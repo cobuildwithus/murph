@@ -1,18 +1,23 @@
 /**
- * The weekly game's wire contract: every command the app (and later Murph)
- * can send, and the views it gets back. One file so the server, its tests and
- * the iOS client agree on shapes. Additive changes only; bump
- * `GAME_SCHEMA_VERSION` for anything else.
+ * The weekly game's wire contract: the request bodies of the /api/game/v1
+ * routes, the commands they become (the one internal write path, which Murph's
+ * tools will call too), and the views that come back. One file so the server,
+ * its tests and the iOS client agree on shapes. The /v1 path versions the API:
+ * change it additively, or add /v2.
  */
 
-export const GAME_SCHEMA_VERSION = 1;
-
 /** Monday = 0 … Sunday = 6, matching the app. */
-export type Weekday = 0 | 1 | 2 | 3 | 4 | 5 | 6;
+export const GAME_WEEKDAYS = [0, 1, 2, 3, 4, 5, 6] as const;
+export type Weekday = (typeof GAME_WEEKDAYS)[number];
 
+/**
+ * Set weekdays, or a count: any N days across the whole game (not per week),
+ * so a 14-day game with `{ count: 10 }` needs 10 days in total.
+ */
 export type GameSchedule = { days: Weekday[] } | { count: number };
 
-export type GameStakeKind = "winner_gets" | "per_miss";
+export const GAME_STAKE_KINDS = ["winner_gets", "per_miss"] as const;
+export type GameStakeKind = (typeof GAME_STAKE_KINDS)[number];
 
 export interface GameStake {
   kind: GameStakeKind;
@@ -49,54 +54,77 @@ export interface GameTermsInput {
   lengthDays?: number;
 }
 
-export type GameEntryKind = "photo" | "video" | "voice" | "text" | "workout" | "number" | "excuse";
+export const GAME_ENTRY_KINDS = ["photo", "video", "voice", "text", "workout", "number", "excuse"] as const;
+export type GameEntryKind = (typeof GAME_ENTRY_KINDS)[number];
+
+/** The words a challenger attaches to whoever they invite; only they ever see them. */
+export interface GameInviteeLabel {
+  /** An uploaded media key, e.g. their contact photo. */
+  photoKey?: string | null;
+  relationship?: string | null;
+}
+
+// Request bodies. Every write also sends an `Idempotency-Key` header
+// (8-64 letters, digits, - or _), minted per user action and reused on retry.
+
+/** PUT /me/profile */
+export interface SetProfileBody {
+  firstName: string;
+  timeZone: string;
+  /** Your own photo (an uploaded media key); null clears it. */
+  photoKey?: string | null;
+}
+
+/** POST /games */
+export interface CreateGameBody {
+  gameId: string;
+  terms: GameTermsInput;
+  /** The first name the challenger typed for the invitee. */
+  inviteeFirstName: string;
+  inviteeLabel?: GameInviteeLabel;
+  previousGameId?: string;
+}
+
+/** POST /invites/:token/accept */
+export interface AcceptInviteBody {
+  /** The terms version the invitee saw. */
+  termsVersion: number;
+  timeZone: string;
+}
+
+/** POST /games/:id/entries */
+export interface PostEntryBody {
+  entryId: string;
+  kind: GameEntryKind;
+  mediaKeys: string[];
+  text?: string;
+  data?: Record<string, unknown>;
+  /** Milliseconds since capture, from a monotonic clock on the phone. */
+  captureAgeMs?: number;
+}
+
+/** PUT /people/:memberId/label. Omitted fields stay; null clears. */
+export interface SetLabelBody {
+  name?: string | null;
+  photoKey?: string | null;
+  relationship?: string | null;
+}
+
+// POST /invites/:token/decline, POST /games/:id/cancel,
+// DELETE /games/:id/entries/:entryId and POST /tickets/:id/redeem have no body.
 
 export type GameCommand =
-  | {
-      type: "setProfile";
-      firstName: string;
-      timeZone: string;
-      /** Your own photo (an uploaded media key); null clears it. */
-      photoKey?: string | null;
-    }
-  | {
-      type: "createGame";
-      gameId: string;
-      terms: GameTermsInput;
-      /** The first name the challenger typed for the invitee. */
-      inviteeFirstName: string;
-      previousGameId?: string;
-    }
-  | { type: "join"; token: string; termsVersion: number; timeZone: string }
-  | { type: "void"; gameId: string; reason: "declined" | "cancelled" }
-  | {
-      type: "post";
-      gameId: string;
-      entryId: string;
-      kind: GameEntryKind;
-      mediaKeys: string[];
-      text?: string;
-      data?: Record<string, unknown>;
-      /** Milliseconds since capture, from a monotonic clock on the phone. */
-      captureAgeMs?: number;
-    }
-  | { type: "deleteToday"; gameId: string }
+  | ({ type: "setProfile" } & SetProfileBody)
+  | ({ type: "createGame" } & CreateGameBody)
+  | ({ type: "join"; token: string } & AcceptInviteBody)
+  /** Declined by the invitee (who holds the link) or cancelled by the challenger, before anyone joins. */
+  | { type: "void"; reason: "declined"; token: string }
+  | { type: "void"; reason: "cancelled"; gameId: string }
+  | ({ type: "post"; gameId: string } & PostEntryBody)
+  /** Take back your own post for your current day (a retake follows, if one's left). */
+  | { type: "withdraw"; gameId: string; entryId: string }
   | { type: "redeem"; ticketId: string }
-  | {
-      type: "setLabel";
-      /** A member id, or an invite token before they've joined. */
-      subject: { memberId: string } | { inviteToken: string };
-      name?: string | null;
-      photoKey?: string | null;
-      relationship?: string | null;
-    };
-
-export interface GameCommandRequest {
-  schemaVersion: number;
-  /** Client-generated, unique per user action; retries reuse it. */
-  requestId: string;
-  command: GameCommand;
-}
+  | ({ type: "setLabel"; memberId: string } & SetLabelBody);
 
 export type GameStatus = "invited" | "live" | "settled" | "void";
 
@@ -137,7 +165,7 @@ export interface GameDayView {
 export interface GameTicketView {
   id: string;
   what: string;
-  status: "open" | "redeemed" | "void";
+  status: "open" | "redeemed";
   owedByMemberId: string;
   owedToMemberId: string;
   /** True when the viewer holds it (is owed). */
@@ -171,15 +199,16 @@ export interface GameHomeView {
   wallet: { held: GameTicketView[]; owed: GameTicketView[]; redeemed: GameTicketView[] };
 }
 
-export interface GameInvitePreview {
-  /** Lets the invitee decline (`void` with reason "declined"). */
-  gameId: string;
-  inviterFirstName: string;
-  inviteeFirstName: string;
-  terms: GameTermsVersion;
-  expiresAt: string;
-  status: "open" | "used" | "expired";
-}
+/** What an invite link shows. Only an open invite carries its details. */
+export type GameInvitePreview =
+  | {
+      status: "open";
+      inviterFirstName: string;
+      inviteeFirstName: string;
+      terms: GameTermsVersion;
+      expiresAt: string;
+    }
+  | { status: "used" | "expired" };
 
 export type GameErrorCode =
   | "UNAUTHENTICATED"

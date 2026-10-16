@@ -5,7 +5,6 @@ import {
   dayStartInstant,
   daysBetween,
   gameLocalDate,
-  isValidTimeZone,
   weekdayOf,
 } from "@/src/lib/game/time";
 
@@ -52,11 +51,5 @@ describe("weekly game time", () => {
     expect(daysBetween("2026-10-17", "2026-10-24")).toBe(7);
     expect(weekdayOf("2026-10-19")).toBe(0);
     expect(weekdayOf("2026-10-25")).toBe(6);
-  });
-
-  it("accepts only real IANA zones", () => {
-    expect(isValidTimeZone("Australia/Sydney")).toBe(true);
-    expect(isValidTimeZone("Mars/Olympus")).toBe(false);
-    expect(isValidTimeZone("")).toBe(false);
   });
 });

@@ -4,15 +4,16 @@
  * what to do, then applies it. Nothing here touches the database or a clock.
  */
 
-import type {
-  GameEntryKind,
-  GameError,
-  GameErrorCode,
-  GameSchedule,
-  GameStakeKind,
-  GameStatus,
-  GameTermsInput,
-  Weekday,
+import {
+  GAME_STAKE_KINDS,
+  GAME_WEEKDAYS,
+  type GameEntryKind,
+  type GameError,
+  type GameErrorCode,
+  type GameSchedule,
+  type GameStakeKind,
+  type GameStatus,
+  type GameTermsInput,
 } from "./contract";
 import { isRecord } from "../primitives";
 import {
@@ -22,7 +23,6 @@ import {
   gameLocalDate,
   GAME_CAPTURE_SLACK_MS,
   GAME_GRACE_MS,
-  isValidTimeZone,
   weekdayOf,
 } from "./time";
 
@@ -96,7 +96,6 @@ export const GAME_DEFAULT_LENGTH_DAYS = 7;
 export const GAME_MAX_LENGTH_DAYS = 28;
 export const GAME_POSTS_PER_DAY = 2;
 export const GAME_INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
-const MAX_WORDS = 200;
 const MAX_STAKES = 3;
 const MEDIA_KINDS: ReadonlySet<GameEntryKind> = new Set(["photo", "video", "voice"]);
 
@@ -129,7 +128,7 @@ export class GameRuleError extends Error {
   }
 }
 
-function reject(code: GameErrorCode, message: string): never {
+export function reject(code: GameErrorCode, message: string): never {
   throw new GameRuleError(code, message);
 }
 
@@ -193,39 +192,7 @@ export function settleDueAt(players: readonly RulePlayer[], lengthDays: number):
   return new Date(due);
 }
 
-// ---------------------------------------------------------------- validation
-
-function words(value: unknown, label: string): string {
-  if (typeof value !== "string") reject("INVALID_REQUEST", `${label} is required.`);
-  const trimmed = value.trim();
-  if (!trimmed) reject("INVALID_REQUEST", `${label} is required.`);
-  if (trimmed.length > MAX_WORDS) reject("INVALID_REQUEST", `${label} is too long.`);
-  return trimmed;
-}
-
-export function requireFirstName(value: unknown): string {
-  return words(value, "First name");
-}
-
-/** Undefined leaves a field alone, null clears it, words replace it. */
-export function optionalWords(value: unknown, label: string): string | null | undefined {
-  if (value === undefined || value === null) return value;
-  return words(value, label);
-}
-
-export function requireTimeZone(value: unknown): string {
-  if (typeof value !== "string" || !isValidTimeZone(value)) {
-    reject("INVALID_REQUEST", "Time zone must be an IANA name like America/New_York.");
-  }
-  return value;
-}
-
-export function requireClientId(value: unknown, label: string): string {
-  if (typeof value !== "string" || !/^[A-Za-z0-9_-]{8,64}$/u.test(value)) {
-    reject("INVALID_REQUEST", `${label} must be 8-64 letters, digits, - or _.`);
-  }
-  return value;
-}
+// ------------------------------------------------------------------- terms
 
 export interface NewTerms {
   terms: StoredTerms;
@@ -234,40 +201,31 @@ export interface NewTerms {
 }
 
 /**
- * Checks what the challenger proposed and turns it into version 1. Stake keys
- * the client sends are kept only when the previous game had them (a rematch);
- * every other stake gets `newKey()`.
+ * Turns what the challenger proposed into version 1 (words arrive checked and
+ * trimmed). Stake keys the client sends are kept only when the previous game
+ * had them (a rematch); every other stake gets `newKey()`.
  */
 export function decideNewTerms(
   input: GameTermsInput,
   options: { previousStakeKeys: ReadonlySet<string>; newKey: () => string },
 ): NewTerms {
   const lengthDays = input.lengthDays ?? GAME_DEFAULT_LENGTH_DAYS;
-  if (!Number.isInteger(lengthDays) || lengthDays < 1 || lengthDays > GAME_MAX_LENGTH_DAYS) {
+  if (lengthDays < 1 || lengthDays > GAME_MAX_LENGTH_DAYS) {
     reject("INVALID_REQUEST", `A game runs 1 to ${GAME_MAX_LENGTH_DAYS} days.`);
   }
-  if (!Array.isArray(input.tasks) || input.tasks.length !== GAME_SEATS_1V1) {
-    reject("INVALID_REQUEST", "Each player needs one task.");
-  }
-  const tasks = [...input.tasks]
-    .map((task) => ({ seat: task.seat, text: words(task.text, "Task") }))
-    .sort((a, b) => a.seat - b.seat);
-  if (tasks.some((task, seat) => task.seat !== seat)) {
-    reject("INVALID_REQUEST", "Tasks must cover seats 0 and 1.");
+  const tasks = [...input.tasks].sort((a, b) => a.seat - b.seat);
+  if (tasks.length !== GAME_SEATS_1V1 || tasks.some((task, seat) => task.seat !== seat)) {
+    reject("INVALID_REQUEST", "Each player needs one task: seats 0 and 1.");
   }
   const schedule = validSchedule(input.schedule, lengthDays);
-  if (!Array.isArray(input.stakes) || input.stakes.length > MAX_STAKES) {
-    reject("INVALID_REQUEST", `A game has up to ${MAX_STAKES} stakes.`);
-  }
+  if (input.stakes.length > MAX_STAKES) reject("INVALID_REQUEST", `A game has up to ${MAX_STAKES} stakes.`);
   const usedKeys = new Set<string>();
   const stakes = input.stakes.map((stake) => {
-    if (stake.kind !== "winner_gets" && stake.kind !== "per_miss") {
-      reject("INVALID_REQUEST", "Stake kind must be winner_gets or per_miss.");
-    }
-    const kept = typeof stake.key === "string" && options.previousStakeKeys.has(stake.key) && !usedKeys.has(stake.key);
-    const key = kept ? stake.key! : options.newKey();
+    const key = stake.key && options.previousStakeKeys.has(stake.key) && !usedKeys.has(stake.key)
+      ? stake.key
+      : options.newKey();
     usedKeys.add(key);
-    return { item: words(stake.item, "Stake"), key, kind: stake.kind };
+    return { item: stake.item, key, kind: stake.kind };
   });
   return {
     lengthDays,
@@ -282,35 +240,44 @@ export function decideNewTerms(
   };
 }
 
-function validSchedule(schedule: unknown, lengthDays: number): GameSchedule {
-  if (schedule && typeof schedule === "object" && "count" in schedule) {
-    const count = (schedule as { count: unknown }).count;
-    if (!Number.isInteger(count) || (count as number) < 1 || (count as number) > lengthDays) {
-      reject("INVALID_REQUEST", `Count must be 1 to ${lengthDays}.`);
-    }
-    return { count: count as number };
+function validSchedule(schedule: GameSchedule, lengthDays: number): GameSchedule {
+  if ("count" in schedule) {
+    if (schedule.count < 1 || schedule.count > lengthDays) reject("INVALID_REQUEST", `Count must be 1 to ${lengthDays}.`);
+    return { count: schedule.count };
   }
-  if (schedule && typeof schedule === "object" && "days" in schedule) {
-    const days = (schedule as { days: unknown }).days;
-    if (
-      !Array.isArray(days)
-      || days.length === 0
-      || days.some((day) => !Number.isInteger(day) || day < 0 || day > 6)
-      || new Set(days).size !== days.length
-    ) {
-      reject("INVALID_REQUEST", "Days must be distinct weekdays 0 (Monday) to 6 (Sunday).");
-    }
-    return { days: [...days].sort((a, b) => a - b) };
+  if (schedule.days.length === 0 || new Set(schedule.days).size !== schedule.days.length) {
+    reject("INVALID_REQUEST", "Days must be distinct weekdays 0 (Monday) to 6 (Sunday).");
   }
-  return reject("INVALID_REQUEST", "Schedule needs days or a count.");
+  return { days: [...schedule.days].sort((a, b) => a - b) };
 }
 
 // ------------------------------------------------------------------ commands
 
+/** Each player's frozen time zone and Day 1, as the write path stores them. */
+export interface PlayerDays {
+  memberId: string;
+  timeZone: string;
+  dayOne: string;
+}
+
+export interface Schedule {
+  players: PlayerDays[];
+  nextDueAt: Date;
+}
+
+function scheduleFor(players: readonly RulePlayer[], lengthDays: number, dayOneOf: (player: RulePlayer) => string): Schedule {
+  const days = players.map((player) => ({ memberId: player.memberId, timeZone: player.timeZone, dayOne: dayOneOf(player) }));
+  return { nextDueAt: settleDueAt(days.map((day, index) => ({ ...players[index], dayOne: day.dayOne })), lengthDays), players: days };
+}
+
 export type JoinDecision =
   | { kind: "already-joined" }
-  | { kind: "join"; seat: number; startedAt: Date; dayOnes: Map<string, string>; nextDueAt: Date };
+  | ({ kind: "join"; seat: number; startedAt: Date } & Schedule);
 
+/**
+ * The last seat filling starts the game. `state.players` must carry each
+ * current player's time zone as of now: it freezes here, at go-live.
+ */
 export function decideJoin(
   state: RuleState,
   input: { memberId: string; termsVersion: number; timeZone: string; now: Date },
@@ -319,12 +286,9 @@ export function decideJoin(
   if (playerFor(state, input.memberId)) {
     if (game.status === "invited" || game.status === "live") return { kind: "already-joined" };
   }
-  if (game.status !== "invited" || state.players.length >= game.seats) {
-    reject("INVITE_USED", "This invite was already used.");
-  }
-  if (game.inviteExpiresAt && input.now.getTime() > game.inviteExpiresAt.getTime()) {
-    reject("INVITE_EXPIRED", "This invite expired.");
-  }
+  const expired = game.inviteExpiresAt !== null && input.now.getTime() > game.inviteExpiresAt.getTime();
+  if (game.status === "void" || (game.status === "invited" && expired)) reject("INVITE_EXPIRED", "This invite isn't open anymore.");
+  if (game.status !== "invited" || state.players.length >= game.seats) reject("INVITE_USED", "This invite was already used.");
   const version = currentTerms(game.terms).n;
   if (input.termsVersion !== version) {
     reject("TERMS_CHANGED", "The terms changed. Take another look.");
@@ -340,18 +304,13 @@ export function decideJoin(
     seat: state.players.length,
     timeZone: input.timeZone,
   };
-  const players = [...state.players, joiner];
   // Day 1 is each player's next local day after the last one shakes on it.
-  const dayOnes = new Map(players.map((player) => [
-    player.memberId,
-    addDays(gameLocalDate(input.now, player.timeZone), 1),
-  ]));
   return {
-    dayOnes,
     kind: "join",
-    nextDueAt: settleDueAt(players.map((player) => ({ ...player, dayOne: dayOnes.get(player.memberId)! })), game.lengthDays),
     seat: joiner.seat,
     startedAt: input.now,
+    ...scheduleFor([...state.players, joiner], game.lengthDays, (player) =>
+      addDays(gameLocalDate(input.now, player.timeZone), 1)),
   };
 }
 
@@ -380,13 +339,11 @@ export function decidePost(
   }
   if (input.kind === "text" && !input.hasText) reject("INVALID_REQUEST", "Write something first.");
   if (input.mediaKeys.some((key) => !key.startsWith(input.mediaKeyPrefix))) {
-    reject("INVALID_REQUEST", "Media must be uploaded by you.");
+    reject("MEDIA_MISSING", "Upload the media before posting it.");
   }
   const dayIndex = postingDay(state, player, input.kind, input.captureAgeMs, input.now);
   if (input.kind === "excuse") {
-    if (state.entries.some((entry) => entry.memberId === player.memberId && entry.dayIndex === dayIndex && entry.attempt === 0)) {
-      reject("RETAKE_USED", "You already sent an excuse for today.");
-    }
+    if (hasExcuse(state.entries, player.memberId, dayIndex)) reject("RETAKE_USED", "You already sent an excuse for today.");
     return { attempt: 0, dayIndex, withdrawEntryId: null };
   }
   const used = attemptsUsed(state.entries, player.memberId, dayIndex);
@@ -398,11 +355,15 @@ export function decidePost(
   };
 }
 
+function hasExcuse(entries: readonly RuleEntry[], memberId: string, dayIndex: number): boolean {
+  return entries.some((entry) => entry.memberId === memberId && entry.dayIndex === dayIndex && entry.attempt === 0);
+}
+
 /**
  * Which day a post counts for. Normally today. In the hour after a player's
  * 3am boundary, a post captured before that boundary (by the phone's
- * monotonic capture age, an honor rule) counts for the day that just ended
- * if that day has no live post and a post left.
+ * monotonic capture age, an honor rule) counts for the day that just ended,
+ * if that day was scheduled and still has no post.
  */
 function postingDay(
   state: RuleState,
@@ -412,16 +373,17 @@ function postingDay(
   now: Date,
 ): number {
   const today = dayIndexAt(player, now)!;
-  const { lengthDays } = state.game;
+  const { lengthDays, terms } = state.game;
   const yesterday = today - 1;
   if (captureAgeMs !== null && yesterday >= 0 && yesterday < lengthDays) {
     const boundary = dayStartInstant(addDays(player.dayOne!, today), player.timeZone).getTime();
     const capturedAt = now.getTime() - captureAgeMs;
-    const open = kind === "excuse"
-      ? !state.entries.some((entry) => entry.memberId === player.memberId && entry.dayIndex === yesterday && entry.attempt === 0)
-      : !liveEntry(state.entries, player.memberId, yesterday)
-        && attemptsUsed(state.entries, player.memberId, yesterday) < GAME_POSTS_PER_DAY;
-    if (now.getTime() - boundary < GAME_GRACE_MS && capturedAt <= boundary + GAME_CAPTURE_SLACK_MS && open) {
+    const open = isScheduledDay(terms, player, yesterday)
+      && !liveEntry(state.entries, player.memberId, yesterday)
+      && (kind === "excuse"
+        ? !hasExcuse(state.entries, player.memberId, yesterday)
+        : attemptsUsed(state.entries, player.memberId, yesterday) < GAME_POSTS_PER_DAY);
+    if (open && now.getTime() - boundary < GAME_GRACE_MS && capturedAt <= boundary + GAME_CAPTURE_SLACK_MS) {
       return yesterday;
     }
   }
@@ -430,67 +392,45 @@ function postingDay(
   return today;
 }
 
-export function decideDeleteToday(state: RuleState, input: { memberId: string; now: Date }): { withdrawEntryId: string | null } {
-  const player = requireLivePlayer(state, input.memberId);
-  const today = dayIndexAt(player, input.now)!;
-  // Nothing to delete is fine: a retried delete must not fail.
-  return { withdrawEntryId: liveEntry(state.entries, player.memberId, today)?.id ?? null };
-}
-
-export function decideVoid(state: RuleState, input: { memberId: string; reason: "declined" | "cancelled" }): void {
-  const { game } = state;
-  const isPlayer = playerFor(state, input.memberId) !== null;
-  if (input.reason === "declined") {
-    if (game.status !== "invited" || isPlayer) reject("INVALID_REQUEST", "Only the invitee can decline an open invite.");
-    return;
-  }
-  if (!isPlayer) reject("NOT_A_PLAYER", "You're not in this game.");
-  if (game.status !== "invited" && game.status !== "live") reject("GAME_NOT_LIVE", "This game already ended.");
-}
-
 /**
- * A schedule change applies from the first day nobody has started, so days
- * already played (or underway) keep the rules they were played under. MVP
- * changes weekdays only; count and stakes stay fixed.
+ * Take back your own live post for your current day. Retrying is fine: an
+ * entry already taken back is a no-op. Other days and other people's posts
+ * can't be withdrawn.
  */
-export function decideScheduleChange(state: RuleState, input: { days: Weekday[]; now: Date }): StoredTermsVersion {
-  const { game } = state;
-  if (game.status !== "invited" && game.status !== "live") reject("GAME_NOT_LIVE", "This game already ended.");
-  const current = currentTerms(game.terms);
-  if ("count" in current.schedule) reject("INVALID_REQUEST", "A pick-any-days game keeps its count.");
-  const started = state.players.map((player) => dayIndexAt(player, input.now) ?? -1);
-  const fromDay = Math.max(0, Math.max(...started) + 1);
-  if (fromDay >= game.lengthDays) reject("DAY_CLOSED", "There are no days left to change.");
-  return {
-    fromDay,
-    n: current.n + 1,
-    schedule: validSchedule({ days: input.days }, game.lengthDays),
-    stakes: current.stakes,
-  };
+export function decideWithdraw(
+  state: RuleState,
+  input: { memberId: string; entryId: string; now: Date },
+): { withdrawEntryId: string | null } {
+  const player = requireLivePlayer(state, input.memberId);
+  const entry = state.entries.find((candidate) => candidate.id === input.entryId);
+  if (!entry || entry.memberId !== player.memberId || entry.attempt === 0) reject("GAME_NOT_FOUND", "That post isn't yours.");
+  if (entry.withdrawnAt) return { withdrawEntryId: null };
+  if (entry.dayIndex !== dayIndexAt(player, input.now)) reject("DAY_CLOSED", "Only today's post can be taken back.");
+  return { withdrawEntryId: entry.id };
+}
+
+/** Both only before anyone joins: a live game plays out. */
+export function decideVoid(state: RuleState, input: { memberId: string; reason: "declined" | "cancelled" }): void {
+  const isPlayer = playerFor(state, input.memberId) !== null;
+  if (state.game.status !== "invited") reject("GAME_NOT_LIVE", "Only an open invite can be called off.");
+  if (input.reason === "declined" && isPlayer) reject("INVALID_REQUEST", "Only the invitee can decline.");
+  if (input.reason === "cancelled" && !isPlayer) reject("NOT_A_PLAYER", "Only the challenger can cancel.");
 }
 
 /** Start now: everyone's Day 1 becomes today. Only before anyone has started. */
-export function decideStartNow(state: RuleState, now: Date): { dayOnes: Map<string, string>; nextDueAt: Date } {
+export function decideStartNow(state: RuleState, now: Date): Schedule {
   if (state.game.status !== "live") reject("GAME_NOT_LIVE", "Both players have to shake on it first.");
   if (state.players.some((player) => (dayIndexAt(player, now) ?? -1) >= 0)) {
     reject("INVALID_REQUEST", "This game already started.");
   }
-  const players = state.players.map((player) => ({ ...player, dayOne: gameLocalDate(now, player.timeZone) }));
-  return {
-    dayOnes: new Map(players.map((player) => [player.memberId, player.dayOne])),
-    nextDueAt: settleDueAt(players, state.game.lengthDays),
-  };
+  return scheduleFor(state.players, state.game.lengthDays, (player) => gameLocalDate(now, player.timeZone));
 }
 
 /** Dev time travel: move every player's Day 1 back so "today" moves forward. */
-export function decideDevAdvance(state: RuleState, days: number): { dayOnes: Map<string, string>; nextDueAt: Date } {
+export function decideDevAdvance(state: RuleState, days: number): Schedule {
   if (state.game.status !== "live") reject("GAME_NOT_LIVE", "This game isn't live.");
   if (!Number.isInteger(days) || days < 1 || days > GAME_MAX_LENGTH_DAYS) reject("INVALID_REQUEST", "Advance 1 or more days.");
-  const players = state.players.map((player) => ({ ...player, dayOne: addDays(player.dayOne!, -days) }));
-  return {
-    dayOnes: new Map(players.map((player) => [player.memberId, player.dayOne])),
-    nextDueAt: settleDueAt(players, state.game.lengthDays),
-  };
+  return scheduleFor(state.players, state.game.lengthDays, (player) => addDays(player.dayOne!, -days));
 }
 
 function requireLivePlayer(state: RuleState, memberId: string): RulePlayer {
@@ -604,11 +544,8 @@ function asSchedule(value: unknown): GameSchedule {
   const schedule = asObject(value, "schedule");
   if ("count" in schedule) return { count: asInt(schedule.count, "schedule") };
   return {
-    days: asList(schedule.days, "schedule").map((raw) => {
-      const day = asInt(raw, "schedule");
-      if (day < 0 || day > 6) malformed("schedule");
-      return day as Weekday;
-    }),
+    days: asList(schedule.days, "schedule").map((raw) =>
+      GAME_WEEKDAYS.find((day) => day === raw) ?? malformed("schedule")),
   };
 }
 
@@ -623,9 +560,7 @@ export function parseStoredTerms(value: unknown): StoredTerms {
       schedule: asSchedule(version.schedule),
       stakes: asList(version.stakes, "terms").map((rawStake) => {
         const stake = asObject(rawStake, "stake");
-        const kind: GameStakeKind = stake.kind === "winner_gets" ? "winner_gets"
-          : stake.kind === "per_miss" ? "per_miss"
-          : malformed("stake");
+        const kind = GAME_STAKE_KINDS.find((candidate) => candidate === stake.kind) ?? malformed("stake");
         return { key: asString(stake.key, "stake"), kind };
       }),
     };

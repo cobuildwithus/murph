@@ -26,6 +26,7 @@ import {
   playerFor,
   scorePlayer,
   type RuleEntry,
+  type RulePlayer,
   type RuleState,
   type StoredResult,
   type TermWords,
@@ -42,7 +43,7 @@ export interface GameTicketRow {
   stakeKey: string;
   owedBy: string;
   owedTo: string;
-  status: "open" | "redeemed" | "void";
+  status: "open" | "redeemed";
   createdAt: Date;
   redeemedAt: Date | null;
 }
@@ -90,11 +91,6 @@ export function visibleEntryIds(state: RuleState, viewerId: string): Set<string>
   return visible;
 }
 
-/** 1 for a circle's first game, then 2, 3…: settled games that came before, plus one. */
-export function roundNumber(createdAt: Date, settledInCircle: ReadonlyArray<{ createdAt: Date }>): number {
-  return 1 + settledInCircle.filter((other) => other.createdAt < createdAt).length;
-}
-
 export function stakeItem(words: TermWords, key: string): string {
   for (let i = words.versions.length - 1; i >= 0; i -= 1) {
     const stake = words.versions[i].stakes.find((candidate) => candidate.key === key);
@@ -140,80 +136,13 @@ function entryView(entry: RuleEntry, input: GameViewInput): GameEntryView {
 }
 
 export function buildGameView(input: GameViewInput): GameView {
-  const { state, viewerId, now } = input;
+  const { state, viewerId } = input;
   const { game } = state;
-  const visible = visibleEntryIds(state, viewerId);
-  const viewer = playerFor(state, viewerId);
   const players = [...state.players].sort((a, b) => a.seat - b.seat);
-  const settled = game.status === "settled";
-
-  const playerViews: GamePlayerView[] = players.map((player) => {
-    const today = game.status === "live" ? dayIndexAt(player, now) : null;
-    const inRange = today !== null && today >= 0 && today < game.lengthDays;
-    const resultScore = input.result?.scores.find((score) => score.memberId === player.memberId)?.score;
-    const avatarKey = input.avatarKeys.get(player.memberId) ?? null;
-    return {
-      avatarUrl: avatarKey ? gameMediaUrl(avatarKey) : null,
-      dayIndex: inRange ? today : null,
-      firstName: input.names.get(player.memberId) ?? "",
-      isMe: player.memberId === viewerId,
-      memberId: player.memberId,
-      score: resultScore ?? (game.status === "live" && today !== null && today >= 0 ? scorePlayer(state, player, today).score : 0),
-      seat: player.seat,
-    };
-  });
-  if (input.invitee && players.length < game.seats) {
-    playerViews.push({
-      avatarUrl: input.invitee.photoKey ? gameMediaUrl(input.invitee.photoKey) : null,
-      dayIndex: null,
-      firstName: input.invitee.name,
-      isMe: false,
-      memberId: null,
-      score: 0,
-      seat: players.length,
-    });
-  }
-
-  const days: GameDayView[] = [];
-  if (viewer?.dayOne) {
-    const scheduleIsCount = "count" in currentTerms(game.terms).schedule;
-    for (let index = 0; index < game.lengthDays; index += 1) {
-      const mine = liveEntry(state.entries, viewerId, index)
-        ?? state.entries.find((entry) => entry.memberId === viewerId && entry.dayIndex === index && entry.attempt === 0 && entry.withdrawnAt === null)
-        ?? null;
-      days.push({
-        index,
-        localDate: addDays(viewer.dayOne, index),
-        mine: mine && visible.has(mine.id) ? entryView(mine, input) : null,
-        off: !isScheduledDay(game.terms, viewer, index),
-        others: players
-          .filter((player) => player.memberId !== viewerId)
-          .map((other) => {
-            const posted = liveEntry(state.entries, other.memberId, index);
-            if (posted) {
-              const open = visible.has(posted.id);
-              return { entry: open ? entryView(posted, input) : null, seat: other.seat, status: open ? "posted" : "locked" };
-            }
-            const otherToday = dayIndexAt(other, now);
-            const over = settled || game.status === "void" || (otherToday !== null && otherToday > index);
-            let status: GameDayOtherStatus = "none";
-            if (!isScheduledDay(game.terms, other, index)) status = "off";
-            else if (over && !scheduleIsCount) status = "missed";
-            return { entry: null, seat: other.seat, status };
-          }),
-      });
-    }
-  }
-
-  const viewerToday = viewer && game.status === "live" ? dayIndexAt(viewer, now) : null;
-  const retakeAvailable = viewerToday !== null
-    && viewerToday >= 0
-    && viewerToday < game.lengthDays
-    && liveEntry(state.entries, viewerId, viewerToday) !== null
-    && attemptsUsed(state.entries, viewerId, viewerToday) < GAME_POSTS_PER_DAY;
-
+  const playerViews = players.map((player) => playerView(input, player));
+  if (input.invitee && players.length < game.seats) playerViews.push(inviteeView(input.invitee, players.length));
   return {
-    days,
+    days: dayViews(input, players),
     id: game.id,
     inviteExpiresAt: game.status === "invited" ? input.inviteExpiresAt?.toISOString() ?? null : null,
     inviteToken: game.status === "invited" ? input.inviteToken : null,
@@ -225,7 +154,7 @@ export function buildGameView(input: GameViewInput): GameView {
           scores: input.result.scores.map(({ score, seat }) => ({ score, seat })),
         }
       : null,
-    retakeAvailable,
+    retakeAvailable: retakeAvailable(state, viewerId, input.now),
     round: input.round,
     startedAt: input.startedAt?.toISOString() ?? null,
     status: game.status,
@@ -235,4 +164,86 @@ export function buildGameView(input: GameViewInput): GameView {
       .filter((ticket) => ticket.owedBy === viewerId || ticket.owedTo === viewerId)
       .map((ticket) => ticketView(ticket, input.words, viewerId)),
   };
+}
+
+function playerView(input: GameViewInput, player: RulePlayer): GamePlayerView {
+  const { game } = input.state;
+  const today = game.status === "live" ? dayIndexAt(player, input.now) : null;
+  const started = today !== null && today >= 0;
+  const resultScore = input.result?.scores.find((score) => score.memberId === player.memberId)?.score;
+  const avatarKey = input.avatarKeys.get(player.memberId) ?? null;
+  return {
+    avatarUrl: avatarKey ? gameMediaUrl(avatarKey) : null,
+    dayIndex: started && today < game.lengthDays ? today : null,
+    firstName: input.names.get(player.memberId) ?? "",
+    isMe: player.memberId === input.viewerId,
+    memberId: player.memberId,
+    score: resultScore ?? (started ? scorePlayer(input.state, player, today).score : 0),
+    seat: player.seat,
+  };
+}
+
+/** The challenger's own name for whoever they invited, until that person joins. */
+function inviteeView(invitee: { name: string; photoKey: string | null }, seat: number): GamePlayerView {
+  return {
+    avatarUrl: invitee.photoKey ? gameMediaUrl(invitee.photoKey) : null,
+    dayIndex: null,
+    firstName: invitee.name,
+    isMe: false,
+    memberId: null,
+    score: 0,
+    seat,
+  };
+}
+
+function dayViews(input: GameViewInput, players: readonly RulePlayer[]): GameDayView[] {
+  const { state, viewerId } = input;
+  const viewer = playerFor(state, viewerId);
+  if (!viewer?.dayOne) return [];
+  const visible = visibleEntryIds(state, viewerId);
+  const others = players.filter((player) => player.memberId !== viewerId);
+  return Array.from({ length: state.game.lengthDays }, (_, index) => {
+    const mine = liveEntry(state.entries, viewerId, index) ?? ownExcuse(state, viewerId, index);
+    return {
+      index,
+      localDate: addDays(viewer.dayOne!, index),
+      mine: mine && visible.has(mine.id) ? entryView(mine, input) : null,
+      off: !isScheduledDay(state.game.terms, viewer, index),
+      others: others.map((other) => otherDayView(input, visible, other, index)),
+    };
+  });
+}
+
+function ownExcuse(state: RuleState, viewerId: string, index: number): RuleEntry | null {
+  return state.entries.find((entry) =>
+    entry.memberId === viewerId && entry.dayIndex === index && entry.attempt === 0 && entry.withdrawnAt === null) ?? null;
+}
+
+/** Another player's day as this viewer may see it: locked until the viewer posts that day. */
+function otherDayView(input: GameViewInput, visible: ReadonlySet<string>, other: RulePlayer, index: number): GameDayView["others"][number] {
+  const posted = liveEntry(input.state.entries, other.memberId, index);
+  if (posted) {
+    const open = visible.has(posted.id);
+    return { entry: open ? entryView(posted, input) : null, seat: other.seat, status: open ? "posted" : "locked" };
+  }
+  return { entry: null, seat: other.seat, status: unpostedStatus(input, other, index) };
+}
+
+function unpostedStatus(input: GameViewInput, other: RulePlayer, index: number): GameDayOtherStatus {
+  const { game } = input.state;
+  if (!isScheduledDay(game.terms, other, index)) return "off";
+  // A blank day isn't a miss in a pick-any-days game; only the shortfall is.
+  if ("count" in currentTerms(game.terms).schedule) return "none";
+  const otherToday = dayIndexAt(other, input.now);
+  const over = game.status === "settled" || game.status === "void" || (otherToday !== null && otherToday > index);
+  return over ? "missed" : "none";
+}
+
+/** A retake is open once today's post is up and the day's two posts aren't used. */
+function retakeAvailable(state: RuleState, viewerId: string, now: Date): boolean {
+  const viewer = playerFor(state, viewerId);
+  const today = viewer && state.game.status === "live" ? dayIndexAt(viewer, now) : null;
+  if (today === null || today < 0 || today >= state.game.lengthDays) return false;
+  return liveEntry(state.entries, viewerId, today) !== null
+    && attemptsUsed(state.entries, viewerId, today) < GAME_POSTS_PER_DAY;
 }

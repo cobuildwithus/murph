@@ -3,9 +3,10 @@ import type { GameInvitePreview } from "@/src/lib/game/contract";
 
 const DESIGN_TOKEN = "design_invite_token";
 
-const OPEN_PREVIEW: GameInvitePreview = {
+type OpenPreview = Extract<GameInvitePreview, { status: "open" }>;
+
+const OPEN_PREVIEW: OpenPreview = {
   expiresAt: "2026-10-23T15:00:00.000Z",
-  gameId: "game_design_preview",
   inviteeFirstName: "Ava",
   inviterFirstName: "Leo",
   status: "open",
@@ -21,7 +22,7 @@ const OPEN_PREVIEW: GameInvitePreview = {
   },
 };
 
-const ANY_DAYS_PREVIEW: GameInvitePreview = {
+const ANY_DAYS_PREVIEW: OpenPreview = {
   ...OPEN_PREVIEW,
   terms: {
     ...OPEN_PREVIEW.terms,
@@ -33,8 +34,8 @@ const ANY_DAYS_PREVIEW: GameInvitePreview = {
 const STATES: ReadonlyArray<{ id: string; label: string; preview: GameInvitePreview | null }> = [
   { id: "open", label: "Open, set weekdays", preview: OPEN_PREVIEW },
   { id: "open-any-days", label: "Open, any days, per miss", preview: ANY_DAYS_PREVIEW },
-  { id: "used", label: "Already accepted", preview: { ...OPEN_PREVIEW, status: "used" } },
-  { id: "expired", label: "Expired", preview: { ...OPEN_PREVIEW, status: "expired" } },
+  { id: "used", label: "Already accepted", preview: { status: "used" } },
+  { id: "expired", label: "Expired", preview: { status: "expired" } },
   { id: "missing", label: "Missing or turned off", preview: null },
 ];
 

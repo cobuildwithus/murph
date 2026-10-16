@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { decideJoin, type RuleEntry, type RuleState, type TermWords } from "@/src/lib/game/rules";
 import { addDays, dayStartInstant } from "@/src/lib/game/time";
-import { buildGameView, roundNumber, visibleEntryIds, type GameViewInput } from "@/src/lib/game/views";
+import { buildGameView, visibleEntryIds, type GameViewInput } from "@/src/lib/game/views";
 
 const LEO = "hbm_leo";
 const AVA = "hbm_ava";
@@ -42,7 +42,11 @@ function liveState(): RuleState {
     players: [
       ...invited.players,
       { active: true, agreedTermsVersion: 1, dayOne: null, memberId: AVA, seat: 1, timeZone: "Australia/Sydney" },
-    ].map((player) => ({ ...player, active: true, dayOne: join.dayOnes.get(player.memberId)! })),
+    ].map((player) => ({
+      ...player,
+      active: true,
+      dayOne: join.players.find((scheduled) => scheduled.memberId === player.memberId)!.dayOne,
+    })),
   };
 }
 
@@ -153,12 +157,5 @@ describe("weekly game views: post to unlock", () => {
     expect(leoView.players.map((player) => [player.memberId, player.firstName])).toEqual([[LEO, "Leo"], [null, "Ava"]]);
     expect(leoView.inviteToken).toBe("tok_123");
     expect(leoView.days).toEqual([]);
-  });
-
-  it("numbers rounds by the settled games before this one", () => {
-    const at = (iso: string) => ({ createdAt: new Date(iso) });
-    expect(roundNumber(new Date("2026-10-20T00:00:00Z"), [])).toBe(1);
-    expect(roundNumber(new Date("2026-10-20T00:00:00Z"), [at("2026-10-01T00:00:00Z"), at("2026-10-10T00:00:00Z")])).toBe(3);
-    expect(roundNumber(new Date("2026-10-05T00:00:00Z"), [at("2026-10-01T00:00:00Z"), at("2026-10-10T00:00:00Z")])).toBe(2);
   });
 });

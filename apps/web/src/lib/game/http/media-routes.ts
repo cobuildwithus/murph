@@ -1,4 +1,3 @@
-import type { GameCommand } from "../contract";
 import {
   GAME_MEDIA_MAX_BYTES,
   gameMediaKey,
@@ -8,9 +7,8 @@ import {
   parseGameMediaContentType,
   putGameMedia,
   readGameMedia,
-  statGameMedia,
 } from "../media";
-import { authorizeMediaRead, mediaKeyPrefixFor, readGame } from "../service";
+import { authorizeMediaRead, isGamePlayer, mediaKeyPrefixFor } from "../service";
 import { readRawBodyBuffer } from "../../http";
 import { gameHttpError, gameNotFound, invalidGameRequest } from "./errors";
 
@@ -26,7 +24,7 @@ export async function uploadGameMedia(input: { gameId: string; memberId: string;
   const role = request.headers.get("x-murph-media-role")?.trim() ?? "";
   if (!MEDIA_ROLE_PATTERN.test(role)) throw invalidGameRequest("X-Murph-Media-Role is required.");
   requireStorage();
-  if (!(await readGame(input.gameId, input.memberId))) throw gameNotFound();
+  if (!(await isGamePlayer(input.gameId, input.memberId))) throw gameNotFound();
 
   const bytes = await readRawBodyBuffer(request, { limitBytes: GAME_MEDIA_MAX_BYTES });
   if (bytes.byteLength === 0 || !matchesGameMediaContentType(bytes, contentType)) {
@@ -37,19 +35,6 @@ export async function uploadGameMedia(input: { gameId: string; memberId: string;
     throw gameHttpError("IDEMPOTENCY_CONFLICT", 409, "This Idempotency-Key was already used for different media.");
   }
   return key;
-}
-
-/** Checked before the command transaction so no storage call runs under the game lock. */
-export async function assertCommandMediaUploaded(memberId: string, command: GameCommand): Promise<void> {
-  const keys = command.type === "post" ? command.mediaKeys
-    : command.type === "setLabel" && command.photoKey ? [command.photoKey]
-      : [];
-  if (keys.length === 0) return;
-  const prefix = mediaKeyPrefixFor(memberId);
-  if (keys.some((key) => !key.startsWith(prefix) || !isGameMediaKey(key))) throw mediaMissing();
-  requireStorage();
-  const objects = await Promise.all(keys.map((key) => statGameMedia(key)));
-  if (objects.some((object) => object === null)) throw mediaMissing();
 }
 
 /**
@@ -76,10 +61,6 @@ function requireStorage(): void {
   if (!isGameMediaStorageAvailable()) {
     throw gameHttpError("GAME_MEDIA_UNAVAILABLE", 503, "Game media isn't available here yet.");
   }
-}
-
-function mediaMissing() {
-  return gameHttpError("MEDIA_MISSING", 422, "Upload the media before posting it.");
 }
 
 function mediaNotFound() {

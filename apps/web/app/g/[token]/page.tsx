@@ -19,7 +19,7 @@ export async function generateMetadata(props: GameInvitePageProps): Promise<Meta
     description: "Open it in Murph to accept.",
     referrer: "no-referrer",
     robots: { follow: false, index: false },
-    title: preview ? `${preview.inviterFirstName} challenged you` : "Murph",
+    title: preview?.status === "open" ? `${preview.inviterFirstName} challenged you` : "Murph",
   };
 }
 

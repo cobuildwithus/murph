@@ -1,92 +1,45 @@
 /**
- * Game days run 3am to 3am in each player's own time zone, frozen when they
- * join. Local dates are plain `YYYY-MM-DD` strings; instants are `Date`s from
- * the database clock. Pure functions only.
+ * Game days run 3am to 3am in each player's own time zone, frozen when the
+ * game goes live. Local dates are plain `YYYY-MM-DD` strings; instants are
+ * `Date`s from the database clock. Pure functions over the shared time helpers.
  */
+
+import {
+  addDaysToIsoDate,
+  formatTimeZoneDateTimeParts,
+  resolveFloatingIsoTimestampInTimeZone,
+} from "@murphai/contracts";
 
 import type { Weekday } from "./contract";
 
 const DAY_START_HOUR = 3;
 const DAY_MS = 24 * 60 * 60 * 1000;
+const MONDAY_FIRST: readonly Weekday[] = [6, 0, 1, 2, 3, 4, 5];
 /** A post captured just before 3am may still count for the day that ended. */
 export const GAME_GRACE_MS = 60 * 60 * 1000;
 /** Clock slack allowed between capture and the 3am boundary. */
-export const GAME_CAPTURE_SLACK_MS = 2 * 60 * 1000;
+export const GAME_CAPTURE_SLACK_MS = 30 * 1000;
 
-const formatters = new Map<string, Intl.DateTimeFormat>();
-
-function formatterFor(timeZone: string): Intl.DateTimeFormat {
-  let formatter = formatters.get(timeZone);
-  if (!formatter) {
-    formatter = new Intl.DateTimeFormat("en-US", {
-      day: "2-digit",
-      hour: "2-digit",
-      hourCycle: "h23",
-      minute: "2-digit",
-      month: "2-digit",
-      second: "2-digit",
-      timeZone,
-      year: "numeric",
-    });
-    formatters.set(timeZone, formatter);
-  }
-  return formatter;
-}
-
-export function isValidTimeZone(timeZone: string): boolean {
-  if (!timeZone || timeZone.length > 64) return false;
-  try {
-    formatterFor(timeZone);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/** The wall clock in `timeZone` at `instant`, read back as if it were UTC. */
-function wallClockMs(instant: Date, timeZone: string): number {
-  const parts: Record<string, number> = {};
-  for (const part of formatterFor(timeZone).formatToParts(instant)) {
-    if (part.type !== "literal") parts[part.type] = Number(part.value);
-  }
-  return Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, parts.second);
-}
-
-function toDateString(utcMs: number): string {
-  return new Date(utcMs).toISOString().slice(0, 10);
-}
-
-function parseDate(date: string): number {
-  const ms = Date.parse(`${date}T00:00:00Z`);
-  if (Number.isNaN(ms)) throw new RangeError(`Invalid local date: ${date}`);
-  return ms;
-}
-
-export function addDays(date: string, days: number): string {
-  return toDateString(parseDate(date) + days * DAY_MS);
-}
+export const addDays = addDaysToIsoDate;
 
 export function daysBetween(from: string, to: string): number {
-  return Math.round((parseDate(to) - parseDate(from)) / DAY_MS);
+  return Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / DAY_MS);
 }
 
 /** Monday = 0 … Sunday = 6. */
 export function weekdayOf(date: string): Weekday {
-  return ((new Date(parseDate(date)).getUTCDay() + 6) % 7) as Weekday;
+  return MONDAY_FIRST[new Date(`${date}T00:00:00Z`).getUTCDay()];
 }
 
 /** The game day an instant falls in: before 3am still belongs to yesterday. */
 export function gameLocalDate(instant: Date, timeZone: string): string {
-  const wall = wallClockMs(instant, timeZone);
-  const date = toDateString(wall);
-  return new Date(wall).getUTCHours() < DAY_START_HOUR ? addDays(date, -1) : date;
+  const local = formatTimeZoneDateTimeParts(instant, timeZone);
+  return local.hour < DAY_START_HOUR ? addDays(local.dayKey, -1) : local.dayKey;
 }
 
 /** The instant a game day starts: 3am local on `date`. */
 export function dayStartInstant(date: string, timeZone: string): Date {
-  const target = parseDate(date) + DAY_START_HOUR * 60 * 60 * 1000;
-  // Two passes settle the offset, including on DST change days.
-  let guess = target - (wallClockMs(new Date(target), timeZone) - target);
-  guess = target - (wallClockMs(new Date(guess), timeZone) - guess);
-  return new Date(guess);
+  const resolved = resolveFloatingIsoTimestampInTimeZone(`${date}T03:00:00`, timeZone);
+  if (!resolved) throw new RangeError(`No 3am on ${date} in ${timeZone}.`);
+  return new Date(resolved.timestamp);
 }
