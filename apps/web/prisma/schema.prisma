@@ -2786,7 +2786,6 @@ model HostedConversationPollVote {
 model GameProfile {
   memberId           String             @id @map("member_id")
   firstNameEncrypted String             @map("first_name_encrypted")
-  avatarKey          String?            @map("avatar_key")
   timeZone           String             @map("time_zone")
   createdAt          DateTime           @default(now()) @map("created_at")
   updatedAt          DateTime           @updatedAt @map("updated_at")
@@ -2823,8 +2822,8 @@ model Game {
   // Rematches chain through previous_game_id; round counts the chain.
   previousGameId       String?      @map("previous_game_id")
   round                Int          @default(1)
+  // invited, live, settled, or void (an invite that expired unclaimed)
   status               String
-  voidReason           String?      @map("void_reason")
   terms                Json
   termsWordsEncrypted  String       @map("terms_words_encrypted")
   inviteTokenHash      String?      @unique @map("invite_token_hash")
@@ -2833,7 +2832,6 @@ model Game {
   pendingLabel         Json?        @map("pending_label")
   lengthDays           Int          @default(7) @map("length_days")
   startedAt            DateTime?    @map("started_at")
-  nextDueAt            DateTime?    @map("next_due_at")
   result               Json?
   settledAt            DateTime?    @map("settled_at")
   createdAt            DateTime     @default(now()) @map("created_at")
@@ -2843,7 +2841,6 @@ model Game {
   tickets              GameTicket[]
   events               GameEvent[]
 
-  @@index([nextDueAt])
   @@index([createdBy])
   @@map("game")
 }
@@ -2854,7 +2851,6 @@ model GamePlayer {
   seat               Int
   timeZone           String      @map("time_zone")
   dayOne             DateTime?   @map("day_one") @db.Date
-  agreedTermsVersion Int         @map("agreed_terms_version")
   // Equals member_id while the game is live, else null: one live game per person.
   activeMemberId     String?     @unique @map("active_member_id")
   joinedAt           DateTime    @default(now()) @map("joined_at")
@@ -2873,11 +2869,11 @@ model GameEntry {
   gameId          String     @map("game_id")
   memberId        String     @map("member_id")
   dayIndex        Int        @map("day_index")
-  // 1 or 2 for posts (2 is the retake), 0 for an excuse: caps each player-day.
+  // 1 or 2 for photos (2 is the retake), 0 for an excuse: caps each player-day.
   attempt         Int
+  // photo or excuse (a voice memo, with its transcript as text)
   kind            String
   textEncrypted   String?    @map("text_encrypted")
-  dataEncrypted   String?    @map("data_encrypted")
   mediaKeys       String[]   @default([]) @map("media_keys")
   captureAgeMs    Int?       @map("capture_age_ms")
   receivedAt      DateTime   @map("received_at")
@@ -2894,14 +2890,14 @@ model GameEntry {
 // One IOU. Its words come from the game's stake with the same key.
 model GameTicket {
   id         String      @id
-  gameId     String?     @map("game_id")
+  gameId     String      @map("game_id")
   stakeKey   String      @map("stake_key")
   owedBy     String      @map("owed_by")
   owedTo     String      @map("owed_to")
   status     String      @default("open")
   redeemedAt DateTime?   @map("redeemed_at")
   createdAt  DateTime    @default(now()) @map("created_at")
-  game       Game?       @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  game       Game        @relation(fields: [gameId], references: [id], onDelete: Cascade)
   debtor     GameProfile @relation("GameTicketOwedBy", fields: [owedBy], references: [memberId], onDelete: Cascade)
   holder     GameProfile @relation("GameTicketOwedTo", fields: [owedTo], references: [memberId], onDelete: Cascade)
 
@@ -2911,18 +2907,19 @@ model GameTicket {
   @@map("game_ticket")
 }
 
-// Append-only audit log and recap material. Payloads hold ids and numbers only.
+// Append-only history of accepted changes, one row each, in the same
+// transaction. Payloads hold ids and numbers only; words stay in their
+// encrypted columns. Nothing reads it yet.
 model GameEvent {
   id        BigInt   @id @default(autoincrement())
   gameId    String   @map("game_id")
+  // A member id, or "murph" / "system".
+  actor     String
   type      String
-  actorId   String   @map("actor_id")
-  requestId String?  @map("request_id")
   payload   Json
   createdAt DateTime @default(now()) @map("created_at")
   game      Game     @relation(fields: [gameId], references: [id], onDelete: Cascade)
 
-  @@unique([actorId, requestId])
   @@index([gameId, id])
   @@map("game_event")
 }

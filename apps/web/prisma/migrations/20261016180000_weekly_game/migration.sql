@@ -2,7 +2,6 @@
 CREATE TABLE "game_profile" (
     "member_id" TEXT NOT NULL,
     "first_name_encrypted" TEXT NOT NULL,
-    "avatar_key" TEXT,
     "time_zone" TEXT NOT NULL,
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updated_at" TIMESTAMP(3) NOT NULL,
@@ -29,7 +28,6 @@ CREATE TABLE "game" (
     "previous_game_id" TEXT,
     "round" INTEGER NOT NULL DEFAULT 1,
     "status" TEXT NOT NULL,
-    "void_reason" TEXT,
     "terms" JSONB NOT NULL,
     "terms_words_encrypted" TEXT NOT NULL,
     "invite_token_hash" TEXT,
@@ -38,7 +36,6 @@ CREATE TABLE "game" (
     "pending_label" JSONB,
     "length_days" INTEGER NOT NULL DEFAULT 7,
     "started_at" TIMESTAMP(3),
-    "next_due_at" TIMESTAMP(3),
     "result" JSONB,
     "settled_at" TIMESTAMP(3),
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -57,7 +54,6 @@ CREATE TABLE "game_player" (
     "seat" INTEGER NOT NULL,
     "time_zone" TEXT NOT NULL,
     "day_one" DATE,
-    "agreed_terms_version" INTEGER NOT NULL,
     "active_member_id" TEXT,
     "joined_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
@@ -74,7 +70,6 @@ CREATE TABLE "game_entry" (
     "attempt" INTEGER NOT NULL,
     "kind" TEXT NOT NULL,
     "text_encrypted" TEXT,
-    "data_encrypted" TEXT,
     "media_keys" TEXT[] DEFAULT ARRAY[]::TEXT[],
     "capture_age_ms" INTEGER,
     "received_at" TIMESTAMP(3) NOT NULL,
@@ -82,13 +77,13 @@ CREATE TABLE "game_entry" (
     "withdrawn_reason" TEXT,
 
     CONSTRAINT "game_entry_pkey" PRIMARY KEY ("id"),
-    CONSTRAINT "game_entry_attempt_check" CHECK ("attempt" BETWEEN 0 AND 2 AND ("attempt" = 0) = ("kind" = 'excuse'))
+    CONSTRAINT "game_entry_attempt_check" CHECK ("kind" IN ('photo', 'excuse') AND "attempt" BETWEEN 0 AND 2 AND ("attempt" = 0) = ("kind" = 'excuse'))
 );
 
 -- CreateTable
 CREATE TABLE "game_ticket" (
     "id" TEXT NOT NULL,
-    "game_id" TEXT,
+    "game_id" TEXT NOT NULL,
     "stake_key" TEXT NOT NULL,
     "owed_by" TEXT NOT NULL,
     "owed_to" TEXT NOT NULL,
@@ -104,9 +99,8 @@ CREATE TABLE "game_ticket" (
 CREATE TABLE "game_event" (
     "id" BIGSERIAL NOT NULL,
     "game_id" TEXT NOT NULL,
+    "actor" TEXT NOT NULL,
     "type" TEXT NOT NULL,
-    "actor_id" TEXT NOT NULL,
-    "request_id" TEXT,
     "payload" JSONB NOT NULL,
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
@@ -118,9 +112,6 @@ CREATE INDEX "game_contact_label_subject_member_id_idx" ON "game_contact_label"(
 
 -- CreateIndex
 CREATE UNIQUE INDEX "game_invite_token_hash_key" ON "game"("invite_token_hash");
-
--- CreateIndex
-CREATE INDEX "game_next_due_at_idx" ON "game"("next_due_at");
 
 -- CreateIndex
 CREATE INDEX "game_created_by_idx" ON "game"("created_by");
@@ -151,9 +142,6 @@ CREATE INDEX "game_ticket_game_id_idx" ON "game_ticket"("game_id");
 
 -- CreateIndex
 CREATE INDEX "game_event_game_id_id_idx" ON "game_event"("game_id", "id");
-
--- CreateIndex
-CREATE UNIQUE INDEX "game_event_actor_id_request_id_key" ON "game_event"("actor_id", "request_id");
 
 -- AddForeignKey
 ALTER TABLE "game_profile" ADD CONSTRAINT "game_profile_member_id_fkey" FOREIGN KEY ("member_id") REFERENCES "hosted_member"("id") ON DELETE CASCADE ON UPDATE CASCADE;

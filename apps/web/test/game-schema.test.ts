@@ -13,10 +13,23 @@ describe("weekly game schema", () => {
     expect(migration).toContain(
       'CREATE UNIQUE INDEX "game_entry_game_id_member_id_day_index_attempt_key" ON "game_entry"("game_id", "member_id", "day_index", "attempt");',
     );
-    expect(migration).toContain('CHECK ("attempt" BETWEEN 0 AND 2 AND ("attempt" = 0) = ("kind" = \'excuse\'))');
+    expect(migration).toContain(
+      'CHECK ("kind" IN (\'photo\', \'excuse\') AND "attempt" BETWEEN 0 AND 2 AND ("attempt" = 0) = ("kind" = \'excuse\'))',
+    );
     expect(migration).toContain('CHECK ("active_member_id" IS NULL OR "active_member_id" = "member_id")');
-    expect(migration).toContain('CREATE UNIQUE INDEX "game_event_actor_id_request_id_key" ON "game_event"("actor_id", "request_id");');
     expect(migration).toContain('CREATE UNIQUE INDEX "game_invite_token_hash_key" ON "game"("invite_token_hash");');
+  });
+
+  it("keeps to seven tables", () => {
+    expect([...migration.matchAll(/CREATE TABLE "(\w+)"/gu)].map((match) => match[1])).toEqual([
+      "game_profile",
+      "game_contact_label",
+      "game",
+      "game_player",
+      "game_entry",
+      "game_ticket",
+      "game_event",
+    ]);
   });
 
   it("stores people's words only in encrypted columns", () => {
@@ -26,7 +39,6 @@ describe("weekly game schema", () => {
       "name_encrypted",
       "relationship_encrypted",
       "text_encrypted",
-      "data_encrypted",
       "terms_words_encrypted",
       "invite_token_encrypted",
     ]) {
