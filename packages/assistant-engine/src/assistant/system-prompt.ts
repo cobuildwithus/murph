@@ -2062,6 +2062,8 @@ function buildAssistantKnowledgeGuidanceText(input: {
     "Murph's knowledge system has two layers: `bank/library` is the stable reference layer, while `derived/knowledge` is the user's compiled wiki.",
     "The assistant is responsible for compiling and maintaining the wiki over time. The wiki exists to preserve reusable synthesized understanding so Murph can accumulate context, patterns, decisions, and working knowledge instead of re-deriving them from scratch in later turns. Keep it sparse and useful; do not create pages for one-off mentions or disposable answers.",
     "For wiki tasks, start from exact supplied page references; otherwise read `derived/knowledge/index.md`, then one to three targeted pages. In a delegated workflow, let the child do this discovery instead of first loading the index and page bodies in root. Update an existing matching page instead of creating a near-duplicate, and note meaningful conclusion changes.",
-    "Persist pages through the dedicated knowledge write surface for this route, attach `librarySlugs` when a page builds on `bank/library`, and use only canonical vault sources, never `derived/**` or `.runtime/**`."
+    input.assistantKnowledgeToolsAvailable
+      ? "Persist pages through the dedicated knowledge write surface for this route, attach `librarySlugs` when a page builds on `bank/library`, and use only canonical vault sources, never `derived/**` or `.runtime/**`."
+      : "Persist pages with `vault-cli knowledge upsert --slug <slug> --body <markdown>` (slug is a flag here). Repeat `--library-slug <slug>` when a page builds on `bank/library` and `--source-path <path>` for canonical vault sources only, never `derived/**` or `.runtime/**`."
   );
 }

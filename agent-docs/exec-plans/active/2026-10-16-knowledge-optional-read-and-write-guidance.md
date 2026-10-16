@@ -1,6 +1,7 @@
 # Knowledge optional reads and CLI write guidance
 
-Status: active (Stage 1 consumer candidate; Stage 2 producer pending)
+Status: active (Stage 1 consumer merged in PR 4174; Stage 2 producer prepared
+locally, publication held)
 Created: 2026-10-16
 Updated: 2026-10-16
 
@@ -66,7 +67,21 @@ path. No new deployment toggles, aliases, or rollout machinery.
   and switches no production caller. The Stage 2 PR's single item will name
   both PRs.
 
-## Stage 2 scope (deferred, private snapshot)
+## Stage 2 gate: local preparation versus production adoption
+
+- Stage 1 merged as `617753d7c2` (PR 4174), and its protected gradual
+  release is deploying. The Stage 2 producer checkout starts from that exact
+  base.
+- Authorized now: local preparation only. That covers applying the producer
+  hunks, focused and relevant deterministic checks, and recording evidence
+  here.
+- Still held, and unchanged by this preparation: publication, merge, any
+  production saved caller, and any producer release that adopts
+  `--if-exists`. These wait until the parent verifies Stage 1's exact protected
+  Worker, native image, and config convergence and health. The rollback-floor
+  rule in § Two-stage delivery still applies.
+
+## Stage 2 scope
 
 - `system-prompt.ts` CLI-route write sentence.
 - `managed-automations.ts` and first-personal-read `--if-exists` reads with
@@ -171,8 +186,60 @@ Pre-split full candidate (Stage 1 plus Stage 2 together; not Stage 1 proof):
   Stage 2 write sentence), both group fixtures unchanged. The CLI contract was
   equal at 6,531 bytes.
 
-Remaining Stage 2 proof:
+Stage 2 local preparation on base `617753d7c2`, executed and passed:
 
-- Apply the snapshot to a new checkout and rerun the focused suites, the
-  provider-input measurement against Stage 1, and the producer live journeys.
-- Add the changelog item with both PR numbers.
+- Applied: the producer-only snapshot hunks applied cleanly except the live
+  e2e file. There the two producer journeys (`real Codex optional knowledge
+  ledger and wiki write e2e`), the `fakeMissingKnowledgePageShow` helper, the
+  `knowledgeAbsentPageResultSchema` import, and the three fake-CLI absent
+  fixtures were reapplied by hand next to the Stage 1 consumer journey. The
+  consumer journey and its assertions are kept; only its comment no longer says
+  saved callers do not use the option. The full pre-split diff was not
+  applied.
+- Also restored `knowledge-cli-guidance.test.ts`, rewrote the changelog
+  fragment, and updated the command-surface owner sentence.
+- Single saved one-shot producer: `buildOnboardingFirstPersonalReadAutomationSaveRequest`
+  saves `MURPH_ONBOARDING_FIRST_PERSONAL_READ_INSTRUCTIONS`, which is the
+  edited constant.
+- Focused first (3 files, 129 passed): knowledge-cli-guidance,
+  assistant-codex-turn-planning, and onboarding-first-personal-read.
+  - The planning test's direct and scheduledEmail digests match the saved
+    snapshot. Group, maintenance, and outputOnly are unchanged, and group
+    prompts contain no `knowledge upsert`.
+  - The guidance test runs the built CLI (`packages/cli/dist/bin.js`) on
+    fresh synthetic vaults.
+    - It parses the composed CLI-route prompt and executes its upsert shape
+      with repeatable `--library-slug` and `--source-path`, producing one page,
+      the index, the log, and one log entry.
+    - The synthetic plural flags `--library-slugs` and `--source-paths` fail
+      with `VALIDATION_ERROR` at `arguments` and write nothing.
+    - Every production `knowledge show` in managed automations, the first
+      read, and the connected-context skill uses `--if-exists`. That covers six
+      slugs, and each returns exact `page: null` while a strict read stays
+      `knowledge_page_not_found`, with no writes.
+    - Unconfirmed absence (`knowledge_page_invalid`, stage `integrity`) is
+      covered through the CLI by Stage 1's `device-knowledge-command-coverage`,
+      and the shipped-MCP strict and optional `structuredContent` test is
+      unchanged.
+- Engine suites (9 files, 402 passed, 493 skipped): the files above plus
+  managed-automations, managed-automations-core,
+  system-prompt.dynamic-context, assistant-skill-assets, knowledge-service,
+  and assistant-codex-real-e2e (live tests compile and skip without a real
+  Codex).
+- assistant-engine typecheck passed.
+- `gen:config-schema` produced no diff. `complexity:diff` passed with
+  `system-prompt.ts` debt unchanged. `test:scenario-integrity` passed (206
+  scenarios).
+- Web: `changelog:generate` and `changelog-page.test.tsx` passed (10).
+- Changelog item `2026-10-16 · wiki-saves-and-scheduled-history`, priority 2.
+  `sourcePullRequests` lists 4174 until the parent supplies the producer PR
+  number.
+
+Remaining Stage 2 proof (parent):
+
+- Run the private provider-input measurement with Stage 1 as base; no bytes
+  measured here are claimed. Run the producer live journeys, independent
+  review, and CI.
+- Add the producer PR number to the changelog fragment.
+- Pass the production adoption gate in § Stage 2 gate, then close this plan
+  through `scripts/finish-task`.

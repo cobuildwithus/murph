@@ -378,7 +378,14 @@ describe('assistant Codex turn planning', () => {
         expect(instructions).not.toContain(
           'For wiki work, use `vault-cli knowledge ...` directly in this turn.',
         )
+        expect(instructions).toContain(
+          'Persist pages with `vault-cli knowledge upsert --slug <slug> --body <markdown>` (slug is a flag here).',
+        )
+        expect(instructions).not.toContain('dedicated knowledge write surface')
       }
+    }
+    for (const instructions of [plans.group.systemPrompt, plans.group.developerInstructions]) {
+      expect(instructions).not.toContain('knowledge upsert')
     }
     const digestPlan = (
       plan: Awaited<ReturnType<typeof resolveAssistantRouteTurnPlan>>,
@@ -442,11 +449,11 @@ describe('assistant Codex turn planning', () => {
       Object.entries(plans).map(([name, plan]) => [name, digestPlan(plan)]),
     )).toMatchInlineSnapshot(`
       {
-        "direct": "414fdfe3a0c97ec7a1dc9ceda05f67721e44abdaa3e577762e7721ac64955a90",
+        "direct": "08842c4dd2a63dc100bdb6f2a6289156ef92c7578341311e9596b2664e0dd1f9",
         "group": "ae7e3a55c2d1698c756c2f7ad37f5c75399f19717d3ac18fac3719b2540bfceb",
         "maintenance": "4def8e201c9fe004f9f60f5ac3ec5ecf084f63f7bc5c70e1a6409107487300be",
         "outputOnly": "7f13d7195b8e231e1fba2e5bd5e91437b30756cd8fcf763edd47fe27de6f7d6e",
-        "scheduledEmail": "96beb7fbd63067169e43e1c59fcb7e9068f0918c2052a8a278536c47e9904feb",
+        "scheduledEmail": "aa8bfd7c79bebf5996941b1c422725306acfe8e69c14ccaf91040853581e7fc2",
       }
     `)
   })

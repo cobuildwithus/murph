@@ -1,0 +1,20 @@
+{
+  "publishedOn": "2026-10-16",
+  "order": 100,
+  "item": {
+    "id": "wiki-saves-and-scheduled-history",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "More reliable wiki saves and first-time history checks",
+    "summary": "Asking Murph to save a page to your wiki works more reliably, and scheduled insights and check-ins handle a first run with no earlier history more smoothly.",
+    "details": "If earlier history exists but cannot be read safely, Murph skips that scheduled step for the run instead of risking a repeat or overlooking a preference you set.",
+    "relevanceTags": [
+      "wiki",
+      "reliability",
+      "scheduled-insights"
+    ],
+    "sourcePullRequests": [
+      4174
+    ]
+  }
+}

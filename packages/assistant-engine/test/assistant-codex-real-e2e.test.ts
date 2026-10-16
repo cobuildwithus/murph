@@ -121,6 +121,7 @@ import {
   buildPersonalPatternReport,
   buildJournalView,
   getQueryProjectionStatus,
+  knowledgeAbsentPageResultSchema,
   readVaultRawTolerant,
   type CanonicalEntity,
 } from '@murphai/query'
@@ -5222,8 +5223,7 @@ describeRealCodex('real Codex missing knowledge recovery e2e', () => {
 })
 
 describeRealCodex('real Codex optional knowledge show e2e', () => {
-  // Stage-one consumer capability only: the request names the new opt-in mode;
-  // saved production callers do not use it yet.
+  // Direct consumer capability: the request names the opt-in mode itself.
   it('checks an absent wiki page once with the opt-in if-exists read and writes nothing', async () => {
     const config = await resolveRealCodexE2eConfig()
     const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-optional-show-e2e-'))
@@ -5281,6 +5281,147 @@ describeRealCodex('real Codex optional knowledge show e2e', () => {
       await removeRealCodexTemporaryPaths(config.temporaryPaths)
     }
   }, 600_000)
+})
+
+describeRealCodex('real Codex optional knowledge ledger and wiki write e2e', () => {
+  it('reads an absent optional scheduled ledger once and stays quiet without writing', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const automation = MURPH_MANAGED_AUTOMATIONS.find(
+      (candidate) => candidate.automationId === MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID,
+    )
+    if (!automation) throw new Error('Expected the managed research scout automation.')
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-optional-ledger-e2e-'))
+    // Fixture scaffolding stays outside the vault so the snapshot covers all vault content.
+    const vaultRoot = path.join(workingDirectory, 'vault')
+    const binDirectory = path.join(workingDirectory, 'bin')
+    const commandLogPath = path.join(workingDirectory, 'commands.log')
+    try {
+      await initializeVault({ title: 'Synthetic optional ledger', timezone: 'UTC', vaultRoot })
+      await materializeRealWorkoutVaultCli({ binDirectory, commandLogPath, vaultRoot })
+      const vaultBefore = await snapshotRealCodexCanonicalVault(vaultRoot)
+      const result = await executeRealCodexAppServerTurn({
+        allowFinishWithoutReply: true,
+        approvalPolicy: 'never',
+        baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome,
+        developerInstructions: buildWeeklyHealthInsightDeveloperInstructions(),
+        dynamicTools: [MURPH_FINISH_WITHOUT_REPLY_TOOL],
+        // No research credential: the saved instructions require a quiet skip after the ledger read.
+        env: { ...config.env, EXA_API_KEY: undefined },
+        fixtureBinDirectory: binDirectory,
+        model: config.model,
+        modelProvider: config.modelProvider,
+        prompt: [
+          automation.instructions,
+          'Scheduled occurrence context: 2026-08-09. This is an isolated synthetic fixture.',
+        ].join('\n\n'),
+        reasoningEffort: 'high',
+        sandbox: 'workspace-write',
+        workingDirectory,
+      })
+      const commands = (await readFile(commandLogPath, 'utf8')).split('\n').filter(Boolean)
+        .filter((command) => !isRecordedVaultHelpCommand(command))
+      const actions = readCapabilityRoutingActions(result.jsonEvents)
+      const knowledgeOutputs = actions.filter((action) => action.kind === 'command' && action.command.includes('knowledge'))
+        .map((action) => action.output)
+      const finishCalls = actions.filter((action) => action.kind === 'dynamic'
+        && action.tool === MURPH_FINISH_WITHOUT_REPLY_TOOL.name)
+      process.stdout.write(`[optional-ledger-e2e] ${JSON.stringify({
+        finalMessage: result.finalMessage || '(silent)', finishCalls: finishCalls.length,
+      })}\n`)
+      const ledgerReads = commands.filter((command) => /^knowledge show weekly-health-research-scout(?:\s|$)/u.test(command))
+      expect(ledgerReads).toHaveLength(1)
+      expect(ledgerReads[0]).toContain('--if-exists')
+      expect(knowledgeOutputs.filter((output) => /knowledge_page_not_found|VALIDATION_ERROR/u.test(output))).toEqual([])
+      expect(commands.filter((command) => /^research scout-batch\b/u.test(command))).toEqual([])
+      // Absence authorizes nothing: every canonical and derived vault file is unchanged.
+      expect(await snapshotRealCodexCanonicalVault(vaultRoot)).toEqual(vaultBefore)
+      expect(await listAssistantOutboxIntents(vaultRoot)).toEqual([])
+      expect(result.responseMedia).toEqual([])
+      expect(result.finalMessage === '' && finishCalls.length === 1
+        || /"kind"\s*:\s*"skip"/u.test(result.finalMessage)).toBe(true)
+    } finally {
+      await removeRealCodexTemporaryPath(workingDirectory)
+      await removeRealCodexTemporaryPaths(config.temporaryPaths)
+    }
+  }, 600_000)
+
+  it('saves an explicitly requested wiki page with exactly one valid upsert', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-wiki-upsert-e2e-'))
+    const vaultRoot = path.join(workingDirectory, 'vault')
+    const binDirectory = path.join(workingDirectory, 'bin')
+    const commandLogPath = path.join(workingDirectory, 'commands.log')
+    try {
+      await initializeVault({ title: 'Synthetic wiki write', timezone: 'UTC', vaultRoot })
+      await materializeRealWorkoutVaultCli({ binDirectory, commandLogPath, vaultRoot })
+      const vaultBefore = await snapshotRealCodexCanonicalVault(vaultRoot)
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome,
+        developerInstructions: buildAssistantSystemPrompt({
+          assistantCliContract: null, assistantContextSnapshotPrompt: null,
+          assistantHostedDeviceConnectAvailable: false, assistantHostedDeviceConnectProviders: [],
+          assistantKnowledgeToolsAvailable: false, channel: 'linq',
+          cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+          conversationScope: 'direct', currentLocalDate: '2026-09-04', currentTimeZone: 'UTC',
+          hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false,
+          turnTrigger: null,
+        }),
+        dynamicTools: [],
+        env: { ...config.env, PATH: `${binDirectory}:${config.env.PATH ?? ''}` },
+        model: config.model, modelProvider: config.modelProvider,
+        prompt: 'Please add a page to my wiki saying my preferred commute route is the canal path because it skips the steep hill. I want to refer back to it later.',
+        reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
+      })
+      const commands = (await readFile(commandLogPath, 'utf8')).split('\n').filter(Boolean)
+        .filter((command) => !isRecordedVaultHelpCommand(command))
+      const writeActions = readCapabilityRoutingActions(result.jsonEvents)
+        .filter((action) => action.kind === 'command' && /\bknowledge\s+(?:upsert|append-section)\b/u.test(action.command)
+          && !isRecordedVaultHelpCommand(action.command))
+      const pagesRoot = path.join(vaultRoot, 'derived/knowledge/pages')
+      const pages = existsSync(pagesRoot) ? await readdir(pagesRoot) : []
+      process.stdout.write(`[wiki-upsert-e2e] ${JSON.stringify({ finalMessage: result.finalMessage, pages })}\n`)
+      // Exactly one executed write, using the real flags: no invalid attempt, alias, or retry.
+      expect(commands.filter((command) => /^knowledge (?:upsert|append-section)\b/u.test(command))).toHaveLength(1)
+      expect(writeActions).toHaveLength(1)
+      const write = writeActions[0]
+      if (!write || write.kind !== 'command') throw new Error('Expected one executed knowledge upsert.')
+      expect(write.ok).toBe(true)
+      expect(write.command).toMatch(/\bknowledge\s+upsert\b/u)
+      expect(write.command).toMatch(/\s--slug[\s=]/u)
+      expect(write.command).toMatch(/\s--body[\s=]/u)
+      expect(write.output).not.toMatch(/VALIDATION_ERROR|"code"\s*:/u)
+      expect(commands.filter((command) => /^memory (?:upsert|update|set-name)\b/u.test(command))).toEqual([])
+      expect(pages).toHaveLength(1)
+      const slug = pages[0]?.replace(/\.md$/u, '') ?? ''
+      const saved = await getKnowledgePage({ vault: vaultRoot, slug })
+      expect(saved.page.body).toMatch(/canal/iu)
+      expect(saved.page.body).toMatch(/hill/iu)
+      expect(saved.page.sourcePaths.filter((sourcePath) => /^(?:derived|\.runtime)\//u.test(sourcePath))).toEqual([])
+      // Only the intended page, its index, and its log change; canonical inputs are preserved
+      // apart from the write's own append-only audit record.
+      const vaultAfter = await snapshotRealCodexCanonicalVault(vaultRoot)
+      const changed = [...new Set([...Object.keys(vaultBefore), ...Object.keys(vaultAfter)])]
+        .filter((file) => vaultBefore[file] !== vaultAfter[file]).sort()
+      expect(changed.filter((file) => !file.startsWith('audit/'))).toEqual([
+        'derived/knowledge/index.md',
+        'derived/knowledge/log.md',
+        `derived/knowledge/pages/${slug}.md`,
+      ])
+      expect(changed.filter((file) => file.startsWith('audit/') && vaultBefore[file] !== undefined
+        && vaultAfter[file] === undefined)).toEqual([])
+      expect(await listAssistantOutboxIntents(vaultRoot)).toEqual([])
+      expect(result.finalMessage).toMatch(/sav|add|wiki|page/iu)
+      expect(result.finalMessage).not.toMatch(/couldn.t|could not|failed|error|vault-cli|--slug/iu)
+      expect(result.finalMessage.length).toBeLessThan(500)
+    } finally {
+      await removeRealCodexTemporaryPath(workingDirectory)
+      await removeRealCodexTemporaryPaths(config.temporaryPaths)
+    }
+  }, 300_000)
 })
 
 describeRealCodex('real Codex workout capture default e2e', () => {
@@ -37982,6 +38123,20 @@ async function materializeNutritionCardVaultCli(input: {
   await chmod(input.executablePath, 0o700)
 }
 
+// Fake CLIs mirror the shipped contract: only `--if-exists` turns a missing page
+// into a successful absent result; a strict read still fails.
+function fakeMissingKnowledgePageShow(slug: string): string[] {
+  const absent = knowledgeAbsentPageResultSchema.parse({
+    degradation: null, page: null, slug, vault: 'synthetic-vault',
+  })
+  return [
+    '    case "$*" in',
+    `      *"--if-exists"*) printf '%s\\n' ${quoteNutritionShellLiteral(JSON.stringify(absent))} ;;`,
+    "      *) printf '%s\\n' 'knowledge page not found' >&2; exit 1 ;;",
+    '    esac',
+  ]
+}
+
 function quoteNutritionShellLiteral(value: string): string {
   return `'${value.replaceAll("'", `'"'"'`)}'`
 }
@@ -40461,12 +40616,12 @@ async function materializePersonalPatternsBaselineVaultCli(input: {
       '  *"knowledge show personal-pattern-notifications"*)',
       ...(input.initialDigestSent
         ? ["    printf '%s\\n' '{\"initialDigestSent\":true,\"results\":[]}'"]
-        : ["    printf '%s\\n' 'knowledge page not found' >&2", '    exit 1']),
+        : fakeMissingKnowledgePageShow('personal-pattern-notifications')),
       '    ;;',
       '  *"knowledge show weekly-health-insights"*)',
       ...(input.weeklyHistory
         ? [`    printf '%s\\n' ${quoteNutritionShellLiteral(input.weeklyHistory)}`]
-        : ["    printf '%s\\n' 'knowledge page not found' >&2", '    exit 1']),
+        : fakeMissingKnowledgePageShow('weekly-health-insights')),
       '    ;;',
       '  *"knowledge show journal-pattern-vocabulary"*)',
       "    printf '%s\\n' '{\"version\":1,\"concepts\":[{\"id\":\"yard-work\",\"label\":\"Yard work\",\"icon\":\"activity\",\"aliases\":[\"yard-work\"]}]}'",
@@ -40809,8 +40964,7 @@ async function materializeWeeklyHealthInsightVaultCli(input: {
       ...patternCommand,
       '    ;;',
       '  *"knowledge show weekly-health-insights"*)',
-      '    printf \'%s\\n\' \'knowledge page not found\' >&2',
-      '    exit 1',
+      ...fakeMissingKnowledgePageShow('weekly-health-insights'),
       '    ;;',
       '  *"knowledge append-section weekly-health-insights"*)',
       '    printf \'%s\\n\' \'{"ok":true,"status":"appended"}\'',

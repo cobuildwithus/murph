@@ -16,7 +16,10 @@ into the ledger.
 
 ## Eligible connections and opt-outs
 
-Read the existing ledger before any connected-app tool call or account selection.
+Read the existing ledger with `vault-cli knowledge show journal-connected-context
+--if-exists` before any connected-app tool call or account selection; `page: null`
+means no ledger exists yet. A failed read is not a missing ledger: treat it as a
+global opt-out for this run and do not rewrite the ledger.
 A global opt-out is a hard stop for connected reads and capture: preserve it in the normalized ledger below
 and keep Journal history. Do not list accounts, search or execute provider tools,
 send an announcement, or create a connected-plan follow-up. Continue existing
