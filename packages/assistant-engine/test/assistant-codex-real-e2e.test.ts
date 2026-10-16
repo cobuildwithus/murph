@@ -7544,19 +7544,23 @@ describeRealCodex('real Codex video-analysis detail e2e', () => {
 
 describeRealCodex('real Codex X post reading e2e', () => {
   const coachPost = 'https://x.com/synthetic_coach/status/2100000000000000001'
+  const coachPostAlias = 'https://x.com/i/status/2100000000000000001'
   const runnerPost = 'https://x.com/synthetic_runner/status/2100000000000000002'
-  const lookupNarration = /\blive X\b|\bX (?:read|search|lookup)\b|\bGrok\b|from (?:the|my|a) (?:search|lookup|read)/iu
+  const physioReply = 'https://x.com/synthetic_physio/status/2100000000000000003'
+  const unrelatedPost = 'https://x.com/synthetic_baker/status/2100000000000000004'
+  const lookupNarration = /\blive X\b|\bX (?:read|search|lookup)\b|\bGrok\b|from (?:the|my|a) (?:search|lookup|read)|\bdescribed as\b|\baccording to\b|\b(?:the|this) result\b|\breturned\b|\breported\b/iu
+  const screenshotAnswer =
+    `The post text says "Morning check-in." The screenshot shows a chat reply that opens with an all-caps "HEYYY" and then advises drinking water, eating something, and resting. ${coachPostAlias}`
   it.each([
     {
-      scenarioLabel: 'group asks about one post returned under two URL spellings',
-      testName: 'x post reading in a group sends one link without lookup narration',
+      scenarioLabel: 'group shares the i/status spelling and Grok returns both spellings',
+      testName: 'x post reading in a group does not echo the shared post',
       scope: 'group',
-      memberText: `Murph, what does the screenshot in this post say? ${coachPost}`,
-      answerText:
-        'The post text says "Morning check-in." The screenshot shows a chat reply that opens with an all-caps "HEYYY" and then advises drinking water, eating something, and resting. https://x.com/i/status/2100000000000000001',
+      memberText: `Murph, what does the screenshot in this post say? ${coachPostAlias}`,
+      answerText: screenshotAnswer,
       annotationUrls: [coachPost],
-      citations: ['https://x.com/i/status/2100000000000000001'],
-      expectedPostIds: ['2100000000000000001'],
+      citations: [coachPostAlias],
+      expectedPostIds: [],
       expectedReplyPattern: /HEYYY/u,
       forbiddenReplyPattern: lookupNarration,
     },
@@ -7565,11 +7569,10 @@ describeRealCodex('real Codex X post reading e2e', () => {
       testName: 'x post reading discloses the live lookup when asked how it checked',
       scope: 'direct',
       memberText: `Did you actually read this post live, and how did you check? What does its screenshot say? ${coachPost}`,
-      answerText:
-        'The post text says "Morning check-in." The screenshot shows a chat reply that opens with an all-caps "HEYYY" and then advises drinking water, eating something, and resting. https://x.com/i/status/2100000000000000001',
+      answerText: screenshotAnswer,
       annotationUrls: [coachPost],
-      citations: ['https://x.com/i/status/2100000000000000001'],
-      expectedPostIds: ['2100000000000000001'],
+      citations: [coachPostAlias],
+      expectedPostIds: [],
       expectedReplyPattern: /HEYYY[\s\S]*\b(?:live|search(?:ed)?|looked|checked|Grok)\b|\b(?:live|search(?:ed)?|looked|checked|Grok)\b[\s\S]*HEYYY/iu,
       forbiddenReplyPattern: /\b(?:did not|didn['’]t|could(?:n['’]t| not)) (?:read|check|search|access)\b/iu,
     },
@@ -7581,38 +7584,85 @@ describeRealCodex('real Codex X post reading e2e', () => {
       answerText:
         'The post text says "Leg day." The attached video is blurry: it appears to show a barbell back squat, but the plates are not readable, so the weight on the bar cannot be confirmed.',
       annotationUrls: [coachPost],
-      citations: ['https://x.com/i/status/2100000000000000001'],
-      expectedPostIds: ['2100000000000000001'],
+      citations: [coachPostAlias],
+      expectedPostIds: [],
       expectedReplyPattern: /(?:can(?:no|['’])t|could(?:n['’]t| not)|unable|not (?:readable|clear|possible)|unclear|blurry)[\s\S]*\b(?:weight|plates?)\b|\b(?:weight|plates?)\b[\s\S]*(?:can(?:no|['’])t|could(?:n['’]t| not)|unable|not (?:readable|clear|possible)|unclear|blurry)/iu,
       forbiddenReplyPattern: /\b\d+\s?(?:lb|lbs|kg|pounds|kilos)\b/iu,
     },
     {
-      scenarioLabel: 'one post returned under handle and i/status URL spellings',
-      testName: 'x post reading sends one link per post id without lookup narration',
+      scenarioLabel: 'member shares the handle spelling and Grok returns both spellings',
+      testName: 'x post reading does not echo the shared post or narrate the lookup',
       scope: 'direct',
       memberText: `What does the screenshot in this post say? ${coachPost}`,
-      answerText:
-        'The post text says "Morning check-in." The screenshot shows a chat reply that opens with an all-caps "HEYYY" and then advises drinking water, eating something, and resting. https://x.com/i/status/2100000000000000001',
+      answerText: screenshotAnswer,
       annotationUrls: [coachPost],
-      citations: ['https://x.com/i/status/2100000000000000001'],
-      expectedPostIds: ['2100000000000000001'],
+      citations: [coachPostAlias],
+      expectedPostIds: [],
       expectedReplyPattern: /HEYYY/u,
       forbiddenReplyPattern: lookupNarration,
     },
     {
-      scenarioLabel: 'two distinct posts each returned under two URL spellings',
-      testName: 'x post reading keeps distinct post links once each',
+      scenarioLabel: 'member shares two posts and Grok returns both under two spellings',
+      testName: 'x post reading does not echo either of two shared posts',
       scope: 'direct',
       memberText: `What do the videos in these two posts show? ${coachPost} and ${runnerPost}`,
       answerText:
         `The first video shows a coach demonstrating a slow goblet squat. ${coachPost} The second video shows a runner doing strides on a track. ${runnerPost}`,
       annotationUrls: [coachPost, runnerPost],
-      citations: [
-        'https://x.com/i/status/2100000000000000001',
-        'https://x.com/i/status/2100000000000000002',
-      ],
-      expectedPostIds: ['2100000000000000001', '2100000000000000002'],
+      citations: [coachPostAlias, 'https://x.com/i/status/2100000000000000002'],
+      expectedPostIds: [],
       expectedReplyPattern: /squat[\s\S]*strides|strides[\s\S]*squat/iu,
+      forbiddenReplyPattern: lookupNarration,
+    },
+    {
+      scenarioLabel: 'Grok answers about the shared post and cites a different reply post',
+      testName: 'x post reading links an additional source but not the shared post',
+      scope: 'direct',
+      memberText: `What does the video in this post show, and did anyone point out a form problem? ${coachPost}`,
+      answerText:
+        `The video shows a coach demonstrating a slow goblet squat. ${coachPostAlias} A reply from a physiotherapist adds that the coach's heels lift slightly at the bottom. ${physioReply}`,
+      annotationUrls: [coachPost, physioReply],
+      citations: [coachPostAlias, unrelatedPost],
+      expectedPostIds: ['2100000000000000003'],
+      expectedReplyPattern: /squat[\s\S]*heel|heel[\s\S]*squat/iu,
+      forbiddenReplyPattern: lookupNarration,
+    },
+    {
+      scenarioLabel: 'member explicitly asks for the link to the post they shared',
+      testName: 'x post reading sends the shared post link once when asked for it',
+      scope: 'direct',
+      memberText: `Send me the link to this post, and what does its screenshot say? ${coachPostAlias}`,
+      answerText: screenshotAnswer,
+      annotationUrls: [coachPost],
+      citations: [coachPostAlias],
+      expectedPostIds: ['2100000000000000001'],
+      expectedReplyPattern: /HEYYY/u,
+      forbiddenReplyPattern: lookupNarration,
+    },
+    {
+      scenarioLabel: 'member asks for a notes entry that must point back to the shared post',
+      testName: 'x post reading includes the shared post link when the requested entry needs it',
+      scope: 'direct',
+      memberText: `Make a reading-list entry for this post that I can paste into my notes app: ${coachPost}`,
+      answerText:
+        `The video shows a coach demonstrating a slow goblet squat with a three-second lowering phase. ${coachPostAlias}`,
+      annotationUrls: [coachPost],
+      citations: [coachPostAlias],
+      expectedPostIds: ['2100000000000000001'],
+      expectedReplyPattern: /goblet squat/iu,
+      forbiddenReplyPattern: lookupNarration,
+    },
+    {
+      scenarioLabel: 'member asks Murph to find a post without sharing a URL',
+      testName: 'x post reading links a discovered post the member did not share',
+      scope: 'direct',
+      memberText: 'Find the X post where @synthetic_coach demonstrates a goblet squat. What does the video show?',
+      answerText:
+        `@synthetic_coach posted a video demonstrating a slow goblet squat with a three-second lowering phase. ${coachPost}`,
+      annotationUrls: [coachPost],
+      citations: [coachPostAlias],
+      expectedPostIds: ['2100000000000000001'],
+      expectedReplyPattern: /goblet squat/iu,
       forbiddenReplyPattern: lookupNarration,
     },
     {
@@ -7767,12 +7817,7 @@ describeRealCodex('real Codex X post reading e2e', () => {
         expect(grokCalls[0]).toMatchObject({ kind: 'dynamic', success: true })
         expect(reply).toMatch(scenario.expectedReplyPattern)
         expect(reply).not.toMatch(scenario.forbiddenReplyPattern)
-        if (scenario.expectedPostIds.length > 0) {
-          expect([...replyPostIds].sort()).toEqual([...scenario.expectedPostIds])
-        } else {
-          expect(replyPostIds.every((id) => coachPost.endsWith(id))).toBe(true)
-          expect(replyPostIds.length).toBeLessThanOrEqual(1)
-        }
+        expect([...replyPostIds].sort()).toEqual([...scenario.expectedPostIds])
       } finally {
         await removeRealCodexTemporaryPaths([
           workingDirectory,
