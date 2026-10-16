@@ -409,7 +409,10 @@ async function writeSchedule(tx: Tx, gameId: string, schedule: Schedule, options
   }
 }
 
-/** The challenger's invite label becomes their label for the joiner; existing fields win. */
+/**
+ * The challenger's invite label becomes their label for the joiner. What they
+ * typed most recently wins: its non-null fields replace the existing label's.
+ */
 async function copyPendingLabel(tx: Tx, row: GameRow, joinerId: string): Promise<void> {
   const label = parsePendingLabel(row.pendingLabel);
   if (!label.nameEncrypted && !label.relationshipEncrypted && !label.photoKey) return;
@@ -418,9 +421,9 @@ async function copyPendingLabel(tx: Tx, row: GameRow, joinerId: string): Promise
       (owner_member_id, subject_member_id, name_encrypted, relationship_encrypted, photo_key, updated_at)
     VALUES (${row.createdBy}, ${joinerId}, ${label.nameEncrypted}, ${label.relationshipEncrypted}, ${label.photoKey}, now())
     ON CONFLICT (owner_member_id, subject_member_id) DO UPDATE SET
-      name_encrypted = COALESCE(game_contact_label.name_encrypted, EXCLUDED.name_encrypted),
-      relationship_encrypted = COALESCE(game_contact_label.relationship_encrypted, EXCLUDED.relationship_encrypted),
-      photo_key = COALESCE(game_contact_label.photo_key, EXCLUDED.photo_key),
+      name_encrypted = COALESCE(EXCLUDED.name_encrypted, game_contact_label.name_encrypted),
+      relationship_encrypted = COALESCE(EXCLUDED.relationship_encrypted, game_contact_label.relationship_encrypted),
+      photo_key = COALESCE(EXCLUDED.photo_key, game_contact_label.photo_key),
       updated_at = EXCLUDED.updated_at`;
 }
 

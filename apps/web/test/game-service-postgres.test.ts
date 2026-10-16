@@ -206,7 +206,7 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     ]);
     expect(JSON.stringify(events.map((event) => event.payload))).not.toMatch(/pushups|Breakfast|done|girlfriend/u);
 
-    // Rematch with the same person: round 2; the earlier label wins over the new typed name.
+    // Rematch with the same person: round 2; the name typed most recently wins.
     const rematch = await ok(leo, {
       gameId: randomUUID(),
       inviteeFirstName: "Ava B",
@@ -218,7 +218,21 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     const rejoined = await ok(ava, { termsVersion: 1, timeZone: "Australia/Sydney", token: rematch!.inviteToken!, type: "join" });
     expect(rejoined).toMatchObject({ round: 2, status: "live" });
     expect(rejoined!.players[0].firstName).toBe("Leo");
-    expect((await readGame(rematch!.id, leo))!.players[1].firstName).toBe("Ava");
+    expect((await readGame(rematch!.id, leo))!.players[1].firstName).toBe("Ava B");
+  });
+
+  it("keeps the challenger's latest name for someone, and their earlier words it didn't replace", async () => {
+    const kat = await member("Kat", "Europe/London");
+    const leo = await member("Leo", "America/New_York");
+    const first = await startGame(kat, leo, { inviteeFirstName: "Anna", inviteeLabel: { relationship: "brother" } });
+    expect((await readGame(first.gameId, kat))!.players[1].firstName).toBe("Anna");
+    await devSettleNow(first.gameId, kat);
+    const next = await startGame(kat, leo, { inviteeFirstName: "Leo", previousGameId: first.gameId });
+    expect((await readGame(next.gameId, kat))!.players[1].firstName).toBe("Leo");
+    const label = await getPrisma().gameContactLabel.findUniqueOrThrow({
+      where: { ownerMemberId_subjectMemberId: { ownerMemberId: kat, subjectMemberId: leo } },
+    });
+    expect(label.relationshipEncrypted).toBeTruthy();
   });
 
   it("starts on the challenger's picked date, shown before and after accept", async () => {
