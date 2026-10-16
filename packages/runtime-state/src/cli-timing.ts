@@ -46,7 +46,7 @@ export interface CliFailureTiming {
   stage: typeof CLI_TIMING_FAILURE_STAGES[number];
   count: number;
   validation?: CliValidationDiagnostic;
-  rejection?: CliTimingRejection;
+  rejection?: CliTimingRejection | CliTimingParseRejection;
 }
 export function cliTimingFailureCode(value: unknown, command?: unknown): CliFailureTiming["code"] {
   // Only the registered meal-photo removal owner is qualified for this code.
@@ -145,13 +145,23 @@ export const CLI_TIMING_REJECTIONS = [
 ] as const;
 export type CliTimingRejection = typeof CLI_TIMING_REJECTIONS[number];
 
+// `knowledge upsert` argv rejection class set by the pinned Incur parser at the
+// exact unknown-flag/missing-value throw site; never derived from argv or text.
+export const CLI_TIMING_PARSE_REJECTIONS = ["unknown_flag", "missing_value"] as const;
+export type CliTimingParseRejection = typeof CLI_TIMING_PARSE_REJECTIONS[number];
+const rejectionOwners = [
+  ["research scout-batch", "research_scout_invalid_batch_payload", CLI_TIMING_REJECTIONS],
+  ["knowledge upsert", "VALIDATION_ERROR", CLI_TIMING_PARSE_REJECTIONS],
+] as const;
+
 /** Optional, independently dropped like validation detail; same own-data rules. */
 export function cliTimingRejectionFailure(
   command: unknown, code: unknown, source: unknown, property: "cliTimingRejection" | "rejection",
 ): Pick<CliFailureTiming, "rejection"> {
-  if (command !== "research scout-batch" || code !== "research_scout_invalid_batch_payload") return {};
+  const allowed = rejectionOwners.find(([name, owned]) => name === command && owned === code)?.[2];
+  if (!allowed) return {};
   const value = readCliTimingOwnData(source, property);
-  const rejection = CLI_TIMING_REJECTIONS.find((candidate) => candidate === value);
+  const rejection = allowed.find((candidate) => candidate === value);
   return rejection ? { rejection } : {};
 }
 
