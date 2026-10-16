@@ -1,7 +1,8 @@
 # Knowledge optional reads and CLI write guidance
 
-Status: active (Stage 1 consumer merged in PR 4174; Stage 2 producer prepared
-locally, publication held)
+Status: active (Stage 1 consumer merged in PR 4174 and verified live; Stage 2
+producer in draft PR 4176, implementation and local verification complete,
+review, CI, merge, deployment, and watch pending)
 Created: 2026-10-16
 Updated: 2026-10-16
 
@@ -69,17 +70,20 @@ path. No new deployment toggles, aliases, or rollout machinery.
 
 ## Stage 2 gate: local preparation versus production adoption
 
-- Stage 1 merged as `617753d7c2` (PR 4174), and its protected gradual
-  release is deploying. The Stage 2 producer checkout starts from that exact
-  base.
-- Authorized now: local preparation only. That covers applying the producer
-  hunks, focused and relevant deterministic checks, and recording evidence
-  here.
-- Still held, and unchanged by this preparation: publication, merge, any
-  production saved caller, and any producer release that adopts
-  `--if-exists`. These wait until the parent verifies Stage 1's exact protected
-  Worker, native image, and config convergence and health. The rollback-floor
-  rule in § Two-stage delivery still applies.
+- Stage 1 merged as `617753d7c2` (PR 4174). The Stage 2 producer checkout
+  starts from that exact base.
+- Historical (at local preparation): only local preparation was authorized;
+  publication, merge, any production saved caller, and any producer release
+  adopting `--if-exists` were held until the parent verified Stage 1 live.
+- Consumer publication gate: PASSED. The parent verified merged public source
+  `617753d7c205ca2087d644ab47cd7dffa741ea9f` live through the protected
+  release: native image and config distribution completed, the Worker serves
+  it at 100%, no candidate remains, and health is good. Raw Worker and native
+  identifiers stay in the parent's private evidence.
+- Both the current baseline and candidate CLIs now support
+  `knowledge show --if-exists`. Once Stage 2 persists new saved instructions,
+  source `617753d7` or a descendant is the rollback floor. Prefer a forward
+  fix; any exact Cloudflare rollback still requires explicit user permission.
 
 ## Stage 2 scope
 
@@ -101,8 +105,9 @@ path. No new deployment toggles, aliases, or rollout machinery.
 2. Risk: one-shot first-read loss under mixed CLI versions.
    Mitigation: the consumer-first split above.
 3. Risk: prompt growth (Stage 2).
-   Mitigation: the private real-CLI-contract provider-input harness is ready to
-   rerun with Stage 1 as base.
+   Mitigation: the private real-CLI-contract provider-input harness was rerun
+   with Stage 1 as base (direct +58 bytes, groups unchanged; see
+   § Verification).
 
 ## Verification
 
@@ -232,14 +237,61 @@ Stage 2 local preparation on base `617753d7c2`, executed and passed:
   scenarios).
 - Web: `changelog:generate` and `changelog-page.test.tsx` passed (10).
 - Changelog item `2026-10-16 · wiki-saves-and-scheduled-history`, priority 2.
-  `sourcePullRequests` lists 4174 until the parent supplies the producer PR
-  number.
+  At local preparation `sourcePullRequests` listed only 4174; it now lists
+  4174 and producer PR 4176, with member-facing copy unchanged.
 
-Remaining Stage 2 proof (parent):
+Stage 2 parent current-source proof on PR 4176 head `17891324e5` (behavior
+source digests unchanged since the authored patch), executed and passed:
 
-- Run the private provider-input measurement with Stage 1 as base; no bytes
-  measured here are claimed. Run the producer live journeys, independent
-  review, and CI.
-- Add the producer PR number to the changelog fragment.
-- Pass the production adoption gate in § Stage 2 gate, then close this plan
-  through `scripts/finish-task`.
+- Focused: 3 files, 129 passed. Web typecheck passed.
+- Provider input, private real-CLI-contract harness with Stage 1 as base: three
+  complete first-provider request comparisons passed, using the actual base
+  and head CLI manifests with production bootstrap scoping.
+  - Both manifests have 336 commands with no leaf metadata difference. The CLI
+    contract is the same 6,531 bytes, and head source equals the built dist.
+  - Direct: 186,160 to 186,218 bytes (+58, +0.031%), only the CLI-route write
+    sentence. Group: 155,434 unchanged. Group with research available:
+    164,448 unchanged.
+  - Registered tool payloads compare equal. Incidental UUIDs, paths, and
+    timestamps are normalized; `prompt_cache_key` is the explicit transport
+    exclusion. No exact GPT-6.1 Sol tokenizer is available, so no token
+    estimate is given.
+  - Separate instruction source deltas (not general first-request overhead):
+    managed automations +338 bytes, first personal read -28, skill +223.
+  - The harness's old pre-consumer rejection assertion no longer applies
+    because the base CLI now supports `--if-exists`. The selected
+    measurement cases were rerun: 3 passed.
+- Live journeys: the parent ran each separately with
+  `pnpm test:assistant:live -- --test <exact name>` on gpt-6.1-sol with a
+  local subscription. All three passed and each reply was reviewed `Ready`.
+  - `finishes a stale wiki lookup without retrying the missing page or
+    inventing its contents`: one strict target show, no writes or invented
+    contents, and a truthful, concise recovery.
+  - `reads an absent optional scheduled ledger once and stays quiet without
+    writing`: one optional read and one finish without reply. It stayed
+    silent, the full vault was unchanged, and there was no outbox or research
+    call.
+  - `saves an explicitly requested wiki page with exactly one valid upsert`:
+    one valid `--slug`/`--body` write touching only the intended page, index,
+    and log plus the normal audit. There was no memory write or outbox, and
+    the confirmation was short and accurate.
+
+## Product UX patch
+
+- Outcome: scheduled insights, check-ins, and the onboarding first personal
+  read treat a confirmed-absent history ledger as a normal first run instead
+  of a failed tool call, and skip when history is unreadable. Requested wiki
+  saves use the real `vault-cli knowledge upsert` shape.
+- Reaches: managed automations, the saved onboarding first read, the
+  connected-context skill, and direct CLI-route wiki writes. Group prompts are
+  unchanged.
+- Proof: built-CLI guidance tests on synthetic vaults, the measured +58-byte
+  direct prompt delta, and the three `Ready` live journeys above.
+- Verdict: Ready for review and protected rollout.
+
+## Remaining (parent)
+
+- Implementation and local verification are complete. Still pending: the
+  independent ReviewGPT round, final-head CI, producer merge, protected
+  deployment, and the 4-hour actual watch. Then close this plan through
+  `scripts/finish-task`.
