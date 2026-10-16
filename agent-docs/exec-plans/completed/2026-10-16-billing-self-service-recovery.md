@@ -22,13 +22,20 @@ The known cancellation diagnostic reaches the Settings dialog, which currently o
 
 - [x] ReviewGPT supplied the generic dialog, service-copy, and regression patch.
 - [x] Parent inspected the patch, mirrored the small correction in the separate Edge-to-Pulse dialog, reproduced both missing actions and both cancellation-copy cases before the change, and updated catalog, changelog, and owner guidance.
-- [ ] Verify, close plan, commit/push follow-up PR as Draft, then Ready.
-- [ ] Final round 1 on pushed head and required CI; human merge only.
+- [x] Focused proof and parent review complete; follow-up PR #4154 opened as Draft. Close this implementation plan in the final candidate; required final review and CI remain on the PR.
+- Final round 1 on the pushed candidate and required CI are tracked in PR #4154. Canonical merge/deployment is authorized after final review and required CI pass. Verify the serving revision, check immediately and every 30 minutes for four hours, and preserve unexercised outcomes. No direct billing-state mutation is authorized.
 
 ## Decisions and evidence
 
-No production mutation is authorized by this task. Existing completed plan is historical and remains unchanged. PR4151 merged during investigation. Continue in a new sanctioned worktree from current main; preserve the merged branch and prior completed plan.
+Production investigation remains read-only. The updated task authorizes canonical merge/deployment after green final review and required CI, followed by four hours of bounded observation. Existing completed plan is historical and remains unchanged. PR4151 merged during investigation. Continue in a new sanctioned worktree from current main; preserve the merged branch and prior completed plan.
 
 ## Focused verification
 
 Four targeted regressions fail against the base implementation. The patched billing Settings, plan-switch service, payment-status, portal-route, and portal-button suites pass all 132 tests; changelog passes 39 tests. Web typecheck, raw-log privacy guard, complexity (no hotspot above 20), docs drift, and docs gardening pass. Real Chromium rendering at 390px and 1440px fits the changed section. Separate catalog overflow is recorded through Frog. Product UX: Ready at the local composed boundary; authenticated Stripe renewal was not performed because production investigation is read-only. Required CI and final ReviewGPT remain explicit PR completion gates.
+
+## Handoff
+
+PR: https://github.com/cobuildwithus/murph/pull/4154. The implementation is ready for final exact-head review and CI. Preview: https://murph-1yfu0g37m-cobuildwithus.vercel.app/design?tab=components#hosted-plan-change. Phone and desktop proof use the real component with synthetic props. No live renewal or cancellation reversal was attempted.
+Status: completed
+Updated: 2026-10-16
+Completed: 2026-10-16
