@@ -48,7 +48,7 @@ function invited(schedule: GameSchedule = EVERY_DAY, stakes: StoredStake[] = [WI
       status: "invited",
       terms: { v: 1, versions: [{ fromDay: 0, n: 1, schedule, stakes }] },
     },
-    players: [{ active: false, dayOne: null, memberId: LEO, seat: 0, timeZone: NYC }],
+    players: [{ dayOne: null, memberId: LEO, seat: 0, timeZone: NYC }],
   };
 }
 
@@ -57,12 +57,12 @@ function live(state: RuleState = invited(), avaTimeZone = SYD, joinAt = JOIN_AT)
   if (decision.kind !== "join") throw new Error("expected a join");
   const players = [
     ...state.players,
-    { active: false, dayOne: null, memberId: AVA, seat: decision.seat, timeZone: avaTimeZone },
+    { dayOne: null, memberId: AVA, seat: decision.seat, timeZone: avaTimeZone },
   ];
   return {
     ...state,
     game: { ...state.game, status: "live" },
-    players: players.map((player) => ({ ...player, active: true, dayOne: dayOneOf(decision, player.memberId) })),
+    players: players.map((player) => ({ ...player, dayOne: dayOneOf(decision, player.memberId) })),
   };
 }
 

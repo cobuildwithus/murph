@@ -33,7 +33,7 @@ function liveState(schedule: GameSchedule = { days: [0, 1, 2, 3, 4, 5, 6] }, joi
         versions: [{ fromDay: 0, n: 1, schedule, stakes: [{ key: "gsk_breakfast", kind: "winner_gets" }] }],
       },
     },
-    players: [{ active: false, dayOne: null, memberId: LEO, seat: 0, timeZone: "America/New_York" }],
+    players: [{ dayOne: null, memberId: LEO, seat: 0, timeZone: "America/New_York" }],
   };
   const join = decideJoin(invited, { memberId: AVA, now: joinAt, termsVersion: 1, timeZone: "Australia/Sydney" });
   if (join.kind !== "join") throw new Error("expected a join");
@@ -42,10 +42,9 @@ function liveState(schedule: GameSchedule = { days: [0, 1, 2, 3, 4, 5, 6] }, joi
     game: { ...invited.game, status: "live" },
     players: [
       ...invited.players,
-      { active: true, dayOne: null, memberId: AVA, seat: 1, timeZone: "Australia/Sydney" },
+      { dayOne: null, memberId: AVA, seat: 1, timeZone: "Australia/Sydney" },
     ].map((player) => ({
       ...player,
-      active: true,
       dayOne: join.players.find((scheduled) => scheduled.memberId === player.memberId)!.dayOne,
     })),
   };

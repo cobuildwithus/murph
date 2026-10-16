@@ -59,7 +59,6 @@ export interface RulePlayer {
   timeZone: string;
   /** Local date of this player's day 0, set at go-live. */
   dayOne: string | null;
-  active: boolean;
 }
 
 export interface RuleEntry {
@@ -210,6 +209,22 @@ export function isGameDue(state: RuleState, now: Date): boolean {
   return game.status === "live" && settleDueAt(state.players, game.lengthDays) <= now;
 }
 
+/**
+ * Who's playing, as one key: the sorted member ids joined by ":". A live game
+ * holds its roster's key, so the same people can't have two going at once.
+ */
+export function liveRosterKey(memberIds: readonly string[]): string {
+  return [...memberIds].sort().join(":");
+}
+
+/** A live game is waiting on this player today: a scheduled day they haven't posted yet. */
+export function needsPostToday(state: RuleState, memberId: string, now: Date): boolean {
+  const player = playerFor(state, memberId);
+  const today = player && state.game.status === "live" ? dayIndexAt(player, now) : null;
+  if (today === null || today < 0 || today >= state.game.lengthDays) return false;
+  return isScheduledDay(state, today) && !liveEntry(state.entries, memberId, today);
+}
+
 /** When the last player's last day ends, plus grace: the settle time. */
 export function settleDueAt(players: readonly RulePlayer[], lengthDays: number): Date {
   let due = 0;
@@ -321,7 +336,6 @@ export function decideJoin(
     reject("TERMS_CHANGED", "The terms changed. Take another look.");
   }
   const joiner: RulePlayer = {
-    active: true,
     dayOne: null,
     memberId: input.memberId,
     seat: state.players.length,

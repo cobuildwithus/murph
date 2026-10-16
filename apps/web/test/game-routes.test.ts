@@ -240,7 +240,7 @@ describe("weekly game routes", () => {
 
     it("renders service rejections in the error envelope", async () => {
       mocks.runGameCommand.mockResolvedValue({
-        error: { code: "ALREADY_IN_A_GAME", message: "You're already in a game." },
+        error: { code: "ALREADY_IN_A_GAME", message: "You and Ava already have a game going." },
         ok: false,
         status: 409,
       });
@@ -249,7 +249,7 @@ describe("weekly game routes", () => {
 
       expect(response.status).toBe(409);
       expect(await response.json()).toEqual({
-        error: { code: "ALREADY_IN_A_GAME", message: "You're already in a game.", retryable: false },
+        error: { code: "ALREADY_IN_A_GAME", message: "You and Ava already have a game going.", retryable: false },
       });
     });
   });
@@ -463,8 +463,8 @@ function viewFor(viewerId: string, entries: RuleEntry[]): GameView {
       terms: { v: 1, versions: [{ fromDay: 0, n: 1, schedule: { count: 7 }, stakes: [{ key: "s1", kind: "winner_gets" }] }] },
     },
     players: [
-      { active: true, dayOne: "2026-10-16", memberId: LEO, seat: 0, timeZone: "America/New_York" },
-      { active: true, dayOne: "2026-10-17", memberId: AVA, seat: 1, timeZone: "Australia/Sydney" },
+      { dayOne: "2026-10-16", memberId: LEO, seat: 0, timeZone: "America/New_York" },
+      { dayOne: "2026-10-17", memberId: AVA, seat: 1, timeZone: "Australia/Sydney" },
     ],
   };
   return buildGameView({

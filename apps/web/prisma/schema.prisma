@@ -2837,6 +2837,9 @@ model Game {
   // The challenger's picked Day 1; Day 1 is the day after accept, or this if later.
   startsOn             DateTime?    @map("starts_on") @db.Date
   startedAt            DateTime?    @map("started_at")
+  // The players' sorted member ids joined by ":" while the game is live, else
+  // null. Unique, so the same people can't have two live games at once.
+  liveRosterKey        String?      @unique @map("live_roster_key")
   // Dev time travel only: added to the database clock for this game. Null (no
   // shift) everywhere else; production never writes it.
   devClockOffsetMs     BigInt?      @map("dev_clock_offset_ms")
@@ -2860,8 +2863,6 @@ model GamePlayer {
   seat               Int
   timeZone           String      @map("time_zone")
   dayOne             DateTime?   @map("day_one") @db.Date
-  // Equals member_id while the game is live, else null: one live game per person.
-  activeMemberId     String?     @unique @map("active_member_id")
   joinedAt           DateTime    @default(now()) @map("joined_at")
   game               Game        @relation(fields: [gameId], references: [id], onDelete: Cascade)
   profile            GameProfile @relation(fields: [memberId], references: [memberId], onDelete: Cascade)

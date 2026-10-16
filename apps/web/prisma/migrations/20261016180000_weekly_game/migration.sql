@@ -38,6 +38,7 @@ CREATE TABLE "game" (
     "length_days" INTEGER NOT NULL DEFAULT 7,
     "starts_on" DATE,
     "started_at" TIMESTAMP(3),
+    "live_roster_key" TEXT,
     "dev_clock_offset_ms" BIGINT,
     "result" JSONB,
     "settled_at" TIMESTAMP(3),
@@ -47,7 +48,8 @@ CREATE TABLE "game" (
     CONSTRAINT "game_pkey" PRIMARY KEY ("id"),
     CONSTRAINT "game_status_check" CHECK ("status" IN ('invited', 'live', 'settled', 'void')),
     CONSTRAINT "game_length_days_check" CHECK ("length_days" BETWEEN 1 AND 28),
-    CONSTRAINT "game_round_check" CHECK ("round" >= 1)
+    CONSTRAINT "game_round_check" CHECK ("round" >= 1),
+    CONSTRAINT "game_live_roster_check" CHECK (("live_roster_key" IS NULL) = ("status" <> 'live'))
 );
 
 -- CreateTable
@@ -57,11 +59,9 @@ CREATE TABLE "game_player" (
     "seat" INTEGER NOT NULL,
     "time_zone" TEXT NOT NULL,
     "day_one" DATE,
-    "active_member_id" TEXT,
     "joined_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
-    CONSTRAINT "game_player_pkey" PRIMARY KEY ("game_id","member_id"),
-    CONSTRAINT "game_player_active_member_check" CHECK ("active_member_id" IS NULL OR "active_member_id" = "member_id")
+    CONSTRAINT "game_player_pkey" PRIMARY KEY ("game_id","member_id")
 );
 
 -- CreateTable
@@ -117,13 +117,13 @@ CREATE INDEX "game_contact_label_subject_member_id_idx" ON "game_contact_label"(
 CREATE UNIQUE INDEX "game_invite_token_hash_key" ON "game"("invite_token_hash");
 
 -- CreateIndex
+CREATE UNIQUE INDEX "game_live_roster_key_key" ON "game"("live_roster_key");
+
+-- CreateIndex
 CREATE INDEX "game_created_by_idx" ON "game"("created_by");
 
 -- CreateIndex
 CREATE INDEX "game_invitee_member_id_idx" ON "game"("invitee_member_id");
-
--- CreateIndex
-CREATE UNIQUE INDEX "game_player_active_member_id_key" ON "game_player"("active_member_id");
 
 -- CreateIndex
 CREATE INDEX "game_player_member_id_idx" ON "game_player"("member_id");

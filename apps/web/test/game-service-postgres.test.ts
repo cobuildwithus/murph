@@ -341,54 +341,77 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     expect(joined!.round).toBe(1);
   });
 
-  it("settles a finished game nobody opened before its players join the next one", async () => {
+  it("settles a finished game between the same two people that nobody opened before their next one", async () => {
     const leo = await member("Leo", "America/New_York");
     const ava = await member("Ava", "Australia/Sydney");
-    const kat = await member("Kat", "Europe/London");
     const stale = await startGame(leo, ava);
-    // Past the last day and grace, with no read and no timer since.
+    // Past the last day and grace, with no read since.
     await getPrisma().gamePlayer.updateMany({
       data: { dayOne: new Date(Date.now() - 20 * 24 * 60 * 60 * 1000) },
       where: { gameId: stale.gameId },
     });
     expect((await getPrisma().game.findUniqueOrThrow({ where: { id: stale.gameId } })).status).toBe("live");
 
-    const next = await ok(kat, { gameId: randomUUID(), inviteeFirstName: "Ava", terms: TERMS, type: "createGame" });
+    const next = await ok(leo, { gameId: randomUUID(), inviteeFirstName: "Ava", terms: TERMS, type: "createGame" });
     const joined = await ok(ava, { termsVersion: 1, timeZone: "UTC", token: next!.inviteToken!, type: "join" });
     expect(joined!.status).toBe("live");
     expect((await getPrisma().game.findUniqueOrThrow({ where: { id: stale.gameId } })).status).toBe("settled");
   });
 
-  it("lets only one of two simultaneous joins put the same person in a game", async () => {
-    const leo = await member("Leo", "America/New_York");
-    const kat = await member("Kat", "Europe/London");
-    const ava = await member("Ava", "Australia/Sydney");
-    const fromLeo = await ok(leo, { gameId: randomUUID(), inviteeFirstName: "Ava", terms: TERMS, type: "createGame" });
-    const fromKat = await ok(kat, { gameId: randomUUID(), inviteeFirstName: "Ava", terms: TERMS, type: "createGame" });
-
-    const results = await Promise.all([fromLeo, fromKat].map((game) =>
-      run(ava, { termsVersion: 1, timeZone: "UTC", token: game!.inviteToken!, type: "join" })));
-
-    expect(results.filter((result) => result.ok)).toHaveLength(1);
-    expect(results.flatMap((result) => (result.ok ? [] : [result.error]))).toEqual([
-      { code: "ALREADY_IN_A_GAME", message: "You're already in a game." },
-    ]);
-    expect(await getPrisma().gamePlayer.count({ where: { activeMemberId: ava } })).toBe(1);
-  });
-
-  it("names whoever is busy, from the caller's side", async () => {
+  it("lets one person play several live games, one per opponent, but not two with the same person", async () => {
     const leo = await member("Leo", "America/New_York");
     const ava = await member("Ava", "Australia/Sydney");
     const kat = await member("Kat", "Europe/London");
     await startGame(leo, ava);
-    // Leo invites Kat while he's still playing Ava.
-    const fromLeo = await ok(leo, { gameId: randomUUID(), inviteeFirstName: "Kat", terms: TERMS, type: "createGame" });
-    const result = await run(kat, { termsVersion: 1, timeZone: "UTC", token: fromLeo!.inviteToken!, type: "join" });
-    expect(result).toMatchObject({ error: { code: "ALREADY_IN_A_GAME", message: "Leo is in another game right now." }, ok: false });
-    // Ava, mid-game herself, gets "you".
-    const fromKat = await ok(kat, { gameId: randomUUID(), inviteeFirstName: "Ava", terms: TERMS, type: "createGame" });
-    const own = await run(ava, { termsVersion: 1, timeZone: "UTC", token: fromKat!.inviteToken!, type: "join" });
-    expect(own).toMatchObject({ error: { message: "You're already in a game." }, ok: false });
+    await startGame(leo, kat);
+    expect((await readHome(leo)).games.filter((game) => game.status === "live")).toHaveLength(2);
+
+    // A second live game between Leo and Ava, from either side.
+    const fromLeo = await ok(leo, { gameId: randomUUID(), inviteeFirstName: "Ava", terms: TERMS, type: "createGame" });
+    expect(await run(ava, { termsVersion: 1, timeZone: "UTC", token: fromLeo!.inviteToken!, type: "join" })).toMatchObject({
+      error: { code: "ALREADY_IN_A_GAME", message: "You and Leo already have a game going." },
+      ok: false,
+      status: 409,
+    });
+    const fromAva = await ok(ava, { gameId: randomUUID(), inviteeFirstName: "Leo", terms: TERMS, type: "createGame" });
+    expect(await run(leo, { termsVersion: 1, timeZone: "UTC", token: fromAva!.inviteToken!, type: "join" })).toMatchObject({
+      error: { message: "You and Ava already have a game going." },
+      ok: false,
+    });
+  });
+
+  it("lets only one of two simultaneous accepts between the same two people go live", async () => {
+    const leo = await member("Leo", "America/New_York");
+    const ava = await member("Ava", "Australia/Sydney");
+    const invites = await Promise.all([1, 2].map(() =>
+      ok(leo, { gameId: randomUUID(), inviteeFirstName: "Ava", terms: TERMS, type: "createGame" })));
+
+    const results = await Promise.all(invites.map((game) =>
+      run(ava, { termsVersion: 1, timeZone: "UTC", token: game!.inviteToken!, type: "join" })));
+
+    expect(results.filter((result) => result.ok)).toHaveLength(1);
+    expect(results.flatMap((result) => (result.ok ? [] : [result.error]))).toEqual([
+      { code: "ALREADY_IN_A_GAME", message: "You and Leo already have a game going." },
+    ]);
+    const games = await getPrisma().game.findMany({ where: { id: { in: invites.map((game) => game!.id) } } });
+    expect(games.filter((game) => game.status === "live")).toHaveLength(1);
+  });
+
+  it("orders Home: waiting on you today, other live games, invites, then results", async () => {
+    const leo = await member("Leo", "America/New_York");
+    const ava = await member("Ava", "Australia/Sydney");
+    const kat = await member("Kat", "Europe/London");
+    const ben = await member("Ben", "UTC");
+    const settled = await startGame(leo, ben);
+    await devSettleNow(settled.gameId, leo);
+    const posted = await startGame(leo, kat);
+    await devStartNow(posted.gameId, leo);
+    await ok(leo, await photo(leo, posted.gameId, "done-today"));
+    const waiting = await startGame(leo, ava);
+    await devStartNow(waiting.gameId, leo);
+    const invite = await ok(leo, { gameId: randomUUID(), inviteeFirstName: "Ben", terms: TERMS, type: "createGame" });
+
+    expect((await readHome(leo)).games.map((game) => game.id)).toEqual([waiting.gameId, posted.gameId, invite!.id, settled.gameId]);
   });
 
   it("lands the same post sent twice at once exactly once", async () => {

@@ -36,6 +36,8 @@ import {
   GameRuleError,
   isGameDue,
   isTicketExpired,
+  liveRosterKey,
+  needsPostToday,
   parseStoredResult,
   parseStoredTerms,
   parseTermWords,
@@ -315,33 +317,30 @@ async function join(context: CommandContext, command: Extract<GameCommand, { typ
   if (!target) reject("INVITE_NOT_FOUND", "Invite not found.");
   const profile = await prisma.gameProfile.findUnique({ select: { memberId: true }, where: { memberId: actor } });
   if (!profile) reject("PROFILE_REQUIRED", "Add your first name first.");
-  // A finished game nobody opened must not hold either player.
-  const held = await prisma.gamePlayer.findMany({
-    select: { gameId: true },
-    where: { activeMemberId: { in: [actor, target.createdBy] } },
+  // A finished game between these same people that nobody opened must not block this one.
+  const sameRoster = await prisma.game.findMany({
+    select: { id: true },
+    where: { liveRosterKey: liveRosterKey([target.createdBy, actor]) },
   });
-  await loadCurrent(held.map((player) => player.gameId));
+  await loadCurrent(sameRoster.map((game) => game.id));
   try {
     await accept(context, command, target.id);
   } catch (error) {
-    // Either the friendly check below or, when two games go live at once, the unique index.
-    const busy = isUniqueViolation(error) || (error instanceof GameRuleError && error.error.code === "ALREADY_IN_A_GAME");
-    if (!busy) throw error;
-    reject("ALREADY_IN_A_GAME", await busyMessage(actor, target.createdBy));
+    // Either the friendly check below or, when two of their games go live at once, the unique key.
+    const together = isUniqueViolation(error) || (error instanceof GameRuleError && error.error.code === "ALREADY_IN_A_GAME");
+    if (!together) throw error;
+    reject("ALREADY_IN_A_GAME", await alreadyPlayingMessage(target.createdBy));
   }
   return target.id;
 }
 
-/** Who's busy, from the caller's side: "you", or the other player by their own first name. */
-async function busyMessage(actor: string, otherId: string): Promise<string> {
-  const prisma = getPrisma();
-  const busy = await prisma.gamePlayer.findMany({ select: { memberId: true }, where: { activeMemberId: { in: [actor, otherId] } } });
-  if (busy.length === 0 || busy.some((player) => player.memberId === actor)) return "You're already in a game.";
-  const profile = await prisma.gameProfile.findUnique({ select: { firstNameEncrypted: true }, where: { memberId: otherId } });
+/** From the caller's side, naming the other player by their own first name. */
+async function alreadyPlayingMessage(otherId: string): Promise<string> {
+  const profile = await getPrisma().gameProfile.findUnique({ select: { firstNameEncrypted: true }, where: { memberId: otherId } });
   const [name] = await openGameTexts(profile
     ? [{ field: "first_name", memberId: otherId, rowId: otherId, table: "game_profile", value: profile.firstNameEncrypted }]
     : []);
-  return `${name ?? "The other player"} is in another game right now.`;
+  return name ? `You and ${name} already have a game going.` : "You two already have a game going.";
 }
 
 async function accept(context: CommandContext, command: Extract<GameCommand, { type: "join" }>, gameId: string): Promise<void> {
@@ -355,16 +354,15 @@ async function accept(context: CommandContext, command: Extract<GameCommand, { t
       timeZone: command.timeZone,
     });
     if (decision.kind === "already-joined") return [];
-    // The unique active_member_id index is the real guard; this gives the friendly error.
-    const busy = await tx.gamePlayer.findFirst({
-      select: { gameId: true },
-      where: { activeMemberId: { in: decision.players.map((player) => player.memberId) } },
-    });
-    if (busy) reject("ALREADY_IN_A_GAME", "Someone's already in a game.");
+    // The unique live_roster_key is the real guard; this gives the friendly error.
+    const roster = liveRosterKey(decision.players.map((player) => player.memberId));
+    if (await tx.game.findFirst({ select: { id: true }, where: { liveRosterKey: roster } })) {
+      reject("ALREADY_IN_A_GAME", "These players already have a game going.");
+    }
     await tx.gamePlayer.create({ data: { gameId: row.id, memberId: actor, seat: decision.seat, timeZone: command.timeZone } });
-    await writeSchedule(tx, row.id, decision, { activate: true });
+    await writeSchedule(tx, row.id, decision);
     await tx.game.update({
-      data: { round: await roundAtGoLive(tx, row, actor), startedAt: decision.startedAt, status: "live" },
+      data: { liveRosterKey: roster, round: await roundAtGoLive(tx, row, actor), startedAt: decision.startedAt, status: "live" },
       where: { id: row.id },
     });
     await copyPendingLabel(tx, row, actor);
@@ -401,14 +399,10 @@ async function roundAtGoLive(tx: Tx, row: GameRow, joinerId: string): Promise<nu
 }
 
 /** Writes each player's frozen time zone and Day 1. */
-async function writeSchedule(tx: Tx, gameId: string, schedule: Schedule, options: { activate?: boolean } = {}): Promise<void> {
+async function writeSchedule(tx: Tx, gameId: string, schedule: Schedule): Promise<void> {
   for (const player of schedule.players) {
     await tx.gamePlayer.update({
-      data: {
-        dayOne: toDbDate(player.dayOne),
-        timeZone: player.timeZone,
-        ...(options.activate ? { activeMemberId: player.memberId } : {}),
-      },
+      data: { dayOne: toDbDate(player.dayOne), timeZone: player.timeZone },
       where: { gameId_memberId: { gameId, memberId: player.memberId } },
     });
   }
@@ -432,9 +426,9 @@ async function copyPendingLabel(tx: Tx, row: GameRow, joinerId: string): Promise
       updated_at = EXCLUDED.updated_at`;
 }
 
+/** Settled or void: the roster is free to start another game together. */
 async function endGame(tx: Tx, gameId: string, data: Prisma.GameUpdateInput): Promise<void> {
-  await tx.game.update({ data, where: { id: gameId } });
-  await tx.gamePlayer.updateMany({ data: { activeMemberId: null }, where: { gameId } });
+  await tx.game.update({ data: { ...data, liveRosterKey: null }, where: { id: gameId } });
 }
 
 async function post(context: CommandContext, command: Extract<GameCommand, { type: "post" }>): Promise<string> {
@@ -627,7 +621,6 @@ function toRuleState(row: GameRow, entries: readonly GameEntry[]): RuleState {
     })),
     game: toRuleStateGame(row, parseStoredTerms(row.terms)),
     players: row.players.map((player) => ({
-      active: player.activeMemberId !== null,
       dayOne: fromDbDate(player.dayOne),
       memberId: player.memberId,
       seat: player.seat,
@@ -710,6 +703,21 @@ function homeGames(games: readonly LoadedGame[], now: Date): LoadedGame[] {
   return games.filter((game) => game.row.status === "invited" || game.row.status === "live" || shown.has(game));
 }
 
+/**
+ * Home's order: the live games waiting on you today first, then your other
+ * live games, then invites, then results, then expired invites; newest first
+ * within each.
+ */
+function sortForHome(games: readonly LoadedGame[], memberId: string, clock: Date): LoadedGame[] {
+  const rank = (game: LoadedGame) => {
+    const { status } = game.row;
+    if (status === "live") return needsPostToday(game.state, memberId, gameNow(clock, game.row)) ? 0 : 1;
+    return status === "invited" ? 2 : status === "settled" ? 3 : 4;
+  };
+  const newest = (game: LoadedGame) => (game.row.settledAt ?? game.row.startedAt ?? game.row.createdAt).getTime();
+  return [...games].sort((a, b) => rank(a) - rank(b) || newest(b) - newest(a));
+}
+
 export async function readHome(memberId: string): Promise<GameHomeView> {
   const prisma = getPrisma();
   const [profile, seats, addressed, tickets] = await Promise.all([
@@ -729,7 +737,7 @@ export async function readHome(memberId: string): Promise<GameHomeView> {
     }),
   ]);
   const current = await loadCurrent([...new Set([...seats.map((seat) => seat.gameId), ...addressed.map((game) => game.id)])]);
-  const games = homeGames(current.games, current.clock);
+  const games = sortForHome(homeGames(current.games, current.clock), memberId, current.clock);
   const views = await buildViews(games, memberId, current.clock);
   const words = await readTermWords([...new Map(tickets.map((ticket) => [ticket.gameId, ticket.game])).values()]);
   const [firstName] = await openGameTexts(profile

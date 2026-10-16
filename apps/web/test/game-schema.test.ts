@@ -8,15 +8,15 @@ const migration = readFileSync(
 );
 
 describe("weekly game schema", () => {
-  it("lets the database enforce one live game per person and the per-day caps", () => {
-    expect(migration).toContain('CREATE UNIQUE INDEX "game_player_active_member_id_key" ON "game_player"("active_member_id");');
+  it("lets the database keep the same people to one live game together, and enforce the per-day caps", () => {
+    expect(migration).toContain('CREATE UNIQUE INDEX "game_live_roster_key_key" ON "game"("live_roster_key");');
+    expect(migration).toContain('CHECK (("live_roster_key" IS NULL) = ("status" <> \'live\'))');
     expect(migration).toContain(
       'CREATE UNIQUE INDEX "game_entry_game_id_member_id_day_index_attempt_key" ON "game_entry"("game_id", "member_id", "day_index", "attempt");',
     );
     expect(migration).toContain(
       'CHECK ("kind" IN (\'photo\', \'excuse\') AND "attempt" BETWEEN 0 AND 2 AND ("attempt" = 0) = ("kind" = \'excuse\'))',
     );
-    expect(migration).toContain('CHECK ("active_member_id" IS NULL OR "active_member_id" = "member_id")');
     expect(migration).toContain('CREATE UNIQUE INDEX "game_invite_token_hash_key" ON "game"("invite_token_hash");');
   });
 
