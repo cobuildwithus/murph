@@ -2716,8 +2716,8 @@ export function ComponentsContent() {
 
         <Separator />
 
-        <Section title="Metric Card">
-          <div className="flex gap-3">
+        <Section id="metric-card" title="Metric Card">
+          <div className="flex flex-col gap-3 md:flex-row">
             <MetricCard label="HRV" value="53.8" unit="ms" delta="+15.7%" direction="up" baseline="46.5" expected="+10–25%" />
             <MetricCard label="Resting HR" value="60.1" unit="bpm" delta="−6.4%" direction="down" baseline="64.2" expected="−3–8 bpm" />
             <MetricCard label="Deep Sleep" value="1h44m" delta="+18.2%" direction="up" baseline="1h28m" expected="+15–30%" />
@@ -2750,8 +2750,8 @@ export function ComponentsContent() {
 
         <Separator />
 
-        <Section title="Expected Signal Card">
-          <div className="flex gap-4">
+        <Section id="expected-signal-card" title="Expected Signal Card">
+          <div className="flex flex-col gap-4 md:flex-row">
             <ExpectedSignalCard label="HRV" expected="+10–25%" direction="up" description="Heat stress trains the autonomic nervous system, increasing parasympathetic dominance at rest." />
             <ExpectedSignalCard label="Resting HR" expected="-3–8 bpm" direction="down" description="Repeated heat exposure improves cardiac output efficiency, lowering resting heart rate." />
             <ExpectedSignalCard label="Deep Sleep" expected="+15–30%" direction="up" description="Core temp drop after sauna triggers deeper slow-wave sleep via thermoregulatory pathways." />
