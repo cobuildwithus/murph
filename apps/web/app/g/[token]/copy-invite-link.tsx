@@ -19,9 +19,9 @@ export function CopyInviteLink() {
   }
 
   return (
-    <p className="flex flex-wrap items-center justify-center gap-x-1 text-sm text-muted-foreground">
-      Murph not opening? Copy this link and paste it in Murph.
-      <Button className="h-auto px-1" onClick={copy} size="unstyled" variant="link">
+    <p className="text-center text-sm leading-6 text-muted-foreground">
+      Murph not opening? Copy this link and paste it in Murph.{" "}
+      <Button className="h-auto px-0" onClick={copy} size="unstyled" variant="link">
         {copied ? "Copied" : "Copy link"}
       </Button>
     </p>
