@@ -29,10 +29,12 @@ the challenger's views. There are no public profile photos.
 
 ## Rules
 
-- **Days.** Day 1 is each player's next local day after the game goes live, or
-  today after Start now. A day runs 3am to 3am in the player's time zone, frozen
-  at go-live from their profile, so New York and Sydney play different local
-  dates paired by day number.
+- **Days.** Day 1 is each player's next local day after the game goes live. If
+  the challenger picked a start date (tomorrow to 60 days out in their zone)
+  and it's later, Day 1 is that date, the same calendar date for everyone.
+  Start now makes it today. A day runs 3am to 3am in the player's time zone,
+  frozen at go-live from their profile, so New York and Sydney can play
+  different local dates, paired by day number.
 - **Posting.** One photo a day. Taking it back and retaking is allowed once per
   day (two photos in total, withdrawn ones included). An excuse is a voice memo
   with its transcript; it neither scores nor unlocks.

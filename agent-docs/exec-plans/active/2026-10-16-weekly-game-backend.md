@@ -67,6 +67,9 @@ Updated: 2026-10-16
   state; reads settle), content-addressed media, photo and excuse entries only,
   no profile photos, no decline or cancel. `game_event` stays as a plain
   history that nothing reads yet.
+- The challenger may pick a start date (`terms.startsOn`, tomorrow to 60 days
+  out): each player's Day 1 is the later of their default and that date, so a
+  picked date is one calendar date for everyone. Start now overrides it.
 
 ## Verification
 
