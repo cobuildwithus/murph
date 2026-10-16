@@ -743,6 +743,19 @@ private deployment boundaries still apply.
 
 ## Private Operational Telemetry
 
+The existing container request-exit warning retains `exitReason` and adds
+`requestKind` from the finite method/route owner (`unknown` for an unmatched or
+unclassified request), plus `workspaceAttemptId` from this request's successfully
+parsed workspace-invocation job. `workspaceAttemptId: false` explicitly means no
+parsed job attempt is available, including other request kinds; unlike `null`,
+it survives structured-log sanitization without inventing an attempt ID. These
+fields never borrow a concurrent invocation's identity or include raw request
+paths, queries, headers or bodies. They are observations only: `response.closed`
+does not prove accepted work was aborted; invocation lifetime retains its
+separate explicit-abort owner. This change requires rebuilding and deploying the
+runner image, which bundles `container-entrypoint.ts`; a Worker-only deployment
+cannot ship it.
+
 Linq typing-start fetches mint one random UUID in
 `x-hosted-runtime-fetch-correlation-id`. The runtime records
 `providerRuntimeStartedAtEpochMs`, `providerRuntimeResumedAtEpochMs` and monotonic
