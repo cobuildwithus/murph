@@ -19,6 +19,16 @@ export function isGameEnabled(env: GameEnv = process.env): boolean {
   return flag === "true" || (flag !== "false" && env.NODE_ENV !== "production");
 }
 
+/**
+ * Time travel exists only outside real production, whatever the flags say.
+ * On Vercel the deployment kind decides (previews run with NODE_ENV=production);
+ * elsewhere NODE_ENV does.
+ */
+export function areGameDevToolsAllowed(env: GameEnv = process.env): boolean {
+  const deployment = env.VERCEL_ENV?.trim().toLowerCase();
+  return deployment ? deployment !== "production" : env.NODE_ENV !== "production";
+}
+
 /** Every media key a member uploads starts with this; posts may only use their own. */
 export function mediaKeyPrefixFor(memberId: string): string {
   return `game/${memberId}/`;

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { GameEntryKind, GameSchedule } from "@/src/lib/game/contract";
-import { isGameEnabled, isGameEnabledFor, mediaKeyOwner, mediaKeyPrefixFor } from "@/src/lib/game/access";
+import { areGameDevToolsAllowed, isGameEnabled, isGameEnabledFor, mediaKeyOwner, mediaKeyPrefixFor } from "@/src/lib/game/access";
 import {
   decideDeleteToday,
   decideDevAdvance,
@@ -379,6 +379,13 @@ describe("weekly game: access", () => {
     // Invite links have no member, so only the global switch applies to them.
     expect(isGameEnabled(allowlisted)).toBe(true);
     expect(isGameEnabled({ MURPH_GAME_ENABLED: "false", NODE_ENV: "development" })).toBe(false);
+  });
+
+  it("allows time travel everywhere except real production", () => {
+    expect(areGameDevToolsAllowed({ NODE_ENV: "development" })).toBe(true);
+    expect(areGameDevToolsAllowed({ NODE_ENV: "production", VERCEL_ENV: "preview" })).toBe(true);
+    expect(areGameDevToolsAllowed({ NODE_ENV: "production", VERCEL_ENV: "production" })).toBe(false);
+    expect(areGameDevToolsAllowed({ NODE_ENV: "production" })).toBe(false);
   });
 
   it("scopes media keys to their uploader", () => {

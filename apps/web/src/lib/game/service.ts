@@ -7,7 +7,7 @@ import type { Game, GameEntry, GamePlayer, Prisma } from "@prisma/client";
 import { isUniqueViolation } from "../device-sync/prisma-store/prisma-errors";
 import { generateHostedRandomPrefixedId, isRecord, sha256Hex } from "../primitives";
 import { getPrisma } from "../prisma";
-import { isGameEnabled, mediaKeyOwner, mediaKeyPrefixFor } from "./access";
+import { areGameDevToolsAllowed, isGameEnabled, mediaKeyOwner, mediaKeyPrefixFor } from "./access";
 import {
   GAME_SCHEMA_VERSION,
   type GameCommand,
@@ -615,7 +615,7 @@ export async function settleDueGames(now?: Date): Promise<{ settled: number }> {
 // --------------------------------------------------------------------- dev
 
 function assertDevTools(): void {
-  if (process.env.NODE_ENV === "production") throw new Error("Game dev tools are off in production.");
+  if (!areGameDevToolsAllowed()) throw new Error("Game dev tools are off in production.");
 }
 
 async function runDevStep(gameId: string, memberId: string, step: (locked: LockedStep) => Promise<GameEventDraft>): Promise<GameView> {

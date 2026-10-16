@@ -1,6 +1,7 @@
 import { isHostedOnboardingError } from "../../hosted-onboarding/errors";
 import { requireHostedMemberAuthFromBearerToken } from "../../hosted-onboarding/request-auth";
 import { getPrisma } from "../../prisma";
+import { areGameDevToolsAllowed } from "../access";
 import { isGameEnabledFor } from "../service";
 import { gameHttpError } from "./errors";
 
@@ -22,9 +23,8 @@ export async function requireGameMember(request: Request): Promise<string> {
   return memberId;
 }
 
-/** Time-travel routes exist only outside production, whatever the flags say. */
 export function assertGameDevRoutesAllowed(): void {
-  if (process.env.VERCEL_ENV?.trim().toLowerCase() === "production") throw gameDisabled();
+  if (!areGameDevToolsAllowed()) throw gameDisabled();
 }
 
 function gameDisabled() {
