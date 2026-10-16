@@ -40,8 +40,8 @@ Updated: 2026-10-16
 1. Risk: another player's locked entry leaks through a read.
    Mitigation: views omit the whole entry until the viewer posts; route tests
    assert no entry id, media key, text, or data appears.
-2. Risk: two invites go live for the same person concurrently.
-   Mitigation: unique `game_player.active_member_id`, set only at go-live.
+2. Risk: two invites between the same people go live concurrently.
+   Mitigation: unique `game.live_roster_key`, set only at go-live.
 
 ## Tasks
 
@@ -71,11 +71,13 @@ Updated: 2026-10-16
   out): each player's Day 1 is the later of their default and that date, so a
   picked date is one calendar date for everyone. Start now overrides it.
 - Edge-case pass: weekdays follow the challenger's calendar so days off line
-  up across time zones; a perfect game owes nothing; ALREADY_IN_A_GAME names
-  who is busy; recently expired invites stay on Home; stricter input checks.
+  up across time zones; a perfect game owes nothing; recently expired invites stay on Home; stricter input checks.
 - Excuses are transcript-only (no audio), aimed at the most recent missed
   scheduled day. Dev time travel moves a per-game clock instead of rewriting
   history.
+- Several live games per person, one per opponent (owner's call), replacing
+  one live game per person; tickets get a derived 14-day use-by; a settled
+  1v1's rematch is addressed to the other player; the latest typed label wins.
 
 ## Verification
 

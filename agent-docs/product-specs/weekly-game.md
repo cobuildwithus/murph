@@ -20,8 +20,9 @@ The MVP is private 1v1. The challenger creates a game and texts a single-use
 link (`/g/<token>`, valid 7 days) from their own phone; an invite nobody accepts
 expires, and stays on the challenger's Home for a week marked expired. The invitee opens it, signs in, and shakes on the terms they saw; a
 changed version is refused with `TERMS_CHANGED`. Accepting makes the game live.
-A person plays at most one live game at a time; an open invite never blocks
-anyone.
+A person can play several live games at once, one per opponent, but the same
+two people can't have two going together. Home lists the games waiting on you
+today first, then your other live games, invites, and results.
 
 When inviting, the challenger can attach a private photo and relationship for
 the invitee alongside the first name they typed. Only the challenger ever sees

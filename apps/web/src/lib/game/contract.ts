@@ -227,6 +227,7 @@ export type GameErrorCode =
   | "INVITE_USED"
   | "INVITE_EXPIRED"
   | "TERMS_CHANGED"
+  /** These same people already have a live game together. */
   | "ALREADY_IN_A_GAME"
   | "NOT_A_PLAYER"
   | "GAME_NOT_LIVE"

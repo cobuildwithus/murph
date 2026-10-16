@@ -5448,8 +5448,10 @@ settlement read stays plain, so neither decrypts.
 later. It validates the command (`command.ts`), checks uploads, seals words,
 then locks the game row, reads the database clock, asks a pure rule, and writes
 state plus its history rows. There is no request-id dedupe: every command is
-keyed by its own ids or state, so a repeat writes nothing. One live game per
-person is a unique `game_player.active_member_id`, set only at go-live. There is
+keyed by its own ids or state, so a repeat writes nothing. The same people
+can't have two live games at once: a live game holds `game.live_roster_key`
+(its players' sorted ids), a plain unique column set at go-live and cleared at
+settle or expiry, which also fits groups later. There is
 no timer or cron: whether a game is over is computed from its state, and reads
 (and a player's next accept) settle it under the lock. A rematch of a settled
 1v1 records its addressed invitee (`game.invitee_member_id`), who alone besides
