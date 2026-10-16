@@ -1,6 +1,7 @@
 ---
 title: 'Auth design browser proof has incomplete provider fixtures and a stale records selector'
 severity: 'minor'
+issue: 'cobuildwithus/murph#4166'
 ---
 
 ## Expected Behavior

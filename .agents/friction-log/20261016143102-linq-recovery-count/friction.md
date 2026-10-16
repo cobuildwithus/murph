@@ -1,6 +1,7 @@
 ---
 title: 'Linq recovery count assertions omit request attribution diagnostics'
 severity: 'minor'
+issue: 'cobuildwithus/murph#4171'
 ---
 
 ## Expected Behavior
