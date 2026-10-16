@@ -244,7 +244,7 @@ function buildHostedTypingAlertEmailText(alertId: string, details: Record<string
         : `Webhook-to-typing wait: ${details.elapsedMs} ms`]),
     `Threshold: strictly greater than ${details.thresholdMs} ms`,
     ...(details.workspaceState === "unconfirmed"
-      ? ["Workspace warmth was not confirmed; the 10-second cold-start cutoff applies."] : []),
+      ? [`Workspace warmth was not confirmed; the ${details.thresholdMs} ms cold-start cutoff applies.`] : []),
     "",
     "This is one inbound message. Rollouts and other slow messages do not suppress this alert.",
   ].join("\n");
