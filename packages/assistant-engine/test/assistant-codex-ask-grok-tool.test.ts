@@ -105,7 +105,7 @@ describe('murph.ask_grok availability and framing', () => {
     expect(MURPH_ASK_GROK_TOOL.description)
       .toContain('give the answer without narrating the lookup')
     expect(MURPH_ASK_GROK_TOOL.description)
-      .toContain('mention the search only when its result was partial, uncertain, or found nothing')
+      .toContain('mention the search when its result was partial, uncertain, or found nothing, or when the user asks how you checked')
     expect(MURPH_ASK_GROK_TOOL.description)
       .toContain('include each distinct X post URL supplied by the tool once')
     expect(MURPH_ASK_GROK_TOOL.description)

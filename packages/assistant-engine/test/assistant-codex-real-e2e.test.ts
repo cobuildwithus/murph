@@ -7548,8 +7548,48 @@ describeRealCodex('real Codex X post reading e2e', () => {
   const lookupNarration = /\blive X\b|\bX (?:read|search|lookup)\b|\bGrok\b|from (?:the|my|a) (?:search|lookup|read)/iu
   it.each([
     {
+      scenarioLabel: 'group asks about one post returned under two URL spellings',
+      testName: 'x post reading in a group sends one link without lookup narration',
+      scope: 'group',
+      memberText: `Murph, what does the screenshot in this post say? ${coachPost}`,
+      answerText:
+        'The post text says "Morning check-in." The screenshot shows a chat reply that opens with an all-caps "HEYYY" and then advises drinking water, eating something, and resting. https://x.com/i/status/2100000000000000001',
+      annotationUrls: [coachPost],
+      citations: ['https://x.com/i/status/2100000000000000001'],
+      expectedPostIds: ['2100000000000000001'],
+      expectedReplyPattern: /HEYYY/u,
+      forbiddenReplyPattern: lookupNarration,
+    },
+    {
+      scenarioLabel: 'member explicitly asks whether the post was read live',
+      testName: 'x post reading discloses the live lookup when asked how it checked',
+      scope: 'direct',
+      memberText: `Did you actually read this post live, and how did you check? What does its screenshot say? ${coachPost}`,
+      answerText:
+        'The post text says "Morning check-in." The screenshot shows a chat reply that opens with an all-caps "HEYYY" and then advises drinking water, eating something, and resting. https://x.com/i/status/2100000000000000001',
+      annotationUrls: [coachPost],
+      citations: ['https://x.com/i/status/2100000000000000001'],
+      expectedPostIds: ['2100000000000000001'],
+      expectedReplyPattern: /HEYYY[\s\S]*\b(?:live|search(?:ed)?|looked|checked|Grok)\b|\b(?:live|search(?:ed)?|looked|checked|Grok)\b[\s\S]*HEYYY/iu,
+      forbiddenReplyPattern: /\b(?:did not|didn['’]t|could(?:n['’]t| not)) (?:read|check|search|access)\b/iu,
+    },
+    {
+      scenarioLabel: 'Grok reads the post but cannot confirm a media detail',
+      testName: 'x post reading keeps partial media uncertainty visible',
+      scope: 'direct',
+      memberText: `How much weight is on the bar in this video? ${coachPost}`,
+      answerText:
+        'The post text says "Leg day." The attached video is blurry: it appears to show a barbell back squat, but the plates are not readable, so the weight on the bar cannot be confirmed.',
+      annotationUrls: [coachPost],
+      citations: ['https://x.com/i/status/2100000000000000001'],
+      expectedPostIds: ['2100000000000000001'],
+      expectedReplyPattern: /(?:can(?:no|['’])t|could(?:n['’]t| not)|unable|not (?:readable|clear|possible)|unclear|blurry)[\s\S]*\b(?:weight|plates?)\b|\b(?:weight|plates?)\b[\s\S]*(?:can(?:no|['’])t|could(?:n['’]t| not)|unable|not (?:readable|clear|possible)|unclear|blurry)/iu,
+      forbiddenReplyPattern: /\b\d+\s?(?:lb|lbs|kg|pounds|kilos)\b/iu,
+    },
+    {
       scenarioLabel: 'one post returned under handle and i/status URL spellings',
       testName: 'x post reading sends one link per post id without lookup narration',
+      scope: 'direct',
       memberText: `What does the screenshot in this post say? ${coachPost}`,
       answerText:
         'The post text says "Morning check-in." The screenshot shows a chat reply that opens with an all-caps "HEYYY" and then advises drinking water, eating something, and resting. https://x.com/i/status/2100000000000000001',
@@ -7562,6 +7602,7 @@ describeRealCodex('real Codex X post reading e2e', () => {
     {
       scenarioLabel: 'two distinct posts each returned under two URL spellings',
       testName: 'x post reading keeps distinct post links once each',
+      scope: 'direct',
       memberText: `What do the videos in these two posts show? ${coachPost} and ${runnerPost}`,
       answerText:
         `The first video shows a coach demonstrating a slow goblet squat. ${coachPost} The second video shows a runner doing strides on a track. ${runnerPost}`,
@@ -7577,6 +7618,7 @@ describeRealCodex('real Codex X post reading e2e', () => {
     {
       scenarioLabel: 'Grok could not find the shared post',
       testName: 'x post reading says plainly when the post could not be read',
+      scope: 'direct',
       memberText: `What does the screenshot in this post say? ${coachPost}`,
       answerText:
         'I could not find or open that post. It may have been deleted or made private, so I cannot say what its screenshot shows.',
@@ -7611,7 +7653,7 @@ describeRealCodex('real Codex X post reading e2e', () => {
             actorIsSelf: false,
             source: 'telegram',
             threadId: 'synthetic-direct-thread',
-            threadIsDirect: true,
+            threadIsDirect: scenario.scope === 'direct',
           },
           inputId: `ain_${'c'.repeat(32)}`,
           occurredAt: '2026-08-26T12:00:00.000Z',
@@ -7641,6 +7683,27 @@ describeRealCodex('real Codex X post reading e2e', () => {
         if (promptResult.kind !== 'ready') {
           throw new Error('Expected a ready X post prompt.')
         }
+        const developerInstructions = scenario.scope === 'group'
+          ? buildGroupPointOfViewDeveloperInstructions({ hostedRuntime: true })
+          : buildAssistantSystemPrompt({
+            assistantCliContract: 'No vault command is needed for this X post request.',
+            assistantContextSnapshotPrompt: null,
+            assistantHostedDeviceConnectAvailable: false,
+            assistantHostedDeviceConnectProviders: [],
+            assistantKnowledgeToolsAvailable: false,
+            channel: 'telegram',
+            cliAccess: {
+              rawCommand: 'vault-cli',
+              setupCommand: 'murph',
+            },
+            conversationScope: 'direct',
+            currentLocalDate: '2026-08-26',
+            currentTimeZone: 'UTC',
+            hostedRuntime: true,
+            modelBehaviorProfile: 'gpt5-agentic',
+            onboardingGuidance: false,
+            turnTrigger: null,
+          })
         const result = await executeRealCodexAppServerTurn({
           approvalPolicy: 'never',
           askGrokRuntime: {
@@ -7671,27 +7734,10 @@ describeRealCodex('real Codex X post reading e2e', () => {
             normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
             ?? undefined,
           codexHome: config.codexHome,
-          developerInstructions: buildAssistantSystemPrompt({
-            assistantCliContract: 'No vault command is needed for this X post request.',
-            assistantContextSnapshotPrompt: null,
-            assistantHostedDeviceConnectAvailable: false,
-            assistantHostedDeviceConnectProviders: [],
-            assistantKnowledgeToolsAvailable: false,
-            channel: 'telegram',
-            cliAccess: {
-              rawCommand: 'vault-cli',
-              setupCommand: 'murph',
-            },
-            conversationScope: 'direct',
-            currentLocalDate: '2026-08-26',
-            currentTimeZone: 'UTC',
-            hostedRuntime: true,
-            modelBehaviorProfile: 'gpt5-agentic',
-            onboardingGuidance: false,
-            turnTrigger: null,
-          }),
+          developerInstructions,
           dynamicTools: [MURPH_ASK_GROK_TOOL],
           env: config.env,
+          groupConversation: scenario.scope === 'group',
           model: config.model,
           modelProvider: config.modelProvider,
           prompt: promptResult.prompt,
@@ -7712,6 +7758,7 @@ describeRealCodex('real Codex X post reading e2e', () => {
             providerCallCount: providerBodies.length,
             reply,
             scenario: scenario.scenarioLabel,
+            scope: scenario.scope,
             toolCallCount: grokCalls.length,
           })}\n`,
         )
