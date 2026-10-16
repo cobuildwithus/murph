@@ -47,7 +47,7 @@ export interface CliFailureTiming {
   stage: typeof CLI_TIMING_FAILURE_STAGES[number];
   count: number;
   validation?: CliValidationDiagnostic;
-  rejection?: CliTimingRejection | CliTimingParseRejection;
+  rejection?: CliTimingRejection | CliTimingParseRejection | CliTimingFilterRejection;
 }
 export function cliTimingFailureCode(value: unknown, command?: unknown): CliFailureTiming["code"] {
   // Only the registered meal-photo removal owner is qualified for this code.
@@ -72,6 +72,7 @@ const validationFields = [
   ["meal edit", ["id", "nutritionCalories", "nutritionProteinGrams", "nutritionSource",
     "nutritionConfidence", "occurredAt", "arguments"]],
   ["food search-labels", ["query", "limit"]],
+  ["wearables day", ["date", "provider", "arguments"]],
   ["knowledge upsert", ["body", "slug", "title", "pageType", "status", "clearLibraryLinks",
     "relatedSlug", "librarySlug", "sourcePath", "arguments"]],
   ["knowledge append-section", ["slug", "heading", "body", "title", "position", "sourcePath"]],
@@ -146,13 +147,22 @@ export const CLI_TIMING_REJECTIONS = [
 ] as const;
 export type CliTimingRejection = typeof CLI_TIMING_REJECTIONS[number];
 
-// `knowledge upsert` argv rejection class set by the pinned Incur parser at the
-// exact unknown-flag/missing-value throw site; never derived from argv or text.
+// Argv rejection class set by the pinned Incur parser at the exact
+// unknown-flag/missing-value throw site; never derived from argv or text.
 export const CLI_TIMING_PARSE_REJECTIONS = ["unknown_flag", "missing_value"] as const;
 export type CliTimingParseRejection = typeof CLI_TIMING_PARSE_REJECTIONS[number];
+
+// Set by the shared repeatable-flag normalizer at its comma-list and
+// unsupported-enum throw sites. Admitted only for `search query`; other callers'
+// metadata is dropped here. Never the option name, values or message.
+export const CLI_TIMING_FILTER_REJECTIONS = ["comma_delimited", "unsupported_value"] as const;
+export type CliTimingFilterRejection = typeof CLI_TIMING_FILTER_REJECTIONS[number];
 const rejectionOwners = [
   ["research scout-batch", "research_scout_invalid_batch_payload", CLI_TIMING_REJECTIONS],
   ["knowledge upsert", "VALIDATION_ERROR", CLI_TIMING_PARSE_REJECTIONS],
+  ["knowledge show", "VALIDATION_ERROR", CLI_TIMING_PARSE_REJECTIONS],
+  ["wearables day", "VALIDATION_ERROR", CLI_TIMING_PARSE_REJECTIONS],
+  ["search query", "invalid_option", CLI_TIMING_FILTER_REJECTIONS],
 ] as const;
 
 /** Optional, independently dropped like validation detail; same own-data rules. */

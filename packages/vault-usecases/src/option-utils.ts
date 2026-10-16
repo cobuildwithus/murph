@@ -28,6 +28,16 @@ export function normalizeRepeatedOption(
   return entries.length > 0 ? entries : undefined
 }
 
+// Diagnostic-only class for CLI timing: a non-enumerable, read-only own data
+// property, so the public error envelope, serialization and handling are
+// unchanged. The timing owner admits it only for its gated command/code.
+function withCliTimingRejection(
+  error: VaultCliError,
+  rejection: 'comma_delimited' | 'unsupported_value',
+): VaultCliError {
+  return Object.defineProperty(error, 'cliTimingRejection', { value: rejection })
+}
+
 function rejectCommaDelimitedEntries(
   value: readonly string[] | undefined,
   optionName: string,
@@ -38,10 +48,10 @@ function rejectCommaDelimitedEntries(
 
   for (const entry of value) {
     if (entry.includes(',')) {
-      throw new VaultCliError(
+      throw withCliTimingRejection(new VaultCliError(
         'invalid_option',
         `Comma-delimited values are not supported for --${optionName}. Repeat the flag instead.`,
-      )
+      ), 'comma_delimited')
     }
   }
 }
@@ -77,10 +87,10 @@ export function normalizeRepeatableEnumFlagOption<TValue extends string>(
   if (invalidValues.length > 0) {
     const invalidLabel = invalidValues.length === 1 ? 'value' : 'values'
     const invalidSummary = invalidValues.map((entry) => `"${entry}"`).join(', ')
-    throw new VaultCliError(
+    throw withCliTimingRejection(new VaultCliError(
       'invalid_option',
       `Unsupported ${invalidLabel} for --${optionName}: ${invalidSummary}. Supported values: ${supportedValues.join(', ')}.`,
-    )
+    ), 'unsupported_value')
   }
 
   return entries as TValue[]
