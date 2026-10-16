@@ -70,6 +70,12 @@ Updated: 2026-10-16
 - The challenger may pick a start date (`terms.startsOn`, tomorrow to 60 days
   out): each player's Day 1 is the later of their default and that date, so a
   picked date is one calendar date for everyone. Start now overrides it.
+- Edge-case pass: weekdays follow the challenger's calendar so days off line
+  up across time zones; a perfect game owes nothing; ALREADY_IN_A_GAME names
+  who is busy; recently expired invites stay on Home; stricter input checks.
+- Excuses are transcript-only (no audio), aimed at the most recent missed
+  scheduled day. Dev time travel moves a per-game clock instead of rewriting
+  history.
 
 ## Verification
 

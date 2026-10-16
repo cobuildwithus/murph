@@ -12,12 +12,13 @@ iOS client is the MurphV2 prototype app.
 
 A weekly game is a run of days between close people. Each player picks a habit
 task in their own words ("100 pushups"), everyone shares a schedule (set weekdays
-or any N days) and a stake ("winner gets breakfast in bed", or "for every day you
-miss, you owe the other one"). Games run 7 days by default and at most 28.
+or any N days) and one to three stakes ("winner gets breakfast in bed", or "for
+every day you miss, you owe the other one"). Games run 7 days by default and at
+most 28.
 
 The MVP is private 1v1. The challenger creates a game and texts a single-use
 link (`/g/<token>`, valid 7 days) from their own phone; an invite nobody accepts
-expires. The invitee opens it, signs in, and shakes on the terms they saw; a
+expires, and stays on the challenger's Home for a week marked expired. The invitee opens it, signs in, and shakes on the terms they saw; a
 changed version is refused with `TERMS_CHANGED`. Accepting makes the game live.
 A person plays at most one live game at a time; an open invite never blocks
 anyone.
@@ -32,12 +33,20 @@ the challenger's views. There are no public profile photos.
 - **Days.** Day 1 is each player's next local day after the game goes live. If
   the challenger picked a start date (tomorrow to 60 days out in their zone)
   and it's later, Day 1 is that date, the same calendar date for everyone.
-  Start now makes it today. A day runs 3am to 3am in the player's time zone,
-  frozen at go-live from their profile, so New York and Sydney can play
-  different local dates, paired by day number.
+  Start now makes it today; before 3am that first day is short, since it still
+  ends at 3am (Start now is a dev tool today). A day runs 3am to 3am in the
+  player's time zone, frozen at go-live from their profile, so New York and
+  Sydney can play different local dates, paired by day number.
+- **Weekdays.** A set-weekdays game follows the challenger's calendar: a day
+  number is on or off for everyone, by the weekday it falls on for the
+  challenger, so both players' days off line up.
 - **Posting.** One photo a day. Taking it back and retaking is allowed once per
-  day (two photos in total, withdrawn ones included). An excuse is a voice memo
-  with its transcript; it neither scores nor unlocks.
+  day (two photos in total, withdrawn ones included).
+- **Excuses.** An excuse explains a missed day in a few words: the phone
+  transcribes the voice note on-device and sends only the transcript (1-500
+  characters); no audio is uploaded or stored, and it's never replayed. It
+  applies to the player's most recent past scheduled day with no photo and no
+  excuse yet, never today. It neither scores nor unlocks.
 - **Post to unlock.** You see nothing of another player's day (photo or words)
   until you have posted that day. Unlocking is permanent, so a withdrawn photo
   can't hide what was already seen. After settle, every live photo is visible to

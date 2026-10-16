@@ -5463,6 +5463,9 @@ until the viewer has posted that day; media reads use the same rule.
 Better Auth bearer session, not the paid-member check, because invitees play
 free; the flag and allowlist then hide every route. The invite preview and
 `/g/<token>` page are unauthenticated and honor only the global flag. Dev
-time-travel routes return 404 in real production. Media keys are the uploader's
-prefix plus the SHA-256 of the bytes, so a retried upload lands on the same key;
-media is local-disk only until a Worker game-media path exists.
+time-travel routes return 404 in real production; they move a per-game clock
+(`game.dev_clock_offset_ms`, added to the database clock as that game's "now"
+for writes, settles and views) and never rewrite dates. Media is photos only
+(JPEG or HEIC); keys are the uploader's prefix plus the SHA-256 of the bytes, so
+a retried upload lands on the same key. Media is local-disk only until a Worker
+game-media path exists.
