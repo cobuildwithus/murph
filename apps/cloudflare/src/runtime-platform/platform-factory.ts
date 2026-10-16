@@ -198,7 +198,6 @@ export function buildHostedExecutionRuntimePlatform(input: {
         }
       : {}),
     publicInternetFetch: createCloudflareHostedPublicInternetFetch(baseFetchImpl),
-    ...exposeFetchTransportDiagnostics(input.fetchTransportDiagnostics),
     ...(transport
       ? {
           codexAuthPort: createHostedRuntimeCodexAuthPort({
@@ -334,10 +333,4 @@ export function buildHostedExecutionRuntimePlatform(input: {
         }
       : {}),
   };
-}
-
-function exposeFetchTransportDiagnostics(
-  diagnostics: HostedRuntimeFetchTransportDiagnostics | null | undefined,
-): Pick<HostedRuntimePlatform, "readFetchTransportDiagnostics"> {
-  return diagnostics ? { readFetchTransportDiagnostics: diagnostics.read } : {};
 }

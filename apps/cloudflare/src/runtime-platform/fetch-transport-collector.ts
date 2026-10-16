@@ -2,23 +2,33 @@ import type { HostedRuntimeRedactedObject } from "@murphai/hosted-execution/runt
 
 import type { HostedRuntimeFetchTransportTiming } from "./fetch-transport-diagnostics.ts";
 
+export type HostedRuntimeFetchTransportRecorder = (
+  timing: HostedRuntimeFetchTransportTiming,
+  response?: Response,
+) => void;
+
 /**
- * Keeps the first typing start and the first conversation-lane mailbox fetch
- * of one invocation as scalars for its existing completion log entry.
+ * Keeps the first-started typing start and conversation-lane mailbox fetch of
+ * one invocation as scalars for its existing completion log entry. A claim is
+ * taken when a request starts, so a faster later request never replaces it and
+ * later requests are not observed.
  */
 export function createHostedRuntimeFetchTransportDiagnostics() {
-  let typing: HostedRuntimeRedactedObject | null = null;
-  let mailbox: HostedRuntimeRedactedObject | null = null;
+  const recorded: HostedRuntimeRedactedObject[] = [];
+  const claimFirst = (prefix: string) => {
+    let claimed = false;
+    return (): HostedRuntimeFetchTransportRecorder | null => {
+      if (claimed) return null;
+      claimed = true;
+      return (timing, response) => {
+        recorded.push(summarizeFetchTransport(prefix, timing, response));
+      };
+    };
+  };
   return {
-    recordTypingStart(timing: HostedRuntimeFetchTransportTiming, response?: Response) {
-      typing ??= summarizeFetchTransport("firstTypingFetch", timing, response);
-    },
-    recordConversationMailboxFetch(timing: HostedRuntimeFetchTransportTiming, response?: Response) {
-      mailbox ??= summarizeFetchTransport("firstMailboxFetch", timing, response);
-    },
-    read(): HostedRuntimeRedactedObject {
-      return { ...typing, ...mailbox };
-    },
+    claimTypingStart: claimFirst("firstTypingFetch"),
+    claimConversationMailboxFetch: claimFirst("firstMailboxFetch"),
+    read: (): HostedRuntimeRedactedObject => Object.assign({}, ...recorded),
   };
 }
 

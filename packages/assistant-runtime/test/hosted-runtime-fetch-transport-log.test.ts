@@ -49,18 +49,16 @@ async function runEmptyInvocation(input: {
         async importItem() {
           throw new Error("An empty invocation must not import an item.");
         },
-        platform: {
-          ...createPlatform({
-            logRequests,
-            mailboxPort: createMailboxPort({ events: [], items: [] }),
-            workspacePort: createWorkspacePort({
-              checkpointRequests: [],
-              events: [],
-              workspace: createWorkspaceState({ version: "0" }),
-            }),
+        platform: createPlatform({
+          logRequests,
+          mailboxPort: createMailboxPort({ events: [], items: [] }),
+          workspacePort: createWorkspacePort({
+            checkpointRequests: [],
+            events: [],
+            workspace: createWorkspaceState({ version: "0" }),
           }),
-          readFetchTransportDiagnostics: input.readFetchTransportDiagnostics,
-        },
+        }),
+        fetchTransportDiagnostics: { read: input.readFetchTransportDiagnostics },
         async runAssistantPhase() {
           throw new Error("An empty invocation must not run the assistant.");
         },
@@ -80,7 +78,7 @@ async function runEmptyInvocation(input: {
 }
 
 describe("hosted invocation fetch transport diagnostics", () => {
-  test("adds the platform's first-request scalars to the existing terminal entry", async () => {
+  test("adds the invocation's first-request scalars to the existing terminal entry", async () => {
     const { finished, result } = await runEmptyInvocation({
       attemptId: "attempt_synthetic_fetch_transport_present",
       readFetchTransportDiagnostics: () => ({

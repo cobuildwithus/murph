@@ -775,9 +775,11 @@ historical IDs cannot be reconstructed or treated as zero latency.
 
 Container stdout, including the runtime-side records above, is not queryable from
 Workers Observability. Each invocation therefore also copies transport scalars for
-its first Linq typing start and its first conversation-lane mailbox fetch attempt
-onto its existing `runtime.invocation_finished` runtime-log entry (no additional
-request). The snapshot-fetch observer supplies `firstTypingFetch*` and
+its first-started Linq typing start and the first attempt of its first-started
+conversation-lane mailbox fetch onto its existing `runtime.invocation_finished`
+runtime-log entry (no additional request). The claim is taken when the request
+starts, so an overlapping later request that settles first never replaces it, and
+only the claimed request is observed. The snapshot-fetch observer supplies `firstTypingFetch*` and
 `firstMailboxFetch*` fields: start epoch, duration, response status, new
 connection count, pooled-socket reuse, DNS/TCP/TLS setup, request-sent time,
 response wait after sending, headers-to-resolution delay, process event-loop
@@ -785,7 +787,8 @@ active/idle time and last observed stage. Connection setup and
 headers-to-resolution delay are runtime-local monotonic spans. Response wait still
 combines both transit directions and Worker or upstream work; join it with the
 Worker record by attempt. Later typing starts and mailbox fetches in a long warm
-invocation are not recorded. A failed or unobserved phase is null. These fields are
+invocation are not recorded. A failed or unobserved phase is null, and a claimed
+request that never settles leaves its fields absent. These fields are
 diagnostic only and add no ordering, retry or authority behavior.
 
 Successful warm ensure-processing requests omit the detached processing summary

@@ -299,6 +299,7 @@ export async function runHostedWorkspaceInvocation(
       voice: invocationVoice,
       preparedWorkspaceRestore: options.preparedWorkspaceRestore ?? null,
       readCurrentLease: () => currentLease,
+      fetchTransportDiagnostics: options.fetchTransportDiagnostics,
       runtimeIssueProvenance: {
         releaseSha: options.releaseSha ?? null,
         runtimeName: HOSTED_ASSISTANT_RUNTIME_NAME,

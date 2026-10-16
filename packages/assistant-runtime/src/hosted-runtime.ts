@@ -805,6 +805,8 @@ function isHostedInitialBootstrapPending(input: {
 
 export interface HostedWorkspaceRuntimeJobOptions {
   voice?: HostedRuntimeVoice | null;
+  /** Invocation-scoped diagnostic scalars for the completion log; never authority. */
+  fetchTransportDiagnostics?: { read(): HostedRuntimeRedactedObject } | null;
   createCheckpointSnapshot: HostedWorkspaceSnapshotCheckpointBuilder;
   importItem: HostedMailboxImporter<HostedWorkspaceRuntimeJobImportContext>;
   platform: HostedRuntimePlatform;
@@ -1429,10 +1431,10 @@ function resolveHostedSystemMailboxProjectionMode(
 }
 
 function readHostedFetchTransportDiagnosticsForLog(
-  platform: HostedRuntimePlatform,
+  diagnostics: HostedWorkspaceRuntimeJobOptions["fetchTransportDiagnostics"],
 ): HostedRuntimeRedactedObject {
   try {
-    return platform.readFetchTransportDiagnostics?.() ?? {};
+    return diagnostics?.read() ?? {};
   } catch {
     return {};
   }
@@ -1483,7 +1485,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           runtimeReleaseSha && /^[0-9a-f]{40}$/u.test(runtimeReleaseSha)
             ? runtimeReleaseSha
             : null,
-        ...readHostedFetchTransportDiagnosticsForLog(options.platform),
+        ...readHostedFetchTransportDiagnosticsForLog(options.fetchTransportDiagnostics),
       },
     },
     platform: options.platform,

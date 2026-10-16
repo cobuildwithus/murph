@@ -331,10 +331,12 @@ export function createCloudflareHostedProviderFetch(
       providerRuntimeRoundTripMs: Math.max(0, Math.round(performance.now() - startedAt)),
     } : {};
     try {
-      const response = await (correlationId && transportDiagnostics
+      // Claimed at initiation so the invocation's first-started typing start is kept.
+      const recordTypingStart = correlationId ? transportDiagnostics?.claimTypingStart() : null;
+      const response = await (recordTypingStart
         ? observeHostedRuntimeFetchTransport(
           () => normalizedFetchImpl(providerRequest),
-          (timing, outcome) => transportDiagnostics.recordTypingStart(timing, outcome.response),
+          (timing, outcome) => recordTypingStart(timing, outcome.response),
         )
         : normalizedFetchImpl(providerRequest));
       if (correlationId) emitHostedExecutionStructuredLog({

@@ -7,6 +7,7 @@ import { TLSSocket } from "node:tls";
 import { emitHostedExecutionStructuredLog } from "@murphai/hosted-execution";
 
 import { buildHostedRuntimeSafeErrorMetadata } from "./diagnostics.ts";
+import type { HostedRuntimeFetchTransportRecorder } from "./fetch-transport-collector.ts";
 
 type SocketTiming = {
   startedAt: number;
@@ -248,4 +249,22 @@ function subscribeToFetchTransport(state: FetchObservation): () => void {
   return () => {
     for (const cleanup of cleanups) cleanup();
   };
+}
+
+/** Observe only this fetch's first call, such as the first of a read's retries. */
+export function observeFirstHostedRuntimeFetch(
+  fetchImpl: typeof fetch,
+  record: HostedRuntimeFetchTransportRecorder,
+): typeof fetch {
+  let pending: HostedRuntimeFetchTransportRecorder | null = record;
+  return ((resource: RequestInfo | URL, init?: RequestInit) => {
+    const current = pending;
+    pending = null;
+    return current
+      ? observeHostedRuntimeFetchTransport(
+        () => fetchImpl(resource, init),
+        (timing, outcome) => current(timing, outcome.response),
+      )
+      : fetchImpl(resource, init);
+  }) as typeof fetch;
 }
