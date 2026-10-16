@@ -1,8 +1,8 @@
 # Knowledge optional reads and CLI write guidance
 
-Status: active (Stage 1 consumer merged in PR 4174 and verified live; Stage 2
-producer in draft PR 4176, implementation and local verification complete,
-review, CI, merge, deployment, and watch pending)
+Status: completed
+producer in PR 4176, implementation, local proof, and independent review
+complete; delivery follow-through is parent-owned)
 Created: 2026-10-16
 Updated: 2026-10-16
 
@@ -276,6 +276,23 @@ source digests unchanged since the authored patch), executed and passed:
     and log plus the normal audit. There was no memory write or outbox, and
     the confirmation was short and accurate.
 
+Stage 2 independent review: ReviewGPT Round 1 (full, sensitive) PASSED on
+head `86a5897896`, with no findings. The response and accepted turn matched
+by exact hash identity, and all 11 input head blobs were verified.
+
+Post-review proof-coupling correction (tests only; no runtime, skill, or
+source byte changed):
+
+- `knowledge-cli-guidance.test.ts` first case asserts the parsed machine
+  shape from `parseUpsertShape` (`knowledge upsert --slug <slug> --body
+  <markdown>`, `--library-slug`, `--source-path`) instead of the full prose
+  sentence.
+- `assistant-codex-turn-planning.test.ts` expects only the backticked
+  `vault-cli knowledge upsert --slug <slug> --body <markdown>` signature.
+- Routing absence and guard assertions, and the built-CLI positive and
+  negative write, flag, and count checks, are unchanged.
+- Rerun: focused 3 files, 129 passed; `docs:drift` passed.
+
 ## Product UX patch
 
 - Outcome: scheduled insights, check-ins, and the onboarding first personal
@@ -287,11 +304,15 @@ source digests unchanged since the authored patch), executed and passed:
   unchanged.
 - Proof: built-CLI guidance tests on synthetic vaults, the measured +58-byte
   direct prompt delta, and the three `Ready` live journeys above.
-- Verdict: Ready for review and protected rollout.
+- Verdict: Ready; independent review passed with no findings.
 
 ## Remaining (parent)
 
-- Implementation and local verification are complete. Still pending: the
-  independent ReviewGPT round, final-head CI, producer merge, protected
-  deployment, and the 4-hour actual watch. Then close this plan through
-  `scripts/finish-task`.
+- Local implementation, proof, and independent review are complete. The
+  parent closes this implementation plan through `scripts/finish-task`
+  (completion workflow Step 7) without waiting on delivery.
+- Parent-owned delivery follow-through, not claimed complete here: final-head
+  CI, producer merge, protected producer deployment, and the 4-hour actual
+  watch. These are tracked in the parent's private delivery-state and monitor
+  records.
+Completed: 2026-10-16

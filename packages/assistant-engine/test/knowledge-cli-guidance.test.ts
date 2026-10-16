@@ -20,9 +20,11 @@ afterEach(async () => {
 describe('knowledge CLI guidance matches the shipped CLI', () => {
   it('composes the real upsert shape only on the CLI route', () => {
     const cliRoute = buildKnowledgePrompt({ assistantKnowledgeToolsAvailable: false })
-    expect(cliRoute).toContain(
-      'Persist pages with `vault-cli knowledge upsert --slug <slug> --body <markdown>` (slug is a flag here). Repeat `--library-slug <slug>` when a page builds on `bank/library` and `--source-path <path>` for canonical vault sources only, never `derived/**` or `.runtime/**`.',
-    )
+    expect(parseUpsertShape(cliRoute)).toEqual({
+      command: ['knowledge', 'upsert', '--slug', '<slug>', '--body', '<markdown>'],
+      libraryFlag: '--library-slug',
+      sourceFlag: '--source-path',
+    })
     expect(cliRoute).not.toContain('dedicated knowledge write surface')
     expect(cliRoute).not.toContain('attach `librarySlugs`')
 

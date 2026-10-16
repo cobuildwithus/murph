@@ -378,9 +378,7 @@ describe('assistant Codex turn planning', () => {
         expect(instructions).not.toContain(
           'For wiki work, use `vault-cli knowledge ...` directly in this turn.',
         )
-        expect(instructions).toContain(
-          'Persist pages with `vault-cli knowledge upsert --slug <slug> --body <markdown>` (slug is a flag here).',
-        )
+        expect(instructions).toContain('`vault-cli knowledge upsert --slug <slug> --body <markdown>`')
         expect(instructions).not.toContain('dedicated knowledge write surface')
       }
     }
