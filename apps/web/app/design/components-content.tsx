@@ -1594,7 +1594,7 @@ export function ComponentsContent() {
 
         <Separator />
 
-        <Section title="Hosted plan change">
+        <Section id="hosted-plan-change" title="Hosted plan change">
           <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
             Immediate upgrades open Stripe&apos;s exact proration confirmation.
             Period-end switches keep their in-product scheduling confirmation.
@@ -1602,7 +1602,7 @@ export function ComponentsContent() {
           <div className="grid items-start gap-6 lg:grid-cols-2">
             <div className="space-y-3">
               <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
-                Period-end switch
+                Period-end switch blocked by cancellation
               </p>
               <Dialog>
                 <div
@@ -1611,7 +1611,7 @@ export function ComponentsContent() {
                 >
                   <HostedPlanChangeConfirmationContent
                     currentPeriodEnd="2026-08-27T04:00:00.000Z"
-                    errorMessage={null}
+                    errorMessage="Your subscription is scheduled to cancel, so a plan change cannot be scheduled. Contact support if you want to change plans instead."
                     onClose={() => undefined}
                     onConfirm={() => undefined}
                     pending={false}
