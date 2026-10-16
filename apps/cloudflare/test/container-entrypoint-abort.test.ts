@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   HostedWorkspaceRestorePreparation,
 } from "@murphai/assistant-runtime/hosted-workspace-restore-preparation";
+import type { HostedExecutionStructuredLogRecord } from "@murphai/hosted-execution";
 import { HOSTED_RUNTIME_ARCHITECTURE_VERSION } from "../src/hosted-runtime-architecture.js";
 import "../src/container-entrypoint-heavy-runtime.js";
 
@@ -59,6 +60,7 @@ afterEach(async () => {
   mocks.runHostedWorkspaceInvocation.mockReset();
   vi.clearAllMocks();
   vi.restoreAllMocks();
+  vi.unstubAllEnvs();
   await Promise.all(servers.splice(0).map(async (server) => {
     server.closeAllConnections?.();
     await new Promise<void>((resolve, reject) => {
@@ -220,6 +222,43 @@ function sendHostedContainerPostRequest(input: {
   };
 }
 
+function captureRequestExitWarnings(): () => HostedExecutionStructuredLogRecord[] {
+  vi.stubEnv("MURPH_HOSTED_EXECUTION_STDIO_LOGS", "1");
+  const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+  return () => warn.mock.calls
+    .filter(([payload]) => typeof payload === "string" && payload.includes('"exitReason":'))
+    .map(([payload]) => JSON.parse(String(payload)) as HostedExecutionStructuredLogRecord);
+}
+
+async function closePartialHostedContainerPostRequest(input: {
+  bodyPrefix: string;
+  path: string;
+  port: number;
+  server: Awaited<ReturnType<typeof startHostedContainerEntrypoint>>;
+}): Promise<void> {
+  const bodyObserved = createDeferred();
+  input.server.once("request", (request) => {
+    request.once("data", () => bodyObserved.resolve());
+  });
+  const request = httpRequest({
+    headers: {
+      connection: "close",
+      "content-type": "application/json; charset=utf-8",
+      "x-synthetic-private": "synthetic-private-header",
+    },
+    host: "127.0.0.1",
+    method: "POST",
+    path: input.path,
+    port: input.port,
+  });
+  const closed = new Promise<void>((resolve) => request.once("close", resolve));
+  request.on("error", () => undefined);
+  request.write(input.bodyPrefix);
+  await bodyObserved.promise;
+  request.destroy();
+  await closed;
+}
+
 async function waitForAssertion(
   assertion: () => Promise<void> | void,
   timeoutMs = 1000,
@@ -242,6 +281,7 @@ async function waitForAssertion(
 
 describe("container entrypoint abort boundary", () => {
   it("keeps an accepted workspace invocation running when only the response closes", async () => {
+    const exitWarnings = captureRequestExitWarnings();
     const invocationStarted = createDeferred<AbortSignal>();
     const finishInvocation = createDeferred();
     const completionStarted = createDeferred<{
@@ -300,9 +340,22 @@ describe("container entrypoint abort boundary", () => {
     });
 
     const signal = await invocationStarted.promise;
+    await closePartialHostedContainerPostRequest({
+      bodyPrefix: '{"attemptId":"synthetic-private-wake-attempt","userId":"synthetic-private-member",',
+      path: "/internal/runtime-wake?private=synthetic-private-query",
+      port: address.port,
+      server,
+    });
+    await waitForAssertion(() => {
+      expect(exitWarnings()).toHaveLength(1);
+    });
+    expect(signal.aborted).toBe(false);
+
     request.close();
     await request.done;
-    await new Promise((resolve) => setTimeout(resolve, 25));
+    await waitForAssertion(() => {
+      expect(exitWarnings()).toHaveLength(2);
+    });
     expect(signal.aborted).toBe(false);
 
     finishInvocation.resolve();
@@ -355,9 +408,28 @@ describe("container entrypoint abort boundary", () => {
     expect(
       mocks.recordHostedContainerRuntimeCompletionBestEffort,
     ).toHaveBeenCalledTimes(2);
+    expect(exitWarnings()).toHaveLength(2);
+    expect(exitWarnings()[0]?.details).toEqual({
+      exitReason: "request.aborted",
+      requestKind: "runtime-wake",
+      workspaceAttemptId: false,
+    });
+    expect(exitWarnings()[1]).toMatchObject({
+      component: "container",
+      details: {
+        exitReason: "response.closed",
+        requestKind: "workspace-invocation",
+        workspaceAttemptId: "attempt_evt_response_close_after_accept",
+      },
+      level: "warn",
+      message: "Hosted container entrypoint exited because the response closed before completion.",
+      phase: "failed",
+    });
+    expect(JSON.stringify(exitWarnings())).not.toContain("synthetic-private-");
   });
 
-  it("aborts an accepted workspace invocation through the internal abort endpoint", async () => {
+  it("aborts an accepted workspace invocation through the internal abort endpoint after its response closes", async () => {
+    const exitWarnings = captureRequestExitWarnings();
     const invocationStarted = createDeferred<AbortSignal>();
     const invocationAborted = createDeferred();
     const stopWarmCodex = vi.fn(async () => undefined);
@@ -414,6 +486,11 @@ describe("container entrypoint abort boundary", () => {
     });
 
     const signal = await invocationStarted.promise;
+    request.close();
+    await request.done;
+    await waitForAssertion(() => {
+      expect(exitWarnings()).toHaveLength(1);
+    });
     expect(signal.aborted).toBe(false);
     const abortResponse = await fetch(
       `http://127.0.0.1:${address.port}/internal/workspace-invocation/abort`,
@@ -469,6 +546,51 @@ describe("container entrypoint abort boundary", () => {
       2,
       "hosted-workspace-restore",
     );
+    expect(exitWarnings()).toHaveLength(1);
+    expect(exitWarnings()[0]?.details).toEqual({
+      exitReason: "response.closed",
+      requestKind: "workspace-invocation",
+      workspaceAttemptId: requestBody.job.request.attemptId,
+    });
+  });
+
+  it("does not correlate an attempt from an incomplete workspace request body", async () => {
+    const exitWarnings = captureRequestExitWarnings();
+    const server = await startHostedContainerEntrypoint({
+      port: 0,
+      runtime: {
+        prepareWorkspaceRestore: createTestHostedWorkspaceRestorePreparer(),
+      },
+    });
+    servers.push(server);
+    const address = server.address();
+    if (!address || typeof address === "string") {
+      throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
+    }
+    const requestBody = buildWorkspaceJobBody({ eventId: "synthetic-private-unparsed-attempt" });
+    requestBody.job.request.userId = "synthetic-private-member";
+    await closePartialHostedContainerPostRequest({
+      bodyPrefix: JSON.stringify(requestBody).slice(0, -1),
+      path: "/internal/workspace-invocation?private=synthetic-private-query",
+      port: address.port,
+      server,
+    });
+
+    await waitForAssertion(() => {
+      expect(exitWarnings()).toHaveLength(1);
+      expect(exitWarnings()[0]?.details).toEqual({
+        exitReason: "request.aborted",
+        requestKind: "workspace-invocation",
+        workspaceAttemptId: false,
+      });
+    });
+    expect(JSON.stringify(exitWarnings())).not.toContain("synthetic-private-");
+    expect(mocks.runHostedWorkspaceInvocation).not.toHaveBeenCalled();
+    await waitForAssertion(async () => {
+      const health = await sendHostedContainerGetRequest({ path: "/health", port: address.port });
+      expect(health.json).toMatchObject({ activeJobCount: 0, poisoned: false });
+    });
+    expect(exitWarnings()).toHaveLength(1);
   });
 
   it("releases a preempted invocation without waiting for heavy hydration", async () => {
