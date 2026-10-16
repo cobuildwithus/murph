@@ -1,5 +1,8 @@
 import "server-only";
 
+import { lookupHostedMemberByVerifiedEmailAddress } from "../hosted-onboarding/hosted-member-store";
+import type { HostedOnboardingReadClient } from "../hosted-onboarding/shared";
+
 /**
  * App-store reviewers cannot read a sign-in inbox, so one dedicated review
  * account signs in with a fixed code from production configuration. Every
@@ -8,8 +11,32 @@ import "server-only";
  * disables it.
  */
 export function hostedAuthReviewSignInCode(email: string): string | undefined {
-  const reviewEmail = process.env.HOSTED_AUTH_REVIEW_EMAIL?.trim().toLowerCase();
+  const review = readHostedAuthReviewAccount();
+  return review && email.trim().toLowerCase() === review.email ? review.code : undefined;
+}
+
+/**
+ * Reviewers also cannot receive a text or own a spare Telegram account, so the
+ * companion lets the configured review member past the messaging-setup step.
+ * Only that member's verified email qualifies, and only while the fixed code is
+ * configured.
+ */
+export async function isHostedAuthReviewMember(input: {
+  memberId: string;
+  prisma: HostedOnboardingReadClient;
+}): Promise<boolean> {
+  const review = readHostedAuthReviewAccount();
+  if (!review) return false;
+  const match = await lookupHostedMemberByVerifiedEmailAddress({
+    address: review.email,
+    prisma: input.prisma,
+    projection: "core",
+  });
+  return match?.core.id === input.memberId;
+}
+
+function readHostedAuthReviewAccount(): { code: string; email: string } | null {
+  const email = process.env.HOSTED_AUTH_REVIEW_EMAIL?.trim().toLowerCase();
   const code = process.env.HOSTED_AUTH_REVIEW_CODE?.trim();
-  if (!reviewEmail || !code || !/^\d{6}$/u.test(code)) return undefined;
-  return email.trim().toLowerCase() === reviewEmail ? code : undefined;
+  return email && code && /^\d{6}$/u.test(code) ? { code, email } : null;
 }
