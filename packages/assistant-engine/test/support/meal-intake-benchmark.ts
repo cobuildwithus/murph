@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { execFile } from 'node:child_process'
-import { appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { appendFile, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -20,12 +20,11 @@ import {
 import { NUTRITION_GOAL_INVITATION_SENT_MEMORY } from '../../src/assistant/nutrition-card-introduction.js'
 import { listAssistantOutboxIntents } from '../../src/assistant/outbox.js'
 import { saveAssistantAutomationState } from '../../src/assistant/store.js'
-import { canonicalCodexLauncher } from './canonical-live-journeys.js'
+import { canonicalCodexLauncher } from './canonical-codex-launcher.js'
 
 const execFileAsync = promisify(execFile)
 const CLI_ENTRYPOINT = fileURLToPath(new URL('../../../cli/dist/bin.js', import.meta.url))
 const PINNED_CODEX = fileURLToPath(new URL('../../node_modules/.bin/codex', import.meta.url))
-const REPOSITORY_ROOT = fileURLToPath(new URL('../../../../', import.meta.url)).replace(/\/$/u, '')
 const TIME_ZONE = 'America/New_York'
 const THREAD_ID = 'meal-intake-benchmark-thread'
 
@@ -123,25 +122,6 @@ export interface MealIntakeBenchmarkResult {
   traces: Record<string, unknown>[]
 }
 
-// Production applies these through the hosted Codex config. The local
-// subscription home keeps auth only; personal skills, hooks, and feature
-// preferences must not shape this benchmark.
-const HOSTED_EQUIVALENT_CODEX_OVERRIDES = [
-  'notify=[]',
-  'web_search="cached"',
-  'model_auto_compact_token_limit=132000',
-  'history.persistence="none"',
-  'skills.include_instructions=false',
-  'skills.bundled.enabled=false',
-  'memories.use_memories=false',
-  'memories.generate_memories=false',
-  'features.memories=false',
-  'features.plugins=false',
-  'features.apply_patch_freeform=false',
-  'features.multi_agent_v2.max_concurrent_threads_per_session=4',
-  'features.current_time_reminder={enabled=true,clock_source="system",delivery_mode="after_user_or_tool_output",reminder_interval_seconds=60}',
-] as const
-
 // Records synthetic argv timing and executes the shipped CLI. Like the hosted
 // Worker egress intercept, the preload sends only the data API hostname to the
 // local labels API; every other request is untouched.
@@ -207,6 +187,7 @@ export async function runMealIntakeBenchmarkCase(input: {
     const commandLog = path.join(root, 'commands.jsonl')
     await mkdir(bin, { recursive: true })
     await initializeVault({ vaultRoot: vault, timezone: TIME_ZONE })
+    await symlink(process.execPath, path.join(bin, 'node'))
     await writeFile(path.join(bin, 'vault-cli'), CLI_WRAPPER, { mode: 0o700 })
     await writeFile(path.join(bin, 'data-api-egress.mjs'), DATA_API_EGRESS_PRELOAD, { mode: 0o600 })
     const env: NodeJS.ProcessEnv = {
@@ -220,17 +201,7 @@ export async function runMealIntakeBenchmarkCase(input: {
       VAULT: vault,
     }
     const codexCommand = path.join(bin, 'codex-real')
-    await writeFile(codexCommand, canonicalCodexLauncher([
-      ...HOSTED_EQUIVALENT_CODEX_OVERRIDES,
-      // Production's hosted config owns this include-only gate.
-      'shell_environment_policy.inherit="all"',
-      'shell_environment_policy.ignore_default_excludes=false',
-      `shell_environment_policy.include_only=[${Object.keys(env).sort().map((key) => JSON.stringify(key)).join(',')}]`,
-    ], [
-      // The repository and Node install stand in for the runner's /app; Node
-      // also reads the macOS system OpenSSL config at startup.
-      REPOSITORY_ROOT, path.dirname(path.dirname(process.execPath)), '/System/Library/OpenSSL',
-    ]), { mode: 0o700 })
+    await writeFile(codexCommand, canonicalCodexLauncher(env), { mode: 0o700 })
     const now = new Date()
     const localDate = formatLocalDate(now)
     await seedEstablishedMember({ bin, env, now, vault })

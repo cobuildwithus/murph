@@ -367,6 +367,7 @@ import {
   createCanonicalLiveFixture,
   runCanonicalGroupBoundaryJourney,
   runCanonicalMealRestartJourney,
+  runCanonicalHostedMealJourney,
   runCanonicalReminderJourney,
 } from './support/canonical-live-journeys.ts'
 import {
@@ -1642,6 +1643,11 @@ describeRealCodex('real model canonical production journeys', () => {
       await fixture.close()
       await removeRealCodexTemporaryPaths(config.temporaryPaths)
     }
+  }, 600_000)
+  it('real model canonical hosted meal uses local installed CLI under member permissions', async () => {
+    const config = await resolveRealCodexE2eConfig({ productionTransport: true })
+    try { await runCanonicalHostedMealJourney({ ...config, onProviderRequestStarted: recordCanonicalProviderRequest }) }
+    finally { await removeRealCodexTemporaryPaths(config.temporaryPaths) }
   }, 600_000)
   it('real model canonical meal persists across assistant restart', async () => {
     const config = await resolveRealCodexE2eConfig({ productionTransport: true })

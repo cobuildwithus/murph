@@ -496,6 +496,14 @@ package suite.
 
 ## Real-Codex test fixtures
 
+Canonical live fixtures and the meal benchmark use the shared hosted Codex
+behavior builder. Their launcher overrides hosted feature, memory, skill,
+history, and shell-policy values while preserving authentication in the original
+Codex home. The isolated checkout and Node install are read-only local stand-ins
+for `/app`; credential-shaped files stay denied. Production permission profiles
+are unchanged. Local shells retain the fixture PATH and Codex's credential
+exclusions, rather than inheriting hosted-only paths or sentinel credentials.
+
 Synthetic real-Codex journeys that need fixture executables can opt into
 `executeRealCodexAppServerTurn`'s `fixtureBinDirectory`. The test harness adds
 that directory to PATH and creates a private login profile beneath the journey's
