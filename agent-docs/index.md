@@ -316,9 +316,11 @@ recorded in
 Deployment remains blocked and not observation-ready; the live phase and
 reader-before-producer contract is owned by `docs/hosted-runtime-log-database.md`.
 
-Patterns lazy load phase telemetry (pending exact-head CI, final review and deployment) is
-tracked in
-[`2026-10-16-patterns-load-phase-telemetry.md`](exec-plans/active/2026-10-16-patterns-load-phase-telemetry.md).
+Completed Patterns lazy load phase telemetry implementation, final review and
+candidate CI are recorded in
+[`2026-10-16-patterns-load-phase-telemetry.md`](exec-plans/completed/2026-10-16-patterns-load-phase-telemetry.md).
+Deployment remains blocked and not observation-ready; the live phase and
+reader-before-producer contract is owned by `docs/hosted-runtime-log-database.md`.
 
 Hosted-local pre-allocation barrier control recovery is tracked in
 [`2026-09-17-runtime-test-target-routing.md`](exec-plans/active/2026-09-17-runtime-test-target-routing.md).

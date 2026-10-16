@@ -1,13 +1,17 @@
 # Patterns lazy load phase telemetry
 
-Status: active
+Status: completed
 Created: 2026-10-16
 Updated: 2026-10-16
 
-The implementation is authored locally and the parent validated it
-independently (below). Still pending, and not passed: exact-head required CI,
-final ReviewGPT (blocked until a managed lane is available; not waived), PR, and
-deployment (blocked; see Rollout). Not deployed. This change saves no latency.
+The telemetry deliverable is complete in
+[PR #4150](https://github.com/cobuildwithus/murph/pull/4150). The parent applied
+this docs-only closeout only after verifying final ReviewGPT and all five
+required CI checks at reviewed candidate
+`8d001fb83d9408523138c8ad21a2435ee2395bc2` (see Verification). It is not merged
+or deployed, and no observation window has begun. Production investigation
+issue #3997 remains open. This change saves no latency and makes no optimization
+or speedup claim.
 
 ## Goal
 
@@ -59,12 +63,15 @@ mechanism evidence only, not a production reproduction or a speed claim.
   growth.
 - The history-backed runtime-state test proves old-normalizer compatibility
   only, not the full usage parser.
+- No member-visible behavior changes, so no real-Codex journey replay is
+  required.
 
 ## Verification
 
-- Author: focused tests for runtime-state catalog/compat, vault-usecases
-  loader/runtime, query fixture and mocked load, assistant-engine
-  transport/profile, and Cloudflare HTTP budget.
+- Author: the exact `claude-opus-5-5` model authored the implementation; the
+  ReviewGPT author route failed before submission. Focused tests covered
+  runtime-state catalog/compat, vault-usecases loader/runtime, query fixture and
+  mocked load, assistant-engine transport/profile, and Cloudflare HTTP budget.
 - History-backed normalizer check:
   `MURPH_CLI_LOAD_PHASE_COMPAT_BASE=<reviewed base sha>`.
 - Parent, independent: 119 focused tests passed (17 skipped). Typecheck and
@@ -78,14 +85,23 @@ mechanism evidence only, not a production reproduction or a speed claim.
   The base cold residual was 226.43 ms against about 0.1 ms warm. These are
   noisy independent processes, not paired measurements. Diagnostic attribution
   only; no speedup is claimed.
-- Pending, not passed: exact-head required CI (including installed-CLI static
-  budgets) and final ReviewGPT.
+- Final ReviewGPT, verified by the parent before applying this closeout: the
+  exact-candidate round 1 full sensitive snapshot passed with zero findings, on
+  a recovered managed lane.
+- Required CI at the candidate, verified by the parent before applying this
+  closeout: all five passed — Linux CLI, macOS CLI, Release checks (Ubuntu,
+  including the runner bundle budget and installed-CLI static budgets), hosted
+  Stripe boundary, and Temporal compatibility.
+- The docs-only closeout head leaves source and tests unchanged from the
+  reviewed candidate but still needs its own normal CI; this record does not
+  claim that run.
 
 ## Rollout
 
 Consumer-first rollout, as specified in `docs/hosted-runtime-log-database.md`.
 The user authorizes an isolated telemetry deployment. It is still blocked: the
 protected private deployment workflow is main-only and has no candidate SHA
-input, so it cannot select this candidate without a merge, which is not
-authorized. Run the 24–72 hour observation only after a verified
-consumer-then-producer deployment.
+input, so it cannot select this candidate without a merge, which the user
+prohibits. No deployment or observation window has begun. Run the 24–72 hour
+observation only after a verified reader-then-producer deployment.
+Completed: 2026-10-16
