@@ -1,6 +1,6 @@
 # Explain scheduled cancellation when a plan change is blocked
 
-Status: active
+Status: completed
 Created: 2026-10-16
 Updated: 2026-10-16
 
@@ -52,7 +52,23 @@ must remain ready for human merge. The canonical error code and 409 remain.
 Baseline: billing plan-switch, projection-store, and vault-share delivery tests
 passed (120 tests) after preparing the generated Prisma client. The projection
 proof belongs to the read-only sweep and is not a change in this PR.
-Final patch, failure-before proof, typecheck, final review and CI pending.
+ReviewGPT prepared the minimal patch. Both cancellation cases failed against the
+original source (29 other service tests passed). With the correction, billing
+service and Settings tests passed (100 tests); the generic status message and
+zero billing writes are asserted. Web typecheck and complexity guard passed
+(no source hotspot above 20). Changelog archive tests passed (10 tests).
+Chromium rendered the real confirmation content at 390px and 1440px (2 tests):
+message visible, no overflow; parent inspected both synthetic screenshots.
+
+Parent Product UX verdict: Ready. The service error flows through the existing
+JSON mapper, client error constructor and confirmation alert unchanged. Support
+guidance deliberately avoids promising portal cancellation reversal. The catalog
+adds a stable anchor and uses the same production confirmation component.
+
+Implementation is complete. PR #4151 is draft pending the closing commit,
+independent final ReviewGPT, exact-head required CI and preview availability.
+Those gates remain with the original task owner; no production deployment or
+merge is authorized for this functional correction.
 
 ## Risks and mitigations
 
@@ -61,3 +77,4 @@ Use the existing support escalation, with no automatic billing operation.
 Old/new Web versions differ only in message text; no deployment sequencing or
 persisted-state compatibility change. Production outcome remains unverified
 until a human merges and deploys the functional change.
+Completed: 2026-10-16

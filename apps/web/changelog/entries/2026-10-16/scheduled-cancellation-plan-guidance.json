@@ -8,7 +8,12 @@
     "title": "Clearer guidance when cancellation blocks a plan change",
     "summary": "Settings now explains when a scheduled subscription cancellation prevents a plan change.",
     "details": "The message points you to support if you want to change plans instead. Your scheduled cancellation stays in place.",
-    "relevanceTags": ["billing", "settings"],
-    "sourcePullRequests": []
+    "relevanceTags": [
+      "billing",
+      "settings"
+    ],
+    "sourcePullRequests": [
+      4151
+    ]
   }
 }
