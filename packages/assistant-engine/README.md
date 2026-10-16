@@ -498,9 +498,12 @@ package suite.
 
 Canonical live fixtures and the meal benchmark use the shared hosted Codex
 behavior builder. Their App Server launcher requires Murph's patched native
-`app-server --ignore-user-config` option: it excludes the personal `config.toml`
-and global `AGENTS.md`/`AGENTS.override.md` inputs while retaining the original
-authentication home, managed requirements, project instructions, and exec rules.
+`app-server --ignore-user-config` option: it excludes personal behavioral settings
+and global `AGENTS.md`/`AGENTS.override.md` inputs. It retains the original auth
+home, credential-store and keyring-backend selection, login/workspace restrictions,
+and ChatGPT auth endpoint in their normal configuration precedence. Managed
+requirements, project instructions, and exec rules still apply. Personal proxy
+preferences and other feature switches are not restored by this auth projection.
 CLI table overrides alone cannot provide isolation because native TOML merging
 preserves unspecified personal permission grants.
 Provider-key fixtures pass their trusted provider definition explicitly through

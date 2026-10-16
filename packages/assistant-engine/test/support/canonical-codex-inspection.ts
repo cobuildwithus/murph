@@ -10,7 +10,7 @@ export function canonicalAdapterArgs(): string[] {
   const timing = createCodexCliTimingReceiver()
   try {
     assert.ok(timing.launchArgs.length > 0)
-    const args = buildCodexAppServerArgs({ configOverrides: ['cli_auth_credentials_store="file"'] })
+    const args = buildCodexAppServerArgs({})
     args.splice(args.length - 1, 0, ...timing.launchArgs)
     return args
   } finally { timing.close() }

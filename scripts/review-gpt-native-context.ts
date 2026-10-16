@@ -16,6 +16,7 @@ export const nativeContextOwners = [
   'codex-rs/config/src/state.rs',
   'codex-rs/config/src/loader/mod.rs',
   'codex-rs/core/src/config/mod.rs',
+  'codex-rs/core/src/config/auth_keyring.rs',
   'codex-rs/codex-home/src/instructions/mod.rs',
   'codex-rs/ext/extension-api/src/user_instructions.rs',
   'codex-rs/core/src/exec_policy.rs',
@@ -30,6 +31,8 @@ export const nativeContextOwners = [
   'codex-rs/core/src/compact_remote_history.rs',
   'codex-rs/core/src/realtime_context.rs',
   'codex-rs/login/src/auth/manager.rs',
+  'codex-rs/login/src/auth/storage.rs',
+  'codex-rs/config/src/auth_policy.rs',
 ]
 
 function git(repo: string, args: string[], input?: Buffer): Buffer {

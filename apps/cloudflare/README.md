@@ -1152,9 +1152,11 @@ Cargo concurrency is capped at two jobs so a high CPU count does not expand the
 native build's memory demand; the upstream release optimization profile is kept.
 
 For developer verification, the patch also exposes the opt-in App Server
-`--ignore-user-config` switch. It skips personal configuration and global user
-instructions without moving the auth home or disabling managed requirements,
-project instructions, or exec rules. The default startup path is unchanged;
+`--ignore-user-config` switch. It skips personal behavioral configuration and
+global user instructions while retaining the auth home, credential-store/keyring
+backend selection, login/workspace restrictions and ChatGPT auth endpoint at their
+normal layer precedence. It does not restore personal proxy preferences or other
+feature switches, or disable managed requirements, project instructions or exec rules. The default startup path is unchanged;
 canonical local journey launchers explicitly select this option. CLI overrides
 still supply the hosted behavior and local installation read roots.
 

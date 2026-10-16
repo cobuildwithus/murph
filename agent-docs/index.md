@@ -1,6 +1,7 @@
 Hosted live-journey configuration is owned by `../packages/assistant-engine/README.md`;
 shared behavior and permission proof are tracked in
 [the hosted journey repair plan](exec-plans/completed/2026-10-16-frog-hosted-live-config-4144.md).
+Authentication preservation follow-on: [active plan](exec-plans/active/2026-10-16-frog-hosted-auth-store-4144.md).
 
 Entrypoint test worker build prerequisites are owned by
 `../packages/assistant-runtime/README.md#focused-tests`; repair evidence is tracked
