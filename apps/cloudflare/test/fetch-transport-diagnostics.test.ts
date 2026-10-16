@@ -16,7 +16,7 @@ import {
 import {
   observeHostedWorkspaceSnapshotFetch,
   readHostedWorkspaceSnapshotResponseIds,
-} from "../src/runtime-platform/workspace-snapshot-fetch-diagnostics.ts";
+} from "../src/runtime-platform/fetch-transport-diagnostics.ts";
 import { fetchHostedResponse } from "../src/runtime-platform/hosted-http.ts";
 
 vi.mock("@murphai/hosted-execution", async (importOriginal) => ({

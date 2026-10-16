@@ -7,6 +7,7 @@ import { TLSSocket } from "node:tls";
 import { emitHostedExecutionStructuredLog } from "@murphai/hosted-execution";
 
 import { buildHostedRuntimeSafeErrorMetadata } from "./diagnostics.ts";
+import type { HostedRuntimeFetchTransportRecorder } from "./fetch-transport-collector.ts";
 
 type SocketTiming = {
   startedAt: number;
@@ -34,11 +35,18 @@ type FetchObservation = {
 // callbacks may use a different context, so request identity owns later events.
 const fetchContext = new AsyncLocalStorage<FetchObservation>();
 
-export async function observeHostedWorkspaceSnapshotFetch(
+export type HostedRuntimeFetchTransportTiming = ReturnType<typeof readFetchTransportTiming>;
+
+/** Observe one fetch's transport phases; observation never changes its result. */
+export async function observeHostedRuntimeFetchTransport(
   run: () => Promise<Response>,
-  input: { attempt: number; timeoutMs: number },
+  onSettled: (
+    timing: HostedRuntimeFetchTransportTiming,
+    outcome: { response?: Response; failure?: unknown },
+  ) => void,
 ): Promise<Response> {
   const startedAt = performance.now();
+  const startedAtEpochMs = Date.now();
   const cpuStarted = process.cpuUsage();
   const loopStarted = performance.eventLoopUtilization();
   const state: FetchObservation = {
@@ -47,7 +55,7 @@ export async function observeHostedWorkspaceSnapshotFetch(
     connectionCount: 0,
     diagnosticError: false,
   };
-  const dispose = subscribeToSnapshotFetch(state);
+  const dispose = subscribeToFetchTransport(state);
   let response: Response | undefined;
   let failure: unknown;
   try {
@@ -59,57 +67,86 @@ export async function observeHostedWorkspaceSnapshotFetch(
   } finally {
     state.active = false;
     dispose();
-    // Telemetry cannot turn a successful restore into a failed/retried download.
+    // Telemetry cannot turn a fetch result into a failure or retry.
     try {
-      const settledAt = performance.now();
-      const cpu = process.cpuUsage(cpuStarted);
-      const loop = performance.eventLoopUtilization(loopStarted);
-      const socket = state.socket
-        ?? (!state.socketAssigned && state.connectionCount === 1 ? state.lastCreatedSocket : undefined);
-      const { startedAt: connectionStartedAt, lookupAt, connectedAt, secureAt } = socket ?? {};
-      emitHostedExecutionStructuredLog({
-        component: "hosted.runtime.workspace-snapshot",
-        details: {
-          workspaceSnapshotRestoreAttempt: input.attempt,
-          workspaceSnapshotRestoreStep: "object_fetch",
-          outcome: response ? "headers_received" : "fetch_failed",
-          responseStatus: response?.status ?? null,
-          fetchFailure: response ? null : buildHostedRuntimeSafeErrorMetadata(failure, {
-            includeSafeErrorText: false,
-          }),
-          ...readHostedWorkspaceSnapshotResponseIds(response?.headers),
-          timeoutMs: input.timeoutMs,
-          durationMs: elapsed(startedAt, settledAt),
-          transportObserved: state.requestCount > 0,
-          diagnosticError: state.diagnosticError,
-          requestCount: state.requestCount,
-          connectionCount: state.connectionCount,
-          connectionTimingObserved: socket !== undefined,
-          socketPreviouslyWritten: state.socketPreviouslyWritten ?? null,
-          requestCreatedMs: elapsed(startedAt, state.requestCreatedAt),
-          connectionStartedMs: elapsed(startedAt, connectionStartedAt),
-          dnsLookupMs: elapsed(connectionStartedAt, lookupAt),
-          tcpConnectMs: elapsed(lookupAt ?? connectionStartedAt, connectedAt),
-          tlsHandshakeMs: elapsed(connectedAt, secureAt),
-          requestSentMs: elapsed(startedAt, state.requestSentAt),
-          requestToSendMs: elapsed(state.requestCreatedAt, state.requestSentAt),
-          waitingForHeadersMs: elapsed(state.requestSentAt, state.headersAt ?? settledAt),
-          fetchResolveDelayMs: elapsed(state.headersAt, settledAt),
-          lastObservedStage: lastObservedStage(state, socket),
-          processCpuUserMs: cpu.user / 1_000,
-          processCpuSystemMs: cpu.system / 1_000,
-          processEventLoopActiveMs: loop.active,
-          processEventLoopIdleMs: loop.idle,
-        },
-        level: response?.ok ? "info" : "warn",
-        message: "Hosted workspace snapshot response headers settled.",
-        phase: "runtime.starting",
-        userId: null,
-      });
+      onSettled(readFetchTransportTiming({
+        cpu: process.cpuUsage(cpuStarted),
+        loop: performance.eventLoopUtilization(loopStarted),
+        settledAt: performance.now(),
+        startedAt,
+        startedAtEpochMs,
+        state,
+      }), { response, failure });
     } catch {
-      // The existing fetch result/error is the sole restore outcome.
+      // The existing fetch result/error is the sole outcome.
     }
   }
+}
+
+export async function observeHostedWorkspaceSnapshotFetch(
+  run: () => Promise<Response>,
+  input: { attempt: number; timeoutMs: number },
+): Promise<Response> {
+  return await observeHostedRuntimeFetchTransport(run, (timing, { response, failure }) => {
+    const { startedAtEpochMs: _startedAtEpochMs, ...details } = timing;
+    emitHostedExecutionStructuredLog({
+      component: "hosted.runtime.workspace-snapshot",
+      details: {
+        workspaceSnapshotRestoreAttempt: input.attempt,
+        workspaceSnapshotRestoreStep: "object_fetch",
+        outcome: response ? "headers_received" : "fetch_failed",
+        responseStatus: response?.status ?? null,
+        fetchFailure: response ? null : buildHostedRuntimeSafeErrorMetadata(failure, {
+          includeSafeErrorText: false,
+        }),
+        ...readHostedWorkspaceSnapshotResponseIds(response?.headers),
+        timeoutMs: input.timeoutMs,
+        ...details,
+      },
+      level: response?.ok ? "info" : "warn",
+      message: "Hosted workspace snapshot response headers settled.",
+      phase: "runtime.starting",
+      userId: null,
+    });
+  });
+}
+
+function readFetchTransportTiming(input: {
+  cpu: NodeJS.CpuUsage;
+  loop: ReturnType<typeof performance.eventLoopUtilization>;
+  settledAt: number;
+  startedAt: number;
+  startedAtEpochMs: number;
+  state: FetchObservation;
+}) {
+  const { cpu, loop, settledAt, startedAt, state } = input;
+  const socket = state.socket
+    ?? (!state.socketAssigned && state.connectionCount === 1 ? state.lastCreatedSocket : undefined);
+  const { startedAt: connectionStartedAt, lookupAt, connectedAt, secureAt } = socket ?? {};
+  return {
+    startedAtEpochMs: input.startedAtEpochMs,
+    durationMs: elapsed(startedAt, settledAt),
+    transportObserved: state.requestCount > 0,
+    diagnosticError: state.diagnosticError,
+    requestCount: state.requestCount,
+    connectionCount: state.connectionCount,
+    connectionTimingObserved: socket !== undefined,
+    socketPreviouslyWritten: state.socketPreviouslyWritten ?? null,
+    requestCreatedMs: elapsed(startedAt, state.requestCreatedAt),
+    connectionStartedMs: elapsed(startedAt, connectionStartedAt),
+    dnsLookupMs: elapsed(connectionStartedAt, lookupAt),
+    tcpConnectMs: elapsed(lookupAt ?? connectionStartedAt, connectedAt),
+    tlsHandshakeMs: elapsed(connectedAt, secureAt),
+    requestSentMs: elapsed(startedAt, state.requestSentAt),
+    requestToSendMs: elapsed(state.requestCreatedAt, state.requestSentAt),
+    waitingForHeadersMs: elapsed(state.requestSentAt, state.headersAt ?? settledAt),
+    fetchResolveDelayMs: elapsed(state.headersAt, settledAt),
+    lastObservedStage: lastObservedStage(state, socket),
+    processCpuUserMs: cpu.user / 1_000,
+    processCpuSystemMs: cpu.system / 1_000,
+    processEventLoopActiveMs: loop.active,
+    processEventLoopIdleMs: loop.idle,
+  };
 }
 
 export function readHostedWorkspaceSnapshotResponseIds(headers?: Headers) {
@@ -139,7 +176,7 @@ function lastObservedStage(state: FetchObservation, socket?: SocketTiming): stri
   return state.requestCount > 0 ? "request_created" : "fetch_started";
 }
 
-function subscribeToSnapshotFetch(state: FetchObservation): () => void {
+function subscribeToFetchTransport(state: FetchObservation): () => void {
   const requests = new WeakSet<object>();
   const sockets = new WeakMap<object, SocketTiming>();
   const cleanups: Array<() => void> = [];
@@ -212,4 +249,22 @@ function subscribeToSnapshotFetch(state: FetchObservation): () => void {
   return () => {
     for (const cleanup of cleanups) cleanup();
   };
+}
+
+/** Observe only this fetch's first call, such as the first of a read's retries. */
+export function observeFirstHostedRuntimeFetch(
+  fetchImpl: typeof fetch,
+  record: HostedRuntimeFetchTransportRecorder,
+): typeof fetch {
+  let pending: HostedRuntimeFetchTransportRecorder | null = record;
+  return ((resource: RequestInfo | URL, init?: RequestInit) => {
+    const current = pending;
+    pending = null;
+    return current
+      ? observeHostedRuntimeFetchTransport(
+        () => fetchImpl(resource, init),
+        (timing, outcome) => current(timing, outcome.response),
+      )
+      : fetchImpl(resource, init);
+  }) as typeof fetch;
 }

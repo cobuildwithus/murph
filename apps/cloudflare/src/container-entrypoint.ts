@@ -51,6 +51,10 @@ import type {
   HostedWorkspaceRestorePreparation,
 } from "@murphai/assistant-runtime/hosted-workspace-restore-preparation";
 import {
+  createHostedRuntimeFetchTransportDiagnostics,
+  type HostedRuntimeFetchTransportDiagnostics,
+} from "./runtime-platform/fetch-transport-collector.ts";
+import {
   HOSTED_RUNTIME_ARCHITECTURE_VERSION,
 } from "./hosted-runtime-architecture.ts";
 import {
@@ -218,6 +222,7 @@ interface HostedContainerRuntimeOptions {
   loadHeavyRuntime?: () => Promise<HostedContainerHeavyRuntimeCore>;
   parseRunnerJobInput?: typeof parseHostedExecutionRunnerJobInput;
   prepareWorkspaceRestore?: (input: {
+    fetchTransportDiagnostics?: HostedRuntimeFetchTransportDiagnostics | null;
     job: HostedExecutionRunnerJobInput;
     signal: AbortSignal;
   }) => Promise<HostedWorkspaceRestorePreparation>;
@@ -949,7 +954,10 @@ export async function startHostedContainerEntrypoint(input: {
       await stopWarmCodexWithLifecycleLog(runtime.stopWarmCodex, {
         reason: "hosted-workspace-restore",
       });
+      // One diagnostic collector spans restore preparation and the invocation.
+      const fetchTransportDiagnostics = createHostedRuntimeFetchTransportDiagnostics();
       workspaceRestorePreparation = runtime.prepareWorkspaceRestore({
+        fetchTransportDiagnostics,
         job,
         signal: invocationAbort.signal,
       });
@@ -1019,6 +1027,7 @@ export async function startHostedContainerEntrypoint(input: {
         ...(coldNodeStartupMs === null ? {} : { nodeStartupMs: coldNodeStartupMs }),
         ...(dispatchMilestones ? { dispatch: dispatchMilestones } : {}),
         ...(orchestrationMilestones ? { orchestration: orchestrationMilestones } : {}),
+        fetchTransportDiagnostics,
         preparedWorkspaceRestore,
         runnerJobAcceptedAt,
         releaseSha: runnerBundle?.releaseSha ?? null,
@@ -1766,6 +1775,7 @@ async function loadHostedContainerHeavyRuntime(): Promise<HostedContainerHeavyRu
 }
 
 async function prepareHostedContainerWorkspaceRestore(input: {
+  fetchTransportDiagnostics?: HostedRuntimeFetchTransportDiagnostics | null;
   job: HostedExecutionRunnerJobInput;
   signal: AbortSignal;
 }): Promise<HostedWorkspaceRestorePreparation> {
