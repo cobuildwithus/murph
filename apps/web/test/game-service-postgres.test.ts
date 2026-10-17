@@ -344,7 +344,7 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     const ava = await member("Ava", "UTC");
     // Only today's weekday counts, so tomorrow is a day off.
     const today = gameLocalDate(new Date(), "America/New_York");
-    const { gameId } = await startGame(leo, ava, { terms: { ...TERMS, schedule: { days: [weekdayOf(today)] } } });
+    const { gameId, token } = await startGame(leo, ava, { terms: { ...TERMS, schedule: { days: [weekdayOf(today)] } } });
     await devStartNow(gameId, leo);
     const shot = await photo(leo, gameId, "today");
     await ok(leo, shot);
@@ -363,6 +363,8 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
 
     const ended = await devAdvanceDays(gameId, leo, 7);
     expect(ended.status).toBe("settled");
+    // Past the invite's 7-day expiry, a link that was taken still reads as used.
+    expect(await readInvitePreview(token)).toEqual({ status: "used" });
   });
 
   it("starts the round count over when someone new takes a rematch", async () => {

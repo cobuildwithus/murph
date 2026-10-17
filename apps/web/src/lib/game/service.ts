@@ -771,8 +771,11 @@ export async function readInvitePreview(token: string): Promise<GameInvitePrevie
   });
   if (!row) return null;
   const now = gameNow(await databaseNow(getPrisma()), row);
-  const expired = row.inviteExpiresAt !== null && row.inviteExpiresAt.getTime() < now.getTime();
-  if (row.status !== "invited" || expired) return { status: row.status === "void" || expired ? "expired" : "used" };
+  // Expired means nobody took it: a void game, or an open invite past its
+  // expiry. A taken one stays "used" however long ago that was.
+  const expired = row.status === "void"
+    || (row.status === "invited" && row.inviteExpiresAt !== null && row.inviteExpiresAt.getTime() < now.getTime());
+  if (row.status !== "invited" || expired) return { status: expired ? "expired" : "used" };
   const label = parsePendingLabel(row.pendingLabel);
   const [inviterFirstName, inviteeFirstName, words] = await openGameTexts([
     { field: "first_name", memberId: row.createdBy, rowId: row.createdBy, table: "game_profile", value: row.creator.firstNameEncrypted },
