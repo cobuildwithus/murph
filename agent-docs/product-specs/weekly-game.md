@@ -75,7 +75,10 @@ public profile photos.
 - **Rematch.** A new game can name the previous one. After a settled game with
   the same two people, its round is the previous round plus one; otherwise 1.
   A rematch of a settled 1v1 is addressed to the other player: it appears on
-  their Home ready to accept, so nobody texts a second link.
+  their Home ready to accept, so nobody texts a second link. It must follow
+  the pair's newest game: it's refused while they have a game going or an open
+  rematch between them (`ALREADY_IN_A_GAME`), and when a later game between
+  them has already settled (`REMATCH_OUTDATED`).
 - **Retries.** Every action is safe to repeat: creating a game with the same id,
   posting the same entry, accepting an invite already accepted, or redeeming a
   ticket already redeemed returns the current game and changes nothing.

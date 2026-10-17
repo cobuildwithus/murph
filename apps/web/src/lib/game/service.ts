@@ -241,7 +241,7 @@ async function createGame(context: CommandContext, command: Extract<GameCommand,
     if (existing.createdBy !== actor) reject("INVALID_REQUEST", "That game id is taken.");
     return gameId;
   }
-  const rematch = command.previousGameId ? await readRematch(actor, command.previousGameId) : null;
+  const rematch = command.previousGameId ? await readRematch(actor, command.previousGameId, context.now ?? new Date()) : null;
   const newTerms = decideNewTerms(command.terms, {
     newKey: () => generateHostedRandomPrefixedId("gsk"),
     today: gameLocalDate(context.now ?? new Date(), profile.timeZone),
@@ -293,7 +293,11 @@ async function createGame(context: CommandContext, command: Extract<GameCommand,
  * game with exactly one other player, it continues the round count (the joiner
  * is checked at go-live) and is addressed to that player, who sees it on Home.
  */
-async function readRematch(actor: string, previousGameId: string): Promise<{ round: number; inviteeMemberId: string | null }> {
+async function readRematch(
+  actor: string,
+  previousGameId: string,
+  now: Date,
+): Promise<{ round: number; inviteeMemberId: string | null }> {
   const previous = await getPrisma().game.findUnique({
     include: { players: { select: { memberId: true } } },
     where: { id: previousGameId },
@@ -304,7 +308,42 @@ async function readRematch(actor: string, previousGameId: string): Promise<{ rou
   }
   if (previous.status !== "settled") return { inviteeMemberId: null, round: 1 };
   const others = previous.players.filter((player) => player.memberId !== actor);
-  return { inviteeMemberId: others.length === 1 ? others[0].memberId : null, round: previous.round + 1 };
+  if (others.length !== 1) return { inviteeMemberId: null, round: previous.round + 1 };
+  await assertLatestBetween(actor, others[0].memberId, previous.id, now);
+  return { inviteeMemberId: others[0].memberId, round: previous.round + 1 };
+}
+
+/**
+ * An addressed rematch only follows the pair's newest game: refuse it while
+ * they have a game going or an open invite between them (it could never be
+ * accepted), or when a later game between them has already settled.
+ */
+async function assertLatestBetween(actor: string, otherId: string, previousGameId: string, now: Date): Promise<void> {
+  const prisma = getPrisma();
+  const bothPlayed = { AND: [{ players: { some: { memberId: actor } } }, { players: { some: { memberId: otherId } } }] };
+  const pending = await prisma.game.findFirst({
+    select: { id: true },
+    where: {
+      OR: [
+        { liveRosterKey: liveRosterKey([actor, otherId]) },
+        {
+          inviteExpiresAt: { gt: now },
+          OR: [{ createdBy: actor, inviteeMemberId: otherId }, { createdBy: otherId, inviteeMemberId: actor }],
+          status: "invited",
+        },
+      ],
+    },
+  });
+  if (pending) reject("ALREADY_IN_A_GAME", await alreadyPlayingMessage(otherId));
+  const latest = await prisma.game.findFirst({
+    orderBy: [{ settledAt: "desc" }, { id: "desc" }],
+    select: { id: true },
+    where: { ...bothPlayed, status: "settled" },
+  });
+  if (latest && latest.id !== previousGameId) {
+    const name = await firstNameOf(otherId);
+    reject("REMATCH_OUTDATED", name ? `There's a newer game with ${name}.` : "There's a newer game between you two.");
+  }
 }
 
 async function join(context: CommandContext, command: Extract<GameCommand, { type: "join" }>): Promise<string> {
@@ -336,11 +375,17 @@ async function join(context: CommandContext, command: Extract<GameCommand, { typ
 
 /** From the caller's side, naming the other player by their own first name. */
 async function alreadyPlayingMessage(otherId: string): Promise<string> {
-  const profile = await getPrisma().gameProfile.findUnique({ select: { firstNameEncrypted: true }, where: { memberId: otherId } });
-  const [name] = await openGameTexts(profile
-    ? [{ field: "first_name", memberId: otherId, rowId: otherId, table: "game_profile", value: profile.firstNameEncrypted }]
-    : []);
+  const name = await firstNameOf(otherId);
   return name ? `You and ${name} already have a game going.` : "You two already have a game going.";
+}
+
+/** A player's own first name, or null without a profile. */
+async function firstNameOf(memberId: string): Promise<string | null> {
+  const profile = await getPrisma().gameProfile.findUnique({ select: { firstNameEncrypted: true }, where: { memberId } });
+  const [name] = await openGameTexts(profile
+    ? [{ field: "first_name", memberId, rowId: memberId, table: "game_profile", value: profile.firstNameEncrypted }]
+    : []);
+  return name ?? null;
 }
 
 async function accept(context: CommandContext, command: Extract<GameCommand, { type: "join" }>, gameId: string): Promise<void> {

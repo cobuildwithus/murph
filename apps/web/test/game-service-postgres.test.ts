@@ -367,6 +367,39 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     expect(await readInvitePreview(token)).toEqual({ status: "used" });
   });
 
+  it("refuses a rematch of an older game once the same two people have a newer one", async () => {
+    const leo = await member("Leo", "America/New_York");
+    const ava = await member("Ava", "America/New_York");
+    const { gameId: first } = await startGame(leo, ava);
+    await devSettleNow(first, leo);
+    const rematchOf = (previousGameId: string): GameCommand => ({
+      gameId: randomUUID(),
+      inviteeFirstName: "Ava",
+      previousGameId,
+      terms: TERMS,
+      type: "createGame",
+    });
+
+    // A rematch of the newest game works.
+    const second = await ok(leo, rematchOf(first));
+    expect(second).toMatchObject({ round: 2, status: "invited" });
+    // While that rematch is open, or live, another one from round 1 could never be accepted.
+    expect(await run(leo, rematchOf(first))).toMatchObject({
+      error: { code: "ALREADY_IN_A_GAME", message: "You and Ava already have a game going." },
+      ok: false,
+    });
+    await ok(ava, { termsVersion: 1, timeZone: "America/New_York", token: second!.inviteToken!, type: "join" });
+    expect(await errorCode(ava, rematchOf(first))).toBe("ALREADY_IN_A_GAME");
+
+    // Once round 2 has settled, round 1 is outdated; round 2 rematches fine.
+    await devSettleNow(second!.id, leo);
+    expect(await run(ava, rematchOf(first))).toMatchObject({
+      error: { code: "REMATCH_OUTDATED", message: "There's a newer game with Leo." },
+      ok: false,
+    });
+    expect(await ok(ava, rematchOf(second!.id))).toMatchObject({ round: 3, status: "invited" });
+  });
+
   it("starts the round count over when someone new takes a rematch", async () => {
     const leo = await member("Leo", "America/New_York");
     const ava = await member("Ava", "Australia/Sydney");
