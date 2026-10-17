@@ -1,6 +1,7 @@
 ---
 title: 'Plan closer leaves a wrapped Status continuation behind after marking a plan completed'
 severity: 'minor'
+issue: 'cobuildwithus/murph#4178'
 ---
 
 ## Expected Behavior
