@@ -33,16 +33,18 @@ public profile photos.
 
 ## Rules
 
-- **Days.** Day 1 is each player's next local day after the game goes live. If
-  the challenger picked a start date (tomorrow to 60 days out in their zone)
-  and it's later, Day 1 is that date, the same calendar date for everyone.
-  Start now makes it today; before 3am that first day is short, since it still
-  ends at 3am (Start now is a dev tool today). A day runs 3am to 3am in the
-  player's time zone, frozen at go-live from their profile, so New York and
-  Sydney can play different local dates, paired by day number.
-- **Weekdays.** A set-weekdays game follows the challenger's calendar: a day
-  number is on or off for everyone, by the weekday it falls on for the
-  challenger, so both players' days off line up.
+- **Days.** Everyone shares one Day 1 calendar date: the next local day after
+  the game goes live for whichever player is furthest ahead (Sydney before New
+  York), or the challenger's picked start date (tomorrow to 60 days out in
+  their zone) if that's later. A day runs 3am to 3am in each player's own time
+  zone, frozen at go-live from their profile, so day number N is the same date
+  and weekday for everyone, each in their own zone.
+- **Start now.** Day 1 becomes the latest "today" among the players, so
+  nobody's Day 1 is already over: across the date line the player behind
+  starts tomorrow. Before 3am that first day is short, since it still ends at
+  3am. Start now is a dev tool today.
+- **Weekdays.** A set-weekdays game is on and off on the same dates for
+  everyone, because every player's day number falls on the same date.
 - **Posting.** One photo a day. Taking it back and retaking is allowed once per
   day (two photos in total, withdrawn ones included).
 - **Excuses.** An excuse explains a missed day in a few words: the phone
@@ -73,7 +75,10 @@ public profile photos.
 - **Rematch.** A new game can name the previous one. After a settled game with
   the same two people, its round is the previous round plus one; otherwise 1.
   A rematch of a settled 1v1 is addressed to the other player: it appears on
-  their Home ready to accept, so nobody texts a second link.
+  their Home ready to accept, so nobody texts a second link. It must follow
+  the pair's newest game: it's refused while they have a game going or an open
+  rematch between them (`ALREADY_IN_A_GAME`), and when a later game between
+  them has already settled (`REMATCH_OUTDATED`).
 - **Retries.** Every action is safe to repeat: creating a game with the same id,
   posting the same entry, accepting an invite already accepted, or redeeming a
   ticket already redeemed returns the current game and changes nothing.
