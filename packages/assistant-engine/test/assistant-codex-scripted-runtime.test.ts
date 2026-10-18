@@ -81,6 +81,7 @@ import {
 } from '../src/assistant-codex/dynamic-tools.ts'
 import {
   MURPH_ATTACH_RESPONSE_CARD_TOOL,
+  MURPH_ATTACH_RESPONSE_MEDIA_TOOL,
   MURPH_FINISH_WITHOUT_REPLY_TOOL,
   MURPH_GROUP_CHALLENGE_RESPONSE_CARD_TOOL,
   MURPH_GROUP_FAMILY_TOOLS,
@@ -10710,6 +10711,552 @@ text(JSON.stringify(result));
     expect(result.turnId).toEqual(expect.any(String))
     expect(liveTurnReleased).toBe(1)
     expect(scenario.stub.requestCountSinceBaseline()).toBe(2)
+  })
+
+  async function runSteerDuringUnfinishedAnswer(input: {
+    configOverrides?: readonly string[]
+    holdMs: number
+    replacement: ScriptedResponse
+    followingReplacements?: readonly ScriptedResponse[]
+    turnInput?: Partial<Parameters<typeof executeCodexAppServerTurn>[0]>
+  }) {
+    const scenario = await prepareScriptedTurnScenario()
+    let partialSent!: () => void
+    const partial = new Promise<void>((resolve) => {
+      partialSent = resolve
+    })
+    scenario.stub.queue(
+      {
+        partialText: {
+          delta: 'STALE_UNFINISHED ',
+          holdMs: input.holdMs,
+          onSent: () => partialSent(),
+        },
+        text: 'STALE_UNFINISHED COMPLETE',
+      },
+      input.replacement,
+      ...(input.followingReplacements ?? []),
+    )
+    let steered: Promise<void> | null = null
+    const startedAt = Date.now()
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      ...input.turnInput,
+      ...(input.configOverrides ? { configOverrides: input.configOverrides } : {}),
+      onLiveTurn: (turn: CodexAppServerLiveTurn) => {
+        steered = partial.then(() =>
+          turn.steer({ prompt: 'Use the corrected synthetic detail.' }))
+        return () => {}
+      },
+      prompt: 'Answer the first synthetic message.',
+    })
+    expect(steered).not.toBeNull()
+    await steered
+    return {
+      elapsedMs: Date.now() - startedAt,
+      result,
+      stub: scenario.stub,
+    }
+  }
+
+  it('preempts an unfinished SSE answer on steer and delivers only the steered reply', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const { elapsedMs, result, stub } = await runSteerDuringUnfinishedAnswer({
+      holdMs: 30_000,
+      replacement: {
+        requestIncludes: ['Use the corrected synthetic detail.'],
+        requestExcludes: ['STALE_UNFINISHED'],
+        text: 'STEERED_FINAL_OK',
+      },
+    })
+
+    expect(result.finalMessage).toBe('STEERED_FINAL_OK')
+    expect(result.precedingAgentMessageSegments).toEqual([])
+    expect(stub.abortedResponseCountSinceBaseline()).toBe(1)
+    expect(stub.requestCountSinceBaseline()).toBe(2)
+    expect(elapsedMs).toBeLessThan(20_000)
+  })
+
+  it('keeps the queued steer behavior when a caller explicitly disables instant steering', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const { elapsedMs, result, stub } = await runSteerDuringUnfinishedAnswer({
+      configOverrides: ['features.instant_interrupt=false'],
+      holdMs: 3_000,
+      replacement: {
+        requestIncludes: [
+          'STALE_UNFINISHED COMPLETE',
+          'Use the corrected synthetic detail.',
+        ],
+        text: 'STEERED_FINAL_OK',
+      },
+    })
+
+    expect(result.finalMessage).toBe('STEERED_FINAL_OK')
+    expect(result.precedingAgentMessageSegments.map((segment) => segment.response))
+      .toEqual(['STALE_UNFINISHED COMPLETE'])
+    expect(stub.abortedResponseCountSinceBaseline()).toBe(0)
+    expect(stub.requestCountSinceBaseline()).toBe(2)
+    expect(elapsedMs).toBeGreaterThanOrEqual(3_000)
+  })
+
+  it('does not reuse unfinished preempted text when the steered reply has no text', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const { result, stub } = await runSteerDuringUnfinishedAnswer({
+      holdMs: 30_000,
+      replacement: {
+        requestIncludes: ['Use the corrected synthetic detail.'],
+        text: '',
+      },
+    })
+
+    expect(stub.abortedResponseCountSinceBaseline()).toBe(1)
+    expect(result.finalMessage ?? '').not.toContain('STALE_UNFINISHED')
+    expect(result.precedingAgentMessageSegments).toEqual([])
+  })
+
+  it.each([true, false])('code_mode_interrupt=%s keeps a no-reply cell and its nested Murph tools inside their turn', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async (codeModeInterrupt) => {
+    const scenario = await prepareScriptedTurnScenario()
+    let phase: 'turn-one' | 'between-turns' | 'turn-two' = 'turn-one'
+    const nestedCalls: Array<{ lookup: string, phase: string }> = []
+    let releaseFirstCall!: () => void
+    const firstCallGate = new Promise<void>((resolve) => {
+      releaseFirstCall = resolve
+    })
+    scenario.stub.queue(
+      {
+        customToolCall: {
+          input: `// @exec: {"yield_time_ms": 1000}
+const first = await tools.murph__automation({ action: "inspect", lookup: "first-call" });
+const second = await tools.murph__automation({ action: "inspect", lookup: "after-interrupt" });
+text(JSON.stringify([first.lookupId, second.lookupId]));
+`,
+          name: 'exec',
+        },
+      },
+      {
+        functionCall: {
+          arguments: {},
+          name: 'finish_without_reply',
+          namespace: 'murph',
+        },
+        requestIncludes: ['Script running'],
+      },
+      { requestExcludes: ['SYNTHETIC_TURN_TWO'], text: '' },
+      { requestIncludes: ['SYNTHETIC_TURN_TWO'], text: 'TURN_TWO_OK' },
+    )
+    scenario.stub.captureProviderRequestDiagnostics()
+    const turnInput = {
+      ...scenario.turnInput,
+      allowFinishWithoutReply: true,
+      configOverrides: [`features.code_mode_interrupt=${codeModeInterrupt}`],
+      dynamicTools: [MURPH_AUTOMATION_TOOL, MURPH_FINISH_WITHOUT_REPLY_TOOL],
+      hostedToolContext: {
+        automationTool: {
+          request: async (request: AssistantHostedAutomationToolRequest) => {
+            const lookup = 'lookup' in request ? String(request.lookup) : 'none'
+            nestedCalls.push({ lookup, phase })
+            if (lookup === 'first-call') {
+              // Stay in flight past the cell yield and the no-reply interrupt.
+              setTimeout(releaseFirstCall, 4_000)
+              await firstCallGate
+            }
+            return {
+              action: 'inspect' as const,
+              automationId: `automation-${lookup}`,
+              effectiveTimeZone: 'America/Chicago',
+              lookupId: lookup,
+              occurrenceProjection: {
+                nextOccurrenceAt: '2026-08-11T03:00:00.000Z',
+                status: 'resolved' as const,
+              },
+              routeBinding: 'preserved' as const,
+              schedule: {
+                kind: 'dailyLocal' as const,
+                localTime: '22:00',
+                timeZone: 'America/Chicago',
+              },
+              status: 'active' as const,
+              updatedAt: '2026-08-10T00:00:00.000Z',
+            }
+          },
+        },
+        computerToolsAvailable: false,
+        currentHostedDeliveryContext: () => null,
+        currentHostedMailboxItemIds: () => [],
+        sendVaultFile: async () => {
+          throw new Error('Vault file sends are unavailable in this test.')
+        },
+        vaultFileSendAvailable: false,
+      },
+    }
+
+    const first = await executeCodexAppServerTurn({
+      ...turnInput,
+      prompt: 'Inspect the synthetic reminder, then decide whether to reply.',
+    })
+    phase = 'between-turns'
+    await delay(2_000)
+    phase = 'turn-two'
+    const second = await executeCodexAppServerTurn({
+      ...turnInput,
+      prompt: 'SYNTHETIC_TURN_TWO',
+      resumeSessionId: first.sessionId,
+    })
+    await delay(1_000)
+
+    // Murph drains its own in-flight tool before the no-reply turn closes, so
+    // the cell finishes inside turn one and nothing reaches the resumed turn.
+    expect(first.finalAction).toEqual(expect.objectContaining({ kind: 'none' }))
+    expect(nestedCalls).toEqual([
+      { lookup: 'first-call', phase: 'turn-one' },
+      { lookup: 'after-interrupt', phase: 'turn-one' },
+    ])
+    expect(second.finalMessage).toBe('TURN_TWO_OK')
+  })
+
+  it.each([
+    { codeModeInterrupt: true, interruptAfterMs: 200 },
+    { codeModeInterrupt: false, interruptAfterMs: 200 },
+    { codeModeInterrupt: true, interruptAfterMs: null },
+    { codeModeInterrupt: false, interruptAfterMs: null },
+  ])('code_mode_interrupt=$codeModeInterrupt interrupt=$interruptAfterMs never carries a yielded cell tool into the next turn', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async ({ codeModeInterrupt, interruptAfterMs }) => {
+    const timeline: string[] = []
+    const onTraceEvent = (event: { rawEvent: unknown }) => {
+      const method = readRecord(event.rawEvent)?.method
+      if (method === 'turn/completed' || method === 'turn/started') {
+        timeline.push(String(method))
+      }
+    }
+    const scenario = await prepareScriptedTurnScenario()
+    let phase: 'turn-one' | 'between-turns' | 'turn-two' = 'turn-one'
+    const nestedCalls: Array<{ lookup: string, phase: string }> = []
+    let releaseFirstCall!: () => void
+    const firstCallGate = new Promise<void>((resolve) => {
+      releaseFirstCall = resolve
+    })
+    let firstCallStarted!: () => void
+    const firstCallStartedPromise = new Promise<void>((resolve) => {
+      firstCallStarted = resolve
+    })
+    scenario.stub.queue(
+      {
+        customToolCall: {
+          input: `// @exec: {"yield_time_ms": 1000}
+const first = await tools.murph__automation({ action: "inspect", lookup: "first-call" });
+const second = await tools.murph__automation({ action: "inspect", lookup: "after-interrupt" });
+text(JSON.stringify([first.lookupId, second.lookupId]));
+`,
+          name: 'exec',
+        },
+        requestExcludes: ['SYNTHETIC_TURN_TWO'],
+      },
+      { requestExcludes: ['SYNTHETIC_TURN_TWO'], text: '' },
+      { requestExcludes: ['SYNTHETIC_TURN_TWO'], text: '' },
+      { requestIncludes: ['SYNTHETIC_TURN_TWO'], text: 'TURN_TWO_OK' },
+      { requestIncludes: ['SYNTHETIC_TURN_TWO'], text: 'TURN_TWO_OK' },
+    )
+    scenario.stub.captureProviderRequestDiagnostics()
+    const turnInput = {
+      ...scenario.turnInput,
+      configOverrides: [`features.code_mode_interrupt=${codeModeInterrupt}`],
+      dynamicTools: [MURPH_AUTOMATION_TOOL],
+      hostedToolContext: {
+        automationTool: {
+          request: async (request: AssistantHostedAutomationToolRequest) => {
+            const lookup = 'lookup' in request ? String(request.lookup) : 'none'
+            nestedCalls.push({ lookup, phase })
+            timeline.push(`murph-tool:${lookup}:${phase}`)
+            if (lookup === 'first-call') {
+              firstCallStarted()
+              await firstCallGate
+            }
+            return {
+              action: 'inspect' as const,
+              automationId: `automation-${lookup}`,
+              effectiveTimeZone: 'America/Chicago',
+              lookupId: lookup,
+              occurrenceProjection: {
+                nextOccurrenceAt: '2026-08-11T03:00:00.000Z',
+                status: 'resolved' as const,
+              },
+              routeBinding: 'preserved' as const,
+              schedule: {
+                kind: 'dailyLocal' as const,
+                localTime: '22:00',
+                timeZone: 'America/Chicago',
+              },
+              status: 'active' as const,
+              updatedAt: '2026-08-10T00:00:00.000Z',
+            }
+          },
+        },
+        computerToolsAvailable: false,
+        currentHostedDeliveryContext: () => null,
+        currentHostedMailboxItemIds: () => [],
+        sendVaultFile: async () => {
+          throw new Error('Vault file sends are unavailable in this test.')
+        },
+        vaultFileSendAvailable: false,
+      },
+    }
+
+    let interrupted: Promise<void> | null = null
+    let interruptOutcome = 'not-requested'
+    let firstSessionId: string | null = null
+    let firstOutcome: string
+    try {
+      const first = await executeCodexAppServerTurn({
+        ...turnInput,
+        onTraceEvent,
+        onLiveTurn: (turn: CodexAppServerLiveTurn) => {
+          interrupted = firstCallStartedPromise
+            .then(async () => {
+              if (interruptAfterMs === null) return
+              await delay(interruptAfterMs)
+              await turn.interrupt().then(
+                () => { interruptOutcome = 'accepted' },
+                (error: unknown) => {
+                  interruptOutcome = `rejected:${error instanceof Error ? error.message : 'unknown'}`
+                },
+              )
+            })
+            .finally(() => setTimeout(releaseFirstCall, 2_000))
+          return () => {}
+        },
+        prompt: 'Inspect the synthetic reminder.',
+      })
+      firstOutcome = `completed:${first.finalMessage}`
+      firstSessionId = first.sessionId
+    } catch (error) {
+      firstOutcome = `failed:${error instanceof Error ? error.message.slice(0, 120) : 'unknown'}`
+    }
+    await interrupted
+    phase = 'between-turns'
+    await delay(3_000)
+    phase = 'turn-two'
+    let secondOutcome: string
+    try {
+      const second = await executeCodexAppServerTurn({
+        ...turnInput,
+        onTraceEvent,
+        prompt: 'SYNTHETIC_TURN_TWO',
+        ...(firstSessionId ? { resumeSessionId: firstSessionId } : {}),
+      })
+      secondOutcome = `completed:${second.finalMessage}`
+    } catch (error) {
+      secondOutcome = `failed:${error instanceof Error ? error.message.slice(0, 120) : 'unknown'}`
+    }
+    await delay(1_000)
+
+    // App Server aborts a turn's pending server requests when the turn ends,
+    // so a yielded cell cannot carry a nested Murph tool into the next turn.
+    expect(interruptOutcome).toBe(interruptAfterMs === null ? 'not-requested' : 'accepted')
+    expect(firstOutcome).toMatch(interruptAfterMs === null ? /^completed:/u : /^failed:.*interrupted/u)
+    expect(nestedCalls).toEqual([{ lookup: 'first-call', phase: 'turn-one' }])
+    expect(timeline).toEqual([
+      'turn/started',
+      'murph-tool:first-call:turn-one',
+      'turn/completed',
+      'turn/started',
+      'turn/completed',
+    ])
+    expect(secondOutcome).toBe('completed:TURN_TWO_OK')
+  })
+
+  it('steers past a slow in-flight nested Murph tool without repeating its effect', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    const effects: string[] = []
+    let releaseEffect!: () => void
+    const effectGate = new Promise<void>((resolve) => {
+      releaseEffect = resolve
+    })
+    let effectStarted!: () => void
+    const effectStartedPromise = new Promise<void>((resolve) => {
+      effectStarted = resolve
+    })
+    let steeredRequestSeenBeforeEffectFinished = false
+    scenario.stub.queue(
+      {
+        customToolCall: {
+          input: `// @exec: {"yield_time_ms": 30000}
+const result = await tools.murph__automation({ action: "inspect", lookup: "slow-effect" });
+text(JSON.stringify(result.lookupId));
+`,
+          name: 'exec',
+        },
+      },
+      {
+        requestIncludes: ['Use the corrected synthetic detail.', 'Script running'],
+        respond: () => {
+          steeredRequestSeenBeforeEffectFinished = effects.length === 1
+          setTimeout(releaseEffect, 500)
+          return { text: 'STEERED_AFTER_YIELD_OK' }
+        },
+      },
+    )
+    let steered: Promise<void> | null = null
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      dynamicTools: [MURPH_AUTOMATION_TOOL],
+      hostedToolContext: {
+        automationTool: {
+          request: async (request: AssistantHostedAutomationToolRequest) => {
+            effects.push('lookup' in request ? String(request.lookup) : 'none')
+            effectStarted()
+            await effectGate
+            return {
+              action: 'inspect' as const,
+              automationId: 'automation-slow-effect',
+              effectiveTimeZone: 'America/Chicago',
+              lookupId: 'slow-effect',
+              occurrenceProjection: {
+                nextOccurrenceAt: '2026-08-11T03:00:00.000Z',
+                status: 'resolved' as const,
+              },
+              routeBinding: 'preserved' as const,
+              schedule: {
+                kind: 'dailyLocal' as const,
+                localTime: '22:00',
+                timeZone: 'America/Chicago',
+              },
+              status: 'active' as const,
+              updatedAt: '2026-08-10T00:00:00.000Z',
+            }
+          },
+        },
+        computerToolsAvailable: false,
+        currentHostedDeliveryContext: () => null,
+        currentHostedMailboxItemIds: () => [],
+        sendVaultFile: async () => {
+          throw new Error('Vault file sends are unavailable in this test.')
+        },
+        vaultFileSendAvailable: false,
+      },
+      onLiveTurn: (turn: CodexAppServerLiveTurn) => {
+        steered = effectStartedPromise.then(() =>
+          turn.steer({ prompt: 'Use the corrected synthetic detail.' }))
+        return () => {}
+      },
+      prompt: 'Inspect the synthetic reminder.',
+    })
+
+    await steered
+    expect(steeredRequestSeenBeforeEffectFinished).toBe(true)
+    expect(effects).toEqual(['slow-effect'])
+    expect(result.finalMessage).toBe('STEERED_AFTER_YIELD_OK')
+    expect(scenario.stub.requestCountSinceBaseline()).toBe(2)
+  })
+
+  it('incorporates rapid successive steers into one reply without stale preempted text', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    let firstPartialSent!: () => void
+    const firstPartial = new Promise<void>((resolve) => { firstPartialSent = resolve })
+    let secondPartialSent!: () => void
+    const secondPartial = new Promise<void>((resolve) => { secondPartialSent = resolve })
+    scenario.stub.queue(
+      {
+        partialText: { delta: 'STALE_FIRST ', holdMs: 30_000, onSent: () => firstPartialSent() },
+        text: 'STALE_FIRST COMPLETE',
+      },
+      {
+        partialText: { delta: 'STALE_SECOND ', holdMs: 30_000, onSent: () => secondPartialSent() },
+        requestIncludes: ['First synthetic correction.'],
+        requestExcludes: ['Second synthetic correction.'],
+        text: 'STALE_SECOND COMPLETE',
+      },
+      {
+        requestIncludes: ['First synthetic correction.', 'Second synthetic correction.'],
+        requestExcludes: ['STALE_FIRST', 'STALE_SECOND'],
+        text: 'BOTH_STEERS_OK',
+      },
+    )
+    const steers: Promise<void>[] = []
+    const startedAt = Date.now()
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      onLiveTurn: (turn: CodexAppServerLiveTurn) => {
+        steers.push(firstPartial.then(() =>
+          turn.steer({ prompt: 'First synthetic correction.' })))
+        steers.push(secondPartial.then(() =>
+          turn.steer({ prompt: 'Second synthetic correction.' })))
+        return () => {}
+      },
+      prompt: 'Answer the first synthetic message.',
+    })
+
+    await Promise.all(steers)
+    expect(result.finalMessage).toBe('BOTH_STEERS_OK')
+    expect(result.precedingAgentMessageSegments).toEqual([])
+    expect(scenario.stub.abortedResponseCountSinceBaseline()).toBe(2)
+    expect(scenario.stub.requestCountSinceBaseline()).toBe(3)
+    expect(Date.now() - startedAt).toBeLessThan(20_000)
+  })
+
+  it('keeps a steered media-only reply free of unfinished preempted text', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const media = [{
+      alt: 'Synthetic chart',
+      kind: 'image',
+      url: 'https://cdn.example.test/assistant/steered-chart.png',
+    }]
+    const { result, stub } = await runSteerDuringUnfinishedAnswer({
+      holdMs: 30_000,
+      replacement: {
+        functionCall: {
+          arguments: { media },
+          name: 'attach_response_media',
+          namespace: 'murph',
+        },
+        requestIncludes: ['Use the corrected synthetic detail.'],
+      },
+      followingReplacements: [{ text: '' }],
+      turnInput: { dynamicTools: [MURPH_ATTACH_RESPONSE_MEDIA_TOOL] },
+    })
+
+    expect(stub.abortedResponseCountSinceBaseline()).toBe(1)
+    expect(result.responseMedia).toEqual([
+      expect.objectContaining({ url: media[0]!.url }),
+    ])
+    expect(result.finalMessage ?? '').not.toContain('STALE_UNFINISHED')
+    expect(result.precedingAgentMessageSegments).toEqual([])
+  })
+
+  it('finishes a steered no-reply turn without delivering unfinished preempted text', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const { result, stub } = await runSteerDuringUnfinishedAnswer({
+      holdMs: 30_000,
+      replacement: {
+        functionCall: {
+          arguments: {},
+          name: 'finish_without_reply',
+          namespace: 'murph',
+        },
+        requestIncludes: ['Use the corrected synthetic detail.'],
+      },
+      followingReplacements: [{ text: '' }],
+      turnInput: {
+        allowFinishWithoutReply: true,
+        dynamicTools: [MURPH_FINISH_WITHOUT_REPLY_TOOL],
+      },
+    })
+
+    expect(stub.abortedResponseCountSinceBaseline()).toBe(1)
+    expect(result.finalAction).toEqual(expect.objectContaining({ kind: 'none' }))
+    expect(result.finalMessage ?? '').not.toContain('STALE_UNFINISHED')
+    expect(result.precedingAgentMessageSegments).toEqual([])
   })
 })
 

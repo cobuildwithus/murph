@@ -150,6 +150,7 @@ import {
 } from './assistant-codex/compaction-usage.js'
 import {
   resolveCodexChildEnv,
+  withCodexAppServerSteeringFeatureOverrides,
   withHostedCodexModelCatalogConfigOverride,
 } from './assistant-codex/config.js'
 import {
@@ -1138,11 +1139,12 @@ async function prepareCodexAppServerProcessInput(
     env: input.env,
   })
   const codexCommand = resolveCodexAppServerCommand(input.codexCommand)
-  const configOverrides =
+  const configOverrides = withCodexAppServerSteeringFeatureOverrides(
     withHostedCodexModelCatalogConfigOverride({
       configOverrides: input.configOverrides,
       env: input.env,
-    }) ?? []
+    }) ?? [],
+  )
   const args = buildCodexAppServerArgs({
     configOverrides,
     oss: input.oss,
@@ -3661,6 +3663,7 @@ async function runCodexAppServerTurnOnProcess(
   let actionDiagnosticsTraceEmitted = false
   const assistantStreams = new Map<string, string>()
   const assistantStreamOrder: string[] = []
+  const completedAssistantStreamKeys = new Set<string>()
   const externallyVisibleAssistantOutputDeliveryContexts = new Set<number>()
   const pendingExternallyVisibleAssistantOutputDeliveryContextCounts =
     new Map<number, number>()
@@ -4207,7 +4210,10 @@ async function runCodexAppServerTurnOnProcess(
       return
     }
 
-    const streamKey = normalizeAssistantTraceStreamKey(update)
+    removeAssistantStreamFromFinalFallback(normalizeAssistantTraceStreamKey(update))
+  }
+
+  const removeAssistantStreamFromFinalFallback = (streamKey: string): void => {
     assistantStreams.delete(streamKey)
     const streamOrderIndex = assistantStreamOrder.indexOf(streamKey)
     if (streamOrderIndex >= 0) {
@@ -5547,6 +5553,16 @@ async function runCodexAppServerTurnOnProcess(
     for (const update of updates) {
       recordAssistantTraceUpdate(update, deliveryContextOrdinal)
     }
+    if (
+      normalizedEvent.kind === 'assistant_message' &&
+      normalizedEvent.itemState === 'completed'
+    ) {
+      for (const update of rawUpdates) {
+        if (update.kind === 'assistant') {
+          completedAssistantStreamKeys.add(normalizeAssistantTraceStreamKey(update))
+        }
+      }
+    }
     if (isCommentaryAssistantMessage) {
       // Commentary is internal progress, not a member-facing message. Remove
       // its stream, including any earlier deltas for the same item, so a
@@ -5603,6 +5619,14 @@ async function runCodexAppServerTurnOnProcess(
         input.onFirstAssistantResponseCompleted?.()
       }
     } else if (isCodexCompletedUserMessageItemFromNormalized(normalizedEvent)) {
+      // Instant steering can preempt an answer before its item completes. That
+      // unfinished stream was never a reply and must not become the fallback
+      // text for the steered response.
+      for (const streamKey of [...assistantStreamOrder]) {
+        if (!completedAssistantStreamKeys.has(streamKey)) {
+          removeAssistantStreamFromFinalFallback(streamKey)
+        }
+      }
       if (completedFinalAgentMessage !== null) {
         const completedResponseDeliveryContextOrdinal = Math.max(
           0,

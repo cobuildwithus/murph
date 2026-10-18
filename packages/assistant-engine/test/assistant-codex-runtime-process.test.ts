@@ -1,6 +1,7 @@
 import { withCodexToolInputContract } from '../src/assistant-codex/tool-input-contract.ts'
 import {
   cliTimingLaunchArgs,
+  codexSteeringLaunchArgs,
   MURPH_DYNAMIC_TOOLS_WITHOUT_PROGRESS,
   MockChildProcess,
   asRecord,
@@ -1009,7 +1010,7 @@ describe('assistant codex runtime', () => {
       const child = new MockChildProcess()
       spawnedChildren.push(child)
 
-      expect(args).toEqual([...cliTimingLaunchArgs, 'app-server'])
+      expect(args).toEqual([...codexSteeringLaunchArgs, ...cliTimingLaunchArgs, 'app-server'])
       expect(options).toMatchObject({
         cwd: tmpdir(),
         env: {

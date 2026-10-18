@@ -4199,6 +4199,24 @@ notified exact IDs and accepts every valid same-room successor up to the
 existing cumulative cap, applying the same replyability, conversation, route,
 and exact-successor checks without reopening or mutating the pending index.
 
+Every Murph-launched Codex App Server sets `features.instant_interrupt=true`
+and `features.code_mode_interrupt=true` as CLI-layer `--config` defaults; an
+explicit caller value for the same key wins. An admitted steer therefore
+preempts unfinished generation inside the same Codex turn instead of waiting for
+the stale answer: over HTTP/SSE Codex drops the response stream, and over
+WebSocket it requests `response.interrupt` with `discard_partial_items`. A
+provider that ignores that request completes the stale answer, which Murph then
+delivers as an ordinary preceding segment exactly as before. Preemption does not
+abort tool calls already issued; a code-mode `exec` or `wait` yields its running
+cell so the steer reaches the model while the effect finishes once. An
+interrupted turn stops its code-mode cells, and App Server aborts a finished
+turn's pending server requests, so no cell carries a nested Murph tool into a
+later turn. Text streamed for an answer item that never completed is discarded
+at the steered user-message boundary and cannot become reply fallback text.
+Admission rules, the 50-message cap, first-response closure, journaling, and
+delivery are unchanged, and a dropped stream is not evidence that provider
+generation or billing stopped.
+
 The Environment walkthrough reuses that execution plane without turning audio
 into a chat attachment. Authenticated Web validates and stages one bounded
 application-encrypted recording under the member's opaque R2 namespace, then

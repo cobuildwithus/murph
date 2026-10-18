@@ -875,6 +875,18 @@ MURPH_TEST_CODEX_COMMAND=<patched-codex> \
   --no-coverage test/assistant-codex-websocket-stall.test.ts
 ```
 
+The same suite proves WebSocket instant steering: the binary sends
+`response.interrupt` with `discard_partial_items` for a responses-lite model, a
+discarding provider yields only the steered reply, and a provider that ignores
+the request falls back to the queued result with the completed stale segment.
+`assistant-codex-scripted-runtime.test.ts` owns the HTTP/SSE side through a
+stub that streams unfinished text and records dropped responses: preemption,
+the explicit-disable baseline, rapid successive steers, empty, media-only, and
+no-reply replacements without stale text, a steer past a slow in-flight nested
+tool with one effect, and `code_mode_interrupt` true/false proof that no
+yielded cell carries a nested Murph tool into the next turn. Run them with
+`-t 'unfinished|instant steering|rapid successive|media-only reply free|steered no-reply|slow in-flight nested|code_mode_interrupt='`.
+
 The Cloudflare `codex-websocket-passthrough.test.ts` runs the pinned binary
 through production interception and real local workerd fetch coupling. It proves
 one connection across a 35-second gap, native recovery after an upstream close,

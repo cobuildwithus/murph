@@ -127,3 +127,59 @@ Updated: 2026-10-18
 - Final source verification passed the exact tag, commit, patch application, and 13 reviewed source paths; documentation gardening found zero issues; `git diff --check` passed.
 - No compatibility failure remains in the completed registry-binary or native-source checks. The failed production-platform image build remains unresolved, and neither the fresh image permission smoke nor required hosted-local scenarios ran. Native AMD64 verification capability is needed; the local emulation limitation is documented in the current test owner. Do not promote this candidate or describe it as ready.
 - Preserve the isolated candidate, private logs, native test cache, and ownership handoff for the next automation run. The shared installation/deployment remain unchanged. No commit or PR was opened because this automation requires all local gates before that step; ReviewGPT and exact-head CI therefore remain pending.
+
+## 2026-10-18 instant steering and base reconciliation
+
+### Decisions
+
+- `instant_interrupt` and `code_mode_interrupt` are both default-on in 0.163.0
+  upstream; Murph now sets both explicitly as CLI-layer `--config` defaults in
+  the one App Server launch owner (`assistant-codex/config.ts`, composed in
+  `prepareCodexAppServerProcessInput`) so every fresh, resumed, Ask, and hosted
+  turn uses them and user-config isolation cannot drop them. An explicit caller
+  value for the same key wins, the same precedence the model-catalog default
+  uses; no rejection API or source scan was added. Managed-account login does
+  not launch turns and is unchanged.
+- `code_mode_interrupt=true` was assessed independently. Real-binary proof
+  showed no difference for Murph nested tools: in both settings a yielded cell
+  never reached a later turn and each nested effect ran once, because Murph
+  drains its own in-flight tool before closing and App Server aborts a finished
+  turn's pending server requests. `true` keeps the upstream Stable default and
+  stops interrupted cells; the shell-cell termination itself is upstream-proven,
+  not re-proven here.
+- One Murph defect was proven before fixing: when a steer preempted an
+  unfinished answer and the steered reply had no text (empty or media-only), the
+  unfinished deltas became Murph's final reply text. The fix drops never-completed
+  assistant streams at the steered user-message boundary in the existing event
+  owner. No-reply already suppressed the text.
+- Base reconciliation: preserved the handed-off tree as `2fa75e28`, then one
+  ordinary merge of `origin/main` `1046d9e9` (`27a97a08`). The only conflict was
+  the native patch: main's PR #4147 `--ignore-user-config` hunks were ported onto
+  pristine `rust-v0.163.0`; two `lib.rs` hunks were adapted by hand, and the
+  `Cargo.toml`/`Cargo.lock` keyring hunks were dropped because 0.163.0 already
+  declares that dev-dependency. The regenerated patch reproduces the ported tree
+  exactly on the pristine tag.
+- Changelog: member-visible improvement; an entry is still required before the
+  PR is marked Ready.
+
+### Evidence at this checkpoint
+
+- `verify:codex-upstream-source` passed on the merged tree (tag, commit, patch
+  applicability, 13 reviewed source paths). Installed helper is 0.163.0.
+- Mocked runtime suites with updated launch-arg expectations passed (281 tests),
+  including the default/precedence owner test.
+- New real-binary (npm 0.163.0) regressions passed. SSE: preemption drops the
+  stale stream and delivers only the steered reply; the explicit-disable baseline
+  restores queued delivery; rapid successive steers produce one reply with two
+  dropped streams; empty, media-only, and no-reply replacements carry no stale
+  text (the empty and media-only cases failed before the fix); a steer passes a
+  slow in-flight nested tool with one effect; `code_mode_interrupt` true/false
+  never carries a cell tool into the next turn. WebSocket: the binary sends
+  `response.interrupt`/`discard_partial_items`; a discarding provider yields only
+  the steered reply and an ignoring provider falls back to the queued result.
+- Cloudflare egress/image parity passed (22 tests) and assistant-engine
+  typecheck passed after edits.
+- Not yet proven: native compilation and tests of the regenerated patch (no local
+  Rust toolchain), patched-binary runs of the new WebSocket cases, native AMD64
+  runner image/permission smoke, hosted-local scenarios, payload measurements on
+  the merged head, focused live journeys, ReviewGPT, and exact-head CI. Hold.
