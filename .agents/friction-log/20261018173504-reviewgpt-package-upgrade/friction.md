@@ -1,6 +1,7 @@
 ---
 title: 'ReviewGPT package-upgrade review omits repo-tools implementation source'
 severity: 'minor'
+issue: 'cobuildwithus/murph#4189'
 ---
 
 ## Expected Behavior
