@@ -82,9 +82,11 @@ public profile photos.
 - **Retries.** Every action is safe to repeat: creating a game with the same id,
   posting the same entry, accepting an invite already accepted, or redeeming a
   ticket already redeemed returns the current game and changes nothing.
+- **Photos.** Kept with no expiry, sealed under the uploader's key; only the
+  game's players can see them, by the unlock rule. At most 4 MiB each.
 - **Account deletion.** Deleting an account deletes the games that person
-  created and the tickets they owe. Acceptable while the data is disposable;
-  revisit before real users.
+  created, the tickets they owe, and every photo they uploaded. Acceptable
+  while the data is disposable; revisit before real users.
 
 ## Deferred
 
@@ -92,9 +94,6 @@ public profile photos.
 - Murph as host in the group chat, with `read_game` and `update_game` tools,
   including mid-game term changes (from the first day nobody has started).
 - Declining or cancelling an invite; for now it simply expires.
-- Hosted media storage. Uploads work only on local stacks today; Vercel
-  deployments return `GAME_MEDIA_UNAVAILABLE` until a Worker game-media path
-  exists.
 - Server-side stripping of embedded location metadata from uploaded images.
 - Recaps, bankruptcy, and nudges.
 
