@@ -6,8 +6,8 @@ Authentication preservation follow-on: [implementation proof](exec-plans/complet
 Sleep-pattern focused freshness implementation and parent-verified results are recorded in
 [the completed sleep-pattern plan](exec-plans/completed/2026-10-09-sleep-pattern-focused-freshness.md).
 
-Dated sleep-list row selection and its synthetic evidence are tracked in
-[the active sleep-list plan](exec-plans/active/2026-10-18-sleep-list-dated-rows.md);
+Dated sleep-list row selection and its synthetic evidence are recorded in
+[the completed sleep-list plan](exec-plans/completed/2026-10-18-sleep-list-dated-rows.md);
 `../packages/query/README.md#ordinary-wearable-reads` owns the contract.
 
 Entrypoint test worker build prerequisites are owned by

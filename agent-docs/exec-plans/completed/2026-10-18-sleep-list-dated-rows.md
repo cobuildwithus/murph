@@ -1,6 +1,6 @@
 # Sleep-list dated row selection
 
-Status: active
+Status: completed
 Created: 2026-10-18
 Updated: 2026-10-18
 Base: `dc512788835a48db367fbc2e9317d7e24a5fc636`.
@@ -61,9 +61,11 @@ Base: `dc512788835a48db367fbc2e9317d7e24a5fc636`.
    README wording and changelog entry (done).
 4. Parent: independent benchmark, owner suites, build/typecheck, real-Codex
    sleep journey (done; see Verification).
-5. Pending: final ReviewGPT on the stable pushed head, exact-head CI, merge,
-   deploy and post-deploy observation for
-   [PR #4181](https://github.com/cobuildwithus/murph/pull/4181).
+5. Final ReviewGPT on the stable pushed head (done; PASS, see Verification).
+6. Tracked outside this plan in
+   [PR #4181](https://github.com/cobuildwithus/murph/pull/4181) and its
+   automation: exact-head CI, merge, deployment and the 4-hour operational
+   observation.
 
 ## Decisions
 
@@ -106,9 +108,12 @@ Parent verification for [PR #4181](https://github.com/cobuildwithus/murph/pull/4
   Full result bytes and SHA-256 matched; `publicOracleMismatches` 0. Builds and
   the benchmark ran the actual runtime path. No production speedup is claimed.
 
-Pending, plan stays active:
-- Final ReviewGPT: the primary author attempt failed before submission; all six
-  configured lanes have profile locks and no reachable CDP endpoint. No lock was
-  deleted and no unowned process stopped. Parent will attempt the final gate
-  after the stable push; the gate is not waived.
-- Exact-head CI, merge, deploy and post-deploy observation.
+- Final ReviewGPT (2026-10-18): `ROUND_OUTCOME: PASS` / `REVIEW_COMPLETE` for
+  head `da12507830adfc56d8aad0e8ff6873247f532423` on the Hercules lane
+  ([review](https://chatgpt.com/c/6ad4d863-2cec-83ea-8d70-0af02c75be4d)). No
+  accepted findings; no runtime changes required.
+
+Implementation and review are complete. Pending separately, tracked in the PR
+and its automation, not claimed here: exact-head CI (running, no failures at
+closeout), merge, deployment and the 4-hour operational observation.
+Completed: 2026-10-18
