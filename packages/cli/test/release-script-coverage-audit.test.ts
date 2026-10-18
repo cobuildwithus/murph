@@ -1232,7 +1232,7 @@ describe('monorepo release flow coverage audit', () => {
       'utf8',
     )
     const repoToolsPatch = readFileSync(
-      path.join(repoRoot, 'patches', '@cobuild__repo-tools@0.1.17.patch'),
+      path.join(repoRoot, 'patches', '@cobuild__repo-tools@0.1.18.patch'),
       'utf8',
     )
     const reviewGptConfig = readFileSync(
@@ -1329,7 +1329,7 @@ describe('monorepo release flow coverage audit', () => {
     ).toEqual(
       [
         "'@cloudflare/containers@0.3.7': patches/@cloudflare__containers@0.3.7.patch",
-        "'@cobuild/repo-tools@0.1.17': patches/@cobuild__repo-tools@0.1.17.patch",
+        "'@cobuild/repo-tools@0.1.18': patches/@cobuild__repo-tools@0.1.18.patch",
         "'@cobuild/review-gpt@0.5.153': patches/@cobuild__review-gpt@0.5.153.patch",
         'frog@1.1.0: patches/frog@1.1.0.patch',
         'incur@0.4.5: patches/incur@0.4.5.patch',

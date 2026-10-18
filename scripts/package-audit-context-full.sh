@@ -417,12 +417,13 @@ if [[ -n "$review_gpt_pr_ref" ]]; then
     review_gpt_add_rendered_evidence
   fi
 
-  if grep -Eq '^patches/@cobuild__review-gpt@[^/]+\.patch$' \
+  if grep -Eq '^patches/@cobuild__(review-gpt|repo-tools)@[^/]+\.patch$' \
     "$review_gpt_pr_context_dir/changed-files.txt"; then
     node scripts/review-gpt-dependency-context.mjs \
       "$review_gpt_head_oid" \
       "$review_gpt_pr_context_dir/changed-files.txt" \
-      "$review_gpt_pr_context_dir"
+      "$review_gpt_pr_context_dir" \
+      "$review_gpt_base_oid"
   fi
 
   if grep -Fxq 'patches/codex-public-live.patch' "$review_gpt_pr_context_dir/changed-files.txt"; then
