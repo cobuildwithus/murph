@@ -1,6 +1,7 @@
 ---
 title: 'ReviewGPT exact artifact download can report an unrelated image as success'
 severity: 'minor'
+issue: 'cobuildwithus/murph#4186'
 ---
 
 ## Expected Behavior
