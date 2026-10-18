@@ -1,6 +1,7 @@
 import { withCanonicalWriteLock } from "@murphai/core";
 import { startCliPhase, timeCliPhase, timeCliPhaseSync } from "@murphai/runtime-state/node/cli-timing";
 import {
+  extractIsoDatePrefix,
   isValidIanaTimeZone,
 } from "@murphai/contracts";
 import {
@@ -336,7 +337,14 @@ export async function summarizeWearableSleepRuntime(
   vaultRoot: string,
   filters: WearableSummaryFilters = {},
 ): Promise<ProjectedWearableSleepSummary[]> {
-  const rows = await readFreshWearableSummaryRows(vaultRoot, { providers: filters.providers });
+  // Prune only rows composition would discard by date; keep every summary kind,
+  // because multi-provider sleep composition reads shared recovery/activity keys.
+  const day = (value: string | undefined) => value ? extractIsoDatePrefix(value) ?? value : undefined;
+  const rows = await readFreshWearableSummaryRows(vaultRoot, {
+    from: day(filters.date || filters.from),
+    providers: filters.providers,
+    to: day(filters.date || filters.to),
+  });
   const bundle = composePublicWearableSummaryBundleFromStoredRows(rows, filters);
   return summarizeWearableSleepFromBundle(bundle, filters);
 }
