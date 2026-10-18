@@ -1,6 +1,6 @@
 # Supplement regimen label lookups
 
-Status: active
+Status: completed
 Created: 2026-10-18
 Updated: 2026-10-18
 
@@ -102,3 +102,33 @@ Updated: 2026-10-18
   unknown; scheduled turns and regimens with non-protein facts are untested.
   In the partial and unavailable journeys the model often declines to estimate
   and asks for labels; it names the blocker honestly.
+
+## Pull request and changelog
+
+- PR #4196 carries the source, tests, this plan, and the Frog entry (commit
+  5926039470) plus the changelog fragment (commit b4d2711b1f).
+- Changelog fragment `apps/web/changelog/entries/2026-10-18/supplement-label-nutrition.json`
+  (`sourcePullRequests: [4196]`, no visual or `tryIt`) passed
+  `pnpm --dir apps/web changelog:generate`, the changelog-page test through
+  `apps/web/scripts/run-hosted-web-vitest.mts` (10 passed), and
+  `pnpm --dir apps/web typecheck`.
+
+## Review
+
+- Source implementation is complete at b4d2711b1f. Parent candidate review
+  findings were resolved before the first commit.
+- Final ReviewGPT round 1 returned PASS with REVIEW_COMPLETE, bound to the exact
+  commit and accepted turn, with 1/1 attachment, gpt-6-pro, and the 180-second
+  minimum met. It reported no qualifying Critical or High bugs and no
+  material Complexity Collapse. Its public snapshot held tracked files and
+  review context only, no private incident evidence. No accepted findings remain.
+
+## Handoff
+
+- Not complete: final-head CI was still running with no failures at this update.
+  Merge, production release, and post-release proof have not happened, and the
+  member-facing outcome is not shipped.
+- After the coordinator closes this plan with `scripts/finish-task`, final-head
+  CI, merge, release, and post-release receipts are tracked on PR #4196 and in
+  the coordinator handoff, not here.
+Completed: 2026-10-18
