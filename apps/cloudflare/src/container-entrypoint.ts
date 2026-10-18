@@ -405,6 +405,9 @@ export async function startHostedContainerEntrypoint(input: {
     });
   };
   let activeHostedRunnerJobCount = 0;
+  // Finished jobs still awaiting their recovery completion callback. They keep
+  // the process alive (activeHostedRunnerJobCount) but do not block admission.
+  let settlingCompletionCallbackCount = 0;
   let workspaceInvocationAcceptedCount = 0;
   let conversationActivityReceivedAtEpochMs: number | null = null;
   let activeRuntimeWake: ((notification?: HostedContainerRuntimeWakeNotification) => boolean) | null = null;
@@ -644,6 +647,7 @@ export async function startHostedContainerEntrypoint(input: {
         response.setHeader("content-type", "application/json; charset=utf-8");
         response.end(JSON.stringify({
           activeJobCount: activeHostedRunnerJobCount,
+          settlingCompletionCallbackCount,
           codexShellPreflightCompletedAtEpochMs,
           codexShellPreflightStatus,
           cloudflareRegion,
@@ -772,7 +776,7 @@ export async function startHostedContainerEntrypoint(input: {
       }
 
       if (isCodexShellSmokeRequest) {
-        if (activeHostedRunnerJobCount > 0) {
+        if (activeHostedRunnerJobCount - settlingCompletionCallbackCount > 0) {
           discardUnreadRequestBody(request);
           writeJsonResponse(response, 409, {
             error: "Hosted runner is busy.",
@@ -826,7 +830,7 @@ export async function startHostedContainerEntrypoint(input: {
       }
 
       if (isLiveModelTurnSmokeRequest) {
-        if (activeHostedRunnerJobCount > 0) {
+        if (activeHostedRunnerJobCount - settlingCompletionCallbackCount > 0) {
           discardUnreadRequestBody(request);
           writeJsonResponse(response, 409, {
             error: "Hosted runner is busy.",
@@ -845,7 +849,7 @@ export async function startHostedContainerEntrypoint(input: {
       }
 
       if (isDirectR2PresignedPutSmokeRequest) {
-        if (activeHostedRunnerJobCount > 0) {
+        if (activeHostedRunnerJobCount - settlingCompletionCallbackCount > 0) {
           discardUnreadRequestBody(request);
           writeJsonResponse(response, 409, {
             error: "Hosted runner is busy.",
@@ -883,7 +887,7 @@ export async function startHostedContainerEntrypoint(input: {
         return;
       }
 
-      if (activeHostedRunnerJobCount > 0) {
+      if (activeHostedRunnerJobCount - settlingCompletionCallbackCount > 0) {
         discardUnreadRequestBody(request);
         emitHostedExecutionStructuredLog({
           component: "container",
@@ -1136,9 +1140,7 @@ export async function startHostedContainerEntrypoint(input: {
         activeWorkspaceInvocationAbort = null;
       }
       requestAbort.cleanup();
-      await recordHostedContainerRuntimeCompletionIfPresent(
-        completedInvocation,
-      );
+      await recordSettlingCompletionCallback(completedInvocation);
       // A checkpoint control response must not let shutdown exit while the
       // completed invocation's durable completion callback is still settling.
       if (claimedRunnerSlot) {
@@ -1165,6 +1167,19 @@ export async function startHostedContainerEntrypoint(input: {
   });
 
   let containerShutdownExitStarted = false;
+  // The job and its response are finished; only the recovery callback remains.
+  const recordSettlingCompletionCallback = async (
+    completedInvocation: Parameters<typeof recordHostedContainerRuntimeCompletionIfPresent>[0],
+  ): Promise<void> => {
+    if (!completedInvocation) return;
+    settlingCompletionCallbackCount += 1;
+    try {
+      await recordHostedContainerRuntimeCompletionIfPresent(completedInvocation);
+    } finally {
+      settlingCompletionCallbackCount -= 1;
+    }
+  };
+
   const maybeExitAfterContainerShutdownDrain = () => {
     if (
       !containerShutdownController.signal.aborted

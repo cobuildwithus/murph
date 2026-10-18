@@ -2701,6 +2701,27 @@ describe("RunnerContainer", () => {
   });
 
   it.each([
+    { name: "only a settling completion callback", health: { activeJobCount: 1, settlingCompletionCallbackCount: 1 }, ready: true },
+    { name: "an older child without the settling count", health: { activeJobCount: 1 }, ready: false },
+    { name: "running work beside a settling callback", health: { activeJobCount: 2, settlingCompletionCallbackCount: 1 }, ready: false },
+    { name: "a non-numeric settling count", health: { activeJobCount: 1, settlingCompletionCallbackCount: "1" }, ready: false },
+    { name: "a negative settling count", health: { activeJobCount: 1, settlingCompletionCallbackCount: -1 }, ready: false },
+    { name: "a fractional settling count", health: { activeJobCount: 1, settlingCompletionCallbackCount: 0.5 }, ready: false },
+    { name: "a settling count above the total", health: { activeJobCount: 1, settlingCompletionCallbackCount: 2 }, ready: false },
+    { name: "a null settling count", health: { activeJobCount: 1, settlingCompletionCallbackCount: null }, ready: false },
+  ])("admits a warm runner reporting $name only when nothing else is busy", async ({ health, ready }) => {
+    const containerFetch = vi.fn(async () => new Response(JSON.stringify({
+      ...createRunnerHealthResult(), ...health,
+    }), { headers: { "content-type": "application/json" } }));
+    const { container, destroy } = createContainerDouble({ initialStatus: "running", containerFetch });
+
+    const readiness = await container.ensureReadyForProcessing({ timeoutMs: 15_000, userId: "member_123" });
+    if (ready) expect(readiness).toMatchObject({ kind: "ready" });
+    else expect(readiness).toEqual({ kind: "cleanup_unsettled" });
+    expect(destroy).not.toHaveBeenCalled();
+  });
+
+  it.each([
     { phase: "instance", expired: true },
     { phase: "ports", expired: true },
     { phase: "health", expired: true },
