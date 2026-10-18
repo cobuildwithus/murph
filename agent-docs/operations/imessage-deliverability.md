@@ -113,8 +113,13 @@ assistant-model preference to keep all runtime turns on GPT-5.6 Luna.
 
 The canary must not log phone numbers, message text, chat or message ids, SDK
 errors, or provider bodies. It reports only bounded reset counts and per-turn
-latency and canonical outcome counts. A successful first turn must equal Murph's
-package-owned welcome; later turns must be non-empty and must not repeat it.
+latency and canonical outcome counts. Reply-unavailable failures retain turn,
+stage, and wait-limit context with a fixed `timeout`, `stream-ended`, or
+`stream-failed` reason and per-wait observed/rejected event counts capped at
+10,000. A timeout with zero observations identifies a quiet wait; rejected
+counts record exclusions by the existing reply filter without event details.
+A successful first turn must equal Murph's package-owned welcome; later turns
+must be non-empty and must not repeat it.
 After the identity turn, the canary observes a fresh zero-count baseline, asks
 Murph to save the fixed synthetic walking goal, and requires one canonical goal
 with one valid distinct ID and no additional goals. A later reciprocal turn asks

@@ -8,6 +8,7 @@ import { HOSTED_EXECUTION_DEFAULT_RUNNER_IDLE_TTL_MS } from "@murphai/hosted-exe
 
 const mocks = vi.hoisted(() => ({
   messages: [] as Array<[Record<string, unknown>, Record<string, unknown>]>,
+  next: vi.fn(),
   now: [] as number[],
   sendResults: [] as boolean[],
   spaceSend: vi.fn(),
@@ -33,10 +34,7 @@ vi.mock("@spectrum-ts/core", () => ({
   Spectrum: vi.fn(async () => ({
     messages: {
       [Symbol.asyncIterator]: () => ({
-        next: async () => {
-          const value = mocks.messages.shift();
-          return value ? { done: false as const, value } : { done: true as const };
-        },
+        next: mocks.next,
       }),
     },
     stop: mocks.stop,
@@ -89,6 +87,11 @@ describe("production conversation canary runner", () => {
     vi.restoreAllMocks();
     vi.spyOn(Date, "now").mockReturnValue(1_000);
     mocks.messages = [];
+    mocks.next.mockReset();
+    mocks.next.mockImplementation(async () => {
+      const value = mocks.messages.shift();
+      return value ? { done: false as const, value } : { done: true as const };
+    });
     mocks.now = [];
     mocks.sendResults = [];
     mocks.spaceSend.mockClear();
@@ -315,14 +318,142 @@ describe("production conversation canary runner", () => {
   it("identifies the unavailable turn after preserving earlier timing evidence", async () => {
     mocks.now = [0, 0, 10_000, 10_000, 10_000];
     mocks.sendResults = [true, true];
-    mocks.messages = [inboundMessage({ text: MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE })];
+    mocks.messages = [
+      ...rejectedInboundMessages(),
+      inboundMessage({ text: MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE }),
+    ];
     const report = vi.fn();
     await expect(runLinqProductionCanary(TEST_ENV, report)).rejects.toMatchObject({
-      name: "reply-unavailable; turn=2; stage=identity-question; wait_limit_ms=90000",
+      name: "reply-unavailable; turn=2; stage=identity-question; wait_limit_ms=90000; reason=stream-ended; observed_count=0; rejected_count=0",
+      message: "The Linq production canary failed.",
     });
     expect(report).toHaveBeenCalledOnce();
     expect(report).toHaveBeenCalledWith({ latencyMs: 10_000, senderSendMs: 0, stage: "welcome", turn: 1 });
     expect(mocks.stop).toHaveBeenCalledOnce();
+    expect(mocks.spaceSend).toHaveBeenCalledTimes(2);
+    expect(fetch).toHaveBeenCalledOnce();
+  });
+
+  it("starts observing before send and still accepts a matching reply after rejected events", async () => {
+    prepareCompleteConversation();
+    const rejected = rejectedInboundMessages();
+    mocks.messages.unshift(...rejected);
+    mocks.spaceSend.mockImplementationOnce(async () => {
+      expect(mocks.next).toHaveBeenCalledOnce();
+      return true;
+    });
+
+    await expect(runLinqProductionCanary(TEST_ENV)).resolves.toMatchObject({
+      canonicalOutcome: { baselineGoalCount: 0, savedGoalCount: 1, proposalGoalCount: 0 },
+    });
+    expect(mocks.messages).toEqual([]);
+    expect(mocks.next).toHaveBeenCalledTimes(rejected.length + 5);
+    expect(mocks.spaceSend).toHaveBeenCalledTimes(5);
+    expect(mocks.stop).toHaveBeenCalledOnce();
+    expect(fetch).toHaveBeenCalledTimes(4);
+  });
+
+  it.each([false, true])("distinguishes timeout with rejected events=%s at the unchanged deadline", async (withRejectedEvents) => {
+    vi.useFakeTimers({ toFake: ["setTimeout"] });
+    try {
+      mocks.now = [0, 0];
+      mocks.sendResults = [true];
+      mocks.messages = withRejectedEvents ? rejectedInboundMessages() : [];
+      const count = mocks.messages.length;
+      mocks.next.mockImplementation(async () => {
+        const value = mocks.messages.shift();
+        return value ? { done: false as const, value } : new Promise<never>(() => {});
+      });
+      const report = vi.fn();
+      const result = runLinqProductionCanary(TEST_ENV, report).catch((error: unknown) => error);
+
+      await vi.advanceTimersByTimeAsync(CANARY_REPLY_WAIT_MS - 1);
+      expect(mocks.spaceSend).toHaveBeenCalledOnce();
+      expect(mocks.next).toHaveBeenCalledTimes(count + 1);
+      expect(mocks.stop).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(await result).toMatchObject({
+        name: `reply-unavailable; turn=1; stage=welcome; wait_limit_ms=90000; reason=timeout; observed_count=${count}; rejected_count=${count}`,
+        message: "The Linq production canary failed.",
+      });
+      expect(report).not.toHaveBeenCalled();
+      expect(mocks.stop).toHaveBeenCalledOnce();
+      expect(fetch).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it.each([
+    ["SDK error with a timeout-like name", Object.assign(new Error("synthetic-private-message"), {
+      name: "canary-reply-timeout", cause: "synthetic-private-cause",
+    })],
+    ["private-looking metadata", {
+      name: "synthetic-private-name", message: "synthetic-private-message", reason: "timeout",
+      observedCount: Infinity, rejectedCount: NaN, token: "synthetic-private-token",
+    }],
+    ["private-looking string", "synthetic-private-string"],
+    ["undefined", undefined],
+    ["hostile property getters", Object.defineProperties({}, {
+      name: { get() { throw new Error("synthetic-private-name-getter"); } },
+      message: { get() { throw new Error("synthetic-private-message-getter"); } },
+      toString: { value() { throw new Error("synthetic-private-string-coercion"); } },
+    })],
+  ])("keeps a rejected iterator's %s out of the final failure", async (_label, failure) => {
+    mocks.now = [0, 0];
+    mocks.sendResults = [true];
+    mocks.next.mockRejectedValueOnce(failure);
+
+    const error = await runLinqProductionCanary(TEST_ENV).catch((value: unknown) => value);
+    const name = "reply-unavailable; turn=1; stage=welcome; wait_limit_ms=90000; reason=stream-failed; observed_count=0; rejected_count=0";
+    expect(error).toMatchObject({ name, message: "The Linq production canary failed." });
+    expect(String(error)).toBe(`${name}: The Linq production canary failed.`);
+    expect(error).not.toHaveProperty("cause");
+    expect(JSON.stringify(error)).not.toContain("synthetic-private");
+    expect(mocks.spaceSend).toHaveBeenCalledOnce();
+    expect(mocks.stop).toHaveBeenCalledOnce();
+    expect(fetch).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    ["content", undefined],
+    ["timestamp", { getTime: "synthetic-private-timestamp" }],
+  ])("preserves stream failure for malformed %s without exposing event fields", async (field, value) => {
+    mocks.now = [0, 0];
+    mocks.sendResults = [true];
+    const event = inboundMessage({ text: "synthetic-private-content" });
+    event[1][String(field)] = value;
+    event[1].privateField = "synthetic-private-extra-field";
+    mocks.messages = [event];
+
+    const error = await runLinqProductionCanary(TEST_ENV).catch((failure: unknown) => failure);
+    const name = "reply-unavailable; turn=1; stage=welcome; wait_limit_ms=90000; reason=stream-failed; observed_count=1; rejected_count=0";
+    expect(error).toMatchObject({ name, message: "The Linq production canary failed." });
+    expect(String(error)).toBe(`${name}: The Linq production canary failed.`);
+    expect(error).not.toHaveProperty("cause");
+    expect(JSON.stringify(error)).not.toContain("synthetic-private");
+    expect(mocks.stop).toHaveBeenCalledOnce();
+    expect(fetch).toHaveBeenCalledOnce();
+  });
+
+  it("saturates both observation counters without retaining rejected event fields", async () => {
+    mocks.now = [0, 0];
+    mocks.sendResults = [true];
+    const event = inboundMessage({ spaceId: "synthetic-private-space", text: "synthetic-private-content" });
+    let remaining = 10_005;
+    mocks.next.mockImplementation(async () => remaining-- > 0
+      ? { done: false as const, value: event }
+      : { done: true as const });
+
+    const error = await runLinqProductionCanary(TEST_ENV).catch((failure: unknown) => failure);
+    const name = "reply-unavailable; turn=1; stage=welcome; wait_limit_ms=90000; reason=stream-ended; observed_count=10000; rejected_count=10000";
+    expect(error).toMatchObject({ name, message: "The Linq production canary failed." });
+    expect(String(error)).toBe(`${name}: The Linq production canary failed.`);
+    expect(JSON.stringify(error)).not.toContain("synthetic-private");
+    expect(mocks.next).toHaveBeenCalledTimes(10_006);
+    expect(mocks.spaceSend).toHaveBeenCalledOnce();
+    expect(mocks.stop).toHaveBeenCalledOnce();
+    expect(fetch).toHaveBeenCalledOnce();
   });
 
   it.each([
@@ -555,15 +686,33 @@ function inboundMessage(input: {
   spaceId?: string;
   text: string;
   timestampMs?: number;
+  direction?: string;
+  platform?: string;
+  senderId?: string | null;
+  contentType?: string;
 }): [Record<string, unknown>, Record<string, unknown>] {
   return [
     { id: input.spaceId ?? "space_canary" },
     {
-      content: { text: input.text, type: "text" },
-      direction: "inbound",
-      platform: "imessage",
-      sender: { id: "target_canary" },
+      content: { text: input.text, type: input.contentType ?? "text" },
+      direction: input.direction ?? "inbound",
+      platform: input.platform ?? "imessage",
+      sender: input.senderId === null ? undefined : { id: input.senderId ?? "target_canary" },
       timestamp: new Date(input.timestampMs ?? 1_000),
     },
+  ];
+}
+
+function rejectedInboundMessages(): Array<[Record<string, unknown>, Record<string, unknown>]> {
+  const text = "synthetic-private-content";
+  return [
+    inboundMessage({ text, spaceId: "synthetic-private-space" }),
+    inboundMessage({ text, direction: "outbound" }),
+    inboundMessage({ text, platform: "sms" }),
+    inboundMessage({ text, senderId: "synthetic-private-sender" }),
+    inboundMessage({ text, senderId: null }),
+    inboundMessage({ text, contentType: "image" }),
+    inboundMessage({ text, timestampMs: NaN }),
+    inboundMessage({ text, timestampMs: 999 }),
   ];
 }
