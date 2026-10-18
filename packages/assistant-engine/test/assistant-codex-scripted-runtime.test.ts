@@ -10817,9 +10817,9 @@ text(JSON.stringify(result));
     expect(result.precedingAgentMessageSegments).toEqual([])
   })
 
-  it.each([true, false])('code_mode_interrupt=%s keeps a no-reply cell and its nested Murph tools inside their turn', {
+  it('keeps a no-reply code-mode cell and its nested Murph tools inside their turn', {
     timeout: TURN_TIMEOUT_MS,
-  }, async (codeModeInterrupt) => {
+  }, async () => {
     const scenario = await prepareScriptedTurnScenario()
     let phase: 'turn-one' | 'between-turns' | 'turn-two' = 'turn-one'
     const nestedCalls: Array<{ lookup: string, phase: string }> = []
@@ -10849,11 +10849,9 @@ text(JSON.stringify([first.lookupId, second.lookupId]));
       { requestExcludes: ['SYNTHETIC_TURN_TWO'], text: '' },
       { requestIncludes: ['SYNTHETIC_TURN_TWO'], text: 'TURN_TWO_OK' },
     )
-    scenario.stub.captureProviderRequestDiagnostics()
     const turnInput = {
       ...scenario.turnInput,
       allowFinishWithoutReply: true,
-      configOverrides: [`features.code_mode_interrupt=${codeModeInterrupt}`],
       dynamicTools: [MURPH_AUTOMATION_TOOL, MURPH_FINISH_WITHOUT_REPLY_TOOL],
       hostedToolContext: {
         automationTool: {
@@ -10922,8 +10920,8 @@ text(JSON.stringify([first.lookupId, second.lookupId]));
   it.each([
     { codeModeInterrupt: true, interruptAfterMs: 200 },
     { codeModeInterrupt: false, interruptAfterMs: 200 },
-    { codeModeInterrupt: true, interruptAfterMs: null },
-    { codeModeInterrupt: false, interruptAfterMs: null },
+    // Without an interrupt the flag is not consulted; the Murph default applies.
+    { codeModeInterrupt: null, interruptAfterMs: null },
   ])('code_mode_interrupt=$codeModeInterrupt interrupt=$interruptAfterMs never carries a yielded cell tool into the next turn', {
     timeout: TURN_TIMEOUT_MS,
   }, async ({ codeModeInterrupt, interruptAfterMs }) => {
@@ -10962,10 +10960,11 @@ text(JSON.stringify([first.lookupId, second.lookupId]));
       { requestIncludes: ['SYNTHETIC_TURN_TWO'], text: 'TURN_TWO_OK' },
       { requestIncludes: ['SYNTHETIC_TURN_TWO'], text: 'TURN_TWO_OK' },
     )
-    scenario.stub.captureProviderRequestDiagnostics()
     const turnInput = {
       ...scenario.turnInput,
-      configOverrides: [`features.code_mode_interrupt=${codeModeInterrupt}`],
+      ...(codeModeInterrupt === null
+        ? {}
+        : { configOverrides: [`features.code_mode_interrupt=${codeModeInterrupt}`] }),
       dynamicTools: [MURPH_AUTOMATION_TOOL],
       hostedToolContext: {
         automationTool: {

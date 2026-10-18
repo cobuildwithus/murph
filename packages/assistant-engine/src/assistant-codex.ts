@@ -4221,6 +4221,34 @@ async function runCodexAppServerTurnOnProcess(
     }
   }
 
+  const recordCompletedAssistantStreams = (
+    normalizedEvent: CodexNormalizedEvent,
+    updates: readonly AssistantProviderTraceUpdate[],
+  ): void => {
+    if (
+      normalizedEvent.kind !== 'assistant_message' ||
+      normalizedEvent.itemState !== 'completed'
+    ) {
+      return
+    }
+    for (const update of updates) {
+      if (update.kind === 'assistant') {
+        completedAssistantStreamKeys.add(normalizeAssistantTraceStreamKey(update))
+      }
+    }
+  }
+
+  // Instant steering can preempt an answer before its item completes. That
+  // unfinished stream was never a reply and must not become the fallback text
+  // for the steered response.
+  const removeUnfinishedAssistantStreamsFromFinalFallback = (): void => {
+    for (const streamKey of [...assistantStreamOrder]) {
+      if (!completedAssistantStreamKeys.has(streamKey)) {
+        removeAssistantStreamFromFinalFallback(streamKey)
+      }
+    }
+  }
+
   // App-server events mutate this state inside the asynchronous message
   // handler, so finalization reads it through an explicitly typed boundary.
   const readTrailingSteerCandidate = (): CodexAppServerTrailingResponseCandidate | null =>
@@ -5553,16 +5581,7 @@ async function runCodexAppServerTurnOnProcess(
     for (const update of updates) {
       recordAssistantTraceUpdate(update, deliveryContextOrdinal)
     }
-    if (
-      normalizedEvent.kind === 'assistant_message' &&
-      normalizedEvent.itemState === 'completed'
-    ) {
-      for (const update of rawUpdates) {
-        if (update.kind === 'assistant') {
-          completedAssistantStreamKeys.add(normalizeAssistantTraceStreamKey(update))
-        }
-      }
-    }
+    recordCompletedAssistantStreams(normalizedEvent, rawUpdates)
     if (isCommentaryAssistantMessage) {
       // Commentary is internal progress, not a member-facing message. Remove
       // its stream, including any earlier deltas for the same item, so a
@@ -5619,14 +5638,7 @@ async function runCodexAppServerTurnOnProcess(
         input.onFirstAssistantResponseCompleted?.()
       }
     } else if (isCodexCompletedUserMessageItemFromNormalized(normalizedEvent)) {
-      // Instant steering can preempt an answer before its item completes. That
-      // unfinished stream was never a reply and must not become the fallback
-      // text for the steered response.
-      for (const streamKey of [...assistantStreamOrder]) {
-        if (!completedAssistantStreamKeys.has(streamKey)) {
-          removeAssistantStreamFromFinalFallback(streamKey)
-        }
-      }
+      removeUnfinishedAssistantStreamsFromFinalFallback()
       if (completedFinalAgentMessage !== null) {
         const completedResponseDeliveryContextOrdinal = Math.max(
           0,
