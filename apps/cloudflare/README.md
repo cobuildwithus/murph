@@ -815,6 +815,16 @@ invocation are not recorded. A failed or unobserved phase is null, and a claimed
 request that never settles leaves its fields absent. These fields are
 diagnostic only and add no ordering, retry or authority behavior.
 
+Each conversation-lane mailbox read also reports its own first attempt as
+`passMailboxFetch*` scalars on the existing `mailbox.imported` row of the import
+pass that consumed it. The pass is fed by either the wake prefetch or the pass's
+own read, including a refetch after a failed prefetch. The scalars use the same
+observer and fields, plus `passMailboxFetchAttemptCount` for that logical read.
+When a retry delivered the data, the timing still describes the first, failed
+attempt, and the count is greater than one. The invocation-first claim reuses the
+same observation, so no request is observed twice. System-only reads carry no pass
+timing.
+
 Successful warm ensure-processing requests omit the detached processing summary
 only when they complete within one second. Slower successes retain the existing
 native wake entry, dispatch, response, and handler timing fields, so platform

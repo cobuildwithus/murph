@@ -1,6 +1,9 @@
 import { emitHostedExecutionStructuredLog } from "@murphai/hosted-execution";
 import { HOSTED_RUNTIME_FETCH_CORRELATION_ID_HEADER } from "../runner-outbound/headers.ts";
-import type { HostedRuntimePlatform } from "@murphai/assistant-runtime/hosted-runtime-contracts";
+import type {
+  HostedRuntimeMailboxFetchResponse,
+  HostedRuntimePlatform,
+} from "@murphai/assistant-runtime/hosted-runtime-contracts";
 import {
   parseHostedMailboxFetchResponse,
   parseHostedExecutionWake,
@@ -12,7 +15,12 @@ import {
   HOSTED_RUNNER_WEB_CONTROL_ROUTES,
   type HostedWebControlTransport,
 } from "./web-control-transport.ts";
-import type { HostedRuntimeFetchTransportDiagnostics } from "./fetch-transport-collector.ts";
+import type { HostedRuntimeRedactedObject } from "@murphai/hosted-execution/runtime-control";
+import {
+  summarizeFetchTransport,
+  type HostedRuntimeFetchTransportDiagnostics,
+  type HostedRuntimeFetchTransportRecorder,
+} from "./fetch-transport-collector.ts";
 import { observeFirstHostedRuntimeFetch } from "./fetch-transport-diagnostics.ts";
 
 export function createHostedWebMailboxPort(input: {
@@ -46,15 +54,20 @@ export function createHostedWebMailboxPort(input: {
     async fetch(
       request: Parameters<NonNullable<HostedRuntimePlatform["mailboxPort"]>["fetch"]>[0],
       context?: Parameters<NonNullable<HostedRuntimePlatform["mailboxPort"]>["fetch"]>[1],
-    ) {
+    ): Promise<HostedRuntimeMailboxFetchResponse> {
       const correlationId = crypto.randomUUID();
       const startedAt = performance.now();
       const startedAtEpochMs = Date.now();
       let decodedAt: number | null = null;
       let decodedAtEpochMs: number | null = null;
       let importReadyAtEpochMs: number | null = null;
-      const recordMailboxFetch = request.lanes.some(({ lane }) => lane === "conversation")
-        ? input.fetchTransportDiagnostics?.claimConversationMailboxFetch()
+      // A conversation read carries its own first-attempt timing to the import pass
+      // that consumes it; the invocation-first claim reuses that same observation.
+      const readTransport = request.lanes.some(({ lane }) => lane === "conversation")
+        ? observeHostedMailboxReadTransport(
+          input.fetchImpl,
+          input.fetchTransportDiagnostics?.claimConversationMailboxFetch() ?? null,
+        )
         : null;
       try {
         let payload: unknown;
@@ -63,9 +76,7 @@ export function createHostedWebMailboxPort(input: {
             body: { ...request, decodeInlinePayloads: true },
             boundUserId: input.boundUserId,
             description: "Hosted mailbox fetch",
-            fetchImpl: recordMailboxFetch
-              ? observeFirstHostedRuntimeFetch(input.fetchImpl, recordMailboxFetch)
-              : input.fetchImpl,
+            fetchImpl: readTransport?.fetchImpl ?? input.fetchImpl,
             headers: new Headers({ [HOSTED_RUNTIME_FETCH_CORRELATION_ID_HEADER]: correlationId }),
             route: HOSTED_RUNNER_WEB_CONTROL_ROUTES.mailboxFetch,
             ...(context?.signal ? { signal: context.signal } : {}),
@@ -92,7 +103,7 @@ export function createHostedWebMailboxPort(input: {
           })),
         };
         importReadyAtEpochMs = Date.now();
-        return result;
+        return readTransport ? { ...result, transportTiming: readTransport.read() } : result;
       } finally {
         emitHostedExecutionStructuredLog({
           component: "mailbox",
@@ -156,5 +167,25 @@ export function createHostedWebMailboxPort(input: {
         throw new TypeError("Hosted member action outcome response is invalid.");
       }
     },
+  };
+}
+
+/** Observe one logical read's first attempt and count its attempts; retries pass through. */
+function observeHostedMailboxReadTransport(
+  fetchImpl: typeof fetch,
+  recordInvocationFirst: HostedRuntimeFetchTransportRecorder | null,
+) {
+  let attemptCount = 0;
+  let timing: HostedRuntimeRedactedObject | null = null;
+  const observed = observeFirstHostedRuntimeFetch(fetchImpl, (transport, response) => {
+    timing = summarizeFetchTransport("passMailboxFetch", transport, response);
+    recordInvocationFirst?.(transport, response);
+  });
+  return {
+    fetchImpl: ((resource: RequestInfo | URL, init?: RequestInit) => {
+      attemptCount += 1;
+      return observed(resource, init);
+    }) as typeof fetch,
+    read: (): HostedRuntimeRedactedObject => ({ ...timing, passMailboxFetchAttemptCount: attemptCount }),
   };
 }

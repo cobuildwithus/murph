@@ -54,6 +54,7 @@ import type {
   HostedWorkspaceCheckpointResponse,
   HostedWorkspaceReadResponse,
   HostedBrowserVaultReplicaPublishResponse,
+  HostedRuntimeRedactedObject,
 } from "@murphai/hosted-execution/runtime-control";
 import type {
   AssistantUsageRecord,
@@ -745,6 +746,11 @@ export interface HostedRuntimePhysicalNotePort {
   ): Promise<HostedPhysicalNoteSendResponse>;
 }
 
+/** Runtime-only fetch result: optional transport scalars for the read's first attempt. */
+export type HostedRuntimeMailboxFetchResponse = HostedMailboxFetchResponse & {
+  transportTiming?: HostedRuntimeRedactedObject;
+};
+
 export interface HostedRuntimeMailboxPort {
   admitVoiceInput?(
     request: import("@murphai/hosted-execution").HostedVoiceInputRequest,
@@ -752,7 +758,7 @@ export interface HostedRuntimeMailboxPort {
   fetch(
     request: HostedMailboxFetchRequest,
     context?: { signal?: AbortSignal | null },
-  ): Promise<HostedMailboxFetchResponse>;
+  ): Promise<HostedRuntimeMailboxFetchResponse>;
   fetchPayload(
     request: HostedMailboxPayloadFetchRequest,
   ): Promise<HostedMailboxPayloadFetchResponse>;

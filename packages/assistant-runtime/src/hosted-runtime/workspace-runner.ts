@@ -2581,6 +2581,7 @@ async function writeHostedMailboxImportRuntimeLog(input: {
         importedCount: input.result.importResult.importedCount,
         laneCount: lanes.length,
         ...(input.result.importResult.conversationImportTiming ?? {}),
+        ...(input.result.importResult.fetchTransportTiming ?? {}),
         retryableBlockedCount,
         stateChanged: input.result.stateChanged,
         systemSeqEnd: input.result.state.watermarks.system,
