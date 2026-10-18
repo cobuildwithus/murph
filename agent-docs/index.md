@@ -1,4 +1,4 @@
-Canary reply observation diagnostics: [active plan](exec-plans/active/2026-10-18-canary-reply-observation-diagnostics.md).
+Canary reply observation diagnostics: [completed plan](exec-plans/completed/2026-10-18-canary-reply-observation-diagnostics.md).
 
 Hosted live-journey configuration is owned by `../packages/assistant-engine/README.md`;
 shared behavior and permission proof are tracked in
