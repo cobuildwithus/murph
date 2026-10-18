@@ -4932,12 +4932,30 @@ from the pinned Containers SDK 0.3.7 `startContainerIfNotRunning` wait;
 `port_wait_aborted` matches exactly `Container request aborted.` from its separate
 `waitForPort` wait. The initial wait also probes the port, so these labels identify
 SDK cancellation boundaries, not infrastructure allocation versus process-start
-root causes. Classification reads only the caught Error's top-level message,
-before the existing cancellation-reason restoration and pending/cleanup handling;
-it never traverses causes or emits the message. Other errors, non-Errors, unreadable
+root causes. This boundary classification reads only the caught Error's top-level
+message, before the existing cancellation-reason restoration and pending/cleanup handling;
+it never emits the message. Other errors, non-Errors, unreadable
 messages, and changed SDK wording are `unclassified`, not a guessed boundary.
-The field is omitted when no cold wait failure has been caught (including a caller
-settling before the SDK wait), on noncold failures, and by older code during skew.
+At that same catch, `runtimeStartupColdWaitDirectCause` reads at most the caught
+Error's single direct cause. An Error cause with the exact message
+`there is no container instance that can be provided to this durable object` is
+`native_no_instance`; the exact message `the container is not listening` is
+`port_not_listening`. A missing or undefined cause is `absent`; a non-Error outer
+value, a present non-Error cause (including null), or any other message is `other`.
+A throwing direct-cause access or cause-message read is `unreadable`. The classifier
+never follows a nested cause, coerces a value, serializes an error, or retains
+cause content.
+This is the last available direct-cause observation, not a provider root cause:
+a monitor's native no-instance error can be lost while a port-not-listening cause
+remains. It establishes no quota, placement, or actual native start count.
+`runtimeStartupColdWaitNativeRunning` is the synchronous native `running` flag
+at the catch: `true`, `false`, or `unavailable` for a missing, non-boolean, or
+unreadable flag. This flag is not health: optimistic `true` does not prove a
+healthy or listening process or an `onStart` transition. Message, cause, and native
+flag reads are guarded so diagnostics cannot replace the original failure.
+All three cold-wait fields are omitted when no cold wait failure has been caught
+(including a caller settling before the SDK wait), on noncold failures, on
+success, and by older code during skew.
 Successful-start timestamps cannot identify a failed SDK wait. The diagnostic
 changes no error identity, pending fence, cleanup, retry, or readiness behavior.
 
