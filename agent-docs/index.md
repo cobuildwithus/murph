@@ -59,6 +59,10 @@ in [the import-speed plan](exec-plans/completed/2026-09-24-garmin-import-speed.m
 
 # Murph Agent Docs Index
 
+Failure-only startup context telemetry is tracked in
+[the startup failure context plan](exec-plans/active/2026-10-18-startup-failure-context.md);
+the current observation contract remains in `references/hosted-runtime-protocol.md`.
+
 Published plan-closer adoption and installed-wrapper proof are tracked in
 [the repo-tools adoption plan](exec-plans/completed/2026-10-18-frog-plan-closer-adoption-4178.md).
 Dependency review source inclusion is tracked in

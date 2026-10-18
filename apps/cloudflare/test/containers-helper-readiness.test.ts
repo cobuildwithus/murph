@@ -2,6 +2,8 @@ import { DatabaseSync } from "node:sqlite";
 import { Container } from "@cloudflare/containers";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { classifyRunnerContainerColdWaitDirectCause } from "../src/runner-container-error-codes.js";
+
 const runnerPort = 8_080;
 const productionStartToListenMs = 1_650;
 const productionStickyProbeReleaseMs = 4_425;
@@ -25,6 +27,7 @@ interface ProbeStats {
 interface ProbeHarness {
   abortContext: ReturnType<typeof vi.fn>;
   crash(exitCode?: number): void;
+  nativeContainer: { readonly running: boolean };
   runner: Container;
   stats: ProbeStats;
 }
@@ -337,6 +340,118 @@ describe("patched Cloudflare container readiness probes", () => {
     expect(harness.abortContext).not.toHaveBeenCalled();
   });
 
+  it.each([
+    {
+      name: "initial wait retaining native no-instance with optimistic running",
+      causeMessage: "there is no container instance that can be provided to this durable object",
+      classification: "native_no_instance",
+      failureFromProbeNumber: 1,
+      message: "Aborted waiting for container to start as we received a cancellation signal",
+      nativeRunning: true,
+    },
+    {
+      name: "port wait retaining native no-instance with optimistic running",
+      causeMessage: "there is no container instance that can be provided to this durable object",
+      classification: "native_no_instance",
+      failureFromProbeNumber: 2,
+      message: "Container request aborted.",
+      nativeRunning: true,
+    },
+    {
+      name: "port wait retaining a port-not-listening failure",
+      causeMessage: "the container is not listening",
+      classification: "port_not_listening",
+      failureFromProbeNumber: 1,
+      message: "Container request aborted.",
+      nativeRunning: true,
+    },
+    {
+      name: "initial wait losing monitor no-instance behind a port failure",
+      causeMessage: "the container is not listening",
+      classification: "port_not_listening",
+      failureFromProbeNumber: 1,
+      message: "Aborted waiting for container to start as we received a cancellation signal",
+      nativeRunning: false,
+    },
+    {
+      name: "initial wait with an absent direct cause",
+      causeMessage: undefined,
+      classification: "absent",
+      failureFromProbeNumber: 1,
+      message: "Aborted waiting for container to start as we received a cancellation signal",
+      nativeRunning: true,
+    },
+    {
+      name: "initial wait with a private unknown failure",
+      causeMessage: "synthetic-private-startup-sentinel",
+      classification: "other",
+      failureFromProbeNumber: 1,
+      message: "Aborted waiting for container to start as we received a cancellation signal",
+      nativeRunning: true,
+    },
+  ])("observes direct startup failure context: $name", async (scenario) => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-10-18T12:00:00.000Z"));
+    const probeFailure = scenario.causeMessage === undefined
+      ? undefined
+      : new Error(scenario.causeMessage);
+    const harness = await createProbeHarness({
+      listeningAtMs: 0,
+      ...(scenario.nativeRunning ? {} : {
+        monitorFailure: new Error(
+          "there is no container instance that can be provided to this durable object",
+        ),
+      }),
+      probeFailure: {
+        fromProbeNumber: scenario.failureFromProbeNumber,
+        value: probeFailure,
+      },
+      stickyProbeReleaseMs: 10_000,
+    });
+    const abortController = new AbortController();
+    const readiness = harness.runner.startAndWaitForPorts({
+      cancellationOptions: {
+        abort: abortController.signal,
+        instanceGetTimeoutMS: 8_000,
+        portProbeTimeoutMS: boundedProbeTimeoutMs,
+        portReadyTimeoutMS: 8_000,
+        waitInterval: runnerPollIntervalMs,
+      },
+      ports: runnerPort,
+    }).catch((error: unknown) => ({
+      directCause: classifyRunnerContainerColdWaitDirectCause(error),
+      error,
+      nativeRunning: harness.nativeContainer.running,
+    }));
+
+    setTimeout(() => abortController.abort(new DOMException("Timed out", "TimeoutError")), 600);
+    await vi.advanceTimersByTimeAsync(1_000);
+    const failure = await readiness;
+    if (!failure) {
+      throw new Error("Expected the native readiness wait to fail");
+    }
+
+    // Native I/O supplies the failure; the installed SDK owns the wrapper and
+    // its retained direct cause. A monitor refusal can be lost at this boundary.
+    expect(failure.error).toMatchObject({
+      cause: probeFailure,
+      message: scenario.message,
+    });
+    expect(failure.directCause).toBe(scenario.classification);
+    expect(failure.nativeRunning).toBe(scenario.nativeRunning);
+    expect(JSON.stringify({
+      directCause: failure.directCause,
+      nativeRunning: failure.nativeRunning,
+    })).not.toContain("synthetic-private-startup-sentinel");
+    expect(harness.stats.healthyAtMs).toBeNull();
+    expect(harness.stats.onStartCount).toBe(0);
+    expect(harness.stats.onErrorCount).toBe(0);
+    expect(harness.stats.stateTransitions).not.toContain("healthy");
+    expect(harness.stats.inFlightProbeCount).toBe(0);
+    expect(harness.stats.settledProbeCount).toBe(harness.stats.probeStartedAtMs.length);
+    expect(harness.abortContext).not.toHaveBeenCalled();
+  });
+
   it("preserves true-crash handling without publishing healthy state", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-08-30T12:03:00.000Z"));
@@ -399,6 +514,8 @@ async function runTimingVariant(
 async function createProbeHarness(options: {
   crashAtMs?: number;
   listeningAtMs: number;
+  monitorFailure?: Error;
+  probeFailure?: { fromProbeNumber: number; value: unknown };
   stickyProbeNumbers?: readonly number[];
   stickyProbeReleaseMs: number;
 }): Promise<ProbeHarness> {
@@ -499,6 +616,14 @@ async function createProbeHarness(options: {
             return;
           }
 
+          const probeFailure = options.probeFailure;
+          if (probeFailure && probeNumber >= probeFailure.fromProbeNumber) {
+            timer = setTimeout(() => {
+              finish(() => reject(probeFailure.value));
+            }, readyProbeResponseMs);
+            return;
+          }
+
           const useStickyRelease = options.stickyProbeNumbers?.includes(
             probeNumber,
           ) ?? probeStartedAtMs < options.listeningAtMs;
@@ -511,7 +636,13 @@ async function createProbeHarness(options: {
         });
       },
     })),
-    monitor: vi.fn(() => monitor),
+    monitor: vi.fn(() => {
+      if (options.monitorFailure) {
+        running = false;
+        rejectMonitor(options.monitorFailure);
+      }
+      return monitor;
+    }),
     signal: vi.fn((_signal: number) => undefined),
     start: vi.fn((_config: unknown) => {
       running = true;
@@ -580,6 +711,7 @@ async function createProbeHarness(options: {
   return {
     abortContext,
     crash,
+    nativeContainer: containerBinding,
     runner,
     stats,
   };
