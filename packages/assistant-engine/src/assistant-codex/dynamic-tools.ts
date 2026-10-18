@@ -1,3 +1,4 @@
+import { types } from 'node:util'
 import { executeGetSenderContactDynamicTool, readSenderContactDynamicToolRequest, type SenderContactDynamicToolRequest } from './dynamic-tools/sender-contact.js'
 import { type ConversationPollAction } from '@murphai/hosted-execution/conversation-polls'
 import { readConversationPollDynamicToolRequest, executeConversationPollTool } from './dynamic-tools/conversation-polls.js'
@@ -5,10 +6,12 @@ import { nutritionCardAttachmentGuidance } from '../assistant/nutrition-card-int
 import { parseDynamicToolArguments } from './dynamic-tools/dynamic-tool-wrapper.js'
 import {
   completeDynamicToolFailureDiagnostics,
+  isAlreadyActiveVaultFileSendError,
   toolFailureDiagnostic,
   toolFailureMetadata,
   toolTextResult,
   withProductFeedbackAuditFailureDetails,
+  withVaultFileToolFailureDetails,
   type ToolFailureDiagnostic,
   type ToolFailureReason,
 } from './tool-failure-diagnostics.js'
@@ -137,7 +140,6 @@ import {
   type AssistantResponseCard,
   type CompactTableWorkoutResponseCardV1,
 } from '@murphai/operator-config/assistant-response-cards'
-import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { readLiveWorkoutCardEditor } from '@murphai/vault-usecases/workouts'
 import { normalizeNullableString } from '@murphai/operator-config/text/shared'
 import {
@@ -2435,10 +2437,10 @@ async function executeSendVaultFileDynamicTool(
         )
     }
   } catch (error) {
-    if (
-      error instanceof VaultCliError
-      && error.code === 'ASSISTANT_VAULT_FILE_SEND_ALREADY_ACTIVE'
-    ) {
+    // Keep opaque errors out of both the legacy classifier and the new detail
+    // reader; even instanceof can execute a Proxy's prototype trap.
+    const diagnosticError = types.isProxy(error) ? undefined : error
+    if (isAlreadyActiveVaultFileSendError(diagnosticError)) {
       return replyRequiredResult(
         true,
         JSON.stringify({
@@ -2448,10 +2450,13 @@ async function executeSendVaultFileDynamicTool(
         }),
       )
     }
-    return replyRequiredResult(
-      false,
-      'secure vault-file approval could not be prepared',
-      'handler_exception', error,
+    return withVaultFileToolFailureDetails(
+      replyRequiredResult(
+        false,
+        'secure vault-file approval could not be prepared',
+        'handler_exception', diagnosticError,
+      ),
+      diagnosticError,
     )
   }
 }
