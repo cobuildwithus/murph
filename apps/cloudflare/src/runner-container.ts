@@ -56,7 +56,9 @@ import {
   requireRunnerSlotUserId,
 } from "./runner-slot-binding.js";
 import {
+  classifyRunnerContainerColdWaitDirectCause,
   HOSTED_RUNNER_SHUTTING_DOWN_ERROR_CODE,
+  type RunnerContainerColdWaitDirectCause,
 } from "./runner-container-error-codes.ts";
 import {
   readHostedRunnerContainerIdentity,
@@ -260,7 +262,9 @@ type RunnerContainerLocalStartupFailureStage = Exclude<
 >;
 
 interface RunnerContainerStartupFailureObservation {
+  coldWaitDirectCause?: RunnerContainerColdWaitDirectCause;
   coldWaitFailure?: "instance_start_aborted" | "port_wait_aborted" | "unclassified";
+  coldWaitNativeRunning?: boolean | "unavailable";
   stage: RunnerContainerLocalStartupFailureStage;
 }
 
@@ -3175,6 +3179,18 @@ export class RunnerContainer extends Container {
           } catch {
             // An unreadable diagnostic must not replace the caller's failure.
           }
+          options.startupFailureObservation.coldWaitDirectCause =
+            classifyRunnerContainerColdWaitDirectCause(error);
+          options.startupFailureObservation.coldWaitNativeRunning = "unavailable";
+          try {
+            // Synchronous native flag at the catch, not proof of health or listening.
+            const running = this.ctx.container?.running;
+            if (typeof running === "boolean") {
+              options.startupFailureObservation.coldWaitNativeRunning = running;
+            }
+          } catch {
+            // An unavailable native diagnostic must not replace the startup failure.
+          }
         }
         // The SDK can replace a cancellation reason with a plain Error.
         throwIfRunnerContainerOperationAborted(startupAbortSignal);
@@ -4696,6 +4712,12 @@ function emitRunnerContainerStartupFailureObservation(input: RunnerContainerStar
         ...(input.coldWaitFailure === undefined
           ? {}
           : { runtimeStartupColdWaitFailure: input.coldWaitFailure }),
+        ...(input.coldWaitDirectCause === undefined
+          ? {}
+          : { runtimeStartupColdWaitDirectCause: input.coldWaitDirectCause }),
+        ...(input.coldWaitNativeRunning === undefined
+          ? {}
+          : { runtimeStartupColdWaitNativeRunning: input.coldWaitNativeRunning }),
         runtimeStartupConfirmTimeoutMs: input.timeoutMs,
         runtimeStartupCleanupUnsettled: input.cleanupUnsettled,
         runtimeStartupFailureElapsedMs: elapsedMs,

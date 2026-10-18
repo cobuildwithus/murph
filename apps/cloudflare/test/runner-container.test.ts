@@ -47,6 +47,7 @@ import {
 } from "../src/runner-container-ca-env.ts";
 import {
   HOSTED_RUNNER_SHUTTING_DOWN_ERROR_CODE,
+  type RunnerContainerColdWaitDirectCause,
 } from "../src/runner-container-error-codes.ts";
 import {
   DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
@@ -58,6 +59,9 @@ import {
 const SDK_INSTANCE_START_ABORT_MESSAGE =
   "Aborted waiting for container to start as we received a cancellation signal";
 const SDK_PORT_WAIT_ABORT_MESSAGE = "Container request aborted.";
+const NATIVE_NO_INSTANCE_MESSAGE =
+  "there is no container instance that can be provided to this durable object";
+const NATIVE_PORT_NOT_LISTENING_MESSAGE = "the container is not listening";
 
 const EXPECTED_RUNNER_CONTAINER_ENV = {
   ...buildHostedRunnerContainerCaEnv(),
@@ -83,7 +87,9 @@ type RunnerContainerLocalStartupFailureStage = Exclude<
 
 function expectRunnerContainerStartupFailureObservation(input: {
   cleanupUnsettled: boolean;
+  expectedColdWaitDirectCause?: RunnerContainerColdWaitDirectCause;
   expectedColdWaitFailure?: "instance_start_aborted" | "port_wait_aborted" | "unclassified";
+  expectedColdWaitNativeRunning?: boolean | "unavailable";
   expectedElapsedMs?: number;
   expectedOrchestrationAttemptId?: string;
   expectedTimeoutMs?: number;
@@ -110,6 +116,12 @@ function expectRunnerContainerStartupFailureObservation(input: {
       ...(input.expectedColdWaitFailure === undefined
         ? {}
         : { runtimeStartupColdWaitFailure: input.expectedColdWaitFailure }),
+      ...(input.expectedColdWaitDirectCause === undefined
+        ? {}
+        : { runtimeStartupColdWaitDirectCause: input.expectedColdWaitDirectCause }),
+      ...(input.expectedColdWaitNativeRunning === undefined
+        ? {}
+        : { runtimeStartupColdWaitNativeRunning: input.expectedColdWaitNativeRunning }),
       runtimeStartupConfirmTimeoutMs: input.expectedTimeoutMs ?? expect.any(Number),
       runtimeStartupCleanupUnsettled: input.cleanupUnsettled,
       runtimeStartupFailureElapsedMs: expect.any(Number),
@@ -141,9 +153,12 @@ function expectRunnerContainerStartupFailureObservation(input: {
   if (input.expectedElapsedMs !== undefined) {
     expect(elapsedMs).toBe(input.expectedElapsedMs);
   }
+  const record = buildHostedExecutionStructuredLogRecord(observation);
+  expect(record.details).toEqual(observation.details);
   const serialized = JSON.stringify(observation);
   for (const forbiddenValue of input.forbiddenValues ?? []) {
     expect(serialized).not.toContain(forbiddenValue);
+    expect(JSON.stringify(record)).not.toContain(forbiddenValue);
   }
 }
 
@@ -2196,6 +2211,10 @@ describe("RunnerContainer", () => {
             === "Hosted execution container startup confirmation failed.",
       ),
     ).toHaveLength(0);
+    for (const [observation] of mocks.emitHostedExecutionStructuredLog.mock.calls) {
+      expect(observation.details).not.toHaveProperty("runtimeStartupColdWaitDirectCause");
+      expect(observation.details).not.toHaveProperty("runtimeStartupColdWaitNativeRunning");
+    }
   });
 
   it("reproduces the old deployment gap: new Worker fingerprints reject an available previous image", async () => {
@@ -2600,19 +2619,19 @@ describe("RunnerContainer", () => {
   });
 
   it.each([
-    { label: "initial SDK wait", startFailure: new Error(SDK_INSTANCE_START_ABORT_MESSAGE), expected: "instance_start_aborted" },
-    { label: "separate SDK port wait", startFailure: new Error(SDK_PORT_WAIT_ABORT_MESSAGE), expected: "port_wait_aborted" },
-    { label: "unknown error", startFailure: new Error("port wait failed with token=private-start-token"), expected: "unclassified" },
-    { label: "changed initial message", startFailure: new Error(`${SDK_INSTANCE_START_ABORT_MESSAGE}.`), expected: "unclassified" },
-    { label: "changed port message", startFailure: new Error(`${SDK_PORT_WAIT_ABORT_MESSAGE} changed`), expected: "unclassified" },
-    { label: "non-Error string", startFailure: SDK_PORT_WAIT_ABORT_MESSAGE, expected: "unclassified" },
-    { label: "non-Error object", startFailure: { message: SDK_INSTANCE_START_ABORT_MESSAGE }, expected: "unclassified" },
-    { label: "null", startFailure: null, expected: "unclassified" },
-    { label: "wrapped cancellation", startFailure: new Error("Synthetic wrapper", { cause: new Error(SDK_PORT_WAIT_ABORT_MESSAGE) }), expected: "unclassified" },
+    { label: "initial SDK wait", startFailure: new Error(SDK_INSTANCE_START_ABORT_MESSAGE), expected: "instance_start_aborted", expectedCause: "absent" },
+    { label: "separate SDK port wait", startFailure: new Error(SDK_PORT_WAIT_ABORT_MESSAGE), expected: "port_wait_aborted", expectedCause: "absent" },
+    { label: "unknown error", startFailure: new Error("port wait failed with token=private-start-token"), expected: "unclassified", expectedCause: "absent" },
+    { label: "changed initial message", startFailure: new Error(`${SDK_INSTANCE_START_ABORT_MESSAGE}.`), expected: "unclassified", expectedCause: "absent" },
+    { label: "changed port message", startFailure: new Error(`${SDK_PORT_WAIT_ABORT_MESSAGE} changed`), expected: "unclassified", expectedCause: "absent" },
+    { label: "non-Error string", startFailure: SDK_PORT_WAIT_ABORT_MESSAGE, expected: "unclassified", expectedCause: "other" },
+    { label: "non-Error object", startFailure: { message: SDK_INSTANCE_START_ABORT_MESSAGE }, expected: "unclassified", expectedCause: "other" },
+    { label: "null", startFailure: null, expected: "unclassified", expectedCause: "other" },
+    { label: "wrapped cancellation", startFailure: new Error("Synthetic wrapper", { cause: new Error(SDK_PORT_WAIT_ABORT_MESSAGE) }), expected: "unclassified", expectedCause: "other" },
     { label: "unreadable message", startFailure: Object.defineProperty(new Error(), "message", {
       get() { throw new Error("Synthetic unreadable message"); },
-    }), expected: "unclassified" },
-  ] as const)("classifies only the caught cold wait: $label", async ({ startFailure, expected }) => {
+    }), expected: "unclassified", expectedCause: "absent" },
+  ] as const)("classifies only the caught cold wait: $label", async ({ startFailure, expected, expectedCause }) => {
     const orchestrationAttemptId = "test-cold-start-timeout-correlation";
     const { container, destroy, startAndWaitForPorts } = createContainerDouble({
       startAndWaitForPorts: vi.fn(async () => {
@@ -2634,7 +2653,9 @@ describe("RunnerContainer", () => {
     });
     expectRunnerContainerStartupFailureObservation({
       cleanupUnsettled: false,
+      expectedColdWaitDirectCause: expectedCause,
       expectedColdWaitFailure: expected,
+      expectedColdWaitNativeRunning: "unavailable",
       expectedOrchestrationAttemptId: orchestrationAttemptId,
       expectedTimeoutMs: 15_000,
       forbiddenValues: [
@@ -2643,6 +2664,119 @@ describe("RunnerContainer", () => {
       ],
       stage: "cold_start_or_ports",
     });
+  });
+
+  it.each([
+    { label: "instance abort retaining no instance", message: SDK_INSTANCE_START_ABORT_MESSAGE, cause: new Error(NATIVE_NO_INSTANCE_MESSAGE), running: true, expectedCause: "native_no_instance" },
+    { label: "port abort retaining no instance", message: SDK_PORT_WAIT_ABORT_MESSAGE, cause: new Error(NATIVE_NO_INSTANCE_MESSAGE), running: true, expectedCause: "native_no_instance" },
+    { label: "port refusal after lost no-instance cause", message: SDK_PORT_WAIT_ABORT_MESSAGE, cause: new Error(NATIVE_PORT_NOT_LISTENING_MESSAGE), running: false, expectedCause: "port_not_listening" },
+    { label: "missing direct cause", message: SDK_PORT_WAIT_ABORT_MESSAGE, cause: undefined, running: undefined, expectedCause: "absent" },
+    { label: "changed no-instance message", message: SDK_PORT_WAIT_ABORT_MESSAGE, cause: new Error(`${NATIVE_NO_INSTANCE_MESSAGE}.`), running: true, expectedCause: "other" },
+    { label: "changed port message", message: SDK_PORT_WAIT_ABORT_MESSAGE, cause: new Error(`${NATIVE_PORT_NOT_LISTENING_MESSAGE} changed`), running: false, expectedCause: "other" },
+    { label: "deeper no-instance cause", message: SDK_PORT_WAIT_ABORT_MESSAGE, cause: new Error("synthetic-private-cause", { cause: new Error(NATIVE_NO_INSTANCE_MESSAGE) }), running: undefined, expectedCause: "other" },
+    { label: "non-Error direct cause", message: SDK_PORT_WAIT_ABORT_MESSAGE, cause: { message: NATIVE_NO_INSTANCE_MESSAGE }, running: undefined, expectedCause: "other" },
+    { label: "null direct cause", message: SDK_PORT_WAIT_ABORT_MESSAGE, cause: null, running: undefined, expectedCause: "other" },
+  ] as const)("observes bounded cold wait context: $label", async ({ message, cause, running, expectedCause }) => {
+    const startFailure = new Error(message, { cause });
+    const { container, containerFetch, destroy, getState, start, startAndWaitForPorts } = createContainerDouble({
+      platformRunning: running,
+      startAndWaitForPorts: vi.fn(async () => { throw startFailure; }),
+    });
+
+    await expect(container.ensureReadyForProcessing({
+      timeoutMs: 15_000, userId: "member_123",
+    })).rejects.toBe(startFailure);
+
+    expectRunnerContainerStartupFailureObservation({
+      cleanupUnsettled: false,
+      expectedColdWaitDirectCause: expectedCause,
+      expectedColdWaitFailure: message === SDK_INSTANCE_START_ABORT_MESSAGE
+        ? "instance_start_aborted" : "port_wait_aborted",
+      expectedColdWaitNativeRunning: running ?? "unavailable",
+      forbiddenValues: [NATIVE_NO_INSTANCE_MESSAGE, NATIVE_PORT_NOT_LISTENING_MESSAGE, "synthetic-private-cause"],
+      stage: "cold_start_or_ports",
+    });
+    expect(startAndWaitForPorts).toHaveBeenCalledOnce();
+    expect(getState).toHaveBeenCalledOnce();
+    expect(containerFetch).not.toHaveBeenCalled();
+    expect(start).not.toHaveBeenCalled();
+    expect(destroy).not.toHaveBeenCalled();
+    expect(Reflect.get(container, "currentContainerStart")).toMatchObject({
+      pendingUntilMs: expect.any(Number), readyObservedBy: null,
+    });
+  });
+
+  it.each(["cause", "cause message", "native running", "native container"] as const)(
+    "keeps the original cold failure when the %s getter throws",
+    async (unreadable) => {
+      const privateSentinel = "synthetic-private-getter-value";
+      const unreadableGetter = vi.fn(() => { throw new Error(privateSentinel); });
+      const directCause = new Error(NATIVE_NO_INSTANCE_MESSAGE);
+      const startFailure = new Error(SDK_PORT_WAIT_ABORT_MESSAGE, { cause: directCause });
+      const nativeContainer = { running: true };
+      if (unreadable === "cause") Object.defineProperty(startFailure, "cause", { get: unreadableGetter });
+      if (unreadable === "cause message") Object.defineProperty(directCause, "message", { get: unreadableGetter });
+      const { container, containerFetch, destroy } = createContainerDouble({
+        state: { container: nativeContainer },
+        startAndWaitForPorts: vi.fn(async () => { throw startFailure; }),
+      });
+      if (unreadable === "native running") Object.defineProperty(nativeContainer, "running", { get: unreadableGetter });
+      if (unreadable === "native container") {
+        Object.defineProperty(requireObject(Reflect.get(container, "ctx"), "container context"), "container", { get: unreadableGetter });
+      }
+
+      await expect(container.ensureReadyForProcessing({
+        timeoutMs: 15_000, userId: "member_123",
+      })).rejects.toBe(startFailure);
+
+      expectRunnerContainerStartupFailureObservation({
+        cleanupUnsettled: false,
+        expectedColdWaitDirectCause: unreadable === "cause" || unreadable === "cause message"
+          ? "unreadable" : "native_no_instance",
+        expectedColdWaitFailure: "port_wait_aborted",
+        expectedColdWaitNativeRunning: unreadable === "native running" || unreadable === "native container"
+          ? "unavailable" : true,
+        forbiddenValues: [privateSentinel, NATIVE_NO_INSTANCE_MESSAGE],
+        stage: "cold_start_or_ports",
+      });
+      expect(unreadableGetter).toHaveBeenCalledOnce();
+      expect(containerFetch).not.toHaveBeenCalled();
+      expect(destroy).not.toHaveBeenCalled();
+    },
+  );
+
+  it("does not traverse, serialize, enumerate, or coerce cold wait context", async () => {
+    const privateSentinel = "synthetic-private-nested-value";
+    const forbiddenRead = vi.fn(() => { throw new Error(privateSentinel); });
+    const opaqueValue = { [Symbol.toPrimitive]: forbiddenRead, toJSON: forbiddenRead, toString: forbiddenRead };
+    const directCause = new Proxy(Object.defineProperties(new Error(), {
+      message: { value: opaqueValue },
+      cause: { get: forbiddenRead },
+      stack: { get: forbiddenRead },
+      privatePayload: { enumerable: true, get: forbiddenRead },
+      toJSON: { get: forbiddenRead },
+    }), { ownKeys: forbiddenRead });
+    const startFailure = new Error(SDK_PORT_WAIT_ABORT_MESSAGE, { cause: directCause });
+    const { container, containerFetch, destroy } = createContainerDouble({
+      state: { container: { running: opaqueValue } },
+      startAndWaitForPorts: vi.fn(async () => { throw startFailure; }),
+    });
+
+    await expect(container.ensureReadyForProcessing({
+      timeoutMs: 15_000, userId: "member_123",
+    })).rejects.toBe(startFailure);
+
+    expectRunnerContainerStartupFailureObservation({
+      cleanupUnsettled: false,
+      expectedColdWaitDirectCause: "other",
+      expectedColdWaitFailure: "port_wait_aborted",
+      expectedColdWaitNativeRunning: "unavailable",
+      forbiddenValues: [privateSentinel, "privatePayload"],
+      stage: "cold_start_or_ports",
+    });
+    expect(forbiddenRead).not.toHaveBeenCalled();
+    expect(containerFetch).not.toHaveBeenCalled();
+    expect(destroy).not.toHaveBeenCalled();
   });
 
   it("classifies cold health and readiness-finalization failures", async () => {
@@ -2719,7 +2853,9 @@ describe("RunnerContainer", () => {
       const transportStarted = createDeferred<void>();
       const transportFailure = createDeferred<never>();
       const sdkFailure = new Error(phase === "instance"
-        ? SDK_INSTANCE_START_ABORT_MESSAGE : SDK_PORT_WAIT_ABORT_MESSAGE);
+        ? SDK_INSTANCE_START_ABORT_MESSAGE : SDK_PORT_WAIT_ABORT_MESSAGE, {
+        cause: new Error(NATIVE_NO_INSTANCE_MESSAGE),
+      });
       const rejectOnAbort = (signal: AbortSignal) => {
         signal.addEventListener("abort", () => transportFailure.reject(sdkFailure), { once: true });
         transportStarted.resolve(undefined);
@@ -2733,7 +2869,7 @@ describe("RunnerContainer", () => {
       const containerFetch = vi.fn(async (_url: string, init: { signal: AbortSignal }) =>
         rejectOnAbort(init.signal));
       const { container, destroy } = createContainerDouble({
-        initialStatus: "stopped", startAndWaitForPorts, containerFetch,
+        initialStatus: "stopped", platformRunning: true, startAndWaitForPorts, containerFetch,
       });
       try {
         const readiness = container.ensureReadyForProcessing({
@@ -2754,10 +2890,12 @@ describe("RunnerContainer", () => {
         });
         expectRunnerContainerStartupFailureObservation({
           cleanupUnsettled: false,
+          expectedColdWaitDirectCause: phase === "health" ? undefined : "native_no_instance",
           expectedColdWaitFailure: phase === "health" ? undefined
             : phase === "instance" ? "instance_start_aborted" : "port_wait_aborted",
+          expectedColdWaitNativeRunning: phase === "health" ? undefined : true,
           stage: phase === "health" ? "cold_health_or_finalization" : "cold_start_or_ports",
-          forbiddenValues: [sdkFailure.message, deadlineReason.message],
+          forbiddenValues: [sdkFailure.message, deadlineReason.message, NATIVE_NO_INSTANCE_MESSAGE],
         });
       } finally {
         timeout.mockRestore();
@@ -3878,7 +4016,9 @@ describe("RunnerContainer", () => {
       expect(startAndWaitForPorts).toHaveBeenCalledTimes(2);
       expectRunnerContainerStartupFailureObservation({
         cleanupUnsettled: true,
+        expectedColdWaitDirectCause: "absent",
         expectedColdWaitFailure: "port_wait_aborted",
+        expectedColdWaitNativeRunning: "unavailable",
         stage: "cold_start_or_ports",
       });
     } finally {
