@@ -66,6 +66,8 @@ const validationFields = [
   ["automation list", ["limit", "status"]],
   ["event list", ["kind", "from", "to", "tag", "experiment", "limit", "arguments"]],
   ["event payload-schema", ["kind", "for"]],
+  ["exercise list", ["query", "kind", "environment", "category", "target", "level",
+    "equipment", "position", "modality", "commonness", "limit", "arguments"]],
   ["knowledge show", ["slug", "arguments"]],
   ["measurement entry list", ["metric", "from", "to", "limit"]],
   ["meal add", ["nutritionCalories", "nutritionSource", "occurredAt", "arguments"]],
@@ -159,6 +161,7 @@ export const CLI_TIMING_FILTER_REJECTIONS = ["comma_delimited", "unsupported_val
 export type CliTimingFilterRejection = typeof CLI_TIMING_FILTER_REJECTIONS[number];
 const rejectionOwners = [
   ["research scout-batch", "research_scout_invalid_batch_payload", CLI_TIMING_REJECTIONS],
+  ["exercise list", "VALIDATION_ERROR", CLI_TIMING_PARSE_REJECTIONS],
   ["knowledge upsert", "VALIDATION_ERROR", CLI_TIMING_PARSE_REJECTIONS],
   ["knowledge show", "VALIDATION_ERROR", CLI_TIMING_PARSE_REJECTIONS],
   ["wearables day", "VALIDATION_ERROR", CLI_TIMING_PARSE_REJECTIONS],

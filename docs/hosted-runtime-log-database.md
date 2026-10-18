@@ -2252,7 +2252,7 @@ of that category; recurrence is not required. A null-only result remains
 unresolved and justifies no prompt, schema or guidance change. The category
 identifies the first schema invariant, not why the model produced the input.
 
-#### Optional parser rejection reason (knowledge upsert/show, wearables day)
+#### Optional parser rejection reason (knowledge upsert/show, wearables day, exercise list)
 
 Every Incur argv rejection projects to the same privacy-safe
 `VALIDATION_ERROR / validation / arguments / custom / missing=false` envelope,
@@ -2270,7 +2270,7 @@ data `kind` is `arguments`, copies that one own data descriptor value as
 `cliTimingRejection` onto its timing-only projection. Config ParseErrors share
 the projected code, so they never carry the reason even if one is supplied.
 `cliTimingRejectionFailure` admits it as `rejection` only for
-`knowledge upsert`, `knowledge show` and `wearables day` with
+`knowledge upsert`, `knowledge show`, `wearables day` and `exercise list` with
 `VALIDATION_ERROR` and only these two literals; the research categories above
 and the search filter classes below stay gated to their own command/code. Accessors,
 spoofed/prototype values and wrong commands omit only the reason. A throwing
@@ -2287,8 +2287,8 @@ test with `MURPH_CLI_PARSE_REJECTION_COMPAT_BASE=a83068adbe524217d32a22c270902ef
 (`knowledge show`, `wearables day`, and the filter classes below).
 
 After convergence, reuse the research query above with
-`e ->> 'code' = 'VALIDATION_ERROR'`, `c ->> 'command'` set to one of the three
-admitted commands, and `rejection IN ('unknown_flag', 'missing_value')`.
+`e ->> 'code' = 'VALIDATION_ERROR'`, `c ->> 'command'` set to an admitted
+command, and `rejection IN ('unknown_flag', 'missing_value')`.
 Threshold: **any** natural attributed turn distinguishes the two causes enough
 to build a synthetic reproduction; null-only results stay unresolved and
 justify no prompt, schema or guidance change. Null means an older writer,
@@ -2342,6 +2342,8 @@ causes, iterators and arbitrary nested paths are not consulted. Only exact full
 static field names are admitted:
 
 - `automation list`: limit, status (only these two options from `packages/cli/src/commands/automation.ts`).
+- `exercise list`: query, kind, environment, category, target, level, equipment,
+  position, modality, commonness, limit, plus the fixed Incur invocation field arguments.
 - `food search-labels`: query, limit.
 - `wearables day`: date (required positional argument in `packages/cli/src/commands/wearables.ts`), provider, plus the fixed Incur invocation field arguments.
 - `knowledge show`: slug (required positional argument in `packages/cli/src/commands/knowledge.ts`), plus the fixed Incur invocation field arguments.
@@ -2458,6 +2460,16 @@ The research equivalent uses `MURPH_CLI_RESEARCH_FAILURE_COMPAT_BASE` with the
 pre-admission base in its active plan. Runtime-state and profile tests load the
 actual old portable and hosted readers, checking coalescing to `unknown`, mixed
 old/new reports, absent evidence and unchanged counts/tokens.
+
+The `exercise list` admission reuses the existing CLI timing bridge and portable
+normalizer, including the two parser reasons above. Deploy Web/hosted usage and
+engine/profile readers before runner/CLI producers. Older readers omit its
+optional `validation` and `rejection` and coalesce equal code/stage counts while
+preserving calls, outcomes, phases and drops; new readers accept old reports
+without inferring detail. Run the existing history-backed test with
+`MURPH_CLI_EXERCISE_VALIDATION_COMPAT_BASE` set to the exact pre-extension commit.
+This classifies future failures; it cannot recover historical arguments or
+establish a prompt/schema defect.
 
 The `automation list` field extension follows that same consumer-first order.
 Deploy the portable reader in Web/hosted usage, engine/profile and assistant

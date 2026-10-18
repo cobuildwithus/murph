@@ -586,6 +586,8 @@ test("validation selection admits only exact schema-owned fields and one standar
     ["automation list", ["limit", "status"]],
     ["event list", ["kind", "from", "to", "tag", "experiment", "limit", "arguments"]],
     ["event payload-schema", ["kind", "for"]],
+    ["exercise list", ["query", "kind", "environment", "category", "target", "level",
+      "equipment", "position", "modality", "commonness", "limit", "arguments"]],
     ["knowledge show", ["slug", "arguments"]],
     ["measurement entry list", ["metric", "from", "to", "limit"]],
     ["food search-labels", ["query", "limit"]],
@@ -623,6 +625,7 @@ test("validation selection admits only exact schema-owned fields and one standar
 for (const [command, field] of [
   ["food search-labels", "query"], ["event list", "limit"],
   ["event list", "arguments"], ["knowledge upsert", "arguments"],
+  ["exercise list", "kind"], ["exercise list", "limit"], ["exercise list", "arguments"],
   ["meal add", "nutritionCalories"], ["meal edit", "nutritionSource"],
   ["meal add", "occurredAt"], ["meal edit", "arguments"],
   ["meal edit", "id"], ["meal edit", "nutritionProteinGrams"], ["meal edit", "nutritionConfidence"],
@@ -652,26 +655,28 @@ for (const [command, field] of [
   assert.equal(reads, 0);
 });
 
-test("malformed optional validation is omitted without losing failure counts or changing unknown/success boundaries", () => {
-  const report = sample("food search-labels");
+for (const commandName of ["food search-labels", "exercise list"]) test(`${commandName}: malformed optional validation preserves failure counts and boundaries`, () => {
+  const report = sample(commandName);
   const command = report.commands[0]!;
   command.outcome = "error";
   command.failures = [{ code: "VALIDATION_ERROR", stage: "validation", count: 1 }];
   const good = { field: "query", code: "invalid_type", missing: true };
+  let reads = 0;
   const proxy = new Proxy({}, { getOwnPropertyDescriptor() { throw Error("PRIVATE_SENTINEL"); } });
   for (const validation of [null, [], "PRIVATE_SENTINEL", proxy, Object.create(good),
     { ...good, field: "body" }, { ...good, field: "query.PRIVATE_SENTINEL" }, { ...good, field: ["query"] },
     ...["INVALID_TYPE", "invalid_type ", "invalid_type_PRIVATE_SENTINEL", "PRIVATE_SENTINEL"].map((code) => ({ ...good, code })),
     ...[null, "true", 1, {}].map((missing) => ({ ...good, missing })),
-    Object.defineProperty({ ...good }, "code", { get() { throw Error("PRIVATE_SENTINEL"); } })]) {
+    Object.defineProperty({ ...good }, "code", { get() { reads += 1; throw Error("PRIVATE_SENTINEL"); } })]) {
     assert.deepEqual(normalizeCliTiming({ ...report, commands: [{ ...command,
       failures: [{ ...command.failures[0], validation }] }] }), report);
   }
+  assert.equal(reads, 0);
   const input = { ...report, commands: [{ ...command, failures: [{ ...command.failures[0],
     validation: { ...good, path: "PRIVATE_SENTINEL", expected: "PRIVATE_SENTINEL", value: "PRIVATE_SENTINEL" } }] }] };
   assert.deepEqual(normalizeCliTiming(input)?.commands[0]!.failures, [{ ...command.failures[0], validation: good }]);
   assert.ok(!JSON.stringify(normalizeCliTiming(input)).includes("PRIVATE_SENTINEL"));
-  for (const name of ["other", "exercise list", "knowledge show"]) {
+  for (const name of ["other", "exercise show", "knowledge show"]) {
     assert.equal(normalizeCliTiming({ ...input, commands: [{ ...input.commands[0], command: name }] })?.commands[0]!.failures?.[0]?.validation, undefined);
   }
   const unknown = { ...input, commands: [{ ...command, failures: [{ code: "PRIVATE_SENTINEL", stage: "validation", count: 1, validation: good }] }] };
@@ -709,6 +714,13 @@ const readValidationCases = [
   ["event payload-schema", "kind", "invalid_value", true],
   ["event payload-schema", "kind", "invalid_value", false],
   ["event payload-schema", "for", "invalid_value", false],
+] as const;
+
+const exerciseValidationCases = [
+  ["exercise list", "kind", "invalid_value", false],
+  ["exercise list", "limit", "too_big", false],
+  ["exercise list", "arguments", "custom", false, "unknown_flag"],
+  ["exercise list", "arguments", "custom", false, "missing_value"],
 ] as const;
 
 const measurementValidationCases = [
@@ -751,6 +763,7 @@ const mealEditValidationCases = [
 test("allowlisted commands preserve original errors and round-trip only finite validation detail", async () => {
   for (const [command, field, code, missing] of [
     ["automation list", "limit", "too_big", false], ["automation list", "status", "invalid_value", false],
+    ...exerciseValidationCases,
     ...readValidationCases, ...measurementValidationCases, ...eventInvocationValidationCases, ...mealValidationCases, ...mealEditValidationCases,
   ] as const) for (const property of ["publicIssues", "fieldErrors"] as const) {
     const validation = { field, code, missing };
@@ -805,6 +818,8 @@ test("command validation omits other fields, commands and malformed evidence on 
     ["knowledge show", "slug", ["kind", "for", "body", "sourcePath"]],
     ["event payload-schema", "kind", ["slug", "body", "sourcePath"]],
     ["event payload-schema", "for", ["slug", "body", "sourcePath"]],
+    ...exerciseValidationCases.map(([command, field]) =>
+      [command, field, ["lookup", "body", "slug", "sourcePath", "value", "context", "config"]] as const),
     ...measurementValidationCases.map(([command, field]) =>
       [command, field, ["value", "unit", "slug", "body", "sourcePath"]] as const),
     ...eventInvocationValidationCases.map(([command, field]) =>
@@ -825,7 +840,7 @@ test("command validation omits other fields, commands and malformed evidence on 
         : [{ ...issue, value: "PRIVATE_SENTINEL", message: "PRIVATE_SENTINEL" }];
       assert.deepEqual(cliTimingValidationFailure(command, "VALIDATION_ERROR", { [property]: detail }, property), {});
     }
-    for (const other of ["other", "automation show", "automation set-status", "event show", "knowledge list",
+    for (const other of ["other", "exercise show", "exercise facets", "automation show", "automation set-status", "event show", "knowledge list",
       "measurement list", "measurement add", `${command} PRIVATE_SENTINEL`, command.toUpperCase()]) {
       assert.deepEqual(cliTimingValidationFailure(other, "VALIDATION_ERROR", { publicIssues: [good] }, "publicIssues"), {});
     }
@@ -867,6 +882,7 @@ test.skipIf(!automationValidationCompatibilityBase)("actual older automation rea
 });
 
 for (const [reader, base, cases] of [
+  ["exercise-validation", process.env.MURPH_CLI_EXERCISE_VALIDATION_COMPAT_BASE, exerciseValidationCases],
   ["read-validation", process.env.MURPH_CLI_READ_VALIDATION_COMPAT_BASE, readValidationCases],
   ["measurement-validation", process.env.MURPH_CLI_MEASUREMENT_VALIDATION_COMPAT_BASE, measurementValidationCases],
   ["event-invocation-validation", process.env.MURPH_CLI_EVENT_INVOCATION_VALIDATION_COMPAT_BASE, eventInvocationValidationCases],
@@ -881,7 +897,9 @@ for (const [reader, base, cases] of [
   const old: { normalizeCliTiming: typeof normalizeCliTiming; cliTimingValidationFailure: typeof cliTimingValidationFailure } = await import(
     `data:text/javascript;base64,${Buffer.from(stripTypeScriptTypes(source)).toString("base64")}`,
   );
-  for (const [command, field, code, missing] of cases) {
+  for (const entry of cases) {
+    const [command, field, code, missing] = entry;
+    const rejection = entry.length === 5 ? entry[4] : undefined;
     const validation = { field, code, missing };
     for (const property of ["publicIssues", "fieldErrors"] as const) {
       const source = { [property]: [{ path: field, code, missing }] };
@@ -892,7 +910,8 @@ for (const [reader, base, cases] of [
     report.commands[0]!.outcome = "error";
     report.commands[0]!.calls = 3;
     report.commands[0]!.failures = [
-      { code: "VALIDATION_ERROR", stage: "validation", count: 1, validation },
+      { code: "VALIDATION_ERROR", stage: "validation", count: 1, validation,
+        ...(rejection ? { rejection } : {}) },
       { code: "VALIDATION_ERROR", stage: "validation", count: 1 },
     ];
     report.commands[0]!.droppedFailures = 1;
@@ -1161,8 +1180,8 @@ function parseRejectionEnvelope(value?: unknown): object {
 }
 const parseValidation = { field: "arguments", code: "custom", missing: false } as const;
 
-test("knowledge upsert parse rejection is gated, finite and separate from research categories", async () => {
-  const capture = async (error: object, command = "knowledge upsert") => {
+for (const owner of ["knowledge upsert", "exercise list"]) test(`${owner} parse rejection is gated, finite and separate from research categories`, async () => {
+  const capture = async (error: object, command = owner) => {
     let report!: CliTiming;
     await assert.rejects(withCliTiming(() => timeCliDispatch(command, async () => { throw error; }),
       (value) => { report = value; }), (caught) => caught === error);
@@ -1187,9 +1206,11 @@ test("knowledge upsert parse rejection is gated, finite and separate from resear
   const accessor = Object.defineProperty(parseRejectionEnvelope(), "cliTimingRejection",
     { enumerable: true, get: () => { reads += 1; return "unknown_flag"; } });
   assert.deepEqual(await capture(accessor), [{ ...base }]);
+  const inherited = Object.setPrototypeOf(parseRejectionEnvelope(), { cliTimingRejection: "unknown_flag" });
+  assert.deepEqual(await capture(inherited), [{ ...base }]);
   assert.equal(reads, 0);
   const other = { ...parseRejectionEnvelope("unknown_flag"), code: "knowledge_page_invalid" };
-  assert.deepEqual(cliTimingRejectionFailure("knowledge upsert", other.code, other, "cliTimingRejection"), {});
+  assert.deepEqual(cliTimingRejectionFailure(owner, other.code, other, "cliTimingRejection"), {});
 });
 
 test("parse rejection variants coalesce, conserve counts and drop only malformed wire detail", () => {
@@ -1300,6 +1321,7 @@ test("knowledge show and wearables day admit the same parser reasons; search que
 
 test("new rejection owners coalesce per variant and drop malformed wire detail without losing counts", () => {
   for (const [command, code, stage, admitted] of [
+    ["exercise list", "VALIDATION_ERROR", "validation", CLI_TIMING_PARSE_REJECTIONS],
     ["knowledge show", "VALIDATION_ERROR", "validation", CLI_TIMING_PARSE_REJECTIONS],
     ["wearables day", "VALIDATION_ERROR", "validation", CLI_TIMING_PARSE_REJECTIONS],
     ["search query", "invalid_option", "unknown", CLI_TIMING_FILTER_REJECTIONS],
@@ -1318,15 +1340,22 @@ test("new rejection owners coalesce per variant and drop malformed wire detail w
     assert.deepEqual(normalizeCliTiming(aggregate), aggregate);
     const wire = sample(command);
     wire.commands[0]!.outcome = "error";
-    wire.commands[0]!.calls = 3;
+    wire.commands[0]!.calls = 4;
     const foreign = admitted === CLI_TIMING_FILTER_REJECTIONS ? "unknown_flag" : "comma_delimited";
+    const failure: CliFailureTiming = { code, stage, count: 1,
+      ...(command === "exercise list" ? { validation: { ...parseValidation } } : {}) };
+    let reads = 0;
     const entries = [
-      { code, stage, count: 1, rejection: "PRIVATE_REASON" },
-      { code, stage, count: 1, rejection: foreign },
-      Object.defineProperty({ code, stage, count: 1 }, "rejection", { enumerable: true, get: () => admitted[0] }),
+      { ...failure, rejection: "PRIVATE_REASON" },
+      { ...failure, rejection: foreign },
+      Object.defineProperty({ ...failure }, "rejection", {
+        enumerable: true, get: () => { reads += 1; return admitted[0]; },
+      }),
+      Object.assign(Object.create({ rejection: admitted[0] }), failure),
     ];
     assert.deepEqual(normalizeCliTiming({ ...wire, commands: [{ ...wire.commands[0]!, failures: entries }] })
-      ?.commands[0]!.failures, [{ code, stage, count: 3 }]);
+      ?.commands[0]!.failures, [{ ...failure, count: 4 }]);
+    assert.equal(reads, 0);
   }
 });
 
