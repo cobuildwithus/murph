@@ -196,6 +196,17 @@ Recovery from a lost completion acknowledgment uses that same settled `complete`
 command after proving the exact completed receipt and inactive fence, replacing
 the separate completion and release requests.
 
+The container still awaits that recovery callback after the job and its response
+finish. Health `activeJobCount` keeps counting it as lifetime work, so shutdown
+drain, post-shutdown wake absence, idle cleanup, and the legacy wake probe are
+unchanged. The child also reports `settlingCompletionCallbackCount`, and
+admission excludes only those settling callbacks. A Worker readiness check
+subtracts the settling count only when the child reports a valid integer between
+zero and the total; an absent count uses the total, and a malformed count stays
+busy. Admitting the next job beside a settling callback grants no authority: a
+new attempt still needs canonical release, and the old callback cannot complete,
+release, or retire its successor.
+
 Deploy the additive Web completion consumer before the Worker producer. The
 existing live Web protocol admission includes both early and settled command
 witnesses parsed by the same reader as the ownership endpoint, and rejects

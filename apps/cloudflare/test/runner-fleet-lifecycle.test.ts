@@ -235,6 +235,7 @@ describe("unified runner identity and binding", () => {
     source: { runnerBundle: { bundleFingerprint: "bundle-test", sourceFingerprint: "bad" } },
     pristine: { workspaceInvocationAcceptedCount: 1 },
     active: { activeJobCount: 1 },
+    settling: { activeJobCount: 1, settlingCompletionCallbackCount: 1 },
     poisoned: { poisoned: true },
   })) it(`still rejects invalid global inventory ${label} proof`, async () => {
     const { container } = runnerHarness({ health });
