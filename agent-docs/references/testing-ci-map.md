@@ -1775,7 +1775,7 @@ keep the one-second presentation-only deadline and late-result rejection.
   reviewed OpenAI route dispositions to the exact assistant package, runner
   image, workspace Codex pins, and upstream source-tree identity. The required
   Linux app-verification job resolves the version-derived upstream tag and
-  verifies its exact commit, `codex-rs/codex-api/src` tree, and declared source
+  verifies its exact commit, `codex-rs` tree (including provider APIs and Guardian Decisions), and declared source
   paths. Offline tests then treat native scanning as corroboration: they cover
   full plus separated single- and multi-segment provider-relative candidates,
   supplement target-specific linker layout with the source-owned route list,
