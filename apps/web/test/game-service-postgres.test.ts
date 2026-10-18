@@ -77,12 +77,16 @@ async function photo(actor: string, gameId: string, name: string, text?: string)
   };
 }
 
-/** Challenger invites, invitee accepts; returns the game id and its invite token. */
+/**
+ * Challenger invites, invitee accepts; returns the game id and its invite token.
+ * The invitee plays from New York like the challengers here, so Start now
+ * starts today for both whatever hour the suite runs (zones are the rules' job).
+ */
 async function startGame(challenger: string, invitee: string, extra: Partial<Extract<GameCommand, { type: "createGame" }>> = {}) {
   const gameId = randomUUID();
   const created = await ok(challenger, { gameId, inviteeFirstName: "Friend", terms: TERMS, type: "createGame", ...extra });
   const token = created!.inviteToken!;
-  await ok(invitee, { termsVersion: 1, timeZone: "UTC", token, type: "join" });
+  await ok(invitee, { termsVersion: 1, timeZone: "America/New_York", token, type: "join" });
   return { gameId, token };
 }
 
@@ -128,8 +132,9 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     expect(preview).toMatchObject({ inviteeFirstName: "Ava", inviterFirstName: "Leo" });
     expect(preview.terms.tasks[0].text).toBe("100 pushups");
 
-    // Accept; the invite is single-use and a used invite shows only its status.
-    const joined = await ok(ava, { termsVersion: 1, timeZone: "Australia/Sydney", token, type: "join" });
+    // Accept (from New York, so Start now below starts today for both); the
+    // invite is single-use and a used invite shows only its status.
+    const joined = await ok(ava, { termsVersion: 1, timeZone: "America/New_York", token, type: "join" });
     expect(joined).toMatchObject({ status: "live" });
     expect(await errorCode(kat, { termsVersion: 1, timeZone: "Europe/London", token, type: "join" })).toBe("INVITE_USED");
     expect(await readInvitePreview(token)).toEqual({ status: "used" });
@@ -138,7 +143,7 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     });
     expect(label?.nameEncrypted && label.relationshipEncrypted).toBeTruthy();
     // Accepting again is a repeat, not an error.
-    expect(await errorCode(ava, { termsVersion: 1, timeZone: "Australia/Sydney", token, type: "join" })).toBe("OK");
+    expect(await errorCode(ava, { termsVersion: 1, timeZone: "America/New_York", token, type: "join" })).toBe("OK");
 
     await devStartNow(gameId, leo);
 
@@ -339,7 +344,7 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     const ava = await member("Ava", "UTC");
     // Only today's weekday counts, so tomorrow is a day off.
     const today = gameLocalDate(new Date(), "America/New_York");
-    const { gameId } = await startGame(leo, ava, { terms: { ...TERMS, schedule: { days: [weekdayOf(today)] } } });
+    const { gameId, token } = await startGame(leo, ava, { terms: { ...TERMS, schedule: { days: [weekdayOf(today)] } } });
     await devStartNow(gameId, leo);
     const shot = await photo(leo, gameId, "today");
     await ok(leo, shot);
@@ -358,6 +363,41 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
 
     const ended = await devAdvanceDays(gameId, leo, 7);
     expect(ended.status).toBe("settled");
+    // Past the invite's 7-day expiry, a link that was taken still reads as used.
+    expect(await readInvitePreview(token)).toEqual({ status: "used" });
+  });
+
+  it("refuses a rematch of an older game once the same two people have a newer one", async () => {
+    const leo = await member("Leo", "America/New_York");
+    const ava = await member("Ava", "America/New_York");
+    const { gameId: first } = await startGame(leo, ava);
+    await devSettleNow(first, leo);
+    const rematchOf = (previousGameId: string): GameCommand => ({
+      gameId: randomUUID(),
+      inviteeFirstName: "Ava",
+      previousGameId,
+      terms: TERMS,
+      type: "createGame",
+    });
+
+    // A rematch of the newest game works.
+    const second = await ok(leo, rematchOf(first));
+    expect(second).toMatchObject({ round: 2, status: "invited" });
+    // While that rematch is open, or live, another one from round 1 could never be accepted.
+    expect(await run(leo, rematchOf(first))).toMatchObject({
+      error: { code: "ALREADY_IN_A_GAME", message: "You and Ava already have a game going." },
+      ok: false,
+    });
+    await ok(ava, { termsVersion: 1, timeZone: "America/New_York", token: second!.inviteToken!, type: "join" });
+    expect(await errorCode(ava, rematchOf(first))).toBe("ALREADY_IN_A_GAME");
+
+    // Once round 2 has settled, round 1 is outdated; round 2 rematches fine.
+    await devSettleNow(second!.id, leo);
+    expect(await run(ava, rematchOf(first))).toMatchObject({
+      error: { code: "REMATCH_OUTDATED", message: "There's a newer game with Leo." },
+      ok: false,
+    });
+    expect(await ok(ava, rematchOf(second!.id))).toMatchObject({ round: 3, status: "invited" });
   });
 
   it("starts the round count over when someone new takes a rematch", async () => {

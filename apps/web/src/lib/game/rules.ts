@@ -122,6 +122,7 @@ export const GAME_ERROR_STATUS: Record<GameErrorCode, number> = {
   MEDIA_MISSING: 422,
   NOT_A_PLAYER: 403,
   PROFILE_REQUIRED: 409,
+  REMATCH_OUTDATED: 409,
   RETAKE_USED: 409,
   TERMS_CHANGED: 409,
   TICKET_EXPIRED: 410,
@@ -167,16 +168,16 @@ export function dayIndexAt(player: RulePlayer, now: Date): number | null {
 }
 
 /**
- * Whether a day index counts. Weekdays follow the challenger's calendar
- * (seat 0's Day 1 plus the index), so a day is on or off for everyone at
- * once even when the players' local dates differ. Count mode counts every day.
+ * Whether a day index counts. Every player shares one Day 1 date, so a day
+ * index is the same calendar date (and weekday) for everyone, each in their
+ * own time zone. Count mode counts every day.
  */
 export function isScheduledDay(state: RuleState, dayIndex: number): boolean {
   const schedule = termsForDay(state.game.terms, dayIndex).schedule;
   if ("count" in schedule) return true;
-  const challenger = state.players.find((player) => player.seat === 0);
-  if (!challenger?.dayOne) return false;
-  return schedule.days.includes(weekdayOf(addDays(challenger.dayOne, dayIndex)));
+  const dayOne = state.players.find((player) => player.dayOne)?.dayOne;
+  if (!dayOne) return false;
+  return schedule.days.includes(weekdayOf(addDays(dayOne, dayIndex)));
 }
 
 export function liveEntry(entries: readonly RuleEntry[], memberId: string, dayIndex: number): RuleEntry | null {
@@ -307,9 +308,19 @@ export interface Schedule {
   players: PlayerDays[];
 }
 
-function scheduleFor(players: readonly RulePlayer[], dayOneOf: (player: RulePlayer) => string): Schedule {
+/**
+ * One Day 1 date for everyone: the latest of each player's earliest allowed
+ * date (and `atLeast`, a picked start), so nobody's Day 1 is already behind
+ * them and every day index is the same calendar date in each time zone.
+ */
+function scheduleFor(
+  players: readonly RulePlayer[],
+  earliestFor: (player: RulePlayer) => string,
+  atLeast: string | null = null,
+): Schedule {
+  const dayOne = players.map(earliestFor).reduce((latest, date) => (date > latest ? date : latest), atLeast ?? "");
   return {
-    players: players.map((player) => ({ dayOne: dayOneOf(player), memberId: player.memberId, timeZone: player.timeZone })),
+    players: players.map((player) => ({ dayOne, memberId: player.memberId, timeZone: player.timeZone })),
   };
 }
 
@@ -341,16 +352,17 @@ export function decideJoin(
     seat: state.players.length,
     timeZone: input.timeZone,
   };
-  // Day 1 is each player's next local day after the last one shakes on it,
-  // or the picked date if that's later: then it's one calendar date for all.
+  // Day 1 is the next local day after the last one shakes on it for whoever
+  // gets there last, or the picked date if that's later.
   return {
     kind: "join",
     seat: joiner.seat,
     startedAt: input.now,
-    ...scheduleFor([...state.players, joiner], (player) => {
-      const next = addDays(gameLocalDate(input.now, player.timeZone), 1);
-      return game.startsOn && game.startsOn > next ? game.startsOn : next;
-    }),
+    ...scheduleFor(
+      [...state.players, joiner],
+      (player) => addDays(gameLocalDate(input.now, player.timeZone), 1),
+      game.startsOn,
+    ),
   };
 }
 
@@ -451,7 +463,11 @@ export function decideWithdraw(
   return { withdraw: { dayIndex: entry.dayIndex, entryId: entry.id } };
 }
 
-/** Start now: everyone's Day 1 becomes today. Only before anyone has started. */
+/**
+ * Start now: Day 1 becomes today, the latest "today" among the players, so
+ * nobody starts on a day that's already over for them. Across the date line
+ * the player behind starts tomorrow. Only before anyone has started.
+ */
 export function decideStartNow(state: RuleState, now: Date): Schedule {
   if (state.game.status !== "live") reject("GAME_NOT_LIVE", "Both players have to shake on it first.");
   if (state.players.some((player) => (dayIndexAt(player, now) ?? -1) >= 0)) {
