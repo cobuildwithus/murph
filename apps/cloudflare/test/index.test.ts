@@ -365,6 +365,10 @@ describe("cloudflare worker routes", () => {
       "environment-voice-delete",
       "meal-photo-stage",
       "meal-photo-delete",
+      "game-media-stage",
+      "game-media-read",
+      "game-media-stat",
+      "game-media-delete",
       "browser-vault-session",
       "user-status",
     ]);
@@ -400,6 +404,10 @@ describe("cloudflare worker routes", () => {
       "environment-voice-delete",
       "meal-photo-stage",
       "meal-photo-delete",
+      "game-media-stage",
+      "game-media-read",
+      "game-media-stat",
+      "game-media-delete",
       "browser-vault-session",
       "user-status",
     ]);
