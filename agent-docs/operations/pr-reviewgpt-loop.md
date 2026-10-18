@@ -336,7 +336,7 @@ the current user explicitly asks for it.
    native Codex build. Keep it with the Dockerfiles in the mandatory snapshot paths.
 
    When the PR changes that patch, the existing packager also includes complete
-   patched native text files, upstream repository policy, and the bounded
+   patched native text files and the bounded
    configuration/instruction/authentication/transport/recovery owner list under
    `review-gpt-pr-context/dependencies/codex-<version>/`. It reads the reviewed
    commit's package pin, Docker source SHA, and patch, verifies the official
