@@ -487,18 +487,25 @@ test('real event and knowledge validation preserve output, effects and finite lo
   vi.useFakeTimers({ toFake: ['Date'] })
   vi.setSystemTime(new Date('2030-01-15T10:00:00.000Z'))
   try {
-    for (const [args, field, code, missing] of [
+    // Optional parser reason is admitted only for knowledge upsert/show (and
+    // wearables day below), never event list; trailing tokens follow the
+    // shared flags so a final option really lacks its value.
+    const rows: Array<[string[], string, string, boolean, string?, string[]?]> = [
       [['event', 'list', '--limit', '201'], 'limit', 'too_big', false],
       [['event', 'list', '--PRIVATE_SENTINEL'], 'arguments', 'custom', false],
-      [['knowledge', 'show', '--slug', 'synthetic-page'], 'arguments', 'custom', false],
+      [['knowledge', 'show', '--slug', 'synthetic-page'], 'arguments', 'custom', false, 'unknown_flag'],
+      [['knowledge', 'show', 'synthetic-page'], 'arguments', 'custom', false, 'missing_value', ['--request-id']],
       [['knowledge', 'show'], 'slug', 'invalid_type', true],
       [['knowledge', 'show', 'PRIVATE_SENTINEL!'], 'slug', 'invalid_format', false],
-      [['knowledge', 'upsert', '--body', '# PRIVATE_SENTINEL', '--PRIVATE_SENTINEL'], 'arguments', 'custom', false],
+      [['knowledge', 'upsert', '--body', '# PRIVATE_SENTINEL', '--PRIVATE_SENTINEL'], 'arguments', 'custom', false, 'unknown_flag'],
+      [['knowledge', 'upsert', '--body', '# PRIVATE_SENTINEL'], 'arguments', 'custom', false, 'missing_value', ['--slug']],
       [['knowledge', 'upsert'], 'body', 'invalid_type', true],
       [['knowledge', 'upsert', '--body', ''], 'body', 'too_small', false],
       [['knowledge', 'upsert', '--body', '# PRIVATE_SENTINEL', '--related-slug', 'PRIVATE_SENTINEL!'], 'relatedSlug', 'invalid_format', false],
-    ] as const) {
-      const argv = [...args, '--vault', root, '--format', 'json']
+    ]
+    const outputs = new Map<string, string>()
+    for (const [args, field, code, missing, rejection, trailing = []] of rows) {
+      const argv = [...args, '--vault', root, '--format', 'json', ...trailing]
       const baseline = await invoke(argv)
       const captured = await collect(() => invoke(argv))
       assert.deepEqual(captured.result, baseline)
@@ -517,12 +524,20 @@ test('real event and knowledge validation preserve output, effects and finite lo
       assert.equal(command.calls, 1)
       const validation = { field, code, missing }
       assert.deepEqual(cliTimingValidationFailure(command.command, output.code, output, 'fieldErrors'), { validation })
-      assert.deepEqual(command.failures, [{ code: 'VALIDATION_ERROR', stage: 'validation', count: 1, validation }])
+      assert.deepEqual(command.failures, [{ code: 'VALIDATION_ERROR', stage: 'validation', count: 1, validation,
+        ...(rejection ? { rejection } : {}) }])
+      assert.equal(/unknown_flag|missing_value|cliTimingRejection/u.test(captured.result.stdout + captured.result.stderr), false)
+      if (rejection) outputs.set(`${command.command}:${rejection}`, captured.result.stdout)
       assert.equal(command.droppedFailures, undefined)
       assert.equal(captured.timing.droppedCalls, 0)
       assert.equal(captured.timing.droppedSpans, 0)
       assert.ok(Buffer.byteLength(captured.wire) <= CLI_TIMING_MAX_REPORT_BYTES)
       assert.equal(captured.wire.includes('PRIVATE_SENTINEL'), false)
+    }
+    // Distinct telemetry reasons; the model-visible fixed envelope stays identical.
+    assert.equal(outputs.size, 4)
+    for (const name of ['knowledge upsert', 'knowledge show']) {
+      assert.equal(outputs.get(`${name}:unknown_flag`), outputs.get(`${name}:missing_value`))
     }
     assert.equal(upsert.mock.calls.length, 0)
     assert.equal(show.mock.calls.length, 0, 'Parser/schema rejection precedes the registered read handler.')
@@ -568,6 +583,121 @@ test('real event and knowledge validation preserve output, effects and finite lo
     assert.equal(eventCalls.reduce((sum, count) => sum + count(), 0), 2)
     assert.equal((await knowledge.listKnowledgePages({ vault: root })).pageCount, 1)
     assert.match(await readFile(path.join(root, 'derived/knowledge/pages/synthetic-page.md'), 'utf8'), /PRIVATE_SENTINEL/u)
+    assert.equal(fetchImpl.mock.calls.length, 0)
+  } finally { vi.useRealTimers() }
+})
+
+async function vaultFiles(root: string, canonicalOnly = false): Promise<Array<[string, string]>> {
+  const files: Array<[string, string]> = []
+  for (const entry of await readdir(root, { recursive: true, withFileTypes: true })) {
+    if (!entry.isFile()) continue
+    const relative = path.relative(root, path.join(entry.parentPath, entry.name))
+    // Valid reads may refresh rebuildable projections; canonical sources must not change.
+    if (canonicalOnly && /^(?:derived|\.runtime)(?:\/|$)/u.test(relative)) continue
+    files.push([relative, (await readFile(path.join(root, relative))).toString('base64')])
+  }
+  return files.sort(([left], [right]) => left.localeCompare(right))
+}
+
+test('real wearables day and search query rejections keep output, exits and zero effects while separating causes', async () => {
+  const home = await mkdtemp(path.join(os.tmpdir(), 'cli-filter-PRIVATE_SENTINEL-'))
+  roots.push(home)
+  vi.stubEnv('HOME', home)
+  vi.spyOn(process, 'loadEnvFile').mockImplementation(() => {})
+  const fetchImpl = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
+    throw new Error('PRIVATE_SENTINEL unexpected provider request')
+  })
+  const root = await vault()
+  vi.spyOn(performance, 'now').mockReturnValue(0)
+  vi.useFakeTimers({ toFake: ['Date'] })
+  vi.setSystemTime(new Date('2030-01-15T10:00:00.000Z'))
+  const hidden = /cliTimingRejection|comma_delimited|unsupported_value|unknown_flag|missing_value/u
+  try {
+    type Row = { args: string[]; trailing?: string[]; code: string; stage: string;
+      validation?: { field: string; code: string; missing: boolean }; rejection?: string }
+    const day = (args: string[], field: string, code: string, missing: boolean, rejection?: string, trailing?: string[]): Row =>
+      ({ args: ['wearables', 'day', ...args], trailing, code: 'VALIDATION_ERROR', stage: 'validation',
+        validation: { field, code, missing }, ...(rejection ? { rejection } : {}) })
+    const filter = (args: string[], rejection?: string): Row =>
+      ({ args, code: 'invalid_option', stage: 'unknown', ...(rejection ? { rejection } : {}) })
+    const rows: Row[] = [
+      day(['2030-01-14', '--PRIVATE_SENTINEL'], 'arguments', 'custom', false, 'unknown_flag'),
+      day(['2030-01-14'], 'arguments', 'custom', false, 'missing_value', ['--provider']),
+      day([], 'date', 'invalid_type', true),
+      day(['PRIVATE_SENTINEL'], 'date', 'invalid_format', false),
+      filter(['search', 'query', 'synthetic', '--record-type', 'PRIVATE_SENTINEL'], 'unsupported_value'),
+      filter(['search', 'query', 'synthetic', '--record-type', 'event,goal'], 'comma_delimited'),
+      filter(['search', 'query', 'synthetic', '--kind', 'PRIVATE,SENTINEL'], 'comma_delimited'),
+      filter(['search', 'query', 'synthetic', '--stream', 'PRIVATE,SENTINEL'], 'comma_delimited'),
+      filter(['search', 'query', 'synthetic', '--tag', 'PRIVATE,SENTINEL'], 'comma_delimited'),
+      // The same shared normalizer on another command: metadata dropped by the owner gate.
+      filter(['list', '--record-type', 'PRIVATE_SENTINEL']),
+      filter(['list', '--tag', 'PRIVATE,SENTINEL']),
+    ]
+    const canonical = await vaultFiles(root, true)
+    const outputs = new Map<string, string>()
+    for (const row of rows) {
+      const argv = [...row.args, '--vault', root, '--format', 'json', ...(row.trailing ?? [])]
+      // `list` reads the vault before its tag normalizer (unchanged ordering),
+      // which may refresh the rebuildable projection; the others touch nothing.
+      const before = await vaultFiles(root, row.args[0] === 'list')
+      const baseline = await invoke(argv)
+      const captured = await collect(() => invoke(argv))
+      assert.deepEqual(captured.result, baseline, 'Timing on/off: identical stdout, stderr, exits and throws.')
+      assert.equal(captured.result.thrown, null)
+      assert.deepEqual(captured.result.exits, [1])
+      const output = JSON.parse(captured.result.stdout)
+      assert.equal(output.code, row.code)
+      if (row.validation) {
+        assert.ok(output.fieldErrors.some((issue: { path: string; code: string; missing?: boolean }) =>
+          issue.path === row.validation!.field && issue.code === row.validation!.code && issue.missing === row.validation!.missing))
+      }
+      assert.equal(hidden.test(captured.result.stdout + captured.result.stderr), false)
+      const command = captured.timing.commands[0]!
+      assert.equal(captured.timing.commands.length, 1)
+      assert.equal(command.command, row.args[0] === 'list' ? 'list' : row.args.slice(0, 2).join(' '))
+      assert.equal(command.outcome, 'error')
+      assert.equal(command.calls, 1)
+      assert.deepEqual(command.failures, [{ code: row.code, stage: row.stage, count: 1,
+        ...(row.validation ? { validation: row.validation } : {}), ...(row.rejection ? { rejection: row.rejection } : {}) }])
+      assert.equal(command.droppedFailures, undefined)
+      assert.equal(captured.timing.droppedCalls, 0)
+      assert.equal(captured.timing.droppedSpans, 0)
+      assert.ok(Buffer.byteLength(captured.wire) <= CLI_TIMING_MAX_REPORT_BYTES)
+      assert.equal(captured.wire.includes('PRIVATE'), false)
+      if (row.args[0] === 'wearables' && row.rejection) outputs.set(row.rejection, captured.result.stdout)
+      assert.deepEqual(await vaultFiles(root, row.args[0] === 'list'), before, 'Rejected input performs no vault writes.')
+    }
+    // Distinct telemetry reasons; the model-visible fixed envelope stays identical.
+    assert.equal(outputs.size, 2)
+    assert.equal(outputs.get('unknown_flag'), outputs.get('missing_value'))
+    // Reversed dates are a different, already-staged validation: no filter class.
+    const reversedArgv = ['search', 'query', 'synthetic', '--from', '2030-01-15', '--to', '2030-01-14', '--vault', root, '--format', 'json']
+    const reversedBaseline = await invoke(reversedArgv)
+    const reversed = await collect(() => invoke(reversedArgv))
+    assert.deepEqual(reversed.result, reversedBaseline)
+    assert.deepEqual(reversed.result.exits, [1])
+    assert.equal(JSON.parse(reversed.result.stdout).code, 'invalid_option')
+    assert.deepEqual(reversed.timing.commands[0]!.failures, [{ code: 'invalid_option', stage: 'validation', count: 1 }])
+    assert.deepEqual(await vaultFiles(root, true), canonical)
+    // Valid neighbors use the same real handlers and succeed exactly once each.
+    for (const args of [
+      ['search', 'query', 'synthetic', '--record-type', 'event', '--record-type', 'goal', '--tag', 'synthetic'],
+      ['wearables', 'day', '2030-01-14'],
+    ]) {
+      const argv = [...args, '--vault', root, '--format', 'json']
+      const baseline = await invoke(argv)
+      const captured = await collect(() => invoke(argv))
+      assert.deepEqual(captured.result, baseline)
+      assert.equal(captured.result.thrown, null)
+      assert.deepEqual(captured.result.exits, [])
+      assert.equal(captured.timing.commands[0]!.command, args.slice(0, 2).join(' '))
+      assert.equal(captured.timing.commands[0]!.outcome, 'ok')
+      assert.equal(captured.timing.commands[0]!.calls, 1)
+      assert.equal(captured.timing.commands[0]!.failures, undefined)
+      assert.equal(hidden.test(captured.result.stdout + captured.wire), false)
+    }
+    assert.deepEqual(await vaultFiles(root, true), canonical, 'Valid reads perform no canonical writes.')
     assert.equal(fetchImpl.mock.calls.length, 0)
   } finally { vi.useRealTimers() }
 })

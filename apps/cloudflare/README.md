@@ -743,6 +743,30 @@ private deployment boundaries still apply.
 
 ## Private Operational Telemetry
 
+Existing internal-request failure and authority-rejection warnings include
+`workspaceAttemptId` from the canonical lease already read to fence that request.
+The value is captured before fetch and cannot follow a later lease change. Join
+it to the exact invocation's checkpoint/completion and work-mode records; it does
+not establish a failure's cause. Supplied workspace-snapshot fences, supplied
+POST latency-trace fences, and trusted internal fetches omit correlation because
+they do not read the current lease. Missing or rejected lease reads still fail
+before the existing request logs. No supplied header is used for diagnostics,
+and this adds no lease read, I/O, retry, or success-path logging. Shipping this
+runtime change requires rebuilding and deploying the runner image.
+
+The existing container request-exit warning retains `exitReason` and adds
+`requestKind` from the finite method/route owner (`unknown` for an unmatched or
+unclassified request), plus `workspaceAttemptId` from this request's successfully
+parsed workspace-invocation job. `workspaceAttemptId: false` explicitly means no
+parsed job attempt is available, including other request kinds; unlike `null`,
+it survives structured-log sanitization without inventing an attempt ID. These
+fields never borrow a concurrent invocation's identity or include raw request
+paths, queries, headers or bodies. They are observations only: `response.closed`
+does not prove accepted work was aborted; invocation lifetime retains its
+separate explicit-abort owner. This change requires rebuilding and deploying the
+runner image, which bundles `container-entrypoint.ts`; a Worker-only deployment
+cannot ship it.
+
 Linq typing-start fetches mint one random UUID in
 `x-hosted-runtime-fetch-correlation-id`. The runtime records
 `providerRuntimeStartedAtEpochMs`, `providerRuntimeResumedAtEpochMs` and monotonic
@@ -772,6 +796,34 @@ it for behavior. Roll out the Worker before the runtime image so newly emitted
 headers are stripped at egress; complete joins require both new revisions.
 Use ordinary authorized traffic to verify correlation after rollout. Missing
 historical IDs cannot be reconstructed or treated as zero latency.
+
+Container stdout, including the runtime-side records above, is not queryable from
+Workers Observability. Each invocation therefore also copies transport scalars for
+its first-started Linq typing start and the first attempt of its first-started
+conversation-lane mailbox fetch onto its existing `runtime.invocation_finished`
+runtime-log entry (no additional request). The claim is taken when the request
+starts, so an overlapping later request that settles first never replaces it, and
+only the claimed request is observed. The snapshot-fetch observer supplies `firstTypingFetch*` and
+`firstMailboxFetch*` fields: start epoch, duration, response status, new
+connection count, pooled-socket reuse, DNS/TCP/TLS setup, request-sent time,
+response wait after sending, headers-to-resolution delay, process event-loop
+active/idle time and last observed stage. Connection setup and
+headers-to-resolution delay are runtime-local monotonic spans. Response wait still
+combines both transit directions and Worker or upstream work; join it with the
+Worker record by attempt. Later typing starts and mailbox fetches in a long warm
+invocation are not recorded. A failed or unobserved phase is null, and a claimed
+request that never settles leaves its fields absent. These fields are
+diagnostic only and add no ordering, retry or authority behavior.
+
+Each conversation-lane mailbox read also reports its own first attempt as
+`passMailboxFetch*` scalars on the existing `mailbox.imported` row of the import
+pass that consumed it. The pass is fed by either the wake prefetch or the pass's
+own read, including a refetch after a failed prefetch. The scalars use the same
+observer and fields, plus `passMailboxFetchAttemptCount` for that logical read.
+When a retry delivered the data, the timing still describes the first, failed
+attempt, and the count is greater than one. The invocation-first claim reuses the
+same observation, so no request is observed twice. System-only reads carry no pass
+timing.
 
 Successful warm ensure-processing requests omit the detached processing summary
 only when they complete within one second. Slower successes retain the existing
@@ -1150,6 +1202,15 @@ host, shell resources, and sandbox helper remain from the same release. The imag
 records the upstream revision and patch SHA-256 in `murph-source-revision`.
 Cargo concurrency is capped at two jobs so a high CPU count does not expand the
 native build's memory demand; the upstream release optimization profile is kept.
+
+For developer verification, the patch also exposes the opt-in App Server
+`--ignore-user-config` switch. It skips personal behavioral configuration and
+global user instructions while retaining the auth home, credential-store/keyring
+backend selection, login/workspace restrictions and ChatGPT auth endpoint at their
+normal layer precedence. It does not restore personal proxy preferences or other
+feature switches, or disable managed requirements, project instructions or exec rules. The default startup path is unchanged;
+canonical local journey launchers explicitly select this option. CLI overrides
+still supply the hosted behavior and local installation read roots.
 
 Public Live transcript fragments use Codex's native normalized event stream and
 bounded transcript collection. Handoffs without separate task text use upstream

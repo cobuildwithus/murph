@@ -1879,6 +1879,30 @@
     {
       "issue": "cobuildwithus/murph#4099",
       "path": ".agents/friction-log/20261007232207-worker-upload-dry/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#4136",
+      "path": ".agents/friction-log/20261012103952-initial-provider-input/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#4137",
+      "path": ".agents/friction-log/20261012103953-opt-in-live/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#4144",
+      "path": ".agents/friction-log/20261013121801-hosted-mode-real/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#4157",
+      "path": ".agents/friction-log/20261016112258-components-catalog-overflows/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#4166",
+      "path": ".agents/friction-log/20261016131621-auth-design-browser/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#4171",
+      "path": ".agents/friction-log/20261016143102-linq-recovery-count/friction.md"
     }
   ],
   "version": 1

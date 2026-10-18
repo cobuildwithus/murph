@@ -2407,7 +2407,7 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   operational Resend sender and `HostedLinqAlert` retry ledger. It carries the
   Web route receipt time and optional early ingress typing acceptance on the
   existing ingress trace, compares first accepted typing against the warm
-  3-second or cold 8-second cutoff, and creates one immutable alert per trace.
+  2.5-second or cold 7-second cutoff, and creates one immutable alert per trace.
   Runtime typing/restore callbacks and the existing alert cron trigger bounded
   asynchronous evaluation. The detailed classification, missing-evidence,
   recovery, and retention rules live in `agent-docs/RELIABILITY.md`. The progress
@@ -5432,3 +5432,44 @@ runtime scheduler owns delays. Session leases and durable duplicate-effect
 receipts stay in Web/Postgres; Bluetooth/vendor framing stays in the iOS app.
 See [wearable haptics](agent-docs/references/wearable-haptics.md) for the contract,
 query bounds, receipt semantics, foreground limit and rollout order.
+
+## Weekly Game
+
+`apps/web` owns the weekly game (product: `agent-docs/product-specs/weekly-game.md`).
+Postgres state tables are the truth: `game_profile`, `game_contact_label`,
+`game`, `game_player`, `game_entry`, `game_ticket`, plus `game_event`, a plain
+append-only history (one row per accepted change, ids and numbers only, read by
+nothing yet). Every member link cascades from `game_profile`, which cascades
+from `HostedMember`. Words (names, tasks, stakes, labels, excuse transcripts)
+are app-encrypted before any transaction; the structure that rules and
+settlement read stays plain, so neither decrypts.
+
+`runGameCommand` is the single write path, for the routes now and Murph's tools
+later. It validates the command (`command.ts`), checks uploads, seals words,
+then locks the game row, reads the database clock, asks a pure rule, and writes
+state plus its history rows. There is no request-id dedupe: every command is
+keyed by its own ids or state, so a repeat writes nothing. The same people
+can't have two live games at once: a live game holds `game.live_roster_key`
+(its players' sorted ids), a plain unique column set at go-live and cleared at
+settle or expiry, which also fits groups later. There is
+no timer or cron: whether a game is over is computed from its state, and reads
+(and a player's next accept) settle it under the lock. A rematch of a settled
+1v1 records its addressed invitee (`game.invitee_member_id`), who alone besides
+the challenger can read it and its invite token. Reads are viewer-scoped:
+another player's entry is omitted from the response, not just its media URL,
+until the viewer has posted that day; media reads use the same rule.
+
+`/api/game/v1` routes are thin: they fold path ids into one command. Writes:
+`PUT /me/profile`, `POST /games`, `POST /invites/:token/accept`,
+`POST /games/:id/entries`, `DELETE /games/:id/entries/:entryId`,
+`POST /tickets/:id/redeem`, and `POST /media`. Reads: `GET /home`,
+`GET /games/:id`, `GET /invites/:token`, `GET /media/:key`. They use a plain
+Better Auth bearer session, not the paid-member check, because invitees play
+free; the flag and allowlist then hide every route. The invite preview and
+`/g/<token>` page are unauthenticated and honor only the global flag. Dev
+time-travel routes return 404 in real production; they move a per-game clock
+(`game.dev_clock_offset_ms`, added to the database clock as that game's "now"
+for writes, settles and views) and never rewrite dates. Media is photos only
+(JPEG or HEIC); keys are the uploader's prefix plus the SHA-256 of the bytes, so
+a retried upload lands on the same key. Media is local-disk only until a Worker
+game-media path exists.

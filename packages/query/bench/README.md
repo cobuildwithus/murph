@@ -122,3 +122,29 @@ Use the same fixture and command on each revision. Output contains synthetic
 hashes and timings only. Deduplication stress cases establish scaling behavior;
 these in-memory measurements do not establish production duplicate frequency,
 container wakeups, canonical I/O cost, end-to-end CPU, or billing savings.
+
+## Sleep-list row selection
+
+`sleep-list-runtime.ts` seeds 365 days of synthetic Oura, WHOOP and Garmin
+sleep, recovery-resource HRV/SpO2/score, steps and weight records. For bounded
+and unbounded filters it compares the public `summarizeWearableSleepRuntime()`
+with the original providers-only full-row read and composition (the oracle) and
+the rejected `sleep`/`source_health` kind selection. Each case computes its
+oracle before any variant runs; stale oracles come from an identical reference
+vault that receives the same canonical sleep revision first. Two warmups precede
+rotated-order warm samples. Any public/oracle difference fails the run; rejected
+kind-selection differences are reported as diagnostics. Untimed, each case also
+reports stored rows and decoded summary bytes from the existing store reader for
+providers-only versus day-bounded selection, documenting materialization the
+dated read avoids; result bytes are unchanged. Output also lists result bytes,
+SHA-256 and the timing distribution per variant.
+
+```sh
+node packages/query/bench/sleep-list-runtime.ts
+```
+
+`MURPH_SLEEP_LIST_BENCH_DAYS` (integer 14–3,650, default 365) and
+`MURPH_SLEEP_LIST_BENCH_WARM` (integer 1–50, default 7) size the fixture and warm
+samples; other values fail before seeding. Stale timings are dominated by
+the wearable rebuild, which row selection does not change. These in-process
+timings do not establish production latency or the share of dated calls.

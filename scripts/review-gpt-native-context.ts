@@ -9,8 +9,17 @@ const patchPath = 'patches/codex-public-live.patch'
 const maxBytes = 12 * 1024 * 1024
 const hash = (bytes: Buffer) => createHash('sha256').update(bytes).digest('hex')
 
-// Direct transport, recovery, and compaction owners surrounding the patched modules.
+// Direct runtime/configuration owners and policy surrounding the patched modules.
 export const nativeContextOwners = [
+  'AGENTS.md',
+  'codex-rs/app-server/src/config_manager.rs',
+  'codex-rs/config/src/state.rs',
+  'codex-rs/config/src/loader/mod.rs',
+  'codex-rs/core/src/config/mod.rs',
+  'codex-rs/core/src/config/auth_keyring.rs',
+  'codex-rs/codex-home/src/instructions/mod.rs',
+  'codex-rs/ext/extension-api/src/user_instructions.rs',
+  'codex-rs/core/src/exec_policy.rs',
   'codex-rs/codex-api/src/common.rs',
   'codex-rs/codex-api/src/error.rs',
   'codex-rs/codex-api/src/provider.rs',
@@ -22,6 +31,8 @@ export const nativeContextOwners = [
   'codex-rs/core/src/compact_remote_history.rs',
   'codex-rs/core/src/realtime_context.rs',
   'codex-rs/login/src/auth/manager.rs',
+  'codex-rs/login/src/auth/storage.rs',
+  'codex-rs/config/src/auth_policy.rs',
 ]
 
 function git(repo: string, args: string[], input?: Buffer): Buffer {
@@ -77,7 +88,7 @@ export async function addNativeReviewContext(input: {
     const files = []
     let totalBytes = 0
     for (const file of sourcePaths) {
-      if (!/^codex-rs\/[A-Za-z0-9_./-]+\.(rs|toml|md)$/.test(file) || file.split('/').some((part) => part === '..' || part === '.')) {
+      if ((file !== 'AGENTS.md' && !/^codex-rs\/[A-Za-z0-9_./-]+\.(rs|toml|md)$/.test(file)) || file.split('/').some((part) => part === '..' || part === '.')) {
         throw new Error('Native review context contains an unsafe source path.')
       }
       const indexEntry = git(temporary, ['ls-files', '--stage', '--', file]).toString()
@@ -96,7 +107,7 @@ export async function addNativeReviewContext(input: {
       omittedChangedPaths: changed.filter((file) => !sourcePaths.includes(file)),
     }, null, 2) + '\n', { flag: 'wx' })
     await writeFile(path.join(destination, 'README.md'),
-      '# Pinned patched Codex source\n\nComplete postimages of touched native source, tests, and Markdown, plus the listed direct transport and recovery owners. The exact reviewed patch was applied to the verified upstream tag and commit without executing upstream code. The provenance manifest records every included file and omitted binary/generated path; the original patch remains in the main snapshot.\n',
+      '# Pinned patched Codex source\n\nComplete postimages of touched native source, tests, and Markdown, plus the listed direct configuration, instruction, authentication, transport, and recovery owners and upstream repository policy. The exact reviewed patch was applied to the verified upstream tag and commit without executing upstream code. The provenance manifest records every included file and omitted binary/generated path; the original patch remains in the main snapshot.\n',
       { flag: 'wx' })
     return true
   } finally {

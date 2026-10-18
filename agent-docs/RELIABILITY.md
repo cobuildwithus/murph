@@ -1886,7 +1886,13 @@ to apply after cutover.
   malformed, and unknown reasons are omitted. Finite nonnegative integer counts
   bounded by the ECG sample limit plus one describe expected/actual recordings
   and samples, pages, total groups, provider-matching groups, instance-matching
-  groups, and fully matching groups. Empty collections, unmatched sources, and
+  groups, and fully matching groups. `junctionEcgInstanceMissingGroupCount`
+  counts provider-matching groups rejected because a requested instance had no
+  group instance identity; provider-matching minus instance-matching minus that
+  count gives present-but-unequal identities. Older producers omit it, and
+  absence means unknown, never zero. It stays only if 24-72 hours of natural
+  failures after producer convergence separate those diagnoses; otherwise a
+  later reviewed change removes it. Empty collections, unmatched sources, and
   matched groups without samples have distinct reasons, evaluated after all
   bounded pages. `providerHttpStatusSource=local_validation` distinguishes the
   validator's status from a provider HTTP response. Identifiers, raw errors,
@@ -1901,7 +1907,11 @@ to apply after cutover.
   For Junction resource jobs, blood-oxygen incomplete-normalization failures
   and ECG binding failures retain the existing queued job beyond its initial
   attempt allowance, rechecking after 30 minutes. `validationRetryDelayMs`
-  records that policy. Complete-day and ECG binding validation still fail before
+  records that policy. Each such failure leaves at least the default five-attempt
+  budget from that attempt, so a later retryable transport failure keeps ordinary
+  bounded retries; consecutive non-validation failures consume it and terminalize
+  normally. Warm restart keeps that count, and hosted cold handoff carries it as
+  `maxAttempts`. Complete-day and ECG binding validation still fail before
   canonical replacement. Numeric-zero blood-oxygen samples, including finite
   numeric-string aliases, are unusable and skipped; other invalid values and
   source/day validation still reject. A complete-source-day blood-oxygen response
@@ -2462,8 +2472,8 @@ to apply after cutover.
   establishes Web acceptance. Malformed timestamp values and raw wake reasons
   are never copied into these fields.
 - Per-message typing alerts independently measure the member's wait through the
-  earliest accepted typing indicator: strictly over 3 seconds for a warm
-  workspace and over 8 seconds for a cold workspace. Linq waits start at the
+  earliest accepted typing indicator: strictly over 2.5 seconds for a warm
+  workspace and over 7 seconds for a cold workspace. Linq waits start at the
   latest recorded provider event for the exact member-bound message (its own
   creation, or a later edit), never after the Web route's receipt instant, so
   time before the route runs, such as a fresh Web instance boot, counts.
@@ -2492,7 +2502,7 @@ to apply after cutover.
   or delivery operation waits for this diagnostic persistence.
   A restore completed before the message arrived, or an explicit reused restore,
   identifies warmth. This includes later messages within an invocation that
-  originally started cold. Missing warmth evidence uses the 8-second cutoff and
+  originally started cold. Missing warmth evidence uses the 7-second cutoff and
   is labeled unconfirmed; deployment version, rollout convergence, canary identity,
   access changes, other incidents, and quiet hours do not suppress these alerts.
   An exact member-bound mailbox item with recorded `ai_usage_denied_at` is

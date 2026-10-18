@@ -74,6 +74,7 @@ import { exchangeHostedAuthSession, readHostedAuthSessionResponse, logoutHostedA
 import { upsertHostedMemberPendingLinqParticipantContactTx } from "../src/lib/hosted-onboarding/hosted-member-routing-store";
 import { issueHostedInvite } from "../src/lib/hosted-onboarding/invite-service";
 import { sendHostedAuthOtp } from "../src/lib/better-auth/send-otp";
+import { isHostedAuthReviewMember } from "../src/lib/better-auth/review-account";
 import { prepareHostedAuthSmsOtp } from "../src/lib/better-auth/sms-otp";
 import { syntheticSmsVerification } from "./support/better-auth-sms-verification";
 import { hostedAuthOtpIdentifier } from "../src/lib/better-auth/otp-store";
@@ -1240,6 +1241,48 @@ describe.skipIf(!enabled)("Better Auth canonical member PostgreSQL composition",
       expect(replay.status).toBe(400);
     } finally {
       await prisma.hostedMember.deleteMany({ where: { id: result.memberId } });
+      await prisma.hostedAuthRecord.deleteMany({ where: { model: "verification", id: { in: rateIds } } });
+    }
+  });
+
+  it("signs the review account in natively with its configured code and sends it no email", async () => {
+    const prisma = getPrisma();
+    const baseURL = "http://localhost:3000";
+    vi.stubEnv("HOSTED_BETTER_AUTH_ENABLED", "true");
+    vi.stubEnv("HOSTED_BETTER_AUTH_SECRET", Buffer.alloc(32, 29).toString("base64url"));
+    vi.stubEnv("HOSTED_ONBOARDING_PUBLIC_BASE_URL", baseURL);
+    vi.stubEnv("VERCEL", "1");
+    const value = `review-${randomUUID()}@example.test`;
+    const other = `route-${randomUUID()}@example.test`;
+    vi.stubEnv("HOSTED_AUTH_REVIEW_EMAIL", ` ${value.toUpperCase()} `);
+    vi.stubEnv("HOSTED_AUTH_REVIEW_CODE", "246810");
+    const rateIds = [value, other].flatMap((address) => [`send:contact:email:${address}`, `verify:contact:email:${address}`, `send:cooldown:email:${address}`])
+      .map((key) => `arl_${authLookupKey("verification", "rate-limit", key)}`);
+    const ip = `2001:db8::${randomUUID().slice(0, 4)}`;
+    const request = (body: unknown) => new Request(`${baseURL}/api/device-sync/companion/auth/otp/verify`, {
+      method: "POST", body: JSON.stringify(body),
+      headers: { "content-type": "application/json", origin: baseURL, "x-vercel-forwarded-for": ip },
+    });
+    let memberId: string | undefined;
+    try {
+      expect((await sendNativeCode(request({ kind: "email", value }))).status).toBe(200);
+      expect(provider.codes.has(value)).toBe(false);
+      expect((await verifyNativeCode(request({ kind: "email", value, code: "135791" }))).status).toBe(400);
+      const response = await verifyNativeCode(request({ kind: "email", value, code: "246810", timeZone: "America/New_York" }));
+      expect(response.status).toBe(200);
+      memberId = (await response.json()).memberId;
+      expect(memberId).toEqual(expect.any(String));
+      // The verified sign-in email alone identifies the member that may skip messaging setup.
+      expect(await isHostedAuthReviewMember({ memberId: memberId!, prisma })).toBe(true);
+      expect(await isHostedAuthReviewMember({ memberId: `auth-other-${randomUUID()}`, prisma })).toBe(false);
+      vi.stubEnv("HOSTED_AUTH_REVIEW_CODE", "");
+      expect(await isHostedAuthReviewMember({ memberId: memberId!, prisma })).toBe(false);
+      vi.stubEnv("HOSTED_AUTH_REVIEW_CODE", "246810");
+      // Every other address keeps a random, emailed code.
+      expect((await sendNativeCode(request({ kind: "email", value: other }))).status).toBe(200);
+      expect(provider.codes.get(other)).toMatch(/^\d{6}$/u);
+    } finally {
+      if (memberId) await prisma.hostedMember.deleteMany({ where: { id: memberId } });
       await prisma.hostedAuthRecord.deleteMany({ where: { model: "verification", id: { in: rateIds } } });
     }
   });

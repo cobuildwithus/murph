@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 
 import { afterEach, test, vi } from "vitest";
+import { normalizeCliTiming, type CliTiming } from "@murphai/runtime-state/cli-timing";
 
 import {
   healthCoreRuntimeMethodNames,
@@ -367,6 +368,76 @@ test("loadQueryRuntime clears the cache after a shape mismatch and retries clean
   const recoveredRuntime = await runtimeModule.loadQueryRuntime();
   assert.equal(recoveredRuntime, queryRuntime);
   assert.deepEqual(loadRuntimeModuleMock.mock.calls, [["@murphai/query"], ["@murphai/query"]]);
+});
+
+test("query-runtime-load times only cold shared loads, excludes the shape check and keeps reset semantics", async () => {
+  const queryRuntime = createQueryRuntimeStub();
+  const importFailure = new Error("synthetic import failure");
+  const original = process.hrtime.bigint;
+  let clock = 0n;
+  const advance = (ms: number) => { clock += BigInt(ms) * 1_000_000n; };
+  let attempt = 0;
+  const loadRuntimeModuleMock = vi.fn(async (specifier: string) => {
+    assert.equal(specifier, "@murphai/query");
+    attempt += 1;
+    advance(5);
+    if (attempt === 1) throw importFailure;
+    if (attempt === 2) return {};
+    // The shape check reads this member after the timed load has resolved.
+    return Object.defineProperty({ ...queryRuntime }, "readVault", {
+      enumerable: true,
+      get() { advance(7); return queryRuntime.readVault; },
+    });
+  });
+  const runtimeModule = await importWithMocks<typeof import("../src/usecases/runtime.ts")>(
+    "../src/usecases/runtime.ts",
+    { "../src/runtime-import.ts": () => ({ loadRuntimeModule: loadRuntimeModuleMock }) },
+  );
+  // Same post-reset module instance (and AsyncLocalStorage) as runtime.ts.
+  const { timeCliDispatch, withCliTiming } = await import("@murphai/runtime-state/node/cli-timing");
+  function timed<T>(run: () => Promise<T>) {
+    let report: CliTiming | undefined;
+    let result: T | undefined;
+    const outcome = withCliTiming(() => timeCliDispatch("wearables patterns", async () => { result = await run(); }),
+      (value) => { report = value; }).then(() => result);
+    const loads = () => {
+      assert.ok(report);
+      assert.deepEqual(normalizeCliTiming(report), report);
+      return report.commands[0]!.phases.filter((phase) => phase.phase.endsWith("-load"))
+        .map((phase) => [phase.phase, phase.count, phase.sumUs]);
+    };
+    return { outcome, loads };
+  }
+  const unavailable = { name: "VaultCliError", code: "runtime_unavailable" };
+
+  process.hrtime.bigint = () => clock;
+  try {
+    const failedImport = timed(() => runtimeModule.loadQueryRuntime());
+    await assert.rejects(failedImport.outcome, { ...unavailable, context: {
+      cause: "synthetic import failure",
+      packages: ["@murphai/core", "@murphai/importers", "@murphai/query", "incur"],
+    } });
+    assert.deepEqual(failedImport.loads(), [["query-runtime-load", 1, 5_000]]);
+
+    const failedShape = timed(() => runtimeModule.loadQueryRuntime());
+    await assert.rejects(failedShape.outcome, unavailable);
+    assert.deepEqual(failedShape.loads(), [["query-runtime-load", 1, 5_000]]);
+
+    const cold = timed(() => Promise.all([runtimeModule.loadQueryRuntime(), runtimeModule.loadQueryRuntime()]));
+    const [first, second] = (await cold.outcome) ?? [];
+    assert.ok(first);
+    assert.equal(first, second);
+    // One shared-promise owner; the 7 ms shape-check getter is outside the span.
+    assert.deepEqual(cold.loads(), [["query-runtime-load", 1, 5_000]]);
+
+    const warm = timed(() => runtimeModule.loadQueryRuntime());
+    assert.equal(await warm.outcome, first);
+    assert.deepEqual(warm.loads(), []);
+    assert.equal(await runtimeModule.loadQueryRuntime(), first);
+  } finally {
+    process.hrtime.bigint = original;
+  }
+  assert.equal(loadRuntimeModuleMock.mock.calls.length, 3);
 });
 
 test("loadIntegratedRuntime composes cached owner loaders and retries only the failed owner", async () => {

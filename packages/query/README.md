@@ -128,9 +128,12 @@ focused owner and specialized `sourceHealthOnly` composition. Neither gets the
 ordinary fast path. Ordinary readers keep their original normal composer and
 summarizers, including public days and source health.
 
-Only provider selection is pushed into the stored-row read. Date, range,
-ordering, complete cross-provider composition and limits stay with their existing
-owners, preserving prior/next canonical evidence. At the
+Ordinary readers push only provider selection into the stored-row read.
+Sleep-list additionally pushes its day-prefixed `date`/`from`/`to` bounds, but
+never a summary-kind filter: composed multi-provider sleep reads shared
+recovery/activity keys such as HRV and SpO2. In every reader the composer still
+applies date and range filters, ordering, complete cross-provider composition
+and limits, preserving prior/next canonical evidence. At the
 service boundary an omitted or empty provider array is unrestricted; a nonempty
 array normalized to no providers selects nothing.
 

@@ -697,6 +697,51 @@ describe("scheduleHostedBillingPlanSwitchToPulse", () => {
     expect(mocks.stripe.subscriptionSchedules.update).not.toHaveBeenCalled();
   });
 
+  test.each([
+    ["scheduled cancellation", makeSubscription({ cancelAt: 1_778_025_600 })],
+    ["cancel at period end", makeSubscription({ cancelAtPeriodEnd: true })],
+  ])("gives cancellation guidance for %s without billing mutations", async (_label, subscription) => {
+    mocks.stripe.subscriptions.retrieve.mockResolvedValueOnce(subscription);
+
+    await expect(scheduleHostedBillingPlanSwitchToPulse({
+      memberId: "member_123",
+      now: new Date("2026-05-06T00:00:00.000Z"),
+    })).rejects.toMatchObject({
+      code: "HOSTED_BILLING_STRIPE_SUBSCRIPTION_STATE_UNSUPPORTED",
+      details: {
+        code: "cancellation",
+      },
+      httpStatus: 409,
+      message: "Your subscription is scheduled to cancel. Open Manage billing to renew it, then try changing plans again.",
+    });
+
+    expect(mocks.stripe.subscriptionSchedules.create).not.toHaveBeenCalled();
+    expect(mocks.stripe.subscriptionSchedules.update).not.toHaveBeenCalled();
+    expect(mocks.writeHostedMemberStripeBillingRefTx).not.toHaveBeenCalled();
+  });
+
+  test("keeps generic guidance for an unsupported subscription status", async () => {
+    mocks.stripe.subscriptions.retrieve.mockResolvedValueOnce(makeSubscription({
+      status: "past_due",
+    }));
+
+    await expect(scheduleHostedBillingPlanSwitchToPulse({
+      memberId: "member_123",
+      now: new Date("2026-05-06T00:00:00.000Z"),
+    })).rejects.toMatchObject({
+      code: "HOSTED_BILLING_STRIPE_SUBSCRIPTION_STATE_UNSUPPORTED",
+      details: {
+        code: "status",
+      },
+      httpStatus: 409,
+      message: "Your subscription state is not ready for this plan change.",
+    });
+
+    expect(mocks.stripe.subscriptionSchedules.create).not.toHaveBeenCalled();
+    expect(mocks.stripe.subscriptionSchedules.update).not.toHaveBeenCalled();
+    expect(mocks.writeHostedMemberStripeBillingRefTx).not.toHaveBeenCalled();
+  });
+
   test("rejects metered usage items with unsupported quantities", async () => {
     const subscription = makeSubscription({
       items: ["price_edge_recurring", "price_edge_usage"],

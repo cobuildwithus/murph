@@ -25,6 +25,7 @@ import {
 import {
   requireActiveHostedMemberAuthFromBearerToken,
 } from "@/src/lib/hosted-onboarding/request-auth";
+import { isHostedAuthReviewMember } from "@/src/lib/better-auth/review-account";
 import {
   readHostedMemberMessagingSetupState,
 } from "@/src/lib/hosted-onboarding/hosted-member-store";
@@ -232,7 +233,8 @@ async function readCompanionMessagingSetup(input: {
   const messaging = { identity: state?.identity ?? null, routing: state?.routing ?? null };
   const resolved = resolveHostedMemberMessagingState(messaging);
   return {
-    messagingSetupRequired: isHostedMemberMessagingSetupRequired(messaging),
+    messagingSetupRequired: isHostedMemberMessagingSetupRequired(messaging)
+      && !(await isHostedAuthReviewMember(input)),
     // The native say-hi step must not block an already usable phone/direct route.
     telegramAwaitingInbound: !resolved.hasDirectMessagingChannel && resolved.telegramAwaitingInbound,
   };

@@ -17,6 +17,7 @@ export const CLI_TIMING_PHASES = [
   "query-source-read", "query-wearable-dataset", "query-metric-projection",
   "query-wearable-summary", "query-search-documents", "query-publication",
   "query-entity-read", "query-wearable-compose", "query-metric-read", "query-pattern-report",
+  "service-runtime-load", "query-runtime-load", "query-projection-load",
 ] as const;
 export type CliTimingPhase = typeof CLI_TIMING_PHASES[number];
 export type CliTimingOutcome = "ok" | "error" | "unknown";
@@ -46,7 +47,7 @@ export interface CliFailureTiming {
   stage: typeof CLI_TIMING_FAILURE_STAGES[number];
   count: number;
   validation?: CliValidationDiagnostic;
-  rejection?: CliTimingRejection;
+  rejection?: CliTimingRejection | CliTimingParseRejection | CliTimingFilterRejection;
 }
 export function cliTimingFailureCode(value: unknown, command?: unknown): CliFailureTiming["code"] {
   // Only the registered meal-photo removal owner is qualified for this code.
@@ -65,12 +66,15 @@ const validationFields = [
   ["automation list", ["limit", "status"]],
   ["event list", ["kind", "from", "to", "tag", "experiment", "limit", "arguments"]],
   ["event payload-schema", ["kind", "for"]],
+  ["exercise list", ["query", "kind", "environment", "category", "target", "level",
+    "equipment", "position", "modality", "commonness", "limit", "arguments"]],
   ["knowledge show", ["slug", "arguments"]],
   ["measurement entry list", ["metric", "from", "to", "limit"]],
   ["meal add", ["nutritionCalories", "nutritionSource", "occurredAt", "arguments"]],
   ["meal edit", ["id", "nutritionCalories", "nutritionProteinGrams", "nutritionSource",
     "nutritionConfidence", "occurredAt", "arguments"]],
   ["food search-labels", ["query", "limit"]],
+  ["wearables day", ["date", "provider", "arguments"]],
   ["knowledge upsert", ["body", "slug", "title", "pageType", "status", "clearLibraryLinks",
     "relatedSlug", "librarySlug", "sourcePath", "arguments"]],
   ["knowledge append-section", ["slug", "heading", "body", "title", "position", "sourcePath"]],
@@ -145,13 +149,33 @@ export const CLI_TIMING_REJECTIONS = [
 ] as const;
 export type CliTimingRejection = typeof CLI_TIMING_REJECTIONS[number];
 
+// Argv rejection class set by the pinned Incur parser at the exact
+// unknown-flag/missing-value throw site; never derived from argv or text.
+export const CLI_TIMING_PARSE_REJECTIONS = ["unknown_flag", "missing_value"] as const;
+export type CliTimingParseRejection = typeof CLI_TIMING_PARSE_REJECTIONS[number];
+
+// Set by the shared repeatable-flag normalizer at its comma-list and
+// unsupported-enum throw sites. Admitted only for `search query`; other callers'
+// metadata is dropped here. Never the option name, values or message.
+export const CLI_TIMING_FILTER_REJECTIONS = ["comma_delimited", "unsupported_value"] as const;
+export type CliTimingFilterRejection = typeof CLI_TIMING_FILTER_REJECTIONS[number];
+const rejectionOwners = [
+  ["research scout-batch", "research_scout_invalid_batch_payload", CLI_TIMING_REJECTIONS],
+  ["exercise list", "VALIDATION_ERROR", CLI_TIMING_PARSE_REJECTIONS],
+  ["knowledge upsert", "VALIDATION_ERROR", CLI_TIMING_PARSE_REJECTIONS],
+  ["knowledge show", "VALIDATION_ERROR", CLI_TIMING_PARSE_REJECTIONS],
+  ["wearables day", "VALIDATION_ERROR", CLI_TIMING_PARSE_REJECTIONS],
+  ["search query", "invalid_option", CLI_TIMING_FILTER_REJECTIONS],
+] as const;
+
 /** Optional, independently dropped like validation detail; same own-data rules. */
 export function cliTimingRejectionFailure(
   command: unknown, code: unknown, source: unknown, property: "cliTimingRejection" | "rejection",
 ): Pick<CliFailureTiming, "rejection"> {
-  if (command !== "research scout-batch" || code !== "research_scout_invalid_batch_payload") return {};
+  const allowed = rejectionOwners.find(([name, owned]) => name === command && owned === code)?.[2];
+  if (!allowed) return {};
   const value = readCliTimingOwnData(source, property);
-  const rejection = CLI_TIMING_REJECTIONS.find((candidate) => candidate === value);
+  const rejection = allowed.find((candidate) => candidate === value);
   return rejection ? { rejection } : {};
 }
 

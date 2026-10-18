@@ -1,7 +1,7 @@
 import { setTimeout as delay } from "node:timers/promises";
 import type { HostedRuntimeGroupToolResponse } from "@murphai/hosted-execution/runtime-control";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createHostedGroupSharedReader } from "../src/hosted-runtime/group-shared-reader.ts";
+import { createHostedGroupSharedReader, type HostedGroupSharedReadTelemetry } from "../src/hosted-runtime/group-shared-reader.ts";
 
 vi.mock("node:timers/promises", () => ({ setTimeout: vi.fn() }));
 const scope = { projectionKind: "sleep-duration-days.v0" } as const;
@@ -145,5 +145,161 @@ describe("mixed reporting history recovery", () => {
     if (result.status !== "ok") throw new Error("Expected shared results");
     expect(result.members.slice(0, 3).every((member) => member.projections[0]?.records.some((record) => "date" in record.data && record.data.date === "2026-08-04"))).toBe(true);
     expect(result.members[3]?.projections[0]?.records).toEqual([]);
+  });
+});
+
+describe("shared read timing telemetry", () => {
+  const telemetryKeys = [
+    "groupSharedReadCallbackCount", "groupSharedReadCallbackElapsedMs", "groupSharedReadCallbackMaxElapsedMs",
+    "groupSharedReadDecision", "groupSharedReadElapsedMs", "groupSharedReadFreshnessRequested",
+    "groupSharedReadOutcome", "groupSharedReadPollCount", "groupSharedReadPollElapsedMs", "groupSharedReadWaitBudgetMs",
+  ];
+  function observed() {
+    const records: HostedGroupSharedReadTelemetry[] = [];
+    return { records, onReadCompleted: (telemetry: HostedGroupSharedReadTelemetry) => { records.push(telemetry); } };
+  }
+
+  it("attributes a five-minute deadline to 20 polls and 21 instant callbacks with one exact record", async () => {
+    const { records, onReadCompleted } = observed();
+    const request = vi.fn().mockImplementation(async () => response());
+    await createHostedGroupSharedReader({ groupToolPort: { request }, freshnessWaitMs: 300_000, onReadCompleted }).request(input);
+    expect(request).toHaveBeenCalledTimes(21);
+    expect(request.mock.calls.filter(([value]) => value.freshness)).toHaveLength(1);
+    expect(records).toEqual([{
+      groupSharedReadCallbackCount: 21, groupSharedReadCallbackElapsedMs: 0, groupSharedReadCallbackMaxElapsedMs: 0,
+      groupSharedReadDecision: "deadline", groupSharedReadElapsedMs: 300_000, groupSharedReadFreshnessRequested: true,
+      groupSharedReadOutcome: "ok", groupSharedReadPollCount: 20, groupSharedReadPollElapsedMs: 300_000,
+      groupSharedReadWaitBudgetMs: 300_000,
+    }]);
+    expect(Object.keys(records[0]!).sort()).toEqual(telemetryKeys);
+    expect(JSON.stringify(records)).not.toMatch(/2026|member|participant|sleep|Rowan|minutes/u);
+  });
+
+  it("separates slow Web callbacks from intentional poll sleep and records an early stop", async () => {
+    const { records, onReadCompleted } = observed();
+    const request = vi.fn()
+      .mockImplementationOnce(async () => { await vi.advanceTimersByTimeAsync(1_000); return response(); })
+      .mockImplementationOnce(async () => { await vi.advanceTimersByTimeAsync(4_000); return response({ available: true }); });
+    await createHostedGroupSharedReader({ groupToolPort: { request }, freshnessWaitMs: 300_000, onReadCompleted }).request(input);
+    expect(request).toHaveBeenCalledTimes(2);
+    expect(records).toEqual([expect.objectContaining({
+      groupSharedReadCallbackCount: 2, groupSharedReadCallbackElapsedMs: 5_000, groupSharedReadCallbackMaxElapsedMs: 4_000,
+      groupSharedReadDecision: "satisfied", groupSharedReadElapsedMs: 20_000,
+      groupSharedReadPollCount: 1, groupSharedReadPollElapsedMs: 15_000,
+    })]);
+  });
+
+  function withoutFreshness(): HostedRuntimeGroupToolResponse {
+    const current = response();
+    if (current.action === "read_shared" && current.result.status === "ok") delete current.result.freshness;
+    return current;
+  }
+  it.each([
+    ["refresh unavailable", response({ refreshStatus: "unavailable" }), "refresh_unavailable"],
+    ["freshness absent", withoutFreshness(), "refresh_unavailable"],
+    ["refresh not needed", response({ refreshStatus: "not_needed" }), "not_needed"],
+    ["requested day present", response({ available: true }), "satisfied"],
+    ["non-ok result", { action: "read_shared", result: { status: "unavailable", unavailableReason: "synthetic" } }, "not_ok"],
+  ] as const)("records a no-wait terminal decision (%s)", async (_label, current, decision) => {
+    const { records, onReadCompleted } = observed();
+    const request = vi.fn().mockResolvedValue(current);
+    await createHostedGroupSharedReader({ groupToolPort: { request }, freshnessWaitMs: 15_000, onReadCompleted }).request(input);
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(delay).not.toHaveBeenCalled();
+    expect(records).toEqual([expect.objectContaining({
+      groupSharedReadCallbackCount: 1, groupSharedReadDecision: decision, groupSharedReadPollCount: 0,
+    })]);
+  });
+
+  it("classifies an invalid response and a failed fallback without exception text", async () => {
+    const { records, onReadCompleted } = observed();
+    const invalid = vi.fn().mockResolvedValue({ action: "ask", result: {} });
+    expect(await createHostedGroupSharedReader({ groupToolPort: { request: invalid }, freshnessWaitMs: 15_000, onReadCompleted })
+      .request(input)).toEqual({ status: "unavailable", unavailableReason: "group_shared_result_invalid" });
+    const failed = vi.fn().mockRejectedValueOnce(new Error("secret initial failure"))
+      .mockRejectedValueOnce(new Error("secret fallback failure"));
+    expect(await createHostedGroupSharedReader({ groupToolPort: { request: failed }, freshnessWaitMs: 15_000, onReadCompleted })
+      .request(input)).toEqual({ status: "unavailable", unavailableReason: "group_shared_read_failed" });
+    expect(records).toEqual([
+      expect.objectContaining({ groupSharedReadCallbackCount: 1, groupSharedReadDecision: "invalid", groupSharedReadOutcome: "unavailable" }),
+      expect.objectContaining({ groupSharedReadCallbackCount: 2, groupSharedReadDecision: "error", groupSharedReadOutcome: "unavailable" }),
+    ]);
+    expect(JSON.stringify(records)).not.toMatch(/secret|failure/u);
+  });
+
+  it("records plain reads, non-ok results, and skips rejected requests", async () => {
+    const { records, onReadCompleted } = observed();
+    const request = vi.fn().mockResolvedValueOnce(response())
+      .mockResolvedValueOnce({ action: "read_shared", result: { status: "unavailable", unavailableReason: "synthetic" } });
+    const reader = createHostedGroupSharedReader({ groupToolPort: { request }, onReadCompleted });
+    await reader.request(input);
+    await reader.request({ projectionScopes: [scope] });
+    await reader.request({ projectionScopes: [scope] });
+    expect(records).toEqual([
+      expect.objectContaining({ groupSharedReadDecision: "no_freshness", groupSharedReadFreshnessRequested: false,
+        groupSharedReadOutcome: "ok", groupSharedReadWaitBudgetMs: 0 }),
+      expect.objectContaining({ groupSharedReadDecision: "no_freshness", groupSharedReadOutcome: "unavailable" }),
+    ]);
+  });
+
+  it("keeps Web no-data distinct from unavailable", async () => {
+    const { records, onReadCompleted } = observed();
+    const none = { action: "read_shared", result: { members: [], requestedProjectionScopeKeys: ["sleep-duration-days.v0"], status: "none" } } as const;
+    const request = vi.fn().mockResolvedValue(none);
+    const reader = createHostedGroupSharedReader({ groupToolPort: { request }, freshnessWaitMs: 15_000, onReadCompleted });
+    expect(await reader.request(input)).toEqual(none.result);
+    expect(await reader.request({ projectionScopes: [scope] })).toEqual(none.result);
+    expect(records).toEqual([
+      expect.objectContaining({ groupSharedReadDecision: "not_ok", groupSharedReadOutcome: "none" }),
+      expect.objectContaining({ groupSharedReadDecision: "no_freshness", groupSharedReadOutcome: "none" }),
+    ]);
+  });
+
+  it("records an accepted already-aborted read as canceled with zero callbacks", async () => {
+    const { records, onReadCompleted } = observed();
+    const controller = new AbortController();
+    const reason = new Error("synthetic pre-abort");
+    controller.abort(reason);
+    const request = vi.fn();
+    await expect(createHostedGroupSharedReader({ groupToolPort: { request }, freshnessWaitMs: 15_000, onReadCompleted })
+      .request(input, { signal: controller.signal })).rejects.toBe(reason);
+    expect(request).not.toHaveBeenCalled();
+    expect(records).toEqual([expect.objectContaining({
+      groupSharedReadCallbackCount: 0, groupSharedReadDecision: "canceled", groupSharedReadOutcome: "canceled",
+      groupSharedReadPollCount: 0,
+    })]);
+  });
+
+  it("records fallback and cancellation without claiming completion", async () => {
+    const { records, onReadCompleted } = observed();
+    const fallback = vi.fn().mockRejectedValueOnce(new Error("unsupported field")).mockResolvedValueOnce(response());
+    await createHostedGroupSharedReader({ groupToolPort: { request: fallback }, freshnessWaitMs: 15_000, onReadCompleted }).request(input);
+    const controller = new AbortController();
+    const reason = new Error("synthetic abort");
+    vi.mocked(delay).mockImplementationOnce(async () => {
+      await vi.advanceTimersByTimeAsync(4_000); controller.abort(reason); throw controller.signal.reason;
+    });
+    const canceled = vi.fn().mockResolvedValue(response());
+    await expect(createHostedGroupSharedReader({ groupToolPort: { request: canceled }, freshnessWaitMs: 15_000, onReadCompleted })
+      .request(input, { signal: controller.signal })).rejects.toBe(reason);
+    expect(canceled).toHaveBeenCalledTimes(1);
+    expect(records).toEqual([
+      expect.objectContaining({ groupSharedReadCallbackCount: 2, groupSharedReadDecision: "fallback", groupSharedReadOutcome: "ok" }),
+      expect.objectContaining({ groupSharedReadCallbackCount: 1, groupSharedReadDecision: "canceled", groupSharedReadElapsedMs: 4_000,
+        groupSharedReadOutcome: "canceled", groupSharedReadPollCount: 1, groupSharedReadPollElapsedMs: 4_000 }),
+    ]);
+  });
+
+  it.each([
+    ["throws", () => { throw new Error("observer failed"); }],
+    ["rejects", () => Promise.reject(new Error("observer failed"))],
+    ["never settles", () => new Promise<void>(() => undefined)],
+  ])("keeps the read result when the observer %s", async (_label, onReadCompleted) => {
+    const current = response({ available: true });
+    const request = vi.fn().mockResolvedValue(current);
+    const result = await createHostedGroupSharedReader({ groupToolPort: { request }, freshnessWaitMs: 15_000, onReadCompleted }).request(input);
+    if (current.action !== "read_shared") throw new Error("Expected read response");
+    expect(result).toEqual(current.result);
+    await vi.advanceTimersByTimeAsync(0);
   });
 });

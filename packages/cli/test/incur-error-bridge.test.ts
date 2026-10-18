@@ -5,6 +5,8 @@ import { normalizeCliTiming, type CliTiming } from '@murphai/runtime-state/cli-t
 import * as timing from '@murphai/runtime-state/node/cli-timing'
 import { incurErrorBridge } from '../src/incur-error-bridge.js'
 import { projectVaultCliError } from '../src/vault-cli-error-projection.js'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
+import { normalizeRepeatableEnumFlagOption, normalizeRepeatableFlagOption } from '@murphai/vault-usecases'
 
 // Errors is a native ESM namespace. Mock the module export rather than
 // redefining it; keep the real classes, projection and timing scope owner.
@@ -22,7 +24,7 @@ afterEach(() => { vi.resetAllMocks() })
 
 // Inspect the bridge's throw before Incur renders it. Real registered commands,
 // byte parity and canonical effects are covered in cli-timing.test.ts.
-async function observe(error: unknown, enabled = true) {
+async function observe(error: unknown, enabled = true, command = 'knowledge show') {
   let caught: unknown
   let release!: () => void
   let late: Promise<void> | undefined
@@ -34,7 +36,7 @@ async function observe(error: unknown, enabled = true) {
   }))
   cli.use(incurErrorBridge)
   cli.command('show', { run() { throw error } })
-  const run = () => timing.timeCliDispatch('knowledge show', async () => {
+  const run = () => timing.timeCliDispatch(command, async () => {
     late = gate.then(() => {
       timing.noteCliTimingFailure(error)
       timing.noteCliTimingExit(1, false)
@@ -156,4 +158,95 @@ test('nonparser errors preserve original handling and are never passed to the pa
   assert.equal(result.caught.message, expected.message)
   assert.deepEqual(result.failures, [codeOnly])
   assert.equal(projection.mock.calls.length, 0)
+})
+
+test('parser-set reason reaches only its gated commands; hostile metadata cannot leak, throw or invoke accessors', async () => {
+  for (const reason of ['unknown_flag', 'missing_value'] as const) {
+    const original = new Errors.ParseError({ message: 'PRIVATE_SENTINEL', reason })
+    const visible = { keys: Object.keys(original), json: JSON.stringify(original), envelope: Errors.toErrorEnvelope(original) }
+    assert.deepEqual(visible.envelope, Errors.toErrorEnvelope(new Errors.ParseError({ message: 'PRIVATE_SENTINEL' })))
+    assert.equal(JSON.stringify(visible).includes(reason), false)
+    for (const command of ['knowledge upsert', 'knowledge show', 'wearables day']) {
+      const result = await observe(original, true, command)
+      assert.equal(result.caught, original)
+      assert.deepEqual(result.failures, [{ ...parserFailure, rejection: reason }])
+    }
+    assert.deepEqual((await observe(original, true, 'event list')).failures, [parserFailure],
+      'Other commands never admit the reason.')
+    assert.equal((await observe(original, false, 'knowledge upsert')).caught, original)
+    assert.deepEqual({ keys: Object.keys(original), json: JSON.stringify(original), envelope: Errors.toErrorEnvelope(original) }, visible)
+  }
+  let reads = 0
+  const withReason = (descriptor: PropertyDescriptor) =>
+    Object.defineProperty(new Errors.ParseError({ message: 'PRIVATE_SENTINEL' }), 'reason', descriptor)
+  for (const original of [
+    new Errors.ParseError({ message: 'PRIVATE_SENTINEL' }),
+    new Errors.ParseError({ message: 'PRIVATE_SENTINEL', kind: 'config_invalid' }),
+    withReason({ value: 'PRIVATE_SENTINEL' }),
+    withReason({ value: 'Unknown_flag' }),
+    withReason({ value: new String('unknown_flag') }),
+    withReason({ value: { toString: () => 'unknown_flag' } }),
+    withReason({ get: () => { reads += 1; return 'unknown_flag' } }),
+    Object.setPrototypeOf(new Errors.ParseError({ message: 'PRIVATE_SENTINEL' }),
+      Object.create(Errors.ParseError.prototype, { reason: { value: 'unknown_flag' } })),
+  ]) {
+    const result = await observe(original, true, 'knowledge upsert')
+    assert.equal(result.caught, original)
+    assert.equal(result.failures?.length, 1)
+    assert.equal(result.failures?.[0]?.rejection, undefined)
+  }
+  assert.equal(reads, 0)
+  // Config rejections share VALIDATION_ERROR; even a valid reason stays unclassified.
+  for (const kind of ['config_missing', 'config_invalid', 'config_unavailable'] as const) {
+    for (const reason of ['unknown_flag', 'missing_value'] as const) {
+      const original = new Errors.ParseError({ message: 'SYNTHETIC_PRIVATE', kind, reason })
+      const result = await observe(original, true, 'knowledge upsert')
+      assert.equal(result.caught, original)
+      assert.deepEqual(result.failures, [codeOnly])
+    }
+    const getter = Object.defineProperty(new Errors.ParseError({ message: 'SYNTHETIC_PRIVATE', kind }), 'reason',
+      { get: () => { reads += 1; return 'unknown_flag' } })
+    assert.deepEqual((await observe(getter, true, 'knowledge upsert')).failures, [codeOnly])
+  }
+  assert.equal(reads, 0)
+  // A throwing descriptor trap falls back to the original code/stage only.
+  const trapped = new Proxy(new Errors.ParseError({ message: 'PRIVATE_SENTINEL', reason: 'unknown_flag' }), {
+    getOwnPropertyDescriptor: (target, key) => {
+      if (key === 'reason') throw new Error('PRIVATE_SENTINEL')
+      return Reflect.getOwnPropertyDescriptor(target, key)
+    },
+  })
+  const trappedResult = await observe(trapped, true, 'knowledge upsert')
+  assert.equal(trappedResult.caught, trapped)
+  assert.deepEqual(trappedResult.failures, [codeOnly])
+  // Name and reason alone are not a typed ParseError.
+  const spoof = Object.defineProperty(Object.assign(new Error('PRIVATE_SENTINEL'), { name: 'Incur.ParseError' }),
+    'reason', { value: 'unknown_flag' })
+  assert.deepEqual((await observe(spoof, true, 'knowledge upsert')).failures, [codeOnly])
+})
+
+test('shared filter normalizer class reaches only search query timing; projected errors stay unchanged', async () => {
+  const thrown = (run: () => unknown) => { try { run() } catch (error) { return error } assert.fail('expected throw') }
+  const filterFailure = { code: 'invalid_option', stage: 'unknown', count: 1 }
+  for (const [rejection, error] of [
+    ['comma_delimited', thrown(() => normalizeRepeatableFlagOption(['PRIVATE,SENTINEL'], 'tag'))],
+    ['unsupported_value', thrown(() => normalizeRepeatableEnumFlagOption(['PRIVATE_SENTINEL'], 'record-type', ['event']))],
+  ] as const) {
+    assert.ok(error instanceof VaultCliError)
+    assert.deepEqual(Object.getOwnPropertyDescriptor(error, 'cliTimingRejection'),
+      { value: rejection, writable: false, enumerable: false, configurable: false })
+    const bare = new VaultCliError(error.code, error.message)
+    const visible = (value: VaultCliError) => ({ keys: Object.keys(value), json: JSON.stringify(value),
+      projected: projectVaultCliError(value) })
+    assert.deepEqual(visible(error), visible(bare), 'Envelope, serialization and projection are unchanged.')
+    const result = await observe(error, true, 'search query')
+    assert.ok(result.caught instanceof Errors.IncurError)
+    assert.equal(Object.hasOwn(result.caught, 'cliTimingRejection'), false)
+    assert.deepEqual(result.failures, [{ ...filterFailure, rejection }])
+    assert.deepEqual((await observe(bare, true, 'search query')).caught, result.caught)
+    for (const command of ['list', 'event list', 'knowledge show']) {
+      assert.deepEqual((await observe(error, true, command)).failures, [filterFailure])
+    }
+    assert.deepEqual((await observe(error, false, 'search query')).caught, result.caught)
+  }
 })

@@ -1,13 +1,12 @@
 import {
   HOSTED_MAILBOX_LANES,
-  type HostedMailboxFetchResponse,
   type HostedMailboxLane,
   type HostedMailboxWakeHighWater,
   type HostedWorkspaceInvocationRequest,
   type HostedWorkspaceState,
 } from "@murphai/hosted-execution/runtime-control";
 import type { HostedMailboxImportState } from "./mailbox-state.ts";
-import type { HostedRuntimeMailboxPort } from "./platform.ts";
+import type { HostedRuntimeMailboxFetchResponse, HostedRuntimeMailboxPort } from "./platform.ts";
 
 export const HOSTED_FOREGROUND_MAILBOX_PREFETCH_LANES = ["conversation", "system"] as const;
 
@@ -15,7 +14,7 @@ export interface HostedMailboxPrefixPrefetch {
   importedSeqByLane: Record<HostedMailboxLane, string>;
   lanes: readonly HostedMailboxLane[];
   limitPerLane: number;
-  response: Promise<HostedMailboxFetchResponse>;
+  response: Promise<HostedRuntimeMailboxFetchResponse>;
   signal?: AbortSignal | null;
 }
 
@@ -41,7 +40,7 @@ export function prefetchHostedMailboxPrefix(input: {
     requestId: input.requestId,
   };
   const signal = input.signal ?? null;
-  let response: Promise<HostedMailboxFetchResponse>;
+  let response: Promise<HostedRuntimeMailboxFetchResponse>;
   try {
     response = signal
       ? input.mailboxPort.fetch(request, { signal })

@@ -277,14 +277,33 @@ describe("patched Cloudflare container readiness probes", () => {
     )).toHaveLength(forwardedListenerCount);
   });
 
-  it("propagates caller abort without a retry or late healthy transition", async () => {
+  it.each([
+    {
+      boundary: "startContainerIfNotRunning",
+      listeningAtMs: 10_000,
+      stickyProbeNumbers: [1],
+      message: "Aborted waiting for container to start as we received a cancellation signal",
+      probeStartedAtMs: [0],
+      portWaitCount: 0,
+    },
+    {
+      boundary: "waitForPort",
+      listeningAtMs: 0,
+      stickyProbeNumbers: [2],
+      message: "Container request aborted.",
+      probeStartedAtMs: [0, 50],
+      portWaitCount: 1,
+    },
+  ])("proves $boundary cancellation provenance without a retry or late healthy transition", async (scenario) => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-08-30T12:02:00.000Z"));
     const harness = await createProbeHarness({
-      listeningAtMs: 10_000,
+      listeningAtMs: scenario.listeningAtMs,
+      stickyProbeNumbers: scenario.stickyProbeNumbers,
       stickyProbeReleaseMs: 10_000,
     });
     const abortController = new AbortController();
+    const waitForPort = vi.spyOn(harness.runner, "waitForPort");
     const readiness = harness.runner.startAndWaitForPorts({
       cancellationOptions: {
         abort: abortController.signal,
@@ -295,20 +314,25 @@ describe("patched Cloudflare container readiness probes", () => {
       },
       ports: runnerPort,
     });
-    const rejection = expect(readiness).rejects.toThrow(
-      "Aborted waiting for container to start",
-    );
+    // Exact top-level messages from the installed patched SDK, not a runner double.
+    const rejection = Promise.all([
+      expect(readiness).rejects.toBeInstanceOf(Error),
+      expect(readiness).rejects.toMatchObject({ message: scenario.message }),
+    ]);
 
     setTimeout(() => abortController.abort(new DOMException("Timed out", "TimeoutError")), 200);
     await vi.advanceTimersByTimeAsync(1_000);
     await rejection;
 
     expect(harness.stats.startCount).toBe(1);
-    expect(harness.stats.probeStartedAtMs).toEqual([0]);
+    expect(harness.stats.probeStartedAtMs).toEqual(scenario.probeStartedAtMs);
     expect(harness.stats.abortedProbeCount).toBe(1);
     expect(harness.stats.maxInFlightProbeCount).toBe(1);
     expect(harness.stats.inFlightProbeCount).toBe(0);
+    expect(harness.stats.settledProbeCount).toBe(scenario.probeStartedAtMs.length);
     expect(harness.stats.onStartCount).toBe(0);
+    expect(waitForPort).toHaveBeenCalledTimes(scenario.portWaitCount);
+    expect(harness.stats.onErrorCount).toBe(0);
     expect(harness.stats.stateTransitions).not.toContain("healthy");
     expect(harness.abortContext).not.toHaveBeenCalled();
   });

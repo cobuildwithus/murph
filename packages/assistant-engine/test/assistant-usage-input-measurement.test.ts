@@ -1,44 +1,41 @@
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { readFile, rm, writeFile } from 'node:fs/promises'
-import { fileURLToPath } from 'node:url'
+import { readFile, rm } from 'node:fs/promises'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { runInNewContext } from 'node:vm'
 
 import { HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV } from '@murphai/hosted-execution/env'
-import { afterAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { executeCodexAppServerTurn, resolveMurphDynamicTools, stopWarmCodexAppServer } from '../src/assistant-codex.ts'
 import { MURPH_CODEX_BASE_INSTRUCTIONS } from '../src/assistant/codex-base-instructions.ts'
 import { buildAssistantSystemPromptLayers } from '../src/assistant/system-prompt.ts'
 import { writeHostedOpenAiMixedModeModelCatalogJson } from './support/codex-model-catalog.ts'
 import { prepareScriptedTurnScenario, readRecord, startScriptedResponsesStub } from './support/codex-scripted-provider.ts'
-import { assertModelVisibleToolContract, readProviderNativeTools, readVisibleCanonicalSchema } from './support/codex-tool-contract-proof.ts'
+import { assertModelVisibleToolContract, readProviderNativeTools } from './support/codex-tool-contract-proof.ts'
+import { materializeUsageInputBaseline } from './support/usage-input-baseline.ts'
 
-// Credential-free, opt-in complete request measurement. The baseline module is
-// materialized beside its original imports and removed afterwards. Its unchanged
-// dependencies are shared with the candidate; changed tool definitions use their
-// exact base modules as well.
-const base = process.env.MURPH_USAGE_INPUT_BASE ?? '4cd1e58609'
+// Snapshot all assistant-engine source together so relative imports cannot fall
+// through to head modules. Public workspace dependencies and Codex stay installed
+// at the candidate version; the output records that measurement boundary.
+let base = process.env.MURPH_USAGE_INPUT_BASE ?? 'origin/main'
 const repository = fileURLToPath(new URL('../../../', import.meta.url))
-const promptPath = 'packages/assistant-engine/src/assistant/system-prompt.ts'
 const configPath = 'packages/assistant-runtime/src/hosted-runtime/codex-config.ts'
-const baseModule = new URL('../src/assistant/system-prompt.usage-measurement-base.ts', import.meta.url)
-const baseCatalogModule = new URL('../src/assistant-codex/dynamic-tool-catalog.usage-measurement-base.ts', import.meta.url)
-const baseAutomationModule = new URL('../src/assistant-codex/dynamic-tools/automation.usage-measurement-base.ts', import.meta.url)
 const temporaryPaths: string[] = []
 const noExternalFetch: typeof fetch = async () => { throw new Error('Unexpected external effect') }
 
-function readFreshnessScopeKeySchema(schema: unknown): Record<string, unknown> {
-  const properties = readRecord(readRecord(schema)?.properties)
-  const items = readRecord(readRecord(properties?.freshness)?.items)
-  const scopeKey = readRecord(readRecord(items?.properties)?.projectionScopeKey)
-  assert.ok(scopeKey, 'Expected the captured group_data freshness scope-key schema')
-  return scopeKey
-}
-
 function gitSource(file: string): string {
   return execFileSync('git', ['show', `${base}:${file}`], { cwd: repository, encoding: 'utf8' })
+}
+
+async function nativeDelegationSource(phase: 'base' | 'head'): Promise<string> {
+  const sharedPath = 'packages/hosted-execution/src/codex-behavior.ts'
+  if (phase === 'base') {
+    const committed = execFileSync('git', ['ls-tree', '--name-only', base, '--', sharedPath], { cwd: repository, encoding: 'utf8' }).trim()
+    return gitSource(committed === sharedPath ? sharedPath : configPath)
+  }
+  return readFile(new URL(`../../../${sharedPath}`, import.meta.url), 'utf8')
 }
 
 function nativeDelegationConfig(source: string): string[] {
@@ -70,18 +67,23 @@ afterAll(async () => {
 })
 
 describe.skipIf(process.env.MURPH_MEASURE_USAGE_INPUT !== '1')('usage efficiency initial input', () => {
+  beforeAll(() => {
+    // Freeze mutable refs once before any source or config reads.
+    base = execFileSync('git', ['rev-parse', '--verify', '--end-of-options', `${base}^{commit}`], {
+      cwd: repository, encoding: 'utf8', timeout: 30_000,
+    }).trim()
+  })
+
   it.each(['direct', 'group', 'groupAvailable'] as const)('complete first provider request (%s)', { timeout: 180_000 }, async (fixture) => {
     const scope = fixture === 'direct' ? 'direct' : 'group'
     const groupAvailable = fixture === 'groupAvailable'
-    await writeFile(baseModule, gitSource(promptPath), { flag: 'wx' })
-    await writeFile(baseAutomationModule, gitSource('packages/assistant-engine/src/assistant-codex/dynamic-tools/automation.ts'), { flag: 'wx' })
-    await writeFile(baseCatalogModule, gitSource('packages/assistant-engine/src/assistant-codex/dynamic-tool-catalog.ts').replaceAll(
-      "'./dynamic-tools/automation.js'", "'./dynamic-tools/automation.usage-measurement-base.js'",
-    ), { flag: 'wx' })
+    const baselineRoot = await materializeUsageInputBaseline(repository, base)
+    temporaryPaths.push(baselineRoot)
     const stub = await startScriptedResponsesStub()
     try {
-      const baseline: typeof import('../src/assistant/system-prompt.ts') = await import(baseModule.href)
-      const baselineCatalog: typeof import('../src/assistant-codex/dynamic-tool-catalog.ts') = await import(baseCatalogModule.href)
+      const baseline: typeof import('../src/assistant/system-prompt.ts') = await import(pathToFileURL(`${baselineRoot}/src/assistant/system-prompt.ts`).href)
+      const baselineCatalog: typeof import('../src/assistant-codex/dynamic-tool-catalog.ts') = await import(pathToFileURL(`${baselineRoot}/src/assistant-codex/dynamic-tool-catalog.ts`).href)
+      const baselineInstructions: typeof import('../src/assistant/codex-base-instructions.ts') = await import(pathToFileURL(`${baselineRoot}/src/assistant/codex-base-instructions.ts`).href)
       const availability: Parameters<typeof resolveMurphDynamicTools>[0] = {
         allowFinishWithoutReply: true, automationAvailable: true,
         personalizationAvailable: scope === 'direct', groupSharedReadAvailable: fixture === 'group',
@@ -89,19 +91,16 @@ describe.skipIf(process.env.MURPH_MEASURE_USAGE_INPUT !== '1')('usage efficiency
         imageGenerationAvailable: false, progressUpdatesAvailable: true, progressUpdateMode: scope,
       }
       const captures = []
-      const groupScopeKeySchemas: Record<string, unknown>[] = []
-      // The affected case changes ONLY the catalog. Reuse the current production
-      // prompt/config and the same isolated home/workspace across both phases.
-      // Keep the existing direct/shared-read fixtures' broader base/head capture.
-      let groupScenario: Awaited<ReturnType<typeof prepareScriptedTurnScenario>> | undefined
+      let workingDirectory: string | undefined
       for (const phase of ['base', 'head'] as const) {
         const tools = (phase === 'base' ? baselineCatalog.resolveMurphDynamicTools : resolveMurphDynamicTools)(availability)
-        const configSource = phase === 'base' && !groupAvailable ? gitSource(configPath) : await readFile(new URL(`../../../${configPath}`, import.meta.url), 'utf8')
-        const scenario = groupScenario ?? await prepareScriptedTurnScenario(stub, temporaryPaths, {
+        const configSource = await nativeDelegationSource(phase)
+        const scenario = await prepareScriptedTurnScenario(stub, temporaryPaths, {
           model: 'gpt-6.1-sol', additionalTomlLines: nativeDelegationConfig(configSource),
         })
-        if (groupAvailable) groupScenario = scenario
-        const build = phase === 'base' && !groupAvailable ? baseline.buildAssistantSystemPromptLayers : buildAssistantSystemPromptLayers
+        workingDirectory ??= scenario.turnInput.workingDirectory
+        scenario.turnInput.workingDirectory = workingDirectory
+        const build = phase === 'base' ? baseline.buildAssistantSystemPromptLayers : buildAssistantSystemPromptLayers
         const layers = build({
           assistantCliContract: null, assistantHostedAutomationAvailable: true,
           assistantProgressUpdatesAvailable: true, channel: 'linq',
@@ -120,7 +119,7 @@ describe.skipIf(process.env.MURPH_MEASURE_USAGE_INPUT !== '1')('usage efficiency
         const result = await executeCodexAppServerTurn({
           ...scenario.turnInput, dynamicTools: tools, groupConversation: scope === 'group',
           fetchImpl: noExternalFetch, publicInternetFetch: noExternalFetch,
-          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          baseInstructions: phase === 'base' ? baselineInstructions.MURPH_CODEX_BASE_INSTRUCTIONS : MURPH_CODEX_BASE_INSTRUCTIONS,
           developerInstructions: [layers.staticCacheableCorePrompt, layers.stableRouteCapabilityPrompt, layers.threadContextPrompt].join('\n\n'),
           prompt: [layers.dynamicTurnContextPrompt, groupAvailable
             ? 'Summarize the shared sleep duration for January 10, 2030, with the shared timezone for each person. Keep it brief.'
@@ -147,7 +146,6 @@ describe.skipIf(process.env.MURPH_MEASURE_USAGE_INPUT !== '1')('usage efficiency
           const visible = observed[0]
           assert.ok(visible)
           assertModelVisibleToolContract(registered, visible)
-          groupScopeKeySchemas.push(readFreshnessScopeKeySchema(readVisibleCanonicalSchema(visible.description)))
         }
         captures.push({
           phase, bytes: Buffer.byteLength(capture.json),
@@ -160,29 +158,17 @@ describe.skipIf(process.env.MURPH_MEASURE_USAGE_INPUT !== '1')('usage efficiency
       }
       const [before, after] = captures
       assert.ok(before && after)
-      if (groupAvailable) {
-        const [baseScopeKey, headScopeKey] = groupScopeKeySchemas
-        assert.ok(baseScopeKey && headScopeKey)
-        // Fail rather than silently measuring two already-patched catalogs.
-        expect(baseScopeKey).not.toHaveProperty('enum')
-        const { enum: wearableKeys, ...unchangedScopeKey } = headScopeKey
-        assert.ok(Array.isArray(wearableKeys) && wearableKeys.length > 0)
-        expect(unchangedScopeKey).toEqual(baseScopeKey)
-        expect(after.registeredTools).toEqual(before.registeredTools)
-        expect(after.bytes).toBeGreaterThan(before.bytes)
-        expect(after.sha256).not.toBe(before.sha256)
-      }
       process.stdout.write(`[usage-input-proof] ${JSON.stringify({
         fixture, scope, base, model: 'gpt-6.1-sol', provider: 'scripted-loopback', nativeDelegation: true, captures,
-        comparison: groupAvailable ? 'base/current catalog; identical current prompt, config and workspace' : 'base/head production inputs',
-        freshnessEnumSizes: groupScopeKeySchemas.map((schema) => Array.isArray(schema.enum) ? schema.enum.length : null),
+        comparison: 'base/head assistant-engine source and native delegation text; identical fixture and workspace',
+        sharedDependencies: 'candidate request adapter and public workspace packages, installed Codex and model catalog',
         deltaBytes: after.bytes - before.bytes, deltaPercent: (after.bytes - before.bytes) / before.bytes * 100,
         tokens: null, tokenDelta: null, tokenLimitation: 'No exact GPT-6.1 Sol tokenizer is configured; no estimate is substituted.',
       })}\n`)
     } finally {
       await stopWarmCodexAppServer()
       await stub.close()
-      await Promise.all([baseModule, baseCatalogModule, baseAutomationModule].map((file) => rm(file, { force: true })))
+      await rm(baselineRoot, { recursive: true, force: true })
     }
   })
 })

@@ -2,6 +2,7 @@ import type {
   HostedMailboxFetchResponse,
   HostedMailboxItem,
   HostedMailboxLane,
+  HostedRuntimeRedactedObject,
 } from "@murphai/hosted-execution/runtime-control";
 import {
   HOSTED_MAILBOX_LANES,
@@ -22,6 +23,7 @@ import {
   type HostedMailboxPayloadResolutionResult,
 } from "./mailbox-payloads.ts";
 import type {
+  HostedRuntimeMailboxFetchResponse,
   HostedRuntimeMailboxPort,
 } from "./platform.ts";
 import type {
@@ -130,6 +132,8 @@ export interface HostedMailboxImportLoopResult {
   latestLinqDeliveryContext?: HostedAssistantLinqDeliveryContext | null;
   linqDeliveryContexts?: HostedAssistantLinqDeliveryContext[];
   conversationImportTiming?: HostedMailboxConversationImportTiming;
+  /** Transport scalars for the first attempt of the read this pass imported. */
+  fetchTransportTiming?: HostedRuntimeRedactedObject;
   nextRetryAt?: string | null;
   state: HostedMailboxImportState;
 }
@@ -560,6 +564,7 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
     ...(latestLinqDeliveryContext ? { latestLinqDeliveryContext } : {}),
     ...(linqDeliveryContexts.length > 0 ? { linqDeliveryContexts } : {}),
     ...(conversationImportTiming ? { conversationImportTiming } : {}),
+    fetchTransportTiming: fetchedResponse.transportTiming,
     ...(nextRetryAt ? { nextRetryAt } : {}),
     state: nextState,
   };
@@ -728,7 +733,7 @@ async function fetchHostedMailboxPrefix(input: {
   prefetch: HostedMailboxPrefixPrefetch | null;
   requestId: string;
   state: HostedMailboxImportState;
-}): Promise<HostedMailboxFetchResponse> {
+}): Promise<HostedRuntimeMailboxFetchResponse> {
   if (input.prefetch && canUseHostedMailboxPrefixPrefetch({
     lanes: input.lanes,
     limitPerLane: input.limitPerLane,
@@ -759,7 +764,7 @@ async function fetchHostedMailboxPrefixFromPort(input: {
   mailboxPort: HostedRuntimeMailboxPort;
   requestId: string;
   state: HostedMailboxImportState;
-}): Promise<HostedMailboxFetchResponse> {
+}): Promise<HostedRuntimeMailboxFetchResponse> {
   const request = {
     cursorMode: "imported_seq" as const,
     lanes: input.lanes.map((lane) => ({

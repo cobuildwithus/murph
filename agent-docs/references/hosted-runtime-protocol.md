@@ -514,6 +514,16 @@ continuation. Unknown crypto/provider, access-query, database, or transaction
 errors use the ordinary delivery-failed response and stop current destination
 fanout plus the undispatched scope suffix. Deadline exhaustion, an unmarked proxy
 response, transport loss, or an owner-ending condition likewise stops the suffix.
+The existing `Hosted vault-share projection offer failed; continuing wake.`
+warning may include one optional `vaultShareOfferFailureReason` from the captured
+offer: `serialized_projection_too_large` for the existing serialized size gate,
+`delivery_exception` for its existing delivery catch (including response-contract
+errors), or `scope_failed` when explicit scope failures determine the aggregate
+error. A later size-gate or delivery exception takes precedence over an earlier
+scope failure; preemption and other non-error outcomes carry no reason. Earlier
+discovery, restore, or capture failures omit this offer-specific field. It adds
+only fixed literals to that warning, without payload or error details or changes
+to delivery, continuation, or warning count and severity.
 Web performs
 encryption before taking a short `hosted_workspace` row lock, then replaces the
 exact active share generation only when the locked version still matches. The
@@ -4914,6 +4924,22 @@ The four container-local stages are `lifecycle_lock_or_state_read`,
 `warm_health_or_cleanup`, `cold_start_or_ports`, and
 `cold_health_or_finalization`. The cleanup boolean overlays the stage that
 triggered cleanup instead of replacing it.
+
+Only when the local cold `startAndWaitForPorts` catch has run, that same warning
+also carries `runtimeStartupColdWaitFailure`: `instance_start_aborted` matches
+exactly `Aborted waiting for container to start as we received a cancellation signal`
+from the pinned Containers SDK 0.3.7 `startContainerIfNotRunning` wait;
+`port_wait_aborted` matches exactly `Container request aborted.` from its separate
+`waitForPort` wait. The initial wait also probes the port, so these labels identify
+SDK cancellation boundaries, not infrastructure allocation versus process-start
+root causes. Classification reads only the caught Error's top-level message,
+before the existing cancellation-reason restoration and pending/cleanup handling;
+it never traverses causes or emits the message. Other errors, non-Errors, unreadable
+messages, and changed SDK wording are `unclassified`, not a guessed boundary.
+The field is omitted when no cold wait failure has been caught (including a caller
+settling before the SDK wait), on noncold failures, and by older code during skew.
+Successful-start timestamps cannot identify a failed SDK wait. The diagnostic
+changes no error identity, pending fence, cleanup, retry, or readiness behavior.
 
 A non-OK Web workspace read also retains one failure-only Worker diagnostic
 without changing its caller-visible exception or retry behavior. The Durable

@@ -1594,7 +1594,7 @@ export function ComponentsContent() {
 
         <Separator />
 
-        <Section title="Hosted plan change">
+        <Section id="hosted-plan-change" title="Hosted plan change">
           <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
             Immediate upgrades open Stripe&apos;s exact proration confirmation.
             Period-end switches keep their in-product scheduling confirmation.
@@ -1602,7 +1602,7 @@ export function ComponentsContent() {
           <div className="grid items-start gap-6 lg:grid-cols-2">
             <div className="space-y-3">
               <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
-                Period-end switch
+                Period-end switch blocked by cancellation
               </p>
               <Dialog>
                 <div
@@ -1611,10 +1611,11 @@ export function ComponentsContent() {
                 >
                   <HostedPlanChangeConfirmationContent
                     currentPeriodEnd="2026-08-27T04:00:00.000Z"
-                    errorMessage={null}
+                    errorMessage="Your subscription is scheduled to cancel. Open Manage billing to renew it, then try changing plans again."
                     onClose={() => undefined}
                     onConfirm={() => undefined}
                     pending={false}
+                    showCancellationRecovery
                     targetPlanCode="launch_group_monthly"
                   />
                 </div>
@@ -2715,8 +2716,8 @@ export function ComponentsContent() {
 
         <Separator />
 
-        <Section title="Metric Card">
-          <div className="flex gap-3">
+        <Section id="metric-card" title="Metric Card">
+          <div className="flex flex-col gap-3 md:flex-row">
             <MetricCard label="HRV" value="53.8" unit="ms" delta="+15.7%" direction="up" baseline="46.5" expected="+10–25%" />
             <MetricCard label="Resting HR" value="60.1" unit="bpm" delta="−6.4%" direction="down" baseline="64.2" expected="−3–8 bpm" />
             <MetricCard label="Deep Sleep" value="1h44m" delta="+18.2%" direction="up" baseline="1h28m" expected="+15–30%" />
@@ -2749,8 +2750,8 @@ export function ComponentsContent() {
 
         <Separator />
 
-        <Section title="Expected Signal Card">
-          <div className="flex gap-4">
+        <Section id="expected-signal-card" title="Expected Signal Card">
+          <div className="flex flex-col gap-4 md:flex-row">
             <ExpectedSignalCard label="HRV" expected="+10–25%" direction="up" description="Heat stress trains the autonomic nervous system, increasing parasympathetic dominance at rest." />
             <ExpectedSignalCard label="Resting HR" expected="-3–8 bpm" direction="down" description="Repeated heat exposure improves cardiac output efficiency, lowering resting heart rate." />
             <ExpectedSignalCard label="Deep Sleep" expected="+15–30%" direction="up" description="Core temp drop after sauna triggers deeper slow-wave sleep via thermoregulatory pathways." />

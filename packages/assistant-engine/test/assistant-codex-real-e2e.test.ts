@@ -121,6 +121,7 @@ import {
   buildPersonalPatternReport,
   buildJournalView,
   getQueryProjectionStatus,
+  knowledgeAbsentPageResultSchema,
   readVaultRawTolerant,
   type CanonicalEntity,
 } from '@murphai/query'
@@ -172,6 +173,7 @@ import {
 } from '../src/assistant-ask.ts'
 import {
   MURPH_ANALYZE_VIDEO_TOOL,
+  MURPH_ASK_GROK_TOOL,
   MURPH_CONVERSATION_ATTACHMENTS_TOOL,
   MURPH_ASSISTANT_CONFIGURATION_TOOL,
   MURPH_ASSISTANT_STYLE_TOOL,
@@ -367,8 +369,11 @@ import {
   createCanonicalLiveFixture,
   runCanonicalGroupBoundaryJourney,
   runCanonicalMealRestartJourney,
+  runCanonicalHostedMealJourney,
   runCanonicalReminderJourney,
 } from './support/canonical-live-journeys.ts'
+import { inspectCanonicalCodex } from './support/canonical-codex-inspection.js'
+import { realCodexProviderTomlLines, type RealCodexProviderConfig } from './support/real-codex-provider.js'
 import {
   MEAL_INTAKE_BENCHMARK_CASES,
   readMealIntakeBenchmarkEnvironment,
@@ -959,6 +964,127 @@ describeRealCodex('real Codex event-list family isolation', () => {
   }, 360_000)
 })
 
+const BOUNDED_EVENT_LIST_LIMIT_DESCRIPTION = 'Maximum number of results to return, from 1 to 200.'
+
+function buildBoundedEventListPrompt(assistantCliContract: string, conversationScope: 'direct' | 'group') {
+  return buildAssistantSystemPrompt({
+    assistantCliContract, assistantHostedAutomationAvailable: false,
+    assistantContextSnapshotPrompt: null, assistantHostedDeviceConnectAvailable: false,
+    assistantHostedDeviceConnectProviders: [], assistantKnowledgeToolsAvailable: false,
+    channel: 'linq', cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+    conversationScope, currentInstant: '2026-04-11T12:00:00.000Z',
+    currentLocalDate: '2026-04-11', currentTimeZone: 'America/New_York', hostedRuntime: true,
+    modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false, turnTrigger: null,
+  })
+}
+
+async function readBoundedEventListManifest() {
+  return await readAssistantCliLlmsFullManifestFromCliEntry({
+    cliEntryPath: fileURLToPath(new URL('../../cli/dist/bin.js', import.meta.url)),
+    workingDirectory: fileURLToPath(new URL('../../../', import.meta.url)),
+  })
+}
+
+describe('bounded event list limit production contract', () => {
+  it('discloses the cap only in command help, leaving the composed CLI contract unchanged', async () => {
+    const manifest = await readBoundedEventListManifest()
+    expect(manifest.commands.find(command => command.name === 'event list')?.schema?.options?.properties?.limit)
+      .toMatchObject({ maximum: 200, default: 10, description: BOUNDED_EVENT_LIST_LIMIT_DESCRIPTION })
+    // Substitute the prior description everywhere and rebuild through the same
+    // production builders: the compact index and composed prompts must not move.
+    const prior = JSON.parse(JSON.stringify(manifest).replaceAll(
+      BOUNDED_EVENT_LIST_LIMIT_DESCRIPTION, 'Maximum number of results to return.',
+    )) as typeof manifest
+    const contract = buildAssistantCliSurfaceContract(manifest)
+    if (!contract) throw new Error('Expected the generated production CLI contract.')
+    expect(buildAssistantCliSurfaceContract(prior)).toBe(contract)
+    expect(contract).not.toContain(BOUNDED_EVENT_LIST_LIMIT_DESCRIPTION)
+    expect(buildBoundedEventListPrompt(contract, 'direct')).toContain('read `vault-cli <command> --help`')
+    for (const scope of ['direct', 'group'] as const) {
+      expect(buildBoundedEventListPrompt(contract, scope)).not.toContain(BOUNDED_EVENT_LIST_LIMIT_DESCRIPTION)
+    }
+  }, 120_000)
+})
+
+describeRealCodex('real Codex bounded event list limit e2e', () => {
+  it('bounded event list limit reads an oversized note request once within the cap', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-event-limit-e2e-'))
+    const vaultRoot = path.join(workingDirectory, 'vault')
+    const binDirectory = path.join(workingDirectory, 'bin')
+    const commandLogPath = path.join(workingDirectory, 'commands.log')
+    try {
+      const assistantCliContract = buildAssistantCliSurfaceContract(await readBoundedEventListManifest())
+      if (!assistantCliContract) throw new Error('Expected the generated production CLI contract.')
+      const developerInstructions = buildBoundedEventListPrompt(assistantCliContract, 'direct')
+      await initializeVault({ vaultRoot, timezone: 'America/New_York' })
+      for (const [title, day, tag] of [
+        ['Pack the travel adapter.', '2026-04-08', 'trip-log'],
+        ['The hotel checkout is at eleven.', '2026-04-09', 'trip-log'],
+        ['The lighthouse tour starts at the north pier.', '2026-04-10', 'trip-log'],
+        ['Water the fern on Sunday.', '2026-04-10', 'home'],
+      ] as const) {
+        await upsertEvent({ vaultRoot, payload: {
+          kind: 'note', source: 'manual', title, note: title, tags: [tag],
+          occurredAt: `${day}T14:00:00Z`, timeZone: 'America/New_York',
+        } })
+      }
+      await writeFile(commandLogPath, '')
+      // The recorder runs the shipped source CLI; no event output is fixtured.
+      await materializeRealWorkoutVaultCli({ binDirectory, commandLogPath, vaultRoot })
+      const canonicalBefore = await snapshotRealCodexCanonicalVault(vaultRoot)
+      const writesBefore = await listWriteOperationMetadataPaths(vaultRoot)
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never',
+        allowFinishWithoutReply: false,
+        baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome,
+        developerInstructions,
+        env: config.env,
+        fixtureBinDirectory: binDirectory,
+        groupConversation: false,
+        model: config.model,
+        modelProvider: config.modelProvider,
+        prompt: "Pull up to 1,000 of my saved notes tagged trip-log and list their titles. Don't change anything.",
+        reasoningEffort: 'low',
+        sandbox: 'workspace-write',
+        workingDirectory,
+      })
+      const reads = readCapabilityRoutingActions(result.jsonEvents).filter((action) => action.kind === 'command'
+        && /\bvault-cli\b[^;\n]*\bevent\s+list\b/u.test(action.command)
+        && !isRecordedVaultHelpCommand(action.command))
+      const reply = result.finalMessage.trim()
+      const commands = expandRecordedVaultCommands((await readFile(commandLogPath, 'utf8'))
+        .split('\n').filter(Boolean)).filter((command) =>
+        !isRecordedVaultHelpCommand(command) && !/^--(?:llms(?:-full)?|version)(?:\s|$)/u.test(command)
+      )
+      const limits = commands.map((command) => command.match(/(?:^|\s)--limit(?:=|\s+)(\S+)/u)?.[1] ?? null)
+      process.stdout.write(`[event-list-limit-e2e] ${JSON.stringify({
+        scenario: 'oversized-note-limit', eventReads: reads.length, limits, reply,
+      })}\n`)
+      // One successful bounded read: no oversized attempt and no unchanged retry.
+      expect(commands).toHaveLength(1)
+      expect(commands[0]).toMatch(/^event list(?:\s|$)/u)
+      expect(limits.every((limit) => limit === null || (/^\d+$/u.test(limit) && Number(limit) >= 1 && Number(limit) <= 200))).toBe(true)
+      expect(reads).toHaveLength(1)
+      expect(reads[0]?.kind === 'command' && reads[0].ok).toBe(true)
+      expect(readDynamicToolAttempts(result.jsonEvents)).toEqual([])
+      expect(await snapshotRealCodexCanonicalVault(vaultRoot)).toEqual(canonicalBefore)
+      expect(await listWriteOperationMetadataPaths(vaultRoot)).toEqual(writesBefore)
+      expect(await listAssistantOutboxIntents(vaultRoot)).toEqual([])
+      expect(reply).toMatch(/travel adapter/iu)
+      expect(reply).toMatch(/hotel checkout/iu)
+      expect(reply).toMatch(/lighthouse tour/iu)
+      expect(reply).not.toMatch(/fern/iu)
+      expect(reply).not.toMatch(/VALIDATION|too_big|invalid|error|\b200\b|\bcap(?:ped)?\b|maximum|retry|unable|couldn['’]t|could not/iu)
+      expect(reply.length).toBeLessThanOrEqual(400)
+    } finally {
+      await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+    }
+  }, 360_000)
+})
+
 async function seedFocusedFollowupVault(vaultRoot: string) {
   await initializeVault({ vaultRoot, timezone: 'UTC', createdAt: '2026-04-01T00:00:00Z' })
   const { createExperiment } = await import('@murphai/core')
@@ -1488,6 +1614,132 @@ describeRealCodex('real Codex focused wearable activity projection e2e', () => {
   }, 360_000)
 })
 
+async function seedFocusedSleepPatternProjectionVault(vaultRoot: string): Promise<void> {
+  await initializeVault({ vaultRoot, timezone: 'UTC', createdAt: '2026-01-01T00:00:00Z' })
+  const events = ['2026-01-01', '2026-01-02', '2026-01-03'].flatMap(date =>
+    ['oura', 'garmin'].map(provider => {
+      const durationMinutes = provider === 'oura' ? 450 : 600
+      const endAt = `${date}T11:00:00.000Z`
+      const startAt = new Date(Date.parse(endAt) - durationMinutes * 60_000).toISOString()
+      return {
+        dayKey: date, durationMinutes, endAt,
+        externalRef: { system: provider, resourceType: 'sleep', resourceId: `focused-sleep-${provider}-${date}` },
+        id: `evt_focused_sleep_${provider}_${date.replaceAll('-', '')}`,
+        kind: 'sleep_session', occurredAt: startAt, recordedAt: `${date}T11:05:00.000Z`,
+        schemaVersion: 'murph.event.v1', sleepType: 'main_sleep', source: 'device',
+        startAt, title: 'Synthetic provider sleep',
+      }
+    }))
+  await mkdir(path.join(vaultRoot, 'ledger/events/2026'), { recursive: true })
+  await writeFile(path.join(vaultRoot, 'ledger/events/2026/2026-01.jsonl'),
+    `${events.map(event => JSON.stringify(event)).join('\n')}\n`, 'utf8')
+}
+
+async function buildFocusedSleepPatternProjectionInstructions() {
+  const manifest = await readAssistantCliLlmsFullManifestFromCliEntry({
+    cliEntryPath: fileURLToPath(new URL('../../cli/dist/bin.js', import.meta.url)),
+    workingDirectory: fileURLToPath(new URL('../../../', import.meta.url)),
+  })
+  expect(manifest.commands.find(command => command.name === 'wearables sleep pattern')?.schema?.options?.properties)
+    .toMatchObject({
+      from: expect.any(Object), to: expect.any(Object), provider: expect.any(Object),
+      timeZone: expect.any(Object), windowDays: expect.any(Object),
+    })
+  const assistantCliContract = buildAssistantCliSurfaceContract(manifest)
+  if (!assistantCliContract) throw new Error('Expected the generated sleep-pattern CLI contract.')
+  const instructions = buildAssistantSystemPrompt({
+    assistantCliContract, assistantHostedAutomationAvailable: false,
+    assistantContextSnapshotPrompt: null, assistantHostedDeviceConnectAvailable: false,
+    assistantHostedDeviceConnectProviders: [], assistantKnowledgeToolsAvailable: false,
+    channel: 'linq', cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+    conversationScope: 'direct', currentInstant: '2026-01-04T12:00:00.000Z',
+    currentLocalDate: '2026-01-04', currentTimeZone: 'UTC', hostedRuntime: true,
+    modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false, turnTrigger: null,
+  })
+  expect(instructions).toContain(assistantCliContract)
+  expect(assistantCliContract).toContain('sleep pattern')
+  return instructions
+}
+
+function readFocusedSleepPatternProjectionCommand(command: string): string {
+  expect(command).not.toMatch(/[\r\n]/u)
+  const unwrapped = command.match(/^\/bin\/zsh -c '([^']+)'$/u)?.[1] ?? command
+  expect(unwrapped).toMatch(/^[ \t]*vault-cli[ \t]+wearables[ \t]+sleep[ \t]+pattern(?:[ \t]|$)/u)
+  expect(unwrapped).not.toMatch(/[^A-Za-z0-9_= \t-]/u)
+  return unwrapped
+}
+
+describeRealCodex('real Codex focused sleep-pattern projection e2e', () => {
+  it('answers duration and usable nights from one native sleep-pattern read without other reads or effects', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const root = await mkdtemp(path.join(tmpdir(), 'murph-sleep-pattern-projection-e2e-'))
+    const vaultRoot = path.join(root, 'vault'); const binDirectory = path.join(root, 'bin')
+    const commandLogPath = path.join(root, 'commands.log')
+    try {
+      await seedFocusedSleepPatternProjectionVault(vaultRoot)
+      const developerInstructions = await buildFocusedSleepPatternProjectionInstructions()
+      // Reuse the existing native production CLI wrapper, including its command log.
+      await materializeFocusedActivityProjectionCli({ binDirectory, commandLogPath, vaultRoot })
+      const before = await snapshotRealCodexCanonicalVault(vaultRoot)
+      const writesBefore = await listWriteOperationMetadataPaths(vaultRoot)
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never', allowFinishWithoutReply: false,
+        baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome, developerInstructions,
+        env: config.env, fixtureBinDirectory: binDirectory, groupConversation: false,
+        model: config.model, modelProvider: config.modelProvider,
+        prompt: 'Read my Oura wearable sleep pattern from 2026-01-01 through 2026-01-03 once, using the native JSON format. Report the mean session duration in minutes (not total asleep time) and usable night count in one sentence. Use provider oura and those exact date bounds. No other reads, help commands, advice, messages to anyone, or changes.',
+        reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory: root,
+      })
+      const commands = (await readFile(commandLogPath, 'utf8')).trim().split('\n').filter(Boolean)
+      expect(commands).toHaveLength(1)
+      expect(commands[0]).toMatch(/^wearables sleep pattern(?:\s|$)/u)
+      const tokens = commands[0]!.split(/\s+/u).slice(3)
+      const options = new Map<string, string>()
+      while (tokens.length) {
+        const [flag, inline] = tokens.shift()!.split('=')
+        expect(['--from', '--to', '--provider', '--format']).toContain(flag)
+        expect(options.has(flag!)).toBe(false)
+        const value = inline ?? tokens.shift()
+        expect(value).toBeDefined(); options.set(flag!, value!)
+      }
+      expect(Object.fromEntries(options)).toEqual({
+        '--from': '2026-01-01', '--to': '2026-01-03', '--provider': 'oura', '--format': 'json',
+      })
+      const actions = readCapabilityRoutingActions(result.jsonEvents)
+      expect(actions).toHaveLength(1)
+      const action = actions[0]!
+      if (action.kind !== 'command') throw new Error('Only the focused native sleep-pattern read is permitted.')
+      expect(action.ok).toBe(true)
+      readFocusedSleepPatternProjectionCommand(action.command)
+      const document = readRecord(JSON.parse(action.output))
+      expect(document?.ok === true ? document.data : document).toMatchObject({
+        summary: {
+          from: '2026-01-01', to: '2026-01-03', providers: ['oura'],
+          validNightCount: 3, expectedNightCount: 3, reportingTimeZone: 'UTC',
+          sessionDurationMinutes: { average: 450, count: 3, median: 450 },
+        },
+      })
+      expect(readDynamicToolAttempts(result.jsonEvents)).toEqual([])
+      expect(result.runtimeIssueInputs).toEqual([])
+      expect(await snapshotRealCodexCanonicalVault(vaultRoot)).toEqual(before)
+      expect(await listWriteOperationMetadataPaths(vaultRoot)).toEqual(writesBefore)
+      expect(await listAssistantOutboxIntents(vaultRoot)).toEqual([])
+      expect(await getQueryProjectionStatus(vaultRoot)).toMatchObject({
+        exists: true, fresh: false, builtAt: null, entityCount: 0, searchDocumentCount: 0,
+      })
+      const reply = result.finalMessage.trim()
+      process.stdout.write(`[focused-sleep-pattern-projection-e2e] ${JSON.stringify({ reads: commands.length, reply })}\n`)
+      const plainReply = reply.replace(/[*_`]/gu, '')
+      expect(plainReply).toMatch(/\b450\s*(?:minutes?|mins?)\b/iu)
+      expect(plainReply).toMatch(/\b(?:3|three)\s+(?:(?:usable|valid)\s+)?nights?\b|\bnights?\s*:\s*(?:3|three)\b/iu)
+      expect(plainReply).not.toMatch(/\b600\b|\b(?:updated|changed|deleted|sent|scheduled)\b|\?/iu)
+      expect(reply.length).toBeLessThanOrEqual(400)
+    } finally { await removeRealCodexTemporaryPaths([root, ...config.temporaryPaths]) }
+  }, 360_000)
+})
+
 describeRealCodex('real model canonical production journeys', () => {
   it.each(['single message', 'live follow-up', 'split question'] as const)('natural recall inspects photo-only device captures arriving outside a resumed private conversation: %s', async (messageShape) => {
     const config = await resolveRealCodexE2eConfig()
@@ -1643,6 +1895,11 @@ describeRealCodex('real model canonical production journeys', () => {
       await removeRealCodexTemporaryPaths(config.temporaryPaths)
     }
   }, 600_000)
+  it('real model canonical hosted meal uses local installed CLI under member permissions', async () => {
+    const config = await resolveRealCodexE2eConfig({ productionTransport: true })
+    try { await runCanonicalHostedMealJourney({ ...config, onProviderRequestStarted: recordCanonicalProviderRequest }) }
+    finally { await removeRealCodexTemporaryPaths(config.temporaryPaths) }
+  }, 600_000)
   it('real model canonical meal persists across assistant restart', async () => {
     const config = await resolveRealCodexE2eConfig({ productionTransport: true })
     try { await runCanonicalMealRestartJourney({ ...config, onProviderRequestStarted: recordCanonicalProviderRequest }) }
@@ -1795,7 +2052,6 @@ type RealCodexOnboardingScenario =
   keyof typeof REAL_CODEX_ONBOARDING_ALLOWED_POLICY_PATHS
 const OPENAI_ENV_MODEL_PROVIDER = HOSTED_OPENAI_CODEX_MODEL_PROVIDER_ID
 const OPENAI_SUBSCRIPTION_MODEL_PROVIDER = 'openai'
-const OPENAI_BASE_URL = 'https://api.openai.com/v1'
 const OPENAI_API_KEY_ENV = 'OPENAI_API_KEY'
 const REAL_CODEX_E2E_TSX_TSCONFIG_PATH = fileURLToPath(
   new URL('../../../tsconfig.base.json', import.meta.url),
@@ -1826,6 +2082,7 @@ const realCodexProviderApiKeyEnvByEnvironment = new WeakMap<
 >()
 
 interface RealCodexE2eConfig {
+  providerConfig?: RealCodexProviderConfig
   codexHome: string | null
   env: NodeJS.ProcessEnv
   model: string
@@ -3826,6 +4083,55 @@ describe('real Codex live fixture contracts', () => {
     expect(toml).toContain('"MURPH_CANONICAL_JOURNEY_CLI"')
     expect(toml.split('[model_providers.')[0]).not.toContain('OPENAI_API_KEY')
   })
+  it.skipIf(!process.env.MURPH_REAL_CODEX_COMMAND)('preserves resolved provider configuration through the isolated canonical adapter without personal inputs', { timeout: 60_000 }, async () => {
+    const config = await resolveRealCodexE2eConfig({ productionTransport: true, sourceEnv: {
+      PATH: process.env.PATH, MURPH_REAL_CODEX_AUTH: 'provider',
+      MURPH_REAL_CODEX_PROVIDER_ENV_KEY: 'SYNTHETIC_PROVIDER_KEY',
+      SYNTHETIC_PROVIDER_KEY: 'synthetic-only-no-provider-request',
+    } })
+    const fixture = await createCanonicalLiveFixture(config)
+    try {
+      const home = fixture.codexHome
+      const original = await readFile(path.join(home, 'config.toml'), 'utf8')
+      await writeFile(path.join(home, 'config.toml'), [
+        'developer_instructions = "SYNTHETIC_PERSONAL_DEVELOPER"', original,
+        '[permissions.murph-member-workspace.filesystem]',
+        '"/synthetic-extra-read" = "read"',
+      ].join('\n'))
+      await writeFile(path.join(home, 'AGENTS.override.md'), 'SYNTHETIC_GLOBAL_INSTRUCTIONS')
+      await writeFile(path.join(fixture.vault, 'AGENTS.md'), 'SYNTHETIC_PROJECT_INSTRUCTIONS')
+      const inspected = await inspectCanonicalCodex({
+        command: fixture.codexCommand, cwd: fixture.vault,
+        env: { ...fixture.env, CODEX_HOME: home },
+        // The provider table must arrive through the resolver and launcher.
+        // Thread/start supplies only the same model and policy selection as a journey.
+        threadParams: { model: config.model, modelProvider: config.modelProvider,
+          approvalPolicy: 'never', config: { model_reasoning_effort: 'low' } },
+      })
+      expect(inspected.config).toMatchObject({ config: {
+        model_providers: { [OPENAI_ENV_MODEL_PROVIDER]: {
+          name: 'OpenAI', base_url: OPENAI_CODEX_MODEL_PROVIDER_CONFIG.baseUrl,
+          env_key: 'SYNTHETIC_PROVIDER_KEY', wire_api: 'responses',
+          request_max_retries: 4, stream_max_retries: 5, supports_websockets: true,
+        } },
+        default_permissions: 'murph-member-workspace', allow_login_shell: false,
+        shell_environment_policy: { ignore_default_excludes: false, include_only: expect.arrayContaining(['HOME', 'PATH']) },
+      } })
+      expect(inspected.config).not.toMatchObject({ config: { shell_environment_policy: { include_only: expect.arrayContaining(['SYNTHETIC_PROVIDER_KEY']) } } })
+      expect(fixture.env.SYNTHETIC_PROVIDER_KEY).toBe('synthetic-only-no-provider-request')
+      expect(inspected.started).toMatchObject({ model: config.model, modelProvider: config.modelProvider, approvalPolicy: 'never' })
+      const readback = JSON.stringify(inspected)
+      expect(readback).not.toContain('SYNTHETIC_PERSONAL_DEVELOPER')
+      expect(readback).not.toContain('/synthetic-extra-read')
+      expect(readback).not.toContain('synthetic-only-no-provider-request')
+      expect(inspected.instructionSources.some((source) => source.endsWith('/AGENTS.override.md'))).toBe(false)
+      expect(inspected.instructionSources.some((source) => source.endsWith('/vault/AGENTS.md'))).toBe(true)
+      expect(await fixture.commandCount()).toBe(0)
+    } finally {
+      await fixture.close()
+      for (const temporaryPath of config.temporaryPaths) await removeRealCodexTemporaryPath(temporaryPath)
+    }
+  })
   it('executes canonical gate CLI commands and rejects an unknown command without a model', async () => {
     const fixture = await createCanonicalLiveFixture({ codexHome: null, env: { PATH: process.env.PATH }, model: 'gpt-6-sol', modelProvider: OPENAI_ENV_MODEL_PROVIDER })
     try {
@@ -4909,6 +5215,208 @@ describeRealCodex('real Codex missing knowledge recovery e2e', () => {
       expect(result.finalMessage).toMatch(/couldn.t find|could not find|can.t find|missing|not (?:currently )?(?:saved|available|there)|isn.t|unavailable/iu)
       expect(result.finalMessage).not.toMatch(/silver compass|striped notebook/iu)
       expect(result.finalMessage.length).toBeLessThan(700)
+    } finally {
+      await removeRealCodexTemporaryPath(workingDirectory)
+      await removeRealCodexTemporaryPaths(config.temporaryPaths)
+    }
+  }, 300_000)
+})
+
+describeRealCodex('real Codex optional knowledge show e2e', () => {
+  // Direct consumer capability: the request names the opt-in mode itself.
+  it('checks an absent wiki page once with the opt-in if-exists read and writes nothing', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-optional-show-e2e-'))
+    // Fixture scaffolding stays outside the vault so the snapshot covers all vault content.
+    const vaultRoot = path.join(workingDirectory, 'vault')
+    const binDirectory = path.join(workingDirectory, 'bin')
+    const commandLogPath = path.join(workingDirectory, 'commands.log')
+    try {
+      await initializeVault({ title: 'Synthetic optional show', timezone: 'UTC', vaultRoot })
+      await upsertKnowledgePage({
+        vault: vaultRoot, slug: 'trail-snacks', title: 'Trail snacks',
+        body: '# Trail snacks\n\nA small bag of almonds and one apple.',
+      })
+      await materializeRealWorkoutVaultCli({ binDirectory, commandLogPath, vaultRoot })
+      const vaultBefore = await snapshotRealCodexCanonicalVault(vaultRoot)
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome,
+        developerInstructions: buildAssistantSystemPrompt({
+          assistantCliContract: null, assistantContextSnapshotPrompt: null,
+          assistantHostedDeviceConnectAvailable: false, assistantHostedDeviceConnectProviders: [],
+          assistantKnowledgeToolsAvailable: false, channel: 'linq',
+          cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+          conversationScope: 'direct', currentLocalDate: '2026-09-04', currentTimeZone: 'UTC',
+          hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false,
+          turnTrigger: null,
+        }),
+        dynamicTools: [],
+        env: { ...config.env, PATH: `${binDirectory}:${config.env.PATH ?? ''}` },
+        model: config.model, modelProvider: config.modelProvider,
+        prompt: 'Do I have a saved wiki page with slug trail-gear-list? Check it once with the knowledge show if-exists option, and do not create or change anything.',
+        reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
+      })
+      const commands = (await readFile(commandLogPath, 'utf8')).split('\n').filter(Boolean)
+        .filter((command) => !isRecordedVaultHelpCommand(command))
+      const knowledgeOutputs = readCapabilityRoutingActions(result.jsonEvents)
+        .filter((action) => action.kind === 'command' && action.command.includes('knowledge'))
+        .map((action) => action.output)
+      process.stdout.write(`[optional-show-e2e] ${JSON.stringify({ finalMessage: result.finalMessage })}\n`)
+      // Exactly one optional read of the target; no strict retry, alias, or other wiki command.
+      expect(commands.filter((command) => /^knowledge show trail-gear-list(?:\s|$)/u.test(command))).toHaveLength(1)
+      expect(commands.filter((command) => /^knowledge /u.test(command))).toEqual([
+        expect.stringMatching(/^knowledge show trail-gear-list .*--if-exists/u),
+      ])
+      expect(knowledgeOutputs.filter((output) => /knowledge_page_not_found|VALIDATION_ERROR/u.test(output))).toEqual([])
+      // Absence authorizes nothing: every canonical and derived vault file is unchanged.
+      expect(await snapshotRealCodexCanonicalVault(vaultRoot)).toEqual(vaultBefore)
+      expect(await listAssistantOutboxIntents(vaultRoot)).toEqual([])
+      expect(result.finalMessage).toMatch(/no|not|isn.t|doesn.t|don.t/iu)
+      expect(result.finalMessage).not.toMatch(/almonds|apple|created|saved it|added/iu)
+      expect(result.finalMessage.length).toBeLessThan(500)
+    } finally {
+      await removeRealCodexTemporaryPath(workingDirectory)
+      await removeRealCodexTemporaryPaths(config.temporaryPaths)
+    }
+  }, 600_000)
+})
+
+describeRealCodex('real Codex optional knowledge ledger and wiki write e2e', () => {
+  it('reads an absent optional scheduled ledger once and stays quiet without writing', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const automation = MURPH_MANAGED_AUTOMATIONS.find(
+      (candidate) => candidate.automationId === MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID,
+    )
+    if (!automation) throw new Error('Expected the managed research scout automation.')
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-optional-ledger-e2e-'))
+    // Fixture scaffolding stays outside the vault so the snapshot covers all vault content.
+    const vaultRoot = path.join(workingDirectory, 'vault')
+    const binDirectory = path.join(workingDirectory, 'bin')
+    const commandLogPath = path.join(workingDirectory, 'commands.log')
+    try {
+      await initializeVault({ title: 'Synthetic optional ledger', timezone: 'UTC', vaultRoot })
+      await materializeRealWorkoutVaultCli({ binDirectory, commandLogPath, vaultRoot })
+      const vaultBefore = await snapshotRealCodexCanonicalVault(vaultRoot)
+      const result = await executeRealCodexAppServerTurn({
+        allowFinishWithoutReply: true,
+        approvalPolicy: 'never',
+        baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome,
+        developerInstructions: buildWeeklyHealthInsightDeveloperInstructions(),
+        dynamicTools: [MURPH_FINISH_WITHOUT_REPLY_TOOL],
+        // No research credential: the saved instructions require a quiet skip after the ledger read.
+        env: { ...config.env, EXA_API_KEY: undefined },
+        fixtureBinDirectory: binDirectory,
+        model: config.model,
+        modelProvider: config.modelProvider,
+        prompt: [
+          automation.instructions,
+          'Scheduled occurrence context: 2026-08-09. This is an isolated synthetic fixture.',
+        ].join('\n\n'),
+        reasoningEffort: 'high',
+        sandbox: 'workspace-write',
+        workingDirectory,
+      })
+      const commands = (await readFile(commandLogPath, 'utf8')).split('\n').filter(Boolean)
+        .filter((command) => !isRecordedVaultHelpCommand(command))
+      const actions = readCapabilityRoutingActions(result.jsonEvents)
+      const knowledgeOutputs = actions.filter((action) => action.kind === 'command' && action.command.includes('knowledge'))
+        .map((action) => action.output)
+      const finishCalls = actions.filter((action) => action.kind === 'dynamic'
+        && action.tool === MURPH_FINISH_WITHOUT_REPLY_TOOL.name)
+      process.stdout.write(`[optional-ledger-e2e] ${JSON.stringify({
+        finalMessage: result.finalMessage || '(silent)', finishCalls: finishCalls.length,
+      })}\n`)
+      const ledgerReads = commands.filter((command) => /^knowledge show weekly-health-research-scout(?:\s|$)/u.test(command))
+      expect(ledgerReads).toHaveLength(1)
+      expect(ledgerReads[0]).toContain('--if-exists')
+      expect(knowledgeOutputs.filter((output) => /knowledge_page_not_found|VALIDATION_ERROR/u.test(output))).toEqual([])
+      expect(commands.filter((command) => /^research scout-batch\b/u.test(command))).toEqual([])
+      // Absence authorizes nothing: every canonical and derived vault file is unchanged.
+      expect(await snapshotRealCodexCanonicalVault(vaultRoot)).toEqual(vaultBefore)
+      expect(await listAssistantOutboxIntents(vaultRoot)).toEqual([])
+      expect(result.responseMedia).toEqual([])
+      expect(result.finalMessage === '' && finishCalls.length === 1
+        || /"kind"\s*:\s*"skip"/u.test(result.finalMessage)).toBe(true)
+    } finally {
+      await removeRealCodexTemporaryPath(workingDirectory)
+      await removeRealCodexTemporaryPaths(config.temporaryPaths)
+    }
+  }, 600_000)
+
+  it('saves an explicitly requested wiki page with exactly one valid upsert', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-wiki-upsert-e2e-'))
+    const vaultRoot = path.join(workingDirectory, 'vault')
+    const binDirectory = path.join(workingDirectory, 'bin')
+    const commandLogPath = path.join(workingDirectory, 'commands.log')
+    try {
+      await initializeVault({ title: 'Synthetic wiki write', timezone: 'UTC', vaultRoot })
+      await materializeRealWorkoutVaultCli({ binDirectory, commandLogPath, vaultRoot })
+      const vaultBefore = await snapshotRealCodexCanonicalVault(vaultRoot)
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome,
+        developerInstructions: buildAssistantSystemPrompt({
+          assistantCliContract: null, assistantContextSnapshotPrompt: null,
+          assistantHostedDeviceConnectAvailable: false, assistantHostedDeviceConnectProviders: [],
+          assistantKnowledgeToolsAvailable: false, channel: 'linq',
+          cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+          conversationScope: 'direct', currentLocalDate: '2026-09-04', currentTimeZone: 'UTC',
+          hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false,
+          turnTrigger: null,
+        }),
+        dynamicTools: [],
+        env: { ...config.env, PATH: `${binDirectory}:${config.env.PATH ?? ''}` },
+        model: config.model, modelProvider: config.modelProvider,
+        prompt: 'Please add a page to my wiki saying my preferred commute route is the canal path because it skips the steep hill. I want to refer back to it later.',
+        reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
+      })
+      const commands = (await readFile(commandLogPath, 'utf8')).split('\n').filter(Boolean)
+        .filter((command) => !isRecordedVaultHelpCommand(command))
+      const writeActions = readCapabilityRoutingActions(result.jsonEvents)
+        .filter((action) => action.kind === 'command' && /\bknowledge\s+(?:upsert|append-section)\b/u.test(action.command)
+          && !isRecordedVaultHelpCommand(action.command))
+      const pagesRoot = path.join(vaultRoot, 'derived/knowledge/pages')
+      const pages = existsSync(pagesRoot) ? await readdir(pagesRoot) : []
+      process.stdout.write(`[wiki-upsert-e2e] ${JSON.stringify({ finalMessage: result.finalMessage, pages })}\n`)
+      // Exactly one executed write, using the real flags: no invalid attempt, alias, or retry.
+      expect(commands.filter((command) => /^knowledge (?:upsert|append-section)\b/u.test(command))).toHaveLength(1)
+      expect(writeActions).toHaveLength(1)
+      const write = writeActions[0]
+      if (!write || write.kind !== 'command') throw new Error('Expected one executed knowledge upsert.')
+      expect(write.ok).toBe(true)
+      expect(write.command).toMatch(/\bknowledge\s+upsert\b/u)
+      expect(write.command).toMatch(/\s--slug[\s=]/u)
+      expect(write.command).toMatch(/\s--body[\s=]/u)
+      expect(write.output).not.toMatch(/VALIDATION_ERROR|"code"\s*:/u)
+      expect(commands.filter((command) => /^memory (?:upsert|update|set-name)\b/u.test(command))).toEqual([])
+      expect(pages).toHaveLength(1)
+      const slug = pages[0]?.replace(/\.md$/u, '') ?? ''
+      const saved = await getKnowledgePage({ vault: vaultRoot, slug })
+      expect(saved.page.body).toMatch(/canal/iu)
+      expect(saved.page.body).toMatch(/hill/iu)
+      expect(saved.page.sourcePaths.filter((sourcePath) => /^(?:derived|\.runtime)\//u.test(sourcePath))).toEqual([])
+      // Only the intended page, its index, and its log change; canonical inputs are preserved
+      // apart from the write's own append-only audit record.
+      const vaultAfter = await snapshotRealCodexCanonicalVault(vaultRoot)
+      const changed = [...new Set([...Object.keys(vaultBefore), ...Object.keys(vaultAfter)])]
+        .filter((file) => vaultBefore[file] !== vaultAfter[file]).sort()
+      expect(changed.filter((file) => !file.startsWith('audit/'))).toEqual([
+        'derived/knowledge/index.md',
+        'derived/knowledge/log.md',
+        `derived/knowledge/pages/${slug}.md`,
+      ])
+      expect(changed.filter((file) => file.startsWith('audit/') && vaultBefore[file] !== undefined
+        && vaultAfter[file] === undefined)).toEqual([])
+      expect(await listAssistantOutboxIntents(vaultRoot)).toEqual([])
+      expect(result.finalMessage).toMatch(/sav|add|wiki|page/iu)
+      expect(result.finalMessage).not.toMatch(/couldn.t|could not|failed|error|vault-cli|--slug/iu)
+      expect(result.finalMessage.length).toBeLessThan(500)
     } finally {
       await removeRealCodexTemporaryPath(workingDirectory)
       await removeRealCodexTemporaryPaths(config.temporaryPaths)
@@ -7234,6 +7742,293 @@ describeRealCodex('real Codex video-analysis detail e2e', () => {
       }
     },
     480_000,
+  )
+})
+
+describeRealCodex('real Codex X post reading e2e', () => {
+  const coachPost = 'https://x.com/synthetic_coach/status/2100000000000000001'
+  const coachPostAlias = 'https://x.com/i/status/2100000000000000001'
+  const runnerPost = 'https://x.com/synthetic_runner/status/2100000000000000002'
+  const physioReply = 'https://x.com/synthetic_physio/status/2100000000000000003'
+  const unrelatedPost = 'https://x.com/synthetic_baker/status/2100000000000000004'
+  const lookupNarration = /\blive X\b|\bX (?:read|search|lookup)\b|\bGrok\b|from (?:the|my|a) (?:search|lookup|read)|\bdescribed as\b|\baccording to\b|\b(?:the|this) result\b|\breturned\b|\breported\b/iu
+  const screenshotAnswer =
+    `The post text says "Morning check-in." The screenshot shows a chat reply that opens with an all-caps "HEYYY" and then advises drinking water, eating something, and resting. ${coachPostAlias}`
+  it.each([
+    {
+      scenarioLabel: 'group shares the i/status spelling and Grok returns both spellings',
+      testName: 'x post reading in a group does not echo the shared post',
+      scope: 'group',
+      memberText: `Murph, what does the screenshot in this post say? ${coachPostAlias}`,
+      answerText: screenshotAnswer,
+      annotationUrls: [coachPost],
+      citations: [coachPostAlias],
+      expectedPostIds: [],
+      expectedReplyPattern: /HEYYY/u,
+      forbiddenReplyPattern: lookupNarration,
+    },
+    {
+      scenarioLabel: 'member explicitly asks whether the post was read live',
+      testName: 'x post reading discloses the live lookup when asked how it checked',
+      scope: 'direct',
+      memberText: `Did you actually read this post live, and how did you check? What does its screenshot say? ${coachPost}`,
+      answerText: screenshotAnswer,
+      annotationUrls: [coachPost],
+      citations: [coachPostAlias],
+      expectedPostIds: [],
+      expectedReplyPattern: /HEYYY[\s\S]*\b(?:live|search(?:ed)?|looked|checked|Grok)\b|\b(?:live|search(?:ed)?|looked|checked|Grok)\b[\s\S]*HEYYY/iu,
+      forbiddenReplyPattern: /\b(?:did not|didn['’]t|could(?:n['’]t| not)) (?:read|check|search|access)\b/iu,
+    },
+    {
+      scenarioLabel: 'Grok reads the post but cannot confirm a media detail',
+      testName: 'x post reading keeps partial media uncertainty visible',
+      scope: 'direct',
+      memberText: `How much weight is on the bar in this video? ${coachPost}`,
+      answerText:
+        'The post text says "Leg day." The attached video is blurry: it appears to show a barbell back squat, but the plates are not readable, so the weight on the bar cannot be confirmed.',
+      annotationUrls: [coachPost],
+      citations: [coachPostAlias],
+      expectedPostIds: [],
+      expectedReplyPattern: /(?:can(?:no|['’])t|could(?:n['’]t| not)|unable|not (?:readable|clear|possible)|unclear|blurry)[\s\S]*\b(?:weight|plates?)\b|\b(?:weight|plates?)\b[\s\S]*(?:can(?:no|['’])t|could(?:n['’]t| not)|unable|not (?:readable|clear|possible)|unclear|blurry)/iu,
+      forbiddenReplyPattern: /\b\d+\s?(?:lb|lbs|kg|pounds|kilos)\b/iu,
+    },
+    {
+      scenarioLabel: 'member shares the handle spelling and Grok returns both spellings',
+      testName: 'x post reading does not echo the shared post or narrate the lookup',
+      scope: 'direct',
+      memberText: `What does the screenshot in this post say? ${coachPost}`,
+      answerText: screenshotAnswer,
+      annotationUrls: [coachPost],
+      citations: [coachPostAlias],
+      expectedPostIds: [],
+      expectedReplyPattern: /HEYYY/u,
+      forbiddenReplyPattern: lookupNarration,
+    },
+    {
+      scenarioLabel: 'member shares two posts and Grok returns both under two spellings',
+      testName: 'x post reading does not echo either of two shared posts',
+      scope: 'direct',
+      memberText: `What do the videos in these two posts show? ${coachPost} and ${runnerPost}`,
+      answerText:
+        `The first video shows a coach demonstrating a slow goblet squat. ${coachPost} The second video shows a runner doing strides on a track. ${runnerPost}`,
+      annotationUrls: [coachPost, runnerPost],
+      citations: [coachPostAlias, 'https://x.com/i/status/2100000000000000002'],
+      expectedPostIds: [],
+      expectedReplyPattern: /squat[\s\S]*strides|strides[\s\S]*squat/iu,
+      forbiddenReplyPattern: lookupNarration,
+    },
+    {
+      scenarioLabel: 'Grok answers about the shared post and cites a different reply post',
+      testName: 'x post reading links an additional source but not the shared post',
+      scope: 'direct',
+      memberText: `What does the video in this post show, and did anyone point out a form problem? ${coachPost}`,
+      answerText:
+        `The video shows a coach demonstrating a slow goblet squat. ${coachPostAlias} A reply from a physiotherapist adds that the coach's heels lift slightly at the bottom. ${physioReply}`,
+      annotationUrls: [coachPost, physioReply],
+      citations: [coachPostAlias, unrelatedPost],
+      expectedPostIds: ['2100000000000000003'],
+      expectedReplyPattern: /squat[\s\S]*heel|heel[\s\S]*squat/iu,
+      forbiddenReplyPattern: lookupNarration,
+    },
+    {
+      scenarioLabel: 'member explicitly asks for the link to the post they shared',
+      testName: 'x post reading sends the shared post link once when asked for it',
+      scope: 'direct',
+      memberText: `Send me the link to this post, and what does its screenshot say? ${coachPostAlias}`,
+      answerText: screenshotAnswer,
+      annotationUrls: [coachPost],
+      citations: [coachPostAlias],
+      expectedPostIds: ['2100000000000000001'],
+      expectedReplyPattern: /HEYYY/u,
+      forbiddenReplyPattern: lookupNarration,
+    },
+    {
+      scenarioLabel: 'member asks for a notes entry that must point back to the shared post',
+      testName: 'x post reading includes the shared post link when the requested entry needs it',
+      scope: 'direct',
+      memberText: `Make a reading-list entry for this post that I can paste into my notes app: ${coachPost}`,
+      answerText:
+        `The video shows a coach demonstrating a slow goblet squat with a three-second lowering phase. ${coachPostAlias}`,
+      annotationUrls: [coachPost],
+      citations: [coachPostAlias],
+      expectedPostIds: ['2100000000000000001'],
+      expectedReplyPattern: /goblet squat/iu,
+      forbiddenReplyPattern: lookupNarration,
+    },
+    {
+      scenarioLabel: 'member asks Murph to find a post without sharing a URL',
+      testName: 'x post reading links a discovered post the member did not share',
+      scope: 'direct',
+      memberText: 'Find the X post where @synthetic_coach demonstrates a goblet squat. What does the video show?',
+      answerText:
+        `@synthetic_coach posted a video demonstrating a slow goblet squat with a three-second lowering phase. ${coachPost}`,
+      annotationUrls: [coachPost],
+      citations: [coachPostAlias],
+      expectedPostIds: ['2100000000000000001'],
+      expectedReplyPattern: /goblet squat/iu,
+      forbiddenReplyPattern: lookupNarration,
+    },
+    {
+      scenarioLabel: 'Grok could not find the shared post',
+      testName: 'x post reading says plainly when the post could not be read',
+      scope: 'direct',
+      memberText: `What does the screenshot in this post say? ${coachPost}`,
+      answerText:
+        'I could not find or open that post. It may have been deleted or made private, so I cannot say what its screenshot shows.',
+      annotationUrls: [],
+      citations: [],
+      expectedPostIds: [],
+      expectedReplyPattern:
+        /could(?:n['’]t| not)|unable|was(?:n['’]t| not) able|(?:deleted|private)/iu,
+      forbiddenReplyPattern: /HEYYY|squat|the screenshot (?:says|shows)/iu,
+    },
+  ] as const)(
+    '$testName',
+    async (scenario) => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-x-post-e2e-'))
+      const providerBodies: unknown[] = []
+      try {
+        const promptResult = buildAssistantAutoReplyPrompt([{
+          actorIsSelf: false,
+          attachmentDescriptors: [],
+          attachmentEvidence: {
+            attachments: [],
+            optionalInboxCaptureId: 'synthetic-capture',
+            reasonCode: null,
+            source: 'manual',
+            status: 'available',
+            updatedAt: '2026-08-26T12:00:01.000Z',
+          },
+          conversation: {
+            accountId: null,
+            actorId: 'synthetic-member',
+            actorIsSelf: false,
+            source: 'telegram',
+            threadId: 'synthetic-direct-thread',
+            threadIsDirect: scenario.scope === 'direct',
+          },
+          inputId: `ain_${'c'.repeat(32)}`,
+          occurredAt: '2026-08-26T12:00:00.000Z',
+          projection: {
+            optionalInboxCaptureId: 'synthetic-capture',
+            reasonCode: null,
+            status: 'succeeded',
+          },
+          receivedAt: '2026-08-26T12:00:01.000Z',
+          replyTarget: {
+            channel: 'telegram',
+            messageId: '101',
+            threadId: 'synthetic-direct-thread',
+          },
+          source: 'telegram',
+          sourceMetadata: {
+            externalThreadRouteAuthorityPresent: true,
+            kind: 'telegram',
+            mediaGroupId: null,
+            replyContext: null,
+            senderDisplayName: 'Member',
+            senderHandle: 'synthetic-member',
+          },
+          telegramMetadata: null,
+          text: scenario.memberText,
+        }])
+        if (promptResult.kind !== 'ready') {
+          throw new Error('Expected a ready X post prompt.')
+        }
+        const developerInstructions = scenario.scope === 'group'
+          ? buildGroupPointOfViewDeveloperInstructions({ hostedRuntime: true })
+          : buildAssistantSystemPrompt({
+            assistantCliContract: 'No vault command is needed for this X post request.',
+            assistantContextSnapshotPrompt: null,
+            assistantHostedDeviceConnectAvailable: false,
+            assistantHostedDeviceConnectProviders: [],
+            assistantKnowledgeToolsAvailable: false,
+            channel: 'telegram',
+            cliAccess: {
+              rawCommand: 'vault-cli',
+              setupCommand: 'murph',
+            },
+            conversationScope: 'direct',
+            currentLocalDate: '2026-08-26',
+            currentTimeZone: 'UTC',
+            hostedRuntime: true,
+            modelBehaviorProfile: 'gpt5-agentic',
+            onboardingGuidance: false,
+            turnTrigger: null,
+          })
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          askGrokRuntime: {
+            apiKey: 'synthetic-xai-key',
+            fetchImpl: async (_request, init) => {
+              providerBodies.push(JSON.parse(String(init?.body)))
+              return Response.json({
+                citations: scenario.citations,
+                output: [{
+                  type: 'message',
+                  role: 'assistant',
+                  content: [{
+                    type: 'output_text',
+                    text: scenario.answerText,
+                    annotations: scenario.annotationUrls.map((url) => ({
+                      type: 'url_citation',
+                      url,
+                    })),
+                  }],
+                }],
+                status: 'completed',
+              })
+            },
+            model: 'grok-4.5',
+          },
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions,
+          dynamicTools: [MURPH_ASK_GROK_TOOL],
+          env: config.env,
+          groupConversation: scenario.scope === 'group',
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt: promptResult.prompt,
+          reasoningEffort: 'low',
+          sandbox: 'workspace-write',
+          vaultRoot: workingDirectory,
+          workingDirectory,
+        })
+        const reply = result.finalMessage
+        const grokCalls = readCapabilityRoutingActions(result.jsonEvents)
+          .filter((action) =>
+            action.kind === 'dynamic' && action.tool === MURPH_ASK_GROK_TOOL.name
+          )
+        const replyPostIds = [...reply.matchAll(/status\/(\d+)/gu)]
+          .map((match) => match[1])
+        process.stdout.write(
+          `[x-post-reading-e2e] ${JSON.stringify({
+            providerCallCount: providerBodies.length,
+            reply,
+            scenario: scenario.scenarioLabel,
+            scope: scenario.scope,
+            toolCallCount: grokCalls.length,
+          })}\n`,
+        )
+        expect(grokCalls).toHaveLength(1)
+        expect(providerBodies).toHaveLength(1)
+        expect(grokCalls[0]).toMatchObject({ kind: 'dynamic', success: true })
+        expect(reply).toMatch(scenario.expectedReplyPattern)
+        expect(reply).not.toMatch(scenario.forbiddenReplyPattern)
+        expect([...replyPostIds].sort()).toEqual([...scenario.expectedPostIds])
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    360_000,
   )
 })
 
@@ -37328,6 +38123,20 @@ async function materializeNutritionCardVaultCli(input: {
   await chmod(input.executablePath, 0o700)
 }
 
+// Fake CLIs mirror the shipped contract: only `--if-exists` turns a missing page
+// into a successful absent result; a strict read still fails.
+function fakeMissingKnowledgePageShow(slug: string): string[] {
+  const absent = knowledgeAbsentPageResultSchema.parse({
+    degradation: null, page: null, slug, vault: 'synthetic-vault',
+  })
+  return [
+    '    case "$*" in',
+    `      *"--if-exists"*) printf '%s\\n' ${quoteNutritionShellLiteral(JSON.stringify(absent))} ;;`,
+    "      *) printf '%s\\n' 'knowledge page not found' >&2; exit 1 ;;",
+    '    esac',
+  ]
+}
+
 function quoteNutritionShellLiteral(value: string): string {
   return `'${value.replaceAll("'", `'"'"'`)}'`
 }
@@ -39807,12 +40616,12 @@ async function materializePersonalPatternsBaselineVaultCli(input: {
       '  *"knowledge show personal-pattern-notifications"*)',
       ...(input.initialDigestSent
         ? ["    printf '%s\\n' '{\"initialDigestSent\":true,\"results\":[]}'"]
-        : ["    printf '%s\\n' 'knowledge page not found' >&2", '    exit 1']),
+        : fakeMissingKnowledgePageShow('personal-pattern-notifications')),
       '    ;;',
       '  *"knowledge show weekly-health-insights"*)',
       ...(input.weeklyHistory
         ? [`    printf '%s\\n' ${quoteNutritionShellLiteral(input.weeklyHistory)}`]
-        : ["    printf '%s\\n' 'knowledge page not found' >&2", '    exit 1']),
+        : fakeMissingKnowledgePageShow('weekly-health-insights')),
       '    ;;',
       '  *"knowledge show journal-pattern-vocabulary"*)',
       "    printf '%s\\n' '{\"version\":1,\"concepts\":[{\"id\":\"yard-work\",\"label\":\"Yard work\",\"icon\":\"activity\",\"aliases\":[\"yard-work\"]}]}'",
@@ -40155,8 +40964,7 @@ async function materializeWeeklyHealthInsightVaultCli(input: {
       ...patternCommand,
       '    ;;',
       '  *"knowledge show weekly-health-insights"*)',
-      '    printf \'%s\\n\' \'knowledge page not found\' >&2',
-      '    exit 1',
+      ...fakeMissingKnowledgePageShow('weekly-health-insights'),
       '    ;;',
       '  *"knowledge append-section weekly-health-insights"*)',
       '    printf \'%s\\n\' \'{"ok":true,"status":"appended"}\'',
@@ -43077,6 +43885,7 @@ async function resolveRealCodexE2eConfig(
     model,
     modelProvider,
     providerApiKeyEnv: apiKeyEnv,
+    providerConfig: { apiKeyEnv, modelProvider, productionTransport: input.productionTransport },
     temporaryPaths,
   }
 }
@@ -43111,9 +43920,6 @@ function buildRealCodexConfigToml(input: {
   productionTransport?: boolean
   sandboxMode?: 'workspace-write' | null
 }): string {
-  const baseUrl = OPENAI_BASE_URL
-  const providerName = 'OpenAI'
-
   return [
     `model = ${tomlString(input.model)}`,
     `model_provider = ${tomlString(input.modelProvider)}`,
@@ -43135,14 +43941,7 @@ function buildRealCodexConfigToml(input: {
     ...(input.productionTransport ? ['HOME', 'VAULT', 'MURPH_CANONICAL_JOURNEY_CLI', 'MURPH_CANONICAL_JOURNEY_COMMANDS'].map((key) => `  ${tomlString(key)},`) : []),
     ']',
     '',
-    `[model_providers.${tomlKey(input.modelProvider)}]`,
-    `name = ${tomlString(providerName)}`,
-    `base_url = ${tomlString(baseUrl)}`,
-    `env_key = ${tomlString(input.apiKeyEnv)}`,
-    'wire_api = "responses"',
-    'request_max_retries = 4',
-    'stream_max_retries = 5',
-    `supports_websockets = ${input.productionTransport === true && input.modelProvider === OPENAI_ENV_MODEL_PROVIDER && OPENAI_CODEX_MODEL_PROVIDER_CONFIG.supportsWebSockets}`,
+    ...realCodexProviderTomlLines(input),
     '',
   ].join('\n')
 }

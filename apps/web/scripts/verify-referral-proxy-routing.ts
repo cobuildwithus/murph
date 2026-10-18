@@ -15,7 +15,7 @@ const webRequire = createRequire(path.join(webRoot, "package.json"));
 const nextBin = webRequire.resolve("next/dist/bin/next");
 const nextVersion = (webRequire("next/package.json") as { version: string }).version;
 const NOT_FOUND_MARKER = "fixture-app-not-found";
-const encodedQuery = "?code=synthetic%2Fvalue%5Ctail&next=%2Frefer%2F";
+const encodedQuery = "?code=synthetic%2Fvalue%5Ctail&next=%2Frefer%2F&root=%2F%5C&literal=%255C";
 
 async function prepareFixture(root: string): Promise<void> {
   // Keep Next's static matcher extraction and the real homepage dependency closure.
@@ -145,7 +145,11 @@ async function readOrigin(server: NextProcess): Promise<string> {
 type RequestFixture = (pathname: string, init?: RequestInit) => Promise<Response>;
 
 async function verifyReferralResponses(request: RequestFixture): Promise<void> {
+  // Require the proxy's fixed body, not the app's ordinary missing-route 404.
   for (const pathname of [
+    "/%5C", "/%5c", "/%5Cchild", "/%5c/child", "/%5C%2Fchild",
+    `/%5C${encodedQuery}`, `/%5c${encodedQuery}`,
+    "/%5C.rsc", "/%5c.rsc",
     "/refer%2F", "/refer%2f", "/refer%5C", "/refer%5c",
     "/refer%2Fchild", "/refer%5c%2Fchild", `/refer%2F${encodedQuery}`,
   ]) {
@@ -154,9 +158,18 @@ async function verifyReferralResponses(request: RequestFixture): Promise<void> {
     assert.equal(await response.text(), "Not Found", pathname);
     assert.equal(response.headers.get("location"), null, pathname);
   }
-  const head = await request("/refer%5C", { method: "HEAD" });
-  assert.equal(head.status, 404);
-  assert.equal(await head.text(), "");
+  for (const pathname of ["/refer%5C", "/%5C", "/%5c"]) {
+    const head = await request(pathname, { method: "HEAD" });
+    assert.equal(head.status, 404, pathname);
+    assert.equal(await head.text(), "", pathname);
+    assert.equal(head.headers.get("location"), null, pathname);
+  }
+  for (const pathname of ["/%5C?_rsc=synthetic", "/%5c?_rsc=synthetic"]) {
+    const response = await request(pathname, { headers: { RSC: "1", Accept: "text/x-component" } });
+    assert.equal(response.status, 404, pathname);
+    assert.equal(await response.text(), "Not Found", pathname);
+    assert.equal(response.headers.get("location"), null, pathname);
+  }
   for (const pathname of ["/refer", `/refer${encodedQuery}`]) {
     const response = await request(pathname, { headers: { Accept: "text/markdown" } });
     assert.equal(response.status, 200, pathname);
@@ -167,7 +180,10 @@ async function verifyReferralResponses(request: RequestFixture): Promise<void> {
   const destination = new URL(trailingSlash.headers.get("location") ?? "", trailingSlash.url);
   assert.equal(destination.pathname + destination.search, `/refer${encodedQuery}`);
   await trailingSlash.text();
-  for (const pathname of ["/refer-missing", "/refer%252F", "/refer%255C", "/about%2F", "/unknown"]) {
+  for (const pathname of [
+    "/%255C", "/%255c", "/%255Cchild",
+    "/refer-missing", "/refer%252F", "/refer%255C", "/about%2F", "/unknown",
+  ]) {
     const response = await request(pathname);
     assert.equal(response.status, 404, pathname);
     assert.ok((await response.text()).includes(NOT_FOUND_MARKER), pathname);
@@ -180,6 +196,12 @@ async function verifyHomepageAndPublicRoutes(request: RequestFixture): Promise<v
     assert.equal(response.status, 200);
     assert.equal(response.headers.get("content-type"), "text/markdown; charset=utf-8");
     assert.equal(await response.text(), method === "HEAD" ? "" : MURPH_AGENT_GUIDE_MARKDOWN);
+
+    const html = await request(`/${encodedQuery}`, { method, headers: { Accept: "text/html" } });
+    assert.equal(html.status, 200);
+    assert.match(html.headers.get("content-type") ?? "", /^text\/html(?:;|$)/u);
+    if (method === "HEAD") assert.equal(await html.text(), "");
+    else assert.match(await html.text(), /fixture-home/u);
   }
   for (const [pathname, marker] of [["/", "fixture-home"], ["/about", "fixture-about"]]) {
     assert.ok(pathname && marker);
@@ -192,7 +214,11 @@ async function verifyHomepageAndPublicRoutes(request: RequestFixture): Promise<v
 async function verifyUnchangedRequestPaths(request: RequestFixture): Promise<void> {
   for (const pathname of [
     `/api/synthetic-signed/token%2Fvalue%5Ctail${encodedQuery}`,
+    `/api/synthetic-signed/%5Ctoken${encodedQuery}`,
+    `/api/synthetic-signed/%5ctoken${encodedQuery}`,
     `/.well-known/workflow/v1/webhook/token%2Fvalue${encodedQuery}`,
+    `/.well-known/workflow/v1/webhook/%5Ctoken${encodedQuery}`,
+    `/.well-known/workflow/v1/webhook/%5ctoken${encodedQuery}`,
   ]) {
     const response = await request(pathname, {
       method: "POST", body: "synthetic-body", headers: { "x-synthetic-signature": "synthetic-signature" },

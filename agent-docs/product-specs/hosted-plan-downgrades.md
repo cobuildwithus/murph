@@ -27,6 +27,7 @@ The app supports immediate upgrades and explicit renewal-bound changes:
 - `/settings` computes and renders only transitions admitted by the shared
   server policy.
 - `Manage subscription` opens Stripe Customer Portal for payment methods, invoices, and other Stripe-managed account work.
+- When scheduled cancellation blocks a period-end plan change, Settings offers `Manage billing` directly in the error dialog. The member can renew through the existing Stripe portal and then retry the plan change; Murph never clears cancellation automatically after a payment or plan-change attempt.
 
 The transition graph is explicit. Arbitrary plan-code routing, reversal, and
 merging with foreign schedules stay out of scope.

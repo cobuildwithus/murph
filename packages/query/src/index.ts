@@ -1,3 +1,4 @@
+import { timeCliPhase } from "@murphai/runtime-state/node/cli-timing";
 import type { CanonicalEntity } from "./canonical-entities.ts";
 import type {
   QueryCanonicalEntityFilters,
@@ -445,6 +446,7 @@ export {
 } from "./knowledge-model.ts";
 export {
   KNOWLEDGE_READ_RECOVERY_ACTION,
+  knowledgeAbsentPageResultSchema,
   knowledgeGetResultSchema,
   knowledgeGraphSearchHitSchema,
   knowledgeGraphSearchResultSchema,
@@ -461,9 +463,11 @@ export {
   knowledgeReadIssueCodeSchema,
   knowledgeSearchHitSchema,
   knowledgeSearchResultSchema,
+  knowledgeShowResultSchema,
   knowledgeUpsertResultSchema,
 } from "./knowledge-contracts.ts";
 export type {
+  KnowledgeAbsentPageResult,
   KnowledgeGetResult,
   KnowledgeGraphSearchHit,
   KnowledgeGraphSearchResult,
@@ -653,7 +657,7 @@ export async function buildPersonalPatternReportRuntime(
   vaultRoot: string,
   options: { asOf?: Date | string; windowDays?: number } = {},
 ): Promise<import("./personal-patterns.ts").PersonalPatternReport> {
-  const mod = await import("./query-projection.ts");
+  const mod = await timeCliPhase("query-projection-load", () => import("./query-projection.ts"));
   return mod.buildPersonalPatternReportRuntime(vaultRoot, options);
 }
 

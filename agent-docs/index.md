@@ -1,3 +1,19 @@
+Canary reply observation diagnostics: [completed plan](exec-plans/completed/2026-10-18-canary-reply-observation-diagnostics.md).
+
+Hosted live-journey configuration is owned by `../packages/assistant-engine/README.md`;
+shared behavior and permission proof are tracked in
+[the hosted journey repair plan](exec-plans/completed/2026-10-16-frog-hosted-live-config-4144.md).
+Authentication preservation follow-on: [implementation proof](exec-plans/completed/2026-10-16-frog-hosted-auth-store-4144.md).
+Captured vault-share offer failure diagnostics are tracked in
+[the completed diagnostic plan](exec-plans/completed/2026-10-18-vault-share-failure-diagnostics.md).
+
+Sleep-pattern focused freshness implementation and parent-verified results are recorded in
+[the completed sleep-pattern plan](exec-plans/completed/2026-10-09-sleep-pattern-focused-freshness.md).
+
+Dated sleep-list row selection and its synthetic evidence are recorded in
+[the completed sleep-list plan](exec-plans/completed/2026-10-18-sleep-list-dated-rows.md);
+`../packages/query/README.md#ordinary-wearable-reads` owns the contract.
+
 Entrypoint test worker build prerequisites are owned by
 `../packages/assistant-runtime/README.md#focused-tests`; repair evidence is tracked
 in [the worker preflight plan](exec-plans/completed/2026-10-09-frog-entrypoint-build-preflight.md).
@@ -43,10 +59,35 @@ in [the import-speed plan](exec-plans/completed/2026-09-24-garmin-import-speed.m
 
 # Murph Agent Docs Index
 
+Published plan-closer adoption and installed-wrapper proof are tracked in
+[the repo-tools adoption plan](exec-plans/completed/2026-10-18-frog-plan-closer-adoption-4178.md).
+Dependency review source inclusion is tracked in
+[the source-context plan](exec-plans/completed/2026-10-18-frog-repo-tools-review-source-4178.md).
+
+Private vault-file preparation failure evidence is owned by
+[`the runtime telemetry contract`](../docs/hosted-runtime-log-database.md#private-vault-file-preparation-failure-evidence);
+implementation, complexity repair and validation/release handoff are tracked in
+[the vault-file failure telemetry plan](exec-plans/completed/2026-10-18-vault-file-failure-telemetry.md).
+
+Failed native startup wait diagnostics are owned by
+[`hosted-runtime-protocol.md`](references/hosted-runtime-protocol.md); implementation
+and synthetic proof are tracked in
+[the startup wait plan](exec-plans/completed/2026-10-16-startup-wait-diagnostics.md).
+
+Retained Junction validation jobs keep a bounded transport retry budget in the existing job store;
+[`RELIABILITY.md`](RELIABILITY.md) owns the retry and cold-handoff contract.
+Implementation and review proof are recorded in the
+[retry-budget plan](exec-plans/completed/2026-10-16-junction-validation-retry-budget.md).
+
 Typing egress and mailbox runtime timing correlation is owned by
 [`Cloudflare private telemetry`](../apps/cloudflare/README.md#private-operational-telemetry);
 implementation evidence is tracked in
 [the timing diagnostics plan](exec-plans/completed/2026-10-11-typing-phase-diagnostics.md).
+
+Internal fetch failure correlation is owned by
+[`Cloudflare private telemetry`](../apps/cloudflare/README.md#private-operational-telemetry);
+implementation and focused proof are tracked in
+[the failure correlation plan](exec-plans/completed/2026-10-16-internal-fetch-failure-correlation.md).
 
 Private latest-meal recall uses the descending canonical timeline; the ordering
 contract and synthetic capture-identity proof are tracked in
@@ -157,7 +198,7 @@ Structured provider failure diagnostic preservation is tracked in
 [the telemetry plan](exec-plans/completed/2026-10-09-structured-provider-failure-telemetry.md);
 its runtime contract remains in `packages/assistant-engine/README.md`.
 
-Bounded device-webhook enqueue recovery is owned by `RELIABILITY.md`;
+Bounded device-webhook enqueue recovery and ECG missing-instance diagnostics are owned by `RELIABILITY.md`;
 private SMS provider failure diagnostics are owned by
 `../docs/hosted-auth-migration.md` under "SMS verification owner".
 
@@ -319,6 +360,12 @@ recorded in
 Deployment remains blocked and not observation-ready; the live phase and
 reader-before-producer contract is owned by `docs/hosted-runtime-log-database.md`.
 
+Completed Patterns lazy load phase telemetry implementation, final review and
+candidate CI are recorded in
+[`2026-10-16-patterns-load-phase-telemetry.md`](exec-plans/completed/2026-10-16-patterns-load-phase-telemetry.md).
+Deployment remains blocked and not observation-ready; the live phase and
+reader-before-producer contract is owned by `docs/hosted-runtime-log-database.md`.
+
 Hosted-local pre-allocation barrier control recovery is tracked in
 [`2026-09-17-runtime-test-target-routing.md`](exec-plans/active/2026-09-17-runtime-test-target-routing.md).
 
@@ -386,6 +433,10 @@ its conditional delivery, reconciliation, and repair rules live in
 `packages/assistant-engine/skills/behavior-followthrough/references/support-runtime.md`.
 Goal-setup latency investigation and focused verification are recorded in
 [`2026-09-24-goal-turn-latency.md`](exec-plans/completed/2026-09-24-goal-turn-latency.md).
+
+Group shared-read timing telemetry (#3997) is recorded in
+[`2026-10-13-group-shared-read-timing.md`](exec-plans/completed/2026-10-13-group-shared-read-timing.md);
+its log contract is owned by `docs/hosted-runtime-log-database.md`.
 
 Runtime authority lock/read consolidation is recorded in
 [`2026-09-20-runtime-latency-delete-work.md`](exec-plans/active/2026-09-20-runtime-latency-delete-work.md).
@@ -635,7 +686,7 @@ Package verifier worker-exit result preservation is tracked in
 | `agent-docs/strategy.md` | Current product strategy. | Current product strategy | High | 2026-07-15 |
 | `agent-docs/PRODUCT_SENSE.md` | Product posture, scope, member workspace troubleshooting, and complete unfiltered private workspace archives. | Current product behavior | High | 2026-09-17 |
 | `agent-docs/PRODUCT_CONSTITUTION.md` | Internal product constitution and tradeoff rules. | Product principles | High | 2026-07-15 |
-| `agent-docs/FRONTEND.md` | Frontend implementation guidance for `apps/web`. | Current frontend implementation guidance | Medium | 2026-08-31 |
+| `agent-docs/FRONTEND.md` | Frontend implementation guidance for `apps/web`, including inert auth studies and isolated browser proof. | Current frontend implementation guidance | Medium | 2026-10-16 |
 | `agent-docs/exec-plans/completed/2026-09-28-viewport-animation-csp.md` | Viewport animation setup and CSP regression proof. | Historical browser proof implementation | Low | 2026-09-28 |
 | `agent-docs/product-marketing-context.md` | Product/marketing decisions. | Product/marketing decisions | High | 2026-07-15 |
 | `agent-docs/user-interviews.md` | User research method. | User research method | Medium | 2026-07-12 |
@@ -659,13 +710,14 @@ Package verifier worker-exit result preservation is tracked in
 | `agent-docs/product-specs/personal-patterns.md` | Private context-to-outcome findings, desktop comparisons, and mobile cards with changed results, compact neutral states, tappable recorded-day counts, and inline comparison sample sizes. | Personal Patterns product spec | High | 2026-09-10 |
 | `agent-docs/product-specs/repo.md` | Canonical repository posture and success criteria. | Current repo product spec | High | 2026-04-06 |
 | `agent-docs/product-specs/starter-usage.md` | Non-expiring $4.50 starter usage on the immutable credit ledger, text entry, subscription access for Images and Responses HTTP/WebSocket generation, and abuse alerts; retained paid legacy compatibility. | Hosted access/billing product spec | High | 2026-09-11 |
-| `agent-docs/product-specs/hosted-plan-downgrades.md` | Edge-to-Pulse renewal switches plus the web-owned hosted assistant configuration and personalization resolvers. | Hosted billing/current-state spec | High | 2026-07-30 |
+| `agent-docs/product-specs/hosted-plan-downgrades.md` | Period-end plan switches, self-service scheduled-cancellation recovery, and web-owned assistant configuration and personalization resolvers. | Hosted billing/current-state spec | High | 2026-10-16 |
 | `agent-docs/product-specs/hosted-plan-usage.md` | Hosted billing/current-state spec. | Hosted billing/current-state spec | High | 2026-08-18 |
 | `agent-docs/product-specs/hosted-group-member-plan.md` | Private $3.50 Core subscription for confirmed hosted-group members. | Hosted billing/product spec | High | 2026-08-25 |
 | `agent-docs/product-specs/labs-discovery.md` | Private conversational Labs discovery and retired browser entrypoints. | Hosted Labs product spec | High | 2026-07-16 |
 | `agent-docs/product-specs/hosted-usage-topups.md` | Hosted billing/product spec, including 80% top-up usage grants, preserved historical purchase terms, and migration-first sponsorship compatibility. | Hosted billing/product spec | High | 2026-09-22 |
 | `agent-docs/product-specs/hosted-usage-referrals.md` | Hosted growth/product spec. | Hosted growth/product spec | High | 2026-08-10 |
 | `agent-docs/product-specs/physical-notes.md` | Hosted physical-note product spec. | Hosted physical-note product spec | High | 2026-08-21 |
+| `agent-docs/product-specs/weekly-game.md` | Private 1v1 weekly habit game shipped dark: live games per opponent, days and picked start dates, shared weekdays, photo post-to-unlock, retakes, transcript-only excuses, offline grace, settle on read, tickets with use-by dates, addressed rematches and rounds, retries, and deferred scope. | Weekly game product spec | High | 2026-10-16 |
 | `agent-docs/product-specs/hosted-support-escalation.md` | Hosted support product spec. | Hosted support product spec | High | 2026-08-05 |
 | `agent-docs/product-specs/hosted-family-plan.md` | Hosted billing/product spec. | Hosted billing/product spec | High | 2026-08-10 |
 | `agent-docs/product-specs/health-commons.md` | Health Commons behavior. | Health Commons behavior | High | 2026-07-29 |
@@ -747,7 +799,7 @@ Package verifier worker-exit result preservation is tracked in
 | `agent-docs/operations/local-storage-lifecycle.md` | Local rebuildable-storage lifecycle, guarded retirement, and dependency hook setup. | Local rebuildable-storage lifecycle | High | 2026-09-11 |
 | `agent-docs/operations/hosted-local-worktree-dev.md` | Local hosted runtime workflow, required canonical HTTPS proxy dependencies and occupied-listener admission, call-scoped cancellation, and exact-child startup/exit cleanup ownership. | Local hosted runtime workflow | Medium | 2026-09-28 |
 | `agent-docs/exec-plans/completed/2026-09-25-frog-reviewgpt-recovery.md` | Exact accepted ReviewGPT request recovery, guarded dependency context, and accepted final-finding remediation evidence. | Completed execution plan | Low | 2026-09-28 |
-| `agent-docs/operations/pr-reviewgpt-loop.md` | PR review for realistic serious bugs and material Complexity Collapse, with a three-round review cap, exact tracked archive inputs, no base-update limit, response timing and evidence requirements, same-session waiting or paced polling by default, exact-metadata and transient-URL recovery, guarded companion snapshots, and invalid-first-attempt baseline recovery. Includes pinned patched native Codex source context. | Final PR ReviewGPT loop | Medium | 2026-09-25 |
+| `agent-docs/operations/pr-reviewgpt-loop.md` | PR review for realistic serious bugs and material Complexity Collapse, with a three-round review cap, exact tracked archive inputs, no base-update limit, response timing and evidence requirements, same-session waiting or paced polling by default, exact-metadata and transient-URL recovery, guarded companion snapshots, and invalid-first-attempt baseline recovery. Includes pinned patched native Codex source, configuration, instruction, authentication, and repository-policy context. | Final PR ReviewGPT loop | Medium | 2026-09-25 |
 | `agent-docs/operations/device-sync-ingestion-invariants.md` | Device-sync push/pull ingestion, daily recovery, checkpoint-owned continuation preflight, bounded deferral of future history, pending-start history scans, bounded completion-marker retention, and operation-local source admission reuse. | Device-sync ingestion contract | High | 2026-09-20 |
 | `agent-docs/PLANS.md` | Execution-plan lifecycle and storage rules. | Plan workflow | Medium | 2026-03-31 |
 | `agent-docs/exec-plans/completed/2026-10-02-connected-apps-response-schema-telemetry.md` | Private response-schema rejection attribution; implementation evidence recorded, closing-commit CI still required. | Completed telemetry execution plan | Medium | 2026-10-02 |
@@ -786,6 +838,7 @@ Package verifier worker-exit result preservation is tracked in
 | `agent-docs/exec-plans/completed/2026-09-28-checkpoint-failure-stage-telemetry.md` | Fixed-vocabulary checkpoint rejection-stage observation and response-preservation proof. | Completed telemetry implementation evidence | Low | 2026-09-28 |
 | `agent-docs/exec-plans/completed/2026-09-28-codex-0158-live-port.md` | Codex 0.158.0 public Live patch port, removal review, and native compatibility verification; deployment gates remain. | Historical implementation evidence | Medium | 2026-09-28 |
 | `agent-docs/exec-plans/completed/2026-10-10-snapshot-failure-timeout-diagnostics.md` | Preserve existing snapshot failure diagnostics for supported long deadlines. | Assistant runtime telemetry | Medium | 2026-10-10 |
+| `agent-docs/exec-plans/completed/2026-10-10-sms-mobile-number-guidance.md` | Unsupported SMS destination guidance correction and focused proof. | Task plan | Medium | 2026-10-10 |
 | `agent-docs/exec-plans/active/` | Task-owned in-flight execution plans. | Active plan lifecycle | Medium | 2026-08-20 |
 | `agent-docs/exec-plans/completed/2026-10-02-checkpoint-progress-generation.md` | Canonical checkpoint-generation ownership correction and composed regression proof. | Checkpoint generation execution plan | Medium | 2026-10-02 |
 | `agent-docs/exec-plans/completed/2026-10-02-otp-parameter-diagnostic.md` | Bounded Verify parameter-hint telemetry and unchanged authentication proof. | OTP diagnostic execution plan | Medium | 2026-10-02 |
@@ -1201,3 +1254,10 @@ Meal telemetry authoring and validation handoff are recorded in
 [the meal failure attribution plan](exec-plans/completed/2026-10-10-meal-failure-attribution.md).
 
 Control response MIME diagnostics: [`2026-10-13-control-response-mime-diagnostic.md`](exec-plans/completed/2026-10-13-control-response-mime-diagnostic.md).
+
+Provider-input baseline snapshot repair and regression proof are tracked in
+[the measurement plan](exec-plans/active/2026-10-16-frog-input-measurement-4136.md).
+
+Consumer-first optional knowledge reads and CLI wiki write guidance
+implementation and compatibility evidence are recorded in
+[the knowledge optional-read plan](exec-plans/completed/2026-10-16-knowledge-optional-read-and-write-guidance.md).

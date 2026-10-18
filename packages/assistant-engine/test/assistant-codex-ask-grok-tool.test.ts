@@ -101,9 +101,24 @@ describe('murph.ask_grok availability and framing', () => {
       .toContain('untrusted third-party content')
     expect(MURPH_ASK_GROK_TOOL.description).toContain('not independently verified')
     expect(MURPH_ASK_GROK_TOOL.description)
-      .toContain('attribute what it reports to a live X search')
+      .toContain('not as established fact')
     expect(MURPH_ASK_GROK_TOOL.description)
-      .toContain('those URLs are part of the requested deliverable')
+      .toContain('say directly what the posts say or show, without narrating the lookup or its result')
+    expect(MURPH_ASK_GROK_TOOL.description)
+      .toContain('state a gap only when it matters to the answer')
+    expect(MURPH_ASK_GROK_TOOL.description)
+      .toContain('mention the search when its result was partial, uncertain, or found nothing, or when the user asks how you checked')
+    expect(MURPH_ASK_GROK_TOOL.description)
+      .toContain('each other X post the tool supplied that your answer relies on or that the user asked you to find')
+    expect(MURPH_ASK_GROK_TOOL.description)
+      .toContain('leave out supplied URLs your answer does not use')
+    expect(MURPH_ASK_GROK_TOOL.description)
+      .toContain('Do not send back a post the user already shared unless they ask for its link or the output they requested must contain it')
+    expect(MURPH_ASK_GROK_TOOL.description)
+      .toContain('URLs with the same status number are the same post')
+    expect(MURPH_ASK_GROK_TOOL.description).not.toContain('attribute what it reports')
+    expect(MURPH_ASK_GROK_TOOL.description).not.toContain('include every X post URL')
+    expect(MURPH_ASK_GROK_TOOL.description).not.toContain('part of the requested deliverable')
     expect(MURPH_ASK_GROK_TOOL.description)
       .toContain('keep post text separate from media observations')
     expect(MURPH_ASK_GROK_TOOL.description).toContain('never claim a search happened')
@@ -197,6 +212,39 @@ describe('executeAskGrokTool', () => {
     expect(result.rpcText).toContain('https://x.com/i/status/2000000000000000002')
     expect(result.rpcText).not.toContain('https://example.com/not-an-x-post')
     expect(result.rpcText.match(/2000000000000000001/gu)).toHaveLength(1)
+  })
+
+  it('lists one URL per X post id while keeping distinct posts', async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
+      citations: [
+        'https://x.com/i/status/2000000000000000004',
+        'https://twitter.com/example/status/2000000000000000004?s=20',
+        'https://x.com/i/status/2000000000000000005',
+      ],
+      output: [{
+        type: 'message',
+        role: 'assistant',
+        content: [{
+          type: 'output_text',
+          text: 'The post opens with a loud greeting, then gives practical advice.',
+          annotations: [
+            { type: 'url_citation', url: 'https://x.com/example/status/2000000000000000004' },
+          ],
+        }],
+      }],
+      status: 'completed',
+    })))
+
+    const result = await executeAskGrokTool({
+      args: { question: 'what does the screenshot in this post say?' },
+      runtime: createRuntime({ XAI_API_KEY: 'xai-sentinel-key' }, fetchImpl),
+    })
+
+    expect(result.rpcSuccess).toBe(true)
+    expect(result.rpcText.split('X posts Grok inspected:\n')[1]).toBe([
+      'https://x.com/example/status/2000000000000000004',
+      'https://x.com/i/status/2000000000000000005',
+    ].join('\n'))
   })
 
   it('does not promote a requested X post URL into provider evidence', async () => {

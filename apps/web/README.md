@@ -104,6 +104,12 @@ These hints do not prove whether a browser action took effect and never change
 retry or unknown-outcome handling. The event omits provider prose, scripts,
 URLs, and page contents; its existing private subject binding is unchanged.
 
+Twilio Verify send failures with HTTP 400 and numeric code 21614 return the
+existing invalid-request response with guidance to use an SMS-capable mobile
+number. This classification does not apply to verification checks, string codes,
+or other HTTP statuses. Code 60200 retains its exact allowlisted `To` parameter
+requirement.
+
 Twilio failures use the existing private route-error cause. Alongside operation,
 HTTP status, numeric provider code, and exact allowlisted parameter labels, it
 records whether the bounded response was parsed, missing, oversized, invalid
@@ -451,11 +457,15 @@ active-member placeholder. This rule is app-card-specific; legacy media-only
 first contacts retain their existing behavior.
 
 The Web proxy rejects referral paths whose `/refer` prefix is immediately
-followed by a single-encoded slash or backslash before generated page loading.
-Its narrow matcher and fixed 404 preserve valid referral paths, encoded query
-values, normal missing-route handling, homepage negotiation, and workflow token
-validation. The isolated production routing proof uses no production credentials
-or full Web build:
+followed by a single-encoded slash or backslash, plus paths beginning with
+`/%5C` (case-insensitive percent encoding), before generated page loading.
+The root check does not decode paths or queries and excludes the `/%2F` and
+`/%255C` families. The narrow matchers and fixed 404 preserve valid referral
+paths, encoded query values, normal missing-route handling, homepage negotiation,
+and signed API/workflow paths, including workflow token validation.
+The isolated production routing fixture requires the fixed `Not Found` body
+for `/%5C` and `/%5c`, rather than accepting an ordinary app 404, and uses no
+production credentials or full Web build:
 
 ```sh
 pnpm exec node --import tsx apps/web/scripts/verify-referral-proxy-routing.ts

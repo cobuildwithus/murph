@@ -66,6 +66,7 @@ import {
 } from "./connect-source-card-study";
 import { DataExportFlowStudy } from "./data-export-study";
 import { FamilyInviteJoinStudy } from "./family-invite-join-study";
+import { GameInviteStudy } from "./game-invite-study";
 import { GroupJoinStudy } from "./group-join-study";
 import { GroupStartStudy } from "./group-start-study";
 import { GroupMemberPlanStudy } from "./group-member-plan-study";
@@ -782,6 +783,12 @@ export function SectionsContent({
 
           <StudySection title="Group sponsorship purchase, signed-out management, cancellation, and completion">
             <GroupUsageFundingStudy />
+          </StudySection>
+
+          <Separator />
+
+          <StudySection title="Weekly game challenge invite link">
+            <GameInviteStudy />
           </StudySection>
         </>
       ) : null}

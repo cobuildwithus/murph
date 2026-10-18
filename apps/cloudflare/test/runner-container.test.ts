@@ -55,6 +55,10 @@ import {
   buildHostedRunnerRedactedErrorJson,
 } from "../src/user-runner/diagnostics.ts";
 
+const SDK_INSTANCE_START_ABORT_MESSAGE =
+  "Aborted waiting for container to start as we received a cancellation signal";
+const SDK_PORT_WAIT_ABORT_MESSAGE = "Container request aborted.";
+
 const EXPECTED_RUNNER_CONTAINER_ENV = {
   ...buildHostedRunnerContainerCaEnv(),
   PORT: "8080",
@@ -79,6 +83,7 @@ type RunnerContainerLocalStartupFailureStage = Exclude<
 
 function expectRunnerContainerStartupFailureObservation(input: {
   cleanupUnsettled: boolean;
+  expectedColdWaitFailure?: "instance_start_aborted" | "port_wait_aborted" | "unclassified";
   expectedElapsedMs?: number;
   expectedOrchestrationAttemptId?: string;
   expectedTimeoutMs?: number;
@@ -102,6 +107,9 @@ function expectRunnerContainerStartupFailureObservation(input: {
       ...(input.expectedOrchestrationAttemptId === undefined
         ? {}
         : { orchestrationAttemptId: input.expectedOrchestrationAttemptId }),
+      ...(input.expectedColdWaitFailure === undefined
+        ? {}
+        : { runtimeStartupColdWaitFailure: input.expectedColdWaitFailure }),
       runtimeStartupConfirmTimeoutMs: input.expectedTimeoutMs ?? expect.any(Number),
       runtimeStartupCleanupUnsettled: input.cleanupUnsettled,
       runtimeStartupFailureElapsedMs: expect.any(Number),
@@ -2591,11 +2599,22 @@ describe("RunnerContainer", () => {
     })).rejects.toBe(stateReadFailure);
   });
 
-  it("classifies cold start and port-readiness failures", async () => {
+  it.each([
+    { label: "initial SDK wait", startFailure: new Error(SDK_INSTANCE_START_ABORT_MESSAGE), expected: "instance_start_aborted" },
+    { label: "separate SDK port wait", startFailure: new Error(SDK_PORT_WAIT_ABORT_MESSAGE), expected: "port_wait_aborted" },
+    { label: "unknown error", startFailure: new Error("port wait failed with token=private-start-token"), expected: "unclassified" },
+    { label: "changed initial message", startFailure: new Error(`${SDK_INSTANCE_START_ABORT_MESSAGE}.`), expected: "unclassified" },
+    { label: "changed port message", startFailure: new Error(`${SDK_PORT_WAIT_ABORT_MESSAGE} changed`), expected: "unclassified" },
+    { label: "non-Error string", startFailure: SDK_PORT_WAIT_ABORT_MESSAGE, expected: "unclassified" },
+    { label: "non-Error object", startFailure: { message: SDK_INSTANCE_START_ABORT_MESSAGE }, expected: "unclassified" },
+    { label: "null", startFailure: null, expected: "unclassified" },
+    { label: "wrapped cancellation", startFailure: new Error("Synthetic wrapper", { cause: new Error(SDK_PORT_WAIT_ABORT_MESSAGE) }), expected: "unclassified" },
+    { label: "unreadable message", startFailure: Object.defineProperty(new Error(), "message", {
+      get() { throw new Error("Synthetic unreadable message"); },
+    }), expected: "unclassified" },
+  ] as const)("classifies only the caught cold wait: $label", async ({ startFailure, expected }) => {
     const orchestrationAttemptId = "test-cold-start-timeout-correlation";
-    const privateErrorText = "port wait failed with token=private-start-token";
-    const startFailure = new Error(privateErrorText);
-    const { container } = createContainerDouble({
+    const { container, destroy, startAndWaitForPorts } = createContainerDouble({
       startAndWaitForPorts: vi.fn(async () => {
         throw startFailure;
       }),
@@ -2607,11 +2626,21 @@ describe("RunnerContainer", () => {
       userId: "member_private_cold_start",
     })).rejects.toBe(startFailure);
 
+    expect(startAndWaitForPorts).toHaveBeenCalledOnce();
+    expect(destroy).not.toHaveBeenCalled();
+    expect(Reflect.get(container, "currentContainerStart")).toMatchObject({
+      pendingUntilMs: expect.any(Number),
+      readyObservedBy: null,
+    });
     expectRunnerContainerStartupFailureObservation({
       cleanupUnsettled: false,
+      expectedColdWaitFailure: expected,
       expectedOrchestrationAttemptId: orchestrationAttemptId,
       expectedTimeoutMs: 15_000,
-      forbiddenValues: [privateErrorText, "member_private_cold_start"],
+      forbiddenValues: [
+        SDK_INSTANCE_START_ABORT_MESSAGE, SDK_PORT_WAIT_ABORT_MESSAGE,
+        "private-start-token", "member_private_cold_start", "Synthetic wrapper",
+      ],
       stage: "cold_start_or_ports",
     });
   });
@@ -2672,8 +2701,10 @@ describe("RunnerContainer", () => {
   });
 
   it.each([
+    { phase: "instance", expired: true },
     { phase: "ports", expired: true },
     { phase: "health", expired: true },
+    { phase: "instance", expired: false },
     { phase: "ports", expired: false },
     { phase: "health", expired: false },
   ] as const)(
@@ -2687,7 +2718,8 @@ describe("RunnerContainer", () => {
         .mockImplementation((ms) => originalTimeout(ms));
       const transportStarted = createDeferred<void>();
       const transportFailure = createDeferred<never>();
-      const sdkFailure = new Error("Synthetic SDK cancellation without a typed reason");
+      const sdkFailure = new Error(phase === "instance"
+        ? SDK_INSTANCE_START_ABORT_MESSAGE : SDK_PORT_WAIT_ABORT_MESSAGE);
       const rejectOnAbort = (signal: AbortSignal) => {
         signal.addEventListener("abort", () => transportFailure.reject(sdkFailure), { once: true });
         transportStarted.resolve(undefined);
@@ -2696,7 +2728,7 @@ describe("RunnerContainer", () => {
       const startAndWaitForPorts = vi.fn(async (input: {
         cancellationOptions: { abort: AbortSignal };
       }) => {
-        if (phase === "ports") await rejectOnAbort(input.cancellationOptions.abort);
+        if (phase !== "health") await rejectOnAbort(input.cancellationOptions.abort);
       });
       const containerFetch = vi.fn(async (_url: string, init: { signal: AbortSignal }) =>
         rejectOnAbort(init.signal));
@@ -2716,11 +2748,62 @@ describe("RunnerContainer", () => {
         expect(startAndWaitForPorts).toHaveBeenCalledOnce();
         expect(containerFetch).toHaveBeenCalledTimes(phase === "health" ? 1 : 0);
         expect(destroy).not.toHaveBeenCalled();
+        expect(Reflect.get(container, "currentContainerStart")).toMatchObject({
+          pendingUntilMs: expect.any(Number),
+          readyObservedBy: null,
+        });
+        expectRunnerContainerStartupFailureObservation({
+          cleanupUnsettled: false,
+          expectedColdWaitFailure: phase === "health" ? undefined
+            : phase === "instance" ? "instance_start_aborted" : "port_wait_aborted",
+          stage: phase === "health" ? "cold_health_or_finalization" : "cold_start_or_ports",
+          forbiddenValues: [sdkFailure.message, deadlineReason.message],
+        });
       } finally {
         timeout.mockRestore();
       }
     },
   );
+
+  it("omits the cold-wait diagnostic when the SDK wait has not rejected", async () => {
+    vi.useFakeTimers();
+    const deadline = new AbortController();
+    const timeout = vi.spyOn(AbortSignal, "timeout").mockReturnValue(deadline.signal);
+    const waitStarted = createDeferred<void>();
+    const wait = createDeferred<void>();
+    const { container, destroy, startAndWaitForPorts } = createContainerDouble({
+      startAndWaitForPorts: vi.fn(() => {
+        waitStarted.resolve(undefined);
+        return wait.promise;
+      }),
+    });
+    try {
+      const readiness = container.ensureReadyForProcessing({
+        timeoutMs: 15_000, userId: "member_123",
+      });
+      await waitStarted.promise;
+      deadline.abort(new DOMException("Synthetic readiness deadline", "TimeoutError"));
+      await vi.advanceTimersByTimeAsync(5_000);
+      await expect(readiness).resolves.toEqual({ kind: "cleanup_unsettled" });
+      expectRunnerContainerStartupFailureObservation({
+        cleanupUnsettled: true,
+        stage: "cold_start_or_ports",
+      });
+      // A later rejection must not mutate the record or add another failure observation.
+      wait.reject(new Error(SDK_PORT_WAIT_ABORT_MESSAGE));
+      await vi.advanceTimersByTimeAsync(0);
+      expectRunnerContainerStartupFailureObservation({
+        cleanupUnsettled: true,
+        stage: "cold_start_or_ports",
+      });
+      expect(startAndWaitForPorts).toHaveBeenCalledOnce();
+      expect(destroy).not.toHaveBeenCalled();
+    } finally {
+      wait.resolve(undefined);
+      timeout.mockRestore();
+      vi.useRealTimers();
+    }
+  });
 
   it("starts the readiness deadline before lifecycle-lock admission", async () => {
     const firstDeadline = new AbortController();
@@ -3710,7 +3793,7 @@ describe("RunnerContainer", () => {
       startObserved.resolve(undefined);
       await new Promise<never>((_, reject) => {
         input.cancellationOptions.abort.addEventListener("abort", () => {
-          reject(input.cancellationOptions.abort.reason);
+          reject(new Error(SDK_PORT_WAIT_ABORT_MESSAGE));
         }, { once: true });
       });
     });
@@ -3795,6 +3878,7 @@ describe("RunnerContainer", () => {
       expect(startAndWaitForPorts).toHaveBeenCalledTimes(2);
       expectRunnerContainerStartupFailureObservation({
         cleanupUnsettled: true,
+        expectedColdWaitFailure: "port_wait_aborted",
         stage: "cold_start_or_ports",
       });
     } finally {

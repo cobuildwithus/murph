@@ -1071,6 +1071,94 @@ ORDER BY at DESC
 LIMIT 100;
 ```
 
+## Group shared-read timing
+
+Each accepted group `read_shared` request from the interactive group operation
+and the scheduled group operation (`createHostedGroupSharedReader` wired in
+`workspace-assistant-phase.ts`) queues one info `assistant.automation_detail`
+event when it settles. Only requests rejected by input or capability
+validation (invalid scopes or options, no group tool port, or freshness on a
+reader without a wait budget) emit nothing. A valid request whose operation
+signal is already aborted is accepted and records `canceled` with zero
+callbacks. The unscoped read-only reader used by detached asks is not instrumented. The record
+is queued through the existing nonblocking info buffer after the read settles;
+it is never awaited, and an observer throw or rejection cannot change the read.
+
+`redacted_json` holds `type = 'hosted_group_shared_read_timing'`,
+`schema = 'murph.hosted-group-shared-read-timing.v1'`, a fixed `detailLabel`,
+and only:
+
+- `groupSharedReadLane`: `interactive` or `scheduled`
+- `groupSharedReadFreshnessRequested`: the caller supplied freshness
+  requirements for the initial Web read. It does not prove that a request was
+  sent or accepted (a pre-aborted read makes zero Web calls) or that a refresh
+  completed.
+- `groupSharedReadWaitBudgetMs`: the configured deadline for the existing
+  sleep-and-reread loop (15,000 interactive, 300,000 scheduled, 0 read-only).
+  It bounds when another poll may start; it is not a callback timeout, so total
+  time can exceed it.
+- `groupSharedReadElapsedMs`: monotonic total from acceptance to settlement
+- `groupSharedReadCallbackCount`, `groupSharedReadCallbackElapsedMs`,
+  `groupSharedReadCallbackMaxElapsedMs`: Web callback attempts (including an
+  older-producer fallback) and their cumulative and longest wall time
+- `groupSharedReadPollCount`, `groupSharedReadPollElapsedMs`: intentional
+  freshness waits between rereads and their wall time, including timer
+  scheduling and abort latency (a canceled wait counts its partial time)
+- `groupSharedReadOutcome`: `ok`, `none`, `unavailable`, `error`, or
+  `canceled`. `ok`, `none` (Web found no shared data), and `unavailable` are
+  the returned result's own `status`; `unavailable` includes runtime-built
+  unavailable results such as an invalid response or failed fallback.
+- `groupSharedReadDecision`: the terminal reason. `not_ok` through `deadline`
+  follow the polling loop's original short-circuit order:
+  - `no_freshness`: no requirements were supplied
+  - `not_ok`: the current result was not `ok`
+  - `not_needed`: Web reported `refreshStatus = 'not_needed'`
+  - `refresh_unavailable`: Web reported `unavailable` or omitted freshness
+  - `satisfied`: the existing wearable-recovery predicate is false. That is
+    narrower than every requested or historical date being populated.
+  - `deadline`: the polling deadline passed while recovery was still needed
+  - `invalid`: Web returned a non-`read_shared` response
+  - `fallback`: the initial or a poll callback threw and an ordinary reread
+    succeeded
+  - `error`: the request and any fallback failed
+  - `canceled`: the operation signal aborted
+
+There are no dates, scope keys, health cardinalities, member or participant
+identifiers, values, arguments, results, or exception text. `canceled` means the
+operation signal aborted and the read rejected; it does not prove that in-flight
+Web work stopped. A process kill before settlement emits nothing, and the
+droppable info queue may shed records under backpressure, so absence is missing
+evidence rather than a fast read. `ok` with `deadline` is not latency health.
+
+Run this aggregate on the dedicated runtime-log database only, over a fixed
+window that begins **after** the instrumented revision is verified deployed.
+A telemetry-only protected deployment can be blocked when the deploy workflow
+cannot select that candidate revision; confirm the running revision rather than
+assuming it. Observe for 24–72 hours before deciding whether the remaining time
+is polling, callback latency, or freshness that never arrived.
+
+```sql
+SELECT redacted_json->>'groupSharedReadLane' AS lane,
+       redacted_json->>'groupSharedReadDecision' AS decision,
+       redacted_json->>'groupSharedReadOutcome' AS outcome,
+       count(*) AS reads,
+       sum((redacted_json->>'groupSharedReadPollCount')::bigint) AS polls,
+       percentile_disc(0.5) WITHIN GROUP (
+         ORDER BY (redacted_json->>'groupSharedReadElapsedMs')::numeric) AS p50_total_ms,
+       max((redacted_json->>'groupSharedReadElapsedMs')::numeric) AS max_total_ms,
+       sum((redacted_json->>'groupSharedReadPollElapsedMs')::numeric) AS poll_ms,
+       sum((redacted_json->>'groupSharedReadCallbackElapsedMs')::numeric) AS callback_ms,
+       max((redacted_json->>'groupSharedReadCallbackMaxElapsedMs')::numeric) AS max_callback_ms
+FROM hosted_runtime_log
+WHERE at >= $1 AND at < $2
+  AND event_code = 'assistant.automation_detail'
+  AND redacted_json->>'type' = 'hosted_group_shared_read_timing'
+  AND redacted_json->>'schema' = 'murph.hosted-group-shared-read-timing.v1'
+GROUP BY 1, 2, 3
+ORDER BY 1, 2, 3
+LIMIT 100;
+```
+
 ## Reads and retention
 
 Status and latency dashboards read only the isolated store. If a dedicated
@@ -1393,6 +1481,81 @@ when that transition lands, adapting names to their actual operations rather tha
 claiming SQLite hydration still occurs. No deployment or speedup is established
 merely by these local tests.
 
+### Patterns lazy load phases
+
+Three fixed phases attribute the module loading that precedes the first query
+phase. Each wraps one existing native dynamic import with `timeCliPhase` and
+records only a duration under its fixed name:
+
+| Phase | Existing operation measured |
+| --- | --- |
+| `service-runtime-load` | The loader-backed public service seam (`vault-usecases/vault-services`) creating its cached promise: the `import("./usecases/integrated-services.js")` only. Excludes the service factory call and every service method. |
+| `query-runtime-load` | The cold shared-promise owner in `usecases/runtime.ts` `loadQueryRuntime`: `import("@murphai/query")` only. Excludes the module shape check and error wrapping. |
+| `query-projection-load` | The `query-projection.ts` import inside the public `@murphai/query` `buildPersonalPatternReportRuntime` wrapper. Other public wrappers are unchanged. |
+
+The first two are recorded only by the call that creates the existing memoized
+promise. Their memoization scopes differ: `service-runtime-load` is cached per
+`createIntegratedVaultServices` instance, and `query-runtime-load` is cached per
+process (module scope). Calls that share an existing promise, whether pending or
+settled, have **absent** samples. A new service instance, or a retry after the
+existing failure reset, creates the promise again and records a new owner span,
+which can measure only cached resolution when Node's module cache is already
+warm. Absence is not zero wait. A waiter's time on a shared promise stays in its
+dispatch residual, and the sample belongs to the call that started the load.
+`query-projection-load` records one sample per Patterns
+call. Loads outside a timing scope are no-ops. Failed imports finish their span
+and rethrow the original error, and the existing reset still applies. No new
+cache, loader, retry, state or pipeline is added; the existing promise
+memoization and Node's module cache are preserved unchanged.
+
+In the unbundled source graph, `integrated-services.ts` statically imports
+`@murphai/query`, and the query root reaches `query-projection.ts` statically
+through `health/index.ts`. There, cold query module evaluation is expected
+**inside `service-runtime-load`**, and the other two phases measure near-zero
+cached resolution. That is a static-source expectation only, not a production
+claim. The production runner bundle (`apps/cloudflare/scripts/runner-bundle`)
+statically bundles and tree-shakes the CLI, while `loadRuntimeModule(specifier)`
+stays a native variable import; `bundle-shared.ts` documents that this differs
+from bundled static imports. Production may therefore record native query-module
+loading in `query-runtime-load` rather than `service-runtime-load`. All three
+phases are kept for that reason, and no production cost split is assumed. The
+three phases are sequential and non-overlapping for one serial Patterns call;
+they are not nested in the query phases. `dispatch` minus these and the
+existing query phases is still unattributed handler work, not a
+pure startup or import measurement. They do not cover Node launch, the timing
+module import, or imports made before the timing scope opens (see `total`).
+
+Synthetic mechanism evidence (parent probe on unchanged main, empty synthetic
+vault, fresh projection, 5 processes × 3 calls): the cold first-call residual
+outside query phases had a median of 226.43 ms (range 187.38–499.33). It was
+about 0.1 ms warm, and preloading `@murphai/query` cut it to a 61.39 ms median.
+On the candidate, the same unbundled public-service probe (30 base and 30 head
+calls, byte-identical 579-byte responses by SHA-256) gave cold head medians of
+187.398 ms `service-runtime-load`, 0.429 ms `query-runtime-load`, 0.102 ms
+`query-projection-load` and 0.944 ms residual after the load spans; with
+`@murphai/query` preloaded, `service-runtime-load` was 61.318 ms and the
+residual 0.954 ms. These are separate noisy processes, not paired measurements:
+diagnostic attribution only. They explain no production tail or speedup. The historical 49 s Patterns call
+remains unexplained. PR #3391 changes only data acquisition inside
+`query-projection`. These seams are outside it and stay valid after it lands.
+
+Rollout is reader-before-producer, as above. An old normalizer rejects the
+**entire optional `cliTiming` object** that carries any of these names. It does
+not strip them into a falsely complete record. The opt-in history-backed test
+proves that old-normalizer compatibility only; it does not exercise the full
+usage parser:
+`MURPH_CLI_LOAD_PHASE_COMPAT_BASE=<reviewed base sha> pnpm --dir packages/runtime-state
+test test/cli-timing.test.ts -t "pre-load-phase"`. Span, command, UDP and HTTP
+caps are unchanged. Installed-CLI static closure budgets are owned by exact-head
+CI; no closure-size result is claimed from static reasoning. Isolated telemetry
+deployment is user-authorized, but the same main-only deployment blocker
+described below applies: the protected workflow cannot select this candidate
+without a merge, which is not authorized. It is **not deployed**. After a verified consumer-then-producer
+deployment, observe 24–72 hours of normal traffic with the bounded aggregate
+query below, which includes these names. Compare single-call `wearables
+patterns` cohorts: dispatch against the sum of the three load phases and the
+existing query phases. Never pair multi-call maxima.
+
 ### Timing semantics and completeness
 
 All durations use `process.hrtime.bigint()`, floored to integer **microseconds**.
@@ -1447,7 +1610,7 @@ and children rejected before entering the CLI have no invented command timing.
 Legacy batch output, counts, lengths, durations and failure handling are unchanged.
 
 Bounds are source-owned: 32 distinct command/outcome entries per report/active
-window; 21 fixed phase names (the original 11, six rebuild names and four Patterns names); 64 started
+window; 24 fixed phase names (the original 11, six rebuild names, four Patterns names and three load names); 64 started
 scoped spans per invocation (plus fixed lifecycle samples); at most 8,192 bytes
 per complete UDP envelope (including the ephemeral key/ticks) and 256 received packets per window. The 8 KiB cap is below
 the supported macOS 9 KiB UDP datagram limit; no host setting or permission is
@@ -1509,7 +1672,7 @@ microseconds, eight histogram buckets, command/outcome identity, failure fields,
 32-command / 64-scoped-span caps, UDP 8,192-byte and HTTP 16,384-byte ceilings,
 whole-command trimming and disabled-scope no-op behavior are unchanged. No entity
 counts, IDs, paths, arguments, content, result values or error text are added.
-The enum length itself owns the current 21-entry per-command shape bound (including the four Patterns phases); no
+The enum length itself owns the current 24-entry per-command shape bound (including the Patterns and load phases); no
 transport limit is widened to accommodate the extra phases.
 
 | New phase | Existing operation measured |
@@ -1740,6 +1903,33 @@ reason/category. Keep missing/unknown evidence unresolved and completion counts
 separate. Propose a behavior correction only after at least two matching
 action/code observations and a deterministic reproduction at the responsible
 owner; telemetry alone does not establish the original cause.
+
+### Private vault-file preparation failure evidence
+
+Only the existing `send-vault-file` execution catch may add the optional
+`vaultFileErrorCode` to its private failure diagnostic and classification issue.
+The value is exact membership in `VAULT_FILE_FAILURE_CODES` in
+`packages/assistant-engine/src/assistant-codex/tool-failure-diagnostics.ts`:
+source-owned request, destination, file-path and staging-preparation rejections.
+Provider codes, delivery-time errors and arbitrary `ASSISTANT_*` names are not
+admitted. Missing, unknown and unallowlisted codes omit the field; missing files
+keep the existing `not_found` category without new detail.
+
+Capture reads only an own data `code` descriptor. It rejects proxies before
+inspection, never invokes accessors or follows prototypes, contexts or causes,
+and retains no error prose, paths, refs, identifiers, arguments, results or
+payloads. The catch also treats proxies as opaque before its existing classifier
+and uses an own data code for the already-active success branch. Ordinary failure
+stage, reason and category are unchanged. The existing already-active success,
+approval handling, RPC text and final action remain unchanged and unannotated.
+
+The existing completion, issue reporter, sanitizer and record parser preserve
+this optional scalar within their existing limits (six classification detail
+keys); older records without it remain valid. It never enters the RPC envelope,
+prompts or tool schemas. No new store, stream, retry or external call is added.
+The field attributes future caught rejections; it neither recovers historical
+causes nor establishes why an argument was chosen or authorizes changed recovery.
+Native completion rows overlap classification rows and are not extra failures.
 
 ### Batch read attribution and connected-app failure status
 
@@ -2062,6 +2252,83 @@ of that category; recurrence is not required. A null-only result remains
 unresolved and justifies no prompt, schema or guidance change. The category
 identifies the first schema invariant, not why the model produced the input.
 
+#### Optional parser rejection reason (knowledge upsert/show, wearables day, exercise list)
+
+Every Incur argv rejection projects to the same privacy-safe
+`VALIDATION_ERROR / validation / arguments / custom / missing=false` envelope,
+so code, stage and validation detail cannot separate an unknown flag from a
+final option that lacks its value. The pinned `patches/incur@0.5.1.patch`
+therefore sets `ParseError.reason` (`unknown_flag` or `missing_value`) at the
+exact command-parser (`Parser.parse`) throw sites only. It is a non-enumerable,
+non-writable own data property: `toErrorEnvelope`, JSON/RPC output, hints,
+exits and prompts are byte-identical, and config, stacked-alias, global/builtin
+flag and other ParseErrors carry no reason. The reason is the fixed literal of
+the parser throw site that ran; no diagnostic code parses argv or messages.
+
+`incurErrorBridge`, only while timing is active and only when the error's own
+data `kind` is `arguments`, copies that one own data descriptor value as
+`cliTimingRejection` onto its timing-only projection. Config ParseErrors share
+the projected code, so they never carry the reason even if one is supplied.
+`cliTimingRejectionFailure` admits it as `rejection` only for
+`knowledge upsert`, `knowledge show`, `wearables day` and `exercise list` with
+`VALIDATION_ERROR` and only these two literals; the research categories above
+and the search filter classes below stay gated to their own command/code. Accessors,
+spoofed/prototype values and wrong commands omit only the reason. A throwing
+descriptor trap falls back to the original error before projection, so it may
+also drop optional validation detail. No optional diagnostic fault can replace
+the original error, change model-visible output or handling, or change the
+base failure code/stage/count. Variant
+identity, the 8-failure cap, wire normalization and reader-first rollout match
+the research category. Older readers drop `rejection` and coalesce counts; new
+readers accept old reports without inferring a reason. Run the actual old-reader
+test with `MURPH_CLI_PARSE_REJECTION_COMPAT_BASE=a83068adbe524217d32a22c270902ef0b02c6921`
+(`knowledge upsert`) and
+`MURPH_CLI_FILTER_REJECTION_COMPAT_BASE=2899a61ce5b6de7f0b6184e8e5a73cb507a798ef`
+(`knowledge show`, `wearables day`, and the filter classes below).
+
+After convergence, reuse the research query above with
+`e ->> 'code' = 'VALIDATION_ERROR'`, `c ->> 'command'` set to an admitted
+command, and `rejection IN ('unknown_flag', 'missing_value')`.
+Threshold: **any** natural attributed turn distinguishes the two causes enough
+to build a synthetic reproduction; null-only results stay unresolved and
+justify no prompt, schema or guidance change. Null means an older writer,
+schema validation, or an unclassified parse failure. For `knowledge show` and
+`wearables day`, a reason separates an argv rejection from schema validation of
+the positional slug/date (`slug` or `date` validation detail, with no reason).
+Coverage is limited to argv invocations reaching the command middleware;
+built-in/global flag failures, HTTP/MCP parsing and other commands are not
+classified. The reason never identifies which flag was rejected, and it does
+not prove that a prompt, hint or help text caused the input; any such
+hypothesis needs a separate synthetic reproduction.
+
+#### Optional search query filter rejection class
+
+`search query` rejects an unsupported `--record-type` family and a
+comma-delimited `--record-type`, `--kind`, `--stream` or `--tag` value with the
+same `invalid_option / unknown` failure. The shared repeatable-flag normalizer
+in `packages/vault-usecases/src/option-utils.ts` therefore attaches
+`cliTimingRejection` (`comma_delimited` or `unsupported_value`) at exactly its
+two existing throw sites, as the same non-enumerable, non-writable own data
+property used by the research category. The normalizer's validation (which
+necessarily reads the supplied values), decisions, ordering, code, message,
+context and every projected envelope are unchanged. The diagnostic class is a
+fixed literal chosen by which throw site ran; the timing classifier never reads
+option names, values, argv or messages. Many commands share the
+normalizer, so `cliTimingRejectionFailure` admits the class only for
+`search query` with `invalid_option`; any other command or code omits it
+(including `list`, which uses the same normalizer). Reversed `--from`/`--to`
+dates keep their existing `invalid_option / validation` pair and carry no
+class. Identity, cap, wire normalization, reader-first rollout and old-reader
+behavior match the parser reason above.
+
+After convergence, reuse the research query above with
+`e ->> 'code' = 'invalid_option'`, `c ->> 'command' = 'search query'` and
+`rejection IN ('comma_delimited', 'unsupported_value')`. The same singleton
+threshold applies: one natural attributed turn justifies a targeted synthetic
+reproduction of that class; null-only results stay unresolved. The class never
+says which option or value, or why the model chose it. Do not manufacture
+traffic or wait for a quota of events.
+
 #### Optional schema-validation detail
 
 For `VALIDATION_ERROR` only, `validation: { field, code, missing? }` is one finite
@@ -2075,7 +2342,10 @@ causes, iterators and arbitrary nested paths are not consulted. Only exact full
 static field names are admitted:
 
 - `automation list`: limit, status (only these two options from `packages/cli/src/commands/automation.ts`).
+- `exercise list`: query, kind, environment, category, target, level, equipment,
+  position, modality, commonness, limit, plus the fixed Incur invocation field arguments.
 - `food search-labels`: query, limit.
+- `wearables day`: date (required positional argument in `packages/cli/src/commands/wearables.ts`), provider, plus the fixed Incur invocation field arguments.
 - `knowledge show`: slug (required positional argument in `packages/cli/src/commands/knowledge.ts`), plus the fixed Incur invocation field arguments.
 - `measurement entry list`: metric, from, to, limit (only these top-level options from `packages/cli/src/commands/measurement.ts`; no metric array indices).
 - `event list`: kind, from, to, tag, experiment, limit (the command and its shared list factory), plus the fixed Incur invocation field arguments.
@@ -2190,6 +2460,16 @@ The research equivalent uses `MURPH_CLI_RESEARCH_FAILURE_COMPAT_BASE` with the
 pre-admission base in its active plan. Runtime-state and profile tests load the
 actual old portable and hosted readers, checking coalescing to `unknown`, mixed
 old/new reports, absent evidence and unchanged counts/tokens.
+
+The `exercise list` admission reuses the existing CLI timing bridge and portable
+normalizer, including the two parser reasons above. Deploy Web/hosted usage and
+engine/profile readers before runner/CLI producers. Older readers omit its
+optional `validation` and `rejection` and coalesce equal code/stage counts while
+preserving calls, outcomes, phases and drops; new readers accept old reports
+without inferring detail. Run the existing history-backed test with
+`MURPH_CLI_EXERCISE_VALIDATION_COMPAT_BASE` set to the exact pre-extension commit.
+This classifies future failures; it cannot recover historical arguments or
+establish a prompt/schema defect.
 
 The `automation list` field extension follows that same consumer-first order.
 Deploy the portable reader in Web/hosted usage, engine/profile and assistant
@@ -2383,7 +2663,7 @@ needed for this extension's unchanged output contract.
 #### Command-specific validation inspection (including singletons)
 
 For `automation list`, `knowledge show`, `knowledge upsert`, `event list`,
-`event payload-schema`, `measurement entry list`, `meal add` and `meal edit` with
+`event payload-schema`, `measurement entry list`, `wearables day`, `meal add` and `meal edit` with
 `VALIDATION_ERROR / validation`, **any newly
 attributed event warrants inspection, including one event in one turn**; the two-turn
 implementation-investigation threshold above does not gate this inspection.
@@ -2431,7 +2711,8 @@ WITH rows AS MATERIALIZED (
   CROSS JOIN LATERAL jsonb_array_elements(t -> 'commands') c
   WHERE t ->> 'schema' = 'murph.cli-timing.v1'
     AND c ->> 'command' IN ('automation list', 'knowledge show', 'knowledge upsert',
-      'event list', 'event payload-schema', 'measurement entry list', 'meal add', 'meal edit', 'meal remove-photo')
+      'event list', 'event payload-schema', 'measurement entry list', 'wearables day',
+      'meal add', 'meal edit', 'meal remove-photo')
     AND c ->> 'outcome' = 'error'
 ), per_turn AS (
   SELECT turn_id, c ->> 'command' AS command, f.failure_code, f.failure_stage, f.field, f.issue_code, f.missing,
@@ -2449,6 +2730,7 @@ WITH rows AS MATERIALIZED (
                  'kind', 'from', 'to', 'tag', 'experiment', 'limit', 'arguments')
                OR c ->> 'command' = 'event payload-schema' AND e -> 'validation' ->> 'field' IN ('kind', 'for')
                OR c ->> 'command' = 'measurement entry list' AND e -> 'validation' ->> 'field' IN ('metric', 'from', 'to', 'limit')
+               OR c ->> 'command' = 'wearables day' AND e -> 'validation' ->> 'field' IN ('date', 'provider', 'arguments')
                OR c ->> 'command' IN ('meal add', 'meal edit') AND e -> 'validation' ->> 'field' IN (
                  'nutritionCalories', 'nutritionSource', 'occurredAt', 'arguments')
                OR c ->> 'command' = 'meal edit' AND e -> 'validation' ->> 'field' IN (
@@ -2535,7 +2817,8 @@ rows AS MATERIALIZED (
     'query-status', 'query-rebuild', 'query-wait', 'query-source-read',
     'query-wearable-dataset', 'query-metric-projection', 'query-wearable-summary',
     'query-search-documents', 'query-publication', 'query-entity-read',
-    'query-wearable-compose', 'query-metric-read', 'query-pattern-report')
+    'query-wearable-compose', 'query-metric-read', 'query-pattern-report',
+    'service-runtime-load', 'query-runtime-load', 'query-projection-load')
 ), totals AS (
   SELECT period, command, outcome, p ->> 'phase' AS phase,
          sum((p ->> 'count')::numeric) AS phase_samples,
