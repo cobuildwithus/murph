@@ -84,9 +84,10 @@ function view(state: RuleState, viewerId: string, now: Date, overrides: Partial<
   });
 }
 
-function noonOnDay(state: RuleState, memberId: string, dayIndex: number): Date {
+/** `hour` o'clock local on a player's game day (defaults to noon). */
+function noonOnDay(state: RuleState, memberId: string, dayIndex: number, hour = 12): Date {
   const player = state.players.find((candidate) => candidate.memberId === memberId)!;
-  return new Date(dayStartInstant(addDays(player.dayOne!, dayIndex), player.timeZone).getTime() + 9 * 60 * 60 * 1000);
+  return new Date(dayStartInstant(addDays(player.dayOne!, dayIndex), player.timeZone).getTime() + (hour - 3) * 60 * 60 * 1000);
 }
 
 describe("weekly game views: tickets", () => {
@@ -116,12 +117,13 @@ describe("weekly game views: tickets", () => {
 
 describe("weekly game views: post to unlock", () => {
   it("shows the same days off to both players and pairs their posts by index across time zones", () => {
-    // Leo (New York) starts Friday the 16th, Ava (Sydney) Saturday the 17th; weekdays only.
+    // Leo (New York) and Ava (Sydney) both start Saturday the 17th; weekdays only.
     const base = liveState({ days: [0, 1, 2, 3, 4] }, new Date("2026-10-16T00:00:00Z"));
     const state = { ...base, entries: [entry(LEO, 0, 1), entry(AVA, 0, 1)] };
     const leoView = view(state, LEO, noonOnDay(state, LEO, 0));
     const avaView = view(state, AVA, noonOnDay(state, AVA, 0));
-    expect(leoView.days.map((day) => day.off)).toEqual([false, true, true, false, false, false, false]);
+    expect(leoView.days.map((day) => day.localDate)).toEqual(avaView.days.map((day) => day.localDate));
+    expect(leoView.days.map((day) => day.off)).toEqual([true, true, false, false, false, false, false]);
     expect(avaView.days.map((day) => day.off)).toEqual(leoView.days.map((day) => day.off));
     expect(leoView.days[0].others[0].status).toBe("posted");
     expect(avaView.days[0].others[0].status).toBe("posted");
@@ -154,7 +156,8 @@ describe("weekly game views: post to unlock", () => {
     const avaView = view(state, AVA, noonOnDay(state, AVA, 0));
     expect(avaView.days[0].others[0].status).toBe("posted");
     expect(avaView.days[0].mine).toBeNull();
-    const leoView = view(state, LEO, noonOnDay(state, LEO, 0));
+    // 6am in New York: Sydney is still on the same day, so it isn't missed yet.
+    const leoView = view(state, LEO, noonOnDay(state, LEO, 0, 6));
     expect(leoView.days[0].others[0]).toEqual({ entry: null, seat: 1, status: "none" });
   });
 
@@ -172,9 +175,9 @@ describe("weekly game views: post to unlock", () => {
 
   it("marks missed days only once that player's day is over, and shows scores and retakes", () => {
     const state = { ...liveState(), entries: [entry(LEO, 0, 1), entry(LEO, 1, 1)] };
-    const leoNow = noonOnDay(state, LEO, 1);
+    const leoNow = noonOnDay(state, LEO, 1, 9);
     const leoView = view(state, LEO, leoNow);
-    // At noon on Leo's Day 1 (New York), Ava (Sydney) is just past 3am on her Day 1.
+    // At 9am on Day 1 in New York it's midnight in Sydney: Ava's Day 1 isn't over yet.
     expect(leoView.days[0].others[0].status).toBe("missed");
     expect(leoView.days[1].others[0].status).toBe("none");
     expect(leoView.players.map((player) => [player.firstName, player.dayIndex, player.score, player.isMe]))
