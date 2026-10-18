@@ -52,6 +52,11 @@ in [the import-speed plan](exec-plans/completed/2026-09-24-garmin-import-speed.m
 
 # Murph Agent Docs Index
 
+Private vault-file preparation failure evidence is owned by
+[`the runtime telemetry contract`](../docs/hosted-runtime-log-database.md#private-vault-file-preparation-failure-evidence);
+implementation, complexity repair and validation/release handoff are tracked in
+[the vault-file failure telemetry plan](exec-plans/completed/2026-10-18-vault-file-failure-telemetry.md).
+
 Failed native startup wait diagnostics are owned by
 [`hosted-runtime-protocol.md`](references/hosted-runtime-protocol.md); implementation
 and synthetic proof are tracked in

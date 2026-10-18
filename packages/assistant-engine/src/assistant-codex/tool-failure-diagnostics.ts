@@ -20,6 +20,7 @@ export interface ToolFailureDiagnostic {
   deviceErrorCode?: DeviceToolFailureCode
   deviceHttpStatus?: number
   connectedAppsHttpStatus?: number
+  vaultFileErrorCode?: VaultFileToolFailureCode
   productFeedbackAuditRejection?: HostedUsageOptimizationAuditRejection
 }
 
@@ -102,6 +103,54 @@ export function withConnectedAppsToolFailureDetails(
     return {
       ...result,
       failureDiagnostic: { ...result.failureDiagnostic, connectedAppsHttpStatus: status },
+    }
+  } catch {
+    return result
+  }
+}
+
+// Request/file-preparation owners only; delivery-time and provider codes do not
+// belong here. Missing files retain their existing not_found category.
+const VAULT_FILE_FAILURE_CODES = [
+  'ASSISTANT_EXPORT_PACK_RETIREMENT_INVALID',
+  'ASSISTANT_GENERATED_DELIVERY_IDENTITY_REQUIRED',
+  'ASSISTANT_PATH_OUTSIDE_VAULT',
+  'ASSISTANT_VAULT_FILE_CHANNEL_UNSUPPORTED',
+  'ASSISTANT_VAULT_FILE_TARGET_UNAVAILABLE',
+  'ASSISTANT_VAULT_FILE_REF_INVALID',
+  'ASSISTANT_VAULT_FILE_TYPE_UNSUPPORTED',
+  'ASSISTANT_VAULT_FILE_NOT_REGULAR_FILE',
+  'ASSISTANT_VAULT_FILE_SIZE_UNSUPPORTED',
+  'ASSISTANT_VAULT_FILE_PERMISSIONS_UNSAFE',
+  'ASSISTANT_VAULT_FILE_CHANGED_DURING_READ',
+] as const
+
+type VaultFileToolFailureCode = typeof VAULT_FILE_FAILURE_CODES[number]
+
+/** Recognize the existing active-send outcome without invoking a code getter. */
+export function isAlreadyActiveVaultFileSendError(error: unknown): boolean {
+  if (types.isProxy(error) || !(error instanceof VaultCliError)) return false
+  const descriptor = Object.getOwnPropertyDescriptor(error, 'code')
+  return descriptor !== undefined
+    && Object.hasOwn(descriptor, 'value')
+    && descriptor.value === 'ASSISTANT_VAULT_FILE_SEND_ALREADY_ACTIVE'
+}
+
+/** Private source-owned evidence only at the vault-file preparation catch. */
+export function withVaultFileToolFailureDetails(
+  result: MurphDynamicToolExecutionResult,
+  error: unknown,
+): MurphDynamicToolExecutionResult {
+  if (result.rpcResult.success || !result.failureDiagnostic) return result
+  if (typeof error !== 'object' || error === null || types.isProxy(error)) return result
+  try {
+    const descriptor = Object.getOwnPropertyDescriptor(error, 'code')
+    if (!descriptor || !Object.hasOwn(descriptor, 'value')) return result
+    const vaultFileErrorCode = VAULT_FILE_FAILURE_CODES.find((known) => known === descriptor.value)
+    if (vaultFileErrorCode === undefined) return result
+    return {
+      ...result,
+      failureDiagnostic: { ...result.failureDiagnostic, vaultFileErrorCode },
     }
   } catch {
     return result

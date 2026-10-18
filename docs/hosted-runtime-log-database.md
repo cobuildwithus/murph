@@ -1904,6 +1904,33 @@ separate. Propose a behavior correction only after at least two matching
 action/code observations and a deterministic reproduction at the responsible
 owner; telemetry alone does not establish the original cause.
 
+### Private vault-file preparation failure evidence
+
+Only the existing `send-vault-file` execution catch may add the optional
+`vaultFileErrorCode` to its private failure diagnostic and classification issue.
+The value is exact membership in `VAULT_FILE_FAILURE_CODES` in
+`packages/assistant-engine/src/assistant-codex/tool-failure-diagnostics.ts`:
+source-owned request, destination, file-path and staging-preparation rejections.
+Provider codes, delivery-time errors and arbitrary `ASSISTANT_*` names are not
+admitted. Missing, unknown and unallowlisted codes omit the field; missing files
+keep the existing `not_found` category without new detail.
+
+Capture reads only an own data `code` descriptor. It rejects proxies before
+inspection, never invokes accessors or follows prototypes, contexts or causes,
+and retains no error prose, paths, refs, identifiers, arguments, results or
+payloads. The catch also treats proxies as opaque before its existing classifier
+and uses an own data code for the already-active success branch. Ordinary failure
+stage, reason and category are unchanged. The existing already-active success,
+approval handling, RPC text and final action remain unchanged and unannotated.
+
+The existing completion, issue reporter, sanitizer and record parser preserve
+this optional scalar within their existing limits (six classification detail
+keys); older records without it remain valid. It never enters the RPC envelope,
+prompts or tool schemas. No new store, stream, retry or external call is added.
+The field attributes future caught rejections; it neither recovers historical
+causes nor establishes why an argument was chosen or authorizes changed recovery.
+Native completion rows overlap classification rows and are not extra failures.
+
 ### Batch read attribution and connected-app failure status
 
 Parsed batch children for exactly `knowledge show`, `event show` and
