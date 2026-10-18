@@ -25,6 +25,16 @@ Updated: 2026-10-18
 - No added network call, readiness kind, cache, Web or Postgres state, or
   typing order/origin change.
 
+## Product UX (Patch)
+
+- Outcome: a member who messages right after Murph finishes a reply no longer
+  waits for the previous reply's completion bookkeeping before the next job can
+  start on the same warm runner.
+- Reaches: back-to-back messages on a warm runner; messages during running work,
+  recovery of a lost result, and mixed-version rollout keep today's behavior.
+- Proof: composed real controller plus real entrypoint handoff; running-work
+  409; lost-outer-response and stale-callback guards; old-child fallback.
+
 ## Scope
 
 - In scope: container entrypoint admission gates, the settling counter and

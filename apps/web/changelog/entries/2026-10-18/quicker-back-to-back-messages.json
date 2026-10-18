@@ -1,0 +1,20 @@
+{
+  "publishedOn": "2026-10-18",
+  "order": 100,
+  "item": {
+    "id": "quicker-back-to-back-messages",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Quicker starts on back-to-back messages",
+    "summary": "When you message Murph right after it finishes a reply, it can start on your new message without waiting for its bookkeeping on the previous one.",
+    "details": "Messages that arrive while Murph is still working are handled as before, and if it cannot confirm the previous reply has finished, it still waits rather than risk duplicate work.",
+    "relevanceTags": [
+      "messaging",
+      "reliability",
+      "performance"
+    ],
+    "sourcePullRequests": [
+      4191
+    ]
+  }
+}

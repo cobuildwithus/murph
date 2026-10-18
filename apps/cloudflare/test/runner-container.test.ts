@@ -2709,6 +2709,13 @@ describe("RunnerContainer", () => {
     { name: "a fractional settling count", health: { activeJobCount: 1, settlingCompletionCallbackCount: 0.5 }, ready: false },
     { name: "a settling count above the total", health: { activeJobCount: 1, settlingCompletionCallbackCount: 2 }, ready: false },
     { name: "a null settling count", health: { activeJobCount: 1, settlingCompletionCallbackCount: null }, ready: false },
+    { name: "a null total beside a settling count", health: { activeJobCount: null, settlingCompletionCallbackCount: 0 }, ready: false },
+    { name: "a string total beside a settling count", health: { activeJobCount: "1", settlingCompletionCallbackCount: 1 }, ready: false },
+    { name: "a negative total beside a settling count", health: { activeJobCount: -1, settlingCompletionCallbackCount: 0 }, ready: false },
+    { name: "a fractional total beside a settling count", health: { activeJobCount: 1.5, settlingCompletionCallbackCount: 1 }, ready: false },
+    { name: "an unsafe total beside a settling count", health: { activeJobCount: 2 ** 53, settlingCompletionCallbackCount: 2 ** 53 }, ready: false },
+    { name: "a missing total beside a settling count", health: { activeJobCount: undefined, settlingCompletionCallbackCount: 0 }, ready: false },
+    { name: "an idle older child", health: { activeJobCount: 0 }, ready: true },
   ])("admits a warm runner reporting $name only when nothing else is busy", async ({ health, ready }) => {
     const containerFetch = vi.fn(async () => new Response(JSON.stringify({
       ...createRunnerHealthResult(), ...health,
@@ -9746,6 +9753,23 @@ describe("RunnerContainer", () => {
       "http://container/health",
       expect.objectContaining({ method: "GET" }),
     );
+    expect(destroy).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not idle-stop a child while a finished job's completion callback is settling", async () => {
+    let health: Record<string, unknown> = { activeJobCount: 1, settlingCompletionCallbackCount: 1 };
+    const containerFetch = vi.fn(async () => new Response(JSON.stringify({
+      ...createRunnerHealthResult(), ...health,
+    }), { headers: { "content-type": "application/json; charset=utf-8" }, status: 200 }));
+    const destroy = vi.fn(async () => {});
+    const { container } = createContainerDouble({ containerFetch, destroy, initialStatus: "running" });
+
+    await expect(container.onActivityExpired()).resolves.toBeUndefined();
+    // Lifetime work still includes the settling callback, so idle cleanup waits.
+    expect(destroy).not.toHaveBeenCalled();
+
+    health = { activeJobCount: 0, settlingCompletionCallbackCount: 0 };
+    await expect(container.onActivityExpired()).resolves.toBeUndefined();
     expect(destroy).toHaveBeenCalledTimes(1);
   });
 

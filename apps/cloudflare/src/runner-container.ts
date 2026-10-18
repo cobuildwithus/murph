@@ -5000,16 +5000,21 @@ interface RunnerContainerHealthMetadata {
 
 // activeJobCount includes finished jobs whose completion callback is still
 // settling. Children that report that subset let a new job in alongside it;
-// older children fall back to the total, and a malformed subset stays busy.
+// older children keep the total-only check, and a malformed pair stays busy.
 function readRunnerContainerAdmissionBusy(payload: Record<string, unknown>): boolean {
   const total = payload.activeJobCount;
-  if (typeof total !== "number") return false;
-  if (!("settlingCompletionCallbackCount" in payload)) return total > 0;
+  if (!("settlingCompletionCallbackCount" in payload)) {
+    return typeof total === "number" && total > 0;
+  }
   const settling = payload.settlingCompletionCallbackCount;
-  if (typeof settling !== "number" || !Number.isSafeInteger(settling) || settling < 0 || settling > total) {
+  if (!isRunnerContainerCount(total) || !isRunnerContainerCount(settling) || settling > total) {
     return true;
   }
   return total - settling > 0;
+}
+
+function isRunnerContainerCount(value: unknown): value is number {
+  return Number.isSafeInteger(value) && (value as number) >= 0;
 }
 
 function readRunnerContainerHealthMetadata(
