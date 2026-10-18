@@ -58,6 +58,8 @@ in [the import-speed plan](exec-plans/completed/2026-09-24-garmin-import-speed.m
 
 Published plan-closer adoption and installed-wrapper proof are tracked in
 [the repo-tools adoption plan](exec-plans/completed/2026-10-18-frog-plan-closer-adoption-4178.md).
+Dependency review source inclusion is tracked in
+[the source-context plan](exec-plans/completed/2026-10-18-frog-repo-tools-review-source-4178.md).
 
 Private vault-file preparation failure evidence is owned by
 [`the runtime telemetry contract`](../docs/hosted-runtime-log-database.md#private-vault-file-preparation-failure-evidence);

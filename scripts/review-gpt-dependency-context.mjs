@@ -6,7 +6,8 @@ import { pathToFileURL } from 'node:url';
 import { gunzipSync } from 'node:zlib';
 import { sensitiveFilenameRule } from './release-artifact-secret-guard.mjs';
 
-const changedPatchPattern = /^patches\/@cobuild__review-gpt@[^/]+\.patch$/;
+const supportedPackageSlugs = ['review-gpt', 'repo-tools'];
+const changedPatchPattern = /^patches\/@cobuild__(review-gpt|repo-tools)@[^/]+\.patch$/;
 const maxCompressedBytes = 2 * 1024 * 1024;
 const maxExpandedBytes = 4 * 1024 * 1024;
 const maxFileBytes = 2 * 1024 * 1024;
@@ -20,15 +21,17 @@ function readLockSection(lockfile, name) {
   return remainder.split(/^\S/m, 1)[0];
 }
 
-export function readReviewGptRegistryInput(lockfile) {
+export function readReviewGptRegistryInput(lockfile, packageSlug = 'review-gpt') {
+  if (!supportedPackageSlugs.includes(packageSlug)) throw new Error('Review dependency package is not supported.');
+  const packageEntry = new RegExp(`^  '@cobuild/${packageSlug}@([^']+)':\\r?\\n((?: {4}[^\\n]*\\n|\\s*\\n)*)`, 'gm');
   const patched = readLockSection(lockfile, 'patchedDependencies');
-  const patches = [...patched.matchAll(/^  '@cobuild\/review-gpt@([^']+)':\r?\n((?: {4}[^\n]*\n|\s*\n)*)/gm)];
+  const patches = [...patched.matchAll(packageEntry)];
   if (patches.length !== 1) throw new Error('Review dependency requires one exact patched package entry.');
   const version = patches[0][1];
   if (!/^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/.test(version)) {
     throw new Error('Review dependency requires an exact stable package version.');
   }
-  const patchPath = `patches/@cobuild__review-gpt@${version}.patch`;
+  const patchPath = `patches/@cobuild__${packageSlug}@${version}.patch`;
   const patchPaths = [...patches[0][2].matchAll(/^    path: (.+)\r?$/gm)];
   if (patchPaths.length !== 1 || patchPaths[0][1] !== patchPath) {
     throw new Error('Review dependency patch path does not match the locked package version.');
@@ -36,7 +39,7 @@ export function readReviewGptRegistryInput(lockfile) {
   const patchHashes = [...patches[0][2].matchAll(/^    hash: ([a-f0-9]{64})\r?$/gm)];
   if (patchHashes.length !== 1) throw new Error('Review dependency requires one exact patch hash.');
   const packages = readLockSection(lockfile, 'packages');
-  const entries = [...packages.matchAll(/^  '@cobuild\/review-gpt@([^']+)':\r?\n((?: {4}[^\n]*\n|\s*\n)*)/gm)]
+  const entries = [...packages.matchAll(packageEntry)]
     .filter((entry) => entry[1] === version);
   if (entries.length !== 1) throw new Error('Review dependency requires one exact locked package entry.');
   const match = /^    resolution: \{integrity: (sha512-[A-Za-z0-9+/]{86}==)\}\r?$/m.exec(entries[0][2]);
@@ -61,7 +64,7 @@ async function downloadRegistryPackage(registryUrl, fetchImpl) {
   return Buffer.concat(parts);
 }
 
-function readRegularPackageFiles(tarPath, version) {
+function readRegularPackageFiles(tarPath, version, packageSlug) {
   const runTar = (args, maxBuffer = maxExpandedBytes) => execFileSync('tar', args, {
     timeout: 5_000, maxBuffer, stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -86,37 +89,29 @@ function readRegularPackageFiles(tarPath, version) {
   });
   const manifest = files.find((file) => file.name === 'package/package.json');
   const identity = manifest && JSON.parse(manifest.bytes.toString('utf8'));
-  if (identity?.name !== '@cobuild/review-gpt' || identity?.version !== version) {
+  if (identity?.name !== `@cobuild/${packageSlug}` || identity?.version !== version) {
     throw new Error('Review dependency archive has the wrong package identity.');
   }
   return files;
 }
 
-export async function addReviewGptDependencyContext({
-  head, changedFiles, contextDir, repoRoot = process.cwd(), fetchImpl = fetch,
+async function addDependencyVersion({
+  head, sourceHead, role, packageSlug, contextDir, fetchImpl, git, input,
 }) {
-  const changedPaths = changedFiles.split(/\r?\n/);
-  if (!changedPaths.some((name) => changedPatchPattern.test(name))) return false;
-  if (!/^[a-f0-9]{40}$/.test(head)) throw new Error('Review dependency requires an exact reviewed head.');
-  const git = (args) => execFileSync('git', args, {
-    cwd: repoRoot, timeout: 5_000, maxBuffer: maxExpandedBytes, stdio: ['ignore', 'pipe', 'pipe'],
-  });
-  const lockfile = git(['show', `${head}:pnpm-lock.yaml`]);
-  const { version, patchPath, patchHash, integrity } = readReviewGptRegistryInput(lockfile.toString('utf8'));
-  if (!changedPaths.includes(patchPath)) return false;
-  const patch = git(['show', `${head}:${patchPath}`]);
+  const { version, patchPath, patchHash, integrity } = input;
+  const patch = git(['show', `${sourceHead}:${patchPath}`]);
   if (hash(patch) !== patchHash) throw new Error('Review dependency patch bytes do not match the reviewed lockfile hash.');
-  const registryUrl = `https://registry.npmjs.org/@cobuild/review-gpt/-/review-gpt-${version}.tgz`;
+  const registryUrl = `https://registry.npmjs.org/@cobuild/${packageSlug}/-/${packageSlug}-${version}.tgz`;
   const archive = await downloadRegistryPackage(registryUrl, fetchImpl);
   if (`sha512-${hash(archive, 'sha512', 'base64')}` !== integrity) {
     throw new Error('Review dependency registry bytes do not match the reviewed lockfile integrity.');
   }
   const tarBytes = gunzipSync(archive, { maxOutputLength: maxExpandedBytes });
   // The existing packager owns this temporary parent and its EXIT cleanup.
-  const tarPath = path.join(path.dirname(contextDir), 'review-gpt-registry.tar');
+  const tarPath = path.join(path.dirname(contextDir), `${role}-${packageSlug}-registry.tar`);
   await writeFile(tarPath, tarBytes, { flag: 'wx', mode: 0o600 });
-  const files = readRegularPackageFiles(tarPath, version);
-  const destination = path.join(contextDir, 'dependencies', `review-gpt-${version}`);
+  const files = readRegularPackageFiles(tarPath, version, packageSlug);
+  const destination = path.join(contextDir, 'dependencies', role === 'base' ? 'base' : '', `${packageSlug}-${version}`);
   await mkdir(path.dirname(destination), { recursive: true });
   await mkdir(destination);
   for (const file of files) {
@@ -126,24 +121,49 @@ export async function addReviewGptDependencyContext({
   }
   await writeFile(path.join(destination, 'murph.patch'), patch, { flag: 'wx' });
   await writeFile(path.join(destination, 'provenance.json'), `${JSON.stringify({
-    schemaVersion: 1, package: `@cobuild/review-gpt@${version}`, reviewedHead: head, registryUrl,
-    lockfileBlob: git(['rev-parse', `${head}:pnpm-lock.yaml`]).toString('utf8').trim(),
+    schemaVersion: 1, package: `@cobuild/${packageSlug}@${version}`, reviewedHead: head, sourceHead, role, registryUrl,
+    lockfileBlob: git(['rev-parse', `${sourceHead}:pnpm-lock.yaml`]).toString('utf8').trim(),
     integrity, compressedBytes: archive.length, patchPath, patchSha256: hash(patch),
     files: files.map(({ name, bytes }) => ({ path: name, bytes: bytes.length, sha256: hash(bytes) })),
   }, null, 2)}\n`, { flag: 'wx' });
   await writeFile(path.join(destination, 'README.md'),
-    '# Exact ReviewGPT dependency source\n\n'
-    + 'The package directory contains every unmodified regular file from the public registry tarball verified against the reviewed commit\'s lockfile. No install or lifecycle script ran. The provenance manifest records each file hash.\n\n'
-    + 'To inspect Murph\'s patched dependency, copy this directory to scratch, enter `package` outside any Git checkout, then run `git apply --check ../murph.patch` followed by `git apply ../murph.patch`. The patch is the exact reviewed commit\'s patch.\n',
+    `# Exact @cobuild/${packageSlug} dependency source (${role})\n\n`
+    + 'The package directory contains every unmodified regular file from the public registry tarball verified against the recorded source commit\'s lockfile. No install or lifecycle script ran. The provenance manifest records each file hash.\n\n'
+    + 'To inspect Murph\'s patched dependency, copy this directory to scratch, enter `package` outside any Git checkout, then run `git apply --check ../murph.patch` followed by `git apply ../murph.patch`. The patch is the exact recorded source commit\'s patch.\n',
     { flag: 'wx' });
-  return true;
+}
+
+export async function addReviewGptDependencyContext({
+  head, baseHead, changedFiles, contextDir, repoRoot = process.cwd(), fetchImpl = fetch,
+}) {
+  const changedPaths = changedFiles.split(/\r?\n/);
+  const packages = new Set(changedPaths.map((name) => changedPatchPattern.exec(name)?.[1]).filter(Boolean));
+  if (packages.size === 0) return false;
+  if (![head, ...(baseHead ? [baseHead] : [])].every((ref) => /^[a-f0-9]{40}$/.test(ref))) {
+    throw new Error('Review dependency requires an exact reviewed head and base.');
+  }
+  const git = (args) => execFileSync('git', args, {
+    cwd: repoRoot, timeout: 5_000, maxBuffer: maxExpandedBytes, stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  let added = false;
+  for (const packageSlug of packages) {
+    const input = readReviewGptRegistryInput(git(['show', `${head}:pnpm-lock.yaml`]).toString('utf8'), packageSlug);
+    if (!changedPaths.includes(input.patchPath)) continue;
+    await addDependencyVersion({ head, sourceHead: head, role: 'head', packageSlug, contextDir, fetchImpl, git, input });
+    if (baseHead) {
+      const baseInput = readReviewGptRegistryInput(git(['show', `${baseHead}:pnpm-lock.yaml`]).toString('utf8'), packageSlug);
+      await addDependencyVersion({ head, sourceHead: baseHead, role: 'base', packageSlug, contextDir, fetchImpl, git, input: baseInput });
+    }
+    added = true;
+  }
+  return added;
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   try {
-    const [head, changedFilePath, contextDir, ...extra] = process.argv.slice(2);
-    if (!head || !changedFilePath || !contextDir || extra.length) throw new Error('Review dependency context arguments are incomplete.');
-    await addReviewGptDependencyContext({ head, changedFiles: await readFile(changedFilePath, 'utf8'), contextDir });
+    const [head, changedFilePath, contextDir, baseHead, ...extra] = process.argv.slice(2);
+    if (!head || !changedFilePath || !contextDir || !baseHead || extra.length) throw new Error('Review dependency context arguments are incomplete.');
+    await addReviewGptDependencyContext({ head, baseHead, changedFiles: await readFile(changedFilePath, 'utf8'), contextDir });
   } catch (error) {
     // Child command errors can contain machine paths; expose only our finite diagnostics.
     console.error(error instanceof Error && error.message.startsWith('Review dependency ')

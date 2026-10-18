@@ -175,15 +175,18 @@ expected attachments must survive onto the exact accepted user turn before the
 review receipt can be used. This adds context to the existing review owner; it
 does not start a separate review or satisfy another PR's exact-head gate.
 
-### Review patched ReviewGPT dependency source
+### Review patched tooling dependency source
 
-When a PR changes the locked ReviewGPT dependency patch, the canonical packager
-adds all registry package files under `review-gpt-pr-context/dependencies/`.
-It verifies the reviewed commit’s registry integrity before expanding bounded
-regular files and records file hashes plus the exact patch in that context.
-Use the included reconstruction instructions to inspect complete dependency
-owners. This source is part of the guarded snapshot; no inline encoded package
-or separate unguarded archive is needed.
+When a PR changes a locked `@cobuild/review-gpt` or `@cobuild/repo-tools` patch,
+the canonical packager adds the exact registry package and patch from the
+reviewed head under `review-gpt-pr-context/dependencies/`, and the base version
+under `dependencies/base/`. These are the only supported dependency packages.
+Each version must match its source commit’s registry integrity and patch hash;
+only bounded regular files pass the existing archive and privacy checks.
+Provenance records the reviewed head, source commit, role, and individual file
+hashes. Use the included reconstruction instructions to compare complete
+patched owners. This source is part of the guarded snapshot; no inline encoded
+package or separate unguarded archive is needed.
 
 ## Finding Disposition Boundary
 
