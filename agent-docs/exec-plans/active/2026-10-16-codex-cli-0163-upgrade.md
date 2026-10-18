@@ -179,7 +179,23 @@ Updated: 2026-10-18
   the steered reply and an ignoring provider falls back to the queued result.
 - Cloudflare egress/image parity passed (22 tests) and assistant-engine
   typecheck passed after edits.
+- The documented CLI-upgrade matrix plus steering, journal, and live-input
+  suites (16 files) passed on rebuilt runtime artifacts: 734 passed, 30 opt-in
+  skips. A first run had two list-limit failures caused only by pre-merge CLI
+  `dist`; `pnpm build:test-runtime:prepared` fixed them without source changes.
+  Hosted runtime Codex-config/turn-input suites passed (104). The opt-in shared
+  schema first-input measurement passed for all four cases on the merged tree.
+- Main advanced to `de9a56bf` (#4187, #4190: friction sync and runner-container
+  startup context); a second ordinary merge was clean (`40b9c828`). On that head
+  the patch verifier, doc gardening/drift, Cloudflare parity and runner-container
+  suites (323), and the 17 targeted steering/transport tests passed.
+- Focused live journey `instant steer: correction mid-answer replaces the stale
+  reply` (`pnpm test:assistant:live -- --test 'instant steer: correction
+  mid-answer'`, gpt-6.1-sol, local subscription, no tools): the steer was sent
+  while the answer streamed, zero stale segments, one corrected swimming reply.
+  Reply review: Ready. A stochastic pass for this model and run only.
 - Not yet proven: native compilation and tests of the regenerated patch (no local
-  Rust toolchain), patched-binary runs of the new WebSocket cases, native AMD64
-  runner image/permission smoke, hosted-local scenarios, payload measurements on
-  the merged head, focused live journeys, ReviewGPT, and exact-head CI. Hold.
+  Rust toolchain; the local container runtime is stopped and was not started),
+  patched-binary runs of the new WebSocket cases, native AMD64 runner
+  image/permission smoke, hosted-local scenarios, the changelog entry, ReviewGPT,
+  and exact-head CI. Hold.
