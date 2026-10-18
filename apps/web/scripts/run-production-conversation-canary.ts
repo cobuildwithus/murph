@@ -20,6 +20,7 @@ const CANARY_RESET_PATH =
 const CANARY_OUTCOME_PATH =
   "/api/internal/hosted-onboarding/linq/production-canary/outcome";
 const CANARY_REPLY_BUDGET_MS = 20_000;
+const CANARY_REPLY_OBSERVATION_COUNT_MAX = 10_000;
 export const CANARY_REPLY_WAIT_MS = 90_000;
 export const CANARY_RESET_TIMEOUT_MS = 300_000;
 // Observe the normal quiet window plus bounded checkpoint/publication time.
@@ -48,6 +49,23 @@ type LinqProductionCanaryTurnResult = {
   stage: (typeof CANARY_TURNS)[number]["stage"];
   turn: number;
 };
+
+type LinqProductionCanaryReplyObservation = {
+  reason: "timeout" | "stream-ended" | "stream-failed";
+  observedCount: number;
+  rejectedCount: number;
+};
+
+class LinqProductionCanaryReplyUnavailableError extends Error {
+  constructor(readonly observation: LinqProductionCanaryReplyObservation) {
+    super("The Linq production canary failed.");
+    this.name = `reply-unavailable${formatCanaryReplyObservation(observation)}`;
+  }
+}
+
+function formatCanaryReplyObservation(observation: LinqProductionCanaryReplyObservation): string {
+  return `; reason=${observation.reason}; observed_count=${observation.observedCount}; rejected_count=${observation.rejectedCount}`;
+}
 
 export async function runLinqProductionCanary(
   source: NodeJS.ProcessEnv = process.env,
@@ -93,8 +111,10 @@ export async function runLinqProductionCanary(
         throwCanaryFailure("send-unconfirmed");
       }
       const senderSendMs = Math.round(performance.now() - sentAt);
-      const reply = await replyPromise.catch(() => {
-        throwCanaryFailure(`reply-unavailable; turn=${turn}; stage=${stage}; wait_limit_ms=${CANARY_REPLY_WAIT_MS}`);
+      const reply = await replyPromise.catch((error: unknown) => {
+        const observation = error instanceof LinqProductionCanaryReplyUnavailableError
+          ? formatCanaryReplyObservation(error.observation) : "";
+        throwCanaryFailure(`reply-unavailable; turn=${turn}; stage=${stage}; wait_limit_ms=${CANARY_REPLY_WAIT_MS}${observation}`);
       });
       const replyAt = performance.now();
       const latencyMs = Math.round(replyAt - sentAt);
@@ -143,8 +163,13 @@ export async function waitForLinqProductionCanaryReply(input: {
   timeoutMs: number;
   userId: string;
 }): Promise<string> {
+  let observedCount = 0;
+  let rejectedCount = 0;
+  // Identity-only markers cannot be confused with provider error names or values.
+  const timeoutFailure = Symbol();
+  const streamEndFailure = Symbol();
   const timeout = new Promise<never>((_resolve, reject) => {
-    setTimeout(() => reject(new Error("canary-reply-timeout")), input.timeoutMs)
+    setTimeout(() => reject(timeoutFailure), input.timeoutMs)
       .unref();
   });
 
@@ -152,8 +177,9 @@ export async function waitForLinqProductionCanaryReply(input: {
     while (true) {
       const next = await input.inbound.next();
       if (next.done) {
-        throwCanaryFailure("message-stream-ended");
+        throw streamEndFailure;
       }
+      observedCount = Math.min(observedCount + 1, CANARY_REPLY_OBSERVATION_COUNT_MAX);
       const [space, message] = next.value;
       if (
         space.id !== input.spaceId
@@ -164,6 +190,7 @@ export async function waitForLinqProductionCanaryReply(input: {
         || !Number.isFinite(message.timestamp.getTime())
         || message.timestamp.getTime() < input.notBeforeEpochMs
       ) {
+        rejectedCount = Math.min(rejectedCount + 1, CANARY_REPLY_OBSERVATION_COUNT_MAX);
         continue;
       }
       return message.content.text.trim();
@@ -172,8 +199,13 @@ export async function waitForLinqProductionCanaryReply(input: {
 
   try {
     return await Promise.race([nextReply, timeout]);
-  } catch {
-    throwCanaryFailure("reply-unavailable");
+  } catch (error: unknown) {
+    throw new LinqProductionCanaryReplyUnavailableError({
+      reason: error === timeoutFailure ? "timeout"
+        : error === streamEndFailure ? "stream-ended" : "stream-failed",
+      observedCount,
+      rejectedCount,
+    });
   }
 }
 
