@@ -75,7 +75,7 @@ export interface GameInviteeLabel {
 // entryId) or state (accepting twice, redeeming twice), so retries are safe.
 //
 // POST /media takes a photo's raw bytes (Content-Type image/jpeg or
-// image/heic; 8 MB max) and returns { mediaKey }. The key is derived from the
+// image/heic; 4 MiB max) and returns { mediaKey }. The key is derived from the
 // bytes, so uploading the same file again returns the same key.
 
 /** PUT /me/profile */
