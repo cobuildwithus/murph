@@ -1,6 +1,6 @@
 # Stop blocking admission on a finished job's completion callback
 
-Status: active
+Status: completed
 Created: 2026-10-18
 Updated: 2026-10-18
 
@@ -65,3 +65,21 @@ Updated: 2026-10-18
   composed handoff, runner-container readiness, completion and controller
   suites; mutation checks of both sides; `pnpm complexity:diff`;
   `runner:bundle`; docs drift.
+
+## Completion evidence
+
+- Implementation and parent candidate/final source review are complete. Final
+  ReviewGPT round 1 passed at `bf86d3d2727c36dc5098bdb329e1418f526a495a`
+  with no qualifying findings. The exact accepted turn, snapshot, response
+  hash, GPT-6 Pro request and completion were verified.
+- Focused proof passes: readiness/fleet 351 tests; handoff/entrypoint/abort
+  92; supervised invocation/callback 34; completion router 47; lost-outer
+  recovery 1; runner bundle 17; Web owner route 13; changelog 11. Typecheck,
+  complexity, bundle budget and docs drift pass. Database-backed canonical
+  owner proof passed in CI.
+- Product UX result: Ready. Callback-only admission, real running work, lost
+  result recovery and mixed-version fallback are covered.
+- This closure changes documentation only. Final-head CI, merge, coordinated
+  canonical release and bounded natural observation remain tracked by PR #4191.
+  No production latency improvement is claimed by the synthetic evidence.
+Completed: 2026-10-18

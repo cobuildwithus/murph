@@ -193,7 +193,7 @@ Late runtime telemetry retirement semantics are owned by
 
 Admitting the next job beside a settling completion callback is owned by
 `references/hosted-postgres-runtime.md` and tracked in
-[the completion-callback admission plan](exec-plans/active/2026-10-18-completion-callback-admission.md).
+[the completion-callback admission plan](exec-plans/completed/2026-10-18-completion-callback-admission.md).
 
 Structured provider failure diagnostic preservation is tracked in
 [the telemetry plan](exec-plans/completed/2026-10-09-structured-provider-failure-telemetry.md);
