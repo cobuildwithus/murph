@@ -129,7 +129,7 @@ async function addDependencyVersion({
   await writeFile(path.join(destination, 'README.md'),
     `# Exact @cobuild/${packageSlug} dependency source (${role})\n\n`
     + 'The package directory contains every unmodified regular file from the public registry tarball verified against the recorded source commit\'s lockfile. No install or lifecycle script ran. The provenance manifest records each file hash.\n\n'
-    + 'To inspect Murph\'s patched dependency, copy this directory to scratch, enter `package` outside any Git checkout, then run `git apply --check ../murph.patch` followed by `git apply ../murph.patch`. The patch is the exact recorded source commit\'s patch.\n',
+    + 'To inspect Murph\'s patched dependency, copy this directory to scratch, enter `package` outside any Git checkout, then run `git apply --check --unidiff-zero ../murph.patch` followed by `git apply --unidiff-zero ../murph.patch`. The patch is the exact recorded source commit\'s patch.\n',
     { flag: 'wx' });
 }
 
