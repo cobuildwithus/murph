@@ -421,6 +421,18 @@ describe.skipIf(!enabled)("Postgres runtime ownership", () => {
     }
   });
 
+  it("authorizes deletion for a member who never had a hosted runtime (a game-only player)", async () => {
+    const userId = await member();
+    expect(await observer.hostedRuntimeOwner.findUnique({ where: { userId } })).toBeNull();
+    expect(await observer.hostedWorkspace.findUnique({ where: { userId } })).toBeNull();
+    await observer.hostedMember.delete({ where: { id: userId } });
+
+    expect(await executeHostedRuntimeOwnerCommand({ prisma: first, userId, command: { operation: "reconcile" } }))
+      .toMatchObject({ cutover: "postgres", owner: null, status: "observed" });
+    expect(await executeHostedRuntimeOwnerCommand({ prisma: first, userId, command: { operation: "deletion_ready" } }))
+      .toMatchObject({ cutover: "postgres", status: "authorized" });
+  });
+
   it("recovers uncertain media uploads by exact provider abort before deleted-member cleanup", async () => {
     const userId = await member();
     const owner = (await claim(userId)).owner;

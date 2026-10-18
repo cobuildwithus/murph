@@ -5,7 +5,7 @@ import { controlPostgresRuntimeVoice, deletePostgresRunnerUserData, readPostgres
 import { commandHostedRuntimeOwner } from "../src/runtime-owner-client.ts";
 import { fetchHostedExecutionWebControlPlaneResponse } from "../src/web-control-plane.ts";
 import { createHostedExecutionTestEnv } from "./hosted-execution-fixtures.ts";
-import { hostedMediaObjectKey } from "../src/storage-paths.ts";
+import { hostedGameMediaObjectKey, hostedMediaObjectKey } from "../src/storage-paths.ts";
 import { MemoryEncryptedR2Bucket } from "./test-helpers.ts";
 
 vi.mock("../src/runtime-owner-client.ts", () => ({ commandHostedRuntimeOwner: vi.fn() }));
@@ -119,6 +119,23 @@ describe("Postgres runtime user controls", () => {
       stateOwner: "postgres", runtimeStateCleared: true, r2: { deletedObjectCount: 1 },
       durableObject: { stateDeleted: false, deleteAllCompleted: false, alarmCleared: false } });
     expect(await h.source.BUNDLES.get(key)).toBeNull();
+  });
+
+  it("deletes a game-only member's photos though they never had a runtime", async () => {
+    const h = harness();
+    vi.mocked(commandHostedRuntimeOwner).mockImplementation(async ({ command }) => ({ cutover: "postgres",
+      status: command.operation === "deletion_ready" ? "authorized" : "observed", owner: null }));
+    const photos = await Promise.all(["a", "b"].map((digit) =>
+      hostedGameMediaObjectKey({ userId: h.userId, mediaId: `${digit.repeat(64)}.jpg` })));
+    const otherPlayer = await hostedGameMediaObjectKey({ userId: "synthetic-other-player", mediaId: `${"a".repeat(64)}.jpg` });
+    for (const key of [...photos, otherPlayer]) await h.source.BUNDLES.put(key, "synthetic-sealed-photo");
+
+    expect(await deletePostgresRunnerUserData(h.source, h.userId)).toMatchObject({ ok: true,
+      stateOwner: "postgres", runtimeStateCleared: true, r2: { deletedObjectCount: 2, supported: true } });
+    for (const key of photos) expect(await h.source.BUNDLES.get(key)).toBeNull();
+    expect(await h.source.BUNDLES.get(otherPlayer)).not.toBeNull();
+    expect(h.source.RUNNER_CONTAINER.getByName).not.toHaveBeenCalled();
+    expect(vi.mocked(commandHostedRuntimeOwner).mock.calls.map(([input]) => input.command.operation)).toEqual(["reconcile", "deletion_ready"]);
   });
 
   it("preserves R2 data when independent uploads have not drained", async () => {
