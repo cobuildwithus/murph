@@ -4,15 +4,17 @@
   "item": {
     "id": "dated-sleep-history-reads",
     "kind": "improvement",
-    "priority": 1,
-    "title": "Sleep history for specific dates skips unrelated history",
-    "summary": "When Murph looks up your sleep for a specific night or date range, it now reads only the stored wearable summaries for those dates instead of your full history.",
+    "priority": 3,
+    "title": "Faster sleep lookups for specific dates",
+    "summary": "Murph can check a particular night or date range without reading unrelated dates from your sleep history.",
     "details": "Your sleep results, including how Murph reconciles overlapping devices, stay the same. Requests without dates work as before, and after new wearable data arrives Murph still refreshes your summaries before answering.",
     "relevanceTags": [
       "wearables",
       "sleep",
       "performance"
     ],
-    "sourcePullRequests": []
+    "sourcePullRequests": [
+      4181
+    ]
   }
 }
