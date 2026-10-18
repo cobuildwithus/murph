@@ -2,6 +2,8 @@ Hosted live-journey configuration is owned by `../packages/assistant-engine/READ
 shared behavior and permission proof are tracked in
 [the hosted journey repair plan](exec-plans/completed/2026-10-16-frog-hosted-live-config-4144.md).
 Authentication preservation follow-on: [implementation proof](exec-plans/completed/2026-10-16-frog-hosted-auth-store-4144.md).
+Captured vault-share offer failure diagnostics are tracked in
+[the active diagnostic plan](exec-plans/active/2026-10-18-vault-share-failure-diagnostics.md).
 
 Sleep-pattern focused freshness implementation and parent-verified results are recorded in
 [the completed sleep-pattern plan](exec-plans/completed/2026-10-09-sleep-pattern-focused-freshness.md).

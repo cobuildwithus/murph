@@ -2625,6 +2625,9 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         component: "runtime",
         details: {
           requestId,
+          ...(vaultShareOffer.failureReason
+            ? { vaultShareOfferFailureReason: vaultShareOffer.failureReason }
+            : {}),
           vaultShareOfferOutcome: vaultShareOffer.outcome,
         },
         level: "warn",

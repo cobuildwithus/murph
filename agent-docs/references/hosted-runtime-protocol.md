@@ -514,6 +514,16 @@ continuation. Unknown crypto/provider, access-query, database, or transaction
 errors use the ordinary delivery-failed response and stop current destination
 fanout plus the undispatched scope suffix. Deadline exhaustion, an unmarked proxy
 response, transport loss, or an owner-ending condition likewise stops the suffix.
+The existing `Hosted vault-share projection offer failed; continuing wake.`
+warning may include one optional `vaultShareOfferFailureReason` from the captured
+offer: `serialized_projection_too_large` for the existing serialized size gate,
+`delivery_exception` for its existing delivery catch (including response-contract
+errors), or `scope_failed` when explicit scope failures determine the aggregate
+error. A later size-gate or delivery exception takes precedence over an earlier
+scope failure; preemption and other non-error outcomes carry no reason. Earlier
+discovery, restore, or capture failures omit this offer-specific field. It adds
+only fixed literals to that warning, without payload or error details or changes
+to delivery, continuation, or warning count and severity.
 Web performs
 encryption before taking a short `hosted_workspace` row lock, then replaces the
 exact active share generation only when the locked version still matches. The
