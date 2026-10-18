@@ -199,3 +199,32 @@ Updated: 2026-10-18
   patched-binary runs of the new WebSocket cases, native AMD64 runner
   image/permission smoke, hosted-local scenarios, the changelog entry, ReviewGPT,
   and exact-head CI. Hold.
+
+### Candidate review and refreshed evidence
+
+- Minimality review: completed-stream tracking stays the owner fix. Clearing all
+  streams at the boundary would also drop completed non-final assistant text that
+  existing fallback can use, so only never-completed items are removed. The two
+  loops moved into named closures beside the existing fallback helper; `pnpm
+  complexity:diff` now passes with `assistant-codex.ts` debt unchanged (181).
+- Test trimming: the no-reply code-mode test sends no interrupt, so it is one
+  default-config case, and the normal-completion lifetime variants collapsed to
+  one default case; debug-only provider diagnostics were removed. The remaining
+  four cases still pass.
+- The permission-sandbox lane now also runs the SSE preemption, explicit-disable,
+  and empty-reply cases against the extracted patched binary, because the native
+  patch changes config loading and the Responses WebSocket client. Workflow
+  guards (image contract 11, PR CI policy 25) pass.
+- Complete first provider input, merged head source, identical synthetic
+  fixtures, stock 0.160.0 versus 0.163.0 binaries, only `prompt_cache_key`
+  excluded, no exact tokenizer available: direct native 163,815 -> 163,846
+  (+31, +0.02%); direct code-only 156,347 -> 159,769 (+3,422, +2.19%); group
+  native 144,638 -> 144,669 (+31, +0.02%); group code-only 133,303 -> 136,725
+  (+3,422, +2.57%). Murph's own change adds no provider-visible content.
+- The pinned codeload tarball for `83086188` matches the Dockerfile checksum.
+- Main advanced to `dafcaf45` (#4180, web only); third ordinary merge was clean.
+- Hosted-local: public PR CI is fixture-only by design, and no authorized
+  pre-merge path runs real hosted-local scenarios on this image without local
+  Docker. Protected `release_admission` runs the five production-core lanes on
+  merged main before production; media/tool delivery and prompt-cache scenarios
+  are not part of that set.

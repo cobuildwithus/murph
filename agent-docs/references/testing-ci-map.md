@@ -883,8 +883,9 @@ the request falls back to the queued result with the completed stale segment.
 stub that streams unfinished text and records dropped responses: preemption,
 the explicit-disable baseline, rapid successive steers, empty, media-only, and
 no-reply replacements without stale text, a steer past a slow in-flight nested
-tool with one effect, and `code_mode_interrupt` true/false proof that no
-yielded cell carries a nested Murph tool into the next turn. Run them with
+tool with one effect, and interrupted (`code_mode_interrupt` true and false),
+no-reply, and normal-completion patterns in which a yielded cell's later nested
+Murph tool call never reaches the next turn. Run them with
 `-t 'unfinished|instant steering|rapid successive|media-only reply free|steered no-reply|slow in-flight nested|no-reply code-mode cell|never carries a yielded cell'`.
 These run on the npm helper in the ordinary lane. The permission-sandbox lane
 also runs the WebSocket cases and the SSE preemption, explicit-disable, and

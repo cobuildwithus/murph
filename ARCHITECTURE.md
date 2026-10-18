@@ -4210,8 +4210,9 @@ delivers as an ordinary preceding segment exactly as before. Preemption does not
 abort tool calls already issued; a code-mode `exec` or `wait` yields its running
 cell so the steer reaches the model while the effect finishes once. An
 interrupted turn stops its code-mode cells, and App Server aborts a finished
-turn's pending server requests, so no cell carries a nested Murph tool into a
-later turn. Text streamed for an answer item that never completed is discarded
+turn's pending server requests; in the tested interrupted, no-reply, and
+normal-completion patterns a yielded cell's later nested Murph tool call never
+reached the next turn. Text streamed for an answer item that never completed is discarded
 at the steered user-message boundary and cannot become reply fallback text.
 Admission rules, the 50-message cap, first-response closure, journaling, and
 delivery are unchanged, and a dropped stream is not evidence that provider
