@@ -1,4 +1,5 @@
 import { readHostedDelegationHintOverrides } from './support/hosted-delegation-hints.js'
+import { materializeRegimenLabelFixture, REGIMEN_FUZZY_FOOD_NAMES, REGIMEN_LABEL_SCENARIOS, REGIMEN_SHAKE_TOTALS } from './support/supplement-regimen-label-fixture.js'
 import { seedImportedRecallMeal, seedImportedRecallPhoto, SYNTHETIC_IMPORTED_MEAL } from './support/imported-record-recall-fixture.js'
 import { buildHostedVaultShareProjectionScopeKey } from '@murphai/hosted-execution/vault-share'
 import { observesAppointmentConsentMutation } from './support/appointment-consent-observer.js'
@@ -332,6 +333,7 @@ import {
 } from '../src/assistant/reply-bubbles.ts'
 import {
   buildAssistantCliSurfaceContract,
+  scopeAssistantCliSurfaceContractForAssistant,
 } from '../src/assistant/cli-surface-bootstrap.ts'
 import {
   readAssistantCliLlmsFullManifestFromCliEntry,
@@ -4173,6 +4175,38 @@ describe('real Codex live fixture contracts', () => {
       expect((await readFile(commandLog, 'utf8')).trim().split('\n')).toHaveLength(1)
     } finally { await removeRealCodexTemporaryPath(root) }
   }, 120_000)
+
+  it('serves sparse supplement regimens, fuzzy food hits, and supplement labels through the real CLI', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'murph-regimen-label-fixture-'))
+    try {
+      const fixture = await materializeRegimenLabelFixture({ root, labels: 'without-fat' })
+      const { assistantCliContract } = await buildRegimenLabelDeveloperInstructions(fixture.vaultRoot)
+      expect(assistantCliContract).toMatch(/^- `regimen`: .*`list`.*`show`/mu)
+      expect(assistantCliContract).toMatch(/^- `supplement`: .*`search-labels`, `search-labels-batch`/mu)
+      const regimens = JSON.parse(await fixture.cli(['regimen', 'list', '--format', 'json'])) as { items: Array<{ id: string }> }
+      expect(regimens.items).toHaveLength(2)
+      for (const { id } of regimens.items) {
+        const { entity } = JSON.parse(await fixture.cli(['regimen', 'show', id, '--format', 'json'])) as {
+          entity: { data: Record<string, unknown> }
+        }
+        expect(entity.data).toMatchObject({ kind: 'supplement', brand: expect.any(String), servingSize: expect.any(String),
+          ingredients: [{ compound: 'protein', amount: expect.any(Number), unit: 'g' }] })
+        expect(entity.data).not.toHaveProperty('nutrition')
+      }
+      const fuzzy = JSON.parse(await fixture.cli(['food', 'search-labels', 'Nimbus Forge Vanilla Whey', '--format', 'json']))
+      expect(fuzzy.items.map((item: { name: string }) => item.name)).toEqual([REGIMEN_FUZZY_FOOD_NAMES[0]])
+      const labels = JSON.parse(await fixture.cli(['supplement', 'search-labels-batch', '--query', 'Nimbus Forge Vanilla Whey',
+        '--query', 'Halcyon Vale Plant Protein', '--format', 'json'])) as {
+        results: Array<{ items: Array<{ label: { calories: number, nutritionRows: Array<{ name: string }> } }> }>
+      }
+      // The partial corpus keeps calories and carbs but omits fat rows.
+      expect(labels.results.map(({ items }) => items.map(({ label }) =>
+        [label.calories, label.nutritionRows.map((row) => row.name)]))).toEqual([
+        [[130, ['Total Carbohydrate', 'Protein']]], [[140, ['Total Carbohydrate', 'Protein']]],
+      ])
+      expect((await fixture.readLabelRequests()).filter((request) => 'unexpected' in request)).toEqual([])
+    } finally { await removeRealCodexTemporaryPath(root) }
+  }, 240_000)
 
   it('reads a later canonical wearable import through the arrival fixture CLI', async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-wearable-arrival-cli-'))
@@ -33944,6 +33978,126 @@ describeRealCodex('real Codex bounded nutrition research e2e', () => {
             expect(result.finalMessage).toMatch(/(?:calories|kcal)/iu)
             if (scenario === 'unavailable-label') expect(result.finalMessage).toMatch(/estimat|rough|about|approximately/iu)
             else expect(result.finalMessage).toMatch(/serving|tablespoon|15\s*m[lL]/iu)
+          }
+        }
+      } finally {
+        await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+      }
+    },
+  )
+})
+
+async function buildRegimenLabelDeveloperInstructions(vaultRoot: string) {
+  // Mirrors private interactive hosted planning: scoped CLI bootstrap plus current state.
+  const assistantCliContract = scopeAssistantCliSurfaceContractForAssistant({
+    contract: buildAssistantCliSurfaceContract(await readAssistantCliLlmsFullManifestFromCliEntry({
+      cliEntryPath: fileURLToPath(new URL('../../cli/dist/bin.js', import.meta.url)),
+      workingDirectory: fileURLToPath(new URL('../../../', import.meta.url)),
+    })),
+    hostedRuntime: true,
+    researchAvailable: false,
+  })
+  if (assistantCliContract === null) throw new Error('Expected the production CLI surface contract.')
+  await refreshAssistantContextSnapshot({ vaultRoot })
+  const developerInstructions = buildAssistantSystemPrompt({
+    assistantCliContract,
+    assistantContextSnapshotPrompt: await readAssistantCurrentStatePrompt({ vaultRoot }),
+    assistantHostedDeviceConnectAvailable: false,
+    assistantHostedDeviceConnectProviders: [],
+    assistantKnowledgeToolsAvailable: false,
+    channel: 'linq',
+    cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+    conversationScope: 'direct',
+    currentLocalDate: '2026-08-26',
+    currentTimeZone: 'America/New_York',
+    hostedRuntime: true,
+    modelBehaviorProfile: 'gpt5-agentic',
+    onboardingGuidance: false,
+    ordinaryInboundTurn: true,
+    turnTrigger: 'automation-auto-reply',
+  })
+  return { assistantCliContract, developerInstructions }
+}
+
+describeRealCodex('real Codex regimen label reuse e2e', () => {
+  it.each(Object.keys(REGIMEN_LABEL_SCENARIOS) as Array<keyof typeof REGIMEN_LABEL_SCENARIOS>)(
+    'resolves requested facts for saved supplement regimens: %s',
+    { timeout: 900_000 },
+    async (scenario) => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-regimen-label-e2e-'))
+      try {
+        const { prompt, labels } = REGIMEN_LABEL_SCENARIOS[scenario]
+        const fixture = await materializeRegimenLabelFixture({ root: workingDirectory, labels })
+        const skillsRoot = path.join(workingDirectory, 'skills')
+        await cp(resolveAssistantSkillsRoot(), skillsRoot, { recursive: true })
+        const { developerInstructions } = await buildRegimenLabelDeveloperInstructions(fixture.vaultRoot)
+        const regimensBefore = await fixture.cli(['regimen', 'list', '--format', 'json'])
+        await fixture.resetLogs()
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions,
+          env: { ...config.env, [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot },
+          fixtureBinDirectory: fixture.binDirectory,
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt,
+          reasoningEffort: 'low',
+          sandbox: 'workspace-write',
+          workingDirectory,
+        })
+        const commands = await fixture.readCommands()
+        const requests = await fixture.readLabelRequests()
+        const labelRequests = requests.filter((request) => 'queries' in request)
+        const supplementHits = new Set(labelRequests.filter((request) => request.path === '/api/supplements')
+          .flatMap((request) => request.queries.filter((_, index) => request.hits[index]))
+          .map((query) => /nimbus/iu.test(query) ? 'nimbus' : /halcyon/iu.test(query) ? 'halcyon' : query))
+        const webCalls = result.jsonEvents.filter((event) => {
+          const record = readRecord(event)
+          return record?.method === 'item/completed'
+            && readRecord(readRecord(record.params)?.item)?.type === 'webSearch'
+        }).length
+        const reply = result.finalMessage
+        process.stdout.write(`[regimen-label-e2e] ${JSON.stringify({ scenario, commands, labelRequests, webCalls, reply })}\n`)
+
+        expect(requests.filter((request) => 'unexpected' in request)).toEqual([])
+        expect(commands.filter(([family, verb]) => ['food', 'meal', 'regimen', 'supplement'].includes(family ?? '')
+          && ['add', 'delete', 'edit', 'import-json', 'rename', 'save', 'schedule', 'stop', 'unschedule'].includes(verb ?? ''))).toEqual([])
+        expect(await fixture.cli(['regimen', 'list', '--format', 'json'])).toBe(regimensBefore)
+        expect(JSON.parse(await fixture.cli(['meal', 'list', '--limit', '50', '--format', 'json'])).items).toEqual([])
+        expect(webCalls).toBeLessThanOrEqual(4)
+        expect(reply).not.toMatch(/(?:want me to|shall i|should i|i can)[^.?!\n]{0,60}\b(?:look|check|pull|find|search)/iu)
+        for (const name of REGIMEN_FUZZY_FOOD_NAMES) expect(reply).not.toContain(name)
+        const range = /\b\d+(?:[.,]\d+)?\s*(?:-|–|—|to)\s*\d+(?:[.,]\d+)?\s*(?:g|grams|kcal|calories)\b/iu
+        const total = (value: number, unit: string, label?: string) => new RegExp(label
+          ? `\\b${value}\\s*${unit}\\b[^.\\n]{0,40}${label}|${label}[^.\\n]{0,40}\\b${value}\\s*${unit}\\b`
+          : `\\b${value}\\s*${unit}\\b`, 'iu')
+        const blocker = /(?:couldn.t|could not|can.t|cannot|unable to|didn.t|did not|wasn.t able to|no|not|isn.t|doesn.t)\b[^.?!\n]{0,80}\b(?:find|found|locate|verify|confirm|match|label|list|listed|include|available)/iu
+        if (scenario === 'regimen-verified-protein') {
+          // Saved regimen protein answers the request without label research.
+          expect(labelRequests).toEqual([])
+          expect(webCalls).toBe(0)
+          expect(reply).toMatch(total(REGIMEN_SHAKE_TOTALS.proteinGrams, '(?:g|grams)'))
+          expect(reply).not.toMatch(range)
+        } else if (scenario === 'regimen-label-unavailable') {
+          // No source has the requested facts: name the blocker and mark any numbers as estimates.
+          expect(reply).toMatch(blocker)
+          if (/\d+\s*(?:kcal|calories)/iu.test(reply)) expect(reply).toMatch(/estimat|approx|rough|about|around|~/iu)
+        } else {
+          // Both saved products resolve through the supplement label corpus.
+          expect([...supplementHits].sort()).toEqual(['halcyon', 'nimbus'])
+          expect(reply).toMatch(total(REGIMEN_SHAKE_TOTALS.calories, '(?:kcal|cal|calories)'))
+          expect(reply).toMatch(total(REGIMEN_SHAKE_TOTALS.carbsGrams, '(?:g|grams)', 'carb'))
+          if (scenario === 'regimen-label-available') {
+            expect(reply).toMatch(total(REGIMEN_SHAKE_TOTALS.fatGrams, '(?:g|grams)', 'fat'))
+            expect(reply).not.toMatch(range)
+          } else {
+            // Only fat is unresolved: name that gap without claiming no label matched.
+            expect(reply).toMatch(/fat[^.?!\n]{0,100}(?:not|isn.t|doesn.t|missing|unavailable|no |estimat)|(?:not|missing|no |estimat)[^.?!\n]{0,100}fat/iu)
+            expect(reply).not.toMatch(/(?:couldn.t|could not|didn.t|did not|unable to)\s+find[^.?!\n]{0,30}label|no (?:matching )?labels? (?:were |was )?found/iu)
           }
         }
       } finally {
