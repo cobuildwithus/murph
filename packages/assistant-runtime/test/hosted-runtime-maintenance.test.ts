@@ -74,7 +74,11 @@ vi.mock("../src/device-sync-service.ts", () => ({
   requireHostedRuntimeDeviceSyncStore: mocks.requireHostedRuntimeDeviceSyncStore,
 }));
 
-vi.mock("@murphai/assistant-engine", () => ({
+vi.mock("@murphai/assistant-engine", async () => ({
+  // The real finite reason list, so the row builder is tested against its owner.
+  ASSISTANT_INPUT_EXACT_LOOKUP_EXCLUSION_REASONS: (await vi.importActual<
+    typeof import("@murphai/assistant-engine/assistant-automation")
+  >("@murphai/assistant-engine/assistant-automation")).ASSISTANT_INPUT_EXACT_LOOKUP_EXCLUSION_REASONS,
   DEFAULT_ASSISTANT_AUTOMATION_SCAN_LIMIT: 50,
   HOSTED_ASSISTANT_CONTEXT_DIAGNOSTICS_SCHEMA:
     "murph.assistant-context-diagnostics.v1",
@@ -1246,6 +1250,29 @@ describe("runHostedAssistantAutomation", () => {
         limit: 1,
         sourceId: "linq",
       });
+      // Malformed reason data from a source must not read as a clean result.
+      for (const exclusionReasonCounts of [
+        { "Synthetic Unknown Reason": 1 },
+        { missing_event: "1" },
+        { missing_event: -1 },
+        { missing_event: 1.5 },
+        { missing_event: Number.NaN },
+        { missing_event: Number.MAX_SAFE_INTEGER + 1 },
+        { missing_event: 4 },
+        {},
+        { missing_event: 0 },
+      ]) {
+        await input.inputSource?.listInputCandidates({
+          exactLookupObservation: {
+            called: true,
+            exclusionReasonCounts: exclusionReasonCounts as never,
+            requestedCount: 3,
+            returnedCount: 0,
+          },
+          limit: 1,
+          sourceId: "linq",
+        });
+      }
       return {
         nextWakeAt: null,
         progressed: false,
@@ -1272,7 +1299,7 @@ describe("runHostedAssistantAutomation", () => {
 
     expect(result.timings).toEqual(expect.objectContaining({
       inputCandidateListed: true,
-      inputCandidateQueryCount: 3,
+      inputCandidateQueryCount: 12,
     }));
     expect(result.redactedLogEntries).toEqual(expect.arrayContaining([
       expect.objectContaining({
@@ -1314,6 +1341,13 @@ describe("runHostedAssistantAutomation", () => {
       exactLookupRequestedCount: 0,
       exactLookupReturnedCount: null,
     });
+    expect(candidateLogs.slice(3).map((entry) => entry.redacted?.exactLookupExclusionSummary)).toEqual([
+      "invalid", "invalid", "invalid", "invalid", "invalid", "invalid",
+      // A total above the requested inputs is invalid too.
+      "invalid",
+      // An empty or all-zero report is a clean "none".
+      "none", "none",
+    ]);
     for (const entry of candidateLogs) {
       expect(() => parseHostedRuntimeLogRequest({
         entries: [{

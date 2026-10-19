@@ -809,9 +809,10 @@ connection count, pooled-socket reuse, DNS/TCP/TLS setup, request-sent time,
 response wait after sending, headers-to-resolution delay, process event-loop
 active/idle time, process CPU user/system time and last observed stage. The CPU
 values are the observer's existing `process.cpuUsage` deltas over the same fetch.
-They count every process thread, so they only separate on-CPU from off-CPU time
-for that window. They do not attribute a main-thread cause and say nothing about
-time before the fetch starts. Connection setup and
+They count every process thread and can exceed wall time. They only narrow
+CPU-cost hypotheses for the observed fetch window: they cannot cleanly decompose
+event-loop wait, do not attribute a main-thread cause, and say nothing about time
+before the fetch starts. Connection setup and
 headers-to-resolution delay are runtime-local monotonic spans. Response wait still
 combines both transit directions and Worker or upstream work; join it with the
 Worker record by attempt. Later typing starts and mailbox fetches in a long warm

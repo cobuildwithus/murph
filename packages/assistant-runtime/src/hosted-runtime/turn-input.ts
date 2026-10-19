@@ -324,7 +324,8 @@ export function createHostedAssistantInputSource(input: {
       if (events.length < inputIds.length) {
         exclusions.record("missing_event", inputIds.length - events.length);
       }
-      const replyableEvents = events.length === inputIds.length
+      const replyabilityEvaluated = events.length === inputIds.length;
+      const replyableEvents = replyabilityEvaluated
         ? await filterHostedReplyablePendingAssistantInputEvents({
             events,
             vaultRoot: input.vaultRoot,
@@ -333,7 +334,13 @@ export function createHostedAssistantInputSource(input: {
       const exactSuccessors = await selectHostedAssistantExactSuccessorEvents({
         afterCursor: query.afterCursor ?? null,
         events,
-        recordExclusion: exclusions.record,
+        // An incomplete batch never builds a replyable set; name that, not a rejection.
+        recordExclusion: replyabilityEvaluated
+          ? exclusions.record
+          : (reason, count) => exclusions.record(
+              reason === "not_replyable" ? "replyability_not_evaluated" : reason,
+              count,
+            ),
         replyableInputIds: new Set(
           replyableEvents.map((event) => event.inputId),
         ),
@@ -354,6 +361,8 @@ export function createHostedAssistantInputSource(input: {
           exclusions.record(reason, count);
         },
       });
+      // With ignoreAfterCursor the batch builder only sorts and slices, so every
+      // candidate is either filtered (counted above), returned, or cut by the limit.
       const overLimit = candidates.length - filteredCount - batch.inputs.length;
       if (overLimit > 0) exclusions.record("over_limit", overLimit);
       return { ...batch, exactLookupExclusionReasonCounts: exclusions.read() };

@@ -2714,10 +2714,13 @@ async function listAutoReplyActiveTurnInputs(input: {
   const exactInputIds = input.inputIds.filter(
     (inputId) => !discoveredInputIds.has(inputId),
   )
-  const exactLookupCalled =
-    exactInputIds.length > 0 && input.inputSource.listInputCandidatesByIds !== undefined
-  const exact: AssistantInputCandidateBatch = exactInputIds.length > 0 && input.inputSource.listInputCandidatesByIds
-    ? await input.inputSource.listInputCandidatesByIds({
+  const listExact = exactInputIds.length > 0
+    ? input.inputSource.listInputCandidatesByIds
+    : undefined
+  // Derived from the branch that actually runs below.
+  const exactLookupCalled = listExact !== undefined
+  const exact: AssistantInputCandidateBatch = listExact
+    ? await listExact.call(input.inputSource, {
         afterCursor: input.afterCursor,
         inputIds: exactInputIds,
         knownInputIds: [...discoveredInputIds],

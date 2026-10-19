@@ -672,9 +672,6 @@ describe("createHostedAssistantInputSource", () => {
       exactLookupExclusionReasonCounts: { not_grouped_with_anchor: 1, source_mismatch: 1 },
       inputs: [],
     });
-    await expect(lookup({ limit: 0 })).resolves.toMatchObject({
-      exactLookupExclusionReasonCounts: { not_grouped_with_anchor: 1 },
-    });
     await expect(lookup({ afterCursor: null })).resolves.toMatchObject({
       exactLookupExclusionReasonCounts: { no_cursor: 2 },
       inputs: [],
@@ -682,13 +679,62 @@ describe("createHostedAssistantInputSource", () => {
     await expect(lookup({
       afterCursor: { ...anchor.cursor, inputId: "ain_88888888888888888888888888888888" },
     })).resolves.toMatchObject({ exactLookupExclusionReasonCounts: { anchor_unavailable: 2 }, inputs: [] });
-    // A missing peer makes the existing replyable filter empty for the batch.
+    // A missing peer skips the replyable filter for the whole batch, so the valid
+    // successor is named as not evaluated rather than rejected.
     await expect(lookup({
       inputIds: [successor.inputId, "ain_99999999999999999999999999999999"],
     })).resolves.toMatchObject({
-      exactLookupExclusionReasonCounts: { missing_event: 1, not_replyable: 1 },
+      exactLookupExclusionReasonCounts: { missing_event: 1, replyability_not_evaluated: 1 },
       inputs: [],
     });
+
+    // A real replyability rejection: the same complete batch with auto-reply off.
+    const disabledRoot = await createTempVault();
+    const disabledAnchor = await upsertAssistantInputEvent({ vault: disabledRoot, event: event("70") });
+    const disabledSuccessor = await upsertAssistantInputEvent({ vault: disabledRoot, event: event("71") });
+    const disabledSource = createHostedAssistantInputSource({
+      pendingInputRefreshMode: "none",
+      selectedInputIds: [disabledAnchor.inputId],
+      vaultRoot: disabledRoot,
+    });
+    await expect(disabledSource.listInputCandidatesByIds({
+      afterCursor: disabledAnchor.cursor,
+      inputIds: [disabledSuccessor.inputId],
+      sourceId: "linq",
+    })).resolves.toMatchObject({ exactLookupExclusionReasonCounts: { not_replyable: 1 }, inputs: [] });
+  });
+
+  it("counts exact candidates cut by the lookup limit without changing the returned prefix", async () => {
+    const vaultRoot = await createTempVault();
+    await enableLinqAutoReply(vaultRoot);
+    const event = (seq: string) => createAssistantInputEvent({
+      causalSeq: seq,
+      dedupeKey: `dedupe_limit_${seq}`,
+      eventId: `evt_limit_${seq}`,
+      itemId: `item_limit_${seq}`,
+      laneSeq: seq,
+      messageId: `msg_limit_${seq}`,
+      text: `synthetic limit input ${seq}`,
+    });
+    const anchor = await upsertAssistantInputEvent({ vault: vaultRoot, event: event("80") });
+    const first = await upsertAssistantInputEvent({ vault: vaultRoot, event: event("81") });
+    const second = await upsertAssistantInputEvent({ vault: vaultRoot, event: event("82") });
+    for (const inputId of [anchor.inputId, first.inputId, second.inputId]) {
+      await enqueueHostedPendingAssistantInputId({ inputId, vaultRoot });
+    }
+    const source = createHostedAssistantInputSource({
+      pendingInputRefreshMode: "none",
+      selectedInputIds: [anchor.inputId],
+      vaultRoot,
+    });
+    const query = { afterCursor: anchor.cursor, inputIds: [first.inputId, second.inputId], sourceId: "linq" };
+    const all = await source.listInputCandidatesByIds(query);
+    expect(all.inputs.map((candidate) => candidate.event.inputId)).toEqual([first.inputId, second.inputId]);
+    expect(all.exactLookupExclusionReasonCounts).toEqual({});
+    const limited = await source.listInputCandidatesByIds({ ...query, limit: 1 });
+    expect(limited.inputs.map((candidate) => candidate.event.inputId)).toEqual([first.inputId]);
+    expect(limited.nextCursor).toEqual(first.cursor);
+    expect(limited.exactLookupExclusionReasonCounts).toEqual({ over_limit: 1 });
   });
 
   it("ignores duplicate exact ids at the supplied frontier before checking successors", async () => {

@@ -1,5 +1,6 @@
 import { cancelHostedLinqInputTyping } from "./channel-activity.ts";
 import {
+  ASSISTANT_INPUT_EXACT_LOOKUP_EXCLUSION_REASONS,
   DEFAULT_ASSISTANT_AUTOMATION_SCAN_LIMIT,
   type AssistantExecutionContext,
   type AssistantAutomationOperationScope,
@@ -1115,23 +1116,34 @@ function buildHostedAssistantExactLookupLogDetails(
   observation: AssistantInputExactLookupObservation | undefined,
 ): Record<string, boolean | number | string | null> {
   if (!observation) return {};
-  const counts = observation.exclusionReasonCounts;
-  const summary = counts
-    ? Object.entries(counts)
-        .sort(([left], [right]) => left.localeCompare(right))
-        .flatMap(([reason, count]) =>
-          typeof count === "number" && Number.isSafeInteger(count) && count > 0
-            ? [`${toHostedRuntimeLogCode(reason)}:${count}`]
-            : []
-        )
-        .join(",")
-    : null;
   return {
     exactLookupCalled: observation.called,
-    exactLookupExclusionSummary: summary === "" ? "none" : summary,
+    exactLookupExclusionSummary: summarizeHostedAssistantExactLookupExclusions(observation),
     exactLookupRequestedCount: observation.requestedCount,
     exactLookupReturnedCount: observation.returnedCount,
   };
+}
+
+// Emits only the declared reason codes. Unknown keys, malformed counts or a
+// total above the requested inputs yield "invalid", never a clean "none".
+function summarizeHostedAssistantExactLookupExclusions(
+  observation: AssistantInputExactLookupObservation,
+): string | null {
+  const counts: Readonly<Record<string, unknown>> | undefined = observation.exclusionReasonCounts;
+  if (!counts) return null;
+  const known = new Set<string>(ASSISTANT_INPUT_EXACT_LOOKUP_EXCLUSION_REASONS);
+  if (Object.keys(counts).some((key) => !known.has(key))) return "invalid";
+  const parts: string[] = [];
+  let total = 0;
+  for (const reason of ASSISTANT_INPUT_EXACT_LOOKUP_EXCLUSION_REASONS) {
+    const count = counts[reason];
+    if (count === undefined || count === 0) continue;
+    if (typeof count !== "number" || !Number.isSafeInteger(count) || count < 0) return "invalid";
+    total += count;
+    parts.push(`${reason}:${count}`);
+  }
+  if (total > observation.requestedCount) return "invalid";
+  return parts.length === 0 ? "none" : parts.join(",");
 }
 
 function summarizeHostedRuntimeLogCodeCounts(values: readonly string[]): string {

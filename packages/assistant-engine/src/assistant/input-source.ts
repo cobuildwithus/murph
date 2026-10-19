@@ -84,20 +84,26 @@ export interface AssistantInputCandidateByIdQuery
   inputIds: readonly string[]
 }
 
-/** The existing exact-lookup step that left a requested input out. */
+/** The existing exact-lookup steps that can leave a requested input out. */
+export const ASSISTANT_INPUT_EXACT_LOOKUP_EXCLUSION_REASONS = [
+  'after_earlier_exclusion',
+  'anchor_unavailable',
+  'at_or_before_cursor',
+  'known_input',
+  'missing_event',
+  'no_cursor',
+  'not_batch_successor',
+  'not_grouped_with_anchor',
+  'not_replyable',
+  'over_limit',
+  'projection_pending',
+  // Replyability is only evaluated for a complete batch; a missing peer skips it.
+  'replyability_not_evaluated',
+  'source_mismatch',
+] as const
+
 export type AssistantInputExactLookupExclusionReason =
-  | 'after_earlier_exclusion'
-  | 'anchor_unavailable'
-  | 'at_or_before_cursor'
-  | 'known_input'
-  | 'missing_event'
-  | 'no_cursor'
-  | 'not_batch_successor'
-  | 'not_grouped_with_anchor'
-  | 'not_replyable'
-  | 'over_limit'
-  | 'projection_pending'
-  | 'source_mismatch'
+  (typeof ASSISTANT_INPUT_EXACT_LOOKUP_EXCLUSION_REASONS)[number]
 
 export type AssistantInputExactLookupExclusionReasonCounts = Readonly<
   Partial<Record<AssistantInputExactLookupExclusionReason, number>>

@@ -1212,11 +1212,18 @@ observation. It adds no new row and does not count against the input-query cap.
   step that left each requested input out, or `none`.
   - Reasons: `missing_event`, `no_cursor`, `anchor_unavailable`,
     `at_or_before_cursor`, `not_grouped_with_anchor`, `projection_pending`,
-    `not_replyable`, `not_batch_successor`, `after_earlier_exclusion`,
-    `known_input`, `source_mismatch`, `over_limit`.
+    `not_replyable`, `replyability_not_evaluated`, `not_batch_successor`,
+    `after_earlier_exclusion`, `known_input`, `source_mismatch`, `over_limit`.
   - Within the successor walk, only the first failing check is named, in the
     existing check order.
+  - `replyability_not_evaluated`: a requested input was missing, so the batch's
+    replyable filter never ran. It is not a replyability rejection.
+  - `not_grouped_with_anchor` covers every grouping exclusion. It does not tell
+    an affirmative reaction from a route, session or conversation mismatch.
   - Null means the source did not report reasons, not that nothing was excluded.
+  - `invalid` means the reported reasons were not usable: an undeclared code, a
+    count that is not a non-negative safe integer, or a total above the
+    requested count. Only declared codes are ever emitted.
 
 Missing fields mean the row carried no admission observation: a pass-start
 listing, an admission that ended before the route query, or one whose route

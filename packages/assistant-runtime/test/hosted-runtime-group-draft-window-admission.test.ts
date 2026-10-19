@@ -24,7 +24,7 @@ import { initializeVault } from "@murphai/core";
 import { buildHostedExecutionLinqConversationMessageWake } from "@murphai/hosted-execution";
 import { HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV } from "@murphai/hosted-execution/env";
 import { listAssistantOutboxIntents } from "@murphai/assistant-engine";
-import type { HostedMailboxItem } from "@murphai/hosted-execution";
+import type { HostedMailboxItem, HostedRuntimeLogRequest } from "@murphai/hosted-execution/runtime-control";
 import { test } from "vitest";
 
 import {
@@ -34,7 +34,7 @@ import {
 import { runHostedWorkspaceAssistantPhase } from "../src/hosted-runtime/workspace-assistant-phase.ts";
 import { importHostedConversationMailboxItem } from "../src/hosted-runtime/mailbox-conversation-import.ts";
 import { normalizeHostedAssistantRuntimeConfig } from "../src/hosted-runtime/environment.ts";
-import type { HostedRuntimeLogRequest, HostedRuntimePlatform } from "../src/hosted-runtime-contracts.ts";
+import type { HostedRuntimePlatform } from "../src/hosted-runtime-contracts.ts";
 
 const GROUP_THREAD = "thread_synthetic_group_window";
 const OTHER_THREAD = "thread_synthetic_other_group";
@@ -155,6 +155,9 @@ async function runGroupWindowScenario(input: { mode: Request0Mode; followUp: Fol
   const eventLog = path.join(root, "provider-events.jsonl");
   const logRequests: HostedRuntimeLogRequest[] = [];
   const staged: Array<{ laneSeq: string; at: number }> = [];
+  // Test-owned watcher; stopped and awaited in finally on every exit path.
+  let watching = true;
+  let watcher: Promise<void> = Promise.resolve();
   try {
     const codexCommand = await writeCodexDouble(root, eventLog, input.mode);
     const events: string[] = [];
@@ -244,13 +247,13 @@ async function runGroupWindowScenario(input: { mode: Request0Mode; followUp: Fol
     // is staged inside the held window rather than at a fixed offset from an
     // earlier hook.
     let followUpQueued = false;
-    let watching = true;
-    const watcher = (async () => {
+    watcher = (async () => {
       while (watching && !followUpQueued) {
         const done = (await readProviderEvents(eventLog))
           .find((event) => event.ev === "request_completed" && event.followup === false);
         if (done) {
           await new Promise((resolve) => REAL_SET_TIMEOUT(resolve, Math.max(0, done.t + 300 - Date.now())));
+          if (!watching) return;
           const at = new Date().toISOString();
           mailboxItems.push(createMailboxItem({
             causalSeq: "14",
@@ -323,8 +326,6 @@ async function runGroupWindowScenario(input: { mode: Request0Mode; followUp: Fol
       runAssistantPhase: runHostedWorkspaceAssistantPhase,
       vaultRoot,
     }), 60_000, () => events.join(","));
-    watching = false;
-    await watcher;
 
     // Source-owned pass rows; the first assistant pass ends at its pass_finished.
     const firstPass: Array<Record<string, unknown>> = [];
@@ -346,6 +347,8 @@ async function runGroupWindowScenario(input: { mode: Request0Mode; followUp: Fol
       providerEvents,
     };
   } finally {
+    watching = false;
+    await watcher;
     await removeTempRoot(root);
   }
 }

@@ -67,6 +67,7 @@ export {
   type HostedMailboxAssistantInputItem,
 } from './hosted-mailbox-input-items.js'
 export {
+  ASSISTANT_INPUT_EXACT_LOOKUP_EXCLUSION_REASONS,
   assistantInputCandidateFromStoredEvent,
   assistantInputIdFromInboxCaptureId,
   createStoreBackedAssistantInputSource,
