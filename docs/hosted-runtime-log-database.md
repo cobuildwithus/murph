@@ -1192,6 +1192,37 @@ ORDER BY 1, 2, 3
 LIMIT 100;
 ```
 
+## Active-turn exact input lookup
+
+Each active-turn admission runs, in one call, a strict conversation query, an
+exact-ID lookup for the inputs notified to that turn, and a route query.
+
+The route query's existing `assistant.automation_detail` row (`type =
+'assistant.input_candidates.listed'`) carries that same call's exact-lookup
+observation. It adds no new row and does not count against the input-query cap.
+
+- `exactLookupCalled`: whether the exact lookup ran.
+  - `false` with `exactLookupRequestedCount = 0` means no notified inputs were
+    pending.
+  - `false` with a positive count means the source has no exact lookup.
+- `exactLookupRequestedCount`: the notified inputs not already known to the call.
+- `exactLookupReturnedCount`: how many came back, or null when the lookup did not
+  run.
+- `exactLookupExclusionSummary`: `reason:count` pairs naming the existing lookup
+  step that left each requested input out, or `none`.
+  - Reasons: `missing_event`, `no_cursor`, `anchor_unavailable`,
+    `at_or_before_cursor`, `not_grouped_with_anchor`, `projection_pending`,
+    `not_replyable`, `not_batch_successor`, `after_earlier_exclusion`,
+    `known_input`, `source_mismatch`, `over_limit`.
+  - Within the successor walk, only the first failing check is named, in the
+    existing check order.
+  - Null means the source did not report reasons, not that nothing was excluded.
+
+Missing fields mean the row carried no admission observation: a pass-start
+listing, an admission that ended before the route query, or one whose route
+discovery was skipped. These are diagnostics only. They do not change admission,
+selection, grouping or ordering, and they carry no IDs, actors, anchors or text.
+
 ## Reads and retention
 
 Status and latency dashboards read only the isolated store. If a dedicated

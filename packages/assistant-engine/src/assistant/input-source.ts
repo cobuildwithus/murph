@@ -71,6 +71,8 @@ export interface AssistantInputCandidate {
 
 export interface AssistantInputCandidateQuery {
   afterCursor?: AssistantInputCursor | null
+  // Diagnostics only: set by active-turn admission on its own route query.
+  exactLookupObservation?: AssistantInputExactLookupObservation
   knownInputIds?: readonly string[]
   limit?: number
   signal?: AbortSignal
@@ -78,8 +80,39 @@ export interface AssistantInputCandidateQuery {
 }
 
 export interface AssistantInputCandidateByIdQuery
-  extends AssistantInputCandidateQuery {
+  extends Omit<AssistantInputCandidateQuery, 'exactLookupObservation'> {
   inputIds: readonly string[]
+}
+
+/** The existing exact-lookup step that left a requested input out. */
+export type AssistantInputExactLookupExclusionReason =
+  | 'after_earlier_exclusion'
+  | 'anchor_unavailable'
+  | 'at_or_before_cursor'
+  | 'known_input'
+  | 'missing_event'
+  | 'no_cursor'
+  | 'not_batch_successor'
+  | 'not_grouped_with_anchor'
+  | 'not_replyable'
+  | 'over_limit'
+  | 'projection_pending'
+  | 'source_mismatch'
+
+export type AssistantInputExactLookupExclusionReasonCounts = Readonly<
+  Partial<Record<AssistantInputExactLookupExclusionReason, number>>
+>
+
+/**
+ * One admission's exact-ID lookup. `called=false` with `requestedCount=0` means
+ * no notified IDs were pending; with `requestedCount>0` the source has no exact
+ * lookup. Missing reason counts mean the source did not report them.
+ */
+export interface AssistantInputExactLookupObservation {
+  called: boolean
+  exclusionReasonCounts?: AssistantInputExactLookupExclusionReasonCounts
+  requestedCount: number
+  returnedCount: number | null
 }
 
 export interface AssistantTurnConversationInputQuery {
@@ -92,6 +125,8 @@ export interface AssistantTurnConversationInputQuery {
 }
 
 export interface AssistantInputCandidateBatch {
+  // Diagnostics only: reported by exact-ID lookups for their requested IDs.
+  exactLookupExclusionReasonCounts?: AssistantInputExactLookupExclusionReasonCounts
   inputs: AssistantInputCandidate[]
   nextCursor: AssistantInputCursor | null
 }

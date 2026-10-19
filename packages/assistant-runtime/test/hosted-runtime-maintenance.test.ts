@@ -1230,6 +1230,22 @@ describe("runHostedAssistantAutomation", () => {
         limit: 1,
         sourceId: "linq",
       });
+      // Admission route queries carry their own exact-lookup observation.
+      await input.inputSource?.listInputCandidates({
+        exactLookupObservation: {
+          called: true,
+          exclusionReasonCounts: { not_grouped_with_anchor: 1, missing_event: 2 },
+          requestedCount: 3,
+          returnedCount: 0,
+        },
+        limit: 1,
+        sourceId: "linq",
+      });
+      await input.inputSource?.listInputCandidates({
+        exactLookupObservation: { called: false, requestedCount: 0, returnedCount: null },
+        limit: 1,
+        sourceId: "linq",
+      });
       return {
         nextWakeAt: null,
         progressed: false,
@@ -1256,7 +1272,7 @@ describe("runHostedAssistantAutomation", () => {
 
     expect(result.timings).toEqual(expect.objectContaining({
       inputCandidateListed: true,
-      inputCandidateQueryCount: 1,
+      inputCandidateQueryCount: 3,
     }));
     expect(result.redactedLogEntries).toEqual(expect.arrayContaining([
       expect.objectContaining({
@@ -1280,6 +1296,36 @@ describe("runHostedAssistantAutomation", () => {
       entry.message === "Hosted assistant input candidate query finished."
     );
     expect(candidateLog?.redacted).not.toHaveProperty("requestId");
+    const candidateLogs = result.redactedLogEntries.filter((entry) =>
+      entry.message === "Hosted assistant input candidate query finished."
+    );
+    // Rows without an admission observation carry no exact-lookup fields.
+    expect(candidateLogs[0]?.redacted).not.toHaveProperty("exactLookupCalled");
+    expect(candidateLogs[1]?.redacted).toMatchObject({
+      exactLookupCalled: true,
+      exactLookupExclusionSummary: "missing_event:2,not_grouped_with_anchor:1",
+      exactLookupRequestedCount: 3,
+      exactLookupReturnedCount: 0,
+    });
+    // A skipped lookup is not a reported zero, and unreported reasons stay unknown.
+    expect(candidateLogs[2]?.redacted).toMatchObject({
+      exactLookupCalled: false,
+      exactLookupExclusionSummary: null,
+      exactLookupRequestedCount: 0,
+      exactLookupReturnedCount: null,
+    });
+    for (const entry of candidateLogs) {
+      expect(() => parseHostedRuntimeLogRequest({
+        entries: [{
+          at: "2026-05-18T15:10:39.000Z",
+          component: "assistant",
+          eventCode: "assistant.automation_detail",
+          level: "info",
+          phase: "invoke",
+          redactedJson: entry.redacted,
+        }],
+      })).not.toThrow();
+    }
   });
 
   it("runs hosted assistant automation through the queue-only scanner path", async () => {

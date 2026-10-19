@@ -7,6 +7,7 @@ import {
   type AssistantBeforeProviderAcceptedInputsHook,
   type AssistantInputCandidateBatch,
   type AssistantInputCandidateQuery,
+  type AssistantInputExactLookupObservation,
   type AssistantInputSource,
   type AssistantProviderStartCriticalPathContext,
   type AssistantProviderStartCriticalPathTiming,
@@ -1076,6 +1077,7 @@ function buildHostedAssistantInputCandidateQueryLogDetails(input: {
       input.result.inputs.map((candidate) => candidate.event.source),
     ),
     elapsedMs: input.elapsedMs,
+    ...buildHostedAssistantExactLookupLogDetails(input.query.exactLookupObservation),
     knownInputIdCount: input.query.knownInputIds?.length ?? 0,
     limit: normalizeHostedRuntimeLogLimit(input.query.limit),
     nextCursorPresent: input.result.nextCursor !== null,
@@ -1104,6 +1106,31 @@ function buildHostedAssistantNewConversationInputQueryLogDetails(input: {
     limit: normalizeHostedRuntimeLogLimit(input.query.limit),
     nextCursorPresent: input.result.nextCursor !== null,
     type: "assistant.new_conversation_inputs.listed",
+  };
+}
+
+// Present only on an admission's route query; absent rows made no exact
+// observation. A null summary means the source did not report reasons.
+function buildHostedAssistantExactLookupLogDetails(
+  observation: AssistantInputExactLookupObservation | undefined,
+): Record<string, boolean | number | string | null> {
+  if (!observation) return {};
+  const counts = observation.exclusionReasonCounts;
+  const summary = counts
+    ? Object.entries(counts)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .flatMap(([reason, count]) =>
+          typeof count === "number" && Number.isSafeInteger(count) && count > 0
+            ? [`${toHostedRuntimeLogCode(reason)}:${count}`]
+            : []
+        )
+        .join(",")
+    : null;
+  return {
+    exactLookupCalled: observation.called,
+    exactLookupExclusionSummary: summary === "" ? "none" : summary,
+    exactLookupRequestedCount: observation.requestedCount,
+    exactLookupReturnedCount: observation.returnedCount,
   };
 }
 

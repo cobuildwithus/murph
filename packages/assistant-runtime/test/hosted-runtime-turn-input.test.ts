@@ -284,6 +284,8 @@ describe("createHostedAssistantInputSource", () => {
       late.inputId,
     ]);
     expect(missingExact.inputs).toEqual([]);
+    expect(exact.exactLookupExclusionReasonCounts).toEqual({});
+    expect(missingExact.exactLookupExclusionReasonCounts).toEqual({ missing_event: 1 });
     await expect(readHostedPendingAssistantInputIds({ vaultRoot })).resolves.toEqual([
       oldUnrelated.inputId,
       fresh.inputId,
@@ -489,6 +491,8 @@ describe("createHostedAssistantInputSource", () => {
 
     expect(exact.inputs.map((candidate) => candidate.event.inputId))
       .toEqual(admitted ? [afterGap.inputId] : []);
+    expect(exact.exactLookupExclusionReasonCounts)
+      .toEqual(admitted ? {} : { not_batch_successor: 1 });
     await expect(readHostedPendingAssistantInputIds({ vaultRoot })).resolves.toEqual([
       anchor.inputId,
       afterGap.inputId,
@@ -553,7 +557,20 @@ describe("createHostedAssistantInputSource", () => {
       afterCursor: anchor.cursor,
       inputIds: [projecting.inputId, later.inputId],
       sourceId: "linq",
-    })).resolves.toMatchObject({ inputs: [] });
+    })).resolves.toMatchObject({
+      exactLookupExclusionReasonCounts: { after_earlier_exclusion: 1, projection_pending: 1 },
+      inputs: [],
+    });
+    // Pending projection is checked before replyability, so it is the named step
+    // even when a missing peer also empties the replyable set.
+    await expect(source.listInputCandidatesByIds({
+      afterCursor: anchor.cursor,
+      inputIds: [projecting.inputId, "ain_99999999999999999999999999999999"],
+      sourceId: "linq",
+    })).resolves.toMatchObject({
+      exactLookupExclusionReasonCounts: { missing_event: 1, projection_pending: 1 },
+      inputs: [],
+    });
 
     await updateAssistantInputProjection({
       inputId: projecting.inputId,
@@ -610,6 +627,68 @@ describe("createHostedAssistantInputSource", () => {
       failedProjection.inputId,
     ]);
     expect(failed.inputs[0]?.projection.status).toBe("failed");
+  });
+
+  it("names the existing exact-lookup step that left each requested id out", async () => {
+    const vaultRoot = await createTempVault();
+    await enableLinqAutoReply(vaultRoot);
+    const event = (seq: string, threadId = "thread_1") => createAssistantInputEvent({
+      causalSeq: seq,
+      dedupeKey: `dedupe_exclusion_${seq}`,
+      eventId: `evt_exclusion_${seq}`,
+      itemId: `item_exclusion_${seq}`,
+      laneSeq: seq,
+      messageId: `msg_exclusion_${seq}`,
+      text: `synthetic exclusion input ${seq}`,
+      threadId,
+    });
+    const anchor = await upsertAssistantInputEvent({ vault: vaultRoot, event: event("70") });
+    const successor = await upsertAssistantInputEvent({ vault: vaultRoot, event: event("71") });
+    const otherThread = await upsertAssistantInputEvent({ vault: vaultRoot, event: event("72", "thread_2") });
+    for (const inputId of [anchor.inputId, successor.inputId, otherThread.inputId]) {
+      await enqueueHostedPendingAssistantInputId({ inputId, vaultRoot });
+    }
+    const source = createHostedAssistantInputSource({
+      pendingInputRefreshMode: "none",
+      selectedInputIds: [anchor.inputId],
+      vaultRoot,
+    });
+    const lookup = (query: Partial<Parameters<typeof source.listInputCandidatesByIds>[0]>) =>
+      source.listInputCandidatesByIds({
+        afterCursor: anchor.cursor,
+        inputIds: [successor.inputId, otherThread.inputId],
+        sourceId: "linq",
+        ...query,
+      });
+
+    const plain = await lookup({});
+    expect(plain.inputs.map((candidate) => candidate.event.inputId)).toEqual([successor.inputId]);
+    expect(plain.exactLookupExclusionReasonCounts).toEqual({ not_grouped_with_anchor: 1 });
+    await expect(lookup({ knownInputIds: [successor.inputId] })).resolves.toMatchObject({
+      exactLookupExclusionReasonCounts: { known_input: 1, not_grouped_with_anchor: 1 },
+      inputs: [],
+    });
+    await expect(lookup({ sourceId: "telegram" })).resolves.toMatchObject({
+      exactLookupExclusionReasonCounts: { not_grouped_with_anchor: 1, source_mismatch: 1 },
+      inputs: [],
+    });
+    await expect(lookup({ limit: 0 })).resolves.toMatchObject({
+      exactLookupExclusionReasonCounts: { not_grouped_with_anchor: 1 },
+    });
+    await expect(lookup({ afterCursor: null })).resolves.toMatchObject({
+      exactLookupExclusionReasonCounts: { no_cursor: 2 },
+      inputs: [],
+    });
+    await expect(lookup({
+      afterCursor: { ...anchor.cursor, inputId: "ain_88888888888888888888888888888888" },
+    })).resolves.toMatchObject({ exactLookupExclusionReasonCounts: { anchor_unavailable: 2 }, inputs: [] });
+    // A missing peer makes the existing replyable filter empty for the batch.
+    await expect(lookup({
+      inputIds: [successor.inputId, "ain_99999999999999999999999999999999"],
+    })).resolves.toMatchObject({
+      exactLookupExclusionReasonCounts: { missing_event: 1, not_replyable: 1 },
+      inputs: [],
+    });
   });
 
   it("ignores duplicate exact ids at the supplied frontier before checking successors", async () => {
@@ -670,6 +749,8 @@ describe("createHostedAssistantInputSource", () => {
     expect(exact.inputs.map((candidate) => candidate.event.inputId)).toEqual([
       next.inputId,
     ]);
+    // Each requested ID is either returned or counted once.
+    expect(exact.exactLookupExclusionReasonCounts).toEqual({ at_or_before_cursor: 2 });
   });
 
   it("batches newly enqueued exact successors while the pre-provider selection is empty", async () => {

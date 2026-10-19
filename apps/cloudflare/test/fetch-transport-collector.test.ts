@@ -327,7 +327,7 @@ describe("first-request fetch transport diagnostics", () => {
       const { mailboxPort } = await mailboxPortWith([5]);
       const result = await mailboxPort.fetch({ ...conversation, requestId: "synthetic-redaction" });
       const timing = result.transportTiming!;
-      expect(Object.keys(timing)).toHaveLength(15);
+      expect(Object.keys(timing)).toHaveLength(17);
       expect(parseHostedRuntimeRedactedJson(timing, "synthetic read timing")).toEqual(timing);
     });
   });
@@ -339,7 +339,7 @@ describe("first-request fetch transport diagnostics", () => {
       requestCount: 1, connectionCount: 1, connectionTimingObserved: true, socketPreviouslyWritten: false,
       requestCreatedMs: 0.2, connectionStartedMs: 0.3, dnsLookupMs: 1.4, tcpConnectMs: 2.5, tlsHandshakeMs: 3.6,
       requestSentMs: 8.1, requestToSendMs: 7.9, waitingForHeadersMs: 4.2, fetchResolveDelayMs: 0.4,
-      lastObservedStage: "response_headers", processCpuUserMs: 1, processCpuSystemMs: 1,
+      lastObservedStage: "response_headers", processCpuUserMs: 2.4, processCpuSystemMs: 0.6,
       processEventLoopActiveMs: 5.5, processEventLoopIdleMs: 7.1,
     };
     diagnostics.claimTypingStart()?.(timing, new Response(null, { status: 204 }));
@@ -347,9 +347,12 @@ describe("first-request fetch transport diagnostics", () => {
     expect(diagnostics.claimTypingStart()).toBeNull();
     expect(diagnostics.claimConversationMailboxFetch()).toBeNull();
     const recorded = diagnostics.read();
-    expect(Object.keys(recorded)).toHaveLength(28);
+    expect(Object.keys(recorded)).toHaveLength(32);
     expect(recorded).toMatchObject({ firstTypingFetchDurationMs: 13, firstTypingFetchTlsHandshakeMs: 4,
-      firstMailboxFetchResponseStatus: null });
+      firstMailboxFetchResponseStatus: null,
+      // The observer's own CPU deltas are copied (rounded), never re-sampled.
+      firstTypingFetchProcessCpuUserMs: 2, firstTypingFetchProcessCpuSystemMs: 1,
+      firstMailboxFetchProcessCpuUserMs: 2, firstMailboxFetchProcessCpuSystemMs: 1 });
     expect(parseHostedRuntimeRedactedJson(recorded, "synthetic diagnostics")).toEqual(recorded);
   });
 });

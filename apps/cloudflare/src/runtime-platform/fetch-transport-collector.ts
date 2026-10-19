@@ -56,6 +56,9 @@ export function summarizeFetchTransport(
     [`${prefix}ResolveDelayMs`]: ms(timing.fetchResolveDelayMs),
     [`${prefix}EventLoopActiveMs`]: ms(timing.processEventLoopActiveMs),
     [`${prefix}EventLoopIdleMs`]: ms(timing.processEventLoopIdleMs),
+    // Already measured over the same fetch; counts every process thread.
+    [`${prefix}ProcessCpuUserMs`]: ms(timing.processCpuUserMs),
+    [`${prefix}ProcessCpuSystemMs`]: ms(timing.processCpuSystemMs),
     [`${prefix}LastStage`]: timing.lastObservedStage,
   };
 }
