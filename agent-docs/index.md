@@ -1270,3 +1270,8 @@ Provider-input baseline snapshot repair and regression proof are tracked in
 Consumer-first optional knowledge reads and CLI wiki write guidance
 implementation and compatibility evidence are recorded in
 [the knowledge optional-read plan](exec-plans/completed/2026-10-16-knowledge-optional-read-and-write-guidance.md).
+
+Complete first-provider-input equality now accounts for explicit fixture identities
+and generated fixture roots while preserving semantic differences. Implementation
+and regression proof are recorded in
+[`2026-10-18-frog-first-input-4198.md`](exec-plans/completed/2026-10-18-frog-first-input-4198.md).
