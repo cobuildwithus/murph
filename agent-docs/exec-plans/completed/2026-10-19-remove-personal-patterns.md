@@ -87,6 +87,12 @@ removes roughly 12,700 net lines without a replacement service or state store.
 PR CI and ReviewGPT are the remaining external review gates, tracked on the PR;
 no deployment or merge is requested by this plan.
 
+CI follow-up: updated onboarding registry counts and the direct/scheduled prompt
+fingerprints to reflect the removed seed and guidance. Both affected suites pass
+132 tests, and the assistant-engine typecheck passes. Production code is unchanged
+from the ReviewGPT round-1 PASS; this test-only correction uses the documented
+review rerun exemption. Final-head CI remains tracked on the PR.
+
 ## Deployment
 
 Web and runtime changes must converge together. Already-running older runtimes
