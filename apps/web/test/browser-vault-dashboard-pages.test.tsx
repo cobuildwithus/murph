@@ -17,7 +17,6 @@ import type {
   PersonalPatternReport,
   PersonalPatternStage,
 } from "@murphai/query/browser-overview";
-import { listHealthCommonsExperimentBrowseProtocols } from "@/src/lib/health-commons/experiment-browse";
 
 const mocks = vi.hoisted(() => ({
   refresh: vi.fn<BrowserVaultContextValue["refresh"]>(async () => undefined),
@@ -35,8 +34,6 @@ vi.mock("@/src/lib/browser-vault/context", () => ({
   useBrowserVault: mocks.useBrowserVault,
 }));
 
-import { metadata as experimentsMetadata } from "../app/(dashboard)/experiments/page";
-import { ExperimentsPageClient } from "../app/(dashboard)/experiments/experiments-page-client";
 import { metadata as environmentMetadata } from "../app/(dashboard)/environment/page";
 import EnvironmentPage from "../app/(dashboard)/environment/page";
 import { EnvironmentPrintPageClient } from "../app/(dashboard)/environment/print/environment-print-page-client";
@@ -60,7 +57,6 @@ type BrowserVaultEntity = Parameters<
 >[0]["entities"][number];
 
 let clientFixture: Awaited<ReturnType<typeof createFixtureClient>>;
-const experimentProtocols = listHealthCommonsExperimentBrowseProtocols();
 
 const staticMatchMedia: typeof window.matchMedia = (query) => ({
   addEventListener() {},
@@ -105,11 +101,6 @@ test("dashboard routes define page-specific metadata with the shared preview ima
     journalMetadata.description,
     "Review your health events, context, and connected data in one timeline.",
   );
-  assert.equal(experimentsMetadata.title, "Experiments — Murph");
-  assert.equal(
-    experimentsMetadata.description,
-    "Browse evidence-backed health experiments and compare what changes against your own baseline.",
-  );
   assert.equal(environmentMetadata.title, "Environment — Murph");
   assert.equal(
     environmentMetadata.description,
@@ -129,7 +120,6 @@ test("dashboard routes define page-specific metadata with the shared preview ima
   for (const routeMetadata of [
     patternsMetadata,
     journalMetadata,
-    experimentsMetadata,
   ]) {
     assert.deepEqual(routeMetadata.openGraph?.images, [
       {
@@ -1291,115 +1281,6 @@ test("EnvironmentPage gives zero-data members one clear start and previews the r
   assert.doesNotMatch(markup, /t\.me|telegram/i);
 });
 
-test("ExperimentsPage renders the public library with private browser-vault overlays", () => {
-  const markup = renderToStaticMarkup(createExperimentsPageClientElement());
-
-  assert.match(markup, /Browse the public protocol library\./);
-  assert.match(markup, /Hyperbaric Oxygen Therapy/);
-  assert.match(markup, /Finnish Dry Sauna/);
-  assert.match(markup, /Morning walk/);
-  assert.match(markup, /Private only run/);
-  assert.doesNotMatch(markup, /with data/);
-  assert.doesNotMatch(markup, /shown/);
-  assert.match(markup, /Short walks are helping with afternoon energy\./);
-});
-
-test("ExperimentsPage keeps the public library visible when browser-vault is unauthenticated", () => {
-  mocks.useBrowserVault.mockReturnValue({
-    client: null,
-    dataVersion: null,
-    error: null,
-    ref: null,
-    refresh: async () => {},
-    status: "ready",
-  });
-
-  const markup = renderToStaticMarkup(createExperimentsPageClientElement());
-
-  assert.match(markup, /Finnish Dry Sauna/);
-  assert.match(markup, /Hyperbaric Oxygen Therapy/);
-  assert.doesNotMatch(markup, /Red Light Glasses Before Bed/);
-  const featuredMarkup = markup.split("Browse all").at(0) ?? markup;
-  assert.match(featuredMarkup, /Finnish Dry Sauna/);
-  assert.match(featuredMarkup, /Norwegian 4x4/);
-  assert.doesNotMatch(featuredMarkup, /Bryan Johnson Sauna/);
-  assert.doesNotMatch(markup, /Could not load your experiment data/);
-});
-
-test("ExperimentsPage merges protocol-shaped private runs into the matching public protocol card", async () => {
-  const protocolVariantClient = await createFixtureClient({
-    experimentSlug: "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
-  });
-  mocks.useBrowserVault.mockReturnValue({
-    client: protocolVariantClient,
-    dataVersion: protocolVariantClient.replica.source.dataVersion,
-    error: null,
-    ref: null,
-    refresh: async () => {},
-    status: "ready",
-  });
-
-  const markup = renderToStaticMarkup(createExperimentsPageClientElement());
-
-  assert.match(markup, /Finnish Dry Sauna/);
-  assert.match(markup, /Started Apr 18, 2026 · 14 days · 150 studies/);
-  assert.doesNotMatch(
-    markup,
-    /protocol_variant:dry-sauna\/murph-finnish-standard-3x-week/,
-  );
-  assert.doesNotMatch(markup, /Morning walk/);
-});
-
-test("ExperimentsPage links private-only tracked experiments to their private results", async () => {
-  const clientWithPrivateOnlyExperiment = await createFixtureClient();
-  mocks.useBrowserVault.mockReturnValue({
-    client: clientWithPrivateOnlyExperiment,
-    dataVersion: clientWithPrivateOnlyExperiment.replica.source.dataVersion,
-    error: null,
-    ref: null,
-    refresh: async () => {},
-    status: "ready",
-  });
-
-  const markup = renderToStaticMarkup(createExperimentsPageClientElement());
-
-  assert.match(markup, /Private/);
-  assert.match(markup, /href="\/experiments\/runs\/exp_private_only"/);
-  assert.match(markup, /Private only run/);
-  assert.match(markup, /Started Apr 19, 2026 · Private run only/);
-});
-
-test("ExperimentsPage keeps the public library visible when browser-vault loading fails", () => {
-  mocks.useBrowserVault.mockReturnValue({
-    client: null,
-    dataVersion: null,
-    error: "The latest refresh failed.",
-    ref: null,
-    refresh: async () => {},
-    status: "error",
-  });
-
-  const markup = renderToStaticMarkup(createExperimentsPageClientElement());
-
-  assert.match(markup, /Your experiments couldn/);
-  assert.match(markup, /The latest refresh failed\./);
-  assert.match(
-    markup,
-    /The public experiment library is still available below\./,
-  );
-  assert.match(markup, /Finnish Dry Sauna/);
-  assert.doesNotMatch(markup, /Red Light Glasses Before Bed/);
-});
-
-
-
-
-function createExperimentsPageClientElement() {
-  return createElement(ExperimentsPageClient, {
-    protocols: experimentProtocols,
-  });
-}
-
 function createEntity(
   family: BrowserVaultEntity["family"],
   entityId: string,
@@ -1485,7 +1366,6 @@ function createPersonalPatternDiagnosticFixture(): PersonalPatternReport {
 
 async function createFixtureClient(
   input: {
-    experimentSlug?: string;
     extraEntities?: BrowserVaultEntity[];
     includeHabitat?: boolean;
   } = {},
@@ -1502,7 +1382,7 @@ async function createFixtureClient(
             summary: "Short walks are helping with afternoon energy.",
           } satisfies NonNullable<BrowserVaultEntity["frontmatter"]>,
           date: "2026-04-18",
-          experimentSlug: input.experimentSlug ?? "light-morning-walk",
+          experimentSlug: "light-morning-walk",
           occurredAt: "2026-04-18T08:00:00.000Z",
           status: "active",
           tags: ["movement"],

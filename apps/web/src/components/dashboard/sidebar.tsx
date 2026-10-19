@@ -7,7 +7,6 @@ import {
   BookOpen,
   ChartSpline,
   ChevronsUpDown,
-  FlaskConical,
   Home,
   Leaf,
 } from "lucide-react";
@@ -90,7 +89,6 @@ const navItems: {
     matchPrefix: "/biomarkers",
     icon: Activity,
   },
-  { label: "Experiments", href: "/experiments", icon: FlaskConical },
 ];
 
 const sidebarThemeStyle = {

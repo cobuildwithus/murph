@@ -94,7 +94,7 @@ test("does not render mocked private biomarker values when browser-vault is unav
   assert.doesNotMatch(markup, /Latest Demo/iu);
 });
 
-test("the biomarker overview uses a concise experiments section heading", () => {
+test("the biomarker overview omits retired experiment protocol cards", () => {
   const biomarker = resolveHealthCommonsBiomarkerOverview("resting-heart-rate");
   assert.ok(biomarker);
 
@@ -111,8 +111,8 @@ test("the biomarker overview uses a concise experiments section heading", () => 
     createElement(BiomarkerOverview, { biomarker }),
   );
 
-  assert.match(markup, />Experiments</u);
-  assert.doesNotMatch(markup, /Experiments that may move your/u);
+  assert.doesNotMatch(markup, />Experiments</u);
+  assert.doesNotMatch(markup, /href="\/experiments/u);
 });
 
 test("the biomarker overview lets the metric catalog decide private trend support", () => {

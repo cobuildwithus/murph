@@ -99,7 +99,6 @@ function buildResearchWithSourceUrl(url: string) {
     entitiesByKey,
     routeAliases: [],
     routeId: "test-biomarker",
-    routeIdByEntityKey: new Map([[biomarker.key, "test-biomarker"]]),
   });
 }
 

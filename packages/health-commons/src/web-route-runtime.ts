@@ -22,10 +22,6 @@ const HEALTH_COMMONS_WEB_PROJECTION_KEYS: readonly HealthCommonsWebProjectionKey
   "biomarker.research",
   "biomarker.shell",
   "goal.page",
-  "experiment.protocol",
-  "experiment.research",
-  "experiment.results-public",
-  "experiment.shell",
 ];
 
 let cachedGeneratedWebRouteIndex: HealthCommonsWebRouteIndex | null = null;

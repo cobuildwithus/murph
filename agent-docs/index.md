@@ -738,15 +738,13 @@ Package verifier worker-exit result preservation is tracked in
 | `agent-docs/product-specs/weekly-game.md` | Private 1v1 weekly habit game shipped dark: live games per opponent, one shared Day 1 date across time zones, picked start dates, Start now, photo post-to-unlock, sealed hosted photo storage, retakes, transcript-only excuses, offline grace and refused stale captures, settle on read, tickets with use-by dates, addressed rematches and rounds, retries, and deferred scope. | Weekly game product spec | High | 2026-10-18 |
 | `agent-docs/product-specs/hosted-support-escalation.md` | Hosted support product spec. | Hosted support product spec | High | 2026-08-05 |
 | `agent-docs/product-specs/hosted-family-plan.md` | Hosted billing/product spec. | Hosted billing/product spec | High | 2026-08-10 |
-| `agent-docs/product-specs/health-commons.md` | Health Commons behavior. | Health Commons behavior | High | 2026-07-29 |
+| `agent-docs/product-specs/health-commons.md` | Health Commons behavior. | Health Commons behavior | High | 2026-10-19 |
 | `agent-docs/product-specs/public-goal-guides.md` | Goal guide behavior. | Goal guide behavior | High | 2026-09-14 |
 | `agent-docs/product-specs/murph-safe-public-product-search.md` | Public product evidence behavior. | Public product evidence behavior | High | 2026-09-02 |
-| `agent-docs/product-specs/protocol-summary-copy.md` | Source-of-truth copy rules for Health Commons protocol `summary:` fields shown on `/experiments` cards. | Health Commons protocol card copy | High | 2026-04-30 |
 | `agent-docs/product-specs/murph-onboarding.md` | Three-reply Web opening, model-owned identity saves, and aspiration-anchored private onboarding. | New-member onboarding behavior | High | 2026-09-24 |
-| `agent-docs/product-specs/experiment-onboarding.md` | Experiment onboarding behavior. | Experiment onboarding behavior | High | 2026-07-30 |
+| `agent-docs/product-specs/experiment-onboarding.md` | Experiment onboarding behavior. | Experiment onboarding behavior | High | 2026-10-19 |
 | `agent-docs/product-specs/experiment-adherence-confidence.md` | Read-time assumed adherence, confidence ladder, correction semantics, category-scoped activity evidence, and typed subjective session evidence for experiments. | Experiment adherence behavior | High | 2026-07-16 |
 | `agent-docs/product-specs/experiment-outcome-selection.md` | Experiment-only selection rules for member-valued and capturable outcomes, credible evidence, typed session metrics, timeframe integrity, and setup handoff. | Experiment outcome selection behavior | High | 2026-07-16 |
-| `agent-docs/product-specs/protocol-outcome-network.md` | Protocol outcome network boundary for private outcome cards now and future sharing, contribution, cohort summaries, and social guardrails. | Outcome network behavior | High | 2026-05-13 |
 | `agent-docs/product-specs/captures.md` | Capture behavior. | Capture behavior | High | 2026-08-10 |
 | `agent-docs/product-specs/companion-app.md` | Companion app plan. | Companion app plan | High | 2026-08-13 |
 | `agent-docs/product-specs/query-metric-universality.md` | Universal metric queryability invariant: every metric-bearing canonical event yields a query metric point through the generic extraction rule. | Query metric product spec | High | 2026-07-22 |

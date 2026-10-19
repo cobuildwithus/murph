@@ -16,8 +16,6 @@ test.each([
   ["/history", ["core"]],
   ["/environment", ["core"]],
   ["/environment/print", ["core"]],
-  ["/experiments", ["core"]],
-  ["/experiments/protocol-1/research", ["core"]],
   ["/biomarkers/heart-rate-variability/research", ["core"]],
   ["/settings", ["core"]],
 ] as const)("plans core-only Browser Vault data for %s", (pathname, expected) => {
@@ -26,9 +24,6 @@ test.each([
 
 test.each([
   "/biomarkers/heart-rate-variability",
-  "/experiments/protocol-1",
-  "/experiments/protocol-1/results",
-  "/experiments/runs/protocol-1",
 ] as const)("plans core and the metrics index for %s", (pathname) => {
   assert.deepEqual(planBrowserVaultRouteShards(pathname), ["core", "metricsIndex"]);
 });

@@ -37,7 +37,6 @@ export const BROWSER_VAULT_REPLICA_POLICY_ID = "health-vault-browser";
 export const BODY_PREVIEW_CHARS = 280;
 export const METRIC_LOOKBACK_DAYS = 365;
 export const RECENT_JOURNAL_LIMIT = 4;
-export const TRACKED_EXPERIMENT_LIMIT = 24;
 export const TIMELINE_LIMIT = 240;
 export const SIGNAL_LIMIT = 30;
 export const SOURCE_HEALTH_LIMIT = 24;
@@ -230,75 +229,6 @@ export interface BrowserVaultAssistantSummary {
   latestDate: string | null;
 }
 
-export const BROWSER_VAULT_EXPERIMENT_RUN_CARD_SCHEMA =
-  "murph.browser-vault.experiment-run-card.v1";
-
-export type BrowserVaultExperimentRunCardStatus =
-  | "active"
-  | "paused"
-  | "finished"
-  | "stopped";
-
-export interface BrowserVaultExperimentRunCardMetric {
-  baseline?: string;
-  /** Used by the web display layer to preserve health-commons sentiment coloring. */
-  biomarkerKey?: string;
-  current: string;
-  delta?: string;
-  direction?: "down" | "neutral" | "up";
-  label: string;
-}
-
-export interface BrowserVaultExperimentRunCardDailyCadence {
-  cadence: string;
-  completed: number;
-  expected: number;
-  label?: string;
-}
-
-export interface BrowserVaultExperimentRunCardSummary {
-  completionPercent?: number;
-  dailyCadence?: BrowserVaultExperimentRunCardDailyCadence;
-  dateRange?: string;
-  day?: number;
-  metric?: BrowserVaultExperimentRunCardMetric;
-  metrics: BrowserVaultExperimentRunCardMetric[];
-}
-
-export interface BrowserVaultExperimentRunCardLookupKeys {
-  experimentIds: string[];
-  protocolKeys: string[];
-  slugs: string[];
-}
-
-/**
- * A bounded, rebuildable home-card projection. It is generated with the
- * replica and therefore shares the replica's single freshness/version owner.
- */
-export interface BrowserVaultExperimentRunCard {
-  id: string;
-  lookupKeys: BrowserVaultExperimentRunCardLookupKeys;
-  requiredMetricBuckets: BrowserVaultMetricBucketId[];
-  runSummary: BrowserVaultExperimentRunCardSummary;
-  schema: typeof BROWSER_VAULT_EXPERIMENT_RUN_CARD_SCHEMA;
-  slug: string | null;
-  startedOn: string | null;
-  status: BrowserVaultExperimentRunCardStatus;
-  statusLabel: string;
-  summary: string | null;
-  summaryDetail: string | null;
-  tags: string[];
-  title: string;
-}
-
-export type BrowserVaultExperimentRunCardLookup =
-  | string
-  | {
-      experimentId?: string;
-      protocolKeys?: readonly string[];
-      slug?: string;
-    };
-
 export interface BrowserVaultMetricGoalProgressRow {
   currentValue: number | null;
   currentValueLabel: string | null;
@@ -318,8 +248,6 @@ export interface BrowserVaultReplica {
   entities: BrowserVaultEntity[];
   /** Absent only on replicas produced before canonical outcome projection shipped. */
   experimentOutcomes?: ExperimentOutcome[];
-  /** Absent only on legacy replicas produced before compact home cards shipped. */
-  experimentRunCards?: BrowserVaultExperimentRunCard[];
   generatedAt: string;
   /** Absent only on legacy replicas produced before generation-aware freshness. */
   generation?: number;
@@ -346,7 +274,6 @@ type BrowserVaultLegacyCompatibleCoreReplica = Pick<
   BrowserVaultReplica,
   | "assistantSummary"
   | "entities"
-  | "experimentRunCards"
   | "generatedAt"
   | "generation"
   | "hasLabBiomarkers"
@@ -362,9 +289,8 @@ type BrowserVaultLegacyCompatibleCoreReplica = Pick<
 
 export type BrowserVaultCoreReplica = Omit<
   BrowserVaultLegacyCompatibleCoreReplica,
-  "experimentRunCards" | "hasLabBiomarkers"
+  "hasLabBiomarkers"
 > & {
-  experimentRunCards: BrowserVaultExperimentRunCard[];
   hasLabBiomarkers: boolean;
 };
 
@@ -449,11 +375,6 @@ interface BrowserVaultCoreQueryAccess {
     get(idOrLookupId: string): BrowserVaultEntity | null;
     list(filters?: BrowserVaultEntityFilters): BrowserVaultEntity[];
   };
-  experimentRunCards: {
-    find(lookup: BrowserVaultExperimentRunCardLookup): BrowserVaultExperimentRunCard | null;
-    get(experimentId: string): BrowserVaultExperimentRunCard | null;
-    list(): BrowserVaultExperimentRunCard[];
-  };
   search(query: string, filters?: BrowserVaultSearchFilters): BrowserVaultSearchRow[];
   timeline: {
     list(filters?: BrowserVaultTimelineFilters): BrowserVaultTimelineRow[];
@@ -524,7 +445,6 @@ export interface BrowserVaultQueryClient extends BrowserVaultCoreQueryAccess, Br
   capability: "core+metrics+labs";
   replica: BrowserVaultReplica & {
     experimentOutcomes: ExperimentOutcome[];
-    experimentRunCards: BrowserVaultExperimentRunCard[];
     hasLabBiomarkers: boolean;
   };
 }

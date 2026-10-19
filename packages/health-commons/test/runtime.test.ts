@@ -1,42 +1,20 @@
-import { readFileSync } from "node:fs";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
-import { gzipSync } from "node:zlib";
 
 import { describe, expect, it } from "vitest";
 import { resolveMetricDefinition } from "@murphai/health-metrics";
 
 import {
   buildHealthCommonsBiomarkerDesiredDirectionsArtifact,
-  buildHealthCommonsCatalog,
   createHealthCommonsCatalogReader,
   createHealthCommonsRouteBundleReader,
   getGeneratedHealthCommonsBiomarkerDesiredDirections,
-  getGeneratedHealthCommonsProtocolFamilyGraphReader,
-  getGeneratedHealthCommonsProtocolIndexReader,
-  getGeneratedHealthCommonsProtocolRunSpecReader,
   getGeneratedHealthCommonsWebBiomarkerIndex,
-  getGeneratedHealthCommonsWebExperimentIndex,
   getGeneratedHealthCommonsWebRouteIndex,
-  HealthCommonsProtocolArtifactError,
   HEALTH_COMMONS_BIOMARKER_DESIRED_DIRECTIONS_SCHEMA_VERSION,
-  HEALTH_COMMONS_PROTOCOL_FAMILY_GRAPH_SCHEMA_VERSION,
-  HEALTH_COMMONS_PROTOCOL_INDEX_SCHEMA_VERSION,
-  HEALTH_COMMONS_PROTOCOL_RUN_SPECS_SCHEMA_VERSION,
-  isRunnableProtocolStatus,
-  isHealthCommonsProtocolArtifactError,
   loadGeneratedHealthCommonsBiomarkerDesiredDirections,
-  loadGeneratedHealthCommonsProtocolFamilyGraph,
-  loadGeneratedHealthCommonsProtocolIndex,
-  loadGeneratedHealthCommonsProtocolRunSpecs,
   loadGeneratedHealthCommonsWebBiomarkerIndex,
-  loadGeneratedHealthCommonsWebExperimentIndex,
-  loadGeneratedHealthCommonsWebExperimentProtocolTab,
-  loadGeneratedHealthCommonsWebExperimentResearchTab,
-  loadGeneratedHealthCommonsWebExperimentResultsPublic,
-  loadGeneratedHealthCommonsWebExperimentShell,
   loadGeneratedHealthCommonsWebRouteBundle,
   loadGeneratedHealthCommonsWebRouteIndex,
   MURPH_HEALTH_COMMONS_PACKAGE_ROOT_ENV,
@@ -44,8 +22,6 @@ import {
 } from "@murphai/health-commons";
 import { healthCommonsCatalogSchema } from "@murphai/contracts";
 
-const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const contentRoot = path.join(packageRoot, "content");
 const TEST_CATALOG_HASH = `sha256:${"0".repeat(64)}`;
 const TEST_PAGE_REVISION_ID = `sha256:${"1".repeat(64)}`;
 
@@ -311,22 +287,13 @@ describe("@murphai/health-commons runtime catalog reader", () => {
 
   it("loads the compact generated biomarker browse index", () => {
     const biomarkerIndex = getGeneratedHealthCommonsWebBiomarkerIndex();
-    const publishedRouteIds = biomarkerIndex.biomarkers
-      .filter((entry) => entry.published)
-      .map((entry) => entry.routeId);
 
     expect(biomarkerIndex.schemaVersion).toBe("murph.commons.web.biomarker-index.v4");
-    expect(publishedRouteIds).toEqual(expect.arrayContaining([
-      "estimated-vo2max",
-      "resting-heart-rate",
-      "deep-sleep-minutes",
-    ]));
     expect(
       biomarkerIndex.biomarkers.find((entry) => entry.routeId === "estimated-vo2max"),
     ).toEqual(expect.objectContaining({
       bundlePath: "bundles/biomarker/estimated-vo2max.json",
       key: "biomarker:estimated-vo2max",
-      published: true,
     }));
     expect(
       biomarkerIndex.biomarkers.find((entry) => entry.routeId === "chloride")?.fallbackRanges,
@@ -370,39 +337,19 @@ describe("@murphai/health-commons runtime catalog reader", () => {
     }
   });
 
-  it("keeps protocol sort rank in the generated experiment index", () => {
-    const experimentIndex = getGeneratedHealthCommonsWebExperimentIndex();
-    const firstProtocolIds = experimentIndex.experiments
-      .filter((entry) => entry.sortRank != null)
-      .sort((left, right) => (left.sortRank ?? 0) - (right.sortRank ?? 0))
-      .slice(0, 4)
-      .map((entry) => entry.routeId);
-
-    expect(firstProtocolIds).toEqual([
-      "finnish-sauna",
-      "norwegian-4x4",
-      "bryan-johnson-blueprint",
-    ]);
-    expect(
-      experimentIndex.experiments.find((entry) => entry.routeId === "finnish-sauna"),
-    ).toEqual(expect.objectContaining({ sortRank: 10 }));
-  });
-
   it("falls back to package-relative generated artifacts when the package root env is unset", () => {
     const previousPackageRoot =
       process.env[MURPH_HEALTH_COMMONS_PACKAGE_ROOT_ENV];
     delete process.env[MURPH_HEALTH_COMMONS_PACKAGE_ROOT_ENV];
     try {
-      const protocolIndex = loadGeneratedHealthCommonsProtocolIndex();
+      const biomarkerIndex = loadGeneratedHealthCommonsWebBiomarkerIndex();
       const routeIndex = loadGeneratedHealthCommonsWebRouteIndex();
 
-      expect(protocolIndex.protocols.length).toBeGreaterThan(0);
       expect(
-        protocolIndex.protocols.some((protocol) => protocol.routeId === "finnish-sauna"),
+        biomarkerIndex.biomarkers.some((biomarker) => biomarker.routeId === "resting-heart-rate"),
       ).toBe(true);
-      expect(routeIndex.routes.length).toBeGreaterThan(0);
       expect(
-        routeIndex.routes.some((route) => route.routeId === "finnish-sauna"),
+        routeIndex.routes.some((route) => route.routeId === "resting-heart-rate"),
       ).toBe(true);
     } finally {
       if (previousPackageRoot === undefined) {
@@ -435,35 +382,6 @@ describe("@murphai/health-commons runtime catalog reader", () => {
       "utf8",
     );
     await writeFile(
-      path.join(generatedRoot, "protocol-index.json"),
-      `${JSON.stringify({
-        catalogHash,
-        protocols: [],
-        schemaVersion: HEALTH_COMMONS_PROTOCOL_INDEX_SCHEMA_VERSION,
-      })}\n`,
-      "utf8",
-    );
-    await writeFile(
-      path.join(generatedRoot, "protocol-run-specs.json"),
-      `${JSON.stringify({
-        catalogHash,
-        protocols: [],
-        schemaVersion: HEALTH_COMMONS_PROTOCOL_RUN_SPECS_SCHEMA_VERSION,
-      })}\n`,
-      "utf8",
-    );
-    await writeFile(
-      path.join(generatedRoot, "protocol-family-graph.json"),
-      `${JSON.stringify({
-        catalogHash,
-        edges: [],
-        families: [],
-        protocols: [],
-        schemaVersion: HEALTH_COMMONS_PROTOCOL_FAMILY_GRAPH_SCHEMA_VERSION,
-      })}\n`,
-      "utf8",
-    );
-    await writeFile(
       path.join(generatedRoot, "web", "routes", "index.json"),
       `${JSON.stringify({
         catalogHash,
@@ -491,9 +409,6 @@ describe("@murphai/health-commons runtime catalog reader", () => {
           },
         ),
       ).toBe("lower_or_stable");
-      expect(loadGeneratedHealthCommonsProtocolIndex().catalogHash).toBe(catalogHash);
-      expect(loadGeneratedHealthCommonsProtocolRunSpecs().catalogHash).toBe(catalogHash);
-      expect(loadGeneratedHealthCommonsProtocolFamilyGraph().catalogHash).toBe(catalogHash);
       expect(loadGeneratedHealthCommonsWebRouteIndex().catalogHash).toBe(catalogHash);
     } finally {
       if (previousPackageRoot === undefined) {
@@ -524,8 +439,6 @@ describe("@murphai/health-commons runtime catalog reader", () => {
         );
       expect(() => loadGeneratedHealthCommonsWebRouteIndex())
         .toThrow(path.join(expectedWebRootPath, "routes", "index.json"));
-      expect(() => loadGeneratedHealthCommonsWebExperimentIndex())
-        .toThrow(path.join(expectedWebRootPath, "browse", "experiments.json"));
       expect(() => loadGeneratedHealthCommonsWebBiomarkerIndex())
         .toThrow(path.join(expectedWebRootPath, "browse", "biomarkers.json"));
     } finally {
@@ -533,63 +446,6 @@ describe("@murphai/health-commons runtime catalog reader", () => {
         delete process.env[MURPH_HEALTH_COMMONS_PACKAGE_ROOT_ENV];
       } else {
         process.env[MURPH_HEALTH_COMMONS_PACKAGE_ROOT_ENV] = previousPackageRoot;
-      }
-    }
-  });
-
-  it("classifies generated protocol artifact failures without exposing paths or contents", async () => {
-    const generatedRoot = await mkdtemp(
-      path.join(os.tmpdir(), "murph-health-commons-protocol-failures-"),
-    );
-    const privateArtifactValue = "private malformed artifact value";
-    const scenarios = [
-      {
-        artifact: "protocol_index",
-        fileName: "protocol-index.json",
-        load: (artifactPath: string) =>
-          loadGeneratedHealthCommonsProtocolIndex({ protocolIndexPath: artifactPath }),
-      },
-      {
-        artifact: "protocol_run_specs",
-        fileName: "protocol-run-specs.json",
-        load: (artifactPath: string) =>
-          loadGeneratedHealthCommonsProtocolRunSpecs({ protocolRunSpecsPath: artifactPath }),
-      },
-      {
-        artifact: "protocol_family_graph",
-        fileName: "protocol-family-graph.json",
-        load: (artifactPath: string) =>
-          loadGeneratedHealthCommonsProtocolFamilyGraph({ protocolFamilyGraphPath: artifactPath }),
-      },
-    ] as const;
-
-    for (const scenario of scenarios) {
-      const artifactPath = path.join(generatedRoot, scenario.fileName);
-      for (const category of ["unavailable", "invalid"] as const) {
-        if (category === "invalid") {
-          await writeFile(artifactPath, `${privateArtifactValue} {not-json}`, "utf8");
-        }
-        let failure: unknown;
-        try {
-          scenario.load(artifactPath);
-        } catch (error) {
-          failure = error;
-        }
-
-        expect(isHealthCommonsProtocolArtifactError(failure)).toBe(true);
-        expect(failure).toBeInstanceOf(HealthCommonsProtocolArtifactError);
-        expect(failure).toMatchObject({
-          artifact: scenario.artifact,
-          category,
-          code: "HEALTH_COMMONS_PROTOCOL_ARTIFACT_FAILURE",
-        });
-        const serialized = JSON.stringify(failure, Object.getOwnPropertyNames(failure));
-        expect(serialized).not.toContain(generatedRoot);
-        expect(serialized).not.toContain(privateArtifactValue);
-
-        if (category === "invalid") {
-          await rm(artifactPath, { force: true });
-        }
       }
     }
   });
@@ -628,44 +484,40 @@ describe("@murphai/health-commons runtime catalog reader", () => {
   it("loads route-scoped web bundles and preserves the route-bundle reader contract", () => {
     const routeIndex = getGeneratedHealthCommonsWebRouteIndex();
     const routeEntry = routeIndex.routes.find((entry) =>
-      entry.entityType === "protocol_variant" && entry.routeId === "finnish-sauna"
+      entry.entityType === "biomarker" && entry.routeId === "estimated-vo2max"
     );
 
     expect(routeEntry).toMatchObject({
-      bundlePath: "bundles/protocol_variant/finnish-sauna.json",
-      entityType: "protocol_variant",
-      routeId: "finnish-sauna",
+      bundlePath: "bundles/biomarker/estimated-vo2max.json",
+      entityType: "biomarker",
+      routeId: "estimated-vo2max",
     });
 
     const bundle = loadGeneratedHealthCommonsWebRouteBundle({
-      entityType: "protocol_variant",
-      routeId: "murph-finnish-standard-3x-week",
+      entityType: "biomarker",
+      routeId: "estimated-vo2max",
     });
 
     expect(bundle).not.toBeNull();
     if (!bundle) {
-      throw new Error("Expected a generated Finnish sauna route bundle.");
+      throw new Error("Expected a generated estimated VO2max route bundle.");
     }
     expect(bundle.route).toEqual(expect.objectContaining({
-      aliases: expect.arrayContaining(["murph-finnish-standard-3x-week"]),
-      entityType: "protocol_variant",
-      routeId: "finnish-sauna",
-      slug: "protocols/dry-sauna/murph-finnish-standard-3x-week",
+      entityType: "biomarker",
+      routeId: "estimated-vo2max",
+      slug: "biomarkers/estimated-vo2max",
     }));
-    expect(bundle.entitiesByKey[bundle.primaryKey]?.entityType).toBe("protocol_variant");
-    expect(Object.keys(bundle.sourceSnippets)).not.toHaveLength(0);
-
+    expect(bundle.entitiesByKey[bundle.primaryKey]?.entityType).toBe("biomarker");
     expect(bundle.revisionManifest[bundle.primaryKey]).toEqual({
       pageRevisionId: expect.stringMatching(/^sha256:/u),
-      recipeHash: expect.stringMatching(/^sha256:/u),
-      runSpecRevisionId: expect.stringMatching(/^sha256:/u),
+      recipeHash: null,
+      runSpecRevisionId: null,
       workflowSpecRevisionId: null,
     });
     const reader = createHealthCommonsRouteBundleReader(bundle);
     expect(reader.route).toEqual(bundle.route);
     expect(reader.revisionManifest).toEqual(bundle.revisionManifest);
-    expect(reader.findByKey(bundle.primaryKey)?.entityType).toBe("protocol_variant");
-    expect(reader.listEvidenceAppraisals({ targetKey: bundle.primaryKey }).length).toBeGreaterThan(0);
+    expect(reader.findByKey(bundle.primaryKey)?.entityType).toBe("biomarker");
     expect(
       bundle.reverseEdges.every((edge) => bundle.entitiesByKey[edge.sourceKey] !== undefined),
     ).toBe(true);
@@ -697,370 +549,43 @@ describe("@murphai/health-commons runtime catalog reader", () => {
         .every((entity) => entity.relations?.length === 0),
     ).toBe(true);
 
-    const reverseProtocolEdges = reader.listReverseEdges({
-      relationTypes: ["related_protocol"],
+    const reverseMeasurementEdges = reader.listReverseEdges({
+      relationTypes: ["measures"],
       targetKey: bundle.primaryKey,
     });
-    expect(reverseProtocolEdges.length).toBeGreaterThan(0);
-    expect(reverseProtocolEdges.every((edge) => edge.relation.type === "related_protocol")).toBe(
-      true,
-    );
+    expect(reverseMeasurementEdges.length).toBeGreaterThan(0);
     expect(
-      reverseProtocolEdges.every(
-        (edge) => edge.relation.target === bundle.primaryKey && edge.sourceKey.length > 0,
+      reverseMeasurementEdges.every(
+        (edge) =>
+          edge.relation.type === "measures"
+          && edge.relation.target === bundle.primaryKey
+          && edge.sourceKey.length > 0,
       ),
     ).toBe(true);
-    expect(reverseProtocolEdges).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        relation: expect.objectContaining({
-          target: bundle.primaryKey,
-          type: "related_protocol",
-        }),
-        sourceKey: "biomarker:resting-heart-rate",
-      }),
-    ]));
 
     expect(bundle.reverseEdges.every((edge) => edge.relation.type !== "cites")).toBe(true);
   });
 
-  it("loads the minimal experiment research-tab projection by primary id and aliases", () => {
-    const researchTab = loadGeneratedHealthCommonsWebExperimentResearchTab({
-      routeId: "finnish-sauna",
-    });
-    const aliasResearchTab = loadGeneratedHealthCommonsWebExperimentResearchTab({
-      routeId: "murph-finnish-standard-3x-week",
-    });
-
-    expect(researchTab).not.toBeNull();
-    expect(aliasResearchTab).toEqual(researchTab);
-    if (!researchTab) {
-      throw new Error("Expected the generated Finnish sauna research tab.");
-    }
-
-    expect(researchTab).toEqual(expect.objectContaining({
-      key: "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
-      route: expect.objectContaining({
-        entityType: "protocol_variant",
-        routeId: "finnish-sauna",
-      }),
-      schemaVersion: "murph.commons.web.experiment-research-tab.v1",
-      title: "Finnish Dry Sauna",
-    }));
-    expect(researchTab.researchStats).toEqual(expect.arrayContaining([
-      expect.objectContaining({ label: "SOURCES CHECKED", value: 178 }),
-      expect.objectContaining({ label: "DIRECT HUMAN PARTICIPANTS", value: "11,584+" }),
-      expect.objectContaining({ label: "REVIEW PAPERS", value: 51 }),
-      expect.objectContaining({ label: "RESEARCH PAPERS", value: 98 }),
-      expect.objectContaining({ label: "YEARS COVERED", value: "1979–2026" }),
-    ]));
-    expect(researchTab.protocolKeepInMind).toEqual(expect.arrayContaining([
-      expect.stringContaining("short self-experiment"),
-    ]));
-    expect(Object.keys(researchTab.researchLandscape ?? {})).not.toContain("groups");
-    expect(researchTab.researchGroups?.map((group) => [group.id, group.studies.length])).toEqual([
-      ["evidence-backbone-and-claim-calibration", 23],
-      ["dry_sauna_acute_thermoregulation", 1],
-      ["near-term-autonomic-vascular-and-immune-signals", 38],
-      ["intervention-design-training-and-mixed-results", 29],
-      ["post_exercise_heat_performance", 2],
-      ["cultural-practice-and-protocol-context", 4],
-      ["traditional-sauna-design-and-operation", 2],
-      ["sauna-modality-definition-context", 1],
-      ["long-term-finnish-cohort-and-real-world-context", 21],
-      ["safety-dose-modality-and-context-boundaries", 69],
-      ["operational-public-sauna-safety", 3],
-      ["external-protocol-claims", 5],
-      ["external-protocol-dose-context", 1],
-      ["core-temperature-measurement-context", 2],
-      ["heat-tolerance-safety-boundaries", 2],
-    ]);
-    expect(researchTab.studies.length).toBeGreaterThan(100);
-    expect(researchTab.studies[0]).toEqual(expect.objectContaining({
-      authors: expect.any(String),
-      journal: expect.any(String),
-      title: expect.any(String),
-      type: expect.any(String),
-    }));
-    expect(researchTab.studies.every((study) => (study.finding?.length ?? 0) <= 1_000))
-      .toBe(true);
-    expect(researchTab.studies.every((study) =>
-      Object.keys(study).every((key) => RESEARCH_STUDY_PROJECTION_KEYS.has(key))
-    )).toBe(true);
-    expect(
-      researchTab.researchGroups?.every((group) =>
-        group.studies.every((study) =>
-          Object.keys(study).every((key) => RESEARCH_STUDY_PROJECTION_KEYS.has(key))
-        )
-      ) ?? true,
-    ).toBe(true);
-    expect(Object.keys(researchTab)).not.toContain("entitiesByKey");
-    expect(Object.keys(researchTab)).not.toContain("evidenceAppraisals");
-    expect(Object.keys(researchTab)).not.toContain("sourceSnippets");
-  });
-
-  it("loads minimal experiment shell, protocol-tab, and results projections by aliases", () => {
-    const shell = loadGeneratedHealthCommonsWebExperimentShell({
-      routeId: "murph-finnish-standard-3x-week",
-    });
-    const protocolTab = loadGeneratedHealthCommonsWebExperimentProtocolTab({
-      routeId: "murph-finnish-standard-3x-week",
-    });
-    const resultsPublic = loadGeneratedHealthCommonsWebExperimentResultsPublic({
-      routeId: "murph-finnish-standard-3x-week",
-    });
-
-    expect(shell).toEqual(expect.objectContaining({
-      baselineDays: 14,
-      durationDays: 28,
-      id: "finnish-sauna",
-      schemaVersion: "murph.commons.web.experiment-shell.v1",
-      title: "Finnish Dry Sauna",
-    }));
-    expect(protocolTab).toEqual(expect.objectContaining({
-      baselineDays: 14,
-      durationDays: 28,
-      id: "finnish-sauna",
-      schemaVersion: "murph.commons.web.experiment-protocol-tab.v1",
-    }));
-    expect(resultsPublic).toEqual(expect.objectContaining({
-      commons: expect.objectContaining({
-        aliases: expect.arrayContaining([
-          "finnish-sauna",
-          "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
-          "murph-finnish-standard-3x-week",
-        ]),
-        key: "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
-        routeId: "finnish-sauna",
-      }),
-      id: "finnish-sauna",
-      schemaVersion: "murph.commons.web.experiment-results-public.v1",
-    }));
-    expect(protocolTab?.expectedSignals.length).toBeGreaterThan(0);
-    expect(protocolTab?.expectedSignals).toContainEqual(expect.objectContaining({
-      biomarkerRouteId: "resting-heart-rate",
-      label: "Resting Heart Rate",
-    }));
-    expect(protocolTab?.protocol.length).toBeGreaterThan(0);
-    expect(protocolTab?.mechanismChain).toContainEqual(expect.objectContaining({
-      content: "3x/week dry heat · 5–20 min · tolerable cooldown",
-      label: "Session",
-    }));
-    expect(protocolTab?.safety.precautions.length).toBeGreaterThan(0);
-    expect(resultsPublic?.protocol).toEqual(protocolTab?.protocol);
-    expect(Object.keys(shell ?? {})).not.toContain("entitiesByKey");
-    expect(Object.keys(protocolTab ?? {})).not.toContain("studies");
-    expect(Object.keys(resultsPublic ?? {})).not.toContain("expectedSignals");
-    expect(Object.keys(resultsPublic ?? {})).not.toContain("safety");
-  });
-
-  it("projects Consistent Wake Time expected signals in the edited order with metadata", () => {
-    const protocolTab = loadGeneratedHealthCommonsWebExperimentProtocolTab({
-      routeId: "consistent-wake-time",
-    });
-
-    expect(protocolTab).toEqual(expect.objectContaining({
-      id: "consistent-wake-time",
-      title: "Consistent Wake Time",
-    }));
-    expect(protocolTab?.expectedSignals.map((signal) => signal.biomarkerRouteId)).toEqual([
-      "total-sleep-time",
-      "sleep-efficiency",
-      "resting-heart-rate",
-      "hrv-rmssd",
-      "sleep-onset-latency",
-      "daytime-sleepiness",
-    ]);
-    expect(protocolTab?.expectedSignals).toContainEqual(expect.objectContaining({
-      biomarkerRouteId: "daytime-sleepiness",
-      expected: "Should fall, not rise",
-      estimatedChange: expect.objectContaining({
-        confidence: "low",
-        high: 0,
-        kind: "absolute",
-        low: -2,
-        unit: "score points",
-        window: "4 weeks",
-      }),
-      protocolProminence: "focus",
-    }));
-    expect(protocolTab?.expectedSignals).toContainEqual(expect.objectContaining({
-      biomarkerRouteId: "sleep-efficiency",
-      expected: "Possible change",
-      protocolProminence: "context",
-    }));
-    expect(protocolTab?.expectedSignals).toContainEqual(expect.objectContaining({
-      biomarkerRouteId: "resting-heart-rate",
-      expected: "May drop slightly",
-      estimatedChange: expect.objectContaining({
-        confidence: "low",
-        high: 0,
-        kind: "absolute",
-        low: -3,
-        unit: "bpm",
-        window: "2-4 weeks",
-      }),
-      protocolProminence: "context",
-    }));
-  });
-
-  it("projects Daily Step Floor safety outcomes into protocol signal cards", () => {
-    const protocolTab = loadGeneratedHealthCommonsWebExperimentProtocolTab({
-      routeId: "daily-step-floor",
-    });
-
-    expect(protocolTab?.expectedSignals.map((signal) => signal.biomarkerRouteId)).toEqual([
-      "daily-step-count",
-      "step-floor-days",
-      "resting-heart-rate",
-      "estimated-vo2max",
-      "morning-blood-pressure",
-      "sleep-efficiency",
-      "musculoskeletal-pain",
-      "walking-safety-events",
-      "sedentary-time",
-      "moderate-to-vigorous-activity-minutes",
-      "walking-bout-minutes",
-      "walking-cadence",
-    ]);
-    expect(protocolTab?.expectedSignals).toContainEqual(expect.objectContaining({
-      biomarkerRouteId: "daily-step-count",
-      expected: "Could improve",
-      protocolProminence: "focus",
-    }));
-    expect(protocolTab?.expectedSignals).toContainEqual(expect.objectContaining({
-      biomarkerRouteId: "walking-safety-events",
-      expected: "Could trend lower",
-      protocolProminence: "focus",
-    }));
-  });
-
-  it("rejects route-index projection paths that do not match the route bundle id", async () => {
-    const routeIndex = getGeneratedHealthCommonsWebRouteIndex();
-    const finnishRoute = routeIndex.routes.find((entry) =>
-      entry.entityType === "protocol_variant" && entry.routeId === "finnish-sauna"
-    );
-    if (!finnishRoute?.projections) {
-      throw new Error("Expected a generated Finnish sauna route with projections.");
-    }
-
-    const generatedWebRoot = await mkdtemp(path.join(os.tmpdir(), "murph-health-commons-web-"));
-    await mkdir(path.join(generatedWebRoot, "routes"), { recursive: true });
-    await mkdir(path.join(generatedWebRoot, "tabs/experiments/norwegian-4x4"), { recursive: true });
-    await writeFile(
-      path.join(generatedWebRoot, "routes/index.json"),
-      JSON.stringify({
-        ...routeIndex,
-        routes: [
-          {
-            ...finnishRoute,
-            projections: {
-              ...finnishRoute.projections,
-              "experiment.research": "tabs/experiments/norwegian-4x4/research.json",
-            },
-          },
-        ],
-      }),
-      "utf8",
-    );
-    await writeFile(
-      path.join(generatedWebRoot, "tabs/experiments/norwegian-4x4/research.json"),
-      readFileSync(
-        new URL("../generated/web/tabs/experiments/norwegian-4x4/research.json", import.meta.url),
-        "utf8",
-      ),
-      "utf8",
-    );
-
-    expect(() => loadGeneratedHealthCommonsWebExperimentResearchTab({
-      generatedWebRoot,
-      routeId: "finnish-sauna",
-    })).toThrow("projection path does not match route bundle id");
-  });
-
-  it("rejects generated research study urls with unsafe schemes", async () => {
-    const routeIndex = getGeneratedHealthCommonsWebRouteIndex();
-    const finnishRoute = routeIndex.routes.find((entry) =>
-      entry.entityType === "protocol_variant" && entry.routeId === "finnish-sauna"
-    );
-    if (!finnishRoute?.projections) {
-      throw new Error("Expected a generated Finnish sauna route with projections.");
-    }
-
-    const unsafeUrls = [
-      "javascript:alert(1)",
-      "data:text/html,<script>alert(1)</script>",
-      "file:///etc/passwd",
-      "//example.test/source",
-      "https://user:password@example.test/source",
-    ];
-
-    for (const unsafeUrl of unsafeUrls) {
-      const generatedWebRoot = await mkdtemp(path.join(os.tmpdir(), "murph-health-commons-web-"));
-      await mkdir(path.join(generatedWebRoot, "routes"), { recursive: true });
-      await mkdir(path.join(generatedWebRoot, "tabs/experiments/finnish-sauna"), {
-        recursive: true,
-      });
-      await writeFile(
-        path.join(generatedWebRoot, "routes/index.json"),
-        JSON.stringify({
-          ...routeIndex,
-          routes: [finnishRoute],
-        }),
-        "utf8",
-      );
-      const researchTab = JSON.parse(
-        readFileSync(
-          new URL("../generated/web/tabs/experiments/finnish-sauna/research.json", import.meta.url),
-          "utf8",
-        ),
-      ) as Record<string, unknown>;
-      const studies = researchTab["studies"];
-      if (!Array.isArray(studies) || typeof studies[0] !== "object" || studies[0] === null) {
-        throw new Error("Expected generated Finnish sauna research studies.");
-      }
-      const firstStudy = studies[0] as Record<string, unknown>;
-      await writeFile(
-        path.join(generatedWebRoot, "tabs/experiments/finnish-sauna/research.json"),
-        JSON.stringify({
-          ...researchTab,
-          studies: [
-            {
-              ...firstStudy,
-              url: unsafeUrl,
-            },
-            ...studies.slice(1),
-          ],
-        }),
-        "utf8",
-      );
-
-      expect(() => loadGeneratedHealthCommonsWebExperimentResearchTab({
-        generatedWebRoot,
-        routeId: "finnish-sauna",
-      })).toThrow("Health Commons generated experiment research tab is invalid");
-    }
-  });
-
   it("rejects unsafe projection paths in generated route indexes", async () => {
     const routeIndex = getGeneratedHealthCommonsWebRouteIndex();
-    const finnishRoute = routeIndex.routes.find((entry) =>
-      entry.entityType === "protocol_variant" && entry.routeId === "finnish-sauna"
+    const goalRoute = routeIndex.routes.find((entry) =>
+      entry.entityType === "goal_template" && entry.projections?.["goal.page"] !== undefined
     );
-    if (!finnishRoute?.projections) {
-      throw new Error("Expected a generated Finnish sauna route with projections.");
+    if (!goalRoute?.projections) {
+      throw new Error("Expected a generated goal route with projections.");
     }
 
     const generatedWebRoot = await mkdtemp(path.join(os.tmpdir(), "murph-health-commons-web-"));
     await mkdir(path.join(generatedWebRoot, "routes"), { recursive: true });
     const unsafeProjectionPaths = [
-      "../tabs/experiments/norwegian-4x4/research.json",
-      "%2e%2e/tabs/experiments/norwegian-4x4/research.json",
-      "%252e%252e/tabs/experiments/norwegian-4x4/research.json",
-      "tabs%2fexperiments/finnish-sauna/research.json",
-      "tabs%252fexperiments/finnish-sauna/research.json",
-      "tabs%5cexperiments/finnish-sauna/research.json",
-      "tabs/experiments/finnish-sauna/research.json?outside",
-      "tabs/experiments/finnish-sauna/research.json#outside",
+      "../pages/goals/other.json",
+      "%2e%2e/pages/goals/other.json",
+      "%252e%252e/pages/goals/other.json",
+      "pages%2fgoals/other.json",
+      "pages%252fgoals/other.json",
+      "pages%5cgoals/other.json",
+      "pages/goals/other.json?outside",
+      "pages/goals/other.json#outside",
     ];
 
     for (const unsafeProjectionPath of unsafeProjectionPaths) {
@@ -1070,10 +595,10 @@ describe("@murphai/health-commons runtime catalog reader", () => {
           ...routeIndex,
           routes: [
             {
-              ...finnishRoute,
+              ...goalRoute,
               projections: {
-                ...finnishRoute.projections,
-                "experiment.research": unsafeProjectionPath,
+                ...goalRoute.projections,
+                "goal.page": unsafeProjectionPath,
               },
             },
           ],
@@ -1086,290 +611,6 @@ describe("@murphai/health-commons runtime catalog reader", () => {
         unsafeProjectionPath,
       ).toThrow("Health Commons generated web route index is invalid.");
     }
-  });
-
-  it("rejects projection artifacts whose top-level id no longer matches the route index", async () => {
-    const routeIndex = getGeneratedHealthCommonsWebRouteIndex();
-    const finnishRoute = routeIndex.routes.find((entry) =>
-      entry.entityType === "protocol_variant" && entry.routeId === "finnish-sauna"
-    );
-    if (!finnishRoute?.projections) {
-      throw new Error("Expected a generated Finnish sauna route with projections.");
-    }
-
-    const generatedWebRoot = await mkdtemp(path.join(os.tmpdir(), "murph-health-commons-web-"));
-    await mkdir(path.join(generatedWebRoot, "routes"), { recursive: true });
-    await mkdir(path.join(generatedWebRoot, "shell/experiments"), { recursive: true });
-    await writeFile(
-      path.join(generatedWebRoot, "routes/index.json"),
-      JSON.stringify({
-        ...routeIndex,
-        routes: [finnishRoute],
-      }),
-      "utf8",
-    );
-    const shell = JSON.parse(
-      readFileSync(
-        new URL("../generated/web/shell/experiments/finnish-sauna.json", import.meta.url),
-        "utf8",
-      ),
-    ) as Record<string, unknown>;
-    await writeFile(
-      path.join(generatedWebRoot, "shell/experiments/finnish-sauna.json"),
-      JSON.stringify({
-        ...shell,
-        id: "not-finnish-sauna",
-      }),
-      "utf8",
-    );
-
-    expect(() => loadGeneratedHealthCommonsWebExperimentShell({
-      generatedWebRoot,
-      routeId: "finnish-sauna",
-    })).toThrow("projection id does not match route index");
-  });
-
-  it("does not publish any explicit draft, deprecated, or hidden protocol route or bundle", async () => {
-    const catalog = await buildHealthCommonsCatalog({ contentRoot });
-    const routeIndex = getGeneratedHealthCommonsWebRouteIndex();
-    const experimentIndex = getGeneratedHealthCommonsWebExperimentIndex();
-    const protocolIndexReader = getGeneratedHealthCommonsProtocolIndexReader();
-    const runSpecReader = getGeneratedHealthCommonsProtocolRunSpecReader();
-    const excludedProtocols = catalog.entities.filter((entity) =>
-      entity.entityType === "protocol_variant"
-      && (!isRunnableProtocolStatus(entity.status) || entity.hidden === true)
-    );
-
-    for (const protocol of excludedProtocols) {
-      const routeId = protocol.preferredRouteId ?? protocol.slug.split("/").at(-1);
-
-      expect(routeIndex.routes.some((route) => route.key === protocol.key)).toBe(false);
-      expect(experimentIndex.experiments.some((entry) => entry.key === protocol.key)).toBe(false);
-      expect(protocolIndexReader.findByLookup(protocol.key)).toBeNull();
-      expect(runSpecReader.findByLookup(protocol.key)).toBeNull();
-      expect(loadGeneratedHealthCommonsWebRouteBundle({
-        entityType: "protocol_variant",
-        routeId: routeId ?? protocol.key,
-      })).toBeNull();
-      expect(loadGeneratedHealthCommonsWebExperimentResearchTab({
-        routeId: routeId ?? protocol.key,
-      })).toBeNull();
-      expect(loadGeneratedHealthCommonsWebExperimentShell({
-        routeId: routeId ?? protocol.key,
-      })).toBeNull();
-      expect(loadGeneratedHealthCommonsWebExperimentProtocolTab({
-        routeId: routeId ?? protocol.key,
-      })).toBeNull();
-      expect(loadGeneratedHealthCommonsWebExperimentResultsPublic({
-        routeId: routeId ?? protocol.key,
-      })).toBeNull();
-    }
-
-    expect(excludedProtocols.some((protocol) => protocol.status === "draft")).toBe(true);
-    expect(excludedProtocols.some((protocol) => protocol.hidden === true)).toBe(true);
-  });
-
-  it("keeps non-public protocol variants out of every generated route bundle", () => {
-    const routeIndex = getGeneratedHealthCommonsWebRouteIndex();
-    const checkedBundlePaths = new Set<string>();
-
-    for (const route of routeIndex.routes) {
-      if (checkedBundlePaths.has(route.bundlePath)) {
-        continue;
-      }
-      checkedBundlePaths.add(route.bundlePath);
-
-      const bundle = loadGeneratedHealthCommonsWebRouteBundle({
-        entityType: route.entityType,
-        routeId: route.routeId,
-      });
-      expect(bundle, `Expected generated route bundle ${route.bundlePath}`).not.toBeNull();
-      if (!bundle) {
-        continue;
-      }
-
-      const leakedProtocolKeys = Object.values(bundle.entitiesByKey)
-        .filter((entity) =>
-          entity.entityType === "protocol_variant"
-          && (!isRunnableProtocolStatus(entity.status) || entity.hidden === true)
-        )
-        .map((entity) => entity.key)
-        .sort();
-
-      expect(leakedProtocolKeys, route.bundlePath).toEqual([]);
-    }
-
-    expect(checkedBundlePaths.size).toBeGreaterThan(0);
-  });
-
-  it("does not include hidden protocol variants in public biomarker route bundles", () => {
-    const bundle = loadGeneratedHealthCommonsWebRouteBundle({
-      entityType: "biomarker",
-      routeId: "musculoskeletal-pain",
-    });
-
-    expect(bundle).not.toBeNull();
-    expect(bundle?.entitiesByKey).not.toHaveProperty(
-      "protocol_variant:collagen-supplementation/hydrolyzed-collagen-peptides",
-    );
-    expect(bundle?.reverseEdges.map((edge) => edge.sourceKey)).not.toContain(
-      "protocol_variant:collagen-supplementation/hydrolyzed-collagen-peptides",
-    );
-  });
-
-  it("keeps the Finnish sauna tab projections materially smaller than the route bundle", () => {
-    const bundle = readFileSync(
-      new URL("../generated/web/bundles/protocol_variant/finnish-sauna.json", import.meta.url),
-    );
-    const shell = readFileSync(
-      new URL("../generated/web/shell/experiments/finnish-sauna.json", import.meta.url),
-    );
-    const protocolTab = readFileSync(
-      new URL("../generated/web/tabs/experiments/finnish-sauna/protocol.json", import.meta.url),
-    );
-    const resultsPublic = readFileSync(
-      new URL("../generated/web/tabs/experiments/finnish-sauna/results-public.json", import.meta.url),
-    );
-    const researchTab = readFileSync(
-      new URL("../generated/web/tabs/experiments/finnish-sauna/research.json", import.meta.url),
-    );
-
-    expect(shell.byteLength).toBeLessThan(5_000);
-    expect(protocolTab.byteLength).toBeLessThan(30_000);
-    expect(resultsPublic.byteLength).toBeLessThan(10_000);
-    expect(researchTab.byteLength).toBeLessThan(500_000);
-    expect(gzipSync(shell).byteLength).toBeLessThan(2_000);
-    expect(gzipSync(protocolTab).byteLength).toBeLessThan(8_000);
-    expect(gzipSync(resultsPublic).byteLength).toBeLessThan(4_000);
-    expect(gzipSync(researchTab).byteLength).toBeLessThan(90_000);
-    expect(bundle.byteLength / researchTab.byteLength).toBeGreaterThan(2);
-    expect(bundle.byteLength / protocolTab.byteLength).toBeGreaterThan(80);
-    expect(bundle.byteLength / resultsPublic.byteLength).toBeGreaterThan(250);
-  });
-
-  it("loads compact protocol artifacts and resolves keys, slugs, and route ids", () => {
-    const index = loadGeneratedHealthCommonsProtocolIndex();
-    const runSpecs = loadGeneratedHealthCommonsProtocolRunSpecs();
-    const familyGraph = loadGeneratedHealthCommonsProtocolFamilyGraph();
-    const indexReader = getGeneratedHealthCommonsProtocolIndexReader();
-    const runSpecReader = getGeneratedHealthCommonsProtocolRunSpecReader();
-    const graphReader = getGeneratedHealthCommonsProtocolFamilyGraphReader();
-
-    expect(index.catalogHash).toBe(runSpecs.catalogHash);
-    expect(index.catalogHash).toBe(familyGraph.catalogHash);
-    expect(Object.keys(index.protocols[0] ?? {})).toContain("searchText");
-    expect(Object.keys(familyGraph.protocols[0] ?? {})).not.toContain("searchText");
-
-    const finnishSauna = indexReader.findByLookup("protocol_variant:finnish-sauna");
-    expect(finnishSauna?.key).toBe(
-      "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
-    );
-
-    expect(indexReader.findByLookup("finnish-sauna")?.key).toBe(
-      "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
-    );
-    expect(indexReader.findByLookup("PROTOCOL_VARIANT:DRY-SAUNA")?.key).toBe(
-      "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
-    );
-    expect(indexReader.findByLookup("protocol_variant%3Afinnish-sauna")?.key).toBe(
-      "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
-    );
-
-    expect(
-      indexReader.findByLookup(
-        "protocol_variant:sauna/finnish-dry/murph-standard-3x-week",
-      )?.key,
-    ).toBe("protocol_variant:dry-sauna/murph-finnish-standard-3x-week");
-
-    expect(indexReader.findByLookup("protocols/norwegian-4x4/norwegian-4x4")?.key).toBe(
-      "protocol_variant:norwegian-4x4/norwegian-4x4",
-    );
-
-    expect(indexReader.findByLookup("/protocols/norwegian-4x4/norwegian-4x4/")?.key)
-      .toBe("protocol_variant:norwegian-4x4/norwegian-4x4");
-    expect(
-      indexReader.findByLookup("PROTOCOL_VARIANT:NORWEGIAN-4X4/NORWEGIAN-4X4")?.key,
-    ).toBe("protocol_variant:norwegian-4x4/norwegian-4x4");
-    expect(indexReader.findByLookup("norwegian-4x4")?.key).toBe(
-      "protocol_variant:norwegian-4x4/norwegian-4x4",
-    );
-
-    expect(indexReader.findByLookup("%E0%A4%A")).toBeNull();
-
-    expect(runSpecReader.findByLookup("finnish-sauna")?.protocol).toMatchObject({
-      doseSignature: expect.stringContaining("3x/week"),
-    });
-    expect(
-      graphReader.findEntity({
-        entityTypes: ["experiment_family"],
-        lookup: "dry-sauna",
-      })?.key,
-    ).toBe("experiment_family:dry-sauna");
-    expect(
-      graphReader.findEntity({
-        entityTypes: ["experiment_family"],
-        lookup: "experiment_family:sauna/finnish-dry",
-      })?.key,
-    ).toBe("experiment_family:dry-sauna");
-    expect(
-      graphReader.findEntity({
-        entityTypes: ["experiment_family", "protocol_variant"],
-        lookup: "protocol_variant:dry-sauna",
-      })?.key,
-    ).toBe("protocol_variant:dry-sauna/murph-finnish-standard-3x-week");
-  });
-
-  it("lists compact protocol variants deterministically", () => {
-    const indexReader = getGeneratedHealthCommonsProtocolIndexReader();
-    const runSpecReader = getGeneratedHealthCommonsProtocolRunSpecReader();
-
-    const protocols = indexReader.listProtocols({ limit: 6 });
-    expect(protocols.map((protocol) => protocol.key)).toEqual([
-      "protocol_variant:dry-sauna/bryan-johnson-blueprint",
-      "protocol_variant:cold-water-immersion/cold-plunge",
-      "protocol_variant:consistent-wake-time/consistent-wake-time",
-      "protocol_variant:daily-step-floor/daily-step-floor",
-      "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
-      "protocol_variant:cognitive-offload-before-bed/five-minute-tomorrow-list",
-    ]);
-    expect(Object.keys(protocols[0] ?? {})).not.toContain("body");
-    expect(Object.keys(protocols[0] ?? {})).not.toContain("protocol");
-    expect(protocols[0]?.revision.runSpecRevisionId).toEqual(expect.stringMatching(/^sha256:/u));
-    const finnishSauna = runSpecReader.findByLookup(
-      "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
-    );
-    expect(finnishSauna?.protocol).toMatchObject({
-      doseSignature: expect.stringContaining("3x/week"),
-    });
-    expect(
-      indexReader.findByLookup("protocol_variant:creatine-supplementation/creatine-monohydrate"),
-    ).toBeNull();
-    expect(
-      runSpecReader.findByLookup("protocol_variant:creatine-supplementation/creatine-monohydrate"),
-    ).toBeNull();
-  });
-
-  it("filters compact protocol index entries by query and category", () => {
-    const reader = getGeneratedHealthCommonsProtocolIndexReader();
-
-    const protocolResults = reader.listProtocols({
-      categories: ["passive heat"],
-      limit: 5,
-      query: "sauna",
-    });
-
-    expect(protocolResults.map((protocol) => protocol.key)).toContain(
-      "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
-    );
-    expect(
-      protocolResults.every((protocol) => protocol.entityType === "protocol_variant"),
-    ).toBe(true);
-
-    const bodyFieldResults = reader.listProtocols({
-      limit: 10,
-      query: "RPE",
-    }).map((protocol) => protocol.key);
-    expect(bodyFieldResults).toContain("protocol_variant:norwegian-4x4/norwegian-4x4");
   });
 
   it("lists and searches measurement methods with compact measurement fields", () => {
@@ -1468,47 +709,37 @@ describe("@murphai/health-commons runtime catalog reader", () => {
     });
   });
 
-  it("normalizes wildcard filters for compact protocol lists", () => {
-    const reader = getGeneratedHealthCommonsProtocolIndexReader();
+  it("normalizes wildcard filters for compact catalog lists", () => {
+    const reader = createMeasurementMethodCatalogReader();
 
-    const wildcardStatusProtocolKeys = reader.listProtocols({
+    const wildcardStatusKeys = reader.listMeasurementMethods({
       limit: 20,
-      query: "sauna",
+      query: "camera",
       statuses: ["*"],
-    }).map((protocol) => protocol.key);
-    expect(wildcardStatusProtocolKeys).toContain(
-      "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
-    );
+    }).map((method) => method.key);
+    expect(wildcardStatusKeys).toContain("measurement_method:standardized-skin-photo-score");
 
-    const wildcardCategoryProtocolKeys = reader.listProtocols({
+    const wildcardCategoryKeys = reader.listMeasurementMethods({
       categories: ["*"],
       limit: 20,
-      query: "sauna",
-    }).map((protocol) => protocol.key);
-    expect(wildcardCategoryProtocolKeys).toContain(
-      "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
-    );
+      query: "camera",
+    }).map((method) => method.key);
+    expect(wildcardCategoryKeys).toContain("measurement_method:standardized-skin-photo-score");
 
-    const spacedCategoryKeys = reader.listProtocols({
-      categories: ["passive heat"],
+    const spacedCategoryKeys = reader.listMeasurementMethods({
+      categories: ["skin photography"],
       limit: 500,
-    }).map((protocol) => protocol.key);
-    const slugCategoryKeys = reader.listProtocols({
-      categories: ["passive-heat"],
+    }).map((method) => method.key);
+    const slugCategoryKeys = reader.listMeasurementMethods({
+      categories: ["skin-photography"],
       limit: 500,
-    }).map((protocol) => protocol.key);
+    }).map((method) => method.key);
     expect(spacedCategoryKeys).toEqual(slugCategoryKeys);
-
-    const listKeys = reader.listProtocols({
-      limit: 500,
-      query: "sauna",
-    }).map((protocol) => protocol.key);
-    expect(listKeys).toContain("protocol_variant:dry-sauna/murph-finnish-standard-3x-week");
 
     expect(reader.normalizeListOptions({
       categories: ["*"],
       limit: 20,
-      query: "Sauna",
+      query: "Camera",
       statuses: ["*"],
     })).toMatchObject({
       categories: [],
@@ -1516,78 +747,12 @@ describe("@murphai/health-commons runtime catalog reader", () => {
         categories: ["*"],
         statuses: ["*"],
       },
-      query: "sauna",
+      query: "camera",
       statuses: [],
     });
 
-    expect(() => reader.listProtocols({
+    expect(() => reader.listMeasurementMethods({
       statuses: ["active"],
     })).toThrow(/Unknown Health Commons status filter\. Expected one of:/u);
   });
-
-  it("resolves compact protocol family graph relations", () => {
-    const reader = getGeneratedHealthCommonsProtocolFamilyGraphReader();
-    const protocol = reader.findEntity({
-      entityTypes: ["protocol_variant"],
-      lookup: "finnish-sauna",
-    });
-    expect(protocol).not.toBeNull();
-
-    if (!protocol || protocol.entityType !== "protocol_variant") {
-      throw new Error("Expected Finnish sauna protocol in compact family graph.");
-    }
-
-    expect(protocol.key).toBe(
-      "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
-    );
-    expect(reader.parentFamilies(protocol).map((family) => family.key)).toContain(
-      "experiment_family:dry-sauna",
-    );
-
-    const family = reader.findEntity({
-      entityTypes: ["experiment_family"],
-      lookup: "dry-sauna",
-    });
-    if (!family || family.entityType !== "experiment_family") {
-      throw new Error("Expected dry-sauna family in compact family graph.");
-    }
-    const familyVariantKeys = reader.protocolVariantsForFamily(family).map((variant) => variant.key);
-    expect(familyVariantKeys).toContain(
-      "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
-    );
-    expect(familyVariantKeys).toContain(
-      "protocol_variant:dry-sauna/bryan-johnson-blueprint",
-    );
-
-    const bodyFieldMatches = reader.listProtocolMatches({
-      limit: 10,
-      lookup: "RPE",
-    }).map((match) => match.protocol.key);
-    expect(bodyFieldMatches).toContain("protocol_variant:norwegian-4x4/norwegian-4x4");
-  });
 });
-
-const RESEARCH_STUDY_PROJECTION_KEYS = new Set<string>([
-  "authors",
-  "caveat",
-  "designLabel",
-  "displayPriority",
-  "duration",
-  "finding",
-  "findingKind",
-  "groupId",
-  "headline",
-  "implication",
-  "includedStudyCount",
-  "journal",
-  "participantCountKind",
-  "participants",
-  "population",
-  "result",
-  "scope",
-  "stance",
-  "title",
-  "type",
-  "url",
-  "year",
-]);

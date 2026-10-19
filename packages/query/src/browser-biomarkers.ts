@@ -11,6 +11,7 @@ export {
   selectBrowserVaultDeviceMetricSummary,
   type BrowserVaultDeviceMetricSummary,
 } from "./browser-replica/device-metrics.ts";
+export { resolveExperimentMetricIdentity } from "./experiment-metrics.ts";
 export type {
   BrowserVaultLabsCapableQueryClient,
   BrowserVaultLabResultRow,

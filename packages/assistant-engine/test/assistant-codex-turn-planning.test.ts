@@ -447,11 +447,11 @@ describe('assistant Codex turn planning', () => {
       Object.entries(plans).map(([name, plan]) => [name, digestPlan(plan)]),
     )).toMatchInlineSnapshot(`
       {
-        "direct": "08842c4dd2a63dc100bdb6f2a6289156ef92c7578341311e9596b2664e0dd1f9",
-        "group": "ae7e3a55c2d1698c756c2f7ad37f5c75399f19717d3ac18fac3719b2540bfceb",
+        "direct": "3150f43c427944b76bf380a577999044eb420188f2ed72f726d8d4aee6ec1fc7",
+        "group": "89d5fedce76a43611d28f4edeeff37e8a4e200b2d542181fd30d296ce98c7438",
         "maintenance": "4def8e201c9fe004f9f60f5ac3ec5ecf084f63f7bc5c70e1a6409107487300be",
         "outputOnly": "7f13d7195b8e231e1fba2e5bd5e91437b30756cd8fcf763edd47fe27de6f7d6e",
-        "scheduledEmail": "aa8bfd7c79bebf5996941b1c422725306acfe8e69c14ccaf91040853581e7fc2",
+        "scheduledEmail": "bd08c6a6fb139a22b71bba6f65aca74123442c83683f59230e3cd64fbd63a3e2",
       }
     `)
   })
@@ -2042,8 +2042,9 @@ describe('assistant Codex turn planning', () => {
     })
 
     expect(plan.systemPrompt).not.toContain('Supported experiment protocols:')
+    expect(plan.systemPrompt).not.toContain('vault-cli commons protocol')
     expect(plan.systemPrompt).toContain(
-      '`vault-cli commons protocol explore <query> --format json` for broad or ambiguous discovery',
+      'use the experiment-onboarding skill to build a private plan',
     )
     expect(plan.planningDiagnostics).not.toHaveProperty(
       'supportedExperimentProtocolsElapsedMs',

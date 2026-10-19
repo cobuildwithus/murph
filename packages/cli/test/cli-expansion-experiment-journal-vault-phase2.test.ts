@@ -5,10 +5,7 @@ import path from 'node:path'
 import { Cli } from 'incur'
 import { test, vi } from 'vitest'
 import { incurErrorBridge } from '../src/incur-error-bridge.js'
-import {
-  buildEffectiveSnapshotFromCommonsProtocol,
-  registerExperimentCommands,
-} from '../src/commands/experiment.js'
+import { registerExperimentCommands } from '../src/commands/experiment.js'
 import { registerJournalCommands } from '../src/commands/journal.js'
 import { registerMeasurementCommands } from '../src/commands/measurement.js'
 import { registerProtocolCommands } from '../src/commands/protocol.js'
@@ -16,8 +13,6 @@ import { registerReadCommands } from '../src/commands/read.js'
 import { registerVaultCommands } from '../src/commands/vault.js'
 import { createIntegratedVaultServices, type VaultServices } from '@murphai/vault-usecases'
 import { createIntegratedInboxServices } from '@murphai/inbox-services'
-import { commonsProtocolRefSchema } from '@murphai/contracts'
-import { loadGeneratedHealthCommonsProtocolRunSpecs } from '@murphai/health-commons/runtime'
 import {
   CURRENT_VAULT_FORMAT_VERSION,
   importDeviceBatch,
@@ -93,29 +88,6 @@ function requireRecord(value: unknown, label: string): Record<string, unknown> {
   return value as Record<string, unknown>
 }
 
-test('Health Commons snapshot construction preserves protocol activity evidence', () => {
-  const baseProtocol = loadGeneratedHealthCommonsProtocolRunSpecs().protocols.find(
-    (entry) =>
-      entry.key ===
-      'protocol_variant:dry-sauna/murph-finnish-standard-3x-week',
-  )
-  assert.ok(baseProtocol?.protocol)
-  const activitySessionEvidence = {
-    activityKinds: ['walking', 'cycling', 'rowing', 'elliptical'],
-    minimumDurationMinutes: 35,
-  }
-
-  const snapshot = buildEffectiveSnapshotFromCommonsProtocol({
-    ...baseProtocol,
-    protocol: {
-      ...baseProtocol.protocol,
-      activitySessionEvidence,
-    },
-  })
-
-  assert.deepEqual(snapshot.activitySessionEvidence, activitySessionEvidence)
-})
-
 async function rewriteVaultMetadataWithFormatVersion(
   vaultRoot: string,
   formatVersion: number,
@@ -149,9 +121,11 @@ test('experiment edit schema exposes typed onboarding flags', async () => {
   assert.equal('id' in schema.args.properties, true)
   assert.deepEqual(schema.args.required, ['id'])
   assert.equal('input' in schema.options.properties, false)
-  assert.equal('protocolKey' in schema.options.properties, true)
-  assert.equal('pageRevisionId' in schema.options.properties, true)
-  assert.equal('runSpecRevisionId' in schema.options.properties, true)
+  assert.equal('protocolKey' in schema.options.properties, false)
+  assert.equal('pageRevisionId' in schema.options.properties, false)
+  assert.equal('runSpecRevisionId' in schema.options.properties, false)
+  assert.equal('testPlanId' in schema.options.properties, false)
+  assert.equal('hydrateProtocolDefaults' in schema.options.properties, false)
   assert.equal('baselineDays' in schema.options.properties, true)
   assert.equal('interventionDays' in schema.options.properties, true)
   assert.equal('schedule' in schema.options.properties, false)
@@ -217,32 +191,23 @@ test('experiment start schema exposes typed fields while protocol import-json ke
   assert.deepEqual(experimentStartSchema.args.required, ['slug'])
   assert.equal('input' in experimentStartSchema.options.properties, false)
   assert.equal('protocolKey' in experimentStartSchema.options.properties, false)
-  assert.equal('fromProtocol' in experimentStartSchema.options.properties, true)
-  assert.equal('custom' in experimentStartSchema.options.properties, true)
-  assert.equal('publicProtocol' in experimentStartSchema.options.properties, true)
-  assert.match(
-    experimentStartSchema.options.properties.fromProtocol.description ?? '',
-    /default experiment-start path/u,
-  )
-  assert.match(
-    experimentStartSchema.options.properties.custom.description ?? '',
-    /Requires --no-public-protocol/u,
-  )
-  assert.match(
-    experimentStartSchema.options.properties.publicProtocol.description ?? '',
-    /Pass --no-public-protocol/u,
-  )
-  assert.match(
-    experimentStartSchema.options.properties.testPlanId.description ?? '',
-    /Only valid with --from-protocol/u,
-  )
+  for (const removedOption of [
+    'fromProtocol',
+    'custom',
+    'publicProtocol',
+    'testPlanId',
+    'pageRevisionId',
+    'runSpecRevisionId',
+  ]) {
+    assert.equal(removedOption in experimentStartSchema.options.properties, false, removedOption)
+  }
   assert.match(
     experimentStartSchema.options.properties.primaryBiomarkerKey.description ?? '',
     /Legacy primary biomarker identity/u,
   )
   assert.match(
     experimentStartSchema.options.properties.primaryOutcomeKey.description ?? '',
-    /Required for new custom runs.*biomarker:<outcome-slug>/u,
+    /Required for new runs.*biomarker:<outcome-slug>/u,
   )
   assert.match(
     experimentStartSchema.options.properties.primaryOutcomeSourceMetricKey.description ?? '',
@@ -288,29 +253,41 @@ test('protocol import-json discovery surfaces both accepted JSON payload shapes'
   assert.match(llms, /nested frontmatter plus a Markdown body/u)
 })
 
-test.sequential('experiment start requires an explicit protocol or custom fallback source', async () => {
+test.sequential('experiment start creates a private plan by default and rejects removed catalog flags', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-experiment-start-source-'))
-  const configPath = path.join(vaultRoot, 'config.json')
 
   try {
-    await writeFile(
-      configPath,
-      `${JSON.stringify({
-        commands: {
-          experiment: {
-            commands: {
-              start: {
-                options: {
-                  publicProtocol: false,
-                },
-              },
-            },
-          },
-        },
-      }, null, 2)}\n`,
-      'utf8',
-    )
-    const missingSource = await runSliceCli([
+    await runSliceCli(['init', '--vault', vaultRoot])
+    for (const flags of [
+      ['--from-protocol', 'finnish-sauna'],
+      ['--custom'],
+      ['--no-public-protocol'],
+      ['--test-plan-id', 'rhr-21d'],
+    ]) {
+      const rejected = await runSliceCli([
+        'experiment',
+        'start',
+        'sleep-reset',
+        ...flags,
+        '--intervention-start',
+        '2026-05-01',
+        '--primary-biomarker-key',
+        'biomarker:sleep-efficiency',
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(rejected.ok, false, flags.join(' '))
+    }
+    const missingAfterRejectedFlags = await runSliceCli([
+      'experiment',
+      'show',
+      'sleep-reset',
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(missingAfterRejectedFlags.ok, false)
+
+    const started = await runSliceCli<{ experimentId: string }>([
       'experiment',
       'start',
       'sleep-reset',
@@ -323,114 +300,24 @@ test.sequential('experiment start requires an explicit protocol or custom fallba
       '--vault',
       vaultRoot,
     ])
-    const conflictingSource = await runSliceCli([
-      'experiment',
-      'start',
-      'sleep-reset',
-      '--from-protocol',
-      'finnish-sauna',
-      '--custom',
-      '--intervention-start',
-      '2026-05-01',
-      '--vault',
-      vaultRoot,
-    ])
-    const customWithoutFallback = await runSliceCli([
-      'experiment',
-      'start',
-      'sleep-reset',
-      '--custom',
-      '--intervention-start',
-      '2026-05-01',
-      '--primary-biomarker-key',
-      'biomarker:sleep-efficiency',
-      '--vault',
-      vaultRoot,
-    ])
-    const customWithConfiguredFallbackOnly = await runSliceCli(
-      [
-        'experiment',
-        'start',
-        'sleep-reset',
-        '--custom',
-        '--intervention-start',
-        '2026-05-01',
-        '--primary-biomarker-key',
-        'biomarker:sleep-efficiency',
-        '--config',
-        configPath,
-        '--vault',
-        vaultRoot,
-      ],
-      { config: true },
-    )
-    await runSliceCli(['init', '--vault', vaultRoot])
-    const protocolBackedWithConfiguredFallback = await runSliceCli(
-      [
-        'experiment',
-        'start',
-        'sauna-two-week',
-        '--from-protocol',
-        'PROTOCOL_VARIANT:SAUNA/FINNISH-DRY/MURPH-STANDARD-3X-WEEK',
-        '--status',
-        'planned',
-        '--intervention-start',
-        '2026-05-01',
-        '--config',
-        configPath,
-        '--vault',
-        vaultRoot,
-      ],
-      { config: true },
-    )
-    const customWithProtocolOnlyOption = await runSliceCli([
-      'experiment',
-      'start',
-      'sleep-reset',
-      '--custom',
-      '--no-public-protocol',
-      '--test-plan-id',
-      'rhr-21d',
-      '--intervention-start',
-      '2026-05-01',
-      '--primary-biomarker-key',
-      'biomarker:sleep-efficiency',
-      '--vault',
-      vaultRoot,
-    ])
+    assert.equal(started.ok, true, started.ok ? undefined : started.error.message)
 
-    assert.equal(missingSource.ok, false)
-    assert.match(
-      missingSource.error.message ?? '',
-      /must choose a source: use --from-protocol <key-or-route>.*--custom --no-public-protocol/u,
-    )
-    assert.equal(conflictingSource.ok, false)
-    assert.match(
-      conflictingSource.error.message ?? '',
-      /either --from-protocol or --custom, not both/u,
-    )
-    assert.equal(customWithoutFallback.ok, false)
-    assert.match(
-      customWithoutFallback.error.message ?? '',
-      /custom experiment starts are disabled by default/u,
-    )
-    assert.equal(customWithConfiguredFallbackOnly.ok, false)
-    assert.match(
-      customWithConfiguredFallbackOnly.error.message ?? '',
-      /Config defaults do not count/u,
-    )
-    assert.equal(protocolBackedWithConfiguredFallback.ok, true)
-    assert.equal(customWithProtocolOnlyOption.ok, false)
-    assert.match(
-      customWithProtocolOnlyOption.error.message ?? '',
-      /--test-plan-id, --page-revision-id, and --run-spec-revision-id are only valid with --from-protocol/u,
+    const shown = await runSliceCli<{
+      entity: { data: Record<string, unknown> }
+    }>(['experiment', 'show', 'sleep-reset', '--vault', vaultRoot])
+    const data = requireData(shown).entity.data
+    assert.equal(data.commonsProtocolRef, undefined)
+    assert.equal(data.effectiveProtocolSnapshot, undefined)
+    assert.equal(
+      requireRecord(data.analysisPlan, 'analysisPlan').primaryBiomarkerKey,
+      'biomarker:sleep-efficiency',
     )
   } finally {
     await rm(vaultRoot, { recursive: true, force: true })
   }
 })
 
-test.sequential('custom experiment start explains the required primary outcome before writing', async () => {
+test.sequential('experiment start explains the required primary outcome before writing', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-experiment-start-metric-'))
 
   try {
@@ -439,8 +326,6 @@ test.sequential('custom experiment start explains the required primary outcome b
       'experiment',
       'start',
       'pushup-capacity',
-      '--custom',
-      '--no-public-protocol',
       '--title',
       'Pushup Capacity',
       '--intervention-start',
@@ -452,11 +337,7 @@ test.sequential('custom experiment start explains the required primary outcome b
     assert.equal(result.ok, false)
     assert.match(
       result.error.message ?? '',
-      /Custom experiment starts require --primary-outcome-key biomarker:<outcome-slug>/u,
-    )
-    assert.match(
-      result.error.message ?? '',
-      /no protocol\/test-plan default primary outcome/u,
+      /experiment start requires --primary-outcome-key biomarker:<outcome-slug>/u,
     )
 
     const shownAfterFailure = await runSliceCli([
@@ -486,8 +367,6 @@ test.sequential('experiment start preserves option-error precedence and bounded 
       'experiment',
       'start',
       'direction-repair',
-      '--custom',
-      '--no-public-protocol',
       '--title',
       'Direction Repair',
       '--intervention-start',
@@ -505,8 +384,6 @@ test.sequential('experiment start preserves option-error precedence and bounded 
       'experiment',
       'start',
       'outcome-repair',
-      '--custom',
-      '--no-public-protocol',
       '--title',
       'Outcome Repair',
       '--intervention-start',
@@ -568,8 +445,6 @@ test.sequential('experiment start maps canonical plan conflicts without echoing 
       'experiment',
       'start',
       slug,
-      '--custom',
-      '--no-public-protocol',
       '--title',
       title,
       '--intervention-start',
@@ -621,8 +496,6 @@ test.sequential('custom experiment start persists one first-class primary outcom
       'experiment',
       'start',
       'repetition-benchmark',
-      '--custom',
-      '--no-public-protocol',
       '--title',
       'Repetition Benchmark',
       '--intervention-start',
@@ -680,8 +553,6 @@ test.sequential('experiment start rejects competing primary outcome sources', as
       'experiment',
       'start',
       'outcome-conflict',
-      '--custom',
-      '--no-public-protocol',
       '--title',
       'Outcome Conflict',
       '--intervention-start',
@@ -713,8 +584,6 @@ test.sequential('active structured reviews require bounded before-and-after evid
       'experiment',
       'start',
       'movement-review-incomplete',
-      '--custom',
-      '--no-public-protocol',
       '--title',
       'Movement Review',
       '--intervention-start',
@@ -736,8 +605,6 @@ test.sequential('active structured reviews require bounded before-and-after evid
       'experiment',
       'start',
       'movement-review',
-      '--custom',
-      '--no-public-protocol',
       '--title',
       'Movement Review',
       '--intervention-start',
@@ -774,8 +641,6 @@ test.sequential('custom session outcomes require their declared capture field', 
       'experiment',
       'start',
       'session-benchmark-incomplete',
-      '--custom',
-      '--no-public-protocol',
       '--title',
       'Session Benchmark',
       '--intervention-start',
@@ -801,8 +666,6 @@ test.sequential('custom session outcomes require their declared capture field', 
       'experiment',
       'start',
       'session-benchmark',
-      '--custom',
-      '--no-public-protocol',
       '--title',
       'Session Benchmark',
       '--intervention-start',
@@ -841,8 +704,6 @@ test.sequential('derived outcomes require an existing deterministic metric sourc
       'experiment',
       'start',
       'derived-outcome-missing-source',
-      '--custom',
-      '--no-public-protocol',
       '--title',
       'Derived Outcome',
       '--intervention-start',
@@ -888,8 +749,6 @@ test.sequential('derived outcomes require an existing deterministic metric sourc
       'experiment',
       'start',
       'derived-outcome-observed-source',
-      '--custom',
-      '--no-public-protocol',
       '--title',
       'Derived Outcome',
       '--intervention-start',
@@ -915,8 +774,6 @@ test.sequential('derived outcomes require an existing deterministic metric sourc
       'experiment',
       'start',
       'derived-outcome-registered-source',
-      '--custom',
-      '--no-public-protocol',
       '--title',
       'Derived Outcome',
       '--intervention-start',
@@ -1138,8 +995,7 @@ test('experiment onboarding llms discovery exposes apply flags and hides edit in
   const updateDiscovery = await runRawSliceCli(['experiment', 'edit', '--llms-full'])
 
   assert.match(applyDiscovery, /experiment edit/u)
-  assert.match(applyDiscovery, /protocolKey/u)
-  assert.match(applyDiscovery, /pageRevisionId/u)
+  assert.doesNotMatch(applyDiscovery, /protocolKey|pageRevisionId|hydrateProtocolDefaults/u)
   assert.match(applyDiscovery, /scheduleKind/u)
   assert.match(applyDiscovery, /scheduleTimeZone/u)
   assert.doesNotMatch(applyDiscovery, /Plain-language schedule string/u)
@@ -1156,14 +1012,6 @@ test.sequential(
   'experiment edit maps public run options into canonical frontmatter',
   async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-experiment-onboarding-'))
-    const protocolKey = 'protocol_variant:dry-sauna/murph-finnish-standard-3x-week'
-    const protocol = loadGeneratedHealthCommonsProtocolRunSpecs().protocols.find(
-      (candidate) => candidate.key === protocolKey,
-    )
-    assert.ok(protocol)
-    const pageRevisionId = protocol.revision.pageRevisionId
-    const runSpecRevisionId = protocol.revision.runSpecRevisionId
-    assert.ok(runSpecRevisionId)
 
     try {
       await runSliceCli([
@@ -1180,8 +1028,6 @@ test.sequential(
         'experiment',
         'start',
         'sauna-daily',
-        '--custom',
-        '--no-public-protocol',
         '--title',
         'Sauna Daily',
         '--hypothesis',
@@ -1228,55 +1074,14 @@ test.sequential(
         '--vault',
         vaultRoot,
       ])
-      const missingProtocolTriplet = await runSliceCli([
-        'experiment',
-        'edit',
-        'sauna-daily',
-        '--protocol-key',
-        protocolKey,
-        '--page-revision-id',
-        pageRevisionId,
-        '--vault',
-        vaultRoot,
-      ])
-      const invalidRevision = await runSliceCli([
-        'experiment',
-        'edit',
-        'sauna-daily',
-        '--protocol-key',
-        protocolKey,
-        '--page-revision-id',
-        'sha256:not-a-real-revision',
-        '--run-spec-revision-id',
-        runSpecRevisionId,
-        '--vault',
-        vaultRoot,
-      ])
-      const invalidProtocolKey = await runSliceCli([
-        'experiment',
-        'edit',
-        'sauna-daily',
-        '--protocol-key',
-        'biomarker:resting-heart-rate',
-        '--page-revision-id',
-        pageRevisionId,
-        '--run-spec-revision-id',
-        runSpecRevisionId,
-        '--vault',
-        vaultRoot,
-      ])
       const invalidMixedEdit = await runSliceCli([
         'experiment',
         'edit',
         'sauna-daily',
         '--title',
         'Should Not Persist',
-        '--protocol-key',
-        'biomarker:resting-heart-rate',
-        '--page-revision-id',
-        pageRevisionId,
-        '--run-spec-revision-id',
-        runSpecRevisionId,
+        '--schedule-local-time',
+        '19:30',
         '--vault',
         vaultRoot,
       ])
@@ -1323,15 +1128,6 @@ test.sequential(
         'sauna-daily',
         '--status',
         'active',
-        '--protocol-key',
-        protocolKey,
-        '--hydrate-protocol-defaults',
-        '--page-revision-id',
-        pageRevisionId,
-        '--run-spec-revision-id',
-        runSpecRevisionId,
-        '--test-plan-id',
-        'rhr-21d',
         '--baseline-days',
         '7',
         '--intervention-start',
@@ -1434,19 +1230,8 @@ test.sequential(
       assert.match(noOptions.error.message ?? '', /requires at least one/u)
       assert.equal(statusOnly.ok, true)
       assert.equal(requireData<{ status: string }>(statusOnly).status, 'active')
-      assert.equal(missingProtocolTriplet.ok, false)
-      assert.match(
-        missingProtocolTriplet.error.message ?? '',
-        /requires --protocol-key, --page-revision-id, and --run-spec-revision-id/u,
-      )
-      assert.equal(invalidRevision.ok, false)
-      assert.equal(invalidRevision.error.code, 'VALIDATION_ERROR')
-      assert.equal(invalidRevision.error.message, 'The command input is invalid.')
-      assert.equal(invalidRevision.error.fieldErrors?.[0]?.path, 'pageRevisionId')
-      assert.equal(invalidProtocolKey.ok, false)
-      assert.match(invalidProtocolKey.error.message ?? '', /protocol_variant key/u)
       assert.equal(invalidMixedEdit.ok, false)
-      assert.match(invalidMixedEdit.error.message ?? '', /protocol_variant key/u)
+      assert.match(invalidMixedEdit.error.message ?? '', /--schedule-kind is required/u)
       assert.equal(shownAfterInvalidMixedEdit.ok, true)
       assert.equal(
         requireData(shownAfterInvalidMixedEdit).entity.data.title,
@@ -1466,16 +1251,7 @@ test.sequential(
       const experimentData = requireData(shown).entity.data
       assert.equal(experimentData.status, 'active')
 
-      const commonsProtocolRef = requireRecord(
-        experimentData.commonsProtocolRef,
-        'commonsProtocolRef',
-      )
-      assert.deepEqual(commonsProtocolRef, {
-        key: protocolKey,
-        pageRevisionId,
-        runSpecRevisionId,
-        testPlanId: 'rhr-21d',
-      })
+      assert.equal(experimentData.commonsProtocolRef, undefined)
 
       const runPlan = requireRecord(experimentData.runPlan, 'runPlan')
       assert.equal(runPlan.baselineStart, '2026-05-01')
@@ -1582,10 +1358,6 @@ test.sequential(
         vaultRoot,
       ])
       const partialData = requireData(shownAfterPartial).entity.data
-      const partialCommonsProtocolRef = requireRecord(
-        partialData.commonsProtocolRef,
-        'commonsProtocolRef',
-      )
       const partialRunPlan = requireRecord(partialData.runPlan, 'runPlan')
       const partialOnboarding = requireRecord(partialData.onboarding, 'onboarding')
       const partialSetupAnswers = requireRecord(
@@ -1598,7 +1370,7 @@ test.sequential(
       )
 
       assert.equal(partialApply.ok, true)
-      assert.deepEqual(partialCommonsProtocolRef, commonsProtocolRef)
+      assert.equal(partialData.commonsProtocolRef, undefined)
       assert.deepEqual(partialRunPlan.schedule, {
         kind: 'cron',
         expression: '0 18 * * 2,4,6',
@@ -1699,7 +1471,7 @@ test.sequential(
   },
 )
 
-test.sequential('experiment start uses typed protocol defaults and supports dry-run', async () => {
+test.sequential('experiment start writes an explicit private plan and supports dry-run', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-experiment-start-typed-'))
 
   try {
@@ -1711,6 +1483,22 @@ test.sequential('experiment start uses typed protocol defaults and supports dry-
       'America/Los_Angeles',
     ])
 
+    const planOptions = [
+      '--intervention-start',
+      '2026-05-01',
+      '--baseline-days',
+      '14',
+      '--intervention-days',
+      '14',
+      '--primary-biomarker-key',
+      'biomarker:resting-heart-rate',
+      '--secondary-biomarker-key',
+      'biomarker:sleep-efficiency',
+      '--expected-direction',
+      'biomarker:sleep-efficiency=increase',
+      '--vault',
+      vaultRoot,
+    ]
     const dryRun = await runSliceCli<{
       dryRun: boolean
       experiment: null
@@ -1721,13 +1509,13 @@ test.sequential('experiment start uses typed protocol defaults and supports dry-
       'experiment',
       'start',
       'sauna-two-week',
-      '--from-protocol',
-      'finnish-sauna',
-      '--intervention-start',
-      '2026-05-01',
-      '--onboarding-completed-at',
-      '2026-04-30T15:00:00.000Z',
+      ...planOptions,
       '--dry-run',
+    ])
+    const shownAfterDryRun = await runSliceCli([
+      'experiment',
+      'show',
+      'sauna-two-week',
       '--vault',
       vaultRoot,
     ])
@@ -1744,10 +1532,25 @@ test.sequential('experiment start uses typed protocol defaults and supports dry-
       'experiment',
       'start',
       'sauna-two-week',
-      '--from-protocol',
-      'protocol_variant:dry-sauna/murph-finnish-standard-3x-week',
-      '--intervention-start',
-      '2026-05-01',
+      ...planOptions,
+      '--title',
+      'Sauna Two Week',
+      '--modality',
+      'traditional_dry_sauna',
+      '--dose',
+      '3x/week dry sauna, 15-20 min',
+      '--sessions-per-week',
+      '3',
+      '--target-sessions',
+      '6',
+      '--minimum-useful-sessions',
+      '4',
+      '--session-field',
+      'session_date',
+      '--session-field',
+      'session_duration_minutes',
+      '--confounder-field',
+      'hard_training_last_24h',
       '--schedule-kind',
       'cron',
       '--schedule-cron',
@@ -1757,8 +1560,6 @@ test.sequential('experiment start uses typed protocol defaults and supports dry-
       '--onboarding-completed-at',
       '2026-04-30T15:00:00.000Z',
       '--setup-answer',
-      'safety_red_flags_denied=2026-06-09',
-      '--setup-answer',
       'first_week_support_status=existing_daily_reminder',
       '--context-note',
       'Existing daily reminder will handle the first week.',
@@ -1767,8 +1568,6 @@ test.sequential('experiment start uses typed protocol defaults and supports dry-
       '--reminder-option-id',
       'daily_1100',
       '--reminders-enabled',
-      '--vault',
-      vaultRoot,
     ])
     const shown = await runSliceCli<{
       entity: {
@@ -1782,12 +1581,13 @@ test.sequential('experiment start uses typed protocol defaults and supports dry-
       vaultRoot,
     ])
 
-    assert.equal(dryRun.ok, true)
+    assert.equal(dryRun.ok, true, dryRun.ok ? undefined : dryRun.error.message)
     assert.equal(requireData(dryRun).dryRun, true)
     assert.equal(requireData(dryRun).experiment, null)
     assert.deepEqual(requireData(dryRun).plan.operations, ['experiment_create'])
+    assert.equal(shownAfterDryRun.ok, false)
 
-    assert.equal(started.ok, true)
+    assert.equal(started.ok, true, started.ok ? undefined : started.error.message)
     assert.equal(requireData(started).dryRun, false)
     assert.equal(requireData(started).protocol, null)
     assert.equal(requireData(started).experiment?.slug, 'sauna-two-week')
@@ -1795,84 +1595,39 @@ test.sequential('experiment start uses typed protocol defaults and supports dry-
     assert.equal(requireData(started).experiment?.updated, true)
 
     const experimentData = requireData(shown).entity.data
-    const commonsProtocolRef = requireRecord(
-      experimentData.commonsProtocolRef,
-      'commonsProtocolRef',
-    )
-    const effectiveProtocolSnapshot = requireRecord(
-      experimentData.effectiveProtocolSnapshot,
-      'effectiveProtocolSnapshot',
-    )
+    assert.equal(experimentData.title, 'Sauna Two Week')
+    assert.equal(experimentData.commonsProtocolRef, undefined)
+    assert.equal(experimentData.effectiveProtocolSnapshot, undefined)
     const runPlan = requireRecord(experimentData.runPlan, 'runPlan')
     const analysisPlan = requireRecord(experimentData.analysisPlan, 'analysisPlan')
 
-    assert.equal(
-      commonsProtocolRef.key,
-      'protocol_variant:dry-sauna/murph-finnish-standard-3x-week',
-    )
-    assert.match(String(effectiveProtocolSnapshot.doseSignature), /^3x\/week/u)
     assert.equal(runPlan.baselineStart, '2026-04-17')
     assert.equal(runPlan.baselineEnd, '2026-04-30')
     assert.equal(runPlan.interventionStart, '2026-05-01')
     assert.equal(runPlan.interventionEnd, '2026-05-14')
+    assert.equal(runPlan.modality, 'traditional_dry_sauna')
+    assert.equal(runPlan.dose, '3x/week dry sauna, 15-20 min')
     assert.equal(runPlan.sessionsPerWeek, 3)
     assert.equal(runPlan.targetSessions, 6)
     assert.equal(runPlan.minimumUsefulSessions, 4)
-    const saunaLogging = requireRecord(runPlan.logging, 'runPlan.logging')
-    assert.ok(Array.isArray(saunaLogging.sessionFields))
-    assert.equal(saunaLogging.sessionFields.length, 25)
-    assert.deepEqual(saunaLogging.sessionFields.slice(0, 3), [
-      'session_date',
-      'session_start_time',
-      'session_duration_minutes',
-    ])
-    assert.equal(saunaLogging.sessionFields.includes('symptoms_during_or_after'), true)
-    assert.ok(Array.isArray(saunaLogging.confounderFields))
-    assert.equal(saunaLogging.confounderFields.includes('hard_training_last_24h'), true)
-    assert.ok(Array.isArray(runPlan.adherenceTargets))
-    assert.equal(runPlan.adherenceTargets.length, 1)
-    const adherenceTarget = requireRecord(
-      runPlan.adherenceTargets[0],
-      'runPlan.adherenceTargets[0]',
-    )
-    assert.match(String(adherenceTarget.targetId), /^traditional-dry-sauna/u)
-    assert.match(String(adherenceTarget.label), /dry sauna/iu)
-    assert.equal(adherenceTarget.phase, 'intervention')
-    assert.deepEqual(requireRecord(adherenceTarget.calendar, 'adherenceTarget.calendar'), {
-      kind: 'weekdays',
+    assert.deepEqual(runPlan.logging, {
+      sessionFields: ['session_date', 'session_duration_minutes'],
+      confounderFields: ['hard_training_last_24h'],
+    })
+    assert.deepEqual(runPlan.schedule, {
+      kind: 'cron',
+      expression: '0 18 * * 2,4,6',
       timeZone: 'America/Los_Angeles',
-      localTime: '18:00',
-      weekdays: [2, 4, 6],
-      targetCountPerDay: 1,
-    })
-    assert.deepEqual(requireRecord(adherenceTarget.evidence, 'adherenceTarget.evidence'), {
-      kind: 'linkedEventCount',
-      eventKind: 'intervention_session',
-      missing: 'assumed_after_grace',
-    })
-    assert.deepEqual(requireRecord(adherenceTarget.grace, 'adherenceTarget.grace'), {
-      hours: 24,
-    })
-    assert.deepEqual(requireRecord(adherenceTarget.rollup, 'adherenceTarget.rollup'), {
-      targetCompletions: 6,
-      minimumUsefulCompletions: 4,
     })
     assert.equal(analysisPlan.primaryBiomarkerKey, 'biomarker:resting-heart-rate')
-    assert.deepEqual(analysisPlan.secondaryBiomarkerKeys, [
-      'biomarker:morning-blood-pressure',
-      'biomarker:hrv-rmssd',
-      'biomarker:sleep-efficiency',
-      'biomarker:deep-sleep-minutes',
-    ])
+    assert.deepEqual(analysisPlan.secondaryBiomarkerKeys, ['biomarker:sleep-efficiency'])
     assert.equal('desiredDirection' in analysisPlan, false)
     assert.deepEqual(analysisPlan.expectedDirections, [
-      { biomarkerKey: 'biomarker:morning-blood-pressure', direction: 'decrease' },
       { biomarkerKey: 'biomarker:sleep-efficiency', direction: 'increase' },
     ])
     const onboarding = requireRecord(experimentData.onboarding, 'onboarding')
     assert.equal(onboarding.completedAt, '2026-04-30T15:00:00.000Z')
     const setupAnswers = requireRecord(onboarding.setupAnswers, 'onboarding.setupAnswers')
-    assert.equal(setupAnswers.safety_red_flags_denied, '2026-06-09')
     assert.equal(setupAnswers.first_week_support_status, 'existing_daily_reminder')
     assert.deepEqual(onboarding.contextNotes, [
       'Existing daily reminder will handle the first week.',
@@ -1884,121 +1639,24 @@ test.sequential('experiment start uses typed protocol defaults and supports dry-
     assert.equal(assistantSupport.reminderPolicy, 'daily_reminder_policy')
     assert.equal(assistantSupport.reminderOptionId, 'daily_1100')
     assert.equal(assistantSupport.remindersEnabled, true)
-
-    const compressionStarted = await runSliceCli([
-      'experiment',
-      'start',
-      'compression-pants-prose-log-fields',
-      '--from-protocol',
-      'protocol_variant:intermittent-pneumatic-compression/pneumatic-compression-pants',
-      '--intervention-start',
-      '2026-05-01',
-      '--onboarding-completed-at',
-      '2026-04-30T15:00:00.000Z',
-      '--positive-question-id',
-      'can_stop_and_remove_device',
-      '--vault',
-      vaultRoot,
-    ])
-    const compressionShown = await runSliceCli<{
-      entity: {
-        data: Record<string, unknown>
-      }
-    }>([
-      'experiment',
-      'show',
-      'compression-pants-prose-log-fields',
-      '--vault',
-      vaultRoot,
-    ])
-    assert.equal(compressionStarted.ok, true)
-    assert.equal(compressionShown.ok, true)
-    const compressionRunPlan = requireRecord(
-      requireData(compressionShown).entity.data.runPlan,
-      'compression runPlan',
-    )
-    const compressionLogging = requireRecord(
-      compressionRunPlan.logging,
-      'compression runPlan.logging',
-    )
-    assert.deepEqual(compressionLogging.sessionFields, [
-      'target_use_case',
-      'device_model',
-      'garment_coverage',
-      'pressure_intensity',
-      'compression_mode',
-      'duration_minutes',
-      'timing_after_trigger',
-      'posture',
-      'soreness_score',
-      'fatigue_score',
-      'perceived_recovery_score',
-      'leg_heaviness_score',
-      'comfort_score',
-      'skin_check',
-      'symptoms_or_stop_reason',
-      'time_since_workout_or_trigger',
-      'workout_type_intensity_muscle_group',
-      'time_of_day',
-      'device_zones_or_program',
-      'garment_contact_risk_points',
-      'mobility_breaks_or_calf_exercises_if_travel_context',
-      'skin_check_later_same_day',
-      'delayed_symptoms',
-      'symptom_resolution_after_removal',
-    ])
-    assert.equal('confounderFields' in compressionLogging, false)
-
-    const draftAlcoholStart = await runSliceCli([
-      'experiment',
-      'start',
-      'alcohol-free-selected-plan',
-      '--from-protocol',
-      'protocol_variant:alcohol-abstinence/short-term-alcohol-abstinence',
-      '--intervention-start',
-      '2026-05-01',
-      '--vault',
-      vaultRoot,
-    ])
-    const draftAlcoholShown = await runSliceCli([
-      'experiment',
-      'show',
-      'alcohol-free-selected-plan',
-      '--vault',
-      vaultRoot,
-    ])
-    assert.equal(draftAlcoholStart.ok, false)
-    if (draftAlcoholStart.ok) {
-      throw new Error('Draft alcohol protocol must not start.')
-    }
-    assert.equal(draftAlcoholStart.error.code, 'not_found')
-    assert.match(
-      draftAlcoholStart.error.message ?? '',
-      /No Health Commons protocol variant matched/u,
-    )
-    assert.equal(draftAlcoholShown.ok, false)
-    if (draftAlcoholShown.ok) {
-      throw new Error('Rejected draft start must not persist an experiment.')
-    }
-    assert.equal(draftAlcoholShown.error.code, 'not_found')
   } finally {
     await rm(vaultRoot, { recursive: true, force: true })
   }
 })
 
-test.sequential('experiment start composes protocol overrides without conflating direction defaults', async () => {
+test.sequential('experiment start composes explicit analysis options without conflating direction defaults', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-experiment-composition-'))
 
   try {
     assert.equal((await runSliceCli(['init', '--vault', vaultRoot, '--timezone', 'UTC'])).ok, true)
-    const protocolOptions = [
-      '--from-protocol', 'finnish-sauna',
+    const planOptions = [
       '--status', 'planned',
       '--intervention-start', '2026-05-01',
+      '--intervention-days', '14',
       '--vault', vaultRoot,
     ]
     const legacyStarted = await runSliceCli([
-      'experiment', 'start', 'signal-overrides', ...protocolOptions,
+      'experiment', 'start', 'signal-overrides', ...planOptions,
       '--primary-biomarker-key', 'biomarker:sleep-efficiency',
       '--secondary-biomarker-key', ' biomarker:blood-oxygen-spo2 ',
       '--secondary-biomarker-key', 'biomarker:morning-blood-pressure',
@@ -2032,8 +1690,7 @@ test.sequential('experiment start composes protocol overrides without conflating
       'biomarker:morning-blood-pressure',
       'biomarker:SyntheticContext',
     ])
-    // Explicit expected directions replace the list, not the primary's desired default.
-    assert.equal(legacyAnalysis.desiredDirection, 'increase')
+    assert.equal('desiredDirection' in legacyAnalysis, false)
     assert.deepEqual(legacyAnalysis.expectedDirections, [
       { biomarkerKey: 'biomarker:blood-oxygen-spo2', direction: 'decrease' },
     ])
@@ -2057,7 +1714,7 @@ test.sequential('experiment start composes protocol overrides without conflating
     })
 
     const outcomeStarted = await runSliceCli([
-      'experiment', 'start', 'outcome-overrides', ...protocolOptions,
+      'experiment', 'start', 'outcome-overrides', ...planOptions,
       '--primary-outcome-key', 'biomarker:morning-blood-pressure',
       '--secondary-biomarker-key', 'biomarker:sleep-efficiency',
       '--secondary-biomarker-key', 'biomarker:blood-oxygen-spo2',
@@ -2078,344 +1735,11 @@ test.sequential('experiment start composes protocol overrides without conflating
       'biomarker:sleep-efficiency',
       'biomarker:blood-oxygen-spo2',
     ])
-    // The independent desired override must not replace the protocol's expected signals.
+    // The desired direction does not synthesize per-signal expected directions.
     assert.equal(outcomeAnalysis.desiredDirection, 'stabilize')
-    assert.deepEqual(outcomeAnalysis.expectedDirections, [
-      { biomarkerKey: 'biomarker:morning-blood-pressure', direction: 'decrease' },
-      { biomarkerKey: 'biomarker:sleep-efficiency', direction: 'increase' },
-      { biomarkerKey: 'biomarker:blood-oxygen-spo2', direction: 'stabilize' },
-    ])
+    assert.equal('expectedDirections' in outcomeAnalysis, false)
     assert.equal('onboarding' in outcomeData, false)
     assert.deepEqual(outcomeData.assistantSupport, {})
-  } finally {
-    await rm(vaultRoot, { recursive: true, force: true })
-  }
-})
-
-test.sequential('Health Commons active starts require completed non-blocking safety screens', async () => {
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-experiment-safety-gate-'))
-  const screenedProtocol =
-    'protocol_variant:cognitive-offload-before-bed/five-minute-tomorrow-list'
-  const completedAt = '2026-04-30T15:00:00.000Z'
-
-  try {
-    await runSliceCli(['init', '--vault', vaultRoot, '--timezone', 'UTC'])
-
-    const missingScreenDryRun = await runSliceCli([
-      'experiment',
-      'start',
-      'bedtime-missing-screen-dry-run',
-      '--from-protocol',
-      screenedProtocol,
-      '--intervention-start',
-      '2026-05-01',
-      '--dry-run',
-      '--vault',
-      vaultRoot,
-    ])
-    assert.equal(missingScreenDryRun.ok, false)
-    assert.match(missingScreenDryRun.error.message ?? '', /Complete the safety screen/u)
-
-    const missingScreen = await runSliceCli([
-      'experiment',
-      'start',
-      'bedtime-missing-screen',
-      '--from-protocol',
-      screenedProtocol,
-      '--intervention-start',
-      '2026-05-01',
-      '--vault',
-      vaultRoot,
-    ])
-    assert.equal(missingScreen.ok, false)
-    assert.match(missingScreen.error.message ?? '', /Complete the safety screen/u)
-
-    const missingScreenRecord = await runSliceCli([
-      'experiment',
-      'show',
-      'bedtime-missing-screen',
-      '--vault',
-      vaultRoot,
-    ])
-    assert.equal(missingScreenRecord.ok, false)
-
-    const dangerousSleepiness = await runSliceCli([
-      'experiment',
-      'start',
-      'bedtime-dangerous-sleepiness',
-      '--from-protocol',
-      screenedProtocol,
-      '--intervention-start',
-      '2026-05-01',
-      '--onboarding-completed-at',
-      completedAt,
-      '--positive-question-id',
-      'dangerous_sleepiness',
-      '--safety-disposition',
-      'continue_with_caution',
-      '--vault',
-      vaultRoot,
-    ])
-    assert.equal(dangerousSleepiness.ok, false)
-    assert.match(
-      dangerousSleepiness.error.message ?? '',
-      /requires do_not_start_unsupervised/u,
-    )
-
-    const dangerousSleepinessRecord = await runSliceCli([
-      'experiment',
-      'show',
-      'bedtime-dangerous-sleepiness',
-      '--vault',
-      vaultRoot,
-    ])
-    assert.equal(dangerousSleepinessRecord.ok, false)
-
-  } finally {
-    await rm(vaultRoot, { recursive: true, force: true })
-  }
-})
-
-test.sequential('Health Commons safety screening validates recorded question ids and dispositions', async () => {
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-experiment-safety-answers-'))
-  const screenedProtocol =
-    'protocol_variant:cognitive-offload-before-bed/five-minute-tomorrow-list'
-  const completedAt = '2026-04-30T15:00:00.000Z'
-
-  try {
-    await runSliceCli(['init', '--vault', vaultRoot, '--timezone', 'UTC'])
-    const missingDisposition = await runSliceCli([
-      'experiment',
-      'start',
-      'bedtime-missing-disposition',
-      '--from-protocol',
-      screenedProtocol,
-      '--intervention-start',
-      '2026-05-01',
-      '--onboarding-completed-at',
-      completedAt,
-      '--positive-question-id',
-      'severe_writing_activation_risk',
-      '--vault',
-      vaultRoot,
-    ])
-    assert.equal(missingDisposition.ok, false)
-    assert.match(missingDisposition.error.message ?? '', /Record the safety-screen disposition/u)
-
-    const unknownQuestion = await runSliceCli([
-      'experiment',
-      'start',
-      'bedtime-unknown-question',
-      '--from-protocol',
-      screenedProtocol,
-      '--intervention-start',
-      '2026-05-01',
-      '--onboarding-completed-at',
-      completedAt,
-      '--positive-question-id',
-      'not_in_current_protocol',
-      '--safety-disposition',
-      'continue_with_caution',
-      '--vault',
-      vaultRoot,
-    ])
-    assert.equal(unknownQuestion.ok, false)
-    assert.match(unknownQuestion.error.message ?? '', /does not belong to the current/u)
-  } finally {
-    await rm(vaultRoot, { recursive: true, force: true })
-  }
-})
-
-test.sequential('Health Commons safety screening enforces negative-answer dispositions', async () => {
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-experiment-negative-safety-'))
-  const compressionProtocol =
-    'protocol_variant:intermittent-pneumatic-compression/pneumatic-compression-pants'
-  const completedAt = '2026-04-30T15:00:00.000Z'
-
-  try {
-    await runSliceCli(['init', '--vault', vaultRoot, '--timezone', 'UTC'])
-    const negativeStopAnswer = await runSliceCli([
-      'experiment',
-      'start',
-      'compression-cannot-remove',
-      '--from-protocol',
-      compressionProtocol,
-      '--intervention-start',
-      '2026-05-01',
-      '--onboarding-completed-at',
-      completedAt,
-      '--vault',
-      vaultRoot,
-    ])
-    assert.equal(negativeStopAnswer.ok, false)
-    assert.match(
-      negativeStopAnswer.error.message ?? '',
-      /requires do_not_start_unsupervised/u,
-    )
-
-    const safeCompression = await runSliceCli([
-      'experiment',
-      'start',
-      'compression-can-remove',
-      '--from-protocol',
-      compressionProtocol,
-      '--intervention-start',
-      '2026-05-01',
-      '--onboarding-completed-at',
-      completedAt,
-      '--positive-question-id',
-      'can_stop_and_remove_device',
-      '--vault',
-      vaultRoot,
-    ])
-    assert.equal(
-      safeCompression.ok,
-      true,
-      safeCompression.ok ? undefined : safeCompression.error.message,
-    )
-  } finally {
-    await rm(vaultRoot, { recursive: true, force: true })
-  }
-})
-
-test.sequential('Health Commons safety screening gates reactivation and preserves lineage', async () => {
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-experiment-reactivation-'))
-  const screenedProtocol =
-    'protocol_variant:cognitive-offload-before-bed/five-minute-tomorrow-list'
-  const completedAt = '2026-04-30T15:00:00.000Z'
-
-  try {
-    await runSliceCli(['init', '--vault', vaultRoot, '--timezone', 'UTC'])
-    const planned = await runSliceCli([
-      'experiment',
-      'start',
-      'bedtime-planned',
-      '--from-protocol',
-      screenedProtocol,
-      '--status',
-      'planned',
-      '--intervention-start',
-      '2026-05-01',
-      '--vault',
-      vaultRoot,
-    ])
-    assert.equal(planned.ok, true, planned.ok ? undefined : planned.error.message)
-
-    const scalarActivation = await runSliceCli([
-      'experiment',
-      'edit',
-      'bedtime-planned',
-      '--status',
-      'active',
-      '--vault',
-      vaultRoot,
-    ])
-    assert.equal(scalarActivation.ok, false)
-    assert.match(scalarActivation.error.message ?? '', /Complete the safety screen/u)
-
-    const staleActivation = await runSliceCli([
-      'experiment',
-      'edit',
-      'bedtime-planned',
-      '--status',
-      'active',
-      '--onboarding-completed-at',
-      completedAt,
-      '--page-revision-id',
-      `sha256:${'0'.repeat(64)}`,
-      '--vault',
-      vaultRoot,
-    ])
-    assert.equal(staleActivation.ok, false)
-    assert.match(staleActivation.error.message ?? '', /changed after this plan was prepared/u)
-
-    const services = createIntegratedVaultServices()
-    const plannedShown = await runSliceCli<{
-      entity: { data: { commonsProtocolRef?: unknown } }
-    }>(['experiment', 'show', 'bedtime-planned', '--vault', vaultRoot])
-    assert.equal(plannedShown.ok, true)
-    const plannedProtocolRef = commonsProtocolRefSchema.parse(
-      requireData(plannedShown).entity.data.commonsProtocolRef,
-    )
-    await assert.rejects(
-      services.core.updateExperiment({
-        vault: vaultRoot,
-        requestId: null,
-        lookup: 'bedtime-planned',
-        commonsProtocolRef: null,
-      }),
-      /must preserve its exact protocol lineage/u,
-    )
-    await services.core.createExperiment({
-      vault: vaultRoot,
-      requestId: null,
-      slug: 'active-custom-before-protocol',
-      status: 'active',
-    })
-    await assert.rejects(
-      services.core.updateExperiment({
-        vault: vaultRoot,
-        requestId: null,
-        lookup: 'active-custom-before-protocol',
-        commonsProtocolRef: plannedProtocolRef,
-      }),
-      /Only a planned experiment may change its protocol lineage/u,
-    )
-
-    const safeActivation = await runSliceCli([
-      'experiment',
-      'edit',
-      'bedtime-planned',
-      '--status',
-      'active',
-      '--onboarding-completed-at',
-      completedAt,
-      '--vault',
-      vaultRoot,
-    ])
-    assert.equal(
-      safeActivation.ok,
-      true,
-      safeActivation.ok ? undefined : safeActivation.error.message,
-    )
-
-    const unsafeActiveScreenUpdate = await runSliceCli([
-      'experiment',
-      'edit',
-      'bedtime-planned',
-      '--positive-question-id',
-      'dangerous_sleepiness',
-      '--safety-disposition',
-      'do_not_start_unsupervised',
-      '--vault',
-      vaultRoot,
-    ])
-    assert.equal(unsafeActiveScreenUpdate.ok, false)
-    assert.match(
-      unsafeActiveScreenUpdate.error.message ?? '',
-      /requires do_not_start_unsupervised/u,
-    )
-
-    const downgradedWithBlockingScreen = await runSliceCli([
-      'experiment',
-      'edit',
-      'bedtime-planned',
-      '--status',
-      'planned',
-      '--positive-question-id',
-      'dangerous_sleepiness',
-      '--safety-disposition',
-      'do_not_start_unsupervised',
-      '--vault',
-      vaultRoot,
-    ])
-    assert.equal(
-      downgradedWithBlockingScreen.ok,
-      true,
-      downgradedWithBlockingScreen.ok
-        ? undefined
-        : downgradedWithBlockingScreen.error.message,
-    )
   } finally {
     await rm(vaultRoot, { recursive: true, force: true })
   }
@@ -2441,8 +1765,8 @@ test.sequential('experiment prose flags accept commas inside prose values', asyn
       'experiment',
       'start',
       'mobility-guardrails',
-      '--from-protocol',
-      'protocol_variant:dry-sauna/murph-finnish-standard-3x-week',
+      '--primary-biomarker-key',
+      'biomarker:resting-heart-rate',
       '--intervention-start',
       '2026-05-01',
       '--onboarding-completed-at',
@@ -2547,8 +1871,6 @@ test.sequential(
         'experiment',
         'start',
         'context-seam',
-        '--custom',
-        '--no-public-protocol',
         '--title',
         'Context Seam',
         '--started-on',
@@ -2819,7 +2141,7 @@ test.sequential('experiment edit preserves canonical write order and failure cut
   const apply = services.core.applyExperimentOnboarding.bind(services.core)
   const updateSpy = vi.spyOn(services.core, 'updateExperiment').mockImplementation((input) => {
     calls.push({
-      kind: input.runPlan ? 'hydrate' : 'scalar',
+      kind: 'scalar',
       hasStatus: Object.hasOwn(input, 'status'),
       status: input.status,
     })
@@ -2833,8 +2155,8 @@ test.sequential('experiment edit preserves canonical write order and failure cut
     assert.equal((await run(['init', '--vault', vaultRoot, '--timezone', 'UTC'])).ok, true)
     const created = await run([
       'experiment', 'start', 'dispatch-proof',
-      '--from-protocol', 'protocol_variant:dry-sauna/murph-finnish-standard-3x-week',
-      '--test-plan-id', 'rhr-21d', '--intervention-start', '2026-04-08',
+      '--primary-biomarker-key', 'biomarker:resting-heart-rate',
+      '--intervention-start', '2026-04-08', '--intervention-days', '21',
       '--onboarding-completed-at', '2026-04-07T15:00:00.000Z',
       '--vault', vaultRoot,
     ])
@@ -2845,10 +2167,7 @@ test.sequential('experiment edit preserves canonical write order and failure cut
       { flags: ['--status', 'paused'], kinds: ['scalar'] },
       { flags: ['--target-sessions', '8'], kinds: ['structured'] },
       { flags: ['--target-sessions', '9', '--title', 'Mixed proof', '--status', 'active'], kinds: ['structured', 'scalar'] },
-      { flags: ['--hydrate-protocol-defaults'], kinds: ['hydrate'] },
-      { flags: ['--hydrate-protocol-defaults', '--title', 'Hydrated proof'], kinds: ['hydrate', 'scalar'] },
-      { flags: ['--hydrate-protocol-defaults', '--status', 'paused'], kinds: ['hydrate', 'structured'] },
-      { flags: ['--hydrate-protocol-defaults', '--analysis-note', 'Synthetic analysis note', '--title', 'Full proof', '--status', 'active'], kinds: ['hydrate', 'structured', 'scalar'] },
+      { flags: ['--analysis-note', 'Synthetic analysis note', '--title', 'Full proof', '--status', 'paused'], kinds: ['structured', 'scalar'] },
     ]
     for (const scenario of scenarios) {
       calls.length = 0
@@ -2870,13 +2189,10 @@ test.sequential('experiment edit preserves canonical write order and failure cut
     assert.equal(calls.length, 0)
 
     calls.length = 0
+    const applyCallsBeforeFailure = applySpy.mock.calls.length
     applySpy.mockRejectedValueOnce(new Error('Synthetic structured write failure'))
-    assert.equal((await edit(['--hydrate-protocol-defaults', '--target-sessions', '10', '--title', 'Must not write'])).ok, false)
-    assert.deepEqual(calls.map((call) => call.kind), ['hydrate'])
-
-    calls.length = 0
-    updateSpy.mockRejectedValueOnce(new Error('Synthetic hydration failure'))
-    assert.equal((await edit(['--hydrate-protocol-defaults', '--target-sessions', '11', '--title', 'Must not write'])).ok, false)
+    assert.equal((await edit(['--target-sessions', '10', '--title', 'Must not write'])).ok, false)
+    assert.equal(applySpy.mock.calls.length, applyCallsBeforeFailure + 1)
     assert.equal(calls.length, 0)
 
     calls.length = 0
@@ -2913,8 +2229,6 @@ test.sequential(
         'experiment',
         'start',
         'focus-sprint',
-        '--custom',
-        '--no-public-protocol',
         '--title',
         'Focus Sprint',
         '--started-on',
@@ -3077,14 +2391,6 @@ test.sequential(
   'experiment session/context logging feeds deterministic progress and outcome analysis for the same run',
   async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-experiment-analysis-'))
-    const protocolKey = 'protocol_variant:dry-sauna/murph-finnish-standard-3x-week'
-    const protocol = loadGeneratedHealthCommonsProtocolRunSpecs().protocols.find(
-      (candidate) => candidate.key === protocolKey,
-    )
-    assert.ok(protocol)
-    const pageRevisionId = protocol.revision.pageRevisionId
-    const runSpecRevisionId = protocol.revision.runSpecRevisionId
-    assert.ok(runSpecRevisionId)
 
     try {
       await runSliceCli([
@@ -3101,8 +2407,6 @@ test.sequential(
         'experiment',
         'start',
         'focus-sprint',
-        '--custom',
-        '--no-public-protocol',
         '--title',
         'Focus Sprint',
         '--started-on',
@@ -3130,15 +2434,6 @@ test.sequential(
         'focus-sprint',
         '--status',
         'active',
-        '--protocol-key',
-        protocolKey,
-        '--hydrate-protocol-defaults',
-        '--page-revision-id',
-        pageRevisionId,
-        '--run-spec-revision-id',
-        runSpecRevisionId,
-        '--test-plan-id',
-        'rhr-21d',
         '--baseline-start',
         '2026-04-01',
         '--baseline-end',

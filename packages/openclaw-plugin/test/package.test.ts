@@ -125,11 +125,12 @@ describe("@murphai/openclaw-plugin", () => {
     expect(skill).toContain("`vault-cli <command path> --schema --format json`");
     expect(skill).toContain("`vault-cli memory show --compact --format json`");
     expect(skill).not.toMatch(/vault-cli memory show(?![^\n`]*--compact)/u);
-    expect(skill).toContain("--from-protocol <key-or-route>");
-    expect(skill).toContain("--custom");
-    expect(skill).toContain("--no-public-protocol");
-    expect(skill).toContain("same-turn Health Commons protocol explore/list");
+    expect(skill).not.toContain("--from-protocol <key-or-route>");
+    expect(skill).not.toContain("--custom");
+    expect(skill).not.toContain("--no-public-protocol");
+    expect(skill).not.toContain("same-turn Health Commons protocol explore/list");
     expect(skill).not.toContain("experiment start <slug> --protocol-key");
+    expect(skill).toContain("no public catalog or fallback flags are required");
     expect(skill).toContain('`vault-cli search query "<query>"`');
     expect(skill).toContain("Do not read raw revision hashes, field names, or test-plan ids aloud");
     expect(skill).toContain("Ask at most two questions per response");

@@ -5,19 +5,11 @@ import { describe, expect, it } from "vitest";
 
 const repoRoot = path.resolve(import.meta.dirname, "../../..");
 const sourceFiles: readonly string[] = [
-  "apps/web/src/lib/health-commons/experiment-browse.ts",
-  "apps/web/src/lib/health-commons/generated-experiment-artifacts.ts",
   "apps/web/src/lib/health-commons/generated-biomarker-artifacts.ts",
   "apps/web/src/lib/health-commons/generated-measurement-method-artifacts.ts",
-  "apps/web/src/lib/health-commons/experiment-projections.ts",
   "apps/web/src/lib/health-commons/biomarker-projections.ts",
   "apps/web/src/lib/health-commons/measurement-method-detail.ts",
   "apps/web/src/lib/health-commons/goal-projections.ts",
-  "apps/web/app/(dashboard)/experiments/page.tsx",
-  "apps/web/app/(dashboard)/experiments/[experimentId]/layout.tsx",
-  "apps/web/app/(dashboard)/experiments/[experimentId]/page.tsx",
-  "apps/web/app/(dashboard)/experiments/[experimentId]/research/page.tsx",
-  "apps/web/app/(dashboard)/experiments/[experimentId]/results/page.tsx",
   "apps/web/app/(dashboard)/biomarkers/[biomarkerId]/page.tsx",
   "apps/web/app/goals/page.tsx",
   "apps/web/app/goals/[goalId]/page.tsx",
@@ -45,30 +37,6 @@ describe("Health Commons route-bundle boundary", () => {
         expect(source, `${relativePath} should not contain ${pattern}`).not.toContain(pattern);
       }
     }
-  });
-
-  it("keeps the public experiment layout static-first", () => {
-    const source = readFileSync(
-      path.join(repoRoot, "apps/web/app/(dashboard)/experiments/[experimentId]/layout.tsx"),
-      "utf8",
-    );
-
-    expect(source).not.toContain("next/headers");
-    expect(source).not.toContain("cookies(");
-    expect(source).not.toContain("headers(");
-    expect(source).not.toContain("@prisma/client");
-    expect(source).not.toContain("prisma");
-    expect(source).not.toContain("getServerSession");
-    expect(source).not.toContain("auth(");
-  });
-
-  it("keeps experiment browse code off the filesystem-backed Health Commons runtime", () => {
-    const source = readFileSync(
-      path.join(repoRoot, "apps/web/src/lib/health-commons/experiment-browse.ts"),
-      "utf8",
-    );
-
-    expect(source).not.toContain("@murphai/health-commons/runtime");
   });
 
   it("keeps Goal projections on the narrow Goal runtime", () => {
@@ -110,22 +78,6 @@ describe("Health Commons route-bundle boundary", () => {
       );
       expect(source, `${relativePath} should not instantiate biomarker route bundle readers`).not.toContain(
         "createHealthCommonsRouteBundleReader",
-      );
-    }
-  });
-
-  it("keeps biomarker experiment cards on projected protocol images", () => {
-    const files = [
-      "apps/web/src/components/biomarkers/biomarker-detail/biomarker-experiment-card.tsx",
-      "apps/web/src/components/biomarkers/biomarker-detail/biomarker-experiment-card-hero.tsx",
-      "apps/web/src/components/biomarkers/biomarker-detail/biomarker-experiment-row.tsx",
-    ];
-
-    for (const relativePath of files) {
-      const source = readFileSync(path.join(repoRoot, relativePath), "utf8");
-
-      expect(source, `${relativePath} should not N+1 load experiment shells`).not.toContain(
-        "resolveHealthCommonsExperimentShell",
       );
     }
   });
@@ -233,14 +185,8 @@ function resolveRelativeSourceFile(fromRelativePath: string, specifier: string):
 
 function isPublicHealthCommonsSourceFile(relativePath: string): boolean {
   return sourceFiles.includes(relativePath)
-    || relativePath.startsWith("apps/web/app/(dashboard)/experiments")
     || relativePath.startsWith("apps/web/app/(dashboard)/biomarkers")
     || relativePath.startsWith("apps/web/app/measurement-methods")
-    || relativePath.startsWith("apps/web/src/lib/health-commons/experiment-browse")
-    || relativePath.startsWith("apps/web/src/lib/health-commons/experiment-detail")
-    || relativePath.startsWith("apps/web/src/lib/health-commons/experiment-images")
-    || relativePath.startsWith("apps/web/src/lib/health-commons/experiment-projections")
-    || relativePath.startsWith("apps/web/src/lib/health-commons/generated-experiment-artifacts")
     || relativePath.startsWith("apps/web/src/lib/health-commons/generated-biomarker-artifacts")
     || relativePath.startsWith("apps/web/src/lib/health-commons/generated-measurement-method-artifacts")
     || relativePath.startsWith("apps/web/src/lib/health-commons/biomarker-projections")
@@ -302,11 +248,9 @@ function isMissingPathError(error: unknown): boolean {
 function isHealthCommonsRouteTrace(filePath: string, source: string): boolean {
   const normalizedPath = filePath.replace(/\\/gu, "/");
   return (
-    normalizedPath.includes("/experiments/") ||
     normalizedPath.includes("/biomarkers/") ||
     normalizedPath.includes("/goals/") ||
     normalizedPath.includes("/measurement-methods/") ||
-    source.includes("experiment-detail") ||
     source.includes("biomarker-detail") ||
     source.includes("goal-projections") ||
     source.includes("measurement-method-detail")

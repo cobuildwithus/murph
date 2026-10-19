@@ -92,11 +92,9 @@ const MURPH_CONTACT_CARD_AVATAR_TRACE_INCLUDES = [
 // so Goal functions must explicitly discard projection families they never read.
 const HEALTH_COMMONS_GOAL_TRACE_EXCLUDES = [
   "../../packages/health-commons/generated/web/browse/biomarkers.json",
-  "../../packages/health-commons/generated/web/browse/experiments.json",
   "../../packages/health-commons/generated/web/bundles/**/*.json",
   "../../packages/health-commons/generated/web/pages/biomarkers/**/*.json",
   "../../packages/health-commons/generated/web/shell/**/*.json",
-  "../../packages/health-commons/generated/web/tabs/**/*.json",
 ];
 const HEALTH_COMMONS_GOAL_INDEX_ONLY_TRACE_EXCLUDES = [
   "../../packages/health-commons/generated/web/pages/goals/**/*.json",
@@ -400,24 +398,6 @@ export function buildHostedWebNextConfig(
       ],
     },
     outputFileTracingIncludes: {
-      "/experiments": [
-        "../../packages/health-commons/generated/web/browse/experiments.json",
-      ],
-      "/experiments/[experimentId]": [
-        "../../packages/health-commons/generated/web/routes/index.json",
-        "../../packages/health-commons/generated/web/shell/experiments/**/*.json",
-        "../../packages/health-commons/generated/web/tabs/experiments/**/*.json",
-      ],
-      "/experiments/[experimentId]/research": [
-        "../../packages/health-commons/generated/web/routes/index.json",
-        "../../packages/health-commons/generated/web/shell/experiments/**/*.json",
-        "../../packages/health-commons/generated/web/tabs/experiments/**/*.json",
-      ],
-      "/experiments/[experimentId]/results": [
-        "../../packages/health-commons/generated/web/routes/index.json",
-        "../../packages/health-commons/generated/web/shell/experiments/**/*.json",
-        "../../packages/health-commons/generated/web/tabs/experiments/**/*.json",
-      ],
       "/goals": [
         ...HEALTH_COMMONS_GOAL_INDEX_TRACE_INCLUDES,
       ],
@@ -448,11 +428,10 @@ export function buildHostedWebNextConfig(
       // Keys are picomatch globs matched with `contains: true` against the
       // route path (route groups stripped), so "/opengraph-image" covers every
       // `opengraph-image` metadata route: the static marketing images and the
-      // dynamic invite/group/biomarker/experiment unfurls that are never
+      // dynamic invite/group/biomarker unfurls that are never
       // prerendered. Share-card route handlers are keyed explicitly.
       "/opengraph-image": OG_SHARE_ASSET_TRACE_INCLUDES,
       "/changelog/card/v1/[items]": OG_SHARE_ASSET_TRACE_INCLUDES,
-      "/experiments/[experimentId]/card": OG_SHARE_ASSET_TRACE_INCLUDES,
       "/api/environment/share-card": OG_SHARE_ASSET_TRACE_INCLUDES,
       "/api/murph-contact-card": MURPH_CONTACT_CARD_AVATAR_TRACE_INCLUDES,
       "/imessage/card/v1/[payload]": OG_SHARE_ASSET_TRACE_INCLUDES,

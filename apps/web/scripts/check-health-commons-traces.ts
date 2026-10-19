@@ -17,16 +17,6 @@ const forbiddenRouteBundleSubstring =
   /packages[/\\]health-commons[/\\]generated[/\\]web[/\\]bundles[/\\]/u;
 const allowedMeasurementMethodRouteBundleSubstring =
   /packages[/\\]health-commons[/\\]generated[/\\]web[/\\]bundles[/\\]measurement_method[/\\]/u;
-const requiredExperimentTraceArtifacts = [
-  "packages/health-commons/generated/web/routes/index.json",
-  "packages/health-commons/generated/web/shell/experiments/finnish-sauna.json",
-  "packages/health-commons/generated/web/tabs/experiments/finnish-sauna/protocol.json",
-  "packages/health-commons/generated/web/tabs/experiments/finnish-sauna/research.json",
-  "packages/health-commons/generated/web/tabs/experiments/finnish-sauna/results-public.json",
-] as const;
-const requiredBrowseTraceArtifacts = [
-  "packages/health-commons/generated/web/browse/experiments.json",
-] as const;
 const requiredBiomarkerOverviewTraceArtifacts = [
   "packages/health-commons/generated/web/routes/index.json",
   "packages/health-commons/generated/web/shell/biomarkers/hrv-rmssd.json",
@@ -79,8 +69,6 @@ if (!existsSync(distDir)) {
 
 const traceFiles = listFiles(distDir).filter((file) => file.endsWith(".nft.json"));
 const violations: string[] = [];
-const experimentTraceArtifacts = new Set<string>();
-const browseTraceArtifacts = new Set<string>();
 const biomarkerOverviewTraceArtifacts = new Set<string>();
 const biomarkerResearchTraceArtifacts = new Set<string>();
 const measurementMethodTraceArtifacts = new Set<string>();
@@ -98,12 +86,6 @@ for (const traceFile of traceFiles) {
   const trace = JSON.parse(readFileSync(traceFile, "utf8")) as unknown;
   const files = readTraceFiles(trace);
   const relativeTraceFile = path.relative(appRoot, traceFile).replace(/\\/gu, "/");
-  const isExperimentDetailTrace = relativeTraceFile.includes(
-    "server/app/(dashboard)/experiments/[experimentId]/",
-  );
-  const isExperimentBrowseTrace = relativeTraceFile.endsWith(
-    "server/app/(dashboard)/experiments/page.js.nft.json",
-  );
   const isBiomarkerOverviewTrace = relativeTraceFile.endsWith(
     "server/app/(dashboard)/biomarkers/[biomarkerId]/page.js.nft.json",
   );
@@ -138,7 +120,6 @@ for (const traceFile of traceFiles) {
     if (
       forbiddenGeneratedCatalogPattern.test(normalizedTracedFile) ||
       forbiddenGeneratedCatalogSubstring.test(normalizedTracedFile) ||
-      (isExperimentDetailTrace && forbiddenRouteBundleSubstring.test(normalizedTracedFile)) ||
       (
         isMeasurementMethodTrace
         && forbiddenRouteBundleSubstring.test(normalizedTracedFile)
@@ -158,22 +139,6 @@ for (const traceFile of traceFiles) {
       )
     ) {
       violations.push(`${relativeTraceFile} -> ${tracedFile}`);
-    }
-
-    if (isExperimentDetailTrace) {
-      for (const requiredArtifact of requiredExperimentTraceArtifacts) {
-        if (normalizedTracedFile.endsWith(requiredArtifact)) {
-          experimentTraceArtifacts.add(requiredArtifact);
-        }
-      }
-    }
-
-    if (isExperimentBrowseTrace) {
-      for (const requiredArtifact of requiredBrowseTraceArtifacts) {
-        if (normalizedTracedFile.endsWith(requiredArtifact)) {
-          browseTraceArtifacts.add(requiredArtifact);
-        }
-      }
     }
 
     if (isBiomarkerOverviewTrace) {
@@ -267,17 +232,11 @@ for (const policy of goalIndexWebhookTracePolicies) {
 if (violations.length > 0) {
   throw new Error([
     "Health Commons Next trace boundary check failed.",
-    "Public experiment and Goal routes must use only their web projections; measurement routes may trace only measurement-method route bundles.",
+    "Public Goal routes must use only their web projections; measurement routes may trace only measurement-method route bundles.",
     ...violations.map((violation) => `- ${violation}`),
   ].join("\n"));
 }
 
-const missingExperimentArtifacts = requiredExperimentTraceArtifacts.filter((artifact) =>
-  !experimentTraceArtifacts.has(artifact)
-);
-const missingBrowseArtifacts = requiredBrowseTraceArtifacts.filter((artifact) =>
-  !browseTraceArtifacts.has(artifact)
-);
 const missingBiomarkerOverviewArtifacts = requiredBiomarkerOverviewTraceArtifacts.filter((artifact) =>
   !biomarkerOverviewTraceArtifacts.has(artifact)
 );
@@ -298,8 +257,6 @@ const missingGoalContactArtifacts = requiredGoalContactTraceArtifacts.filter((ar
 );
 
 if (
-  missingExperimentArtifacts.length > 0 ||
-  missingBrowseArtifacts.length > 0 ||
   missingBiomarkerOverviewArtifacts.length > 0 ||
   missingBiomarkerResearchArtifacts.length > 0 ||
   missingMeasurementMethodArtifacts.length > 0 ||
@@ -310,8 +267,6 @@ if (
   throw new Error([
     "Health Commons generated web projections are missing from Next build traces.",
     "Public Health Commons routes need compact generated/web artifacts at runtime.",
-    ...missingExperimentArtifacts.map((artifact) => `- missing experiment detail trace artifact: ${artifact}`),
-    ...missingBrowseArtifacts.map((artifact) => `- missing experiment browse trace artifact: ${artifact}`),
     ...missingBiomarkerOverviewArtifacts.map((artifact) => `- missing biomarker overview trace artifact: ${artifact}`),
     ...missingBiomarkerResearchArtifacts.map((artifact) => `- missing biomarker research trace artifact: ${artifact}`),
     ...missingMeasurementMethodArtifacts.map((artifact) => `- missing measurement method trace artifact: ${artifact}`),

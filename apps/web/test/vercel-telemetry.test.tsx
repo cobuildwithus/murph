@@ -445,21 +445,6 @@ test("VercelTelemetry aggregates public dynamic routes without sending identifie
       route: "/compare/[competitor]",
     },
     {
-      expected: "/experiments/[experiment]",
-      pathname: "/experiments/sleep-consistency",
-      route: "/experiments/[experimentId]",
-    },
-    {
-      expected: "/experiments/[experiment]/research",
-      pathname: "/experiments/sleep-consistency/research",
-      route: "/experiments/[experimentId]/research",
-    },
-    {
-      expected: "/experiments/[experiment]/results",
-      pathname: "/experiments/sleep-consistency/results",
-      route: "/experiments/[experimentId]/results",
-    },
-    {
       expected: "/goals/[goal]",
       pathname: "/goals/improve-deep-sleep",
       route: "/goals/[goalId]",

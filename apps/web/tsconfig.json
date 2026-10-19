@@ -273,9 +273,6 @@
       "@murphai/query/browser-biomarkers": [
         "../../packages/query/src/browser-biomarkers.ts"
       ],
-      "@murphai/query/browser-experiments": [
-        "../../packages/query/src/browser-experiments.ts"
-      ],
       "@murphai/query/browser-overview": [
         "../../packages/query/src/browser-overview.ts"
       ],

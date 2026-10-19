@@ -15,7 +15,6 @@ import {
   writeHealthCommonsKnowledgeIndex,
 } from "./knowledge-index.ts";
 import { stablePrettyJson } from "./normalize.ts";
-import { buildHealthCommonsProtocolGeneratedArtifacts } from "./protocol-artifacts.ts";
 import { buildHealthCommonsWebGeneratedArtifacts } from "./web-artifacts.ts";
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -129,10 +128,6 @@ function buildGeneratedFiles(
   const sourceIndex = buildHealthCommonsSourceIndex(catalog);
   const sourceArtifactIndex = buildHealthCommonsSourceArtifactIndex(catalog);
   const webArtifacts = buildHealthCommonsWebGeneratedArtifacts(catalog);
-  const protocolArtifacts = buildHealthCommonsProtocolGeneratedArtifacts({
-    catalog,
-    routeIndex: webArtifacts.routeIndex,
-  });
   const biomarkerDesiredDirections =
     buildHealthCommonsBiomarkerDesiredDirectionsArtifact(webArtifacts.biomarkerIndex);
   const files = new Map<string, string>([
@@ -141,15 +136,11 @@ function buildGeneratedFiles(
     ["recent-changes.json", stablePrettyJson({ changes: catalog.changes })],
     ["artifact-manifests.json", stablePrettyJson({ artifactManifests: catalog.artifactManifests })],
     ["evidence-appraisals.json", stablePrettyJson({ evidenceAppraisals: catalog.evidenceAppraisals })],
-    ["protocol-index.json", stablePrettyJson(protocolArtifacts.index)],
-    ["protocol-run-specs.json", stablePrettyJson(protocolArtifacts.runSpecs)],
-    ["protocol-family-graph.json", stablePrettyJson(protocolArtifacts.familyGraph)],
     ["biomarker-desired-directions.json", stablePrettyJson(biomarkerDesiredDirections)],
     ["source-index.json", stablePrettyJson(sourceIndex)],
     ["source-identities.ndjson", sourceIndex.identityLookup.map((entry) => JSON.stringify(entry)).join("\n") + "\n"],
     ["source-artifact-index.json", stablePrettyJson(sourceArtifactIndex)],
     ["web/routes/index.json", stablePrettyJson(webArtifacts.routeIndex)],
-    ["web/browse/experiments.json", stablePrettyJson(webArtifacts.experimentIndex)],
     ["web/browse/biomarkers.json", stablePrettyJson(webArtifacts.biomarkerIndex)],
     ["web/browse/goals.json", stablePrettyJson(webArtifacts.goalIndex)],
   ]);

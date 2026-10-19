@@ -1,6 +1,6 @@
 # Product Specs Index
 
-Last verified: 2026-08-20
+Last verified: 2026-10-19
 
 | Path | Purpose | Status |
 | --- | --- | --- |
@@ -22,15 +22,13 @@ Last verified: 2026-08-20
 | `agent-docs/product-specs/weekly-game.md` | Private 1v1 weekly habit game behind `MURPH_GAME_ENABLED` and a member allowlist: 3am local days, post-to-unlock, one retake, offline grace, settlement, and tickets. | Active |
 | `agent-docs/product-specs/hosted-support-escalation.md` | Direct support address plus explicit, member-linked, de-identified product-team escalation with a three-email-per-UTC-day server limit and stable provider idempotency. | Implemented |
 | `agent-docs/product-specs/hosted-family-plan.md` | Hosted Family plan for 2-6 sponsored people with mixed Pulse/Edge seats, exact owner-funded member usage top-ups, private member accounts, chat-first invites, and privacy boundaries. | Active |
-| `agent-docs/product-specs/health-commons.md` | Health Commons page graph, catalog, versioning, future aggregate outcome summaries, and artifact-storage product boundary. | Active |
+| `agent-docs/product-specs/health-commons.md` | Health Commons biomarker, Goal, measurement-method, and source pages; knowledge lookup; versioning; artifact storage; and retired public experiment catalog boundary. | Active |
 | `agent-docs/product-specs/public-goal-guides.md` | Public outcome-first Goal guides, Health Commons contract, messaging handoff, private setup workflow, SEO boundaries, and exact revision lineage. | Active |
 | `agent-docs/product-specs/murph-safe-public-product-search.md` | Public supplement and branded-food evidence search, normalized API contract, exact product-test semantics, privacy, and abuse bounds. | Active |
-| `agent-docs/product-specs/protocol-summary-copy.md` | Source-of-truth copy rules for Health Commons protocol `summary:` fields shown on `/experiments` cards. | Active |
 | `agent-docs/product-specs/murph-onboarding.md` | Aspiration-anchored onboarding through a compact progressive-disclosure skill: private relationship, observable bounded-history resume rules, brief aspiration-thread capture, explicit park, progressive health foundation, contextual return, collaborative first step, finite completion, and one code-owned first personal read. | Active |
-| `agent-docs/product-specs/experiment-onboarding.md` | Experiment-only start, protocol onboarding contracts, assistant setup behavior, and private run handoff. | Active |
+| `agent-docs/product-specs/experiment-onboarding.md` | Assistant-led private experiment planning, custom run start, saved protocol lineage, reminders, and outcome closeout. | Active |
 | `agent-docs/product-specs/experiment-adherence-confidence.md` | Read-time assumed adherence, sensed/confirmed/assumed confidence ladder, correction semantics, and category-scoped activity evidence. | Active |
 | `agent-docs/product-specs/experiment-outcome-selection.md` | Experiment-only choice rules for member-valued outcomes, credible evidence, timeframe integrity, and setup handoff. | Active |
-| `agent-docs/product-specs/protocol-outcome-network.md` | Private outcome cards now, plus target-state sharing levels, contribution rules, cohort summaries, and social guardrails for the protocol outcome network. | Active |
 | `agent-docs/product-specs/captures.md` | Dated media-capture primitive for lightweight private evidence over time. | Active |
 | `agent-docs/product-specs/companion-app.md` | Native Swift iOS companion for broad Apple Health sync, closed WHOOP Recovery/Strain metadata enrichment, and an authorization- and validation-gated beta WHOOP 5/MG overnight PRV estimate. | Active |
 | `agent-docs/product-specs/query-metric-universality.md` | Invariant that every metric-bearing canonical event yields a query metric point through one generic rule; summary pipeline becomes presentation + precedence, never a gatekeeper. | Specified |

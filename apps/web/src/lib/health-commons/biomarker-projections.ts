@@ -21,8 +21,6 @@ export type BiomarkerShellProjection = HealthCommonsWebBiomarkerShell;
 export type BiomarkerOverviewProjection = HealthCommonsWebBiomarkerOverview;
 export type BiomarkerResearchProjection = HealthCommonsWebBiomarkerResearch;
 export type BiomarkerAboutItemModel = HealthCommonsWebBiomarkerShell["about"][number];
-export type BiomarkerProtocolRankingModel =
-  HealthCommonsWebBiomarkerOverview["protocolRankings"][number];
 export type BiomarkerSourceModel = HealthCommonsWebBiomarkerResearch["sourceHighlights"][number];
 export type BiomarkerClaimModel = HealthCommonsWebBiomarkerResearch["claims"][number];
 
@@ -87,8 +85,6 @@ function cleanBiomarkerOverview(
       ...(placeholder ? { placeholder } : {}),
     },
     privateMetricBindings: overview.privateMetricBindings,
-    protocolRankingFormula: cleanHealthCommonsUserFacingCopy(overview.protocolRankingFormula),
-    protocolRankings: overview.protocolRankings.map(cleanBiomarkerProtocolRanking),
     shortName: cleanHealthCommonsUserFacingCopy(overview.shortName),
     summary: cleanHealthCommonsUserFacingCopy(overview.summary),
     title: cleanHealthCommonsUserFacingCopy(overview.title),
@@ -111,24 +107,6 @@ function cleanBiomarkerResearch(
     shortName: cleanHealthCommonsUserFacingCopy(research.shortName),
     sourceHighlights: research.sourceHighlights.map(cleanBiomarkerSource),
     title: cleanHealthCommonsUserFacingCopy(research.title),
-  };
-}
-
-function cleanBiomarkerProtocolRanking(
-  ranking: BiomarkerProtocolRankingModel,
-): BiomarkerProtocolRankingModel {
-  return {
-    ...ranking,
-    burdenLabel: cleanHealthCommonsUserFacingCopy(ranking.burdenLabel),
-    category: cleanHealthCommonsUserFacingCopy(ranking.category),
-    cautionLabel: cleanHealthCommonsUserFacingCopy(ranking.cautionLabel),
-    description: cleanHealthCommonsUserFacingCopy(ranking.description),
-    durationLabel: cleanHealthCommonsUserFacingCopy(ranking.durationLabel),
-    evidenceLabel: cleanHealthCommonsUserFacingCopy(ranking.evidenceLabel),
-    expectedSignalLabel: cleanHealthCommonsUserFacingCopy(ranking.expectedSignalLabel),
-    fitLabel: ranking.fitLabel,
-    mechanism: cleanHealthCommonsUserFacingCopy(ranking.mechanism),
-    title: cleanHealthCommonsUserFacingCopy(ranking.title),
   };
 }
 

@@ -9,7 +9,6 @@ import {
   createBrowserVaultReplica,
   createVaultReadModel,
   parseBrowserVaultReplica,
-  selectBrowserVaultExperimentResults,
   selectBrowserVaultLabBiomarkerDetail,
   selectBrowserVaultMeasuredBiomarkers,
   splitBrowserVaultReplica,
@@ -435,16 +434,6 @@ test("lab aliases project into one comparable longitudinal biomarker", async () 
       metricKey,
     );
   }
-
-  const experiment = selectBrowserVaultExperimentResults(client, "bun-alias");
-  assert.ok(experiment);
-  assert.deepEqual(experiment.progress?.analysisReadiness, {
-    status: "ready",
-    blockingReasons: [],
-  });
-  assert.equal(experiment.biomarkers[0]?.baseline.mean, 14);
-  assert.equal(experiment.biomarkers[0]?.intervention.mean, 16);
-  assert.equal(experiment.biomarkers[0]?.deltaAbs, 2);
 
   const bun = selectBrowserVaultLabBiomarkerDetail(client, "BUN");
   assert.ok(bun);

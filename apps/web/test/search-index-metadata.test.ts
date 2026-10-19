@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 
-import { metadata as experimentsMetadata } from "../app/(dashboard)/experiments/page";
 import { metadata as dashboardMetadata } from "../app/(dashboard)/layout";
 import { metadata as designMetadata } from "../app/design/page";
 import robots from "../app/robots";
@@ -11,7 +10,6 @@ import {
   listComparisonSitemapEntries,
 } from "../src/lib/comparisons/catalog";
 import { listHealthCommonsBiomarkerRoutes } from "../src/lib/health-commons/biomarker-projections";
-import { listHealthCommonsExperimentRouteParams } from "../src/lib/health-commons/experiment-browse";
 import { listHealthCommonsMeasurementMethodRoutes } from "../src/lib/health-commons/measurement-method-detail";
 import {
   listHealthCommonsGoalEntries,
@@ -21,7 +19,6 @@ import {
 } from "../src/lib/health-commons/goal-projections";
 import { GOAL_CATEGORIES } from "../src/lib/goals/goal-categories";
 import {
-  MURPH_INDEXABLE_PAGE_ROBOTS,
   MURPH_NOINDEX_PAGE_ROBOTS,
   MURPH_PUBLIC_SITE_URL,
 } from "../src/lib/site-metadata";
@@ -34,7 +31,6 @@ const EXPECTED_STATIC_PUBLIC_ROUTES = [
   "/clubs",
   "/contact",
   "/consumer-health-data-privacy-policy",
-  "/experiments",
   "/goals",
   "/goals/methodology",
   "/food",
@@ -71,10 +67,6 @@ describe("public search indexing metadata", () => {
     const expectedRoutes = [
       ...EXPECTED_STATIC_PUBLIC_ROUTES,
       ...listComparisonRoutes(),
-      ...listHealthCommonsExperimentRouteParams().flatMap(({ experimentId }) => {
-        const route = `/experiments/${encodeURIComponent(experimentId)}`;
-        return [route, `${route}/research`];
-      }),
       ...listHealthCommonsBiomarkerRoutes().flatMap((biomarkerId) => {
         const route = `/biomarkers/${encodeURIComponent(biomarkerId)}`;
         return [route, `${route}/research`];
@@ -101,11 +93,6 @@ describe("public search indexing metadata", () => {
         : {}),
       url: publicUrl(route),
     })));
-
-    for (const { experimentId } of listHealthCommonsExperimentRouteParams()) {
-      const route = `/experiments/${encodeURIComponent(experimentId)}`;
-      expect(expectedRoutes).not.toContain(`${route}/results`);
-    }
   });
 
   it("publishes a broad, uniquely routed goal library in every category", () => {
@@ -162,11 +149,9 @@ describe("public search indexing metadata", () => {
     expect(sitemapUrls).not.toContain(publicUrl(`/goals/${legacyRouteId}`));
   });
 
-  it("defaults private routes to noindex and opts the public experiment index back in", () => {
+  it("defaults private routes to noindex", () => {
     expect(dashboardMetadata.robots).toEqual(MURPH_NOINDEX_PAGE_ROBOTS);
     expect(designMetadata.robots).toEqual(MURPH_NOINDEX_PAGE_ROBOTS);
     expect(pitchMetadata.robots).toEqual(MURPH_NOINDEX_PAGE_ROBOTS);
-    expect(experimentsMetadata.alternates?.canonical).toBe("/experiments");
-    expect(experimentsMetadata.robots).toEqual(MURPH_INDEXABLE_PAGE_ROBOTS);
   });
 });

@@ -109,13 +109,6 @@ const probeRoutes: ProbeRoute[] = [
     params: { biomarkerId: "biomarker-probe" },
     url: "http://localhost/biomarkers/biomarker-probe/opengraph-image",
   },
-  {
-    entry: "server/app/experiments/[experimentId]/opengraph-image/route.js",
-    expectedHeight: 630,
-    expectedWidth: 1200,
-    params: { experimentId: "experiment-probe" },
-    url: "http://localhost/experiments/experiment-probe/opengraph-image",
-  },
   createIMessageCardProbe(),
 ];
 

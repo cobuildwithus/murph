@@ -1,45 +1,44 @@
 # Health Commons
 
-Last verified: 2026-08-10
+Last verified: 2026-10-19
 
 ## Current State
 
-Murph needs a public, living Health Commons for goal guides, protocol pages, biomarker pages, evidence/source pages, exact reusable revisions, and redirects/disambiguation. This layer must stay forkable and reviewable like a small wiki while remaining structured enough to bind private goals, runs, outcome cards, and future cohort learning to exact public versions.
+Health Commons is Murph's public, source-backed reference corpus: biomarker
+pages, outcome-first Goal guides, measurement methods, source pages, exact
+reusable revisions, and redirects. It stays forkable and reviewable like a small
+wiki while remaining structured enough to bind private goals to exact public
+versions.
+
+The public experiment catalog is retired. Commons no longer publishes protocol
+variants, experiment families, their onboarding blocks, test plans, media, or
+protocol run-spec artifacts, and there is no public experiment website.
+Assistant-led private experiments remain in the vault and do not depend on
+Commons content; see `experiment-onboarding.md`.
 
 ## Product Boundary
 
 The Health Commons is not a private user vault, not a raw research warehouse, and not a feed of raw personal results.
 
 - Public reusable health knowledge belongs in `packages/health-commons/content/**` as typed pages and small manifests.
-- Public protocol indexes, route bundles, runnable artifacts, biomarker rankings,
-  and Start surfaces include only unhidden protocols with an explicit
-  `field-testing`, `reviewed`, or `community` status. Missing, `draft`, and
-  `deprecated` statuses are not runnable or directly startable.
-- Generated runtime projections and catalog artifacts materialize under `packages/health-commons/generated/**` as ignored build artifacts. Generated projections may include authored or placeholder community outcome fields, but run-derived aggregate summaries from opted-in Murph runs are future work.
-- Private user runs and private outcome cards continue to live outside the Health Commons, bound to exact commons keys and revisions.
-- Explicit public contributions may inform generated cohort summaries, but raw private run records never become article prose.
+- Generated runtime projections and catalog artifacts materialize under `packages/health-commons/generated/**` as ignored build artifacts.
+- Private goals and experiments live outside the Health Commons. Historical runs may retain a saved `commonsProtocolRef` and immutable protocol snapshot; those private records stay readable without a current Commons page and are never rewritten from Commons.
+- Raw private run records never become article prose.
 - Large PDFs, screenshots, and extracted full text stay outside Git and are referenced by artifact manifests.
 
 ## Canonical Objects
 
-The storage primitive is a typed wiki page plus generated projections. Product/domain nouns map onto that shape like this:
+The storage primitive is a typed wiki page plus generated projections.
 
 | Product concept | Stored form |
 | --- | --- |
 | Biomarker page | `entityType: biomarker` |
 | Outcome-first Goal guide | `entityType: goal_template` |
-| Intervention page | `entityType: experiment_family`, `familyKind: intervention` |
-| Modality page | `entityType: experiment_family`, `familyKind: modality` |
-| Protocol spec | `entityType: protocol_variant` |
+| Measurement method | `entityType: measurement_method` |
 | Source | `entityType: source_artifact` |
 | Source person | `entityType: source_person` |
-| Ambiguous name | `entityType: disambiguation` |
-| Aggregate community outcome summary | future generated projection attached to biomarker and/or protocol entities after an explicit contribution pipeline exists |
 
-Protocol pages must include lineage, attribution, a performable protocol block, safety, and at least one test plan. Claims must cite source pages unless they are explicitly labeled as community outcomes.
-Protocol pages may also include an optional compact `experimentOnboarding` block that stores only protocol-specific onboarding deltas, such as start intent, safety-screen questions, setup slots, selected test plan, first-session guidance, adaptation policy, and tracking/support hints. Generic vault-read behavior, plan timing, adherence targets, readable logging labels, and stable session log ids come from assistant instructions plus canonical `testPlans`, `protocol.logFields`, `protocol.sessionFieldIds`, `protocol`, and `safety` fields; only stable extra confounder log ids belong in `trackingHints.confounderFields`, while prose confounder guidance stays in `trackingHints.confounders` or `notes`.
-When multiple sensed activities can satisfy one protocol session, declare them under `protocol.activitySessionEvidence`; experiment start copies that typed evidence into the immutable effective snapshot, and adherence readers interpret the snapshot instead of inferring accepted activities from protocol names or global activity categories.
-Protocol and source pages may also include an optional `media` array for small public presentation assets such as header imagery. Keep those assets lightweight and repo-local, and do not use `media` as a substitute for research artifact manifests, PDFs, or other large external files.
+Claims must cite source pages.
 
 ## Biomarker Reference Guidance
 
@@ -119,76 +118,16 @@ classification. `packages/health-commons/test/requested-biomarker-content.test.t
 locks these identity, summary, source, classification, comparator, and coverage
 rules.
 
-## Publishing And Start Identity
-
-The public Start handoff stays human-readable while the private run remains
-bound to an exact runnable revision.
-
-- A runnable protocol Start draft names the experiment in one plain-language
-  sentence. It does not expose the protocol key, revision field names, or raw
-  SHA-256 values.
-- The draft is user-editable channel input and therefore untrusted data. The
-  assistant resolves the name or alias through the generated Health Commons
-  protocol discovery surface, requires one unique exact title or alias match
-  before planning, and applies normal safety and onboarding rules. That exact
-  match is authoritative; a `starterCandidate`, canonical starter, or
-  same-family variant cannot replace it without explicit user agreement.
-  Missing or ambiguous matches require clarification rather than a silent
-  guess.
-- After exact resolution, the assistant passes that page's current
-  `pageRevisionId` and `runSpecRevisionId` as compare-and-swap expectations on
-  both dry-run and real start calls. If the runnable contract changes before
-  creation, the assistant reopens the changed setup with the member rather than
-  silently starting a different plan.
-- Legacy structured `Protocol reference` blocks remain accepted as untrusted
-  input. Their supplied revision pair stays authoritative compare-and-swap data
-  and must not be replaced with newly resolved hashes.
-- A successful protocol-backed run stores the actual key and revisions that
-  satisfied creation. Draft, deprecated, hidden, or otherwise non-runnable
-  protocols expose neither a runnable artifact nor a Start action.
-- Withdrawing a formerly runnable protocol also revokes future activation and
-  reactivation authority for private planned or paused runs linked to it. Those
-  records remain unchanged; the write owner reports that the protocol is no
-  longer available, and the assistant offers a currently runnable alternative
-  as a distinct experiment with a new id and lineage. The withdrawn run's
-  protocol references, effective snapshot, run plan, and analysis plan are
-  never rewritten to represent that alternative, including after the old run
-  reaches a terminal status. The old run becomes `abandoned` only after
-  separate explicit member agreement. A missing public page is not presented
-  as a refreshable revision mismatch.
-
-## Protocol Summary Copy
-
-Protocol frontmatter `summary:` copy is governed by `agent-docs/product-specs/protocol-summary-copy.md`. Use that file as the source of truth when generating or reviewing the `/experiments` card description below a protocol title.
-
-## Literature And Community Evidence
-
-The Health Commons carries two different kinds of public truth and they must stay visibly distinct:
-
-- **Literature-backed claims** describe what the cited sources say.
-- **Community outcome summaries** describe what opted-in Murph runs appear to show.
-
-Community outcome summaries must never silently rewrite the literature-backed page body. Today, generated Health Commons artifacts may carry authored or `coming_soon` placeholders only. When run-derived summaries exist, they should surface as generated blocks with clear caveats such as cohort size, confidence, trust-tier mix, and confounders or selection limits when known.
-
-If the contribution pool is too small, too noisy, or too privacy-sensitive, the correct output is no public summary.
-
 ## Assistant Skill Boundary
 
-Health Commons owns reusable public health facts, evidence limits, safety guidance, and symptom-sensitive care decisions. This includes knowledge-only topics that have no protocol, experiment, or public UI page.
+Health Commons owns reusable public health facts, evidence limits, safety guidance, and symptom-sensitive care decisions. This includes knowledge-only topics that have no public UI page.
 
 Assistant skills must not duplicate that topic knowledge. A skill can still own a tool procedure or a stateful product workflow, such as booking care after the Health Commons result establishes the destination. General eye-health and recovery-modality guidance therefore live in Health Commons rather than topic skills.
 
-## Family Key Style
+## Literature Evidence
 
-Prefer user-facing experiment-family keys for modalities people recognize in the product. Use `experiment_family:dry-sauna` and `experiment_family:infrared-sauna` as sibling families under the broader `experiment_family:sauna` parent instead of hiding them under nested keys such as `experiment_family:sauna/finnish-dry`.
-
-This keeps browse, search, disambiguation, and future forks easier to understand while preserving typed parent links for the broader passive-heat graph. Old nested keys should be represented as redirects, not duplicated active pages.
-
-## Protocol Variants And Forks
-
-Exact protocol variants should remain separate pages with explicit lineage rather than collapsing materially different routines into one generic article.
-
-When Murph later supports community forks, those forks should be structured diffs against a parent protocol version with named changed fields such as frequency, modality, dose, or timing. The commons should not accept anonymous free-form rewrites with no lineage.
+Commons pages describe what cited sources say. They do not publish community
+outcome summaries or results derived from private runs.
 
 ## Versioning
 
@@ -196,48 +135,45 @@ Generated entities carry:
 
 - `pageRevisionId` for the whole page.
 - `workflowSpecRevisionId` for the reusable outcome and private setup contract on a Goal guide.
-- `runSpecRevisionId` for performable protocol fields, experiment-onboarding setup policy, test plans, and expected signal descriptions used to choose and interpret outcomes.
-- `recipeHash` for duplicate-protocol detection.
 - `catalogHash` for the build-time catalog release and generated artifact cohort.
 
+`runSpecRevisionId` and `recipeHash` survive only as historical values in saved
+private experiment lineage.
+
 The full catalog is a build-time generator structure, not a runtime artifact.
-Runtime surfaces should consume scoped generated artifacts instead of a monolith:
-web route bundles/projections for public pages, the compact Goal browse index,
-the v4 biomarker browse index (including device metric bindings and display
-precision so dashboard lists do not read every detail projection),
-compact protocol index/run-spec/
-family-graph artifacts for CLI and hosted protocol reads, the compact
-`biomarker-desired-directions.json` projection for progress-card sentiment, and
-separate source indexes only for tools that explicitly need source lookup. The
-generated `knowledge.sqlite` FTS projection gives the assistant a bounded
-claim-level read path for ordinary health questions. Authored Markdown and JSONL
-remain authoritative. The SQLite file is read-only build output, contains no
-user data, and returns at most a small evidence packet instead of loading the
-catalog or source files into a turn. One command accepts the complete health
-question. It resolves a contiguous authored title or alias before using a
-conservative title-and-alias token fallback. A canonical title ranks above an
-alias, and a longer specific phrase ranks above a shorter phrase. Equal owners
-remain ambiguous and return at most three candidates. Evidence text, source
-titles, citations, categories, and stems never admit a topic.
+Runtime surfaces consume scoped generated artifacts instead of a monolith:
+web route bundles and projections for public pages, the compact Goal browse
+index, the v4 biomarker browse index (including device metric bindings and
+display precision so dashboard lists do not read every detail projection), the
+compact `biomarker-desired-directions.json` projection for progress-card
+sentiment, and separate source indexes only for tools that explicitly need
+source lookup. The generated `knowledge.sqlite` FTS projection
+gives the assistant a bounded claim-level read path for ordinary health
+questions. Authored Markdown and JSONL remain authoritative. The SQLite file is
+read-only build output, contains no user data, and returns at most a small
+evidence packet instead of loading the catalog or source files into a turn. One
+command accepts the complete health question. It resolves a contiguous authored
+title or alias before using a conservative title-and-alias token fallback. A
+canonical title ranks above an alias, and a longer specific phrase ranks above a
+shorter phrase. Equal owners remain ambiguous and return at most three
+candidates. Evidence text, source titles, citations, categories, and stems
+never admit a topic.
 
 After topic resolution, the reader removes the matched topic phrase and small
 grammar terms. It uses the remaining medical terms only inside that owner. A
 broad question runs a bounded owner-wide lookup without a reserved phrase.
-Evidence and safety use separate internal queries but one assistant call. A
-canonical family title can include typed child families and protocols. A family
-alias stays family-scoped. Child titles and aliases resolve the child directly.
-Unrelated equal aliases fail closed. Source findings use one unambiguous target:
-`related_protocol`, then `parent_family`, then `measures`. Multi-target and
-untargeted findings stay out of the projection until their ownership is
-authored more precisely. Safety comes only from a directly sourced safety claim
-or typed source finding. Page-wide
-`safety` arrays do not enter the source-backed projection. The default packet
-contains three distinct sourced evidence items,
-up to one safety item that matches the question terms, and at most four source
-locators per item. Unsourced overview text and all editorial evidence-appraisal
-rows are not part of the assistant projection. Claims and extracted typed findings are
-the only member-facing evidence shapes. The CLI returns the resolved topic or
-ambiguity candidates, not query internals, `focus`, or catalog-hash merge work.
+Evidence and safety use separate internal queries but one assistant call.
+Unrelated equal aliases fail closed. Source findings enter the projection only
+with one unambiguous owner target; multi-target and untargeted findings stay
+out until their ownership is authored more precisely. Safety comes only from a
+directly sourced safety claim or typed source finding. Page-wide `safety`
+arrays do not enter the source-backed projection. The default packet contains
+three distinct sourced evidence items, up to one safety item that matches the
+question terms, and at most four source locators per item. Unsourced overview
+text and all editorial evidence-appraisal rows are not part of the assistant
+projection. Claims and extracted typed findings are the only member-facing
+evidence shapes. The CLI returns the resolved topic or ambiguity candidates,
+not query internals, `focus`, or catalog-hash merge work.
 The assistant does one lookup. It does not create an experiment unless the
 member authorizes setup. In a private direct conversation, it may suggest one
 context-grounded bounded trial without experiment vocabulary when a persistent
@@ -249,7 +185,7 @@ urgent or clinician-led evaluation, decisions the existing record already
 resolves, or cases where one clearly indicated direct action makes comparison
 unnecessary. A proposal never authorizes a run, reminder, check-in, or tracking
 plan; each requires its own applicable authorization.
-An authored knowledge page can support this lookup without a protocol or UI.
+An authored knowledge page can support this lookup without a UI.
 Hosted runner packaging must include that compact direction projection, the
 knowledge index, and the compact public Goal index without shipping the rest of
 the web artifact tree. A missing direction
@@ -261,8 +197,6 @@ field, its adapter appends the media description once to the existing reply or
 photo caption. The command also returns the exact warning for diagnostics.
 Malformed direction data remains a hard error.
 
-Private runs, outcome cards, and future contributions should store commons references by key and revision instead of copying protocol prose. Future aggregate community summaries must be traceable back to the exact protocol revisions they summarize.
-
 ## Artifact Storage
 
 Research artifacts are represented by `murph.commons.artifact-manifest.v1` JSON manifests. A manifest entry can point to a Cloudflare R2 object key, local staging path, content type, byte size, hash, rights status, and redistributability flag. Source pages may also declare small snapshot pointers in their own `artifacts` block; generated artifact manifests must collect those into a synthetic artifact manifest so Cloudflare/R2 sync sees every declared artifact.
@@ -271,9 +205,7 @@ The upload script must refuse unknown, permission-required, or non-redistributab
 
 ## Success Criteria
 
-1. A new biomarker, source, or protocol page can be added as one Markdown file plus optional manifests.
-2. Multiple protocol variants remain distinct by key, lineage, attribution, modality, and recipe hash.
-3. Generated artifacts are deterministic and checkable in CI.
-4. Artifact manifests make Cloudflare/R2 storage possible without storing large copyrighted files in the repo.
-5. User experiment results can later reference exact commons revisions and contribute aggregate outcomes without rewriting literature truth.
-6. Public pages can later show community outcome summaries without exposing raw personal data or confusing aggregate outcomes with source-backed claims.
+1. A new biomarker, Goal guide, measurement method, or source page can be added as one Markdown file plus optional manifests.
+2. Generated artifacts are deterministic and checkable in CI.
+3. Artifact manifests make Cloudflare/R2 storage possible without storing large copyrighted files in the repo.
+4. Saved private experiments remain readable without any Commons protocol content.

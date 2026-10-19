@@ -517,11 +517,9 @@ test("next.config traces generated Health Commons route files without the monoli
   }
   const expectedGoalTraceExcludes = [
     "../../packages/health-commons/generated/web/browse/biomarkers.json",
-    "../../packages/health-commons/generated/web/browse/experiments.json",
-    "../../packages/health-commons/generated/web/bundles/**/*.json",
+  "../../packages/health-commons/generated/web/bundles/**/*.json",
     "../../packages/health-commons/generated/web/pages/biomarkers/**/*.json",
-    "../../packages/health-commons/generated/web/shell/**/*.json",
-    "../../packages/health-commons/generated/web/tabs/**/*.json",
+  "../../packages/health-commons/generated/web/shell/**/*.json",
   ];
   assert.deepEqual(
     productionNextConfig.outputFileTracingExcludes?.["/goals"],

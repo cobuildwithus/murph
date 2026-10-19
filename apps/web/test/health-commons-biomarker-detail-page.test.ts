@@ -430,45 +430,6 @@ describe("BiomarkerPage", () => {
     })).rejects.toThrow("NEXT_NOT_FOUND");
   });
 
-  it("derives biomarker protocol rankings from protocol expected signals", () => {
-    const detail = resolveHealthCommonsBiomarkerOverview("estimated-vo2max");
-
-    expect(detail?.protocolRankings.slice(0, 4).map((protocol) => protocol.title)).toEqual([
-      "Norwegian 4x4",
-      "Tabata 20/10 Interval Training",
-      "Daily Step Floor",
-      "Hyperbaric Oxygen Therapy",
-    ]);
-
-    const saunaIndex = detail?.protocolRankings.findIndex((protocol) =>
-      protocol.title === "Finnish Dry Sauna"
-    ) ?? -1;
-    const hyperbaricIndex = detail?.protocolRankings.findIndex((protocol) =>
-      protocol.title === "Hyperbaric Oxygen Therapy"
-    ) ?? -1;
-    const zone2Index = detail?.protocolRankings.findIndex((protocol) =>
-      protocol.title === "Zone 2 Cardio"
-    ) ?? -1;
-
-    expect(zone2Index).toBe(-1);
-    expect(hyperbaricIndex).toBeGreaterThanOrEqual(0);
-    expect(saunaIndex).toBeGreaterThan(hyperbaricIndex);
-    expect(detail?.protocolRankings[0]).toEqual(expect.objectContaining({
-      evidenceLabel: "Moderate",
-      fitLabel: "Strong",
-      mechanism: expect.stringContaining("Sustained intervals"),
-    }));
-    expect(detail?.protocolRankings[0]).not.toHaveProperty("rankScore");
-    expect(
-      resolveHealthCommonsBiomarkerOverview("hrv-rmssd")?.protocolRankings.map((protocol) =>
-        protocol.expectedSignalLabel
-      ),
-    ).not.toEqual(expect.arrayContaining([
-      "mixed_or_contextual",
-      "down_or_stable",
-      "up_or_stable",
-    ]));
-  });
 
 });
 

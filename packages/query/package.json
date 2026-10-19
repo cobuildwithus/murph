@@ -27,11 +27,6 @@
       "import": "./dist/browser-biomarkers.js",
       "default": "./dist/browser-biomarkers.js"
     },
-    "./browser-experiments": {
-      "types": "./dist/browser-experiments.d.ts",
-      "import": "./dist/browser-experiments.js",
-      "default": "./dist/browser-experiments.js"
-    },
     "./browser-overview": {
       "types": "./dist/browser-overview.d.ts",
       "import": "./dist/browser-overview.js",

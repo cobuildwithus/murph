@@ -81,8 +81,8 @@ test("components catalog comparison rows fit responsive viewports", async ({ pag
         requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
       );
     });
-    for (const id of ["metric-card", "expected-signal-card"]) {
-      const cards = page.locator(`#${id} > div > div`);
+    {
+      const cards = page.locator("#metric-card > div > div");
       await expect(cards).toHaveCount(3);
       const bounds = await cards.evaluateAll((nodes) => nodes.map((node) => {
         const { left, right, top, bottom } = node.getBoundingClientRect();

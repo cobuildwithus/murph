@@ -6,6 +6,7 @@ import {
   EXPERIMENT_STATUSES,
   ID_PREFIXES,
   VAULT_LAYOUT,
+  commonsProtocolRefSchema,
   eventSourceSchema,
   experimentAnalysisPlanSchema,
   experimentAssistantSupportSchema,
@@ -13,16 +14,15 @@ import {
   experimentOutcomeSchema,
   experimentFrontmatterSchema,
   experimentOnboardingCaptureSchema,
-  commonsProtocolRefSchema,
   experimentRunPlanSchema,
   experimentRunScheduleIntentSchema,
   jsonObjectSchema,
+  protocolFrontmatterSchema,
   protocolRefSchema,
   safeParseContract,
   type ExperimentOutcomeStatistic,
   type ExperimentPrimaryOutcome,
   type HealthCommonsBiomarkerDesiredDirection,
-  type HealthCommonsExperimentOnboardingPositiveDisposition,
   type ExperimentFrontmatter,
   type ExperimentRunScheduleIntent,
 } from '@murphai/contracts'
@@ -80,7 +80,6 @@ import {
 } from './vault-usecase-helpers.js'
 import {
   buildAnalysisPlanForOnboardingApply,
-  buildCommonsProtocolRefForOnboardingApply,
   buildRunLoggingForOnboardingApply,
   buildRunPlanDatePatch,
   buildExperimentAssistantSupportFromOptions,
@@ -99,7 +98,7 @@ import type { JsonObject } from '../health-cli-method-types.js'
 
 export type { ApplyExperimentOnboardingRecordInput } from '../experiment-onboarding-options.js'
 
-type EntityFamily = 'experiment' | 'journal'
+type EntityFamily = 'experiment' | 'journal' | 'protocol'
 type JournalLinkKind = 'eventIds' | 'sampleStreams'
 type JournalLinkOperation = 'link' | 'unlink'
 type JournalLinkRuntimeInput = {
@@ -194,6 +193,7 @@ interface ExperimentJournalVaultCoreRuntime {
     created: boolean
     record: {
       entity: {
+        commonsProtocolRef: z.infer<typeof commonsProtocolRefSchema>
         protocolId: string
         slug: string
         title: string
@@ -317,50 +317,9 @@ interface ExperimentJournalVaultCoreRuntime {
 const experimentStatusSchema = z.enum(EXPERIMENT_STATUSES)
 type ExperimentStatusValue = z.infer<typeof experimentStatusSchema>
 type ExperimentFrontmatterValue = z.infer<typeof experimentFrontmatterSchema>
-type CommonsProtocolRefValue = z.infer<typeof commonsProtocolRefSchema>
 type ExperimentRunPlanValue = z.infer<typeof experimentRunPlanSchema>
 type ExperimentAnalysisPlanValue = z.infer<typeof experimentAnalysisPlanSchema>
 const EXPERIMENT_OUTCOME_WRITE_MAX_ATTEMPTS = 3
-type HealthCommonsProtocolActivationRecord = {
-  key: string
-  revision: {
-    pageRevisionId: string
-    runSpecRevisionId: string
-  }
-  experimentOnboarding?: {
-    safetyScreen?: {
-      dispositionIfAnyPositive: HealthCommonsExperimentOnboardingPositiveDisposition
-      mustAsk: Array<{
-        id: string
-        ifPositive?: HealthCommonsExperimentOnboardingPositiveDisposition
-        ifNegative?: HealthCommonsExperimentOnboardingPositiveDisposition
-      }>
-    }
-  }
-}
-type HealthCommonsProtocolArtifactFailure = {
-  artifact: 'protocol_family_graph' | 'protocol_index' | 'protocol_run_specs'
-  category: 'invalid' | 'unavailable'
-}
-type HealthCommonsProtocolActivationRuntime = {
-  getGeneratedHealthCommonsProtocolRunSpecReader(): {
-    findByLookup(lookup: string): HealthCommonsProtocolActivationRecord | null
-  }
-  isHealthCommonsProtocolArtifactError(
-    error: unknown,
-  ): error is HealthCommonsProtocolArtifactFailure
-}
-
-const healthCommonsSafetyDispositionRank: Record<
-  HealthCommonsExperimentOnboardingPositiveDisposition,
-  number
-> = {
-  continue_with_caution: 0,
-  clinician_guidance_before_unsupervised_start: 1,
-  do_not_start_unsupervised: 2,
-  do_not_start_unsupervised_explicit_clinician_clearance_required: 3,
-}
-
 const experimentSelectorPayloadSchema = z
   .object({
     lookup: z.string().min(1).optional(),
@@ -381,7 +340,10 @@ const privateProtocolPlanInputSchema = z
     slug: slugSchema.optional(),
     title: z.string().min(1).optional(),
     body: z.string().optional(),
-    frontmatter: jsonObjectSchema.optional(),
+    frontmatter: jsonObjectSchema.refine(
+      (value) => value.commonsProtocolRef === undefined,
+      "New public protocol links are retired; reuse a saved private protocol by reference.",
+    ).optional(),
   })
   .strict()
 
@@ -398,7 +360,6 @@ const experimentPlanDecisionSchema = z
 const experimentPlanSourceSchema = z
   .discriminatedUnion('kind', [
     z.object({ kind: z.literal('custom') }).strict(),
-    z.object({ kind: z.literal('health_commons_protocol') }).strict(),
     z.object({ kind: z.literal('private_protocol') }).strict(),
   ])
 
@@ -417,7 +378,6 @@ const experimentPlanPayloadSchema = z
         body: z.string().optional(),
       })
       .strict(),
-    commonsProtocolRef: commonsProtocolRefSchema.optional(),
     protocol: privateProtocolPlanInputSchema.optional(),
     protocolRef: privateProtocolRefInputSchema.optional(),
     effectiveProtocolSnapshot: effectiveProtocolSnapshotSchema.optional(),
@@ -431,33 +391,15 @@ const experimentPlanPayloadSchema = z
   .superRefine((payload, context) => {
     if (
       payload.source.kind === 'custom' &&
-      (payload.commonsProtocolRef !== undefined ||
-        payload.protocol !== undefined ||
+      (payload.protocol !== undefined ||
         payload.protocolRef !== undefined ||
         payload.effectiveProtocolSnapshot !== undefined)
     ) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
-        message: 'Custom experiment plans must not include protocol references or protocol snapshots.',
+        message: 'Custom experiment plans must not include commonsProtocolRef, private protocol references, or protocol snapshots.',
         path: ['source', 'kind'],
       })
-    }
-
-    if (payload.source.kind === 'health_commons_protocol') {
-      if (payload.commonsProtocolRef === undefined) {
-        context.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: 'Health Commons protocol-backed experiment plans require commonsProtocolRef.',
-          path: ['commonsProtocolRef'],
-        })
-      }
-      if (payload.protocol !== undefined || payload.protocolRef !== undefined) {
-        context.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: 'Health Commons protocol-backed experiment plans must not include private protocol inputs.',
-          path: ['source', 'kind'],
-        })
-      }
     }
 
     if (
@@ -472,14 +414,11 @@ const experimentPlanPayloadSchema = z
       })
     }
 
-    if (
-      payload.source.kind !== 'health_commons_protocol' &&
-      payload.commonsProtocolRef !== undefined
-    ) {
+    if (payload.protocol !== undefined && payload.effectiveProtocolSnapshot !== undefined) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
-        message: 'commonsProtocolRef is only valid for Health Commons protocol-backed experiment plans.',
-        path: ['commonsProtocolRef'],
+        message: 'Inline private protocol plans derive their snapshot from the saved protocol.',
+        path: ['effectiveProtocolSnapshot'],
       })
     }
 
@@ -511,18 +450,6 @@ const experimentPlanPayloadSchema = z
       })
     }
 
-    if (
-      payload.commonsProtocolRef !== undefined &&
-      payload.protocol === undefined &&
-      payload.protocolRef === undefined &&
-      payload.effectiveProtocolSnapshot === undefined
-    ) {
-      context.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: 'Health Commons protocol-backed plans require effectiveProtocolSnapshot.',
-        path: ['effectiveProtocolSnapshot'],
-      })
-    }
   })
 
 type ExperimentPlanPayload = z.infer<typeof experimentPlanPayloadSchema>
@@ -535,185 +462,36 @@ export interface PlanExperimentRecordInput {
 
 export interface StartExperimentFromPlanInput extends PlanExperimentRecordInput {}
 
-async function assertHealthCommonsProtocolStartAllowed(input: {
-  source: ExperimentPlanPayload['source']
-  status: ExperimentStatusValue
-  commonsProtocolRef: CommonsProtocolRefValue | undefined
+function assertExperimentSafetyAllowsActivation(input: {
   onboarding: ExperimentFrontmatterValue['onboarding']
-}) {
-  if (input.source.kind !== 'health_commons_protocol') {
-    return
-  }
-
-  if (!input.commonsProtocolRef) {
+  hasSavedPublicProtocol?: boolean
+}): void {
+  if (input.hasSavedPublicProtocol && !input.onboarding?.completedAt) {
     throw new VaultCliError(
       'invalid_payload',
-      'Health Commons protocol-backed experiment starts require an exact protocol reference.',
+      'Complete and record the safety review for this saved experiment before activation.',
     )
   }
-
-  const protocol = await resolveCurrentHealthCommonsProtocol(
-    input.commonsProtocolRef,
-    `Health Commons protocol ${input.commonsProtocolRef.key} is no longer available to start. Choose a currently runnable protocol instead.`,
-  )
-  if (input.status === 'active') {
-    assertHealthCommonsProtocolSafetyAllowsActivation({
-      protocol,
-      onboarding: input.onboarding,
-    })
-  }
-}
-
-async function assertHealthCommonsProtocolActivationAllowed(input: {
-  commonsProtocolRef: ExperimentFrontmatterValue['commonsProtocolRef']
-  onboarding: ExperimentFrontmatterValue['onboarding']
-}) {
-  if (!input.commonsProtocolRef) {
-    return
-  }
-
-  const protocol = await resolveCurrentHealthCommonsProtocol(
-    input.commonsProtocolRef,
-    `Health Commons protocol ${input.commonsProtocolRef.key} is no longer available to activate. This experiment remains unchanged. Start any currently runnable alternative as a new experiment; never replace this run's protocol lineage. Mark this run abandoned only after the member separately agrees.`,
-  )
-  assertHealthCommonsProtocolSafetyAllowsActivation({
-    protocol,
-    onboarding: input.onboarding,
-  })
-}
-
-async function resolveCurrentHealthCommonsProtocol(
-  reference: CommonsProtocolRefValue,
-  unavailableMessage: string,
-): Promise<HealthCommonsProtocolActivationRecord> {
-  const protocol = await findCurrentHealthCommonsProtocol(reference)
-
-  if (!protocol) {
-    throw new VaultCliError('invalid_payload', unavailableMessage)
-  }
-
-  if (
-    protocol.revision.pageRevisionId !== reference.pageRevisionId ||
-    protocol.revision.runSpecRevisionId !== reference.runSpecRevisionId
-  ) {
+  const safety = input.onboarding?.safety
+  if (input.hasSavedPublicProtocol && safety?.positiveQuestionIds?.length) {
     throw new VaultCliError(
       'invalid_payload',
-      `Health Commons protocol ${reference.key} changed after this plan was prepared. Refresh or reopen the protocol before starting this experiment.`,
-      {
-        expectedPageRevisionId: reference.pageRevisionId,
-        expectedRunSpecRevisionId: reference.runSpecRevisionId,
-        currentPageRevisionId: protocol.revision.pageRevisionId,
-        currentRunSpecRevisionId: protocol.revision.runSpecRevisionId,
-      },
+      'This saved experiment has positive safety answers whose original screening rules are retired. Keep it planned and create a private plan after a fresh safety review.',
     )
   }
-
-  return protocol
-}
-
-async function findCurrentHealthCommonsProtocol(
-  reference: CommonsProtocolRefValue,
-): Promise<HealthCommonsProtocolActivationRecord | null> {
-  const runtime = await loadRuntimeModule<HealthCommonsProtocolActivationRuntime>(
-    '@murphai/health-commons/runtime',
-  )
-  return runtime
-    .getGeneratedHealthCommonsProtocolRunSpecReader()
-    .findByLookup(reference.key)
-}
-
-function assertHealthCommonsProtocolSafetyAllowsActivation(input: {
-  protocol: HealthCommonsProtocolActivationRecord
-  onboarding: ExperimentFrontmatterValue['onboarding']
-}) {
-  const safetyScreen = input.protocol.experimentOnboarding?.safetyScreen
-  if (!safetyScreen) {
-    return
-  }
-
-  if (!input.onboarding?.completedAt) {
+  if (safety?.positiveQuestionIds?.length && safety.disposition === undefined) {
     throw new VaultCliError(
       'invalid_payload',
-      `Complete the safety screen for ${input.protocol.key} before activating this experiment. Keep the experiment planned until screening is complete.`,
+      'Record the safety disposition before activating this experiment.',
     )
   }
-
-  const questionsById = new Map(
-    safetyScreen.mustAsk.map((question) => [question.id, question]),
-  )
-  const positiveQuestionIds = input.onboarding.safety?.positiveQuestionIds ?? []
-  const positiveQuestionIdSet = new Set(positiveQuestionIds)
-  let requiredDisposition: HealthCommonsExperimentOnboardingPositiveDisposition | undefined
-  let hasPositiveDispositionTrigger = false
-
-  for (const questionId of positiveQuestionIds) {
-    if (!questionsById.has(questionId)) {
-      throw new VaultCliError(
-        'invalid_payload',
-        `Safety-screen question ${questionId} does not belong to the current ${input.protocol.key} protocol revision. Refresh or reopen the protocol before starting this experiment.`,
-      )
-    }
-  }
-
-  for (const question of safetyScreen.mustAsk) {
-    const answeredPositive = positiveQuestionIdSet.has(question.id)
-    const questionDisposition = answeredPositive
-      ? question.ifPositive ??
-        (question.ifNegative === undefined
-          ? safetyScreen.dispositionIfAnyPositive
-          : undefined)
-      : question.ifNegative
-    if (questionDisposition === undefined) {
-      continue
-    }
-    if (answeredPositive) {
-      hasPositiveDispositionTrigger = true
-    }
-    if (
-      requiredDisposition === undefined ||
-      healthCommonsSafetyDispositionRank[questionDisposition] >
-        healthCommonsSafetyDispositionRank[requiredDisposition]
-    ) {
-      requiredDisposition = questionDisposition
-    }
-  }
-
-  const recordedDisposition = input.onboarding.safety?.disposition
-  if (hasPositiveDispositionTrigger && recordedDisposition === undefined) {
+  if (safety?.disposition && safety.disposition !== 'continue_with_caution') {
     throw new VaultCliError(
       'invalid_payload',
-      `Record the safety-screen disposition for ${input.protocol.key} before activating this experiment.`,
+      `This experiment requires ${safety.disposition}; keep it planned instead of activating an unsupervised run.`,
+      { safetyDisposition: safety.disposition },
     )
   }
-
-  const blockingDisposition = mostRestrictiveHealthCommonsSafetyDisposition(
-    requiredDisposition,
-    recordedDisposition,
-  )
-  if (blockingDisposition && blockingDisposition !== 'continue_with_caution') {
-    throw new VaultCliError(
-      'invalid_payload',
-      `This ${input.protocol.key} safety screen requires ${blockingDisposition}; keep the experiment planned instead of activating an unsupervised run.`,
-      { safetyDisposition: blockingDisposition },
-    )
-  }
-}
-
-function mostRestrictiveHealthCommonsSafetyDisposition(
-  first: HealthCommonsExperimentOnboardingPositiveDisposition | undefined,
-  second: HealthCommonsExperimentOnboardingPositiveDisposition | undefined,
-): HealthCommonsExperimentOnboardingPositiveDisposition | undefined {
-  if (first === undefined) {
-    return second
-  }
-  if (second === undefined) {
-    return first
-  }
-
-  return healthCommonsSafetyDispositionRank[first] >=
-    healthCommonsSafetyDispositionRank[second]
-    ? first
-    : second
 }
 
 const experimentCheckpointPayloadSchema = experimentSelectorPayloadSchema.extend({
@@ -1038,12 +816,9 @@ async function assertActiveExperimentPrimaryOutcomeIsCapturable(input: {
 
 export async function planExperimentRecord(input: PlanExperimentRecordInput) {
   const payload = await resolveExperimentPlanPayload(input)
-  await assertHealthCommonsProtocolStartAllowed({
-    source: payload.source,
-    status: payload.experiment.status ?? 'active',
-    commonsProtocolRef: payload.commonsProtocolRef,
-    onboarding: payload.onboarding,
-  })
+  if ((payload.experiment.status ?? 'active') === 'active') {
+    assertExperimentSafetyAllowsActivation({ onboarding: payload.onboarding })
+  }
 
   return {
     vault: input.vault,
@@ -1055,12 +830,9 @@ export async function startExperimentFromPlanRecord(input: StartExperimentFromPl
   const payload = await resolveExperimentPlanPayload(input)
   const core = await loadExperimentJournalVaultCoreRuntime()
   return core.withCanonicalWriteLock(input.vault, async () => {
-    await assertHealthCommonsProtocolStartAllowed({
-      source: payload.source,
-      status: payload.experiment.status ?? 'active',
-      commonsProtocolRef: payload.commonsProtocolRef,
-      onboarding: payload.onboarding,
-    })
+    if ((payload.experiment.status ?? 'active') === 'active') {
+      assertExperimentSafetyAllowsActivation({ onboarding: payload.onboarding })
+    }
 
     let protocol: {
       protocolId: string
@@ -1071,6 +843,7 @@ export async function startExperimentFromPlanRecord(input: StartExperimentFromPl
       path: string
       created: boolean
     } | null = null
+    let commonsProtocolRef: ExperimentFrontmatterValue['commonsProtocolRef']
     let privateProtocolRef = payload.protocolRef
     let effectiveProtocolSnapshot = payload.effectiveProtocolSnapshot
 
@@ -1089,14 +862,13 @@ export async function startExperimentFromPlanRecord(input: StartExperimentFromPl
         body: payload.protocol.body,
       })
       const entity = result.record.entity
+      commonsProtocolRef = entity.commonsProtocolRef
       privateProtocolRef = {
         protocolId: entity.protocolId,
         protocolRevisionId: entity.protocolRevisionId,
         effectiveSpecHash: entity.effectiveSpecHash,
       }
-      effectiveProtocolSnapshot =
-        payload.effectiveProtocolSnapshot ??
-        buildEffectiveProtocolSnapshotFromPrivateProtocol(entity)
+      effectiveProtocolSnapshot = buildEffectiveProtocolSnapshotFromPrivateProtocol(entity)
       protocol = {
         protocolId: entity.protocolId,
         slug: entity.slug,
@@ -1106,6 +878,21 @@ export async function startExperimentFromPlanRecord(input: StartExperimentFromPl
         path: result.record.document.relativePath,
         created: result.created,
       }
+    }
+
+    if (privateProtocolRef && !payload.protocol) {
+      const saved = await requireEntityFamily(input.vault, privateProtocolRef.protocolId, 'protocol')
+      const parsed = safeParseContract(protocolFrontmatterSchema, saved.attributes)
+      if (!parsed.success || parsed.data.protocolRevisionId !== privateProtocolRef.protocolRevisionId ||
+        parsed.data.effectiveSpecHash !== privateProtocolRef.effectiveSpecHash) {
+        throw new VaultCliError('invalid_payload', 'The saved private protocol revision does not match this plan.')
+      }
+      commonsProtocolRef = parsed.data.commonsProtocolRef
+      const savedSnapshot = buildEffectiveProtocolSnapshotFromPrivateProtocol(parsed.data)
+      if (effectiveProtocolSnapshot && !isDeepStrictEqual(effectiveProtocolSnapshot, savedSnapshot)) {
+        throw new VaultCliError('invalid_payload', 'The experiment snapshot must match its saved private protocol.')
+      }
+      effectiveProtocolSnapshot = savedSnapshot
     }
 
     if (privateProtocolRef !== undefined && effectiveProtocolSnapshot === undefined) {
@@ -1118,7 +905,7 @@ export async function startExperimentFromPlanRecord(input: StartExperimentFromPl
     const runPlan = hydrateRunPlanAdherenceTargets(
       payload.runPlan,
       effectiveProtocolSnapshot,
-      payload.commonsProtocolRef?.key,
+      commonsProtocolRef?.key,
     )
     const protocolRef = toCurrentProtocolRef(privateProtocolRef)
     const preflight = safeParseContract(experimentFrontmatterSchema, compactObject({
@@ -1130,7 +917,7 @@ export async function startExperimentFromPlanRecord(input: StartExperimentFromPl
       title: payload.experiment.title ?? payload.experiment.slug,
       startedOn: payload.experiment.startedOn ?? '2026-01-01',
       hypothesis: payload.experiment.hypothesis,
-      commonsProtocolRef: payload.commonsProtocolRef,
+      commonsProtocolRef,
       protocolRef,
       effectiveProtocolSnapshot,
       runPlan,
@@ -1161,7 +948,7 @@ export async function startExperimentFromPlanRecord(input: StartExperimentFromPl
       startedOn: payload.experiment.startedOn,
       status: payload.experiment.status ?? 'active',
       body: payload.experiment.body,
-      commonsProtocolRef: payload.commonsProtocolRef,
+      commonsProtocolRef,
       protocolRef,
       effectiveProtocolSnapshot,
       runPlan,
@@ -1209,7 +996,7 @@ export async function applyExperimentOnboardingRecord(
   if (!hasExperimentOnboardingApplyPatch(input)) {
     throw new VaultCliError(
       'invalid_payload',
-      'Experiment edit requires at least one protocol, run plan, analysis, onboarding, assistant-support, or scalar field.',
+      'Experiment edit requires at least one run plan, analysis, onboarding, assistant-support, or scalar field.',
     )
   }
 
@@ -1217,10 +1004,6 @@ export async function applyExperimentOnboardingRecord(
   return core.withCanonicalWriteLock(input.vault, async () => {
     const experiment = await requireEntityFamily(input.vault, input.lookup, 'experiment')
     const frontmatter = requireExperimentFrontmatter(experiment)
-    const commonsProtocolRef = buildCommonsProtocolRefForOnboardingApply(
-      input,
-      frontmatter.commonsProtocolRef,
-    )
     const runPlan = await buildRunPlanForOnboardingApply(input, frontmatter.runPlan)
     const analysisPlan = buildAnalysisPlanForOnboardingApply(
       input,
@@ -1236,18 +1019,7 @@ export async function applyExperimentOnboardingRecord(
     )
 
     if (
-      commonsProtocolRef !== undefined &&
-      frontmatter.effectiveProtocolSnapshot === undefined
-    ) {
-      throw new VaultCliError(
-        'invalid_payload',
-        'Applying a Health Commons protocol reference requires an effectiveProtocolSnapshot; use typed experiment start for protocol-backed runs.',
-      )
-    }
-
-    if (
       input.status === undefined &&
-      commonsProtocolRef === undefined &&
       runPlan === undefined &&
       analysisPlan === undefined &&
       onboarding === undefined &&
@@ -1263,7 +1035,6 @@ export async function applyExperimentOnboardingRecord(
       vault: input.vault,
       lookup: input.lookup,
       status: input.status,
-      commonsProtocolRef,
       runPlan,
       analysisPlan,
       onboarding,
@@ -1328,36 +1099,23 @@ export async function updateExperimentRecord(input: {
       const nextRunPlan = input.runPlan === undefined
         ? frontmatter.runPlan
         : input.runPlan ?? undefined
-      const changesRunPlan = !isDeepStrictEqual(
-        nextRunPlan,
-        frontmatter.runPlan,
-      )
       const nextAnalysisPlan = input.analysisPlan === undefined
         ? frontmatter.analysisPlan
         : input.analysisPlan ?? undefined
-      const changesAnalysisPlan = !isDeepStrictEqual(
-        nextAnalysisPlan,
-        frontmatter.analysisPlan,
-      )
       const nextStatus = input.status ?? frontmatter.status
-      const preservesActiveRunPlanTuning =
-        frontmatter.status === 'active' && nextStatus === 'active'
-      const changesWithdrawnProtectedState =
-        changesCommonsProtocolRef ||
-        changesProtocolRef ||
-        changesEffectiveProtocolSnapshot ||
-        (
-          !preservesActiveRunPlanTuning &&
-          (changesRunPlan || changesAnalysisPlan)
+      if (!frontmatter.commonsProtocolRef && nextCommonsProtocolRef) {
+        throw new VaultCliError(
+          'invalid_payload',
+          'New public protocol links are retired. Keep this experiment private.',
         )
+      }
       if (
-        changesWithdrawnProtectedState &&
         frontmatter.commonsProtocolRef &&
-        !(await findCurrentHealthCommonsProtocol(frontmatter.commonsProtocolRef))
+        (changesCommonsProtocolRef || changesProtocolRef || changesEffectiveProtocolSnapshot)
       ) {
         throw new VaultCliError(
           'invalid_payload',
-          'This experiment is linked to a withdrawn Health Commons protocol, so its protocol lineage, effective snapshot, run plan, and analysis plan cannot be changed in place. Start the alternative as a new experiment; this saved run remains unchanged. Abandonment changes status only and must be a separate member decision.',
+          'A saved experiment must preserve its exact protocol lineage and snapshot. Start a new experiment to use a different protocol.',
         )
       }
       if (
@@ -1387,8 +1145,8 @@ export async function updateExperimentRecord(input: {
           input.onboarding !== undefined
         )
       ) {
-        await assertHealthCommonsProtocolActivationAllowed({
-          commonsProtocolRef: nextCommonsProtocolRef,
+        assertExperimentSafetyAllowsActivation({
+          hasSavedPublicProtocol: nextCommonsProtocolRef !== undefined,
           onboarding: nextActivationOnboarding,
         })
       }

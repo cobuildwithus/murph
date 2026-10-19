@@ -19,11 +19,8 @@ import type {
 import {
   BROWSER_VAULT_REPLICA_POLICY_ID,
   BROWSER_VAULT_REPLICA_SCHEMA,
-  BROWSER_VAULT_EXPERIMENT_RUN_CARD_SCHEMA,
   createBrowserVaultQueryClient,
 } from "@murphai/query/browser-replica-client";
-
-import type { ExperimentLibraryCard } from "@/src/lib/experiments/library-cards";
 
 import { renderClientComponent } from "./render-client-component";
 
@@ -326,37 +323,6 @@ test("OnboardingSteps offers Message Murph when every step is complete", async (
   assert.doesNotMatch(markup, /data-onboarding-step/);
 });
 
-test("splitHomeExperimentCards keeps only the member's runs and splits by run status", async () => {
-  const { splitHomeExperimentCards } = await import(
-    "@/src/lib/experiments/library-cards"
-  );
-
-  const { history, inProgress } = splitHomeExperimentCards([
-    libraryCard({ hasPrivateData: false, id: "protocol-only" }),
-    libraryCard({ hasPrivateData: true, id: "active-run", runStatus: "active" }),
-    libraryCard({ hasPrivateData: true, id: "paused-run", runStatus: "paused" }),
-    libraryCard({ hasPrivateData: true, id: "finished-run", runStatus: "finished" }),
-    libraryCard({ hasPrivateData: true, id: "stopped-run", runStatus: "stopped" }),
-  ]);
-
-  assert.deepEqual(inProgress.map((card) => card.id), ["active-run", "paused-run"]);
-  assert.deepEqual(history.map((card) => card.id), ["finished-run", "stopped-run"]);
-});
-
-test("splitHomeExperimentCards orders history most recent first with non-dates last", async () => {
-  const { splitHomeExperimentCards } = await import(
-    "@/src/lib/experiments/library-cards"
-  );
-
-  const { history } = splitHomeExperimentCards([
-    libraryCard({ hasPrivateData: true, id: "old-run", runStatus: "finished", startedOn: "2026-01-05" }),
-    libraryCard({ hasPrivateData: true, id: "undated-run", runStatus: "finished", startedOn: "Undated" }),
-    libraryCard({ hasPrivateData: true, id: "new-run", runStatus: "finished", startedOn: "2026-06-01" }),
-  ]);
-
-  assert.deepEqual(history.map((card) => card.id), ["new-run", "old-run", "undated-run"]);
-});
-
 function createClient(
   metricRows: BrowserVaultMetricRow[],
   entities: BrowserVaultEntity[] = [],
@@ -367,37 +333,6 @@ function createClient(
         latestDate: null,
       },
       entities,
-      experimentRunCards: entities
-        .filter((entity) => entity.family === "experiment")
-        .map((entity) => {
-          const status = entity.status === "paused"
-            ? "paused" as const
-            : entity.status === "active" || entity.status === "planned"
-              ? "active" as const
-              : entity.status === "closed" || entity.status === "stopped"
-                ? "stopped" as const
-                : "finished" as const;
-          return {
-            id: entity.id,
-            lookupKeys: {
-              experimentIds: [entity.id, ...entity.lookupIds],
-              protocolKeys: [],
-              slugs: [entity.experimentSlug, ...entity.lookupIds]
-                .filter((value): value is string => value !== null),
-            },
-            runSummary: { metrics: [] },
-            requiredMetricBuckets: [],
-            schema: BROWSER_VAULT_EXPERIMENT_RUN_CARD_SCHEMA,
-            slug: entity.experimentSlug,
-            startedOn: entity.date,
-            status,
-            statusLabel: status === "finished" ? "Completed" : status === "paused" ? "Paused" : "Active",
-            summary: null,
-            summaryDetail: null,
-            tags: entity.tags,
-            title: entity.title ?? entity.id,
-          };
-        }),
       generatedAt: "2026-06-06T12:00:00.000Z",
       hasLabBiomarkers: metricRows.some((row) =>
         row.sourceKind === "test-result" && row.biomarkerKey !== null && row.value !== null
@@ -476,25 +411,5 @@ function experimentEntity(input: {
     stream: null,
     tags: [],
     title: input.title,
-  };
-}
-
-function libraryCard(input: {
-  hasPrivateData: boolean;
-  id: string;
-  runStatus?: ExperimentLibraryCard["runStatus"];
-  startedOn?: string | null;
-}): ExperimentLibraryCard {
-  return {
-    category: "Recovery",
-    description: "Test card.",
-    hasPrivateData: input.hasPrivateData,
-    href: null,
-    id: input.id,
-    image: "/design-assets/hero-sauna.png",
-    runStatus: input.runStatus,
-    searchText: input.id,
-    startedOn: input.startedOn,
-    title: input.id,
   };
 }

@@ -54,3 +54,11 @@ Done when: focused tests and typechecks pass and the final diff preserves Enviro
 - Focused web coverage: 19 files / 328 tests pass. Mobile and desktop production sidebar proof passes and confirms `/experiments` returns 404 while Environment remains linked.
 - Assistant deterministic guidance tests, typecheck, and the focused real-Codex private-start journey pass. The journey saves one private run with an explicit outcome and no retired catalog commands or web link.
 - Commons typecheck and all 177 tests pass after updating the obsolete protocol-dependent publication expectation; generated-output determinism check passes.
+
+- Claude candidate review found four issues: unverifiable positive legacy safety answers, stale test commands/assertions, overbroad biomarker trace includes, and caller-supplied private-protocol lineage. Accepted all four. Activation now fails closed for positive legacy answers; private-protocol reuse reads and verifies canonical saved revisions/snapshots; trace includes are narrow; test consumers are being updated.
+
+- Removed the dead browser results engine and three orphan presentation components; shared metric identity and canonical outcomes remain with existing owners. Query suite passes 876 tests (one skipped).
+- Final browser navigation/404 proof passes at 390px and 1280px; retained metric-card responsiveness passes at 320/390/768/1280px. Final trace tests pass 54 cases and Web typecheck passes.
+- Follow-up Claude review identified a nested inline lineage bypass, stale onboarding assertions, and a dead historical changelog button. Closed the nested input, derive inline snapshots from the saved protocol, updated the safety assertions and saved-plan skill guidance, and removed only the dead button. Private-plan tests pass 13 cases and onboarding guidance passes 16; vault-usecases typecheck passes.
+- Final complexity guard passes across 123 authored source files, with 17 retained hotspots inspected and lower aggregate debt. No new service, persistence owner, or dependency.
+- Draft PR #4216 is open. Review preview and final deterministic assistant sweep are in progress; exact pushed-head ReviewGPT and CI remain required.

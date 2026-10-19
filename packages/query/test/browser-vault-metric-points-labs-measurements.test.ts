@@ -16,7 +16,6 @@ import {
   createVaultReadModel,
   parseBrowserVaultReplica,
   selectBrowserVaultBiomarkerPanel,
-  selectBrowserVaultExperimentResults,
 } from "../src/browser.ts";
 import {
   buildMetricProjection,
@@ -477,7 +476,6 @@ test("unitless catalog labs stay raw and cannot drive metric consumers", async (
   const unitlessClient = createBrowserVaultQueryClient(parseBrowserVaultReplica(unitlessReplica));
   const unitlessSelection = unitlessClient.metricSelections.get("ldl-c");
   const unitlessGoal = unitlessClient.metricGoals.progress({ goalId: "goal_ldl_unit_provenance" })[0];
-  const unitlessExperiment = selectBrowserVaultExperimentResults(unitlessClient, "ldl-unit-provenance");
   const unitlessPanel = selectBrowserVaultBiomarkerPanel({
     biomarkerKey: "biomarker:ldl-c",
     client: unitlessClient,
@@ -512,9 +510,6 @@ test("unitless catalog labs stay raw and cannot drive metric consumers", async (
   assert.ok(unitlessGoal);
   assert.equal(unitlessGoal.status, "unsupported");
   assert.equal(unitlessGoal.currentValue, null);
-  assert.ok(unitlessExperiment);
-  assert.equal(unitlessExperiment.biomarkers[0]?.status, "no_data");
-  assert.equal(unitlessExperiment.biomarkers[0]?.deltaAbs, null);
 
   const unitfulReplica = await createBrowserVaultReplicaFromVault({
     generatedAt: "2026-08-02T12:00:00.000Z",
@@ -524,7 +519,6 @@ test("unitless catalog labs stay raw and cannot drive metric consumers", async (
   const unitfulClient = createBrowserVaultQueryClient(parseBrowserVaultReplica(unitfulReplica));
   const unitfulSelection = unitfulClient.metricSelections.get("ldl-c");
   const unitfulGoal = unitfulClient.metricGoals.progress({ goalId: "goal_ldl_unit_provenance" })[0];
-  const unitfulExperiment = selectBrowserVaultExperimentResults(unitfulClient, "ldl-unit-provenance");
 
   assert.deepEqual(
     unitfulClient.metrics.series({ metricKey: "ldl-c" }).map((row) => [row.value, row.unit]),
@@ -534,7 +528,6 @@ test("unitless catalog labs stay raw and cannot drive metric consumers", async (
   assert.equal(unitfulSelection?.value, 120);
   assert.equal(unitfulGoal?.status, "met");
   assert.equal(unitfulGoal?.currentValue, 120);
-  assert.equal(unitfulExperiment?.biomarkers[0]?.deltaAbs, -20);
 });
 
 test("browser-vault metric goal targets honor startAt when selecting rolling-window progress", async () => {

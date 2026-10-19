@@ -85,14 +85,11 @@ import {
 } from "./persona-onboarding-study";
 import { SettingsAuthRequiredStudy } from "./settings-auth-required-study";
 import { SignupReferralFlowStudy } from "./signup-referral-study";
-import { StructuredReviewResultsStudy } from "./structured-review-results-study";
 import { TrainingDashboardStudy } from "./training-dashboard-study";
 import {
   GroupUsageFundingStudy,
   PersonalUsageCreditOwnerStudy,
 } from "./group-usage-funding-study";
-import { ExperimentResultsShareStudy } from "./experiment-results-share-study";
-import { ExperimentRepeatedResultsStudy } from "./experiment-repeated-results-study";
 import { EnvironmentProgressStudy } from "./environment-progress-study";
 import { EnvironmentPrintStudy } from "./environment-print-study";
 import { PersonalPatternsStudy } from "./personal-patterns-study";
@@ -849,22 +846,6 @@ export function SectionsContent({
         </>
       ) : null}
 
-      {category === "messages" ? (
-        <>
-          <Separator />
-
-          <StudySection title="Private experiment results share">
-            <ExperimentResultsShareStudy />
-          </StudySection>
-
-          <Separator />
-
-          <StudySection title="Private structured-review result">
-            <StructuredReviewResultsStudy />
-          </StudySection>
-        </>
-      ) : null}
-
       {category === "ops" ? (
         <>
           <Separator />
@@ -919,12 +900,6 @@ export function SectionsContent({
 
           <StudySection title="Biomarker reference context">
             <BiomarkerReferenceContextStudy />
-          </StudySection>
-
-          <Separator />
-
-          <StudySection title="Repeated-session experiment Results">
-            <ExperimentRepeatedResultsStudy />
           </StudySection>
 
           <Separator />

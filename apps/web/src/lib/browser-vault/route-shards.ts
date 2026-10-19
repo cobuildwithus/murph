@@ -57,13 +57,6 @@ export function planBrowserVaultRouteShards(
     return CORE_AND_METRICS_INDEX_SHARDS;
   }
 
-  if (
-    /^\/experiments\/runs\/[^/]+$/u.test(normalizedPathname)
-    || /^\/experiments\/[^/]+(?:\/results)?$/u.test(normalizedPathname)
-  ) {
-    return CORE_AND_METRICS_INDEX_SHARDS;
-  }
-
   return CORE_SHARDS;
 }
 

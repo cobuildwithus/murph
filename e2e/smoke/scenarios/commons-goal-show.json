@@ -1,10 +1,10 @@
 {
-  "id": "commons-protocol-explore",
-  "command": "vault-cli commons protocol explore <query> [--limit <n>]",
+  "id": "commons-goal-show",
+  "command": "vault-cli commons goal show <key-or-slug>",
   "vaultFixture": "fixtures/minimal-vault",
   "inputs": [
     "fixtures/minimal-vault/CORE.md"
   ],
-  "goldenOutput": "fixtures/golden-outputs/search",
+  "goldenOutput": "fixtures/golden-outputs/show",
   "purpose": "Documents the frozen command surface entry for release fixture coverage."
 }
