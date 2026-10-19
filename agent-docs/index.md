@@ -65,7 +65,7 @@ Published plan-closer adoption and installed-wrapper proof are tracked in
 Dependency review source inclusion is tracked in
 [the source-context plan](exec-plans/completed/2026-10-18-frog-repo-tools-review-source-4178.md).
 Pinned Containers SDK patch and mapping inclusion is tracked in
-[the SDK snapshot plan](exec-plans/active/2026-10-18-frog-sdk-patch-context-4192.md).
+[the SDK snapshot plan](exec-plans/completed/2026-10-18-frog-sdk-patch-context-4192.md).
 
 Private vault-file preparation failure evidence is owned by
 [`the runtime telemetry contract`](../docs/hosted-runtime-log-database.md#private-vault-file-preparation-failure-evidence);
