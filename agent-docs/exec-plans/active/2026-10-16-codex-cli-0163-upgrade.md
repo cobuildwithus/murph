@@ -253,3 +253,11 @@ Updated: 2026-10-18
 - The changelog fragment moved to the 2026-10-19 edition: it ships after
   #4191's same-day entry, whose "handled as before" detail stays true for its
   date.
+- ReviewGPT round 1 (gpt-6-pro, full snapshot of `4c289edb`) returned one
+  Complexity Collapse finding, accepted: the completed-stream tracking was
+  unnecessary because every completed non-commentary reply already moves to the
+  trailing candidate before the boundary clear, and suppressed contexts never
+  record streams. The fallback fix is now the existing clear moved outside its
+  conditional. The empty and media-only regressions fail with the old placement
+  and pass with the new; mocked runtime suites (282) and targeted real-binary
+  cases (14) pass, with complexity debt unchanged.
