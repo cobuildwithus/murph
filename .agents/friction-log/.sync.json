@@ -1909,6 +1909,10 @@
       "path": ".agents/friction-log/20261016192544-plan-closer-leaves/friction.md"
     },
     {
+      "issue": "cobuildwithus/murph#4186",
+      "path": ".agents/friction-log/20261018123830-reviewgpt-exact-artifact/friction.md"
+    },
+    {
       "issue": "cobuildwithus/murph#4189",
       "path": ".agents/friction-log/20261018173504-reviewgpt-package-upgrade/friction.md"
     },
