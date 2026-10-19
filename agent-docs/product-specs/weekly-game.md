@@ -59,8 +59,10 @@ public profile photos.
 - **Offline grace.** In the hour after a player's 3am boundary, a photo the
   phone says it captured before the boundary (monotonic capture age, with 30
   seconds of slack) counts for the day that just ended, if that was a scheduled
-  day with no live photo and a post left. This is an honor rule for friends, not
-  league evidence.
+  day with no live photo and a post left. Any other photo captured before the
+  current day began (one the phone kept and sent later) counts for no day and
+  is refused with `DAY_CLOSED`; a post without a capture age counts for today.
+  This is an honor rule for friends, not league evidence.
 - **Settle.** When the last player's last day ends plus one hour, the game is
   over: score is scheduled days with a live photo (capped at N in any-N games),
   misses are scheduled days without one (the shortfall from N in any-N games;
