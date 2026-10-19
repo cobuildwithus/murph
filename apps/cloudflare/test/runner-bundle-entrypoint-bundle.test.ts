@@ -491,11 +491,6 @@ describe("runner bundle container-entrypoint esbuild step", () => {
       /packages\/assistant-runtime\/dist\/hosted-runtime\/events\/assistant-ask-completion\.js/,
     ],
     [
-      "staged Environment voice wake handler",
-      ".deploy/runner-bundle/node_modules/@murphai/assistant-runtime/dist/hosted-runtime/events/environment-voice.js",
-      /node_modules\/@murphai\/assistant-runtime\/dist\/hosted-runtime\/events\/environment-voice\.js/,
-    ],
-    [
       "workspace Codex auth wake handler",
       "packages/assistant-runtime/dist/hosted-runtime/events/codex-auth.js",
       /packages\/assistant-runtime\/dist\/hosted-runtime\/events\/codex-auth\.js/,

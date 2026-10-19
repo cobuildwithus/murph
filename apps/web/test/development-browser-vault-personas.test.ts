@@ -2,8 +2,6 @@ import assert from "node:assert/strict";
 
 import { test } from "vitest";
 
-import { createBrowserVaultQueryClient } from "@murphai/query/browser";
-import { selectEnvironmentHabitatValues } from "../app/(dashboard)/environment/habitat-values";
 import { buildDevelopmentPersonaReplica } from "@/src/lib/browser-vault/development-personas.server";
 import { DEVELOPMENT_PERSONAS } from "@/src/lib/browser-vault/development-personas";
 
@@ -219,11 +217,22 @@ test("Oura persona joins meals, travel, and environment context into one private
     replica.entities.some((entity) => entity.family === "habitat"),
     true,
   );
-  const environment = selectEnvironmentHabitatValues(
-    createBrowserVaultQueryClient(replica),
+  const sleep = replica.entities.find((entity) =>
+    entity.family === "habitat" && entity.attributes.aspect === "sleep-environment"
   );
-  assert.equal(environment["sleep-environment"]?.night_temp_c, 18);
-  assert.equal(environment["home-location"]?.location, "Warsaw");
+  const home = replica.entities.find((entity) =>
+    entity.family === "habitat" && entity.attributes.aspect === "home-location"
+  );
+  const sleepIndicators = sleep?.attributes.indicators;
+  const homeIndicators = home?.attributes.indicators;
+  assert.ok(
+    sleepIndicators && typeof sleepIndicators === "object" && "night_temp_c" in sleepIndicators,
+  );
+  assert.ok(
+    homeIndicators && typeof homeIndicators === "object" && "location" in homeIndicators,
+  );
+  assert.equal(sleepIndicators.night_temp_c, 18);
+  assert.equal(homeIndicators.location, "Warsaw");
 });
 
 test("Active persona has varied recent context without wearable outcomes", async () => {

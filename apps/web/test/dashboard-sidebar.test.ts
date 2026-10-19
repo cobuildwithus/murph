@@ -209,15 +209,16 @@ test.each([
   );
 });
 
-test("Sidebar renders Environment as an active primary destination", () => {
-  mocks.usePathname.mockReturnValue("/environment");
+test("Sidebar keeps retired Environment out of primary navigation", () => {
+  mocks.usePathname.mockReturnValue("/home");
 
   const markup = renderToStaticMarkup(createElement(Sidebar));
 
-  assert.match(
-    markup,
-    /data-active="true">\s*<a[^>]*href="\/environment"[^>]*>[\s\S]*Environment<\/a>/,
-  );
+  assert.doesNotMatch(markup, /href="\/environment(?:\/|"|\?)/);
+  assert.doesNotMatch(markup, />Environment</);
+  assert.match(markup, /href="\/home"/);
+  assert.match(markup, /href="\/journal"/);
+  assert.match(markup, /href="\/patterns"/);
 });
 
 test("Sidebar renders an active Biomarkers tab for the live RHR page", () => {

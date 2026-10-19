@@ -86,8 +86,7 @@ describe("share preview metadata", () => {
     });
     // The route file lives OUTSIDE the (dashboard) group: metadata images
     // inside route groups get hash-suffixed URLs in production, so the
-    // advertised unhashed URL only resolves from an ungrouped segment
-    // (the /environment card established this pattern).
+    // advertised unhashed URL only resolves from an ungrouped segment.
     expectRouteFile("../app/connect/opengraph-image.tsx");
   });
 

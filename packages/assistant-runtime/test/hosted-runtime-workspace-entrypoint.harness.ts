@@ -18,7 +18,6 @@ import {
   findCaptureByLookup,
   initializeVault,
   patchAutomation,
-  readHabitatAspect,
   readJsonlRecords,
   repairVault,
   runCanonicalWrite,
@@ -33,7 +32,6 @@ import {
 } from "@murphai/inboxd";
 import {
   buildHostedExecutionAssistantNotificationRequestedWake,
-  buildHostedExecutionEnvironmentInterviewCompletedWake,
   buildHostedExecutionLinqConversationMessageWake,
   buildHostedExecutionMemberActivatedWake,
   buildHostedExecutionRuntimeControlWake,
@@ -1897,52 +1895,6 @@ async function enqueueDeviceSyncSystemMailboxItemForTest(input: {
   });
 }
 
-async function enqueueEnvironmentInterviewSystemMailboxItemForTest(input: {
-  item: HostedMailboxItem;
-  vaultRoot: string;
-}) {
-  return await enqueueHostedSystemMailboxItem({
-    item: {
-      item: input.item,
-      payload: {
-        payloadCiphertext: "ciphertext",
-        payloadSchema: HOSTED_MAILBOX_PAYLOAD_SCHEMA,
-        requestId: "request_entrypoint_environment_interview",
-        source: "inline",
-        status: "resolved",
-      },
-      route: {
-        action: "run-environment-interview",
-        advanceProgress: true,
-        itemRef: {
-          id: input.item.id,
-          kind: input.item.kind,
-          lane: input.item.lane,
-          laneSeq: input.item.laneSeq,
-        },
-        state: "route",
-      },
-    },
-    vaultRoot: input.vaultRoot,
-    wake: buildHostedExecutionEnvironmentInterviewCompletedWake({
-      completedAt: input.item.occurredAt,
-      completionId: "550e8400-e29b-41d4-a716-446655440000",
-      eventId: input.item.dedupeKey,
-      memberId: TEST_USER_ID,
-      occurredAt: input.item.occurredAt,
-      topics: [{
-        answers: [{
-          aspectId: "sleep-environment",
-          indicatorId: "night_temp_c",
-          note: "The bedroom stays near 19 degrees at night.",
-          value: 19,
-        }],
-        topicId: "sleep:0",
-      }],
-    }),
-  });
-}
-
 function createResolvedPendingEffectsSystemMailboxItem(
   item: HostedMailboxItem,
 ): HostedMailboxResolvedImportItem {
@@ -2674,7 +2626,6 @@ export {
   createWorkspaceState,
   describeCheckpointConversationWatermarkTransition,
   enqueueDeviceSyncSystemMailboxItemForTest,
-  enqueueEnvironmentInterviewSystemMailboxItemForTest,
   enqueuePendingEffectsSystemMailboxItemForTest,
   ensureHostedBootstrapMetadataForSystemMailboxTest,
   execFileAsync,

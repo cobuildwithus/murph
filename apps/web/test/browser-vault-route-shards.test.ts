@@ -14,8 +14,6 @@ test.each([
   ["/patterns", ["core"]],
   ["/journal", ["core"]],
   ["/history", ["core"]],
-  ["/environment", ["core"]],
-  ["/environment/print", ["core"]],
   ["/experiments", ["core"]],
   ["/experiments/protocol-1/research", ["core"]],
   ["/biomarkers/heart-rate-variability/research", ["core"]],

@@ -23,7 +23,6 @@ import {
   createWorkspaceSnapshotV2Ref,
   createWorkspaceState,
   enqueueDeviceSyncSystemMailboxItemForTest,
-  enqueueEnvironmentInterviewSystemMailboxItemForTest,
   enqueuePendingEffectsSystemMailboxItemForTest,
   mocks,
   readCapturedRuntimePhaseLogs,
@@ -63,7 +62,6 @@ import {
   initializeVault,
   applyCanonicalWriteBatch,
   patchAutomation,
-  readHabitatAspect,
   readJsonlRecords,
   repairVault,
   runCanonicalWrite,
@@ -74,7 +72,6 @@ import {
 import {
   buildHostedExecutionAssistantNotificationRequestedWake,
   buildHostedExecutionDailyMetricReportedWake,
-  buildHostedExecutionEnvironmentInterviewCompletedWake,
   buildHostedExecutionGroupJournalFactRecordedWake,
   buildHostedExecutionLinqConversationMessageWake,
   buildHostedExecutionMemberActivatedWake,
@@ -2047,105 +2044,6 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
     } finally {
       vi.unstubAllGlobals();
       vi.useRealTimers();
-      await removeTempRoot(vaultRoot);
-    }
-  });
-
-  test("system mailbox mode applies Environment answers without a model and refreshes the browser replica", async () => {
-    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
-    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
-    const events: string[] = [];
-    const fetchRequests: HostedMailboxFetchRequest[] = [];
-    const interviewItem = createMailboxItem({
-      dedupeKey: "environment-interview:entrypoint-isolation",
-      id: "mailbox_item_environment_interview_entrypoint_isolation",
-      kind: "environment-interview.completed",
-      lane: "system",
-      laneSeq: "1",
-    });
-
-    try {
-      mocks.prepareHostedCodexRuntimeEnvironment.mockClear();
-      mocks.prepareHostedCodexAssistantProcess.mockClear();
-      mocks.refreshHostedBrowserVaultReplicaFromRuntime.mockClear();
-      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
-      await enqueueEnvironmentInterviewSystemMailboxItemForTest({
-        item: interviewItem,
-        vaultRoot,
-      });
-      const importState = createEmptyHostedMailboxImportState();
-      importState.watermarks.system = "1";
-      await writeMailboxImportStateFile(vaultRoot, importState);
-      const restoredWorkspace = await createVaultSnapshotBundle({
-        vaultRoot,
-      });
-
-      const result = await runHostedWorkspaceRuntimeJobInProcess(
-        createWorkspaceRuntimeJobInput({
-          request: {
-            attemptId: "attempt_environment_interview_entrypoint_isolation",
-            processingMode: "system_mailbox",
-            workspaceVersion: "0",
-          },
-        }),
-        {
-          async createCheckpointSnapshot() {
-            return {
-              snapshotRef: createSnapshotFixtureRef({
-                hash: "e".repeat(64),
-                size: 512,
-              }),
-            };
-          },
-          async importItem() {
-            throw new Error("Already-imported Environment work should not import a new row.");
-          },
-          platform: createPlatform({
-            artifactBytesByHash: new Map([[restoredWorkspace.hash, restoredWorkspace.bytes]]),
-            mailboxPort: createMailboxPort({
-              events,
-              fetchRequests,
-              items: [createMailboxItem({
-                id: "mailbox_item_environment_interview_unrelated_conversation",
-                kind: "conversation.message",
-                lane: "conversation",
-                laneSeq: "1",
-              })],
-            }),
-            workspacePort: createWorkspacePort({
-              checkpointRequests,
-              events,
-              workspace: createWorkspaceState({
-                nextWakeAt: "2026-04-26T23:59:59.000Z",
-                nextWakeReason: "assistant",
-                snapshotRef: restoredWorkspace.snapshotRef,
-                version: "0",
-              }),
-            }),
-          }),
-          async runAssistantPhase() {
-            throw new Error("Model-free Environment work must not enter assistant phase.");
-          },
-          vaultRoot,
-        },
-      );
-
-      assert.deepEqual(
-        fetchRequests.map((request) => request.lanes.map((lane) => lane.lane)),
-        [["system"], ["system"]],
-      );
-      await expect(readHabitatAspect({
-        slug: "sleep-environment",
-        vaultRoot,
-      })).resolves.toMatchObject({
-        indicators: { night_temp_c: 19 },
-      });
-      expect(mocks.refreshHostedBrowserVaultReplicaFromRuntime).toHaveBeenCalledTimes(1);
-      expect(mocks.prepareHostedCodexRuntimeEnvironment).not.toHaveBeenCalled();
-      expect(mocks.prepareHostedCodexAssistantProcess).not.toHaveBeenCalled();
-      expect(result.status).toBe("idle");
-    } finally {
-      mocks.refreshHostedBrowserVaultReplicaFromRuntime.mockClear();
       await removeTempRoot(vaultRoot);
     }
   });

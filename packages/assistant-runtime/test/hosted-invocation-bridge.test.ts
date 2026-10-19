@@ -4,7 +4,9 @@ import type {
   HostedExecutionSystemWake,
 } from "@murphai/hosted-execution/contracts";
 
+import { HOSTED_RETIRED_MAILBOX_KINDS } from "@murphai/hosted-execution/runtime-control";
 import type {
+  HostedRetiredMailboxKind,
   HostedWorkspaceCheckpointResponse,
   HostedWorkspaceCheckpointRequest,
   HostedWorkspaceInvocationRequest,
@@ -2201,12 +2203,12 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     },
   );
 
-  it("consumes retired newsletter rows without decoding or importing them", async () => {
+  it.each(HOSTED_RETIRED_MAILBOX_KINDS)("consumes retired %s rows without decoding or importing them", async (kind) => {
     const vaultRoot = await createVaultRoot();
     const { platform } = createRuntimePlatform();
     const mailboxPayloadDecoder: HostedWorkspaceMailboxPayloadDecoder = {
       decode: vi.fn(async () => {
-        throw new Error("Retired newsletter payloads must not be decoded.");
+        throw new Error("Retired payloads must not be decoded.");
       }),
     };
     const options = createBridgeOptions({
@@ -2216,10 +2218,31 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     });
 
     await expect(options.importItem(
-      createRetiredNewsletterMailboxImportItem(),
+      createRetiredMailboxImportItem(kind),
     )).resolves.toEqual({
-      reasonCode: "legacy_group_newsletter_email_needed.retired",
+      reasonCode: "mailbox.kind_retired",
       status: "skipped",
+    });
+    expect(mailboxPayloadDecoder.decode).not.toHaveBeenCalled();
+  });
+
+  it("rejects active rows mislabeled as retired without decoding them", async () => {
+    const vaultRoot = await createVaultRoot();
+    const { platform } = createRuntimePlatform();
+    const mailboxPayloadDecoder: HostedWorkspaceMailboxPayloadDecoder = {
+      decode: vi.fn(async () => {
+        throw new Error("Mismatched retired routes must not be decoded.");
+      }),
+    };
+    const options = createBridgeOptions({ mailboxPayloadDecoder, platform, vaultRoot });
+    const item = createRetiredMailboxImportItem(HOSTED_RETIRED_MAILBOX_KINDS[0]);
+    item.item.kind = "member.activated";
+    item.route.itemRef.kind = "member.activated";
+
+    await expect(options.importItem(item)).resolves.toEqual({
+      reasonCode: "mailbox.retired_kind_mismatch",
+      retryable: false,
+      status: "blocked",
     });
     expect(mailboxPayloadDecoder.decode).not.toHaveBeenCalled();
   });
@@ -2952,25 +2975,25 @@ function createRetiredVaultShareMailboxImportItem(input: {
   };
 }
 
-function createRetiredNewsletterMailboxImportItem(): Parameters<
+function createRetiredMailboxImportItem(kind: HostedRetiredMailboxKind): Parameters<
   HostedWorkspaceRuntimeJobOptions["importItem"]
 >[0] {
   const base = createSystemMailboxImportItem();
-  const id = "retired_group_newsletter_email_needed";
+  const id = "retired_mailbox_item";
   return {
     ...base,
     item: {
       ...base.item,
       dedupeKey: id,
       id,
-      kind: "group-newsletter.email-needed",
+      kind,
     },
     route: {
       action: "skip-retired-mailbox-item",
       advanceProgress: true,
       itemRef: {
         id,
-        kind: "group-newsletter.email-needed",
+        kind,
         lane: "system",
         laneSeq: base.item.laneSeq,
       },

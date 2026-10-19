@@ -940,12 +940,6 @@ function journalEventDetailHref(
   if (event.kind === "test") {
     return { href: "/biomarkers", label: "View results" };
   }
-  if (
-    event.kind === "note" &&
-    event.title.toLowerCase().includes("bedroom temperature")
-  ) {
-    return { href: "/environment", label: "View environment" };
-  }
   if (event.kind === "note" && event.title.toLowerCase().includes("joined")) {
     return { href: "/groups", label: "View group" };
   }

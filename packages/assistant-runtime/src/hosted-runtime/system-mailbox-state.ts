@@ -86,8 +86,6 @@ export type HostedSystemMailboxRouteAction =
   | "run-clinical-records-sync"
   | "apply-clinical-enrichment"
   | "run-device-sync-wake"
-  | "run-environment-interview"
-  | "run-environment-voice"
   | "import-group-journal-fact"
   | "import-reported-daily-metric"
   | "apply-runtime-control-request";
@@ -1412,8 +1410,6 @@ function parseHostedSystemMailboxRouteAction(value: unknown): HostedSystemMailbo
     || value === "run-clinical-records-sync"
     || value === "apply-clinical-enrichment"
     || value === "run-device-sync-wake"
-    || value === "run-environment-interview"
-    || value === "run-environment-voice"
     || value === "import-group-journal-fact"
     || value === "import-reported-daily-metric"
     || value === "apply-runtime-control-request"
@@ -1546,27 +1542,6 @@ function parseHostedSystemMailboxRecordRequest(
       ),
       kind: "codex-auth.updated",
       phase: record.phase,
-    };
-  }
-
-  if (record.kind === "environment-voice.audio-delete") {
-    assertHostedSystemMailboxRecordKeys(
-      record,
-      ["audioKey", "kind"],
-      "hosted system mailbox Environment voice postCheckpointRecord",
-    );
-    const audioKey = readRequiredString(
-      record.audioKey,
-      "hosted system mailbox Environment voice postCheckpointRecord audioKey",
-    );
-    if (!/^[a-f0-9]{40}$/u.test(audioKey)) {
-      throw new TypeError(
-        "hosted system mailbox Environment voice postCheckpointRecord audioKey is invalid.",
-      );
-    }
-    return {
-      audioKey,
-      kind: "environment-voice.audio-delete",
     };
   }
 

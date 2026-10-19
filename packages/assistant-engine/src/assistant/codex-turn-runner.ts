@@ -182,10 +182,6 @@ const ASSISTANT_GROUP_EMAIL_THREAD_CONFIG = {
   'features.shell_tool': false,
   'features.tool_suggest': false,
 } as const
-const ASSISTANT_HABITAT_MAINTENANCE_THREAD_CONFIG = {
-  'memories.generate_memories': false,
-  'memories.use_memories': false,
-} as const
 
 export {
   resolveAssistantCodexThreadScope,
@@ -757,9 +753,6 @@ function resolveCodexAttemptCapabilities(
     automationId === MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID
   const toolOnlyMaintenanceTurn =
     groupRoomModelMaintenanceTurn || memberMemoryMaintenanceTurn
-  const habitatVoiceMaintenanceTurn =
-    executionPlan.profile.toolProfile === 'maintenance-turn' &&
-    executionPlan.input.maintenanceProfile === 'habitat-voice'
   const restrictedOneShotTurn =
     toolOnlyMaintenanceTurn || readOnlyAutomationTurn
   const audience = executionPlan.sharedPlan.conversationPolicy.audience
@@ -788,7 +781,6 @@ function resolveCodexAttemptCapabilities(
     groupRoomModelMaintenanceTurn,
     memberMemoryMaintenanceTurn,
     toolOnlyMaintenanceTurn,
-    habitatVoiceMaintenanceTurn,
     restrictedOneShotTurn,
     groupConversation,
     groupEmailTurn,
@@ -813,9 +805,6 @@ function resolveCodexAttemptThreadConfig(
   }
   if (capabilities.readOnlyAutomationTurn) {
     return ASSISTANT_READ_ONLY_AUTOMATION_THREAD_CONFIG
-  }
-  if (capabilities.habitatVoiceMaintenanceTurn) {
-    return ASSISTANT_HABITAT_MAINTENANCE_THREAD_CONFIG
   }
   return capabilities.groupEmailTurn ? ASSISTANT_GROUP_EMAIL_THREAD_CONFIG : null
 }

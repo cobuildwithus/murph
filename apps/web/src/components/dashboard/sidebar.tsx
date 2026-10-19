@@ -9,7 +9,6 @@ import {
   ChevronsUpDown,
   FlaskConical,
   Home,
-  Leaf,
 } from "lucide-react";
 import {
   useEffect,
@@ -77,12 +76,6 @@ const navItems: {
     href: "/patterns",
     matchPrefix: "/patterns",
     icon: ChartSpline,
-  },
-  {
-    label: "Environment",
-    href: "/environment",
-    matchPrefix: "/environment",
-    icon: Leaf,
   },
   {
     label: "Biomarkers",

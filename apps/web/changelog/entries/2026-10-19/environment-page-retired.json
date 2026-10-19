@@ -1,0 +1,17 @@
+{
+  "publishedOn": "2026-10-19",
+  "order": 100,
+  "item": {
+    "id": "environment-page-retired",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "A simpler dashboard",
+    "summary": "The Environment page and its voice walkthrough, printable report and share card have been retired.",
+    "details": "Your saved home and workspace context remains available to Murph in normal conversations.",
+    "relevanceTags": [
+      "dashboard",
+      "habitat"
+    ],
+    "sourcePullRequests": []
+  }
+}
