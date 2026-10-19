@@ -37,7 +37,7 @@
     "@murphai/vault-usecases": "workspace:*"
   },
   "devDependencies": {
-    "zod": "^4.4.3"
+    "zod": "^4.5.4"
   },
   "engines": {
     "node": ">=24.14.1"

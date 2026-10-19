@@ -1,4 +1,6 @@
 Final reply post-generation delivery telemetry and alerting are owned by
+
+Environment removal dependency follow-up: [runner schema runtime proof](exec-plans/completed/2026-10-19-environment-boot-dependency.md).
 [`hosted-runtime-protocol.md`](references/hosted-runtime-protocol.md); the
 implementation is recorded in
 [the completed delivery latency plan](exec-plans/completed/2026-10-19-post-generation-delivery-latency.md).
