@@ -212,6 +212,8 @@ describe("createHostedWebMailboxPort", () => {
       passMailboxFetchEventLoopActiveMs: expect.any(Number),
       passMailboxFetchEventLoopIdleMs: expect.any(Number),
       passMailboxFetchLastStage: "fetch_started",
+      passMailboxFetchProcessCpuSystemMs: expect.any(Number),
+      passMailboxFetchProcessCpuUserMs: expect.any(Number),
       passMailboxFetchRequestSentMs: null,
       passMailboxFetchResolveDelayMs: null,
       passMailboxFetchResponseStatus: 200,

@@ -5,7 +5,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { InboxServices } from '@murphai/inbox-services'
 import { serializeHostedEmailThreadTarget } from '@murphai/runtime-state'
-import type { AssistantInputCandidate } from '../src/assistant/input-source.ts'
+import type {
+  AssistantInputCandidate,
+  AssistantInputCandidateBatch,
+} from '../src/assistant/input-source.ts'
 import type { AssistantInputConversationRef } from '../src/assistant/input-store.ts'
 import type {
   AssistantInputProjectionStatus,
@@ -2054,6 +2057,117 @@ describe('assistant auto-reply event-first path', () => {
       'cannot be attested as Murph-authored or linked',
     )
     expect(admitted.prompt).not.toContain('linq-msg-live-initial')
+  })
+
+  it('attaches each admission exact-lookup observation only to that admission route query', async () => {
+    const vault = await createTempVault()
+    const initial = createLinqGroupCandidate({
+      inputId: 'ain_00000000000000000000000000000010',
+      messageId: 'linq-msg-observe-initial',
+      occurredAt: '2026-08-07T21:10:00.000Z',
+      text: 'Initial participant message.',
+    })
+    const resolvers = new Map<string, (batch: AssistantInputCandidateBatch) => void>()
+    const routeQueries: unknown[] = []
+    const inputSource = {
+      checkpointAcceptedInput: vi.fn(async () => undefined),
+      listInputCandidates: vi.fn(async (query: { exactLookupObservation?: unknown }) => {
+        routeQueries.push(query.exactLookupObservation)
+        return { inputs: [], nextCursor: null }
+      }),
+      listInputCandidatesByIds: vi.fn((query: { inputIds: readonly string[] }) =>
+        new Promise<AssistantInputCandidateBatch>((resolve) => {
+          resolvers.set(query.inputIds.join(','), resolve)
+        })),
+      listNewConversationInputs: vi.fn(async () => ({ inputs: [], nextCursor: null })),
+      refresh: vi.fn(async () => ({ progressed: false, reason: 'no_new_input' as const })),
+    }
+    await processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context: createReplyContext(initial),
+      enabledChannels: ['linq'],
+      inboxServices: createInboxServices(),
+      inputSource,
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault,
+    })
+    const admit = readSentInput().activeTurnInput
+    if (!admit) throw new Error('expected an active-turn input admission hook')
+    const base = { sessionId: 'session-observe', turnId: 'turn-observe', vault }
+
+    // Two independent admissions overlap; B's exact lookup settles first.
+    const first = admit({ ...base, availableInputIds: ['ain_a1', 'ain_a2'] })
+    const second = admit({ ...base, availableInputIds: ['ain_b1'] })
+    await vi.waitFor(() => expect(resolvers.size).toBe(2))
+    resolvers.get('ain_b1')!({
+      exactLookupExclusionReasonCounts: { not_grouped_with_anchor: 1 },
+      inputs: [],
+      nextCursor: null,
+    })
+    await vi.waitFor(() => expect(routeQueries).toHaveLength(1))
+    resolvers.get('ain_a1,ain_a2')!({
+      exactLookupExclusionReasonCounts: { missing_event: 1, not_replyable: 1 },
+      inputs: [],
+      nextCursor: null,
+    })
+    await Promise.all([first, second])
+    expect(routeQueries).toEqual([
+      { called: true, exclusionReasonCounts: { not_grouped_with_anchor: 1 }, requestedCount: 1, returnedCount: 0 },
+      { called: true, exclusionReasonCounts: { missing_event: 1, not_replyable: 1 }, requestedCount: 2, returnedCount: 0 },
+    ])
+
+    // No pending IDs: the lookup is skipped, which is distinct from returning zero.
+    await admit({ ...base, availableInputIds: [] })
+    expect(routeQueries.at(-1)).toEqual({ called: false, requestedCount: 0, returnedCount: null })
+    expect(inputSource.listInputCandidatesByIds).toHaveBeenCalledTimes(2)
+
+    // A source that does not report reasons leaves them absent, not zero.
+    inputSource.listInputCandidatesByIds.mockImplementationOnce(async () => ({ inputs: [], nextCursor: null }))
+    await admit({ ...base, availableInputIds: ['ain_c1'] })
+    expect(routeQueries.at(-1)).toEqual({ called: true, requestedCount: 1, returnedCount: 0 })
+
+    // A failed exact lookup fails the admission as before and emits no route query.
+    inputSource.listInputCandidatesByIds.mockImplementationOnce(async () => {
+      throw new Error('synthetic exact lookup failure')
+    })
+    const routeCount = routeQueries.length
+    await expect(admit({ ...base, availableInputIds: ['ain_d1'] })).rejects.toThrow('synthetic exact lookup failure')
+    expect(routeQueries).toHaveLength(routeCount)
+  })
+
+  it('reports a pending exact ID as not called when the source has no exact lookup', async () => {
+    const vault = await createTempVault()
+    const initial = createLinqGroupCandidate({
+      inputId: 'ain_00000000000000000000000000000020',
+      messageId: 'linq-msg-observe-legacy',
+      occurredAt: '2026-08-07T21:10:00.000Z',
+      text: 'Initial participant message.',
+    })
+    const routeQueries: unknown[] = []
+    const inputSource = {
+      checkpointAcceptedInput: vi.fn(async () => undefined),
+      listInputCandidates: vi.fn(async (query: { exactLookupObservation?: unknown }) => {
+        routeQueries.push(query.exactLookupObservation)
+        return { inputs: [], nextCursor: null }
+      }),
+      listNewConversationInputs: vi.fn(async () => ({ inputs: [], nextCursor: null })),
+      refresh: vi.fn(async () => ({ progressed: false, reason: 'no_new_input' as const })),
+    }
+    await processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context: createReplyContext(initial),
+      enabledChannels: ['linq'],
+      inboxServices: createInboxServices(),
+      inputSource,
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault,
+    })
+    const admit = readSentInput().activeTurnInput
+    if (!admit) throw new Error('expected an active-turn input admission hook')
+    await admit({ availableInputIds: ['ain_e1'], sessionId: 's', turnId: 't', vault })
+    expect(routeQueries).toEqual([{ called: false, requestedCount: 1, returnedCount: null }])
   })
 
   it('admits trusted Linq corrections into a live turn while deferring ordinary native replies', async () => {

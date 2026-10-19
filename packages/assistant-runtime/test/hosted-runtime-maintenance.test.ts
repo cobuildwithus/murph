@@ -74,7 +74,11 @@ vi.mock("../src/device-sync-service.ts", () => ({
   requireHostedRuntimeDeviceSyncStore: mocks.requireHostedRuntimeDeviceSyncStore,
 }));
 
-vi.mock("@murphai/assistant-engine", () => ({
+vi.mock("@murphai/assistant-engine", async () => ({
+  // The real finite reason list, so the row builder is tested against its owner.
+  ASSISTANT_INPUT_EXACT_LOOKUP_EXCLUSION_REASONS: (await vi.importActual<
+    typeof import("@murphai/assistant-engine/assistant-automation")
+  >("@murphai/assistant-engine/assistant-automation")).ASSISTANT_INPUT_EXACT_LOOKUP_EXCLUSION_REASONS,
   DEFAULT_ASSISTANT_AUTOMATION_SCAN_LIMIT: 50,
   HOSTED_ASSISTANT_CONTEXT_DIAGNOSTICS_SCHEMA:
     "murph.assistant-context-diagnostics.v1",
@@ -1230,6 +1234,45 @@ describe("runHostedAssistantAutomation", () => {
         limit: 1,
         sourceId: "linq",
       });
+      // Admission route queries carry their own exact-lookup observation.
+      await input.inputSource?.listInputCandidates({
+        exactLookupObservation: {
+          called: true,
+          exclusionReasonCounts: { not_grouped_with_anchor: 1, missing_event: 2 },
+          requestedCount: 3,
+          returnedCount: 0,
+        },
+        limit: 1,
+        sourceId: "linq",
+      });
+      await input.inputSource?.listInputCandidates({
+        exactLookupObservation: { called: false, requestedCount: 0, returnedCount: null },
+        limit: 1,
+        sourceId: "linq",
+      });
+      // Malformed reason data from a source must not read as a clean result.
+      for (const exclusionReasonCounts of [
+        { "Synthetic Unknown Reason": 1 },
+        { missing_event: "1" },
+        { missing_event: -1 },
+        { missing_event: 1.5 },
+        { missing_event: Number.NaN },
+        { missing_event: Number.MAX_SAFE_INTEGER + 1 },
+        { missing_event: 4 },
+        {},
+        { missing_event: 0 },
+      ]) {
+        await input.inputSource?.listInputCandidates({
+          exactLookupObservation: {
+            called: true,
+            exclusionReasonCounts: exclusionReasonCounts as never,
+            requestedCount: 3,
+            returnedCount: 0,
+          },
+          limit: 1,
+          sourceId: "linq",
+        });
+      }
       return {
         nextWakeAt: null,
         progressed: false,
@@ -1256,7 +1299,7 @@ describe("runHostedAssistantAutomation", () => {
 
     expect(result.timings).toEqual(expect.objectContaining({
       inputCandidateListed: true,
-      inputCandidateQueryCount: 1,
+      inputCandidateQueryCount: 12,
     }));
     expect(result.redactedLogEntries).toEqual(expect.arrayContaining([
       expect.objectContaining({
@@ -1280,6 +1323,43 @@ describe("runHostedAssistantAutomation", () => {
       entry.message === "Hosted assistant input candidate query finished."
     );
     expect(candidateLog?.redacted).not.toHaveProperty("requestId");
+    const candidateLogs = result.redactedLogEntries.filter((entry) =>
+      entry.message === "Hosted assistant input candidate query finished."
+    );
+    // Rows without an admission observation carry no exact-lookup fields.
+    expect(candidateLogs[0]?.redacted).not.toHaveProperty("exactLookupCalled");
+    expect(candidateLogs[1]?.redacted).toMatchObject({
+      exactLookupCalled: true,
+      exactLookupExclusionSummary: "missing_event:2,not_grouped_with_anchor:1",
+      exactLookupRequestedCount: 3,
+      exactLookupReturnedCount: 0,
+    });
+    // A skipped lookup is not a reported zero, and unreported reasons stay unknown.
+    expect(candidateLogs[2]?.redacted).toMatchObject({
+      exactLookupCalled: false,
+      exactLookupExclusionSummary: null,
+      exactLookupRequestedCount: 0,
+      exactLookupReturnedCount: null,
+    });
+    expect(candidateLogs.slice(3).map((entry) => entry.redacted?.exactLookupExclusionSummary)).toEqual([
+      "invalid", "invalid", "invalid", "invalid", "invalid", "invalid",
+      // A total above the requested inputs is invalid too.
+      "invalid",
+      // An empty or all-zero report is a clean "none".
+      "none", "none",
+    ]);
+    for (const entry of candidateLogs) {
+      expect(() => parseHostedRuntimeLogRequest({
+        entries: [{
+          at: "2026-05-18T15:10:39.000Z",
+          component: "assistant",
+          eventCode: "assistant.automation_detail",
+          level: "info",
+          phase: "invoke",
+          redactedJson: entry.redacted,
+        }],
+      })).not.toThrow();
+    }
   });
 
   it("runs hosted assistant automation through the queue-only scanner path", async () => {
