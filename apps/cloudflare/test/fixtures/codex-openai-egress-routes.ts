@@ -236,6 +236,12 @@ export const PINNED_CODEX_OPENAI_EGRESS_INVENTORY = {
       reason: "The 0.163.0 macOS binary joins the exact /v1/decisions URL in ext/guardian-v2/src/async_scorer/decisions.rs to an adjacent event label. The real Decisions route is independently classified as blocked.",
     },
     {
+      candidate: "/v1/decisionsanswerschoicemodelquestionsvalueinstructionsvariant",
+      disposition: "binary_false_positive",
+      owner: "codex-guardian",
+      reason: "The 0.163.0 Linux release stores the exact https://api.openai.com/v1/decisions URL constant from ext/guardian-v2/src/async_scorer/decisions.rs beside the serialized answers, choice, model, questions, value, instructions, and variant labels of that request and response; scanning stops at the following serde variant-index text. The real Decisions route is independently classified as blocked.",
+    },
+    {
       candidate: "/v1/rowscols",
       disposition: "binary_false_positive",
       owner: "dependency",

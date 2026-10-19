@@ -1,5 +1,5 @@
 ---
-title: 'Hosted workspace runner wake-interrupt test flakes under parallel acceptance load'
+title: 'Hosted workspace runner wake-interrupt test failed once in local acceptance'
 severity: 'minor'
 ---
 
@@ -9,18 +9,20 @@ severity: 'minor'
 
 ## Current Behavior
 
-Under the parallel package-coverage stage of local acceptance, the test can observe foreground yield states `[false, false]` instead of `[false, true]` and fail. The same test passes repeatedly when run alone, so the failure depends on scheduling load rather than the change under test.
+In one full local acceptance run, during the parallel package-coverage stage, the test observed foreground yield states `[false, false]` instead of `[false, true]` and failed. The same test then passed in five isolated runs, and a later full acceptance run on the same source passed. The root cause is not established: scheduling load is one hypothesis, and an interaction with other concurrently running suites or with the change under test has not been excluded.
 
 ## Possible Solution
 
-Drive the wake and the second import from an explicit synchronization point instead of relying on timing between the in-flight cleanup request and the runtime wake.
+First reproduce the failure and identify what ordering the test depends on. If it proves timing-dependent, drive the wake and the second import from an explicit synchronization point.
 
 ## Minimal Reproducible Example
 
-1. Run `MURPH_VERIFY_EXECUTOR=local pnpm verify:acceptance` on a loaded developer machine.
-2. Observe the assertion at the yield-state check fail once.
-3. Run `pnpm --dir packages/assistant-runtime exec vitest run --no-coverage test/hosted-runtime-workspace-runner.test.ts -t 'runtime wake interrupts an in-flight provider cleanup request'` five times; all pass.
+No reliable reproduction yet. Observed sequence:
+
+1. One `MURPH_VERIFY_EXECUTOR=local pnpm verify:acceptance` run failed this assertion.
+2. `pnpm --dir packages/assistant-runtime exec vitest run --no-coverage test/hosted-runtime-workspace-runner.test.ts -t 'runtime wake interrupts an in-flight provider cleanup request'` passed five consecutive times.
+3. A subsequent full acceptance run passed.
 
 ## Context
 
-Seen during acceptance for an unrelated Codex CLI upgrade; it forces a full acceptance rerun.
+Seen once during acceptance for a Codex CLI upgrade that does not touch the hosted workspace runner. A single intermittent failure forces a full acceptance rerun; no production fix is indicated by this observation alone.

@@ -237,10 +237,12 @@ Updated: 2026-10-18
   That owner was removed; a real-pin dry run packaged 69 patched upstream files.
 - Local acceptance surfaced one argv-shape assertion in
   `packages/cli/test/assistant-codex.test.ts` that the steering defaults changed;
-  it now pins the exact steering and timing prefix. A second run hit a
-  load-sensitive hosted workspace runner wake test that passes alone (5/5); it is
-  recorded through Frog. The third `MURPH_VERIFY_EXECUTOR=local pnpm
-  verify:acceptance` run on `73d86bfa` exited 0.
+  it now pins the exact steering and timing prefix. A second run failed once in
+  the hosted workspace runner wake-interrupt test, which then passed five
+  isolated runs; the root cause is not established (load is a hypothesis, and an
+  interaction is not excluded), and it is recorded through Frog without a
+  production fix. The third `MURPH_VERIFY_EXECUTOR=local pnpm verify:acceptance`
+  run on `73d86bfa` exited 0.
 - The six documented CLI-upgrade live journeys passed on `73d86bfa` with Ready
   reply and effect review: nine-item native and code-only lists with no card and
   no invalid calls; one compact-table card for both comparison modes; one
@@ -261,3 +263,23 @@ Updated: 2026-10-18
   conditional. The empty and media-only regressions fail with the old placement
   and pass with the new; mocked runtime suites (282) and targeted real-binary
   cases (14) pass, with complexity debt unchanged.
+
+### Exact-head CI checkpoint at `c7e4d65d`
+
+- Release Cloudflare verification failed the installed-binary route inventory
+  on `/v1/decisionsanswerschoicemodelquestionsvalueinstructionsvariant` (same as
+  the earlier head). Diagnosis on the exact lockfile-verified 0.163.0 Linux x64
+  helper: the binary stores the `https://api.openai.com/v1/decisions` constant
+  from `ext/guardian-v2/src/async_scorer/decisions.rs` beside that request and
+  response's serialized `answers`, `choice`, `model`, `questions`, `value`,
+  `instructions`, and `variant` labels, and the scanner stops at the following
+  serde variant-index text. It is classified as one exact-token
+  `binary_false_positive`, like the existing macOS form; the real Decisions route
+  stays blocked and the scanner is unchanged. Rescanning that Linux binary leaves
+  zero unclassified candidates, and the local conformance suite passes.
+- Serialized positive proof on the final engine source (no concurrent edits,
+  engine source equal to `c7e4d65d` before and after): mocked runtime suites 282
+  passed (01:41:18Z-01:41:52Z), then the real-binary steering and preservation
+  cases 14 passed (01:41:58Z-01:42:43Z), including unfinished empty, media-only,
+  and no-reply replacements, the explicit-disable completed-answer baseline, and
+  WebSocket discard and ignore.
