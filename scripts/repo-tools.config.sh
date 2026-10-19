@@ -109,6 +109,7 @@ repo_tools_join_lines COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS \
   "Dockerfile.cloudflare-hosted-runner" \
   "Dockerfile.cloudflare-hosted-runner-base" \
   "patches/codex-public-live.patch" \
+  "patches/@cloudflare__containers@0.3.7.patch" \
   "README.md" \
   "PRODUCT.md" \
   "DESIGN.md" \
@@ -132,6 +133,7 @@ repo_tools_join_lines COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS \
   "agent-docs/operations/imessage-deliverability.md" \
   "agent-docs/operations/pr-reviewgpt-loop.md" \
   "package.json" \
+  "pnpm-lock.yaml" \
   "pnpm-workspace.yaml" \
   "tsconfig.test-runtime.json" \
   "tsconfig.json" \
