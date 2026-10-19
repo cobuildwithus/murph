@@ -16,7 +16,6 @@ import { importClinicalFhirSnapshot } from '@murphai/vault-usecases/clinical-rec
 import { clinicalFhirResourceText, clinicalFhirResourceExtractionText } from '@murphai/clinical-records'
 import { executeClinicalDocumentExtraction } from '../src/clinical-document-extraction.ts'
 import * as clinicalExtractionCodex from '../src/assistant-codex.ts'
-import { parsePersonalPatternNotificationLedger } from '../src/assistant/personal-patterns-eligibility.js'
 import { canSkipManagedAutomaticMealCloseout } from '../src/assistant/automatic-meal-closeout-eligibility.js'
 import { resolveAssistantStatePaths } from '../src/assistant/store/paths.js'
 import {
@@ -118,8 +117,6 @@ import {
   vaultCliBatchResultSchema,
 } from '@murphai/operator-config/vault-cli-contracts'
 import {
-  parsePersonalPatternVocabulary,
-  buildPersonalPatternReport,
   buildJournalView,
   getQueryProjectionStatus,
   knowledgeAbsentPageResultSchema,
@@ -4144,13 +4141,6 @@ describe('real Codex live fixture contracts', () => {
       await expect(fixture.cli(['nonexistent-canonical-journey-command'])).rejects.toThrow()
     } finally { await fixture.close() }
   }, 120_000)
-  it('rejects unknown Personal Patterns fixture commands instead of fabricating success', async () => {
-    const root = await mkdtemp(path.join(tmpdir(), 'murph-pattern-fixture-contract-'))
-    try {
-      await materializePersonalPatternsBaselineVaultCli({ binDirectory: root, commandCapturePath: path.join(root, 'commands'), initialDigestSent: false, ledgerCapturePath: path.join(root, 'ledger'), vocabularyCapturePath: path.join(root, 'vocabulary') })
-      await expect(execFileAsync(path.join(root, 'vault-cli'), ['nonexistent-command'])).rejects.toThrow()
-    } finally { await removeRealCodexTemporaryPath(root) }
-  })
   it('executes canonical single-read nutrition fixtures through the real CLI', async () => {
     const root = await mkdtemp(path.join(tmpdir(), 'murph-nutrition-cli-fixture-'))
     const binDirectory = path.join(root, 'bin')
@@ -16560,6 +16550,48 @@ describeRealCodex('real Codex generated-music fallback e2e', () => {
   )
 })
 
+describeRealCodex('real Codex weekly insight after feature retirement e2e', () => {
+  it('keeps weekly insight quiet after Personal Patterns retirement when evidence is unchanged', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const automation = MURPH_MANAGED_AUTOMATIONS.find(
+      (candidate) => candidate.automationId === MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID,
+    )
+    if (!automation) throw new Error('Expected the managed weekly health insight automation.')
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-weekly-insight-retirement-e2e-'))
+    try {
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never',
+        baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome,
+        developerInstructions: buildScheduledAutomationDeveloperInstructions('direct', 'none'),
+        dynamicTools: [],
+        env: config.env,
+        model: config.model,
+        modelProvider: config.modelProvider,
+        prompt: [
+          automation.instructions,
+          'Current synthetic evidence from the completed required reads:',
+          '- The knowledge index contains weekly-health-insights. Its existing entry already explains the same exercise timing and sleep observation seen this week.',
+          '- Bounded canonical history, source health, current goals, experiments, and recent conversation have been inspected. Sources are current and healthy. No independent signal, explanation, or useful takeaway changed.',
+          '- No candidate materially changes a prior finding, and no other candidate clears the interestingness gate.',
+          '- All required evidence is supplied above. Do not repeat completed reads; complete the terminal scheduled decision.',
+        ].join('\n\n'),
+        reasoningEffort: 'low',
+        sandbox: 'read-only',
+        workingDirectory,
+      })
+      const decision = parseAssistantNotificationDecision(result.finalMessage)
+      process.stdout.write(`[weekly-insight-retirement-e2e] ${JSON.stringify({ decision })}\n`)
+      expect(readCapabilityRoutingActions(result.jsonEvents)).toHaveLength(0)
+      expect(decision.kind).toBe('skip')
+      expect(result.responseMedia).toHaveLength(0)
+    } finally {
+      await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+    }
+  }, 360_000)
+})
+
 describeRealCodex('real Codex weekly digest natural recognition e2e', () => {
   it('recognizes a new cycling routine without pattern jargon or disclaimer padding', async () => {
     const config = await resolveRealCodexE2eConfig()
@@ -17472,357 +17504,6 @@ describeRealCodex('real Codex adaptive wearable no-data outreach e2e', () => {
   )
 })
 
-describeRealCodex('real Codex Personal Patterns typed-ledger GPT-6 Luna xhigh digest e2e', () => {
-  it.each([false, true])('sends exactly one Personal Pattern without a link (initial digest sent: %s)', async (initialDigestSent) => {
-    const config = await resolveRealCodexE2eConfig()
-    const automation = MURPH_MANAGED_AUTOMATIONS.find(
-      (candidate) => candidate.slug === 'personal-patterns-update',
-    )
-    if (!automation) {
-      throw new Error('Expected the managed Personal Patterns automation.')
-    }
-    expect(automation.assistantTargetOverride).toEqual({ model: 'gpt-6-luna', reasoningEffort: 'xhigh' })
-    const workingDirectory = await mkdtemp(
-      path.join(tmpdir(), 'murph-personal-pattern-baseline-e2e-'),
-    )
-
-    try {
-      const binDirectory = path.join(workingDirectory, 'bin')
-      const ledgerCapturePath = path.join(workingDirectory, 'ledger-write.txt')
-      const commandCapturePath = path.join(workingDirectory, 'commands.txt')
-      const vocabularyCapturePath = path.join(
-        workingDirectory,
-        'vocabulary-write.txt',
-      )
-      await materializePersonalPatternsBaselineVaultCli({
-        binDirectory,
-        commandCapturePath,
-        initialDigestSent,
-        ledgerCapturePath,
-        vocabularyCapturePath,
-      })
-      const result = await executeRealCodexAppServerTurn({
-        allowFinishWithoutReply: true,
-        approvalPolicy: 'never',
-        baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
-        codexCommand:
-          normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
-        codexHome: config.codexHome,
-        developerInstructions: buildWeeklyHealthInsightDeveloperInstructions({
-          currentLocalDate: '2026-08-29',
-          scheduledOccurrenceAt: '2026-08-29T17:00:00.000Z',
-        }),
-        dynamicTools: [MURPH_FINISH_WITHOUT_REPLY_TOOL],
-        env: config.env,
-        fixtureBinDirectory: binDirectory,
-        model: config.model,
-        modelProvider: config.modelProvider,
-        prompt: [
-          automation.instructions,
-          'Scheduled occurrence context:',
-          '- Current local date: 2026-08-29.',
-          '- This is a controlled synthetic fixture.',
-          '- Complete the normal scheduled decision.',
-        ].join('\n\n'),
-        reasoningEffort: automation.assistantTargetOverride?.reasoningEffort ?? 'medium',
-        sandbox: 'workspace-write',
-        workingDirectory,
-      })
-      const decision = parseAssistantNotificationDecision(result.finalMessage)
-      if (decision.kind !== 'send_message') {
-        process.stdout.write(`[personal-pattern-decision-e2e] ${JSON.stringify(decision)}\n`)
-      }
-      expect(decision.kind).toBe('send_message')
-      if (decision.kind !== 'send_message') throw new Error('Expected a Pattern message')
-      const message = decision.text
-      const actions = readCapabilityRoutingActions(result.jsonEvents)
-      // Count executed fixture commands, not shell text after a short-circuited &&.
-      const commands = (await readFile(commandCapturePath, 'utf8')).trim().split('\n')
-      const patternReads = commands.filter((command) => command.startsWith('wearables patterns '))
-      const vocabularyReads = commands.filter((command) => command.startsWith('knowledge show journal-pattern-vocabulary '))
-      const ledgerReads = commands.filter((command) => command.startsWith('knowledge show personal-pattern-notifications '))
-      const sourceReads = commands.filter((command) => command.startsWith('wearables sources list '))
-      const ledgerWrites = commands.filter((command) => command === 'knowledge upsert --slug personal-pattern-notifications')
-      const vocabularyWrites = commands.filter((command) => command === 'knowledge upsert --slug journal-pattern-vocabulary')
-      const finishCalls = actions.filter(
-        (action) =>
-          action.kind === 'dynamic' &&
-          action.tool === MURPH_FINISH_WITHOUT_REPLY_TOOL.name,
-      )
-
-      process.stdout.write(
-        `[personal-pattern-baseline-e2e] ${JSON.stringify({
-          initialDigestSent,
-          patternReads: patternReads.length,
-          vocabularyWrites: vocabularyWrites.length,
-          finalMessage: message,
-          ledgerWrites: ledgerWrites.length,
-        })}\n`,
-      )
-
-      expect(vocabularyWrites.length).toBeLessThanOrEqual(1)
-      expect(patternReads).toHaveLength(1 + vocabularyWrites.length)
-      expect(vocabularyReads).toHaveLength(1)
-      expect(ledgerReads).toHaveLength(1)
-      expect(sourceReads).toHaveLength(1)
-      expect(ledgerWrites).toHaveLength(1)
-      if (vocabularyWrites.length === 1) {
-        expect(await readFile(vocabularyCapturePath, 'utf8')).toContain('yard-work')
-      }
-      expect(await readFile(ledgerCapturePath, 'utf8')).toContain('yard-work')
-      const savedLedger = parsePersonalPatternNotificationLedger(await readFile(ledgerCapturePath, 'utf8'))
-      expect(savedLedger).toMatchObject({ version: 1, initialDigestSent: true, reviewedFactorIds: ['yard-work'] })
-      expect(savedLedger?.results).toHaveLength(4)
-      expect(savedLedger?.results.every((entry) => entry.factorId === 'yard-work')).toBe(true)
-      expect(finishCalls).toHaveLength(0)
-      expect(message).toMatch(/yard work/iu)
-      expect(message).not.toMatch(/\bgrade\b|\b[A-E][- ](?:grade|association)\b|evidence days|classification|ledger/iu)
-      expect(message).not.toMatch(/other factors|proof (?:of|that)|not caus(?:es|ation)|correlation.{0,20}causation/iu)
-      expect(message).not.toMatch(/(?:^|\n)\s*[•*-]\s/u)
-      expect(message.trim().split(/\s+/u).length).toBeLessThanOrEqual(65)
-      expect(message).toMatch(/(?:16|sixteen)\s+(?:comparable |matched )?(?:days|nights|comparisons|cases)/iu)
-      expect(message).not.toMatch(/https?:|www\.|\/patterns\b|\bpatterns\b|see the rest/iu)
-      expect(message).not.toMatch(/`|\]\(|(?:^|\s)\/patterns\b/u)
-      expect(message).not.toMatch(/\b(?:should|need to|must) (?:do|add|stop|avoid|change)\b/iu)
-      const ledger = await readFile(ledgerCapturePath, 'utf8')
-      for (const outcomeId of ['hrv', 'sleep_score', 'readiness_score', 'respiratory_rate']) {
-        expect(ledger).toContain(outcomeId)
-      }
-      // All four outcomes stay reviewed; only one finding reaches the member.
-      const mentionedOutcomes = [
-        /\bHRV\b|heart.rate variability/iu,
-        /sleep/iu,
-        /readiness/iu,
-        /breathing|respiratory/iu,
-      ].filter((pattern) => pattern.test(message))
-      expect(mentionedOutcomes).toHaveLength(1)
-      expect(message).toMatch(/\bHRV\b|heart.rate variability/iu)
-      expect(message).toMatch(/next[ -](?:day|morning)|following[ -](?:day|morning)|day after/iu)
-      const reportsDelta = /(?:20|twenty)\s*(?:ms|milliseconds)/iu.test(message)
-      const reportsMeans = /(?:70|seventy)\s*(?:ms|milliseconds)/iu.test(message)
-        && /(?:50|fifty)\s*(?:ms|milliseconds)/iu.test(message)
-      expect(reportsDelta || reportsMeans).toBe(true)
-      expect(message).toMatch(/without|(?:non|not|no)[ -]yard[ -]work|days (?:you |with )?(?:didn.t|did not|weren.t)/iu)
-    } finally {
-      await removeRealCodexTemporaryPath(workingDirectory)
-      await removeRealCodexTemporaryPaths(config.temporaryPaths)
-    }
-  }, 720_000)
-})
-
-describeRealCodex('real Codex Personal Pattern cross-automation history e2e', () => {
-  it.each([
-    { priorFinding: 'covered', initialDigestSent: false, slot: 'default' },
-    { priorFinding: 'covered', initialDigestSent: true, slot: 'default' },
-    { priorFinding: 'covered', initialDigestSent: true, slot: 'staggered' },
-    { priorFinding: 'unrelated', initialDigestSent: true, slot: 'default' },
-  ] as const)('checks prior $priorFinding insight before sending (initial digest: $initialDigestSent, slot: $slot)', async ({ priorFinding, initialDigestSent, slot }) => {
-    const config = await resolveRealCodexE2eConfig()
-    const automation = MURPH_MANAGED_AUTOMATIONS.find(
-      (candidate) => candidate.slug === 'personal-patterns-update',
-    )
-    if (!automation) throw new Error('Expected the managed Personal Patterns automation.')
-    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-pattern-history-e2e-'))
-    try {
-      const binDirectory = path.join(workingDirectory, 'bin')
-      const commandCapturePath = path.join(workingDirectory, 'commands.txt')
-      const ledgerCapturePath = path.join(workingDirectory, 'ledger-write.txt')
-      await materializePersonalPatternsBaselineVaultCli({
-        binDirectory,
-        commandCapturePath,
-        initialDigestSent,
-        ledgerCapturePath,
-        onlyPrimaryOutcome: true,
-        vocabularyCapturePath: path.join(workingDirectory, 'vocabulary-write.txt'),
-        weeklyHistory: priorFinding === 'covered'
-          ? '## 2026-08-28\nOutdoor chores were associated with higher heart-rate variability the following morning. This is the yard-work result; the comparison is with days without those chores. The useful interpretation is that the apparent link also tracks lighter workdays.'
-          : '## 2026-08-02\nEvening coffee was associated with later sleep onset. No other factor or outcome was discussed.',
-      })
-      const result = await executeRealCodexAppServerTurn({
-        allowFinishWithoutReply: true,
-        approvalPolicy: 'never',
-        baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
-        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
-        codexHome: config.codexHome,
-        developerInstructions: buildWeeklyHealthInsightDeveloperInstructions({
-          currentLocalDate: '2026-08-29',
-          scheduledOccurrenceAt: slot === 'staggered'
-            ? '2026-08-29T19:37:00.000Z' : '2026-08-29T17:00:00.000Z',
-        }),
-        dynamicTools: [MURPH_FINISH_WITHOUT_REPLY_TOOL],
-        env: config.env,
-        fixtureBinDirectory: binDirectory,
-        model: config.model,
-        modelProvider: config.modelProvider,
-        prompt: automation.instructions,
-        reasoningEffort: automation.assistantTargetOverride?.reasoningEffort ?? 'high',
-        sandbox: 'workspace-write',
-        workingDirectory,
-      })
-      const actions = readCapabilityRoutingActions(result.jsonEvents)
-      const finishedQuietly = actions.some((action) =>
-        action.kind === 'dynamic' && action.tool === MURPH_FINISH_WITHOUT_REPLY_TOOL.name)
-      const decision = finishedQuietly && result.finalMessage.trim() === ''
-        ? { kind: 'skip' as const }
-        : parseAssistantNotificationDecision(result.finalMessage)
-      const commands = (await readFile(commandCapturePath, 'utf8')).trim().split('\n')
-      expect(commands.filter((command) => command.startsWith('knowledge show weekly-health-insights '))).toHaveLength(1)
-      expect(commands.filter((command) => command === 'knowledge upsert --slug personal-pattern-notifications')).toHaveLength(1)
-      const ledger = parsePersonalPatternNotificationLedger(await readFile(ledgerCapturePath, 'utf8'))
-      expect(ledger).toMatchObject({ version: 1, initialDigestSent: true, reviewedFactorIds: ['yard-work'] })
-      expect(ledger?.results).toHaveLength(1)
-      expect(ledger?.results[0]).toMatchObject({ factorId: 'yard-work', outcomeId: 'hrv', lagDays: 1 })
-      process.stdout.write(`[pattern-history-e2e] ${JSON.stringify({
-        priorFinding, initialDigestSent, slot, decision,
-      })}\n`)
-      if (priorFinding === 'covered') {
-        expect(decision.kind).toBe('skip')
-        expect(ledger?.results[0]?.firstSharedDate).toBeNull()
-      } else {
-        expect(finishedQuietly).toBe(false)
-        expect(decision.kind).toBe('send_message')
-        if (decision.kind !== 'send_message') throw new Error('Expected a genuinely new finding.')
-        expect(decision.text).toMatch(/yard work/iu)
-        expect(decision.text).toMatch(/HRV|heart.rate variability/iu)
-        expect(decision.text).not.toMatch(/coffee|sleep onset|already|again|ledger|weekly insight/iu)
-      }
-    } finally {
-      await removeRealCodexTemporaryPath(workingDirectory)
-      await removeRealCodexTemporaryPaths(config.temporaryPaths)
-    }
-  }, 720_000)
-})
-
-describeRealCodex('real Codex Personal Patterns vocabulary normalization e2e', () => {
-  it('groups clear aliases without notifying for a rename', async () => {
-    const config = await resolveRealCodexE2eConfig()
-    const automation = MURPH_MANAGED_AUTOMATIONS.find(
-      (candidate) => candidate.slug === 'personal-patterns-update',
-    )
-    if (!automation) {
-      throw new Error('Expected the managed Personal Patterns automation.')
-    }
-    const workingDirectory = await mkdtemp(
-      path.join(tmpdir(), 'murph-personal-pattern-vocabulary-e2e-'),
-    )
-
-    try {
-      const binDirectory = path.join(workingDirectory, 'bin')
-      const ledgerCapturePath = path.join(workingDirectory, 'ledger-write.txt')
-      const vocabularyCapturePath = path.join(
-        workingDirectory,
-        'vocabulary-write.txt',
-      )
-      await materializePersonalPatternsVocabularyVaultCli({
-        binDirectory,
-        ledgerCapturePath,
-        vocabularyCapturePath,
-      })
-      const result = await executeRealCodexAppServerTurn({
-        allowFinishWithoutReply: true,
-        approvalPolicy: 'never',
-        baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
-        codexCommand:
-          normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
-        codexHome: config.codexHome,
-        developerInstructions: buildWeeklyHealthInsightDeveloperInstructions(),
-        dynamicTools: [MURPH_FINISH_WITHOUT_REPLY_TOOL],
-        env: config.env,
-        fixtureBinDirectory: binDirectory,
-        model: config.model,
-        modelProvider: config.modelProvider,
-        prompt: [
-          automation.instructions,
-          'Scheduled occurrence context:',
-          '- Current local date: 2026-09-02.',
-          '- This is a controlled synthetic fixture.',
-          '- Complete the normal scheduled decision.',
-        ].join('\n\n'),
-        reasoningEffort: 'medium',
-        sandbox: 'workspace-write',
-        workingDirectory,
-      })
-      const actions = readCapabilityRoutingActions(result.jsonEvents)
-      const commands = actions.filter((action) => action.kind === 'command')
-      const finishCalls = actions.filter(
-        (action) =>
-          action.kind === 'dynamic' &&
-          action.tool === MURPH_FINISH_WITHOUT_REPLY_TOOL.name,
-      )
-
-      expect(
-        commands.filter((action) =>
-          action.command.includes('vault-cli wearables patterns'),
-        ).length,
-      ).toBeGreaterThanOrEqual(2)
-      expect(
-        commands.some((action) =>
-          action.command.includes(
-            'vault-cli knowledge show journal-pattern-vocabulary',
-          ),
-        ),
-      ).toBe(true)
-      expect(
-        commands.some((action) =>
-          action.command.includes(
-            'vault-cli knowledge upsert --slug journal-pattern-vocabulary',
-          ),
-        ),
-      ).toBe(true)
-      expect(
-        commands.filter((action) =>
-          action.command.includes(
-            'vault-cli knowledge upsert --slug personal-pattern-notifications',
-          ),
-        ),
-      ).toHaveLength(1)
-      const vocabularyWrite = await readFile(vocabularyCapturePath, 'utf8')
-      expect(vocabularyWrite).toMatch(/cardio-dance/iu)
-      expect(vocabularyWrite).toMatch(/dancing/iu)
-      expect(vocabularyWrite).toMatch(/dance/iu)
-      expect(vocabularyWrite).toMatch(/"icon":"dance"/iu)
-      expect(vocabularyWrite).toMatch(/physical therapy/iu)
-      expect(vocabularyWrite).toMatch(/pt/iu)
-      const parsedVocabulary = parsePersonalPatternVocabulary(vocabularyWrite)
-      expect(parsedVocabulary).not.toBeNull()
-      const breathingConcept = parsedVocabulary?.concepts.find((concept) =>
-        [concept.id, ...concept.aliases].includes(
-          'evening-breathing-practice',
-        ),
-      )
-      expect(breathingConcept).toBeDefined()
-      expect(
-        breathingConcept?.label.trim().split(/\s+/u).length,
-      ).toBeLessThanOrEqual(3)
-      expect(
-        parsedVocabulary?.concepts.some((concept) =>
-          [concept.id, ...concept.aliases].some((token) => token.includes('--')),
-        ),
-      ).toBe(false)
-      expect(await readFile(ledgerCapturePath, 'utf8')).toMatch(/dance/iu)
-      expect(finishCalls.length).toBeLessThanOrEqual(1)
-      if (result.finalMessage !== '') {
-        expect(JSON.parse(result.finalMessage.trim())).toEqual({
-          kind: 'skip',
-          privateSummary: 'No new Personal Pattern result appeared.',
-        })
-      }
-      process.stdout.write(
-        `[personal-pattern-vocabulary-e2e] ${JSON.stringify({
-          finalMessage: result.finalMessage,
-          patternReads: commands.filter((action) =>
-            action.command.includes('vault-cli wearables patterns'),
-          ).length,
-          vocabularyWrites: 1,
-        })}\n`,
-      )
-    } finally {
-      await removeRealCodexTemporaryPath(workingDirectory)
-      await removeRealCodexTemporaryPaths(config.temporaryPaths)
-    }
-  }, 720_000)
-})
-
 describeRealCodex('real Codex Journal GPT-6 Luna xhigh connected account eligibility e2e', () => {
   it.each([
     { name: 'reads a newly connected mailbox silently on its first pass', accountId: 'gmail_new', toolkit: 'gmail', optedOut: false, ledgerText: '# Journal connected context' },
@@ -18710,122 +18391,6 @@ describeRealCodex('real Codex Journal connected email travel capture e2e', () =>
   }, 720_000)
 })
 
-describeRealCodex(
-  'real Codex weekly health insight evidence fallback e2e',
-  () => {
-    it('falls back from an unavailable personal-pattern report and accepts a usable no-clear report', async () => {
-      const config = await resolveRealCodexE2eConfig()
-      const weeklyHealthInsight = MURPH_MANAGED_AUTOMATIONS.find(
-        (automation) =>
-          automation.automationId
-          === MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID,
-      )
-      if (!weeklyHealthInsight) {
-        throw new Error('Expected the managed weekly health insight automation.')
-      }
-
-      try {
-        for (const patternResult of ['unavailable', 'no-clear'] as const) {
-          const workingDirectory = await mkdtemp(
-            path.join(
-              tmpdir(),
-              `murph-weekly-health-insight-${patternResult}-e2e-`,
-            ),
-          )
-
-          try {
-            const binDirectory = path.join(workingDirectory, 'bin')
-            await materializeWeeklyHealthInsightVaultCli({
-              binDirectory,
-              patternResult,
-            })
-            const result = await executeRealCodexAppServerTurn({
-              allowFinishWithoutReply: true,
-              approvalPolicy: 'never',
-              baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
-              codexCommand:
-                normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
-                ?? undefined,
-              codexHome: config.codexHome,
-              developerInstructions:
-                buildWeeklyHealthInsightDeveloperInstructions(),
-              dynamicTools: [MURPH_FINISH_WITHOUT_REPLY_TOOL],
-              env: {
-                ...config.env,
-                PATH: `${binDirectory}:${config.env.PATH ?? ''}`,
-              },
-              model: config.model,
-              modelProvider: config.modelProvider,
-              prompt: [
-                weeklyHealthInsight.instructions,
-                'Scheduled occurrence context:',
-                '- Current local date: 2026-08-09.',
-                '- The controlled canonical vault fixture has no prior insight ledger and no send-worthy candidate.',
-                '- Recent underlying wearable summaries are available through the normal vault CLI and are stable.',
-                '- Complete the normal evidence pass and terminal scheduled decision.',
-              ].join('\n\n'),
-              reasoningEffort: 'low',
-              sandbox: 'workspace-write',
-              workingDirectory,
-            })
-            const actions = readCapabilityRoutingActions(result.jsonEvents)
-            const patternRead = actions.find((action) =>
-              action.kind === 'command'
-              && action.command.includes('vault-cli wearables patterns')
-            )
-
-            expect(patternRead, patternResult).toBeDefined()
-            if (patternResult === 'unavailable') {
-              const manualRead = actions.find((action) =>
-                action.kind === 'command'
-                && action.eventIndex > (patternRead?.eventIndex ?? Infinity)
-                && /vault-cli (?:experiment|goal|list|meal|search|wearables (?!patterns\b))/u
-                  .test(action.command)
-              )
-              expect(manualRead, patternResult).toBeDefined()
-            } else {
-              expect(patternRead?.kind === 'command' && patternRead.output)
-                .toContain('"stage":"no_clear_pattern"')
-              const recoveryCommands = actions.filter((action) =>
-                action.kind === 'command'
-                && action.eventIndex > (patternRead?.eventIndex ?? Infinity)
-                && /(?:command -v|which |--help|\b(?:brew|npm|pnpm)\b|\binstall\b)/u
-                  .test(action.command)
-              )
-              expect(recoveryCommands, patternResult).toHaveLength(0)
-            }
-
-            expect(result.finalMessage).not.toMatch(
-              /apolog|command (?:failed|failure)|could not run|couldn't run|set ?up|tool (?:failed|failure|unavailable)/iu,
-            )
-            const finishCalls = actions.filter((action) =>
-              action.kind === 'dynamic'
-              && action.tool === MURPH_FINISH_WITHOUT_REPLY_TOOL.name
-            )
-            expect(finishCalls.length, patternResult).toBeLessThanOrEqual(1)
-            expect(
-              result.finalMessage !== '' || finishCalls.length === 1,
-              patternResult,
-            ).toBe(true)
-            if (result.finalMessage !== '') {
-              expect(JSON.parse(result.finalMessage.trim())).toEqual({
-                kind: 'skip',
-                privateSummary:
-                  'No weekly health insight cleared the interestingness bar.',
-              })
-            }
-          } finally {
-            await removeRealCodexTemporaryPath(workingDirectory)
-          }
-        }
-      } finally {
-        await removeRealCodexTemporaryPaths(config.temporaryPaths)
-      }
-    },
-    720_000,
-  )
-})
-
 describeRealCodex('real Codex research scout ongoing interest e2e', () => {
   it('saves research with compressed ledger sources and suppresses repeated research', async () => {
     const config = await resolveRealCodexE2eConfig()
@@ -18994,82 +18559,6 @@ describeRealCodex('real Codex research scout ongoing interest e2e', () => {
   }, 720_000)
 })
 
-describeRealCodex('real Codex Journal and Patterns help e2e', () => {
-  it('recalculates Patterns and explains Journal corrections in plain language', async () => {
-    const config = await resolveRealCodexE2eConfig()
-    const workingDirectory = await mkdtemp(
-      path.join(tmpdir(), 'murph-journal-patterns-help-e2e-'),
-    )
-
-    try {
-      const binDirectory = path.join(workingDirectory, 'bin')
-      await materializeWeeklyHealthInsightVaultCli({
-        binDirectory,
-        patternResult: 'no-clear',
-      })
-      const result = await executeRealCodexAppServerTurn({
-        approvalPolicy: 'never',
-        baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
-        codexCommand:
-          normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
-        codexHome: config.codexHome,
-        developerInstructions: buildDirectConversationDeveloperInstructions(),
-        env: {
-          ...config.env,
-          PATH: `${binDirectory}:${config.env.PATH ?? ''}`,
-        },
-        model: config.model,
-        modelProvider: config.modelProvider,
-        prompt: [
-          'Please recalculate my Patterns now.',
-          'Then explain when Patterns refreshes and how I can correct or delete a Journal entry.',
-        ].join(' '),
-        reasoningEffort: 'low',
-        sandbox: 'workspace-write',
-        workingDirectory,
-      })
-      const actions = readCapabilityRoutingActions(result.jsonEvents)
-      const patternReads = actions.flatMap((action) =>
-        action.kind === 'command' &&
-        action.command.includes('vault-cli wearables patterns')
-          ? [action.command]
-          : [],
-      )
-      const journalWrites = actions.flatMap((action) =>
-        action.kind === 'command' &&
-        /vault-cli event (?:note add|edit|delete)/u.test(action.command)
-          ? [action.command]
-          : [],
-      )
-
-      expect(patternReads).toHaveLength(1)
-      expect(patternReads[0]).toMatch(
-        /vault-cli wearables patterns --date \d{4}-\d{2}-\d{2} --format json/u,
-      )
-      expect(journalWrites).toHaveLength(0)
-      expect(result.finalMessage).toMatch(/Patterns/iu)
-      expect(result.finalMessage).toMatch(/Journal/iu)
-      expect(result.finalMessage).toMatch(/correct|edit|delete|remove/iu)
-      expect(result.finalMessage).toMatch(/ask|message|tell|through Murph/iu)
-      expect(result.finalMessage).toMatch(/13:00|daily|stale|refresh/iu)
-      expect(result.finalMessage).not.toMatch(
-        /open (?:that|the) (?:Journal )?entry|edit button|delete button/iu,
-      )
-      expect(result.finalMessage).not.toMatch(
-        /(?:refreshed|updated) (?:the )?(?:web|page)/iu,
-      )
-      process.stdout.write(
-        `[real-codex] Journal and Patterns help reply: ${JSON.stringify(
-          result.finalMessage,
-        )}\n`,
-      )
-    } finally {
-      await removeRealCodexTemporaryPath(workingDirectory)
-      await removeRealCodexTemporaryPaths(config.temporaryPaths)
-    }
-  }, 720_000)
-})
-
 describeRealCodex('real Codex private Journal capture recovery e2e', () => {
   it('vault pass recovery compacts a live conversation and preserves its task', async () => {
     const config = await resolveRealCodexE2eConfig()
@@ -19100,7 +18589,7 @@ describeRealCodex('real Codex private Journal capture recovery e2e', () => {
     }
   }, 360_000)
 
-  it('vault pass recovery captures actions and reported outcomes as usable Pattern evidence', async () => {
+  it('vault pass recovery captures actions and reported outcomes as structured Journal evidence', async () => {
     const config = await resolveRealCodexE2eConfig()
     const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-pattern-capture-e2e-'))
     try {
@@ -19128,9 +18617,6 @@ describeRealCodex('real Codex private Journal capture recovery e2e', () => {
       const wrist = vault.events.filter(event => /wrist|stiff/iu.test(JSON.stringify(event.attributes)))
       expect(wrist).toHaveLength(1)
       expect(wrist[0]?.tags.some(tag => tag.startsWith('value-'))).toBe(false)
-      const report = buildPersonalPatternReport(vault, { asOf: '2026-09-22' })
-      expect(report.factors.some(factor => factor.observedDays === 2)).toBe(true)
-      expect(report.outcomes.some(outcome => outcome.id.startsWith('subjective-'))).toBe(true)
       expect((await listAutomations({ vaultRoot: workingDirectory })).items).toEqual([])
       process.stdout.write(`[vault-pass-capture] ${JSON.stringify({ factors: factors.length, scoredOutcomes: outcomes.length, unscoredFacts: wrist.length, reply: result.finalMessage })}\n`)
     } finally {
@@ -40684,354 +40170,6 @@ async function materializeHealthCommonsKnowledgeVaultCli(input: {
   await chmod(executablePath, 0o700)
 }
 
-async function materializePersonalPatternsBaselineVaultCli(input: {
-  binDirectory: string
-  commandCapturePath: string
-  initialDigestSent: boolean
-  ledgerCapturePath: string
-  vocabularyCapturePath: string
-  weeklyHistory?: string
-  onlyPrimaryOutcome?: boolean
-}): Promise<void> {
-  await mkdir(input.binDirectory, { recursive: true })
-  const executablePath = path.join(input.binDirectory, 'vault-cli')
-  const report = JSON.stringify({
-    filters: { date: '2026-08-29', windowDays: 120 },
-    report: {
-      asOfDate: '2026-08-29',
-      cells: [
-        {
-          classification: 'pattern',
-          comparisonBasis: 'confirmed_absence',
-          comparisonDays: 16,
-          comparisonMean: 50,
-          delta: 20,
-          deltaPercent: 40,
-          direction: 'higher',
-          exposedDays: 16,
-          exposedMean: 70,
-          factorId: 'yard-work',
-          grade: 'A',
-          lagDays: 1,
-          outcomeId: 'hrv',
-          stage: 'worth_testing',
-        },
-        ...[
-          { outcomeId: 'sleep_score', grade: 'C', count: 6, mean: 72, delta: 8 },
-          { outcomeId: 'readiness_score', grade: 'D', count: 3, mean: 65, delta: 9 },
-          { outcomeId: 'respiratory_rate', grade: 'D', count: 2, mean: 16, delta: -2 },
-        ].map(({ outcomeId, grade, count, mean, delta }) => ({
-          classification: grade === 'C' ? 'pattern' : 'early_signal',
-          comparisonBasis: 'confirmed_absence',
-          comparisonDays: count,
-          comparisonMean: mean,
-          delta,
-          deltaPercent: delta / mean * 100,
-          direction: delta > 0 ? 'higher' : 'lower',
-          exposedDays: count,
-          exposedMean: mean + delta,
-          factorId: 'yard-work',
-          grade,
-          lagDays: 1,
-          outcomeId,
-          stage: grade === 'C' ? 'seen_again' : 'new_clue',
-        })),
-      ].filter((cell) => !input.onlyPrimaryOutcome || cell.outcomeId === 'hrv'),
-      factors: [
-        {
-          id: 'yard-work',
-          kind: 'activity',
-          label: 'Yard work',
-          observedDays: 16,
-        },
-      ],
-      lagDays: 1,
-      outcomes: [
-        { id: 'hrv', label: 'HRV', unit: 'ms' },
-        { id: 'sleep_score', label: 'Sleep score', unit: 'score' },
-        { id: 'readiness_score', label: 'Readiness score', unit: 'score' },
-        { id: 'respiratory_rate', label: 'Respiratory rate', unit: 'breaths/min' },
-      ],
-    },
-  })
-
-  await writeFile(
-    executablePath,
-    [
-      '#!/bin/sh',
-      `printf '%s %s %s %s\\n' "$1" "$2" "$3" "$4" >> ${quoteNutritionShellLiteral(input.commandCapturePath)}`,
-      'case "$*" in',
-      '  *"wearables patterns"*)',
-      `    printf '%s\\n' '${report}'`,
-      '    ;;',
-      '  *"wearables sources list"*)',
-      "    printf '%s\\n' '{\"sources\":[{\"provider\":\"fixture\",\"status\":\"healthy\",\"firstDate\":\"2026-05-02\",\"lastDate\":\"2026-08-29\",\"stalenessVsNewestDays\":0}]}'",
-      '    ;;',
-      '  *"knowledge show personal-pattern-notifications"*)',
-      ...(input.initialDigestSent
-        ? ["    printf '%s\\n' '{\"initialDigestSent\":true,\"results\":[]}'"]
-        : fakeMissingKnowledgePageShow('personal-pattern-notifications')),
-      '    ;;',
-      '  *"knowledge show weekly-health-insights"*)',
-      ...(input.weeklyHistory
-        ? [`    printf '%s\\n' ${quoteNutritionShellLiteral(input.weeklyHistory)}`]
-        : fakeMissingKnowledgePageShow('weekly-health-insights')),
-      '    ;;',
-      '  *"knowledge show journal-pattern-vocabulary"*)',
-      "    printf '%s\\n' '{\"version\":1,\"concepts\":[{\"id\":\"yard-work\",\"label\":\"Yard work\",\"icon\":\"activity\",\"aliases\":[\"yard-work\"]}]}'",
-      '    ;;',
-      '  *"knowledge upsert --slug journal-pattern-vocabulary"*)',
-      '    while [ "$#" -gt 0 ]; do',
-      '      if [ "$1" = "--body" ]; then',
-      '        shift',
-      `        printf '%s\\n' "$1" > ${JSON.stringify(input.vocabularyCapturePath)}`,
-      '        break',
-      '      fi',
-      '      shift',
-      '    done',
-      "    printf '%s\\n' '{\"ok\":true}'",
-      '    ;;',
-      '  *"knowledge upsert --slug personal-pattern-notifications"*)',
-      '    while [ "$#" -gt 0 ]; do',
-      '      if [ "$1" = "--body" ]; then',
-      '        shift',
-      `        printf '%s\\n' "$1" > ${quoteNutritionShellLiteral(input.ledgerCapturePath)}`,
-      '        break',
-      '      fi',
-      '      shift',
-      '    done',
-      "    printf '%s\\n' '{\"ok\":true}'",
-      '    ;;',
-      '  *)',
-      '    printf \'%s\\n\' \'unsupported Personal Patterns fixture command\' >&2',
-      '    exit 64',
-      '    ;;',
-      'esac',
-      '',
-    ].join('\n'),
-    { encoding: 'utf8', mode: 0o700 },
-  )
-  await chmod(executablePath, 0o700)
-}
-
-async function materializePersonalPatternsVocabularyVaultCli(input: {
-  binDirectory: string
-  ledgerCapturePath: string
-  vocabularyCapturePath: string
-}): Promise<void> {
-  await mkdir(input.binDirectory, { recursive: true })
-  const executablePath = path.join(input.binDirectory, 'vault-cli')
-  const rawReport = JSON.stringify({
-    filters: { date: '2026-09-02', windowDays: 120 },
-    report: {
-      asOfDate: '2026-09-02',
-      cells: [
-        personalPatternFixtureCell('cardio-dance'),
-        personalPatternFixtureCell('dancing'),
-        personalPatternFixtureCell('pt'),
-        personalPatternFixtureCell('evening-breathing-practice'),
-        personalPatternFixtureCell('coffee--amount-high'),
-      ],
-      factors: [
-        personalPatternFixtureFactor('cardio-dance', 'Cardio dance'),
-        personalPatternFixtureFactor('dancing', 'Dancing'),
-        personalPatternFixtureFactor('pt', 'Pt', 'intervention'),
-        personalPatternFixtureFactor(
-          'evening-breathing-practice',
-          'Relaxing evening breathing practice',
-          'intervention',
-        ),
-        personalPatternFixtureFactor(
-          'coffee--amount-high',
-          'Coffee · amount high',
-          'intervention',
-        ),
-      ],
-      lagDays: 1,
-      outcomes: [{ id: 'hrv', label: 'HRV', unit: 'ms' }],
-    },
-  })
-  const normalizedReport = JSON.stringify({
-    filters: { date: '2026-09-02', windowDays: 120 },
-    report: {
-      asOfDate: '2026-09-02',
-      cells: [
-        personalPatternFixtureCell('dance'),
-        personalPatternFixtureCell('physical-therapy'),
-        personalPatternFixtureCell('breathing'),
-        personalPatternFixtureCell('coffee--amount-high'),
-      ],
-      factors: [
-        personalPatternFixtureFactor('dance', 'Dance'),
-        personalPatternFixtureFactor(
-          'physical-therapy',
-          'Physical therapy',
-          'intervention',
-        ),
-        personalPatternFixtureFactor('breathing', 'Breathing', 'intervention'),
-        personalPatternFixtureFactor(
-          'coffee--amount-high',
-          'Coffee · amount high',
-          'intervention',
-        ),
-      ],
-      lagDays: 1,
-      outcomes: [{ id: 'hrv', label: 'HRV', unit: 'ms' }],
-    },
-  })
-  const ledger = JSON.stringify({
-    initialDigestSent: true,
-    results: [
-      {
-        comparisonBasis: 'matched_weekday',
-        factorId: 'cardio-dance',
-        firstSharedDate: '2026-08-20',
-        lagDays: 1,
-        lastSeenGrade: 'D',
-        muted: false,
-        outcomeId: 'hrv',
-      },
-      {
-        comparisonBasis: 'matched_weekday',
-        factorId: 'dancing',
-        firstSharedDate: '2026-08-21',
-        lagDays: 1,
-        lastSeenGrade: 'D',
-        muted: false,
-        outcomeId: 'hrv',
-      },
-      {
-        comparisonBasis: 'matched_weekday',
-        factorId: 'pt',
-        firstSharedDate: '2026-08-22',
-        lagDays: 1,
-        lastSeenGrade: 'D',
-        muted: false,
-        outcomeId: 'hrv',
-      },
-      {
-        comparisonBasis: 'matched_weekday',
-        factorId: 'evening-breathing-practice',
-        firstSharedDate: '2026-08-23',
-        lagDays: 1,
-        lastSeenGrade: 'D',
-        muted: false,
-        outcomeId: 'hrv',
-      },
-      {
-        comparisonBasis: 'matched_weekday',
-        factorId: 'coffee--amount-high',
-        firstSharedDate: '2026-08-24',
-        lagDays: 1,
-        lastSeenGrade: 'D',
-        muted: false,
-        outcomeId: 'hrv',
-      },
-    ],
-  })
-
-  await writeFile(
-    executablePath,
-    [
-      '#!/bin/sh',
-      'case "$*" in',
-      '  *"wearables patterns"*)',
-      `    if [ -s ${JSON.stringify(input.vocabularyCapturePath)} ]; then`,
-      `      printf '%s\\n' '${normalizedReport}'`,
-      '    else',
-      `      printf '%s\\n' '${rawReport}'`,
-      '    fi',
-      '    ;;',
-      '  *"wearables sources list"*)',
-      "    printf '%s\\n' '{\"sources\":[{\"provider\":\"fixture\",\"status\":\"healthy\",\"firstDate\":\"2026-05-05\",\"lastDate\":\"2026-09-02\",\"stalenessVsNewestDays\":0}]}'",
-      '    ;;',
-      '  *"knowledge show journal-pattern-vocabulary"*)',
-      `    printf '%s\\n' '${JSON.stringify({
-        version: 1,
-        concepts: [
-          {
-            id: 'breathing',
-            label: 'Relaxing evening breathing practice',
-            icon: 'mind-body',
-            aliases: ['evening-breathing-practice'],
-          },
-          {
-            id: 'dance',
-            label: 'Dance',
-            icon: 'dance',
-            aliases: ['cardio-dance', 'dancing'],
-          },
-          {
-            id: 'physical-therapy',
-            label: 'Physical therapy',
-            icon: 'wellness',
-            aliases: ['pt'],
-          },
-        ],
-      })}'`,
-      '    ;;',
-      '  *"knowledge show personal-pattern-notifications"*)',
-      `    printf '%s\\n' '${ledger}'`,
-      '    ;;',
-      '  *"knowledge upsert --slug journal-pattern-vocabulary"*)',
-      '    while [ "$#" -gt 0 ]; do',
-      '      if [ "$1" = "--body" ]; then',
-      '        shift',
-      `        printf '%s\\n' "$1" > ${JSON.stringify(input.vocabularyCapturePath)}`,
-      '        break',
-      '      fi',
-      '      shift',
-      '    done',
-      "    printf '%s\\n' '{\"ok\":true}'",
-      '    ;;',
-      '  *"knowledge upsert --slug personal-pattern-notifications"*)',
-      `    printf '%s\\n' "$*" > ${JSON.stringify(input.ledgerCapturePath)}`,
-      "    printf '%s\\n' '{\"ok\":true}'",
-      '    ;;',
-      '  *)',
-      '    printf \'unsupported Personal Patterns command: %s\\n\' "$*" >&2',
-      '    exit 64',
-      '    ;;',
-      'esac',
-      '',
-    ].join('\n'),
-    { encoding: 'utf8', mode: 0o700 },
-  )
-  await chmod(executablePath, 0o700)
-}
-
-function personalPatternFixtureCell(factorId: string) {
-  return {
-    classification: 'early_signal',
-    comparisonBasis: 'matched_weekday',
-    comparisonDays: 8,
-    comparisonMean: 50,
-    delta: 10,
-    deltaPercent: 20,
-    direction: 'higher',
-    exposedDays: 8,
-    exposedMean: 60,
-    factorId,
-    grade: 'D',
-    lagDays: 1,
-    outcomeId: 'hrv',
-    stage: 'seen_again',
-  }
-}
-
-function personalPatternFixtureFactor(
-  id: string,
-  label: string,
-  kind = 'activity',
-) {
-  return {
-    id,
-    kind,
-    label,
-    observedDays: 8,
-  }
-}
-
 async function materializeJournalConnectedContextVaultCli(input: {
   binDirectory: string
   commandLogPath?: string
@@ -41050,94 +40188,6 @@ async function materializeJournalConnectedContextVaultCli(input: {
     commandLogPath: input.commandLogPath ?? path.join(input.vaultRoot, 'commands.log'),
     vaultRoot: input.vaultRoot,
   })
-}
-
-async function materializeWeeklyHealthInsightVaultCli(input: {
-  binDirectory: string
-  patternResult: 'no-clear' | 'unavailable'
-}): Promise<void> {
-  await mkdir(input.binDirectory, { recursive: true })
-  const executablePath = path.join(input.binDirectory, 'vault-cli')
-  const personalPatternResult = JSON.stringify({
-    filters: {
-      date: '2026-08-09',
-      windowDays: 120,
-    },
-    report: {
-      asOfDate: '2026-08-09',
-      cells: [{
-        comparisonDays: 18,
-        comparisonMean: 72,
-        delta: 0,
-        deltaPercent: 0,
-        direction: 'flat',
-        exposedDays: 6,
-        exposedMean: 72,
-        factorId: 'activity:strength-training',
-        firstExposedDate: '2026-05-12',
-        lastExposedDate: '2026-08-05',
-        outcomeId: 'recovery:score',
-        repeatedDirection: false,
-        stage: 'no_clear_pattern',
-      }],
-      factors: [{
-        id: 'activity:strength-training',
-        kind: 'activity',
-        label: 'Strength training',
-        observedDays: 6,
-      }],
-      lagDays: 1,
-      notes: [],
-      outcomes: [{
-        id: 'recovery:score',
-        label: 'Recovery score',
-        unit: 'score',
-      }],
-      repeatableCellCount: 0,
-      testedCellCount: 1,
-      windowDays: 120,
-    },
-  })
-  const patternCommand = input.patternResult === 'unavailable'
-    ? [
-        '    printf \'%s\\n\' \'personal-pattern report unavailable\' >&2',
-        '    exit 69',
-      ]
-    : [
-        `    printf '%s\\n' '${personalPatternResult}'`,
-        '    exit 0',
-      ]
-  const canonicalSummary = 'No material change in the available canonical period.'
-
-  await writeFile(
-    executablePath,
-    [
-      '#!/bin/sh',
-      'case "$*" in',
-      '  *"wearables patterns"*)',
-      ...patternCommand,
-      '    ;;',
-      '  *"knowledge show weekly-health-insights"*)',
-      ...fakeMissingKnowledgePageShow('weekly-health-insights'),
-      '    ;;',
-      '  *"knowledge append-section weekly-health-insights"*)',
-      '    printf \'%s\\n\' \'{"ok":true,"status":"appended"}\'',
-      '    ;;',
-      '  *"wearables sources list"*)',
-      '    printf \'%s\\n\' \'{"sources":[{"provider":"fixture","status":"healthy","lastDate":"2026-08-09","stalenessVsNewestDays":0}]}\'',
-      '    ;;',
-      '  *"wearables"*|*"experiment"*|*"goal"*|*"list"*|*"search"*|*"meal"*)',
-      `    printf '%s\\n' '${JSON.stringify({ data: [], summary: canonicalSummary })}'`,
-      '    ;;',
-      '  *)',
-      '    printf \'%s\\n\' \'{"data":[],"ok":true}\'',
-      '    ;;',
-      'esac',
-      '',
-    ].join('\n'),
-    { encoding: 'utf8', mode: 0o700 },
-  )
-  await chmod(executablePath, 0o700)
 }
 
 async function materializeProductUpdatesFixture(input: {

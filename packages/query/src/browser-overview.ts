@@ -39,13 +39,3 @@ export type {
   OverviewWeeklySampleSummary,
   OverviewWeeklyStat,
 } from "./overview-weekly-stats.ts";
-export type {
-  PersonalPatternCell,
-  PersonalPatternClassification,
-  PersonalPatternFactor,
-  PersonalPatternGrade,
-  PersonalPatternIcon,
-  PersonalPatternOutcome,
-  PersonalPatternReport,
-  PersonalPatternStage,
-} from "./personal-patterns.ts";

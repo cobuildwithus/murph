@@ -456,49 +456,6 @@ test("Journal combines exercises across grouped activity sessions", () => {
   ]);
 });
 
-test("Journal groups activity aliases with the shared vocabulary", () => {
-  const view = buildJournalView(
-    createVaultReadModel({
-      entities: [
-        event(
-          "dance_1",
-          "activity_session",
-          "2026-08-25T17:30:00.000Z",
-          { activityType: "dancing", durationMinutes: 30 },
-          "Dancing",
-        ),
-        event(
-          "dance_2",
-          "activity_session",
-          "2026-08-25T18:00:00.000Z",
-          { activityType: "cardio_dance", durationMinutes: 25 },
-          "Cardio dance",
-        ),
-      ],
-      vaultRoot: "test://journal-activity-vocabulary",
-    }),
-    [],
-    {
-      asOf: "2026-08-25T22:00:00.000Z",
-      vocabulary: {
-        concepts: [
-          {
-            aliases: ["cardio-dance", "dancing"],
-            icon: "dance",
-            id: "dance",
-            label: "Dance",
-          },
-        ],
-        version: 1,
-      },
-    },
-  );
-
-  assert.equal(view.eventCount, 1);
-  assert.equal(view.days[0]?.events[0]?.title, "Dance");
-  assert.equal(view.days[0]?.events[0]?.summary, "55 min across 2 sessions");
-});
-
 test("Journal groups deterministic activity aliases without vocabulary", () => {
   const view = buildJournalView(
     createVaultReadModel({

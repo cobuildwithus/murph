@@ -18,11 +18,6 @@ export const metadata: Metadata = {
 
 const OPS_TOOLS = [
   {
-    description: "Review de-identified Sol suggestions for improving the deterministic Patterns engine.",
-    href: "/ops/pattern-audits",
-    label: "Pattern audits",
-  },
-  {
     description:
       "Ask one member's Murph for a private diagnostic or one direct message.",
     href: "/ops/tasks",

@@ -11,10 +11,6 @@
     "relevanceTags": [
       "patterns"
     ],
-    "sourcePullRequests": [],
-    "tryIt": {
-      "href": "/patterns",
-      "label": "View your patterns"
-    }
+    "sourcePullRequests": []
   }
 }

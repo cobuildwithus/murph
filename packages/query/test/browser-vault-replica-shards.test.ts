@@ -30,6 +30,21 @@ import {
   type BrowserVaultReplica,
 } from "../src/browser.ts";
 
+test("legacy Patterns payloads are ignored without losing Journal data", async () => {
+  const replica = createReplica();
+  const legacy = { ...replica, personalPatterns: { malformed: "retired feature" } };
+  const parsed = parseBrowserVaultReplica(legacy);
+  assert.equal("personalPatterns" in parsed, false);
+  assert.deepEqual(parsed.journal, replica.journal);
+  const shards = await splitBrowserVaultReplica(replica);
+  const parsedCore = parseBrowserVaultCoreShard({
+    ...shards.core,
+    personalPatterns: { malformed: "retired feature" },
+  });
+  assert.equal("personalPatterns" in parsedCore, false);
+  assert.deepEqual(parsedCore.journal, replica.journal);
+});
+
 test("browser vault replicas split into independently parseable core, metrics index, buckets, and labs shards", async () => {
   const replica = createReplica();
   const outcome = createCurrentOutcome(0);

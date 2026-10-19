@@ -19,8 +19,6 @@ export const HOSTED_AUTOMATION_LOSS_RUNTIME_THRESHOLD = 1;
 export const HOSTED_AUTOMATION_LOSS_WINDOW_MS = 6 * 60 * 60_000;
 export const HOSTED_AUTOMATION_LOSS_REMINDER_INTERVAL_MS = 6 * 60 * 60_000;
 
-// Personal Patterns has its own per-occurrence alert.
-const PERSONAL_PATTERNS_AUTOMATION_SLUG = "personal-patterns-update";
 const USAGE_LIMIT_ERROR_CODE = "ASSISTANT_CODEX_USAGE_LIMIT";
 // Member-created automation slugs can contain personal text. Only managed
 // slugs and known error codes leave the diagnostic database in an email.
@@ -64,7 +62,6 @@ export async function readHostedAutomationLossHealth(input: {
       FROM hosted_runtime_log
       WHERE at >= $1 AND at <= $2
         AND event_code = 'assistant.automation_detail'
-        AND redacted_json->>'failureAutomationSlug' IS DISTINCT FROM $4
         AND (
           (redacted_json->>'type' = 'cron.occurrence.expired'
             AND CASE WHEN jsonb_typeof(redacted_json->'failurePriorFailureCount') = 'number'
@@ -72,7 +69,7 @@ export async function readHostedAutomationLossHealth(input: {
           OR (redacted_json->>'type' = 'cron.job.completed'
             AND redacted_json->>'failureRunOutcome' = 'failed'
             AND redacted_json->'failureRetryScheduled' = 'false'::jsonb
-            AND coalesce(redacted_json->>'failureErrorCode', error_code, '') <> $5)
+            AND coalesce(redacted_json->>'failureErrorCode', error_code, '') <> $4)
         )
     )
     SELECT
@@ -83,7 +80,7 @@ export async function readHostedAutomationLossHealth(input: {
     FROM lost
     GROUP BY 1
     ORDER BY count(*) DESC, 1
-  `, [...window, EMAIL_AUTOMATION_SLUGS, PERSONAL_PATTERNS_AUTOMATION_SLUG, USAGE_LIMIT_ERROR_CODE]);
+  `, [...window, EMAIL_AUTOMATION_SLUGS, USAGE_LIMIT_ERROR_CODE]);
   const runtimeCount = Number(lost.rows[0]?.totalRuntimeCount ?? 0);
   const anomalous = runtimeCount >= HOSTED_AUTOMATION_LOSS_RUNTIME_THRESHOLD;
   const failed = anomalous
@@ -155,7 +152,7 @@ export async function runHostedAutomationLossAlertMonitor(input: {
     }),
     buildMessage: ({ health, now }) => [
       `Scheduled runs lost outright: ${health.lostRunCount} across ${health.runtimeCount} runtimes in the trailing ${HOSTED_AUTOMATION_LOSS_WINDOW_MS / 3_600_000} hours.`,
-      "Each run failed and expired after its retry window, or failed with no retry left, so the member never received it. Delayed runs that are still retrying are not counted. Personal Patterns has its own alert.",
+      "Each run failed and expired after its retry window, or failed with no retry left, so the member never received it. Delayed runs that are still retrying are not counted.",
       "By automation:",
       ...health.automations.map(row => `${row.automation}: ${row.lostRunCount} lost runs across ${row.runtimeCount} runtimes.`),
       "Failed scheduled attempts in the window by error code:",

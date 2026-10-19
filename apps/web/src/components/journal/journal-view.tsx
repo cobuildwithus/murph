@@ -61,25 +61,14 @@ import { cn } from "@/src/lib/utils";
 
 const JOURNAL_WINDOW_DAYS = 7;
 
-export interface JournalInsight {
-  date: string;
-  detail: string;
-  href: string;
-  id: string;
-  label: "Early signal" | "Observation" | "Pattern";
-  title: string;
-}
-
 export function JournalViewContent({
   asOfDate,
   contactOptions = [],
-  insights = [],
   isRefreshing = false,
   journal,
 }: {
   asOfDate?: string;
   contactOptions?: readonly MurphContactOption[];
-  insights?: JournalInsight[];
   isRefreshing?: boolean;
   journal: JournalView;
 }) {
@@ -122,10 +111,6 @@ export function JournalViewContent({
   const visibleDates = useMemo(
     () => [...selectedDates].reverse(),
     [selectedDates],
-  );
-  const visibleInsights = insights.filter(
-    (insight) =>
-      insight.date >= selectedWindowStart && insight.date <= selectedWindowEnd,
   );
 
   return (
@@ -222,9 +207,6 @@ export function JournalViewContent({
                 mode="desktop"
                 today={today}
               />
-              {visibleInsights.length > 0 ? (
-                <WeeklyInsights insights={visibleInsights} />
-              ) : null}
               <JournalEntryActions contactOptions={contactOptions} />
             </aside>
           </div>
@@ -383,44 +365,6 @@ function JournalStatusState({
         title={title}
         tone={tone}
       />
-    </section>
-  );
-}
-
-function WeeklyInsights({ insights }: { insights: JournalInsight[] }) {
-  return (
-    <section aria-label="Weekly insights" className="flex flex-col gap-3">
-      <h2 className="font-serif text-xl font-semibold tracking-tight text-foreground lg:hidden">
-        From these 7 days
-      </h2>
-      <div className="flex flex-col gap-3">
-        {insights.map((insight) => (
-          <Link
-            className="group flex flex-col gap-3 rounded-xl bg-sage-soft p-[22px] transition-colors hover:bg-sage-soft/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            href={insight.href}
-            key={insight.id}
-          >
-            <span className="flex items-center justify-between gap-4">
-              <span className="font-mono text-[10px] uppercase leading-[15px] tracking-[0.11em] text-primary">
-                {insight.label}
-              </span>
-              <ArrowRight
-                className="size-4 shrink-0 text-primary transition-transform group-hover:translate-x-0.5"
-                aria-hidden="true"
-              />
-            </span>
-            <span className="font-serif text-[22px] font-semibold leading-7 tracking-[-0.012em] text-foreground">
-              {insight.title}
-            </span>
-            <span className="text-[13px] leading-5 text-foreground/80">
-              {insight.detail}
-            </span>
-            <span className="text-[13px] font-semibold leading-[19px] text-primary">
-              See evidence
-            </span>
-          </Link>
-        ))}
-      </div>
     </section>
   );
 }

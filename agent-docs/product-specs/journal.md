@@ -79,7 +79,7 @@ Factor and context notes use a stable `key-*` tag and explicit `happened` or
 `value-*` containing a reported 0–10 score or a supported reported level.
 Numeric ratings and verbal levels use distinct outcome keys so their different
 scales are never combined. Unscored symptoms and relative changes remain Journal facts without fabricated
-scores; the Patterns reader cannot use them as scored outcomes. Completed
+scores. Completed
 actions are factors, not subjective outcomes. Missing reports remain unknown.
 
 Murph does not announce routine saves. It asks a private question only when an
@@ -91,7 +91,7 @@ Automatic capture always writes to the member's private Journal. An
 authenticated group can propose a clear fact about its sender after the member
 accepts one private global choice. Unclear facts get one private question. A
 member can exclude one group or all groups. The group never receives private
-Journal or Patterns data.
+Journal data.
 
 Environment remains the owner of current Environment values. Each real value
 change also creates one idempotent canonical `journal-context` event. Journal
@@ -220,8 +220,7 @@ main sleep. With an explicit main sleep, a short unlabeled session stays a nap.
 A long duplicate stays with main sleep instead of becoming a nap.
 
 Repeated activities of the same kind on one day become one display event. The
-event keeps all source sessions and shows their combined time. Personal
-Patterns still receives the full source records. Journal hides static profile
+event keeps all source sessions and shows their combined time. Journal hides static profile
 records and total-sleep metrics already represented by a sleep session. When
 two providers expose the same daily score, Journal uses the provider's product
 term, such as Oura Readiness or Whoop Recovery, without showing a duplicate.
@@ -275,9 +274,7 @@ Approximate periods show `Morning`, `Afternoon`, `Evening`, or `Night`.
 Full-day notes show `All day`. Unknown times leave the time column empty.
 Period sorting anchors order rows without displaying invented clock times.
 
-The right rail shows a small calendar, seven-day sleep and activity statistics,
-and a current Personal Pattern when one is ready. A Pattern is an insight about
-the week, not a health event, so it does not appear on the daily timeline.
+The right rail shows a small calendar and seven-day sleep and activity statistics.
 Historical statistics name the selected date range. Chart weekday labels keep
 their calendar date in every browser time zone. The calendar marks its
 selected end date separately from today, including for assistive technology. The
@@ -304,8 +301,7 @@ and stops at the projection's bounded history window. Top controls offer Today
 and a native calendar drawer. Tapping an entry opens a native detail drawer
 with its summary, metrics, additional details, and source records. Seven-day
 summary values use main sleep and grouped activity once. Additions and
-corrections remain conversational. Home and Personal Patterns keep their
-separate presentation owners.
+corrections remain conversational. Home keeps its separate presentation owner.
 
 Native feed previews use at most three lines. The entry drawer retains the full
 summary, and long secondary source text expands on demand. Date-only records

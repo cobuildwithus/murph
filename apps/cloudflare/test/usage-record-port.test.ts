@@ -36,9 +36,9 @@ const limit = HOSTED_USAGE_RECORD_BODY_LIMIT_BYTES;
 const roots = [
   "goal list", "family list", "food list", "protocol list", "regimen list",
   "recipe list", "provider list", "genetics list", "automation list", "habitat list",
-  "allergy list", "condition list",
+  "allergy list", "condition list", "event list",
   "wearables activity list", "wearables body list", "wearables day", "wearables drift",
-  "wearables latest", "wearables metric latest", "wearables metric trend", "wearables patterns",
+  "wearables latest", "wearables metric latest", "wearables metric trend",
   "wearables recovery list", "wearables sleep list", "wearables sleep pattern", "wearables sources list",
 ];
 

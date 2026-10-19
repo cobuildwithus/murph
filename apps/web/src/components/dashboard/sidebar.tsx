@@ -5,7 +5,6 @@ import { usePathname, useRouter } from "next/navigation";
 import {
   Activity,
   BookOpen,
-  ChartSpline,
   ChevronsUpDown,
   FlaskConical,
   Home,
@@ -71,12 +70,6 @@ const navItems: {
     href: "/journal",
     matchPrefix: "/journal",
     icon: BookOpen,
-  },
-  {
-    label: "Patterns",
-    href: "/patterns",
-    matchPrefix: "/patterns",
-    icon: ChartSpline,
   },
   {
     label: "Environment",

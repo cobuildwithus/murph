@@ -190,7 +190,7 @@ and required refresh work. Manifest/status subspans remain inclusive; do not add
 them to their parent spans or omit the extra preflight from workflow costs.
 
 Sleep-pattern remains outside this patch because it also owns current timezone
-metadata capture. `buildPersonalPatternReportRuntime()` is untouched. See the
+metadata capture. See the
 [ordinary-read and whole-rebuild proof](../vault-usecases/bench/global-projection.md)
 for the eight-reader oracle, real CLI/assistant gates, exact byte comparisons,
 phase counts and paired workflow measurement. Parent evidence is required before
@@ -211,9 +211,7 @@ explicit global query still performs its necessary validation/publication work.
 Generic entity queries and other health collections keep their original policy.
 
 Browser Vault builds one default-visible wearable bundle for source health and
-the assistant summary. Its private invocation also reuses that bundle for Personal
-Patterns only when filtering removed no entities. Otherwise Personal Patterns
-retains a separate raw-input bundle. `buildWearableAssistantSummaryFromBundle()`
+the assistant summary. `buildWearableAssistantSummaryFromBundle()`
 expects an already-filtered normal bundle; the existing public vault wrapper
 still performs the same filtering and returns the complete original summary.
 There is no persistent cache. Raw/default visibility, journal input, cancellation

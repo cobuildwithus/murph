@@ -248,17 +248,6 @@ export function JournalStudy() {
       <section aria-label="Journal ready state" inert>
         <JournalViewContent
           asOfDate="2026-06-13"
-          insights={[
-            {
-              date: "2026-06-12",
-              detail:
-                "Late caffeine and shorter sleep moved together in your data.",
-              href: "/patterns",
-              id: "caffeine-sleep",
-              label: "Pattern",
-              title: "Late caffeine",
-            },
-          ]}
           journal={JOURNAL_STUDY_DATA}
         />
       </section>

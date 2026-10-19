@@ -187,15 +187,14 @@ test("Sidebar exposes primary destinations without Voice or the internal Overvie
   assert.match(markup, />Journal<\/a>/);
   assert.doesNotMatch(markup, /href="\/voice"/);
   assert.doesNotMatch(markup, />Voice<\/a>/);
-  assert.match(markup, /href="\/patterns"/);
-  assert.match(markup, />Patterns<\/a>/);
+  assert.doesNotMatch(markup, /href="\/patterns"/);
+  assert.doesNotMatch(markup, />Patterns<\/a>/);
   assert.doesNotMatch(markup, /href="\/overview"/);
   assert.doesNotMatch(markup, />Overview<\/a>/);
 });
 
 test.each([
   ["/journal", "Journal"],
-  ["/patterns", "Patterns"],
 ])("Sidebar marks %s as the active primary destination", (pathname, label) => {
   mocks.usePathname.mockReturnValue(pathname);
 
