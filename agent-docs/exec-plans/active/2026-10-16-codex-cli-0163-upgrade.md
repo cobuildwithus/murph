@@ -283,3 +283,16 @@ Updated: 2026-10-18
   cases 14 passed (01:41:58Z-01:42:43Z), including unfinished empty, media-only,
   and no-reply replacements, the explicit-disable completed-answer baseline, and
   WebSocket discard and ignore.
+- Host Support run `39184625416` on `c7e4d65d`: besides the route inventory
+  (fixed in `4a1420aa`), job `117844621409` "Production runner bundle budget"
+  ended with "The operation was canceled." at 01:56:44Z, before any one-vCPU
+  latency sample. The candidate's `codex0.163.0-live1` base tag is unpublished,
+  so the step compiled patched Codex from source; that compile had reached the
+  final crates (`codex-exec` at 01:40:42Z) when `ELIFECYCLE`, Docker
+  `context canceled`, and the step cancellation followed at 01:56:40-42Z, 33m18s
+  into the 90-minute base-build timeout and far inside the 195-minute step
+  limit. No script, Docker, or job timeout explains it, the run itself was not
+  cancelled, and the check annotation names no cause. Historical from-source
+  base builds take 31-47 minutes. Root cause is not established; resource
+  exhaustion on this heavier two-checkout job is an unproven hypothesis. No
+  code or budget change was made; the next exact-head run re-executes it.
