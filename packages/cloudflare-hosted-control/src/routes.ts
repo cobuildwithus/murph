@@ -8,6 +8,9 @@ export const CLOUDFLARE_HOSTED_CONTROL_MEAL_PHOTO_KEY_HEADER =
   "x-murph-meal-photo-key";
 export const CLOUDFLARE_HOSTED_CONTROL_MEAL_PHOTO_SHA256_HEADER =
   "x-murph-meal-photo-sha256";
+/** A weekly game photo's own name: `<sha256 of the plaintext>.<jpg|heic>`. */
+export const CLOUDFLARE_HOSTED_CONTROL_GAME_MEDIA_ID_HEADER =
+  "x-murph-game-media-id";
 export const CLOUDFLARE_HOSTED_CONTROL_ENVIRONMENT_VOICE_CAPTURE_ID_HEADER =
   "x-murph-environment-voice-capture-id";
 export const CLOUDFLARE_HOSTED_CONTROL_ENVIRONMENT_VOICE_KEY_HEADER =
@@ -31,6 +34,22 @@ export const CLOUDFLARE_HOSTED_CONTROL_USER_ROUTE_SPECS = {
   environmentRealtimeCall: {
     method: "POST",
     suffix: "environment-realtime/call",
+  },
+  gameMediaDelete: {
+    method: "DELETE",
+    suffix: "game-media/delete",
+  },
+  gameMediaRead: {
+    method: "GET",
+    suffix: "game-media/read",
+  },
+  gameMediaStage: {
+    method: "POST",
+    suffix: "game-media/stage",
+  },
+  gameMediaStat: {
+    method: "GET",
+    suffix: "game-media/stat",
   },
   mealPhotoStage: {
     method: "POST",
@@ -118,6 +137,13 @@ export function buildCloudflareHostedControlMealPhotoStagePath(userId: string): 
 
 export function buildCloudflareHostedControlMealPhotoDeletePath(userId: string): string {
   return buildCloudflareHostedControlUserRoutePath("mealPhotoDelete", userId);
+}
+
+export function buildCloudflareHostedControlGameMediaPath(
+  routeName: "gameMediaDelete" | "gameMediaRead" | "gameMediaStage" | "gameMediaStat",
+  userId: string,
+): string {
+  return buildCloudflareHostedControlUserRoutePath(routeName, userId);
 }
 
 export function buildCloudflareHostedControlEnvironmentVoiceStagePath(

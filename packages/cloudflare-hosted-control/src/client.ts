@@ -2,6 +2,7 @@ import { parseHostedRuntimeResourcePurge, parseHostedRuntimeResourcePurgeRespons
 import { parseHostedVoiceControlRequest, parseHostedVoiceControlResponse, type HostedVoiceControlRequest, type HostedVoiceControlResponse } from "@murphai/hosted-execution";
 import {
   parseHostedCipherEnvelope,
+  parseHostedSecureBoxEnvelope,
   parseHostedUserRecipientPublicKeyJwk,
   parseHostedBrowserSessionKeyEnvelope,
   type HostedBrowserSessionKeyEnvelope,
@@ -53,6 +54,7 @@ import {
   CLOUDFLARE_HOSTED_CONTROL_ENVIRONMENT_VOICE_CAPTURE_ID_HEADER,
   CLOUDFLARE_HOSTED_CONTROL_ENVIRONMENT_VOICE_KEY_HEADER,
   CLOUDFLARE_HOSTED_CONTROL_ENVIRONMENT_VOICE_SHA256_HEADER,
+  CLOUDFLARE_HOSTED_CONTROL_GAME_MEDIA_ID_HEADER,
   CLOUDFLARE_HOSTED_CONTROL_MEAL_PHOTO_CAPTURE_ID_HEADER,
   CLOUDFLARE_HOSTED_CONTROL_MEAL_PHOTO_KEY_HEADER,
   CLOUDFLARE_HOSTED_CONTROL_MEAL_PHOTO_SHA256_HEADER,
@@ -61,6 +63,7 @@ import {
   buildCloudflareHostedControlEnvironmentRealtimeCallPath,
   buildCloudflareHostedControlEnvironmentVoiceDeletePath,
   buildCloudflareHostedControlEnvironmentVoiceStagePath,
+  buildCloudflareHostedControlGameMediaPath,
   buildCloudflareHostedControlMealPhotoDeletePath,
   buildCloudflareHostedControlMealPhotoStagePath,
   buildCloudflareHostedControlRuntimeEnsureProcessingPath,
@@ -265,6 +268,12 @@ export interface CloudflareHostedControlClient {
     mealPhotoKey: string;
     userId: string;
   }): Promise<void>;
+  /** Weekly game photos: Web seals them; the Worker stores the sealed envelope. */
+  deleteGameMedia(input: { mediaId: string; userId: string }): Promise<void>;
+  putGameMedia(input: { envelope: string; mediaId: string; userId: string }): Promise<void>;
+  /** The sealed envelope, or null when there's none under that name. */
+  readGameMedia(input: { mediaId: string; userId: string }): Promise<string | null>;
+  statGameMedia(input: { mediaId: string; userId: string }): Promise<{ byteLength: number } | null>;
   deleteEnvironmentVoice(input: {
     audioKey: string;
     userId: string;
@@ -614,6 +623,57 @@ export function createCloudflareHostedControlClient(
         },
         timeoutMs: options.timeoutMs,
       });
+    },
+    async deleteGameMedia(input) {
+      const userId = requireCloudflareHostedControlUserId(input.userId);
+      await requestHostedExecutionAuthorizedJson({
+        baseUrl, boundUserId: userId, fetchImpl, getAuthorizationHeader,
+        label: "game media deletion",
+        parse: (value) => requireDeleted(value, "Cloudflare game media delete result"),
+        path: buildCloudflareHostedControlGameMediaPath("gameMediaDelete", userId),
+        request: { headers: gameMediaHeaders(input.mediaId), method: "DELETE" },
+        timeoutMs: options.timeoutMs,
+      });
+    },
+    async putGameMedia(input) {
+      const userId = requireCloudflareHostedControlUserId(input.userId);
+      const envelope = JSON.stringify(parseHostedSecureBoxEnvelope(JSON.parse(input.envelope), "Cloudflare game media envelope"));
+      await requestHostedExecutionAuthorizedJson({
+        baseUrl, boundUserId: userId, fetchImpl, getAuthorizationHeader,
+        label: "game media staging",
+        parse: (value) => requireBoolean(requireRecord(value, "Cloudflare game media stage result").stored, "Cloudflare game media stage result stored"),
+        path: buildCloudflareHostedControlGameMediaPath("gameMediaStage", userId),
+        request: {
+          body: envelope,
+          headers: { ...gameMediaHeaders(input.mediaId), "content-type": "application/json; charset=utf-8" },
+          method: "POST",
+        },
+        timeoutMs: options.timeoutMs,
+      });
+    },
+    async readGameMedia(input) {
+      const userId = requireCloudflareHostedControlUserId(input.userId);
+      return await nullWhenNotFound(requestHostedExecutionAuthorizedJson({
+        baseUrl, boundUserId: userId, fetchImpl, getAuthorizationHeader,
+        label: "game media read",
+        parse: (value) => JSON.stringify(parseHostedSecureBoxEnvelope(value, "Cloudflare game media envelope")),
+        path: buildCloudflareHostedControlGameMediaPath("gameMediaRead", userId),
+        request: { headers: gameMediaHeaders(input.mediaId), method: "GET" },
+        timeoutMs: options.timeoutMs,
+      }));
+    },
+    async statGameMedia(input) {
+      const userId = requireCloudflareHostedControlUserId(input.userId);
+      return await nullWhenNotFound(requestHostedExecutionAuthorizedJson({
+        baseUrl, boundUserId: userId, fetchImpl, getAuthorizationHeader,
+        label: "game media stat",
+        parse: (value) => ({
+          byteLength: requireNumber(requireRecord(value, "Cloudflare game media stat").byteLength, "Cloudflare game media stat byteLength"),
+        }),
+        path: buildCloudflareHostedControlGameMediaPath("gameMediaStat", userId),
+        request: { headers: gameMediaHeaders(input.mediaId), method: "GET" },
+        timeoutMs: options.timeoutMs,
+      }));
     },
     async deleteEnvironmentVoice(input) {
       const userId = requireCloudflareHostedControlUserId(input.userId);
@@ -968,6 +1028,30 @@ function parseCloudflareHostedControlMealPhotoDeleteResult(value: unknown): void
   const record = requireRecord(value, "Cloudflare meal-photo delete result");
   if (record.deleted !== true) {
     throw new TypeError("Cloudflare meal-photo delete result deleted must be true.");
+  }
+}
+
+const GAME_MEDIA_ID_PATTERN = /^[a-f0-9]{64}\.(?:heic|jpg)$/u;
+
+function gameMediaHeaders(mediaId: string): Record<string, string> {
+  if (typeof mediaId !== "string" || !GAME_MEDIA_ID_PATTERN.test(mediaId)) {
+    throw new TypeError("Cloudflare game media id must be <sha256>.<jpg|heic>.");
+  }
+  return { [CLOUDFLARE_HOSTED_CONTROL_GAME_MEDIA_ID_HEADER]: mediaId };
+}
+
+function requireDeleted(value: unknown, label: string): void {
+  if (requireRecord(value, label).deleted !== true) {
+    throw new TypeError(`${label} deleted must be true.`);
+  }
+}
+
+async function nullWhenNotFound<T>(request: Promise<T>): Promise<T | null> {
+  try {
+    return await request;
+  } catch (error) {
+    if (error instanceof HostedExecutionHttpResponseError && error.status === 404) return null;
+    throw error;
   }
 }
 

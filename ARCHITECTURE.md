@@ -5470,6 +5470,11 @@ free; the flag and allowlist then hide every route. The invite preview and
 time-travel routes return 404 in real production; they move a per-game clock
 (`game.dev_clock_offset_ms`, added to the database clock as that game's "now"
 for writes, settles and views) and never rewrite dates. Media is photos only
-(JPEG or HEIC); keys are the uploader's prefix plus the SHA-256 of the bytes, so
-a retried upload lands on the same key. Media is local-disk only until a Worker
-game-media path exists.
+(JPEG or HEIC, at most 4 MiB); keys are the uploader's prefix plus the SHA-256
+of the bytes, so a retried upload lands on the same key. Deployed, Web seals each
+photo under the uploader's control-domain key (`hosted-member-private-field`,
+scope `weekly-game`, bound to the key) and the Worker keeps only that sealed
+envelope in R2 under `hosted-game-media/objects/<namespace>/`, through the
+member-bound `game-media/{stage,read,stat,delete}` control routes; players need
+no hosted workspace. Account deletion clears that prefix. Local stacks keep
+plain files on disk.

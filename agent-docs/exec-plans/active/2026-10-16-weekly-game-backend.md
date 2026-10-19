@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-10-16
-Updated: 2026-10-16
+Updated: 2026-10-18
 
 ## Goal
 
@@ -25,8 +25,7 @@ Updated: 2026-10-16
   local-disk media, invite page and its presentation study, product spec, and
   architecture entry.
 - Out of scope: groups, league, Murph host tools, declining or cancelling
-  invites, hosted media storage, EXIF stripping, recaps, bankruptcy, and any
-  production enablement.
+  invites, EXIF stripping, recaps, bankruptcy, and any production enablement.
 
 ## Constraints
 
@@ -49,6 +48,7 @@ Updated: 2026-10-16
 2. Rules, time, views, and the service write path.
 3. HTTP resource routes, content-addressed media, invite page.
 4. Docs, design proof, PR evidence, final ReviewGPT.
+5. Hosted photo storage so deployed games can post photos.
 
 ## Decisions
 
@@ -78,6 +78,13 @@ Updated: 2026-10-16
 - Several live games per person, one per opponent (owner's call), replacing
   one live game per person; tickets get a derived 14-day use-by; a settled
   1v1's rematch is addressed to the other player; the latest typed label wins.
+- Hosted photos: Web seals each photo under the uploader's control-domain key
+  and the Worker keeps only the sealed envelope in R2 (new `game-media`
+  control routes, `hosted-game-media/objects/` prefix cleared by account
+  deletion). The meal-photo route wasn't reusable (JPEG-only, capture-keyed,
+  runner-read, 31-day lifecycle), and Worker-side encryption would need a
+  hosted workspace players don't have. The upload cap drops to 4 MiB to fit
+  Vercel's body limits; the phone sends about 1 MiB.
 
 ## Verification
 

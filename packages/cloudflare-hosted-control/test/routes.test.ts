@@ -10,6 +10,7 @@ import {
   buildCloudflareHostedControlEnvironmentRealtimeCallPath,
   buildCloudflareHostedControlEnvironmentVoiceDeletePath,
   buildCloudflareHostedControlEnvironmentVoiceStagePath,
+  buildCloudflareHostedControlGameMediaPath,
   buildCloudflareHostedControlMealPhotoDeletePath,
   buildCloudflareHostedControlMealPhotoStagePath,
   buildCloudflareHostedControlRuntimeEnsureProcessingPath,
@@ -51,6 +52,16 @@ describe("cloudflare hosted control routes", () => {
     expect(buildCloudflareHostedControlMealPhotoDeletePath("user/a b")).toBe(
       "/internal/users/user%2Fa%20b/meal-photos/delete",
     );
+    for (const [routeName, suffix] of [
+      ["gameMediaDelete", "game-media/delete"],
+      ["gameMediaRead", "game-media/read"],
+      ["gameMediaStage", "game-media/stage"],
+      ["gameMediaStat", "game-media/stat"],
+    ] as const) {
+      const built = buildCloudflareHostedControlGameMediaPath(routeName, "user/a b");
+      expect(built).toBe(`/internal/users/user%2Fa%20b/${suffix}`);
+      expect(matchCloudflareHostedControlUserRoutePath(routeName, built)).toEqual({ userId: "user%2Fa%20b" });
+    }
     expect(buildCloudflareHostedControlEnvironmentVoiceStagePath("user/a b")).toBe(
       "/internal/users/user%2Fa%20b/environment-voice/stage",
     );
@@ -167,6 +178,10 @@ describe("cloudflare hosted control routes", () => {
       environmentRealtimeCall: { method: "POST", suffix: "environment-realtime/call" },
       environmentVoiceDelete: { method: "DELETE", suffix: "environment-voice/delete" },
       environmentVoiceStage: { method: "POST", suffix: "environment-voice/stage" },
+      gameMediaDelete: { method: "DELETE", suffix: "game-media/delete" },
+      gameMediaRead: { method: "GET", suffix: "game-media/read" },
+      gameMediaStage: { method: "POST", suffix: "game-media/stage" },
+      gameMediaStat: { method: "GET", suffix: "game-media/stat" },
       mealPhotoDelete: { method: "DELETE", suffix: "meal-photos/delete" },
       mealPhotoStage: { method: "POST", suffix: "meal-photos/stage" },
       runtimeEnsureProcessing: { method: "POST", suffix: "runtime/ensure-processing" },
@@ -225,6 +240,7 @@ describe("cloudflare hosted control routes", () => {
       "CLOUDFLARE_HOSTED_CONTROL_ENVIRONMENT_VOICE_CAPTURE_ID_HEADER",
       "CLOUDFLARE_HOSTED_CONTROL_ENVIRONMENT_VOICE_KEY_HEADER",
       "CLOUDFLARE_HOSTED_CONTROL_ENVIRONMENT_VOICE_SHA256_HEADER",
+      "CLOUDFLARE_HOSTED_CONTROL_GAME_MEDIA_ID_HEADER",
       "CLOUDFLARE_HOSTED_CONTROL_MEAL_PHOTO_CAPTURE_ID_HEADER",
       "CLOUDFLARE_HOSTED_CONTROL_MEAL_PHOTO_KEY_HEADER",
       "CLOUDFLARE_HOSTED_CONTROL_MEAL_PHOTO_SHA256_HEADER",
@@ -233,6 +249,7 @@ describe("cloudflare hosted control routes", () => {
       "buildCloudflareHostedControlEnvironmentRealtimeCallPath",
       "buildCloudflareHostedControlEnvironmentVoiceDeletePath",
       "buildCloudflareHostedControlEnvironmentVoiceStagePath",
+      "buildCloudflareHostedControlGameMediaPath",
       "buildCloudflareHostedControlMealPhotoDeletePath",
       "buildCloudflareHostedControlMealPhotoStagePath",
       "buildCloudflareHostedControlRuntimeEnsureProcessingPath",

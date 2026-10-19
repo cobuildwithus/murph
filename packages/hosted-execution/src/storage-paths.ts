@@ -6,6 +6,7 @@ import type { HostedExecutionBundleKind } from "@murphai/runtime-state/node/host
 const HOSTED_STORAGE_NAMESPACE_PATTERN = /^[a-z0-9][a-z0-9_-]{3,63}$/u;
 const HOSTED_MEDIA_ID_PATTERN = /^[a-f0-9]{64}$/u;
 const HOSTED_MEAL_PHOTO_KEY_PATTERN = /^[a-f0-9]{40}$/u;
+const HOSTED_GAME_MEDIA_ID_PATTERN = /^[a-f0-9]{64}\.(?:heic|jpg)$/u;
 const HOSTED_WORKSPACE_SNAPSHOT_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u;
 const HOSTED_STORAGE_NAMESPACE_SALT = "murph.hosted.storage-namespace.v1";
 const HOSTED_STORAGE_PATH_SALT = "murph.hosted.storage-path.v1";
@@ -155,6 +156,42 @@ export async function hostedMealPhotoUserPrefix(input: {
   userId: string;
 }): Promise<string> {
   return `hosted-meal-photos/images/${resolveHostedStorageNamespaceId(input)}/`;
+}
+
+/**
+ * Weekly game photos: Web seals each one under its owner's key, so the object
+ * is ciphertext keyed by the photo's own name (`<sha256>.<ext>`). No lifecycle
+ * expiry; account deletion clears the user prefix.
+ */
+export async function hostedGameMediaObjectKey(input: {
+  mediaId: string;
+  storageNamespaceId?: string | null;
+  userId: string;
+}): Promise<string> {
+  const userSegment = resolveHostedStorageNamespaceId(input);
+  const mediaId = requireHostedGameMediaId(input.mediaId);
+  const mediaSegment = deriveHostedStoragePathId({
+    length: 48,
+    scope: "game-media-path",
+    value: `game-media:${userSegment}:${mediaId}`,
+  });
+
+  return `hosted-game-media/objects/${userSegment}/${mediaSegment}.json.enc`;
+}
+
+export async function hostedGameMediaUserPrefix(input: {
+  storageNamespaceId?: string | null;
+  userId: string;
+}): Promise<string> {
+  return `hosted-game-media/objects/${resolveHostedStorageNamespaceId(input)}/`;
+}
+
+export function requireHostedGameMediaId(value: string): string {
+  const normalized = requireStoragePathString(value, "Hosted game media id");
+  if (!HOSTED_GAME_MEDIA_ID_PATTERN.test(normalized)) {
+    throw new TypeError("Hosted game media id is invalid.");
+  }
+  return normalized;
 }
 
 export async function hostedEnvironmentVoiceObjectKey(input: {
