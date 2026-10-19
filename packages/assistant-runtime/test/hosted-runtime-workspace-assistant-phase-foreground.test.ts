@@ -213,6 +213,12 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(mocks.drainHostedPreparedAssistantDeliveries).toHaveBeenCalledWith(
       expect.objectContaining({
         assistantDeliveryEffects: [effect],
+        // Attribution only: the batch-shared barrier and phase-start reading.
+        deliveryTraceContext: expect.objectContaining({
+          foregroundDeliveryPhaseStartedAtMonotonicMs: expect.any(Number),
+          memberChannelBarrierMs: expect.any(Number),
+          runtimeAttemptId: "attempt_synthetic_phase",
+        }),
         linqDeliveryContexts: [linqDeliveryContext],
       }),
     );

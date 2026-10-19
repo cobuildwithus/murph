@@ -253,6 +253,17 @@ export type AssistantProviderRequestOutcome =
   | 'partial'
   | 'succeeded'
 
+/**
+ * `observed` carries a same-process `performance.now()` reading. `unavailable`
+ * means no completion notification arrived; `superseded` means later provider
+ * activity followed the last one, or the selected response came from an
+ * earlier sampling. Neither may be replaced by another boundary.
+ */
+export type AssistantProviderFinalResponseCompletion =
+  | { kind: 'observed'; observedAtMonotonicMs: number }
+  | { kind: 'superseded' }
+  | { kind: 'unavailable' }
+
 export type AssistantNoReplyDisposition = {
   kind: 'none'
 }
@@ -277,6 +288,11 @@ export interface AssistantProviderTurnExecutionResult {
   response: string
   /** Final provider-authored text before runtime-owned presentation transforms. */
   providerAuthoredResponse?: string | null
+  /**
+   * Murph-local receipt of the provider's final per-response completion for
+   * this result. Absent when the provider cannot report it.
+   */
+  finalResponseCompletion?: AssistantProviderFinalResponseCompletion
   /** Capability-free semantic response persisted into model-visible history. */
   transcriptResponse: string | null
   // Completed final answers that were followed by a steered user message and

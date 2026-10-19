@@ -49,7 +49,10 @@ import {
   emitHostedAssistantContextTimingTrace,
   emitHostedAssistantContextSessionResolvedTrace,
 } from './hosted-context-diagnostics.js'
-import { emitHostedAssistantTurnTimingTrace } from './hosted-turn-timing.js'
+import {
+  buildHostedAssistantFinalResponseCompletionTiming,
+  emitHostedAssistantTurnTimingTrace,
+} from './hosted-turn-timing.js'
 import {
   deliverAssistantPrecedingReplies,
   deliverAssistantReaction,
@@ -1530,6 +1533,8 @@ export async function sendAssistantMessageLocal(
           acceptedInputItemsForProviderRequest
         let providerRequestStartedAtMs: number | null = null
         let providerResultReturnedAt: number | null = null
+        // Same instant as providerResultReturnedAt, on the monotonic clock.
+        let providerResultReturnedAtMonotonicMs: number | null = null
         const emitTurnTiming = (timingInput: Parameters<
           typeof emitHostedAssistantTurnTimingTrace
         >[0]) => {
@@ -1843,6 +1848,7 @@ export async function sendAssistantMessageLocal(
             turnId: currentUserTurn.turnId,
           })
           providerResultReturnedAt = Date.now()
+          providerResultReturnedAtMonotonicMs = performance.now()
           emitTurnTiming({
             elapsedMs: elapsedSince(turnTimingStartedAt),
             providerOutcomeKind: providerOutcome.kind,
@@ -2557,6 +2563,12 @@ export async function sendAssistantMessageLocal(
               ? null
               : Math.max(0, providerResultReturnedAt - providerRequestStartedAtMs),
           providerRequestOrdinal,
+          ...buildHostedAssistantFinalResponseCompletionTiming({
+            completion: providerResult.finalResponseCompletion,
+            finalReplySelected: finalResponseText !== null,
+            providerResultAtEpochMs: providerResultReturnedAt,
+            providerResultAtMonotonicMs: providerResultReturnedAtMonotonicMs,
+          }),
           sinceProviderResultMs:
             providerResultReturnedAt === null || replyIntentReadyAt === null
               ? null

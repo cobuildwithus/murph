@@ -625,17 +625,21 @@ describe.skipIf(!runPostgresProof)("isolated runtime-log deletion fence", () => 
           attemptId,
           stage: "provider-result",
         }),
+        timingEntry({
+          attemptId,
+          stage: "linq-dispatch-entered",
+        }),
       ],
       isUserActive: async () => true,
       userId,
-    })).resolves.toBe(3);
+    })).resolves.toBe(4);
 
     const recent = await listHostedRuntimeLogs({
       database: sql,
       limit: 10,
       userId,
     });
-    expect(recent).toHaveLength(3);
+    expect(recent).toHaveLength(4);
     expect(recent.every((row) => row.userId === userId)).toBe(true);
     expect(recent).toEqual(expect.arrayContaining([
       expect.objectContaining({
@@ -663,6 +667,17 @@ describe.skipIf(!runPostgresProof)("isolated runtime-log deletion fence", () => 
         }),
       }),
     ]);
+    const stagedTiming = await listHostedRuntimeTurnTimingLogs({
+      attemptIds: [attemptId],
+      database: sql,
+      from: new Date("2026-07-29T00:00:00.000Z"),
+      limit: 10,
+      stages: ["linq-dispatch-entered", "reply-dispatched"],
+      to: new Date("2026-07-30T00:00:00.000Z"),
+    });
+    expect(stagedTiming.map((row) =>
+      (row.redactedJson as { turnTimingStage?: unknown }).turnTimingStage).sort())
+      .toEqual(["linq-dispatch-entered", "reply-dispatched"]);
   });
 
   it("executes one-row retention batches with separate verbose and hard cutoffs", async () => {

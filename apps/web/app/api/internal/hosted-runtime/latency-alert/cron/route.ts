@@ -3,6 +3,7 @@ import { requireVercelCronRequest } from "@/src/lib/hosted-execution/vercel-cron
 import { runHostedAiUsageOvershootAlertMonitor } from "@/src/lib/hosted-execution/usage-overshoot-alert-monitor";
 import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
 import { runHostedRuntimeLatencyAlertMonitor } from "@/src/lib/hosted-runtime-latency/alert-monitor";
+import { runHostedRuntimeFinalReplyDeliveryAlertMonitor } from "@/src/lib/hosted-runtime-latency/final-reply-delivery-alert-monitor";
 import { runHostedRuntimeTypingAlertMonitor } from "@/src/lib/hosted-runtime-latency/typing-alert-monitor";
 import { runHostedDeviceImportAlertMonitor } from "@/src/lib/hosted-runtime-progress/device-import-alert-monitor";
 import { runHostedRuntimeProgressAlertMonitor } from "@/src/lib/hosted-runtime-progress/alert-monitor";
@@ -12,7 +13,7 @@ import { runHostedRuntimeRunawayAlertMonitor } from "@/src/lib/hosted-runtime-lo
 export const GET = withJsonError(async (request: Request) => {
   requireVercelCronRequest(request);
 
-  const [typingResult, latencyResult, progressResult, usageOvershootResult, starterAbuseResult, deviceImportResult, runawayResult, automationLossResult] = await Promise.allSettled([
+  const [typingResult, latencyResult, progressResult, usageOvershootResult, starterAbuseResult, deviceImportResult, runawayResult, automationLossResult, finalReplyDeliveryResult] = await Promise.allSettled([
     runHostedRuntimeTypingAlertMonitor(),
     runHostedRuntimeLatencyAlertMonitor({
       signal: request.signal,
@@ -27,6 +28,7 @@ export const GET = withJsonError(async (request: Request) => {
     runHostedDeviceImportAlertMonitor({ signal: request.signal }),
     runHostedRuntimeRunawayAlertMonitor({ signal: request.signal }),
     runHostedAutomationLossAlertMonitor({ signal: request.signal }),
+    runHostedRuntimeFinalReplyDeliveryAlertMonitor(),
   ]);
 
   if (typingResult.status === "rejected") {
@@ -47,9 +49,11 @@ export const GET = withJsonError(async (request: Request) => {
   if (deviceImportResult.status === "rejected") throw deviceImportResult.reason;
   if (runawayResult.status === "rejected") throw runawayResult.reason;
   if (automationLossResult.status === "rejected") throw automationLossResult.reason;
+  if (finalReplyDeliveryResult.status === "rejected") throw finalReplyDeliveryResult.reason;
 
   return jsonOk({
     automationLossAlert: automationLossResult.value,
+    finalReplyDeliveryAlert: finalReplyDeliveryResult.value,
     runtimeRunawayAlert: runawayResult.value,
     deviceImportAlert: deviceImportResult.value,
     starterAbuseAlert: starterAbuseResult.value,

@@ -4750,6 +4750,81 @@ For unresolved replies, it separates missing valid terminal evidence
 from valid terminal non-reply evidence that still lacks durable checkpoint
 acknowledgement. Persisted incident details and alert email contain only these
 aggregate counts and durations.
+The same five-minute cron also runs the final reply delivery monitor. It
+measures work after the final reply exists, not ingress latency. Its population
+is accepted `hosted_runtime_linq_delivery` rows linked to a Linq ingress trace.
+Unlinked runtime Linq deliveries (scheduled, progress, or preceding segments)
+are counted but not evaluated. Telegram is excluded: its terminal reply
+evidence is recorded after outbox success, not at an exact provider-acceptance
+boundary. Linq `acceptedAt` covers the whole delivery, including every part of
+a multi-part send. The runtime reads this timestamp when the Linq send promise
+returns successfully; it is a local acceptance observation, not a Linq server
+timestamp or member receipt. `deliveredAt` stays a separate boundary and is not
+used here.
+
+Each accepted delivery joins exactly one queued final-reply `reply-dispatched`
+turn-timing row through the hashed delivery source reference. Two independently
+named measurements end at `acceptedAt`:
+
+- provider result: starts at `turnTimingProviderResultAtEpochMs`, the exact
+  `Date.now()` instant the engine read when the selected provider result
+  returned. It is never derived from the clamped `turnTimingSinceProviderResultMs`.
+- final response completion: starts at the Murph-local receipt of Codex's last
+  turn-scoped `rawResponse/completed` notification for the selected result. It
+  is derived as the anchor minus `turnTimingFinalResponseCompletedToProviderResultMs`,
+  a monotonic interval read beside the same anchor. Codex emits that
+  notification while handling upstream `response.completed` (pinned 0.160 and
+  0.163 alike). The value excludes upstream transit, contains no timestamp from
+  Codex, and only the receipt instant is kept; the payload stays discarded.
+
+`turnTimingFinalResponseCompletion` is `observed`, `unavailable` (no raw
+completion arrived, as on a cold-resumed thread, because only `thread/start`
+can request raw events), `superseded` (later provider output, a tool call, or
+context compaction followed the last completion, or the selected answer was
+retained from an earlier sampling), or `invalid` (a non-finite or negative raw
+interval, never rounded to zero). A missing field means the producer supplied
+no observation. No state ever falls back to the provider-result origin.
+
+The budgets are strict initial engineering budgets, not an SLO: greater than
+5000 ms for direct or unknown-directness threads, and greater than 9000 ms for
+group threads, which adds the intentional four-second draft hold that follows
+the first provider result. The origin is not moved past that hold. When a group
+reconsideration runs, the selected result and its completion come from the
+second request. A delivery raises at most one immutable alert. That alert names
+each measurement with its status, plus the bounded trigger-origin set.
+`createMany` with `skipDuplicates` on the delivery-scoped identity owns dedupe,
+and the existing durable sender claim owns sending.
+
+Chronology must satisfy provider result <= Linq attempt <= acceptance; any
+violation is `invalid_chronology`. Anchors come from the runtime clock that
+wrote them. A delivery accepted by a later runtime attempt (a durable retry or a
+checkpoint-first send) is marked `deliveryAttemptRelation: different`, because
+the two readings come from different containers. Deliveries inside the
+five-minute grace are `pending`. Missing timing after grace is `missing`, or
+`timingBeyondRetention` when the delivery's earliest linked ingress predates the
+seven-day verbose runtime-log retention. Duplicate source references or timing
+rows are `ambiguous`. Timing rows are read for the scanned attempts from the
+earliest linked ingress minus a one-minute clock-skew allowance, bounded by
+that retention, so a retried delivery keeps its original turn's anchor.
+Acceptance is scanned over two hours with a 500-row page. A truncated delivery
+page, or an unavailable or truncated timing scan, raises nothing and reports
+the scan status.
+
+Old producers without the anchor report `producer_absent` for both measurements.
+The runtime also writes one queued `linq-dispatch-entered` row per Linq
+provider-dispatch boundary, from each boundary's existing cached entry. Each row
+holds monotonic durations since the foreground delivery phase started, send
+preparation, the route-authority check, and the provider-entry fence. It also
+carries the member-channel pre-dispatch barrier duration, which is shared by
+every delivery in that drain rather than measured per delivery. These durations
+nest and overlap, so they are not additive. A rejected app card followed by its
+text fallback writes two rows, and the accepted outcome carries the fallback's
+own attempt time. The alert therefore reports dispatch attribution `observed`
+only for a single row and `ambiguous` for more. The whole-delivery
+measurements are unaffected. These rows attribute pre-send time only. They add
+no direct request, await, guard change, or ordering change; the existing bounded
+verbose-log transport batches the extra rows. A log failure cannot reach dispatch.
+
 Fresh conversation mailbox rows observed at an authoritative Web AI
 usage-denial boundary receive the assign-once `ai_usage_denied_at` timestamp.
 The best-effort write uses database UTC time, updates only unconsumed rows
