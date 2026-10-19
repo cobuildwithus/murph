@@ -1,6 +1,6 @@
 # Remove Personal Patterns feature and managed automation
 
-Status: active
+Status: completed
 Created: 2026-10-19
 Updated: 2026-10-19
 
@@ -76,11 +76,16 @@ Claude inventoried the feature, helped remove its runtime and Web owners, and
 reviewed the remaining source. Its findings were stale generated CLI artifacts and two retired-feature wording
 references. These are corrected. The existing generator reuse path refreshed
 CLI artifacts from the built command tree; its diff only removes the command
-and changes the skill hash. Full prepared-runtime build admission is still
-waiting on another worktree's verification.
+and changes the skill hash. The commit hook subsequently acquired admission, completed the full prepared-runtime
+build, and independently regenerated the same CLI artifacts.
 A public-safe Frog entry records the generator's hidden admission-wait progress.
 
-Remaining: full build admission, preview URL, PR CI, and final-head ReviewGPT.
+Implementation and local proof are complete in PR #4215. The completed Vercel
+preview serves the Journal and sidebar studies, retains Environment navigation,
+and returns 404 for /patterns and its companion endpoint. The implementation
+removes roughly 12,700 net lines without a replacement service or state store.
+PR CI and ReviewGPT are the remaining external review gates, tracked on the PR;
+no deployment or merge is requested by this plan.
 
 ## Deployment
 
@@ -89,3 +94,4 @@ can retain the old recipe until replaced. The new runtime uses existing
 retirement before scheduled work; no production mutation is performed locally.
 Old Browser Vault reports are ignored on read and disappear on next publication.
 Rollback to old code would reintroduce the feature; historical data is preserved.
+Completed: 2026-10-19
