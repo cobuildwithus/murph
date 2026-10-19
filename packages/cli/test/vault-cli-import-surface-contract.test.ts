@@ -127,7 +127,11 @@ const scopedImportSurfaceProbes: readonly ScopedImportSurfaceProbe[] = [
     // primitive-schemas}.js are leaf splits of contract modules this probe
     // already loads (same schemas, two more files), letting the Cloudflare
     // Worker skip the CLI contracts. Admit only those two.
-    maxResolvedModules: 305,
+    // PR #4211 measured base 305 / candidate 319 in built CLI probes. Zod 4.5.4
+    // adds five internal modules and ten locales; Environment removal drops
+    // contracts/dist/environment-interview.js. No new package is loaded.
+    // Native runner startup and emitted-byte budgets pass independently.
+    maxResolvedModules: 319,
   },
 ]
 
