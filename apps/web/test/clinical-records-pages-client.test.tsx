@@ -889,6 +889,22 @@ describe("Clinical Records connect page", () => {
 });
 
 describe("Clinical Records status page", () => {
+  it("opens the public privacy policy from connection management", async () => {
+    const { RecordsPageClient } = await import("../app/(dashboard)/records/records-page-client");
+    const rendered = await renderClientComponent(createElement(RecordsPageClient, {
+      authenticated: true, initialCallback: null, initialConnections: [makeConnection()], initialLoadError: false,
+    }), { requireButton: false });
+    cleanup = rendered.cleanup;
+    const management = rendered.container.querySelector("details");
+    assert.ok(management);
+    await act(async () => { management.open = true; });
+    const privacyLink = Array.from(management.querySelectorAll("a"))
+      .find((link) => link.textContent === "How Murph uses your data");
+    assert.ok(privacyLink);
+    expect(privacyLink.getAttribute("href")).toBe("/legal/privacy");
+    expect(mocks.requestHostedOnboardingJson).not.toHaveBeenCalled();
+  });
+
   it("routes the empty state through the shared launcher without creating a claim", async () => {
     const { RecordsPageClient } = await import("../app/(dashboard)/records/records-page-client");
     const rendered = await renderClientComponent(createElement(RecordsPageClient, {
