@@ -198,6 +198,10 @@ Late runtime telemetry retirement semantics are owned by
 `references/hosted-postgres-runtime.md`; focused proof is recorded in
 [`retired runtime telemetry`](exec-plans/completed/2026-09-29-runtime-log-retired.md).
 
+Admitting the next job beside a settling completion callback is owned by
+`references/hosted-postgres-runtime.md` and tracked in
+[the completion-callback admission plan](exec-plans/completed/2026-10-18-completion-callback-admission.md).
+
 Structured provider failure diagnostic preservation is tracked in
 [the telemetry plan](exec-plans/completed/2026-10-09-structured-provider-failure-telemetry.md);
 its runtime contract remains in `packages/assistant-engine/README.md`.

@@ -239,7 +239,7 @@ Before calculating a meal total:
   or searching the web. Use `--generic` for ordinary ingredients where a USDA
   generic row is preferable; use normal lookup for branded, packaged, menu, UPC,
   or exact-FDC searches. Because `--generic` applies to the whole batch, split a
-  mixed meal into at most two lookups: one generic USDA batch and one normal
+  mixed meal into at most two food lookups: one generic USDA batch and one normal
   branded/menu/package batch. Repeat the singular `--query` flag, for example:
   `vault-cli food search-labels-batch --generic --query 'chickpeas mature seeds cooked' --query 'rice brown long-grain cooked'`.
   Do not pass a JSON array or invent `--queries`. Lookups use the compact
@@ -260,6 +260,12 @@ Before calculating a meal total:
   response. This includes sugars, saturated fat, cholesterol, sodium or other
   micronutrients, ingredients, allergens, or complete contaminant observation,
   sample, source, and threshold details.
+- For a supplement product such as a protein powder, including one from a saved
+  supplement regimen (read it with `regimen show`; `regimen list` omits
+  ingredient amounts), look up only requested facts the record lacks with
+  `vault-cli supplement search-labels-batch` and its saved brand and name, in
+  the same tool round as any food lookups. Do not use a food lookup for it; the
+  food database can return unrelated products.
 - Prefer an exact visible or user-named product, restaurant item, variant, UPC,
   or FDC id over a nearby generic substitute. Never merge nutrition from
   similarly named variants without evidence that they are the same item.
@@ -284,8 +290,11 @@ Before calculating a meal total:
   target an authoritative food-composition source. Read `computer-use` and use
   its bounded browser recovery only when a material fact requires interaction
   or visual inspection unavailable through web search/text reading.
-- After this bounded pass fails, give a clearly marked estimate or useful range
-  for routine calories/macros, naming only an assumption that materially changes it.
+- After this bounded pass, keep the requested facts it found. For each fact
+  still unresolved, briefly name the concrete blocker, such as no matching
+  label, a label without that field, or an unreachable source. Give a clearly
+  marked estimate or useful range only for those routine calories/macros,
+  naming only an assumption that materially changes it.
   Do not keep researching minor ingredients or ask for brand details that would
   not meaningfully change the answer. Never invent an exact label or imply that
   a visual portion estimate was database-measured. New product identity or

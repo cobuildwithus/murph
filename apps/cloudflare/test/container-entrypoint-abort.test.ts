@@ -375,9 +375,12 @@ describe("container entrypoint abort boundary", () => {
       port: address.port,
     });
     expect(healthDuringCompletion.status).toBe(200);
+    // The finished job's recovery callback keeps lifetime work counted, but it
+    // is the only settling work, so it no longer blocks the next admission.
     expect(healthDuringCompletion.json).toMatchObject({
       activeJobCount: 1,
       poisoned: false,
+      settlingCompletionCallbackCount: 1,
     });
     expect(exit).not.toHaveBeenCalled();
     expect(mocks.reportHostedContainerFatalBestEffort).not.toHaveBeenCalled();
@@ -387,13 +390,21 @@ describe("container entrypoint abort boundary", () => {
       headers: { "content-type": "application/json; charset=utf-8" },
       method: "POST",
     });
-    expect(whileCompleting.status).toBe(409);
+    expect(whileCompleting.status).toBe(200);
     await whileCompleting.arrayBuffer();
-    expect(mocks.runHostedWorkspaceInvocation).toHaveBeenCalledTimes(1);
+    expect(mocks.runHostedWorkspaceInvocation).toHaveBeenCalledTimes(2);
+    expect(mocks.recordHostedContainerRuntimeCompletionBestEffort).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      job: expect.objectContaining({ request: expect.objectContaining({ attemptId: "attempt_evt_during_completion" }) }),
+    }));
+    // The first callback is still awaited, never abandoned.
+    expect((await sendHostedContainerGetRequest({ path: "/health", port: address.port })).json).toMatchObject({
+      activeJobCount: 1,
+      settlingCompletionCallbackCount: 1,
+    });
     releaseCompletion.resolve();
     await vi.waitFor(async () => {
       const health = await sendHostedContainerGetRequest({ path: "/health", port: address.port });
-      expect(health.json).toMatchObject({ activeJobCount: 0, poisoned: false });
+      expect(health.json).toMatchObject({ activeJobCount: 0, poisoned: false, settlingCompletionCallbackCount: 0 });
     });
 
     const nextInvocation = await fetch(`http://127.0.0.1:${address.port}/internal/workspace-invocation`, {
@@ -404,10 +415,10 @@ describe("container entrypoint abort boundary", () => {
       method: "POST",
     });
     expect(nextInvocation.status).toBe(200);
-    expect(mocks.runHostedWorkspaceInvocation).toHaveBeenCalledTimes(2);
+    expect(mocks.runHostedWorkspaceInvocation).toHaveBeenCalledTimes(3);
     expect(
       mocks.recordHostedContainerRuntimeCompletionBestEffort,
-    ).toHaveBeenCalledTimes(2);
+    ).toHaveBeenCalledTimes(3);
     expect(exitWarnings()).toHaveLength(2);
     expect(exitWarnings()[0]?.details).toEqual({
       exitReason: "request.aborted",

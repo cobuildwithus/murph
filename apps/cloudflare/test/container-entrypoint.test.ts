@@ -868,6 +868,104 @@ describe("startHostedContainerEntrypoint", () => {
     }
   });
 
+  it("keeps a settling completion callback alive across shutdown without advertising absence", async () => {
+    const completionStarted = createDeferred();
+    const releaseCompletion = createDeferred();
+    mocks.recordHostedContainerRuntimeCompletionBestEffort.mockImplementationOnce(async () => {
+      completionStarted.resolve();
+      await releaseCompletion.promise;
+    });
+    const exit = vi.spyOn(process, "exit").mockImplementation((() => undefined) as never);
+    const server = await startHostedContainerEntrypoint({ port: 0 });
+    servers.push(server);
+    const address = server.address();
+    if (!address || typeof address === "string") {
+      throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
+    }
+
+    try {
+      const response = await sendHostedContainerJsonRequest({
+        body: JSON.stringify(buildWorkspaceJobBody()),
+        path: "/internal/workspace-invocation",
+        port: address.port,
+      });
+      expect(response.status).toBe(200);
+      await completionStarted.promise;
+      expect((await sendHostedContainerGetRequest({ path: "/health", port: address.port })).json)
+        .toMatchObject({ activeJobCount: 1, settlingCompletionCallbackCount: 1 });
+
+      process.emit("SIGTERM", "SIGTERM");
+      const lateWake = await fetch(`http://127.0.0.1:${address.port}/internal/runtime-wake`, {
+        body: JSON.stringify({ attemptId: "attempt_container_workspace", leaseGeneration: "8", userId: "u_container_workspace" }),
+        headers: { "content-type": "application/json; charset=utf-8" },
+        method: "POST",
+      });
+      expect(lateWake.headers.get("x-runtime-wake-accepted")).toBe("0");
+      expect(lateWake.headers.get("x-runtime-wake-absent")).not.toBe("1");
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(exit).not.toHaveBeenCalled();
+    } finally {
+      releaseCompletion.resolve();
+    }
+
+    await vi.waitFor(() => {
+      expect(exit).toHaveBeenCalledWith(0);
+    });
+    const serverIndex = servers.indexOf(server);
+    if (serverIndex !== -1) {
+      servers.splice(serverIndex, 1);
+    }
+  });
+
+  it("admits past settling callbacks but never past running work, and balances overlapping callbacks", async () => {
+    const callbacks: Array<ReturnType<typeof createDeferred<void>>> = [];
+    mocks.recordHostedContainerRuntimeCompletionBestEffort.mockImplementation(async () => {
+      const callback = createDeferred();
+      callbacks.push(callback);
+      await callback.promise;
+    });
+    const releaseRunning = createDeferred();
+    const runningStarted = createDeferred();
+    mocks.runHostedWorkspaceInvocation
+      .mockResolvedValueOnce(buildWorkspaceRunnerResult())
+      .mockImplementationOnce(async () => {
+        runningStarted.resolve();
+        await releaseRunning.promise;
+        return buildWorkspaceRunnerResult();
+      });
+    const server = await startHostedContainerEntrypoint({ port: 0 });
+    servers.push(server);
+    const address = server.address();
+    if (!address || typeof address === "string") {
+      throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
+    }
+    const invoke = () => sendHostedContainerJsonRequest({
+      body: JSON.stringify(buildWorkspaceJobBody()),
+      path: "/internal/workspace-invocation",
+      port: address.port,
+    });
+    const health = async () => (await sendHostedContainerGetRequest({ path: "/health", port: address.port })).json;
+
+    expect((await invoke()).status).toBe(200);
+    await vi.waitFor(() => expect(callbacks).toHaveLength(1));
+    const running = invoke();
+    await runningStarted.promise;
+    // Real running work still blocks admission while another callback settles.
+    expect(await health()).toMatchObject({ activeJobCount: 2, settlingCompletionCallbackCount: 1 });
+    expect((await invoke()).status).toBe(409);
+
+    releaseRunning.resolve();
+    expect((await running).status).toBe(200);
+    await vi.waitFor(() => expect(callbacks).toHaveLength(2));
+    expect(await health()).toMatchObject({ activeJobCount: 2, settlingCompletionCallbackCount: 2 });
+
+    callbacks[1]?.resolve();
+    await vi.waitFor(async () => expect(await health()).toMatchObject({ activeJobCount: 1, settlingCompletionCallbackCount: 1 }));
+    callbacks[0]?.resolve();
+    await vi.waitFor(async () => expect(await health()).toMatchObject({ activeJobCount: 0, settlingCompletionCallbackCount: 0 }));
+    expect(mocks.runHostedWorkspaceInvocation).toHaveBeenCalledTimes(2);
+  });
+
   it("rejects active runtime wakes after shutdown starts without advertising absence", async () => {
     const invocationReady = createDeferred();
     const releaseInvocation = createDeferred();

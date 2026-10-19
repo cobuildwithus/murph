@@ -37,11 +37,14 @@ describe('assistant nutrition source grounding', () => {
       'use returned label or USDA facts for calories and macros',
     )
     expect(food).toContain(
-      'Because `--generic` applies to the whole batch, split a mixed meal into at most two lookups: one generic USDA batch and one normal branded/menu/package batch.',
+      'Because `--generic` applies to the whole batch, split a mixed meal into at most two food lookups: one generic USDA batch and one normal branded/menu/package batch.',
     )
     expect(food).toContain(
       'The default returns one compact nutrition match per component with serving, calories, protein, carbohydrate, fat, fiber, and a bounded exact-product contaminant summary.',
     )
+    // Supplement identities, including saved regimens, route to the supplement label corpus.
+    expect(food).toMatch(/supplement regimen \(read it with `regimen show`[^.]*\)[^.]*`vault-cli supplement search-labels-batch`/u)
+    expect(food).toContain('Do not use a food lookup for it')
     expect(contaminantGuidance).toContain(
       'Read `contaminantSummary` by default: `no_known_product_tests` means evidence is unknown',
     )
@@ -109,7 +112,7 @@ describe('assistant nutrition source grounding', () => {
       'Only after the database result, official source, or clearly marked last-resort estimate is resolved may you call `meal add` or `meal edit` with the available nutrition and provenance.',
     )
     expect(food).toContain(
-      'After this bounded pass fails, give a clearly marked estimate or useful range',
+      'For each fact still unresolved, briefly name the concrete blocker',
     )
     expect(food).not.toContain('use `computer_act` to follow')
     expect(food).toContain('make one targeted web search for the official label/menu')
