@@ -12,11 +12,8 @@ aliases:
 - Drug-induced photosensitivity
 categories:
 - skin-photobiomodulation
-relations:
-- type: related_protocol
-  target: protocol_variant:skin-photobiomodulation/red-near-infrared-skin-texture-photoaging
-- type: parent_family
-  target: experiment_family:skin-photobiomodulation
+relations: []
+
 source:
   kind: web_page
   title: Drug-induced photosensitivity
