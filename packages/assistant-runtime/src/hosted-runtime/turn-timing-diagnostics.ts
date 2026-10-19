@@ -20,6 +20,13 @@ const HOSTED_ASSISTANT_TURN_TIMING_STAGES = new Set([
   "foreground-delivery-phase-finished",
 ]);
 
+const HOSTED_ASSISTANT_TURN_TIMING_FINAL_RESPONSE_COMPLETIONS = new Set([
+  "invalid",
+  "observed",
+  "superseded",
+  "unavailable",
+]);
+
 const HOSTED_ASSISTANT_TURN_TIMING_PROVIDER_OUTCOME_KINDS = new Set([
   "failed_terminal",
   "succeeded",
@@ -50,7 +57,10 @@ const hostedTurnTimingDetailReaders = {
   scanStateChanged: readHostedTurnTimingBoolean,
   turnTimingDeliveryIntentId: readHostedTurnTimingIdentifier,
   turnTimingElapsedMs: readHostedTurnTimingNonnegativeNumber,
+  turnTimingFinalResponseCompletedToProviderResultMs: readHostedTurnTimingNonnegativeInteger,
+  turnTimingFinalResponseCompletion: readHostedTurnTimingFinalResponseCompletion,
   turnTimingProviderRequestElapsedMs: readHostedTurnTimingNonnegativeNumber,
+  turnTimingProviderResultAtEpochMs: readHostedTurnTimingNonnegativeInteger,
   turnTimingSinceProviderResultMs: readHostedTurnTimingNonnegativeNumber,
   turnTimingStage: readHostedTurnTimingStage,
   turnTimingStepElapsedMs: readHostedTurnTimingNonnegativeNumber,
@@ -162,6 +172,17 @@ function readHostedTurnTimingAllowedString(
   return stringValue && allowedValues.has(stringValue) ? stringValue : undefined;
 }
 
+function readHostedTurnTimingFinalResponseCompletion(
+  debug: Record<string, unknown>,
+  key: string,
+): string | null | undefined {
+  return readHostedTurnTimingAllowedString(
+    debug,
+    key,
+    HOSTED_ASSISTANT_TURN_TIMING_FINAL_RESPONSE_COMPLETIONS,
+  );
+}
+
 function readHostedTurnTimingBoolean(
   debug: Record<string, unknown>,
   key: string,
@@ -182,6 +203,16 @@ function readHostedTurnTimingNonnegativeNumber(
     return null;
   }
   return typeof value === "number" && Number.isFinite(value) && value >= 0
+    ? value
+    : undefined;
+}
+
+function readHostedTurnTimingNonnegativeInteger(
+  debug: Record<string, unknown>,
+  key: string,
+): number | undefined {
+  const value = debug[key];
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0
     ? value
     : undefined;
 }

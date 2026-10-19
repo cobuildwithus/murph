@@ -1,3 +1,8 @@
+Final reply post-generation delivery telemetry and alerting are owned by
+[`hosted-runtime-protocol.md`](references/hosted-runtime-protocol.md); the
+implementation is recorded in
+[the completed delivery latency plan](exec-plans/completed/2026-10-19-post-generation-delivery-latency.md).
+
 ReviewGPT artifact identity adoption: [completed plan](exec-plans/completed/2026-10-18-frog-reviewgpt-artifact-4186.md).
 
 Canary reply observation diagnostics: [completed plan](exec-plans/completed/2026-10-18-canary-reply-observation-diagnostics.md).

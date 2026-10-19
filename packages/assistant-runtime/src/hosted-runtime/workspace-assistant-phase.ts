@@ -2357,6 +2357,7 @@ export async function runHostedWorkspaceAssistantPhase(
         stage: "foreground-delivery-phase-started",
       });
       const foregroundAssistantPhaseStartedAt = Date.now();
+      const foregroundDeliveryPhaseStartedAtMonotonicMs = performance.now();
       const writeForegroundAssistantFinishedTiming = () => {
         writeHostedAssistantTurnTimingRuntimeLog({
           currentTurnDeliveryIntentCount: currentTurnDeliveryIntentIds.length,
@@ -2370,6 +2371,7 @@ export async function runHostedWorkspaceAssistantPhase(
       const foregroundAssistantResult = await runForegroundAssistantReplyPhase({
         assistantMetrics,
         currentTurnDeliveryIntentIds,
+        foregroundDeliveryPhaseStartedAtMonotonicMs,
         foregroundCronReconciliationWake,
         foregroundWorkspaceWake: createFutureExistingHostedAssistantWorkspaceWakeCandidate(input),
         input,
@@ -6135,6 +6137,7 @@ async function collectForegroundDeliveryEffects(input: {
 async function runForegroundAssistantReplyPhase(input: {
   assistantMetrics: HostedAssistantMetrics;
   currentTurnDeliveryIntentIds: readonly string[];
+  foregroundDeliveryPhaseStartedAtMonotonicMs: number;
   foregroundCronReconciliationWake: HostedRuntimeWakeCandidate | null;
   foregroundWorkspaceWake: HostedRuntimeWakeCandidate | null;
   input: HostedWorkspaceRuntimeAssistantPhaseInput;
@@ -6194,6 +6197,8 @@ async function runForegroundAssistantReplyPhase(input: {
       baseNextWake: fastDispatchBaseNextWake,
       checkpointReason: "outbox_receipt",
       canConsumeWorkspaceAssistantWake: true,
+      foregroundDeliveryPhaseStartedAtMonotonicMs:
+        input.foregroundDeliveryPhaseStartedAtMonotonicMs,
       input: input.input,
       linqDeliveryContexts: input.linqDeliveryContexts,
       postDeliveryReconciliationWake: input.foregroundCronReconciliationWake,
@@ -6517,6 +6522,8 @@ async function drainHostedPostCheckpointDelivery(input: {
   baseNextWake: HostedRuntimeWakeCandidate;
   checkpointReason: HostedWorkspaceRunnerAssistantPhasePostCheckpoint["checkpointReason"];
   canConsumeWorkspaceAssistantWake: boolean;
+  /** Present only for the fast foreground dispatch; attribution only. */
+  foregroundDeliveryPhaseStartedAtMonotonicMs?: number | null;
   input: HostedWorkspaceRuntimeAssistantPhaseInput;
   linqDeliveryContexts?: readonly HostedAssistantLinqDeliveryContext[] | null;
   providerCleanupPlan: HostedProviderCleanupPlan;
@@ -6531,13 +6538,17 @@ async function drainHostedPostCheckpointDelivery(input: {
   }
 
   let memberChannelBarrier: HostedWorkspaceRunnerAssistantPhasePostCheckpoint | null = null;
+  let memberChannelBarrierMs: number | null = null;
   try {
     if (hasDeliveryEffects && input.shouldYieldBackgroundDrain?.() === true) {
       return await yieldHostedBackgroundPostCheckpointDrain(input);
     }
+    const memberChannelBarrierStartedAt = performance.now();
     memberChannelBarrier = hasDeliveryEffects
       ? await flushHostedMemberChannelUpdatesBeforeAutoReplyDelivery(input)
       : null;
+    // Read only when delivery effects drain below; no effects means no reader.
+    memberChannelBarrierMs = performance.now() - memberChannelBarrierStartedAt;
   } catch (error) {
     await resetHostedPreparedDeliveryForBarrier({
       assistantDeliveryEffects: input.assistantDeliveryEffects,
@@ -6575,6 +6586,9 @@ async function drainHostedPostCheckpointDelivery(input: {
   const outcomes = input.assistantDeliveryEffects.length > 0
     ? await drainHostedPreparedAssistantDeliveries({
         deliveryTraceContext: {
+          foregroundDeliveryPhaseStartedAtMonotonicMs:
+            input.foregroundDeliveryPhaseStartedAtMonotonicMs,
+          memberChannelBarrierMs,
           latencyTracePort: input.input.runtime.platform.latencyTracePort,
           runtimeAttemptId: input.input.request.attemptId,
           runnerIdleTtlMs: input.input.request.runnerIdleTtlMs,

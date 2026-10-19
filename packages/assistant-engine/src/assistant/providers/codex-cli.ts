@@ -474,6 +474,7 @@ export async function executeCodexAssistantTurnAttempt(
           }
         : {}),
       response: result.finalMessage,
+      finalResponseCompletion: result.finalResponseCompletion,
       ...(result.providerAuthoredFinalMessage === undefined
         ? {}
         : {

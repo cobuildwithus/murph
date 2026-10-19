@@ -220,7 +220,7 @@ describe('steered final segments', () => {
       progressDelivery?: CodexAppServerTurnInput['progressDelivery']
       responseCardsAvailable?: boolean
       trustedContextReferences?: CodexAppServerTurnInput['trustedContextReferences']
-      turnStatus?: 'completed' | 'failed'
+      turnStatus?: 'completed' | 'failed' | 'interrupted'
       voiceMemoRuntime?: CodexAppServerTurnInput['voiceMemoRuntime']
     } = {},
   ) {
@@ -1828,6 +1828,128 @@ describe('steered final segments', () => {
     expect(result.finalMessage).toBe('Answer one.')
     expect(result.responseDeliveryContextOrdinal).toBe(0)
     expect(result.precedingAgentMessageSegments).toEqual([])
+  })
+
+  describe('final response completion observation', () => {
+    function rawResponseCompleted(turnId = 'turn-steered-finals') {
+      // Synthetic payload fields prove only the receipt instant is retained.
+      return {
+        method: 'rawResponse/completed',
+        params: {
+          responseId: 'resp-synthetic-private-id',
+          threadId: 'thread-steered-finals',
+          turnId,
+          usage: { inputTokens: 11, outputTokens: 7 },
+        },
+      }
+    }
+
+    function expectNoRawPayload(result: Awaited<ReturnType<typeof runScriptedSteeredFinalSegmentsTurn>>) {
+      expect(JSON.stringify(result)).not.toContain('resp-synthetic-private-id')
+    }
+
+    it('observes the completion that follows the final answer item', async () => {
+      const result = await runScriptedSteeredFinalSegmentsTurn([
+        completedItemEvent({ id: 'assistant-1', type: 'assistant_message', message: 'Answer one.' }),
+        rawResponseCompleted(),
+      ])
+
+      expect(result.finalMessage).toBe('Answer one.')
+      expect(result.finalResponseCompletion).toEqual({
+        kind: 'observed',
+        observedAtMonotonicMs: expect.any(Number),
+      })
+      expectNoRawPayload(result)
+    })
+
+    it('reports unavailable when no raw completion arrives, as on a cold-resumed thread', async () => {
+      const result = await runScriptedSteeredFinalSegmentsTurn([
+        completedItemEvent({ id: 'assistant-1', type: 'assistant_message', message: 'Answer one.' }),
+      ])
+
+      expect(result.finalResponseCompletion).toEqual({ kind: 'unavailable' })
+    })
+
+    it('ignores another turn and never borrows its completion', async () => {
+      const result = await runScriptedSteeredFinalSegmentsTurn([
+        rawResponseCompleted('turn-foreign'),
+        completedItemEvent({ id: 'assistant-1', type: 'assistant_message', message: 'Answer one.' }),
+      ])
+
+      expect(result.finalMessage).toBe('Answer one.')
+      expect(result.finalResponseCompletion).toEqual({ kind: 'unavailable' })
+    })
+
+    it('supersedes a completion followed by tool activity without a later completion', async () => {
+      const result = await runScriptedSteeredFinalSegmentsTurn([
+        completedItemEvent({ id: 'assistant-1', type: 'assistant_message', message: 'Answer one.' }),
+        rawResponseCompleted(),
+        completedItemEvent({ id: 'command-1', type: 'commandExecution', command: 'true' }),
+      ])
+
+      expect(result.finalResponseCompletion).toEqual({ kind: 'superseded' })
+    })
+
+    it('observes the later completion after a tool continuation', async () => {
+      const result = await runScriptedSteeredFinalSegmentsTurn([
+        rawResponseCompleted(),
+        completedItemEvent({ id: 'command-1', type: 'commandExecution', command: 'true' }),
+        completedItemEvent({ id: 'assistant-1', type: 'assistant_message', message: 'Answer one.' }),
+        rawResponseCompleted(),
+      ])
+
+      expect(result.finalResponseCompletion).toMatchObject({ kind: 'observed' })
+    })
+
+    it('supersedes a completion followed by context compaction', async () => {
+      const result = await runScriptedSteeredFinalSegmentsTurn([
+        completedItemEvent({ id: 'assistant-1', type: 'assistant_message', message: 'Answer one.' }),
+        rawResponseCompleted(),
+        {
+          method: 'item/started',
+          params: { item: { id: 'compaction-1', type: 'contextCompaction' } },
+        },
+      ])
+
+      expect(result.finalResponseCompletion).toEqual({ kind: 'superseded' })
+    })
+
+    it('observes the steered sampling that produced the selected final answer', async () => {
+      const result = await runScriptedSteeredFinalSegmentsTurn([
+        completedItemEvent({ id: 'user-1', type: 'user_message', message: 'First question' }),
+        completedItemEvent({ id: 'assistant-1', type: 'assistant_message', message: 'Answer one.' }),
+        rawResponseCompleted(),
+        completedItemEvent({ id: 'user-2', type: 'user_message', message: 'Follow-up' }),
+        completedItemEvent({ id: 'assistant-2', type: 'assistant_message', message: 'Answer two.' }),
+        rawResponseCompleted(),
+      ])
+
+      expect(result.finalMessage).toBe('Answer two.')
+      expect(result.finalResponseCompletion).toMatchObject({ kind: 'observed' })
+    })
+
+    it('supersedes when the selected answer was retained from an earlier sampling', async () => {
+      const result = await runScriptedSteeredFinalSegmentsTurn([
+        completedItemEvent({ id: 'user-1', type: 'user_message', message: 'First question' }),
+        completedItemEvent({ id: 'assistant-1', type: 'assistant_message', message: 'Answer one.' }),
+        rawResponseCompleted(),
+        completedItemEvent({ id: 'user-2', type: 'user_message', message: 'Thanks' }),
+        rawResponseCompleted(),
+      ])
+
+      expect(result.finalMessage).toBe('Answer one.')
+      expect(result.finalResponseCompletion).toEqual({ kind: 'superseded' })
+    })
+
+    it.each(['failed', 'interrupted'] as const)(
+      'lets no completion escape a %s turn',
+      async (turnStatus) => {
+        await expect(runScriptedSteeredFinalSegmentsTurn([
+          completedItemEvent({ id: 'assistant-1', type: 'assistant_message', message: 'Answer one.' }),
+          rawResponseCompleted(),
+        ], { turnStatus })).rejects.toThrow()
+      },
+    )
   })
 
   it('promotes a trailing-steer answer when the current segment has fallback text', async () => {

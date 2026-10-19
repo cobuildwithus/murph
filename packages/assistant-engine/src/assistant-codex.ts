@@ -149,6 +149,10 @@ import {
   type CodexCompactionResponseUsage,
 } from './assistant-codex/compaction-usage.js'
 import {
+  createCodexFinalResponseCompletionTracker,
+  type CodexFinalResponseCompletionTracker,
+} from './assistant-codex/final-response-completion.js'
+import {
   resolveCodexChildEnv,
   withHostedCodexModelCatalogConfigOverride,
 } from './assistant-codex/config.js'
@@ -419,6 +423,18 @@ function isCodexContextCompactionCompletion(message: CodexRpcMessage): boolean {
   }
   return readCodexRecord(readCodexRecord(message.params)?.item)?.type
     === 'contextCompaction'
+}
+
+function observeCodexContextCompactionActivity(
+  tracker: CodexFinalResponseCompletionTracker,
+  message: CodexRpcMessage,
+): void {
+  if (
+    isCodexContextCompactionStarted(message)
+    || isCodexContextCompactionCompletion(message)
+  ) {
+    tracker.observeProviderActivity()
+  }
 }
 
 function isCodexContextCompactionCompletionForThread(
@@ -696,6 +712,8 @@ export interface CodexAppServerTurnResult {
   /** Accepted input selected as the native target for the final reply, if any. */
   targetInputId: string | null
   additionalUsages: AssistantProviderUsageDraft[]
+  /** Local receipt of the final `rawResponse/completed` for the selected reply. */
+  finalResponseCompletion?: AssistantProviderTurnExecutionResult['finalResponseCompletion']
   responseMedia: AssistantResponseMedia[]
   followUpRequest: AssistantProviderTurnExecutionResult["followUpRequest"]
   responseCard: AssistantResponseCard | null
@@ -3675,6 +3693,7 @@ async function runCodexAppServerTurnOnProcess(
   let firstProviderReceiptElapsedMs: number | null = null
   let firstAssistantReceiptElapsedMs: number | null = null
   let lastProviderReceiptElapsedMs: number | null = null
+  const finalResponseCompletion = createCodexFinalResponseCompletionTracker()
   let providerReceiptCount = 0
   let currentTurnStartedNotificationObserved = false
   let liveInterruptRequested = false
@@ -3959,6 +3978,7 @@ async function runCodexAppServerTurnOnProcess(
   }
 
   const recordProviderReceipt = (kind: 'assistant' | 'reasoning' | 'tool') => {
+    finalResponseCompletion.observeProviderActivity()
     if (!input.onTraceEvent || turnId === null || codexProviderRequestStartedAtMs === null) return
     const elapsedMs = Math.max(0, Date.now() - codexProviderRequestStartedAtMs)
     const first = firstProviderReceiptElapsedMs === null
@@ -5499,6 +5519,7 @@ async function runCodexAppServerTurnOnProcess(
     }
     lastEventError = extractCodexErrorMessage(message) ?? lastEventError
     lastEventErrorInfo = extractCodexErrorInfo(message) ?? lastEventErrorInfo
+    observeCodexContextCompactionActivity(finalResponseCompletion, message)
 
     const normalizedEvent = normalizeCodexEvent(message)
     recordProviderEventReceipt(normalizedEvent)
@@ -5912,7 +5933,13 @@ async function runCodexAppServerTurnOnProcess(
       method === 'rawResponse/completed'
     ) {
       // Raw response notifications can contain provider payload content and
-      // do not belong in the parent turn's persisted event surface.
+      // do not belong in the parent turn's persisted event surface. Only the
+      // receipt instant of a turn-scoped completion is kept.
+      finalResponseCompletion.observeRawNotification({
+        activeTurnId: turnId,
+        messageTurnId,
+        method,
+      })
       return
     }
 
@@ -6480,6 +6507,9 @@ async function runCodexAppServerTurnOnProcess(
     targetInputId:
       resolveReplyTargetPatch(finalDeliveryContextOrdinal)?.targetInputId ?? null,
     additionalUsages: [...additionalUsages, ...buildSubagentUsageDrafts()],
+    finalResponseCompletion: finalResponseCompletion.read({
+      selectedFromEarlierSampling: finalResponseCandidate !== null,
+    }),
     responseMedia: finalHasDeliverableOutput ? [...finalResponseMedia] : [],
     followUpRequest: finalFollowUpRequest(finalDeliveryContextOrdinal, finalHasDeliverableOutput),
     responseCard: finalHasDeliverableOutput ? deliveredFinalResponseCard : null,

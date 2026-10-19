@@ -991,6 +991,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260812050000_hosted_sensitive_action_transient_retention_index",
       "20260826190000_hosted_vault_share_delivery_cursor_index",
       "20260905120000_hosted_operator_task_result_retention_index",
+      "20261019120000_final_reply_delivery_alert_retention",
     ]);
     expect(
       migrationEntries.filter((entry) => !queryShapeMigrationEntries.has(entry)),

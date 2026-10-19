@@ -68,6 +68,7 @@ export interface HostedControlPlaneRetentionCleanupResult {
   expiredGroupCurrentSenderClarificationsDeleted: number;
   expiredIngressLatencyTracesDeleted: number;
   expiredTypingAlertsDeleted: number;
+  expiredFinalReplyDeliveryAlertsDeleted: number;
   expiredMailboxContentRetired: number;
   expiredMailboxTombstonesDeleted: number;
   expiredOperatorTaskResultsRetired: number;
@@ -122,6 +123,8 @@ export async function runHostedControlPlaneRetentionCleanup(input: {
     prisma,
   });
   const expiredTypingAlertsDeleted = await deleteExpiredTypingAlerts({ now, prisma });
+  const expiredFinalReplyDeliveryAlertsDeleted =
+    await deleteExpiredFinalReplyDeliveryAlerts({ now, prisma });
   const expiredAssistantRuntimeIssuesDeleted = await deleteExpiredAssistantRuntimeIssues({
     now,
     prisma,
@@ -156,6 +159,7 @@ export async function runHostedControlPlaneRetentionCleanup(input: {
     expiredGroupCurrentSenderClarificationsDeleted,
     expiredIngressLatencyTracesDeleted,
     expiredTypingAlertsDeleted,
+    expiredFinalReplyDeliveryAlertsDeleted,
     expiredMailboxContentRetired: expiredMailboxItems.retired,
     expiredMailboxTombstonesDeleted: expiredMailboxItems.tombstonesDeleted,
     expiredOperatorTaskResultsRetired,
@@ -879,6 +883,26 @@ export async function deleteExpiredTypingAlerts(input: {
     WITH doomed AS (
       SELECT id FROM hosted_linq_alert
       WHERE kind IN ('runtime_warm_typing_slow', 'runtime_cold_typing_slow')
+        AND status = 'sent' AND claimed_at < ${cutoff}
+      ORDER BY claimed_at, id
+      LIMIT ${HOSTED_RETENTION_BATCH_SIZE}
+    )
+    DELETE FROM hosted_linq_alert AS alert USING doomed
+    WHERE alert.id = doomed.id
+  `);
+}
+
+export async function deleteExpiredFinalReplyDeliveryAlerts(input: {
+  now: Date;
+  prisma: Pick<PrismaClient, "$executeRaw">;
+}): Promise<number> {
+  const cutoff = new Date(input.now.getTime() - HOSTED_TYPING_ALERT_RETENTION_MS);
+  // Unsent obligations stay. The monitor's lookback is far shorter than this
+  // retention, so retiring a sent identity cannot recreate its alert.
+  return runRetentionBatches(() => input.prisma.$executeRaw`
+    WITH doomed AS (
+      SELECT id FROM hosted_linq_alert
+      WHERE kind = 'runtime_final_reply_delivery_slow'
         AND status = 'sent' AND claimed_at < ${cutoff}
       ORDER BY claimed_at, id
       LIMIT ${HOSTED_RETENTION_BATCH_SIZE}

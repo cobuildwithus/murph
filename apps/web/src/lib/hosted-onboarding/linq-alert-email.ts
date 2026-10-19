@@ -187,6 +187,9 @@ function buildHostedLinqAlertEmailText(alert: HostedLinqAlert): string {
   if (alert.kind === "runtime_warm_typing_slow" || alert.kind === "runtime_cold_typing_slow") {
     return buildHostedTypingAlertEmailText(alert.id, details);
   }
+  if (alert.kind === "runtime_final_reply_delivery_slow") {
+    return buildHostedFinalReplyDeliveryAlertEmailText(alert.id, details);
+  }
   const independentProviderStatusPresent =
     typeof details.providerServiceStatus === "string"
     || typeof details.providerReputationStatus === "string";
@@ -219,6 +222,54 @@ function buildHostedLinqAlertEmailText(alert: HostedLinqAlert): string {
 
 function buildHostedLinqAlertEmailIdempotencyKey(alertId: string): string {
   return `hosted-linq-alert/${alertId}`.slice(0, 256);
+}
+
+function buildHostedFinalReplyDeliveryAlertEmailText(
+  alertId: string,
+  details: Record<string, unknown>,
+): string {
+  const describe = (label: string, value: unknown): string => {
+    const measurement = value && typeof value === "object"
+      ? value as Record<string, unknown>
+      : {};
+    return measurement.status === "observed"
+      ? `${label}: ${measurement.elapsedMs} ms`
+      : `${label}: not measured (${String(measurement.status ?? "missing")})`;
+  };
+  const components = details.components && typeof details.components === "object"
+    ? details.components as Record<string, unknown>
+    : {};
+  const dispatch = details.dispatchAttribution && typeof details.dispatchAttribution === "object"
+    ? details.dispatchAttribution as Record<string, unknown>
+    : {};
+  const formatOptionalMs = (value: unknown) => typeof value === "number" ? `${value} ms` : "unknown";
+  return [
+    "Murph final reply delivery latency alert.",
+    "",
+    `Alert ID: ${alertId}`,
+    `Scope: ${details.scope}`,
+    `Triggered by: ${Array.isArray(details.triggerOrigins) ? details.triggerOrigins.join(", ") : "unknown"}`,
+    `Threshold: strictly greater than ${details.thresholdMs} ms`,
+    `Whole-delivery Linq acceptance observed at: ${details.acceptedAt}`,
+    describe("Final response completion observed to Linq acceptance", details.finalResponseCompletedToAccepted),
+    describe("Provider result to Linq acceptance", details.providerResultToAccepted),
+    `Provider result to queued reply intent: ${formatOptionalMs(components.providerResultToIntentMs)}`,
+    `Provider result to Linq send attempt: ${formatOptionalMs(components.providerResultToAttemptMs)}`,
+    `Linq send attempt to acceptance: ${formatOptionalMs(components.attemptToAcceptedMs)}`,
+    `Dispatch attribution (nested, not additive): ${String(dispatch.status ?? "missing")}`,
+    ...(dispatch.status === "observed"
+      ? [
+        `  Since foreground delivery phase start: ${formatOptionalMs(dispatch.sinceForegroundPhaseStartedMs)}`,
+        `  Member-channel barrier (shared by the batch): ${formatOptionalMs(dispatch.memberChannelBarrierMs)}`,
+        `  Send preparation: ${formatOptionalMs(dispatch.sendPreparationMs)}`,
+        `  Route authority check: ${formatOptionalMs(dispatch.routeAuthorityCheckMs)}`,
+        `  Provider entry fence: ${formatOptionalMs(dispatch.providerEntryFenceMs)}`,
+      ]
+      : []),
+    `Delivery runtime attempt: ${details.deliveryAttemptRelation}`,
+    "",
+    "Acceptance means Linq accepted the send; it is not member receipt.",
+  ].join("\n");
 }
 
 function buildHostedTypingAlertEmailText(alertId: string, details: Record<string, unknown>): string {
