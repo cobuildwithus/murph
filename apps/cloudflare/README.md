@@ -466,6 +466,18 @@ roles. Zero branch series distinguishes provider omission from unusable primary
 provenance. These diagnostics contain no label values or raw metrics, add no
 provider calls, and do not change paging or persisted samples.
 
+When `planetscale_pgbouncer_current_connections` is missing, the existing failed
+collection warning also includes `pgbouncerCurrentConnectionSeries`: one entry
+per successfully parsed scrape in collection order, at most two entries. Each
+entry contains only `branch`, `primary`, `replica`, `unrecognizedRole`, and
+`primaryMissingPod` series counts. Counts use the already parsed points for the
+configured branch; `primaryMissingPod` counts primary series with a missing or
+empty pod label, which makes the per-pod sum unavailable. Zero branch series
+means no matching series, whether the family is absent or appears only on other
+branches; these counts do not establish a provider cause. No label values,
+identifiers, or metric payloads are included. The diagnostic adds no requests,
+logs, or storage and does not change null values, retries, conditions, or paging.
+
 Discovery selects exactly one target by organization, database name, and branch
 name. The configured branch ID then filters the selected Prometheus payload's
 metric series. Both selectors are required because one organization can have

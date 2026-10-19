@@ -235,6 +235,8 @@ type DatabaseHealthCollectedSample =
 
 interface DatabaseMetricCollection {
   attempts: number;
+  pgbouncerCurrentConnectionSeries:
+    readonly DatabaseMetricObservation["pgbouncerCurrentConnectionSeries"][];
   postgresStateSeries: readonly DatabaseMetricObservation["postgresStateSeries"][];
   connectionErrorCounterBaseline: Record<string, number>;
   connectionErrorDeltas: DatabaseConnectionErrorDeltas | null;
@@ -367,6 +369,7 @@ export class DatabaseHealthMonitor {
     try {
       const {
         attempts,
+        pgbouncerCurrentConnectionSeries,
         postgresStateSeries,
         connectionErrorCounterBaseline,
         connectionErrorDeltas,
@@ -397,6 +400,9 @@ export class DatabaseHealthMonitor {
         }
         console.warn("Database health metrics collection failed.", {
           attempts,
+          ...(monitoringMissingMetrics.includes("planetscale_pgbouncer_current_connections")
+            ? { pgbouncerCurrentConnectionSeries }
+            : {}),
           ...(monitoringMissingMetrics.includes("planetscale_postgres_connection_state")
             ? { postgresStateSeries }
             : {}),
@@ -1546,6 +1552,9 @@ function buildDatabaseMetricCollection(input: {
   });
   return {
     attempts: input.attempts,
+    pgbouncerCurrentConnectionSeries: input.parsedObservations.map(
+      (observation) => observation.pgbouncerCurrentConnectionSeries,
+    ),
     postgresStateSeries: input.parsedObservations.map(
       (observation) => observation.postgresStateSeries,
     ),
@@ -1691,6 +1700,7 @@ function composeRecoveredConnectionErrorObservation(input: {
   }
   return {
     missingMetrics: [],
+    pgbouncerCurrentConnectionSeries: input.observation.pgbouncerCurrentConnectionSeries,
     postgresStateSeries: input.observation.postgresStateSeries,
     snapshot: {
       ...input.observation.snapshot,
