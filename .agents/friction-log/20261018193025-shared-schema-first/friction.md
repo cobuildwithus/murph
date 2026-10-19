@@ -1,6 +1,7 @@
 ---
 title: 'Shared-schema first-input equality digest differs between identical runs'
 severity: 'minor'
+issue: 'cobuildwithus/murph#4198'
 ---
 
 ## Expected Behavior

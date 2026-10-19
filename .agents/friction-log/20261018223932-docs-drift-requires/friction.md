@@ -1,6 +1,7 @@
 ---
 title: 'Docs drift requires architecture documentation for a one-link Records correction'
 severity: 'minor'
+issue: 'cobuildwithus/murph#4205'
 ---
 
 ## Expected Behavior

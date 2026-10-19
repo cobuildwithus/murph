@@ -1,6 +1,7 @@
 ---
 title: 'Full audit snapshot omits the Containers SDK patch used by readiness tests'
 severity: 'minor'
+issue: 'cobuildwithus/murph#4192'
 ---
 
 ## Expected Behavior
