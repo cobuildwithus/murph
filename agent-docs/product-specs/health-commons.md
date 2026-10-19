@@ -53,8 +53,10 @@ or override the source range.
 
 The contract lives in `packages/contracts/src/health-commons.ts`; authored
 guidance remains in `packages/health-commons/content/biomarkers/*.md`, and the
-canonical knowledge readers carry the parsed structure. Do not
-create a frontend-only guidance lookup or commit generated catalog artifacts.
+canonical knowledge readers carry the parsed structure. The retired Biomarkers
+website has no browse/detail projections, browser presentation selectors, or
+curated navigation grouping. Raw lab replica rows and export remain supported.
+Do not create a frontend-only guidance lookup or commit generated catalog artifacts.
 
 ```yaml
 referenceGuidance:

@@ -6,7 +6,6 @@ export {
   buildJunctionWearableHostedReplayPlan,
   collectJunctionWearableBrowserVaultSummaryFailures,
   DEFAULT_JUNCTION_WEARABLE_HOSTED_REPLAY_FIXTURE_RELATIVE_PATH,
-  JUNCTION_WEARABLE_BROWSER_VAULT_BIOMARKER_EXPECTATIONS,
   JUNCTION_WEARABLE_BROWSER_VAULT_METRIC_EXPECTATIONS,
   JUNCTION_WEARABLE_FIXTURE_SUMMARY_RESOURCES,
   JUNCTION_WEARABLE_FIXTURE_TIMESERIES_RESOURCES,
@@ -22,8 +21,6 @@ export {
 export type {
   JunctionWearableBrowserVaultExperimentProgressSummary,
   JunctionWearableBrowserVaultReplicaSummary,
-  JunctionWearableBiomarkerPanelExpectation,
-  JunctionWearableFixtureBiomarkerPanelSummary,
   JunctionWearableFixtureE2eInput,
   JunctionWearableFixtureE2eResult,
   JunctionWearableFixtureMetricSummary,

@@ -2725,7 +2725,9 @@ application code.
   route requires fresh session authority. Ops routes retain their prior behavior.
 - Biomarker knowledge, canonical lab records, metric definitions, and shared
   query APIs remain available to the assistant and other consumers. The website
-  has no Biomarkers route family or generated biomarker page projections.
+  has no Biomarkers route family, generated biomarker page projections, or
+  browser-only biomarker display selectors. Raw lab replica rows and export
+  remain supported; presentation-only grouping and status inference are gone.
   Experiment sentiment uses the compact runtime desired-direction artifact,
   derived directly from canonical Health Commons entities.
 - Journal and Personal Patterns are query-owned Browser Vault projections over canonical events and metric points. Journal groups linked records for display without writing daily summaries or a second health-data store. Note timing and icon choices use existing canonical tags and a shared contracts catalog. Opening Journal requests updated data through the existing bounded Browser Vault runtime-refresh owner. Personal Patterns performs one bounded deterministic calculation and stores only the current derived report in Browser Vault; React and assistant prompts never recalculate it. Browser Vault generation 11 makes the Journal projection part of the core shard while keeping legacy replicas readable until the normal generation refresh replaces them.

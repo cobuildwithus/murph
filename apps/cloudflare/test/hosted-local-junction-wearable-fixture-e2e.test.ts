@@ -3,7 +3,6 @@ import { beforeAll, describe, expect, it } from "vitest";
 import {
   assertJunctionWearableBrowserVaultSummary,
   DEFAULT_JUNCTION_WEARABLE_HOSTED_REPLAY_FIXTURE_RELATIVE_PATH,
-  JUNCTION_WEARABLE_BROWSER_VAULT_BIOMARKER_EXPECTATIONS,
   normalizeJunctionProviderSlugForComparison,
   runJunctionWearableFixtureE2e,
   type JunctionWearableFixtureE2eResult,
@@ -85,19 +84,15 @@ describe("hosted local Junction wearable fixture e2e", () => {
     expect(sourceHealth.sleepNights).toBeGreaterThanOrEqual(7);
   });
 
-  it("projects imported wearable data into the shared biomarker query contract", () => {
+  it("projects imported wearable data into the shared metric query contract", () => {
     const e2e = requireResult();
 
     assertJunctionWearableBrowserVaultSummary({
-      biomarkerPanels: e2e.biomarkerPanels,
       metrics: e2e.metrics,
       sourceHealth: e2e.sourceHealth,
     });
   });
 
-  it("uses the production Health Commons biomarker panel inputs", async () => {
-
-  });
 });
 
 function requireResult(): JunctionWearableFixtureE2eResult {

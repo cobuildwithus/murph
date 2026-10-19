@@ -62,5 +62,19 @@ is part of the task.
   rerun passed. Synthetic screenshots were inspected locally.
 - Complexity guard and documentation drift checks passed. No schema, data,
   assistant tools, prompts, ingestion, or Environment implementation changed.
-- Final Claude review and PR exact-head CI/ReviewGPT are pending; user requested
-  a PR and green ReviewGPT. No merge or production deployment is requested.
+- Claude found stale design-study assertions, an empty test, and orphaned
+  browser-only presentation selectors. Removed these plus their dedicated
+  navigation grouping and fixture scaffolding. Generic lab shard protocol,
+  raw rows, export, and non-browser agent/query readers remain unchanged.
+- Follow-up proof passed: 148 Web tests, 25 raw lab/metric/experiment query tests,
+  11 wearable fixture unit tests, 9 canonical biomarker-content tests, and 6
+  sanitized wearable ingestion replay tests. Query dependency build and all
+  affected package/app typechecks passed.
+- PR #4213 is open. Claude's follow-up confirmed all three findings resolved
+  with no actionable regressions. Parent review found no remaining broken
+  consumer or privacy leak. Implementation and local verification are complete.
+- Exact-head CI and ReviewGPT remain PR completion gates, tracked in the PR.
+  No merge or production deployment is requested.
+Status: completed
+Updated: 2026-10-19
+Completed: 2026-10-19
