@@ -269,7 +269,6 @@ test("JournalPage requests one automatic refresh and keeps the refreshed page fr
 
 test("Journal renders honest note timing, selected artwork, and non-repeating detail", async () => {
   const client = await createFixtureClient({
-    includeHabitat: false,
     extraEntities: [
       createEntity("event", "evt_context", {
         kind: "note", title: "Recovery context", occurredAt: "2026-04-20T12:00:00Z", date: "2026-04-20",
@@ -1327,7 +1326,6 @@ async function createFixtureClient(
   input: {
     experimentSlug?: string;
     extraEntities?: BrowserVaultEntity[];
-    includeHabitat?: boolean;
   } = {},
 ) {
   const replica = await createBrowserVaultReplica({
@@ -1408,7 +1406,6 @@ async function createFixtureClient(
           tags: ["cardio"],
           title: "Improve resting heart rate",
         }),
-        ...(input.includeHabitat === false ? [] : createHabitatEntities()),
         ...(input.extraEntities ?? []),
       ],
       metadata: {
@@ -1427,7 +1424,6 @@ function resolveRecordClass(
   switch (family) {
     case "experiment":
     case "goal":
-    case "habitat":
     case "regimen":
       return "bank";
     case "event":
@@ -1438,44 +1434,6 @@ function resolveRecordClass(
     default:
       throw new Error(`Unsupported browser-vault test family: ${family}`);
   }
-}
-
-function createHabitatEntities(): BrowserVaultEntity[] {
-  return [
-    createEntity("habitat", "hab_home-location", {
-      attributes: {
-        aspect: "home-location",
-        domain: "environment",
-        indicators: {
-          area_type: "urban_center",
-          location: "Lisbon",
-        },
-      },
-      kind: "habitat",
-      path: "bank/habitat/home-location.md",
-      status: "active",
-      title: "Location & climate",
-    }),
-    createEntity("habitat", "hab_sleep-environment", {
-      attributes: {
-        aspect: "sleep-environment",
-        domain: "environment",
-        indicators: {
-          co2_meter: "aranet",
-          darkness: "blackout",
-          mattress_satisfaction: "good",
-          night_noise: "quiet",
-          night_temp_c: 20,
-          phone_by_bed: false,
-          tv_in_bedroom: false,
-        },
-      },
-      kind: "habitat",
-      path: "bank/habitat/sleep-environment.md",
-      status: "active",
-      title: "Bedroom & sleep",
-    }),
-  ];
 }
 
 function addIsoDays(value: string, days: number): string {

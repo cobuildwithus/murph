@@ -15,6 +15,7 @@ import {
   HOSTED_RUNTIME_GROUP_CONTEXT_HANDOFF_EVENT_ID_PREFIX,
   HOSTED_RUNTIME_GROUP_CONTEXT_HANDOFF_TTL_MS,
   HOSTED_RUNTIME_DEVICE_SYNC_CONTINUATION_OWNER_MAX_COUNT,
+  isHostedRetiredMailboxKind,
 } from "@murphai/hosted-execution/runtime-control";
 import { parseMemberActionOutcomeV1 } from "@murphai/contracts";
 import {
@@ -1328,7 +1329,17 @@ function parseHostedSystemMailboxStateValue(value: unknown): HostedSystemMailbox
   }
 
   return {
-    pending: pending.map(parseHostedSystemMailboxPendingItem),
+    pending: pending.flatMap((value) => {
+      // Old snapshots can retain retired work at any completion stage. Skip
+      // before parsing its removed payload, action, or post-checkpoint record.
+      const wake = value && typeof value === "object" && "wake" in value
+        ? value.wake : null;
+      if (wake && typeof wake === "object" && "kind" in wake
+        && typeof wake.kind === "string" && isHostedRetiredMailboxKind(wake.kind)) {
+        return [];
+      }
+      return [parseHostedSystemMailboxPendingItem(value)];
+    }),
   };
 }
 

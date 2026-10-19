@@ -4200,12 +4200,13 @@ existing cumulative cap, applying the same replyability, conversation, route,
 and exact-successor checks without reopening or mutating the pending index.
 
 Habitat remains canonical member context in `bank/habitat`, accessed through
-ordinary assistant conversations, the vault CLI, and existing query/replica
-owners. The retired Environment dashboard has no dedicated interview, voice,
+ordinary assistant conversations, the vault CLI, and canonical query owners.
+Browser replicas omit Habitat records because their only consumer was Environment. The retired Environment dashboard has no dedicated interview, voice,
 report, or live-conditions execution path. The existing retired-mailbox registry
 keeps old event metadata readable and skips unimported rows without fetching
-their payload; already-imported pending state must drain on the old runtime
-before consumer removal. Existing staged recordings retain
+their payload. The saved system-mailbox reader discards retired wakes before
+parsing obsolete payloads, actions or completion records, preserving active
+successors and handled-prefix progress without a pre-deploy drain. Existing staged recordings retain
 only the legacy member-prefix deletion sweep and R2 expiry safety.
 
 Hosted dynamic image generation launches as invocation-local background work so

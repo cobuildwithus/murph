@@ -651,29 +651,6 @@ function addOuraPersonaEvents(
 function addContextRichEvents(asOfDate: string, entities: CanonicalEntity[]) {
   const tripStart = addDays(asOfDate, -5);
   entities.push(
-    habitatEntity({
-      aspect: "home-location",
-      id: "oura_home_location",
-      indicators: {
-        area_type: "urban_center",
-        location: "Warsaw",
-      },
-      title: "Location and climate",
-    }),
-    habitatEntity({
-      aspect: "sleep-environment",
-      id: "oura_sleep_environment",
-      indicators: {
-        co2_meter: "aranet",
-        darkness: "blackout",
-        mattress_satisfaction: "good",
-        night_noise: "quiet",
-        night_temp_c: 18,
-        phone_by_bed: false,
-        tv_in_bedroom: false,
-      },
-      title: "Bedroom and sleep",
-    }),
     journalNote({
       attributes: {
         destination: "Berlin",
@@ -954,39 +931,6 @@ function scheduledDates(
     dates.add(addDays(asOfDate, -offset));
   }
   return dates;
-}
-
-function habitatEntity(input: {
-  aspect: string;
-  id: string;
-  indicators: Record<string, boolean | number | string>;
-  title: string;
-}): CanonicalEntity {
-  return {
-    attributes: {
-      aspect: input.aspect,
-      domain: "environment",
-      indicators: input.indicators,
-    },
-    body: null,
-    date: null,
-    entityId: input.id,
-    experimentSlug: null,
-    family: "habitat",
-    frontmatter: null,
-    kind: "habitat",
-    links: [],
-    lookupIds: [input.id],
-    occurredAt: null,
-    path: `bank/habitat/${input.aspect}.md`,
-    primaryLookupId: input.id,
-    recordClass: "bank",
-    relatedIds: [],
-    status: "active",
-    stream: null,
-    tags: [],
-    title: input.title,
-  };
 }
 
 function activityEntity(

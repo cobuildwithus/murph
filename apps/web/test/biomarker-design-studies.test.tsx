@@ -291,7 +291,6 @@ test("screenshot categories keep the production studies available without one gi
   expect(designPageSource).toContain('import Link from "next/link"');
 
   for (const clientStudy of [
-    "environment-progress-study.tsx",
     "experiment-results-share-study.tsx",
     "homepage-auth-warm-runtime-study.tsx",
   ]) {

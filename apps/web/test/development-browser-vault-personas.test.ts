@@ -213,26 +213,7 @@ test("Oura persona joins meals, travel, and environment context into one private
     events.some((event) => event.title === "Bedroom temperature changed"),
     true,
   );
-  assert.equal(
-    replica.entities.some((entity) => entity.family === "habitat"),
-    true,
-  );
-  const sleep = replica.entities.find((entity) =>
-    entity.family === "habitat" && entity.attributes.aspect === "sleep-environment"
-  );
-  const home = replica.entities.find((entity) =>
-    entity.family === "habitat" && entity.attributes.aspect === "home-location"
-  );
-  const sleepIndicators = sleep?.attributes.indicators;
-  const homeIndicators = home?.attributes.indicators;
-  assert.ok(
-    sleepIndicators && typeof sleepIndicators === "object" && "night_temp_c" in sleepIndicators,
-  );
-  assert.ok(
-    homeIndicators && typeof homeIndicators === "object" && "location" in homeIndicators,
-  );
-  assert.equal(sleepIndicators.night_temp_c, 18);
-  assert.equal(homeIndicators.location, "Warsaw");
+
 });
 
 test("Active persona has varied recent context without wearable outcomes", async () => {

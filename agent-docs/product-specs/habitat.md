@@ -20,8 +20,9 @@ cover standalone equipment. Diet remains outside this family.
   indicator, priority, allowed-value and evidence-target catalog.
 - `packages/core/src/bank/habitat.ts` owns canonical mutations through the
   ordinary bank registry, one Markdown record per aspect under `bank/habitat/`.
-- `packages/query/src/health/habitat.ts` owns reads; ordinary Browser Vault
-  replicas and Journal projections retain their existing context consumers.
+- `packages/query/src/health/habitat.ts` owns canonical reads. New Browser Vault
+  replicas omit Habitat records after removal of their only browser consumer;
+  ordinary Journal events retain their own projection.
 - `packages/cli/src/commands/habitat.ts` exposes `save`, `show`, `list`,
   `coverage` and `catalog`. The assistant uses this same public CLI boundary.
 - `packages/contracts/src/habitat-coverage.ts` derives known, unknown,
@@ -64,8 +65,9 @@ special-purpose mailbox handlers remain. Historical event metadata uses the
 existing retired-mailbox registry and cannot admit new work. Shared assistant weather tools and
 ordinary audio ingestion retain their own owners.
 
-Before rolling out removal of the event consumers, stop old Environment
-producers and drain accepted interview/voice jobs and post-checkpoint audio
-cleanup on the previous runtime. Preserve the existing R2 expiration and
-account-deletion prefix sweep for residual encrypted recordings. Canonical
+Unimported retired events skip before payload retrieval; saved system-mailbox
+state discards retired wakes, including obsolete completion/recording records,
+before active parsing. No old-runtime drain is required. Preserve the existing
+R2 expiration and account-deletion prefix sweep for residual encrypted
+recordings, including recordings whose completion was discarded. Canonical
 Habitat records need no destructive migration.
