@@ -9,14 +9,8 @@ status: draft
 quality: usable
 categories:
   - pre-sleep-downshift-practices
-relations:
+relations: []
 
-  -
-    type: related_protocol
-    target: protocol_variant:pre-sleep-downshift-practices/pre-sleep-resonance-breathing-and-meditation
-  -
-    type: parent_family
-    target: experiment_family:pre-sleep-downshift-practices
 source:
   kind: "review"
   title: "The Relationship Between Doses of Mindfulness-Based Programs and Depression, Anxiety, Stress, and Mindfulness: a Dose-Response Meta-Regression of Randomized Controlled Trials"

@@ -12,14 +12,8 @@ aliases:
   - NCT05217602
 categories:
   - pre-sleep-downshift-practices
-relations:
+relations: []
 
-  -
-    type: related_protocol
-    target: protocol_variant:pre-sleep-downshift-practices/pre-sleep-silent-meditation
-  -
-    type: parent_family
-    target: experiment_family:pre-sleep-downshift-practices
 source:
   kind: other
   title: Incentivizing Meditation App Habit Formation
