@@ -369,13 +369,13 @@ describe("weekly game: posting", () => {
     // Thirty seconds of clock slack is allowed; more is not.
     expect(post(state, LEO, thirtyAfter, { captureAgeMs: (30 * 60 - 25) * 1000 }).entries[0].dayIndex).toBe(1);
     expect(post(state, LEO, thirtyAfter, { captureAgeMs: (30 * 60 - 35) * 1000 }).entries[0].dayIndex).toBe(2);
-    // No capture age, or past the hour: today.
+    // No capture age: today.
     expect(post(state, LEO, thirtyAfter).entries[0].dayIndex).toBe(2);
+    // Yesterday's shot past the hour, or once yesterday already has a live post, counts for no day.
     const late = new Date(boundary.getTime() + 61 * 60 * 1000);
-    expect(post(state, LEO, late, { captureAgeMs: 62 * 60 * 1000 }).entries[0].dayIndex).toBe(2);
-    // Yesterday already has a live post: today.
+    expect(codeOf(() => post(state, LEO, late, { captureAgeMs: 62 * 60 * 1000 }))).toBe("DAY_CLOSED");
     const already = post(state, LEO, at(state, LEO, 1, 9));
-    expect(post(already, LEO, thirtyAfter, { captureAgeMs: 31 * 60 * 1000 }).entries.at(-1)!.dayIndex).toBe(2);
+    expect(codeOf(() => post(already, LEO, thirtyAfter, { captureAgeMs: 31 * 60 * 1000 }))).toBe("DAY_CLOSED");
     // After the last day: grace still lands on day 6, otherwise closed.
     const end = at(state, LEO, 7, 3);
     const afterEnd = new Date(end.getTime() + 30 * 60 * 1000);
@@ -383,12 +383,26 @@ describe("weekly game: posting", () => {
     expect(codeOf(() => post(state, LEO, afterEnd, { captureAgeMs: 10 * 60 * 1000 }))).toBe("DAY_CLOSED");
   });
 
+  it("never counts a shot the phone kept from an earlier day", () => {
+    const state = live();
+    // Captured Day 0 at 9am (Monday, say), sent two days later: refused, not counted for Day 2.
+    const sentLater = at(state, LEO, 2, 9);
+    expect(codeOf(() => post(state, LEO, sentLater, { captureAgeMs: 2 * 24 * 60 * 60 * 1000 }))).toBe("DAY_CLOSED");
+    // Captured today and sent a few seconds later: today.
+    expect(post(state, LEO, sentLater, { captureAgeMs: 5000 }).entries[0].dayIndex).toBe(2);
+    // Captured just after today's 3am, inside the 30 seconds of slack before it: still today.
+    const justAfter = new Date(at(state, LEO, 2, 3).getTime() + 2 * 60 * 60 * 1000);
+    expect(post(state, LEO, justAfter, { captureAgeMs: 2 * 60 * 60 * 1000 + 20 * 1000 }).entries[0].dayIndex).toBe(2);
+  });
+
   it("gives grace only to a scheduled day that ended without a post", () => {
     // Mon/Wed/Fri. Leo's Day 0 is Saturday and Day 1 Sunday (off); Day 2 is Monday.
     const state = live(invited({ days: [0, 2, 4] }));
     const mondayBoundary = at(state, LEO, 2, 3);
     const afterSunday = new Date(mondayBoundary.getTime() + 10 * 60 * 1000);
-    expect(post(state, LEO, afterSunday, { captureAgeMs: 15 * 60 * 1000 }).entries[0].dayIndex).toBe(2);
+    // Sunday was a day off, so a shot from before 3am gets no grace, and isn't Monday's either.
+    expect(codeOf(() => post(state, LEO, afterSunday, { captureAgeMs: 15 * 60 * 1000 }))).toBe("DAY_CLOSED");
+    expect(post(state, LEO, afterSunday, { captureAgeMs: 5 * 60 * 1000 }).entries[0].dayIndex).toBe(2);
     const tuesdayBoundary = at(state, LEO, 3, 3);
     const afterMonday = new Date(tuesdayBoundary.getTime() + 10 * 60 * 1000);
     expect(post(state, LEO, afterMonday, { captureAgeMs: 15 * 60 * 1000 }).entries[0].dayIndex).toBe(2);

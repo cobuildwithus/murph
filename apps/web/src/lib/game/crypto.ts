@@ -1,6 +1,11 @@
 import "server-only";
 
-import { openHostedUserSecureBoxStrings, sealHostedUserSecureBoxString } from "../hosted-crypto/secure-box";
+import {
+  openHostedUserSecureBoxBytes,
+  openHostedUserSecureBoxStrings,
+  sealHostedUserSecureBoxBytes,
+  sealHostedUserSecureBoxString,
+} from "../hosted-crypto/secure-box";
 
 /**
  * Game words (names, tasks, stakes, labels, captions, workout data) are
@@ -35,6 +40,19 @@ export async function openGameTexts(
     entries: entries.map((entry) => ({ aad: aad(entry), scope: SCOPE, userId: entry.memberId, value: entry.value })),
     lane: LANE,
   });
+}
+
+/** A photo is sealed under its uploader's key and bound to its own content key. */
+function mediaAad(key: string) {
+  return { field: "bytes", purpose: SCOPE, rowId: key, table: "game_media" };
+}
+
+export async function sealGameMedia(input: { bytes: Uint8Array; key: string; ownerMemberId: string }): Promise<string> {
+  return sealHostedUserSecureBoxBytes({ aad: mediaAad(input.key), lane: LANE, scope: SCOPE, userId: input.ownerMemberId, value: input.bytes });
+}
+
+export async function openGameMedia(input: { envelope: string; key: string; ownerMemberId: string }): Promise<Uint8Array> {
+  return openHostedUserSecureBoxBytes({ aad: mediaAad(input.key), lane: LANE, scope: SCOPE, userId: input.ownerMemberId, value: input.envelope });
 }
 
 export function labelTarget(ownerMemberId: string, field: "name" | "relationship"): GameSealTarget {

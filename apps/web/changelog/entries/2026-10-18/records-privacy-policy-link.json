@@ -1,0 +1,19 @@
+{
+  "publishedOn": "2026-10-18",
+  "order": 0,
+  "item": {
+    "id": "records-privacy-policy-link",
+    "kind": "improvement",
+    "priority": 1,
+    "title": "Read the privacy policy from Records",
+    "summary": "The privacy link under a connected record source now opens Murph’s privacy policy.",
+    "details": "Expand Manage and choose “How Murph uses your data” to read the policy.",
+    "relevanceTags": [
+      "records",
+      "privacy"
+    ],
+    "sourcePullRequests": [
+      4201
+    ]
+  }
+}

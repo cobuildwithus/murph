@@ -1911,6 +1911,14 @@
     {
       "issue": "cobuildwithus/murph#4189",
       "path": ".agents/friction-log/20261018173504-reviewgpt-package-upgrade/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#4192",
+      "path": ".agents/friction-log/20261018183332-full-audit-snapshot/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#4198",
+      "path": ".agents/friction-log/20261018193025-shared-schema-first/friction.md"
     }
   ],
   "version": 1

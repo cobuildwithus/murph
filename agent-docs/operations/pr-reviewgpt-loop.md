@@ -28,6 +28,9 @@ Both lean and full guarded archives include the tracked native CI controller
 policy, PR evidence template, and assistant verification skill through the
 existing exact always-path manifest. These inputs remain available when they
 are unchanged by the candidate.
+The exact always-path manifest also includes the pinned Containers SDK patch,
+`pnpm-lock.yaml`, and `pnpm-workspace.yaml`, so included readiness tests retain
+the dependency implementation correction and its version/integrity mapping.
 
 Round 1 is always a full-patch audit. On round 2 or later, the packager reads the
 PR body's explicit context

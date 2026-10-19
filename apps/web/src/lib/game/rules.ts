@@ -443,6 +443,13 @@ function postingDay(state: RuleState, player: RulePlayer, captureAgeMs: number |
   }
   if (today < 0) reject("DAY_CLOSED", "Day 1 hasn't started yet.");
   if (today >= lengthDays) reject("DAY_CLOSED", "This game is over.");
+  // A shot the phone kept from an earlier day never counts for today.
+  if (captureAgeMs !== null) {
+    const dayStart = dayStartInstant(addDays(player.dayOne!, today), player.timeZone).getTime();
+    if (now.getTime() - captureAgeMs < dayStart - GAME_CAPTURE_SLACK_MS) {
+      reject("DAY_CLOSED", "That photo is from an earlier day.");
+    }
+  }
   return today;
 }
 

@@ -59,8 +59,10 @@ public profile photos.
 - **Offline grace.** In the hour after a player's 3am boundary, a photo the
   phone says it captured before the boundary (monotonic capture age, with 30
   seconds of slack) counts for the day that just ended, if that was a scheduled
-  day with no live photo and a post left. This is an honor rule for friends, not
-  league evidence.
+  day with no live photo and a post left. Any other photo captured before the
+  current day began (one the phone kept and sent later) counts for no day and
+  is refused with `DAY_CLOSED`; a post without a capture age counts for today.
+  This is an honor rule for friends, not league evidence.
 - **Settle.** When the last player's last day ends plus one hour, the game is
   over: score is scheduled days with a live photo (capped at N in any-N games),
   misses are scheduled days without one (the shortfall from N in any-N games;
@@ -82,9 +84,11 @@ public profile photos.
 - **Retries.** Every action is safe to repeat: creating a game with the same id,
   posting the same entry, accepting an invite already accepted, or redeeming a
   ticket already redeemed returns the current game and changes nothing.
+- **Photos.** Kept with no expiry, sealed under the uploader's key; only the
+  game's players can see them, by the unlock rule. At most 4 MiB each.
 - **Account deletion.** Deleting an account deletes the games that person
-  created and the tickets they owe. Acceptable while the data is disposable;
-  revisit before real users.
+  created, the tickets they owe, and every photo they uploaded. Acceptable
+  while the data is disposable; revisit before real users.
 
 ## Deferred
 
@@ -92,9 +96,6 @@ public profile photos.
 - Murph as host in the group chat, with `read_game` and `update_game` tools,
   including mid-game term changes (from the first day nobody has started).
 - Declining or cancelling an invite; for now it simply expires.
-- Hosted media storage. Uploads work only on local stacks today; Vercel
-  deployments return `GAME_MEDIA_UNAVAILABLE` until a Worker game-media path
-  exists.
 - Server-side stripping of embedded location metadata from uploaded images.
 - Recaps, bankruptcy, and nudges.
 

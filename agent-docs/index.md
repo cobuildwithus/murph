@@ -3,6 +3,8 @@ Final reply post-generation delivery telemetry and alerting are owned by
 implementation is recorded in
 [the completed delivery latency plan](exec-plans/completed/2026-10-19-post-generation-delivery-latency.md).
 
+ReviewGPT artifact identity adoption: [completed plan](exec-plans/completed/2026-10-18-frog-reviewgpt-artifact-4186.md).
+
 Canary reply observation diagnostics: [completed plan](exec-plans/completed/2026-10-18-canary-reply-observation-diagnostics.md).
 
 Hosted live-journey configuration is owned by `../packages/assistant-engine/README.md`;
@@ -69,6 +71,8 @@ Published plan-closer adoption and installed-wrapper proof are tracked in
 [the repo-tools adoption plan](exec-plans/completed/2026-10-18-frog-plan-closer-adoption-4178.md).
 Dependency review source inclusion is tracked in
 [the source-context plan](exec-plans/completed/2026-10-18-frog-repo-tools-review-source-4178.md).
+Pinned Containers SDK patch and mapping inclusion is tracked in
+[the SDK snapshot plan](exec-plans/completed/2026-10-18-frog-sdk-patch-context-4192.md).
 
 Private vault-file preparation failure evidence is owned by
 [`the runtime telemetry contract`](../docs/hosted-runtime-log-database.md#private-vault-file-preparation-failure-evidence);
@@ -731,7 +735,7 @@ Package verifier worker-exit result preservation is tracked in
 | `agent-docs/product-specs/hosted-usage-topups.md` | Hosted billing/product spec, including 80% top-up usage grants, preserved historical purchase terms, and migration-first sponsorship compatibility. | Hosted billing/product spec | High | 2026-09-22 |
 | `agent-docs/product-specs/hosted-usage-referrals.md` | Hosted growth/product spec. | Hosted growth/product spec | High | 2026-08-10 |
 | `agent-docs/product-specs/physical-notes.md` | Hosted physical-note product spec. | Hosted physical-note product spec | High | 2026-08-21 |
-| `agent-docs/product-specs/weekly-game.md` | Private 1v1 weekly habit game shipped dark: live games per opponent, one shared Day 1 date across time zones, picked start dates, Start now, photo post-to-unlock, retakes, transcript-only excuses, offline grace, settle on read, tickets with use-by dates, addressed rematches and rounds, retries, and deferred scope. | Weekly game product spec | High | 2026-10-16 |
+| `agent-docs/product-specs/weekly-game.md` | Private 1v1 weekly habit game shipped dark: live games per opponent, one shared Day 1 date across time zones, picked start dates, Start now, photo post-to-unlock, sealed hosted photo storage, retakes, transcript-only excuses, offline grace and refused stale captures, settle on read, tickets with use-by dates, addressed rematches and rounds, retries, and deferred scope. | Weekly game product spec | High | 2026-10-18 |
 | `agent-docs/product-specs/hosted-support-escalation.md` | Hosted support product spec. | Hosted support product spec | High | 2026-08-05 |
 | `agent-docs/product-specs/hosted-family-plan.md` | Hosted billing/product spec. | Hosted billing/product spec | High | 2026-08-10 |
 | `agent-docs/product-specs/health-commons.md` | Health Commons behavior. | Health Commons behavior | High | 2026-07-29 |
@@ -1275,3 +1279,8 @@ Provider-input baseline snapshot repair and regression proof are tracked in
 Consumer-first optional knowledge reads and CLI wiki write guidance
 implementation and compatibility evidence are recorded in
 [the knowledge optional-read plan](exec-plans/completed/2026-10-16-knowledge-optional-read-and-write-guidance.md).
+
+Complete first-provider-input equality now accounts for explicit fixture identities
+and generated fixture roots while preserving semantic differences. Implementation
+and regression proof are recorded in
+[`2026-10-18-frog-first-input-4198.md`](exec-plans/completed/2026-10-18-frog-first-input-4198.md).

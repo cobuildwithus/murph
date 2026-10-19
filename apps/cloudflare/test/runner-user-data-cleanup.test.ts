@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   hostedBundleUserPrefix,
+  hostedGameMediaObjectKey,
   hostedMealPhotoUserPrefix,
   hostedPrivateMediaUserPrefix,
 } from "../src/storage-paths.js";
@@ -58,6 +59,28 @@ describe("hosted runner user data cleanup", () => {
     });
     expect(bucket.objects.has(stagedPhotoKey)).toBe(false);
     expect(bucket.objects.has(unrelatedKey)).toBe(true);
+  });
+
+  it("deletes weekly game photos during user erasure", async () => {
+    const bucket = new ListableMemoryEncryptedR2Bucket();
+    const mediaId = `${"c".repeat(64)}.jpg`;
+    const photoKey = await hostedGameMediaObjectKey({ mediaId, userId: USER_ID });
+    const otherKey = await hostedGameMediaObjectKey({ mediaId, userId: "member_other" });
+    await bucket.put(photoKey, "sealed-game-photo");
+    await bucket.put(otherKey, "other-member-game-photo");
+
+    const result = await deleteHostedUserR2DataBeforeStateDeletion({
+      bucket,
+      userId: USER_ID,
+    });
+
+    expect(result).toMatchObject({
+      deletedObjectCount: 1,
+      skippedUserScopedPrefixes: false,
+      supported: true,
+    });
+    expect(bucket.objects.has(photoKey)).toBe(false);
+    expect(bucket.objects.has(otherKey)).toBe(true);
   });
 
   it("deletes private avatar ingress objects during user erasure", async () => {

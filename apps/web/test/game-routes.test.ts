@@ -359,8 +359,8 @@ describe("weekly game routes", () => {
       expect(photoAsAudio.status).toBe(400);
     });
 
-    it("caps uploads at 8 MB", async () => {
-      const response = await routes.upload.POST(uploadRequest({ headers: { "content-length": String(8 * 1024 * 1024 + 1) } }));
+    it("caps uploads at 4 MiB", async () => {
+      const response = await routes.upload.POST(uploadRequest({ headers: { "content-length": String(4 * 1024 * 1024 + 1) } }));
 
       expect(response.status).toBe(413);
     });

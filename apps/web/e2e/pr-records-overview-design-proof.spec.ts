@@ -48,5 +48,8 @@ for (const width of [390, 1280]) {
     await expect(dialog).toBeHidden();
     await expect(study.getByText("Import incomplete", { exact: true })).toBeVisible();
     await expect(study.getByRole("link", { name: "How Murph uses your data" })).toBeVisible();
+    await study.getByRole("link", { name: "How Murph uses your data" }).click();
+    await expect(page).toHaveURL(/\/legal\/privacy$/);
+    await expect(page.getByRole("heading", { name: "Murph Privacy Policy", exact: true })).toBeVisible();
   });
 }

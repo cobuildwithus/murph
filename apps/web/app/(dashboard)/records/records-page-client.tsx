@@ -307,7 +307,7 @@ function ConnectionDetails({ connection, disabled, onDisconnect }: {
         {(latestRun?.labResultCount ?? 0) > 0 ? <ImportAgainLink connection={connection} /> : null}
         {connection.importsRemaining === 0 ? <p>This source has reached its import limit. Saved records remain available.</p> : null}
         <p>Disconnect stops future imports. Records already saved in Murph stay there.</p>
-        <Link href="/privacy" className="w-fit underline underline-offset-4">How Murph uses your data</Link>
+        <Link href="/legal/privacy" className="w-fit underline underline-offset-4">How Murph uses your data</Link>
         {connection.status !== "disconnected" ? (
           <Button className="w-fit" disabled={disabled} onClick={onDisconnect} size="sm" type="button" variant="outline">
             Disconnect
