@@ -228,3 +228,28 @@ Updated: 2026-10-18
   Docker. Protected `release_admission` runs the five production-core lanes on
   merged main before production; media/tool delivery and prompt-cache scenarios
   are not part of that set.
+
+### PR #4194 checkpoint
+
+- Draft PR #4194 opened from this branch. The first ReviewGPT launch on
+  `927c2a79` was invalid before send: native review packaging still required
+  upstream root `AGENTS.md`, which `rust-v0.163.0` deleted (upstream #49713).
+  That owner was removed; a real-pin dry run packaged 69 patched upstream files.
+- Local acceptance surfaced one argv-shape assertion in
+  `packages/cli/test/assistant-codex.test.ts` that the steering defaults changed;
+  it now pins the exact steering and timing prefix. A second run hit a
+  load-sensitive hosted workspace runner wake test that passes alone (5/5); it is
+  recorded through Frog. The third `MURPH_VERIFY_EXECUTOR=local pnpm
+  verify:acceptance` run on `73d86bfa` exited 0.
+- The six documented CLI-upgrade live journeys passed on `73d86bfa` with Ready
+  reply and effect review: nine-item native and code-only lists with no card and
+  no invalid calls; one compact-table card for both comparison modes; one
+  generation and one attachment with a truthful 300-second statement for Sol
+  code-only and Luna mixed songs.
+- Main advanced to `6fb79bfc` (#4191 completion admission, #4196 supplement
+  labels); fourth ordinary merge was clean. On the merged head: typecheck, doc
+  gardening, complexity (debt unchanged), Cloudflare runner/entrypoint/image/
+  egress suites (479), targeted steering tests (15), and the patch verifier pass.
+- The changelog fragment moved to the 2026-10-19 edition: it ships after
+  #4191's same-day entry, whose "handled as before" detail stays true for its
+  date.
