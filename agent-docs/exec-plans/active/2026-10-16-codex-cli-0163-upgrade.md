@@ -330,3 +330,43 @@ source, and local `pnpm hosted-local e2e` would need an owned Docker runtime.
 Neither is available or authorized in this task. Protected
 `release_admission` runs only on `main` and does not cover these four
 scenarios. The gap is missing execution capability, not a proven missing test.
+
+### Ownership handback and hosted proof, 2026-10-19
+
+The user explicitly handed completion of PR #4194 back to this chat. The
+preceding Hold records an earlier checkpoint and is superseded by this section.
+No merge or rollout is authorized by this handback; preserve the separate
+release coordinator's reservation and all production admission gates.
+
+- Reconciled clean local and remote head `6273ed253a8ba118fc4cda44f89ae97c16613529`.
+  Current main retains Codex 0.160.0; latest stable remains 0.163.0.
+- Exact-head native Runner permission sandbox run `39189084344` passed,
+  including patched-image compilation, extracted-binary tests, egress, and
+  permission/confinement smoke. Host Support run `39189084341` passed, including
+  the one-vCPU bundle comparison with actual samples. PR evidence run
+  `39189077380` passed. These resolve the first two preceding Hold items.
+- Existing private diagnostic PR #192 supplies a reviewed, non-main,
+  no-production-credential candidate lane. Its run `39195739584` selected exact
+  public head `6273ed25`, built the actual image, passed gateway/prompt-cache
+  (one test) and image/media delivery (three tests), then failed lost-active-
+  operation steering. No duplicate private branch or implementation is needed.
+- Failure cause: the test holds a provider response *before* Codex receives
+  its tool call, but then requires that stale tool to run after steering.
+  The default instant interrupt intentionally preempts this response. The
+  test now requires the corrected provider request while the stale response is
+  still held, rejects its tool from subsequent input, and preserves exact
+  single delivery, mailbox progress, durable fence clearance, and fresh wake.
+  This is test alignment to the already-reviewed behavior, not a runtime fix.
+- The existing vault-persistence scenario previously skipped without a live
+  provider key. It now additionally supports the stub profile, scripting only
+  the provider while the candidate binary executes the real shell write and
+  the original encrypted-checkpoint/restart assertions remain intact. It also
+  requires exactly one synthetic reply. Live mode remains available and fails
+  on missing credentials. No auth material is copied or read.
+- After both test edits, Cloudflare typecheck, provider-support tests (39),
+  real-binary instant-steer/explicit-disable controls (2), complexity, doc
+  gardening, and doc drift all passed. Native
+  hosted-local execution of the corrected steering, vault persistence, replies,
+  and scheduled reminders remains required before Ready. ReviewGPT round 2
+  remains the production-source review; these isolated proof changes follow
+  the review-loop exemption and require their own verification and exact-head CI.
