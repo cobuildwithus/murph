@@ -1923,6 +1923,10 @@
     {
       "issue": "cobuildwithus/murph#4198",
       "path": ".agents/friction-log/20261018193025-shared-schema-first/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#4205",
+      "path": ".agents/friction-log/20261018223932-docs-drift-requires/friction.md"
     }
   ],
   "version": 1
