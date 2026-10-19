@@ -370,3 +370,40 @@ release coordinator's reservation and all production admission gates.
   and scheduled reminders remains required before Ready. ReviewGPT round 2
   remains the production-source review; these isolated proof changes follow
   the review-loop exemption and require their own verification and exact-head CI.
+
+### Resumed verification receipts on `a89bd548`
+
+- Native Runner permission sandbox run `39328838880` passed. The fresh image
+  reports Codex 0.163.0; its extracted binary passes native voice/WebSocket
+  tests (13), SSE steering cases (3; 137 unrelated filtered skips), egress (28),
+  and the actual permission/confinement smoke. This is current-source image
+  proof, not merely a source-contract check.
+- Refreshed canonical local acceptance initially failed the unchanged reserved-
+  voice owner-handoff test's one-second deadline. The owner starts no provider
+  and is identical to the base. Three focused file runs (five cases each) and
+  full assistant-runtime coverage (3,740 passed, seven skipped) then passed.
+  The clean `MURPH_VERIFY_EXECUTOR=local pnpm verify:acceptance` rerun passed
+  with exit 0 in 2,445 seconds: workspace typechecks, repo tools (898), all
+  package coverage, Web verification (14,094 tests, lint and production build),
+  Cloudflare Node/Worker checks (4,405 + 20 + 19 tests), and fixture smoke
+  covering 206 scenarios. Existing opt-in skips are unchanged. Root cause of
+  the initial timing failure is unproven; no assertion or deadline changed.
+- Refreshed remote main `f54875376973da0c36a8eece4bb63ad91edbad96` matches
+  `ls-remote` and retains Codex 0.160.0. Merge-tree proof is clean; intervening
+  invite-UI and documentation changes do not alter this upgrade's owners.
+- Hosted candidate proof `39328858199` attempt 2 remains pending. Host Support
+  `39328838919` diagnostic attempt 3 failed when the hosted runner lost
+  communication; its build and diagnostic logs were never uploaded. Attempt 1
+  canceled during compilation, and attempt 2 logged `Killed` / exit 137 before
+  any latency samples. Resource exhaustion remains unproven.
+- The budget job now bounds native compilation to the existing two-job default
+  already proven in current-head native permission run `39328838880`. Only the
+  CI build parallelism changes. The Dockerfile, patch, image source fingerprint,
+  compiler target/profile, one-vCPU measurements, timeouts, and assertions stay
+  unchanged. This is a bounded execution mitigation, not a claimed OOM fix.
+- Existing latency-comparator and PR-CI policy tests pass (32), and workspace
+  typecheck passes after the workflow edit. Parent review confirms the deployed
+  source is unchanged; this low-risk build-tooling change does not create a new
+  substantive ReviewGPT round under completion eligibility. Round 2 PASS still
+  covers the production source. Fresh exact-head CI is required for the new
+  setting, and the plan remains active until it and hosted proof are reviewed.
