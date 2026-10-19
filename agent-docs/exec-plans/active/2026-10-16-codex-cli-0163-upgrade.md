@@ -296,3 +296,37 @@ Updated: 2026-10-18
   base builds take 31-47 minutes. Root cause is not established; resource
   exhaustion on this heavier two-checkout job is an unproven hypothesis. No
   code or budget change was made; the next exact-head run re-executes it.
+- Cloudflare Runner Permission Sandbox run `39184625389` on `c7e4d65d` ended
+  FAILURE. The patched-image compile passed, native voice and WebSocket cases
+  passed 13/13, and native SSE steering cases passed 3/3. Native egress passed
+  27 and failed 1 on the same
+  `/v1/decisionsanswerschoicemodelquestionsvalueinstructionsvariant` token,
+  which `4a1420aa` classifies. The permission and confinement smoke was skipped
+  after that failure, so it has not passed and remains required proof.
+
+### Base reconciliation at `52ad1721`
+
+- Exact remote `main` refreshed by explicit refspec is `df2e9ec4` (#4197),
+  matching `ls-remote`. `git merge-tree --write-tree` against it is clean, and
+  the only file both sides touch is `agent-docs/index.md`. #4197's
+  persisted-event Web reader floor lives in files this branch does not change,
+  so no base merge is needed and that floor is untouched; pull-request CI also
+  tests the merge ref.
+- ReviewGPT round 2 PASS at `c7e4d65d` still covers the reviewed source: later
+  commits change only the egress fixture and this plan.
+
+### Hold
+
+Still unexecuted required proof keeps this plan active:
+
+- the native permission and confinement smoke;
+- a one-vCPU runner-bundle latency comparison that reaches its samples;
+- hosted-local scenarios on the current image: gateway and prompt cache, vault
+  persistence, media and tool delivery, and steering through the image.
+
+Those scenarios have no execution owner here. Private Murph Cloud's
+`Public Murph Integration` would need a private PR that pins this exact public
+source, and local `pnpm hosted-local e2e` would need an owned Docker runtime.
+Neither is available or authorized in this task. Protected
+`release_admission` runs only on `main` and does not cover these four
+scenarios. The gap is missing execution capability, not a proven missing test.
