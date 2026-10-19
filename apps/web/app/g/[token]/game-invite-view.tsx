@@ -7,8 +7,8 @@ import { CopyInviteLink } from "./copy-invite-link";
 
 const WEEKDAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
-/** What a texted challenge link shows, from the invite preview. The page supplies `<main>`. */
-export function GameInviteView(props: { preview: GameInvitePreview | null; token: string }) {
+/** What a texted challenge link shows, from the invite preview. The page supplies `<main>` and the app link. */
+export function GameInviteView(props: { appUrl: string; preview: GameInvitePreview | null }) {
   const { preview } = props;
   return (
     <div className="mx-auto flex max-w-md flex-col">
@@ -28,7 +28,7 @@ export function GameInviteView(props: { preview: GameInvitePreview | null; token
             ))}
           </dl>
           <div className="mt-8 flex flex-col gap-4">
-            <a className={buttonVariants({ className: "w-full", size: "xl" })} href={`murphv2://invite/${encodeURIComponent(props.token)}`}>
+            <a className={buttonVariants({ className: "w-full", size: "xl" })} href={props.appUrl}>
               Open in Murph
             </a>
             <CopyInviteLink />
