@@ -1034,17 +1034,6 @@ export function useBrowserVaultMetricsSelector<T>(
   );
 }
 
-export function useBrowserVaultLabsSelector<T>(
-  selector: (client: BrowserVaultLabsCapableQueryClient) => T,
-): T | null {
-  const { client } = useBrowserVault();
-  const labsClient = isBrowserVaultLabsCapable(client) ? client : null;
-  return useMemo(
-    () => (labsClient ? selector(labsClient) : null),
-    [labsClient, selector],
-  );
-}
-
 export function useBrowserVaultFullSelector<T>(
   selector: (client: BrowserVaultQueryClient) => T,
 ): T | null {

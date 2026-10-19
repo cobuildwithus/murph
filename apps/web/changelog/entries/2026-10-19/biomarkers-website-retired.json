@@ -1,0 +1,17 @@
+{
+  "publishedOn": "2026-10-19",
+  "order": 100,
+  "item": {
+    "id": "biomarkers-website-retired",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Biomarker support stays in conversation",
+    "summary": "The Biomarkers page has been retired from the website.",
+    "details": "Your saved lab results and wearable data remain available to Murph in conversation. Record imports and experiment results are still supported.",
+    "relevanceTags": [
+      "biomarkers",
+      "labs"
+    ],
+    "sourcePullRequests": []
+  }
+}

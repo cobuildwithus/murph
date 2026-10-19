@@ -3,7 +3,6 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
-  Activity,
   BookOpen,
   ChartSpline,
   ChevronsUpDown,
@@ -83,12 +82,6 @@ const navItems: {
     href: "/environment",
     matchPrefix: "/environment",
     icon: Leaf,
-  },
-  {
-    label: "Biomarkers",
-    href: "/biomarkers",
-    matchPrefix: "/biomarkers",
-    icon: Activity,
   },
   { label: "Experiments", href: "/experiments", icon: FlaskConical },
 ];

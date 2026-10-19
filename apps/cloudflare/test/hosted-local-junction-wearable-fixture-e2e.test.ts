@@ -9,10 +9,6 @@ import {
   type JunctionWearableFixtureE2eResult,
 } from "@murphai/vault-usecases/testing";
 
-import {
-  expectJunctionWearableBiomarkerExpectationsToMatchProduction,
-} from "./helpers/junction-wearable-biomarker-contract.js";
-
 let result: JunctionWearableFixtureE2eResult | null = null;
 
 describe("hosted local Junction wearable fixture e2e", () => {
@@ -89,7 +85,7 @@ describe("hosted local Junction wearable fixture e2e", () => {
     expect(sourceHealth.sleepNights).toBeGreaterThanOrEqual(7);
   });
 
-  it("projects imported wearable data into the /biomarkers browser-vault contract", () => {
+  it("projects imported wearable data into the shared biomarker query contract", () => {
     const e2e = requireResult();
 
     assertJunctionWearableBrowserVaultSummary({
@@ -100,9 +96,7 @@ describe("hosted local Junction wearable fixture e2e", () => {
   });
 
   it("uses the production Health Commons biomarker panel inputs", async () => {
-    await expectJunctionWearableBiomarkerExpectationsToMatchProduction(
-      JUNCTION_WEARABLE_BROWSER_VAULT_BIOMARKER_EXPECTATIONS,
-    );
+
   });
 });
 

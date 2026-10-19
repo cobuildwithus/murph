@@ -138,7 +138,7 @@ test.each([
   await rendered.cleanup();
 });
 
-test.each(["/home", "/patterns", "/journal", "/biomarkers/example"])(
+test.each(["/home", "/patterns", "/journal", "/experiments/example"])(
   "dashboard sign-in resumes the full current URL: %s",
   async (pathname) => {
     const { AuthProvider } = await import(

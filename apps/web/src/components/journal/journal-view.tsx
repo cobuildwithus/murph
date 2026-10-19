@@ -937,9 +937,6 @@ function journalEventDetailHref(
   if (event.kind === "experiment_context") {
     return { href: "/experiments", label: "View experiment" };
   }
-  if (event.kind === "test") {
-    return { href: "/biomarkers", label: "View results" };
-  }
   if (
     event.kind === "note" &&
     event.title.toLowerCase().includes("bedroom temperature")

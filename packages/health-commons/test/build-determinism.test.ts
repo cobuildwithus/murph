@@ -72,7 +72,7 @@ vi.mock("node:fs/promises", async (importOriginal) => {
 });
 
 import { writeHealthCommonsGeneratedArtifacts } from "../src/build.ts";
-import { buildHealthCommonsWebBiomarkerOverview } from "../src/biomarker-web-artifacts.ts";
+
 import { buildHealthCommonsWebGeneratedArtifacts } from "../src/web-artifacts.ts";
 
 const TEST_PAGE_REVISION_ID = `sha256:${"1".repeat(64)}`;
@@ -188,7 +188,7 @@ describe("@murphai/health-commons build determinism", () => {
         generatedRoot: "health-commons-generated",
       }),
     ).rejects.toThrow(
-      "Health Commons generated artifacts are nondeterministic: catalog.hash, protocol-index.json, protocol-run-specs.json, protocol-family-graph.json, biomarker-desired-directions.json, source-index.json, source-artifact-index.json, web/routes/index.json, web/browse/experiments.json, web/browse/biomarkers.json, web/browse/goals.json.",
+      "Health Commons generated artifacts are nondeterministic: catalog.hash, protocol-index.json, protocol-run-specs.json, protocol-family-graph.json, biomarker-desired-directions.json, source-index.json, source-artifact-index.json, web/routes/index.json, web/browse/experiments.json, web/browse/goals.json.",
     );
 
     expect(buildHealthCommonsCatalogMock).toHaveBeenCalledTimes(2);
@@ -236,9 +236,8 @@ describe("@murphai/health-commons build determinism", () => {
     await expect(readFile(path.join(generatedRoot, "web/browse/experiments.json"), "utf8")).resolves.toContain(
       '"schemaVersion": "murph.commons.web.experiment-index.v1"',
     );
-    await expect(readFile(path.join(generatedRoot, "web/browse/biomarkers.json"), "utf8")).resolves.toContain(
-      '"schemaVersion": "murph.commons.web.biomarker-index.v4"',
-    );
+    await expect(readFile(path.join(generatedRoot, "web/browse/biomarkers.json"), "utf8"))
+      .rejects.toMatchObject({ code: "ENOENT" });
     await expect(readFile(path.join(generatedRoot, "web/browse/goals.json"), "utf8")).resolves.toContain(
       '"schemaVersion": "murph.commons.web.goal-index.v2"',
     );
@@ -530,108 +529,6 @@ describe("@murphai/health-commons build determinism", () => {
     ]);
     expect(webArtifacts.experimentIndex.experiments.map((entry) => entry.routeId)).toEqual([
       "public",
-    ]);
-  });
-
-  it("does not let a statusless protocol publish or enter a biomarker route bundle", () => {
-    const statuslessProtocolKey = "protocol_variant:family/statusless";
-    const biomarker = {
-      ...createBiomarkerEntity({
-        key: "biomarker:test-signal",
-        slug: "biomarkers/test-signal",
-        title: "Test Signal",
-      }),
-      biomarker: {
-        explainerCards: [
-          { title: "Why people care", body: "Test context." },
-          { title: "How to measure it", body: "Test measurement." },
-          { title: "What moves it", body: "Test confounders." },
-        ],
-        measurement: {
-          bestContext: "Use a consistent test context.",
-          howToMeasure: ["Measure consistently."],
-        },
-      },
-      communityOutcomeSummary: {
-        placeholder: "Community outcomes are not yet available.",
-        state: "coming_soon",
-      },
-      relations: [{
-        target: statuslessProtocolKey,
-        type: "related_protocol",
-      }],
-    } satisfies HealthCommonsCatalogEntity;
-    const statuslessProtocol = createProtocolEntity({
-      expectedSignalDescriptions: [{
-        biomarkerKey: biomarker.key,
-        description: "Test signal.",
-        protocolProminence: "focus",
-      }],
-      key: statuslessProtocolKey,
-      relations: [{
-        target: biomarker.key,
-        type: "primary_biomarker",
-      }],
-      slug: "protocols/family/statusless",
-      title: "Statusless Protocol",
-    });
-    const webArtifacts = buildHealthCommonsWebGeneratedArtifacts({
-      ...createCatalog("sha256:first"),
-      entities: [biomarker, statuslessProtocol],
-    });
-    const biomarkerBundle = webArtifacts.routeBundles.get(
-      "bundles/biomarker/test-signal.json",
-    );
-
-    expect(webArtifacts.biomarkerIndex.biomarkers).toEqual([
-      expect.objectContaining({
-        key: biomarker.key,
-        published: false,
-      }),
-    ]);
-    expect(webArtifacts.routeIndex.routes[0]).not.toHaveProperty("projections");
-    expect([...webArtifacts.projectionArtifacts.keys()]).toEqual([]);
-    expect(Object.keys(biomarkerBundle?.entitiesByKey ?? {})).toEqual([
-      biomarker.key,
-    ]);
-    expect(biomarkerBundle?.reverseEdges).toEqual([]);
-  });
-
-  it("excludes statusless protocols from biomarker rankings", () => {
-    const biomarker = createBiomarkerEntity({
-      key: "biomarker:test-signal",
-      slug: "biomarkers/test-signal",
-      title: "Test Signal",
-    });
-    const protocol = (key: string, status?: "field-testing") => createProtocolEntity({
-      expectedSignalDescriptions: [{
-        biomarkerKey: biomarker.key,
-        description: "Test signal.",
-        protocolProminence: "focus",
-      }],
-      key: `protocol_variant:family/${key}`,
-      slug: `protocols/family/${key}`,
-      status,
-      title: `${key} Protocol`,
-    });
-    const protocols = [protocol("public", "field-testing"), protocol("statusless")];
-    const overview = buildHealthCommonsWebBiomarkerOverview({
-      biomarker,
-      catalogHash: "sha256:first",
-      entitiesByKey: new Map<string, HealthCommonsCatalogEntity>([
-        [biomarker.key, biomarker],
-        ...protocols.map((entry): [string, HealthCommonsCatalogEntity] => [
-          entry.key,
-          entry,
-        ]),
-      ]),
-      routeAliases: [],
-      routeId: "test-signal",
-      routeIdByEntityKey: new Map(protocols.map((entry) => [entry.key, entry.slug])),
-    });
-
-    expect(overview.protocolRankings.map((ranking) => ranking.key)).toEqual([
-      "protocol_variant:family/public",
     ]);
   });
 
