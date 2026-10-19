@@ -4532,6 +4532,20 @@ printf 'ZIP: %s (%s bytes)\n' \
       const leanEntries = listZipEntries(leanBundle.zipPath)
       const fullEntries = listZipEntries(fullBundle.zipPath)
 
+      const containersPatch = 'patches/@cloudflare__containers@0.3.7.patch'
+      expect(fullEntries).toContain('apps/cloudflare/test/containers-helper-readiness.test.ts')
+      for (const [bundle, entries] of [[fullBundle, fullEntries], [leanBundle, leanEntries]] as const) {
+        for (const dependencyInput of [containersPatch, 'pnpm-lock.yaml', 'pnpm-workspace.yaml']) {
+          expect(entries, `missing dependency input: ${dependencyInput}`).toContain(dependencyInput)
+          const archived = execFileSync('unzip', ['-p', bundle.zipPath, dependencyInput])
+          expect(archived.equals(readFileSync(path.join(repoRoot, dependencyInput)))).toBe(true)
+        }
+      }
+      expect(readFileSync(path.join(repoRoot, 'pnpm-workspace.yaml'), 'utf8'))
+        .toContain(`'@cloudflare/containers@0.3.7': ${containersPatch}`)
+      expect(readFileSync(path.join(repoRoot, 'pnpm-lock.yaml'), 'utf8'))
+        .toContain(`path: ${containersPatch}`)
+
       for (const relativePath of [
         '.github/native-hosted-e2e-controller.json',
         '.github/pull_request_template.md',
