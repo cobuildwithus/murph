@@ -286,6 +286,7 @@ describe("hosted runtime control contracts", () => {
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("mailbox.appended");
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("mailbox.dedupe_conflict");
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("mailbox.post_checkpoint_effects_finished");
+    expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("mailbox.progress_alert_sampled");
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("assistant.device_connect");
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain(
       "assistant.device_activity_automation_failed",

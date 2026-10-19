@@ -2660,7 +2660,13 @@ to apply after cutover.
   ownership. An imported sequence above durable high water is unknown and
   contributes no imported-but-unhandled count; equality is full coverage.
   They never contain member, mailbox, phone, message, trace, or exception
-  identifiers. The existing terminal runtime-invocation log records
+  identifiers. A newly built alert or reminder whose claim commits also
+  schedules, after the response, at most 20 subject-scoped
+  `mailbox.progress_alert_sampled` runtime-log entries for its oldest sampled
+  stalled lane heads (see `docs/hosted-runtime-log-database.md`). Retries that
+  reuse a persisted message never record a new sample. The observation is best
+  effort: missing entries are not evidence, and it never gates delivery.
+  The existing terminal runtime-invocation log records
   the public runner release SHA, result status, selected wake, and derived
   system imported/handled/first-pending sequences, including returns that
   require no checkpoint. That return reuses the current system-mailbox state

@@ -65,6 +65,39 @@ Historical missing categories cannot be retrospectively classified. The existing
 shallow scalar parser used on append and read accepts both new category values;
 no schema, reader, retention or event-count change is required.
 
+### Progress-alert sample attribution
+
+`mailbox.progress_alert_sampled` attributes a runtime-progress alert or reminder
+to the lane heads its health sample counted. Web writes it only after a newly
+built notification's claim commits, through Next.js `after()`, so neither the
+email send nor the cron response waits for it. Retries that reuse the persisted
+message write nothing, so a later sample is never bound to an earlier incident.
+
+Each entry is scoped to its runtime's subject key and uses existing columns:
+`at` equals the email's `Checked` admission time, `mailbox_lane` and
+`mailbox_seq_start`/`mailbox_seq_end` hold the sampled head's lane sequence,
+level is `warn` (14-day retention), and phase is the Web-origin `invoke`.
+`redactedJson` contains only `alertIncidentId` (the incident's existing opaque
+UUID), `healthCheckedAt` (the actual sampling instant, which precedes `at`),
+`sampleCount`, `sampleOverflowCount` and `scanTruncated`. At most 20 of the
+oldest stalled lanes are written, grouped per subject. Writes are sequential;
+no new write starts after a 10-second budget. That budget is not an end-to-end
+timeout: each started write keeps the store's existing connection and statement
+bounds across its lock, active-member check, insert and commit. If `after()`
+cannot schedule the task, the observation is dropped.
+
+Locate an alert's entries by event code and its exact `Checked` timestamp, then
+group by `alertIncidentId`. Fewer entries than `sampleCount`, a positive
+`sampleOverflowCount`, or `scanTruncated` means the evidence is incomplete.
+Missing entries are not evidence of no alert or of recovery: writes are best
+effort, skip inactive members, and may not finish if the function ends. A failed
+send may still have its attempted sample recorded. The alert email and
+persisted incident state do not change.
+
+Web is the only producer, but the shared event enum is part of Worker
+protocol admission. Deploy Web before any Worker built from this change, or the
+Worker release fails Web protocol admission closed.
+
 ### Device import connection ownership
 
 `device-sync.pass_finished.deviceSyncConnectionKey` is a SHA-256 hex digest of
