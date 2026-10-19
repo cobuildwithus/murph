@@ -1,7 +1,7 @@
 Final reply post-generation delivery telemetry and alerting are owned by
 [`hosted-runtime-protocol.md`](references/hosted-runtime-protocol.md); the
-candidate is tracked in
-[the active delivery latency plan](exec-plans/active/2026-10-19-post-generation-delivery-latency.md).
+implementation is recorded in
+[the completed delivery latency plan](exec-plans/completed/2026-10-19-post-generation-delivery-latency.md).
 
 Canary reply observation diagnostics: [completed plan](exec-plans/completed/2026-10-18-canary-reply-observation-diagnostics.md).
 
