@@ -62,3 +62,8 @@ Done when: focused tests and typechecks pass and the final diff preserves Enviro
 - Follow-up Claude review identified a nested inline lineage bypass, stale onboarding assertions, and a dead historical changelog button. Closed the nested input, derive inline snapshots from the saved protocol, updated the safety assertions and saved-plan skill guidance, and removed only the dead button. Private-plan tests pass 13 cases and onboarding guidance passes 16; vault-usecases typecheck passes.
 - Final complexity guard passes across 123 authored source files, with 17 retained hotspots inspected and lower aggregate debt. No new service, persistence owner, or dependency.
 - Draft PR #4216 is open. Review preview and final deterministic assistant sweep are in progress; exact pushed-head ReviewGPT and CI remain required.
+
+- Claude final follow-up returned PASS, including nested input rejection, saved snapshot validation, historical lineage preservation, and unchanged Environment.
+- Full assistant sweep: 5,842 passed and 565 skipped; two stale prompt/skill assertions failed during the in-progress run. Both were corrected, and the complete affected two-file rerun passed all 38 tests. The four-file regression cleanup also passes 161 tests (seven skipped) and assistant typecheck passes.
+
+- Review preview builds successfully. Live checks confirm `/design` returns 200, the navigation retains Environment and omits Experiments, and `/experiments` returns 404. Production project settings remain unchanged.
