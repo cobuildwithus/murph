@@ -2,7 +2,7 @@ import { readHostedDelegationHintOverrides } from './support/hosted-delegation-h
 import { MURPH_ATTACH_FOLLOW_UP_TOOL } from '../src/assistant-codex/dynamic-tools/automation.ts'
 import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { cp, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -3882,7 +3882,10 @@ text(result.output);
   // Equality projection for this opt-in measurement only. These exact paths
   // differed in all four pinned-App-Server fixture pairs; never scrub metadata
   // wholesale or alter the raw capture used for byte counts and digests.
-  function normalizeSharedSchemaFirstInputForEquality(json: string): {
+  function normalizeSharedSchemaFirstInputForEquality(
+    json: string,
+    fixturePaths: ReadonlyArray<readonly [string, 'codex-home' | 'workspace' | 'temporary-directory']> = [],
+  ): {
     json: string
     normalizedFields: string[]
   } {
@@ -3906,9 +3909,9 @@ text(result.output);
     const identities = [
       ...Array.from({ length: 7 }, (_, index) =>
         [readRecord(input[index]), 'id', `input[${index}].id`] as const),
-      ...['session_id', 'thread_id', 'turn_id', 'root_turn_id', 'x-codex-window-id'].map((key) =>
+      ...['session_id', 'thread_id', 'turn_id', 'root_turn_id', 'x-codex-window-id', 'x-codex-installation-id'].map((key) =>
         [metadata, key, `client_metadata.${key}`] as const),
-      ...['session_id', 'thread_id', 'turn_id', 'window_id', 'context_window_id', 'root_turn_id'].map((key) =>
+      ...['session_id', 'thread_id', 'turn_id', 'window_id', 'context_window_id', 'root_turn_id', 'installation_id'].map((key) =>
         [turnMetadata, key, `${turnMetadataPath}.${key}`] as const),
     ]
     for (const [record, key, field] of identities) {
@@ -3921,6 +3924,34 @@ text(result.output);
     turnMetadata.turn_started_at_unix_ms = 0
     // Decode only in the equality projection; retain every static nested field.
     metadata['x-codex-turn-metadata'] = turnMetadata
+    const normalizedFields = [...identities.map(([, , field]) => field), `${turnMetadataPath}.turn_started_at_unix_ms`]
+    // Only fixture-owned roots in these native-generated messages are incidental.
+    // Keep their suffixes, surrounding policy, other messages, and raw input intact.
+    if (fixturePaths.length > 0) {
+      const roots = [...fixturePaths].sort(([left], [right]) => right.length - left.length)
+      for (const [inputIndex, contentIndex, marker] of [
+        [2, 1, '<skills_instructions>'],
+        [2, 2, '<permissions instructions>'],
+        [5, 0, '<environment_context>'],
+      ] as const) {
+        const content = readRecord(input[inputIndex])?.content
+        const part = readRecord(Array.isArray(content) ? content[contentIndex] : null)
+        const field = `input[${inputIndex}].content[${contentIndex}].text`
+        if (part?.type !== 'input_text' || typeof part.text !== 'string' || !part.text.startsWith(marker)) {
+          throw new Error(`Unexpected generated fixture context at ${field}.`)
+        }
+        let text = part.text
+        for (const [root, name] of roots) {
+          if (!path.isAbsolute(root) || root === path.parse(root).root) {
+            throw new Error('Expected a non-root absolute fixture path.')
+          }
+          const escaped = root.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&')
+          text = text.replace(new RegExp(`(^|[\\s\x60>])${escaped}(?=[/\x60<\\s]|$)`, 'gu'), `$1<fixture-${name}>`)
+        }
+        part.text = text
+        normalizedFields.push(`${field} (fixture roots only)`)
+      }
+    }
     return {
       json: JSON.stringify(body, (_key, value: unknown) => {
         const record = readRecord(value)
@@ -3928,7 +3959,7 @@ text(result.output);
           ? Object.fromEntries(Object.keys(record).sort().map((key) => [key, record[key]]))
           : value
       }),
-      normalizedFields: [...identities.map(([, , field]) => field), `${turnMetadataPath}.turn_started_at_unix_ms`],
+      normalizedFields,
     }
   }
 
@@ -3944,11 +3975,11 @@ text(result.output);
       tools: [{ type: 'function', name: 'synthetic_tool', parameters: { type: 'object' } }],
       client_metadata: {
         session_id: identity, thread_id: identity, turn_id: identity,
-        root_turn_id: identity, 'x-codex-window-id': identity,
+        root_turn_id: identity, 'x-codex-window-id': identity, 'x-codex-installation-id': identity,
         static_client: 'synthetic',
         'x-codex-turn-metadata': JSON.stringify({
           session_id: identity, thread_id: identity, turn_id: identity,
-          window_id: identity, context_window_id: identity, root_turn_id: identity,
+          window_id: identity, context_window_id: identity, root_turn_id: identity, installation_id: identity,
           turn_started_at_unix_ms: identity === 'a' ? 1 : 2,
           static_route: { mode: 'synthetic' },
         }),
@@ -3978,6 +4009,51 @@ text(result.output);
       change(body)
       expect(normalizeSharedSchemaFirstInputForEquality(JSON.stringify(body)).json === normalized.json).toBe(false)
     }
+    const fixturePaths = (identity: string): Array<readonly [string, 'codex-home' | 'workspace' | 'temporary-directory']> => [
+      [`/tmp/first-input-${identity}`, 'temporary-directory'],
+      [`/tmp/first-input-${identity}/home`, 'codex-home'],
+      [`/tmp/first-input-${identity}/workspace`, 'workspace'],
+      [`/private/tmp/first-input-${identity}`, 'temporary-directory'],
+      [`/private/tmp/first-input-${identity}/home`, 'codex-home'],
+      [`/private/tmp/first-input-${identity}/workspace`, 'workspace'],
+    ]
+    const pathFixture = (identity: string) => {
+      const body = fixture(identity)
+      const root = `/tmp/first-input-${identity}`
+      body.input[2]!.content = [
+        { type: 'input_text', text: 'SYNTHETIC unchanged context' },
+        { type: 'input_text', text: `<skills_instructions>Root: ${root}/home/skills/.system` },
+        { type: 'input_text', text: `<permissions instructions>Writable: ${root} ${root}/workspace; read-only: /unrelated` },
+      ]
+      body.input[5]!.content[0]!.text = `<environment_context><cwd>${root}/workspace</cwd><path>/private${root}/workspace/.git</path>`
+      return body
+    }
+    const pathBaseline = normalizeSharedSchemaFirstInputForEquality(JSON.stringify(pathFixture('a')), fixturePaths('a'))
+    expect(normalizeSharedSchemaFirstInputForEquality(JSON.stringify(pathFixture('b')), fixturePaths('b'))).toEqual(pathBaseline)
+    expect(pathBaseline.json).toContain('<fixture-codex-home>/skills/.system')
+    expect(pathBaseline.json).toContain('<fixture-workspace>/.git')
+    expect(pathBaseline.json).toContain('<fixture-temporary-directory>')
+    expect(normalizeSharedSchemaFirstInputForEquality(JSON.stringify(pathFixture('b'))).json === pathBaseline.json).toBe(false)
+    for (const change of [
+      (body: ReturnType<typeof fixture>) => { body.input[2]!.content[1]!.text += ' Changed skill guidance.' },
+      (body: ReturnType<typeof fixture>) => { body.input[2]!.content[2]!.text = body.input[2]!.content[2]!.text.replace('Writable', 'Read-only') },
+      (body: ReturnType<typeof fixture>) => { body.input[5]!.content[0]!.text = body.input[5]!.content[0]!.text.replace('/.git', '/.aws') },
+      (body: ReturnType<typeof fixture>) => { body.input[2]!.content[2]!.text += ' /tmp/first-input-b-unrelated' },
+      (body: ReturnType<typeof fixture>) => { body.input[0]!.content[0]!.text = '/tmp/first-input-b/workspace' },
+    ]) {
+      const body = pathFixture('b')
+      change(body)
+      expect(normalizeSharedSchemaFirstInputForEquality(JSON.stringify(body), fixturePaths('b')).json === pathBaseline.json).toBe(false)
+    }
+    const otherPaths = pathFixture('b')
+    otherPaths.input[2]!.content[2]!.text += ' /tmp/first-input-b-unrelated /other/tmp/first-input-b/workspace'
+    const preservedPaths = normalizeSharedSchemaFirstInputForEquality(JSON.stringify(otherPaths), fixturePaths('b')).json
+    expect(preservedPaths).toContain('/tmp/first-input-b-unrelated')
+    expect(preservedPaths).toContain('/other/tmp/first-input-b/workspace')
+    const wrongContext = pathFixture('b')
+    wrongContext.input[5]!.content[0]!.text = '<user_message>Unexpected context'
+    expect(() => normalizeSharedSchemaFirstInputForEquality(JSON.stringify(wrongContext), fixturePaths('b'))).toThrow()
+    expect(() => normalizeSharedSchemaFirstInputForEquality(JSON.stringify(pathFixture('b')), [['/', 'workspace']])).toThrow()
     for (const invalidMetadata of ['not-json', '[]', '{}']) {
       const body = fixture('b')
       body.client_metadata['x-codex-turn-metadata'] = invalidMetadata
@@ -4217,15 +4293,15 @@ text(result.output);
     const prompt = [
       layers.dynamicTurnContextPrompt, 'Compare two synthetic routes: Amber takes ten minutes; Birch takes twenty minutes.',
     ].join('\n\n')
-    const scenario = await prepareScriptedTurnScenario()
-    const modelCatalogJson = await writeHostedOpenAiMixedModeModelCatalogJson({
-      codexCommand: scenario.turnInput.codexCommand,
-      directory: scenario.turnInput.codexHome,
-      ...(toolMode === 'code-only' ? { toolMode: 'code_mode_only' } : {}),
-    })
     const captures = []
     for (const phase of ['baseline', 'candidate'] as const) {
       await stopWarmCodexAppServer()
+      const scenario = await prepareScriptedTurnScenario()
+      const modelCatalogJson = await writeHostedOpenAiMixedModeModelCatalogJson({
+        codexCommand: scenario.turnInput.codexCommand,
+        directory: scenario.turnInput.codexHome,
+        ...(toolMode === 'code-only' ? { toolMode: 'code_mode_only' } : {}),
+      })
       scenario.stub.markRequestBaseline()
       scenario.stub.captureProviderRequestDiagnostics({ completeInput: true })
       scenario.stub.queue({ text: 'SYNTHETIC_FIRST_INPUT_CAPTURED' })
@@ -4289,6 +4365,14 @@ text(result.output);
       } else {
         expect(capture.json).not.toContain('MURPH_INPUT_SCHEMA_JSON:')
       }
+      const fixturePaths: Array<readonly [string, 'codex-home' | 'workspace' | 'temporary-directory']> = []
+      for (const [root, name] of [
+        [scenario.turnInput.codexHome, 'codex-home'],
+        [scenario.turnInput.workingDirectory, 'workspace'],
+        [tmpdir(), 'temporary-directory'],
+      ] as const) {
+        fixturePaths.push([root, name], [await realpath(root), name])
+      }
       captures.push({
         ...capture,
         phase,
@@ -4297,7 +4381,7 @@ text(result.output);
         visibleMurphToolCount: visibleMurphTools.length,
         bytes: Buffer.byteLength(capture.json, 'utf8'),
         sha256: createHash('sha256').update(capture.json).digest('hex'),
-        equalityInput: normalizeSharedSchemaFirstInputForEquality(capture.json),
+        equalityInput: normalizeSharedSchemaFirstInputForEquality(capture.json, fixturePaths),
       })
     }
     const [baseline, candidate] = captures
@@ -4324,7 +4408,7 @@ text(result.output);
         excludedTransportFields: candidate.excludedTransportFields,
       },
       equality: {
-        method: 'Decode x-codex-turn-metadata; normalize only the listed identity/timestamp fields. Preserve every other property/value and array order.',
+        method: 'Decode x-codex-turn-metadata; normalize listed identities/timestamp and exact fixture-owned roots in listed generated context fields. Preserve path suffixes, other text/properties, and array order.',
         normalizedFields: candidate.equalityInput.normalizedFields,
         baselineSha256: createHash('sha256').update(baseline.equalityInput.json).digest('hex'),
         candidateSha256: createHash('sha256').update(candidate.equalityInput.json).digest('hex'),
@@ -4340,7 +4424,7 @@ text(result.output);
       const suffix = supplementedTools[index]!.description.slice(tools[index]!.description.length)
       withoutSupplements = withoutSupplements.replaceAll(JSON.stringify(suffix).slice(1, -1), '')
     }
-    expect(withoutSupplements, 'whole first request differs only by derived supplements and listed transport identities').toBe(baseline.equalityInput.json)
+    expect(withoutSupplements === baseline.equalityInput.json, 'whole first request differs only by derived supplements and listed fixture identities').toBe(true)
     expect(registrationBytes.candidate).toBeGreaterThan(registrationBytes.baseline)
   })
 
