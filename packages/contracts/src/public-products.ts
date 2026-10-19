@@ -426,8 +426,8 @@ const publicProductSourceSchema = z
     recordId: boundedText(512),
     url: nullableUrl,
     releaseDate: z.iso.date().nullable(),
-    lastSeenAt: z.iso.datetime().nullable(),
-    importedAt: z.iso.datetime().nullable(),
+    lastSeenAt: z.isoDateTime().nullable(),
+    importedAt: z.isoDateTime().nullable(),
   })
   .strict();
 

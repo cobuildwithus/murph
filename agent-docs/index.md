@@ -1,5 +1,7 @@
 Final reply post-generation delivery telemetry and alerting are owned by
 
+Environment removal compatibility review: [timestamp preservation](exec-plans/completed/2026-10-19-environment-timestamp-compatibility.md).
+
 Environment removal dependency follow-up: [runner schema runtime proof](exec-plans/completed/2026-10-19-environment-boot-dependency.md).
 [`hosted-runtime-protocol.md`](references/hosted-runtime-protocol.md); the
 implementation is recorded in

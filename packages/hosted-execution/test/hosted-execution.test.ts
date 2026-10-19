@@ -793,7 +793,7 @@ describe("hosted execution coverage gaps", () => {
 
     const exportKeys = Object.keys(packageJson.exports ?? {}).sort();
 
-    expect(packageJson.dependencies?.zod).toBe("^4.4.3");
+    expect(packageJson.dependencies?.zod).toBe("^4.5.4");
     expect(packageJson.devDependencies?.zod).toBeUndefined();
     expect(exportKeys).toEqual([
       ".",

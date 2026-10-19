@@ -132,7 +132,7 @@ assert(
   'package.json must keep incur pinned to the reviewed runtime with Murph error-envelope and canonical skill-hash patches.',
 )
 assert(
-  packageJson.dependencies?.zod === '^4.4.3',
+  packageJson.dependencies?.zod === '^4.5.4',
   'package.json must install Zod because the published CLI bundles private declarations that name zod/v4.',
 )
 assert(

@@ -1,6 +1,7 @@
 import { string as zString } from 'zod/v4'
 
 const offsetIsoTimestampSchema = zString().datetime({ offset: true })
+  .or(zString().datetime({ offset: true, precision: -1 }))
 
 export function normalizeNullableString(value: string | null | undefined): string | null {
   if (typeof value !== 'string') {

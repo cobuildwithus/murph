@@ -173,7 +173,7 @@ function parseStoredWearableActivityEvidence(value: unknown): {
 const storedTokenSchema = z.string().max(120).regex(
   /^[a-z0-9]+(?:[ ._:/-][a-z0-9]+)*$/u,
 );
-const storedTimestampSchema = z.iso.datetime({ offset: true }).nullable();
+const storedTimestampSchema = z.isoDateTime({ offset: true }).nullable();
 const storedActivityMetricSchema = z.custom<WearableMetricKey>(
   (value) =>
     typeof value === "string"

@@ -49,7 +49,7 @@ const hostedRuntimeAssistantPersonalizationToolAuthoritySchema = z.union([
   }).strict(),
   z.object({
     automationId: z.string().trim().min(1).max(256),
-    occurrenceAt: z.string().datetime({ offset: true }),
+    occurrenceAt: z.isoDateTime({ offset: true }),
     toolCallId: z.string().trim().min(1).max(256).optional(),
   }).strict(),
 ]);
