@@ -1,3 +1,5 @@
+ReviewGPT artifact identity adoption: [completed plan](exec-plans/completed/2026-10-18-frog-reviewgpt-artifact-4186.md).
+
 Canary reply observation diagnostics: [completed plan](exec-plans/completed/2026-10-18-canary-reply-observation-diagnostics.md).
 
 Hosted live-journey configuration is owned by `../packages/assistant-engine/README.md`;
