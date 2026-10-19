@@ -349,7 +349,7 @@ The original productive-pass and conversation implementation is tracked in
 Bounded post-claim attribution of progress alerts to sampled lane heads uses
 `mailbox.progress_alert_sampled`, specified in `docs/hosted-runtime-log-database.md`
 and tracked in
-[`2026-10-18-progress-alert-sample-attribution.md`](exec-plans/active/2026-10-18-progress-alert-sample-attribution.md).
+[`2026-10-18-progress-alert-sample-attribution.md`](exec-plans/completed/2026-10-18-progress-alert-sample-attribution.md).
 
 Healthy retention rechecks, observation-only cleanup health, and incomplete
 provider-stream close classification are owned by `apps/cloudflare/README.md`; implementation
