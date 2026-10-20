@@ -378,7 +378,7 @@ test("public Android controller has no PR lifecycle and retains fail-closed run 
   assert.doesNotMatch(native, /mode === "pr"|prHead|pulls\/\$\{/u);
 });
 
-test("trusted Android controller is twelve-hour, executed on every admission, and production-only", async () => {
+test("trusted Android controller runs five times weekly, executed on every admission, and production-only", async () => {
   const workflow = await readFile(
     path.join(ROOT, ".github", "workflows", "native-android-hosted-e2e.yml"),
     "utf8",
@@ -388,8 +388,11 @@ test("trusted Android controller is twelve-hour, executed on every admission, an
     workflow.indexOf("\njobs:\n"),
   );
 
-  assert.match(workflow, /schedule:\n\s+- cron: "47 \*\/12 \* \* \*"/u);
-  assert.match(workflow, /schedule:\n\s+- cron: "47 \*\/12 \* \* \*"\n\s+workflow_dispatch:/u);
+  assert.deepEqual(
+    [...workflow.matchAll(/cron: "([^"]+)"/gu)].map((match) => match[1]),
+    ["47 0 * * 0,3,6", "47 12 * * 1,4"],
+  );
+  assert.match(workflow, /workflow_dispatch:/u);
   assert.match(workflow, /actions: read\n\s+contents: read/u);
   assert.match(workflowConcurrency, /group: native-android-production-canary/u);
   assert.match(workflowConcurrency, /cancel-in-progress: false/u);

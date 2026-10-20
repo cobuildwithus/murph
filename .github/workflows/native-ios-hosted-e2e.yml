@@ -2,10 +2,12 @@ name: Native iOS Hosted E2E
 
 on:
   schedule:
-    - cron: "17 */12 * * *"
+    # UTC: five weekly slots, 36-hour gaps except the 24-hour week boundary.
+    - cron: "17 0 * * 0,3,6"
+    - cron: "17 12 * * 1,4"
   workflow_dispatch:
 
-# Every twelve-hour admission executes the provider journey, including unchanged
+# Every scheduled admission executes the provider journey, including unchanged
 # revisions. A successful scheduling job is never reused as provider evidence.
 # Manual recovery stays limited to exact current main; private source pins and
 # protected environments retain their existing authority.

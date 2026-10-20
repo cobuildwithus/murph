@@ -1589,7 +1589,8 @@ never adopt them or bypass a replay conflict.
   Because a newly added workflow is not yet a protected trust root, its first
   credentialed proof occurs only after that exact workflow lands on `main`.
 - Native iOS and Android public controllers are protected-main production
-  canaries only. They run on staggered six-hour schedules and admit no PR or
+  canaries only. They run in five staggered weekly UTC calendar slots and admit
+  no PR or
   deployment-status event. Manual recovery must name `refs/heads/main` at the
   exact current `main` SHA before protected environment work. The controllers
   own no database, Privy, Junction, custom-environment deployment, or

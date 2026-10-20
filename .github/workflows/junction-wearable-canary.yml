@@ -2,7 +2,7 @@ name: Live Junction Garmin Canary
 
 on:
   schedule:
-    - cron: "43 5 * * *"
+    - cron: "43 5 * * 1,4"
   workflow_dispatch:
 
 permissions:
