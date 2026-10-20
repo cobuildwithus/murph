@@ -356,7 +356,6 @@ const RUNNER_ENTRYPOINT_FORBIDDEN_BOOT_INPUT_MARKERS = [
   "/assistant-runtime/dist/hosted-runtime/events/assistant-notification.js",
   "/assistant-runtime/dist/hosted-runtime/events/assistant-ask-completion.js",
   "/assistant-runtime/dist/hosted-runtime/events/environment-voice.js",
-  "/assistant-runtime/dist/hosted-runtime/events/codex-auth.js",
   "node_modules/zod/v4/locales/",
 ] as const;
 

@@ -1287,3 +1287,8 @@ Complete first-provider-input equality now accounts for explicit fixture identit
 and generated fixture roots while preserving semantic differences. Implementation
 and regression proof are recorded in
 [`2026-10-18-frog-first-input-4198.md`](exec-plans/completed/2026-10-18-frog-first-input-4198.md).
+
+Member ChatGPT linking retirement is tracked in
+[`the removal plan`](exec-plans/active/2026-10-19-remove-member-inference.md);
+the retained mailbox cleanup contract is owned by
+[`hosted runtime protocol`](references/hosted-runtime-protocol.md).

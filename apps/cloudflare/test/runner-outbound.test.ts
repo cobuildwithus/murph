@@ -88,7 +88,6 @@ import {
   HOSTED_RUNTIME_ACTION_APPROVAL_READ_PATH,
   HOSTED_RUNTIME_ACTION_APPROVAL_REQUEST_PATH,
   HOSTED_RUNTIME_BROWSER_VAULT_REPLICA_PUBLISH_PATH,
-  HOSTED_RUNTIME_CODEX_AUTH_PATH,
   HOSTED_RUNTIME_CRYPTO_CONTEXT_PATH,
   HOSTED_RUNTIME_CRYPTO_ROOT_PATH,
   HOSTED_RUNTIME_EMAIL_EGRESS_RECIPIENT_PATH,
@@ -537,14 +536,6 @@ const ALLOWLISTED_WEB_CONTROL_CASES = [
   },
   {
     body: {
-      attemptId: "hca_abcdefghijklmnop",
-      phase: "connected",
-    },
-    name: "hosted Codex auth update",
-    path: HOSTED_RUNTIME_CODEX_AUTH_PATH,
-  },
-  {
-    body: {
       component: "mailbox",
       detailsJson: {},
       environment: "production",
@@ -718,7 +709,12 @@ describe("handleRunnerOutboundRequest", () => {
       name: "hosted runtime crypto root",
       path: HOSTED_RUNTIME_CRYPTO_ROOT_PATH,
     },
-  ])("rejects raw crypto web-control proxy path: $name", async ({ body, path }) => {
+    {
+      body: { attemptId: "hca_abcdefghijklmnop", phase: "connected" },
+      name: "retired member ChatGPT auth callback",
+      path: "/api/internal/hosted-runtime/codex-auth",
+    },
+  ])("rejects unavailable web-control proxy path: $name", async ({ body, path }) => {
     expect(isAllowedHostedRunnerWebControlRequest({
       method: "POST",
       path,
@@ -1303,40 +1299,6 @@ describe("handleRunnerOutboundRequest", () => {
           providerThreadId: "linq_chat_123",
           target: "linq_chat_123",
           targetKind: "thread",
-        }),
-        headers: createRunnerProxyHeaders({
-          "content-type": "application/json; charset=utf-8",
-        }),
-        method: "POST",
-      }),
-      createRunnerOutboundEnv({
-        HOSTED_WEB_BASE_URL: "https://web.example.test",
-        runtimeControl: {
-          getByName() {
-            return {
-              validateRuntimeWriteFence,
-            };
-          },
-        },
-      }),
-      "member_123" ,
-    );
-
-    expect(response.status).toBe(401);
-    expect(validateRuntimeWriteFence).not.toHaveBeenCalled();
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
-
-  it("rejects hosted Codex auth updates without the active runtime fence", async () => {
-    const validateRuntimeWriteFence = vi.fn(async () => true);
-    const fetchMock = vi.fn();
-    vi.stubGlobal("fetch", fetchMock);
-
-    const response = await handleRunnerOutboundRequest(
-      new Request(`http://web-control.worker${HOSTED_RUNTIME_CODEX_AUTH_PATH}`, {
-        body: JSON.stringify({
-          attemptId: "hca_abcdefghijklmnop",
-          phase: "connected",
         }),
         headers: createRunnerProxyHeaders({
           "content-type": "application/json; charset=utf-8",
