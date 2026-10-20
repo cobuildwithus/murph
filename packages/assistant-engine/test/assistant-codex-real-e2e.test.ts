@@ -156,6 +156,7 @@ import {
   readCodexAppServerTurnFailureContext,
   resolveMurphDynamicTools,
   stopWarmCodexAppServer,
+  type CodexAppServerLiveTurn,
   type CodexAppServerTurnInput,
   type CodexAppServerTurnResult,
   waitForWarmCodexBackgroundWork,
@@ -35538,6 +35539,57 @@ describeRealCodex('real Codex degraded Knowledge read e2e', () => {
       }
     },
   )
+})
+
+describeRealCodex('real Codex instant steering e2e', () => {
+  it('instant steer: correction mid-answer replaces the stale reply', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-instant-steer-e2e-'))
+    let steered: Promise<void> | null = null
+    let steerSent = false
+    let startSteer!: () => void
+    const answerStreaming = new Promise<void>((resolve) => { startSteer = resolve })
+    try {
+      const response = await executeCodexAppServerTurn({
+        approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome,
+        developerInstructions: buildDirectConversationDeveloperInstructions(),
+        dynamicTools: [], env: config.env,
+        model: config.model, modelProvider: config.modelProvider, reasoningEffort: 'low',
+        sandbox: 'read-only', workingDirectory,
+        onLiveTurn: (turn: CodexAppServerLiveTurn) => {
+          steered = answerStreaming.then(() => turn.steer({
+            prompt: 'Sorry, I meant swimming, not running. Give me just three short steps for a first week of swimming.',
+          }))
+          return () => {}
+        },
+        onTraceEvent: (event) => {
+          const method = readRecord(event.rawEvent)?.method
+          if (method === 'item/agentMessage/delta' && !steerSent) {
+            steerSent = true
+            startSteer()
+          }
+        },
+        prompt: 'I want to start running. Write me a detailed beginner plan for my first four weeks, with each week described in a few sentences.',
+      })
+      await steered
+      const reply = response.finalMessage.trim()
+      process.stdout.write(`instant-steer-e2e ${JSON.stringify({
+        model: config.model,
+        precedingSegments: response.precedingAgentMessageSegments.length,
+        reply,
+        scenario: 'synthetic running plan corrected to swimming while the answer streams',
+        steerSent,
+      })}\n`)
+      expect(steerSent).toBe(true)
+      expect(response.precedingAgentMessageSegments).toEqual([])
+      expect(reply).toMatch(/swim/iu)
+      expect(reply).not.toMatch(/week (?:4|four)\b/iu)
+    } finally {
+      await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+    }
+  }, 360_000)
 })
 
 describeRealCodex('real Codex private usage diagnostics e2e', () => {

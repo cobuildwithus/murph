@@ -129,7 +129,8 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
 
     const preview = await readInvitePreview(token);
     if (preview?.status !== "open") throw new Error("expected an open invite");
-    expect(preview).toMatchObject({ inviteeFirstName: "Ava", inviterFirstName: "Leo" });
+    expect(preview).toMatchObject({ inviterFirstName: "Leo" });
+    expect(preview).not.toHaveProperty("inviteeFirstName");
     expect(preview.terms.tasks[0].text).toBe("100 pushups");
 
     // Accept (from New York, so Start now below starts today for both); the
@@ -290,7 +291,24 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     expect(await readGame(rematch!.id, kat)).toBeNull();
 
     const accepted = await ok(ava, { termsVersion: 1, timeZone: "Australia/Sydney", token: addressed!.inviteToken!, type: "join" });
-    expect(accepted).toMatchObject({ inviteToken: null, round: 2, status: "live" });
+    expect(accepted).toMatchObject({ inviteToken: rematch!.inviteToken, round: 2, status: "live" });
+  });
+
+  it("keeps a game's own invite token for its players after go-live, and never shows it to anyone else", async () => {
+    const leo = await member("Leo", "America/New_York");
+    const ava = await member("Ava", "America/New_York");
+    const kat = await member("Kat", "America/New_York");
+    const { gameId, token } = await startGame(leo, ava);
+    // Live: both players can recognize their own link; a third person can't read the game at all.
+    expect((await readGame(gameId, leo))!.inviteToken).toBe(token);
+    expect((await readGame(gameId, ava))!.inviteToken).toBe(token);
+    expect(await readGame(gameId, kat)).toBeNull();
+    expect(JSON.stringify(await readHome(kat))).not.toContain(token);
+    // Settled: still theirs, and a spent token can't be accepted again.
+    await devSettleNow(gameId, leo);
+    expect((await readHome(leo)).games.find((game) => game.id === gameId)!.inviteToken).toBe(token);
+    expect((await readGame(gameId, ava))!.inviteToken).toBe(token);
+    expect(await errorCode(kat, { termsVersion: 1, timeZone: "America/New_York", token, type: "join" })).toBe("INVITE_USED");
   });
 
   it("lets a ticket expire 14 days after it's issued, refusing to redeem it then", async () => {
@@ -326,10 +344,13 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
       type: "createGame",
     })).toBe("INVALID_REQUEST");
 
-    const created = await ok(leo, { gameId: randomUUID(), inviteeFirstName: "Ava", terms: { ...TERMS, startsOn }, type: "createGame" });
+    // The name Leo types for the invitee is his private label: the public preview never carries it.
+    const created = await ok(leo, { gameId: randomUUID(), inviteeFirstName: "Babe", terms: { ...TERMS, startsOn }, type: "createGame" });
     expect(created!.startsOn).toBe(startsOn);
     const preview = await readInvitePreview(created!.inviteToken!);
-    expect(preview).toMatchObject({ startsOn, status: "open" });
+    expect(preview).toMatchObject({ inviterFirstName: "Leo", startsOn, status: "open" });
+    expect(preview).not.toHaveProperty("inviteeFirstName");
+    expect(JSON.stringify(preview)).not.toContain("Babe");
 
     const joined = await ok(ava, { termsVersion: 1, timeZone: "Australia/Sydney", token: created!.inviteToken!, type: "join" });
     expect(joined).toMatchObject({ startsOn, status: "live" });

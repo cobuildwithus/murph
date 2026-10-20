@@ -46,6 +46,7 @@ const requiredOgRouteTraceMarkers = [
   "server/app/join/[inviteCode]/opengraph-image",
   "server/app/family/accept/[inviteCode]/opengraph-image",
   "server/app/groups/join/[joinCode]/opengraph-image",
+  "server/app/g/[token]/opengraph-image",
   "server/app/experiments/[experimentId]/opengraph-image",
   "server/app/(dashboard)/experiments/[experimentId]/card/route.js.nft.json",
   "server/app/changelog/card/v1/[items]/route.js.nft.json",

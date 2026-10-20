@@ -98,12 +98,16 @@ describe("hosted local Linq lost active-operation e2e", () => {
 
     const replyPath = `/chats/${encodeURIComponent(chatId)}/messages`;
     const outboundCountBeforeReply = requireLinqStub().countObservedSends(replyPath);
-    let releaseFirstToolCall!: () => void;
-    const firstToolCallGate = new Promise<void>((resolve) => { releaseFirstToolCall = resolve; });
+    let releaseFirstProviderResponse!: () => void;
+    let firstProviderStreamStarted = false;
+    const firstProviderResponseGate = new Promise<void>((resolve) => { releaseFirstProviderResponse = resolve; });
     requireScenario().queueAssistantResponses([
       {
         ...buildAssistantProviderShellCommandCall("echo first-turn-held"),
-        beforeResponse: () => firstToolCallGate,
+        beforeStreamContent: () => {
+          firstProviderStreamStarted = true;
+          return firstProviderResponseGate;
+        },
       },
       unsteeredFirstReplyText,
     ], {
@@ -136,6 +140,12 @@ describe("hosted local Linq lost active-operation e2e", () => {
         "Expected the first hosted assistant turn to reach the provider before dropping active operation.",
       );
       firstTurnProviderRequestCount = countResponsesApiRequests();
+      // Upstream instant steering begins after HTTP stream establishment.
+      // Keep the tool content held, but let response.created reach Codex.
+      await waitForCondition(
+        () => firstProviderStreamStarted,
+        "Expected the provider stream to open before steering its held tool content.",
+      );
       const firstTurnFence = await readActiveRuntimeFenceForTest();
       expect(firstTurnFence).not.toBeNull();
       await requireScenario().harness.dropRunnerActiveOperationForTest(userId, {
@@ -170,19 +180,21 @@ describe("hosted local Linq lost active-operation e2e", () => {
         return trace?.runtimeAttemptId === firstTurnFence?.attemptId
           && typeof trace?.phaseBreakdown?.assistant
             ?.assistantInputAcceptedForExecutionAtEpochMs === "number";
-      }, "Expected the second mailbox input to reach live steering on the original runtime before releasing the first tool call.");
+      }, "Expected the second mailbox input to reach live steering on the original runtime before releasing the first provider response.");
+      // The tool call has not reached Codex. Instant steering must preempt the
+      // held provider request and start the corrected request before release.
+      await waitForCondition(
+        () => requireScenario().assistantProviderRequests
+          .filter((request) => request.url === "/v1/responses")
+          .slice(firstTurnProviderRequestCount)
+          .some((request) => request.body.includes(secondInboundText)),
+        "Expected instant steering to reach the provider while the stale tool-call response is still held.",
+      );
     } finally {
       // Also release on failure so scenario teardown cannot strand the stub.
-      releaseFirstToolCall();
+      releaseFirstProviderResponse();
     }
 
-    await waitForCondition(
-      () => requireScenario().assistantProviderRequests
-        .filter((request) => request.url === "/v1/responses")
-        .slice(firstTurnProviderRequestCount)
-        .some((request) => request.body.includes("first-turn-held")),
-      "Expected the already-running hosted assistant turn to finish its delayed tool output after the outer pointer was dropped.",
-    );
     const liveTurnSend = await requireLinqStub().waitForAdditionalSend({
       baselineCount: outboundCountBeforeReply,
       expectedPath: replyPath,
@@ -194,6 +206,9 @@ describe("hosted local Linq lost active-operation e2e", () => {
     const finalStatus = await requireScenario().waitForHostedCompletion(userId);
     expect(finalStatus.lastErrorCode ?? null).toBeNull();
     expect(finalStatus.mailboxLag.every((lane) => lane.lag === "0")).toBe(true);
+    expect(requireScenario().assistantProviderRequests
+      .filter((request) => request.url === "/v1/responses")
+      .some((request) => request.body.includes("first-turn-held"))).toBe(false);
     expect(requireScenario().assistantProviderRequests
       .filter((request) => request.url === "/v1/responses")
       .slice(firstTurnProviderRequestCount)

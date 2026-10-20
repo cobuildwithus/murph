@@ -63,6 +63,8 @@ export type HostedLocalAssistantProviderMode = "stub" | "live";
  */
 type HostedLocalAssistantProviderFunctionCallResponse = {
     beforeResponse?: () => Promise<void> | void;
+    // Hold streamed tool content after response.created, leaving the HTTP stream open.
+    beforeStreamContent?: () => Promise<void> | void;
     functionCall: {
       arguments: Record<string, unknown>;
       name: string;
@@ -846,13 +848,14 @@ function buildAssistantProviderToolCallItem(input: {
   };
 }
 
-function writeAssistantProviderToolCallStubStream(input: {
+async function writeAssistantProviderToolCallStubStream(input: {
+  beforeContent?: () => Promise<void> | void;
   modelId: string;
   response: ServerResponse;
   responseId: string;
   toolCallItem: Record<string, unknown>;
   usage: HostedLocalAssistantProviderUsage;
-}): void {
+}): Promise<void> {
   const completedResponse = {
     created_at: Math.floor(Date.now() / 1000),
     id: input.responseId,
@@ -873,6 +876,7 @@ function writeAssistantProviderToolCallStubStream(input: {
     },
     type: "response.created",
   });
+  await input.beforeContent?.();
   writeAssistantProviderSseEvent(input.response, "response.output_item.added", {
     item: {
       ...input.toolCallItem,
@@ -1132,7 +1136,10 @@ export async function startAssistantProviderStubServer(input: {
           usageMode: input.usageMode ?? "fixed",
         });
         if (bodyJson.stream === true) {
-          writeAssistantProviderToolCallStubStream({
+          await writeAssistantProviderToolCallStubStream({
+            beforeContent: "functionCall" in preparedScriptedResponse
+              ? preparedScriptedResponse.beforeStreamContent
+              : undefined,
             modelId,
             response,
             responseId,

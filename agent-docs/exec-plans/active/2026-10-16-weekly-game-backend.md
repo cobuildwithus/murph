@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-10-16
-Updated: 2026-10-18
+Updated: 2026-10-19
 
 ## Goal
 
@@ -49,6 +49,7 @@ Updated: 2026-10-18
 3. HTTP resource routes, content-addressed media, invite page.
 4. Docs, design proof, PR evidence, final ReviewGPT.
 5. Hosted photo storage so deployed games can post photos.
+6. Invite link previews: the `/g/<token>` unfurl shows the challenge.
 
 ## Decisions
 
@@ -85,6 +86,13 @@ Updated: 2026-10-18
   runner-read, 31-day lifecycle), and Worker-side encryption would need a
   hosted workspace players don't have. The upload cap drops to 4 MiB to fit
   Vercel's body limits; the phone sends about 1 MiB.
+- The game moved into the Murph app: invite links open `ai.withmurph.app://`
+  (overridable by `MURPH_GAME_APP_URL_SCHEME` for the Debug app).
+- Invite link previews come from the page's own metadata and a dynamic
+  `/g/<token>/opengraph-image` card in the invite design's ticket look. An open
+  invite shows first names, tasks, days, and stake (what the page shows);
+  a closed one names nobody. The card image is passed explicitly so the
+  site-wide default can't stand in, and it's never cached.
 
 ## Verification
 

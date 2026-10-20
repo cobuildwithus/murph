@@ -869,6 +869,23 @@ MURPH_TEST_CODEX_COMMAND=<patched-codex> \
   --no-coverage test/assistant-codex-websocket-stall.test.ts
 ```
 
+The same suite proves WebSocket instant steering: the binary sends
+`response.interrupt` with `discard_partial_items` for a responses-lite model, a
+discarding provider yields only the steered reply, and a provider that ignores
+the request falls back to the queued result with the completed stale segment.
+`assistant-codex-scripted-runtime.test.ts` owns the HTTP/SSE side through a
+stub that streams unfinished text and records dropped responses: preemption,
+the explicit-disable baseline, rapid successive steers, empty, media-only, and
+no-reply replacements without stale text, a steer past a slow in-flight nested
+tool with one effect, and interrupted (`code_mode_interrupt` true and false),
+no-reply, and normal-completion patterns in which a yielded cell's later nested
+Murph tool call never reaches the next turn. Run them with
+`-t 'unfinished|instant steering|rapid successive|media-only reply free|steered no-reply|slow in-flight nested|no-reply code-mode cell|never carries a yielded cell'`.
+These run on the npm helper in the ordinary lane. The permission-sandbox lane
+also runs the WebSocket cases and the SSE preemption, explicit-disable, and
+empty-reply cases against the extracted patched binary, because the native
+patch owns config loading and the Responses WebSocket client.
+
 The Cloudflare `codex-websocket-passthrough.test.ts` runs the pinned binary
 through production interception and real local workerd fetch coupling. It proves
 one connection across a 35-second gap, native recovery after an upstream close,
@@ -1769,7 +1786,7 @@ keep the one-second presentation-only deadline and late-result rejection.
   reviewed OpenAI route dispositions to the exact assistant package, runner
   image, workspace Codex pins, and upstream source-tree identity. The required
   Linux app-verification job resolves the version-derived upstream tag and
-  verifies its exact commit, `codex-rs/codex-api/src` tree, and declared source
+  verifies its exact commit, `codex-rs` tree (including provider APIs and Guardian Decisions), and declared source
   paths. Offline tests then treat native scanning as corroboration: they cover
   full plus separated single- and multi-segment provider-relative candidates,
   supplement target-specific linker layout with the source-owned route list,

@@ -3773,7 +3773,9 @@ projection-completion notification retries it; terminal projection failure is
 still replyable through the normal fallback. Duplicate staging and
 projection-completion notifications at or behind the newest queued or committed
 frontier are ignored before exact-successor proof. A successful `turn/steer`
-acknowledges transport only. Before any hosted tool effect or final delivery,
+acknowledges transport only; instant steering (see `ARCHITECTURE.md`) changes
+when Codex samples the steered input, not this acknowledgement or journal
+contract. Before any hosted tool effect or final delivery,
 Murph journals and checkpoints only accepted inputs at or below that tool
 request's or provider result's authoritative delivery-context ordinal. An
 acknowledged later input that remains above the ordinal stays pending for a
@@ -4646,6 +4648,15 @@ runtime-wake interruption. Each non-success event carries the last reached
 fixed `snapshotStage`: `plan`, `session`, `archive`, `upload`, or `checkpoint`.
 These events prove local progress only; they do not claim that Web accepted a
 checkpoint.
+
+An upload failure may also carry `snapshotUploadFailurePhase`, limited to
+`upload_prepare` (local file verification and hashing), `upload_presign`
+(write-fence headers and presign request/response validation), `upload_transfer`
+(direct PUT and its existing bounded retries), or `upload_receipt` (managed-part
+receipt processing). The terminal owner reads the existing safe error phase and
+omits unrecognized values. An underlying phase is preserved instead of replaced,
+and exact caller interruptions remain unchanged. Session-start and completion
+phase/timeout diagnostics and successful upload timings retain their contracts.
 
 Runtime logs remain lossy observability. Finished and preempted info events use
 the bounded process-global best-effort queue; failure warning/error events
