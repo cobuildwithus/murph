@@ -118,8 +118,9 @@ retrieval batches admit their eligible records through the ordinary import path.
 
 The records page has one import action through the shared authenticated
 launcher. Connect opens provider search immediately after required consent.
-The return page shows saved counts, partial or failed status, and a link to
-`/biomarkers` only when recognized lab results were saved. Raw evidence does
+The return page shows saved counts, partial or failed status, and an import
+or reconnect action. Saved lab results remain available to Murph in conversation.
+Raw evidence does
 not imply usable results or a human review queue. Callback replay never claims
 that no earlier records were copied. A failed start can retry the same provider;
 selecting another starts a fresh document and claim.

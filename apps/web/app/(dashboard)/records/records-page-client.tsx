@@ -267,9 +267,7 @@ export function ConnectionRow({
           {importInProgress ? <p>{presentation.detail}</p> : null}
         </div>
 
-        {latestRun && (latestRun.labResultCount ?? 0) > 0 ? (
-          <Link href="/biomarkers" className={buttonVariants({ size: "lg", className: "mt-5" })}>View lab results</Link>
-        ) : <ImportAgainLink connection={connection} primary />}
+        <ImportAgainLink connection={connection} />
 
         <ConnectionDetails connection={connection} disabled={disabled} onDisconnect={onDisconnect} />
       </article>
@@ -304,7 +302,6 @@ function ConnectionDetails({ connection, disabled, onDisconnect }: {
           {connection.nextSyncAt ? <>Daily updates on. Next check around <time dateTime={connection.nextSyncAt}>{formatDate(connection.nextSyncAt)}</time>.</> : connection.status === "needs_reauth" ? "Daily updates stopped. Reconnect to continue." : "One-time import."}
           {connection.lastCheckedAt ? <> Last checked <time dateTime={connection.lastCheckedAt}>{formatDate(connection.lastCheckedAt)}</time>.</> : null}
         </p> : null}
-        {(latestRun?.labResultCount ?? 0) > 0 ? <ImportAgainLink connection={connection} /> : null}
         {connection.importsRemaining === 0 ? <p>This source has reached its import limit. Saved records remain available.</p> : null}
         <p>Disconnect stops future imports. Records already saved in Murph stay there.</p>
         <Link href="/legal/privacy" className="w-fit underline underline-offset-4">How Murph uses your data</Link>
@@ -318,15 +315,14 @@ function ConnectionDetails({ connection, disabled, onDisconnect }: {
   );
 }
 
-function ImportAgainLink({ connection, primary = false }: {
+function ImportAgainLink({ connection }: {
   connection: ClinicalRecordConnectionContract;
-  primary?: boolean;
 }) {
   if (isImportInProgress(connection) || !connection.canImport) return null;
   return (
     <Link
       href="/records/connect?launch=clinical-records"
-      className={buttonVariants({ size: "lg", variant: primary ? "default" : "link", className: primary ? "mt-5" : "w-fit" })}
+      className={buttonVariants({ size: "lg", variant: "default", className: "mt-5" })}
     >
       {connection.status === "disconnected" || connection.status === "needs_reauth" ? "Reconnect" : "Import again"}
     </Link>
