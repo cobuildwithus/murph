@@ -8,6 +8,7 @@ import { HOSTED_EXECUTION_DEFAULT_RUNNER_IDLE_TTL_MS } from "@murphai/hosted-exe
 
 const mocks = vi.hoisted(() => ({
   messages: [] as Array<[Record<string, unknown>, Record<string, unknown>]>,
+  next: vi.fn(),
   now: [] as number[],
   sendResults: [] as boolean[],
   spaceSend: vi.fn(),
@@ -33,10 +34,7 @@ vi.mock("@spectrum-ts/core", () => ({
   Spectrum: vi.fn(async () => ({
     messages: {
       [Symbol.asyncIterator]: () => ({
-        next: async () => {
-          const value = mocks.messages.shift();
-          return value ? { done: false as const, value } : { done: true as const };
-        },
+        next: mocks.next,
       }),
     },
     stop: mocks.stop,
@@ -59,6 +57,7 @@ vi.mock("@spectrum-ts/imessage", () => ({
 }));
 
 import {
+  CANARY_OUTCOME_POLL_MS,
   CANARY_OUTCOME_WAIT_MS,
   CANARY_REPLY_WAIT_MS,
   CANARY_RESET_TIMEOUT_MS,
@@ -88,6 +87,11 @@ describe("production conversation canary runner", () => {
     vi.restoreAllMocks();
     vi.spyOn(Date, "now").mockReturnValue(1_000);
     mocks.messages = [];
+    mocks.next.mockReset();
+    mocks.next.mockImplementation(async () => {
+      const value = mocks.messages.shift();
+      return value ? { done: false as const, value } : { done: true as const };
+    });
     mocks.now = [];
     mocks.sendResults = [];
     mocks.spaceSend.mockClear();
@@ -245,6 +249,186 @@ describe("production conversation canary runner", () => {
     expect(mocks.stop).toHaveBeenCalledOnce();
   });
 
+  it.each(["slow", "unavailable"])("observes one bounded server diagnostic after a %s runtime reply", async (mode) => {
+    prepareRuntimeFailure(mode);
+    const diagnostics = diagnosticFixture();
+    vi.mocked(fetch).mockResolvedValueOnce(resetResponse())
+      .mockResolvedValueOnce(diagnosticOutcomeResponse(diagnostics));
+    const reportDiagnostic = vi.fn();
+    await expect(runLinqProductionCanary(TEST_ENV, undefined, reportDiagnostic))
+      .rejects.toHaveProperty("name", runtimeFailureName(mode));
+    expect(reportDiagnostic).toHaveBeenCalledExactlyOnceWith({
+      status: "turn-diagnostics", turn: 3, stage: "runtime-identity",
+      observation: "available", diagnostics,
+    });
+    expect(fetch).toHaveBeenCalledTimes(2);
+    const [url, options] = vi.mocked(fetch).mock.calls[1]!;
+    expect(String(url)).toBe("https://example.test/api/internal/hosted-onboarding/linq/production-canary/outcome");
+    expect(options).toMatchObject({
+      method: "GET", headers: { authorization: "Bearer test-reset-secret" }, redirect: "error",
+    });
+    expect(options).not.toHaveProperty("body");
+    expect(mocks.spaceSend).toHaveBeenCalledTimes(3);
+    expect(mocks.stop).toHaveBeenCalledOnce();
+  });
+
+  it("also observes an inter-reply-gap failure without sending another turn", async () => {
+    mocks.now = [0, 0, 10_000, 15_000, 15_000, 30_000];
+    mocks.sendResults = [true, true];
+    mocks.messages = [
+      inboundMessage({ text: MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE }),
+      inboundMessage({ text: "A later reply." }),
+    ];
+    const reportDiagnostic = vi.fn();
+    await expect(runLinqProductionCanary(TEST_ENV, undefined, reportDiagnostic)).rejects.toHaveProperty(
+      "name", "reply-latency-budget-exceeded; turn=2; metric=inter_reply_gap; elapsed_ms=20000; budget_ms=20000",
+    );
+    expect(reportDiagnostic).toHaveBeenCalledExactlyOnceWith({
+      status: "turn-diagnostics", turn: 2, stage: "identity-question", observation: "unsupported",
+    });
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(mocks.spaceSend).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([
+    { status: "empty", failedTurnMatched: false, truncated: false, traces: [] },
+    { status: "unavailable", failedTurnMatched: false, truncated: false, traces: [] },
+    { status: "observed", failedTurnMatched: false, truncated: false, traces: [
+      { stage: "instant_reply", stale: false, incomplete: false, ageMs: 25_000, ingressMs: 5, deliveryAcceptMs: 3 },
+    ] },
+    { status: "observed", failedTurnMatched: false, truncated: false, traces: [
+      { stage: "pre_runtime", stale: true, incomplete: true, ageMs: 120_001 },
+    ] },
+    { status: "ambiguous", failedTurnMatched: false, truncated: false, traces: [
+      { stage: "pre_runtime", stale: false, incomplete: true, ageMs: 2_000 },
+      { stage: "runtime_provider", stale: true, incomplete: true, ageMs: 130_000 },
+    ] },
+    { status: "ambiguous", failedTurnMatched: false, truncated: true, traces: Array.from({ length: 3 }, () => (
+      { stage: "delivery_observation", stale: false, incomplete: false, ageMs: 1_000, deliveryReceiptMs: 600_000 }
+    )) },
+  ])("keeps bounded empty, unavailable, bypass, stale, incomplete, and ambiguous observations distinct: $status", async (diagnostics) => {
+    prepareRuntimeFailure("slow");
+    vi.mocked(fetch).mockResolvedValueOnce(resetResponse()).mockResolvedValueOnce(diagnosticOutcomeResponse(diagnostics));
+    const reportDiagnostic = vi.fn();
+    await expect(runLinqProductionCanary(TEST_ENV, undefined, reportDiagnostic)).rejects.toHaveProperty("name", runtimeFailureName("slow"));
+    expect(reportDiagnostic).toHaveBeenCalledExactlyOnceWith({
+      status: "turn-diagnostics", turn: 3, stage: "runtime-identity", observation: "available", diagnostics,
+    });
+  });
+
+  it.each([
+    null,
+    [],
+    { ...diagnosticFixture(), failedTurnMatched: true },
+    { ...diagnosticFixture(), status: "synthetic-private-status" },
+    { ...diagnosticFixture(), memberId: "synthetic-private-member" },
+    { ...diagnosticFixture(), status: "empty" },
+    { ...diagnosticFixture(), status: "unavailable" },
+    { ...diagnosticFixture(), traces: [] },
+    { ...diagnosticFixture(), status: "ambiguous" },
+    { ...diagnosticFixture(), truncated: true },
+    { ...diagnosticFixture(), status: "ambiguous", traces: Array.from({ length: 4 }, () => diagnosticFixture().traces[0]) },
+    ...[
+      { stage: "synthetic-private-stage" },
+      { stale: "false" },
+      { incomplete: null },
+      { ageMs: "synthetic-private-timestamp" },
+      { ingressMs: -1 },
+      { preRuntimeMs: 600_001 },
+      { runtimeToProviderMs: 0.5 },
+      { providerToDeliveryMs: NaN },
+      { acceptedToDeliveryAttemptMs: Infinity },
+      { deliveryAcceptMs: null },
+      { deliveryReceiptMs: "1" },
+      { deliveredAgeMs: 600_001 },
+      { providerPayload: "synthetic-private-payload" },
+    ].map((fields) => ({ ...diagnosticFixture(), traces: [{ ...diagnosticFixture().traces[0], ...fields }] })),
+  ])("rejects malformed or private-shaped diagnostics while preserving the original failure", async (diagnostics) => {
+    prepareRuntimeFailure("slow");
+    vi.mocked(fetch).mockResolvedValueOnce(resetResponse()).mockResolvedValueOnce(diagnosticOutcomeResponse(diagnostics));
+    const reportDiagnostic = vi.fn();
+    const failure = await runLinqProductionCanary(TEST_ENV, undefined, reportDiagnostic).catch((error: unknown) => error);
+    expect(failure).toHaveProperty("name", runtimeFailureName("slow"));
+    expect(reportDiagnostic).toHaveBeenCalledExactlyOnceWith({
+      status: "turn-diagnostics", turn: 3, stage: "runtime-identity", observation: "invalid",
+    });
+    expect(JSON.stringify(reportDiagnostic.mock.calls)).not.toContain("synthetic-private");
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(mocks.spaceSend).toHaveBeenCalledTimes(3);
+  });
+
+  it.each(["request", "status", "json", "reporter"])("preserves the primary failure when the diagnostic %s fails", async (mode) => {
+    prepareRuntimeFailure("unavailable");
+    const response = diagnosticOutcomeResponse(diagnosticFixture());
+    if (mode === "json") vi.spyOn(response, "json").mockRejectedValue(new Error("synthetic-private-json"));
+    vi.mocked(fetch).mockResolvedValueOnce(resetResponse());
+    if (mode === "request") vi.mocked(fetch).mockRejectedValueOnce(new Error("synthetic-private-request"));
+    else vi.mocked(fetch).mockResolvedValueOnce(mode === "status" ? new Response(null, { status: 503 }) : response);
+    const reportDiagnostic = vi.fn(() => { if (mode === "reporter") throw new Error("synthetic-private-reporter"); });
+    const failure = await runLinqProductionCanary(TEST_ENV, undefined, reportDiagnostic).catch((error: unknown) => error);
+    expect(failure).toMatchObject({ name: runtimeFailureName("unavailable"), message: "The Linq production canary failed." });
+    expect(reportDiagnostic).toHaveBeenCalledOnce();
+    expect(JSON.stringify(reportDiagnostic.mock.calls)).not.toContain("synthetic-private");
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(mocks.spaceSend).toHaveBeenCalledTimes(3);
+    expect(mocks.stop).toHaveBeenCalledOnce();
+  });
+
+  it.each(["headers", "body"])("bounds a hung diagnostic %s read without expanding the reply budget", async (phase) => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      prepareRuntimeFailure("slow");
+      const request: { signal?: AbortSignal | null } = {};
+      vi.mocked(fetch).mockResolvedValueOnce(resetResponse()).mockImplementationOnce(async (_url, options) => {
+        request.signal = options?.signal;
+        if (phase === "headers") return new Promise<never>(() => {});
+        const response = diagnosticOutcomeResponse(diagnosticFixture());
+        vi.spyOn(response, "json").mockImplementation(async () => new Promise<never>(() => {}));
+        return response;
+      });
+      const reportDiagnostic = vi.fn();
+      let settled = false;
+      const result = runLinqProductionCanary(TEST_ENV, undefined, reportDiagnostic).catch((error: unknown) => {
+        settled = true;
+        return error;
+      });
+      await vi.advanceTimersByTimeAsync(2_999);
+      expect(settled).toBe(false);
+      expect(reportDiagnostic).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(await result).toHaveProperty("name", runtimeFailureName("slow"));
+      expect(request.signal?.aborted).toBe(true);
+      expect(reportDiagnostic).toHaveBeenCalledExactlyOnceWith({
+        status: "turn-diagnostics", turn: 3, stage: "runtime-identity", observation: "unavailable",
+      });
+      expect(fetch).toHaveBeenCalledTimes(2);
+      expect(mocks.spaceSend).toHaveBeenCalledTimes(3);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("accepts older responses and emits no diagnostics on the unchanged success journey", async () => {
+    prepareCompleteConversation();
+    const reportDiagnostic = vi.fn();
+    await expect(runLinqProductionCanary(TEST_ENV, undefined, reportDiagnostic)).resolves.toHaveProperty("canonicalOutcome.savedGoalCount", 1);
+    expect(reportDiagnostic).not.toHaveBeenCalled();
+    expect(fetch).toHaveBeenCalledTimes(4);
+    expect(mocks.spaceSend).toHaveBeenCalledTimes(5);
+    expect(vi.mocked(fetch).mock.calls.filter(([, options]) => options?.method === "POST")).toHaveLength(1);
+  });
+
+  it("does not let malformed optional diagnostics change canonical goal-read behavior", async () => {
+    prepareCompleteConversation();
+    vi.mocked(fetch).mockResolvedValueOnce(resetResponse()).mockResolvedValueOnce(diagnosticOutcomeResponse({
+      memberId: "synthetic-private-member",
+    }, true));
+    const reportDiagnostic = vi.fn();
+    await expect(runLinqProductionCanary(TEST_ENV, undefined, reportDiagnostic)).resolves.toHaveProperty("canonicalOutcome.savedGoalCount", 1);
+    expect(reportDiagnostic).not.toHaveBeenCalled();
+    expect(mocks.spaceSend).toHaveBeenCalledTimes(5);
+  });
+
   it.each([
     MURPH_ASSISTANT_ONBOARDING_IDENTITY_QUESTIONS.casual,
     MURPH_ASSISTANT_ONBOARDING_IDENTITY_QUESTIONS.formal.toUpperCase().replaceAll("?", "."),
@@ -314,14 +498,142 @@ describe("production conversation canary runner", () => {
   it("identifies the unavailable turn after preserving earlier timing evidence", async () => {
     mocks.now = [0, 0, 10_000, 10_000, 10_000];
     mocks.sendResults = [true, true];
-    mocks.messages = [inboundMessage({ text: MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE })];
+    mocks.messages = [
+      ...rejectedInboundMessages(),
+      inboundMessage({ text: MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE }),
+    ];
     const report = vi.fn();
     await expect(runLinqProductionCanary(TEST_ENV, report)).rejects.toMatchObject({
-      name: "reply-unavailable; turn=2; stage=identity-question; wait_limit_ms=90000",
+      name: "reply-unavailable; turn=2; stage=identity-question; wait_limit_ms=90000; reason=stream-ended; observed_count=0; rejected_count=0",
+      message: "The Linq production canary failed.",
     });
     expect(report).toHaveBeenCalledOnce();
     expect(report).toHaveBeenCalledWith({ latencyMs: 10_000, senderSendMs: 0, stage: "welcome", turn: 1 });
     expect(mocks.stop).toHaveBeenCalledOnce();
+    expect(mocks.spaceSend).toHaveBeenCalledTimes(2);
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it("starts observing before send and still accepts a matching reply after rejected events", async () => {
+    prepareCompleteConversation();
+    const rejected = rejectedInboundMessages();
+    mocks.messages.unshift(...rejected);
+    mocks.spaceSend.mockImplementationOnce(async () => {
+      expect(mocks.next).toHaveBeenCalledOnce();
+      return true;
+    });
+
+    await expect(runLinqProductionCanary(TEST_ENV)).resolves.toMatchObject({
+      canonicalOutcome: { baselineGoalCount: 0, savedGoalCount: 1, proposalGoalCount: 0 },
+    });
+    expect(mocks.messages).toEqual([]);
+    expect(mocks.next).toHaveBeenCalledTimes(rejected.length + 5);
+    expect(mocks.spaceSend).toHaveBeenCalledTimes(5);
+    expect(mocks.stop).toHaveBeenCalledOnce();
+    expect(fetch).toHaveBeenCalledTimes(4);
+  });
+
+  it.each([false, true])("distinguishes timeout with rejected events=%s at the unchanged deadline", async (withRejectedEvents) => {
+    vi.useFakeTimers({ toFake: ["setTimeout"] });
+    try {
+      mocks.now = [0, 0];
+      mocks.sendResults = [true];
+      mocks.messages = withRejectedEvents ? rejectedInboundMessages() : [];
+      const count = mocks.messages.length;
+      mocks.next.mockImplementation(async () => {
+        const value = mocks.messages.shift();
+        return value ? { done: false as const, value } : new Promise<never>(() => {});
+      });
+      const report = vi.fn();
+      const result = runLinqProductionCanary(TEST_ENV, report).catch((error: unknown) => error);
+
+      await vi.advanceTimersByTimeAsync(CANARY_REPLY_WAIT_MS - 1);
+      expect(mocks.spaceSend).toHaveBeenCalledOnce();
+      expect(mocks.next).toHaveBeenCalledTimes(count + 1);
+      expect(mocks.stop).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(await result).toMatchObject({
+        name: `reply-unavailable; turn=1; stage=welcome; wait_limit_ms=90000; reason=timeout; observed_count=${count}; rejected_count=${count}`,
+        message: "The Linq production canary failed.",
+      });
+      expect(report).not.toHaveBeenCalled();
+      expect(mocks.stop).toHaveBeenCalledOnce();
+      expect(fetch).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it.each([
+    ["SDK error with a timeout-like name", Object.assign(new Error("synthetic-private-message"), {
+      name: "canary-reply-timeout", cause: "synthetic-private-cause",
+    })],
+    ["private-looking metadata", {
+      name: "synthetic-private-name", message: "synthetic-private-message", reason: "timeout",
+      observedCount: Infinity, rejectedCount: NaN, token: "synthetic-private-token",
+    }],
+    ["private-looking string", "synthetic-private-string"],
+    ["undefined", undefined],
+    ["hostile property getters", Object.defineProperties({}, {
+      name: { get() { throw new Error("synthetic-private-name-getter"); } },
+      message: { get() { throw new Error("synthetic-private-message-getter"); } },
+      toString: { value() { throw new Error("synthetic-private-string-coercion"); } },
+    })],
+  ])("keeps a rejected iterator's %s out of the final failure", async (_label, failure) => {
+    mocks.now = [0, 0];
+    mocks.sendResults = [true];
+    mocks.next.mockRejectedValueOnce(failure);
+
+    const error = await runLinqProductionCanary(TEST_ENV).catch((value: unknown) => value);
+    const name = "reply-unavailable; turn=1; stage=welcome; wait_limit_ms=90000; reason=stream-failed; observed_count=0; rejected_count=0";
+    expect(error).toMatchObject({ name, message: "The Linq production canary failed." });
+    expect(String(error)).toBe(`${name}: The Linq production canary failed.`);
+    expect(error).not.toHaveProperty("cause");
+    expect(JSON.stringify(error)).not.toContain("synthetic-private");
+    expect(mocks.spaceSend).toHaveBeenCalledOnce();
+    expect(mocks.stop).toHaveBeenCalledOnce();
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([
+    ["content", undefined],
+    ["timestamp", { getTime: "synthetic-private-timestamp" }],
+  ])("preserves stream failure for malformed %s without exposing event fields", async (field, value) => {
+    mocks.now = [0, 0];
+    mocks.sendResults = [true];
+    const event = inboundMessage({ text: "synthetic-private-content" });
+    event[1][String(field)] = value;
+    event[1].privateField = "synthetic-private-extra-field";
+    mocks.messages = [event];
+
+    const error = await runLinqProductionCanary(TEST_ENV).catch((failure: unknown) => failure);
+    const name = "reply-unavailable; turn=1; stage=welcome; wait_limit_ms=90000; reason=stream-failed; observed_count=1; rejected_count=0";
+    expect(error).toMatchObject({ name, message: "The Linq production canary failed." });
+    expect(String(error)).toBe(`${name}: The Linq production canary failed.`);
+    expect(error).not.toHaveProperty("cause");
+    expect(JSON.stringify(error)).not.toContain("synthetic-private");
+    expect(mocks.stop).toHaveBeenCalledOnce();
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it("saturates both observation counters without retaining rejected event fields", async () => {
+    mocks.now = [0, 0];
+    mocks.sendResults = [true];
+    const event = inboundMessage({ spaceId: "synthetic-private-space", text: "synthetic-private-content" });
+    let remaining = 10_005;
+    mocks.next.mockImplementation(async () => remaining-- > 0
+      ? { done: false as const, value: event }
+      : { done: true as const });
+
+    const error = await runLinqProductionCanary(TEST_ENV).catch((failure: unknown) => failure);
+    const name = "reply-unavailable; turn=1; stage=welcome; wait_limit_ms=90000; reason=stream-ended; observed_count=10000; rejected_count=10000";
+    expect(error).toMatchObject({ name, message: "The Linq production canary failed." });
+    expect(String(error)).toBe(`${name}: The Linq production canary failed.`);
+    expect(JSON.stringify(error)).not.toContain("synthetic-private");
+    expect(mocks.next).toHaveBeenCalledTimes(10_006);
+    expect(mocks.spaceSend).toHaveBeenCalledOnce();
+    expect(mocks.stop).toHaveBeenCalledOnce();
+    expect(fetch).toHaveBeenCalledTimes(2);
   });
 
   it.each([
@@ -391,6 +703,8 @@ describe("production conversation canary runner", () => {
 
     await expect(runLinqProductionCanary(TEST_ENV)).rejects.toMatchObject({ name: "outcome-not-ready; stage=runtime-identity" });
     expect(clock.elapsedMs()).toBe(HOSTED_EXECUTION_DEFAULT_RUNNER_IDLE_TTL_MS + 120_000);
+    expect(vi.mocked(fetch).mock.calls.filter(([, options]) => options?.method === "GET"))
+      .toHaveLength(CANARY_OUTCOME_WAIT_MS / CANARY_OUTCOME_POLL_MS);
     expect(mocks.spaceSend).toHaveBeenCalledTimes(3);
     expect(mocks.stop).toHaveBeenCalledOnce();
   });
@@ -458,10 +772,10 @@ describe("production conversation canary runner", () => {
         const response = outcomeResponse({ ready: true, matchingGoalCount: 0, matchingGoalIdCount: 0 });
         vi.spyOn(response, "json").mockImplementation(failAfterTimeout);
         return response;
-      });
+    });
 
     await expect(runLinqProductionCanary(TEST_ENV)).resolves.toHaveProperty("canonicalOutcome.proposalGoalCount", 0);
-    expect(clock.elapsedMs()).toBe(11_000);
+    expect(clock.elapsedMs()).toBe(10_000 + CANARY_OUTCOME_POLL_MS);
     expect(mocks.spaceSend).toHaveBeenCalledTimes(5);
   });
 
@@ -504,6 +818,41 @@ describe("production conversation canary runner", () => {
     });
   });
 });
+
+function diagnosticFixture() {
+  return {
+    status: "observed", failedTurnMatched: false, truncated: false,
+    traces: [{
+      stage: "delivery_observation", stale: false, incomplete: false, ageMs: 46_000,
+      ingressMs: 100, preRuntimeMs: 3_000, runtimeToProviderMs: 500, providerToDeliveryMs: 15_000,
+      acceptedToDeliveryAttemptMs: 18_500, deliveryAcceptMs: 200, deliveryReceiptMs: 600, deliveredAgeMs: 20_000,
+    }],
+  };
+}
+
+function diagnosticOutcomeResponse(diagnostics: unknown, ready = false): Response {
+  return new Response(JSON.stringify({ ok: true, outcome: {
+    ready, totalGoalCount: 0, matchingGoalCount: 0, matchingGoalIdCount: 0, diagnostics,
+  } }));
+}
+
+function prepareRuntimeFailure(mode: string): void {
+  mocks.now = mode === "slow"
+    ? [0, 0, 1_000, 1_000, 1_000, 2_000, 2_000, 2_000, 48_000]
+    : [0, 0, 1_000, 1_000, 1_000, 2_000, 2_000, 2_000];
+  mocks.sendResults = [true, true, true];
+  mocks.messages = [
+    inboundMessage({ text: MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE }),
+    inboundMessage({ text: MURPH_ASSISTANT_ONBOARDING_IDENTITY_QUESTIONS.casual }),
+  ];
+  if (mode === "slow") mocks.messages.push(inboundMessage({ text: "What would you most like to improve about your health?" }));
+}
+
+function runtimeFailureName(mode: string): string {
+  return mode === "slow"
+    ? "reply-latency-budget-exceeded; turn=3; metric=send_to_reply; elapsed_ms=46000; budget_ms=20000"
+    : "reply-unavailable; turn=3; stage=runtime-identity; wait_limit_ms=90000; reason=stream-ended; observed_count=0; rejected_count=0";
+}
 
 function mockCanaryObservationClock(): { elapsedMs(): number; advance(durationMs: number): void } {
   let elapsedMs = 0;
@@ -552,15 +901,33 @@ function inboundMessage(input: {
   spaceId?: string;
   text: string;
   timestampMs?: number;
+  direction?: string;
+  platform?: string;
+  senderId?: string | null;
+  contentType?: string;
 }): [Record<string, unknown>, Record<string, unknown>] {
   return [
     { id: input.spaceId ?? "space_canary" },
     {
-      content: { text: input.text, type: "text" },
-      direction: "inbound",
-      platform: "imessage",
-      sender: { id: "target_canary" },
+      content: { text: input.text, type: input.contentType ?? "text" },
+      direction: input.direction ?? "inbound",
+      platform: input.platform ?? "imessage",
+      sender: input.senderId === null ? undefined : { id: input.senderId ?? "target_canary" },
       timestamp: new Date(input.timestampMs ?? 1_000),
     },
+  ];
+}
+
+function rejectedInboundMessages(): Array<[Record<string, unknown>, Record<string, unknown>]> {
+  const text = "synthetic-private-content";
+  return [
+    inboundMessage({ text, spaceId: "synthetic-private-space" }),
+    inboundMessage({ text, direction: "outbound" }),
+    inboundMessage({ text, platform: "sms" }),
+    inboundMessage({ text, senderId: "synthetic-private-sender" }),
+    inboundMessage({ text, senderId: null }),
+    inboundMessage({ text, contentType: "image" }),
+    inboundMessage({ text, timestampMs: NaN }),
+    inboundMessage({ text, timestampMs: 999 }),
   ];
 }

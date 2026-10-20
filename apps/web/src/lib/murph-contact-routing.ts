@@ -103,8 +103,12 @@ export function withMurphContactOptionBody(
     };
   }
 
+  if (option.kind === "telegram") {
+    return { ...option, href: withMurphTelegramText(option.href, body) };
+  }
+
   const href = new URL(option.href);
-  href.searchParams.set(option.kind === "telegram" ? "text" : "body", body);
+  href.searchParams.set("body", body);
 
   return {
     ...option,
@@ -236,7 +240,7 @@ export function buildMurphTelegramTextHref(input: {
     return telegramUrl;
   }
 
-  return `${telegramUrl}?${buildMurphTelegramTextQuery(body)}`;
+  return withMurphTelegramText(telegramUrl, body);
 }
 
 export function resolveMurphWebmailShortcut(input: {
@@ -335,9 +339,15 @@ function buildMurphTelegramContactOption(input: {
   };
 }
 
-function buildMurphTelegramTextQuery(body: string): string {
-  const query = new URLSearchParams({ text: body });
-  return query.toString();
+/**
+ * Sets a t.me link's prefilled message. Telegram shows a form-style "+" as a
+ * literal plus sign, so the text is percent-encoded; other parameters stay.
+ */
+export function withMurphTelegramText(href: string, text: string): string {
+  const url = new URL(href);
+  url.searchParams.delete("text");
+  const query = url.searchParams.toString();
+  return `${url.origin}${url.pathname}?${query ? `${query}&` : ""}text=${encodeURIComponent(text)}`;
 }
 
 function buildMurphEmailContactOption(input: {

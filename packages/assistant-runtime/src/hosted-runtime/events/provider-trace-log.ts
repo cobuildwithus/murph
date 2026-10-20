@@ -146,13 +146,11 @@ const HOSTED_ASSISTANT_CODEX_PROCESS_LIFECYCLE_STAGE_VALUES = new Set([
 const HOSTED_ASSISTANT_CODEX_APP_SERVER_TIMING_STAGE_VALUES = new Set([
   "initialized",
   "preinitialized",
-  "shutdown",
   "spawn-ready",
   "thread-resumed",
   "thread-started",
   "turn-completed",
   "turn-started",
-  "warm-abort-poisoned",
   "warm-idle",
   "warm-reused",
   "provider-output-received",
@@ -170,7 +168,7 @@ const HOSTED_ASSISTANT_CODEX_APP_SERVER_COLD_START_REASON_VALUES = new Set([
   "previous-turn-failure",
 ]);
 const HOSTED_ASSISTANT_CODEX_TRANSPORT_TIMEOUT_PHASE_VALUES = new Set([
-  "websocket-send", "websocket-read", "http-read",
+  "websocket-send", "websocket-ack", "websocket-read", "http-read",
 ]);
 const HOSTED_ASSISTANT_CODEX_TRANSPORT_EVENT_KIND_VALUES = new Set([
   "stream-disconnected",

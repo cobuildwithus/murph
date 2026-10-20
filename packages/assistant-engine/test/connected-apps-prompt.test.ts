@@ -11,6 +11,14 @@ import {
 } from '../src/assistant/system-prompt.js'
 
 describe('connected-apps skill and system-prompt coverage', () => {
+  it('reuses same-turn discovery without treating it as live authority or complete data', async () => {
+    const skill = (await readFile(path.join(resolveAssistantSkillsRoot(), 'connected-apps', 'SKILL.md'), 'utf8')).replace(/\s+/gu, ' ')
+    expect(skill).toContain('Reuse an exact slug and complete schema already discovered in this turn')
+    expect(skill).toContain('not current account access, approval, or write authority')
+    expect(skill).toContain('Retain pagination, truncation, errors and source identifiers')
+    expect(skill).toContain('complete source text when required for completeness or attribution')
+  })
+
   it('requires source geography before treating lodging names as destinations', async () => {
     const skill = (await readFile(path.join(resolveAssistantSkillsRoot(), 'journal-connected-context', 'SKILL.md'), 'utf8')).replace(/\s+/gu, ' ')
     for (const text of [

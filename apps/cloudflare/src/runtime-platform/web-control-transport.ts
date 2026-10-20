@@ -203,6 +203,7 @@ export async function fetchReplaySafeHostedWebControlPlaneJson(input: {
   boundUserId: string;
   description: string;
   fetchImpl: typeof fetch;
+  headers?: Headers;
   route: HostedRunnerWebControlRoute;
   signal?: AbortSignal | null;
   timeoutMs: number;
@@ -531,7 +532,10 @@ function decodeHostedWebControlPlaneResponseJson({
             includeSafeErrorText: false,
           }),
           responseStatus: response.status,
-          ...(snapshotDetails ?? { responseBodyBytes: new TextEncoder().encode(text).byteLength }),
+          ...(snapshotDetails ?? {
+            responseBodyBytes: new TextEncoder().encode(text).byteLength,
+            responseMimeCategory: readHostedWebControlResponseMimeCategory(response.headers),
+          }),
         },
         level: "warn",
         message: "Hosted runtime control-plane response returned invalid JSON.",
@@ -586,6 +590,17 @@ function decodeHostedWebControlPlaneResponseJson({
   return payload;
 }
 
+function readHostedWebControlResponseMimeCategory(
+  headers: Headers,
+): "missing" | "json" | "html" | "text" | "other" {
+  const mime = headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase();
+  return mime === undefined ? "missing"
+    : mime === "application/json" || (mime.startsWith("application/") && mime.endsWith("+json")) ? "json"
+    : mime === "text/html" ? "html"
+    : mime === "text/plain" ? "text"
+    : "other";
+}
+
 // Never return raw header values, body text, or parser messages from this boundary.
 function describeHostedSnapshotResponseBody(
   response: Response,
@@ -601,16 +616,12 @@ function describeHostedSnapshotResponseBody(
     && Number.isSafeInteger(Number(marker))
     ? Number(marker)
     : null;
-  const mime = headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase();
+  const responseMimeCategory = readHostedWebControlResponseMimeCategory(headers);
   return {
     responseBodyBytes,
     responseBodyShape,
     ...readHostedSnapshotResponseHeaderMetadata(response, true),
-    responseMimeCategory: mime === undefined ? "missing"
-      : mime === "application/json" || (mime.startsWith("application/") && mime.endsWith("+json")) ? "json"
-      : mime === "text/html" ? "html"
-      : mime === "text/plain" ? "text"
-      : "other",
+    responseMimeCategory,
     responseByteCountComparison: marker === null ? "missing"
       : expectedBytes === null ? "invalid"
       : expectedBytes === responseBodyBytes ? "match" : "mismatch",

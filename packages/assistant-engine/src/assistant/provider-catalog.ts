@@ -113,7 +113,7 @@ export function resolveCodexModelCatalog(input: {
   const selectedModel = normalizedCurrentModel
     ? createCatalogModel({
         id: normalizedCurrentModel,
-        description: profile.target.oss ? 'Current Codex OSS model.' : 'Current Codex model.',
+        description: 'Current Codex model.',
         source: 'current',
         capabilities: resolveCodexCatalogModelCapabilities(capabilities),
       })

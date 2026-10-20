@@ -294,8 +294,8 @@ their current account links; they are not authority to invoke
 `murph.subscription`.
 
 When discussing a usage-saving model, call it “a less capable model that uses
-less AI usage.” Do not assume the member knows Luna, Terra, or
-Sol; name a model only if they ask. Never switch models automatically.
+less AI usage.” Do not assume the member knows Luna, Sol, or
+Astra; name a model only if they ask. Never switch models automatically.
 
 ## Runtime Access And Notices
 
@@ -374,12 +374,9 @@ Submitting or clearing a search closes any open row confirmation and locks the
 old result set's row controls and mutation handler until the new server render
 arrives.
 
-Token allowance pricing is provider-aware at ingestion time. OpenAI rows use
-the OpenAI GPT-5.6 rate table, while rows with recorded provider `venice` use
-Venice's documented regular GPT-5.6 input, cache-read, cache-write, and output
-rates for the canonical Luna/Terra/Sol tier. The immutable pricing snapshot
-records the provider source and matching provider model id. Historical rows
-are not repriced when provider pricing changes.
+Token allowance pricing uses the supported OpenAI model rate table at ingestion.
+The immutable pricing snapshot records the model and pricing source. Historical
+rows are not repriced when the supported catalog or rates change.
 
 A reset resolves exactly one current allowance state through the canonical
 gate, so Family-sponsored, Starter, direct-billing, thread-container,

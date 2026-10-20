@@ -1,0 +1,20 @@
+{
+  "publishedOn": "2026-10-18",
+  "order": 100,
+  "item": {
+    "id": "supplement-label-nutrition",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Better nutrition answers for protein powders",
+    "summary": "For protein powders and other supplements, Murph uses nutrition facts you've already saved and looks up only missing requested values in supplement labels.",
+    "details": "Murph keeps the values a label provides. If a label lacks a requested value or no label is found, Murph says what was missing and clearly marks any estimate.",
+    "relevanceTags": [
+      "nutrition",
+      "food-journal",
+      "supplements"
+    ],
+    "sourcePullRequests": [
+      4196
+    ]
+  }
+}

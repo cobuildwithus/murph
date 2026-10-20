@@ -75,6 +75,7 @@ export async function createHostedTelegramProof(prisma: PrismaClient, binding: s
 
 export async function readHostedTelegramProof(input: { request: Request; token: string; prisma: PrismaClient; binding: string }) {
   const nonce = readNonce(input.request);
+  if (!noncePattern.test(nonce)) throw invalidLogin("pending_proof");
   const where = [{ field: "identifier", value: identifier(nonce) }];
   const pending = await hostedAuthAdapter(input.prisma)({}).findOne<AuthRecord>({ model: "verification", where });
   if (!pending || pending.value !== input.binding || !(pending.expiresAt instanceof Date) || pending.expiresAt <= new Date()) throw invalidLogin("pending_proof");

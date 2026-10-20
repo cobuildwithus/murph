@@ -1469,8 +1469,163 @@ describe("database health monitor", () => {
         ],
       }),
     );
+    expect(warning).toHaveBeenCalledTimes(1);
+    expect(warning.mock.calls[0]?.[1])
+      .not.toHaveProperty("pgbouncerCurrentConnectionSeries");
     expect(harness.planetScaleRequests).toHaveLength(4);
     expect(harness.primaryLinqRequests).toEqual([]);
+  });
+
+  it("reports count-only PgBouncer provenance for both partial scrapes", async () => {
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const privateLabelSentinel = "synthetic-private-pgbouncer-label";
+    const metricName = "planetscale_pgbouncer_current_connections";
+    const branchLabels =
+      `planetscale_database_branch_id="${BRANCH_ID}",`
+      + `planetscale_container="${privateLabelSentinel}-container"`;
+    const withoutCurrentConnections = buildMetricsBody({ branchId: BRANCH_ID })
+      .replace(/^planetscale_pgbouncer_current_connections.*$/gmu, "");
+    const currentConnectionScrapes = [
+      [
+        `${metricName}{${branchLabels},planetscale_role="replica",`
+          + `planetscale_pod="${privateLabelSentinel}-pod"} 10`,
+        `${metricName}{planetscale_database_branch_id="${privateLabelSentinel}-branch",`
+          + 'planetscale_role="primary"} 20',
+      ],
+      [
+        `${metricName}{${branchLabels},planetscale_role="primary"} 10`,
+        `${metricName}{${branchLabels},planetscale_role="primary",planetscale_pod=""} 0`,
+        `${metricName}{${branchLabels},planetscale_role="${privateLabelSentinel}-role"} 10`,
+        `${metricName}{${branchLabels}} 10`,
+      ],
+    ];
+    let scrapeAttempt = 0;
+    const harness = createMonitorHarness({
+      readMetricsBody() {
+        const series = currentConnectionScrapes[scrapeAttempt++];
+        if (!series) {
+          throw new Error("Unexpected additional PgBouncer scrape.");
+        }
+        return `${withoutCurrentConnections}\n${series.join("\n")}`;
+      },
+    });
+
+    await expect(harness.runScheduledCheck(FIVE_MINUTES_MS)).resolves.toEqual({
+      conditions: [],
+      outcome: "healthy",
+      sampleStatus: "failed",
+    });
+    expect(warning).toHaveBeenCalledTimes(1);
+    expect(warning).toHaveBeenCalledWith(
+      "Database health metrics collection failed.",
+      {
+        attempts: 2,
+        connectionErrorEvidence: {
+          missingPortAttempts: { "5432": 0, "6432": 0 },
+          parsedAttempts: 2,
+        },
+        failureCode: "required_metrics_missing",
+        failures: 1,
+        missingMetrics: [metricName],
+        pgbouncerCurrentConnectionSeries: [
+          { branch: 1, primary: 0, replica: 1, unrecognizedRole: 0, primaryMissingPod: 0 },
+          { branch: 4, primary: 2, replica: 0, unrecognizedRole: 2, primaryMissingPod: 2 },
+        ],
+      },
+    );
+    expect(JSON.stringify(warning.mock.calls)).not.toContain(privateLabelSentinel);
+    expect(JSON.stringify(warning.mock.calls)).not.toContain(BRANCH_ID);
+    expect(harness.planetScaleRequests).toHaveLength(4);
+    expect(harness.retryWaits).toEqual([1_000]);
+    expect(harness.allLinqRequests).toEqual([]);
+    expect(harness.monitor.readRecentSamples()).toEqual([
+      expect.objectContaining({
+        postgresConnections: 10,
+        postgresMaxConnections: 50,
+        scrapeStatus: "failed",
+        serverConnections: null,
+        serverPoolSaturationRatio: null,
+      }),
+    ]);
+  });
+
+  it.each([10, 0])(
+    "keeps recovered complete PgBouncer series quiet at %d connections",
+    async (serverConnections) => {
+      const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const complete = buildMetricsBody({ branchId: BRANCH_ID, serverConnections });
+      const partial = complete.replace(/^planetscale_pgbouncer_current_connections.*$/gmu, "");
+      let scrapeAttempt = 0;
+      const harness = createMonitorHarness({
+        readMetricsBody() {
+          return scrapeAttempt++ === 0 ? partial : complete;
+        },
+      });
+
+      await expect(harness.runScheduledCheck(FIVE_MINUTES_MS)).resolves.toEqual({
+        conditions: [],
+        outcome: "healthy",
+        sampleStatus: "ok",
+      });
+      expect(warning).not.toHaveBeenCalled();
+      expect(harness.planetScaleRequests).toHaveLength(4);
+      expect(harness.retryWaits).toEqual([1_000]);
+      expect(harness.allLinqRequests).toEqual([]);
+      expect(harness.monitor.readAlertState()).toMatchObject({
+        consecutiveScrapeFailures: 0,
+        incidentOpen: false,
+      });
+      expect(harness.monitor.readRecentSamples()).toEqual([
+        expect.objectContaining({
+          failureCode: null,
+          scrapeStatus: "ok",
+          serverConnections,
+          serverPoolCapacity: 50,
+          serverPoolSaturationRatio: serverConnections / 50,
+        }),
+      ]);
+    },
+  );
+
+  it("keeps only parsed PgBouncer evidence when confirmation transport fails", async () => {
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const partial = buildMetricsBody({ branchId: BRANCH_ID }).replace(
+      /^planetscale_pgbouncer_current_connections.*$/gmu,
+      (line) => line.replace('planetscale_role="primary"', 'planetscale_role="replica"'),
+    );
+    const harness = createMonitorHarness({
+      metricsBody: partial,
+      serviceDiscoveryResponses: [
+        createServiceDiscoveryResponse,
+        () => new Response(null, { status: 503 }),
+      ],
+    });
+
+    await expect(harness.runScheduledCheck(FIVE_MINUTES_MS)).resolves.toEqual({
+      conditions: [],
+      outcome: "healthy",
+      sampleStatus: "failed",
+    });
+    expect(warning).toHaveBeenCalledTimes(1);
+    expect(warning).toHaveBeenCalledWith(
+      "Database health metrics collection failed.",
+      {
+        attempts: 2,
+        connectionErrorEvidence: {
+          missingPortAttempts: { "5432": 0, "6432": 0 },
+          parsedAttempts: 1,
+        },
+        failureCode: "required_metrics_missing",
+        failures: 1,
+        missingMetrics: ["planetscale_pgbouncer_current_connections"],
+        pgbouncerCurrentConnectionSeries: [
+          { branch: 1, primary: 0, replica: 1, unrecognizedRole: 0, primaryMissingPod: 0 },
+        ],
+      },
+    );
+    expect(harness.planetScaleRequests).toHaveLength(3);
+    expect(harness.retryWaits).toEqual([1_000]);
+    expect(harness.allLinqRequests).toEqual([]);
   });
 
   it("keeps a persistently missing Postgres-state family incomplete after confirmation", async () => {
@@ -1940,14 +2095,18 @@ describe("database health monitor", () => {
     ]);
   });
 
-  it("joins recovered connection-error counters to first-scrape gauges when confirmation loses another family", async () => {
+  it.each([
+    "planetscale_postgres_settings_max_connections",
+    "planetscale_pgbouncer_current_connections",
+  ])("joins recovered connection-error counters to first-scrape gauges when confirmation loses %s", async (missingMetric) => {
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
     const completeMetricsBody = buildMetricsBody({ branchId: BRANCH_ID });
     const missingConnectionErrorMetricsBody = completeMetricsBody.replace(
       /^planetscale_edge_postgres_connection_errors_total.*$/gmu,
       "",
     );
-    const missingMaxConnectionsMetricsBody = completeMetricsBody.replace(
-      /^planetscale_postgres_settings_max_connections.*$/mu,
+    const confirmationMetricsBody = completeMetricsBody.replace(
+      new RegExp(`^${missingMetric}.*$`, "gmu"),
       "",
     );
     let scrapeAttempt = 0;
@@ -1956,7 +2115,7 @@ describe("database health monitor", () => {
         scrapeAttempt += 1;
         return scrapeAttempt === 1
           ? missingConnectionErrorMetricsBody
-          : missingMaxConnectionsMetricsBody;
+          : confirmationMetricsBody;
       },
     });
 
@@ -1968,12 +2127,17 @@ describe("database health monitor", () => {
 
     expect(harness.planetScaleRequests).toHaveLength(4);
     expect(harness.retryWaits).toEqual([1_000]);
+    expect(warning).not.toHaveBeenCalled();
+    expect(harness.allLinqRequests).toEqual([]);
     expect(harness.monitor.readRecentSamples()).toEqual([
       expect.objectContaining({
         connectionErrorDelta: 0,
         failureCode: null,
         postgresMaxConnections: 50,
         scrapeStatus: "ok",
+        serverConnections: 10,
+        serverPoolCapacity: 50,
+        serverPoolSaturationRatio: 0.2,
       }),
     ]);
   });

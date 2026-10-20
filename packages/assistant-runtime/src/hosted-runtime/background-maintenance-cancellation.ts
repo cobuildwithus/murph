@@ -1,8 +1,10 @@
 const HOSTED_BACKGROUND_MAINTENANCE_PREEMPTION_POLL_MS = 25;
 
+export type HostedBackgroundMaintenanceYieldReason = "foreground" | "canonical_receipt_capacity";
+
 export type HostedBackgroundMaintenanceCancellationReason =
   | "container_destroyed"
-  | "foreground"
+  | HostedBackgroundMaintenanceYieldReason
   | "invocation_preempted"
   | "outer_signal"
   | "timeout";
@@ -10,6 +12,7 @@ export type HostedBackgroundMaintenanceCancellationReason =
 export function createHostedBackgroundMaintenanceCancellation(input: {
   signal: AbortSignal | null;
   shouldYield: (() => boolean) | null;
+  cooperativeYieldReason?: HostedBackgroundMaintenanceYieldReason;
   timeoutMs: number | null;
 }): {
   dispose(): void;
@@ -41,10 +44,10 @@ export function createHostedBackgroundMaintenanceCancellation(input: {
       readHostedBackgroundMaintenanceAbortReason(input.signal),
     );
   };
-  const abortForForeground = () => {
+  const abortForCooperativeYield = () => {
     abort(
-      "foreground",
-      new DOMException("Background maintenance yielded to foreground input.", "AbortError"),
+      input.cooperativeYieldReason ?? "foreground",
+      new DOMException("Background maintenance yielded to its owning runtime.", "AbortError"),
     );
   };
   const abortForTimeout = () => {
@@ -62,7 +65,7 @@ export function createHostedBackgroundMaintenanceCancellation(input: {
   const pollTimer = input.shouldYield
     ? setInterval(() => {
         if (input.shouldYield?.() === true) {
-          abortForForeground();
+          abortForCooperativeYield();
         }
       }, HOSTED_BACKGROUND_MAINTENANCE_PREEMPTION_POLL_MS)
     : null;

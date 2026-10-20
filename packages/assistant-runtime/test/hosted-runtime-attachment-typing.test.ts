@@ -14,6 +14,7 @@ vi.mock("@murphai/assistant-engine/assistant-channel-adapters", async (importOri
 }));
 
 import {
+  cancelHostedLinqInputTyping,
   createHostedAssistantChannelTypingDependencies,
   startHostedLinqInputTyping,
 } from "../src/hosted-runtime/channel-activity.ts";
@@ -207,6 +208,71 @@ test("an active turn suppresses preparation and a full session retains the exist
   expect(mocks.startLinqTypingIndicator).toHaveBeenCalledTimes(3);
 });
 
+test("terminal cleanup drains a pending start before the next turn starts typing", async () => {
+  const fixture = createFixture("terminal_pending");
+  const pending = createDeferred<AssistantChannelActivityHandle>();
+  const stopped = createDeferred<void>();
+  mocks.startLinqTypingIndicator.mockReturnValueOnce(pending.promise);
+  fixture.stop.mockImplementationOnce(() => stopped.promise);
+  const cancel = startHostedLinqInputTyping(fixture.input);
+  assert.ok(cancel);
+  cleanups.push(cancel);
+  const cleanup = cancelHostedLinqInputTyping({
+    inputIds: [fixture.input.inputId], runtimeAttemptId: fixture.input.runtimeAttemptId,
+  });
+  const next = fixture.typing().startLinqTyping?.({ target: fixture.context.target! });
+  await drainMicrotasks();
+  expect(mocks.startLinqTypingIndicator).toHaveBeenCalledOnce();
+  expect(fixture.stop).not.toHaveBeenCalled();
+  expect(mocks.startLinqTypingIndicator.mock.calls[0]?.[1].signal.aborted).toBe(false);
+  pending.resolve(fixture.handle);
+  await drainMicrotasks();
+  expect(fixture.stop).toHaveBeenCalledOnce();
+  expect(fixture.events.some(isAcceptance)).toBe(false);
+  expect(mocks.startLinqTypingIndicator).toHaveBeenCalledOnce();
+  stopped.resolve();
+  await cleanup;
+  const successor = await next;
+  assert.ok(successor);
+  cleanups.push(() => successor.stop({ providerStop: false }));
+  expect(mocks.startLinqTypingIndicator).toHaveBeenCalledTimes(2);
+});
+
+test("cleanup matches the input and runtime and never cancels a taken handle", async () => {
+  const fixture = createFixture("cleanup_scope");
+  const cancel = startHostedLinqInputTyping(fixture.input);
+  assert.ok(cancel);
+  cleanups.push(cancel);
+  await drainMicrotasks();
+  await cancelHostedLinqInputTyping({ inputIds: [fixture.input.inputId] });
+  await cancelHostedLinqInputTyping({ inputIds: [fixture.input.inputId], runtimeAttemptId: "other_attempt" });
+  await cancelHostedLinqInputTyping({ inputIds: ["other_input"], runtimeAttemptId: fixture.input.runtimeAttemptId });
+  expect(fixture.stop).not.toHaveBeenCalled();
+  const taken = await fixture.typing().startLinqTyping?.({ target: fixture.context.target! });
+  assert.ok(taken);
+  cleanups.push(() => taken.stop({ providerStop: false }));
+  await cancelHostedLinqInputTyping({ runtimeAttemptId: fixture.input.runtimeAttemptId });
+  expect(fixture.stop).not.toHaveBeenCalled();
+});
+
+test("runtime cleanup releases only its untaken preparations, including failed provider stops", async () => {
+  const own = createFixture("cleanup_owner");
+  const other = createFixture("cleanup_other");
+  mocks.startLinqTypingIndicator.mockResolvedValueOnce(own.handle).mockResolvedValueOnce(other.handle);
+  for (const fixture of [own, other]) {
+    const cancel = startHostedLinqInputTyping(fixture.input);
+    assert.ok(cancel);
+    cleanups.push(cancel);
+  }
+  own.stop.mockRejectedValueOnce(new Error("Synthetic provider stop failure"));
+  await cancelHostedLinqInputTyping({ runtimeAttemptId: own.input.runtimeAttemptId });
+  expect(own.stop).toHaveBeenCalledOnce();
+  expect(other.stop).not.toHaveBeenCalled();
+  const successor = await own.typing().startLinqTyping?.({ target: own.context.target! });
+  assert.ok(successor);
+  cleanups.push(() => successor.stop({ providerStop: false }));
+});
+
 function createFixture(name: string) {
   const context: HostedAssistantLinqDeliveryContext = {
     directRecipientPhoneNumber: null, fromPhoneNumber: null,
@@ -218,6 +284,7 @@ function createFixture(name: string) {
   const handle: AssistantChannelActivityHandle = { isActive: () => true, stop };
   mocks.startLinqTypingIndicator.mockResolvedValue(handle);
   const input = {
+    inputId: `input_${name}`, runtimeAttemptId: `attempt_${name}`,
     forwardedEnv: {}, userEnv: {}, providerFetch: vi.fn<typeof fetch>(),
     linqDeliveryContext: context,
     latencyTraceContext: {

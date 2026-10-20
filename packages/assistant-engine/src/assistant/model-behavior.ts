@@ -17,15 +17,11 @@ export function resolveAssistantModelBehaviorProfile(
 ): AssistantModelBehaviorProfile {
   const normalized = normalizeAssistantProviderConfig(input)
 
-  if (normalized.target.oss) {
-    return 'default'
-  }
-
   if (isAssistantGpt5FamilyModel(normalized.target.model)) {
     return 'gpt5-agentic'
   }
 
-  if (!normalized.target.oss && !normalized.target.model) {
+  if (!normalized.target.model) {
     return 'gpt5-agentic'
   }
 
@@ -83,7 +79,7 @@ export function buildAssistantExecutionBehaviorText(input: {
 - Do not create a reminder for a hypothetical, tentative, canceled, completed, or date/time-unknown appointment. If a confirmed appointment is canceled or rescheduled and current conversation or tool evidence identifies its reminder, archive it or patch its timing rather than leaving a stale occurrence. When an appointment is clearly booked but its date or start time is missing, ask only for the missing detail instead of guessing. Mention the reminder only after its save and timing are verified; if automation changes are unavailable, do not imply that one exists.`
   const messagingPresentationGuidance = `
 - Messaging: no Markdown tables; use labeled lines.
-- When an available card can fully answer the request, discover \`murph.attach_response_card\`, \`murph.attach_exercise_routine_card\`, or \`murph.attach_telegram_rich_content\` through native \`tool_search\` or code-mode \`ALL_TOOLS\` and read its full contract before authoring it. Preserve route eligibility and all required reads, safety, and fallback rules.
+- When an available card can fully answer the request, read the full contract of \`murph.attach_response_card\`, \`murph.attach_exercise_routine_card\`, or \`murph.attach_telegram_rich_content\` via native \`tool_search\` or code-mode \`ALL_TOOLS\` before authoring it; a meal save's ready \`totalsOnlyCard\` needs no discovery. Keep route eligibility and required reads, safety, and fallback rules.
 - Complete cards replace text. After attachment, do not call \`murph.finish_without_reply\`; end an attended turn without final text, or use the scheduled turn's required terminal decision. Response media comes with concise text for order, dose, timing, cues, safety, and fallback. With no fit, use concise text.
 - Use \`murph.generate_image\` only if no card fits and a safe image helps. Keep exact or safety-critical text. No decorative group images.`
   const responseCardGuidance = input.progressUpdateMode === 'group'

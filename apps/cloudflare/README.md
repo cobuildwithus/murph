@@ -35,8 +35,23 @@ activity expiry, and operation-drop controls still require the selected Postgres
 target. These routes exist only in the hosted-local test entrypoint and retain
 its environment, signature, and bound-member checks.
 
-Run these commands from the repository root. To run one Node workspace test,
-pass its repository-relative filename directly to Vitest:
+Run these commands from the repository root. After installing dependencies in a
+fresh checkout, prepare the Web-owned Prisma client before running the standalone
+Cloudflare typecheck:
+
+```bash
+pnpm --dir apps/web prisma:generate
+pnpm --dir apps/cloudflare typecheck
+```
+
+Cloudflare's hosted-runtime migration test helpers import that generated client.
+Repeat generation after changing the Prisma schema. The root typecheck and
+`pnpm --dir apps/cloudflare verify` already prepare it; app-local `typecheck`
+remains a no-emit check so prepared parallel verification does not regenerate
+shared inputs.
+
+To run one Node workspace test, pass its repository-relative filename directly
+to Vitest:
 
 ```bash
 pnpm exec vitest run --config apps/cloudflare/vitest.node.workspace.ts --no-coverage apps/cloudflare/test/workspace-snapshot-local.test.ts
@@ -57,27 +72,21 @@ workspace proof.
 
 ## Worker startup profiling
 
-Use the pinned Wrangler's `check startup` to profile the Worker, separately from
-container startup. Its nested deployment dry run also builds configured container
-images, so a fresh checkout needs a profiling-only scratch config:
-
-1. Copy `apps/cloudflare/wrangler.jsonc` to the ignored
-   `apps/cloudflare/.tmp/startup/wrangler.jsonc`.
-2. Remove `containers` and set `main` to `../../src/index.ts`. Preserve the
-   compatibility date, compatibility flags, and bundling options. Do not add a
-   `tsconfig` override; resolution follows the source entrypoint.
-3. From the repository root, run:
+Profile the Worker's global-scope startup locally with the pinned Wrangler:
 
 ```bash
-WRANGLER_WRITE_LOGS=false WRANGLER_SEND_METRICS=false \
-  pnpm --dir apps/cloudflare exec wrangler check startup \
-  --args="--config .tmp/startup/wrangler.jsonc" \
-  --outfile=.tmp/startup/worker.cpuprofile
+pnpm --dir apps/cloudflare worker:startup:profile
 ```
 
-Pass the scratch config through `--args`: the outer `--config` alone does not
-configure the nested build in the pinned Wrangler. This command stays local and
-does not require production credentials or a container image.
+The command passes `--containers-rollout=none` to Wrangler's nested deployment
+**dry run**, so it neither builds container images nor deploys anything. It uses
+the checked-in Wrangler configuration directly, preserving the entrypoint,
+compatibility flags, and bundling options without a scratch config copy. Docker
+and production credentials are not required.
+
+The profile is written to the ignored
+`apps/cloudflare/.tmp/startup/worker.cpuprofile`; each run replaces that file.
+Open it in Chrome DevTools or VS Code to inspect the flamegraph.
 
 Compare alternating runs of the baseline and candidate on the same machine,
 excluding idle samples from CPU totals. `--worker=<multipart-bundle>` can reuse
@@ -182,6 +191,17 @@ Full Codex and CLI validation stays in deployment smoke. Its health receipt rema
 compatible with preceding Workers that still request a per-slot preflight; their
 legacy readiness query is ignored and runs the full smoke. Global eligibility
 imposes no ENAM health requirement.
+Periodic health rechecks leave ready slots claimable, including a target of one.
+They observe the existing process directly without the binding lifecycle lock or
+SDK auto-start. The coordinator advances the existing check deadline and applies
+a result only while the exact slot remains ready inventory: a racing claim wins,
+and late success, failure or timeout cannot restore or retire its handoff. Failed
+unclaimed checks use existing fenced retirement and refill. Rechecks preserve
+activity renewal; initial preparation still owns startup and full pristine proof.
+Existing persisted provisioning rows continue through ordinary preparation after
+a reset or Worker upgrade. This Worker-only correction uses the existing container
+health response and needs no Web or container-image protocol change.
+
 No member, workspace, or provider credential enters a slot before binding.
 The member-specific resident Codex process starts after encrypted-workspace restore.
 
@@ -227,6 +247,21 @@ The runner container sends runtime internal Worker requests to normal virtual ho
 
 The shared canonical completion publisher additionally emits one failure-isolated info observation per existing call after it settles: `runtimeCompletionCaller` is `runtime_callback` without native settlement evidence or `native_invocation` when the call supplies the settled target. The latter includes exact native-receipt reconciliation and does not exclusively identify the outer supervisor. `runtimeCompletionOutcome` is `updated` for an acknowledged canonical update, `not_updated` for a settled non-update, or `unconfirmed` when the call throws. The event reuses `workspaceAttemptId` correlation; user identity is handled by the existing structured-log redaction. It contains no target, generation, error text, or payload and adds no I/O, retry, timer, or control decision. Join this observation to callback warnings on the exact attempt: a newer attempt cannot prove the older one completed, and canonical acknowledgment does not prove message delivery. Missing observations on older Workers or unexercised paths remain unknown.
 Shared runtime ports cannot supply raw Web-control methods or paths. They must use a branded route descriptor from the same registry that derives the Worker proxy allowlist; bounded query-bearing and device-connect variants can only bind to an already-registered pathname. Cloudflare typecheck rejects an unregistered caller at compile time, and the Node route-contract suite enumerates the registry to prove each exact method/path is allowed while the opposite method and path variants remain blocked.
+
+The existing `Hosted runtime control-plane response returned invalid JSON.` warning
+includes `responseMimeCategory` (`missing`, `json`, `html`, `text`, `other`) for
+non-device responses too, including sensitive bodies. It categorizes only the
+server-declared `content-type`, without logging raw header values; it does not
+prove body contents or root cause. This is failure-only enrichment: no new events
+or success log volume, and no changes to snapshot-only fields. Follow up on natural
+traffic using a fixed 24-hour UTC window after rollout (`start <= timestamp < start + 24h`):
+filter `component = "hosted.runtime.control-plane"` and
+`message = "Hosted runtime control-plane response returned invalid JSON."`, then
+count by `details.path`, `details.responseStatus`, and `details.responseMimeCategory`.
+Include the production runner-container application streams as well as the Worker;
+container records identify their application through `$containers.applicationId`.
+An absent field is unknown, not `missing`; zero matches do not establish health.
+
 The phone-call start port is one bounded `web-control.worker` callback into `apps/web`; its protocol floor is 45 seconds even when the generic web-control timeout is 30 seconds, so the web-owned 40-second aggregate deadline finishes before the caller gives up. Deploy and prove convergence of this 45-second Cloudflare caller before deploying a web build with the 40-second deadline. The longer caller is backward compatible with older web builds; an old 30-second caller is not compatible with the 40-second web deadline, so Cloudflare cannot be rolled back below 45 seconds while that web build is active. Retell credentials and provider calls remain web-owned and are never forwarded into the runner.
 `murph.plan_usage` uses one allowlisted signed `web-control.worker` callback.
 Cloudflare transports and validates the strict result but owns no billing or
@@ -254,23 +289,7 @@ The usage-record callback may also transport one bounded Linq group delivery
 target captured from the accepted mailbox input. The target includes the
 existing thread-route authority and is advisory to web-owned accounting; the
 Worker does not resolve, persist, or authorize an alternate recipient.
-The runner container also uses Cloudflare HTTPS outbound interception for hosted provider egress. OpenAI, Exa, Mapbox, Linq, Telegram, hosted data API, and Workers AI transcription real credentials stay in Worker env. Native provider clients receive SDK placeholders. The Worker resolves platform-supplied `ctx.containerId` and `ctx.className` to the exact controller and reads its immutable member binding, registered invocation context, and usage-settlement state before injecting the real upstream credential. The ordinary path needs one native RPC and no Web authorization callback. Completion and native retirement deny new effects; already admitted effects may finish. Legacy credentials and caller-supplied headers do not grant access. Recipient binding, journaling, and idempotency remain runtime responsibilities. The Worker constrains Codex-native managed OpenAI search to exact `POST /v1/alpha/search`, constrains Exa to `POST /search`, constrains Linq to the runtime route matrix (`GET /phone_numbers`, `GET /attachments/:id`, `POST /attachments`, `POST /chats`, `POST /chats/:id/messages`, `POST /chats/:id/voicememo`, `POST /chats/:id/typing`, `DELETE /chats/:id/typing`, `POST /chats/:id/read`, `POST /messages/:id/reactions`, `DELETE /messages/:id`), constrains Telegram to its explicit operation allowlist, including `sendRichMessage`, constrains Mapbox to read-only GET allowlisted path families, and strips runtime authority headers before upstream provider egress leaves Cloudflare. Runtime code does not call Linq's contact-card provider endpoint directly; first-contact native contact-card sharing stays web-owned. Hosted generated-image turns call OpenAI through native container authorization, persist the validated bytes as a canonical vault capture, and return private `vault_image` media. Final message delivery reloads and hash-verifies those bytes, then uses Linq's attachment upload or Telegram multipart `sendPhoto`. Linq group-avatar mutation is the narrow URL-only exception: after preflight, the write-fenced Worker route stores one deterministic application-encrypted R2 object and returns an opaque at-most-one-day capability on Murph's fixed Worker origin directly to the runtime provider boundary. The capability reveals no member id, R2 key, storage namespace, or image hash; the public Worker route decrypts and verifies the object and returns `private, no-store`. Retries reuse the deterministic object only while its original 24-hour lifecycle window remains, and each capability expiry is capped at that object's lifecycle boundary. At or after the boundary, the Worker replaces the same deterministic key before returning a newly bounded capability; the R2 lifecycle and account deletion still own cleanup without relying on Linq fetch acceptance. The URL is not response media or model-visible state. The platform container coordinates select the existing native authority; neither request headers nor caller-supplied container names can select another member. Unknown egress currently passes through during migration and logs only sanitized method/host/path metadata. Adding a new hosted provider API, method, or runtime tool that calls an intercepted provider is not complete until this egress boundary and its regression tests allow the exact upstream operation. Updating the Codex pin additionally requires a source-manifest review: required CI resolves `rust-v<version>` from OpenAI, verifies its exact commit and `codex-rs/codex-api/src` tree, and then uses native binary scanning only as cross-platform corroboration. The test-only inventory cannot generate or widen the Worker policy.
-Venice joins that same Worker-owned credential boundary for core inference.
-The Worker permits only `POST /api/v1/responses` and
-`POST /api/v1/responses/compact`, accepts only canonical Luna/Terra/Sol request
-models, and replaces the model with the matching regular Venice provider id
-(`openai-gpt-56-luna`, `openai-gpt-56-terra`, or `openai-gpt-56-sol`) while disabling
-Venice's added system prompt, web search, and web scraping at the final egress
-boundary. Runtime egress derives the provider id from the same shared map that
-Web records in its pricing snapshot, so the allowance rate remains bound to
-the actual upstream model. Codex Responses Lite `/responses` requests also have
-their standard top-level tools restored and receive an explicit GPT-5.6 prompt
-cache breakpoint on the final block of the contiguous leading developer prefix.
-The Worker preserves the stable cache key and caller-owned cache controls, does
-not modify compact or ordinary Responses cache behavior, and never logs prompt
-content or cache keys. Specialized
-tools such as generated images continue to use their own managed providers even
-when Venice owns the core assistant turn.
+The runner container also uses Cloudflare HTTPS outbound interception for hosted provider egress. OpenAI, Exa, Mapbox, Linq, Telegram, hosted data API, and Workers AI transcription real credentials stay in Worker env. Native provider clients receive SDK placeholders. The Worker resolves platform-supplied `ctx.containerId` and `ctx.className` to the exact controller and reads its immutable member binding, registered invocation context, and usage-settlement state before injecting the real upstream credential. The ordinary path needs one native RPC and no Web authorization callback. Completion and native retirement deny new effects; already admitted effects may finish. Legacy credentials and caller-supplied headers do not grant access. Recipient binding, journaling, and idempotency remain runtime responsibilities. The Worker constrains Codex-native managed OpenAI search to exact `POST /v1/alpha/search`, constrains Exa to `POST /search`, constrains Linq to the runtime route matrix (`GET /phone_numbers`, `GET /attachments/:id`, `POST /attachments`, `POST /chats`, `POST /chats/:id/messages`, `POST /chats/:id/voicememo`, `POST /chats/:id/typing`, `DELETE /chats/:id/typing`, `POST /chats/:id/read`, `POST /messages/:id/reactions`, `DELETE /messages/:id`), constrains Telegram to its explicit operation allowlist, including `sendRichMessage`, constrains Mapbox to read-only GET allowlisted path families, and strips runtime authority headers before upstream provider egress leaves Cloudflare. Runtime code does not call Linq's contact-card provider endpoint directly; first-contact native contact-card sharing stays web-owned. Hosted generated-image turns call OpenAI through native container authorization, persist the validated bytes as a canonical vault capture, and return private `vault_image` media. Final message delivery reloads and hash-verifies those bytes, then uses Linq's attachment upload or Telegram multipart `sendPhoto`. Linq group-avatar mutation is the narrow URL-only exception: after preflight, the write-fenced Worker route stores one deterministic application-encrypted R2 object and returns an opaque at-most-one-day capability on Murph's fixed Worker origin directly to the runtime provider boundary. The capability reveals no member id, R2 key, storage namespace, or image hash; the public Worker route decrypts and verifies the object and returns `private, no-store`. Retries reuse the deterministic object only while its original 24-hour lifecycle window remains, and each capability expiry is capped at that object's lifecycle boundary. At or after the boundary, the Worker replaces the same deterministic key before returning a newly bounded capability; the R2 lifecycle and account deletion still own cleanup without relying on Linq fetch acceptance. The URL is not response media or model-visible state. The platform container coordinates select the existing native authority; neither request headers nor caller-supplied container names can select another member. Unknown egress currently passes through during migration and logs only sanitized method/host/path metadata. Adding a new hosted provider API, method, or runtime tool that calls an intercepted provider is not complete until this egress boundary and its regression tests allow the exact upstream operation. Updating the Codex pin additionally requires a source-manifest review: required CI resolves `rust-v<version>` from OpenAI, verifies its exact commit, which pins the `codex-rs` tree (including provider APIs and Guardian Decisions), and then uses native binary scanning only as cross-platform corroboration. The test-only inventory cannot generate or widen the Worker policy.
 Hosted Linq container requests use the canonical HTTPS API base even when the
 Worker has a custom `LINQ_API_BASE_URL`. The existing outbound handler maps that
 canonical request to the Worker-owned upstream and injects the provider token.
@@ -446,6 +465,18 @@ the configured branch, split into primary, replica, and missing or unrecognized
 roles. Zero branch series distinguishes provider omission from unusable primary
 provenance. These diagnostics contain no label values or raw metrics, add no
 provider calls, and do not change paging or persisted samples.
+
+When `planetscale_pgbouncer_current_connections` is missing, the existing failed
+collection warning also includes `pgbouncerCurrentConnectionSeries`: one entry
+per successfully parsed scrape in collection order, at most two entries. Each
+entry contains only `branch`, `primary`, `replica`, `unrecognizedRole`, and
+`primaryMissingPod` series counts. Counts use the already parsed points for the
+configured branch; `primaryMissingPod` counts primary series with a missing or
+empty pod label, which makes the per-pod sum unavailable. Zero branch series
+means no matching series, whether the family is absent or appears only on other
+branches; these counts do not establish a provider cause. No label values,
+identifiers, or metric payloads are included. The diagnostic adds no requests,
+logs, or storage and does not change null values, retries, conditions, or paging.
 
 Discovery selects exactly one target by organization, database name, and branch
 name. The configured branch ID then filters the selected Prometheus payload's
@@ -629,14 +660,7 @@ Optional execution vars and secrets:
 
 - `HOSTED_WEB_CALLBACK_SIGNING_KEY_ID` for callback key rotation metadata on the required signed hosted-web path
 - `HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS` and `HOSTED_EXECUTION_RUNNER_ENV_PROFILES` for execution-time secret forwarding
-- `HOSTED_ASSISTANT_PROVIDER=openai` for Codex hosted assistant execution through the Worker egress intercept. The standard deploy preflight requires Worker-owned `OPENAI_API_KEY` plus `HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET`; hosted Codex receives only an SDK placeholder, never the real OpenAI key. The existing signing secret remains required for encrypted inference settings and Live resource references; provider credential minting is removed. Host Codex bridge/proxy env is not accepted
-- Optional Venice core inference uses the Worker-owned `VENICE_API_KEY` secret.
-  The regular provider ids `openai-gpt-56-luna`, `openai-gpt-56-terra`, and
-  `openai-gpt-56-sol` are code-owned and derived from Murph's canonical model;
-  there are no separate operator model vars. The fleet default remains
-  `HOSTED_ASSISTANT_PROVIDER=openai`; Web projects the per-member
-  Venice override for an invocation only after its separate rollout flag is
-  enabled. The runner receives only a signed Venice credential.
+- `HOSTED_ASSISTANT_PROVIDER=openai` for Codex hosted assistant execution through the Worker egress intercept. The standard deploy preflight requires Worker-owned `OPENAI_API_KEY` plus `HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET`; hosted Codex receives only an SDK placeholder, never the real OpenAI key. The existing signing secret remains required for Live resource references; provider credential minting is removed. Host Codex bridge/proxy env is not accepted
 - `HOSTED_R2_PRESIGN_ENDPOINT` can override the default account-scoped R2 S3 endpoint for direct snapshot URL generation. Production deploys must leave it as the account-scoped R2 HTTPS origin. Hosted-local dev, worker-only, and E2E profiles start a MinIO sidecar and inject local S3-compatible endpoints behind the local-only `HOSTED_R2_PRESIGN_ALLOW_LOCAL_ENDPOINT=1` guard; those local endpoint flags are not deploy vars.
 - `HOSTED_AI_USAGE_REPORTING_SECRET` is an optional Worker-owned platform
   secret. It must not be forwarded into the hosted runtime env; usage
@@ -731,6 +755,105 @@ private deployment boundaries still apply.
 
 ## Private Operational Telemetry
 
+Existing internal-request failure and authority-rejection warnings include
+`workspaceAttemptId` from the canonical lease already read to fence that request.
+The value is captured before fetch and cannot follow a later lease change. Join
+it to the exact invocation's checkpoint/completion and work-mode records; it does
+not establish a failure's cause. Supplied workspace-snapshot fences, supplied
+POST latency-trace fences, and trusted internal fetches omit correlation because
+they do not read the current lease. Missing or rejected lease reads still fail
+before the existing request logs. No supplied header is used for diagnostics,
+and this adds no lease read, I/O, retry, or success-path logging. Shipping this
+runtime change requires rebuilding and deploying the runner image.
+
+The existing container request-exit warning retains `exitReason` and adds
+`requestKind` from the finite method/route owner (`unknown` for an unmatched or
+unclassified request), plus `workspaceAttemptId` from this request's successfully
+parsed workspace-invocation job. `workspaceAttemptId: false` explicitly means no
+parsed job attempt is available, including other request kinds; unlike `null`,
+it survives structured-log sanitization without inventing an attempt ID. These
+fields never borrow a concurrent invocation's identity or include raw request
+paths, queries, headers or bodies. They are observations only: `response.closed`
+does not prove accepted work was aborted; invocation lifetime retains its
+separate explicit-abort owner. This change requires rebuilding and deploying the
+runner image, which bundles `container-entrypoint.ts`; a Worker-only deployment
+cannot ship it.
+
+For `usage_settlement_pending` only, the existing `Hosted runner provider egress
+completed.` warning includes `runtimeAttemptId` when its already-read native
+ContainerProxy authority supplies a write fence. Caller headers never supply
+this join. The existing 503 response with `retry-after: 1` returns without an
+upstream request; associated tracing lacks the attempt, and the separate typing-start
+correlation below does not cover this rejection. The extension adds at most one
+scalar under the structured logger's existing sanitization and size bounds, with
+distinct values limited to native attempts represented in these warnings. It
+adds no event, I/O or wait; other diagnostics retain their existing details.
+This observes the rejected attempt. It does not repair settlement failures or
+establish their cause or recovery.
+
+Linq typing-start fetches mint one random UUID in
+`x-hosted-runtime-fetch-correlation-id`. The runtime records
+`providerRuntimeStartedAtEpochMs`, `providerRuntimeResumedAtEpochMs` and monotonic
+`providerRuntimeRoundTripMs` under `providerFetchCorrelationId`. The Worker adds
+the same ID, native-authorized `runtimeAttemptId` and
+`providerWorkerStartedAtEpochMs` to its existing total, authorization and upstream
+duration record. Subtracting Worker elapsed time from runtime elapsed time shows
+time outside Worker processing; it does not distinguish outbound proxy queueing,
+network transit or a delayed runtime continuation. Epoch clocks can differ across
+hosts and cannot independently prove an event-loop stall.
+
+Mailbox port fetches use the same private header with `mailboxFetchCorrelationId`.
+The Worker attaches the authorized attempt to existing mailbox timing fields.
+The runtime records fetch start, response JSON decoded and validated import-ready
+epoch markers, plus monotonic fetch/decode, parse and total milliseconds. One
+logical fetch ID spans existing read retries and can join multiple Worker records;
+its total includes retry waits. A failed/canceled fetch records false
+`mailboxRuntimeImportReady` and unset markers for unfinished phases (null in the
+emitter input; omitted by structured-log sanitization). Import-ready
+means the port can return validated items, not that the runtime has imported or
+staged them; compare the subsequent mailbox milestones separately.
+
+These IDs are diagnostic only. The Worker accepts UUID-v4 shape only and strips
+the header before provider or Web forwarding; request bodies, recipients and
+credentials are excluded. Old runtimes omit the header, and old Workers ignore
+it for behavior. Roll out the Worker before the runtime image so newly emitted
+headers are stripped at egress; complete joins require both new revisions.
+Use ordinary authorized traffic to verify correlation after rollout. Missing
+historical IDs cannot be reconstructed or treated as zero latency.
+
+Container stdout, including the runtime-side records above, is not queryable from
+Workers Observability. Each invocation therefore also copies transport scalars for
+its first-started Linq typing start and the first attempt of its first-started
+conversation-lane mailbox fetch onto its existing `runtime.invocation_finished`
+runtime-log entry (no additional request). The claim is taken when the request
+starts, so an overlapping later request that settles first never replaces it, and
+only the claimed request is observed. The snapshot-fetch observer supplies `firstTypingFetch*` and
+`firstMailboxFetch*` fields: start epoch, duration, response status, new
+connection count, pooled-socket reuse, DNS/TCP/TLS setup, request-sent time,
+response wait after sending, headers-to-resolution delay, process event-loop
+active/idle time, process CPU user/system time and last observed stage. The CPU
+values are the observer's existing `process.cpuUsage` deltas over the same fetch.
+They count every process thread and can exceed wall time. They only narrow
+CPU-cost hypotheses for the observed fetch window: they cannot cleanly decompose
+event-loop wait, do not attribute a main-thread cause, and say nothing about time
+before the fetch starts. Connection setup and
+headers-to-resolution delay are runtime-local monotonic spans. Response wait still
+combines both transit directions and Worker or upstream work; join it with the
+Worker record by attempt. Later typing starts and mailbox fetches in a long warm
+invocation are not recorded. A failed or unobserved phase is null, and a claimed
+request that never settles leaves its fields absent. These fields are
+diagnostic only and add no ordering, retry or authority behavior.
+
+Each conversation-lane mailbox read also reports its own first attempt as
+`passMailboxFetch*` scalars on the existing `mailbox.imported` row of the import
+pass that consumed it. The pass is fed by either the wake prefetch or the pass's
+own read, including a refetch after a failed prefetch. The scalars use the same
+observer and fields, plus `passMailboxFetchAttemptCount` for that logical read.
+When a retry delivered the data, the timing still describes the first, failed
+attempt, and the count is greater than one. The invocation-first claim reuses the
+same observation, so no request is observed twice. System-only reads carry no pass
+timing.
+
 Successful warm ensure-processing requests omit the detached processing summary
 only when they complete within one second. Slower successes retain the existing
 native wake entry, dispatch, response, and handler timing fields, so platform
@@ -741,7 +864,8 @@ OpenAI Responses upgrades return the upstream `Response` and unaccepted
 `webSocket` unchanged. Cloudflare forwards the connection; native Codex owns
 continuation, idle reuse, and reconnect/fallback. The Worker owns handshake
 runtime authorization and API-key injection, with no frame relay or socket
-registry. HTTP response diagnostics and native Codex transport diagnostics remain.
+registry. HTTP response diagnostics remain as Worker structured logs, and native
+Codex transport diagnostics remain.
 
 An opaque socket is admitted only after the existing image-access callback
 allows the runtime member. Otherwise HTTP 426 activates native Codex HTTPS
@@ -823,45 +947,20 @@ the aggregate queries in
 to detect affected runtimes and their later mailbox outcomes without returning
 subject keys or raw JSON.
 
-The `HOSTED_RUNTIME_RETRY_ANALYTICS` Analytics Engine binding records one
-identifier-free data point only after the runtime owner has decided to return
-`retry_later`. `index1` is the sole index and `blob2` repeats the bounded retry
-reason, `blob1` is the schema `murph.hosted-runtime-retry.v1`, `double1` is the
-event count, and `double2` is the selected retry delay in milliseconds. For
-`container_busy` only, optional `blob3` records one of these closed control-path
-stages:
-
-- `active_runtime_contention`: an active runtime fence remains contended after
-  the liveness check.
-- `background_preemption_unavailable`: the active container exposes no
-  background-abort capability.
-- `background_preemption_not_accepted`: background abort returned a bounded
-  non-accepted, non-failure status.
-- `stopped_container_record_pending`: a destroyed pending stop target could not
-  yet be cleared from the runner record.
-
-Historical reports still recognize `non_runtime_write_fence` and
-`cooperative_handoff_pending`; current code no longer emits them. An exact
-system-mailbox child that accepts a foreground wake is acknowledged without
-requiring a new owner. The child retains its existing authority checks.
-
-The stage is a finite mechanism label, not a processing mode, scenario name,
-identifier, free-text value, or private-state projection. Other retry reasons
-must omit it. This is an optional-field evolution of the existing v1 point:
-historical points have no `blob3`, and the report groups them explicitly as
-`unattributed`. The write remains exactly one immediate, unawaited,
-best-effort point per existing retry and is absent from successful processing.
-Run
-[`scripts/runtime-retry-reasons.sql`](./scripts/runtime-retry-reasons.sql)
-through the private Cloudflare Analytics Engine SQL API or dashboard to get a
-sampling-corrected reason-plus-stage breakdown. It defaults to the trailing 24
-hours; for later two-hour comparisons, replace its first timestamp predicate
-with the commented half-open fixed UTC bounds and run once for each adjacent
-window. The corresponding Workers structured log includes the bounded retry
-reason, `runtimeProcessingRetryStage` for `container_busy`, and the existing
-`orchestrationAttemptId` for request-level joins. No identifier or user,
-workspace, message, command, provider, health, path, content, credential, or
-raw-error value is copied into Analytics Engine blobs, indexes, or doubles.
+The `HOSTED_STANDBY_ANALYTICS` Analytics Engine binding records one
+identifier-free data point per standby coordinator claim answer and per finished
+slot preparation in `murph_hosted_standby_inventory`. `index1` and `blob2` are
+the event (`claim` or `prepare`), `blob1` is the schema
+`murph.hosted-standby-inventory.v1`, `double1` is the event count, `double2` and
+`double3` are the ready and provisioning inventory, `double4` is the configured
+target, and `double5` is the duration in milliseconds. A claim's `blob3` is its
+outcome (`claimed`, `no_ready_slot`, `replayed`, `disabled`, `stale_release` or
+`deadline_expired`) and its inventory is read before selection, so a claimed
+point with target two and one ready slot shows overlapping demand, and
+`no_ready_slot` shows a foreground cold fallback. A preparation's `blob3` is
+`refill`, `resume` or `reproof`, `blob4` is `ready` or `failed`, and its
+inventory is read after the result. Query daily claims and preparation latency
+with [`scripts/standby-inventory.sql`](scripts/standby-inventory.sql).
 
 For the primary production control database, run the identifier-free cold-start
 report through the read-only helper:
@@ -1076,9 +1175,9 @@ Foreground progress recovery is write-fenced instead of container-destroy
 driven. A write fence is commit authority, not liveness proof; the exact wake,
 replacement, ambiguous-wake, and fresh-startup retry contract is documented in
 `agent-docs/references/hosted-runtime-protocol.md`. Live runner side effects validate the runtime-kind write fence by attempt,
-generation, and user identity. Hosted OpenAI and Venice provider egress paths
-validate the signed Murph provider credential's user and runner against
-the Postgres owner's current active runtime state.
+generation, and user identity. Hosted OpenAI provider egress resolves the
+platform's native container identity and validates its bound member, registered
+invocation, and usage-settlement state before sending the request upstream.
 Workspace version remains a checkpoint/restore freshness guard, not generic
 side-effect authority.
 Active, unsupported, error, and timeout liveness outcomes preserve the write
@@ -1133,6 +1232,15 @@ records the upstream revision and patch SHA-256 in `murph-source-revision`.
 Cargo concurrency is capped at two jobs so a high CPU count does not expand the
 native build's memory demand; the upstream release optimization profile is kept.
 
+For developer verification, the patch also exposes the opt-in App Server
+`--ignore-user-config` switch. It skips personal behavioral configuration and
+global user instructions while retaining the auth home, credential-store/keyring
+backend selection, login/workspace restrictions and ChatGPT auth endpoint at their
+normal layer precedence. It does not restore personal proxy preferences or other
+feature switches, or disable managed requirements, project instructions or exec rules. The default startup path is unchanged;
+canonical local journey launchers explicitly select this option. CLI overrides
+still supply the hosted behavior and local installation read roots.
+
 Public Live transcript fragments use Codex's native normalized event stream and
 bounded transcript collection. Handoffs without separate task text use upstream
 transcript fallback and delegation formatting, including escaped, bounded input
@@ -1170,17 +1278,16 @@ image recipe; no manual binary installation or separate release service is neede
 The native runner image has a default GPT-6.1 Sol, GPT-6 Sol/Luna, and GPT-5.6 Sol/Luna catalog and an expanded
 `.astra` catalog with `gpt-6-astra` and OpenAI Flex support. The runtime chooses
 the latter only from Web's explicit Max/OpenAI workspace authorization. Missing
-authority, Edge, group, and Venice runtimes retain the default catalog and its
+authority, Edge, and group runtimes retain the default catalog and its
 existing delegation choices. The
-pinned Codex 0.160.0 release supplies every entry natively; the image validates
+pinned Codex 0.163.0 release supplies every entry natively; the image validates
 its bundled catalog without a separate launch supplement. Murph supplies its own base
 instructions for each turn.
 The Astra context window remains at most 272,000 tokens, verified while building the
 image. This bound lets allowance accounting price cumulative Codex turn and
 subagent usage without mistaking multiple requests for one long-context request.
 Changing this bound requires request-level long-context metering first. Astra
-selection remains owned by the Web Max-plan eligibility check. Venice mappings
-remain limited to Luna, Terra, and Sol.
+selection remains owned by the Web Max-plan eligibility check.
 
 ## Workspace restore benchmark
 

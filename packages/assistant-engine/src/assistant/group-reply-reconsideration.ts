@@ -5,5 +5,6 @@ export const ASSISTANT_GROUP_REPLY_RECONSIDERATION_INSTRUCTION = [
   'Additional group messages joined this turn.',
   'Replace the draft with one final result under the group turn rules, judged across every accepted message in this turn rather than the latest one alone.',
   'The draft was never sent: any request it answered is still unanswered, and an earlier direct ask to Murph stays owed unless a later accepted message withdraws or replaces it.',
+  'Images, cards, and other reply staging from the draft were discarded with it; attach again whatever the final result needs.',
   'Do not repeat completed effects or mention the draft or this instruction.',
 ].join(' ')

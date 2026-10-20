@@ -53,24 +53,18 @@ function createSetupOptions(
   }
 }
 
-test('setup assistant option normalization infers Codex presets and rejects legacy provider inputs', () => {
+test('setup assistant option normalization infers Codex presets', () => {
   assert.equal(getDefaultSetupAssistantPreset(), 'codex')
   assert.equal(hasExplicitSetupAssistantOptions({}), false)
   assert.equal(
     hasExplicitSetupAssistantOptions({
-      assistantModel: 'gpt-5.6-terra',
-    }),
-    true,
-  )
-  assert.equal(
-    hasExplicitSetupAssistantOptions({
-      assistantModelProvider: 'vercel-ai-gateway',
+      assistantModel: 'gpt-6.1-sol',
     }),
     true,
   )
   assert.equal(
     inferSetupAssistantPresetFromOptions({
-      assistantModel: 'gpt-5.6-terra',
+      assistantModel: 'gpt-6.1-sol',
     }),
     'codex',
   )
@@ -79,12 +73,6 @@ test('setup assistant option normalization infers Codex presets and rejects lega
       assistantPreset: 'skip',
     }),
     'skip',
-  )
-  assert.equal(
-    inferSetupAssistantPresetFromOptions({
-      assistantModelProvider: 'venice',
-    }),
-    'codex',
   )
   assert.equal(inferSetupAssistantPresetFromOptions({}), null)
 })
@@ -96,9 +84,9 @@ test('setup assistant defaults round-trip Codex defaults', () => {
       approvalPolicy: 'never',
       codexCommand: 'codex',
       codexHome: '/tmp/codex-home',
-      model: 'gpt-5.6-terra',
-      modelProvider: 'vercel-ai-gateway',
-      oss: true,
+      model: 'gpt-6.1-sol',
+      modelProvider: null,
+      oss: false,
       profile: 'primary',
       reasoningEffort: 'medium',
       sandbox: 'danger-full-access',
@@ -115,17 +103,15 @@ test('setup assistant defaults round-trip Codex defaults', () => {
   }
   assert.deepEqual(buildSetupAssistantOptionsFromDefaults(codexDefaults), {
     assistantPreset: 'codex',
-    assistantModel: 'gpt-5.6-terra',
-    assistantModelProvider: 'vercel-ai-gateway',
+    assistantModel: 'gpt-6.1-sol',
     assistantCodexCommand: 'codex',
     assistantCodexHome: '/tmp/codex-home',
     assistantProfile: 'primary',
     assistantReasoningEffort: 'medium',
-    assistantOss: true,
   })
   assert.equal(
     formatSavedAssistantDefaultsSummary(codexDefaults),
-    'gpt-5.6-terra via Codex OSS app-server (Team account)',
+    'gpt-6.1-sol via Codex app-server (Team account)',
   )
   assert.equal(formatSavedAssistantDefaultsSummary(null), null)
   assert.deepEqual(buildSetupAssistantOptionsFromDefaults(null), {})
@@ -136,7 +122,7 @@ test('setup assistant summary helpers label Codex accounts consistently', () => 
     preset: 'codex',
     enabled: true,
     provider: 'codex-cli',
-    model: 'gpt-5.6-terra',
+    model: 'gpt-6.1-sol',
     modelProvider: null,
     codexCommand: null,
     codexHome: undefined,
@@ -157,7 +143,7 @@ test('setup assistant summary helpers label Codex accounts consistently', () => 
 
   assert.equal(
     formatAssistantDefaultsSummary(assistant),
-    'gpt-5.6-terra via Codex app-server (Plus account)',
+    'gpt-6.1-sol via Codex app-server (Plus account)',
   )
   assert.equal(
     formatSetupAssistantAccountLabel(assistant.account),
@@ -318,7 +304,7 @@ test('setup assistant account resolver merges Codex auth and RPC snapshots', asy
       preset: 'codex',
       enabled: true,
       provider: 'codex-cli',
-      model: 'gpt-5.6-terra',
+      model: 'gpt-6.1-sol',
       modelProvider: null,
       codexCommand: 'codex',
       codexHome: '/tmp/custom-codex',
@@ -351,8 +337,8 @@ test('setup assistant selection normalizes Codex values into operator defaults p
     preset: 'codex',
     enabled: true,
     provider: 'codex-cli',
-    model: 'gpt-5.6-terra',
-    modelProvider: 'vercel-ai-gateway',
+    model: 'gpt-6.1-sol',
+    modelProvider: null,
     codexCommand: 'codex',
     codexHome: '/tmp/codex-home',
     profile: 'team',
@@ -377,8 +363,8 @@ test('setup assistant selection normalizes Codex values into operator defaults p
       approvalPolicy: 'never',
       codexCommand: 'codex',
       codexHome: '/tmp/codex-home',
-      model: 'gpt-5.6-terra',
-      modelProvider: 'vercel-ai-gateway',
+      model: 'gpt-6.1-sol',
+      modelProvider: null,
       oss: false,
       profile: 'team',
       reasoningEffort: 'high',
@@ -430,7 +416,7 @@ test('setup assistant defaults helpers clear backend state and summarize empty s
         approvalPolicy: 'never',
         codexCommand: 'codex',
         codexHome: null,
-        model: 'gpt-5.6-terra',
+        model: 'gpt-6.1-sol',
         modelProvider: null,
         oss: false,
         profile: null,
@@ -451,7 +437,7 @@ test('setup assistant defaults helpers clear backend state and summarize empty s
   assert.equal(formatSavedAssistantDefaultsSummary(null), null)
 })
 
-test('setup assistant resolver handles skip, Codex cloud, and Codex OSS', async () => {
+test('setup assistant resolver handles skip and OpenAI Codex models', async () => {
   const capturedAssistants: SetupConfiguredAssistant[] = []
   const resolver = createSetupAssistantResolver({
     assistantAccount: {
@@ -504,8 +490,7 @@ test('setup assistant resolver handles skip, Codex cloud, and Codex OSS', async 
     allowPrompt: false,
     commandName: 'murph setup',
     options: createSetupOptions({
-      assistantModel: 'gpt-5.6-terra',
-      assistantModelProvider: 'vercel-ai-gateway',
+      assistantModel: 'gpt-6.1-sol',
       assistantCodexCommand: 'codex-beta',
       assistantProfile: 'team',
     }),
@@ -515,8 +500,8 @@ test('setup assistant resolver handles skip, Codex cloud, and Codex OSS', async 
     preset: 'codex',
     enabled: true,
     provider: 'codex-cli',
-    model: 'gpt-5.6-terra',
-    modelProvider: 'vercel-ai-gateway',
+    model: 'gpt-6.1-sol',
+    modelProvider: null,
     codexCommand: 'codex-beta',
     codexHome: '/tmp/codex-home',
     profile: 'team',
@@ -524,11 +509,11 @@ test('setup assistant resolver handles skip, Codex cloud, and Codex OSS', async 
     sandbox: 'danger-full-access',
     approvalPolicy: 'never',
     oss: false,
-    account: null,
+    account: { source: 'codex-auth-json', kind: 'account', planCode: 'team', planName: 'Team', quota: null },
     detail:
-      'Use Codex with gpt-5.6-terra. Use Codex model provider vercel-ai-gateway. An explicit Codex home is configured; path redacted in CLI output.',
+      'Use Codex with gpt-6.1-sol. An explicit Codex home is configured; path redacted in CLI output. Detected Team account from local Codex credentials.',
   })
-  assert.equal(capturedAssistants.length, 1)
+  assert.equal(capturedAssistants.length, 2)
 })
 
 test('setup assistant resolver rejects skip with Codex-specific options', async () => {
@@ -539,53 +524,12 @@ test('setup assistant resolver rejects skip with Codex-specific options', async 
       allowPrompt: false,
       commandName: 'murph setup',
       options: createSetupOptions({
-        assistantModelProvider: 'venice',
+        assistantModel: 'gpt-6-sol',
         assistantPreset: 'skip',
       }),
       preset: 'skip',
     }),
-    /--assistant-model-provider cannot be used with --assistant-preset skip/u,
-  )
-})
-
-test('setup assistant resolver fails closed for invalid provider combinations', async () => {
-  const resolver = createSetupAssistantResolver()
-
-  await assert.rejects(
-    resolver.resolve({
-      allowPrompt: false,
-      commandName: 'murph setup',
-      options: createSetupOptions({
-        assistantModelProvider: 'venice',
-        assistantOss: true,
-      }),
-      preset: 'codex',
-    }),
-    /--assistant-model-provider cannot be used with --assistant-oss/u,
-  )
-
-  await assert.rejects(
-    resolver.resolve({
-      allowPrompt: false,
-      commandName: 'murph setup',
-      options: createSetupOptions({
-        assistantModelProvider: 'unknown-provider',
-      }),
-      preset: 'codex',
-    }),
-    /Unknown Codex model provider: unknown-provider/u,
-  )
-
-  await assert.rejects(
-    resolver.resolve({
-      allowPrompt: false,
-      commandName: 'murph setup',
-      options: createSetupOptions({
-        assistantModelProvider: 'venice',
-      }),
-      preset: 'codex',
-    }),
-    /--assistant-model is required when --assistant-model-provider venice is selected/u,
+    /--assistant-model cannot be used with --assistant-preset skip/u,
   )
 })
 

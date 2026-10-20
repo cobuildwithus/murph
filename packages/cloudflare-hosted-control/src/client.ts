@@ -2,6 +2,7 @@ import { parseHostedRuntimeResourcePurge, parseHostedRuntimeResourcePurgeRespons
 import { parseHostedVoiceControlRequest, parseHostedVoiceControlResponse, type HostedVoiceControlRequest, type HostedVoiceControlResponse } from "@murphai/hosted-execution";
 import {
   parseHostedCipherEnvelope,
+  parseHostedSecureBoxEnvelope,
   parseHostedUserRecipientPublicKeyJwk,
   parseHostedBrowserSessionKeyEnvelope,
   type HostedBrowserSessionKeyEnvelope,
@@ -11,9 +12,6 @@ import {
 import {
   assertHostedRuntimeProcessingTimeoutMs,
   HOSTED_EXECUTION_MEAL_PHOTO_MAX_BYTES,
-  HOSTED_EXECUTION_ENVIRONMENT_VOICE_CONTENT_TYPES,
-  HOSTED_EXECUTION_ENVIRONMENT_VOICE_MAX_BYTES,
-  type HostedExecutionEnvironmentVoiceContentType,
   HOSTED_EXECUTION_USER_ID_HEADER,
   HOSTED_RUNTIME_ENSURE_PROCESSING_AUTH_DURATION_MS_HEADER,
   HOSTED_RUNTIME_ENSURE_PROCESSING_DIRECT_REQUEST_STARTED_AT_MS_HEADER,
@@ -49,25 +47,14 @@ import type {
 import { normalizeHostedExecutionBaseUrl } from "@murphai/hosted-execution/env";
 
 import {
-  parseCloudflareHostedInferenceVerificationRequest,
-  parseCloudflareHostedInferenceVerificationResult,
-  type CloudflareHostedInferenceVerificationRequest,
-  type CloudflareHostedInferenceVerificationResult,
-} from "./inference-verification.ts";
-import {
   CLOUDFLARE_HOSTED_CONTROL_BROWSER_VAULT_REPLICA_NOT_FOUND_CODE,
-  CLOUDFLARE_HOSTED_CONTROL_ENVIRONMENT_VOICE_CAPTURE_ID_HEADER,
-  CLOUDFLARE_HOSTED_CONTROL_ENVIRONMENT_VOICE_KEY_HEADER,
-  CLOUDFLARE_HOSTED_CONTROL_ENVIRONMENT_VOICE_SHA256_HEADER,
+  CLOUDFLARE_HOSTED_CONTROL_GAME_MEDIA_ID_HEADER,
   CLOUDFLARE_HOSTED_CONTROL_MEAL_PHOTO_CAPTURE_ID_HEADER,
   CLOUDFLARE_HOSTED_CONTROL_MEAL_PHOTO_KEY_HEADER,
   CLOUDFLARE_HOSTED_CONTROL_MEAL_PHOTO_SHA256_HEADER,
   buildCloudflareHostedControlBrowserVaultSessionPath,
   buildCloudflareHostedControlVoiceControlPath,
-  buildCloudflareHostedControlEnvironmentRealtimeCallPath,
-  buildCloudflareHostedControlEnvironmentVoiceDeletePath,
-  buildCloudflareHostedControlEnvironmentVoiceStagePath,
-  buildCloudflareHostedControlInferenceVerificationPath,
+  buildCloudflareHostedControlGameMediaPath,
   buildCloudflareHostedControlMealPhotoDeletePath,
   buildCloudflareHostedControlMealPhotoStagePath,
   buildCloudflareHostedControlRuntimeEnsureProcessingPath,
@@ -225,12 +212,6 @@ export interface CloudflareHostedControlMealPhotoStageResult {
   sha256: string;
 }
 
-export interface CloudflareHostedControlEnvironmentVoiceStageResult {
-  audioKey: string;
-  byteLength: number;
-  sha256: string;
-}
-
 export type CloudflareHostedControlTelegramUsageLimitNoticeResponse =
   | {
     status: "sent";
@@ -244,10 +225,6 @@ export type CloudflareHostedControlTelegramUsageLimitNoticeResponse =
 
 export interface CloudflareHostedControlClient {
   controlVoice(input: { userId: string; request: HostedVoiceControlRequest; signal?: AbortSignal }): Promise<HostedVoiceControlResponse>;
-  createEnvironmentRealtimeCall(input: {
-    sdp: string;
-    userId: string;
-  }): Promise<{ sdp: string }>;
   enqueueDeviceWebhook(
     envelope: DeviceWebhookQueueEnvelopeV1,
   ): Promise<{ accepted: true; transportId: string }>;
@@ -272,10 +249,12 @@ export interface CloudflareHostedControlClient {
     mealPhotoKey: string;
     userId: string;
   }): Promise<void>;
-  deleteEnvironmentVoice(input: {
-    audioKey: string;
-    userId: string;
-  }): Promise<void>;
+  /** Weekly game photos: Web seals them; the Worker stores the sealed envelope. */
+  deleteGameMedia(input: { mediaId: string; userId: string }): Promise<void>;
+  putGameMedia(input: { envelope: string; mediaId: string; userId: string }): Promise<void>;
+  /** The sealed envelope, or null when there's none under that name. */
+  readGameMedia(input: { mediaId: string; userId: string }): Promise<string | null>;
+  statGameMedia(input: { mediaId: string; userId: string }): Promise<{ byteLength: number } | null>;
   ensureRuntimeProcessing(input: {
     voiceCallId?: string;
     admission?: import("@murphai/hosted-execution/runtime-owner").HostedRuntimeOwnerResponse;
@@ -289,10 +268,6 @@ export interface CloudflareHostedControlClient {
     userId: string,
   ): Promise<CloudflareHostedControlRuntimeHealthDataConsentResult>;
   getRunnerStatus(userId: string): Promise<HostedRunnerStatusResponse>;
-  verifyInferenceConnection(input: {
-    request: CloudflareHostedInferenceVerificationRequest;
-    userId: string;
-  }): Promise<CloudflareHostedInferenceVerificationResult>;
   sendTelegramUsageLimitNotice(input: {
     onRequestAttempted?: () => Promise<void> | void;
     request: CloudflareHostedControlTelegramUsageLimitNoticeRequest;
@@ -304,13 +279,6 @@ export interface CloudflareHostedControlClient {
     sha256: string;
     userId: string;
   }): Promise<CloudflareHostedControlMealPhotoStageResult>;
-  stageEnvironmentVoice(input: {
-    bytes: Uint8Array;
-    captureId: string;
-    contentType: HostedExecutionEnvironmentVoiceContentType;
-    sha256: string;
-    userId: string;
-  }): Promise<CloudflareHostedControlEnvironmentVoiceStageResult>;
 }
 
 export interface CloudflareHostedControlRuntimeEnsureProcessingAcceptedAck {
@@ -360,7 +328,6 @@ export interface CloudflareHostedControlClientOptions {
 const BROWSER_VAULT_REPLICA_NOT_FOUND_ERROR_MESSAGE = "Hosted execution browser vault replica was not found.";
 const HOSTED_MEAL_PHOTO_CAPTURE_ID_PATTERN = /^[a-f0-9]{64}$/u;
 const HOSTED_MEAL_PHOTO_KEY_PATTERN = /^[a-f0-9]{40}$/u;
-const HOSTED_ENVIRONMENT_VOICE_KEY_PATTERN = /^[a-f0-9]{40}$/u;
 const HOSTED_SHA256_PATTERN = /^[a-f0-9]{64}$/u;
 
 export class CloudflareHostedControlBrowserVaultReplicaNotFoundError extends Error {
@@ -518,31 +485,6 @@ export function createCloudflareHostedControlClient(
         signal: input.signal, timeoutMs: 45_000,
       });
     },
-    createEnvironmentRealtimeCall(input) {
-      const userId = requireCloudflareHostedControlUserId(input.userId);
-      const sdp = requireString(
-        input.sdp,
-        "Cloudflare environment realtime SDP",
-      );
-      if (!sdp.startsWith("v=0") || sdp.length > 64 * 1_024) {
-        throw new TypeError("Cloudflare environment realtime SDP is invalid.");
-      }
-      return requestHostedExecutionAuthorizedJson({
-        baseUrl,
-        boundUserId: userId,
-        fetchImpl,
-        getAuthorizationHeader,
-        label: "environment realtime call",
-        parse: parseCloudflareHostedControlEnvironmentRealtimeCall,
-        path: buildCloudflareHostedControlEnvironmentRealtimeCallPath(userId),
-        request: {
-          body: sdp,
-          headers: { "content-type": "application/sdp" },
-          method: "POST",
-        },
-        timeoutMs: options.timeoutMs,
-      });
-    },
 
     enqueueDeviceWebhook(envelope) {
       const request = parseDeviceWebhookQueueEnvelope(envelope);
@@ -626,26 +568,56 @@ export function createCloudflareHostedControlClient(
         timeoutMs: options.timeoutMs,
       });
     },
-    async deleteEnvironmentVoice(input) {
+    async deleteGameMedia(input) {
       const userId = requireCloudflareHostedControlUserId(input.userId);
-      const audioKey = requireEnvironmentVoiceKey(input.audioKey);
-
       await requestHostedExecutionAuthorizedJson({
-        baseUrl,
-        boundUserId: userId,
-        fetchImpl,
-        getAuthorizationHeader,
-        label: "environment voice deletion",
-        parse: parseCloudflareHostedControlEnvironmentVoiceDeleteResult,
-        path: buildCloudflareHostedControlEnvironmentVoiceDeletePath(userId),
+        baseUrl, boundUserId: userId, fetchImpl, getAuthorizationHeader,
+        label: "game media deletion",
+        parse: (value) => requireDeleted(value, "Cloudflare game media delete result"),
+        path: buildCloudflareHostedControlGameMediaPath("gameMediaDelete", userId),
+        request: { headers: gameMediaHeaders(input.mediaId), method: "DELETE" },
+        timeoutMs: options.timeoutMs,
+      });
+    },
+    async putGameMedia(input) {
+      const userId = requireCloudflareHostedControlUserId(input.userId);
+      const envelope = JSON.stringify(parseHostedSecureBoxEnvelope(JSON.parse(input.envelope), "Cloudflare game media envelope"));
+      await requestHostedExecutionAuthorizedJson({
+        baseUrl, boundUserId: userId, fetchImpl, getAuthorizationHeader,
+        label: "game media staging",
+        parse: (value) => requireBoolean(requireRecord(value, "Cloudflare game media stage result").stored, "Cloudflare game media stage result stored"),
+        path: buildCloudflareHostedControlGameMediaPath("gameMediaStage", userId),
         request: {
-          headers: {
-            [CLOUDFLARE_HOSTED_CONTROL_ENVIRONMENT_VOICE_KEY_HEADER]: audioKey,
-          },
-          method: "DELETE",
+          body: envelope,
+          headers: { ...gameMediaHeaders(input.mediaId), "content-type": "application/json; charset=utf-8" },
+          method: "POST",
         },
         timeoutMs: options.timeoutMs,
       });
+    },
+    async readGameMedia(input) {
+      const userId = requireCloudflareHostedControlUserId(input.userId);
+      return await nullWhenNotFound(requestHostedExecutionAuthorizedJson({
+        baseUrl, boundUserId: userId, fetchImpl, getAuthorizationHeader,
+        label: "game media read",
+        parse: (value) => JSON.stringify(parseHostedSecureBoxEnvelope(value, "Cloudflare game media envelope")),
+        path: buildCloudflareHostedControlGameMediaPath("gameMediaRead", userId),
+        request: { headers: gameMediaHeaders(input.mediaId), method: "GET" },
+        timeoutMs: options.timeoutMs,
+      }));
+    },
+    async statGameMedia(input) {
+      const userId = requireCloudflareHostedControlUserId(input.userId);
+      return await nullWhenNotFound(requestHostedExecutionAuthorizedJson({
+        baseUrl, boundUserId: userId, fetchImpl, getAuthorizationHeader,
+        label: "game media stat",
+        parse: (value) => ({
+          byteLength: requireNumber(requireRecord(value, "Cloudflare game media stat").byteLength, "Cloudflare game media stat byteLength"),
+        }),
+        path: buildCloudflareHostedControlGameMediaPath("gameMediaStat", userId),
+        request: { headers: gameMediaHeaders(input.mediaId), method: "GET" },
+        timeoutMs: options.timeoutMs,
+      }));
     },
     ensureRuntimeProcessing(input) {
       const userId = requireCloudflareHostedControlUserId(input.userId);
@@ -730,30 +702,6 @@ export function createCloudflareHostedControlClient(
         timeoutMs: options.timeoutMs,
       });
     },
-    verifyInferenceConnection(input) {
-      const userId = requireCloudflareHostedControlUserId(input.userId);
-      const request = parseCloudflareHostedInferenceVerificationRequest(
-        input.request,
-      );
-
-      return requestHostedExecutionAuthorizedJson({
-        baseUrl,
-        boundUserId: userId,
-        fetchImpl,
-        getAuthorizationHeader,
-        label: "custom inference verification",
-        parse: parseCloudflareHostedInferenceVerificationResult,
-        path: buildCloudflareHostedControlInferenceVerificationPath(userId),
-        request: {
-          body: JSON.stringify(request),
-          headers: {
-            "content-type": "application/json; charset=utf-8",
-          },
-          method: "POST",
-        },
-        timeoutMs: options.timeoutMs,
-      });
-    },
     sendTelegramUsageLimitNotice(input) {
       const request = parseCloudflareHostedControlTelegramUsageLimitNoticeRequest(
         input.request,
@@ -820,82 +768,7 @@ export function createCloudflareHostedControlClient(
         timeoutMs: options.timeoutMs,
       });
     },
-    async stageEnvironmentVoice(input) {
-      const userId = requireCloudflareHostedControlUserId(input.userId);
-      const captureId = requireMealPhotoCaptureId(input.captureId);
-      const bytes = copyUint8Array(
-        input.bytes,
-        "Cloudflare environment voice bytes",
-      );
-      if (
-        bytes.byteLength === 0
-        || bytes.byteLength > HOSTED_EXECUTION_ENVIRONMENT_VOICE_MAX_BYTES
-      ) {
-        throw new RangeError(
-          `Cloudflare environment voice bytes must contain between 1 and ${HOSTED_EXECUTION_ENVIRONMENT_VOICE_MAX_BYTES} bytes.`,
-        );
-      }
-      const contentType = HOSTED_EXECUTION_ENVIRONMENT_VOICE_CONTENT_TYPES.find(
-        (candidate) => candidate === input.contentType,
-      );
-      if (!contentType) {
-        throw new TypeError("Cloudflare environment voice content type is invalid.");
-      }
-      const sha256 = requireSha256(
-        input.sha256,
-        "Cloudflare environment voice sha256",
-      );
-      if (await sha256Hex(bytes) !== sha256) {
-        throw new TypeError(
-          "Cloudflare environment voice sha256 must match bytes.",
-        );
-      }
-
-      return await requestHostedExecutionAuthorizedJson({
-        baseUrl,
-        boundUserId: userId,
-        fetchImpl,
-        getAuthorizationHeader,
-        label: "environment voice staging",
-        parse: (value) =>
-          parseCloudflareHostedControlEnvironmentVoiceStageResult(value, {
-            byteLength: bytes.byteLength,
-            sha256,
-          }),
-        path: buildCloudflareHostedControlEnvironmentVoiceStagePath(userId),
-        request: {
-          body: copyBytesToArrayBuffer(bytes),
-          headers: {
-            [CLOUDFLARE_HOSTED_CONTROL_ENVIRONMENT_VOICE_CAPTURE_ID_HEADER]:
-              captureId,
-            [CLOUDFLARE_HOSTED_CONTROL_ENVIRONMENT_VOICE_SHA256_HEADER]: sha256,
-            "content-type": contentType,
-          },
-          method: "POST",
-        },
-        timeoutMs: options.timeoutMs,
-      });
-    },
   };
-}
-
-function parseCloudflareHostedControlEnvironmentRealtimeCall(
-  value: unknown,
-): { sdp: string } {
-  const record = requireRecord(
-    value,
-    "Cloudflare environment realtime call",
-  );
-  const sdp = requireString(
-    record.sdp,
-    "Cloudflare environment realtime call SDP",
-  );
-  if (!sdp.startsWith("v=0") || sdp.length > 64 * 1_024) {
-    throw new TypeError(
-      "Cloudflare environment realtime call SDP is invalid.",
-    );
-  }
-  return { sdp };
 }
 
 function parseDeviceWebhookEnqueueResponse(
@@ -910,54 +783,6 @@ function parseDeviceWebhookEnqueueResponse(
     "Device webhook enqueue response transportId",
   );
   return { accepted: true, transportId };
-}
-
-function parseCloudflareHostedControlEnvironmentVoiceStageResult(
-  value: unknown,
-  expected: { byteLength: number; sha256: string },
-): CloudflareHostedControlEnvironmentVoiceStageResult {
-  const record = requireRecord(value, "Cloudflare environment voice stage result");
-  const audioKey = requireString(
-    record.audioKey,
-    "Cloudflare environment voice stage result audioKey",
-  );
-  const byteLength = requireNonNegativeInteger(
-    record.byteLength,
-    "Cloudflare environment voice stage result byteLength",
-  );
-  const sha256 = requireSha256(
-    record.sha256,
-    "Cloudflare environment voice stage result sha256",
-  );
-  if (!HOSTED_ENVIRONMENT_VOICE_KEY_PATTERN.test(audioKey)) {
-    throw new TypeError(
-      "Cloudflare environment voice stage result audioKey is invalid.",
-    );
-  }
-  assertMatchingNumber(
-    byteLength,
-    expected.byteLength,
-    "Cloudflare environment voice stage result byteLength",
-    "the uploaded byte length",
-  );
-  assertMatchingString(
-    sha256,
-    expected.sha256,
-    "Cloudflare environment voice stage result sha256",
-    "the uploaded sha256",
-  );
-  return { audioKey, byteLength, sha256 };
-}
-
-function parseCloudflareHostedControlEnvironmentVoiceDeleteResult(
-  value: unknown,
-): void {
-  const record = requireRecord(value, "Cloudflare environment voice delete result");
-  if (record.deleted !== true) {
-    throw new TypeError(
-      "Cloudflare environment voice delete result deleted must be true.",
-    );
-  }
 }
 
 function parseCloudflareHostedControlMealPhotoStageResult(
@@ -1003,6 +828,30 @@ function parseCloudflareHostedControlMealPhotoDeleteResult(value: unknown): void
   const record = requireRecord(value, "Cloudflare meal-photo delete result");
   if (record.deleted !== true) {
     throw new TypeError("Cloudflare meal-photo delete result deleted must be true.");
+  }
+}
+
+const GAME_MEDIA_ID_PATTERN = /^[a-f0-9]{64}\.(?:heic|jpg)$/u;
+
+function gameMediaHeaders(mediaId: string): Record<string, string> {
+  if (typeof mediaId !== "string" || !GAME_MEDIA_ID_PATTERN.test(mediaId)) {
+    throw new TypeError("Cloudflare game media id must be <sha256>.<jpg|heic>.");
+  }
+  return { [CLOUDFLARE_HOSTED_CONTROL_GAME_MEDIA_ID_HEADER]: mediaId };
+}
+
+function requireDeleted(value: unknown, label: string): void {
+  if (requireRecord(value, label).deleted !== true) {
+    throw new TypeError(`${label} deleted must be true.`);
+  }
+}
+
+async function nullWhenNotFound<T>(request: Promise<T>): Promise<T | null> {
+  try {
+    return await request;
+  } catch (error) {
+    if (error instanceof HostedExecutionHttpResponseError && error.status === 404) return null;
+    throw error;
   }
 }
 
@@ -2553,16 +2402,6 @@ function requireMealPhotoKey(value: unknown): string {
     );
   }
   return mealPhotoKey;
-}
-
-function requireEnvironmentVoiceKey(value: unknown): string {
-  const audioKey = requireString(value, "Cloudflare environment voice key");
-  if (!HOSTED_ENVIRONMENT_VOICE_KEY_PATTERN.test(audioKey)) {
-    throw new TypeError(
-      "Cloudflare environment voice key must be a 40-character lowercase hexadecimal string.",
-    );
-  }
-  return audioKey;
 }
 
 function requireSha256(value: unknown, label: string): string {

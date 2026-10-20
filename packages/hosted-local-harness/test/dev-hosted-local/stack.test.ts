@@ -182,46 +182,6 @@ const cleanupHostedRunnerContainerLocalState = vi.fn<
   }) => Promise<void>
 >(async () => {});
 const collectDockerDevDiagnostics = vi.fn(async () => "Docker diagnostics:\n- docker version: ok");
-const DEFAULT_CODEX_MODEL_CATALOG_TEXT = JSON.stringify({
-  models: [
-    { slug: "gpt-6.1-sol" },
-    { slug: "gpt-6-sol" },
-    { slug: "gpt-6-luna" },
-    {
-      name: "GPT-5.6-Sol",
-      service_tiers: [
-        {
-          id: "priority",
-          name: "Priority",
-        },
-      ],
-      slug: "gpt-5.6-sol",
-      tool_mode: "code_mode_only",
-    },
-    {
-      name: "GPT-5.6-Terra",
-      service_tiers: [
-        {
-          id: "priority",
-          name: "Priority",
-        },
-      ],
-      slug: "gpt-5.6-terra",
-      tool_mode: "code_mode_only",
-    },
-    {
-      name: "GPT-5.6-Luna",
-      service_tiers: [
-        {
-          id: "priority",
-          name: "Priority",
-        },
-      ],
-      slug: "gpt-5.6-luna",
-      tool_mode: "code_mode_only",
-    },
-  ],
-});
 const defaultSpawnSyncImplementation = (
   command: string,
   args: readonly string[],
@@ -230,19 +190,6 @@ const defaultSpawnSyncImplementation = (
   status: number;
   stdout: string;
 } => {
-  if (
-    command === "codex" &&
-    args[0] === "debug" &&
-    args[1] === "models" &&
-    args[2] === "--bundled"
-  ) {
-    return {
-      error: undefined,
-      status: 0,
-      stdout: DEFAULT_CODEX_MODEL_CATALOG_TEXT,
-    };
-  }
-
   return {
     error: undefined,
     status: 0,
@@ -449,7 +396,7 @@ vi.mock("../../src/dev-hosted-local/environment.ts", () => ({
         /^(?:HOSTED_)?TEMPORAL_/u.test(name)
       ),
     ),
-    HOSTED_ASSISTANT_MODEL: input.overrides?.HOSTED_ASSISTANT_MODEL ?? "gpt-5.6-terra",
+    HOSTED_ASSISTANT_MODEL: input.overrides?.HOSTED_ASSISTANT_MODEL ?? "gpt-6.1-sol",
     HOSTED_ASSISTANT_PROVIDER:
       input.overrides?.HOSTED_ASSISTANT_PROVIDER ?? "openai",
     OPENAI_API_KEY: input.overrides?.OPENAI_API_KEY,
@@ -827,7 +774,7 @@ describe("hosted local dev stack", () => {
         HOSTED_EXECUTION_RUNNER_HOST_ALIAS: "host.docker.internal",
         HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK:
           expect.stringContaining("automation-d"),
-        HOSTED_ASSISTANT_MODEL: "gpt-5.6-terra",
+        HOSTED_ASSISTANT_MODEL: "gpt-6.1-sol",
         HOSTED_ASSISTANT_PROVIDER: "openai",
         MURPH_DEV_SKIP_RUNNER_BUNDLE: "1",
         NODE_ENV: "development",
@@ -980,7 +927,7 @@ describe("hosted local dev stack", () => {
     );
     expect(vi.mocked(environmentModule.buildWranglerLocalDevConfig)).toHaveBeenCalledWith(
       expect.objectContaining({
-        HOSTED_ASSISTANT_MODEL: "gpt-5.6-terra",
+        HOSTED_ASSISTANT_MODEL: "gpt-6.1-sol",
         MURPH_HOSTED_LOCAL_DEPLOY_SMOKE_USE_BUILD_ID: "1",
       }),
       {
@@ -3145,7 +3092,6 @@ describe("hosted local dev stack", () => {
         HOSTED_ASSISTANT_PROVIDER: "openai",
         MURPH_HOSTED_CODEX_MODEL_CATALOG_JSON: "/tmp/spoofed-catalog.json",
         OPENAI_API_KEY: "local-openai-key",
-        VENICE_API_KEY: "local-venice-key",
       },
     });
     await stack.ready;
@@ -3156,11 +3102,9 @@ describe("hosted local dev stack", () => {
     const cloudflareEnv = cloudflareCall?.[3] as NodeJS.ProcessEnv;
     expect(cloudflareEnv.CODEX_HOME).toBeUndefined();
     expect(cloudflareEnv.OPENAI_API_KEY).toBe("local-openai-key");
-    expect(cloudflareEnv.VENICE_API_KEY).toBe("local-venice-key");
     expect(cloudflareEnv.HOSTED_ASSISTANT_PROVIDER).toBe("openai");
-    expect(cloudflareEnv.MURPH_HOSTED_CODEX_MODEL_CATALOG_JSON).toBe(
-      "/tmp/murph-dev-env-test/codex-model-catalog.openai-flex.json",
-    );
+    // The image owns the Codex model catalog; inherited values are stripped.
+    expect(cloudflareEnv.MURPH_HOSTED_CODEX_MODEL_CATALOG_JSON).toBeUndefined();
     expect(cloudflareEnv.MURPH_DEV_CODEX_APP_SERVER_PROXY_TOKEN).toBeUndefined();
     expect(cloudflareEnv.MURPH_DEV_CODEX_APP_SERVER_PROXY_URL).toBeUndefined();
     for (const [, , options] of runCommand.mock.calls) {
@@ -3180,93 +3124,9 @@ describe("hosted local dev stack", () => {
       .mock.calls.at(-1)?.[0] as NodeJS.ProcessEnv;
     expect(envFileSource.CODEX_HOME).toBeUndefined();
     expect(envFileSource.OPENAI_API_KEY).toBe("local-openai-key");
-    expect(envFileSource.VENICE_API_KEY).toBe("local-venice-key");
     expect(envFileSource.HOSTED_ASSISTANT_PROVIDER).toBe("openai");
-    expect(envFileSource.MURPH_HOSTED_CODEX_MODEL_CATALOG_JSON).toBe(
-      "/tmp/murph-dev-env-test/codex-model-catalog.openai-flex.json",
-    );
-    const catalogWrite = vi.mocked(writeFile).mock.calls.find(([filePath]) =>
-      filePath === "/tmp/murph-dev-env-test/codex-model-catalog.openai-flex.json"
-    );
-    expect(catalogWrite).toBeDefined();
-    expect(JSON.parse(String(catalogWrite?.[1]))).toMatchObject({
-      models: [
-        { slug: "gpt-6.1-sol", tool_mode: "code_mode" },
-        { slug: "gpt-6-sol", tool_mode: "code_mode" },
-        { slug: "gpt-6-luna", tool_mode: "code_mode" },
-        {
-          service_tiers: expect.arrayContaining([
-            expect.objectContaining({ id: "flex" }),
-          ]),
-          slug: "gpt-5.6-sol",
-          tool_mode: "code_mode",
-        },
-        {
-          service_tiers: expect.arrayContaining([
-            expect.objectContaining({ id: "flex" }),
-          ]),
-          slug: "gpt-5.6-luna",
-          tool_mode: "code_mode",
-        },
-      ],
-    });
-    expect(spawnSync).toHaveBeenCalledWith(
-      "codex",
-      ["debug", "models", "--bundled"],
-      expect.objectContaining({
-        encoding: "utf8",
-        stdio: ["ignore", "pipe", "pipe"],
-      }),
-    );
+    expect(envFileSource.MURPH_HOSTED_CODEX_MODEL_CATALOG_JSON).toBeUndefined();
   });
-
-  it.each([
-    {
-      expectedMessage: "Hosted local dev received an invalid Codex model catalog.",
-      stdout: "{not-json",
-    },
-    {
-      expectedMessage: "Hosted local dev Codex model catalog is missing gpt-6.1-sol.",
-      stdout: JSON.stringify({ models: [] }),
-    },
-  ])(
-    "fails closed when Codex bundled model catalog prep fails: $expectedMessage",
-    async ({ expectedMessage, stdout }) => {
-      spawnSync.mockImplementation((command, args) => {
-        if (
-          command === "codex" &&
-          args[0] === "debug" &&
-          args[1] === "models" &&
-          args[2] === "--bundled"
-        ) {
-          return {
-            error: undefined,
-            status: 0,
-            stdout,
-          };
-        }
-
-        return defaultSpawnSyncImplementation(command, args);
-      });
-
-      const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
-
-      await expect(startHostedLocalDevStack({
-        env: {
-          ...process.env,
-          HOSTED_ASSISTANT_PROVIDER: "openai",
-          OPENAI_API_KEY: "local-openai-key",
-        },
-      })).rejects.toThrow(expectedMessage);
-      expect(spawnChildProcess).not.toHaveBeenCalledWith(
-        "cloudflare",
-        expect.any(String),
-        expect.any(Array),
-        expect.any(Object),
-        expect.any(Object),
-      );
-    },
-  );
 
   it("defaults the hosted assistant provider to OpenAI when only the key is configured", async () => {
     spawnChildProcess
@@ -3546,13 +3406,6 @@ describe("hosted local dev stack", () => {
           error: undefined,
           status: 0,
           stdout: "cloudflare-dev/deploysmokerunnercontainer:4e19cead e144c487891e\n",
-        };
-      }
-      if (command === "codex" && args[0] === "debug") {
-        return {
-          error: undefined,
-          status: 0,
-          stdout: DEFAULT_CODEX_MODEL_CATALOG_TEXT,
         };
       }
       return {
@@ -3910,13 +3763,13 @@ describe("hosted local dev stack", () => {
       .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "web", pid: 302 }));
 
     vi.stubEnv("HOSTED_ASSISTANT_PROVIDER", "openai");
-    vi.stubEnv("HOSTED_ASSISTANT_MODEL", "gpt-5.6-terra");
+    vi.stubEnv("HOSTED_ASSISTANT_MODEL", "gpt-6.1-sol");
 
     const environmentModule = await import("../../src/dev-hosted-local/environment.ts");
 
     vi.mocked(environmentModule.readSimpleEnvFile).mockResolvedValueOnce({
       HOSTED_ASSISTANT_MODEL: "stale-pulled-model",
-      HOSTED_ASSISTANT_PROVIDER: "venice",
+      HOSTED_ASSISTANT_PROVIDER: "openai",
     });
 
     const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
@@ -3932,7 +3785,7 @@ describe("hosted local dev stack", () => {
       "pnpm",
       expect.any(Array),
       expect.objectContaining({
-        HOSTED_ASSISTANT_MODEL: "gpt-5.6-terra",
+        HOSTED_ASSISTANT_MODEL: "gpt-6.1-sol",
         HOSTED_ASSISTANT_PROVIDER: "openai",
       }),
       expect.any(Object),

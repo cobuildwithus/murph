@@ -10,11 +10,7 @@ import {
 } from '@murphai/hosted-execution/assistant-capabilities'
 import {
   HOSTED_ASSISTANT_ALLOWED_API_KEY_ENV_NAMES,
-  HOSTED_ASSISTANT_PROVIDER_ENV,
 } from '@murphai/operator-config/hosted-assistant-config-constants'
-import {
-  resolveAssistantCodexModelProviderConfig,
-} from '@murphai/operator-config/assistant/target-runtime'
 import { resolveOperatorHomeDirectory } from '@murphai/operator-config/operator-config'
 import {
   MURPH_ASSISTANT_SKILLS_ROOT_ENV,
@@ -26,7 +22,6 @@ export const HOSTED_RUNTIME_PROCESS_ENV_MARKER =
   HOSTED_RUNTIME_PROCESS_ENV
 const HOSTED_CODEX_DIRECT_CLI_ENV_NAMES = [
   HOSTED_RUNTIME_PROCESS_ENV_MARKER,
-  HOSTED_ASSISTANT_PROVIDER_ENV,
   'CODEX_HOME',
   'CODEX_CA_CERTIFICATE',
   'CURL_CA_BUNDLE',
@@ -61,9 +56,6 @@ const HOSTED_CODEX_DIRECT_CLI_ENV_NAMES = [
   ...HOSTED_ASSISTANT_CODEX_SHELL_ENV_NAMES,
   'VERCEL_ENV',
 ] as const
-const HOSTED_ASSISTANT_ALLOWED_API_KEY_ENV_NAME_SET = new Set<string>(
-  HOSTED_ASSISTANT_ALLOWED_API_KEY_ENV_NAMES,
-)
 
 export interface AssistantCliAccessContext {
   env: NodeJS.ProcessEnv
@@ -127,16 +119,10 @@ function projectHostedCodexDirectCliEnv(
       projected[key] = value
     }
   }
-  const providerConfig = resolveAssistantCodexModelProviderConfig(
-    env[HOSTED_ASSISTANT_PROVIDER_ENV],
-  )
-  if (
-    providerConfig
-    && HOSTED_ASSISTANT_ALLOWED_API_KEY_ENV_NAME_SET.has(providerConfig.envKey)
-  ) {
-    const apiKey = env[providerConfig.envKey]
+  for (const key of HOSTED_ASSISTANT_ALLOWED_API_KEY_ENV_NAMES) {
+    const apiKey = env[key]
     if (typeof apiKey === 'string') {
-      projected[providerConfig.envKey] = apiKey
+      projected[key] = apiKey
     }
   }
 

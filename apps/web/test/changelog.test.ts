@@ -310,11 +310,8 @@ describe("changelog registry", () => {
     expect(items.get("private-environment-report")).toMatchObject({
       sourcePullRequests: [573],
       details: expect.stringContaining("optional equipment never counts against it"),
-      tryIt: {
-        href: "/environment",
-        label: "Open Environment",
-      },
     });
+    expect(items.get("private-environment-report")?.tryIt).toBeUndefined();
     expect(items.get("environment-voice-walkthrough")).toMatchObject({
       sourcePullRequests: [573],
       details: expect.stringContaining("Precise addresses are rejected"),
@@ -512,11 +509,8 @@ describe("changelog registry", () => {
     expect(items.get("environment-report-loading-preview")).toMatchObject({
       sourcePullRequests: [1617],
       summary: expect.stringContaining("report-shaped preview"),
-      tryIt: {
-        href: "/environment/print",
-        label: "Open your Environment report",
-      },
     });
+    expect(items.get("environment-report-loading-preview")?.tryIt).toBeUndefined();
     expect(items.get("public-referral-home")).toMatchObject({
       sourcePullRequests: [
         1450, 1459, 1483, 1485, 1487, 1492, 1497, 1498, 1499, 1515,
@@ -1085,11 +1079,8 @@ describe("changelog registry", () => {
 
     expect(item).toMatchObject({
       sourcePullRequests: [1563],
-      tryIt: {
-        href: "/patterns",
-        label: "View your patterns",
-      },
     });
+    expect(item?.tryIt).toBeUndefined();
     expect(item?.details).toContain("existing history");
     expect(item?.details).toContain("association rather than cause");
   });

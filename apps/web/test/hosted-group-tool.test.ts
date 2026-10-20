@@ -329,10 +329,12 @@ import {
   buildHostedGroupJoinOfferMessage,
   buildHostedGroupJoinOfferProviderIdempotencyKey,
   HOSTED_RUNTIME_GROUP_TOOL_ACCESS_CLASSIFICATION,
-  HOSTED_THREAD_CONTAINER_PARTICIPANT_RECONCILE_MAX,
   handleHostedRuntimeGroupTool,
-  reconcileHostedThreadContainerParticipants,
 } from "@/src/lib/hosted-groups/group-tool";
+import {
+  HOSTED_THREAD_CONTAINER_PARTICIPANT_RECONCILE_MAX,
+  reconcileHostedThreadContainerParticipants,
+} from "@/src/lib/hosted-groups/thread-container-participants";
 import {
   HOSTED_ADDRESS_BOOK_LOOKUP_MAX_HANDLES,
   HOSTED_ADDRESS_BOOK_LOOKUP_TIMEOUT_MS,

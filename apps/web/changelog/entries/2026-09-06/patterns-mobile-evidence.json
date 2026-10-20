@@ -9,7 +9,6 @@
     "summary": "On phones, pattern cards focus on changed results, with compact cards for activities showing no clear changes.",
     "details": "Tap the green coverage bars to see how many days an activity was recorded. Result drawers now show how many days support each average, including separate samples for sleep score and sleep efficiency.",
     "relevanceTags": ["patterns", "mobile"],
-    "sourcePullRequests": [],
-    "tryIt": { "href": "/patterns", "label": "View your patterns" }
+    "sourcePullRequests": []
   }
 }

@@ -28,7 +28,7 @@ import {
 
 const HOSTED_ASSISTANT_ENV = {
   HOSTED_ASSISTANT_APPROVAL_POLICY: "never",
-  HOSTED_ASSISTANT_MODEL: "gpt-5.6-terra",
+  HOSTED_ASSISTANT_MODEL: "gpt-6.1-sol",
   HOSTED_ASSISTANT_PROVIDER: "openai",
   HOSTED_ASSISTANT_REASONING_EFFORT: "medium",
   HOSTED_ASSISTANT_SANDBOX: "danger-full-access",
@@ -69,44 +69,23 @@ test("hosted assistant injected env overrides a stale saved platform profile", a
       allowMissing: false,
       env: {
         ...HOSTED_ASSISTANT_ENV,
-        HOSTED_ASSISTANT_MODEL: "openai/gpt-5.6-terra",
+        HOSTED_ASSISTANT_MODEL: "openai/gpt-6.1-sol",
       },
     });
 
     const staleSavedTarget = await readHostedAssistantExecutionDefaultTarget();
-    assert.equal(staleSavedTarget?.model, "openai/gpt-5.6-terra");
+    assert.equal(staleSavedTarget?.model, "openai/gpt-6.1-sol");
 
     const envTarget = await readHostedAssistantExecutionDefaultTarget({
       runtimeEnv: HOSTED_ASSISTANT_RUNTIME_ENV,
     });
 
-    assert.equal(envTarget?.model, "gpt-5.6-terra");
+    assert.equal(envTarget?.model, "gpt-6.1-sol");
     assert.equal(envTarget?.modelProvider, "hosted-openai");
 
     const restoredTarget = await readHostedAssistantExecutionDefaultTarget();
-    assert.equal(restoredTarget?.model, "gpt-5.6-terra");
+    assert.equal(restoredTarget?.model, "gpt-6.1-sol");
     assert.equal(restoredTarget?.modelProvider, "openai");
-  });
-});
-
-test("hosted assistant target follows a provider switch in the same operator home", async () => {
-  await withTemporaryHostedAssistantEnv(async () => {
-    const openAiTarget = await readHostedAssistantExecutionDefaultTarget({
-      runtimeEnv: {
-        ...HOSTED_ASSISTANT_RUNTIME_ENV,
-        [HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV]: "hosted-openai",
-      },
-    });
-    assert.equal(openAiTarget?.modelProvider, "hosted-openai");
-
-    const veniceTarget = await readHostedAssistantExecutionDefaultTarget({
-      runtimeEnv: {
-        ...HOSTED_ASSISTANT_RUNTIME_ENV,
-        HOSTED_ASSISTANT_PROVIDER: "venice",
-        [HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV]: "venice-local-test",
-      },
-    });
-    assert.equal(veniceTarget?.modelProvider, "venice-local-test");
   });
 });
 
@@ -131,7 +110,7 @@ test("hosted assistant hydration applies runtime env over stale saved platform p
       allowMissing: false,
       env: {
         ...HOSTED_ASSISTANT_ENV,
-        HOSTED_ASSISTANT_MODEL: "openai/gpt-5.6-terra",
+        HOSTED_ASSISTANT_MODEL: "openai/gpt-6.1-sol",
       },
     });
 
@@ -147,7 +126,7 @@ test("hosted assistant hydration applies runtime env over stale saved platform p
       },
     );
 
-    assert.equal(hydrated.hosted?.defaultTarget?.model, "gpt-5.6-terra");
+    assert.equal(hydrated.hosted?.defaultTarget?.model, "gpt-6.1-sol");
     assert.equal(hydrated.hosted?.defaultTarget?.modelProvider, "hosted-openai");
   });
 });

@@ -659,10 +659,6 @@ vi.mock("@/src/lib/hosted-crypto/domain-root-store", async (importOriginal) => {
   };
 });
 
-vi.mock("@/src/lib/hosted-onboarding/webhook-service-stripe", () => ({
-  handleHostedStripeWebhook: vi.fn(),
-}));
-
 vi.mock("@/src/lib/prisma", () => ({
   getPrisma: mocks.getPrisma,
 }));
@@ -4647,7 +4643,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       ...values: unknown[]
     ) => {
       const sql = query.join(" ").toLowerCase();
-      if (sql.includes("for no key update skip locked")) {
+      if (/select "id"\s+from "hosted_member"[\s\S]*for no key update/.test(sql)) {
         lockOrder.push("member-row");
       } else if (sql.includes("for no key update")) {
         lockOrder.push("home-route");
@@ -4895,12 +4891,12 @@ describe("handleHostedOnboardingLinqWebhook", () => {
 
   it.each([
     {
-      label: "retries direct member contention once and appends after release",
+      label: "retries a missing direct member row once and appends after it appears",
       lockedRows: [[], [{ id: "member_123" }]],
       succeeds: true,
     },
     {
-      label: "fails closed after repeated direct member contention",
+      label: "fails closed when the direct member row stays missing",
       lockedRows: [[], []],
       succeeds: false,
     },
@@ -4957,7 +4953,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       ...values: unknown[]
     ) => {
       const sql = query.join(" ").toLowerCase();
-      if (sql.includes("for no key update skip locked")) {
+      if (/select "id"\s+from "hosted_member"[\s\S]*for no key update/.test(sql)) {
         const rows = lockedRows[memberLockAttempt];
         memberLockAttempt += 1;
         return rows ?? [];
@@ -6029,6 +6025,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
               eventId: "evt_null_preflight_duplicate",
               linqChatId: "chat_123",
               mailboxItemId: acceptedMailboxItem.id,
+              originalInboundMailboxItemId: "mailbox_existing_null_preflight",
               source: "linq",
               userId: "member_123",
               wakeMailboxCheckpoint: { lane: "conversation", laneSeq: "7" },
@@ -14491,7 +14488,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       ...values: unknown[]
     ) => {
       const sql = query.join(" ").toLowerCase();
-      if (sql.includes("for no key update skip locked")) {
+      if (/select "id"\s+from "hosted_member"[\s\S]*for no key update/.test(sql)) {
         lockOrder.push("member-row");
       } else if (sql.includes("for no key update")) {
         lockOrder.push("home-route");
@@ -15801,7 +15798,7 @@ function asPrismaTransactionClient<T extends PrismaFixtureBase>(
       : (query as { values?: readonly unknown[] }).values ?? [];
     const sql = strings.join(" ").toLowerCase();
     if (sql.includes("hosted_runtime_cutover")) return [{ phase: "legacy" }];
-    return sql.includes("for no key update skip locked")
+    return /select "id"\s+from "hosted_member"[\s\S]*for no key update/.test(sql)
       ? [{ id: values[0] }]
       : [];
   });

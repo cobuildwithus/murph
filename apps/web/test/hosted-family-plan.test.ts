@@ -1715,6 +1715,10 @@ describe("hosted Family plan", () => {
       .filter(({ args }) => Array.isArray(args[0]) && args[0].join("").includes('from "hosted_member"'));
     const acceptedMemberId = memberLocks[1]?.args[1];
     expect(memberLocks.map(({ args }) => args[1])).toEqual(["member_owner", acceptedMemberId, acceptedMemberId]);
+    // Member before root, like activation.
+    expect(memberLocks[1]?.order).toBeLessThan(
+      cryptoRootMocks.provisionActiveHostedDomainRootEnvelopeForUserOnly.mock.invocationCallOrder[0] ?? 0,
+    );
     expect(memberLocks[2]?.order).toBeLessThan(
       tx.hostedMemberRouting.upsert.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
     );
@@ -6482,6 +6486,7 @@ describe("hosted Family plan", () => {
         tx,
       })).resolves.toEqual({
         activations: [],
+        terminalOwnerMemberId: "member_owner",
         billingModeChangedMemberIds: [],
         groupId: "hbag_family",
         runtimeRecheckMemberIds: [],
@@ -6524,6 +6529,23 @@ describe("hosted Family plan", () => {
       });
     },
   );
+
+  it("returns the billing owner again after cancellation cleared the Family subscription binding", async () => {
+    const tx = createTxMock();
+    const input = {
+      dispatchContext: { eventCreatedAt: new Date("2026-06-18T12:30:00.000Z") },
+      subscription: makeFamilyStripeSubscription({ status: "canceled" }),
+      tx,
+    };
+    await applyHostedFamilyStripeSubscriptionUpdatedTx(input);
+    expect(await tx.hostedAccountGroupBillingRef.findUnique({
+      where: { groupId: "hbag_family" },
+    })).toMatchObject({ stripeSubscriptionIdEncrypted: null });
+    await expect(applyHostedFamilyStripeSubscriptionUpdatedTx(input)).resolves.toMatchObject({
+      groupId: "hbag_family",
+      terminalOwnerMemberId: "member_owner",
+    });
+  });
 
   it("releases direct and Family retry when terminal state wins before active handoff", async () => {
     const terminalEventCreatedAt = new Date("2026-06-18T12:30:00.000Z");
@@ -6610,6 +6632,7 @@ describe("hosted Family plan", () => {
     })).resolves.toEqual({
       activations: [],
       billingModeChangedMemberIds: ["member_owner"],
+      terminalOwnerMemberId: "member_owner",
       groupId: "hbag_family",
       runtimeRecheckMemberIds: ["member_owner"],
     });
@@ -7005,7 +7028,7 @@ describe("hosted Family plan", () => {
     expect(activationMocks.activateHostedMemberForFamilySponsorshipTx).not.toHaveBeenCalled();
   });
 
-  it("does not activate family members from a stale active Stripe subscription event", async () => {
+  it.each(["active", "canceled"] as const)("does not activate or email family members from a stale %s Stripe subscription event", async (status) => {
     const tx = createTxMock();
     tx.hostedAccountGroupMembership.findMany
       .mockResolvedValueOnce([])
@@ -7033,7 +7056,7 @@ describe("hosted Family plan", () => {
       dispatchContext: {
         eventCreatedAt: new Date("2026-06-18T12:30:00.000Z"),
       },
-      subscription: makeFamilyStripeSubscription(),
+      subscription: makeFamilyStripeSubscription({ status }),
       tx,
     })).resolves.toEqual({
       activations: [],

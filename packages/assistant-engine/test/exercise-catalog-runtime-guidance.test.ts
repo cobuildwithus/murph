@@ -56,6 +56,9 @@ describe('exercise catalog runtime guidance', () => {
       'For Linq/iMessage, use the existing response-media path when images improve the instruction.',
     )
     expect(compact).toContain(
+      "When a walkthrough shows images for more than one movement, give each movement, or a closely related pair, its own `---` bubble, at most four, and set each image's `bubble` to the bubble that teaches it so every step arrives with its own pictures.",
+    )
+    expect(compact).toContain(
       "On Telegram, follow the routine-card tool's per-movement mapping and bounded validation-repair guidance.",
     )
     expect(compact).toContain(

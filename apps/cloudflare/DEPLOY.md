@@ -141,11 +141,7 @@ converged, nor prevent an independent Web rollback after the check. Keep the
 serving alias stable and preserve the required reader floor throughout activation
 and subsequent operation. Admission tests event-code parsing and the authority
 response encoding, not database route correctness, every log field, or all
-Web-to-runtime features. In particular, selected custom-inference revisions flow
-in the opposite direction: the **Custom Inference Activation** procedure below
-still owns flag enablement, selected-state migration and the runtime rollback
-floor. This GET neither reads member selection nor authorizes that feature's
-activation. New wire obligations need narrowly derived executable witnesses at
+Web-to-runtime features. New wire obligations need narrowly derived executable witnesses at
 their actual owners, not labels in a general capability registry.
 
 ### Retiring the selected-account size experiment
@@ -1515,12 +1511,12 @@ Before the first deploy:
 3. Decide the public Worker URL, either `*.workers.dev` or a custom domain.
 
 The rendered and checked-in Wrangler configs both declare the code-owned
-`HOSTED_RUNTIME_RETRY_ANALYTICS` Analytics Engine binding and
-`murph_hosted_runtime_retries` dataset. Analytics Engine creates the dataset on
-its first write, so this binding adds no GitHub environment variable, secret,
-or separate private-workflow mapping.
+`HOSTED_STANDBY_ANALYTICS` Analytics Engine binding with its
+`murph_hosted_standby_inventory` dataset. Analytics Engine creates the dataset
+on its first write, so the binding adds no GitHub environment variable,
+secret, or separate private-workflow mapping.
 
-The checked-in lifecycle file contains four narrow backstops. Raw hosted-email blobs and their encrypted recovery refs under `hosted-email/messages/` become deletion-eligible after 24 hours. Application-encrypted Linq avatar-ingress objects under `hosted-private-media/images/` also become deletion-eligible after 24 hours. Retries reuse the deterministic object and cap capability expiry at that object's original lifecycle boundary; at or after the boundary, the mutation-locked `UserRunner` replaces the same deterministic key before returning another bounded capability. Application-encrypted Environment voice recordings under `hosted-environment-voice/audio/` become deletion-eligible after 24 hours; successful processing deletes them immediately after the updated vault checkpoint. Account deletion synchronously deletes each member prefix. Encrypted automatic meal-photo staging under `hosted-meal-photos/images/` becomes deletion-eligible after 31 days, one day beyond canonical mailbox recovery retention; successful imports still delete those objects immediately after checkpoint. R2 deletes eligible objects asynchronously. The rest of the encrypted objects in `BUNDLES` remain owner-cleaned or durable by design.
+The checked-in lifecycle file contains four narrow backstops. Raw hosted-email blobs and their encrypted recovery refs under `hosted-email/messages/` become deletion-eligible after 24 hours. Application-encrypted Linq avatar-ingress objects under `hosted-private-media/images/` also become deletion-eligible after 24 hours. Retries reuse the deterministic object and cap capability expiry at that object's original lifecycle boundary; at or after the boundary, the mutation-locked `UserRunner` replaces the same deterministic key before returning another bounded capability. Residual application-encrypted recordings from the retired Environment feature under `hosted-environment-voice/audio/` remain deletion-eligible after 24 hours. Account deletion continues to delete each member prefix. Keep this lifecycle rule and the account-deletion prefix until both production and preview buckets have been verified empty; lifecycle deletion is asynchronous. Encrypted automatic meal-photo staging under `hosted-meal-photos/images/` becomes deletion-eligible after 31 days, one day beyond canonical mailbox recovery retention; successful imports still delete those objects immediately after checkpoint. R2 deletes eligible objects asynchronously. The rest of the encrypted objects in `BUNDLES` remain owner-cleaned or durable by design.
 
 ## Required GitHub Environment Vars
 
@@ -1606,81 +1602,105 @@ identity compatibility floor described in the migration section.
 
 The production smoke also runs one real `gpt-6-luna` model turn inside the deployed runner container (`HOSTED_EXECUTION_SMOKE_LIVE_MODEL_TURN=true`, set by the deploy workflow's `live_model_turn` input, default on). The container runs a single non-interactive `codex exec` in a scratch workspace with the injected-credential placeholder; the Worker egress intercept authorizes exactly one deploy-smoke fenced `POST /v1/responses` request for `gpt-6-luna` and injects the real Worker-owned `OPENAI_API_KEY`, so the smoke proves the rollout target's OpenAI auth, account availability, quota, request compatibility, and network path without the raw key ever entering the container. The container accepts the smoke only when Codex JSONL reports the final agent output as exactly `OK`. Cost posture: each enabled behavioral smoke phase runs one bounded model turn; an image release checks the isolated artifact before serving replacement and retains the existing post-rollout checks; the flag remains disabled in per-PR CI and hosted-local E2E.
 
-## Venice Provider Activation
+## OpenAI-only inference cutover
 
-Venice is an optional core-inference provider, not a replacement for the fleet
-default or specialized tool providers. Configure the selected GitHub
-Environment with this secret:
+Retiring alternative inference requires a coordinated Web, Worker, and runner
+cutover. Use the protected native release flow consumer first; there is no
+supported fleet-wide admission pause. Before starting, confirm no member still
+selects a retired provider or custom connection and no runtime owner carries a
+custom inference envelope. Resolve any such state before this sequence.
 
-- secret `VENICE_API_KEY`
+1. Hold the exact candidate's Web production admission and automatic contract
+   migration workflow. Keep the current Web serving while the runtime changes.
+   A cancelled admission run must be rerun in full after runtime convergence;
+   never manually publish a successful admission status or promote around it.
+2. Deploy the compatibility Worker and runner through private Murph Cloud, with
+   the full image rollout and live model smoke enabled. During native replacement,
+   the Worker emits the fixed `assistantProvider: "openai"` mailbox field for old
+   runners. New configuration readers accept and discard old Web's `provider`
+   and `availableProviders` response fields; update requests remain OpenAI-only.
+3. Require the final Worker at 100%, matching runner fingerprints, the exact
+   target native image/configuration and completed rollouts, successful serving
+   smoke, and the protected deployment's `release_converged` receipt. A successful
+   upload, an idle owner count, or the `immediate` rollout setting alone does not
+   prove that old runners are gone.
+4. Rerun the exact current-main Web admission workflow in full. Let managed
+   Vercel promotion finish and verify all production aliases serve that SHA.
+5. Restore the contract migration workflow and dispatch it against the verified
+   ready deployment. Its alias checks and timed Web function drain complement
+   the already-proven native convergence; they do not replace it.
 
-The Worker derives the regular Venice Luna/Terra/Sol provider ids from one
-code-owned mapping; do not add model vars. Keep the hosted Web
-`HOSTED_VENICE_ENABLED` flag off while applying the nullable member migration
-and deploying the compatible Web reader. Then deploy Cloudflare and the runner
-with `container_rollout=immediate` and require the exact runner fingerprint.
-Before Web enables the flag, use that exact candidate bundle to exercise Luna,
-Terra, and Sol through Venice. For each tier, prove a direct streamed reply, a
-tool-bearing turn, and a compact request through the Worker intercept without
-exposing the key to the container. Confirm completed streams and usage
-snapshots identify `venice` plus the expected code-owned provider model. A
-static translation test or one successful tier is not sufficient activation
-proof.
+Verify ordinary OpenAI replies through the protected live smoke/canary. Preserve
+the usage-blocked delivery regression proving the outbox phase can run while
+metered egress stays denied; do not describe an ordinary live canary as live
+proof of that separate condition. Remove the two legacy-facing wire bridges
+only after old Web and runner readers have drained and their rollback window
+has closed. Neither bridge restores alternative inference support.
 
-The candidate must also pass a capped prompt-cache canary before Web exposure.
-Drive two sequential Sol `/responses` turns within five minutes through the
-exact candidate bundle's pinned Codex App Server and one resumed synthetic
-thread; do not hand-author ordinary Responses requests. The captured pre-egress
-shape must contain one valid nonempty Responses Lite `additional_tools`
-envelope, a nonempty stable `prompt_cache_key`, a contiguous leading developer
-prefix, and a different user tail on the second turn. Focused candidate proof
-must show that the final Worker body preserves the key, restores tools at top
-level, removes `additional_tools`, and adds exactly one breakpoint to the final
-supported block in that developer prefix.
+Apply destructive database cleanup only after no old Web or runtime readers
+remain. Historical immutable usage rows keep their recorded pricing. Remove
+retired provider secrets from deployment environments after the old consumers
+are gone. A rollback to an older contract requires a separately reviewed
+compatible database and complete Web/Worker/runner release; reverting a single
+component after cleanup is unsupported.
 
-Retain only aggregate usage fields and provider request ids from the live
-canary; never log the body, prompt, or cache key. The second request must report
-a nonzero cache read and materially fewer cache-write tokens than the first. A
-schema rejection, missing or changed key/prefix evidence, zero cache reads, or
-another full-prefix cache write fails the gate: keep `HOSTED_VENICE_ENABLED`
-off and roll back the Worker candidate. Only after the full request matrix and
-cache canary pass should Web enable the flag and redeploy so Settings can offer
-Venice.
+Once the OpenAI-only Worker and runner consumers have converged, retire
+`VENICE_API_KEY` and `VERCEL_AI_API_KEY` through the existing protected Murph
+Cloud deployment. The ordinary Wrangler upload uses the canonical generated
+config and existing secret payload. If its binding inventory still contains a
+retired name, the existing deployment owner makes one native merge PATCH with
+`env: { VENICE_API_KEY: null, VERCEL_AI_API_KEY: null }` and the deployment's
+message/tag. This follows the [official Wrangler version-secret owner](https://github.com/cloudflare/workers-sdk/blob/c82d96ba63a3b343b520e781a070889251868d9a/packages/wrangler/src/versions/secrets/index.ts#L74-L112):
+`PATCH /accounts/{accountId}/workers/workers/{name}/versions/latest` with
+`Content-Type: application/merge-patch+json`. Cloudflare preserves the remaining
+version code and configuration; the deploy helper does not reconstruct them or
+write temporary Wrangler configs. A clean uploaded inventory skips the patch.
 
-Rollback in the opposite exposure order: disable the Web flag and redeploy Web
-first, verify new workspace reads omit the Venice override, and only then
-remove the Venice secret or roll Cloudflare back. The nullable stored
-preference may remain; while the flag is off it resolves to OpenAI.
+The [raw versions API](https://developers.cloudflare.com/api/resources/workers/subresources/scripts/subresources/versions/methods/list/)
+returns newest first, including inactive uploads. Before upload, latest must be
+the original live version for staging or the verified stage for final promotion.
+After upload, the newest pair must be uploaded/source. Immediately before a
+secret patch, latest must still be that upload; afterwards the pair must be
+patched/uploaded. A required patch must return a distinct nonempty version ID.
+The final complete secret name/type inventory must match the original baseline
+plus synchronized rotations, excluding only the retired names. Canonical required
+secrets must remain present in that expected inventory. The verified final ID
+feeds existing native rollout, smoke, activation and release-receipt owners.
 
-## Custom Inference Activation
+This path relies on the protected deployment owner's serialized workflow.
+The metadata checks detect source drift; they are not atomic compare-and-swap
+and do not lock out dashboard or other API writers. An unknown inactive latest
+version stops deployment and requires operational resolution; retries must not
+silently adopt it. A failed upload or patch check can leave an inactive version
+but does not authorize activation. Existing live identity guards remain required.
+Local serialization and mocked API tests do not replace protected external
+acceptance. Run cleanup through this deployment owner without separate local
+secret deletion or promotion.
 
-Custom inference is reader-first and fail-closed. Apply the additive Web
-database migration and deploy Web storage, verification, workspace projection,
-and signed resolution routes with both `HOSTED_CUSTOM_INFERENCE_ENABLED` and
-`HOSTED_CUSTOM_CHAT_COMPLETIONS_ENABLED` set to `0`. Then deploy Cloudflare and
-the runner bundle with `container_rollout=immediate`, require managed-container
-smoke to report the exact new runner fingerprint, and exercise the native
-Responses synthetic tool/final-response probes through the deployed Worker.
-The verification operation has one 60-second Worker deadline inside the
-75-second Web control timeout; cancellation propagation is covered at the
-Worker stream-adapter boundary instead of claimed as a remote capability.
-The invocation target uses the existing provider-egress signing secret through
-a context-separated key derivation; this release adds no custom-inference
-secret or binding.
+When an operator has identified a trusted failed upload that cannot be removed,
+the protected deployment may explicitly use it as the secret source for a fresh
+worker-only upload. Set both `HOSTED_EXECUTION_RECOVERY_VERSION_ID` (the complete
+UUID) and `HOSTED_EXECUTION_RECOVERY_VERSION_TAG` (its exact tag), together with
+`HOSTED_EXECUTION_CONTAINER_ROLLOUT=worker-only` and synchronized secret inclusion.
+Both recovery inputs empty means ordinary deployment; partial, padded or malformed
+values fail closed. Forward these inputs only to the protected apply step.
 
-After that proof, set `HOSTED_CUSTOM_INFERENCE_ENABLED=1` for the intended Web
-rollout and verify one controlled native Responses connection end to end.
-Enable `HOSTED_CUSTOM_CHAT_COMPLETIONS_ENABLED=1` only after the exact Chat
-adapter conformance suite passes on the deployed candidate. A selected custom
-workspace presented to an incompatible Worker fails closed; it must never
-resolve to OpenAI or Venice.
+Recovery requires one live version serving 100%, a distinct named inactive version
+with the exact tag and complete live secret name/type inventory, and the raw
+latest pair inactive/live. The pair is checked before image/lifecycle preparation
+and again immediately before upload. The original live metadata still owns all
+runner preparation and final expected-secret calculations. Only the fresh upload's
+inheritance source changes; its history pair must be fresh/inactive, and all native
+PATCH, inventory, live identity, smoke and activation gates remain required.
+Only the newly verified version can appear in the deployment receipt or activation.
 
-Rollback begins by preventing new custom selection and explicitly returning
-currently selected members to managed inference. Only after no selected custom
-connection remains may Web disable the main flag or Cloudflare/runner roll below
-the custom-inference contract. Forward-fix the compatible Worker/runner while
-any custom selection is active; an old runtime interpreting an unknown override
-as managed inference is not a supported rollback state.
+The operator must establish that the named upload is their trusted failed attempt.
+Matching names/types cannot prove opaque secret values are equal, and no secret
+values are fetched for this check. The current synchronized payload applies its
+rotations; optional inherited secrets remain subject to that explicit trust.
+This is not automatic discovery, retry or activation of the old candidate.
+Further drift or another failed upload requires a new deliberate selection;
+protected serialization remains necessary, with no atomic CAS guarantee.
 
 ## Required GitHub Environment Secrets
 
@@ -1729,17 +1749,9 @@ request/response. Deploy the compatible Web route and credential first, then
 Cloudflare/runtime. Roll back Cloudflare/runtime first so deploy skew fails
 closed as Labs unavailable instead of calling a removed Web route.
 
-For the first OpenAI/Venice provider-choice release, keep
-`HOSTED_VENICE_ENABLED` disabled until both Web and Cloudflare/runtime are
-deployed. A new runtime accepts the preceding provider-less assistant
-configuration response as OpenAI, so either deploy order preserves ordinary
-replies while the flag is closed. Deploy Web before enabling Venice, deploy
-Cloudflare/runtime immediately afterward with `container_rollout=immediate`,
-then enable the Web flag only after managed-container smoke reports the new
-runner fingerprint. Roll back by disabling the Web flag first.
 The Cloudflare automation private JWK is only used to unwrap the `cloudflare-automation-secret` recipient on signed ingress/runtime domain-root envelopes returned by hosted web.
 `OPENAI_API_KEY` is required by the standard Worker deploy preflight because the hosted assistant provider path expects Worker-owned OpenAI egress interception. The runner container still receives only an injected-credential placeholder; the raw key stays in the Worker.
-`HOSTED_LOG_FINGERPRINT_SECRET` is required so prompt-cache diagnostics can persist stable, Worker-owned request fingerprints without logging prompts, messages, request bodies, headers, or raw identifiers. It must stay out of hosted runtime env.
+`HOSTED_LOG_FINGERPRINT_SECRET` is required so prompt-cache diagnostics can emit stable, Worker-owned request fingerprints without logging prompts, messages, request bodies, headers, or raw identifiers. It must stay out of hosted runtime env.
 `MURPH_DATA_API_KEY` is required so the Worker can authorize the internal `murph-data-api.worker` product label lookup endpoints (`/api/foods` and `/api/supplements`) without exposing the key to the runner. Hosted web must have `MURPH_LABELS_DB_URL` before serving either route; `MURPH_SUPPLEMENT_DB_URL` is not a runtime fallback.
 Hosted message images do not use Cloudflare Images. The runner stores generated bytes as canonical vault captures and final delivery uses Linq attachments or Telegram multipart upload. Linq group avatars remain available through the narrow `results.worker/private-image-urls` boundary: the Worker passes only validated bytes and MIME type to the existing per-user `UserRunner`, which serializes the write-fence check and deterministic application-encrypted R2 staging with account deletion, then returns an opaque at-most-one-day capability on the current deployment's exact `CF_PUBLIC_BASE_URL` origin for the immediate avatar mutation. Hosted Web accepts that capability only when its origin matches `HOSTED_EXECUTION_CONTROL_URL`; production and preview therefore reject one another's capabilities while the isolated preview Worker, R2 bucket, secret, and Web boundary complete the same journey. The capability hides the member id, R2 key, storage namespace, and image hash. Its only accepted path ends in `group-avatar.<ext>`, with the extension derived from the verified MIME type; the public GET/HEAD route decrypts and verifies the object, rejects an extension/MIME mismatch, returns matching successful content headers with no HEAD body, and responds with `private, no-store`. A retry reuses the deterministic object only while its original lifecycle window remains and cannot extend capability validity past that boundary; at or after the boundary, the mutation-locked `UserRunner` replaces the same key before returning another capability. Account deletion makes the existing bounded Cloudflare cleanup attempt before acknowledging completion and synchronously sweeps the member prefix when that attempt succeeds; its encrypted receipt and retention cron retain retry ownership on timeout or provider failure. The R2 lifecycle makes any remaining object eligible for asynchronous deletion after 24 hours rather than guaranteeing physical deletion by that age. Neither cleanup path relies on Linq fetch timing. `HOSTED_PRIVATE_MEDIA_CAPABILITY_SECRET` is Worker-only, must contain at least 32 characters, and must not enter runner env. The protected deploy workflow maps the existing GitHub Environment secret named `CLOUDFLARE_IMAGES_SIGNING_KEY` into that Worker variable; the environment name grants no Cloudflare Images delivery compatibility.
 
@@ -1984,25 +1996,15 @@ or `decrypt_only` envelope references before retirement.
 
 Hosted assistant config:
 
-- `HOSTED_ASSISTANT_PROVIDER`; keep the fleet default `openai`. A per-member
-  Venice selection arrives through the signed workspace projection rather than
-  this deploy default.
+- `HOSTED_ASSISTANT_PROVIDER`; only `openai` is supported.
 - `HOSTED_ASSISTANT_MODEL`; worker deploy preflight requires an explicit allowance-priced direct OpenAI model slug. Supported slugs include `gpt-6.1-sol`, `gpt-6-sol`, `gpt-6-luna`, `gpt-6-astra`, `gpt-5.6-sol`, and `gpt-5.6-luna`. GPT-6.1 Sol is the managed OpenAI default. Production deploys require `HOSTED_ASSISTANT_REASONING_EFFORT=low`.
 - `HOSTED_ASSISTANT_APPROVAL_POLICY`
 - `HOSTED_ASSISTANT_REASONING_EFFORT`
 - `HOSTED_ASSISTANT_SANDBOX`
-- Optional Venice core inference uses the `VENICE_API_KEY` GitHub Environment
-  secret. The regular provider model ids are code-owned rather than deploy
-  variables.
 
 When changing hosted assistant model pricing or allowance enforcement, deploy the
 Cloudflare Worker/runner model contract before or atomically with the hosted web
 allowance logic so runtime usage callbacks keep using an allowance-priced model.
-For the Venice provider-aware pricing rollout, deploy Cloudflare first so the
-exact upstream mappings are active, complete the all-tier direct/tool/compact
-proof above, then deploy Web so new immutable usage rows select the Venice rate
-table. Historical immutable usage rows are not repriced.
-
 Vault-share selector-scope production deploys must also use
 `container_rollout=immediate` until the distance/count selector-scope runner
 bundle has fully rolled out and the rollback window to a bundle without exact
@@ -2351,14 +2353,15 @@ pnpm --dir apps/cloudflare runner:docker:base
 ```
 
 That image is prepared in the local Docker cache under the stable GHCR tag
-`ghcr.io/cobuildwithus/murph-cloudflare-runner-base:node24.14.1-codex0.160.0-live1`,
+`ghcr.io/cobuildwithus/murph-cloudflare-runner-base:node24.14.1-codex0.163.0-live1`,
 which is also the final app-layer Dockerfile default. Using the pullable GHCR
 name avoids BuildKit treating the prepared base as a Docker Hub `library/*`
 image during local Wrangler container builds.
-The base Dockerfile builds the CLI from the checksum-pinned Codex 0.160.0 source
+The base Dockerfile builds the CLI from the checksum-pinned Codex 0.163.0 source
 with `patches/codex-public-live.patch`. It keeps the same release's bundled
 Code Mode host and sandbox resources. The patch adds public API-key Live
-compatibility, owned-session shutdown, and opt-in app-server input ownership.
+compatibility, owned-session shutdown, opt-in app-server input ownership, and a
+15-second bound on a Responses websocket request that receives no provider frame.
 Existing callers retain native routing by default. No separate package registry
 or release workflow is required.
 Both the Dockerfile and patch enter the source fingerprint, so a patch-only
@@ -2370,10 +2373,14 @@ that exact binary before its final-image sandbox proof.
 
 To update the patch, retain the pinned release as its base, run the affected
 upstream tests, and run `pnpm --dir apps/cloudflare verify:codex-upstream-source`
-to verify applicability. Codex 0.160.0 supplies the policy-aware websocket transport;
-the patch retains that transport and only adds the public Live wire adapter,
-client-managed input ownership, and owned-session finalization. It does not
-restore a separate model catalog or websocket stack. Update the source revision and archive checksum
+to verify applicability. Codex 0.163.0 supplies the policy-aware websocket transport;
+the patch preserves upstream response-interruption acknowledgements and native
+transcript-tail history recording, retains that transport, and only adds the public Live wire adapter,
+client-managed input ownership, owned-session finalization, and the request
+acknowledgement bound. That bound fails a silently dropped reused socket so
+native fallback replays the request over HTTPS; acknowledged responses keep the
+provider stream idle timeout. It does not restore a separate model catalog or
+websocket stack. Update the source revision and archive checksum
 together when upgrading Codex, keep the npm helper version aligned, and rerun
 the exact-image compatibility and sandbox lane. Remove the patch and build
 stage once a verified upstream release provides this behavior. Cold native
@@ -2383,17 +2390,13 @@ rule. The protected deployment workflow must provide that cache before this
 patch is considered operationally ready; its current fresh-runner forced
 build would otherwise recompile Codex for each deployment.
 
-Codex CLI 0.160.0 supplies native Sol, Luna and Astra entries. Its bundled
+Codex CLI 0.163.0 supplies native Sol, Luna and Astra entries. Its bundled
 Sol/Luna entries match the former pinned launch supplement, which is removed
 along with its bundle staging and fingerprint input. The native bundled catalog
 is the sole model-entry source.
 Terra is excluded from active catalogs; historical usage pricing remains readable. The existing standard catalog and separately
 authorized Astra catalog retain their model filtering, mixed Code Mode, Flex,
 and context-window validation. Missing product models fail the image build.
-The saved `portable-responses-v1` custom-inference verification identity remains
-stable across this CLI upgrade because it describes the verified protocol,
-not the installed binary. Changing that identity requires separate compatibility
-handling for saved connections and mixed Web/Worker versions.
 Codex 0.158 broadens `httpConnectionFailed` to include unexpected HTTP statuses.
 Murph keeps permanent HTTP rejections terminal while preserving recovery for
 transport failures, timeouts, throttling, and server failures. The new
@@ -2421,7 +2424,7 @@ Saved Terra preferences resolve to Sol; historical GPT-5.6 pricing stays readabl
 A rollback after new preferences are saved requires a reader that still accepts
 those IDs.
 
-The final app-layer image filters `codex debug models --bundled` to GPT-6.1 Sol, GPT-6 Sol/Luna, GPT-5.6 Sol/Luna, and the separately authorized GPT-6 Astra catalog, adds OpenAI flex service-tier support to each, forces mixed `tool_mode: code_mode`, validates the exact catalog with `jq`, and exposes it through `MURPH_HOSTED_CODEX_MODEL_CATALOG_JSON`. Hosted app-server turns can therefore keep the code executor, expose native `tool_search` for deferred dynamic tools, and send OpenAI `service_tier: flex`; individual tool `deferLoading` flags still keep broad schemas out of the initial model-visible surface. The deploy smoke validates the GPT-6.1 Sol default configuration and uses GPT-6 Luna for its bounded live turn, and native Codex validation rejects a non-product per-spawn model before provider traffic. Hosted Codex MultiAgent V2 is enabled through the generated `[features.multi_agent_v2]` config table, which also carries Murph's proactive-delegation tool and mode hints: delegate bounded background work that would otherwise block the immediate reply. Hosted launches must not pass a boolean `features.multi_agent_v2` override because that would replace the table and drop those hints. Per-spawn model selection stays disabled unless Web's existing assistant-configuration owner confirms that the current managed runtime is authorized for the full product-model catalog; Cloudflare forwards that one decision, and missing projection or custom inference disables only the optional selector. Deploy the Cloudflare/runtime consumer before the Web producer so mixed versions fail closed without blocking ordinary replies or inherited-model children. The Codex App Server stays warm for the container lifetime; catalog changes take effect through normal container or process replacement, not per-turn restart.
+The final app-layer image filters `codex debug models --bundled` to GPT-6.1 Sol, GPT-6 Sol/Luna, GPT-5.6 Sol/Luna, and the separately authorized GPT-6 Astra catalog, adds OpenAI flex service-tier support to each, forces mixed `tool_mode: code_mode`, validates the exact catalog with `jq`, and exposes it through `MURPH_HOSTED_CODEX_MODEL_CATALOG_JSON`. Hosted app-server turns can therefore keep the code executor, expose native `tool_search` for deferred dynamic tools, and send OpenAI `service_tier: flex`; individual tool `deferLoading` flags still keep broad schemas out of the initial model-visible surface. The deploy smoke validates the GPT-6.1 Sol default configuration and uses GPT-6 Luna for its bounded live turn, and native Codex validation rejects a non-product per-spawn model before provider traffic. Hosted Codex MultiAgent V2 is enabled through the generated `[features.multi_agent_v2]` config table, which also carries Murph's proactive-delegation tool and mode hints: delegate bounded background work that would otherwise block the immediate reply. Hosted launches must not pass a boolean `features.multi_agent_v2` override because that would replace the table and drop those hints. Per-spawn model selection stays disabled unless Web's existing assistant-configuration owner confirms that the current managed runtime is authorized for the full product-model catalog; Cloudflare forwards that one decision, and missing projection disables only the optional selector. Deploy the Cloudflare/runtime consumer before the Web producer so mixed versions fail closed without blocking ordinary replies or inherited-model children. The Codex App Server stays warm for the container lifetime; catalog changes take effect through normal container or process replacement, not per-turn restart.
 The runner bundle is root-owned and mode-normalized in an intermediate image
 stage, then copied once into a fresh final base stage. Keep that normalized-copy
 boundary instead of applying a recursive permission change after the final

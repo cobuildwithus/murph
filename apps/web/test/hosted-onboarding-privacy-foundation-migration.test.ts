@@ -69,7 +69,6 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
     "authRecords HostedAuthRecord[]",
     "id String @id",
     'assistantModelPreference String? @map("assistant_model_preference")',
-    'assistantProviderPreference String? @map("assistant_provider_preference")',
     'assistantPersona String? @map("assistant_persona")',
     'assistantPersonaCausalSeq BigInt? @map("assistant_persona_causal_seq")',
     'assistantReasoningEffortPreference String? @map("assistant_reasoning_effort_preference")',
@@ -89,8 +88,10 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
     "codexAuthConnection HostedCodexAuthConnection?",
     'companionLastContactAt DateTime? @map("companion_last_contact_at")',
     'companionLastForegroundAt DateTime? @map("companion_last_foreground_at")',
+    "companionPushRoute CompanionPushRoute?",
     "conversationPolls HostedConversationPoll[]",
     "emailPublicBootstrapAttempts HostedEmailPublicBootstrapAttempt[]",
+    "gameProfile GameProfile?",
     'groupCurrentSenderClarificationsAsRuntime HostedGroupCurrentSenderClarification[] @relation("HostedGroupCurrentSenderClarificationRuntime")',
     'groupCurrentSenderClarificationsAsTarget HostedGroupCurrentSenderClarification[] @relation("HostedGroupCurrentSenderClarificationTarget")',
     'groupJournalCaptureConsentRequestedAt DateTime? @map("group_journal_capture_consent_requested_at")',
@@ -99,7 +100,6 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
     'groupSponsorshipMomentsCreated HostedGroupSponsorshipMoment[] @relation("HostedGroupSponsorshipMomentCreator")',
     'groupSponsorshipsPaid HostedGroupSponsorshipAuthorization[] @relation("HostedGroupSponsorshipAuthorizationPayer")',
     'groupSponsorshipsReceived HostedGroupSponsorshipAuthorization[] @relation("HostedGroupSponsorshipAuthorizationBeneficiary")',
-    "inferenceConnection HostedInferenceConnection?",
     'initialOnboardingCompletedAt DateTime? @default(now()) @map("initial_onboarding_completed_at")',
     "linqContactCardShares HostedLinqContactCardShare[]",
     'linqDeliveryPayloads HostedLinqDelivery[] @relation("HostedLinqDeliveryPayloadOwner")',
@@ -128,6 +128,7 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
     'usageReferralsAsIntroduced HostedUsageReferral[] @relation("HostedUsageReferralIntroducedMember")',
     'usageReferralsAsReferrer HostedUsageReferral[] @relation("HostedUsageReferralReferrer")',
     "wearableCommands CompanionWearableCommand[]",
+    "wearableLinks CompanionWearableLink[]",
     "wearableSessions CompanionWearableSession[]",
     'createdAt DateTime @default(now()) @map("created_at")',
     'updatedAt DateTime @updatedAt @map("updated_at")',
@@ -990,6 +991,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260812050000_hosted_sensitive_action_transient_retention_index",
       "20260826190000_hosted_vault_share_delivery_cursor_index",
       "20260905120000_hosted_operator_task_result_retention_index",
+      "20261019120000_final_reply_delivery_alert_retention",
     ]);
     expect(
       migrationEntries.filter((entry) => !queryShapeMigrationEntries.has(entry)),
@@ -1231,6 +1233,10 @@ describe("hosted Prisma baseline migration", () => {
       "20260922220000_poll_result_notifications",
       "20261001140000_companion_wearable_haptics",
       "20261002010000_companion_presence",
+      "20261005000000_device_sync_deferred_wake",
+      "20261005120000_companion_wake_delivery",
+      "20261008210000_linq_bounded_terminal_recovery",
+      "20261016180000_weekly_game",
       "migration_lock.toml",
     ]);
     expect(migrationEntries).toEqual(

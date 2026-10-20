@@ -10,6 +10,7 @@ import {
 
 import {
   buildAssistantProviderMurphToolCall,
+  buildAssistantProviderShellCommandCall,
   buildAssistantProviderVaultCliCall,
   buildHostedLocalDeviceSyncProviderEnvClearances,
   buildHostLoopbackStubBaseUrl,
@@ -186,7 +187,7 @@ describe("startAssistantProviderStubServer", () => {
               }),
             },
             input: [],
-            model: "gpt-5.6-terra",
+            model: "gpt-6.1-sol",
             stream: true,
           }),
           headers: {
@@ -253,7 +254,7 @@ describe("startAssistantProviderStubServer", () => {
         {
           body: JSON.stringify({
             input: [],
-            model: "gpt-5.6-terra",
+            model: "gpt-6.1-sol",
             stream: true,
           }),
           headers: {
@@ -308,7 +309,7 @@ describe("startAssistantProviderStubServer", () => {
           body: JSON.stringify({
             client_metadata: { "x-codex-turn-metadata": metadata },
             input: [],
-            model: "gpt-5.6-terra",
+            model: "gpt-6.1-sol",
           }),
           headers: { "content-type": "application/json; charset=utf-8" },
           method: "POST",
@@ -367,7 +368,7 @@ describe("startAssistantProviderStubServer", () => {
               },
             }),
             input,
-            model: "gpt-5.6-terra",
+            model: "gpt-6.1-sol",
           }),
           headers: {
             "content-type": "application/json; charset=utf-8",
@@ -431,6 +432,91 @@ describe("startAssistantProviderStubServer", () => {
     }
   });
 
+  it("holds a tool-call response until the scenario releases its state barrier", async () => {
+    let release!: () => void;
+    let entered!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const started = new Promise<void>(resolve => { entered = resolve; });
+    const requests: Array<{ url: string; body: string }> = [];
+    const server = await startAssistantProviderStubServer({
+      onRequest: request => { requests.push(request); },
+      responseState: { queuedResponses: [{
+        ...buildAssistantProviderShellCommandCall("echo barrier-released"),
+        beforeResponse: async () => { entered(); await gate; },
+      }] },
+    });
+    try {
+      let returned = false;
+      const response = fetch(`${buildHostLoopbackStubBaseUrl(server, "tool barrier")}/v1/responses`, {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ input: [], model: "gpt-6.1-sol", stream: true }),
+      }).then(value => { returned = true; return value; });
+      await started;
+      expect(requests).toHaveLength(1);
+      expect(returned).toBe(false);
+      release();
+      const body = await (await response).text();
+      expect(body).toContain('"type":"function_call"');
+      expect(body).toContain("barrier-released");
+      expect(body).toContain("response.completed");
+    } finally {
+      release();
+      await stopHttpStubServer(server);
+    }
+  });
+
+  it("starts a tool-call stream while holding its content and serves a concurrent correction", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const requests: HostedLocalAssistantProviderStubRequest[] = [];
+    const server = await startAssistantProviderStubServer({
+      onRequest: (request) => { requests.push(request); },
+      responseState: { queuedResponses: [
+        {
+          ...buildAssistantProviderShellCommandCall("echo barrier-released"),
+          beforeStreamContent: () => gate,
+        },
+        "corrected response",
+      ] },
+    });
+    const controller = new AbortController();
+    const url = `${buildHostLoopbackStubBaseUrl(server, "streamed tool barrier")}/v1/responses`;
+    const init = {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ input: [], model: "gpt-6.1-sol", stream: true }),
+    };
+    try {
+      const response = await fetch(url, { ...init, signal: controller.signal });
+      expect(response.status).toBe(200);
+      const reader = response.body!.getReader();
+      const first = await reader.read();
+      const opening = new TextDecoder().decode(first.value);
+      expect(first.done).toBe(false);
+      expect(opening).toContain("response.created");
+      expect(opening).not.toContain("function_call");
+      expect(opening).not.toContain("barrier-released");
+
+      const correction = await fetch(url, init);
+      expect(await correction.text()).toContain("corrected response");
+      expect(requests).toHaveLength(2);
+      release();
+      let remainder = "";
+      for (;;) {
+        const chunk = await reader.read();
+        if (chunk.done) break;
+        remainder += new TextDecoder().decode(chunk.value);
+      }
+      expect(remainder).toContain('"type":"function_call"');
+      expect(remainder).toContain("barrier-released");
+      expect(remainder).toContain("response.completed");
+    } finally {
+      release();
+      controller.abort();
+      await stopHttpStubServer(server);
+    }
+  });
+
   it("streams a scripted function_call item for tool-call turns", async () => {
     const server = await startAssistantProviderStubServer({
       responseState: {
@@ -447,7 +533,7 @@ describe("startAssistantProviderStubServer", () => {
       const toolCallResponse = await fetch(baseUrl, {
         body: JSON.stringify({
           input: [],
-          model: "gpt-5.6-terra",
+          model: "gpt-6.1-sol",
           stream: true,
         }),
         headers: {
@@ -467,7 +553,7 @@ describe("startAssistantProviderStubServer", () => {
       const followupResponse = await fetch(baseUrl, {
         body: JSON.stringify({
           input: [],
-          model: "gpt-5.6-terra",
+          model: "gpt-6.1-sol",
           stream: true,
         }),
         headers: {
@@ -502,7 +588,7 @@ describe("startAssistantProviderStubServer", () => {
         {
           body: JSON.stringify({
             input: [],
-            model: "gpt-5.6-terra",
+            model: "gpt-6.1-sol",
             stream: true,
           }),
           headers: {
@@ -550,7 +636,7 @@ describe("startAssistantProviderStubServer", () => {
       const backgroundResponse = await fetch(baseUrl, {
         body: JSON.stringify({
           input: [{ content: "background wake", role: "user" }],
-          model: "gpt-5.6-terra",
+          model: "gpt-6.1-sol",
         }),
         headers: {
           "content-type": "application/json; charset=utf-8",
@@ -572,7 +658,7 @@ describe("startAssistantProviderStubServer", () => {
       const targetResponse = await fetch(baseUrl, {
         body: JSON.stringify({
           input: [{ content: "please handle this target message", role: "user" }],
-          model: "gpt-5.6-terra",
+          model: "gpt-6.1-sol",
         }),
         headers: {
           "content-type": "application/json; charset=utf-8",
@@ -616,7 +702,7 @@ describe("startAssistantProviderStubServer", () => {
     try {
       const body = JSON.stringify({
         input: [{ content: "background wake", role: "user" }],
-        model: "gpt-5.6-terra",
+        model: "gpt-6.1-sol",
       });
       for (let attempt = 0; attempt < 2; attempt += 1) {
         const response = await fetch(
@@ -681,7 +767,7 @@ describe("startAssistantProviderStubServer", () => {
                 role: "user",
               },
             ],
-            model: "gpt-5.6-terra",
+            model: "gpt-6.1-sol",
           }),
           headers: {
             "content-type": "application/json; charset=utf-8",
@@ -725,7 +811,7 @@ describe("startAssistantProviderStubServer", () => {
       const toolCallResponse = await fetch(baseUrl, {
         body: JSON.stringify({
           input: [{ content: triggerText, role: "user" }],
-          model: "gpt-5.6-terra",
+          model: "gpt-6.1-sol",
           stream: true,
         }),
         headers: {
@@ -751,7 +837,7 @@ describe("startAssistantProviderStubServer", () => {
               role: "user",
             },
           ],
-          model: "gpt-5.6-terra",
+          model: "gpt-6.1-sol",
           stream: true,
         }),
         headers: {
@@ -791,7 +877,7 @@ describe("startAssistantProviderStubServer", () => {
         {
           body: JSON.stringify({
             input: [{ content: "please handle this target message", role: "user" }],
-            model: "gpt-5.6-terra",
+            model: "gpt-6.1-sol",
           }),
           headers: {
             "content-type": "application/json; charset=utf-8",
@@ -830,7 +916,7 @@ describe("startAssistantProviderStubServer", () => {
       const firstResponse = await fetch(baseUrl, {
         body: JSON.stringify({
           input: [],
-          model: "gpt-5.6-terra",
+          model: "gpt-6.1-sol",
         }),
         headers: {
           "content-type": "application/json; charset=utf-8",
@@ -840,7 +926,7 @@ describe("startAssistantProviderStubServer", () => {
       const secondResponse = await fetch(baseUrl, {
         body: JSON.stringify({
           input: [],
-          model: "gpt-5.6-terra",
+          model: "gpt-6.1-sol",
         }),
         headers: {
           "content-type": "application/json; charset=utf-8",
@@ -935,7 +1021,7 @@ describe("expectAdvertisedMurphDynamicTools", () => {
     expect(() => expectAdvertisedMurphDynamicTools([
       buildResponsesRequest([...baseToolNames, "murph.usage_diagnostics"]),
     ])).toThrow();
-    // Responses Lite models (e.g. gpt-5.6-terra) relocate the structured
+    // Responses Lite models (e.g. gpt-6.1-sol) relocate the structured
     // namespace into an additional_tools input item; it must still be read.
     expectAdvertisedMurphDynamicTools([
       buildResponsesRequest(baseToolNames, "additional-tools"),
@@ -1028,7 +1114,7 @@ describe("resolveHostedAssistantLocalDevEnv", () => {
     );
 
     expect(env).toMatchObject({
-      HOSTED_ASSISTANT_MODEL: "gpt-5.6-terra",
+      HOSTED_ASSISTANT_MODEL: "gpt-6.1-sol",
       HOSTED_ASSISTANT_PROVIDER: "openai",
       HOSTED_ASSISTANT_REASONING_EFFORT: "low",
       [HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV]: "http://127.0.0.1:1234/v1",
@@ -1085,7 +1171,7 @@ describe("resolveHostedAssistantLocalDevEnv", () => {
     expect(
       resolveHostedAssistantLocalDevEnv(
         {
-          HOSTED_ASSISTANT_MODEL: "gpt-5.6-terra",
+          HOSTED_ASSISTANT_MODEL: "gpt-6.1-sol",
           HOSTED_ASSISTANT_PROVIDER: "openai",
           [HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV]:
             "http://127.0.0.1:4567/v1",

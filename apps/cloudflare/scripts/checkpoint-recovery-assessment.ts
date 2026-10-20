@@ -4,9 +4,6 @@ import { parseHostedWorkspaceReadResponse } from "@murphai/hosted-execution/pars
 import type { HostedWorkspaceState } from "@murphai/hosted-execution/runtime-control";
 import { createHostedStorageNamespaceId } from "@murphai/hosted-execution/storage-paths";
 import { HOSTED_RUNTIME_WORKSPACE_PATH } from "@murphai/hosted-execution/routes";
-import {
-  HOSTED_CUSTOM_INFERENCE_CONSUMER_VERSION, HOSTED_CUSTOM_INFERENCE_CONSUMER_VERSION_QUERY,
-} from "@murphai/hosted-execution/assistant-inference";
 import { fetchHostedExecutionWebControlPlaneResponse } from "../src/web-control-plane.ts";
 import { readHostedWebCallbackSigningEnvironment } from "../src/web-callback-auth.ts";
 import { createHostedR2PresignedGetUrl } from "../src/r2-presigned-url.ts";
@@ -235,9 +232,6 @@ export async function assessCheckpointRecovery(
     const response = await fetchHostedExecutionWebControlPlaneResponse({
       baseUrl: "https://www.withmurph.ai", boundUserId: request.userId,
       callbackSigning, method: "GET", path: HOSTED_RUNTIME_WORKSPACE_PATH,
-      search: new URLSearchParams({
-        [HOSTED_CUSTOM_INFERENCE_CONSUMER_VERSION_QUERY]: String(HOSTED_CUSTOM_INFERENCE_CONSUMER_VERSION),
-      }).toString(),
       timeoutMs: 30_000, fetchImpl: boundedFetch,
     });
     const value = parseHostedWorkspaceReadResponse(JSON.parse(Buffer.from(await readRecoveryResponse(response, 1024 * 1024)).toString("utf8")));

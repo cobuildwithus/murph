@@ -1,15 +1,14 @@
 /**
- * Reviewed against the pinned upstream source tree below. Base-relative paths
+ * Reviewed against the pinned upstream commit below. Base-relative paths
  * are recorded separately because native linkers may concatenate their string
  * literals differently across targets; changing the Codex pin requires a fresh
- * source-tree review rather than trusting one platform's binary layout.
+ * source review at the new commit rather than trusting one platform's binary layout.
  */
 export const PINNED_CODEX_OPENAI_EGRESS_INVENTORY = {
-  upstreamCommit: "a956835d020762cb2b570053af06f643a11c0ecc",
-  upstreamSourceRoot: "codex-rs/codex-api/src",
-  upstreamSourceTree: "a17e1a769e8fca44e37c73c1293f5350c8adadf5",
-  upstreamTag: "rust-v0.160.0",
-  version: "0.160.0",
+  upstreamCommit: "83086188ae0614bd882818ff1aa23f3194962012",
+  upstreamSourceRoot: "codex-rs",
+  upstreamTag: "rust-v0.163.0",
+  version: "0.163.0",
   baseRelativeProviderRoutes: [
     "alpha/search",
     "guardian",
@@ -25,6 +24,9 @@ export const PINNED_CODEX_OPENAI_EGRESS_INVENTORY = {
     "responses",
   ],
   reviewedSources: [
+    "codex-rs/agent-message-board-client/src/client.rs",
+    "codex-rs/backend-client/src/client/turn_usage.rs",
+    "codex-rs/ext/guardian-v2/src/async_scorer/decisions.rs",
     "codex-rs/codex-api/src/endpoint/images.rs",
     "codex-rs/codex-api/src/endpoint/memories.rs",
     "codex-rs/codex-api/src/endpoint/models.rs",
@@ -32,10 +34,21 @@ export const PINNED_CODEX_OPENAI_EGRESS_INVENTORY = {
     "codex-rs/codex-api/src/endpoint/realtime_websocket/methods.rs",
     "codex-rs/codex-api/src/endpoint/responses.rs",
     "codex-rs/codex-api/src/endpoint/responses_websocket.rs",
+    "codex-rs/codex-api/src/endpoint/responses_websocket/connector.rs",
     "codex-rs/codex-api/src/endpoint/search.rs",
     "codex-rs/codex-api/src/files.rs",
   ],
   routes: [
+    {
+      disposition: "blocked",
+      feature: "Guardian Decisions comparison",
+      method: "POST",
+      owner: "codex",
+      pathname: "/v1/decisions",
+      proof: "reviewed_source",
+      source: "codex-rs/ext/guardian-v2/src/async_scorer/decisions.rs",
+      transport: "http",
+    },
     {
       disposition: "allowed",
       feature: "public Live session setup (native patch)",
@@ -83,7 +96,7 @@ export const PINNED_CODEX_OPENAI_EGRESS_INVENTORY = {
       owner: "codex",
       pathname: "/v1/responses",
       proof: "policy_contract",
-      source: "codex-rs/codex-api/src/endpoint/responses_websocket.rs",
+      source: "codex-rs/codex-api/src/endpoint/responses_websocket/connector.rs",
       transport: "websocket",
     },
     {
@@ -204,6 +217,30 @@ export const PINNED_CODEX_OPENAI_EGRESS_INVENTORY = {
     },
   ],
   nonProviderBinaryCandidates: [
+    {
+      candidate: "/v1/analytics/codex/turn-costsmethodspath_prefixesstruct",
+      disposition: "binary_false_positive",
+      owner: "codex-analytics",
+      reason: "The 0.163.0 macOS binary joins the reviewed turn-costs path to adjacent network-hook field labels. backend-client/src/client/turn_usage.rs sets only /v1/analytics/codex/turn-costs on the separate analytics origin.",
+    },
+    {
+      candidate: "/v1/boards",
+      disposition: "different_origin",
+      owner: "codex-agent-message-board",
+      reason: "agent-message-board-client/src/client.rs appends this path to the explicitly configured remote board-service endpoint, not the model provider base URL. Murph does not configure a remote board service.",
+    },
+    {
+      candidate: "/v1/decisionsevent",
+      disposition: "binary_false_positive",
+      owner: "codex-guardian",
+      reason: "The 0.163.0 macOS binary joins the exact /v1/decisions URL in ext/guardian-v2/src/async_scorer/decisions.rs to an adjacent event label. The real Decisions route is independently classified as blocked.",
+    },
+    {
+      candidate: "/v1/decisionsanswerschoicemodelquestionsvalueinstructionsvariant",
+      disposition: "binary_false_positive",
+      owner: "codex-guardian",
+      reason: "The 0.163.0 Linux release stores the exact https://api.openai.com/v1/decisions URL constant from ext/guardian-v2/src/async_scorer/decisions.rs beside the serialized answers, choice, model, questions, value, instructions, and variant labels of that request and response; scanning stops at the following serde variant-index text. The real Decisions route is independently classified as blocked.",
+    },
     {
       candidate: "/v1/rowscols",
       disposition: "binary_false_positive",

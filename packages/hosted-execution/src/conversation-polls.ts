@@ -30,7 +30,7 @@ export const conversationPollVoterSchema = z.object({
   displayName: z.string().max(256).optional(),
   username: z.string().max(64).optional(),
   optionIndexes: z.array(z.number().int().min(0).max(99)).max(100),
-  observedAt: z.string().datetime(),
+  observedAt: z.isoDateTime(),
 }).strict();
 export type ConversationPollVoter = z.infer<typeof conversationPollVoterSchema>;
 export const CONVERSATION_POLL_VOTER_PAGE_SIZE = 50;
@@ -50,7 +50,7 @@ export const conversationPollSnapshotSchema = z.object({
   anonymous: z.boolean(),
   multipleAnswers: z.boolean(),
   closed: z.boolean(),
-  observedAt: z.string().datetime(),
+  observedAt: z.isoDateTime(),
   freshness: z.enum(["provider_read", "provider_update", "creation"]),
 }).strict();
 export type ConversationPollSnapshot = z.infer<typeof conversationPollSnapshotSchema>;

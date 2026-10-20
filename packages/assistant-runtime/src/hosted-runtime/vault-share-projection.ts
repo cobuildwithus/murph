@@ -216,6 +216,10 @@ type ProjectableMemoryProfileNameRead =
   | { status: "absent" | "no-evidence" | "unresolved" };
 
 export interface HostedVaultShareProjectionOfferResult {
+  failureReason?:
+    | "serialized_projection_too_large"
+    | "delivery_exception"
+    | "scope_failed";
   outcome:
     | "continued"
     | "deferred"
@@ -487,7 +491,7 @@ export async function offerCapturedHostedVaultShareProjectionBestEffort(input: {
       if (new TextEncoder().encode(JSON.stringify(request)).byteLength > HOSTED_VAULT_SHARE_SERIALIZED_PROJECTION_MAX_BYTES - 1024) {
         // Reserve the existing destination-continuation envelope. An oversized
         // complete result is an error, never an empty replacement or truncation.
-        return { outcome: "error" };
+        return { failureReason: "serialized_projection_too_large", outcome: "error" };
       }
       const response = await input.vaultSharePort.deliver(request);
       if (response.status === "scope-failed") {
@@ -507,7 +511,7 @@ export async function offerCapturedHostedVaultShareProjectionBestEffort(input: {
         response.status === "delivered" ? "delivered" : "no-active-share",
       );
     } catch {
-      return { outcome: "error" };
+      return { failureReason: "delivery_exception", outcome: "error" };
     }
   }
   const outcome = combineHostedVaultShareOfferOutcomes(outcomes);
@@ -519,7 +523,9 @@ export async function offerCapturedHostedVaultShareProjectionBestEffort(input: {
           : "deferred",
     };
   }
-  return { outcome };
+  return outcome === "error"
+    ? { failureReason: "scope_failed", outcome }
+    : { outcome };
 }
 
 function canSkipHostedVaultShareProjectionDelivery(input: {

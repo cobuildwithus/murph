@@ -59,21 +59,13 @@ export async function POST(request: Request): Promise<Response> {
         // One fresh projection supplies access, consent and read-first allowance.
         const memberState = await tx.hostedMember.findUnique({
           where: { id: userId },
-          select: {
-            ...hostedRuntimeUsageMemberSelect,
-            assistantProviderPreference: true,
-            inferenceConnection: { select: { selected: true, revision: true } },
-          },
+          select: hostedRuntimeUsageMemberSelect,
         });
         timing.start("access");
         const access = await requireHostedRuntimeMailboxActiveAccess(userId, {
           prisma: tx,
           memberState,
         });
-        const assistantCustomInferenceRevision = !access.isThreadContainer
-            && memberState?.inferenceConnection?.selected
-          ? memberState.inferenceConnection.revision
-          : null;
         const fetchedAt = new Date();
         timing.start("mailbox");
         const projection = await fetchHostedRuntimeMailboxProjection({
@@ -112,8 +104,6 @@ export async function POST(request: Request): Promise<Response> {
         timing.start("projection");
         if (!usage.allowed) {
           return { includeGroupRunningBit: false, mailbox: parseHostedMailboxFetchResponse({
-            assistantProvider: access.assistantProvider,
-            assistantCustomInferenceRevision,
             consumedSeqByLane: body.lanes.map(({ importedSeq, lane }) => ({
               consumedSeq: importedSeq,
               lane,
@@ -128,8 +118,6 @@ export async function POST(request: Request): Promise<Response> {
           }) };
         }
         return { includeGroupRunningBit: conversationWorkPresent && access.isThreadContainer, mailbox: parseHostedMailboxFetchResponse({
-          assistantProvider: access.assistantProvider,
-          assistantCustomInferenceRevision,
           ...(usage.runningLow ? { conversationUsageStatus: "low" as const } : {}),
           consumedSeqByLane: projection.consumedSeqByLane,
           fetchedAt: fetchedAt.toISOString(),

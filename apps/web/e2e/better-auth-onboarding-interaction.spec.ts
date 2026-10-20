@@ -3,6 +3,9 @@ import { expect, test } from "@playwright/test";
 test.use({ launchOptions: { ignoreDefaultArgs: ["--disable-popup-blocking"] } });
 
 test.beforeEach(async ({ page }) => {
+  await page.route("**/*", (route) => ["localhost", "127.0.0.1", "[::1]"].includes(new URL(route.request().url()).hostname)
+    ? route.continue() : route.abort());
+  await page.route("**/api/**", (route) => route.abort());
   await page.route("**/api/settings/login-methods", (route) => route.fulfill({ json: {
     ok: true, methods: { email: "new@example.test", phone: null, telegram: null }, initialMessagingSetupAllowed: true,
   } }));
@@ -27,10 +30,9 @@ test("an early Telegram click reuses its window after preparation outlasts the c
     } };`,
   }));
   await context.route("**/telegram-browser-proof", (route) => route.fulfill({ contentType: "text/html", body: "<!doctype html><title>Provider window proof</title>" }));
-  await page.goto("/design?tab=components");
-  const study = page.locator("#better-auth-adoption");
-  await study.evaluate((element) => element.removeAttribute("inert"));
-  const phone = study.locator('[data-auth-study="phone"]');
+  await page.goto("/");
+  await page.getByRole("button", { name: "Signup", exact: true }).click();
+  const phone = page.getByRole("dialog");
   const telegram = phone.getByRole("button", { name: "Telegram", exact: true });
   await expect(telegram).toBeEnabled();
   await expect(telegram.locator(".animate-spin")).toHaveCount(0);
@@ -67,12 +69,13 @@ test("real messaging setup renders immediately while settings are delayed at des
     sends += 1;
     return route.fulfill({ json: { ok: true } });
   });
-  const response = await page.goto("/design?tab=components");
+  // This existing non-production invite fixture mounts the real join island,
+  // including its eager credential reads, rather than making the catalog live.
+  const response = await page.goto("/join/synthetic-browser-proof?preview=messaging-setup");
   const html = await response!.text();
-  const serverSetup = html.split('data-auth-study="messaging"')[1].split('data-auth-study="recovery"')[0];
-  expect(serverSetup).toContain('type="tel"');
-  expect(serverSetup).toContain('Connect Telegram');
-  const setup = page.locator('[data-auth-study="messaging"]');
+  expect(html).toContain('type="tel"');
+  expect(html).toContain('Connect Telegram');
+  const setup = page.locator("main");
   for (const width of [1280, 390]) {
     await page.setViewportSize({ width, height: 900 });
     await expect(setup.locator('input[type="tel"]')).toBeVisible();
@@ -82,7 +85,6 @@ test("real messaging setup renders immediately while settings are delayed at des
     expect(await setup.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
     await setup.screenshot({ path: testInfo.outputPath(`messaging-${width}.png`) });
   }
-  await page.locator("#better-auth-adoption").evaluate((element) => element.removeAttribute("inert"));
   const input = setup.locator('input[type="tel"]');
   await input.fill("2025550195");
   await setup.getByRole("button", { name: "Send verification code" }).click();

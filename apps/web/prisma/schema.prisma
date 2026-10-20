@@ -203,6 +203,7 @@ model DeviceSyncDirtyConnection {
   sourceProviderCountsJson   Json?            @map("source_provider_counts_json")
   resourceCategoryCountsJson Json?            @map("resource_category_counts_json")
   dirtyResourcesJson         Json?            @map("dirty_resources_json")
+  wakeDeferredUntil          DateTime?        @map("wake_deferred_until")
   createdAt                  DateTime         @default(now()) @map("created_at")
   updatedAt                  DateTime         @updatedAt @map("updated_at")
   connection                 DeviceConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
@@ -211,6 +212,7 @@ model DeviceSyncDirtyConnection {
   @@index([userId, dirtyRevision, processedRevision])
   @@index([userId, firstDirtyAt, connectionId])
   @@index([latestDirtyAt])
+  @@index([wakeDeferredUntil])
   @@map("device_sync_dirty_connection")
 }
 
@@ -584,6 +586,34 @@ model CompanionWearableSession {
   @@map("companion_wearable_session")
 }
 
+// Where to wake the member's companion app. A transport address only: wearable
+// enrollment lives on CompanionWearableLink.
+model CompanionPushRoute {
+  userId         String       @id @map("user_id")
+  installationId String       @map("installation_id")
+  token          String
+  environment    String
+  topic          String
+  alertsAllowed  Boolean      @map("alerts_allowed")
+  updatedAt      DateTime     @map("updated_at")
+  member         HostedMember @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("companion_push_route")
+}
+
+// The band link a wake-capable app last reported ready. Observational, not a lease.
+model CompanionWearableLink {
+  userId         String       @map("user_id")
+  wearable       String
+  installationId String       @map("installation_id")
+  linkId         String       @map("link_id")
+  updatedAt      DateTime     @map("updated_at")
+  member         HostedMember @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, wearable])
+  @@map("companion_wearable_link")
+}
+
 model CompanionWearableCommand {
   unavailableReason String? @map("unavailable_reason")
   id        String   @id
@@ -603,6 +633,8 @@ model CompanionWearableCommand {
 model HostedMember {
   companionLastContactAt         DateTime?                       @map("companion_last_contact_at")
   companionLastForegroundAt      DateTime?                       @map("companion_last_foreground_at")
+  companionPushRoute             CompanionPushRoute?
+  wearableLinks                  CompanionWearableLink[]
   wearableSessions               CompanionWearableSession[]
   wearableCommands               CompanionWearableCommand[]
   authRecords                    HostedAuthRecord[]
@@ -611,7 +643,6 @@ model HostedMember {
   usageCreditBalanceUsdMicros    BigInt?                         @default(0) @map("usage_credit_balance_usd_micros")
   usageCreditLedgerVersion       BigInt?                         @default(0) @map("usage_credit_ledger_version")
   assistantModelPreference       String?                         @map("assistant_model_preference")
-  assistantProviderPreference    String?                         @map("assistant_provider_preference")
   assistantReasoningEffortPreference String?                     @map("assistant_reasoning_effort_preference")
   assistantPersona               String?                         @map("assistant_persona")
   assistantPersonaCausalSeq      BigInt?                         @map("assistant_persona_causal_seq")
@@ -692,10 +723,10 @@ model HostedMember {
   clinicalRecordRetrievalRuns        ClinicalRecordRetrievalRun[]
   clinicalRecordRetrievalRequests    ClinicalRecordRetrievalRequest[]
   codexAuthConnection            HostedCodexAuthConnection?
-  inferenceConnection            HostedInferenceConnection?
   computerRuns                   HostedComputerRun[]
   computerHandoffs               HostedComputerHandoff[]
   conversationPolls              HostedConversationPoll[]
+  gameProfile                    GameProfile?
   phoneCalls                     HostedPhoneCall[]
   physicalNotes                  HostedPhysicalNote[]
   physicalNoteRecoveries         HostedPhysicalNoteRecovery[]
@@ -724,23 +755,6 @@ model HostedCodexAuthConnection {
   member          HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
 
   @@map("hosted_codex_auth_connection")
-}
-
-model HostedInferenceConnection {
-  memberId            String       @id @map("member_id")
-  protocol            String
-  selected            Boolean      @default(false)
-  configEncrypted     String       @map("config_encrypted")
-  revision            Int          @default(1)
-  contextWindowTokens Int          @map("context_window_tokens")
-  supportsImages      Boolean      @default(false) @map("supports_images")
-  verificationProfile String       @map("verification_profile")
-  verifiedAt          DateTime     @map("verified_at")
-  createdAt           DateTime     @default(now()) @map("created_at")
-  updatedAt           DateTime     @updatedAt @map("updated_at")
-  member              HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
-
-  @@map("hosted_inference_connection")
 }
 
 model HostedProductFeedback {
@@ -1373,7 +1387,6 @@ model HostedRuntimeOwner {
   runnerContainerName       String?  @map("runner_container_name")
   workspaceVersion          BigInt?  @map("workspace_version")
   providerEgressTokenHash    String?  @map("provider_egress_token_hash")
-  customInferenceEnvelope   String?  @map("custom_inference_envelope")
   platformAiUsageAllowed    Boolean  @default(false) @map("platform_ai_usage_allowed")
   startedAt                 DateTime? @map("started_at")
   acceptedAt                DateTime? @map("accepted_at")
@@ -2461,6 +2474,7 @@ model HostedLinqDelivery {
   @@index([phoneNumberLookupKey, attemptedAt])
   @@index([status, attemptedAt])
   @@index([linqChatLookupKey, attemptedAt])
+  @@index([linqChatLookupKey, acceptedAt], map: "hosted_linq_delivery_chat_accepted_at_idx")
   @@index([lastReceiptAt])
   @@index([payloadOwnerMemberId])
   @@index([acceptedAt, id], map: "hosted_linq_delivery_accepted_at_id_idx")
@@ -2473,6 +2487,13 @@ model HostedLinqDeliveryMessage {
   ordinal             Int
   messageLookupKey    String   @unique @map("message_lookup_key")
   terminalRetryAttemptedAt DateTime? @map("terminal_retry_attempted_at")
+  terminalRetryCount Int @default(0) @map("terminal_retry_count")
+  terminalRetryNextAt DateTime? @map("terminal_retry_next_at")
+  terminalRetryExpiresAt DateTime? @map("terminal_retry_expires_at")
+  terminalRetryClaimedMessageLookupKey String? @map("terminal_retry_claimed_message_lookup_key")
+  terminalRetryPreviousMessageLookupKeys String[] @default([]) @map("terminal_retry_previous_message_lookup_keys")
+  terminalRetryContextCiphertext String? @map("terminal_retry_context_ciphertext")
+  terminalRetryOwnerMemberId String? @map("terminal_retry_owner_member_id")
   terminalRetryOriginalMessageLookupKey String? @unique(map: "hosted_linq_delivery_message_terminal_retry_key") @map("terminal_retry_original_message_lookup_key")
   messageIdSuffix     String?  @map("message_id_suffix")
   status              String   @default("accepted")
@@ -2491,6 +2512,7 @@ model HostedLinqDeliveryMessage {
   @@unique([deliveryId, ordinal])
   @@index([deliveryId, status])
   @@index([lastReceiptAt])
+  @@index([terminalRetryPreviousMessageLookupKeys], type: Gin, map: "hosted_linq_delivery_message_terminal_retry_history_idx")
   @@map("hosted_linq_delivery_message")
 }
 
@@ -2756,4 +2778,158 @@ model HostedConversationPollVote {
   @@id([pollId, voterKey])
   @@index([pollId, hasVote, voterKey], map: "hosted_conversation_poll_vote_page_idx")
   @@map("hosted_conversation_poll_vote")
+}
+
+// Weekly game. Words are sealed per member (see apps/web/src/lib/game/crypto.ts);
+// ids, numbers and dates stay plain.
+
+model GameProfile {
+  memberId           String             @id @map("member_id")
+  firstNameEncrypted String             @map("first_name_encrypted")
+  timeZone           String             @map("time_zone")
+  createdAt          DateTime           @default(now()) @map("created_at")
+  updatedAt          DateTime           @updatedAt @map("updated_at")
+  member             HostedMember       @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  gamesCreated       Game[]
+  players            GamePlayer[]
+  labelsOwned        GameContactLabel[] @relation("GameContactLabelOwner")
+  labelsAbout        GameContactLabel[] @relation("GameContactLabelSubject")
+  ticketsOwed        GameTicket[]       @relation("GameTicketOwedBy")
+  ticketsHeld        GameTicket[]       @relation("GameTicketOwedTo")
+
+  @@map("game_profile")
+}
+
+// One member's private name/photo/relationship for another; only its owner sees it.
+model GameContactLabel {
+  ownerMemberId         String      @map("owner_member_id")
+  subjectMemberId       String      @map("subject_member_id")
+  nameEncrypted         String?     @map("name_encrypted")
+  relationshipEncrypted String?     @map("relationship_encrypted")
+  photoKey              String?     @map("photo_key")
+  updatedAt             DateTime    @updatedAt @map("updated_at")
+  owner                 GameProfile @relation("GameContactLabelOwner", fields: [ownerMemberId], references: [memberId], onDelete: Cascade)
+  subject               GameProfile @relation("GameContactLabelSubject", fields: [subjectMemberId], references: [memberId], onDelete: Cascade)
+
+  @@id([ownerMemberId, subjectMemberId])
+  @@index([subjectMemberId])
+  @@map("game_contact_label")
+}
+
+model Game {
+  id                   String       @id
+  createdBy            String       @map("created_by")
+  // Rematches chain through previous_game_id; round counts the chain.
+  previousGameId       String?      @map("previous_game_id")
+  // A rematch's invitee: the one other player of the settled previous game.
+  // They see the invite on Home and accept it there, with no link to text.
+  inviteeMemberId      String?      @map("invitee_member_id")
+  round                Int          @default(1)
+  // invited, live, settled, or void (an invite that expired unclaimed)
+  status               String
+  terms                Json
+  termsWordsEncrypted  String       @map("terms_words_encrypted")
+  inviteTokenHash      String?      @unique @map("invite_token_hash")
+  inviteTokenEncrypted String?      @map("invite_token_encrypted")
+  inviteExpiresAt      DateTime?    @map("invite_expires_at")
+  pendingLabel         Json?        @map("pending_label")
+  lengthDays           Int          @default(7) @map("length_days")
+  // The challenger's picked Day 1; Day 1 is the day after accept, or this if later.
+  startsOn             DateTime?    @map("starts_on") @db.Date
+  startedAt            DateTime?    @map("started_at")
+  // The players' sorted member ids joined by ":" while the game is live, else
+  // null. Unique, so the same people can't have two live games at once.
+  liveRosterKey        String?      @unique @map("live_roster_key")
+  // Dev time travel only: added to the database clock for this game. Null (no
+  // shift) everywhere else; production never writes it.
+  devClockOffsetMs     BigInt?      @map("dev_clock_offset_ms")
+  result               Json?
+  settledAt            DateTime?    @map("settled_at")
+  createdAt            DateTime     @default(now()) @map("created_at")
+  updatedAt            DateTime     @updatedAt @map("updated_at")
+  creator              GameProfile  @relation(fields: [createdBy], references: [memberId], onDelete: Cascade)
+  players              GamePlayer[]
+  tickets              GameTicket[]
+  events               GameEvent[]
+
+  @@index([createdBy])
+  @@index([inviteeMemberId])
+  @@map("game")
+}
+
+model GamePlayer {
+  gameId             String      @map("game_id")
+  memberId           String      @map("member_id")
+  seat               Int
+  timeZone           String      @map("time_zone")
+  dayOne             DateTime?   @map("day_one") @db.Date
+  joinedAt           DateTime    @default(now()) @map("joined_at")
+  game               Game        @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  profile            GameProfile @relation(fields: [memberId], references: [memberId], onDelete: Cascade)
+  entries            GameEntry[]
+
+  @@id([gameId, memberId])
+  @@unique([gameId, seat])
+  @@index([memberId])
+  @@map("game_player")
+}
+
+model GameEntry {
+  id              String     @id
+  gameId          String     @map("game_id")
+  memberId        String     @map("member_id")
+  dayIndex        Int        @map("day_index")
+  // 1 or 2 for photos (2 is the retake), 0 for an excuse: caps each player-day.
+  attempt         Int
+  // photo or excuse (a voice memo, with its transcript as text)
+  kind            String
+  textEncrypted   String?    @map("text_encrypted")
+  mediaKeys       String[]   @default([]) @map("media_keys")
+  captureAgeMs    Int?       @map("capture_age_ms")
+  receivedAt      DateTime   @map("received_at")
+  withdrawnAt     DateTime?  @map("withdrawn_at")
+  // "retake" (replaced by attempt 2) or "withdrawn" (taken back by its poster).
+  withdrawnReason String?    @map("withdrawn_reason")
+  player          GamePlayer @relation(fields: [gameId, memberId], references: [gameId, memberId], onDelete: Cascade)
+
+  @@unique([gameId, memberId, dayIndex, attempt])
+  @@index([memberId])
+  @@map("game_entry")
+}
+
+// One IOU. Its words come from the game's stake with the same key.
+model GameTicket {
+  id         String      @id
+  gameId     String      @map("game_id")
+  stakeKey   String      @map("stake_key")
+  owedBy     String      @map("owed_by")
+  owedTo     String      @map("owed_to")
+  status     String      @default("open")
+  redeemedAt DateTime?   @map("redeemed_at")
+  createdAt  DateTime    @default(now()) @map("created_at")
+  game       Game        @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  debtor     GameProfile @relation("GameTicketOwedBy", fields: [owedBy], references: [memberId], onDelete: Cascade)
+  holder     GameProfile @relation("GameTicketOwedTo", fields: [owedTo], references: [memberId], onDelete: Cascade)
+
+  @@index([owedTo, status])
+  @@index([owedBy, status])
+  @@index([gameId])
+  @@map("game_ticket")
+}
+
+// Append-only history of accepted changes, one row each, in the same
+// transaction. Payloads hold ids and numbers only; words stay in their
+// encrypted columns. Nothing reads it yet.
+model GameEvent {
+  id        BigInt   @id @default(autoincrement())
+  gameId    String   @map("game_id")
+  // A member id, or "murph" / "system".
+  actor     String
+  type      String
+  payload   Json
+  createdAt DateTime @default(now()) @map("created_at")
+  game      Game     @relation(fields: [gameId], references: [id], onDelete: Cascade)
+
+  @@index([gameId, id])
+  @@map("game_event")
 }

@@ -172,6 +172,77 @@ describe("public loader seams", () => {
     });
   });
 
+  it("times only cold integrated-services imports as service-runtime-load", async () => {
+    const original = process.hrtime.bigint;
+    let clock = 0n;
+    const advance = (ms: number) => { clock += BigInt(ms) * 1_000_000n; };
+    const factoryFailure = new Error("synthetic factory failure");
+    const result = { synthetic: true };
+    const showVaultMock = vi.fn(async () => { advance(11); return result; });
+    let evaluations = 0;
+    const createIntegratedVaultServicesMock = vi.fn()
+      .mockImplementationOnce(() => { advance(7); throw factoryFailure; })
+      .mockImplementation(() => { advance(7); return { core: {}, importers: {}, query: { showVault: showVaultMock } }; });
+    const vaultServicesModule = await importWithMocks<
+      typeof import("../src/vault-services.ts")
+    >("../src/vault-services.ts", {
+      "../src/usecases/integrated-services.ts": async () => {
+        evaluations += 1;
+        advance(5);
+        if (evaluations === 1) throw new Error("synthetic import failure");
+        return { createIntegratedVaultServices: createIntegratedVaultServicesMock };
+      },
+    });
+    // Same post-reset module instance (and AsyncLocalStorage) as usecases/runtime.ts.
+    const { timeCliDispatch, withCliTiming } = await import("@murphai/runtime-state/node/cli-timing");
+    const { normalizeCliTiming } = await import("@murphai/runtime-state/cli-timing");
+    const integrated = vaultServicesModule.createIntegratedVaultServices();
+    const call = () => integrated.query.showVault({ vault: "./vault", requestId: null });
+    const timed = async (run: () => Promise<unknown>) => {
+      let report: import("@murphai/runtime-state/cli-timing").CliTiming | undefined;
+      let settled: { value: unknown } | { error: unknown };
+      try {
+        let value: unknown;
+        await withCliTiming(() => timeCliDispatch("wearables latest", async () => { value = await run(); }),
+          (timing) => { report = timing; });
+        settled = { value };
+      } catch (error) {
+        settled = { error };
+      }
+      expect(normalizeCliTiming(report)).toEqual(report);
+      const loads = report?.commands[0]?.phases.filter((phase) => phase.phase.endsWith("-load"))
+        .map((phase) => [phase.phase, phase.count, phase.sumUs]);
+      return { settled, loads };
+    };
+
+    process.hrtime.bigint = () => clock;
+    try {
+      // Failed import (Vitest wraps mock-factory errors): one span, promise reset.
+      const failedImport = await timed(call);
+      expect("error" in failedImport.settled).toBe(true);
+      expect(createIntegratedVaultServicesMock).not.toHaveBeenCalled();
+      expect(failedImport.loads).toEqual([["service-runtime-load", 1, 5_000]]);
+      // Failed factory: original error identity, one cold import span, promise reset.
+      const failed = await timed(call);
+      expect("error" in failed.settled && failed.settled.error).toBe(factoryFailure);
+      expect(failed.loads).toEqual([["service-runtime-load", 1, 5_000]]);
+      // Retry after reset reuses Node's module cache; it is cold for this loader only.
+      const retried = await timed(() => Promise.all([call(), call()]));
+      expect("value" in retried.settled && retried.settled.value).toEqual([result, result]);
+      expect(retried.loads).toEqual([["service-runtime-load", 1, 0]]);
+      // Warm calls share the cached services promise and emit no load span.
+      const warm = await timed(call);
+      expect("value" in warm.settled && warm.settled.value).toBe(result);
+      expect(warm.loads).toEqual([]);
+      expect(await call()).toBe(result);
+    } finally {
+      process.hrtime.bigint = original;
+    }
+    expect(evaluations).toBe(2);
+    expect(createIntegratedVaultServicesMock).toHaveBeenCalledTimes(2);
+    expect(showVaultMock).toHaveBeenCalledTimes(4);
+  });
+
   it("keeps helper and preference seams behind the runtime loader", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "vault-usecases-loader-"));
     const manifestRelativePath = "raw/documents/2026/04/doc_loader/manifest.json";

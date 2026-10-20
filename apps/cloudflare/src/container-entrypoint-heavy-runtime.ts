@@ -555,8 +555,10 @@ export function buildHostedContainerCodexShellSmokeConfig(model: string): string
     'wire_api = "responses"',
     'requires_openai_auth = false',
     "supports_websockets = false",
-    "request_max_retries = 4",
-    "stream_max_retries = 5",
+    // The deploy-smoke egress fence admits exactly one provider request, so a
+    // retry could only be refused and would hide the original failure.
+    "request_max_retries = 0",
+    "stream_max_retries = 0",
     "",
     "[skills]",
     "include_instructions = false",

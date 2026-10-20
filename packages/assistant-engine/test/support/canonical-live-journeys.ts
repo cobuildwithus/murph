@@ -1,13 +1,12 @@
 import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
-import { access, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { access, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 
 import { initializeVault, listAutomations, patchAutomation, showAutomation, upsertAutomation } from '@murphai/core'
-import { buildMurphHostedPermissionProfileTomlLines } from '@murphai/hosted-execution/assistant-permissions'
 import { readMealNutritionTotals } from '@murphai/query'
 import { createAssistantModelTarget } from '@murphai/operator-config/assistant-backend'
 import { restoreHostedBundleRoots, snapshotHostedBundleRoots } from '@murphai/runtime-state/node'
@@ -17,6 +16,9 @@ import { sendAssistantMessageLocal, type AssistantMessageInput } from '../../src
 import type { AssistantHostedAutomationTool, AssistantHostedAutomationToolRequest } from '../../src/assistant/execution-context.js'
 import { stopWarmCodexAppServer, waitForWarmCodexBackgroundWork } from '../../src/assistant-codex.js'
 
+import type { RealCodexProviderConfig } from './real-codex-provider.js'
+import { canonicalCodexLauncher } from './canonical-codex-launcher.js'
+
 const execFileAsync = promisify(execFile)
 const CLI_ENTRYPOINT = fileURLToPath(new URL('../../../cli/dist/bin.js', import.meta.url))
 const PINNED_CODEX = fileURLToPath(new URL('../../node_modules/.bin/codex', import.meta.url))
@@ -25,6 +27,7 @@ const THREAD_ID = 'canonical-live-synthetic-thread'
 
 export interface CanonicalLiveConfig {
   codexHome: string | null
+  providerConfig?: RealCodexProviderConfig
   env: NodeJS.ProcessEnv
   model: string
   modelProvider: string
@@ -39,7 +42,7 @@ export interface CanonicalLiveFixture {
   codexCommand: string
   commandCount(): Promise<number>
   cli(args: readonly string[], vault?: string): Promise<string>
-  message(prompt: string, input?: Partial<Pick<AssistantMessageInput, 'vault' | 'sessionId' | 'threadId' | 'threadIsDirect' | 'executionContext'>>): ReturnType<typeof sendAssistantMessageLocal>
+  message(prompt: string, input?: Partial<Pick<AssistantMessageInput, 'vault' | 'sessionId' | 'threadId' | 'threadIsDirect' | 'executionContext' | 'beforeProviderAcceptedInputs'>>): ReturnType<typeof sendAssistantMessageLocal>
   close(): Promise<void>
 }
 
@@ -54,26 +57,6 @@ const CLI_WRAPPER = [
   'process.exit(result.status ?? 1);',
   '',
 ].join('\n')
-
-function canonicalCodexLauncher(): string {
-  let section = ''
-  let rows: string[] = []
-  const overrides: string[] = []
-  const flush = () => {
-    if (section) overrides.push(`${section}={${rows.join(',')}}`)
-    rows = []
-  }
-  for (const line of buildMurphHostedPermissionProfileTomlLines()) {
-    if (!line || line.startsWith('#')) continue
-    if (line.startsWith('[')) { flush(); section = line.slice(1, -1).replaceAll('"', '') }
-    else rows.push(line)
-  }
-  flush()
-  const args = overrides.map((value) => `-c '${value.replaceAll("'", "'\\''")}'`).join(' ')
-  // exec preserves native process ownership and stdio. The wrapper supplies
-  // only production permission definitions, never model responses or tools.
-  return `#!/bin/sh\nexec "$MURPH_CANONICAL_JOURNEY_CODEX" ${args} "$@"\n`
-}
 
 export async function createCanonicalLiveFixture(config: CanonicalLiveConfig, channel: 'telegram' | 'linq' = 'telegram'): Promise<CanonicalLiveFixture> {
   try {
@@ -98,9 +81,10 @@ export async function createCanonicalLiveFixture(config: CanonicalLiveConfig, ch
     PATH: `${bin}${path.delimiter}${config.env.PATH ?? ''}`,
     VAULT: vault,
   }
+  await symlink(process.execPath, path.join(bin, 'node'))
   await writeFile(path.join(bin, 'vault-cli'), CLI_WRAPPER, { mode: 0o700 })
   const codexCommand = path.join(bin, 'codex-real')
-  await writeFile(codexCommand, canonicalCodexLauncher(), { mode: 0o700 })
+  await writeFile(codexCommand, canonicalCodexLauncher(env, undefined, config.providerConfig), { mode: 0o700 })
   await writeFile(env.MURPH_CANONICAL_JOURNEY_COMMANDS!, '')
   // Bind the original authentication home explicitly while isolating operator
   // config and the first production CLI PATH entry. Auth is never copied.
@@ -147,6 +131,32 @@ export async function createCanonicalLiveFixture(config: CanonicalLiveConfig, ch
     },
   }
   return fixture
+}
+
+export async function runCanonicalHostedMealJourney(config: CanonicalLiveConfig): Promise<void> {
+  const fixture = await createCanonicalLiveFixture(config)
+  try {
+    const target = createAssistantModelTarget({
+      approvalPolicy: 'never', codexCommand: fixture.codexCommand,
+      codexHome: fixture.codexHome, model: config.model,
+      modelProvider: config.modelProvider, provider: 'codex-cli',
+      reasoningEffort: 'low', sandbox: 'workspace-write',
+    })
+    assert.ok(target)
+    const result = await fixture.message(`I ate oats for lunch on ${MEAL_DATE} at 12:15 UTC. The label says exactly 321 calories, 12 g protein, 51 g carbs and 7 g fat. Please record that meal.`, {
+      executionContext: { hosted: { defaultTarget: target, memberId: 'synthetic-hosted-meal-member', userEnvKeys: [] } },
+    })
+    const saved = await readMealNutritionTotals(fixture.vault, { from: MEAL_DATE, to: MEAL_DATE })
+    assert.equal(saved.mealCount, 1)
+    assert.equal(saved.totals.calories.total, 321)
+    assert.equal(saved.totals.proteinGrams.total, 12)
+    assert.equal(saved.totals.carbsGrams.total, 51)
+    assert.equal(saved.totals.fatGrams.total, 7)
+    assert.match(result.response, /logged|saved|recorded|added/iu)
+    assert.doesNotMatch(result.response, /couldn['’]t|unable|permission denied/iu)
+    assert.equal(result.delivery, null)
+    assert.equal((await listAutomations({ vaultRoot: fixture.vault })).count, 0)
+  } finally { await fixture.close() }
 }
 
 export async function runCanonicalMealRestartJourney(config: CanonicalLiveConfig): Promise<void> {

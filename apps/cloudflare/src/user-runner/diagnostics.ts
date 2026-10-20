@@ -46,32 +46,6 @@ export function observeRuntimeProcessingFence(
   diagnostics.details.runtimeProcessingActiveMode = fence.processingMode;
 }
 
-export type RuntimeProcessingRetryReason =
-  | "active_child_rejected"
-  | "checkpoint_handoff_pending"
-  | "container_busy"
-  | "container_rpc_error"
-  | "container_rpc_timeout"
-  | "command_budget_exhausted"
-  | "missing_container_binding"
-  | "starting_fence_preserved";
-
-export type RuntimeProcessingContainerBusyStage =
-  | "active_runtime_contention"
-  | "background_preemption_not_accepted"
-  | "background_preemption_unavailable"
-  | "stopped_container_record_pending";
-
-export type RuntimeProcessingRetryAttribution =
-  | {
-      reason: "container_busy";
-      stage: RuntimeProcessingContainerBusyStage;
-    }
-  | {
-      reason: Exclude<RuntimeProcessingRetryReason, "container_busy">;
-      stage?: never;
-    };
-
 /**
  * Same metadata-only picks as `buildHostedRunnerMetadataOnlyErrorDetails`, plus
  * the shared sanitizer's bounded error detail and cause, narrowed to the

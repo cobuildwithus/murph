@@ -1,4 +1,3 @@
-import { isIP } from 'node:net'
 import * as z from '@murphai/contracts/zod-runtime'
 import {
   assistantReasoningEffortValues as contractAssistantReasoningEffortValues,
@@ -14,26 +13,21 @@ import {
   type AutomationRoute,
   type AutomationTimeScheduleKind,
 } from '@murphai/contracts'
-import {
-  isAssistantGeneratedDeliveryRef,
-  isNormalizedAssistantVaultFileRef,
-} from '@murphai/runtime-state/assistant-generated-deliveries'
 import { normalizeAssistantOpaqueId } from '@murphai/runtime-state/assistant-ids'
-import {
-  gatewayDeliveryTargetKindValues,
-  gatewayReplyRouteKindValues,
-  type GatewayDeliveryTargetKind,
-  type GatewayReplyRouteKind,
+import type {
+  GatewayDeliveryTargetKind,
+  GatewayReplyRouteKind,
 } from '@murphai/gateway-core'
 import {
   isoTimestampSchema,
   pathSchema,
-} from './vault-cli-contracts.js'
+} from './primitive-schemas.js'
 import {
   assistantCodexModelProviderWireApiValues,
   assistantExecutionDriverValues,
   assistantResumeKindValues,
   buildCodexAssistantContinuityFingerprint,
+  isCodexReservedModelProviderId,
   normalizeAssistantCodexModelProvider,
 } from './assistant/target-runtime.js'
 import {
@@ -48,6 +42,35 @@ import {
   assistantResponseCardMatchesConversationAudience,
   assistantResponseCardSchema,
 } from './assistant-response-cards.js'
+import {
+  assistantBindingDeliverySchema,
+  assistantVoiceMemoGenerationSchema,
+  assistantVoiceMemoTransportSchema,
+  assistantResponseMediaSchema,
+  assistantMessageReactionSchema,
+  assistantProviderMessageEffectSchema,
+  assistantChannelDeliverySchema,
+} from './assistant-delivery-contracts.js'
+
+export {
+  assistantChannelDeliveryTargetKindValues,
+  assistantBindingDeliveryKindValues,
+  assistantMessageReactionValues,
+  assistantVaultImageMaxBytes,
+  assistantVaultFileMaxBytes,
+  assistantVoiceMemoSpeechOutputFormat,
+  assistantVoiceMemoMusicModelId,
+  assistantVoiceMemoMusicOutputFormat,
+  assistantBindingDeliverySchema,
+  assistantAuthoredResponseMediaSchema,
+  assistantVoiceMemoGenerationSchema,
+  assistantVoiceMemoTransportSchema,
+  assistantResponseMediaSchema,
+  assistantMessageReactionSchema,
+  normalizeAssistantResponseMediaUrl,
+  assistantProviderMessageEffectSchema,
+  assistantChannelDeliverySchema,
+} from './assistant-delivery-contracts.js'
 
 export const assistantSandboxValues = [
   'read-only',
@@ -61,13 +84,6 @@ export const assistantReasoningEffortValues = contractAssistantReasoningEffortVa
 export const assistantChatProviderValues = ['codex-cli'] as const
 export const assistantChannelNameValues = ['telegram', 'linq', 'email', 'voice'] as const
 export const assistantChannelNameSchema = z.enum(assistantChannelNameValues)
-export const assistantChannelDeliveryTargetKindValues = gatewayDeliveryTargetKindValues
-export const assistantBindingDeliveryKindValues = gatewayReplyRouteKindValues
-export const assistantMessageReactionValues = [
-  'heart',
-  'thumbs_up',
-  'laugh',
-] as const
 export const assistantTranscriptEntryKindValues = [
   'user',
   'assistant',
@@ -205,11 +221,6 @@ export const assistantResponseMediaKindValues = [
   'voice_memo',
   'vault_file',
 ] as const
-export const assistantVaultImageMaxBytes = 10 * 1024 * 1024
-export const assistantVaultFileMaxBytes = 100 * 1024 * 1024
-export const assistantVoiceMemoSpeechOutputFormat = 'mp3_44100_128' as const
-export const assistantVoiceMemoMusicModelId = 'music_v2' as const
-export const assistantVoiceMemoMusicOutputFormat = 'mp3_48000_192' as const
 
 export const assistantRuntimeEventKindValues = [
   'session.upserted',
@@ -251,6 +262,15 @@ export const assistantCodexModelProviderConfigSchema = z
   })
   .strict()
 
+const assistantOpenAiModelProviderSchema = z.string().min(1).refine(
+  isCodexReservedModelProviderId,
+  'Assistant models must use OpenAI.',
+)
+const assistantOpenAiOssSchema = z.boolean().refine(
+  (value) => !value,
+  'Assistant models must use OpenAI.',
+)
+
 export const assistantCodexModelTargetSchema = z
   .object({
     adapter: z.literal('codex-cli'),
@@ -258,8 +278,8 @@ export const assistantCodexModelTargetSchema = z
     codexCommand: z.string().min(1).nullable().default(null),
     codexHome: z.string().min(1).nullable().optional(),
     model: z.string().min(1).nullable().default(null),
-    modelProvider: z.string().min(1).nullable().optional(),
-    oss: z.boolean().default(false),
+    modelProvider: assistantOpenAiModelProviderSchema.nullable().optional(),
+    oss: assistantOpenAiOssSchema.default(false),
     profile: z.string().min(1).nullable().default(null),
     reasoningEffort: z.enum(assistantReasoningEffortValues).nullable().default(null),
     sandbox: z.enum(assistantSandboxValues).nullable().default(null),
@@ -300,9 +320,9 @@ export const assistantProviderSessionOptionsSchema = z.object({
   sandbox: z.enum(assistantSandboxValues).nullable(),
   approvalPolicy: z.enum(assistantApprovalPolicyValues).nullable(),
   profile: z.string().min(1).nullable(),
-  oss: z.boolean(),
+  oss: assistantOpenAiOssSchema,
   codexHome: z.string().min(1).nullable().optional(),
-  modelProvider: z.string().min(1).nullable().optional(),
+  modelProvider: assistantOpenAiModelProviderSchema.nullable().optional(),
   executionDriver: z.enum(assistantExecutionDriverValues),
   resumeKind: z.enum(assistantResumeKindValues).nullable(),
   headers: assistantHeadersSchema.nullable().optional(),
@@ -325,11 +345,6 @@ export const assistantAliasStoreSchema = z
     recentSessions: z.record(assistantSessionIdSchema, isoTimestampSchema).optional(),
   })
   .strict()
-
-export const assistantBindingDeliverySchema = z.object({
-  kind: z.enum(assistantBindingDeliveryKindValues),
-  target: z.string().min(1),
-})
 
 export const assistantDeliverySourceSchema = z.discriminatedUnion('kind', [
   z
@@ -373,202 +388,6 @@ export const assistantSessionBindingSchema = z.object({
   delivery: assistantBindingDeliverySchema.nullable(),
 })
 
-const assistantImageResponseMediaSchema = z
-  .object({
-    kind: z.literal('image').default('image'),
-    url: z
-      .string()
-      .url()
-      .transform((value, context) => {
-        try {
-          return normalizeAssistantResponseMediaUrl(value)
-        } catch {
-          context.addIssue({
-            code: 'custom',
-            message:
-              'Assistant response media URLs must be valid public HTTPS image URLs.',
-            params: { murphExpectedShape: 'public_https_image_url' },
-          })
-          return z.NEVER
-        }
-      }),
-    alt: z.string().trim().min(1).max(500).nullable().default(null),
-    source: z.string().trim().min(1).max(200).nullable().default(null),
-  })
-  .strict()
-
-const assistantVaultImageResponseMediaSchema = z
-  .object({
-    kind: z.literal('vault_image'),
-    ref: z
-      .string()
-      .trim()
-      .min(1)
-      .max(1024)
-      .refine(
-        (value) => isNormalizedAssistantVaultFileRef(value),
-        'Assistant vault image refs must be normalized vault-relative paths.',
-      ),
-    sha256: z.string().regex(/^[0-9a-f]{64}$/u),
-    filename: z
-      .string()
-      .trim()
-      .min(1)
-      .max(255)
-      .refine(
-        (value) => !/[\\/\u0000-\u001F\u007F]/u.test(value),
-        'Assistant vault image names must not contain path separators or control characters.',
-      ),
-    contentType: z.enum(['image/jpeg', 'image/png', 'image/webp']),
-    sizeBytes: z.number().int().positive().max(assistantVaultImageMaxBytes),
-    alt: z.string().trim().min(1).max(500).nullable().default(null),
-    source: z.string().trim().min(1).max(200).nullable().default(null),
-  })
-  .strict()
-
-export const assistantAuthoredResponseMediaSchema = z.preprocess(
-  (value) =>
-    typeof value === 'object' &&
-    value !== null &&
-    !Array.isArray(value) &&
-    !Object.hasOwn(value, 'kind')
-      ? { ...value, kind: 'image' }
-      : value,
-  z.discriminatedUnion('kind', [
-    assistantImageResponseMediaSchema,
-    assistantVaultImageResponseMediaSchema,
-  ]),
-)
-
-export const assistantVoiceMemoGenerationSchema = z.discriminatedUnion('kind', [
-  z
-    .object({
-      kind: z.literal('elevenlabs_speech'),
-      modelId: z.string().trim().min(1).max(200),
-      outputFormat: z.literal(assistantVoiceMemoSpeechOutputFormat),
-      text: z.string().trim().min(1).max(4000),
-      voiceId: z.string().trim().min(1).max(200),
-    })
-    .strict(),
-  z
-    .object({
-      durationMs: z.number().int().min(3_000).max(300_000),
-      forceInstrumental: z.boolean(),
-      kind: z.literal('elevenlabs_music'),
-      modelId: z.literal(assistantVoiceMemoMusicModelId),
-      outputFormat: z.literal(assistantVoiceMemoMusicOutputFormat),
-      prompt: z.string().trim().min(1).max(4100),
-    })
-    .strict(),
-])
-
-export const assistantVoiceMemoTransportSchema = z.discriminatedUnion('kind', [
-  z
-    .object({
-      attachmentId: z.string().trim().min(1).max(200),
-      kind: z.literal('linq_attachment'),
-    })
-    .strict(),
-  z
-    .object({
-      generation: assistantVoiceMemoGenerationSchema,
-      kind: z.literal('telegram_generation'),
-    })
-    .strict(),
-])
-
-const assistantVoiceMemoResponseMediaSchema = z
-  .object({
-    kind: z.literal('voice_memo'),
-    filename: z.string().trim().min(1).max(255),
-    transcript: z.string().trim().min(1).max(4000).nullable().default(null),
-    transport: assistantVoiceMemoTransportSchema,
-  })
-  .strict()
-
-const assistantExportPackRetirementReceiptSchema = z
-  .object({
-    manifestSha256: z.string().regex(/^[0-9a-f]{64}$/u),
-    packId: z.string().regex(/^[A-Za-z0-9_-]+$/u),
-  })
-  .strict()
-
-const assistantVaultFileResponseMediaSchema = z
-  .object({
-    approvalGeneration: z.string().regex(/^[0-9a-f]{64}$/u).nullable().default(null),
-    approvalId: z.string().regex(/^haa_[A-Za-z0-9_-]{32}$/u).nullable().default(null),
-    kind: z.literal('vault_file'),
-    ref: z
-      .string()
-      .trim()
-      .min(1)
-      .max(1024)
-      .refine(
-        (value) => isNormalizedAssistantVaultFileRef(value),
-        'Assistant vault file refs must be normalized vault-relative paths.',
-      ),
-    sha256: z.string().regex(/^[0-9a-f]{64}$/u),
-    filename: z
-      .string()
-      .trim()
-      .min(1)
-      .max(255)
-      .refine(
-        (value) => !/[\\/\u0000-\u001F\u007F]/u.test(value),
-        'Assistant vault file names must not contain path separators or control characters.',
-      ),
-    contentType: z
-      .string()
-      .trim()
-      .min(3)
-      .max(200)
-      .regex(/^[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]*\/[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]*$/u),
-    retireExportPacks: z
-      .array(assistantExportPackRetirementReceiptSchema)
-      .min(1)
-      .max(20)
-      .optional(),
-    sizeBytes: z.number().int().positive().max(assistantVaultFileMaxBytes),
-  })
-  .strict()
-  .superRefine((value, context) => {
-    if ((value.approvalGeneration === null) !== (value.approvalId === null)) {
-      context.addIssue({
-        code: 'custom',
-        message: 'Assistant vault file approval id and generation must be present together.',
-      })
-    }
-    if (value.retireExportPacks) {
-      if (
-        value.contentType !== 'application/zip'
-        || !isAssistantGeneratedDeliveryRef(value.ref)
-      ) {
-        context.addIssue({
-          code: 'custom',
-          message: 'Export-pack retirement requires an assistant-generated ZIP.',
-          path: ['retireExportPacks'],
-        })
-      }
-      const packIds = value.retireExportPacks.map((receipt) => receipt.packId)
-      if (new Set(packIds).size !== packIds.length) {
-        context.addIssue({
-          code: 'custom',
-          message: 'Export-pack retirement receipts must have unique pack ids.',
-          path: ['retireExportPacks'],
-        })
-      }
-    }
-  })
-
-export const assistantResponseMediaSchema = z.union([
-  assistantImageResponseMediaSchema,
-  assistantVaultImageResponseMediaSchema,
-  assistantVoiceMemoResponseMediaSchema,
-  assistantVaultFileResponseMediaSchema,
-])
-
-export const assistantMessageReactionSchema = z.enum(assistantMessageReactionValues)
-
 export const assistantOutboxMessageReactionOperationSchema = z
   .object({
     kind: z.literal('message-reaction'),
@@ -579,60 +398,18 @@ export const assistantOutboxMessageReactionOperationSchema = z
 export const assistantOutboxOperationSchema =
   assistantOutboxMessageReactionOperationSchema
 
-export function normalizeAssistantResponseMediaUrl(value: string): string {
-  let parsed: URL
-  try {
-    parsed = new URL(value.trim())
-  } catch {
-    throw new Error('Assistant response media URLs must be valid URLs.')
-  }
-
-  if (parsed.protocol !== 'https:') {
-    throw new Error('Assistant response media URLs must use HTTPS.')
-  }
-  if (parsed.username || parsed.password || parsed.search || parsed.hash) {
-    throw new Error('Assistant response media URLs must be public image URLs without credentials, query strings, or fragments.')
-  }
-  if (!isPublicAssistantResponseMediaHost(parsed.hostname)) {
-    throw new Error('Assistant response media URLs must use public hosts.')
-  }
-  if (!hasAssistantResponseMediaImageExtension(parsed.pathname) && !isCloudflareImagesDeliveryUrl(parsed)) {
-    throw new Error('Assistant response media URLs must point to image files.')
-  }
-
-  return parsed.toString()
-}
-
-function hasAssistantResponseMediaImageExtension(pathname: string): boolean {
-  return /\.(?:avif|gif|jpe?g|png|webp)$/iu.test(pathname)
-}
-
-function isCloudflareImagesDeliveryUrl(url: URL): boolean {
-  return url.hostname.toLowerCase().replace(/\.$/u, '') === 'imagedelivery.net'
-    && url.pathname.split('/').filter(Boolean).length >= 3
-}
-
-function isPublicAssistantResponseMediaHost(hostname: string): boolean {
-  const normalized = hostname.toLowerCase().replace(/\.$/u, '')
-  if (!normalized || normalized === 'localhost' || normalized.endsWith('.localhost') || normalized.endsWith('.local')) {
-    return false
-  }
-
-  const ipLiteral = normalized.startsWith('[') && normalized.endsWith(']')
-    ? normalized.slice(1, -1)
-    : normalized
-  if (isIP(ipLiteral) !== 0) {
-    return false
-  }
-
-  return true
-}
+// Saved conversations can predate the OpenAI-only target contract. Keep this
+// read boundary separate from strict targets accepted for configuration/writes.
+const assistantPersistedModelTargetInputSchema = assistantModelTargetSchema.extend({
+  modelProvider: z.string().min(1).nullable().optional(),
+  oss: z.boolean().default(false),
+})
 
 const assistantPersistedSessionV1Schema = z
   .object({
     schema: z.literal('murph.assistant-session.v1'),
     sessionId: assistantSessionIdSchema,
-    target: assistantModelTargetSchema,
+    target: assistantPersistedModelTargetInputSchema,
     resumeState: z
       .union([assistantSessionResumeStateSchema, legacyAssistantSessionResumeStateSchema])
       .nullable()
@@ -663,6 +440,7 @@ export const assistantPersistedSessionSchema = z
 
 const assistantPersistedSessionInputSchema = assistantPersistedSessionSchema
   .extend({
+    codexTarget: assistantPersistedModelTargetInputSchema,
     codexResume: z.unknown().nullable().default(null),
   })
   .strict()
@@ -703,12 +481,12 @@ export const assistantSessionSummarySchema = z
     turnCount: z.number().int().nonnegative(),
     provider: z.enum(assistantChatProviderValues),
     model: z.string().min(1).nullable(),
-    modelProvider: z.string().min(1).nullable(),
+    modelProvider: assistantOpenAiModelProviderSchema.nullable(),
     reasoningEffort: z.string().min(1).nullable(),
     sandbox: z.enum(assistantSandboxValues).nullable(),
     approvalPolicy: z.enum(assistantApprovalPolicyValues).nullable(),
     profile: z.string().min(1).nullable(),
-    oss: z.boolean(),
+    oss: assistantOpenAiOssSchema,
     executionDriver: z.enum(assistantExecutionDriverValues),
     resumeKind: z.enum(assistantResumeKindValues).nullable(),
     resumeThreadId: z.string().min(1).nullable(),
@@ -766,10 +544,35 @@ function buildAssistantRuntimeSession(
 function normalizeAssistantPersistedConversation(
   value: z.infer<typeof assistantPersistedSessionRecordSchema>,
 ): AssistantPersistedSessionRecord {
+  const target = value.schema === 'murph.assistant-conversation.v2'
+    ? value.codexTarget
+    : value.target
+  const resetProvider = target.oss || (
+    target.modelProvider != null &&
+    !isCodexReservedModelProviderId(target.modelProvider)
+  )
+  const codexTarget = resetProvider
+    ? {
+        ...target,
+        model: null,
+        modelProvider: 'openai',
+        oss: false,
+        profile: null,
+      }
+    : target
+  const codexResume = resetProvider
+    ? null
+    : normalizeCodexResumeState(
+        value.schema === 'murph.assistant-conversation.v2'
+          ? value.codexResume
+          : value.resumeState,
+      )
+
   if (value.schema === 'murph.assistant-conversation.v2') {
     return assistantPersistedSessionSchema.parse({
       ...value,
-      codexResume: normalizeCodexResumeState(value.codexResume),
+      codexTarget,
+      codexResume,
     })
   }
 
@@ -778,19 +581,13 @@ function normalizeAssistantPersistedConversation(
     conversationId: value.sessionId,
     alias: value.alias,
     binding: value.binding,
-    codexTarget: value.target,
-    codexResume: normalizeAssistantSessionResumeState(value.resumeState),
+    codexTarget,
+    codexResume,
     createdAt: value.createdAt,
     updatedAt: value.updatedAt,
     lastTurnAt: value.lastTurnAt,
     turnCount: value.turnCount,
   })
-}
-
-function normalizeAssistantSessionResumeState(
-  value: unknown,
-): AssistantSessionResumeState | null {
-  return normalizeCodexResumeState(value)
 }
 
 export const assistantTranscriptEntrySchema = z.object({
@@ -819,58 +616,6 @@ export const assistantTranscriptEntrySchema = z.object({
   // rather than expired.
   textRetiredAt: isoTimestampSchema.optional(),
 })
-
-const assistantChannelCleanupMessageSchema = z
-  .object({
-    messageId: z.string().min(1),
-    target: z.string().min(1),
-  })
-  .strict()
-
-export const assistantProviderMessageEffectSchema = z
-  .object({
-    carriesIntentMedia: z.literal(true).optional(),
-    providerMessageId: z.string().min(1),
-    message: z.string().min(1).nullable(),
-  })
-  .strict()
-
-const assistantMessageChannelDeliverySchema = z.object({
-  kind: z.literal('message').optional(),
-  channel: z.string().min(1),
-  idempotencyKey: z.string().min(1).nullable().default(null),
-  target: z.string().min(1),
-  targetKind: z.enum(assistantChannelDeliveryTargetKindValues),
-  sentAt: isoTimestampSchema,
-  messageLength: z.number().int().nonnegative(),
-  providerMessageId: z.string().min(1).nullable().default(null),
-  providerMessageIds: z.array(z.string().min(1)).min(1).optional(),
-  providerMessageEffects: z
-    .array(assistantProviderMessageEffectSchema)
-    .min(1)
-    .optional(),
-  cleanupMessages: z.array(assistantChannelCleanupMessageSchema).min(1).optional(),
-  cleanupTargetAliases: z.array(z.string().min(1)).min(1).optional(),
-  providerThreadId: z.string().min(1).nullable().default(null),
-})
-
-const assistantMessageReactionChannelDeliverySchema = z
-  .object({
-    kind: z.literal('message-reaction'),
-    channel: z.enum(['linq', 'telegram']),
-    idempotencyKey: z.string().min(1).nullable().default(null),
-    reaction: assistantMessageReactionSchema,
-    sentAt: isoTimestampSchema,
-    target: z.string().min(1),
-    targetKind: z.enum(assistantChannelDeliveryTargetKindValues),
-    targetMessageId: z.string().min(1),
-  })
-  .strict()
-
-export const assistantChannelDeliverySchema = z.union([
-  assistantMessageChannelDeliverySchema,
-  assistantMessageReactionChannelDeliverySchema,
-])
 
 const assistantDeliveryErrorDiagnosticValueSchema = z.union([
   z.boolean(),

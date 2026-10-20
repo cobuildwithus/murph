@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 
+import { APIConnectionTimeoutError, APIUserAbortError } from "@composio/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const prismaMocks = vi.hoisted(() => ({
@@ -27,8 +28,10 @@ import {
   executeHostedConnectedAppsRequest,
   startHostedConnectedAppConnection,
 } from "@/src/lib/connected-apps/service";
+import { ComposioConnectedAppsRequestError } from "@/src/lib/connected-apps/composio";
 import { HOSTED_CONNECTED_APP_STARTED_INTENT_OWNER_GRACE_MS } from "@/src/lib/connected-apps/connect-intent-ownership";
 import { isHostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
+import { jsonError, jsonOk } from "@/src/lib/hosted-onboarding/http";
 
 interface MemberRow {
   accountGroupMemberships?: Array<{
@@ -287,6 +290,252 @@ describe("connected-app service", () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.unstubAllEnvs();
+  });
+
+  describe("private Composio transport diagnostics", () => {
+    beforeEach(() => {
+      vi.stubEnv("NODE_ENV", "production");
+      installPrismaHarness();
+      vi.spyOn(console, "error").mockImplementation(() => undefined);
+      vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    });
+
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    it.each([
+      {
+        label: "socket",
+        diagnostic: "socket",
+        cause: () => new TypeError("private-fetch-message", {
+          cause: Object.assign(new Error("private-socket-message"), { code: "ECONNRESET" }),
+        }),
+      },
+      {
+        label: "DNS",
+        diagnostic: "dns",
+        cause: () => new TypeError("private-fetch-message", {
+          cause: { code: "ENOTFOUND", name: "private-name", message: "private-message" },
+        }),
+      },
+      {
+        label: "connect",
+        diagnostic: "connect",
+        cause: () => Object.assign(new Error("private-connect-message"), { code: "ECONNREFUSED" }),
+      },
+      {
+        label: "SDK timeout",
+        diagnostic: "sdk_timeout",
+        cause: () => Object.assign(
+          new APIConnectionTimeoutError({ message: "private-timeout-message" }),
+          { cause: Object.assign(new Error("private-socket-message"), { code: "ECONNRESET" }) },
+        ),
+      },
+      {
+        label: "SDK abort",
+        diagnostic: "abort",
+        cause: () => new APIUserAbortError({ message: "private-abort-message" }),
+      },
+      {
+        label: "nested abort",
+        diagnostic: "abort",
+        cause: () => new TypeError("private-fetch-message", {
+          cause: new DOMException("private-abort-message", "AbortError"),
+        }),
+      },
+      {
+        label: "unknown private metadata",
+        diagnostic: "unknown",
+        cause: () => Object.assign(new Error("private-message ENOTFOUND"), {
+          name: "private-custom-class",
+          code: "ECONNRESET-private-code",
+          stack: "private-stack https://private.example.test/?token=private-secret",
+        }),
+      },
+      {
+        label: "cyclic unknown",
+        diagnostic: "unknown",
+        cause: () => {
+          const error = new Error("private-cycle");
+          error.cause = error;
+          return error;
+        },
+      },
+      {
+        label: "depth-limited unknown",
+        diagnostic: "unknown",
+        cause: () => {
+          let error: Error = Object.assign(new Error("private-root"), { code: "ENOTFOUND" });
+          for (let depth = 0; depth < 8; depth += 1) {
+            error = new Error("private-wrapper", { cause: error });
+          }
+          return error;
+        },
+      },
+      {
+        label: "ambiguous direct write",
+        diagnostic: "socket",
+        directWrite: true,
+        cause: () => Object.assign(new Error("private-write-message"), { code: "ECONNRESET" }),
+      },
+    ])("keeps $label observable only in the existing route log", async (scenario) => {
+      const directWrite = "directWrite" in scenario && scenario.directWrite === true;
+      const failure = scenario.cause();
+      const fetchImpl = vi.fn(async (url: string | URL | Request): Promise<Response> => {
+        const pathname = new URL(String(url)).pathname;
+        if (directWrite && pathname === "/api/v3.1/connected_accounts") {
+          return jsonResponse({
+            items: [{
+              id: "ca_calendar",
+              is_disabled: false,
+              status: "ACTIVE",
+              toolkit: { slug: "googlecalendar" },
+            }],
+          });
+        }
+        expect(pathname).toBe(directWrite
+          ? "/api/v3.1/tools/execute/GOOGLECALENDAR_CREATE_EVENT"
+          : "/api/v3.1/connected_accounts");
+        throw failure;
+      });
+      const error = await executeHostedConnectedAppsRequest({
+        fetchImpl,
+        memberId: "hbm_member",
+        request: directWrite
+          ? {
+              operation: "execute",
+              input: {
+                account: "ca_calendar",
+                agentApproved: true,
+                arguments: {
+                  event_duration_hour: 0,
+                  event_duration_minutes: 30,
+                  start_datetime: "2026-07-01T10:00:00-04:00",
+                  summary: "private-summary",
+                  timezone: "America/New_York",
+                },
+                toolSlug: "GOOGLECALENDAR_CREATE_EVENT",
+              },
+            }
+          : { operation: "manage", input: { action: "list" } },
+      }).catch((value: unknown) => value);
+      if (!isHostedOnboardingError(error)
+        || !(error.cause instanceof ComposioConnectedAppsRequestError)) {
+        throw new Error("Expected the original mapped Composio failure.");
+      }
+      const cause = error.cause;
+      const transport = directWrite ? cause.cause : cause;
+      if (!(transport instanceof ComposioConnectedAppsRequestError)) {
+        throw new Error("Expected the transport cause inside the write wrapper.");
+      }
+      const transportMessage =
+        `Composio is temporarily unavailable. Transport diagnostic: ${scenario.diagnostic}.`;
+      const causeMessage = directWrite
+        ? `Composio calendar event creation returned an ambiguous result. ${transportMessage}`
+        : transportMessage;
+      expect(transport).toMatchObject({
+        message: transportMessage,
+        retryable: null,
+        status: null,
+        type: "composio_transport_error",
+      });
+      expect(cause.retryable).toBe(directWrite ? false : null);
+      const transportCause = transport.cause;
+      if (scenario.diagnostic === "sdk_timeout") {
+        // The SDK replaces timeout-looking fetch failures before our wrapper.
+        expect(transportCause).toBeInstanceOf(APIConnectionTimeoutError);
+        expect(transportCause).toHaveProperty("message", "Request timed out.");
+        expect(transportCause).not.toHaveProperty("cause");
+        expect(transportCause).not.toBe(failure);
+      } else {
+        expect(transportCause).toBe(failure);
+      }
+      const expectedError = {
+        code: "CONNECTED_APPS_PROVIDER_UNAVAILABLE",
+        details: {
+          ...(directWrite ? { operationName: "GOOGLECALENDAR_CREATE_EVENT" } : {}),
+          type: "composio_transport_error",
+        },
+        message: directWrite
+          ? "The connected-app request could not be completed."
+          : "Connected apps are temporarily unavailable.",
+        retryable: !directWrite,
+      };
+      const status = directWrite ? 400 : 503;
+      expect(error).toMatchObject({ ...expectedError, httpStatus: status });
+      expect(console.error).not.toHaveBeenCalled();
+      expect(console.warn).not.toHaveBeenCalled();
+      const response = jsonError(error);
+      expect(response.status).toBe(status);
+      expect(await response.json()).toEqual({ error: expectedError });
+      expect(error.cause).toBe(cause);
+      expect(transport.cause).toBe(transportCause);
+      const log = vi.mocked(directWrite ? console.warn : console.error);
+      expect(log).toHaveBeenCalledTimes(1);
+      expect(directWrite ? console.error : console.warn).not.toHaveBeenCalled();
+      expect(log).toHaveBeenCalledWith("Hosted onboarding route failed.", expect.objectContaining({
+        errorCauseType: "ComposioConnectedAppsRequestError",
+        errorCauseMessage: causeMessage,
+        errorResponseRetryable: !directWrite,
+        errorResponseStatus: status,
+      }));
+      expect(JSON.stringify(log.mock.calls)).not.toMatch(/private-|secret-test-key|hbm_member|ca_calendar/);
+      expect(fetchImpl).toHaveBeenCalledTimes(directWrite ? 2 : 1);
+    });
+
+    it.each([200, 400, 502])("preserves provider HTTP %i without transport diagnostics", async (status) => {
+      const fetchImpl = vi.fn(async (): Promise<Response> => jsonResponse(
+        status === 200
+          ? { items: [] }
+          : { error: { code: 2502, slug: "UPSTREAM_UNAVAILABLE", message: "private-provider-message" } },
+        status,
+      ));
+      let failure: unknown;
+      const response = await executeHostedConnectedAppsRequest({
+        fetchImpl,
+        memberId: "hbm_member",
+        request: { operation: "manage", input: { action: "list" } },
+      }).then(
+        (result) => jsonOk(result),
+        (error: unknown) => {
+          failure = error;
+          return jsonError(error);
+        },
+      );
+      expect(fetchImpl).toHaveBeenCalledTimes(1);
+      if (status === 200) {
+        expect(response.status).toBe(200);
+        expect(await response.json()).toMatchObject({ accounts: [] });
+        expect(console.error).not.toHaveBeenCalled();
+        expect(console.warn).not.toHaveBeenCalled();
+        return;
+      }
+      if (!isHostedOnboardingError(failure)
+        || !(failure.cause instanceof ComposioConnectedAppsRequestError)) {
+        throw new Error("Expected the unchanged provider HTTP error.");
+      }
+      const retryable = status >= 500;
+      const expectedError = {
+        code: "CONNECTED_APPS_PROVIDER_UNAVAILABLE",
+        details: { statusCode: status, type: "composio_http_error" },
+        message: retryable
+          ? "Connected apps are temporarily unavailable."
+          : "The connected-app request could not be completed.",
+        retryable,
+      };
+      expect(response.status).toBe(retryable ? 503 : 400);
+      expect(await response.json()).toEqual({ error: expectedError });
+      expect(failure.cause.status).toBe(status);
+      expect(failure.cause.cause).toBeUndefined();
+      const log = vi.mocked(retryable ? console.error : console.warn);
+      expect(log).toHaveBeenCalledTimes(1);
+      expect(retryable ? console.warn : console.error).not.toHaveBeenCalled();
+      expect(log).toHaveBeenCalledWith("Hosted onboarding route failed.", expect.objectContaining({
+        errorCauseMessage: `Composio request failed with status ${status}. Provider error: code=2502, slug=UPSTREAM_UNAVAILABLE.`,
+      }));
+      expect(JSON.stringify(log.mock.calls)).not.toMatch(/Transport diagnostic|private-/);
+    });
   });
 
   it("binds connect intents to the member and keeps provider-link attempts visible", async () => {

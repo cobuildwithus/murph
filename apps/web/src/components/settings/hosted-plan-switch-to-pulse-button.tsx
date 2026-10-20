@@ -4,7 +4,10 @@ import { MinusIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState, type ReactNode } from "react";
 
-import { requestHostedOnboardingJson } from "@/src/components/hosted-onboarding/client-api";
+import {
+  HostedOnboardingApiError,
+  requestHostedOnboardingJson,
+} from "@/src/components/hosted-onboarding/client-api";
 import { Button } from "@/src/components/ui/button";
 import {
   Dialog,
@@ -17,6 +20,7 @@ import { getHostedBillingPlanDefinition } from "@/src/lib/hosted-onboarding/bill
 import { EDGE_ONLY_FEATURES } from "@/src/lib/hosted-onboarding/plan-features";
 import { cn } from "@/src/lib/utils";
 
+import { BillingPortalButton } from "./billing-portal-button";
 import { toErrorMessage } from "./hosted-settings-sync-helpers";
 
 interface HostedBillingPlanSwitchToPulseResponse {
@@ -38,14 +42,21 @@ export function SwitchToPulseButton(props: {
   onPendingChange?: (pending: boolean) => void;
 }) {
   const router = useRouter();
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [failure, setFailure] = useState<{ error: unknown } | null>(null);
   const [confirmationOpen, setConfirmationOpen] = useState(false);
   const [isSwitching, setIsSwitching] = useState(false);
   const label = isSwitching ? "Scheduling..." : props.children ?? "Switch to Pulse";
   const disabled = props.disabled === true || isSwitching;
+  const error = failure?.error;
+  const errorMessage = failure
+    ? toErrorMessage(error, "Could not schedule your plan switch right now.")
+    : null;
+  const showCancellationRecovery = error instanceof HostedOnboardingApiError
+    && error.code === "HOSTED_BILLING_STRIPE_SUBSCRIPTION_STATE_UNSUPPORTED"
+    && error.details?.code === "cancellation";
 
   async function handleSwitchToPulse() {
-    setErrorMessage(null);
+    setFailure(null);
     setIsSwitching(true);
     props.onPendingChange?.(true);
 
@@ -58,7 +69,7 @@ export function SwitchToPulseButton(props: {
       setConfirmationOpen(false);
       router.refresh();
     } catch (error) {
-      setErrorMessage(toErrorMessage(error, "Could not schedule your plan switch right now."));
+      setFailure({ error });
     } finally {
       setIsSwitching(false);
       props.onPendingChange?.(false);
@@ -92,6 +103,7 @@ export function SwitchToPulseButton(props: {
         onConfirm={() => void handleSwitchToPulse()}
         onOpenChange={setConfirmationOpen}
         open={confirmationOpen}
+        showCancellationRecovery={showCancellationRecovery}
       />
     </div>
   );
@@ -104,6 +116,7 @@ function PulseSwitchConfirmationDialog(props: {
   onConfirm: () => void;
   onOpenChange: (open: boolean) => void;
   open: boolean;
+  showCancellationRecovery: boolean;
 }) {
   const renewalDate = formatHostedBillingDate(props.currentPeriodEnd);
 
@@ -151,15 +164,19 @@ function PulseSwitchConfirmationDialog(props: {
         ) : null}
 
         <div className="flex flex-col gap-2">
-          <Button
-            type="button"
-            size="xl"
-            onClick={props.onConfirm}
-            disabled={props.isSwitching}
-            className="w-full"
-          >
-            {props.isSwitching ? "Scheduling..." : "Confirm switch"}
-          </Button>
+          {props.showCancellationRecovery ? (
+            <BillingPortalButton block label="Manage billing" variant="secondary" />
+          ) : (
+            <Button
+              type="button"
+              size="xl"
+              onClick={props.onConfirm}
+              disabled={props.isSwitching}
+              className="w-full"
+            >
+              {props.isSwitching ? "Scheduling..." : "Confirm switch"}
+            </Button>
+          )}
           <Button
             type="button"
             size="xl"

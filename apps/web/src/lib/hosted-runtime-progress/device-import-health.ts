@@ -6,6 +6,7 @@ export const DEVICE_IMPORT_CYCLE_WINDOW_MS = 20 * MINUTE;
 export const DEVICE_IMPORT_CYCLE_LIMIT = 4;
 
 export type DeviceImportCondition = "stalled" | "cycling" | "backlog";
+export type DeviceImportCheckpointPublication = { attemptId: string; expectedBy: Date };
 export type DeviceImportHealth = {
   anomalous: boolean;
   affectedRuntimeCount: number;
@@ -40,6 +41,7 @@ export function summarizeDeviceImportHealth(input: {
   now: Date;
   observations: readonly DeviceImportObservation[];
   dueSubjects: ReadonlySet<string>;
+  checkpointPublications?: ReadonlyMap<string, DeviceImportCheckpointPublication>;
 }): Record<DeviceImportCondition, DeviceImportHealth> {
   const result = { stalled: emptyHealth(), cycling: emptyHealth(), backlog: emptyHealth() };
   const bySubject = new Map<string, DeviceImportObservation[]>();
@@ -54,7 +56,8 @@ export function summarizeDeviceImportHealth(input: {
     bySubject.set(row.subjectKey, rows);
   }
   for (const [subject, rows] of bySubject) {
-    const health = summarizeRuntime(rows, now, input.dueSubjects.has(subject));
+    const health = summarizeRuntime(rows, now, input.dueSubjects.has(subject),
+      input.checkpointPublications?.get(subject));
     for (const condition of ["stalled", "cycling", "backlog"] as const) {
       const runtime = health[condition];
       const total = result[condition];
@@ -69,12 +72,13 @@ export function summarizeDeviceImportHealth(input: {
   return result;
 }
 
-function summarizeRuntime(rows: DeviceImportObservation[], now: number, due: boolean) {
+function summarizeRuntime(rows: DeviceImportObservation[], now: number, due: boolean,
+  publication?: DeviceImportCheckpointPublication) {
   rows.sort((a, b) => a.at.getTime() - b.at.getTime());
   const result = { stalled: emptyHealth(), cycling: emptyHealth(), backlog: emptyHealth() };
   const restartTimes = rows.filter(row => row.restarted).map(row => row.at.getTime());
   for (const connectionRows of groupConnectionObservations(rows).values()) {
-    const evidence = summarizeConnection(connectionRows, now, due, restartTimes, row => row.pending);
+    const evidence = summarizeConnection(connectionRows, now, due, restartTimes, row => row.pending, publication);
     if (!evidence) continue;
     // Saved deferral ends active cycling/backlog evidence. Keep all pending
     // retry obligations in the separate stall summary for overdue wakes.
@@ -84,6 +88,7 @@ function summarizeRuntime(rows: DeviceImportObservation[], now: number, due: boo
     if ((due || evidence.latestPassUncheckpointed)
       && !evidence.awaitingProgressCheckpoint
       && !evidence.awaitingDeferredCheckpoint
+      && !evidence.awaitingForegroundCheckpoint
       && now - evidence.lastProgress >= DEVICE_IMPORT_STALL_MS) {
       conditions.push("stalled");
     }
@@ -138,6 +143,7 @@ function emptyHealth(): DeviceImportHealth {
 function summarizeConnection(
   rows: DeviceImportObservation[], now: number, due: boolean, restartTimes: readonly number[],
   pendingOf: (row: DeviceImportObservation) => boolean | null,
+  publication?: DeviceImportCheckpointPublication,
 ) {
   let pendingSince: number | null = null;
   let lastPendingAt = 0;
@@ -196,12 +202,29 @@ function summarizeConnection(
     evidenceCurrent,
     awaitingProgressCheckpoint: isAwaitingProgressCheckpoint(pendingProgress, lastProgress, now),
     awaitingDeferredCheckpoint: isAwaitingDeferredCheckpoint(pendingSnapshots, latestPassAttemptId, due, now),
+    awaitingForegroundCheckpoint: isAwaitingForegroundCheckpoint(
+      pendingSnapshots, pendingProgress, latestPassAttemptId, publication, now),
     latestPassUncheckpointed: pendingSnapshots.has(latestPassAttemptId),
     backlogAge: now - pendingSince,
     lastProgress: Math.max(pendingSince, lastProgress),
     restarts: countAtOrAfter(restartTimes, recentAfter), cancellations: countRecent(cancellationsAt),
     savedPasses: countRecent(savedAt),
   };
+}
+
+function isAwaitingForegroundCheckpoint(
+  snapshots: ReadonlyMap<string | null, PendingSnapshot>,
+  progress: ReadonlyMap<string, readonly number[]>,
+  latestAttemptId: string | null,
+  publication: DeviceImportCheckpointPublication | undefined,
+  now: number,
+): boolean {
+  if (!publication || latestAttemptId !== publication.attemptId
+    || !(now <= publication.expectedBy.getTime())) return false;
+  // A newer foreground owner cannot excuse an older attempt's unsaved work.
+  if (snapshots.size !== 1 || !snapshots.has(latestAttemptId)) return false;
+  return snapshots.get(latestAttemptId)?.runnable === false
+    || progress.has(publication.attemptId);
 }
 
 function recordPendingSnapshot(

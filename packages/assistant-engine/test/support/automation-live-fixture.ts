@@ -1,4 +1,5 @@
 import type {
+  AssistantAutomationOccurrenceProjection,
   AssistantHostedAutomationTool,
   AssistantHostedAutomationToolRequest,
   AssistantHostedAutomationToolResponse,
@@ -16,7 +17,10 @@ type AutomationPatchRequest = Extract<
 export type VersionedAutomationFixtureRecord = Omit<
   AutomationInspectResponse,
   'action' | 'routeBinding'
->
+> & {
+  effectiveTimeZone: string | null
+  occurrenceProjection: AssistantAutomationOccurrenceProjection
+}
 
 export function createVersionedAutomationPatchFixture(input: {
   current: VersionedAutomationFixtureRecord

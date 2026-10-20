@@ -13,6 +13,8 @@ import {
   type AssistantInputCandidateQuery,
   type AssistantInputCursor,
   type AssistantInputEventRecord,
+  type AssistantInputExactLookupExclusionReason,
+  type AssistantInputExactLookupExclusionReasonCounts,
   type AssistantInputSource,
   type AssistantTurnConversationInputQuery,
 } from "@murphai/assistant-engine";
@@ -318,7 +320,12 @@ export function createHostedAssistantInputSource(input: {
         missingInput: "skip",
         vaultRoot: input.vaultRoot,
       });
-      const replyableEvents = events.length === inputIds.length
+      const exclusions = createHostedAssistantExactLookupExclusionCounts();
+      if (events.length < inputIds.length) {
+        exclusions.record("missing_event", inputIds.length - events.length);
+      }
+      const replyabilityEvaluated = events.length === inputIds.length;
+      const replyableEvents = replyabilityEvaluated
         ? await filterHostedReplyablePendingAssistantInputEvents({
             events,
             vaultRoot: input.vaultRoot,
@@ -327,6 +334,13 @@ export function createHostedAssistantInputSource(input: {
       const exactSuccessors = await selectHostedAssistantExactSuccessorEvents({
         afterCursor: query.afterCursor ?? null,
         events,
+        // An incomplete batch never builds a replyable set; name that, not a rejection.
+        recordExclusion: replyabilityEvaluated
+          ? exclusions.record
+          : (reason, count) => exclusions.record(
+              reason === "not_replyable" ? "replyability_not_evaluated" : reason,
+              count,
+            ),
         replyableInputIds: new Set(
           replyableEvents.map((event) => event.inputId),
         ),
@@ -337,11 +351,21 @@ export function createHostedAssistantInputSource(input: {
         vaultRoot: input.vaultRoot,
       });
       assertHostedAssistantInputQueryNotAborted(query.signal);
-      return filterHostedAssistantInputCandidates({
+      let filteredCount = 0;
+      const batch = filterHostedAssistantInputCandidates({
         candidates,
         ignoreAfterCursor: true,
         query,
+        recordExclusion: (reason, count) => {
+          filteredCount += count ?? 1;
+          exclusions.record(reason, count);
+        },
       });
+      // With ignoreAfterCursor the batch builder only sorts and slices, so every
+      // candidate is either filtered (counted above), returned, or cut by the limit.
+      const overLimit = candidates.length - filteredCount - batch.inputs.length;
+      if (overLimit > 0) exclusions.record("over_limit", overLimit);
+      return { ...batch, exactLookupExclusionReasonCounts: exclusions.read() };
     },
     async listNewConversationInputs(query) {
       assertHostedAssistantInputQueryNotAborted(query.signal);
@@ -693,11 +717,13 @@ function selectHostedAssistantInputEventBatch(input: {
 async function selectHostedAssistantExactSuccessorEvents(input: {
   afterCursor: AssistantInputCursor | null;
   events: readonly AssistantInputEventRecord[];
+  recordExclusion?: HostedAssistantExactLookupExclusionRecorder;
   replyableInputIds: ReadonlySet<string>;
   vaultRoot: string;
 }): Promise<AssistantInputEventRecord[]> {
   const afterCursor = input.afterCursor;
   if (!afterCursor || input.events.length === 0) {
+    if (input.events.length > 0) input.recordExclusion?.("no_cursor", input.events.length);
     return [];
   }
   const [anchor] = await readHostedAssistantInputEventsById({
@@ -706,6 +732,7 @@ async function selectHostedAssistantExactSuccessorEvents(input: {
     vaultRoot: input.vaultRoot,
   });
   if (!anchor) {
+    input.recordExclusion?.("anchor_unavailable", input.events.length);
     return [];
   }
   const anchorCandidate = assistantInputCandidateFromStoredEvent(anchor);
@@ -719,23 +746,34 @@ async function selectHostedAssistantExactSuccessorEvents(input: {
     .sort((left, right) =>
       compareAssistantInputCursors(left.cursor, right.cursor)
     )
-    .filter((event) =>
-      compareAssistantInputCursors(event.cursor, afterCursor) > 0
-    )
-    .filter((event) =>
-      shouldGroupAdjacentAssistantInputCandidates(
+    .filter((event) => {
+      const after = compareAssistantInputCursors(event.cursor, afterCursor) > 0;
+      if (!after) input.recordExclusion?.("at_or_before_cursor");
+      return after;
+    })
+    .filter((event) => {
+      const grouped = shouldGroupAdjacentAssistantInputCandidates(
         anchorCandidate,
         assistantInputCandidateFromStoredEvent(event),
-      )
-    );
+      );
+      if (!grouped) input.recordExclusion?.("not_grouped_with_anchor");
+      return grouped;
+    });
   const selected: AssistantInputEventRecord[] = [];
   let previous = anchor;
-  for (const event of successorEvents) {
-    if (
-      event.projection.status === "pending"
-      || !input.replyableInputIds.has(event.inputId)
-      || !isHostedAssistantInputEventBatchSuccessor(previous, event)
-    ) {
+  for (const [index, event] of successorEvents.entries()) {
+    // Same checks in the same short-circuit order; only the first failure is named.
+    const exclusion = event.projection.status === "pending"
+      ? "projection_pending"
+      : !input.replyableInputIds.has(event.inputId)
+        ? "not_replyable"
+        : !isHostedAssistantInputEventBatchSuccessor(previous, event)
+          ? "not_batch_successor"
+          : null;
+    if (exclusion) {
+      input.recordExclusion?.(exclusion);
+      const later = successorEvents.length - index - 1;
+      if (later > 0) input.recordExclusion?.("after_earlier_exclusion", later);
       break;
     }
     selected.push(event);
@@ -893,12 +931,29 @@ async function filterHostedReplyablePendingAssistantInputEvents(input: {
   return replyableEvents;
 }
 
+type HostedAssistantExactLookupExclusionRecorder = (
+  reason: AssistantInputExactLookupExclusionReason,
+  count?: number,
+) => void;
+
+// Diagnostics only: names the existing exact-lookup step that dropped each requested ID.
+function createHostedAssistantExactLookupExclusionCounts() {
+  const counts: Partial<Record<AssistantInputExactLookupExclusionReason, number>> = {};
+  return {
+    read: (): AssistantInputExactLookupExclusionReasonCounts => ({ ...counts }),
+    record: (reason: AssistantInputExactLookupExclusionReason, count = 1) => {
+      counts[reason] = (counts[reason] ?? 0) + count;
+    },
+  };
+}
+
 function filterHostedAssistantInputCandidates(input: {
   candidates: readonly AssistantInputCandidate[];
   emittedCursorKeys?: Set<string>;
   ignoreAfterCursor?: boolean;
   preserveInputOrder?: boolean;
   query: AssistantInputCandidateQuery;
+  recordExclusion?: HostedAssistantExactLookupExclusionRecorder;
 }): AssistantInputCandidateBatch {
   const knownInputIds = new Set(input.query.knownInputIds ?? []);
   const afterCursor = input.ignoreAfterCursor === true
@@ -911,12 +966,14 @@ function filterHostedAssistantInputCandidates(input: {
     afterCursor,
     candidates: input.candidates.filter((candidate) => {
       if (knownInputIds.has(candidate.event.inputId)) {
+        input.recordExclusion?.("known_input");
         return false;
       }
       if (
         input.query.sourceId
         && candidate.event.source !== input.query.sourceId
       ) {
+        input.recordExclusion?.("source_mismatch");
         return false;
       }
       return true;

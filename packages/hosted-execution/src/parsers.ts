@@ -8,7 +8,6 @@ import {
 } from "./builders.ts";
 import {
   assistantPersonalitySettingIds,
-  getEnvironmentInterviewTopicGroup,
   isAssistantPersonalityScore,
   isAssistantPersonalitySettingId,
   isAssistantTonePreference,
@@ -17,14 +16,11 @@ import {
   normalizeIanaTimeZone,
   parseMemberActionRequestV1,
   parseMemberActionOutcomeV1,
-  validateEnvironmentInterviewAnswer,
 } from "@murphai/contracts";
 
 import {
   HOSTED_EXECUTION_ASSISTANT_NOTIFICATION_PROMPT_PROFILES,
   HOSTED_EXECUTION_ASSISTANT_ASK_TARGET_LABEL_MAX_CODE_POINTS,
-  HOSTED_EXECUTION_ENVIRONMENT_VOICE_CONTENT_TYPES,
-  HOSTED_EXECUTION_ENVIRONMENT_VOICE_MAX_BYTES,
   HOSTED_EXECUTION_MEAL_PHOTO_MAX_BYTES,
   HOSTED_EXECUTION_LINQ_GROUP_REACTION_CONTEXT_MAX_CHARS,
   isHostedConversationMessageChannel,
@@ -65,8 +61,6 @@ import type {
   HostedExecutionMemberPersonalityPreferences,
   HostedExecutionMemberPreferences,
   HostedExecutionMemberPreferencesUpdatedEvent,
-  HostedExecutionEnvironmentVoiceCapturedPayload,
-  HostedExecutionEnvironmentInterviewCompletedPayload,
   HostedExecutionMealPhotoCapturedPayload,
   HostedExecutionMemberActionRequestedEvent,
   HostedExecutionMemberActionCompletedEvent,
@@ -109,10 +103,8 @@ import {
   buildHostedExecutionMemberActivatedWake,
   buildHostedExecutionMemberChannelsUpdatedWake,
   buildHostedExecutionMemberPreferencesUpdatedWake,
-  buildHostedExecutionEnvironmentVoiceCapturedWake,
   buildHostedExecutionDailyMetricReportedWake,
   buildHostedExecutionGroupJournalFactRecordedWake,
-  buildHostedExecutionEnvironmentInterviewCompletedWake,
   buildHostedExecutionMealPhotoCapturedWake,
   buildHostedExecutionMemberActionRequestedWake,
   buildHostedExecutionMemberActionCompletedWake,
@@ -199,8 +191,6 @@ export {
   parseHostedIngressLatencySource,
   parseHostedRuntimeIssueExportRequest,
   parseHostedRuntimeIssueExportResponse,
-  parseHostedCodexAuthUpdate,
-  parseHostedCodexAuthUpdateResponse,
   parseHostedRuntimeLatencyTraceBatchRequest,
   parseHostedRuntimeLatencyTraceBatchResponse,
   parseHostedRuntimeLatencyTraceEvent,
@@ -589,62 +579,6 @@ export function parseHostedExecutionWake(value: unknown): HostedExecutionWake {
         sha256: mealPhoto.sha256,
       });
     }
-    case "environment-voice.captured": {
-      assertExactHostedExecutionKeys(record, [
-        "environmentVoice",
-        "eventId",
-        "kind",
-        "occurredAt",
-        "userId",
-      ], "Hosted execution environment-voice.captured wake");
-      const environmentVoice =
-        parseHostedExecutionEnvironmentVoiceCapturedPayload(
-          record.environmentVoice,
-        );
-      if (environmentVoice.capturedAt !== occurredAt) {
-        throw new TypeError(
-          "Hosted execution wake environment-voice.captured occurredAt must match capturedAt.",
-        );
-      }
-      return buildHostedExecutionEnvironmentVoiceCapturedWake({
-        audioKey: environmentVoice.audioKey,
-        byteLength: environmentVoice.byteLength,
-        captureId: environmentVoice.captureId,
-        capturedAt: environmentVoice.capturedAt,
-        contentType: environmentVoice.contentType,
-        durationMs: environmentVoice.durationMs,
-        eventId,
-        memberId: wireUserId,
-        occurredAt,
-        sha256: environmentVoice.sha256,
-      });
-    }
-    case "environment-interview.completed": {
-      assertExactHostedExecutionKeys(record, [
-        "environmentInterview",
-        "eventId",
-        "kind",
-        "occurredAt",
-        "userId",
-      ], "Hosted execution environment-interview.completed wake");
-      const environmentInterview =
-        parseHostedExecutionEnvironmentInterviewCompletedPayload(
-          record.environmentInterview,
-        );
-      if (environmentInterview.completedAt !== occurredAt) {
-        throw new TypeError(
-          "Hosted execution wake environment-interview.completed occurredAt must match completedAt.",
-        );
-      }
-      return buildHostedExecutionEnvironmentInterviewCompletedWake({
-        completedAt: environmentInterview.completedAt,
-        completionId: environmentInterview.completionId,
-        eventId,
-        memberId: wireUserId,
-        occurredAt,
-        topics: environmentInterview.topics,
-      });
-    }
     case "runtime.manual-requested":
     case "runtime.maintenance-requested":
     case "runtime.browser-vault-refresh-requested":
@@ -746,239 +680,6 @@ export function parseHostedExecutionMealPhotoCapturedPayload(
     mealPhotoKey,
     sha256,
   };
-}
-
-export function parseHostedExecutionEnvironmentVoiceCapturedPayload(
-  value: unknown,
-): HostedExecutionEnvironmentVoiceCapturedPayload {
-  const record = requireObject(
-    value,
-    "Hosted execution environment-voice.captured payload",
-  );
-  assertExactHostedEnvironmentVoiceKeys(record);
-
-  const audioKey = requireString(
-    record.audioKey,
-    "Hosted execution environment-voice.captured audioKey",
-  );
-  if (!/^[a-f0-9]{40}$/u.test(audioKey)) {
-    throw new TypeError(
-      "Hosted execution environment-voice.captured audioKey is invalid.",
-    );
-  }
-
-  const captureId = requireString(
-    record.captureId,
-    "Hosted execution environment-voice.captured captureId",
-  );
-  if (!/^[a-f0-9]{64}$/u.test(captureId)) {
-    throw new TypeError(
-      "Hosted execution environment-voice.captured captureId must be a lowercase SHA-256 digest.",
-    );
-  }
-
-  const capturedAt = requireString(
-    record.capturedAt,
-    "Hosted execution environment-voice.captured capturedAt",
-  );
-  if (
-    !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/u.test(capturedAt)
-    || !Number.isFinite(Date.parse(capturedAt))
-  ) {
-    throw new TypeError(
-      "Hosted execution environment-voice.captured capturedAt must be an ISO timestamp.",
-    );
-  }
-
-  const byteLength = record.byteLength;
-  if (
-    typeof byteLength !== "number"
-    || !Number.isSafeInteger(byteLength)
-    || byteLength <= 0
-    || byteLength > HOSTED_EXECUTION_ENVIRONMENT_VOICE_MAX_BYTES
-  ) {
-    throw new TypeError(
-      `Hosted execution environment-voice.captured byteLength must be between 1 and ${HOSTED_EXECUTION_ENVIRONMENT_VOICE_MAX_BYTES}.`,
-    );
-  }
-
-  const durationMs = record.durationMs;
-  if (
-    typeof durationMs !== "number"
-    || !Number.isSafeInteger(durationMs)
-    || durationMs <= 0
-    || durationMs > 3 * 60 * 1_000
-  ) {
-    throw new TypeError(
-      "Hosted execution environment-voice.captured durationMs must be between 1 and 180000.",
-    );
-  }
-
-  const contentType = requireString(
-    record.contentType,
-    "Hosted execution environment-voice.captured contentType",
-  );
-  const normalizedContentType =
-    HOSTED_EXECUTION_ENVIRONMENT_VOICE_CONTENT_TYPES.find(
-      (candidate) => candidate === contentType,
-    );
-  if (!normalizedContentType) {
-    throw new TypeError(
-      "Hosted execution environment-voice.captured contentType is invalid.",
-    );
-  }
-
-  const sha256 = requireString(
-    record.sha256,
-    "Hosted execution environment-voice.captured sha256",
-  );
-  if (!/^[a-f0-9]{64}$/u.test(sha256)) {
-    throw new TypeError(
-      "Hosted execution environment-voice.captured sha256 must be a lowercase SHA-256 digest.",
-    );
-  }
-
-  return {
-    audioKey,
-    byteLength,
-    captureId,
-    capturedAt,
-    contentType: normalizedContentType,
-    durationMs,
-    sha256,
-  };
-}
-
-export function parseHostedExecutionEnvironmentInterviewCompletedPayload(
-  value: unknown,
-): HostedExecutionEnvironmentInterviewCompletedPayload {
-  const record = requireObject(
-    value,
-    "Hosted execution environment-interview.completed payload",
-  );
-  assertExactHostedExecutionKeys(record, [
-    "completedAt",
-    "completionId",
-    "topics",
-  ], "Hosted execution environment-interview.completed payload");
-  const completedAt = requireString(
-    record.completedAt,
-    "Hosted execution environment-interview.completed completedAt",
-  );
-  if (!isIsoTimestamp(completedAt)) {
-    throw new TypeError(
-      "Hosted execution environment-interview.completed completedAt must be an ISO timestamp.",
-    );
-  }
-  const completionId = requireString(
-    record.completionId,
-    "Hosted execution environment-interview.completed completionId",
-  );
-  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(completionId)) {
-    throw new TypeError(
-      "Hosted execution environment-interview.completed completionId must be a UUID v4.",
-    );
-  }
-  const topics = requireArray(
-    record.topics,
-    "Hosted execution environment-interview.completed topics",
-  );
-  if (topics.length < 1 || topics.length > 5) {
-    throw new TypeError(
-      "Hosted execution environment-interview.completed must contain one to five topics.",
-    );
-  }
-  let answerCount = 0;
-  const parsedTopics = topics.map((topicValue, topicIndex) => {
-    const topic = requireObject(
-      topicValue,
-      `Hosted execution environment-interview.completed topic ${topicIndex}`,
-    );
-    assertExactHostedExecutionKeys(topic, [
-      "answers",
-      "topicId",
-    ], `Hosted execution environment-interview.completed topic ${topicIndex}`);
-    const topicId = requireString(
-      topic.topicId,
-      `Hosted execution environment-interview.completed topic ${topicIndex} id`,
-    );
-    if (!/^[a-z]+(?::[0-9]+)?$/u.test(topicId) || !getEnvironmentInterviewTopicGroup(topicId)) {
-      throw new TypeError(
-        "Hosted execution environment-interview.completed topic id is invalid.",
-      );
-    }
-    const answers = requireArray(
-      topic.answers,
-      `Hosted execution environment-interview.completed topic ${topicIndex} answers`,
-    );
-    if (answers.length < 1 || answers.length > 16) {
-      throw new TypeError(
-        "Hosted execution environment-interview.completed topic must contain one to sixteen answers.",
-      );
-    }
-    answerCount += answers.length;
-    return {
-      answers: answers.map((answerValue, answerIndex) => {
-        const answer = requireObject(
-          answerValue,
-          `Hosted execution environment-interview.completed answer ${answerIndex}`,
-        );
-        assertExactHostedExecutionKeys(answer, [
-          "aspectId",
-          "indicatorId",
-          "note",
-          "value",
-        ], `Hosted execution environment-interview.completed answer ${answerIndex}`);
-        const parsed = {
-          aspectId: requireString(answer.aspectId, "Environment interview answer aspectId"),
-          indicatorId: requireString(answer.indicatorId, "Environment interview answer indicatorId"),
-          ...(answer.note === undefined
-            ? {}
-            : {
-                note: answer.note === null
-                  ? null
-                  : requireString(
-                      answer.note,
-                      "Environment interview answer note",
-                    ).trim(),
-              }),
-          value: parseEnvironmentInterviewAnswerValue(answer.value),
-        };
-        const issue = validateEnvironmentInterviewAnswer(topicId, parsed);
-        if (issue) {
-          throw new TypeError(issue);
-        }
-        return parsed;
-      }),
-      topicId,
-    };
-  });
-  if (answerCount > 32) {
-    throw new TypeError(
-      "Hosted execution environment-interview.completed contains too many answers.",
-    );
-  }
-  return { completedAt, completionId, topics: parsedTopics };
-}
-
-function parseEnvironmentInterviewAnswerValue(
-  value: unknown,
-): string | number | boolean {
-  if (
-    typeof value === "string"
-    || typeof value === "boolean"
-    || (typeof value === "number" && Number.isFinite(value))
-  ) {
-    return value;
-  }
-  throw new TypeError(
-    "Hosted execution environment interview answer value is invalid.",
-  );
-}
-
-function isIsoTimestamp(value: string): boolean {
-  return /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/u.test(value)
-    && Number.isFinite(Date.parse(value));
 }
 
 export function parseHostedExecutionConversationMessagePayload(
@@ -2489,27 +2190,6 @@ function assertExactHostedMealPhotoKeys(record: Record<string, unknown>): void {
     if (!allowed.has(key)) {
       throw new TypeError(
         `Hosted execution meal-photo.captured payload contains unsupported field ${JSON.stringify(key)}.`,
-      );
-    }
-  }
-}
-
-function assertExactHostedEnvironmentVoiceKeys(
-  record: Record<string, unknown>,
-): void {
-  const allowed = new Set([
-    "audioKey",
-    "byteLength",
-    "captureId",
-    "capturedAt",
-    "contentType",
-    "durationMs",
-    "sha256",
-  ]);
-  for (const key of Object.keys(record)) {
-    if (!allowed.has(key)) {
-      throw new TypeError(
-        `Hosted execution environment-voice.captured payload contains unsupported field ${JSON.stringify(key)}.`,
       );
     }
   }

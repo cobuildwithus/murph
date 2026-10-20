@@ -93,14 +93,19 @@ describe("hosted product feedback port", () => {
 
   it("caps a stalled response before headers at the feedback-specific deadline", async () => {
     const fetchImpl = vi.fn<typeof fetch>(async (input, init) => {
-      const request = new Request(input, init);
+      // Observe the fetch signal directly: a synthetic Request can be collected
+      // while this stub is pending, dropping its dependent abort listener.
+      const signal = init?.signal ?? (input instanceof Request ? input.signal : null);
+      if (!signal) {
+        throw new Error("Expected a product-feedback request signal.");
+      }
       await new Promise<void>((_resolve, reject) => {
-        const abort = () => reject(request.signal.reason);
-        if (request.signal.aborted) {
+        const abort = () => reject(signal.reason);
+        if (signal.aborted) {
           abort();
           return;
         }
-        request.signal.addEventListener("abort", abort, { once: true });
+        signal.addEventListener("abort", abort, { once: true });
       });
       throw new Error("Expected the product-feedback request to abort.");
     });

@@ -279,7 +279,7 @@ describe('assistant skill assets', () => {
       'Power fields ending in `Watts` are watts,',
     )
     expect(daily).toContain('current-local-day totals as provisional and say "so far."')
-    expect(daily).toContain('not proof of failed provider sync or import')
+    expect(daily).toContain('report what each shows without inventing a cause such as a failed sync or import')
     expect(ASSISTANT_SKILLS.find((skill) => skill.slug === 'running-cardio')?.triggerHint).toContain('Use daily-activity for ordinary walking breaks and everyday movement targets.')
     expect(daily).toContain('For a simple time-based walking plan, use the person\'s stated current activity, available window, and chosen duration plus relevant saved context.')
     expect(daily).toContain('Do not collect step counts, labs, body measurements, or unrelated event history unless symptoms, a known condition, or the requested target makes them decision-changing.')

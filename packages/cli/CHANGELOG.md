@@ -2,6 +2,13 @@
 
 All notable changes to `@murphai/murph` will be documented in this file.
 
+## Unreleased
+
+### Removed
+- Remove `wearables patterns` and the managed Personal Patterns daily update.
+  Wearable summaries, `wearables sleep pattern`, and historical health records
+  remain available.
+
 ## [1.3.5] - 2026-09-21
 
 ### Fixed

@@ -135,10 +135,10 @@ values outside the card; capability failure or definitive pre-acceptance
 rejection still uses the existing automatic text-only recovery.
 
 The bitmap remains rectangular because Messages owns the outer mask and
-caption. Because the provider request omits an App Store id, the app-absent
-layout supplies no app art of its own; the bitmap therefore embeds the checked-in
-canonical Murph mark in the same 36×27pt upper-left badge footprint as the
-native balloon. Every fallback title sits beside that compact footprint in one
+caption. Because the provider request carries Murph's App Store id, Messages
+draws the app art in the same 36×27pt upper-left badge footprint as the native
+balloon; the bitmap leaves that footprint empty rather than painting a second
+mark. Every fallback title sits beside that compact footprint in one
 shared header; optional supporting text stays directly under the title, and no
 larger empty icon gutter is reserved.
 

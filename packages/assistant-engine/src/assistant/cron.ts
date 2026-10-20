@@ -113,6 +113,7 @@ export {
   resolveAssistantCronDefaultTimeZone,
   resolveAssistantCronDefaultTimeZoneProjection,
   resolveAssistantCronVaultTimeZone,
+  widenAssistantCronActiveUntilForFinalOccurrence,
 } from './cron/canonical-jobs.ts'
 export { addAssistantCronJob, installAssistantCronPreset, upsertAssistantCronAutomation }
 export type {

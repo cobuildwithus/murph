@@ -1,6 +1,7 @@
 import { withCanonicalWriteLock } from "@murphai/core";
-import { startCliPhase, timeCliPhase } from "@murphai/runtime-state/node/cli-timing";
+import { startCliPhase, timeCliPhase, timeCliPhaseSync } from "@murphai/runtime-state/node/cli-timing";
 import {
+  extractIsoDatePrefix,
   isValidIanaTimeZone,
 } from "@murphai/contracts";
 import {
@@ -49,6 +50,7 @@ import {
 import {
   listCanonicalSourceManifest,
   readCanonicalEntityFamilySource,
+  readVaultMetadataSource,
   readVaultSourceStrict,
   readVaultSourceTolerant,
   type VaultSourceSnapshot,
@@ -98,11 +100,6 @@ import {
 } from "./projection/wearable-summary-store.ts";
 import { resolveWearableSleepPatternReadFilters } from "./wearables/sleep-pattern.ts";
 import { createVaultReadModel } from "./read-model.ts";
-import {
-  buildPersonalPatternReportFromWearableBundleAndMetricPoints,
-  type PersonalPatternReport,
-} from "./personal-patterns.ts";
-import { readBrowserVaultPersonalPatternVocabulary } from "./browser-replica/source.ts";
 
 export type {
   QueryCanonicalEntityFilters,
@@ -120,6 +117,24 @@ function readStoredPublicWearableSummaryBundle(
     readWearableSummaryRows(location, { providers: filters.providers }),
     filters,
   );
+}
+
+/** Preserve ordinary readers' existing unlocked, fully fresh global path.
+ * Otherwise the focused owner validates, publishes and captures under the lock. */
+async function readFreshPublicWearableSummaryBundle(
+  vaultRoot: string,
+  filters: WearableSummaryFilters | WearableMetricSummaryFilters,
+) {
+  const location = currentQueryProjectionLocation(vaultRoot);
+  const status = await timeCliPhase("query-freshness", async () => {
+    const manifest = await timeCliPhase("query-manifest", () => listCanonicalSourceManifest(vaultRoot));
+    return timeCliPhase("query-status", () => readProjectionStatus(location, manifest));
+  });
+  if (status?.fresh) return readStoredPublicWearableSummaryBundle(location, filters);
+
+  // This preflight and the focused owner's locked recheck are separate spans.
+  const rows = await readFreshWearableSummaryRows(vaultRoot, { providers: filters.providers });
+  return composePublicWearableSummaryBundleFromStoredRows(rows, filters);
 }
 
 export async function getQueryProjectionStatus(
@@ -272,8 +287,7 @@ export async function summarizeWearableDayRuntime(
   date: string,
   filters: Omit<WearableSummaryFilters, "date" | "from" | "to"> = {},
 ): Promise<ProjectedWearableDaySummary | null> {
-  const location = await ensureFreshQueryProjection(vaultRoot);
-  const bundle = readStoredPublicWearableSummaryBundle(location, {
+  const bundle = await readFreshPublicWearableSummaryBundle(vaultRoot, {
     date,
     providers: filters.providers,
   });
@@ -284,8 +298,7 @@ export async function summarizeWearableLatestRuntime(
   vaultRoot: string,
   filters: WearableSummaryFilters = {},
 ): Promise<ProjectedWearableLatestSummary | null> {
-  const location = await ensureFreshQueryProjection(vaultRoot);
-  const bundle = readStoredPublicWearableSummaryBundle(location, filters);
+  const bundle = await readFreshPublicWearableSummaryBundle(vaultRoot, filters);
   return summarizeWearableLatestFromBundle(bundle, filters);
 }
 
@@ -294,8 +307,7 @@ export async function summarizeWearableMetricLatestRuntime(
   metric: string,
   filters: WearableMetricSummaryFilters = {},
 ): Promise<ProjectedWearableMetricLatestSummary | null> {
-  const location = await ensureFreshQueryProjection(vaultRoot);
-  const bundle = readStoredPublicWearableSummaryBundle(location, filters);
+  const bundle = await readFreshPublicWearableSummaryBundle(vaultRoot, filters);
   return summarizeWearableMetricLatestFromBundle(bundle, metric, filters);
 }
 
@@ -304,8 +316,7 @@ export async function summarizeWearableMetricTrendRuntime(
   metric: string,
   filters: WearableMetricSummaryFilters = {},
 ): Promise<ProjectedWearableMetricTrendSummary | null> {
-  const location = await ensureFreshQueryProjection(vaultRoot);
-  const bundle = readStoredPublicWearableSummaryBundle(location, filters);
+  const bundle = await readFreshPublicWearableSummaryBundle(vaultRoot, filters);
   return summarizeWearableMetricTrendFromBundle(bundle, metric, filters);
 }
 
@@ -313,8 +324,7 @@ export async function explainWearableDriftRuntime(
   vaultRoot: string,
   filters: WearableMetricSummaryFilters = {},
 ): Promise<ProjectedWearableDriftSummary | null> {
-  const location = await ensureFreshQueryProjection(vaultRoot);
-  const bundle = readStoredPublicWearableSummaryBundle(location, filters);
+  const bundle = await readFreshPublicWearableSummaryBundle(vaultRoot, filters);
   return explainWearableDriftFromBundle(bundle, filters);
 }
 
@@ -322,7 +332,14 @@ export async function summarizeWearableSleepRuntime(
   vaultRoot: string,
   filters: WearableSummaryFilters = {},
 ): Promise<ProjectedWearableSleepSummary[]> {
-  const rows = await readFreshWearableSummaryRows(vaultRoot, { providers: filters.providers });
+  // Prune only rows composition would discard by date; keep every summary kind,
+  // because multi-provider sleep composition reads shared recovery/activity keys.
+  const day = (value: string | undefined) => value ? extractIsoDatePrefix(value) ?? value : undefined;
+  const rows = await readFreshWearableSummaryRows(vaultRoot, {
+    from: day(filters.date || filters.from),
+    providers: filters.providers,
+    to: day(filters.date || filters.to),
+  });
   const bundle = composePublicWearableSummaryBundleFromStoredRows(rows, filters);
   return summarizeWearableSleepFromBundle(bundle, filters);
 }
@@ -331,23 +348,49 @@ export async function summarizeWearableSleepPatternRuntime(
   vaultRoot: string,
   filters: WearableSleepPatternFilters = {},
 ): Promise<WearableSleepPatternSummary> {
-  const location = await ensureFreshQueryProjection(vaultRoot);
-  const metadata = filters.timeZone === undefined
-    ? readStoredVaultMetadata(location)
-    : null;
-  const vaultTimeZone = typeof metadata?.timezone === "string"
-    && isValidIanaTimeZone(metadata.timezone)
-    ? metadata.timezone
-    : undefined;
-  const resolvedFilters = filters.timeZone === undefined && vaultTimeZone
-    ? { ...filters, timeZone: vaultTimeZone }
-    : filters;
-  const readFilters = resolveWearableSleepPatternReadFilters(resolvedFilters);
+  const location = currentQueryProjectionLocation(vaultRoot);
+  const status = await timeCliPhase("query-freshness", async () => {
+    const manifest = await timeCliPhase("query-manifest", () => listCanonicalSourceManifest(vaultRoot));
+    return timeCliPhase("query-status", () => readProjectionStatus(location, manifest));
+  });
+  const captureSleepPatternInput = async () => {
+    const metadata = filters.timeZone === undefined
+      ? status?.fresh
+        ? readStoredVaultMetadata(location)
+        : await readVaultMetadataSource(vaultRoot)
+      : null;
+    const vaultTimeZone = typeof metadata?.timezone === "string"
+      && isValidIanaTimeZone(metadata.timezone)
+      ? metadata.timezone
+      : undefined;
+    const resolvedFilters = filters.timeZone === undefined && vaultTimeZone
+      ? { ...filters, timeZone: vaultTimeZone }
+      : filters;
+    const readFilters = resolveWearableSleepPatternReadFilters(resolvedFilters);
+    const rowFilters = { ...readFilters, summaryKinds: ["sleep", "source_health"] as const };
+    const rows = status?.fresh
+      ? readWearableSummaryRows(location, rowFilters)
+      : await readFreshWearableSummaryRows(vaultRoot, rowFilters);
+    return { rows, readFilters, resolvedFilters, vaultTimeZone };
+  };
+
+  // Keep the fresh-global path unlocked. Otherwise metadata and row capture
+  // share the focused owner's reentrant boundary, without global query work.
+  const endWait = status?.fresh ? null : startCliPhase("query-wait");
+  let captured: Awaited<ReturnType<typeof captureSleepPatternInput>>;
+  try {
+    captured = status?.fresh
+      ? await captureSleepPatternInput()
+      : await withCanonicalWriteLock(vaultRoot, () => {
+        endWait?.();
+        return captureSleepPatternInput();
+      });
+  } finally {
+    endWait?.();
+  }
+  const { rows, readFilters, resolvedFilters, vaultTimeZone } = captured;
   const bundle = composePublicWearableSummaryBundleFromStoredRows(
-    readWearableSummaryRows(location, {
-      ...readFilters,
-      summaryKinds: ["sleep", "source_health"],
-    }),
+    rows,
     readFilters,
     { retainSourceHealthOutsideDateFilters: true },
   );
@@ -360,37 +403,11 @@ export async function summarizeWearableSleepPatternRuntime(
   });
 }
 
-export async function buildPersonalPatternReportRuntime(
-  vaultRoot: string,
-  options: { asOf?: Date | string; windowDays?: number } = {},
-): Promise<PersonalPatternReport> {
-  const location = await ensureFreshQueryProjection(vaultRoot);
-  const snapshot = readStoredVaultSource(location);
-  const vault = createVaultReadModel({
-    entities: snapshot.entities,
-    metadata: snapshot.metadata,
-    vaultRoot,
-  });
-  const wearableBundle = readStoredPublicWearableSummaryBundle(location, {});
-  const metricPoints = listStoredMetricPoints(
-    location,
-    normalizeMetricPointFilters({ limit: null }),
-  );
-  const vocabulary = await readBrowserVaultPersonalPatternVocabulary(vaultRoot);
-  return buildPersonalPatternReportFromWearableBundleAndMetricPoints(
-    vault,
-    wearableBundle,
-    metricPoints,
-    { ...options, vocabulary },
-  );
-}
-
 export async function summarizeWearableActivityRuntime(
   vaultRoot: string,
   filters: WearableSummaryFilters = {},
 ): Promise<ProjectedWearableActivitySummary[]> {
-  const location = await ensureFreshQueryProjection(vaultRoot);
-  const bundle = readStoredPublicWearableSummaryBundle(location, filters);
+  const bundle = await readFreshPublicWearableSummaryBundle(vaultRoot, filters);
   return summarizeWearableActivityFromBundle(bundle, filters);
 }
 
@@ -398,8 +415,7 @@ export async function summarizeWearableBodyStateRuntime(
   vaultRoot: string,
   filters: WearableSummaryFilters = {},
 ): Promise<ProjectedWearableBodyStateSummary[]> {
-  const location = await ensureFreshQueryProjection(vaultRoot);
-  const bundle = readStoredPublicWearableSummaryBundle(location, filters);
+  const bundle = await readFreshPublicWearableSummaryBundle(vaultRoot, filters);
   return summarizeWearableBodyStateFromBundle(bundle, filters);
 }
 
@@ -407,8 +423,7 @@ export async function summarizeWearableRecoveryRuntime(
   vaultRoot: string,
   filters: WearableSummaryFilters = {},
 ): Promise<ProjectedWearableRecoverySummary[]> {
-  const location = await ensureFreshQueryProjection(vaultRoot);
-  const bundle = readStoredPublicWearableSummaryBundle(location, filters);
+  const bundle = await readFreshPublicWearableSummaryBundle(vaultRoot, filters);
   return summarizeWearableRecoveryFromBundle(bundle, filters);
 }
 

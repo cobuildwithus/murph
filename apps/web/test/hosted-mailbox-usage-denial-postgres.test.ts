@@ -51,7 +51,8 @@ describe.skipIf(!runPostgresProof)(
           await tx.$executeRaw(Prisma.sql`
             CREATE TEMP TABLE hosted_linq_delivery (
               id TEXT PRIMARY KEY,
-              accepted_at TIMESTAMP(3) NOT NULL
+              accepted_at TIMESTAMP(3) NOT NULL,
+              thread_is_direct BOOLEAN
             ) ON COMMIT DROP
           `);
           await tx.$executeRaw(Prisma.sql`

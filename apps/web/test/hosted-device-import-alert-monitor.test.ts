@@ -8,7 +8,7 @@ const mocks = vi.hoisted(() => ({
   workspaces: vi.fn(), logQuery: vi.fn(),
 }));
 vi.mock("@/src/lib/prisma", () => ({ getPrisma: () => ({
-  $queryRaw: mocks.query, hostedWorkspace: { findMany: mocks.workspaces },
+  $queryRaw: mocks.query,
 }) }));
 vi.mock("@/src/lib/hosted-onboarding/member-access", () => ({ readHostedRuntimeAiAllowedMemberIds: mocks.allowed }));
 vi.mock("@/src/lib/hosted-runtime-log/database", () => ({ getHostedRuntimeLogPool: () => ({ query: mocks.logQuery }) }));
@@ -33,7 +33,9 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.read.mockResolvedValue(healthy());
   mocks.incident.mockImplementation(async ({ initialHealth }: { initialHealth: DeviceImportHealth }) => ({ health: initialHealth, outcome: "healthy" }));
-  mocks.query.mockResolvedValue([{ userId: "synthetic-active" }, { userId: "synthetic-inactive" }]);
+  mocks.query.mockImplementation((query: { sql: string }) => query.sql.includes("FROM device_connection")
+    ? [{ userId: "synthetic-active" }, { userId: "synthetic-inactive" }]
+    : mocks.workspaces());
   mocks.allowed.mockResolvedValue(new Set(["synthetic-active"]));
   mocks.workspaces.mockResolvedValue([{ userId: "synthetic-active", nextWakeAt: now, nextWakeReason: "device-sync.reconcile" }]);
   mocks.logQuery.mockResolvedValue({ rows: [] });
@@ -82,6 +84,40 @@ describe("device import incident integration", () => {
 });
 
 describe("bounded import diagnostic observation", () => {
+  it.each(["terminalReplyCommittedAtEpochMs", "terminalNonReplyCommittedAtEpochMs"])(
+    "uses the active foreground deadline with %s and restores the alert after expiry", async (terminalField) => {
+      const deadline = new Date(+now + 3 * 60_000);
+      const workspace = { userId: "synthetic-active", nextWakeAt: new Date(+now - 25 * 60_000),
+        nextWakeReason: "device-sync.reconcile", attemptId: "synthetic-attempt",
+        foregroundAcceptedAt: new Date(+now - 10 * 60_000),
+        checkpointEvidence: { assistant: {
+          checkpointPublicationExpectedByEpochMs: +deadline, [terminalField]: +now - 6 * 60_000,
+        } },
+      };
+      mocks.workspaces.mockResolvedValue([workspace]);
+      mocks.logQuery.mockResolvedValue({ rows: [{
+        subjectKey: hostedRuntimeLogSubjectKey("synthetic-active"), connectionKey: "a".repeat(64),
+        attemptId: "synthetic-attempt", at: new Date(+now - 20 * 60_000),
+        eventCode: "device-sync.pass_finished", pending: true, runnable: false, progressed: false,
+        checkpointAccepted: false, restarted: false, cancelled: false,
+      }] });
+      expect((await readDeviceImportHealth({ now })).stalled.anomalous).toBe(false);
+      expect((await readDeviceImportHealth({ now: deadline })).stalled.anomalous).toBe(false);
+      expect((await readDeviceImportHealth({ now: new Date(+deadline + 1) })).stalled.anomalous).toBe(true);
+      for (const patch of [
+        { attemptId: null }, { attemptId: "another-attempt" },
+        { checkpointEvidence: null },
+        { checkpointEvidence: { assistant: { checkpointPublicationExpectedByEpochMs: +deadline } } },
+        { checkpointEvidence: { assistant: { checkpointPublicationExpectedByEpochMs: String(+deadline), [terminalField]: +now - 1 } } },
+        { checkpointEvidence: { assistant: { checkpointPublicationExpectedByEpochMs: +deadline, [terminalField]: +now + 1 } } },
+        { foregroundAcceptedAt: now },
+      ]) {
+        mocks.workspaces.mockResolvedValueOnce([{ ...workspace, ...patch }]);
+        expect((await readDeviceImportHealth({ now })).stalled.anomalous).toBe(true);
+      }
+    },
+  );
+
   it.each([
     { overdueMinutes: -40, stalled: false },
     { overdueMinutes: 0, stalled: false },
@@ -149,7 +185,7 @@ describe("bounded import diagnostic observation", () => {
     expect(mocks.allowed).toHaveBeenCalledWith(expect.objectContaining({ memberIds: ["synthetic-active", "synthetic-inactive"] }));
     expect(mocks.logQuery.mock.calls[0]?.[1][0]).toEqual([hostedRuntimeLogSubjectKey("synthetic-active")]);
     expect(mocks.logQuery.mock.calls[0]?.[1][3]).toBe(DEVICE_IMPORT_EVENT_LIMIT + 1);
-    expect(mocks.query).toHaveBeenCalledOnce();
+    expect(mocks.query).toHaveBeenCalledTimes(2);
     expect(mocks.workspaces).toHaveBeenCalledOnce();
     expect(mocks.logQuery).toHaveBeenCalledOnce();
   });
@@ -170,7 +206,7 @@ describe("bounded import diagnostic observation", () => {
       return { rows: [] };
     });
     await readDeviceImportHealth({ now });
-    expect(mocks.query).toHaveBeenCalledOnce();
+    expect(mocks.query).toHaveBeenCalledTimes(2);
     expect(mocks.allowed).toHaveBeenCalledOnce();
     expect(mocks.workspaces).toHaveBeenCalledOnce();
     expect(mocks.logQuery).toHaveBeenCalledOnce();

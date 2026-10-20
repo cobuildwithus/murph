@@ -19,38 +19,91 @@ const WEARABLE_SCOPE_KEYS = new Set<string>(
     .map((spec) => spec.projectionKind),
 );
 
+const EXACT_FRESHNESS_ENTRY_MESSAGE =
+  "Shared freshness requires an exact requested wearable scope and calendar date.";
+const FRESHNESS_REJECTION_MESSAGES = {
+  count: "Shared freshness requires one to twenty-one scope/date pairs.",
+  entry_shape: "Shared freshness requires a scope/date object.",
+  entry_fields: EXACT_FRESHNESS_ENTRY_MESSAGE,
+  scope_not_requested: EXACT_FRESHNESS_ENTRY_MESSAGE,
+  scope_not_wearable: EXACT_FRESHNESS_ENTRY_MESSAGE,
+  invalid_date: EXACT_FRESHNESS_ENTRY_MESSAGE,
+  duplicate_pair: "Shared freshness scope/date pairs must be unique.",
+} as const;
+
+/** The first canonical rejection, in evaluation order. Finite and value-free. */
+export type HostedGroupSharedFreshnessRejection = keyof typeof FRESHNESS_REJECTION_MESSAGES;
+
 export function parseHostedGroupSharedFreshnessRequirements(
   value: unknown,
   scopes: readonly HostedVaultShareSelectableProjectionScope[],
 ): HostedRuntimeGroupSharedFreshnessRequirement[] {
+  const parsed = readHostedGroupSharedFreshness(value, scopes);
+  if (typeof parsed === "string") {
+    throw new TypeError(FRESHNESS_REJECTION_MESSAGES[parsed]);
+  }
+  return parsed;
+}
+
+/** Same checks as the parser; callers may record only the returned reason. */
+export function readHostedGroupSharedFreshnessRejection(
+  value: unknown,
+  scopes: readonly HostedVaultShareSelectableProjectionScope[],
+): HostedGroupSharedFreshnessRejection | null {
+  const parsed = readHostedGroupSharedFreshness(value, scopes);
+  return typeof parsed === "string" ? parsed : null;
+}
+
+function readHostedGroupSharedFreshness(
+  value: unknown,
+  scopes: readonly HostedVaultShareSelectableProjectionScope[],
+): HostedRuntimeGroupSharedFreshnessRequirement[] | HostedGroupSharedFreshnessRejection {
   if (!Array.isArray(value) || value.length < 1 || value.length > 21) {
-    throw new TypeError("Shared freshness requires one to twenty-one scope/date pairs.");
+    return "count";
   }
   const scopeKeys = new Set(scopes.map(buildHostedVaultShareProjectionScopeKey));
   const seen = new Set<string>();
-  return value.map((entry: unknown) => {
-    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
-      throw new TypeError("Shared freshness requires a scope/date object.");
+  const state: { rejection?: HostedGroupSharedFreshnessRejection } = {};
+  // `map` keeps the parser's existing sparse-array behavior; later entries are
+  // not inspected after the first rejection.
+  const requirements = value.map((entry: unknown) => {
+    if (state.rejection) return null;
+    const requirement = readHostedGroupSharedFreshnessEntry(entry, scopeKeys, seen);
+    if (typeof requirement === "string") {
+      state.rejection = requirement;
+      return null;
     }
-    const record = entry as Record<string, unknown>;
-    const { projectionScopeKey, date } = record;
-    if (Object.keys(record).some((key) => key !== "projectionScopeKey" && key !== "date")
-      || typeof projectionScopeKey !== "string"
-      || !scopeKeys.has(projectionScopeKey)
-      || !WEARABLE_SCOPE_KEYS.has(projectionScopeKey)
-      || typeof date !== "string"
-      || !/^\d{4}-\d{2}-\d{2}$/u.test(date)
-      || !Number.isFinite(Date.parse(`${date}T00:00:00.000Z`))
-      || new Date(`${date}T00:00:00.000Z`).toISOString().slice(0, 10) !== date) {
-      throw new TypeError("Shared freshness requires an exact requested wearable scope and calendar date.");
-    }
-    const key = `${projectionScopeKey}:${date}`;
-    if (seen.has(key)) {
-      throw new TypeError("Shared freshness scope/date pairs must be unique.");
-    }
-    seen.add(key);
-    return { projectionScopeKey, date };
+    return requirement;
   });
+  return state.rejection ?? requirements as HostedRuntimeGroupSharedFreshnessRequirement[];
+}
+
+function readHostedGroupSharedFreshnessEntry(
+  entry: unknown,
+  scopeKeys: ReadonlySet<string>,
+  seen: Set<string>,
+): HostedRuntimeGroupSharedFreshnessRequirement | HostedGroupSharedFreshnessRejection {
+  if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+    return "entry_shape";
+  }
+  const record = entry as Record<string, unknown>;
+  const { projectionScopeKey, date } = record;
+  if (Object.keys(record).some((key) => key !== "projectionScopeKey" && key !== "date")
+    || typeof projectionScopeKey !== "string") {
+    return "entry_fields";
+  }
+  if (!scopeKeys.has(projectionScopeKey)) return "scope_not_requested";
+  if (!WEARABLE_SCOPE_KEYS.has(projectionScopeKey)) return "scope_not_wearable";
+  if (typeof date !== "string") return "entry_fields";
+  if (!/^\d{4}-\d{2}-\d{2}$/u.test(date)
+    || !Number.isFinite(Date.parse(`${date}T00:00:00.000Z`))
+    || new Date(`${date}T00:00:00.000Z`).toISOString().slice(0, 10) !== date) {
+    return "invalid_date";
+  }
+  const key = `${projectionScopeKey}:${date}`;
+  if (seen.has(key)) return "duplicate_pair";
+  seen.add(key);
+  return { projectionScopeKey, date };
 }
 
 /** Existing reconcile jobs recover recent civil dates, never arbitrary history. */

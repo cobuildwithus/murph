@@ -43,6 +43,7 @@ import {
 import type {
   HostedRuntimeLogContext,
 } from "./runtime-logs.ts";
+import type { HostedBackgroundMaintenanceYieldReason } from "./background-maintenance-cancellation.ts";
 
 export { emitHostedAssistantProviderTraceLog } from "./events/provider-trace-log.ts";
 
@@ -56,6 +57,7 @@ export async function executeHostedMailboxEvent(input: {
   preferenceAppliedAt?: string;
   preferenceCausalSeq?: string;
   shouldYieldBackgroundMaintenance?: (() => boolean) | null;
+  backgroundMaintenanceYieldReason?: HostedBackgroundMaintenanceYieldReason;
   sourceMailboxItemId?: string | null;
   runtimeLogContext?: HostedRuntimeLogContext | null;
   runtime: Pick<
@@ -118,7 +120,10 @@ export async function executeHostedMailboxEvent(input: {
     runtimeEnv: input.runtimeEnv,
     signal: input.signal ?? null,
     ...(input.shouldYieldBackgroundMaintenance
-      ? { shouldYieldBackgroundMaintenance: input.shouldYieldBackgroundMaintenance }
+      ? {
+          shouldYieldBackgroundMaintenance: input.shouldYieldBackgroundMaintenance,
+          backgroundMaintenanceYieldReason: input.backgroundMaintenanceYieldReason,
+        }
       : {}),
     sourceMailboxItemId: input.sourceMailboxItemId ?? null,
     vaultRoot: input.vaultRoot,
@@ -160,6 +165,7 @@ async function handleHostedMailboxEvent(input: {
   runtimeEnv: Readonly<Record<string, string>>;
   signal: AbortSignal | null;
   shouldYieldBackgroundMaintenance?: (() => boolean) | null;
+  backgroundMaintenanceYieldReason?: HostedBackgroundMaintenanceYieldReason;
   sourceMailboxItemId: string | null;
   runtimeLogContext: HostedRuntimeLogContext | null;
   vaultRoot: string;
@@ -180,7 +186,10 @@ async function handleHostedMailboxEvent(input: {
     runtimeEnv: input.runtimeEnv,
     signal: input.signal,
     ...(input.shouldYieldBackgroundMaintenance
-      ? { shouldYieldBackgroundMaintenance: input.shouldYieldBackgroundMaintenance }
+      ? {
+          shouldYieldBackgroundMaintenance: input.shouldYieldBackgroundMaintenance,
+          backgroundMaintenanceYieldReason: input.backgroundMaintenanceYieldReason,
+        }
       : {}),
     sourceMailboxItemId: input.sourceMailboxItemId,
     vaultRoot: input.vaultRoot,
@@ -201,6 +210,7 @@ async function executeHostedSystemWake(input: {
   runtimeEnv: Readonly<Record<string, string>>;
   signal: AbortSignal | null;
   shouldYieldBackgroundMaintenance?: (() => boolean) | null;
+  backgroundMaintenanceYieldReason?: HostedBackgroundMaintenanceYieldReason;
   sourceMailboxItemId: string | null;
   runtimeLogContext: HostedRuntimeLogContext | null;
   vaultRoot: string;
@@ -333,6 +343,7 @@ async function executeHostedSystemWake(input: {
         runtimeLogPlatform: input.runtime.platform,
         resolvedConfig: input.runtime.resolvedConfig,
         shouldYieldDeviceSync: input.shouldYieldBackgroundMaintenance,
+        cooperativeYieldReason: input.backgroundMaintenanceYieldReason,
         signal: input.signal,
         timeoutMs: HOSTED_DEVICE_SYNC_PASS_TIMEOUT_MS,
         vaultRoot: input.vaultRoot,
@@ -378,32 +389,6 @@ async function executeHostedSystemWake(input: {
           ? { systemProgressed: true as const }
           : {}),
       });
-    case "environment-voice.captured": {
-      const { executeHostedEnvironmentVoiceWake } = await import(
-        "./events/environment-voice.ts"
-      );
-      return await executeHostedEnvironmentVoiceWake({
-        executionContext: input.executionContext,
-        runtime: input.runtime,
-        signal: input.signal,
-        turnEnvironment: createHostedAssistantTurnEnvironment({
-          operatorHomeRoot: input.operatorHomeRoot,
-          runtimeEnv: input.runtimeEnv,
-          vaultRoot: input.vaultRoot,
-        }),
-        vaultRoot: input.vaultRoot,
-        wake: input.wake,
-      });
-    }
-    case "environment-interview.completed": {
-      const { executeHostedEnvironmentInterviewWake } = await import(
-        "./events/environment-interview.ts"
-      );
-      return await executeHostedEnvironmentInterviewWake({
-        vaultRoot: input.vaultRoot,
-        wake: input.wake,
-      });
-    }
     case "runtime.manual-requested":
     case "runtime.pending-effects-reconcile-requested":
     case "runtime.browser-vault-refresh-requested":
@@ -429,10 +414,6 @@ async function executeHostedSystemWake(input: {
       );
       return await executeHostedCodexAuthWake({
         operatorHomeRoot: input.operatorHomeRoot,
-        platform: input.runtime.platform,
-        runtimeEnv: input.runtimeEnv,
-        vaultRoot: input.vaultRoot,
-        wake: input.wake,
       });
     }
     case "assistant.ask.requested":

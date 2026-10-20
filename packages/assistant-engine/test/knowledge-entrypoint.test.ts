@@ -7,6 +7,7 @@ describe('assistant-engine knowledge entrypoint', () => {
     expect(Object.keys(knowledgeSurface).sort()).toEqual([
       'appendKnowledgePageSection',
       'getKnowledgePage',
+      'getKnowledgePageIfExists',
       'lintKnowledgePages',
       'listKnowledgePages',
       'rebuildKnowledgeIndex',

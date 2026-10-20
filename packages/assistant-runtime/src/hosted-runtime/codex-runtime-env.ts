@@ -1,7 +1,6 @@
 import {
   HOSTED_CHATGPT_OPENAI_CODEX_MODEL_PROVIDER_ID,
   HOSTED_LOCAL_TEST_CODEX_MODEL_PROVIDER_ID,
-  HOSTED_LOCAL_TEST_VENICE_CODEX_MODEL_PROVIDER_ID,
   HOSTED_OPENAI_CODEX_MODEL_PROVIDER_ID,
 } from "@murphai/operator-config/assistant/target-runtime";
 
@@ -27,7 +26,6 @@ export function resolveHostedOperatorModelProvider(
   }
   if (
     memberModelProvider === HOSTED_LOCAL_TEST_CODEX_MODEL_PROVIDER_ID
-    || memberModelProvider === HOSTED_LOCAL_TEST_VENICE_CODEX_MODEL_PROVIDER_ID
   ) {
     return HOSTED_LOCAL_TEST_CODEX_MODEL_PROVIDER_ID;
   }

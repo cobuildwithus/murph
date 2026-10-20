@@ -34,7 +34,6 @@ import {
   splitAssistantHeadersForPersistence,
 } from '../src/assistant/redaction.ts'
 import {
-  isAssistantVercelAIGatewayBaseUrl,
   readAssistantEnvString,
 } from '../src/assistant/shared.ts'
 test('assistant shared and state-id helpers handle empty, invalid, and valid inputs', () => {
@@ -49,15 +48,6 @@ test('assistant shared and state-id helpers handle empty, invalid, and valid inp
   assert.equal(readAssistantEnvString({ OPENAI_API_KEY: '' }, 'OPENAI_API_KEY'), null)
   assert.equal(readAssistantEnvString({ OPENAI_API_KEY: 'key' }, '  '), null)
   assert.equal(readAssistantEnvString(nonStringEnv, 'OPENAI_API_KEY'), null)
-
-  assert.equal(
-    isAssistantVercelAIGatewayBaseUrl(' https://ai-gateway.vercel.sh/v1 '),
-    true,
-  )
-  assert.equal(isAssistantVercelAIGatewayBaseUrl('   '), false)
-  assert.equal(isAssistantVercelAIGatewayBaseUrl('http://ai-gateway.vercel.sh/v1'), false)
-  assert.equal(isAssistantVercelAIGatewayBaseUrl('https://example.test/v1'), false)
-  assert.equal(isAssistantVercelAIGatewayBaseUrl('not a url'), false)
 
   assert.equal(isValidAssistantOpaqueId('opaque_id-123'), true)
   assert.equal(isValidAssistantOpaqueId(' bad id '), false)
@@ -98,7 +88,7 @@ test('assistant backend helpers cover Codex persistence branches and legacy fail
   const codexTarget = createAssistantModelTarget({
     provider: 'codex-cli',
     codexHome: ' /tmp/codex ',
-    modelProvider: ' Vercel-AI-Gateway ',
+    modelProvider: ' OpenAI ',
   })
   assert.deepEqual(codexTarget, {
     adapter: 'codex-cli',
@@ -106,7 +96,7 @@ test('assistant backend helpers cover Codex persistence branches and legacy fail
     codexCommand: null,
     codexHome: '/tmp/codex',
     model: null,
-    modelProvider: 'vercel-ai-gateway',
+    modelProvider: 'openai',
     oss: false,
     profile: null,
     reasoningEffort: 'low',
@@ -119,7 +109,7 @@ test('assistant backend helpers cover Codex persistence branches and legacy fail
     codexCommand: null,
     codexHome: '/tmp/codex',
     model: null,
-    modelProvider: 'vercel-ai-gateway',
+    modelProvider: 'openai',
     oss: false,
     profile: null,
     provider: 'codex-cli',
@@ -133,7 +123,7 @@ test('assistant backend helpers cover Codex persistence branches and legacy fail
       codexCommand: null,
       codexHome: ' /tmp/codex ',
       model: null,
-      modelProvider: 'vercel-ai-gateway',
+      modelProvider: 'openai',
       oss: false,
       profile: null,
       reasoningEffort: null,
@@ -165,8 +155,8 @@ test('assistant provider helpers cover Codex inference and serialization branche
 
   const mergedCodex = mergeAssistantProviderConfigs(null, {
     provider: 'codex-cli',
-    model: ' gpt-5.6-terra ',
-    modelProvider: ' Vercel-AI-Gateway ',
+    model: ' gpt-6.1-sol ',
+    modelProvider: ' OpenAI ',
   })
   assert.deepEqual(mergedCodex, {
     policy: {
@@ -177,8 +167,8 @@ test('assistant provider helpers cover Codex inference and serialization branche
     target: {
       codexCommand: null,
       codexHome: null,
-      model: 'gpt-5.6-terra',
-      modelProvider: 'vercel-ai-gateway',
+      model: 'gpt-6.1-sol',
+      modelProvider: 'openai',
       oss: false,
       profile: null,
     },
@@ -196,11 +186,11 @@ test('assistant provider helpers cover Codex inference and serialization branche
   )
   assert.deepEqual(serializeAssistantProviderSessionOptions(mergedCodex), {
     continuityFingerprint:
-      'sha256:92dd8f385e880361ece3d37db9e95db805e54e9f23e12cb7f5c2960ea52eaea8',
+      'sha256:f5efdf258853d4e25eaea6c82afed8676c17ee9001ce6533148d8bf5c236dc28',
     executionDriver: 'codex-app-server',
     approvalPolicy: null,
-    model: 'gpt-5.6-terra',
-    modelProvider: 'vercel-ai-gateway',
+    model: 'gpt-6.1-sol',
+    modelProvider: 'openai',
     oss: false,
     profile: null,
     provider: 'codex-cli',
@@ -212,8 +202,8 @@ test('assistant provider helpers cover Codex inference and serialization branche
     approvalPolicy: null,
     codexCommand: null,
     codexHome: null,
-    model: 'gpt-5.6-terra',
-    modelProvider: 'vercel-ai-gateway',
+    model: 'gpt-6.1-sol',
+    modelProvider: 'openai',
     oss: false,
     profile: null,
     reasoningEffort: 'low',
@@ -249,11 +239,11 @@ test('hosted assistant config helpers normalize Codex profiles and sparse fallba
     id: ' codex-profile ',
     providerConfig: {
       provider: 'codex-cli',
-      model: ' gpt-5.6-terra ',
-      modelProvider: ' vercel-ai-gateway ',
+      model: ' gpt-6.1-sol ',
+      modelProvider: ' openai ',
     },
   })
-  assert.equal(codexProfile.label, 'Vercel AI Gateway')
+  assert.equal(codexProfile.label, 'OpenAI')
 
   const hostedConfig = createHostedAssistantConfig({
     activeProfileId: null,
@@ -300,8 +290,8 @@ test('hosted assistant config helpers normalize Codex profiles and sparse fallba
         id: '   ',
         providerConfig: {
           provider: 'codex-cli',
-          model: 'gpt-5.6-terra',
-          modelProvider: 'vercel-ai-gateway',
+          model: 'gpt-6.1-sol',
+          modelProvider: 'openai',
         },
       }),
     /profile id is required/u,

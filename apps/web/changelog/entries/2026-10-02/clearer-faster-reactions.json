@@ -1,0 +1,17 @@
+{
+  "publishedOn": "2026-10-02",
+  "order": 100,
+  "item": {
+    "id": "clearer-faster-reactions",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Faster follow-through on reactions",
+    "summary": "Question marks and thumbs-down iMessage reactions reach Murph without an extra interpretation step.",
+    "details": "Ambiguous laughter and unidentified reactions get another look instead of being dismissed as acknowledgment. Clear appreciation can still stay quiet, and a reaction alone never grants permission to take action.",
+    "relevanceTags": [
+      "conversation",
+      "usage"
+    ],
+    "sourcePullRequests": []
+  }
+}

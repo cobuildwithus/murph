@@ -7,10 +7,10 @@ import {
 } from '../assistant-cli-contracts.js'
 import { splitAssistantHeadersForPersistence } from './redaction.js'
 import { normalizeNullableString } from './shared.js'
+import { VaultCliError } from '../vault-cli-errors.js'
 import {
   buildCodexAssistantContinuityFingerprint,
   createUnsupportedAssistantRuntimeTargetError,
-  normalizeAssistantCodexModelProvider,
   resolveStrictAssistantCodexModelProvider,
 } from './target-runtime.js'
 
@@ -84,6 +84,12 @@ export function normalizeAssistantProviderConfig(
     ? assistantProviderConfigToInput(input)
     : input
   assertSupportedAssistantRuntimeIdentifier(providerConfigInput?.provider)
+  if (providerConfigInput?.oss === true) {
+    throw new VaultCliError(
+      'invalid_option',
+      'Assistant models must use OpenAI. Local model execution is no longer supported.',
+    )
+  }
 
   return {
     policy: {
@@ -97,10 +103,10 @@ export function normalizeAssistantProviderConfig(
       codexCommand: normalizeNullableString(providerConfigInput?.codexCommand),
       codexHome: normalizeNullableString(providerConfigInput?.codexHome),
       model: normalizeNullableString(providerConfigInput?.model),
-      modelProvider: normalizeAssistantCodexModelProvider(
+      modelProvider: resolveStrictAssistantCodexModelProvider(
         providerConfigInput?.modelProvider,
-      ),
-      oss: providerConfigInput?.oss === true,
+      ).id,
+      oss: false,
       profile: normalizeNullableString(providerConfigInput?.profile),
     },
   }

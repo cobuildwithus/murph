@@ -236,6 +236,7 @@ import {
   resolveHostedAssistantDeliveryIntentState,
   resolveHostedAssistantOutboxNextWakeAt,
 } from "../src/hosted-runtime/callbacks.ts";
+import { drainHostedRuntimeLogWritesBestEffort } from "../src/hosted-runtime/runtime-logs.ts";
 import {
   HOSTED_PROVIDER_FETCH_UNAVAILABLE_CODE,
 } from "../src/hosted-runtime/provider-fetch.ts";
@@ -413,9 +414,15 @@ async function assertLinqEngagementWithExistingProviderClaim(request: {
   fromPhoneNumber?: string | null;
   target?: string | null;
   targetKind?: "explicit" | "participant" | "thread" | null;
-}) {
+}, responseKind: "claim-result" | "legacy-conflict") {
   if (request.authorityCheckOnly === true) {
     return { resolvedRoute: buildHostedRuntimeResolvedLinqRoute(request) };
+  }
+  if (responseKind === "claim-result") {
+    return {
+      providerDispatchClaimed: false,
+      resolvedRoute: buildHostedRuntimeResolvedLinqRoute(request),
+    };
   }
   throw Object.assign(new Error("Hosted Linq provider dispatch is already started."), {
     code: "HOSTED_LINQ_PROVIDER_DISPATCH_ALREADY_STARTED",
@@ -13135,6 +13142,121 @@ describe("hosted runtime callbacks", () => {
     ]);
   });
 
+  it("writes one dispatch timing row per primary and fallback provider boundary", async () => {
+    const idempotencyKey = "assistant-outbox:intent_123";
+    const fallbackIdempotencyKey = `${idempotencyKey}:fallback`;
+    const effect = createEffect({
+      bindingDeliveryKind: "thread",
+      bindingDeliveryTarget: "linq_chat_123",
+      card: HOSTED_LINQ_RESPONSE_CARD,
+      channel: "linq",
+      idempotencyKey,
+      message: "Nutrition summary",
+      threadIsDirect: true,
+      transportIdempotent: true,
+    });
+    const recordedOutcomes: Array<{
+      acceptedAt?: string | null;
+      attemptedAt?: string | null;
+      idempotencyKey?: string | null;
+    }> = [];
+    let messageRequestCount = 0;
+    const providerFetch = vi.fn<typeof fetch>(async (request, init) => {
+      const url = new URL(String(request));
+      if (url.pathname.endsWith("/capability/check_imessage")) {
+        return new Response(JSON.stringify({ address: "+15550001", available: true }), {
+          headers: { "content-type": "application/json" },
+        });
+      }
+      messageRequestCount += 1;
+      const body = JSON.parse(String(init?.body)) as {
+        message?: { parts?: Array<{ type?: string }> };
+      };
+      const isCard = body.message?.parts?.some((part) => part.type === "imessage_app") === true;
+      expect(isCard).toBe(messageRequestCount === 1);
+      return isCard
+        ? new Response(JSON.stringify({ error: "unsupported app card" }), {
+            headers: { "content-type": "application/json" },
+            status: 400,
+          })
+        : new Response(JSON.stringify({ message: { id: "linq_text_fallback" } }), {
+            headers: { "content-type": "application/json" },
+          });
+    });
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+      const delivery = await dependencies.sendLinq({
+        card: HOSTED_LINQ_RESPONSE_CARD,
+        directRecipientPhoneNumber: "+15550001",
+        fromPhoneNumber: "+15550002",
+        idempotencyKey,
+        message: "Nutrition summary",
+        persistAppCardTextFallback: vi.fn(async () => undefined),
+        target: "linq_chat_123",
+        targetKind: "thread",
+        threadIsDirect: true,
+      });
+      return createDispatchResult({
+        delivery: createDelivery({
+          channel: "linq",
+          idempotencyKey: delivery.idempotencyKey,
+          providerMessageId: delivery.providerMessageId,
+          providerThreadId: delivery.providerThreadId,
+          target: delivery.target,
+          targetKind: delivery.targetKind ?? "thread",
+        }),
+        status: "sent",
+      });
+    });
+    const writes: Array<{ redactedJson?: Record<string, unknown> | null }> = [];
+
+    await expect(drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      deliveryTraceContext: {
+        latencyTracePort: null,
+        runtimeAttemptId: "attempt_dispatch_fallback",
+      },
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        assertLinqRecentInboundEngagement: vi.fn(async (request) =>
+          buildClaimedLinqEngagementResult(request)),
+        recordLinqDeliveryOutcome: vi.fn(async (request) => {
+          recordedOutcomes.push(request);
+        }),
+      }),
+      forwardedEnv: {
+        LINQ_API_BASE_URL: "https://api.linq.example/api/partner/v3",
+        LINQ_API_TOKEN: "linq-actual-runtime-token",
+      },
+      platform: {
+        logPort: {
+          write: vi.fn(async (request: {
+            entries: Array<{ redactedJson?: Record<string, unknown> | null }>;
+          }) => {
+            writes.push(...request.entries);
+            return { loggedCount: request.entries.length };
+          }),
+        },
+      },
+      platformEnv: {},
+      providerFetch,
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    })).resolves.toEqual([expect.objectContaining({ deliveryStatus: "sent" })]);
+    await drainHostedAssistantLinqDeliveryOutcomeWritesBestEffort();
+    await drainHostedRuntimeLogWritesBestEffort();
+
+    // The accepted outcome carries the fallback boundary's own attempt time.
+    const failed = recordedOutcomes.find((outcome) => outcome.idempotencyKey === idempotencyKey);
+    const accepted = recordedOutcomes.find((outcome) =>
+      outcome.idempotencyKey === fallbackIdempotencyKey && outcome.acceptedAt);
+    expect(failed?.acceptedAt ?? null).toBeNull();
+    expect(Date.parse(accepted!.attemptedAt!)).toBeGreaterThanOrEqual(Date.parse(failed!.attemptedAt!));
+    // Each boundary writes its own row; the reader classifies two as ambiguous
+    // rather than pretending the first describes the accepted fallback.
+    expect(writes.filter((entry) =>
+      entry.redactedJson?.turnTimingStage === "linq-dispatch-entered"
+      && entry.redactedJson?.turnTimingDeliveryIntentId === "intent_123")).toHaveLength(2);
+  });
+
   it("recovers a classified stale app-card chat under the promoted fallback identity", async () => {
     const idempotencyKey = "assistant-outbox:stale-card-chat";
     const fallbackIdempotencyKey = idempotencyKey + ":fallback";
@@ -13550,7 +13672,7 @@ describe("hosted runtime callbacks", () => {
     expect(mocks.sendLinqVoiceMemoMessage).toHaveBeenCalledTimes(1);
   });
 
-  it("safely re-enters idempotent Linq text delivery after an existing provider claim", async () => {
+  it.each(["claim-result", "legacy-conflict"] as const)("safely re-enters idempotent Linq text delivery after an existing provider claim (%s)", async (responseKind) => {
     const effect = createEffect({
       bindingDeliveryTarget: "linq_chat_123",
       channel: "linq",
@@ -13558,7 +13680,8 @@ describe("hosted runtime callbacks", () => {
       replyToMessageId: "linq_message_1",
       transportIdempotent: true,
     });
-    const assertRecentInbound = vi.fn(assertLinqEngagementWithExistingProviderClaim);
+    const assertRecentInbound = vi.fn((request) =>
+      assertLinqEngagementWithExistingProviderClaim(request, responseKind));
     mocks.sendLinqMessage.mockResolvedValueOnce({
       providerMessageId: "linq_message_sent",
       providerThreadId: "linq_chat_123",
@@ -13611,6 +13734,112 @@ describe("hosted runtime callbacks", () => {
       expect.any(Object),
     );
   });
+
+  it.each(["recording", "rejecting", "throwing"] as const)(
+    "attributes Linq dispatch entry once without letting a %s log port affect delivery",
+    async (logPortBehavior) => {
+      const effect = createEffect({
+        bindingDeliveryTarget: "linq_chat_123",
+        channel: "linq",
+        transportIdempotent: true,
+      });
+      mocks.sendLinqMessage.mockResolvedValueOnce({
+        providerMessageId: "linq_message_sent",
+        providerThreadId: "linq_chat_123",
+        target: "linq_chat_123",
+        targetKind: "thread" as const,
+      });
+      mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+        const delivery = await dependencies.sendLinq({
+          idempotencyKey: "assistant-outbox:intent_123",
+          message: "hello from hosted",
+          target: "linq_chat_123",
+          targetKind: "thread",
+        });
+        return createDispatchResult({
+          delivery: createDelivery({
+            channel: "linq",
+            providerMessageId: delivery.providerMessageId,
+            providerThreadId: delivery.providerThreadId,
+            target: delivery.target,
+            targetKind: delivery.targetKind,
+          }),
+          status: "sent",
+        });
+      });
+      const writes: unknown[] = [];
+      const logPort = {
+        write: vi.fn(async (request: { entries: unknown[] }) => {
+          if (logPortBehavior === "rejecting") {
+            throw new Error("synthetic log port rejection");
+          }
+          writes.push(...request.entries);
+          return { loggedCount: request.entries.length };
+        }),
+      };
+      const platform = logPortBehavior === "throwing"
+        ? {
+            get logPort(): never {
+              throw new Error("synthetic log port access failure");
+            },
+          }
+        : { logPort };
+
+      await expect(drainHostedPreparedAssistantDeliveries({
+        assistantDeliveryEffects: [effect],
+        deliveryTraceContext: {
+          foregroundDeliveryPhaseStartedAtMonotonicMs: performance.now() - 40,
+          latencyTracePort: null,
+          memberChannelBarrierMs: 12.4,
+          runtimeAttemptId: "attempt_dispatch_timing",
+        },
+        effectsPort: createHostedRuntimeEffectsPortStub({
+          assertLinqRecentInboundEngagement: vi.fn(async (request) =>
+            buildClaimedLinqEngagementResult(request)),
+        }),
+        forwardedEnv: { LINQ_API_TOKEN: "linq-token" },
+        platform,
+        platformEnv: {},
+        providerFetch: vi.fn<typeof fetch>(async () => new Response(null, { status: 204 })),
+        vaultRoot: HOSTED_WAKE.vaultRoot,
+        wake: HOSTED_WAKE.wake,
+      })).resolves.toEqual([
+        expect.objectContaining({ deliveryStatus: "sent" }),
+      ]);
+      await drainHostedRuntimeLogWritesBestEffort();
+
+      const dispatchRows = writes.filter((entry) =>
+        (entry as { redactedJson?: { turnTimingStage?: unknown } })
+          .redactedJson?.turnTimingStage === "linq-dispatch-entered");
+      if (logPortBehavior !== "recording") {
+        expect(dispatchRows).toEqual([]);
+        return;
+      }
+      expect(dispatchRows).toEqual([
+        expect.objectContaining({
+          attemptId: "attempt_dispatch_timing",
+          eventCode: "assistant.automation_detail",
+          redactedJson: {
+            deliveryMemberChannelBarrierMs: 12,
+            deliveryProviderEntryFenceMs: expect.any(Number),
+            deliveryRouteAuthorityCheckMs: expect.any(Number),
+            deliverySendPreparationMs: expect.any(Number),
+            deliverySinceForegroundPhaseStartedMs: expect.any(Number),
+            detailLabel: "Hosted Linq dispatch entry timing captured.",
+            schema: "murph.assistant-turn-timing.v1",
+            turnTimingDeliveryIntentId: "intent_123",
+            turnTimingStage: "linq-dispatch-entered",
+            type: "assistant.turn.timing",
+          },
+        }),
+      ]);
+      const timing = (dispatchRows[0] as { redactedJson: Record<string, number> }).redactedJson;
+      expect(timing.deliverySinceForegroundPhaseStartedMs).toBeGreaterThanOrEqual(40);
+      expect(timing.deliverySendPreparationMs).toBeGreaterThanOrEqual(
+        timing.deliveryProviderEntryFenceMs!,
+      );
+    },
+  );
 
   it("durably supersedes a revoked reviewed answer and sends the fixed fallback once after retry", async () => {
     const completionId = "aask_done_revoked_before_dispatch";
@@ -14140,9 +14369,14 @@ describe("hosted runtime callbacks", () => {
     }
   });
 
-  it.each(["reaction", "voice"] as const)(
-    "keeps an already-started non-idempotent Linq %s delivery confirmation-pending",
-    async (kind) => {
+  it.each([
+    ["reaction", "claim-result"],
+    ["voice", "claim-result"],
+    ["reaction", "legacy-conflict"],
+    ["voice", "legacy-conflict"],
+  ] as const)(
+    "keeps an already-started non-idempotent Linq %s delivery confirmation-pending (%s)",
+    async (kind, responseKind) => {
       const effect = createEffect({
         bindingDeliveryKind: "thread",
         bindingDeliveryTarget: "linq_chat_123",
@@ -14151,7 +14385,8 @@ describe("hosted runtime callbacks", () => {
         replyToMessageId: "linq_message_1",
         transportIdempotent: false,
       });
-      const assertRecentInbound = vi.fn(assertLinqEngagementWithExistingProviderClaim);
+      const assertRecentInbound = vi.fn((request) =>
+        assertLinqEngagementWithExistingProviderClaim(request, responseKind));
       mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
         if (kind === "reaction") {
           await dependencies.setLinqMessageReaction({

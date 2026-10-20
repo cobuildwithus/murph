@@ -1062,8 +1062,8 @@ function createTarget(
 ): AssistantModelTarget {
   const target = createAssistantModelTarget({
     approvalPolicy: 'never',
-    model: 'gpt-5.6-terra',
-    modelProvider: 'vercel-ai-gateway',
+    model: 'gpt-6.1-sol',
+    modelProvider: 'hosted-openai',
     provider: 'codex-cli',
     reasoningEffort: 'medium',
     sandbox: 'danger-full-access',

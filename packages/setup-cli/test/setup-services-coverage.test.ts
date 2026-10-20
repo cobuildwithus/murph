@@ -1490,8 +1490,6 @@ test('createSetupServices keeps prompted provider credentials out of provisionin
         ...setupCredentialEnv,
         OPENAI_API_KEY: 'openai_secret_SENTINEL',
         PATH: binDirectory,
-        VENICE_API_KEY: 'venice_secret_SENTINEL',
-        VERCEL_AI_API_KEY: 'vercel_secret_SENTINEL',
       }),
       getCwd: () => cwd,
       getHomeDirectory: () => homeDirectory,
@@ -1541,7 +1539,7 @@ test('createSetupServices keeps prompted provider credentials out of provisionin
       localEnvOverrides: {
         ...setupNonCredentialEnv,
         ...setupCredentialEnv,
-        VENICE_API_KEY: 'venice_secret_SENTINEL',
+        OPENAI_API_KEY: 'openai_secret_SENTINEL',
       },
       strict: false,
       toolchainRoot,
@@ -1552,13 +1550,10 @@ test('createSetupServices keeps prompted provider credentials out of provisionin
     assert.ok(commandEnvs.length > 0)
     for (const env of commandEnvs) {
       assert.equal(env.OPENAI_API_KEY, undefined)
-      assert.equal(env.VENICE_API_KEY, undefined)
-      assert.equal(env.VERCEL_AI_API_KEY, undefined)
       for (const key of Object.keys(setupCredentialEnv)) {
         assert.equal(env[key], undefined)
       }
     }
-    assert.equal(JSON.stringify(result).includes('venice_secret_SENTINEL'), false)
     for (const value of Object.values(setupCredentialEnv)) {
       assert.equal(JSON.stringify(result).includes(value ?? ''), false)
     }
@@ -1573,7 +1568,7 @@ test('createSetupServices keeps prompted provider credentials out of provisionin
     )
     assert.match(
       await readFile(path.join(cwd, '.env.local'), 'utf8'),
-      /VENICE_API_KEY="venice_secret_SENTINEL"/u,
+      /OPENAI_API_KEY="openai_secret_SENTINEL"/u,
     )
   } finally {
     await rm(root, { recursive: true, force: true })
@@ -1719,8 +1714,8 @@ test('createSetupServices dry-run on macOS plans toolchain and assistant default
     preset: 'codex',
     enabled: true,
     provider: 'codex-cli',
-    model: 'gpt-5.6-terra',
-    modelProvider: 'vercel-ai-gateway',
+    model: 'gpt-6.1-sol',
+    modelProvider: null,
     codexCommand: 'codex',
     codexHome: null,
     profile: null,
@@ -1729,7 +1724,7 @@ test('createSetupServices dry-run on macOS plans toolchain and assistant default
     approvalPolicy: 'never',
     oss: false,
     account: null,
-    detail: 'Configured Codex gpt-5.6-terra.',
+    detail: 'Configured Codex gpt-6.1-sol.',
   }
 
   try {
@@ -1812,8 +1807,8 @@ test('createSetupServices on linux records apt provisioning failures and saves a
     codexHome: null,
     detail: 'Configured Codex.',
     enabled: true,
-    model: 'gpt-5.6-terra',
-    modelProvider: 'vercel-ai-gateway',
+    model: 'gpt-6.1-sol',
+    modelProvider: null,
     oss: false,
     preset: 'codex',
     profile: null,

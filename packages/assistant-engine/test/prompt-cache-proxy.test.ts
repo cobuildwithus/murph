@@ -41,13 +41,13 @@ it('forwards HTTP and WebSocket completions and keeps the comparison across reco
   try {
     expect((await fetch(`${proxy.baseUrl}/responses`, { method: 'POST', body: '{}' })).status).toBe(404)
     expect(received).toHaveLength(0)
-    const first = await fetch(`${proxy.baseUrl}/responses`, { method: 'POST', headers: { authorization: `Bearer ${proxy.token}` }, body: JSON.stringify({ model: 'gpt-5.6-terra', input: 'private synthetic prompt', stream: true }) })
+    const first = await fetch(`${proxy.baseUrl}/responses`, { method: 'POST', headers: { authorization: `Bearer ${proxy.token}` }, body: JSON.stringify({ model: 'gpt-6.1-sol', input: 'private synthetic prompt', stream: true }) })
     expect(await first.text()).toContain('response.completed')
     for (let index = 0; index < 2; index++) {
       const socket = new WebSocket(`${proxy.baseUrl.replace('http:', 'ws:')}/responses`, { headers: { authorization: `Bearer ${proxy.token}` } })
       await once(socket, 'open')
       const reply = once(socket, 'message')
-      socket.send(JSON.stringify({ type: 'response.create', model: 'gpt-5.6-terra', input: 'private synthetic prompt' }))
+      socket.send(JSON.stringify({ type: 'response.create', model: 'gpt-6.1-sol', input: 'private synthetic prompt' }))
       expect(JSON.parse(String((await reply)[0])).type).toBe('response.completed')
       socket.close()
       await once(socket, 'close')

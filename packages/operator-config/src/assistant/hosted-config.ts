@@ -31,7 +31,7 @@ const hostedAssistantConfigBaseSchema = z
   .object({
     schema: z.literal(HOSTED_ASSISTANT_CONFIG_SCHEMA),
     activeProfileId: z.string().min(1).nullable().default(null),
-    updatedAt: z.string().datetime({ offset: true }),
+    updatedAt: z.isoDateTime({ offset: true }),
   })
   .strict()
 

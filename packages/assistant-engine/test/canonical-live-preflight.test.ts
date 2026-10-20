@@ -19,7 +19,7 @@ import { sendAssistantMessageLocal } from '../src/assistant/service.js'
 import { createCanonicalLiveFixture, createCanonicalReminderAutomationPort, runCanonicalReminderJourney } from './support/canonical-live-journeys.js'
 
 const cli = fileURLToPath(new URL('../../cli/dist/bin.js', import.meta.url))
-const config = { codexHome: null, env: {}, model: 'gpt-6-sol', modelProvider: 'openai-env' }
+const config = { codexHome: null, env: {}, model: 'gpt-6-sol', modelProvider: 'openai' }
 
 afterEach(() => { vi.resetAllMocks() })
 
@@ -54,14 +54,14 @@ it('creates the canonical fixture after the CLI preflight succeeds', async () =>
 })
 
 
-it('passes the hosted automation port to the canonical reminder creation turn', async () => {
+it.each(['openai', 'hosted-openai'])('passes the hosted automation port to the canonical reminder creation turn with %s', async (modelProvider) => {
   vi.mocked(access).mockResolvedValueOnce(undefined)
   const stop = new Error('synthetic stop after checking the hosted boundary')
   vi.mocked(sendAssistantMessageLocal).mockImplementationOnce(async (input) => {
     expect(input.executionContext?.hosted?.automationTool?.request).toBeTypeOf('function')
     throw stop
   })
-  await expect(runCanonicalReminderJourney(config)).rejects.toBe(stop)
+  await expect(runCanonicalReminderJourney({ ...config, modelProvider })).rejects.toBe(stop)
 })
 
 it('persists and cancels a reminder through the synthetic port using canonical storage and timing', async () => {

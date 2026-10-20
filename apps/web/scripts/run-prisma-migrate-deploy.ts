@@ -105,6 +105,12 @@ const hostedWebPrismaPredeployHistoricalMigrationIds = new Set([
 
 const hostedWebPrismaPredeployCompatibleMigrationReasons = new Map([
   [
+    "20261008210000_linq_bounded_terminal_recovery",
+    // Constant zero/empty-array defaults preserve existing rows and old inserts.
+    // All other new fields are nullable; no recovery starts during migration.
+    new Set(["ADD COLUMN NOT NULL"]),
+  ],
+  [
     "20260915223000_hosted_runtime_legacy_import",
     // The new cursor/count fields have constant defaults, so existing rows and
     // old writers retain the empty-inventory shape before cutover begins.

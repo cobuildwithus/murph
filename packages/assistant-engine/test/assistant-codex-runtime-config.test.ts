@@ -1,6 +1,8 @@
 import { withCodexToolInputContract } from '../src/assistant-codex/tool-input-contract.ts'
+import { withCodexAppServerSteeringFeatureOverrides } from '../src/assistant-codex/config.ts'
 import {
   cliTimingLaunchArgs,
+  codexSteeringLaunchArgs,
   MURPH_DYNAMIC_TOOLS,
   MURPH_DYNAMIC_TOOLS_WITHOUT_PROGRESS,
   MURPH_DYNAMIC_TOOLS_WITH_COMPUTER,
@@ -42,7 +44,6 @@ import {
 } from '@murphai/hosted-execution/assistant-permissions'
 import {
   HOSTED_ASSISTANT_PRODUCT_MODELS,
-  HOSTED_ASSISTANT_PROVIDERS,
   HOSTED_ASSISTANT_REASONING_EFFORTS,
   HOSTED_ASSISTANT_SOL_MODEL,
   HOSTED_ASSISTANT_DEFAULT_MODEL,
@@ -61,7 +62,6 @@ import {
   buildCodexAppServerArgs,
   compactWarmCodexThread,
   executeCodexAppServerTurn as executeCodexAppServerTurnUnchecked,
-  executeCodexManagedAccountOperation,
   preinitializeCodexAppServer,
   readCodexAppServerTurnFailureContext,
   resolveCodexDisplayOptions,
@@ -131,7 +131,7 @@ describe('assistant codex runtime', () => {
       buildCodexAppServerArgs({
         approvalPolicy: 'never',
         configOverrides: ['model="gpt-5"', 'theme="clean"'],
-        oss: true,
+        oss: false,
         profile: 'daily',
         sandbox: 'workspace-write',
       }),
@@ -142,11 +142,30 @@ describe('assistant codex runtime', () => {
       'theme="clean"',
       '--profile',
       'daily',
-      '--oss',
       'app-server',
     ])
 
     expect(buildCodexAppServerArgs({})).toEqual(['app-server'])
+    expect(() => buildCodexAppServerArgs({ oss: true })).toThrow(/must use OpenAI/u)
+  })
+
+  it('defaults instant steering and code-mode interruption while keeping explicit caller values', () => {
+    expect(withCodexAppServerSteeringFeatureOverrides(['model="gpt-5"'])).toEqual([
+      'model="gpt-5"',
+      'features.instant_interrupt=true',
+      'features.code_mode_interrupt=true',
+    ])
+    expect(withCodexAppServerSteeringFeatureOverrides([
+      'features.instant_interrupt = false',
+    ])).toEqual([
+      'features.instant_interrupt = false',
+      'features.code_mode_interrupt=true',
+    ])
+    const complete = [
+      'features.code_mode_interrupt=false',
+      'features.instant_interrupt=true',
+    ]
+    expect(withCodexAppServerSteeringFeatureOverrides(complete)).toBe(complete)
   })
 
   it('builds typed Codex app-server turn steer requests for live turns', () => {
@@ -191,7 +210,7 @@ describe('assistant codex runtime', () => {
       developerInstructions: 'Stable Murph instructions.',
       dynamicTools: MURPH_DYNAMIC_TOOLS_WITHOUT_PROGRESS,
       model: 'gpt-5',
-      modelProvider: 'vercel-ai-gateway',
+      modelProvider: 'hosted-openai',
       prompt: 'User message:\nWhat changed?',
       reasoningEffort: 'high',
       sandbox: 'workspace-write' as const,
@@ -206,7 +225,7 @@ describe('assistant codex runtime', () => {
       dynamicTools: MURPH_DYNAMIC_TOOLS_WITHOUT_PROGRESS.map(withCodexToolInputContract),
       experimentalRawEvents: true,
       model: 'gpt-5',
-      modelProvider: 'vercel-ai-gateway',
+      modelProvider: 'hosted-openai',
       sandbox: 'workspace-write',
       serviceName: 'murph',
     })
@@ -221,11 +240,11 @@ describe('assistant codex runtime', () => {
     expect(
       buildCodexThreadStartParams({
         ...baseInput,
-        modelProvider: 'venice',
+        modelProvider: 'hosted-openai',
       }),
     ).toMatchObject({
       model: 'gpt-5',
-      modelProvider: 'venice',
+      modelProvider: 'hosted-openai',
     })
     expect(
       buildCodexThreadStartParams({
@@ -293,7 +312,7 @@ describe('assistant codex runtime', () => {
       cwd: '/workspace',
       excludeTurns: true,
       model: 'gpt-5',
-      modelProvider: 'vercel-ai-gateway',
+      modelProvider: 'hosted-openai',
       sandbox: 'workspace-write',
       threadId: 'thread-1',
     })
@@ -315,7 +334,7 @@ describe('assistant codex runtime', () => {
       cwd: '/workspace',
       excludeTurns: true,
       model: 'gpt-5',
-      modelProvider: 'vercel-ai-gateway',
+      modelProvider: 'hosted-openai',
       sandbox: 'workspace-write',
       threadId: 'thread-restricted-resume',
     })
@@ -337,7 +356,7 @@ describe('assistant codex runtime', () => {
       cwd: '/workspace',
       excludeTurns: true,
       model: 'gpt-5',
-      modelProvider: 'vercel-ai-gateway',
+      modelProvider: 'hosted-openai',
       sandbox: 'workspace-write',
       threadId: 'thread-1',
     })
@@ -356,7 +375,7 @@ describe('assistant codex runtime', () => {
       cwd: '/workspace',
       excludeTurns: true,
       model: 'gpt-5',
-      modelProvider: 'vercel-ai-gateway',
+      modelProvider: 'hosted-openai',
       permissions: MURPH_MEMBER_WORKSPACE_PERMISSION_PROFILE,
       runtimeWorkspaceRoots: ['/workspace'],
       threadId: 'thread-member-workspace',
@@ -452,7 +471,7 @@ describe('assistant codex runtime', () => {
       ephemeral: true,
       experimentalRawEvents: true,
       model: 'gpt-5',
-      modelProvider: 'vercel-ai-gateway',
+      modelProvider: 'hosted-openai',
       permissions: 'murph-group-read',
       runtimeWorkspaceRoots: ['/group-vault'],
       serviceName: 'murph',
@@ -551,12 +570,6 @@ describe('assistant codex runtime', () => {
       model: 'gpt-5.2',
       modelProvider: 'openai',
       providerRequestOrdinal: 3,
-    },
-    {
-      expectedImageDetail: 'high',
-      model: 'member-model',
-      modelProvider: 'hosted-custom-inference',
-      providerRequestOrdinal: 4,
     },
   ] as const)(
     'executes Codex app-server turns for $modelProvider at provider ordinal $providerRequestOrdinal',
@@ -916,6 +929,7 @@ describe('assistant codex runtime', () => {
         `model="${model}"`,
         '--config',
         'model_catalog_json="/opt/murph/codex-model-catalog.openai-flex.json"',
+        ...codexSteeringLaunchArgs,
         ...cliTimingLaunchArgs,
         'app-server',
       ],
@@ -1283,6 +1297,37 @@ describe('assistant codex runtime', () => {
     })
   })
 
+  it('keeps each image bubble placement on the final response media', async () => {
+    const placedMedia = [
+      {
+        kind: 'image' as const,
+        url: 'https://cdn.example.test/assistant/step-one.png',
+        alt: 'Step one',
+        source: 'step-one',
+        bubble: 1,
+      },
+      {
+        kind: 'image' as const,
+        url: 'https://cdn.example.test/assistant/step-two.png',
+        alt: 'Step two',
+        source: 'step-two',
+        bubble: 2,
+      },
+    ]
+
+    await expect(
+      runCodexResponseMediaToolTurn([
+        {
+          id: 43,
+          media: placedMedia,
+          expectedText: '2 response images attached',
+        },
+      ]),
+    ).resolves.toMatchObject({
+      responseMedia: placedMedia,
+    })
+  })
+
   it('clears response media when attach_response_media receives an empty batch', async () => {
     await expect(
       runCodexResponseMediaToolTurn([
@@ -1529,12 +1574,10 @@ describe('assistant codex runtime', () => {
 
     const configurationSnapshot = () => ({
       availableModels: [...HOSTED_ASSISTANT_PRODUCT_MODELS],
-      availableProviders: [...HOSTED_ASSISTANT_PROVIDERS],
       availableReasoningEfforts: [...HOSTED_ASSISTANT_REASONING_EFFORTS],
       configurationAvailable: true,
       dormantSolPreference: false,
       model: savedModel,
-      provider: "openai" as const,
       reasoningEffort: savedReasoningEffort,
       solAvailable: true,
     })
@@ -1575,7 +1618,6 @@ describe('assistant codex runtime', () => {
       currentAssistantInputId: () => `ain_${'a'.repeat(32)}`,
       currentAssistantTarget: () => ({
         model: HOSTED_ASSISTANT_DEFAULT_MODEL,
-        provider: "openai",
         reasoningEffort: 'low',
       }),
     }
@@ -1673,7 +1715,7 @@ describe('assistant codex runtime', () => {
     await expect(executeCodexAppServerTurn({
       env: { OPENAI_API_KEY: 'openai-test-key' },
       hostedToolContext,
-      prompt: 'switch to Sol, then back to Terra',
+      prompt: 'switch to Sol, then back to the default model',
       workingDirectory,
     })).resolves.toMatchObject({
       finalMessage: 'Configuration updates complete',

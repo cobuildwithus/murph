@@ -12,9 +12,7 @@ import {
 } from '@murphai/hosted-execution/assistant-usage'
 import {
   resolveAssistantCodexUsageProviderName,
-  HOSTED_CUSTOM_INFERENCE_CODEX_MODEL_PROVIDER_ID,
   HOSTED_LOCAL_TEST_CODEX_MODEL_PROVIDER_ID,
-  HOSTED_LOCAL_TEST_VENICE_CODEX_MODEL_PROVIDER_ID,
 } from '@murphai/operator-config/assistant/target-runtime'
 import {
   MURPH_GROUP_ROOM_MODEL_MAINTENANCE_PERMISSION_PROFILE,
@@ -183,10 +181,6 @@ const ASSISTANT_GROUP_EMAIL_THREAD_CONFIG = {
   'features.multi_agent_v2': false,
   'features.shell_tool': false,
   'features.tool_suggest': false,
-} as const
-const ASSISTANT_HABITAT_MAINTENANCE_THREAD_CONFIG = {
-  'memories.generate_memories': false,
-  'memories.use_memories': false,
 } as const
 
 export {
@@ -437,11 +431,6 @@ function createAssistantProviderUsageAttribution(input: {
 
   const credentialSource = resolveAssistantUsageCredentialSource({
     apiKeyEnv: null,
-    credentialSourceHint:
-      input.attemptPlan.route.providerOptions.modelProvider
-        === HOSTED_CUSTOM_INFERENCE_CODEX_MODEL_PROVIDER_ID
-        ? 'member'
-        : null,
     effectiveEnv: input.env,
     headers: null,
     provider: input.attemptPlan.route.provider,
@@ -764,9 +753,6 @@ function resolveCodexAttemptCapabilities(
     automationId === MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID
   const toolOnlyMaintenanceTurn =
     groupRoomModelMaintenanceTurn || memberMemoryMaintenanceTurn
-  const habitatVoiceMaintenanceTurn =
-    executionPlan.profile.toolProfile === 'maintenance-turn' &&
-    executionPlan.input.maintenanceProfile === 'habitat-voice'
   const restrictedOneShotTurn =
     toolOnlyMaintenanceTurn || readOnlyAutomationTurn
   const audience = executionPlan.sharedPlan.conversationPolicy.audience
@@ -785,9 +771,7 @@ function resolveCodexAttemptCapabilities(
     !groupEmailTurn
   const hostedLocalTestProviderTurn =
     attemptPlan.route.providerOptions.modelProvider ===
-      HOSTED_LOCAL_TEST_CODEX_MODEL_PROVIDER_ID ||
-    attemptPlan.route.providerOptions.modelProvider ===
-      HOSTED_LOCAL_TEST_VENICE_CODEX_MODEL_PROVIDER_ID
+      HOSTED_LOCAL_TEST_CODEX_MODEL_PROVIDER_ID
   return {
     outputOnlyTurn,
     readOnlyAutomationTurn,
@@ -797,7 +781,6 @@ function resolveCodexAttemptCapabilities(
     groupRoomModelMaintenanceTurn,
     memberMemoryMaintenanceTurn,
     toolOnlyMaintenanceTurn,
-    habitatVoiceMaintenanceTurn,
     restrictedOneShotTurn,
     groupConversation,
     groupEmailTurn,
@@ -822,9 +805,6 @@ function resolveCodexAttemptThreadConfig(
   }
   if (capabilities.readOnlyAutomationTurn) {
     return ASSISTANT_READ_ONLY_AUTOMATION_THREAD_CONFIG
-  }
-  if (capabilities.habitatVoiceMaintenanceTurn) {
-    return ASSISTANT_HABITAT_MAINTENANCE_THREAD_CONFIG
   }
   return capabilities.groupEmailTurn ? ASSISTANT_GROUP_EMAIL_THREAD_CONFIG : null
 }

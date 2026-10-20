@@ -15,6 +15,7 @@ import {
   HOSTED_RUNTIME_GROUP_CONTEXT_HANDOFF_EVENT_ID_PREFIX,
   HOSTED_RUNTIME_GROUP_CONTEXT_HANDOFF_TTL_MS,
   HOSTED_RUNTIME_DEVICE_SYNC_CONTINUATION_OWNER_MAX_COUNT,
+  isHostedRetiredMailboxKind,
 } from "@murphai/hosted-execution/runtime-control";
 import { parseMemberActionOutcomeV1 } from "@murphai/contracts";
 import {
@@ -86,8 +87,6 @@ export type HostedSystemMailboxRouteAction =
   | "run-clinical-records-sync"
   | "apply-clinical-enrichment"
   | "run-device-sync-wake"
-  | "run-environment-interview"
-  | "run-environment-voice"
   | "import-group-journal-fact"
   | "import-reported-daily-metric"
   | "apply-runtime-control-request";
@@ -1330,7 +1329,17 @@ function parseHostedSystemMailboxStateValue(value: unknown): HostedSystemMailbox
   }
 
   return {
-    pending: pending.map(parseHostedSystemMailboxPendingItem),
+    pending: pending.flatMap((value) => {
+      // Old snapshots can retain retired work at any completion stage. Skip
+      // before parsing its removed payload, action, or post-checkpoint record.
+      const wake = value && typeof value === "object" && "wake" in value
+        ? value.wake : null;
+      if (wake && typeof wake === "object" && "kind" in wake
+        && typeof wake.kind === "string" && isHostedRetiredMailboxKind(wake.kind)) {
+        return [];
+      }
+      return [parseHostedSystemMailboxPendingItem(value)];
+    }),
   };
 }
 
@@ -1412,8 +1421,6 @@ function parseHostedSystemMailboxRouteAction(value: unknown): HostedSystemMailbo
     || value === "run-clinical-records-sync"
     || value === "apply-clinical-enrichment"
     || value === "run-device-sync-wake"
-    || value === "run-environment-interview"
-    || value === "run-environment-voice"
     || value === "import-group-journal-fact"
     || value === "import-reported-daily-metric"
     || value === "apply-runtime-control-request"
@@ -1546,27 +1553,6 @@ function parseHostedSystemMailboxRecordRequest(
       ),
       kind: "codex-auth.updated",
       phase: record.phase,
-    };
-  }
-
-  if (record.kind === "environment-voice.audio-delete") {
-    assertHostedSystemMailboxRecordKeys(
-      record,
-      ["audioKey", "kind"],
-      "hosted system mailbox Environment voice postCheckpointRecord",
-    );
-    const audioKey = readRequiredString(
-      record.audioKey,
-      "hosted system mailbox Environment voice postCheckpointRecord audioKey",
-    );
-    if (!/^[a-f0-9]{40}$/u.test(audioKey)) {
-      throw new TypeError(
-        "hosted system mailbox Environment voice postCheckpointRecord audioKey is invalid.",
-      );
-    }
-    return {
-      audioKey,
-      kind: "environment-voice.audio-delete",
     };
   }
 

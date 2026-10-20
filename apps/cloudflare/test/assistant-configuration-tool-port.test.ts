@@ -3,7 +3,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   HOSTED_ASSISTANT_LUNA_MODEL,
   HOSTED_ASSISTANT_PRODUCT_MODELS,
-  HOSTED_ASSISTANT_PROVIDERS,
   HOSTED_ASSISTANT_REASONING_EFFORTS,
 } from "@murphai/hosted-execution/assistant-model";
 import {
@@ -254,12 +253,10 @@ describe("hosted assistant configuration tool port", () => {
       };
       const snapshot = {
         availableModels: [...HOSTED_ASSISTANT_PRODUCT_MODELS],
-        availableProviders: [...HOSTED_ASSISTANT_PROVIDERS],
         availableReasoningEfforts: [...HOSTED_ASSISTANT_REASONING_EFFORTS],
         configurationAvailable: true,
         dormantSolPreference: false,
         model: HOSTED_ASSISTANT_LUNA_MODEL,
-        provider: "openai",
         reasoningEffort: "high",
         solAvailable: false,
       };
@@ -302,7 +299,6 @@ describe("hosted assistant configuration tool port", () => {
       action: "update",
       assistantInputId: `ain_${"c".repeat(32)}`,
       model: HOSTED_ASSISTANT_LUNA_MODEL,
-      provider: "venice",
       reasoningEffort: "high",
     })).resolves.toMatchObject({
       action: "update",
@@ -330,7 +326,6 @@ describe("hosted assistant configuration tool port", () => {
       action: "update",
       assistantInputId: `ain_${"c".repeat(32)}`,
       model: HOSTED_ASSISTANT_LUNA_MODEL,
-      provider: "venice",
       reasoningEffort: "high",
     });
   });
@@ -342,11 +337,9 @@ describe("hosted assistant configuration tool port", () => {
         action: "read",
         result: {
           availableModels: [...HOSTED_ASSISTANT_PRODUCT_MODELS],
-          availableProviders: [...HOSTED_ASSISTANT_PROVIDERS],
           availableReasoningEfforts: ["none"],
           configurationAvailable: true,
           model: HOSTED_ASSISTANT_LUNA_MODEL,
-          provider: "openai",
           reasoningEffort: "none",
           solAvailable: false,
         },

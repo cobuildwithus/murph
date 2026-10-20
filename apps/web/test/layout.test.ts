@@ -5,9 +5,7 @@ import { createElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { test, vi } from "vitest";
 
-import { GoalContactAction } from "@/src/components/goals/goal-contact-action";
 import type { HostedPublicLayoutAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
-import type { MurphContactOption } from "@/src/lib/murph-contact-routing";
 
 const mocks = vi.hoisted(() => ({
   getHostedPublicLayoutAuthSnapshot: vi.fn(
@@ -45,14 +43,6 @@ vi.mock("@/src/components/hosted-onboarding/phone-country-code-provider", () => 
 
 import RootLayout, { metadata } from "../app/layout";
 
-const TELEGRAM_GOAL_OPTION: MurphContactOption = {
-  href: "https://t.me/withmurph_bot?text=Help+me+with+this+goal",
-  kind: "telegram",
-  label: "Telegram",
-  rel: "noopener noreferrer",
-  target: "_blank",
-};
-
 test("RootLayout renders global providers without route-owned footer chrome", async () => {
   const markup = renderToStaticMarkup(
     await RootLayout({
@@ -70,25 +60,6 @@ test("RootLayout renders global providers without route-owned footer chrome", as
   assert.match(markup, /<html lang="en" class="[^"]*--font-mono[^"]*"/u);
   assert.doesNotMatch(markup, /id="site-footer"/u);
   assert.doesNotMatch(markup, /Murph provides educational health information/u);
-});
-
-test("RootLayout keeps Goal contact on-page when public auth is unavailable", async () => {
-  mocks.getHostedPublicLayoutAuthSnapshot.mockResolvedValueOnce({
-    status: "unavailable",
-  });
-
-  const markup = renderToStaticMarkup(
-    await RootLayout({
-      children: createElement(GoalContactAction, {
-        goalRouteId: "lower-resting-heart-rate",
-        option: TELEGRAM_GOAL_OPTION,
-      }),
-    }),
-  );
-
-  assert.doesNotMatch(markup, /<a\b|t\.me|Telegram/u);
-  assert.match(markup, /<button\b/u);
-  assert.match(markup, /Couldn’t open your Murph chat\. Try again\./u);
 });
 
 test("footer ownership stays on explicit public surfaces", () => {
@@ -114,7 +85,6 @@ test("footer ownership stays on explicit public surfaces", () => {
 
   assertOwnsFooter("app/page.tsx");
   assertOwnsFooter("app/security/page.tsx");
-  assertOwnsFooter("app/goals/layout.tsx");
   assertOwnsFooter(
     "app/design/page.tsx",
     /<SiteFooter vitalsMode="synthetic" \/>/u,
@@ -123,18 +93,11 @@ test("footer ownership stays on explicit public surfaces", () => {
   assertOwnsFooter("src/components/legal/legal-policy-page.tsx");
 
   const rootLayoutSource = readAppFile("app/layout.tsx");
-  const goalsLayoutSource = readAppFile("app/goals/layout.tsx");
   const designPageSource = readAppFile("app/design/page.tsx");
   const designComponentsSource = readAppFile("app/design/components-content.tsx");
   const inputOtpSource = readAppFile("src/components/ui/input-otp.tsx");
   const subprocessorsPageSource = readAppFile("app/subprocessors/page.tsx");
   assert.doesNotMatch(rootLayoutSource, /SiteFooter/u);
-  assert.match(goalsLayoutSource, /<StickyNav/u);
-  assert.match(goalsLayoutSource, /getHostedPageAuthSnapshot/u);
-  assert.match(goalsLayoutSource, /href="#goal-content"/u);
-  assert.match(goalsLayoutSource, /id="goal-content"/u);
-  assert.match(goalsLayoutSource, /tabIndex=\{-1\}/u);
-  assert.doesNotMatch(goalsLayoutSource, /DashboardShell|SidebarAuth/u);
   assert.doesNotMatch(designPageSource, /HostedPrivyBoundary/u);
   assert.match(
     designComponentsSource,

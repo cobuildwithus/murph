@@ -23,7 +23,6 @@ export type HostedCryptoDomain = (typeof HOSTED_CRYPTO_DOMAINS)[number];
 
 export const HOSTED_CRYPTO_LANES = [
   "hosted-member-private-field",
-  "hosted-inference-connection",
   "clinical-records-oauth",
   "clinical-records-page-cursor",
   "clinical-records-patient-id",
@@ -63,7 +62,6 @@ export const HOSTED_CRYPTO_LANE_DOMAINS: Record<
   "device-webhook-transport": "ingress",
   "email-raw": "ingress",
   "hosted-member-private-field": "control",
-  "hosted-inference-connection": "control",
   "mailbox-payload": "ingress",
   "meal-photo": "ingress",
   "runner-secrets": "runtime",

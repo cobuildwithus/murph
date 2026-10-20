@@ -45,7 +45,7 @@ const newsletterSubject = "Hosted-local group health edition";
 const newsletterText = "The authorized group health edition is ready.";
 const newsletterHtml = `<p>${newsletterText}</p>`;
 const groupReplyPath = `/chats/${encodeURIComponent(groupChatId)}/messages`;
-const productionLikeAssistantModel = "gpt-5.6-terra";
+const productionLikeAssistantModel = "gpt-6.1-sol";
 const scheduledWaitMs = 240_000;
 const projectionScopes = [
   { projectionKind: "steps-days.v0" },

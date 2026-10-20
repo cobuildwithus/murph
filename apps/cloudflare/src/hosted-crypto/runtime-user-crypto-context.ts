@@ -19,11 +19,13 @@ import {
 
 type HostedWorkerRuntimeDomain = Extract<HostedCryptoDomain, "ingress" | "runtime">;
 
-const HOSTED_RUNTIME_CRYPTO_CONTEXT_ENVELOPE_CACHE_MAX_AGE_MS = 60_000;
+const HOSTED_RUNTIME_CRYPTO_CONTEXT_ENVELOPE_CACHE_MAX_AGE_MS = 5 * 60 * 1000;
 const HOSTED_RUNTIME_CRYPTO_CONTEXT_ENVELOPE_CACHE_MAX_ENTRIES = 512;
 const HOSTED_RUNTIME_CRYPTO_CONTEXT_ENVELOPE_CACHE_MAX_ENTRY_BYTES = 64 * 1024;
 const HOSTED_RUNTIME_CRYPTO_CONTEXT_ENVELOPE_CACHE_MAX_TOTAL_BYTES = 2 * 1024 * 1024;
 const HOSTED_RUNTIME_CRYPTO_CONTEXT_ENVELOPE_CACHE_FUTURE_SKEW_MS = 10_000;
+const HOSTED_RUNTIME_CRYPTO_CONTEXT_ENVELOPE_CACHE_DOMAINS =
+  ["ingress", "runtime"] as const satisfies readonly HostedWorkerRuntimeDomain[];
 const hostedRuntimeCryptoContextEnvelopeCacheTextEncoder = new TextEncoder();
 
 interface HostedRuntimeCryptoContextEnvelopeCacheEntry {
@@ -224,14 +226,14 @@ async function buildHostedUserCryptoContextFromLoadResult(input: {
   });
 
   if (!input.loaded.cacheHit) {
-    maybeStoreHostedRuntimeCryptoContextEnvelopeCacheEntry({
+    await maybeStoreHostedRuntimeCryptoContextEnvelopeCacheEntries({
       context: input.loaded.context,
       cryptoEnv: input.cryptoEnv,
       domain: input.domain,
       environment: input.environment,
       nowMs: Date.now(),
+      userCryptoContext,
       userId: input.userId,
-      verifiedEnvelope: userCryptoContext.envelope,
     });
   }
 
@@ -553,6 +555,52 @@ function maybeStoreHostedRuntimeCryptoContextEnvelopeCacheEntry(input: {
     jsonText,
   });
   hostedRuntimeCryptoContextEnvelopeCacheTotalBytes += byteLength;
+}
+
+async function maybeStoreHostedRuntimeCryptoContextEnvelopeCacheEntries(input: {
+  context: HostedRuntimeCryptoContextResponse;
+  cryptoEnv: HostedWorkerCryptoEnv;
+  domain: HostedWorkerRuntimeDomain;
+  environment: Pick<HostedExecutionEnvironment, "hostedWebBaseUrl" | "webCallbackSigning">;
+  nowMs: number;
+  userCryptoContext: HostedUserCryptoContext;
+  userId: string;
+}): Promise<void> {
+  const verifiedEnvelopes = new Map<HostedWorkerRuntimeDomain, HostedDomainRootKeyEnvelopeV1>([
+    [input.domain, input.userCryptoContext.envelope],
+  ]);
+
+  for (const domain of HOSTED_RUNTIME_CRYPTO_CONTEXT_ENVELOPE_CACHE_DOMAINS) {
+    if (domain === input.domain || input.context.envelopes[domain] === undefined) {
+      continue;
+    }
+    try {
+      const root = await unwrapHostedWorkerRuntimeRoot({
+        context: input.context,
+        domain,
+        env: input.cryptoEnv,
+      });
+      try {
+        verifiedEnvelopes.set(domain, root.envelope);
+      } finally {
+        root.rootKey.fill(0);
+      }
+    } catch {
+      continue;
+    }
+  }
+
+  for (const [domain, envelope] of verifiedEnvelopes) {
+    maybeStoreHostedRuntimeCryptoContextEnvelopeCacheEntry({
+      context: input.context,
+      cryptoEnv: input.cryptoEnv,
+      domain,
+      environment: input.environment,
+      nowMs: input.nowMs,
+      userId: input.userId,
+      verifiedEnvelope: envelope,
+    });
+  }
 }
 
 function deleteHostedRuntimeCryptoContextEnvelopeCacheEntry(input: {

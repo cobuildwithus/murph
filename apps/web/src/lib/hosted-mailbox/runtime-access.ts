@@ -3,15 +3,10 @@ import type {
   PrismaClient,
 } from "@prisma/client";
 
-import type { HostedAssistantProvider } from "@murphai/hosted-execution/assistant-model";
-
 import {
   readActiveHostedMemberAccess,
   readActiveHostedMemberAccessState,
 } from "../hosted-onboarding/member-access";
-import {
-  resolveHostedMemberAssistantProvider,
-} from "../hosted-onboarding/assistant-model-preference";
 import {
   hostedOnboardingError,
   isHostedOnboardingError,
@@ -195,7 +190,6 @@ export async function requireHostedRuntimeMailboxActiveAccess(
     memberState?: Parameters<typeof readActiveHostedMemberAccessState>[0]["memberState"];
   } = {},
 ): Promise<{
-  assistantProvider: HostedAssistantProvider;
   isThreadContainer: boolean;
 }> {
   const member = await readActiveHostedMemberAccessState({
@@ -211,7 +205,6 @@ export async function requireHostedRuntimeMailboxActiveAccess(
     });
   }
   return {
-    assistantProvider: resolveHostedMemberAssistantProvider(member),
     isThreadContainer: member.threadContainer != null,
   };
 }

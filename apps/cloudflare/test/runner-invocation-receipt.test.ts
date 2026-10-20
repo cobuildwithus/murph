@@ -58,7 +58,7 @@ describe("native invocation receipts", () => {
   it("retains provider context across eviction and resets it only for a completed successor", () => {
     const sql = createTestSqlStorage();
     const first = { attemptId: "provider-1", generation: "1" };
-    const context = { workspaceVersion: "9007199254740993", customInferenceEnvelope: "synthetic-encrypted-settings", platformAiUsageAllowed: false };
+    const context = { workspaceVersion: "9007199254740993", platformAiUsageAllowed: false };
     const store = new RunnerInvocationReceiptStore(sql);
     store.register(first, context);
     const recovered = new RunnerInvocationReceiptStore(sql);
@@ -79,7 +79,7 @@ describe("native invocation receipts", () => {
     const store = new RunnerInvocationReceiptStore(sql);
     const identity = { attemptId: "legacy-attempt", generation: "1" };
     expect(store.readProviderInvocation()?.context).toBeNull();
-    const context = { workspaceVersion: "0", customInferenceEnvelope: null, platformAiUsageAllowed: true };
+    const context = { workspaceVersion: "0", platformAiUsageAllowed: true };
     store.restoreProviderContext({ ...identity, generation: "2" }, context);
     expect(store.readProviderInvocation()?.context).toBeNull();
     store.restoreProviderContext(identity, context);

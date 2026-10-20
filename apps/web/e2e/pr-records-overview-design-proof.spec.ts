@@ -14,8 +14,8 @@ for (const width of [390, 1280]) {
     await expect(study.getByText("Northstar Health", { exact: true })).toBeVisible();
     await expect(study.getByText("Import incomplete", { exact: true })).toBeVisible();
     await expect(study.getByText(/248 records added/)).toBeVisible();
-    await expect(study.getByRole("link", { name: "View lab results" })).toHaveAttribute("href", "/biomarkers");
-    await expect(study.getByRole("link", { name: "Import again" })).toBeHidden();
+    await expect(study.getByRole("link", { name: "View lab results" })).toHaveCount(0);
+    await expect(study.getByRole("link", { name: "Import again" })).toBeVisible();
     await expect(study.getByRole("button", { name: "Disconnect", exact: true })).toBeHidden();
     await page.evaluate(async () => {
       await document.fonts.ready;
@@ -48,5 +48,8 @@ for (const width of [390, 1280]) {
     await expect(dialog).toBeHidden();
     await expect(study.getByText("Import incomplete", { exact: true })).toBeVisible();
     await expect(study.getByRole("link", { name: "How Murph uses your data" })).toBeVisible();
+    await study.getByRole("link", { name: "How Murph uses your data" }).click();
+    await expect(page).toHaveURL(/\/legal\/privacy$/);
+    await expect(page.getByRole("heading", { name: "Murph Privacy Policy", exact: true })).toBeVisible();
   });
 }

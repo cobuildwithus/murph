@@ -7,7 +7,7 @@ import {
   assistantVoiceMemoMusicModelId,
   assistantVoiceMemoMusicOutputFormat,
   assistantVoiceMemoSpeechOutputFormat,
-} from './assistant-cli-contracts.js'
+} from './assistant-delivery-contracts.js'
 import {
   createTimeoutAbortController,
   type ResponseHeadersLike,

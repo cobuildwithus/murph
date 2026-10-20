@@ -93,6 +93,8 @@ const OPERATOR_DIAGNOSTIC_OUTPUT_SCHEMA = {
 
 export const READ_ONLY_ASSISTANT_ASK_THREAD_CONFIG = {
   allow_login_shell: false,
+  // Model defaults may select multi-agent v2 even when feature flags are false.
+  'agents.enabled': false,
   include_apps_instructions: false,
   include_collaboration_mode_instructions: false,
   include_environment_context: false,
@@ -103,6 +105,7 @@ export const READ_ONLY_ASSISTANT_ASK_THREAD_CONFIG = {
   'features.browser_use': false,
   'features.enable_mcp_apps': false,
   'features.exec_permission_approvals': false,
+  'features.goals': false,
   'features.memories': false,
   'features.multi_agent': false,
   'features.multi_agent_v2': false,
@@ -297,10 +300,10 @@ interface ConfinedReadOnlyAssistantAskTurn {
   usageStage: ReadOnlyAssistantAskProviderUsageEvent['stage']
 }
 
-function readOnlyAssistantAskThreadConfig(turn: ConfinedReadOnlyAssistantAskTurn) {
+function readOnlyAssistantAskThreadSettings(turn: ConfinedReadOnlyAssistantAskTurn) {
   return turn.disableShell || turn.usageStage === 'review'
-    ? CONSENTED_READ_ONLY_ASSISTANT_ASK_REVIEW_THREAD_CONFIG
-    : READ_ONLY_ASSISTANT_ASK_THREAD_CONFIG
+    ? { environments: [], threadConfig: CONSENTED_READ_ONLY_ASSISTANT_ASK_REVIEW_THREAD_CONFIG }
+    : { threadConfig: READ_ONLY_ASSISTANT_ASK_THREAD_CONFIG }
 }
 
 type ReadOnlyAssistantAskChildInput =
@@ -543,7 +546,7 @@ export async function executeConfinedReadOnlyAssistantAskTurn(
         reasoningEffort: input.reasoningEffort,
         runtimeWorkspaceRoots,
         serviceTier: input.serviceTier,
-        threadConfig: readOnlyAssistantAskThreadConfig(turn),
+        ...readOnlyAssistantAskThreadSettings(turn),
         workingDirectory,
       })
 

@@ -171,13 +171,6 @@ describe('assistant codex image helpers', () => {
       turnKind: 'steer' as const,
     },
     {
-      name: 'custom inference',
-      images: [{ bytes: Buffer.from([0x01]), detail: 'original' as const }],
-      model: 'gpt-6-sol',
-      modelProvider: 'hosted-custom-inference',
-      turnKind: 'initial' as const,
-    },
-    {
       name: 'unsupported OpenAI model',
       images: [{ bytes: Buffer.from([0x01]), detail: 'original' as const }],
       model: 'gpt-5.2',

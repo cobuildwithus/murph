@@ -216,7 +216,7 @@ describe('assistant session resolution store integration', () => {
 
     const sessionTarget = createCodexTarget({
       model: 'gpt-5-session',
-      modelProvider: 'vercel-ai-gateway',
+      modelProvider: 'hosted-openai',
       profile: 'session-profile',
       reasoningEffort: 'low',
     })
@@ -265,7 +265,7 @@ describe('assistant session resolution store integration', () => {
     expect(resolved.session.sessionId).toBe(created.session.sessionId)
     expect(resolved.session.target).toEqual(createCodexTarget({
       model: 'gpt-5-session',
-      modelProvider: 'vercel-ai-gateway',
+      modelProvider: 'hosted-openai',
       profile: 'session-profile',
       reasoningEffort: 'high',
     }))
@@ -288,7 +288,7 @@ describe('assistant session resolution store integration', () => {
 
     const sessionTarget = createCodexTarget({
       model: 'gpt-5-session',
-      modelProvider: 'vercel-ai-gateway',
+      modelProvider: 'hosted-openai',
       profile: 'session-profile',
       reasoningEffort: 'low',
     })
@@ -338,7 +338,7 @@ describe('assistant session resolution store integration', () => {
 
     const durableTarget = createCodexTarget({
       model: 'gpt-5-session',
-      modelProvider: 'vercel-ai-gateway',
+      modelProvider: 'hosted-openai',
       profile: 'session-profile',
       reasoningEffort: 'low',
     })

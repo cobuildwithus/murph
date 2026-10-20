@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { rm } from "node:fs/promises";
 import path from "node:path";
 import { junctionProviderAdapter } from "@murphai/importers/device-providers/junction";
+import { JUNCTION_DEVICE_PROVIDER_DESCRIPTOR } from "@murphai/importers/device-providers/provider-descriptors";
 import { test } from "vitest";
 
 import { deviceSyncError, isDeviceSyncError } from "../src/errors.ts";
@@ -43,6 +44,8 @@ import type {
 } from "../src/types.ts";
 
 const NOW = "2026-06-11T12:00:00.000Z";
+// One ordinary scheduled pass; history slots rotate on this cadence.
+const RECONCILE_INTERVAL_MS = JUNCTION_DEVICE_PROVIDER_DESCRIPTOR.sync.windows.reconcileIntervalMs;
 const SAME_DAY_LATER = "2026-06-11T18:00:00.000Z";
 const BACKFILL_WINDOW_END = "2026-06-11T00:00:00.000Z";
 const BP_HISTORY_COVERAGE_KEY = "junctionBloodPressureHistoryBackfillCoverage";
@@ -434,6 +437,7 @@ function createProvider(input: {
   providerListRequests?: { count: number };
   providerState?: MutableProviderState;
   historicalPullState?: MutableHistoricalPullState;
+  reconcileIntervalMs?: number;
   requests: TimeseriesRequest[];
   summaryBackfillDays?: number;
   timeseriesBackfillDays?: number;
@@ -455,6 +459,9 @@ function createProvider(input: {
     region: "us",
     summaryResources: ["activity"],
     summaryBackfillDays: input.summaryBackfillDays ?? 30,
+    ...(input.reconcileIntervalMs === undefined
+      ? {}
+      : { reconcileIntervalMs: input.reconcileIntervalMs }),
     timeseriesResources: input.timeseriesResources
       ? [...input.timeseriesResources]
       : input.includeNote
@@ -1792,7 +1799,7 @@ test("stable dead coordinates cannot starve any ordinary history coordinate", as
     const selectedSources: string[] = [];
 
     for (let pass = 0; pass < 8; pass += 1) {
-      const now = new Date(Date.parse(NOW) + pass * 60 * 60_000).toISOString();
+      const now = new Date(Date.parse(NOW) + pass * RECONCILE_INTERVAL_MS).toISOString();
       const resourceJobs = createScheduledJobs(account, now, {
         findActiveDedupeKeys: (dedupeKeys) => store.findActiveJobDedupeKeys({
           accountId: storedAccount.id,
@@ -1929,10 +1936,10 @@ test("maximum history matrix applies active and completed coordinate suppression
   const afterActiveSuppression = selectRoot(NOW);
   assert.notEqual(afterActiveSuppression.dedupeKey, activeRoot.dedupeKey);
 
-  const scheduleSlot = Math.floor(Date.parse(NOW) / (60 * 60_000));
+  const scheduleSlot = Math.floor(Date.parse(NOW) / RECONCILE_INTERVAL_MS);
   const ordinaryPassOffset = (3 - scheduleSlot % 4 + 4) % 4;
   const ordinaryNow = new Date(
-    Date.parse(NOW) + ordinaryPassOffset * 60 * 60_000,
+    Date.parse(NOW) + ordinaryPassOffset * RECONCILE_INTERVAL_MS,
   ).toISOString();
   const completedRoot = selectRoot(ordinaryNow);
   assert.equal(completedRoot.payload?.sourceLifecycleEpoch, 1);
@@ -1997,7 +2004,7 @@ test("schedule-time extended history admits one account root and rotates determi
   for (let slot = 0; slot < 4; slot += 1) {
     const offered = extendedRoots(createScheduledJobs(
       account,
-      new Date(slotStart + slot * 60 * 60_000).toISOString(),
+      new Date(slotStart + slot * RECONCILE_INTERVAL_MS).toISOString(),
     ).jobs);
     for (const job of offered) {
       seenCoordinates.add(`${job.payload?.resource}:${job.payload?.sourceProviderSlug}`);
@@ -2025,7 +2032,7 @@ test("schedule-time extended history admits one account root and rotates determi
   for (let slot = 0; slot < 2; slot += 1) {
     const offered = requireValue(extendedRoots(createScheduledJobs(
       reducedAccount,
-      new Date(slotStart + slot * 60 * 60_000).toISOString(),
+      new Date(slotStart + slot * RECONCILE_INTERVAL_MS).toISOString(),
     ).jobs)[0]);
     reducedSeen.add(`${offered.payload?.resource}:${offered.payload?.sourceProviderSlug}`);
   }
@@ -2423,6 +2430,8 @@ test("maximum source projection uses one shared snapshot while retaining exact-s
     historicalPullState: { providerSlug: "omron", resource: "caffeine", status: "success" },
     providerListRequests,
     providerState: { resourceAvailability: availability, status: "connected" },
+    // Hourly slots keep the selected window near the fixed execution clock.
+    reconcileIntervalMs: 60 * 60_000,
     requests,
     timeseriesRecords: {
       caffeine: [{

@@ -272,21 +272,52 @@ test("pull-request inspection binds the open exact head and trust source", () =>
     repository: "cobuildwithus/murph",
   }), {
     changedFiles: 1,
+    current: true,
     headSha: PUBLIC_SHA,
     targetsDefaultBranch: true,
     trusted: true,
   });
 });
 
-test("pull-request inspection rejects a stale workflow-run head", () => {
-  assert.throws(() => inspectPullRequest(pullRequest({
+test("pull-request inspection reports a head that moved past the tested commit", () => {
+  const newerHead = pullRequest({
     head: { repo: { full_name: "cobuildwithus/murph" }, sha: "d".repeat(40) },
-  }), {
+  });
+  const expected = {
     expectedBaseRef: "main",
     expectedHeadSha: PUBLIC_SHA,
     prNumber: 42,
     repository: "cobuildwithus/murph",
-  }), /changed after Repo Hygiene/u);
+  };
+  assert.equal(inspectPullRequest(newerHead, expected).current, false);
+  assert.throws(
+    () => inspectExactPublicHead(newerHead, { ...expected, expectedSha: PUBLIC_SHA }),
+    /changed after Repo Hygiene/u,
+  );
+});
+
+test("selection leaves a superseded tested commit to the newer head's run", async () => {
+  let fileLookup = false;
+  await withFetch(async (url) => {
+    if (url.endsWith("/pulls/42")) {
+      return jsonResponse(pullRequest({
+        head: { repo: { full_name: "cobuildwithus/murph" }, sha: "d".repeat(40) },
+      }));
+    }
+    fileLookup = true;
+    throw new Error(`unexpected URL ${url}`);
+  }, async () => {
+    const result = await selectPullRequest({
+      expectedBaseRef: "main",
+      expectedHeadSha: PUBLIC_SHA,
+      prNumber: 42,
+      repository: "cobuildwithus/murph",
+      token: "public-token",
+    });
+    assert.equal(result.current, false);
+    assert.equal(result.selected, false);
+    assert.equal(fileLookup, false);
+  });
 });
 
 test("pull-request inspection rejects fork and bot authority without rejecting classification", () => {
@@ -1546,16 +1577,19 @@ test("workflow keeps credentials behind trusted selection and publishes one stab
   );
   assert.match(
     workflow,
-    /- name: Mark stable status pending\n\s+if: \$\{\{ steps\.select\.outputs\.targets_default_branch == 'true' \}\}/u,
+    /- name: Mark stable status pending\n\s+if: \$\{\{ steps\.select\.outputs\.targets_default_branch == 'true' && steps\.select\.outputs\.current == 'true' \}\}/u,
   );
   assert.match(
     workflow,
-    /compatibility:\n[\s\S]*?if: \$\{\{ github\.event\.workflow_run\.conclusion == 'success' && needs\.select-pr\.outputs\.targets_default_branch == 'true' && needs\.select-pr\.outputs\.selected == 'true' && needs\.select-pr\.outputs\.trusted == 'true' \}\}/u,
+    /compatibility:\n[\s\S]*?if: \$\{\{ github\.event\.workflow_run\.conclusion == 'success' && needs\.select-pr\.outputs\.targets_default_branch == 'true' && needs\.select-pr\.outputs\.current == 'true' && needs\.select-pr\.outputs\.selected == 'true' && needs\.select-pr\.outputs\.trusted == 'true' \}\}/u,
   );
   assert.match(
     workflow,
-    /required:\n[\s\S]*?if: \$\{\{ always\(\) && github\.event\.workflow_run\.event == 'pull_request' && github\.event\.workflow_run\.pull_requests\[0\] != null && needs\.select-pr\.outputs\.targets_default_branch == 'true' \}\}/u,
+    /required:\n[\s\S]*?if: \$\{\{ always\(\) && github\.event\.workflow_run\.event == 'pull_request' && github\.event\.workflow_run\.pull_requests\[0\] != null && needs\.select-pr\.outputs\.targets_default_branch == 'true' && needs\.select-pr\.outputs\.current == 'true' \}\}/u,
   );
+  // Bind to the commit Repo Hygiene tested, never the PR's live head.
+  assert.match(workflow, /EXPECTED_HEAD_SHA: \$\{\{ github\.event\.workflow_run\.head_sha \}\}/u);
+  assert.doesNotMatch(workflow, /pull_requests\[0\]\.head\.sha/u);
   assert.match(workflow, /run-id: \$\{\{ github\.event\.workflow_run\.id \}\}/u);
   assert.match(workflow, /temporal-compatibility-producer-\$\{\{ needs\.select-pr\.outputs\.head_sha \}\}/u);
   assert.doesNotMatch(workflow, /TEMPORAL_COMPATIBILITY_PRIVATE_EXPECTED_SHA/u);
@@ -1592,6 +1626,9 @@ test("workflow status shell executes every terminal outcome", async () => {
     [{ SELECT_RESULT: "failure" }, "failure", "Temporal compatibility selection failed."],
     [{ SELECTED: "false" }, "success", "No hosted Temporal compatibility owner changed."],
     [{ SOURCE_RESULT: "failure" }, "failure", "Repo Hygiene did not pass for this exact commit."],
+    // A superseded Repo Hygiene run leaves the status to its replacement.
+    [{ SOURCE_RESULT: "cancelled" }, null, null],
+    [{ SELECTED: "false", SOURCE_RESULT: "cancelled" }, "success", "No hosted Temporal compatibility owner changed."],
     [{ TRUSTED: "false" }, "failure", "Relevant changes require a same-repository human-authored head."],
     [{ COMPATIBILITY_RESULT: "success" }, "success", "Exact public SHA passed every supported private Temporal reader."],
     [{ COMPATIBILITY_RESULT: "failure" }, "failure", "No complete exact-SHA private Temporal compatibility proof was recorded."],
@@ -1619,7 +1656,12 @@ printf '%s\n' "$@" > "$GH_CAPTURE"
           STATUS_SHA: PUBLIC_SHA,
         },
       });
-      assert.equal(result.status, expectedState === "success" ? 0 : 1, result.stderr);
+      // The commit status carries the verdict; the job itself never fails.
+      assert.equal(result.status, 0, result.stderr);
+      if (expectedState === null) {
+        await assert.rejects(readFile(capturePath, "utf8"), { code: "ENOENT" });
+        continue;
+      }
       const ghArgs = (await readFile(capturePath, "utf8")).trimEnd().split("\n");
       assert.ok(ghArgs.includes(`state=${expectedState}`));
       assert.ok(ghArgs.includes(`description=${expectedDescription}`));

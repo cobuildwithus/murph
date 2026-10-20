@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { parseHostedRuntimeRedactedJson } from "@murphai/hosted-execution/parsers";
+
 import { createHostedWebMailboxPort } from "../src/runtime-platform/mailbox-port.ts";
 
 const mailboxRequest = {
@@ -166,9 +168,8 @@ describe("createHostedWebMailboxPort", () => {
     expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 
-  it.each(["openai", "venice"])("preserves the Web-owned empty mailbox prefix with provider %s", async (assistantProvider) => {
+  it("preserves the Web-owned empty mailbox prefix", async () => {
     const response = {
-      assistantProvider,
       consumedSeqByLane: [
         {
           consumedSeq: "7",
@@ -198,8 +199,31 @@ describe("createHostedWebMailboxPort", () => {
       transport: { mode: "proxy" },
     });
 
-    await expect(mailboxPort.fetch(mailboxRequest)).resolves.toEqual(response);
+    const { transportTiming, ...payload } = await mailboxPort.fetch(mailboxRequest);
+    expect(payload).toEqual(response);
     expect(fetchImpl).toHaveBeenCalledTimes(1);
+    // A conversation read adds only its first attempt's bounded transport scalars.
+    // This mocked fetch never reaches undici, so connection phases stay unobserved.
+    expect(transportTiming).toEqual({
+      passMailboxFetchAttemptCount: 1,
+      passMailboxFetchConnectionCount: 0,
+      passMailboxFetchDnsLookupMs: null,
+      passMailboxFetchDurationMs: expect.any(Number),
+      passMailboxFetchEventLoopActiveMs: expect.any(Number),
+      passMailboxFetchEventLoopIdleMs: expect.any(Number),
+      passMailboxFetchLastStage: "fetch_started",
+      passMailboxFetchProcessCpuSystemMs: expect.any(Number),
+      passMailboxFetchProcessCpuUserMs: expect.any(Number),
+      passMailboxFetchRequestSentMs: null,
+      passMailboxFetchResolveDelayMs: null,
+      passMailboxFetchResponseStatus: 200,
+      passMailboxFetchResponseWaitMs: null,
+      passMailboxFetchSocketPreviouslyWritten: null,
+      passMailboxFetchStartedAtEpochMs: expect.any(Number),
+      passMailboxFetchTcpConnectMs: null,
+      passMailboxFetchTlsHandshakeMs: null,
+    });
+    expect(parseHostedRuntimeRedactedJson(transportTiming, "mailbox read timing")).toEqual(transportTiming);
   });
 
   it.each([

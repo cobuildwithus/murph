@@ -3,9 +3,7 @@ import {
   serializeTelegramThreadTarget,
   type TelegramThreadTarget,
 } from '@murphai/messaging-ingress/telegram-webhook'
-import {
-  type AssistantMessageReaction,
-} from './assistant-cli-contracts.js'
+import type { AssistantMessageReaction } from './assistant-cli-contracts.js'
 
 import {
   createLinkedAbortSignal,

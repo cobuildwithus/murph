@@ -1473,12 +1473,6 @@ function buildAssistantNotificationObservabilityDetails(input: {
   const providerBaseUrl = readAssistantNotificationUrlDetails(
     readAssistantNotificationStringProperty(providerOptions, 'baseUrl'),
   )
-  const gatewayOnlyProviders = summarizeAssistantNotificationGatewayOnlyProviders(
-    readAssistantNotificationStringListProperty(
-      providerOptions,
-      'gatewayOnlyProviders',
-    ),
-  )
 
   return {
     assistantNotificationChannel: channel,
@@ -1491,7 +1485,6 @@ function buildAssistantNotificationObservabilityDetails(input: {
       normalizeNullableString(input.input.identityId) !== null,
     assistantNotificationLinqBaseUrlOrigin: linqBaseUrl.origin,
     assistantNotificationLinqBaseUrlPath: linqBaseUrl.path,
-    assistantNotificationGatewayOnlyProviders: gatewayOnlyProviders,
     assistantNotificationProvider: input.route.provider,
     assistantNotificationProviderBaseUrlOrigin: providerBaseUrl.origin,
     assistantNotificationProviderBaseUrlPath: providerBaseUrl.path,
@@ -1507,18 +1500,6 @@ function buildAssistantNotificationObservabilityDetails(input: {
       normalizeNullableString(input.input.workingDirectory) !== null,
     assistantNotificationHostedExecutionPresent: input.input.executionContext?.hosted != null,
   }
-}
-
-function summarizeAssistantNotificationGatewayOnlyProviders(
-  values: readonly string[] | null | undefined,
-): string | null {
-  const normalized = [...(values ?? [])]
-    .map((value) => normalizeNullableString(value)?.toLowerCase() ?? null)
-    .filter((value): value is string =>
-      value !== null && /^[a-z0-9][a-z0-9._-]*$/u.test(value),
-    )
-
-  return normalized.length > 0 ? Array.from(new Set(normalized)).join(',') : null
 }
 
 function readAssistantNotificationUrlDetails(value: string | null | undefined): {
@@ -1555,18 +1536,6 @@ function readAssistantNotificationStringProperty(
   return typeof candidate === 'string'
     ? normalizeNullableString(candidate)
     : null
-}
-
-function readAssistantNotificationStringListProperty(
-  value: object,
-  key: string,
-): readonly string[] | null {
-  const candidate: unknown = Reflect.get(value, key)
-  if (!Array.isArray(candidate)) {
-    return null
-  }
-
-  return candidate.filter((entry): entry is string => typeof entry === 'string')
 }
 
 function buildAssistantNotificationMessageInput(
@@ -1983,51 +1952,19 @@ function assistantMaintenanceRawEventsIncludeMutation(
   rawEvents: readonly unknown[],
   profile: AssistantMaintenanceProfile,
 ): boolean {
-  return rawEvents.some((rawEvent) => {
-    const event = normalizeCodexEvent(rawEvent)
-    const dynamicMutationActions = profile === 'group-room-model'
-      ? ['delete', 'upsert'] as const
-      : profile === 'member-memory'
-        ? ['forget', 'update', 'upsert'] as const
-        : null
-    const dynamicMutationTool = profile === 'group-room-model'
-      ? 'group_room_model'
-      : profile === 'member-memory'
-        ? 'member_memory'
-        : null
-    if (
-      dynamicMutationActions &&
-      dynamicMutationTool &&
-      assistantMaintenanceDynamicMutationCompleted({
-        actions: dynamicMutationActions,
-        event,
-        toolName: dynamicMutationTool,
-      })
-    ) {
-      return true
-    }
-    return (
-      event.kind === 'status_item' &&
-      event.itemType === 'commandExecution' &&
-      event.itemState === 'completed' &&
-      event.exitCode === 0 &&
-      isAssistantMaintenanceMutationCommand(event.commandLabel, profile)
-    )
-  })
-}
-
-function isAssistantMaintenanceMutationCommand(
-  commandLabel: string | null,
-  profile: AssistantMaintenanceProfile,
-): boolean {
-  const normalized = normalizeNullableString(commandLabel)
-  if (normalized === null) {
-    return false
-  }
-  if (profile !== 'habitat-voice') {
-    return false
-  }
-  return /\bvault-cli\b[\s\S]*\bhabitat\s+save\b/u.test(normalized)
+  const actions = profile === 'group-room-model'
+    ? ['delete', 'upsert'] as const
+    : ['forget', 'update', 'upsert'] as const
+  const toolName = profile === 'group-room-model'
+    ? 'group_room_model'
+    : 'member_memory'
+  return rawEvents.some((rawEvent) =>
+    assistantMaintenanceDynamicMutationCompleted({
+      actions,
+      event: normalizeCodexEvent(rawEvent),
+      toolName,
+    }),
+  )
 }
 
 function assistantMaintenanceDynamicMutationCompleted(input: {

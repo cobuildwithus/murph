@@ -815,6 +815,7 @@ describe("executeHostedMailboxEvent", () => {
   it.each([
     { phase: "websocket-read", expectedPhase: "websocket-read" },
     { phase: "websocket-send", expectedPhase: "websocket-send" },
+    { phase: "websocket-ack", expectedPhase: "websocket-ack" },
     { phase: "http-read", expectedPhase: "http-read" },
     { phase: "PRIVATE_UNKNOWN_PHASE", expectedPhase: null },
     { phase: undefined, expectedPhase: null },
@@ -930,7 +931,6 @@ describe("executeHostedMailboxEvent", () => {
       "preinitialized",
       "warm-reused",
       "warm-idle",
-      "warm-abort-poisoned",
     ]) {
       const eventId = `evt_codex_${stage.replaceAll("-", "_")}_timing`;
       const wake = buildHostedExecutionAssistantNotificationRequestedWake({
@@ -3242,7 +3242,7 @@ describe("executeHostedMailboxEvent", () => {
           adapter: "codex-cli" as const,
           approvalPolicy: "never" as const,
           codexCommand: null,
-          model: "gpt-5.6-terra",
+          model: "gpt-6.1-sol",
           modelProvider: "openai",
           oss: false,
           profile: null,
@@ -3612,8 +3612,8 @@ describe("executeHostedMailboxEvent", () => {
         code: "invalid_api_key",
         details: {
           assistantNotificationProvider: "codex-cli",
-          assistantNotificationProviderBaseUrlOrigin: "https://ai-gateway.vercel.sh",
-          assistantNotificationProviderModel: "gpt-5.6-terra",
+          assistantNotificationProviderBaseUrlOrigin: "https://api.openai.com",
+          assistantNotificationProviderModel: "gpt-6.1-sol",
           assistantNotificationStage: "provider",
         },
         statusCode: 401,
@@ -3651,7 +3651,7 @@ describe("executeHostedMailboxEvent", () => {
           assistantNotificationProvider: "codex-cli",
           assistantNotificationProviderBaseUrlConfigured: true,
           assistantNotificationProviderErrorCode: "invalid_api_key",
-          assistantNotificationProviderModel: "gpt-5.6-terra",
+          assistantNotificationProviderModel: "gpt-6.1-sol",
           assistantNotificationStage: "provider",
           errorCode: "authorization_error",
           notificationRouteThreadIsDirect: null,

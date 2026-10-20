@@ -10,6 +10,7 @@ import {
   type HostedAssistantRuntimeConfig,
   type HostedAssistantWorkspaceRuntimeJobInput,
   type HostedAssistantWorkspaceRuntimeJobResult,
+  type HostedWorkspaceRuntimeJobOptions,
   type RuntimeWakeSignal,
 } from "./hosted-runtime.ts";
 export { drainHostedRuntimeDeferredUsageCompletionsBestEffort } from "./hosted-runtime.ts";
@@ -57,6 +58,7 @@ export interface HostedWorkspaceInvocationInput {
   onConversationActivityObserved?: (receivedAtEpochMs: number) => void;
   platform: HostedRuntimePlatform;
   preparedWorkspaceRestore?: HostedWorkspaceRestorePreparation | null;
+  fetchTransportDiagnostics?: HostedWorkspaceRuntimeJobOptions["fetchTransportDiagnostics"];
   readCurrentLease: () =>
     | HostedRuntimeBridgeCheckpointLease
     | null
@@ -103,6 +105,7 @@ export async function runHostedWorkspaceInvocation(
       ...(input.preparedWorkspaceRestore
         ? { preparedWorkspaceRestore: input.preparedWorkspaceRestore }
         : {}),
+      fetchTransportDiagnostics: input.fetchTransportDiagnostics,
       runtimeIssueProvenance: input.runtimeIssueProvenance ?? null,
       runtimeWakeSignal,
       shutdownSignal: input.shutdownSignal ?? null,

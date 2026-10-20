@@ -9,10 +9,6 @@
     "summary": "Personal Patterns can now compare repeated wearable activity with selected next-day recovery metrics when enough evidence exists.",
     "details": "The existing matching thresholds stay unchanged, and unclear or insufficient evidence still remains labeled as such.",
     "relevanceTags": ["patterns", "wearables", "recovery"],
-    "sourcePullRequests": [1668],
-    "tryIt": {
-      "href": "/patterns",
-      "label": "View your patterns"
-    }
+    "sourcePullRequests": [1668]
   }
 }

@@ -93,10 +93,10 @@ const BASE_USAGE_RECORD = {
   rawUsageJsonHash: null,
   reasoningTokens: null,
   reportingUserId: "member_123",
-  requestedModel: "gpt-5.6-terra",
+  requestedModel: "gpt-5.6-sol",
   routeId: "primary",
   schema: "murph.assistant-usage.v1",
-  servedModel: "gpt-5.6-terra",
+  servedModel: "gpt-5.6-sol",
   sessionId: "asst_123",
   stripeMeterSource: "murph",
   surface: null,
@@ -415,17 +415,14 @@ describe("hosted AI usage allowance pricing", () => {
         });
       }
     }
-    expect(() => priceHostedAiUsageForAllowance({
-      ...BASE_USAGE_RECORD, requestedModel: model, servedModel: model, providerName: "venice",
-    })).toThrow("pricing is missing for the provider model");
   });
 
   it("prices platform usage from uncached input, cached input, and output tokens", () => {
     expect(priceHostedAiUsageForAllowance(BASE_USAGE_RECORD)).toMatchObject({
-      costUsdMicros: 759n,
+      costUsdMicros: 1337n,
       counted: true,
       pricingSnapshot: {
-        standardCostUsdMicros: "759",
+        standardCostUsdMicros: "1337",
         tokenPricingAdjustment: {
           denominator: "1",
           numerator: "1",
@@ -441,10 +438,10 @@ describe("hosted AI usage allowance pricing", () => {
       ...BASE_USAGE_RECORD,
       tokenPricingBasis: "openai-flex",
     })).toMatchObject({
-      costUsdMicros: 380n,
+      costUsdMicros: 669n,
       counted: true,
       pricingSnapshot: {
-        standardCostUsdMicros: "759",
+        standardCostUsdMicros: "1337",
         tokenPricingAdjustment: {
           denominator: "2",
           numerator: "1",
@@ -460,10 +457,10 @@ describe("hosted AI usage allowance pricing", () => {
       ...BASE_USAGE_RECORD,
       tokenPricingBasis: "openai-priority",
     })).toMatchObject({
-      costUsdMicros: 1_518n,
+      costUsdMicros: 2_674n,
       counted: true,
       pricingSnapshot: {
-        standardCostUsdMicros: "759",
+        standardCostUsdMicros: "1337",
         tokenPricingAdjustment: {
           denominator: "1",
           numerator: "2",
@@ -509,30 +506,26 @@ describe("hosted AI usage allowance pricing", () => {
     expect(result.costUsdMicros).toBe(model === "gpt-6-astra" ? 4_500_000n : (model === "gpt-6-sol" || model === "gpt-6.1-sol") ? 900_000n : 45_000n);
   });
 
-  it("does not invent Venice pricing for Astra", () => {
-    expect(() => priceHostedAiUsageForAllowance({ ...BASE_USAGE_RECORD, requestedModel: "gpt-6-astra", servedModel: "gpt-6-astra", providerName: "venice" })).toThrow("pricing is missing for the provider model");
-  });
-
   it("prices GPT-5.6 model slugs with official standard and flex accounting", () => {
     expect(priceHostedAiUsageForAllowance({
       ...BASE_USAGE_RECORD,
-      requestedModel: "gpt-5.6-terra",
-      servedModel: "openai/gpt-5.6-terra-2026-07-08",
+      requestedModel: "gpt-5.6-sol",
+      servedModel: "openai/gpt-5.6-sol-2026-07-08",
     })).toMatchObject({
-      costUsdMicros: 759n,
+      costUsdMicros: 1337n,
       counted: true,
       pricingSnapshot: {
-        model: "gpt-5.6-terra",
+        model: "gpt-5.6-sol",
         modelSource: "served",
         pricingSource: "https://developers.openai.com/api/docs/pricing",
         ratesUsdMicrosPerMillionTokens: {
-          cachedInput: "200000",
-          cacheWrite: "2500000",
-          input: "2000000",
-          output: "12000000",
+          cachedInput: "400000",
+          cacheWrite: "5000000",
+          input: "4000000",
+          output: "20000000",
         },
-        requestedModel: "gpt-5.6-terra",
-        servedModel: "openai/gpt-5.6-terra-2026-07-08",
+        requestedModel: "gpt-5.6-sol",
+        servedModel: "openai/gpt-5.6-sol-2026-07-08",
         tokenPricingBasis: "standard",
       },
       pricingVersion: "openai-api-pricing-2026-08-21-gpt-5.6-standard",
@@ -619,92 +612,6 @@ describe("hosted AI usage allowance pricing", () => {
     });
   });
 
-  it("prices Venice GPT-5.6 usage at Venice's official provider rates", () => {
-    const cases = [
-      {
-        costUsdMicros: 2_230_000n,
-        model: "gpt-5.6-luna",
-        providerModel: "openai-gpt-56-luna",
-        rates: {
-          cachedInput: "30000",
-          cacheWrite: "330000",
-          input: "270000",
-          output: "1600000",
-        },
-      },
-      {
-        costUsdMicros: 26_100_000n,
-        model: "gpt-5.6-terra",
-        providerModel: "openai-gpt-56-terra",
-        rates: {
-          cachedInput: "310000",
-          cacheWrite: "3910000",
-          input: "3130000",
-          output: "18750000",
-        },
-      },
-      {
-        costUsdMicros: 52_190_000n,
-        model: "gpt-5.6-sol",
-        providerModel: "openai-gpt-56-sol",
-        rates: {
-          cachedInput: "630000",
-          cacheWrite: "7810000",
-          input: "6250000",
-          output: "37500000",
-        },
-      },
-    ] as const;
-
-    for (const testCase of cases) {
-      expect(priceHostedAiUsageForAllowance({
-        ...BASE_USAGE_RECORD,
-        cachedInputTokens: 1_000_000,
-        cacheWriteTokens: 1_000_000,
-        inputTokens: 3_000_000,
-        outputTokens: 1_000_000,
-        providerName: "venice",
-        requestedModel: testCase.model,
-        servedModel: testCase.model,
-        totalTokens: 4_000_000,
-      })).toMatchObject({
-        costUsdMicros: testCase.costUsdMicros,
-        counted: true,
-        pricingSnapshot: {
-          model: testCase.model,
-          pricingSource: "https://docs.venice.ai/overview/pricing",
-          providerModel: testCase.providerModel,
-          ratesUsdMicrosPerMillionTokens: testCase.rates,
-          standardCostUsdMicros: testCase.costUsdMicros.toString(),
-          tokenPricingBasis: "standard",
-        },
-        pricingVersion: "venice-api-pricing-2026-08-30-gpt-5.6-standard",
-      });
-    }
-  });
-
-  it("prices regular Venice Luna without applying Luna Pro rates", () => {
-    expect(priceHostedAiUsageForAllowance({
-      ...BASE_USAGE_RECORD,
-      cachedInputTokens: 0,
-      cacheWriteTokens: 0,
-      inputTokens: 1_000_000,
-      outputTokens: 1_000_000,
-      providerName: "venice",
-      requestedModel: "gpt-5.6-luna",
-      servedModel: "gpt-5.6-luna",
-      totalTokens: 2_000_000,
-    })).toMatchObject({
-      costUsdMicros: 1_870_000n,
-      counted: true,
-      pricingSnapshot: {
-        providerModel: "openai-gpt-56-luna",
-        standardCostUsdMicros: "1870000",
-      },
-      pricingVersion: "venice-api-pricing-2026-08-30-gpt-5.6-standard",
-    });
-  });
-
   it("prices GPT-5.6 Sol tokens at the current Standard and Flex rates", () => {
     expect(priceHostedAiUsageForAllowance({
       ...BASE_USAGE_RECORD,
@@ -780,10 +687,10 @@ describe("hosted AI usage allowance pricing", () => {
       tokenPricingBasis: "openai-flex",
       totalTokens: 2,
     })).toMatchObject({
-      costUsdMicros: 2n,
+      costUsdMicros: 3n,
       counted: true,
       pricingSnapshot: {
-        standardCostUsdMicros: "3",
+        standardCostUsdMicros: "5",
         tokenPricingAdjustment: {
           denominator: "2",
           numerator: "1",
@@ -938,7 +845,7 @@ describe("hosted AI usage allowance pricing", () => {
       providerName: "hosted-openai",
       tokenPricingBasis: "openai-flex",
     })).toMatchObject({
-      costUsdMicros: 380n,
+      costUsdMicros: 669n,
       counted: true,
       pricingSnapshot: {
         tokenPricingBasis: "openai-flex",
@@ -949,7 +856,7 @@ describe("hosted AI usage allowance pricing", () => {
       providerName: "openai",
       tokenPricingBasis: "openai-flex",
     })).toMatchObject({
-      costUsdMicros: 380n,
+      costUsdMicros: 669n,
       counted: true,
       pricingSnapshot: {
         tokenPricingBasis: "openai-flex",
@@ -960,7 +867,7 @@ describe("hosted AI usage allowance pricing", () => {
   it("rejects OpenAI flex token pricing without OpenAI provider evidence", () => {
     expect(() => priceHostedAiUsageForAllowance({
       ...BASE_USAGE_RECORD,
-      providerName: "venice",
+      providerName: "unsupported-provider",
       tokenPricingBasis: "openai-flex",
     })).toThrow(
       "OpenAI token pricing adjustments require OpenAI provider evidence",
@@ -981,7 +888,7 @@ describe("hosted AI usage allowance pricing", () => {
     );
     expect(() => priceHostedAiUsageForAllowance({
       ...BASE_USAGE_RECORD,
-      providerName: "venice",
+      providerName: "unsupported-provider",
       tokenPricingBasis: "openai-priority",
     })).toThrow(
       "OpenAI token pricing adjustments require OpenAI provider evidence",
@@ -1002,7 +909,7 @@ describe("hosted AI usage allowance pricing", () => {
     expect(() => priceHostedAiUsageForAllowance({
       ...BASE_USAGE_RECORD,
       credentialSource: "member",
-      providerName: "venice",
+      providerName: "unsupported-provider",
       tokenPricingBasis: "openai-flex",
     })).toThrow(
       "OpenAI token pricing adjustments require OpenAI provider evidence",
@@ -1037,11 +944,11 @@ describe("hosted AI usage allowance pricing", () => {
     } satisfies AssistantUsageRecord;
 
     expect(priceHostedAiUsageForAllowance(estimatedIdleCompaction)).toMatchObject({
-      costUsdMicros: 250000n,
+      costUsdMicros: 500000n,
       counted: true,
     });
     expect(priceHostedAiUsageForAllowance(markedEstimatedIdleCompaction)).toMatchObject({
-      costUsdMicros: 250000n,
+      costUsdMicros: 500000n,
       counted: true,
       pricingSnapshot: {
         credentialSource: "platform",
@@ -1057,14 +964,14 @@ describe("hosted AI usage allowance pricing", () => {
       ...markedEstimatedIdleCompaction,
       surface: null,
     })).toMatchObject({
-      costUsdMicros: 250000n,
+      costUsdMicros: 500000n,
       counted: true,
     });
     expect(priceHostedAiUsageForAllowance({
       ...markedEstimatedIdleCompaction,
       providerRequestId: null,
     })).toMatchObject({
-      costUsdMicros: 250000n,
+      costUsdMicros: 500000n,
       counted: true,
     });
   });
@@ -1092,28 +999,28 @@ describe("hosted AI usage allowance pricing", () => {
   it("prices provider-prefixed OpenAI model ids", () => {
     expect(priceHostedAiUsageForAllowance({
       ...BASE_USAGE_RECORD,
-      requestedModel: "openai/gpt-5.6-terra",
-      servedModel: "openai/gpt-5.6-terra",
+      requestedModel: "openai/gpt-5.6-sol",
+      servedModel: "openai/gpt-5.6-sol",
     })).toMatchObject({
       counted: true,
       pricingSnapshot: {
-        model: "gpt-5.6-terra",
+        model: "gpt-5.6-sol",
       },
     });
   });
 
-  it("prices direct OpenAI dated gpt-5.6-terra snapshots", () => {
+  it("prices direct OpenAI dated gpt-5.6-sol snapshots", () => {
     expect(priceHostedAiUsageForAllowance({
       ...BASE_USAGE_RECORD,
-      requestedModel: "gpt-5.6-terra-2026-07-08",
-      servedModel: "gpt-5.6-terra-2026-07-08",
+      requestedModel: "gpt-5.6-sol-2026-07-08",
+      servedModel: "gpt-5.6-sol-2026-07-08",
     })).toMatchObject({
       counted: true,
       pricingSnapshot: {
-        model: "gpt-5.6-terra",
+        model: "gpt-5.6-sol",
         modelSource: "served",
-        requestedModel: "gpt-5.6-terra-2026-07-08",
-        servedModel: "gpt-5.6-terra-2026-07-08",
+        requestedModel: "gpt-5.6-sol-2026-07-08",
+        servedModel: "gpt-5.6-sol-2026-07-08",
       },
     });
   });
@@ -1121,15 +1028,15 @@ describe("hosted AI usage allowance pricing", () => {
   it("falls back to a recognized requested model when the served model is decorated", () => {
     expect(priceHostedAiUsageForAllowance({
       ...BASE_USAGE_RECORD,
-      requestedModel: "gpt-5.6-terra",
-      servedModel: "gpt-5.6-terra-production",
+      requestedModel: "gpt-5.6-sol",
+      servedModel: "gpt-5.6-sol-production",
     })).toMatchObject({
       counted: true,
       pricingSnapshot: {
-        model: "gpt-5.6-terra",
+        model: "gpt-5.6-sol",
         modelSource: "requested",
-        requestedModel: "gpt-5.6-terra",
-        servedModel: "gpt-5.6-terra-production",
+        requestedModel: "gpt-5.6-sol",
+        servedModel: "gpt-5.6-sol-production",
       },
     });
   });
@@ -1138,14 +1045,14 @@ describe("hosted AI usage allowance pricing", () => {
     expect(priceHostedAiUsageForAllowance({
       ...BASE_USAGE_RECORD,
       requestedModel: "gpt-unpriced",
-      servedModel: "openai/gpt-5.6-terra",
+      servedModel: "openai/gpt-5.6-sol",
     })).toMatchObject({
       counted: true,
       pricingSnapshot: {
-        model: "gpt-5.6-terra",
+        model: "gpt-5.6-sol",
         modelSource: "served",
         requestedModel: "gpt-unpriced",
-        servedModel: "openai/gpt-5.6-terra",
+        servedModel: "openai/gpt-5.6-sol",
       },
     });
   });
@@ -1709,7 +1616,7 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
     expect(updateMany).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({
         allowanceAccountedAt: new Date("2026-03-29T12:00:05.000Z"),
-        allowanceCostUsdMicros: 759n,
+        allowanceCostUsdMicros: 1337n,
         allowanceCounted: true,
         allowancePeriodEnd: new Date("2026-04-01T00:00:00.000Z"),
         allowancePeriodStart: new Date("2026-03-01T00:00:00.000Z"),
@@ -1737,10 +1644,10 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
     expect(sqlText).toContain("AND");
     expect(sqlText).toContain('OR "blocked_at" IS NULL');
     expect(params).toEqual([
-      759n,
+      1337n,
       new Date("2026-03-29T12:00:00.000Z"),
       new Date("2026-03-29T12:00:00.000Z"),
-      759n,
+      1337n,
       0n,
       new Date("2026-03-29T12:00:05.000Z"),
       new Date("2026-03-29T12:00:05.000Z"),
@@ -1803,8 +1710,8 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
     });
     usageCreditMocks.settleHostedUsageCreditForUsageTx.mockResolvedValueOnce({
       absorbedUsdMicros: 0n,
-      balanceUsdMicros: 4_293n,
-      debitedUsdMicros: 707n,
+      balanceUsdMicros: 3_715n,
+      debitedUsdMicros: 1285n,
       ledgerVersion: 8n,
     });
 
@@ -1817,13 +1724,13 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
 
     expect(usageCreditMocks.settleHostedUsageCreditForUsageTx).toHaveBeenCalledWith({
       beneficiaryMemberId: "member_123",
-      debitUsdMicros: 707n,
+      debitUsdMicros: 1285n,
       effectiveAt: new Date("2026-03-29T12:00:00.000Z"),
       sourceUsageId: "turn_123.attempt-1",
       tx,
     });
     const [, ...params] = executeRaw.mock.calls[0] ?? [];
-    expect(params).toContain(4_293n);
+    expect(params).toContain(3_715n);
   });
 
   it("settles Retell cost against included capacity before purchased credit", async () => {
@@ -1957,8 +1864,8 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
     });
     usageCreditMocks.settleHostedUsageCreditForUsageTx.mockResolvedValueOnce({
       absorbedUsdMicros: 0n,
-      balanceUsdMicros: 4_293n,
-      debitedUsdMicros: 707n,
+      balanceUsdMicros: 3_715n,
+      debitedUsdMicros: 1285n,
       ledgerVersion: 8n,
     });
 
@@ -1973,7 +1880,7 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
 
     expect(usageCreditMocks.settleHostedUsageCreditForUsageTx)
       .toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
-        debitUsdMicros: 707n,
+        debitUsdMicros: 1285n,
         sourceUsageId: "turn_123.attempt-1",
       }));
   });
@@ -2007,7 +1914,7 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
 
     expect(usageCreditMocks.settleHostedUsageCreditForUsageTx).toHaveBeenCalledWith(
       expect.objectContaining({
-        debitUsdMicros: 707n,
+        debitUsdMicros: 1285n,
       }),
     );
   });
@@ -2562,7 +2469,7 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
     expect(updateMany).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({
         allowanceAccountedAt: new Date("2026-04-09T12:00:05.000Z"),
-        allowanceCostUsdMicros: 759n,
+        allowanceCostUsdMicros: 1337n,
         allowanceCounted: true,
         allowancePeriodEnd: new Date("2026-05-01T00:00:00.000Z"),
         allowancePeriodStart: new Date("2026-04-01T00:00:00.000Z"),
@@ -2603,7 +2510,7 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
     expect(updateMany).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({
         allowanceAccountedAt: new Date("2026-04-09T12:00:05.000Z"),
-        allowanceCostUsdMicros: 759n,
+        allowanceCostUsdMicros: 1337n,
         allowanceCounted: true,
         allowancePeriodEnd: new Date("2026-05-01T00:00:00.000Z"),
         allowancePeriodStart: new Date("2026-04-01T00:00:00.000Z"),
@@ -5021,7 +4928,7 @@ function createAllowanceTx(input: {
         occurredAt: new Date("2026-03-29T12:00:00.000Z"),
       },
       _sum: {
-        allowanceCostUsdMicros: 759n,
+        allowanceCostUsdMicros: 1337n,
       },
     });
 

@@ -1,5 +1,6 @@
 import type { AssistantExecutionContext } from './execution-context.js'
 import type { AssistantProviderTraceEvent } from './provider-traces.js'
+import type { AssistantProviderFinalResponseCompletion } from './providers/types.js'
 
 export const HOSTED_ASSISTANT_TURN_TIMING_SCHEMA =
   'murph.assistant-turn-timing.v1'
@@ -21,6 +22,17 @@ export type HostedAssistantTurnTimingProviderOutcomeKind =
   | 'failed_terminal'
   | 'succeeded'
 
+/**
+ * Whether the selected provider result carried a Murph-local observation of
+ * Codex's final per-response completion notification. `absent` is never
+ * emitted; a missing field means the producer supplied no observation.
+ */
+export type HostedAssistantTurnTimingFinalResponseCompletion =
+  | 'invalid'
+  | 'observed'
+  | 'superseded'
+  | 'unavailable'
+
 export type HostedAssistantTurnTimingDeliveryOutcomeKind =
   | 'failed'
   | 'not-requested'
@@ -36,11 +48,14 @@ export interface HostedAssistantTurnTimingTraceInput {
   elapsedMs?: number | null
   executionContext?: AssistantExecutionContext | null
   finalReplySelected?: boolean | null
+  finalResponseCompletedToProviderResultMs?: number | null
+  finalResponseCompletion?: HostedAssistantTurnTimingFinalResponseCompletion | null
   foregroundAssistantPass?: boolean | null
   onTraceEvent?: ((event: AssistantProviderTraceEvent) => void) | null
   providerOutcomeKind?: HostedAssistantTurnTimingProviderOutcomeKind | null
   providerRequestElapsedMs?: number | null
   providerRequestOrdinal?: number | null
+  providerResultAtEpochMs?: number | null
   scanStateChanged?: boolean | null
   sinceProviderResultMs?: number | null
   stage: HostedAssistantTurnTimingStage
@@ -107,6 +122,11 @@ function buildHostedAssistantTurnTimingRawEvent(
   )
   maybeAssignHostedAssistantTurnTimingValue(
     rawEvent,
+    'turnTimingFinalResponseCompletion',
+    input.finalResponseCompletion,
+  )
+  maybeAssignHostedAssistantTurnTimingValue(
+    rawEvent,
     'foregroundAssistantPass',
     input.foregroundAssistantPass,
   )
@@ -119,6 +139,11 @@ function buildHostedAssistantTurnTimingRawEvent(
     rawEvent,
     'providerRequestOrdinal',
     input.providerRequestOrdinal,
+  )
+  maybeAssignHostedAssistantTurnTimingValue(
+    rawEvent,
+    'turnTimingProviderResultAtEpochMs',
+    input.providerResultAtEpochMs,
   )
   maybeAssignHostedAssistantTurnTimingValue(
     rawEvent,
@@ -137,6 +162,11 @@ function buildHostedAssistantTurnTimingRawEvent(
   )
   maybeAssignHostedAssistantTurnTimingValue(
     rawEvent,
+    'turnTimingFinalResponseCompletedToProviderResultMs',
+    input.finalResponseCompletedToProviderResultMs,
+  )
+  maybeAssignHostedAssistantTurnTimingValue(
+    rawEvent,
     'turnTimingSinceProviderResultMs',
     input.sinceProviderResultMs,
   )
@@ -147,6 +177,51 @@ function buildHostedAssistantTurnTimingRawEvent(
   )
 
   return rawEvent
+}
+
+/**
+ * Reply-dispatch anchors for post-result delivery timing. The epoch anchor is
+ * the exact provider-result instant (never clamped). The completion interval is
+ * monotonic and ends at the same instant; any non-finite or negative raw value
+ * is `invalid`, never rounded to zero.
+ */
+export function buildHostedAssistantFinalResponseCompletionTiming(input: {
+  completion: AssistantProviderFinalResponseCompletion | undefined
+  /** Only a selected final reply queues the intent these anchors describe. */
+  finalReplySelected: boolean
+  providerResultAtEpochMs: number | null
+  providerResultAtMonotonicMs: number | null
+}): Pick<
+  HostedAssistantTurnTimingTraceInput,
+  | 'finalResponseCompletedToProviderResultMs'
+  | 'finalResponseCompletion'
+  | 'providerResultAtEpochMs'
+> {
+  if (
+    !input.finalReplySelected
+    || input.providerResultAtEpochMs === null
+    || !Number.isSafeInteger(input.providerResultAtEpochMs)
+    || input.providerResultAtEpochMs < 0
+  ) {
+    return {}
+  }
+  const anchor = { providerResultAtEpochMs: input.providerResultAtEpochMs }
+  if (!input.completion) {
+    return anchor
+  }
+  if (input.completion.kind !== 'observed') {
+    return { ...anchor, finalResponseCompletion: input.completion.kind }
+  }
+  const rawElapsedMs = input.providerResultAtMonotonicMs === null
+    ? Number.NaN
+    : input.providerResultAtMonotonicMs - input.completion.observedAtMonotonicMs
+  return Number.isFinite(rawElapsedMs) && rawElapsedMs >= 0
+    ? {
+        ...anchor,
+        finalResponseCompletedToProviderResultMs: Math.round(rawElapsedMs),
+        finalResponseCompletion: 'observed',
+      }
+    : { ...anchor, finalResponseCompletion: 'invalid' }
 }
 
 function maybeAssignHostedAssistantTurnTimingValue(

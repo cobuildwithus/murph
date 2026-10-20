@@ -8,6 +8,8 @@ import { act, createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, test, vi } from "vitest";
 
+import { HostedOnboardingApiError } from "@/src/components/hosted-onboarding/client-api";
+
 import { renderClientComponent } from "./render-client-component";
 
 const mocks = vi.hoisted(() => ({
@@ -2217,6 +2219,44 @@ describe("HostedBillingSettings", () => {
     await rendered.cleanup();
   });
 
+  test("opens billing only on request after an Edge-to-Pulse cancellation rejection", async () => {
+    const { HostedOnboardingApiError } = await import("@/src/components/hosted-onboarding/client-api");
+    mocks.requestHostedOnboardingJson.mockRejectedValueOnce(new HostedOnboardingApiError({
+      code: "HOSTED_BILLING_STRIPE_SUBSCRIPTION_STATE_UNSUPPORTED",
+      details: { code: "cancellation" },
+      message: "Your subscription is scheduled to cancel.",
+    }));
+    const { SwitchToPulseButton } = await import("@/src/components/settings/hosted-plan-switch-to-pulse-button");
+    const rendered = await renderClientComponent(createElement(SwitchToPulseButton));
+
+    try {
+      await act(async () => {
+        rendered.button.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+      });
+      await act(async () => {
+        findButtonByText(rendered.window.document, "Confirm switch", rendered.window)
+          .dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+      });
+      assert.equal(mocks.requestHostedOnboardingJson.mock.calls.length, 1);
+      assert.equal(rendered.assign.mock.calls.length, 0);
+      mocks.requestHostedOnboardingJson.mockResolvedValueOnce({
+        url: "https://stripe.example.test/portal/recovery",
+      });
+      await act(async () => {
+        findButtonByText(rendered.window.document, "Manage billing", rendered.window)
+          .dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+      });
+      assert.deepEqual(mocks.requestHostedOnboardingJson.mock.calls.map(([request]) => request), [
+        { method: "POST", url: "/api/settings/billing/switch-to-pulse" },
+        { method: "POST", url: "/api/settings/billing/portal" },
+      ]);
+      assert.deepEqual(rendered.assign.mock.calls, [["https://stripe.example.test/portal/recovery"]]);
+      assert.equal(mocks.routerRefresh.mock.calls.length, 0);
+    } finally {
+      await rendered.cleanup();
+    }
+  });
+
   test("posts the Pulse switch request and refreshes on success", async () => {
     mocks.requestHostedOnboardingJson.mockResolvedValueOnce({
       effectiveAt: "2026-05-06T12:00:00.000Z",
@@ -2250,6 +2290,182 @@ describe("HostedBillingSettings", () => {
     assert.equal(mocks.routerRefresh.mock.calls.length, 1);
 
     await rendered.cleanup();
+  });
+
+  test("offers cancellation recovery without opening Stripe or repeating the switch automatically", async () => {
+    mocks.requestHostedOnboardingJson.mockRejectedValueOnce(
+      new HostedOnboardingApiError({
+        code: "HOSTED_BILLING_STRIPE_SUBSCRIPTION_STATE_UNSUPPORTED",
+        details: { code: "cancellation" },
+        message: "Synthetic subscription state failure.",
+      }),
+    );
+    const { HostedPlanChangeButton } = await import(
+      "@/src/components/settings/hosted-plan-change-button"
+    );
+    const rendered = await renderClientComponent(createElement(
+      HostedPlanChangeButton,
+      {
+        currentPeriodEnd: "2026-09-01T00:00:00.000Z",
+        mode: "schedule",
+        targetPlanCode: "launch_edge_monthly",
+      },
+    ));
+    const switchRequest = {
+      method: "POST",
+      payload: { targetPlanCode: "launch_edge_monthly" },
+      url: "/api/settings/billing/switch-plan",
+    };
+
+    try {
+      await act(async () => {
+        rendered.button.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+      });
+      assert.equal(mocks.requestHostedOnboardingJson.mock.calls.length, 0);
+
+      const confirmButton = findButtonByText(
+        rendered.window.document,
+        "Confirm switch",
+        rendered.window,
+      );
+      await act(async () => {
+        confirmButton.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+      });
+
+      const dialog = rendered.window.document.querySelector('[role="dialog"]');
+      assert.ok(dialog instanceof rendered.window.HTMLElement);
+      const alert = dialog.querySelector('[role="alert"]');
+      assert.ok(alert instanceof rendered.window.HTMLElement);
+      assert.equal(alert.textContent, "Synthetic subscription state failure.");
+      assert.deepEqual(mocks.requestHostedOnboardingJson.mock.calls, [[switchRequest]]);
+      assert.equal(rendered.assign.mock.calls.length, 0);
+      assert.equal(mocks.routerRefresh.mock.calls.length, 0);
+      assert.equal(
+        [...dialog.querySelectorAll("button")].some(
+          (button) => button.textContent?.includes("Confirm switch"),
+        ),
+        false,
+      );
+
+      const manageBillingButton = findButtonByText(
+        rendered.window.document,
+        "Manage billing",
+        rendered.window,
+      );
+      assert.ok(dialog.contains(manageBillingButton));
+      mocks.requestHostedOnboardingJson.mockResolvedValueOnce({
+        url: "https://stripe.example.test/portal/session_cancellation",
+      });
+      await act(async () => {
+        manageBillingButton.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+      });
+
+      assert.deepEqual(mocks.requestHostedOnboardingJson.mock.calls, [
+        [switchRequest],
+        [{ method: "POST", url: "/api/settings/billing/portal" }],
+      ]);
+      assert.deepEqual(rendered.assign.mock.calls, [
+        ["https://stripe.example.test/portal/session_cancellation"],
+      ]);
+      assert.equal(mocks.routerRefresh.mock.calls.length, 0);
+      assert.equal(manageBillingButton.disabled, true);
+      assert.equal(manageBillingButton.textContent, "Opening Stripe...");
+    } finally {
+      await rendered.cleanup();
+    }
+  });
+
+  test.each([
+    ["plain error text", new Error("Your subscription is scheduled to cancel.")],
+    ["an unrelated API code", new HostedOnboardingApiError({
+      code: "HOSTED_BILLING_STRIPE_SUBSCRIPTION_ITEMS_UNSUPPORTED",
+      details: { code: "cancellation" },
+      message: "Your subscription is scheduled to cancel.",
+    })],
+    ["another unsupported state", new HostedOnboardingApiError({
+      code: "HOSTED_BILLING_STRIPE_SUBSCRIPTION_STATE_UNSUPPORTED",
+      details: { code: "status" },
+      message: "Your subscription is scheduled to cancel.",
+    })],
+    ["a missing cancellation detail", new HostedOnboardingApiError({
+      code: "HOSTED_BILLING_STRIPE_SUBSCRIPTION_STATE_UNSUPPORTED",
+      message: "Your subscription is scheduled to cancel.",
+    })],
+    ["an untyped error lookalike", {
+      code: "HOSTED_BILLING_STRIPE_SUBSCRIPTION_STATE_UNSUPPORTED",
+      details: { code: "cancellation" },
+      message: "Your subscription is scheduled to cancel.",
+    }],
+  ])("keeps the scheduling retry without cancellation recovery for %s", async (_label, error) => {
+    mocks.requestHostedOnboardingJson.mockRejectedValueOnce(error);
+    const { HostedPlanChangeButton } = await import(
+      "@/src/components/settings/hosted-plan-change-button"
+    );
+    const rendered = await renderClientComponent(createElement(
+      HostedPlanChangeButton,
+      {
+        currentPeriodEnd: "2026-09-01T00:00:00.000Z",
+        mode: "schedule",
+        targetPlanCode: "launch_edge_monthly",
+      },
+    ));
+    const switchRequest = {
+      method: "POST",
+      payload: { targetPlanCode: "launch_edge_monthly" },
+      url: "/api/settings/billing/switch-plan",
+    };
+
+    try {
+      await act(async () => {
+        rendered.button.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+      });
+      const confirmButton = findButtonByText(
+        rendered.window.document,
+        "Confirm switch",
+        rendered.window,
+      );
+      await act(async () => {
+        confirmButton.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+      });
+
+      const dialog = rendered.window.document.querySelector('[role="dialog"]');
+      assert.ok(dialog instanceof rendered.window.HTMLElement);
+      assert.ok(dialog.querySelector('[role="alert"]') instanceof rendered.window.HTMLElement);
+      assert.equal(
+        [...dialog.querySelectorAll("button")].some(
+          (button) => button.textContent?.includes("Manage billing"),
+        ),
+        false,
+      );
+      assert.deepEqual(mocks.requestHostedOnboardingJson.mock.calls, [[switchRequest]]);
+      assert.equal(rendered.assign.mock.calls.length, 0);
+      assert.equal(mocks.routerRefresh.mock.calls.length, 0);
+
+      const retryButton = findButtonByText(
+        rendered.window.document,
+        "Confirm switch",
+        rendered.window,
+      );
+      assert.equal(retryButton.disabled, false);
+      mocks.requestHostedOnboardingJson.mockResolvedValueOnce({
+        effectiveAt: "2026-09-01T00:00:00.000Z",
+        scheduledBillingPlanCode: "launch_edge_monthly",
+        status: "scheduled",
+      });
+      await act(async () => {
+        retryButton.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+      });
+
+      assert.deepEqual(mocks.requestHostedOnboardingJson.mock.calls, [
+        [switchRequest],
+        [switchRequest],
+      ]);
+      assert.equal(mocks.routerRefresh.mock.calls.length, 1);
+      assert.equal(rendered.assign.mock.calls.length, 0);
+      assert.equal(rendered.window.document.querySelector('[role="dialog"]'), null);
+    } finally {
+      await rendered.cleanup();
+    }
   });
 
   test("posts a confirmed Max-to-Edge switch and refreshes on success", async () => {

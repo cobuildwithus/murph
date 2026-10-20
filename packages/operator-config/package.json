@@ -14,6 +14,11 @@
       "import": "./dist/assistant-cli-contracts.js",
       "default": "./dist/assistant-cli-contracts.js"
     },
+    "./assistant-delivery-contracts": {
+      "types": "./dist/assistant-delivery-contracts.d.ts",
+      "import": "./dist/assistant-delivery-contracts.js",
+      "default": "./dist/assistant-delivery-contracts.js"
+    },
     "./assistant/shared": {
       "types": "./dist/assistant/shared.d.ts",
       "import": "./dist/assistant/shared.js",
@@ -197,7 +202,7 @@
     "mpg123-decoder": "1.0.3"
   },
   "devDependencies": {
-    "zod": "^4.4.3"
+    "zod": "^4.5.4"
   },
   "engines": {
     "node": ">=24.14.1"

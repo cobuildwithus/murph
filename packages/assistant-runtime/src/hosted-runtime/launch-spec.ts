@@ -26,7 +26,6 @@ import {
 } from "@murphai/operator-config/hosted-assistant-config-constants";
 import {
   OPENAI_CODEX_MODEL_PROVIDER_CONFIG,
-  VENICE_CODEX_MODEL_PROVIDER_ID,
 } from "@murphai/operator-config/assistant/target-runtime";
 import {
   HOSTED_SHARED_FORWARDED_ENV_CATEGORY_KEYS,
@@ -327,8 +326,7 @@ function shouldForwardHostedCodexAssistantConfigEnv(source: UnknownEnvSource): b
     return false;
   }
   const normalized = provider.trim();
-  return normalized === OPENAI_CODEX_MODEL_PROVIDER_CONFIG.id
-    || normalized === VENICE_CODEX_MODEL_PROVIDER_ID;
+  return normalized === OPENAI_CODEX_MODEL_PROVIDER_CONFIG.id;
 }
 
 export function buildHostedRuntimeChildEnv(input: {

@@ -1,6 +1,7 @@
 import { withCodexToolInputContract } from '../src/assistant-codex/tool-input-contract.ts'
 import {
   cliTimingLaunchArgs,
+  codexSteeringLaunchArgs,
   MURPH_DYNAMIC_TOOLS_WITHOUT_PROGRESS,
   MockChildProcess,
   asRecord,
@@ -41,7 +42,6 @@ import {
   buildCodexAppServerArgs,
   compactWarmCodexThread,
   executeCodexAppServerTurn as executeCodexAppServerTurnUnchecked,
-  executeCodexManagedAccountOperation,
   preinitializeCodexAppServer,
   readCodexAppServerTurnFailureContext,
   resolveCodexDisplayOptions,
@@ -975,13 +975,6 @@ describe('assistant codex runtime', () => {
     await expect(waitForWarmCodexBackgroundWork()).rejects.toMatchObject({
       code: 'ASSISTANT_CODEX_APP_SERVER_BUSY',
     })
-    await expect(executeCodexManagedAccountOperation({
-      action: 'disconnect',
-      codexHome,
-      workingDirectory,
-    })).rejects.toMatchObject({
-      code: 'ASSISTANT_CODEX_APP_SERVER_BUSY',
-    })
     await expect(executeCodexAppServerTurn({
       ...launchInput,
       prompt: 'Do not cross the active workspace boundary.',
@@ -1009,7 +1002,7 @@ describe('assistant codex runtime', () => {
       const child = new MockChildProcess()
       spawnedChildren.push(child)
 
-      expect(args).toEqual([...cliTimingLaunchArgs, 'app-server'])
+      expect(args).toEqual([...codexSteeringLaunchArgs, ...cliTimingLaunchArgs, 'app-server'])
       expect(options).toMatchObject({
         cwd: tmpdir(),
         env: {

@@ -1983,8 +1983,8 @@ function createProviderOptions(
   return serializeAssistantProviderSessionOptions({
     approvalPolicy: 'never',
     provider: 'codex-cli',
-    model: 'gpt-5.6-terra',
-    modelProvider: 'vercel-ai-gateway',
+    model: 'gpt-6.1-sol',
+    modelProvider: 'hosted-openai',
     reasoningEffort: 'medium',
     sandbox: 'danger-full-access',
     ...overrides,

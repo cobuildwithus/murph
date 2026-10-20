@@ -1,8 +1,5 @@
 "use client";
 
-import {
-  HOSTED_ASSISTANT_OPENAI_PROVIDER,
-} from "@murphai/hosted-execution/assistant-model";
 import { useState } from "react";
 import { CheckCircle2, CheckIcon, ContactRound, Monitor } from "lucide-react";
 import { SourceCard } from "@/app/(dashboard)/connect/connect-source-card";
@@ -45,13 +42,6 @@ import {
   ASSISTANT_MODEL_CHOICE_CARD_CLASSES,
   AssistantModelArtwork,
 } from "@/src/components/settings/assistant-model-artwork";
-import {
-  AssistantProviderDialog,
-  AssistantProviderSummary,
-  type AssistantRoutingChoice,
-} from "@/src/components/settings/hosted-assistant-model-settings";
-import { HostedInferenceConnectionPane } from "@/src/components/settings/hosted-inference-connection-settings";
-import { DESIGN_INFERENCE_CONNECTION } from "./design-inference-connection";
 import { HealthDomainCard } from "@/src/components/overview/health-domain-card";
 import { ActiveExperimentBanner } from "@/src/components/overview/active-experiment-banner";
 import { ProfileStats } from "@/src/components/overview/profile-stats";
@@ -131,7 +121,10 @@ import {
 } from "@/src/components/murph/murph-contact-card-picker";
 import type { ExperimentStartContactOption } from "@/src/lib/experiments/start-experiment-contact";
 import type { ExperimentLibraryCard } from "@/src/lib/experiments/library-cards";
-import type { DeviceSyncCompletionDialogModel } from "@/src/lib/device-sync/connect-completion-types";
+import {
+  FITBIT_GOOGLE_HEALTH_LINK_FAILED_DETAIL,
+  type DeviceSyncCompletionDialogModel,
+} from "@/src/lib/device-sync/connect-completion-types";
 import type { HostedConsentStatus } from "@/src/lib/legal/consent";
 import { buildWhoopAppleHealthSetupGuide } from "@/src/lib/device-sync/whoop-apple-health-setup-guide";
 import {
@@ -153,6 +146,7 @@ import { HostedPlanChangeConfirmationContent } from "@/src/components/settings/h
 import { UpgradeToEdgeButton } from "@/src/components/settings/hosted-plan-upgrade-button";
 import { HostedPlanUpdateReturn } from "@/src/components/settings/hosted-plan-update-return";
 import { FoodBrandVisualStudy } from "./food-label-lab-study";
+import { CustomizeMurphSettings } from "@/src/components/settings/customize-murph-settings";
 import { MurphPersonalitySettingsDialog } from "@/src/components/settings/murph-personality-settings-dialog";
 import {
   DESIGN_AI_USAGE_ACTIVITY,
@@ -178,15 +172,9 @@ import {
 } from "@/src/components/settings/hosted-data-privacy-settings";
 import { HOSTED_STRIPE_EFFECT_PENDING_MESSAGE } from "@/src/lib/hosted-onboarding/errors";
 import { VitalConnectionDialog } from "../(dashboard)/connect/connect-page-dialogs";
-import {
-  EnvironmentCaptureCard,
-  EnvironmentEmptyState,
-  EnvironmentVoiceRefreshNotice,
-} from "../(dashboard)/environment/environment-page-client";
 import { GroupPrivateConversions } from "../(dashboard)/ops/growth/group-private-conversions";
 import { PublicComparisonTableStudy } from "./public-comparison-table-study";
 import type { HostedGrowthDashboard } from "@/src/lib/hosted-ops/growth-metrics";
-import type { EnvironmentVoiceScript } from "../(dashboard)/environment/environment-voice-script";
 import { ExperimentResultsShareStudy } from "./experiment-results-share-study";
 import { ImessageChallengeStandingsCardStudy } from "./imessage-challenge-standings-card-study";
 import { ImessageNutritionCardStudy } from "./imessage-nutrition-card-study";
@@ -197,35 +185,10 @@ import { BetterAuthAdoptionStudy } from "./better-auth-adoption-study";
 import { DataExportControlStudy } from "./data-export-study";
 import { HealthDataConsentControlStudy } from "./health-data-consent-study";
 import { SignupReferralComponentStudy } from "./signup-referral-study";
-import { PersonalPatternsComponentStudy } from "./personal-patterns-study";
 import { DashboardSidebarStudy } from "./dashboard-sidebar-study";
 
 const DESIGN_SIGNED_GROUP_FUNDING_ENDPOINT =
   "/api/groups/fund/gf1.design_group_runtime.synthetic_funding_signature";
-
-const DESIGN_ENVIRONMENT_GAP_SCRIPT: EnvironmentVoiceScript = {
-  dialogTitle: "Fill the gaps in your report",
-  flow: "fill-gaps",
-  idleTitle: "Only the missing details",
-  topics: [
-    {
-      eyebrow: "Sleep",
-      focus: ["Bedroom CO₂"],
-      id: "sleep",
-      prompt:
-        "Cover only the details Murph is still missing. If something does not apply or you would rather skip it, say so.",
-      title: "Your sleep setup",
-    },
-    {
-      eyebrow: "Workspace",
-      focus: ["Breaks"],
-      id: "workspace",
-      prompt:
-        "Cover only the details Murph is still missing. If something does not apply or you would rather skip it, say so.",
-      title: "Your remaining workspace details",
-    },
-  ],
-};
 
 function Section({
   children,
@@ -352,6 +315,16 @@ const WHOOP_COMPLETION_DIALOG_MODEL: DeviceSyncCompletionDialogModel = {
   retryHref: null,
   setupGuide: WHOOP_COMPLETION_SETUP_GUIDE,
   title: "WHOOP is connected",
+  unverified: false,
+};
+
+const FITBIT_LINK_FAILED_DIALOG_MODEL: DeviceSyncCompletionDialogModel = {
+  contactAction: null,
+  detail: FITBIT_GOOGLE_HEALTH_LINK_FAILED_DETAIL,
+  failed: true,
+  kind: "device-sync",
+  retryHref: "/connect",
+  title: "Fitbit connection did not finish",
   unverified: false,
 };
 
@@ -655,11 +628,7 @@ export function ComponentsContent() {
     useState<SegmentedControlDemoValue>("phone");
   const [warmSegmentedControlValue, setWarmSegmentedControlValue] =
     useState<SegmentedControlDemoValue>("email");
-  const [choiceCardValue, setChoiceCardValue] = useState("terra");
-  const [providerDialogOpen, setProviderDialogOpen] = useState(false);
-  const [providerValue, setProviderValue] = useState<AssistantRoutingChoice>(
-    HOSTED_ASSISTANT_OPENAI_PROVIDER,
-  );
+  const [choiceCardValue, setChoiceCardValue] = useState("sol");
   const [addedContactAvatar, setAddedContactAvatar] =
     useState<MurphContactAvatarOption | null>(null);
   const [inlineContactAvatarId, setInlineContactAvatarId] = useState("hooded");
@@ -668,6 +637,7 @@ export function ComponentsContent() {
   const [phoneTransferSupportDialogOpen, setPhoneTransferSupportDialogOpen] =
     useState(false);
   const [whoopCompletionPreviewKey, setWhoopCompletionPreviewKey] = useState(0);
+  const [fitbitLinkFailedPreviewKey, setFitbitLinkFailedPreviewKey] = useState(0);
   const [whoopCapacityPreviewOpen, setWhoopCapacityPreviewOpen] = useState(false);
   const [whoopCapacityNoContactPreviewOpen, setWhoopCapacityNoContactPreviewOpen] =
     useState(false);
@@ -1037,120 +1007,6 @@ export function ComponentsContent() {
 
         <Separator />
 
-        <div
-          data-design-component="personal-patterns"
-          id="personal-patterns-component"
-          inert
-        >
-          <Section title="Personal patterns matrix">
-            <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
-              Production overview component. It compares repeated actions with
-              next-day outcomes and shows evidence strength without causal or
-              good-versus-bad labels.
-            </p>
-            <PersonalPatternsComponentStudy />
-          </Section>
-        </div>
-
-        <Separator />
-
-        <div
-          data-design-component="environment-empty-state"
-          id="environment-empty-state-component"
-        >
-          <Section title="Environment empty state">
-            <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
-              Production zero-data state. One voice-first action leads to the
-              walkthrough, while the real report categories preview what Murph
-              will build without showing empty scores or missing facts.
-            </p>
-            <EnvironmentEmptyState
-              contactOptions={[
-                {
-                  href: "sms:+15555550100?body=I%20want%20to%20update%20what%20you%20know%20about%20my%20home%20environment.",
-                  kind: "text",
-                  label: "Messages",
-                },
-                {
-                  href: "https://t.me/withmurph_bot",
-                  kind: "telegram",
-                  label: "Telegram",
-                },
-              ]}
-            />
-          </Section>
-        </div>
-
-        <Separator />
-
-        <div
-          data-design-component="environment-capture-card"
-          id="environment-capture-card-component"
-          inert
-        >
-          <Section title="Environment progressive capture">
-            <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
-              Production partial-data state. The action opens a voice script
-              built only from facts Murph still does not know.
-            </p>
-            <EnvironmentCaptureCard
-              contactOptions={[]}
-              coverage={70}
-              known={21}
-              script={DESIGN_ENVIRONMENT_GAP_SCRIPT}
-            />
-          </Section>
-        </div>
-
-        <Separator />
-
-        <div
-          data-design-component="environment-voice-refresh-notice"
-          id="environment-voice-refresh-notice-component"
-          inert
-        >
-          <Section title="Environment voice processing feedback">
-            <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
-              The open report keeps ownership after upload: processing,
-              private-report refresh, updated, no-clear-facts, and delayed
-              recovery remain visible without requiring a reload. Processing
-              stays animated, and the delayed action rechecks the owned phase.
-            </p>
-            <div className="grid gap-4">
-              <EnvironmentVoiceRefreshNotice
-                state={{ baselineValues: "{}", status: "processing" }}
-                onCheckAgain={() => {}}
-              />
-              <EnvironmentVoiceRefreshNotice
-                state={{
-                  factsAdded: 3,
-                  factsChanged: true,
-                  remainingDetails: 4,
-                  remainingTopics: 2,
-                  status: "updated",
-                }}
-                onCheckAgain={() => {}}
-              />
-              <EnvironmentVoiceRefreshNotice
-                state={{
-                  factsAdded: 0,
-                  factsChanged: false,
-                  remainingDetails: 4,
-                  remainingTopics: 2,
-                  status: "updated",
-                }}
-                onCheckAgain={() => {}}
-              />
-              <EnvironmentVoiceRefreshNotice
-                state={{ status: "delayed" }}
-                onCheckAgain={() => {}}
-              />
-            </div>
-          </Section>
-        </div>
-
-        <Separator />
-
         <Section title="Buttons">
           <div className="flex flex-wrap items-center gap-3">
             <Button size="lg">Start Experiment →</Button>
@@ -1335,13 +1191,11 @@ export function ComponentsContent() {
         <Separator />
 
         <Section
-          id="assistant-provider-picker"
-          title="Radio group, choice cards & inference routing"
+          id="assistant-model-picker"
+          title="Radio group and model choice cards"
         >
           <p className="max-w-2xl text-sm text-muted-foreground">
-            Compare model choice cards, provider privacy labels, and the
-            included-capacity disclosure and its accessible Save association
-            shown after Venice is selected.
+            Compare model choice cards and their selection states.
           </p>
           <RadioGroup
             className="grid gap-3 sm:grid-cols-3"
@@ -1358,56 +1212,26 @@ export function ComponentsContent() {
               value="luna"
             />
             <ChoiceCard
-              artwork={<AssistantModelArtwork variant="terra" />}
-              badge={<Badge variant="outline">Recommended</Badge>}
-              className={ASSISTANT_MODEL_CHOICE_CARD_CLASSES.terra}
-              description="Advanced health intelligence"
-              id="design-choice-terra"
-              meta="Balanced usage"
-              title="Terra"
-              value="terra"
-            />
-            <ChoiceCard
               artwork={<AssistantModelArtwork variant="sol" />}
-              badge={<Badge variant="outline">Edge</Badge>}
+              badge={<Badge variant="outline">Recommended</Badge>}
               className={ASSISTANT_MODEL_CHOICE_CARD_CLASSES.sol}
-              description="Highest health intelligence"
+              description="Deep health intelligence"
               id="design-choice-sol"
-              meta="High usage · Edge plan"
+              meta="Balanced usage"
               title="Sol"
               value="sol"
             />
-          </RadioGroup>
-          <AssistantProviderSummary
-            connection={DESIGN_INFERENCE_CONNECTION}
-            currentRouting={HOSTED_ASSISTANT_OPENAI_PROVIDER}
-            draftRouting={providerValue}
-            onChangeClick={() => setProviderDialogOpen(true)}
-          />
-          <AssistantProviderDialog
-            chatCompletionsAvailable
-            connection={DESIGN_INFERENCE_CONNECTION}
-            customInferenceAvailable
-            onOpenChange={setProviderDialogOpen}
-            onRoutingChange={setProviderValue}
-            open={providerDialogOpen}
-            routing={providerValue}
-            veniceAvailable
-          />
-        </Section>
-
-        <Separator />
-
-        <Section title="Custom inference endpoint pane">
-          <div inert>
-            <HostedInferenceConnectionPane
-              chatCompletionsAvailable
-              configurationAvailable={false}
-              connection={null}
-              onConnectionChange={() => {}}
-              selected={false}
+            <ChoiceCard
+              artwork={<AssistantModelArtwork variant="astra" />}
+              badge={<Badge variant="outline">Edge</Badge>}
+              className={ASSISTANT_MODEL_CHOICE_CARD_CLASSES.astra}
+              description="Frontier health intelligence"
+              id="design-choice-astra"
+              meta="Highest usage · Edge plan"
+              title="Astra"
+              value="astra"
             />
-          </div>
+          </RadioGroup>
         </Section>
 
         <Separator />
@@ -1626,7 +1450,7 @@ export function ComponentsContent() {
 
         <Separator />
 
-        <Section title="Hosted plan change">
+        <Section id="hosted-plan-change" title="Hosted plan change">
           <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
             Immediate upgrades open Stripe&apos;s exact proration confirmation.
             Period-end switches keep their in-product scheduling confirmation.
@@ -1634,7 +1458,7 @@ export function ComponentsContent() {
           <div className="grid items-start gap-6 lg:grid-cols-2">
             <div className="space-y-3">
               <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
-                Period-end switch
+                Period-end switch blocked by cancellation
               </p>
               <Dialog>
                 <div
@@ -1643,10 +1467,11 @@ export function ComponentsContent() {
                 >
                   <HostedPlanChangeConfirmationContent
                     currentPeriodEnd="2026-08-27T04:00:00.000Z"
-                    errorMessage={null}
+                    errorMessage="Your subscription is scheduled to cancel. Open Manage billing to renew it, then try changing plans again."
                     onClose={() => undefined}
                     onConfirm={() => undefined}
                     pending={false}
+                    showCancellationRecovery
                     targetPlanCode="launch_group_monthly"
                   />
                 </div>
@@ -1732,6 +1557,31 @@ export function ComponentsContent() {
               open={whoopCapacityNoContactPreviewOpen}
               onOpenChange={setWhoopCapacityNoContactPreviewOpen}
             />
+          </Section>
+        </div>
+
+        <Separator />
+
+        <div id="fitbit-link-failed-dialog" className="scroll-mt-24">
+          <Section title="Fitbit Link Failure Dialog">
+            <p className="max-w-2xl text-sm text-muted-foreground">
+              Production failure state when Google Health stops a Fitbit link,
+              usually a missing Google Health profile or a declined permission.
+            </p>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                variant="outline"
+                onClick={() => setFitbitLinkFailedPreviewKey((key) => key + 1)}
+              >
+                Preview Fitbit link failure
+              </Button>
+            </div>
+            {fitbitLinkFailedPreviewKey > 0 ? (
+              <DeviceSyncCompletionDialog
+                key={fitbitLinkFailedPreviewKey}
+                model={FITBIT_LINK_FAILED_DIALOG_MODEL}
+              />
+            ) : null}
           </Section>
         </div>
 
@@ -2477,10 +2327,17 @@ export function ComponentsContent() {
 
         <Separator />
 
+        <Section id="murph-style-settings" title="Murph Style Settings">
+          <div inert className="max-w-2xl">
+            <CustomizeMurphSettings assistant={null} />
+          </div>
+        </Section>
+
+        <Separator />
+
         <Section title="Assistant Style Picker">
           <p className="text-sm text-muted-foreground">
-            Tone and voice pickers used in onboarding (chained) and settings
-            (one step at a time). Full-height drawer under 768px, dialog above;
+            Tone and voice pickers used in settings, one step at a time. Full-height drawer under 768px, dialog above;
             the voice grid is two columns on mobile and three on desktop.
           </p>
           <div className="flex flex-wrap gap-3 rounded-xl border border-border bg-card p-5">
@@ -2722,8 +2579,8 @@ export function ComponentsContent() {
 
         <Separator />
 
-        <Section title="Metric Card">
-          <div className="flex gap-3">
+        <Section id="metric-card" title="Metric Card">
+          <div className="flex flex-col gap-3 md:flex-row">
             <MetricCard label="HRV" value="53.8" unit="ms" delta="+15.7%" direction="up" baseline="46.5" expected="+10–25%" />
             <MetricCard label="Resting HR" value="60.1" unit="bpm" delta="−6.4%" direction="down" baseline="64.2" expected="−3–8 bpm" />
             <MetricCard label="Deep Sleep" value="1h44m" delta="+18.2%" direction="up" baseline="1h28m" expected="+15–30%" />
@@ -2756,8 +2613,8 @@ export function ComponentsContent() {
 
         <Separator />
 
-        <Section title="Expected Signal Card">
-          <div className="flex gap-4">
+        <Section id="expected-signal-card" title="Expected Signal Card">
+          <div className="flex flex-col gap-4 md:flex-row">
             <ExpectedSignalCard label="HRV" expected="+10–25%" direction="up" description="Heat stress trains the autonomic nervous system, increasing parasympathetic dominance at rest." />
             <ExpectedSignalCard label="Resting HR" expected="-3–8 bpm" direction="down" description="Repeated heat exposure improves cardiac output efficiency, lowering resting heart rate." />
             <ExpectedSignalCard label="Deep Sleep" expected="+15–30%" direction="up" description="Core temp drop after sauna triggers deeper slow-wave sleep via thermoregulatory pathways." />

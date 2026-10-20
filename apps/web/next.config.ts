@@ -81,30 +81,11 @@ const BRANDFETCH_IMAGE_SOURCES = ["https://cdn.brandfetch.io"] as const;
 // scripts/check-og-asset-traces.ts fails the build when a trace goes missing.
 const OG_SHARE_ASSET_TRACE_INCLUDES = [
   "app/fonts/*.ttf",
-  "public/icons/murph-mark.svg",
   "public/logo.svg",
 ];
 const MURPH_CONTACT_CARD_AVATAR_TRACE_INCLUDES = [
   "public/brand-logos/murph-logo-avatar-*.png",
   "public/murph-headshots/*-sm.png",
-];
-// The package root resolver supports several install layouts. Node file trace
-// conservatively expands that fallback search to every generated Web artifact,
-// so Goal functions must explicitly discard projection families they never read.
-const HEALTH_COMMONS_GOAL_TRACE_EXCLUDES = [
-  "../../packages/health-commons/generated/web/browse/biomarkers.json",
-  "../../packages/health-commons/generated/web/browse/experiments.json",
-  "../../packages/health-commons/generated/web/bundles/**/*.json",
-  "../../packages/health-commons/generated/web/pages/biomarkers/**/*.json",
-  "../../packages/health-commons/generated/web/shell/**/*.json",
-  "../../packages/health-commons/generated/web/tabs/**/*.json",
-];
-const HEALTH_COMMONS_GOAL_INDEX_ONLY_TRACE_EXCLUDES = [
-  "../../packages/health-commons/generated/web/pages/goals/**/*.json",
-  "../../packages/health-commons/generated/web/routes/index.json",
-];
-const HEALTH_COMMONS_GOAL_INDEX_TRACE_INCLUDES = [
-  "../../packages/health-commons/generated/web/browse/goals.json",
 ];
 // The footer availability indicator reads the incident.io status-page summary
 // from the browser, so the status-page origin must be reachable client-side.
@@ -265,8 +246,7 @@ export function buildHostedWebSecurityHeaders(
     },
     {
       key: "Permissions-Policy",
-      // The Environment recorder is same-origin and still requires the
-      // browser's explicit per-site permission. Embedded origins stay blocked.
+      // Browser voice calls require same-origin microphone permission.
       value: "camera=(), geolocation=(), microphone=(self)",
     },
   ];
@@ -419,29 +399,6 @@ export function buildHostedWebNextConfig(
         "../../packages/health-commons/generated/web/shell/experiments/**/*.json",
         "../../packages/health-commons/generated/web/tabs/experiments/**/*.json",
       ],
-      "/goals": [
-        ...HEALTH_COMMONS_GOAL_INDEX_TRACE_INCLUDES,
-      ],
-      "/goals/[goalId]": [
-        "../../packages/health-commons/generated/web/browse/goals.json",
-        "../../packages/health-commons/generated/web/routes/index.json",
-        "../../packages/health-commons/generated/web/pages/goals/**/*.json",
-      ],
-      "/api/goals/contact": [
-        ...HEALTH_COMMONS_GOAL_INDEX_TRACE_INCLUDES,
-      ],
-      "/api/hosted-onboarding/linq/webhook": [
-        ...HEALTH_COMMONS_GOAL_INDEX_TRACE_INCLUDES,
-      ],
-      "/api/hosted-onboarding/telegram/webhook": [
-        ...HEALTH_COMMONS_GOAL_INDEX_TRACE_INCLUDES,
-      ],
-      "/biomarkers": [
-        "../../packages/health-commons/generated/web/browse/biomarkers.json",
-        "../../packages/health-commons/generated/web/routes/index.json",
-        "../../packages/health-commons/generated/web/shell/biomarkers/**/*.json",
-        "../../packages/health-commons/generated/web/pages/biomarkers/**/*.json",
-      ],
       "/measurement-methods/[measurementMethodId]": [
         "../../packages/health-commons/generated/web/routes/index.json",
         "../../packages/health-commons/generated/web/bundles/measurement_method/**/*.json",
@@ -454,28 +411,8 @@ export function buildHostedWebNextConfig(
       "/opengraph-image": OG_SHARE_ASSET_TRACE_INCLUDES,
       "/changelog/card/v1/[items]": OG_SHARE_ASSET_TRACE_INCLUDES,
       "/experiments/[experimentId]/card": OG_SHARE_ASSET_TRACE_INCLUDES,
-      "/api/environment/share-card": OG_SHARE_ASSET_TRACE_INCLUDES,
       "/api/murph-contact-card": MURPH_CONTACT_CARD_AVATAR_TRACE_INCLUDES,
       "/imessage/card/v1/[payload]": OG_SHARE_ASSET_TRACE_INCLUDES,
-    },
-    outputFileTracingExcludes: {
-      "/goals": HEALTH_COMMONS_GOAL_TRACE_EXCLUDES,
-      "/goals/[goalId]": HEALTH_COMMONS_GOAL_TRACE_EXCLUDES,
-      // Next matches trace keys with picomatch `contains: true`. This extglob
-      // matches only the directory landing route, not /goals/[goalId].
-      "/goals!(/**)": HEALTH_COMMONS_GOAL_INDEX_ONLY_TRACE_EXCLUDES,
-      "/api/goals/contact": [
-        ...HEALTH_COMMONS_GOAL_TRACE_EXCLUDES,
-        ...HEALTH_COMMONS_GOAL_INDEX_ONLY_TRACE_EXCLUDES,
-      ],
-      "/api/hosted-onboarding/linq/webhook": [
-        ...HEALTH_COMMONS_GOAL_TRACE_EXCLUDES,
-        ...HEALTH_COMMONS_GOAL_INDEX_ONLY_TRACE_EXCLUDES,
-      ],
-      "/api/hosted-onboarding/telegram/webhook": [
-        ...HEALTH_COMMONS_GOAL_TRACE_EXCLUDES,
-        ...HEALTH_COMMONS_GOAL_INDEX_ONLY_TRACE_EXCLUDES,
-      ],
     },
     outputFileTracingRoot: path.resolve(appDir, "../.."),
     // Temporal clients use process-bound transport state. Keep one physical

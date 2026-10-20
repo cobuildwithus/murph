@@ -691,7 +691,7 @@ function readVaultCliFailure(
     ) {
       return { category: 'unknown', attribution: 'unstructured_output' }
     }
-    const code = cliTimingFailureCode(error.code)
+    const code = cliTimingFailureCode(error.code, command)
     const stage = cliTimingFailureStage(error.stage)
     return {
       category: classifyToolFailureCode(error.code, error.stage),

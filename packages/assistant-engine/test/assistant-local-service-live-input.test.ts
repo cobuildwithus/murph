@@ -3888,6 +3888,11 @@ test('sendAssistantMessageLocal commits only the selected held-group result', as
     expect(ASSISTANT_GROUP_REPLY_RECONSIDERATION_INSTRUCTION).not.toContain(
       'the latest accepted message decides',
     )
+    // Request 1 starts with empty reply staging, so draft media must be
+    // re-attached rather than treated as a completed effect.
+    expect(ASSISTANT_GROUP_REPLY_RECONSIDERATION_INSTRUCTION).toContain(
+      'Images, cards, and other reply staging from the draft were discarded with it; attach again whatever the final result needs.',
+    )
     expect(
       mocks.executeCodexTurnWithRecovery.mock.calls[1]?.[0]?.input.turnContext,
     ).not.toContain('previous response was held')
@@ -5088,7 +5093,7 @@ test('sendAssistantMessageLocal composes group reconsideration through the real 
   const requestOneLive = createDeferred<void>()
   const providerConfig = normalizeAssistantProviderConfig({
     approvalPolicy: 'never',
-    model: 'gpt-5.6-terra',
+    model: 'gpt-6.1-sol',
     modelProvider: 'openai',
     provider: 'codex-cli',
     sandbox: 'workspace-write',

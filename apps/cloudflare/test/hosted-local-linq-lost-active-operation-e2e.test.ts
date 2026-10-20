@@ -1,5 +1,9 @@
 import { createHmac } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import {
+  readHostedIngressLatencyTraceForTest,
+  readHostedMailboxItemForTest,
+} from "#hosted-web-testing";
 
 import {
   buildHostedExecutionMemberActivatedWake,
@@ -26,7 +30,7 @@ import {
 const userId = `member_local_linq_lost_active_operation_${Date.now()}`;
 const linqApiToken = "linq-local-test-token";
 const linqWebhookSecret = "linq-local-lost-active-operation-secret";
-const assistantModel = "gpt-5.6-terra";
+const assistantModel = "gpt-6.1-sol";
 const chatId = `chat_local_linq_lost_active_operation_${Date.now()}`;
 const unsteeredFirstReplyText = "I got the first note.";
 const secondInboundText = "Second message that used to be stranded behind idle checkpoint.";
@@ -94,8 +98,17 @@ describe("hosted local Linq lost active-operation e2e", () => {
 
     const replyPath = `/chats/${encodeURIComponent(chatId)}/messages`;
     const outboundCountBeforeReply = requireLinqStub().countObservedSends(replyPath);
+    let releaseFirstProviderResponse!: () => void;
+    let firstProviderStreamStarted = false;
+    const firstProviderResponseGate = new Promise<void>((resolve) => { releaseFirstProviderResponse = resolve; });
     requireScenario().queueAssistantResponses([
-      buildAssistantProviderShellCommandCall("sleep 3 && echo first-turn-held"),
+      {
+        ...buildAssistantProviderShellCommandCall("echo first-turn-held"),
+        beforeStreamContent: () => {
+          firstProviderStreamStarted = true;
+          return firstProviderResponseGate;
+        },
+      },
       unsteeredFirstReplyText,
     ], {
       matchInputContains: "First message while starting the turn.",
@@ -107,46 +120,81 @@ describe("hosted local Linq lost active-operation e2e", () => {
       matchInputContains: thirdInboundText,
     });
 
-    const firstWebhookResponse = await postSignedLinqWebhook(buildHostedLinqInboundEvent(
-      userId,
-      chatId,
-      {
-        eventId: `evt_lost_active_first_${userId}`,
-        messageId: `msg_lost_active_first_${userId}`,
-        text: "First message while starting the turn.",
-      },
-    ));
-    expect(firstWebhookResponse.status).toBe(202);
+    let firstTurnProviderRequestCount = 0;
+    try {
+      const firstWebhookResponse = await postSignedLinqWebhook(buildHostedLinqInboundEvent(
+        userId,
+        chatId,
+        {
+          eventId: `evt_lost_active_first_${userId}`,
+          messageId: `msg_lost_active_first_${userId}`,
+          text: "First message while starting the turn.",
+        },
+      ));
+      expect(firstWebhookResponse.status).toBe(202);
 
-    await waitForCondition(
-      () => requireScenario().assistantProviderRequests
-        .some((request) => request.url === "/v1/responses"
-          && request.body.includes("First message while starting the turn.")),
-      "Expected the first hosted assistant turn to reach the provider before dropping active operation.",
-    );
-    const firstTurnProviderRequestCount = countResponsesApiRequests();
-    await requireScenario().harness.dropRunnerActiveOperationForTest(userId, {
-      loseCompletedInvocationResult: true,
-    });
+      await waitForCondition(
+        () => requireScenario().assistantProviderRequests
+          .some((request) => request.url === "/v1/responses"
+            && request.body.includes("First message while starting the turn.")),
+        "Expected the first hosted assistant turn to reach the provider before dropping active operation.",
+      );
+      firstTurnProviderRequestCount = countResponsesApiRequests();
+      // Upstream instant steering begins after HTTP stream establishment.
+      // Keep the tool content held, but let response.created reach Codex.
+      await waitForCondition(
+        () => firstProviderStreamStarted,
+        "Expected the provider stream to open before steering its held tool content.",
+      );
+      const firstTurnFence = await readActiveRuntimeFenceForTest();
+      expect(firstTurnFence).not.toBeNull();
+      await requireScenario().harness.dropRunnerActiveOperationForTest(userId, {
+        loseCompletedInvocationResult: true,
+      });
 
-    const secondWebhookResponse = await postSignedLinqWebhook(buildHostedLinqInboundEvent(
-      userId,
-      chatId,
-      {
-        eventId: `evt_lost_active_second_${userId}`,
-        messageId: `msg_lost_active_second_${userId}`,
-        text: secondInboundText,
-      },
-    ));
-    expect(secondWebhookResponse.status).toBe(202);
+      const secondWebhookResponse = await postSignedLinqWebhook(buildHostedLinqInboundEvent(
+        userId,
+        chatId,
+        {
+          eventId: `evt_lost_active_second_${userId}`,
+          messageId: `msg_lost_active_second_${userId}`,
+          text: secondInboundText,
+        },
+      ));
+      expect(secondWebhookResponse.status).toBe(202);
 
-    await waitForCondition(
-      () => requireScenario().assistantProviderRequests
-        .filter((request) => request.url === "/v1/responses")
-        .slice(firstTurnProviderRequestCount)
-        .some((request) => request.body.includes("first-turn-held")),
-      "Expected the already-running hosted assistant turn to finish its delayed tool output after the outer pointer was dropped.",
-    );
+      const secondMailboxItem = await readHostedMailboxItemForTest({
+        dedupeKey: `evt_lost_active_second_${userId}`,
+        environment: requireScenario().runtimeEnv,
+        userId,
+      });
+      // HTTP 202 proves admission only. Wait until the active-turn controller
+      // has queued this exact input and entered its pre-steer callback on the
+      // original runtime, while the first provider response is still held.
+      await waitForCondition(async () => {
+        const trace = await readHostedIngressLatencyTraceForTest({
+          environment: requireScenario().runtimeEnv,
+          mailboxItemId: secondMailboxItem.id,
+          userId,
+        }).catch(() => null); // Best-effort traces can lag mailbox admission.
+        return trace?.runtimeAttemptId === firstTurnFence?.attemptId
+          && typeof trace?.phaseBreakdown?.assistant
+            ?.assistantInputAcceptedForExecutionAtEpochMs === "number";
+      }, "Expected the second mailbox input to reach live steering on the original runtime before releasing the first provider response.");
+      // The tool call has not reached Codex. Instant steering must preempt the
+      // held provider request and start the corrected request before release.
+      await waitForCondition(
+        () => requireScenario().assistantProviderRequests
+          .filter((request) => request.url === "/v1/responses")
+          .slice(firstTurnProviderRequestCount)
+          .some((request) => request.body.includes(secondInboundText)),
+        "Expected instant steering to reach the provider while the stale tool-call response is still held.",
+      );
+    } finally {
+      // Also release on failure so scenario teardown cannot strand the stub.
+      releaseFirstProviderResponse();
+    }
+
     const liveTurnSend = await requireLinqStub().waitForAdditionalSend({
       baselineCount: outboundCountBeforeReply,
       expectedPath: replyPath,
@@ -158,6 +206,9 @@ describe("hosted local Linq lost active-operation e2e", () => {
     const finalStatus = await requireScenario().waitForHostedCompletion(userId);
     expect(finalStatus.lastErrorCode ?? null).toBeNull();
     expect(finalStatus.mailboxLag.every((lane) => lane.lag === "0")).toBe(true);
+    expect(requireScenario().assistantProviderRequests
+      .filter((request) => request.url === "/v1/responses")
+      .some((request) => request.body.includes("first-turn-held"))).toBe(false);
     expect(requireScenario().assistantProviderRequests
       .filter((request) => request.url === "/v1/responses")
       .slice(firstTurnProviderRequestCount)

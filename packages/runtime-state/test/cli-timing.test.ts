@@ -7,10 +7,12 @@ import {
   addCliPhaseSample, CLI_TIMING_MAX_COMMANDS, CLI_TIMING_MAX_SPANS,
   CLI_TIMING_PHASES, cliTimingCommand, cliTimingFailureCode, emptyCliTiming, mergeCliTiming,
   normalizeCliTiming, cliTimingValidationFailure, CLI_TIMING_MAX_VALIDATION_ISSUES, type CliTiming, type CliValidationDiagnostic,
+  CLI_TIMING_REJECTIONS, CLI_TIMING_PARSE_REJECTIONS, CLI_TIMING_FILTER_REJECTIONS, cliTimingRejectionFailure,
+  type CliCommandTiming, type CliFailureTiming, type CliTimingFilterRejection, type CliTimingParseRejection,
 } from "../src/cli-timing.ts";
 import {
   finishCliTimingAction, isCliTimingActive, noteCliTimingExit,
-  startCliPhase, timeCliDispatch, timeCliPhase, withCliTiming,
+  startCliPhase, timeCliDispatch, timeCliPhase, timeCliPhaseSync, withCliTiming,
 } from "../src/node/cli-timing.ts";
 
 async function clocked(run: (advance: (us: number) => void) => Promise<void>) {
@@ -584,9 +586,12 @@ test("validation selection admits only exact schema-owned fields and one standar
     ["automation list", ["limit", "status"]],
     ["event list", ["kind", "from", "to", "tag", "experiment", "limit", "arguments"]],
     ["event payload-schema", ["kind", "for"]],
-    ["knowledge show", ["slug"]],
+    ["exercise list", ["query", "kind", "environment", "category", "target", "level",
+      "equipment", "position", "modality", "commonness", "limit", "arguments"]],
+    ["knowledge show", ["slug", "arguments"]],
     ["measurement entry list", ["metric", "from", "to", "limit"]],
     ["food search-labels", ["query", "limit"]],
+    ["wearables day", ["date", "provider", "arguments"]],
     ["knowledge upsert", ["body", "slug", "title", "pageType", "status", "clearLibraryLinks", "relatedSlug", "librarySlug", "sourcePath", "arguments"]],
     ["knowledge append-section", ["slug", "heading", "body", "title", "position", "sourcePath"]],
   ] as const;
@@ -620,8 +625,10 @@ test("validation selection admits only exact schema-owned fields and one standar
 for (const [command, field] of [
   ["food search-labels", "query"], ["event list", "limit"],
   ["event list", "arguments"], ["knowledge upsert", "arguments"],
+  ["exercise list", "kind"], ["exercise list", "limit"], ["exercise list", "arguments"],
   ["meal add", "nutritionCalories"], ["meal edit", "nutritionSource"],
   ["meal add", "occurredAt"], ["meal edit", "arguments"],
+  ["meal edit", "id"], ["meal edit", "nutritionProteinGrams"], ["meal edit", "nutritionConfidence"],
 ] as const) test(`${command}/${field} validation reads a fixed prefix without getters, prototypes, causes or proxy escapes`, () => {
   let reads = 0;
   const getter = { get() { reads += 1; throw Error("PRIVATE_SENTINEL"); } };
@@ -648,26 +655,28 @@ for (const [command, field] of [
   assert.equal(reads, 0);
 });
 
-test("malformed optional validation is omitted without losing failure counts or changing unknown/success boundaries", () => {
-  const report = sample("food search-labels");
+for (const commandName of ["food search-labels", "exercise list"]) test(`${commandName}: malformed optional validation preserves failure counts and boundaries`, () => {
+  const report = sample(commandName);
   const command = report.commands[0]!;
   command.outcome = "error";
   command.failures = [{ code: "VALIDATION_ERROR", stage: "validation", count: 1 }];
   const good = { field: "query", code: "invalid_type", missing: true };
+  let reads = 0;
   const proxy = new Proxy({}, { getOwnPropertyDescriptor() { throw Error("PRIVATE_SENTINEL"); } });
   for (const validation of [null, [], "PRIVATE_SENTINEL", proxy, Object.create(good),
     { ...good, field: "body" }, { ...good, field: "query.PRIVATE_SENTINEL" }, { ...good, field: ["query"] },
     ...["INVALID_TYPE", "invalid_type ", "invalid_type_PRIVATE_SENTINEL", "PRIVATE_SENTINEL"].map((code) => ({ ...good, code })),
     ...[null, "true", 1, {}].map((missing) => ({ ...good, missing })),
-    Object.defineProperty({ ...good }, "code", { get() { throw Error("PRIVATE_SENTINEL"); } })]) {
+    Object.defineProperty({ ...good }, "code", { get() { reads += 1; throw Error("PRIVATE_SENTINEL"); } })]) {
     assert.deepEqual(normalizeCliTiming({ ...report, commands: [{ ...command,
       failures: [{ ...command.failures[0], validation }] }] }), report);
   }
+  assert.equal(reads, 0);
   const input = { ...report, commands: [{ ...command, failures: [{ ...command.failures[0],
     validation: { ...good, path: "PRIVATE_SENTINEL", expected: "PRIVATE_SENTINEL", value: "PRIVATE_SENTINEL" } }] }] };
   assert.deepEqual(normalizeCliTiming(input)?.commands[0]!.failures, [{ ...command.failures[0], validation: good }]);
   assert.ok(!JSON.stringify(normalizeCliTiming(input)).includes("PRIVATE_SENTINEL"));
-  for (const name of ["other", "exercise list", "knowledge show"]) {
+  for (const name of ["other", "exercise show", "knowledge show"]) {
     assert.equal(normalizeCliTiming({ ...input, commands: [{ ...input.commands[0], command: name }] })?.commands[0]!.failures?.[0]?.validation, undefined);
   }
   const unknown = { ...input, commands: [{ ...command, failures: [{ code: "PRIVATE_SENTINEL", stage: "validation", count: 1, validation: good }] }] };
@@ -699,11 +708,19 @@ test("original validation capture is first-observation-only and retains neither 
 });
 
 const readValidationCases = [
+  ["knowledge show", "arguments", "custom", false],
   ["knowledge show", "slug", "invalid_type", true],
   ["knowledge show", "slug", "invalid_format", false],
   ["event payload-schema", "kind", "invalid_value", true],
   ["event payload-schema", "kind", "invalid_value", false],
   ["event payload-schema", "for", "invalid_value", false],
+] as const;
+
+const exerciseValidationCases = [
+  ["exercise list", "kind", "invalid_value", false],
+  ["exercise list", "limit", "too_big", false],
+  ["exercise list", "arguments", "custom", false, "unknown_flag"],
+  ["exercise list", "arguments", "custom", false, "missing_value"],
 ] as const;
 
 const measurementValidationCases = [
@@ -737,10 +754,17 @@ const mealValidationCases = [
   ["meal edit", "arguments", "custom", false],
 ] as const;
 
+const mealEditValidationCases = [
+  ["meal edit", "id", "invalid_type", true],
+  ["meal edit", "nutritionProteinGrams", "too_small", false],
+  ["meal edit", "nutritionConfidence", "invalid_value", false],
+] as const;
+
 test("allowlisted commands preserve original errors and round-trip only finite validation detail", async () => {
   for (const [command, field, code, missing] of [
     ["automation list", "limit", "too_big", false], ["automation list", "status", "invalid_value", false],
-    ...readValidationCases, ...measurementValidationCases, ...eventInvocationValidationCases, ...mealValidationCases,
+    ...exerciseValidationCases,
+    ...readValidationCases, ...measurementValidationCases, ...eventInvocationValidationCases, ...mealValidationCases, ...mealEditValidationCases,
   ] as const) for (const property of ["publicIssues", "fieldErrors"] as const) {
     const validation = { field, code, missing };
     const original = Object.assign(new Error("PRIVATE_SENTINEL"), {
@@ -794,12 +818,14 @@ test("command validation omits other fields, commands and malformed evidence on 
     ["knowledge show", "slug", ["kind", "for", "body", "sourcePath"]],
     ["event payload-schema", "kind", ["slug", "body", "sourcePath"]],
     ["event payload-schema", "for", ["slug", "body", "sourcePath"]],
+    ...exerciseValidationCases.map(([command, field]) =>
+      [command, field, ["lookup", "body", "slug", "sourcePath", "value", "context", "config"]] as const),
     ...measurementValidationCases.map(([command, field]) =>
       [command, field, ["value", "unit", "slug", "body", "sourcePath"]] as const),
     ...eventInvocationValidationCases.map(([command, field]) =>
       [command, field, ["value", "unit", "cursor", "text"]] as const),
-    ...mealValidationCases.map(([command, field]) =>
-      [command, field, ["id", "source", "timeZone", "dayKey", "note", "photo", "audio", "ingredient", "nutrition",
+    ...[...mealValidationCases, ...mealEditValidationCases].map(([command, field]) =>
+      [command, field, [...(command === "meal add" ? ["id"] : []), "source", "timeZone", "dayKey", "note", "photo", "audio", "ingredient", "nutrition",
         "nutritionSourceDetail", "nutrition.totals.calories", "env", "0", "value", "context"]] as const),
   ] as const) {
     const good = { path: field, code: "invalid_value", missing: false };
@@ -814,7 +840,7 @@ test("command validation omits other fields, commands and malformed evidence on 
         : [{ ...issue, value: "PRIVATE_SENTINEL", message: "PRIVATE_SENTINEL" }];
       assert.deepEqual(cliTimingValidationFailure(command, "VALIDATION_ERROR", { [property]: detail }, property), {});
     }
-    for (const other of ["other", "automation show", "automation set-status", "event show", "knowledge list",
+    for (const other of ["other", "exercise show", "exercise facets", "automation show", "automation set-status", "event show", "knowledge list",
       "measurement list", "measurement add", `${command} PRIVATE_SENTINEL`, command.toUpperCase()]) {
       assert.deepEqual(cliTimingValidationFailure(other, "VALIDATION_ERROR", { publicIssues: [good] }, "publicIssues"), {});
     }
@@ -856,10 +882,14 @@ test.skipIf(!automationValidationCompatibilityBase)("actual older automation rea
 });
 
 for (const [reader, base, cases] of [
+  ["exercise-validation", process.env.MURPH_CLI_EXERCISE_VALIDATION_COMPAT_BASE, exerciseValidationCases],
   ["read-validation", process.env.MURPH_CLI_READ_VALIDATION_COMPAT_BASE, readValidationCases],
   ["measurement-validation", process.env.MURPH_CLI_MEASUREMENT_VALIDATION_COMPAT_BASE, measurementValidationCases],
   ["event-invocation-validation", process.env.MURPH_CLI_EVENT_INVOCATION_VALIDATION_COMPAT_BASE, eventInvocationValidationCases],
   ["meal-validation", process.env.MURPH_CLI_MEAL_VALIDATION_COMPAT_BASE, mealValidationCases],
+  ["meal-edit-validation", process.env.MURPH_CLI_MEAL_FAILURE_ATTRIBUTION_COMPAT_BASE, mealEditValidationCases],
+  ["knowledge-parser-validation", process.env.MURPH_CLI_KNOWLEDGE_PARSER_VALIDATION_COMPAT_BASE,
+    [["knowledge show", "arguments", "custom", false]]],
 ] as const) test.skipIf(!base)(`actual older ${reader} consumer drops detail but preserves the envelope and counts`, async () => {
   assert.match(base ?? "", /^[a-f0-9]{40}$/u);
   const source = execFileSync("git", ["show", `${base}:packages/runtime-state/src/cli-timing.ts`],
@@ -867,7 +897,9 @@ for (const [reader, base, cases] of [
   const old: { normalizeCliTiming: typeof normalizeCliTiming; cliTimingValidationFailure: typeof cliTimingValidationFailure } = await import(
     `data:text/javascript;base64,${Buffer.from(stripTypeScriptTypes(source)).toString("base64")}`,
   );
-  for (const [command, field, code, missing] of cases) {
+  for (const entry of cases) {
+    const [command, field, code, missing] = entry;
+    const rejection = entry.length === 5 ? entry[4] : undefined;
     const validation = { field, code, missing };
     for (const property of ["publicIssues", "fieldErrors"] as const) {
       const source = { [property]: [{ path: field, code, missing }] };
@@ -878,7 +910,8 @@ for (const [reader, base, cases] of [
     report.commands[0]!.outcome = "error";
     report.commands[0]!.calls = 3;
     report.commands[0]!.failures = [
-      { code: "VALIDATION_ERROR", stage: "validation", count: 1, validation },
+      { code: "VALIDATION_ERROR", stage: "validation", count: 1, validation,
+        ...(rejection ? { rejection } : {}) },
       { code: "VALIDATION_ERROR", stage: "validation", count: 1 },
     ];
     report.commands[0]!.droppedFailures = 1;
@@ -991,6 +1024,385 @@ test("research timing admits only three exact source codes without inferring a s
   }
 });
 
+function researchRejectionError(value?: unknown, descriptor: PropertyDescriptor = { value }): Error {
+  const error = Object.assign(new Error("PRIVATE_ERROR_MESSAGE"), { code: "research_scout_invalid_batch_payload" });
+  if (value !== undefined || !("value" in descriptor)) Object.defineProperty(error, "cliTimingRejection", descriptor);
+  return error;
+}
+
+test("research batch rejection is private own data, finite, gated and inert to hostile metadata", async () => {
+  const capture = async (error: Error, command = "research scout-batch") => {
+    const visible = { keys: Object.keys(error), json: JSON.stringify(error), name: error.name, message: error.message };
+    let report!: CliTiming;
+    await assert.rejects(withCliTiming(() => timeCliDispatch(command, async () => { throw error; }),
+      (value) => { report = value; }), (caught) => caught === error);
+    assert.deepEqual({ keys: Object.keys(error), json: JSON.stringify(error), name: error.name, message: error.message }, visible);
+    // Disabled timing has the same throw identity and visible error shape.
+    await assert.rejects(withCliTiming(async () => { throw error; }, undefined), (caught) => caught === error);
+    assert.deepEqual(normalizeCliTiming(report), report);
+    assert.ok(!JSON.stringify(report).includes("PRIVATE"));
+    return report.commands[0]!.failures;
+  };
+  const base = { code: "research_scout_invalid_batch_payload", stage: "unknown", count: 1 } as const;
+  for (const rejection of CLI_TIMING_REJECTIONS) {
+    assert.deepEqual(await capture(researchRejectionError(rejection)), [{ ...base, rejection }]);
+    // Other commands/codes never admit the field, even with identical metadata.
+    assert.deepEqual(await capture(researchRejectionError(rejection), "research scout"), [{ ...base }]);
+    const window = Object.assign(researchRejectionError(rejection), { code: "research_scout_invalid_window" });
+    assert.deepEqual(await capture(window), [{ ...base, code: "research_scout_invalid_window" }]);
+  }
+  let reads = 0;
+  const hostile: Error[] = [
+    researchRejectionError(), researchRejectionError("PRIVATE_REASON"), researchRejectionError("Envelope"),
+    researchRejectionError("envelope "), researchRejectionError(["envelope"]), researchRejectionError({ toString: () => "envelope" }),
+    researchRejectionError(new String("envelope")), researchRejectionError(1),
+    researchRejectionError(new Proxy({}, { get: () => { reads += 1; return "envelope"; } })),
+    researchRejectionError(undefined, { get: () => { reads += 1; return "envelope"; } }),
+    Object.setPrototypeOf(researchRejectionError(), { cliTimingRejection: "envelope" }) as Error,
+  ];
+  for (const error of hostile) assert.deepEqual(await capture(error), [{ ...base }]);
+  assert.equal(reads, 0);
+  assert.deepEqual(cliTimingRejectionFailure("research scout-batch", "research_scout_invalid_batch_payload",
+    new Proxy({}, { getOwnPropertyDescriptor: () => { throw new Error("PRIVATE_TRAP"); } }), "cliTimingRejection"), {});
+});
+
+test("a source proxy's descriptor trap can supply only an allowlisted literal, never arbitrary data", async () => {
+  // Not proxy detection: the descriptor trap may run. Only a fixed primitive leaves.
+  const proxied = (rejection: unknown) => new Proxy(new Error("PRIVATE_ERROR_MESSAGE"), {
+    getOwnPropertyDescriptor: (target, key) => {
+      if (key === "code") return { value: "research_scout_invalid_batch_payload", configurable: true, enumerable: true, writable: true };
+      if (key === "cliTimingRejection") return { value: rejection, configurable: true, enumerable: false, writable: false };
+      if (key === "context" || key === "stage") return { value: { stage: "PRIVATE_STAGE" }, configurable: true, enumerable: true, writable: true };
+      return Reflect.getOwnPropertyDescriptor(target, key);
+    },
+  });
+  const capture = async (error: object) => {
+    let report!: CliTiming;
+    await assert.rejects(withCliTiming(() => timeCliDispatch("research scout-batch", async () => { throw error; }),
+      (value) => { report = value; }), (caught) => caught === error);
+    assert.ok(!JSON.stringify(report).includes("PRIVATE"));
+    return report.commands[0]!.failures;
+  };
+  const base = { code: "research_scout_invalid_batch_payload", stage: "unknown", count: 1 } as const;
+  assert.deepEqual(await capture(proxied("public_concept")), [{ ...base, rejection: "public_concept" }]);
+  for (const value of ["PRIVATE_REASON", { PRIVATE: "PRIVATE_VALUE" }, ["envelope"], new String("envelope")]) {
+    const failures = await capture(proxied(value));
+    assert.deepEqual(failures, [{ ...base }]);
+    assert.deepEqual(cliTimingRejectionFailure("research scout-batch", base.code, proxied(value), "cliTimingRejection"), {});
+  }
+});
+
+test("rejection variants share failure caps, coalesce exactly and drop only detail when malformed on the wire", () => {
+  const aggregate = emptyCliTiming();
+  const variants = [...CLI_TIMING_REJECTIONS, undefined, CLI_TIMING_REJECTIONS[0]];
+  for (const rejection of variants) {
+    const incoming = sample("research scout-batch");
+    incoming.commands[0]!.outcome = "error";
+    incoming.commands[0]!.failures = [{ code: "research_scout_invalid_batch_payload", stage: "unknown", count: 1,
+      ...(rejection ? { rejection } : {}) }];
+    mergeCliTiming(aggregate, incoming);
+  }
+  const command = aggregate.commands[0]!;
+  assert.equal(command.calls, 9);
+  assert.equal(command.failures!.length, 8);
+  assert.equal(command.failures![0]!.count, 2);
+  assert.deepEqual(command.failures!.map((failure) => failure.rejection), [...CLI_TIMING_REJECTIONS, undefined]);
+  assert.equal(command.droppedFailures, undefined);
+  assert.deepEqual(normalizeCliTiming(aggregate), aggregate);
+  const extra = sample("research scout-batch");
+  extra.commands[0]!.outcome = "error";
+  extra.commands[0]!.failures = [{ code: "research_scout_invalid_batch_payload", stage: "validation", count: 1,
+    rejection: "envelope" }];
+  mergeCliTiming(aggregate, extra);
+  assert.equal(aggregate.commands[0]!.droppedFailures, 1);
+  assert.equal(aggregate.commands[0]!.failures!.reduce((sum, failure) => sum + failure.count, 0) + 1, 10);
+  // Wire detail is admitted only for the exact command/code; hostile values drop only the detail.
+  const wire = sample("research scout-batch");
+  wire.commands[0]!.outcome = "error";
+  wire.commands[0]!.calls = 4;
+  const entries = [
+    { code: "research_scout_invalid_batch_payload", stage: "unknown", count: 1, rejection: "PRIVATE_REASON" },
+    { code: "research_scout_invalid_batch_payload", stage: "unknown", count: 1 },
+    { code: "research_scout_invalid_window", stage: "unknown", count: 1, rejection: "envelope" },
+    Object.defineProperty({ code: "research_scout_invalid_batch_payload", stage: "unknown", count: 1 }, "rejection",
+      { enumerable: true, get: () => "envelope" }),
+  ];
+  const normalized = normalizeCliTiming({ ...wire, commands: [{ ...wire.commands[0]!, failures: entries }] });
+  assert.deepEqual(normalized?.commands[0]!.failures, [
+    { code: "research_scout_invalid_batch_payload", stage: "unknown", count: 3 },
+    { code: "research_scout_invalid_window", stage: "unknown", count: 1 },
+  ]);
+  const other = sample("research scout");
+  other.commands[0]!.outcome = "error";
+  other.commands[0]!.failures = [{ code: "research_scout_invalid_batch_payload", stage: "unknown", count: 1,
+    rejection: "envelope" }];
+  assert.deepEqual(normalizeCliTiming(other)?.commands[0]!.failures,
+    [{ code: "research_scout_invalid_batch_payload", stage: "unknown", count: 1 }]);
+});
+
+// Actual pre-rejection reader (named in the active plan), never a copied parser.
+const researchRejectionCompatibilityBase = process.env.MURPH_CLI_RESEARCH_REJECTION_COMPAT_BASE;
+test.skipIf(!researchRejectionCompatibilityBase)("actual pre-rejection reader drops only the category and keeps counts", async () => {
+  assert.match(researchRejectionCompatibilityBase ?? "", /^[a-f0-9]{40}$/u);
+  const source = execFileSync("git", ["show", `${researchRejectionCompatibilityBase}:packages/runtime-state/src/cli-timing.ts`],
+    { encoding: "utf8", maxBuffer: 1_000_000 });
+  const old: { normalizeCliTiming: typeof normalizeCliTiming; mergeCliTiming: typeof mergeCliTiming } = await import(
+    `data:text/javascript;base64,${Buffer.from(stripTypeScriptTypes(source)).toString("base64")}`,
+  );
+  const report = sample("research scout-batch");
+  report.commands[0]!.outcome = "error";
+  report.commands[0]!.calls = 4;
+  report.commands[0]!.failures = [
+    { code: "research_scout_invalid_batch_payload", stage: "unknown", count: 1, rejection: "public_concept" },
+    { code: "research_scout_invalid_batch_payload", stage: "unknown", count: 1, rejection: "envelope" },
+    { code: "research_scout_invalid_batch_payload", stage: "unknown", count: 1 },
+  ];
+  report.commands[0]!.droppedFailures = 1;
+  assert.deepEqual(normalizeCliTiming(report), report);
+  const legacy = structuredClone(report);
+  legacy.commands[0]!.failures = [{ code: "research_scout_invalid_batch_payload", stage: "unknown", count: 3 }];
+  assert.deepEqual(old.normalizeCliTiming(report), legacy);
+  assert.deepEqual(normalizeCliTiming(legacy), legacy);
+  const oldMerged = emptyCliTiming();
+  old.mergeCliTiming(oldMerged, report);
+  assert.deepEqual(oldMerged.commands, legacy.commands);
+  delete legacy.commands[0]!.failures;
+  delete legacy.commands[0]!.droppedFailures;
+  assert.deepEqual(old.normalizeCliTiming(legacy), legacy);
+  assert.deepEqual(normalizeCliTiming(legacy), legacy);
+});
+
+// The CLI bridge's timing-only copy of Incur's typed projection plus parser reason.
+function parseRejectionEnvelope(value?: unknown): object {
+  return { code: "VALIDATION_ERROR", stage: "validation", message: "PRIVATE_MESSAGE",
+    fieldErrors: [{ path: "arguments", code: "custom", missing: false }],
+    ...(value === undefined ? {} : { cliTimingRejection: value }) };
+}
+const parseValidation = { field: "arguments", code: "custom", missing: false } as const;
+
+for (const owner of ["knowledge upsert", "exercise list"]) test(`${owner} parse rejection is gated, finite and separate from research categories`, async () => {
+  const capture = async (error: object, command = owner) => {
+    let report!: CliTiming;
+    await assert.rejects(withCliTiming(() => timeCliDispatch(command, async () => { throw error; }),
+      (value) => { report = value; }), (caught) => caught === error);
+    assert.deepEqual(normalizeCliTiming(report), report);
+    assert.ok(!JSON.stringify(report).includes("PRIVATE"));
+    return report.commands[0]!.failures;
+  };
+  const base = { code: "VALIDATION_ERROR", stage: "validation", count: 1, validation: parseValidation } as const;
+  for (const rejection of CLI_TIMING_PARSE_REJECTIONS) {
+    assert.deepEqual(await capture(parseRejectionEnvelope(rejection)), [{ ...base, rejection }]);
+    assert.deepEqual(await capture(parseRejectionEnvelope(rejection), "event list"),
+      [{ ...base, validation: { ...parseValidation } }]);
+    const research = Object.assign(new Error("PRIVATE_MESSAGE"), { code: "research_scout_invalid_batch_payload" });
+    Object.defineProperty(research, "cliTimingRejection", { value: rejection });
+    assert.deepEqual(await capture(research, "research scout-batch"),
+      [{ code: "research_scout_invalid_batch_payload", stage: "unknown", count: 1 }]);
+  }
+  let reads = 0;
+  for (const value of ["envelope", "PRIVATE_REASON", "Unknown_flag", new String("unknown_flag"), ["missing_value"], 1]) {
+    assert.deepEqual(await capture(parseRejectionEnvelope(value)), [{ ...base }]);
+  }
+  const accessor = Object.defineProperty(parseRejectionEnvelope(), "cliTimingRejection",
+    { enumerable: true, get: () => { reads += 1; return "unknown_flag"; } });
+  assert.deepEqual(await capture(accessor), [{ ...base }]);
+  const inherited = Object.setPrototypeOf(parseRejectionEnvelope(), { cliTimingRejection: "unknown_flag" });
+  assert.deepEqual(await capture(inherited), [{ ...base }]);
+  assert.equal(reads, 0);
+  const other = { ...parseRejectionEnvelope("unknown_flag"), code: "knowledge_page_invalid" };
+  assert.deepEqual(cliTimingRejectionFailure(owner, other.code, other, "cliTimingRejection"), {});
+});
+
+test("parse rejection variants coalesce, conserve counts and drop only malformed wire detail", () => {
+  const aggregate = emptyCliTiming();
+  for (const rejection of [...CLI_TIMING_PARSE_REJECTIONS, undefined, CLI_TIMING_PARSE_REJECTIONS[0]]) {
+    const incoming = sample("knowledge upsert");
+    incoming.commands[0]!.outcome = "error";
+    incoming.commands[0]!.failures = [{ code: "VALIDATION_ERROR", stage: "validation", count: 1,
+      validation: { ...parseValidation }, ...(rejection ? { rejection } : {}) }];
+    mergeCliTiming(aggregate, incoming);
+  }
+  const command = aggregate.commands[0]!;
+  assert.equal(command.calls, 4);
+  assert.deepEqual(command.failures!.map(({ rejection, count }) => ({ rejection, count })), [
+    { rejection: "unknown_flag", count: 2 }, { rejection: "missing_value", count: 1 }, { rejection: undefined, count: 1 },
+  ]);
+  assert.deepEqual(normalizeCliTiming(aggregate), aggregate);
+  const wire = sample("knowledge upsert");
+  wire.commands[0]!.outcome = "error";
+  wire.commands[0]!.calls = 4;
+  const entries = [
+    { code: "VALIDATION_ERROR", stage: "validation", count: 1, rejection: "PRIVATE_REASON" },
+    { code: "VALIDATION_ERROR", stage: "validation", count: 1, rejection: "envelope" },
+    { code: "knowledge_page_invalid", stage: "validation", count: 1, rejection: "unknown_flag" },
+    Object.defineProperty({ code: "VALIDATION_ERROR", stage: "validation", count: 1 }, "rejection",
+      { enumerable: true, get: () => "missing_value" }),
+  ];
+  const normalized = normalizeCliTiming({ ...wire, commands: [{ ...wire.commands[0]!, failures: entries }] });
+  assert.deepEqual(normalized?.commands[0]!.failures, [
+    { code: "VALIDATION_ERROR", stage: "validation", count: 3 },
+    { code: "knowledge_page_invalid", stage: "validation", count: 1 },
+  ]);
+  assert.ok(!JSON.stringify(normalized).includes("PRIVATE"));
+});
+
+// Actual pre-parse-rejection reader, never a copied parser.
+const parseRejectionCompatibilityBase = process.env.MURPH_CLI_PARSE_REJECTION_COMPAT_BASE;
+test.skipIf(!parseRejectionCompatibilityBase)("actual pre-parse-rejection reader drops only the reason and keeps counts", async () => {
+  assert.match(parseRejectionCompatibilityBase ?? "", /^[a-f0-9]{40}$/u);
+  const source = execFileSync("git", ["show", `${parseRejectionCompatibilityBase}:packages/runtime-state/src/cli-timing.ts`],
+    { encoding: "utf8", maxBuffer: 1_000_000 });
+  const old: { normalizeCliTiming: typeof normalizeCliTiming; mergeCliTiming: typeof mergeCliTiming } = await import(
+    `data:text/javascript;base64,${Buffer.from(stripTypeScriptTypes(source)).toString("base64")}`,
+  );
+  const report = sample("knowledge upsert");
+  report.commands[0]!.outcome = "error";
+  report.commands[0]!.calls = 3;
+  report.commands[0]!.failures = [
+    { code: "VALIDATION_ERROR", stage: "validation", count: 1, validation: { ...parseValidation }, rejection: "unknown_flag" },
+    { code: "VALIDATION_ERROR", stage: "validation", count: 1, validation: { ...parseValidation }, rejection: "missing_value" },
+    { code: "VALIDATION_ERROR", stage: "validation", count: 1, validation: { ...parseValidation } },
+  ];
+  assert.deepEqual(normalizeCliTiming(report), report);
+  const legacy = structuredClone(report);
+  legacy.commands[0]!.failures = [{ code: "VALIDATION_ERROR", stage: "validation", count: 3, validation: { ...parseValidation } }];
+  assert.deepEqual(old.normalizeCliTiming(report), legacy);
+  assert.deepEqual(normalizeCliTiming(legacy), legacy, "New readers never invent a reason for old reports.");
+  const oldMerged = emptyCliTiming();
+  old.mergeCliTiming(oldMerged, report);
+  assert.deepEqual(oldMerged.commands, legacy.commands);
+});
+
+test("knowledge show and wearables day admit the same parser reasons; search query admits only filter classes", async () => {
+  const capture = async (error: object, command: string) => {
+    let report!: CliTiming;
+    await assert.rejects(withCliTiming(() => timeCliDispatch(command, async () => { throw error; }),
+      (value) => { report = value; }), (caught) => caught === error);
+    assert.deepEqual(normalizeCliTiming(report), report);
+    assert.ok(!JSON.stringify(report).includes("PRIVATE"));
+    return report.commands[0]!.failures;
+  };
+  const base = { code: "VALIDATION_ERROR", stage: "validation", count: 1, validation: parseValidation } as const;
+  for (const command of ["knowledge show", "wearables day"]) {
+    for (const rejection of CLI_TIMING_PARSE_REJECTIONS) {
+      assert.deepEqual(await capture(parseRejectionEnvelope(rejection), command), [{ ...base, rejection }]);
+    }
+    for (const rejection of [...CLI_TIMING_FILTER_REJECTIONS, ...CLI_TIMING_REJECTIONS, "PRIVATE_REASON"]) {
+      assert.deepEqual(await capture(parseRejectionEnvelope(rejection), command), [{ ...base }]);
+    }
+  }
+  // The shared normalizer's VaultCliError shape: own non-enumerable data, no stage.
+  const filterError = (value: unknown, code = "invalid_option") => Object.defineProperty(
+    Object.assign(new Error("PRIVATE_MESSAGE"), { code }), "cliTimingRejection", { value });
+  const filterBase = { code: "invalid_option", stage: "unknown", count: 1 } as const;
+  for (const rejection of CLI_TIMING_FILTER_REJECTIONS) {
+    assert.deepEqual(await capture(filterError(rejection), "search query"), [{ ...filterBase, rejection }]);
+    // Other callers of the shared normalizer and other codes never admit it.
+    for (const command of ["list", "event list", "knowledge show", "journal link"]) {
+      assert.deepEqual(await capture(filterError(rejection), command), [{ ...filterBase }]);
+    }
+    assert.deepEqual(await capture(filterError(rejection, "invalid_query"), "search query"),
+      [{ code: "unknown", stage: "unknown", count: 1 }]);
+    assert.deepEqual(await capture(parseRejectionEnvelope(rejection), "search query"),
+      [{ code: "VALIDATION_ERROR", stage: "validation", count: 1 }]);
+  }
+  let reads = 0;
+  for (const value of [...CLI_TIMING_PARSE_REJECTIONS, "Comma_delimited", "PRIVATE_REASON", new String("comma_delimited"), ["unsupported_value"], 1]) {
+    assert.deepEqual(await capture(filterError(value), "search query"), [{ ...filterBase }]);
+  }
+  const accessor = Object.defineProperty(Object.assign(new Error("PRIVATE_MESSAGE"), { code: "invalid_option" }),
+    "cliTimingRejection", { get: () => { reads += 1; return "comma_delimited"; } });
+  assert.deepEqual(await capture(accessor, "search query"), [{ ...filterBase }]);
+  const inherited = Object.setPrototypeOf(Object.assign(new Error("PRIVATE_MESSAGE"), { code: "invalid_option" }),
+    Object.create(Error.prototype, { cliTimingRejection: { value: "comma_delimited" } }));
+  assert.deepEqual(await capture(inherited, "search query"), [{ ...filterBase }]);
+  assert.equal(reads, 0);
+});
+
+test("new rejection owners coalesce per variant and drop malformed wire detail without losing counts", () => {
+  for (const [command, code, stage, admitted] of [
+    ["exercise list", "VALIDATION_ERROR", "validation", CLI_TIMING_PARSE_REJECTIONS],
+    ["knowledge show", "VALIDATION_ERROR", "validation", CLI_TIMING_PARSE_REJECTIONS],
+    ["wearables day", "VALIDATION_ERROR", "validation", CLI_TIMING_PARSE_REJECTIONS],
+    ["search query", "invalid_option", "unknown", CLI_TIMING_FILTER_REJECTIONS],
+  ] as const) {
+    const aggregate = emptyCliTiming();
+    for (const rejection of [...admitted, undefined, admitted[0]]) {
+      const incoming = sample(command);
+      incoming.commands[0]!.outcome = "error";
+      incoming.commands[0]!.failures = [{ code, stage, count: 1, ...(rejection ? { rejection } : {}) }];
+      mergeCliTiming(aggregate, incoming);
+    }
+    assert.equal(aggregate.commands[0]!.calls, 4);
+    assert.deepEqual(aggregate.commands[0]!.failures!.map(({ rejection, count }) => ({ rejection, count })), [
+      { rejection: admitted[0], count: 2 }, { rejection: admitted[1], count: 1 }, { rejection: undefined, count: 1 },
+    ]);
+    assert.deepEqual(normalizeCliTiming(aggregate), aggregate);
+    const wire = sample(command);
+    wire.commands[0]!.outcome = "error";
+    wire.commands[0]!.calls = 4;
+    const foreign = admitted === CLI_TIMING_FILTER_REJECTIONS ? "unknown_flag" : "comma_delimited";
+    const failure: CliFailureTiming = { code, stage, count: 1,
+      ...(command === "exercise list" ? { validation: { ...parseValidation } } : {}) };
+    let reads = 0;
+    const entries = [
+      { ...failure, rejection: "PRIVATE_REASON" },
+      { ...failure, rejection: foreign },
+      Object.defineProperty({ ...failure }, "rejection", {
+        enumerable: true, get: () => { reads += 1; return admitted[0]; },
+      }),
+      Object.assign(Object.create({ rejection: admitted[0] }), failure),
+    ];
+    assert.deepEqual(normalizeCliTiming({ ...wire, commands: [{ ...wire.commands[0]!, failures: entries }] })
+      ?.commands[0]!.failures, [{ ...failure, count: 4 }]);
+    assert.equal(reads, 0);
+  }
+});
+
+// Actual pre-change reader for the knowledge show, wearables day and search query
+// details; it must drop only the optional detail and keep accounting.
+const filterRejectionCompatibilityBase = process.env.MURPH_CLI_FILTER_REJECTION_COMPAT_BASE;
+test.skipIf(!filterRejectionCompatibilityBase)("actual pre-filter-rejection reader drops only new detail and keeps counts", async () => {
+  assert.match(filterRejectionCompatibilityBase ?? "", /^[a-f0-9]{40}$/u);
+  const source = execFileSync("git", ["show", `${filterRejectionCompatibilityBase}:packages/runtime-state/src/cli-timing.ts`],
+    { encoding: "utf8", maxBuffer: 1_000_000 });
+  const old: { normalizeCliTiming: typeof normalizeCliTiming; mergeCliTiming: typeof mergeCliTiming } = await import(
+    `data:text/javascript;base64,${Buffer.from(stripTypeScriptTypes(source)).toString("base64")}`,
+  );
+  const report = emptyCliTiming();
+  // Typed mutable fixtures: each call builds fresh arrays checked against the contract.
+  const argv = (rejection?: CliTimingParseRejection): CliFailureTiming => ({ code: "VALIDATION_ERROR", stage: "validation",
+    count: 1, validation: { ...parseValidation }, ...(rejection ? { rejection } : {}) });
+  const filtered = (rejection: CliTimingFilterRejection): CliFailureTiming =>
+    ({ code: "invalid_option", stage: "unknown", count: 1, rejection });
+  const rows: Array<[string, () => CliFailureTiming[], () => CliFailureTiming[]]> = [
+    ["knowledge show", () => [argv("unknown_flag"), argv("missing_value")], () => [{ ...argv(), count: 2 }]],
+    ["wearables day", () => [argv("unknown_flag"), { code: "VALIDATION_ERROR", stage: "validation", count: 1,
+      validation: { field: "date", code: "invalid_format", missing: false } }],
+    () => [{ code: "VALIDATION_ERROR", stage: "validation", count: 2 }]],
+    ["search query", () => [filtered("comma_delimited"), filtered("unsupported_value")],
+      () => [{ code: "invalid_option", stage: "unknown", count: 2 }]],
+  ];
+  for (const [command, failures, legacy] of rows) {
+    const entry = sample(command).commands[0]!;
+    report.commands.push({ ...entry, outcome: "error", calls: 2, failures: failures() });
+    const expected: CliCommandTiming = { ...entry, outcome: "error", calls: 2, failures: legacy() };
+    const current = { ...report, commands: [report.commands.at(-1)!] };
+    assert.deepEqual(normalizeCliTiming(current), current);
+    assert.deepEqual(old.normalizeCliTiming(current)?.commands, [expected]);
+    assert.deepEqual(normalizeCliTiming({ ...report, commands: [expected] })?.commands, [expected],
+      "New readers never invent detail for old reports.");
+  }
+  const oldMerged = emptyCliTiming();
+  old.mergeCliTiming(oldMerged, report);
+  assert.deepEqual(oldMerged.commands.map(({ command, calls, failures }) => ({ command, calls,
+    count: failures!.reduce((sum, item) => sum + item.count, 0) })), [
+    { command: "knowledge show", calls: 2, count: 2 },
+    { command: "wearables day", calls: 2, count: 2 },
+    { command: "search query", calls: 2, count: 2 },
+  ]);
+});
+
 // Actual history-backed reader, not a copied parser or current-reader roundtrip.
 const researchFailureCompatibilityBase = process.env.MURPH_CLI_RESEARCH_FAILURE_COMPAT_BASE;
 test.skipIf(!researchFailureCompatibilityBase)("actual pre-research reader collapses only new evidence and preserves mixed counts", async () => {
@@ -1039,12 +1451,16 @@ test.skipIf(!researchFailureCompatibilityBase)("actual pre-research reader colla
 });
 
 
-test("query rebuild admission is exactly seventeen fixed phases without raising invocation caps", async () => {
+test("phase admission is exactly twenty-nine fixed names without raising invocation caps", async () => {
   assert.deepEqual(CLI_TIMING_PHASES, [
     "total", "setup", "dispatch", "post-dispatch", "teardown", "unattributed",
     "query-freshness", "query-manifest", "query-status", "query-rebuild", "query-wait",
     "query-source-read", "query-wearable-dataset", "query-metric-projection",
     "query-wearable-summary", "query-search-documents", "query-publication",
+    "query-entity-read", "query-wearable-compose", "query-metric-read", "query-pattern-report",
+    "service-runtime-load", "query-runtime-load", "query-projection-load",
+    "query-metric-samples", "query-metric-evidence", "query-metric-extract",
+    "query-metric-precedence", "query-metric-targets",
   ]);
   assert.equal(CLI_TIMING_MAX_COMMANDS, 32);
   assert.equal(CLI_TIMING_MAX_SPANS, 64);
@@ -1052,7 +1468,7 @@ test("query rebuild admission is exactly seventeen fixed phases without raising 
   for (const phase of CLI_TIMING_PHASES.slice(1)) {
     assert.equal(addCliPhaseSample(report.commands[0]!.phases, phase, 37_000_000), true);
   }
-  assert.equal(report.commands[0]!.phases.length, 17);
+  assert.equal(report.commands[0]!.phases.length, 29);
   assert.deepEqual(normalizeCliTiming(report), report);
   // Unknown labels are rejected, not pattern-admitted or serialized as paths.
   for (const phase of ["query-publication/PRIVATE_SENTINEL", "QUERY-SOURCE-READ", "query-source-read "]) {
@@ -1077,4 +1493,142 @@ test("query rebuild admission is exactly seventeen fixed phases without raising 
       .reduce((count, phase) => count + phase.count, 0), 63);
     assert.deepEqual(normalizeCliTiming(bounded), bounded);
   });
+});
+
+
+test("synchronous query stage timing preserves values, immediate execution and thrown identity", async () => {
+  const value = { synthetic: true };
+  assert.equal(timeCliPhaseSync("query-entity-read", () => value), value);
+  await clocked(async advance => {
+    let report!: CliTiming;
+    const failure = new Error("synthetic decode failure");
+    await assert.rejects(withCliTiming(() => timeCliDispatch("wearables latest", async () => {
+      assert.equal(timeCliPhaseSync("query-entity-read", () => { advance(12); return value; }), value);
+      timeCliPhaseSync("query-metric-read", () => { advance(34); throw failure; });
+    }), captured => { report = captured; }), error => error === failure);
+    assert.equal(report.commands[0]!.outcome, "error");
+    assert.deepEqual(report.commands[0]!.phases.filter(phase => phase.phase.startsWith("query-")).map(
+      phase => [phase.phase, phase.count, phase.sumUs]), [["query-entity-read", 1, 12], ["query-metric-read", 1, 34]]);
+    assert.deepEqual(normalizeCliTiming(report), report);
+  });
+});
+
+// Actual pre-admission reader from history; parent supplies the reviewed base.
+for (const [admission, compatibilityBase, admitted] of [
+  ["load", process.env.MURPH_CLI_LOAD_PHASE_COMPAT_BASE, 21],
+  ["metric-subphase", process.env.MURPH_CLI_METRIC_PHASE_COMPAT_BASE, 24],
+] as const) test.skipIf(!compatibilityBase)(`actual pre-${admission} reader drops the whole optional object; new reader keeps old reports`, async () => {
+  assert.match(compatibilityBase ?? "", /^[a-f0-9]{40}$/u);
+  const source = execFileSync("git", ["show", `${compatibilityBase}:packages/runtime-state/src/cli-timing.ts`],
+    { encoding: "utf8", maxBuffer: 1_000_000 });
+  const old: { CLI_TIMING_PHASES: readonly string[]; normalizeCliTiming: typeof normalizeCliTiming } = await import(
+    `data:text/javascript;base64,${Buffer.from(stripTypeScriptTypes(source)).toString("base64")}`,
+  );
+  assert.deepEqual(old.CLI_TIMING_PHASES, CLI_TIMING_PHASES.slice(0, admitted), "compatibility base must precede admission");
+  const legacy = sample("wearables latest", 1_000);
+  assert.deepEqual(old.normalizeCliTiming(legacy), legacy);
+  assert.deepEqual(normalizeCliTiming(legacy), legacy);
+  for (const phase of CLI_TIMING_PHASES.slice(admitted)) {
+    const report = structuredClone(legacy);
+    assert.equal(addCliPhaseSample(report.commands[0]!.phases, phase, 500), true);
+    assert.deepEqual(normalizeCliTiming(report), report);
+    // No partially stripped (falsely complete) record: the old reader rejects it all.
+    assert.equal(old.normalizeCliTiming(report), null);
+  }
+});
+
+test("new meal edit fields remain absent on every other command", () => {
+  for (const [, field, code, missing] of mealEditValidationCases) {
+    for (const command of ["meal add", "meal remove-photo", "meal show", "event edit", "other"]) {
+      for (const property of ["publicIssues", "fieldErrors", "validation"] as const) {
+        const source = { [property]: property === "validation" ? { field, code, missing } : [{ path: field, code, missing }] };
+        assert.deepEqual(cliTimingValidationFailure(command, "VALIDATION_ERROR", source, property), {});
+      }
+    }
+  }
+});
+
+test("invalid_operation is exact meal remove-photo evidence, never a global failure-code admission", async () => {
+  for (const command of ["meal remove-photo", "meal edit", "meal add", "event show", "other"]) {
+    const expected = command === "meal remove-photo" ? "invalid_operation" : "unknown";
+    assert.equal(cliTimingFailureCode("invalid_operation", command), expected);
+    const original = Object.assign(new Error("PRIVATE_SENTINEL"), { code: "invalid_operation", cause: { code: "PRIVATE_SENTINEL" } });
+    let report!: CliTiming;
+    await assert.rejects(withCliTiming(() => timeCliDispatch(command, async () => { throw original; }),
+      value => { report = value; }), caught => caught === original);
+    assert.deepEqual(report.commands[0]!.failures, [{ code: expected, stage: "unknown", count: 1 }]);
+    assert.deepEqual(normalizeCliTiming(report), report);
+    const incoming = { ...report, commands: [{ ...report.commands[0],
+      failures: [{ code: "invalid_operation", stage: "unknown", count: 1 }] }] };
+    assert.deepEqual(normalizeCliTiming(incoming), report);
+    assert.equal(JSON.stringify(report).includes("PRIVATE_SENTINEL"), false);
+    assert.equal(normalizeCliTiming({ ...incoming, commands: [{ ...incoming.commands[0], outcome: "ok" }] })
+      ?.commands[0]!.failures, undefined);
+  }
+  for (const command of [undefined, "MEAL REMOVE-PHOTO", "meal remove-photo ", "meal remove-photo PRIVATE_SENTINEL"]) {
+    assert.equal(cliTimingFailureCode("invalid_operation", command), "unknown");
+  }
+  for (const code of ["unknown", "PRIVATE_SENTINEL", "INVALID_OPERATION", "invalid_operation ",
+    "invalid_operation_PRIVATE_SENTINEL", "invalid-operatiоn", { toString() { throw Error("PRIVATE_SENTINEL"); } }]) {
+    assert.equal(cliTimingFailureCode(code, "meal remove-photo"), "unknown");
+  }
+  const { noteCliTimingFailure } = await import("../src/node/cli-timing.ts");
+  let reads = 0;
+  const getter = { get() { reads += 1; throw Error("PRIVATE_SENTINEL"); } };
+  const revoked = Proxy.revocable({}, {}); revoked.revoke();
+  for (const error of [Object.defineProperty({}, "code", getter), Object.create({ code: "invalid_operation" }),
+    new Proxy({}, { getOwnPropertyDescriptor() { throw Error("PRIVATE_SENTINEL"); } }), revoked.proxy,
+    { cause: { code: "invalid_operation" } }]) {
+    let report!: CliTiming;
+    await withCliTiming(() => timeCliDispatch("meal remove-photo", async () => {
+      noteCliTimingFailure(error); noteCliTimingExit(1, false);
+    }), value => { report = value; });
+    assert.deepEqual(report.commands[0]!.failures, [{ code: "unknown", stage: "unknown", count: 1 }]);
+    assert.equal(JSON.stringify(report).includes("PRIVATE_SENTINEL"), false);
+  }
+  assert.equal(reads, 0);
+});
+
+test("meal edit variants saturate independently of calls and legacy absence", () => {
+  const aggregate = emptyCliTiming();
+  const variants = mealEditValidationCases.flatMap(([, field]) =>
+    ["invalid_type", "custom", "too_small"].map(code => ({ field, code, missing: false })));
+  for (const validation of [...variants, variants[0]]) {
+    const report = sample("meal edit");
+    const incoming = normalizeCliTiming({ ...report, commands: [{ ...report.commands[0], outcome: "error",
+      failures: [{ code: "VALIDATION_ERROR", stage: "validation", count: 1, validation }] }] });
+    assert.ok(incoming);
+    mergeCliTiming(aggregate, incoming);
+  }
+  assert.equal(aggregate.commands[0]!.calls, 10);
+  assert.equal(aggregate.commands[0]!.failures?.length, 8);
+  assert.equal(aggregate.commands[0]!.failures?.[0]!.count, 2);
+  assert.equal(aggregate.commands[0]!.droppedFailures, 1);
+  const legacy = sample("meal edit"); legacy.commands[0]!.outcome = "error";
+  mergeCliTiming(aggregate, legacy);
+  assert.equal(aggregate.commands[0]!.calls, 11);
+  assert.equal(aggregate.commands[0]!.failures?.reduce((sum, failure) => sum + failure.count, 0), 9);
+  assert.deepEqual(normalizeCliTiming(aggregate), aggregate);
+});
+
+const mealFailureCompatibilityBase = process.env.MURPH_CLI_MEAL_FAILURE_ATTRIBUTION_COMPAT_BASE;
+test.skipIf(!mealFailureCompatibilityBase)("actual pre-meal-attribution reader loses specificity, not timing", async () => {
+  assert.match(mealFailureCompatibilityBase ?? "", /^[a-f0-9]{40}$/u);
+  const source = execFileSync("git", ["show", `${mealFailureCompatibilityBase}:packages/runtime-state/src/cli-timing.ts`],
+    { encoding: "utf8", maxBuffer: 1_000_000 });
+  const old: { normalizeCliTiming: typeof normalizeCliTiming; cliTimingFailureCode: typeof cliTimingFailureCode } = await import(
+    `data:text/javascript;base64,${Buffer.from(stripTypeScriptTypes(source)).toString("base64")}`);
+  assert.equal(old.cliTimingFailureCode("invalid_operation", "meal remove-photo"), "unknown");
+  const report = sample("meal remove-photo");
+  Object.assign(report.commands[0]!, { outcome: "error", calls: 3, droppedFailures: 1,
+    failures: [{ code: "invalid_operation", stage: "unknown", count: 1 }, { code: "unknown", stage: "unknown", count: 1 }] });
+  const legacy = structuredClone(report);
+  legacy.commands[0]!.failures = [{ code: "unknown", stage: "unknown", count: 2 }];
+  assert.deepEqual(normalizeCliTiming(report), report);
+  assert.deepEqual(old.normalizeCliTiming(report), legacy);
+  assert.deepEqual(normalizeCliTiming(legacy), legacy);
+  const merged = emptyCliTiming(); mergeCliTiming(merged, report); mergeCliTiming(merged, legacy);
+  const oldMerged = emptyCliTiming(); mergeCliTiming(oldMerged, legacy); mergeCliTiming(oldMerged, legacy);
+  assert.deepEqual(old.normalizeCliTiming(merged), oldMerged);
+  assert.equal(normalizeCliTiming(legacy)?.commands[0]!.failures?.[0]!.code, "unknown", "Never backfill old evidence.");
 });

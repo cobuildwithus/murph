@@ -54,7 +54,6 @@ describe("hosted runtime abort guard", () => {
       async fetch(request: HostedMailboxFetchRequest): Promise<HostedMailboxFetchResponse> {
         fetchRequests.push(request);
         return {
-          assistantProvider: "openai",
           fetchedAt: TEST_NOW,
           items: [this.#mailboxItem],
           maxSeqByLane: request.lanes.map((lane) => ({
@@ -673,7 +672,6 @@ function createDefaultMailboxPort(): HostedRuntimeMailboxPort {
   return {
     async fetch(request: HostedMailboxFetchRequest): Promise<HostedMailboxFetchResponse> {
       return {
-        assistantProvider: "openai",
         fetchedAt: TEST_NOW,
         items: [],
         maxSeqByLane: request.lanes.map((lane) => ({

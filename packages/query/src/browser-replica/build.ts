@@ -1,7 +1,6 @@
 import type { CanonicalEntity } from "../canonical-entities.ts";
 import { experimentOutcomeSchema } from "@murphai/contracts";
 import { metricPointRecordIds } from "../metrics/index.ts";
-import { buildPersonalPatternReportFromWearableBundleAndMetricPoints } from "../personal-patterns.ts";
 import { buildJournalView } from "../journal-view.ts";
 import { isDefaultProjectedQueryEntity } from "../query-visibility.ts";
 import type { OverviewWeeklySampleSummary } from "../overview.ts";
@@ -10,9 +9,9 @@ import { buildTimeline, type TimelineEntry } from "../timeline.ts";
 import { createVaultReadModel, type VaultReadModel } from "../read-model.ts";
 import { resolveAdherenceObservationActivityKind } from "../experiment-adherence.ts";
 import {
-  buildWearableAssistantSummary,
+  buildWearableAssistantSummaryFromBundle,
   buildWearableSummaryBundle,
-  summarizeWearableSourceHealth,
+  summarizeWearableSourceHealthFromBundle,
   type WearableAssistantSummary,
   type WearableSourceHealthSummary,
 } from "../wearables.ts";
@@ -107,21 +106,12 @@ export async function createBrowserVaultReplica(
     requestedMetrics,
     selectionPoints: selectionMetricPoints,
   });
-  const sourceHealthRows = summarizeWearableSourceHealth(defaultProjectedVault, { limit: SOURCE_HEALTH_LIMIT })
+  const defaultWearableBundle = buildWearableSummaryBundle(defaultProjectedVault);
+  const sourceHealthRows = summarizeWearableSourceHealthFromBundle(defaultWearableBundle, { limit: SOURCE_HEALTH_LIMIT })
     .map(projectSourceHealthRow);
-  const wearableSummaryBundle = buildWearableSummaryBundle(input.vault);
-  const personalPatterns = buildPersonalPatternReportFromWearableBundleAndMetricPoints(
-    input.vault,
-    wearableSummaryBundle,
-    allMetricPoints,
-    {
-      asOf: generatedAt,
-      vocabulary: input.personalPatternVocabulary,
-    },
-  );
   await yieldToBrowserVaultReplicaCancellation(input.signal);
   const replicaWithoutVersion: BrowserVaultReplica = {
-    assistantSummary: projectWearableAssistantSummary(buildWearableAssistantSummary(defaultProjectedVault)),
+    assistantSummary: projectWearableAssistantSummary(buildWearableAssistantSummaryFromBundle(defaultWearableBundle)),
     entities,
     experimentOutcomes: (input.experimentOutcomes ?? []).map((outcome) =>
       experimentOutcomeSchema.parse(outcome)
@@ -136,13 +126,11 @@ export async function createBrowserVaultReplica(
     ),
     journal: buildJournalView(input.vault, allMetricPoints, {
       asOf: addDaysToIsoDate(generatedAt.slice(0, 10), 1),
-      vocabulary: input.personalPatternVocabulary,
     }),
     labResultRows,
     metricGoalProgressRows: buildMetricGoalProgressRows(defaultProjectedVault.entities, allMetricPoints, generatedAt),
     metricRows,
     metricSelectionRows,
-    personalPatterns,
     policy,
     schema: BROWSER_VAULT_REPLICA_SCHEMA,
     searchRows: entities.map(projectBrowserVaultSearchRow),
@@ -194,14 +182,6 @@ export async function hashBrowserVaultReplicaData(
   const stableReplica = {
     ...replica,
     generatedAt: "",
-    ...(replica.personalPatterns
-      ? {
-          personalPatterns: {
-            ...replica.personalPatterns,
-            asOfDate: "",
-          },
-        }
-      : {}),
     source: {
       ...replica.source,
       dataVersion: "pending",
@@ -481,16 +461,6 @@ function projectEntityAttributes(
 ): Record<string, unknown> {
   if (entity.family === "event") {
     return projectSafeEventAttributes(entity, generatedAt);
-  }
-  if (entity.family === "habitat") {
-    return projectSafeAttributeKeys(entity, [
-      "aspect",
-      "domain",
-      "indicators",
-      "indicatorNotes",
-      "indicatorRecordedAt",
-      "note",
-    ]);
   }
 
   return projectSafeAttributes(entity);

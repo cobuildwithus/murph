@@ -3,9 +3,6 @@ import { describe, expect, it, vi } from "vitest";
 import type { HostedCanonicalWriteReceipt } from "@murphai/core";
 import { BROWSER_VAULT_REPLICA_SCHEMA } from "@murphai/contracts/browser-vault";
 import { HOSTED_BROWSER_VAULT_REPLICA_REF_SCHEMA, type HostedBrowserVaultReplicaRef } from "@murphai/hosted-execution";
-import {
-  HOSTED_CUSTOM_INFERENCE_CONSUMER_VERSION_QUERY, isHostedCustomInferenceConsumerVersion,
-} from "@murphai/hosted-execution/assistant-inference";
 import { buildHostedStorageAad, encryptHostedStoragePayload } from "@murphai/runtime-state";
 import { hostedArtifactObjectKey } from "@murphai/hosted-execution/storage-paths";
 import {
@@ -226,9 +223,6 @@ describe("bounded recovery census", () => {
       const target = new URL(String(url));
       if (target.pathname === "/api/internal/hosted-workspace") {
         workspaceReads++;
-        if (!isHostedCustomInferenceConsumerVersion(target.searchParams.get(HOSTED_CUSTOM_INFERENCE_CONSUMER_VERSION_QUERY))) {
-          return Response.json({ error: { code: "HOSTED_CUSTOM_INFERENCE_CONSUMER_UNSUPPORTED" } }, { status: 409 });
-        }
         const signedRequest = new Request(target, init);
         const verification = {
           environment: { keyId: "test", privateKeyJwkJson: privateJwk }, method: "GET",
@@ -236,7 +230,7 @@ describe("bounded recovery census", () => {
           request: signedRequest, userId,
         };
         expect(await verifyHostedWebCallbackSignatureHeaders({ ...verification, search: target.search })).toBe(true);
-        expect(await verifyHostedWebCallbackSignatureHeaders({ ...verification, search: "" })).toBe(false);
+        expect(await verifyHostedWebCallbackSignatureHeaders({ ...verification, search: "?unexpected=true" })).toBe(false);
         return Response.json({ fetchedAt: new Date(now).toISOString(), workspace: {
           userId, version: changeAtEnd && workspaceReads > 1 ? "8" : workspaceVersion, createdAt: request.before, updatedAt: request.before, snapshotRef: null, browserVaultReplicaRef,
         } });

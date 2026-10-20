@@ -51,6 +51,10 @@ import type {
   HostedWorkspaceRestorePreparation,
 } from "@murphai/assistant-runtime/hosted-workspace-restore-preparation";
 import {
+  createHostedRuntimeFetchTransportDiagnostics,
+  type HostedRuntimeFetchTransportDiagnostics,
+} from "./runtime-platform/fetch-transport-collector.ts";
+import {
   HOSTED_RUNTIME_ARCHITECTURE_VERSION,
 } from "./hosted-runtime-architecture.ts";
 import {
@@ -89,12 +93,20 @@ const HOSTED_CONTAINER_DIRECT_R2_PRESIGNED_PUT_DEFAULT_BYTES = 150 * 1024 * 1024
 const HOSTED_CONTAINER_DIRECT_R2_PRESIGNED_PUT_MAX_BYTES = 512 * 1024 * 1024;
 const HOSTED_CONTAINER_SHUTDOWN_POST_SAFE_POINT_DRAIN_TIMEOUT_MS = 5_000;
 const HOSTED_CONTAINER_REQUEST_KINDS = new Map([
-  [HOSTED_CONTAINER_CODEX_SHELL_SMOKE_PATH, "codex-shell-smoke"],
-  [HOSTED_CONTAINER_LIVE_MODEL_TURN_SMOKE_PATH, "live-model-smoke"],
-  [HOSTED_CONTAINER_DIRECT_R2_PRESIGNED_PUT_SMOKE_PATH, "direct-r2-smoke"],
-  ["/internal/workspace-invocation", "workspace-invocation"],
-  [HOSTED_CONTAINER_WORKSPACE_INVOCATION_ABORT_PATH, "workspace-invocation-abort"],
+  ["GET /health", "health" as const],
+  ["POST /internal/voice-control", "voice-control" as const],
+  [`POST ${HOSTED_CONTAINER_RUNTIME_WAKE_PATH}`, "runtime-wake" as const],
+  [`POST ${HOSTED_CONTAINER_CODEX_SHELL_SMOKE_PATH}`, "codex-shell-smoke" as const],
+  [`POST ${HOSTED_CONTAINER_LIVE_MODEL_TURN_SMOKE_PATH}`, "live-model-smoke" as const],
+  [`POST ${HOSTED_CONTAINER_DIRECT_R2_PRESIGNED_PUT_SMOKE_PATH}`, "direct-r2-smoke" as const],
+  ["POST /internal/workspace-invocation", "workspace-invocation" as const],
+  [`POST ${HOSTED_CONTAINER_WORKSPACE_INVOCATION_ABORT_PATH}`, "workspace-invocation-abort" as const],
 ]);
+
+interface HostedContainerRequestDiagnostics {
+  requestKind: NonNullable<ReturnType<typeof HOSTED_CONTAINER_REQUEST_KINDS.get>> | "unknown";
+  workspaceAttemptId: string | null;
+}
 
 function writeHostedRuntimeWakeResponse(
   response: ServerResponse,
@@ -218,6 +230,7 @@ interface HostedContainerRuntimeOptions {
   loadHeavyRuntime?: () => Promise<HostedContainerHeavyRuntimeCore>;
   parseRunnerJobInput?: typeof parseHostedExecutionRunnerJobInput;
   prepareWorkspaceRestore?: (input: {
+    fetchTransportDiagnostics?: HostedRuntimeFetchTransportDiagnostics | null;
     job: HostedExecutionRunnerJobInput;
     signal: AbortSignal;
   }) => Promise<HostedWorkspaceRestorePreparation>;
@@ -392,6 +405,9 @@ export async function startHostedContainerEntrypoint(input: {
     });
   };
   let activeHostedRunnerJobCount = 0;
+  // Finished jobs still awaiting their recovery completion callback. They keep
+  // the process alive (activeHostedRunnerJobCount) but do not block admission.
+  let settlingCompletionCallbackCount = 0;
   let workspaceInvocationAcceptedCount = 0;
   let conversationActivityReceivedAtEpochMs: number | null = null;
   let activeRuntimeWake: ((notification?: HostedContainerRuntimeWakeNotification) => boolean) | null = null;
@@ -577,7 +593,11 @@ export async function startHostedContainerEntrypoint(input: {
 
   const server = createServer(async (request, response) => {
     response.setHeader("connection", "close");
-    const requestAbort = createRequestAbortController(request, response);
+    const requestDiagnostics: HostedContainerRequestDiagnostics = {
+      requestKind: "unknown",
+      workspaceAttemptId: null,
+    };
+    const requestAbort = createRequestAbortController(request, response, requestDiagnostics);
     // Once a workspace job is accepted, HTTP transport state is no longer the
     // owner of invocation lifetime. A closed caller connection means the caller
     // may miss the result; explicit aborts arrive through the internal abort
@@ -595,6 +615,8 @@ export async function startHostedContainerEntrypoint(input: {
     let activeAbortRecord: HostedContainerActiveInvocation | null = null;
     try {
       const requestUrl = new URL(request.url ?? "/", "http://127.0.0.1");
+      const requestKind = HOSTED_CONTAINER_REQUEST_KINDS.get(`${request.method} ${requestUrl.pathname}`);
+      requestDiagnostics.requestKind = requestKind ?? "unknown";
 
       if (request.method === "POST" && requestUrl.pathname === "/internal/voice-control") {
         let command;
@@ -625,6 +647,7 @@ export async function startHostedContainerEntrypoint(input: {
         response.setHeader("content-type", "application/json; charset=utf-8");
         response.end(JSON.stringify({
           activeJobCount: activeHostedRunnerJobCount,
+          settlingCompletionCallbackCount,
           codexShellPreflightCompletedAtEpochMs,
           codexShellPreflightStatus,
           cloudflareRegion,
@@ -669,7 +692,6 @@ export async function startHostedContainerEntrypoint(input: {
         return;
       }
 
-      const requestKind = request.method === "POST" ? HOSTED_CONTAINER_REQUEST_KINDS.get(requestUrl.pathname) : undefined;
       const isCodexShellSmokeRequest = requestKind === "codex-shell-smoke";
       const isLiveModelTurnSmokeRequest = requestKind === "live-model-smoke";
       const isDirectR2PresignedPutSmokeRequest = requestKind === "direct-r2-smoke";
@@ -754,7 +776,7 @@ export async function startHostedContainerEntrypoint(input: {
       }
 
       if (isCodexShellSmokeRequest) {
-        if (activeHostedRunnerJobCount > 0) {
+        if (activeHostedRunnerJobCount - settlingCompletionCallbackCount > 0) {
           discardUnreadRequestBody(request);
           writeJsonResponse(response, 409, {
             error: "Hosted runner is busy.",
@@ -808,7 +830,7 @@ export async function startHostedContainerEntrypoint(input: {
       }
 
       if (isLiveModelTurnSmokeRequest) {
-        if (activeHostedRunnerJobCount > 0) {
+        if (activeHostedRunnerJobCount - settlingCompletionCallbackCount > 0) {
           discardUnreadRequestBody(request);
           writeJsonResponse(response, 409, {
             error: "Hosted runner is busy.",
@@ -827,7 +849,7 @@ export async function startHostedContainerEntrypoint(input: {
       }
 
       if (isDirectR2PresignedPutSmokeRequest) {
-        if (activeHostedRunnerJobCount > 0) {
+        if (activeHostedRunnerJobCount - settlingCompletionCallbackCount > 0) {
           discardUnreadRequestBody(request);
           writeJsonResponse(response, 409, {
             error: "Hosted runner is busy.",
@@ -865,7 +887,7 @@ export async function startHostedContainerEntrypoint(input: {
         return;
       }
 
-      if (activeHostedRunnerJobCount > 0) {
+      if (activeHostedRunnerJobCount - settlingCompletionCallbackCount > 0) {
         discardUnreadRequestBody(request);
         emitHostedExecutionStructuredLog({
           component: "container",
@@ -885,6 +907,7 @@ export async function startHostedContainerEntrypoint(input: {
         const requestBody: unknown = JSON.parse(await readHostedContainerInvocationRequestBody(request));
         const requestEnvelope = parseHostedExecutionContainerInvocationEnvelope(requestBody);
         job = runtime.parseRunnerJobInput(requestEnvelope.job);
+        requestDiagnostics.workspaceAttemptId = readHostedContainerWorkspaceAttemptId(job);
       } catch (error) {
         emitHostedExecutionStructuredLog({
           component: "container",
@@ -949,7 +972,10 @@ export async function startHostedContainerEntrypoint(input: {
       await stopWarmCodexWithLifecycleLog(runtime.stopWarmCodex, {
         reason: "hosted-workspace-restore",
       });
+      // One diagnostic collector spans restore preparation and the invocation.
+      const fetchTransportDiagnostics = createHostedRuntimeFetchTransportDiagnostics();
       workspaceRestorePreparation = runtime.prepareWorkspaceRestore({
+        fetchTransportDiagnostics,
         job,
         signal: invocationAbort.signal,
       });
@@ -1019,6 +1045,7 @@ export async function startHostedContainerEntrypoint(input: {
         ...(coldNodeStartupMs === null ? {} : { nodeStartupMs: coldNodeStartupMs }),
         ...(dispatchMilestones ? { dispatch: dispatchMilestones } : {}),
         ...(orchestrationMilestones ? { orchestration: orchestrationMilestones } : {}),
+        fetchTransportDiagnostics,
         preparedWorkspaceRestore,
         runnerJobAcceptedAt,
         releaseSha: runnerBundle?.releaseSha ?? null,
@@ -1113,9 +1140,7 @@ export async function startHostedContainerEntrypoint(input: {
         activeWorkspaceInvocationAbort = null;
       }
       requestAbort.cleanup();
-      await recordHostedContainerRuntimeCompletionIfPresent(
-        completedInvocation,
-      );
+      await recordSettlingCompletionCallback(completedInvocation);
       // A checkpoint control response must not let shutdown exit while the
       // completed invocation's durable completion callback is still settling.
       if (claimedRunnerSlot) {
@@ -1142,6 +1167,19 @@ export async function startHostedContainerEntrypoint(input: {
   });
 
   let containerShutdownExitStarted = false;
+  // The job and its response are finished; only the recovery callback remains.
+  const recordSettlingCompletionCallback = async (
+    completedInvocation: Parameters<typeof recordHostedContainerRuntimeCompletionIfPresent>[0],
+  ): Promise<void> => {
+    if (!completedInvocation) return;
+    settlingCompletionCallbackCount += 1;
+    try {
+      await recordHostedContainerRuntimeCompletionIfPresent(completedInvocation);
+    } finally {
+      settlingCompletionCallbackCount -= 1;
+    }
+  };
+
   const maybeExitAfterContainerShutdownDrain = () => {
     if (
       !containerShutdownController.signal.aborted
@@ -1766,6 +1804,7 @@ async function loadHostedContainerHeavyRuntime(): Promise<HostedContainerHeavyRu
 }
 
 async function prepareHostedContainerWorkspaceRestore(input: {
+  fetchTransportDiagnostics?: HostedRuntimeFetchTransportDiagnostics | null;
   job: HostedExecutionRunnerJobInput;
   signal: AbortSignal;
 }): Promise<HostedWorkspaceRestorePreparation> {
@@ -1811,6 +1850,7 @@ function raceHostedContainerInvocationAbort<T>(
 export function createRequestAbortController(
   request: HostedAbortRequestLike,
   response: HostedAbortResponseLike,
+  diagnostics?: Readonly<HostedContainerRequestDiagnostics>,
 ): {
   cleanup: () => void;
   requestSignal: AbortSignal;
@@ -1832,6 +1872,8 @@ export function createRequestAbortController(
       component: "container",
       details: {
         exitReason,
+        requestKind: diagnostics?.requestKind ?? "unknown",
+        workspaceAttemptId: diagnostics?.workspaceAttemptId ?? false,
       },
       level: "warn",
       message:

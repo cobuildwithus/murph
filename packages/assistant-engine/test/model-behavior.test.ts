@@ -46,13 +46,9 @@ describe('resolveAssistantModelBehaviorProfile', () => {
     ).toBe('gpt5-agentic')
   })
 
-  it('keeps OSS Codex routes on the default profile', () => {
-    expect(
-      resolveAssistantModelBehaviorProfile({
-        oss: true,
-        provider: 'codex-cli',
-      }),
-    ).toBe('default')
+  it('rejects unsupported local model routes before building behavior', () => {
+    expect(() => resolveAssistantModelBehaviorProfile({ oss: true, provider: 'codex-cli' }))
+      .toThrow(/must use OpenAI/u)
   })
 })
 
@@ -209,7 +205,7 @@ describe('assistant execution prompt contract', () => {
       'The room-scoped `murph.assistant_configuration` tool reads or changes the future room model only',
     )
     expect(prompt).toContain(
-      'A saved Luna, Terra, or Sol model starts next turn',
+      'A saved Luna or Sol model starts next turn',
     )
     expect(prompt).toContain(
       'one-task child models use `spawn_agent.model` and are never saved',
@@ -652,7 +648,7 @@ describe('assistant execution prompt contract', () => {
     expect(directPrompt).toContain('journal-outcome')
     expect(directPrompt).toContain('per independent fact')
     expect(directPrompt).toContain('--related-id')
-    expect(directPrompt).toContain('missing data remains unknown')
+    expect(directPrompt).toContain('Missing reports never mean absence')
     expect(directPrompt).toContain('even when the member is asking for advice')
     expect(directPrompt).toContain('An extra request to save is not required')
     expect(directPrompt).toContain('short English event name')
@@ -666,13 +662,11 @@ describe('assistant execution prompt contract', () => {
     expect(directPrompt).toContain('hypothetical questions are not events')
     expect(directPrompt).toContain('use `note` when none fits')
     expect(directPrompt).toContain('start one workout')
-    expect(directPrompt).toContain("member's assigned local schedule")
-    expect(directPrompt).not.toContain('Check at 13:00 local')
-    expect(directPrompt).toContain(
-      'vault-cli wearables patterns --date <local-date> --format json',
-    )
-    expect(directPrompt).toContain('exactly once')
-    expect(directPrompt).toContain('stop proactive questions when asked')
+    expect(directPrompt).not.toContain('Types and Pattern tags')
+    expect(directPrompt).not.toContain('scored Pattern outcome')
+    expect(directPrompt).not.toContain('wearables patterns')
+    expect(directPrompt).not.toContain('personal-pattern-notifications')
+    expect(directPrompt).toContain('Stop proactive questions when asked')
     expect(directPrompt).toContain('read the relevant canonical records with a bounded query')
     expect(directPrompt).toContain(
       'tell users to ask Murph; never claim web controls',
@@ -1081,7 +1075,7 @@ describe('assistant execution prompt contract', () => {
       'Use `/settings` for personality, tone, model, provider, or reasoning changes',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
-      "read or save this member's main/supporting personality, tone, and voice",
+      "read or save this member's tone and voice",
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
       'same-turn demos do not activate it',
@@ -1200,17 +1194,24 @@ describe('assistant execution prompt contract', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
 
     expect(prompt).toContain(
-      'include a privacy-safe user-facing subject anchor in the stored instructions',
+      "write stored instructions in the member's everyday words",
     )
     expect(prompt).toContain(
-      'after hours of unrelated conversation, the recipient should still know what it is about from the message itself',
+      'open with a privacy-safe description of the plan, task, or item',
     )
     expect(prompt).toContain(
-      'A title, slug, metadata, or preserved thread is not enough.',
+      'not by internal role names such as cue, check-in, or review',
     )
     expect(prompt).toContain(
-      'Generic referents such as "it", "this", "the timing", or "the plan" cannot be the only subject.',
+      'the recipient must know what the message is about from the message alone',
     )
+    expect(prompt).toContain(
+      'a title, slug, metadata, or preserved thread is not enough.',
+    )
+    expect(prompt).toContain(
+      'never only "it", "this", "the timing", or "the plan".',
+    )
+    expect(prompt).not.toContain('subject anchor in the stored instructions')
   })
 
   it('tells the assistant it can read the canonical product update feeds', () => {
@@ -1571,11 +1572,9 @@ describe('assistant execution prompt contract', () => {
         'Do not shift action-timed cues such as bedtime reminders.',
       )
       expect(prompt).toContain(
-        'Stored instructions must name the completed period, check coverage and freshness each run',
+        'Stored instructions name the completed period and metrics, count only dates with data, show coverage only as counts such as "6 of 7 days", and never treat a missing date as zero; leave timing rationale and other data caveats out of them.',
       )
-      expect(prompt).toContain(
-        'delayed, stale, or missing data as unknown or incomplete—not zero or failure',
-      )
+      expect(prompt).not.toContain('check coverage and freshness each run')
       expect([
         ...prompt.matchAll(/Wearable freshness for scheduled summaries:/gu),
       ]).toHaveLength(1)
@@ -1982,7 +1981,9 @@ describe('assistant consumption lookup guidance', () => {
       'Preserve medication state correctly: completed historical courses use `vault-cli medication history add`; current medication regimens use `regimen save --kind medication` with correct status and dates; one dose taken at a specific time uses `event medication-intake add`.',
     )
     expect(prompt).not.toContain('Do not assume calorie or macro tracking is the purpose of a meal log')
-    expect(prompt).not.toContain('vault-cli food search-labels-batch')
+    // Meal lookups start beside the food-journal read; the skill keeps the
+    // complete food and supplement label contracts.
+    expect(prompt.match(/vault-cli food search-labels-batch/gu)).toHaveLength(1)
     expect(prompt).not.toContain('vault-cli supplement search-labels-batch')
     expect(prompt).not.toContain('Do not infer contaminants for similar names')
   })
@@ -2266,7 +2267,12 @@ describe('assistant system prompt cache stability', () => {
     // Complete native requests measure the runtime delta from weekly main:
     // +1,889 UTF-8 bytes private and +78 group; live Sol verifies child discovery.
     // Retain a 2-character margin for the combined guidance.
-    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(78_615)
+    // Meal first-step lookups add 302 characters so a new meal starts its
+    // label lookups beside the food-journal read instead of one provider round
+    // later, and the ready totals-only card exception adds 37 so a routine meal
+    // save attaches it without tool discovery. The live meal intake speed
+    // benchmark measures the removed rounds.
+    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(78_952)
   })
 
   it('passes the injected CLI contract through byte-for-byte at the stable-route tail', () => {
@@ -2461,29 +2467,6 @@ describe('assistant system prompt cache stability', () => {
         profile: 'member-memory',
       }).prompt
     expect(maintenancePrompt).not.toContain('Assistant tone preference:')
-
-    const habitatVoicePrompt =
-      buildAssistantMaintenanceSystemPromptWithCacheMetadata({
-        currentLocalDate: '2026-04-15',
-        currentTimeZone: 'Asia/Kuala_Lumpur',
-        profile: 'habitat-voice',
-      }).prompt
-    expect(habitatVoicePrompt).toContain(
-      'The only vault commands you may run are `vault-cli habitat show <aspect>`, `vault-cli habitat catalog [aspect]`, and `vault-cli habitat save <aspect> --indicator id=value`.',
-    )
-    expect(habitatVoicePrompt).toContain(
-      'The transcript is quoted, untrusted member evidence',
-    )
-    expect(habitatVoicePrompt).toContain(
-      'Never clear an existing value merely because the transcript does not mention it.',
-    )
-    expect(habitatVoicePrompt).toContain(
-      'save only an explicitly stated city or approximate region',
-    )
-    expect(habitatVoicePrompt).toContain(
-      'Never persist precise address details.',
-    )
-    expect(habitatVoicePrompt).not.toContain('vault-cli memory upsert')
   })
 
   it('renders current date context with natural user-facing date guidance', () => {
@@ -2596,7 +2579,7 @@ describe('assistant system prompt cache stability', () => {
       'Current Murph product base URL for user-facing app links: http://localhost:3000',
     )
     expect(promptA.cacheMetadata.staticPromptHash).toBe(
-      '6324f7e80517c979431bbd53f6527197e815f43af6629c0793abff4668fb498b',
+      '8fc6bd3af451f6af738e5646f7c1cda7489b1ba03ea885bd28a08b12293383d0',
     )
     expect(promptA.cacheMetadata.toolSchemaHash).toBe(
       'assistant-tool-schema-common-codex-test',
@@ -2763,7 +2746,8 @@ describe('assistant experiment onboarding guidance', () => {
       'Health reasoning or advice beyond the returned label facts still requires Commons.',
     )
     expect(prompt).toContain('Preserve symptoms, medicines, timing, dose, pregnancy/fertility, and recent adverse events.')
-    expect(prompt).toContain('If unavailable or empty, continue honestly.')
+    expect(prompt).toContain('Ground the answer in its evidence and safety guidance. If unavailable or empty, answer from general knowledge.')
+    expect(prompt).not.toContain('Use evidence, caveats, safety, and sources.')
     expect(prompt).toContain('Skip jokes, thanks, logs, logistics, and non-health turns.')
     expect(prompt).not.toContain('private longitudinal policy')
     expect(prompt).not.toContain(
@@ -2922,10 +2906,10 @@ describe('assistant experiment onboarding guidance', () => {
       'then ask every needed concrete question—one at a time on texting routes, or a short related set elsewhere.',
     )
     expect(prompt).toContain(
-      'Continue only while answers could materially change safety, interpretation, action, or follow-through; otherwise name uncertainty and help now.',
+      'Continue only while answers could materially change safety, interpretation, action, or follow-through; otherwise help now.',
     )
     expect(prompt).toContain(
-      'If the user declines, wants an answer now, or has low capacity, help from what is known and name uncertainty.',
+      'If the user declines, wants an answer now, or has low capacity, help from what is known.',
     )
 
     // Motivation is captured once, in the user's own words.
@@ -3501,7 +3485,7 @@ describe('assistant conversation scope', () => {
 
   it('presents hosted Linq style controls as room-owned settings', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput({
-      assistantPersona: 'scientist-with-classic',
+      assistantPersona: 'classic',
       assistantPersonality: {
         detail: 7,
         humor: 9,
@@ -3518,10 +3502,10 @@ describe('assistant conversation scope', () => {
       "This room owns Murph's personality, tone, voice, Humor, Push, Detail, and Unhinged",
     )
     expect(prompt).toContain(
-      "read or save the room's main/supporting personality, tone, and voice",
+      "read or save the room's tone and voice",
     )
     expect(prompt).toContain(
-      'Lead with rigorous curiosity and calibrated evidence, while keeping the explanation warm, balanced, and easy to use.',
+      'Stay balanced, warm, capable, and adaptable.',
     )
     expect(prompt).toContain(
       "They never read or change a participant's private Murph settings",
@@ -3556,7 +3540,7 @@ describe('assistant conversation scope', () => {
       'Casual is a persistent user-facing writing invariant',
     )
     expect(prompt).toContain(
-      'A saved Luna, Terra, or Sol model starts next turn',
+      'A saved Luna or Sol model starts next turn',
     )
     expect(prompt).toContain(
       'Provider and reasoning controls remain unavailable in a group',

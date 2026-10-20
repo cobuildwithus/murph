@@ -55,7 +55,7 @@ export async function assertUnusedHostedSignupTx(input: {
       clinicalRecordConnections: { none: {} }, clinicalRecordConnectIntents: { none: {} },
       connectedAppsSession: { is: null }, connectedAppConnectIntents: { none: {} },
       mealPhotoCaptureEnrollments: { none: {} }, addressBookProjection: { is: null },
-      codexAuthConnection: { is: null }, inferenceConnection: { is: null },
+      codexAuthConnection: { is: null },
       computerRuns: { none: {} }, computerHandoffs: { none: {} },
       phoneCalls: { none: {} }, physicalNotes: { none: {} },
       vaultSharesGranted: { none: {} }, vaultSharesReceived: { none: {} },

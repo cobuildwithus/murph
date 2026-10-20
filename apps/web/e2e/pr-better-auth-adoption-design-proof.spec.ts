@@ -19,6 +19,12 @@ test.beforeEach(async ({ page }) => {
   page.on("pageerror", (error) => { throw error; });
   await page.route("**/*", (route) => ["127.0.0.1", "localhost"].includes(new URL(route.request().url()).hostname)
     ? route.continue() : route.abort());
+  await page.route("**/api/**", (route) => route.abort());
+  await page.route("**/api/auth/telegram/start", (route) => route.fulfill({ json: { ok: true, clientId: "123456789", nonce: "n".repeat(43) } }));
+  await page.route("https://telegram.org/js/telegram-login.js", (route) => route.fulfill({
+    contentType: "text/javascript", body: "window.Telegram={Login:{auth(){},close(){}}};",
+  }));
+  await page.route("**/api/settings/signup-referral-link", (route) => route.fulfill({ json: { signupUrl: "http://localhost/join/synthetic-browser-proof" } }));
 });
 
 for (const width of [390, 1280]) {
@@ -71,10 +77,8 @@ for (const width of [390, 1280]) {
       mutations += 1;
       return route.fulfill({ json: { recovered: true } });
     });
-    await page.goto("/design?tab=components", { waitUntil: "load", timeout: 90_000 });
-    const study = page.locator("#better-auth-adoption");
-    await study.evaluate((element) => element.removeAttribute("inert"));
-    const panel = study.locator('[data-auth-study="recovery"]');
+    await page.goto("/test/better-auth-settings", { waitUntil: "load", timeout: 90_000 });
+    const panel = page.getByRole("region", { name: "Security", exact: true });
     await capture(page, panel, `recovery-actions-${width}`);
     await expect(panel.getByRole("button")).toHaveCount(1);
     await panel.getByRole("button", { name: "Recovery key", exact: true }).click();
@@ -186,7 +190,7 @@ for (const width of [390, 1280]) {
     const study = page.locator("#better-auth-adoption");
     await expect(study).toBeVisible();
     await expect(study).toHaveAttribute("inert", "");
-    for (const state of ["phone", "email", "connections", "unconnected", "compact-code", "initial-passkey", "messaging", "recovery"]) {
+    for (const state of ["phone", "email", "connections", "unconnected", "compact-code", "signing-in", "initial-passkey", "messaging", "recovery"]) {
       const panel = study.locator(`[data-auth-study="${state}"]`);
       expect(await panel.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
       await panel.evaluate((element) => element.scrollIntoView({ block: "center" }));
@@ -231,14 +235,14 @@ for (const width of [390, 1280]) {
     await dialog.getByRole("button", { name: "Use another email", exact: true }).click();
     await dialog.getByRole("button", { name: "Phone", exact: true }).click();
     await expect(dialog.getByLabel("Your phone", { exact: true })).toBeVisible();
-    await dialog.getByRole("button", { name: "Telegram", exact: true }).click();
-    await expect(dialog.getByRole("button", { name: "Continue with Telegram", exact: true })).toBeEnabled();
+    await expect(dialog.getByRole("button", { name: "Telegram", exact: true })).toBeEnabled();
     await capture(page, dialog, `login-telegram-${width}`);
-    await dialog.getByRole("button", { name: "Continue with Telegram", exact: true }).click();
-    await expect(dialog.getByRole("button", { name: "Try Telegram again", exact: true })).toBeVisible();
+    await dialog.getByRole("button", { name: "Telegram", exact: true }).click();
+    await expect(dialog.getByText("Telegram sign-in was canceled. Try again.", { exact: true })).toBeVisible();
+    await expect(dialog.getByRole("button", { name: "Try again", exact: true })).toBeVisible();
     await capture(page, dialog, `login-telegram-error-${width}`);
-    await dialog.getByRole("button", { name: "Try Telegram again", exact: true }).click();
-    await expect(dialog.getByRole("button", { name: "Continue with Telegram", exact: true })).toBeEnabled();
+    await dialog.getByRole("button", { name: "Try again", exact: true }).click();
+    await expect(dialog.getByRole("button", { name: "Telegram", exact: true })).toBeEnabled();
     expect(await dialog.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
   });
 }
@@ -265,12 +269,10 @@ for (const width of [390, 1280]) {
     } }));
     await page.route("**/api/settings/login-methods/otp/*", (route) => route.fulfill({ json: { ok: true } }));
     await page.route("**/api/settings/login-methods/remove", (route) => route.fulfill({ json: { ok: true } }));
-    await page.goto("/design?tab=components", { waitUntil: "load", timeout: 90_000 });
-    const study = page.locator("#better-auth-adoption");
-    await study.evaluate((element) => element.removeAttribute("inert"));
     for (const action of ["added", "updated", "removed"] as const) {
+      await page.goto(`/test/better-auth-settings?email=${action === "added" ? "none" : "connected"}`, { waitUntil: "load", timeout: 90_000 });
       const trigger = action === "added" ? "Add Email" : action === "updated" ? "Change Email" : "Remove Email";
-      await study.locator(`[data-auth-study="${action === "added" ? "unconnected" : "connections"}"]`).getByRole("button", { name: trigger, exact: true }).click();
+      await page.getByRole("region", { name: "Connected accounts", exact: true }).getByRole("button", { name: trigger, exact: true }).click();
       const dialog = page.getByRole("dialog");
       if (action === "removed") {
         await expect(dialog.getByRole("button", { name: "Approve and remove email" })).toHaveCSS("height", "56px");
@@ -318,25 +320,13 @@ for (const width of [390, 1280]) {
     await expect(dialog.getByRole("button", { name: "Cancel", exact: true })).toHaveCSS("height", "56px");
     await capture(page, dialog, `consent-actions-${width}`);
     await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
-    const inference = page.locator("#settings-custom-inference");
-    await inference.evaluate((element) => {
-      for (let ancestor: Element | null = element; ancestor; ancestor = ancestor.parentElement) ancestor.removeAttribute("inert");
-    });
-    await expect(inference.getByRole("button", { name: "Verify and save", exact: true })).toHaveCSS("height", "44px");
-    const endpoint = inference.locator('[data-design-variant="custom-venice-enabled"]');
-    await endpoint.hover();
-    await endpoint.getByRole("button", { name: /Change inference routing/ }).click();
-    dialog = page.getByRole("dialog");
-    await dialog.getByRole("button", { name: "Manage", exact: true }).click();
-    await expect(dialog.getByRole("button", { name: "Back to providers", exact: true })).toHaveCSS("height", "44px");
-    await capture(page, dialog, `endpoint-actions-${width}`);
-    await page.keyboard.press("Escape");
     await page.goto("/screenshots/health", { waitUntil: "load", timeout: 60_000 });
     const records = page.locator("#clinical-records");
     await expect(records).toHaveAttribute("data-preview-ready", "true");
     await records.evaluate((element) => {
       for (let ancestor: Element | null = element; ancestor; ancestor = ancestor.parentElement) ancestor.removeAttribute("inert");
     });
+    await records.locator("summary").filter({ hasText: "Manage" }).first().click();
     await records.getByRole("button", { name: "Disconnect", exact: true }).first().click();
     dialog = page.getByRole("dialog");
     await expect(dialog.getByRole("button", { name: "Disconnect", exact: true })).toHaveCSS("height", "56px");

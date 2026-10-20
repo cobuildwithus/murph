@@ -417,13 +417,11 @@ test.each([false, true])("replica source observation preserves results (populate
   assert.deepEqual(steps, [
     "canonical_source_read", null,
     "read_model_construction", null,
-    "personal_pattern_vocabulary_read", null,
     "metric_projection", null,
     "default_entity_projection", null,
   ]);
   assert.deepEqual(observed, expected);
   assert.deepEqual(observed.vault, await readBrowserVaultReplicaVault(vaultRoot));
-  assert.equal(observed.personalPatternVocabulary, null);
   assert.deepEqual(await readBrowserVaultReplicaSource(vaultRoot, {
     onSourceStep() { throw new Error("Synthetic observer failure."); },
   }), expected);
@@ -444,7 +442,6 @@ test("replica source observation does not start work after an existing abort", a
 
 test.each([
   "canonical_source_read",
-  "personal_pattern_vocabulary_read",
   "metric_projection",
 ] as const)("replica source retains cancellation after %s", async (cancelAfter) => {
   const vaultRoot = await createTempVaultRoot();

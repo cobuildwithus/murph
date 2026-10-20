@@ -35,10 +35,6 @@
       "types": "./dist/runtime-owner.d.ts",
       "default": "./dist/runtime-owner.js"
     },
-    "./assistant-inference": {
-      "types": "./dist/assistant-inference.d.ts",
-      "default": "./dist/assistant-inference.js"
-    },
     "./assistant-usage": {
       "types": "./dist/assistant-usage.d.ts",
       "default": "./dist/assistant-usage.js"
@@ -46,6 +42,10 @@
     "./assistant-identifiers": {
       "types": "./dist/assistant-identifiers.d.ts",
       "default": "./dist/assistant-identifiers.js"
+    },
+    "./codex-behavior": {
+      "types": "./dist/codex-behavior.d.ts",
+      "default": "./dist/codex-behavior.js"
     },
     "./assistant-permissions": {
       "types": "./dist/assistant-permissions.d.ts",
@@ -244,7 +244,7 @@
     "@murphai/health-metrics": "workspace:*",
     "@murphai/importers": "workspace:*",
     "@murphai/runtime-state": "workspace:*",
-    "zod": "^4.4.3"
+    "zod": "^4.5.4"
   },
   "bundleDependencies": [
     "@murphai/clinical-records",

@@ -222,7 +222,7 @@ describe("hosted deploy automation helpers", () => {
       HOSTED_EXECUTION_RUNNER_LIFECYCLE_REEVALUATION_MS: "60000",
       HOSTED_PHYSICAL_NOTES_ENABLED: "true",
       HOSTED_ASSISTANT_APPROVAL_POLICY: "never",
-      HOSTED_ASSISTANT_MODEL: "gpt-5.6-terra",
+      HOSTED_ASSISTANT_MODEL: "gpt-6.1-sol",
       HOSTED_ASSISTANT_PROVIDER: "openai",
       HOSTED_ASSISTANT_REASONING_EFFORT: "medium",
       HOSTED_ASSISTANT_SANDBOX: "danger-full-access",
@@ -405,8 +405,8 @@ describe("hosted deploy automation helpers", () => {
     ]);
     expect(config.analytics_engine_datasets).toEqual([
       {
-        binding: "HOSTED_RUNTIME_RETRY_ANALYTICS",
-        dataset: "murph_hosted_runtime_retries",
+        binding: "HOSTED_STANDBY_ANALYTICS",
+        dataset: "murph_hosted_standby_inventory",
       },
     ]);
     expect(config.migrations).toEqual([
@@ -523,7 +523,7 @@ describe("hosted deploy automation helpers", () => {
     expect(config.vars.HOSTED_CRYPTO_ENV).toBe("production");
     expect(config.vars.HOSTED_WEB_CALLBACK_SIGNING_KEY_ID).toBe("callback:v2");
     expect(config.vars.HOSTED_ASSISTANT_APPROVAL_POLICY).toBe("never");
-    expect(config.vars.HOSTED_ASSISTANT_MODEL).toBe("gpt-5.6-terra");
+    expect(config.vars.HOSTED_ASSISTANT_MODEL).toBe("gpt-6.1-sol");
     expect(config.vars.HOSTED_ASSISTANT_PROVIDER).toBe("openai");
     expect(config.vars.HOSTED_ASSISTANT_REASONING_EFFORT).toBe("medium");
     expect(config.vars.HOSTED_ASSISTANT_SANDBOX).toBe("danger-full-access");
@@ -1075,7 +1075,6 @@ describe("hosted deploy automation helpers", () => {
       WHATSAPP_PHONE_NUMBER_ID: "removed-whatsapp-phone-number-id",
       WHATSAPP_VERIFY_TOKEN: "removed-whatsapp-verify-token",
       OPENAI_API_KEY: "openai-key",
-      VENICE_API_KEY: "venice-key",
     })).toEqual({
       ...REQUIRED_PRIVATE_IMAGE_WORKER_SECRET,
       HOSTED_EMAIL_SIGNING_SECRET: "email-signing-secret",
@@ -1096,7 +1095,6 @@ describe("hosted deploy automation helpers", () => {
       STRAVA_CLIENT_SECRET: "strava-client-secret",
       TELEGRAM_BOT_TOKEN: "bot-token",
       OPENAI_API_KEY: "openai-key",
-      VENICE_API_KEY: "venice-key",
     });
   });
 
@@ -1123,7 +1121,7 @@ describe("hosted deploy automation helpers", () => {
     const providerSecretsPayload = buildHostedWorkerSecretsPayload({
       ...REQUIRED_PRIVATE_IMAGE_WORKER_SECRET,
       HOSTED_ASSISTANT_BASE_URL: "https://legacy-provider.example.test/v1",
-      HOSTED_ASSISTANT_MODEL: "gpt-5.6-terra",
+      HOSTED_ASSISTANT_MODEL: "gpt-6.1-sol",
       HOSTED_ASSISTANT_PROVIDER: "openai",
       HOSTED_ASSISTANT_PROVIDER_NAME: "legacy-provider",
       HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: "automation-private-jwk",
@@ -1165,7 +1163,7 @@ describe("hosted deploy automation helpers", () => {
     expect(buildHostedWorkerSecretsPayload({
       ...REQUIRED_PRIVATE_IMAGE_WORKER_SECRET,
       HOSTED_ASSISTANT_API_KEY_ENV: "OPENAI_ENTERPRISE_API_KEY",
-      HOSTED_ASSISTANT_MODEL: "gpt-5.6-terra",
+      HOSTED_ASSISTANT_MODEL: "gpt-6.1-sol",
       HOSTED_ASSISTANT_PROVIDER: "openai",
       HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: "automation-private-jwk",
       HOSTED_LOG_FINGERPRINT_SECRET: "log-fingerprint-secret",
@@ -1184,7 +1182,7 @@ describe("hosted deploy automation helpers", () => {
       CF_WORKER_NAME: "hosted-worker",
       ...REQUIRED_HOSTED_CRYPTO_WORKER_VARS,
       HOSTED_ASSISTANT_API_KEY_ENV: "OPENAI_ENTERPRISE_API_KEY",
-      HOSTED_ASSISTANT_MODEL: "gpt-5.6-terra",
+      HOSTED_ASSISTANT_MODEL: "gpt-6.1-sol",
       HOSTED_ASSISTANT_PROVIDER: "openai",
     }).workerVars.HOSTED_ASSISTANT_API_KEY_ENV).toBeUndefined();
 
@@ -1194,7 +1192,7 @@ describe("hosted deploy automation helpers", () => {
       CF_WORKER_NAME: "hosted-worker",
       ...REQUIRED_HOSTED_CRYPTO_WORKER_VARS,
       HOSTED_ASSISTANT_API_KEY_ENV: "HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK",
-      HOSTED_ASSISTANT_MODEL: "gpt-5.6-terra",
+      HOSTED_ASSISTANT_MODEL: "gpt-6.1-sol",
       HOSTED_ASSISTANT_PROVIDER: "openai",
     }).workerVars.HOSTED_ASSISTANT_API_KEY_ENV).toBeUndefined();
   });

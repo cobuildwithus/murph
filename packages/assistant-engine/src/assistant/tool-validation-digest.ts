@@ -5,6 +5,28 @@ import * as z from '@murphai/contracts/zod-runtime'
 export const SAFE_TOOL_CALL_VALIDATION_DIGEST_SCHEMA =
   'murph.tool-call-validation-digest.v1'
 
+// Closed private vocabulary for semantic refinements whose Zod issue alone
+// cannot locate the cause. Only trusted parser code supplies a value.
+export const SAFE_TOOL_CALL_SEMANTIC_REJECTIONS = [
+  'automation_action_list',
+  'automation_action_show',
+  'automation_action_edit',
+  'automation_action_update',
+  'automation_action_unrecognized_string',
+  'shared_read_options',
+  'shared_freshness_count',
+  'shared_freshness_entry_shape',
+  'shared_freshness_entry_fields',
+  'shared_freshness_scope_not_requested',
+  'shared_freshness_scope_not_wearable',
+  'shared_freshness_invalid_date',
+  'shared_freshness_duplicate_pair',
+  'shared_semantic_unclassified',
+] as const
+
+export type SafeToolCallSemanticRejection =
+  typeof SAFE_TOOL_CALL_SEMANTIC_REJECTIONS[number]
+
 export interface SafeToolCallValidationDigest {
   [key: string]: unknown
   detailsSchema: typeof SAFE_TOOL_CALL_VALIDATION_DIGEST_SCHEMA
@@ -28,6 +50,7 @@ export interface SafeToolCallValidationDigest {
     received?: string
   }>
   inputShape?: string[]
+  semanticRejection?: SafeToolCallSemanticRejection
 }
 
 interface BuildSafeToolCallValidationDigestInput {
@@ -35,6 +58,7 @@ interface BuildSafeToolCallValidationDigestInput {
   rawInput: unknown
   requestedToolName?: string | null
   schemaFingerprint?: string | null
+  semanticRejection?: SafeToolCallSemanticRejection | null
   schemaName?: string | null
   schemaPaths?: readonly string[] | null
   schemaRootKeys?: readonly string[] | null
@@ -123,6 +147,10 @@ export function buildSafeToolCallValidationDigest(
     issueCodes: facts.issueCodes,
     pathIssues: facts.pathIssues,
     inputShape,
+    // Not fingerprinted, so existing fingerprints remain comparable.
+    semanticRejection: SAFE_TOOL_CALL_SEMANTIC_REJECTIONS.find(
+      (reason) => reason === input.semanticRejection,
+    ),
   })
   if (input.error instanceof z.ZodError) {
     modelValidationIssuesByDigest.set(digest, input.error.issues)
@@ -308,7 +336,7 @@ function normalizeIssueCode(
   rawCode: string | null,
   received: string | null,
 ): string {
-  if (rawCode === 'invalid_type' && received === 'undefined') {
+  if ((rawCode === 'invalid_type' || rawCode === 'invalid_union') && received === 'undefined') {
     return 'missing_required'
   }
   if (!rawCode) {

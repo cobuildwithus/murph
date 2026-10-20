@@ -976,7 +976,7 @@ test.sequential(
 
 interface MealAddWithTotalsResult extends MealAddResult {
   dailyTotals?:
-    | { status: 'available'; data: Awaited<ReturnType<ReturnType<typeof createIntegratedVaultServices>['query']['showMealNutritionTotals']>> }
+    | { status: 'available'; data: Awaited<ReturnType<ReturnType<typeof createIntegratedVaultServices>['query']['showMealNutritionTotals']>>; totalsOnlyCard: unknown }
     | { status: 'unavailable'; localDate: string; code: string; hint: string }
 }
 
@@ -1005,6 +1005,15 @@ test.sequential('meal save composes fresh totals and goals for its canonical loc
     assert.equal(saved.dailyTotals.data.goalContext?.status, 'missing')
     const fresh = await services.query.showMealNutritionTotals({ vault: vaultRoot, requestId: null, from: '2026-04-10', to: '2026-04-10', resolveGoals: true })
     assert.deepEqual(saved.dailyTotals.data, fresh)
+    assert.deepEqual(saved.dailyTotals.totalsOnlyCard, {
+      kind: 'daily_nutrition', version: 2, localDate: '2026-04-10', mealCount: 2,
+      totals: {
+        calories: { total: 700, mealCount: 2 }, proteinGrams: { total: 30, mealCount: 2 },
+        carbsGrams: { total: 90, mealCount: 2 }, fatGrams: { total: 24, mealCount: 2 },
+        fiberGrams: { total: 11, mealCount: 2 },
+      },
+      goals: { calories: null, proteinGrams: null, carbsGrams: null, fatGrams: null, fiberGrams: null },
+    })
     const shown = await runInProcessJsonCli<ShowResult>(createMealCli(), ['meal', 'show', saved.mealId, '--vault', vaultRoot])
     assert.equal(requireData(shown.envelope).entity.id, saved.mealId)
   } finally { totals.mockRestore(); await rm(parentRoot, { recursive: true, force: true }) }
@@ -1033,6 +1042,31 @@ test.sequential.each(['unavailable', 'malformed'] as const)('a %s post-save tota
     const retry = await services.query.showMealNutritionTotals({ vault: vaultRoot, requestId: null, from: '2026-04-10', to: '2026-04-10', resolveGoals: true })
     assert.equal(retry.mealCount, 1)
     assert.deepEqual(retry.totals.calories, { total: null, mealCount: 0 })
+  } finally { totals.mockRestore(); await rm(parentRoot, { recursive: true, force: true }) }
+})
+
+test.sequential('accepted goals leave the totals-only card to model-authored goal statuses', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext('meal-save-goal-card-')
+  const services = createIntegratedVaultServices()
+  const readTotals = services.query.showMealNutritionTotals.bind(services.query)
+  const totals = vi.spyOn(services.query, 'showMealNutritionTotals')
+  totals.mockImplementationOnce(async (input) => {
+    const fresh = await readTotals(input)
+    if (!fresh.goalContext) throw new Error('Expected goal context')
+    return { ...fresh, goalContext: { ...fresh.goalContext, status: 'ready' as const, activeGoalCount: 1 } }
+  })
+  try {
+    await initializeVault({ vaultRoot, timezone: 'UTC' })
+    const saved = requireData((await runInProcessJsonCli<MealAddWithTotalsResult>(createMealCli(services), [
+      'meal', 'add', '--note', 'Synthetic goal-day meal', '--occurred-at', '2026-04-10T12:00:00Z',
+      '--nutrition-calories', '400', '--nutrition-protein-grams', '20', '--nutrition-carbs-grams', '50',
+      '--nutrition-fat-grams', '13', '--nutrition-fiber-grams', '6', '--nutrition-source', 'estimated',
+      '--with-daily-totals', '--vault', vaultRoot,
+    ])).envelope)
+    assert.equal(saved.dailyTotals?.status, 'available')
+    if (saved.dailyTotals?.status !== 'available') throw new Error('Expected daily totals')
+    assert.equal(saved.dailyTotals.data.goalContext?.status, 'ready')
+    assert.equal(saved.dailyTotals.totalsOnlyCard, null)
   } finally { totals.mockRestore(); await rm(parentRoot, { recursive: true, force: true }) }
 })
 
@@ -1071,5 +1105,7 @@ test.sequential('structured meal save retains incomplete daily coverage in its c
     assert.equal(saved.dailyTotals.data.mealCount, 2)
     assert.deepEqual(saved.dailyTotals.data.totals.calories, { total: 560, mealCount: 1 })
     assert.deepEqual(saved.dailyTotals.data.totals.fiberGrams, { total: null, mealCount: 0 })
+    // Incomplete coverage needs recovery before any card, so none is offered.
+    assert.equal(saved.dailyTotals.totalsOnlyCard, null)
   } finally { await rm(parentRoot, { recursive: true, force: true }) }
 })

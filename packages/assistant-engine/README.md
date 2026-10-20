@@ -4,7 +4,39 @@ Workspace-private headless assistant execution runtime for Murph.
 
 This package owns headless assistant execution and assistant-specific tool surfaces. That includes the assistant turn runtime, Codex app-server provider execution path, direct CLI prompt/bootstrap guidance, assistant state/outbox/status/store surfaces, assistant automation, and input/tool integration points for the daemon and hosted runtimes.
 
-Neutral vault services live in `@murphai/vault-usecases/vault-services`, and inbox service composition lives in `@murphai/inbox-services`. `assistant-engine` consumes those owners instead of owning their factories. Canonical writes still terminate in `packages/core`. Provider-target normalization plus hosted provider preset/config utilities are owned by `@murphai/operator-config` and consumed here directly.
+Neutral vault services live in `@murphai/vault-usecases/vault-services`, and inbox service composition lives in `@murphai/inbox-services`. `assistant-engine` consumes those owners instead of owning their factories. Canonical writes still terminate in `packages/core`. OpenAI target normalization and hosted configuration utilities are owned by `@murphai/operator-config` and consumed here directly.
+
+Murph assistant execution supports OpenAI models only. Hosted configuration
+exposes model and reasoning choices; there is no provider selector or custom
+endpoint. Local execution explicitly selects OpenAI even when the saved target
+omits a provider, and rejects local OSS mode. OpenAI API, ChatGPT subscription,
+and synthetic local-test transports retain their existing execution boundaries.
+
+## Codex failure telemetry
+
+Auto-reply failure context retains `codexErrorInfoPresent` only as a boolean,
+`codexErrorInfo` as a closed recognized kind or `unrecognized` for other strings,
+and `codexErrorHttpStatusCode` only as an integer from 100 through 599. Wrong
+kinds of values are omitted, not coerced. Hosted maintenance logs project these
+as `failureCodexErrorInfoPresent`, `failureCodexErrorInfo`, and
+`failureCodexErrorHttpStatusCode` without changing classification, retry policy,
+or event count.
+
+`internalServerError` identifies structured server-error evidence, unlike
+`responseStreamDisconnected` or `httpConnectionFailed`; the latter's status
+still affects the existing connection-loss classification. Presence `false`
+means no structured info was attached, so classification may be text-based.
+Missing presence is unavailable telemetry, not `false`; `unrecognized` retains
+presence without exposing the external kind string.
+
+Natural-traffic query (read-only): use one fixed UTC `[start, end)` window of at
+most 12 hours in the existing maintenance logs. Filter `type = 'input.reply-failed'`
+and `errorCode IN ('ASSISTANT_CODEX_FAILED', 'ASSISTANT_CODEX_CONNECTION_LOST',
+'ASSISTANT_CODEX_USAGE_LIMIT')`; group `COUNT(*)` by `errorCode`,
+`failureCodexErrorInfoPresent`, `failureCodexErrorInfo`,
+`failureCodexErrorHttpStatusCode`, and `failureRetryable`, limited to 100 groups.
+Keep missing values separate from `false`, select metadata only, and do not
+induce failures. An empty window is not evidence that the path works.
 
 ## Prompt time context
 
@@ -365,6 +397,9 @@ reads are routine and namespace discovery expands unrelated schemas. Its input
 schema and authorization remain identical; private conversations keep the group
 family deferred, and read-only scheduled group turns keep their narrower tool.
 
+The [vault-share freshness contract](../../agent-docs/references/hosted-runtime-protocol.md#vault-share-direct-read-and-cutover)
+owns the wearable-only schema domain and ordinary nonwearable shared reads.
+
 Response-card, exercise-routine, Telegram rich-content, and group-challenge
 card tools follow the same deferred contract. Resident messaging guidance
 provides the discovery trigger; the discovered tool remains the sole owner of
@@ -460,6 +495,34 @@ forwards that separator to Vitest, which drops the file filter and runs the
 package suite.
 
 ## Real-Codex test fixtures
+
+Canonical live fixtures and the meal benchmark use the shared hosted Codex
+behavior builder. Their App Server launcher requires Murph's patched native
+`app-server --ignore-user-config` option: it excludes personal behavioral settings
+and global `AGENTS.md`/`AGENTS.override.md` inputs. It retains the original auth
+home, credential-store and keyring-backend selection, login/workspace restrictions,
+and ChatGPT auth endpoint in their normal configuration precedence. Managed
+requirements, project instructions, and exec rules still apply. Personal proxy
+preferences and other feature switches are not restored by this auth projection.
+CLI table overrides alone cannot provide isolation because native TOML merging
+preserves unspecified personal permission grants.
+Provider-key fixtures pass their trusted provider definition explicitly through
+the launcher, using the same serializer as the generated fixture home. Only
+provider metadata and the environment-variable name enter configuration; the
+credential value remains in the process environment and its name is omitted
+from shell-tool allowlists. Model, provider, reasoning, and approval selections
+remain explicit journey inputs.
+
+Build from the exact source pin with `patches/codex-public-live.patch` applied,
+then select that local artifact with `pnpm test:assistant:live -- --test <name>
+--codex-command <absolute-native-binary>`. The unpatched npm CLI does not support
+this App Server option. Keep the matching release's helper layout; the native
+build contract is documented in `apps/cloudflare/README.md`. Selecting a local
+verification binary does not install a global package or deploy the runner.
+
+The isolated checkout and Node install are read-only local stand-ins for `/app`;
+credential-shaped files stay denied. Production permission profiles are
+unchanged. Local shells retain the fixture PATH and Codex's credential exclusions.
 
 Synthetic real-Codex journeys that need fixture executables can opt into
 `executeRealCodexAppServerTurn`'s `fixtureBinDirectory`. The test harness adds

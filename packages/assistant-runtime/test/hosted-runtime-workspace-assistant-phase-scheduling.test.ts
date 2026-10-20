@@ -33,6 +33,7 @@ import {
   type HostedRuntimeLatencyTraceRequest,
   type HostedRuntimeLogRequest,
 } from "@murphai/hosted-execution/runtime-control";
+import { parseHostedRuntimeLogRequest } from "@murphai/hosted-execution/parsers";
 import {
   ASSISTANT_USAGE_SCHEMA,
   type AssistantUsageRecord,
@@ -111,7 +112,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       adapter: "codex-cli" as const,
       approvalPolicy: "never" as const,
       codexCommand: null,
-      model: "gpt-5.6-terra",
+      model: "gpt-6.1-sol",
       modelProvider: "openai",
       oss: false,
       profile: null,
@@ -356,13 +357,35 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       };
     });
 
+    const logRequests: HostedRuntimeLogRequest[] = [];
     try {
       await runHostedWorkspaceAssistantPhase(createPhaseInput({
+        logRequests,
         runtimeGroupToolPort: { request },
         vaultRoot,
       }));
       expect(sequence).toEqual(["assistant_lane", "read_shared", "read_shared"]);
       expect(request).toHaveBeenCalledTimes(2);
+      const readTimings = logRequests
+        .flatMap((logRequest) => parseHostedRuntimeLogRequest(logRequest).entries)
+        .filter((entry) => entry.redactedJson?.type === "hosted_group_shared_read_timing");
+      expect(readTimings).toHaveLength(2);
+      expect(readTimings[0]).toMatchObject({
+        component: "assistant",
+        eventCode: "assistant.automation_detail",
+        level: "info",
+        redactedJson: {
+          groupSharedReadCallbackCount: 1,
+          groupSharedReadDecision: "no_freshness",
+          groupSharedReadFreshnessRequested: false,
+          groupSharedReadLane: "scheduled",
+          groupSharedReadOutcome: "ok",
+          groupSharedReadPollCount: 0,
+          groupSharedReadWaitBudgetMs: 300_000,
+          schema: "murph.hosted-group-shared-read-timing.v1",
+        },
+      });
+      expect(JSON.stringify(readTimings)).not.toMatch(/steps-days|member_shared|participant_shared|Ada|chat_current/u);
     } finally {
       await rm(vaultRoot, { force: true, recursive: true });
     }
@@ -810,7 +833,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
   it("prepares hosted assistant automation state before running scheduled automation", async () => {
     const runtimeEnv = {};
     const runtimeForwardedEnv = {
-      HOSTED_ASSISTANT_MODEL: "gpt-5.6-terra",
+      HOSTED_ASSISTANT_MODEL: "gpt-6.1-sol",
       HOSTED_ASSISTANT_PROVIDER: "openai",
       LINQ_API_BASE_URL: "https://linq.example.test",
     };

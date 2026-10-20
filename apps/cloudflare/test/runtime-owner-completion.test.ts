@@ -130,7 +130,7 @@ describe("native completion publication", () => {
         userId: "synthetic-private-owner", attemptId: "attempt-private-owner", generation: "934872",
         phase: "active", processingMode: "default", allocationId: "synthetic-private-allocation",
         runnerContainerName: "synthetic-private-owner-target", workspaceVersion: "18",
-        customInferenceEnvelope: "synthetic-private-envelope", platformAiUsageAllowed: true,
+        platformAiUsageAllowed: true,
         startedAt: null, acceptedAt: null, completedAt: null, failureCount: 0,
         lastErrorCode: "synthetic-private-owner-error",
       },

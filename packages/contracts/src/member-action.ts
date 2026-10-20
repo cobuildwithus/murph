@@ -491,7 +491,7 @@ export const memberActionRequestV1Schema = z
   .object({
     action: memberActionV1Schema,
     actionId: memberActionIdV1Schema,
-    requestedAt: z.string().datetime({ offset: true }),
+    requestedAt: z.isoDateTime({ offset: true }),
     schemaVersion: z.literal(1),
   })
   .strict();
@@ -557,7 +557,7 @@ export type MemberActionResultV1 = z.infer<typeof memberActionResultV1Schema>;
 export const memberActionOutcomeV1Schema = z
   .object({
     actionId: memberActionIdV1Schema,
-    completedAt: z.string().datetime({ offset: true }),
+    completedAt: z.isoDateTime({ offset: true }),
     reason: memberActionRejectionReasonV1Schema.nullable(),
     result: memberActionResultV1Schema.optional(),
     schemaVersion: z.literal(1),

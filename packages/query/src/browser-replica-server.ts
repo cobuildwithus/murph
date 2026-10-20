@@ -1,7 +1,6 @@
 export { createBrowserVaultReplica } from "./browser-replica/build.ts";
 export { stringifyJsonCooperatively } from "./browser-replica/json.ts";
 export {
-  readBrowserVaultPersonalPatternVocabulary,
   readBrowserVaultReplicaSource,
   readBrowserVaultReplicaVault,
   type BrowserVaultReplicaSourceStep,

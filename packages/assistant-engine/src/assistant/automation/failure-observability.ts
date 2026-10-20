@@ -73,6 +73,17 @@ const SAFE_FAILURE_CONTEXT_KEYS = new Set([
   'status',
 ])
 
+// Keep external kind strings bounded to the classifications used here.
+const SAFE_CODEX_ERROR_INFO_KINDS = new Set([
+  'httpConnectionFailed',
+  'internalServerError',
+  'responseStreamConnectionFailed',
+  'responseStreamDisconnected',
+  'responseTooManyFailedAttempts',
+  'serverOverloaded',
+  'usageLimitExceeded',
+])
+
 const SAFE_FAILURE_TOP_LEVEL_KEYS = new Set(['outboxIntentId'])
 const SAFE_FAILURE_DIAGNOSTIC_TEXT_KEY_PATTERN =
   /^[A-Za-z][A-Za-z0-9_.-]{0,127}(?:ErrorMessage|ErrorDetail|ErrorCause|ErrorStatusText)$/u
@@ -315,6 +326,27 @@ function pickFailureContext(
 
   return Object.fromEntries(
     Object.entries(value).flatMap(([key, entryValue]) => {
+      switch (key) {
+        case 'codexErrorInfoPresent':
+          return typeof entryValue === 'boolean' ? [[key, entryValue]] : []
+        case 'codexErrorInfo': {
+          if (typeof entryValue !== 'string') {
+            return []
+          }
+          const kind = SAFE_CODEX_ERROR_INFO_KINDS.has(entryValue)
+            ? entryValue
+            : 'unrecognized'
+          return [[key, kind]]
+        }
+        case 'codexErrorHttpStatusCode':
+          return typeof entryValue === 'number' &&
+            Number.isInteger(entryValue) &&
+            entryValue >= 100 &&
+            entryValue <= 599
+            ? [[key, entryValue]]
+            : []
+      }
+
       if (!isSafeFailureContextKey(key)) {
         return []
       }

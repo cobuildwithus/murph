@@ -2019,7 +2019,7 @@ test("Junction temporal catch-up yields and upstream failures remain retryable",
     createJunctionJobContext({ now: "2026-04-06T00:00:00.000Z" }),
     createJob("resource", payload),
   );
-  assert.equal(completedResult.nextReconcileAt, "2026-04-06T01:00:00.000Z");
+  assert.equal(completedResult.nextReconcileAt, "2026-04-06T06:00:00.000Z");
 
   const staleTimeZoneResult = await executeJunctionJob(
     completedProvider,

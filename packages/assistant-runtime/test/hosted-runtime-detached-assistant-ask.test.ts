@@ -593,9 +593,9 @@ describe("hosted detached assistant ask controller", () => {
     }
   });
 
-  test("requeues immediately and closes the stale controller on provider handoff", async () => {
+  test("requeues immediately and closes the stale controller on runtime handoff", async () => {
     const vaultRoot = await createVaultRoot();
-    const resolveProviderAuthority = vi.fn(async () => "handoff" as const);
+    const resolveRuntimeAuthority = vi.fn(async () => "handoff" as const);
     let completionCalls = 0;
     let providerEgressCount = 0;
 
@@ -630,13 +630,13 @@ describe("hosted detached assistant ask controller", () => {
         }),
         now: () => TEST_NOW,
         onStateMutation() {},
-        resolveProviderAuthority,
+        resolveRuntimeAuthority,
         vaultRoot,
       });
 
       controller.kick();
       await waitUntil(async () => {
-        assert.equal(resolveProviderAuthority.mock.calls.length, 1);
+        assert.equal(resolveRuntimeAuthority.mock.calls.length, 1);
         const item = (await readHostedSystemMailboxState(vaultRoot)).pending[0];
         assert.equal(item?.status, "pending");
         assert.equal(item?.nextAttemptAt, null);
@@ -645,7 +645,7 @@ describe("hosted detached assistant ask controller", () => {
       await Promise.resolve();
       await controller.closeAndRequeue();
 
-      assert.equal(resolveProviderAuthority.mock.calls.length, 1);
+      assert.equal(resolveRuntimeAuthority.mock.calls.length, 1);
       assert.equal(providerEgressCount, 0);
       assert.equal(completionCalls, 0);
     } finally {
@@ -687,7 +687,7 @@ describe("hosted detached assistant ask controller", () => {
         }),
         now: () => TEST_NOW,
         onStateMutation() {},
-        resolveProviderAuthority: async () => {
+        resolveRuntimeAuthority: async () => {
           throw new Error("control plane unavailable");
         },
         vaultRoot,
@@ -928,11 +928,8 @@ describe("hosted detached assistant ask controller", () => {
 
   test.each([
     ["hosted-openai", "hosted-openai"],
-    ["venice", "hosted-openai"],
-    ["hosted-custom-inference", "hosted-openai"],
     ["hosted-chatgpt-openai", "hosted-chatgpt-openai"],
     ["openai-local-test", "openai-local-test"],
-    ["venice-local-test", "openai-local-test"],
   ])("dispatches an operator diagnostic with hosted authentication from %s without consent review or delivery authority", async (memberProvider, operatorProvider) => {
     const groupRuntimeRoot = await createVaultRoot();
     const records: AssistantUsageRecord[] = [];

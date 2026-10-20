@@ -19,10 +19,6 @@ vi.mock("@/src/lib/hosted-onboarding/invite-service", () => ({
   buildHostedInvitePageData: vi.fn(),
 }));
 
-vi.mock("@/src/components/biomarkers/biomarker-detail/biomarker-research", () => ({
-  BiomarkerResearch: () => null,
-}));
-
 vi.mock("@/src/components/experiments/experiment-detail/research-tab", () => ({
   ExperimentResearchTab: () => null,
   ResearchTab: () => null,
@@ -86,8 +82,7 @@ describe("share preview metadata", () => {
     });
     // The route file lives OUTSIDE the (dashboard) group: metadata images
     // inside route groups get hash-suffixed URLs in production, so the
-    // advertised unhashed URL only resolves from an ungrouped segment
-    // (the /environment card established this pattern).
+    // advertised unhashed URL only resolves from an ungrouped segment.
     expectRouteFile("../app/connect/opengraph-image.tsx");
   });
 
@@ -105,26 +100,6 @@ describe("share preview metadata", () => {
       url: "/groups/fund/join-code/opengraph-image",
     });
     expectRouteFile("../app/groups/fund/[joinCode]/opengraph-image.tsx");
-  });
-
-  it("biomarker research keeps the parent biomarker card", async () => {
-    const { generateMetadata } = await import(
-      "../app/(dashboard)/biomarkers/[biomarkerId]/research/page"
-    );
-    const metadata = await generateMetadata({
-      params: Promise.resolve({ biomarkerId: "deep-sleep-minutes" }),
-    });
-
-    // Alt mirrors the parent route's subject-specific wording.
-    expectDedicatedImage(metadata, {
-      alt: expect.stringMatching(/^.+, a Murph biomarker\.$/),
-      url: "/biomarkers/deep-sleep-minutes/opengraph-image",
-    });
-    expect(metadata.alternates?.canonical).toBe(
-      "/biomarkers/deep-sleep-minutes/research",
-    );
-    expect(metadata.robots).toEqual({ follow: true, index: true });
-    expectRouteFile("../app/biomarkers/[biomarkerId]/opengraph-image.tsx");
   });
 
   it("experiment research keeps the parent experiment card", async () => {
