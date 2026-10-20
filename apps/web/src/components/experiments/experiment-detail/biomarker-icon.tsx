@@ -2,8 +2,8 @@ import type { ReactNode } from "react";
 
 import { cn } from "@/src/lib/utils";
 
-// Single-stroke line-art glyphs authored to share a visual register with the
-// existing Quiver About icons. Uses `currentColor` so callers control hue.
+// Single-stroke line-art glyphs for experiment signals.
+// Uses `currentColor` so callers control hue.
 const ICONS: Record<string, ReactNode> = {
   // Heart outline with a single ECG pulse threaded through it.
   "resting-heart-rate": (

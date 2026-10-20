@@ -91,10 +91,9 @@ const MURPH_CONTACT_CARD_AVATAR_TRACE_INCLUDES = [
 // conservatively expands that fallback search to every generated Web artifact,
 // so Goal functions must explicitly discard projection families they never read.
 const HEALTH_COMMONS_GOAL_TRACE_EXCLUDES = [
-  "../../packages/health-commons/generated/web/browse/biomarkers.json",
+  "../../packages/health-commons/generated/biomarker-desired-directions.json",
   "../../packages/health-commons/generated/web/browse/experiments.json",
   "../../packages/health-commons/generated/web/bundles/**/*.json",
-  "../../packages/health-commons/generated/web/pages/biomarkers/**/*.json",
   "../../packages/health-commons/generated/web/shell/**/*.json",
   "../../packages/health-commons/generated/web/tabs/**/*.json",
 ];
@@ -433,12 +432,6 @@ export function buildHostedWebNextConfig(
       ],
       "/api/hosted-onboarding/telegram/webhook": [
         ...HEALTH_COMMONS_GOAL_INDEX_TRACE_INCLUDES,
-      ],
-      "/biomarkers": [
-        "../../packages/health-commons/generated/web/browse/biomarkers.json",
-        "../../packages/health-commons/generated/web/routes/index.json",
-        "../../packages/health-commons/generated/web/shell/biomarkers/**/*.json",
-        "../../packages/health-commons/generated/web/pages/biomarkers/**/*.json",
       ],
       "/measurement-methods/[measurementMethodId]": [
         "../../packages/health-commons/generated/web/routes/index.json",
