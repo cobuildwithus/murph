@@ -7,6 +7,7 @@ import type { HostedRuntimeOwnerSnapshot } from "@murphai/hosted-execution/runti
 import { ContainerProxy } from "./stubs/cloudflare-containers.ts";
 import { settleWaitUntilForTest } from "./stubs/cloudflare-workers.ts";
 import { describe, expect, it, vi, afterEach, beforeEach } from "vitest";
+import { sanitizeHostedExecutionStructuredLogDetails } from "@murphai/hosted-execution";
 import {
   buildExaResearchScoutOutputSchema,
   buildExaResearchScoutBatchLaneRequest,
@@ -477,6 +478,75 @@ describe("hostedRunnerIntercept", () => {
     expect(HOSTED_RUNNER_OUTBOUND_BY_HOST["host.docker.internal"])
       .toBe(handleHostedRunnerOpenInternetOutbound);
     expect(HOSTED_RUNNER_OUTBOUND_BY_HOST["unexpected.example.test"]).toBeUndefined();
+  });
+
+  it.each([
+    { nativeState: "pending", status: 503, rejectReason: "usage_settlement_pending", runtimeAttemptId: "attempt_synthetic_native" },
+    { nativeState: "absent", status: 401, rejectReason: "bound_container_inactive", runtimeAttemptId: undefined },
+    { nativeState: "retiring", status: 401, rejectReason: "bound_container_inactive", runtimeAttemptId: undefined },
+    { nativeState: "active", status: 200, rejectReason: undefined, runtimeAttemptId: undefined },
+  ])("joins only settlement-pending provider diagnostics to native authority ($nativeState)", async ({
+    nativeState, status, rejectReason, runtimeAttemptId,
+  }) => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response("ok"));
+    vi.stubGlobal("fetch", fetchMock);
+    const response = await hostedRunnerIntercept(
+      createAuthorizedOpenAiModelsRequest({ headers: {
+        [HOSTED_RUNTIME_ATTEMPT_ID_HEADER]: "attempt_spoofed",
+        [HOSTED_RUNTIME_LEASE_GENERATION_HEADER]: "987",
+        [HOSTED_RUNTIME_WORKSPACE_VERSION_HEADER]: "654",
+        [HOSTED_RUNNER_BOUND_USER_ID_HEADER]: "member_spoofed",
+        [HOSTED_RUNTIME_FETCH_CORRELATION_ID_HEADER]: "11111111-1111-4111-8111-111111111111",
+      } }),
+      createInterceptEnv({
+        OPENAI_API_KEY: "synthetic-worker-secret",
+        providerContext: async ({ userId }) => nativeState === "absent" ? { owns: false } : {
+          ...createProviderEgressTokenValidationResult({ userId }),
+          attemptId: "attempt_synthetic_native",
+        },
+        settlementPending: nativeState === "pending",
+        retiring: nativeState === "retiring",
+      }),
+      { className: "RunnerContainer", containerId: "synthetic-container" },
+    );
+
+    expect(response.status).toBe(status);
+    expect(response.headers.get("retry-after")).toBe(status === 503 ? "1" : null);
+    expect(await response.text()).toBe(status === 503 ? "Usage settlement pending."
+      : status === 401 ? "Unauthorized" : "ok");
+    expect(fetchMock).toHaveBeenCalledTimes(status === 200 ? 1 : 0);
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledTimes(1);
+    const entry = mocks.emitHostedExecutionStructuredLog.mock.calls[0]![0];
+    expect(entry).toStrictEqual({
+      component: "runner",
+      details: {
+        host: "api.openai.com",
+        method: "GET",
+        providerKind: "openai",
+        providerRequestAuthorized: status === 200,
+        providerTotalDurationMs: expect.any(Number),
+        providerUpstreamDurationMs: status === 200 ? expect.any(Number) : null,
+        providerEgressAuthDurationMs: expect.any(Number),
+        providerEgressAuthMode: "native_container",
+        ...(runtimeAttemptId ? { runtimeAttemptId } : {}),
+        responseOk: status === 200,
+        responseStatus: status,
+        providerBearerCredentialKind: "sentinel",
+        userIdPresent: nativeState !== "absent",
+        writeFenceMetadataPresent: nativeState !== "absent",
+        writeFenceValidationDurationMs: expect.any(Number),
+        writeFenceValidationMode: "native_container",
+        ...(rejectReason ? {
+          providerEgressRejectReason: rejectReason,
+          writeFenceValidationRejectReason: rejectReason,
+        } : {}),
+      },
+      level: status === 200 ? "info" : "warn",
+      message: "Hosted runner provider egress completed.",
+      phase: "wake.running",
+    });
+    expect(sanitizeHostedExecutionStructuredLogDetails(entry.details)?.runtimeAttemptId)
+      .toBe(runtimeAttemptId);
   });
 
   it("denies OpenAI provider egress when platform AI usage is unavailable", async () => {
@@ -5821,7 +5891,7 @@ describe("hostedRunnerIntercept", () => {
     expect(mocks.emitHostedExecutionStructuredLog).not.toHaveBeenCalled();
   });
 
-  it.each(["not-a-uuid", "11111111-1111-1111-1111-111111111111"])(
+  it.each(["", "not-a-uuid", "11111111-1111-1111-1111-111111111111"])(
     "omits malformed typing correlation metadata (%s) without changing egress", async (id) => {
       const upstream = vi.fn<typeof fetch>(async () => new Response(null, { status: 204 }));
       vi.stubGlobal("fetch", upstream);
@@ -5837,6 +5907,8 @@ describe("hostedRunnerIntercept", () => {
       const log = mocks.emitHostedExecutionStructuredLog.mock.calls.find(([entry]) =>
         entry.message === "Hosted runner provider egress completed.")?.[0];
       expect(log.details).not.toHaveProperty("providerFetchCorrelationId");
+      expect(log.details).not.toHaveProperty("runtimeAttemptId");
+      expect(log.details).not.toHaveProperty("providerWorkerStartedAtEpochMs");
     },
   );
 
@@ -7391,6 +7463,8 @@ function createInterceptEnv(input: {
     userId: string;
   }) => Promise<boolean>;
   providerContext?: (input: { userId: string }) => Promise<TestProviderContext>;
+  settlementPending?: boolean;
+  retiring?: boolean;
   XAI_API_KEY?: string;
 }): RunnerOutboundEnvironmentSource {
   const env: RunnerOutboundEnvironmentSource = {
@@ -7433,7 +7507,8 @@ function createInterceptEnv(input: {
             generation: validation.leaseGeneration, workspaceVersion: validation.workspaceVersion,
             platformAiUsageAllowed: !state.revoked && (!("platformAiUsageAllowed" in validation) || validation.platformAiUsageAllowed !== false) };
           state.owner = owner;
-          return { ...owner, attemptId: validation.attemptId, workspaceVersion: validation.workspaceVersion, settlementPending: false, retiring: false };
+          return { ...owner, attemptId: validation.attemptId, workspaceVersion: validation.workspaceVersion,
+            settlementPending: input.settlementPending ?? false, retiring: input.retiring ?? false };
         },
         readActiveRuntimeUserFence:
           input.readActiveRuntimeUserFence

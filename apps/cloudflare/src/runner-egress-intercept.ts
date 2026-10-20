@@ -2709,7 +2709,7 @@ function emitHostedProviderEgressDiagnostic(input: {
       providerUpstreamDurationMs: input.upstreamDurationMs,
       providerEgressAuthDurationMs: input.authorization.durationMs,
       providerEgressAuthMode: input.authorization.mode,
-      ...readTypingFetchCorrelationDetails(input),
+      ...readProviderEgressCorrelationDetails(input),
       ...(input.providerOperation ? { providerOperation: input.providerOperation } : {}),
       responseOk: input.response?.ok ?? null,
       responseStatus: input.response?.status ?? null,
@@ -2783,16 +2783,21 @@ function readSafeCloudflareRay(value: string | null): string | null {
     : null;
 }
 
-function readTypingFetchCorrelationDetails(
+function readProviderEgressCorrelationDetails(
   input: Parameters<typeof emitHostedProviderEgressDiagnostic>[0],
 ): Record<string, string | number | null> {
-  if (input.providerKind !== "linq" || input.providerOperation !== "typing_start") return {};
+  const pendingAttemptDetails: Record<string, string> =
+    input.authorization.rejectReason === "usage_settlement_pending"
+      && input.authorization.writeFence
+      ? { runtimeAttemptId: input.authorization.writeFence.attemptId }
+      : {};
+  if (input.providerKind !== "linq" || input.providerOperation !== "typing_start") return pendingAttemptDetails;
   const correlationId = readHostedRuntimeFetchCorrelationId(input.request.headers);
   return correlationId ? {
     providerFetchCorrelationId: correlationId,
     runtimeAttemptId: input.authorization.writeFence?.attemptId ?? null,
     providerWorkerStartedAtEpochMs: input.startedAt,
-  } : {};
+  } : pendingAttemptDetails;
 }
 
 function stripHostedRuntimeAuthorityHeaders(headers: Headers): Headers {
