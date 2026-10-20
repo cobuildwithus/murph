@@ -2,8 +2,6 @@ import assert from "node:assert/strict";
 
 import { test } from "vitest";
 
-import { createBrowserVaultQueryClient } from "@murphai/query/browser";
-import { selectEnvironmentHabitatValues } from "../app/(dashboard)/environment/habitat-values";
 import { buildDevelopmentPersonaReplica } from "@/src/lib/browser-vault/development-personas.server";
 import { DEVELOPMENT_PERSONAS } from "@/src/lib/browser-vault/development-personas";
 
@@ -169,15 +167,7 @@ test("Oura persona joins meals, travel, and environment context into one private
     events.some((event) => event.title === "Bedroom temperature changed"),
     true,
   );
-  assert.equal(
-    replica.entities.some((entity) => entity.family === "habitat"),
-    true,
-  );
-  const environment = selectEnvironmentHabitatValues(
-    createBrowserVaultQueryClient(replica),
-  );
-  assert.equal(environment["sleep-environment"]?.night_temp_c, 18);
-  assert.equal(environment["home-location"]?.location, "Warsaw");
+
 });
 
 test("Active persona has varied recent context without wearable outcomes", async () => {

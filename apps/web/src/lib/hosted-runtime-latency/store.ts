@@ -22,6 +22,13 @@ import {
   createHostedLinqDeliverySourceRefLookupKey,
 } from "../hosted-onboarding/linq-observability-identifiers";
 import {
+  LINQ_PRODUCTION_CANARY_DIAGNOSTIC_STALE_MS,
+  LINQ_PRODUCTION_CANARY_DIAGNOSTIC_TRACE_LIMIT,
+  LINQ_PRODUCTION_CANARY_DIAGNOSTIC_WINDOW_MS,
+  type LinqProductionCanaryDiagnostics,
+  type LinqProductionCanaryLatencyTrace,
+} from "../hosted-onboarding/linq-production-canary-contract";
+import {
   isHostedRuntimeLogDatabaseConfigured,
 } from "../hosted-runtime-log/database";
 import {
@@ -1393,6 +1400,91 @@ function collectNonnegativeObservedLatency(
   if (startMs !== null && endMs !== null && endMs >= startMs) {
     durations.push(endMs - startMs);
   }
+}
+
+const CANARY_LATENCY_SELECT = {
+  webhookReceivedAt: true,
+  acceptedAt: true,
+  assistantInputStagedAt: true,
+  providerStartAt: true,
+  linqDelivery: {
+    select: { source: true, attemptedAt: true, acceptedAt: true, deliveredAt: true },
+  },
+} as const satisfies Prisma.HostedIngressLatencyTraceSelect;
+
+/** The caller owns fixed-canary authority and revalidation; no dashboard/log scan. */
+export async function readHostedLinqProductionCanaryLatencyDiagnostics(input: {
+  memberId: string;
+  prisma: { hostedIngressLatencyTrace: Pick<PrismaClient["hostedIngressLatencyTrace"], "findMany"> };
+}): Promise<LinqProductionCanaryDiagnostics> {
+  const now = Date.now();
+  const rows = await input.prisma.hostedIngressLatencyTrace.findMany({
+    where: {
+      userId: input.memberId,
+      source: "linq",
+      acceptedAt: { gte: new Date(now - LINQ_PRODUCTION_CANARY_DIAGNOSTIC_WINDOW_MS), lte: new Date(now) },
+    },
+    orderBy: { acceptedAt: "desc" },
+    take: LINQ_PRODUCTION_CANARY_DIAGNOSTIC_TRACE_LIMIT + 1,
+    select: CANARY_LATENCY_SELECT,
+  });
+  return {
+    status: rows.length === 0 ? "empty" : rows.length === 1 ? "observed" : "ambiguous",
+    failedTurnMatched: false,
+    truncated: rows.length > LINQ_PRODUCTION_CANARY_DIAGNOSTIC_TRACE_LIMIT,
+    traces: rows.slice(0, LINQ_PRODUCTION_CANARY_DIAGNOSTIC_TRACE_LIMIT)
+      .map((row) => projectCanaryLatencyTrace(row, now)),
+  };
+}
+
+function projectCanaryLatencyTrace(
+  row: Prisma.HostedIngressLatencyTraceGetPayload<{ select: typeof CANARY_LATENCY_SELECT }>,
+  now: number,
+): LinqProductionCanaryLatencyTrace {
+  const delivery = row.linqDelivery;
+  // A welcome's continuation may acquire provider milestones after its instant
+  // reply. Only delivery origin establishes that bypass; absent milestones do not.
+  const instantReply = delivery?.source === "hosted_web_instant_first_turn";
+  const intervals: Record<string, readonly [Date | null | undefined, Date | null | undefined]> = {
+    ageMs: [row.acceptedAt, new Date(now)],
+    ingressMs: [row.webhookReceivedAt, row.acceptedAt],
+    ...(instantReply ? {
+      acceptedToDeliveryAttemptMs: [row.acceptedAt, delivery.attemptedAt] as const,
+    } : {
+      preRuntimeMs: [row.acceptedAt, row.assistantInputStagedAt] as const,
+      runtimeToProviderMs: [row.assistantInputStagedAt, row.providerStartAt] as const,
+      providerToDeliveryMs: [row.providerStartAt, delivery?.attemptedAt] as const,
+    }),
+    deliveryAcceptMs: [delivery?.attemptedAt, delivery?.acceptedAt],
+    deliveryReceiptMs: [delivery?.acceptedAt, delivery?.deliveredAt],
+    deliveredAgeMs: [delivery?.deliveredAt, new Date(now)],
+  };
+  const durations = Object.fromEntries(Object.entries(intervals).flatMap(([key, [start, end]]) => {
+    const duration = boundedCanaryLatencyMs(start, end, now);
+    return duration === undefined ? [] : [[key, duration]];
+  }));
+  return {
+    stage: instantReply ? "instant_reply" : delivery ? "delivery_observation"
+      : row.providerStartAt ? "runtime_provider" : "pre_runtime",
+    stale: durations.ageMs > LINQ_PRODUCTION_CANARY_DIAGNOSTIC_STALE_MS,
+    incomplete: Object.keys(durations).length !== Object.keys(intervals).length,
+    ...durations,
+  };
+}
+
+function boundedCanaryLatencyMs(
+  start: Date | null | undefined,
+  end: Date | null | undefined,
+  now: number,
+): number | undefined {
+  const startMs = start?.getTime() ?? null;
+  const endMs = end?.getTime() ?? null;
+  if (startMs === null || endMs === null || endMs > now || hasNegativeLatencyInterval(startMs, endMs)) {
+    return undefined;
+  }
+  const duration = endMs - startMs;
+  return Number.isSafeInteger(duration) && duration <= LINQ_PRODUCTION_CANARY_DIAGNOSTIC_WINDOW_MS
+    ? duration : undefined;
 }
 
 export async function readHostedIngressLatencyDashboard(

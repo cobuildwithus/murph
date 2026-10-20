@@ -159,15 +159,9 @@ import {
 } from "@/src/components/settings/hosted-data-privacy-settings";
 import { HOSTED_STRIPE_EFFECT_PENDING_MESSAGE } from "@/src/lib/hosted-onboarding/errors";
 import { VitalConnectionDialog } from "../(dashboard)/connect/connect-page-dialogs";
-import {
-  EnvironmentCaptureCard,
-  EnvironmentEmptyState,
-  EnvironmentVoiceRefreshNotice,
-} from "../(dashboard)/environment/environment-page-client";
 import { GroupPrivateConversions } from "../(dashboard)/ops/growth/group-private-conversions";
 import { PublicComparisonTableStudy } from "./public-comparison-table-study";
 import type { HostedGrowthDashboard } from "@/src/lib/hosted-ops/growth-metrics";
-import type { EnvironmentVoiceScript } from "../(dashboard)/environment/environment-voice-script";
 import { ImessageChallengeStandingsCardStudy } from "./imessage-challenge-standings-card-study";
 import { ImessageNutritionCardStudy } from "./imessage-nutrition-card-study";
 import { ImessageCompactTableCardStudy } from "./imessage-compact-table-card-study";
@@ -181,30 +175,6 @@ import { DashboardSidebarStudy } from "./dashboard-sidebar-study";
 
 const DESIGN_SIGNED_GROUP_FUNDING_ENDPOINT =
   "/api/groups/fund/gf1.design_group_runtime.synthetic_funding_signature";
-
-const DESIGN_ENVIRONMENT_GAP_SCRIPT: EnvironmentVoiceScript = {
-  dialogTitle: "Fill the gaps in your report",
-  flow: "fill-gaps",
-  idleTitle: "Only the missing details",
-  topics: [
-    {
-      eyebrow: "Sleep",
-      focus: ["Bedroom CO₂"],
-      id: "sleep",
-      prompt:
-        "Cover only the details Murph is still missing. If something does not apply or you would rather skip it, say so.",
-      title: "Your sleep setup",
-    },
-    {
-      eyebrow: "Workspace",
-      focus: ["Breaks"],
-      id: "workspace",
-      prompt:
-        "Cover only the details Murph is still missing. If something does not apply or you would rather skip it, say so.",
-      title: "Your remaining workspace details",
-    },
-  ],
-};
 
 function Section({
   children,
@@ -833,103 +803,6 @@ export function ComponentsContent() {
             </div>
           </div>
         </Section>
-
-        <Separator />
-
-        <div
-          data-design-component="environment-empty-state"
-          id="environment-empty-state-component"
-        >
-          <Section title="Environment empty state">
-            <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
-              Production zero-data state. One voice-first action leads to the
-              walkthrough, while the real report categories preview what Murph
-              will build without showing empty scores or missing facts.
-            </p>
-            <EnvironmentEmptyState
-              contactOptions={[
-                {
-                  href: "sms:+15555550100?body=I%20want%20to%20update%20what%20you%20know%20about%20my%20home%20environment.",
-                  kind: "text",
-                  label: "Messages",
-                },
-                {
-                  href: "https://t.me/withmurph_bot",
-                  kind: "telegram",
-                  label: "Telegram",
-                },
-              ]}
-            />
-          </Section>
-        </div>
-
-        <Separator />
-
-        <div
-          data-design-component="environment-capture-card"
-          id="environment-capture-card-component"
-          inert
-        >
-          <Section title="Environment progressive capture">
-            <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
-              Production partial-data state. The action opens a voice script
-              built only from facts Murph still does not know.
-            </p>
-            <EnvironmentCaptureCard
-              contactOptions={[]}
-              coverage={70}
-              known={21}
-              script={DESIGN_ENVIRONMENT_GAP_SCRIPT}
-            />
-          </Section>
-        </div>
-
-        <Separator />
-
-        <div
-          data-design-component="environment-voice-refresh-notice"
-          id="environment-voice-refresh-notice-component"
-          inert
-        >
-          <Section title="Environment voice processing feedback">
-            <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
-              The open report keeps ownership after upload: processing,
-              private-report refresh, updated, no-clear-facts, and delayed
-              recovery remain visible without requiring a reload. Processing
-              stays animated, and the delayed action rechecks the owned phase.
-            </p>
-            <div className="grid gap-4">
-              <EnvironmentVoiceRefreshNotice
-                state={{ baselineValues: "{}", status: "processing" }}
-                onCheckAgain={() => {}}
-              />
-              <EnvironmentVoiceRefreshNotice
-                state={{
-                  factsAdded: 3,
-                  factsChanged: true,
-                  remainingDetails: 4,
-                  remainingTopics: 2,
-                  status: "updated",
-                }}
-                onCheckAgain={() => {}}
-              />
-              <EnvironmentVoiceRefreshNotice
-                state={{
-                  factsAdded: 0,
-                  factsChanged: false,
-                  remainingDetails: 4,
-                  remainingTopics: 2,
-                  status: "updated",
-                }}
-                onCheckAgain={() => {}}
-              />
-              <EnvironmentVoiceRefreshNotice
-                state={{ status: "delayed" }}
-                onCheckAgain={() => {}}
-              />
-            </div>
-          </Section>
-        </div>
 
         <Separator />
 

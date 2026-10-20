@@ -12,8 +12,6 @@ test.each([
   ["/home", ["core"]],
   ["/overview", ["core"]],
   ["/history", ["core"]],
-  ["/environment", ["core"]],
-  ["/environment/print", ["core"]],
   ["/settings", ["core"]],
 ] as const)("plans core-only Browser Vault data for %s", (pathname, expected) => {
   assert.deepEqual(planBrowserVaultRouteShards(pathname), expected);

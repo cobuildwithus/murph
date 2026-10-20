@@ -4211,46 +4211,15 @@ Admission rules, the 50-message cap, first-response closure, journaling, and
 delivery are unchanged, and a dropped stream is not evidence that provider
 generation or billing stopped.
 
-The Environment walkthrough reuses that execution plane without turning audio
-into a chat attachment. Authenticated Web validates and stages one bounded
-application-encrypted recording under the member's opaque R2 namespace, then
-appends a pointer-only `environment-voice.captured` system mailbox wake. The
-first-seen admission uses the existing AI-usage gate and the member lock limits
-each member to one unconsumed Environment recording; exact capture retries
-resolve idempotently even when they arrive later. The write-fenced runtime
-verifies the staged bytes, applies the three-minute media cap during ffmpeg
-preparation, transcribes through the existing Worker-owned transcription effect,
-and gives the transcript only to a silent Habitat-scoped maintenance turn.
-Canonical Habitat writes checkpoint through the ordinary workspace owner before
-a post-checkpoint effect deletes the recording; failed work remains retryable
-and the 24-hour R2 lifecycle is only a cleanup backstop. Neither audio nor
-transcript becomes assistant conversation history, an outbound message, or
-Browser Vault product truth. The open page captures its displayed Habitat values
-before the recording upload. After the durable voice job finishes, that page
-uses the existing Browser Vault runtime-refresh request owner in its post-request
-mode. The provider excludes already-running ordinary reads, treats the explicit
-refresh response as the request-local admission boundary, and remains pending
-until a later replica ref is published; only then may the page distinguish
-changed Habitat facts from a completed recording with no clear new facts.
-The one-minute delayed notice is presentation-only: it does not retire that
-causal fence. Environment-owned runtime-refresh observation stops after a
-bounded five-minute window while retaining the original admission boundary;
-independent session-freshness polling may continue when the server reports its
-own pending work, but it cannot replace or re-signal that boundary. Check again
-first performs an ordinary read; if that read still returns the admitted
-replica, it opens another bounded window and sends at most one idempotent refresh
-signal for the same boundary. A newer replica completes without another signal,
-and repeated checks within one window cannot create duplicate refresh pressure.
-Delayed and reload recovery reuse the same voice-processing and replica-refresh
-owners, with no second result store.
-
-Environment live weather and outdoor-air context uses the fixed OpenWeather
-geocoding, current-weather, and current-air-pollution endpoints directly from
-Web with the server-owned key. The authenticated same-origin route caches the
-public city-to-coordinate result for 30 days and the combined current
-conditions for 10 minutes; weather and air reads run in parallel on a cache
-miss. Cache keys contain normalized city or coordinates, never the provider key
-or member identity, and the results remain transient rather than Habitat facts.
+Habitat remains canonical member context in `bank/habitat`, accessed through
+ordinary assistant conversations, the vault CLI, and canonical query owners.
+Browser replicas omit Habitat records because their only consumer was Environment. The retired Environment dashboard has no dedicated interview, voice,
+report, or live-conditions execution path. The existing retired-mailbox registry
+keeps old event metadata readable and skips unimported rows without fetching
+their payload. The saved system-mailbox reader discards retired wakes before
+parsing obsolete payloads, actions or completion records, preserving active
+successors and handled-prefix progress without a pre-deploy drain. Existing staged recordings retain
+only the legacy member-prefix deletion sweep and R2 expiry safety.
 
 Hosted dynamic image generation launches as invocation-local background work so
 the current tool call returns immediately. Provider work stays detached, while

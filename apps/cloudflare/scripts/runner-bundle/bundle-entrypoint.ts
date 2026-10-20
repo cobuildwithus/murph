@@ -78,14 +78,6 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // measured 9,979,011B. Ratchet the total baseline to that measurement and
 // retain the established 32KB allowance.
 //
-// Private Environment voice processing reuses the existing hosted-runtime,
-// parser, and vault paths, but keeps the capture-to-checkpoint handling in the
-// static runner graph. CI measured an 8,196,760B static closure and macOS
-// measured 9,894,078B total on 2026-07-30. After rebasing both changes together,
-// the final macOS assembly measured 9,971,103B total and an 8,295,095B static
-// closure. No forbidden subsystem entered the boot graph. Preserve that static
-// measurement alongside main's higher cross-platform total measurement.
-//
 // Daily-nutrition response cards and the durable Linq app-card text fallback
 // extend the existing assistant, hosted-runtime, and provider paths without
 // adding a forbidden boot input. CI measured 10,020,882B total on 2026-07-31.
@@ -151,7 +143,7 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // while retaining the established cross-platform tolerances.
 //
 // Lazy-loading the rare hosted wake handlers then removes their uncommon
-// activation, notification, ask-completion, Environment voice, and Codex-auth
+// activation, notification, ask-completion, and Codex-auth
 // paths from the static boot closure. After merging the Zod runtime change and
 // current main, exact macOS assembly measured a 1,640,840B entry, 8,053,604B
 // static closure, and 9,885,077B total on 2026-08-07. Ratchet both startup-path
@@ -355,7 +347,6 @@ const RUNNER_ENTRYPOINT_FORBIDDEN_BOOT_INPUT_MARKERS = [
   "/assistant-engine/dist/assistant-codex/dynamic-tools.js",
   "/assistant-runtime/dist/hosted-runtime/events/assistant-notification.js",
   "/assistant-runtime/dist/hosted-runtime/events/assistant-ask-completion.js",
-  "/assistant-runtime/dist/hosted-runtime/events/environment-voice.js",
   "node_modules/zod/v4/locales/",
 ] as const;
 

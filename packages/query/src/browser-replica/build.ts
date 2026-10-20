@@ -453,16 +453,6 @@ function projectEntityAttributes(
   if (entity.family === "event") {
     return projectSafeEventAttributes(entity, generatedAt);
   }
-  if (entity.family === "habitat") {
-    return projectSafeAttributeKeys(entity, [
-      "aspect",
-      "domain",
-      "indicators",
-      "indicatorNotes",
-      "indicatorRecordedAt",
-      "note",
-    ]);
-  }
 
   return projectSafeAttributes(entity);
 }

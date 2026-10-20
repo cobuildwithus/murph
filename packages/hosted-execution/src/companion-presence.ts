@@ -4,8 +4,8 @@ export const COMPANION_FOREGROUND_TTL_MS = 45_000;
 export const companionHeartbeatSchema = z.object({ state: z.enum(["foreground", "background"]) }).strict();
 export const companionPresenceSchema = z.object({
   status: z.enum(["recently_active", "unreachable", "unknown"]),
-  lastContactAt: z.string().datetime().nullable(),
-  lastForegroundAt: z.string().datetime().nullable(),
+  lastContactAt: z.isoDateTime().nullable(),
+  lastForegroundAt: z.isoDateTime().nullable(),
 }).strict();
 export type CompanionPresence = z.infer<typeof companionPresenceSchema>;
 

@@ -189,9 +189,6 @@ importers:
       jose:
         specifier: ^6.2.3
         version: 6.2.3
-      openai:
-        specifier: 6.45.0
-        version: 6.45.0(ws@8.21.0(bufferutil@4.1.0)(utf-8-validate@6.0.6))(zod@4.5.4)
     devDependencies:
       '@cloudflare/vitest-pool-workers':
         specifier: ^0.16.3
@@ -521,7 +518,7 @@ importers:
         version: link:../vault-usecases
       openai:
         specifier: 6.45.0
-        version: 6.45.0(ws@8.21.0(bufferutil@4.1.0)(utf-8-validate@6.0.6))(zod@4.4.3)
+        version: 6.45.0(ws@8.21.0(bufferutil@4.1.0)(utf-8-validate@6.0.6))(zod@4.5.4)
     devDependencies:
       '@openai/codex':
         specifier: 0.163.0
@@ -539,8 +536,8 @@ importers:
         specifier: 8.21.0
         version: 8.21.0(bufferutil@4.1.0)(utf-8-validate@6.0.6)
       zod:
-        specifier: ^4.4.3
-        version: 4.4.3
+        specifier: ^4.5.4
+        version: 4.5.4
 
   packages/assistant-runtime:
     dependencies:
@@ -726,7 +723,7 @@ importers:
         version: 1.0.3
       openai:
         specifier: 6.45.0
-        version: 6.45.0(ws@8.21.0(bufferutil@4.1.0)(utf-8-validate@6.0.6))(zod@4.4.3)
+        version: 6.45.0(ws@8.21.0(bufferutil@4.1.0)(utf-8-validate@6.0.6))(zod@4.5.4)
       patch-console:
         specifier: ^2.0.0
         version: 2.0.0
@@ -779,8 +776,8 @@ importers:
         specifier: ~3.2.1
         version: 3.2.1
       zod:
-        specifier: ^4.4.3
-        version: 4.4.3
+        specifier: ^4.5.4
+        version: 4.5.4
       zxing-wasm:
         specifier: 3.0.3
         version: 3.0.3(@types/emscripten@1.41.5)
@@ -799,8 +796,8 @@ importers:
         version: link:../contracts
     devDependencies:
       zod:
-        specifier: ^4.4.3
-        version: 4.4.3
+        specifier: ^4.5.4
+        version: 4.5.4
 
   packages/cloudflare-hosted-control:
     dependencies:
@@ -817,8 +814,8 @@ importers:
   packages/contracts:
     dependencies:
       zod:
-        specifier: ^4.4.3
-        version: 4.4.3
+        specifier: ^4.5.4
+        version: 4.5.4
 
   packages/core:
     dependencies:
@@ -868,8 +865,8 @@ importers:
   packages/gateway-core:
     dependencies:
       zod:
-        specifier: ^4.4.3
-        version: 4.4.3
+        specifier: ^4.5.4
+        version: 4.5.4
     devDependencies:
       typescript:
         specifier: ^7.0.2
@@ -932,8 +929,8 @@ importers:
         specifier: workspace:*
         version: link:../runtime-state
       zod:
-        specifier: ^4.4.3
-        version: 4.4.3
+        specifier: ^4.5.4
+        version: 4.5.4
 
   packages/hosted-local-harness:
     dependencies:
@@ -966,8 +963,8 @@ importers:
         specifier: ^5.1.24
         version: 5.1.24
       zod:
-        specifier: ^4.4.3
-        version: 4.4.3
+        specifier: ^4.5.4
+        version: 4.5.4
 
   packages/inbox-services:
     dependencies:
@@ -997,8 +994,8 @@ importers:
         version: link:../vault-usecases
     devDependencies:
       zod:
-        specifier: ^4.4.3
-        version: 4.4.3
+        specifier: ^4.5.4
+        version: 4.5.4
 
   packages/inboxd:
     dependencies:
@@ -1059,8 +1056,8 @@ importers:
         version: 1.0.3
     devDependencies:
       zod:
-        specifier: ^4.4.3
-        version: 4.4.3
+        specifier: ^4.5.4
+        version: 4.5.4
 
   packages/parsers:
     dependencies:
@@ -1090,8 +1087,8 @@ importers:
         version: link:../runtime-state
     devDependencies:
       zod:
-        specifier: ^4.4.3
-        version: 4.4.3
+        specifier: ^4.5.4
+        version: 4.5.4
 
   packages/runtime-state: {}
 
@@ -1163,8 +1160,8 @@ importers:
         version: link:../runtime-state
     devDependencies:
       zod:
-        specifier: ^4.4.3
-        version: 4.4.3
+        specifier: ^4.5.4
+        version: 4.5.4
 
 packages:
 
@@ -10871,9 +10868,6 @@ packages:
   zod@4.3.6:
     resolution: {integrity: sha512-rftlrkhHZOcjDwkGlnUtZZkvaPHCsDATp4pGpuOOMDaTdDDXF91wuVDJoWoPsKX/3YPQ5fHuF3STjcYyKr+Qhg==}
 
-  zod@4.4.3:
-    resolution: {integrity: sha512-ytENFjIJFl2UwYglde2jchW2Hwm4GJFLDiSXWdTrJQBIN9Fcyp7n4DhxJEiWNAJMV1/BqWfW/kkg71UDcHJyTQ==}
-
   zod@4.5.4:
     resolution: {integrity: sha512-sC95tT5iHHH9gtpj6A81kh+NEaRAUFN+qlUPDUbRfOMvNf5QCBqsb3WgvnpVtK5Y+4UfA6KqufotuTvMGiTlsA==}
 
@@ -12570,7 +12564,7 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  '@modelcontextprotocol/sdk@1.29.0(@cfworker/json-schema@4.1.1)(zod@4.4.3)':
+  '@modelcontextprotocol/sdk@1.29.0(@cfworker/json-schema@4.1.1)(zod@4.5.4)':
     dependencies:
       '@hono/node-server': 1.19.14(hono@4.12.25)
       ajv: 8.20.0
@@ -12587,8 +12581,8 @@ snapshots:
       json-schema-typed: 8.0.2
       pkce-challenge: 5.0.1
       raw-body: 3.0.2
-      zod: 4.4.3
-      zod-to-json-schema: 3.25.2(zod@4.4.3)
+      zod: 4.5.4
+      zod-to-json-schema: 3.25.2(zod@4.5.4)
     optionalDependencies:
       '@cfworker/json-schema': 4.1.1
     transitivePeerDependencies:
@@ -12596,13 +12590,13 @@ snapshots:
 
   '@modelcontextprotocol/server@2.0.0-alpha.2(@cfworker/json-schema@4.1.1)':
     dependencies:
-      zod: 4.4.3
+      zod: 4.5.4
     optionalDependencies:
       '@cfworker/json-schema': 4.1.1
 
   '@modelcontextprotocol/server@2.0.0-alpha.4':
     dependencies:
-      zod: 4.4.3
+      zod: 4.5.4
 
   '@msgpack/msgpack@3.1.2': {}
 
@@ -15171,7 +15165,7 @@ snapshots:
       typescript: 5.9.3
       uncrypto: 0.1.3
       vcf: 2.1.2
-      zod: 4.4.3
+      zod: 4.5.4
     transitivePeerDependencies:
       - supports-color
 
@@ -15186,7 +15180,7 @@ snapshots:
       nice-grpc: 2.1.17
       nice-grpc-common: 2.0.4
       typescript: 5.9.3
-      zod: 4.4.3
+      zod: 4.5.4
     transitivePeerDependencies:
       - supports-color
 
@@ -17273,10 +17267,10 @@ snapshots:
       typescript: 5.9.3
       zod: 4.3.6
 
-  abitype@1.2.4(typescript@5.9.3)(zod@4.4.3):
+  abitype@1.2.4(typescript@5.9.3)(zod@4.5.4):
     optionalDependencies:
       typescript: 5.9.3
-      zod: 4.4.3
+      zod: 4.5.4
 
   abort-controller-x@0.5.0: {}
 
@@ -18601,8 +18595,8 @@ snapshots:
       '@babel/parser': 7.29.3
       eslint: 9.39.4(jiti@2.7.0)
       hermes-parser: 0.25.1
-      zod: 4.4.3
-      zod-validation-error: 4.0.2(zod@4.4.3)
+      zod: 4.5.4
+      zod-validation-error: 4.0.2(zod@4.5.4)
     transitivePeerDependencies:
       - supports-color
 
@@ -19479,7 +19473,7 @@ snapshots:
       '@toon-format/toon': 2.2.0
       tokenx: 1.3.0
       yaml: 2.9.0
-      zod: 4.4.3
+      zod: 4.5.4
 
   incur@0.4.5(patch_hash=0205cee2a49c283710c432d91b890aeea525b3aa30bcef68fa16b293f71de8a3):
     dependencies:
@@ -19488,7 +19482,7 @@ snapshots:
       '@toon-format/toon': 2.2.0
       tokenx: 1.3.0
       yaml: 2.9.0
-      zod: 4.4.3
+      zod: 4.5.4
 
   incur@0.5.1(patch_hash=176de4224f3882268de92c7a86ff6ae0b56834d12bb90bf72dedeeef22e682d9):
     dependencies:
@@ -19498,7 +19492,7 @@ snapshots:
       '@toon-format/toon': 2.2.0
       tokenx: 1.3.0
       yaml: 2.9.0
-      zod: 4.4.3
+      zod: 4.5.4
 
   indent-string@4.0.0: {}
 
@@ -20552,11 +20546,6 @@ snapshots:
       ws: 8.21.0(bufferutil@4.1.0)(utf-8-validate@5.0.10)
       zod: 4.3.6
 
-  openai@6.45.0(ws@8.21.0(bufferutil@4.1.0)(utf-8-validate@6.0.6))(zod@4.4.3):
-    optionalDependencies:
-      ws: 8.21.0(bufferutil@4.1.0)(utf-8-validate@6.0.6)
-      zod: 4.4.3
-
   openai@6.45.0(ws@8.21.0(bufferutil@4.1.0)(utf-8-validate@6.0.6))(zod@4.5.4):
     optionalDependencies:
       ws: 8.21.0(bufferutil@4.1.0)(utf-8-validate@6.0.6)
@@ -20702,7 +20691,7 @@ snapshots:
     transitivePeerDependencies:
       - zod
 
-  ox@0.9.17(typescript@5.9.3)(zod@4.4.3):
+  ox@0.9.17(typescript@5.9.3)(zod@4.5.4):
     dependencies:
       '@adraffy/ens-normalize': 1.11.1
       '@noble/ciphers': 1.3.0
@@ -20710,7 +20699,7 @@ snapshots:
       '@noble/hashes': 1.8.0
       '@scure/bip32': 1.7.0
       '@scure/bip39': 1.6.0
-      abitype: 1.2.4(typescript@5.9.3)(zod@4.4.3)
+      abitype: 1.2.4(typescript@5.9.3)(zod@4.5.4)
       eventemitter3: 5.0.1
     optionalDependencies:
       typescript: 5.9.3
@@ -20977,9 +20966,9 @@ snapshots:
       hono: 4.12.25
       idb-keyval: 6.2.2
       mipd: 0.0.7(typescript@5.9.3)
-      ox: 0.9.17(typescript@5.9.3)(zod@4.4.3)
+      ox: 0.9.17(typescript@5.9.3)(zod@4.5.4)
       viem: 2.47.12(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@5.0.10)(zod@3.25.76)
-      zod: 4.4.3
+      zod: 4.5.4
       zustand: 5.0.13(@types/react@19.2.14)(immer@11.1.8)(react@19.2.6)(use-sync-external-store@1.4.0(react@19.2.6))
     optionalDependencies:
       '@tanstack/react-query': 5.95.2(react@19.2.6)
@@ -21382,7 +21371,7 @@ snapshots:
   repomix@1.16.0(@cfworker/json-schema@4.1.1)(typescript@7.0.2):
     dependencies:
       '@clack/prompts': 0.11.0
-      '@modelcontextprotocol/sdk': 1.29.0(@cfworker/json-schema@4.1.1)(zod@4.4.3)
+      '@modelcontextprotocol/sdk': 1.29.0(@cfworker/json-schema@4.1.1)(zod@4.5.4)
       '@repomix/strip-comments': 2.4.2
       '@repomix/tree-sitter-wasms': 0.1.17
       '@secretlint/core': 13.0.2
@@ -21408,7 +21397,7 @@ snapshots:
       tinypool: 2.1.0
       valibot: 1.4.1(typescript@7.0.2)
       web-tree-sitter: 0.26.9
-      zod: 4.4.3
+      zod: 4.5.4
     transitivePeerDependencies:
       - '@cfworker/json-schema'
       - supports-color
@@ -23284,13 +23273,13 @@ snapshots:
     dependencies:
       zod: 3.25.76
 
-  zod-to-json-schema@3.25.2(zod@4.4.3):
+  zod-to-json-schema@3.25.2(zod@4.5.4):
     dependencies:
-      zod: 4.4.3
+      zod: 4.5.4
 
-  zod-validation-error@4.0.2(zod@4.4.3):
+  zod-validation-error@4.0.2(zod@4.5.4):
     dependencies:
-      zod: 4.4.3
+      zod: 4.5.4
 
   zod@3.22.4: {}
 
@@ -23299,8 +23288,6 @@ snapshots:
   zod@4.1.11: {}
 
   zod@4.3.6: {}
-
-  zod@4.4.3: {}
 
   zod@4.5.4: {}
 

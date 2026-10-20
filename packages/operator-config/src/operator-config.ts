@@ -75,7 +75,7 @@ const assistantOperatorSharedFields = {
               usedPercent: z.number().min(0).max(100),
               remainingPercent: z.number().min(0).max(100),
               windowMinutes: z.number().int().positive().nullable(),
-              resetsAt: z.string().datetime({ offset: true }).nullable(),
+              resetsAt: z.isoDateTime({ offset: true }).nullable(),
             })
             .strict()
             .nullable(),
@@ -84,7 +84,7 @@ const assistantOperatorSharedFields = {
               usedPercent: z.number().min(0).max(100),
               remainingPercent: z.number().min(0).max(100),
               windowMinutes: z.number().int().positive().nullable(),
-              resetsAt: z.string().datetime({ offset: true }).nullable(),
+              resetsAt: z.isoDateTime({ offset: true }).nullable(),
             })
             .strict()
             .nullable(),
@@ -108,7 +108,7 @@ const operatorConfigSchema = z.object({
   defaultVault: z.string().min(1).nullable(),
   assistant: z.unknown().nullable().default(null),
   hostedAssistant: z.unknown().nullable().optional(),
-  updatedAt: z.string().datetime({ offset: true }),
+  updatedAt: z.isoDateTime({ offset: true }),
 })
 
 type RawOperatorConfig = z.infer<typeof operatorConfigSchema>
