@@ -1,16 +1,36 @@
 # Live provider canaries
 
-Last verified: 2026-09-17
+Last verified: 2026-10-20
 
 A passing live canary means its actual journey and business assertions completed.
 A successful scheduler, skipped job, connection-only result, or unavailable
 credential is not equivalent evidence. GitHub completion timestamps identify the
 age of an executed run; this system adds no product-state receipt database.
 
+## Scheduled cadence
+
+Schedules use GitHub Actions UTC cron entries without a timezone override, so
+DST does not shift their UTC slots. GitHub may delay or drop scheduled runs;
+these are admission opportunities, not completion or freshness guarantees.
+Manual recovery, release gates, PR/push proof, journey assertions, permissions,
+source pins, and non-canceling concurrency retain their existing behavior.
+
+| Journey | UTC slots | Weekly admissions | Gap between nominal slots |
+| --- | --- | ---: | --- |
+| Linq | Sun/Wed/Sat 00:17; Sun/Wed 18:17; Mon/Thu 12:17; Tue/Fri 06:17 | 9 (was 28) | Eight 18-hour gaps and one 24-hour gap |
+| iOS | Sun/Wed/Sat 00:17; Mon/Thu 12:17 | 5 (was 14) | Four 36-hour gaps and one 24-hour gap |
+| Android | Same native days/hours at minute 47 | 5 (was 14) | Four 36-hour gaps and one 24-hour gap |
+
+This retains about one-third of the preceding admission frequency (32.1% for
+Linq and 35.7% for each native platform), using calendar entries alone. No
+skip job, elapsed-time state, or new scheduler is needed. Native platforms stay
+30 minutes apart. The increased observation gaps do not relax reply budgets or
+release-required proof. Actual billed savings depend on executed job duration.
+
 ## Existing journeys
 
-- Native iOS and Android execute on every staggered twelve-hour schedule, including
-  unchanged revisions. They retain immutable private-source pins, exact deployed
+- Native iOS and Android execute on every admitted staggered UTC calendar slot,
+  including unchanged revisions. They retain immutable private-source pins, exact deployed
   revision checks, non-destructive identity ownership, and fixed non-canceling
   concurrency. Manual recovery is restricted to current protected main. iOS
   independently selects and verifies the actual production deployment, including
@@ -18,7 +38,7 @@ age of an executed run; this system adds no product-state receipt database.
   deployment selected at launch, not an assertion that production stays frozen
   for the entire native journey. Ordinary promotions do not invalidate successful
   native business assertions; the canary emits no per-commit acceptance status.
-- Linq resolves the actual production alias before its six-hour journey, verifies
+- Linq resolves the actual production alias before its scheduled journey, verifies
   protected-main ancestry and exact deployment, and repeats deployment validation
   after execution. A manual requested SHA must match the deployed revision.
   The fixed canary account is reset through its existing input-free owner.

@@ -118,7 +118,7 @@ to apply after cutover.
   missing verifier before database authority or SQL, and recovery must roll
   forward to the floor or newer rather than re-running an older base-domain-only
   workflow.
-- The Linq production canary runs from one staggered hourly schedule only after
+- The Linq production canary runs in nine weekly UTC calendar slots only after
   the actual current Vercel alias passes exact deployment verification and
   protected-main ancestry. Manual dispatch remains available for recovery. One
   fixed Photon identity starts a five-turn private iMessage conversation, and
@@ -186,8 +186,8 @@ to apply after cutover.
   stage and the applicable closed reason (plus finite HTTP status at
   `session_request`); do not invoke extra canaries, poll the endpoint, retry,
   wake or refresh to collect evidence.
-- Protected native iOS and Android hosted E2E controllers run staggered every
-  twelve hours and execute each admitted journey even when the same revision
+- Protected native iOS and Android hosted E2E controllers run in five staggered
+  weekly UTC calendar slots and execute each admitted journey even when the same revision
   previously passed. Provider behavior can change independently of source.
   Manual recovery requires `refs/heads/main` and the exact current `main` SHA
   before protected environment work. Native source pins are committed with
