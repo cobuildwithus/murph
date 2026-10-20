@@ -425,21 +425,6 @@ test("VercelTelemetry strips shared-card fragments before sending", () => {
 test("VercelTelemetry aggregates public dynamic routes without sending identifiers", () => {
   const routes = [
     {
-      expected: "/biomarkers/[biomarker]",
-      pathname: "/biomarkers/resting-heart-rate",
-      route: "/biomarkers/[biomarkerId]",
-    },
-    {
-      expected: "/biomarkers/[biomarker]/research",
-      pathname: "/biomarkers/resting-heart-rate/research",
-      route: "/biomarkers/[biomarkerId]/research",
-    },
-    {
-      expected: "/biomarkers/results/[metric]",
-      pathname: "/biomarkers/results/ldl_cholesterol",
-      route: "/biomarkers/results/[metricKey]",
-    },
-    {
       expected: "/compare/[competitor]",
       pathname: "/compare/murph-vs-whoop",
       route: "/compare/[competitor]",
@@ -458,11 +443,6 @@ test("VercelTelemetry aggregates public dynamic routes without sending identifie
       expected: "/experiments/[experiment]/results",
       pathname: "/experiments/sleep-consistency/results",
       route: "/experiments/[experimentId]/results",
-    },
-    {
-      expected: "/goals/[goal]",
-      pathname: "/goals/improve-deep-sleep",
-      route: "/goals/[goalId]",
     },
     {
       expected: "/measurement-methods/[method]",

@@ -753,7 +753,7 @@ describe("hosted runtime context coverage", () => {
         memberId: "member_123",
         occurredAt: "2026-04-08T00:25:00.000Z",
         preferences: {
-          persona: "navy-seal",
+          persona: "classic",
           personality: {
             humor: 8,
           },
@@ -768,7 +768,7 @@ describe("hosted runtime context coverage", () => {
       assert.equal(first.exists, true);
       assert.equal(first.updatedAt, "2026-04-08T00:25:00.000Z");
       assert.deepEqual(first.assistant, {
-        persona: "navy-seal",
+        persona: "classic",
         personality: {
           humor: 8,
         },
@@ -790,7 +790,7 @@ describe("hosted runtime context coverage", () => {
       const second = await readPreferencesDocument(vaultRoot);
       assert.equal(second.updatedAt, "2026-04-08T00:26:00.000Z");
       assert.deepEqual(second.assistant, {
-        persona: "navy-seal",
+        persona: "classic",
         personality: {
           detail: 7,
           humor: 8,

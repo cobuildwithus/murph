@@ -121,7 +121,7 @@ describe("companion initial onboarding routes", () => {
       contactAction: { kind: "text" },
       contactCard: { defaultAvatarId: "classic" },
     });
-    expect(payload.catalog.personas).toHaveLength(6);
+    expect(payload.catalog.personas).toHaveLength(1);
     expect(payload.catalog.voices.length).toBeGreaterThan(10);
     expect(payload.catalog.voices[0].previewURL).toMatch(
       /^https:\/\/www\.withmurph\.ai\/audio\//u,
@@ -150,7 +150,7 @@ describe("companion initial onboarding routes", () => {
       contactAction: null,
       contactCard: null,
     });
-    expect(payload.catalog.personas).toHaveLength(6);
+    expect(payload.catalog.personas).toHaveLength(1);
     expect(warn).toHaveBeenCalledWith(
       "Companion initial onboarding contact projection unavailable.",
     );

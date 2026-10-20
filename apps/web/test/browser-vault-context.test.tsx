@@ -118,8 +118,6 @@ import { AuthProvider } from "@/src/components/hosted-onboarding/auth-dialog-pro
 import { requestHostedPrivyCompletionWithRetry } from "@/src/components/hosted-onboarding/hosted-privy-auth-support";
 import { logoutHostedAppSession, verifyHostedAppSession } from "@/src/components/hosted-onboarding/hosted-app-session-client";
 import EnvironmentPageClient from "../app/(dashboard)/environment/environment-page-client";
-import { LabBiomarkerDetailClient } from "../app/(dashboard)/biomarkers/results/[metricKey]/lab-biomarker-detail-client";
-import JournalPageClient from "../app/(dashboard)/journal/journal-page-client";
 
 beforeEach(() => {
   // The warm path lives in module memory; reset it so ready snapshots and
@@ -167,7 +165,7 @@ test.each(["/settings", "/settings/", "/connect", "/records", "/records/connect"
   },
 );
 
-test.each(["/home", "/journal", "/patterns", "/environment", "/biomarkers", "/experiments", "/training", "/ops"])(
+test.each(["/home", "/environment", "/experiments", "/training", "/ops"])(
   "data route %s retains its session load",
   async (pathname) => {
     mocks.usePathname.mockReturnValue(pathname);
@@ -623,14 +621,13 @@ test("browser-vault warm store reuses same-ref bucket intersections and retains 
 });
 
 test("required bucket transport failure preserves partial data and Retry requests only missing demand once", async () => {
-  mocks.usePathname.mockReturnValue("/biomarkers");
+  mocks.usePathname.mockReturnValue("/experiments/test-protocol");
   const metricBucketId = await getBrowserVaultMetricBucketId("resting-heart-rate");
   const replica = createReplica();
   const ref = await createShardedReplicaRef(replica);
   const shardSet = await splitBrowserVaultReplica(replica);
   const encoded = {
     core: gzipSync(new TextEncoder().encode(JSON.stringify(shardSet.core))),
-    labs: gzipSync(new TextEncoder().encode(JSON.stringify(shardSet.labs))),
     metricsIndex: gzipSync(new TextEncoder().encode(JSON.stringify(shardSet.metrics))),
     metricBucket: gzipSync(
       new TextEncoder().encode(JSON.stringify(shardSet.metricBuckets[metricBucketId])),
@@ -642,7 +639,6 @@ test("required bucket transport failure preserves partial data and Retry request
       replicaRef: ref,
       shards: {
         core: createEncryptedShardResponse(ref, "core"),
-        labs: createEncryptedShardResponse(ref, "labs"),
         metricsIndex: createEncryptedShardResponse(ref, "metricsIndex"),
       },
       state: "ready",
@@ -665,7 +661,6 @@ test("required bucket transport failure preserves partial data and Retry request
     aad: { metricBucketId?: string; shard?: string };
   }) => {
     if (aad.shard === "core") return Promise.resolve(encoded.core);
-    if (aad.shard === "labs") return Promise.resolve(encoded.labs);
     if (aad.shard === "metricsIndex") return Promise.resolve(encoded.metricsIndex);
     if (aad.metricBucketId === metricBucketId) {
       return Promise.resolve(encoded.metricBucket);
@@ -683,12 +678,12 @@ test("required bucket transport failure preserves partial data and Retry request
 
   await waitForText(
     rendered.container,
-    "error:pending:core+metrics-partial+labs",
+    "error:pending:core+metrics-partial",
   );
   assert.deepEqual(getBrowserVaultReadySnapshot()?.loadedMetricBuckets, []);
   assert.equal(
     getBrowserVaultReadySnapshot()?.client.capability,
-    "core+metrics-partial+labs",
+    "core+metrics-partial",
   );
   assert.equal(fetchMock.mock.calls.length, 2);
 
@@ -698,7 +693,7 @@ test("required bucket transport failure preserves partial data and Retry request
   });
   await waitForText(
     rendered.container,
-    "ready:loaded:core+metrics-partial+labs",
+    "ready:loaded:core+metrics-partial",
   );
 
   const failedDemandBody = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body));
@@ -706,14 +701,14 @@ test("required bucket transport failure preserves partial data and Retry request
   assert.deepEqual(failedDemandBody.requestedMetricBuckets, [metricBucketId]);
   assert.deepEqual(retryBody.requestedMetricBuckets, [metricBucketId]);
   assert.deepEqual(retryBody.knownMetricBuckets, []);
-  assert.deepEqual(retryBody.knownShards, ["core", "labs", "metricsIndex"]);
+  assert.deepEqual(retryBody.knownShards, ["core", "metricsIndex"]);
   assert.equal(fetchMock.mock.calls.length, 3);
 
   await rendered.cleanup();
 });
 
 test("required bucket integrity failure surfaces through the provider without dropping partial data", async () => {
-  mocks.usePathname.mockReturnValue("/biomarkers");
+  mocks.usePathname.mockReturnValue("/experiments/test-protocol");
   const metricBucketId = await getBrowserVaultMetricBucketId("resting-heart-rate");
   const mismatchedBucketId: BrowserVaultMetricBucketId = metricBucketId === "00"
     ? "01"
@@ -744,7 +739,6 @@ test("required bucket integrity failure surfaces through the provider without dr
   };
   const encoded = {
     core: gzipSync(new TextEncoder().encode(JSON.stringify(shardSet.core))),
-    labs: gzipSync(new TextEncoder().encode(JSON.stringify(shardSet.labs))),
     metricsIndex: gzipSync(new TextEncoder().encode(JSON.stringify(shardSet.metrics))),
   };
   const fetchMock = vi.fn()
@@ -753,7 +747,6 @@ test("required bucket integrity failure surfaces through the provider without dr
       replicaRef: ref,
       shards: {
         core: createEncryptedShardResponse(ref, "core"),
-        labs: createEncryptedShardResponse(ref, "labs"),
         metricsIndex: createEncryptedShardResponse(ref, "metricsIndex"),
       },
       state: "ready",
@@ -771,7 +764,6 @@ test("required bucket integrity failure surfaces through the provider without dr
     aad: { metricBucketId?: string; shard?: string };
   }) => {
     if (aad.shard === "core") return Promise.resolve(encoded.core);
-    if (aad.shard === "labs") return Promise.resolve(encoded.labs);
     if (aad.shard === "metricsIndex") return Promise.resolve(encoded.metricsIndex);
     if (aad.metricBucketId === metricBucketId) {
       return Promise.resolve(encodedInvalidBucket);
@@ -789,13 +781,13 @@ test("required bucket integrity failure surfaces through the provider without dr
 
   await waitForText(
     rendered.container,
-    "error:pending:core+metrics-partial+labs",
+    "error:pending:core+metrics-partial",
   );
   assert.equal(fetchMock.mock.calls.length, 2);
   assert.deepEqual(getBrowserVaultReadySnapshot()?.loadedMetricBuckets, []);
   assert.equal(
     getBrowserVaultReadySnapshot()?.client.capability,
-    "core+metrics-partial+labs",
+    "core+metrics-partial",
   );
   assert.equal(
     mocks.decryptHostedStoragePayload.mock.calls.some(([input]) =>
@@ -808,14 +800,13 @@ test("required bucket integrity failure surfaces through the provider without dr
 });
 
 test("a route transition aborts provider-owned bucket work and admits the new route before it settles", async () => {
-  mocks.usePathname.mockReturnValue("/biomarkers");
+  mocks.usePathname.mockReturnValue("/experiments/test-protocol");
   const metricBucketId = await getBrowserVaultMetricBucketId("resting-heart-rate");
   const replica = createReplica();
   const ref = await createShardedReplicaRef(replica);
   const shardSet = await splitBrowserVaultReplica(replica);
   const encoded = {
     core: gzipSync(new TextEncoder().encode(JSON.stringify(shardSet.core))),
-    labs: gzipSync(new TextEncoder().encode(JSON.stringify(shardSet.labs))),
     metricsIndex: gzipSync(new TextEncoder().encode(JSON.stringify(shardSet.metrics))),
   };
   const routeABucketResponse = createDeferred<Response>();
@@ -830,7 +821,6 @@ test("a route transition aborts provider-owned bucket work and admits the new ro
         replicaRef: ref,
         shards: {
           core: createEncryptedShardResponse(ref, "core"),
-          labs: createEncryptedShardResponse(ref, "labs"),
           metricsIndex: createEncryptedShardResponse(ref, "metricsIndex"),
         },
         state: "ready",
@@ -861,7 +851,6 @@ test("a route transition aborts provider-owned bucket work and admits the new ro
     aad: { shard?: string };
   }) => {
     if (aad.shard === "core") return Promise.resolve(encoded.core);
-    if (aad.shard === "labs") return Promise.resolve(encoded.labs);
     if (aad.shard === "metricsIndex") return Promise.resolve(encoded.metricsIndex);
     throw new Error("Unexpected encrypted browser-vault route transition child.");
   });
@@ -905,7 +894,7 @@ test("a route transition aborts provider-owned bucket work and admits the new ro
   await waitForText(rendered.container, `ready:${ref.dataVersion}`);
   const routeBRequest = JSON.parse(String(fetchMock.mock.calls[2]?.[1]?.body));
   assert.deepEqual(routeBRequest.requestedShards, ["core"]);
-  assert.deepEqual(routeBRequest.knownShards, ["core", "labs", "metricsIndex"]);
+  assert.deepEqual(routeBRequest.knownShards, ["core", "metricsIndex"]);
   const routeBSnapshot = getBrowserVaultReadySnapshot();
   assert.ok(routeBSnapshot);
   assert.deepEqual(routeBSnapshot.loadedShards, ["core"]);
@@ -1565,55 +1554,6 @@ test("an authenticated dashboard reloads when current browser-vault authority re
   await rendered.cleanup();
 });
 
-test("a stale empty biomarker detail exposes provider-owned refresh without background polling", async () => {
-  vi.useFakeTimers();
-  const fetchMock = vi.fn().mockResolvedValue(jsonResponse({
-    encryptedReplica: null,
-    freshness: "stale",
-    memberId: "member_123",
-    replicaAad: null,
-    replicaKeyEnvelope: null,
-    replicaRef: null,
-    refreshPending: false,
-    state: "empty",
-    workspaceVersion: null,
-  }));
-
-  installBrowserVaultCryptoMocks();
-  vi.stubGlobal("fetch", fetchMock);
-
-  const rendered = await renderClientComponent(
-    createAuthenticatedBrowserVaultElement(
-      createElement(LabBiomarkerDetailClient, {
-        authenticated: true,
-        metricKey: "hba1c",
-      }),
-    ),
-    { requireButton: false },
-  );
-
-  await waitForText(rendered.container, "No results found");
-  assert.equal(rendered.container.textContent?.includes("This history may be out of date"), true);
-  assert.equal(rendered.container.textContent?.includes("Preparing dashboard..."), false);
-
-  await act(async () => {
-    await vi.advanceTimersByTimeAsync(25_000);
-  });
-
-  assert.equal(fetchMock.mock.calls.length, 1);
-
-  const refreshButton = [...rendered.container.querySelectorAll("button")].find(
-    (button) => button.textContent === "Refresh",
-  );
-  assert.ok(refreshButton);
-  await act(async () => {
-    refreshButton.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
-  });
-  await waitForCondition(() => fetchMock.mock.calls.length === 2, "manual stale refresh");
-
-  await rendered.cleanup();
-});
-
 test("browser-vault provider exposes pending device imports without showing a global sync warning", async () => {
   vi.useFakeTimers();
   const fetchMock = vi.fn().mockResolvedValue(jsonResponse({
@@ -1688,25 +1628,12 @@ test("browser-vault provider does not poll an empty vault while a device import 
   await rendered.cleanup();
 });
 
-
 test("browser-vault provider preserves readable stale data when bounded observation cannot load the referenced replica", async () => {
   vi.useFakeTimers();
   const legacyReplica = createReplica({
     generation: BROWSER_VAULT_REPLICA_CURRENT_GENERATION - 1,
   });
-  delete legacyReplica.personalPatterns;
   const currentReplica = createReplica({
-    personalPatterns: {
-      asOfDate: "2026-04-30",
-      cells: [],
-      factors: [],
-      lagDays: 1,
-      notes: [],
-      outcomes: [],
-      repeatableCellCount: 0,
-      testedCellCount: 0,
-      windowDays: 120,
-    },
     source: {
       dataVersion: "e".repeat(64),
       sourceBundleHash: "a".repeat(64),
@@ -1766,7 +1693,7 @@ test("browser-vault provider preserves readable stale data when bounded observat
   vi.stubGlobal("fetch", fetchMock);
 
   const rendered = await renderClientComponent(
-    createAuthenticatedBrowserVaultElement(createElement(BrowserVaultPatternsProbe)),
+    createAuthenticatedBrowserVaultElement(createElement(BrowserVaultReplicaVersionProbe)),
     { requireButton: false },
   );
 
@@ -1787,224 +1714,11 @@ test("browser-vault provider preserves readable stale data when bounded observat
   await act(async () => {
     rendered.window.dispatchEvent(new rendered.window.Event("focus"));
   });
-  await waitForText(rendered.container, "patterns:ready");
+  await waitForText(rendered.container, "current:ready");
   const focusBody = JSON.parse(String(fetchMock.mock.calls.at(-1)?.[1]?.body));
   assert.equal(focusBody.refreshObservationOnly, true);
 
   await rendered.cleanup();
-});
-
-test.each(["published", "pending"] as const)(
-  "Journal bounds first-import observation when publication remains %s",
-  async (publication) => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-04-30T12:00:00.000Z"));
-    mocks.usePathname.mockReturnValue("/journal");
-    const occurredAt = "2026-04-30T09:15:00.000Z";
-    const replica = createReplica({
-      journal: {
-        days: [{ date: "2026-04-30", events: [{
-          date: "2026-04-30", details: [], id: "stretching-note", kind: "note",
-          metrics: {
-            activityMinutes: 0, deepSleepMinutes: null, hrvMs: null,
-            readinessScore: null, recoveryScore: null, remSleepMinutes: null,
-            respiratoryRate: null, restingHeartRateBpm: null,
-            sleepEfficiencyPercent: null, sleepMinutes: null, sleepScore: null,
-            spo2Percent: null,
-          },
-          occurredAt,
-          records: [{
-            id: "stretching-note", kind: "note", label: "Stretching",
-            occurredAt, source: "manual", summary: "10 min", tags: [], timeZone: "UTC",
-          }],
-          summary: "10 min", timing: "timed", timeZone: "UTC", title: "Stretching",
-        }] }],
-        eventCount: 1, recordCount: 1, weeks: [], windowDays: 120,
-      },
-    });
-    let published = false;
-    const requestBodies: Array<Record<string, unknown>> = [];
-    const fetchMock = vi.fn(async (_url: unknown, init?: RequestInit) => {
-      requestBodies.push(JSON.parse(String(init?.body)));
-      return jsonResponse(published ? {
-        deviceSyncImportPending: false,
-        encryptedReplica: createReplicaEnvelope(),
-        freshness: "fresh",
-        replicaAad: createReplicaAad(),
-        replicaKeyEnvelope: createReplicaKeyEnvelope(),
-        replicaRef: createReplicaRef({
-          byteLength: new TextEncoder().encode(JSON.stringify(replica)).byteLength,
-        }),
-        refreshPending: false,
-        state: "ready",
-      } : {
-        deviceSyncImportPending: true,
-        encryptedReplica: null,
-        freshness: "stale",
-        memberId: "member_123",
-        replicaAad: null,
-        replicaKeyEnvelope: null,
-        replicaRef: null,
-        refreshPending: true,
-        state: "empty",
-        workspaceVersion: "1",
-      });
-    });
-    installBrowserVaultCryptoMocks();
-    mocks.decryptHostedStoragePayload.mockResolvedValue(
-      new TextEncoder().encode(JSON.stringify(replica)),
-    );
-    vi.stubGlobal("fetch", fetchMock);
-
-    const rendered = await renderClientComponent(
-      createAuthenticatedBrowserVaultElement(createElement(JournalPageClient)),
-      { requireButton: false },
-    );
-    try {
-      await waitForText(rendered.container, "Preparing your Journal");
-      published = publication === "published";
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(published ? 1_500 : 60_000);
-      });
-      if (published) {
-        await waitForText(rendered.container, "Stretching");
-        assert.match(rendered.container.textContent ?? "", /10 min/);
-      } else {
-        await waitForText(rendered.container, "Build your health timeline");
-      }
-      assert.equal(rendered.container.textContent?.includes("Preparing your Journal"), false);
-      assert.equal(requestBodies.filter((body) => body.requestRefresh === true).length, 1);
-      assert.ok(requestBodies.some((body) => body.refreshObservationOnly === true));
-      assert.ok(requestBodies.slice(2).every((body) => body.refreshObservationOnly === true));
-      const requestCount = requestBodies.length;
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(60_000);
-      });
-      assert.equal(requestBodies.length, requestCount);
-    } finally {
-      await rendered.cleanup();
-    }
-  },
-);
-
-test("Journal unavailable retry preserves the active refresh deadline", async () => {
-  vi.useFakeTimers();
-  mocks.usePathname.mockReturnValue("/journal");
-  const replica = createReplica();
-  const requestBodies: Array<Record<string, unknown>> = [];
-  const fetchMock = vi.fn(async (_url: unknown, init?: RequestInit) => {
-    requestBodies.push(JSON.parse(String(init?.body)));
-    return jsonResponse({
-      encryptedReplica: createReplicaEnvelope(),
-      freshness: "fresh",
-      replicaAad: createReplicaAad(),
-      replicaKeyEnvelope: createReplicaKeyEnvelope(),
-      replicaRef: createReplicaRef({
-        byteLength: new TextEncoder().encode(JSON.stringify(replica)).byteLength,
-      }),
-      refreshPending: false,
-      state: "ready",
-    });
-  });
-  installBrowserVaultCryptoMocks();
-  vi.stubGlobal("fetch", fetchMock);
-  const rendered = await renderClientComponent(
-    createAuthenticatedBrowserVaultElement(createElement(JournalPageClient)),
-    { requireButton: false },
-  );
-  try {
-    await waitForText(rendered.container, "Journal is not ready yet");
-    await waitForCondition(() => requestBodies.length === 2, "automatic Journal request");
-    const retry = [...rendered.container.querySelectorAll("button")]
-      .find((button) => button.textContent === "Refresh Journal");
-    assert.ok(retry);
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(30_000);
-    });
-    const requestCount = requestBodies.length;
-    await act(async () => retry.click());
-    await act(async () => retry.click());
-    assert.equal(requestBodies.length, requestCount);
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(30_000);
-    });
-    const countAtDeadline = requestBodies.length;
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(30_000);
-    });
-    assert.equal(requestBodies.length, countAtDeadline);
-    assert.equal(requestBodies.filter((body) => body.requestRefresh === true).length, 1);
-    await act(async () => retry.click());
-    assert.equal(requestBodies.filter((body) => body.requestRefresh === true).length, 2);
-  } finally {
-    await rendered.cleanup();
-  }
-});
-
-test("Journal retry admits the recovered session and renders its timeline", async () => {
-  vi.useFakeTimers({ toFake: ["Date"] });
-  vi.setSystemTime(new Date("2026-04-30T12:00:00.000Z"));
-  mocks.usePathname.mockReturnValue("/journal");
-  const occurredAt = "2026-04-30T09:15:00.000Z";
-  const replica = createReplica({
-    journal: {
-      days: [{ date: "2026-04-30", events: [{
-        date: "2026-04-30", details: [], id: "stretching-note", kind: "note",
-        metrics: {
-          activityMinutes: 0, deepSleepMinutes: null, hrvMs: null,
-          readinessScore: null, recoveryScore: null, remSleepMinutes: null,
-          respiratoryRate: null, restingHeartRateBpm: null,
-          sleepEfficiencyPercent: null, sleepMinutes: null, sleepScore: null,
-          spo2Percent: null,
-        },
-        occurredAt,
-        records: [{
-          id: "stretching-note", kind: "note", label: "Stretching",
-          occurredAt, source: "manual", summary: "10 min", tags: [], timeZone: "UTC",
-        }],
-        summary: "10 min", timing: "timed", timeZone: "UTC", title: "Stretching",
-      }] }],
-      eventCount: 1, recordCount: 1, weeks: [], windowDays: 120,
-    },
-  });
-  const fetchMock = vi.fn()
-    .mockResolvedValueOnce(new Response(JSON.stringify({
-      error: { message: "Temporarily unavailable." },
-    }), { status: 503 }))
-    .mockImplementation(async () => jsonResponse({
-      encryptedReplica: createReplicaEnvelope(),
-      replicaAad: createReplicaAad(),
-      replicaKeyEnvelope: createReplicaKeyEnvelope(),
-      replicaRef: createReplicaRef({
-        byteLength: new TextEncoder().encode(JSON.stringify(replica)).byteLength,
-      }),
-      state: "ready",
-    }));
-  installBrowserVaultCryptoMocks();
-  mocks.decryptHostedStoragePayload.mockResolvedValue(
-    new TextEncoder().encode(JSON.stringify(replica)),
-  );
-  vi.stubGlobal("fetch", fetchMock);
-
-  const rendered = await renderClientComponent(
-    createAuthenticatedBrowserVaultElement(createElement(JournalPageClient)),
-    { requireButton: false },
-  );
-  try {
-    await waitForText(rendered.container, "Try again");
-    assert.equal(rendered.container.textContent?.includes("Stretching"), false);
-    const retry = [...rendered.container.querySelectorAll("button")]
-      .find((button) => button.textContent === "Try again");
-    assert.ok(retry);
-    await act(async () => {
-      retry.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
-    });
-    await waitForText(rendered.container, "Stretching");
-    assert.match(rendered.container.textContent ?? "", /10 min/);
-    assert.equal(rendered.container.textContent?.includes("Try again"), false);
-  } finally {
-    await rendered.cleanup();
-  }
 });
 
 test("current endpoint denial never adopts a matching warm snapshot", async () => {
@@ -4643,14 +4357,14 @@ function PublicDashboardRouteProbe() {
   );
 }
 
-function BrowserVaultPatternsProbe() {
+function BrowserVaultReplicaVersionProbe() {
   const vault = useBrowserVault();
-  const patternsAvailable = vault.client?.replica.personalPatterns !== undefined;
+  const current = vault.client?.replica.source.dataVersion === "e".repeat(64);
 
   return createElement(
     "div",
     null,
-    `${patternsAvailable ? "patterns" : "legacy"}:${vault.refreshPending ? "pending" : "ready"}`,
+    `${current ? "current" : "legacy"}:${vault.refreshPending ? "pending" : "ready"}`,
   );
 }
 

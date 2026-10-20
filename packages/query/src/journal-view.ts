@@ -19,12 +19,6 @@ import {
 } from "./metrics/index.ts";
 import type { CanonicalEntity } from "./canonical-entities.ts";
 import type { VaultReadModel } from "./read-model.ts";
-import {
-  canonicalFactorToken,
-  humanizeFactorToken,
-  resolvePersonalPatternVocabularyConcept,
-  type PersonalPatternVocabulary,
-} from "./personal-patterns.ts";
 
 const DEFAULT_WINDOW_DAYS = 120;
 const MAX_RECORDS = 1_500;
@@ -133,7 +127,6 @@ export function buildJournalView(
   metricPoints: readonly MetricPoint[] = [],
   options: {
     asOf?: Date | string;
-    vocabulary?: PersonalPatternVocabulary | null;
     windowDays?: number;
   } = {},
 ): JournalView {
@@ -142,7 +135,7 @@ export function buildJournalView(
   const fromDate = addDays(asOfDate, -(windowDays - 1));
   const candidates = normalizeJournalCandidates([
     ...prepareClinicalJournalEvents(vault.events).flatMap((event) =>
-      journalCandidateFromEvent(event, fromDate, asOfDate, options.vocabulary),
+      journalCandidateFromEvent(event, fromDate, asOfDate),
     ),
     ...journalCandidatesFromExperiments(
       vault.experiments,
@@ -186,14 +179,13 @@ function journalCandidateFromEvent(
   event: CanonicalEntity,
   fromDate: string,
   toDate: string,
-  vocabulary: PersonalPatternVocabulary | null | undefined,
 ): JournalCandidate[] {
   if (event.family !== "event" || !isJournalEventKind(event.kind)) return [];
   if (isHiddenJournalEvent(event)) return [];
   const date = resolveEventDate(event);
   if (!date || date < fromDate || date > toDate) return [];
   const occurredAt = normalizeOccurredAt(event.occurredAt ?? undefined, date);
-  const presentation = journalEventPresentation(event, vocabulary);
+  const presentation = journalEventPresentation(event);
   const { activityKey, exerciseNames, label, metricValue, observationMetric } = presentation;
   const durationMinutes = readNumber(event.attributes.durationMinutes);
   const sleepType =
@@ -257,7 +249,6 @@ function isHiddenJournalEvent(event: CanonicalEntity): boolean {
 
 function journalEventPresentation(
   event: CanonicalEntity,
-  vocabulary: PersonalPatternVocabulary | null | undefined,
 ): {
   activityKey: string | null;
   exerciseNames: string[];
@@ -286,16 +277,15 @@ function journalEventPresentation(
     };
   }
   const rawKey =
-    canonicalFactorToken(
+    canonicalActivityToken(
       resolveAdherenceObservationActivityKind({
         attributes: event.attributes,
       }),
     ) ?? "activity";
-  const concept = resolvePersonalPatternVocabularyConcept(vocabulary, rawKey);
   return {
-    activityKey: concept?.id ?? rawKey,
+    activityKey: rawKey,
     exerciseNames: activityExerciseNames(event.attributes),
-    label: concept?.label ?? humanizeFactorToken(rawKey),
+    label: humanizeActivityToken(rawKey),
     metricValue: null,
     observationMetric,
   };
@@ -1554,4 +1544,43 @@ function readString(value: unknown): string | null {
 
 function readNumber(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function canonicalActivityToken(value: string | null): string | null {
+  switch (value) {
+    case "run":
+      return "running";
+    case "walk":
+      return "walking";
+    case "bike":
+    case "biking":
+    case "cycle":
+    case "ride":
+      return "cycling";
+    case "swim":
+      return "swimming";
+    case "hike":
+      return "hiking";
+    case "row":
+      return "rowing";
+    case "strength-training":
+    case "weightlifting":
+    case "weights":
+      return "strength";
+    default:
+      return value;
+  }
+}
+
+function humanizeActivityToken(value: string): string {
+  const readableValue =
+    value === "yardwork"
+      ? "yard-work"
+      : value === "housework"
+      ? "house-work"
+      : value === "strength"
+      ? "strength-training"
+      : value;
+  const words = readableValue.replace(/--/gu, " · ").replace(/[-_]+/gu, " ");
+  return `${words.charAt(0).toUpperCase()}${words.slice(1)}`;
 }

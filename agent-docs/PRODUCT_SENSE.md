@@ -49,14 +49,10 @@ Last verified: 2026-09-09
 - A member with no current goal is not a failed onboarding case. Murph may
   offer one optional baseline review, then remain available without inventing
   a problem.
-- Hosted landing-page signup should hand members directly toward messaging
-  Murph. Signup-oriented accessible-stage landing auth routes to
-  `/home?initialVisit=true`, where members with a resolved text contact first see
-  the contact-card picker and then the one-shot four-step Murph personality
-  picker. Members without a text contact start at the personality picker. A
-  successful personality save ends in the Welcome to Murph dialog and its
-  current messaging action; skipping or dismissing the picker ends the handoff
-  without that dialog.
+- Hosted landing-page signup routes members to `/home?initialVisit=true`.
+  Pending members with a text contact can add Murph to Contacts; add, skip or
+  dismiss completes the existing account onboarding marker. Other members
+  complete directly. No personality setup or welcome dialog follows.
   Login-oriented landing CTAs continue to route to ordinary `/home`.
 - The public changelog opens on a bounded seven-day window of dated editions.
   Every edition remains a stable cursor, and API or digest links to an older

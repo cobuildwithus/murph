@@ -3,9 +3,6 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
-  Activity,
-  BookOpen,
-  ChartSpline,
   ChevronsUpDown,
   FlaskConical,
   Home,
@@ -67,28 +64,10 @@ const navItems: {
 }[] = [
   { label: "Home", href: "/home", icon: Home },
   {
-    label: "Journal",
-    href: "/journal",
-    matchPrefix: "/journal",
-    icon: BookOpen,
-  },
-  {
-    label: "Patterns",
-    href: "/patterns",
-    matchPrefix: "/patterns",
-    icon: ChartSpline,
-  },
-  {
     label: "Environment",
     href: "/environment",
     matchPrefix: "/environment",
     icon: Leaf,
-  },
-  {
-    label: "Biomarkers",
-    href: "/biomarkers",
-    matchPrefix: "/biomarkers",
-    icon: Activity,
   },
   { label: "Experiments", href: "/experiments", icon: FlaskConical },
 ];

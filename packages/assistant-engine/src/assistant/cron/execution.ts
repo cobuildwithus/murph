@@ -72,7 +72,6 @@ import {
 import {
   runOnboardingGoalCheckinAuthorityPrecondition,
 } from '../onboarding-goal-checkin-automation.js'
-import { canSkipManagedPersonalPatterns } from '../personal-patterns-eligibility.js'
 import { canSkipManagedAutomaticMealCloseout } from '../automatic-meal-closeout-eligibility.js'
 import {
   buildAssistantLinqDeliveryPosturePrompt,
@@ -764,8 +763,6 @@ export async function executeClaimedAssistantCronJob(
       }
       lifecycleSkipReason = await runAssistantCronAutomationPreconditions({
         trigger: input.trigger,
-        consecutiveFailures: claimedJob.state.consecutiveFailures,
-        nowIso: startedAt,
         source: input.job.source,
         occurrenceAt,
         vault: input.vault,
@@ -2108,8 +2105,6 @@ function assistantCronTimestampIsLater(
 
 async function runAssistantCronAutomationPreconditions(input: {
   trigger: AssistantCronTrigger
-  consecutiveFailures: number
-  nowIso: string
   source: CanonicalAutomationAssistantCronJobRecord
   occurrenceAt: string
   vault: string
@@ -2139,18 +2134,6 @@ async function runAssistantCronAutomationPreconditions(input: {
       : null
   if (lifecycleResult?.kind === 'skip') {
     lifecycleSkipReason = lifecycleResult.reason
-  }
-  if (lifecycleSkipReason === null
-    && input.trigger === 'scheduled' && input.consecutiveFailures === 0
-    && await canSkipManagedPersonalPatterns({
-      automationId: input.source.automationId,
-      instructions: input.source.instructions,
-      nowIso: input.nowIso,
-      signal: input.signal,
-      timeZone: input.source.timeZone,
-      vaultRoot: input.vault,
-    })) {
-    lifecycleSkipReason = 'Personal Patterns factors, results, and grades are already reviewed.'
   }
   if (lifecycleSkipReason === null && input.trigger === 'scheduled'
     && await canSkipManagedAutomaticMealCloseout({

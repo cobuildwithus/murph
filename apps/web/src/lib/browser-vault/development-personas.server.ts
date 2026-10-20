@@ -51,14 +51,6 @@ interface PersonaFixture {
   timeZone: string;
 }
 
-interface PatternedActivityDates {
-  cycling: Set<string>;
-  hiking: Set<string>;
-  running: Set<string>;
-  strength: Set<string>;
-  tennis: Set<string>;
-}
-
 function buildPersonaFixture(
   personaId: DevelopmentPersonaId,
   asOfDate: string,
@@ -72,29 +64,18 @@ function buildPersonaFixture(
       addDays(asOfDate, -(index * 14 + 8)),
     ),
   );
-  const patternedActivityDates =
-    personaId === "oura"
-      ? buildOuraPersonaActivityDates(asOfDate)
-      : personaId === "coach"
-      ? buildTrainingPersonaActivityDates(asOfDate)
-      : null;
-
   const addSleepDay = (offset: number) => {
     const date = addDays(asOfDate, -offset);
     const {
       deepSleep,
       efficiency,
-      followsFactor,
       hrv,
       readiness,
       remSleep,
       sleepScore,
       totalSleep,
     } = buildPersonaSleepDayValues({
-      date,
-      factorDates,
       offset,
-      patternedActivityDates,
       personaId,
     });
 
@@ -154,7 +135,7 @@ function buildPersonaFixture(
         source,
         date,
         "resting-heart-rate",
-        57 + (offset % 4) + (followsFactor ? 3 : 0),
+        57 + (offset % 4),
         "bpm",
       ),
       metricPoint(
@@ -233,7 +214,6 @@ function buildPersonaFixture(
     asOfDate,
     entities,
     metricPoints,
-    patternedActivityDates,
   );
 
   return {
@@ -277,97 +257,20 @@ function addPersonaFactorEvents(
 }
 
 function buildPersonaSleepDayValues(input: {
-  date: string;
-  factorDates: ReadonlySet<string>;
   offset: number;
-  patternedActivityDates: PatternedActivityDates | null;
   personaId: DevelopmentPersonaId;
 }) {
-  const priorDate = addDays(input.date, -1);
-  const followsFactor = input.factorDates.has(priorDate);
-  const followsCycling = patternContains(
-    input.patternedActivityDates?.cycling,
-    priorDate,
-  );
-  const followsRunning = patternContains(
-    input.patternedActivityDates?.running,
-    priorDate,
-  );
-  const followsStrength = patternContains(
-    input.patternedActivityDates?.strength,
-    priorDate,
-  );
-  const followsTennis = patternContains(
-    input.patternedActivityDates?.tennis,
-    priorDate,
-  );
-  const wave = input.offset % 5;
-  const totalSleep =
-    430 +
-    wave * 9 -
-    (followsFactor ? 42 : 0) +
-    (followsCycling ? 32 : 0) -
-    (followsTennis ? 24 : 0);
-  const sleepScore =
-    79 +
-    (input.offset % 4) -
-    (followsFactor ? 9 : 0) +
-    (followsCycling ? 6 : 0) -
-    (followsTennis ? 6 : 0);
-  const efficiency =
-    87 +
-    (input.offset % 3) -
-    (followsFactor ? 4 : 0) +
-    (followsRunning ? 5 : 0);
-  const readiness =
-    78 +
-    (input.offset % 6) -
-    (followsFactor ? 8 : 0) +
-    (followsCycling ? 8 : 0) -
-    (followsTennis ? 8 : 0);
-  const hrv = buildPersonaHrv({
-    followsCycling,
-    followsFactor,
-    followsTennis,
-    offset: input.offset,
-    personaId: input.personaId,
-  });
   return {
-    deepSleep: 72 + (input.offset % 6) + (followsStrength ? 14 : 0),
-    efficiency,
-    followsFactor,
-    hrv,
-    readiness,
-    remSleep: 96 + (input.offset % 8) + (followsRunning ? 16 : 0),
-    sleepScore,
-    totalSleep,
+    deepSleep: 72 + (input.offset % 6),
+    efficiency: 87 + (input.offset % 3),
+    hrv: input.personaId === "whoop"
+      ? 58 + (input.offset % 8)
+      : 48 + (input.offset % 9),
+    readiness: 78 + (input.offset % 6),
+    remSleep: 96 + (input.offset % 8),
+    sleepScore: 79 + (input.offset % 4),
+    totalSleep: 430 + (input.offset % 5) * 9,
   };
-}
-
-function buildPersonaHrv(input: {
-  followsCycling: boolean;
-  followsFactor: boolean;
-  followsTennis: boolean;
-  offset: number;
-  personaId: DevelopmentPersonaId;
-}): number {
-  if (input.personaId === "whoop") {
-    return 58 + (input.offset % 8) - (input.followsFactor ? 5 : 0);
-  }
-  return (
-    48 +
-    (input.offset % 9) -
-    (input.followsFactor ? 4 : 0) +
-    (input.followsCycling ? 8 : 0) -
-    (input.followsTennis ? 5 : 0)
-  );
-}
-
-function patternContains(
-  dates: ReadonlySet<string> | undefined,
-  date: string,
-): boolean {
-  return dates?.has(date) ?? false;
 }
 
 function addPersonaSpecificEvents(
@@ -375,10 +278,9 @@ function addPersonaSpecificEvents(
   asOfDate: string,
   entities: CanonicalEntity[],
   metricPoints: MetricPoint[],
-  patternedActivityDates: PatternedActivityDates | null,
 ) {
-  if (personaId === "oura" && patternedActivityDates) {
-    addOuraPersonaEvents(asOfDate, entities, patternedActivityDates);
+  if (personaId === "oura") {
+    addOuraPersonaEvents(asOfDate, entities);
     return;
   }
 
@@ -629,17 +531,16 @@ function addPersonaSpecificEvents(
 function addOuraPersonaEvents(
   asOfDate: string,
   entities: CanonicalEntity[],
-  dates: PatternedActivityDates,
 ): void {
   const activities = [
-    [dates.tennis, "tennis", 62],
-    [dates.cycling, "cycling", 50],
-    [dates.running, "running", 39],
-    [dates.hiking, "hiking", 120],
-    [dates.strength, "strength-training", 50],
+    [6, 76, 14, "tennis", 62],
+    [4, 80, 12, "cycling", 50],
+    [9, 79, 14, "running", 39],
+    [12, 75, 21, "hiking", 120],
+    [3, 80, 10, "strength-training", 50],
   ] as const;
-  for (const [activityDates, activityType, durationMinutes] of activities) {
-    for (const date of activityDates) {
+  for (const [first, last, step, activityType, durationMinutes] of activities) {
+    for (const date of scheduledDates(asOfDate, first, last, step)) {
       entities.push(
         activityEntity("oura", date, activityType, durationMinutes, "oura"),
       );
@@ -917,30 +818,6 @@ function addWhoopJournalExamples(
       title: "Sauna",
     }),
   );
-}
-
-function buildOuraPersonaActivityDates(
-  asOfDate: string,
-): PatternedActivityDates {
-  return {
-    cycling: scheduledDates(asOfDate, 4, 80, 12),
-    hiking: scheduledDates(asOfDate, 12, 75, 21),
-    running: scheduledDates(asOfDate, 9, 79, 14),
-    strength: scheduledDates(asOfDate, 3, 80, 10),
-    tennis: scheduledDates(asOfDate, 6, 76, 14),
-  };
-}
-
-function buildTrainingPersonaActivityDates(
-  asOfDate: string,
-): PatternedActivityDates {
-  return {
-    cycling: new Set(),
-    hiking: new Set(),
-    running: new Set(),
-    strength: scheduledDates(asOfDate, 2, 44, 3),
-    tennis: new Set(),
-  };
 }
 
 function scheduledDates(

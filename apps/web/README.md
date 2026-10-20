@@ -233,8 +233,8 @@ Browser-vault dashboard sessions and public-homepage preparation read only the
 published replica ref and workspace version. Refresh orchestration is imported
 only when the existing after-response refresh path needs it. The browser loader
 constructs one query client for the route's requested capability; the combined
-metrics/labs client reuses its metrics client's core access. Patterns reads its
-precomputed report directly. Session reauthorization, exact replica identity,
+metrics/labs client reuses its metrics client's core access. Session
+reauthorization, exact replica identity,
 route-scoped shard retention, and encrypted transport remain unchanged.
 
 ## Browser-vault member-proof rollback floor
@@ -392,7 +392,6 @@ specimens omit the comparator.
 
 The `/settings` Data & privacy export uses that same in-browser browser-vault replica path. It downloads the decrypted `murph.browser-vault-replica` JSON that dashboard pages can already read, rather than making the primary user export the older hosted account metadata bundle.
 
-The Overview Personal Patterns section also uses the encrypted browser-vault replica. The query projection compares repeated activity or intervention days with existing daily wearable sleep and recovery summaries. The browser receives only the derived report. Raw device observations stay outside the replica. The same query result is available to the assistant through `vault-cli wearables patterns`.
 
 ## Core responsibilities
 
@@ -1443,9 +1442,20 @@ Callback auth contract:
   `Hosted runtime resource cleanup failed.` and only `resourceKind` (`snapshot`,
   `replica`, `legacy_snapshot`, `media`, `unknown`), `stage` (`parse`, `purge`,
   `acknowledge`), `errorCategory` (`timeout`, `abort`, `http`, `validation`,
-  `database`, `other`), and optional integer `httpStatus` (100–599). Existing
-  request context supplies correlation; no identities or raw error/provider data
-  are logged. Success, disabled, and deadline-skipped work stay quiet. Diagnostic
+  `database`, `other`), optional integer `httpStatus` (100–599), and optional
+  `resourceFingerprint` for snapshot, replica, and legacy-snapshot orphans.
+  The fingerprint is the full lowercase SHA-256 hex of the UTF-8 encoding of
+  `JSON.stringify(["murph.runtime-resource-cleanup.orphan.v1", userId, kind, resourceId, String(revision)])`.
+  Only own data properties with nonempty primitive string identities and a
+  positive primitive bigint revision qualify; invalid or unreadable identities
+  and hash failures omit the fingerprint. Authorized read-only canonical-row
+  inspection can recompute it and check that exact revision's `purgedAt`;
+  aggregate backlog clearance or a different revision cannot prove recovery.
+  Media warnings retain request context only. No raw identities, paths, contents,
+  secrets, or error/provider data are logged. Hashing occurs only for existing
+  orphan warnings (at most 50 per sweep), with cost linear in identity bytes and
+  one fixed 64-character value per resource generation, reused across retries.
+  Success, disabled, and deadline-skipped work stay quiet. Diagnostic
   inspection/logging failures cannot change claims, counts, fences, retry timing,
   or failure propagation.
 - Hosted member private fields, device-sync credentials, mailbox payloads, and
@@ -2893,7 +2903,7 @@ runtimes without that port. Keep the compatible Web callback through runner
 convergence and any rollback window.
 
 New managed automation usage records use fixed workflow feature keys (including
-Morning Journal, Personal Patterns, research, and the weekly usage review).
+Morning Journal, research, and the weekly usage review).
 They derive only from the runtime-bound built-in occurrence identity and do not
 change model selection or pricing. Older generic `assistant_cron` or internal
 reply rows remain generic; diagnostics cannot reconstruct their workflow names.

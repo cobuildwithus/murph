@@ -648,7 +648,7 @@ describe('assistant execution prompt contract', () => {
     expect(directPrompt).toContain('journal-outcome')
     expect(directPrompt).toContain('per independent fact')
     expect(directPrompt).toContain('--related-id')
-    expect(directPrompt).toContain('missing data remains unknown')
+    expect(directPrompt).toContain('Missing reports never mean absence')
     expect(directPrompt).toContain('even when the member is asking for advice')
     expect(directPrompt).toContain('An extra request to save is not required')
     expect(directPrompt).toContain('short English event name')
@@ -662,13 +662,11 @@ describe('assistant execution prompt contract', () => {
     expect(directPrompt).toContain('hypothetical questions are not events')
     expect(directPrompt).toContain('use `note` when none fits')
     expect(directPrompt).toContain('start one workout')
-    expect(directPrompt).toContain("member's assigned local schedule")
-    expect(directPrompt).not.toContain('Check at 13:00 local')
-    expect(directPrompt).toContain(
-      'vault-cli wearables patterns --date <local-date> --format json',
-    )
-    expect(directPrompt).toContain('exactly once')
-    expect(directPrompt).toContain('stop proactive questions when asked')
+    expect(directPrompt).not.toContain('Types and Pattern tags')
+    expect(directPrompt).not.toContain('scored Pattern outcome')
+    expect(directPrompt).not.toContain('wearables patterns')
+    expect(directPrompt).not.toContain('personal-pattern-notifications')
+    expect(directPrompt).toContain('Stop proactive questions when asked')
     expect(directPrompt).toContain('read the relevant canonical records with a bounded query')
     expect(directPrompt).toContain(
       'tell users to ask Murph; never claim web controls',
@@ -1077,7 +1075,7 @@ describe('assistant execution prompt contract', () => {
       'Use `/settings` for personality, tone, model, provider, or reasoning changes',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
-      "read or save this member's main/supporting personality, tone, and voice",
+      "read or save this member's tone and voice",
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
       'same-turn demos do not activate it',
@@ -3510,7 +3508,7 @@ describe('assistant conversation scope', () => {
 
   it('presents hosted Linq style controls as room-owned settings', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput({
-      assistantPersona: 'scientist-with-classic',
+      assistantPersona: 'classic',
       assistantPersonality: {
         detail: 7,
         humor: 9,
@@ -3527,10 +3525,10 @@ describe('assistant conversation scope', () => {
       "This room owns Murph's personality, tone, voice, Humor, Push, Detail, and Unhinged",
     )
     expect(prompt).toContain(
-      "read or save the room's main/supporting personality, tone, and voice",
+      "read or save the room's tone and voice",
     )
     expect(prompt).toContain(
-      'Lead with rigorous curiosity and calibrated evidence, while keeping the explanation warm, balanced, and easy to use.',
+      'Stay balanced, warm, capable, and adaptable.',
     )
     expect(prompt).toContain(
       "They never read or change a participant's private Murph settings",

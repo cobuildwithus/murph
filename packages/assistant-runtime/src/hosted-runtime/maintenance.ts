@@ -1258,12 +1258,7 @@ function shouldAlwaysPersistHostedAssistantAutomationEvent(
   event: AssistantRunEvent,
 ): boolean {
   return event.type === "input.reply-failed"
-    || event.type === "onboarding.followup.completed"
-    || (
-      (event.type === "cron.job.completed"
-        || event.type === "cron.occurrence.expired")
-      && event.failureContext?.automationSlug === "personal-patterns-update"
-    );
+    || event.type === "onboarding.followup.completed";
 }
 
 export function runHostedNoopSystemWakeLane(): HostedMaintenanceMetrics {

@@ -2535,66 +2535,10 @@ orchestrator.
 
 Scheduled-job completion diagnostics expose `retryScheduled` after the cron
 owner finalizes durable runtime state. Web prefixes that field as
-`failureRetryScheduled` in persisted redacted log details. Personal Patterns
-operator email ignores failed events unless this field is explicitly `false`;
-missing fields from an older runtime stay quiet. Explicit provider usage-limit
-failures stay quiet too. Occurrence-expired events remain terminal, but Web
-suppresses their operator email when retained `runtime.ai_usage_gate` observations
-establish a platform usage pause at the occurrence or before expiry detection.
-These Web-owned observations use the existing `assistant.automation_detail` event
-with type `runtime.ai_usage_gate`, carry only time and a usage-limited boolean, survive
-an allowance reset under normal diagnostic retention, and never change runtime
-admission. Missing history preserves the ordinary alert. The alert callback uses
-its authenticated member identity for the bounded lookup before coalescing. Every terminal event for one scheduled occurrence uses
-one member-independent email body and Resend idempotency key, so concurrent
-member failures coalesce without a new alert queue or persistence owner.
-The generic email describes either expiry or terminal failure without asserting
-that an expired occurrence reached a model. Expiry diagnostics add
-`failurePriorFailureCount` from the existing consecutive-failure state.
-Snapshot lifecycle events add `nextWakeState`, `nextWakeOffsetMs`,
-`nextDefaultProcessingWakeState`, `nextDefaultProcessingWakeOffsetMs`,
-`nextDefaultProcessingWakeReasonPresent`, and
-`systemMailboxProgressGenerationPresent`. Wake states distinguish `omitted`
-legacy fields, explicit `none`, `invalid`, `due`, and `future`; offsets are
-finite milliseconds relative to diagnostic construction, negative when overdue,
-and null for omitted, absent, or invalid timestamps. These are attempted
-checkpoint projections, not runtime admission decisions. Use
-`checkpoint.snapshot_finished` with `webCheckpointAccepted: true` to establish
-acceptance; failed or preempted snapshots do not establish it. Older runners
-omit the new diagnostics. Neither raw timestamp input nor arbitrary reason
-strings enter the new fields, and no diagnostic drives wake selection.
-Separately, after an exact successful completion clears the matching write
-fence, Cloudflare makes at most one signed `POST` to
-`/api/internal/hosted-runtime/owner-released`. The request has no body, uses a
-timeout capped at two seconds, and is not retried. A strictly future mailbox
-retry continuation still sends the callback after exact fence clear; the retry
-time does not establish whether Web has actionable work. The signed query
-carries the bounded opaque `runtimeAttemptId` whose exact write fence was cleared
-and may also carry `immediateRecheckRequested=1`. That transient edge means this
-invocation produced a default or retention schedule which it committed but did not service;
-inherited and already-attempted wakes do not emit it on the ordinary result path.
-Transport-loss recovery is the narrow exception:
-after explicit inactive-container proof and durable workspace-version advance,
-Cloudflare has lost attempt-local provenance and may conservatively emit the
-edge for a recovered due default wake, causing one facts re-read. It does not do
-so for a future wake. Web binds the user through the signed request. Without the
-edge, it re-derives runnable mailbox lag and never treats a persisted due wake
-as level-triggered signal authority. A live system mailbox item beyond the
-handled-through frontier also remains actionable, including a recording item
-with a future retry. For actionable work it emits the pointer-only
-`runtime_owner_released` signal. Temporal releases an accepted owner horizon only
-when its runtime attempt matches, then immediately re-reads
-durable facts and either runs due work or owns the exact future timer. A stale
-release cannot affect a newer owner. Legacy callbacks without an attempt pointer
-remain facts-only `runtime_recheck_requested` signals during rollout. Future
-mailbox retry continuations remain deferred to their retry time. A callback timeout,
-transport failure, non-success response, or Temporal signal failure is logged
-as metadata-only degradation and cannot change the completed runtime result.
-This is a prompt recheck hint over the existing durable reconciliation path,
-not a new work owner, queue, alarm, or persisted state.
-Duplicate provider retries, duplicate email delivery attempts, or duplicate
-workflow attempts are safe because mailbox append dedupes by event id and
-Temporal signals only coalesce pending work.
+`failureRetryScheduled` in persisted redacted log details. Generic automation
+loss monitoring ignores failures that still have a scheduled retry and explicit
+provider usage limits. The former Patterns-only usage-gate observation writer is removed; usage
+admission and the shared reconciliation diagnostics keep their existing owners.
 
 The signal consumer is a patch-introducing Temporal release because an exact
 match can cancel an accepted timer and schedule the next reconciliation
@@ -3116,15 +3060,17 @@ workspace may still hit the runtime's format gate on its next wake, so the
 operator rollout gate is zero known v1 hosted snapshots before returning to
 normal traffic.
 
-Hosted Codex auth is system-mailbox runtime-control work, but hosted ChatGPT
-connect is disabled until credentials have an isolated control-plane owner
-outside the hosted tool filesystem. Already-queued connect wakes fail closed
-without starting OAuth. Disconnect remains local-revocation-first for cleanup:
-remote app-server logout is best effort, local `auth.json` deletion is required,
-and a local deletion failure keeps the system-mailbox item retryable instead of
-consuming a revocation request. Any terminal `connected` callback from an old
-in-flight wake prunes local managed `auth.json` and is reported as a failed
-connection cleanup callback, not as a durable connected state.
+Member ChatGPT account linking is retired. Web no longer creates linking attempts
+or accepts runtime auth callbacks, and the runtime performs no member OAuth or
+remote logout. Legacy `runtime.codex-auth-requested` wakes and
+`codex-auth.updated` checkpoint records remain readable solely to delete local
+`auth.json`; deletion failures retain retryable mailbox work. Remove those
+readers only after retained mailbox records and snapshots have drained. Existing
+connection rows remain available to account export/deletion and retirement
+cleanup. No schema drop, billing change, or ordinary provider-selection change
+is part of this retirement; local/operator authentication remains supported.
+Deploy the runtime/Worker consumer before removing Web callback routes, and
+ensure old callback-producing runtime instances have drained before Web rollout.
 
 Hosted device-sync webhook freshness is owned by web dirty state, not mailbox
 completion. The route claims the exact provider trace, writes sparse
@@ -3829,7 +3775,9 @@ projection-completion notification retries it; terminal projection failure is
 still replyable through the normal fallback. Duplicate staging and
 projection-completion notifications at or behind the newest queued or committed
 frontier are ignored before exact-successor proof. A successful `turn/steer`
-acknowledges transport only. Before any hosted tool effect or final delivery,
+acknowledges transport only; instant steering (see `ARCHITECTURE.md`) changes
+when Codex samples the steered input, not this acknowledgement or journal
+contract. Before any hosted tool effect or final delivery,
 Murph journals and checkpoints only accepted inputs at or below that tool
 request's or provider result's authoritative delivery-context ordinal. An
 acknowledged later input that remains above the ordinal stays pending for a
@@ -4314,7 +4262,7 @@ carries optional `sourceReadAtDeadline: { step, elapsedMs }`. The same done even
 adds `details.browserVaultRefreshSourceReadStep` and
 `details.browserVaultRefreshSourceReadStepElapsedMs`. The closed source labels
 are `canonical_source_read` (`readVaultSourceStrict`), `read_model_construction`
-(`createVaultReadModel`), `personal_pattern_vocabulary_read`, `metric_projection`
+(`createVaultReadModel`), `metric_projection`
 (`buildMetricProjection`), and `default_entity_projection`. Source elapsed time
 is a bounded, finite, non-negative integer measured through the first operation
 boundary at or after the deadline, or through timeout observation while active.
@@ -4702,6 +4650,15 @@ runtime-wake interruption. Each non-success event carries the last reached
 fixed `snapshotStage`: `plan`, `session`, `archive`, `upload`, or `checkpoint`.
 These events prove local progress only; they do not claim that Web accepted a
 checkpoint.
+
+An upload failure may also carry `snapshotUploadFailurePhase`, limited to
+`upload_prepare` (local file verification and hashing), `upload_presign`
+(write-fence headers and presign request/response validation), `upload_transfer`
+(direct PUT and its existing bounded retries), or `upload_receipt` (managed-part
+receipt processing). The terminal owner reads the existing safe error phase and
+omits unrecognized values. An underlying phase is preserved instead of replaced,
+and exact caller interruptions remain unchanged. Session-start and completion
+phase/timeout diagnostics and successful upload timings retain their contracts.
 
 Runtime logs remain lossy observability. Finished and preempted info events use
 the bounded process-global best-effort queue; failure warning/error events

@@ -10,7 +10,6 @@ import {
   Timer,
 } from "lucide-react";
 
-import { BiomarkerIcon } from "@/src/components/biomarkers/biomarker-icon";
 import { MarkdownView } from "@/src/components/ui/markdown-view";
 import { SectionLabel } from "@/src/components/ui/section-label";
 import { cn } from "@/src/lib/utils";
@@ -28,6 +27,7 @@ import type {
   ExperimentSignal,
   ExperimentSignalEstimatedChange,
 } from "@/src/types/experiments";
+import { BiomarkerIcon } from "./biomarker-icon";
 import { ExpertCard } from "./expert-card";
 import { SafetySection } from "./safety-section";
 import { splitBulletLead } from "./format";
@@ -385,16 +385,7 @@ export function ProtocolTab({ experiment, researchHref }: ProtocolTabProps) {
                         isPrimary ? "text-2xl" : "text-lg"
                       }`}
                     >
-                      {signal.biomarkerRouteId ? (
-                        <Link
-                          href={`/biomarkers/${signal.biomarkerRouteId}`}
-                          className="hover:text-primary transition-colors"
-                        >
-                          {signal.label}
-                        </Link>
-                      ) : (
-                        signal.label
-                      )}
+                      {signal.label}
                     </h3>
                     <p
                       className={`font-serif font-semibold text-primary ${
@@ -693,7 +684,7 @@ function ExpectedSignalContextPills({
         Also worth watching
       </span>
       {signals.map((signal) => {
-        const pill = (
+        return (
           <span
             key={signal.label}
             className="inline-flex items-center gap-2 rounded-full border border-border/70 bg-background/35 px-3 py-1.5 text-[12px]/4"
@@ -707,15 +698,6 @@ function ExpectedSignalContextPills({
             </span>
           </span>
         );
-        return signal.biomarkerRouteId ? (
-          <Link
-            key={signal.label}
-            href={`/biomarkers/${signal.biomarkerRouteId}`}
-            className="transition-opacity hover:opacity-75"
-          >
-            {pill}
-          </Link>
-        ) : pill;
       })}
     </div>
   );

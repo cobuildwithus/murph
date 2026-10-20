@@ -42,52 +42,6 @@ vi.mock("@/src/components/murph/murph-assistant-style-picker", () => ({
   },
 }));
 
-vi.mock("@/src/components/murph/murph-persona-picker", () => ({
-  MurphPersonaPicker(props: {
-    initialPersona?: string;
-    initialTone?: string | null;
-    initialVoice?: string | null;
-    mode?: string;
-    onOpenChange?: (open: boolean) => void;
-    onSaved?: (preferences: {
-      persona: string;
-      tone: string;
-      voice: string;
-    }) => void;
-    open?: boolean;
-    savePreference?: (preferences: {
-      persona: string;
-      tone: string;
-      voice: string;
-    }) => Promise<{ persona: string; tone: string; voice: string }>;
-  }) {
-    if (!props.open) return null;
-    return React.createElement(
-      "div",
-      {
-        "data-persona-picker": props.initialPersona ?? "",
-        "data-persona-picker-mode": props.mode ?? "",
-      },
-      React.createElement("button", {
-        "data-save-persona": "true",
-        onClick: async () => {
-          const preferences = {
-            persona: "hype-coach",
-            tone: props.initialTone ?? "formal",
-            voice: props.initialVoice ?? "upbeat",
-          };
-          const saved = props.savePreference
-            ? await props.savePreference(preferences)
-            : preferences;
-          props.onSaved?.(saved);
-          props.onOpenChange?.(false);
-        },
-        type: "button",
-      }, "Save personality"),
-    );
-  },
-}));
-
 vi.mock("@/src/components/settings/murph-personality-settings-dialog", async () => {
   const actual = await vi.importActual<
     typeof import("@/src/components/settings/murph-personality-settings-dialog")
@@ -151,6 +105,7 @@ describe("CustomizeMurphSettings", () => {
     );
 
     expect(markup).toContain("How Murph talks");
+    expect(markup).not.toContain("Personality");
     expect(markup).toContain("Formal · Custom");
     expect(markup).toContain("Voice");
     expect(markup).toContain("Grandpa · Custom");
@@ -158,29 +113,15 @@ describe("CustomizeMurphSettings", () => {
     expect(markup).toContain("Change");
   });
 
-  test("shows effective persona defaults with their source", () => {
+  test("shows the existing defaults with their source", () => {
     const markup = renderToStaticMarkup(
       React.createElement(CustomizeMurphSettings, { assistant: null }),
     );
 
-    expect(markup).toContain("Formal · Personality default");
-    expect(markup).toContain("Classic Murph · Personality default");
+    expect(markup).toContain("Formal · Default");
+    expect(markup).toContain("Classic Murph · Default");
   });
 
-  test("summarizes the saved main and supporting personalities in their own row", () => {
-    const markup = renderToStaticMarkup(
-      React.createElement(CustomizeMurphSettings, {
-        assistant: {
-          persona: "scientist-with-classic",
-          tone: null,
-          voice: null,
-        },
-      }),
-    );
-
-    expect(markup).toContain("Personality");
-    expect(markup).toContain("Scientist + Classic");
-  });
 
   test("keeps the existing Humor, Push, and Detail controls in a separate row", () => {
     const markup = renderToStaticMarkup(
@@ -198,20 +139,6 @@ describe("CustomizeMurphSettings", () => {
     expect(markup).not.toContain("Unhinged");
   });
 
-  test("resolves untouched style levels from the selected main personality", () => {
-    const markup = renderToStaticMarkup(
-      React.createElement(CustomizeMurphSettings, {
-        assistant: {
-          persona: "navy-seal",
-          personality: { detail: null, humor: null, push: null },
-          tone: null,
-          voice: null,
-        },
-      }),
-    );
-
-    expect(markup).toContain("Humor 1 · Push 10 · Detail 2");
-  });
 
   test("keeps the customization rows in their intended order", () => {
     const markup = renderToStaticMarkup(
@@ -223,7 +150,6 @@ describe("CustomizeMurphSettings", () => {
 
     const labels = [
       "How Murph talks",
-      "Personality",
       "Style levels",
       "Voice",
       "Contact card",
@@ -233,37 +159,12 @@ describe("CustomizeMurphSettings", () => {
     expect(positions).toEqual([...positions].sort((left, right) => left - right));
   });
 
-  test("shows Classic when no persona is stored", () => {
-    const markup = renderToStaticMarkup(
-      React.createElement(CustomizeMurphSettings, { assistant: null }),
-    );
 
-    expect(markup).toContain("Classic");
-  });
-
-  test("opens the personality editor from its row", async () => {
-    const rendered = await renderClientComponent(
-      React.createElement(CustomizeMurphSettings, { assistant: null }),
-      { requireButton: false },
-    );
-
-    const personalityRow = findSettingsRow(rendered.container, "Personality");
-    await React.act(async () => {
-      personalityRow?.querySelector("button")?.click();
-    });
-
-    const picker = rendered.container.querySelector("[data-persona-picker]");
-    expect(picker).not.toBeNull();
-    expect(picker?.getAttribute("data-persona-picker-mode")).toBe("personality");
-
-    await rendered.cleanup();
-  });
 
   test("opens and saves the existing style-level editor independently", async () => {
     const rendered = await renderClientComponent(
       React.createElement(CustomizeMurphSettings, {
         assistant: {
-          persona: "scientist-with-classic",
           personality: { detail: 8, humor: 9, push: 1 },
           tone: "formal",
           voice: "grandpa",
@@ -285,114 +186,18 @@ describe("CustomizeMurphSettings", () => {
       )?.click();
     });
 
-    expect(rendered.container.textContent).toContain("Scientist + Classic");
     expect(rendered.container.textContent).toContain("Humor 7 · Push 3 · Detail 5");
     expect(rendered.container.textContent).toContain("Formal");
     expect(rendered.container.textContent).toContain("Grandpa");
     await rendered.cleanup();
   });
 
-  test("updates the row and preserves tone and voice after a personality save", async () => {
-    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => ({
-      ok: true,
-      json: async () => ({ assistantPersona: "hype-coach" }),
-      init,
-    }));
-    vi.stubGlobal("fetch", fetchMock);
-    const rendered = await renderClientComponent(
-      React.createElement(CustomizeMurphSettings, {
-        assistant: { persona: "classic", tone: "formal", voice: "grandpa" },
-        voiceTestContactOption: makeVoiceTestOption(),
-      }),
-      { requireButton: false },
-    );
 
-    const personalityRow = findSettingsRow(rendered.container, "Personality");
-    await React.act(async () => {
-      personalityRow?.querySelector("button")?.click();
-    });
-
-    const saveButton = rendered.container.querySelector("[data-save-persona]");
-    expect(saveButton).toBeInstanceOf(rendered.window.HTMLButtonElement);
-    await React.act(async () => {
-      (saveButton as HTMLButtonElement | null)?.click();
-    });
-
-    expect(rendered.container.textContent).toContain("Hype Coach");
-    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({
-      persona: "hype-coach",
-    });
-    // Explicit tone and voice overrides are untouched by a personality save.
-    expect(rendered.container.textContent).toContain("Formal · Custom");
-    expect(rendered.container.textContent).toContain("Grandpa · Custom");
-    // A personality save never triggers the voice chat handoff.
-    expect(rendered.assign).not.toHaveBeenCalled();
-
-    await rendered.cleanup();
-  });
-
-  test("updates effective tone and voice defaults after a personality save", async () => {
-    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => ({
-      ok: true,
-      json: async () => ({ assistantPersona: "hype-coach" }),
-      init,
-    }));
-    vi.stubGlobal("fetch", fetchMock);
-    const rendered = await renderClientComponent(
-      React.createElement(CustomizeMurphSettings, {
-        assistant: { persona: "classic", tone: null, voice: null },
-      }),
-      { requireButton: false },
-    );
-
-    expect(rendered.container.textContent).toContain(
-      "Formal · Personality default",
-    );
-    expect(rendered.container.textContent).toContain(
-      "Classic Murph · Personality default",
-    );
-
-    const personalityRow = findSettingsRow(rendered.container, "Personality");
-    await React.act(async () => {
-      personalityRow?.querySelector("button")?.click();
-    });
-    await React.act(async () => {
-      rendered.container.querySelector<HTMLButtonElement>(
-        "[data-save-persona]",
-      )?.click();
-    });
-
-    expect(rendered.container.textContent).toContain("Hype Coach");
-    expect(rendered.container.textContent).toContain(
-      "Casual · Personality default",
-    );
-    expect(rendered.container.textContent).toContain(
-      "Football announcer · Personality default",
-    );
-    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({
-      persona: "hype-coach",
-    });
-
-    const toneRow = findSettingsRow(rendered.container, "How Murph talks");
-    await React.act(async () => {
-      toneRow?.querySelector("button")?.click();
-    });
-    const picker = rendered.container.querySelector(
-      "[data-assistant-style-step]",
-    );
-    expect(picker?.getAttribute("data-initial-tone")).toBe("casual");
-    expect(picker?.getAttribute("data-initial-voice")).toBe(
-      "football-announcer",
-    );
-
-    await rendered.cleanup();
-  });
 
   test("preserves personality after a tone or voice save", async () => {
     const rendered = await renderClientComponent(
       React.createElement(CustomizeMurphSettings, {
         assistant: {
-          persona: "scientist-with-classic",
           personality: { detail: 8, humor: 9, push: 1 },
           tone: "formal",
           voice: "grandpa",
@@ -411,7 +216,6 @@ describe("CustomizeMurphSettings", () => {
       )?.click();
     });
 
-    expect(rendered.container.textContent).toContain("Scientist + Classic");
     expect(rendered.container.textContent).toContain("Humor 9 · Push 1 · Detail 8");
 
     await rendered.cleanup();

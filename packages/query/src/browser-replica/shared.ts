@@ -10,10 +10,6 @@ import type {
   OverviewExperiment,
   OverviewWeeklySampleSummary,
 } from "../overview.ts";
-import type {
-  PersonalPatternReport,
-  PersonalPatternVocabulary,
-} from "../personal-patterns.ts";
 import type { JournalView } from "../journal-view.ts";
 import type { VaultReadModel } from "../read-model.ts";
 import type { TimelineEntry } from "../timeline.ts";
@@ -329,8 +325,6 @@ export interface BrowserVaultReplica {
   metricGoalProgressRows: BrowserVaultMetricGoalProgressRow[];
   metricRows: BrowserVaultMetricRow[];
   metricSelectionRows: BrowserVaultMetricSelectionRow[];
-  /** Absent only on replicas produced before Personal Patterns shipped. */
-  personalPatterns?: PersonalPatternReport;
   policy: BrowserVaultReplicaPolicy;
   schema: typeof BROWSER_VAULT_REPLICA_SCHEMA;
   searchRows: BrowserVaultSearchRow[];
@@ -351,7 +345,6 @@ type BrowserVaultLegacyCompatibleCoreReplica = Pick<
   | "generation"
   | "hasLabBiomarkers"
   | "journal"
-  | "personalPatterns"
   | "policy"
   | "schema"
   | "searchRows"
@@ -398,7 +391,6 @@ export interface CreateBrowserVaultReplicaInput {
   experimentOutcomes?: readonly ExperimentOutcome[];
   generatedAt?: string;
   metricPoints: readonly MetricPoint[];
-  personalPatternVocabulary?: PersonalPatternVocabulary | null;
   signal?: AbortSignal;
   sourceBundleHash: string;
   vault: VaultReadModel;

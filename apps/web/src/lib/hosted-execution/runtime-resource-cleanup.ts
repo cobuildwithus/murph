@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { readCloudflareHostedControlHttpError } from "@murphai/cloudflare-hosted-control/client";
 import { reconcileHostedRuntimeUploads } from "./runtime-upload-recovery";
 import { parseHostedRuntimeResourcePurge } from "@murphai/hosted-execution/runtime-resource-purge";
@@ -48,7 +49,7 @@ function classifyCleanupError(error: unknown, stage: CleanupFailureStage): { err
 }
 
 function warnHostedRuntimeResourceCleanupFailure(resource: HostedRuntimeOrphan | "media", stage: CleanupFailureStage, error: unknown): void {
-  const diagnostic: { resourceKind: CleanupResourceKind; stage: CleanupFailureStage; errorCategory: CleanupErrorCategory; httpStatus?: number } = {
+  const diagnostic: { resourceKind: CleanupResourceKind; stage: CleanupFailureStage; errorCategory: CleanupErrorCategory; httpStatus?: number; resourceFingerprint?: string } = {
     resourceKind: "unknown", stage, errorCategory: "other",
   };
   try {
@@ -56,7 +57,21 @@ function warnHostedRuntimeResourceCleanupFailure(resource: HostedRuntimeOrphan |
     diagnostic.resourceKind = new Map<unknown, CleanupResourceKind>([
       ["snapshot", "snapshot"], ["replica", "replica"], ["legacy_snapshot", "legacy_snapshot"], ["media", "media"],
     ]).get(kind) ?? "unknown";
-  } catch { /* Resource inspection is optional, including for proxies. */ }
+    if (kind === "snapshot" || kind === "replica" || kind === "legacy_snapshot") {
+      const userId: unknown = Object.getOwnPropertyDescriptor(resource, "userId")?.value;
+      const resourceId: unknown = Object.getOwnPropertyDescriptor(resource, "resourceId")?.value;
+      const revision: unknown = Object.getOwnPropertyDescriptor(resource, "revision")?.value;
+      if (typeof userId === "string" && userId.length > 0
+        && typeof resourceId === "string" && resourceId.length > 0
+        && typeof revision === "bigint" && revision > 0n) {
+        // Read-only joins: SHA-256 of UTF-8 JSON.stringify([domain, userId,
+        // kind, resourceId, decimal revision]); domain is the literal below.
+        diagnostic.resourceFingerprint = createHash("sha256").update(JSON.stringify([
+          "murph.runtime-resource-cleanup.orphan.v1", userId, kind, resourceId, String(revision),
+        ]), "utf8").digest("hex");
+      }
+    }
+  } catch { /* Resource inspection/hashing is optional, including for proxies. */ }
   try {
     Object.assign(diagnostic, classifyCleanupError(error, stage));
   } catch { /* Hostile reflection/predicate inputs must not affect cleanup. */ }

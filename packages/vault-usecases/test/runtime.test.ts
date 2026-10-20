@@ -76,7 +76,6 @@ function createQueryRuntimeStub() {
     summarizeWearableMetricTrendRuntime: vi.fn(async () => undefined),
     summarizeWearableSleepRuntime: vi.fn(async () => undefined),
     summarizeWearableSleepPatternRuntime: vi.fn(async () => undefined),
-    buildPersonalPatternReportRuntime: vi.fn(async () => undefined),
     summarizeWearableActivityRuntime: vi.fn(async () => undefined),
     summarizeWearableBodyStateRuntime: vi.fn(async () => undefined),
     summarizeWearableDayRuntime: vi.fn(async () => undefined),
@@ -398,7 +397,7 @@ test("query-runtime-load times only cold shared loads, excludes the shape check 
   function timed<T>(run: () => Promise<T>) {
     let report: CliTiming | undefined;
     let result: T | undefined;
-    const outcome = withCliTiming(() => timeCliDispatch("wearables patterns", async () => { result = await run(); }),
+    const outcome = withCliTiming(() => timeCliDispatch("wearables latest", async () => { result = await run(); }),
       (value) => { report = value; }).then(() => result);
     const loads = () => {
       assert.ok(report);

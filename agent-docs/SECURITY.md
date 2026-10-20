@@ -110,10 +110,8 @@ to apply after cutover.
   spine. A record without a tag field stays canonical-no-op; a replay of the same
   provider note with changed or explicitly empty tags revises or clears the
   spine's tag set. It must remove the free-text `value` before provider-snapshot
-  or evidence retention, and it must not place that text in Patterns, logs, or
-  fixtures. Personal Patterns fails closed on the canonical note type plus
-  Junction/Oura provenance. It currently treats only the exact `sauna` tag as
-  an action; every other source or tag stays neutral. Junction note-history
+  or evidence retention, and it must not place that text in logs or
+  fixtures. Junction note-history
   coverage version 2 reopens each legacy-covered source for one bounded pass so
   existing members receive neutral replacement notes without rewriting or
   deleting the legacy event spines.

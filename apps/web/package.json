@@ -33,7 +33,6 @@
     "privacy:backfill-phone-calls": "pnpm --dir ../.. exec tsx --tsconfig apps/web/tsconfig.json apps/web/scripts/backfill-hosted-phone-call-private-content.ts",
     "privacy:backfill-vault-share-recent-dates": "pnpm --dir ../.. exec tsx --tsconfig apps/web/tsconfig.json apps/web/scripts/backfill-hosted-vault-share-recent-date-generations.ts",
     "stripe:migrate-legacy-usage-items": "pnpm --dir ../.. exec tsx --tsconfig apps/web/tsconfig.json apps/web/scripts/migrate-legacy-stripe-usage-items.ts",
-    "pitch:pdf": "pnpm --dir ../.. exec tsx apps/web/scripts/export-pitch-pdf.ts",
     "legal:pdf": "pnpm --dir ../.. exec tsx apps/web/scripts/generate-legal-pdfs.ts",
     "typecheck": "pnpm health-commons:generate && pnpm prisma:generate && pnpm typecheck:prepared",
     "typecheck:prepared": "pnpm changelog:generate && pnpm --dir ../.. exec tsx scripts/ensure-next-route-type-stubs.ts apps/web && node ../../scripts/run-typescript.mjs web -p tsconfig.json --pretty false",

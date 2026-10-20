@@ -1,6 +1,8 @@
 import { withCodexToolInputContract } from '../src/assistant-codex/tool-input-contract.ts'
+import { withCodexAppServerSteeringFeatureOverrides } from '../src/assistant-codex/config.ts'
 import {
   cliTimingLaunchArgs,
+  codexSteeringLaunchArgs,
   MURPH_DYNAMIC_TOOLS,
   MURPH_DYNAMIC_TOOLS_WITHOUT_PROGRESS,
   MURPH_DYNAMIC_TOOLS_WITH_COMPUTER,
@@ -60,7 +62,6 @@ import {
   buildCodexAppServerArgs,
   compactWarmCodexThread,
   executeCodexAppServerTurn as executeCodexAppServerTurnUnchecked,
-  executeCodexManagedAccountOperation,
   preinitializeCodexAppServer,
   readCodexAppServerTurnFailureContext,
   resolveCodexDisplayOptions,
@@ -146,6 +147,25 @@ describe('assistant codex runtime', () => {
 
     expect(buildCodexAppServerArgs({})).toEqual(['app-server'])
     expect(() => buildCodexAppServerArgs({ oss: true })).toThrow(/must use OpenAI/u)
+  })
+
+  it('defaults instant steering and code-mode interruption while keeping explicit caller values', () => {
+    expect(withCodexAppServerSteeringFeatureOverrides(['model="gpt-5"'])).toEqual([
+      'model="gpt-5"',
+      'features.instant_interrupt=true',
+      'features.code_mode_interrupt=true',
+    ])
+    expect(withCodexAppServerSteeringFeatureOverrides([
+      'features.instant_interrupt = false',
+    ])).toEqual([
+      'features.instant_interrupt = false',
+      'features.code_mode_interrupt=true',
+    ])
+    const complete = [
+      'features.code_mode_interrupt=false',
+      'features.instant_interrupt=true',
+    ]
+    expect(withCodexAppServerSteeringFeatureOverrides(complete)).toBe(complete)
   })
 
   it('builds typed Codex app-server turn steer requests for live turns', () => {
@@ -909,6 +929,7 @@ describe('assistant codex runtime', () => {
         `model="${model}"`,
         '--config',
         'model_catalog_json="/opt/murph/codex-model-catalog.openai-flex.json"',
+        ...codexSteeringLaunchArgs,
         ...cliTimingLaunchArgs,
         'app-server',
       ],

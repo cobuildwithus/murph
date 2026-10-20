@@ -183,30 +183,16 @@ test("Sidebar exposes primary destinations without Voice or the internal Overvie
   const markup = renderToStaticMarkup(createElement(Sidebar));
 
   assert.match(markup, /href="\/home"[^>]*>\s*<svg/);
-  assert.match(markup, /href="\/journal"/);
-  assert.match(markup, />Journal<\/a>/);
+  assert.doesNotMatch(markup, /href="\/journal"/);
+  assert.doesNotMatch(markup, />Journal<\/a>/);
   assert.doesNotMatch(markup, /href="\/voice"/);
   assert.doesNotMatch(markup, />Voice<\/a>/);
-  assert.match(markup, /href="\/patterns"/);
-  assert.match(markup, />Patterns<\/a>/);
+  assert.doesNotMatch(markup, /href="\/biomarkers/);
+  assert.match(markup, /href="\/environment"/);
+  assert.doesNotMatch(markup, /href="\/patterns"/);
+  assert.doesNotMatch(markup, />Patterns<\/a>/);
   assert.doesNotMatch(markup, /href="\/overview"/);
   assert.doesNotMatch(markup, />Overview<\/a>/);
-});
-
-test.each([
-  ["/journal", "Journal"],
-  ["/patterns", "Patterns"],
-])("Sidebar marks %s as the active primary destination", (pathname, label) => {
-  mocks.usePathname.mockReturnValue(pathname);
-
-  const markup = renderToStaticMarkup(createElement(Sidebar));
-
-  assert.match(
-    markup,
-    new RegExp(
-      `data-active="true">\\s*<a[^>]*href="${pathname}"[^>]*>[\\s\\S]*${label}<\\/a>`,
-    ),
-  );
 });
 
 test("Sidebar renders Environment as an active primary destination", () => {
@@ -217,18 +203,6 @@ test("Sidebar renders Environment as an active primary destination", () => {
   assert.match(
     markup,
     /data-active="true">\s*<a[^>]*href="\/environment"[^>]*>[\s\S]*Environment<\/a>/,
-  );
-});
-
-test("Sidebar renders an active Biomarkers tab for the live RHR page", () => {
-  mocks.usePathname.mockReturnValue("/biomarkers/resting-heart-rate");
-
-  const markup = renderToStaticMarkup(createElement(Sidebar));
-
-  assert.match(markup, /href="\/biomarkers"/);
-  assert.match(
-    markup,
-    /data-active="true">\s*<a[^>]*href="\/biomarkers"[^>]*>[\s\S]*Biomarkers<\/a>/,
   );
 });
 
@@ -271,17 +245,6 @@ test("Sidebar keeps the private Training page out of navigation", () => {
 
   assert.doesNotMatch(markup, /href="\/training"/);
   assert.doesNotMatch(markup, />Training<\/a>/);
-});
-
-test("Sidebar keeps the Biomarkers tab active across biomarker section routes", () => {
-  mocks.usePathname.mockReturnValue("/biomarkers/heart-rate-variability");
-
-  const markup = renderToStaticMarkup(createElement(Sidebar));
-
-  assert.match(
-    markup,
-    /data-active="true">\s*<a[^>]*href="\/biomarkers"[^>]*>[\s\S]*Biomarkers<\/a>/,
-  );
 });
 
 test("Sidebar keeps Records out of navigation", () => {

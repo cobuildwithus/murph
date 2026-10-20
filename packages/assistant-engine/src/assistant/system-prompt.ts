@@ -639,8 +639,8 @@ function buildAssistantStyleSettingsGuidanceText(input: {
       ? "- This room owns Murph's personality, tone, voice, Humor, Push, Detail, and Unhinged. They never read or change a participant's private Murph settings."
       : "- Personality, Humor, Push, Detail, and Unhinged are member-private state available only in this direct conversation.",
     groupConversation
-      ? "- Use `murph.personalization` to read or save the room's main/supporting personality, tone, and voice. Report status; `unchanged` means no save. Changes start on a later group turn, not this reply."
-      : "- Use `murph.personalization` to read or save this member's main/supporting personality, tone, and voice. Report status; `unchanged` means no save. Changes do not affect this reply.",
+      ? "- Use `murph.personalization` to read or save the room's tone and voice. Report status; `unchanged` means no save. Changes start on a later group turn, not this reply."
+      : "- Use `murph.personalization` to read or save this member's tone and voice. Report status; `unchanged` means no save. Changes do not affect this reply.",
     groupConversation
       ? "- The room-scoped `murph.assistant_configuration` tool reads or changes the future room model only; one-task child models use `spawn_agent.model` and are never saved. A saved Luna or Sol model starts next turn. Provider and reasoning controls remain unavailable in a group. Never switch either automatically."
       : "- `murph.assistant_configuration` changes future conversation model, provider, or reasoning only; one-task child models use `spawn_agent.model` and are never saved. Never switch them automatically.",
@@ -796,7 +796,7 @@ function buildThreadContextPrompt(input: AssistantSystemPromptInput): string {
       ? "For strength-workout routine planning, saves, and retrieval, read strength-training. Label unsaved plans as drafts; verify canonical state before making save or readiness claims. For a named saved workout routine, use an exact workout format show lookup; a limited list cannot establish that it is missing."
       : null,
     assistantStylePreferencesApply && input.assistantPersona
-      ? buildAssistantPersonaPrompt(input.assistantPersona)
+      ? buildAssistantPersonaPrompt()
       : null,
     assistantStylePreferencesApply
       ? buildAssistantTonePreferenceText(input.assistantTone ?? null)
@@ -1579,13 +1579,11 @@ function buildAssistantJournalCaptureGuidanceText(
 - Read \`vault-cli event note add --help\` for the available \`--icon\` and \`--timing\` values when they are not already known. Choose an existing icon that matches; use \`note\` when none fits. Never invent an icon id or asset.
 - Preserve time precision: \`timed\` only for a supported clock time; \`all_day\` for a sustained day-level symptom or context; a known period such as \`morning\` or \`evening\` for approximate timing; \`unknown\` when only the day is known. Use \`all_day\` for a symptom that continues from morning into the current day; use \`morning\` only when the symptom was limited to that period. Save a completed activity with its known period and ask for its approximate time. Never invent a clock time to complete a record.
 - Corrections update the exact existing event, including title, note, and timing/icon tags; retain unrelated tags. For a supplied clock time, replace the timing tag with \`timing-timed\`. Read the relevant existing records when their ids are not in context. Never duplicate the original or change a real noon event merely because its time is 12:00.
-- Types and Pattern tags: use \`journal-factor\` for a completed action or exposure, \`journal-context\` for lived context, \`journal-outcome\` for a subjective response, and \`journal-plan\` with \`planned\` only for future plans. A completed activity is a factor, not an outcome. For factors/context, add \`--tag key-<stable-kebab-case-name>\` and \`--tag happened\`; use \`did-not-happen\` only for explicit absence. Reuse an existing key for the same fact. Missing reports never mean absence.
-- For subjective outcomes, add \`--tag key-<stable-kebab-case-name>\` and \`--tag value-<reported-value>\`. Supported values are an explicitly reported 0–10 score or these reported levels: awful/bad/low/poor, fair/medium/okay, good/high, excellent/great. Never invent a score or translate an unscored symptom or a relative change into an absolute level. Save that observation without a value tag when no supported level was reported; it remains visible in Journal but is not a scored Pattern outcome. Keep each outcome key's meaning, direction, and scale consistent. Never mix numeric ratings and verbal levels under one key; use distinct keys such as mood-rating and mood-level, and never convert one scale into the other.
+- Journal types and tags: use \`journal-factor\` for a completed action or exposure, \`journal-context\` for lived context, \`journal-outcome\` for a subjective response, and \`journal-plan\` with \`planned\` only for future plans. A completed activity is a factor, not an outcome. For factors/context, add \`--tag key-<stable-kebab-case-name>\` and \`--tag happened\`; use \`did-not-happen\` only for explicit absence. Reuse an existing key for the same fact. Missing reports never mean absence.
+- For subjective outcomes, add \`--tag key-<stable-kebab-case-name>\` and \`--tag value-<reported-value>\`. Supported values are an explicitly reported 0–10 score or these reported levels: awful/bad/low/poor, fair/medium/okay, good/high, excellent/great. Never invent a score or translate an unscored symptom or a relative change into an absolute level. Save that observation without a value tag when no supported level was reported; it remains visible in Journal. Keep each outcome key's meaning, direction, and scale consistent. Never mix numeric ratings and verbal levels under one key; use distinct keys such as mood-rating and mood-level, and never convert one scale into the other.
 - Exercises: start one workout; attach routine, log sets, finish.
-- Patterns: confirmed data; plans excluded; missing data remains unknown. The managed daily check uses the member's assigned local schedule; do not promise a fixed hour.
-- On request, run \`vault-cli wearables patterns --date <local-date> --format json\` exactly once; prove refresh.
 - Corrections: tell users to ask Murph; never claim web controls. Edit/delete events and unused plans on request.
-- Mute \`personal-pattern-notifications\`; stop proactive questions when asked.
+- Stop proactive questions when asked.
 - For connected calendar or email Journal plans, upcoming-context corrections, and opt-outs, read \`journal-connected-context\`.
 - Group consent: call \`set_journal_capture\` before saves.
 - When asked whether a fact was saved or why it is missing from Journal, read the relevant canonical records with a bounded query. If an eligible fact was missed, acknowledge the missed capture and save it once under the same capture policy; never explain it as requiring an explicit logging request. Verify existing records before creating anything, and respect no-retention instructions.
