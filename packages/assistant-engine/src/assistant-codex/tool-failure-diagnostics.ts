@@ -16,12 +16,56 @@ export interface ToolFailureDiagnostic {
   failureStage: 'admission' | 'execution' | 'result' | 'validation' | 'delivery'
   failureReason: ToolFailureReason
   errorCategory?: ToolErrorCategory
+  automationAction?: Extract<MurphDynamicToolRequest, { kind: 'automation' }>['request']['action']
+  automationErrorCode?: AutomationToolFailureCode
   deviceAction?: AssistantHostedDeviceToolRequest['action']
   deviceErrorCode?: DeviceToolFailureCode
   deviceHttpStatus?: number
   connectedAppsHttpStatus?: number
   vaultFileErrorCode?: VaultFileToolFailureCode
   productFeedbackAuditRejection?: HostedUsageOptimizationAuditRejection
+}
+
+// Core patch/reconciliation owners called by the hosted automation adapter.
+// These are diagnostic evidence only; unknown error categories stay unknown.
+const AUTOMATION_FAILURE_CODES = [
+  'VAULT_AUTOMATION_EMPTY_PATCH',
+  'VAULT_AUTOMATION_MISSING',
+  'VAULT_AUTOMATION_RECONCILIATION_LIMIT_EXCEEDED',
+] as const
+
+type AutomationToolFailureCode = typeof AUTOMATION_FAILURE_CODES[number]
+
+/** Private evidence only at the automation adapter's caught handler failure. */
+export function withAutomationToolFailureDetails(
+  result: MurphDynamicToolExecutionResult,
+  action: NonNullable<ToolFailureDiagnostic['automationAction']>,
+  error: unknown,
+): MurphDynamicToolExecutionResult {
+  if (result.rpcResult.success || !result.failureDiagnostic) return result
+  const automationErrorCode = readAutomationFailureCode(error)
+  return {
+    ...result,
+    failureDiagnostic: {
+      ...result.failureDiagnostic,
+      // Includes inspect_models, whose port calls use the inspect action.
+      automationAction: action,
+      ...(automationErrorCode === undefined ? {} : { automationErrorCode }),
+    },
+  }
+}
+
+function readAutomationFailureCode(error: unknown): AutomationToolFailureCode | undefined {
+  // Reject proxies before descriptors and accept only an own data code.
+  // Never invoke accessors, coerce values, or follow prototypes/context/causes.
+  if (typeof error !== 'object' || error === null || types.isProxy(error)) return undefined
+  try {
+    const descriptor = Object.getOwnPropertyDescriptor(error, 'code')
+    if (!descriptor || !Object.hasOwn(descriptor, 'value')) return undefined
+    return AUTOMATION_FAILURE_CODES.find((known) => known === descriptor.value)
+  } catch {
+    return undefined
+  }
 }
 
 // Exactly the source-owned codes recognized by the device adapter, not a
