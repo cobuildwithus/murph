@@ -1,3 +1,4 @@
+import { createHash, Hash } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createCloudflareHostedControlClient } from "@murphai/cloudflare-hosted-control/client";
 
@@ -23,7 +24,8 @@ import { runHostedRuntimeResourceCleanup } from "@/src/lib/hosted-execution/runt
 const NOW = new Date("2026-01-01T00:00:00.000Z");
 type OrphanRow = {
   userId: string; kind: string; resourceId: string; objectKey: string | null;
-  snapshotRef: null; revision: bigint; cleanupAt: Date; retiredAt: Date | null; purgedAt: Date | null;
+  snapshotRef: { hash: string; key: string; size: number; updatedAt: string } | null;
+  revision: bigint; cleanupAt: Date; retiredAt: Date | null; purgedAt: Date | null;
 };
 type MediaRow = {
   userId: string; mediaId: string; objectKey: string; revision: bigint;
@@ -34,6 +36,7 @@ type Diagnostic = {
   stage: "parse" | "purge" | "acknowledge";
   errorCategory: "timeout" | "abort" | "http" | "validation" | "database" | "other";
   httpStatus?: number;
+  resourceFingerprint?: string;
 };
 function orphan(overrides: Partial<OrphanRow> = {}): OrphanRow {
   return { userId: "synthetic-member", kind: "snapshot", resourceId: "synthetic-orphan",
@@ -117,8 +120,15 @@ function acknowledge(row: OrphanRow) {
   return { where: { userId, kind, resourceId, revision, retiredAt: { not: null }, purgedAt: null },
     data: { purgedAt: NOW } };
 }
-function expectDiagnostic(diagnostic: Diagnostic) {
-  expect(vi.mocked(console.warn).mock.calls).toEqual([["Hosted runtime resource cleanup failed.", diagnostic]]);
+function fingerprint(row: OrphanRow): string {
+  return createHash("sha256").update(JSON.stringify([
+    "murph.runtime-resource-cleanup.orphan.v1", row.userId, row.kind, row.resourceId, String(row.revision),
+  ]), "utf8").digest("hex");
+}
+function expectDiagnostic(diagnostic: Diagnostic, row: OrphanRow | null = orphan()) {
+  const correlation = row && ["snapshot", "replica", "legacy_snapshot"].includes(diagnostic.resourceKind)
+    ? { resourceFingerprint: fingerprint(row) } : {};
+  expect(vi.mocked(console.warn).mock.calls).toEqual([["Hosted runtime resource cleanup failed.", { ...diagnostic, ...correlation }]]);
 }
 async function controlHttpError(): Promise<Error> {
   const client = createCloudflareHostedControlClient({
@@ -145,6 +155,141 @@ describe("runtime resource cleanup diagnostics", () => {
   });
   afterEach(() => vi.restoreAllMocks());
 
+  it.each(["snapshot", "replica", "legacy_snapshot"] as const)("correlates %s retries with the exact later purge acknowledgement", async kind => {
+    const row = orphan({ kind, ...(kind === "legacy_snapshot" ? { objectKey: null,
+      snapshotRef: { hash: "a".repeat(64), key: "synthetic-bundle-key", size: 1, updatedAt: NOW.toISOString() },
+    } : {}) });
+    const expected = fingerprint(row);
+    if (kind === "snapshot") expect(expected).toBe("3ccf63195da793a92defaee6b47be6eefc9aac975f9dbcde9d6b4df3012c8bb5");
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      vi.mocked(console.warn).mockClear();
+      const f = fixture([row]);
+      f.purge.mockRejectedValueOnce(Object.assign(new Error("Synthetic timeout."), { name: "TimeoutError" }));
+      await expect(f.run()).resolves.toEqual({ configured: true, deleted: 0, failed: 1 });
+      expectDiagnostic({ resourceKind: kind, stage: "purge", errorCategory: "timeout" }, row);
+      expect(vi.mocked(console.warn).mock.calls[0][1].resourceFingerprint).toBe(expected);
+      expect(f.orphanTable.updateMany.mock.calls).toEqual([[requeue(row)]]);
+    }
+    const recovered = fixture([orphan({ ...row, retiredAt: NOW })]);
+    await expect(recovered.run()).resolves.toEqual({ configured: true, deleted: 1, failed: 0 });
+    expect(recovered.orphanTable.updateMany.mock.calls).toEqual([[acknowledge(row)]]);
+    expect(console.warn).toHaveBeenCalledTimes(1);
+  });
+
+  it("separates user, kind, resource and exact bigint revision without delimiter ambiguity", async () => {
+    const rows = [orphan(), orphan({ userId: "synthetic-other-member" }), orphan({ kind: "replica" }),
+      orphan({ kind: "legacy_snapshot" }), orphan({ resourceId: "synthetic-other-orphan" }), orphan({ revision: 8n }),
+      orphan({ revision: 9_007_199_254_740_992n }), orphan({ revision: 9_007_199_254_740_993n }),
+      orphan({ userId: "synthetic|snapshot", resourceId: "orphan" }),
+      orphan({ userId: "synthetic", resourceId: "snapshot|orphan" }),
+    ];
+    for (const row of rows) {
+      const f = fixture([row]);
+      f.purge.mockRejectedValueOnce(new Error("Synthetic purge failure."));
+      await expect(f.run()).resolves.toEqual({ configured: true, deleted: 0, failed: 1 });
+    }
+    const fingerprints = vi.mocked(console.warn).mock.calls.map(([, diagnostic]) => diagnostic.resourceFingerprint);
+    expect(fingerprints).toEqual(rows.map(fingerprint));
+    expect(new Set(fingerprints).size).toBe(rows.length);
+  });
+
+  it.each([
+    ["userId", ""], ["userId", null], ["resourceId", ""], ["resourceId", undefined],
+    ["revision", 0n], ["revision", -1n], ["revision", 7], ["revision", "7"], ["revision", null],
+  ] as const)("omits correlation for malformed %s without changing the requeue", async (field, value) => {
+    const f = fixture();
+    const claimed = orphan({ retiredAt: NOW });
+    Object.defineProperty(claimed, field, { value });
+    f.orphanTable.update.mockResolvedValueOnce(claimed);
+    f.purge.mockRejectedValueOnce(new Error("Synthetic purge failure."));
+    await expect(f.run()).resolves.toEqual({ configured: true, deleted: 0, failed: 1 });
+    expectDiagnostic({ resourceKind: "snapshot", stage: "purge", errorCategory: "other" }, null);
+    expect(f.orphanTable.updateMany.mock.calls).toEqual([[requeue(claimed)]]);
+  });
+
+  it.each(["userId", "kind", "resourceId", "revision"] as const)("does not invoke a diagnostic %s accessor", async field => {
+    const f = fixture();
+    const getter = vi.fn(() => { throw new Error("Synthetic private accessor."); });
+    // Preserve ordinary cleanup reads while exposing an accessor to diagnostics.
+    const claimed = new Proxy(orphan({ retiredAt: NOW }), {
+      getOwnPropertyDescriptor(target, key) {
+        return key === field ? { configurable: true, enumerable: true, get: getter }
+          : Reflect.getOwnPropertyDescriptor(target, key);
+      },
+    });
+    f.orphanTable.update.mockResolvedValueOnce(claimed);
+    f.purge.mockRejectedValueOnce(new Error("Synthetic purge failure."));
+    await expect(f.run()).resolves.toEqual({ configured: true, deleted: 0, failed: 1 });
+    expectDiagnostic({ resourceKind: field === "kind" ? "unknown" : "snapshot", stage: "purge", errorCategory: "other" }, null);
+    expect(getter).not.toHaveBeenCalled();
+    expect(f.orphanTable.updateMany.mock.calls).toEqual([[requeue(orphan())]]);
+  });
+
+  it.each(["userId", "resourceId", "revision"] as const)("does not coerce a hostile %s value", async field => {
+    const f = fixture();
+    const getter = vi.fn(() => { throw new Error("Synthetic private coercion."); });
+    const value = Object.create(null);
+    for (const key of ["toString", "toJSON", Symbol.toPrimitive]) Object.defineProperty(value, key, { get: getter });
+    const claimed = orphan({ retiredAt: NOW });
+    Object.defineProperty(claimed, field, { value });
+    f.orphanTable.update.mockResolvedValueOnce(claimed);
+    f.purge.mockRejectedValueOnce(new Error("Synthetic purge failure."));
+    await expect(f.run()).resolves.toEqual({ configured: true, deleted: 0, failed: 1 });
+    expectDiagnostic({ resourceKind: "snapshot", stage: "purge", errorCategory: "other" }, null);
+    expect(getter).not.toHaveBeenCalled();
+    expect(f.orphanTable.updateMany.mock.calls).toEqual([[requeue(claimed)]]);
+  });
+
+  it.each(["inherited", "reflection-failure"] as const)("omits %s identity diagnostics and retains error classification", async kind => {
+    const f = fixture();
+    let claimed = orphan({ retiredAt: NOW });
+    if (kind === "inherited") {
+      Object.setPrototypeOf(claimed, { userId: claimed.userId });
+      Reflect.deleteProperty(claimed, "userId");
+    } else claimed = new Proxy(claimed, { getOwnPropertyDescriptor(target, key) {
+      if (key === "revision") throw new Error("Synthetic private reflection failure.");
+      return Reflect.getOwnPropertyDescriptor(target, key);
+    } });
+    f.orphanTable.update.mockResolvedValueOnce(claimed);
+    f.purge.mockRejectedValueOnce(Object.assign(new Error("Synthetic timeout."), { name: "TimeoutError" }));
+    await expect(f.run()).resolves.toEqual({ configured: true, deleted: 0, failed: 1 });
+    expectDiagnostic({ resourceKind: "snapshot", stage: "purge", errorCategory: "timeout" }, null);
+    expect(f.orphanTable.updateMany.mock.calls).toEqual([[requeue(orphan())]]);
+  });
+
+  it("serializes no private row or error values and never serializes the row itself", async () => {
+    const f = fixture();
+    const row = orphan({ retiredAt: NOW, userId: "synthetic-private-member", resourceId: "synthetic-private-resource",
+      objectKey: "synthetic-private-object-key", snapshotRef: {
+        hash: "synthetic-private-content-hash", key: "synthetic-private-key", size: 1, updatedAt: NOW.toISOString(),
+      } });
+    const getter = vi.fn(() => { throw new Error("Synthetic private serialization."); });
+    Object.defineProperty(row, "toJSON", { get: getter });
+    f.orphanTable.update.mockResolvedValueOnce(row);
+    f.purge.mockRejectedValueOnce(Object.assign(new Error("synthetic-private-message"), {
+      name: "TimeoutError", cause: "synthetic-private-cause", stack: "synthetic-private-stack",
+    }));
+    await expect(f.run()).resolves.toEqual({ configured: true, deleted: 0, failed: 1 });
+    expectDiagnostic({ resourceKind: "snapshot", stage: "purge", errorCategory: "timeout" }, row);
+    expect(JSON.stringify(vi.mocked(console.warn).mock.calls)).not.toContain("synthetic-private");
+    expect(getter).not.toHaveBeenCalled();
+    expect(f.orphanTable.updateMany.mock.calls).toEqual([[requeue(row)]]);
+  });
+
+  it.each(["hash", "logger"] as const)("preserves failed acknowledgement, requeue and later success when the %s throws", async failure => {
+    const rows = [orphan(), orphan({ resourceId: "synthetic-second" })];
+    const f = fixture(rows);
+    f.orphanTable.updateMany.mockRejectedValueOnce(Object.assign(new Error("Synthetic acknowledgement failure."), {
+      name: "PrismaClientKnownRequestError",
+    }));
+    if (failure === "hash") vi.spyOn(Hash.prototype, "update").mockImplementationOnce(() => { throw new Error("synthetic-private-hash-failure"); });
+    else vi.mocked(console.warn).mockImplementationOnce(() => { throw new Error("synthetic-private-logger-failure"); });
+    await expect(f.run()).resolves.toEqual({ configured: true, deleted: 1, failed: 1 });
+    expectDiagnostic({ resourceKind: "snapshot", stage: "acknowledge", errorCategory: "database" }, failure === "hash" ? null : rows[0]);
+    expect(f.orphanTable.updateMany.mock.calls).toEqual([[acknowledge(rows[0])], [requeue(rows[0])], [acknowledge(rows[1])]]);
+    expect(f.fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
   it.each([
     ["snapshot", "snapshot"], ["replica", "replica"], ["legacy_snapshot", "legacy_snapshot"],
     ["media", "media"], ["synthetic-private-kind", "unknown"], ["multipart", "unknown"],
@@ -152,7 +297,7 @@ describe("runtime resource cleanup diagnostics", () => {
     const row = orphan({ kind, objectKey: null });
     const f = fixture([row]);
     await expect(f.run()).resolves.toEqual({ configured: true, deleted: 0, failed: 1 });
-    expectDiagnostic({ resourceKind, stage: "parse", errorCategory: "validation" });
+    expectDiagnostic({ resourceKind, stage: "parse", errorCategory: "validation" }, row);
     expect(f.purge).not.toHaveBeenCalled();
     expect(f.fetchImpl).not.toHaveBeenCalled();
     expect(f.orphanTable.updateMany.mock.calls).toEqual([[requeue(row)]]);
@@ -200,7 +345,7 @@ describe("runtime resource cleanup diagnostics", () => {
       name: "PrismaClientKnownRequestError", code: "synthetic-private-code",
     }));
     await expect(f.run()).resolves.toEqual({ configured: true, deleted: 0, failed: 1 });
-    expectDiagnostic({ resourceKind: "snapshot", stage: "acknowledge", errorCategory: "database" });
+    expectDiagnostic({ resourceKind: "snapshot", stage: "acknowledge", errorCategory: "database" }, row);
     expect(f.purge).toHaveBeenCalledTimes(1);
     expect(f.fetchImpl).toHaveBeenCalledTimes(1);
     expect(f.orphanTable.updateMany.mock.calls).toEqual([[acknowledge(row)], [requeue(row)]]);
@@ -236,11 +381,13 @@ describe("runtime resource cleanup diagnostics", () => {
   });
 
   it("keeps successful claims and sequential provider work quiet and bounded", async () => {
+    const hash = vi.spyOn(Hash.prototype, "update");
     const rows = [orphan(), orphan({ kind: "replica", resourceId: "synthetic-second", objectKey: "synthetic/second" })];
     const mediaRow = media();
     const f = fixture(rows, [mediaRow]);
     await expect(f.run()).resolves.toEqual({ configured: true, deleted: 3, failed: 0 });
     expect(console.warn).not.toHaveBeenCalled();
+    expect(hash).not.toHaveBeenCalled();
     expect(mocks.control.mock.calls).toEqual([[5_000]]);
     expect(mocks.reconcile.mock.calls).toEqual([[{ prisma: f.prisma, now: NOW, deadlineAtMs: NOW.getTime() + 25_000 }]]);
     expect(f.prisma.$queryRaw).toHaveBeenCalledTimes(2);
@@ -272,6 +419,7 @@ describe("runtime resource cleanup diagnostics", () => {
   });
 
   it("keeps disabled cleanup quiet without claims or effects", async () => {
+    const hash = vi.spyOn(Hash.prototype, "update");
     const f = fixture();
     mocks.control.mockReturnValue(null);
     await expect(f.run()).resolves.toEqual({ configured: false, deleted: 0, failed: 0 });
@@ -280,9 +428,11 @@ describe("runtime resource cleanup diagnostics", () => {
     expect(f.prisma.$transaction).not.toHaveBeenCalled();
     expect(f.purge).not.toHaveBeenCalled();
     expect(console.warn).not.toHaveBeenCalled();
+    expect(hash).not.toHaveBeenCalled();
   });
 
   it("keeps expired-deadline claims quiet", async () => {
+    const hash = vi.spyOn(Hash.prototype, "update");
     const f = fixture([orphan()], [media()]);
     mocks.reconcile.mockImplementationOnce(async () => { vi.mocked(Date.now).mockReturnValue(NOW.getTime() + 25_000); });
     await expect(f.run()).resolves.toEqual({ configured: true, deleted: 0, failed: 0 });
@@ -290,6 +440,7 @@ describe("runtime resource cleanup diagnostics", () => {
     expect(f.prisma.$transaction).not.toHaveBeenCalled();
     expect(f.purge).not.toHaveBeenCalled();
     expect(console.warn).not.toHaveBeenCalled();
+    expect(hash).not.toHaveBeenCalled();
   });
 
   it("finishes the current acknowledgement but quietly skips remaining claimed work at the deadline", async () => {

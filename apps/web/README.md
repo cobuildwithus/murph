@@ -1485,9 +1485,20 @@ Callback auth contract:
   `Hosted runtime resource cleanup failed.` and only `resourceKind` (`snapshot`,
   `replica`, `legacy_snapshot`, `media`, `unknown`), `stage` (`parse`, `purge`,
   `acknowledge`), `errorCategory` (`timeout`, `abort`, `http`, `validation`,
-  `database`, `other`), and optional integer `httpStatus` (100–599). Existing
-  request context supplies correlation; no identities or raw error/provider data
-  are logged. Success, disabled, and deadline-skipped work stay quiet. Diagnostic
+  `database`, `other`), optional integer `httpStatus` (100–599), and optional
+  `resourceFingerprint` for snapshot, replica, and legacy-snapshot orphans.
+  The fingerprint is the full lowercase SHA-256 hex of the UTF-8 encoding of
+  `JSON.stringify(["murph.runtime-resource-cleanup.orphan.v1", userId, kind, resourceId, String(revision)])`.
+  Only own data properties with nonempty primitive string identities and a
+  positive primitive bigint revision qualify; invalid or unreadable identities
+  and hash failures omit the fingerprint. Authorized read-only canonical-row
+  inspection can recompute it and check that exact revision's `purgedAt`;
+  aggregate backlog clearance or a different revision cannot prove recovery.
+  Media warnings retain request context only. No raw identities, paths, contents,
+  secrets, or error/provider data are logged. Hashing occurs only for existing
+  orphan warnings (at most 50 per sweep), with cost linear in identity bytes and
+  one fixed 64-character value per resource generation, reused across retries.
+  Success, disabled, and deadline-skipped work stay quiet. Diagnostic
   inspection/logging failures cannot change claims, counts, fences, retry timing,
   or failure propagation.
 - Hosted member private fields, device-sync credentials, mailbox payloads, and
