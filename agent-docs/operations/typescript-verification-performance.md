@@ -10,54 +10,62 @@ method.
 
 The design stays deliberately small:
 
-- Normal emission keeps TypeScript's worker defaults; tsrs checking uses four checkers.
+- tsrs checks and emission use four checkers outside the shared-host profile.
 - When selected locally, Codex `test:diff` and acceptance commands use the
   conservative shared-host profile by default; explicit offload can run them
   through Crabbox on a dedicated static Mac.
-- One root runner selects pinned tsrs for no-emit checks and TypeScript 7 for
-  emission, and owns the lane's worker flags.
+- One root runner selects pinned tsrs for checks and emission on supported hosts,
+  retains TypeScript 7 fallback, and owns the lane's worker flags.
 - Host admission uses temporary directories. It has no daemon, database,
   persistent coordinator, hardware detector, or cross-worktree config file.
 - The admission helper never signals or terminates another worktree's process.
 
 ## Compiler Boundaries
 
-`scripts/run-typescript.mjs` selects pinned tsrs for the explicit `check`,
-`web`, and `watch` lanes and forces `--noEmit`. Package emission (`package`)
-and the root project-reference graph (`workspace-build`) retain TypeScript 7:
-the adoption benchmark found identical JavaScript but differing declaration
-output, so this change does not adopt tsrs emission.
+`scripts/run-typescript.mjs` selects pinned tsrs for every lane on supported
+hosts. The explicit `check`, `web`, and `watch` lanes force `--noEmit`.
+`package` and `workspace-build` honor the config's emission settings, covering
+package builds, clean/incremental workspace graphs, prepared test runtimes,
+Cloudflare builds and smoke bundles, and local build prerequisites.
+
+The adoption comparison produced identical JavaScript and source maps across
+5,284 output files. Thirteen declaration files differ in destructuring syntax
+or member order; TypeScript 5 accepted their value exports and fifteen named types as bidirectionally
+assignable to the retained TS7 output. Incremental regression coverage exercises
+referenced declaration changes, invalid consumers, repairs, and compiler switches.
 
 The pinned tsrs release publishes Linux x64/arm64 and macOS arm64 binaries.
 Other hosts, including Intel Macs, use TypeScript 7. Set
 `MURPH_TYPECHECK_COMPILER=typescript` to compare or troubleshoot; an explicit
 `tsrs` selection fails on unsupported hosts. Missing binaries on a supported
-host fail closed. The Linux CI typecheck explicitly selects tsrs. The same
+host fail closed. `MURPH_BUILD_COMPILER=typescript` selects the retained emitter
+for build troubleshooting or paired measurements; it is independent of
+`MURPH_TYPECHECK_COMPILER`. The Linux CI typecheck explicitly selects tsrs. The same
 entrypoints work on GitHub-hosted or Blacksmith Linux runners without a
 provider-specific compiler setup.
 
 Both compilers use the existing `MURPH_TSC_*` budgets. Outside shared-host mode,
 tsrs gets four checkers unless overridden, matching the former TS7 default
-instead of inheriting tsrs's larger worker count. Emission keeps TS7 defaults.
+instead of inheriting tsrs's larger worker count. Both compilers default to four
+builders; explicit lane overrides and shared-host budgets remain authoritative.
 
 `apps/web` still owns a local TypeScript 5 compatibility compiler for Next and
 other tools that require the legacy compiler API or peer range. The tsrs
-source check does not replace Next's generated route and page contract check.
+source check does not replace the separate generated route and page contract check.
 
 Root acceptance checks hosted-web source with tsrs before app
 verification. Only after that succeeds may the acceptance lane skip the
 duplicate app-local tsrs source pass. A direct
 `pnpm --dir apps/web verify` remains self-contained and still runs its source
-check. Next's TypeScript 5 contract check is never replaced by this reuse.
+check. The generated route/page contract check is never replaced by this reuse.
 
-The production Next runner generates route declarations and runs the app-local
-TypeScript 5 contract check explicitly before compilation. That check has its
-own heap budget; only after it succeeds does the runner set its private,
-exact-value build flag and let the ordinary Next build skip the duplicate
-internal invocation. The runner clears any inherited flag before checking, and
-direct `next build` invocations remain fail-closed with Next's internal check.
-This phase split keeps the TypeScript 5 route/page contract authoritative
-without forcing Webpack workers to inherit the larger TypeScript heap.
+The production Next runner generates route declarations, then uses the root
+`web` lane with `tsconfig.next.json` to check those actual contracts. Only after
+that succeeds does it set its private exact-value build flag and let Next skip
+the duplicate internal invocation. It clears inherited flags before checking;
+direct `next build` still uses Next's internal TypeScript 5 check. A real Next
+fixture proves that an invalid `generateStaticParams` export fails and a repair
+passes. Next and Workflow still retain their TypeScript 5 API dependency.
 
 ## Shared-Host Profile
 
@@ -121,9 +129,9 @@ not multiply TypeScript's internal workers:
 | Lane | Normal mode | Shared-host default | Override |
 | --- | --- | --- | --- |
 | Package no-emit (`check`) | tsrs `--checkers 4` | `--checkers 1` | `MURPH_TSC_PACKAGE_CHECKERS` |
-| Package `-b` | TypeScript default | `--builders 1 --checkers 1` | Package checker override; builders stay `1` |
+| Package `-b` | tsrs `--checkers 4` | `--builders 1 --checkers 1` | Package checker override; builders stay `1` |
 | Hosted-web source | tsrs `--checkers 4` | `--checkers 2` | `MURPH_TSC_WEB_CHECKERS` |
-| Root workspace graph | TypeScript default | `--builders 2 --checkers 1` | `MURPH_TSC_BUILDERS`, `MURPH_TSC_BUILD_CHECKERS` |
+| Root workspace graph | tsrs `--checkers 4` | `--builders 2 --checkers 1` | `MURPH_TSC_BUILDERS`, `MURPH_TSC_BUILD_CHECKERS` |
 | Hosted-web watch | `--checkers 1` | `--checkers 1` | `MURPH_TSC_WEB_WATCH_CHECKERS` |
 
 All numeric overrides must be positive integers. Pass budget choices through
@@ -252,3 +260,21 @@ local edit, and a shared-package edit. Compare both median time and peak memory
 on the actual runner class and under a representative host load. Select values
 per runner only when the measurements show a stable win; there is no universal
 fastest worker count.
+
+### Paired compiler CI measurement
+
+`pnpm benchmark:compilers` runs three alternating TS7/tsrs rounds in a disposable
+installed checkout. It compares full cold/warm source checks and clean/incremental
+workspace builds, plus generated-route checks against the former TS5 CLI, with
+equal explicit worker budgets for the native compilers. It prepares generated inputs
+before timing, clears only check build info before cold checks, and keeps TS7
+emission during the check comparison to isolate the source-check adoption.
+Every round also requires identical emitted JavaScript and source maps.
+
+The `Compiler paired benchmark` workflow runs this on Ubuntu when compiler
+routing or benchmark code changes, and supports manual dispatch. The artifact
+contains individual timings, sanitized logs, medians and percentage reductions.
+Those are command savings; installation, queue time, other parallel jobs and
+provider billing are separate. Blacksmith consumes the same public build runner
+through the protected Murph Cloud workflows; measure that provider separately
+before claiming equivalent wall-clock or cost savings.

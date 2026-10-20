@@ -206,7 +206,7 @@ export function resolveRootTypeScriptCompiler(repoRoot = defaultRepoRoot) {
 }
 
 /**
- * Checking is an explicit lane: never infer no-emit safety from a config filename.
+ * Separate check/build overrides keep benchmarks and fallback scoped to one surface.
  * tsrs currently publishes Linux x64/arm64 and macOS arm64 binaries only.
  * @param {string} lane
  * @param {NodeJS.ProcessEnv | Record<string, string | undefined>} [env]
@@ -215,11 +215,13 @@ export function resolveRootTypeScriptCompiler(repoRoot = defaultRepoRoot) {
  * @returns {"tsrs" | "typescript"}
  */
 export function selectTypeScriptCompiler(lane, env = {}, platform = process.platform, arch = process.arch) {
-  const requested = env.MURPH_TYPECHECK_COMPILER;
+  const selector = ["package", "workspace-build"].includes(lane)
+    ? "MURPH_BUILD_COMPILER"
+    : "MURPH_TYPECHECK_COMPILER";
+  const requested = env[selector];
   if (requested !== undefined && requested !== "tsrs" && requested !== "typescript") {
-    throw new Error("MURPH_TYPECHECK_COMPILER must be tsrs or typescript when set.");
+    throw new Error(`${selector} must be tsrs or typescript when set.`);
   }
-  if (!["check", "web", "watch"].includes(lane)) return "typescript";
   const supported = (platform === "linux" && ["x64", "arm64"].includes(arch))
     || (platform === "darwin" && arch === "arm64");
   if (requested === "tsrs" && !supported) {
