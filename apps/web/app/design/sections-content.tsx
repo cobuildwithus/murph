@@ -67,7 +67,6 @@ import {
 import { ExperimentResultsShareStudy } from "./experiment-results-share-study";
 import { ExperimentRepeatedResultsStudy } from "./experiment-repeated-results-study";
 import { BrowserVaultLoadingTransitionsStudy } from "./browser-vault-loading-transitions-study";
-import { FoodLabelLabStudy } from "./food-label-lab-study";
 import {
   SCREENSHOT_CATEGORIES,
   type ScreenshotCategory,
@@ -260,13 +259,6 @@ export function SectionsContent({
         <>
           <Separator />
 
-          <StudySection title="Food Label Lab">
-            <div className="-mx-5 sm:-mx-8 lg:-mx-12" inert>
-              <FoodLabelLabStudy />
-            </div>
-          </StudySection>
-
-          <Separator />
 
           <StudySection title="Private training dashboard">
             <div

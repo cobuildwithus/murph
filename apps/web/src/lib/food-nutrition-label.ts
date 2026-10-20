@@ -1,154 +1,42 @@
 import "server-only";
 
-import type { PublicProductDetail, PublicProductKind } from "@murphai/contracts";
+import { isRecord } from "./primitives";
 
-import { isRecord } from "../primitives";
+type FoodNutritionRow = {
+  name: string;
+  amount: { value: number | null; unit: string | null; display: string | null } | null;
+  dailyValuePercent: number | null;
+  basis: "per_serving" | "per_100_g";
+};
 
-type PublicProductUnknownCode = PublicProductDetail["unknowns"][number]["code"];
+type NormalizedFoodNutritionLabel = {
+  serving: {
+    description: string | null;
+    amount: number | null;
+    unit: string | null;
+    grams: number | null;
+  } | null;
+  nutrition: {
+    basis: "per_serving" | "per_100_g" | "mixed" | "unavailable";
+    rows: FoodNutritionRow[];
+  };
+};
 
-export interface NormalizedPublicProductLabel {
-  serving: PublicProductDetail["serving"];
-  ingredients: PublicProductDetail["ingredients"];
-  nutrition: PublicProductDetail["nutrition"];
-  unknownCodes: PublicProductUnknownCode[];
-}
-
-export function normalizePublicProductLabel(input: {
-  kind: PublicProductKind;
+export function normalizeFoodNutritionLabel(input: {
   label: unknown;
   servingGrams: number | null;
-}): NormalizedPublicProductLabel {
+}): NormalizedFoodNutritionLabel {
   const label = isRecord(input.label) ? input.label : {};
-  const active = readIngredientRows(label.ingredientRows, 200);
-  const other = readOtherIngredientRows(label);
-  const statement = firstText(label.ingredientText, label.ingredients);
-  const otherStatement = readText(label.otherIngredients, 16_000);
-  const ingredients = {
-    structure: active.length > 0 || other.length > 0
-      ? "structured" as const
-      : statement || otherStatement
-        ? "statement_only" as const
-        : "unavailable" as const,
-    statement,
-    otherStatement,
-    active,
-    other,
-  };
-  const nutrition = readNutrition(label, input.kind);
-  const serving = readServing(label, input.servingGrams);
-  const unknownCodes: PublicProductUnknownCode[] = [
-    "FORMULA_REVISION_NOT_TRACKED",
-  ];
-
-  if (ingredients.structure === "statement_only") {
-    unknownCodes.push("INGREDIENTS_STATEMENT_ONLY");
-  } else if (ingredients.structure === "unavailable") {
-    unknownCodes.push("INGREDIENTS_UNAVAILABLE");
-  }
-
-  if (nutrition.basis === "unavailable") {
-    unknownCodes.push("NUTRITION_UNAVAILABLE");
-  }
-
-  if (serving?.grams == null) {
-    unknownCodes.push("SERVING_MASS_UNAVAILABLE");
-  }
-
   return {
-    serving,
-    ingredients,
-    nutrition,
-    unknownCodes,
+    serving: readServing(label, input.servingGrams),
+    nutrition: readNutrition(label),
   };
-}
-
-function readIngredientRows(
-  value: unknown,
-  limit: number,
-): PublicProductDetail["ingredients"]["active"] {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-
-  return value.slice(0, limit).flatMap((candidate) => {
-    const ingredient = readIngredient(candidate);
-    return ingredient ? [ingredient] : [];
-  });
-}
-
-function readIngredient(
-  value: unknown,
-): PublicProductDetail["ingredients"]["active"][number] | null {
-  if (!isRecord(value)) {
-    return null;
-  }
-
-  const name = readText(value.name, 512);
-  if (!name) {
-    return null;
-  }
-
-  const childRows = Array.isArray(value.nestedRows)
-    ? value.nestedRows
-    : Array.isArray(value.ingredients)
-      ? value.ingredients
-      : [];
-  const children = childRows.slice(0, 50).flatMap((candidate) => {
-    const child = readIngredientChild(candidate);
-    return child ? [child] : [];
-  });
-
-  return {
-    ...readIngredientChildFields(value, name),
-    children,
-  };
-}
-
-function readIngredientChild(
-  value: unknown,
-): PublicProductDetail["ingredients"]["active"][number]["children"][number] | null {
-  if (!isRecord(value)) {
-    return null;
-  }
-
-  const name = readText(value.name, 512);
-  return name ? readIngredientChildFields(value, name) : null;
-}
-
-function readIngredientChildFields(
-  row: Record<string, unknown>,
-  name: string,
-): PublicProductDetail["ingredients"]["active"][number]["children"][number] {
-  return {
-    name,
-    amount: readMeasuredValue(row.amount, row.unit),
-    dailyValuePercent: readPercent(row.dailyValue),
-    notes: readText(row.notes, 2_000),
-  };
-}
-
-function readOtherIngredientRows(
-  label: Record<string, unknown>,
-): PublicProductDetail["ingredients"]["other"] {
-  const nestedOther = isRecord(label.otheringredients)
-    ? label.otheringredients.ingredients
-    : undefined;
-  const source = Array.isArray(label.otherIngredients)
-    ? label.otherIngredients
-    : Array.isArray(nestedOther)
-      ? nestedOther
-      : [];
-
-  return source.slice(0, 200).flatMap((candidate) => {
-    const ingredient = readIngredient(candidate);
-    return ingredient ? [ingredient] : [];
-  });
 }
 
 function readServing(
   label: Record<string, unknown>,
   servingGrams: number | null,
-): PublicProductDetail["serving"] {
+): NormalizedFoodNutritionLabel["serving"] {
   const fallbackGrams = readPositiveNumber(servingGrams);
 
   if (Array.isArray(label.servingSizes)) {
@@ -176,7 +64,7 @@ function readServing(
       const unit = readText(candidate.unit, 64);
       const grams = readPositiveNumber(candidate.grams) ?? fallbackGrams;
 
-      if (description || amount !== null || unit || grams !== null) {
+      if ([description, amount, unit, grams].some((value) => value !== null)) {
         return { description, amount, unit, grams };
       }
     }
@@ -196,7 +84,7 @@ function readServing(
       const unit = readText(candidate.unit, 64);
       const grams = readPositiveNumber(candidate.gramWeight) ?? fallbackGrams;
 
-      if (description || amount !== null || unit || grams !== null) {
+      if ([description, amount, unit, grams].some((value) => value !== null)) {
         return { description, amount, unit, grams };
       }
     }
@@ -221,10 +109,9 @@ function readServing(
 
 function readNutrition(
   label: Record<string, unknown>,
-  kind: PublicProductKind,
-): PublicProductDetail["nutrition"] {
+): NormalizedFoodNutritionLabel["nutrition"] {
   const groups: Array<{
-    basis: PublicProductDetail["nutrition"]["rows"][number]["basis"];
+    basis: FoodNutritionRow["basis"];
     rows: unknown[];
   }> = [];
 
@@ -248,7 +135,7 @@ function readNutrition(
   const calories = readNonnegativeNumber(label.calories);
   const hasCaloriesRow = boundedSourceRows.some((row) =>
     row.name.toLowerCase() === "calories");
-  const caloriesRow: PublicProductDetail["nutrition"]["rows"][number] | null =
+  const caloriesRow: FoodNutritionRow | null =
     calories !== null && !hasCaloriesRow
       ? {
           name: "Calories",
@@ -274,7 +161,7 @@ function readNutrition(
       ? "mixed"
       : bases.has("per_100_g")
         ? "per_100_g"
-        : kind === "supplement" || bases.has("per_serving")
+        : bases.has("per_serving")
           ? "per_serving"
           : "unavailable",
     rows,
@@ -283,8 +170,8 @@ function readNutrition(
 
 function readNutritionRow(
   value: unknown,
-  basis: PublicProductDetail["nutrition"]["rows"][number]["basis"],
-): PublicProductDetail["nutrition"]["rows"][number] | null {
+  basis: FoodNutritionRow["basis"],
+): FoodNutritionRow | null {
   if (!isRecord(value)) {
     return null;
   }
@@ -305,7 +192,7 @@ function readNutritionRow(
 function readMeasuredValue(
   rawValue: unknown,
   rawUnit: unknown,
-): PublicProductDetail["ingredients"]["active"][number]["amount"] {
+): FoodNutritionRow["amount"] {
   const value = readNonnegativeNumber(rawValue);
   const display = readDisplayText(rawValue);
   const unit = readText(rawUnit, 64);

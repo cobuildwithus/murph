@@ -842,7 +842,6 @@ Optional but recommended:
 - `HOSTED_WEB_BASE_URL`
 - `MURPH_LABELS_DB_URL` for the shared product labels Postgres database required by `/api/foods` and `/api/supplements`
 - `MURPH_DATA_API_KEY` for server-to-server data API auth on `/api/foods` and `/api/supplements`; hosted Cloudflare owns the same secret for Worker-side injection and the key must not be exposed to browsers or runner env
-- `BRANDFETCH_CLIENT_ID` enables brand logos on the public `/food` page. It is a browser-safe Brandfetch client identifier, not server authority. The page searches Brandfetch with a bounded brand and broad food category, accepts only matching brand names from the fixed Brandfetch CDN, falls back to local category art, and keeps results only in page memory.
 - `CRON_SECRET`
 - `HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_JWK`
 - `HOSTED_WEB_CALLBACK_SIGNING_KEY_ID`
@@ -980,58 +979,17 @@ explicitly. After this constraint is installed, importer rollback must stay at
 or above the first version that bounds and validates the affected payload
 fields; an older importer requires an explicit constraint rollback first.
 
-## Murph Safe public product data
-
-`/search` exposes the public Murph Safe product-evidence experience. `/food`
-uses the same records for a conclusion-first comparison of up to ten branded
-foods. Browser searches call `POST /api/public/v1/products/search`;
-server-rendered product details use the same service as
-`GET /api/public/v1/products/[productRef]`. The generated OpenAPI 3.1 document
-is available at `/api/public/v1/openapi.json`, and the current schema id is
-`murph.public-products.v1`.
-
-On `/food`, autocomplete keeps relevance order. Category comparisons and the
-related-product grid use a dated US Google Shopping brand snapshot for 342 food
-queries. The database keeps category relevance and usable nutrition as gates,
-spreads results across brands, then uses exact-linked test count as a secondary
-signal. It rejects empty, zero-only, and physically impossible nutrition rows.
-A single exact food derives a peer category when the local food taxonomy can
-identify one, so a branded soda can lead to other sodas.
-Share URLs contain only public product references and the nutrition basis. They
-never contain the typed search query.
-
-The public catalog includes current supplement and branded-food sources and
-excludes generic food origins. Search and detail DTOs are bounded normalized
-projections; product tests join only through the selected row's exact
-`food_id` or `supplement_id`. Search terms stay in POST bodies and are not
-echoed, persisted, analyzed, or logged.
-
-Compatible browsers expose four page-scoped, read-only WebMCP tools while
-`/food` is open: `search_food_products`, `compare_food_products`,
-`get_food_comparison`, and `show_food_evidence`. The tools use exact public
-product references and update the same visible page state as manual controls.
-Comparison results carry returned, total, and truncated observation scope so a
-bounded evidence response cannot look complete to an agent. They also include
-the same four nutrition values, complete-row winners, ties, and the row-win
-counts behind the visible rows-led caption.
-One abort signal removes every registration when the page unmounts. This is a
-browser surface, not a remote MCP server, and it adds no account or vault access.
+## Public route firewall verification
 
 Before a production build, configure these Production-scoped server values:
 
 - `MURPH_PUBLIC_ROUTES_WAF_REQUIRED=1`
-- `MURPH_SAFE_SEARCH_WAF_RULE_ID`
-- `MURPH_SAFE_DETAIL_WAF_RULE_ID`
 - `MURPH_SIGNUP_REFERRAL_CLAIM_WAF_RULE_ID`
 - `HOSTED_WEB_VERCEL_PROJECT_ID`
 - optional `HOSTED_WEB_VERCEL_TEAM_ID`
 - `HOSTED_WEB_VERCEL_TOKEN`, limited to reading the project's firewall config
 
-The exact-id Murph Safe rules must be the first active rules after the optional
-companion diagnostics rule. Search is an exact POST path with a fixed-window
-per-IP 429 at 30 requests per 60 seconds. Detail covers the public API prefix
-while excluding search, plus the public web-detail prefix, at 120 requests per
-60 seconds. The signup-referral claim rule matches only POST paths that start
+The signup-referral claim rule matches only POST paths that start
 with `/r/` and end with `/claim`, with a fixed-window per-IP 429 at 10 requests
 per 60 seconds. It may follow other scoped active rules but never an active
 bypass rule. `pnpm public-routes:waf-check` reads the active Vercel firewall
