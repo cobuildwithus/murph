@@ -3773,7 +3773,9 @@ projection-completion notification retries it; terminal projection failure is
 still replyable through the normal fallback. Duplicate staging and
 projection-completion notifications at or behind the newest queued or committed
 frontier are ignored before exact-successor proof. A successful `turn/steer`
-acknowledges transport only. Before any hosted tool effect or final delivery,
+acknowledges transport only; instant steering (see `ARCHITECTURE.md`) changes
+when Codex samples the steered input, not this acknowledgement or journal
+contract. Before any hosted tool effect or final delivery,
 Murph journals and checkpoints only accepted inputs at or below that tool
 request's or provider result's authoritative delivery-context ordinal. An
 acknowledged later input that remains above the ordinal stays pending for a

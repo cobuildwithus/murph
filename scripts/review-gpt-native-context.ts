@@ -11,7 +11,6 @@ const hash = (bytes: Buffer) => createHash('sha256').update(bytes).digest('hex')
 
 // Direct runtime/configuration owners and policy surrounding the patched modules.
 export const nativeContextOwners = [
-  'AGENTS.md',
   'codex-rs/app-server/src/config_manager.rs',
   'codex-rs/config/src/state.rs',
   'codex-rs/config/src/loader/mod.rs',
@@ -88,7 +87,7 @@ export async function addNativeReviewContext(input: {
     const files = []
     let totalBytes = 0
     for (const file of sourcePaths) {
-      if ((file !== 'AGENTS.md' && !/^codex-rs\/[A-Za-z0-9_./-]+\.(rs|toml|md)$/.test(file)) || file.split('/').some((part) => part === '..' || part === '.')) {
+      if (!/^codex-rs\/[A-Za-z0-9_./-]+\.(rs|toml|md)$/.test(file) || file.split('/').some((part) => part === '..' || part === '.')) {
         throw new Error('Native review context contains an unsafe source path.')
       }
       const indexEntry = git(temporary, ['ls-files', '--stage', '--', file]).toString()

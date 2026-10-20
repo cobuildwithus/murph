@@ -94,7 +94,8 @@ describe("pinned Codex OpenAI egress conformance", () => {
     expect(PINNED_CODEX_OPENAI_EGRESS_INVENTORY.upstreamCommit)
       .toMatch(/^[0-9a-f]{40}$/u);
     expect(PINNED_CODEX_OPENAI_EGRESS_INVENTORY.upstreamSourceRoot)
-      .toBe("codex-rs/codex-api/src");
+      // Guardian Decisions lives outside codex-api; verify every reviewed Rust owner.
+      .toBe("codex-rs");
     expect(cloudflarePackage.scripts?.["verify:codex-upstream-source"])
       .toContain("verify-codex-upstream-source.ts");
     expect(hostSupportWorkflow)

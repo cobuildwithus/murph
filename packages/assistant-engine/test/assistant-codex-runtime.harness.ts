@@ -42,6 +42,12 @@ import {
 } from 'vitest'
 
 export const cliTimingLaunchArgs = ['--config', expect.stringMatching(/^shell_environment_policy\.set\.MURPH_CLI_TIMING_ENDPOINT="\d+:[a-f0-9]{32}"$/u)]
+export const codexSteeringLaunchArgs = [
+  '--config',
+  'features.instant_interrupt=true',
+  '--config',
+  'features.code_mode_interrupt=true',
+]
 
 const codexMocks: {
   fakeHome: string
@@ -488,7 +494,7 @@ async function runCodexResponseMediaToolTurn(
   codexMocks.spawn.mockImplementation((_command, args, options) => {
     const child = new MockChildProcess()
 
-    expect(args).toEqual([...cliTimingLaunchArgs, 'app-server'])
+    expect(args).toEqual([...codexSteeringLaunchArgs, ...cliTimingLaunchArgs, 'app-server'])
     expect(options).toMatchObject({
       cwd: tmpdir(),
       env: {
@@ -608,7 +614,7 @@ async function runCodexTelegramVoiceMemoOnlyTurn(input: {
   codexMocks.spawn.mockImplementation((_command, args, options) => {
     const child = new MockChildProcess()
 
-    expect(args).toEqual([...cliTimingLaunchArgs, 'app-server'])
+    expect(args).toEqual([...codexSteeringLaunchArgs, ...cliTimingLaunchArgs, 'app-server'])
     expect(options).toMatchObject({
       cwd: tmpdir(),
       env: {
