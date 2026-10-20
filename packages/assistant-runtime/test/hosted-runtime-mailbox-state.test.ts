@@ -1,4 +1,4 @@
-import { mkdtemp, rm, stat } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -10,6 +10,7 @@ import {
   HOSTED_RUNTIME_DEVICE_SYNC_CONTINUATION_OWNER_MAX_COUNT,
 } from "@murphai/hosted-execution/runtime-control";
 import { describe, expect, it } from "vitest";
+import { resolveAssistantStatePaths } from "@murphai/runtime-state/node/assistant-state-fs";
 
 import {
   findNextHostedSystemMailboxQueueItem,
@@ -40,6 +41,57 @@ import {
 } from "../src/hosted-runtime/mailbox-state.ts";
 
 const DENSE_RAW_RETENTION_MAILBOX_DEDUPE_KEY = "device-sync.wake:dense-raw-retention";
+
+describe("retired system work in saved snapshots", () => {
+  it.each(["pending", "sending", "recording"])("discards retired %s work without blocking active successors", async (status) => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-retired-system-state-"));
+    try {
+      const active = buildPendingRuntimeControlMailboxItem({
+        itemId: "active", mailboxLaneSeq: "3",
+        mailboxDedupeKey: "runtime-control:refresh", wakeKind: "runtime.browser-vault-refresh-requested",
+      });
+      await updateHostedSystemMailboxState(vaultRoot, () => ({ pending: [active] }));
+      const statePath = path.join(resolveAssistantStatePaths(vaultRoot).assistantStateRoot, "hosted-system-mailbox.json");
+      const envelope = JSON.parse(await readFile(statePath, "utf8"));
+      const retired = ["environment-interview.completed", "environment-voice.captured"].map((kind, index) => ({
+        ...active,
+        itemId: `retired_${index}`, mailboxLaneSeq: String(index + 1),
+        mailboxDedupeKey: `${kind}:retired`,
+        routeAction: index === 0 ? "run-environment-interview" : "run-environment-voice",
+        wake: { kind },
+        status,
+        postCheckpointRecord: index === 1 && status === "recording"
+          ? { kind: "environment-voice.audio-delete", audioId: "expired-audio" } : null,
+      }));
+      // Restore obsolete wire shapes directly; active writers cannot produce them.
+      envelope.value.pending = [...retired, ...envelope.value.pending];
+      await writeFile(statePath, JSON.stringify(envelope));
+      const restored = await readHostedSystemMailboxState(vaultRoot);
+      expect(restored.pending.map((item) => item.itemId)).toEqual(["active"]);
+      expect(resolveHostedSystemMailboxHandledThroughSeq({ importedSeq: "3", state: restored })).toBe("2");
+      await removeHostedSystemMailboxPendingItemIfCurrent({ item: restored.pending[0]!, vaultRoot });
+      expect(await readHostedSystemMailboxState(vaultRoot)).toEqual({ pending: [] });
+      expect(resolveHostedSystemMailboxHandledThroughSeq({ importedSeq: "3", state: await readHostedSystemMailboxState(vaultRoot) })).toBe("3");
+      expect(await readFile(statePath, "utf8")).not.toContain("environment-");
+    } finally {
+      await rm(vaultRoot, { recursive: true, force: true });
+    }
+  });
+
+  it.each([null, { kind: "unknown.event" }, { kind: "runtime.browser-vault-refresh-requested" }])("still rejects malformed or unknown active wakes: %j", async (wake) => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-invalid-system-state-"));
+    try {
+      await updateHostedSystemMailboxState(vaultRoot, () => ({ pending: [] }));
+      const statePath = path.join(resolveAssistantStatePaths(vaultRoot).assistantStateRoot, "hosted-system-mailbox.json");
+      const envelope = JSON.parse(await readFile(statePath, "utf8"));
+      envelope.value.pending = [{ wake }];
+      await writeFile(statePath, JSON.stringify(envelope));
+      await expect(readHostedSystemMailboxState(vaultRoot)).rejects.toThrow();
+    } finally {
+      await rm(vaultRoot, { recursive: true, force: true });
+    }
+  });
+});
 
 function listDenseRawRetentionMailboxItems(
   state: HostedSystemMailboxState,

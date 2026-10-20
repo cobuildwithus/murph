@@ -1619,8 +1619,6 @@ function readHostedSystemMailboxRouteAction(
     || item.route.action === "run-clinical-records-sync"
     || item.route.action === "apply-clinical-enrichment"
     || item.route.action === "run-device-sync-wake"
-    || item.route.action === "run-environment-interview"
-    || item.route.action === "run-environment-voice"
     || item.route.action === "import-group-journal-fact"
     || item.route.action === "import-reported-daily-metric"
     || item.route.action === "apply-runtime-control-request"
@@ -1736,22 +1734,6 @@ async function recordHostedSystemMailboxPostCheckpointRecord(input: {
         newerRevisionPending: false,
         nextWakeAt: null,
         recorded: 0,
-        stillDirty: false,
-      };
-    }
-    case "environment-voice.audio-delete": {
-      const deleteEnvironmentVoice =
-        input.runtime.platform.effectsPort.deleteEnvironmentVoice;
-      if (!deleteEnvironmentVoice) {
-        throw new Error(
-          "Hosted environment voice checkpoint requires an audio deletion port.",
-        );
-      }
-      await deleteEnvironmentVoice(input.record.audioKey);
-      return {
-        newerRevisionPending: false,
-        nextWakeAt: null,
-        recorded: 1,
         stillDirty: false,
       };
     }

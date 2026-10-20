@@ -17,7 +17,10 @@ import { assertBrowserVaultMemberAuthority } from "@/src/lib/browser-vault/autho
 import { readHostedLinqProductionCanaryOutcome } from "@/src/lib/hosted-onboarding/linq-production-canary-outcome";
 import { createPrismaClient } from "@/src/lib/prisma";
 
-const notReady = { ready: false, totalGoalCount: 0, matchingGoalCount: 0, matchingGoalIdCount: 0 };
+const notReady = {
+  ready: false, totalGoalCount: 0, matchingGoalCount: 0, matchingGoalIdCount: 0,
+  diagnostics: { status: "empty", failedTurnMatched: false, truncated: false, traces: [] },
+};
 const clients: ReturnType<typeof createPrismaClient>[] = [];
 
 beforeEach(() => {
@@ -41,32 +44,37 @@ function fixture(input?: { absent?: boolean; suspended?: boolean; inactive?: boo
   };
   const findUnique = vi.fn().mockResolvedValue(member);
   const findMany = vi.fn().mockResolvedValue([]);
+  const traceFindMany = vi.fn().mockResolvedValue([]);
   // Real client shape, with only the reached read delegates replaced. No database
   // connection is opened; unexpected database work targets a closed loopback port.
   const prisma = createPrismaClient({ databaseUrl: "postgresql://test:test@127.0.0.1:1/test" });
   clients.push(prisma);
   Object.defineProperty(prisma, "hostedMember", { value: { findUnique } });
   Object.defineProperty(prisma, "hostedConsentGrant", { value: { findMany } });
-  return { prisma, findUnique, findMany };
+  Object.defineProperty(prisma, "hostedIngressLatencyTrace", { value: { findMany: traceFindMany } });
+  return { prisma, findUnique, findMany, traceFindMany };
 }
 
 it("admits a fresh messaging-only canary without manufacturing browser consent", async () => {
-  const { prisma, findUnique, findMany } = fixture();
+  const { prisma, findUnique, findMany, traceFindMany } = fixture();
   await expect(readHostedLinqProductionCanaryOutcome({ prisma })).resolves.toEqual(notReady);
   expect(mocks.pending).toHaveBeenCalledOnce();
   expect(mocks.workspace).not.toHaveBeenCalled();
-  expect(findUnique).toHaveBeenCalledTimes(2);
+  expect(findUnique).toHaveBeenCalledTimes(4);
   expect(findMany).not.toHaveBeenCalled();
+  expect(traceFindMany).toHaveBeenCalledOnce();
   expect(console.warn).not.toHaveBeenCalled();
 });
 
 it.each([
   { absent: true }, { suspended: true }, { inactive: true }, { withdrawn: true },
 ])("refuses disallowed runtime authority before reading canonical state: %j", async (state) => {
-  await expect(readHostedLinqProductionCanaryOutcome({ prisma: fixture(state).prisma }))
+  const { prisma, traceFindMany } = fixture(state);
+  await expect(readHostedLinqProductionCanaryOutcome({ prisma }))
     .rejects.toMatchObject({ code: "HOSTED_LINQ_PRODUCTION_CANARY_OUTCOME_UNAVAILABLE", httpStatus: 503 });
   expect(mocks.pending).not.toHaveBeenCalled();
   expect(mocks.workspace).not.toHaveBeenCalled();
+  expect(traceFindMany).not.toHaveBeenCalled();
 });
 
 it("keeps current launch consent mandatory for the actual Browser Vault authority", async () => {

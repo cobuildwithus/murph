@@ -334,8 +334,8 @@ describe("hosted orchestration control contracts", () => {
 
   it("classifies the generic first system-mailbox frontier", () => {
     expect(classifyHostedSystemMailboxExecutionClass({
-      dedupeKey: "environment-interview.completed:completion",
-      kind: "environment-interview.completed",
+      dedupeKey: "journal.group-fact.recorded:fact",
+      kind: "journal.group-fact.recorded",
     })).toBe("model_free");
     expect(classifyHostedSystemMailboxExecutionClass({
       dedupeKey: "member.channels.updated:settings-change",

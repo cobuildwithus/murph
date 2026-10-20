@@ -13,7 +13,6 @@ import {
   createWorkspaceRuntimeJobInput,
   createWorkspaceState,
   createVaultSnapshotBundle,
-  enqueueEnvironmentInterviewSystemMailboxItemForTest,
   listHostedCanonicalWriteReceiptLogArtifacts,
   mocks,
   removeTempRoot,
@@ -26,7 +25,7 @@ import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test, vi } from "vitest";
-import { initializeVault, patchAutomation, readHabitatAspect, upsertAutomation } from "@murphai/core";
+import { initializeVault, patchAutomation, upsertAutomation } from "@murphai/core";
 import { listCanonicalEntities } from "@murphai/query";
 import { createAssistantOutboxIntent, listAssistantOutboxIntents, type RunAssistantAutomationPassInput } from "@murphai/assistant-engine";
 import { writeAssistantAutoReplyReplyTerminalEvidence } from "@murphai/assistant-engine/assistant-automation";
@@ -52,7 +51,6 @@ test.each(["completed", "stalled", "absent", "persistent", "cold", "reminder", "
   const artifactBytesByHash = new Map<string, Uint8Array>();
   const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
   const imported = createDeferred<void>();
-  const environmentImported = createDeferred<void>();
   const providerStarted = createDeferred<void>();
   const secondReply = createDeferred<void>();
   const releaseSnapshot = createDeferred<void>();
@@ -67,12 +65,7 @@ test.each(["completed", "stalled", "absent", "persistent", "cold", "reminder", "
     dedupeKey: "device-sync.wake:concurrent-import",
     kind: "device-sync.wake", lane: "system", laneSeq: "1",
   });
-  const environmentItem = createMailboxItem({
-    id: "mailbox_item_concurrent_environment",
-    dedupeKey: "environment-interview.completed:concurrent-import",
-    kind: "environment-interview.completed", lane: "system", laneSeq: "2",
-  });
-  const items = cold ? [deviceItem, environmentItem]
+  const items = cold ? [deviceItem]
     : [createMailboxItem({ id: "mailbox_item_concurrent_conversation", laneSeq: "1" })];
   const baseDevicePort = createSnapshotDeviceSyncPort({
     connectionId,
@@ -143,7 +136,6 @@ test.each(["completed", "stalled", "absent", "persistent", "cold", "reminder", "
       });
       if (scenario !== "absent" && !cold && handledInputIds.size === 1) {
         items.push(deviceItem);
-        if (persistent) items.push(environmentItem);
         runtimeWakeSignal.notify();
         await withRealTimeout(
           completesBeforeReply ? imported.promise : providerStarted.promise,
@@ -283,11 +275,6 @@ test.each(["completed", "stalled", "absent", "persistent", "cold", "reminder", "
             inputId = await stagePendingLinqAssistantInputForMailboxItem({ item: item.item, vaultRoot });
             return { assistantInputId: inputId, status: "imported" };
           }
-          if (item.item.kind === "environment-interview.completed") {
-            await enqueueEnvironmentInterviewSystemMailboxItemForTest({ item: item.item, vaultRoot });
-            events.push("environment.staged");
-            return { status: "imported" };
-          }
           if (cold) await initializeVault({ createdAt: TEST_NOW, vaultRoot });
           if (scenario === "reminder") {
             await upsertAutomation({
@@ -316,10 +303,6 @@ test.each(["completed", "stalled", "absent", "persistent", "cold", "reminder", "
             ...basePlatform.artifactStore,
             async put(artifact) {
               await basePlatform.artifactStore.put(artifact);
-              if (new TextDecoder().decode(artifact.bytes).includes('"habitat_upsert"')) {
-                events.push("environment.receipt.uploaded");
-                environmentImported.resolve();
-              }
               if (new TextDecoder().decode(artifact.bytes).includes('"device_batch_import"')) {
                 events.push("device.receipt.uploaded");
                 imported.resolve();
@@ -363,10 +346,7 @@ test.each(["completed", "stalled", "absent", "persistent", "cold", "reminder", "
       if (persistent) {
         assert.equal(events.includes("provider.aborted"), false, events.join(","));
         assert.equal(events.filter((event) => event.endsWith("/synthetic-concurrent-sleep")).length, 1);
-        await withRealTimeout(environmentImported.promise, 5_000, () => events.join(","));
         assert.equal(events.includes("device.receipt.uploaded"), false, events.join(","));
-        const environment = await readHabitatAspect({ slug: "sleep-environment", vaultRoot });
-        assert.equal(environment.indicators.night_temp_c, 19);
         releaseDownload.resolve();
         await withRealTimeout(imported.promise, 5_000, () => events.join(","));
       }
@@ -403,7 +383,6 @@ test.each(["completed", "stalled", "absent", "persistent", "cold", "reminder", "
           return (JSON.parse(new TextDecoder().decode(bytes)) as { operationType: string }).operationType;
         });
         assert.equal(operations.filter((operation) => operation === "device_batch_import").length, 1);
-        assert.equal(operations.filter((operation) => operation === "habitat_upsert").length, 1, JSON.stringify({ events, operations, checkpoints: checkpointRequests.map((request) => ({ reason: request.reason, version: request.expectedWorkspaceVersion, receipt: request.redactedStatus?.hostedCanonicalWriteReceiptLogSha256 })) }));
         const rows = await listCanonicalEntities(vaultRoot, { family: "event" });
         assert.ok(rows.some((row) => JSON.stringify(row.attributes).includes("synthetic-concurrent-sleep")));
       }

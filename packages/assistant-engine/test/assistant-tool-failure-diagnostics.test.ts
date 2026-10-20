@@ -78,7 +78,8 @@ function expectFailure(
 ) {
   const requestKind = action === 'attach_follow_up' ? 'attach-follow-up' : 'automation'
   const diagnostic = { failureStage, failureReason: reason,
-    ...(errorCategory === undefined ? {} : { errorCategory }) }
+    ...(errorCategory === undefined ? {} : { errorCategory }),
+    ...(requestKind === 'automation' && reason === 'handler_exception' ? { automationAction: action } : {}) }
   expect(result).toEqual({
     rpcResult: { success: false, contentItems: [{ type: 'inputText', text }] },
     failureDiagnostic: diagnostic,
@@ -658,14 +659,28 @@ describe('opaque MCP and command failures', () => {
     expect(createCodexActionRuntimeIssueTracker().recordEvent(eventInput(completed))).toBeNull()
   })
 
-  it('does not parse arbitrary shell JSON even when its code is allowlisted', () => {
+  it.each([
+    ...[-1, 1, 3, 127].map((exitCode) => [
+      'vault-cli event list; false', exitCode, 'command', 'shell_syntax',
+    ] as const),
+    ['cat synthetic-source', 1, 'cat', 'recognized'],
+    ['node synthetic.js', 2, 'node', 'recognized'],
+  ] as const)('keeps synthetic shell completion %s (exit %s) opaque', (command, exitCode, commandFamily, commandAttribution) => {
     const parse = vi.spyOn(JSON, 'parse')
     try {
-      const issue = commandIssue(JSON.stringify(envelope('not_found')), 'node synthetic.js', 2)
+      const output = JSON.stringify(envelope('not_found'))
+      const input = eventInput(commandEvent(output, command, exitCode))
+      const tracker = createCodexActionRuntimeIssueTracker()
+      const issue = tracker.recordEvent(input)
       expect(parse).not.toHaveBeenCalled()
       expect(issue?.details).toMatchObject({ failureStage: 'execution', failureReason: 'nonzero_exit',
-        errorCategory: 'unknown', exitCode: 2, commandFamily: 'node' })
+        errorCategory: 'unknown', exitCode, commandFamily, commandAttribution, commandOrdinal: 1 })
+      expect(issue?.details).not.toHaveProperty('vaultCliCommand')
       expect(issue?.details).not.toHaveProperty('vaultCliErrorCategory')
+      expect(JSON.stringify(issue)).not.toContain(sentinel)
+      expect(tracker.recordEvent(input)).toBeNull()
+      expect(commandIssue(output, command, 0)).toBeNull()
+      expect(parse).not.toHaveBeenCalled()
     } finally { parse.mockRestore() }
   })
 })

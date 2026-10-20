@@ -4382,6 +4382,18 @@ describe("parseHostedRuntimeFamilyPlanTool", () => {
 });
 
 describe("parseHostedExecutionWake", () => {
+  it.each([
+    "environment-interview.completed",
+    "environment-voice.captured",
+  ])("rejects retired %s as new executable work", (kind) => {
+    expect(() => parseHostedExecutionWake({
+      eventId: "retired-event",
+      kind,
+      occurredAt: "2026-04-26T00:00:00.000Z",
+      userId: "member_123",
+    })).toThrow("kind is invalid");
+  });
+
   it("parses runtime control wakes", () => {
     expect(
       parseHostedExecutionWake({

@@ -1,5 +1,8 @@
 import type { MurphDynamicToolExecutionResult } from '../dynamic-tools.js'
-import { toolTextResult as automationTextResult } from '../tool-failure-diagnostics.js'
+import {
+  toolTextResult as automationTextResult,
+  withAutomationToolFailureDetails,
+} from '../tool-failure-diagnostics.js'
 import { createHash } from 'node:crypto'
 
 import * as z from '@murphai/contracts/zod-runtime'
@@ -63,7 +66,7 @@ const automationStableRecipeKeySchema = z
 const automationTitleSchema = z.string().trim().min(1).max(160)
 const automationInstructionsSchema = z.string().trim().min(1).max(50_000)
 const automationSummarySchema = z.string().trim().min(1).max(4_000)
-const automationUpdatedAtSchema = z.string().datetime({ offset: true })
+const automationUpdatedAtSchema = z.isoDateTime({ offset: true })
 const automationTagsSchema = z
   .array(z.string().trim().min(1).max(80))
   .max(32)
@@ -1020,7 +1023,11 @@ export async function executeAutomationDynamicTool(input: {
     if (isAutomationConflictError(error)) {
       return automationTextResult(false, 'automation changed since the last readback; inspect it again and decide from the current stored schedule before retrying', 'conflict')
     }
-    return automationTextResult(false, 'automation operation is unavailable', 'handler_exception', error)
+    return withAutomationToolFailureDetails(
+      automationTextResult(false, 'automation operation is unavailable', 'handler_exception', error),
+      input.request.request.action,
+      error,
+    )
   }
 }
 

@@ -22,7 +22,6 @@ export const HOSTED_WORKSPACE_SYSTEM_WORK_ACTIONS = [
   "run-device-sync-wake",
   "run-clinical-records-sync",
   "apply-clinical-enrichment",
-  "run-environment-interview",
 ] as const satisfies readonly HostedSystemMailboxRouteAction[];
 
 /** Attempts belong to the fenced workspace. Mailbox claims own exclusion and retry. */

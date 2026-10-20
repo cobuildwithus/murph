@@ -38,7 +38,7 @@ const jobSchema = z.object({
   resourceIndex: z.number().int().nonnegative().optional(),
   page: z.number().int().positive().max(100_000),
   totalPages: z.number().int().positive().max(100_000).optional(),
-  nextAttemptAt: z.iso.datetime().optional(),
+  nextAttemptAt: z.isoDateTime().optional(),
   failures: z.number().int().nonnegative().max(3).default(0),
   status: z.enum(["pending", "prepared", "complete", "blocked"]),
   source: sourceSchema.optional(),

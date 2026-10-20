@@ -244,8 +244,6 @@ describe("hosted runtime control contracts", () => {
       "clinical-records.sync-requested",
       "clinical-records.enrichment-requested",
       "device-sync.wake",
-      "environment-interview.completed",
-      "environment-voice.captured",
       "journal.group-fact.recorded",
       "health.daily-metric.reported",
       "meal-photo.captured",
@@ -253,6 +251,8 @@ describe("hosted runtime control contracts", () => {
       "member.action.completed",
       "vault-share.delivery",
       "vault-share.revoke",
+      "environment-interview.completed",
+      "environment-voice.captured",
       "group-newsletter.email-needed",
       "runtime.manual-requested",
       "runtime.pending-effects-reconcile-requested",
@@ -263,6 +263,8 @@ describe("hosted runtime control contracts", () => {
       "runtime.mailbox-lag-observed",
     ]);
     expect(HOSTED_RETIRED_MAILBOX_KINDS).toEqual([
+      "environment-interview.completed",
+      "environment-voice.captured",
       "group-newsletter.email-needed",
     ]);
     expect(isHostedRetiredMailboxKind("group-newsletter.email-needed")).toBe(true);
@@ -948,6 +950,13 @@ describe("hosted runtime control contracts", () => {
       idleShutdownCheckpointSkipped: "warm_workspace_unavailable",
       status: "idle",
     })).toThrow("Hosted workspace invocation result.idleShutdownCheckpointSkipped is no longer supported.");
+  });
+
+  it.each(HOSTED_RETIRED_MAILBOX_KINDS)("reads retained %s metadata as retired", (kind) => {
+    const item = createMailboxItem({ kind, lane: "system" });
+    expect(isHostedMailboxKind(kind)).toBe(true);
+    expect(isHostedRetiredMailboxKind(kind)).toBe(true);
+    expect(parseHostedMailboxItem(item)).toEqual(item);
   });
 
   it("parses mailbox fetch contracts without run ownership fields", () => {

@@ -336,7 +336,7 @@ function normalizeIssueCode(
   rawCode: string | null,
   received: string | null,
 ): string {
-  if (rawCode === 'invalid_type' && received === 'undefined') {
+  if ((rawCode === 'invalid_type' || rawCode === 'invalid_union') && received === 'undefined') {
     return 'missing_required'
   }
   if (!rawCode) {

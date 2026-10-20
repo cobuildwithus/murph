@@ -457,7 +457,6 @@ const HOSTED_SYSTEM_MAILBOX_MODEL_FREE_ROUTE_ACTIONS = [
   "import-group-journal-fact",
   "import-reported-daily-metric",
   "run-device-sync-wake",
-  "run-environment-interview",
 ] as const;
 const HOSTED_INITIAL_BOOTSTRAP_PENDING_REASON_CODE = "bootstrap.pending";
 const HOSTED_RUNTIME_ISSUE_POST_CHECKPOINT_EXPORT_TIMEOUT_MS = 2_500;
@@ -8994,20 +8993,6 @@ function createAbortGuardedHostedRuntimePlatform(
       : {}),
     effectsPort: {
       ...platform.effectsPort,
-      ...(platform.effectsPort.deleteEnvironmentVoice
-        ? {
-            deleteEnvironmentVoice: (audioKey) =>
-              guard(() =>
-                platform.effectsPort.deleteEnvironmentVoice!(audioKey)
-              ),
-          }
-        : {}),
-      ...(platform.effectsPort.readEnvironmentVoice
-        ? {
-            readEnvironmentVoice: (audioKey) =>
-              guard(() => platform.effectsPort.readEnvironmentVoice!(audioKey)),
-          }
-        : {}),
       ...(platform.effectsPort.deletePreparedAssistantDelivery
         ? {
             deletePreparedAssistantDelivery: (deleteInput) =>

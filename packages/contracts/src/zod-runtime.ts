@@ -5,7 +5,9 @@
 // the runner bundle guard rejects locale modules if a direct root import
 // reaches the static graph again.
 import {
+  iso as zodIso,
   toJSONSchema as convertToJsonSchema,
+  union as zodUnion,
   type ZodType,
 } from "zod/v4";
 
@@ -58,6 +60,15 @@ export type ZodJsonSchema = Record<string, unknown>;
 
 export interface ZodJsonSchemaOptions {
   io?: "input" | "output";
+}
+
+// Persisted contracts accepted minute precision before Zod 4.5. Keep those
+// values readable without rewriting strings used for schedule identity.
+export function isoDateTime(options: { offset?: boolean } = {}) {
+  return zodUnion([
+    zodIso.datetime(options),
+    zodIso.datetime({ ...options, precision: -1 }),
+  ]);
 }
 
 export function toJSONSchema(

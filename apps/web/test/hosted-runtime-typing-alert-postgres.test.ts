@@ -9,6 +9,7 @@ import {
 import { linkHostedIngressLatencyTracesToAcceptedLinqDelivery } from "@/src/lib/hosted-runtime-latency/store";
 import { deleteExpiredTypingAlerts } from "@/src/lib/hosted-retention/cleanup";
 import { sendRecoverableHostedLinqAlertsBestEffort } from "@/src/lib/hosted-onboarding/linq-alert-email";
+import { createHostedLinqProviderEventLookupKey } from "@/src/lib/hosted-onboarding/linq-observability-identifiers";
 
 const enabled = process.env.MURPH_TEST_POSTGRES_CONCURRENCY === "1";
 const databaseUrl = process.env.DATABASE_URL ?? "";
@@ -281,6 +282,70 @@ describe.skipIf(!enabled)("per-message typing alert PostgreSQL proof", () => {
     });
   });
 
+  it.each(["current", "prior"] as const)("correlates a %s reaction with same-chat activity through its exact event", async (reactionSide) => {
+    await withTables(async (tx) => {
+      for (const id of ["covered", "other-chat", "other-member", "expired", "ended", "reply"]) {
+        await insertTrace(tx, id, { elapsed: 8000 });
+        await bindConversation(tx, id, `chat-${id}`);
+        if (id !== "reply") {
+          const ageMs = id === "expired" ? 301_000 : 2000;
+          await insertTrace(tx, `prior-${id}`, {
+            elapsed: -ageMs,
+            receivedAt: new Date(received.getTime() - ageMs - 1000),
+          });
+          await bindConversation(tx, `prior-${id}`, id === "other-chat" ? "different-chat" : `chat-${id}`);
+        }
+        const reactionId = reactionSide === "prior" && id !== "reply" ? `prior-${id}` : id;
+        // Reaction ingress synthesizes a message identity from the event ID.
+        // The provider record still names the message that was reacted to.
+        await tx.$executeRaw`UPDATE hosted_linq_provider_event
+          SET message_lookup_key = ${`reacted-to-${id}`}
+          WHERE event_id = ${createHostedLinqProviderEventLookupKey(`event-${reactionId}`)}`;
+      }
+      await tx.$executeRaw`UPDATE hosted_mailbox_item SET user_id = 'foreign-member'
+        WHERE id = 'mailbox-prior-other-member'`;
+      await tx.$executeRaw`UPDATE hosted_ingress_latency_trace SET user_id = 'foreign-member'
+        WHERE id = 'prior-other-member'`;
+      await insertDelivery(tx, "ended-reply", "chat-ended", 2000);
+      await tx.$executeRaw`UPDATE hosted_ingress_latency_trace SET linq_delivery_id = 'ended-reply'
+        WHERE id = 'prior-ended'`;
+      await insertDelivery(tx, "recent-reply", "chat-reply", 7000);
+      const rows = await tx.$queryRaw<Array<{ id: string; elapsedMs: bigint }>>(
+        buildHostedRuntimeTypingAlertQuery({ now }),
+      );
+      expect(rows.map(({ id, elapsedMs }) => [id, elapsedMs]).sort()).toEqual([
+        ["runtime-typing/ended", 6000n],
+        ["runtime-typing/expired", 8000n],
+        ["runtime-typing/other-chat", 8000n],
+        ["runtime-typing/other-member", 8000n],
+      ]);
+    });
+  });
+
+  it("keeps the exact event origin when later events reference the same message", async () => {
+    await withTables(async (tx) => {
+      await insertTrace(tx, "original", { elapsed: 2000 });
+      await insertProviderEvent(tx, "original", -2000);
+      await insertProviderEvent(tx, "original", 1000, "later-delivery-receipt");
+      await insertTrace(tx, "reaction", { elapsed: 2000 });
+      await insertProviderEvent(tx, "reaction", -1000);
+      await tx.$executeRaw`UPDATE hosted_linq_provider_event
+        SET message_lookup_key = 'reacted-to-message'
+        WHERE event_id = ${createHostedLinqProviderEventLookupKey("event-reaction")}`;
+      // The canonical identity helper also accepts its already-hashed form.
+      await tx.$executeRaw`UPDATE hosted_mailbox_item
+        SET dedupe_key = ${createHostedLinqProviderEventLookupKey("event-reaction")}
+        WHERE id = 'mailbox-reaction'`;
+      const rows = await tx.$queryRaw<Array<{ id: string; elapsedMs: bigint }>>(
+        buildHostedRuntimeTypingAlertQuery({ now }),
+      );
+      expect(rows.map(({ id, elapsedMs }) => [id, elapsedMs]).sort()).toEqual([
+        ["runtime-typing/original", 4000n],
+        ["runtime-typing/reaction", 3000n],
+      ]);
+    });
+  });
+
   it("restarts pending silence after replies and after earlier typing ends", async () => {
     await withTables(async (tx) => {
       for (const id of ["gap", "boundary", "repeated", "missing", "recent", "answered", "answered-typed",
@@ -347,7 +412,7 @@ describe.skipIf(!enabled)("per-message typing alert PostgreSQL proof", () => {
       await insertProviderEvent(tx, "early-event", -1500);
       await insertProviderEvent(tx, "late-event", 2000);
       // The edit's own event, not the original send, starts its wait.
-      await insertProviderEvent(tx, "edited", -600_000);
+      await insertProviderEvent(tx, "edited", -600_000, "original-send");
       await insertProviderEvent(tx, "edited", -400);
       // A reply delivered after the provider event but before receipt restarts silence.
       await insertProviderEvent(tx, "reply-before-receipt", -3000);
@@ -389,17 +454,24 @@ describe.skipIf(!enabled)("per-message typing alert PostgreSQL proof", () => {
       await insertTrace(tx, "denied-later-typing", { source, elapsed: 20_000, usageDeniedAt });
       await insertTrace(tx, "allowed-slow", { source, elapsed: 4000 });
       await insertTrace(tx, "allowed-missing", { source, cold: null, elapsed: null });
+      await insertTrace(tx, "absent-mailbox", { source, elapsed: 4000 });
+      await tx.$executeRaw`DELETE FROM hosted_mailbox_item WHERE id = 'mailbox-absent-mailbox'`;
+      await insertTrace(tx, "foreign-denial", { source, elapsed: 4000, usageDeniedAt });
+      await tx.$executeRaw`UPDATE hosted_mailbox_item SET user_id = 'foreign-member'
+        WHERE id = 'mailbox-foreign-denial'`;
 
       const fetchImpl = vi.fn<typeof fetch>().mockImplementation(async () =>
         new Response(JSON.stringify({ id: "synthetic-email" }), { status: 200 }));
       expect(await runHostedRuntimeTypingAlertMonitor({ env, fetchImpl, now, prisma: tx })).toEqual({
-        queuedCount: 2, scanTruncated: false,
+        queuedCount: 4, scanTruncated: false,
       });
-      expect(fetchImpl).toHaveBeenCalledTimes(2);
+      expect(fetchImpl).toHaveBeenCalledTimes(4);
       const alerts = await tx.hostedLinqAlert.findMany({ select: { id: true, status: true } });
       expect(alerts.sort((a, b) => a.id.localeCompare(b.id))).toEqual([
+        { id: "runtime-typing/absent-mailbox", status: "sent" },
         { id: "runtime-typing/allowed-missing", status: "sent" },
         { id: "runtime-typing/allowed-slow", status: "sent" },
+        { id: "runtime-typing/foreign-denial", status: "sent" },
       ]);
     });
   });
@@ -464,7 +536,7 @@ async function withTables(run: (tx: Prisma.TransactionClient) => Promise<void>) 
       ) ON COMMIT DROP`;
       await tx.$executeRaw`INSERT INTO hosted_member (id) VALUES ('synthetic-member')`;
       await tx.$executeRaw`CREATE TEMP TABLE hosted_mailbox_item (
-        id TEXT PRIMARY KEY, user_id TEXT NOT NULL, source_message_lookup_key TEXT, ai_usage_denied_at TIMESTAMP(3),
+        id TEXT PRIMARY KEY, user_id TEXT NOT NULL, dedupe_key TEXT, source_message_lookup_key TEXT, ai_usage_denied_at TIMESTAMP(3),
         lane TEXT NOT NULL DEFAULT 'conversation', lane_seq BIGINT NOT NULL DEFAULT 1,
         kind TEXT NOT NULL DEFAULT 'conversation.message', created_at TIMESTAMP(3) DEFAULT CURRENT_TIMESTAMP
       ) ON COMMIT DROP`;
@@ -477,7 +549,7 @@ async function withTables(run: (tx: Prisma.TransactionClient) => Promise<void>) 
         assistant_input_staged_at TIMESTAMP(3), provider_start_at TIMESTAMP(3), phase_breakdown_json JSONB
       ) ON COMMIT DROP`;
       await tx.$executeRaw`CREATE TEMP TABLE hosted_linq_provider_event (
-        message_lookup_key TEXT, linq_chat_lookup_key TEXT, provider_created_at TIMESTAMP(3)
+        event_id TEXT UNIQUE, message_lookup_key TEXT, linq_chat_lookup_key TEXT, provider_created_at TIMESTAMP(3)
       ) ON COMMIT DROP`;
       await tx.$executeRaw`CREATE TEMP TABLE hosted_linq_delivery (
         id TEXT PRIMARY KEY, linq_chat_lookup_key TEXT, attempted_at TIMESTAMP(3), accepted_at TIMESTAMP(3)
@@ -520,8 +592,8 @@ async function insertTrace(tx: Prisma.TransactionClient, id: string, input: {
   };
   const mailboxItemId = `mailbox-${id}`;
   await tx.$executeRaw(Prisma.sql`
-    INSERT INTO hosted_mailbox_item (id, user_id, ai_usage_denied_at)
-    VALUES (${mailboxItemId}, 'synthetic-member', ${input.usageDeniedAt ?? null})
+    INSERT INTO hosted_mailbox_item (id, user_id, dedupe_key, ai_usage_denied_at)
+    VALUES (${mailboxItemId}, 'synthetic-member', ${`event-${id}`}, ${input.usageDeniedAt ?? null})
   `);
   await tx.$executeRaw(Prisma.sql`
     INSERT INTO hosted_ingress_latency_trace
@@ -537,17 +609,17 @@ async function bindConversation(tx: Prisma.TransactionClient, traceId: string, c
   await tx.$executeRaw`UPDATE hosted_mailbox_item
     SET source_message_lookup_key = ${`message-${traceId}`} WHERE id = ${`mailbox-${traceId}`}`;
   await tx.$executeRaw`INSERT INTO hosted_linq_provider_event
-    (message_lookup_key, linq_chat_lookup_key, provider_created_at)
-    SELECT ${`message-${traceId}`}, ${chat}, webhook_received_at
+    (event_id, message_lookup_key, linq_chat_lookup_key, provider_created_at)
+    SELECT ${createHostedLinqProviderEventLookupKey(`event-${traceId}`)}, ${`message-${traceId}`}, ${chat}, webhook_received_at
     FROM hosted_ingress_latency_trace WHERE id = ${traceId}`;
 }
 
-async function insertProviderEvent(tx: Prisma.TransactionClient, traceId: string, offsetMs: number) {
+async function insertProviderEvent(tx: Prisma.TransactionClient, traceId: string, offsetMs: number, eventId = `event-${traceId}`) {
   await tx.$executeRaw`UPDATE hosted_mailbox_item
     SET source_message_lookup_key = ${`message-${traceId}`} WHERE id = ${`mailbox-${traceId}`}`;
   await tx.$executeRaw`INSERT INTO hosted_linq_provider_event
-    (message_lookup_key, linq_chat_lookup_key, provider_created_at)
-    VALUES (${`message-${traceId}`}, ${`chat-${traceId}`}, ${new Date(received.getTime() + offsetMs)})`;
+    (event_id, message_lookup_key, linq_chat_lookup_key, provider_created_at)
+    VALUES (${createHostedLinqProviderEventLookupKey(eventId)}, ${`message-${traceId}`}, ${`chat-${traceId}`}, ${new Date(received.getTime() + offsetMs)})`;
 }
 
 async function insertDelivery(tx: Prisma.TransactionClient, id: string, chat: string, offsetMs: number | null) {
