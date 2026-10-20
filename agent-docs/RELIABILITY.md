@@ -177,15 +177,28 @@ to apply after cutover.
   Unknown/hostile values and failed classification yield `other`. Other
   non-authority stages remain completely uninspected. Raw errors, messages,
   stacks, causes, details, identifiers, refs, keys, payloads and goal contents
-  remain excluded. Existing successful/not-ready paths and their literal stage
-  assignments are unchanged; diagnostic allocation and emission remain
-  failure-only, with at most one warning per failed read. Classification or
-  logging failure still yields the unchanged generic 503, with no API or
-  authorization change. For a bounded natural-traffic query, filter the last
+  remain excluded. The warning remains failure-only, with at most one warning
+  per failed read. Classification or logging failure still yields the unchanged
+  generic 503. For a bounded natural-traffic query, filter the last
   24 hours of Web logs by that exact message and return only counts grouped by
   stage and the applicable closed reason (plus finite HTTP status at
   `session_request`); do not invoke extra canaries, poll the endpoint, retry,
   wake or refresh to collect evidence.
+  The outcome response's optional timing diagnostics are recent observations,
+  never a proven failed-turn match. Empty and unavailable reads are distinct;
+  multiple rows or truncation are ambiguous. Each observation marks incomplete
+  milestones and age over two minutes separately. Ages use the server sample,
+  and intervals outside zero through ten minutes are omitted, never clamped.
+  Stage denotes the furthest populated boundary; runtime/provider-to-delivery
+  time includes reply preparation. Instant welcome delivery origin bypasses
+  runtime intervals even if its continuation later acquires provider milestones.
+  After a slow or unavailable reply, the existing protected canary runner makes
+  one input-free outcome GET with a three-second request/body deadline, validates
+  its closed diagnostic shape and emits one content-free record. Older Web
+  responses, malformed diagnostics and failed reads retain the original canary
+  failure. Successful journeys emit no new diagnostic records; reply budgets,
+  canonical outcome polling, reset count and sends are unchanged. This read
+  never polls, retries, resets or resends to collect diagnostic evidence.
 - Protected native iOS and Android hosted E2E controllers run staggered every
   twelve hours and execute each admitted journey even when the same revision
   previously passed. Provider behavior can change independently of source.
