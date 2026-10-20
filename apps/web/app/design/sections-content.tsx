@@ -1,12 +1,5 @@
 import { ModelSettingsHoverPreview } from "./model-settings-hover-preview";
 
-import {
-  BiomarkerBoundaryResultStudy,
-  BiomarkerDetailStudy,
-  BiomarkerIndexStudy,
-  BiomarkerPreparingStateStudy,
-  BiomarkerReferenceContextStudy,
-} from "@/src/components/biomarkers/biomarker-design-studies";
 import { AsksGridSection } from "@/src/components/homepage/asks-section";
 import { FaqSection } from "@/src/components/homepage/faq-section";
 import { HeroClocksIn } from "@/src/components/homepage/hero-clocks-in";
@@ -888,44 +881,11 @@ export function SectionsContent({
 
       {category === "health" ? (
         <>
-          <Separator />
-
-          <StudySection title="Biomarker preparing state">
-            <BiomarkerPreparingStateStudy />
-          </StudySection>
-
-          <Separator />
-
-          <StudySection title="Biomarker index">
-            <BiomarkerIndexStudy />
-          </StudySection>
-
-          <Separator />
-
-          <StudySection title="Biomarker result detail">
-            <div id="biomarker-result-range-bands">
-              <BiomarkerDetailStudy />
-            </div>
-          </StudySection>
-
-          <Separator />
-
-          <StudySection title="Biomarker reference context">
-            <BiomarkerReferenceContextStudy />
-          </StudySection>
 
           <Separator />
 
           <StudySection title="Repeated-session experiment Results">
             <ExperimentRepeatedResultsStudy />
-          </StudySection>
-
-          <Separator />
-
-          <StudySection title="Biomarker boundary result · published comparator provenance">
-            <div id="biomarker-boundary-result">
-              <BiomarkerBoundaryResultStudy />
-            </div>
           </StudySection>
         </>
       ) : null}
