@@ -496,11 +496,6 @@ describe("runner bundle container-entrypoint esbuild step", () => {
       /node_modules\/@murphai\/assistant-runtime\/dist\/hosted-runtime\/events\/environment-voice\.js/,
     ],
     [
-      "workspace Codex auth wake handler",
-      "packages/assistant-runtime/dist/hosted-runtime/events/codex-auth.js",
-      /packages\/assistant-runtime\/dist\/hosted-runtime\/events\/codex-auth\.js/,
-    ],
-    [
       "Zod locale catalog",
       "node_modules/zod/v4/locales/index.js",
       /node_modules\/zod\/v4\/locales\/index\.js/,

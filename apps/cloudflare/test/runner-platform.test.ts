@@ -44,7 +44,6 @@ import {
 import {
   HOSTED_RUNTIME_EMAIL_EGRESS_RECIPIENT_PATH,
   HOSTED_RUNTIME_GROUP_TOOL_PATH,
-  HOSTED_RUNTIME_CODEX_AUTH_PATH,
   HOSTED_RUNTIME_LINQ_EGRESS_DELIVERY_PATH,
   HOSTED_RUNTIME_LINQ_EGRESS_ENGAGEMENT_PATH,
   HOSTED_RUNTIME_OPERATOR_TASK_CONTROL_PATH,
@@ -6758,15 +6757,6 @@ describe("buildHostedExecutionRuntimePlatform", () => {
           status: 200,
         });
       }
-      if (url.pathname.endsWith(HOSTED_RUNTIME_CODEX_AUTH_PATH)) {
-        return new Response(JSON.stringify({
-          applied: true,
-          status: "applied",
-        }), {
-          headers: { "content-type": "application/json; charset=utf-8" },
-          status: 200,
-        });
-      }
       if (url.pathname.endsWith("/api/internal/hosted-execution/issues/record")) {
         return new Response(JSON.stringify({
           issueIds: ["issue_123"],
@@ -6891,7 +6881,6 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(platform.workspacePort).toBeDefined();
     expect(platform.logPort).toBeDefined();
     expect(platform.latencyTracePort).toBeDefined();
-    expect(platform.codexAuthPort).toBeDefined();
     expect(platform.issueExportPort).toBeDefined();
     expect(platform.usageRecordPort).toBeDefined();
     expect(platform.productFeedbackPort).toBeDefined();
@@ -6934,10 +6923,6 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         source: "linq",
         type: "assistant_input_staged",
       },
-    });
-    await platform.codexAuthPort!.update({
-      attemptId: "hca_abcdefghijklmnop",
-      phase: "connected",
     });
     await platform.issueExportPort!.recordIssues([{ code: "runtime.issue" }]);
     await platform.usageRecordPort!.recordUsage(createAssistantUsageRecord());
@@ -7015,7 +7000,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       connectionId: "conn_123",
     });
 
-    expect(fetchMock).toHaveBeenCalledTimes(16);
+    expect(fetchMock).toHaveBeenCalledTimes(15);
     const requests = fetchMock.mock.calls.map((call, index) =>
       requireFetchRequest(call, `callback web-control request ${index}`)
     );
@@ -7024,7 +7009,6 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       "http://web-control.worker/api/internal/hosted-workspace",
       "http://web-control.worker/api/internal/hosted-runtime/log",
       "http://web-control.worker/api/internal/hosted-runtime/latency",
-      "http://web-control.worker/api/internal/hosted-runtime/codex-auth",
       "http://web-control.worker/api/internal/hosted-execution/issues/record",
       "http://web-control.worker/api/internal/hosted-execution/usage/record",
       "http://web-control.worker/api/internal/hosted-execution/product-feedback/record",
@@ -7039,7 +7023,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     ]);
     // The composed group and both publication paths advertise one canonical
     // scope per metric, not a second history registry or capability flag.
-    for (const request of requests.slice(12, 15)) {
+    for (const request of requests.slice(11, 14)) {
       const url = new URL(request.url);
       const scopes = url.searchParams.getAll("supportedProjectionScope");
       expect(scopes).toHaveLength(100);
@@ -7053,7 +7037,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       expect(request.headers.get("x-hosted-runtime-workspace-version")).toBe("6");
       expect(request.headers.has("x-hosted-execution-runner-proxy-token")).toBe(false);
     }
-    await expect(requests[11]?.clone().json()).resolves.toEqual({
+    await expect(requests[10]?.clone().json()).resolves.toEqual({
       action: HOSTED_RUNTIME_ASSISTANT_PERSONALITY_UPDATE_ACTION,
       personality: {
         detail: null,
