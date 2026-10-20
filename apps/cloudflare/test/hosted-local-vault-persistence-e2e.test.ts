@@ -192,6 +192,8 @@ async function startVaultPersistenceScenario(input: {
       LINQ_API_BASE_URL: requireLinqStub().runnerBaseUrl,
       LINQ_API_TOKEN: "linq-local-test-token",
       LINQ_WEBHOOK_SECRET: linqWebhookSecret,
+      // Keep object data with the Worker state across the full stack restart.
+      MURPH_DEV_MINIO_DATA_DIR: path.join(requirePersistDir(), "minio-r2"),
       MURPH_DEV_SKIP_HEALTH_COMMONS_WATCH: "1",
       ...(assistantProviderMode === "stub" ? { OPENAI_API_KEY: "stub-local-openai-key" } : {}),
     },

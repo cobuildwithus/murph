@@ -1,9 +1,9 @@
 # Upgrade Codex CLI to 0.163.0 with default instant steering
 
 Status: active
-Release decision: Hold — native AMD64 runner-image/permission proof and hosted-local scenarios unavailable
+Release decision: Hold — vault restart fixture corrected; native rerun and remaining delivery scenarios required
 Created: 2026-10-16
-Updated: 2026-10-18
+Updated: 2026-10-19
 
 ## Goal
 
@@ -436,3 +436,53 @@ release coordinator's reservation and all production admission gates.
   disable control. There are 138 unrelated filtered cases. Production source
   and image fingerprint are unchanged; hosted execution of the corrected
   fixture and all three unexecuted scenarios remains required.
+
+### Final candidate budget proof on `d8d1d500`
+
+- Host Support run `39345224818` passed every job. The budget used the PR's
+  synthetic merge `f2f1f4b183a881c00e188b2a5f2dab2b1c427722` against first
+  parent `f54875376973da0c36a8eece4bb63ad91edbad96`. Native compilation with
+  two Cargo jobs completed; the complete latency step took 46 minutes.
+- All six one-vCPU median comparisons passed the unchanged limits. CPU/wall
+  milliseconds, base to candidate: boot 728.652/667 to 739.672/679;
+  seed 843.709/828.523 to 835.931/824.075; new-turn 220.371/211.166 to
+  227.503/214.703. This proves the bounded compilation mitigation can complete
+  and the candidate remains within budget; it does not establish the prior
+  runner failures' root cause.
+- All four branch-required checks and PR evidence pass on `d8d1d500`.
+  Corrected hosted run `39345272648` and native permission run `39345224641`
+  are still pending. This plan remains active and the release decision is Hold.
+
+### Final candidate native-image proof on `d8d1d500`
+
+- Native permission run `39345224641` passed on the current PR head. The newly
+  compiled image reports `codex-cli 0.163.0`; extracted-binary Live/WebSocket
+  tests passed 13, SSE steering passed three (138 unrelated filtered cases),
+  and egress passed 28. The actual hosted runner permission/confinement smoke
+  passed and independently reported `codex-cli 0.163.0`.
+- All public CI is green. Hosted candidate run `39345272648` remains active;
+  the corrected steering, vault, reply, and scheduled-reminder results are the
+  last task-specific proof gap.
+
+### Hosted steering pass and vault restart storage correction
+
+- Native hosted run `39345272648` built and launched the patched 0.163.0
+  image. Lost-active-operation steering passed (one test, 76.79 seconds),
+  including corrected-request preemption, forbidden stale tool, exact reply,
+  mailbox progress, durable-fence clearance, and a fresh wake.
+- Vault persistence reached the post-restart assertion, proving the real binary
+  write, initial encrypted snapshot contents, and exact single synthetic reply.
+  The post-restart snapshot GET then returned HTTP 404. Delivery and reminders
+  did not run because scenario two failed; the whole run is not a pass.
+- Proven fixture cause: `persistDirOverride` retained Worker state, but MinIO
+  defaulted to the stack's disposable temporary directory. `stack.stop` removed
+  that object data. The new stack retained the committed snapshot reference but
+  had an empty object store. MinIO/stack/snapshot-inspection source is identical
+  to the base. The live-only scenario previously skipped without credentials.
+- The fixture now sets the existing `MURPH_DEV_MINIO_DATA_DIR` to a child of its
+  retained scenario-owned persistence root. The first start still resets that
+  root; restart retains it; final cleanup owns its removal. Production storage,
+  encryption, auth, snapshot checks, and exact reply assertions are unchanged.
+- MinIO support tests pass 21 and Cloudflare typecheck passes. The failed native
+  run is the negative proof; a new native vault/delivery/reminder run remains
+  required as positive proof. The unchanged steering test need not be repeated.
