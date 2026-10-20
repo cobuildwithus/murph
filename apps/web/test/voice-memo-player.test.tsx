@@ -201,7 +201,7 @@ test("VoiceMemoPlayer falls back once before marking a preview unavailable", asy
   const rendered = await renderClientComponent(
     createElement(VoiceMemoPlayer, {
       fallbackSrc: "/audio/murph-voices/warm.mp3",
-      src: "/audio/murph-voices/warm.mp3",
+      src: "/audio/missing-preview.mp3",
       unavailableLabel: "Preview unavailable",
     }),
     { requireButton: false },
@@ -212,7 +212,7 @@ test("VoiceMemoPlayer falls back once before marking a preview unavailable", asy
     assert.ok(audio);
     assert.equal(
       audio.getAttribute("src"),
-      "/audio/murph-voices/warm.mp3",
+      "/audio/missing-preview.mp3",
     );
 
     await act(async () => {
