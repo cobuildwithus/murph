@@ -332,6 +332,12 @@ describe('assistant execution prompt contract', () => {
       'If no strong move is earned, answer plainly, react, or stay silent.',
     )
     expect(groupLayers.staticCacheableCorePrompt).toContain(
+      'A strong move is not necessarily a joke',
+    )
+    expect(groupLayers.staticCacheableCorePrompt).toContain(
+      'humor lands because it is occasional, not on every reply',
+    )
+    expect(groupLayers.staticCacheableCorePrompt).toContain(
       'never random weirdness or invented facts',
     )
     expect(directLayers.staticCacheableCorePrompt).not.toContain(
@@ -748,7 +754,7 @@ describe('assistant execution prompt contract', () => {
       'Assistant personality preferences',
     )
     expect(defaultLayers.staticCacheableCorePrompt).toContain(
-      'Defaults: Humor 3—deadpan; at most one earned beat when playful; no canned bits, laughing emojis, or user-directed jokes. Push 3—one small reversible step with visible choice. Detail 5—answer first, then useful context.',
+      'Defaults: Humor 3—deadpan, occasional: most replies have no joke; at most one earned beat when playful; no canned bits, repeated templates, laughing emojis, or user-directed jokes; if told jokes miss, stop joking. Push 3—one small reversible step with visible choice. Detail 5—answer first, then useful context.',
     )
     expect(defaultLayers.staticCacheableCorePrompt).toContain(
       'Calm, observant, direct, plainspoken.',
@@ -794,6 +800,9 @@ describe('assistant execution prompt contract', () => {
     )
     expect(layers.threadContextPrompt).toContain(
       'never stock personification, canned meme templates, or forced analogies',
+    )
+    expect(layers.threadContextPrompt).toContain(
+      'never the same comic shape as your last joke',
     )
     expect(layers.threadContextPrompt).toContain(
       'When health stakes are real or emotional reception is unclear, stay literal',
@@ -2579,7 +2588,7 @@ describe('assistant system prompt cache stability', () => {
       'Current Murph product base URL for user-facing app links: http://localhost:3000',
     )
     expect(promptA.cacheMetadata.staticPromptHash).toBe(
-      '8fc6bd3af451f6af738e5646f7c1cda7489b1ba03ea885bd28a08b12293383d0',
+      '2fced832928b88ac3ecfca1b7928cf95f58e987ea8bae42879cfe9c03f7bb7ff',
     )
     expect(promptA.cacheMetadata.toolSchemaHash).toBe(
       'assistant-tool-schema-common-codex-test',
