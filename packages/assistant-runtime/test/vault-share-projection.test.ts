@@ -1088,7 +1088,7 @@ describe("offerHostedVaultShareProjectionBestEffort", () => {
           },
         }),
       },
-    })).resolves.toEqual({ outcome: "error" });
+    })).resolves.toEqual({ failureReason: "delivery_exception", outcome: "error" });
 
     await writeVaultTimeZone(vaultRoot, "UTC");
     const retryDeliver = vi.fn(async (request: HostedVaultShareDeliverRequest) => {
