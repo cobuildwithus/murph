@@ -779,6 +779,18 @@ separate explicit-abort owner. This change requires rebuilding and deploying the
 runner image, which bundles `container-entrypoint.ts`; a Worker-only deployment
 cannot ship it.
 
+For `usage_settlement_pending` only, the existing `Hosted runner provider egress
+completed.` warning includes `runtimeAttemptId` when its already-read native
+ContainerProxy authority supplies a write fence. Caller headers never supply
+this join. The existing 503 response with `retry-after: 1` returns without an
+upstream request; associated tracing lacks the attempt, and the separate typing-start
+correlation below does not cover this rejection. The extension adds at most one
+scalar under the structured logger's existing sanitization and size bounds, with
+distinct values limited to native attempts represented in these warnings. It
+adds no event, I/O or wait; other diagnostics retain their existing details.
+This observes the rejected attempt. It does not repair settlement failures or
+establish their cause or recovery.
+
 Linq typing-start fetches mint one random UUID in
 `x-hosted-runtime-fetch-correlation-id`. The runtime records
 `providerRuntimeStartedAtEpochMs`, `providerRuntimeResumedAtEpochMs` and monotonic
