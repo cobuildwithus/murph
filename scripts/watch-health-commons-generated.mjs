@@ -14,7 +14,6 @@ const hostedWebDevCachePaths = [
   path.join(repoRoot, "apps", "web", ".next-dev", "dev", "cache", "fetch-cache"),
 ];
 const hostedWebHealthCommonsBridgeFiles = [
-  path.join(repoRoot, "apps", "web", "src", "lib", "health-commons", "biomarker-detail.ts"),
   path.join(repoRoot, "apps", "web", "src", "lib", "health-commons", "experiment-browse.ts"),
   path.join(repoRoot, "apps", "web", "src", "lib", "health-commons", "experiment-detail.ts"),
   path.join(repoRoot, "apps", "web", "src", "lib", "health-commons", "experiment-projections.ts"),

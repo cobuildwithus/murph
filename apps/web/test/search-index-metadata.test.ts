@@ -9,7 +9,6 @@ import {
   listComparisonRoutes,
   listComparisonSitemapEntries,
 } from "../src/lib/comparisons/catalog";
-import { listHealthCommonsBiomarkerRoutes } from "../src/lib/health-commons/biomarker-projections";
 import { listHealthCommonsExperimentRouteParams } from "../src/lib/health-commons/experiment-browse";
 import { listHealthCommonsMeasurementMethodRoutes } from "../src/lib/health-commons/measurement-method-detail";
 import {
@@ -62,10 +61,6 @@ describe("public search indexing metadata", () => {
       ...listComparisonRoutes(),
       ...listHealthCommonsExperimentRouteParams().flatMap(({ experimentId }) => {
         const route = `/experiments/${encodeURIComponent(experimentId)}`;
-        return [route, `${route}/research`];
-      }),
-      ...listHealthCommonsBiomarkerRoutes().flatMap((biomarkerId) => {
-        const route = `/biomarkers/${encodeURIComponent(biomarkerId)}`;
         return [route, `${route}/research`];
       }),
       ...listHealthCommonsMeasurementMethodRoutes().map((measurementMethodId) =>

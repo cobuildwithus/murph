@@ -4,7 +4,7 @@ Last verified: 2026-08-10
 
 ## Current State
 
-Murph maintains Health Commons content for assistant evidence, goal templates, protocol pages, biomarker pages, evidence/source pages, exact reusable revisions, and redirects/disambiguation. The standalone public `/goals` guides and `/knowledge` marketing page are retired. This layer must stay forkable and reviewable like a small wiki while remaining structured enough to bind private goals, runs, outcome cards, and future cohort learning to exact public versions.
+Murph maintains Health Commons content for assistant evidence, goal templates, protocol pages, biomarker knowledge, evidence/source pages, exact reusable revisions, and redirects/disambiguation. The standalone public `/goals` guides and `/knowledge` marketing page are retired. This layer must stay forkable and reviewable like a small wiki while remaining structured enough to bind private goals, runs, outcome cards, and future cohort learning to exact public versions.
 
 ## Product Boundary
 
@@ -26,7 +26,7 @@ The storage primitive is a typed wiki page plus generated projections. Product/d
 
 | Product concept | Stored form |
 | --- | --- |
-| Biomarker page | `entityType: biomarker` |
+| Biomarker reference entity | `entityType: biomarker` |
 | Outcome-first Goal guide | `entityType: goal_template` |
 | Intervention page | `entityType: experiment_family`, `familyKind: intervention` |
 | Modality page | `entityType: experiment_family`, `familyKind: modality` |
@@ -43,7 +43,7 @@ Protocol and source pages may also include an optional `media` array for small p
 
 ## Biomarker Reference Guidance
 
-Authored biomarker pages may carry calm educational context for measured
+Authored biomarker entities may carry calm educational context for measured
 health data under `referenceGuidance`. This content does not diagnose,
 prescribe, or decide whether a saved result is in or out of range. For saved
 laboratory results, the reporting source's flag and per-result reference
@@ -53,8 +53,10 @@ or override the source range.
 
 The contract lives in `packages/contracts/src/health-commons.ts`; authored
 guidance remains in `packages/health-commons/content/biomarkers/*.md`, and the
-generated biomarker research projection carries the parsed structure. Do not
-create a frontend-only guidance lookup or commit generated catalog artifacts.
+canonical knowledge readers carry the parsed structure. The retired Biomarkers
+website has no browse/detail projections, browser presentation selectors, or
+curated navigation grouping. Raw lab replica rows and export remain supported.
+Do not create a frontend-only guidance lookup or commit generated catalog artifacts.
 
 ```yaml
 referenceGuidance:
@@ -203,8 +205,6 @@ Generated entities carry:
 The full catalog is a build-time generator structure, not a runtime artifact.
 Runtime surfaces should consume scoped generated artifacts instead of a monolith:
 web route bundles/projections for public pages, the compact Goal browse index,
-the v4 biomarker browse index (including device metric bindings and display
-precision so dashboard lists do not read every detail projection),
 compact protocol index/run-spec/
 family-graph artifacts for CLI and hosted protocol reads, the compact
 `biomarker-desired-directions.json` projection for progress-card sentiment, and

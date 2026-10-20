@@ -2800,10 +2800,6 @@ const LEGACY_CHANGELOG_EDITIONS = [
           "When an imported result arrives without its own range, the page can show a clearly labeled published adult comparator without changing the reporting lab's status or presenting the comparator as that lab's range.",
         relevanceTags: ["biomarkers", "labs", "health", "dashboard"],
         sourcePullRequests: [838, 844, 871],
-        tryIt: {
-          href: "/biomarkers",
-          label: "Open Biomarkers",
-        },
       },
       {
         id: "family-usage-top-ups",
@@ -2981,10 +2977,6 @@ const LEGACY_CHANGELOG_EDITIONS = [
           "Equivalent lab spellings such as BUN and blood urea nitrogen collapse into a single history, and report metadata no longer lands in a catch-all Other group. Qualitative and incompatible-unit results stay in the form the lab reported them.",
         relevanceTags: ["biomarkers", "labs", "dashboard", "design"],
         sourcePullRequests: [816, 817, 818, 826, 829],
-        tryIt: {
-          href: "/biomarkers",
-          label: "Open Biomarkers",
-        },
       },
       {
         id: "low-usage-mentioned-in-conversation",
@@ -3298,10 +3290,6 @@ const LEGACY_CHANGELOG_EDITIONS = [
           "Qualitative results, comparator values, unit changes, custom analytes, and lab-reported reference ranges stay visible without being forced into a misleading numeric series. Raw reports and external identifiers stay out of the browser view.",
         relevanceTags: ["biomarkers", "labs", "history", "dashboard"],
         sourcePullRequests: [771],
-        tryIt: {
-          href: "/biomarkers",
-          label: "Open your biomarkers",
-        },
       },
       {
         id: "device-metrics-on-biomarkers",
@@ -6871,10 +6859,6 @@ const LEGACY_CHANGELOG_EDITIONS = [
           "If you haven't connected a wearable or uploaded labs, the Biomarkers page now tells you exactly what to do next.",
         relevanceTags: ["dashboard", "biomarkers", "onboarding"],
         sourcePullRequests: [54],
-        tryIt: {
-          href: "/biomarkers",
-          label: "Open biomarkers",
-        },
       },
       {
         id: "leaner-wearable-imports",

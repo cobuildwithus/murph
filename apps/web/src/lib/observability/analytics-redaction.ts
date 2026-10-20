@@ -3,7 +3,6 @@ import type { BeforeSendEvent as VercelAnalyticsBeforeSendEvent } from "@vercel/
 export const VERCEL_TELEMETRY_PATHNAMES = [
   "/",
   "/about",
-  "/biomarkers",
   "/changelog",
   "/clubs",
   "/compare",
@@ -55,27 +54,6 @@ const VERCEL_TELEMETRY_PATHNAME_SET = new Set<string>(
 );
 const PUBLIC_PATH_SEGMENT_PATTERN = String.raw`[a-z0-9][a-z0-9._~-]*`;
 const VERCEL_TELEMETRY_DYNAMIC_PATHNAME_RULES = [
-  {
-    pattern: new RegExp(
-      `^/biomarkers/(?:${PUBLIC_PATH_SEGMENT_PATTERN}|\\[biomarkerId\\])$`,
-      "iu",
-    ),
-    pathname: "/biomarkers/[biomarker]",
-  },
-  {
-    pattern: new RegExp(
-      `^/biomarkers/(?:${PUBLIC_PATH_SEGMENT_PATTERN}|\\[biomarkerId\\])/research$`,
-      "iu",
-    ),
-    pathname: "/biomarkers/[biomarker]/research",
-  },
-  {
-    pattern: new RegExp(
-      `^/biomarkers/results/(?:${PUBLIC_PATH_SEGMENT_PATTERN}|\\[metricKey\\])$`,
-      "iu",
-    ),
-    pathname: "/biomarkers/results/[metric]",
-  },
   {
     pattern: new RegExp(
       `^/compare/(?:murph-vs-${PUBLIC_PATH_SEGMENT_PATTERN}|\\[competitor\\])$`,

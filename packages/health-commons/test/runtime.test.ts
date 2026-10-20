@@ -17,7 +17,6 @@ import {
   getGeneratedHealthCommonsProtocolFamilyGraphReader,
   getGeneratedHealthCommonsProtocolIndexReader,
   getGeneratedHealthCommonsProtocolRunSpecReader,
-  getGeneratedHealthCommonsWebBiomarkerIndex,
   getGeneratedHealthCommonsWebExperimentIndex,
   getGeneratedHealthCommonsWebRouteIndex,
   HealthCommonsProtocolArtifactError,
@@ -31,7 +30,6 @@ import {
   loadGeneratedHealthCommonsProtocolFamilyGraph,
   loadGeneratedHealthCommonsProtocolIndex,
   loadGeneratedHealthCommonsProtocolRunSpecs,
-  loadGeneratedHealthCommonsWebBiomarkerIndex,
   loadGeneratedHealthCommonsWebExperimentIndex,
   loadGeneratedHealthCommonsWebExperimentProtocolTab,
   loadGeneratedHealthCommonsWebExperimentResearchTab,
@@ -309,67 +307,6 @@ describe("@murphai/health-commons runtime catalog reader", () => {
     ).toBeNull();
   });
 
-  it("loads the compact generated biomarker browse index", () => {
-    const biomarkerIndex = getGeneratedHealthCommonsWebBiomarkerIndex();
-    const publishedRouteIds = biomarkerIndex.biomarkers
-      .filter((entry) => entry.published)
-      .map((entry) => entry.routeId);
-
-    expect(biomarkerIndex.schemaVersion).toBe("murph.commons.web.biomarker-index.v4");
-    expect(publishedRouteIds).toEqual(expect.arrayContaining([
-      "estimated-vo2max",
-      "resting-heart-rate",
-      "deep-sleep-minutes",
-    ]));
-    expect(
-      biomarkerIndex.biomarkers.find((entry) => entry.routeId === "estimated-vo2max"),
-    ).toEqual(expect.objectContaining({
-      bundlePath: "bundles/biomarker/estimated-vo2max.json",
-      key: "biomarker:estimated-vo2max",
-      published: true,
-    }));
-    expect(
-      biomarkerIndex.biomarkers.find((entry) => entry.routeId === "chloride")?.fallbackRanges,
-    ).toEqual([expect.objectContaining({
-      eligibleSpecimenKinds: ["serum"],
-      lowerBound: { inclusive: true, value: 98 },
-      unit: "mmol/L",
-      upperBound: { inclusive: true, value: 107 },
-    })]);
-  });
-
-  it("keeps published biomarker private metric bindings aligned with the metric catalog", () => {
-    const biomarkerIndex = getGeneratedHealthCommonsWebBiomarkerIndex();
-    const publishedBiomarkers = biomarkerIndex.biomarkers
-      .filter((entry) => entry.published && entry.hidden !== true);
-
-    for (const entry of publishedBiomarkers) {
-      const bundle = loadGeneratedHealthCommonsWebRouteBundle({
-        entityType: "biomarker",
-        routeId: entry.routeId,
-      });
-      expect(bundle, `Expected biomarker route bundle for ${entry.routeId}`).not.toBeNull();
-      if (!bundle) {
-        continue;
-      }
-
-      const reader = createHealthCommonsRouteBundleReader(bundle);
-      const entity = reader.findByKey(entry.key);
-      expect(entity?.entityType).toBe("biomarker");
-      if (!entity || entity.entityType !== "biomarker") {
-        continue;
-      }
-
-      for (const binding of entity.biomarker?.privateMetricBindings ?? []) {
-        const definition = resolveMetricDefinition(binding.metricKey);
-        expect(definition, `${entry.key} private metric ${binding.metricKey}`).not.toBeNull();
-        if (binding.role === "primary") {
-          expect(definition?.biomarkerKey).toBe(entry.key);
-        }
-      }
-    }
-  });
-
   it("keeps protocol sort rank in the generated experiment index", () => {
     const experimentIndex = getGeneratedHealthCommonsWebExperimentIndex();
     const firstProtocolIds = experimentIndex.experiments
@@ -526,8 +463,7 @@ describe("@murphai/health-commons runtime catalog reader", () => {
         .toThrow(path.join(expectedWebRootPath, "routes", "index.json"));
       expect(() => loadGeneratedHealthCommonsWebExperimentIndex())
         .toThrow(path.join(expectedWebRootPath, "browse", "experiments.json"));
-      expect(() => loadGeneratedHealthCommonsWebBiomarkerIndex())
-        .toThrow(path.join(expectedWebRootPath, "browse", "biomarkers.json"));
+
     } finally {
       if (previousPackageRoot === undefined) {
         delete process.env[MURPH_HEALTH_COMMONS_PACKAGE_ROOT_ENV];
@@ -1202,19 +1138,17 @@ describe("@murphai/health-commons runtime catalog reader", () => {
     expect(checkedBundlePaths.size).toBeGreaterThan(0);
   });
 
-  it("does not include hidden protocol variants in public biomarker route bundles", () => {
-    const bundle = loadGeneratedHealthCommonsWebRouteBundle({
+  it("omits retired biomarker website routes while retaining runtime guidance", () => {
+    expect(loadGeneratedHealthCommonsWebRouteBundle({
       entityType: "biomarker",
-      routeId: "musculoskeletal-pain",
-    });
-
-    expect(bundle).not.toBeNull();
-    expect(bundle?.entitiesByKey).not.toHaveProperty(
-      "protocol_variant:collagen-supplementation/hydrolyzed-collagen-peptides",
-    );
-    expect(bundle?.reverseEdges.map((edge) => edge.sourceKey)).not.toContain(
-      "protocol_variant:collagen-supplementation/hydrolyzed-collagen-peptides",
-    );
+      routeId: "resting-heart-rate",
+    })).toBeNull();
+    expect(getGeneratedHealthCommonsWebRouteIndex().routes.some(
+      (route) => route.entityType === "biomarker",
+    )).toBe(false);
+    expect(resolveGeneratedHealthCommonsBiomarkerDesiredDirection(
+      "biomarker:resting-heart-rate",
+    )).toBe("lower_or_stable");
   });
 
   it("keeps the Finnish sauna tab projections materially smaller than the route bundle", () => {

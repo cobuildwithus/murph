@@ -1127,7 +1127,7 @@ describe("Clinical Records status page", () => {
       .find((span) => span.textContent === "Imported");
     assert.ok(completeBadge);
     expect(completeBadge.className).toContain("sr-only");
-    expect(rendered.container.querySelector('a[href="/biomarkers"]')?.textContent).toBe("View lab results");
+    expect(rendered.container.querySelector('a[href="/biomarkers"]')).toBeNull();
     expect(rendered.container.textContent).toContain(
       "Your records are saved and ready for conversations with Murph.",
     );
@@ -1178,7 +1178,7 @@ describe("Clinical Records status page", () => {
     }));
     expect(rendered.container.textContent).toContain("3 records added");
     expect(rendered.container.textContent).toContain("2 items saved for reference");
-    expect(rendered.container.querySelector('a[href="/biomarkers"]')).not.toBeNull();
+    expect(rendered.container.querySelector('a[href="/biomarkers"]')).toBeNull();
     expect(Array.from(rendered.container.querySelectorAll("a")).find((link) => link.textContent === "Reconnect")?.getAttribute("href")).toBe("/records/connect?launch=clinical-records");
     const reauthorizationBadge = Array.from(rendered.container.querySelectorAll("span"))
       .find((span) => span.textContent === "Portal access ended");

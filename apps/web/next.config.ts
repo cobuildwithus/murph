@@ -400,12 +400,6 @@ export function buildHostedWebNextConfig(
         "../../packages/health-commons/generated/web/shell/experiments/**/*.json",
         "../../packages/health-commons/generated/web/tabs/experiments/**/*.json",
       ],
-      "/biomarkers": [
-        "../../packages/health-commons/generated/web/browse/biomarkers.json",
-        "../../packages/health-commons/generated/web/routes/index.json",
-        "../../packages/health-commons/generated/web/shell/biomarkers/**/*.json",
-        "../../packages/health-commons/generated/web/pages/biomarkers/**/*.json",
-      ],
       "/measurement-methods/[measurementMethodId]": [
         "../../packages/health-commons/generated/web/routes/index.json",
         "../../packages/health-commons/generated/web/bundles/measurement_method/**/*.json",

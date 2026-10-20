@@ -1,7 +1,6 @@
 import type { MetadataRoute } from "next";
 
 import { listComparisonSitemapEntries } from "@/src/lib/comparisons/catalog";
-import { listHealthCommonsBiomarkerRoutes } from "@/src/lib/health-commons/biomarker-projections";
 import { listHealthCommonsExperimentRouteParams } from "@/src/lib/health-commons/experiment-browse";
 import { listHealthCommonsMeasurementMethodRoutes } from "@/src/lib/health-commons/measurement-method-detail";
 import { MURPH_PUBLIC_SITE_URL } from "@/src/lib/site-metadata";
@@ -32,10 +31,6 @@ export default function sitemap(): MetadataRoute.Sitemap {
       return [route, `${route}/research`];
     },
   );
-  const biomarkerRoutes = listHealthCommonsBiomarkerRoutes().flatMap((biomarkerId) => {
-    const route = `/biomarkers/${encodeURIComponent(biomarkerId)}`;
-    return [route, `${route}/research`];
-  });
   const measurementMethodRoutes = listHealthCommonsMeasurementMethodRoutes().map(
     (measurementMethodId) =>
       `/measurement-methods/${encodeURIComponent(measurementMethodId)}`,
@@ -49,7 +44,6 @@ export default function sitemap(): MetadataRoute.Sitemap {
     ...STATIC_PUBLIC_ROUTES,
     ...comparisonLastModifiedByRoute.keys(),
     ...experimentRoutes,
-    ...biomarkerRoutes,
     ...measurementMethodRoutes,
   ]
     .sort()
