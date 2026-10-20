@@ -1,7 +1,6 @@
 import type { CanonicalEntity } from "../canonical-entities.ts";
 import { experimentOutcomeSchema } from "@murphai/contracts";
 import { metricPointRecordIds } from "../metrics/index.ts";
-import { buildPersonalPatternReportFromWearableBundleAndMetricPoints } from "../personal-patterns.ts";
 import { buildJournalView } from "../journal-view.ts";
 import { isDefaultProjectedQueryEntity } from "../query-visibility.ts";
 import type { OverviewWeeklySampleSummary } from "../overview.ts";
@@ -108,20 +107,6 @@ export async function createBrowserVaultReplica(
   const defaultWearableBundle = buildWearableSummaryBundle(defaultProjectedVault);
   const sourceHealthRows = summarizeWearableSourceHealthFromBundle(defaultWearableBundle, { limit: SOURCE_HEALTH_LIMIT })
     .map(projectSourceHealthRow);
-  // Filtering only removes entities. Reuse is exact when none were removed;
-  // otherwise Personal Patterns retains its separate, raw input semantics.
-  const wearableSummaryBundle = defaultProjectedVault.entities.length === input.vault.entities.length
-    ? defaultWearableBundle
-    : buildWearableSummaryBundle(input.vault);
-  const personalPatterns = buildPersonalPatternReportFromWearableBundleAndMetricPoints(
-    input.vault,
-    wearableSummaryBundle,
-    allMetricPoints,
-    {
-      asOf: generatedAt,
-      vocabulary: input.personalPatternVocabulary,
-    },
-  );
   await yieldToBrowserVaultReplicaCancellation(input.signal);
   const replicaWithoutVersion: BrowserVaultReplica = {
     assistantSummary: projectWearableAssistantSummary(buildWearableAssistantSummaryFromBundle(defaultWearableBundle)),
@@ -138,13 +123,11 @@ export async function createBrowserVaultReplica(
     ),
     journal: buildJournalView(input.vault, allMetricPoints, {
       asOf: addDaysToIsoDate(generatedAt.slice(0, 10), 1),
-      vocabulary: input.personalPatternVocabulary,
     }),
     labResultRows,
     metricGoalProgressRows: buildMetricGoalProgressRows(defaultProjectedVault.entities, allMetricPoints, generatedAt),
     metricRows,
     metricSelectionRows,
-    personalPatterns,
     policy,
     schema: BROWSER_VAULT_REPLICA_SCHEMA,
     searchRows: entities.map(projectBrowserVaultSearchRow),
@@ -190,14 +173,6 @@ export async function hashBrowserVaultReplicaData(
   const stableReplica = {
     ...replica,
     generatedAt: "",
-    ...(replica.personalPatterns
-      ? {
-          personalPatterns: {
-            ...replica.personalPatterns,
-            asOfDate: "",
-          },
-        }
-      : {}),
     source: {
       ...replica.source,
       dataVersion: "pending",

@@ -85,7 +85,6 @@ import {
 } from "./group-usage-funding-study";
 import { EnvironmentProgressStudy } from "./environment-progress-study";
 import { EnvironmentPrintStudy } from "./environment-print-study";
-import { PersonalPatternsStudy } from "./personal-patterns-study";
 import { FoodLabelLabStudy } from "./food-label-lab-study";
 import {
   SCREENSHOT_CATEGORIES,
@@ -337,12 +336,6 @@ export function SectionsContent({
             >
               <TrainingDashboardStudy />
             </div>
-          </StudySection>
-
-          <Separator />
-
-          <StudySection title="Patterns page">
-            <PersonalPatternsStudy />
           </StudySection>
         </>
       ) : null}

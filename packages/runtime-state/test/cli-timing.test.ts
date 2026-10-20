@@ -1502,7 +1502,7 @@ test("synchronous query stage timing preserves values, immediate execution and t
   await clocked(async advance => {
     let report!: CliTiming;
     const failure = new Error("synthetic decode failure");
-    await assert.rejects(withCliTiming(() => timeCliDispatch("wearables patterns", async () => {
+    await assert.rejects(withCliTiming(() => timeCliDispatch("wearables latest", async () => {
       assert.equal(timeCliPhaseSync("query-entity-read", () => { advance(12); return value; }), value);
       timeCliPhaseSync("query-metric-read", () => { advance(34); throw failure; });
     }), captured => { report = captured; }), error => error === failure);
@@ -1525,7 +1525,7 @@ for (const [admission, compatibilityBase, admitted] of [
     `data:text/javascript;base64,${Buffer.from(stripTypeScriptTypes(source)).toString("base64")}`,
   );
   assert.deepEqual(old.CLI_TIMING_PHASES, CLI_TIMING_PHASES.slice(0, admitted), "compatibility base must precede admission");
-  const legacy = sample("wearables patterns", 1_000);
+  const legacy = sample("wearables latest", 1_000);
   assert.deepEqual(old.normalizeCliTiming(legacy), legacy);
   assert.deepEqual(normalizeCliTiming(legacy), legacy);
   for (const phase of CLI_TIMING_PHASES.slice(admitted)) {

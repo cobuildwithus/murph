@@ -233,8 +233,8 @@ Browser-vault dashboard sessions and public-homepage preparation read only the
 published replica ref and workspace version. Refresh orchestration is imported
 only when the existing after-response refresh path needs it. The browser loader
 constructs one query client for the route's requested capability; the combined
-metrics/labs client reuses its metrics client's core access. Patterns reads its
-precomputed report directly. Session reauthorization, exact replica identity,
+metrics/labs client reuses its metrics client's core access. Session
+reauthorization, exact replica identity,
 route-scoped shard retention, and encrypted transport remain unchanged.
 
 ## Browser-vault member-proof rollback floor
@@ -377,7 +377,6 @@ specimens omit the comparator.
 
 The `/settings` Data & privacy export uses that same in-browser browser-vault replica path. It downloads the decrypted `murph.browser-vault-replica` JSON that dashboard pages can already read, rather than making the primary user export the older hosted account metadata bundle.
 
-The Overview Personal Patterns section also uses the encrypted browser-vault replica. The query projection compares repeated activity or intervention days with existing daily wearable sleep and recovery summaries. The browser receives only the derived report. Raw device observations stay outside the replica. The same query result is available to the assistant through `vault-cli wearables patterns`.
 
 ## Core responsibilities
 
@@ -2920,7 +2919,7 @@ runtimes without that port. Keep the compatible Web callback through runner
 convergence and any rollback window.
 
 New managed automation usage records use fixed workflow feature keys (including
-Morning Journal, Personal Patterns, research, and the weekly usage review).
+Morning Journal, research, and the weekly usage review).
 They derive only from the runtime-bound built-in occurrence identity and do not
 change model selection or pricing. Older generic `assistant_cron` or internal
 reply rows remain generic; diagnostics cannot reconstruct their workflow names.

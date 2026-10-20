@@ -3,7 +3,6 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
-  ChartSpline,
   ChevronsUpDown,
   Home,
   Leaf,
@@ -63,12 +62,6 @@ const navItems: {
   icon?: ElementType;
 }[] = [
   { label: "Home", href: "/home", icon: Home },
-  {
-    label: "Patterns",
-    href: "/patterns",
-    matchPrefix: "/patterns",
-    icon: ChartSpline,
-  },
   {
     label: "Environment",
     href: "/environment",

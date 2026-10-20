@@ -57,7 +57,6 @@ import type {
   QueryMealNutritionMetricTotal,
   QueryMealNutritionTotals,
   QueryMealNutritionTotalsResult,
-  QueryPersonalPatternReport,
   QueryRuntimeModule as SharedQueryRuntimeModule,
   QueryWearableSleepPatternSummary,
 } from "../query-runtime.js"
@@ -652,14 +651,6 @@ export interface WearableSleepPatternFiltersResult extends Omit<WearableListFilt
 export interface WearableSleepPatternResult {
   filters: WearableSleepPatternFiltersResult
   summary: WearablePublicSleepPatternSummary
-}
-
-export interface PersonalPatternResult {
-  filters: {
-    date: string | null
-    windowDays: number
-  }
-  report: QueryPersonalPatternReport
 }
 
 export interface VaultShowResult {
@@ -1515,12 +1506,6 @@ export interface QueryServices extends HealthQueryServiceMethods {
       windowDays?: number
     },
   ): Promise<WearableSleepPatternResult>
-  showPersonalPatterns(
-    input: CommandContext & {
-      date?: string
-      windowDays?: number
-    },
-  ): Promise<PersonalPatternResult>
   listWearableSleep(
     input: CommandContext & {
       date?: string

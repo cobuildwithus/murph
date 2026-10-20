@@ -1,4 +1,3 @@
-import { timeCliPhase } from "@murphai/runtime-state/node/cli-timing";
 import type { CanonicalEntity } from "./canonical-entities.ts";
 import type {
   QueryCanonicalEntityFilters,
@@ -137,13 +136,6 @@ export type {
   OverviewWeeklySampleSummary,
   OverviewWeeklyStat,
 } from "./overview.ts";
-export {
-  buildPersonalPatternReport,
-  buildPersonalPatternReportFromWearableBundle,
-  emptyPersonalPatternReport,
-  parsePersonalPatternVocabulary,
-  PERSONAL_PATTERN_VOCABULARY_SLUG,
-} from "./personal-patterns.ts";
 export { buildJournalView, emptyJournalView } from "./journal-view.ts";
 export type {
   JournalDay,
@@ -151,18 +143,6 @@ export type {
   JournalRecord,
   JournalView,
 } from "./journal-view.ts";
-export type {
-  PersonalPatternCell,
-  PersonalPatternClassification,
-  PersonalPatternFactor,
-  PersonalPatternGrade,
-  PersonalPatternIcon,
-  PersonalPatternOutcome,
-  PersonalPatternReport,
-  PersonalPatternStage,
-  PersonalPatternVocabulary,
-  PersonalPatternVocabularyConcept,
-} from "./personal-patterns.ts";
 export {
   buildSharedGroupWeeklyMembers,
 } from "./group-weekly.ts";
@@ -651,14 +631,6 @@ export async function summarizeWearableSleepPatternRuntime(
 ): Promise<WearableSleepPatternSummary> {
   const mod = await import("./query-projection.ts");
   return mod.summarizeWearableSleepPatternRuntime(vaultRoot, filters);
-}
-
-export async function buildPersonalPatternReportRuntime(
-  vaultRoot: string,
-  options: { asOf?: Date | string; windowDays?: number } = {},
-): Promise<import("./personal-patterns.ts").PersonalPatternReport> {
-  const mod = await timeCliPhase("query-projection-load", () => import("./query-projection.ts"));
-  return mod.buildPersonalPatternReportRuntime(vaultRoot, options);
 }
 
 export async function summarizeWearableActivityRuntime(

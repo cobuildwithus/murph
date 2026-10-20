@@ -203,7 +203,7 @@ describe("public loader seams", () => {
       let settled: { value: unknown } | { error: unknown };
       try {
         let value: unknown;
-        await withCliTiming(() => timeCliDispatch("wearables patterns", async () => { value = await run(); }),
+        await withCliTiming(() => timeCliDispatch("wearables latest", async () => { value = await run(); }),
           (timing) => { report = timing; });
         settled = { value };
       } catch (error) {
