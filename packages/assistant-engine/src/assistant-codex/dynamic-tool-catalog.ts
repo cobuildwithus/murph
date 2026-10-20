@@ -8,8 +8,6 @@ import {
   HOSTED_EXECUTION_MEMBER_REPORTED_DAILY_METRIC_KEYS,
 } from '@murphai/hosted-execution'
 import {
-  assistantBasePersonaIdValues,
-  assistantBasePersonaOptions,
   assistantPersonaIdValues,
   assistantTonePreferenceValues,
   assistantVoiceOptionIdValues,
@@ -43,11 +41,11 @@ import {
 } from '@murphai/hosted-execution/runtime-control'
 import {
   HOSTED_ASSISTANT_PRODUCT_MODELS,
-  HOSTED_ASSISTANT_PROVIDERS,
   HOSTED_ASSISTANT_REASONING_EFFORTS,
 } from '@murphai/hosted-execution/assistant-model'
 import { HOSTED_PLAN_USAGE_DIRECT_BILLING_PLAN_CODES } from '@murphai/hosted-execution/plan-usage'
 import { ASSISTANT_AUTHORED_RESPONSE_MEDIA_MAX_ITEMS } from '../assistant/response-media.js'
+import { MAX_ASSISTANT_REPLY_BUBBLES } from '../assistant/reply-bubbles.js'
 import {
   HOSTED_VAULT_SHARE_ACTIVITY_DISTANCE_PROJECTION_KIND,
   HOSTED_VAULT_SHARE_ACTIVITY_DISTANCE_SELECTOR_ACTIVITY_KINDS,
@@ -55,6 +53,7 @@ import {
   HOSTED_VAULT_SHARE_ACTIVITY_MINUTES_SELECTOR_ACTIVITY_KINDS,
   HOSTED_VAULT_SHARE_ACTIVITY_SESSION_COUNT_PROJECTION_KIND,
   HOSTED_VAULT_SHARE_ACTIVITY_SESSION_COUNT_SELECTOR_ACTIVITY_KINDS,
+  HOSTED_VAULT_SHARE_DAILY_METRIC_PROJECTION_SPECS,
   HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS,
   HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES,
 } from '@murphai/hosted-execution/vault-share'
@@ -201,7 +200,7 @@ export const MURPH_ATTACH_RESPONSE_MEDIA_TOOL = {
   namespace: 'murph',
   name: 'attach_response_media',
   description:
-    `Attach up to ${ASSISTANT_AUTHORED_RESPONSE_MEDIA_MAX_ITEMS} images to the current final assistant response. Accept intentionally public catalog image URLs or an exact vault_image descriptor returned by a trusted Murph command. Never invent or modify a private descriptor. Replaces the current response media batch for this turn only. It does not send directly. For charts, the final reply must include one brief numeric takeaway from the source data, such as the start/end values or range; do not list every plotted value.`,
+    `Attach up to ${ASSISTANT_AUTHORED_RESPONSE_MEDIA_MAX_ITEMS} images to the current final assistant response. Accept intentionally public catalog image URLs or an exact vault_image descriptor returned by a trusted Murph command. Never invent or modify a private descriptor. Replaces the current response media batch for this turn only. It does not send directly. When the final reply uses \`---\` bubbles, set each image's bubble to the bubble it illustrates; each bubble is sent with its own images. Images without a bubble follow the final bubble. For charts, the final reply must include one brief numeric takeaway from the source data, such as the start/end values or range; do not list every plotted value.`,
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -238,6 +237,13 @@ export const MURPH_ATTACH_RESPONSE_MEDIA_TOOL = {
                     { type: 'null' },
                   ],
                 },
+                bubble: {
+                  type: 'integer',
+                  minimum: 1,
+                  maximum: MAX_ASSISTANT_REPLY_BUBBLES,
+                  description:
+                    '1-based `---` reply bubble this image follows. Omit to send it with the final bubble.',
+                },
               },
               required: ['url'],
             },
@@ -273,6 +279,13 @@ export const MURPH_ATTACH_RESPONSE_MEDIA_TOOL = {
                     { type: 'null' },
                   ],
                 },
+                bubble: {
+                  type: 'integer',
+                  minimum: 1,
+                  maximum: MAX_ASSISTANT_REPLY_BUBBLES,
+                  description:
+                    '1-based `---` reply bubble this image follows. Omit to send it with the final bubble.',
+                },
               },
               required: [
                 'kind',
@@ -302,7 +315,7 @@ export const MURPH_ATTACH_RESPONSE_CARD_TOOL = {
     'For a clear request-relevant suitability outcome, explicitly name the requested target or metric. For a tracked workout, attempt the complete verified card and let input validation decide whether its actual encoded envelope fits; never refuse from an estimated exercise or set count or ask the member to simplify saved workout data. If validation rejects the complete envelope, use the full deterministic text recovery. ' +
     `For generic compact_table only (rowHeader/columns/rows, not structured workouts): card.rows has at most ${compactTableCardV1Bounds.rows} rows, card.columns at most ${compactTableCardV1Bounds.columns} columns, and each card.rows[].values[] string at most ${compactTableCardV1Bounds.cellValue} characters. Before calling, use concise labels and cells only when they preserve all meaning; if required rows or exact wording cannot fit, give complete ordinary text and no card. Never omit or invent rows, merge explicitly separate items, or truncate meaning to fit. After a validation error, retry only with a fixable field corrected; never repeat identical invalid arguments. If content cannot fit, use complete text. Never claim attachment without success. ` +
     'Attach one private-direct response card when the current accepted member message or the saved instructions for the exact scheduled automation occurrence request a structured answer that the card alone can represent, after a verified private meal mutation (including an ordinary reply to a scheduled meal check-in), during managed meal closeout, for the verified initial card after starting or exact-reading one canonical workout, or for an unambiguous update to its established workout card, including the just-completed final snapshot. Occurrence authority alone is not card intent. Except for the fixed first totals-only introduction described above, the card replaces the entire final response: attach it only when the card alone completely satisfies the current request; answer compound requests with complete ordinary text and no card. For routine daily_nutrition, including an authorized meal estimate or explicit manual app submission, use one workflow and end with one card or concise fallback. Never narrate safety, totals, estimation, or target resolution. ' +
-    'Before every daily_nutrition card or explicit target-proposal decision, obtain fresh canonical totals with vault-cli meal totals --from <date> --to <same-date> --resolve-goals --format json, or reuse dailyTotals.data from a successful same-date meal add/import-json --with-daily-totals when dailyTotals.status is available. The combined save performs this exact read after writing; no separate show or totals confirmation is needed. Use the exact requested localDate interactively or the engine-supplied occurrence local date for scheduled closeout, never wall-clock today. This fresh canonical read owns complete active-target discovery, dates, identity, units, comparators, conflicts, the calorie floor, and legacy display compatibility. Copy exact totals { total, mealCount } and resolved goalContext.targets.*.target values; never calculate totals, reinterpret raw Goal bounds, or repeat goal list/show to resolve the active bundle. goalContext.status ready permits the unchanged all-five accepted goal card; missing permits totals-only with all five goals null, even with a subset of compatible targets. Both require suitability, intent and completeness. A meal reply (including a reply to an ordinary scheduled check-in), daily summary or numeric-card request never derives, proposes, accepts, activates or mutates targets; conflict, incompatible, or capacity means ordinary text, no card, and no Goal or measurement mutation. Never derive from or replace unresolved targets. A historical compatibility bundle is read-only display authority, never authority to derive or mutate targets. Keep the all-status managed-proposal lookup separate; it cannot substitute for this read. Rerun this same-date read after any meal or Goal mutation and before the card. Otherwise one successful read in this turn is sufficient: do not repeat it after read-only suitability checks or skill reads. During private meal logging or estimation, including an explicit manual app submission, and daily-card or daily-summary requests, if any metric mealCount is below the top-level mealCount, follow food-journal selected-date incomplete-meal recovery before finishing. Inspect and estimate the existing meals from supported evidence or ask one focused follow-up for essential missing identity or amount; no separate daily-card request is required. Never stop at a missing-estimate refusal before trying recovery. Use accepted current equivalence or matching saved ingredient and portion evidence, not an informal name alone. If recovery still needs identity or amount, ask one compact question and stop without a card; after the answer, edit and read back the exact existing meal and rerun fresh totals. Do not ask merely to enable numbers when numeric presentation is suppressed. A partial card is only for an explicit request to see the currently available partial data after the limitation is clear, not the normal interactive closeout. Scheduled closeout keeps automatic-meal-capture\'s existing question authority. New authoring uses V2 with fiber and either all five goals null (totals-only) or all five accepted snapshots (goal-aware); mixed authoring is invalid. Historical nullable V2 and V1 replay remain supported. Totals-only says estimated/logged so far with date and logged meal coverage, without target judgments. Complete stored records do not prove everything eaten was logged. ' +
+    'Before every daily_nutrition card or explicit target-proposal decision, obtain fresh canonical totals with vault-cli meal totals --from <date> --to <same-date> --resolve-goals --format json, or reuse dailyTotals.data from a successful same-date meal add/import-json --with-daily-totals when dailyTotals.status is available. The combined save performs this exact read after writing; no separate show or totals confirmation is needed. Its non-null dailyTotals.totalsOnlyCard is the complete no-goals card for that day; attach it unchanged. Use the exact requested localDate interactively or the engine-supplied occurrence local date for scheduled closeout, never wall-clock today. This fresh canonical read owns complete active-target discovery, dates, identity, units, comparators, conflicts, the calorie floor, and legacy display compatibility. Copy exact totals { total, mealCount } and resolved goalContext.targets.*.target values; never calculate totals, reinterpret raw Goal bounds, or repeat goal list/show to resolve the active bundle. goalContext.status ready permits the unchanged all-five accepted goal card; missing permits totals-only with all five goals null, even with a subset of compatible targets. Both require suitability, intent and completeness. A meal reply (including a reply to an ordinary scheduled check-in), daily summary or numeric-card request never derives, proposes, accepts, activates or mutates targets; conflict, incompatible, or capacity means ordinary text, no card, and no Goal or measurement mutation. Never derive from or replace unresolved targets. A historical compatibility bundle is read-only display authority, never authority to derive or mutate targets. Keep the all-status managed-proposal lookup separate; it cannot substitute for this read. Rerun this same-date read after any meal or Goal mutation and before the card. Otherwise one successful read in this turn is sufficient: do not repeat it after read-only suitability checks or skill reads. During private meal logging or estimation, including an explicit manual app submission, and daily-card or daily-summary requests, if any metric mealCount is below the top-level mealCount, follow food-journal selected-date incomplete-meal recovery before finishing. Inspect and estimate the existing meals from supported evidence or ask one focused follow-up for essential missing identity or amount; no separate daily-card request is required. Never stop at a missing-estimate refusal before trying recovery. Use accepted current equivalence or matching saved ingredient and portion evidence, not an informal name alone. If recovery still needs identity or amount, ask one compact question and stop without a card; after the answer, edit and read back the exact existing meal and rerun fresh totals. Do not ask merely to enable numbers when numeric presentation is suppressed. A partial card is only for an explicit request to see the currently available partial data after the limitation is clear, not the normal interactive closeout. Scheduled closeout keeps automatic-meal-capture\'s existing question authority. New authoring uses V2 with fiber and either all five goals null (totals-only) or all five accepted snapshots (goal-aware); mixed authoring is invalid. Historical nullable V2 and V1 replay remain supported. Totals-only text gives the date and the logged totals so far with the meal count, such as "3 meals so far", without target judgments. ' +
     'A historical automatic capture cannot authorize a scheduled card. Author only dietary-calories. If a daily_nutrition call is rejected for malformed arguments, use the returned validation paths to correct only invalid fields and retry this tool once with the same verified totals and targets; if that retry fails, use the truthful text fallback without narrating tool or schema mechanics. Only explicit target-setting authorizes the existing paused canonical proposal, not activation or use. Neither card requests nor scheduled work authorize proposals. For explicit target-setting with a missing target, follow nutrition-strategy/references/daily-nutrition-card-goals.md: hold applicable, compatible exact point targets fixed, derive missing macros from residual calories, and require every AMDR plus a 50 kcal energy tolerance before any Goal write; an infeasible bundle means ordinary text and no mutation. Save one paused canonical proposal, explain its values, reasoning, and effective date in ordinary text with no card, and activate it only after member acceptance. On first creation, set Goal window.startAt explicitly: use a member-requested effective date when present, otherwise the selected card localDate for a dated card request, otherwise the engine-supplied current vault-local date; never rely on the write-day default. Preserve that window on every later edit, activation, or card request and never silently rebase it to another card date. Any derived target addition or change atomically pauses the complete managed bundle until acceptance. A scheduled closeout never asks for target inputs or creates, changes, repeats or activates provisional targets. ' +
     'When explicit target-setting included a card request, its next unambiguous acceptance may complete that pending request only after reapplying suitability, activation/readback and fresh same-date totals; corrections, declines, ambiguous replies, target-setting-only requests and compound requests remain text-only. An ordinary summary leaves paused/abandoned Goals unchanged and never repeats a proposal. Explicit active targets win metric by metric; conflicts, thresholds, ranges or unsafe target numbers remain ordinary text, never substitute target authority. Freeze each exact point target and Murph\'s context-aware status without a universal threshold. Use compact_table for an explicit table or structured-tracker request, a structured plan or schedule that the table alone can fully represent within its bounds, that verified initial live-workout card, or an unambiguous update to the same exact open or just-finished workout; with multiple plausible workouts, do not infer authority and ask one narrow question. Never invent or silently truncate values. For tracked workouts, first update or resolve the canonical workout and re-read it successfully. A structured workout card has exactly kind compact_table, version 1, title, subtitle null, footer, tracking with kind workout plus the exact evt_<ULID> entityId, and workout; never add rowHeader, columns, or rows. The runtime records tracking snapshotAt. Use only when numerical output is permitted. Runtime renders durable text and fallbacks, so do not repeat card values in final send_message. This tool does not send and cannot combine with response media.',
   inputSchema: {
@@ -630,7 +643,7 @@ export const MURPH_PERSONALIZATION_TOOL = {
   namespace: 'murph',
   name: 'personalization',
   description:
-    'For a conversation update, pass message_ref from the accepted message requesting these changes; never borrow a later message\'s ref. Split changes requested by different messages into separate calls. Omit it for scheduled actions. For updates, send only the fields the user wants changed; omit unchanged fields. For an exact tone-only or voice-only request, call update once without read; its result reports the saved value. Send both personas only when changing that pair. Read the current hosted conversation runtime\'s effective Murph main personality, optional supporting personality, tone, voice, and model context, or atomically update those fields. Persona changes require current accepted user input plus both mainPersona and supportingPersona; use read first when either current value must be preserved, and pass null to remove support. Exact scheduled automation occurrences may update tone and voice but never personas. Reply casing maps to the existing tone field: capitalize, standard capitalization, or sentence case means formal; lowercase means casual. Confirm casing as sentence case or lowercase in the reply. Treat a request about how Murph should keep writing or show up as an update rather than an unsupported setting; a one-reply formatting request does not persist. In a private chat this is the member\'s Murph; in a group chat this is the synthetic room Murph and never a participant\'s private settings. Use murph.assistant_configuration for model, provider, or reasoning changes only when that separate tool is available.',
+    'For a conversation update, pass message_ref from the accepted message requesting these changes; never borrow a later message\'s ref. Split changes requested by different messages into separate calls. Omit it for scheduled actions. For updates, send only the fields the user wants changed; omit unchanged fields. For an exact tone-only or voice-only request, call update once without read; its result reports the saved value. Read the current hosted conversation runtime\'s effective Murph tone, voice, and model context, or atomically update those fields. Reply casing maps to the existing tone field: capitalize, standard capitalization, or sentence case means formal; lowercase means casual. Confirm casing as sentence case or lowercase in the reply. Treat a request about how Murph should keep writing or show up as an update rather than an unsupported setting; a one-reply formatting request does not persist. In a private chat this is the member\'s Murph; in a group chat this is the synthetic room Murph and never a participant\'s private settings. Use murph.assistant_configuration for model, provider, or reasoning changes only when that separate tool is available.',
   inputSchema: {
     oneOf: [
       {
@@ -656,21 +669,6 @@ export const MURPH_PERSONALIZATION_TOOL = {
             type: 'string',
             pattern: ASSISTANT_ACCEPTED_MESSAGE_REF_PATTERN,
           },
-          mainPersona: {
-            type: 'string',
-            enum: assistantBasePersonaIdValues,
-            description: assistantBasePersonaOptions
-              .map((option) => `${option.label}=${option.id}`)
-              .join(', '),
-          },
-          supportingPersona: {
-            anyOf: [
-              { type: 'string', enum: assistantBasePersonaIdValues },
-              { type: 'null' },
-            ],
-            description:
-              'Supporting personality paired with mainPersona; null removes support. It must differ from mainPersona.',
-          },
           tone: {
             type: 'string',
             enum: assistantTonePreferenceValues,
@@ -688,10 +686,7 @@ export const MURPH_PERSONALIZATION_TOOL = {
         // Keep properties here so generated tool arguments stay concrete.
         // Source metadata alone cannot make an update nonempty.
         not: { required: ['message_ref'], maxProperties: 2 },
-        dependentRequired: {
-          mainPersona: ['supportingPersona'],
-          supportingPersona: ['mainPersona'],
-        },
+
       },
     ],
   },
@@ -701,7 +696,7 @@ export const MURPH_ASSISTANT_CONFIGURATION_TOOL = {
   namespace: 'murph',
   name: 'assistant_configuration',
   description:
-    'Read the current hosted turn model, provider, and reasoning effort plus the choices available for the next turn, or directly save an explicit user-requested change. OpenAI and Venice are the supported core-reply providers when listed as available; specialized tools may still use their own managed providers. Internally, Luna is the most usage-efficient model, Terra is the default, Sol and Astra require an active paid Edge or Max plan, and Astra requires OpenAI. Do not assume the member knows model names or introduce them unless the member asks; otherwise describe the usage-saving option as “a less capable model that uses less AI usage.” The lowest supported reasoning effort is low; these hosted models do not support none. Use action="read" whenever configuration facts are needed. Use action="update" only when the current user-sourced turn explicitly asks for the exact change. Never switch models, providers, or reasoning automatically because usage is low. Do not claim a change is saved unless the result says updated or unchanged. A saved update does not change the running turn and takes effect on the next turn.',
+    'Read the current hosted turn OpenAI model and reasoning effort plus the choices available for the next turn, or directly save an explicit user-requested change. Internally, Luna is the most usage-efficient model and GPT-6.1 Sol is the default; Astra and GPT-5.6 Sol require an active paid Edge or Max plan. Do not assume the member knows model names or introduce them unless the member asks; otherwise describe the usage-saving option as “a less capable model that uses less AI usage.” The lowest supported reasoning effort is low; these hosted models do not support none. Use action="read" whenever configuration facts are needed. Use action="update" only when the current user-sourced turn explicitly asks for the exact change. Never switch models or reasoning automatically because usage is low. Do not claim a change is saved unless the result says updated or unchanged. A saved update does not change the running turn and takes effect on the next turn.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -714,11 +709,6 @@ export const MURPH_ASSISTANT_CONFIGURATION_TOOL = {
         type: 'string',
         enum: [...HOSTED_ASSISTANT_PRODUCT_MODELS],
         description: 'Optional next-turn model for action="update".',
-      },
-      provider: {
-        type: 'string',
-        enum: [...HOSTED_ASSISTANT_PROVIDERS],
-        description: 'Optional next-turn core-reply provider for action="update".',
       },
       reasoningEffort: {
         type: 'string',
@@ -734,7 +724,7 @@ export const MURPH_GROUP_ASSISTANT_CONFIGURATION_TOOL = {
   namespace: 'murph',
   name: 'assistant_configuration',
   description:
-    'Read the current group room model and the choices available for the next turn, or save an explicit current-room request to change it. This changes only the synthetic Murph instance for this room; it never reads or changes any participant\'s private model, provider, reasoning, account, or billing settings. Group rooms default to Sol, and Luna, Terra, or Sol may be selected for the room. Use action="read" whenever model facts are needed. Use action="update" only when the current user-sourced group turn explicitly asks for the exact model. Never switch models automatically because usage is low. Do not claim a change is saved unless the result says updated or unchanged. A saved update does not change the running turn and takes effect on the next turn.',
+    'Read the current group room model and the choices available for the next turn, or save an explicit current-room request to change it. This changes only the synthetic Murph instance for this room; it never reads or changes any participant\'s private model, reasoning, account, or billing settings. Group rooms default to Sol, and Luna or Sol may be selected for the room. Use action="read" whenever model facts are needed. Use action="update" only when the current user-sourced group turn explicitly asks for the exact model. Never switch models automatically because usage is low. Do not claim a change is saved unless the result says updated or unchanged. A saved update does not change the running turn and takes effect on the next turn.',
   inputSchema: {
     oneOf: [
       {
@@ -873,7 +863,7 @@ const GROUP_SHARED_HISTORY_READ_PROPERTIES = {
       fromDate: { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$' },
       throughDate: { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$' },
     },
-    description: 'read_shared only: at most 90 member-local civil dates, one current participant and one existing health metric scope; no freshness or group_email. Follow dateCoverage.nextFromDate with the same throughDate until exhausted. Every page retains complete source/date observations. For requested history, use the existing metric scope: every active metric grant already covers this window. No history permission or settings visit is needed. not_granted means the metric itself is unshared and ordinary metric consent is required. This reads available canonical data, never provider backfill. State requested range and actually available dates in trends; do not treat absent dates as zeros or missing permission.' },
+    description: 'read_shared only: at most 90 member-local civil dates, one current participant and one existing health metric scope; no freshness or group_email. Follow dateCoverage.nextFromDate with the same throughDate until exhausted. Every page retains complete source/date observations. For requested history, use the existing metric scope: every active metric grant already covers this window. No history permission or settings visit is needed. not_granted means the metric itself is unshared and ordinary metric consent is required. This reads available canonical data, never provider backfill. Let trend counts carry date coverage, such as "62 of 90 days"; absent dates are never zeros or missing permission.' },
 } as const
 
 /**
@@ -885,7 +875,7 @@ export const MURPH_GROUP_SHARED_READ_TOOL = {
   namespace: 'murph',
   name: 'group',
   description:
-    'Read 1–3 host-bound scopes (7 days; history: participantId, ≤90 dates, one metric). status="partial" means omittedParticipantIds have omitted rows; result is incomplete, not proof of departure, scores, diagnosis or permissions. companionLastContactAt is app contact, possibly background, not proof of sync, closure, Health access or missing-data cause.',
+    'Read 1–3 host-bound scopes (7 days; history: participantId, ≤90 dates, one metric). status="partial" means omittedParticipantIds were not loaded; infer nothing else about them. companionLastContactAt is only the last app-contact time, possibly background.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -912,12 +902,17 @@ const GROUP_SHARED_FRESHNESS_SCHEMA = {
   minItems: 1,
   maxItems: 21,
   uniqueItems: true,
-  description: 'Optional only for ordinary read_shared. For a dated wearable update, supply each required projectionScopeKey and YYYY-MM-DD date. Missing consented dates trigger a bounded sync request and fresh consent-aware reread. checkedAt is a shared-data check, not a device-upload time. Does not guarantee new provider data.',
+  description: 'Optional only for ordinary read_shared. For a dated wearable update, supply only requested wearable projectionScopeKeys from projectionScopes, paired with each required YYYY-MM-DD calendar date. Missing consented dates trigger a bounded sync request and fresh consent-aware reread. checkedAt is the last shared-data check time.',
   items: {
     type: 'object',
     additionalProperties: false,
     properties: {
-      projectionScopeKey: { type: 'string', minLength: 1, maxLength: 191 },
+      projectionScopeKey: {
+        type: 'string', minLength: 1, maxLength: 191,
+        enum: HOSTED_VAULT_SHARE_DAILY_METRIC_PROJECTION_SPECS
+          .filter((spec) => spec.source.kind === 'metric-series')
+          .map((spec) => spec.projectionKind),
+      },
       date: { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$' },
     },
     required: ['projectionScopeKey', 'date'],
@@ -1224,7 +1219,7 @@ export const MURPH_GROUP_TOOL_PROPERTIES = {
         maxItems: HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES.length,
         items: GROUP_VAULT_SHARE_PROJECTION_SCOPE_SCHEMA,
         description:
-          'Ordinary read_shared returns one to three seven-day consent-aware group projections; weekly standings and newsletters still use their requested dates, not a 90-day average. For longer trends, use one existing health metric scope with participantId and history dates, consume every dateCoverage page, and pass exact observed values to generate_image without storing a group history copy. All active health grants cover 90 rolling member-local dates, including existing grants; never ask to expand history permission. not_granted means the metric is unshared and requires ordinary metric consent. State requested versus actually available date coverage; sparse or pending history is not missing permission. For read_shared, including additive exact-grant activation time when available. For read_shared with audience="group_email", the exact bounded projections allowed into this email composition; the trusted host intersects them with live recipient grants. For offer_access, supply only the exact permissions requested by the person; existing sleep timing or connection-status permission does not include sleep duration. Show the consent surface immediately for a direct request or accepted offer, with no preliminary confirmation. Omitting projectionScopes requests every selectable permission and is not appropriate for adding one missing scope. Existing membership and other grants remain unchanged. The trusted host owns the exact consent copy and actual scope snapshot and uses a handled native consent path or a first-party link. Fresh native results include exact responseHandling; follow it.',
+          'Ordinary read_shared returns one to three seven-day consent-aware group projections; weekly standings and newsletters still use their requested dates, not a 90-day average. For longer trends, use one existing health metric scope with participantId and history dates, consume every dateCoverage page, and pass exact observed values to generate_image without storing a group history copy. All active health grants cover 90 rolling member-local dates, including existing grants; never ask to expand history permission. not_granted means the metric is unshared and requires ordinary metric consent. Let reported counts carry date coverage; sparse or pending history is not missing permission. For read_shared, including additive exact-grant activation time when available. For read_shared with audience="group_email", the exact bounded projections allowed into this email composition; the trusted host intersects them with live recipient grants. For offer_access, supply only the exact permissions requested by the person; existing sleep timing or connection-status permission does not include sleep duration. Show the consent surface immediately for a direct request or accepted offer, with no preliminary confirmation. Omitting projectionScopes requests every selectable permission and is not appropriate for adding one missing scope. Existing membership and other grants remain unchanged. The trusted host owns the exact consent copy and actual scope snapshot and uses a handled native consent path or a first-party link. Fresh native results include exact responseHandling; follow it.',
       },
       freshness: GROUP_SHARED_FRESHNESS_SCHEMA,
       audience: {
@@ -1482,7 +1477,7 @@ export const MURPH_GROUP_CONSULT_TOOL = {
 export const MURPH_GROUP_DATA_TOOL = buildMurphGroupFamilyTool({
   name: 'group_data',
   description:
-    'Read shared data, record sender metrics, or manage disclosure/access. read_shared may include companionLastContactAt for members sharing wearable data with an active Apple Health source. It means last app contact, including opportunistic background contact; never infer app closure, Health permission denial, sync success, or the cause of missing steps from its age. Missing means unavailable, not closed.',
+    'Read shared data, record sender metrics, or manage disclosure/access. read_shared may include companionLastContactAt for members sharing wearable data with an active Apple Health source. It means last app contact, including opportunistic background contact; never infer app closure, Health permission denial, sync success, or the cause of missing steps from its age. If absent, omit app state.',
 })
 
 const MURPH_GROUP_DATA_EAGER_TOOL = {

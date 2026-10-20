@@ -68,6 +68,10 @@ const mocks = vi.hoisted(() => {
     syncDurableConnectionMetadata: vi.fn(),
     syncDurableConnectionState: vi.fn(),
     getDirtyConnection: vi.fn(),
+    advanceDeferredDirtyConnectionWakeTx: vi.fn(),
+    clearDeferredDirtyConnectionWake: vi.fn(),
+    deferDirtyConnectionWakeTx: vi.fn(),
+    readDueDeferredDirtyConnectionWake: vi.fn(),
     prepareDirtyConnectionUpsert: vi.fn(),
     shouldRequestWakeForDirtyConnectionUpsert: vi.fn(),
     upsertDirtyConnection: vi.fn(),
@@ -623,6 +627,10 @@ vi.mock("@/src/lib/device-sync/prisma-store", () => ({
     syncDurableConnectionState = mocks.syncDurableConnectionState;
     syncDurableConnectionMetadata = mocks.syncDurableConnectionMetadata;
     prepareDirtyConnectionUpsert = mocks.prepareDirtyConnectionUpsert;
+    advanceDeferredDirtyConnectionWakeTx = mocks.advanceDeferredDirtyConnectionWakeTx;
+    clearDeferredDirtyConnectionWake = mocks.clearDeferredDirtyConnectionWake;
+    deferDirtyConnectionWakeTx = mocks.deferDirtyConnectionWakeTx;
+    readDueDeferredDirtyConnectionWake = mocks.readDueDeferredDirtyConnectionWake;
     shouldRequestWakeForDirtyConnectionUpsert =
       mocks.shouldRequestWakeForDirtyConnectionUpsert;
     upsertDirtyConnection = mocks.upsertDirtyConnection;
@@ -680,6 +688,8 @@ import {
   cleanupRejectedHostedDeviceSyncConnectionSource,
   handleHostedDeviceSyncConnectionEstablished,
   handleHostedDeviceSyncWebhookAccepted,
+  isHostedJunctionRoutineDailyTotalWebhook,
+  releaseHostedDeviceSyncDeferredDirtyWake,
   persistHostedDeviceSyncCompanionMetadata,
 } from "@/src/lib/device-sync/wake-service";
 import { buildHostedDeviceSyncWakeEventId } from "@/src/lib/device-sync/wake";
@@ -2647,13 +2657,322 @@ describe("hosted device-sync wakes", () => {
     expect(mocks.materializeStoredConnectionAccount).not.toHaveBeenCalled();
     expect(mocks.registryGet).not.toHaveBeenCalled();
     expect(mocks.upsertDirtyConnection).toHaveBeenCalledOnce();
-    expect(mocks.appendHostedMailboxEnvelope).toHaveBeenCalledOnce();
+    // Routine daily heart rate batches behind the deferred dirty wake.
+    expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
+    expect(mocks.deferDirtyConnectionWakeTx).toHaveBeenCalledOnce();
     expect(mocks.completeWebhookTrace).toHaveBeenCalledWith(
       "junction",
       "trace_established_source",
       "claim-token",
       mocks.prismaTx,
     );
+  });
+
+  describe("routine Junction daily-total wake deferral", () => {
+    async function admitJunctionDailyWebhook(eventType: string) {
+      const source = buildHostedConnectionSource("dsc_123", "garmin", {
+        id: "dcs_legacy_garmin",
+        sourceInstanceKey: "legacy:dsc_123:garmin",
+        status: "connected",
+      });
+      mocks.prismaTx.deviceConnection.findUnique.mockResolvedValue(
+        buildWebhookAdmissionRecord({ provider: "junction" }),
+      );
+      mocks.resolveConnectionSourceAdmissionCandidate.mockResolvedValue(
+        buildHostedConnectionSourceAdmissionCandidate(source),
+      );
+      await handleHostedDeviceSyncWebhookAccepted({
+        account: {
+          connectedAt: "2026-03-26T12:00:00.000Z",
+          id: "dsc_123",
+          provider: "junction",
+        },
+        claimToken: "claim-token",
+        now: "2026-03-26T12:00:00.000Z",
+        ownerId: "user-123",
+        processingAttemptedAt: "2026-03-26T12:00:00.000Z",
+        registry: {
+          get: mocks.registryGet,
+          list: mocks.registryList,
+          register: vi.fn(),
+        },
+        sourceAdmissionDeferred: false,
+        store: new PrismaDeviceSyncControlPlaneStore({ prisma: getPrisma() }),
+        traceId: "trace_routine",
+        webhook: {
+          acceptanceMode: "level_dirty_hint",
+          eventType,
+          jobs: [],
+          sourceProviderSlug: "garmin",
+        },
+      });
+    }
+
+    function markConnectionAlreadyDirty() {
+      mocks.readPendingDirtyConnectionSnapshot.mockResolvedValue({
+        dirtyRevision: 2n,
+        processedRevision: 1n,
+      });
+      mocks.shouldRequestWakeForDirtyConnectionUpsert.mockResolvedValue(false);
+      mocks.upsertDirtyConnection.mockResolvedValue({
+        dirty: { dirtyRevision: 2n },
+        shouldRequestWake: false,
+      });
+    }
+
+    it("defers a routine clean-to-dirty transition for fifteen minutes from receipt", async () => {
+      await admitJunctionDailyWebhook("daily.data.steps.updated");
+
+      expect(mocks.deferDirtyConnectionWakeTx).toHaveBeenCalledWith({
+        connectionId: "dsc_123",
+        deferredUntil: new Date("2026-03-26T12:15:00.000Z"),
+        tx: mocks.prismaTx,
+        userId: "user-123",
+      });
+      expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
+      expect(mocks.signalHostedDeviceSyncMailboxRuntime).not.toHaveBeenCalled();
+      expect(mocks.advanceDeferredDirtyConnectionWakeTx).not.toHaveBeenCalled();
+      expect(mocks.createSignal).toHaveBeenCalledWith(expect.objectContaining({
+        eventType: "daily.data.steps.updated",
+        kind: "webhook_hint",
+      }));
+    });
+
+    it("keeps the immediate wake for urgent sleep and workout transitions", async () => {
+      await admitJunctionDailyWebhook("daily.data.sleep.created");
+
+      expect(mocks.deferDirtyConnectionWakeTx).not.toHaveBeenCalled();
+      expect(mocks.appendHostedMailboxEnvelope).toHaveBeenCalledOnce();
+      expect(mocks.appendHostedMailboxEnvelope).toHaveBeenCalledWith(expect.objectContaining({
+        envelope: expect.objectContaining({
+          hint: expect.objectContaining({
+            eventType: "daily.data.sleep.created",
+            reason: "webhook_dirty_transition",
+          }),
+          kind: "device-sync.wake",
+        }),
+      }));
+    });
+
+    it("makes a pending routine batch due when an urgent hint arrives", async () => {
+      markConnectionAlreadyDirty();
+      await admitJunctionDailyWebhook("daily.data.workouts.created");
+
+      expect(mocks.advanceDeferredDirtyConnectionWakeTx).toHaveBeenCalledWith({
+        connectionId: "dsc_123",
+        dueAt: new Date("2026-03-26T12:00:00.000Z"),
+        tx: mocks.prismaTx,
+        userId: "user-123",
+      });
+      expect(mocks.deferDirtyConnectionWakeTx).not.toHaveBeenCalled();
+      expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
+    });
+
+    it("leaves an already-dirty routine batch unchanged", async () => {
+      markConnectionAlreadyDirty();
+      await admitJunctionDailyWebhook("daily.data.heartrate.updated");
+
+      expect(mocks.deferDirtyConnectionWakeTx).not.toHaveBeenCalled();
+      expect(mocks.advanceDeferredDirtyConnectionWakeTx).not.toHaveBeenCalled();
+      expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
+    });
+
+    describe("release", () => {
+      const dueAt = new Date("2026-03-26T12:15:00.000Z");
+      const release = () => releaseHostedDeviceSyncDeferredDirtyWake({
+        connectionId: "dsc_123",
+        now: dueAt,
+        userId: "user-123",
+      });
+      const deferredFacts = (overrides: Record<string, unknown> = {}) => ({
+        connectedAt: new Date("2026-03-26T12:00:00.000Z"),
+        connectionStatus: "active",
+        dirtyRevision: 3n,
+        latestDirtyAt: new Date("2026-03-26T12:09:00.000Z"),
+        latestEventType: "daily.data.steps.updated",
+        latestResourceCategory: "timeseries",
+        processedRevision: 1n,
+        provider: "junction",
+        ...overrides,
+      });
+
+      it("appends the ordinary dirty wake, clears the deadline in that transaction, then signals", async () => {
+        mocks.readDueDeferredDirtyConnectionWake.mockResolvedValue(deferredFacts());
+
+        await expect(release()).resolves.toEqual({ outcome: "released", wakeInserted: true });
+
+        expect(mocks.readDueDeferredDirtyConnectionWake).toHaveBeenLastCalledWith({
+          connectionId: "dsc_123",
+          dueAt,
+          tx: mocks.prismaTx,
+          userId: "user-123",
+        });
+        expect(mocks.clearDeferredDirtyConnectionWake).toHaveBeenCalledOnce();
+        expect(mocks.clearDeferredDirtyConnectionWake).toHaveBeenCalledWith({
+          connectionId: "dsc_123",
+          dirtyRevision: 3n,
+          dueAt,
+          tx: mocks.prismaTx,
+          userId: "user-123",
+        });
+        expect(mocks.appendHostedMailboxEnvelope).toHaveBeenCalledWith(expect.objectContaining({
+          envelope: expect.objectContaining({
+            connectionId: "dsc_123",
+            eventId: "device-sync:dirty:v1:user-123:junction:dsc_123:2026-03-26T12:00:00.000Z:3",
+            expectedConnectedAt: "2026-03-26T12:00:00.000Z",
+            hint: expect.objectContaining({
+              eventType: "daily.data.steps.updated",
+              occurredAt: "2026-03-26T12:09:00.000Z",
+              reason: "webhook_dirty_transition",
+              resourceCategory: "timeseries",
+            }),
+            kind: "device-sync.wake",
+            reason: "webhook_hint",
+          }),
+          tx: mocks.prismaTx,
+        }));
+        expect(mocks.signalHostedDeviceSyncMailboxRuntime).toHaveBeenCalledOnce();
+      });
+
+      it.each([
+        ["already processed", { processedRevision: 3n }],
+        ["disconnected", { connectionStatus: "disconnected" }],
+      ])("only clears a %s batch", async (_label, overrides) => {
+        mocks.readDueDeferredDirtyConnectionWake.mockResolvedValue(deferredFacts(overrides));
+
+        await expect(release()).resolves.toEqual({ outcome: "cleared", reason: "superseded" });
+
+        expect(mocks.clearDeferredDirtyConnectionWake).toHaveBeenCalledWith({
+          connectionId: "dsc_123",
+          dirtyRevision: 3n,
+          dueAt,
+          userId: "user-123",
+        });
+        expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
+        expect(mocks.signalHostedDeviceSyncMailboxRuntime).not.toHaveBeenCalled();
+      });
+
+      it("writes nothing when another owner already cleared the deadline", async () => {
+        // A newer batch admitted after this observation must keep its deadline.
+        mocks.readDueDeferredDirtyConnectionWake.mockResolvedValue(null);
+
+        await expect(release()).resolves.toEqual({ outcome: "cleared", reason: "superseded" });
+
+        expect(mocks.clearDeferredDirtyConnectionWake).not.toHaveBeenCalled();
+        expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
+      });
+
+      it("clears only the observed batch without appending after consent withdrawal", async () => {
+        mocks.readDueDeferredDirtyConnectionWake.mockResolvedValue(deferredFacts());
+        mocks.prisma.hostedConsentGrant.findUnique.mockResolvedValueOnce({
+          scope: "launch.health-data",
+          status: "revoked",
+        });
+
+        await expect(release()).resolves.toEqual({ outcome: "cleared", reason: "consent_withdrawn" });
+
+        expect(mocks.readDueDeferredDirtyConnectionWake).toHaveBeenCalledOnce();
+        expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
+        expect(mocks.clearDeferredDirtyConnectionWake).toHaveBeenCalledWith({
+          connectionId: "dsc_123",
+          dirtyRevision: 3n,
+          dueAt,
+          userId: "user-123",
+        });
+      });
+
+      it("leaves deadlines untouched when the locked recheck finds no due batch", async () => {
+        mocks.readDueDeferredDirtyConnectionWake
+          .mockResolvedValueOnce(deferredFacts())
+          .mockResolvedValueOnce(null);
+
+        await expect(release()).resolves.toEqual({ outcome: "cleared", reason: "superseded" });
+
+        expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
+        expect(mocks.signalHostedDeviceSyncMailboxRuntime).not.toHaveBeenCalled();
+        expect(mocks.clearDeferredDirtyConnectionWake).not.toHaveBeenCalled();
+      });
+
+      it("keeps a newer batch's deadline when the observed revision was processed meanwhile", async () => {
+        mocks.readDueDeferredDirtyConnectionWake
+          .mockResolvedValueOnce(deferredFacts())
+          .mockResolvedValueOnce(deferredFacts({ dirtyRevision: 4n, processedRevision: 3n }));
+
+        await expect(release()).resolves.toEqual({ outcome: "cleared", reason: "superseded" });
+
+        expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
+        expect(mocks.signalHostedDeviceSyncMailboxRuntime).not.toHaveBeenCalled();
+        expect(mocks.clearDeferredDirtyConnectionWake).not.toHaveBeenCalled();
+      });
+
+      it("still releases when only a concurrent hint advanced the unprocessed batch", async () => {
+        mocks.readDueDeferredDirtyConnectionWake
+          .mockResolvedValueOnce(deferredFacts())
+          .mockResolvedValueOnce(deferredFacts({ dirtyRevision: 4n, processedRevision: 1n }));
+
+        await expect(release()).resolves.toEqual({ outcome: "released", wakeInserted: true });
+
+        expect(mocks.appendHostedMailboxEnvelope).toHaveBeenCalledOnce();
+        expect(mocks.clearDeferredDirtyConnectionWake).toHaveBeenCalledWith({
+          connectionId: "dsc_123",
+          dirtyRevision: 4n,
+          dueAt,
+          tx: mocks.prismaTx,
+          userId: "user-123",
+        });
+      });
+
+      it("clears only the locked batch when its recheck finds it processed", async () => {
+        mocks.readDueDeferredDirtyConnectionWake
+          .mockResolvedValueOnce(deferredFacts())
+          .mockResolvedValueOnce(deferredFacts({ dirtyRevision: 4n, processedRevision: 4n }));
+
+        await expect(release()).resolves.toEqual({ outcome: "cleared", reason: "superseded" });
+
+        expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
+        expect(mocks.clearDeferredDirtyConnectionWake).toHaveBeenCalledOnce();
+        expect(mocks.clearDeferredDirtyConnectionWake).toHaveBeenCalledWith({
+          connectionId: "dsc_123",
+          dirtyRevision: 4n,
+          dueAt,
+          userId: "user-123",
+        });
+      });
+    });
+
+    it("classifies only allowlisted Junction daily totals as routine", () => {
+      for (const eventType of [
+        "daily.data.activity.updated",
+        "daily.data.heartrate.created",
+        "daily.data.steps.created",
+        "daily.data.calories_active.updated",
+        "daily.data.respiratory_rate.created",
+        "daily.data.stress_level.updated",
+        "daily.data.hrv.created",
+        "daily.data.blood_oxygen.created",
+        "daily.data.vo2_max.created",
+      ]) {
+        expect(isHostedJunctionRoutineDailyTotalWebhook({ eventType, provider: "junction" }))
+          .toBe(true);
+      }
+      for (const [provider, eventType] of [
+        ["junction", "daily.data.sleep.created"],
+        ["junction", "daily.data.sleep_cycle.updated"],
+        ["junction", "daily.data.workouts.created"],
+        ["junction", "daily.data.workout_stream.created"],
+        ["junction", "daily.data.glucose.created"],
+        ["junction", "daily.data.weight.created"],
+        ["junction", "daily.data.body.created"],
+        ["junction", "historical.data.steps.created"],
+        ["junction", "provider.connection.created"],
+        ["junction", "daily.data.steps.deleted"],
+        ["junction", "daily.data.new_resource.created"],
+        ["oura", "daily.data.steps.updated"],
+      ] as const) {
+        expect(isHostedJunctionRoutineDailyTotalWebhook({ eventType, provider }))
+          .toBe(false);
+      }
+    });
   });
 
   it("terminally settles prepared Junction work when the source epoch changes across provider I/O", async () => {

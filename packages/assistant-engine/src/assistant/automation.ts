@@ -67,6 +67,7 @@ export {
   type HostedMailboxAssistantInputItem,
 } from './hosted-mailbox-input-items.js'
 export {
+  ASSISTANT_INPUT_EXACT_LOOKUP_EXCLUSION_REASONS,
   assistantInputCandidateFromStoredEvent,
   assistantInputIdFromInboxCaptureId,
   createStoreBackedAssistantInputSource,
@@ -76,6 +77,9 @@ export {
   type AssistantInputCandidateQuery,
   type AssistantInputCursor,
   type AssistantInputEvent,
+  type AssistantInputExactLookupExclusionReason,
+  type AssistantInputExactLookupExclusionReasonCounts,
+  type AssistantInputExactLookupObservation,
   type AssistantInputProjection,
   type AssistantInputProjectionStatus,
   type AssistantInputSource,

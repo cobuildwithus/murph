@@ -27,7 +27,7 @@ describe("Postgres runtime: cold reply and warm typing", () => {
     linqStub = await startHostedLocalLinqStub();
     scenario = await startHostedLocalFullStackScenario({
       additionalEnv: {
-        HOSTED_ASSISTANT_MODEL: "gpt-5.6-terra",
+        HOSTED_ASSISTANT_MODEL: "gpt-6.1-sol",
         HOSTED_ASSISTANT_PROVIDER: "openai",
         HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "60000",
         HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS: buildLinqRecipientPhoneNumber(userId),
@@ -39,7 +39,7 @@ describe("Postgres runtime: cold reply and warm typing", () => {
         MURPH_DEV_SKIP_RUNNER_SMOKE: "1",
         OPENAI_API_KEY: "synthetic-stub-openai-key",
       },
-      assistantProviderStubModelId: "gpt-5.6-terra",
+      assistantProviderStubModelId: "gpt-6.1-sol",
       persistDirPrefix: "murph-hosted-local-postgres-runtime-",
       requiredRunnerEnvProfile: "linq",
       scenarioLabel: "Postgres runtime cold and warm reply",

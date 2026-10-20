@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-10-07",
+  "order": 100,
+  "item": {
+    "id": "multi-device-wearable-reads",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Faster lookups across several wearables",
+    "summary": "When you connect more than one wearable, Murph combines their readings faster for activity, sleep, recovery and body lookups.",
+    "details": "Lookups use the same sources and readings as before, and Murph picks the same source for each day.",
+    "relevanceTags": ["wearables"],
+    "sourcePullRequests": [4084]
+  }
+}

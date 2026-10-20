@@ -47,15 +47,21 @@ retired legacy alarm and run-until-idle HTTP controls are unavailable.
 
 ## Request consolidation
 
-Snapshot creation and media PUT, registration, and deletion use the existing
-resource command's locked ownership check without a preceding `authorize_effect`
-HTTP call. Snapshot creation returns no data key before admission, media uploads
-admit before sending bytes, and registration/retirement remain transactional.
-Media registration and deletion do not unwrap a crypto context. Media reads,
-artifacts, and private-media capability publication keep their separate authority
-checks: those paths can expose data or a capability without a resource mutation.
-Existing Web resource commands already enforce this boundary, so Worker rollout
-requires no new protocol or coordinated Web deployment.
+Snapshot creation and media PUT, registration, deletion, and read admission use
+resource commands' locked ownership checks without a preceding `authorize_effect`
+HTTP call. Media GET sends `admit_read` with exact attempt/generation; Web checks
+ownership and media lifetime in the same transaction before Worker crypto/storage
+access. Snapshot abort relies on its final delete transaction; compatibility
+checkpoint publication relies on the checkpoint transaction. Expired-session
+cleanup preserves stale-owner rejections even when transport cleanup is best-effort.
+Artifacts and private-media capability publication retain their separate checks.
+
+Deploy Web with `admit_read` support before the Worker. The legacy `read` command
+remains for older Workers that authorize separately. An older Web rejects the new
+operation; there is no fallback, capability flag, or permission cache. Keep Web at
+this version or newer while the new Worker runs. The media command owner removes
+legacy `read` after older Worker versions are drained and excluded from rollback.
+Warm containers keep their existing media HTTP protocol unchanged.
 
 ## Claim, launch, completion, and recovery
 
@@ -99,8 +105,14 @@ have released the completed owner. An unusable retained target likewise permits
 fresh admission after its existing exact retirement path. One ensure request
 visits at most three admitted generations (completed owner, expired target,
 fresh successor), within its existing command deadline. A repeated generation,
-uncertain liveness or stop, denied admission, or further contention returns the
-existing retry response. Successful warm wakes and fresh starts add no reads;
+uncertain liveness or stop, or further contention returns the existing
+three-second retry response. A claim denied by member admission (inactive,
+suspended, or consent withdrawn) carries `blockedReason: "admission"`, and the
+Worker retries five minutes out with reason `admission_blocked`. Member
+activation and new inbound work signal Temporal directly, so the slower recheck
+does not delay them. The reason is optional and parsed leniently: old Web omits
+it (three-second retry) and old Workers ignore it, so either side may deploy
+first. Successful warm wakes and fresh starts add no reads;
 completion recovery removes the separate release callback. Each fresh-start
 attempt retains its own bounded, overlapping workspace and native readiness
 preparation; abandoned target reads are not execution authority.
@@ -162,8 +174,15 @@ lifecycle recheck; they do not grant a new conversation lease. Cleanup rechecks
 native status, health, and interaction fencing after the bounded control read,
 which runs outside the lifecycle lock so arriving work does not wait on
 control-plane latency. Explicit retirement
-and its exact native stop proof remain the recovery owner. Without a future local
-receipt deadline, remote denial retains the existing short lifecycle recheck.
+and its exact native stop proof remain the recovery owner. When the outer result
+is lost after a completion callback, the existing container lifecycle recheck
+also replays settled completion for a matching retiring owner, exact completed
+native receipt, and inactive native fence. This releases drained owners without
+requiring new mailbox work. Active or unknown native execution, stale receipts,
+and failed completion preserve the scheduled recheck. Destruction requires a
+fresh canonical observation on a later lifecycle pass.
+Without a future local receipt deadline, remote denial retains the existing
+short lifecycle recheck.
 
 The runtime completion callback and outer invocation result share the same
 native receipt and Web `complete` command. Each stage uses one HTTP request for
@@ -177,12 +196,24 @@ releases ownership before the HTTP response. Only an
 updated `complete` response schedules the advisory hint through Next `after`,
 so neither its dependency loading nor its network wait delays acknowledgement.
 The hint has a two-second best-effort budget; failure leaves
-durable completion for the normal recheck. Lost responses replay the same exact
+durable completion for native lifecycle or processing reconciliation. Lost
+responses replay the same exact
 identity and cannot retire or release a successor. Pending upload drains remain
 owned by the existing release transaction.
 Recovery from a lost completion acknowledgment uses that same settled `complete`
 command after proving the exact completed receipt and inactive fence, replacing
 the separate completion and release requests.
+
+The container still awaits that recovery callback after the job and its response
+finish. Health `activeJobCount` keeps counting it as lifetime work, so shutdown
+drain, post-shutdown wake absence, idle cleanup, and the legacy wake probe are
+unchanged. The child also reports `settlingCompletionCallbackCount`, and
+admission excludes only those settling callbacks. A Worker readiness check
+subtracts the settling count only when the child reports a valid integer between
+zero and the total; an absent count uses the total, and a malformed count stays
+busy. Admitting the next job beside a settling callback grants no authority: a
+new attempt still needs canonical release, and the old callback cannot complete,
+release, or retire its successor.
 
 Deploy the additive Web completion consumer before the Worker producer. The
 existing live Web protocol admission includes both early and settled command
@@ -316,6 +347,10 @@ after replacement. The existing orphan row owns this recovery history;
 no additional scheduler or plaintext backup is created. Key-only session and
 adapter cleanup records preserve that reference and cannot shorten its deadline.
 Unaccepted uploads and ordinary replica orphans retain the 65-minute grace.
+After namespace validation, physical replica cleanup deletes the root and its
+finite sibling set in one R2 batch operation so serial binding round trips do
+not exhaust the Web control deadline. Provider rejection remains a failed purge;
+Web records purge acknowledgement only after the deletion request succeeds.
 The existing bounded cleanup sweep retires expired, non-current snapshots under
 the same owner/publication locks. Account deletion still drains writes and
 deletes the entire member snapshot namespace without waiting seven days.

@@ -41,7 +41,7 @@ it.skipIf(!live)('replays synthetic Murph workflows through native Codex with ca
   for (const key of ['PATH', 'TMPDIR', 'LANG', 'SSL_CERT_FILE', 'SSL_CERT_DIR']) {
     if (process.env[key]) env[key] = process.env[key]
   }
-  const model = 'gpt-5.6-terra'
+  const model = 'gpt-6.1-sol'
   const modelProvider = 'cache-replay'
   await writeFile(path.join(codexHome, 'config.toml'), [
     `model = "${model}"`, `model_provider = "${modelProvider}"`,

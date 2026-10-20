@@ -41,7 +41,6 @@ import {
   buildCodexAppServerArgs,
   compactWarmCodexThread,
   executeCodexAppServerTurn as executeCodexAppServerTurnUnchecked,
-  executeCodexManagedAccountOperation,
   preinitializeCodexAppServer,
   readCodexAppServerTurnFailureContext,
   resolveCodexDisplayOptions,
@@ -403,7 +402,7 @@ describe('assistant codex runtime', () => {it('handles current Codex v2 turn-tag
       executeCodexAppServerTurn({
         env: hostedEnv,
         model: 'gpt-thread-second',
-        modelProvider: 'venice',
+        modelProvider: 'hosted-openai',
         prompt: 'second thread launch',
         workingDirectory,
       }),
@@ -426,7 +425,7 @@ describe('assistant codex runtime', () => {it('handles current Codex v2 turn-tag
     })
     expect(asRecord(threadStarts[1]?.params)).toMatchObject({
       model: 'gpt-thread-second',
-      modelProvider: 'venice',
+      modelProvider: 'hosted-openai',
     })
   })
 
@@ -1565,329 +1564,6 @@ describe('assistant codex runtime', () => {it('handles current Codex v2 turn-tag
     expect(codexMocks.spawn).not.toHaveBeenCalled()
   })
 
-  it('hands managed disconnect cleanup attribution to the next assistant turn', async () => {
-    const workingDirectory = await createTempDir('assistant-codex-managed-disconnect-work-')
-    const codexHome = await createTempDir('assistant-codex-managed-disconnect-home-')
-    const spawnedChildren: MockChildProcess[] = []
-    mockProcessGroupSignalsForChildren(spawnedChildren)
-
-    codexMocks.spawn.mockImplementation(() => {
-      const child = new MockChildProcess()
-      const processNumber = spawnedChildren.length + 1
-      child.pid = 41_000 + spawnedChildren.length
-      spawnedChildren.push(child)
-
-      queueMicrotask(() => {
-        void (async () => {
-          const initialize = await waitForRpcMethod(child, 'initialize')
-          child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
-          if (processNumber === 1) {
-            const logout = await waitForRpcMethod(child, 'account/logout')
-            child.stdout.write(jsonLine({ id: logout.id, result: {} }))
-            return
-          }
-
-          await writeWarmTurnStarted({
-            child,
-            requestCount: 1,
-            threadId: 'thread-after-managed-disconnect',
-            turnId: 'turn-after-managed-disconnect',
-          })
-          child.stdout.write(jsonLine({
-            method: 'turn/completed',
-            params: {
-              turn: {
-                id: 'turn-after-managed-disconnect',
-                status: 'completed',
-              },
-            },
-          }))
-        })()
-      })
-
-      return child
-    })
-
-    await expect(
-      executeCodexManagedAccountOperation({
-        action: 'disconnect',
-        codexHome,
-        workingDirectory,
-      }),
-    ).resolves.toEqual({ kind: 'disconnected' })
-
-    const replacementTrace = vi.fn()
-    await expect(
-      executeCodexAppServerTurn({
-        codexHome,
-        onTraceEvent: replacementTrace,
-        prompt: 'assistant turn after managed disconnect',
-        workingDirectory,
-      }),
-    ).resolves.toMatchObject({
-      sessionId: 'thread-after-managed-disconnect',
-      turnId: 'turn-after-managed-disconnect',
-    })
-
-    expect(codexMocks.spawn).toHaveBeenCalledTimes(2)
-    expect(replacementTrace).toHaveBeenCalledWith(
-      expect.objectContaining({
-        rawEvent: expect.objectContaining({
-          codexTimingColdStartReason: 'previous-explicit-stop',
-          codexTimingStage: 'initialized',
-        }),
-      }),
-    )
-  })
-
-  it('waits for the Codex account update before verifying managed ChatGPT connect', async () => {
-    const workingDirectory = await createTempDir('assistant-codex-managed-auth-work-')
-    const codexHome = await createTempDir('assistant-codex-managed-auth-home-')
-    const child = new MockChildProcess()
-    const loginStarted = createDeferred<void>()
-    const onDeviceCode = vi.fn()
-
-    codexMocks.spawn.mockImplementation(() => {
-      queueMicrotask(() => {
-        void (async () => {
-          const initialize = await waitForRpcMethod(child, 'initialize')
-          child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
-          child.stdout.write(jsonLine({
-            method: 'account/updated',
-            params: {
-              authMode: 'chatgpt',
-              planType: 'pro',
-            },
-          }))
-
-          const initialRead = await waitForRpcMethodCount(child, 'account/read', 1)
-          child.stdout.write(jsonLine({
-            id: initialRead.id,
-            result: {
-              account: null,
-              requiresOpenaiAuth: true,
-            },
-          }))
-
-          const loginStart = await waitForRpcMethod(child, 'account/login/start')
-          expect(loginStart.params).toEqual({
-            type: 'chatgptDeviceCode',
-          })
-          child.stdout.write(jsonLine({
-            id: loginStart.id,
-            result: {
-              type: 'chatgptDeviceCode',
-              loginId: 'login-managed-chatgpt',
-              verificationUrl: 'https://auth.openai.com/codex/device',
-              userCode: 'ABCD-1234',
-            },
-          }))
-          loginStarted.resolve()
-        })()
-      })
-
-      return child
-    })
-
-    const operation = executeCodexManagedAccountOperation({
-      action: 'connect',
-      codexHome,
-      onDeviceCode,
-      timeoutMs: 1_000,
-      workingDirectory,
-    })
-
-    await loginStarted.promise
-    await waitForMockCall(onDeviceCode, 1)
-    expect(onDeviceCode).toHaveBeenCalledWith({
-      userCode: 'ABCD-1234',
-      verificationUrl: 'https://auth.openai.com/codex/device',
-    })
-
-    child.stdout.write(jsonLine({
-      method: 'account/login/completed',
-      params: {
-        loginId: 'login-managed-chatgpt',
-        success: true,
-      },
-    }))
-    await waitForStableMicrotask()
-    expect(readWrittenRpcMessages(child).filter(
-      (message) => message.method === 'account/read',
-    )).toHaveLength(1)
-
-    child.stdout.write(jsonLine({
-      method: 'account/updated',
-      params: {
-        authMode: 'chatgpt',
-        planType: 'pro',
-      },
-    }))
-
-    const verifiedRead = await waitForRpcMethodCount(child, 'account/read', 2)
-    child.stdout.write(jsonLine({
-      id: verifiedRead.id,
-      result: {
-        account: {
-          type: 'chatgpt',
-          email: 'user@example.com',
-          planType: 'pro',
-        },
-        requiresOpenaiAuth: true,
-      },
-    }))
-
-    await expect(operation).resolves.toEqual({
-      kind: 'connected',
-    })
-    expect(codexMocks.spawn).toHaveBeenCalledWith(
-      'codex',
-      [
-        '--config',
-        'model_provider="openai"',
-        '--config',
-        'cli_auth_credentials_store="file"',
-        ...cliTimingLaunchArgs,
-        'app-server',
-      ],
-      expect.any(Object),
-    )
-  })
-
-  it.each([false, true])(
-    'handles batched account responses and notifications with unexpected response=%s',
-    async (unexpectedResponse) => {
-      const workingDirectory = await createTempDir('assistant-codex-account-rpc-work-')
-      const codexHome = await createTempDir('assistant-codex-account-rpc-home-')
-      const child = new MockChildProcess()
-      const onDeviceCode = vi.fn()
-      codexMocks.spawn.mockReturnValue(child)
-      const operation = executeCodexManagedAccountOperation({
-        action: 'connect',
-        codexHome,
-        onDeviceCode,
-        workingDirectory,
-      })
-      const outcome = unexpectedResponse
-        ? expect(operation).rejects.toMatchObject({
-            code: 'ASSISTANT_CODEX_APP_SERVER_PROTOCOL_ERROR',
-            context: { retryable: false },
-          })
-        : expect(operation).resolves.toEqual({ kind: 'connected' })
-
-      const initialize = await waitForRpcMethod(child, 'initialize')
-      child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
-      const read = await waitForRpcMethod(child, 'account/read')
-      child.stdout.write(jsonLine({ id: read.id, result: { account: null, requiresOpenaiAuth: true } }))
-      const login = await waitForRpcMethod(child, 'account/login/start')
-      child.stdout.write([
-        {
-          id: login.id,
-          result: {
-            type: 'chatgptDeviceCode',
-            loginId: 'login-batched-account',
-            verificationUrl: 'https://example.com/device',
-            userCode: 'TEST-CODE',
-          },
-        },
-        ...(unexpectedResponse ? [{ id: 'unknown-account-response', result: {} }] : []),
-        {
-          method: 'account/login/completed',
-          params: { loginId: 'login-batched-account', success: true },
-        },
-        { method: 'account/updated', params: { authMode: 'chatgpt', planType: 'pro' } },
-      ].map(jsonLine).join(''))
-
-      if (!unexpectedResponse) {
-        const verifiedRead = await waitForRpcMethodCount(child, 'account/read', 2)
-        child.stdout.write(jsonLine({
-          id: verifiedRead.id,
-          result: {
-            account: { type: 'chatgpt', email: 'user@example.com', planType: 'pro' },
-            requiresOpenaiAuth: true,
-          },
-        }))
-      }
-      await outcome
-      expect(onDeviceCode).toHaveBeenCalledTimes(1)
-      expect(onDeviceCode).toHaveBeenCalledWith({
-        userCode: 'TEST-CODE',
-        verificationUrl: 'https://example.com/device',
-      })
-      expect(readWrittenRpcMessages(child).filter((message) => message.method === 'account/read'))
-        .toHaveLength(unexpectedResponse ? 1 : 2)
-    },
-  )
-
-  it('preserves Codex managed ChatGPT login completion errors', async () => {
-    const workingDirectory = await createTempDir('assistant-codex-managed-auth-error-work-')
-    const codexHome = await createTempDir('assistant-codex-managed-auth-error-home-')
-    const child = new MockChildProcess()
-    const loginStarted = createDeferred<void>()
-    const onDeviceCode = vi.fn()
-
-    codexMocks.spawn.mockImplementation(() => {
-      queueMicrotask(() => {
-        void (async () => {
-          const initialize = await waitForRpcMethod(child, 'initialize')
-          child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
-
-          const initialRead = await waitForRpcMethodCount(child, 'account/read', 1)
-          child.stdout.write(jsonLine({
-            id: initialRead.id,
-            result: {
-              account: null,
-              requiresOpenaiAuth: true,
-            },
-          }))
-
-          const loginStart = await waitForRpcMethod(child, 'account/login/start')
-          child.stdout.write(jsonLine({
-            id: loginStart.id,
-            result: {
-              type: 'chatgptDeviceCode',
-              loginId: 'login-managed-chatgpt-error',
-              verificationUrl: 'https://auth.openai.com/codex/device',
-              userCode: 'WXYZ-9876',
-            },
-          }))
-          loginStarted.resolve()
-        })()
-      })
-
-      return child
-    })
-
-    const operation = executeCodexManagedAccountOperation({
-      action: 'connect',
-      codexHome,
-      onDeviceCode,
-      timeoutMs: 1_000,
-      workingDirectory,
-    })
-
-    await loginStarted.promise
-    await waitForMockCall(onDeviceCode, 1)
-
-    child.stdout.write(jsonLine({
-      method: 'account/login/completed',
-      params: {
-        error: 'device auth failed with status 500',
-        loginId: 'login-managed-chatgpt-error',
-        success: false,
-      },
-    }))
-
-    await expect(operation).rejects.toMatchObject({
-      code: 'ASSISTANT_CODEX_AUTH_FAILED',
-      context: {
-        codexLoginError: 'device auth failed with status 500',
-        retryable: false,
-      },
-      message: 'ChatGPT account authentication did not complete successfully.',
-    })
-  })
-
   it('preserves missing Codex startup errors emitted before turn binding', async () => {
     const workingDirectory = await createTempDir('assistant-codex-prebind-not-found-')
 
@@ -2587,7 +2263,7 @@ describe('assistant codex runtime', () => {it('handles current Codex v2 turn-tag
                 approvalPolicy: 'never',
                 cwd: staleWorkingDirectory,
                 model: 'gpt-5',
-                modelProvider: 'vercel-ai-gateway',
+                modelProvider: 'hosted-openai',
                 sandbox: codexSandboxPolicyForMode('read-only'),
                 thread: {
                   id: 'resume-thread',
@@ -2771,7 +2447,7 @@ describe('assistant codex runtime', () => {it('handles current Codex v2 turn-tag
         cwd: path.resolve(workingDirectory),
         developerInstructions: 'Stable Murph instructions.',
         model: 'gpt-5',
-        modelProvider: 'vercel-ai-gateway',
+        modelProvider: 'hosted-openai',
         sandbox: freshSandbox,
       }
       const expectedResumeThreadContext = {
@@ -2889,7 +2565,7 @@ describe('assistant codex runtime', () => {it('handles current Codex v2 turn-tag
         executeCodexAppServerTurn({
           approvalPolicy: 'never',
           model: 'gpt-5',
-          modelProvider: 'vercel-ai-gateway',
+          modelProvider: 'hosted-openai',
           developerInstructions: 'Stable Murph instructions.',
           prompt: 'fresh prompt',
           reasoningEffort: 'high',

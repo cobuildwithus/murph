@@ -1503,7 +1503,7 @@ describe("buildWranglerEnvFileText", () => {
       buildWranglerEnvFileText({
         VENICE_API_KEY: "local-venice-key",
       }),
-    ).toContain('VENICE_API_KEY="local-venice-key"');
+    ).not.toContain('VENICE_API_KEY');
     expect(
       buildWranglerEnvFileText({
         MURPH_DATA_API_KEY: "local-data-api-key",
@@ -1765,8 +1765,8 @@ describe("buildWranglerLocalDevConfig", () => {
     });
     expect(config.analytics_engine_datasets).toEqual([
       {
-        binding: "HOSTED_RUNTIME_RETRY_ANALYTICS",
-        dataset: "murph_hosted_runtime_retries",
+        binding: "HOSTED_STANDBY_ANALYTICS",
+        dataset: "murph_hosted_standby_inventory",
       },
     ]);
     expect(container.image).toBe("../../../Dockerfile.cloudflare-hosted-runner");
@@ -2005,7 +2005,6 @@ describe("buildWranglerLocalDevConfig", () => {
       required: expect.arrayContaining([
         "MURPH_DATA_API_KEY",
         "OPENAI_API_KEY",
-        "VENICE_API_KEY",
       ]),
     });
     expect(config.vars).toMatchObject({

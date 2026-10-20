@@ -197,11 +197,11 @@ test("ConnectPage renders source search, source names, and logo marks", async ()
   assert.match(markup, /Live Well/);
   assert.match(markup, /placeholder="Search sources"/);
   assert.match(markup, /aria-label="Search sources"/);
-  assert.match(markup, />33 of 33 sources</);
+  assert.match(markup, />32 of 32 sources</);
   assert.match(markup, /lg:grid-cols-2 xl:grid-cols-4/);
   assert.match(markup, /data-connect-source="fitbit"/u);
   assert.match(markup, /data-connect-source="oura"/u);
-  assert.equal(markup.match(/data-connect-source=/gu)?.length, 33);
+  assert.equal(markup.match(/data-connect-source=/gu)?.length, 32);
   assert.doesNotMatch(markup, /scroll-mt-24/gu);
   assert.doesNotMatch(markup, /target:ring/gu);
   assert.doesNotMatch(markup, /data-priority list/);
@@ -389,12 +389,6 @@ test("ConnectPage renders source search, source names, and logo marks", async ()
       name: "Withings",
     },
     {
-      assetPath: "/brand-logos/connect/google-fit.svg",
-      description:
-        "Android activity, steps, heart points, workouts, and wellness record context.",
-      name: "Google Fit",
-    },
-    {
       assetPath: "/brand-logos/connect/zwift.png",
       description:
         "Indoor rides, runs, power, distance, elevation, and virtual training sessions.",
@@ -432,7 +426,7 @@ test("ConnectPage renders source search, source names, and logo marks", async ()
     },
   ];
 
-  assert.equal(sources.length, 33);
+  assert.equal(sources.length, 32);
   assert.equal(
     markup.match(/data-connection-state="idle"/gu)?.length,
     sources.length - 6,
@@ -489,6 +483,7 @@ test("ConnectPage renders source search, source names, and logo marks", async ()
   assert.doesNotMatch(markup, />OneTouch</u);
   assert.doesNotMatch(markup, />Manual</u);
   assert.doesNotMatch(markup, />Strava</u);
+  assert.doesNotMatch(markup, />Google Fit</u);
   assert.doesNotMatch(markup, /Whoop V2/u);
   assert.ok(
     sourceHeadingIndex(markup, "Apple Health") <
@@ -499,10 +494,6 @@ test("ConnectPage renders source search, source names, and logo marks", async ()
   );
   assert.ok(
     sourceHeadingIndex(markup, "Fitbit") <
-      sourceHeadingIndex(markup, "Google Fit"),
-  );
-  assert.ok(
-    sourceHeadingIndex(markup, "Google Fit") <
       sourceHeadingIndex(markup, "Huawei Health"),
   );
   assert.ok(
@@ -1633,10 +1624,14 @@ test("ConnectPage enables every Link source exposed by the shared Junction defau
   assert.equal(
     markup.match(/>Connect<\/button>/gu)?.length,
     JUNCTION_DEFAULT_PROVIDER_FILTER.filter(
-      (providerSlug) => providerSlug !== "strava" && providerSlug !== "dexcom_v3",
+      (providerSlug) =>
+        providerSlug !== "strava"
+        && providerSlug !== "dexcom_v3"
+        && providerSlug !== "google_fit",
     ).length,
   );
   assert.equal(markup.match(/>Not available<\/button>/gu)?.length ?? 0, 0);
+  assert.doesNotMatch(markup, /data-connect-source="google-fit"/u);
   assert.match(markup, /aria-label="Download app for Apple Health"/u);
   assert.doesNotMatch(markup, />Accu-Chek</u);
   assert.doesNotMatch(markup, />Samsung Health</u);

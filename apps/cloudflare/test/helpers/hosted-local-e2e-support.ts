@@ -42,15 +42,9 @@ export const HOSTED_LOCAL_ASSISTANT_STUB_CLEARED_ENV_KEYS = [
   "OPENROUTER_API_KEY",
   "PERPLEXITY_API_KEY",
   "TOGETHER_API_KEY",
-  "VENICE_API_KEY",
   "XAI_API_KEY",
-  "HOSTED_ASSISTANT_API_KEY_ENV",
-  "HOSTED_ASSISTANT_BASE_URL",
   "HOSTED_ASSISTANT_CODEX_COMMAND",
-  "HOSTED_ASSISTANT_GATEWAY_ONLY_PROVIDERS",
-  "HOSTED_ASSISTANT_OSS",
   "HOSTED_ASSISTANT_PROFILE",
-  "HOSTED_ASSISTANT_PROVIDER_NAME",
 ] as const;
 export const HOSTED_LOCAL_DEVICE_SYNC_PROVIDER_CLEARED_ENV_KEYS = [
   ...deviceSyncProviderRuntimeSecretEnvKeys,
@@ -68,6 +62,9 @@ export type HostedLocalAssistantProviderMode = "stub" | "live";
  * first, then the follow-up text.
  */
 type HostedLocalAssistantProviderFunctionCallResponse = {
+    beforeResponse?: () => Promise<void> | void;
+    // Hold streamed tool content after response.created, leaving the HTTP stream open.
+    beforeStreamContent?: () => Promise<void> | void;
     functionCall: {
       arguments: Record<string, unknown>;
       name: string;
@@ -147,7 +144,7 @@ export function scopeHostedLocalAssistantProviderResponse(
  */
 export function buildAssistantProviderShellCommandCall(
   command: string,
-): HostedLocalAssistantProviderScriptedResponse {
+): HostedLocalAssistantProviderFunctionCallResponse {
   return {
     functionCall: {
       arguments: { cmd: command },
@@ -302,7 +299,7 @@ function readMurphDynamicToolAdvertisement(body: string): {
   const candidateToolLists: unknown[][] = [];
 
   // The murph namespace appears in the top-level `tools` array on the full
-  // Responses API. Responses Lite models (e.g. gpt-5.6-terra in Codex >= 0.144)
+  // Responses API. Responses Lite models (e.g. gpt-6.1-sol in Codex >= 0.144)
   // relocate the structured tool specs into an `additional_tools` input item
   // and null the top-level `tools`, so look in both places.
   const topLevelTools = request?.tools;
@@ -707,11 +704,11 @@ async function prepareAssistantProviderScriptedResponse(
   scriptedResponse: HostedLocalAssistantProviderScriptedResponsePayload,
   requestContext: HostedLocalAssistantProviderRequestContext,
 ): Promise<string | HostedLocalAssistantProviderToolCallResponse> {
-  if (
-    typeof scriptedResponse === "string"
-    || "customToolCall" in scriptedResponse
-    || "functionCall" in scriptedResponse
-  ) {
+  if (typeof scriptedResponse === "object" && "functionCall" in scriptedResponse) {
+    await scriptedResponse.beforeResponse?.();
+    return scriptedResponse;
+  }
+  if (typeof scriptedResponse === "string" || "customToolCall" in scriptedResponse) {
     return scriptedResponse;
   }
   if ("deriveResponse" in scriptedResponse) {
@@ -851,13 +848,14 @@ function buildAssistantProviderToolCallItem(input: {
   };
 }
 
-function writeAssistantProviderToolCallStubStream(input: {
+async function writeAssistantProviderToolCallStubStream(input: {
+  beforeContent?: () => Promise<void> | void;
   modelId: string;
   response: ServerResponse;
   responseId: string;
   toolCallItem: Record<string, unknown>;
   usage: HostedLocalAssistantProviderUsage;
-}): void {
+}): Promise<void> {
   const completedResponse = {
     created_at: Math.floor(Date.now() / 1000),
     id: input.responseId,
@@ -878,6 +876,7 @@ function writeAssistantProviderToolCallStubStream(input: {
     },
     type: "response.created",
   });
+  await input.beforeContent?.();
   writeAssistantProviderSseEvent(input.response, "response.output_item.added", {
     item: {
       ...input.toolCallItem,
@@ -959,7 +958,7 @@ export async function startAssistantProviderStubServer(input: {
   responseState?: HostedLocalAssistantProviderStubState;
   usageMode?: HostedLocalAssistantProviderStubUsageMode;
 } = {}): Promise<ReturnType<typeof createServer>> {
-  const modelId = input.modelId ?? "gpt-5.6-terra";
+  const modelId = input.modelId ?? "gpt-6.1-sol";
   let responseSequence = 0;
   let responsesApiRequestBodyCount = 0;
 
@@ -1137,7 +1136,10 @@ export async function startAssistantProviderStubServer(input: {
           usageMode: input.usageMode ?? "fixed",
         });
         if (bodyJson.stream === true) {
-          writeAssistantProviderToolCallStubStream({
+          await writeAssistantProviderToolCallStubStream({
+            beforeContent: "functionCall" in preparedScriptedResponse
+              ? preparedScriptedResponse.beforeStreamContent
+              : undefined,
             modelId,
             response,
             responseId,
@@ -1333,7 +1335,7 @@ export function resolveHostedAssistantLocalDevEnv(
 
     return {
       ...buildHostedAssistantStubEnvClearances(),
-      HOSTED_ASSISTANT_MODEL: "gpt-5.6-terra",
+      HOSTED_ASSISTANT_MODEL: "gpt-6.1-sol",
       HOSTED_ASSISTANT_PROVIDER: "openai",
       HOSTED_ASSISTANT_REASONING_EFFORT: "low",
       [HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV]:

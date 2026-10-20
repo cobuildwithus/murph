@@ -1,6 +1,8 @@
 import "server-only";
 
 import { Prisma, type PrismaClient } from "@prisma/client";
+import type { HostedRuntimeLogEntry } from "@murphai/hosted-execution/runtime-control";
+import { after } from "next/server";
 
 import { HOSTED_MAILBOX_RETENTION_MS } from "../hosted-mailbox/store";
 import {
@@ -19,10 +21,13 @@ import {
   readHostedRuntimeTerminalNonReplyCommittedAt,
   readHostedRuntimeTerminalReplyCommittedAt,
 } from "../hosted-runtime-latency/alert-monitor";
+import { writeHostedRuntimeLogs } from "../hosted-runtime-log/write";
 import { getPrisma } from "../prisma";
 
 export const HOSTED_RUNTIME_PROGRESS_STALL_THRESHOLD_MS = 15 * 60_000;
 export const HOSTED_RUNTIME_PROGRESS_REMINDER_INTERVAL_MS = 6 * 60 * 60_000;
+export const HOSTED_RUNTIME_PROGRESS_ALERT_SAMPLE_LIMIT = 20;
+const HOSTED_RUNTIME_PROGRESS_ALERT_OBSERVATION_BUDGET_MS = 10_000;
 
 const HOSTED_RUNTIME_PROGRESS_MONITOR_ID = "hosted-runtime-progress-monitor:v1";
 const HOSTED_RUNTIME_PROGRESS_MONITOR_KIND = "hosted_runtime_progress_monitor";
@@ -111,6 +116,21 @@ export interface HostedRuntimeStalledRecheckCandidateScan {
   scanTruncated: boolean;
 }
 
+interface HostedRuntimeProgressStalledLaneSample {
+  headLaneSeq: bigint;
+  lane: "conversation" | "system";
+  runtimeKey: string;
+}
+
+// The cron route serializes health, so private lane samples stay off that object.
+const stalledLaneSamplesByHealth = new WeakMap<
+  HostedRuntimeProgressHealth,
+  readonly HostedRuntimeProgressStalledLaneSample[]
+>();
+
+export type HostedRuntimeProgressObservationScheduler =
+  (task: () => Promise<void>) => void;
+
 export type HostedRuntimeProgressAlertMonitorOutcome =
   | HostedOperationalAlertMonitorOutcome
   | "disabled";
@@ -152,8 +172,10 @@ export async function runHostedRuntimeProgressAlertMonitor(input: {
   env?: Readonly<Record<string, string | undefined>>;
   now?: Date;
   prisma?: HostedRuntimeProgressPrismaClient;
+  scheduleObservation?: HostedRuntimeProgressObservationScheduler;
   sendAlert?: HostedOperationalAlertSend;
   signal?: AbortSignal;
+  writeRuntimeLogs?: typeof writeHostedRuntimeLogs;
 } = {}): Promise<HostedRuntimeProgressAlertMonitorResult> {
   const now = input.now ?? new Date();
   const prisma = input.prisma ?? getPrisma();
@@ -178,7 +200,15 @@ export async function runHostedRuntimeProgressAlertMonitor(input: {
     prisma,
     sendAlert: input.sendAlert,
     signal: input.signal,
-    spec: HOSTED_RUNTIME_PROGRESS_MONITOR_SPEC,
+    spec: {
+      ...HOSTED_RUNTIME_PROGRESS_MONITOR_SPEC,
+      // A scheduler failure is caught by the claim hook; the observation is dropped.
+      onNotificationClaimed: (claim) => {
+        const schedule = input.scheduleObservation ?? after;
+        const write = input.writeRuntimeLogs ?? writeHostedRuntimeLogs;
+        schedule(() => recordHostedRuntimeProgressAlertObservation({ ...claim, write }));
+      },
+    },
   });
 
   return {
@@ -535,7 +565,6 @@ async function readHostedRuntimeProgressCandidatePage(input: {
           AND owner.processing_mode = 'default'
           AND owner.completed_at IS NULL
           AND owner.attempt_id = foreground.runtime_attempt_id
-          AND owner.generation = workspace_evidence.workspace_system_mailbox_progress_generation
           AND owner.generation::text = foreground.phase_breakdown_json -> 'assistant' ->> 'runtimeLeaseGeneration'
       ) AS foreground_checkpoint ON TRUE
       LEFT JOIN LATERAL (
@@ -676,6 +705,7 @@ export function summarizeHostedRuntimeProgressRows(input: {
   let stalledConversationLaneCount = 0;
   let stalledLaneCount = 0;
   let stalledSystemLaneCount = 0;
+  const stalledLaneSamples: HostedRuntimeProgressStalledLaneSample[] = [];
   const systemDiagnostics: HostedRuntimeProgressSystemDiagnostics = {
     assistantWakeLaneCount: 0,
     deviceSyncHeadLaneCount: 0,
@@ -710,6 +740,13 @@ export function summarizeHostedRuntimeProgressRows(input: {
 
     stalledLaneCount += 1;
     stalledRuntimeKeys.add(row.runtimeKey);
+    if (stalledLaneSamples.length < HOSTED_RUNTIME_PROGRESS_ALERT_SAMPLE_LIMIT) {
+      stalledLaneSamples.push({
+        headLaneSeq: row.headLaneSeq,
+        lane: row.lane === "conversation" ? "conversation" : "system",
+        runtimeKey: row.runtimeKey,
+      });
+    }
     oldestStalledAgeMs = Math.max(
       oldestStalledAgeMs ?? 0,
       input.now.getTime() - progressOriginAtMs,
@@ -724,7 +761,7 @@ export function summarizeHostedRuntimeProgressRows(input: {
   }
 
   const scanTruncated = input.scanTruncated === true;
-  return {
+  const health: HostedRuntimeProgressHealth = {
     anomalous: stalledLaneCount > 0 || invalidRowCount > 0 || scanTruncated,
     excludedInactiveLaneCount,
     excludedUsageBlockedConversationLaneCount,
@@ -739,6 +776,63 @@ export function summarizeHostedRuntimeProgressRows(input: {
     systemDiagnostics,
     thresholdMs: HOSTED_RUNTIME_PROGRESS_STALL_THRESHOLD_MS,
   };
+  stalledLaneSamplesByHealth.set(health, stalledLaneSamples);
+  return health;
+}
+
+// Records which lane heads a newly built notification sampled. Writes are
+// best effort and run after the response; absence is never evidence. The
+// budget only stops starting writes; each write keeps its store's own bounds.
+async function recordHostedRuntimeProgressAlertObservation(input: {
+  attemptedAt: Date;
+  health: HostedRuntimeProgressHealth;
+  healthCheckedAt: Date;
+  incidentId: string;
+  write: typeof writeHostedRuntimeLogs;
+}): Promise<void> {
+  const samples = stalledLaneSamplesByHealth.get(input.health) ?? [];
+  if (samples.length === 0) {
+    return;
+  }
+  const deadlineMs = Date.now() + HOSTED_RUNTIME_PROGRESS_ALERT_OBSERVATION_BUDGET_MS;
+  const redactedJson = {
+    alertIncidentId: input.incidentId,
+    healthCheckedAt: input.healthCheckedAt.toISOString(),
+    sampleCount: samples.length,
+    sampleOverflowCount: Math.max(0, input.health.stalledLaneCount - samples.length),
+    scanTruncated: input.health.scanTruncated,
+  };
+  const samplesByRuntime = new Map<string, HostedRuntimeProgressStalledLaneSample[]>();
+  for (const sample of samples) {
+    const group = samplesByRuntime.get(sample.runtimeKey) ?? [];
+    group.push(sample);
+    samplesByRuntime.set(sample.runtimeKey, group);
+  }
+  for (const [runtimeKey, group] of samplesByRuntime) {
+    if (Date.now() >= deadlineMs) {
+      return;
+    }
+    try {
+      await input.write({
+        entries: group.map((sample): HostedRuntimeLogEntry => ({
+          at: input.attemptedAt.toISOString(),
+          component: "mailbox",
+          eventCode: "mailbox.progress_alert_sampled",
+          level: "warn",
+          mailboxLane: sample.lane,
+          mailboxSeqEnd: sample.headLaneSeq.toString(),
+          mailboxSeqStart: sample.headLaneSeq.toString(),
+          phase: "invoke",
+          redactedJson,
+        })),
+        userId: runtimeKey,
+      });
+    } catch (error) {
+      console.warn("Hosted runtime progress alert observation write failed.", {
+        errorName: error instanceof Error ? error.name : typeof error,
+      });
+    }
+  }
 }
 
 function summarizeHostedRuntimeSystemDiagnostics(

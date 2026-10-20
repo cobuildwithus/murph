@@ -1051,6 +1051,7 @@ async function readCompletedHostedLinqInstantFirstTurn(input: {
         ),
       ),
       mailboxItemId: item.id,
+      originalInboundMailboxItemId: input.wakeHandoff.mailboxItemId,
       wakeMailboxCheckpoint: {
         lane: item.lane,
         laneSeq: item.laneSeq,

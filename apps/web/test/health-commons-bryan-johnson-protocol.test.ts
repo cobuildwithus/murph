@@ -8,12 +8,7 @@ import {
   listHealthCommonsExperimentBrowseProtocols,
   listHealthCommonsExperimentRouteParams as listHealthCommonsExperimentBrowseRouteParams,
 } from "@/src/lib/health-commons/experiment-browse";
-import {
-  listHealthCommonsBiomarkerRoutes,
-  resolveHealthCommonsBiomarkerShell,
-  resolveHealthCommonsBiomarkerOverview,
-  resolveHealthCommonsBiomarkerResearch,
-} from "@/src/lib/health-commons/biomarker-projections";
+
 import { resolveExperimentProjectionFixture } from "./health-commons-projection-fixtures";
 import {
   resolveHealthCommonsExperimentProtocolTab,
@@ -445,31 +440,6 @@ describe("Health Commons experiment protocol metadata", () => {
     expect(dirtyCopy).toEqual([]);
   });
 
-  it("strips Health Commons source keys from public biomarker detail copy", () => {
-    const dirtyCopy: string[] = [];
-
-    for (const biomarkerId of listHealthCommonsBiomarkerRoutes()) {
-      const shell = resolveHealthCommonsBiomarkerShell(biomarkerId);
-      const overview = resolveHealthCommonsBiomarkerOverview(biomarkerId);
-      const research = resolveHealthCommonsBiomarkerResearch(biomarkerId);
-      const biomarker = shell && overview && research ? { ...shell, ...overview, ...research } : null;
-
-      if (!biomarker) {
-        throw new Error(`${biomarkerId} biomarker should resolve for public routes.`);
-      }
-
-      const issue = describeSourceKeyResidue(
-        biomarkerId,
-        collectBiomarkerCopy(biomarker).join("\n"),
-      );
-      if (issue) {
-        dirtyCopy.push(issue);
-      }
-    }
-
-    expect(dirtyCopy).toEqual([]);
-  });
-
 });
 
 type ExperimentProtocolLike = NonNullable<
@@ -479,10 +449,6 @@ type ExperimentProtocolLike = NonNullable<
 type ExperimentResearchTab = NonNullable<
   ReturnType<typeof resolveHealthCommonsExperimentResearchTab>
 >;
-
-type BiomarkerDetail = Omit<NonNullable<ReturnType<typeof resolveHealthCommonsBiomarkerShell>>, "schemaVersion">
-  & Omit<NonNullable<ReturnType<typeof resolveHealthCommonsBiomarkerOverview>>, "schemaVersion">
-  & NonNullable<ReturnType<typeof resolveHealthCommonsBiomarkerResearch>>;
 
 function collectExperimentProtocolCopy(
   protocol: Pick<
@@ -564,30 +530,6 @@ function collectResearchStudyCopy(
     study.journal,
     study.population ?? "",
     study.title,
-  ];
-}
-
-function collectBiomarkerCopy(biomarker: BiomarkerDetail): string[] {
-  return [
-    biomarker.body,
-    biomarker.summary,
-    biomarker.title,
-    biomarker.shortName,
-    ...biomarker.claims.flatMap((claim) => [
-      claim.text,
-      ...claim.caveats,
-      ...claim.sources.flatMap((source) => [source.title, source.summary, source.typeLabel]),
-    ]),
-    ...biomarker.sourceHighlights.flatMap((source) => [source.title, source.summary, source.typeLabel]),
-    ...biomarker.protocolRankings.flatMap((protocol) => [
-      protocol.title,
-      protocol.description,
-      protocol.mechanism,
-      protocol.category,
-      protocol.burdenLabel,
-      protocol.cautionLabel,
-    ]),
-    biomarker.communityOutcomeSummary.placeholder ?? "",
   ];
 }
 

@@ -1,3 +1,4 @@
+import { timeCliPhase } from "@murphai/runtime-state/node/cli-timing"
 import { loadRuntimeModule } from "../runtime-import.js"
 import { createRuntimeUnavailableError } from "../runtime-errors.js"
 import { VaultCliError } from "@murphai/operator-config/vault-cli-errors"
@@ -31,6 +32,11 @@ function toRuntimeUnavailableCause(error: unknown): unknown {
   }
 
   return error
+}
+
+/** Fixed diagnostic span for the public service seam's cold integrated-services import. */
+export function timeServiceRuntimeLoad<T>(load: () => Promise<T>): Promise<T> {
+  return timeCliPhase("service-runtime-load", load)
 }
 
 export function createUnwiredMethod<
@@ -110,7 +116,6 @@ function isQueryRuntimeModule(value: unknown): value is QueryRuntimeModule {
       "summarizeWearableMetricTrendRuntime",
       "summarizeWearableSleepRuntime",
       "summarizeWearableSleepPatternRuntime",
-      "buildPersonalPatternReportRuntime",
       "summarizeWearableActivityRuntime",
       "summarizeWearableBodyStateRuntime",
       "summarizeWearableDayRuntime",
@@ -159,7 +164,8 @@ export async function loadQueryRuntime(): Promise<QueryRuntimeModule> {
     queryRuntimePromise ??
     (queryRuntimePromise = (async () => {
       try {
-        const queryModule = await loadRuntimeModule("@murphai/query")
+        // Cold shared-promise owner only; the shape check below is excluded.
+        const queryModule = await timeCliPhase("query-runtime-load", () => loadRuntimeModule("@murphai/query"))
 
         if (!isQueryRuntimeModule(queryModule)) {
           throw new TypeError("Query runtime package did not match the expected module shape.")

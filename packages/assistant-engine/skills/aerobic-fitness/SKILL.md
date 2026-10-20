@@ -40,7 +40,7 @@ Ask: "Do you want to understand the cardio/VO2 number, or do you want a training
 
 ## Interpretation Rules
 
-- Wearable VO2 max is an estimate, not a lab test. It is most useful as a within-person trend under similar conditions.
+- Read wearable VO2 max as a device estimate, most useful as a within-person trend under similar conditions.
 - Heat, hills, trail running, poor GPS, illness, fatigue, and weight changes can shift estimates without true fitness change.
 - Resting HR improvements may appear over weeks; VO2 estimates and performance trends usually need several weeks to months.
 
@@ -51,6 +51,6 @@ Ask: "Do you want to understand the cardio/VO2 number, or do you want a training
 
 ## Answer Shape
 
-- For marker questions, explain confidence and likely causes before advice.
+- For marker questions, give the trend and its likely causes before advice.
 - For improvement questions, give the simplest next training lever and route detailed programming to running-cardio.
 - Use a 4-8 week horizon for meaningful trend assessment.

@@ -50,9 +50,6 @@ import {
 } from './setup-services/steps.js'
 import { describeSelectedSetupWearables } from '@murphai/operator-config/setup-runtime-env'
 import {
-  resolveSetupAssistantModelProviderMissingEnv,
-} from '@murphai/operator-config/setup-runtime-env'
-import {
   ASSISTANT_CODEX_MODEL_PROVIDER_CONFIGS,
 } from '@murphai/operator-config/assistant/target-runtime'
 import {
@@ -314,10 +311,7 @@ export function createSetupServices(
     const assistantWithReadiness = assistant
       ? {
           ...assistant,
-          missingEnv: resolveSetupAssistantModelProviderMissingEnv(
-            assistant.modelProvider,
-            persistedEnv,
-          ),
+          missingEnv: [],
         }
       : null
 

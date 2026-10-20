@@ -9,7 +9,6 @@ import {
 } from '../src/assistant/hosted-config.ts'
 import {
   OPENAI_CODEX_MODEL_PROVIDER_CONFIG,
-  VENICE_CODEX_MODEL_PROVIDER_CONFIG,
 } from '../src/assistant/target-runtime.ts'
 
 afterEach(() => {
@@ -96,7 +95,7 @@ test('hosted assistant config parsing and readiness helpers normalize Codex host
     managedBy: 'platform',
     providerConfig: {
       provider: 'codex-cli',
-      model: ' gpt-5.6-terra ',
+      model: ' gpt-6.1-sol ',
       modelProvider: ' openai ',
       reasoningEffort: ' medium ',
       sandbox: 'danger-full-access',
@@ -108,14 +107,6 @@ test('hosted assistant config parsing and readiness helpers normalize Codex host
     providerConfig: {
       provider: 'codex-cli',
       modelProvider: 'openai',
-    },
-  })
-  const veniceProfile = createHostedAssistantProfile({
-    id: 'member-venice',
-    providerConfig: {
-      provider: 'codex-cli',
-      model: 'venice-model',
-      modelProvider: VENICE_CODEX_MODEL_PROVIDER_CONFIG.id,
     },
   })
   const config = createHostedAssistantConfig({
@@ -134,13 +125,12 @@ test('hosted assistant config parsing and readiness helpers normalize Codex host
   assert.deepEqual(resolveReadyHostedAssistantProfile(config), readyProfile)
   assert.equal(resolveReadyHostedAssistantProfile(null), null)
   assert.equal(isHostedAssistantProfileReady(providerOnlyProfile), true)
-  assert.equal(isHostedAssistantProfileReady(veniceProfile), true)
   assert.equal(isHostedAssistantProfileReady(null), false)
   assert.deepEqual(compileHostedAssistantProfileProviderConfig(readyProfile), {
     approvalPolicy: 'never',
     codexCommand: null,
     codexHome: null,
-    model: 'gpt-5.6-terra',
+    model: 'gpt-6.1-sol',
     modelProvider: 'openai',
     oss: false,
     profile: null,
@@ -152,7 +142,7 @@ test('hosted assistant config parsing and readiness helpers normalize Codex host
     approvalPolicy: 'never',
     codexCommand: null,
     codexHome: null,
-    model: 'gpt-5.6-terra',
+    model: 'gpt-6.1-sol',
     modelProvider: 'openai',
     oss: false,
     profile: null,
@@ -433,7 +423,7 @@ test('hosted assistant bootstrap rejects unsupported hosted provider aliases', a
         allowMissing: false,
         env: {
           HOSTED_ASSISTANT_PROVIDER: 'openai',
-          HOSTED_ASSISTANT_MODEL: 'gpt-5.6-terra',
+          HOSTED_ASSISTANT_MODEL: 'gpt-6.1-sol',
           HOSTED_ASSISTANT_BASE_URL: 'https://gateway.internal.test/v1',
         },
       }),

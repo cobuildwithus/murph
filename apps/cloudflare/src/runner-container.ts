@@ -56,7 +56,9 @@ import {
   requireRunnerSlotUserId,
 } from "./runner-slot-binding.js";
 import {
+  classifyRunnerContainerColdWaitDirectCause,
   HOSTED_RUNNER_SHUTTING_DOWN_ERROR_CODE,
+  type RunnerContainerColdWaitDirectCause,
 } from "./runner-container-error-codes.ts";
 import {
   readHostedRunnerContainerIdentity,
@@ -231,7 +233,7 @@ class RunnerContainerCleanupUnsettledError extends Error {
 
 export interface HostedExecutionContainerInvokeRequest {
   launch?: Pick<Extract<HostedRuntimeOwnerCommand, { operation: "prepare_launch" }>,
-    "providerEgressTokenHash" | "customInferenceEnvelope" | "platformAiUsageAllowed">;
+    "providerEgressTokenHash" | "platformAiUsageAllowed">;
   job: HostedExecutionRunnerJobInput;
   orchestration?: HostedRuntimeOrchestrationLatencyDiagnostics | null;
   timeoutMs?: number | null;
@@ -260,6 +262,9 @@ type RunnerContainerLocalStartupFailureStage = Exclude<
 >;
 
 interface RunnerContainerStartupFailureObservation {
+  coldWaitDirectCause?: RunnerContainerColdWaitDirectCause;
+  coldWaitFailure?: "instance_start_aborted" | "port_wait_aborted" | "unclassified";
+  coldWaitNativeRunning?: boolean | "unavailable";
   stage: RunnerContainerLocalStartupFailureStage;
 }
 
@@ -715,6 +720,7 @@ export class RunnerContainer extends Container {
     region: HostedRunnerRegion;
     slotName: string;
     timeoutMs: number;
+    recheck?: true;
   }): Promise<{
     prepared: true;
     runnerImage: { bundleFingerprint: string; sourceFingerprint: string };
@@ -732,6 +738,20 @@ export class RunnerContainer extends Container {
     const timeoutMs = requireRunnerSlotTimeout(input.timeoutMs);
     const deadlineAtEpochMs = Date.now() + timeoutMs;
     const signal = AbortSignal.timeout(timeoutMs);
+    if (input.recheck) {
+      // Observation must neither join the binding lock nor use SDK auto-start.
+      // A racing claim owns the slot; the coordinator discards its late result.
+      const binding = this.requireRunnerSlotStore().read();
+      if (binding.state !== "unbound" || this.isPlatformContainerDefinitelyStopped()
+        || this.warmShellInvalidatedByUnsettledDestroy) {
+        throw new Error("Hosted standby slot is not eligible for recheck.");
+      }
+      this.renewPlatformActivityTimeout("standby-recheck");
+      const health = await this.readStandbyHealth(deadlineAtEpochMs);
+      const runnerImage = this.assertPristineStandbyHealth(health, input);
+      return { prepared: true, runnerImage, releaseId: binding.releaseId,
+        region: binding.region, slotName: binding.slotName };
+    }
     return await this.withLifecycleLock(async () => {
       throwIfRunnerContainerOperationAborted(signal);
       const store = this.requireRunnerSlotStore();
@@ -940,7 +960,8 @@ export class RunnerContainer extends Container {
   private async readStandbyHealth(
     deadlineAtEpochMs: number,
   ): Promise<Record<string, unknown>> {
-    const response = await this.containerFetch(RUNNER_HEALTH_URL, {
+    // Observe only: SDK containerFetch may start a stopped process.
+    const response = await this.ctx.container!.getTcpPort(RUNNER_PORT).fetch(RUNNER_HEALTH_URL, {
       method: "GET",
       signal: AbortSignal.timeout(requireRunnerSlotRemainingTime(deadlineAtEpochMs)),
     });
@@ -1033,7 +1054,6 @@ export class RunnerContainer extends Container {
     // Reserve durably before launch. Retrying after eviction never reexecutes
     // an ambiguous invocation; reconciliation inspects this exact target.
     if (receipts.register(identity, { workspaceVersion: request.workspaceVersion,
-      customInferenceEnvelope: authority.owner.customInferenceEnvelope,
       platformAiUsageAllowed: authority.owner.platformAiUsageAllowed }) === "existing") return { accepted: true };
     const result = this.invoke(payload);
     this.ctx.waitUntil(result.then(async (completed) => {
@@ -1108,7 +1128,7 @@ export class RunnerContainer extends Container {
         || owner.runnerContainerName !== binding.slotName || owner.workspaceVersion === null
         || !["starting", "active", "retiring"].includes(owner.phase)) return null;
       receipts.restoreProviderContext(invocation, { workspaceVersion: owner.workspaceVersion,
-        customInferenceEnvelope: owner.customInferenceEnvelope, platformAiUsageAllowed: owner.platformAiUsageAllowed });
+        platformAiUsageAllowed: owner.platformAiUsageAllowed });
       invocation = receipts.readProviderInvocation();
     }
     const state = this.readRunnerSlotBindingOptional()?.state;
@@ -1440,7 +1460,7 @@ export class RunnerContainer extends Container {
           cleanupUnsettled: true,
           orchestrationAttemptId: input.orchestrationAttemptId,
           readinessRequestedAtEpochMs,
-          stage: startupFailureObservation.stage,
+          ...startupFailureObservation,
           timeoutMs: input.timeoutMs,
         });
       }
@@ -1450,7 +1470,7 @@ export class RunnerContainer extends Container {
         cleanupUnsettled: cleanupSettlementTimedOut,
         orchestrationAttemptId: input.orchestrationAttemptId,
         readinessRequestedAtEpochMs,
-        stage: startupFailureObservation.stage,
+        ...startupFailureObservation,
         timeoutMs: input.timeoutMs,
       });
       if (cleanupSettlementTimedOut) {
@@ -2400,8 +2420,27 @@ export class RunnerContainer extends Container {
         command: { operation: "reconcile" },
         timeoutMs: RUNNER_DESTROY_SETTLE_TIMEOUT_MS,
       });
-      return cutover === "postgres" && status === "observed"
-        && (owner?.runnerContainerName !== binding.slotName || owner.phase === "idle");
+      if (cutover !== "postgres" || status !== "observed") return false;
+      if (owner?.runnerContainerName !== binding.slotName || owner.phase === "idle") return true;
+      // A lost outer result can leave a completed owner retiring after its
+      // mailbox drains. The existing lifecycle alarm must recover it even when
+      // there is no new work for Temporal to dispatch. Receipt alone is not
+      // stoppedness: require the exact identity and an inactive native fence.
+      if (owner.phase !== "retiring" || owner.completedAt === null) return false;
+      const receipt = this.requireInvocationReceiptStore().read();
+      if (receipt?.state === "completed" && receipt.attemptId === owner.attemptId
+        && receipt.generation === owner.generation
+        && !(await this.readActiveRuntimeUserFence()).active) {
+        await recordHostedRuntimeOwnerCompletion({
+          source: this.environment, userId: binding.userId,
+          attemptId: receipt.attemptId, generation: receipt.generation,
+          result: receipt.immediateRecheckRequested ? { immediateRecheckRequested: true } : {},
+          settledRunnerContainerName: binding.slotName,
+        });
+      }
+      // Re-read canonical ownership on the already-scheduled next lifecycle
+      // pass before destruction; a concurrent successor may now own this slot.
+      return false;
     } catch (error) {
       this.logLifecycleCleanupFailure(
         "Hosted execution container could not verify runtime ownership during idle cleanup.",
@@ -3137,6 +3176,33 @@ export class RunnerContainer extends Container {
           portProbeTimeoutMS: RUNNER_PORT_PROBE_TIMEOUT_MS,
         },
       }).catch((error: unknown) => {
+        if (options.startupFailureObservation) {
+          options.startupFailureObservation.coldWaitFailure = "unclassified";
+          try {
+            // Pinned SDK wait boundaries, not allocation/process root causes.
+            const message = error instanceof Error ? error.message : undefined;
+            options.startupFailureObservation.coldWaitFailure =
+              message === "Aborted waiting for container to start as we received a cancellation signal"
+                ? "instance_start_aborted"
+                : message === "Container request aborted."
+                  ? "port_wait_aborted"
+                  : "unclassified";
+          } catch {
+            // An unreadable diagnostic must not replace the caller's failure.
+          }
+          options.startupFailureObservation.coldWaitDirectCause =
+            classifyRunnerContainerColdWaitDirectCause(error);
+          options.startupFailureObservation.coldWaitNativeRunning = "unavailable";
+          try {
+            // Synchronous native flag at the catch, not proof of health or listening.
+            const running = this.ctx.container?.running;
+            if (typeof running === "boolean") {
+              options.startupFailureObservation.coldWaitNativeRunning = running;
+            }
+          } catch {
+            // An unavailable native diagnostic must not replace the startup failure.
+          }
+        }
         // The SDK can replace a cancellation reason with a plain Error.
         throwIfRunnerContainerOperationAborted(startupAbortSignal);
         throw error;
@@ -4634,11 +4700,10 @@ function hostedRunnerContainerFragmentsOverlap(left: string, right: string): boo
     && (normalizedLeft.includes(normalizedRight) || normalizedRight.includes(normalizedLeft));
 }
 
-function emitRunnerContainerStartupFailureObservation(input: {
+function emitRunnerContainerStartupFailureObservation(input: RunnerContainerStartupFailureObservation & {
   cleanupUnsettled: boolean;
   orchestrationAttemptId?: string;
   readinessRequestedAtEpochMs: number;
-  stage: RunnerContainerLocalStartupFailureStage;
   timeoutMs: number;
 }): void {
   try {
@@ -4655,6 +4720,15 @@ function emitRunnerContainerStartupFailureObservation(input: {
         ...(input.orchestrationAttemptId === undefined
           ? {}
           : { orchestrationAttemptId: input.orchestrationAttemptId }),
+        ...(input.coldWaitFailure === undefined
+          ? {}
+          : { runtimeStartupColdWaitFailure: input.coldWaitFailure }),
+        ...(input.coldWaitDirectCause === undefined
+          ? {}
+          : { runtimeStartupColdWaitDirectCause: input.coldWaitDirectCause }),
+        ...(input.coldWaitNativeRunning === undefined
+          ? {}
+          : { runtimeStartupColdWaitNativeRunning: input.coldWaitNativeRunning }),
         runtimeStartupConfirmTimeoutMs: input.timeoutMs,
         runtimeStartupCleanupUnsettled: input.cleanupUnsettled,
         runtimeStartupFailureElapsedMs: elapsedMs,
@@ -4957,6 +5031,25 @@ interface RunnerContainerHealthMetadata {
   serverListeningAtEpochMs?: number;
 }
 
+// activeJobCount includes finished jobs whose completion callback is still
+// settling. Children that report that subset let a new job in alongside it;
+// older children keep the total-only check, and a malformed pair stays busy.
+function readRunnerContainerAdmissionBusy(payload: Record<string, unknown>): boolean {
+  const total = payload.activeJobCount;
+  if (!("settlingCompletionCallbackCount" in payload)) {
+    return typeof total === "number" && total > 0;
+  }
+  const settling = payload.settlingCompletionCallbackCount;
+  if (!isRunnerContainerCount(total) || !isRunnerContainerCount(settling) || settling > total) {
+    return true;
+  }
+  return total - settling > 0;
+}
+
+function isRunnerContainerCount(value: unknown): value is number {
+  return Number.isSafeInteger(value) && (value as number) >= 0;
+}
+
 function readRunnerContainerHealthMetadata(
   payload: Record<string, unknown>,
 ): RunnerContainerHealthMetadata {
@@ -4967,8 +5060,7 @@ function readRunnerContainerHealthMetadata(
     payload.serverListeningAtEpochMs,
   );
   return {
-    // The entrypoint retains this count until its completion receipt settles.
-    runnerBusy: typeof payload.activeJobCount === "number" && payload.activeJobCount > 0,
+    runnerBusy: readRunnerContainerAdmissionBusy(payload),
     ...(processStartedAtEpochMs === undefined ? {} : {
       processStartedAtEpochMs,
     }),

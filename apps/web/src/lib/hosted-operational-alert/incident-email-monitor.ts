@@ -71,6 +71,17 @@ export interface HostedOperationalAlertMonitorSpec<
   id: string;
   idempotencyScope: string;
   kind: string;
+  /**
+   * Synchronous, non-throwing scheduling hook for a newly built notification.
+   * It runs after the claim commits and before delivery; retries that reuse a
+   * persisted message never call it, so it cannot bind a newer sample.
+   */
+  onNotificationClaimed?(input: {
+    attemptedAt: Date;
+    health: Health;
+    healthCheckedAt: Date;
+    incidentId: string;
+  }): void;
   readHealth(input: { now: Date; prisma: Client }): Promise<Health>;
   reminderIntervalMs?: number;
   sendDuringQuietHours?: true;
@@ -420,6 +431,18 @@ async function claimHostedOperationalAlertSend<
 
   if (claimed.count !== 1) {
     return { action: null, health, outcome: "coalesced" };
+  }
+  if (!retrying && input.spec.onNotificationClaimed) {
+    try {
+      input.spec.onNotificationClaimed({
+        attemptedAt: admissionCheckedAt,
+        health,
+        healthCheckedAt,
+        incidentId,
+      });
+    } catch {
+      // Diagnostics never change claim or delivery semantics.
+    }
   }
   return {
     action: {

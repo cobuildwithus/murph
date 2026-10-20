@@ -126,8 +126,132 @@ import {
   readHostedSystemMailboxState,
   updateHostedSystemMailboxState,
 } from "../src/hosted-runtime/system-mailbox-state.ts";
+import {
+  compactHostedConversationMailboxHandledItemSelection,
+  hasHostedPendingAssistantInputWakeCandidate,
+  inspectHostedPendingAssistantInputWakeCandidate,
+  readHostedPendingAssistantInputIds,
+} from "../src/hosted-runtime/pending-input-index.ts";
 
 describe("hosted workspace runtime entrypoint", () => {
+  test("converges a restored terminal-only index after an empty import advances consumption", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-consumed-convergence-"));
+    const artifactBytesByHash = new Map<string, Uint8Array>();
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const farWakeAt = new Date(Date.parse(TEST_NOW) + 86_400_000).toISOString();
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(TEST_NOW));
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      await ensureHostedBootstrapMetadataForSystemMailboxTest(vaultRoot);
+      await upsertAutomation({
+        automationId: "automation_01J00000000000000000000001", continuityPolicy: "fresh",
+        instructions: "Send the synthetic scheduled reminder.", now: new Date(TEST_NOW),
+        route: {
+          channel: "linq", deliveryTarget: "synthetic_consumed_chat", identityId: null,
+          participantId: null, threadId: "synthetic_consumed_chat", threadIsDirect: true,
+        },
+        schedule: { kind: "at", at: farWakeAt }, status: "active",
+        title: "Synthetic consumption reminder", vaultRoot,
+      });
+      let unacknowledgedInputId = "";
+      for (let seq = 1; seq <= 65; seq += 1) {
+        const inputId = await stagePendingLinqAssistantInputForMailboxItem({
+          item: createMailboxItem({ id: `mailbox_consumed_${seq}`, laneSeq: String(seq) }),
+          vaultRoot,
+        });
+        await writeSyntheticAssistantAutoReplyTerminalEvidence({ inputId, vaultRoot });
+        await recordHostedMailboxAssistantInputItem({
+          inputId, mailboxItemId: `mailbox_consumed_${seq}`, vault: vaultRoot,
+        });
+        if (seq === 65) unacknowledgedInputId = inputId;
+      }
+      const importState = createEmptyHostedMailboxImportState();
+      importState.watermarks.conversation = "65";
+      await writeMailboxImportStateFile(vaultRoot, importState);
+      assert.deepEqual(await inspectHostedPendingAssistantInputWakeCandidate({ vaultRoot }), {
+        hasCandidate: false, indexComplete: false,
+      });
+      const initialSnapshot = await createVaultSnapshotBundle({ vaultRoot });
+      artifactBytesByHash.set(initialSnapshot.hash, initialSnapshot.bytes);
+      let workspace = createWorkspaceState({
+        snapshotRef: initialSnapshot.snapshotRef,
+        nextWakeAt: farWakeAt, nextWakeReason: "assistant",
+        nextDefaultProcessingWakeAt: TEST_NOW, nextDefaultProcessingWakeReason: "assistant",
+        systemMailboxProgressGeneration: "7",
+        redactedStatus: {
+          hostedMailboxConversationImportedSeq: "65",
+          hostedMailboxConversationConsumedSeq: "0",
+          hostedMailboxSystemImportedSeq: "0",
+        },
+      });
+      // Restore the published checkpoint again: acknowledgment must survive a
+      // new invocation, while terminal but unacknowledged input remains retained.
+      for (let invocation = 0; invocation < 2; invocation += 1) {
+        const checkpointCountBeforeInvocation = checkpointRequests.length;
+        await runHostedWorkspaceRuntimeJobInProcess(
+          createWorkspaceRuntimeJobInput({ request: {
+            runnerIdleTtlMs: 1, workspaceVersion: workspace.version,
+          } }),
+          {
+            vaultRoot,
+            platform: createPlatform({
+              artifactBytesByHash,
+              mailboxPort: createMailboxPort({
+                events, items: [],
+                consumedSeqByLane: [{ lane: "conversation", consumedSeq: "64" }],
+              }),
+              workspacePort: createWorkspacePort({ events, checkpointRequests, workspace }),
+            }),
+            async importItem() { throw new Error("An empty mailbox must not import items."); },
+            // Isolate the steady-state empty pass from assistant post-checkpoint
+            // work, which can independently request a near-term continuation.
+            async runAssistantPhase() {
+              return {
+                progressed: false, runtimeProjectionCheckpointRequested: true,
+                nextWakeAt: farWakeAt, nextWakeReason: "assistant",
+              };
+            },
+            async createCheckpointSnapshot() {
+              const snapshot = await createVaultSnapshotBundle({ vaultRoot });
+              artifactBytesByHash.set(snapshot.hash, snapshot.bytes);
+              return { snapshotRef: snapshot.snapshotRef };
+            },
+          },
+        );
+        assert.ok(checkpointRequests.length > checkpointCountBeforeInvocation);
+        const checkpoint = checkpointRequests.at(-1);
+        assert.ok(checkpoint);
+        assert.equal(checkpoint.nextDefaultProcessingWakeAt, farWakeAt,
+          "An acknowledged terminal index must not re-arm the 30-second maintenance wake.");
+        assert.equal(checkpoint.redactedStatus?.hostedMailboxConversationConsumedSeq, "64",
+          "The assistant phase must preserve the freshly observed consumption floor.");
+        assert.equal(checkpoint.systemMailboxProgressGeneration, "7");
+        assert.deepEqual(await readHostedPendingAssistantInputIds({ vaultRoot }), [unacknowledgedInputId]);
+        assert.deepEqual(checkpoint.handledConversationMailboxItemIds, ["mailbox_consumed_65"]);
+        workspace = createWorkspaceState({
+          ...workspace,
+          snapshotRef: checkpoint.snapshotRef,
+          redactedStatus: checkpoint.redactedStatus,
+          nextDefaultProcessingWakeAt: checkpoint.nextDefaultProcessingWakeAt,
+          version: String(BigInt(checkpoint.expectedWorkspaceVersion) + 1n),
+        });
+      }
+      const freshInputId = await stagePendingLinqAssistantInputForMailboxItem({
+        item: createMailboxItem({ id: "mailbox_consumed_fresh", laneSeq: "66" }),
+        vaultRoot,
+      });
+      await compactHostedConversationMailboxHandledItemSelection({ consumedThroughSeq: "64", vaultRoot });
+      assert.deepEqual(await readHostedPendingAssistantInputIds({ vaultRoot }), [unacknowledgedInputId, freshInputId]);
+      assert.equal(await hasHostedPendingAssistantInputWakeCandidate({ vaultRoot }), true,
+        "Fresh unconsumed foreground input must remain runnable after acknowledgment compaction.");
+      assert.equal(mocks.runAssistantAutomationPass.mock.calls.length, 0);
+    } finally {
+      vi.useRealTimers();
+      await removeTempRoot(vaultRoot);
+    }
+  });
   test("clears a stale delivery projection while the same workspace drains device work", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-stale-delivery-"));
     const artifactBytesByHash = new Map<string, Uint8Array>();
@@ -902,380 +1026,6 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
       await removeTempRoot(vaultRoot);
     }
   });
-
-  test.each([
-    { name: "managed provider changed", invocationRevision: null, selectedRevision: null },
-    { name: "custom endpoint selected", invocationRevision: null, selectedRevision: 2 },
-    { name: "custom endpoint replaced and reselected", invocationRevision: 1, selectedRevision: 2 },
-    { name: "custom endpoint deselected or deleted", invocationRevision: 1, selectedRevision: null },
-    { name: "custom identity absent from older Web", invocationRevision: 1, selectedRevision: undefined },
-  ])("hands a pending turn to a fresh invocation without a settings wake: $name", async ({
-    invocationRevision,
-    selectedRevision,
-  }) => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date(TEST_NOW));
-    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-provider-handoff-"));
-    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
-    const mailboxItems: HostedMailboxItem[] = [];
-    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
-    let assistantPhaseCount = 0;
-    let providerEgressCount = 0;
-
-    try {
-      const result = await runHostedWorkspaceRuntimeJobInProcess(
-        createWorkspaceRuntimeJobInput({
-          ...(invocationRevision === null ? {} : {
-            forwardedEnv: {
-              HOSTED_ASSISTANT_PROVIDER: "hosted-custom-inference",
-              HOSTED_ASSISTANT_MODEL: `murph-custom-r${invocationRevision}`,
-              HOSTED_ASSISTANT_CONTEXT_WINDOW_TOKENS: "131072",
-              MURPH_CUSTOM_INFERENCE_API_KEY: "synthetic-sentinel",
-            },
-          }),
-          request: {
-            attemptId: "attempt_provider_handoff",
-            runnerIdleTtlMs: 180_000,
-            leaseGeneration: "1",
-            userId: TEST_USER_ID,
-            workspaceVersion: "0",
-          },
-        }),
-        {
-          async createCheckpointSnapshot() {
-            return {
-              snapshotRef: createSnapshotFixtureRef({
-                hash: "a".repeat(64),
-                size: 512,
-              }),
-            };
-          },
-          async importItem(item) {
-            return {
-              assistantInputId: await stageAssistantInputEventForMailboxItem({
-                item: item.item,
-                vaultRoot,
-              }),
-              status: "imported",
-            };
-          },
-          platform: createPlatform({
-            assistantConfigurationToolPort: {
-              async request() {
-                return {
-                  action: "read",
-                  result: {
-                    availableModels: ["gpt-5.6-luna", "gpt-6-sol"],
-                    availableProviders: ["openai", "venice"],
-                    availableReasoningEfforts: ["low", "medium", "high", "xhigh"],
-                    configurationAvailable: true,
-                    dormantSolPreference: false,
-                    model: "gpt-6-sol",
-                    provider: "venice",
-                    reasoningEffort: "low",
-                    solAvailable: false,
-                  },
-                };
-              },
-            },
-            mailboxPort: createMailboxPort({
-              assistantCustomInferenceRevision: selectedRevision,
-              assistantProvider: selectedRevision == null ? "venice" : "openai",
-              events: [],
-              items: mailboxItems,
-            }),
-            workspacePort: createWorkspacePort({
-              checkpointRequests,
-              checkpointWorkspace: (request) => {
-                mailboxItems.push(createMailboxItem({
-                  id: "mailbox_item_provider_handoff_retry",
-                  laneSeq: "1",
-                }));
-                runtimeWakeSignal.notify();
-                return createWorkspaceState({
-                  nextWakeAt: request.nextWakeAt ?? null,
-                  nextWakeReason: request.nextWakeReason ?? null,
-                  redactedStatus: request.redactedStatus ?? null,
-                  snapshotRef: request.snapshotRef,
-                  version: String(BigInt(request.expectedWorkspaceVersion) + 1n),
-                });
-              },
-              events: [],
-              workspace: createWorkspaceState({ version: "0" }),
-            }),
-          }),
-          runtimeWakeSignal,
-          async runAssistantPhase(input) {
-            assistantPhaseCount += 1;
-            if (assistantPhaseCount > 1) {
-              throw new Error(
-                "A stale-provider invocation must checkpoint before servicing another wake.",
-              );
-            }
-            try {
-              await input.beforeProviderAcceptedInputs?.({
-                turnId: "turn_hosted_runtime_test",
-                acceptedInputs: [{ id: "system_provider_handoff", source: "system" }],
-              });
-            } catch (error) {
-              assert.equal(
-                error instanceof Error ? error.name : null,
-                "AssistantActiveTurnInputUnavailableError",
-              );
-              return {
-                checkpointReason: "canonical_runtime_commit",
-                nextWakeAt: new Date(Date.now() + 30_000).toISOString(),
-                progressed: true,
-              };
-            }
-            providerEgressCount += 1;
-            return { progressed: false };
-          },
-          vaultRoot,
-        },
-      );
-
-      assert.equal(providerEgressCount, 0);
-      assert.equal(assistantPhaseCount, 1);
-      assert.equal(result.immediateRecheckRequested, true);
-      assert.equal(checkpointRequests.length, 1);
-    } finally {
-      vi.useRealTimers();
-      await removeTempRoot(vaultRoot);
-    }
-  });
-
-  test.each([null, 3])("uses matching mailbox route identity without rereading settings (custom revision %s)", async (revision) => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date(TEST_NOW));
-    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-provider-authority-"));
-    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
-    let providerEgressCount = 0;
-
-    try {
-      const result = await runHostedWorkspaceRuntimeJobInProcess(
-        createWorkspaceRuntimeJobInput({
-          ...(revision === null ? {} : {
-            forwardedEnv: {
-              HOSTED_ASSISTANT_PROVIDER: "hosted-custom-inference",
-              HOSTED_ASSISTANT_MODEL: `murph-custom-r${revision}`,
-              HOSTED_ASSISTANT_CONTEXT_WINDOW_TOKENS: "131072",
-              MURPH_CUSTOM_INFERENCE_API_KEY: "synthetic-sentinel",
-            },
-          }),
-          request: {
-            attemptId: "attempt_provider_authority_unavailable",
-            runnerIdleTtlMs: 180_000,
-            leaseGeneration: "1",
-            userId: TEST_USER_ID,
-            workspaceVersion: "0",
-          },
-        }),
-        {
-          async createCheckpointSnapshot() {
-            throw new Error("Provider authority deferral must not checkpoint.");
-          },
-          async importItem() {
-            return { status: "imported" };
-          },
-          platform: createPlatform({
-            assistantConfigurationToolPort: {
-              async request() {
-                throw new Error("control plane unavailable");
-              },
-            },
-            mailboxPort: createMailboxPort({
-              assistantCustomInferenceRevision: revision,
-              assistantProvider: revision === null ? "openai" : "venice",
-              events: [],
-              items: [],
-            }),
-            workspacePort: createWorkspacePort({
-              checkpointRequests,
-              events: [],
-              workspace: createWorkspaceState({ version: "0" }),
-            }),
-          }),
-          async runAssistantPhase(input) {
-            try {
-              await input.beforeProviderAcceptedInputs?.({
-                turnId: "turn_hosted_runtime_test",
-                acceptedInputs: [{ id: "system_provider_authority", source: "system" }],
-              });
-            } catch (error) {
-              assert.equal(
-                error instanceof Error ? error.name : null,
-                "AssistantActiveTurnInputUnavailableError",
-              );
-              return { progressed: false };
-            }
-            providerEgressCount += 1;
-            return { progressed: false };
-          },
-          vaultRoot,
-        },
-      );
-
-      assert.equal(providerEgressCount, 1);
-      assert.equal(result.status, "idle");
-      assert.equal(checkpointRequests.length, 0);
-    } finally {
-      vi.useRealTimers();
-      await removeTempRoot(vaultRoot);
-    }
-  });
-
-  test("hands a detached ask to a fresh invocation after an acknowledged provider update", async () => {
-    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-detached-provider-handoff-"));
-    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
-    const events: string[] = [];
-    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
-    const prepareStarted = createDeferred<void>();
-    const prepareRelease = createDeferred<void>();
-    const idleMaintenanceCallCount =
-      mocks.runHostedIdleCheckpointMaintenance.mock.calls.length;
-    const askItem = createMailboxItem({
-      dedupeKey: "ask_event_detached_provider_handoff",
-      id: "mailbox_item_detached_provider_handoff",
-      kind: "assistant.ask.requested",
-      lane: "system",
-      laneSeq: "1",
-    });
-    let completionCalls = 0;
-    let providerEgressCount = 0;
-
-    mocks.executeReadOnlyAssistantAsk.mockImplementationOnce(async (askInput) => {
-      events.push("ask.started");
-      await askInput.beforeProviderEntry?.();
-      providerEgressCount += 1;
-      return { answer: "stale answer", outcome: "answered" };
-    });
-
-    try {
-      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
-      const result = await withRealTimeout(
-        runHostedWorkspaceRuntimeJobInProcess(
-          createWorkspaceRuntimeJobInput({
-            request: {
-              attemptId: "attempt_detached_provider_handoff",
-              runnerIdleTtlMs: 180_000,
-              leaseGeneration: "1",
-              userId: TEST_USER_ID,
-              workspaceVersion: "0",
-            },
-          }),
-          {
-            async createCheckpointSnapshot() {
-              return {
-                snapshotRef: createSnapshotFixtureRef({
-                  hash: "b".repeat(64),
-                  size: 512,
-                }),
-              };
-            },
-            async importItem(item) {
-              events.push("ask.imported");
-              return await enqueueHostedSystemMailboxItem({
-                item,
-                vaultRoot,
-                wake: createAssistantAskRequestedWake({
-                  eventId: askItem.dedupeKey,
-                }),
-              });
-            },
-            platform: createPlatform({
-              assistantAskPort: {
-                async request(request) {
-                  if (request.action === "complete") {
-                    events.push("ask.completed");
-                    completionCalls += 1;
-                    return { action: "complete", status: "completed" };
-                  }
-                  events.push("ask.prepared");
-                  prepareStarted.resolve();
-                  await prepareRelease.promise;
-                  return {
-                    action: "prepare",
-                    question: "What did the group decide?",
-                    status: "ready",
-                    targetLabel: "100 Club",
-                  };
-                },
-              },
-              assistantConfigurationToolPort: {
-                async request() {
-                  return {
-                    action: "update",
-                    result: {
-                      appliesAt: "next_turn",
-                      availableModels: ["gpt-5.6-luna", "gpt-6-sol"],
-                      availableProviders: ["openai", "venice"],
-                      availableReasoningEfforts: ["low", "medium", "high", "xhigh"],
-                      configurationAvailable: true,
-                      dormantSolPreference: false,
-                      model: "gpt-6-sol",
-                      provider: "venice",
-                      reasoningEffort: "low",
-                      requiredPlan: null,
-                      solAvailable: false,
-                      status: "updated",
-                    },
-                  };
-                },
-              },
-              mailboxPort: createMailboxPort({ events, items: [askItem] }),
-              workspacePort: createWorkspacePort({
-                checkpointRequests,
-                events: [],
-                workspace: createWorkspaceState({ version: "0" }),
-              }),
-            }),
-            async runAssistantPhase(input) {
-              events.push("foreground");
-              await prepareStarted.promise;
-              await input.runtime.platform.assistantConfigurationToolPort?.request({
-                action: "update",
-                assistantInputId: "ain_synthetic_provider_update",
-                provider: "venice",
-              });
-              prepareRelease.resolve();
-              return { progressed: false };
-            },
-            runtimeWakeSignal,
-            vaultRoot,
-          },
-        ),
-        30_000,
-        () => JSON.stringify({
-          checkpointCount: checkpointRequests.length,
-          completionCalls,
-          events,
-          providerEgressCount,
-        }),
-      );
-
-      assert.equal(providerEgressCount, 0);
-      assert.equal(completionCalls, 0);
-      assert.equal(result.status, "scheduled");
-      assert.equal(result.nextWakeReason, "assistant");
-      assert.ok(result.nextWakeAt);
-      assert.equal(
-        mocks.runHostedIdleCheckpointMaintenance.mock.calls[
-          idleMaintenanceCallCount
-        ]?.[0].pendingWork,
-        true,
-      );
-      assert.equal(checkpointRequests.length, 1);
-      const pending = (await readHostedSystemMailboxState(vaultRoot)).pending;
-      assert.equal(pending.length, 1);
-      assert.equal(pending[0]?.itemId, askItem.id);
-      assert.equal(pending[0]?.status, "pending");
-      assert.equal(pending[0]?.nextAttemptAt, null);
-    } finally {
-      prepareRelease.resolve();
-      await removeTempRoot(vaultRoot);
-    }
-  }, 45_000);
 
   test("keeps device-sync ownership when invocation projections tie on wake time", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));

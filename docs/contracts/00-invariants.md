@@ -532,11 +532,9 @@ it has been explicitly elevated to a cross-cutting invariant.
   the irreversible-effect boundary. Later authority loss takes a typed durable
   disposition rather than retroactively erasing accepted work or spawning
   repair machinery. Invocation configuration remains a separate lifecycle
-  responsibility: a warm provider-specific invocation observes the saved route
-  through normal work reads before provider entry; inference settings changes
-  alone do not schedule execution. A mismatch hands accepted work to a fresh
-  invocation without consuming or rejecting it; an unavailable read retains
-  the work for retry. This check does not reauthorize the accepted inputs.
+  responsibility: saved OpenAI model and reasoning changes apply at the next
+  accepted turn; a running turn retains its admitted target. This configuration
+  does not reauthorize the accepted inputs.
 - When provider target identity and audience privacy are coupled, one live
   owner resolves the effective target and audience class atomically before
   model work. Persisted routes, snapshots, and legacy markers are hints, never

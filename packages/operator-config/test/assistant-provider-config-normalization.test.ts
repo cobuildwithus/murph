@@ -15,8 +15,8 @@ describe('assistant provider config normalization', () => {
       target: {
         codexCommand: null,
         codexHome: null,
-        model: ' gpt-5.6-terra ',
-        modelProvider: ' VERCEL-AI-GATEWAY ',
+        model: ' gpt-6.1-sol ',
+        modelProvider: ' OPENAI ',
         oss: false,
         profile: null,
       },
@@ -29,11 +29,11 @@ describe('assistant provider config normalization', () => {
 
     const normalized = normalizeAssistantProviderConfig(staleNormalizedConfig)
 
-    expect(normalized.target.model).toBe('gpt-5.6-terra')
-    expect(normalized.target.modelProvider).toBe('vercel-ai-gateway')
+    expect(normalized.target.model).toBe('gpt-6.1-sol')
+    expect(normalized.target.modelProvider).toBe('openai')
     expect(serializeAssistantProviderSessionOptions(normalized)).toMatchObject({
       executionDriver: 'codex-app-server',
-      modelProvider: 'vercel-ai-gateway',
+      modelProvider: 'openai',
       provider: 'codex-cli',
       resumeKind: 'codex-thread',
     })

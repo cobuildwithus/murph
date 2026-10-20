@@ -107,6 +107,7 @@ import { sanitizeAssistantOutboxIntentForPersistence } from './redaction.js'
 import {
   normalizeAssistantResponseMediaList,
 } from './response-media.js'
+import { stripAssistantResponseMediaPlacement } from './reply-bubbles.js'
 import { writeAssistantAutoReplyIntentProvenance } from './automation/intent-provenance.js'
 import {
   assistantDeviceActivityAuthorityKeyMatches,
@@ -326,7 +327,9 @@ export async function createAssistantOutboxIntent(
     await ensureAssistantState(paths)
     const createdAt = input.createdAt ?? new Date().toISOString()
     const initialState = input.initialState ?? { status: 'pending' as const }
-    const media = normalizeAssistantResponseMediaList(input.media ?? [])
+    const media = stripAssistantResponseMediaPlacement(
+      normalizeAssistantResponseMediaList(input.media ?? []),
+    )
     const card = input.card == null
       ? null
       : assistantResponseCardSchema.parse(input.card)

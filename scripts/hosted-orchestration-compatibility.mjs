@@ -91,9 +91,6 @@ export function inspectPullRequest(raw, {
   }
   const headSha = requiredString(raw.head.sha, "public pull request head SHA");
   assertSha(headSha, "public pull request head SHA");
-  if (headSha !== expectedHeadSha) {
-    throw new Error("Public pull request head changed after Repo Hygiene.");
-  }
   const changedFiles = raw.changed_files;
   if (!Number.isSafeInteger(changedFiles) || changedFiles < 0) {
     throw new Error("Public pull request changed-file count is invalid.");
@@ -113,6 +110,9 @@ export function inspectPullRequest(raw, {
     && raw.user.type === "User";
   return {
     changedFiles,
+    // A newer push owns the pull request once its head moves past the commit
+    // Repo Hygiene tested; that commit's own run publishes its status.
+    current: headSha === expectedHeadSha,
     headSha,
     targetsDefaultBranch: baseRef === expectedBaseRef,
     trusted,
@@ -152,6 +152,9 @@ export async function selectPullRequest({
     "public pull request lookup",
   ), { expectedBaseRef, expectedHeadSha, prNumber, repository });
 
+  if (!pullRequest.current) {
+    return { ...pullRequest, selected: false };
+  }
   if (pullRequest.changedFiles > MAX_CHANGED_FILES) {
     return { ...pullRequest, selected: true };
   }
@@ -286,6 +289,9 @@ export function inspectExactPublicHead(raw, {
     prNumber,
     repository,
   });
+  if (!inspected.current) {
+    throw new Error("Public pull request head changed after Repo Hygiene.");
+  }
   if (!inspected.trusted) {
     throw new Error("Public pull request is no longer a same-repository human-authored head.");
   }
@@ -906,6 +912,7 @@ async function runSelectCommand() {
     token,
   });
   await writeOutputs({
+    current: String(selected.current),
     head_sha: selected.headSha,
     selected: String(selected.selected),
     targets_default_branch: String(selected.targetsDefaultBranch),

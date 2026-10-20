@@ -2,7 +2,7 @@ import {
   HEALTH_COMMONS_BIOMARKER_DESIRED_DIRECTIONS,
   type HealthCommonsBiomarkerDesiredDirection,
 } from "@murphai/contracts";
-import biomarkerIndex from "@murphai/health-commons/generated/web/browse/biomarkers.json";
+import biomarkerIndex from "@murphai/health-commons/generated/biomarker-desired-directions.json";
 import { resolveExperimentMetricIdentity } from "@murphai/query/browser-experiments";
 
 let biomarkerDesiredDirectionByKey: Map<

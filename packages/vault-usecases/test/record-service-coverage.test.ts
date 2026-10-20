@@ -1734,7 +1734,13 @@ describe("record service seams", () => {
       })),
       "../src/query-runtime.ts": mockActualModule("../src/query-runtime.ts", (actual) => ({
         ...actual,
-        loadQueryRuntime: vi.fn(async () => journalQuery),
+        loadQueryRuntime: vi.fn(async () => ({
+          ...journalQuery,
+          readExperimentQuerySource: vi.fn(async () => ({
+            readModel: await journalQuery.readVault(),
+            listMetricPoints: journalQuery.listMetricPoints,
+          })),
+        })),
       })),
     });
     assert.deepEqual(await journal.createExperimentRecord({ vault: "./vault", slug: "focus-sprint" }), {

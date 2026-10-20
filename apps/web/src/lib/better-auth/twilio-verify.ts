@@ -114,9 +114,10 @@ function parseVerifyFailure(body: string): VerifyResponseFailure {
     && result.code >= 10000 && result.code <= 99999 ? result.code : undefined;
   const message = "message" in result && typeof result.message === "string" ? result.message : "";
   const parameter = code === 60200
-    ? /^Invalid parameter: (To|Channel|RiskCheck|Code|VerificationSid)$/u.exec(message)?.[1]
+    ? /^Invalid parameter(?:: (To|Channel|RiskCheck|Code|VerificationSid)| `(To)`: \+[1-9]\d{6,14})$/u
+      .exec(message)?.slice(1).find(Boolean)
     : undefined;
-  // Observation only: keep the exact parameter classifier above unchanged.
+  // Other anchored labels remain observation only, never public error authority.
   const hint = code === 60200 && !parameter
     ? /^Invalid parameter(?:: ([A-Za-z]+)|(?::)? `([A-Za-z]+)`)(?=$|[ \t:])/u.exec(message)
     : null;
@@ -141,17 +142,23 @@ function readVerifyConfig() {
 
 function verificationError(operation: "send" | "check", reason: VerifyFailure, status?: number, failure?: VerifyResponseFailure) {
   if (operation === "send" && reason === "provider_http" && status === 400
-    && failure?.code === 60200 && failure.parameter === "To") {
+    && (failure?.code === 21614 || (failure?.code === 60200 && failure.parameter === "To"))) {
     return hostedOnboardingError({
       code: "AUTH_REQUEST_INVALID", httpStatus: 400,
-      message: "Check your phone number, including its country code, and try again.",
+      message: failure.code === 21614
+        ? "Enter a mobile phone number that can receive SMS, including its country code, and try again."
+        : "Check your phone number, including its country code, and try again.",
     });
   }
   return hostedOnboardingError({
-    cause: new Error(`Twilio Verify ${operation}: ${reason}${status === undefined ? "" : `; HTTP ${status}`}${failure?.code === undefined ? "" : `; code ${failure.code}`}${failure?.parameter === undefined ? "" : `; parameter ${failure.parameter}`}${failure ? `; response ${failure.responseKind}` : ""}${failure?.parameterKind ? `; parameterKind ${failure.parameterKind}` : ""}${status === 400 && failure?.parameterHint ? `; parameterHint ${failure.parameterHint}` : ""}.`),
+    cause: new Error(formatVerifyFailureDiagnostic(operation, reason, status, failure)),
     code: operation === "send" ? "AUTH_DELIVERY_UNAVAILABLE" : "AUTH_VERIFICATION_UNAVAILABLE",
     httpStatus: 503,
     message: operation === "send" ? "We could not send a sign-in code. Try again shortly."
       : "We could not verify your sign-in code. Try again shortly.",
   });
+}
+
+function formatVerifyFailureDiagnostic(operation: "send" | "check", reason: VerifyFailure, status?: number, failure?: VerifyResponseFailure): string {
+  return `Twilio Verify ${operation}: ${reason}${status === undefined ? "" : `; HTTP ${status}`}${failure?.code === undefined ? "" : `; code ${failure.code}`}${failure?.parameter === undefined ? "" : `; parameter ${failure.parameter}`}${failure ? `; response ${failure.responseKind}` : ""}${failure?.parameterKind ? `; parameterKind ${failure.parameterKind}` : ""}${status === 400 && failure?.parameterHint ? `; parameterHint ${failure.parameterHint}` : ""}.`;
 }

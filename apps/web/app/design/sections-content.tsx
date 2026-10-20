@@ -1,12 +1,5 @@
 import { ModelSettingsHoverPreview } from "./model-settings-hover-preview";
 
-import {
-  BiomarkerBoundaryResultStudy,
-  BiomarkerDetailStudy,
-  BiomarkerIndexStudy,
-  BiomarkerPreparingStateStudy,
-  BiomarkerReferenceContextStudy,
-} from "@/src/components/biomarkers/biomarker-design-studies";
 import { AsksGridSection } from "@/src/components/homepage/asks-section";
 import { FaqSection } from "@/src/components/homepage/faq-section";
 import { HeroClocksIn } from "@/src/components/homepage/hero-clocks-in";
@@ -21,32 +14,15 @@ import { SecurityTeaserSection } from "@/src/components/homepage/security-teaser
 import { SiteFooter } from "@/src/components/homepage/site-footer";
 import { TechnicalCapabilitiesSection } from "@/src/components/homepage/technical-capabilities-section";
 import { TogetherSection } from "@/src/components/homepage/together-section";
-import { DeepCarouselSection } from "@/src/components/knowledge/deep-carousel-section";
 import {
   ReferralPageContent,
   ReferralRewardCards,
   ReferralRewardReceiptPreview,
 } from "@/src/components/referrals/referral-page-content";
-import { ModelProviderSecuritySection } from "@/src/components/security/model-provider-security-section";
 import { HostedAssistantModelSettings } from "@/src/components/settings/hosted-assistant-model-settings";
 import { Separator } from "@/src/components/ui/separator";
 import { isMurphAndroidAppEnabled } from "@murphai/hosted-execution/env";
 import { HOSTED_PUBLIC_REFERRAL_REWARDS } from "@/src/lib/hosted-growth/referral-program";
-import {
-  AskSlide,
-  BusinessModelSlide,
-  CompetitionSlide,
-  ExperimentSlide,
-  InsightSlide,
-  MoatSlide,
-  ProblemSlide,
-  ProductSlide,
-  SpreadSlide,
-  TeamSlide,
-  TitleSlide,
-  ValidationSlide,
-  WhyNowSlide,
-} from "../pitch/_components/slides";
 import {
   projectHostedVaultShareProjectionDisplays,
   resolveHostedGroupAccessOfferProjectionScopes,
@@ -67,6 +43,7 @@ import {
 } from "./connect-source-card-study";
 import { DataExportFlowStudy } from "./data-export-study";
 import { FamilyInviteJoinStudy } from "./family-invite-join-study";
+import { GameInviteStudy } from "./game-invite-study";
 import { GroupJoinStudy } from "./group-join-study";
 import { GroupStartStudy } from "./group-start-study";
 import { GroupMemberPlanStudy } from "./group-member-plan-study";
@@ -79,12 +56,7 @@ import { JoinFamilyBillingRecoveryStudy } from "./join-family-billing-recovery-s
 import { OpsUsageStudy } from "./ops-usage-study";
 import { OpsOperatorTaskStudy } from "./ops-operator-task-study";
 import { JunctionRecoveryStudy, RuntimeMaintenanceStudy } from "./runtime-maintenance-study";
-import {
-  PersonaOnboardingStudy,
-  PersonaSettingsStudy,
-} from "./persona-onboarding-study";
 import { SettingsAuthRequiredStudy } from "./settings-auth-required-study";
-import { SettingsCustomInferenceStudy } from "./settings-custom-inference-study";
 import { SignupReferralFlowStudy } from "./signup-referral-study";
 import { StructuredReviewResultsStudy } from "./structured-review-results-study";
 import { TrainingDashboardStudy } from "./training-dashboard-study";
@@ -96,7 +68,6 @@ import { ExperimentResultsShareStudy } from "./experiment-results-share-study";
 import { ExperimentRepeatedResultsStudy } from "./experiment-repeated-results-study";
 import { EnvironmentProgressStudy } from "./environment-progress-study";
 import { EnvironmentPrintStudy } from "./environment-print-study";
-import { PersonalPatternsStudy } from "./personal-patterns-study";
 import { BrowserVaultLoadingTransitionsStudy } from "./browser-vault-loading-transitions-study";
 import { FoodLabelLabStudy } from "./food-label-lab-study";
 import {
@@ -122,23 +93,6 @@ function StudySection({
     </section>
   );
 }
-
-// Every pitch deck slide, in deck order, each under its own anchor.
-const PITCH_SLIDE_STUDIES = [
-  { id: "pitch-title-slide", Slide: TitleSlide },
-  { id: "pitch-problem-slide", Slide: ProblemSlide },
-  { id: "pitch-insight-slide", Slide: InsightSlide },
-  { id: "pitch-why-now-slide", Slide: WhyNowSlide },
-  { id: "pitch-product-slide", Slide: ProductSlide },
-  { id: "pitch-experiment-slide", Slide: ExperimentSlide },
-  { id: "pitch-spread-slide", Slide: SpreadSlide },
-  { id: "pitch-progress-slide", Slide: ValidationSlide },
-  { id: "pitch-competition-slide", Slide: CompetitionSlide },
-  { id: "pitch-moat-slide", Slide: MoatSlide },
-  { id: "pitch-business-model-slide", Slide: BusinessModelSlide },
-  { id: "pitch-team-slide", Slide: TeamSlide },
-  { id: "pitch-ask-slide", Slide: AskSlide },
-] as const;
 
 export function SectionsContent({
   category,
@@ -186,51 +140,20 @@ export function SectionsContent({
 
           <Separator />
 
-          <StudySection title="Knowledge topic depth">
-            <div
-              id="knowledge-topic-depth"
-              data-design-section="knowledge-topic-depth"
-              className="-mx-5 sm:-mx-8 lg:-mx-12"
-              inert
-            >
-              <DeepCarouselSection />
-            </div>
-          </StudySection>
-
-          <Separator />
-
           <StudySection title="Homepage background readiness and phone handoff">
             <HomepageAuthWarmRuntimeStudy />
           </StudySection>
 
           <Separator />
 
-          <StudySection title="Homepage technical runtime · inference choice">
+          <StudySection title="Homepage technical runtime">
             <div
               id="homepage-technical-runtime"
               data-design-section="homepage-technical-runtime"
               className="-mx-5 sm:-mx-8 lg:-mx-12"
               inert
             >
-              <TechnicalCapabilitiesSection
-                customInferenceAvailable
-                veniceAvailable
-              />
-            </div>
-          </StudySection>
-
-          <Separator />
-
-          <StudySection title="Homepage technical runtime · provider flags off">
-            <div
-              data-design-section="homepage-technical-runtime-minimal"
-              className="-mx-5 sm:-mx-8 lg:-mx-12"
-              inert
-            >
-              <TechnicalCapabilitiesSection
-                customInferenceAvailable={false}
-                veniceAvailable={false}
-              />
+              <TechnicalCapabilitiesSection />
             </div>
           </StudySection>
 
@@ -242,25 +165,13 @@ export function SectionsContent({
 
           <Separator />
 
-          <StudySection title="Homepage model provider FAQ">
+          <StudySection title="Homepage FAQ">
             <div
-              data-design-section="homepage-model-provider-faq"
+              data-design-section="homepage-faq"
               className="-mx-5 sm:-mx-8 lg:-mx-12"
               inert
             >
-              <FaqSection veniceAvailable />
-            </div>
-          </StudySection>
-
-          <Separator />
-
-          <StudySection title="Security model provider choice">
-            <div
-              data-design-section="security-model-provider-choice"
-              className="-mx-5 sm:-mx-8 lg:-mx-12"
-              inert
-            >
-              <ModelProviderSecuritySection />
+              <FaqSection />
             </div>
           </StudySection>
         </>
@@ -272,8 +183,8 @@ export function SectionsContent({
 
           <StudySection title="Settings model choice for Edge and Max">
             <div
-              id="settings-model-provider-save-controls"
-              data-design-section="settings-compact-provider-control"
+              id="settings-model-save-controls"
+              data-design-section="settings-model-control"
               className="max-w-5xl"
             >
               <ModelSettingsHoverPreview>
@@ -281,12 +192,9 @@ export function SectionsContent({
                   availableModels={["gpt-6.1-sol", "gpt-6-sol", "gpt-6-luna", "gpt-5.6-luna", "gpt-5.6-sol", "gpt-6-astra"]}
                   canUpgradeToEdge={false}
                   configurationAvailable
-                  customInferenceAvailable
                   initialDormantSolPreference={false}
                   initialModel="gpt-6.1-sol"
-                  initialProvider="openai"
                   solAvailable
-                  veniceAvailable
                 />
               </ModelSettingsHoverPreview>
             </div>
@@ -294,10 +202,18 @@ export function SectionsContent({
 
           <Separator />
 
-          <StudySection title="Settings inference routing, locked models, and endpoint">
-            <ModelSettingsHoverPreview>
-              <SettingsCustomInferenceStudy />
-            </ModelSettingsHoverPreview>
+          <StudySection title="Settings model choice for Pulse">
+            <div data-design-variant="pulse-models-locked" className="max-w-5xl">
+              <ModelSettingsHoverPreview>
+                <HostedAssistantModelSettings
+                  canUpgradeToEdge
+                  configurationAvailable
+                  initialDormantSolPreference={false}
+                  initialModel="gpt-6.1-sol"
+                  solAvailable={false}
+                />
+              </ModelSettingsHoverPreview>
+            </div>
           </StudySection>
 
           <Separator />
@@ -374,12 +290,6 @@ export function SectionsContent({
             >
               <TrainingDashboardStudy />
             </div>
-          </StudySection>
-
-          <Separator />
-
-          <StudySection title="Patterns page">
-            <PersonalPatternsStudy />
           </StudySection>
         </>
       ) : null}
@@ -679,16 +589,6 @@ export function SectionsContent({
         <>
           <Separator />
 
-          <StudySection title="Persona onboarding with stacked tone samples">
-            <div data-design-section="persona-onboarding">
-              <PersonaOnboardingStudy />
-              <Separator />
-              <PersonaSettingsStudy />
-            </div>
-          </StudySection>
-
-          <Separator />
-
           <StudySection title="Family plan invite acceptance">
             <FamilyInviteJoinStudy />
           </StudySection>
@@ -810,6 +710,12 @@ export function SectionsContent({
           <StudySection title="Group sponsorship purchase, signed-out management, cancellation, and completion">
             <GroupUsageFundingStudy />
           </StudySection>
+
+          <Separator />
+
+          <StudySection title="Weekly game challenge invite link">
+            <GameInviteStudy />
+          </StudySection>
         </>
       ) : null}
 
@@ -889,22 +795,6 @@ export function SectionsContent({
         <>
           <Separator />
 
-          <StudySection title="Pitch deck slides">
-            {PITCH_SLIDE_STUDIES.map(({ id, Slide }) => (
-              <div
-                key={id}
-                id={id}
-                data-design-section={id}
-                className="-mx-5 overflow-hidden sm:-mx-8 lg:-mx-12"
-                inert
-              >
-                <Slide />
-              </div>
-            ))}
-          </StudySection>
-
-          <Separator />
-
           <StudySection title="Ops weekly growth compass with referral-link usage, sponsorship accounting, messaging activity, message volume, and monthly revenue history">
             <div inert>
               <GrowthScorecardStudy />
@@ -915,44 +805,11 @@ export function SectionsContent({
 
       {category === "health" ? (
         <>
-          <Separator />
-
-          <StudySection title="Biomarker preparing state">
-            <BiomarkerPreparingStateStudy />
-          </StudySection>
-
-          <Separator />
-
-          <StudySection title="Biomarker index">
-            <BiomarkerIndexStudy />
-          </StudySection>
-
-          <Separator />
-
-          <StudySection title="Biomarker result detail">
-            <div id="biomarker-result-range-bands">
-              <BiomarkerDetailStudy />
-            </div>
-          </StudySection>
-
-          <Separator />
-
-          <StudySection title="Biomarker reference context">
-            <BiomarkerReferenceContextStudy />
-          </StudySection>
 
           <Separator />
 
           <StudySection title="Repeated-session experiment Results">
             <ExperimentRepeatedResultsStudy />
-          </StudySection>
-
-          <Separator />
-
-          <StudySection title="Biomarker boundary result · published comparator provenance">
-            <div id="biomarker-boundary-result">
-              <BiomarkerBoundaryResultStudy />
-            </div>
           </StudySection>
         </>
       ) : null}

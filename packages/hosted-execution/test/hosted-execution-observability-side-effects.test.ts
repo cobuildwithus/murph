@@ -536,7 +536,7 @@ describe("hosted execution observability", () => {
   it("extracts a privacy-bounded assistant-notification detail subset from annotated errors", () => {
     const privateResponseMarker = "PRIVATE_PROVIDER_RESPONSE_5a2d9c_DO_NOT_EMIT";
     const error = Object.assign(new Error("provider failed"), {
-      cause: Object.assign(new Error("Gateway rejected provider credentials."), {
+      cause: Object.assign(new Error("OpenAI rejected provider credentials."), {
         code: "invalid_api_key",
         statusCode: 401,
       }),
@@ -550,12 +550,11 @@ describe("hosted execution observability", () => {
           "creative_response_media_invalid",
         assistantNotificationDeliveryKind: "thread",
         assistantNotificationExplicitTargetPresent: false,
-        assistantNotificationGatewayOnlyProviders: "openai",
         assistantNotificationIdentityIdPresent: true,
         assistantNotificationLinqBaseUrlOrigin: "https://linq.example.test",
         assistantNotificationLinqBaseUrlPath: "/v1",
         assistantNotificationProvider: "openai-compatible",
-        assistantNotificationProviderBaseUrlOrigin: "https://gateway.example.test",
+        assistantNotificationProviderBaseUrlOrigin: "https://api.openai.com",
         assistantNotificationProviderBaseUrlPath: "/v1/responses",
         assistantNotificationProviderModel: "gpt-4.1-mini",
         assistantNotificationRouteId: "route_primary",
@@ -567,14 +566,11 @@ describe("hosted execution observability", () => {
         assistantNotificationWorkingDirectoryPresent: false,
         assistantProviderAdapter: "openai-compatible",
         assistantProviderErrorBodyCode: "invalid_request",
-        assistantProviderErrorBodyMessage: "Gateway only provider cannot serve this model.",
+        assistantProviderErrorBodyMessage: "OpenAI cannot serve this model.",
         assistantProviderErrorBodyPresent: true,
         assistantProviderErrorBodyType: "invalid_request_error",
         assistantProviderErrorStatus: 400,
-        assistantProviderGatewayOnlyProviderCount: 1,
-        assistantProviderGatewayOnlyProviders: "openai",
-        assistantProviderGatewayTarget: true,
-        assistantProviderModel: "openai/gpt-5.4",
+        assistantProviderModel: "gpt-5.4",
         prompt: "do not keep me",
       },
     });
@@ -592,7 +588,7 @@ describe("hosted execution observability", () => {
     expect(redacted).toEqual({
       assistantNotificationChannel: "linq",
       assistantNotificationDeliveryKind: "thread",
-      assistantNotificationErrorCause: "Gateway rejected provider credentials.",
+      assistantNotificationErrorCause: "OpenAI rejected provider credentials.",
       assistantNotificationErrorCode: "authorization_error",
       assistantNotificationErrorCodeDetail: "invalid_api_key",
       assistantNotificationErrorDetail: "provider failed",
@@ -600,7 +596,6 @@ describe("hosted execution observability", () => {
       assistantNotificationErrorName: "Error",
       assistantNotificationErrorStatus: 401,
       assistantNotificationExplicitTargetPresent: false,
-      assistantNotificationGatewayOnlyProviders: "openai",
       assistantNotificationIdentityIdPresent: true,
       assistantNotificationLinqBaseUrlConfigured: true,
       assistantNotificationProvider: "openai-compatible",
@@ -617,14 +612,11 @@ describe("hosted execution observability", () => {
       assistantNotificationWorkingDirectoryPresent: false,
       assistantProviderAdapter: "openai-compatible",
       assistantProviderErrorBodyCode: "invalid_request",
-      assistantProviderErrorBodyMessage: "Gateway only provider cannot serve this model.",
+      assistantProviderErrorBodyMessage: "OpenAI cannot serve this model.",
       assistantProviderErrorBodyPresent: true,
       assistantProviderErrorBodyType: "invalid_request_error",
       assistantProviderErrorStatus: 400,
-      assistantProviderGatewayOnlyProviderCount: 1,
-      assistantProviderGatewayOnlyProviders: "openai",
-      assistantProviderGatewayTarget: true,
-      assistantProviderModel: "openai/gpt-5.4",
+      assistantProviderModel: "gpt-5.4",
     });
     expect(JSON.stringify(redacted)).not.toContain(privateResponseMarker);
     expect(JSON.stringify(redacted)).not.toContain("do not keep me");

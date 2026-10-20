@@ -7,7 +7,6 @@ import {
   type AssistantProviderConfigLike,
 } from '@murphai/operator-config/assistant/provider-config'
 import {
-  HOSTED_CUSTOM_INFERENCE_CODEX_MODEL_PROVIDER_ID,
   resolveStrictAssistantCodexModelProvider,
 } from '@murphai/operator-config/assistant/target-runtime'
 import {
@@ -91,15 +90,12 @@ export function resolveCodexAssistantTargetCapabilities(
   input: AssistantProviderConfigLike | null | undefined,
 ): AssistantProviderCapabilities {
   const normalized = normalizeAssistantProviderConfig(input)
-  const modelProvider = resolveStrictAssistantCodexModelProvider(
-    normalized.target.modelProvider,
-  ).id
+  resolveStrictAssistantCodexModelProvider(normalized.target.modelProvider)
 
   return cloneAssistantProviderCapabilities({
     ...CODEX_ASSISTANT_CAPABILITIES,
     supportsNativeResume: true,
-    supportsReasoningEffort:
-      modelProvider !== HOSTED_CUSTOM_INFERENCE_CODEX_MODEL_PROVIDER_ID,
+    supportsReasoningEffort: true,
   })
 }
 

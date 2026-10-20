@@ -88,7 +88,7 @@ it.each([
   });
   const input: HostedClinicalEnrichmentInput = {
     abortSignal: parent.signal, codexHome: null, env: {}, vaultRoot, memberId: "synthetic-member",
-    state, onStateMutation() {}, resolveProviderAuthority: async () => handoff && initialCalls === 3 ? "handoff" : "current",
+    state, onStateMutation() {}, resolveRuntimeAuthority: async () => handoff && initialCalls === 3 ? "handoff" : "current",
     prepareDocument: async () => ({ totalPages: 1, extractedText: text, renderedPages: [], scratchRoots: [], async cleanup() {} }),
   };
   try {

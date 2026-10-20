@@ -29,6 +29,8 @@ export type HostedWebhookWakeHandoff = {
   eventId: string;
   linqChatId?: string | null;
   mailboxItemId: string;
+  // Telemetry only; mailboxItemId and its checkpoint still own the actual wake.
+  originalInboundMailboxItemId?: string;
   source: "linq" | "telegram";
   userId: string;
   wakeMailboxCheckpoint?: HostedWebhookWakeMailboxCheckpoint;

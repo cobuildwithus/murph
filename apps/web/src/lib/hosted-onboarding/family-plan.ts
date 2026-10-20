@@ -489,6 +489,7 @@ export type HostedFamilyStripeSubscriptionResult = {
   accessRestoredMemberIds?: string[];
   activations: HostedMemberActivationResult[];
   billingModeChangedMemberIds?: string[];
+  terminalOwnerMemberId?: string;
   groupId: string | null;
   runtimeRecheckMemberIds?: string[];
 };
@@ -2330,6 +2331,7 @@ export async function applyHostedFamilyStripeSubscriptionUpdatedTx(input: {
     });
     return {
       activations: [],
+      terminalOwnerMemberId: group.ownerMemberId,
       billingModeChangedMemberIds: billingModeChanged
         ? [group.ownerMemberId]
         : [],
@@ -5325,12 +5327,6 @@ export async function acceptHostedFamilyInviteFromTelegramTx(input: {
         memberId: generateHostedMemberId(),
         prisma: input.tx,
       });
-  await provisionActiveHostedDomainRootEnvelopeForUserOnly({
-    domain: "control",
-    prisma: input.tx,
-    reason: "hosted-family.telegram-routing",
-    userId: member.id,
-  });
   let telegramBindingAttempted = false;
   let telegramBindingWritten = false;
   const writeTelegramBinding = async (): Promise<void> => {
@@ -5358,6 +5354,13 @@ export async function acceptHostedFamilyInviteFromTelegramTx(input: {
         });
       }
     }
+    // Every caller holds the member row by now: member before root.
+    await provisionActiveHostedDomainRootEnvelopeForUserOnly({
+      domain: "control",
+      prisma: input.tx,
+      reason: "hosted-family.telegram-routing",
+      userId: member.id,
+    });
     await upsertHostedMemberTelegramRoutingBindingTx({
       memberId: member.id,
       prisma: input.tx,

@@ -67,6 +67,7 @@ import {
 import type {
   AssistantInputCandidateBatch,
   AssistantInputCandidate,
+  AssistantInputExactLookupObservation,
   AssistantInputSource,
 } from '../input-source.js'
 import {
@@ -2713,8 +2714,13 @@ async function listAutoReplyActiveTurnInputs(input: {
   const exactInputIds = input.inputIds.filter(
     (inputId) => !discoveredInputIds.has(inputId),
   )
-  const exact = exactInputIds.length > 0 && input.inputSource.listInputCandidatesByIds
-    ? await input.inputSource.listInputCandidatesByIds({
+  const listExact = exactInputIds.length > 0
+    ? input.inputSource.listInputCandidatesByIds
+    : undefined
+  // Derived from the branch that actually runs below.
+  const exactLookupCalled = listExact !== undefined
+  const exact: AssistantInputCandidateBatch = listExact
+    ? await listExact.call(input.inputSource, {
         afterCursor: input.afterCursor,
         inputIds: exactInputIds,
         knownInputIds: [...discoveredInputIds],
@@ -2727,9 +2733,20 @@ async function listAutoReplyActiveTurnInputs(input: {
     ...discoveredInputIds,
     ...exact.inputs.map((candidate) => candidate.event.inputId),
   ]
+  // Diagnostics ride this call's own route query, so they cannot attach to
+  // another admission's row.
+  const exactLookupObservation: AssistantInputExactLookupObservation = {
+    called: exactLookupCalled,
+    ...(exactLookupCalled && exact.exactLookupExclusionReasonCounts
+      ? { exclusionReasonCounts: exact.exactLookupExclusionReasonCounts }
+      : {}),
+    requestedCount: exactInputIds.length,
+    returnedCount: exactLookupCalled ? exact.inputs.length : null,
+  }
   const route = input.discoverConversationInputs && input.inputSource.listInputCandidates
     ? await input.inputSource.listInputCandidates({
         afterCursor: input.afterCursor,
+        exactLookupObservation,
         knownInputIds,
         limit: 100,
         signal: input.signal,

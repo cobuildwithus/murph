@@ -40,7 +40,6 @@ import {
   HOSTED_RUNTIME_ASSISTANT_ASK_CONTROL_PATH,
   HOSTED_RUNTIME_ASSISTANT_CONFIGURATION_TOOL_PATH,
   HOSTED_RUNTIME_BROWSER_VAULT_REPLICA_PUBLISH_PATH,
-  HOSTED_RUNTIME_CODEX_AUTH_PATH,
   HOSTED_RUNTIME_EMAIL_EGRESS_RECIPIENT_PATH,
   HOSTED_RUNTIME_FAMILY_PLAN_TOOL_PATH,
   HOSTED_RUNTIME_GROUP_TOOL_PATH,
@@ -185,10 +184,6 @@ export const HOSTED_RUNNER_WEB_CONTROL_ROUTES = {
   clinicalRecordsRecordOutcome: defineHostedRunnerWebControlPostRoute(
     "clinical_records_record_outcome",
     HOSTED_CLINICAL_RECORDS_RUNTIME_RECORD_OUTCOME_PATH,
-  ),
-  codexAuthUpdate: defineHostedRunnerWebControlPostRoute(
-    "codex_auth_update",
-    HOSTED_RUNTIME_CODEX_AUTH_PATH,
   ),
   connectedApps: defineHostedRunnerWebControlPostRoute(
     "connected_apps",

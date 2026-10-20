@@ -12,7 +12,13 @@ import {
   MURPH_ASSISTANT_ONBOARDING_IDENTITY_QUESTIONS,
   MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
 } from "@murphai/contracts";
-import type { LinqProductionCanaryOutcome } from "../src/lib/hosted-onboarding/linq-production-canary-contract";
+import {
+  LINQ_PRODUCTION_CANARY_DIAGNOSTIC_TRACE_LIMIT,
+  LINQ_PRODUCTION_CANARY_DIAGNOSTIC_WINDOW_MS,
+  type LinqProductionCanaryDiagnostics,
+  type LinqProductionCanaryLatencyTrace,
+  type LinqProductionCanaryOutcome,
+} from "../src/lib/hosted-onboarding/linq-production-canary-contract";
 import CANARY_TURNS from "./fixtures/linq-production-conversation.json";
 
 const CANARY_RESET_PATH =
@@ -20,12 +26,14 @@ const CANARY_RESET_PATH =
 const CANARY_OUTCOME_PATH =
   "/api/internal/hosted-onboarding/linq/production-canary/outcome";
 const CANARY_REPLY_BUDGET_MS = 20_000;
+const CANARY_REPLY_OBSERVATION_COUNT_MAX = 10_000;
 export const CANARY_REPLY_WAIT_MS = 90_000;
 export const CANARY_RESET_TIMEOUT_MS = 300_000;
+export const CANARY_DIAGNOSTIC_WAIT_MS = 3_000;
 // Observe the normal quiet window plus bounded checkpoint/publication time.
 // This budget is independent of the twenty-second reply latency requirement.
 export const CANARY_OUTCOME_WAIT_MS = HOSTED_EXECUTION_DEFAULT_RUNNER_IDLE_TTL_MS + 120_000;
-const CANARY_OUTCOME_POLL_MS = 1_000;
+export const CANARY_OUTCOME_POLL_MS = 5_000;
 
 type LinqProductionCanaryConfig = {
   productionBaseUrl: string;
@@ -49,9 +57,37 @@ type LinqProductionCanaryTurnResult = {
   turn: number;
 };
 
+type LinqProductionCanaryDiagnosticObservation =
+  | { observation: "available"; diagnostics: LinqProductionCanaryDiagnostics }
+  | { observation: "unsupported" | "invalid" | "unavailable" };
+
+type LinqProductionCanaryDiagnosticRecord = LinqProductionCanaryDiagnosticObservation & {
+  status: "turn-diagnostics";
+  stage: LinqProductionCanaryTurnResult["stage"];
+  turn: number;
+};
+
+type LinqProductionCanaryReplyObservation = {
+  reason: "timeout" | "stream-ended" | "stream-failed";
+  observedCount: number;
+  rejectedCount: number;
+};
+
+class LinqProductionCanaryReplyUnavailableError extends Error {
+  constructor(readonly observation: LinqProductionCanaryReplyObservation) {
+    super("The Linq production canary failed.");
+    this.name = `reply-unavailable${formatCanaryReplyObservation(observation)}`;
+  }
+}
+
+function formatCanaryReplyObservation(observation: LinqProductionCanaryReplyObservation): string {
+  return `; reason=${observation.reason}; observed_count=${observation.observedCount}; rejected_count=${observation.rejectedCount}`;
+}
+
 export async function runLinqProductionCanary(
   source: NodeJS.ProcessEnv = process.env,
   reportTurn?: (result: LinqProductionCanaryTurnResult) => void,
+  reportDiagnostic?: (result: LinqProductionCanaryDiagnosticRecord) => void,
 ): Promise<{
   canonicalOutcome: { baselineGoalCount: number; savedGoalCount: number; proposalGoalCount: number };
   reset: LinqProductionCanaryResetResult;
@@ -93,14 +129,18 @@ export async function runLinqProductionCanary(
         throwCanaryFailure("send-unconfirmed");
       }
       const senderSendMs = Math.round(performance.now() - sentAt);
-      const reply = await replyPromise.catch(() => {
-        throwCanaryFailure(`reply-unavailable; turn=${turn}; stage=${stage}; wait_limit_ms=${CANARY_REPLY_WAIT_MS}`);
+      const reply = await replyPromise.catch(async (error: unknown) => {
+        const observation = error instanceof LinqProductionCanaryReplyUnavailableError
+          ? formatCanaryReplyObservation(error.observation) : "";
+        await reportCanaryFailureDiagnostics(config, { stage, turn }, reportDiagnostic);
+        throwCanaryFailure(`reply-unavailable; turn=${turn}; stage=${stage}; wait_limit_ms=${CANARY_REPLY_WAIT_MS}${observation}`);
       });
       const replyAt = performance.now();
       const latencyMs = Math.round(replyAt - sentAt);
       const turnResult = { latencyMs, senderSendMs, stage, turn };
       reportTurn?.(turnResult);
       if (latencyMs >= CANARY_REPLY_BUDGET_MS) {
+        await reportCanaryFailureDiagnostics(config, { stage, turn }, reportDiagnostic);
         throwCanaryFailure(
           `reply-latency-budget-exceeded; turn=${turn}; metric=send_to_reply; elapsed_ms=${Math.min(CANARY_REPLY_WAIT_MS, latencyMs)}; budget_ms=${CANARY_REPLY_BUDGET_MS}`,
         );
@@ -112,6 +152,7 @@ export async function runLinqProductionCanary(
         interReplyGapMs !== null
         && interReplyGapMs >= CANARY_REPLY_BUDGET_MS
       ) {
+        await reportCanaryFailureDiagnostics(config, { stage, turn }, reportDiagnostic);
         throwCanaryFailure(
           `reply-latency-budget-exceeded; turn=${turn}; metric=inter_reply_gap; elapsed_ms=${Math.min(CANARY_REPLY_WAIT_MS, Math.round(interReplyGapMs))}; budget_ms=${CANARY_REPLY_BUDGET_MS}`,
         );
@@ -143,8 +184,13 @@ export async function waitForLinqProductionCanaryReply(input: {
   timeoutMs: number;
   userId: string;
 }): Promise<string> {
+  let observedCount = 0;
+  let rejectedCount = 0;
+  // Identity-only markers cannot be confused with provider error names or values.
+  const timeoutFailure = Symbol();
+  const streamEndFailure = Symbol();
   const timeout = new Promise<never>((_resolve, reject) => {
-    setTimeout(() => reject(new Error("canary-reply-timeout")), input.timeoutMs)
+    setTimeout(() => reject(timeoutFailure), input.timeoutMs)
       .unref();
   });
 
@@ -152,8 +198,9 @@ export async function waitForLinqProductionCanaryReply(input: {
     while (true) {
       const next = await input.inbound.next();
       if (next.done) {
-        throwCanaryFailure("message-stream-ended");
+        throw streamEndFailure;
       }
+      observedCount = Math.min(observedCount + 1, CANARY_REPLY_OBSERVATION_COUNT_MAX);
       const [space, message] = next.value;
       if (
         space.id !== input.spaceId
@@ -164,6 +211,7 @@ export async function waitForLinqProductionCanaryReply(input: {
         || !Number.isFinite(message.timestamp.getTime())
         || message.timestamp.getTime() < input.notBeforeEpochMs
       ) {
+        rejectedCount = Math.min(rejectedCount + 1, CANARY_REPLY_OBSERVATION_COUNT_MAX);
         continue;
       }
       return message.content.text.trim();
@@ -172,8 +220,13 @@ export async function waitForLinqProductionCanaryReply(input: {
 
   try {
     return await Promise.race([nextReply, timeout]);
-  } catch {
-    throwCanaryFailure("reply-unavailable");
+  } catch (error: unknown) {
+    throw new LinqProductionCanaryReplyUnavailableError({
+      reason: error === timeoutFailure ? "timeout"
+        : error === streamEndFailure ? "stream-ended" : "stream-failed",
+      observedCount,
+      rejectedCount,
+    });
   }
 }
 
@@ -230,6 +283,89 @@ async function waitForCanonicalGoalOutcome(
       .catch(() => throwCanaryFailure(`outcome-not-ready; stage=${stage}`));
   }
   throwCanaryFailure(`outcome-not-ready; stage=${stage}`);
+}
+
+async function reportCanaryFailureDiagnostics(
+  config: LinqProductionCanaryConfig,
+  turn: Pick<LinqProductionCanaryTurnResult, "stage" | "turn">,
+  report: ((result: LinqProductionCanaryDiagnosticRecord) => void) | undefined,
+): Promise<void> {
+  try {
+    const observation = await readCanaryFailureDiagnostics(config, turn.stage);
+    report?.({ status: "turn-diagnostics", ...turn, ...observation });
+  } catch {
+    // A diagnostic or reporter failure must never replace the original failure.
+  }
+}
+
+async function readCanaryFailureDiagnostics(
+  config: LinqProductionCanaryConfig,
+  stage: string,
+): Promise<LinqProductionCanaryDiagnosticObservation> {
+  const controller = new AbortController();
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    // One read after failure; this deadline never extends reply acceptance or
+    // starts the canonical outcome polling loop. The race also bounds body reads.
+    const outcome = await Promise.race([
+      readCanonicalGoalOutcome(config, controller.signal, stage),
+      new Promise<null>((resolve) => {
+        timeout = setTimeout(() => {
+          controller.abort();
+          resolve(null);
+        }, CANARY_DIAGNOSTIC_WAIT_MS).unref();
+      }),
+    ]);
+    if (!outcome) return { observation: "unavailable" };
+    if (!Object.hasOwn(outcome, "diagnostics")) return { observation: "unsupported" };
+    if (!isCanaryDiagnostics(outcome.diagnostics)) return { observation: "invalid" };
+    return { observation: "available", diagnostics: outcome.diagnostics };
+  } catch {
+    return { observation: "unavailable" };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function isCanaryDiagnostics(value: unknown): value is LinqProductionCanaryDiagnostics {
+  const record = readDiagnosticRecord(value);
+  if (!record
+    || !hasExactDiagnosticKeys(record, ["status", "failedTurnMatched", "truncated", "traces"])
+    || record.failedTurnMatched !== false
+    || typeof record.truncated !== "boolean"
+    || !Array.isArray(record.traces)
+    || record.traces.length > LINQ_PRODUCTION_CANARY_DIAGNOSTIC_TRACE_LIMIT
+    || !record.traces.every(isCanaryLatencyTrace)) return false;
+  switch (record.status) {
+    case "empty":
+    case "unavailable": return record.traces.length === 0 && !record.truncated;
+    case "observed": return record.traces.length === 1 && !record.truncated;
+    case "ambiguous": return record.traces.length > 1
+      && (!record.truncated || record.traces.length === LINQ_PRODUCTION_CANARY_DIAGNOSTIC_TRACE_LIMIT);
+    default: return false;
+  }
+}
+
+function isCanaryLatencyTrace(value: unknown): value is LinqProductionCanaryLatencyTrace {
+  const record = readDiagnosticRecord(value);
+  if (!record || typeof record.stale !== "boolean" || typeof record.incomplete !== "boolean"
+    || typeof record.stage !== "string"
+    || !["instant_reply", "pre_runtime", "runtime_provider", "delivery_observation"].includes(record.stage)) return false;
+  const durations = [
+    "ageMs", "ingressMs", "preRuntimeMs", "runtimeToProviderMs", "providerToDeliveryMs",
+    "acceptedToDeliveryAttemptMs", "deliveryAcceptMs", "deliveryReceiptMs", "deliveredAgeMs",
+  ];
+  return Object.entries(record).every(([key, duration]) => ["stage", "stale", "incomplete"].includes(key)
+    || (durations.includes(key) && isNonNegativeInteger(duration) && duration <= LINQ_PRODUCTION_CANARY_DIAGNOSTIC_WINDOW_MS));
+}
+
+function readDiagnosticRecord(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown> : null;
+}
+
+function hasExactDiagnosticKeys(record: Record<string, unknown>, keys: string[]): boolean {
+  return Object.keys(record).length === keys.length && keys.every((key) => Object.hasOwn(record, key));
 }
 
 async function readCanonicalGoalOutcome(
@@ -393,6 +529,8 @@ function throwCanaryFailure(code: string): never {
 if (import.meta.url === `file://${process.argv[1]}`) {
   runLinqProductionCanary(process.env, (turn) => {
     process.stdout.write(`${JSON.stringify({ status: "reply-received", ...turn })}\n`);
+  }, (diagnostic) => {
+    process.stdout.write(`${JSON.stringify(diagnostic)}\n`);
   })
     .then((result) => {
       process.stdout.write(`${JSON.stringify({

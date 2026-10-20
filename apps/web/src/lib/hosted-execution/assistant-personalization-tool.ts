@@ -20,8 +20,6 @@ import {
 } from "@murphai/hosted-execution";
 import {
   assistantPersonalitySettingIds,
-  resolveAssistantPersonaCombinationId,
-  resolveAssistantPersonaParts,
   resolveAssistantEffectiveStyle,
   type AssistantPersonaId,
   type AssistantPersonalityPreferences,
@@ -101,17 +99,9 @@ export async function handleHostedRuntimeAssistantPersonalizationTool(input: {
         : {}),
     });
   }
-  const requestedPersona = resolveRequestedAssistantPersona(request);
-  if (requestedPersona && "automationId" in authority) {
-    throw new TypeError(
-      "Scheduled automation occurrences cannot change Murph personas.",
-    );
-  }
   const prisma = getPrisma();
   const transactionResult = await prisma.$transaction(async (tx) => {
-    const personaRequested = requestedPersona !== null;
     const requestedFields: AssistantPreferenceFieldId[] = [
-      ...(personaRequested ? ["persona" as const] : []),
       ...(request.tone === undefined ? [] : ["tone" as const]),
       ...(request.voice === undefined ? [] : ["voice" as const]),
     ];
@@ -119,7 +109,7 @@ export async function handleHostedRuntimeAssistantPersonalizationTool(input: {
       await resolveHostedRuntimeAssistantPreferenceWriteAuthority({
         authority,
         memberId: input.memberId,
-        operation: personaRequested ? "personalization" : "tone-voice",
+        operation: "tone-voice",
         prisma: tx,
         requestedFields,
       });
@@ -131,7 +121,6 @@ export async function handleHostedRuntimeAssistantPersonalizationTool(input: {
         ? {}
         : { preferenceCausalSeq: writeAuthority.preferenceCausalSeq }),
       preferences: {
-        ...(requestedPersona === null ? {} : { persona: requestedPersona }),
         ...(request.tone === undefined ? {} : { tone: request.tone }),
         ...(request.voice === undefined ? {} : { voice: request.voice }),
       },
@@ -149,7 +138,6 @@ export async function handleHostedRuntimeAssistantPersonalizationTool(input: {
       voice: styleResult.assistantVoice,
     };
     const effectiveStyle = resolveHostedAssistantEffectiveStyle(preferences);
-    const personaParts = resolveAssistantPersonaParts(effectiveStyle.persona);
     const effectiveTone = effectiveStyle.tone;
     const effectiveVoice = effectiveStyle.voice;
     const styleUpdated = styleResult.updated;
@@ -159,13 +147,13 @@ export async function handleHostedRuntimeAssistantPersonalizationTool(input: {
       response: {
         action: "update" as const,
         result: {
-          mainPersona: personaParts.mainId,
+          mainPersona: "classic" as const,
+          supportingPersona: null,
           model: model.model,
           modelChangeAppliesNextRun: false as const,
           modelUpdated: false as const,
           solAvailable: model.solAvailable,
           status: styleUpdated ? "saved" as const : "unchanged" as const,
-          supportingPersona: personaParts.supportingId,
           tone: effectiveTone,
           voice: effectiveVoice,
         },
@@ -326,7 +314,7 @@ function buildHostedAssistantPersonalitySetting(input: {
 async function resolveHostedRuntimeAssistantPreferenceWriteAuthority(input: {
   authority: HostedRuntimeAssistantPersonalizationToolAuthority;
   memberId: string;
-  operation: "personalization" | "personality" | "tone-voice";
+  operation: "personality" | "tone-voice";
   prisma: HostedMailboxStoreClient;
   requestedFields: readonly AssistantPreferenceFieldId[];
 }): Promise<HostedRuntimeAssistantPreferenceWriteAuthority> {
@@ -370,7 +358,7 @@ async function resolveHostedRuntimeAssistantPreferenceWriteAuthority(input: {
 
 function buildHostedAssistantPreferenceUpdateId(input: {
   authority: HostedRuntimeAssistantPersonalizationToolAuthority;
-  operation: "personalization" | "personality" | "tone-voice";
+  operation: "personality" | "tone-voice";
   requestedFields: readonly AssistantPreferenceFieldId[];
 }): string {
   return createHash("sha256")
@@ -463,42 +451,12 @@ async function readHostedAssistantPersonalization(
   ]);
 
   const effective = resolveHostedAssistantEffectiveStyle(preferences);
-  const personaParts = resolveAssistantPersonaParts(effective.persona);
   return {
-    mainPersona: personaParts.mainId,
+    mainPersona: "classic",
+    supportingPersona: null,
     model: model.model,
     solAvailable: model.solAvailable,
-    supportingPersona: personaParts.supportingId,
     tone: effective.tone,
     voice: effective.voice,
   };
-}
-
-function resolveRequestedAssistantPersona(
-  input: Extract<
-    HostedRuntimeAssistantPersonalizationToolRequest,
-    { action: "update" }
-  >,
-): AssistantPersonaId | null {
-  if (
-    input.mainPersona === undefined
-    && input.supportingPersona === undefined
-  ) {
-    return null;
-  }
-  if (
-    input.mainPersona === undefined
-    || input.supportingPersona === undefined
-  ) {
-    throw new TypeError(
-      "Assistant persona updates require both main and supporting persona fields.",
-    );
-  }
-  if (input.supportingPersona === input.mainPersona) {
-    throw new TypeError("Supporting persona must differ from the main persona.");
-  }
-  return resolveAssistantPersonaCombinationId(
-    input.mainPersona,
-    input.supportingPersona,
-  );
 }

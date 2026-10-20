@@ -20,7 +20,7 @@ import { createCoalescingRuntimeWakeSignal } from "../src/hosted-runtime/runtime
 // The same foreground contract must hold regardless of how authority arrived.
 // Keep the invocation alive beyond its first admission to exercise owner history.
 const priorityJourneys = (["default", "device completion", "system checkpoint"] as const)
-  .flatMap((owner) => (["quiet window", "snapshot", "provider change", "shutdown"] as const)
+  .flatMap((owner) => (["quiet window", "snapshot", "shutdown"] as const)
     .map((arrival) => ({ owner, arrival })));
 
 test.each(priorityJourneys)(
@@ -41,7 +41,6 @@ test.each(priorityJourneys)(
     let nextInput = 0;
     let effectCalls = 0;
     let snapshotInterrupted = false;
-    let providerChanged = false;
     let invocation: ReturnType<typeof runHostedWorkspaceRuntimeJobInProcess> | null = null;
     const device = createMailboxItem({
       id: "mailbox_item_priority_device", dedupeKey: "device-sync.wake:priority",
@@ -98,7 +97,7 @@ test.each(priorityJourneys)(
           }
           snapshotTimes.push(Date.now());
           events.push("snapshot");
-          if (!providerChanged && !shutdown.signal.aborted) {
+          if (!shutdown.signal.aborted) {
             assert.ok(Date.now() >= Date.parse(TEST_NOW) + quietMs,
               "A duplicate default wake must not bypass the foreground quiet window.");
           }
@@ -164,13 +163,7 @@ test.each(priorityJourneys)(
               if (owner === "device completion" && nextInput === 0) sendInput();
             },
           }),
-          mailboxPort: {
-            ...mailbox,
-            async fetch(request) {
-              const response = await mailbox.fetch(request);
-              return { ...response, assistantProvider: providerChanged ? "venice" : response.assistantProvider };
-            },
-          },
+          mailboxPort: mailbox,
           workspacePort: createWorkspacePort({
             events, checkpointRequests,
             workspace: createWorkspaceState({ version: "0", snapshotRef: restored.snapshotRef }),
@@ -185,16 +178,14 @@ test.each(priorityJourneys)(
       const foregroundIdleCheckpoints = () => checkpointRequests
         .filter((request) => request.reason === "idle_shutdown").length - initialIdleCheckpoints;
 
-      if (arrival === "provider change" || arrival === "shutdown") {
-        if (arrival === "provider change") providerChanged = true;
-        else shutdown.abort();
+      if (arrival === "shutdown") {
+        shutdown.abort();
         sendInput();
-        const result = await withRealTimeout(invocation, 10_000, () => events.join(","));
+        await withRealTimeout(invocation, 10_000, () => events.join(","));
         assert.equal(handled.size, 1, "The old owner must not execute new input after losing authority.");
         assert.equal(Date.now(), Date.parse(TEST_NOW), "Required handoff must not wait for idle.");
         assert.ok(snapshotTimes.length > 0);
         assert.equal(effectCalls, 1);
-        if (providerChanged) assert.equal(result.immediateRecheckRequested, true);
         return;
       }
 

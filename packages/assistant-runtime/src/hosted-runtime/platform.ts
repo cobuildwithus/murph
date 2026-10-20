@@ -46,14 +46,13 @@ import type {
   HostedRuntimeGroupToolResponse,
   HostedRuntimeProductFeedbackRecord,
   HostedRuntimeProductFeedbackRecordResponse,
-  HostedCodexAuthUpdate,
-  HostedCodexAuthUpdateResponse,
   HostedRuntimeUsageNoticeDeliveryTarget,
   HostedRuntimeUsageRecordResponse as HostedExecutionRuntimeUsageRecordResponse,
   HostedWorkspaceCheckpointRequest,
   HostedWorkspaceCheckpointResponse,
   HostedWorkspaceReadResponse,
   HostedBrowserVaultReplicaPublishResponse,
+  HostedRuntimeRedactedObject,
 } from "@murphai/hosted-execution/runtime-control";
 import type {
   AssistantUsageRecord,
@@ -64,10 +63,8 @@ import type {
   HostedRuntimeAssistantPersonalizationToolRequest,
   HostedRuntimeAssistantPersonalizationToolResponse,
 } from "@murphai/hosted-execution/assistant-personalization";
-import {
-  assistantResponseMediaSchema,
-  type AssistantResponseMedia,
-} from "@murphai/operator-config/assistant-cli-contracts";
+import { assistantResponseMediaSchema } from "@murphai/operator-config/assistant-delivery-contracts";
+import type { AssistantResponseMedia } from "@murphai/operator-config/assistant-cli-contracts";
 import type {
   AssistantResponseCard,
 } from "@murphai/operator-config/assistant-response-cards";
@@ -707,10 +704,6 @@ export interface HostedRuntimeGroupToolPort {
     | { status: "unavailable"; unavailableReason: string };
 }
 
-export interface HostedRuntimeCodexAuthPort {
-  update(update: HostedCodexAuthUpdate): Promise<HostedCodexAuthUpdateResponse>;
-}
-
 export interface HostedRuntimePhoneCallPort {
   stop?(
     request: HostedPhoneCallStopRequest,
@@ -747,6 +740,11 @@ export interface HostedRuntimePhysicalNotePort {
   ): Promise<HostedPhysicalNoteSendResponse>;
 }
 
+/** Runtime-only fetch result: optional transport scalars for the read's first attempt. */
+export type HostedRuntimeMailboxFetchResponse = HostedMailboxFetchResponse & {
+  transportTiming?: HostedRuntimeRedactedObject;
+};
+
 export interface HostedRuntimeMailboxPort {
   admitVoiceInput?(
     request: import("@murphai/hosted-execution").HostedVoiceInputRequest,
@@ -754,7 +752,7 @@ export interface HostedRuntimeMailboxPort {
   fetch(
     request: HostedMailboxFetchRequest,
     context?: { signal?: AbortSignal | null },
-  ): Promise<HostedMailboxFetchResponse>;
+  ): Promise<HostedRuntimeMailboxFetchResponse>;
   fetchPayload(
     request: HostedMailboxPayloadFetchRequest,
   ): Promise<HostedMailboxPayloadFetchResponse>;
@@ -902,7 +900,6 @@ export interface HostedRuntimePlatform {
   artifactStore: HostedRuntimeArtifactStore;
   mediaStore?: HostedRuntimeMediaStore | null;
   browserVaultReplicaPort?: HostedRuntimeBrowserVaultReplicaPort | null;
-  codexAuthPort?: HostedRuntimeCodexAuthPort | null;
   clinicalRecordsPort?: HostedRuntimeClinicalRecordsPort | null;
   connectedApps?: AssistantConnectedAppsPort | null;
   deviceSyncPort?: HostedRuntimeDeviceSyncPort | null;

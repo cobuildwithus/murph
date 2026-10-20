@@ -69,7 +69,6 @@ export async function claimHostedRuntime(input: {
       platformAiUsageAllowed: false,
       workspaceVersion: null,
       providerEgressTokenHash: null,
-      customInferenceEnvelope: null,
     };
     const owner = existing
       ? await tx.hostedRuntimeOwner.update({ where: { userId: input.userId }, data })
@@ -87,7 +86,6 @@ export async function prepareHostedRuntimeLaunch(input: {
   runnerContainerName: string;
   workspaceVersion: string;
   providerEgressTokenHash: string | null;
-  customInferenceEnvelope: string | null;
   platformAiUsageAllowed: boolean;
   processingMode?: HostedWorkspaceInvocationProcessingMode | null;
 }): Promise<HostedRuntimeOwner> {
@@ -101,7 +99,6 @@ export async function prepareHostedRuntimeLaunch(input: {
       if (owner.runnerContainerName !== input.runnerContainerName
         || owner.workspaceVersion !== workspaceVersion
         || owner.providerEgressTokenHash !== input.providerEgressTokenHash
-        || owner.customInferenceEnvelope !== input.customInferenceEnvelope
         || owner.processingMode !== (input.processingMode ?? owner.processingMode)) {
         throw staleRuntimeError();
       }
@@ -117,7 +114,6 @@ export async function prepareHostedRuntimeLaunch(input: {
         runnerContainerName: input.runnerContainerName,
         workspaceVersion,
         providerEgressTokenHash: input.providerEgressTokenHash,
-        customInferenceEnvelope: input.customInferenceEnvelope,
         platformAiUsageAllowed: input.platformAiUsageAllowed,
         processingMode: input.processingMode ?? owner.processingMode,
       },
@@ -261,7 +257,7 @@ export async function releaseHostedRuntimeAfterRetirement(input: {
       data: {
         phase: "idle", attemptId: null, allocationId: null, runnerContainerName: null,
         processingMode: null, workspaceVersion: null, providerEgressTokenHash: null,
-        customInferenceEnvelope: null, platformAiUsageAllowed: false,
+        platformAiUsageAllowed: false,
       },
     });
     if (result.count === 1) await tx.hostedRuntimePutDrain.updateMany({
@@ -289,7 +285,7 @@ export async function releaseHostedRuntimeAfterCompletion(input: {
       data: {
         phase: "idle", attemptId: null, processingMode: null,
         workspaceVersion: null, providerEgressTokenHash: null,
-        customInferenceEnvelope: null, platformAiUsageAllowed: false,
+        platformAiUsageAllowed: false,
       },
     });
     if (result.count === 1) await tx.hostedRuntimePutDrain.updateMany({
@@ -336,7 +332,6 @@ const runtimeOwnerColumns = Prisma.sql`
   owner.processing_mode AS "processingMode", owner.allocation_id AS "allocationId",
   owner.runner_container_name AS "runnerContainerName", owner.workspace_version AS "workspaceVersion",
   owner.provider_egress_token_hash AS "providerEgressTokenHash",
-  owner.custom_inference_envelope AS "customInferenceEnvelope",
   owner.platform_ai_usage_allowed AS "platformAiUsageAllowed", owner.started_at AS "startedAt",
   owner.accepted_at AS "acceptedAt", owner.completed_at AS "completedAt",
   owner.failure_count AS "failureCount", owner.last_error_code AS "lastErrorCode", owner.updated_at AS "updatedAt"
@@ -400,7 +395,7 @@ export async function authorizeHostedRuntimeProvider(input: {
   const { cutover, owner } = await readRuntimeEffectOwner(input.prisma, input.userId);
   if (!owner?.attemptId || !owner.runnerContainerName || owner.workspaceVersion === null) return { cutover, owner: null };
   if (input.runnerContainerName !== null) {
-    if (owner.runnerContainerName !== input.runnerContainerName || !["exa", "mapbox", "murph_data_api", "openai", "venice", "workers_ai_transcribe"].includes(input.providerKind)) return { cutover, owner: null };
+    if (owner.runnerContainerName !== input.runnerContainerName || !["exa", "mapbox", "murph_data_api", "openai", "workers_ai_transcribe"].includes(input.providerKind)) return { cutover, owner: null };
   } else if (!input.providerEgressTokenHash || owner.providerEgressTokenHash !== input.providerEgressTokenHash) return { cutover, owner: null };
   return { cutover, owner };
 }
@@ -414,7 +409,7 @@ export async function recordHostedRuntimeTargetRetired(input: { prisma: PrismaCl
     if (!current || current.runnerContainerName !== input.runnerContainerName) return false;
     await tx.hostedRuntimeOwner.update({ where: { userId: input.userId }, data: {
       phase: "idle", attemptId: null, allocationId: null, runnerContainerName: null, processingMode: null,
-      workspaceVersion: null, providerEgressTokenHash: null, customInferenceEnvelope: null, platformAiUsageAllowed: false,
+      workspaceVersion: null, providerEgressTokenHash: null, platformAiUsageAllowed: false,
     } });
     if (current.attemptId) await tx.hostedRuntimePutDrain.updateMany({ where: {
       userId: input.userId, attemptId: current.attemptId, generation: current.generation, kind: "replica", uploadId: null, completedAt: null, drainUntil: null,

@@ -1,0 +1,19 @@
+{
+  "publishedOn": "2026-10-04",
+  "order": 100,
+  "item": {
+    "id": "single-badge-on-imessage-cards",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "One Murph badge on iMessage cards",
+    "summary": "Nutrition, workout, and challenge cards viewed on a Mac or without the Murph app show one Murph badge instead of two overlapping ones.",
+    "details": "Card contents and layout are unchanged. Cards that were already sent keep their original image.",
+    "relevanceTags": [
+      "imessage",
+      "nutrition"
+    ],
+    "sourcePullRequests": [
+      4005
+    ]
+  }
+}

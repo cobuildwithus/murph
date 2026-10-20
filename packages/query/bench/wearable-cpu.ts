@@ -5,6 +5,11 @@ import { performance } from "node:perf_hooks";
 import type { CanonicalEntity } from "../src/canonical-entities.ts";
 import { createVaultReadModel } from "../src/read-model.ts";
 import { buildMetricProjection, buildWearableMetricEvidence, buildWearableMetricEvidenceFromBundle } from "../src/metrics/projection.ts";
+import { parseJsonValue } from "../src/projection/schema.ts";
+import {
+  projectPublicWearableSummaryBundle,
+  stringifyPublicWearableProjectionSummary,
+} from "../src/projection/wearable-summary-public-json.ts";
 import { buildWearableSummaryBundle } from "../src/wearables.ts";
 import { dedupeExactMetricCandidates } from "../src/wearables/dedupe.ts";
 import type { WearableMetricCandidate } from "../src/wearables/types.ts";
@@ -84,4 +89,30 @@ for (const [name, days, copies] of [["projection-duplicate-burst", 1, 2000], ["p
   // Metric-only construction must equal the full source-health-enabled bundle.
   assert.deepEqual(buildWearableMetricEvidence(vault), buildWearableMetricEvidenceFromBundle(buildWearableSummaryBundle(vault)));
   measure(name, () => buildMetricProjection(vault));
+}
+
+// Public projection versus its text round-trip control on one fixture:
+// two warm pairs, then seven alternating measured pairs.
+{
+  const bundle = buildWearableSummaryBundle(makeVault(365, 1));
+  const control = () => Object.fromEntries(Object.entries(bundle).map(([key, summaries]: [string, readonly unknown[]]) => [
+    key,
+    summaries.map((summary) => parseJsonValue<unknown>(stringifyPublicWearableProjectionSummary(summary), null))
+      .filter((summary) => summary !== null),
+  ]));
+  const expected = control();
+  const hash = createHash("sha256").update(JSON.stringify(expected)).digest("hex");
+  const pairs = [];
+  for (let pair = 0; pair < 9; pair += 1) {
+    const sample = { control: 0, projection: 0 };
+    for (const name of pair % 2 === 0 ? ["control", "projection"] as const : ["projection", "control"] as const) {
+      globalThis.gc?.();
+      const start = performance.now();
+      const result = name === "control" ? control() : projectPublicWearableSummaryBundle(bundle);
+      sample[name] = performance.now() - start;
+      assert.deepStrictEqual(result, expected);
+    }
+    if (pair >= 2) pairs.push(sample);
+  }
+  console.log(JSON.stringify({ name: "public-projection-unique-history", hash, pairs }));
 }

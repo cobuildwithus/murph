@@ -3357,7 +3357,7 @@
                         },
                         "limit": {
                           "default": 10,
-                          "description": "Maximum number of results to return.",
+                          "description": "Maximum number of results to return, from 1 to 200.",
                           "type": "integer",
                           "exclusiveMinimum": 0,
                           "maximum": 200
@@ -3694,7 +3694,7 @@
                         },
                         "limit": {
                           "default": 10,
-                          "description": "Maximum number of results to return.",
+                          "description": "Maximum number of results to return, from 1 to 200.",
                           "type": "integer",
                           "exclusiveMinimum": 0,
                           "maximum": 200
@@ -4386,11 +4386,6 @@
                   "type": "string",
                   "minLength": 1
                 },
-                "modelProvider": {
-                  "description": "Optional Codex model provider id to save. Only applies with `--preset codex`.",
-                  "type": "string",
-                  "minLength": 1
-                },
                 "codexCommand": {
                   "description": "Optional Codex CLI executable path. Only applies with `--preset codex`. Defaults to `codex`.",
                   "type": "string",
@@ -4415,10 +4410,6 @@
                     "high",
                     "xhigh"
                   ]
-                },
-                "oss": {
-                  "description": "Save a local Codex OSS model target instead of the signed-in Codex cloud path. Only applies with `--preset codex`.",
-                  "type": "boolean"
                 }
               }
             }
@@ -4787,7 +4778,7 @@
                         },
                         "limit": {
                           "default": 10,
-                          "description": "Maximum number of results to return.",
+                          "description": "Maximum number of results to return, from 1 to 200.",
                           "type": "integer",
                           "exclusiveMinimum": 0,
                           "maximum": 200
@@ -4830,7 +4821,7 @@
                         },
                         "limit": {
                           "default": 10,
-                          "description": "Maximum number of results to return.",
+                          "description": "Maximum number of results to return, from 1 to 200.",
                           "type": "integer",
                           "exclusiveMinimum": 0,
                           "maximum": 200
@@ -5496,7 +5487,7 @@
                         },
                         "limit": {
                           "default": 10,
-                          "description": "Maximum number of results to return.",
+                          "description": "Maximum number of results to return, from 1 to 200.",
                           "type": "integer",
                           "exclusiveMinimum": 0,
                           "maximum": 200
@@ -5549,7 +5540,7 @@
                                 },
                                 "limit": {
                                   "default": 10,
-                                  "description": "Maximum number of results to return.",
+                                  "description": "Maximum number of results to return, from 1 to 200.",
                                   "type": "integer",
                                   "exclusiveMinimum": 0,
                                   "maximum": 200
@@ -7426,7 +7417,7 @@
                         },
                         "limit": {
                           "default": 10,
-                          "description": "Maximum number of results to return.",
+                          "description": "Maximum number of results to return, from 1 to 200.",
                           "type": "integer",
                           "exclusiveMinimum": 0,
                           "maximum": 200
@@ -7746,7 +7737,7 @@
                         },
                         "limit": {
                           "default": 10,
-                          "description": "Maximum number of results to return.",
+                          "description": "Maximum number of results to return, from 1 to 200.",
                           "type": "integer",
                           "exclusiveMinimum": 0,
                           "maximum": 200
@@ -8187,7 +8178,7 @@
                         },
                         "limit": {
                           "default": 10,
-                          "description": "Maximum number of results to return.",
+                          "description": "Maximum number of results to return, from 1 to 200.",
                           "type": "integer",
                           "exclusiveMinimum": 0,
                           "maximum": 200
@@ -8922,7 +8913,7 @@
                         },
                         "limit": {
                           "default": 10,
-                          "description": "Maximum number of results to return.",
+                          "description": "Maximum number of results to return, from 1 to 200.",
                           "type": "integer",
                           "exclusiveMinimum": 0,
                           "maximum": 200
@@ -10860,36 +10851,6 @@
                     }
                   }
                 },
-                "patterns": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "properties": {
-                    "options": {
-                      "type": "object",
-                      "additionalProperties": false,
-                      "properties": {
-                        "requestId": {
-                          "description": "Optional caller-supplied request id for audit correlation.",
-                          "type": "string",
-                          "minLength": 1,
-                          "maxLength": 128
-                        },
-                        "date": {
-                          "description": "Optional last action date in YYYY-MM-DD form. Defaults to today.",
-                          "type": "string",
-                          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
-                        },
-                        "windowDays": {
-                          "default": 120,
-                          "description": "Calendar-day window for matched personal patterns. Defaults to 120 days.",
-                          "type": "integer",
-                          "minimum": 28,
-                          "maximum": 366
-                        }
-                      }
-                    }
-                  }
-                },
                 "metric": {
                   "type": "object",
                   "additionalProperties": false,
@@ -11790,7 +11751,7 @@
                         },
                         "limit": {
                           "default": 10,
-                          "description": "Maximum number of results to return.",
+                          "description": "Maximum number of results to return, from 1 to 200.",
                           "type": "integer",
                           "exclusiveMinimum": 0,
                           "maximum": 200
@@ -12786,7 +12747,7 @@
                         },
                         "limit": {
                           "default": 10,
-                          "description": "Maximum number of results to return.",
+                          "description": "Maximum number of results to return, from 1 to 200.",
                           "type": "integer",
                           "exclusiveMinimum": 0,
                           "maximum": 200
@@ -13455,6 +13416,10 @@
                           "type": "string",
                           "minLength": 1,
                           "maxLength": 128
+                        },
+                        "ifExists": {
+                          "description": "For an optional page, return `page: null` instead of failing when no derived page exists for the slug. Fails instead when any invalid page leaves absence unconfirmed, and for unreadable, duplicate, or reserved pages.",
+                          "type": "boolean"
                         }
                       }
                     }
@@ -13969,7 +13934,7 @@
                         },
                         "limit": {
                           "default": 10,
-                          "description": "Maximum number of results to return.",
+                          "description": "Maximum number of results to return, from 1 to 200.",
                           "type": "integer",
                           "exclusiveMinimum": 0,
                           "maximum": 200
@@ -14181,7 +14146,7 @@
                         },
                         "limit": {
                           "default": 10,
-                          "description": "Maximum number of results to return.",
+                          "description": "Maximum number of results to return, from 1 to 200.",
                           "type": "integer",
                           "exclusiveMinimum": 0,
                           "maximum": 200
@@ -14377,7 +14342,7 @@
                         },
                         "limit": {
                           "default": 10,
-                          "description": "Maximum number of results to return.",
+                          "description": "Maximum number of results to return, from 1 to 200.",
                           "type": "integer",
                           "exclusiveMinimum": 0,
                           "maximum": 200
@@ -14573,7 +14538,7 @@
                         },
                         "limit": {
                           "default": 10,
-                          "description": "Maximum number of results to return.",
+                          "description": "Maximum number of results to return, from 1 to 200.",
                           "type": "integer",
                           "exclusiveMinimum": 0,
                           "maximum": 200
@@ -14846,7 +14811,7 @@
                         },
                         "limit": {
                           "default": 10,
-                          "description": "Maximum number of results to return.",
+                          "description": "Maximum number of results to return, from 1 to 200.",
                           "type": "integer",
                           "exclusiveMinimum": 0,
                           "maximum": 200
@@ -15063,7 +15028,7 @@
                         },
                         "limit": {
                           "default": 10,
-                          "description": "Maximum number of results to return.",
+                          "description": "Maximum number of results to return, from 1 to 200.",
                           "type": "integer",
                           "exclusiveMinimum": 0,
                           "maximum": 200
@@ -15222,7 +15187,7 @@
                         },
                         "limit": {
                           "default": 10,
-                          "description": "Maximum number of results to return.",
+                          "description": "Maximum number of results to return, from 1 to 200.",
                           "type": "integer",
                           "exclusiveMinimum": 0,
                           "maximum": 200
@@ -15454,7 +15419,7 @@
                         },
                         "limit": {
                           "default": 10,
-                          "description": "Maximum number of results to return.",
+                          "description": "Maximum number of results to return, from 1 to 200.",
                           "type": "integer",
                           "exclusiveMinimum": 0,
                           "maximum": 200
@@ -15721,7 +15686,7 @@
                                 },
                                 "limit": {
                                   "default": 10,
-                                  "description": "Maximum number of results to return.",
+                                  "description": "Maximum number of results to return, from 1 to 200.",
                                   "type": "integer",
                                   "exclusiveMinimum": 0,
                                   "maximum": 200

@@ -32,13 +32,8 @@ import type {
   AssistantUsageTokenPricingBasis,
 } from "./assistant-usage.ts";
 import type {
-  HostedAssistantCustomInferenceOverride,
-} from "./assistant-inference.ts";
-import type {
   HostedAssistantModelOverride,
   HostedAssistantProductModel,
-  HostedAssistantProvider,
-  HostedAssistantProviderOverride,
   HostedAssistantReasoningEffort,
   HostedAssistantReasoningEffortOverride,
 } from "./assistant-model.ts";
@@ -205,7 +200,6 @@ export const HOSTED_AI_USAGE_ALLOWANCE_PRICED_MODELS = [
   "gpt-6-luna",
   "gpt-6-astra",
   "gpt-5.6-sol",
-  "gpt-5.6-terra",
   "gpt-5.6-luna",
 ] as const;
 
@@ -907,11 +901,6 @@ export interface HostedGroupRunningBitProjection {
 }
 
 export interface HostedMailboxFetchResponse {
-  // Web supplies this invocation-lifecycle fact on every fetch, including empty
-  // batches. Deploy Web before a runner that consumes it.
-  assistantProvider: HostedAssistantProvider;
-  // Selected custom route identity; null means managed. Older Web omits it.
-  assistantCustomInferenceRevision?: number | null;
   // Optional for deploy-window compatibility. Web emits this only for an
   // allowed conversation batch whose current effective capacity is low.
   conversationUsageStatus?: "low" | null;
@@ -1038,16 +1027,28 @@ export interface HostedRuntimeProductFeedbackRecord {
 
 export const HOSTED_PRODUCT_SUPPORT_ESCALATION_PREFIX = "Support escalation:";
 export const HOSTED_USAGE_OPTIMIZATION_AUDIT_PREFIX = "Usage optimization audit:";
+export const HOSTED_USAGE_OPTIMIZATION_AUDIT_REJECTIONS = [
+  "wrong_kind", "changelog_linked", "missing_prefix", "summary_too_long", "empty_report",
+] as const;
+export type HostedUsageOptimizationAuditRejection =
+  (typeof HOSTED_USAGE_OPTIMIZATION_AUDIT_REJECTIONS)[number];
+
 export function isHostedUsageOptimizationAuditFeedback(
   feedback: Pick<HostedRuntimeProductFeedbackRecord, "kind" | "relatedChangelogItemIds" | "summary">,
+  onRejection?: (reason: HostedUsageOptimizationAuditRejection) => void,
 ): boolean {
-  return feedback.kind === "feature_request" && feedback.relatedChangelogItemIds.length === 0
-    && feedback.summary.startsWith(HOSTED_USAGE_OPTIMIZATION_AUDIT_PREFIX)
-    && feedback.summary.length <= 1800
-    && feedback.summary.slice(HOSTED_USAGE_OPTIMIZATION_AUDIT_PREFIX.length).trim().length > 0;
+  // Observe the existing short-circuit rules once, without a second validator.
+  const reject = (reason: HostedUsageOptimizationAuditRejection): false => {
+    onRejection?.(reason);
+    return false;
+  };
+  return (feedback.kind === "feature_request" || reject("wrong_kind"))
+    && (feedback.relatedChangelogItemIds.length === 0 || reject("changelog_linked"))
+    && (feedback.summary.startsWith(HOSTED_USAGE_OPTIMIZATION_AUDIT_PREFIX) || reject("missing_prefix"))
+    && (feedback.summary.length <= 1800 || reject("summary_too_long"))
+    && (feedback.summary.slice(HOSTED_USAGE_OPTIMIZATION_AUDIT_PREFIX.length).trim().length > 0 || reject("empty_report"));
 }
 
-export const HOSTED_PATTERN_ENGINE_AUDIT_PREFIX = "Pattern engine audit:";
 
 export function isHostedProductSupportEscalationSummary(
   value: string | null | undefined,
@@ -2277,17 +2278,10 @@ export type HostedRuntimeAssistantConfigurationToolRequest =
 export type HostedRuntimeAssistantConfigurationChanges =
   | {
       model: HostedAssistantProductModel;
-      provider?: HostedAssistantProvider;
       reasoningEffort?: HostedAssistantReasoningEffort;
     }
   | {
       model?: never;
-      provider: HostedAssistantProvider;
-      reasoningEffort?: HostedAssistantReasoningEffort;
-    }
-  | {
-      model?: never;
-      provider?: never;
       reasoningEffort: HostedAssistantReasoningEffort;
     };
 
@@ -2302,12 +2296,10 @@ export type HostedRuntimeAssistantConfigurationControlRequest =
 
 export interface HostedRuntimeAssistantConfigurationSnapshot {
   availableModels: HostedAssistantProductModel[];
-  availableProviders: HostedAssistantProvider[];
   availableReasoningEfforts: HostedAssistantReasoningEffort[];
   configurationAvailable: boolean;
   dormantSolPreference: boolean;
   model: HostedAssistantProductModel;
-  provider: HostedAssistantProvider;
   reasoningEffort: HostedAssistantReasoningEffort;
   solAvailable: boolean;
 }
@@ -2331,32 +2323,6 @@ export type HostedRuntimeAssistantConfigurationToolResponse =
         status: HostedRuntimeAssistantConfigurationUpdateStatus;
       };
     };
-
-export type HostedCodexAuthUpdate =
-  | {
-      attemptId: string;
-      phase: "device_code";
-      userCode: string;
-      verificationUrl: string;
-    }
-  | {
-      attemptId: string;
-      phase: "connected" | "disconnected" | "failed";
-    };
-
-export const HOSTED_CODEX_AUTH_UPDATE_RESPONSE_STATUSES = [
-  "applied",
-  "already_applied",
-  "superseded",
-] as const;
-
-export type HostedCodexAuthUpdateResponseStatus =
-  (typeof HOSTED_CODEX_AUTH_UPDATE_RESPONSE_STATUSES)[number];
-
-export interface HostedCodexAuthUpdateResponse {
-  applied: boolean;
-  status: HostedCodexAuthUpdateResponseStatus;
-}
 
 export interface HostedRuntimeIssueExportRequest {
   issues: AssistantRuntimeIssueRecord[];
@@ -3654,9 +3620,7 @@ export interface HostedWorkspaceReadResponse {
   /** Derived from personal member signup; rechecked at each provider attempt. */
   hostedAssistantPriorityUntil?: string;
   hostedAssistantAstraAllowed?: boolean;
-  hostedAssistantCustomInferenceOverride?: HostedAssistantCustomInferenceOverride;
   hostedAssistantModelOverride?: HostedAssistantModelOverride;
-  hostedAssistantProviderOverride?: HostedAssistantProviderOverride;
   hostedAssistantReasoningEffortOverride?: HostedAssistantReasoningEffortOverride;
   hostedAssistantSubagentModelOverridesAllowed?: boolean;
   platformAiUsageAllowed?: boolean;
@@ -3851,6 +3815,7 @@ export const HOSTED_RUNTIME_LOG_EVENT_CODES = [
   "mailbox.parser_drain_failed",
   "mailbox.parser_jobs_failed",
   "mailbox.post_checkpoint_effects_finished",
+  "mailbox.progress_alert_sampled",
   "mailbox.system_processed",
   "mailbox.telegram_attachment_download_finished",
   "mailbox.quarantined",
@@ -4102,6 +4067,8 @@ export function isHostedRetiredMailboxKind(
 
 export {
   parseHostedGroupSharedFreshnessRequirements,
+  readHostedGroupSharedFreshnessRejection,
+  type HostedGroupSharedFreshnessRejection,
   selectRefreshableHostedGroupWearableDates,
   hostedGroupMemberHasMissingWearableDates,
   hostedGroupSharedNeedsWearableRecovery,

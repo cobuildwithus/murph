@@ -111,6 +111,15 @@ export interface KnowledgeGetResult {
   vault: string;
 }
 
+// Explicit opt-in result for a page proven absent from a fully parsed graph;
+// strict reads never return it.
+export interface KnowledgeAbsentPageResult {
+  degradation: null;
+  page: null;
+  slug: string;
+  vault: string;
+}
+
 export interface KnowledgeIndexRebuildResult {
   indexPath: string;
   pageCount: number;
@@ -234,6 +243,19 @@ export const knowledgeGetResultSchema = z.object({
   page: knowledgePageSchema,
   vault: pathLikeSchema,
 }) satisfies z.ZodType<KnowledgeGetResult>;
+
+export const knowledgeAbsentPageResultSchema = z.object({
+  degradation: z.null(),
+  page: z.null(),
+  slug: knowledgePageSlugSchema,
+  vault: pathLikeSchema,
+}) satisfies z.ZodType<KnowledgeAbsentPageResult>;
+
+// Both branches are objects; the root type keeps MCP structured results.
+export const knowledgeShowResultSchema = z.union([
+  knowledgeGetResultSchema,
+  knowledgeAbsentPageResultSchema,
+]).meta({ type: "object" });
 
 export const knowledgeIndexRebuildResultSchema = z.object({
   indexPath: pathLikeSchema,

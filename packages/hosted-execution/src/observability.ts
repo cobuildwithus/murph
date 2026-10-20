@@ -186,7 +186,6 @@ const HOSTED_ASSISTANT_NOTIFICATION_STRING_DETAIL_KEYS = [
   "assistantNotificationChannel",
   "assistantNotificationDeliveryDispatchMode",
   "assistantNotificationDeliveryKind",
-  "assistantNotificationGatewayOnlyProviders",
   "assistantNotificationProvider",
   "assistantNotificationProviderModel",
   "assistantNotificationRouteId",
@@ -206,10 +205,8 @@ const HOSTED_ASSISTANT_PROVIDER_STRING_DETAIL_KEYS = [
   "assistantProviderErrorStatusText",
   "assistantProviderErrorType",
   "assistantProviderExecutionDriver",
-  "assistantProviderGatewayOnlyProviders",
   "assistantProviderModel",
   "assistantProviderName",
-  "assistantProviderPresetId",
   "assistantProviderRequestUrlOrigin",
   "assistantProviderRequestUrlPath",
 ] as const;
@@ -218,13 +215,10 @@ const HOSTED_ASSISTANT_PROVIDER_BOOLEAN_DETAIL_KEYS = [
   "assistantProviderBaseUrlConfigured",
   "assistantProviderErrorBodyPresent",
   "assistantProviderErrorRetryable",
-  "assistantProviderGatewayTarget",
-  "assistantProviderZeroDataRetention",
 ] as const;
 
 const HOSTED_ASSISTANT_PROVIDER_NUMBER_DETAIL_KEYS = [
   "assistantProviderErrorStatus",
-  "assistantProviderGatewayOnlyProviderCount",
 ] as const;
 
 const HOSTED_ASSISTANT_NOTIFICATION_CODEX_STRING_DETAIL_KEYS = {

@@ -2,9 +2,6 @@ import { createInterface } from 'node:readline'
 import { prepareSetupPromptInput } from './setup-prompt-io.js'
 import { VaultCliError } from './vault-cli-errors.js'
 import {
-  resolveAssistantCodexModelProviderConfig,
-} from './assistant/target-runtime.js'
-import {
   type SetupChannel,
   type SetupConfiguredWearable,
   type SetupWearable,
@@ -49,7 +46,6 @@ export interface SetupWizardRuntimeStatus {
 export interface SetupRuntimeEnvResolver {
   getCurrentEnv(): NodeJS.ProcessEnv
   promptForMissing(input: {
-    assistantModelProvider?: string | null
     channels: readonly SetupChannel[]
     env: NodeJS.ProcessEnv
     helpText?: readonly string[]
@@ -233,58 +229,6 @@ export function describeSetupWearableStatus(
   }
 }
 
-export function resolveSetupAssistantModelProviderMissingEnv(
-  modelProvider: string | null | undefined,
-  env: NodeJS.ProcessEnv,
-): string[] {
-  const envKeys = resolveSetupAssistantModelProviderEnvKeys(modelProvider)
-  return envKeys.length > 0 && !hasAnyEnv(env, envKeys)
-    ? envKeys
-    : []
-}
-
-export function resolveSetupAssistantModelProviderEnvKeys(
-  modelProvider: string | null | undefined,
-): string[] {
-  const modelProviderConfig =
-    resolveAssistantCodexModelProviderConfig(modelProvider)
-  return modelProviderConfig ? [modelProviderConfig.envKey] : []
-}
-
-export function describeSetupAssistantModelProviderStatus(
-  modelProvider: string | null | undefined,
-  env: NodeJS.ProcessEnv,
-): SetupWizardRuntimeStatus {
-  const modelProviderConfig =
-    resolveAssistantCodexModelProviderConfig(modelProvider)
-  if (!modelProviderConfig) {
-    return {
-      badge: 'ready',
-      detail: 'No assistant provider API key is required.',
-      missingEnv: [],
-      ready: true,
-    }
-  }
-
-  const missingEnv = resolveSetupAssistantModelProviderMissingEnv(
-    modelProviderConfig.id,
-    env,
-  )
-  return missingEnv.length === 0
-    ? {
-        badge: 'ready',
-        detail: `${modelProviderConfig.name} API key is available in the current environment.`,
-        missingEnv,
-        ready: true,
-      }
-    : {
-        badge: 'needs key',
-        detail: `Add ${modelProviderConfig.envKey} to the current environment to use ${modelProviderConfig.name}.`,
-        missingEnv,
-        ready: false,
-      }
-}
-
 export function describeSelectedSetupWearables(input: {
   wearables: readonly SetupWearable[]
   env: NodeJS.ProcessEnv
@@ -308,30 +252,12 @@ export function describeSelectedSetupWearables(input: {
 }
 
 export function resolveSetupRuntimePromptKeys(input: {
-  assistantModelProvider?: string | null
   channels: readonly SetupChannel[]
   env: NodeJS.ProcessEnv
   wearables: readonly SetupWearable[]
 }): string[] {
   const keys: string[] = []
   const seen = new Set<string>()
-  const modelProviderConfig = resolveAssistantCodexModelProviderConfig(
-    input.assistantModelProvider,
-  )
-
-  if (modelProviderConfig) {
-    const missingAssistantEnv = resolveSetupAssistantModelProviderMissingEnv(
-      modelProviderConfig.id,
-      input.env,
-    )
-    for (const key of missingAssistantEnv) {
-      if (!seen.has(key)) {
-        seen.add(key)
-        keys.push(key)
-      }
-    }
-  }
-
   for (const channel of input.channels) {
     for (const key of resolveSetupChannelMissingEnv(channel, input.env)) {
       if (!seen.has(key)) {

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 
 import { test } from "vitest";
+import { VaultCliError } from "@murphai/operator-config/vault-cli-errors";
 
 import {
   normalizeRepeatedOption,
@@ -29,6 +30,23 @@ test("normalizeRepeatableFlagOption rejects comma-delimited values", () => {
             "Comma-delimited values are not supported for --kind. Repeat the flag instead.",
       ),
   );
+});
+
+test("rejections carry only a hidden, read-only CLI timing class", () => {
+  for (const [rejection, run] of [
+    ["comma_delimited", () => normalizeRepeatableFlagOption(["goal,condition"], "kind")],
+    ["unsupported_value", () => normalizeRepeatableEnumFlagOption(["allergy"], "record-type", ["goal"])],
+  ] as const) {
+    assert.throws(run, (error: unknown) => {
+      assert.ok(error instanceof Error);
+      assert.deepEqual(Object.getOwnPropertyDescriptor(error, "cliTimingRejection"),
+        { value: rejection, writable: false, enumerable: false, configurable: false });
+      const bare = new VaultCliError("invalid_option", error.message);
+      assert.deepEqual(Object.keys(error), Object.keys(bare));
+      assert.equal(JSON.stringify(error), JSON.stringify(bare));
+      return true;
+    });
+  }
 });
 
 test("normalizeRepeatableTextFlagOption preserves commas inside prose values", () => {

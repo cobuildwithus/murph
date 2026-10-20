@@ -2,7 +2,6 @@ import {
   parseHostedRuntimeLogRequest,
   parseHostedRuntimeLogResponse,
 } from "@murphai/hosted-execution/parsers";
-import { after } from "next/server";
 
 import {
   requireHostedCloudflareCallbackRequest,
@@ -19,10 +18,6 @@ import { isHostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import {
   writeHostedRuntimeLogs,
 } from "@/src/lib/hosted-runtime-log/write";
-import {
-  hasHostedPersonalPatternsRunAlert,
-  reportHostedPersonalPatternsRunAlerts,
-} from "@/src/lib/hosted-runtime-log/personal-patterns-run-alert";
 import {
   claimHostedAcceptedAttemptFailureRecheck,
 } from "@/src/lib/hosted-workspace/store";
@@ -44,7 +39,7 @@ export const POST = withJsonError(async (request: Request) => {
       throw error;
     }
     // Bounded shutdown drains can leave authenticated telemetry in flight after
-    // retirement. Discard it before persistence, recovery signals, or alerts.
+    // retirement. Discard it before persistence or recovery signals.
     return jsonOk(parseHostedRuntimeLogResponse({ loggedCount: 0 }));
   }
   const body = parseHostedRuntimeLogRequest(await readOptionalJsonObject(request));
@@ -64,12 +59,6 @@ export const POST = withJsonError(async (request: Request) => {
     entries: body.entries,
     userId,
   });
-  if (loggedCount > 0 && hasHostedPersonalPatternsRunAlert(body.entries)) {
-    after(() => reportHostedPersonalPatternsRunAlerts({
-      userId,
-      entries: body.entries,
-    }));
-  }
 
   return jsonOk(parseHostedRuntimeLogResponse({
     loggedCount,

@@ -137,6 +137,7 @@ export type HostedStripeSubscriptionUpdateOutcome = HostedStripeActivationOutcom
 };
 
 export type HostedSubscriptionCancellationEmailCandidate = {
+  accountGroupId?: string;
   memberId: string;
   stripeSubscriptionId: string;
 };
@@ -969,7 +970,11 @@ export async function applyStripeSubscriptionUpdated(
   if (familySubscription.groupId) {
     return {
       ...buildHostedStripeActivationOutcomeFromFamilySubscription(familySubscription),
-      subscriptionCancellationEmail: null,
+      subscriptionCancellationEmail: resolveHostedFamilySubscriptionCancellationEmail({
+        familySubscription,
+        sourceType: dispatchContext.sourceType,
+        subscription,
+      }),
     };
   }
 
@@ -1567,6 +1572,27 @@ export async function applyStripeRefundCreated(
 
 function isHostedStripeSucceededRefund(refund: Stripe.Refund): boolean {
   return refund.status === "succeeded" && readHostedStripePositiveAmount(refund.amount) !== null;
+}
+
+function resolveHostedFamilySubscriptionCancellationEmail(input: {
+  familySubscription: HostedFamilyStripeSubscriptionResult;
+  sourceType: string;
+  subscription: Stripe.Subscription;
+}): HostedSubscriptionCancellationEmailCandidate | null {
+  const { familySubscription, subscription } = input;
+  if (
+    input.sourceType !== "stripe.customer.subscription.deleted"
+    || subscription.status !== "canceled"
+    || !familySubscription.groupId
+    || !familySubscription.terminalOwnerMemberId
+  ) {
+    return null;
+  }
+  return {
+    accountGroupId: familySubscription.groupId,
+    memberId: familySubscription.terminalOwnerMemberId,
+    stripeSubscriptionId: subscription.id,
+  };
 }
 
 function resolveHostedSubscriptionCancellationEmail(input: {

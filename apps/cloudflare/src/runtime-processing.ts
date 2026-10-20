@@ -15,7 +15,7 @@ import type { HostedRuntimeEnsureProcessingRequest } from "@murphai/hosted-execu
 import type { HostedRuntimeLatencyPhaseBreakdown } from "@murphai/hosted-execution/runtime-control";
 
 import { createRuntimeProcessingCommandBudget, isRuntimeProcessingCommandBudgetTimeout, readRuntimeProcessingCommandStepTimeoutMs, runRuntimeProcessingCommandStep } from "./user-runner/runtime-command-budget.ts";
-import { computeRuntimeProcessingOwnerRecheckAt } from "./user-runner/runtime-processing-responses.ts";
+import { computeHostedRuntimeProcessingRecheckDelayMs } from "./runtime-processing-timing.ts";
 import { ensureActiveRuntimeProcessing } from "./user-runner/runtime-container-wake.ts";
 import { readRuntimeFenceLivenessBestEffort } from "./user-runner/runtime-fence-liveness.ts";
 import type { RunnerWriteFenceToken } from "./runtime-invocation-token.ts";
@@ -26,6 +26,10 @@ import {
   resolveHostedStandbyCoordinatorName, readHostedRunnerTargetIdentity, requireHostedRunnerSlotLifecycle,
   type HostedStandbySlotBinding,
 } from "./standby-runner-contract.ts";
+
+/** Member activation and new inbound work signal orchestration directly, so a
+ * member denied admission is rechecked slowly instead of every few seconds. */
+export const HOSTED_RUNTIME_ADMISSION_BLOCKED_RETRY_MS = 5 * 60_000;
 
 type RuntimeProcessingInput = HostedRuntimeEnsureProcessingRequest & {
   commandStartedAtEpochMs?: number;
@@ -68,6 +72,9 @@ async function ensureRuntimeProcessing(context: ReturnType<typeof createProcessi
   for (let admission = 0; admission < 3; admission += 1) {
     if (claim.cutover !== "postgres") return retryProcessing(ctx, "cutover_blocked");
     const owner = claim.owner;
+    if (claim.blockedReason === "admission") {
+      return retryProcessing(ctx, "admission_blocked", Date.now() + HOSTED_RUNTIME_ADMISSION_BLOCKED_RETRY_MS);
+    }
     if (!owner || (claim.status !== "claimed" && claim.status !== "existing")) return retryProcessing(ctx, "claim_blocked");
     if (owner.userId !== ctx.input.userId) throw new TypeError("Runtime admission belongs to a different member.");
     if (owner.generation === previousGeneration) return retryProcessing(ctx, "claim_blocked");
@@ -132,7 +139,7 @@ function createProcessingContext(source: RuntimeProcessingSource, input: Runtime
 }
 
 function retryProcessing(ctx: { diagnostics: RuntimeProcessingDiagnostics }, reason:
-  | "cutover_blocked" | "missing_container_binding"
+  | "cutover_blocked" | "missing_container_binding" | "admission_blocked"
   | "claim_blocked" | "retirement_pending" | "completion_unconfirmed" | "starting_fence_preserved"
   | "processing_mode_conflict" | "wake_unconfirmed" | "container_not_ready"
   | "command_budget_exhausted" | "container_rpc_timeout",
@@ -143,7 +150,10 @@ function retryProcessing(ctx: { diagnostics: RuntimeProcessingDiagnostics }, rea
 }
 function acceptedProcessing(ctx: ProcessingContext, owner: HostedRuntimeOwnerSnapshot, action: "started" | "woken" | "already_running"): HostedRuntimeEnsureProcessingResponse {
   return { kind: "runtime_processing_accepted", action, runtimeAttemptId: requireIdentity(owner).attemptId,
-    recommendedRecheckAt: computeRuntimeProcessingOwnerRecheckAt({ env: ctx.env }) };
+    recommendedRecheckAt: new Date(ownerRecheckAtEpochMs(ctx)).toISOString() };
+}
+function ownerRecheckAtEpochMs(ctx: ProcessingContext): number {
+  return Date.now() + computeHostedRuntimeProcessingRecheckDelayMs(ctx.env);
 }
 
 async function retireRuntime(ctx: ProcessingContext, owner: HostedRuntimeOwnerSnapshot): Promise<HostedRuntimeEnsureProcessingResponse | null> {
@@ -216,7 +226,8 @@ async function wakeExistingRuntime(ctx: ProcessingContext, owner: HostedRuntimeO
     const live = await readRuntimeFenceLivenessBestEffort({ commandBudget: ctx.budget,
       identity: { ...identity, leaseGeneration: identity.generation, userId: ctx.input.userId },
       runnerContainerName: owner.runnerContainerName, runnerContainerNamespace: ctx.namespace, stepTimeoutMs: 1_000 });
-    return live.outcome === "inactive" ? null : retryProcessing(ctx, "processing_mode_conflict");
+    // Protected work keeps its own recheck horizon; its completion signal admits retention sooner.
+    return live.outcome === "inactive" ? null : retryProcessing(ctx, "processing_mode_conflict", ownerRecheckAtEpochMs(ctx));
   }
   ctx.diagnostics.stage = "active_wake";
   const wake = await ensureActiveRuntimeProcessing({ activeRuntime: {
@@ -251,7 +262,6 @@ async function startClaimedRuntime(ctx: ProcessingContext, initialOwner: HostedR
   if (ready.kind !== "ready") return retryProcessing(ctx, "container_not_ready");
   const launch = {
     providerEgressTokenHash: null,
-    customInferenceEnvelope: prepared.customInferenceEnvelope,
     platformAiUsageAllowed: prepared.platformAiUsageAllowed,
   };
   // Readiness already crosses this boundary. Its capability keeps rolling
@@ -309,7 +319,6 @@ function createInvocationPreparation(ctx: ProcessingContext) {
   return new RuntimeInvocationPreparation({
     env, runnerContainerNamespace: namespace, runnerRuntimeEnvSource: source,
     runnerStoreCache: new RunnerStoreCache({ bucket: source.BUNDLES, env, runnerRuntimeEnvSource: source }),
-    readHostedWebControlBaseUrl: () => env.hostedWebBaseUrl,
     assertWorkspaceBelongsToRunnerUser(workspace, userId) {
       if (workspace && workspace.userId !== userId) throw new Error("Hosted workspace member mismatch.");
     },

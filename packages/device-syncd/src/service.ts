@@ -67,6 +67,7 @@ import type {
   DeviceSyncAccount,
   DeviceSyncCanonicalImportReceipt,
   DeviceSyncImporterPort,
+  DeviceSyncJobIdentity,
   DeviceSyncJobInput,
   DeviceSyncJobRecord,
   DeviceSyncJobTimingDiagnostic,
@@ -631,12 +632,18 @@ class DeviceSyncServiceController {
     return this.jobFailureDiagnostics.map((entry) => ({
       ...entry,
       details: { ...entry.details },
+      ...(entry.jobIdentities
+        ? { jobIdentities: entry.jobIdentities.map((identity) => ({ ...identity })) }
+        : {}),
     }));
   }
 
   listJobTimingDiagnostics(): DeviceSyncJobTimingDiagnostic[] {
     return this.jobTimingDiagnostics.map((entry) => ({
       ...entry,
+      ...(entry.jobIdentities
+        ? { jobIdentities: entry.jobIdentities.map((identity) => ({ ...identity })) }
+        : {}),
       snapshotImportOutcomes: { ...entry.snapshotImportOutcomes },
       completeSourceDayImportOutcomes: { ...entry.completeSourceDayImportOutcomes },
     }));
@@ -992,6 +999,7 @@ class DeviceSyncServiceController {
         ...scheduledJobDiagnostics,
         elapsedMs: nonnegativeDeviceSyncDurationMs(now, finishedAt),
         jobCount: Math.max(1, activeJobs.length),
+        jobIdentities: activeJobs.map(toDeviceSyncJobIdentity),
         jobKind: job.kind,
         outcome,
         provider: job.provider,
@@ -1066,6 +1074,7 @@ class DeviceSyncServiceController {
         code,
         details: {},
         jobDisposition: failureTransition.disposition,
+        jobIdentities: [toDeviceSyncJobIdentity(job)],
         jobKind: job.kind,
         maxAttempts: failureTransition.maxAttempts,
         provider: job.provider,
@@ -1683,6 +1692,7 @@ class DeviceSyncServiceController {
         code: failure.code,
         details: failure.details,
         jobDisposition: diagnosticTransition.transition.disposition,
+        jobIdentities: failureTransitions.map(({ activeJob }) => toDeviceSyncJobIdentity(activeJob)),
         jobKind: diagnosticTransition.activeJob.kind,
         maxAttempts: diagnosticTransition.transition.maxAttempts,
         provider: provider.provider,
@@ -2206,6 +2216,10 @@ function summarizeDeviceSyncScheduledJobs(
   };
 }
 
+function toDeviceSyncJobIdentity(job: DeviceSyncJobRecord): DeviceSyncJobIdentity {
+  return { accountId: job.accountId, dedupeKey: job.dedupeKey, jobId: job.id };
+}
+
 function nonnegativeDeviceSyncDurationMs(startAt: string, endAt: string): number {
   const startMs = Date.parse(startAt);
   const endMs = Date.parse(endAt);
@@ -2722,6 +2736,7 @@ function readSafeJunctionEcgFailureContext(
   | "junctionEcgGroupCount"
   | "junctionEcgProviderMatchGroupCount"
   | "junctionEcgInstanceMatchGroupCount"
+  | "junctionEcgInstanceMissingGroupCount"
   | "junctionEcgMatchedGroupCount"
   | "junctionEcgExpectedRecordingCount"
   | "junctionEcgExpectedSampleCount"
@@ -2748,6 +2763,7 @@ function readSafeJunctionEcgFailureContext(
     junctionEcgGroupCount: readSafeJunctionEcgDiagnosticCount(error.details?.groupCount),
     junctionEcgProviderMatchGroupCount: readSafeJunctionEcgDiagnosticCount(error.details?.providerMatchGroupCount),
     junctionEcgInstanceMatchGroupCount: readSafeJunctionEcgDiagnosticCount(error.details?.instanceMatchGroupCount),
+    junctionEcgInstanceMissingGroupCount: readSafeJunctionEcgDiagnosticCount(error.details?.instanceMissingGroupCount),
     junctionEcgMatchedGroupCount: readSafeJunctionEcgDiagnosticCount(error.details?.matchedGroupCount),
     junctionEcgExpectedRecordingCount: readSafeJunctionEcgDiagnosticCount(
       error.details?.expectedRecordingCount,

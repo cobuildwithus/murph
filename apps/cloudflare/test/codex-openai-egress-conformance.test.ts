@@ -37,7 +37,7 @@ const PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET =
   "codex-route-conformance-signing-secret";
 const RUNNER_CONTAINER_NAME = "member_123--v-version_1";
 const TEST_USER_ID = "member_123";
-const SCRIPTED_MODEL = "gpt-5.6-terra";
+const SCRIPTED_MODEL = "gpt-6.1-sol";
 const SCRIPTED_PROVIDER_ENV = "MURPH_CODEX_ROUTE_CONFORMANCE_KEY";
 const TEST_TIMEOUT_MS = 90_000;
 const repoRoot = fileURLToPath(new URL("../../..", import.meta.url));
@@ -94,9 +94,8 @@ describe("pinned Codex OpenAI egress conformance", () => {
     expect(PINNED_CODEX_OPENAI_EGRESS_INVENTORY.upstreamCommit)
       .toMatch(/^[0-9a-f]{40}$/u);
     expect(PINNED_CODEX_OPENAI_EGRESS_INVENTORY.upstreamSourceRoot)
-      .toBe("codex-rs/codex-api/src");
-    expect(PINNED_CODEX_OPENAI_EGRESS_INVENTORY.upstreamSourceTree)
-      .toMatch(/^[0-9a-f]{40}$/u);
+      // Guardian Decisions lives outside codex-api; verify every reviewed Rust owner.
+      .toBe("codex-rs");
     expect(cloudflarePackage.scripts?.["verify:codex-upstream-source"])
       .toContain("verify-codex-upstream-source.ts");
     expect(hostSupportWorkflow)

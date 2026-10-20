@@ -1,5 +1,9 @@
 export type DeviceSyncCompletionContactKind = "imessage" | "telegram";
 
+// Shared with the design catalog so its failure study stays current.
+export const FITBIT_GOOGLE_HEALTH_LINK_FAILED_DETAIL =
+  "Fitbit now connects through Google Health. Open the Google Health app, sign in with your Google Account, and finish setup. Then try again and allow every permission.";
+
 export interface DeviceSyncCompletionContactAction {
   ariaLabel?: string;
   href: string;

@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => ({
     linqFirstContactAdmissionOpenAiApiKey: "test-openai-key" as string | null,
   },
   hasConflictingHostedLinqInstantFirstTurnForChatTx: vi.fn(),
+  handoffHostedMailboxWake: vi.fn(),
   hostedMemberRoutingRecordsEqual: vi.fn(),
   hostedLinqDeliveryFindUnique: vi.fn(),
   readOpeningDeliveries: vi.fn(),
@@ -28,6 +29,7 @@ const mocks = vi.hoisted(() => ({
   hostedLinqDeliveryUpdateMany: vi.fn(),
   hostedMailboxItemUpdateMany: vi.fn(),
   logHostedOnboardingDiagnostic: vi.fn(),
+  linkHostedIngressLatencyTracesToAcceptedLinqDelivery: vi.fn(),
   lockHostedMemberRoutingStateTx: vi.fn(),
   lockHostedLinqMessageReceiptsTx: vi.fn(),
   markHostedLinqDeliveryAcceptedTx: vi.fn(),
@@ -40,6 +42,8 @@ const mocks = vi.hoisted(() => ({
   readHostedMemberRoutingRecord: vi.fn(),
   readHostedMailboxItemByDedupeKey: vi.fn(),
   recordHostedAiUsageRecords: vi.fn(),
+  recordHostedIngressAcceptedFromMailboxItem: vi.fn(),
+  recordHostedIngressTemporalSignalAccepted: vi.fn(),
   resolveHostedMemberDirectRoute: vi.fn(),
   sendHostedLinqChatMessage: vi.fn(),
 }));
@@ -74,7 +78,23 @@ vi.mock("@/src/lib/hosted-onboarding/logging", () => ({
   deriveHostedOnboardingTimingErrorName: (error: unknown) =>
     error instanceof Error ? error.name : "UnknownError",
   logHostedOnboardingDiagnostic: mocks.logHostedOnboardingDiagnostic,
+  finishHostedOnboardingTiming: vi.fn(),
+  startHostedOnboardingTiming: vi.fn(),
   toHostedOnboardingLogIdSuffix: (value: string) => value.slice(-8),
+}));
+
+vi.mock("@/src/lib/hosted-orchestration/mailbox-wake", () => ({
+  handoffHostedMailboxWake: mocks.handoffHostedMailboxWake,
+}));
+
+vi.mock("@/src/lib/hosted-runtime-latency/store", () => ({
+  linkHostedIngressLatencyTracesToAcceptedLinqDelivery:
+    mocks.linkHostedIngressLatencyTracesToAcceptedLinqDelivery,
+  recordHostedIngressAcceptedFromMailboxItem:
+    mocks.recordHostedIngressAcceptedFromMailboxItem,
+  recordHostedIngressDirectEnsureTiming: vi.fn(),
+  recordHostedIngressTemporalSignalAccepted:
+    mocks.recordHostedIngressTemporalSignalAccepted,
 }));
 
 vi.mock("@/src/lib/hosted-crypto/secure-box", () => ({
@@ -153,6 +173,7 @@ import {
   isHostedLinqInstantFirstTurnRequestEligible,
   startHostedLinqInstantFirstTurnGeneration,
 } from "@/src/lib/hosted-onboarding/linq-instant-first-turn";
+import { maybeHandoffHostedExecutionWebhookWake } from "@/src/lib/hosted-onboarding/webhook-service-wake";
 
 const REQUEST = {
   eventId: "evt_instant_first_turn",
@@ -263,6 +284,10 @@ function buildUsageResponse(
 describe("hosted Linq instant first turn", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.handoffHostedMailboxWake.mockResolvedValue({
+      signalAccepted: true,
+      workflowId: "hosted-user-runtime:member_123",
+    });
     mocks.readOpeningDeliveries.mockResolvedValue([]);
     mocks.hostedMemberFindUnique.mockResolvedValue({ assistantTone: "formal" });
     mocks.readHostedMailboxRecentLiveConversationItemIds.mockResolvedValue(["mailbox_welcome"]);
@@ -882,6 +907,7 @@ describe("hosted Linq instant first turn", () => {
         ...WAKE_HANDOFF,
         acceptedLinqDeliveryId: "hld_9fcbd74ffb0be2360b61fcbb8599b45b",
         mailboxItemId: "mailbox_outbound",
+        originalInboundMailboxItemId: "mailbox_inbound",
         wakeMailboxCheckpoint: {
           lane: "conversation",
           laneSeq: "2",
@@ -905,10 +931,95 @@ describe("hosted Linq instant first turn", () => {
       wakeHandoff: {
         acceptedLinqDeliveryId: "hld_9fcbd74ffb0be2360b61fcbb8599b45b",
         mailboxItemId: "mailbox_outbound",
+        originalInboundMailboxItemId: "mailbox_inbound",
       },
     });
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
   });
+
+  for (const wakeFails of [false, true]) {
+    it.each(["reply", "completed", "resume"] as const)(
+      `links original ingress after %s completion with echo wake failure=${wakeFails}`,
+      async (generationKind) => {
+        const tasks: Array<() => Promise<void>> = [];
+        const scheduleAfterResponse = (task: () => Promise<void>) => { tasks.push(task); };
+        const wakeHandoff = structuredClone(WAKE_HANDOFF);
+        const wakeError = new Error("synthetic signal failure");
+        if (wakeFails) mocks.handoffHostedMailboxWake.mockRejectedValueOnce(wakeError);
+        if (generationKind === "resume") {
+          mocks.hostedLinqDeliveryFindUnique.mockResolvedValueOnce({
+            acceptedAt: new Date("2026-08-22T21:00:01.000Z"),
+            template: "instant_first_turn_v1",
+          });
+        }
+        const completion = await completeHostedLinqInstantFirstTurn({
+          generation: generationKind === "reply" ? {
+            kind: "reply",
+            message: "Hey! What would you like help with?",
+            usage: { requestedModel: "gpt-6-luna", response: buildUsageResponse() },
+          } : { kind: generationKind },
+          inboundMessageId: "inbound_message_123",
+          participantContact: { kind: "phone", lookupKey: "phone_lookup_123", value: "+15551234567" },
+          prisma: createPrisma(),
+          recipientPhoneNumber: "+15550000000",
+          service: "iMessage",
+          wakeHandoff,
+        });
+        if (completion.kind !== "accepted") throw new Error("Expected accepted completion");
+
+        const result = maybeHandoffHostedExecutionWebhookWake({
+          response: { ok: true },
+          scheduleAfterResponse,
+          wakeHandoff: completion.wakeHandoff,
+        });
+        if (wakeFails) await expect(result).rejects.toBe(wakeError);
+        else await expect(result).resolves.toEqual({
+          reason: "temporal-signaled",
+          signalAccepted: true,
+          started: true,
+          workflowId: "hosted-user-runtime:member_123",
+        });
+
+        expect(wakeHandoff).toEqual(WAKE_HANDOFF);
+        expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledTimes(generationKind === "reply" ? 1 : 0);
+        expect(mocks.hostedMailboxItemUpdateMany).not.toHaveBeenCalled();
+        expect(mocks.handoffHostedMailboxWake).toHaveBeenCalledExactlyOnceWith({
+          directWakeSource: "linq",
+          expectedUserId: "member_123",
+          knownCheckpoint: { lane: "conversation", laneSeq: "2", userId: "member_123" },
+          mailboxItemId: "mailbox_outbound",
+          onDirectWakeTiming: expect.any(Function),
+          scheduleAfterResponse,
+          signal: undefined,
+          timeoutMs: undefined,
+        });
+        expect(mocks.linkHostedIngressLatencyTracesToAcceptedLinqDelivery).not.toHaveBeenCalled();
+        expect(tasks).toHaveLength(1);
+        await tasks[0]!();
+        expect(mocks.linkHostedIngressLatencyTracesToAcceptedLinqDelivery).toHaveBeenCalledExactlyOnceWith({
+          authenticatedUserId: "member_123",
+          answeredMailboxItemIds: ["mailbox_outbound", "mailbox_inbound"],
+          linqDeliveryId: "hld_9fcbd74ffb0be2360b61fcbb8599b45b",
+          replyRuntimeAttemptId: null,
+        });
+        const ingress = {
+          ingressTypingAcceptedAt: undefined,
+          webhookReceivedAt: undefined,
+          mailboxItemId: "mailbox_outbound",
+          source: "linq",
+        };
+        if (wakeFails) {
+          expect(mocks.recordHostedIngressAcceptedFromMailboxItem).toHaveBeenCalledExactlyOnceWith(ingress);
+          expect(mocks.recordHostedIngressTemporalSignalAccepted).not.toHaveBeenCalled();
+        } else {
+          expect(mocks.recordHostedIngressTemporalSignalAccepted).toHaveBeenCalledExactlyOnceWith({
+            ...ingress, at: expect.any(Date), expectedUserId: "member_123",
+          });
+          expect(mocks.recordHostedIngressAcceptedFromMailboxItem).not.toHaveBeenCalled();
+        }
+      },
+    );
+  }
 
   it("makes unsafe model output unavailable", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(buildOpenAiResponse({
@@ -980,6 +1091,7 @@ describe("hosted Linq instant first turn", () => {
         ...WAKE_HANDOFF,
         acceptedLinqDeliveryId: "hld_9fcbd74ffb0be2360b61fcbb8599b45b",
         mailboxItemId: "mailbox_outbound",
+        originalInboundMailboxItemId: "mailbox_inbound",
         wakeMailboxCheckpoint: {
           lane: "conversation",
           laneSeq: "2",
@@ -1141,6 +1253,7 @@ describe("hosted Linq instant first turn", () => {
         ...WAKE_HANDOFF,
         acceptedLinqDeliveryId: "hld_9fcbd74ffb0be2360b61fcbb8599b45b",
         mailboxItemId: "mailbox_outbound",
+        originalInboundMailboxItemId: "mailbox_inbound",
         wakeMailboxCheckpoint: {
           lane: "conversation",
           laneSeq: "2",
@@ -1255,12 +1368,17 @@ describe("hosted Linq instant first turn", () => {
       recipientPhoneNumber: "+15550000000",
       service: "iMessage",
       wakeHandoff: WAKE_HANDOFF,
-    })).rejects.toMatchObject({
+    }).then((completion) => maybeHandoffHostedExecutionWebhookWake({
+      response: { ok: true },
+      wakeHandoff: completion.kind === "accepted" ? completion.wakeHandoff : WAKE_HANDOFF,
+    }))).rejects.toMatchObject({
       code: "HOSTED_LINQ_INSTANT_FIRST_TURN_RETRY",
       retryable: true,
     });
     expect(mocks.markHostedLinqDeliverySendFailedTx).toHaveBeenCalledOnce();
     expect(mocks.prepareHostedMailboxEnvelopeAppend).not.toHaveBeenCalled();
+    expect(mocks.handoffHostedMailboxWake).not.toHaveBeenCalled();
+    expect(mocks.linkHostedIngressLatencyTracesToAcceptedLinqDelivery).not.toHaveBeenCalled();
   });
 
   it("falls back to the runtime after a definitive provider rejection", async () => {
@@ -1272,7 +1390,7 @@ describe("hosted Linq instant first turn", () => {
       retryable: false,
     }));
 
-    await expect(completeHostedLinqInstantFirstTurn({
+    const completion = await completeHostedLinqInstantFirstTurn({
       generation: {
         kind: "reply",
         message: "Hey! What would you like help with?",
@@ -1291,7 +1409,20 @@ describe("hosted Linq instant first turn", () => {
       recipientPhoneNumber: "+15550000000",
       service: "iMessage",
       wakeHandoff: WAKE_HANDOFF,
-    })).resolves.toEqual({ kind: "fallback" });
+    });
+    expect(completion).toEqual({ kind: "fallback" });
+    const tasks: Array<() => Promise<void>> = [];
+    await maybeHandoffHostedExecutionWebhookWake({
+      response: { ok: true },
+      scheduleAfterResponse: (task) => { tasks.push(task); },
+      wakeHandoff: completion.kind === "accepted" ? completion.wakeHandoff : WAKE_HANDOFF,
+    });
+    for (const task of tasks) await task();
+    expect(mocks.handoffHostedMailboxWake).toHaveBeenCalledWith(expect.objectContaining({
+      mailboxItemId: "mailbox_inbound",
+      knownCheckpoint: { lane: "conversation", laneSeq: "1", userId: "member_123" },
+    }));
+    expect(mocks.linkHostedIngressLatencyTracesToAcceptedLinqDelivery).not.toHaveBeenCalled();
     expect(mocks.hostedLinqDeliveryUpdateMany).toHaveBeenCalledWith(
       expect.objectContaining({
         data: {

@@ -19,12 +19,12 @@ import {
   MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID,
   MURPH_GROUP_ROOM_MODEL_CONSOLIDATION_AUTOMATION_ID,
   MURPH_MANAGED_AUTOMATIONS,
-  MURPH_PERSONAL_PATTERNS_UPDATE_AUTOMATION_ID,
   MURPH_ONBOARDING_FOLLOWUP_AUTOMATION,
   MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
   MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID,
   MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID,
   MURPH_MONTHLY_IMPROVEMENT_COACH_AUTOMATION_ID,
+  MURPH_RETIRED_PERSONAL_PATTERNS_UPDATE_AUTOMATION_ID,
   MURPH_RETIRED_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
   MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID,
   applyMurphManagedAutomations,
@@ -40,7 +40,7 @@ import {
 } from '../src/assistant/onboarding-state.ts'
 import { ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG } from '../src/assistant/automation-tags.ts'
 import { upsertAssistantCronAutomation } from '../src/assistant/cron/authoring.ts'
-import { projectCanonicalAssistantCronJob, requireCanonicalAssistantCronRecord, resolveAssistantCronDefaultTimeZone } from '../src/assistant/cron/canonical-jobs.ts'
+import { resolveAssistantCronDefaultTimeZone } from '../src/assistant/cron/canonical-jobs.ts'
 import { computeAssistantCronFirstRunAfterCurrentLocalDay } from '../src/assistant/cron/schedule.ts'
 import * as assistantCronRuntimeState from '../src/assistant/cron/runtime-state.ts'
 import {
@@ -173,80 +173,91 @@ async function startOnboarding(input: {
 }
 
 describe('applyMurphManagedAutomations core integration', () => {
-  it.each(['America/New_York', 'Asia/Tokyo', 'Pacific/Auckland'])(
-    'spreads existing Personal Patterns after the current local day in %s without resetting execution metadata', async (timeZone) => {
+  it.each(['active', 'paused'] as const)(
+    'archives a persisted %s Personal Patterns job without reseeding it', async (status) => {
       const vaultRoot = await createVaultRoot()
-      const seed = MURPH_MANAGED_AUTOMATIONS.find(entry => entry.automationId === MURPH_PERSONAL_PATTERNS_UPDATE_AUTOMATION_ID)!
-      const now = new Date('2026-09-21T17:10:00Z')
-      await upsertAutomation({ ...seed, tags: [...(seed.tags ?? [])], status: 'active', route: defaultRoute,
-        schedule: { kind: 'cron', expression: '0 13 * * *', timeZone }, vaultRoot,
-        now: new Date('2026-09-01T00:00:00Z') })
-      const paths = resolveAssistantStatePaths(vaultRoot)
-      const runtime = assistantCronRuntimeState.createAssistantCronCanonicalRuntimeRecord({
-        jobId: seed.automationId, now: now.toISOString(),
+      const now = new Date('2026-10-19T17:10:00.000Z')
+      const legacySchedule = { kind: 'cron' as const, expression: '0 13 * * *', timeZone: 'America/New_York' }
+      await upsertAutomation({
+        automationId: MURPH_RETIRED_PERSONAL_PATTERNS_UPDATE_AUTOMATION_ID,
+        continuityPolicy: 'fresh',
+        instructions: 'Retired synthetic daily pattern check.',
+        now: new Date('2026-09-01T00:00:00.000Z'),
+        route: defaultRoute,
+        schedule: legacySchedule,
+        slug: 'personal-patterns-update',
+        status,
+        tags: ['assistant', 'scheduled', 'murph-managed', 'murph-managed:personal-patterns-update'],
+        title: 'Retired pattern check',
+        vaultRoot,
       })
-      runtime.state.lastSucceededAt = '2026-09-20T17:00:00.000Z'
-      await assistantCronRuntimeState.writeAssistantCronCanonicalRuntimeStore(paths, {
-        version: 1, jobs: [runtime],
+
+      await expect(applyMurphManagedAutomations({ defaultRoute, now, vaultRoot })).resolves.toEqual({
+        created: 4,
+        skipped: 0,
+        updated: 1,
       })
-      const before = await showAutomation({ automationId: seed.automationId, vaultRoot })
-      const result = await applyMurphManagedAutomations({ seeds: [seed], now, vaultRoot })
-      if (result.stableKeyFailure) throw result.stableKeyFailure
-      expect(result).toMatchObject({ updated: 1 })
-      const after = (await showAutomation({ automationId: seed.automationId, vaultRoot }))!
-      expect(after.schedule).toMatchObject({ kind: 'dailyLocal', timeZone })
-      if (after.schedule.kind !== 'dailyLocal') throw new Error('Expected a daily schedule')
-      expect(after.schedule).not.toEqual(before?.schedule)
-      expect(after.assistantTargetOverride).toEqual(before?.assistantTargetOverride)
-      expect(after.instructions).toBe(before?.instructions)
-      const expectedFirst = computeAssistantCronFirstRunAfterCurrentLocalDay({ after: now,
-        schedule: { ...after.schedule, timeZone } })
-      const job = projectCanonicalAssistantCronJob({
-        source: requireCanonicalAssistantCronRecord(after, timeZone), runtimeState: runtime,
+      // Retirement archives in place; it never migrates the retired schedule.
+      await expect(showAutomation({
+        automationId: MURPH_RETIRED_PERSONAL_PATTERNS_UPDATE_AUTOMATION_ID,
+        vaultRoot,
+      })).resolves.toMatchObject({
+        schedule: legacySchedule,
+        slug: 'personal-patterns-update',
+        status: 'archived',
       })
-      expect(job.state.nextRunAt).toBe(expectedFirst)
-      const state = await assistantCronRuntimeState.readAssistantCronCanonicalRuntimeStore(paths)
-      expect(state.jobs).toEqual([runtime])
-      await applyMurphManagedAutomations({ seeds: [seed], now, vaultRoot })
-      expect((await showAutomation({ automationId: seed.automationId, vaultRoot }))?.scheduleAnchorAt).toBe(after.scheduleAnchorAt)
+
+      await expect(applyMurphManagedAutomations({ defaultRoute, now, vaultRoot })).resolves.toEqual({
+        created: 0,
+        skipped: 4,
+        updated: 0,
+      })
+      await expect(showAutomation({
+        automationId: MURPH_RETIRED_PERSONAL_PATTERNS_UPDATE_AUTOMATION_ID,
+        vaultRoot,
+      })).resolves.toMatchObject({ status: 'archived' })
     },
   )
 
-  it.each(['runningAt', 'pendingDeliveryIntentId', 'pendingOccurrenceAt', 'retryAfterAt'] as const)(
-    'defers the legacy spread while %s owns an occurrence', async (field) => {
-      const vaultRoot = await createVaultRoot()
-      const seed = MURPH_MANAGED_AUTOMATIONS.find(entry => entry.automationId === MURPH_PERSONAL_PATTERNS_UPDATE_AUTOMATION_ID)!
-      const now = new Date('2026-09-21T17:10:00Z')
-      await upsertAutomation({ ...seed, tags: [...(seed.tags ?? [])], status: 'active', route: defaultRoute, vaultRoot, now })
-      const paths = resolveAssistantStatePaths(vaultRoot)
-      const runtime = assistantCronRuntimeState.createAssistantCronCanonicalRuntimeRecord({ jobId: seed.automationId, now: now.toISOString() })
-      runtime.state[field] = field === 'pendingDeliveryIntentId' ? 'synthetic_intent' : now.toISOString()
-      // Fixture setup must preserve the claim regardless of the wall-clock date.
-      await assistantCronRuntimeState.writeAssistantCronCanonicalRuntimeStore(paths, { version: 1, jobs: [runtime] },
-        { reclaimStaleRunningClaims: false })
-      await applyMurphManagedAutomations({ seeds: [seed], now, vaultRoot })
-      expect((await showAutomation({ automationId: seed.automationId, vaultRoot }))?.schedule).toEqual(seed.schedule)
-      runtime.state[field] = null
-      await assistantCronRuntimeState.writeAssistantCronCanonicalRuntimeStore(paths, { version: 1, jobs: [runtime] })
-      await applyMurphManagedAutomations({ seeds: [seed], now, vaultRoot })
-      expect((await showAutomation({ automationId: seed.automationId, vaultRoot }))?.schedule).not.toEqual(seed.schedule)
-    },
-  )
-
-  it.each([
-    { status: 'paused' as const, expression: '0 13 * * *' },
-    { status: 'active' as const, expression: '15 18 * * *' },
-  ])('preserves a $status Personal Patterns schedule $expression', async ({ status, expression }) => {
+  it('preserves a member automation using the retired Patterns slug', async () => {
     const vaultRoot = await createVaultRoot()
-    const seed = MURPH_MANAGED_AUTOMATIONS.find(entry => entry.automationId === MURPH_PERSONAL_PATTERNS_UPDATE_AUTOMATION_ID)!
-    const now = new Date('2026-09-21T17:10:00Z')
-    const before = await upsertAutomation({ ...seed, tags: [...(seed.tags ?? [])], status, route: defaultRoute,
-      schedule: { kind: 'cron', expression, timeZone: 'America/New_York' }, vaultRoot, now })
-    await applyMurphManagedAutomations({ seeds: [seed], now, vaultRoot })
-    const after = await showAutomation({ automationId: seed.automationId, vaultRoot })
-    expect(after?.schedule).toEqual(before.record.schedule)
-    expect(after?.status).toBe(status)
-    expect(after?.scheduleAnchorAt).toBe(before.record.scheduleAnchorAt)
+    const memberJob = await upsertAutomation({
+      automationId: 'automation_01JNW7YJ7MNE7M9Q2QWQK4Z3F8',
+      continuityPolicy: 'preserve',
+      instructions: 'Keep this member-authored reminder.',
+      now: new Date('2026-09-01T00:00:00.000Z'),
+      route: defaultRoute,
+      schedule: { kind: 'cron', expression: '0 9 * * 1' },
+      slug: 'personal-patterns-update',
+      status: 'active',
+      tags: ['user'],
+      title: 'My reminder',
+      vaultRoot,
+    })
+    await applyMurphManagedAutomations({ defaultRoute, now: new Date('2026-10-19T17:10:00.000Z'), vaultRoot })
+    await expect(showAutomation({ automationId: memberJob.record.automationId, vaultRoot }))
+      .resolves.toEqual(memberJob.record)
+  })
+
+  it('does not seed Personal Patterns into a fresh vault', async () => {
+    const vaultRoot = await createVaultRoot()
+    expect(MURPH_MANAGED_AUTOMATIONS.map((seed) => seed.automationId))
+      .not.toContain(MURPH_RETIRED_PERSONAL_PATTERNS_UPDATE_AUTOMATION_ID)
+
+    await applyMurphManagedAutomations({
+      defaultRoute,
+      now: new Date('2026-10-19T17:10:00.000Z'),
+      vaultRoot,
+    })
+
+    await expect(showAutomation({
+      automationId: MURPH_RETIRED_PERSONAL_PATTERNS_UPDATE_AUTOMATION_ID,
+      vaultRoot,
+    })).resolves.toBeNull()
+    await expect(showAutomation({
+      slug: 'personal-patterns-update',
+      vaultRoot,
+    })).resolves.toBeNull()
   })
 
   it('seeds one finite follow-up from durable onboarding start and preserves archive', async () => {
@@ -523,7 +534,7 @@ describe('applyMurphManagedAutomations core integration', () => {
       vaultRoot,
     })
 
-    expect(result.created).toBe(5)
+    expect(result.created).toBe(4)
     expect(result.experimentLifecycleFailure).toMatchObject({
       code: 'EXPERIMENT_STORAGE_INVALID',
     })
@@ -573,7 +584,7 @@ describe('applyMurphManagedAutomations core integration', () => {
     expect(result.experimentLifecycleFailure).toMatchObject({
       code: 'EXPERIMENT_STORAGE_INVALID',
     })
-    expect(result.created).toBe(5)
+    expect(result.created).toBe(4)
     expect(
       await showAutomation({ automationId: experimentAutomationId, vaultRoot }),
     ).toMatchObject({ status: 'active' })
@@ -592,7 +603,7 @@ describe('applyMurphManagedAutomations core integration', () => {
       vaultRoot,
     })
     expect(result).toEqual({
-      created: 5,
+      created: 4,
       skipped: 0,
       updated: 0,
     })
@@ -600,8 +611,8 @@ describe('applyMurphManagedAutomations core integration', () => {
       { stage: 'experiment_lifecycle' },
       { stage: 'onboarding_goal_checkin' },
       { stage: 'seed_composition' },
-      ...Array.from({ length: 5 }, (_value, seedIndex) => ({
-        seedCount: 5,
+      ...Array.from({ length: 4 }, (_value, seedIndex) => ({
+        seedCount: 4,
         seedPosition: seedIndex + 1,
         stage: 'managed_seed' as const,
       })),
@@ -707,11 +718,8 @@ describe('applyMurphManagedAutomations core integration', () => {
     expect(insightRecord?.instructions).toContain('knowledge show weekly-health-insights')
     expect(insightRecord?.instructions).toContain('Use `weekly-health-insights` as the dedupe ledger')
     expect(insightRecord?.instructions).toContain('Do not scan every wiki page')
-    expect(insightRecord?.instructions).toContain('vault-cli wearables patterns --date YYYY-MM-DD --format json')
-    expect(insightRecord?.instructions).toContain('continue with the existing bounded manual candidate search')
-    expect(insightRecord?.instructions).toContain('Do not treat command failure as evidence')
-    expect(insightRecord?.instructions).toContain('Read grades A-E as evidence strength')
-    expect(insightRecord?.instructions).toContain('pattern report narrows the search')
+    expect(insightRecord?.instructions).not.toContain('wearables patterns')
+    expect(insightRecord?.instructions).not.toContain('personal-pattern-notifications')
     expect(insightRecord?.instructions).toContain('find zero or one useful')
     expect(insightRecord?.instructions).toContain('better to send nothing')
     expect(insightRecord?.instructions).toContain('knowledge append-section weekly-health-insights YYYY-MM-DD')
@@ -1304,7 +1312,7 @@ describe('applyMurphManagedAutomations core integration', () => {
       },
       vaultRoot,
     })).resolves.toEqual({
-      created: 8,
+      created: 7,
       skipped: 0,
       updated: 0,
     })
@@ -1378,7 +1386,7 @@ describe('applyMurphManagedAutomations core integration', () => {
       routeValidationProfile: 'hosted',
       vaultRoot,
     })).resolves.toEqual({
-      created: 7,
+      created: 6,
       skipped: 0,
       updated: 0,
     })
@@ -1438,7 +1446,7 @@ describe('applyMurphManagedAutomations core integration', () => {
       now: new Date('2026-06-09T12:00:00.000Z'),
       vaultRoot,
     })).resolves.toEqual({
-      created: 5,
+      created: 4,
       skipped: 0,
       updated: 0,
     })
@@ -1475,7 +1483,7 @@ describe('applyMurphManagedAutomations core integration', () => {
       vaultRoot,
     })).resolves.toEqual({
       created: 0,
-      skipped: 5,
+      skipped: 4,
       updated: 0,
     })
 
@@ -1507,7 +1515,7 @@ describe('applyMurphManagedAutomations core integration', () => {
       vaultRoot,
     })).resolves.toEqual({
       created: 0,
-      skipped: 5,
+      skipped: 4,
       updated: 0,
     })
   })
@@ -1520,7 +1528,7 @@ describe('applyMurphManagedAutomations core integration', () => {
       now: new Date('2026-06-23T12:00:00.000Z'),
       vaultRoot,
     })).resolves.toEqual({
-      created: 5,
+      created: 4,
       skipped: 0,
       updated: 0,
     })
@@ -1566,7 +1574,7 @@ describe('applyMurphManagedAutomations core integration', () => {
         now: new Date('2026-06-23T13:00:00.000Z'),
         vaultRoot,
       })).resolves.toEqual({
-      created: 5,
+        created: 4,
         skipped: 0,
         updated: 1,
       })
@@ -1628,7 +1636,7 @@ describe('applyMurphManagedAutomations core integration', () => {
       },
       vaultRoot,
     })).resolves.toEqual({
-      created: 5,
+      created: 4,
       skipped: 0,
       updated: 1,
     })
@@ -1696,7 +1704,7 @@ describe('applyMurphManagedAutomations core integration', () => {
       now: new Date('2026-06-23T13:00:00.000Z'),
       vaultRoot,
     })).resolves.toEqual({
-      created: 5,
+      created: 4,
       skipped: 0,
       updated: 0,
     })
@@ -1849,7 +1857,7 @@ describe('applyMurphManagedAutomations core integration', () => {
       },
       vaultRoot,
     })).resolves.toEqual({
-      created: 5,
+      created: 4,
       skipped: 0,
       updated: 1,
     })
@@ -1916,7 +1924,7 @@ describe('applyMurphManagedAutomations core integration', () => {
       now: new Date('2026-06-23T13:00:00.000Z'),
       vaultRoot,
     })).resolves.toEqual({
-      created: 5,
+      created: 4,
       skipped: 0,
       updated: 1,
     })
@@ -1966,7 +1974,7 @@ describe('applyMurphManagedAutomations core integration', () => {
       now: new Date('2026-06-23T13:00:00.000Z'),
       vaultRoot,
     })).resolves.toEqual({
-      created: 5,
+      created: 4,
       skipped: 0,
       updated: 0,
     })
@@ -2020,7 +2028,7 @@ describe('applyMurphManagedAutomations core integration', () => {
       now: new Date('2026-06-23T13:00:00.000Z'),
       vaultRoot,
     })).resolves.toEqual({
-      created: 5,
+      created: 4,
       skipped: 0,
       updated: 0,
     })
@@ -2065,7 +2073,7 @@ describe('applyMurphManagedAutomations core integration', () => {
       now: new Date('2026-06-23T13:00:00.000Z'),
       vaultRoot,
     })).resolves.toEqual({
-      created: 6,
+      created: 5,
       skipped: 0,
       updated: 1,
     })
@@ -2141,7 +2149,7 @@ describe('applyMurphManagedAutomations core integration', () => {
       now: new Date('2026-06-23T13:00:00.000Z'),
       vaultRoot,
     })).resolves.toEqual({
-      created: 5,
+      created: 4,
       skipped: 0,
       updated: 1,
     })
@@ -2263,7 +2271,7 @@ describe('applyMurphManagedAutomations core integration', () => {
       now: new Date('2026-06-09T13:00:00.000Z'),
       vaultRoot,
     })).resolves.toEqual({
-      created: 4,
+      created: 3,
       skipped: 0,
       updated: 1,
     })
@@ -2316,7 +2324,7 @@ describe('applyMurphManagedAutomations core integration', () => {
       now: new Date('2026-06-09T13:00:00.000Z'),
       vaultRoot,
     })).resolves.toEqual({
-      created: 5,
+      created: 4,
       skipped: 0,
       updated: 1,
     })
@@ -2369,7 +2377,7 @@ describe('applyMurphManagedAutomations core integration', () => {
       now: new Date('2026-06-09T13:00:00.000Z'),
       vaultRoot,
     })).resolves.toEqual({
-      created: 4,
+      created: 3,
       skipped: 0,
       updated: 1,
     })
@@ -2447,7 +2455,7 @@ describe('applyMurphManagedAutomations core integration', () => {
       now: new Date('2026-06-09T13:00:00.000Z'),
       vaultRoot,
     })).resolves.toEqual({
-      created: 4,
+      created: 3,
       skipped: 0,
       updated: 1,
     })
@@ -2554,7 +2562,7 @@ describe('applyMurphManagedAutomations core integration', () => {
       now: new Date('2026-06-09T12:00:00.000Z'),
       vaultRoot,
     })).resolves.toEqual({
-      created: 1,
+      created: 0,
       skipped: 4,
       updated: 0,
     })

@@ -1,6 +1,3 @@
-import { rm } from "node:fs/promises";
-import path from "node:path";
-
 import {
   buildHostedExecutionSafeErrorDiagnostics,
   deriveHostedExecutionErrorCode,
@@ -31,6 +28,7 @@ import {
 import {
   bootstrapHostedMemberContext,
 } from "./context.ts";
+import { removeHostedCodexAuthJson } from "./events/codex-auth.ts";
 import {
   executeHostedMailboxEvent,
 } from "./events.ts";
@@ -51,6 +49,7 @@ import {
   findHostedRunnableSystemMailboxItem,
   findNextHostedSystemMailboxQueueItem,
   isHostedGroupContextHandoffSystemMailboxItem,
+  isHostedPlainDeviceSyncWakeHint,
   isHostedRetainedDeviceScheduledAdmission,
   mergeHostedSystemMailboxRollbackItems,
   projectHostedDeviceHintCoverage,
@@ -87,9 +86,8 @@ import {
   type HostedRuntimeLogContext,
   writeHostedRuntimeLogBestEffort,
 } from "./runtime-logs.ts";
+import type { HostedBackgroundMaintenanceYieldReason } from "./background-maintenance-cancellation.ts";
 
-const HOSTED_CODEX_HOME_DIR_NAME = ".codex-hosted";
-const HOSTED_CODEX_AUTH_FILE_NAME = "auth.json";
 const HOSTED_SYSTEM_MAILBOX_RETRY_DELAY_MS = 60_000;
 const HOSTED_VAULT_SHARE_PROJECTION_FAILED_ERROR_CODE =
   "HOSTED_VAULT_SHARE_PROJECTION_FAILED";
@@ -302,14 +300,56 @@ export async function enqueueHostedSystemMailboxItem(input: {
     status: "pending",
     wake: input.wake,
   };
-  await updateHostedSystemMailboxState(input.vaultRoot, (state) => ({
-    pending: upsertHostedSystemMailboxPendingItem(state.pending, nextItem),
-  }));
+  await updateHostedSystemMailboxState(input.vaultRoot, async (state) => {
+    const queued = { pending: upsertHostedSystemMailboxPendingItem(state.pending, nextItem) };
+    if (nextItem.wake.kind !== "device-sync.wake"
+      || nextItem.wake.reason !== "reconcile_due"
+      || !isHostedPlainDeviceSyncWakeHint(nextItem)) return queued;
+
+    const continuationItemIds = await readHostedSystemMailboxContinuationItemIds({
+      state: queued, vaultRoot: input.vaultRoot,
+    });
+    if (continuationItemIds.size === 0) return queued;
+    // A recording continuation already owns its retained jobs and cadence.
+    // Transfer only redundant schedules; preserve the exact completion record
+    // until its ordinary post-checkpoint publication succeeds.
+    return retireHostedCoveredDeviceHints({
+      continuationItemIds,
+      coverage: projectHostedDeviceHintCoverage({
+        now: new Date().toISOString(),
+        pending: queued.pending.map(projectHostedDeviceScheduleImportOwner),
+      }),
+      eligibleItemIds: new Set([nextItem.itemId]),
+      state: queued,
+    }).state;
+  });
 
   return {
     reasonCode: "system_mailbox.queued",
     status: "imported",
   };
+}
+
+function projectHostedDeviceScheduleImportOwner(
+  item: HostedSystemMailboxPendingItem,
+): HostedSystemMailboxPendingItem {
+  const record = item.postCheckpointRecord;
+  if (item.deviceSyncContinuationOwner !== true
+    || item.status !== "recording"
+    || item.wake.kind !== "device-sync.wake"
+    || record?.kind !== "device-sync.dirty-processed-batch"
+    || !record.retainMailboxItemUntil) return item;
+  const wake = record.retainedWake;
+  if (wake?.kind !== "device-sync.wake"
+    || wake.eventId !== item.wake.eventId
+    || wake.userId !== item.wake.userId
+    || wake.connectionId !== item.wake.connectionId
+    || wake.provider !== item.wake.provider
+    || wake.expectedConnectedAt !== item.wake.expectedConnectedAt
+    || !wake.hint?.jobs?.length) return item;
+  // This is a coverage-only view, never a mutation or execution admission.
+  return { ...item, status: "pending", postCheckpointRecord: null,
+    nextAttemptAt: record.retainMailboxItemUntil, wake };
 }
 
 async function resolveAssistantAskCompletionCutoff(
@@ -334,6 +374,7 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
   retainProcessedItemUntilRecorded?: boolean;
   signal?: AbortSignal | null;
   shouldYieldBackgroundMaintenance?: (() => boolean) | null;
+  backgroundMaintenanceYieldReason?: HostedBackgroundMaintenanceYieldReason;
   vaultRoot: string;
 }): Promise<HostedSystemMailboxCheckpointPreparation | null> {
   const startedAt = (input.now ?? (() => new Date().toISOString()))();
@@ -528,6 +569,7 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
       runtimeEnv: input.runtimeEnv,
       signal: input.signal ?? null,
       shouldYieldBackgroundMaintenance: input.shouldYieldBackgroundMaintenance ?? null,
+      backgroundMaintenanceYieldReason: input.backgroundMaintenanceYieldReason,
       vaultRoot: input.vaultRoot,
     });
     if (
@@ -1475,6 +1517,7 @@ async function executePendingHostedSystemMailboxItem(input: {
   runtimeEnv: Readonly<Record<string, string>>;
   signal: AbortSignal | null;
   shouldYieldBackgroundMaintenance?: (() => boolean) | null;
+  backgroundMaintenanceYieldReason?: HostedBackgroundMaintenanceYieldReason;
   vaultRoot: string;
 }): Promise<HostedMailboxExecutionMetrics> {
   const executionContext =
@@ -1535,6 +1578,7 @@ async function executePendingHostedSystemMailboxItem(input: {
     ...(input.shouldYieldBackgroundMaintenance
       ? {
           shouldYieldBackgroundMaintenance: input.shouldYieldBackgroundMaintenance,
+          backgroundMaintenanceYieldReason: input.backgroundMaintenanceYieldReason,
         }
       : {}),
     sourceMailboxItemId: input.pendingItem.itemId,
@@ -1687,24 +1731,11 @@ async function recordHostedSystemMailboxPostCheckpointRecord(input: {
       };
     }
     case "codex-auth.updated": {
-      const port = input.runtime.platform.codexAuthPort;
-      if (!port) {
-        throw new Error("Hosted Codex auth checkpoint requires a configured Codex auth port.");
-      }
-      const response = await port.update({
-        attemptId: input.record.attemptId,
-        phase: input.record.phase,
-      });
-      if (
-        input.record.phase === "connected"
-        && response.status === "superseded"
-      ) {
-        await removeHostedCodexAuthJson(input.operatorHomeRoot);
-      }
+      await removeHostedCodexAuthJson(input.operatorHomeRoot);
       return {
         newerRevisionPending: false,
         nextWakeAt: null,
-        recorded: response.status === "superseded" ? 0 : 1,
+        recorded: 0,
         stillDirty: false,
       };
     }
@@ -1756,18 +1787,6 @@ async function recordHostedSystemMailboxPostCheckpointRecord(input: {
         signal: input.signal ?? null,
       });
   }
-}
-
-async function removeHostedCodexAuthJson(
-  operatorHomeRoot: string | null,
-): Promise<void> {
-  if (!operatorHomeRoot) {
-    return;
-  }
-  await rm(
-    path.join(operatorHomeRoot, HOSTED_CODEX_HOME_DIR_NAME, HOSTED_CODEX_AUTH_FILE_NAME),
-    { force: true },
-  );
 }
 
 async function recordHostedDeviceSyncDirtyProcessedRecords(input: {

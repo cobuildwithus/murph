@@ -1,10 +1,13 @@
+import { createCloudflareHostedProviderFetch } from "../src/runtime-platform/provider-fetch.ts";
 import type { TestProviderContext } from "./postgres-owner-fixtures.ts";
 import { createPostgresTestOwner } from "./postgres-owner-fixtures.ts";
 import { createHash } from "node:crypto";
 import * as runtimeOwnerClient from "../src/runtime-owner-client.ts";
 import type { HostedRuntimeOwnerSnapshot } from "@murphai/hosted-execution/runtime-owner";
 import { ContainerProxy } from "./stubs/cloudflare-containers.ts";
+import { settleWaitUntilForTest } from "./stubs/cloudflare-workers.ts";
 import { describe, expect, it, vi, afterEach, beforeEach } from "vitest";
+import { sanitizeHostedExecutionStructuredLogDetails } from "@murphai/hosted-execution";
 import {
   buildExaResearchScoutOutputSchema,
   buildExaResearchScoutBatchLaneRequest,
@@ -30,7 +33,6 @@ vi.mock("@murphai/hosted-execution", async () => {
 });
 
 import {
-  handleHostedRunnerCustomInferenceOutbound,
   handleHostedRunnerElevenLabsOutbound,
   handleHostedRunnerExaOutbound,
   handleHostedRunnerGeminiOutbound,
@@ -40,7 +42,6 @@ import {
   handleHostedRunnerOpenAiOutbound,
   handleHostedRunnerOpenInternetOutbound,
   handleHostedRunnerTelegramOutbound,
-  handleHostedRunnerVeniceOutbound,
   handleHostedRunnerXaiOutbound,
   HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
   HOSTED_OPENAI_CACHE_DIAGNOSTIC_EVENT_CODE,
@@ -63,6 +64,7 @@ import {
 } from "@murphai/hosted-execution/parsers";
 import {
   HOSTED_PROVIDER_EGRESS_TOKEN_HEADER,
+  HOSTED_RUNTIME_FETCH_CORRELATION_ID_HEADER,
   HOSTED_RUNTIME_ATTEMPT_ID_HEADER,
   HOSTED_RUNTIME_LEASE_GENERATION_HEADER,
   HOSTED_RUNTIME_WORKSPACE_VERSION_HEADER,
@@ -83,20 +85,11 @@ import { StandbyRunnerContainer } from "../src/standby-runner-container.ts";
 import {
   DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
 } from "../src/deploy-smoke-live-model.ts";
-import {
-  HOSTED_VENICE_RESPONSES_MAX_BODY_BYTES,
-} from "../src/runner-egress-venice.ts";
 import { parseHostedXaiRequestBody } from "../src/runner-egress-xai.ts";
 import {
   HOSTED_GEMINI_VIDEO_ANALYSIS_PATH,
   HOSTED_GEMINI_VIDEO_ANALYSIS_PREVIOUS_MODEL_PATH,
 } from "../src/runner-egress-gemini.ts";
-import {
-  sealHostedInferenceRuntimeTarget,
-} from "../src/hosted-inference-target-envelope.ts";
-import {
-  HOSTED_INFERENCE_RUNTIME_TARGET_SCHEMA,
-} from "../src/hosted-inference-runtime-target.ts";
 
 const WRITE_FENCE_HEADERS = {
   [HOSTED_RUNTIME_ATTEMPT_ID_HEADER]: "attempt_1",
@@ -379,6 +372,16 @@ function parseDiagnosticRuntimeLog(redactedJson: Record<string, unknown>): void 
   });
 }
 
+function readCapturedOpenAiDiagnostic(): Record<string, unknown> {
+  const captureCall = mocks.emitHostedExecutionStructuredLog.mock.calls.find(([entry]) =>
+    entry.message === "Hosted runner provider request diagnostic captured."
+  );
+  expect(captureCall).toBeDefined();
+  const details = captureCall?.[0].details;
+  expect(details && typeof details === "object").toBe(true);
+  return details as Record<string, unknown>;
+}
+
 function readDiagnosticInputMetric(
   diagnostic: Record<string, unknown>,
   kind: string,
@@ -426,18 +429,20 @@ beforeEach(() => {
       || validation.userId !== userId || typeof validation.workspaceVersion !== "string") {
       return { cutover: "postgres", status: "stale", owner: null };
     }
-    const customInferenceEnvelope = "customInferenceEnvelope" in validation && typeof validation.customInferenceEnvelope === "string" ? validation.customInferenceEnvelope : null;
     state.owner = {
       userId, attemptId: validation.attemptId, generation: validation.leaseGeneration, workspaceVersion: validation.workspaceVersion,
       runnerContainerName: RUNNER_CONTAINER_NAME, phase: "active", processingMode: "default", allocationId: "synthetic-allocation",
-      customInferenceEnvelope, platformAiUsageAllowed: !state.revoked && (!("platformAiUsageAllowed" in validation) || validation.platformAiUsageAllowed !== false),
+      platformAiUsageAllowed: !state.revoked && (!("platformAiUsageAllowed" in validation) || validation.platformAiUsageAllowed !== false),
       startedAt: "2026-09-17T00:00:00.000Z", acceptedAt: null, completedAt: null, failureCount: 0, lastErrorCode: null,
     };
     return { cutover: "postgres", status: "authorized", owner: state.owner };
   });
 });
 
-afterEach(() => {
+afterEach(async () => {
+  // Production-shaped requests leave diagnostics in module-level background
+  // work; settle them before the next test replaces the global fetch stub.
+  await settleWaitUntilForTest();
   vi.useRealTimers();
   vi.clearAllMocks();
   vi.unstubAllGlobals();
@@ -448,13 +453,6 @@ describe("hostedRunnerIntercept", () => {
     expect(hostedRunnerIntercept).toBe(handleHostedRunnerOpenInternetOutbound);
     expect(HOSTED_RUNNER_OUTBOUND_BY_HOST[HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.openAi])
       .toBe(handleHostedRunnerOpenAiOutbound);
-    expect(
-      HOSTED_RUNNER_OUTBOUND_BY_HOST[
-        HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.customInference
-      ],
-    ).toBe(handleHostedRunnerCustomInferenceOutbound);
-    expect(HOSTED_RUNNER_OUTBOUND_BY_HOST[HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.venice])
-      .toBe(handleHostedRunnerVeniceOutbound);
     expect(HOSTED_RUNNER_OUTBOUND_BY_HOST[HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.elevenLabs])
       .toBe(handleHostedRunnerElevenLabsOutbound);
     expect(HOSTED_RUNNER_OUTBOUND_BY_HOST[HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.exa])
@@ -482,124 +480,76 @@ describe("hostedRunnerIntercept", () => {
     expect(HOSTED_RUNNER_OUTBOUND_BY_HOST["unexpected.example.test"]).toBeUndefined();
   });
 
-  it("pins custom inference to the active fence and strips caller authority before egress", async () => {
-    const envelope = await sealHostedInferenceRuntimeTarget({
-      source: {
-        HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET:
-          PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET,
-      },
-      target: {
-        auth: {
-          kind: "x_api_key",
-          secret: "synthetic-custom-upstream-secret",
-        },
-        contextWindowTokens: 131_072,
-        endpointUrl: "https://inference.example.com/v1/responses",
-        model: "synthetic-upstream-model",
-        protocol: "responses",
-        revision: 7,
-        schema: HOSTED_INFERENCE_RUNTIME_TARGET_SCHEMA,
-        supportsImages: false,
-        verificationProfile: "murph-codex-0.151.0-portable-responses-v1",
-      },
-    });
-    const validateRuntimeProviderEgressToken = vi.fn(async (input: {
-
-      userId: string;
-    }): Promise<TestProviderContext> => ({
-      attemptId: "attempt_provider_egress",
-      customInferenceEnvelope: envelope,
-      leaseGeneration: "7",
-      owns: true,
-      userId: input.userId,
-      workspaceVersion: "4",
-    }));
-    const upstreamStream = [
-      "event: response.created",
-      `data: ${JSON.stringify({
-        response: {
-          id: "resp_synthetic",
-          model: "synthetic-upstream-model",
-          output: [],
-          status: "in_progress",
-        },
-        type: "response.created",
-      })}`,
-      "",
-      "event: response.completed",
-      `data: ${JSON.stringify({
-        response: {
-          id: "resp_synthetic",
-          model: "synthetic-upstream-model",
-          output: [],
-          status: "completed",
-        },
-        type: "response.completed",
-      })}`,
-      "",
-      "data: [DONE]",
-      "",
-      "",
-    ].join("\n");
-    const fetchMock = vi.fn<typeof fetch>(async () =>
-      new Response(upstreamStream, {
-        headers: { "content-type": "text/event-stream" },
-      })
-    );
+  it.each([
+    { nativeState: "pending", status: 503, rejectReason: "usage_settlement_pending", runtimeAttemptId: "attempt_synthetic_native" },
+    { nativeState: "absent", status: 401, rejectReason: "bound_container_inactive", runtimeAttemptId: undefined },
+    { nativeState: "retiring", status: 401, rejectReason: "bound_container_inactive", runtimeAttemptId: undefined },
+    { nativeState: "active", status: 200, rejectReason: undefined, runtimeAttemptId: undefined },
+  ])("joins only settlement-pending provider diagnostics to native authority ($nativeState)", async ({
+    nativeState, status, rejectReason, runtimeAttemptId,
+  }) => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response("ok"));
     vi.stubGlobal("fetch", fetchMock);
-
     const response = await hostedRunnerIntercept(
-      new Request("http://murph-custom-inference.worker/v1/responses", {
-        body: JSON.stringify({
-          input: "synthetic request",
-          model: "murph-custom-r7",
-          stream: true,
-        }),
-        headers: {
-          ...BOUND_USER_PROVIDER_EGRESS_HEADERS,
-          authorization: `Bearer ${HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL}`,
-          "cf-connecting-ip": "203.0.113.7",
-          cookie: "caller-private-cookie",
-          forwarded: "for=203.0.113.7",
-          "x-api-key": "caller-private-key",
-          "x-caller-arbitrary": "caller-private-value",
-          "x-forwarded-for": "203.0.113.7",
+      createAuthorizedOpenAiModelsRequest({ headers: {
+        [HOSTED_RUNTIME_ATTEMPT_ID_HEADER]: "attempt_spoofed",
+        [HOSTED_RUNTIME_LEASE_GENERATION_HEADER]: "987",
+        [HOSTED_RUNTIME_WORKSPACE_VERSION_HEADER]: "654",
+        [HOSTED_RUNNER_BOUND_USER_ID_HEADER]: "member_spoofed",
+        [HOSTED_RUNTIME_FETCH_CORRELATION_ID_HEADER]: "11111111-1111-4111-8111-111111111111",
+      } }),
+      createInterceptEnv({
+        OPENAI_API_KEY: "synthetic-worker-secret",
+        providerContext: async ({ userId }) => nativeState === "absent" ? { owns: false } : {
+          ...createProviderEgressTokenValidationResult({ userId }),
+          attemptId: "attempt_synthetic_native",
         },
-        method: "POST",
+        settlementPending: nativeState === "pending",
+        retiring: nativeState === "retiring",
       }),
-      createInterceptEnv({ providerContext: validateRuntimeProviderEgressToken }),
-      { className: "RunnerContainer", containerId: "opaque-container-id" },
+      { className: "RunnerContainer", containerId: "synthetic-container" },
     );
 
-    expect(response.status).toBe(200);
-    const responseText = await response.text();
-    expect(responseText).toContain('"model":"murph-custom-r7"');
-    expect(responseText).not.toContain("synthetic-upstream-model");
-
-    const forwarded = readForwardedRequest(fetchMock);
-    expect(forwarded.url).toBe("https://inference.example.com/v1/responses");
-    expect(forwarded.redirect).toBe("manual");
-    expect(forwarded.headers.get("x-api-key"))
-      .toBe("synthetic-custom-upstream-secret");
-    // The member-controlled upstream must receive a from-scratch header set:
-    // SSE/JSON transport plus the one configured auth header, nothing inbound.
-    expect([...forwarded.headers.keys()].sort()).toEqual([
-      "accept",
-      "content-type",
-      "x-api-key",
-    ]);
-    expect(forwarded.headers.get("accept")).toBe("text/event-stream");
-    expect(forwarded.headers.get("content-type")).toBe("application/json");
-    await expect(forwarded.json()).resolves.toEqual({
-      input: "synthetic request",
-      model: "synthetic-upstream-model",
-      parallel_tool_calls: false,
-      store: false,
-      stream: true,
+    expect(response.status).toBe(status);
+    expect(response.headers.get("retry-after")).toBe(status === 503 ? "1" : null);
+    expect(await response.text()).toBe(status === 503 ? "Usage settlement pending."
+      : status === 401 ? "Unauthorized" : "ok");
+    expect(fetchMock).toHaveBeenCalledTimes(status === 200 ? 1 : 0);
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledTimes(1);
+    const entry = mocks.emitHostedExecutionStructuredLog.mock.calls[0]![0];
+    expect(entry).toStrictEqual({
+      component: "runner",
+      details: {
+        host: "api.openai.com",
+        method: "GET",
+        providerKind: "openai",
+        providerRequestAuthorized: status === 200,
+        providerTotalDurationMs: expect.any(Number),
+        providerUpstreamDurationMs: status === 200 ? expect.any(Number) : null,
+        providerEgressAuthDurationMs: expect.any(Number),
+        providerEgressAuthMode: "native_container",
+        ...(runtimeAttemptId ? { runtimeAttemptId } : {}),
+        responseOk: status === 200,
+        responseStatus: status,
+        providerBearerCredentialKind: "sentinel",
+        userIdPresent: nativeState !== "absent",
+        writeFenceMetadataPresent: nativeState !== "absent",
+        writeFenceValidationDurationMs: expect.any(Number),
+        writeFenceValidationMode: "native_container",
+        ...(rejectReason ? {
+          providerEgressRejectReason: rejectReason,
+          writeFenceValidationRejectReason: rejectReason,
+        } : {}),
+      },
+      level: status === 200 ? "info" : "warn",
+      message: "Hosted runner provider egress completed.",
+      phase: "wake.running",
     });
+    expect(sanitizeHostedExecutionStructuredLogDetails(entry.details)?.runtimeAttemptId)
+      .toBe(runtimeAttemptId);
   });
 
-  it("keeps custom core inference available while denying Murph-funded provider egress", async () => {
+  it("denies OpenAI provider egress when platform AI usage is unavailable", async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response("unexpected"));
     vi.stubGlobal("fetch", fetchMock);
     const validateRuntimeProviderEgressToken = vi.fn(async (input: {
@@ -618,7 +568,7 @@ describe("hostedRunnerIntercept", () => {
       new Request("https://api.openai.com/v1/responses", {
         body: JSON.stringify({
           input: "platform-funded request",
-          model: "gpt-5.6-terra",
+          model: "gpt-6.1-sol",
           stream: true,
         }),
         headers: {
@@ -731,7 +681,7 @@ describe("hostedRunnerIntercept", () => {
       new Request("https://api.openai.com/v1/responses", {
         body: JSON.stringify({
           input: "automatic retry",
-          model: "gpt-5.6-terra",
+          model: "gpt-6.1-sol",
           stream: true,
         }),
         headers: {
@@ -1421,7 +1371,7 @@ describe("hostedRunnerIntercept", () => {
 
     const response = await hostedRunnerIntercept(
       new Request("https://api.openai.com/v1/responses", {
-        body: JSON.stringify({ model: "gpt-5.6-terra", input: "Synthetic text turn." }),
+        body: JSON.stringify({ model: "gpt-6.1-sol", input: "Synthetic text turn." }),
         headers: {
           ...BOUND_USER_WRITE_FENCE_HEADERS,
           cookie: "session=user-supplied-cookie",
@@ -1465,8 +1415,6 @@ describe("hostedRunnerIntercept", () => {
       expect.objectContaining({
         details: expect.objectContaining({
           providerKind: "openai",
-          providerEgressTokenPresent: false,
-          runtimeAuthorityHeadersPresent: false,
           writeFenceMetadataPresent: true,
           writeFenceValidationMode: "native_container",
         }),
@@ -1498,7 +1446,7 @@ describe("hostedRunnerIntercept", () => {
         type: "message",
       }],
       max_output_tokens: 2_500,
-      model: "gpt-5.6-terra",
+      model: "gpt-6.1-sol",
       settings: {
         allowed_callers: ["direct"],
         external_web_access: false,
@@ -1564,7 +1512,7 @@ describe("hostedRunnerIntercept", () => {
       method: "POST",
       headers: { authorization: `Bearer ${credential}`, "content-type": "application/json" },
       body: JSON.stringify({
-        model: "gpt-5.6-terra",
+        model: "gpt-6.1-sol",
         input: "Draw a synthetic geometric pattern.",
         tools: image ? [{ type: "image_generation" }] : [],
       }),
@@ -2472,6 +2420,8 @@ describe("hostedRunnerIntercept", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
+    let background: Promise<void> | undefined;
+    let backgroundSettled = false;
     let timeoutId: ReturnType<typeof setTimeout> | undefined;
     try {
       const response = await Promise.race([
@@ -2504,6 +2454,13 @@ describe("hostedRunnerIntercept", () => {
       expect(response.status).toBe(200);
       expect(await response.json()).toEqual(upstreamPayload);
       await accountingStarted;
+      // The production-shaped recording is registered background work, so it
+      // stays attached to the invocation instead of floating until canceled.
+      background = settleWaitUntilForTest().then(() => {
+        backgroundSettled = true;
+      });
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(backgroundSettled).toBe(false);
     } finally {
       if (timeoutId !== undefined) {
         clearTimeout(timeoutId);
@@ -2514,6 +2471,8 @@ describe("hostedRunnerIntercept", () => {
         usageId: "usage_1",
       }));
     }
+    await background;
+    expect(backgroundSettled).toBe(true);
   });
 
   it("rejects an oversized Gemini response without widening the delivery buffer", async () => {
@@ -2811,6 +2770,8 @@ describe("hostedRunnerIntercept", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
+    let background: Promise<void> | undefined;
+    let backgroundSettled = false;
     let timeoutId: ReturnType<typeof setTimeout> | undefined;
     try {
       const response = await Promise.race([
@@ -2839,6 +2800,13 @@ describe("hostedRunnerIntercept", () => {
       expect(response.status).toBe(200);
       expect(await response.json()).toEqual(upstreamPayload);
       await accountingStarted;
+      // The production-shaped recording is registered background work, so it
+      // stays attached to the invocation instead of floating until canceled.
+      background = settleWaitUntilForTest().then(() => {
+        backgroundSettled = true;
+      });
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(backgroundSettled).toBe(false);
     } finally {
       if (timeoutId !== undefined) {
         clearTimeout(timeoutId);
@@ -2849,6 +2817,8 @@ describe("hostedRunnerIntercept", () => {
         usageId: "usage_1",
       }));
     }
+    await background;
+    expect(backgroundSettled).toBe(true);
   });
 
   it("does not delay or fail xAI delivery when off-path accounting rejects", async () => {
@@ -3229,8 +3199,6 @@ describe("hostedRunnerIntercept", () => {
       expect.objectContaining({
         details: expect.objectContaining({
           providerKind: "openai",
-          providerEgressTokenPresent: false,
-          runtimeAuthorityHeadersPresent: false,
           writeFenceMetadataPresent: true,
           writeFenceValidationMode: "native_container",
         }),
@@ -3258,7 +3226,7 @@ describe("hostedRunnerIntercept", () => {
 
     const response = await hostedRunnerIntercept(
       new Request("https://api.openai.com/v1/responses", {
-        body: JSON.stringify({ model: "gpt-5.6-terra", input: "Synthetic text turn." }),
+        body: JSON.stringify({ model: "gpt-6.1-sol", input: "Synthetic text turn." }),
         headers: {
           authorization: `Bearer ${credential}`,
         },
@@ -3283,242 +3251,12 @@ describe("hostedRunnerIntercept", () => {
           providerKind: "openai",
           providerBearerCredentialKind: "provider_egress",
           providerEgressAuthMode: "native_container",
-          providerEgressTokenPresent: false,
-          runtimeAuthorityHeadersPresent: false,
           writeFenceMetadataPresent: true,
           writeFenceValidationMode: "native_container",
         }),
         message: "Hosted runner provider egress completed.",
       }),
     );
-  });
-
-  it("injects Venice authorization and rewrites only the upstream model id", async () => {
-    const fetchMock = vi.fn<typeof fetch>(async () => new Response("ok"));
-    vi.stubGlobal("fetch", fetchMock);
-    const validateRuntimeProviderEgressCredential = vi.fn(async (input: {
-
-      userId: string;
-    }) => createProviderEgressCredentialValidationResult(input));
-    const credential = await createTestProviderEgressCredential({
-      providerKind: "venice",
-    });
-    const env = createInterceptEnv({
-      VENICE_API_KEY: "venice-worker-secret",
-      providerContext: validateRuntimeProviderEgressCredential,
-    });
-
-    const response = await hostedRunnerIntercept(
-      new Request("https://api.venice.ai/api/v1/responses", {
-        body: JSON.stringify({
-          input: "hello",
-          model: "gpt-5.6-sol",
-          stream: true,
-        }),
-        headers: {
-          authorization: `Bearer ${credential}`,
-          "content-type": "application/json",
-        },
-        method: "POST",
-      }),
-      env,
-      { className: "RunnerContainer", containerId: "opaque-container-id" },
-    );
-
-    expect(response.status).toBe(200);
-
-    const forwarded = findFetchCall(fetchMock, "api.venice.ai")?.[0];
-    expect(forwarded).toBeInstanceOf(Request);
-    const forwardedRequest = forwarded as Request;
-    expect(forwardedRequest.url).toBe("https://api.venice.ai/api/v1/responses");
-    expect(forwardedRequest.headers.get("authorization")).toBe(
-      "Bearer venice-worker-secret",
-    );
-    expect(forwardedRequest.headers.has(HOSTED_RUNNER_BOUND_USER_ID_HEADER)).toBe(false);
-    expect(forwardedRequest.headers.has(HOSTED_PROVIDER_EGRESS_TOKEN_HEADER)).toBe(false);
-    await expect(forwardedRequest.json()).resolves.toEqual({
-      input: "hello",
-      model:
-        "openai-gpt-56-sol:include_venice_system_prompt=false&enable_web_search=off&enable_web_scraping=false",
-      stream: true,
-    });
-  });
-
-  it.each([
-    ["foreground", JSON.stringify({ request_kind: "turn" })],
-    ["untagged", null],
-  ])("does not persist Venice provider diagnostics for %s turns", async (_kind, metadata) => {
-    const fetchMock = vi.fn<typeof fetch>(async () => new Response("ok"));
-    vi.stubGlobal("fetch", fetchMock);
-    const credential = await createTestProviderEgressCredential({
-      providerKind: "venice",
-    });
-    const headers = new Headers({
-      authorization: `Bearer ${credential}`,
-      "content-type": "application/json",
-    });
-    if (metadata) {
-      headers.set("x-codex-turn-metadata", metadata);
-    }
-
-    const response = await hostedRunnerIntercept(
-      new Request("https://api.venice.ai/api/v1/responses", {
-        body: JSON.stringify({
-          input: "synthetic foreground request",
-          model: "gpt-5.6-sol",
-          stream: true,
-        }),
-        headers,
-        method: "POST",
-      }),
-      createInterceptEnv({
-        VENICE_API_KEY: "venice-worker-secret",
-        providerContext: async (input) =>
-          createProviderEgressCredentialValidationResult(input),
-        validateRuntimeWriteFence: async () => true,
-      }),
-      { className: "RunnerContainer", containerId: "opaque-container-id" },
-    );
-
-    expect(response.status).toBe(200);
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(new URL(readFetchTargetUrl(fetchMock.mock.calls[0]?.[0])).hostname)
-      .toBe("api.venice.ai");
-  });
-
-  it("normalizes Responses Lite tools and marks the stable Venice cache prefix", async () => {
-    const fetchMock = vi.fn<typeof fetch>(async () => new Response("ok"));
-    vi.stubGlobal("fetch", fetchMock);
-    const validateRuntimeProviderEgressCredential = vi.fn(async (input: {
-
-      userId: string;
-    }) => createProviderEgressCredentialValidationResult(input));
-    const credential = await createTestProviderEgressCredential({
-      providerKind: "venice",
-    });
-    const env = createInterceptEnv({
-      VENICE_API_KEY: "venice-worker-secret",
-      providerContext: validateRuntimeProviderEgressCredential,
-    });
-    const responsesLiteTools = [{
-      name: "murph",
-      tools: [
-        { name: "connected_apps_manage" },
-        { name: "send_progress_update" },
-      ],
-      type: "namespace",
-    }];
-    const standardInput = [
-      {
-        content: [{ text: "Stable Codex instructions.", type: "input_text" }],
-        role: "developer",
-        type: "message",
-      },
-      {
-        content: [{ text: "Show my connected apps.", type: "input_text" }],
-        role: "user",
-        type: "message",
-      },
-    ];
-
-    const response = await hostedRunnerIntercept(
-      new Request("https://api.venice.ai/api/v1/responses", {
-        body: JSON.stringify({
-          input: [
-            {
-              role: "developer",
-              tools: responsesLiteTools,
-              type: "additional_tools",
-            },
-            ...standardInput,
-          ],
-          model: "gpt-5.6-sol",
-          parallel_tool_calls: false,
-          stream: true,
-          tool_choice: "auto",
-        }),
-        headers: {
-          authorization: `Bearer ${credential}`,
-          "content-type": "application/json",
-        },
-        method: "POST",
-      }),
-      env,
-      { className: "RunnerContainer", containerId: "opaque-container-id" },
-    );
-
-    expect(response.status).toBe(200);
-    const forwarded = findFetchCall(fetchMock, "api.venice.ai")?.[0];
-    expect(forwarded).toBeInstanceOf(Request);
-    const forwardedRequest = forwarded as Request;
-    await expect(forwardedRequest.json()).resolves.toEqual({
-      input: [
-        {
-          content: [{
-            prompt_cache_breakpoint: { mode: "explicit" },
-            text: "Stable Codex instructions.",
-            type: "input_text",
-          }],
-          role: "developer",
-          type: "message",
-        },
-        standardInput[1],
-      ],
-      model:
-        "openai-gpt-56-sol:include_venice_system_prompt=false&enable_web_search=off&enable_web_scraping=false",
-      parallel_tool_calls: false,
-      stream: true,
-      tool_choice: "auto",
-      tools: responsesLiteTools,
-    });
-  });
-
-  it("rejects malformed and oversized Venice bodies before upstream", async () => {
-    const fetchMock = vi.fn<typeof fetch>(async () => new Response("ok"));
-    vi.stubGlobal("fetch", fetchMock);
-    const validateRuntimeProviderEgressCredential = vi.fn(async (input: {
-
-      userId: string;
-    }) => createProviderEgressCredentialValidationResult(input));
-    const credential = await createTestProviderEgressCredential({
-      providerKind: "venice",
-    });
-    const env = createInterceptEnv({
-      VENICE_API_KEY: "venice-worker-secret",
-      providerContext: validateRuntimeProviderEgressCredential,
-    });
-    const requestHeaders = {
-      authorization: `Bearer ${credential}`,
-      "content-type": "application/json",
-    };
-
-    const malformedResponse = await hostedRunnerIntercept(
-      new Request("https://api.venice.ai/api/v1/responses", {
-        body: "{malformed",
-        headers: requestHeaders,
-        method: "POST",
-      }),
-      env,
-      { className: "RunnerContainer", containerId: "opaque-container-id" },
-    );
-    const oversizedResponse = await hostedRunnerIntercept(
-      new Request("https://api.venice.ai/api/v1/responses", {
-        body: "{}",
-        headers: {
-          ...requestHeaders,
-          "content-length": String(
-            HOSTED_VENICE_RESPONSES_MAX_BODY_BYTES + 1,
-          ),
-        },
-        method: "POST",
-      }),
-      env,
-      { className: "RunnerContainer", containerId: "opaque-container-id" },
-    );
-
-    expect(malformedResponse.status).toBe(403);
-    expect(oversizedResponse.status).toBe(413);
-    expect(findFetchCall(fetchMock, "api.venice.ai")).toBeUndefined();
   });
 
   it("injects OpenAI authorization for deploy-smoke egress while the live model turn fence is open", async () => {
@@ -3720,7 +3458,7 @@ describe("hostedRunnerIntercept", () => {
 
     const response = await hostedRunnerIntercept(
       new Request("https://api.openai.com/v1/responses", {
-        body: JSON.stringify({ model: "gpt-5.6-terra", input: "Synthetic text turn." }),
+        body: JSON.stringify({ model: "gpt-6.1-sol", input: "Synthetic text turn." }),
         headers: {
           authorization: `Bearer ${credential}`,
         },
@@ -3858,6 +3596,44 @@ describe("hostedRunnerIntercept", () => {
     await Promise.all(deferred.promises);
     expect(reportCompleted).toBe(true);
     expect(await response.text()).toBe("private-upstream-response-body");
+  });
+
+  it("keeps the OpenAI authorization alert report as background work when the context lacks waitUntil", async () => {
+    let completeReport = (_value: { accepted: true }): void => {
+      throw new Error("OpenAI authorization alert report did not start.");
+    };
+    const reportFailure = vi.fn(
+      (_report: OpenAiAuthorizationAlertReport) =>
+        new Promise<{ accepted: true }>((resolve) => {
+          completeReport = resolve;
+        }),
+    );
+    const alert = createOpenAiAuthorizationAlertTestNamespace(reportFailure);
+    const upstreamResponse = new Response("forbidden", { status: 403 });
+
+    const response = await handleHostedRunnerOpenAiOutbound(
+      createAuthorizedOpenAiModelsRequest(),
+      createInterceptEnv({
+        OPENAI_API_KEY: "openai-worker-secret",
+        OPENAI_AUTHORIZATION_ALERT_MONITOR: alert.namespace,
+        validateRuntimeWriteFence: async () => true,
+      }),
+      // Production container interception supplies no ctx.waitUntil.
+      { className: "RunnerContainer", containerId: "synthetic-container" },
+      async () => upstreamResponse,
+    );
+
+    expect(response).toBe(upstreamResponse);
+    expect(reportFailure).toHaveBeenCalledOnce();
+    let backgroundSettled = false;
+    const background = settleWaitUntilForTest().then(() => {
+      backgroundSettled = true;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(backgroundSettled).toBe(false);
+    completeReport({ accepted: true });
+    await background;
+    expect(backgroundSettled).toBe(true);
   });
 
   it("routes standby provider and internal hosts through concrete class interception", async () => {
@@ -4281,43 +4057,7 @@ describe("hostedRunnerIntercept", () => {
     expect(forwarded.headers.has("x-hosted-runtime-attempt-id")).toBe(false);
   });
 
-  it("injects OpenAI authorization for Codex auto-compaction requests", async () => {
-    const fetchMock = vi.fn<typeof fetch>(async () => new Response("ok"));
-    vi.stubGlobal("fetch", fetchMock);
-    const validateRuntimeProviderEgressCredential = vi.fn(async (input: {
-
-      userId: string;
-    }) => createProviderEgressCredentialValidationResult(input));
-    const credential = await createTestProviderEgressCredential();
-
-    const response = await hostedRunnerIntercept(
-      new Request("https://api.openai.com/v1/responses/compact", {
-        headers: {
-          authorization: `Bearer ${credential}`,
-        },
-        method: "POST",
-      }),
-      createInterceptEnv({
-        OPENAI_API_KEY: "openai-worker-secret",
-        providerContext: validateRuntimeProviderEgressCredential,
-      }),
-      { className: "RunnerContainer", containerId: "opaque-container-id" },
-    );
-
-    expect(response.status).toBe(200);
-
-    const forwarded = findFetchCall(fetchMock, "api.openai.com")?.[0];
-    expect(forwarded).toBeInstanceOf(Request);
-    const forwardedRequest = forwarded as Request;
-    expect(forwardedRequest.url).toBe("https://api.openai.com/v1/responses/compact");
-    expect(forwardedRequest.headers.get("authorization")).toBe("Bearer openai-worker-secret");
-    expect(forwardedRequest.headers.has("x-hosted-runtime-attempt-id")).toBe(false);
-    expect(forwardedRequest.headers.has("x-hosted-runtime-lease-generation")).toBe(false);
-    expect(forwardedRequest.headers.has("x-hosted-runtime-workspace-version")).toBe(false);
-    expect(forwardedRequest.headers.has(HOSTED_RUNNER_BOUND_USER_ID_HEADER)).toBe(false);
-  });
-
-  it("records OpenAI cache diagnostics as redacted metadata when background work is available", async () => {
+  it("emits OpenAI cache diagnostics as redacted structured metadata without a Web runtime-log POST", async () => {
     const waitUntilPromises: Promise<unknown>[] = [];
     const fetchMock = vi.fn<typeof fetch>(async (target) => {
       const url = new URL(readFetchTargetUrl(target));
@@ -4347,7 +4087,7 @@ describe("hostedRunnerIntercept", () => {
         role: "user",
       }],
       instructions: `synthetic instructions ${syntheticStablePrefix}`,
-      model: "gpt-5.6-terra",
+      model: "gpt-6.1-sol",
       previous_response_id: syntheticPreviousResponse,
       prompt_cache_key: syntheticCacheNamespace,
       prompt_cache_retention: "24h",
@@ -4400,35 +4140,10 @@ describe("hostedRunnerIntercept", () => {
       .toBe("Bearer openai-worker-secret");
     await expect((upstreamRequest as Request).clone().json()).resolves.toEqual(requestBody);
 
-    const runtimeLogCall = findFetchCall(fetchMock, "web.example.test");
-    expect(runtimeLogCall).toBeDefined();
-    const runtimeLogBody = JSON.parse(String(runtimeLogCall?.[1]?.body ?? "{}")) as {
-      entries?: Array<{
-        attemptId?: string;
-        component?: string;
-        eventCode?: string;
-        leaseGeneration?: string;
-        level?: string;
-        phase?: string;
-        redactedJson?: Record<string, unknown>;
-        workspaceVersion?: string;
-      }>;
-    };
-    const entry = runtimeLogBody.entries?.[0];
-    expect(parseHostedRuntimeLogRequest(runtimeLogBody).entries).toHaveLength(1);
-    if (entry?.redactedJson) {
-      parseDiagnosticRuntimeLog(entry.redactedJson);
-    }
-    expect(entry).toEqual(expect.objectContaining({
-      attemptId: "attempt_1",
-      component: "runner",
-      eventCode: HOSTED_OPENAI_CACHE_DIAGNOSTIC_EVENT_CODE,
-      leaseGeneration: "7",
-      level: "debug",
-      phase: "fetch",
-      workspaceVersion: "4",
-    }));
-    expect(entry?.redactedJson).toEqual(expect.objectContaining({
+    expect(findFetchCall(fetchMock, "web.example.test")).toBeUndefined();
+    const diagnostic = readCapturedOpenAiDiagnostic();
+    parseDiagnosticRuntimeLog(diagnostic);
+    expect(diagnostic).toEqual(expect.objectContaining({
       cacheNamespacePresent: true,
       cacheRetentionKind: "24h",
       endpointKind: "responses",
@@ -4455,55 +4170,55 @@ describe("hostedRunnerIntercept", () => {
       jsonType: "object",
       jsonValid: true,
       methodKind: "POST",
-      modelKind: "gpt-5.6-terra",
+      modelKind: "gpt-6.1-sol",
       previousResponsePresent: true,
       providerKind: "openai",
       requestFingerprintPresent: true,
       streamPresent: true,
       toolCount: 1,
     }));
-    expect(entry?.redactedJson?.inputLargestItemBytes)
+    expect(diagnostic.inputLargestItemBytes)
       .toBe(testJsonByteLength(requestBody.input[0]));
-    expect(entry?.redactedJson?.inputNestedMetricBytes).toEqual([
+    expect(diagnostic.inputNestedMetricBytes).toEqual([
       testJsonByteLength(requestBody.input[0].content),
       0,
       testByteLength(`${syntheticStablePrefix}${syntheticHiddenText}`)
         + testByteLength("input_text")
         + testByteLength("user"),
     ]);
-    expect(entry?.redactedJson?.inputTailItemBytes).toEqual([
+    expect(diagnostic.inputTailItemBytes).toEqual([
       testJsonByteLength(requestBody.input[0]),
     ]);
-    expect(entry?.redactedJson?.inputTailItemContentBytes).toEqual([
+    expect(diagnostic.inputTailItemContentBytes).toEqual([
       testJsonByteLength(requestBody.input[0].content),
     ]);
-    expect(entry?.redactedJson?.inputTailItemOutputBytes).toEqual([0]);
-    expect(entry?.redactedJson?.inputTailItemStringBytes).toEqual([
+    expect(diagnostic.inputTailItemOutputBytes).toEqual([0]);
+    expect(diagnostic.inputTailItemStringBytes).toEqual([
       testByteLength(`${syntheticStablePrefix}${syntheticHiddenText}`)
         + testByteLength("input_text")
         + testByteLength("user"),
     ]);
-    expect(Object.keys(entry?.redactedJson ?? {}).length).toBeLessThanOrEqual(64);
-    expect(entry?.redactedJson?.cacheNamespaceFingerprint).toMatch(/^hmac-sha256:[a-f0-9]{64}$/u);
-    expect(entry?.redactedJson?.previousResponseFingerprint).toMatch(/^hmac-sha256:[a-f0-9]{64}$/u);
-    expect(entry?.redactedJson?.requestPrefixFingerprints).toEqual(
+    expect(Object.keys(diagnostic).length).toBeLessThanOrEqual(65);
+    expect(diagnostic.cacheNamespaceFingerprint).toMatch(/^hmac-sha256:[a-f0-9]{64}$/u);
+    expect(diagnostic.previousResponseFingerprint).toMatch(/^hmac-sha256:[a-f0-9]{64}$/u);
+    expect(diagnostic.requestPrefixFingerprints).toEqual(
       expect.arrayContaining([expect.stringMatching(/^hmac-sha256:[a-f0-9]{64}$/u)]),
     );
-    expect(entry?.redactedJson?.inputPrefixFingerprints).toEqual(
+    expect(diagnostic.inputPrefixFingerprints).toEqual(
       expect.arrayContaining([expect.stringMatching(/^hmac-sha256:[a-f0-9]{64}$/u)]),
     );
-    expect(entry?.redactedJson?.inputTailItemFingerprints).toEqual([
+    expect(diagnostic.inputTailItemFingerprints).toEqual([
       expect.stringMatching(/^hmac-sha256:[a-f0-9]{64}$/u),
     ]);
 
-    const runtimeLogJson = JSON.stringify(runtimeLogBody);
-    expect(runtimeLogJson).not.toContain(syntheticCacheNamespace);
-    expect(runtimeLogJson).not.toContain(syntheticPreviousResponse);
-    expect(runtimeLogJson).not.toContain(syntheticHiddenText);
-    expect(runtimeLogJson).not.toContain("synthetic-stable-cache-prefix-segment");
-    expect(runtimeLogJson).not.toContain("diagnostic-fingerprint-secret");
-    expect(runtimeLogJson).not.toContain("openai-worker-secret");
-    expect(runtimeLogJson).not.toContain(HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL);
+    const diagnosticJson = JSON.stringify(diagnostic);
+    expect(diagnosticJson).not.toContain(syntheticCacheNamespace);
+    expect(diagnosticJson).not.toContain(syntheticPreviousResponse);
+    expect(diagnosticJson).not.toContain(syntheticHiddenText);
+    expect(diagnosticJson).not.toContain("synthetic-stable-cache-prefix-segment");
+    expect(diagnosticJson).not.toContain("diagnostic-fingerprint-secret");
+    expect(diagnosticJson).not.toContain("openai-worker-secret");
+    expect(diagnosticJson).not.toContain(HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL);
     expect(JSON.stringify(mocks.emitHostedExecutionStructuredLog.mock.calls))
       .not.toContain(syntheticHiddenText);
   });
@@ -4529,7 +4244,7 @@ describe("hostedRunnerIntercept", () => {
     const sensitiveTurnId = "turn-sensitive-diagnostic-id";
     const requestBody = {
       input: [],
-      model: "gpt-5.6-terra",
+      model: "gpt-6.1-sol",
     };
     const codexTurnMetadata = JSON.stringify({
       compaction: {
@@ -4547,7 +4262,7 @@ describe("hostedRunnerIntercept", () => {
     });
 
     const response = await hostedRunnerIntercept(
-      new Request("https://api.openai.com/v1/responses/compact", {
+      new Request("https://api.openai.com/v1/responses", {
         body: JSON.stringify(requestBody),
         headers: {
           ...BOUND_USER_WRITE_FENCE_HEADERS,
@@ -4573,36 +4288,28 @@ describe("hostedRunnerIntercept", () => {
     expect(response.status).toBe(200);
     await Promise.all(waitUntilPromises);
 
-    const runtimeLogCall = findFetchCall(fetchMock, "web.example.test");
-    expect(runtimeLogCall).toBeDefined();
-    const runtimeLogBody = JSON.parse(String(runtimeLogCall?.[1]?.body ?? "{}")) as {
-      entries?: Array<{
-        redactedJson?: Record<string, unknown>;
-      }>;
-    };
-    const redactedJson = runtimeLogBody.entries?.[0]?.redactedJson;
-    expect(redactedJson).toEqual(expect.objectContaining({
+    expect(findFetchCall(fetchMock, "web.example.test")).toBeUndefined();
+    const diagnostic = readCapturedOpenAiDiagnostic();
+    expect(diagnostic).toEqual(expect.objectContaining({
       codexCompactionImplementationKind: "responses_compaction_v2",
       codexCompactionPhaseKind: "pre_turn",
       codexCompactionReasonKind: "context_limit",
       codexCompactionTriggerKind: "auto",
       codexRequestKind: "compaction",
       codexTurnMetadataStatus: "valid",
-      endpointKind: "responses_compact",
+      endpointKind: "responses",
     }));
-    if (redactedJson) {
-      parseDiagnosticRuntimeLog(redactedJson);
-    }
+    parseDiagnosticRuntimeLog(diagnostic);
 
-    const runtimeLogJson = JSON.stringify(runtimeLogBody);
-    expect(runtimeLogJson).not.toContain(sensitiveSessionId);
-    expect(runtimeLogJson).not.toContain(sensitiveThreadId);
-    expect(runtimeLogJson).not.toContain(sensitiveTurnId);
+    const diagnosticJson = JSON.stringify(diagnostic);
+    expect(diagnosticJson).not.toContain(sensitiveSessionId);
+    expect(diagnosticJson).not.toContain(sensitiveThreadId);
+    expect(diagnosticJson).not.toContain(sensitiveTurnId);
     expect(JSON.stringify(mocks.emitHostedExecutionStructuredLog.mock.calls))
       .not.toContain(sensitiveThreadId);
   });
 
-  it("records OpenAI cache diagnostics under the fence validated by a provider token", async () => {
+  it("emits OpenAI cache diagnostics for provider-token egress without a Web runtime-log POST", async () => {
     const waitUntilPromises: Promise<unknown>[] = [];
     const fetchMock = vi.fn<typeof fetch>(async (target) => {
       const url = new URL(readFetchTargetUrl(target));
@@ -4632,7 +4339,7 @@ describe("hostedRunnerIntercept", () => {
       new Request("https://api.openai.com/v1/responses", {
         body: JSON.stringify({
           input: "hello",
-          model: "gpt-5.6-terra",
+          model: "gpt-6.1-sol",
           prompt_cache_retention: "24h",
         }),
         headers: {
@@ -4660,33 +4367,17 @@ describe("hostedRunnerIntercept", () => {
     expect(response.status).toBe(200);
     await Promise.all(waitUntilPromises);
     expect(validateRuntimeWriteFence).not.toHaveBeenCalled();
-    expect(validateRuntimeWriteFence).not.toHaveBeenCalled();
 
-    const runtimeLogCall = findFetchCall(fetchMock, "web.example.test");
-    expect(runtimeLogCall).toBeDefined();
-    const runtimeLogBody = JSON.parse(String(runtimeLogCall?.[1]?.body ?? "{}")) as {
-      entries?: Array<{
-        attemptId?: string;
-        eventCode?: string;
-        leaseGeneration?: string;
-        redactedJson?: Record<string, unknown>;
-        workspaceVersion?: string;
-      }>;
-    };
-    expect(parseHostedRuntimeLogRequest(runtimeLogBody).entries).toHaveLength(1);
-    expect(runtimeLogBody.entries?.[0]).toEqual(expect.objectContaining({
-      attemptId: "attempt_provider_egress",
-      eventCode: HOSTED_OPENAI_CACHE_DIAGNOSTIC_EVENT_CODE,
-      leaseGeneration: "11",
-      workspaceVersion: "9",
-    }));
-    expect(runtimeLogBody.entries?.[0]?.redactedJson).toEqual(expect.objectContaining({
+    expect(findFetchCall(fetchMock, "web.example.test")).toBeUndefined();
+    const diagnostic = readCapturedOpenAiDiagnostic();
+    parseDiagnosticRuntimeLog(diagnostic);
+    expect(diagnostic).toEqual(expect.objectContaining({
       endpointKind: "responses",
       providerKind: "openai",
     }));
   });
 
-  it("records OpenAI cache diagnostics when background work is unavailable", async () => {
+  it("emits OpenAI cache diagnostics when background work is unavailable without a Web runtime-log POST", async () => {
     const fetchMock = vi.fn<typeof fetch>(async (target) => {
       const url = new URL(readFetchTargetUrl(target));
       if (url.hostname === "web.example.test") {
@@ -4705,7 +4396,7 @@ describe("hostedRunnerIntercept", () => {
       new Request("https://api.openai.com/v1/responses", {
         body: JSON.stringify({
           input: "hello",
-          model: "gpt-5.6-terra",
+          model: "gpt-6.1-sol",
           prompt_cache_retention: "24h",
           stream: true,
         }),
@@ -4725,29 +4416,16 @@ describe("hostedRunnerIntercept", () => {
     );
 
     expect(response.status).toBe(200);
+    await settleWaitUntilForTest();
     expect(findFetchCall(fetchMock, "api.openai.com")).toBeDefined();
-    const runtimeLogCall = findFetchCall(fetchMock, "web.example.test");
-    expect(runtimeLogCall).toBeDefined();
-    const runtimeLogBody = JSON.parse(String(runtimeLogCall?.[1]?.body ?? "{}")) as {
-      entries?: Array<{
-        eventCode?: string;
-        redactedJson?: Record<string, unknown>;
-      }>;
-    };
-    expect(runtimeLogBody.entries?.[0]).toEqual(expect.objectContaining({
-      eventCode: HOSTED_OPENAI_CACHE_DIAGNOSTIC_EVENT_CODE,
-      redactedJson: expect.objectContaining({
-        endpointKind: "responses",
-        fingerprintKind: "hmac-sha256",
-        inputFingerprintPresent: false,
-        requestFingerprintPresent: false,
-      }),
-    }));
-    const captureCall = mocks.emitHostedExecutionStructuredLog.mock.calls.find(([entry]) =>
-      entry.message === "Hosted runner provider request diagnostic captured."
-    );
-    expect(captureCall?.[0].details).toEqual(expect.objectContaining({
-      runtimeLogScheduled: false,
+    expect(findFetchCall(fetchMock, "web.example.test")).toBeUndefined();
+    const diagnostic = readCapturedOpenAiDiagnostic();
+    parseDiagnosticRuntimeLog(diagnostic);
+    expect(diagnostic).toEqual(expect.objectContaining({
+      endpointKind: "responses",
+      fingerprintKind: "hmac-sha256",
+      inputFingerprintPresent: false,
+      requestFingerprintPresent: false,
     }));
   });
 
@@ -4770,7 +4448,7 @@ describe("hostedRunnerIntercept", () => {
 
     const response = await hostedRunnerIntercept(
       new Request("https://api.openai.com/v1/responses", {
-        body: JSON.stringify({ model: "gpt-5.6-terra", stream: true }),
+        body: JSON.stringify({ model: "gpt-6.1-sol", stream: true }),
         headers: {
           ...BOUND_USER_WRITE_FENCE_WITH_BEARER_SENTINEL_HEADERS,
           "content-type": "application/json",
@@ -4794,26 +4472,31 @@ describe("hostedRunnerIntercept", () => {
   });
 
   it("rejects OpenAI paths outside the explicit hosted runner policy", async () => {
-    const fetchMock = vi.fn<typeof fetch>(async () => new Response("unexpected"));
-    vi.stubGlobal("fetch", fetchMock);
+    for (const url of [
+      "https://api.openai.com/v1/chat/completions",
+      "https://api.openai.com/v1/responses/compact",
+    ]) {
+      const fetchMock = vi.fn<typeof fetch>(async () => new Response("unexpected"));
+      vi.stubGlobal("fetch", fetchMock);
 
-    const response = await hostedRunnerIntercept(
-      new Request("https://api.openai.com/v1/chat/completions", {
-        body: JSON.stringify({ messages: [] }),
-        headers: {
-          "content-type": "application/json; charset=utf-8",
-          ...WRITE_FENCE_HEADERS,
-        },
-        method: "POST",
-      }),
-      createInterceptEnv({
-        OPENAI_API_KEY: "openai-worker-secret",
-      }),
-      { className: "RunnerContainer", containerId: "opaque-container-id" },
-    );
+      const response = await hostedRunnerIntercept(
+        new Request(url, {
+          body: JSON.stringify({ messages: [] }),
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+            ...WRITE_FENCE_HEADERS,
+          },
+          method: "POST",
+        }),
+        createInterceptEnv({
+          OPENAI_API_KEY: "openai-worker-secret",
+        }),
+        { className: "RunnerContainer", containerId: "opaque-container-id" },
+      );
 
-    expect(response.status).toBe(403);
-    expect(fetchMock).not.toHaveBeenCalled();
+      expect(response.status).toBe(403);
+      expect(fetchMock).not.toHaveBeenCalled();
+    }
   });
 
   it("rejects wrong OpenAI methods on otherwise allowed paths", async () => {
@@ -6136,6 +5819,99 @@ describe("hostedRunnerIntercept", () => {
     );
   });
 
+  it.each(["https://api.linqapp.com/api/partner/v3", "https://linq.example.test/custom/v3"])(
+    "correlates typing runtime resume with Worker egress under %s without forwarding diagnostics",
+    async (base) => {
+      let clock = 100;
+      const performanceSpy = vi.spyOn(performance, "now").mockImplementation(() => clock);
+      const response = new Response(null, { status: 204 });
+      const upstream = vi.fn<typeof fetch>(async () => response);
+      vi.stubGlobal("fetch", upstream);
+      const env = createInterceptEnv({ LINQ_API_BASE_URL: base, LINQ_API_TOKEN: "synthetic-worker-secret",
+        validateRuntimeWriteFence: async () => true });
+      const proxy = vi.fn<typeof fetch>(async (request, init) => {
+        const result = await hostedRunnerIntercept(new Request(request, init), env,
+          { className: "RunnerContainer", containerId: "opaque-container-id" });
+        // A controlled continuation gap is runtime-side, after Worker completion.
+        clock += 250;
+        return result;
+      });
+      const runtimeFetch = createCloudflareHostedProviderFetch("member_123", proxy, {
+        providerFetchBaseUrlSource: { LINQ_API_BASE_URL: base }, providerFetchBaseUrls: [base],
+      });
+      const result = await runtimeFetch(`${base}/chats/synthetic-private-chat/typing`, {
+        method: "POST", headers: {
+          authorization: `Bearer ${HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL}`,
+          [HOSTED_RUNTIME_FETCH_CORRELATION_ID_HEADER]: "synthetic-private-caller-value",
+        },
+      });
+      expect(result).toBe(response);
+      expect(proxy).toHaveBeenCalledTimes(1);
+      expect(upstream).toHaveBeenCalledTimes(1);
+      expect(readForwardedRequest(upstream).headers.has(HOSTED_RUNTIME_FETCH_CORRELATION_ID_HEADER)).toBe(false);
+      const entries = mocks.emitHostedExecutionStructuredLog.mock.calls.map(([entry]) => entry);
+      const runtimeLog = entries.find(entry => entry.message === "Hosted runtime typing fetch resumed.");
+      const workerLog = entries.find(entry => entry.message === "Hosted runner provider egress completed.");
+      expect(runtimeLog?.details).toMatchObject({ providerRuntimeRoundTripMs: 250, responseStatus: 204 });
+      expect(runtimeLog?.details.providerFetchCorrelationId).toMatch(/^[0-9a-f-]{36}$/);
+      expect(workerLog?.details).toMatchObject({
+        providerFetchCorrelationId: runtimeLog?.details.providerFetchCorrelationId,
+        runtimeAttemptId: "attempt_1", providerTotalDurationMs: expect.any(Number),
+        providerUpstreamDurationMs: expect.any(Number),
+      });
+      expect(JSON.stringify(entries)).not.toMatch(/synthetic-private-chat|synthetic-private-caller-value|synthetic-worker-secret/);
+      performanceSpy.mockRestore();
+    },
+  );
+
+  it("preserves typing transport failure identity and records its correlation", async () => {
+    const error = new Error("Synthetic transport failure");
+    const transport = vi.fn<typeof fetch>(async () => { throw error; });
+    const runtimeFetch = createCloudflareHostedProviderFetch("member_123", transport, {});
+    await expect(runtimeFetch("https://api.linqapp.com/api/partner/v3/chats/synthetic-chat/typing",
+      { method: "POST" })).rejects.toBe(error);
+    expect(transport).toHaveBeenCalledTimes(1);
+    const correlationId = new Request(transport.mock.calls[0]![0]).headers.get(HOSTED_RUNTIME_FETCH_CORRELATION_ID_HEADER);
+    expect(correlationId).toMatch(/^[0-9a-f-]{36}$/);
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(expect.objectContaining({
+      level: "warn", details: expect.objectContaining({ providerFetchCorrelationId: correlationId,
+        providerRuntimeRoundTripMs: expect.any(Number) }),
+    }));
+  });
+
+  it("does not attach typing diagnostics to a typing-stop request", async () => {
+    const response = new Response(null, { status: 204 });
+    const transport = vi.fn<typeof fetch>(async () => response);
+    const runtimeFetch = createCloudflareHostedProviderFetch("member_123", transport, {});
+    expect(await runtimeFetch("https://api.linqapp.com/api/partner/v3/chats/synthetic-chat/typing", {
+      method: "DELETE", headers: { [HOSTED_RUNTIME_FETCH_CORRELATION_ID_HEADER]: crypto.randomUUID() },
+    })).toBe(response);
+    expect(transport).toHaveBeenCalledTimes(1);
+    expect(new Request(transport.mock.calls[0]![0]).headers.has(HOSTED_RUNTIME_FETCH_CORRELATION_ID_HEADER)).toBe(false);
+    expect(mocks.emitHostedExecutionStructuredLog).not.toHaveBeenCalled();
+  });
+
+  it.each(["", "not-a-uuid", "11111111-1111-1111-1111-111111111111"])(
+    "omits malformed typing correlation metadata (%s) without changing egress", async (id) => {
+      const upstream = vi.fn<typeof fetch>(async () => new Response(null, { status: 204 }));
+      vi.stubGlobal("fetch", upstream);
+      const response = await hostedRunnerIntercept(new Request(
+        "https://api.linqapp.com/api/partner/v3/chats/synthetic-chat/typing", {
+          method: "POST", headers: { ...BOUND_USER_WRITE_FENCE_WITH_BEARER_SENTINEL_HEADERS,
+            [HOSTED_RUNTIME_FETCH_CORRELATION_ID_HEADER]: id },
+        }), createInterceptEnv({ LINQ_API_TOKEN: "synthetic-secret", validateRuntimeWriteFence: async () => true }),
+        { className: "RunnerContainer", containerId: "opaque-container-id" });
+      expect(response.status).toBe(204);
+      expect(upstream).toHaveBeenCalledTimes(1);
+      expect(readForwardedRequest(upstream).headers.has(HOSTED_RUNTIME_FETCH_CORRELATION_ID_HEADER)).toBe(false);
+      const log = mocks.emitHostedExecutionStructuredLog.mock.calls.find(([entry]) =>
+        entry.message === "Hosted runner provider egress completed.")?.[0];
+      expect(log.details).not.toHaveProperty("providerFetchCorrelationId");
+      expect(log.details).not.toHaveProperty("runtimeAttemptId");
+      expect(log.details).not.toHaveProperty("providerWorkerStartedAtEpochMs");
+    },
+  );
+
   it("honors configured Linq base URL pathname prefixes before validating allowed suffixes", async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response("ok"));
     vi.stubGlobal("fetch", fetchMock);
@@ -7304,7 +7080,7 @@ describe("maybeHandleHostedTranscribeRequest", () => {
       new Request("https://api.openai.com/v1/responses", {
         body: JSON.stringify({
           input: "automatic retry",
-          model: "gpt-5.6-terra",
+          model: "gpt-6.1-sol",
           stream: true,
         }),
         headers: {
@@ -7681,13 +7457,14 @@ function createInterceptEnv(input: {
   TELEGRAM_API_BASE_URL?: string;
   TELEGRAM_BOT_TOKEN?: string;
   TELEGRAM_FILE_BASE_URL?: string;
-  VENICE_API_KEY?: string;
   validateRuntimeWriteFence?: (input: {
     attemptId: string;
     generation: string;
     userId: string;
   }) => Promise<boolean>;
   providerContext?: (input: { userId: string }) => Promise<TestProviderContext>;
+  settlementPending?: boolean;
+  retiring?: boolean;
   XAI_API_KEY?: string;
 }): RunnerOutboundEnvironmentSource {
   const env: RunnerOutboundEnvironmentSource = {
@@ -7726,12 +7503,12 @@ function createInterceptEnv(input: {
             : await input.validateRuntimeWriteFence?.({ userId, attemptId: "attempt_1", generation: "7" })
               ? { owns: true as const, userId, attemptId: "attempt_1", leaseGeneration: "7", workspaceVersion: "4" } : null;
           if (!validation?.owns || validation.workspaceVersion === null) return null;
-          const customInferenceEnvelope = "customInferenceEnvelope" in validation && typeof validation.customInferenceEnvelope === "string" ? validation.customInferenceEnvelope : null;
           const owner = { ...createPostgresTestOwner(), userId, attemptId: validation.attemptId,
             generation: validation.leaseGeneration, workspaceVersion: validation.workspaceVersion,
-            customInferenceEnvelope, platformAiUsageAllowed: !state.revoked && (!("platformAiUsageAllowed" in validation) || validation.platformAiUsageAllowed !== false) };
+            platformAiUsageAllowed: !state.revoked && (!("platformAiUsageAllowed" in validation) || validation.platformAiUsageAllowed !== false) };
           state.owner = owner;
-          return { ...owner, attemptId: validation.attemptId, workspaceVersion: validation.workspaceVersion, settlementPending: false, retiring: false };
+          return { ...owner, attemptId: validation.attemptId, workspaceVersion: validation.workspaceVersion,
+            settlementPending: input.settlementPending ?? false, retiring: input.retiring ?? false };
         },
         readActiveRuntimeUserFence:
           input.readActiveRuntimeUserFence
@@ -7767,7 +7544,6 @@ function createInterceptEnv(input: {
     TELEGRAM_API_BASE_URL: input.TELEGRAM_API_BASE_URL,
     TELEGRAM_BOT_TOKEN: input.TELEGRAM_BOT_TOKEN,
     TELEGRAM_FILE_BASE_URL: input.TELEGRAM_FILE_BASE_URL,
-    VENICE_API_KEY: input.VENICE_API_KEY,
     XAI_API_KEY: input.XAI_API_KEY,
     USER_RUNNER: { getByName() { throw new Error("Provider egress must not access the legacy namespace."); } },
   };

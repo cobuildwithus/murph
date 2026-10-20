@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => ({
   completeHostedInitialOnboardingTx: vi.fn(),
   getPrisma: vi.fn(),
   issueMurphContactCardHandoffClaim: vi.fn(),
+  lookupHostedMemberByVerifiedEmailAddress: vi.fn(),
   parseHostedInitialOnboardingCompletionRequest: vi.fn(),
   readHostedInitialOnboardingState: vi.fn(),
   readHostedMemberMessagingSetupState: vi.fn(),
@@ -33,6 +34,8 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-contact-context", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", () => ({
+  lookupHostedMemberByVerifiedEmailAddress:
+    mocks.lookupHostedMemberByVerifiedEmailAddress,
   readHostedMemberMessagingSetupState:
     mocks.readHostedMemberMessagingSetupState,
 }));
@@ -118,7 +121,7 @@ describe("companion initial onboarding routes", () => {
       contactAction: { kind: "text" },
       contactCard: { defaultAvatarId: "classic" },
     });
-    expect(payload.catalog.personas).toHaveLength(6);
+    expect(payload.catalog.personas).toHaveLength(1);
     expect(payload.catalog.voices.length).toBeGreaterThan(10);
     expect(payload.catalog.voices[0].previewURL).toMatch(
       /^https:\/\/www\.withmurph\.ai\/audio\//u,
@@ -147,7 +150,7 @@ describe("companion initial onboarding routes", () => {
       contactAction: null,
       contactCard: null,
     });
-    expect(payload.catalog.personas).toHaveLength(6);
+    expect(payload.catalog.personas).toHaveLength(1);
     expect(warn).toHaveBeenCalledWith(
       "Companion initial onboarding contact projection unavailable.",
     );
@@ -171,6 +174,63 @@ describe("companion initial onboarding routes", () => {
     await expect(response.json()).resolves.toMatchObject({
       messagingSetupRequired: true,
       status: "completed",
+    });
+    expect(mocks.lookupHostedMemberByVerifiedEmailAddress).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { code: "246810", lookupMemberId: "member_123", expected: false },
+    { code: "246810", lookupMemberId: "member_other", expected: true },
+    { code: "", lookupMemberId: "member_123", expected: true },
+  ])("lets only the configured review member past messaging setup (%j)", async ({ code, lookupMemberId, expected }) => {
+    vi.stubEnv("HOSTED_AUTH_REVIEW_EMAIL", " Review@Example.test ");
+    vi.stubEnv("HOSTED_AUTH_REVIEW_CODE", code);
+    mocks.readHostedMemberMessagingSetupState.mockResolvedValue({
+      identity: { phoneLookupKey: null },
+      routing: null,
+    });
+    mocks.lookupHostedMemberByVerifiedEmailAddress.mockResolvedValue({
+      core: { id: lookupMemberId },
+      matchedBy: "verifiedEmail",
+    });
+    try {
+      const response = await route.GET(new Request(
+        "https://app.example.test/api/device-sync/companion/initial-onboarding",
+        { headers: { authorization: "Bearer identity-token" } },
+      ));
+
+      await expect(response.json()).resolves.toMatchObject({
+        messagingSetupRequired: expected,
+      });
+      if (code) {
+        expect(mocks.lookupHostedMemberByVerifiedEmailAddress).toHaveBeenCalledWith(
+          expect.objectContaining({ address: "review@example.test", projection: "core" }),
+        );
+      } else {
+        expect(mocks.lookupHostedMemberByVerifiedEmailAddress).not.toHaveBeenCalled();
+      }
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it.each([
+    { telegramThreadId: null, phoneLookupKey: null, expectedAwaiting: true },
+    { telegramThreadId: "123456789", phoneLookupKey: null, expectedAwaiting: false },
+    { telegramThreadId: null, phoneLookupKey: "synthetic-phone-lookup", expectedAwaiting: false },
+    { telegramThreadId: "123456789", phoneLookupKey: "synthetic-phone-lookup", expectedAwaiting: false },
+  ])("projects Telegram waiting only when no direct route exists (%j)", async ({ telegramThreadId, phoneLookupKey, expectedAwaiting }) => {
+    mocks.readHostedMemberMessagingSetupState.mockResolvedValue({
+      identity: { phoneLookupKey },
+      routing: { telegramUserId: "123456789", telegramThreadId },
+    });
+    const response = await route.GET(new Request(
+      "https://app.example.test/api/device-sync/companion/initial-onboarding",
+      { headers: { authorization: "Bearer identity-token" } },
+    ));
+    await expect(response.json()).resolves.toMatchObject({
+      messagingSetupRequired: false,
+      telegramAwaitingInbound: expectedAwaiting,
     });
   });
 

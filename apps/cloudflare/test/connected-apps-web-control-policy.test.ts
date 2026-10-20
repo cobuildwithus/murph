@@ -116,6 +116,67 @@ describe("connected-app web-control policy", () => {
     expect(response.status).toBe(401);
     expect(mocks.fetchHostedExecutionWebControlPlaneResponse).not.toHaveBeenCalled();
   });
+  it.each([false, true])("preserves the real port's response boundary (malformed=%s)", async (malformed) => {
+    const privateValue = "SYNTHETIC_PRIVATE_CONNECTED_RESPONSE";
+    const response = malformed
+      ? { result: { value: privateValue }, payload: privateValue, requestId: privateValue }
+      : { result: { ok: true } };
+    mocks.fetchHostedExecutionWebControlPlaneResponse.mockResolvedValue(
+      new Response(JSON.stringify(response), {
+        headers: { "content-type": "application/json" }, status: 200,
+      }),
+    );
+    const fetchImpl = vi.fn<typeof fetch>();
+    const port = createHostedWebConnectedAppsPort({
+      boundUserId: "synthetic-member",
+      fetchImpl,
+      timeoutMs: 5_000,
+      transport: {
+        callbackSigning: {
+          keyId: "v1",
+          privateKeyJwkJson: TEST_HOSTED_WEB_CALLBACK_PRIVATE_JWK_JSON,
+        },
+        mode: "direct",
+        webControlBaseUrl: "https://web.example.test",
+        workspaceCheckpointBridge: null,
+      },
+    });
+    const request = { operation: "search" as const, input: { query: privateValue } };
+    const requestBefore = JSON.stringify(request);
+    const result = await port.request(request, { signal: null }).catch((error: unknown) => error);
+
+    expect(mocks.fetchHostedExecutionWebControlPlaneResponse).toHaveBeenCalledTimes(1);
+    expect(mocks.fetchHostedExecutionWebControlPlaneResponse.mock.calls[0]![0]).toMatchObject({
+      body: requestBefore,
+      boundUserId: "synthetic-member",
+      fetchImpl,
+      method: "POST",
+      path: HOSTED_CONNECTED_APPS_PATH,
+    });
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(JSON.stringify(request)).toBe(requestBefore);
+    if (!malformed) {
+      expect(result).toEqual(response);
+      return;
+    }
+
+    expect(result).toBeInstanceOf(TypeError);
+    if (!(result instanceof TypeError)) throw new Error("Expected the port's TypeError");
+    expect(Object.getPrototypeOf(result)).toBe(TypeError.prototype);
+    expect(result.name).toBe("TypeError");
+    expect(result.message).toBe("Hosted connected apps returned an invalid response.");
+    expect(Reflect.ownKeys(result).sort()).toEqual(["code", "message", "stack"]);
+    expect(Object.getOwnPropertyDescriptor(result, "code")).toEqual({
+      value: "CONNECTED_APPS_RESPONSE_SCHEMA_INVALID",
+      enumerable: false,
+      configurable: false,
+      writable: false,
+    });
+    expect(Object.keys(result)).toEqual([]);
+    expect({ ...result }).toEqual({});
+    expect(JSON.stringify(result)).toBe("{}");
+  });
+
   it("keeps the control-plane error code, status, and message readable by the caller", async () => {
     // The assistant decides whether a connected-app failure is worth retrying
     // and what to tell the user, so a rejected request must arrive as more than

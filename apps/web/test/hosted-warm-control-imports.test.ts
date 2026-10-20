@@ -45,6 +45,6 @@ it("answers a configuration read without loading device sync or mailbox mutation
   expect(response.status).toBe(200);
   await expect(response.json()).resolves.toMatchObject({
     action: "read",
-    result: { configurationAvailable: false, provider: "openai" },
+    result: { configurationAvailable: false },
   });
 });

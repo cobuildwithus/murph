@@ -194,7 +194,7 @@ async function acquireHostedMailboxSourceLocksForTest(input: {
 describe.skipIf(!runPostgresConcurrencyProof)(
   "hosted Linq home-routing PostgreSQL concurrency",
   () => {
-    it.each(["foreign-key insert", "member writer", "route writer"] as const)(
+    it.each(["foreign-key insert", "member writer", "route writer", "runtime callback"] as const)(
       "prepared direct admission remains safe with a held %s",
       async (lockHolder) => {
         const authorityKey = generateKeyPairSync("ec", {
@@ -246,7 +246,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         });
         let preparedMemberLockAttempts = 0;
         prisma.$on("query", ({ query }) => {
-          if (query.includes('from "hosted_member"') && query.includes("skip locked")) {
+          if (query.includes('from "hosted_member"') && query.includes("for no key update")) {
             preparedMemberLockAttempts += 1;
           }
         });
@@ -321,6 +321,8 @@ describe.skipIf(!runPostgresConcurrencyProof)(
                 VALUES ($1, $2, 'synthetic-lock-proof', '[]'::jsonb)`,
               [feedbackId, memberId],
             );
+          } else if (lockHolder === "runtime callback") {
+            await holder.query("SELECT id FROM hosted_member WHERE id = $1 FOR UPDATE", [memberId]);
           } else if (lockHolder === "member writer") {
             await holder.query("UPDATE hosted_member SET updated_at = now() WHERE id = $1", [memberId]);
           } else {
@@ -329,22 +331,31 @@ describe.skipIf(!runPostgresConcurrencyProof)(
             await holder.query("UPDATE hosted_member_routing SET updated_at = now() WHERE member_id = $1", [memberId]);
           }
           // The awaited statement is the barrier: this connection retains its locks until COMMIT/end.
+          let admission: ReturnType<typeof admit> | undefined;
           if (lockHolder !== "foreign-key insert") {
-            await expect(admit()).rejects.toMatchObject({
-              code: "HOSTED_THREAD_ROUTE_PREPARATION_REQUIRED",
-              details: { preparationTarget: "direct_linq_mailbox", reason: "member" },
-              httpStatus: 503,
-              retryable: true,
-            });
-            expect(preparedMemberLockAttempts).toBe(2);
+            const { rows: [{ pid: holderPid }] } = await holder.query<{ pid: number }>(
+              "SELECT pg_backend_pid() AS pid",
+            );
+            admission = admit();
+            // Observe early rejection too, so a nonblocking lock cannot pass.
+            void admission.catch(() => undefined);
+            await vi.waitFor(async () => {
+              const rows = await prisma.$queryRaw<Array<{ blocked: boolean }>>`
+                SELECT EXISTS (
+                  SELECT 1 FROM pg_stat_activity
+                  WHERE ${holderPid}::int = ANY(pg_blocking_pids(pid))
+                ) AS blocked
+              `;
+              expect(rows[0]?.blocked).toBe(true);
+            }, { interval: 10, timeout: 5_000 });
             expect(await prisma.hostedMailboxItem.count({ where: { userId: memberId } })).toBe(0);
             await holder.query("COMMIT");
           }
-          await expect(admit()).resolves.toMatchObject({
+          await expect(admission ?? admit()).resolves.toMatchObject({
             ok: true,
             reason: "wake-appended-active-member",
           });
-          expect(preparedMemberLockAttempts).toBe(lockHolder === "foreign-key insert" ? 1 : 3);
+          expect(preparedMemberLockAttempts).toBe(1);
           // A separate connection observes the committed mailbox item while the FK holder is still open.
           expect(await prisma.hostedMailboxItem.findMany({
             where: { userId: memberId },

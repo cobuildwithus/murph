@@ -16,6 +16,7 @@ import {
   recordHostedIngressRuntimeMilestone,
 } from "@/src/lib/hosted-runtime-latency/store";
 import { createPrismaClient } from "@/src/lib/prisma";
+import { DEVICE_IMPORT_MEMBER_LIMIT, readDeviceImportRuntimeStates } from "@/src/lib/hosted-runtime-progress/device-import-observation";
 
 const databaseUrl = process.env.DATABASE_URL?.trim() ?? "";
 const runPostgresProof =
@@ -33,6 +34,82 @@ if (
 describe.skipIf(!runPostgresProof)(
   "hosted runtime progress alert PostgreSQL boundary",
   () => {
+    it("binds device import checkpoint deadlines to the active owner's latest foreground trace", async () => {
+      const prisma = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const now = new Date("2026-08-12T16:00:00Z");
+      const acceptedAt = new Date(+now - 10 * 60_000);
+      const evidence = { assistant: { runtimeLeaseGeneration: "7",
+        checkpointPublicationExpectedByEpochMs: +now + 5 * 60_000,
+        terminalReplyCommittedAtEpochMs: +now - 5 * 60_000 } };
+      try {
+        await prisma.$transaction(async tx => {
+          await tx.$executeRaw`CREATE TEMP TABLE hosted_workspace (
+            user_id text PRIMARY KEY, next_wake_at timestamp(3), next_wake_reason text
+          ) ON COMMIT DROP`;
+          await tx.$executeRaw`CREATE TEMP TABLE hosted_runtime_owner (
+            user_id text PRIMARY KEY, attempt_id text, generation bigint,
+            phase text, processing_mode text, completed_at timestamp(3)
+          ) ON COMMIT DROP`;
+          await tx.$executeRaw`CREATE TEMP TABLE hosted_ingress_latency_trace (
+            id text PRIMARY KEY, user_id text, accepted_at timestamp(3),
+            runtime_attempt_id text, phase_breakdown_json jsonb
+          ) ON COMMIT DROP`;
+          await tx.$executeRaw`CREATE INDEX ON hosted_ingress_latency_trace (user_id, accepted_at)`;
+          await tx.$executeRaw`INSERT INTO hosted_workspace
+            SELECT 'synthetic-' || n, ${acceptedAt}, 'device-sync.reconcile'
+            FROM generate_series(1, ${DEVICE_IMPORT_MEMBER_LIMIT}::int) n`;
+          await tx.$executeRaw`INSERT INTO hosted_runtime_owner VALUES
+            ('synthetic-1', 'attempt-1', 7, 'active', 'default', NULL)`;
+          await tx.$executeRaw`INSERT INTO hosted_ingress_latency_trace VALUES
+            ('trace-1', 'synthetic-1', ${acceptedAt}, 'attempt-1', ${JSON.stringify(evidence)}::jsonb),
+            ('foreign-trace', 'synthetic-2', ${now}, 'attempt-1', ${JSON.stringify(evidence)}::jsonb)`;
+          const read = () => readDeviceImportRuntimeStates({ userIds: ["synthetic-1"], now, prisma: tx });
+          expect(await read()).toEqual([{
+            userId: "synthetic-1", nextWakeAt: acceptedAt, nextWakeReason: "device-sync.reconcile",
+            attemptId: "attempt-1", foregroundAcceptedAt: acceptedAt,
+            checkpointEvidence: { assistant: {
+              checkpointPublicationExpectedByEpochMs: evidence.assistant.checkpointPublicationExpectedByEpochMs,
+              terminalReplyCommittedAtEpochMs: evidence.assistant.terminalReplyCommittedAtEpochMs,
+              terminalNonReplyCommittedAtEpochMs: null,
+            } },
+          }]);
+          for (const patch of [
+            Prisma.sql`phase = 'idle'`, Prisma.sql`processing_mode = 'system_mailbox'`,
+            Prisma.sql`completed_at = ${now}`, Prisma.sql`attempt_id = 'another-attempt'`,
+            Prisma.sql`generation = 8`,
+          ]) {
+            await tx.$executeRaw(Prisma.sql`UPDATE hosted_runtime_owner SET ${patch}`);
+            expect(await read()).toMatchObject([{ attemptId: null, checkpointEvidence: null }]);
+            await tx.$executeRaw`UPDATE hosted_runtime_owner SET phase = 'active', processing_mode = 'default',
+              completed_at = NULL, attempt_id = 'attempt-1', generation = 7`;
+          }
+          // Do not fall back to an older completed turn if the newest one has
+          // missing or malformed evidence, or belongs to another attempt.
+          for (const [attempt, value] of [
+            ["another-attempt", evidence], ["attempt-1", {}],
+            ["attempt-1", { assistant: { runtimeLeaseGeneration: "6" } }],
+          ] as const) {
+            await tx.$executeRaw`INSERT INTO hosted_ingress_latency_trace VALUES
+              ('latest', 'synthetic-1', ${now}, ${attempt}, ${JSON.stringify(value)}::jsonb)`;
+            expect(await read()).toMatchObject([{ attemptId: null, checkpointEvidence: null }]);
+            await tx.$executeRaw`DELETE FROM hosted_ingress_latency_trace WHERE id = 'latest'`;
+          }
+          await tx.$executeRaw`UPDATE hosted_ingress_latency_trace SET accepted_at = ${new Date(+now + 1)} WHERE id = 'trace-1'`;
+          expect(await read()).toMatchObject([{ attemptId: null }]);
+          await tx.$executeRaw`UPDATE hosted_ingress_latency_trace SET accepted_at = ${new Date(+now - 3 * 60 * 60_000)} WHERE id = 'trace-1'`;
+          expect(await read()).toMatchObject([{ attemptId: null }]);
+          await tx.$executeRaw`UPDATE hosted_ingress_latency_trace SET accepted_at = ${acceptedAt} WHERE id = 'trace-1'`;
+          const userIds = Array.from({ length: DEVICE_IMPORT_MEMBER_LIMIT }, (_, index) => `synthetic-${index + 1}`);
+          const maximum = await readDeviceImportRuntimeStates({ userIds, now, prisma: tx });
+          expect(maximum).toHaveLength(DEVICE_IMPORT_MEMBER_LIMIT);
+          expect(maximum.filter(row => row.attemptId !== null)).toHaveLength(1);
+          expect(await readDeviceImportRuntimeStates({ userIds: [], now, prisma: tx })).toEqual([]);
+          await expect(readDeviceImportRuntimeStates({ userIds: [...userIds, "overflow"], now, prisma: tx }))
+            .rejects.toThrow("Too many device import members");
+        }, { timeout: 15_000 });
+      } finally { await prisma.$disconnect(); }
+    });
+
     it("waits for the exact delivered email's checkpoint, then alerts at its expired deadline", async () => {
       const prisma = createPrismaClient({ databaseUrl, poolMax: 1 });
       const userId = `progress-email-proof-${randomUUID()}`;
@@ -112,8 +189,10 @@ describe.skipIf(!runPostgresProof)(
         await prisma.hostedMember.create({ data: member(userId, HostedBillingStatus.active) });
         await seedProgressLane({ createdAt: acceptedAt, kind, lane: "system", tx: prisma, userId });
         await seedProgressLane({ createdAt: foregroundAt, lane: "conversation", tx: prisma, userId });
+        // Production shape: the progress counter starts at zero and advances
+        // independently of the lease generation (first owner lease is 1+).
         await prisma.hostedWorkspace.create({ data: {
-          userId, checkpointedAt, systemMailboxProgressGeneration: 2n,
+          userId, checkpointedAt, systemMailboxProgressGeneration: 0n,
           redactedStatusJson: { hostedMailboxSystemImportedSeq: "1" },
         } });
         await prisma.hostedRuntimeOwner.create({ data: {
@@ -148,15 +227,18 @@ describe.skipIf(!runPostgresProof)(
             generation: 2n, completedAt: null,
           } });
         }
+        for (const systemMailboxProgressGeneration of [null, 2n, 9n]) {
+          await prisma.hostedWorkspace.update({ where: { userId }, data: { systemMailboxProgressGeneration } });
+          await assertStalled(0);
+        }
         for (const override of [
-          { systemMailboxProgressGeneration: 1n },
           { redactedStatusJson: { hostedMailboxSystemImportedSeq: "0" } },
           { checkpointedAt: completedAt },
         ]) {
           await prisma.hostedWorkspace.update({ where: { userId }, data: override });
           await assertStalled(1);
           await prisma.hostedWorkspace.update({ where: { userId }, data: {
-            systemMailboxProgressGeneration: 2n, checkpointedAt,
+            systemMailboxProgressGeneration: 0n, checkpointedAt,
             redactedStatusJson: { hostedMailboxSystemImportedSeq: "1" },
           } });
         }

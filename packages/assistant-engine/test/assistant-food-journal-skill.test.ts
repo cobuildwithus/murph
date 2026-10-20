@@ -42,6 +42,7 @@ describe('assistant food journal skill', () => {
     const instructions = compact([
       buildPrompt(),
       await readFile(path.join(root, 'food-journal/SKILL.md'), 'utf8'),
+      await readFile(path.join(root, 'food-journal/references/meal-and-nutrient-reads.md'), 'utf8'),
       await readFile(path.join(root, 'computer-use/SKILL.md'), 'utf8'),
     ].join('\n'))
     for (const rule of [
@@ -121,13 +122,21 @@ describe('assistant food journal skill', () => {
     expect(prompt).toContain(
       'When exact food or supplement identity, ingredients, allergens, dose, or movement instruction matters, follow the owning skill',
     )
-    expect(prompt).not.toContain('vault-cli food search-labels')
+    // Meal lookups start in the same tool step as the skill read; the skill
+    // still owns the complete command contract.
+    expect(prompt).toContain(
+      'When a new meal needs label lookups, run them in that same tool step: `vault-cli food search-labels-batch` with one `--query` per food',
+    )
+    expect(prompt).not.toContain('vault-cli food search-labels \'')
   })
 
   it('keeps observation runs bounded and composed from existing surfaces', async () => {
     const skillsRoot = resolveAssistantSkillsRoot()
-    const [skill, onboarding, cardGoals] = await Promise.all([
+    const [skillCore, nutrientReads, dayRecovery, observationRuns, onboarding, cardGoals] = await Promise.all([
       readFile(path.join(skillsRoot, 'food-journal', 'SKILL.md'), 'utf8'),
+      readFile(path.join(skillsRoot, 'food-journal', 'references', 'meal-and-nutrient-reads.md'), 'utf8'),
+      readFile(path.join(skillsRoot, 'food-journal', 'references', 'day-recovery.md'), 'utf8'),
+      readFile(path.join(skillsRoot, 'food-journal', 'references', 'observation-runs.md'), 'utf8'),
       readFile(path.join(skillsRoot, 'murph-onboarding', 'SKILL.md'), 'utf8'),
       readFile(
         path.join(
@@ -140,6 +149,11 @@ describe('assistant food journal skill', () => {
       ),
     ])
     const compactCardGoals = cardGoals.replace(/\s+/gu, ' ').trim()
+    // Capture stays in SKILL.md; reads, recovery, and observation runs load on demand.
+    for (const reference of ['meal-and-nutrient-reads.md', 'day-recovery.md', 'observation-runs.md']) {
+      expect(skillCore).toContain(`$MURPH_ASSISTANT_SKILLS_ROOT/food-journal/references/${reference}`)
+    }
+    const skill = [skillCore, nutrientReads, dayRecovery, observationRuns].join('\n')
 
     expect(skill).toContain(
       'Do not create a new food-journal store, observation entity, scoring model, streak, or CLI family.',
@@ -160,7 +174,7 @@ describe('assistant food journal skill', () => {
       'vault-cli meal nutrients --from <date> --to <date> --format json',
     )
     expect(skill).toContain(
-      'A `null` total with zero\ncontributing meals means unavailable, not zero.',
+      'A `null` total with zero\ncontributing meals means no recorded value; never report it as zero.',
     )
     expect(skill).toContain(
       'A `contributingMealCount` below\nthe enclosing `mealCount` means the total is partial',
@@ -323,7 +337,7 @@ describe('assistant food journal skill', () => {
     expect(skill).toContain(
       "activation/readback, and fresh same-date totals.",
     )
-    expect(skill).toContain("vault-cli food search-labels 'rolled oats' --generic --format json`")
+    expect(skill).toContain("vault-cli food search-labels 'rolled oats' --generic`")
     expect(skill).toContain('vault-cli food search-labels-batch`')
     expect(skill).toContain(
       'When the user names a restaurant and recognizable menu item, and known context\ndoes not trigger one of the numeric safety exceptions below, resolve nutrition\nbefore the meal mutation.',
@@ -332,8 +346,12 @@ describe('assistant food journal skill', () => {
       'Use a normal exact restaurant/menu search rather\nthan a generic substitute.',
     )
     expect(skill).toContain(
-      'Run this database search first even when the user\nsupplies an official restaurant URL.',
+      'Run this database search even when the user\nsupplies an official restaurant URL, together with the official-source web\nsearch from step 1.',
     )
+    expect(compact(skill)).toContain(
+      'When `dailyTotals.totalsOnlyCard` is non-null, attach it unchanged with `murph.attach_response_card` in that script; in code mode, `await tools.murph__attach_response_card({ card: saved.dailyTotals.totalsOnlyCard })` needs no tool discovery.',
+    )
+    expect(skill).toContain('Keep `--nutrition-source-detail` to\nat most 240 characters')
     expect(skill).toContain(
       'When a numeric safety exception already applies, save the meal without calorie\nor macro estimates.',
     )
@@ -341,7 +359,7 @@ describe('assistant food journal skill', () => {
       'Do not force a nutrition lookup, clarification, or safety\npreflight just to capture the meal.',
     )
     expect(skill).toContain(
-      "If that search has no exact result, use the bounded\nsource fallback below.",
+      'Use an exact database result; otherwise use the official\nsource under the bounded source fallback below.',
     )
     expect(skill).toContain(
       'When using that official source, retain its URL in nutrition source detail.',

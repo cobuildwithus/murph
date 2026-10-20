@@ -78,7 +78,8 @@ function expectFailure(
 ) {
   const requestKind = action === 'attach_follow_up' ? 'attach-follow-up' : 'automation'
   const diagnostic = { failureStage, failureReason: reason,
-    ...(errorCategory === undefined ? {} : { errorCategory }) }
+    ...(errorCategory === undefined ? {} : { errorCategory }),
+    ...(requestKind === 'automation' && reason === 'handler_exception' ? { automationAction: action } : {}) }
   expect(result).toEqual({
     rpcResult: { success: false, contentItems: [{ type: 'inputText', text }] },
     failureDiagnostic: diagnostic,
@@ -487,6 +488,7 @@ describe('bounded CLI validation completion metadata', () => {
     ['automation list', 'status', 'invalid_value', false],
     ['food search-labels', 'limit', 'too_big', false],
     ['food search-labels', 'query', 'invalid_type', true],
+    ['knowledge show', 'arguments', 'custom', false],
     ['knowledge upsert', 'body', 'invalid_type', true],
     ['knowledge upsert', 'slug', 'invalid_format', false],
     ['knowledge upsert', 'arguments', 'custom', false],
@@ -506,6 +508,9 @@ describe('bounded CLI validation completion metadata', () => {
     ['meal edit', 'nutritionSource', 'invalid_value', false],
     ['meal edit', 'occurredAt', 'invalid_format', false],
     ['meal edit', 'arguments', 'custom', false],
+    ['meal edit', 'id', 'invalid_type', true],
+    ['meal edit', 'nutritionProteinGrams', 'too_small', false],
+    ['meal edit', 'nutritionConfidence', 'invalid_value', false],
   ] as const)('selects one finite %s %s issue from the existing error envelope', (command, field, code, missing) => {
     const error = { ...envelope('VALIDATION_ERROR'), fieldErrors: [
       { path: `body.${sentinel}`, code: 'invalid_type', missing: true },
@@ -571,6 +576,9 @@ describe('bounded CLI validation completion metadata', () => {
       { path: 'arguments', code: 'custom', missing: false },
     ]],
     ['meal edit', [
+      { path: 'id', code: 'invalid_type', missing: true },
+      { path: 'nutritionProteinGrams', code: 'too_small', missing: false },
+      { path: 'nutritionConfidence', code: 'invalid_value', missing: false },
       { path: 'nutritionCalories', code: 'too_small', missing: false },
       { path: 'nutritionSource', code: 'invalid_value', missing: false },
       { path: 'occurredAt', code: 'invalid_format', missing: false },
@@ -651,14 +659,28 @@ describe('opaque MCP and command failures', () => {
     expect(createCodexActionRuntimeIssueTracker().recordEvent(eventInput(completed))).toBeNull()
   })
 
-  it('does not parse arbitrary shell JSON even when its code is allowlisted', () => {
+  it.each([
+    ...[-1, 1, 3, 127].map((exitCode) => [
+      'vault-cli event list; false', exitCode, 'command', 'shell_syntax',
+    ] as const),
+    ['cat synthetic-source', 1, 'cat', 'recognized'],
+    ['node synthetic.js', 2, 'node', 'recognized'],
+  ] as const)('keeps synthetic shell completion %s (exit %s) opaque', (command, exitCode, commandFamily, commandAttribution) => {
     const parse = vi.spyOn(JSON, 'parse')
     try {
-      const issue = commandIssue(JSON.stringify(envelope('not_found')), 'node synthetic.js', 2)
+      const output = JSON.stringify(envelope('not_found'))
+      const input = eventInput(commandEvent(output, command, exitCode))
+      const tracker = createCodexActionRuntimeIssueTracker()
+      const issue = tracker.recordEvent(input)
       expect(parse).not.toHaveBeenCalled()
       expect(issue?.details).toMatchObject({ failureStage: 'execution', failureReason: 'nonzero_exit',
-        errorCategory: 'unknown', exitCode: 2, commandFamily: 'node' })
+        errorCategory: 'unknown', exitCode, commandFamily, commandAttribution, commandOrdinal: 1 })
+      expect(issue?.details).not.toHaveProperty('vaultCliCommand')
       expect(issue?.details).not.toHaveProperty('vaultCliErrorCategory')
+      expect(JSON.stringify(issue)).not.toContain(sentinel)
+      expect(tracker.recordEvent(input)).toBeNull()
+      expect(commandIssue(output, command, 0)).toBeNull()
+      expect(parse).not.toHaveBeenCalled()
     } finally { parse.mockRestore() }
   })
 })
@@ -682,7 +704,15 @@ describe('existing diagnostic transport and denominator', () => {
     })
   })
 
-  it('round-trips new details through the real sanitizer/parser with the existing cap and best-effort writes', async () => {
+  it.each([
+    ['knowledge upsert', 'body', 'invalid_type', true],
+    ['knowledge show', 'arguments', 'custom', false],
+    ['knowledge upsert', 'arguments', 'custom', false],
+    ['meal edit', 'arguments', 'custom', false],
+    ['meal edit', 'id', 'invalid_type', true],
+    ['meal edit', 'nutritionProteinGrams', 'too_small', false],
+    ['meal edit', 'nutritionConfidence', 'invalid_value', false],
+  ] as const)('round-trips %s %s details through the real sanitizer/parser with the existing cap and best-effort writes', async (command, field, code, missing) => {
     const automation = await dispatch(requests[0], { automationTool: { request: vi.fn<AssistantHostedAutomationTool['request']>().mockRejectedValue(
       Object.assign(new Error(sentinel), { code: 'invalid_option', cause: { content: sentinel } }),
     ) } })
@@ -696,11 +726,11 @@ describe('existing diagnostic transport and denominator', () => {
       expect(memory.details?.vaultCliErrorCode).toBe(code)
       issues.push(memory)
     }
-    const validation = commandIssue(JSON.stringify({ ...envelope('VALIDATION_ERROR'),
-      fieldErrors: [{ path: 'body', code: 'invalid_type', missing: true, value: sentinel, message: sentinel }] }),
-      'vault-cli knowledge upsert')
+    const validation = commandIssue(JSON.stringify({ ...envelope('VALIDATION_ERROR', 'validation'),
+      fieldErrors: [{ path: field, code, missing, value: sentinel, message: sentinel }] }),
+      `vault-cli ${command}`)
     if (!validation) throw new Error('Expected synthetic validation diagnostic')
-    expect(validation.details).toMatchObject({ vaultCliValidationField: 'body', vaultCliValidationCode: 'invalid_type', vaultCliValidationMissing: true })
+    expect(validation.details).toMatchObject({ vaultCliValidationField: field, vaultCliValidationCode: code, vaultCliValidationMissing: missing })
     issues.push(validation)
     for (const code of ['knowledge_source_unreadable', 'knowledge_invalid_source_path', 'knowledge_invalid_library_slug']) {
       const source = commandIssue(JSON.stringify(envelope(code)), 'vault-cli knowledge upsert')
@@ -855,4 +885,29 @@ describe('research scout-batch completion diagnostics', () => {
       expect(JSON.stringify(issue)).not.toContain(unknown)
     }
   })
+})
+
+it('recognizes invalid_operation only on positively attributed meal remove-photo completion', () => {
+  for (const full of [false, true]) {
+    const error = envelope('invalid_operation')
+    const output = JSON.stringify(full ? { ok: false, error } : error)
+    const command = `vault-cli meal remove-photo ${sentinel} --format json`
+    const issue = commandIssue(output, command)
+    expect(issue?.details).toMatchObject({ vaultCliCommand: 'meal remove-photo',
+      vaultCliErrorAttribution: 'recognized', vaultCliErrorCode: 'invalid_operation',
+      failureReason: 'nonzero_exit', exitCode: 1 })
+    expect(issue?.details?.vaultCliErrorStage).toBeUndefined()
+    expect(issue?.details?.vaultCliValidationField).toBeUndefined()
+    expect(JSON.stringify(issue)).not.toContain(sentinel)
+    expect(commandIssue(output, command, 0)).toBeNull()
+    for (const other of ['vault-cli meal edit synthetic', 'vault-cli meal add', 'vault-cli event show synthetic',
+      'vault-cli meal remove-photo synthetic && node synthetic.js']) {
+      expect(commandIssue(output, other)?.details?.vaultCliErrorCode).toBeUndefined()
+    }
+    for (const code of ['unknown', 'invalid_operation_extra', 'INVALID_OPERATION', 'invalid_operation ', sentinel]) {
+      const rejected = envelope(code)
+      expect(commandIssue(JSON.stringify(full ? { ok: false, error: rejected } : rejected), command)
+        ?.details?.vaultCliErrorCode).toBeUndefined()
+    }
+  }
 })

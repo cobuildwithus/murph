@@ -1,0 +1,17 @@
+{
+  "publishedOn": "2026-10-19",
+  "order": 100,
+  "item": {
+    "id": "journal-native-access",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Journal stays in the app",
+    "summary": "The website Journal page has retired. You can continue viewing your Journal in the app.",
+    "details": "Existing Journal and History web links now open Home. Your saved entries and conversational capture remain available.",
+    "relevanceTags": [
+      "journal",
+      "web"
+    ],
+    "sourcePullRequests": [4212]
+  }
+}

@@ -3,7 +3,6 @@ import type { BeforeSendEvent as VercelAnalyticsBeforeSendEvent } from "@vercel/
 export const VERCEL_TELEMETRY_PATHNAMES = [
   "/",
   "/about",
-  "/biomarkers",
   "/changelog",
   "/clubs",
   "/compare",
@@ -17,8 +16,6 @@ export const VERCEL_TELEMETRY_PATHNAMES = [
   "/experiments",
   "/family/setup",
   "/farewell",
-  "/goals",
-  "/goals/methodology",
   "/food",
   "/groups/start",
   "/growth",
@@ -26,7 +23,6 @@ export const VERCEL_TELEMETRY_PATHNAMES = [
   "/home",
   "/journal",
   "/join",
-  "/knowledge",
   "/labs",
   "/legal",
   "/legal/consumer-health-data-privacy-policy",
@@ -36,14 +32,11 @@ export const VERCEL_TELEMETRY_PATHNAMES = [
   "/ops",
   "/ops/email",
   "/ops/growth",
-  "/ops/pattern-audits",
   "/ops/runtime-latency",
   "/ops/runtime-maintenance",
   "/ops/tasks",
   "/ops/usage",
   "/overview",
-  "/patterns",
-  "/pitch",
   "/records",
   "/records/connect",
   "/refer",
@@ -61,27 +54,6 @@ const PUBLIC_PATH_SEGMENT_PATTERN = String.raw`[a-z0-9][a-z0-9._~-]*`;
 const VERCEL_TELEMETRY_DYNAMIC_PATHNAME_RULES = [
   {
     pattern: new RegExp(
-      `^/biomarkers/(?:${PUBLIC_PATH_SEGMENT_PATTERN}|\\[biomarkerId\\])$`,
-      "iu",
-    ),
-    pathname: "/biomarkers/[biomarker]",
-  },
-  {
-    pattern: new RegExp(
-      `^/biomarkers/(?:${PUBLIC_PATH_SEGMENT_PATTERN}|\\[biomarkerId\\])/research$`,
-      "iu",
-    ),
-    pathname: "/biomarkers/[biomarker]/research",
-  },
-  {
-    pattern: new RegExp(
-      `^/biomarkers/results/(?:${PUBLIC_PATH_SEGMENT_PATTERN}|\\[metricKey\\])$`,
-      "iu",
-    ),
-    pathname: "/biomarkers/results/[metric]",
-  },
-  {
-    pattern: new RegExp(
       `^/compare/(?:murph-vs-${PUBLIC_PATH_SEGMENT_PATTERN}|\\[competitor\\])$`,
       "iu",
     ),
@@ -93,13 +65,6 @@ const VERCEL_TELEMETRY_DYNAMIC_PATHNAME_RULES = [
       "iu",
     ),
     pathname: "/experiments/[experiment]",
-  },
-  {
-    pattern: new RegExp(
-      `^/goals/(?:${PUBLIC_PATH_SEGMENT_PATTERN}|\\[goalId\\])$`,
-      "iu",
-    ),
-    pathname: "/goals/[goal]",
   },
   {
     pattern: new RegExp(

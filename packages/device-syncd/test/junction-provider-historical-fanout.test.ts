@@ -9,7 +9,7 @@ import {
 } from "./junction-provider.harness.ts";
 
 import assert from "node:assert/strict";
-import { test } from "vitest";
+import { test, vi } from "vitest";
 import { createJsonResponse, readUrl, requireValue } from "./helpers.ts";
 import type {
   DeviceSyncJobInput,
@@ -125,8 +125,15 @@ test("Junction cheap 365-day dense history advances in bounded multi-day suffixe
     account: createAccount({ sources: [source] }),
     connectionSourceAdmissionMode: "listed_only",
     importSnapshot: async (snapshot) => {
-      const window = snapshot as { windowStart?: string };
-      importedDays.push(requireValue(window.windowStart, "dense import window").slice(0, 10));
+      const window = snapshot as { windowEnd?: string; windowStart?: string };
+      // One import may commit several consecutive closed days.
+      for (
+        let day = Date.parse(requireValue(window.windowStart, "dense import window"));
+        day < Date.parse(requireValue(window.windowEnd, "dense import window end"));
+        day += 86_400_000
+      ) {
+        importedDays.push(new Date(day).toISOString().slice(0, 10));
+      }
       return { canonicalEventCount: 1, durableDeliveryAccepted: true };
     },
     now: "2026-04-04T12:00:00.000Z",
@@ -468,7 +475,9 @@ test("overlapping Garmin pull windows import identical days with 150 versus 42 f
   const day = (offset: number) => new Date(Date.UTC(2026, 0, 1 + offset)).toISOString();
   async function replay(windows: readonly { start: number; end: number }[]) {
     const requestedDays: string[] = [];
+    // Imported records by day: batch boundaries differ, day content must not.
     const imports = new Map<string, unknown>();
+    let importCalls = 0;
     const provider = createJunctionProvider(async (input) => {
       const url = new URL(readUrl(input));
       if (url.pathname === "/v2/user/providers/junction-user-1") {
@@ -488,8 +497,10 @@ test("overlapping Garmin pull windows import identical days with 150 versus 42 f
       connectionSourceAdmissionMode: "listed_only",
       now: "2026-04-04T12:00:00.000Z",
       importSnapshot: async (snapshot) => {
-        const key = (snapshot as { windowStart: string }).windowStart;
-        imports.set(key, snapshot);
+        importCalls += 1;
+        for (const record of (snapshot as { timeseries: { steps: { start: string }[] } }).timeseries.steps) {
+          imports.set(record.start.slice(0, 10), record);
+        }
         return { canonicalEventCount: 1, durableDeliveryAccepted: true };
       },
     });
@@ -499,7 +510,7 @@ test("overlapping Garmin pull windows import identical days with 150 versus 42 f
         sourceProviderSlug: "garmin", windowStart: day(window.start), windowEnd: day(window.end),
       }));
     }
-    return { requestedDays, imports };
+    return { requestedDays, imports, importCalls };
   }
   const original = await replay(Array.from({ length: 5 }, (_, index) => ({ start: index * 3, end: 30 + index * 3 })));
   const coalesced = await replay([{ start: 0, end: 42 }]);
@@ -508,4 +519,158 @@ test("overlapping Garmin pull windows import identical days with 150 versus 42 f
   assert.deepEqual(new Set(coalesced.requestedDays), new Set(original.requestedDays));
   assert.equal(coalesced.imports.size, 42);
   assert.deepEqual(coalesced.imports, original.imports);
+  assert.equal(coalesced.importCalls, 7, "the first day commits alone, then 41 days in eight-day batches");
 });
+
+test("slow successful historical reads commit before a pass deadline and resume without re-reading committed days", async () => {
+  // Each closed day reads successfully but slowly. A pass deadline aborts the
+  // job mid-range; the service then rejects writes, as production does.
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date("2026-04-04T12:00:00.000Z"));
+  try {
+    const windowStart = "2026-03-01T00:00:00.000Z";
+    const windowEnd = "2026-03-17T00:00:00.000Z";
+    const expectedDays = buildUtcDayKeys(windowStart, windowEnd);
+    const requestedDays: string[] = [];
+    const importedDays: string[] = [];
+    let pass: AbortController = new AbortController();
+    let abortAfterReads = 3;
+    const provider = createJunctionProvider(async (input) => {
+      const url = new URL(readUrl(input));
+      if (url.pathname === "/v2/user/providers/junction-user-1") {
+        return createJsonResponse({ providers: [createHistoricalProviderConnection("floors_climbed")] });
+      }
+      assert.equal(url.pathname, "/v2/timeseries/junction-user-1/floors_climbed/grouped");
+      pass.signal.throwIfAborted();
+      const dayKey = requireValue(url.searchParams.get("start_date"), "slow history day");
+      requestedDays.push(dayKey);
+      vi.setSystemTime(Date.now() + 6_000);
+      abortAfterReads -= 1;
+      if (abortAfterReads === 0) pass.abort(new Error("synthetic pass deadline"));
+      return createJsonResponse({ groups: { garmin: [{
+        data: [{ end: `${dayKey}T10:00:00.000Z`, start: `${dayKey}T09:00:00.000Z`, unit: "count", value: 1 }],
+        source: { provider: "garmin", type: "watch" },
+      }] } });
+    }, { summaryResources: [], timeseriesResources: ["floors_climbed"] });
+    const createContext = () => createJunctionJobContext({
+      account: createAccount({ sources: [createHistoricalSource("floors_climbed")] }),
+      connectionSourceAdmissionMode: "listed_only",
+      importSnapshot: async (snapshot) => {
+        // Production rejects writes once the job has yielded or aborted.
+        pass.signal.throwIfAborted();
+        const window = snapshot as { windowEnd: string; windowStart: string };
+        importedDays.push(...buildUtcDayKeys(window.windowStart, window.windowEnd));
+        return { canonicalEventCount: 1, durableDeliveryAccepted: true };
+      },
+      now: "2026-04-04T12:00:00.000Z",
+      shouldYield: () => pass.signal.aborted,
+      signal: pass.signal,
+      throwIfAborted: () => pass.signal.throwIfAborted(),
+    });
+
+    let job = createJob("resource", {
+      eventType: HISTORICAL_FLOORS_EVENT,
+      resource: "floors_climbed",
+      resourceCategory: "timeseries",
+      sourceProviderSlug: "garmin",
+      windowEnd,
+      windowStart,
+    });
+    const continuationStarts: string[] = [];
+    for (let claim = 0; claim < 10; claim += 1) {
+      const result = await executeJunctionJob(provider, createContext(), job);
+      const continuation = readHistoricalContinuation(result, HISTORICAL_FLOORS_EVENT);
+      if (!continuation) break;
+      continuationStarts.push(requireValue(continuation.payload?.windowStart as string | undefined, "resume day"));
+      pass = new AbortController();
+      abortAfterReads = 3;
+      job = createJobFromInput(continuation, claim + 1);
+    }
+
+    // Each six-second read exceeds the batching budget, so the two days read
+    // before the deadline commit; the day whose write the abort rejects resumes.
+    assert.equal(continuationStarts[0], `${expectedDays[2]}T00:00:00.000Z`);
+    assert.deepEqual(importedDays, expectedDays, "every day lands exactly once, in order");
+    const readCounts = new Map<string, number>();
+    for (const day of requestedDays) readCounts.set(day, (readCounts.get(day) ?? 0) + 1);
+    assert.ok([...readCounts.values()].every((count) => count <= 2));
+    for (const [index, start] of continuationStarts.entries()) {
+      // A resumed pass never re-reads a day committed before its continuation.
+      const committedBefore = expectedDays.slice(0, expectedDays.indexOf(start.slice(0, 10)));
+      const readsAfterResume = requestedDays.slice(3 * (index + 1));
+      assert.ok(committedBefore.every((day) => !readsAfterResume.includes(day)));
+    }
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("a fast first day commits before a slow paginated day can exhaust the pass", async () => {
+  // Day one reads in four seconds, day two in 297; a pass ends at 300 seconds
+  // of reads and the service then rejects writes, as production does.
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date("2026-04-04T12:00:00.000Z"));
+  try {
+    const windowStart = "2026-03-01T00:00:00.000Z";
+    const windowEnd = "2026-03-03T00:00:00.000Z";
+    const [firstDay, secondDay] = buildUtcDayKeys(windowStart, windowEnd);
+    const readSeconds = new Map([[firstDay, 4], [secondDay, 297]]);
+    const requestedDays: string[] = [];
+    const importedDays: string[] = [];
+    let pass = new AbortController();
+    let passSeconds = 0;
+    const provider = createJunctionProvider(async (input) => {
+      const url = new URL(readUrl(input));
+      if (url.pathname === "/v2/user/providers/junction-user-1") {
+        return createJsonResponse({ providers: [createHistoricalProviderConnection("floors_climbed")] });
+      }
+      pass.signal.throwIfAborted();
+      const dayKey = requireValue(url.searchParams.get("start_date"), "paginated history day");
+      requestedDays.push(dayKey);
+      const seconds = requireValue(readSeconds.get(dayKey), "read duration");
+      vi.setSystemTime(Date.now() + seconds * 1_000);
+      passSeconds += seconds;
+      if (passSeconds >= 300) pass.abort(new Error("synthetic pass deadline"));
+      return createJsonResponse({ groups: { garmin: [{
+        data: [{ end: `${dayKey}T10:00:00.000Z`, start: `${dayKey}T09:00:00.000Z`, unit: "count", value: 1 }],
+        source: { provider: "garmin", type: "watch" },
+      }] } });
+    }, { summaryResources: [], timeseriesResources: ["floors_climbed"] });
+    const runPass = (job: ReturnType<typeof createJob>) => executeJunctionJob(provider, createJunctionJobContext({
+      account: createAccount({ sources: [createHistoricalSource("floors_climbed")] }),
+      connectionSourceAdmissionMode: "listed_only",
+      importSnapshot: async (snapshot) => {
+        pass.signal.throwIfAborted();
+        const window = snapshot as { windowEnd: string; windowStart: string };
+        importedDays.push(...buildUtcDayKeys(window.windowStart, window.windowEnd));
+        return { canonicalEventCount: 1, durableDeliveryAccepted: true };
+      },
+      now: "2026-04-04T12:00:00.000Z",
+      shouldYield: () => pass.signal.aborted,
+      signal: pass.signal,
+      throwIfAborted: () => pass.signal.throwIfAborted(),
+    }), job);
+
+    const first = await runPass(createJob("resource", {
+      eventType: HISTORICAL_FLOORS_EVENT,
+      resource: "floors_climbed",
+      resourceCategory: "timeseries",
+      sourceProviderSlug: "garmin",
+      windowEnd,
+      windowStart,
+    }));
+    const continuation = readHistoricalContinuation(first, HISTORICAL_FLOORS_EVENT);
+    assert.equal(continuation?.payload?.windowStart, `${secondDay}T00:00:00.000Z`);
+    assert.deepEqual(importedDays, [firstDay]);
+
+    pass = new AbortController();
+    passSeconds = 0;
+    const second = await runPass(createJobFromInput(requireValue(continuation, "slow day continuation"), 1));
+    assert.equal(readHistoricalContinuation(second, HISTORICAL_FLOORS_EVENT), null);
+    assert.deepEqual(importedDays, [firstDay, secondDay]);
+    assert.deepEqual(requestedDays, [firstDay, secondDay, secondDay], "the committed first day is not read again");
+  } finally {
+    vi.useRealTimers();
+  }
+});
+

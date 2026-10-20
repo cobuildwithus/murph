@@ -34,7 +34,10 @@ The live ownership split is:
   appends one deterministic `device-sync.wake` mailbox handoff if the connection
   transitioned from clean to dirty, and completes trace acceptance in the same
   transaction. The post-commit Temporal signal carries only the mailbox pointer.
-  There is no periodic dirty-row recovery sweep. The existing scheduled
+  Routine Junction daily totals defer that handoff up to fifteen minutes; the
+  scheduled recovery command releases due deadlines (see
+  `docs/device-sync-hosted-control-plane.md`). Otherwise there is no periodic
+  dirty-row recovery sweep. The existing scheduled
   mailbox-handoff sweep may re-signal one exact unconsumed `device-sync.wake`
   pointer per user after a failed first signal; it does not scan dirty state.
   The runtime pulls pending dirty rows through the required signed dirty-pending
@@ -147,7 +150,7 @@ The live ownership split is:
   conversation items and a provisioned workspace. It reads one already-signed
   ingress envelope per batch, never runtime roots or plaintext keys. The Worker
   verifies the supplied context through the existing user/domain/signature and
-  recipient checks, then reuses the bounded encrypted-envelope cache (60-second
+  recipient checks, then reuses the bounded encrypted-envelope cache (five-minute
   ceiling). The extension is stripped before returning the mailbox to the
   container. Cache hits request no envelope read. An old Web response omits the
   extension and retains the existing context callback; old Workers never request
@@ -406,7 +409,7 @@ authorization succeeds.
 The pinned Codex release has a test-only, version-bound route-disposition
 inventory whose authoritative review input is the upstream
 `codex-rs/codex-api/src` tree. Required Linux CI resolves the version-derived
-OpenAI tag and verifies its exact commit and source-tree object, so stale
+OpenAI tag and verifies its exact commit, which pins that source tree, so stale
 provenance cannot pass after a pin change. Offline tests scan the installed
 native artifact for conservative `/v1/**` plus separated provider-relative
 candidates, require every discovered candidate to be explicitly classified,
@@ -511,6 +514,16 @@ continuation. Unknown crypto/provider, access-query, database, or transaction
 errors use the ordinary delivery-failed response and stop current destination
 fanout plus the undispatched scope suffix. Deadline exhaustion, an unmarked proxy
 response, transport loss, or an owner-ending condition likewise stops the suffix.
+The existing `Hosted vault-share projection offer failed; continuing wake.`
+warning may include one optional `vaultShareOfferFailureReason` from the captured
+offer: `serialized_projection_too_large` for the existing serialized size gate,
+`delivery_exception` for its existing delivery catch (including response-contract
+errors), or `scope_failed` when explicit scope failures determine the aggregate
+error. A later size-gate or delivery exception takes precedence over an earlier
+scope failure; preemption and other non-error outcomes carry no reason. Earlier
+discovery, restore, or capture failures omit this offer-specific field. It adds
+only fixed literals to that warning, without payload or error details or changes
+to delivery, continuation, or warning count and severity.
 Web performs
 encryption before taking a short `hosted_workspace` row lock, then replaces the
 exact active share generation only when the locked version still matches. The
@@ -546,6 +559,16 @@ infrastructure fields.
 
 Ordinary shared reads may additionally request one to twenty-one unique
 `freshness` scope/date pairs for daily wearable metrics already in that read.
+Every model-visible schema exposing `freshness` derives its
+`projectionScopeKey` enum from the public
+`HOSTED_VAULT_SHARE_DAILY_METRIC_PROJECTION_SPECS` catalog's `metric-series`
+entries, matching the existing freshness parser and handler domain. Each pair
+must also name a scope in the request's `projectionScopes` and a real calendar
+date; duplicates and the existing bounds remain enforced. Nonwearable context,
+such as `time-zone.v0`, remains readable through ordinary `projectionScopes`
+without a freshness entry for that scope. This advertised constraint does not
+change runtime acceptance, semantic diagnostics, authorization, or refresh work.
+
 Web filters the recent reconcile dates independently, so older or future requested
 dates cannot suppress recovery of eligible missing dates. Missing granted dates
 in that recent window cause Web to recheck the
@@ -994,6 +1017,11 @@ foreground/default work arrives, the runner preempts that exact child through
 the existing container abort seam, clears the old fence by identity, and starts
 foreground work. Retention remains recoverable through the workspace's projected
 retention wake instead of becoming a second scheduler concern.
+Retention does not preempt live work. When due retention meets a live or
+unconfirmed owner in another mode, Cloudflare returns `retry_later` at that
+owner's recheck horizon, the same horizon an accepted wake reports. The owner's
+completion signal interrupts that Temporal wait, so retention starts once the
+fence is free without polling it.
 The same wake owns all receipt-anchored inbound message-content work: pending
 input suppression and redaction, transcript redaction, media expiration, legacy
 envelope migration, capture/parser/projection redaction, and their earliest
@@ -1076,6 +1104,9 @@ withdraw that wait, leaving the actual child tracked until it exits. Only effect
 covered by a successful snapshot may acknowledge exact device revisions. Already
 committed Web updates remain authoritative, and interrupted attempts recover
 through the durable mailbox and existing continuation contract.
+After quiescence, full snapshots derive `systemMailboxProgressGeneration` from
+the checkpoint request builder's latest accepted workspace and advance it only
+for system progress not yet checkpointed.
 
 After a device item records a durable follow-up deadline, that
 `device-sync.reconcile` deadline remains in the canonical model-free
@@ -1832,6 +1863,16 @@ once from the complete index.
 Terminal conversation ids stay in the checkpointed snapshot until a later
 mailbox fetch returns a `consumedSeqByLane` floor covering them; the wake probe
 checks terminal evidence so those retained ids do not schedule another reply.
+Every import result, including an empty or replay-only fetch, carries a newer
+authoritative conversation-consumed floor into the existing checkpoint status.
+Older or absent floors cannot regress it, and observing the floor adds no
+separate checkpoint or mailbox request. At the quiescent idle boundary, compact
+acknowledged terminal inputs before deriving the default-processing wake, then
+reuse that exact handled-item selection in the snapshot. This prevents a
+terminal-only index larger than the bounded wake probe from repeatedly arming
+its maintenance timer. Inputs without terminal evidence or committed server
+acknowledgment remain retained. The idle checkpoint still derives system
+progress from the builder's latest accepted workspace generation.
 When more exact ids are pending than the checkpoint request cap, v2 persists a
 batch cursor in the same snapshot and rotates later checkpoints through the
 remaining ids. It never deletes an id merely because it was selected, so a
@@ -2494,66 +2535,10 @@ orchestrator.
 
 Scheduled-job completion diagnostics expose `retryScheduled` after the cron
 owner finalizes durable runtime state. Web prefixes that field as
-`failureRetryScheduled` in persisted redacted log details. Personal Patterns
-operator email ignores failed events unless this field is explicitly `false`;
-missing fields from an older runtime stay quiet. Explicit provider usage-limit
-failures stay quiet too. Occurrence-expired events remain terminal, but Web
-suppresses their operator email when retained `runtime.ai_usage_gate` observations
-establish a platform usage pause at the occurrence or before expiry detection.
-These Web-owned observations use the existing `assistant.automation_detail` event
-with type `runtime.ai_usage_gate`, carry only time and a usage-limited boolean, survive
-an allowance reset under normal diagnostic retention, and never change runtime
-admission. Missing history preserves the ordinary alert. The alert callback uses
-its authenticated member identity for the bounded lookup before coalescing. Every terminal event for one scheduled occurrence uses
-one member-independent email body and Resend idempotency key, so concurrent
-member failures coalesce without a new alert queue or persistence owner.
-The generic email describes either expiry or terminal failure without asserting
-that an expired occurrence reached a model. Expiry diagnostics add
-`failurePriorFailureCount` from the existing consecutive-failure state.
-Snapshot lifecycle events add `nextWakeState`, `nextWakeOffsetMs`,
-`nextDefaultProcessingWakeState`, `nextDefaultProcessingWakeOffsetMs`,
-`nextDefaultProcessingWakeReasonPresent`, and
-`systemMailboxProgressGenerationPresent`. Wake states distinguish `omitted`
-legacy fields, explicit `none`, `invalid`, `due`, and `future`; offsets are
-finite milliseconds relative to diagnostic construction, negative when overdue,
-and null for omitted, absent, or invalid timestamps. These are attempted
-checkpoint projections, not runtime admission decisions. Use
-`checkpoint.snapshot_finished` with `webCheckpointAccepted: true` to establish
-acceptance; failed or preempted snapshots do not establish it. Older runners
-omit the new diagnostics. Neither raw timestamp input nor arbitrary reason
-strings enter the new fields, and no diagnostic drives wake selection.
-Separately, after an exact successful completion clears the matching write
-fence, Cloudflare makes at most one signed `POST` to
-`/api/internal/hosted-runtime/owner-released`. The request has no body, uses a
-timeout capped at two seconds, and is not retried. A strictly future mailbox
-retry continuation still sends the callback after exact fence clear; the retry
-time does not establish whether Web has actionable work. The signed query
-carries the bounded opaque `runtimeAttemptId` whose exact write fence was cleared
-and may also carry `immediateRecheckRequested=1`. That transient edge means this
-invocation produced a default or retention schedule which it committed but did not service;
-inherited and already-attempted wakes do not emit it on the ordinary result path.
-Transport-loss recovery is the narrow exception:
-after explicit inactive-container proof and durable workspace-version advance,
-Cloudflare has lost attempt-local provenance and may conservatively emit the
-edge for a recovered due default wake, causing one facts re-read. It does not do
-so for a future wake. Web binds the user through the signed request. Without the
-edge, it re-derives runnable mailbox lag and never treats a persisted due wake
-as level-triggered signal authority. A live system mailbox item beyond the
-handled-through frontier also remains actionable, including a recording item
-with a future retry. For actionable work it emits the pointer-only
-`runtime_owner_released` signal. Temporal releases an accepted owner horizon only
-when its runtime attempt matches, then immediately re-reads
-durable facts and either runs due work or owns the exact future timer. A stale
-release cannot affect a newer owner. Legacy callbacks without an attempt pointer
-remain facts-only `runtime_recheck_requested` signals during rollout. Future
-mailbox retry continuations remain deferred to their retry time. A callback timeout,
-transport failure, non-success response, or Temporal signal failure is logged
-as metadata-only degradation and cannot change the completed runtime result.
-This is a prompt recheck hint over the existing durable reconciliation path,
-not a new work owner, queue, alarm, or persisted state.
-Duplicate provider retries, duplicate email delivery attempts, or duplicate
-workflow attempts are safe because mailbox append dedupes by event id and
-Temporal signals only coalesce pending work.
+`failureRetryScheduled` in persisted redacted log details. Generic automation
+loss monitoring ignores failures that still have a scheduled retry and explicit
+provider usage limits. The former Patterns-only usage-gate observation writer is removed; usage
+admission and the shared reconciliation diagnostics keep their existing owners.
 
 The signal consumer is a patch-introducing Temporal release because an exact
 match can cancel an accepted timer and schedule the next reconciliation
@@ -3075,15 +3060,17 @@ workspace may still hit the runtime's format gate on its next wake, so the
 operator rollout gate is zero known v1 hosted snapshots before returning to
 normal traffic.
 
-Hosted Codex auth is system-mailbox runtime-control work, but hosted ChatGPT
-connect is disabled until credentials have an isolated control-plane owner
-outside the hosted tool filesystem. Already-queued connect wakes fail closed
-without starting OAuth. Disconnect remains local-revocation-first for cleanup:
-remote app-server logout is best effort, local `auth.json` deletion is required,
-and a local deletion failure keeps the system-mailbox item retryable instead of
-consuming a revocation request. Any terminal `connected` callback from an old
-in-flight wake prunes local managed `auth.json` and is reported as a failed
-connection cleanup callback, not as a durable connected state.
+Member ChatGPT account linking is retired. Web no longer creates linking attempts
+or accepts runtime auth callbacks, and the runtime performs no member OAuth or
+remote logout. Legacy `runtime.codex-auth-requested` wakes and
+`codex-auth.updated` checkpoint records remain readable solely to delete local
+`auth.json`; deletion failures retain retryable mailbox work. Remove those
+readers only after retained mailbox records and snapshots have drained. Existing
+connection rows remain available to account export/deletion and retirement
+cleanup. No schema drop, billing change, or ordinary provider-selection change
+is part of this retirement; local/operator authentication remains supported.
+Deploy the runtime/Worker consumer before removing Web callback routes, and
+ensure old callback-producing runtime instances have drained before Web rollout.
 
 Hosted device-sync webhook freshness is owned by web dirty state, not mailbox
 completion. The route claims the exact provider trace, writes sparse
@@ -3401,7 +3388,7 @@ It binds that effective processing mode into the same fence so controller
 priority, preemption, and the container job
 cannot diverge; the fence also rejects all metered provider egress if the runtime
 reaches one unexpectedly. Explicit media
-retention remains model-free, and custom inference keeps its selected route.
+retention remains model-free.
 This keeps a racing payloadless direct wake from manufacturing `runtime_error`
 state or mutating restored assistant recovery while Web and Temporal remain the
 usage-policy and durable-reconciliation owners.
@@ -3788,7 +3775,9 @@ projection-completion notification retries it; terminal projection failure is
 still replyable through the normal fallback. Duplicate staging and
 projection-completion notifications at or behind the newest queued or committed
 frontier are ignored before exact-successor proof. A successful `turn/steer`
-acknowledges transport only. Before any hosted tool effect or final delivery,
+acknowledges transport only; instant steering (see `ARCHITECTURE.md`) changes
+when Codex samples the steered input, not this acknowledgement or journal
+contract. Before any hosted tool effect or final delivery,
 Murph journals and checkpoints only accepted inputs at or below that tool
 request's or provider result's authoritative delivery-context ordinal. An
 acknowledged later input that remains above the ordinal stays pending for a
@@ -3932,8 +3921,7 @@ readiness. Older producers and containers omit the hint and keep the fresh-fetch
 behavior. Ship the consumer before the optional producer. Roll back or disable
 the producer before restoring a Worker with the old strict ensure parser.
 Coverage is intentionally unavailable when reconciliation has due or unknown
-control work; measured savings apply only to eligible mailbox-only wakes. Provider/custom-inference observation runs only on a
-selected response. Fetch failures retain the importer's ordinary retry, while
+control work; measured savings apply only to eligible mailbox-only wakes. Fetch failures retain the importer's ordinary retry, while
 cancellation propagates through the existing invocation signal. A match uses the
 same request count with overlapping waits; a discarded or failed speculative
 request can add one bounded fetch. Existing Web policy, Worker inline decoding,
@@ -3970,7 +3958,11 @@ workspace checkpoint that retains the prior snapshot ref. Web retains its
 workspace-version CAS and equal-or-plus-one generation invariant; rejected
 transitions add only a fixed regression, skipped-increment, or invalid-initial
 error code to the existing publication-failure event, never generation values
-or checkpoint contents. Capacity, log shape, and payload lengths are validated before
+or checkpoint contents. After draining system work, idle snapshots derive their
+progress generation from the checkpoint builder's latest accepted workspace,
+which also owns the expected workspace version. A foreground projection can
+precede canonical publications and must not supply an older generation.
+Capacity, log shape, and payload lengths are validated before
 upload. The complete immutable payload, receipt, and log artifact set then
 uploads in small fixed concurrent waves; every started wave settles before a
 failure returns, and the checkpoint publishes the log ref only after the whole
@@ -4270,7 +4262,7 @@ carries optional `sourceReadAtDeadline: { step, elapsedMs }`. The same done even
 adds `details.browserVaultRefreshSourceReadStep` and
 `details.browserVaultRefreshSourceReadStepElapsedMs`. The closed source labels
 are `canonical_source_read` (`readVaultSourceStrict`), `read_model_construction`
-(`createVaultReadModel`), `personal_pattern_vocabulary_read`, `metric_projection`
+(`createVaultReadModel`), `metric_projection`
 (`buildMetricProjection`), and `default_entity_projection`. Source elapsed time
 is a bounded, finite, non-negative integer measured through the first operation
 boundary at or after the deadline, or through timeout observation while active.
@@ -4659,6 +4651,15 @@ fixed `snapshotStage`: `plan`, `session`, `archive`, `upload`, or `checkpoint`.
 These events prove local progress only; they do not claim that Web accepted a
 checkpoint.
 
+An upload failure may also carry `snapshotUploadFailurePhase`, limited to
+`upload_prepare` (local file verification and hashing), `upload_presign`
+(write-fence headers and presign request/response validation), `upload_transfer`
+(direct PUT and its existing bounded retries), or `upload_receipt` (managed-part
+receipt processing). The terminal owner reads the existing safe error phase and
+omits unrecognized values. An underlying phase is preserved instead of replaced,
+and exact caller interruptions remain unchanged. Session-start and completion
+phase/timeout diagnostics and successful upload timings retain their contracts.
+
 Runtime logs remain lossy observability. Finished and preempted info events use
 the bounded process-global best-effort queue; failure warning/error events
 bypass that verbose queue but still swallow log-endpoint failure, and a runtime
@@ -4675,8 +4676,13 @@ there is no historical lifecycle backfill.
 
 Web runs one Vercel-authenticated reply-latency monitor every five minutes over
 the existing `HostedIngressLatencyTrace`, accepted `HostedLinqDelivery`, and
-conversation `consumed_at` facts. The fixed product boundary is 30 seconds. A
-recent accepted delivery at or above that boundary is anomalous. A trace at or
+conversation `consumed_at` facts. The fixed product boundary is 60 seconds. A
+recent accepted delivery at or above that boundary is anomalous unless its
+thread is explicitly a group (`thread_is_direct = false`): Murph may answer a
+busy group late or not at all, so group replies count as completed but never
+page. Unknown directness stays alertable. An input whose own turn committed
+valid `terminal_non_reply_committed` evidence at or before the delivery was
+already resolved and does not set that delivery's latency origin. A trace at or
 above the boundary with no accepted delivery and no durable consumed evidence
 is provisionally resolved only when it has valid
 `terminal_non_reply_committed` evidence and the runtime's latest
@@ -4694,11 +4700,88 @@ Every other latency leaf remains assign-once. For slow completed replies, the
 monitor compares
 accepted-to-provider-start with provider-start-to-first-visible-response and
 reports the larger measured boundary as pre-provider path or provider/assistant
-execution. Missing, ambiguous, or impossible provider chronology remains
-unknown. For unresolved replies, it separates missing valid terminal evidence
+execution. Inputs that arrive during a running turn get later provider
+requests, so the earliest provider start in the delivery bounds the
+pre-provider path. Missing or impossible provider chronology remains unknown.
+For unresolved replies, it separates missing valid terminal evidence
 from valid terminal non-reply evidence that still lacks durable checkpoint
 acknowledgement. Persisted incident details and alert email contain only these
 aggregate counts and durations.
+The same five-minute cron also runs the final reply delivery monitor. It
+measures work after the final reply exists, not ingress latency. Its population
+is accepted `hosted_runtime_linq_delivery` rows linked to a Linq ingress trace.
+Unlinked runtime Linq deliveries (scheduled, progress, or preceding segments)
+are counted but not evaluated. Telegram is excluded: its terminal reply
+evidence is recorded after outbox success, not at an exact provider-acceptance
+boundary. Linq `acceptedAt` covers the whole delivery, including every part of
+a multi-part send. The runtime reads this timestamp when the Linq send promise
+returns successfully; it is a local acceptance observation, not a Linq server
+timestamp or member receipt. `deliveredAt` stays a separate boundary and is not
+used here.
+
+Each accepted delivery joins exactly one queued final-reply `reply-dispatched`
+turn-timing row through the hashed delivery source reference. Two independently
+named measurements end at `acceptedAt`:
+
+- provider result: starts at `turnTimingProviderResultAtEpochMs`, the exact
+  `Date.now()` instant the engine read when the selected provider result
+  returned. It is never derived from the clamped `turnTimingSinceProviderResultMs`.
+- final response completion: starts at the Murph-local receipt of Codex's last
+  turn-scoped `rawResponse/completed` notification for the selected result. It
+  is derived as the anchor minus `turnTimingFinalResponseCompletedToProviderResultMs`,
+  a monotonic interval read beside the same anchor. Codex emits that
+  notification while handling upstream `response.completed` (pinned 0.160 and
+  0.163 alike). The value excludes upstream transit, contains no timestamp from
+  Codex, and only the receipt instant is kept; the payload stays discarded.
+
+`turnTimingFinalResponseCompletion` is `observed`, `unavailable` (no raw
+completion arrived, as on a cold-resumed thread, because only `thread/start`
+can request raw events), `superseded` (later provider output, a tool call, or
+context compaction followed the last completion, or the selected answer was
+retained from an earlier sampling), or `invalid` (a non-finite or negative raw
+interval, never rounded to zero). A missing field means the producer supplied
+no observation. No state ever falls back to the provider-result origin.
+
+The budgets are strict initial engineering budgets, not an SLO: greater than
+5000 ms for direct or unknown-directness threads, and greater than 9000 ms for
+group threads, which adds the intentional four-second draft hold that follows
+the first provider result. The origin is not moved past that hold. When a group
+reconsideration runs, the selected result and its completion come from the
+second request. A delivery raises at most one immutable alert. That alert names
+each measurement with its status, plus the bounded trigger-origin set.
+`createMany` with `skipDuplicates` on the delivery-scoped identity owns dedupe,
+and the existing durable sender claim owns sending.
+
+Chronology must satisfy provider result <= Linq attempt <= acceptance; any
+violation is `invalid_chronology`. Anchors come from the runtime clock that
+wrote them. A delivery accepted by a later runtime attempt (a durable retry or a
+checkpoint-first send) is marked `deliveryAttemptRelation: different`, because
+the two readings come from different containers. Deliveries inside the
+five-minute grace are `pending`. Missing timing after grace is `missing`, or
+`timingBeyondRetention` when the delivery's earliest linked ingress predates the
+seven-day verbose runtime-log retention. Duplicate source references or timing
+rows are `ambiguous`. Timing rows are read for the scanned attempts from the
+earliest linked ingress minus a one-minute clock-skew allowance, bounded by
+that retention, so a retried delivery keeps its original turn's anchor.
+Acceptance is scanned over two hours with a 500-row page. A truncated delivery
+page, or an unavailable or truncated timing scan, raises nothing and reports
+the scan status.
+
+Old producers without the anchor report `producer_absent` for both measurements.
+The runtime also writes one queued `linq-dispatch-entered` row per Linq
+provider-dispatch boundary, from each boundary's existing cached entry. Each row
+holds monotonic durations since the foreground delivery phase started, send
+preparation, the route-authority check, and the provider-entry fence. It also
+carries the member-channel pre-dispatch barrier duration, which is shared by
+every delivery in that drain rather than measured per delivery. These durations
+nest and overlap, so they are not additive. A rejected app card followed by its
+text fallback writes two rows, and the accepted outcome carries the fallback's
+own attempt time. The alert therefore reports dispatch attribution `observed`
+only for a single row and `ambiguous` for more. The whole-delivery
+measurements are unaffected. These rows attribute pre-send time only. They add
+no direct request, await, guard change, or ordering change; the existing bounded
+verbose-log transport batches the extra rows. A log failure cannot reach dispatch.
+
 Fresh conversation mailbox rows observed at an authoritative Web AI
 usage-denial boundary receive the assign-once `ai_usage_denied_at` timestamp.
 The best-effort write uses database UTC time, updates only unconsumed rows
@@ -4818,7 +4901,7 @@ scalars for the active wake and exact fence clear. Fresh-start traces carry
 elapsed scalars for the parallel workspace read and runtime-store ensure, and
 total invocation preparation. The two read durations overlap and must not be
 added. Invocation preparation also records four adjacent elapsed subdivisions:
-remaining input-read wait, admission/custom-inference preparation, write-fence
+remaining input-read wait, admission preparation, write-fence
 binding, and runner-job preparation. These local durations retain their own
 values when merged with an older wake's orchestration evidence. Foreground wake
 telemetry separates local mailbox-prefetch preparation from the explicit
@@ -4873,6 +4956,40 @@ The four container-local stages are `lifecycle_lock_or_state_read`,
 `warm_health_or_cleanup`, `cold_start_or_ports`, and
 `cold_health_or_finalization`. The cleanup boolean overlays the stage that
 triggered cleanup instead of replacing it.
+
+Only when the local cold `startAndWaitForPorts` catch has run, that same warning
+also carries `runtimeStartupColdWaitFailure`: `instance_start_aborted` matches
+exactly `Aborted waiting for container to start as we received a cancellation signal`
+from the pinned Containers SDK 0.3.7 `startContainerIfNotRunning` wait;
+`port_wait_aborted` matches exactly `Container request aborted.` from its separate
+`waitForPort` wait. The initial wait also probes the port, so these labels identify
+SDK cancellation boundaries, not infrastructure allocation versus process-start
+root causes. This boundary classification reads only the caught Error's top-level
+message, before the existing cancellation-reason restoration and pending/cleanup handling;
+it never emits the message. Other errors, non-Errors, unreadable
+messages, and changed SDK wording are `unclassified`, not a guessed boundary.
+At that same catch, `runtimeStartupColdWaitDirectCause` reads at most the caught
+Error's single direct cause. An Error cause with the exact message
+`there is no container instance that can be provided to this durable object` is
+`native_no_instance`; the exact message `the container is not listening` is
+`port_not_listening`. A missing or undefined cause is `absent`; a non-Error outer
+value, a present non-Error cause (including null), or any other message is `other`.
+A throwing direct-cause access or cause-message read is `unreadable`. The classifier
+never follows a nested cause, coerces a value, serializes an error, or retains
+cause content.
+This is the last available direct-cause observation, not a provider root cause:
+a monitor's native no-instance error can be lost while a port-not-listening cause
+remains. It establishes no quota, placement, or actual native start count.
+`runtimeStartupColdWaitNativeRunning` is the synchronous native `running` flag
+at the catch: `true`, `false`, or `unavailable` for a missing, non-boolean, or
+unreadable flag. This flag is not health: optimistic `true` does not prove a
+healthy or listening process or an `onStart` transition. Message, cause, and native
+flag reads are guarded so diagnostics cannot replace the original failure.
+All three cold-wait fields are omitted when no cold wait failure has been caught
+(including a caller settling before the SDK wait), on noncold failures, on
+success, and by older code during skew.
+Successful-start timestamps cannot identify a failed SDK wait. The diagnostic
+changes no error identity, pending fence, cleanup, retry, or readiness behavior.
 
 A non-OK Web workspace read also retains one failure-only Worker diagnostic
 without changing its caller-visible exception or retry behavior. The Durable

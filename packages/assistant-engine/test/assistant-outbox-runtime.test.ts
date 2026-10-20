@@ -71,7 +71,7 @@ import {
 import {
   MURPH_ONBOARDING_FOLLOWUP_AUTOMATION,
 } from '../src/assistant/onboarding-followup-automation.ts'
-import { applyMurphManagedAutomations } from '../src/assistant/managed-automations.ts'
+import { applyMurphManagedAutomations, MURPH_RETIRED_PERSONAL_PATTERNS_UPDATE_AUTOMATION_ID } from '../src/assistant/managed-automations.ts'
 import { readAssistantDiagnosticsSnapshot } from '../src/assistant/diagnostics.ts'
 import { runAssistantAutomationPass } from '../src/assistant/automation/run-loop.ts'
 import {
@@ -1235,6 +1235,34 @@ describe('assistant outbox runtime', () => {
 
     const retry = await createIntent(vaultRoot, intentInput)
     expect(retry.intentId).not.toBe(failed.intentId)
+  })
+
+  it('persists outbox media without authored bubble placement', async () => {
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-outbox-media-placement-',
+    )
+    const media = {
+      alt: null,
+      kind: 'image' as const,
+      source: null,
+      url: 'https://cdn.example.test/step-two.png',
+    }
+    const intent = await createIntent(vaultRoot, {
+      actorId: null,
+      channel: 'linq',
+      createdAt: '2026-04-08T00:30:00.000Z',
+      dedupeToken: 'media-placement',
+      explicitTarget: 'linq-media-placement-thread',
+      identityId: null,
+      media: [{ ...media, bubble: 2 }],
+      message: 'Step two.',
+      sessionId: 'session-media-placement',
+      threadId: 'linq-media-placement-thread',
+      threadIsDirect: false,
+      turnId: 'turn-media-placement',
+    })
+
+    expect(intent.media).toStrictEqual([media])
   })
 
   it('persists native reply intent explicitly while omitting it from legacy messages', async () => {
@@ -5787,29 +5815,31 @@ describe('assistant outbox runtime', () => {
     expect(mockedDeliverAssistantMessageOverBinding).toHaveBeenCalledOnce()
   })
 
-  it('fails an active revision-matching retired Sunday intent before provider entry', async () => {
-    const retiredAutomationId = 'automation_01K55N7S9X4Q2M6P8R3T0V1WYZ'
+  it.each([
+    { retiredAutomationId: 'automation_01K55N7S9X4Q2M6P8R3T0V1WYZ', slug: 'group-sunday-superlatives', threadIsDirect: false },
+    { retiredAutomationId: MURPH_RETIRED_PERSONAL_PATTERNS_UPDATE_AUTOMATION_ID, slug: 'personal-patterns-update', threadIsDirect: true },
+  ])('fails an active revision-matching retired $slug intent before provider entry', async ({ retiredAutomationId, slug, threadIsDirect }) => {
     const { vaultRoot } = await createInitializedAssistantVault(
-      'assistant-outbox-retired-sunday-',
+      'assistant-outbox-retired-managed-',
     )
     const scaffold = scaffoldAutomationPayload()
     const automation = await upsertAutomation({
       ...scaffold,
       automationId: retiredAutomationId,
       continuityPolicy: 'fresh',
-      instructions: 'Legacy Sunday group superlatives instructions.',
+      instructions: 'Legacy managed automation instructions.',
       now: new Date('2026-07-26T17:59:00.000Z'),
       route: {
         ...scaffold.route,
         deliveryTarget: 'telegram-group-thread',
         threadId: 'telegram-group-thread',
-        threadIsDirect: false,
+        threadIsDirect,
       },
       schedule: { kind: 'cron', expression: '0 18 * * 0' },
-      slug: 'group-sunday-superlatives',
+      slug,
       status: 'active',
       tags: ['assistant', 'scheduled', 'murph-managed'],
-      title: 'Sunday group superlatives',
+      title: 'Retired managed automation',
       vaultRoot,
     })
     const queued = await deliverAssistantOutboxMessage({
@@ -5820,10 +5850,10 @@ describe('assistant outbox runtime', () => {
       channel: 'telegram',
       dispatchMode: 'queue-only',
       explicitTarget: 'telegram-group-thread',
-      message: 'Legacy Sunday group superlatives.',
+      message: 'Legacy managed notification.',
       sessionId: 'session-outbox-retired-sunday',
       threadId: 'telegram-group-thread',
-      threadIsDirect: false,
+      threadIsDirect,
       turnId: 'turn-outbox-retired-sunday',
       vault: vaultRoot,
     })

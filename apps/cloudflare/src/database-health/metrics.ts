@@ -71,14 +71,19 @@ export interface DatabaseMetricObservationSnapshot {
   serverPoolStates: Record<string, number> | null;
 }
 
+interface DatabaseMetricRoleSeriesCounts {
+  branch: number;
+  primary: number;
+  replica: number;
+  unrecognizedRole: number;
+}
+
 export interface DatabaseMetricObservation {
   missingMetrics: readonly DatabaseHealthRequiredMetricName[];
-  postgresStateSeries: {
-    branch: number;
-    primary: number;
-    replica: number;
-    unrecognizedRole: number;
+  pgbouncerCurrentConnectionSeries: DatabaseMetricRoleSeriesCounts & {
+    primaryMissingPod: number;
   };
+  postgresStateSeries: DatabaseMetricRoleSeriesCounts;
   snapshot: DatabaseMetricObservationSnapshot;
 }
 
@@ -335,7 +340,19 @@ export function parsePlanetScaleDatabaseMetricObservation(
   );
   return {
     missingMetrics,
-    postgresStateSeries: summarizePostgresStateSeries(points),
+    pgbouncerCurrentConnectionSeries: {
+      ...summarizeMetricRoleSeries(
+        points,
+        "planetscale_pgbouncer_current_connections",
+      ),
+      primaryMissingPod: currentConnectionPoints.filter(
+        (point) => !point.labels[POD_LABEL],
+      ).length,
+    },
+    postgresStateSeries: summarizeMetricRoleSeries(
+      points,
+      "planetscale_postgres_connection_state",
+    ),
     snapshot: {
       clientWaitSeconds: clientWaitPoints.length === 0
         ? null
@@ -636,12 +653,13 @@ function parsePrometheusLabels(value: string): Readonly<Record<string, string>> 
   return labels;
 }
 
-function summarizePostgresStateSeries(
+function summarizeMetricRoleSeries(
   points: readonly PrometheusMetricPoint[],
-): DatabaseMetricObservation["postgresStateSeries"] {
+  metricName: DatabaseHealthRequiredMetricName,
+): DatabaseMetricRoleSeriesCounts {
   const counts = { branch: 0, primary: 0, replica: 0, unrecognizedRole: 0 };
   for (const point of points) {
-    if (point.name !== "planetscale_postgres_connection_state") {
+    if (point.name !== metricName) {
       continue;
     }
     counts.branch += 1;

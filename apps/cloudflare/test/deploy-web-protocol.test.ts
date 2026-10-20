@@ -73,6 +73,9 @@ it("accepts reader supersets, but not missing audience or emitted log codes", ()
   expect(() => assertHostedRuntimeWebProtocolAdmission(legacy, evidence.nonce)).toThrow("thread_route_audience");
   const olderReader = { ...evidence, runtimeLogEventCodes: evidence.runtimeLogEventCodes.filter(code => code !== "runner.processing_finished") };
   expect(() => assertHostedRuntimeWebProtocolAdmission(olderReader, evidence.nonce)).toThrow("runtime_log_event:runner.processing_finished");
+  // Web-only producer codes still require the Web reader to deploy first.
+  const preSampleReader = { ...evidence, runtimeLogEventCodes: evidence.runtimeLogEventCodes.filter(code => code !== "mailbox.progress_alert_sampled") };
+  expect(() => assertHostedRuntimeWebProtocolAdmission(preSampleReader, evidence.nonce)).toThrow("runtime_log_event:mailbox.progress_alert_sampled");
 });
 
 it.each([

@@ -58,17 +58,20 @@ describe("createCloudflareHostedControlClient", () => {
       "createBrowserVaultSession",
       "createEnvironmentRealtimeCall",
       "deleteEnvironmentVoice",
+      "deleteGameMedia",
       "deleteMealPhoto",
       "deleteUserData",
       "enqueueDeviceWebhook",
       "ensureRuntimeProcessing",
       "getRunnerStatus",
       "purgeRuntimeResource",
+      "putGameMedia",
+      "readGameMedia",
       "reconcileRuntimeHealthDataConsent",
       "sendTelegramUsageLimitNotice",
       "stageEnvironmentVoice",
       "stageMealPhoto",
-      "verifyInferenceConnection",
+      "statGameMedia",
     ]);
   });
 
@@ -115,47 +118,6 @@ describe("createCloudflareHostedControlClient", () => {
     expect(new Headers(init.headers).get(HOSTED_EXECUTION_USER_ID_HEADER)).toBeNull();
   });
 
-  it("verifies a bounded inference candidate through the user-bound route", async () => {
-    const fetchImpl = vi.fn(async () => createJsonResponse({
-      verificationProfile: "murph-codex-0.151.0-portable-responses-v1",
-      verified: true,
-    })) as typeof fetch;
-    const client = createCloudflareHostedControlClient({
-      baseUrl: "https://runner.example.test",
-      fetchImpl,
-      getBearerToken: async () => "token-123",
-    });
-
-    await expect(client.verifyInferenceConnection({
-      request: {
-        auth: { kind: "bearer", secret: "synthetic-secret" },
-        contextWindowTokens: 131_072,
-        endpointUrl: "https://inference.example.test/v1/responses",
-        model: "example-model",
-        protocol: "responses",
-        supportsImages: false,
-      },
-      userId: "user_123",
-    })).resolves.toEqual({
-      verificationProfile: "murph-codex-0.151.0-portable-responses-v1",
-      verified: true,
-    });
-
-    const [url, init] = vi.mocked(fetchImpl).mock.calls[0] as [
-      string,
-      RequestInit,
-    ];
-    expect(url).toBe(
-      "https://runner.example.test/internal/users/user_123/inference/verify",
-    );
-    expect(init.method).toBe("POST");
-    expect(new Headers(init.headers).get("authorization")).toBe(
-      "Bearer token-123",
-    );
-    expect(new Headers(init.headers).get(HOSTED_EXECUTION_USER_ID_HEADER)).toBe(
-      "user_123",
-    );
-  });
 
   it("stages and deletes environment voice bytes through the bound user routes", async () => {
     const bytes = Uint8Array.from([0x1a, 0x45, 0xdf, 0xa3, 1, 2, 3]);
@@ -399,7 +361,7 @@ describe("createCloudflareHostedControlClient", () => {
         userId: "test-user", attemptId: "attempt-test", generation: "1", phase: "active" as const,
         processingMode: "default" as const, allocationId: "allocation-test",
         runnerContainerName: "runner-test", workspaceVersion: "0",
-        customInferenceEnvelope: null, platformAiUsageAllowed: true,
+        platformAiUsageAllowed: true,
         startedAt: "2026-01-01T00:00:00.000Z", acceptedAt: null, completedAt: null,
         failureCount: 0, lastErrorCode: null,
       },
@@ -1826,6 +1788,83 @@ describe("createCloudflareHostedControlClient", () => {
     );
   });
 
+
+  describe("weekly game media", () => {
+    const mediaId = `${"e".repeat(64)}.jpg`;
+    const envelope = {
+      alg: "AES-256-GCM-HKDF-SHA256",
+      ciphertext: "c2VhbGVk",
+      domain: "control",
+      iv: "aXY=",
+      lane: "hosted-member-private-field",
+      rootKeyId: "root-synthetic",
+      schema: "murph.hosted-secure-box.v1",
+      scope: "weekly-game",
+    };
+
+    function gameMediaClient(response: () => Response) {
+      const fetchImpl = vi.fn(async () => response()) as typeof fetch;
+      const client = createCloudflareHostedControlClient({
+        baseUrl: "https://runner.example.test",
+        fetchImpl,
+        getBearerToken: async () => "token-123",
+      });
+      return { client, fetchImpl };
+    }
+
+    function observed(fetchImpl: typeof fetch) {
+      const [url, init] = vi.mocked(fetchImpl).mock.calls[0] as [string, RequestInit];
+      return { headers: new Headers(init.headers), init, url };
+    }
+
+    it("stages a sealed envelope bound to the owner and the photo's name", async () => {
+      const { client, fetchImpl } = gameMediaClient(() => createJsonResponse({ byteLength: 10, stored: true }));
+
+      await expect(client.putGameMedia({ envelope: JSON.stringify(envelope), mediaId, userId: "user_123" })).resolves.toBeUndefined();
+
+      const { headers, init, url } = observed(fetchImpl);
+      expect(url).toBe("https://runner.example.test/internal/users/user_123/game-media/stage");
+      expect(init.method).toBe("POST");
+      expect(JSON.parse(String(init.body))).toEqual(envelope);
+      expect(headers.get("x-hosted-execution-user-id")).toBe("user_123");
+      expect(headers.get("x-murph-game-media-id")).toBe(mediaId);
+    });
+
+    it("refuses to send anything that isn't a sealed envelope", async () => {
+      const { client, fetchImpl } = gameMediaClient(() => createJsonResponse({ stored: true }));
+
+      await expect(client.putGameMedia({ envelope: JSON.stringify({ photo: "plain" }), mediaId, userId: "user_123" })).rejects.toThrow();
+      await expect(client.putGameMedia({ envelope: JSON.stringify(envelope), mediaId: "photo.jpg", userId: "user_123" })).rejects.toThrow(
+        "Cloudflare game media id must be <sha256>.<jpg|heic>.",
+      );
+      expect(fetchImpl).not.toHaveBeenCalled();
+    });
+
+    it("reads the envelope back and returns null when there's none", async () => {
+      const found = gameMediaClient(() => createJsonResponse(envelope));
+      await expect(found.client.readGameMedia({ mediaId, userId: "user_123" })).resolves.toBe(JSON.stringify(envelope));
+      expect(observed(found.fetchImpl).url).toBe("https://runner.example.test/internal/users/user_123/game-media/read");
+      expect(observed(found.fetchImpl).init.method).toBe("GET");
+
+      const missing = gameMediaClient(() => createJsonResponse({ error: "Game media not found." }, { status: 404 }));
+      await expect(missing.client.readGameMedia({ mediaId, userId: "user_123" })).resolves.toBeNull();
+      await expect(missing.client.statGameMedia({ mediaId, userId: "user_123" })).resolves.toBeNull();
+    });
+
+    it("stats and deletes by name, and surfaces other failures", async () => {
+      const stat = gameMediaClient(() => createJsonResponse({ byteLength: 42 }));
+      await expect(stat.client.statGameMedia({ mediaId, userId: "user_123" })).resolves.toEqual({ byteLength: 42 });
+      expect(observed(stat.fetchImpl).url).toBe("https://runner.example.test/internal/users/user_123/game-media/stat");
+
+      const deleted = gameMediaClient(() => createJsonResponse({ deleted: true }));
+      await expect(deleted.client.deleteGameMedia({ mediaId, userId: "user_123" })).resolves.toBeUndefined();
+      expect(observed(deleted.fetchImpl).init.method).toBe("DELETE");
+      expect(observed(deleted.fetchImpl).url).toBe("https://runner.example.test/internal/users/user_123/game-media/delete");
+
+      const failing = gameMediaClient(() => createJsonResponse({ error: "boom" }, { status: 500 }));
+      await expect(failing.client.readGameMedia({ mediaId, userId: "user_123" })).rejects.toThrow("HTTP 500");
+    });
+  });
 });
 
 function createJsonResponse(value: unknown, init: ResponseInit = {}): Response {

@@ -215,6 +215,7 @@ export interface AssistantHostedLabsTool {
 export type AssistantHostedAutomationToolRequest =
   | {
       action: 'inspect'
+      view?: 'full' | 'model_review'
       lookup: string
     }
   | {
@@ -283,6 +284,8 @@ export type AssistantAutomationOccurrenceProjection =
 export type AssistantHostedAutomationToolResponse =
   | {
       action: 'inspect'
+      view?: 'model_review'
+      instructionsOmitted?: 'managed_model_preserved'
       executionInspection?: AssistantAutomationExecutionInspection
       automationId: string
       assistantTargetOverride?: AutomationAssistantTargetOverride | null
@@ -291,9 +294,9 @@ export type AssistantHostedAutomationToolResponse =
       instructions?: string
       title?: string
       deliveryChannel?: string
-      effectiveTimeZone: string | null
+      effectiveTimeZone?: string | null
       lookupId: string
-      occurrenceProjection: AssistantAutomationOccurrenceProjection
+      occurrenceProjection?: AssistantAutomationOccurrenceProjection
       routeBinding: 'preserved'
       schedule: AutomationSchedule
       status: AutomationStatus

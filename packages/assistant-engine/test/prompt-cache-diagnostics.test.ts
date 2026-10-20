@@ -2,7 +2,7 @@ import { expect, it, vi } from 'vitest'
 import { CacheReplayDiagnostics, type CacheReplayPolicy } from '../scripts/lib/prompt-cache-diagnostics.js'
 
 const policy: CacheReplayPolicy = { cohort: 'synthetic', key: 'preserve', breakpoint: 'none', mode: 'implicit' }
-const request = { model: 'gpt-5.6-terra', prompt_cache_key: 'private-thread-key', input: [{ role: 'developer', content: [{ type: 'input_text', text: 'private instructions' }] }] }
+const request = { model: 'gpt-6.1-sol', prompt_cache_key: 'private-thread-key', input: [{ role: 'developer', content: [{ type: 'input_text', text: 'private instructions' }] }] }
 const response = { status: 'completed', id: 'resp_private', usage: { input_tokens: 2000, input_tokens_details: { cached_tokens: 1500, cache_write_tokens: 400 }, output_tokens: 20 } }
 
 it('compares only completed responses, across transports, without serializing private fields', () => {

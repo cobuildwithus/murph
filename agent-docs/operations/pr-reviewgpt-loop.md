@@ -28,6 +28,9 @@ Both lean and full guarded archives include the tracked native CI controller
 policy, PR evidence template, and assistant verification skill through the
 existing exact always-path manifest. These inputs remain available when they
 are unchanged by the candidate.
+The exact always-path manifest also includes the pinned Containers SDK patch,
+`pnpm-lock.yaml`, and `pnpm-workspace.yaml`, so included readiness tests retain
+the dependency implementation correction and its version/integrity mapping.
 
 Round 1 is always a full-patch audit. On round 2 or later, the packager reads the
 PR body's explicit context
@@ -62,6 +65,11 @@ fresh new-chat target switches the Chat/Work control to Chat when necessary; an
 existing Work conversation or an unconfirmed new-chat surface fails closed.
 Deep Research remains on its dedicated surface. Keep this browser-DOM policy in
 ReviewGPT rather than duplicating it in Murph's lane wrapper or prompts.
+
+The GPT-6 picker can expose a `GPT-6` family row and a separate `Power` control.
+The pinned ReviewGPT package combines that picker state with the sent request's
+model evidence to verify GPT-6 Pro. A generic `Pro` label alone is insufficient;
+keep the concrete model requirement when recovering from picker changes.
 
 This ownership rule is required because the managed browser lanes keep
 background response-polling timers reliable and ReviewGPT pins only the owned
@@ -170,15 +178,18 @@ expected attachments must survive onto the exact accepted user turn before the
 review receipt can be used. This adds context to the existing review owner; it
 does not start a separate review or satisfy another PR's exact-head gate.
 
-### Review patched ReviewGPT dependency source
+### Review patched tooling dependency source
 
-When a PR changes the locked ReviewGPT dependency patch, the canonical packager
-adds all registry package files under `review-gpt-pr-context/dependencies/`.
-It verifies the reviewed commit’s registry integrity before expanding bounded
-regular files and records file hashes plus the exact patch in that context.
-Use the included reconstruction instructions to inspect complete dependency
-owners. This source is part of the guarded snapshot; no inline encoded package
-or separate unguarded archive is needed.
+When a PR changes a locked `@cobuild/review-gpt` or `@cobuild/repo-tools` patch,
+the canonical packager adds the exact registry package and patch from the
+reviewed head under `review-gpt-pr-context/dependencies/`, and the base version
+under `dependencies/base/`. These are the only supported dependency packages.
+Each version must match its source commit’s registry integrity and patch hash;
+only bounded regular files pass the existing archive and privacy checks.
+Provenance records the reviewed head, source commit, role, and individual file
+hashes. Use the included reconstruction instructions to compare complete
+patched owners. This source is part of the guarded snapshot; no inline encoded
+package or separate unguarded archive is needed.
 
 ## Finding Disposition Boundary
 
@@ -326,6 +337,16 @@ the current user explicitly asks for it.
    Full snapshots include `patches/codex-public-live.patch` even when unchanged,
    because the hosted runner applies that production-source patch during its
    native Codex build. Keep it with the Dockerfiles in the mandatory snapshot paths.
+
+   When the PR changes that patch, the existing packager also includes complete
+   patched native text files and the bounded
+   configuration/instruction/authentication/transport/recovery owner list under
+   `review-gpt-pr-context/dependencies/codex-<version>/`. It reads the reviewed
+   commit's package pin, Docker source SHA, and patch, verifies the official
+   upstream tag, and applies the patch only to an isolated Git index. The
+   provenance manifest records file hashes and omitted generated/binary paths.
+   No upstream code runs; unavailable source, mismatched pins, unsafe paths,
+   failed patch application, or exceeded bounds stop packaging.
 
    - `review-gpt-pr-context/pr-body.md`
    - `review-gpt-pr-context/pr.diff`

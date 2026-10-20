@@ -118,18 +118,19 @@ describe('longitudinal sleep guidance', () => {
     expect(dataFirst).toContain(
       'Pass `--time-zone <IANA>` only as an explicit reporting fallback for nights without a canonical zone',
     )
-    expect(dataFirst).toContain('Read the returned `summary.notes` before interpreting it')
+    expect(dataFirst).toContain('Use the returned `summary.notes` to choose the nights that count')
     expect(dataFirst).toContain(
-      'missing wearable dates are missing coverage, not proof of no sleep',
+      'describe the pattern across the nights present, such as "across 11 nights", and never treat a missing date as no sleep',
     )
-    expect(dataFirst).toContain('explicitly identified nap-only dates are excluded')
+    expect(dataFirst).toContain('leave out explicitly identified nap-only dates')
     expect(dataFirst).toContain(
-      'included legacy nights with unknown sleep identity must stay unknown rather than being guessed from titles',
+      'keep legacy nights of unknown sleep identity unlabeled instead of guessing from titles',
     )
-    expect(dataFirst).toContain('mixed providers or time zones can create apparent shifts')
+    expect(dataFirst).toContain('check whether mixed providers or time zones explain an apparent shift')
     expect(dataFirst).toContain(
-      'Provider-reported awake minutes are not WASO or awakening count.',
+      'Report provider-reported awake minutes as awake time, never as WASO or an awakening count.',
     )
+    expect(dataFirst).not.toContain('missing coverage, not proof of no sleep')
   })
 
   it('keeps a mixed magnesium, melatonin, and branded OTC sleep-aid stack compositional and clinician-gated', async () => {
@@ -226,7 +227,7 @@ describe('longitudinal sleep guidance', () => {
     const melatonin = readSection(skill, 'Melatonin As A Clock Signal')
 
     expect(dataFirst).toContain('vault-cli wearables sleep pattern --format json')
-    expect(dataFirst).toContain('Missing wearable dates are missing coverage')
+    expect(dataFirst).toContain('describe timing across the nights present and never treat a missing date as no sleep')
     expect(dataFirst).toContain('mixed providers')
     expect(dataFirst).toContain('DST')
     expect(dataFirst).toContain('progressively drifts later day after day')

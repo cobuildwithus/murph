@@ -1,7 +1,10 @@
 import { Prisma } from "@prisma/client";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { hostedOnboardingError } from "../src/lib/hosted-onboarding/errors";
+import {
+  getHostedLinqRouteAuthorityMismatchReasonForLog,
+  hostedOnboardingError,
+} from "../src/lib/hosted-onboarding/errors";
 
 const mocks = vi.hoisted(() => ({
   assertHostedLaunchRequiredConsentGranted: vi.fn(),
@@ -607,6 +610,119 @@ describe("hosted onboarding routes", () => {
       errorType: "HostedOnboardingError",
       internalMessage: "Hosted onboarding route failed unexpectedly.",
     });
+  });
+
+  describe.each(["production", "development"])("private Linq authority reasons in %s", (nodeEnv) => {
+    const code = "HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH";
+    const message = "Linq egress target does not match the runtime user's Linq route.";
+    const reasons = [
+      "durable_thread_container_mismatch", "durable_target_missing", "requested_target_missing",
+      "member_routing_missing", "target_not_owned", "route_projection_mismatch",
+      "pending_recipient_invalid", "member_identity_missing", "member_recipient_invalid",
+    ] as const;
+    const failure = () => hostedOnboardingError({ code, message, httpStatus: 403 });
+    beforeEach(() => setHostedOnboardingTestNodeEnv(nodeEnv));
+    afterEach(() => vi.restoreAllMocks());
+
+    async function expectPrivateReason(error: ReturnType<typeof failure>, reason?: string) {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const otherLogs = (["error", "info", "log"] as const)
+        .map((level) => vi.spyOn(console, level).mockImplementation(() => {}));
+      const payloadGetter = vi.fn(() => { throw new Error("synthetic-private-payload"); });
+      Object.defineProperty(error, "providerPayload", { enumerable: true, get: payloadGetter });
+      const response = await hostedOnboardingHttp.withJsonError<[Request]>(async () => { throw error; })(
+        new Request("https://synthetic.example.test/engagement?private=synthetic-private-query", {
+          method: "POST", headers: { authorization: "Bearer synthetic-private-token" },
+          body: JSON.stringify({ content: "synthetic-private-body" }),
+        }),
+      );
+      expect(error.name).toBe("HostedOnboardingError");
+      expect(error.constructor.name).toBe("HostedOnboardingError");
+      expect(error.details).toBeUndefined();
+      expect(response.status).toBe(403);
+      expect(response.headers.get("Cache-Control")).toBe("no-store");
+      expect(await response.text()).toBe(JSON.stringify({
+        error: { code: error.code, message: error.message, retryable: false },
+      }));
+      expect(warn).toHaveBeenCalledTimes(1);
+      for (const log of otherLogs) expect(log).not.toHaveBeenCalled();
+      expect(payloadGetter).not.toHaveBeenCalled();
+      expect(warn.mock.calls[0]).toEqual(["Hosted onboarding route failed.", {
+        errorType: "HostedOnboardingError", errorCode: error.code, errorMessage: error.message,
+        internalMessage: "Hosted onboarding route failed unexpectedly.", requestMethod: "POST",
+        errorResponseCode: error.code, errorResponseStatus: 403, errorResponseRetryable: false,
+        ...(reason ? { linqRouteAuthorityMismatchReason: reason } : {}),
+      }]);
+      expect(JSON.stringify(warn.mock.calls)).not.toMatch(/synthetic-private|example\.test|15550000071/);
+    }
+
+    it.each(reasons)("logs only the closed reason %s with an unchanged public envelope", async (reason) => {
+      await expectPrivateReason(hostedOnboardingError({
+        code, message, httpStatus: 403, linqRouteAuthorityMismatchReason: reason,
+      }), reason);
+    });
+
+    it.each([
+      undefined, null, 42, true, ["target_not_owned"], { reason: "target_not_owned" },
+      "unknown_future_reason", "target_not_owned ", "target_not_owned\nsynthetic-private-body",
+      "synthetic-private-chat +15550000071",
+    ].map((value) => ({ value })))("omits unknown or malformed reason $value", async ({ value }) => {
+      const error = failure();
+      Object.defineProperty(error, "linqRouteAuthorityMismatchReason", { value });
+      await expectPrivateReason(error);
+    });
+
+    it("ignores a diagnostic getter without invoking it", async () => {
+      const error = failure();
+      const getter = vi.fn(() => { throw new Error("synthetic-private-reason"); });
+      Object.defineProperty(error, "linqRouteAuthorityMismatchReason", { get: getter });
+      await expectPrivateReason(error);
+      expect(getter).not.toHaveBeenCalled();
+    });
+
+    it("does not coerce or serialize a diagnostic object", async () => {
+      const getter = vi.fn(() => { throw new Error("synthetic-private-reason"); });
+      const value = Object.defineProperties({}, {
+        reason: { enumerable: true, get: getter }, toJSON: { get: getter },
+        toString: { get: getter }, valueOf: { get: getter }, [Symbol.toPrimitive]: { get: getter },
+      });
+      const error = failure();
+      Object.defineProperty(error, "linqRouteAuthorityMismatchReason", { value });
+      await expectPrivateReason(error);
+      expect(getter).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      { code: "UNRELATED_ERROR", message },
+      { code, message: "Linq egress route authority does not match the requested thread." },
+    ])("does not annotate another owner with code=$code and message=$message", async (owner) => {
+      await expectPrivateReason(hostedOnboardingError({
+        ...owner, httpStatus: 403, linqRouteAuthorityMismatchReason: "target_not_owned",
+      }));
+    });
+  });
+
+  it("ignores forged reason accessors outside the hosted error class", () => {
+    const code = "HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH";
+    const message = "Linq egress target does not match the runtime user's Linq route.";
+    const getter = vi.fn(() => { throw new Error("synthetic-private-reason"); });
+    for (const error of [{ code, message }, Object.assign(new Error(message), { code })]) {
+      Object.defineProperty(error, "linqRouteAuthorityMismatchReason", { get: getter });
+      expect(getHostedLinqRouteAuthorityMismatchReasonForLog(error)).toBeUndefined();
+    }
+    expect(getter).not.toHaveBeenCalled();
+  });
+
+  it.each(["code", "message"])("does not invoke the diagnostic owner %s accessor", (property) => {
+    const error = hostedOnboardingError({
+      code: "HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH", httpStatus: 403,
+      message: "Linq egress target does not match the runtime user's Linq route.",
+      linqRouteAuthorityMismatchReason: "target_not_owned",
+    });
+    const getter = vi.fn(() => { throw new Error("synthetic-private-owner"); });
+    Object.defineProperty(error, property, { get: getter });
+    expect(getHostedLinqRouteAuthorityMismatchReasonForLog(error)).toBeUndefined();
+    expect(getter).not.toHaveBeenCalled();
   });
 
   it("logs allowlisted hosted onboarding error details without logging arbitrary response details", async () => {

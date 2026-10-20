@@ -177,6 +177,8 @@ test("VercelTelemetry does not mount outside the explicit page allowlist", () =>
     "/screenshots",
     "/settings/accounts",
     "/settings/accounts?companion=ios#security",
+    "/test/better-auth-settings",
+    "/test/better-auth-settings?email=none",
     "/voice",
     "/voice?source=private#call",
     "/screenshots/home",
@@ -212,6 +214,10 @@ test("VercelTelemetry drops non-allowlisted events before either vendor sends", 
   const voiceUrl = "/voice?source=private#call";
   assert.equal(analyticsProps.beforeSend({ type: "pageview", url: voiceUrl }), null);
   assert.equal(speedInsightsProps.beforeSend({ type: "vital", url: voiceUrl }), null);
+
+  const fixtureUrl = "/test/better-auth-settings?email=none";
+  assert.equal(analyticsProps.beforeSend({ type: "pageview", url: fixtureUrl }), null);
+  assert.equal(speedInsightsProps.beforeSend({ type: "vital", url: fixtureUrl }), null);
 
   const accountSettingsUrl = "/settings/accounts?companion=ios#security";
   assert.equal(analyticsProps.beforeSend({ type: "pageview", url: accountSettingsUrl }), null);
@@ -419,21 +425,6 @@ test("VercelTelemetry strips shared-card fragments before sending", () => {
 test("VercelTelemetry aggregates public dynamic routes without sending identifiers", () => {
   const routes = [
     {
-      expected: "/biomarkers/[biomarker]",
-      pathname: "/biomarkers/resting-heart-rate",
-      route: "/biomarkers/[biomarkerId]",
-    },
-    {
-      expected: "/biomarkers/[biomarker]/research",
-      pathname: "/biomarkers/resting-heart-rate/research",
-      route: "/biomarkers/[biomarkerId]/research",
-    },
-    {
-      expected: "/biomarkers/results/[metric]",
-      pathname: "/biomarkers/results/ldl_cholesterol",
-      route: "/biomarkers/results/[metricKey]",
-    },
-    {
       expected: "/compare/[competitor]",
       pathname: "/compare/murph-vs-whoop",
       route: "/compare/[competitor]",
@@ -452,11 +443,6 @@ test("VercelTelemetry aggregates public dynamic routes without sending identifie
       expected: "/experiments/[experiment]/results",
       pathname: "/experiments/sleep-consistency/results",
       route: "/experiments/[experimentId]/results",
-    },
-    {
-      expected: "/goals/[goal]",
-      pathname: "/goals/improve-deep-sleep",
-      route: "/goals/[goalId]",
     },
     {
       expected: "/measurement-methods/[method]",
@@ -568,9 +554,10 @@ function listStaticPagePathnames(
   return appSources
     .filter(
       ({ path }) =>
-        // Synthetic screenshots, voice, and account-security settings deliberately
-        // stay outside the vendor allowlist.
+        // Synthetic screenshots, the local-only auth fixture, voice, and
+        // account-security settings stay outside the vendor allowlist.
         !path.startsWith("app/screenshots/")
+        && path !== "app/test/better-auth-settings/page.tsx"
         && path !== "app/settings/accounts/page.tsx"
         && path !== "app/(dashboard)/voice/page.tsx"
         && (path === "app/page.tsx" || path.endsWith("/page.tsx")),

@@ -30,7 +30,7 @@ Use this as Murph operating guidance, not as a consumer article. Ground the answ
 
 - Look at recent sleep duration, sleep opportunity, bedtime/wake-time regularity, sleep latency if available, awakenings, naps, HR/RHR overnight, HRV, illness tags, workouts, alcohol/caffeine logs, and recent schedule changes.
 - Build a compact evidence bundle before choosing a lever: the live active sleep plan, 7-14 nights of opportunity/timing when available, the user's latency/awakenings and next-day function, and relevant conditions, substances, or schedule constraints. Compact prompt snapshots are navigation only; read the full canonical records that could change the decision.
-- For provider-neutral multi-night timing, coverage, and source freshness, read `vault-cli wearables sleep pattern --format json`. Narrow it only when useful with `--date`, `--from`/`--to`, repeatable `--provider`, or `--window-days` (default 28, maximum 366). Pass `--time-zone <IANA>` only as an explicit reporting fallback for nights without a canonical zone; it does not replace per-night canonical zones. Read the returned `summary.notes` before interpreting it: missing wearable dates are missing coverage, not proof of no sleep; explicitly identified nap-only dates are excluded; included legacy nights with unknown sleep identity must stay unknown rather than being guessed from titles; mixed providers or time zones can create apparent shifts; and clock timing may be omitted when no validated zone exists. Provider-reported awake minutes are not WASO or awakening count.
+- For provider-neutral multi-night timing, coverage, and source freshness, read `vault-cli wearables sleep pattern --format json`. Narrow it only when useful with `--date`, `--from`/`--to`, repeatable `--provider`, or `--window-days` (default 28, maximum 366). Pass `--time-zone <IANA>` only as an explicit reporting fallback for nights without a canonical zone; it does not replace per-night canonical zones. Use the returned `summary.notes` to choose the nights that count: describe the pattern across the nights present, such as "across 11 nights", and never treat a missing date as no sleep; leave out explicitly identified nap-only dates; keep legacy nights of unknown sleep identity unlabeled instead of guessing from titles; check whether mixed providers or time zones explain an apparent shift; and omit clock times when no validated zone exists. Report provider-reported awake minutes as awake time, never as WASO or an awakening count.
 - Treat sleep timing and total sleep as more reliable than consumer deep/REM staging.
 - Do not call a stage trend real from fewer than 7 nights, a new device/firmware change, poor wear, or a stage-only change without symptoms.
 - Before ordinary coaching, check for dangerous daytime sleepiness or sleep-disordered breathing when the story includes unrefreshing sleep despite adequate opportunity, repeated unexplained awakenings, loud snoring/gasping, morning headaches, sleep attacks, or daytime dozing. Ask one narrow safety question if needed. Consumer wearables and a reassuring sleep score cannot rule out apnea, UARS, narcolepsy, or another clinical sleep disorder.
@@ -63,7 +63,7 @@ Ask: "Is the main issue getting yourself to bed, falling asleep once there, waki
 
 - Deep sleep usually improves indirectly through more total sleep, less alcohol, less fragmentation, cooler sleep, and training/stress load balance; there is no reliable same-night deep-sleep hack.
 - REM is sensitive to alcohol, sleep timing, antidepressants, cannabis, and late-night fragmentation; do not chase REM minutes alone.
-- If the user feels fine and only the score is low, explain measurement limits and pick no intervention or a low-burden check.
+- If the user feels fine and only the score is low, recommend no change or one low-burden check.
 - Never start proactive deep/REM coaching, a multi-day plan, or a supplement change from a consumer stage estimate alone. Do not compare the user's stage minutes with a population target as the reason to intervene.
 
 ## Accepted Multi-Day Plan
@@ -81,4 +81,4 @@ Offer one bounded review at the point when the chosen outcome could reasonably c
 
 - Name the likely sleep problem type first, then one lever and one measurement window.
 - Optimize one outcome at a time: latency, awakenings, total sleep, or score anxiety.
-- When recommending a change, say what wearable signal would count as improvement and what signal is too noisy to chase.
+- When recommending a change, name the wearable signal that would show it is working.

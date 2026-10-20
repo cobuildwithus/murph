@@ -293,52 +293,22 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps idle-window t
       expectedElapsedBoundaryMs: 850,
       failWakeMailboxFetch: false,
       futureWakeReason: null,
-      label: "keeps the idle window when the provider still matches",
-      providerAfterWake: "openai" as const,
-      slug: "matching_provider",
-    },
-    {
-      expectImmediateRecheck: true,
-      expectedElapsedBoundaryMs: 650,
-      failWakeMailboxFetch: false,
-      futureWakeReason: null,
-      label: "hands off immediately when the provider changed",
-      providerAfterWake: "venice" as const,
-      slug: "changed_provider",
-    },
-    {
-      expectImmediateRecheck: true,
-      expectedElapsedBoundaryMs: 650,
-      failWakeMailboxFetch: false,
-      futureWakeReason: "mailbox" as const,
-      label: "hands off immediately with a future mailbox continuation",
-      providerAfterWake: "venice" as const,
-      slug: "changed_provider_future_mailbox",
-    },
-    {
-      expectImmediateRecheck: true,
-      expectedElapsedBoundaryMs: 650,
-      failWakeMailboxFetch: false,
-      futureWakeReason: "assistant" as const,
-      label: "hands off immediately with a future assistant continuation",
-      providerAfterWake: "venice" as const,
-      slug: "changed_provider_future_assistant",
+      label: "keeps the idle window when the mailbox is unchanged",
+      slug: "unchanged_mailbox",
     },
     {
       expectImmediateRecheck: false,
       expectedElapsedBoundaryMs: 850,
       failWakeMailboxFetch: true,
       futureWakeReason: null,
-      label: "fails without a settings fallback when mailbox provider authority is unavailable",
-      providerAfterWake: "openai" as const,
-      slug: "mailbox_provider_unavailable",
+      label: "fails without a settings fallback when mailbox refresh is unavailable",
+      slug: "mailbox_unavailable",
     },
   ])("$label after an external runtime wake", async ({
     expectImmediateRecheck,
     expectedElapsedBoundaryMs,
     failWakeMailboxFetch,
     futureWakeReason,
-    providerAfterWake,
     slug,
   }) => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
@@ -356,9 +326,6 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps idle-window t
     let snapshotCount = 0;
     let wakeMailboxFetchCount = 0;
     const mailboxPort = createMailboxPort({
-      get assistantProvider() {
-        return externalWakeNotified ? providerAfterWake : "openai";
-      },
       events: [],
       items: mailboxItems,
     });
@@ -437,7 +404,7 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps idle-window t
           assistantConfigurationToolPort: {
             async request() {
               providerReadCount += 1;
-              throw new Error("Provider consistency must use mailbox facts.");
+              throw new Error("Mailbox refresh must not read model settings.");
             },
           },
           mailboxPort: {
@@ -446,7 +413,7 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps idle-window t
               if (externalWakeNotified) {
                 wakeMailboxFetchCount += 1;
                 if (failWakeMailboxFetch) {
-                  throw new Error("Mailbox provider refresh unavailable.");
+                  throw new Error("Mailbox refresh unavailable.");
                 }
               }
               return await mailboxPort.fetch(request, context);
@@ -488,7 +455,7 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps idle-window t
       runtimeWakeSignal.notify();
 
       if (failWakeMailboxFetch) {
-        await assert.rejects(resultPromise, /Mailbox provider refresh unavailable\./);
+        await assert.rejects(resultPromise, /Mailbox refresh unavailable\./);
         assert.ok(wakeMailboxFetchCount > 0);
         assert.equal(providerReadCount, 0);
         assert.equal(assistantPhaseCount, 1);

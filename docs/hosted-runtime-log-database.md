@@ -65,6 +65,39 @@ Historical missing categories cannot be retrospectively classified. The existing
 shallow scalar parser used on append and read accepts both new category values;
 no schema, reader, retention or event-count change is required.
 
+### Progress-alert sample attribution
+
+`mailbox.progress_alert_sampled` attributes a runtime-progress alert or reminder
+to the lane heads its health sample counted. Web writes it only after a newly
+built notification's claim commits, through Next.js `after()`, so neither the
+email send nor the cron response waits for it. Retries that reuse the persisted
+message write nothing, so a later sample is never bound to an earlier incident.
+
+Each entry is scoped to its runtime's subject key and uses existing columns:
+`at` equals the email's `Checked` admission time, `mailbox_lane` and
+`mailbox_seq_start`/`mailbox_seq_end` hold the sampled head's lane sequence,
+level is `warn` (14-day retention), and phase is the Web-origin `invoke`.
+`redactedJson` contains only `alertIncidentId` (the incident's existing opaque
+UUID), `healthCheckedAt` (the actual sampling instant, which precedes `at`),
+`sampleCount`, `sampleOverflowCount` and `scanTruncated`. At most 20 of the
+oldest stalled lanes are written, grouped per subject. Writes are sequential;
+no new write starts after a 10-second budget. That budget is not an end-to-end
+timeout: each started write keeps the store's existing connection and statement
+bounds across its lock, active-member check, insert and commit. If `after()`
+cannot schedule the task, the observation is dropped.
+
+Locate an alert's entries by event code and its exact `Checked` timestamp, then
+group by `alertIncidentId`. Fewer entries than `sampleCount`, a positive
+`sampleOverflowCount`, or `scanTruncated` means the evidence is incomplete.
+Missing entries are not evidence of no alert or of recovery: writes are best
+effort, skip inactive members, and may not finish if the function ends. A failed
+send may still have its attempted sample recorded. The alert email and
+persisted incident state do not change.
+
+Web is the only producer, but the shared event enum is part of Worker
+protocol admission. Deploy Web before any Worker built from this change, or the
+Worker release fails Web protocol admission closed.
+
 ### Device import connection ownership
 
 `device-sync.pass_finished.deviceSyncConnectionKey` is a SHA-256 hex digest of
@@ -109,6 +142,226 @@ rate denominator. These additions use the existing shallow scalar log contract
 and existing best-effort event; no extra callback, health payload, source id,
 window date, or durable scheduling state is added. Old log rows lack the fields
 and must be excluded from the measured cohort rather than treated as zeros.
+
+### Device job lineage
+
+Question: did a specific failed logical device job later run, import, and reach
+an accepted checkpoint, or is it still retained, dead, or missing? Resource,
+pass outcome, a later attempt count of one, and queue-set fingerprints cannot
+answer that: cold handoff restarts the local attempt counter, and a set
+fingerprint does not show which member completed.
+
+`device-sync.job_failed` now carries the same typed `attemptId`,
+`leaseGeneration`, and `workspaceVersion` columns as the pass markers, plus:
+
+- `failureJobLineage`: digests of every row whose failure transition committed
+  in that attempt (each row of a failed batch).
+- `failureJobLineageTruncated`.
+
+Both are `null` when the diagnostic has no row identity or its local account has
+no hosted connection mapping. `device-sync.pass_finished` appends:
+
+- `deviceSyncJobLineage`: `<digest>:<outcome><import><claim>` for the first
+  100 mapped rows of the retained claimed attempts, in execution order.
+  `deviceSyncJobLineageCount` counts every mapped row, and
+  `deviceSyncJobLineageTruncated` is true when it exceeds the emitted rows.
+  `deviceSyncJobLineageUnknownCount` counts rows without identity, rows of
+  another connection, and processed rows evicted from the bounded service
+  buffer.
+- `incomingRetainedJobLineage` and `outgoingRetainedJobLineage`, each with a
+  `...Truncated` flag: sorted, deduplicated digests of the first 100 job hints,
+  in queue order, carried in by the wake and handed off at the end. The flag is
+  true when more hints existed; retained queues are intentionally unbounded.
+  `null` means the wake had hints but no hosted connection identity; a thrown
+  pass has a `null` outgoing list because its checkpoint keeps the incoming wake.
+
+Only those bounded prefixes are read and digested; the rest are only counted.
+
+The digest is the first 16 lowercase hex characters of SHA-256 over the JSON
+array `["device-sync-job-lineage-v1", memberId, hostedConnectionId, key]`. `key`
+is the cold-handoff identity from `hosted-device-sync-job-identity.ts`: the
+row's dedupe key; otherwise the `hosted-device-sync-job:` key recovery writes
+from the local row id; or, for an incoming hint without one, the event/position
+key hydration assigns. It stays stable through window or cursor advancement on
+the same row, retries, and warm or cold restores, and differs across members and
+connections. Like the connection key, it is pseudonymous rather than anonymous
+against guessing a low-entropy key with both identifiers; it adds no key, secret,
+or configuration. Raw keys, row/account/connection ids, windows, cursors,
+payloads, and health values never enter the log.
+
+A digest correlates logical work, not a globally unique, immutable window. The
+provider owner defines the dedupe key, a later admission can reuse it, and a
+row's window or cursor can advance under the same key. A matching completion
+shows that work under that key completed, not that the original window did.
+
+| Position | Code | Meaning |
+| --- | --- | --- |
+| Outcome | `c` | Row completed with no follow-up rows scheduled |
+| Outcome | `h` | Row completed and scheduled follow-up rows that own the remainder |
+| Outcome | `p` | Attempt failed after committing partial progress; row retained |
+| Outcome | `f` | Attempt failed |
+| Outcome | `d` / `y` / `x` | Deferred, yielded, or cancelled/superseded; no attempt result |
+| Import | `a` / `n` / `u` / `e` / `0` | Claim applied, no-op only, unknown, failed, or none |
+| Claim | `s` / `b` | Single row, or batch (import code is claim-wide) |
+
+Import precedence is failed, unknown, applied, then no-op. Lists hold at most
+the pass job limit (100) items as comma-joined chunks of at most 2,048
+characters, within the existing 16-item array and 96-key bounds. This adds at
+most about 6 KB to a pass marker and 2 KB to a failure; typical passes add a few
+hundred bytes. No event, request, callback, query, state, or retention changes.
+
+Classify each failed digest relative to its latest observed failure, using only
+later rows of the same subject. Codes read outcome, import, then claim:
+
+- **Completed with its own applied import:** a later `cas` row whose attempt has
+  a later `checkpoint.snapshot_finished` with `webCheckpointAccepted = true`.
+- **Batch claim applied:** an accepted `cab`. The batch applied something, but
+  that import may belong to a sibling row; this row's own import is unknown.
+- **Completed without new persistence:** an accepted `cn?` or `c0?`.
+- **Handed to successors:** an accepted `h??`; successor rows own the remainder.
+- **Not complete:** `p`, `f`, `d`, `y`, `x`, `cu?`, `ce?`, or any completion
+  without an accepted checkpoint. A pass outcome alone never counts.
+- **Dead:** the latest observed failure has `failureDisposition = dead`; dead
+  rows leave both lists. An older dead failure under a reused key does not apply.
+- **Retained:** present in a later accepted pass's outgoing list.
+- **Missing candidate:** absent from every later list, the failure's own
+  lineage is complete, and the failure's connection has at least one later
+  accepted pass. In addition, every later pass on that connection must carry
+  array lists, `...Truncated = false`, and `deviceSyncJobLineageUnknownCount = 0`.
+  No later pass, a truncation flag that is not `false` (`true`, null, or
+  absent), sparse telemetry, or a pre-deployment pass makes absence
+  inconclusive.
+
+First establish failure coverage, because a failure without usable lineage
+cannot appear in the classified cohort below:
+
+```sql
+SELECT
+  CASE
+    WHEN jsonb_typeof(redacted_json->'failureJobLineage') = 'array'
+      AND redacted_json->>'failureJobLineageTruncated' IS NOT DISTINCT FROM 'false'
+      THEN 'complete'
+    WHEN jsonb_typeof(redacted_json->'failureJobLineage') = 'array' THEN 'truncated_or_unflagged'
+    WHEN redacted_json->'failureJobLineage' IS NOT NULL THEN 'identity_unknown'
+    ELSE 'absent'
+  END AS failure_lineage_coverage,
+  COUNT(*) AS failure_event_count,
+  COUNT(DISTINCT subject_key) AS distinct_subject_count
+FROM hosted_runtime_log
+WHERE at >= :window_start AND at < :window_end
+  AND event_code = 'device-sync.job_failed'
+GROUP BY 1
+ORDER BY 1;
+```
+
+Report that result with the classification. Any count other than `complete`
+means the cohort understates failures. Then aggregate natural traffic only; never
+return subject keys, digests, or raw JSON:
+
+```sql
+WITH failure_items AS (
+  SELECT log.id, log.subject_key, log.attempt_id, log.at, item.fingerprint,
+    log.redacted_json->>'failureDisposition' AS disposition,
+    log.redacted_json->>'failureJobLineageTruncated' IS NOT DISTINCT FROM 'false' AS lineage_complete
+  FROM hosted_runtime_log AS log
+  CROSS JOIN LATERAL jsonb_array_elements_text(CASE
+    WHEN jsonb_typeof(log.redacted_json->'failureJobLineage') = 'array'
+    THEN log.redacted_json->'failureJobLineage' ELSE '[]'::jsonb END) AS chunk(value)
+  CROSS JOIN LATERAL regexp_split_to_table(chunk.value, ',') AS item(fingerprint)
+  WHERE log.at >= :window_start AND log.at < :window_end
+    AND log.event_code = 'device-sync.job_failed'
+), failed AS (
+  -- The latest observed failure supplies disposition and attempt.
+  SELECT DISTINCT ON (subject_key, fingerprint) subject_key, attempt_id, fingerprint,
+    at AS failed_at, disposition IS NOT DISTINCT FROM 'dead' AS dead_latest, lineage_complete
+  FROM failure_items
+  ORDER BY subject_key, fingerprint, at DESC, id DESC
+), accepted AS (
+  SELECT subject_key, attempt_id, at
+  FROM hosted_runtime_log
+  WHERE at >= :window_start AND at < :observation_end
+    AND event_code = 'checkpoint.snapshot_finished'
+    AND redacted_json->>'webCheckpointAccepted' = 'true'
+    AND subject_key IN (SELECT subject_key FROM failed)
+), passes AS (
+  SELECT pass.subject_key, pass.attempt_id, pass.at, pass.redacted_json AS d,
+    pass.redacted_json->>'deviceSyncConnectionKey' AS connection_key,
+    EXISTS (SELECT 1 FROM accepted WHERE accepted.subject_key = pass.subject_key
+      AND accepted.attempt_id = pass.attempt_id AND accepted.at >= pass.at) AS checkpointed
+  FROM hosted_runtime_log AS pass
+  WHERE pass.at >= :window_start AND pass.at < :observation_end
+    AND pass.event_code = 'device-sync.pass_finished'
+    AND pass.subject_key IN (SELECT subject_key FROM failed)
+), scoped AS (
+  -- The failure's own pass marker (same attempt, next marker) names its connection.
+  SELECT failed.*, (SELECT own.connection_key FROM passes AS own
+    WHERE own.subject_key = failed.subject_key AND own.attempt_id = failed.attempt_id
+      AND own.at >= failed.failed_at
+    ORDER BY own.at LIMIT 1) AS connection_key
+  FROM failed
+), items AS (
+  SELECT passes.subject_key, passes.at, passes.checkpointed, list.kind,
+    split_part(entry.value, ':', 1) AS fingerprint,
+    split_part(entry.value, ':', 2) AS code
+  FROM passes
+  CROSS JOIN LATERAL (VALUES ('executed', passes.d->'deviceSyncJobLineage'),
+    ('retained', passes.d->'outgoingRetainedJobLineage')) AS list(kind, value)
+  CROSS JOIN LATERAL jsonb_array_elements_text(CASE WHEN jsonb_typeof(list.value) = 'array'
+    THEN list.value ELSE '[]'::jsonb END) AS chunk(value)
+  CROSS JOIN LATERAL regexp_split_to_table(chunk.value, ',') AS entry(value)
+), classified AS (
+  SELECT scoped.subject_key,
+    CASE
+      WHEN bool_or(items.kind = 'executed' AND items.checkpointed AND items.code = 'cas') THEN 'single_row_applied_accepted'
+      WHEN bool_or(items.kind = 'executed' AND items.checkpointed AND items.code = 'cab') THEN 'batch_claim_applied_accepted'
+      WHEN bool_or(items.kind = 'executed' AND items.checkpointed AND items.code ~ '^c[n0]') THEN 'completed_without_new_persistence_accepted'
+      WHEN bool_or(items.kind = 'executed' AND items.checkpointed AND items.code ~ '^h') THEN 'handed_to_successors_accepted'
+      WHEN bool_or(items.kind = 'executed' AND items.code ~ '^[ch]') THEN 'completed_unaccepted_or_import_unresolved'
+      WHEN scoped.dead_latest THEN 'dead_latest'
+      WHEN bool_or(items.kind = 'retained' AND items.checkpointed) THEN 'retained_accepted'
+      ELSE 'unobserved'
+    END AS classification,
+    scoped.lineage_complete AND COALESCE((
+      SELECT COUNT(*) > 0 AND bool_or(later.checkpointed) AND bool_and(
+        jsonb_typeof(later.d->'deviceSyncJobLineage') IS NOT DISTINCT FROM 'array'
+        AND jsonb_typeof(later.d->'outgoingRetainedJobLineage') IS NOT DISTINCT FROM 'array'
+        AND later.d->>'deviceSyncJobLineageTruncated' IS NOT DISTINCT FROM 'false'
+        AND later.d->>'outgoingRetainedJobLineageTruncated' IS NOT DISTINCT FROM 'false'
+        AND later.d->>'deviceSyncJobLineageUnknownCount' IS NOT DISTINCT FROM '0')
+      FROM passes AS later
+      WHERE later.subject_key = scoped.subject_key AND later.at > scoped.failed_at
+        AND later.connection_key = scoped.connection_key
+    ), false) AS later_coverage_complete
+  FROM scoped
+  LEFT JOIN items ON items.subject_key = scoped.subject_key
+    AND items.fingerprint = scoped.fingerprint AND items.at > scoped.failed_at
+  GROUP BY scoped.subject_key, scoped.fingerprint, scoped.failed_at,
+    scoped.dead_latest, scoped.lineage_complete, scoped.connection_key
+)
+SELECT classification, later_coverage_complete,
+  COUNT(*) AS failed_job_count, COUNT(DISTINCT subject_key) AS distinct_subject_count
+FROM classified
+GROUP BY classification, later_coverage_complete
+ORDER BY classification, later_coverage_complete;
+```
+
+Only `unobserved` with `later_coverage_complete = true` is a missing-work
+candidate; every other `unobserved` row is inconclusive. A failure whose own
+pass marker is absent has no connection scope and is never complete. If the
+statement times out, use the bounded four-hour slices below and keep each
+slice's failed set with the shared observation end. Review both queries against
+isolated fixtures before relying on them.
+
+Observation: deploy the runner producer, wait until no pre-deployment runner
+revision emits device passes, then observe 24 to 72 hours of natural traffic
+with `:observation_end` at least 24 hours after `:window_end`; info rows keep
+seven days and warnings 14. Do not generate production traffic. Mixed versions
+are safe: Web parses these keys through the unchanged shared parser, and an
+older runner simply omits them. Exclude failures or later passes without the
+fields rather than treating absence as empty. Rollback removes the fields with
+no state to migrate. After the window, the device-sync owner keeps the fields
+only if they separated completed, retained, dead, and missing work, and
+otherwise removes them in code.
 
 ### Ensure-processing summaries
 
@@ -214,7 +467,6 @@ SELECT at, attempt_id, lease_generation,
   d->>'runtimeProcessingAction' AS action,
   d->>'runtimeProcessingRetryReason' AS retry_reason,
   d->>'runtimeProcessingRetryAtEpochMs' AS retry_at_epoch_ms,
-  d->>'runtimeProcessingRetryStage' AS retry_stage,
   d->>'runtimeProcessingStage' AS final_stage,
   d->>'activeWakeRpcOutcome' AS caller_rpc_outcome,
   d->>'activeWakeRpcDispatchedAtEpochMs' AS caller_rpc_dispatched_epoch_ms,
@@ -251,10 +503,13 @@ export raw JSON or subject identifiers just to investigate a latency span.
 ### Provider request diagnostics
 
 `runner.provider_egress_diagnostic` is the bounded provider-request trace for
-hosted OpenAI Responses traffic and Venice Responses calls explicitly tagged by
-Codex as `request_kind: memory`. Version 4 records request and input byte counts,
-allowlisted shape/model kinds, cache-key presence, and keyed prefix fingerprints.
-For parsed Responses input, it also extends the existing aligned
+hosted OpenAI `POST /v1/responses` traffic. The Worker builds it from the request
+bytes already admitted for the image gate after the provider request starts, as
+background work, and emits it as a Worker structured log with the same bounded,
+redacted fields instead of writing one hosted-runtime-log row per model call.
+Version 4 records request and input byte counts, allowlisted shape/model kinds,
+cache-key presence, and keyed prefix fingerprints. For parsed Responses input, it
+also extends the existing aligned
 `inputNestedMetricKinds`, `inputNestedMetricCounts`, and
 `inputNestedMetricBytes` arrays with fixed function-output metrics. Nonzero
 action metrics use `function_output.action.command.execution`,
@@ -268,16 +523,11 @@ are omitted. They do not claim semantic equivalence, and no call id, serialized
 output, or comparison key is persisted.
 Request bodies above 6 MiB retain the request byte count and `too_large` status
 but skip JSON and function-output classification.
-Venice memory rows additionally record the canonical Murph model, the allowlisted
-upstream Venice model id, response-header latency, HTTP outcome, validated
-`CF-RAY`, bounded provider retry count, and whether the provider's reported model
-matches the requested route. `providerResponseTtfbMs` measures time through
-response headers, not full streamed-generation latency.
 
 Codex `session_id`, `thread_id`, `turn_id`, and `window_id` values are never
 stored. When `HOSTED_LOG_FINGERPRINT_SECRET` is configured, the Worker records
-only context-separated HMAC-SHA256 fingerprints so repeated `request_kind`
-`memory` calls can be grouped within the retention window. Without the secret,
+only context-separated HMAC-SHA256 fingerprints so repeated request prefixes
+can be grouped within the retention window. Without the secret,
 the diagnostic records fingerprint availability only. Provider request and
 response bodies, prompts, messages, tool arguments/results, arbitrary response
 headers, account balances, credentials, paths, vault content, and direct member
@@ -383,15 +633,11 @@ for cache lifetime and write pricing. Current GPT-5.6+ TTL supports `30m`; it do
 not promise that an infrequent scheduled job retains a warm prefix indefinitely.
 
 The row is observability only and remains failure-isolated from provider egress.
-Venice foreground and untagged calls do not create these rows. Container egress
-schedules tagged memory rows with Cloudflare `waitUntil` when available and
+Container egress schedules diagnostics with Cloudflare `waitUntil` when available and
 otherwise starts a best-effort detached callback, which can be lost if the
 invocation ends. Diagnostic persistence never delays a provider response or
 transport error. Non-OK and transport-error diagnostics use warning retention,
-while accepted and request-only diagnostics use debug retention. Venice response
-status and response-header latency are recorded only after upstream dispatch;
-Murph-local platform-usage denials do not produce Venice response rows, and
-transport failures omit response-header latency.
+while accepted and request-only diagnostics use debug retention.
 
 The separate assistant `provider.prompt_size` trace may record
 `conversationHistoryPresent`, `conversationHistoryCount`, and
@@ -426,100 +672,13 @@ describes the active turn at observation time. A delayed thread-scoped warning
 cannot be attributed conclusively to that turn or an earlier WebSocket frame. POST egress
 diagnostics do not observe WebSocket frames, and absence of a warning is not
 proof that no recovery occurred. `codexTransportTimeoutPhase` distinguishes
-`websocket-send`, `websocket-read`, and `http-read` when native warning text
-identifies the operation; missing or unknown phases are omitted by the runtime
-projection. No endpoint, raw thread or turn ID, prompt,
-response, or additional provider error text enters the diagnostic record.
-
-#### Responses WebSocket relay observations
-
-The Worker also writes `runner.provider_egress_diagnostic` records with
-`transportKind: websocket` through the existing runtime-log route. The
-`websocketMilestone` values describe actual relay boundaries:
-`client_received`, `upstream_sent`, first `upstream_received`, first
-`downstream_sent`, `response_received`, `response_forwarded`, and one observed
-`closed` or `failed` event. First-frame observations reset after each forwarded
-client frame. A later acknowledgement, first semantic output, or terminal event
-emits one receive/forward pair; further token frames update constant-size state
-without emitting per-token records. When the first frame is itself a milestone,
-it shares the existing first-frame record.
-
-Each connection gets a random `websocketConnectionCorrelation`. Counts include
-`clientFrameCount`, `upstreamSends`, `upstreamFrameCount`, and
-`downstreamFrameCount`. `activeClientMessageOrdinal` identifies the most recently
-forwarded client frame; `observedClientMessageOrdinal` on receipt can describe
-a newer frame still awaiting admission. `requestElapsedMs` starts at receipt of
-the latest forwarded frame, `upstreamSendElapsedMs` measures its admission/relay
-delay, and `firstUpstreamElapsedMs` and `firstDownstreamElapsedMs` measure the
-next receive and forward boundaries. `upstreamIdleMs` and `downstreamIdleMs`
-measure connection-wide time since the last data frame on each boundary.
-
-Every existing milestone includes numeric `acceptedPendingBytes` and
-`acceptedPendingMessageCount` from the relay's shared client/provider reservation
-counters, connection-local `acceptedPendingHighWaterBytes` and
-`acceptedPendingHighWaterMessageCount`, and the existing limits as
-`pendingLimitBytes` and `pendingLimitMessageCount`. High-water values advance only on successful
-reservation and survive draining and request reuse. Receive milestones run before
-reservation, so they exclude the arriving frame; send milestones run before
-release, so they include the frame being forwarded. Rejected frames never enter
-these values. A close or failure can still observe outstanding reservations.
-These measure accepted queued/in-flight work, including authorization or usage
-persistence waits, not JavaScript heap, socket buffers, or total isolate memory.
-The two high-water values are independent peaks, not necessarily simultaneous.
-
-The six scalars are additive under `diagnosticVersion: 1`; the unchanged runtime
-log parser accepts their `Bytes`/`Count` metadata names, as do older readers using
-that same policy. Readers with stricter schemas need separate compatibility
-verification. Older records without the fields remain valid; absence is unknown,
-not zero. No extra events or writes are emitted. A lost tail or platform memory
-termination may leave no final/high-water observation; low values in the last
-surviving record cannot rule out a later backlog peak or other memory pressure.
-
-`firstUpstreamMessageKind` contains only a fixed event-type allowlist or
-`other`, `invalid_json`, `too_large`, or `binary`. Only the first frame is
-parsed for this field, with a 65,536-character limit. No raw frames, arbitrary
-event types, provider IDs, or close reasons enter the records. Close observations
-contain only side, numeric code, and a fixed failure phase. A provider close can
-be observed before queued downstream forwarding finishes; existing relay drain
-ordering remains authoritative.
-
-Interpret these as connection observations, not model-health or exact-request
-proof. A forwarded request followed by no upstream frames supports upstream
-silence; a received frame without its corresponding forward supports relay
-delay. Unsolicited metadata and overlapping frames can weaken attribution.
-A valid, associated `response.created` establishes an acknowledgement, not
-continued inference progress. The runtime-log attempt/fence belongs to the socket upgrade
-and may precede later turns on a reused socket; it must not be treated as the
-current turn ID. Existing write-fence validation is preserved.
-
-`responseMilestone` is `acknowledged`, `progress`, or `terminal` for an observed
-response lifecycle boundary. `responseAcknowledged` requires `response.created`
-with a bounded response ID; metadata alone cannot set it. Lifecycle inspection
-parses text frames up to 65,536 characters and request frames up to 6 MiB.
-Malformed, binary, and oversized frames still pass through the relay and set
-`responseInspectionIncomplete`; missing evidence is never a health verdict.
-
-`responseRequestKind` distinguishes generation and `generate: false` prewarm.
-`responseClientMessageOrdinal` binds captured receive and forward observations
-to a forwarded request, even when forwarding is queued. Only a single outstanding
-recognized request permits `responseAssociationKind: single-request`. Overlap,
-unknown requests, or conflicting response IDs make subsequent attribution
-ambiguous for that socket. Response IDs are used only in memory and never logged.
-
-`responseAcknowledgementElapsedMs`, `responseFirstProgressElapsedMs`, and
-`responseTerminalElapsedMs` start at upstream send. `responseProgressIdleMs`
-measures time since the last recognized output event; `responseMaxFrameGapMs`
-tracks the largest observed data-frame gap, including send to first frame.
-`responseTerminalKind` uses a fixed terminal-event allowlist.
-`responseForwardElapsedMs` measures a captured milestone's receive-to-send delay.
-These fields distinguish acknowledgement, output, and forwarding; silence can
-still mean healthy reasoning, provider queuing, or a stalled stream.
-
-The request's `client_metadata.turn_id` supplies `codexTurnCorrelation` using the
-existing 48-bit SHA-256 correlation convention. It joins native
-`codexTimingTurnCorrelation` within the same runtime context. It is a diagnostic
-join hint, not an authority key; several provider requests can share a turn.
-The socket correlation and request ordinal retain the finer relay scope.
+`websocket-send`, `websocket-ack`, `websocket-read`, and `http-read` when native
+warning text identifies the operation; missing or unknown phases are omitted by
+the runtime projection. `websocket-ack` means the deployed Codex patch received
+no provider frame within 15 seconds after sending a request; later silence
+remains `websocket-read` under the provider stream idle timeout. No endpoint,
+raw thread or turn ID, prompt, response, or additional provider error text
+enters the diagnostic record.
 
 Native `provider-output-received` and `assistant-output-received` timing records
 observe accepted, current-turn assistant/reasoning output or tool activity at
@@ -529,7 +688,7 @@ Murph's app-server consumer. At most two extra records are emitted per turn.
 `codexTimingFirstAssistantReceiptElapsedMs`,
 `codexTimingLastProviderReceiptElapsedMs`, and `codexTimingProviderReceiptCount`
 also appear on turn completion. These timings start at the local `turn/start`
-write, unlike relay timings. Reused-turn scope checks run before receipt tracking.
+write. Reused-turn scope checks run before receipt tracking.
 Tool activity includes native tool execution events; the count is native events,
 not provider frames. Pinned Codex discards the response ID from its internal
 created event, so these records cannot prove delivery of a particular raw
@@ -539,14 +698,6 @@ The additions are optional diagnostics: older readers drop new receipt stages
 and ignore new fields, and newer readers accept older records. Deploy the runtime
 projection before producers for complete visibility; mixed versions and rollback
 can lose diagnostics without changing responses or transport behavior.
-
-Persistence is best effort: at most four log writes are in flight per connection,
-with no diagnostic queue or awaited write on the forwarding path. Structured
-Worker logs retain the observation even when the durable write is skipped.
-`runtimeLogScheduled` and cumulative `droppedRecords` expose local admission
-and failed writes on subsequent observations, without guaranteeing persistence.
-Failures and closes after a send with no upstream frame receive warning
-retention; ordinary milestones remain debug. Missing rows are missing evidence.
 
 #### Stall reproduction and recovery design
 
@@ -588,17 +739,16 @@ lowering the limit; it does not measure real provider silence frequency or prove
 90 seconds is universally safe. An idle deadline bounds stream-read silence,
 not total latency across HTTP setup, retries, tools, or continuing response events.
 
-A test-only alternative closes the socket after five seconds without its first
-upstream data frame; the same native fallback began at 5,010 ms while native idle
-remained 90 seconds. A separate healthy case emitted `response.created`
-promptly, waited one second for text, and completed without fallback despite a
-500 ms prototype deadline. This alternative preserves acknowledged quiet
-reasoning, but any first frame cancels it: it cannot recover a post-acknowledgement
-stall or establish model progress. It is not a complete replacement for the idle
-deadline. A post-acknowledgement stall fixture confirms native idle recovery
-still fires after the first-frame guard has been cancelled. Ping/pong similarly
-proves a responsive transport peer, not inference;
-Murph's Worker relay also separates the client and upstream transport legs.
+The deployed Codex patch bounds that first-frame wait natively. A WebSocket
+request that receives no provider frame within 15 seconds fails with the
+`websocket-ack` phase, and native fallback replays it over HTTPS while the idle
+window stays 90 seconds. Any provider frame clears the bound, so acknowledged
+quiet reasoning and compaction keep the idle window; ping and pong are consumed
+by the transport and do not count as acknowledgement. The bound cannot recover a
+post-acknowledgement stall, which still surfaces as `websocket-read` after the
+idle window. The permission-sandbox lane runs `assistant-codex-websocket-stall.test.ts`
+against the deployed binary to prove both cases; the ordinary lane uses the
+unpatched npm helper and skips them.
 
 The current hosted policy uses a 90-second native stream-idle timeout for
 OpenAI, including its HTTPS fallback and operator requests. Streaming native
@@ -609,8 +759,7 @@ verifies successful compaction and preserved task state with the current window.
 requests and streaming compaction inherit the same provider configuration.
 Native Codex also uses this knob for WebSocket sends; it does not replace the
 separate connection and HTTP request budgets.
-Venice and custom inference also use 90 seconds. `codex.prepare` reports the
-selected provider's idle timeout and request/stream retry limits. Native Codex
+`codex.prepare` reports OpenAI's idle timeout and request/stream retry limits. Native Codex
 still owns the single WebSocket attempt and HTTPS fallback; request retries,
 Murph cancellation, accepted work, and delivery ownership are unchanged.
 
@@ -624,15 +773,12 @@ cause of the original delayed reply. Genuine provider silence over 30 seconds
 can interrupt useful work; continuing events reset the idle wait, while local
 tool work occurs outside it. This is not a total reply deadline.
 
-The opt-in `MURPH_RUN_CODEX_30S_PROOF=1` cases in the two fixture files above
-exercise the full 30-second setting: silence before/after acknowledgement or partial text,
-22-second quiet completion, reasoning events and local tools spanning 35
-seconds, continuation recovery after a completed tool, and a resumed next turn.
 Routine CI runs short native equivalents and checks the rendered hosted config.
 Rollout needs fresh-process config adoption; mixed old/new containers retain
 their respective native windows without a wire or persisted-state change.
-Observe selected timeout, acknowledgement/forwarding gaps, native timeout phase,
-fallback frequency, and terminal failures through the existing diagnostics.
+Observe the selected timeout, native timeout phase (`websocket-ack` or
+`websocket-read`), fallback frequency, and terminal failures through the
+existing diagnostics.
 
 ### Web-control preflight rejection attribution
 
@@ -958,6 +1104,132 @@ ORDER BY at DESC
 LIMIT 100;
 ```
 
+## Group shared-read timing
+
+Each accepted group `read_shared` request from the interactive group operation
+and the scheduled group operation (`createHostedGroupSharedReader` wired in
+`workspace-assistant-phase.ts`) queues one info `assistant.automation_detail`
+event when it settles. Only requests rejected by input or capability
+validation (invalid scopes or options, no group tool port, or freshness on a
+reader without a wait budget) emit nothing. A valid request whose operation
+signal is already aborted is accepted and records `canceled` with zero
+callbacks. The unscoped read-only reader used by detached asks is not instrumented. The record
+is queued through the existing nonblocking info buffer after the read settles;
+it is never awaited, and an observer throw or rejection cannot change the read.
+
+`redacted_json` holds `type = 'hosted_group_shared_read_timing'`,
+`schema = 'murph.hosted-group-shared-read-timing.v1'`, a fixed `detailLabel`,
+and only:
+
+- `groupSharedReadLane`: `interactive` or `scheduled`
+- `groupSharedReadFreshnessRequested`: the caller supplied freshness
+  requirements for the initial Web read. It does not prove that a request was
+  sent or accepted (a pre-aborted read makes zero Web calls) or that a refresh
+  completed.
+- `groupSharedReadWaitBudgetMs`: the configured deadline for the existing
+  sleep-and-reread loop (15,000 interactive, 300,000 scheduled, 0 read-only).
+  It bounds when another poll may start; it is not a callback timeout, so total
+  time can exceed it.
+- `groupSharedReadElapsedMs`: monotonic total from acceptance to settlement
+- `groupSharedReadCallbackCount`, `groupSharedReadCallbackElapsedMs`,
+  `groupSharedReadCallbackMaxElapsedMs`: Web callback attempts (including an
+  older-producer fallback) and their cumulative and longest wall time
+- `groupSharedReadPollCount`, `groupSharedReadPollElapsedMs`: intentional
+  freshness waits between rereads and their wall time, including timer
+  scheduling and abort latency (a canceled wait counts its partial time)
+- `groupSharedReadOutcome`: `ok`, `none`, `unavailable`, `error`, or
+  `canceled`. `ok`, `none` (Web found no shared data), and `unavailable` are
+  the returned result's own `status`; `unavailable` includes runtime-built
+  unavailable results such as an invalid response or failed fallback.
+- `groupSharedReadDecision`: the terminal reason. `not_ok` through `deadline`
+  follow the polling loop's original short-circuit order:
+  - `no_freshness`: no requirements were supplied
+  - `not_ok`: the current result was not `ok`
+  - `not_needed`: Web reported `refreshStatus = 'not_needed'`
+  - `refresh_unavailable`: Web reported `unavailable` or omitted freshness
+  - `satisfied`: the existing wearable-recovery predicate is false. That is
+    narrower than every requested or historical date being populated.
+  - `deadline`: the polling deadline passed while recovery was still needed
+  - `invalid`: Web returned a non-`read_shared` response
+  - `fallback`: the initial or a poll callback threw and an ordinary reread
+    succeeded
+  - `error`: the request and any fallback failed
+  - `canceled`: the operation signal aborted
+
+There are no dates, scope keys, health cardinalities, member or participant
+identifiers, values, arguments, results, or exception text. `canceled` means the
+operation signal aborted and the read rejected; it does not prove that in-flight
+Web work stopped. A process kill before settlement emits nothing, and the
+droppable info queue may shed records under backpressure, so absence is missing
+evidence rather than a fast read. `ok` with `deadline` is not latency health.
+
+Run this aggregate on the dedicated runtime-log database only, over a fixed
+window that begins **after** the instrumented revision is verified deployed.
+A telemetry-only protected deployment can be blocked when the deploy workflow
+cannot select that candidate revision; confirm the running revision rather than
+assuming it. Observe for 24–72 hours before deciding whether the remaining time
+is polling, callback latency, or freshness that never arrived.
+
+```sql
+SELECT redacted_json->>'groupSharedReadLane' AS lane,
+       redacted_json->>'groupSharedReadDecision' AS decision,
+       redacted_json->>'groupSharedReadOutcome' AS outcome,
+       count(*) AS reads,
+       sum((redacted_json->>'groupSharedReadPollCount')::bigint) AS polls,
+       percentile_disc(0.5) WITHIN GROUP (
+         ORDER BY (redacted_json->>'groupSharedReadElapsedMs')::numeric) AS p50_total_ms,
+       max((redacted_json->>'groupSharedReadElapsedMs')::numeric) AS max_total_ms,
+       sum((redacted_json->>'groupSharedReadPollElapsedMs')::numeric) AS poll_ms,
+       sum((redacted_json->>'groupSharedReadCallbackElapsedMs')::numeric) AS callback_ms,
+       max((redacted_json->>'groupSharedReadCallbackMaxElapsedMs')::numeric) AS max_callback_ms
+FROM hosted_runtime_log
+WHERE at >= $1 AND at < $2
+  AND event_code = 'assistant.automation_detail'
+  AND redacted_json->>'type' = 'hosted_group_shared_read_timing'
+  AND redacted_json->>'schema' = 'murph.hosted-group-shared-read-timing.v1'
+GROUP BY 1, 2, 3
+ORDER BY 1, 2, 3
+LIMIT 100;
+```
+
+## Active-turn exact input lookup
+
+Each active-turn admission runs, in one call, a strict conversation query, an
+exact-ID lookup for the inputs notified to that turn, and a route query.
+
+The route query's existing `assistant.automation_detail` row (`type =
+'assistant.input_candidates.listed'`) carries that same call's exact-lookup
+observation. It adds no new row and does not count against the input-query cap.
+
+- `exactLookupCalled`: whether the exact lookup ran.
+  - `false` with `exactLookupRequestedCount = 0` means no notified inputs were
+    pending.
+  - `false` with a positive count means the source has no exact lookup.
+- `exactLookupRequestedCount`: the notified inputs not already known to the call.
+- `exactLookupReturnedCount`: how many came back, or null when the lookup did not
+  run.
+- `exactLookupExclusionSummary`: `reason:count` pairs naming the existing lookup
+  step that left each requested input out, or `none`.
+  - Reasons: `missing_event`, `no_cursor`, `anchor_unavailable`,
+    `at_or_before_cursor`, `not_grouped_with_anchor`, `projection_pending`,
+    `not_replyable`, `replyability_not_evaluated`, `not_batch_successor`,
+    `after_earlier_exclusion`, `known_input`, `source_mismatch`, `over_limit`.
+  - Within the successor walk, only the first failing check is named, in the
+    existing check order.
+  - `replyability_not_evaluated`: a requested input was missing, so the batch's
+    replyable filter never ran. It is not a replyability rejection.
+  - `not_grouped_with_anchor` covers every grouping exclusion. It does not tell
+    an affirmative reaction from a route, session or conversation mismatch.
+  - Null means the source did not report reasons, not that nothing was excluded.
+  - `invalid` means the reported reasons were not usable: an undeclared code, a
+    count that is not a non-negative safe integer, or a total above the
+    requested count. Only declared codes are ever emitted.
+
+Missing fields mean the row carried no admission observation: a pass-start
+listing, an admission that ended before the route query, or one whose route
+discovery was skipped. These are diagnostics only. They do not change admission,
+selection, grouping or ordering, and they carry no IDs, actors, anchors or text.
+
 ## Reads and retention
 
 Status and latency dashboards read only the isolated store. If a dedicated
@@ -978,6 +1250,63 @@ and contained. Callback and browser assertion
 nonces belong to a separate primary-database nonce cron at minute 5; its
 callback statements retain the 5,000-row statement cap and use a dedicated
 400-batch catch-up ceiling.
+
+### Runaway invocation alert
+
+The existing five-minute `/api/internal/hosted-runtime/latency-alert/cron` also
+runs the runaway invocation monitor. A subject with at least 25
+`runtime.invocation_finished` rows, at least 60 `runner.processing_finished`
+rows, or at least 20 `runner.processing_finished` rows with outcome
+`retry_later`, in the trailing 60 minutes opens the shared operational email
+incident.
+Every Worker ensure-processing call writes one `runner.processing_finished` row
+and calls Web, so the second count catches retry storms that never start a run
+(normal members stay under 20 per hour). The retry count isolates waste from
+activity: from 2026-09-23 to 2026-10-07 every member-hour with 20 or more
+retries was a retry storm, while busy healthy members mostly log accepted
+attempts. Subjects rank by their worst ratio to any threshold, and the email
+shows each subject's retry count. Thresholds and window are named constants; recipient
+and timezone configuration is shared with the latency monitor. Reminders use
+the existing six-hour interval and jitter, including quiet hours like the runtime
+progress monitor. A healthy evaluation clears the incident without a recovery
+email. Missing local log configuration skips the monitor; read failures cannot
+clear an existing incident.
+
+Each evaluation uses one aggregate over the existing `(at, id)` time index,
+including the incident owner's fresh pre-send evaluation. It returns the total
+qualifying subject count and at most ten highest-count subjects. Email and
+incident details contain only counts, eight-character digest prefixes, and
+dominant allowlisted `processingMode`/`nextWakeReason` labels plus the dominant
+processing outcome (`retry_later:<allowlisted reason>`, a bare outcome, or
+`unknown` for missing or unrecognized values). No raw identity lookup, payload export,
+migration, or runtime control action is required.
+
+### Scheduled automation loss alert
+
+The same five-minute cron runs the scheduled automation loss monitor. It alerts
+only on runs a member never receives. A lost run is an
+`assistant.automation_detail` row of type `cron.occurrence.expired` with a
+numeric `failurePriorFailureCount` above zero (every retry inside the
+occurrence's freshness window failed), or `cron.job.completed` with
+`failureRunOutcome: "failed"` and `failureRetryScheduled: false` other than a
+usage-limit error. A run that is still retrying, including a delayed Flex
+retry, is not lost. Any lost run in the trailing 6 hours opens the shared
+operational email incident.
+
+Requiring a prior failure excludes expiries that never reached the model:
+onboarding-gated research automations are evaluated on a later wake and expire
+with zero prior failures by design. Cron rows are capped per pass, so counts
+are lower bounds.
+
+Recipients, timezone, reminders and recovery follow the shared incident owner
+with the latency monitor's configuration. Like the runaway monitor it sends
+during quiet hours: the 23:00–07:00 quiet period outlasts the 6-hour window, so
+a deferred loss early in the night would age out unreported. Read failures
+cannot clear an existing incident. Each evaluation runs one time-indexed aggregate and,
+only when alerting, a second one for failed scheduled attempts by error code.
+Email and incident details contain only counts per allowlisted managed
+automation slug (other slugs, which members can name, read `member_automation`)
+and per allowlisted error code (`other` otherwise).
 
 ### Bounded event inventories
 
@@ -1192,6 +1521,18 @@ This is best-effort diagnostic attribution, not an authorization or integrity
 ledger. Existing runtime/version dimensions, usage sampling and retention remain
 unchanged; there is no new subject/correlation label.
 
+### Shared lazy load phases
+
+`service-runtime-load` measures the native integrated-services import for the
+call that creates its cached promise. `query-runtime-load` measures the native
+query import for the call that creates that process-scoped promise. Waiters
+have absent samples, not zero wait. Failed imports preserve the original error
+and the existing retry/reset behavior. These shared phases remain independent
+of individual commands; they add no cache, retry owner, or persisted state.
+Legacy Patterns phase names remain accepted only for draining older runtimes'
+optional timing reports; no current producer emits them. Remove those names
+after all old runtime/CLI producers have been replaced.
+
 ### Timing semantics and completeness
 
 All durations use `process.hrtime.bigint()`, floored to integer **microseconds**.
@@ -1246,7 +1587,7 @@ and children rejected before entering the CLI have no invented command timing.
 Legacy batch output, counts, lengths, durations and failure handling are unchanged.
 
 Bounds are source-owned: 32 distinct command/outcome entries per report/active
-window; 17 fixed phase names (the original 11 plus six rebuild names); 64 started
+window; 24 fixed phase names (the original 11, six rebuild names, four Patterns names and three load names); 64 started
 scoped spans per invocation (plus fixed lifecycle samples); at most 8,192 bytes
 per complete UDP envelope (including the ephemeral key/ticks) and 256 received packets per window. The 8 KiB cap is below
 the supported macOS 9 KiB UDP datagram limit; no host setting or permission is
@@ -1267,10 +1608,13 @@ activated-window report is not proof every CLI invocation was observed.
 The complete usage-request ceiling is separately **16,384 UTF-8 bytes**, owned by
 `HOSTED_USAGE_RECORD_BODY_LIMIT_BYTES` in `hosted-execution/runtime-control` and
 shared by the sender and Web route. Individually bounded datagrams can merge into
-an oversized HTTP payload. `runtime-platform/usage-record-port.ts` therefore
+an oversized HTTP payload. The shared Cloudflare `usage-record-body.ts` helper
 normalizes/copies only `cliTiming` and measures the entire JSON body, including
-`usage`, the legacy profile and any notice target, before transport serialization
-and signing. It removes whole summaries from the end until the request fits,
+`usage`, the legacy profile and any notice target. The usage port applies it
+before transport serialization; the Worker proxy applies it again after replacing
+`reportingUserId` with trusted attribution, before signing the final body. This
+keeps attribution growth inside the same byte budget for existing senders too.
+It removes whole summaries from the end until the request fits,
 adding their calls to the existing saturating `droppedCalls`. Other counters and
 retained phases are unchanged; HTTP trimming does **not** set `transportTruncated`
 (which describes the packet budget). A counters-only timing object can remain.
@@ -1282,8 +1626,9 @@ can only quantify omissions where the timing object survives. All legacy usage,
 provider-request, token, tool and notice-target fields are preserved; the queued
 record is not mutated. An already-oversized legacy request remains oversized and
 follows its existing rejection path rather than sacrificing accounting to fit.
-No request/packet cap, retry or flush behavior changes. The corrected sender works
-with the existing Web ceiling; this fix does not require coordinated deployment.
+No request/packet cap, retry or flush behavior changes. The sender and Worker use
+the existing Web ceiling; Worker rollout can correct existing senders without a
+coordinated Web or runner-container deployment.
 
 The exact histogram intervals in milliseconds are `[0,250)`, `[250,1000)`,
 `[1000,2500)`, `[2500,5000)`, `[5000,10000)`, `[10000,30000)`,
@@ -1304,14 +1649,14 @@ microseconds, eight histogram buckets, command/outcome identity, failure fields,
 32-command / 64-scoped-span caps, UDP 8,192-byte and HTTP 16,384-byte ceilings,
 whole-command trimming and disabled-scope no-op behavior are unchanged. No entity
 counts, IDs, paths, arguments, content, result values or error text are added.
-The enum length itself owns the exact 17-entry per-command shape bound; no
-transport limit is widened to accommodate the extra phases.
+The enum length itself owns the current 29-entry per-command shape bound (including the Patterns, load and metric
+subphases); no transport limit is widened to accommodate the extra phases.
 
 | New phase | Existing operation measured |
 | --- | --- |
 | `query-source-read` | Await the strict canonical snapshot read, including its parsing/validation; not reset or the separate manifest scan. |
 | `query-wearable-dataset` | `collectWearableDataset`; wearable-only also includes the inline `createVaultReadModel` argument. Full rebuild's prior read-model assembly remains residual. |
-| `query-metric-projection` | Full rebuild's global metric projection, daily sample/metric outputs and canonical metric-target extraction. Absent from wearable-only rebuilds. |
+| `query-metric-projection` | Full rebuild's global metric projection, daily sample/metric outputs and canonical metric-target extraction. Absent from wearable-only rebuilds. Split by the nested subphases below. |
 | `query-wearable-summary` | Derive/encode stored wearable summary rows. Absent when full rebuild reuses an already-fresh wearable generation. |
 | `query-search-documents` | Full rebuild's search-visibility filter and canonical/sample-summary document construction. No SQLite work. Absent from wearable-only rebuilds. |
 | `query-publication` | Database opening and its schema/migration setup, the existing immediate transaction (deletes, inserts, manifests and metadata), and database close. Full rebuild's result-object construction is also inside this interval. This is **not transaction-only timing**. |
@@ -1402,6 +1747,187 @@ instrumentation cardinality/bytes and records observed local overhead, **not a
 universal latency bound or production speedup**. Transport cost is covered
 separately by the existing integration tests.
 
+### Metric projection subphases (reader-before-producer)
+
+Five more fixed names split the existing `query-metric-projection` interval of
+a full rebuild. They follow every rule of the section above: same schema,
+buckets, caps, drop counters, trimming and disabled no-op. They add no labels,
+counts, IDs, arguments, content or error text.
+
+| Nested phase | Existing operation measured |
+| --- | --- |
+| `query-metric-samples` | `summarizeDailySamples` over the snapshot read model. |
+| `query-metric-evidence` | Wearable metric evidence: summary bundle from the rebuild's existing wearable dataset, sleep/recovery/activity/body summaries, evidence rows and suppression evidence. |
+| `query-metric-extract` | `extractMetricPoints` over evidence rows, sample summaries and canonical entities, including its deduplication and ordering. |
+| `query-metric-precedence` | Wearable-summary suppression and Junction precise-body precedence over the extracted points. |
+| `query-metric-targets` | `extractMetricTargetsFromCanonicalEntities`. |
+
+The shared `buildMetricProjection` owner is also used by the browser-replica
+source and by experiment readers, so it never imports Node timing. It exposes
+one optional synchronous `startStep` boundary that receives only a fixed step
+name and returns that step's end callback. Only the Node-only rebuild owner
+passes `startCliPhase`; every other caller passes nothing and runs the
+unchanged direct path. Each step ends in `finally`. Observer failures are
+ignored, so the original result or thrown error is preserved. Targets use
+`timeCliPhaseSync` in the rebuild owner. Ordering, operations, locking,
+freshness, cancellation and publication are unchanged.
+
+**Interpretation.** These spans are nested inside `query-metric-projection` and
+are not additive with it. The parent minus the five children is the small
+unspanned glue around them, not an independent operation. Subphases are absent
+wherever the parent is absent: wearable-only rebuilds, fresh reads and any
+`buildMetricProjection` caller outside the rebuild owner. Browser-replica and
+experiment projection time is not covered. Use them only to rank which
+suboperation dominates slow `query-metric-projection` samples in natural traffic
+after deployment. They make **no historical causal claim**: the earlier 23.4 s
+event and the 72-hour 38 s total cannot be attributed retroactively. A later
+slow subphase is a new observation, not that event's cause. Synchronous spans
+measure wall time, including GC, CPU contention and descheduling; they do not
+separate CPU from waiting.
+
+**Rollout.** Same consumer-first order as above: verify every deployed hosted
+consumer of `normalizeCliTiming` admits the 29-name vocabulary first: Web
+(`parseAssistantUsageRecord`), then the Cloudflare worker's usage forwarding and
+recording. Then deploy the runner image
+carrying the runtime-state, query and CLI producer. Older readers reject the
+whole optional timing object containing a new name while preserving legacy
+usage accounting; do not rely on that during rollout.
+
+**Release route.** The unmerged-candidate blocker above describes the earlier
+rebuild-phase patch and is not this change's route. Release follows the normal
+reviewed merge to main and the main-only protected deployment, only after a
+green review and green CI on the exact head: Web, then the Worker, then the
+Runner, each verified before the next. Establish deployed status only from
+recorded proof of the deployed revision and binding for each surface. Record
+natural end-to-end admission of the new names separately; absent subphases
+may mean insufficient qualifying traffic, not a failed release.
+
+**Observation.** After verified deployment, run an immediate check and then a
+check every 30 minutes for four hours. That covers deploy health and first
+admission only. It is separate from, and does not replace, the 24-hour
+preliminary and 72-hour baseline sampling windows, which also start only after
+verified production deployment and use the bounded inspection below with the
+same retained-sample, coverage and drop caveats. When app heartbeat scheduling
+is unavailable, record that as an explicit observation-scheduling blocker and
+do not claim the watch was scheduled or completed. This grants no manual
+scheduler substitute or new automation.
+
+**Proof.** Query `metric-projection-steps.test.ts` covers step bracketing,
+complete-output parity with and without an observer, observer failures,
+end-on-throw with original error identity, and a Node-free import graph from
+the shared owner. `wearable-source-health-query.test.ts` covers presence, exact
+nested sums under a controlled clock, absence from wearable-only paths, a
+metric-subphase failure (spans closed, lock released, nothing published,
+retryable), and the existing opt-in rotated measurement. Runtime-state
+`cli-timing.test.ts` pins the 29-name catalog. A history-backed check against the
+pre-admission reader runs with `MURPH_CLI_METRIC_PHASE_COMPAT_BASE=<reviewed base sha>`.
+Mechanism overhead on a dense synthetic fixture is documented in
+`packages/query/bench/README.md`. It is a local observation, not a latency bound.
+
+### Private weekly usage audit rejection
+
+The existing caught `submit-product-feedback` classification may add one optional
+`productFeedbackAuditRejection` scalar: `wrong_kind`, `changelog_linked`,
+`missing_prefix`, `summary_too_long`, or `empty_report`. The canonical boolean
+audit validator remains the sole acceptance owner and reports the first failing
+rule in its existing short-circuit order. Its unchanged 1,800-character bound
+runs after the prefix check and before the empty-report check, emitting
+`summary_too_long` on rejection. The dynamic parser still accepts summaries up
+to 5,000 characters; the scheduled audit bound remains 1,800.
+
+Only the already authorized weekly audit recorder rejection attaches the fixed
+non-enumerable own data property to the original `Error`. The feedback adapter's
+caught-failure observer rejects proxies before descriptor reads, accepts only
+own data and exact allowlisted primitive values, and never invokes getters,
+coerces values or follows prototypes, context or causes. It copies no raw error
+code, text, fields, summary, identifiers, dates, arguments, results, provider
+context or stack. Ordinary/support feedback has no new source metadata; other
+tools and native completion rows do not receive this field. Existing generic
+error classification is unchanged; the proxy guarantee applies to this new
+metadata observer. The existing issue reporter and record parser retain exactly
+the finite addition (six classification detail keys, within the 24-key cap),
+without schema, redaction or storage changes.
+
+The Error name/message, `execution` / `handler_exception` / `unknown`
+classification, terminal model RPC, prompts, tool schema, managed instructions,
+idempotency, quiet completion and all effects remain unchanged. Rejection still
+precedes accepted-input callbacks, candidate creation, support delivery and
+persistence. No success log, extra event, retry or metric is introduced.
+
+For a future authorized comparison, use one fixed UTC end instant as `$1` in a
+UTC database session and consecutive half-open 12-hour windows. These details
+live in the **primary**
+`hosted_assistant_runtime_issue.details_json` table, not the runtime log
+database's `redacted_json`. Query only aggregates from at most 200 classification
+rows per window across all releases, grouped by window and release SHA. Only
+full lowercase 40-character hexadecimal release SHAs are returned; missing or
+invalid values share the `NULL` release bucket. Do not retrieve payloads or join
+member data:
+
+```sql
+WITH anchor AS (
+  SELECT $1::timestamptz AS end_at
+), windows AS (
+  SELECT 'prior12' AS period, end_at - interval '24 hours' AS start_at,
+         end_at - interval '12 hours' AS end_at FROM anchor
+  UNION ALL
+  SELECT 'latest12', end_at - interval '12 hours', end_at FROM anchor
+), sampled AS MATERIALIZED (
+  SELECT w.period, i.release_sha, i.rejection
+  FROM windows w
+  CROSS JOIN LATERAL (
+    SELECT CASE WHEN release_sha ~ '^[a-f0-9]{40}$' THEN release_sha END AS release_sha,
+      CASE WHEN details_json->>'productFeedbackAuditRejection' IN
+      ('wrong_kind', 'changelog_linked', 'missing_prefix', 'summary_too_long', 'empty_report')
+      THEN details_json->>'productFeedbackAuditRejection' END AS rejection
+    FROM hosted_assistant_runtime_issue
+    WHERE environment = 'hosted'
+      AND component = 'assistant.codex-dynamic-tool'
+      AND operation = 'submit-product-feedback'
+      AND phase = 'tool_call' AND issue_kind = 'tool_error'
+      AND error_code = 'ASSISTANT_DYNAMIC_TOOL_FAILED'
+      AND occurred_at >= w.start_at AND occurred_at < w.end_at
+      AND details_json->>'diagnosticRole' = 'classification'
+      AND details_json->>'failureStage' = 'execution'
+      AND details_json->>'failureReason' = 'handler_exception'
+      AND details_json->>'errorCategory' = 'unknown'
+    ORDER BY occurred_at DESC, id DESC
+    LIMIT 200
+  ) i
+)
+SELECT w.period, s.release_sha, count(s.period) AS sampled_caught_failure_rows,
+       count(*) FILTER (WHERE s.rejection = 'wrong_kind') AS wrong_kind,
+       count(*) FILTER (WHERE s.rejection = 'changelog_linked') AS changelog_linked,
+       count(*) FILTER (WHERE s.rejection = 'missing_prefix') AS missing_prefix,
+       count(*) FILTER (WHERE s.rejection = 'summary_too_long') AS summary_too_long,
+       count(*) FILTER (WHERE s.rejection = 'empty_report') AS empty_report,
+       count(*) FILTER (WHERE s.period IS NOT NULL AND s.rejection IS NULL)
+         AS absent_or_unattributed,
+       sum(count(s.period)) OVER (PARTITION BY w.period) = 200 AS row_cap_hit
+FROM windows w LEFT JOIN sampled s ON s.period = w.period
+GROUP BY w.period, s.release_sha
+ORDER BY CASE w.period WHEN 'prior12' THEN 0 ELSE 1 END, s.release_sha NULLS LAST;
+```
+
+Each release row repeats its window's cap flag; the 200-row cap is shared across
+releases, not applied separately to each release. Treat a hit row cap as possible
+saturation and counts as lower bounds. Missing fields remain valid on older
+runners and cannot backfill historical causes. `absent_or_unattributed` includes
+older-runner validation rejections and ordinary/support or other unclassified
+feedback exceptions; it does not prove weekly audit membership. This table has
+no `feature_key`, and absent rows must not be assigned to the optimizer. Existing
+native completion rows overlap these
+classification rows and are not additional failures or a separate denominator.
+Best-effort capture, the eight-issue attempt cap and release coverage also limit
+observability: absence, including zero sampled rows, is not zero failures.
+
+Verify compatible reader and producer revisions, including warm runners. The
+earliest new evidence is the first later natural scheduled run after approved
+deployment; this patch grants no deployment authority. Do not induce traffic;
+no live-model journey is required. Any new naturally attributed failure enables a
+targeted correction of that exact rule, with a deterministic reproduction at
+its owner. Unattributed failures do not justify inferring or changing a rule.
+
 ### Private device failure evidence
 
 Caught device-handler failures may add three optional scalars to the existing
@@ -1431,6 +1957,138 @@ reason/category. Keep missing/unknown evidence unresolved and completion counts
 separate. Propose a behavior correction only after at least two matching
 action/code observations and a deterministic reproduction at the responsible
 owner; telemetry alone does not establish the original cause.
+
+### Private automation handler failure evidence
+
+Only `executeAutomationDynamicTool`'s existing generic handler-exception return
+may add `automationAction` and `automationErrorCode` to its private
+`failureDiagnostic` and completed classification issue. `automationAction` is
+the already parsed `inspect | inspect_models | save | patch | reconcile` action;
+`inspect_models` remains the requested batch action even though its port calls
+use `inspect`. No action is inferred from failed parsing or another tool.
+
+`automationErrorCode` admits exactly three core-owned values from
+`AUTOMATION_FAILURE_CODES` in
+`packages/assistant-engine/src/assistant-codex/tool-failure-diagnostics.ts`:
+
+| Code | Existing source owner reached by the hosted adapter |
+| --- | --- |
+| `VAULT_AUTOMATION_EMPTY_PATCH` | `patchAutomation`'s no-change assertion. |
+| `VAULT_AUTOMATION_MISSING` | `patchAutomation`'s locked registry reread. |
+| `VAULT_AUTOMATION_RECONCILIATION_LIMIT_EXCEEDED` | `reconcileAutomationSupportSeries`'s bounded registry loader. |
+
+These are a small diagnostic vocabulary, not new error/retry categories or
+evidence that any particular code occurred. The ordinary JSON patch contract
+already rejects a patch with no change keys; retaining a core code does not
+establish what the model submitted. All three codes keep the existing
+`execution / handler_exception / unknown` classification. Other schema, storage
+and uncatalogued errors keep their current category and omit the new code.
+
+The new observer accepts only an exact primitive code in an own data descriptor.
+It rejects proxies before inspection and never invokes accessors, coerces values,
+walks prototypes or reads error names, messages, stacks, contexts or causes.
+This guarantee applies to the added observer: the existing missing/conflict
+predicates and generic classifier retain their original reads and behavior.
+No arguments, results, identifiers, timestamps or nested payloads are copied.
+An abort snapshot is deliberately omitted; this evidence does not attribute
+cancellation or establish whether earlier effects occurred.
+
+Successes, quiet missing inspections, conflicts, admission refusals and explicit
+result-format rejections receive neither new field. RPC content, prompts, tool
+schemas, calls, ordering, writes, abort handling and recovery/retry behavior are
+unchanged. The existing completion, issue reporter, sanitizer and record parser
+retain these optional scalars within their current limits (at most seven detail
+keys here). Older producers omit them and current readers already accept both
+shapes; no schema migration, new stream, backfill or deploy ordering change is
+required. Confirm actual reader and producer revisions, including warm runners,
+before comparing later natural traffic; do not infer a timing row's release
+from a nearby issue.
+
+For an authorized natural-traffic review, bind one fixed UTC end instant as `$1`
+and query the **primary** `hosted_assistant_runtime_issue.details_json` table.
+The conversion preserves this table's UTC timestamp-without-timezone convention.
+This returns only finite aggregates from at most 200 caught classification rows
+per half-open 12-hour window; it does not select member data or raw payloads:
+
+```sql
+WITH anchor AS (
+  SELECT ($1::timestamptz AT TIME ZONE 'UTC') AS end_at
+), windows AS (
+  SELECT 'prior12' AS period, end_at - interval '24 hours' AS start_at,
+         end_at - interval '12 hours' AS end_at FROM anchor
+  UNION ALL
+  SELECT 'latest12', end_at - interval '12 hours', end_at FROM anchor
+), sampled AS MATERIALIZED (
+  SELECT w.period, i.action, i.code, i.category
+  FROM windows w
+  CROSS JOIN LATERAL (
+    SELECT CASE WHEN details_json->>'automationAction' IN
+        ('inspect', 'inspect_models', 'save', 'patch', 'reconcile')
+        THEN details_json->>'automationAction' END AS action,
+      CASE WHEN details_json->>'automationErrorCode' IN
+        ('VAULT_AUTOMATION_EMPTY_PATCH', 'VAULT_AUTOMATION_MISSING',
+         'VAULT_AUTOMATION_RECONCILIATION_LIMIT_EXCEEDED')
+        THEN details_json->>'automationErrorCode' END AS code,
+      CASE WHEN details_json->>'errorCategory' IN
+        ('unknown', 'invalid_input', 'not_found', 'conflict', 'unavailable',
+         'authority_rejected', 'invalid_result', 'rate_limited', 'timeout')
+        THEN details_json->>'errorCategory' END AS category
+    FROM hosted_assistant_runtime_issue
+    WHERE environment = 'hosted'
+      AND component = 'assistant.codex-dynamic-tool'
+      AND operation = 'automation' AND phase = 'tool_call'
+      AND issue_kind = 'tool_error' AND error_code = 'ASSISTANT_DYNAMIC_TOOL_FAILED'
+      AND occurred_at >= w.start_at AND occurred_at < w.end_at
+      AND details_json->>'diagnosticRole' = 'classification'
+      AND details_json->>'failureStage' = 'execution'
+      AND details_json->>'failureReason' = 'handler_exception'
+    ORDER BY occurred_at DESC, id DESC
+    LIMIT 200
+  ) i
+)
+SELECT w.period, s.action, s.code, s.category,
+       count(s.period) AS sampled_caught_failure_rows,
+       sum(count(s.period)) OVER (PARTITION BY w.period) = 200 AS row_cap_hit
+FROM windows w LEFT JOIN sampled s ON s.period = w.period
+GROUP BY w.period, s.action, s.code, s.category
+ORDER BY w.period, s.action NULLS LAST, s.code NULLS LAST, s.category NULLS LAST;
+```
+
+The cap is shared across groups in each window; a hit means possible truncation.
+Missing fields remain unresolved, including older producers and opaque errors.
+Best-effort capture and the existing per-attempt issue cap limit coverage; zero
+sampled rows does not prove zero failures. Native completion issues can describe
+the same call and must not be added to classification counts. Completed profiles
+are incomplete coverage and are not a denominator for all issue rows. Observe
+natural traffic only; this diagnostic extension authorizes no production call,
+prompt correction, induced failure, retry or claim about prior model intent.
+
+### Private vault-file preparation failure evidence
+
+Only the existing `send-vault-file` execution catch may add the optional
+`vaultFileErrorCode` to its private failure diagnostic and classification issue.
+The value is exact membership in `VAULT_FILE_FAILURE_CODES` in
+`packages/assistant-engine/src/assistant-codex/tool-failure-diagnostics.ts`:
+source-owned request, destination, file-path and staging-preparation rejections.
+Provider codes, delivery-time errors and arbitrary `ASSISTANT_*` names are not
+admitted. Missing, unknown and unallowlisted codes omit the field; missing files
+keep the existing `not_found` category without new detail.
+
+Capture reads only an own data `code` descriptor. It rejects proxies before
+inspection, never invokes accessors or follows prototypes, contexts or causes,
+and retains no error prose, paths, refs, identifiers, arguments, results or
+payloads. The catch also treats proxies as opaque before its existing classifier
+and uses an own data code for the already-active success branch. Ordinary failure
+stage, reason and category are unchanged. The existing already-active success,
+approval handling, RPC text and final action remain unchanged and unannotated.
+
+The existing completion, issue reporter, sanitizer and record parser preserve
+this optional scalar within their existing limits (six classification detail
+keys); older records without it remain valid. It never enters the RPC envelope,
+prompts or tool schemas. No new store, stream, retry or external call is added.
+The field attributes future caught rejections; it neither recovers historical
+causes nor establishes why an argument was chosen or authorizes changed recovery.
+Native completion rows overlap classification rows and are not extra failures.
 
 ### Batch read attribution and connected-app failure status
 
@@ -1475,6 +2133,139 @@ rows as the existing call denominator, not extra failures, and do not add profil
 counts to overlapping native CLI counts. Unresolved connection loss remains
 unresolved. This rollout grants no automatic rollback or production mutation.
 
+The connected-app port's own response-envelope schema rejection keeps its existing
+`TypeError` name/message and adds one fixed, non-enumerable own data code,
+`CONNECTED_APPS_RESPONSE_SCHEMA_INVALID`. Only that exact code maps to the
+existing private `errorCategory: invalid_result`; `failureStage: execution` and
+`failureReason: handler_exception` remain unchanged. Unclassified transport errors
+remain `unknown`. No response content, schema issues, identifiers, raw code or new
+field is persisted. Non-enumerability preserves the existing enumerable-only RPC
+error projection and ambiguous-write no-retry recovery.
+
+For a future authorized comparison, use fixed consecutive 12-hour windows and
+aggregate only connected-app `diagnosticRole: classification` rows by request kind,
+stage, reason, category and optional HTTP status (at most 200 rows per window;
+report saturation as a lower bound). Distinguish `invalid_result` from
+status-absent `unknown`, retaining completion rows as a separate, overlapping call
+denominator. Verify producer/reader release coverage first; old `unknown` records
+cannot be backfilled. This is evidence for future schema-rejection attribution,
+not proof that any previously observed connected-app failure was schema-related.
+
+### Shared-read semantic validation reason
+
+A structurally valid group `read_shared` call (any `murph.group*` tool) that
+fails the semantic refinement still yields its one model-visible `custom` issue at
+`freshness`, with unchanged message, path and repair bytes, and its existing
+`TOOL_INPUT_SCHEMA_REJECTION` intake row. The private validation digest, and so
+that row's `details`, may add one optional `semanticRejection`:
+
+- `shared_read_options`: participant/history rejected by
+  `parseHostedGroupSharedReadOptions` (including history with freshness), or
+  `group_email` combined with history, a participant or freshness.
+- `shared_freshness_scope_not_requested`, `shared_freshness_scope_not_wearable`,
+  `shared_freshness_invalid_date` or `shared_freshness_duplicate_pair`: the
+  first failing freshness entry, in canonical evaluation order.
+- `shared_freshness_count`, `shared_freshness_entry_shape` or
+  `shared_freshness_entry_fields`: canonical shape checks that structural
+  validation normally rejects first.
+- `shared_semantic_unclassified`: the canonical reader threw unexpectedly.
+
+`readHostedGroupSharedFreshnessRejection` in
+`packages/hosted-execution/src/group-shared-freshness.ts` is the source. The
+throwing parser derives from the same function, so acceptance, order and messages
+are unchanged. The digest admits only exact members of
+`SAFE_TOOL_CALL_SEMANTIC_REJECTIONS`. It never reads a label from input. Raw
+values, structurally invalid calls, other actions and other tools get no reason.
+The field is excluded from `validationFingerprint`, so fingerprints remain
+comparable across releases. One fingerprint may therefore carry several reasons.
+The reason identifies the first rejected decision, not every defect. It does not
+explain why the model chose those values. It is a classification on the existing
+intake row, not another failed-call count. Older records lack the field; treat
+that as missing evidence. Within a fixed bounded window:
+
+```sql
+SELECT operation,
+       CASE WHEN NOT (details_json ? 'semanticRejection') THEN 'missing_evidence'
+            WHEN details_json->>'semanticRejection' IN (
+                   'shared_read_options', 'shared_freshness_count',
+                   'shared_freshness_entry_shape', 'shared_freshness_entry_fields',
+                   'shared_freshness_scope_not_requested',
+                   'shared_freshness_scope_not_wearable', 'shared_freshness_invalid_date',
+                   'shared_freshness_duplicate_pair', 'shared_semantic_unclassified')
+            THEN details_json->>'semanticRejection' ELSE 'unrecognized_evidence'
+       END AS semantic_rejection,
+       count(*) AS rejected_calls
+FROM hosted_assistant_runtime_issue
+WHERE occurred_at >= $1 AND occurred_at < $2
+  AND component = 'assistant.tool-validation'
+  AND error_code = 'TOOL_INPUT_SCHEMA_REJECTION'
+  AND operation LIKE 'murph.group%'
+  AND details_json->'pathIssues' @> '[{"path":"freshness","code":"custom"}]'
+GROUP BY 1, 2;
+```
+
+Each row records one already-rejected call, using an existing reporter. The
+sanitizer and record parser are unchanged, and this detail stays below the 24-key
+cap. No schema bump, event, prompt, tool schema or behavior change is needed.
+Existing readers ignore or retain the optional string, so no reader-first release is needed.
+
+### Unsupported dynamic automation action attribution
+
+Rejected `murph.automation` discriminants may add one private `semanticRejection`
+to the existing `TOOL_INPUT_SCHEMA_REJECTION` intake classification:
+`automation_action_list`, `automation_action_show`, `automation_action_edit`, or
+`automation_action_update` for those exact unsupported strings; every other
+unsupported string uses `automation_action_unrecognized_string`. Matching is
+case-sensitive and does not trim or coerce. No raw action or unknown key is
+retained. The parser callback derives supported actions from the existing Zod
+union; it never validates a second schema. A supported action with malformed
+fields gets no label. Missing, non-string, inherited or accessor-backed actions,
+non-object/array roots, and classifier faults also omit the field.
+
+The detail is excluded from both validation and runtime-issue fingerprints. It
+changes neither Zod issues and recovery/RPC bytes nor tool schemas/descriptions.
+There is no additional event, dispatch, write, retry, or awaited work. The
+existing generic-details reporter and record parser retain these finite strings
+under the current schema and key limit; readers with that contract need no
+consumer-first rollout. The focused automation action telemetry test exercises
+that persistence boundary as well as real parser/dispatch byte parity.
+
+Use one fixed UTC `$1` end timestamp for both consecutive, half-open 12-hour
+windows; do not slide it while comparing releases. Count only the intake row,
+not its overlapping completion classification. Group by `release_sha` and the
+allowlisted reason; missing detail is missing evidence, not an unknown action:
+
+```sql
+SELECT CASE WHEN occurred_at < $1::timestamptz - interval '12 hours'
+            THEN 'prior_12h' ELSE 'latest_12h' END AS window_name,
+       release_sha,
+       CASE WHEN NOT (details_json ? 'semanticRejection') THEN 'missing_evidence'
+            WHEN details_json->>'semanticRejection' IN (
+              'automation_action_list', 'automation_action_show',
+              'automation_action_edit', 'automation_action_update',
+              'automation_action_unrecognized_string')
+            THEN details_json->>'semanticRejection'
+            ELSE 'unrecognized_evidence' END AS semantic_rejection,
+       count(*) AS rejected_calls
+FROM hosted_assistant_runtime_issue
+WHERE occurred_at >= $1::timestamptz - interval '24 hours'
+  AND occurred_at < $1::timestamptz
+  AND component = 'assistant.tool-validation'
+  AND error_code = 'TOOL_INPUT_SCHEMA_REJECTION'
+  AND operation = 'murph.automation'
+  AND details_json->>'diagnosticRole' = 'classification'
+  AND details_json->'pathIssues' @> '[{"path":"action","code":"invalid_union"}]'
+GROUP BY 1, 2, 3
+ORDER BY 1, 2, 3;
+```
+
+A singleton post-release row with one of the four exact-action labels suffices
+to attribute that rejected literal and choose a targeted synthetic investigation.
+It does not prove why the model selected it, a behavior defect, or a failure-rate
+regression; it does not authorize a prompt or behavior change without separate
+causal proof. The unrecognized-string bucket cannot recover the concrete action.
+Do not backfill, infer labels for older rows, or reinterpret prior fingerprints.
+
 ### Finite CLI failure counts (optional, same timing identity)
 
 Each non-successful invocation from a new producer contributes at most one
@@ -1495,7 +2286,8 @@ other values collapse to `unknown`. Capture reads only own data properties for
 validation type names. It does not call getters, enumerate objects, inspect
 messages, arguments or result output, follow prototypes/causes, or retain original
 errors or contexts. The optional schema detail below reads only bounded own
-`publicIssues` data at that same original-error seam. Code-only observations are
+`publicIssues` data at that same original-error seam, or the existing safe Incur
+projection for a typed parser exception as described below. Code-only observations are
 diagnostic hints, not authorization or a claim that a reported stage is independently verified. Existing dynamic-tool
 finite stage/reason/category diagnostics remain separate.
 
@@ -1531,20 +2323,189 @@ model/RPC text or retry guidance, or expand provider-code catalogs. Unknown code
 and lookalikes remain `unknown`; no arguments, paths, tokens, payloads or error
 messages enter this telemetry. The same consumer-first order below applies.
 
+#### Optional research batch first-rejection category
+
+Many distinct invalid lane bodies produce the same
+`research_scout_invalid_batch_payload / unknown` pair, so code/stage alone cannot
+choose a reproduction. For `research scout-batch` with exactly that code only, a
+failure may carry `rejection`, one of: `envelope` (lanes missing/not an array,
+or a lane not an object), `unexpected_root_field` (extra top-level key such as a
+CLI option inside `--input`), `lane_count`, `lane_label`, `profile_shape`
+(missing/non-object/empty profile, a non-array field or too many values),
+`unexpected_lane_field` (extra lane or profile key, e.g. `mode` or `tags`), and
+`public_concept` (a profile value that is not an exact server-owned concept).
+`parseResearchScoutBatchCliPayloadInput` derives it from the **first** issue of
+the existing `researchScoutBatchPayloadSchema.safeParse`, using only the issue
+code and schema-owned path shape; other shapes are omitted, never `unknown`.
+Zod's order is deterministic (nested lane issues in lane order precede root
+extra keys). The schema stays the sole acceptance owner: validation order,
+error code/message/hint, RPC bytes, exits, fetches and writes are unchanged.
+
+The category is a non-enumerable, non-writable own data property
+`cliTimingRejection` on the original `VaultCliError`, attached whether or not
+timing is active. Incur projection and JSON output never read it. The node
+observer and wire normalizer use `cliTimingRejectionFailure`, which reads one
+own data descriptor and admits its value only if it strictly equals one of the
+seven literals above. It never invokes getters, coerces values or walks
+prototypes. This is not proxy detection: a proxy source's descriptor trap may run
+and may supply an allowlisted literal, but only that fixed primitive can leave;
+any other value, an accessor descriptor or a throwing trap omits the detail
+without affecting the failure's code, stage or count. No issue paths, indices,
+keys, labels, values or messages are retained. It joins failure identity (and the 8-variant cap) like validation
+detail; malformed detail is dropped independently of counts. Native shell
+output, assistant categories and the model-visible error are unaffected.
+
+Roll out **reader before writer**: Web/hosted usage, usage-body fitting and
+engine/profile consumers first, then runner/CLI producers. Older readers drop
+`rejection` and coalesce equal code/stage counts, keeping calls, phases,
+outcomes, drops and token accounting; new readers accept old reports without
+it. Run the actual old-reader tests in runtime-state and assistant-engine with
+`MURPH_CLI_RESEARCH_REJECTION_COMPAT_BASE=ec9ede5a5e756d356d24e492d9457e25310b6284`.
+
+After convergence, run read-only on the primary usage database for a fixed
+natural window (consecutive 12-hour windows for comparison). Absent `rejection`
+means an older writer/reader, an unclassified first issue or a non-research
+failure; it never means "no rejection". Counts are observed lower bounds; a
+10,000-row cap hit requires a narrower window.
+
+```sql
+WITH rows AS MATERIALIZED (
+  SELECT turn_id, turn_profile_json -> 'cliTiming' AS t
+  FROM hosted_ai_usage
+  WHERE provider = 'codex-cli'
+    AND occurred_at >= :window_start_utc
+    AND occurred_at < :window_end_utc
+  ORDER BY occurred_at DESC
+  LIMIT 10000
+), per_turn AS (
+  -- max per turn: repeated profile snapshots of one turn are not summed.
+  SELECT turn_id, f.rejection, max(f.observations) AS observations
+  FROM rows
+  CROSS JOIN LATERAL jsonb_array_elements(t -> 'commands') c
+  CROSS JOIN LATERAL (
+    SELECT CASE WHEN e ->> 'rejection' IN ('envelope', 'unexpected_root_field', 'lane_count',
+             'lane_label', 'profile_shape', 'unexpected_lane_field', 'public_concept')
+             THEN e ->> 'rejection' END AS rejection,
+           sum((e ->> 'count')::numeric) AS observations
+    FROM jsonb_array_elements(c -> 'failures') e
+    WHERE e ->> 'code' = 'research_scout_invalid_batch_payload'
+    GROUP BY 1
+  ) f
+  WHERE t ->> 'schema' = 'murph.cli-timing.v1'
+    AND c ->> 'command' = 'research scout-batch'
+    AND c ->> 'outcome' = 'error'
+  GROUP BY turn_id, f.rejection
+)
+SELECT rejection, count(*) AS independent_turns,
+       sum(observations) AS observed_failures_lower_bound,
+       (SELECT count(*) = 10000 FROM rows) AS input_row_cap_hit
+FROM per_turn
+GROUP BY rejection
+ORDER BY independent_turns DESC, rejection
+LIMIT 10;
+```
+
+Decision threshold: **any** natural attributed singleton (one turn with a
+non-null `rejection`) is sufficient to build a concrete synthetic reproduction
+of that category; recurrence is not required. A null-only result remains
+unresolved and justifies no prompt, schema or guidance change. The category
+identifies the first schema invariant, not why the model produced the input.
+
+#### Optional parser rejection reason (knowledge upsert/show, wearables day, exercise list)
+
+Every Incur argv rejection projects to the same privacy-safe
+`VALIDATION_ERROR / validation / arguments / custom / missing=false` envelope,
+so code, stage and validation detail cannot separate an unknown flag from a
+final option that lacks its value. The pinned `patches/incur@0.5.1.patch`
+therefore sets `ParseError.reason` (`unknown_flag` or `missing_value`) at the
+exact command-parser (`Parser.parse`) throw sites only. It is a non-enumerable,
+non-writable own data property: `toErrorEnvelope`, JSON/RPC output, hints,
+exits and prompts are byte-identical, and config, stacked-alias, global/builtin
+flag and other ParseErrors carry no reason. The reason is the fixed literal of
+the parser throw site that ran; no diagnostic code parses argv or messages.
+
+`incurErrorBridge`, only while timing is active and only when the error's own
+data `kind` is `arguments`, copies that one own data descriptor value as
+`cliTimingRejection` onto its timing-only projection. Config ParseErrors share
+the projected code, so they never carry the reason even if one is supplied.
+`cliTimingRejectionFailure` admits it as `rejection` only for
+`knowledge upsert`, `knowledge show`, `wearables day` and `exercise list` with
+`VALIDATION_ERROR` and only these two literals; the research categories above
+and the search filter classes below stay gated to their own command/code. Accessors,
+spoofed/prototype values and wrong commands omit only the reason. A throwing
+descriptor trap falls back to the original error before projection, so it may
+also drop optional validation detail. No optional diagnostic fault can replace
+the original error, change model-visible output or handling, or change the
+base failure code/stage/count. Variant
+identity, the 8-failure cap, wire normalization and reader-first rollout match
+the research category. Older readers drop `rejection` and coalesce counts; new
+readers accept old reports without inferring a reason. Run the actual old-reader
+test with `MURPH_CLI_PARSE_REJECTION_COMPAT_BASE=a83068adbe524217d32a22c270902ef0b02c6921`
+(`knowledge upsert`) and
+`MURPH_CLI_FILTER_REJECTION_COMPAT_BASE=2899a61ce5b6de7f0b6184e8e5a73cb507a798ef`
+(`knowledge show`, `wearables day`, and the filter classes below).
+
+After convergence, reuse the research query above with
+`e ->> 'code' = 'VALIDATION_ERROR'`, `c ->> 'command'` set to an admitted
+command, and `rejection IN ('unknown_flag', 'missing_value')`.
+Threshold: **any** natural attributed turn distinguishes the two causes enough
+to build a synthetic reproduction; null-only results stay unresolved and
+justify no prompt, schema or guidance change. Null means an older writer,
+schema validation, or an unclassified parse failure. For `knowledge show` and
+`wearables day`, a reason separates an argv rejection from schema validation of
+the positional slug/date (`slug` or `date` validation detail, with no reason).
+Coverage is limited to argv invocations reaching the command middleware;
+built-in/global flag failures, HTTP/MCP parsing and other commands are not
+classified. The reason never identifies which flag was rejected, and it does
+not prove that a prompt, hint or help text caused the input; any such
+hypothesis needs a separate synthetic reproduction.
+
+#### Optional search query filter rejection class
+
+`search query` rejects an unsupported `--record-type` family and a
+comma-delimited `--record-type`, `--kind`, `--stream` or `--tag` value with the
+same `invalid_option / unknown` failure. The shared repeatable-flag normalizer
+in `packages/vault-usecases/src/option-utils.ts` therefore attaches
+`cliTimingRejection` (`comma_delimited` or `unsupported_value`) at exactly its
+two existing throw sites, as the same non-enumerable, non-writable own data
+property used by the research category. The normalizer's validation (which
+necessarily reads the supplied values), decisions, ordering, code, message,
+context and every projected envelope are unchanged. The diagnostic class is a
+fixed literal chosen by which throw site ran; the timing classifier never reads
+option names, values, argv or messages. Many commands share the
+normalizer, so `cliTimingRejectionFailure` admits the class only for
+`search query` with `invalid_option`; any other command or code omits it
+(including `list`, which uses the same normalizer). Reversed `--from`/`--to`
+dates keep their existing `invalid_option / validation` pair and carry no
+class. Identity, cap, wire normalization, reader-first rollout and old-reader
+behavior match the parser reason above.
+
+After convergence, reuse the research query above with
+`e ->> 'code' = 'invalid_option'`, `c ->> 'command' = 'search query'` and
+`rejection IN ('comma_delimited', 'unsupported_value')`. The same singleton
+threshold applies: one natural attributed turn justifies a targeted synthetic
+reproduction of that class; null-only results stay unresolved. The class never
+says which option or value, or why the model chose it. Do not manufacture
+traffic or wait for a quota of events.
+
 #### Optional schema-validation detail
 
 For `VALIDATION_ERROR` only, `validation: { field, code, missing? }` is one finite
 selected issue, never another failure observation. `cliTimingValidationFailure`
 in the portable owner selects the first admissible issue within the first **8**
 own array entries. It reads `publicIssues` on the original error, `fieldErrors`
-in the assistant's existing complete **16 KiB** error envelope, or `validation`
+from the CLI bridge's typed Incur projection or the assistant's existing complete
+**16 KiB** error envelope, or `validation`
 on the timing wire. All reads use own data descriptors; getters, prototypes,
 causes, iterators and arbitrary nested paths are not consulted. Only exact full
 static field names are admitted:
 
 - `automation list`: limit, status (only these two options from `packages/cli/src/commands/automation.ts`).
+- `exercise list`: query, kind, environment, category, target, level, equipment,
+  position, modality, commonness, limit, plus the fixed Incur invocation field arguments.
 - `food search-labels`: query, limit.
-- `knowledge show`: slug (required positional argument in `packages/cli/src/commands/knowledge.ts`).
+- `wearables day`: date (required positional argument in `packages/cli/src/commands/wearables.ts`), provider, plus the fixed Incur invocation field arguments.
+- `knowledge show`: slug (required positional argument in `packages/cli/src/commands/knowledge.ts`), plus the fixed Incur invocation field arguments.
 - `measurement entry list`: metric, from, to, limit (only these top-level options from `packages/cli/src/commands/measurement.ts`; no metric array indices).
 - `event list`: kind, from, to, tag, experiment, limit (the command and its shared list factory), plus the fixed Incur invocation field arguments.
 - `event payload-schema`: kind, for (required public kind and optional literal `import-jsonl` surface in `packages/cli/src/commands/event.ts`).
@@ -1554,7 +2515,10 @@ static field names are admitted:
 - `meal add` and `meal edit`: nutritionCalories, nutritionSource, occurredAt,
   plus the fixed Incur invocation field arguments. These options are registered
   in `packages/cli/src/commands/meal.ts`; edit inherits occurredAt from
-  `record-mutation-command-helpers.ts`. No other meal fields are admitted: no
+  `record-mutation-command-helpers.ts`. `meal edit` additionally admits only
+  id, nutritionProteinGrams and nutritionConfidence: its required positional id
+  and two exact top-level options in the same registered schema. These names
+  are not admitted for `meal add` or other commands. No other meal fields are admitted: no
   base vault/request/environment fields, free-text/media fields, nested nutrition
   paths, arrays/indices, arbitrary option names or values.
 
@@ -1571,16 +2535,24 @@ otherwise remain unchanged. Synthetic probes establish information loss, **not**
 the behavioral root cause of actual member argument errors.
 
 The existing Incur error bridge observes ordinary handler throws **before** its
-public error projection can discard typed fields. Dispatch and invocation
-catches provide a fallback only: first observation wins, with no per-catch
+public error projection can discard typed fields. For an actual `Errors.ParseError`
+while timing is active, the bridge first reuses pinned Incur's
+`Errors.toErrorEnvelope` as a telemetry-only value: argument-kind errors supply
+`arguments / custom / missing=false`, while config-kind errors keep `config`
+and are not admitted as argument evidence. No error-name/message parsing or
+mutation of the exception is involved. Projection failure falls back to original
+code/stage capture; capture failure cannot replace the original throw. With
+timing disabled, no extra projection runs. The original error still follows the
+same throw/render path, with unchanged public bytes, exits, effects and retries.
+Dispatch and invocation catches provide a fallback only: first observation wins, with no per-catch
 increment and no cross-invocation error-object cache. Recursive batch children
 retain their own scopes; the container is not an additional failure sample.
 Stop-on-error and the existing rejection of nested batch before child entry are
 unchanged. An unentered child has no invented diagnostic.
 
 There are at most **8 failure variants per command/outcome**, within the existing
-32-command limit. Identity is code/stage plus optional validation field/code/missing,
-including absence versus explicit false. Additional distinct variants increment
+32-command limit. Identity is code/stage plus optional validation field/code/missing
+and optional research `rejection`, including absence versus explicit false. Additional distinct variants increment
 optional `droppedFailures` by their observation count; retained variants still aggregate.
 `sum(failures.count) + droppedFailures <= calls`. These are safe positive counts
 (or a safe nonnegative drop count), not extra CLI calls. Malformed optional
@@ -1648,6 +2620,16 @@ pre-admission base in its active plan. Runtime-state and profile tests load the
 actual old portable and hosted readers, checking coalescing to `unknown`, mixed
 old/new reports, absent evidence and unchanged counts/tokens.
 
+The `exercise list` admission reuses the existing CLI timing bridge and portable
+normalizer, including the two parser reasons above. Deploy Web/hosted usage and
+engine/profile readers before runner/CLI producers. Older readers omit its
+optional `validation` and `rejection` and coalesce equal code/stage counts while
+preserving calls, outcomes, phases and drops; new readers accept old reports
+without inferring detail. Run the existing history-backed test with
+`MURPH_CLI_EXERCISE_VALIDATION_COMPAT_BASE` set to the exact pre-extension commit.
+This classifies future failures; it cannot recover historical arguments or
+establish a prompt/schema defect.
+
 The `automation list` field extension follows that same consumer-first order.
 Deploy the portable reader in Web/hosted usage, engine/profile and assistant
 completion consumers before CLI producers. Older readers omit its `validation`
@@ -1666,8 +2648,9 @@ consumers. Older readers omit the new tuples and coalesce equal code/stage pairs
 retaining calls, phases, outcomes, report counts and drops; existing knowledge
 option detail remains readable. New readers accept old producers unchanged and
 cannot reconstruct omitted detail. The fixed invocation field is retained where
-the source supplies it in `fieldErrors` or `publicIssues`; original exceptions
-without it remain code/stage-only. Do not infer it from an error name or message. Set
+the source supplies it in `fieldErrors` or `publicIssues`, including the bridge's
+typed Incur projection above. Other original exceptions without it remain
+code/stage-only. Do not infer it from an error name or message. Set
 `MURPH_CLI_EVENT_INVOCATION_VALIDATION_COMPAT_BASE` to the actual pre-extension
 commit for the history-backed runtime-state test. No schema bump, migration,
 backfill or new event is required. Only after approved telemetry rollout and
@@ -1681,12 +2664,67 @@ The old reader drops the new tuples and coalesces their code/stage counts withou
 losing envelopes, phases, outcomes, calls or drops; new readers accept old reports.
 The real CLI probe checks distinct option failures before mutation/provider
 work, output/exit parity and nearby successful saves. Unknown-option parsing
-supplies arguments/custom in the public envelope; an original ParseError without
-public issues remains code/stage-only in timing. Do not infer the missing tuple.
+supplies arguments/custom in the public envelope; the bridge now reuses that
+existing projection before the first timing observation. Older recorded
+code/stage-only failures remain unresolved; no missing tuple is backfilled.
 The 8 KiB envelope and all existing caps, events and counters remain unchanged.
 Historical meal failures cannot be attributed or backfilled from this extension.
 These probes prove diagnostic loss, not a preventable meal-behavior cause.
 No automatic rollback is authorized or required by a new attribution.
+
+The meal edit/remove-photo refinement uses the same owner and rollout order.
+`cliTimingFailureCode(value, command)` admits the exact existing
+`invalid_operation` code only for positively resolved `meal remove-photo`.
+The original-error observer, portable normalizer and bounded completion reader
+all supply their registered command. Missing/other command attribution and
+unknown/lookalike codes remain `unknown`; success remains detail-free. No new
+optional classification is needed: a command gate on the existing code field
+is narrower than global admission and avoids another wire property, identity
+axis or capture hook. The source mapping is
+`removeAutomaticMealPhotoEventRecord`: core
+`MEAL_PHOTO_RETENTION_SOURCE_INVALID` becomes `invalid_operation`. Neither
+that mapping nor photo removal, schemas, prompt text or public output changes.
+The new field names likewise extend only the existing validation allowlist.
+
+Run portable and hosted history-backed tests with
+`MURPH_CLI_MEAL_FAILURE_ATTRIBUTION_COMPAT_BASE` set to the exact pre-extension
+commit used for the candidate. Deploy Web/hosted usage, engine receiver/profile
+and completion readers, including warm processes, before runner/CLI writers.
+An older reader omits the three new validation tuples, reduces the new code to
+`unknown`, and coalesces equal variants without losing timing, profiles or token
+accounting. New readers accept old/absent detail; they cannot reconstruct an
+old `unknown` or establish that a historical rejection was expected.
+
+Earliest useful evidence is one naturally produced, newly attributed failure
+**after verified reader/writer deployment convergence**, not the merge time or
+an earlier usage row. That singleton warrants bounded inspection and synthetic
+reproduction, not a behavior fix. Use the command-specific query below with
+its literal command filter narrowed to `meal edit` and `meal remove-photo` and
+fixed UTC bounds wholly after convergence; a completed comparison window is
+not needed to inspect a singleton. Retain unknown and absent detail separately.
+Do not add native action-completion counts to overlapping CLI/profile counts.
+The first-8-issues and 8-failure-variants limits, 32 command/outcome summaries,
+64 spans per invocation, 256 reports per attempt, 8 KiB UDP envelope and 16 KiB
+usage-body bound still apply. Drops, missing reports, or row/output-cap saturation
+make observed counts lower bounds; narrow the fixed query window/filter instead
+of interpreting non-observation as success. No induced provider/model calls are
+needed for this probe. A paid-model replay is unnecessary only once the local
+investigator verifies exact public output/exit/effect parity and unchanged
+prompt/tool inputs against the base; authoring alone is not that validation.
+
+The `knowledge show` arguments admission and parser-capture correction reuse
+that reader-first order: deploy the portable reader in Web/hosted usage,
+engine/profile and completion consumers (including warm processes), then the
+CLI bridge. An older reader omits only the newly admitted show detail, coalesces
+its code/stage variants and preserves calls, phases, outcomes, drops and usage.
+Existing upsert/meal/event invocation fields need no new admission. Set
+`MURPH_CLI_KNOWLEDGE_PARSER_VALIDATION_COMPAT_BASE=1d8c8762af9eb5e283b6892050fc8a8b2f008efa`
+for the existing history-backed portable-reader harness; retain the historical
+profile/hosted-reader compatibility tests as well. Reader rollback loses
+specificity, not accounting. No schema, event, counter, state or backfill is added.
+Use the command-specific query below only after approved convergence, deduplicate
+profiles per turn, and keep absent detail separate. `arguments / custom` proves
+parser rejection, not which option was supplied or any historical behavioral cause.
 
 The `knowledge show`, `event payload-schema` and `measurement entry list` field
 extensions use that same consumer-first Web/reader, then runner/CLI-producer
@@ -1784,15 +2822,17 @@ needed for this extension's unchanged output contract.
 #### Command-specific validation inspection (including singletons)
 
 For `automation list`, `knowledge show`, `knowledge upsert`, `event list`,
-`event payload-schema`, `measurement entry list`, `meal add` and `meal edit` with
+`event payload-schema`, `measurement entry list`, `wearables day`, `meal add` and `meal edit` with
 `VALIDATION_ERROR / validation`, **any newly
 attributed event warrants inspection, including one event in one turn**; the two-turn
 implementation-investigation threshold above does not gate this inspection.
 Attribution is not an automatic behavior or prompt change. Reproduce the exact
 attributed path synthetically and prove the earliest violated behavioral invariant
 before proposing one. This also applies to a single newly attributed meal failure;
-its field/code does not establish why the input was selected.
-For the event-list/upsert probe, `arguments / custom` identifies an Incur
+its field/code does not establish why the input was selected. The same singleton
+inspection threshold applies to newly retained `meal remove-photo / invalid_operation`;
+an old `unknown` remains unresolved, not an inferred ordinary-photo rejection.
+For show/upsert, event-list and meal probes, `arguments / custom` identifies an Incur
 invocation rejection, not a particular option or its value. A specific option
 such as `limit / too_big` supports inspecting that option's existing contract;
 it does not authorize changing the limit. Absent detail remains unresolved,
@@ -1806,11 +2846,14 @@ turn-level provider loss. None can be equated with these input rejections.
 After consumer/producer convergence, run this read-only query on the primary
 usage database for a fixed natural-traffic window. Bind `:window_start_utc` and
 `:window_end_utc` to UTC timestamps (use consecutive 12-hour windows for a
-comparison). It returns only finite command/field/code/missing groups, keeps absent
+comparison). It returns only finite command/failure-code/stage/field/issue-code/missing groups, keeps absent
 validation visible, and uses turn IDs only internally to avoid summing repeated
 profile snapshots.
 A 10,000-row cap hit requires a narrower window; counts are observed lower bounds,
-not complete attempt totals. Check missing reports and drop counters separately.
+not complete attempt totals. A full 50-row output also requires a narrower
+command filter/window before coverage claims. Check missing reports and drop
+counters separately. The remove-photo branch selects only the new exact code
+and its unresolved `unknown / unknown` neighbor, not all possible photo failures.
 
 ```sql
 WITH rows AS MATERIALIZED (
@@ -1827,16 +2870,18 @@ WITH rows AS MATERIALIZED (
   CROSS JOIN LATERAL jsonb_array_elements(t -> 'commands') c
   WHERE t ->> 'schema' = 'murph.cli-timing.v1'
     AND c ->> 'command' IN ('automation list', 'knowledge show', 'knowledge upsert',
-      'event list', 'event payload-schema', 'measurement entry list', 'meal add', 'meal edit')
+      'event list', 'event payload-schema', 'measurement entry list', 'wearables day',
+      'meal add', 'meal edit', 'meal remove-photo')
     AND c ->> 'outcome' = 'error'
 ), per_turn AS (
-  SELECT turn_id, c ->> 'command' AS command, f.field, f.issue_code, f.missing,
+  SELECT turn_id, c ->> 'command' AS command, f.failure_code, f.failure_stage, f.field, f.issue_code, f.missing,
          max(f.observations) AS observations
   FROM commands
   CROSS JOIN LATERAL (
-    SELECT CASE
+    SELECT e ->> 'code' AS failure_code, e ->> 'stage' AS failure_stage,
+           CASE
              WHEN c ->> 'command' = 'automation list' AND e -> 'validation' ->> 'field' IN ('limit', 'status')
-               OR c ->> 'command' = 'knowledge show' AND e -> 'validation' ->> 'field' = 'slug'
+               OR c ->> 'command' = 'knowledge show' AND e -> 'validation' ->> 'field' IN ('slug', 'arguments')
                OR c ->> 'command' = 'knowledge upsert' AND e -> 'validation' ->> 'field' IN (
                  'body', 'slug', 'title', 'pageType', 'status', 'clearLibraryLinks',
                  'relatedSlug', 'librarySlug', 'sourcePath', 'arguments')
@@ -1844,8 +2889,11 @@ WITH rows AS MATERIALIZED (
                  'kind', 'from', 'to', 'tag', 'experiment', 'limit', 'arguments')
                OR c ->> 'command' = 'event payload-schema' AND e -> 'validation' ->> 'field' IN ('kind', 'for')
                OR c ->> 'command' = 'measurement entry list' AND e -> 'validation' ->> 'field' IN ('metric', 'from', 'to', 'limit')
+               OR c ->> 'command' = 'wearables day' AND e -> 'validation' ->> 'field' IN ('date', 'provider', 'arguments')
                OR c ->> 'command' IN ('meal add', 'meal edit') AND e -> 'validation' ->> 'field' IN (
                  'nutritionCalories', 'nutritionSource', 'occurredAt', 'arguments')
+               OR c ->> 'command' = 'meal edit' AND e -> 'validation' ->> 'field' IN (
+                 'id', 'nutritionProteinGrams', 'nutritionConfidence')
              THEN e -> 'validation' ->> 'field' END AS field,
            CASE WHEN e -> 'validation' ->> 'code' IN (
              'invalid_type', 'too_big', 'too_small', 'invalid_format', 'not_multiple_of',
@@ -1855,19 +2903,22 @@ WITH rows AS MATERIALIZED (
              THEN e -> 'validation' ->> 'missing' END AS missing,
            sum((e ->> 'count')::numeric) AS observations
     FROM jsonb_array_elements(c -> 'failures') e
-    WHERE e ->> 'code' = 'VALIDATION_ERROR'
-      AND e ->> 'stage' = 'validation'
-    GROUP BY 1, 2, 3
+    WHERE (c ->> 'command' <> 'meal remove-photo'
+      AND e ->> 'code' = 'VALIDATION_ERROR' AND e ->> 'stage' = 'validation')
+      OR (c ->> 'command' = 'meal remove-photo'
+        AND e ->> 'code' IN ('invalid_operation', 'unknown') AND e ->> 'stage' = 'unknown')
+    GROUP BY 1, 2, 3, 4, 5
   ) f
-  GROUP BY turn_id, c ->> 'command', f.field, f.issue_code, f.missing
+  GROUP BY turn_id, c ->> 'command', f.failure_code, f.failure_stage, f.field, f.issue_code, f.missing
 )
-SELECT command, field, issue_code, missing, count(*) AS independent_turns,
+SELECT command, failure_code, failure_stage, field, issue_code, missing, count(*) AS independent_turns,
        sum(observations) AS observed_failures_lower_bound,
-       (field IS NOT NULL AND issue_code IS NOT NULL) AS inspect,
+       ((field IS NOT NULL AND issue_code IS NOT NULL)
+         OR (command = 'meal remove-photo' AND failure_code = 'invalid_operation')) AS inspect,
        (SELECT count(*) = 10000 FROM rows) AS input_row_cap_hit
 FROM per_turn
-GROUP BY command, field, issue_code, missing
-ORDER BY independent_turns DESC, command, field, issue_code, missing
+GROUP BY command, failure_code, failure_stage, field, issue_code, missing
+ORDER BY independent_turns DESC, command, failure_code, failure_stage, field, issue_code, missing
 LIMIT 50;
 ```
 
@@ -1924,7 +2975,11 @@ rows AS MATERIALIZED (
     'teardown', 'unattributed', 'query-freshness', 'query-manifest',
     'query-status', 'query-rebuild', 'query-wait', 'query-source-read',
     'query-wearable-dataset', 'query-metric-projection', 'query-wearable-summary',
-    'query-search-documents', 'query-publication')
+    'query-search-documents', 'query-publication', 'query-entity-read',
+    'query-wearable-compose', 'query-metric-read', 'query-pattern-report',
+    'service-runtime-load', 'query-runtime-load', 'query-projection-load',
+    'query-metric-samples', 'query-metric-evidence', 'query-metric-extract',
+    'query-metric-precedence', 'query-metric-targets')
 ), totals AS (
   SELECT period, command, outcome, p ->> 'phase' AS phase,
          sum((p ->> 'count')::numeric) AS phase_samples,

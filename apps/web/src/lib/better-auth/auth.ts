@@ -6,6 +6,7 @@ import { hostedAuthAdapter } from "./adapter";
 import { authLookupKey } from "./record-crypto";
 import { hostedAuthRateLimitStorage } from "./rate-limit";
 import { hostedAuthCookieName } from "./transport";
+import { hostedAuthReviewSignInCode } from "./review-account";
 
 export interface HostedAuthDelivery {
   email(input: { address: string; code: string }): Promise<void>;
@@ -87,6 +88,8 @@ export function hostedBetterAuthOptions(input: {
       bearer(),
       emailOTP({
         otpLength: 6, expiresIn: 300, allowedAttempts: 3, storeOTP: "hashed",
+        // Undefined falls back to Better Auth's random code.
+        generateOTP: ({ email, type }) => type === "sign-in" ? hostedAuthReviewSignInCode(email) : undefined,
         changeEmail: { enabled: input.credentialEmailChange === true },
         async sendVerificationOTP({ email, otp, type }) {
           if ((type !== "sign-in" && !(input.credentialEmailChange && type === "change-email")) || email.endsWith("@auth.invalid")) {

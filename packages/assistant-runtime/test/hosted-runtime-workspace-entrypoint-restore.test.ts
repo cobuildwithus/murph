@@ -158,66 +158,6 @@ async function createWorkspaceRestoreFixture(snapshotId: string) {
 }
 
 describe("hosted workspace runtime entrypoint", () => {
-  test.each([true, false])("observes provider facts only from a selected startup prefetch (match: %s)", async (matches) => {
-    const vaultRoot = await mkdtemp(path.join(tmpdir(), "mailbox-provider-runtime-"));
-    const sourceRoot = await mkdtemp(path.join(tmpdir(), "mailbox-provider-source-"));
-    try {
-      await initializeVault({ createdAt: TEST_NOW, vaultRoot: sourceRoot });
-      const state = createEmptyHostedMailboxImportState();
-      state.watermarks = { conversation: "3", system: "2" };
-      await writeMailboxImportStateFile(sourceRoot, state);
-      const snapshot = await createVaultSnapshotBundle({ vaultRoot: sourceRoot });
-      const ordinary = createMailboxPort({ events: [], items: [] });
-      let fetches = 0;
-      let providerEgressCount = 0;
-      await runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput({
-        forwardedEnv: { HOSTED_ASSISTANT_PROVIDER: "openai" },
-      }), {
-        vaultRoot,
-        async createCheckpointSnapshot() { return { snapshotRef: snapshot.snapshotRef }; },
-        async importItem() { throw new Error("Empty mailbox must not import."); },
-        async runAssistantPhase(input) {
-          try {
-            await input.beforeProviderAcceptedInputs?.({
-              turnId: "turn_prefetch_provider",
-              acceptedInputs: [{ id: "system_prefetch_provider", source: "system" }],
-            });
-          } catch (error) {
-            expect(error).toMatchObject({ name: "AssistantActiveTurnInputUnavailableError" });
-            return { progressed: false };
-          }
-          providerEgressCount += 1;
-          return { progressed: false };
-        },
-        platform: createPlatform({
-          artifactBytesByHash: new Map([[snapshot.hash, snapshot.bytes]]),
-          mailboxPort: {
-            ...ordinary,
-            async fetch(request, context) {
-              const response = await ordinary.fetch(request, context);
-              fetches += 1;
-              return { ...response, assistantProvider: fetches === 1 ? "venice" : "openai" };
-            },
-          },
-          workspacePort: createWorkspacePort({
-            checkpointRequests: [], events: [],
-            workspace: createWorkspaceState({
-              snapshotRef: snapshot.snapshotRef,
-              redactedStatus: {
-                hostedMailboxConversationImportedSeq: matches ? "3" : "1",
-                hostedMailboxSystemImportedSeq: "2",
-              },
-            }),
-          }),
-        }),
-      });
-      expect(providerEgressCount).toBe(matches ? 0 : 1);
-    } finally {
-      await removeTempRoot(vaultRoot);
-      await removeTempRoot(sourceRoot);
-    }
-  });
-
   test.each(["match", "cursor mismatch", "pending wake", "covered wake", "newer conversation wake", "newer system wake", "mixed unknown wake", "fetch failure", "covered wake fetch failure", "missing hints"] as const)(
     "overlaps the ordinary fetch with restore and preserves staging for %s",
     async (scenario) => {
@@ -932,7 +872,6 @@ describe("hosted workspace runtime entrypoint", () => {
           && BigInt(lateItem.laneSeq) > BigInt(lane.importedSeq)
         );
         return {
-          assistantProvider: "openai",
           fetchedAt: TEST_NOW,
           items: fetchCount === 1 || !itemVisible ? [] : [lateItem],
           maxSeqByLane: request.lanes.map((lane) => ({
@@ -1136,7 +1075,6 @@ describe("hosted workspace runtime entrypoint", () => {
           && BigInt(lateItem.laneSeq) > BigInt(lane.importedSeq)
         );
         return {
-          assistantProvider: "openai",
           fetchedAt: TEST_NOW,
           items: fetchCount === 1 || !itemVisible ? [] : [lateItem],
           maxSeqByLane: request.lanes.map((lane) => ({
@@ -1424,7 +1362,6 @@ describe("hosted workspace runtime entrypoint", () => {
           && BigInt(sidecarItem.laneSeq) > BigInt(lane.importedSeq)
         );
         return {
-          assistantProvider: "openai",
           fetchedAt: TEST_NOW,
           items: fetchCount === 1 || !itemVisible ? [] : [sidecarItem],
           maxSeqByLane: request.lanes.map((lane) => ({

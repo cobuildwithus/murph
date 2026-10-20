@@ -65,6 +65,14 @@ const WEARABLE_SUMMARY_METRIC_KEYS: Record<StoredWearableMetricSummaryKind, Read
   sleep: SLEEP_METRIC_KEYS,
 };
 
+// Finite, module-private expected strings, not cached member envelopes. The
+// write-side comparison still serializes every actual envelope, including its
+// field order and unexpected detail. Decoding still constructs fresh objects.
+const EMPTY_METRIC_PUBLIC_JSON: ReadonlyMap<WearableMetricKey, string> = new Map(
+  [...new Set(Object.values(WEARABLE_SUMMARY_METRIC_KEYS).flatMap(keys => [...keys]))]
+    .map(metric => [metric, stringifyPublicWearableProjectionSummary(resolveMetric(metric, []))]),
+);
+
 const STORED_SELECTION_KEYS = [
   "occurredAt",
   "provider",
@@ -276,8 +284,10 @@ function encodeStoredWearableMetricEnvelope(metric: WearableMetricKey, envelope:
     return envelope;
   }
 
-  const restored = decodeStoredWearableMetricEnvelope(metric, compact);
-  return stringifyPublicWearableProjectionSummary(restored) === stringifyPublicWearableProjectionSummary(envelope)
+  const expectedJson = compact === null
+    ? EMPTY_METRIC_PUBLIC_JSON.get(metric)
+    : stringifyPublicWearableProjectionSummary(decodeStoredWearableMetricEnvelope(metric, compact));
+  return expectedJson === stringifyPublicWearableProjectionSummary(envelope)
     ? compact
     : envelope;
 }

@@ -191,7 +191,7 @@ declare module 'incur' {
       'knowledge log tail': { args: {}; options: { requestId?: string; limit: number } }
       'knowledge score-challenge': { args: {}; options: { input: string } }
       'knowledge search': { args: { query: string }; options: { requestId?: string; pageType?: string; status?: string; limit: number } }
-      'knowledge show': { args: { slug: string }; options: { requestId?: string } }
+      'knowledge show': { args: { slug: string }; options: { requestId?: string; ifExists?: boolean } }
       'knowledge upsert': { args: {}; options: { requestId?: string; body: string; title?: string; slug?: string; pageType?: string; status?: string; clearLibraryLinks?: boolean; relatedSlug?: string[]; librarySlug?: string[]; sourcePath?: string[] } }
       'list': { args: {}; options: { requestId?: string; recordType?: string[]; kind?: string; status?: string; stream?: string[]; experiment?: string; from?: string; to?: string; tag?: string[]; limit: number } }
       'meal add': { args: {}; options: { requestId?: string; withDailyTotals?: boolean; photo?: string; audio?: string; note?: string; occurredAt?: string | string; source?: "manual" | "import" | "device" | "derived"; ingredient?: string[]; nutritionCalories?: number; nutritionProteinGrams?: number; nutritionCarbsGrams?: number; nutritionFatGrams?: number; nutritionFiberGrams?: number; nutritionSource?: "user" | "label" | "database" | "inherited" | "estimated"; nutritionConfidence?: "low" | "medium" | "high"; nutritionSourceDetail?: string } }
@@ -217,7 +217,7 @@ declare module 'incur' {
       'memory show': { args: { memoryId?: string }; options: { recordOnly?: boolean; compact?: boolean } }
       'memory update': { args: { memoryId: string; text: string }; options: { compact?: boolean; section?: "Identity" | "Preferences" | "Instructions" | "Context" } }
       'memory upsert': { args: { text: string }; options: { compact?: boolean; section: "Identity" | "Preferences" | "Instructions" | "Context" } }
-      'model': { args: {}; options: { show?: boolean; preset?: "codex"; model?: string; modelProvider?: string; codexCommand?: string; profile?: string; codexHome?: string; reasoningEffort?: "low" | "medium" | "high" | "xhigh"; oss?: boolean } }
+      'model': { args: {}; options: { show?: boolean; preset?: "codex"; model?: string; codexCommand?: string; profile?: string; codexHome?: string; reasoningEffort?: "low" | "medium" | "high" | "xhigh" } }
       'protocol import-json': { args: {}; options: { requestId?: string; input: string } }
       'protocol list': { args: {}; options: { requestId?: string; status?: "available" | "archived"; commonsProtocol?: string; limit: number } }
       'protocol show': { args: { id: string }; options: { requestId?: string } }
@@ -306,7 +306,6 @@ declare module 'incur' {
       'wearables latest': { args: {}; options: { requestId?: string; date?: string; from?: string; to?: string; provider?: string[] } }
       'wearables metric latest': { args: { metric: string }; options: { requestId?: string; date?: string; from?: string; to?: string; provider?: string[]; windowDays: number } }
       'wearables metric trend': { args: { metric: string }; options: { requestId?: string; date?: string; from?: string; to?: string; provider?: string[]; windowDays: number } }
-      'wearables patterns': { args: {}; options: { requestId?: string; date?: string; windowDays: number } }
       'wearables recovery list': { args: {}; options: { requestId?: string; date?: string; from?: string; to?: string; provider?: string[]; limit: number } }
       'wearables sleep list': { args: {}; options: { requestId?: string; date?: string; from?: string; to?: string; provider?: string[]; limit: number } }
       'wearables sleep pattern': { args: {}; options: { requestId?: string; date?: string; from?: string; to?: string; provider?: string[]; timeZone?: string; windowDays: number } }

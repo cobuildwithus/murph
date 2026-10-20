@@ -91,7 +91,7 @@ for (const bounded of [false, true]) {
     const imports = h.imports();
     const probe = await h.probe();
     assert.equal(probe.outcome, "unchanged");
-    assert.equal(probe.nextReconcileAt, "2026-04-03T16:00:00.000Z");
+    assert.equal(probe.nextReconcileAt, "2026-04-03T21:00:00.000Z");
     assert.equal(probe.requestCount, 2);
     assert.ok(probe.responseBytes > 0);
     assert.equal(h.imports(), imports, "preflight has no canonical write capability");

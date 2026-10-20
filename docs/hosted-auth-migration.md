@@ -50,6 +50,7 @@ place. It must not reload Privy login or restore legacy credential writers.
 | `HOSTED_BETTER_AUTH_SECRET` | Independent canonical 32-byte base64url Better Auth signing secret | Retain while any replacement session exists. |
 | `HOSTED_AUTH_STORAGE_KEY` | Independent canonical 32-byte base64url pre-auth encryption and separated blind-lookup/rate-limit domains | Retain while auth records exist. Rotation needs a reviewed reindex/re-encryption procedure; do not replace it as a rollout toggle. |
 | `HOSTED_AUTH_EMAIL_FROM`, existing `RESEND_API_KEY` | OTP email delivery through the existing email owner | Qualify sender/delivery in hosted staging. |
+| `HOSTED_AUTH_REVIEW_EMAIL`, `HOSTED_AUTH_REVIEW_CODE` | One dedicated app-store review account signs in with this fixed six-digit email code and receives no email; the companion also lets that verified member past messaging setup, because reviewers cannot receive its texts. Every other address keeps random emailed codes and required messaging setup, and expiry, attempt and rate limits are unchanged | Unset either value to disable it. Use a review-only account with no real member data, and rotate the code when a review cycle ends. |
 | `HOSTED_AUTH_TELEGRAM_CLIENT_ID` | Numeric Telegram login client ID; verified token audience and browser popup configuration | Qualify the registered Web origin, profile ID and bot messaging scopes before Telegram login is exposed. |
 | `HOSTED_AUTH_TWILIO_ACCOUNT_SID`, `HOSTED_AUTH_TWILIO_API_KEY_SID`, `HOSTED_AUTH_TWILIO_API_KEY_SECRET`, `HOSTED_AUTH_TWILIO_VERIFY_SERVICE_SID` | Dedicated Twilio Verify SMS service and API key | Qualify six-digit codes, destination coverage and fraud controls before exposing phone login. |
 
@@ -120,8 +121,10 @@ configuration, rejected provider authority and malformed responses fail closed.
 Server-side failure causes retain only the operation, fixed failure stage,
 HTTP status, a five-digit numeric Twilio code and finite response/parameter
 diagnostics read from at most 4 KiB. For code `60200`, `parameter` and
-`parameterKind` retain the exact `Invalid parameter: LABEL` classifier for
-`To`, `Channel`, `RiskCheck`, `Code` and `VerificationSid`. Only an exact `To`
+`parameterKind` recognize the exact `Invalid parameter: LABEL` format for
+`To`, `Channel`, `RiskCheck`, `Code` and `VerificationSid`. They also recognize
+an exact backtick-delimited `To` label followed by a colon, space and an
+E.164-shaped destination; the destination is discarded. Only a recognized `To`
 rejection on send with HTTP 400 maps to the existing invalid-request response.
 For HTTP 400/code `60200` with `parameterKind unrecognized`, an optional
 `parameterHint` retains only one of those five labels. It recognizes a leading
@@ -322,6 +325,90 @@ other sessions and blocks native legacy credentials. This security action may
 require those devices to sign in again. A later import cannot restore the old
 method. These routes remain gated by issuance activation; the settings clients
 and recovery journeys must be qualified before enabling them.
+
+### Native first messaging setup
+
+Authenticated companions use four additive, cookie-rejecting POST endpoints:
+
+- `/api/device-sync/companion/auth/messaging/phone/send`
+- `/api/device-sync/companion/auth/messaging/phone/verify`
+- `/api/device-sync/companion/auth/messaging/telegram/start`
+- `/api/device-sync/companion/auth/messaging/telegram/complete`
+
+Phone requests carry `{ change: { method: "phone", operation: "set",
+expectedIdentity: null, value: "<E164_PHONE>" } }`; verify also carries `code`.
+The existing credential owner owns canonical conflict checks, SMS budgets,
+Twilio Verify proof, current-session revalidation, first-messaging eligibility,
+five-minute primary freshness, atomic contact/login writes and durable channel
+wake. These endpoints cannot replace/remove methods, accept client approval,
+import members, or bypass existing approval state. Protected members use account
+settings; stale primary proof requires signing in again. Additions preserve
+sessions. Existing browser credential routes are unchanged.
+
+Telegram start accepts `{}` and returns `{ ok: true, startId, clientId }`, without
+cookies. The random 256-bit start ID expires after five minutes in the existing
+encrypted auth verification store, bound to the native member and session under
+a purpose distinct from browser login and credential changes. Completion accepts
+`{ startId, idToken }` with the original bearer. The unmodified official SDKs
+request `openid profile telegram:bot_access` and own registered HTTPS App Link /
+Universal Link callbacks and PKCE. No Murph-hosted browser intermediary, backend
+code exchange, SDK fork or client secret is introduced. The SDK may use its own
+platform authentication-session fallback when Telegram is not installed.
+
+The human-approved native exception does not require the nonce the SDKs cannot
+send. It retains the shared verifier's JWKS, algorithms, issuer, audience and
+expiry checks, requires `sub` and `iat`, limits token age to two minutes with at
+most five seconds of future clock skew, and rejects tokens issued before the
+pending start (allowing five seconds for clock skew). A SHA-256 token digest
+becomes a globally unique consumed verification record, retained beyond its
+acceptance window. Pending-start consumption, replay reservation and canonical
+credential mutation commit atomically. Wrong member/session, missing start,
+stale token, replay and conflicts fail closed; member/IP attempt budgets apply.
+The trust rationale is delivery through the registered app callback with SDK
+PKCE, plus current native bearer authority and short-lived one-use proof. This
+is not a cryptographic token-to-start nonce binding. A stolen fresh token remains
+a bearer proof until consumption; never log, persist or expose it in app URLs.
+Browser login and browser credential changes still require the exact signed
+nonce and cookie binding without this exception.
+
+After the committed link, one bounded Bot API send attempts the existing
+`assistant.signup_welcome` content. Telegram documents no bot-access token claim;
+requesting the scope alone is not proof that a message can be delivered. Only a
+successful Bot API message response naming the verified private chat promotes
+`telegramThreadId`, through the existing routing owner and channel-update wake.
+Promotion rechecks the identity under the member lock so removal/replacement
+while the send was in flight cannot restore a stale link. Replay cannot resend.
+Provider rejection, missing access, blocked bots, malformed responses and network
+uncertainty leave the identity linked but awaiting inbound. This narrow native
+link welcome does not enable general proactive Telegram activation welcomes.
+
+Completion also returns `telegramAwaitingInbound` and `telegramUrl` (the bot chat
+with a prefilled greeting, or null if unconfigured). The initial-onboarding
+projection includes the additive `telegramAwaitingInbound` flag for recovery
+across process restarts, only when no other direct messaging route exists. A
+member with a canonical phone must not be held for an unrelated pending Telegram
+thread. Legacy `messagingSetupRequired` semantics are unchanged:
+a verified canonical phone or linked Telegram identity clears that flag. New
+clients show the explicit say-hi step while Telegram awaits inbound and refresh
+on return; they must not infer a direct route from a successful SDK callback.
+The bot-start linking protocol, recipient proof and custom return page are gone.
+
+The native setup default contains the existing phone input and Send code action,
+a quiet divider and secondary Connect Telegram button, with Sign out in the top
+bar. SMS uses the existing six-digit input. Telegram login uses the centered
+confirming state, then either readiness continuation or the say-hi fallback.
+Cancellation and errors stay inline; account settings appears only for changes
+that need its existing approval or conflict controls.
+
+Deploy this backend before distributing either native consumer. Older apps keep
+using browser settings, and the new initial-onboarding field is additive. New
+apps against an older backend fail the native operation without weakening proof.
+Rollback to a backend without these endpoints requires pausing dependent native
+distribution; already installed newer apps retain SMS/browser error recovery.
+Production merge qualification includes an unauthenticated endpoint rejection
+smoke. Native distribution additionally needs registered callback domains and
+real-device Telegram approval. Android distribution also requires its real
+registered redirect host and the official SDK package-fetch credentials.
 
 ## Browser and native continuity
 

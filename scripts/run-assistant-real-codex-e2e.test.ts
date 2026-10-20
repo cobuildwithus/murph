@@ -19,6 +19,7 @@ describe('assistant real Codex local runner', () => {
     ])).toEqual({
       authMode: 'subscription',
       codexHome: null,
+      codexCommand: null,
       help: false,
       model: null,
       testPattern: 'adaptive wearable no-data outreach',
@@ -38,6 +39,7 @@ describe('assistant real Codex local runner', () => {
     ])).toEqual({
       authMode: 'provider',
       codexHome: null,
+      codexCommand: null,
       help: false,
       model: 'gpt-5.6-sol',
       testPattern: 'member preference',
@@ -52,6 +54,7 @@ describe('assistant real Codex local runner', () => {
     ])).toEqual({
       authMode: 'subscription',
       codexHome: '/alternate-codex-home',
+      codexCommand: null,
       help: false,
       model: null,
       testPattern: 'member preference',
@@ -68,6 +71,40 @@ describe('assistant real Codex local runner', () => {
       '--codex-home',
       'relative-codex-home',
     ])).toThrow('--codex-home requires an absolute path.')
+  })
+
+  it.each(['subscription', 'provider'])('selects an explicit native binary for %s runs', (auth) => {
+    const requests: AssistantRealCodexCommandRequest[] = []
+    const options = parseAssistantRealCodexRunArgs([
+      'synthetic journey', '--auth', auth,
+      '--codex-command', '/synthetic native build/codex',
+    ])
+    const status = executeAssistantRealCodexRun(options, {
+      runCommand: (request) => {
+        requests.push(request)
+        return request.stdio === 'capture'
+          ? { status: 0, stdout: JSON.stringify([{ name: 'synthetic journey' }]) }
+          : { status: 0 }
+      },
+      sourceEnv: { MURPH_REAL_CODEX_COMMAND: '/ambient/codex' },
+      writeStderr: () => undefined,
+      writeStdout: () => undefined,
+    })
+    expect(status).toBe(0)
+    expect(requests[0]?.env.MURPH_REAL_CODEX_COMMAND).toBe('/synthetic native build/codex')
+    expect(requests.at(-1)?.env.MURPH_REAL_CODEX_COMMAND).toBe('/synthetic native build/codex')
+    const loginRequests = requests.filter(({ stdio }) => stdio === 'ignore')
+    expect(loginRequests).toHaveLength(auth === 'subscription' ? 1 : 0)
+    if (auth === 'subscription') {
+      expect(loginRequests[0]?.command).toBe('/synthetic native build/codex')
+      expect(loginRequests[0]?.args).toEqual(['login', 'status'])
+    }
+  })
+
+  it.each(['relative/codex', '--model', ''])('rejects a non-absolute selected binary: %s', (command) => {
+    expect(() => parseAssistantRealCodexRunArgs([
+      'synthetic journey', '--codex-command', command,
+    ])).toThrow(/--codex-command requires/)
   })
 
   it('sets only the live-test controls owned by the selected auth mode', () => {

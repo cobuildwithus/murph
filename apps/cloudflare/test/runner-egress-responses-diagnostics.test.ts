@@ -8,7 +8,7 @@ it("observes Responses Lite tools and cache-affecting settings without logging v
   const build = (tools: unknown, format: unknown, fingerprintSecret: string | null = "synthetic-secret") => buildHostedOpenAiCacheDiagnostic({
     endpointKind: "responses", method: "POST", fingerprintSecret,
     requestBytes: TEST_TEXT_ENCODER.encode(JSON.stringify({
-      model: "gpt-5.6-terra",
+      model: "gpt-6.1-sol",
       prompt_cache_options: { comparison_response_id: "resp_private_synthetic", mode: "implicit", ttl: "30m" },
       reasoning: { effort: "low" }, text: { format, verbosity: "medium" },
       service_tier: "private-invalid-value",
@@ -83,7 +83,7 @@ describe("Responses request diagnostic projection", () => {
     const otherThreadId = "thread-other-memory-correlation-id";
     const requestBytes = TEST_TEXT_ENCODER.encode(JSON.stringify({
       input: [],
-      model: "gpt-5.6-terra",
+      model: "gpt-6.1-sol",
     }));
     const buildDiagnostic = (input: {
       threadId: string;
@@ -160,7 +160,7 @@ describe("Responses request diagnostic projection", () => {
       method: "POST",
       requestBytes: TEST_TEXT_ENCODER.encode(JSON.stringify({
         input,
-        model: "gpt-5.6-terra",
+        model: "gpt-6.1-sol",
       })),
     });
 
@@ -310,7 +310,7 @@ describe("Responses request diagnostic projection", () => {
       method: "POST",
       requestBytes: TEST_TEXT_ENCODER.encode(JSON.stringify({
         input,
-        model: "gpt-5.6-terra",
+        model: "gpt-6.1-sol",
       })),
     });
 
@@ -467,7 +467,7 @@ describe("Responses request diagnostic projection", () => {
       method: "POST",
       requestBytes: TEST_TEXT_ENCODER.encode(JSON.stringify({
         input,
-        model: "gpt-5.6-terra",
+        model: "gpt-6.1-sol",
       })),
     });
 
@@ -537,7 +537,7 @@ describe("Responses request diagnostic projection", () => {
           { call_id: "call_b", output: sharedOutput, type: "function_call_output" },
           { call_id: "call_a", output: sharedOutput, type: "function_call_output" },
         ],
-        model: "gpt-5.6-terra",
+        model: "gpt-6.1-sol",
       })),
     });
 
@@ -609,7 +609,7 @@ describe("Responses request diagnostic projection", () => {
       method: "POST",
       requestBytes: TEST_TEXT_ENCODER.encode(JSON.stringify({
         input,
-        model: "gpt-5.6-terra",
+        model: "gpt-6.1-sol",
       })),
     });
 
@@ -661,7 +661,7 @@ describe("Responses request diagnostic projection", () => {
       method: "POST",
       requestBytes: TEST_TEXT_ENCODER.encode(JSON.stringify({
         input,
-        model: "gpt-5.6-terra",
+        model: "gpt-6.1-sol",
       })),
     });
     const expectedTail = input.slice(2);
@@ -737,7 +737,7 @@ describe("Responses request diagnostic projection", () => {
       method: "POST",
       requestBytes: TEST_TEXT_ENCODER.encode(JSON.stringify({
         input,
-        model: "gpt-5.6-terra",
+        model: "gpt-6.1-sol",
       })),
     });
 
@@ -753,7 +753,7 @@ describe("Responses request diagnostic projection", () => {
       endpointKind: "responses",
       method: "POST",
       requestBytes: TEST_TEXT_ENCODER.encode(
-        `{"input":[${nestedJson}],"model":"gpt-5.6-terra"}`,
+        `{"input":[${nestedJson}],"model":"gpt-6.1-sol"}`,
       ),
     });
 
@@ -812,7 +812,7 @@ describe("Responses request diagnostic projection", () => {
 
     const tooLargeBody = JSON.stringify({
       input: "x".repeat(6 * 1024 * 1024),
-      model: "gpt-5.6-terra",
+      model: "gpt-6.1-sol",
     });
     const tooLargeDiagnostic = await buildHostedOpenAiCacheDiagnostic({
       endpointKind: "responses",

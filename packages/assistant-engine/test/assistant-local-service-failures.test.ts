@@ -1027,6 +1027,10 @@ test('sendAssistantMessageLocal anchors hosted reply timing to the queued delive
       providerTurn: {
         onboardingGuidanceInjected: false,
         codexContinuation: { kind: 'explicit-structured-history' },
+        finalResponseCompletion: {
+          kind: 'observed',
+          observedAtMonotonicMs: performance.now() - 250,
+        },
         response: 'timed response',
         responseDeliveryContextOrdinal: 0,
         transcriptResponse: 'timed response',
@@ -1062,9 +1066,16 @@ test('sendAssistantMessageLocal anchors hosted reply timing to the queued delive
       finalReplySelected: true,
       providerRequestOrdinal: 0,
       turnTimingDeliveryIntentId: 'intent-timed-reply',
+      turnTimingFinalResponseCompletion: 'observed',
       turnTimingProviderRequestElapsedMs: 1_200,
+      // The exact captured provider-result instant, never derived or clamped.
+      turnTimingProviderResultAtEpochMs: Date.parse('2026-07-09T12:00:01.200Z'),
       turnTimingSinceProviderResultMs: 0,
     }))
+  const completedToResultMs = (replyTiming as { rawEvent: Record<string, unknown> })
+    .rawEvent.turnTimingFinalResponseCompletedToProviderResultMs
+  expect(completedToResultMs).toBeGreaterThanOrEqual(250)
+  expect(completedToResultMs).toBeLessThan(60_000)
 })
 
 test('sendAssistantMessageLocal reports failed delivery outcomes after provider success', async () => {
@@ -1185,6 +1196,7 @@ test('sendAssistantMessageLocal surfaces queued delivery state after queue-only 
       error: queuedError,
       intentId: 'intent-queued',
       kind: 'queued',
+      media: [],
       session: queuedSession,
     },
   })
@@ -1280,6 +1292,7 @@ test('sendAssistantMessageLocal uses the Codex route and not-requested delivery 
     deliveryOutcome: {
       intentId: 'intent-not-requested',
       kind: 'not-requested',
+      media: [],
       session,
     },
     plan,

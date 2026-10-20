@@ -22,7 +22,6 @@ import { MURPH_CONTACT_AVATAR_OPTIONS } from "../src/lib/murph-contact-avatars";
 // Trace entries are recorded relative to each trace file and stay inside
 // apps/web, so the suffixes carry no apps/web prefix.
 const requiredOgAssetSuffixes = [
-  "public/icons/murph-mark.svg",
   "public/logo.svg",
   "app/fonts/Fraunces-400.ttf",
   "app/fonts/Fraunces-600.ttf",
@@ -47,7 +46,7 @@ const requiredOgRouteTraceMarkers = [
   "server/app/join/[inviteCode]/opengraph-image",
   "server/app/family/accept/[inviteCode]/opengraph-image",
   "server/app/groups/join/[joinCode]/opengraph-image",
-  "server/app/biomarkers/[biomarkerId]/opengraph-image",
+  "server/app/g/[token]/opengraph-image",
   "server/app/experiments/[experimentId]/opengraph-image",
   "server/app/(dashboard)/experiments/[experimentId]/card/route.js.nft.json",
   "server/app/changelog/card/v1/[items]/route.js.nft.json",

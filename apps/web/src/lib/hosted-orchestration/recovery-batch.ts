@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 export const HOSTED_RECOVERY_JITTER_WINDOW_MS = 5_000;
 const RECOVERY_CONCURRENCY = 5;
 
-// Only the two bounded recovery sweeps use this executor. Direct ingress and
+// Only the bounded recovery sweeps use this executor. Direct ingress and
 // runtime-owned deadlines never enter it. Waiting starts before any item work,
 // so it cannot retain a transaction or a pooled database connection.
 export async function runHostedRecoveryBatch<T extends { userId: string }>(

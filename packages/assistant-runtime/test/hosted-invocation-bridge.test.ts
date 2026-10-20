@@ -601,12 +601,154 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     }
   }
 
+  it.each(
+    ([
+      { phase: "session_start_request", stage: "session" },
+      { phase: "session_complete_request", stage: "checkpoint" },
+    ] as const).flatMap(({ phase, stage }) => [
+      ...([
+        ["normal", 6_000, 6_000],
+        ["long", 120_000, 120_000],
+        ["zero", 0, 0],
+        ["largest safe integer", Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER],
+        ["absent", undefined, undefined],
+        ["null", null, undefined],
+        ["string", "120000", undefined],
+        ["negative", -1, undefined],
+        ["fractional", 1.5, undefined],
+        ["NaN", Number.NaN, undefined],
+        ["infinite", Number.POSITIVE_INFINITY, undefined],
+        ["negative infinite", Number.NEGATIVE_INFINITY, undefined],
+        ["unsafe integer", Number.MAX_SAFE_INTEGER + 1, undefined],
+      ] as const).map(([label, timeoutMs, expectedTimeoutMs]) => ({
+        label,
+        phase,
+        stage,
+        timeoutMs,
+        expectedPhase: phase,
+        expectedTimeoutMs,
+      })),
+      {
+        label: "unknown phase",
+        phase: `${phase}_unknown`,
+        stage,
+        timeoutMs: 120_000,
+        expectedPhase: undefined,
+        expectedTimeoutMs: undefined,
+      },
+      {
+        label: "non-string phase",
+        phase: 120_000,
+        stage,
+        timeoutMs: 120_000,
+        expectedPhase: undefined,
+        expectedTimeoutMs: undefined,
+      },
+    ]),
+  )("preserves safe snapshot $stage diagnostics with $label metadata", async ({
+    phase,
+    stage,
+    timeoutMs,
+    expectedPhase,
+    expectedTimeoutMs,
+  }) => {
+    const vaultRoot = await createVaultRoot();
+    const { calls, platform } = createRuntimePlatform();
+    const snapshotArchiveBuilder = createSnapshotArchiveBuilder();
+    const failure = Object.assign(new Error("Synthetic snapshot session failure."), {
+      phase,
+      ...(timeoutMs === undefined ? {} : { timeoutMs }),
+    });
+    if (stage === "session") {
+      calls.startSnapshotSession.mockRejectedValueOnce(failure);
+    } else {
+      calls.completeSnapshotSession.mockRejectedValueOnce(failure);
+    }
+    const options = createBridgeOptions({
+      platform,
+      snapshotArchiveBuilder,
+      vaultRoot,
+    });
+
+    await expect(options.createCheckpointSnapshot(
+      createCheckpointInput("idle_shutdown"),
+    )).rejects.toBe(failure);
+
+    const lifecycleEntries = calls.logWrite.mock.calls
+      .flatMap(([request]) => request.entries)
+      .filter((entry) => entry.eventCode.startsWith("checkpoint.snapshot_"));
+    expect(lifecycleEntries).toEqual([
+      expect.objectContaining({
+        eventCode: "checkpoint.snapshot_failed",
+        redactedJson: expect.objectContaining({
+          snapshotMode: "workspace_snapshot_v2",
+          snapshotStage: stage,
+        }),
+      }),
+    ]);
+    const redactedJson = lifecycleEntries[0]?.redactedJson;
+    const expectedPrefix = stage === "session"
+      ? "snapshotSessionStart"
+      : "snapshotSessionComplete";
+    for (const prefix of ["snapshotSessionStart", "snapshotSessionComplete"]) {
+      if (prefix === expectedPrefix && expectedPhase !== undefined) {
+        expect(redactedJson).toHaveProperty(`${prefix}FailurePhase`, expectedPhase);
+      } else {
+        expect(redactedJson).not.toHaveProperty(`${prefix}FailurePhase`);
+      }
+      if (prefix === expectedPrefix && expectedTimeoutMs !== undefined) {
+        expect(redactedJson).toHaveProperty(`${prefix}TimeoutMs`, expectedTimeoutMs);
+      } else {
+        expect(redactedJson).not.toHaveProperty(`${prefix}TimeoutMs`);
+      }
+    }
+    expect(redactedJson).not.toHaveProperty("snapshotUploadFailurePhase");
+  });
+
+  it.each([
+    { phase: "synthetic-private-upload-phase", shape: "own" },
+    { phase: 42, shape: "own" },
+    { phase: undefined, shape: "own" },
+    { phase: "upload_transfer", shape: "inherited" },
+    { phase: "upload_transfer", shape: "accessor" },
+  ])("omits untrusted upload failure phase metadata: $shape / $phase", async ({ phase, shape }) => {
+    const vaultRoot = await createVaultRoot();
+    const { calls, platform } = createRuntimePlatform();
+    const failure = new Error("Synthetic snapshot upload failure.");
+    const phaseGetter = vi.fn(() => phase);
+    if (shape === "inherited") {
+      Object.setPrototypeOf(failure, Object.assign(new Error(), { phase }));
+    } else {
+      Object.defineProperty(failure, "phase", {
+        enumerable: true,
+        ...(shape === "accessor" ? { get: phaseGetter } : { value: phase }),
+      });
+    }
+    calls.putSnapshotObjectDirect.mockRejectedValueOnce(failure);
+    const options = createBridgeOptions({ platform, vaultRoot });
+
+    await expect(options.createCheckpointSnapshot(
+      createCheckpointInput("idle_shutdown"),
+    )).rejects.toBe(failure);
+
+    const entries = calls.logWrite.mock.calls.flatMap(([request]) => request.entries);
+    const failures = entries.filter((entry) => entry.eventCode === "checkpoint.snapshot_failed");
+    expect(failures).toHaveLength(1);
+    expect(failures[0]?.redactedJson).toHaveProperty("snapshotStage", "upload");
+    expect(failures[0]?.redactedJson).not.toHaveProperty("snapshotUploadFailurePhase");
+    expect(JSON.stringify(entries)).not.toContain("synthetic-private-upload-phase");
+    expect(phaseGetter).not.toHaveBeenCalled();
+  });
+
   it("emits one bounded failure record at each fixed snapshot lifecycle stage", async () => {
     const failureCases = [
       { sessionPhase: "session_start_request", stage: "session" },
       { sessionPhase: "session_start_response_decode", stage: "session" },
       { stage: "archive" },
-      { stage: "upload" },
+      { uploadPhase: "upload_prepare", stage: "upload" },
+      { uploadPhase: "upload_presign", stage: "upload" },
+      { uploadPhase: "upload_transfer", stage: "upload" },
+      { uploadPhase: "upload_receipt", stage: "upload" },
       { stage: "checkpoint" },
     ] as const;
 
@@ -623,6 +765,8 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
           phase: failureCase.sessionPhase,
           timeoutMs: 6_000,
         });
+      } else if (expectedStage === "upload") {
+        Object.assign(failure, { phase: failureCase.uploadPhase, timeoutMs: 6_000 });
       } else if (expectedStage === "checkpoint") {
         Object.assign(failure, {
           phase: "session_complete_request",
@@ -673,9 +817,13 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
                   }
               : {}),
             snapshotStage: expectedStage,
+            ...(expectedStage === "upload"
+              ? { snapshotUploadFailurePhase: failureCase.uploadPhase }
+              : {}),
           }),
         }),
       ]);
+      expect(lifecycleEntries[0]?.redactedJson).not.toHaveProperty("snapshotUploadTimeoutMs");
       expect(lifecycleEntries.some((entry) =>
         entry.eventCode === "checkpoint.snapshot_plan"
         || entry.eventCode === "checkpoint.snapshot_started"
@@ -835,6 +983,42 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
 
     expect(calls.startSnapshotSession).toHaveBeenCalledOnce();
     expect(calls.putSnapshotObjectDirect).not.toHaveBeenCalled();
+    expect(calls.completeSnapshotSession).not.toHaveBeenCalled();
+    expect(calls.abortSnapshotSession).toHaveBeenCalledOnce();
+  });
+
+  it("preserves an exact frozen runtime-wake interruption during snapshot upload", async () => {
+    const vaultRoot = await createVaultRoot();
+    const { calls, platform } = createRuntimePlatform();
+    const controller = new AbortController();
+    const interruption = Object.freeze(new HostedRuntimeCheckpointInterruptedByWakeError());
+    calls.putSnapshotObjectDirect.mockImplementationOnce(async ({ signal }) => {
+      controller.abort(interruption);
+      throw signal?.reason;
+    });
+    const options = createBridgeOptions({ platform, vaultRoot });
+
+    await expect(options.createCheckpointSnapshot(
+      createCheckpointInput("idle_shutdown"),
+      { signal: controller.signal },
+    )).rejects.toBe(interruption);
+    await drainHostedRuntimeLogWritesBestEffort();
+
+    const entries = calls.logWrite.mock.calls
+      .flatMap(([request]) => request.entries)
+      .filter((entry) => entry.eventCode.startsWith("checkpoint.snapshot_"));
+    expect(entries).toEqual([
+      expect.objectContaining({
+        eventCode: "checkpoint.snapshot_preempted",
+        redactedJson: expect.objectContaining({
+          snapshotStage: "upload",
+          snapshotOutcomeKind: "expected_preemption",
+        }),
+      }),
+    ]);
+    expect(entries[0]?.redactedJson).not.toHaveProperty("snapshotUploadFailurePhase");
+    expect(interruption).not.toHaveProperty("phase");
+    expect(calls.putSnapshotObjectDirect).toHaveBeenCalledOnce();
     expect(calls.completeSnapshotSession).not.toHaveBeenCalled();
     expect(calls.abortSnapshotSession).toHaveBeenCalledOnce();
   });
@@ -1263,6 +1447,14 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     expect(calls.putSnapshotObjectDirect).toHaveBeenCalledOnce();
     expect(calls.completeSnapshotSession).toHaveBeenCalledOnce();
     expect(calls.abortSnapshotSession).not.toHaveBeenCalled();
+    await drainHostedRuntimeLogWritesBestEffort();
+    const entries = calls.logWrite.mock.calls
+      .flatMap(([request]) => request.entries)
+      .filter((entry) => entry.eventCode.startsWith("checkpoint.snapshot_"));
+    expect(entries).toEqual([
+      expect.objectContaining({ eventCode: "checkpoint.snapshot_finished" }),
+    ]);
+    expect(entries[0]?.redactedJson).not.toHaveProperty("snapshotUploadFailurePhase");
   });
 
   it("excludes unreferenced Codex rollouts without deleting live local state", async () => {

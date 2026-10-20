@@ -26,8 +26,8 @@ test("Premium model choice shows Astra on phone and desktop", async ({ browser }
         return ["localhost", "127.0.0.1", "[::1]"].includes(hostname)
           ? route.continue() : route.abort();
       });
-      await page.goto("/screenshots/settings#settings-model-provider-save-controls", { waitUntil: "load" });
-      const study = page.locator("#settings-model-provider-save-controls");
+      await page.goto("/screenshots/settings#settings-model-save-controls", { waitUntil: "load" });
+      const study = page.locator("#settings-model-save-controls");
       await expect(study).toBeVisible();
       await expect(study.getByText("Astra", { exact: true })).toBeVisible();
       await expect(study.getByText("Highest usage", { exact: true })).toBeVisible();
@@ -42,7 +42,10 @@ test("Premium model choice shows Astra on phone and desktop", async ({ browser }
       await expect.poll(() => artwork.evaluate((element) =>
         element.getAnimations({ subtree: true }).filter((animation) => animation.playState === "running").length,
       )).toBeGreaterThan(0);
-      await study.screenshot({ path: path.join(outputDir, `astra-models-${width}.png`) });
+      await study.screenshot({
+        path: path.join(outputDir, `astra-models-${width}.png`),
+        style: "nextjs-portal { display: none !important; }",
+      });
       await artwork.scrollIntoViewIfNeeded();
       const displacements: number[] = [];
       for (const depth of [0, 1, 2]) {
@@ -83,9 +86,12 @@ test("Premium model choice shows Astra on phone and desktop", async ({ browser }
       await page.waitForTimeout(200);
       expect(Math.abs((await star.boundingBox())!.x - resting!.x)).toBeLessThan(0.5);
       await expect(study.locator('[id="assistant-model-gpt-6-astra"]')).toBeEnabled();
-      await study.screenshot({ path: path.join(outputDir, `astra-models-${width}-reduced-motion.png`) });
+      await study.screenshot({
+        path: path.join(outputDir, `astra-models-${width}-reduced-motion.png`),
+        style: "nextjs-portal { display: none !important; }",
+      });
       await page.emulateMedia({ reducedMotion: "no-preference" });
-      const disabledStudy = page.locator('[data-design-variant="venice-terra-sol-locked"]');
+      const disabledStudy = page.locator('[data-design-variant="pulse-models-locked"]');
       const disabledArtwork = disabledStudy.locator('[data-model-artwork="astra"]');
       const disabledRadio = disabledStudy.locator('[id="assistant-model-gpt-6-astra"]');
       await expect(disabledRadio).toBeDisabled();
@@ -102,7 +108,7 @@ test("Premium model choice shows Astra on phone and desktop", async ({ browser }
       await expect.poll(async () => disabledResting.x - (await disabledStar.boundingBox())!.x).toBeGreaterThan(0.8);
       await page.mouse.click(disabledResting.x - 24, disabledResting.y);
       await expect(disabledRadio).not.toBeChecked();
-      await expect(disabledStudy.locator('[id="assistant-model-gpt-5.6-terra"]')).toBeChecked();
+      await expect(disabledStudy.locator('[id="assistant-model-gpt-6.1-sol"]')).toBeChecked();
       await page.mouse.move(0, 0);
       await expect.poll(async () => Math.abs((await disabledStar.boundingBox())!.x - disabledResting.x)).toBeLessThan(0.1);
       expect(hydrationErrors).toEqual([]);

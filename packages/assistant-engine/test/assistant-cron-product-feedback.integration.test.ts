@@ -9,7 +9,9 @@ import { claimResolvedAssistantCronJob, executeClaimedAssistantCronJob } from '.
 import { listCanonicalAssistantCronRecords, projectCanonicalAssistantCronJob, resolveCanonicalRuntimeState } from '../src/assistant/cron/canonical-jobs.ts'
 import { readAssistantCronCanonicalRuntimeStore } from '../src/assistant/cron/runtime-state.ts'
 import { resolveAssistantStatePaths } from '../src/assistant/store/paths.ts'
-import { MURPH_WEEKLY_USAGE_OPTIMIZER_AUTOMATION } from '../src/assistant/weekly-usage-optimizer.ts'
+import { MURPH_WEEKLY_USAGE_OPTIMIZER_AUTOMATION, resolveUsageOptimizerFeedbackScope } from '../src/assistant/weekly-usage-optimizer.ts'
+import { createAssistantProductFeedbackRecorder } from '../src/assistant/turn-progress.ts'
+import { executeMurphDynamicToolRequest, readMurphDynamicToolRequest } from '../src/assistant-codex/dynamic-tools.ts'
 import { createDeferred, createTempVaultContext } from './test-helpers.ts'
 
 const boundary = vi.hoisted(() => ({
@@ -125,6 +127,58 @@ async function runCron(accept: (record: HostedRuntimeProductFeedbackRecord) => v
 }
 
 describe('cron notification product feedback commit boundary', () => {
+  it('commits one parsed audit after a quiet cron turn despite a duplicate submission', async () => {
+    const provider = boundary.provider.getMockImplementation()
+    if (!provider) throw new Error('Expected the synthetic provider boundary')
+    const preCommitAccept = vi.fn()
+    const support = vi.fn(async () => ({ recorded: true }))
+    const fetchImpl = vi.fn<typeof fetch>()
+    let recorded: HostedRuntimeProductFeedbackRecord | null = null
+    boundary.provider.mockImplementation(async (input) => {
+      const result = await provider(input)
+      if (result.kind !== 'succeeded') throw new Error('Expected the synthetic successful provider result')
+      const usageOptimizerScope = resolveUsageOptimizerFeedbackScope({
+        conversationScope: 'direct', executionContext: input.input.executionContext, messageInput: input.input,
+      })
+      expect(usageOptimizerScope).not.toBeNull()
+      const recorder = createAssistantProductFeedbackRecorder({ usageOptimizerScope,
+        productFeedbackCandidateSink: { acceptProductFeedbackCandidate: preCommitAccept, deliverProductSupportEscalation: support },
+      })
+      if (!recorder) throw new Error('Expected the scheduled feedback recorder')
+      for (const text of ['product feedback candidate accepted', 'product feedback candidate already accepted']) {
+        const request = readMurphDynamicToolRequest({ id: 1, method: 'item/tool/call', params: {
+          namespace: 'murph', tool: 'submit_product_feedback',
+          threadId: 'synthetic-thread', turnId: 'synthetic-turn', callId: 'synthetic-call',
+          arguments: { kind: candidate.kind, relatedChangelogItemIds: [], summary: candidate.summary },
+        } })
+        if (!request) throw new Error('Expected the parsed audit request')
+        expect(request.kind).toBe('submit-product-feedback')
+        const submitted = await executeMurphDynamicToolRequest({ request, env: {}, fetchImpl,
+          nextUsageOrdinal: () => 1, progressDelivery: null, productFeedbackRecorder: recorder,
+        })
+        expect(submitted).toEqual({ rpcResult: { success: true, contentItems: [{ type: 'inputText', text }] } })
+      }
+      recorded = recorder.readProductFeedback()
+      return { ...result, providerTurn: { ...result.providerTurn, productFeedbackCandidate: recorded } }
+    })
+    const accept = vi.fn()
+    const result = await runCron(accept)
+    expect(result.run.outcome).not.toBe('failed')
+    expect(boundary.provider).toHaveBeenCalledTimes(1)
+    expect(boundary.persist).toHaveBeenCalledTimes(1)
+    expect(boundary.deliver).not.toHaveBeenCalled()
+    expect(preCommitAccept).not.toHaveBeenCalled()
+    expect(support).not.toHaveBeenCalled()
+    expect(fetchImpl).not.toHaveBeenCalled()
+    expect(recorded).toEqual({ ...candidate, idempotencyKey: expect.stringMatching(/^[a-f0-9]{64}$/u) })
+    expect(accept).toHaveBeenCalledExactlyOnceWith(recorded, {
+      committedUsageOptimizerScope: {
+        memberId: 'member_synthetic',
+        occurrenceAt: boundary.provider.mock.calls[0]![0].input.scheduledOccurrenceAt,
+      },
+    })
+  })
+
   it.each(['skip', 'send_message'] as const)('forwards exactly one accepted candidate after %s commits', async (kind) => {
     decision = kind
     const accept = vi.fn((record: HostedRuntimeProductFeedbackRecord) => { order.push('feedback'); expect(record).toEqual(candidate) })

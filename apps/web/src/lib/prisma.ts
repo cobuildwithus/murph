@@ -597,9 +597,11 @@ function createPrisma(): PrismaClient {
   // The pool limit is per module runtime, so the effective ceiling is this
   // number times the live instance count. Say which number is in force and
   // whether anyone chose it, so an inherited default is never mistaken for a
-  // capacity decision.
+  // capacity decision. Process uptime at this first database use tells a
+  // freshly booted instance apart from a long-lived one.
   console.info("Hosted web database pool configured.", {
     maxConnections: configuredPoolMax ?? DEFAULT_DATABASE_POOL_MAX,
+    processUptimeMs: Math.round(process.uptime() * 1_000),
     source: configuredPoolMax === null ? "default" : "configured",
   });
 

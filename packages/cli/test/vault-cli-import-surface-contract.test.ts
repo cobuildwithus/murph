@@ -123,7 +123,11 @@ const scopedImportSurfaceProbes: readonly ScopedImportSurfaceProbe[] = [
     // and node:dgram are the complete added timing subtree. node:async_hooks
     // was already loaded by vault-cli-vault-context. Admit only those three;
     // the package allowlist and startup-byte budgets remain unchanged.
-    maxResolvedModules: 303,
+    // PR #4026 measured 305: operator-config/dist/{assistant-delivery-contracts,
+    // primitive-schemas}.js are leaf splits of contract modules this probe
+    // already loads (same schemas, two more files), letting the Cloudflare
+    // Worker skip the CLI contracts. Admit only those two.
+    maxResolvedModules: 305,
   },
 ]
 

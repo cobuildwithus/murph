@@ -2,15 +2,18 @@ import "server-only";
 
 import { Prisma, type PrismaClient } from "@prisma/client";
 import { readHostedRuntimeAiAllowedMemberIds } from "../hosted-onboarding/member-access";
+import { readHostedRuntimeCheckpointPublicationExpectedBy, readHostedRuntimeTerminalNonReplyCommittedAt,
+  readHostedRuntimeTerminalReplyCommittedAt } from "../hosted-runtime-latency/alert-monitor";
 import { getHostedRuntimeLogPool } from "../hosted-runtime-log/database";
 import { hostedRuntimeLogSubjectKey, type HostedRuntimeLogSqlDatabase } from "../hosted-runtime-log/store";
 import { getPrisma } from "../prisma";
-import { DEVICE_IMPORT_LOOKBACK_MS, DEVICE_IMPORT_STALL_MS, summarizeDeviceImportHealth, type DeviceImportObservation } from "./device-import-health";
+import { DEVICE_IMPORT_LOOKBACK_MS, DEVICE_IMPORT_STALL_MS, summarizeDeviceImportHealth,
+  type DeviceImportCheckpointPublication, type DeviceImportObservation } from "./device-import-health";
 
 export const DEVICE_IMPORT_MEMBER_LIMIT = 1_000;
 export const DEVICE_IMPORT_EVENT_LIMIT = 50_000;
 export type DeviceImportPrisma = Pick<PrismaClient,
-  "$queryRaw" | "hostedWorkspace" | "hostedMember" | "hostedThreadContainerParticipant" | "hostedLinqAlert">;
+  "$queryRaw" | "hostedMember" | "hostedThreadContainerParticipant" | "hostedLinqAlert">;
 
 // At most four primary reads and one isolated log read per observation. No
 // transactions, ciphertext, provider calls, or raw log payloads are needed.
@@ -32,16 +35,65 @@ export async function readDeviceImportHealth(input: {
   if (subjects.length === 0) return summarizeDeviceImportHealth({
     now: input.now, observations: [], dueSubjects: new Set(),
   });
-  const workspaces = await prisma.hostedWorkspace.findMany({
-    where: { userId: { in: [...allowed] } },
-    select: { userId: true, nextWakeAt: true, nextWakeReason: true },
-  });
+  const workspaces = await readDeviceImportRuntimeStates({ userIds: [...allowed], now: input.now, prisma });
   const dueSubjects = new Set(workspaces.filter(row => row.nextWakeReason === "device-sync.reconcile"
     && row.nextWakeAt !== null
     && row.nextWakeAt.getTime() <= input.now.getTime() - DEVICE_IMPORT_STALL_MS)
     .map(row => hostedRuntimeLogSubjectKey(row.userId)));
   const observations = await readDeviceImportObservations({ subjects, now: input.now, database: input.database });
-  return summarizeDeviceImportHealth({ now: input.now, observations, dueSubjects });
+  const checkpointPublications = new Map<string, DeviceImportCheckpointPublication>();
+  for (const row of workspaces) {
+    const expectedBy = readHostedRuntimeCheckpointPublicationExpectedBy(row.checkpointEvidence);
+    const completedAt = readHostedRuntimeTerminalReplyCommittedAt(row.checkpointEvidence)
+      ?? readHostedRuntimeTerminalNonReplyCommittedAt(row.checkpointEvidence);
+    if (row.attemptId && row.foregroundAcceptedAt && expectedBy && completedAt
+      && completedAt >= row.foregroundAcceptedAt && completedAt <= input.now
+      && expectedBy >= completedAt && input.now <= expectedBy) {
+      checkpointPublications.set(hostedRuntimeLogSubjectKey(row.userId), { attemptId: row.attemptId, expectedBy });
+    }
+  }
+  return summarizeDeviceImportHealth({ now: input.now, observations, dueSubjects, checkpointPublications });
+}
+
+export async function readDeviceImportRuntimeStates(input: {
+  userIds: readonly string[]; now: Date; prisma: Pick<PrismaClient, "$queryRaw">;
+}) {
+  if (input.userIds.length > DEVICE_IMPORT_MEMBER_LIMIT) throw new RangeError("Too many device import members.");
+  if (input.userIds.length === 0) return [];
+  return input.prisma.$queryRaw<{
+    userId: string; nextWakeAt: Date | null; nextWakeReason: string | null;
+    attemptId: string | null; foregroundAcceptedAt: Date | null; checkpointEvidence: unknown;
+  }[]>(Prisma.sql`
+    SELECT workspace.user_id AS "userId", workspace.next_wake_at AS "nextWakeAt",
+      workspace.next_wake_reason AS "nextWakeReason", publication.attempt_id AS "attemptId",
+      publication.accepted_at AS "foregroundAcceptedAt", publication.evidence AS "checkpointEvidence"
+    FROM hosted_workspace AS workspace
+    LEFT JOIN hosted_runtime_owner AS owner ON owner.user_id = workspace.user_id
+      AND owner.phase = 'active' AND owner.processing_mode = 'default' AND owner.completed_at IS NULL
+    LEFT JOIN LATERAL (
+      SELECT foreground.runtime_attempt_id AS attempt_id, foreground.accepted_at,
+        jsonb_build_object('assistant', jsonb_build_object(
+          'checkpointPublicationExpectedByEpochMs',
+            foreground.phase_breakdown_json -> 'assistant' -> 'checkpointPublicationExpectedByEpochMs',
+          'terminalReplyCommittedAtEpochMs',
+            foreground.phase_breakdown_json -> 'assistant' -> 'terminalReplyCommittedAtEpochMs',
+          'terminalNonReplyCommittedAtEpochMs',
+            foreground.phase_breakdown_json -> 'assistant' -> 'terminalNonReplyCommittedAtEpochMs'
+        )) AS evidence
+      FROM (
+        SELECT candidate.runtime_attempt_id, candidate.accepted_at, candidate.phase_breakdown_json
+        FROM hosted_ingress_latency_trace AS candidate
+        WHERE candidate.user_id = workspace.user_id
+          AND candidate.accepted_at >= ${new Date(input.now.getTime() - DEVICE_IMPORT_LOOKBACK_MS)}
+          AND candidate.accepted_at <= ${input.now}
+        ORDER BY candidate.accepted_at DESC, candidate.id DESC LIMIT 1
+      ) AS foreground
+      WHERE foreground.runtime_attempt_id = owner.attempt_id
+        AND owner.generation::text = foreground.phase_breakdown_json -> 'assistant' ->> 'runtimeLeaseGeneration'
+    ) AS publication ON TRUE
+    WHERE workspace.user_id IN (${Prisma.join(input.userIds)})
+    ORDER BY workspace.user_id LIMIT ${DEVICE_IMPORT_MEMBER_LIMIT}
+  `);
 }
 
 export async function readDeviceImportObservations(input: {

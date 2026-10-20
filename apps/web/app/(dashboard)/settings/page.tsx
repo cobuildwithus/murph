@@ -2,7 +2,6 @@ import { isApprovalPasskeyEnrollmentEnabled } from "@/src/lib/sensitive-actions/
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import {
-  HOSTED_ASSISTANT_DEFAULT_PROVIDER,
   HOSTED_ASSISTANT_DEFAULT_MODEL,
 } from "@murphai/hosted-execution/assistant-model";
 
@@ -40,14 +39,6 @@ import {
   hasConfirmedHostedGroupMembership,
   resolveVisibleHostedBillingPlanCodes,
 } from "@/src/lib/hosted-onboarding/billing-plan-eligibility";
-import { isHostedVeniceAssistantEnabled } from "@/src/lib/hosted-onboarding/assistant-model-preference";
-import {
-  isHostedCustomChatCompletionsEnabled,
-  isHostedCustomInferenceEnabled,
-} from "@/src/lib/hosted-inference/feature";
-import {
-  readHostedInferenceConnectionView,
-} from "@/src/lib/hosted-inference/connection-store";
 import {
   HOSTED_START_PAID_GROUP_RETURN_PARAM,
   HOSTED_START_PAID_GROUP_RETURN_VALUE,
@@ -212,7 +203,6 @@ function renderAuthenticatedSettingsPage(input: {
     familyDraftRecovery,
     familyOwner,
     hasConfirmedGroupMembership,
-    inferenceConnection,
     secureApprovalStatus,
     settingsSnapshot,
     usageActivity,
@@ -404,27 +394,18 @@ function renderAuthenticatedSettingsPage(input: {
         <HostedAssistantModelSettings
           availableModels={assistant?.availableModels}
           canUpgradeToEdge={canUpgradeToEdge && !planChangePending}
-          chatCompletionsAvailable={isHostedCustomChatCompletionsEnabled()}
           configurationAvailable={assistant?.configurationAvailable === true}
-          customInferenceAvailable={isHostedCustomInferenceEnabled()}
           expectedCurrentPlanCode={
             currentPlanCode === "launch_group_monthly"
             || currentPlanCode === "launch_monthly"
               ? currentPlanCode
               : undefined
           }
-          initialConnection={
-            isHostedCustomInferenceEnabled() ? inferenceConnection : null
-          }
           initialDormantSolPreference={
             assistant?.dormantSolPreference === true
           }
           initialModel={assistant?.model ?? HOSTED_ASSISTANT_DEFAULT_MODEL}
-          initialProvider={
-            assistant?.provider ?? HOSTED_ASSISTANT_DEFAULT_PROVIDER
-          }
           solAvailable={assistant?.solAvailable === true}
-          veniceAvailable={isHostedVeniceAssistantEnabled()}
         />
       </section>
 
@@ -957,7 +938,6 @@ function normalizeSettingsPageData(
     familyOwner: settingsData?.familyOwner ?? null,
     hasConfirmedGroupMembership:
       settingsData?.hasConfirmedGroupMembership === true,
-    inferenceConnection: settingsData?.inferenceConnection ?? null,
     secureApprovalStatus:
       settingsData?.secureApprovalStatus ?? ({ status: "unavailable", method: undefined } as const),
     settingsSnapshot: settingsData?.settingsSnapshot ?? null,
@@ -990,12 +970,6 @@ async function readSettingsPageData(input: {
     memberId,
     prisma,
   });
-  const inferenceConnection = isHostedCustomInferenceEnabled()
-    ? await readHostedInferenceConnectionView({
-        memberId,
-        prisma,
-      })
-    : null;
   const consentStatus = await readHostedConsentStatus({
     memberId,
     prisma,
@@ -1075,7 +1049,6 @@ async function readSettingsPageData(input: {
     familyOwner,
     groupPlanAvailable,
     hasConfirmedGroupMembership,
-    inferenceConnection,
     maxPlanAvailable,
     secureApprovalStatus: await secureApprovalStatusPromise,
     settingsSnapshot,

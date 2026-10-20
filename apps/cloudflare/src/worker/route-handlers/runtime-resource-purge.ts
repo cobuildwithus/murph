@@ -50,6 +50,6 @@ export async function purgeHostedRuntimeResource(input: {
   }
   const prefix = await (resource.kind === "snapshot" ? hostedWorkspaceSnapshotUserPrefix : resource.kind === "media" ? hostedMediaUserPrefix : hostedBrowserVaultReplicaUserPrefix)({ userId: input.userId });
   if (!resource.objectKey.startsWith(prefix) || resource.objectKey.slice(prefix.length).includes("/")) throw new TypeError("Runtime resource purge is outside the member namespace.");
-  const keys = resource.kind === "replica" ? [resource.objectKey, ...listHostedBrowserVaultReplicaSiblingObjectKeys(resource.objectKey)] : [resource.objectKey];
-  for (const key of keys) await bucket.delete(key);
+  const keys = resource.kind === "replica" ? [resource.objectKey, ...listHostedBrowserVaultReplicaSiblingObjectKeys(resource.objectKey)] : resource.objectKey;
+  await bucket.delete(keys);
 }

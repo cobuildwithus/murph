@@ -3,8 +3,11 @@ import { createHash } from 'node:crypto'
 import { WebSocketServer, WebSocket } from 'ws'
 
 /** Local fault injection at the provider wire; the real binary owns recovery. */
-export async function startCodexWebSocketProxy(httpBaseUrl: string, responseStartTimeoutMs?: number) {
+export async function startCodexWebSocketProxy(httpBaseUrl: string) {
   let mode: 'healthy' | 'silent' | 'acknowledged-silent' | 'partial-silent' | 'close' = 'healthy'
+  // How the synthetic provider treats a client `response.interrupt`.
+  let interruptBehavior: 'discard' | 'ignore' = 'discard'
+  const interruptModes: string[] = []
   let httpRequests = 0
   let websocketRequests = 0
   let connections = 0
@@ -48,9 +51,22 @@ export async function startCodexWebSocketProxy(httpBaseUrl: string, responseStar
     socket.on('ping', () => { clientPings += 1 })
     socket.on('pong', () => { providerPongs += 1 })
     socket.on('error', () => {})
+    let activeResponse: { abort: AbortController, id: string | null } | null = null
     socket.on('message', async (data) => {
       try {
         const request = JSON.parse(data.toString())
+        if (request.type === 'response.interrupt') {
+          interruptModes.push(String(request.mode))
+          if (interruptBehavior === 'discard' && activeResponse) {
+            const interrupted = activeResponse
+            activeResponse = null
+            interrupted.abort.abort()
+            socket.send(JSON.stringify({ type: 'response.completed', response: {
+              id: interrupted.id ?? request.response_id, status: 'completed', output: [],
+            } }))
+          }
+          return
+        }
         if (request.generate === false) {
           socket.send(JSON.stringify({ type: 'response.completed', response: {
             id: 'resp_prewarm', status: 'completed', output: [],
@@ -62,22 +78,7 @@ export async function startCodexWebSocketProxy(httpBaseUrl: string, responseStar
         if (typeof turnId === 'string') {
           requestTurnCorrelations.push(Number.parseInt(createHash('sha256').update(turnId).digest('hex').slice(0, 12), 16))
         }
-        // Recovery design prototype, confined to this local test proxy. The first
-        // upstream data frame cancels the timer; this does not prove model progress.
-        let responseDeadline: ReturnType<typeof setTimeout> | undefined
-        if (responseStartTimeoutMs !== undefined) {
-          responseDeadline = setTimeout(() => {
-            timers.delete(responseDeadline!)
-            socket.close(1011, 'synthetic response start deadline')
-          }, responseStartTimeoutMs)
-          timers.add(responseDeadline)
-        }
         const sendProviderFrame = (frame: string) => {
-          if (responseDeadline) {
-            clearTimeout(responseDeadline)
-            timers.delete(responseDeadline)
-            responseDeadline = undefined
-          }
           if (socket.readyState === WebSocket.OPEN) socket.send(frame)
         }
         if (mode !== 'healthy') {
@@ -109,21 +110,34 @@ export async function startCodexWebSocketProxy(httpBaseUrl: string, responseStar
           }
           return
         }
-        const upstream = await fetch(`${httpBaseUrl}/responses`, {
-          method: 'POST', body: JSON.stringify(request), signal: upstreamAbort.signal,
-          headers: { 'content-type': 'application/json' },
-        })
-        if (!upstream.body) throw new Error('Missing scripted response stream')
-        let buffer = ''
-        const decoder = new TextDecoder()
-        for await (const chunk of upstream.body) {
-          buffer += decoder.decode(chunk, { stream: true })
-          let end: number
-          while ((end = buffer.indexOf('\n')) !== -1) {
-            const line = buffer.slice(0, end)
-            buffer = buffer.slice(end + 1)
-            if (line.startsWith('data: ') && line !== 'data: [DONE]') sendProviderFrame(line.slice(6))
+        const response = { abort: new AbortController(), id: null as string | null }
+        activeResponse = response
+        try {
+          const upstream = await fetch(`${httpBaseUrl}/responses`, {
+            method: 'POST', body: JSON.stringify(request),
+            signal: AbortSignal.any([upstreamAbort.signal, response.abort.signal]),
+            headers: { 'content-type': 'application/json' },
+          })
+          if (!upstream.body) throw new Error('Missing scripted response stream')
+          let buffer = ''
+          const decoder = new TextDecoder()
+          for await (const chunk of upstream.body) {
+            buffer += decoder.decode(chunk, { stream: true })
+            let end: number
+            while ((end = buffer.indexOf('\n')) !== -1) {
+              const line = buffer.slice(0, end)
+              buffer = buffer.slice(end + 1)
+              if (!line.startsWith('data: ') || line === 'data: [DONE]') continue
+              const frame = line.slice(6)
+              response.id ??= readCreatedResponseId(frame)
+              sendProviderFrame(frame)
+            }
           }
+        } catch (error) {
+          // A discarded interruption ends this upstream stream on purpose.
+          if (!response.abort.signal.aborted) throw error
+        } finally {
+          if (activeResponse === response) activeResponse = null
         }
       } catch (error) {
         if (!closing) proxyErrors.push(error)
@@ -137,8 +151,10 @@ export async function startCodexWebSocketProxy(httpBaseUrl: string, responseStar
   return {
     baseUrl: `http://127.0.0.1:${address.port}/v1`,
     setMode(value: typeof mode) { mode = value },
+    setInterruptBehavior(value: typeof interruptBehavior) { interruptBehavior = value },
     measurements: () => ({
       httpRequests, websocketRequests, connections, clientPings, providerPongs, requestTurnCorrelations,
+      interruptModes: [...interruptModes],
       recoveryMs: fallbackAt === null || stalledAt === null ? null : fallbackAt - stalledAt,
     }),
     async close() {
@@ -153,5 +169,16 @@ export async function startCodexWebSocketProxy(httpBaseUrl: string, responseStar
       })
       if (proxyErrors.length) throw new AggregateError(proxyErrors, 'Synthetic proxy failed')
     },
+  }
+}
+
+function readCreatedResponseId(frame: string): string | null {
+  try {
+    const event = JSON.parse(frame)
+    return event?.type === 'response.created' && typeof event.response?.id === 'string'
+      ? event.response.id
+      : null
+  } catch {
+    return null
   }
 }

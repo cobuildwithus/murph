@@ -7,20 +7,14 @@ const repoRoot = path.resolve(import.meta.dirname, "../../..");
 const sourceFiles: readonly string[] = [
   "apps/web/src/lib/health-commons/experiment-browse.ts",
   "apps/web/src/lib/health-commons/generated-experiment-artifacts.ts",
-  "apps/web/src/lib/health-commons/generated-biomarker-artifacts.ts",
   "apps/web/src/lib/health-commons/generated-measurement-method-artifacts.ts",
   "apps/web/src/lib/health-commons/experiment-projections.ts",
-  "apps/web/src/lib/health-commons/biomarker-projections.ts",
   "apps/web/src/lib/health-commons/measurement-method-detail.ts",
-  "apps/web/src/lib/health-commons/goal-projections.ts",
   "apps/web/app/(dashboard)/experiments/page.tsx",
   "apps/web/app/(dashboard)/experiments/[experimentId]/layout.tsx",
   "apps/web/app/(dashboard)/experiments/[experimentId]/page.tsx",
   "apps/web/app/(dashboard)/experiments/[experimentId]/research/page.tsx",
   "apps/web/app/(dashboard)/experiments/[experimentId]/results/page.tsx",
-  "apps/web/app/(dashboard)/biomarkers/[biomarkerId]/page.tsx",
-  "apps/web/app/goals/page.tsx",
-  "apps/web/app/goals/[goalId]/page.tsx",
   "apps/web/app/measurement-methods/[measurementMethodId]/page.tsx",
 ] as const;
 
@@ -69,65 +63,6 @@ describe("Health Commons route-bundle boundary", () => {
     );
 
     expect(source).not.toContain("@murphai/health-commons/runtime");
-  });
-
-  it("keeps Goal projections on the narrow Goal runtime", () => {
-    for (const relativePath of [
-      "apps/web/src/lib/goals/goal-models.ts",
-      "apps/web/src/lib/health-commons/goal-projections.ts",
-    ]) {
-      const source = readFileSync(path.join(repoRoot, relativePath), "utf8");
-
-      expect(source, relativePath).toContain("@murphai/health-commons/goal-runtime");
-      expect(source, relativePath).not.toContain("@murphai/health-commons/runtime");
-    }
-  });
-
-  it("keeps public Goal recovery on the validated index-only runtime", () => {
-    const relativePath =
-      "apps/web/src/lib/hosted-onboarding/visible-secondary-webhooks.ts";
-    const source = readFileSync(path.join(repoRoot, relativePath), "utf8");
-
-    expect(source).toContain("@murphai/health-commons/goal-index-runtime");
-    expect(source).not.toContain("@murphai/health-commons/goal-runtime");
-    expect(source).not.toContain("@murphai/health-commons/generated/");
-  });
-
-  it("keeps public biomarker pages on generated page projections instead of route bundles", () => {
-    const files = [
-      "apps/web/app/(dashboard)/biomarkers/page.tsx",
-      "apps/web/app/(dashboard)/biomarkers/[biomarkerId]/layout.tsx",
-      "apps/web/app/(dashboard)/biomarkers/[biomarkerId]/page.tsx",
-      "apps/web/app/(dashboard)/biomarkers/[biomarkerId]/research/page.tsx",
-      "apps/web/src/lib/health-commons/biomarker-projections.ts",
-    ];
-
-    for (const relativePath of files) {
-      const source = readFileSync(path.join(repoRoot, relativePath), "utf8");
-
-      expect(source, `${relativePath} should not load biomarker route bundles`).not.toContain(
-        "loadGeneratedHealthCommonsWebRouteBundle",
-      );
-      expect(source, `${relativePath} should not instantiate biomarker route bundle readers`).not.toContain(
-        "createHealthCommonsRouteBundleReader",
-      );
-    }
-  });
-
-  it("keeps biomarker experiment cards on projected protocol images", () => {
-    const files = [
-      "apps/web/src/components/biomarkers/biomarker-detail/biomarker-experiment-card.tsx",
-      "apps/web/src/components/biomarkers/biomarker-detail/biomarker-experiment-card-hero.tsx",
-      "apps/web/src/components/biomarkers/biomarker-detail/biomarker-experiment-row.tsx",
-    ];
-
-    for (const relativePath of files) {
-      const source = readFileSync(path.join(repoRoot, relativePath), "utf8");
-
-      expect(source, `${relativePath} should not N+1 load experiment shells`).not.toContain(
-        "resolveHealthCommonsExperimentShell",
-      );
-    }
   });
 
   it("fails if existing Next traces include the monolithic generated catalog in public Health Commons routes", () => {
@@ -234,16 +169,13 @@ function resolveRelativeSourceFile(fromRelativePath: string, specifier: string):
 function isPublicHealthCommonsSourceFile(relativePath: string): boolean {
   return sourceFiles.includes(relativePath)
     || relativePath.startsWith("apps/web/app/(dashboard)/experiments")
-    || relativePath.startsWith("apps/web/app/(dashboard)/biomarkers")
     || relativePath.startsWith("apps/web/app/measurement-methods")
     || relativePath.startsWith("apps/web/src/lib/health-commons/experiment-browse")
     || relativePath.startsWith("apps/web/src/lib/health-commons/experiment-detail")
     || relativePath.startsWith("apps/web/src/lib/health-commons/experiment-images")
     || relativePath.startsWith("apps/web/src/lib/health-commons/experiment-projections")
     || relativePath.startsWith("apps/web/src/lib/health-commons/generated-experiment-artifacts")
-    || relativePath.startsWith("apps/web/src/lib/health-commons/generated-biomarker-artifacts")
     || relativePath.startsWith("apps/web/src/lib/health-commons/generated-measurement-method-artifacts")
-    || relativePath.startsWith("apps/web/src/lib/health-commons/biomarker-projections")
     || relativePath.startsWith("apps/web/src/lib/health-commons/measurement-method-detail");
 }
 
@@ -303,12 +235,8 @@ function isHealthCommonsRouteTrace(filePath: string, source: string): boolean {
   const normalizedPath = filePath.replace(/\\/gu, "/");
   return (
     normalizedPath.includes("/experiments/") ||
-    normalizedPath.includes("/biomarkers/") ||
-    normalizedPath.includes("/goals/") ||
     normalizedPath.includes("/measurement-methods/") ||
     source.includes("experiment-detail") ||
-    source.includes("biomarker-detail") ||
-    source.includes("goal-projections") ||
     source.includes("measurement-method-detail")
   );
 }

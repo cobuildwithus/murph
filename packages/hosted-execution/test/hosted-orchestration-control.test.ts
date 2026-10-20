@@ -430,7 +430,7 @@ describe("hosted orchestration control contracts", () => {
         userId: "test-user", attemptId: "attempt-test", generation: "1", phase: "active" as const,
         processingMode: "default" as const, allocationId: "allocation-test",
         runnerContainerName: "runner-test", workspaceVersion: "0",
-        customInferenceEnvelope: null, platformAiUsageAllowed: true,
+        platformAiUsageAllowed: true,
         startedAt: "2026-01-01T00:00:00.000Z", acceptedAt: null, completedAt: null,
         failureCount: 0, lastErrorCode: null,
       },

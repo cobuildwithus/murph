@@ -1,11 +1,6 @@
 import * as React from 'react'
 import { Box, Text, render, useApp, useInput } from 'ink'
 import { getDefaultSetupAssistantPreset as getDefaultAssistantPreset } from './setup-assistant.js'
-import {
-  LOCAL_SETUP_CODEX_PROVIDER_CONFIGS,
-  normalizeAssistantCodexModelProvider,
-  resolveAssistantCodexLocalOnboardingProviderConfig,
-} from '@murphai/operator-config/assistant/target-runtime'
 import type { SetupAssistantPreset } from '@murphai/operator-config/setup-cli-contracts'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
@@ -26,32 +21,16 @@ import {
 } from './setup-wizard-ui.js'
 
 export type SetupAssistantWizardResult = {
-  assistantModelProvider?: string | null
-  assistantOss?: boolean | null
   assistantPreset?: Exclude<SetupAssistantPreset, 'skip'>
 }
 
 export interface SetupAssistantWizardInput {
-  enableApiKeyProviderOnboarding?: boolean
-  initialAssistantModelProvider?: string | null
-  initialAssistantOss?: boolean | null
   initialAssistantPreset?: SetupAssistantPreset
 }
 
-export type SetupWizardAssistantProvider =
-  | 'codex-cloud'
-  | 'codex-local'
-  | LocalSetupCodexProviderId
-  | 'skip'
+export type SetupWizardAssistantProvider = 'codex-cloud' | 'skip'
 
-export type SetupWizardAssistantMethod =
-  | 'codex-cloud'
-  | 'codex-local'
-  | LocalSetupCodexProviderId
-  | 'skip'
-
-type LocalSetupCodexProviderId =
-  (typeof LOCAL_SETUP_CODEX_PROVIDER_CONFIGS)[number]['providerId']
+export type SetupWizardAssistantMethod = SetupWizardAssistantProvider
 
 interface SetupWizardAssistantProviderOption {
   description: string
@@ -76,18 +55,6 @@ const setupWizardAssistantProviderOptions: readonly SetupWizardAssistantProvider
     description: 'Use the saved Codex sign-in path.',
   },
   {
-    provider: 'codex-local',
-    title: 'Codex local model',
-    description: 'Use Codex with a local OSS model.',
-  },
-  ...LOCAL_SETUP_CODEX_PROVIDER_CONFIGS.filter(
-    (config) => config.selectableInLocalOnboarding,
-  ).map((config) => ({
-    provider: config.providerId as SetupWizardAssistantProvider,
-    title: config.label,
-    description: config.description,
-  })),
-  {
     provider: 'skip',
     title: 'Skip for now',
     description: 'Leave the current assistant settings alone.',
@@ -98,96 +65,32 @@ export function getDefaultSetupWizardAssistantPreset(): SetupAssistantPreset {
   return getDefaultAssistantPreset()
 }
 
-export function listSetupAssistantWizardProviderOptions(
-  input: { enableApiKeyProviderOnboarding?: boolean } = {},
-): readonly SetupWizardAssistantProviderOption[] {
-  return listSetupWizardAssistantProviderOptions(input).filter(
+export function listSetupAssistantWizardProviderOptions(): readonly SetupWizardAssistantProviderOption[] {
+  return setupWizardAssistantProviderOptions.filter(
     (option) => option.provider !== 'skip',
   )
 }
 
-export function listSetupWizardAssistantProviderOptions(
-  input: { enableApiKeyProviderOnboarding?: boolean } = {},
-): readonly SetupWizardAssistantProviderOption[] {
-  return input.enableApiKeyProviderOnboarding === false
-    ? setupWizardAssistantProviderOptions.filter(
-        (option) =>
-          option.provider === 'codex-cloud' ||
-          option.provider === 'codex-local' ||
-          option.provider === 'skip',
-      )
-    : setupWizardAssistantProviderOptions
-}
-
-export function listSetupWizardAssistantProviderOptionsForCurrent(
-  currentProvider: SetupWizardAssistantProvider,
-  input: { enableApiKeyProviderOnboarding?: boolean } = {},
-): readonly SetupWizardAssistantProviderOption[] {
-  return withCurrentAssistantProviderOption(
-    listSetupWizardAssistantProviderOptions(input),
-    currentProvider,
-    input,
-  )
-}
-
-export function listSetupAssistantWizardProviderOptionsForCurrent(
-  currentProvider: SetupWizardAssistantProvider,
-  input: { enableApiKeyProviderOnboarding?: boolean } = {},
-): readonly SetupWizardAssistantProviderOption[] {
-  return withCurrentAssistantProviderOption(
-    listSetupAssistantWizardProviderOptions(input),
-    currentProvider,
-    input,
-  )
-}
-
-function withCurrentAssistantProviderOption(
-  options: readonly SetupWizardAssistantProviderOption[],
-  currentProvider: SetupWizardAssistantProvider,
-  input: { enableApiKeyProviderOnboarding?: boolean } = {},
-): readonly SetupWizardAssistantProviderOption[] {
-  if (options.some((option) => option.provider === currentProvider)) {
-    return options
-  }
-
-  if (input.enableApiKeyProviderOnboarding === false) {
-    return options
-  }
-
-  const currentProviderConfig =
-    resolveAssistantCodexLocalOnboardingProviderConfig(currentProvider)
-  if (!currentProviderConfig) {
-    return options
-  }
-
-  return [
-    {
-      description: currentProviderConfig.description,
-      provider: currentProviderConfig.providerId as SetupWizardAssistantProvider,
-      title: currentProviderConfig.label,
-    },
-    ...options,
-  ]
+export function listSetupWizardAssistantProviderOptions(): readonly SetupWizardAssistantProviderOption[] {
+  return setupWizardAssistantProviderOptions
 }
 
 export function findSetupWizardAssistantProviderIndex(
   provider: SetupWizardAssistantProvider,
-  input: { enableApiKeyProviderOnboarding?: boolean } = {},
 ): number {
-  const index = listSetupWizardAssistantProviderOptions(input).findIndex(
+  const index = listSetupWizardAssistantProviderOptions().findIndex(
     (option) => option.provider === provider,
   )
-  return index >= 0 ? index : 0
+  return Math.max(0, index)
 }
 
 export function findSetupAssistantWizardProviderIndex(
   provider: SetupWizardAssistantProvider,
-  input: { enableApiKeyProviderOnboarding?: boolean } = {},
 ): number {
-  const index = listSetupAssistantWizardProviderOptions(input).findIndex(
+  const index = listSetupAssistantWizardProviderOptions().findIndex(
     (option) => option.provider === provider,
   )
-  return index >= 0 ? index : 0
+  return Math.max(0, index)
 }
 
 export function normalizeSetupAssistantWizardProvider(
@@ -196,71 +99,24 @@ export function normalizeSetupAssistantWizardProvider(
   return provider === 'skip' ? 'codex-cloud' : provider
 }
 
-export function resolveSetupAssistantWizardInitialProvider(input: {
-  enableApiKeyProviderOnboarding?: boolean
-  provider: SetupWizardAssistantProvider
-}): SetupWizardAssistantProvider {
-  if (
-    input.enableApiKeyProviderOnboarding === false &&
-    resolveAssistantCodexLocalOnboardingProviderConfig(input.provider)
-  ) {
-    return 'codex-cloud'
-  }
-
-  return input.provider
-}
-
 export function inferSetupWizardAssistantProvider(input: {
-  modelProvider?: string | null
-  oss?: boolean | null
   preset: SetupAssistantPreset
 }): SetupWizardAssistantProvider {
-  if (input.preset === 'skip') {
-    return 'skip'
-  }
-
-  const modelProvider = normalizeAssistantCodexModelProvider(input.modelProvider)
-  if (resolveAssistantCodexLocalOnboardingProviderConfig(modelProvider)) {
-    return modelProvider as LocalSetupCodexProviderId
-  }
-
-  return input.oss === true ? 'codex-local' : 'codex-cloud'
+  return input.preset === 'skip' ? 'skip' : 'codex-cloud'
 }
 
 export function inferSetupWizardAssistantMethod(input: {
-  oss?: boolean | null
   preset: SetupAssistantPreset
   provider: SetupWizardAssistantProvider
 }): SetupWizardAssistantMethod {
-  if (input.preset === 'skip' || input.provider === 'skip') {
-    return 'skip'
-  }
-
-  if (resolveAssistantCodexLocalOnboardingProviderConfig(input.provider)) {
-    return input.provider as LocalSetupCodexProviderId
-  }
-
-  return input.oss === true || input.provider === 'codex-local'
-    ? 'codex-local'
-    : 'codex-cloud'
+  return input.preset === 'skip' ? 'skip' : input.provider
 }
 
 export function resolveSetupWizardAssistantMethodForProvider(input: {
   currentMethod: SetupWizardAssistantMethod
   provider: SetupWizardAssistantProvider
 }): SetupWizardAssistantMethod {
-  switch (input.provider) {
-    case 'codex-local':
-      return 'codex-local'
-    case 'skip':
-      return 'skip'
-    case 'codex-cloud':
-      return 'codex-cloud'
-    default:
-      return resolveAssistantCodexLocalOnboardingProviderConfig(input.provider)
-        ? (input.provider as LocalSetupCodexProviderId)
-        : 'codex-cloud'
-  }
+  return input.provider
 }
 
 export function resolveSetupWizardAssistantSelection(input: {
@@ -276,38 +132,6 @@ export function resolveSetupWizardAssistantSelection(input: {
       preset: 'skip',
       providerLabel: 'Skip for now',
       summary: 'Skip for now',
-    }
-  }
-
-  if (input.provider === 'codex-local' || input.method === 'codex-local') {
-    return {
-      detail: 'Murph will ask which local model id to save next.',
-      methodLabel: null,
-      modelProvider: null,
-      oss: true,
-      preset: 'codex',
-      providerLabel: 'Codex local model',
-      summary: 'Codex local model',
-    }
-  }
-
-  const providerConfig = resolveAssistantCodexLocalOnboardingProviderConfig(
-    input.provider,
-  )
-  if (providerConfig) {
-    const modelLabel = providerConfig.modelPrompt.replace(
-      /\s+to use with Codex$/u,
-      '',
-    )
-    const modelLabelText = modelLabel === 'Model id' ? 'model id' : modelLabel
-    return {
-      detail: `Murph will ask which ${modelLabelText} to save next.`,
-      methodLabel: null,
-      modelProvider: providerConfig.providerId,
-      oss: false,
-      preset: 'codex',
-      providerLabel: providerConfig.label,
-      summary: providerConfig.label,
     }
   }
 
@@ -330,10 +154,6 @@ export function buildSetupWizardAssistantProviderBadges(input: {
 
   if (input.provider === 'codex-cloud') {
     badges.push({ label: 'recommended', tone: 'success' })
-  } else if (input.provider === 'codex-local') {
-    badges.push({ label: 'local', tone: 'accent' })
-  } else if (resolveAssistantCodexLocalOnboardingProviderConfig(input.provider)) {
-    badges.push({ label: 'api key', tone: 'accent' })
   } else {
     badges.push({ label: 'no change', tone: 'muted' })
   }
@@ -366,43 +186,18 @@ export async function runSetupAssistantWizard(
     const createElement = React.createElement
     const { exit } = useApp()
     const initialAssistantProvider = normalizeSetupAssistantWizardProvider(
-      resolveSetupAssistantWizardInitialProvider({
-        enableApiKeyProviderOnboarding: input.enableApiKeyProviderOnboarding,
-        provider: inferSetupWizardAssistantProvider({
-          modelProvider: input.initialAssistantModelProvider,
-          oss: input.initialAssistantOss,
-          preset: initialAssistantPreset,
-        }),
-      }),
+      inferSetupWizardAssistantProvider({ preset: initialAssistantPreset }),
     )
     const initialAssistantMethod = inferSetupWizardAssistantMethod({
-      oss: input.initialAssistantOss,
       preset: initialAssistantPreset,
       provider: initialAssistantProvider,
     })
-    const assistantProviderOptions = React.useMemo(
-      () =>
-        listSetupAssistantWizardProviderOptionsForCurrent(
-          initialAssistantProvider,
-          {
-            enableApiKeyProviderOnboarding:
-              input.enableApiKeyProviderOnboarding,
-          },
-        ),
-      [initialAssistantProvider, input.enableApiKeyProviderOnboarding],
-    )
+    const assistantProviderOptions = listSetupAssistantWizardProviderOptions()
     const [step, setStep] = React.useState<'assistant-provider' | 'confirm'>(
       'assistant-provider',
     )
     const [assistantProviderIndex, setAssistantProviderIndex] = React.useState(
-      () =>
-        findSetupAssistantWizardProviderIndex(
-          initialAssistantProvider,
-          {
-            enableApiKeyProviderOnboarding:
-              input.enableApiKeyProviderOnboarding,
-          },
-        ),
+      () => findSetupAssistantWizardProviderIndex(initialAssistantProvider),
     )
     const [selectedAssistantProvider, setSelectedAssistantProvider] =
       React.useState<SetupWizardAssistantProvider>(initialAssistantProvider)
@@ -516,8 +311,6 @@ export async function runSetupAssistantWizard(
         }
 
         completion.submit({
-          assistantModelProvider: latestAssistantRef.current.modelProvider,
-          assistantOss: latestAssistantRef.current.oss,
           assistantPreset: latestAssistantRef.current.preset,
         })
         exit()

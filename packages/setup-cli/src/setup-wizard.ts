@@ -59,8 +59,6 @@ export {
 } from './setup-wizard-options.js'
 
 export interface SetupWizardResult {
-  assistantModelProvider?: string | null
-  assistantOss?: boolean | null
   assistantPreset?: SetupAssistantPreset
   channels: SetupChannel[]
   scheduledUpdates: string[]
@@ -68,13 +66,9 @@ export interface SetupWizardResult {
 }
 
 export interface SetupWizardInput {
-  assistantProviderStatuses?: Partial<Record<string, SetupWizardRuntimeStatus>>
   channelStatuses?: Partial<Record<SetupChannel, SetupWizardRuntimeStatus>>
   commandName?: string
   deviceSyncLocalBaseUrl?: string | null
-  enableApiKeyProviderOnboarding?: boolean
-  initialAssistantModelProvider?: string | null
-  initialAssistantOss?: boolean | null
   initialAssistantPreset?: SetupAssistantPreset
   initialChannels?: readonly SetupChannel[]
   initialScheduledUpdates?: readonly string[]
@@ -122,15 +116,10 @@ export async function runSetupWizard(
   try {
     instance = render(
       React.createElement(SetupWizardApp, {
-        assistantProviderStatuses: input.assistantProviderStatuses,
         channelStatuses: input.channelStatuses,
         commandName,
         defaultScheduledUpdateIds,
         deviceSyncLocalBaseUrl: input.deviceSyncLocalBaseUrl,
-        enableApiKeyProviderOnboarding:
-          input.enableApiKeyProviderOnboarding ?? true,
-        initialAssistantOss: input.initialAssistantOss,
-        initialAssistantModelProvider: input.initialAssistantModelProvider,
         initialAssistantPreset,
         initialChannels,
         initialScheduledUpdates,

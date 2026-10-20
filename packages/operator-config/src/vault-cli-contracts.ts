@@ -5,6 +5,9 @@ import {
 } from '@murphai/contracts'
 import { ALL_QUERY_ENTITY_FAMILIES } from '@murphai/query/entity-families'
 import * as z from '@murphai/contracts/zod-runtime'
+import { isoTimestampSchema, pathSchema } from './primitive-schemas.js'
+
+export { isoTimestampSchema, pathSchema }
 
 export const VAULT_CLI_BATCH_RESULT_SCHEMA = 'murph.vault-cli.batch-result.v1'
 export const VAULT_CLI_BATCH_MAX_COMMANDS = 50
@@ -15,11 +18,6 @@ function describeQueryRecordTypes(values: readonly string[]): string {
 
 const queryRecordTypeValues = ALL_QUERY_ENTITY_FAMILIES
 const queryRecordTypeDescription = describeQueryRecordTypes(queryRecordTypeValues)
-
-export const isoTimestampSchema = z
-  .string()
-  .datetime({ offset: true })
-  .describe('Timestamp in ISO 8601 format with an explicit UTC offset.')
 
 export const localDateSchema = z
   .string()
@@ -53,11 +51,6 @@ export const slugSchema = z
     'Expected a lowercase kebab-case slug.',
   )
   .describe('Stable lowercase kebab-case identifier.')
-
-export const pathSchema = z
-  .string()
-  .min(1)
-  .describe('Filesystem path supplied by the operator.')
 
 const vaultCliBatchCommandErrorStageSchema = z.enum([
   'authorization',

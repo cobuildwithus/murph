@@ -95,7 +95,7 @@ export interface HostedDetachedAssistantAskControllerInput {
   modelProvider?: string | null;
   now?: () => string;
   onStateMutation(): void;
-  resolveProviderAuthority?(): Promise<"current" | "handoff">;
+  resolveRuntimeAuthority?(): Promise<"current" | "handoff">;
   selectNextExactItemId?(): Promise<string | null>;
   usageRecordPort?: HostedRuntimeUsageRecordPort | null;
   userEnvKeys?: readonly string[];
@@ -153,7 +153,7 @@ export function createHostedDetachedAssistantAskController(
         modelProvider: input.modelProvider ?? null,
         now,
         onStateMutation: input.onStateMutation,
-        resolveProviderAuthority: input.resolveProviderAuthority ?? null,
+        resolveRuntimeAuthority: input.resolveRuntimeAuthority ?? null,
         usageRecordPort: input.usageRecordPort ?? null,
         userEnvKeys: input.userEnvKeys ?? [],
         vaultRoot: input.vaultRoot,
@@ -308,13 +308,13 @@ async function runOneHostedDetachedAssistantAsk(input: {
   modelProvider: string | null;
   now: () => string;
   onStateMutation(): void;
-  resolveProviderAuthority: (() => Promise<"current" | "handoff">) | null;
+  resolveRuntimeAuthority: (() => Promise<"current" | "handoff">) | null;
   usageRecordPort: HostedRuntimeUsageRecordPort | null;
   userEnvKeys: readonly string[];
   vaultRoot: string;
 }): Promise<HostedDetachedAssistantAskRunResult> {
   let claimed: HostedSystemMailboxPendingItem | null = null;
-  let providerHandoffRequested = false;
+  let runtimeHandoffRequested = false;
   const providerUsages: ReadOnlyAssistantAskProviderUsageEvent[] = [];
   const deadlineController = new AbortController();
   let deadlineTimer: ReturnType<typeof setTimeout> | null = null;
@@ -405,15 +405,15 @@ async function runOneHostedDetachedAssistantAsk(input: {
     stage = "execute";
     const executionInput = {
       abortSignal: executionSignal,
-      ...(input.resolveProviderAuthority
+      ...(input.resolveRuntimeAuthority
         ? {
             async beforeProviderEntry() {
               if (
-                await input.resolveProviderAuthority?.() === "handoff"
+                await input.resolveRuntimeAuthority?.() === "handoff"
               ) {
-                providerHandoffRequested = true;
+                runtimeHandoffRequested = true;
                 throw new AssistantActiveTurnInputUnavailableError(
-                  "Assistant provider changed; retrying the ask with the saved provider.",
+                  "Runtime ownership changed; retrying the ask in a fresh invocation.",
                 );
               }
             },
@@ -524,13 +524,13 @@ async function runOneHostedDetachedAssistantAsk(input: {
       input,
       nextAttemptAt: aborted
         ? null
-        : providerHandoffRequested
+        : runtimeHandoffRequested
           ? null
           : new Date(
             Date.parse(input.now()) + HOSTED_DETACHED_ASSISTANT_ASK_RETRY_DELAY_MS,
           ).toISOString(),
     });
-    return providerHandoffRequested ? "handoff" : "settled";
+    return runtimeHandoffRequested ? "handoff" : "settled";
   } finally {
     if (deadlineTimer !== null) clearTimeout(deadlineTimer);
     await finishHostedDetachedAssistantAskAttempt({

@@ -223,7 +223,7 @@ describe("hosted local Temporal orchestration e2e", () => {
     );
   }, 300_000);
 
-  it("runs due retention and retires a system pointer for an inactive member", async () => {
+  it("runs due retention and keeps the system pointer for an inactive member", async () => {
     const activeScenario = requireScenario();
 
     await seedFrontierMemberWithoutRecentInbound(
@@ -278,7 +278,12 @@ describe("hosted local Temporal orchestration e2e", () => {
     expect(workflowState.lastExecutionErrorCode).toBeNull();
     expect(workflowState.lastExecutionKind).toMatch(/runtime_/u);
     expect(workflowState.lastReconciliationBlockedReason).toBe("user_not_active");
-    expect(workflowState.latestMailboxPointer).toBeNull();
+    // Inactive facts redact mailbox lag, so they cannot prove the pointer was
+    // consumed. The scheduler keeps it for activation and runs only retention.
+    expect(workflowState.latestMailboxPointer).toMatchObject({
+      lane: "system",
+      laneSeq: retainedAppend.wake.seq,
+    });
 
     await expect.poll(async () => {
       const status = await activeScenario.harness.readUserStatus(

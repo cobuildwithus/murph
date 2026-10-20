@@ -52,7 +52,8 @@ describe.skipIf(!runPostgresProof)(
           await tx.$executeRaw(Prisma.sql`
             CREATE TEMP TABLE hosted_linq_delivery (
               id TEXT PRIMARY KEY,
-              accepted_at TIMESTAMP(3)
+              accepted_at TIMESTAMP(3),
+              thread_is_direct BOOLEAN
             ) ON COMMIT DROP
           `);
           await tx.$executeRaw(Prisma.sql`
@@ -174,8 +175,8 @@ describe.skipIf(!runPostgresProof)(
               ('candidate-mailbox-consumed', 'candidate-member-consumed', ${consumedCandidateAt}, ${historicalDeniedAt})
           `);
           await tx.$executeRaw(Prisma.sql`
-            INSERT INTO hosted_linq_delivery (id, accepted_at)
-            VALUES ('candidate-delivery', ${deliveryCandidateAt})
+            INSERT INTO hosted_linq_delivery (id, accepted_at, thread_is_direct)
+            VALUES ('candidate-delivery', ${deliveryCandidateAt}, FALSE)
           `);
           await tx.$executeRaw(Prisma.sql`
             INSERT INTO hosted_ingress_latency_trace (
@@ -251,8 +252,17 @@ describe.skipIf(!runPostgresProof)(
             now,
             windowStart,
           });
-          const rows = await tx.$queryRaw<Array<{ acceptedAt: Date }>>(query);
+          const rows = await tx.$queryRaw<Array<{
+            acceptedAt: Date;
+            deliveryThreadIsDirect: boolean | null;
+          }>>(query);
           expect(rows).toHaveLength(5);
+          expect(
+            rows.filter((row) => row.deliveryThreadIsDirect === false),
+          ).toHaveLength(1);
+          expect(
+            rows.filter((row) => row.deliveryThreadIsDirect === null),
+          ).toHaveLength(4);
 
           await expect(readHostedRuntimeLatencyHealth({
             now,
@@ -365,7 +375,8 @@ describe.skipIf(!runPostgresProof)(
           await tx.$executeRaw(Prisma.sql`
             CREATE TEMP TABLE hosted_linq_delivery (
               id TEXT PRIMARY KEY,
-              accepted_at TIMESTAMP(3)
+              accepted_at TIMESTAMP(3),
+              thread_is_direct BOOLEAN
             ) ON COMMIT DROP
           `);
           await tx.$executeRaw(Prisma.sql`

@@ -279,8 +279,25 @@ describe('GitHub Actions cache trust-boundary guards', () => {
       isAllowedTemporalCompatibilityHandoff(
         'temporal-compatibility.yml',
         workflow.replace(
-          "        if: ${{ steps.select.outputs.targets_default_branch == 'true' }}\n",
+          "        if: ${{ steps.select.outputs.targets_default_branch == 'true' && steps.select.outputs.current == 'true' }}\n",
           '',
+        ),
+        'workflow_run handoff trigger',
+      ),
+    ).toBe(false)
+    expect(
+      isAllowedTemporalCompatibilityHandoff(
+        'temporal-compatibility.yml',
+        workflow.replace(" && needs.select-pr.outputs.current == 'true' && needs.select-pr.outputs.selected", ' && needs.select-pr.outputs.selected'),
+        'workflow_run handoff trigger',
+      ),
+    ).toBe(false)
+    expect(
+      isAllowedTemporalCompatibilityHandoff(
+        'temporal-compatibility.yml',
+        workflow.replace(
+          'EXPECTED_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}',
+          'EXPECTED_HEAD_SHA: ${{ github.event.workflow_run.pull_requests[0].head.sha }}',
         ),
         'workflow_run handoff trigger',
       ),
@@ -620,12 +637,14 @@ function isAllowedTemporalCompatibilityHandoff(
     && permissions.statuses === 'write'
     && selectPr.if === "${{ github.event.workflow_run.event == 'pull_request' && github.event.workflow_run.pull_requests[0] != null }}"
     && selectOutputs.targets_default_branch === '${{ steps.select.outputs.targets_default_branch }}'
+    && selectOutputs.current === '${{ steps.select.outputs.current }}'
     && selectStep.env.EXPECTED_BASE_REF === '${{ github.event.repository.default_branch }}'
-    && pendingStep.if === "${{ steps.select.outputs.targets_default_branch == 'true' }}"
-    && compatibility.if === "${{ github.event.workflow_run.conclusion == 'success' && needs.select-pr.outputs.targets_default_branch == 'true' && needs.select-pr.outputs.selected == 'true' && needs.select-pr.outputs.trusted == 'true' }}"
+    && selectStep.env.EXPECTED_HEAD_SHA === '${{ github.event.workflow_run.head_sha }}'
+    && pendingStep.if === "${{ steps.select.outputs.targets_default_branch == 'true' && steps.select.outputs.current == 'true' }}"
+    && compatibility.if === "${{ github.event.workflow_run.conclusion == 'success' && needs.select-pr.outputs.targets_default_branch == 'true' && needs.select-pr.outputs.current == 'true' && needs.select-pr.outputs.selected == 'true' && needs.select-pr.outputs.trusted == 'true' }}"
     && compatibility.environment === 'temporal-compatibility'
     && dispatchStep.env.EXPECTED_BASE_REF === '${{ github.event.repository.default_branch }}'
-    && required.if === "${{ always() && github.event.workflow_run.event == 'pull_request' && github.event.workflow_run.pull_requests[0] != null && needs.select-pr.outputs.targets_default_branch == 'true' }}"
+    && required.if === "${{ always() && github.event.workflow_run.event == 'pull_request' && github.event.workflow_run.pull_requests[0] != null && needs.select-pr.outputs.targets_default_branch == 'true' && needs.select-pr.outputs.current == 'true' }}"
     && hasTemporalCompatibilityPermissions(compatibility.permissions)
     && hasEarlyExactPrHeadRevalidation(
       compatibility.steps,

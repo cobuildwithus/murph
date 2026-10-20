@@ -278,7 +278,8 @@ the owning marker is durable, then represented as a bounded `device-sync.wake`
 mailbox handoff keyed by connection and reconcile timestamp. Dirty webhook
 freshness is separate: web persists dirty state and appends one deterministic
 `device-sync.wake` handoff on clean-to-dirty transitions, but dirty rows are not
-selected by a global scheduled sweep. The existing shared mailbox-handoff sweep
+selected by a global scheduled sweep beyond releasing bounded routine Junction
+wake deadlines (see `docs/device-sync-hosted-control-plane.md`). The existing shared mailbox-handoff sweep
 may re-signal one exact unconsumed `device-sync.wake` pointer per user; it reads
 mailbox and lane-watermark truth, not dirty rows. Historical `runtime.mailbox-lag-observed`
 and `runtime.device-sync-recovery-requested` rows remain valid runtime-control
@@ -462,6 +463,34 @@ Per-user workflows remain user-runtime execution loops: they react after
 mailbox/signal nudges and read per-user reconciliation facts, but they do not
 scan global device-sync tables or keep users alive just to poll for due
 reconciles.
+
+## Inactive member scheduling
+
+Web's `user_not_active` reconciliation reason suppresses ordinary runtime work
+whether or not a canonical workspace remains. Empty mailbox lag and a null
+system frontier in these blocked facts are redacted scheduling inputs, not
+proof that a carried pointer was consumed. Temporal preserves that pointer for
+a later activation signal and discards system/default backoff and wake ownership.
+Only the workspace's inbox media retention deadline can schedule inactive work;
+a due deadline uses `inbox_media_retention` with its existing failure retry and
+accepted-owner recheck. Stale device-sync or assistant wakes cannot shorten that
+wait. A new signal always re-reads Web's access facts before admission.
+
+The private scheduler guards workspace-present quiescence with
+`hosted-runtime-inactive-workspace-quiescence-v1`, evaluated after each successful
+reconciliation so an existing execution adopts it at the live frontier. Keep
+old command order for histories without the marker during replay. This is a
+patch-introducing, direct-Current release with no older traffic-bearing reader;
+retain the patch until pre-marker histories drain. No operator signal or reset
+is required for a workflow already retrying to reach its next reconciliation.
+
+Defense in depth: Web's owner `claim` also reports `blockedReason: "admission"`
+for these members, and the Worker answers a dispatch that still arrives with a
+five-minute `admission_blocked` retry instead of the three-second contention
+retry (`hosted-postgres-runtime.md` owns that contract). The runtime-log
+runaway alert opens at 60 processing attempts per member-hour. Consent
+withdrawal, disconnect authority, and retention claim checks remain with their
+existing owners.
 
 ## Workflow Replay And Versioning
 
@@ -684,10 +713,7 @@ runtime/provider layer still enforces spend before any actual model call. There
 is no Activity-local signed usage-decision endpoint in the Temporal execution
 path.
 
-The facts owner retains authoritative usage admission and queries a selected
-custom inference override only when a denied managed allowance needs that
-exemption. Allowed and consent-withdrawn decisions do not depend on unrelated
-custom inference configuration. The existing route stage callback records
+The facts owner retains authoritative usage admission. The existing route stage callback records
 bounded, numeric durations for authentication and facts processing, including
 repeated stages. Timing records contain no member or request identifiers and
 cannot change the response or failure behavior. Temporal activity duration

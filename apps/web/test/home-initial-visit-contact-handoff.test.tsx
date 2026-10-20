@@ -5,14 +5,6 @@ import { test, vi } from "vitest";
 
 import { renderClientComponent } from "./render-client-component";
 
-vi.mock("@/src/components/murph/murph-persona-picker", () => ({
-  MurphPersonaPicker({ open }: { open: boolean }) {
-    return open
-      ? createElement("section", { "data-murph-persona-picker": "open" })
-      : null;
-  },
-}));
-
 vi.mock("@/src/components/ui/dialog", () => ({
   Dialog: ({ children, open }: { children?: ReactNode; open?: boolean }) =>
     open ? createElement("div", null, children) : null,
@@ -47,7 +39,7 @@ vi.mock("@/src/hooks/use-mobile", () => ({
   useIsMobile: () => true,
 }));
 
-test("initial-visit contact handoff advances to persona setup after Safari launches", async () => {
+test("initial-visit contact handoff completes onboarding after Safari launches", async () => {
   const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
     new Response(JSON.stringify({ claim: "initial-visit.claim" }), {
       headers: { "content-type": "application/json" },
@@ -55,11 +47,11 @@ test("initial-visit contact handoff advances to persona setup after Safari launc
     }),
   );
   vi.stubGlobal("fetch", fetchMock);
-  const { HomeInitialVisitPersonaPickerClient } = await import(
-    "../app/(dashboard)/home/initial-visit-persona-picker-client"
+  const { HomeInitialVisitContactPickerClient } = await import(
+    "../app/(dashboard)/home/initial-visit-contact-picker-client"
   );
   const createInitialVisitElement = () =>
-    createElement(HomeInitialVisitPersonaPickerClient, {
+    createElement(HomeInitialVisitContactPickerClient, {
       contactAction: {
         href: "sms:+15550100001",
         kind: "text",
@@ -111,9 +103,9 @@ test("initial-visit contact handoff advances to persona setup after Safari launc
       rendered.container.querySelector("[data-drawer-open='true']"),
       null,
     );
-    assert.ok(
-      rendered.container.querySelector("[data-murph-persona-picker='open']"),
-    );
+    assert.equal(rendered.container.textContent, "");
+    assert.deepEqual(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body)), { action: "skip" });
+    assert.equal(fetchMock.mock.calls[1]?.[1]?.keepalive, true);
     assert.doesNotMatch(rendered.container.textContent ?? "", /Skip for now/u);
   } finally {
     await rendered.cleanup();

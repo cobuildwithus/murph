@@ -9,6 +9,7 @@ import {
 import { linkHostedIngressLatencyTracesToAcceptedLinqDelivery } from "@/src/lib/hosted-runtime-latency/store";
 import { deleteExpiredTypingAlerts } from "@/src/lib/hosted-retention/cleanup";
 import { sendRecoverableHostedLinqAlertsBestEffort } from "@/src/lib/hosted-onboarding/linq-alert-email";
+import { createHostedLinqProviderEventLookupKey } from "@/src/lib/hosted-onboarding/linq-observability-identifiers";
 
 const enabled = process.env.MURPH_TEST_POSTGRES_CONCURRENCY === "1";
 const databaseUrl = process.env.DATABASE_URL ?? "";
@@ -26,13 +27,17 @@ const env = {
 describe.skipIf(!enabled)("per-message typing alert PostgreSQL proof", () => {
   it("uses strict webhook-to-first-typing thresholds across warm, cold, rollout, and missing observations", async () => {
     await withTables(async (tx) => {
-      await insertTrace(tx, "warm-boundary", { elapsed: 3000 });
-      await insertTrace(tx, "warm-slow", { elapsed: 3001 });
-      await insertTrace(tx, "cold-boundary", { cold: true, elapsed: 8_000 });
-      await insertTrace(tx, "cold-slow", { cold: true, elapsed: 8_001 });
-      await insertTrace(tx, "retained-after-cold", { cold: true, restoredBeforeReceipt: true, elapsed: 3001 });
+      await insertTrace(tx, "warm-below", { elapsed: 2499 });
+      await insertTrace(tx, "warm-boundary", { elapsed: 2500 });
+      await insertTrace(tx, "warm-slow", { elapsed: 2501 });
+      await insertTrace(tx, "warm-former-boundary", { elapsed: 3000 });
+      await insertTrace(tx, "cold-below", { cold: true, elapsed: 6999 });
+      await insertTrace(tx, "cold-boundary", { cold: true, elapsed: 7000 });
+      await insertTrace(tx, "cold-slow", { cold: true, elapsed: 7001 });
+      await insertTrace(tx, "cold-former-boundary", { cold: true, elapsed: 8000 });
+      await insertTrace(tx, "retained-after-cold", { cold: true, restoredBeforeReceipt: true, elapsed: 2501 });
       await insertTrace(tx, "cold-fast", { cold: true, elapsed: 5000 });
-      await insertTrace(tx, "rollout-slow", { cold: true, elapsed: 8_001,
+      await insertTrace(tx, "rollout-slow", { cold: true, elapsed: 7001,
         extra: { orchestration: { activeFenceTargetWasPriorVersion: true, replacedStaleFence: true } } });
       await insertTrace(tx, "missing-warm", { elapsed: null });
       await insertTrace(tx, "missing-cold", { cold: true, elapsed: null });
@@ -44,64 +49,153 @@ describe.skipIf(!enabled)("per-message typing alert PostgreSQL proof", () => {
       await insertTrace(tx, "negative", { elapsed: -1 });
       await insertTrace(tx, "future", { elapsed: 100_000 });
       await insertTrace(tx, "legacy-no-receipt", { elapsed: 50_000, receivedAt: null });
-      await insertTrace(tx, "telegram-slow", { source: "telegram", elapsed: 3001 });
-      await insertTrace(tx, "telegram-fast", { source: "telegram", elapsed: 3000 });
+      await insertTrace(tx, "telegram-slow", { source: "telegram", elapsed: 2501 });
+      await insertTrace(tx, "telegram-fast", { source: "telegram", elapsed: 2500 });
       await insertTrace(tx, "telegram-active-followup", { source: "telegram", elapsed: -1000 });
       await insertTrace(tx, "telegram-missing", { source: "telegram", elapsed: null });
-      await insertTrace(tx, "telegram-cold-fast", { source: "telegram", cold: true, elapsed: 8_000 });
-      await insertTrace(tx, "telegram-cold-slow", { source: "telegram", cold: true, elapsed: 8_001 });
+      await insertTrace(tx, "telegram-cold-fast", { source: "telegram", cold: true, elapsed: 7000 });
+      await insertTrace(tx, "telegram-cold-slow", { source: "telegram", cold: true, elapsed: 7001 });
       await insertTrace(tx, "telemetry-in-flight", { elapsed: null, receivedAt: new Date(now.getTime() - 5000) });
       const rows = await tx.$queryRaw<Array<{ id: string; workspaceState: string; elapsedMs: bigint }>>(
         buildHostedRuntimeTypingAlertQuery({ now }),
       );
       expect(rows.map((row) => row.id).sort()).toEqual([
-        "cold-slow", "missing-cold", "missing-warm", "retained-after-cold", "rollout-slow",
-        "telegram-slow", "telegram-cold-slow", "telegram-missing", "unconfirmed", "warm-slow",
+        "cold-former-boundary", "cold-slow", "missing-cold", "missing-warm", "retained-after-cold",
+        "rollout-slow", "telegram-slow", "telegram-cold-slow", "telegram-missing", "unconfirmed",
+        "warm-former-boundary", "warm-slow",
       ].map((id) => `runtime-typing/${id}`).sort());
       expect(rows.find((row) => row.id.endsWith("retained-after-cold"))?.workspaceState).toBe("warm");
       // Acceptance happens two seconds after webhook receipt; those seconds count.
-      expect(rows.find((row) => row.id.endsWith("warm-slow"))?.elapsedMs).toBe(3001n);
+      expect(rows.find((row) => row.id.endsWith("warm-slow"))?.elapsedMs).toBe(2501n);
       const scoped = await tx.$queryRaw<Array<{ id: string }>>(buildHostedRuntimeTypingAlertQuery({
         now, userId: "synthetic-member", assistantInputIds: ["input-warm-slow"],
       }));
       expect(scoped.map((row) => row.id)).toEqual(["runtime-typing/warm-slow"]);
+      const fetchImpl = vi.fn<typeof fetch>().mockImplementation(async () =>
+        new Response(JSON.stringify({ id: "synthetic-email" }), { status: 200 }));
+      await runHostedRuntimeTypingAlertMonitor({ env, fetchImpl, now, prisma: tx });
+      const alerts = await tx.hostedLinqAlert.findMany({
+        where: { id: { in: ["warm-slow", "cold-slow", "unconfirmed"].map((id) => `runtime-typing/${id}`) } },
+        select: { id: true, subject: true, detailsJson: true },
+      });
+      expect(alerts.map(({ id, subject, detailsJson }) => [id, subject,
+        (detailsJson as { thresholdMs: number }).thresholdMs]).sort()).toEqual([
+        ["runtime-typing/cold-slow", "Murph cold workspace typing exceeded 7 seconds", 7000],
+        ["runtime-typing/unconfirmed", "Murph cold workspace typing exceeded 7 seconds", 7000],
+        ["runtime-typing/warm-slow", "Murph warm workspace typing exceeded 2.5 seconds", 2500],
+      ]);
+      expect(fetchImpl.mock.calls.map((call) => String(call[1]?.body)).join("\n")).toContain(
+        "Workspace warmth was not confirmed; the 7000 ms cold-start cutoff applies.");
     });
   });
 
-  it("resolves synthetic instant replies through the production delivery link and leaves failed sends alertable", async () => {
+  it("ends a Telegram wait at its delivered reply without suppressing slow replies", async () => {
     await withTables(async (tx) => {
-      for (const id of ["instant-accepted", "instant-failed", "instant-ordinary"]) {
+      const assistant = (typingMs: number | null, replyMs: number | string) => ({ assistant: {
+        ...(typingMs === null ? {} : { telegramTypingAcceptedAtEpochMs: received.getTime() + typingMs }),
+        terminalReplyCommittedAtEpochMs: typeof replyMs === "number" ? received.getTime() + replyMs : replyMs,
+      } });
+      const telegram = { source: "telegram" as const, cold: true, elapsed: null };
+      await insertTrace(tx, "reply-within-threshold", { ...telegram, extra: assistant(null, 7000) });
+      await insertTrace(tx, "reply-slow", { ...telegram, extra: assistant(null, 35_900) });
+      await insertTrace(tx, "reply-before-receipt", { ...telegram, extra: assistant(null, -1) });
+      await insertTrace(tx, "reply-after-now", { ...telegram, extra: assistant(null, 60_001) });
+      await insertTrace(tx, "reply-malformed", { ...telegram, extra: assistant(null, "7000") });
+      await insertTrace(tx, "typing-before-reply", { ...telegram, extra: assistant(7001, 9000) });
+      await insertTrace(tx, "reply-before-typing", { ...telegram, extra: assistant(9000, 7000) });
+      // Linq answers keep their own delivery suppression and reply-latency monitor.
+      await insertTrace(tx, "linq-reply-leaf", { cold: true, elapsed: null, extra: { assistant: {
+        terminalReplyCommittedAtEpochMs: received.getTime() + 5_000,
+      } } });
+      const rows = await tx.$queryRaw<Array<{ id: string; elapsedMs: bigint }>>(
+        buildHostedRuntimeTypingAlertQuery({ now }),
+      );
+      expect(Object.fromEntries(rows.map((row) => [row.id.replace("runtime-typing/", ""), row.elapsedMs])))
+        .toEqual({
+          "linq-reply-leaf": 60_000n,
+          "reply-after-now": 60_000n,
+          "reply-before-receipt": 60_000n,
+          "reply-malformed": 60_000n,
+          "reply-slow": 35_900n,
+          "typing-before-reply": 7001n,
+        });
+    });
+  });
+
+  it("links instant replies to original and echo traces and leaves failed sends alertable", async () => {
+    await withTables(async (tx) => {
+      for (const id of ["instant-original", "instant-echo", "instant-failed", "instant-ordinary"]) {
         await insertTrace(tx, id, { elapsed: null });
       }
       await insertDelivery(tx, "delivery-instant", "chat-instant", 2500);
       await insertDelivery(tx, "delivery-failed", "chat-failed", null);
       const readAlerts = () => tx.$queryRaw<Array<{ id: string }>>(buildHostedRuntimeTypingAlertQuery({ now }));
-      expect((await readAlerts()).map((row) => row.id)).toContain("runtime-typing/instant-accepted");
+      expect((await readAlerts()).map((row) => row.id)).toEqual(expect.arrayContaining([
+        "runtime-typing/instant-original", "runtime-typing/instant-echo",
+      ]));
       // Synthetic outbound contexts have no source-message routing key or typing
       // observation. Only their exact provider-accepted delivery answers them.
-      for (const [id, deliveryId] of [["instant-accepted", "delivery-instant"], ["instant-failed", "delivery-failed"]] as const) {
+      for (const [answeredMailboxItemIds, deliveryId] of [
+        [["mailbox-instant-original", "mailbox-instant-echo"], "delivery-instant"],
+        [["mailbox-instant-failed"], "delivery-failed"],
+      ] as const) {
         await expect(linkHostedIngressLatencyTracesToAcceptedLinqDelivery({
           authenticatedUserId: "synthetic-member",
-          answeredMailboxItemIds: [`mailbox-${id}`],
+          answeredMailboxItemIds,
           linqDeliveryId: deliveryId,
           prisma: tx,
           replyRuntimeAttemptId: null,
-        })).resolves.toEqual({ matchedCount: 1, recorded: true });
+        })).resolves.toEqual({ matchedCount: answeredMailboxItemIds.length, recorded: true });
       }
       expect((await readAlerts()).map((row) => row.id).sort()).toEqual([
         "runtime-typing/instant-failed", "runtime-typing/instant-ordinary",
       ]);
-      await expect(linkHostedIngressLatencyTracesToAcceptedLinqDelivery({
-        authenticatedUserId: "synthetic-member",
-        answeredMailboxItemIds: ["mailbox-instant-accepted"],
-        linqDeliveryId: "delivery-competing",
-        prisma: tx,
-        replyRuntimeAttemptId: null,
-      })).resolves.toEqual({ matchedCount: 0, recorded: false });
-      expect(await tx.$queryRaw`SELECT reply_runtime_attempt_id, linq_delivery_id
-        FROM hosted_ingress_latency_trace WHERE id = 'instant-accepted'`).toEqual([
-        { reply_runtime_attempt_id: null, linq_delivery_id: "delivery-instant" },
+      for (const linqDeliveryId of ["delivery-instant", "delivery-competing"]) {
+        await expect(linkHostedIngressLatencyTracesToAcceptedLinqDelivery({
+          authenticatedUserId: "synthetic-member",
+          answeredMailboxItemIds: ["mailbox-instant-original", "mailbox-instant-echo"],
+          linqDeliveryId,
+          prisma: tx,
+          replyRuntimeAttemptId: null,
+        })).resolves.toEqual({ matchedCount: 0, recorded: false });
+      }
+      expect(await tx.$queryRaw`SELECT mailbox_item_id, runtime_attempt_id, reply_runtime_attempt_id, linq_delivery_id
+        FROM hosted_ingress_latency_trace WHERE id IN ('instant-original', 'instant-echo') ORDER BY id`).toEqual([
+        { mailbox_item_id: "mailbox-instant-echo", runtime_attempt_id: null, reply_runtime_attempt_id: null, linq_delivery_id: "delivery-instant" },
+        { mailbox_item_id: "mailbox-instant-original", runtime_attempt_id: null, reply_runtime_attempt_id: null, linq_delivery_id: "delivery-instant" },
       ]);
+    });
+  });
+
+  it("preserves delivery-link member, suspension, lane, kind, and existing-trace guards", async () => {
+    await withTables(async (tx) => {
+      for (const id of ["foreign", "suspended", "system", "wrong-kind", "trace-member", "trace-source"]) {
+        await insertTrace(tx, id, { elapsed: null });
+      }
+      await insertDelivery(tx, "delivery-instant", "chat-instant", 2500);
+      await tx.$executeRaw`INSERT INTO hosted_member (id, suspended_at)
+        VALUES ('foreign-member', NULL), ('suspended-member', ${received})`;
+      await tx.$executeRaw`UPDATE hosted_mailbox_item SET user_id = 'foreign-member' WHERE id = 'mailbox-foreign'`;
+      await tx.$executeRaw`UPDATE hosted_mailbox_item SET user_id = 'suspended-member' WHERE id = 'mailbox-suspended'`;
+      await tx.$executeRaw`UPDATE hosted_mailbox_item SET lane = 'system' WHERE id = 'mailbox-system'`;
+      await tx.$executeRaw`UPDATE hosted_mailbox_item SET kind = 'system.notification' WHERE id = 'mailbox-wrong-kind'`;
+      await tx.$executeRaw`UPDATE hosted_ingress_latency_trace SET user_id = 'foreign-member'
+        WHERE id IN ('foreign', 'trace-member')`;
+      await tx.$executeRaw`UPDATE hosted_ingress_latency_trace SET user_id = 'suspended-member' WHERE id = 'suspended'`;
+      await tx.$executeRaw`UPDATE hosted_ingress_latency_trace SET source = 'telegram' WHERE id = 'trace-source'`;
+      const before = await tx.$queryRaw`SELECT * FROM hosted_ingress_latency_trace ORDER BY id`;
+      for (const [authenticatedUserId, answeredMailboxItemIds] of [
+        ["synthetic-member", ["mailbox-foreign", "mailbox-suspended"]],
+        ["suspended-member", ["mailbox-suspended"]],
+        ["synthetic-member", ["mailbox-system", "mailbox-wrong-kind"]],
+        ["synthetic-member", ["mailbox-trace-member", "mailbox-trace-source"]],
+      ] as const) {
+        await expect(linkHostedIngressLatencyTracesToAcceptedLinqDelivery({
+          authenticatedUserId, answeredMailboxItemIds, linqDeliveryId: "delivery-instant",
+          prisma: tx, replyRuntimeAttemptId: null,
+        })).resolves.toEqual({ matchedCount: 0, recorded: false });
+      }
+      expect(await tx.$queryRaw`SELECT * FROM hosted_ingress_latency_trace ORDER BY id`).toEqual(before);
     });
   });
 
@@ -188,6 +282,70 @@ describe.skipIf(!enabled)("per-message typing alert PostgreSQL proof", () => {
     });
   });
 
+  it.each(["current", "prior"] as const)("correlates a %s reaction with same-chat activity through its exact event", async (reactionSide) => {
+    await withTables(async (tx) => {
+      for (const id of ["covered", "other-chat", "other-member", "expired", "ended", "reply"]) {
+        await insertTrace(tx, id, { elapsed: 8000 });
+        await bindConversation(tx, id, `chat-${id}`);
+        if (id !== "reply") {
+          const ageMs = id === "expired" ? 301_000 : 2000;
+          await insertTrace(tx, `prior-${id}`, {
+            elapsed: -ageMs,
+            receivedAt: new Date(received.getTime() - ageMs - 1000),
+          });
+          await bindConversation(tx, `prior-${id}`, id === "other-chat" ? "different-chat" : `chat-${id}`);
+        }
+        const reactionId = reactionSide === "prior" && id !== "reply" ? `prior-${id}` : id;
+        // Reaction ingress synthesizes a message identity from the event ID.
+        // The provider record still names the message that was reacted to.
+        await tx.$executeRaw`UPDATE hosted_linq_provider_event
+          SET message_lookup_key = ${`reacted-to-${id}`}
+          WHERE event_id = ${createHostedLinqProviderEventLookupKey(`event-${reactionId}`)}`;
+      }
+      await tx.$executeRaw`UPDATE hosted_mailbox_item SET user_id = 'foreign-member'
+        WHERE id = 'mailbox-prior-other-member'`;
+      await tx.$executeRaw`UPDATE hosted_ingress_latency_trace SET user_id = 'foreign-member'
+        WHERE id = 'prior-other-member'`;
+      await insertDelivery(tx, "ended-reply", "chat-ended", 2000);
+      await tx.$executeRaw`UPDATE hosted_ingress_latency_trace SET linq_delivery_id = 'ended-reply'
+        WHERE id = 'prior-ended'`;
+      await insertDelivery(tx, "recent-reply", "chat-reply", 7000);
+      const rows = await tx.$queryRaw<Array<{ id: string; elapsedMs: bigint }>>(
+        buildHostedRuntimeTypingAlertQuery({ now }),
+      );
+      expect(rows.map(({ id, elapsedMs }) => [id, elapsedMs]).sort()).toEqual([
+        ["runtime-typing/ended", 6000n],
+        ["runtime-typing/expired", 8000n],
+        ["runtime-typing/other-chat", 8000n],
+        ["runtime-typing/other-member", 8000n],
+      ]);
+    });
+  });
+
+  it("keeps the exact event origin when later events reference the same message", async () => {
+    await withTables(async (tx) => {
+      await insertTrace(tx, "original", { elapsed: 2000 });
+      await insertProviderEvent(tx, "original", -2000);
+      await insertProviderEvent(tx, "original", 1000, "later-delivery-receipt");
+      await insertTrace(tx, "reaction", { elapsed: 2000 });
+      await insertProviderEvent(tx, "reaction", -1000);
+      await tx.$executeRaw`UPDATE hosted_linq_provider_event
+        SET message_lookup_key = 'reacted-to-message'
+        WHERE event_id = ${createHostedLinqProviderEventLookupKey("event-reaction")}`;
+      // The canonical identity helper also accepts its already-hashed form.
+      await tx.$executeRaw`UPDATE hosted_mailbox_item
+        SET dedupe_key = ${createHostedLinqProviderEventLookupKey("event-reaction")}
+        WHERE id = 'mailbox-reaction'`;
+      const rows = await tx.$queryRaw<Array<{ id: string; elapsedMs: bigint }>>(
+        buildHostedRuntimeTypingAlertQuery({ now }),
+      );
+      expect(rows.map(({ id, elapsedMs }) => [id, elapsedMs]).sort()).toEqual([
+        ["runtime-typing/original", 4000n],
+        ["runtime-typing/reaction", 3000n],
+      ]);
+    });
+  });
+
   it("restarts pending silence after replies and after earlier typing ends", async () => {
     await withTables(async (tx) => {
       for (const id of ["gap", "boundary", "repeated", "missing", "recent", "answered", "answered-typed",
@@ -200,9 +358,9 @@ describe.skipIf(!enabled)("per-message typing alert PostgreSQL proof", () => {
         await bindConversation(tx, id, `chat-${id}`);
       }
       await insertDelivery(tx, "gap-reply", "chat-gap", 2000);
-      await insertDelivery(tx, "boundary-reply", "chat-boundary", 6000);
+      await insertDelivery(tx, "boundary-reply", "chat-boundary", 6500);
       await insertDelivery(tx, "repeated-first", "chat-repeated", 2000);
-      await insertDelivery(tx, "repeated-last", "chat-repeated", 6500);
+      await insertDelivery(tx, "repeated-last", "chat-repeated", 7000);
       await insertDelivery(tx, "missing-reply", "chat-missing", 2000);
       await insertDelivery(tx, "recent-reply", "chat-recent", 58_000);
       await insertDelivery(tx, "answer", "chat-answered", 2000);
@@ -212,7 +370,7 @@ describe.skipIf(!enabled)("per-message typing alert PostgreSQL proof", () => {
       await tx.$executeRaw`UPDATE hosted_ingress_latency_trace
         SET linq_delivery_id = 'typed-answer' WHERE id = 'answered-typed'`;
       await insertDelivery(tx, "cold-gap-reply", "chat-cold-gap", 2000);
-      await insertDelivery(tx, "cold-boundary-reply", "chat-cold-boundary", 3000);
+      await insertDelivery(tx, "cold-boundary-reply", "chat-cold-boundary", 4000);
       for (const [id, age] of [["prior-ended", 2000], ["prior-expired", 298_000]] as const) {
         await insertTrace(tx, `${id}-earlier`, {
           elapsed: -age, receivedAt: new Date(received.getTime() - age - 1000),
@@ -245,6 +403,48 @@ describe.skipIf(!enabled)("per-message typing alert PostgreSQL proof", () => {
     });
   });
 
+  it("measures Linq silence from the exact message's provider event, never after receipt", async () => {
+    await withTables(async (tx) => {
+      for (const id of ["early-event", "late-event", "edited", "no-event", "reply-before-receipt"]) {
+        await insertTrace(tx, id, { elapsed: 2000 });
+      }
+      // Time before the route runs counts; a provider clock ahead of ours does not.
+      await insertProviderEvent(tx, "early-event", -1500);
+      await insertProviderEvent(tx, "late-event", 2000);
+      // The edit's own event, not the original send, starts its wait.
+      await insertProviderEvent(tx, "edited", -600_000, "original-send");
+      await insertProviderEvent(tx, "edited", -400);
+      // A reply delivered after the provider event but before receipt restarts silence.
+      await insertProviderEvent(tx, "reply-before-receipt", -3000);
+      await insertDelivery(tx, "between-reply", "chat-reply-before-receipt", -1000);
+      // Another member's mailbox cannot supply an earlier start.
+      await insertTrace(tx, "other-member", { elapsed: 2000 });
+      await insertProviderEvent(tx, "other-member", -1500);
+      await tx.$executeRaw`UPDATE hosted_mailbox_item SET user_id = 'other-member'
+        WHERE id = 'mailbox-other-member'`;
+      await insertTrace(tx, "telegram-fast", { source: "telegram", elapsed: 2000 });
+
+      const rows = await tx.$queryRaw<Array<{ id: string; elapsedMs: bigint }>>(
+        buildHostedRuntimeTypingAlertQuery({ now }),
+      );
+      expect(rows.map(({ id, elapsedMs }) => [id, elapsedMs]).sort()).toEqual([
+        ["runtime-typing/early-event", 3500n],
+        ["runtime-typing/reply-before-receipt", 3000n],
+      ]);
+
+      const fetchImpl = vi.fn<typeof fetch>().mockImplementation(async () =>
+        new Response(JSON.stringify({ id: "synthetic-email" }), { status: 200 }));
+      await runHostedRuntimeTypingAlertMonitor({
+        env, fetchImpl, now, prisma: tx, userId: "synthetic-member", assistantInputIds: ["input-early-event"],
+      });
+      const body = String(fetchImpl.mock.calls[0]?.[1]?.body);
+      expect(body).toContain("Provider event created: 2026-09-10T03:58:58.500Z");
+      expect(body).toContain("Webhook received: 2026-09-10T03:59:00.000Z");
+      expect(body).toContain("Silence measured from: 2026-09-10T03:58:58.500Z");
+      expect(body).toContain("Wait without typing or a reply: 3500 ms");
+    });
+  });
+
   it.each(["linq", "telegram"] as const)("excludes usage-denied %s inputs while alerting on other slow inputs for the same member", async (source) => {
     await withTables(async (tx) => {
       const usageDeniedAt = new Date(received.getTime() + 1500);
@@ -254,17 +454,24 @@ describe.skipIf(!enabled)("per-message typing alert PostgreSQL proof", () => {
       await insertTrace(tx, "denied-later-typing", { source, elapsed: 20_000, usageDeniedAt });
       await insertTrace(tx, "allowed-slow", { source, elapsed: 4000 });
       await insertTrace(tx, "allowed-missing", { source, cold: null, elapsed: null });
+      await insertTrace(tx, "absent-mailbox", { source, elapsed: 4000 });
+      await tx.$executeRaw`DELETE FROM hosted_mailbox_item WHERE id = 'mailbox-absent-mailbox'`;
+      await insertTrace(tx, "foreign-denial", { source, elapsed: 4000, usageDeniedAt });
+      await tx.$executeRaw`UPDATE hosted_mailbox_item SET user_id = 'foreign-member'
+        WHERE id = 'mailbox-foreign-denial'`;
 
       const fetchImpl = vi.fn<typeof fetch>().mockImplementation(async () =>
         new Response(JSON.stringify({ id: "synthetic-email" }), { status: 200 }));
       expect(await runHostedRuntimeTypingAlertMonitor({ env, fetchImpl, now, prisma: tx })).toEqual({
-        queuedCount: 2, scanTruncated: false,
+        queuedCount: 4, scanTruncated: false,
       });
-      expect(fetchImpl).toHaveBeenCalledTimes(2);
+      expect(fetchImpl).toHaveBeenCalledTimes(4);
       const alerts = await tx.hostedLinqAlert.findMany({ select: { id: true, status: true } });
       expect(alerts.sort((a, b) => a.id.localeCompare(b.id))).toEqual([
+        { id: "runtime-typing/absent-mailbox", status: "sent" },
         { id: "runtime-typing/allowed-missing", status: "sent" },
         { id: "runtime-typing/allowed-slow", status: "sent" },
+        { id: "runtime-typing/foreign-denial", status: "sent" },
       ]);
     });
   });
@@ -329,7 +536,7 @@ async function withTables(run: (tx: Prisma.TransactionClient) => Promise<void>) 
       ) ON COMMIT DROP`;
       await tx.$executeRaw`INSERT INTO hosted_member (id) VALUES ('synthetic-member')`;
       await tx.$executeRaw`CREATE TEMP TABLE hosted_mailbox_item (
-        id TEXT PRIMARY KEY, user_id TEXT NOT NULL, source_message_lookup_key TEXT, ai_usage_denied_at TIMESTAMP(3),
+        id TEXT PRIMARY KEY, user_id TEXT NOT NULL, dedupe_key TEXT, source_message_lookup_key TEXT, ai_usage_denied_at TIMESTAMP(3),
         lane TEXT NOT NULL DEFAULT 'conversation', lane_seq BIGINT NOT NULL DEFAULT 1,
         kind TEXT NOT NULL DEFAULT 'conversation.message', created_at TIMESTAMP(3) DEFAULT CURRENT_TIMESTAMP
       ) ON COMMIT DROP`;
@@ -342,7 +549,7 @@ async function withTables(run: (tx: Prisma.TransactionClient) => Promise<void>) 
         assistant_input_staged_at TIMESTAMP(3), provider_start_at TIMESTAMP(3), phase_breakdown_json JSONB
       ) ON COMMIT DROP`;
       await tx.$executeRaw`CREATE TEMP TABLE hosted_linq_provider_event (
-        message_lookup_key TEXT, linq_chat_lookup_key TEXT, provider_created_at TIMESTAMP(3)
+        event_id TEXT UNIQUE, message_lookup_key TEXT, linq_chat_lookup_key TEXT, provider_created_at TIMESTAMP(3)
       ) ON COMMIT DROP`;
       await tx.$executeRaw`CREATE TEMP TABLE hosted_linq_delivery (
         id TEXT PRIMARY KEY, linq_chat_lookup_key TEXT, attempted_at TIMESTAMP(3), accepted_at TIMESTAMP(3)
@@ -385,8 +592,8 @@ async function insertTrace(tx: Prisma.TransactionClient, id: string, input: {
   };
   const mailboxItemId = `mailbox-${id}`;
   await tx.$executeRaw(Prisma.sql`
-    INSERT INTO hosted_mailbox_item (id, user_id, ai_usage_denied_at)
-    VALUES (${mailboxItemId}, 'synthetic-member', ${input.usageDeniedAt ?? null})
+    INSERT INTO hosted_mailbox_item (id, user_id, dedupe_key, ai_usage_denied_at)
+    VALUES (${mailboxItemId}, 'synthetic-member', ${`event-${id}`}, ${input.usageDeniedAt ?? null})
   `);
   await tx.$executeRaw(Prisma.sql`
     INSERT INTO hosted_ingress_latency_trace
@@ -402,9 +609,17 @@ async function bindConversation(tx: Prisma.TransactionClient, traceId: string, c
   await tx.$executeRaw`UPDATE hosted_mailbox_item
     SET source_message_lookup_key = ${`message-${traceId}`} WHERE id = ${`mailbox-${traceId}`}`;
   await tx.$executeRaw`INSERT INTO hosted_linq_provider_event
-    (message_lookup_key, linq_chat_lookup_key, provider_created_at)
-    SELECT ${`message-${traceId}`}, ${chat}, webhook_received_at
+    (event_id, message_lookup_key, linq_chat_lookup_key, provider_created_at)
+    SELECT ${createHostedLinqProviderEventLookupKey(`event-${traceId}`)}, ${`message-${traceId}`}, ${chat}, webhook_received_at
     FROM hosted_ingress_latency_trace WHERE id = ${traceId}`;
+}
+
+async function insertProviderEvent(tx: Prisma.TransactionClient, traceId: string, offsetMs: number, eventId = `event-${traceId}`) {
+  await tx.$executeRaw`UPDATE hosted_mailbox_item
+    SET source_message_lookup_key = ${`message-${traceId}`} WHERE id = ${`mailbox-${traceId}`}`;
+  await tx.$executeRaw`INSERT INTO hosted_linq_provider_event
+    (event_id, message_lookup_key, linq_chat_lookup_key, provider_created_at)
+    VALUES (${createHostedLinqProviderEventLookupKey(eventId)}, ${`message-${traceId}`}, ${`chat-${traceId}`}, ${new Date(received.getTime() + offsetMs)})`;
 }
 
 async function insertDelivery(tx: Prisma.TransactionClient, id: string, chat: string, offsetMs: number | null) {

@@ -1,3 +1,4 @@
+import { types } from 'node:util'
 import { executeGetSenderContactDynamicTool, readSenderContactDynamicToolRequest, type SenderContactDynamicToolRequest } from './dynamic-tools/sender-contact.js'
 import { type ConversationPollAction } from '@murphai/hosted-execution/conversation-polls'
 import { readConversationPollDynamicToolRequest, executeConversationPollTool } from './dynamic-tools/conversation-polls.js'
@@ -5,9 +6,12 @@ import { nutritionCardAttachmentGuidance } from '../assistant/nutrition-card-int
 import { parseDynamicToolArguments } from './dynamic-tools/dynamic-tool-wrapper.js'
 import {
   completeDynamicToolFailureDiagnostics,
+  isAlreadyActiveVaultFileSendError,
   toolFailureDiagnostic,
   toolFailureMetadata,
   toolTextResult,
+  withProductFeedbackAuditFailureDetails,
+  withVaultFileToolFailureDetails,
   type ToolFailureDiagnostic,
   type ToolFailureReason,
 } from './tool-failure-diagnostics.js'
@@ -45,7 +49,7 @@ import {
   hostedRuntimePendingGroupSetupInputSchema,
 } from '@murphai/hosted-execution/pending-group-setup'
 import {
-  parseHostedGroupSharedFreshnessRequirements,
+  readHostedGroupSharedFreshnessRejection,
   parseHostedGroupSharedReadOptions,
   type HostedGroupSharedReadOptions,
   getHostedGroupWearableReportingGaps,
@@ -79,7 +83,6 @@ import {
 } from '@murphai/hosted-execution/runtime-control'
 import {
   HOSTED_ASSISTANT_PRODUCT_MODELS,
-  HOSTED_ASSISTANT_PROVIDERS,
   HOSTED_ASSISTANT_REASONING_EFFORTS,
 } from '@murphai/hosted-execution/assistant-model'
 import type {
@@ -137,7 +140,6 @@ import {
   type AssistantResponseCard,
   type CompactTableWorkoutResponseCardV1,
 } from '@murphai/operator-config/assistant-response-cards'
-import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { readLiveWorkoutCardEditor } from '@murphai/vault-usecases/workouts'
 import { normalizeNullableString } from '@murphai/operator-config/text/shared'
 import {
@@ -192,6 +194,7 @@ import {
 import {
   buildSafeToolCallValidationDigest,
   collectSafeJsonSchemaValidationPaths,
+  type SafeToolCallSemanticRejection,
   type SafeToolCallValidationDigest,
 } from '../assistant/tool-validation-digest.js'
 import type {
@@ -558,6 +561,62 @@ const groupDisclosureGrantIdSchema = z
     { message: 'grantId exceeds the Unicode code-point limit' },
   )
 
+const groupReadSharedArgumentsSchema = z
+  .object({
+    action: z.literal('read_shared'),
+    participantId: z.string().min(1).max(200).optional(),
+    history: z.object({ fromDate: z.string(), throughDate: z.string() }).strict().optional(),
+    audience: z.literal('group_email').optional(),
+    freshness: z.array(z.object({
+      projectionScopeKey: z.string().min(1).max(191),
+      date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u),
+    }).strict()).min(1).max(21).optional(),
+    projectionScopes: z
+      .array(groupVaultShareProjectionScopeSchema)
+      .min(1)
+      .max(HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES.length)
+      .refine(
+        (projectionScopes) =>
+          new Set(
+            projectionScopes.map(buildHostedVaultShareProjectionScopeKey),
+          ).size === projectionScopes.length,
+        { message: 'projectionScopes must contain unique exact scopes' },
+      ),
+  })
+  .strict()
+
+// The read_shared refinement's only decision. The model still receives the one
+// broad issue; private validation telemetry records this finite first reason.
+function readGroupSharedReadSemanticRejection(
+  request: z.infer<typeof groupReadSharedArgumentsSchema>,
+): SafeToolCallSemanticRejection | null {
+  try {
+    parseHostedGroupSharedReadOptions(request, request.projectionScopes)
+  } catch {
+    return 'shared_read_options'
+  }
+  if (request.audience && (request.history || request.participantId)) return 'shared_read_options'
+  if (request.freshness === undefined) return null
+  if (request.audience !== undefined) return 'shared_read_options'
+  try {
+    const rejection = readHostedGroupSharedFreshnessRejection(
+      request.freshness,
+      request.projectionScopes,
+    )
+    return rejection === null ? null : `shared_freshness_${rejection}` as const
+  } catch {
+    return 'shared_semantic_unclassified'
+  }
+}
+
+// Rejection-only: structurally invalid or non-read_shared input has no reason.
+function readGroupArgumentsSemanticRejection(
+  value: unknown,
+): SafeToolCallSemanticRejection | null {
+  const request = groupReadSharedArgumentsSchema.safeParse(value)
+  return request.success ? readGroupSharedReadSemanticRejection(request.data) : null
+}
+
 const groupArgumentsSchema = z.discriminatedUnion('action', [
   z
     .object({
@@ -754,45 +813,11 @@ const groupArgumentsSchema = z.discriminatedUnion('action', [
       policyCode: z.enum(HOSTED_USAGE_REFERRAL_POLICY_CODES),
     })
     .strict(),
-  z
-    .object({
-      action: z.literal('read_shared'),
-      participantId: z.string().min(1).max(200).optional(),
-      history: z.object({ fromDate: z.string(), throughDate: z.string() }).strict().optional(),
-      audience: z.literal('group_email').optional(),
-      freshness: z.array(z.object({
-        projectionScopeKey: z.string().min(1).max(191),
-        date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u),
-      }).strict()).min(1).max(21).optional(),
-      projectionScopes: z
-        .array(groupVaultShareProjectionScopeSchema)
-        .min(1)
-        .max(HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES.length)
-        .refine(
-          (projectionScopes) =>
-            new Set(
-              projectionScopes.map(buildHostedVaultShareProjectionScopeKey),
-            ).size === projectionScopes.length,
-          { message: 'projectionScopes must contain unique exact scopes' },
-        ),
-    })
-    .strict()
-    .refine((request) => {
-      try {
-        parseHostedGroupSharedReadOptions(request, request.projectionScopes)
-        if (request.audience && (request.history || request.participantId)) return false
-      } catch {
-        return false
-      }
-      if (request.freshness === undefined) return true
-      if (request.audience !== undefined) return false
-      try {
-        parseHostedGroupSharedFreshnessRequirements(request.freshness, request.projectionScopes)
-        return true
-      } catch {
-        return false
-      }
-    }, { message: 'history requires one participant, one existing health metric scope and at most 90 inclusive dates, without freshness or group_email; freshness requires exact requested wearable dates', path: ['freshness'] })
+  groupReadSharedArgumentsSchema
+    .refine(
+      (request) => readGroupSharedReadSemanticRejection(request) === null,
+      { message: 'history requires one participant, one existing health metric scope and at most 90 inclusive dates, without freshness or group_email; freshness requires exact requested wearable dates', path: ['freshness'] },
+    )
     .refine(
       (request) =>
         request.audience === 'group_email'
@@ -1021,12 +1046,6 @@ const assistantConfigurationArgumentsSchema = z
     z.object({
       action: z.literal('update'),
       model: z.enum(HOSTED_ASSISTANT_PRODUCT_MODELS),
-      provider: z.enum(HOSTED_ASSISTANT_PROVIDERS).optional(),
-      reasoningEffort: z.enum(HOSTED_ASSISTANT_REASONING_EFFORTS).optional(),
-    }).strict(),
-    z.object({
-      action: z.literal('update'),
-      provider: z.enum(HOSTED_ASSISTANT_PROVIDERS),
       reasoningEffort: z.enum(HOSTED_ASSISTANT_REASONING_EFFORTS).optional(),
     }).strict(),
     z.object({
@@ -2418,10 +2437,10 @@ async function executeSendVaultFileDynamicTool(
         )
     }
   } catch (error) {
-    if (
-      error instanceof VaultCliError
-      && error.code === 'ASSISTANT_VAULT_FILE_SEND_ALREADY_ACTIVE'
-    ) {
+    // Keep opaque errors out of both the legacy classifier and the new detail
+    // reader; even instanceof can execute a Proxy's prototype trap.
+    const diagnosticError = types.isProxy(error) ? undefined : error
+    if (isAlreadyActiveVaultFileSendError(diagnosticError)) {
       return replyRequiredResult(
         true,
         JSON.stringify({
@@ -2431,10 +2450,13 @@ async function executeSendVaultFileDynamicTool(
         }),
       )
     }
-    return replyRequiredResult(
-      false,
-      'secure vault-file approval could not be prepared',
-      'handler_exception', error,
+    return withVaultFileToolFailureDetails(
+      replyRequiredResult(
+        false,
+        'secure vault-file approval could not be prepared',
+        'handler_exception', diagnosticError,
+      ),
+      diagnosticError,
     )
   }
 }
@@ -4077,15 +4099,20 @@ async function resolveAttachedResponseMedia(input: {
   try {
     const media: AssistantResponseMedia[] = []
     for (const item of input.media) {
+      if (item.kind !== 'vault_image') {
+        media.push(item)
+        continue
+      }
+      const resolvedItem = await resolveAssistantVaultImageResponseMedia({
+        alt: item.alt,
+        ref: item.ref,
+        source: item.source,
+        vaultRoot,
+      })
       media.push(
-        item.kind === 'vault_image'
-          ? await resolveAssistantVaultImageResponseMedia({
-              alt: item.alt,
-              ref: item.ref,
-              source: item.source,
-              vaultRoot,
-            })
-          : item,
+        item.bubble === undefined
+          ? resolvedItem
+          : { ...resolvedItem, bubble: item.bubble },
       )
     }
     return { media }
@@ -4154,7 +4181,10 @@ async function executeSubmitProductFeedbackTool(input: {
         : 'product feedback candidate already accepted',
     )
   } catch (error) {
-    return toolTextResult(false, 'product feedback candidate unavailable', 'handler_exception', error)
+    return withProductFeedbackAuditFailureDetails(
+      toolTextResult(false, 'product feedback candidate unavailable', 'handler_exception', error),
+      error,
+    )
   }
 }
 
@@ -4489,10 +4519,7 @@ async function executeAssistantConfigurationTool(input: {
   if (
     input.request.action === 'update' &&
     conversationScope === 'group' &&
-    (
-      input.request.provider !== undefined ||
-      input.request.reasoningEffort !== undefined
-    )
+    input.request.reasoningEffort !== undefined
   ) {
     return toolTextResult(
       false,
@@ -4505,7 +4532,6 @@ async function executeAssistantConfigurationTool(input: {
   try {
     const currentTurn = input.hostedToolContext?.currentAssistantTarget?.() ?? {
       model: null,
-      provider: null,
       reasoningEffort: null,
     }
     if (input.request.action === 'read') {
@@ -7640,8 +7666,6 @@ function parsePersonalizationArguments(
     schemaRootKeys: [
       'action',
       'message_ref',
-      'mainPersona',
-      'supportingPersona',
       'tone',
       'voice',
     ],
@@ -7710,6 +7734,7 @@ function parseGroupArguments(
     schema: parser,
     value,
     schemaRootKeys: MURPH_GROUP_TOOL_ROOT_KEYS_BY_NAME[toolName],
+    readSemanticRejection: readGroupArgumentsSemanticRejection,
     toolName: qualifiedToolName,
   });
   if (!parsed.ok) {

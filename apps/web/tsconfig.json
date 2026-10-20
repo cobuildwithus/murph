@@ -60,9 +60,6 @@
       "@murphai/health-commons/runtime": [
         "../../packages/health-commons/src/runtime.ts"
       ],
-      "@murphai/health-commons/goal-runtime": [
-        "../../packages/health-commons/src/goal-runtime.ts"
-      ],
       "@murphai/health-commons/goal-index-runtime": [
         "../../packages/health-commons/src/goal-index-runtime.ts"
       ],
@@ -269,9 +266,6 @@
       ],
       "@murphai/query/browser": [
         "../../packages/query/src/browser.ts"
-      ],
-      "@murphai/query/browser-biomarkers": [
-        "../../packages/query/src/browser-biomarkers.ts"
       ],
       "@murphai/query/browser-experiments": [
         "../../packages/query/src/browser-experiments.ts"

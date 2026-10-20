@@ -1,4 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
+import { createCloudflareHostedControlClient } from "@murphai/cloudflare-hosted-control/client";
+import { parseHostedRuntimeResourcePurge } from "@murphai/hosted-execution/runtime-resource-purge";
 import { purgeHostedRuntimeResource } from "../src/worker/route-handlers/runtime-resource-purge.ts";
 import { hostedBrowserVaultReplicaObjectKey, hostedMediaObjectKey, hostedWorkspaceSnapshotObjectKey } from "../src/storage-paths.ts";
 import { listHostedBrowserVaultReplicaSiblingObjectKeys } from "../src/browser-vault-store.ts";
@@ -46,7 +48,59 @@ describe("Postgres-owned physical resource cleanup", () => {
     await expect(purgeHostedRuntimeResource({ source: env, userId, resource })).rejects.toThrow("synthetic R2 failure");
     env.BUNDLES.delete.mockClear();
     await purgeHostedRuntimeResource({ source: env, userId, resource });
-    expect(env.BUNDLES.delete.mock.calls.map(([key]) => key)).toEqual([objectKey, ...listHostedBrowserVaultReplicaSiblingObjectKeys(objectKey)]);
+    expect(env.BUNDLES.delete.mock.calls).toEqual([[[objectKey, ...listHostedBrowserVaultReplicaSiblingObjectKeys(objectKey)]]]);
+  });
+
+  it("finishes the complete replica set before the Web control client deadline", async () => {
+    const userId = "synthetic_owner";
+    const objectKey = await hostedBrowserVaultReplicaObjectKey({ userId, dataVersion: "1", generatedAt: "2026-09-15T00:00:00.000Z" });
+    const keys = [objectKey, ...listHostedBrowserVaultReplicaSiblingObjectKeys(objectKey)];
+    expect(keys.length).toBeLessThanOrEqual(1_000);
+    const remaining = new Set(keys);
+    const env = source();
+    vi.useFakeTimers();
+    // Node's native AbortSignal timer is not controlled by Vitest's clock.
+    const timeout = vi.spyOn(AbortSignal, "timeout").mockImplementation(ms => {
+      const controller = new AbortController();
+      setTimeout(() => controller.abort(new DOMException("Synthetic deadline", "TimeoutError")), ms);
+      return controller.signal;
+    });
+    env.BUNDLES.delete.mockImplementation(async requested => {
+      await new Promise<void>(resolve => setTimeout(resolve, 200));
+      for (const key of typeof requested === "string" ? [requested] : requested) remaining.delete(key);
+    });
+    const fetchImpl: typeof fetch = async (_url, init) => {
+      const signal = init?.signal;
+      const operation = purgeHostedRuntimeResource({ source: env, userId,
+        resource: parseHostedRuntimeResourcePurge(JSON.parse(String(init?.body))) });
+      // A real fetch rejects on cancellation even if the Worker finishes later.
+      return new Promise<Response>((resolve, reject) => {
+        const onAbort = () => reject(signal?.reason);
+        if (signal?.aborted) onAbort();
+        else signal?.addEventListener("abort", onAbort, { once: true });
+        operation.then(() => {
+          signal?.removeEventListener("abort", onAbort);
+          resolve(Response.json({ deleted: true }));
+        }, error => {
+          signal?.removeEventListener("abort", onAbort);
+          reject(error);
+        });
+      });
+    };
+    const client = createCloudflareHostedControlClient({ baseUrl: "https://runner.example.test",
+      fetchImpl, getBearerToken: async () => "synthetic-token", timeoutMs: 5_000 });
+    try {
+      const outcome = client.purgeRuntimeResource({ userId, resource: { kind: "replica", objectKey } })
+        .then(value => ({ value }), error => ({ error: error instanceof Error ? error.name : "unknown" }));
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(await outcome).toEqual({ value: { deleted: true } });
+      expect(remaining.size).toBe(0);
+      expect(timeout).toHaveBeenCalledWith(5_000);
+    } finally {
+      await vi.runAllTimersAsync();
+      timeout.mockRestore();
+      vi.useRealTimers();
+    }
   });
 
   it("deletes only the requested snapshot object", async () => {

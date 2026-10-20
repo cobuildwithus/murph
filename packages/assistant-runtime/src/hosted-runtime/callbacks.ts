@@ -152,6 +152,7 @@ import {
 import {
   recordHostedDeliveryCommittedBestEffort,
   type HostedDeliveryTraceContext,
+  writeHostedLinqDispatchEnteredTiming,
 } from "./delivery-latency-trace.ts";
 
 const HOSTED_MAX_BACKGROUND_DELIVERY_EFFECTS = 1;
@@ -3967,6 +3968,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
         sendLinq: createHostedAssistantLinqSendDependency({
           actionApprovalPort: input.actionApprovalPort,
           assertLiveness: input.assertLiveness,
+          dispatchTimingContext: input.deliveryTraceContext,
           deliveryRouteContext: {
             actorId: input.assistantDeliveryEffect.payload.actorId,
             identityId: input.assistantDeliveryEffect.payload.identityId,
@@ -4699,6 +4701,8 @@ function createHostedAssistantLinqSendDependency(input: {
     HostedAssistantDeliveryPayload,
     "actorId" | "identityId" | "threadId" | "threadIsDirect"
   > | null;
+  /** Enables one timing row per existing provider-dispatch boundary. */
+  dispatchTimingContext?: HostedDeliveryTraceContext | null;
   effectsPort?: Pick<
     HostedRuntimeEffectsPort,
     | "assertAssistantAskPrivateCompletionAuthority"
@@ -4728,6 +4732,7 @@ function createHostedAssistantLinqSendDependency(input: {
     platform: input.platform ?? null,
   });
   return async (request) => {
+    const sendStartedAtMonotonicMs = performance.now();
     await assertHostedDeliveryLiveNow(input);
     const idempotencyKey = request.idempotencyKey?.trim() || null;
     const privateAssistantAskCompletion = idempotencyKey?.startsWith(
@@ -4805,6 +4810,7 @@ function createHostedAssistantLinqSendDependency(input: {
         target: deliveryContext?.target ?? request.target,
       });
     }
+    const routeAuthorityStartedAtMonotonicMs = performance.now();
     const engagement =
       await assertHostedAssistantLinqRecentInboundEngagementForDelivery({
         answeredMailboxItemIds: request.answeredMailboxItemIds,
@@ -4827,6 +4833,8 @@ function createHostedAssistantLinqSendDependency(input: {
         target: deliveryContext?.target ?? request.target,
         targetKind: request.targetKind ?? null,
       });
+    const routeAuthorityCheckMs =
+      performance.now() - routeAuthorityStartedAtMonotonicMs;
     const resolvedRoute = requireHostedAssistantLinqResolvedRoute(engagement);
     const directRecipientPhoneNumber = resolvedRoute.directRecipientPhoneNumber;
     const fromPhoneNumber = resolvedRoute.fromPhoneNumber;
@@ -4911,6 +4919,7 @@ function createHostedAssistantLinqSendDependency(input: {
         }
       },
       onProviderDispatchEntered: async () => {
+        const providerEntryFenceStartedAtMonotonicMs = performance.now();
         try {
           const reviewedCompletionExpiresAt = reviewedAssistantAskCompletion
             ? await prepareHostedReviewedAssistantAskProviderEntry({
@@ -4947,6 +4956,17 @@ function createHostedAssistantLinqSendDependency(input: {
             attemptedAt: new Date(),
             idempotencyKey: deliveryIdempotencyKey,
           };
+          // One row per provider boundary: a primary and a fallback entry
+          // each write their own row, which the reader treats as ambiguous.
+          writeHostedLinqDispatchEnteredTiming({
+            context: input.dispatchTimingContext,
+            dispatchEnteredAtMonotonicMs: performance.now(),
+            intentId: input.intentId,
+            platform: input.platform,
+            providerEntryFenceStartedAtMonotonicMs,
+            routeAuthorityCheckMs,
+            sendStartedAtMonotonicMs,
+          });
           input.onProviderDispatchEntered?.();
         } catch (error) {
           if (isHostedLinqProviderOutcomeAmbiguous(error)) {

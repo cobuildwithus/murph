@@ -546,7 +546,7 @@ function createHostedMember(
     assistantHumor: null,
     assistantHumorCausalSeq: null,
     assistantModelPreference: null,
-    assistantProviderPreference: null,
+
     assistantReasoningEffortPreference: null,
     assistantPush: null,
     assistantPushCausalSeq: null,

@@ -544,11 +544,8 @@ async function handleRunnerMediaRequest(input: {
     });
   };
 
-  // Reads need a standalone fence; mutation commands admit the same identity
-  // transactionally before publication or resource retirement.
-  const writeAuthority = input.request.method === "GET"
-    ? await readRunnerMediaWriteAuthority(input)
-    : readRunnerRuntimeWriteFenceHeaders(input.request);
+  // Media commands validate this identity in their owning Web transaction.
+  const writeAuthority = readRunnerRuntimeWriteFenceHeaders(input.request);
   if (!writeAuthority) {
     emitCompleted({
       mediaAuthorized: false,
@@ -581,35 +578,12 @@ async function handleRunnerMediaRequest(input: {
       });
     }
 
-    const crypto = await resolveRunnerOutboundUserCryptoContext({
-      bucket: input.bucket,
-      domain: "runtime",
-      env: input.env,
-      environment: input.environment,
-      userId: input.userId,
-    });
-    const mediaStore = createHostedMediaStore({
-      bucket: createRuntimeMediaWriteBucket({
-        source: input.env, userId: input.userId, attemptId: writeAuthority.attemptId,
-        generation: writeAuthority.generation, media: { descriptor },
-      }),
-      key: crypto.rootKey,
-      keyId: crypto.rootKeyId,
-      keysById: crypto.keysById,
-      resolveKeyById: crypto.resolveKeyById,
-      userId: input.userId,
-    });
-
+    const storeInput = { ...input, descriptor, writeAuthority };
     if (input.request.method === "GET") {
-      return await handleRunnerMediaGetRequest({
-        descriptor,
-        emitCompleted,
-        env: input.env,
-        mediaStore,
-        userId: input.userId,
-      });
+      return await handleRunnerMediaGetRequest({ ...storeInput, emitCompleted });
     }
 
+    const mediaStore = await createRunnerMediaStore(storeInput);
     return await handleRunnerMediaPutRequest({
       descriptor,
       emitCompleted,
@@ -697,26 +671,49 @@ async function handleRunnerMediaDeleteRequest(input: {
   });
 }
 
-async function handleRunnerMediaGetRequest(input: {
-  descriptor: HostedRunnerMediaDescriptor;
-  emitCompleted: RunnerMediaRequestCompletedEmitter;
+type RunnerMediaStoreInput = {
+  bucket: RunnerOutboundEnvironmentSource["BUNDLES"];
   env: RunnerOutboundEnvironmentSource;
-  mediaStore: RunnerMediaStore;
+  environment: ReturnType<typeof readHostedExecutionEnvironment>;
+  descriptor: HostedRunnerMediaDescriptor;
   userId: string;
-}): Promise<Response> {
-  const readAdmission = await admitHostedMediaRead({
-    descriptor: input.descriptor,
+  writeAuthority: RunnerRuntimeWriteFenceHeaders;
+};
+
+async function createRunnerMediaStore(input: RunnerMediaStoreInput): Promise<RunnerMediaStore> {
+  const crypto = await resolveRunnerOutboundUserCryptoContext({
+    bucket: input.bucket,
+    domain: "runtime",
     env: input.env,
+    environment: input.environment,
     userId: input.userId,
   });
-  if (!readAdmission.ok) {
-    input.emitCompleted({
-      mediaReadable: false,
-      mediaReadAdmissionReason: readAdmission.reason,
-    }, 404);
+  return createHostedMediaStore({
+    bucket: createRuntimeMediaWriteBucket({
+      source: input.env, userId: input.userId, attemptId: input.writeAuthority.attemptId,
+      generation: input.writeAuthority.generation, media: { descriptor: input.descriptor },
+    }),
+    key: crypto.rootKey,
+    keyId: crypto.rootKeyId,
+    keysById: crypto.keysById,
+    resolveKeyById: crypto.resolveKeyById,
+    userId: input.userId,
+  });
+}
+
+async function handleRunnerMediaGetRequest(input: RunnerMediaStoreInput & {
+  emitCompleted: RunnerMediaRequestCompletedEmitter;
+}): Promise<Response> {
+  const admission = await executeRunnerMediaCommand({ source: input.env, userId: input.userId, command: {
+    operation: "admit_read", attemptId: input.writeAuthority.attemptId, generation: input.writeAuthority.generation,
+    descriptor: { ...input.descriptor, expiresAt: input.descriptor.expiresAt ?? null },
+  } });
+  if (!admission.applied) {
+    input.emitCompleted({ mediaReadable: false, mediaReadAdmissionReason: admission.reason ?? "expired" }, 404);
     return notFound();
   }
-  const bytes = await input.mediaStore.readMedia(input.descriptor);
+  const mediaStore = await createRunnerMediaStore(input);
+  const bytes = await mediaStore.readMedia(input.descriptor);
   if (!bytes) {
     input.emitCompleted({
       mediaFound: false,
@@ -844,32 +841,6 @@ function readHostedRunnerMediaExpiresAt(headers: Headers): string | null | false
   return Number.isFinite(expiresAtMs)
     ? new Date(expiresAtMs).toISOString()
     : false;
-}
-
-async function readRunnerMediaWriteAuthority(input: {
-  env: RunnerOutboundEnvironmentSource;
-  request: Request;
-  userId: string;
-}): Promise<RunnerRuntimeWriteFenceHeaders | null> {
-  try {
-    return await requireRunnerRuntimeWriteFence(input);
-  } catch (error) {
-    if (error instanceof RunnerRuntimeWriteFenceError) {
-      return null;
-    }
-    throw error;
-  }
-}
-
-async function admitHostedMediaRead(input: {
-  descriptor: NonNullable<ReturnType<typeof readHostedRunnerMediaDescriptor>>;
-  env: RunnerOutboundEnvironmentSource;
-  userId: string;
-}) {
-  const result = await executeRunnerMediaCommand({ source: input.env, userId: input.userId, command: {
-    operation: "read", descriptor: { ...input.descriptor, expiresAt: input.descriptor.expiresAt ?? null },
-  } });
-  return { ok: result.applied, reason: result.reason ?? "expired" };
 }
 
 async function recordHostedMediaAsset(input: {
@@ -2228,10 +2199,6 @@ async function handleRunnerWorkspaceSnapshotAbortRequest(input: {
     return jsonError("Hosted workspace snapshot upload session is stale.", 409);
   }
 
-  if (!await requestOwnsWorkspaceSnapshotSession(input, session)) {
-    return jsonError("Hosted workspace snapshot upload session is stale.", 409);
-  }
-
   await deleteWorkspaceSnapshotUploadSession({
     session,
     env: input.env,
@@ -2498,9 +2465,6 @@ async function handleRunnerWorkspaceSnapshotCompleteRequest(input: {
         userId: input.userId,
       });
       if (!remembered) {
-        return jsonError("Hosted workspace snapshot upload session is stale.", 409);
-      }
-      if (!await requestOwnsWorkspaceSnapshotSession(input, session)) {
         return jsonError("Hosted workspace snapshot upload session is stale.", 409);
       }
       session.replacedSnapshotRef = preCheckpointReplacedSnapshotRef;
@@ -2853,16 +2817,14 @@ async function completeExpiredCurrentWorkspaceSnapshotUploadSession(input: {
     }
   }
 
-  if (!await requestOwnsWorkspaceSnapshotSession(input, input.session)) {
-    return jsonError("Hosted workspace snapshot upload session is stale.", 409);
-  }
-
   await deleteWorkspaceSnapshotUploadSession({
     session: input.session,
     env: input.env,
     snapshotId: currentSnapshotRef.snapshotId,
     userId: input.userId,
-  }).catch(() => undefined);
+  }).catch((error: unknown) => {
+    if (error instanceof HostedRuntimeResourceRejectedError) throw error;
+  });
 
   return json({
     checkpoint: {

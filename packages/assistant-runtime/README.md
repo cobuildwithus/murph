@@ -6,6 +6,9 @@ This package exists so hosted runtimes such as `apps/cloudflare` do not need to 
 
 Current responsibilities:
 
+- configure hosted assistant execution for OpenAI models, including managed API
+  credentials, local OpenAI test stubs, and local ChatGPT subscription auth
+
 - import each manual app meal photo once, then queue its existing mailbox item
   for a private estimation or clarification turn through ordinary model
   admission and delivery idempotency; automatic photos remain import-only
@@ -30,6 +33,12 @@ Current responsibilities:
   carries same-epoch provider cadence and dirty terminal evidence, and retries
   that reconciliation, while restored records repeat the full path and
   authorityless legacy or terminal records drain without a cadence write
+- transfer a plain scheduled device hint during import only when a validated
+  retained connection owner already covers its cadence; a recording owner's
+  retained jobs and matching completion record may prove that coverage, while
+  the record and retry remain unchanged until normal checkpoint publication.
+  Manual refreshes, dirty webhooks, new jobs, and mismatched connection epochs
+  retain ordinary admission. Import rollback restores the prior frontier.
 - drain each hosted device-sync pass through one bounded worker call so
   canonical imports can safely reuse a pass-local event identity index, while
   cumulative progress remains observable and the service-owned foreground
@@ -60,15 +69,6 @@ Current responsibilities:
 - apply every Web-approved sparse `member.preferences.updated` delta with that event's own cross-lane mailbox sequence, so the canonical preference owner preserves approved event order while stale-no-oping only affected fields; bounded per-field watermarks in `bank/assistant-preference-mutations.json` make replay idempotent without reservation or receipt retention
 - admit one bounded, cursor-ordered batch of same-conversation, same-reply-anchor mailbox inputs only when their positive causal sequences are exact successors; pass the terminal accepted input id to hosted personality commands so Web derives the compound turn frontier from its member-bound mailbox row, and leave gaps, legacy input, overflow, and later arrivals pending
 - recover late foreground input from the current invocation's exact imported-ID snapshot when best-effort active-turn notifications are early or missed; at admission, compose that recovered cursor-ordered prefix with any notified exact IDs, admit every valid same-room successor up to the existing cumulative cap, and reuse the same replyability, route, and capacity checks without scanning or mutating the broad pending index
-- re-read Web's effective core-provider choice immediately before every
-  target-owned provider entry: resident accepted input, joined-group Assistant
-  Ask, consented private candidate, authenticated operator diagnostic, and
-  private disclosure review; a missing or
-  invalid owner response uses the existing typed retry, while a mismatch closes
-  detached work in the stale invocation, requeues any claimed ask through its
-  existing encrypted mailbox with no delay, suppresses provider-backed idle
-  compaction, and forces the dirty checkpoint and fresh invocation without
-  consuming the input
 - expose invocation-scoped automation and device authority only through narrow typed tools on the active root turn, never through Codex App Server or descendant shell env; the runtime supplies existing domain ports directly, canonical automation records remain owned by the already-bound vault, route writes use the trusted current destination rather than model-supplied locators, and the automation tool remains unavailable to scheduled turns and descendants
 - keep automation occurrence projection explicit and operation-local: responses distinguish resolved timing, healthy in-flight scheduler work, and unavailable projection; only unavailable projection receives one bounded read-only readback and typed content-free diagnostics through the existing nonblocking assistant automation-detail log path, without model mediation, retries, new persistence, or a second scheduler owner
 - enroll every activated member in one finite hosted onboarding follow-up independently of optional welcome delivery: activation persists canonical onboarding start once and carries any available direct route separately from the welcome, immediate route-bearing activation performs the canonical idempotent upsert, and route-less Telegram activation remains silent until ordinary managed reconciliation sees a later direct route; delayed creation preserves the activation-anchored window, transient failures reuse the activation mailbox or existing bounded managed-setup retry ladder, and completed, expired, group, or archived follow-ups stay closed; the exact current seed, PR 1203 one-shot, older recurring fingerprint, or bounded original legacy seed is reconciled without granting execution authority to editable metadata; reconciliation preserves the signup-selected daily minute or derives it from an exact one-shot's stored occurrence, and conversion durably binds that occurrence before exposing the daily schedule; the notification gets one opportunity on each of the next three local days in a stable per-member window from 1:30 PM through 2:29 PM, reserves at least 30 minutes for execution before delivery authority closes at 3:00 PM on the third day, checks canonical onboarding state before provider entry, tool execution, delivery, commit, and queued external transport without mutating it, consumes each daily opportunity after either one reply-oriented continuation or a skip, and emits metadata-only seed, reconciliation, state-source, decision, delivery, and run-outcome diagnostics
@@ -123,6 +123,12 @@ The first snapshot containing the additive projection similarly requires the
 projection-aware runner because the preceding v2 value reader is strict; deploy
 this runner with immediate container rollout and use a forward fix below that
 floor rather than adding a second compatibility owner for a derived hint.
+
+Snapshot session start/complete annotations on `checkpoint.snapshot_failed`
+use fixed phase allowlists. Recognized phases survive absent or invalid optional
+timeouts; unknown phases are omitted. Timeout diagnostics include only
+nonnegative safe integers in milliseconds, including values above 60 seconds.
+This validates telemetry only and imposes no execution timeout limit.
 
 For hosted conversation traffic, the mailbox importer is the source adapter. It
 stages bounded `AssistantInputEvent` records in the warm live workspace.
@@ -320,3 +326,9 @@ from a fresh checkout. Vault-share entrypoint cases use the real isolated captur
 worker through its published package entrypoint; Vitest source aliases do not
 compile that separate Node worker. The prepared build includes this package and
 checks the compiled worker and its public import before reporting success.
+The entrypoint test harness rejects a missing capture worker as soon as a
+vault-share port is configured, with the package build command to run before
+retrying; this avoids misleading projection-delivery timeouts.
+
+Device import yield reasons and receipt-capacity slicing are specified in
+[`agent-docs/RELIABILITY.md`](../../agent-docs/RELIABILITY.md).

@@ -25,11 +25,13 @@ import {
 import {
   requireActiveHostedMemberAuthFromBearerToken,
 } from "@/src/lib/hosted-onboarding/request-auth";
+import { isHostedAuthReviewMember } from "@/src/lib/better-auth/review-account";
 import {
   readHostedMemberMessagingSetupState,
 } from "@/src/lib/hosted-onboarding/hosted-member-store";
 import {
   isHostedMemberMessagingSetupRequired,
+  resolveHostedMemberMessagingState,
 } from "@/src/lib/hosted-onboarding/messaging-state";
 import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from
   "@/src/lib/hosted-onboarding/shared";
@@ -58,24 +60,24 @@ const INITIAL_MESSAGE = {
 export const GET = withJsonError(async (request: Request) => {
   const prisma = getPrisma();
   const auth = await requireActiveHostedMemberAuthFromBearerToken(request, prisma);
-  const [state, messagingSetupRequired] = await Promise.all([
+  const [state, messaging] = await Promise.all([
     readHostedInitialOnboardingState({
       memberId: auth.member.id,
       prisma,
     }),
-    readCompanionMessagingSetupRequired({
+    readCompanionMessagingSetup({
       memberId: auth.member.id,
       prisma,
     }),
   ]);
   const contactAction = await readCompanionContactAction({ memberId: auth.member.id, prisma });
   if (state.status === "completed") {
-    return jsonOk(projectCompletedState(state, messagingSetupRequired, contactAction));
+    return jsonOk(projectCompletedState(state, messaging, contactAction));
   }
 
   return jsonOk(projectPendingState({
     contactAction,
-    messagingSetupRequired,
+    messaging,
     origin: resolveHostedPublicBaseUrl() ?? new URL(request.url).origin,
     state,
   }));
@@ -106,22 +108,22 @@ export const POST = withJsonError(async (request: Request) => {
     });
   }
 
-  const [messagingSetupRequired, contactAction] = await Promise.all([
-    readCompanionMessagingSetupRequired({ memberId: auth.member.id, prisma }),
+  const [messaging, contactAction] = await Promise.all([
+    readCompanionMessagingSetup({ memberId: auth.member.id, prisma }),
     readCompanionContactAction({ memberId: auth.member.id, prisma }),
   ]);
-  return jsonOk(projectCompletedState(result, messagingSetupRequired, contactAction));
+  return jsonOk(projectCompletedState(result, messaging, contactAction));
 });
 
 function projectCompletedState(
   state: HostedInitialOnboardingState | HostedInitialOnboardingCompletionResult,
-  messagingSetupRequired: boolean,
+  messaging: CompanionMessagingSetup,
   contactAction: MurphContactOption | null,
 ) {
   return {
     schema: COMPANION_INITIAL_ONBOARDING_SCHEMA,
     status: "completed" as const,
-    messagingSetupRequired,
+    ...messaging,
     ...(state.status === "completed" && "completedNow" in state
       ? { completedNow: state.completedNow }
       : {}),
@@ -136,7 +138,7 @@ function projectCompletedState(
 
 function projectPendingState(input: {
   contactAction: MurphContactOption | null;
-  messagingSetupRequired: boolean;
+  messaging: CompanionMessagingSetup;
   origin: string;
   state: HostedInitialOnboardingState;
 }) {
@@ -144,7 +146,7 @@ function projectPendingState(input: {
   return {
     schema: COMPANION_INITIAL_ONBOARDING_SCHEMA,
     status: "pending" as const,
-    messagingSetupRequired: input.messagingSetupRequired,
+    ...input.messaging,
     preferences: input.state.preferences,
     catalog: {
       personas: assistantBasePersonaOptions.map((option) => ({
@@ -221,15 +223,21 @@ async function readCompanionContactAction(input: {
   }
 }
 
-async function readCompanionMessagingSetupRequired(input: {
+type CompanionMessagingSetup = { messagingSetupRequired: boolean; telegramAwaitingInbound: boolean };
+
+async function readCompanionMessagingSetup(input: {
   memberId: string;
   prisma: Parameters<typeof readHostedMemberMessagingSetupState>[0]["prisma"];
-}): Promise<boolean> {
-  const messagingState = await readHostedMemberMessagingSetupState(input);
-  return isHostedMemberMessagingSetupRequired({
-    identity: messagingState?.identity ?? null,
-    routing: messagingState?.routing ?? null,
-  });
+}): Promise<CompanionMessagingSetup> {
+  const state = await readHostedMemberMessagingSetupState(input);
+  const messaging = { identity: state?.identity ?? null, routing: state?.routing ?? null };
+  const resolved = resolveHostedMemberMessagingState(messaging);
+  return {
+    messagingSetupRequired: isHostedMemberMessagingSetupRequired(messaging)
+      && !(await isHostedAuthReviewMember(input)),
+    // The native say-hi step must not block an already usable phone/direct route.
+    telegramAwaitingInbound: !resolved.hasDirectMessagingChannel && resolved.telegramAwaitingInbound,
+  };
 }
 
 async function signalHostedMailboxAppendBestEffort(input: {

@@ -216,7 +216,8 @@ function buildHostedVaultShareActivitySelectorKinds(
       .flatMap((group) => [...group])
       .map((kind) => normalizeActivityKindToken(kind))
       .filter((kind): kind is string => kind !== null))]
-      .sort((left, right) => left.localeCompare(right)),
+      // Normalized kinds are ASCII; code-unit order avoids ICU collator setup at Worker startup.
+      .sort(),
   );
 }
 

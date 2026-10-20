@@ -35,7 +35,7 @@ const imageGenerationStartedReplyText =
   "I started generating it and can keep helping while it finishes.";
 const interveningConversationReplyText = "Breathe out slowly for six seconds.";
 const generatedImageReplyText = "Here is the generated setup image.";
-const productionLikeAssistantModel = "gpt-5.6-terra";
+const productionLikeAssistantModel = "gpt-6.1-sol";
 // Completion includes the idle checkpoint; keep it inside the scenario's
 // completion deadline while the explicit image barrier owns detached work.
 const localRunnerIdleTtlMs = "1000";

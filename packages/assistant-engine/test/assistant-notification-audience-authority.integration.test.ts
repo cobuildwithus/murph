@@ -121,8 +121,8 @@ const opaqueLocator = {
 const modelTarget = createAssistantModelTarget({
   provider: 'codex-cli',
   approvalPolicy: 'never',
-  model: 'gpt-5.6-terra',
-  modelProvider: 'vercel-ai-gateway',
+  model: 'gpt-6.1-sol',
+  modelProvider: 'hosted-openai',
   reasoningEffort: 'medium',
   sandbox: 'danger-full-access',
 })
@@ -130,7 +130,7 @@ const continuityCompatiblePreviousModelTarget = createAssistantModelTarget({
   provider: 'codex-cli',
   approvalPolicy: 'never',
   model: 'gpt-5.4',
-  modelProvider: 'vercel-ai-gateway',
+  modelProvider: 'hosted-openai',
   reasoningEffort: 'low',
   sandbox: 'danger-full-access',
 })
