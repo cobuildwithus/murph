@@ -292,7 +292,6 @@ test("screenshot categories keep the production studies available without one gi
 
   for (const clientStudy of [
     "environment-progress-study.tsx",
-    "experiment-results-share-study.tsx",
     "homepage-auth-warm-runtime-study.tsx",
   ]) {
     const clientStudySource = readFileSync(

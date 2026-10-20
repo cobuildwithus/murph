@@ -20,6 +20,7 @@ type Update = Parameters<typeof updateExperimentRecord>[0];
 async function withSavedRun(
   status: "planned" | "paused" | "active" | "completed",
   run: (input: { vault: string; lookup: string; file: string }) => Promise<void>,
+  savedPlan: Pick<Parameters<typeof createExperiment>[0], "commonsProtocolRef" | "onboarding"> = {},
 ) {
   const vault = await fs.mkdtemp(path.join(os.tmpdir(), "saved-experiment-"));
   try {
@@ -33,6 +34,7 @@ async function withSavedRun(
       effectiveProtocolSnapshot: snapshot,
       runPlan: { interventionStart: "2026-06-01", interventionEnd: "2026-06-07" },
       analysisPlan: { primaryBiomarkerKey: "biomarker:resting-heart-rate" },
+      ...savedPlan,
     });
     await run({ vault, lookup: created.experiment.id, file: path.join(vault, created.experiment.relativePath) });
   } finally {
@@ -109,3 +111,25 @@ test("saved positive answers cannot activate under an unverifiable caution dispo
     assert.equal(await fs.readFile(file, "utf8"), before);
   });
 });
+
+test.each<string[] | undefined>([undefined, []])(
+  "blocks saved compression activation with negative safety answers (%j)",
+  async (positiveQuestionIds) => withSavedRun("planned", async ({ vault, lookup, file }) => {
+    const before = await fs.readFile(file, "utf8");
+    await assert.rejects(
+      updateExperimentRecord({ vault, lookup, status: "active" }),
+      /fresh safety review/u,
+    );
+    assert.equal(await fs.readFile(file, "utf8"), before);
+    assert.equal(parseFrontmatterDocument(before).attributes.status, "planned");
+  }, {
+    commonsProtocolRef: {
+      ...reference,
+      key: "protocol_variant:intermittent-pneumatic-compression/pneumatic-compression-pants",
+    },
+    onboarding: {
+      completedAt: "2026-06-01T12:00:00.000Z",
+      safety: { positiveQuestionIds },
+    },
+  }),
+);

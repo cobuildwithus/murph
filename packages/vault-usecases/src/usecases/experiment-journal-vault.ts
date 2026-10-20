@@ -464,19 +464,24 @@ export interface StartExperimentFromPlanInput extends PlanExperimentRecordInput 
 
 function assertExperimentSafetyAllowsActivation(input: {
   onboarding: ExperimentFrontmatterValue['onboarding']
-  hasSavedPublicProtocol?: boolean
+  savedPublicProtocolKey?: string
 }): void {
-  if (input.hasSavedPublicProtocol && !input.onboarding?.completedAt) {
+  if (input.savedPublicProtocolKey && !input.onboarding?.completedAt) {
     throw new VaultCliError(
       'invalid_payload',
       'Complete and record the safety review for this saved experiment before activation.',
     )
   }
   const safety = input.onboarding?.safety
-  if (input.hasSavedPublicProtocol && safety?.positiveQuestionIds?.length) {
+  // This retired protocol also blocked negative answers: an empty positive list
+  // cannot establish that the member can stop and remove the device safely.
+  if (input.savedPublicProtocolKey && (
+    safety?.positiveQuestionIds?.length ||
+    input.savedPublicProtocolKey === 'protocol_variant:intermittent-pneumatic-compression/pneumatic-compression-pants'
+  )) {
     throw new VaultCliError(
       'invalid_payload',
-      'This saved experiment has positive safety answers whose original screening rules are retired. Keep it planned and create a private plan after a fresh safety review.',
+      'This saved experiment requires screening rules that are retired. Keep it planned and create a private plan after a fresh safety review.',
     )
   }
   if (safety?.positiveQuestionIds?.length && safety.disposition === undefined) {
@@ -1146,7 +1151,7 @@ export async function updateExperimentRecord(input: {
         )
       ) {
         assertExperimentSafetyAllowsActivation({
-          hasSavedPublicProtocol: nextCommonsProtocolRef !== undefined,
+          savedPublicProtocolKey: nextCommonsProtocolRef?.key,
           onboarding: nextActivationOnboarding,
         })
       }
