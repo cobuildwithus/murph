@@ -1,5 +1,5 @@
 Linq line lock-order repair is tracked in
-[the active lock-order plan](exec-plans/active/2026-10-20-linq-line-lock-order.md).
+[the active lock-order plan](exec-plans/completed/2026-10-20-linq-line-lock-order.md).
 
 Documentation guard diagnostic clarification is tracked in
 [the diagnostic plan](exec-plans/completed/2026-10-19-frog-docs-diagnostic-4205.md).
