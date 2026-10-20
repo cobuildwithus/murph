@@ -3,7 +3,7 @@ Documentation guard diagnostic clarification is tracked in
 
 Snapshot upload failure phases are owned by
 [`hosted-runtime-protocol.md`](references/hosted-runtime-protocol.md);
-[the upload diagnostic plan](exec-plans/active/2026-10-20-snapshot-upload-phase.md)
+[the upload diagnostic plan](exec-plans/completed/2026-10-20-snapshot-upload-phase.md)
 records the focused regression evidence.
 
 Final reply post-generation delivery telemetry and alerting are owned by
