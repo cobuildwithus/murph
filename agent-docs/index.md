@@ -45,8 +45,8 @@ including parity/privacy proof and measured synthetic CPU reduction, is tracked 
 [the projection copy plan](exec-plans/completed/2026-10-07-public-wearable-projection-copy.md);
 `../packages/query/README.md#ordinary-wearable-reads` owns the contract.
 
-Codex CLI 0.163.0 candidate verification is tracked in
-[the upgrade plan](exec-plans/active/2026-10-16-codex-cli-0163-upgrade.md).
+Codex CLI 0.163.0 candidate verification is recorded in
+[the completed upgrade plan](exec-plans/completed/2026-10-16-codex-cli-0163-upgrade.md).
 
 Codex 0.160.0 reconciliation for the current PR is recorded in
 [the PR preparation plan](exec-plans/active/2026-10-01-codex-cli-0160-pr.md).

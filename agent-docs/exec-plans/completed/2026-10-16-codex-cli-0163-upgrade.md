@@ -1,9 +1,11 @@
 # Upgrade Codex CLI to 0.163.0 with default instant steering
 
-Status: active
-Release decision: Hold — vault restart fixture corrected; native rerun and remaining delivery scenarios required
+Status: completed
+Release decision: Ready for PR review — candidate proof complete; merge and rollout remain separately gated
 Created: 2026-10-16
 Updated: 2026-10-19
+
+The final completion receipt below supersedes earlier dated Hold decisions.
 
 ## Goal
 
@@ -486,3 +488,54 @@ release coordinator's reservation and all production admission gates.
 - MinIO support tests pass 21 and Cloudflare typecheck passes. The failed native
   run is the negative proof; a new native vault/delivery/reminder run remains
   required as positive proof. The unchanged steering test need not be repeated.
+
+## Final completion receipt
+
+- Candidate decision: **Ready for review**, Codex 0.160.0 to 0.163.0. No merge,
+  deployment, shared CLI replacement, or release admission is authorized or
+  performed. The coordinator's rollout reservation remains separate.
+- Final behavioral/proof head `187a57e8dec734eb1199033eca24d58c3001e372` changes
+  only the vault fixture's storage lifetime and evidence from `d8d1d500`.
+  ReviewGPT round 2 PASS at `c7e4d65d` still covers unchanged production source;
+  subsequent isolated proof, docs and compilation parallelism meet the current
+  review exemptions. Parent final review found no remaining accepted defect.
+- Native hosted candidate `39352471410` passed on exact `187a57e8`, reviewed
+  private head `61228ca42f01d3b0232d258a2a1b1a0bedd93142`, release scope none.
+  The freshly built image reports `codex-cli 0.163.0`. Vault persistence passed
+  its real shell write, exact one synthetic reply, encrypted snapshot readback,
+  and full-stack restart/readback (one test). This is the positive proof for the
+  preceding 404 failure; no snapshot assertion was removed or relaxed.
+- Linq delivery passed 13 tests, including welcome/follow-up, ambiguous rich-link
+  acknowledgment, definitive fallback, transport recovery without text replay,
+  progress updates, immediate follow-ups, and mailbox quiescence. Four existing
+  opt-in cases remain excluded: the real Web-model first-turn lane and three
+  dedicated test-control reproduction lanes. These are not required upgrade
+  proof; subscription-based real-Codex journeys were independently reviewed.
+- Every scheduled-reminder process passed: image/checkpoint-race and usage
+  accounting, foreground overlap ordering without duplicate delivery, and native
+  nutrition-card delivery. The first process passed three tests including two
+  timing/identity helpers; the other two each passed one journey. Cross-process
+  filtered cases do not represent missing journeys. Synthetic replies and
+  required/forbidden effects were reviewed **Ready**.
+- Combined with native steering pass `39345272648` (one case), gateway/prompt-cache
+  and media/tool passes `39195739584`, all required hosted surfaces have actual
+  candidate-image proof. The earlier failed overall runs remain recorded.
+- Current native permission run `39352455071` passed: actual patched binary
+  version 0.163.0, Live/WebSocket 13, SSE three (138 unrelated filtered), egress
+  28, and actual confinement smoke. Current budget job in `39352455036` passed
+  all six unchanged one-vCPU comparisons: CPU/wall milliseconds base to candidate
+  boot 1289.964/1216 to 1304.201/1229; seed 1387.976/1388.110 to
+  1378.575/1387.972; new-turn 424.001/417.121 to 420.764/415.429.
+- Canonical local acceptance, deterministic CLI matrix, first-request payload
+  measurements, upstream verification and all focused live journeys retain the
+  receipts above. Later proof-only edits passed focused tests, relevant typecheck,
+  complexity and documentation guards. No production runtime changed after the
+  reviewed and accepted source.
+- All four branch-required checks pass on `187a57e8`. The closure commit contains
+  documentation only; final-head required CI and the final PR evidence are
+  tracked on PR #4194. The plan is closed under the completion workflow before
+  that final documentation-head CI, not as a claim of merge or rollout.
+- Refreshed main `3eb2eec191e4a58b663773443aaa872ad7235285` matched ls-remote and
+  merge-tree proof was clean. Its metric-projection telemetry changes do not
+  overlap the upgrade. No redundant base merge was needed.
+Completed: 2026-10-19

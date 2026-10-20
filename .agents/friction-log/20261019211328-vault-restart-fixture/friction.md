@@ -17,4 +17,4 @@ Run the vault-persistence scenario in the stub profile with the real candidate b
 
 ## Context
 
-The fixture now uses the existing explicit MinIO data-directory option; no production code or storage contract changes. MinIO support tests pass 21 and Cloudflare typecheck passes. A fresh native hosted run remains required to prove the complete restart journey. The task's afterAll owns removal of the shared synthetic persistence root. No production secrets or objects are used.
+The fixture now uses the existing explicit MinIO data-directory option; no production code or storage contract changes. MinIO support tests pass 21 and Cloudflare typecheck passes. Native hosted run 39352471410 on head 187a57e8 subsequently passed the complete restart journey: the real Codex 0.163.0 write, initial encrypted snapshot readback, exact one reply, and post-restart encrypted snapshot readback. The earlier 404 run remains the negative proof. The task's afterAll owns removal of the shared synthetic persistence root. No production secrets or objects are used.
