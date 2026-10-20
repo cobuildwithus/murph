@@ -26,6 +26,12 @@ pnpm hosted-local run -- pnpm --dir apps/cloudflare test:workers
 
 Root `pnpm dev` is a thin alias for `pnpm hosted-local up`.
 
+`vault-persistence` also runs with the default `e2e:stub` profile: the scripted
+provider asks the real candidate Codex binary to write a synthetic vault file,
+then the scenario verifies its encrypted checkpoint before and after a stack
+restart and exactly one reply. `e2e:live` retains the real-model journey and
+requires a development provider key; missing credentials fail instead of skip.
+
 E2E MinIO cleanup uses the suite's existing local build identity, including after
 scenario failure or interruption. It removes that build's exact container and
 matching build-labelled leftovers; other E2E builds keep their storage service.

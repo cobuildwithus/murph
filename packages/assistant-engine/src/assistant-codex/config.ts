@@ -67,6 +67,30 @@ export function withHostedCodexModelCatalogConfigOverride(input: {
   ]
 }
 
+// Murph turn steering is a product default, not an inherited upstream default:
+// an admitted follow-up preempts unfinished generation in the same turn, and an
+// interrupted turn stops its code-mode cells and their nested tool calls. These
+// stay CLI-layer process overrides so user config isolation cannot drop them.
+const CODEX_APP_SERVER_STEERING_FEATURE_OVERRIDES = [
+  'features.instant_interrupt=true',
+  'features.code_mode_interrupt=true',
+] as const
+
+export function withCodexAppServerSteeringFeatureOverrides(
+  configOverrides: readonly string[],
+): readonly string[] {
+  const missing = CODEX_APP_SERVER_STEERING_FEATURE_OVERRIDES.filter((feature) =>
+    !configOverrides.some((override) =>
+      readCodexConfigOverrideKey(override) === readCodexConfigOverrideKey(feature)
+    )
+  )
+  return missing.length === 0 ? configOverrides : [...configOverrides, ...missing]
+}
+
+function readCodexConfigOverrideKey(override: string): string {
+  return override.split('=', 1)[0]!.trim()
+}
+
 export function hasHostedCodexModelCatalogServiceTier(input: {
   serviceTier: 'flex' | 'priority'
   env?: NodeJS.ProcessEnv

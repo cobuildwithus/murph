@@ -431,7 +431,7 @@ describe("weekly game routes", () => {
       expect(missing.status).toBe(404);
       expect((await missing.json()).error.code).toBe("INVITE_NOT_FOUND");
 
-      mocks.readInvitePreview.mockResolvedValueOnce({ inviteeFirstName: "Ava", inviterFirstName: "Leo", status: "open" });
+      mocks.readInvitePreview.mockResolvedValueOnce({ inviterFirstName: "Leo", status: "open" });
       const found = await routes.invite.GET(new Request(`${BASE}/invites/tok_1`), params({ token: "tok_1" }));
       expect(found.status).toBe(200);
       expect((await found.json()).preview.inviterFirstName).toBe("Leo");

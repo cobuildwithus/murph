@@ -154,6 +154,7 @@ import {
 } from './assistant-codex/final-response-completion.js'
 import {
   resolveCodexChildEnv,
+  withCodexAppServerSteeringFeatureOverrides,
   withHostedCodexModelCatalogConfigOverride,
 } from './assistant-codex/config.js'
 import {
@@ -1156,11 +1157,12 @@ async function prepareCodexAppServerProcessInput(
     env: input.env,
   })
   const codexCommand = resolveCodexAppServerCommand(input.codexCommand)
-  const configOverrides =
+  const configOverrides = withCodexAppServerSteeringFeatureOverrides(
     withHostedCodexModelCatalogConfigOverride({
       configOverrides: input.configOverrides,
       env: input.env,
-    }) ?? []
+    }) ?? [],
+  )
   const args = buildCodexAppServerArgs({
     configOverrides,
     oss: input.oss,
@@ -5648,9 +5650,12 @@ async function runCodexAppServerTurnOnProcess(
             : {}),
         }
         completedFinalAgentMessage = null
-        assistantStreams.clear()
-        assistantStreamOrder.length = 0
       }
+      // A completed reply moved to the trailing candidate above. Anything left
+      // is unfinished text from a preempted answer (instant steering), never a
+      // reply, so it must not become fallback text for the steered response.
+      assistantStreams.clear()
+      assistantStreamOrder.length = 0
       responseMedia = []
       responseCard = null
       responseCardTextFallback = null

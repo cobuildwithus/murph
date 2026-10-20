@@ -1,11 +1,10 @@
 import Image from "next/image";
 
 import { buttonVariants } from "@/src/components/ui/button";
-import type { GameInvitePreview, GameSchedule, GameStake } from "@/src/lib/game/contract";
+import type { GameInvitePreview } from "@/src/lib/game/contract";
 
 import { CopyInviteLink } from "./copy-invite-link";
-
-const WEEKDAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+import { CLOSED_INVITE_TITLE, describeSchedule, describeStakeLabel } from "./invite-copy";
 
 /** What a texted challenge link shows, from the invite preview. The page supplies `<main>` and the app link. */
 export function GameInviteView(props: { appUrl: string; preview: GameInvitePreview | null }) {
@@ -37,7 +36,7 @@ export function GameInviteView(props: { appUrl: string; preview: GameInvitePrevi
       ) : (
         <section className="py-12 sm:py-16">
           <h1 className="font-serif text-4xl font-semibold leading-[1.05] tracking-[-0.03em]">
-            This invite isn&apos;t available
+            {CLOSED_INVITE_TITLE}
           </h1>
           <p className="mt-4 text-base leading-7 text-muted-foreground">{closedInviteCopy(preview?.status)}</p>
         </section>
@@ -60,14 +59,4 @@ function Row(props: { label: string; value: string }) {
       <dd className="text-right font-medium">{props.value}</dd>
     </div>
   );
-}
-
-function describeSchedule(schedule: GameSchedule): string {
-  if ("count" in schedule) return `Any ${schedule.count} ${schedule.count === 1 ? "day" : "days"} a week`;
-  if (schedule.days.length === 7) return "Every day";
-  return [...schedule.days].sort((left, right) => left - right).map((day) => WEEKDAY_NAMES[day]).join(", ");
-}
-
-function describeStakeLabel(stake: GameStake): string {
-  return stake.kind === "winner_gets" ? "Winner gets" : "Each missed day";
 }

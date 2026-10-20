@@ -1637,7 +1637,7 @@ Web exposes the native field only when its existing assistant-configuration
 resolution confirms that the current managed runtime is authorized for the
 full product-model catalog; missing authority fails closed.
 The production image defaults to a catalog containing GPT-6.1 Sol and GPT-6 Luna plus
-GPT-5.6 Luna and Sol, retaining GPT-6 Sol for saved conversation preferences. CLI 0.160.0 supplies every entry from its native catalog;
+GPT-5.6 Luna and Sol, retaining GPT-6 Sol for saved conversation preferences. CLI 0.163.0 supplies every entry from its native catalog;
 there is no separate launch-catalog supplement. All GPT-6 and GPT-6.1 entries retain
 the native 272K context limit. The image fails validation for missing entries. Web separately derives Astra authority from the canonical available models
 and managed OpenAI provider; only an explicitly authorized workspace selects the
@@ -4189,6 +4189,27 @@ workspace invocation. Admission composes that cursor-ordered prefix with
 notified exact IDs and accepts every valid same-room successor up to the
 existing cumulative cap, applying the same replyability, conversation, route,
 and exact-successor checks without reopening or mutating the pending index.
+
+Every Murph-launched Codex App Server sets `features.instant_interrupt=true`
+and `features.code_mode_interrupt=true` as CLI-layer `--config` defaults; an
+explicit caller value for the same key wins. An admitted steer therefore
+preempts unfinished generation inside the same Codex turn instead of waiting for
+the stale answer: over HTTP/SSE Codex drops the response stream, and over
+WebSocket it requests `response.interrupt` with `discard_partial_items`. A
+provider that ignores that request completes the stale answer, which Murph then
+delivers as an ordinary preceding segment exactly as before. An HTTP request
+still awaiting response headers has not entered the stream-read loop; its queued
+steer takes effect after stream establishment. Preemption does not
+abort tool calls already issued; a code-mode `exec` or `wait` yields its running
+cell so the steer reaches the model while the effect finishes once. An
+interrupted turn stops its code-mode cells, and App Server aborts a finished
+turn's pending server requests; in the tested interrupted, no-reply, and
+normal-completion patterns a yielded cell's later nested Murph tool call never
+reached the next turn. Text streamed for an answer item that never completed is discarded
+at the steered user-message boundary and cannot become reply fallback text.
+Admission rules, the 50-message cap, first-response closure, journaling, and
+delivery are unchanged, and a dropped stream is not evidence that provider
+generation or billing stopped.
 
 The Environment walkthrough reuses that execution plane without turning audio
 into a chat attachment. Authenticated Web validates and stages one bounded

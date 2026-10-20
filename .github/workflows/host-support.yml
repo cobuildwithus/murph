@@ -685,8 +685,9 @@ jobs:
         # Two bounded native source builds, then the unchanged benchmark budget.
         timeout-minutes: 195
         env:
-          # Hosted runners have four vCPUs; a cold Codex build at two jobs took ~55 min.
-          CODEX_CARGO_JOBS: "4"
+          # Match the proven native permission gate while both checkouts are installed.
+          # This bounds compilation only; the benchmark still runs with one vCPU.
+          CODEX_CARGO_JOBS: "2"
         run: |
           node --test candidate/scripts/check-container-latency-ci.test.mjs
           node candidate/scripts/check-container-latency-ci.mjs base candidate
