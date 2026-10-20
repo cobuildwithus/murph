@@ -20,6 +20,9 @@ export const CLI_TIMING_PHASES = [
   // Remove after every old runtime/CLI producer has been replaced.
   "query-entity-read", "query-wearable-compose", "query-metric-read", "query-pattern-report",
   "service-runtime-load", "query-runtime-load", "query-projection-load",
+  // Nested inside query-metric-projection; never additive with it.
+  "query-metric-samples", "query-metric-evidence", "query-metric-extract",
+  "query-metric-precedence", "query-metric-targets",
 ] as const;
 export type CliTimingPhase = typeof CLI_TIMING_PHASES[number];
 export type CliTimingOutcome = "ok" | "error" | "unknown";
