@@ -2447,8 +2447,8 @@ to apply after cutover.
 - Per-message typing alerts independently measure the member's wait through the
   earliest accepted typing indicator: strictly over 2.5 seconds for a warm
   workspace and over 7 seconds for a cold workspace. Linq waits start at the
-  latest recorded provider event for the exact member-bound message (its own
-  creation, or a later edit), never after the Web route's receipt instant, so
+  exact provider event bound by the member's mailbox dedupe identity, never
+  after the Web route's receipt instant, so
   time before the route runs, such as a fresh Web instance boot, counts.
   Without that event, and for Telegram, the wait starts at route receipt.
   Mailbox acceptance remains its existing timestamp; it never substitutes for
@@ -2457,8 +2457,10 @@ to apply after cutover.
   resets the silence start between that start and the first typing acceptance
   (or the missing-observation check). A reply does not exempt subsequent silence.
   An accepted reply linked to this exact input ends its wait; no later typing
-  is required for an already-answered input. Existing blinded provider message/chat
-  keys establish the exact conversation; another chat cannot reset the clock,
+  is required for an already-answered input. Existing hashed provider-event and
+  blinded chat keys establish the exact conversation, including reactions whose
+  synthetic message identity differs from the reacted-to message. Later edits
+  or receipts cannot change an older input's origin. Another chat cannot reset the clock,
   and another member cannot supply prior-typing evidence.
   An earlier accepted typing session covers arrival until its linked reply or
   five-minute expiry, then silence resumes from that endpoint. Missing correlation,

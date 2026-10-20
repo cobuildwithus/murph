@@ -66,6 +66,10 @@ in [the import-speed plan](exec-plans/completed/2026-09-24-garmin-import-speed.m
 
 # Murph Agent Docs Index
 
+Exact provider-event correlation for reaction typing alerts is owned by
+`RELIABILITY.md`; implementation and synthetic PostgreSQL proof are recorded in
+[`reaction typing coverage`](exec-plans/completed/2026-10-19-reaction-typing-coverage.md).
+
 Failure-only startup context telemetry is tracked in
 [the startup failure context plan](exec-plans/active/2026-10-18-startup-failure-context.md);
 the current observation contract remains in `references/hosted-runtime-protocol.md`.

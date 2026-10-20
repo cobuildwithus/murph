@@ -110,6 +110,7 @@ export function buildHostedRuntimeTypingAlertQuery(input: {
         trace.user_id,
         trace.mailbox_item_id,
         trace.linq_delivery_id,
+        provider_event.linq_chat_lookup_key,
         trace.webhook_received_at,
         trace.provider_start_at,
         EXTRACT(EPOCH FROM trace.webhook_received_at AT TIME ZONE 'UTC') * 1000 AS received_ms,
@@ -155,20 +156,18 @@ export function buildHostedRuntimeTypingAlertQuery(input: {
       CROSS JOIN LATERAL (SELECT trace.phase_breakdown_json
         #> '{assistant,terminalReplyCommittedAtEpochMs}' AS value) AS reply
       -- The member waits from the provider's event, so time before our route
-      -- runs (such as a fresh Web instance) counts. The latest event for this
-      -- exact message is its own creation or a later edit/reaction, so an edit
-      -- never inherits the original send time, and a provider clock ahead of
-      -- ours never moves the start past receipt.
+      -- runs (such as a fresh Web instance) counts. Mailbox dedupe binds the
+      -- exact event, including reactions whose synthetic message identity
+      -- differs from the provider's reacted-to message. Later events cannot
+      -- change this input's origin or conversation.
       LEFT JOIN LATERAL (
-        SELECT event.provider_created_at
+        SELECT event.provider_created_at, event.linq_chat_lookup_key
         FROM hosted_mailbox_item AS mailbox
         JOIN hosted_linq_provider_event AS event
-          ON event.message_lookup_key = mailbox.source_message_lookup_key
+          ON event.event_id = ${buildProviderEventLookupKeySql(Prisma.sql`mailbox.dedupe_key`)}
         WHERE trace.source = 'linq'
           AND mailbox.id = trace.mailbox_item_id
           AND mailbox.user_id = trace.user_id
-        ORDER BY event.provider_created_at DESC
-        LIMIT 1
       ) AS provider_event ON TRUE
       CROSS JOIN LATERAL (SELECT LEAST(trace.webhook_received_at,
         provider_event.provider_created_at) AS at) AS origin
@@ -252,7 +251,7 @@ function buildLinqConversationActivitySql(now: Date): Prisma.Sql {
     SELECT GREATEST(
       (
         SELECT MAX(delivery.accepted_at) FROM hosted_linq_delivery AS delivery
-        WHERE delivery.linq_chat_lookup_key = conversation.linq_chat_lookup_key
+        WHERE delivery.linq_chat_lookup_key = observation.linq_chat_lookup_key
           AND delivery.attempted_at >= observation.origin_at - INTERVAL '5 minutes'
           AND delivery.attempted_at <= ${now}
           AND delivery.accepted_at >= observation.origin_at
@@ -266,40 +265,44 @@ function buildLinqConversationActivitySql(now: Date): Prisma.Sql {
           ${now}::timestamp,
           TIMESTAMP 'epoch' + observation.typing_ms * INTERVAL '1 millisecond'
         ))
-        FROM hosted_linq_provider_event AS earlier_event
+        FROM hosted_ingress_latency_trace AS earlier_trace
         JOIN hosted_mailbox_item AS earlier_mailbox
-          ON earlier_mailbox.source_message_lookup_key = earlier_event.message_lookup_key
-         AND earlier_mailbox.user_id = current_mailbox.user_id
-        JOIN hosted_ingress_latency_trace AS earlier_trace
-          ON earlier_trace.mailbox_item_id = earlier_mailbox.id
-         AND earlier_trace.user_id = current_mailbox.user_id
-         AND earlier_trace.source = 'linq'
+          ON earlier_mailbox.id = earlier_trace.mailbox_item_id
+         AND earlier_mailbox.user_id = earlier_trace.user_id
+        JOIN hosted_linq_provider_event AS earlier_event
+          ON earlier_event.event_id = ${buildProviderEventLookupKeySql(Prisma.sql`earlier_mailbox.dedupe_key`)}
         LEFT JOIN hosted_linq_delivery AS earlier_delivery
           ON earlier_delivery.id = earlier_trace.linq_delivery_id
         CROSS JOIN LATERAL (SELECT CASE
           WHEN earlier_trace.phase_breakdown_json #>> '{assistant,linqTypingAcceptedAtEpochMs}' ~ '^[0-9]{1,15}$'
           THEN (earlier_trace.phase_breakdown_json #>> '{assistant,linqTypingAcceptedAtEpochMs}')::bigint
         END AS ms) AS prior_typing
-        WHERE earlier_event.linq_chat_lookup_key = conversation.linq_chat_lookup_key
+        WHERE earlier_trace.user_id = observation.user_id
+          AND earlier_trace.source = 'linq'
+          AND earlier_event.linq_chat_lookup_key = observation.linq_chat_lookup_key
           AND earlier_event.provider_created_at >= observation.webhook_received_at - INTERVAL '5 minutes'
           AND earlier_event.provider_created_at <= observation.webhook_received_at
-          AND earlier_mailbox.id <> current_mailbox.id
+          AND earlier_mailbox.id <> observation.mailbox_item_id
           AND earlier_trace.webhook_received_at <= observation.webhook_received_at
           AND (earlier_delivery.accepted_at IS NULL OR earlier_delivery.accepted_at > observation.webhook_received_at)
           AND prior_typing.ms BETWEEN observation.received_ms - 300000 AND observation.received_ms
       )
     )
-    FROM hosted_mailbox_item AS current_mailbox
-    JOIN LATERAL (
-      SELECT event.linq_chat_lookup_key
-      FROM hosted_linq_provider_event AS event
-      WHERE event.message_lookup_key = current_mailbox.source_message_lookup_key
-        AND event.linq_chat_lookup_key IS NOT NULL
-      ORDER BY event.provider_created_at DESC
-      LIMIT 1
-    ) AS conversation ON TRUE
     WHERE observation.source = 'linq'
-      AND current_mailbox.id = observation.mailbox_item_id
-      AND current_mailbox.user_id = observation.user_id
+      AND observation.linq_chat_lookup_key IS NOT NULL
   )`;
+}
+
+// SQL equivalent of createHostedLinqProviderEventLookupKey. PostgreSQL fixtures
+// use that canonical builder so the immutable s1 hash contract cannot drift.
+function buildProviderEventLookupKeySql(eventId: Prisma.Sql): Prisma.Sql {
+  return Prisma.sql`CASE
+    WHEN ${eventId} ~ '^hbid:linq[.]provider-event:s1:[0-9a-f]{64}$'
+      THEN ${eventId}
+    ELSE 'hbid:linq.provider-event:s1:' || encode(sha256(
+      convert_to('murph.hosted-linq-observability', 'UTF8') || decode('00', 'hex')
+      || convert_to('linq.provider-event', 'UTF8') || decode('00', 'hex')
+      || convert_to(${eventId}, 'UTF8')
+    ), 'hex')
+  END`;
 }
