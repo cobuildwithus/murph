@@ -3,7 +3,6 @@ import { BrandContent } from "./brand-content";
 import { ComponentsContent } from "./components-content";
 import { ConsentContent } from "./consent-content";
 import { GoalGuideStudy } from "./goal-guide-study";
-import { JournalStudy } from "./journal-study";
 import { VoiceOrbStudy } from "./voice-orb-study";
 
 const TABS = [
@@ -53,7 +52,6 @@ export function DesignPage({ activeTab = "brand" }: { activeTab?: string }) {
         <>
           <VoiceOrbStudy />
           <GoalGuideStudy />
-          <JournalStudy />
           <ComponentsContent />
         </>
       )}

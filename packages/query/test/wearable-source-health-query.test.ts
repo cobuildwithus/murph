@@ -33,6 +33,8 @@ import {
 import { isWearableProjectionFresh } from "../src/projection/freshness.ts";
 import * as rebuild from "../src/projection/rebuild.ts";
 import * as metrics from "../src/metrics/projection.ts";
+import * as metricPoints from "../src/metrics/index.ts";
+import * as sampleSummaries from "../src/summaries.ts";
 import * as search from "../src/search-shared.ts";
 import * as metricStore from "../src/projection/metric-store.ts";
 import * as entityStore from "../src/projection/entity-store.ts";
@@ -495,6 +497,11 @@ const rebuildPhases = [
 ] as const;
 const sourceRebuildPhases = rebuildPhases.filter(phase =>
   phase !== "query-metric-projection" && phase !== "query-search-documents");
+// Nested inside query-metric-projection, in completion order.
+const metricSubphases = [
+  "query-metric-samples", "query-metric-evidence", "query-metric-extract",
+  "query-metric-precedence", "query-metric-targets",
+] as const;
 
 async function measuredQuery<T>(command: string, read: () => Promise<T>, publish?: (report: CliTiming) => void): Promise<T> {
   let result!: T;
@@ -502,7 +509,8 @@ async function measuredQuery<T>(command: string, read: () => Promise<T>, publish
   return result;
 }
 
-function assertRebuildTiming(report: CliTiming, expected: readonly CliTimingPhase[], root: string) {
+function assertRebuildTiming(report: CliTiming, expected: readonly CliTimingPhase[], root: string,
+  expectedMetric: readonly CliTimingPhase[] = expected.includes("query-metric-projection") ? metricSubphases : []) {
   assert.deepEqual(normalizeCliTiming(report), report);
   assert.equal(report.droppedSpans, 0);
   assert.equal(report.droppedCalls, 0);
@@ -511,6 +519,8 @@ function assertRebuildTiming(report: CliTiming, expected: readonly CliTimingPhas
   assert.equal(command.calls, 1);
   assert.deepEqual(command.phases.filter(phase => rebuildPhases.some(name => name === phase.phase))
     .map(phase => phase.phase), expected);
+  assert.deepEqual(command.phases.filter(phase => metricSubphases.some(name => name === phase.phase))
+    .map(phase => phase.phase), expectedMetric);
   for (const phase of command.phases) {
     assert.deepEqual(Object.keys(phase).sort(), ["buckets", "count", "maxUs", "phase", "sumUs"]);
     for (const value of [phase.count, phase.sumUs, phase.maxUs, ...phase.buckets]) {
@@ -518,7 +528,7 @@ function assertRebuildTiming(report: CliTiming, expected: readonly CliTimingPhas
     }
     assert.equal(phase.buckets.length, 8);
     assert.equal(phase.buckets.reduce((sum, value) => sum + value, 0), phase.count);
-    if (expected.includes(phase.phase)) assert.equal(phase.count, 1);
+    if (expected.includes(phase.phase) || expectedMetric.includes(phase.phase)) assert.equal(phase.count, 1);
   }
   const serialized = JSON.stringify(report);
   for (const forbidden of [root, "evt_garmin_steps", "vault_01JNV40W8VFYQ2H7CMJY5A9R4K",
@@ -595,6 +605,10 @@ test("rebuild phase boundaries measure actual owners including publication open,
   vi.spyOn(candidates, "collectWearableDataset").mockImplementation((...args) => { advance(13); return dataset(...args); });
   const project = metrics.buildMetricProjection;
   vi.spyOn(metrics, "buildMetricProjection").mockImplementation((...args) => { advance(17); return project(...args); });
+  const summarize = sampleSummaries.summarizeDailySamples;
+  vi.spyOn(sampleSummaries, "summarizeDailySamples").mockImplementation((...args) => { advance(3); return summarize(...args); });
+  const extract = metricPoints.extractMetricPoints;
+  vi.spyOn(metricPoints, "extractMetricPoints").mockImplementation((...args) => { advance(7); return extract(...args); });
   const targets = metricStore.extractMetricTargetsFromCanonicalEntities;
   vi.spyOn(metricStore, "extractMetricTargetsFromCanonicalEntities").mockImplementation((...args) => { advance(19); return targets(...args); });
   const summary = projector.buildWearableSummaryProjectionFromDataset;
@@ -620,9 +634,32 @@ test("rebuild phase boundaries measure actual owners including publication open,
   assertRebuildTiming(report, rebuildPhases, root);
   assert.deepEqual(Object.fromEntries(report.commands[0]!.phases.filter(phase =>
     rebuildPhases.some(name => name === phase.phase)).map(phase => [phase.phase, phase.sumUs])), {
-    "query-source-read": 11, "query-wearable-dataset": 13, "query-metric-projection": 36,
+    "query-source-read": 11, "query-wearable-dataset": 13, "query-metric-projection": 46,
     "query-wearable-summary": 23, "query-search-documents": 60, "query-publication": 121,
   });
+  // Nested, not additive: the parent also includes its own unspanned work (17).
+  assert.deepEqual(Object.fromEntries(report.commands[0]!.phases.filter(phase =>
+    metricSubphases.some(name => name === phase.phase)).map(phase => [phase.phase, phase.sumUs])), {
+    "query-metric-samples": 3, "query-metric-evidence": 0, "query-metric-extract": 7,
+    "query-metric-precedence": 0, "query-metric-targets": 19,
+  });
+});
+
+test("metric subphase failure finishes open spans, keeps the original error and publishes nothing", async () => {
+  const { root } = await fixture();
+  const failure = new Error("PRIVATE_TIMING_FAILURE");
+  const extract = vi.spyOn(metricPoints, "extractMetricPoints").mockImplementation(() => { throw failure; });
+  let report!: CliTiming;
+  await assert.rejects(measuredQuery("query projection rebuild", () => rebuildQueryProjection(root),
+    value => { report = value; }), error => error === failure);
+  assertRebuildTiming(report, ["query-source-read", "query-wearable-dataset", "query-metric-projection"], root,
+    ["query-metric-samples", "query-metric-evidence", "query-metric-extract"]);
+  assert.equal(report.commands[0]!.outcome, "error");
+  assert.equal(existsSync(path.join(root, CANONICAL_WRITE_LOCK_DIRECTORY)), false);
+  assert.equal((await getQueryProjectionStatus(root)).fresh, false);
+  extract.mockRestore();
+  await rebuildQueryProjection(root);
+  assert.equal((await getQueryProjectionStatus(root)).fresh, true);
 });
 
 for (const mode of ["full", "wearable-only"] as const) {

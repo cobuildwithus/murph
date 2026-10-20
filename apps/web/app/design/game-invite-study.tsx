@@ -1,7 +1,9 @@
 import { GameInviteView } from "@/app/g/[token]/game-invite-view";
+import { gameInviteAppUrl } from "@/src/lib/game/access";
 import type { GameInvitePreview } from "@/src/lib/game/contract";
 
-const DESIGN_TOKEN = "design_invite_token";
+// The study links to the Murph app the way production does.
+const DESIGN_APP_URL = gameInviteAppUrl("design_invite_token", {});
 
 type OpenPreview = Extract<GameInvitePreview, { status: "open" }>;
 
@@ -59,7 +61,7 @@ export function GameInviteStudy() {
               id={`game-invite-${state.id}`}
               inert
             >
-              <GameInviteView preview={state.preview} token={DESIGN_TOKEN} />
+              <GameInviteView appUrl={DESIGN_APP_URL} preview={state.preview} />
             </div>
           </figure>
         ))}

@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { cache } from "react";
 
+import { gameInviteAppUrl } from "@/src/lib/game/access";
 import { readInvitePreview } from "@/src/lib/game/service";
 import { resolveDecodedRouteParam } from "@/src/lib/http";
 
@@ -27,7 +28,7 @@ export default async function GameInvitePage(props: GameInvitePageProps) {
   const token = await resolveDecodedRouteParam(props.params, "token");
   return (
     <main className="min-h-dvh bg-background px-6 py-7 text-foreground sm:px-10 sm:py-9">
-      <GameInviteView preview={await readPreview(token)} token={token} />
+      <GameInviteView appUrl={gameInviteAppUrl(token)} preview={await readPreview(token)} />
     </main>
   );
 }

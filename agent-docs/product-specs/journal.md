@@ -1,6 +1,6 @@
 # Journal
 
-Last verified: 2026-09-08
+Last verified: 2026-10-19
 
 ## Product boundary
 
@@ -30,8 +30,9 @@ a missed eligible capture without inventing an explicit-logging requirement.
 
 Canonical persistence and current page visibility are separate facts. Murph
 does not diagnose a filter, stale page, or sync failure without evidence, invent
-filter controls, or claim an unverified refresh. It can explain that opening
-Journal requests updated data and that the member can select the relevant date.
+filter controls, or claim an unverified refresh. The native app reads the saved
+projection and lets the member select the relevant date; opening it does not
+request a runtime refresh.
 It never creates legacy Journal days or day links to make an event appear.
 
 Journal titles and notes use English. Chat replies use the member's language.
@@ -184,7 +185,7 @@ does not prove arrival, current location, or realized experiment context.
 Navigation preserves canonical all-day/period/unknown timing independently of
 optional details; legacy summaries with no precision marker remain unknown.
 
-The current Journal page still navigates today and historical days. Upcoming
+The native Journal page navigates today and historical days. Upcoming
 context does not add a future-date browser to that page; a saved plan appears
 on its occurrence date once that date is selectable and the view is refreshed.
 
@@ -245,50 +246,20 @@ Journal omits the ambiguous facet from dated bands and retains the original
 source report on its documented date. Host-tagged document/source dates and
 other historical dates remain intact. The projection never rewrites evidence.
 
-The projection is built during the existing Browser Vault refresh. Opening
-`/journal` shows the available projection and requests one runtime refresh.
-The ready timeline has no Refresh control; unavailable older projections offer
-a retry. Automatic refresh does not call AI or start a new analysis.
+The projection is built during the existing Browser Vault refresh and remains
+part of the core shard consumed by native clients and shared queries.
 
-The page waits for a different replica through the existing bounded refresh
-window. A busy runtime can delay publication beyond that window. Existing
-content stays visible after waiting stops. Reopening the page starts another
-bounded refresh. When the first device import is pending and no replica exists,
-Journal observes publication through the same 60-second bounded window. The
-import remains responsible for publication, without a competing runtime wake.
-Repeated retry clicks do not restart an active wait. This is not continuous
-polling while the page remains open.
+## Website boundary
 
-## Web experience
+The website Journal timeline is retired. `/journal` and the older `/history`
+route permanently redirect to `/home`. Website navigation and Personal Patterns
+no longer link to a Journal page. There is no web-only timeline renderer, date
+navigation, page-open refresh, or Journal design study.
 
-`/journal` shows the seven days ending on the selected day as a calm timeline.
-`Today` ends the window on the browser local date and follows date changes while
-the page stays open. An explicitly selected historical window stays in place.
-Previous and next move the full window by seven days, so Monday still includes the prior Tuesday through Sunday. Day bands
-separate the days.
-Main sleep uses `Night`, naps use their time, and context can span a full day.
-Event text is readable without opening a detail view. Source labels stay
-available as secondary hover and screen-reader detail. A record with a canonical
-time zone keeps its local event time during travel.
-
-Approximate periods show `Morning`, `Afternoon`, `Evening`, or `Night`.
-Full-day notes show `All day`. Unknown times leave the time column empty.
-Period sorting anchors order rows without displaying invented clock times.
-
-The right rail shows a small calendar, seven-day sleep and activity statistics,
-and a current Personal Pattern when one is ready. A Pattern is an insight about
-the week, not a health event, so it does not appear on the daily timeline.
-Historical statistics name the selected date range. Chart weekday labels keep
-their calendar date in every browser time zone. The calendar marks its
-selected end date separately from today, including for assistive technology. The
-page supports loading, unavailable, empty, error, and ready states. Empty
-timelines retain the background refresh status while showing onboarding.
-
-The web does not provide edit or add controls. A member asks Murph to add,
-correct, or remove an entry. Calendar, email travel, Environment, private chat,
-and approved group capture all write the same canonical events that Journal
-already reads. They do not infer records from page state or store facts in the
-Journal projection.
+Canonical capture, the shared projection, icon catalog, Personal Patterns, and
+`GET /api/device-sync/companion/journal` remain supported. Environment, private
+chat, calendar, email travel, and approved group capture continue writing the
+same canonical events. Retiring the website page does not delete records.
 
 ## Native iOS experience
 
@@ -320,15 +291,14 @@ native app; an older server produces a retryable unavailable page.
 ## Ownership
 
 Canonical event and metric stores own the data. `@murphai/query` owns the
-derived Journal view. Browser Vault carries it to the web. Murph uses existing
-event commands for note writes and corrections.
+derived Journal view. Browser Vault publishes it in the core shard for the
+companion API. Murph uses existing event commands for note writes and corrections.
 
 Do not add a Journal table, `journal_day` writer, daily compaction job, or
 page-open analysis.
 
 ## Deployment
 
-Deploy the Web reader before the runtime writer starts producing new timing
-values. Older replicas remain readable. Existing records are not rewritten by
-this change. After both deploys, verify a new note, a correction, and a page
-refresh through the hosted path.
+Retiring the website timeline changes no API response, replica schema, runtime
+writer, or native client contract. It requires no migration or coordinated
+runtime rollout. Existing native clients continue reading the saved projection.
