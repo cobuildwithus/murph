@@ -8,7 +8,6 @@ import {
 import {
   MURPH_JOURNAL_CONNECTED_CONTEXT_MORNING_AUTOMATION_ID,
   MURPH_MONTHLY_IMPROVEMENT_COACH_AUTOMATION_ID,
-  MURPH_PERSONAL_PATTERNS_UPDATE_AUTOMATION_ID,
   MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID,
   MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID,
   MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID,
@@ -18,18 +17,18 @@ const occurrenceAt = '2026-04-08T13:00:00.000Z'
 const source: CanonicalAutomationAssistantCronJobRecord = {
   kind: 'automation',
   activeUntil: null,
-  automationId: MURPH_PERSONAL_PATTERNS_UPDATE_AUTOMATION_ID,
-  relativePath: 'automations/patterns.md',
+  automationId: MURPH_JOURNAL_CONNECTED_CONTEXT_MORNING_AUTOMATION_ID,
+  relativePath: 'automations/journal-context.md',
   continuityPolicy: 'fresh',
   createdAt: '2026-04-01T00:00:00.000Z',
-  instructions: 'Review current patterns.',
+  instructions: 'Review current Journal context.',
   route: {
     channel: 'telegram', deliveryTarget: 'synthetic-thread', identityId: null,
     participantId: null, threadId: 'synthetic-thread',
   },
   assistantTargetOverride: null,
   schedule: { kind: 'dailyLocal', localTime: '13:00' },
-  slug: 'personal-patterns-update',
+  slug: 'journal-connected-context-morning',
   status: 'active',
   summary: null,
   supportKind: null,
@@ -37,7 +36,7 @@ const source: CanonicalAutomationAssistantCronJobRecord = {
   contextReferences: [],
   tags: [],
   timeZone: 'UTC',
-  title: 'Personal Patterns',
+  title: 'Morning Journal',
   updatedAt: '2026-04-01T00:00:00.000Z',
 }
 
@@ -52,7 +51,7 @@ function deliverable(ageMs: number, overrides: Partial<CanonicalAutomationAssist
 const sixHours = 6 * 60 * 60_000
 
 describe('canonical notification freshness', () => {
-  it('keeps daily Personal Patterns recoverable through six hours, then expires', () => {
+  it('keeps a daily Flex-retry automation recoverable through six hours, then expires', () => {
     expect(deliverable(150 * 60_000)).toBe(true)
     expect(deliverable(sixHours)).toBe(true)
     expect(deliverable(sixHours + 1)).toBe(false)
@@ -72,7 +71,7 @@ describe('canonical notification freshness', () => {
   })
 
   it('uses immutable identity rather than the editable slug', () => {
-    expect(deliverable(150 * 60_000, { slug: 'renamed-patterns' })).toBe(true)
+    expect(deliverable(150 * 60_000, { slug: 'renamed-journal-context' })).toBe(true)
     const ordinary = { automationId: 'automation_synthetic_reminder' }
     expect(deliverable(60 * 60_000, ordinary)).toBe(true)
     expect(deliverable(60 * 60_000 + 1, ordinary)).toBe(false)

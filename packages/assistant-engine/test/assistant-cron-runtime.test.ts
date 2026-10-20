@@ -76,7 +76,6 @@ type MockAutomationRecord = {
 
 const cronMocks = vi.hoisted(() => ({
   archiveAutomationIfActiveUntilElapsed: vi.fn(),
-  canSkipManagedPersonalPatterns: vi.fn(),
   canSkipManagedAutomaticMealCloseout: vi.fn(),
   applyAssistantSelfDeliveryTargetDefaults: vi.fn(),
   automationsByVault: new Map<string, MockAutomationRecord[]>(),
@@ -101,10 +100,6 @@ const cronMocks = vi.hoisted(() => ({
   showCanonicalAutomation: vi.fn(),
   upsertAutomation: vi.fn(),
   withAssistantCronWriteLock: vi.fn(),
-}))
-
-vi.mock('../src/assistant/personal-patterns-eligibility.js', () => ({
-  canSkipManagedPersonalPatterns: cronMocks.canSkipManagedPersonalPatterns,
 }))
 
 vi.mock('../src/assistant/automatic-meal-closeout-eligibility.js', () => ({
@@ -266,7 +261,7 @@ import {
   MURPH_ONBOARDING_FOLLOWUP_AUTOMATION,
   MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
   MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_PRIVATE_SUMMARY,
-  MURPH_PERSONAL_PATTERNS_UPDATE_AUTOMATION_ID,
+  MURPH_RETIRED_PERSONAL_PATTERNS_UPDATE_AUTOMATION_ID,
   MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID,
   MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID,
   MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID,
@@ -297,7 +292,6 @@ const tempRoots: string[] = []
 
 beforeEach(() => {
   cronMocks.canSkipManagedAutomaticMealCloseout.mockReset().mockResolvedValue(false)
-  cronMocks.canSkipManagedPersonalPatterns.mockReset().mockResolvedValue(false)
   vi.useRealTimers()
   cronMocks.automationsByVault.clear()
   cronMocks.scheduledLogsByVault.clear()
@@ -6384,53 +6378,6 @@ describe('assistant cron runtime orchestration', () => {
     expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledTimes(1)
   })
 
-  it('skips unchanged Personal Patterns before model entry and resumes Luna xhigh on the next changed occurrence', async () => {
-    vi.useFakeTimers()
-    const occurrenceAt = '2026-04-08T13:00:00.000Z'
-    vi.setSystemTime(new Date(occurrenceAt))
-    const { vaultRoot } = await createRuntimeContext('assistant-cron-patterns-unchanged-')
-    const automationId = MURPH_PERSONAL_PATTERNS_UPDATE_AUTOMATION_ID
-    addManagedBackgroundAutomation(vaultRoot, automationId)
-    const executionContext: AssistantExecutionContext = {
-      hosted: {
-        memberId: 'member-patterns-fixture',
-        resolveScheduledExternalThreadRoute: async ({ target }) => ({
-          channel: 'telegram', containerMemberId: 'member-patterns-fixture',
-          threadId: target, threadIsDirect: true,
-        }),
-        userEnvKeys: [],
-      },
-    }
-    cronMocks.canSkipManagedPersonalPatterns.mockResolvedValueOnce(true)
-    expect(await processDueAssistantCronJobsLocal({ executionContext, limit: 1, vault: vaultRoot }))
-      .toEqual({ failed: 0, processed: 1, succeeded: 0 })
-    expect(cronMocks.sendAssistantMessageLocal).not.toHaveBeenCalled()
-    expect(await listAssistantOutboxIntents(vaultRoot)).toEqual([])
-    expect(await listAssistantCronRuns({ job: automationId, vault: vaultRoot }))
-      .toMatchObject({ runs: [{ outcome: 'skipped_gate', status: 'skipped' }] })
-    const next = await getAssistantCronJob(vaultRoot, automationId)
-    expect(next.state.nextRunAt).toBe('2026-04-09T13:00:00.000Z')
-    expect(next.state.consecutiveFailures).toBe(0)
-    vi.setSystemTime(new Date(next.state.nextRunAt!))
-    await processDueAssistantCronJobsLocal({ executionContext, limit: 1, vault: vaultRoot })
-    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
-      assistantTargetOverride: { model: 'gpt-6-luna', reasoningEffort: 'xhigh' },
-      serviceTier: 'flex',
-    }))
-  })
-
-  it('keeps explicit Personal Patterns runs outside unchanged suppression', async () => {
-    vi.useFakeTimers()
-    vi.setSystemTime(new Date('2026-04-08T13:00:00.000Z'))
-    const { vaultRoot } = await createRuntimeContext('assistant-cron-patterns-manual-')
-    const automationId = MURPH_PERSONAL_PATTERNS_UPDATE_AUTOMATION_ID
-    addManagedBackgroundAutomation(vaultRoot, automationId)
-    cronMocks.canSkipManagedPersonalPatterns.mockResolvedValue(true)
-    await runAssistantCronJobNow({ job: automationId, vault: vaultRoot })
-    expect(cronMocks.canSkipManagedPersonalPatterns).not.toHaveBeenCalled()
-    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledTimes(1)
-  })
-
   it('uses flex service tier with a deadline for clean hosted scheduled notification sends', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-04-08T08:20:00.000Z'))
@@ -6492,11 +6439,6 @@ describe('assistant cron runtime orchestration', () => {
       automationId: MURPH_JOURNAL_CONNECTED_CONTEXT_MORNING_AUTOMATION_ID,
       name: 'Journal morning',
       occurrenceAt: '2026-04-08T08:00:00.000Z',
-    },
-    {
-      automationId: MURPH_PERSONAL_PATTERNS_UPDATE_AUTOMATION_ID,
-      name: 'Personal Patterns',
-      occurrenceAt: '2026-04-08T13:00:00.000Z',
     },
     ...[
       [MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID, 'Weekly digest'],
@@ -6579,7 +6521,6 @@ describe('assistant cron runtime orchestration', () => {
       new Date(Date.parse(occurrenceAt) + 30_000).toISOString(),
     )
 
-    cronMocks.canSkipManagedPersonalPatterns.mockClear().mockResolvedValue(true)
     vi.setSystemTime(new Date(Date.parse(occurrenceAt) + retryDelayMs))
     const retried = await processDueAssistantCronJobsLocal({
       executionContext,
@@ -6588,7 +6529,6 @@ describe('assistant cron runtime orchestration', () => {
     })
 
     expect(retried).toEqual({ failed: 0, processed: 1, succeeded: 1 })
-    expect(cronMocks.canSkipManagedPersonalPatterns).not.toHaveBeenCalled()
     expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledTimes(2)
     expect(
       (cronMocks.sendAssistantMessageLocal.mock.calls[1]?.[0] as { instructions?: string } | undefined)
@@ -10842,6 +10782,7 @@ describe('assistant cron runtime orchestration', () => {
   it.each([
     { automationId: 'automation_01K55N7S9X4Q2M6P8R3T0V1WYZ', slug: 'group-sunday-superlatives', threadIsDirect: false },
     { automationId: MURPH_JOURNAL_CONNECTED_CONTEXT_AFTERNOON_AUTOMATION_ID, slug: 'journal-connected-context-afternoon', threadIsDirect: true },
+    { automationId: MURPH_RETIRED_PERSONAL_PATTERNS_UPDATE_AUTOMATION_ID, slug: 'personal-patterns-update', threadIsDirect: true },
   ])('skips a persisted $slug occurrence after the seed is retired', async ({ automationId, slug, threadIsDirect }) => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-04-12T18:10:00.000Z'))

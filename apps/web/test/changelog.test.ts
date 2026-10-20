@@ -1079,11 +1079,8 @@ describe("changelog registry", () => {
 
     expect(item).toMatchObject({
       sourcePullRequests: [1563],
-      tryIt: {
-        href: "/patterns",
-        label: "View your patterns",
-      },
     });
+    expect(item?.tryIt).toBeUndefined();
     expect(item?.details).toContain("existing history");
     expect(item?.details).toContain("association rather than cause");
   });

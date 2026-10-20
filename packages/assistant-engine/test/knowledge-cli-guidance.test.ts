@@ -88,8 +88,6 @@ describe('knowledge CLI guidance matches the shipped CLI', () => {
     expect([...new Set(reads.map((read) => read.slug))].sort()).toEqual([
       'improvement-opportunities',
       'journal-connected-context',
-      'journal-pattern-vocabulary',
-      'personal-pattern-notifications',
       'weekly-health-insights',
       'weekly-health-research-scout',
     ])
@@ -97,14 +95,11 @@ describe('knowledge CLI guidance matches the shipped CLI', () => {
     expect(MURPH_ONBOARDING_FIRST_PERSONAL_READ_INSTRUCTIONS).toContain(
       'Treat `page: null` as no prior personal insights, but return skip if the read fails.',
     )
-    expect(MURPH_MANAGED_AUTOMATIONS.find((automation) => automation.slug === 'personal-patterns-update')?.instructions)
-      .toContain('If a Knowledge read fails instead, return skip without writing either ledger.')
     // An unconfirmed or rejected optional read never becomes "no prior history".
     const optionalReaders = MURPH_MANAGED_AUTOMATIONS
       .filter((automation) => automation.instructions.includes('--if-exists'))
     expect(optionalReaders.map((automation) => automation.slug).sort()).toEqual([
       'monthly-improvement-coach',
-      'personal-patterns-update',
       'weekly-health-insight',
       'weekly-health-research-scout',
     ])

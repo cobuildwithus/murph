@@ -53,12 +53,6 @@ conversation arrivals, shutdown, and provider changes.
 without conversation input through slow preparation and execution, exactly-once
 completion before prompt checkpointing, and expiry/shutdown/handoff requeue.
 
-Personal Patterns cross-automation repetition is covered by managed recipe and
-reconciliation assertions in `managed-automations.test.ts` and the focused
-`Personal Pattern cross-automation history` real-Codex journeys. These prove
-silent first/later digests for already-covered findings, preservation of reviewed
-identities without invented delivery dates, and delivery of a distinct finding.
-
 Shared wearable freshness proof spans `group-shared-freshness.test.ts` in
 hosted-execution, `hosted-group-shared-freshness.test.ts` in Web, and
 `hosted-runtime-group-freshness.test.ts` in assistant-runtime. These cover

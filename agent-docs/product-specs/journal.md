@@ -80,7 +80,7 @@ Factor and context notes use a stable `key-*` tag and explicit `happened` or
 `value-*` containing a reported 0–10 score or a supported reported level.
 Numeric ratings and verbal levels use distinct outcome keys so their different
 scales are never combined. Unscored symptoms and relative changes remain Journal facts without fabricated
-scores; the Patterns reader cannot use them as scored outcomes. Completed
+scores. Completed
 actions are factors, not subjective outcomes. Missing reports remain unknown.
 
 Murph does not announce routine saves. It asks a private question only when an
@@ -92,7 +92,7 @@ Automatic capture always writes to the member's private Journal. An
 authenticated group can propose a clear fact about its sender after the member
 accepts one private global choice. Unclear facts get one private question. A
 member can exclude one group or all groups. The group never receives private
-Journal or Patterns data.
+Journal data.
 
 Environment remains the owner of current Environment values. Each real value
 change also creates one idempotent canonical `journal-context` event. Journal
@@ -221,8 +221,7 @@ main sleep. With an explicit main sleep, a short unlabeled session stays a nap.
 A long duplicate stays with main sleep instead of becoming a nap.
 
 Repeated activities of the same kind on one day become one display event. The
-event keeps all source sessions and shows their combined time. Personal
-Patterns still receives the full source records. Journal hides static profile
+event keeps all source sessions and shows their combined time. Journal hides static profile
 records and total-sleep metrics already represented by a sleep session. When
 two providers expose the same daily score, Journal uses the provider's product
 term, such as Oura Readiness or Whoop Recovery, without showing a duplicate.
@@ -252,11 +251,11 @@ part of the core shard consumed by native clients and shared queries.
 ## Website boundary
 
 The website Journal timeline is retired. `/journal` and the older `/history`
-route permanently redirect to `/home`. Website navigation and Personal Patterns
-no longer link to a Journal page. There is no web-only timeline renderer, date
+route permanently redirect to `/home`. Website navigation
+no longer links to a Journal page. There is no web-only timeline renderer, date
 navigation, page-open refresh, or Journal design study.
 
-Canonical capture, the shared projection, icon catalog, Personal Patterns, and
+Canonical capture, the shared projection, icon catalog, and
 `GET /api/device-sync/companion/journal` remain supported. Environment, private
 chat, calendar, email travel, and approved group capture continue writing the
 same canonical events. Retiring the website page does not delete records.
@@ -275,8 +274,7 @@ and stops at the projection's bounded history window. Top controls offer Today
 and a native calendar drawer. Tapping an entry opens a native detail drawer
 with its summary, metrics, additional details, and source records. Seven-day
 summary values use main sleep and grouped activity once. Additions and
-corrections remain conversational. Home and Personal Patterns keep their
-separate presentation owners.
+corrections remain conversational. Home keeps its separate presentation owner.
 
 Native feed previews use at most three lines. The entry drawer retains the full
 summary, and long secondary source text expands on demand. Date-only records

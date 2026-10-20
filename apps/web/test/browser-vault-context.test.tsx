@@ -164,7 +164,7 @@ test.each(["/settings", "/settings/", "/connect", "/records", "/records/connect"
   },
 );
 
-test.each(["/home", "/patterns", "/experiments", "/training", "/ops"])(
+test.each(["/home", "/experiments", "/training", "/ops"])(
   "data route %s retains its session load",
   async (pathname) => {
     mocks.usePathname.mockReturnValue(pathname);
@@ -1632,19 +1632,7 @@ test("browser-vault provider preserves readable stale data when bounded observat
   const legacyReplica = createReplica({
     generation: BROWSER_VAULT_REPLICA_CURRENT_GENERATION - 1,
   });
-  delete legacyReplica.personalPatterns;
   const currentReplica = createReplica({
-    personalPatterns: {
-      asOfDate: "2026-04-30",
-      cells: [],
-      factors: [],
-      lagDays: 1,
-      notes: [],
-      outcomes: [],
-      repeatableCellCount: 0,
-      testedCellCount: 0,
-      windowDays: 120,
-    },
     source: {
       dataVersion: "e".repeat(64),
       sourceBundleHash: "a".repeat(64),
@@ -1704,7 +1692,7 @@ test("browser-vault provider preserves readable stale data when bounded observat
   vi.stubGlobal("fetch", fetchMock);
 
   const rendered = await renderClientComponent(
-    createAuthenticatedBrowserVaultElement(createElement(BrowserVaultPatternsProbe)),
+    createAuthenticatedBrowserVaultElement(createElement(BrowserVaultReplicaVersionProbe)),
     { requireButton: false },
   );
 
@@ -1725,7 +1713,7 @@ test("browser-vault provider preserves readable stale data when bounded observat
   await act(async () => {
     rendered.window.dispatchEvent(new rendered.window.Event("focus"));
   });
-  await waitForText(rendered.container, "patterns:ready");
+  await waitForText(rendered.container, "current:ready");
   const focusBody = JSON.parse(String(fetchMock.mock.calls.at(-1)?.[1]?.body));
   assert.equal(focusBody.refreshObservationOnly, true);
 
@@ -4224,14 +4212,14 @@ function PublicDashboardRouteProbe() {
   );
 }
 
-function BrowserVaultPatternsProbe() {
+function BrowserVaultReplicaVersionProbe() {
   const vault = useBrowserVault();
-  const patternsAvailable = vault.client?.replica.personalPatterns !== undefined;
+  const current = vault.client?.replica.source.dataVersion === "e".repeat(64);
 
   return createElement(
     "div",
     null,
-    `${patternsAvailable ? "patterns" : "legacy"}:${vault.refreshPending ? "pending" : "ready"}`,
+    `${current ? "current" : "legacy"}:${vault.refreshPending ? "pending" : "ready"}`,
   );
 }
 

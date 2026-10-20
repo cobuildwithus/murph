@@ -86,7 +86,6 @@ import {
 } from "./group-usage-funding-study";
 import { ExperimentResultsShareStudy } from "./experiment-results-share-study";
 import { ExperimentRepeatedResultsStudy } from "./experiment-repeated-results-study";
-import { PersonalPatternsStudy } from "./personal-patterns-study";
 import { BrowserVaultLoadingTransitionsStudy } from "./browser-vault-loading-transitions-study";
 import { FoodLabelLabStudy } from "./food-label-lab-study";
 import {
@@ -327,12 +326,6 @@ export function SectionsContent({
             >
               <TrainingDashboardStudy />
             </div>
-          </StudySection>
-
-          <Separator />
-
-          <StudySection title="Patterns page">
-            <PersonalPatternsStudy />
           </StudySection>
         </>
       ) : null}

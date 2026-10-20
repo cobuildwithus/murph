@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
+import { readFile, readdir } from "node:fs/promises";
 
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
@@ -47,6 +48,21 @@ describe("Goal visual system", () => {
     });
 
     expect(new Set(artwork).size).toBe(GOAL_CATEGORIES.length);
+  });
+
+  it("keeps shared pattern SVG assets free of executable or external content", async () => {
+    const assetDirectory = new URL("../public/design-assets/patterns/", import.meta.url);
+    const assetNames = (await readdir(assetDirectory)).filter((name) => name.endsWith(".svg"));
+
+    expect(assetNames.length).toBeGreaterThan(0);
+    await Promise.all(assetNames.map(async (name) => {
+      const source = await readFile(new URL(name, assetDirectory), "utf8");
+      assert.match(source, /<svg\b/u);
+      assert.doesNotMatch(
+        source,
+        /<script\b|<foreignObject\b|javascript:|(?:href|src)=["'](?:https?:|data:)|url\(["']?https?:/iu,
+      );
+    }));
   });
 
   it("renders category artwork with its original colors softly muted", () => {

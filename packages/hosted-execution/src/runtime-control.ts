@@ -1049,7 +1049,6 @@ export function isHostedUsageOptimizationAuditFeedback(
     && (feedback.summary.slice(HOSTED_USAGE_OPTIMIZATION_AUDIT_PREFIX.length).trim().length > 0 || reject("empty_report"));
 }
 
-export const HOSTED_PATTERN_ENGINE_AUDIT_PREFIX = "Pattern engine audit:";
 
 export function isHostedProductSupportEscalationSummary(
   value: string | null | undefined,

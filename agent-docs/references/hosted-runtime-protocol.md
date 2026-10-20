@@ -2535,66 +2535,10 @@ orchestrator.
 
 Scheduled-job completion diagnostics expose `retryScheduled` after the cron
 owner finalizes durable runtime state. Web prefixes that field as
-`failureRetryScheduled` in persisted redacted log details. Personal Patterns
-operator email ignores failed events unless this field is explicitly `false`;
-missing fields from an older runtime stay quiet. Explicit provider usage-limit
-failures stay quiet too. Occurrence-expired events remain terminal, but Web
-suppresses their operator email when retained `runtime.ai_usage_gate` observations
-establish a platform usage pause at the occurrence or before expiry detection.
-These Web-owned observations use the existing `assistant.automation_detail` event
-with type `runtime.ai_usage_gate`, carry only time and a usage-limited boolean, survive
-an allowance reset under normal diagnostic retention, and never change runtime
-admission. Missing history preserves the ordinary alert. The alert callback uses
-its authenticated member identity for the bounded lookup before coalescing. Every terminal event for one scheduled occurrence uses
-one member-independent email body and Resend idempotency key, so concurrent
-member failures coalesce without a new alert queue or persistence owner.
-The generic email describes either expiry or terminal failure without asserting
-that an expired occurrence reached a model. Expiry diagnostics add
-`failurePriorFailureCount` from the existing consecutive-failure state.
-Snapshot lifecycle events add `nextWakeState`, `nextWakeOffsetMs`,
-`nextDefaultProcessingWakeState`, `nextDefaultProcessingWakeOffsetMs`,
-`nextDefaultProcessingWakeReasonPresent`, and
-`systemMailboxProgressGenerationPresent`. Wake states distinguish `omitted`
-legacy fields, explicit `none`, `invalid`, `due`, and `future`; offsets are
-finite milliseconds relative to diagnostic construction, negative when overdue,
-and null for omitted, absent, or invalid timestamps. These are attempted
-checkpoint projections, not runtime admission decisions. Use
-`checkpoint.snapshot_finished` with `webCheckpointAccepted: true` to establish
-acceptance; failed or preempted snapshots do not establish it. Older runners
-omit the new diagnostics. Neither raw timestamp input nor arbitrary reason
-strings enter the new fields, and no diagnostic drives wake selection.
-Separately, after an exact successful completion clears the matching write
-fence, Cloudflare makes at most one signed `POST` to
-`/api/internal/hosted-runtime/owner-released`. The request has no body, uses a
-timeout capped at two seconds, and is not retried. A strictly future mailbox
-retry continuation still sends the callback after exact fence clear; the retry
-time does not establish whether Web has actionable work. The signed query
-carries the bounded opaque `runtimeAttemptId` whose exact write fence was cleared
-and may also carry `immediateRecheckRequested=1`. That transient edge means this
-invocation produced a default or retention schedule which it committed but did not service;
-inherited and already-attempted wakes do not emit it on the ordinary result path.
-Transport-loss recovery is the narrow exception:
-after explicit inactive-container proof and durable workspace-version advance,
-Cloudflare has lost attempt-local provenance and may conservatively emit the
-edge for a recovered due default wake, causing one facts re-read. It does not do
-so for a future wake. Web binds the user through the signed request. Without the
-edge, it re-derives runnable mailbox lag and never treats a persisted due wake
-as level-triggered signal authority. A live system mailbox item beyond the
-handled-through frontier also remains actionable, including a recording item
-with a future retry. For actionable work it emits the pointer-only
-`runtime_owner_released` signal. Temporal releases an accepted owner horizon only
-when its runtime attempt matches, then immediately re-reads
-durable facts and either runs due work or owns the exact future timer. A stale
-release cannot affect a newer owner. Legacy callbacks without an attempt pointer
-remain facts-only `runtime_recheck_requested` signals during rollout. Future
-mailbox retry continuations remain deferred to their retry time. A callback timeout,
-transport failure, non-success response, or Temporal signal failure is logged
-as metadata-only degradation and cannot change the completed runtime result.
-This is a prompt recheck hint over the existing durable reconciliation path,
-not a new work owner, queue, alarm, or persisted state.
-Duplicate provider retries, duplicate email delivery attempts, or duplicate
-workflow attempts are safe because mailbox append dedupes by event id and
-Temporal signals only coalesce pending work.
+`failureRetryScheduled` in persisted redacted log details. Generic automation
+loss monitoring ignores failures that still have a scheduled retry and explicit
+provider usage limits. The former Patterns-only usage-gate observation writer is removed; usage
+admission and the shared reconciliation diagnostics keep their existing owners.
 
 The signal consumer is a patch-introducing Temporal release because an exact
 match can cancel an accepted timer and schedule the next reconciliation
@@ -4314,7 +4258,7 @@ carries optional `sourceReadAtDeadline: { step, elapsedMs }`. The same done even
 adds `details.browserVaultRefreshSourceReadStep` and
 `details.browserVaultRefreshSourceReadStepElapsedMs`. The closed source labels
 are `canonical_source_read` (`readVaultSourceStrict`), `read_model_construction`
-(`createVaultReadModel`), `personal_pattern_vocabulary_read`, `metric_projection`
+(`createVaultReadModel`), `metric_projection`
 (`buildMetricProjection`), and `default_entity_projection`. Source elapsed time
 is a bounded, finite, non-negative integer measured through the first operation
 boundary at or after the deadline, or through timeout observation while active.

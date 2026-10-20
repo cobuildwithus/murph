@@ -135,7 +135,6 @@ const queryServiceMethodNames = [
   "showWearableMetricTrend",
   "showWearableDrift",
   "showWearableSleepPattern",
-  "showPersonalPatterns",
   "listWearableSleep",
   "listWearableActivity",
   "listWearableBodyState",

@@ -418,7 +418,7 @@ describe("hosted browser-vault replica refresh preparation", () => {
         },
       };
     });
-    const { hashCanonicalQuerySources, readBrowserVaultPersonalPatternVocabulary } =
+    const { hashCanonicalQuerySources } =
       await import("@murphai/query/browser-replica-server");
     const { createHostedBrowserVaultReplicaForSourceState, hashHostedBrowserVaultReplicaSources } =
       await import("../src/hosted-runtime/browser-vault-replica.ts");
@@ -490,11 +490,7 @@ describe("hosted browser-vault replica refresh preparation", () => {
       const vocabularyPath = "derived/knowledge/pages/journal-pattern-vocabulary.md";
       await writeVaultFile(vaultRoot, vocabularyPath, createBrowserVaultVocabularyDocument());
       const withVocabulary = await compareHash();
-      expect(withVocabulary.hash).not.toBe(initial.hash);
-      expect(withVocabulary.fileCount).toBe(initial.fileCount + 1);
-      expect(withVocabulary.totalBytes).toBe(initial.totalBytes + Buffer.byteLength(
-        JSON.stringify(await readBrowserVaultPersonalPatternVocabulary(vaultRoot)),
-      ));
+      expect(withVocabulary).toEqual(initial);
       await writeVaultFile(vaultRoot, "ledger/events/2026/2026-05.jsonl", createBrowserVaultCancellationLedger(4));
       let previous = await compareHash();
       expect(previous.hash).not.toBe(withVocabulary.hash);
@@ -510,7 +506,7 @@ describe("hosted browser-vault replica refresh preparation", () => {
     }
   });
 
-  it("refreshes when the validated Pattern vocabulary changes", async () => {
+  it("ignores the retired Pattern vocabulary without scheduling a replica refresh", async () => {
     const { hashHostedBrowserVaultReplicaSources } = await import(
       "../src/hosted-runtime/browser-vault-replica.ts"
     );
@@ -530,8 +526,7 @@ describe("hosted browser-vault replica refresh preparation", () => {
       const vocabularyHash =
         await hashHostedBrowserVaultReplicaSources(vaultRoot);
 
-      expect(vocabularyHash.hash).not.toBe(initialHash.hash);
-      expect(vocabularyHash.fileCount).toBe(initialHash.fileCount + 1);
+      expect(vocabularyHash).toEqual(initialHash);
     } finally {
       await rm(vaultRoot, { force: true, recursive: true });
     }
@@ -1227,7 +1222,7 @@ describe("hosted browser-vault replica refresh preparation", () => {
       const value = await operation;
       await new Promise<void>((resolve) => {
         releases.set(name, resolve);
-        if (releases.size === 3) started();
+        if (releases.size === 2) started();
       });
       childrenSettled += 1;
       return value;
@@ -1248,9 +1243,6 @@ describe("hosted browser-vault replica refresh preparation", () => {
         },
         readBrowserVaultReplicaVault(...args: Parameters<typeof actual.readBrowserVaultReplicaVault>) {
           return hold("experiments", actual.readBrowserVaultReplicaVault(...args));
-        },
-        readBrowserVaultPersonalPatternVocabulary(...args: Parameters<typeof actual.readBrowserVaultPersonalPatternVocabulary>) {
-          return hold("vocabulary", actual.readBrowserVaultPersonalPatternVocabulary(...args));
         },
       };
     });
@@ -1281,11 +1273,10 @@ describe("hosted browser-vault replica refresh preparation", () => {
       if (cause === "wake") runtimeWakeSignal.notify();
       else if (cause === "abort") controller.abort(new Error("Synthetic host abort"));
       releases.get("canonical")!();
-      releases.get("experiments")!();
       await new Promise<void>((resolve) => setImmediate(resolve));
-      expect(childrenSettled).toBe(2);
+      expect(childrenSettled).toBe(1);
       expect(settled).toBe(false);
-      releases.get("vocabulary")!();
+      releases.get("experiments")!();
       await expect(pending).resolves.toMatchObject({
         status: cause === "wake" ? "deferred_runtime_wake"
           : cause === "abort" ? "deferred_aborted" : "deferred_timeout",
@@ -1296,7 +1287,7 @@ describe("hosted browser-vault replica refresh preparation", () => {
           source: { fileCount: 0, totalBytes: 0 },
         } : {}),
       });
-      expect(childrenSettled).toBe(3);
+      expect(childrenSettled).toBe(2);
       expect(write).not.toHaveBeenCalled();
       expect(publishRef).not.toHaveBeenCalled();
     } finally {
@@ -1436,7 +1427,6 @@ describe("hosted browser-vault replica refresh preparation", () => {
   it.each([
     "canonical_source_read",
     "read_model_construction",
-    "personal_pattern_vocabulary_read",
     "metric_projection",
     "default_entity_projection",
     "between_operations",
@@ -1515,7 +1505,6 @@ describe("hosted browser-vault replica refresh preparation", () => {
 
   it.each([
     "canonical_source_read",
-    "personal_pattern_vocabulary_read",
   ] as const)("attributes an active %s timeout and joins cancellation", async (targetStep) => {
     let resolveStarted = () => {};
     const started = new Promise<void>((resolve) => { resolveStarted = resolve; });

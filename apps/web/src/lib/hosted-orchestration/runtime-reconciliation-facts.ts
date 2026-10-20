@@ -59,7 +59,6 @@ import {
   resolveHostedRuntimeAiUsageGate,
   type HostedRuntimeUsageGateCheck,
 } from "./runtime-usage-decision";
-import type { HostedRuntimeUsageGateObservation } from "../hosted-runtime-log/usage-gate";
 
 type HostedRuntimeReconciliationUsageGateStatus =
   | HostedRuntimeUsageGateCheck["status"]
@@ -129,7 +128,6 @@ export async function readHostedRuntimeReconciliationFacts(
     decisionSource?: HostedRuntimeReconciliationDecisionSource;
     now?: Date | string;
     usageGateMode?: HostedRuntimeReconciliationUsageGateMode;
-    onUsageGateDecision?: (observation: HostedRuntimeUsageGateObservation) => void;
   },
   reportStage?: (stage: HostedRuntimeReconciliationFactsStage) => void,
 ): Promise<HostedRuntimeReconciliationFacts> {
@@ -626,7 +624,6 @@ function emitHostedRuntimeReconciliationFacts(event: {
   usageGateStatus: HostedRuntimeReconciliationUsageGateStatus;
 }): void {
   const { blocked, mailboxLag, workspace } = event.facts;
-  observeHostedRuntimeUsageGateDecision(event);
   const workspaceWakeDue = [
     workspace?.nextWakeAt,
     workspace?.nextDefaultProcessingWakeAt,
@@ -667,24 +664,6 @@ function emitHostedRuntimeReconciliationFacts(event: {
       workspace?.systemMailboxProgressGeneration !== undefined,
     workspacePresent: workspace !== null,
   });
-}
-
-function observeHostedRuntimeUsageGateDecision(
-  event: Parameters<typeof emitHostedRuntimeReconciliationFacts>[0],
-): void {
-  if (
-    event.request.usageGateMode !== "read_only"
-    && (event.usageGateStatus === "allowed" || event.usageGateStatus === "denied")
-  ) {
-    try {
-      event.request.onUsageGateDecision?.({
-        at: event.now.toISOString(),
-        usageLimited: event.usageLimitExceeded === true,
-      });
-    } catch {
-      console.warn("Runtime usage-gate diagnostic could not be scheduled.");
-    }
-  }
 }
 
 function describeHostedRuntimeWakeReasonForLog(reason: string | null): string | null {
