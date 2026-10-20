@@ -36,9 +36,7 @@ const mocks = vi.hoisted(() => ({
   requireHostedRuntimeCallbackTx: vi.fn(),
   isHostedRuntimeLogDatabaseConfigured: vi.fn(),
   listHostedRuntimeLogs: vi.fn(),
-  hasHostedPersonalPatternsRunAlert: vi.fn(),
   publishLatestBrowserVaultReplicaRef: vi.fn(),
-  reportHostedPersonalPatternsRunAlerts: vi.fn(),
   claimHostedAcceptedAttemptFailureRecheck: vi.fn(),
   readHostedMailboxConsumedSeqByLane: vi.fn(),
   readHostedMailboxItemByDedupeKey: vi.fn(),
@@ -140,13 +138,6 @@ vi.mock("@/src/lib/hosted-workspace/runtime-publication", () => ({
 
 vi.mock("@/src/lib/hosted-runtime-log/write", () => ({
   writeHostedRuntimeLogs: mocks.recordHostedRuntimeLogs,
-}));
-
-vi.mock("@/src/lib/hosted-runtime-log/personal-patterns-run-alert", () => ({
-  hasHostedPersonalPatternsRunAlert:
-    mocks.hasHostedPersonalPatternsRunAlert,
-  reportHostedPersonalPatternsRunAlerts:
-    mocks.reportHostedPersonalPatternsRunAlerts,
 }));
 
 vi.mock("@/src/lib/hosted-runtime-log/database", async (importOriginal) => ({
@@ -316,7 +307,6 @@ describe("hosted runtime internal web routes", () => {
       schema: "murph.hosted-runtime-crypto-context.v1", userId: "member_routes_1",
       cacheMaxAgeMs: 300_000, cryptoContextVersion: "synthetic-version", envelopes: { ingress: {} },
     });
-    mocks.hasHostedPersonalPatternsRunAlert.mockReturnValue(false);
     delete process.env.HOSTED_CUSTOM_CHAT_COMPLETIONS_ENABLED;
     mocks.hostedRuntimeMailboxMemberFindUnique.mockResolvedValue(
       buildRuntimeMailboxAccessRecord(),
@@ -3245,7 +3235,7 @@ describe("hosted runtime internal web routes", () => {
     });
   });
 
-  it("acknowledges stale runtime telemetry without persistence, recovery, or alerts", async () => {
+  it("acknowledges stale runtime telemetry without persistence or recovery", async () => {
     mocks.requireHostedCloudflareCallbackRequest.mockRejectedValueOnce(hostedOnboardingError({
       code: "HOSTED_RUNTIME_OWNER_STALE",
       httpStatus: 409,
@@ -3262,7 +3252,6 @@ describe("hosted runtime internal web routes", () => {
       expect(mocks.recordHostedRuntimeLogs).not.toHaveBeenCalled();
       expect(mocks.claimHostedAcceptedAttemptFailureRecheck).not.toHaveBeenCalled();
       expect(mocks.signalHostedRuntimeRecheckRuntime).not.toHaveBeenCalled();
-      expect(mocks.hasHostedPersonalPatternsRunAlert).not.toHaveBeenCalled();
       expect(mocks.after).not.toHaveBeenCalled();
       expect(warn).not.toHaveBeenCalled();
     } finally {
@@ -3337,37 +3326,6 @@ describe("hosted runtime internal web routes", () => {
     } finally {
       warn.mockRestore();
     }
-  });
-
-  it("schedules a Personal Patterns alert after runtime logs persist", async () => {
-    mocks.recordHostedRuntimeLogs.mockResolvedValue(1);
-    mocks.hasHostedPersonalPatternsRunAlert.mockReturnValue(true);
-    const entries = [{
-      at: FIXED_NOW,
-      component: "runtime",
-      eventCode: "assistant.automation_detail",
-      level: "info",
-      phase: "invoke",
-      redactedJson: {
-        failureAutomationSlug: "personal-patterns-update",
-        failureOccurrenceAt: FIXED_NOW,
-        failureRunOutcome: "failed",
-        type: "cron.job.completed",
-      },
-    }];
-
-    const response = await runtimeLogRoute.POST(jsonRequest(
-      "/api/internal/hosted-runtime/log",
-      { entries },
-    ));
-
-    expect(response.status).toBe(200);
-    expect(mocks.after).toHaveBeenCalledOnce();
-    await mocks.after.mock.calls[0]?.[0]();
-    expect(mocks.reportHostedPersonalPatternsRunAlerts).toHaveBeenCalledWith({
-      userId: "member_routes_1",
-      entries,
-    });
   });
 
   it("reports zero persisted logs when deletion wins the diagnostic race", async () => {

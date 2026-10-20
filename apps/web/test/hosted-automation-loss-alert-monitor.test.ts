@@ -69,7 +69,7 @@ describe("scheduled automation loss incident monitor", () => {
     expect(mocks.query).toHaveBeenCalledOnce();
     expect(mocks.query.mock.calls[0]?.[1]).toEqual([
       new Date(+now - HOSTED_AUTOMATION_LOSS_WINDOW_MS), now,
-      expect.any(Array), "personal-patterns-update", "ASSISTANT_CODEX_USAGE_LIMIT",
+      expect.any(Array), "ASSISTANT_CODEX_USAGE_LIMIT",
     ]);
   });
 

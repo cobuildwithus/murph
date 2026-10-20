@@ -191,7 +191,6 @@ import { BetterAuthAdoptionStudy } from "./better-auth-adoption-study";
 import { DataExportControlStudy } from "./data-export-study";
 import { HealthDataConsentControlStudy } from "./health-data-consent-study";
 import { SignupReferralComponentStudy } from "./signup-referral-study";
-import { PersonalPatternsComponentStudy } from "./personal-patterns-study";
 import { DashboardSidebarStudy } from "./dashboard-sidebar-study";
 
 const DESIGN_SIGNED_GROUP_FUNDING_ENDPOINT =
@@ -1035,23 +1034,6 @@ export function ComponentsContent() {
             </div>
           </div>
         </Section>
-
-        <Separator />
-
-        <div
-          data-design-component="personal-patterns"
-          id="personal-patterns-component"
-          inert
-        >
-          <Section title="Personal patterns matrix">
-            <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
-              Production overview component. It compares repeated actions with
-              next-day outcomes and shows evidence strength without causal or
-              good-versus-bad labels.
-            </p>
-            <PersonalPatternsComponentStudy />
-          </Section>
-        </div>
 
         <Separator />
 

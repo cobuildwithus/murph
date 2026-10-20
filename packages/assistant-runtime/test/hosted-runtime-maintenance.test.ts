@@ -669,7 +669,7 @@ describe("runHostedAssistantAutomation", () => {
     mocks.runAssistantAutomationPass.mockImplementationOnce(async (input) => {
       input.onEvent?.({
         failureContext: {
-          automationSlug: "personal-patterns-update",
+          automationSlug: "synthetic-daily-check",
           errorCode: "ASSISTANT_CODEX_USAGE_LIMIT",
           errorPresent: true,
           occurrenceAt: "2026-04-08T13:00:00.000Z",
@@ -714,7 +714,7 @@ describe("runHostedAssistantAutomation", () => {
           redacted: expect.objectContaining({
             failureErrorCode: "ASSISTANT_CODEX_USAGE_LIMIT",
             failureErrorPresent: true,
-            failureAutomationSlug: "personal-patterns-update",
+            failureAutomationSlug: "synthetic-daily-check",
             failureOccurrenceAt: "2026-04-08T13:00:00.000Z",
             failureRetryScheduled: true,
             failureRunStatus: "failed",
@@ -732,7 +732,7 @@ describe("runHostedAssistantAutomation", () => {
     );
   });
 
-  it("persists Personal Patterns failures after the ordinary event cap", async () => {
+  it("applies the ordinary event cap to every scheduled automation slug", async () => {
     mocks.runAssistantAutomationPass.mockImplementationOnce(async (input) => {
       for (let index = 0; index < 13; index += 1) {
         input.onEvent?.({
@@ -742,6 +742,7 @@ describe("runHostedAssistantAutomation", () => {
       }
       input.onEvent?.({
         failureContext: {
+          // The retired Personal Patterns slug no longer bypasses the cap.
           automationSlug: "personal-patterns-update",
           errorCode: "ASSISTANT_CODEX_USAGE_LIMIT",
           errorPresent: true,
@@ -777,12 +778,10 @@ describe("runHostedAssistantAutomation", () => {
       },
     );
 
-    expect(result.redactedLogEntries).toEqual(
+    expect(result.redactedLogEntries).not.toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           redacted: expect.objectContaining({
-            failureAutomationSlug: "personal-patterns-update",
-            failureRunOutcome: "failed",
             type: "cron.job.completed",
           }),
         }),

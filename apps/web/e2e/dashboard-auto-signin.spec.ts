@@ -17,7 +17,7 @@ for (const viewport of [
   test(`dashboard entry opens usable sign-in at ${viewport.width}px`, async ({ page }) => {
     test.setTimeout(180_000);
     await page.setViewportSize(viewport);
-    await page.goto("/patterns", { waitUntil: "load", timeout: 120_000 });
+    await page.goto("/journal", { waitUntil: "load", timeout: 120_000 });
     const dialog = page.getByRole("dialog", { name: "Log in or sign up" });
     await expect(dialog).toBeVisible();
     await expect(dialog.locator('input[type="tel"]')).toBeVisible();
@@ -39,7 +39,7 @@ for (const viewport of [
     }
     await page.keyboard.press("Escape");
     await expect(dialog).toHaveCount(0);
-    await expect(page.getByRole("heading", { name: "Patterns", exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Journal", exact: true })).toBeVisible();
     if (viewport.width >= 1024) {
       await page.locator('a[href="/home"]').first().click();
     } else {

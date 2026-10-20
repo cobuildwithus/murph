@@ -167,8 +167,8 @@ metric projection remain in workflow/step totals; `replicaBuildMs` and
 The full output JSON and dataVersion must be identical between revisions for
 **each** variant (not between raw and filtered variants). No timestamps, ids,
 provenance or fields are stripped. Input immutability is checked as well.
-Actual dataset-build call-count tests cover three old derivations versus one
-when no entities were removed, or two when Personal Patterns needs raw input.
+Actual dataset-build call-count tests now require one default-visible wearable
+dataset per replica. The second raw dataset was removed with Personal Patterns.
 Probe output separates replica-build stringify counts from preparation. Native
 CPU profiles remain optional diagnostics, not paired timing evidence.
 

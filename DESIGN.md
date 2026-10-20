@@ -371,59 +371,6 @@ activation is visible. Historical rows without event-time provenance stay
 Unknown. Label raw member creation metrics as member records, never as proof of
 an acquisition channel.
 
-### Measured Biomarker Index
-
-On `/biomarkers`, device-derived reading rows lead in a flat full-width notebook
-band bracketed by warm one-pixel rules. Do not wrap that band in a rounded card
-or give it a contrasting card background. Lab health areas follow as native
-`<details>` disclosures, expanded by default, with a Fraunces area name and one
-rotating chevron in the summary. Search and `All` / `Review` / `In range`
-filters apply only to saved lab biomarkers. The opened contents are one
-partitioned notebook surface rather than a stack of nested cards: one column on
-every viewport, with one full-width biomarker row between warm one-pixel seams.
-Each lab row uses a narrow 48px-tall semantic status rail beside the biomarker
-name; length supplies rhythm while color carries the source-reported status.
-On phones the name and result stack; from `sm` the name sits left and the
-status/value sits right. Each row is one full-size link showing only the
-biomarker name, source status, and latest value; flagged results sort before
-in-range and unflagged results within their health area. Render `normal` in
-sage, source flags that need review in sienna, and missing flags neutrally as
-`Reported`.
-Use explicit health-area classification; never show an `Other` dump, infer that
-an unflagged result is in range, or turn a source flag into a diagnosis.
-
-### Measured Biomarker Result Detail
-
-On `/biomarkers/results/[metricKey]`, use a sparse reading order: biomarker name
-and saved-history span, latest source status, value, collection date, then the
-numeric history chart. Do not repeat the latest value in comparison, reference,
-or count tiles above the chart. Use sage for a source-reported normal result,
-sienna for flags that need review, and slate for an unflagged reported result.
-Keep the complete result ledger below the chart, including the date, exact
-reported value, source reference range, and lab/source label. Comparator,
-qualitative, and incompatible-unit context stays explicit near the chart or in
-the ledger. When the latest comparable result has a normalized lab range, place
-one quiet `Latest lab range` legend above dashed boundary rules for its
-two-sided band or one-sided limit. Preserve exact `<`, `<=`, `>`, and `>=`
-source boundaries in the legend. Fit the vertical scale to the union of the
-comparable results and the available range bounds. Shade the source range with
-very light sage and the visible below/above regions with very light sienna; keep
-the legend and dashed rules as non-color cues. Label source context as latest so
-it does not imply that older labs shared the same range. If the latest comparable
-result has no usable numeric source range, an exact-unit authored Health Commons
-range may appear instead as `Published adult comparator`; it never changes the
-source status and appears only when the result's normalized specimen kind is
-explicitly eligible. State in the legend that the published comparator is not
-the reporting lab's range, and render it with neutral dashed boundaries only,
-without sage/sienna bands. Missing, mismatched, and context-dependent specimens
-omit it. Keep the authored source label in the chart legend. Qualified source
-ranges remain ledger-only and block a comparator from superseding more specific
-source context. Do not add a visible chart title or single-result trend
-instruction above or below this graph. Simplifying the hierarchy must not imply
-that excluded values were plotted. The loading skeleton mirrors the same
-latest-result, chart, and ledger structure rather than substituting a generic
-card grid.
-
 ### Home Experiment History Cards
 
 Completed experiment cards on `/home` are compact index entries, not miniature
@@ -771,10 +718,9 @@ Lucide React (`lucide-react`) is the default. Lucide Animated (`https://lucide-a
 
 ### Concept Icon Sets
 
-Bespoke iconography lives on its own track from Lucide. Two registers coexist:
+Bespoke iconography lives on its own track from Lucide.
 
-- **Quiver-authored filled paths** (e.g. `public/icons/biomarker-about/*.svg` — the heartbeat, watch face, and bidirectional arrow used in the About Intro Grid). `fill="currentColor"`, complex multi-path, hand-lettered feel. Inline the markup with `dangerouslySetInnerHTML` so callers can drive color via the surrounding text class (`text-primary/85`).
-- **Single-stroke line-art glyphs** (e.g. `apps/web/src/components/biomarkers/biomarker-icon.tsx`). The standard for concept identifier sets where every entry needs a distinct glyph (one per biomarker, one per protocol family, etc.). Spec, applied uniformly across the set: viewBox `0 0 100 100`, `stroke="currentColor" strokeWidth={2.5}`, `fill="none"` (committed across the whole set — don't mix in filled-shape members like a solid moon, the inconsistency reads as a bug), `strokeLinecap="round" strokeLinejoin="round"`, sized at `size-10` (40px) when used as a card anchor. Ship them as inline JSX paths/circles, keyed by the entity routeId, returning `null` for unknown ids so cards degrade gracefully.
+- **Single-stroke line-art glyphs** (e.g. `apps/web/src/components/experiments/experiment-detail/biomarker-icon.tsx`). The standard for concept identifier sets where every entry needs a distinct glyph (one per biomarker, one per protocol family, etc.). Spec, applied uniformly across the set: viewBox `0 0 100 100`, `stroke="currentColor" strokeWidth={2.5}`, `fill="none"` (committed across the whole set — don't mix in filled-shape members like a solid moon, the inconsistency reads as a bug), `strokeLinecap="round" strokeLinejoin="round"`, sized at `size-10` (40px) when used as a card anchor. Ship them as inline JSX paths/circles, keyed by the entity routeId, returning `null` for unknown ids so cards degrade gracefully.
 
 When in doubt, prefer authoring a bespoke glyph over a generic Lucide pick. The "lucide-heart for resting heart rate, lucide-droplet for glucose" reflex is the SaaS-cliché tell — Murph's whole point is that the metaphor is hand-drawn.
 
@@ -806,30 +752,6 @@ Wide horizon, small human — spacious, warm, quietly cinematic. Amber-gold sunr
 > Create an ultra-wide social header for Murph. Keep a lone figure small on the right side of the frame and leave a calm, open copy area on the left. Use soft golden-hour light, low-contrast atmosphere, and a grounded natural landscape. The image should feel warm, spacious, and quietly intelligent, not epic or motivational.
 
 Before shipping any Murph image, verify: (1) warm not hyped, (2) breathing room for copy, (3) real place with real light, (4) quiet human presence, (5) still feels like Murph without the logo.
-
-### Personal Patterns Matrix
-
-Use one flat paper surface for repeated action-to-outcome comparisons. Put Quiver-style factor illustrations on rows and outcomes on columns. Use one marker size. The arrow shows direction, and the percentage shows the size of the difference. Color reflects the meaning of the outcome, not the arrow alone: sage for a favorable change, red for an unfavorable change, and a warm neutral when higher or lower is contextual.
-
-Keep the matrix focused on usable comparisons. Hide a factor row or outcome
-column when every cell still needs more data. Use distinct compact icons for
-`No clear pattern` and `Not enough data`, with details on hover or focus. Show
-factor coverage as a compact five-segment bar. Its tooltip uses `Data coverage` as the
-title and gives the exact recorded-case count below it. Label total sleep time
-as `Sleep duration`. Group sleep score and sleep efficiency under `Sleep quality`. Keep
-their calculations separate and identify the metric in each result popover.
-Keep outcome headings clear without separate help controls. Keep `No clear pattern`
-descriptions to one short sentence.
-
-Keep the copy observational and conversational. Prefer `You slept less after cycling` over a statistical sentence. Never use `caused` or `proved`. Show the activity result and other comparable days as two labeled bars in the cell detail. Keep matched-day counts out of the main result grid; expose them in supporting detail. On narrow screens, use one card per factor with its illustration, compact evidence-coverage bars, and available comparisons in a two-column grid. Use serif values for changed results. Show changed results without a neutral-results footer. Neutral-only cards use a compact factor header with a plain `No clear changes` status beneath the name and no expandable list. Omit measures without enough comparable data from mobile cards. Open mobile result details in a bottom drawer with comparison bars, evidence dates, a close control, and safe-area spacing. Keep mobile result headlines free of redundant metric eyebrows. Show the number of days beside each comparison label in mobile detail drawers. Coverage bars open their own mobile drawer leading with the recorded-day count and the factor name underneath. Reuse the detail content in desktop hover popovers. Desktop keeps the sortable comparison matrix.
-
-Comparison details keep their average bars and expose saved dates in one
-`Days compared` disclosure. Use a week-column calendar with filled factor marks,
-bordered sand confirmed-absence marks, and hollow unrecorded marks. Dates reveal
-their group on selection or keyboard focus. Use `Not recorded` in the legend
-for unrecorded comparisons, with no repeated disclaimer beneath it. Label partial
-arrays beside `Days compared` and omit the calendar when no valid saved dates exist.
-Do not repeat statistics, evidence grades, or idle tap instructions below it.
 
 ## 6. Do's and Don'ts
 

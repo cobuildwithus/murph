@@ -1,4 +1,4 @@
-import { MURPH_JOURNAL_CONNECTED_CONTEXT_MORNING_AUTOMATION_ID, MURPH_PERSONAL_PATTERNS_UPDATE_AUTOMATION_ID } from '../src/assistant/managed-automations.js'
+import { MURPH_JOURNAL_CONNECTED_CONTEXT_MORNING_AUTOMATION_ID } from '../src/assistant/managed-automations.js'
 import { MURPH_WEEKLY_USAGE_OPTIMIZER_AUTOMATION_ID } from '../src/assistant/managed-automation-ids.js'
 import { createHmac } from "node:crypto";
 import { rm } from "node:fs/promises";
@@ -607,7 +607,6 @@ describe("assistant scheduled-log cron helpers", () => {
 describe('managed usage workflow attribution', () => {
   it.each([
     [MURPH_JOURNAL_CONNECTED_CONTEXT_MORNING_AUTOMATION_ID, 'assistant_cron_journal_context'],
-    [MURPH_PERSONAL_PATTERNS_UPDATE_AUTOMATION_ID, 'assistant_cron_personal_patterns'],
     [MURPH_WEEKLY_USAGE_OPTIMIZER_AUTOMATION_ID, 'assistant_cron_usage_optimizer'],
   ])('uses a fixed category for a host-bound occurrence (%s)', (automationId, expected) => {
     const input = { deliverResponse: false, promptProfile: 'conversation' as const,

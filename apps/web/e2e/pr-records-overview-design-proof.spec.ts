@@ -14,8 +14,8 @@ for (const width of [390, 1280]) {
     await expect(study.getByText("Northstar Health", { exact: true })).toBeVisible();
     await expect(study.getByText("Import incomplete", { exact: true })).toBeVisible();
     await expect(study.getByText(/248 records added/)).toBeVisible();
-    await expect(study.getByRole("link", { name: "View lab results" })).toHaveAttribute("href", "/biomarkers");
-    await expect(study.getByRole("link", { name: "Import again" })).toBeHidden();
+    await expect(study.getByRole("link", { name: "View lab results" })).toHaveCount(0);
+    await expect(study.getByRole("link", { name: "Import again" })).toBeVisible();
     await expect(study.getByRole("button", { name: "Disconnect", exact: true })).toBeHidden();
     await page.evaluate(async () => {
       await document.fonts.ready;

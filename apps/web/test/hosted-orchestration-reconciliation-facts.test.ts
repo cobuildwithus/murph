@@ -1522,31 +1522,6 @@ describe("hosted orchestration reconciliation facts", () => {
     expect(mocks.sendClaimedHostedAiUsageLimitNoticeToTelegramThread).not.toHaveBeenCalled();
   });
 
-  it.each([true, false])("observes authoritative usage-limited=%s without changing admission", async (usageLimited) => {
-    const onUsageGateDecision = vi.fn();
-    mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
-      nextWakeAt: FIXED_NOW, nextWakeReason: "assistant_due",
-    }));
-    mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue(usageLimited
-      ? { status: "denied", decision: buildUsageLimitExceededGateDecision() }
-      : { status: "allowed" });
-    const { readHostedRuntimeReconciliationFacts } = await import(
-      "../src/lib/hosted-orchestration/runtime-reconciliation-facts"
-    );
-    const facts = await readHostedRuntimeReconciliationFacts({ userId: MEMBER_ID, onUsageGateDecision });
-    expect(onUsageGateDecision).toHaveBeenCalledExactlyOnceWith({ at: FIXED_NOW, usageLimited });
-    expect(facts.blocked?.reason ?? null).toBe(usageLimited ? "ai_usage_denied" : null);
-    onUsageGateDecision.mockClear();
-    await readHostedRuntimeReconciliationFacts({ userId: MEMBER_ID, usageGateMode: "read_only", onUsageGateDecision });
-    expect(onUsageGateDecision).not.toHaveBeenCalled();
-    const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    try {
-      await expect(readHostedRuntimeReconciliationFacts({
-        userId: MEMBER_ID, onUsageGateDecision: () => { throw new Error("synthetic scheduling failure"); },
-      })).resolves.toMatchObject({ blocked: facts.blocked });
-    } finally { warning.mockRestore(); }
-  });
-
   it("does not gate future model-capable workspace wakes", async () => {
     mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
       nextWakeAt: "2026-05-20T12:05:00.000Z",

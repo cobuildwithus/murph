@@ -114,7 +114,6 @@ test("root query export keeps runtime projection methods available as lazy wrapp
     "summarizeWearableMetricTrendRuntime",
     "summarizeWearableSleepRuntime",
     "summarizeWearableSleepPatternRuntime",
-    "buildPersonalPatternReportRuntime",
     "summarizeWearableActivityRuntime",
     "summarizeWearableBodyStateRuntime",
     "summarizeWearableRecoveryRuntime",

@@ -53,12 +53,11 @@ describe.skipIf(!enabled)("scheduled automation loss PostgreSQL aggregate", () =
     });
   });
 
-  it("counts terminal failures and excludes retries, usage limits, gated expiry and Personal Patterns", async () => {
+  it("counts terminal failures and excludes retries, usage limits and gated expiry", async () => {
     await insert(2, failed(true));
     await insert(3, failed(false, "ASSISTANT_CODEX_USAGE_LIMIT"));
     await insert(4, expired("weekly-health-insight", 0));
     await insert(5, expired("weekly-health-insight", "5"));
-    await insert(6, expired("personal-patterns-update"));
     await insert(7, { type: "cron.job.completed", failureAutomationSlug: "weekly-health-digest",
       failureRunOutcome: "failed", failureRetryScheduled: "false" });
     await insert(8, { ...failed(false), failureErrorCode: undefined }, { errorCode: "ASSISTANT_CODEX_USAGE_LIMIT" });

@@ -9,7 +9,6 @@ import {
   loadGeneratedHealthCommonsProtocolFamilyGraph,
   loadGeneratedHealthCommonsProtocolIndex,
   loadGeneratedHealthCommonsProtocolRunSpecs,
-  loadGeneratedHealthCommonsWebBiomarkerIndex,
   loadGeneratedHealthCommonsWebExperimentIndex,
   loadGeneratedHealthCommonsWebExperimentProtocolTab,
   loadGeneratedHealthCommonsWebExperimentResearchTab,
@@ -23,14 +22,12 @@ import {
   type HealthCommonsProtocolIndexEntry,
 } from "../src/protocol-artifacts.ts";
 import {
-  HEALTH_COMMONS_WEB_BIOMARKER_INDEX_SCHEMA_VERSION,
   HEALTH_COMMONS_WEB_EXPERIMENT_INDEX_SCHEMA_VERSION,
   HEALTH_COMMONS_WEB_EXPERIMENT_PROTOCOL_TAB_SCHEMA_VERSION,
   HEALTH_COMMONS_WEB_EXPERIMENT_RESEARCH_TAB_SCHEMA_VERSION,
   HEALTH_COMMONS_WEB_EXPERIMENT_RESULTS_PUBLIC_SCHEMA_VERSION,
   HEALTH_COMMONS_WEB_EXPERIMENT_SHELL_SCHEMA_VERSION,
   HEALTH_COMMONS_WEB_ROUTE_INDEX_SCHEMA_VERSION,
-  type HealthCommonsWebBiomarkerIndexEntry,
   type HealthCommonsWebExperimentIndexEntry,
   type HealthCommonsWebExperimentProtocolTab,
   type HealthCommonsWebExperimentResearchGroup,
@@ -421,19 +418,10 @@ const experimentEntry = {
   hidden: false, image: null, key: KEY, quality: null, revision: REVISION,
   routeId: ROUTE_ID, slug: ROUTE_ID, status: null, studyCount: 0, summary: null, title: "",
 } satisfies HealthCommonsWebExperimentIndexEntry;
-const biomarkerEntry = {
-  aliases: [], bundlePath: "bundles/biomarker/example-marker.json", categories: [],
-  privateMetricBindings: [], valuePrecision: 0,
-  desiredDirection: null, fallbackRanges: [], hidden: false, key: "biomarker:example-marker",
-  published: false, quality: null, revision: REVISION, routeId: "example-marker", shortName: "",
-  slug: "example-marker", status: null, summary: null, title: "", unit: null,
-} satisfies HealthCommonsWebBiomarkerIndexEntry;
 
 describe.each([
   { name: "experiment", entry: experimentEntry, field: "experiments", file: "browse/experiments.json",
     version: HEALTH_COMMONS_WEB_EXPERIMENT_INDEX_SCHEMA_VERSION, load: loadGeneratedHealthCommonsWebExperimentIndex },
-  { name: "biomarker", entry: biomarkerEntry, field: "biomarkers", file: "browse/biomarkers.json",
-    version: HEALTH_COMMONS_WEB_BIOMARKER_INDEX_SCHEMA_VERSION, load: loadGeneratedHealthCommonsWebBiomarkerIndex },
 ] as const)("generated $name index boundaries", ({ name, entry, field, file, version, load }) => {
   it.each([
     ["null required nullable fields", {}, true],
@@ -463,39 +451,6 @@ describe.each([
         if (Array.isArray(entries) && entries.length === 0) expect(load(options)).toStrictEqual(expected);
         else expect(() => load(options)).toThrow(new Error(`Health Commons generated web ${name} index is invalid.`));
       }
-    });
-  });
-});
-
-describe("generated biomarker fallback arrays", () => {
-  it("preserves finite bounds and nonempty specimen checks within checked arrays", () => {
-    const range = { applicability: "", eligibleSpecimenKinds: ["serum"], label: "", unit: "",
-      lowerBound: { inclusive: true, value: 1 }, upperBound: { inclusive: false, value: 2 } };
-    withGeneratedWebRoot((options) => {
-      for (const [fallbackRanges, accepted] of [
-        [[range], true],
-        [[{ ...range, upperBound: undefined }], true],
-        [null, false], [undefined, false], [{}, false], [[null], false],
-        [[{ ...range, eligibleSpecimenKinds: [] }], false],
-        [[{ ...range, lowerBound: { inclusive: true, value: 2 } }], false],
-        [[{ ...range, upperBound: { inclusive: false, value: "2" } }], false],
-      ] as const) {
-        const expected = writeJson(options.generatedWebRoot, "browse/biomarkers.json", {
-          catalogHash: CATALOG_HASH, schemaVersion: HEALTH_COMMONS_WEB_BIOMARKER_INDEX_SCHEMA_VERSION,
-          // These fields are not validated by the current reader; do not tighten it.
-          biomarkers: [{ ...biomarkerEntry, shortName: undefined, sortRank: "unchecked", fallbackRanges }],
-        });
-        const load = () => loadGeneratedHealthCommonsWebBiomarkerIndex(options);
-        if (accepted) expect(load()).toStrictEqual(expected);
-        else expect(load).toThrow(new Error("Health Commons generated web biomarker index is invalid."));
-      }
-      const artifact = { catalogHash: CATALOG_HASH,
-        schemaVersion: HEALTH_COMMONS_WEB_BIOMARKER_INDEX_SCHEMA_VERSION,
-        biomarkers: [{ ...biomarkerEntry, fallbackRanges: [range] }] };
-      const raw = JSON.stringify(artifact).replace('"value":2', '"value":1e400');
-      writeFileSync(path.join(options.generatedWebRoot, "browse/biomarkers.json"), raw, "utf8");
-      expect(() => loadGeneratedHealthCommonsWebBiomarkerIndex(options))
-        .toThrow(new Error("Health Commons generated web biomarker index is invalid."));
     });
   });
 });
