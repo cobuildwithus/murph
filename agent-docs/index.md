@@ -1,4 +1,8 @@
 Documentation guard diagnostic clarification is tracked in
+
+OAuth retirement deployment compatibility is tracked in
+[the callback drain plan](exec-plans/active/2026-10-20-oauth-callback-drain.md);
+`references/hosted-runtime-protocol.md` remains the live contract owner.
 [the diagnostic plan](exec-plans/completed/2026-10-19-frog-docs-diagnostic-4205.md).
 
 Snapshot upload failure phases are owned by
