@@ -1,6 +1,6 @@
 # Retire experiment website and public protocol content
 
-Status: active
+Status: completed
 Created: 2026-10-19
 Updated: 2026-10-19
 
@@ -71,3 +71,12 @@ Done when: focused tests and typechecks pass and the final diff preserves Enviro
 - ReviewGPT round 1 found one accepted activation regression: the retired compression-device protocol used a blocking negative answer, so an empty positive-answer list could not authorize activation. The user resumed remediation. The existing safety guard now receives the saved protocol key and requires a fresh private plan for this protocol, without restoring a catalog or changing active-run logging/closeout. Regression cases cover absent and empty positive-answer lists and verify that rejection leaves the canonical document unchanged.
 - Corrected the runner bundle parity probe to use retained Commons goals and removed two obsolete Web design assertions. Focused remediation proof passes: 30 experiment tests, 17 bundle tests, 14 Web tests, all three relevant typechecks, and the complexity guard.
 - Claude remediation review returned PASS: the single saved-protocol-key branch closes the negative-answer gap; private and harmless saved activation paths remain available; active historical tuning and closeout retain their existing paths.
+
+## Final review and handoff
+
+- ReviewGPT round 2 returned PASS on `0668ef7ad13cf7345f5cf2aa9c6368f47f7ba236` in the existing review thread. GPT-6 Pro selection, attached full sensitive snapshot, exact accepted-turn and response hashes, immutable first-reviewed head, ancestry, completion marker, and minimum response duration were verified. The accepted round-1 negative-answer activation finding is resolved; no findings remain.
+- Reconciled current main after the independent Journal website removal blocked CI admission. Four conflicts in the design page, Journal component, browser context tests, and dashboard metadata tests were resolved by combining the existing deletions. Inspected each against both parents; no new behavior, config, schema, or contract was authored. The base-update-only review exception applies.
+- Post-merge proof passes 154 Web tests and Web typecheck. Mobile and desktop navigation/404 proof passes at 390px and 1280px; inspected both screenshots. Environment remains linked; Experiments is absent and its route returns 404.
+- Parent final review confirms explicit private plans, saved historical records, shared Commons knowledge, and Environment remain supported. No replacement service, dependency, or persistence owner was added.
+- PR #4216 remains open for final-head required CI and reviewer handoff. No merge or production deployment is requested or performed.
+Completed: 2026-10-19
