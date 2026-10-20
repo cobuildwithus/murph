@@ -136,6 +136,8 @@ export const HOSTED_RUNTIME_ASSISTANT_ASK_CONTROL_PATH =
 export const HOSTED_RUNTIME_ASSISTANT_ASK_CONTROL_BODY_MAX_BYTES = 32 * 1_024;
 export const HOSTED_RUNTIME_OPERATOR_TASK_CONTROL_PATH =
   "/api/internal/hosted-execution/operator-tasks/runtime";
+export const HOSTED_RUNTIME_CODEX_AUTH_PATH =
+  "/api/internal/hosted-runtime/codex-auth";
 export const HOSTED_RUNTIME_VAULT_SHARE_DELIVER_PATH =
   "/api/internal/hosted-runtime/vault-share/deliver";
 export const HOSTED_RUNTIME_VAULT_SHARE_DELIVER_CONTINUATION_FIELD =

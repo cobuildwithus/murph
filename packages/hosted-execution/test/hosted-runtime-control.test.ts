@@ -63,6 +63,7 @@ import {
   verifyHostedAiUsageAllowDecision,
 } from "../src/runtime-control.ts";
 import {
+  parseHostedCodexAuthUpdate,
   parseHostedMailboxFetchRequest,
   parseHostedMailboxFetchResponse,
   parseHostedMailboxItem,
@@ -102,6 +103,60 @@ it("preserves configuration parser identity through the legacy export", () => {
   expect(parseHostedRuntimeAssistantConfigurationControlRequest).toBe(parseConfigurationControlRequest);
   expect(parseHostedRuntimeAssistantConfigurationToolRequest).toBe(parseConfigurationToolRequest);
   expect(parseHostedRuntimeAssistantConfigurationToolResponse).toBe(parseConfigurationToolResponse);
+});
+
+describe("retained legacy Codex auth callback contract", () => {
+  const attemptId = "hca_synthetic_attempt_01";
+  const deviceCode = {
+    attemptId,
+    phase: "device_code",
+    userCode: "SYNTHETIC-CODE",
+    verificationUrl: "https://auth.openai.com/codex/device",
+  };
+
+  it("accepts the former device-code and terminal callback shapes", () => {
+    expect(parseHostedCodexAuthUpdate(deviceCode)).toEqual(deviceCode);
+    for (const phase of ["connected", "disconnected", "failed"]) {
+      expect(parseHostedCodexAuthUpdate({ attemptId, phase })).toEqual({ attemptId, phase });
+    }
+    for (const length of [16, 64]) {
+      const boundary = { ...deviceCode, attemptId: `hca_${"a".repeat(length)}`, userCode: "a".repeat(128) };
+      expect(parseHostedCodexAuthUpdate(boundary)).toEqual(boundary);
+    }
+  });
+
+  it.each([
+    null,
+    [],
+    {},
+    { attemptId, phase: "connecting" },
+    { attemptId, phase: "connected", userCode: "SYNTHETIC-CODE" },
+    { attemptId, phase: "failed", memberId: "member_other" },
+    { ...deviceCode, accessToken: "synthetic-not-a-token" },
+    { ...deviceCode, userCode: "" },
+    { ...deviceCode, userCode: "a".repeat(129) },
+    { ...deviceCode, userCode: 123 },
+    { ...deviceCode, attemptId: `hca_${"a".repeat(15)}` },
+    { ...deviceCode, attemptId: `hca_${"a".repeat(65)}` },
+    { ...deviceCode, attemptId: "hca_synthetic.attempt.01" },
+    { ...deviceCode, attemptId: " hca_synthetic_attempt_01" },
+    { ...deviceCode, attemptId: "synthetic_attempt_01" },
+  ])("rejects malformed, over-bound, or extended callback payload %#", (payload) => {
+    expect(() => parseHostedCodexAuthUpdate(payload)).toThrow(TypeError);
+  });
+
+  it.each([
+    "",
+    "/codex/device",
+    "http://auth.openai.com/codex/device",
+    "https://example.com/codex/device",
+    "https://auth.openai.com.example.com/codex/device",
+    "https://synthetic@auth.openai.com/codex/device",
+    "https://synthetic:password@auth.openai.com/codex/device",
+    "https://auth.openai.com@other.example/codex/device",
+  ])("rejects untrusted verification URL %#", (verificationUrl) => {
+    expect(() => parseHostedCodexAuthUpdate({ ...deviceCode, verificationUrl })).toThrow(TypeError);
+  });
 });
 
 describe("hosted runtime control contracts", () => {

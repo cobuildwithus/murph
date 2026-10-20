@@ -2324,6 +2324,29 @@ export type HostedRuntimeAssistantConfigurationToolResponse =
       };
     };
 
+// Retained for callbacks from deployed pre-retirement runners; no new producers.
+export type HostedCodexAuthUpdate =
+  | {
+      attemptId: string;
+      phase: "device_code";
+      userCode: string;
+      verificationUrl: string;
+    }
+  | {
+      attemptId: string;
+      phase: "connected" | "disconnected" | "failed";
+    };
+
+export type HostedCodexAuthUpdateResponseStatus =
+  | "applied"
+  | "already_applied"
+  | "superseded";
+
+export interface HostedCodexAuthUpdateResponse {
+  applied: boolean;
+  status: HostedCodexAuthUpdateResponseStatus;
+}
+
 export interface HostedRuntimeIssueExportRequest {
   issues: AssistantRuntimeIssueRecord[];
 }
