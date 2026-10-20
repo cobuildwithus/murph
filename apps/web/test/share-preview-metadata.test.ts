@@ -19,9 +19,6 @@ vi.mock("@/src/lib/hosted-onboarding/invite-service", () => ({
   buildHostedInvitePageData: vi.fn(),
 }));
 
-vi.mock("@/src/components/biomarkers/biomarker-detail/biomarker-research", () => ({
-  BiomarkerResearch: () => null,
-}));
 
 vi.mock("@/src/components/hosted-onboarding/join-invite-preview", () => ({
   JoinInvitePreview: () => null,
@@ -102,25 +99,6 @@ describe("share preview metadata", () => {
     expectRouteFile("../app/groups/fund/[joinCode]/opengraph-image.tsx");
   });
 
-  it("biomarker research keeps the parent biomarker card", async () => {
-    const { generateMetadata } = await import(
-      "../app/(dashboard)/biomarkers/[biomarkerId]/research/page"
-    );
-    const metadata = await generateMetadata({
-      params: Promise.resolve({ biomarkerId: "deep-sleep-minutes" }),
-    });
-
-    // Alt mirrors the parent route's subject-specific wording.
-    expectDedicatedImage(metadata, {
-      alt: expect.stringMatching(/^.+, a Murph biomarker\.$/),
-      url: "/biomarkers/deep-sleep-minutes/opengraph-image",
-    });
-    expect(metadata.alternates?.canonical).toBe(
-      "/biomarkers/deep-sleep-minutes/research",
-    );
-    expect(metadata.robots).toEqual({ follow: true, index: true });
-    expectRouteFile("../app/biomarkers/[biomarkerId]/opengraph-image.tsx");
-  });
 
   it("join checkout outcome pages keep the invite card", async () => {
     const successPage = await import("../app/join/[inviteCode]/success/page");

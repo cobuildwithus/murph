@@ -46,7 +46,6 @@ const requiredOgRouteTraceMarkers = [
   "server/app/join/[inviteCode]/opengraph-image",
   "server/app/family/accept/[inviteCode]/opengraph-image",
   "server/app/groups/join/[joinCode]/opengraph-image",
-  "server/app/biomarkers/[biomarkerId]/opengraph-image",
   "server/app/changelog/card/v1/[items]/route.js.nft.json",
   "server/app/imessage/card/v1/[payload]/route.js.nft.json",
 ] as const;

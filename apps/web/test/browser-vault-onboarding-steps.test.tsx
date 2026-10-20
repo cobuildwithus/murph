@@ -11,7 +11,7 @@ import { beforeEach, test, vi } from "vitest";
 import type {
   BrowserVaultMetricRow,
   BrowserVaultQueryClient,
-} from "@murphai/query/browser-biomarkers";
+} from "@murphai/query/browser-replica-client";
 import type {
   BrowserVaultEntity,
   BrowserVaultReplica,

@@ -371,59 +371,6 @@ activation is visible. Historical rows without event-time provenance stay
 Unknown. Label raw member creation metrics as member records, never as proof of
 an acquisition channel.
 
-### Measured Biomarker Index
-
-On `/biomarkers`, device-derived reading rows lead in a flat full-width notebook
-band bracketed by warm one-pixel rules. Do not wrap that band in a rounded card
-or give it a contrasting card background. Lab health areas follow as native
-`<details>` disclosures, expanded by default, with a Fraunces area name and one
-rotating chevron in the summary. Search and `All` / `Review` / `In range`
-filters apply only to saved lab biomarkers. The opened contents are one
-partitioned notebook surface rather than a stack of nested cards: one column on
-every viewport, with one full-width biomarker row between warm one-pixel seams.
-Each lab row uses a narrow 48px-tall semantic status rail beside the biomarker
-name; length supplies rhythm while color carries the source-reported status.
-On phones the name and result stack; from `sm` the name sits left and the
-status/value sits right. Each row is one full-size link showing only the
-biomarker name, source status, and latest value; flagged results sort before
-in-range and unflagged results within their health area. Render `normal` in
-sage, source flags that need review in sienna, and missing flags neutrally as
-`Reported`.
-Use explicit health-area classification; never show an `Other` dump, infer that
-an unflagged result is in range, or turn a source flag into a diagnosis.
-
-### Measured Biomarker Result Detail
-
-On `/biomarkers/results/[metricKey]`, use a sparse reading order: biomarker name
-and saved-history span, latest source status, value, collection date, then the
-numeric history chart. Do not repeat the latest value in comparison, reference,
-or count tiles above the chart. Use sage for a source-reported normal result,
-sienna for flags that need review, and slate for an unflagged reported result.
-Keep the complete result ledger below the chart, including the date, exact
-reported value, source reference range, and lab/source label. Comparator,
-qualitative, and incompatible-unit context stays explicit near the chart or in
-the ledger. When the latest comparable result has a normalized lab range, place
-one quiet `Latest lab range` legend above dashed boundary rules for its
-two-sided band or one-sided limit. Preserve exact `<`, `<=`, `>`, and `>=`
-source boundaries in the legend. Fit the vertical scale to the union of the
-comparable results and the available range bounds. Shade the source range with
-very light sage and the visible below/above regions with very light sienna; keep
-the legend and dashed rules as non-color cues. Label source context as latest so
-it does not imply that older labs shared the same range. If the latest comparable
-result has no usable numeric source range, an exact-unit authored Health Commons
-range may appear instead as `Published adult comparator`; it never changes the
-source status and appears only when the result's normalized specimen kind is
-explicitly eligible. State in the legend that the published comparator is not
-the reporting lab's range, and render it with neutral dashed boundaries only,
-without sage/sienna bands. Missing, mismatched, and context-dependent specimens
-omit it. Keep the authored source label in the chart legend. Qualified source
-ranges remain ledger-only and block a comparator from superseding more specific
-source context. Do not add a visible chart title or single-result trend
-instruction above or below this graph. Simplifying the hierarchy must not imply
-that excluded values were plotted. The loading skeleton mirrors the same
-latest-result, chart, and ledger structure rather than substituting a generic
-card grid.
-
 ### Home Experiment History Cards
 
 Completed experiment cards on `/home` are compact index entries, not miniature
@@ -771,10 +718,9 @@ Lucide React (`lucide-react`) is the default. Lucide Animated (`https://lucide-a
 
 ### Concept Icon Sets
 
-Bespoke iconography lives on its own track from Lucide. Two registers coexist:
+Bespoke iconography lives on its own track from Lucide.
 
-- **Quiver-authored filled paths** (e.g. `public/icons/biomarker-about/*.svg` — the heartbeat, watch face, and bidirectional arrow used in the About Intro Grid). `fill="currentColor"`, complex multi-path, hand-lettered feel. Inline the markup with `dangerouslySetInnerHTML` so callers can drive color via the surrounding text class (`text-primary/85`).
-- **Single-stroke line-art glyphs** (e.g. `apps/web/src/components/biomarkers/biomarker-icon.tsx`). The standard for concept identifier sets where every entry needs a distinct glyph (one per biomarker, one per protocol family, etc.). Spec, applied uniformly across the set: viewBox `0 0 100 100`, `stroke="currentColor" strokeWidth={2.5}`, `fill="none"` (committed across the whole set — don't mix in filled-shape members like a solid moon, the inconsistency reads as a bug), `strokeLinecap="round" strokeLinejoin="round"`, sized at `size-10` (40px) when used as a card anchor. Ship them as inline JSX paths/circles, keyed by the entity routeId, returning `null` for unknown ids so cards degrade gracefully.
+- **Single-stroke line-art glyphs** (e.g. `apps/web/src/components/experiments/experiment-detail/biomarker-icon.tsx`). The standard for concept identifier sets where every entry needs a distinct glyph (one per biomarker, one per protocol family, etc.). Spec, applied uniformly across the set: viewBox `0 0 100 100`, `stroke="currentColor" strokeWidth={2.5}`, `fill="none"` (committed across the whole set — don't mix in filled-shape members like a solid moon, the inconsistency reads as a bug), `strokeLinecap="round" strokeLinejoin="round"`, sized at `size-10` (40px) when used as a card anchor. Ship them as inline JSX paths/circles, keyed by the entity routeId, returning `null` for unknown ids so cards degrade gracefully.
 
 When in doubt, prefer authoring a bespoke glyph over a generic Lucide pick. The "lucide-heart for resting heart rate, lucide-droplet for glucose" reflex is the SaaS-cliché tell — Murph's whole point is that the metaphor is hand-drawn.
 

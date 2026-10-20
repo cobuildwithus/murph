@@ -15,7 +15,6 @@ import {
   createBrowserVaultReplica,
   createVaultReadModel,
   parseBrowserVaultReplica,
-  selectBrowserVaultBiomarkerPanel,
 } from "../src/browser.ts";
 import {
   buildMetricProjection,
@@ -476,20 +475,6 @@ test("unitless catalog labs stay raw and cannot drive metric consumers", async (
   const unitlessClient = createBrowserVaultQueryClient(parseBrowserVaultReplica(unitlessReplica));
   const unitlessSelection = unitlessClient.metricSelections.get("ldl-c");
   const unitlessGoal = unitlessClient.metricGoals.progress({ goalId: "goal_ldl_unit_provenance" })[0];
-  const unitlessPanel = selectBrowserVaultBiomarkerPanel({
-    biomarkerKey: "biomarker:ldl-c",
-    client: unitlessClient,
-    label: "LDL-C",
-    metricKey: "ldl-c",
-    trendDefaults: {
-      aggregation: "mean",
-      comparisonWindowDays: 30,
-      latestWindowDays: 30,
-      minimumPoints: 1,
-    },
-    unit: "mg/dL",
-    valuePrecision: 0,
-  });
 
   assert.deepEqual(
     unitlessClient.labResults.list({ metricKey: "ldl-c" }).map((row) => [
@@ -505,8 +490,6 @@ test("unitless catalog labs stay raw and cannot drive metric consumers", async (
   assert.equal(unitlessSelection.status, "no_data");
   assert.equal(unitlessSelection.value, null);
   assert.equal(unitlessSelection.selectedMetricRowId, null);
-  assert.equal(unitlessPanel.status, "no_data");
-  assert.equal(unitlessPanel.primary, null);
   assert.ok(unitlessGoal);
   assert.equal(unitlessGoal.status, "unsupported");
   assert.equal(unitlessGoal.currentValue, null);

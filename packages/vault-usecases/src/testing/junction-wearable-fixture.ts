@@ -25,12 +25,6 @@ import {
   createBrowserVaultReplica,
   parseBrowserVaultReplica,
 } from "@murphai/query/browser";
-import {
-  selectBrowserVaultBiomarkerPanel,
-  type BrowserVaultBiomarkerMetricBinding,
-  type BrowserVaultBiomarkerPanelStatus,
-  type BrowserVaultBiomarkerTrendDefaults,
-} from "@murphai/query/browser-biomarkers";
 
 export const JUNCTION_WEARABLE_FIXTURE_PATH_ENV = "MURPH_JUNCTION_WEARABLE_FIXTURE_PATH";
 export const JUNCTION_WEARABLE_HOSTED_REPLAY_FIXTURE_PATH_ENV =
@@ -50,56 +44,6 @@ const JUNCTION_HOSTED_DIRECT_REPLAY_SUMMARY_RESOURCE_NAMES = new Set<string>([
   "activity",
   "sleep",
 ]);
-const DEFAULT_WEARABLE_TREND_DEFAULTS = {
-  aggregation: "median",
-  comparisonWindowDays: 30,
-  latestWindowDays: 7,
-  minimumPoints: 5,
-} as const satisfies BrowserVaultBiomarkerTrendDefaults;
-
-const HRV_RMSSD_TREND_DEFAULTS = {
-  ...DEFAULT_WEARABLE_TREND_DEFAULTS,
-  minimumPoints: 7,
-} as const satisfies BrowserVaultBiomarkerTrendDefaults;
-
-const DEEP_SLEEP_MINUTES_TREND_DEFAULTS = {
-  ...DEFAULT_WEARABLE_TREND_DEFAULTS,
-  latestWindowDays: 14,
-  minimumPoints: 7,
-} as const satisfies BrowserVaultBiomarkerTrendDefaults;
-
-export const JUNCTION_WEARABLE_BROWSER_VAULT_BIOMARKER_EXPECTATIONS = [
-  wearableBiomarkerExpectation({
-    biomarkerKey: "biomarker:deep-sleep-minutes",
-    label: "Deep sleep",
-    metricKey: "deep-sleep-minutes",
-    trendDefaults: DEEP_SLEEP_MINUTES_TREND_DEFAULTS,
-    unit: "minutes",
-    valuePrecision: 0,
-  }),
-  wearableBiomarkerExpectation({
-    biomarkerKey: "biomarker:hrv-rmssd",
-    label: "HRV",
-    metricKey: "hrv-rmssd",
-    trendDefaults: HRV_RMSSD_TREND_DEFAULTS,
-    unit: "ms",
-    valuePrecision: 0,
-  }),
-  wearableBiomarkerExpectation({
-    biomarkerKey: "biomarker:rem-sleep-minutes",
-    label: "REM",
-    metricKey: "rem-sleep-minutes",
-    unit: "minutes",
-    valuePrecision: 0,
-  }),
-  wearableBiomarkerExpectation({
-    biomarkerKey: "biomarker:resting-heart-rate",
-    label: "RHR",
-    metricKey: "resting-heart-rate",
-    unit: "bpm",
-    valuePrecision: 0,
-  }),
-] as const satisfies readonly JunctionWearableBiomarkerPanelExpectation[];
 
 export const JUNCTION_WEARABLE_BROWSER_VAULT_METRIC_EXPECTATIONS = [
   { metricKey: "activity-minutes", minimumRows: 5 },
@@ -123,35 +67,6 @@ export const JUNCTION_WEARABLE_HOSTED_DIRECT_REPLAY_BROWSER_VAULT_METRIC_EXPECTA
   JUNCTION_WEARABLE_BROWSER_VAULT_METRIC_EXPECTATIONS.filter((expectation) =>
     !JUNCTION_HOSTED_DIRECT_REPLAY_REST_FALLBACK_METRIC_KEYS.has(expectation.metricKey)
   );
-
-function wearableBiomarkerExpectation(input: {
-  biomarkerKey: string;
-  label: string;
-  metricKey: string;
-  minimumRows?: number;
-  trendDefaults?: BrowserVaultBiomarkerTrendDefaults;
-  unit: string;
-  valuePrecision: number;
-}): JunctionWearableBiomarkerPanelExpectation {
-  const minimumRows = input.minimumRows ?? input.trendDefaults?.minimumPoints ?? 5;
-  return {
-    biomarkerKey: input.biomarkerKey,
-    label: input.label,
-    metricKey: input.metricKey,
-    minimumRows,
-    privateMetricBindings: [{
-      metricKey: input.metricKey,
-      role: "primary",
-      source: "metric",
-    }],
-    trendDefaults: input.trendDefaults ?? {
-      ...DEFAULT_WEARABLE_TREND_DEFAULTS,
-      minimumPoints: minimumRows,
-    },
-    unit: input.unit,
-    valuePrecision: input.valuePrecision,
-  };
-}
 
 const SUMMARY_RESOURCE_PREFIX = "junction-summary-";
 const TIMESERIES_RESOURCE_PREFIX = "junction-timeseries-";
@@ -186,17 +101,6 @@ export interface JunctionWearableHostedReplayPlanInput {
   fixturePath?: string;
   maxRecordsPerProviderResource?: number | null;
   replaySize?: JunctionWearableHostedReplaySize;
-}
-
-export interface JunctionWearableBiomarkerPanelExpectation {
-  biomarkerKey: string;
-  label: string;
-  metricKey: string;
-  minimumRows: number;
-  privateMetricBindings: readonly BrowserVaultBiomarkerMetricBinding[];
-  trendDefaults: BrowserVaultBiomarkerTrendDefaults;
-  unit: string;
-  valuePrecision: number;
 }
 
 export interface JunctionWearableMetricRowExpectation {
@@ -253,15 +157,6 @@ export interface JunctionWearableFixturePrivacyScan {
   shiftedDates: number | null;
 }
 
-export interface JunctionWearableFixtureBiomarkerPanelSummary {
-  latestPresent: boolean;
-  metricKey: string | null;
-  sampleCount: number;
-  seriesCount: number;
-  status: BrowserVaultBiomarkerPanelStatus;
-  warnings: string[];
-}
-
 export interface JunctionWearableFixtureMetricSummary {
   metricRowsByKey: Record<string, number>;
   rowCount: number;
@@ -280,7 +175,6 @@ export interface JunctionWearableFixtureSourceHealthSummary {
 }
 
 export interface JunctionWearableFixtureE2eResult {
-  biomarkerPanels: Record<string, JunctionWearableFixtureBiomarkerPanelSummary>;
   fixture: {
     rawArtifactCount: number;
     sourceBundleHash: string;
@@ -298,7 +192,6 @@ export interface JunctionWearableFixtureE2eResult {
 }
 
 export interface JunctionWearableBrowserVaultReplicaSummary {
-  biomarkerPanels: Record<string, JunctionWearableFixtureBiomarkerPanelSummary>;
   metrics: JunctionWearableFixtureMetricSummary;
   sourceHealth: JunctionWearableFixtureSourceHealthSummary[];
 }
@@ -328,19 +221,15 @@ export interface JunctionWearableHostedReplayPlan {
 }
 
 export interface JunctionWearableBrowserVaultSummaryExpectationInput {
-  biomarkerExpectations?: readonly JunctionWearableBiomarkerPanelExpectation[];
   metricExpectations?: readonly JunctionWearableMetricRowExpectation[];
 }
 
 export function summarizeJunctionWearableBrowserVaultReplica(input: {
-  generatedAt: string;
   replica: unknown;
 }): JunctionWearableBrowserVaultReplicaSummary {
   const replica = parseBrowserVaultReplica(input.replica);
-  const client = createBrowserVaultQueryClient(replica);
 
   return {
-    biomarkerPanels: summarizeJunctionWearableBiomarkerPanels({ client, generatedAt: input.generatedAt }),
     metrics: summarizeMetrics(replica.metricRows, replica.metricSelectionRows),
     sourceHealth: replica.sourceHealthRows.map((row) => ({
       activityDays: row.activityDays,
@@ -459,10 +348,8 @@ export async function runJunctionWearableFixtureE2e(
       sourceBundleHash,
       vault,
     });
-    const client = createBrowserVaultQueryClient(parseBrowserVaultReplica(replica));
 
     return {
-      biomarkerPanels: summarizeJunctionWearableBiomarkerPanels({ client, generatedAt }),
       fixture: {
         rawArtifactCount: fixture.artifacts.length,
         sourceBundleHash,
@@ -588,8 +475,7 @@ export function collectJunctionWearableBrowserVaultSummaryFailures(
 ): string[] {
   const metricExpectations =
     input.metricExpectations ?? JUNCTION_WEARABLE_BROWSER_VAULT_METRIC_EXPECTATIONS;
-  const biomarkerExpectations =
-    input.biomarkerExpectations ?? JUNCTION_WEARABLE_BROWSER_VAULT_BIOMARKER_EXPECTATIONS;
+
   const failures: string[] = [];
 
   for (const expectation of metricExpectations) {
@@ -608,35 +494,6 @@ export function collectJunctionWearableBrowserVaultSummaryFailures(
     }
   }
 
-  for (const expectation of biomarkerExpectations) {
-    const panel = summary.biomarkerPanels[expectation.biomarkerKey];
-    if (!panel) {
-      failures.push(`biomarker ${expectation.biomarkerKey} panel missing`);
-      continue;
-    }
-    if (panel.metricKey !== expectation.metricKey) {
-      failures.push(
-        `biomarker ${expectation.biomarkerKey} metric ${String(panel.metricKey)} != ${expectation.metricKey}`,
-      );
-    }
-    if (panel.status !== "ready") {
-      failures.push(`biomarker ${expectation.biomarkerKey} status ${panel.status}`);
-    }
-    if (!panel.latestPresent) {
-      failures.push(`biomarker ${expectation.biomarkerKey} latest missing`);
-    }
-    if (panel.sampleCount < expectation.minimumRows) {
-      failures.push(
-        `biomarker ${expectation.biomarkerKey} samples ${panel.sampleCount} < ${expectation.minimumRows}`,
-      );
-    }
-    if (panel.seriesCount < expectation.minimumRows) {
-      failures.push(
-        `biomarker ${expectation.biomarkerKey} series ${panel.seriesCount} < ${expectation.minimumRows}`,
-      );
-    }
-  }
-
   return failures;
 }
 
@@ -651,10 +508,9 @@ export function assertJunctionWearableBrowserVaultSummary(
 
   throw new Error(
     [
-      "Junction wearable browser-vault summary did not satisfy expected biomarker contract.",
+      "Junction wearable browser-vault summary did not satisfy expected metric contract.",
       ...failures,
       `summary=${JSON.stringify({
-        biomarkerPanels: summary.biomarkerPanels,
         metricRowsByKey: summary.metrics.metricRowsByKey,
         selectedMetricKeys: summary.metrics.selectedMetricKeys,
         sourceHealth: summary.sourceHealth,
@@ -1370,48 +1226,6 @@ function buildSnapshotFromGroup(
     timeseries,
     windowEnd: dates.at(-1) ? `${dates.at(-1)}T23:59:59.999Z` : undefined,
     windowStart: dates[0] ? `${dates[0]}T00:00:00.000Z` : undefined,
-  };
-}
-
-function summarizeJunctionWearableBiomarkerPanels(input: {
-  client: ReturnType<typeof createBrowserVaultQueryClient>;
-  generatedAt: string;
-}): Record<string, JunctionWearableFixtureBiomarkerPanelSummary> {
-  return Object.fromEntries(
-    JUNCTION_WEARABLE_BROWSER_VAULT_BIOMARKER_EXPECTATIONS.map((expectation) => {
-      const panel = selectBrowserVaultBiomarkerPanel({
-        biomarkerKey: expectation.biomarkerKey,
-        client: input.client,
-        generatedAt: input.generatedAt,
-        label: expectation.label,
-        privateMetricBindings: expectation.privateMetricBindings,
-        trendDefaults: expectation.trendDefaults,
-        unit: expectation.unit,
-        valuePrecision: expectation.valuePrecision,
-      });
-
-      return [expectation.biomarkerKey, summarizeBiomarkerPanel(panel)];
-    }),
-  );
-}
-
-function summarizeBiomarkerPanel(panel: {
-  primary: {
-    binding: { metricKey: string };
-    latest: unknown;
-    sampleCount: number;
-    series: readonly unknown[];
-  } | null;
-  status: BrowserVaultBiomarkerPanelStatus;
-  warnings: readonly { code: string }[];
-}): JunctionWearableFixtureBiomarkerPanelSummary {
-  return {
-    latestPresent: panel.primary?.latest !== undefined && panel.primary.latest !== null,
-    metricKey: panel.primary?.binding.metricKey ?? null,
-    sampleCount: panel.primary?.sampleCount ?? 0,
-    seriesCount: panel.primary?.series.length ?? 0,
-    status: panel.status,
-    warnings: panel.warnings.map((warning) => warning.code),
   };
 }
 

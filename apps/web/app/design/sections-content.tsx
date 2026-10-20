@@ -1,12 +1,5 @@
 import { ModelSettingsHoverPreview } from "./model-settings-hover-preview";
 
-import {
-  BiomarkerBoundaryResultStudy,
-  BiomarkerDetailStudy,
-  BiomarkerIndexStudy,
-  BiomarkerPreparingStateStudy,
-  BiomarkerReferenceContextStudy,
-} from "@/src/components/biomarkers/biomarker-design-studies";
 import { AsksGridSection } from "@/src/components/homepage/asks-section";
 import { FaqSection } from "@/src/components/homepage/faq-section";
 import { HeroClocksIn } from "@/src/components/homepage/hero-clocks-in";
@@ -93,7 +86,6 @@ import {
 import { EnvironmentProgressStudy } from "./environment-progress-study";
 import { EnvironmentPrintStudy } from "./environment-print-study";
 import { PersonalPatternsStudy } from "./personal-patterns-study";
-import { BrowserVaultLoadingTransitionsStudy } from "./browser-vault-loading-transitions-study";
 import { FoodLabelLabStudy } from "./food-label-lab-study";
 import {
   SCREENSHOT_CATEGORIES,
@@ -746,12 +738,6 @@ export function SectionsContent({
 
           <Separator />
 
-          <StudySection title="Browser Vault progressive loading and biomarker result detail transitions">
-            <BrowserVaultLoadingTransitionsStudy />
-          </StudySection>
-
-          <Separator />
-
           <StudySection title="Home onboarding steps">
             <HomeOnboardingStepsStudy />
           </StudySection>
@@ -874,43 +860,7 @@ export function SectionsContent({
         </>
       ) : null}
 
-      {category === "health" ? (
-        <>
-          <Separator />
 
-          <StudySection title="Biomarker preparing state">
-            <BiomarkerPreparingStateStudy />
-          </StudySection>
-
-          <Separator />
-
-          <StudySection title="Biomarker index">
-            <BiomarkerIndexStudy />
-          </StudySection>
-
-          <Separator />
-
-          <StudySection title="Biomarker result detail">
-            <div id="biomarker-result-range-bands">
-              <BiomarkerDetailStudy />
-            </div>
-          </StudySection>
-
-          <Separator />
-
-          <StudySection title="Biomarker reference context">
-            <BiomarkerReferenceContextStudy />
-          </StudySection>
-
-          <Separator />
-
-          <StudySection title="Biomarker boundary result · published comparator provenance">
-            <div id="biomarker-boundary-result">
-              <BiomarkerBoundaryResultStudy />
-            </div>
-          </StudySection>
-        </>
-      ) : null}
     </div>
   );
 }

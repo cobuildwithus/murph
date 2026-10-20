@@ -121,7 +121,6 @@ import {
 
 const HOSTED_WEB_HEALTH_PATH = "/api/internal/health";
 const HOSTED_WEB_HEALTH_COMMONS_BRIDGE_FILES = [
-  path.join(webDir, "src", "lib", "health-commons", "biomarker-detail.ts"),
   path.join(webDir, "src", "lib", "health-commons", "experiment-browse.ts"),
   path.join(webDir, "src", "lib", "health-commons", "experiment-detail.ts"),
   path.join(webDir, "src", "lib", "health-commons", "experiment-projections.ts"),

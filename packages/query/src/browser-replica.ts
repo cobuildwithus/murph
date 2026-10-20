@@ -113,17 +113,6 @@ export {
   toBrowserVaultLabResultRows,
 } from "./browser-replica/lab-results.ts";
 export {
-  selectBrowserVaultLabBiomarkerDetail,
-  selectBrowserVaultMeasuredBiomarkers,
-} from "./browser-replica/lab-result-status.ts";
-export type {
-  BrowserVaultLabBiomarkerDetail,
-  BrowserVaultLabBiomarkerSeriesPoint,
-  BrowserVaultMeasuredBiomarker,
-  BrowserVaultNormalizedLabReferenceRange,
-  BrowserVaultPresentedLabResultRow,
-} from "./browser-replica/lab-results.ts";
-export {
   selectBrowserVaultJournal,
 } from "./browser-replica/views.ts";
 export { buildJournalView, emptyJournalView } from "./journal-view.ts";
@@ -134,30 +123,12 @@ export type {
   JournalView,
 } from "./journal-view.ts";
 export {
-  BROWSER_VAULT_BIOMARKER_PANEL_SCHEMA,
-  selectBrowserVaultBiomarkerPanel,
-} from "./browser-replica/biomarker-panel.ts";
-export {
   BROWSER_VAULT_METRIC_ROW_SCHEMA,
   BROWSER_VAULT_METRIC_SELECTION_SCHEMA,
   createBrowserVaultMetricSelectionRows,
   metricRowMatchesFilters,
   toBrowserVaultMetricRows,
 } from "./browser-replica/metric-points.ts";
-export type {
-  BrowserVaultBiomarkerMetricBinding,
-  BrowserVaultBiomarkerMetricPanel,
-  BrowserVaultBiomarkerPanel,
-  BrowserVaultBiomarkerPanelEmptyState,
-  BrowserVaultBiomarkerPanelSource,
-  BrowserVaultBiomarkerPanelStatus,
-  BrowserVaultBiomarkerPanelWarning,
-  BrowserVaultBiomarkerPanelWarningCode,
-  BrowserVaultBiomarkerSeriesPoint,
-  BrowserVaultBiomarkerTrend,
-  BrowserVaultBiomarkerTrendDefaults,
-  SelectBrowserVaultBiomarkerPanelInput,
-} from "./browser-replica/biomarker-panel.ts";
 export {
   buildOverviewWeeklyStatsFromDailySampleSummaries,
   isCompletedOverviewExperimentStatus,

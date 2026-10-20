@@ -20,10 +20,8 @@ import {
   getBrowserVaultMetricBucketId,
   createBrowserVaultQueryClient,
   type BrowserVaultReplica,
-  type BrowserVaultLabsCapableQueryClient,
   type BrowserVaultMetricBucketId,
   type BrowserVaultMetricSeriesCapableQueryClient,
-  type BrowserVaultQueryClient,
 } from "@murphai/query/browser-replica-client";
 import {
   type BrowserVaultAnyQueryClient,
@@ -1032,28 +1030,6 @@ export function useBrowserVaultMetricsSelector<T>(
   );
 }
 
-export function useBrowserVaultLabsSelector<T>(
-  selector: (client: BrowserVaultLabsCapableQueryClient) => T,
-): T | null {
-  const { client } = useBrowserVault();
-  const labsClient = isBrowserVaultLabsCapable(client) ? client : null;
-  return useMemo(
-    () => (labsClient ? selector(labsClient) : null),
-    [labsClient, selector],
-  );
-}
-
-export function useBrowserVaultFullSelector<T>(
-  selector: (client: BrowserVaultQueryClient) => T,
-): T | null {
-  const { client } = useBrowserVault();
-  const fullClient = client?.capability === "core+metrics+labs" ? client : null;
-  return useMemo(
-    () => (fullClient ? selector(fullClient) : null),
-    [fullClient, selector],
-  );
-}
-
 export function isBrowserVaultMetricsCapable(
   client: BrowserVaultAnyQueryClient | null,
 ): client is BrowserVaultMetricSeriesCapableQueryClient {
@@ -1061,16 +1037,6 @@ export function isBrowserVaultMetricsCapable(
     client?.capability === "core+metrics-partial" ||
     client?.capability === "core+metrics-partial+labs" ||
     client?.capability === "core+metrics" ||
-    client?.capability === "core+metrics+labs"
-  );
-}
-
-export function isBrowserVaultLabsCapable(
-  client: BrowserVaultAnyQueryClient | null,
-): client is BrowserVaultLabsCapableQueryClient {
-  return (
-    client?.capability === "core+labs" ||
-    client?.capability === "core+metrics-partial+labs" ||
     client?.capability === "core+metrics+labs"
   );
 }

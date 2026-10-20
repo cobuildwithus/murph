@@ -3,18 +3,15 @@ import os from "node:os";
 import path from "node:path";
 
 import { describe, expect, it } from "vitest";
-import { resolveMetricDefinition } from "@murphai/health-metrics";
 
 import {
   buildHealthCommonsBiomarkerDesiredDirectionsArtifact,
   createHealthCommonsCatalogReader,
   createHealthCommonsRouteBundleReader,
   getGeneratedHealthCommonsBiomarkerDesiredDirections,
-  getGeneratedHealthCommonsWebBiomarkerIndex,
   getGeneratedHealthCommonsWebRouteIndex,
   HEALTH_COMMONS_BIOMARKER_DESIRED_DIRECTIONS_SCHEMA_VERSION,
   loadGeneratedHealthCommonsBiomarkerDesiredDirections,
-  loadGeneratedHealthCommonsWebBiomarkerIndex,
   loadGeneratedHealthCommonsWebRouteBundle,
   loadGeneratedHealthCommonsWebRouteIndex,
   MURPH_HEALTH_COMMONS_PACKAGE_ROOT_ENV,
@@ -285,72 +282,14 @@ describe("@murphai/health-commons runtime catalog reader", () => {
     ).toBeNull();
   });
 
-  it("loads the compact generated biomarker browse index", () => {
-    const biomarkerIndex = getGeneratedHealthCommonsWebBiomarkerIndex();
-
-    expect(biomarkerIndex.schemaVersion).toBe("murph.commons.web.biomarker-index.v4");
-    expect(
-      biomarkerIndex.biomarkers.find((entry) => entry.routeId === "estimated-vo2max"),
-    ).toEqual(expect.objectContaining({
-      bundlePath: "bundles/biomarker/estimated-vo2max.json",
-      key: "biomarker:estimated-vo2max",
-    }));
-    expect(
-      biomarkerIndex.biomarkers.find((entry) => entry.routeId === "chloride")?.fallbackRanges,
-    ).toEqual([expect.objectContaining({
-      eligibleSpecimenKinds: ["serum"],
-      lowerBound: { inclusive: true, value: 98 },
-      unit: "mmol/L",
-      upperBound: { inclusive: true, value: 107 },
-    })]);
-  });
-
-  it("keeps published biomarker private metric bindings aligned with the metric catalog", () => {
-    const biomarkerIndex = getGeneratedHealthCommonsWebBiomarkerIndex();
-    const publishedBiomarkers = biomarkerIndex.biomarkers
-      .filter((entry) => entry.published && entry.hidden !== true);
-
-    for (const entry of publishedBiomarkers) {
-      const bundle = loadGeneratedHealthCommonsWebRouteBundle({
-        entityType: "biomarker",
-        routeId: entry.routeId,
-      });
-      expect(bundle, `Expected biomarker route bundle for ${entry.routeId}`).not.toBeNull();
-      if (!bundle) {
-        continue;
-      }
-
-      const reader = createHealthCommonsRouteBundleReader(bundle);
-      const entity = reader.findByKey(entry.key);
-      expect(entity?.entityType).toBe("biomarker");
-      if (!entity || entity.entityType !== "biomarker") {
-        continue;
-      }
-
-      for (const binding of entity.biomarker?.privateMetricBindings ?? []) {
-        const definition = resolveMetricDefinition(binding.metricKey);
-        expect(definition, `${entry.key} private metric ${binding.metricKey}`).not.toBeNull();
-        if (binding.role === "primary") {
-          expect(definition?.biomarkerKey).toBe(entry.key);
-        }
-      }
-    }
-  });
-
   it("falls back to package-relative generated artifacts when the package root env is unset", () => {
     const previousPackageRoot =
       process.env[MURPH_HEALTH_COMMONS_PACKAGE_ROOT_ENV];
     delete process.env[MURPH_HEALTH_COMMONS_PACKAGE_ROOT_ENV];
     try {
-      const biomarkerIndex = loadGeneratedHealthCommonsWebBiomarkerIndex();
       const routeIndex = loadGeneratedHealthCommonsWebRouteIndex();
 
-      expect(
-        biomarkerIndex.biomarkers.some((biomarker) => biomarker.routeId === "resting-heart-rate"),
-      ).toBe(true);
-      expect(
-        routeIndex.routes.some((route) => route.routeId === "resting-heart-rate"),
-      ).toBe(true);
+      expect(routeIndex.routes.length).toBeGreaterThan(0);
     } finally {
       if (previousPackageRoot === undefined) {
         delete process.env[MURPH_HEALTH_COMMONS_PACKAGE_ROOT_ENV];
@@ -439,8 +378,6 @@ describe("@murphai/health-commons runtime catalog reader", () => {
         );
       expect(() => loadGeneratedHealthCommonsWebRouteIndex())
         .toThrow(path.join(expectedWebRootPath, "routes", "index.json"));
-      expect(() => loadGeneratedHealthCommonsWebBiomarkerIndex())
-        .toThrow(path.join(expectedWebRootPath, "browse", "biomarkers.json"));
     } finally {
       if (previousPackageRoot === undefined) {
         delete process.env[MURPH_HEALTH_COMMONS_PACKAGE_ROOT_ENV];
@@ -484,30 +421,30 @@ describe("@murphai/health-commons runtime catalog reader", () => {
   it("loads route-scoped web bundles and preserves the route-bundle reader contract", () => {
     const routeIndex = getGeneratedHealthCommonsWebRouteIndex();
     const routeEntry = routeIndex.routes.find((entry) =>
-      entry.entityType === "biomarker" && entry.routeId === "estimated-vo2max"
+      entry.entityType === "measurement_method" && entry.routeId === "home-standardized-photo-roi-analysis"
     );
 
     expect(routeEntry).toMatchObject({
-      bundlePath: "bundles/biomarker/estimated-vo2max.json",
-      entityType: "biomarker",
-      routeId: "estimated-vo2max",
+      bundlePath: "bundles/measurement_method/home-standardized-photo-roi-analysis.json",
+      entityType: "measurement_method",
+      routeId: "home-standardized-photo-roi-analysis",
     });
 
     const bundle = loadGeneratedHealthCommonsWebRouteBundle({
-      entityType: "biomarker",
-      routeId: "estimated-vo2max",
+      entityType: "measurement_method",
+      routeId: "home-standardized-photo-roi-analysis",
     });
 
     expect(bundle).not.toBeNull();
     if (!bundle) {
-      throw new Error("Expected a generated estimated VO2max route bundle.");
+      throw new Error("Expected a generated home photo measurement route bundle.");
     }
     expect(bundle.route).toEqual(expect.objectContaining({
-      entityType: "biomarker",
-      routeId: "estimated-vo2max",
-      slug: "biomarkers/estimated-vo2max",
+      entityType: "measurement_method",
+      routeId: "home-standardized-photo-roi-analysis",
+      slug: "measurement-methods/skin/home-standardized-photo-roi-analysis",
     }));
-    expect(bundle.entitiesByKey[bundle.primaryKey]?.entityType).toBe("biomarker");
+    expect(bundle.entitiesByKey[bundle.primaryKey]?.entityType).toBe("measurement_method");
     expect(bundle.revisionManifest[bundle.primaryKey]).toEqual({
       pageRevisionId: expect.stringMatching(/^sha256:/u),
       recipeHash: null,
@@ -517,7 +454,7 @@ describe("@murphai/health-commons runtime catalog reader", () => {
     const reader = createHealthCommonsRouteBundleReader(bundle);
     expect(reader.route).toEqual(bundle.route);
     expect(reader.revisionManifest).toEqual(bundle.revisionManifest);
-    expect(reader.findByKey(bundle.primaryKey)?.entityType).toBe("biomarker");
+    expect(reader.findByKey(bundle.primaryKey)?.entityType).toBe("measurement_method");
     expect(
       bundle.reverseEdges.every((edge) => bundle.entitiesByKey[edge.sourceKey] !== undefined),
     ).toBe(true);
@@ -549,19 +486,20 @@ describe("@murphai/health-commons runtime catalog reader", () => {
         .every((entity) => entity.relations?.length === 0),
     ).toBe(true);
 
-    const reverseMeasurementEdges = reader.listReverseEdges({
-      relationTypes: ["measures"],
-      targetKey: bundle.primaryKey,
+    const reverseEdge = {
+      sourceKey: "biomarker:skin-texture-roughness-score",
+      relation: { type: "default_measurement_method", target: bundle.primaryKey },
+    };
+    const readerWithReverseEdge = createHealthCommonsRouteBundleReader({
+      ...bundle,
+      reverseEdges: [reverseEdge],
     });
-    expect(reverseMeasurementEdges.length).toBeGreaterThan(0);
-    expect(
-      reverseMeasurementEdges.every(
-        (edge) =>
-          edge.relation.type === "measures"
-          && edge.relation.target === bundle.primaryKey
-          && edge.sourceKey.length > 0,
-      ),
-    ).toBe(true);
+    expect(readerWithReverseEdge.listReverseEdges({
+      relationTypes: ["default_measurement_method"], targetKey: bundle.primaryKey,
+    })).toEqual([reverseEdge]);
+    expect(readerWithReverseEdge.listReverseEdges({
+      relationTypes: ["cites"], targetKey: bundle.primaryKey,
+    })).toEqual([]);
 
     expect(bundle.reverseEdges.every((edge) => edge.relation.type !== "cites")).toBe(true);
   });
@@ -611,6 +549,19 @@ describe("@murphai/health-commons runtime catalog reader", () => {
         unsafeProjectionPath,
       ).toThrow("Health Commons generated web route index is invalid.");
     }
+  });
+
+  it("omits retired biomarker website routes while retaining runtime guidance", () => {
+    expect(loadGeneratedHealthCommonsWebRouteBundle({
+      entityType: "biomarker",
+      routeId: "resting-heart-rate",
+    })).toBeNull();
+    expect(getGeneratedHealthCommonsWebRouteIndex().routes.some(
+      (route) => route.entityType === "biomarker",
+    )).toBe(false);
+    expect(resolveGeneratedHealthCommonsBiomarkerDesiredDirection(
+      "biomarker:resting-heart-rate",
+    )).toBe("lower_or_stable");
   });
 
   it("lists and searches measurement methods with compact measurement fields", () => {

@@ -1,7 +1,5 @@
 import type { HealthCommonsBiomarkerDesiredDirection } from "@murphai/contracts";
 
-import type { HealthCommonsWebBiomarkerIndex } from "./web-artifacts.ts";
-
 export const HEALTH_COMMONS_BIOMARKER_DESIRED_DIRECTIONS_SCHEMA_VERSION =
   "murph.commons.biomarker-desired-directions.v1" as const;
 
@@ -19,10 +17,7 @@ export interface HealthCommonsBiomarkerDesiredDirectionsArtifact {
 export function buildHealthCommonsBiomarkerDesiredDirectionsArtifact(
   biomarkerIndex: {
     biomarkers: ReadonlyArray<
-      Pick<
-        HealthCommonsWebBiomarkerIndex["biomarkers"][number],
-        "desiredDirection" | "key"
-      >
+      { desiredDirection: HealthCommonsBiomarkerDesiredDirection | null; key: string }
     >;
     catalogHash: string;
   },

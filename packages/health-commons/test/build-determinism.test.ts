@@ -4,8 +4,6 @@ import path from "node:path";
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { HealthCommonsCatalogEntity } from "@murphai/contracts";
-
 const buildHealthCommonsCatalogMock = vi.hoisted(() => vi.fn());
 const generatedRootRenameControl = vi.hoisted(() => ({
   beforeReleaseDelayedTargetMove: null as (() => Promise<void>) | null,
@@ -74,8 +72,6 @@ vi.mock("node:fs/promises", async (importOriginal) => {
 import { writeHealthCommonsGeneratedArtifacts } from "../src/build.ts";
 import { buildHealthCommonsWebGeneratedArtifacts } from "../src/web-artifacts.ts";
 
-const TEST_PAGE_REVISION_ID = `sha256:${"1".repeat(64)}`;
-
 function createCatalog(catalogHash: string) {
   return {
     artifactManifests: [],
@@ -85,74 +81,6 @@ function createCatalog(catalogHash: string) {
     evidenceAppraisals: [],
     redirects: [],
     schemaVersion: "murph.commons.catalog.v1" as const,
-  };
-}
-
-function createProtocolEntity(input: {
-  expectedSignalDescriptions: Array<{
-    biomarkerKey: string;
-    description: string;
-  }>;
-  key: string;
-  slug: string;
-  status?: "field-testing";
-  title: string;
-}) {
-  return {
-    schemaVersion: "murph.commons.page.v1" as const,
-    entityType: "protocol_variant" as const,
-    key: input.key,
-    slug: input.slug,
-    title: input.title,
-    summary: `${input.title} summary.`,
-    categories: ["recovery"],
-    status: input.status,
-    lineage: { relationship: "root" as const },
-    attribution: { ownerType: "murph" as const },
-    protocol: {
-      doseSignature: `${input.title} dose`,
-      steps: [`Do ${input.title}.`],
-    },
-    expectedSignalDescriptions: input.expectedSignalDescriptions,
-    safety: {
-      cautionLevel: "moderate" as const,
-      stopIf: ["Stop condition"],
-    },
-    testPlans: [
-      {
-        planId: "test-plan",
-        durationDays: 14,
-        baselineDays: 7,
-        interventionDays: 7,
-        primaryBiomarkerKey: "biomarker:test-signal",
-      },
-    ],
-    body: `${input.title} body.`,
-    relativePath: `${input.slug}.md`,
-    revision: {
-      pageRevisionId: TEST_PAGE_REVISION_ID,
-    },
-  };
-}
-
-function createBiomarkerEntity(input: {
-  key: string;
-  slug: string;
-  title: string;
-}) {
-  return {
-    schemaVersion: "murph.commons.page.v1" as const,
-    entityType: "biomarker" as const,
-    key: input.key,
-    slug: input.slug,
-    title: input.title,
-    summary: `${input.title} summary.`,
-    status: "reviewed" as const,
-    body: `${input.title} body.`,
-    relativePath: `${input.slug}.md`,
-    revision: {
-      pageRevisionId: TEST_PAGE_REVISION_ID,
-    },
   };
 }
 
@@ -180,7 +108,7 @@ describe("@murphai/health-commons build determinism", () => {
         generatedRoot: "health-commons-generated",
       }),
     ).rejects.toThrow(
-      "Health Commons generated artifacts are nondeterministic: catalog.hash, biomarker-desired-directions.json, source-index.json, source-artifact-index.json, web/routes/index.json, web/browse/biomarkers.json, web/browse/goals.json.",
+      "Health Commons generated artifacts are nondeterministic: catalog.hash, biomarker-desired-directions.json, source-index.json, source-artifact-index.json, web/routes/index.json, web/browse/goals.json.",
     );
 
     expect(buildHealthCommonsCatalogMock).toHaveBeenCalledTimes(2);
@@ -216,14 +144,33 @@ describe("@murphai/health-commons build determinism", () => {
     await expect(readFile(path.join(generatedRoot, "web/routes/index.json"), "utf8")).resolves.toContain(
       '"schemaVersion": "murph.commons.web.route-index.v1"',
     );
-    await expect(readFile(path.join(generatedRoot, "web/browse/biomarkers.json"), "utf8")).resolves.toContain(
-      '"schemaVersion": "murph.commons.web.biomarker-index.v4"',
-    );
+    await expect(readFile(path.join(generatedRoot, "web/browse/biomarkers.json"), "utf8"))
+      .rejects.toMatchObject({ code: "ENOENT" });
     await expect(readFile(path.join(generatedRoot, "web/browse/goals.json"), "utf8")).resolves.toContain(
       '"schemaVersion": "murph.commons.web.goal-index.v2"',
     );
     expect(buildHealthCommonsSourceIndexMock).toHaveBeenCalledTimes(1);
     expect(buildHealthCommonsSourceArtifactIndexMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects duplicate generated web route ids before writing route indexes", () => {
+    expect(() => buildHealthCommonsWebGeneratedArtifacts({
+      ...createCatalog("sha256:first"),
+      entities: ["a", "b"].map((id) => ({
+        schemaVersion: "murph.commons.page.v1" as const,
+        entityType: "measurement_method" as const,
+        key: `measurement_method:${id}`,
+        slug: `measurement-methods/${id}`,
+        title: `Measurement method ${id}`,
+        body: "Synthetic measurement method.",
+        relativePath: `measurement-methods/${id}.md`,
+        revision: { pageRevisionId: `sha256:${"1".repeat(64)}` },
+      })),
+      redirects: [
+        { from: "measurement_method:legacy/shared", to: "measurement_method:a" },
+        { from: "measurement_method:other/shared", to: "measurement_method:b" },
+      ],
+    })).toThrow("Duplicate Health Commons web route id generated for measurement_method:shared");
   });
 
   it("replaces stale generated files with the exact current file set", async () => {
@@ -398,83 +345,6 @@ describe("@murphai/health-commons build determinism", () => {
     } finally {
       await rm(generatedRoot, { recursive: true, force: true });
     }
-  });
-
-  it("rejects duplicate generated web route ids before writing route indexes", () => {
-    expect(() =>
-      buildHealthCommonsWebGeneratedArtifacts({
-        ...createCatalog("sha256:first"),
-        entities: [
-          createBiomarkerEntity({
-            key: "biomarker:a",
-            slug: "biomarkers/a",
-            title: "Biomarker A",
-          }),
-          createBiomarkerEntity({
-            key: "biomarker:b",
-            slug: "biomarkers/b",
-            title: "Biomarker B",
-          }),
-        ],
-        redirects: [
-          {
-            from: "biomarker:legacy/shared",
-            to: "biomarker:a",
-          },
-          {
-            from: "biomarker:other/shared",
-            to: "biomarker:b",
-          },
-        ],
-      }),
-    ).toThrow("Duplicate Health Commons web route id generated for biomarker:shared");
-  });
-
-  it("publishes complete biomarkers from their own status without a protocol catalog", () => {
-    const biomarker = {
-      ...createBiomarkerEntity({
-        key: "biomarker:test-signal",
-        slug: "biomarkers/test-signal",
-        title: "Test Signal",
-      }),
-      biomarker: {
-        explainerCards: [
-          { title: "Why people care", body: "Test context." },
-          { title: "How to measure it", body: "Test measurement." },
-          { title: "What moves it", body: "Test confounders." },
-        ],
-        measurement: {
-          bestContext: "Use a consistent test context.",
-          howToMeasure: ["Measure consistently."],
-        },
-      },
-      communityOutcomeSummary: {
-        placeholder: "Community outcomes are not yet available.",
-        state: "coming_soon",
-      },
-    } satisfies HealthCommonsCatalogEntity;
-    const statusless = buildHealthCommonsWebGeneratedArtifacts({
-      ...createCatalog("sha256:first"),
-      entities: [{ ...biomarker, status: "draft" }],
-    });
-    expect(statusless.biomarkerIndex.biomarkers).toEqual([
-      expect.objectContaining({ key: biomarker.key, published: false }),
-    ]);
-    expect([...statusless.projectionArtifacts.keys()]).toEqual([]);
-
-    const published = buildHealthCommonsWebGeneratedArtifacts({
-      ...createCatalog("sha256:first"),
-      entities: [biomarker],
-    });
-    expect(published.biomarkerIndex.biomarkers).toEqual([
-      expect.objectContaining({ key: biomarker.key, published: true }),
-    ]);
-    expect([...published.projectionArtifacts.keys()].sort()).toEqual([
-      "pages/biomarkers/test-signal/overview.json",
-      "pages/biomarkers/test-signal/research.json",
-      "shell/biomarkers/test-signal.json",
-    ]);
-    expect([...published.routeBundles.keys()]).toEqual(["bundles/biomarker/test-signal.json"]);
   });
 });
 

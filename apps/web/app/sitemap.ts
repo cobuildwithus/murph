@@ -1,7 +1,6 @@
 import type { MetadataRoute } from "next";
 
 import { listComparisonSitemapEntries } from "@/src/lib/comparisons/catalog";
-import { listHealthCommonsBiomarkerRoutes } from "@/src/lib/health-commons/biomarker-projections";
 import { listHealthCommonsGoalRouteParams } from "@/src/lib/health-commons/goal-projections";
 import { listHealthCommonsMeasurementMethodRoutes } from "@/src/lib/health-commons/measurement-method-detail";
 import { GOAL_CATEGORIES } from "@/src/lib/goals/goal-categories";
@@ -29,10 +28,6 @@ const STATIC_PUBLIC_ROUTES = [
 ] as const;
 
 export default function sitemap(): MetadataRoute.Sitemap {
-  const biomarkerRoutes = listHealthCommonsBiomarkerRoutes().flatMap((biomarkerId) => {
-    const route = `/biomarkers/${encodeURIComponent(biomarkerId)}`;
-    return [route, `${route}/research`];
-  });
   const measurementMethodRoutes = listHealthCommonsMeasurementMethodRoutes().map(
     (measurementMethodId) =>
       `/measurement-methods/${encodeURIComponent(measurementMethodId)}`,
@@ -51,7 +46,6 @@ export default function sitemap(): MetadataRoute.Sitemap {
   return [
     ...STATIC_PUBLIC_ROUTES,
     ...comparisonLastModifiedByRoute.keys(),
-    ...biomarkerRoutes,
     ...measurementMethodRoutes,
     ...goalRoutes,
   ]

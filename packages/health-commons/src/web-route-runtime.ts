@@ -18,9 +18,6 @@ export type {
 } from "./web-artifacts.ts";
 
 const HEALTH_COMMONS_WEB_PROJECTION_KEYS: readonly HealthCommonsWebProjectionKey[] = [
-  "biomarker.overview",
-  "biomarker.research",
-  "biomarker.shell",
   "goal.page",
 ];
 

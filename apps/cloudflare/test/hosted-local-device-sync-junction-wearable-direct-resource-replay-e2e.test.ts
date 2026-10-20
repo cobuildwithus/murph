@@ -33,7 +33,6 @@ import {
 import {
   buildJunctionWearableHostedReplayPlan,
   collectJunctionWearableBrowserVaultSummaryFailures,
-  JUNCTION_WEARABLE_BROWSER_VAULT_BIOMARKER_EXPECTATIONS,
   JUNCTION_WEARABLE_FIXTURE_SUMMARY_RESOURCES,
   JUNCTION_WEARABLE_HOSTED_DIRECT_REPLAY_BROWSER_VAULT_METRIC_EXPECTATIONS,
   normalizeJunctionProviderSlugForComparison,
@@ -63,9 +62,7 @@ import {
   buildSignedJunctionWebhookBody,
   createSignedJunctionSvixWebhook,
 } from "./helpers/junction-webhook-replay.js";
-import {
-  expectJunctionWearableBiomarkerExpectationsToMatchProduction,
-} from "./helpers/junction-wearable-biomarker-contract.js";
+
 import { waitForHostedJunctionReplayCompletion } from "./helpers/hosted-local-junction-replay-completion.js";
 
 const runId = randomUUID().replace(/-/gu, "").slice(0, 16);
@@ -428,11 +425,8 @@ describe("hosted local Junction wearable direct-resource replay e2e", () => {
     expect(drainStatus.hasPendingDirtyConnectionForUser).toBe(false);
   }, 720_000);
 
-  it("imports direct-resource replay jobs through hosted device-sync and publishes /biomarkers data", async () => {
+  it("imports direct-resource replay jobs through hosted device-sync and publishes metric query data", async () => {
     const testDeadlineAtMs = Date.now() + 540_000;
-    await expectJunctionWearableBiomarkerExpectationsToMatchProduction(
-      JUNCTION_WEARABLE_BROWSER_VAULT_BIOMARKER_EXPECTATIONS,
-    );
 
     const replayPlan = requirePlan();
     const activeScenario = requireScenario();
@@ -532,7 +526,6 @@ describe("hosted local Junction wearable direct-resource replay e2e", () => {
       userId,
     });
     browserVaultSummary = summarizeJunctionWearableBrowserVaultReplica({
-      generatedAt: requireReplicaRef(replicaRef).generatedAt,
       replica,
     });
 
@@ -541,10 +534,9 @@ describe("hosted local Junction wearable direct-resource replay e2e", () => {
     });
     if (summaryFailures.length > 0) {
       throw new Error(await activeScenario.buildFailureMessage(userId, [
-        "Hosted Junction wearable direct-resource replay did not publish the expected browser-vault biomarker contract.",
+        "Hosted Junction wearable direct-resource replay did not publish the expected browser-vault metric contract.",
         ...summaryFailures,
         `browser-vault summary: ${JSON.stringify({
-          biomarkerPanels: browserVaultSummary.biomarkerPanels,
           metricRowsByKey: browserVaultSummary.metrics.metricRowsByKey,
           selectedMetricKeys: browserVaultSummary.metrics.selectedMetricKeys,
           sourceHealth: browserVaultSummary.sourceHealth,
@@ -924,7 +916,6 @@ async function runSignedJunctionHistoricalCoverageReplay(input: {
     metricRowIds: collectBrowserVaultMetricRowIds(replica),
     metricRowSignatures: collectBrowserVaultMetricRowSignatures(replica),
     summary: summarizeJunctionWearableBrowserVaultReplica({
-      generatedAt: replicaRef.generatedAt,
       replica,
     }),
   };

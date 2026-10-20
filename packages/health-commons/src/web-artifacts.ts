@@ -1,8 +1,5 @@
 import type {
   HealthCommonsCatalog,
-  HealthCommonsBiomarkerFallbackRange,
-  HealthCommonsBiomarkerPrivateMetricBinding,
-  HealthCommonsBiomarkerDesiredDirection,
   HealthCommonsCatalogEntity,
   HealthCommonsEntityType,
   HealthCommonsEvidenceAppraisal,
@@ -13,40 +10,20 @@ import type {
 } from "@murphai/contracts";
 
 import {
-  buildHealthCommonsWebBiomarkerOverview,
-  buildHealthCommonsWebBiomarkerResearch,
-  buildHealthCommonsWebBiomarkerShell,
-  resolveHealthCommonsWebBiomarkerShortName,
-  resolveHealthCommonsWebBiomarkerMetricFields,
-  type HealthCommonsWebBiomarkerProjectionArtifact,
-  type HealthCommonsWebBiomarkerProjectionKey,
-} from "./biomarker-web-artifacts.ts";
-import {
   extractHealthCommonsGoalSources,
   type HealthCommonsGoalSource,
 } from "./goal-sources.ts";
-
-export {
-  HEALTH_COMMONS_WEB_BIOMARKER_OVERVIEW_SCHEMA_VERSION,
-  HEALTH_COMMONS_WEB_BIOMARKER_RESEARCH_SCHEMA_VERSION,
-  HEALTH_COMMONS_WEB_BIOMARKER_SHELL_SCHEMA_VERSION,
-} from "./biomarker-web-artifacts.ts";
-export type { HealthCommonsWebBiomarkerOverview, HealthCommonsWebBiomarkerResearch, HealthCommonsWebBiomarkerShell } from "./biomarker-web-artifacts.ts";
 
 export const HEALTH_COMMONS_WEB_ROUTE_INDEX_SCHEMA_VERSION =
   "murph.commons.web.route-index.v1" as const;
 export const HEALTH_COMMONS_WEB_ROUTE_BUNDLE_SCHEMA_VERSION =
   "murph.commons.web.route-bundle.v1" as const;
-export const HEALTH_COMMONS_WEB_BIOMARKER_INDEX_SCHEMA_VERSION =
-  "murph.commons.web.biomarker-index.v4" as const;
 export const HEALTH_COMMONS_WEB_GOAL_INDEX_SCHEMA_VERSION =
   "murph.commons.web.goal-index.v2" as const;
 export const HEALTH_COMMONS_WEB_GOAL_PAGE_SCHEMA_VERSION =
   "murph.commons.web.goal-page.v2" as const;
 
-export type HealthCommonsWebProjectionKey =
-  | "goal.page"
-  | HealthCommonsWebBiomarkerProjectionKey;
+export type HealthCommonsWebProjectionKey = "goal.page";
 
 const SOURCE_SNIPPET_FINDING_MAX_LENGTH = 1_000;
 const ROUTE_BUNDLE_REVERSE_RELATION_TYPES = new Set<string>([
@@ -120,45 +97,6 @@ export interface HealthCommonsWebRouteBundle {
   sourceSnippets: Record<string, HealthCommonsWebSourceSnippet>;
 }
 
-export interface HealthCommonsWebBiomarkerIndexEntry {
-  aliases: string[];
-  bundlePath: string;
-  categories: string[];
-  desiredDirection: HealthCommonsBiomarkerDesiredDirection | null;
-  fallbackRanges: HealthCommonsWebBiomarkerFallbackRange[];
-  privateMetricBindings: HealthCommonsBiomarkerPrivateMetricBinding[];
-  valuePrecision: number;
-  hidden: boolean;
-  key: string;
-  published: boolean;
-  quality: string | null;
-  revision: HealthCommonsWebRevisionRef;
-  routeId: string;
-  shortName: string;
-  slug: string;
-  sortRank?: number | null;
-  status: string | null;
-  summary: string | null;
-  title: string;
-  unit: string | null;
-}
-
-export type HealthCommonsWebBiomarkerFallbackRange = Pick<
-  HealthCommonsBiomarkerFallbackRange,
-  | "applicability"
-  | "eligibleSpecimenKinds"
-  | "label"
-  | "lowerBound"
-  | "unit"
-  | "upperBound"
->;
-
-export interface HealthCommonsWebBiomarkerIndex {
-  biomarkers: HealthCommonsWebBiomarkerIndexEntry[];
-  catalogHash: string;
-  schemaVersion: typeof HEALTH_COMMONS_WEB_BIOMARKER_INDEX_SCHEMA_VERSION;
-}
-
 export interface HealthCommonsWebGoalIndexEntry {
   aliases: string[];
   bundlePath: string;
@@ -208,12 +146,9 @@ export interface HealthCommonsWebGoalPage {
   title: string;
 }
 
-export type HealthCommonsWebProjectionArtifact =
-  | HealthCommonsWebBiomarkerProjectionArtifact
-  | HealthCommonsWebGoalPage;
+export type HealthCommonsWebProjectionArtifact = HealthCommonsWebGoalPage;
 
 export interface HealthCommonsWebGeneratedArtifacts {
-  biomarkerIndex: HealthCommonsWebBiomarkerIndex;
   goalIndex: HealthCommonsWebGoalIndex;
   projectionArtifacts: Map<string, HealthCommonsWebProjectionArtifact>;
   routeBundles: Map<string, HealthCommonsWebRouteBundle>;
@@ -221,28 +156,9 @@ export interface HealthCommonsWebGeneratedArtifacts {
 }
 
 const WEB_BUNDLE_ENTITY_TYPES = new Set<HealthCommonsEntityType>([
-  "biomarker",
   "goal_template",
   "measurement_method",
 ]);
-
-function projectionPathsForPublishedBiomarkerRoute(
-  entity: HealthCommonsCatalogEntity,
-  routeId: string,
-): Partial<Record<HealthCommonsWebProjectionKey, string>> | undefined {
-  if (
-    entity.entityType !== "biomarker"
-    || !isPublishedBiomarkerIndexEntity(entity)
-  ) {
-    return undefined;
-  }
-
-  return {
-    "biomarker.shell": `shell/biomarkers/${routeId}.json`,
-    "biomarker.overview": `pages/biomarkers/${routeId}/overview.json`,
-    "biomarker.research": `pages/biomarkers/${routeId}/research.json`,
-  };
-}
 
 export function buildHealthCommonsWebGeneratedArtifacts(
   catalog: HealthCommonsCatalog,
@@ -273,8 +189,7 @@ export function buildHealthCommonsWebGeneratedArtifacts(
     const routeId = selectPrimaryRouteId(entity, routeIds);
     const bundlePath = bundlePathForEntity(entity.entityType, routeId);
     const aliases = routeIds.filter((candidate) => candidate !== routeId);
-    const projections = projectionPathsForRoute(entity, routeId)
-      ?? projectionPathsForPublishedBiomarkerRoute(entity, routeId);
+    const projections = projectionPathsForRoute(entity, routeId);
     if (routeBundles.has(bundlePath)) {
       throw new Error(`Duplicate Health Commons web bundle path generated for ${bundlePath}.`);
     }
@@ -316,82 +231,7 @@ export function buildHealthCommonsWebGeneratedArtifacts(
 
   addGoalPageArtifacts(routeBundles, entitiesByKey, projectionArtifacts);
 
-  for (const bundle of routeBundles.values()) {
-    if (bundle.route.entityType !== "biomarker") {
-      continue;
-    }
-    const biomarker = entitiesByKey.get(bundle.primaryKey);
-    if (
-      biomarker?.entityType !== "biomarker"
-      || !isPublishedBiomarkerIndexEntity(biomarker)
-    ) {
-      continue;
-    }
-
-    const buildInput = {
-      biomarker,
-      catalogHash: catalog.catalogHash,
-      entitiesByKey,
-      routeAliases: bundle.route.aliases,
-      routeId: bundle.route.routeId,
-    };
-
-    projectionArtifacts.set(
-      `shell/biomarkers/${bundle.route.routeId}.json`,
-      buildHealthCommonsWebBiomarkerShell(buildInput),
-    );
-    projectionArtifacts.set(
-      `pages/biomarkers/${bundle.route.routeId}/overview.json`,
-      buildHealthCommonsWebBiomarkerOverview(buildInput),
-    );
-    projectionArtifacts.set(
-      `pages/biomarkers/${bundle.route.routeId}/research.json`,
-      buildHealthCommonsWebBiomarkerResearch(buildInput),
-    );
-  }
-
   return {
-    biomarkerIndex: {
-      biomarkers: [...routeBundles.values()]
-        .filter((bundle) => bundle.route.entityType === "biomarker")
-        .flatMap((bundle) => {
-          const entity = entitiesByKey.get(bundle.primaryKey);
-          if (!entity) {
-            return [];
-          }
-          return [{
-            aliases: bundle.route.aliases,
-            bundlePath: bundlePathForEntity(bundle.route.entityType, bundle.route.routeId),
-            categories: entity.categories ?? [],
-            desiredDirection: entity.biomarker?.direction?.desired ?? null,
-            ...resolveHealthCommonsWebBiomarkerMetricFields(entity),
-            fallbackRanges: entity.referenceGuidance?.fallbackRanges?.map((range) => ({
-              applicability: range.applicability,
-              eligibleSpecimenKinds: range.eligibleSpecimenKinds,
-              label: range.label,
-              ...(range.lowerBound ? { lowerBound: range.lowerBound } : {}),
-              unit: range.unit,
-              ...(range.upperBound ? { upperBound: range.upperBound } : {}),
-            })) ?? [],
-            hidden: entity.hidden === true,
-            key: entity.key,
-            published: isPublishedBiomarkerIndexEntity(entity),
-            quality: entity.quality ?? null,
-            revision: revisionRefForEntity(entity),
-            routeId: bundle.route.routeId,
-            slug: entity.slug,
-            sortRank: entity.sortRank ?? null,
-            shortName: resolveHealthCommonsWebBiomarkerShortName(entity),
-            status: entity.status ?? null,
-            summary: entity.summary ?? null,
-            title: entity.biomarker?.displayName ?? entity.title,
-            unit: entity.biomarker?.unit ?? entity.unit ?? null,
-          }];
-        })
-        .sort((left, right) => left.title.localeCompare(right.title)),
-      catalogHash: catalog.catalogHash,
-      schemaVersion: HEALTH_COMMONS_WEB_BIOMARKER_INDEX_SCHEMA_VERSION,
-    },
     goalIndex: {
       catalogHash: catalog.catalogHash,
       goals: [...routeBundles.values()]
@@ -849,44 +689,6 @@ function isPublicGoalTemplate(
     && entity.quality !== undefined
     && entity.quality !== "stub"
     && isPublicStatus(entity.status);
-}
-
-function isPublishedBiomarkerIndexEntity(
-  entity: HealthCommonsCatalogEntity | undefined,
-): entity is HealthCommonsCatalogEntity & { entityType: "biomarker" } {
-  return entity?.entityType === "biomarker"
-    && isPublicStatus(entity.status)
-    && entity.hidden !== true
-    && hasCompleteBiomarkerAbout(entity)
-    && (entity.biomarker?.measurement?.howToMeasure?.length ?? 0) > 0
-    && entity.communityOutcomeSummary !== undefined;
-}
-
-const BIOMARKER_ABOUT_SLOT_TITLES: readonly (readonly string[])[] = [
-  ["why murph uses it", "why people care", "why it matters"],
-  [
-    "how to measure it",
-    "how it's measured",
-    "how its measured",
-    "how to read it",
-    "how to read a trend",
-    "lab vs wearable",
-  ],
-  ["what can fool it", "what moves it"],
-];
-
-function hasCompleteBiomarkerAbout(entity: HealthCommonsCatalogEntity): boolean {
-  const titles = new Set(
-    (entity.biomarker?.explainerCards ?? []).map((card) => normalizeAboutTitle(card.title)),
-  );
-
-  return BIOMARKER_ABOUT_SLOT_TITLES.every((slotTitles) =>
-    slotTitles.some((title) => titles.has(title))
-  );
-}
-
-function normalizeAboutTitle(value: string): string {
-  return value.trim().toLowerCase().replace(/\s+/gu, " ");
 }
 
 function isPublicStatus(status: string | undefined): boolean {

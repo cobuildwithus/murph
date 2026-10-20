@@ -129,7 +129,15 @@ function buildGeneratedFiles(
   const sourceArtifactIndex = buildHealthCommonsSourceArtifactIndex(catalog);
   const webArtifacts = buildHealthCommonsWebGeneratedArtifacts(catalog);
   const biomarkerDesiredDirections =
-    buildHealthCommonsBiomarkerDesiredDirectionsArtifact(webArtifacts.biomarkerIndex);
+    buildHealthCommonsBiomarkerDesiredDirectionsArtifact({
+      biomarkers: catalog.entities
+        .filter((entity) => entity.entityType === "biomarker")
+        .map((entity) => ({
+          desiredDirection: entity.biomarker?.direction?.desired ?? null,
+          key: entity.key,
+        })),
+      catalogHash: catalog.catalogHash,
+    });
   const files = new Map<string, string>([
     ["catalog.hash", `${catalog.catalogHash}\n`],
     ["redirects.json", stablePrettyJson({ redirects: catalog.redirects })],
@@ -141,7 +149,6 @@ function buildGeneratedFiles(
     ["source-identities.ndjson", sourceIndex.identityLookup.map((entry) => JSON.stringify(entry)).join("\n") + "\n"],
     ["source-artifact-index.json", stablePrettyJson(sourceArtifactIndex)],
     ["web/routes/index.json", stablePrettyJson(webArtifacts.routeIndex)],
-    ["web/browse/biomarkers.json", stablePrettyJson(webArtifacts.biomarkerIndex)],
     ["web/browse/goals.json", stablePrettyJson(webArtifacts.goalIndex)],
   ]);
 

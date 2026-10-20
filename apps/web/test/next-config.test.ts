@@ -516,10 +516,9 @@ test("next.config traces generated Health Commons route files without the monoli
     );
   }
   const expectedGoalTraceExcludes = [
-    "../../packages/health-commons/generated/web/browse/biomarkers.json",
-  "../../packages/health-commons/generated/web/bundles/**/*.json",
-    "../../packages/health-commons/generated/web/pages/biomarkers/**/*.json",
-  "../../packages/health-commons/generated/web/shell/**/*.json",
+    "../../packages/health-commons/generated/biomarker-desired-directions.json",
+    "../../packages/health-commons/generated/web/bundles/**/*.json",
+    "../../packages/health-commons/generated/web/shell/**/*.json",
   ];
   assert.deepEqual(
     productionNextConfig.outputFileTracingExcludes?.["/goals"],
@@ -563,15 +562,7 @@ test("next.config traces generated Health Commons route files without the monoli
       "../../packages/health-commons/generated/web/bundles/measurement_method/**/*.json",
     ],
   );
-  assert.deepEqual(
-    productionNextConfig.outputFileTracingIncludes?.["/biomarkers"],
-    [
-      "../../packages/health-commons/generated/web/browse/biomarkers.json",
-      "../../packages/health-commons/generated/web/routes/index.json",
-      "../../packages/health-commons/generated/web/shell/biomarkers/**/*.json",
-      "../../packages/health-commons/generated/web/pages/biomarkers/**/*.json",
-    ],
-  );
+  assert.equal(productionNextConfig.outputFileTracingIncludes?.["/biomarkers"], undefined);
   assert.equal(
     productionNextConfig.outputFileTracingIncludes?.["/biomarkers/[biomarkerId]"],
     undefined,

@@ -5,7 +5,7 @@ Last verified: 2026-10-19
 ## Current State
 
 Health Commons is Murph's public, source-backed reference corpus: biomarker
-pages, outcome-first Goal guides, measurement methods, source pages, exact
+knowledge, outcome-first Goal guides, measurement methods, source pages, exact
 reusable revisions, and redirects. It stays forkable and reviewable like a small
 wiki while remaining structured enough to bind private goals to exact public
 versions.
@@ -32,7 +32,7 @@ The storage primitive is a typed wiki page plus generated projections.
 
 | Product concept | Stored form |
 | --- | --- |
-| Biomarker page | `entityType: biomarker` |
+| Biomarker reference entity | `entityType: biomarker` |
 | Outcome-first Goal guide | `entityType: goal_template` |
 | Measurement method | `entityType: measurement_method` |
 | Source | `entityType: source_artifact` |
@@ -42,7 +42,7 @@ Claims must cite source pages.
 
 ## Biomarker Reference Guidance
 
-Authored biomarker pages may carry calm educational context for measured
+Authored biomarker entities may carry calm educational context for measured
 health data under `referenceGuidance`. This content does not diagnose,
 prescribe, or decide whether a saved result is in or out of range. For saved
 laboratory results, the reporting source's flag and per-result reference
@@ -52,8 +52,10 @@ or override the source range.
 
 The contract lives in `packages/contracts/src/health-commons.ts`; authored
 guidance remains in `packages/health-commons/content/biomarkers/*.md`, and the
-generated biomarker research projection carries the parsed structure. Do not
-create a frontend-only guidance lookup or commit generated catalog artifacts.
+canonical knowledge readers carry the parsed structure. The retired Biomarkers
+website has no browse/detail projections, browser presentation selectors, or
+curated navigation grouping. Raw lab replica rows and export remain supported.
+Do not create a frontend-only guidance lookup or commit generated catalog artifacts.
 
 ```yaml
 referenceGuidance:
@@ -143,9 +145,7 @@ private experiment lineage.
 The full catalog is a build-time generator structure, not a runtime artifact.
 Runtime surfaces consume scoped generated artifacts instead of a monolith:
 web route bundles and projections for public pages, the compact Goal browse
-index, the v4 biomarker browse index (including device metric bindings and
-display precision so dashboard lists do not read every detail projection), the
-compact `biomarker-desired-directions.json` projection for progress-card
+index, the compact `biomarker-desired-directions.json` projection for progress-card
 sentiment, and separate source indexes only for tools that explicitly need
 source lookup. The generated `knowledge.sqlite` FTS projection
 gives the assistant a bounded claim-level read path for ordinary health

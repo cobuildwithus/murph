@@ -270,9 +270,6 @@
       "@murphai/query/browser": [
         "../../packages/query/src/browser.ts"
       ],
-      "@murphai/query/browser-biomarkers": [
-        "../../packages/query/src/browser-biomarkers.ts"
-      ],
       "@murphai/query/browser-overview": [
         "../../packages/query/src/browser-overview.ts"
       ],

@@ -67,17 +67,11 @@ export {
   loadGeneratedHealthCommonsWebRouteIndex,
 };
 import {
-  HEALTH_COMMONS_WEB_BIOMARKER_INDEX_SCHEMA_VERSION,
   HEALTH_COMMONS_WEB_ROUTE_BUNDLE_SCHEMA_VERSION,
-  type HealthCommonsWebBiomarkerIndex,
   type HealthCommonsWebRouteBundle,
 } from "./web-artifacts.ts";
 
 export type {
-  HealthCommonsWebBiomarkerOverview,
-  HealthCommonsWebBiomarkerFallbackRange,
-  HealthCommonsWebBiomarkerResearch,
-  HealthCommonsWebBiomarkerShell,
   HealthCommonsWebGoalIndex,
   HealthCommonsWebGoalIndexEntry,
   HealthCommonsWebGoalPage,
@@ -347,7 +341,6 @@ const DEFAULT_SOURCE_LIMIT = 8;
 const MAX_LIMIT = 500;
 let cachedGeneratedBiomarkerDesiredDirections:
   HealthCommonsBiomarkerDesiredDirectionsArtifact | null = null;
-let cachedGeneratedWebBiomarkerIndex: HealthCommonsWebBiomarkerIndex | null = null;
 const cachedGeneratedWebRouteBundles = new Map<string, HealthCommonsWebRouteBundle>();
 
 export function loadGeneratedHealthCommonsBiomarkerDesiredDirections(
@@ -373,26 +366,6 @@ export function getGeneratedHealthCommonsBiomarkerDesiredDirections(
   cachedGeneratedBiomarkerDesiredDirections ??=
     loadGeneratedHealthCommonsBiomarkerDesiredDirections();
   return cachedGeneratedBiomarkerDesiredDirections;
-}
-
-export function loadGeneratedHealthCommonsWebBiomarkerIndex(
-  options: LoadGeneratedHealthCommonsWebArtifactOptions = {},
-): HealthCommonsWebBiomarkerIndex {
-  const raw = readGeneratedWebArtifact("browse/biomarkers.json", options.generatedWebRoot);
-  const parsed = parseJsonObject(raw);
-  assertGeneratedWebBiomarkerIndex(parsed);
-  return parsed;
-}
-
-export function getGeneratedHealthCommonsWebBiomarkerIndex(
-  options: LoadGeneratedHealthCommonsWebArtifactOptions = {},
-): HealthCommonsWebBiomarkerIndex {
-  if (options.generatedWebRoot) {
-    return loadGeneratedHealthCommonsWebBiomarkerIndex(options);
-  }
-
-  cachedGeneratedWebBiomarkerIndex ??= loadGeneratedHealthCommonsWebBiomarkerIndex();
-  return cachedGeneratedWebBiomarkerIndex;
 }
 
 export function resolveGeneratedHealthCommonsBiomarkerDesiredDirection(
@@ -1422,22 +1395,6 @@ function assertGeneratedHealthCommonsBiomarkerDesiredDirections(
   }
 }
 
-function assertGeneratedWebBiomarkerIndex(
-  value: unknown,
-): asserts value is HealthCommonsWebBiomarkerIndex {
-  if (!isRecord(value)) {
-    throw new Error("Health Commons generated web biomarker index is invalid.");
-  }
-
-  if (
-    value["schemaVersion"] !== HEALTH_COMMONS_WEB_BIOMARKER_INDEX_SCHEMA_VERSION ||
-    typeof value["catalogHash"] !== "string" ||
-    !isArrayOf(value["biomarkers"], isGeneratedWebBiomarkerIndexEntry)
-  ) {
-    throw new Error("Health Commons generated web biomarker index is invalid.");
-  }
-}
-
 function assertGeneratedWebRouteBundle(
   value: unknown,
   bundlePath: string,
@@ -1468,33 +1425,6 @@ function assertGeneratedWebRouteBundle(
   }
 }
 
-function isGeneratedWebBiomarkerIndexEntry(value: unknown): boolean {
-  if (!isRecord(value)) {
-    return false;
-  }
-
-  return (
-    isArrayOf(value["aliases"], isString) &&
-    typeof value["bundlePath"] === "string" &&
-    isArrayOf(value["categories"], isString) &&
-    isHealthCommonsBiomarkerDesiredDirection(value["desiredDirection"]) &&
-    isArrayOf(value["fallbackRanges"], isGeneratedWebBiomarkerFallbackRange) &&
-    Array.isArray(value["privateMetricBindings"]) &&
-    typeof value["valuePrecision"] === "number" &&
-    typeof value["hidden"] === "boolean" &&
-    typeof value["key"] === "string" &&
-    typeof value["published"] === "boolean" &&
-    isNullableString(value["quality"]) &&
-    isRecord(value["revision"]) &&
-    typeof value["routeId"] === "string" &&
-    typeof value["slug"] === "string" &&
-    isNullableString(value["status"]) &&
-    isNullableString(value["summary"]) &&
-    typeof value["title"] === "string" &&
-    isNullableString(value["unit"])
-  );
-}
-
 function isGeneratedWebSourceSnippet(value: unknown): boolean {
   return isRecord(value)
     && (value["citation"] === null || value["citation"] === undefined || typeof value["citation"] === "string")
@@ -1503,39 +1433,6 @@ function isGeneratedWebSourceSnippet(value: unknown): boolean {
     && typeof value["title"] === "string"
     && (value["url"] === null || value["url"] === undefined || typeof value["url"] === "string")
     && (value["year"] === null || value["year"] === undefined || typeof value["year"] === "number");
-}
-
-function isGeneratedWebBiomarkerFallbackRange(value: unknown): boolean {
-  if (!isRecord(value)) {
-    return false;
-  }
-
-  const lowerBound = value["lowerBound"];
-  const upperBound = value["upperBound"];
-  return typeof value["applicability"] === "string"
-    && Array.isArray(value["eligibleSpecimenKinds"])
-    && value["eligibleSpecimenKinds"].length > 0
-    && value["eligibleSpecimenKinds"].every((kind) => kind === "serum" || kind === "plasma")
-    && typeof value["label"] === "string"
-    && typeof value["unit"] === "string"
-    && (lowerBound === undefined || isGeneratedWebBiomarkerFallbackBound(lowerBound))
-    && (upperBound === undefined || isGeneratedWebBiomarkerFallbackBound(upperBound))
-    && (lowerBound !== undefined || upperBound !== undefined)
-    && !(
-      isGeneratedWebBiomarkerFallbackBound(lowerBound)
-      && isGeneratedWebBiomarkerFallbackBound(upperBound)
-      && lowerBound["value"] >= upperBound["value"]
-    );
-}
-
-function isGeneratedWebBiomarkerFallbackBound(value: unknown): value is {
-  inclusive: boolean;
-  value: number;
-} {
-  return isRecord(value)
-    && typeof value["inclusive"] === "boolean"
-    && typeof value["value"] === "number"
-    && Number.isFinite(value["value"]);
 }
 
 function isGeneratedWebRoute(value: Record<string, unknown>): boolean {
@@ -1698,10 +1595,6 @@ function isArrayOf(
   isItem: (item: unknown) => boolean,
 ): value is unknown[] {
   return Array.isArray(value) && value.every(isItem);
-}
-
-function isNullableString(value: unknown): value is string | null {
-  return value === null || typeof value === "string";
 }
 
 function isNonEmptyString(value: string | null | undefined): value is string {

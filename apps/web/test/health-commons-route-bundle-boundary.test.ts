@@ -5,12 +5,9 @@ import { describe, expect, it } from "vitest";
 
 const repoRoot = path.resolve(import.meta.dirname, "../../..");
 const sourceFiles: readonly string[] = [
-  "apps/web/src/lib/health-commons/generated-biomarker-artifacts.ts",
   "apps/web/src/lib/health-commons/generated-measurement-method-artifacts.ts",
-  "apps/web/src/lib/health-commons/biomarker-projections.ts",
   "apps/web/src/lib/health-commons/measurement-method-detail.ts",
   "apps/web/src/lib/health-commons/goal-projections.ts",
-  "apps/web/app/(dashboard)/biomarkers/[biomarkerId]/page.tsx",
   "apps/web/app/goals/page.tsx",
   "apps/web/app/goals/[goalId]/page.tsx",
   "apps/web/app/measurement-methods/[measurementMethodId]/page.tsx",
@@ -61,26 +58,6 @@ describe("Health Commons route-bundle boundary", () => {
     expect(source).not.toContain("@murphai/health-commons/generated/");
   });
 
-  it("keeps public biomarker pages on generated page projections instead of route bundles", () => {
-    const files = [
-      "apps/web/app/(dashboard)/biomarkers/page.tsx",
-      "apps/web/app/(dashboard)/biomarkers/[biomarkerId]/layout.tsx",
-      "apps/web/app/(dashboard)/biomarkers/[biomarkerId]/page.tsx",
-      "apps/web/app/(dashboard)/biomarkers/[biomarkerId]/research/page.tsx",
-      "apps/web/src/lib/health-commons/biomarker-projections.ts",
-    ];
-
-    for (const relativePath of files) {
-      const source = readFileSync(path.join(repoRoot, relativePath), "utf8");
-
-      expect(source, `${relativePath} should not load biomarker route bundles`).not.toContain(
-        "loadGeneratedHealthCommonsWebRouteBundle",
-      );
-      expect(source, `${relativePath} should not instantiate biomarker route bundle readers`).not.toContain(
-        "createHealthCommonsRouteBundleReader",
-      );
-    }
-  });
 
   it("fails if existing Next traces include the monolithic generated catalog in public Health Commons routes", () => {
     const traceRoots = [
@@ -185,11 +162,8 @@ function resolveRelativeSourceFile(fromRelativePath: string, specifier: string):
 
 function isPublicHealthCommonsSourceFile(relativePath: string): boolean {
   return sourceFiles.includes(relativePath)
-    || relativePath.startsWith("apps/web/app/(dashboard)/biomarkers")
     || relativePath.startsWith("apps/web/app/measurement-methods")
-    || relativePath.startsWith("apps/web/src/lib/health-commons/generated-biomarker-artifacts")
     || relativePath.startsWith("apps/web/src/lib/health-commons/generated-measurement-method-artifacts")
-    || relativePath.startsWith("apps/web/src/lib/health-commons/biomarker-projections")
     || relativePath.startsWith("apps/web/src/lib/health-commons/measurement-method-detail");
 }
 
@@ -248,10 +222,8 @@ function isMissingPathError(error: unknown): boolean {
 function isHealthCommonsRouteTrace(filePath: string, source: string): boolean {
   const normalizedPath = filePath.replace(/\\/gu, "/");
   return (
-    normalizedPath.includes("/biomarkers/") ||
     normalizedPath.includes("/goals/") ||
     normalizedPath.includes("/measurement-methods/") ||
-    source.includes("biomarker-detail") ||
     source.includes("goal-projections") ||
     source.includes("measurement-method-detail")
   );

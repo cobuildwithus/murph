@@ -3,7 +3,6 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
-  Activity,
   ChartSpline,
   ChevronsUpDown,
   Home,
@@ -75,12 +74,6 @@ const navItems: {
     href: "/environment",
     matchPrefix: "/environment",
     icon: Leaf,
-  },
-  {
-    label: "Biomarkers",
-    href: "/biomarkers",
-    matchPrefix: "/biomarkers",
-    icon: Activity,
   },
 ];
 

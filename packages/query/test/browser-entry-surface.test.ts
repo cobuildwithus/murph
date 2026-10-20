@@ -7,7 +7,6 @@ import { test } from "vitest";
 import * as healthMetrics from "@murphai/health-metrics";
 import * as queryRoot from "@murphai/query";
 import * as queryBrowser from "@murphai/query/browser";
-import * as queryBrowserBiomarkers from "@murphai/query/browser-biomarkers";
 
 test("@murphai/query keeps browser-vault-only helpers on the browser subpath", () => {
   for (const exportName of [
@@ -15,20 +14,9 @@ test("@murphai/query keeps browser-vault-only helpers on the browser subpath", (
     "createBrowserVaultQueryClient",
     "createBrowserVaultReplica",
     "parseBrowserVaultReplica",
-    "selectBrowserVaultBiomarkerPanel",
   ]) {
     assert.equal(exportName in queryRoot, false);
     assert.equal(exportName in queryBrowser, true);
-  }
-});
-
-test("@murphai/query exposes measured lab selectors through the biomarker browser subpath", () => {
-  for (const exportName of [
-    "selectBrowserVaultLabBiomarkerDetail",
-    "selectBrowserVaultMeasuredBiomarkers",
-  ]) {
-    assert.equal(exportName in queryRoot, false);
-    assert.equal(exportName in queryBrowserBiomarkers, true);
   }
 });
 
@@ -56,7 +44,7 @@ test("Murph Age entrypoints are absent from package exports and source aliases",
     "./packages/health-metrics/src/*.ts",
   ]);
 
-  for (const surface of [healthMetrics, queryRoot, queryBrowser, queryBrowserBiomarkers]) {
+  for (const surface of [healthMetrics, queryRoot, queryBrowser]) {
     assert.deepEqual(
       Object.keys(surface).filter((name) => /[Mm]urphAge(?:[A-Z]|$)|^MURPH_AGE_/u.test(name)),
       [],
