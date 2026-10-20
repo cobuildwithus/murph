@@ -4,7 +4,6 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
   Activity,
-  BookOpen,
   ChartSpline,
   ChevronsUpDown,
   FlaskConical,
@@ -65,12 +64,6 @@ const navItems: {
   icon?: ElementType;
 }[] = [
   { label: "Home", href: "/home", icon: Home },
-  {
-    label: "Journal",
-    href: "/journal",
-    matchPrefix: "/journal",
-    icon: BookOpen,
-  },
   {
     label: "Patterns",
     href: "/patterns",

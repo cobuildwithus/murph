@@ -6,7 +6,7 @@ MVP backend implemented and dark: off in production unless
 `MURPH_GAME_ENABLED=true`, and limited to the member ids in
 `MURPH_GAME_MEMBER_ALLOWLIST` when that list is non-empty. Unset means on outside
 production only. Members outside the gate see every game route as missing. The
-iOS client is the MurphV2 prototype app.
+iOS client is the Murph app.
 
 ## Product
 
@@ -17,8 +17,11 @@ every day you miss, you owe the other one"). Games run 7 days by default and at
 most 28.
 
 The MVP is private 1v1. The challenger creates a game and texts a single-use
-link (`/g/<token>`, valid 7 days) from their own phone; an invite nobody accepts
-expires, and stays on the challenger's Home for a week marked expired. The invitee opens it, signs in, and shakes on the terms they saw; a
+link (`/g/<token>`, valid 7 days) from their own phone. The page's Open in Murph
+button opens `ai.withmurph.app://invite/<token>`; `MURPH_GAME_APP_URL_SCHEME`
+overrides the scheme (local stacks use the Debug app's `ai.withmurph.app.dev`).
+An invite nobody accepts expires, and stays on the challenger's Home for a week
+marked expired. The invitee opens it, signs in, and shakes on the terms they saw; a
 changed version is refused with `TERMS_CHANGED`. Accepting makes the game live.
 A person can play several live games at once, one per opponent, but the same
 two people can't have two going together. Home lists the games waiting on you

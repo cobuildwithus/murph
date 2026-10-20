@@ -12,7 +12,6 @@ test.each([
   ["/home", ["core"]],
   ["/overview", ["core"]],
   ["/patterns", ["core"]],
-  ["/journal", ["core"]],
   ["/history", ["core"]],
   ["/experiments", ["core"]],
   ["/experiments/protocol-1/research", ["core"]],

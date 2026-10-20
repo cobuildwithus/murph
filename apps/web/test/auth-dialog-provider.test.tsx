@@ -106,7 +106,7 @@ test("dashboard sign-in opens on entry, respects dismissal, and opens on another
   expect(mocks.authDialogProps?.open).toBe(false);
 
   mocks.segment = "(dashboard)";
-  mocks.pathname = "/journal";
+  mocks.pathname = "/patterns";
   await rendered.rerender(view());
   expect(mocks.authDialogProps?.open).toBe(true);
 
@@ -138,7 +138,7 @@ test.each([
   await rendered.cleanup();
 });
 
-test.each(["/home", "/patterns", "/journal", "/biomarkers/example"])(
+test.each(["/home", "/patterns", "/biomarkers/example"])(
   "dashboard sign-in resumes the full current URL: %s",
   async (pathname) => {
     const { AuthProvider } = await import(

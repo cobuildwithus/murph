@@ -230,14 +230,16 @@ function PatternsEmptyState({
             ? "Your device records the result. Tell Murph about training, travel, caffeine, meals, and other things that may explain it."
             : "Connect a device. Murph will compare sleep and recovery with the things that happen in your life."}
         </p>
-        <Button
-          className="mt-6 rounded-full"
-          nativeButton={false}
-          render={<Link href={hasHealthData ? "/journal" : "/connect"} />}
-        >
-          {hasHealthData ? "Open Journal" : "Connect a device"}
-          <ArrowRight aria-hidden="true" />
-        </Button>
+        {!hasHealthData ? (
+          <Button
+            className="mt-6 rounded-full"
+            nativeButton={false}
+            render={<Link href="/connect" />}
+          >
+            Connect a device
+            <ArrowRight aria-hidden="true" />
+          </Button>
+        ) : null}
       </div>
       <div className="border-t border-border bg-muted/20 p-7 sm:border-l sm:border-t-0 sm:p-10">
         <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
