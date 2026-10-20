@@ -1,3 +1,5 @@
+Environment removal validation follow-up: [missing-version feedback](exec-plans/completed/2026-10-19-environment-validation-feedback.md).
+
 Final reply post-generation delivery telemetry and alerting are owned by
 
 Environment removal compatibility review: [timestamp preservation](exec-plans/completed/2026-10-19-environment-timestamp-compatibility.md).
