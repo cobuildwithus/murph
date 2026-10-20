@@ -414,10 +414,6 @@ async function executeHostedSystemWake(input: {
       );
       return await executeHostedCodexAuthWake({
         operatorHomeRoot: input.operatorHomeRoot,
-        platform: input.runtime.platform,
-        runtimeEnv: input.runtimeEnv,
-        vaultRoot: input.vaultRoot,
-        wake: input.wake,
       });
     }
     case "assistant.ask.requested":

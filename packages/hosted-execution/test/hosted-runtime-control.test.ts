@@ -74,8 +74,6 @@ import {
   parseHostedMailboxPayloadFetchResponse,
   parseHostedBrowserVaultReplicaPublishRequest,
   parseHostedBrowserVaultReplicaPublishResponse,
-  parseHostedCodexAuthUpdate,
-  parseHostedCodexAuthUpdateResponse,
   parseHostedRuntimeDeviceSyncBridgeEnvelope,
   parseHostedRuntimeAssistantConfigurationControlRequest,
   parseHostedRuntimeAssistantConfigurationToolRequest,
@@ -1386,54 +1384,6 @@ describe("hosted runtime control contracts", () => {
       recorded: true,
       usageId: usage.usageId,
     })).toThrow(/platformAiUsageAllowedAfter/u);
-  });
-
-  it("parses hosted Codex auth updates with exact bounded callback shapes", () => {
-    expect(parseHostedCodexAuthUpdate({
-      attemptId: "hca_abcdefghijklmnop",
-      phase: "device_code",
-      userCode: "ABCD-EFGH",
-      verificationUrl: "https://auth.openai.com/device",
-    })).toEqual({
-      attemptId: "hca_abcdefghijklmnop",
-      phase: "device_code",
-      userCode: "ABCD-EFGH",
-      verificationUrl: "https://auth.openai.com/device",
-    });
-    expect(parseHostedCodexAuthUpdate({
-      attemptId: "hca_abcdefghijklmnop",
-      phase: "connected",
-    })).toEqual({
-      attemptId: "hca_abcdefghijklmnop",
-      phase: "connected",
-    });
-    expect(parseHostedCodexAuthUpdateResponse({ applied: false })).toEqual({
-      applied: false,
-      status: "superseded",
-    });
-    expect(parseHostedCodexAuthUpdateResponse({
-      applied: true,
-      status: "already_applied",
-    })).toEqual({
-      applied: true,
-      status: "already_applied",
-    });
-    expect(() => parseHostedCodexAuthUpdateResponse({
-      applied: true,
-      status: "superseded",
-    })).toThrow(/conflicts/u);
-
-    expect(() => parseHostedCodexAuthUpdate({
-      attemptId: "hca_abcdefghijklmnop",
-      phase: "device_code",
-      userCode: "ABCD-EFGH",
-      verificationUrl: "https://example.test/device",
-    })).toThrow(/OpenAI auth host/u);
-    expect(() => parseHostedCodexAuthUpdate({
-      attemptId: "hca_abcdefghijklmnop",
-      phase: "connected",
-      verificationUrl: "https://auth.openai.com/device",
-    })).toThrow(/not allowed/u);
   });
 
   it("parses hosted runtime latency trace callbacks with exact safe keys", () => {

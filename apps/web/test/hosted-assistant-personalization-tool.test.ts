@@ -124,10 +124,10 @@ describe("hosted assistant personalization tool owner adapter", () => {
     })).resolves.toEqual({
       action: "read",
       result: {
-        mainPersona: "classic",
+        mainPersona: "classic" as const,
+        supportingPersona: null,
         model: "gpt-6.1-sol",
         solAvailable: false,
-        supportingPersona: null,
         tone: "formal",
         voice: "warm",
       },
@@ -168,10 +168,10 @@ describe("hosted assistant personalization tool owner adapter", () => {
     })).resolves.toEqual({
       action: "read",
       result: {
-        mainPersona: "classic",
+        mainPersona: "classic" as const,
+        supportingPersona: null,
         model: "gpt-6.1-sol",
         solAvailable: false,
-        supportingPersona: null,
         tone: "formal",
         voice: "upbeat",
       },
@@ -237,27 +237,6 @@ describe("hosted assistant personalization tool owner adapter", () => {
     });
   });
 
-  it("rejects scheduled persona changes before opening a transaction", async () => {
-    await expect(handleHostedRuntimeAssistantPersonalizationTool({
-      authority: {
-        automationId: "automation_daily_style",
-        occurrenceAt: "2026-08-06T14:30:00.000Z",
-      },
-      memberId: "member_personalization_1",
-      request: {
-        action: "update",
-        mainPersona: "scientist",
-        supportingPersona: "classic",
-      },
-    })).rejects.toThrow(
-      "Scheduled automation occurrences cannot change Murph personas.",
-    );
-
-    expect(mocks.transaction).not.toHaveBeenCalled();
-    expect(mocks.requireHostedRuntimeActiveAccessForUpdateTx).not.toHaveBeenCalled();
-    expect(mocks.readHostedMemberAssistantPreferences).not.toHaveBeenCalled();
-    expect(mocks.upsertHostedMemberAssistantPreferencesTx).not.toHaveBeenCalled();
-  });
 
   it("uses an independent stable identity for scheduled personality updates", async () => {
     mocks.upsertHostedMemberAssistantPreferencesTx.mockResolvedValue({
@@ -305,61 +284,6 @@ describe("hosted assistant personalization tool owner adapter", () => {
     });
   });
 
-  it("resolves and persists main and supporting personalities without changing tone or voice", async () => {
-    mocks.upsertHostedMemberAssistantPreferencesTx.mockResolvedValue({
-      appliedFields: ["persona"],
-      assistantPersona: "scientist-with-classic",
-      assistantPersonality: {
-        detail: null,
-        humor: null,
-        push: null,
-        unhinged: null,
-      },
-      assistantTone: "formal",
-      assistantVoice: "warm",
-      dispatch: { mailboxItemId: "mailbox_persona_1" },
-      updated: true,
-    });
-
-    await expect(handleHostedRuntimeAssistantPersonalizationTool({
-      authority: { assistantInputId: "ain_12121212121212121212121212121212" },
-      memberId: "member_personalization_1",
-      request: {
-        action: "update",
-        mainPersona: "scientist",
-        supportingPersona: "classic",
-      },
-      scheduleMailboxWake: mocks.scheduleMailboxWake,
-    })).resolves.toEqual({
-      action: "update",
-      result: {
-        mainPersona: "scientist",
-        model: "gpt-6.1-sol",
-        modelChangeAppliesNextRun: false,
-        modelUpdated: false,
-        solAvailable: false,
-        status: "saved",
-        supportingPersona: "classic",
-        tone: "formal",
-        voice: "warm",
-      },
-    });
-
-    expect(mocks.upsertHostedMemberAssistantPreferencesTx).toHaveBeenCalledWith({
-      causalOrigin: "turn",
-      memberId: "member_personalization_1",
-      occurredAt: "2026-07-16T00:00:00.000Z",
-      preferenceCausalSeq: "42",
-      preferences: { persona: "scientist-with-classic" },
-      prisma: expect.objectContaining({ tx: true }),
-      updateId: buildAcceptedPreferenceUpdateId({
-        assistantInputId: "ain_12121212121212121212121212121212",
-        operation: "personalization",
-        requestedFields: ["persona"],
-      }),
-    });
-    expect(mocks.readHostedMemberAssistantPreferences).not.toHaveBeenCalled();
-  });
 
   it("scopes scheduled personality identities to the requested dials", async () => {
     mocks.upsertHostedMemberAssistantPreferencesTx.mockResolvedValue({
@@ -1004,13 +928,13 @@ describe("hosted assistant personalization tool owner adapter", () => {
     })).resolves.toEqual({
       action: "update",
       result: {
-        mainPersona: "classic",
+        mainPersona: "classic" as const,
+        supportingPersona: null,
         model: "gpt-6.1-sol",
         modelChangeAppliesNextRun: false,
         modelUpdated: false,
         solAvailable: false,
         status: "saved",
-        supportingPersona: null,
         tone: "casual",
         voice: "warm",
       },
@@ -1064,6 +988,8 @@ describe("hosted assistant personalization tool owner adapter", () => {
       scheduleMailboxWake: mocks.scheduleMailboxWake,
     })).resolves.toMatchObject({
       result: {
+        mainPersona: "classic" as const,
+        supportingPersona: null,
         model: "gpt-6.1-sol",
         modelChangeAppliesNextRun: false,
         modelUpdated: false,

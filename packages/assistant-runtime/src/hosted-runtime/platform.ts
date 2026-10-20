@@ -46,8 +46,6 @@ import type {
   HostedRuntimeGroupToolResponse,
   HostedRuntimeProductFeedbackRecord,
   HostedRuntimeProductFeedbackRecordResponse,
-  HostedCodexAuthUpdate,
-  HostedCodexAuthUpdateResponse,
   HostedRuntimeUsageNoticeDeliveryTarget,
   HostedRuntimeUsageRecordResponse as HostedExecutionRuntimeUsageRecordResponse,
   HostedWorkspaceCheckpointRequest,
@@ -704,10 +702,6 @@ export interface HostedRuntimeGroupToolPort {
     | { status: "unavailable"; unavailableReason: string };
 }
 
-export interface HostedRuntimeCodexAuthPort {
-  update(update: HostedCodexAuthUpdate): Promise<HostedCodexAuthUpdateResponse>;
-}
-
 export interface HostedRuntimePhoneCallPort {
   stop?(
     request: HostedPhoneCallStopRequest,
@@ -904,7 +898,6 @@ export interface HostedRuntimePlatform {
   artifactStore: HostedRuntimeArtifactStore;
   mediaStore?: HostedRuntimeMediaStore | null;
   browserVaultReplicaPort?: HostedRuntimeBrowserVaultReplicaPort | null;
-  codexAuthPort?: HostedRuntimeCodexAuthPort | null;
   clinicalRecordsPort?: HostedRuntimeClinicalRecordsPort | null;
   connectedApps?: AssistantConnectedAppsPort | null;
   deviceSyncPort?: HostedRuntimeDeviceSyncPort | null;

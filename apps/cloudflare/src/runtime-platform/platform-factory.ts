@@ -17,7 +17,6 @@ import { createHostedRuntimeAssistantConfigurationToolPort } from "./assistant-c
 import { createHostedRuntimeAssistantAskPort } from "./assistant-ask-port.ts";
 import { createCloudflareBrowserVaultReplicaPort } from "./browser-vault-replica-port.ts";
 import { createHostedWebClinicalRecordsPort } from "./clinical-records-port.ts";
-import { createHostedRuntimeCodexAuthPort } from "./codex-auth-port.ts";
 import { createHostedWebConnectedAppsPort } from "./connected-apps-port.ts";
 import { createHostedWebDeviceSyncPort } from "./device-sync-port.ts";
 import type { HostedRuntimeFetchTransportDiagnostics } from "./fetch-transport-collector.ts";
@@ -200,13 +199,6 @@ export function buildHostedExecutionRuntimePlatform(input: {
     publicInternetFetch: createCloudflareHostedPublicInternetFetch(baseFetchImpl),
     ...(transport
       ? {
-          codexAuthPort: createHostedRuntimeCodexAuthPort({
-            boundUserId: input.boundUserId,
-            fetchImpl,
-            timeoutMs,
-            transport,
-            workspaceCheckpointBridge: input.workspaceCheckpointBridge ?? null,
-          }),
           logPort,
           latencyTracePort: createHostedWebRuntimeLatencyTracePort({
             boundUserId: input.boundUserId,

@@ -2826,10 +2826,6 @@ const LEGACY_CHANGELOG_EDITIONS = [
           "A public Knowledge page covers the research, specialist skills, evidence grades, and personal data Murph works from, linked from the main navigation.",
         relevanceTags: ["web", "health", "search"],
         sourcePullRequests: [862],
-        tryIt: {
-          href: "/knowledge",
-          label: "Open Knowledge",
-        },
       },
       {
         id: "two-week-experiment-baselines",

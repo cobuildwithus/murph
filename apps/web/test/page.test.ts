@@ -66,10 +66,6 @@ vi.mock("@/src/lib/hosted-onboarding/page-auth", () => ({
   getHostedDashboardPageAuthSnapshot: mocks.getHostedPageAuthSnapshot,
 }));
 
-vi.mock("@/src/lib/goals/public-murph-line", () => ({
-  resolvePublicMurphLinePhoneNumber: async () => "+15550100001",
-}));
-
 vi.mock("@/src/lib/browser-vault/homepage-preparation", () => ({
   scheduleHomepageBrowserVaultPreparation:
     mocks.scheduleHomepageBrowserVaultPreparation,
@@ -197,12 +193,7 @@ test("HomePage renders the canonical landing page at the root route", async () =
     undefined
   );
   assert.match(markup, /aria-label="Open menu"/);
-  assert.equal((markup.match(/href="\/knowledge"/g) ?? []).length, 1);
-  assert.match(markup, /href="\/goals"[^>]*>Goals<\/a>/s);
-  assert.match(
-    markup,
-    /href="\/goals"[^>]*>Goals<\/a>.*href="\/knowledge"[^>]*>Knowledge<\/a>.*href="\/security"[^>]*>Security<\/a>/s,
-  );
+  assert.doesNotMatch(markup, /href="\/(?:goals|knowledge|pitch)(?:["/#?])/);
   assert.match(markup, /data-root-landing-auth-actions-context="nav"/);
   assert.match(markup, /data-root-landing-auth-actions-context="hero"/);
   assert.match(markup, /data-root-landing-auth-actions-context="footer"/);
@@ -241,8 +232,6 @@ test("HomePage renders the canonical landing page at the root route", async () =
     markup,
     /data-root-landing-auth-actions-label="Meet Murph"/
   );
-  assert.match(markup, /Everyone’s working on something\./);
-  assert.match(markup, /Whatever your goal, you don’t have to hit it alone\./);
   assert.match(markup, /Do I need friends on Murph\?/);
   assert.doesNotMatch(markup, /personal health assistant/);
   assert.doesNotMatch(markup, /Discover what actually makes you healthier/);

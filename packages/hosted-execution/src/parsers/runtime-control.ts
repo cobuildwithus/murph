@@ -57,7 +57,6 @@ import {
   isHostedRuntimeShellPrewarmOrchestrationAttemptId,
   HOSTED_RUNTIME_LATENCY_TRACE_MILESTONES,
   HOSTED_IDLE_CHECKPOINT_TRIGGERS,
-  HOSTED_CODEX_AUTH_UPDATE_RESPONSE_STATUSES,
   HOSTED_CANONICAL_WRITE_RECEIPT_REDACTED_STATUS_KEYS,
   HOSTED_PRODUCT_FEEDBACK_KINDS,
   HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH,
@@ -175,9 +174,6 @@ import {
   type HostedRuntimeGroupEmailEffectResponse,
   type HostedRuntimeProductFeedbackRecordRequest,
   type HostedRuntimeProductFeedbackRecordResponse,
-  type HostedCodexAuthUpdate,
-  type HostedCodexAuthUpdateResponse,
-  type HostedCodexAuthUpdateResponseStatus,
   type HostedProductFeedbackKind,
   type HostedIngressLatencySource,
   type HostedIdleCheckpointTrigger,
@@ -5725,129 +5721,6 @@ export function parseHostedRuntimeFamilyPlanToolResponse(
   throw new TypeError(
     "Hosted runtime family plan tool response action is not supported.",
   );
-}
-
-export function parseHostedCodexAuthUpdate(
-  value: unknown,
-): HostedCodexAuthUpdate {
-  const record = requireObject(value, "Hosted Codex auth update");
-  const phase = requireString(record.phase, "Hosted Codex auth update phase");
-  const attemptId = parseHostedCodexAuthAttemptId(record.attemptId);
-
-  if (phase === "device_code") {
-    assertAllowedObjectKeys(
-      record,
-      new Set(["attemptId", "phase", "userCode", "verificationUrl"]),
-      "Hosted Codex auth device-code update",
-    );
-    const userCode = requireString(
-      record.userCode,
-      "Hosted Codex auth update userCode",
-    );
-    if (userCode.length > 128) {
-      throw new TypeError("Hosted Codex auth update userCode is too long.");
-    }
-    const verificationUrl = requireString(
-      record.verificationUrl,
-      "Hosted Codex auth update verificationUrl",
-    );
-    assertHostedCodexAuthVerificationUrl(verificationUrl);
-    return {
-      attemptId,
-      phase,
-      userCode,
-      verificationUrl,
-    };
-  }
-
-  if (phase === "connected" || phase === "disconnected" || phase === "failed") {
-    assertAllowedObjectKeys(
-      record,
-      new Set(["attemptId", "phase"]),
-      "Hosted Codex auth terminal update",
-    );
-    return { attemptId, phase };
-  }
-
-  throw new TypeError("Hosted Codex auth update phase is not supported.");
-}
-
-export function parseHostedCodexAuthUpdateResponse(
-  value: unknown,
-): HostedCodexAuthUpdateResponse {
-  const record = requireObject(value, "Hosted Codex auth update response");
-  assertAllowedObjectKeys(
-    record,
-    new Set(["applied", "status"]),
-    "Hosted Codex auth update response",
-  );
-  const applied = requireBoolean(
-    record.applied,
-    "Hosted Codex auth update response applied",
-  );
-  const status =
-    record.status === undefined
-      ? applied
-        ? "applied"
-        : "superseded"
-      : parseHostedCodexAuthUpdateResponseStatus(record.status);
-  if ((status === "superseded") === applied) {
-    throw new TypeError(
-      "Hosted Codex auth update response status conflicts with applied.",
-    );
-  }
-  return {
-    applied,
-    status,
-  };
-}
-
-function parseHostedCodexAuthUpdateResponseStatus(
-  value: unknown,
-): HostedCodexAuthUpdateResponseStatus {
-  const status = requireString(
-    value,
-    "Hosted Codex auth update response status",
-  );
-  if (
-    HOSTED_CODEX_AUTH_UPDATE_RESPONSE_STATUSES.includes(
-      status as HostedCodexAuthUpdateResponseStatus,
-    )
-  ) {
-    return status as HostedCodexAuthUpdateResponseStatus;
-  }
-  throw new TypeError(
-    "Hosted Codex auth update response status is not supported.",
-  );
-}
-
-function parseHostedCodexAuthAttemptId(value: unknown): string {
-  const attemptId = requireString(value, "Hosted Codex auth update attemptId");
-  if (!/^hca_[A-Za-z0-9_-]{16,64}$/u.test(attemptId)) {
-    throw new TypeError("Hosted Codex auth update attemptId is invalid.");
-  }
-  return attemptId;
-}
-
-function assertHostedCodexAuthVerificationUrl(value: string): void {
-  let url: URL;
-  try {
-    url = new URL(value);
-  } catch {
-    throw new TypeError(
-      "Hosted Codex auth verificationUrl must be an absolute URL.",
-    );
-  }
-  if (url.protocol !== "https:" || url.username || url.password) {
-    throw new TypeError(
-      "Hosted Codex auth verificationUrl must use HTTPS without credentials.",
-    );
-  }
-  if (url.hostname !== "auth.openai.com") {
-    throw new TypeError(
-      "Hosted Codex auth verificationUrl must use the OpenAI auth host.",
-    );
-  }
 }
 
 function parseHostedRuntimeLinqExternalThreadRouteAuthority(
