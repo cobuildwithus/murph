@@ -1958,6 +1958,111 @@ separate. Propose a behavior correction only after at least two matching
 action/code observations and a deterministic reproduction at the responsible
 owner; telemetry alone does not establish the original cause.
 
+### Private automation handler failure evidence
+
+Only `executeAutomationDynamicTool`'s existing generic handler-exception return
+may add `automationAction` and `automationErrorCode` to its private
+`failureDiagnostic` and completed classification issue. `automationAction` is
+the already parsed `inspect | inspect_models | save | patch | reconcile` action;
+`inspect_models` remains the requested batch action even though its port calls
+use `inspect`. No action is inferred from failed parsing or another tool.
+
+`automationErrorCode` admits exactly three core-owned values from
+`AUTOMATION_FAILURE_CODES` in
+`packages/assistant-engine/src/assistant-codex/tool-failure-diagnostics.ts`:
+
+| Code | Existing source owner reached by the hosted adapter |
+| --- | --- |
+| `VAULT_AUTOMATION_EMPTY_PATCH` | `patchAutomation`'s no-change assertion. |
+| `VAULT_AUTOMATION_MISSING` | `patchAutomation`'s locked registry reread. |
+| `VAULT_AUTOMATION_RECONCILIATION_LIMIT_EXCEEDED` | `reconcileAutomationSupportSeries`'s bounded registry loader. |
+
+These are a small diagnostic vocabulary, not new error/retry categories or
+evidence that any particular code occurred. The ordinary JSON patch contract
+already rejects a patch with no change keys; retaining a core code does not
+establish what the model submitted. All three codes keep the existing
+`execution / handler_exception / unknown` classification. Other schema, storage
+and uncatalogued errors keep their current category and omit the new code.
+
+The new observer accepts only an exact primitive code in an own data descriptor.
+It rejects proxies before inspection and never invokes accessors, coerces values,
+walks prototypes or reads error names, messages, stacks, contexts or causes.
+This guarantee applies to the added observer: the existing missing/conflict
+predicates and generic classifier retain their original reads and behavior.
+No arguments, results, identifiers, timestamps or nested payloads are copied.
+An abort snapshot is deliberately omitted; this evidence does not attribute
+cancellation or establish whether earlier effects occurred.
+
+Successes, quiet missing inspections, conflicts, admission refusals and explicit
+result-format rejections receive neither new field. RPC content, prompts, tool
+schemas, calls, ordering, writes, abort handling and recovery/retry behavior are
+unchanged. The existing completion, issue reporter, sanitizer and record parser
+retain these optional scalars within their current limits (at most seven detail
+keys here). Older producers omit them and current readers already accept both
+shapes; no schema migration, new stream, backfill or deploy ordering change is
+required. Confirm actual reader and producer revisions, including warm runners,
+before comparing later natural traffic; do not infer a timing row's release
+from a nearby issue.
+
+For an authorized natural-traffic review, bind one fixed UTC end instant as `$1`
+and query the **primary** `hosted_assistant_runtime_issue.details_json` table.
+The conversion preserves this table's UTC timestamp-without-timezone convention.
+This returns only finite aggregates from at most 200 caught classification rows
+per half-open 12-hour window; it does not select member data or raw payloads:
+
+```sql
+WITH anchor AS (
+  SELECT ($1::timestamptz AT TIME ZONE 'UTC') AS end_at
+), windows AS (
+  SELECT 'prior12' AS period, end_at - interval '24 hours' AS start_at,
+         end_at - interval '12 hours' AS end_at FROM anchor
+  UNION ALL
+  SELECT 'latest12', end_at - interval '12 hours', end_at FROM anchor
+), sampled AS MATERIALIZED (
+  SELECT w.period, i.action, i.code, i.category
+  FROM windows w
+  CROSS JOIN LATERAL (
+    SELECT CASE WHEN details_json->>'automationAction' IN
+        ('inspect', 'inspect_models', 'save', 'patch', 'reconcile')
+        THEN details_json->>'automationAction' END AS action,
+      CASE WHEN details_json->>'automationErrorCode' IN
+        ('VAULT_AUTOMATION_EMPTY_PATCH', 'VAULT_AUTOMATION_MISSING',
+         'VAULT_AUTOMATION_RECONCILIATION_LIMIT_EXCEEDED')
+        THEN details_json->>'automationErrorCode' END AS code,
+      CASE WHEN details_json->>'errorCategory' IN
+        ('unknown', 'invalid_input', 'not_found', 'conflict', 'unavailable',
+         'authority_rejected', 'invalid_result', 'rate_limited', 'timeout')
+        THEN details_json->>'errorCategory' END AS category
+    FROM hosted_assistant_runtime_issue
+    WHERE environment = 'hosted'
+      AND component = 'assistant.codex-dynamic-tool'
+      AND operation = 'automation' AND phase = 'tool_call'
+      AND issue_kind = 'tool_error' AND error_code = 'ASSISTANT_DYNAMIC_TOOL_FAILED'
+      AND occurred_at >= w.start_at AND occurred_at < w.end_at
+      AND details_json->>'diagnosticRole' = 'classification'
+      AND details_json->>'failureStage' = 'execution'
+      AND details_json->>'failureReason' = 'handler_exception'
+    ORDER BY occurred_at DESC, id DESC
+    LIMIT 200
+  ) i
+)
+SELECT w.period, s.action, s.code, s.category,
+       count(s.period) AS sampled_caught_failure_rows,
+       sum(count(s.period)) OVER (PARTITION BY w.period) = 200 AS row_cap_hit
+FROM windows w LEFT JOIN sampled s ON s.period = w.period
+GROUP BY w.period, s.action, s.code, s.category
+ORDER BY w.period, s.action NULLS LAST, s.code NULLS LAST, s.category NULLS LAST;
+```
+
+The cap is shared across groups in each window; a hit means possible truncation.
+Missing fields remain unresolved, including older producers and opaque errors.
+Best-effort capture and the existing per-attempt issue cap limit coverage; zero
+sampled rows does not prove zero failures. Native completion issues can describe
+the same call and must not be added to classification counts. Completed profiles
+are incomplete coverage and are not a denominator for all issue rows. Observe
+natural traffic only; this diagnostic extension authorizes no production call,
+prompt correction, induced failure, retry or claim about prior model intent.
+
 ### Private vault-file preparation failure evidence
 
 Only the existing `send-vault-file` execution catch may add the optional
