@@ -13,10 +13,6 @@
       "sleep",
       "device-sync"
     ],
-    "sourcePullRequests": [3002],
-    "tryIt": {
-      "label": "Open Journal",
-      "href": "/journal"
-    }
+    "sourcePullRequests": [3002]
   }
 }

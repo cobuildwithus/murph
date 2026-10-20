@@ -417,6 +417,12 @@ export function PersonalPatternsStudy() {
       <div data-design-state="empty">
         <PersonalPatternsSection report={EMPTY_REPORT} />
       </div>
+      <div data-design-state="needs-context">
+        <PersonalPatternsSection report={{ ...EMPTY_REPORT, outcomes: POPULATED_REPORT.outcomes }} />
+      </div>
+      <div data-design-state="learning">
+        <PersonalPatternsSection report={{ ...POPULATED_REPORT, cells: [], repeatableCellCount: 0, testedCellCount: 0 }} />
+      </div>
       <div data-design-state="loading">
         <PersonalPatternsSection report={null} state="loading" />
       </div>

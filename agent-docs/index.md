@@ -1,3 +1,6 @@
+Documentation guard diagnostic clarification is tracked in
+[the diagnostic plan](exec-plans/completed/2026-10-19-frog-docs-diagnostic-4205.md).
+
 Final reply post-generation delivery telemetry and alerting are owned by
 [`hosted-runtime-protocol.md`](references/hosted-runtime-protocol.md); the
 implementation is recorded in
@@ -723,7 +726,7 @@ Package verifier worker-exit result preservation is tracked in
 | `agent-docs/exec-plans/completed/2026-09-11-nutrition-totals-card.md` | Completed implementation, assistant proof and review for optional-goal daily cards. | Completed execution plan | High | 2026-09-11 |
 | `agent-docs/exec-plans/completed/2026-09-12-channel-welcome-reader-rollout.md` | Consumer-first release extraction for channel welcomes; production rollout remains with the deployment owners. | Historical implementation evidence | Low | 2026-09-12 |
 | `agent-docs/product-specs/imessage-workout-tracking.md` | iMessage workout product spec, verified editor attachment, and installed-client-compatible message/result transport. | iMessage workout product spec | High | 2026-09-08 |
-| `agent-docs/product-specs/journal.md` | Private timelines, connected plans, and morning reminder reconciliation using normal vault tools, with or without connected accounts. | Journal product spec | High | 2026-09-23 |
+| `agent-docs/product-specs/journal.md` | Native timeline and companion API, shared projection, connected plans, and morning reminder reconciliation; retired website timeline. | Journal product spec | High | 2026-09-23 |
 | `agent-docs/product-specs/personal-patterns.md` | Private context-to-outcome findings, desktop comparisons, and mobile cards with changed results, compact neutral states, tappable recorded-day counts, and inline comparison sample sizes. | Personal Patterns product spec | High | 2026-09-10 |
 | `agent-docs/product-specs/repo.md` | Canonical repository posture and success criteria. | Current repo product spec | High | 2026-04-06 |
 | `agent-docs/product-specs/starter-usage.md` | Non-expiring $4.50 starter usage on the immutable credit ledger, text entry, subscription access for Images and Responses HTTP/WebSocket generation, and abuse alerts; retained paid legacy compatibility. | Hosted access/billing product spec | High | 2026-09-11 |
@@ -734,7 +737,7 @@ Package verifier worker-exit result preservation is tracked in
 | `agent-docs/product-specs/hosted-usage-topups.md` | Hosted billing/product spec, including 80% top-up usage grants, preserved historical purchase terms, and migration-first sponsorship compatibility. | Hosted billing/product spec | High | 2026-09-22 |
 | `agent-docs/product-specs/hosted-usage-referrals.md` | Hosted growth/product spec. | Hosted growth/product spec | High | 2026-08-10 |
 | `agent-docs/product-specs/physical-notes.md` | Hosted physical-note product spec. | Hosted physical-note product spec | High | 2026-08-21 |
-| `agent-docs/product-specs/weekly-game.md` | Private 1v1 weekly habit game shipped dark: live games per opponent, one shared Day 1 date across time zones, picked start dates, Start now, photo post-to-unlock, sealed hosted photo storage, retakes, transcript-only excuses, offline grace and refused stale captures, settle on read, tickets with use-by dates, addressed rematches and rounds, retries, and deferred scope. | Weekly game product spec | High | 2026-10-18 |
+| `agent-docs/product-specs/weekly-game.md` | Private 1v1 weekly habit game in the Murph app, shipped dark: live games per opponent, one shared Day 1 date across time zones, picked start dates, Start now, photo post-to-unlock, sealed hosted photo storage, retakes, transcript-only excuses, offline grace and refused stale captures, settle on read, tickets with use-by dates, addressed rematches and rounds, retries, and deferred scope. | Weekly game product spec | High | 2026-10-18 |
 | `agent-docs/product-specs/hosted-support-escalation.md` | Hosted support product spec. | Hosted support product spec | High | 2026-08-05 |
 | `agent-docs/product-specs/hosted-family-plan.md` | Hosted billing/product spec. | Hosted billing/product spec | High | 2026-08-10 |
 | `agent-docs/product-specs/health-commons.md` | Health Commons behavior. | Health Commons behavior | High | 2026-07-29 |

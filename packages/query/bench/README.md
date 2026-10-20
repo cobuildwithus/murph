@@ -123,6 +123,36 @@ hashes and timings only. Deduplication stress cases establish scaling behavior;
 these in-memory measurements do not establish production duplicate frequency,
 container wakeups, canonical I/O cost, end-to-end CPU, or billing savings.
 
+## Dense metric projection instrumentation
+
+`metric-projection-dense.ts` measures the cost of the metric-projection subphase
+seam, not projection speed. It runs `buildMetricProjection()` over an in-memory
+synthetic read model with three providers, a sleep session plus twelve
+daily-summary observations per provider-day, and display-grade intraday
+heart-rate samples. With the default 365 days and 96 samples per provider-day,
+that is 119,355 entities and 110,960 metric points. Each round, in rotated
+order after one warmup round, it times three variants: the default call, the
+rebuild's `startCliPhase` observer outside a timing scope (the production no-op),
+and enabled in-memory CLI timing. Each sample must equal the complete default
+result. It prints raw wall/process-CPU samples, medians, and the last enabled
+sample's nested `query-metric-*` spans. No timing threshold is asserted.
+
+```sh
+node scripts/run-typescript.mjs package --project packages/query/bench/tsconfig.json --pretty false
+apps/cloudflare/node_modules/.bin/esbuild packages/query/bench/metric-projection-dense.ts \
+  --bundle --platform=node --format=esm --target=node24 \
+  --tsconfig=tsconfig.base.json --outfile=.tmp/metric-projection-dense.mjs \
+  --banner:js='import { createRequire } from "node:module"; const require = createRequire(import.meta.url);'
+env -u MURPH_CLI_TIMING_ENDPOINT node --expose-gc .tmp/metric-projection-dense.mjs
+```
+
+`MURPH_METRIC_DENSE_BENCH_DAYS` (7–1,095, default 365),
+`MURPH_METRIC_DENSE_BENCH_SAMPLES_PER_DAY` (0–1,440, default 96) and
+`MURPH_METRIC_DENSE_BENCH_ROUNDS` (1–20, default 5) size the run. The fixture
+does not contain production cardinality, provider-specific shapes, hosted CPU
+contention or canonical I/O. Its local subphase split is not evidence of where
+production time goes.
+
 ## Sleep-list row selection
 
 `sleep-list-runtime.ts` seeds 365 days of synthetic Oura, WHOOP and Garmin
