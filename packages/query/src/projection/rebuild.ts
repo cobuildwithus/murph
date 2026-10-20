@@ -1,6 +1,6 @@
 import { withCanonicalWriteLock } from "@murphai/core";
 import { withImmediateTransaction } from "@murphai/runtime-state/node";
-import { startCliPhase, timeCliPhase } from "@murphai/runtime-state/node/cli-timing";
+import { startCliPhase, timeCliPhase, timeCliPhaseSync } from "@murphai/runtime-state/node/cli-timing";
 
 import { isDefaultProjectedQueryEntity, isSearchIndexedQueryEntity } from "../query-visibility.ts";
 import { createVaultReadModel } from "../read-model.ts";
@@ -81,12 +81,15 @@ export async function rebuildQueryProjectionFromCanonicalSource(
     let metricTargets: ReturnType<typeof extractMetricTargetsFromCanonicalEntities>;
     const endMetrics = startCliPhase("query-metric-projection");
     try {
+      // Nested fixed subphases; the shared owner stays free of Node timing.
       const metricProjection = buildMetricProjection(snapshotReadModel, {
+        startStep: startCliPhase,
         wearableDataset,
       });
       dailySampleSummaries = metricProjection.dailySampleSummaries;
       metricPoints = metricProjection.metricPoints;
-      metricTargets = extractMetricTargetsFromCanonicalEntities(snapshot.entities);
+      metricTargets = timeCliPhaseSync("query-metric-targets",
+        () => extractMetricTargetsFromCanonicalEntities(snapshot.entities));
     } finally {
       endMetrics();
     }

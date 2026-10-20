@@ -1743,14 +1743,14 @@ microseconds, eight histogram buckets, command/outcome identity, failure fields,
 32-command / 64-scoped-span caps, UDP 8,192-byte and HTTP 16,384-byte ceilings,
 whole-command trimming and disabled-scope no-op behavior are unchanged. No entity
 counts, IDs, paths, arguments, content, result values or error text are added.
-The enum length itself owns the current 24-entry per-command shape bound (including the Patterns and load phases); no
-transport limit is widened to accommodate the extra phases.
+The enum length itself owns the current 29-entry per-command shape bound (including the Patterns, load and metric
+subphases); no transport limit is widened to accommodate the extra phases.
 
 | New phase | Existing operation measured |
 | --- | --- |
 | `query-source-read` | Await the strict canonical snapshot read, including its parsing/validation; not reset or the separate manifest scan. |
 | `query-wearable-dataset` | `collectWearableDataset`; wearable-only also includes the inline `createVaultReadModel` argument. Full rebuild's prior read-model assembly remains residual. |
-| `query-metric-projection` | Full rebuild's global metric projection, daily sample/metric outputs and canonical metric-target extraction. Absent from wearable-only rebuilds. |
+| `query-metric-projection` | Full rebuild's global metric projection, daily sample/metric outputs and canonical metric-target extraction. Absent from wearable-only rebuilds. Split by the nested subphases below. |
 | `query-wearable-summary` | Derive/encode stored wearable summary rows. Absent when full rebuild reuses an already-fresh wearable generation. |
 | `query-search-documents` | Full rebuild's search-visibility filter and canonical/sample-summary document construction. No SQLite work. Absent from wearable-only rebuilds. |
 | `query-publication` | Database opening and its schema/migration setup, the existing immediate transaction (deletes, inserts, manifests and metadata), and database close. Full rebuild's result-object construction is also inside this interval. This is **not transaction-only timing**. |
@@ -1840,6 +1840,83 @@ unchanged results, zero dropped spans and unchanged packet budget. This bounds
 instrumentation cardinality/bytes and records observed local overhead, **not a
 universal latency bound or production speedup**. Transport cost is covered
 separately by the existing integration tests.
+
+### Metric projection subphases (reader-before-producer)
+
+Five more fixed names split the existing `query-metric-projection` interval of
+a full rebuild. They follow every rule of the section above: same schema,
+buckets, caps, drop counters, trimming and disabled no-op. They add no labels,
+counts, IDs, arguments, content or error text.
+
+| Nested phase | Existing operation measured |
+| --- | --- |
+| `query-metric-samples` | `summarizeDailySamples` over the snapshot read model. |
+| `query-metric-evidence` | Wearable metric evidence: summary bundle from the rebuild's existing wearable dataset, sleep/recovery/activity/body summaries, evidence rows and suppression evidence. |
+| `query-metric-extract` | `extractMetricPoints` over evidence rows, sample summaries and canonical entities, including its deduplication and ordering. |
+| `query-metric-precedence` | Wearable-summary suppression and Junction precise-body precedence over the extracted points. |
+| `query-metric-targets` | `extractMetricTargetsFromCanonicalEntities`. |
+
+The shared `buildMetricProjection` owner is also used by the browser-replica
+source and by experiment readers, so it never imports Node timing. It exposes
+one optional synchronous `startStep` boundary that receives only a fixed step
+name and returns that step's end callback. Only the Node-only rebuild owner
+passes `startCliPhase`; every other caller passes nothing and runs the
+unchanged direct path. Each step ends in `finally`. Observer failures are
+ignored, so the original result or thrown error is preserved. Targets use
+`timeCliPhaseSync` in the rebuild owner. Ordering, operations, locking,
+freshness, cancellation and publication are unchanged.
+
+**Interpretation.** These spans are nested inside `query-metric-projection` and
+are not additive with it. The parent minus the five children is the small
+unspanned glue around them, not an independent operation. Subphases are absent
+wherever the parent is absent: wearable-only rebuilds, fresh reads and any
+`buildMetricProjection` caller outside the rebuild owner. Browser-replica and
+experiment projection time is not covered. Use them only to rank which
+suboperation dominates slow `query-metric-projection` samples in natural traffic
+after deployment. They make **no historical causal claim**: the earlier 23.4 s
+event and the 72-hour 38 s total cannot be attributed retroactively. A later
+slow subphase is a new observation, not that event's cause. Synchronous spans
+measure wall time, including GC, CPU contention and descheduling; they do not
+separate CPU from waiting.
+
+**Rollout.** Same consumer-first order as above: verify every deployed hosted
+consumer of `normalizeCliTiming` admits the 29-name vocabulary first: Web
+(`parseAssistantUsageRecord`), then the Cloudflare worker's usage forwarding and
+recording. Then deploy the runner image
+carrying the runtime-state, query and CLI producer. Older readers reject the
+whole optional timing object containing a new name while preserving legacy
+usage accounting; do not rely on that during rollout.
+
+**Release route.** The unmerged-candidate blocker above describes the earlier
+rebuild-phase patch and is not this change's route. This task authorizes a
+reviewed merge plus the normal main-only protected deployment, only after a
+green ReviewGPT review and green CI on the exact head. The parent owns that
+release: Web, then the Worker, then the Runner, each verified before the next.
+None of those gates or deployments has happened yet. Treat this change as **not
+deployed** until release proof records the deployed revisions and natural
+end-to-end admission of the new names.
+
+**Observation.** After verified deployment, the task requires an immediate
+check and then a check every 30 minutes for four hours. That covers deploy
+health and first admission only. It is separate from, and does not replace,
+the 24-hour preliminary and 72-hour baseline sampling windows, which also start
+only after verified production deployment and use the bounded inspection below
+with the same retained-sample, coverage and drop caveats. App heartbeat
+scheduling tools are currently unavailable. That blocks automatic scheduling of
+the 30-minute checks. It does not block deployment authority. Until those tools
+return, the parent must run or arrange each check manually.
+
+**Proof.** Query `metric-projection-steps.test.ts` covers step bracketing,
+complete-output parity with and without an observer, observer failures,
+end-on-throw with original error identity, and a Node-free import graph from
+the shared owner. `wearable-source-health-query.test.ts` covers presence, exact
+nested sums under a controlled clock, absence from wearable-only paths, a
+metric-subphase failure (spans closed, lock released, nothing published,
+retryable), and the existing opt-in rotated measurement. Runtime-state
+`cli-timing.test.ts` pins the 29-name catalog. A history-backed check against the
+pre-admission reader runs with `MURPH_CLI_METRIC_PHASE_COMPAT_BASE=<reviewed base sha>`.
+Mechanism overhead on a dense synthetic fixture is documented in
+`packages/query/bench/README.md`. It is a local observation, not a latency bound.
 
 ### Private weekly usage audit rejection
 
@@ -2889,7 +2966,9 @@ rows AS MATERIALIZED (
     'query-wearable-dataset', 'query-metric-projection', 'query-wearable-summary',
     'query-search-documents', 'query-publication', 'query-entity-read',
     'query-wearable-compose', 'query-metric-read', 'query-pattern-report',
-    'service-runtime-load', 'query-runtime-load', 'query-projection-load')
+    'service-runtime-load', 'query-runtime-load', 'query-projection-load',
+    'query-metric-samples', 'query-metric-evidence', 'query-metric-extract',
+    'query-metric-precedence', 'query-metric-targets')
 ), totals AS (
   SELECT period, command, outcome, p ->> 'phase' AS phase,
          sum((p ->> 'count')::numeric) AS phase_samples,
