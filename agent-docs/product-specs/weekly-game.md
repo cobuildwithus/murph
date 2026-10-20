@@ -20,6 +20,14 @@ The MVP is private 1v1. The challenger creates a game and texts a single-use
 link (`/g/<token>`, valid 7 days) from their own phone. The page's Open in Murph
 button opens `ai.withmurph.app://invite/<token>`; `MURPH_GAME_APP_URL_SCHEME`
 overrides the scheme (local stacks use the Debug app's `ai.withmurph.app.dev`).
+Its link preview (`/g/<token>/opengraph-image`) shows an open invite as a ticket
+with the challenger's first name against "You", both tasks, the days, and the
+stake, titled "<Name> challenged you"; the name the challenger typed for the
+invitee is their private label and never appears, there or in the public
+invite preview (`GET /api/game/v1/invites/<token>`). A used, expired, or missing
+invite previews as "This invite isn't available" and names nobody. A game's
+players keep its invite token after it goes live (a spent token can't be
+accepted again), so reopening your own link is recognized as yours.
 An invite nobody accepts expires, and stays on the challenger's Home for a week
 marked expired. The invitee opens it, signs in, and shakes on the terms they saw; a
 changed version is refused with `TERMS_CHANGED`. Accepting makes the game live.

@@ -153,7 +153,8 @@ export function buildGameView(input: GameViewInput): GameView {
     days: dayViews(input, players),
     id: game.id,
     inviteExpiresAt: game.status === "invited" ? input.inviteExpiresAt?.toISOString() ?? null : null,
-    inviteToken: game.status === "invited" ? input.inviteToken : null,
+    // The service hands over the token only to the people it belongs to.
+    inviteToken: input.inviteToken,
     lengthDays: game.lengthDays,
     players: playerViews,
     result: input.result

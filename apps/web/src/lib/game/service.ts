@@ -821,16 +821,15 @@ export async function readInvitePreview(token: string): Promise<GameInvitePrevie
   const expired = row.status === "void"
     || (row.status === "invited" && row.inviteExpiresAt !== null && row.inviteExpiresAt.getTime() < now.getTime());
   if (row.status !== "invited" || expired) return { status: expired ? "expired" : "used" };
-  const label = parsePendingLabel(row.pendingLabel);
-  const [inviterFirstName, inviteeFirstName, words] = await openGameTexts([
+  // The invitee's name stays out: the challenger typed it as their own private
+  // label, and this preview is public to anyone holding the link.
+  const [inviterFirstName, words] = await openGameTexts([
     { field: "first_name", memberId: row.createdBy, rowId: row.createdBy, table: "game_profile", value: row.creator.firstNameEncrypted },
-    { ...labelTarget(row.createdBy, "name"), value: label.nameEncrypted },
     { ...gameTarget(row, "terms_words"), value: row.termsWordsEncrypted },
   ]);
   const game = toRuleStateGame(row, parseStoredTerms(row.terms));
   return {
     expiresAt: (row.inviteExpiresAt ?? row.createdAt).toISOString(),
-    inviteeFirstName: inviteeFirstName ?? "",
     inviterFirstName: inviterFirstName ?? "",
     startsOn: game.startsOn,
     status: "open",
@@ -923,10 +922,18 @@ async function buildViews(games: readonly LoadedGame[], viewerId: string, clock:
     label.subjectMemberId,
     ask(labelTarget(viewerId, "relationship"), label.relationshipEncrypted),
   ]));
+  // A game's own link belongs to its people: while invited, the challenger and
+  // an addressed invitee; after go-live, both players (the token is spent).
+  const tokenAt = games.map((game) => {
+    const { row } = game;
+    const holds = row.status === "invited"
+      ? row.createdBy === viewerId || row.inviteeMemberId === viewerId
+      : game.state.players.some((player) => player.memberId === viewerId);
+    return holds ? ask(gameTarget(row, "invite_token"), row.inviteTokenEncrypted) : null;
+  });
   const inviteAt = games.map((game) => {
     const { row } = game;
     if (row.status !== "invited") return null;
-    const token = () => ask(gameTarget(row, "invite_token"), row.inviteTokenEncrypted);
     if (row.createdBy === viewerId) {
       const pending = parsePendingLabel(row.pendingLabel);
       return {
@@ -934,11 +941,10 @@ async function buildViews(games: readonly LoadedGame[], viewerId: string, clock:
         name: ask(labelTarget(viewerId, "name"), pending.nameEncrypted),
         photoKey: pending.photoKey,
         relationship: ask(labelTarget(viewerId, "relationship"), pending.relationshipEncrypted),
-        token: token(),
       };
     }
     // The addressed invitee sees themselves by their own name, never the challenger's private label.
-    if (row.inviteeMemberId === viewerId) return { memberId: viewerId, name: null, photoKey: null, relationship: null, token: token() };
+    if (row.inviteeMemberId === viewerId) return { memberId: viewerId, name: null, photoKey: null, relationship: null };
     return null;
   });
   const textAt = new Map<string, number>();
@@ -968,12 +974,13 @@ async function buildViews(games: readonly LoadedGame[], viewerId: string, clock:
   const entryWords = new Map([...textAt].map(([entryId, at]) => [entryId, { text: plain[at] }]));
   return games.map((game, index) => {
     const invite = inviteAt[index];
+    const tokenIndex = tokenAt[index];
     const result: StoredResult | null = game.row.result ? parseStoredResult(game.row.result) : null;
     return buildGameView({
       avatarKeys,
       entryWords,
       inviteExpiresAt: game.row.inviteExpiresAt,
-      inviteToken: invite ? plain[invite.token] : null,
+      inviteToken: tokenIndex === null ? null : plain[tokenIndex],
       invitee: invite
         ? {
           memberId: invite.memberId,
