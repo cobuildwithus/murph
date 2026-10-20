@@ -146,6 +146,7 @@ import { HostedPlanChangeConfirmationContent } from "@/src/components/settings/h
 import { UpgradeToEdgeButton } from "@/src/components/settings/hosted-plan-upgrade-button";
 import { HostedPlanUpdateReturn } from "@/src/components/settings/hosted-plan-update-return";
 import { FoodBrandVisualStudy } from "./food-label-lab-study";
+import { CustomizeMurphSettings } from "@/src/components/settings/customize-murph-settings";
 import { MurphPersonalitySettingsDialog } from "@/src/components/settings/murph-personality-settings-dialog";
 import {
   DESIGN_AI_USAGE_ACTIVITY,
@@ -2471,10 +2472,17 @@ export function ComponentsContent() {
 
         <Separator />
 
+        <Section id="murph-style-settings" title="Murph Style Settings">
+          <div inert className="max-w-2xl">
+            <CustomizeMurphSettings assistant={null} />
+          </div>
+        </Section>
+
+        <Separator />
+
         <Section title="Assistant Style Picker">
           <p className="text-sm text-muted-foreground">
-            Tone and voice pickers used in onboarding (chained) and settings
-            (one step at a time). Full-height drawer under 768px, dialog above;
+            Tone and voice pickers used in settings, one step at a time. Full-height drawer under 768px, dialog above;
             the voice grid is two columns on mobile and three on desktop.
           </p>
           <div className="flex flex-wrap gap-3 rounded-xl border border-border bg-card p-5">

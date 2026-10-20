@@ -1,6 +1,5 @@
 import {
-  resolveAssistantPersonaOption,
-  type AssistantPersonaId,
+  defaultAssistantPersonaOption,
 } from "@murphai/contracts";
 
 const ASSISTANT_PERSONA_GLOBAL_INVARIANTS = [
@@ -11,7 +10,6 @@ const ASSISTANT_PERSONA_GLOBAL_INVARIANTS = [
   "Keep message-shaping conversational and reciprocal. Never turn it into broadcast, acquisition, signup, notification, or exact-send automation framing.",
 ] as const;
 
-export function buildAssistantPersonaPrompt(persona: AssistantPersonaId): string {
-  const resolved = resolveAssistantPersonaOption(persona);
-  return [...ASSISTANT_PERSONA_GLOBAL_INVARIANTS, resolved.promptBody].join("\n");
+export function buildAssistantPersonaPrompt(): string {
+  return [...ASSISTANT_PERSONA_GLOBAL_INVARIANTS, defaultAssistantPersonaOption.promptBody].join("\n");
 }

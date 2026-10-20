@@ -5,7 +5,7 @@ Last verified: 2026-08-20
 | Path | Purpose | Status |
 | --- | --- | --- |
 | `agent-docs/product-specs/repo.md` | Canonical repository posture and success criteria for keeping the repo current-state only. | Active |
-| `agent-docs/product-specs/murph-personas.md` | Persona-first onboarding, canonical persona ids, and code-owned style defaults. | Implemented |
+| `agent-docs/product-specs/murph-personas.md` | Classic defaults, retained tone/voice/style controls and retired-persona read compatibility. | Implemented |
 | `agent-docs/product-specs/starter-usage.md` | One idempotent, non-expiring $4.50 starter-usage grant on the existing immutable usage-credit ledger, including migration and legacy Stripe-drain compatibility. | Active |
 | `agent-docs/product-specs/hosted-plan-downgrades.md` | Edge-to-Pulse renewal switches, the billing-gated Edge assistant-model choice, downgrade behavior, deployment compatibility, and the enforced composed usage boundary with separate group funding. | Active |
 | `agent-docs/product-specs/hosted-plan-usage.md` | Web-owned overall available-usage projection and enforced included-plus-generic-credit blocking, including forecast, server-selected actions, group privacy boundaries, and personal or exact Family-member Settings handoffs. | Active |

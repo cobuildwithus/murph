@@ -407,7 +407,7 @@ describe("hosted account settings snapshot", () => {
       memberId: "member_123",
     });
 
-    expect(snapshot.assistant?.persona).toBe("scientist-with-classic");
+    expect(snapshot.assistant?.persona).toBe("classic");
     expect(snapshot.assistant?.personality).toEqual({
       detail: 8,
       humor: 7,
@@ -430,7 +430,7 @@ describe("hosted account settings snapshot", () => {
         configurationAvailable: true,
         dormantSolPreference: false,
         model: "gpt-6.1-sol",
-        persona: "scientist-with-classic",
+        persona: "classic",
         personality: {
           detail: null,
           humor: null,

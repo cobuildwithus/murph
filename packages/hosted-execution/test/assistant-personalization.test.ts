@@ -63,16 +63,45 @@ describe("hosted assistant personalization contract", () => {
     })).toEqual({ action: "read" });
     expect(parseHostedRuntimeAssistantPersonalizationToolRequest({
       action: "update",
-      mainPersona: "scientist",
-      supportingPersona: "classic",
       tone: "casual",
       voice: "warm",
     })).toEqual({
       action: "update",
-      mainPersona: "scientist",
-      supportingPersona: "classic",
       tone: "casual",
       voice: "warm",
+    });
+  });
+
+  it("accepts old runtime tone updates while dropping retired selection fields", () => {
+    const request = {
+      action: "update",
+      mainPersona: "scientist",
+      supportingPersona: "navy-seal",
+      tone: "casual",
+      voice: "warm",
+    };
+    expect(parseHostedRuntimeAssistantPersonalizationToolRequest(request)).toEqual({
+      action: "update", tone: "casual", voice: "warm",
+    });
+    expect(hostedRuntimeAssistantPersonalizationModelToolRequestSchema.safeParse(request).success).toBe(false);
+    expect(() => parseHostedRuntimeAssistantPersonalizationToolRequest({
+      ...request, mainPersona: "unknown-persona",
+    })).toThrow();
+  });
+
+  it("normalizes an old Web snapshot without losing retained settings", () => {
+    expect(parseHostedRuntimeAssistantPersonalizationToolResponse({
+      action: "read",
+      result: {
+        mainPersona: "scientist", supportingPersona: "navy-seal",
+        model: "gpt-6-sol", solAvailable: true, tone: "casual", voice: "warm",
+      },
+    })).toEqual({
+      action: "read",
+      result: {
+        mainPersona: "classic", supportingPersona: null,
+        model: "gpt-6-sol", solAvailable: true, tone: "casual", voice: "warm",
+      },
     });
   });
 
@@ -101,20 +130,20 @@ describe("hosted assistant personalization contract", () => {
   it("rejects empty, unknown, and out-of-domain updates", () => {
     expect(() => parseHostedRuntimeAssistantPersonalizationToolRequest({
       action: "update",
-    })).toThrow("requires a main persona, supporting persona, tone, or voice");
+    })).toThrow("requires a tone or voice");
     expect(() => parseHostedRuntimeAssistantPersonalizationToolRequest({
       action: "update",
       mainPersona: "scientist",
-    })).toThrow("require both main and supporting persona fields");
+    })).toThrow("requires a tone or voice");
     expect(() => parseHostedRuntimeAssistantPersonalizationToolRequest({
       action: "update",
       supportingPersona: null,
-    })).toThrow("require both main and supporting persona fields");
+    })).toThrow("requires a tone or voice");
     expect(() => parseHostedRuntimeAssistantPersonalizationToolRequest({
       action: "update",
       mainPersona: "scientist",
       supportingPersona: "scientist",
-    })).toThrow("Supporting persona must differ");
+    })).toThrow("requires a tone or voice");
     expect(() => parseHostedRuntimeAssistantPersonalizationToolRequest({
       action: "read",
       tone: "casual",
@@ -150,26 +179,26 @@ describe("hosted assistant personalization contract", () => {
     expect(parseHostedRuntimeAssistantPersonalizationToolResponse({
       action: "update",
       result: {
-        mainPersona: "scientist",
+        mainPersona: "classic" as const,
+        supportingPersona: null,
         model: "gpt-6-sol",
         modelChangeAppliesNextRun: false,
         modelUpdated: false,
         solAvailable: false,
         status: "saved",
-        supportingPersona: "classic",
         tone: "formal",
         voice: "warm",
       },
     })).toEqual({
       action: "update",
       result: {
-        mainPersona: "scientist",
+        mainPersona: "classic" as const,
+        supportingPersona: null,
         model: "gpt-6-sol",
         modelChangeAppliesNextRun: false,
         modelUpdated: false,
         solAvailable: false,
         status: "saved",
-        supportingPersona: "classic",
         tone: "formal",
         voice: "warm",
       },
@@ -177,13 +206,13 @@ describe("hosted assistant personalization contract", () => {
     expect(parseHostedRuntimeAssistantPersonalizationToolResponse({
       action: "update",
       result: {
-        mainPersona: "classic",
+        mainPersona: "classic" as const,
+        supportingPersona: null,
         model: "gpt-6-sol",
         modelChangeAppliesNextRun: false,
         modelUpdated: false,
         solAvailable: true,
         status: "unchanged",
-        supportingPersona: null,
         tone: "formal",
         voice: "warm",
       },
@@ -198,10 +227,10 @@ describe("hosted assistant personalization contract", () => {
     expect(() => parseHostedRuntimeAssistantPersonalizationToolResponse({
       action: "read",
       result: {
-        mainPersona: "classic",
+        mainPersona: "classic" as const,
+        supportingPersona: null,
         model: "gpt-6-sol",
         solAvailable: false,
-        supportingPersona: null,
         tone: null,
         voice: "upbeat",
       },
@@ -209,10 +238,10 @@ describe("hosted assistant personalization contract", () => {
     expect(() => parseHostedRuntimeAssistantPersonalizationToolResponse({
       action: "read",
       result: {
-        mainPersona: "classic",
+        mainPersona: "classic" as const,
+        supportingPersona: null,
         model: "gpt-6-sol",
         solAvailable: false,
-        supportingPersona: null,
         tone: "formal",
         voice: null,
       },
@@ -309,13 +338,13 @@ describe("hosted assistant personalization contract", () => {
 
   it("rejects impossible model, rejection, and duplicate update states", () => {
     const validResult = {
-      mainPersona: "classic",
+      mainPersona: "classic" as const,
+      supportingPersona: null,
       model: "gpt-6-sol",
       modelChangeAppliesNextRun: false,
       modelUpdated: false,
       solAvailable: true,
       status: "saved",
-      supportingPersona: null,
       tone: "formal",
       voice: "warm",
     } as const;

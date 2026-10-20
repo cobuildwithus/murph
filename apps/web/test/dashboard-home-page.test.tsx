@@ -78,8 +78,8 @@ vi.mock("@/src/components/home/upload-labs-action", () => ({
     createElement("button", { type: "button" }, "Sync"),
 }));
 
-vi.mock("../app/(dashboard)/home/initial-visit-persona-picker-client", () => ({
-  HomeInitialVisitPersonaPickerClient({
+vi.mock("../app/(dashboard)/home/initial-visit-contact-picker-client", () => ({
+  HomeInitialVisitContactPickerClient({
     contactAction,
   }: {
     contactAction: {
@@ -99,9 +99,9 @@ vi.mock("../app/(dashboard)/home/initial-visit-persona-picker-client", () => ({
         "data-contact-action-webmail-href": contactAction?.webmail?.href ?? "none",
         "data-contact-action-webmail-label": contactAction?.webmail?.label ?? "none",
         "data-show-contact-card": contactAction?.kind === "text" ? "true" : "false",
-        "data-home-initial-visit-persona-picker": "shown",
+        "data-home-initial-visit-contact-picker": "shown",
       },
-      "Persona onboarding",
+      "Contact onboarding",
     );
   },
 }));
@@ -462,7 +462,7 @@ test("HomePage bounds composed dashboard owners and preserves advisory siblings"
   assert.equal(activeOwners.size, 0);
   assert.equal(peakOwners.size, 4);
   assert.match(markup, /Welcome to Murph/);
-  assert.match(markup, /data-home-initial-visit-persona-picker="shown"/);
+  assert.match(markup, /data-home-initial-visit-contact-picker="shown"/);
 
   mocks.readHostedInitialOnboardingState.mockRejectedValueOnce(
     new Error("initial onboarding unavailable"),
@@ -483,7 +483,7 @@ test("HomePage bounds composed dashboard owners and preserves advisory siblings"
 
   assert.match(initialRejectedMarkup, /Some dashboard details are unavailable/);
   assert.match(initialRejectedMarkup, /Message Murph/);
-  assert.doesNotMatch(initialRejectedMarkup, /data-home-initial-visit-persona-picker/);
+  assert.doesNotMatch(initialRejectedMarkup, /data-home-initial-visit-contact-picker/);
 
   mocks.readHostedInitialOnboardingState.mockResolvedValueOnce({
     preferences: { persona: null, tone: null, voice: null },
@@ -499,7 +499,7 @@ test("HomePage bounds composed dashboard owners and preserves advisory siblings"
   assert.match(messagingRejectedMarkup, /Some dashboard details are unavailable/);
   assert.match(
     messagingRejectedMarkup,
-    /data-home-initial-visit-persona-picker="shown"/,
+    /data-home-initial-visit-contact-picker="shown"/,
   );
   assert.match(messagingRejectedMarkup, /data-contact-action-href="sms:\+15555550123"/);
 });
@@ -996,7 +996,7 @@ test("HomePage keeps pending onboarding usable without optional contact projecti
 
   assert.match(markup, /Welcome to Murph/);
   assert.doesNotMatch(markup, /Some dashboard details are unavailable/);
-  assert.match(markup, /data-home-initial-visit-persona-picker="shown"/);
+  assert.match(markup, /data-home-initial-visit-contact-picker="shown"/);
   assert.match(markup, /data-contact-action-href="none"/);
   assert.match(markup, /data-show-contact-card="false"/);
   assert.equal(mocks.resolveHostedMurphContactOption.mock.calls.length, 1);
@@ -1013,7 +1013,7 @@ test("HomePage keeps pending onboarding usable without optional contact projecti
   );
   assert.match(
     recoveredMarkup,
-    /data-home-initial-visit-persona-picker="shown"/,
+    /data-home-initial-visit-contact-picker="shown"/,
   );
   assert.match(recoveredMarkup, /data-contact-action-href="sms:\+15555550123"/);
   assert.equal(mocks.resolveHostedMurphContactOption.mock.calls.length, 2);
@@ -1057,7 +1057,7 @@ test("HomePage presents connection results before canonical onboarding", async (
     );
 
     assert.match(markup, testCase.expected);
-    assert.doesNotMatch(markup, /data-home-initial-visit-persona-picker/);
+    assert.doesNotMatch(markup, /data-home-initial-visit-contact-picker/);
   }
 
   const plainHomeMarkup = renderToStaticMarkup(
@@ -1065,7 +1065,7 @@ test("HomePage presents connection results before canonical onboarding", async (
   );
   assert.match(
     plainHomeMarkup,
-    /data-home-initial-visit-persona-picker="shown"/,
+    /data-home-initial-visit-contact-picker="shown"/,
   );
 });
 
@@ -1122,7 +1122,7 @@ test("HomePage starts callback messaging alongside canonical onboarding", async 
   const markup = renderToStaticMarkup(await page);
 
   assert.match(markup, /Device connection complete/);
-  assert.doesNotMatch(markup, /data-home-initial-visit-persona-picker/);
+  assert.doesNotMatch(markup, /data-home-initial-visit-contact-picker/);
   assert.equal(mocks.resolveHostedMurphContactOption.mock.calls.length, 0);
 });
 
@@ -1144,7 +1144,7 @@ test("HomePage retains callback completion when canonical onboarding fails", asy
 
   assert.match(markup, /Gmail is connected/);
   assert.match(markup, /Some dashboard details are unavailable/);
-  assert.doesNotMatch(markup, /data-home-initial-visit-persona-picker/);
+  assert.doesNotMatch(markup, /data-home-initial-visit-contact-picker/);
   assert.equal(mocks.readHostedMemberMessagingSetupState.mock.calls.length, 1);
   assert.equal(mocks.resolveHostedMurphContactOption.mock.calls.length, 0);
 });
@@ -1167,7 +1167,7 @@ test("HomePage skips the losing connected-app resolver after device completion",
   assert.equal(mocks.resolveConnectedAppCompletionDialogModel.mock.calls.length, 0);
 });
 
-test("HomePage opens pending persona onboarding on plain home", async () => {
+test("HomePage opens pending contact onboarding on plain home", async () => {
   const { default: HomePage } = await import("../app/(dashboard)/home/page");
   const markup = renderToStaticMarkup(
     await HomePage({
@@ -1176,10 +1176,10 @@ test("HomePage opens pending persona onboarding on plain home", async () => {
   );
 
   assert.match(markup, /Welcome to Murph/);
-  assert.match(markup, /data-home-initial-visit-persona-picker="shown"/);
+  assert.match(markup, /data-home-initial-visit-contact-picker="shown"/);
   assert.match(markup, /data-show-contact-card="true"/);
   assert.match(markup, /data-contact-action-href="sms:\+15555550123"/);
-  assert.match(markup, /Persona onboarding/);
+  assert.match(markup, /Contact onboarding/);
   assert.equal(mocks.resolveHostedMurphContactOption.mock.calls.length, 1);
 });
 
@@ -1200,7 +1200,7 @@ test("HomePage suppresses onboarding after native completion", async () => {
     }),
   );
 
-  assert.doesNotMatch(markup, /data-home-initial-visit-persona-picker/);
+  assert.doesNotMatch(markup, /data-home-initial-visit-contact-picker/);
   assert.equal(mocks.resolveHostedMurphContactOption.mock.calls.length, 0);
 });
 
@@ -1220,7 +1220,7 @@ test("HomePage skips the contact-card picker for Telegram-only members", async (
     }),
   );
 
-  assert.match(markup, /data-home-initial-visit-persona-picker="shown"/);
+  assert.match(markup, /data-home-initial-visit-contact-picker="shown"/);
   assert.match(markup, /data-show-contact-card="false"/);
   assert.match(markup, /data-contact-action-kind="telegram"/);
   assert.equal(mocks.resolveHostedMurphContactOption.mock.calls.length, 1);
@@ -1260,7 +1260,7 @@ test("HomePage reload keeps canonically pending onboarding visible", async () =>
     }),
   );
 
-  assert.match(markup, /data-home-initial-visit-persona-picker="shown"/);
+  assert.match(markup, /data-home-initial-visit-contact-picker="shown"/);
   assert.equal(mocks.resolveHostedMurphContactOption.mock.calls.length, 1);
 });
 
