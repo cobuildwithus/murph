@@ -4819,25 +4819,13 @@ describe('real Codex live fixture contracts', () => {
     }, 'country')).toBe(true)
     expect(isFixtureVoiceUpdatePreservingCurrentPersonalization({
       action: 'update',
-      mainPersona: 'classic',
-      supportingPersona: null,
       tone: 'casual',
       voice: 'country',
     }, 'country')).toBe(true)
     for (const request of [
       { action: 'update', tone: 'formal', voice: 'country' },
-      {
-        action: 'update',
-        mainPersona: 'athlete',
-        supportingPersona: null,
-        voice: 'country',
-      },
-      {
-        action: 'update',
-        mainPersona: 'classic',
-        supportingPersona: 'doctor',
-        voice: 'country',
-      },
+      { action: 'update', mainPersona: 'athlete', voice: 'country' },
+      { action: 'update', supportingPersona: 'doctor', voice: 'country' },
     ]) {
       expect(
         isFixtureVoiceUpdatePreservingCurrentPersonalization(
@@ -8300,8 +8288,7 @@ describeRealCodex('real Codex preference source e2e', () => {
           personalizationTool: {
             async request(request, authority) {
               if (request.action === 'read') return { action: 'read', result: {
-                mainPersona: 'classic', model: 'gpt-6-sol', solAvailable: true,
-                supportingPersona: null, tone: 'casual', voice: 'warm',
+                mainPersona: 'classic', supportingPersona: null, model: 'gpt-6-sol', solAvailable: true, tone: 'casual', voice: 'warm',
               } }
               writes.push({ request, authority })
               if (request.action === 'update_personality') {
@@ -8321,9 +8308,9 @@ describeRealCodex('real Codex preference source e2e', () => {
               expect(authority).toMatchObject({ assistantInputId: later })
               expect(request).toEqual({ action: 'update', tone: 'formal' })
               return { action: 'update', result: {
-                mainPersona: 'classic', model: 'gpt-6-sol',
+                mainPersona: 'classic', supportingPersona: null, model: 'gpt-6-sol',
                 modelChangeAppliesNextRun: false, modelUpdated: false, solAvailable: true,
-                status: 'saved', supportingPersona: null, tone: 'formal', voice: 'warm',
+                status: 'saved', tone: 'formal', voice: 'warm',
               } }
             },
           },
@@ -11449,10 +11436,9 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
                       return {
                         action: 'read',
                         result: {
-                          mainPersona: 'classic',
+                          mainPersona: 'classic', supportingPersona: null,
                           model: 'gpt-6-sol',
                           solAvailable: true,
-                          supportingPersona: null,
                           tone: 'casual',
                           voice: 'classic',
                         },
@@ -11462,13 +11448,12 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
                       return {
                         action: 'update',
                         result: {
-                          mainPersona: 'classic',
+                          mainPersona: 'classic', supportingPersona: null,
                           model: 'gpt-6-sol',
                           modelChangeAppliesNextRun: false,
                           modelUpdated: false,
                           solAvailable: true,
                           status: 'saved',
-                          supportingPersona: null,
                           tone: 'casual',
                           voice: request.voice ?? 'classic',
                         },
@@ -29026,7 +29011,7 @@ describeRealCodex('real Codex appointment check-in recovery e2e', () => {
 })
 
 describeRealCodex('real Codex personalization schema e2e', () => {
-  it.each(['future', 'one-off'] as const)('routes a reply-style correction to its intended scope (%s)', async (scope) => {
+  it.each(['future', 'one-off'] as const)('preserves tone controls after persona retirement (%s)', async (scope) => {
     const config = await resolveRealCodexE2eConfig()
     const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-personalization-schema-e2e-'))
     const requests: unknown[] = []
@@ -37997,11 +37982,8 @@ function isFixtureVoiceUpdatePreservingCurrentPersonalization(
   const request = readRecord(value)
   return request?.action === 'update'
     && request.voice === expectedVoice
-    && (request.mainPersona === undefined || request.mainPersona === 'classic')
-    && (
-      request.supportingPersona === undefined
-      || request.supportingPersona === null
-    )
+    && request.mainPersona === undefined
+    && request.supportingPersona === undefined
     && (request.tone === undefined || request.tone === 'casual')
 }
 

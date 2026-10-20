@@ -8,8 +8,6 @@ import {
   HOSTED_EXECUTION_MEMBER_REPORTED_DAILY_METRIC_KEYS,
 } from '@murphai/hosted-execution'
 import {
-  assistantBasePersonaIdValues,
-  assistantBasePersonaOptions,
   assistantPersonaIdValues,
   assistantTonePreferenceValues,
   assistantVoiceOptionIdValues,
@@ -645,7 +643,7 @@ export const MURPH_PERSONALIZATION_TOOL = {
   namespace: 'murph',
   name: 'personalization',
   description:
-    'For a conversation update, pass message_ref from the accepted message requesting these changes; never borrow a later message\'s ref. Split changes requested by different messages into separate calls. Omit it for scheduled actions. For updates, send only the fields the user wants changed; omit unchanged fields. For an exact tone-only or voice-only request, call update once without read; its result reports the saved value. Send both personas only when changing that pair. Read the current hosted conversation runtime\'s effective Murph main personality, optional supporting personality, tone, voice, and model context, or atomically update those fields. Persona changes require current accepted user input plus both mainPersona and supportingPersona; use read first when either current value must be preserved, and pass null to remove support. Exact scheduled automation occurrences may update tone and voice but never personas. Reply casing maps to the existing tone field: capitalize, standard capitalization, or sentence case means formal; lowercase means casual. Confirm casing as sentence case or lowercase in the reply. Treat a request about how Murph should keep writing or show up as an update rather than an unsupported setting; a one-reply formatting request does not persist. In a private chat this is the member\'s Murph; in a group chat this is the synthetic room Murph and never a participant\'s private settings. Use murph.assistant_configuration for model, provider, or reasoning changes only when that separate tool is available.',
+    'For a conversation update, pass message_ref from the accepted message requesting these changes; never borrow a later message\'s ref. Split changes requested by different messages into separate calls. Omit it for scheduled actions. For updates, send only the fields the user wants changed; omit unchanged fields. For an exact tone-only or voice-only request, call update once without read; its result reports the saved value. Read the current hosted conversation runtime\'s effective Murph tone, voice, and model context, or atomically update those fields. Reply casing maps to the existing tone field: capitalize, standard capitalization, or sentence case means formal; lowercase means casual. Confirm casing as sentence case or lowercase in the reply. Treat a request about how Murph should keep writing or show up as an update rather than an unsupported setting; a one-reply formatting request does not persist. In a private chat this is the member\'s Murph; in a group chat this is the synthetic room Murph and never a participant\'s private settings. Use murph.assistant_configuration for model, provider, or reasoning changes only when that separate tool is available.',
   inputSchema: {
     oneOf: [
       {
@@ -671,21 +669,6 @@ export const MURPH_PERSONALIZATION_TOOL = {
             type: 'string',
             pattern: ASSISTANT_ACCEPTED_MESSAGE_REF_PATTERN,
           },
-          mainPersona: {
-            type: 'string',
-            enum: assistantBasePersonaIdValues,
-            description: assistantBasePersonaOptions
-              .map((option) => `${option.label}=${option.id}`)
-              .join(', '),
-          },
-          supportingPersona: {
-            anyOf: [
-              { type: 'string', enum: assistantBasePersonaIdValues },
-              { type: 'null' },
-            ],
-            description:
-              'Supporting personality paired with mainPersona; null removes support. It must differ from mainPersona.',
-          },
           tone: {
             type: 'string',
             enum: assistantTonePreferenceValues,
@@ -703,10 +686,7 @@ export const MURPH_PERSONALIZATION_TOOL = {
         // Keep properties here so generated tool arguments stay concrete.
         // Source metadata alone cannot make an update nonempty.
         not: { required: ['message_ref'], maxProperties: 2 },
-        dependentRequired: {
-          mainPersona: ['supportingPersona'],
-          supportingPersona: ['mainPersona'],
-        },
+
       },
     ],
   },

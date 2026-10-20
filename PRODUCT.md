@@ -89,14 +89,11 @@ If the referee reads dry and clinical, it's failing; if the private write-ups st
 
 ## First-run onboarding
 
-New members see one onboarding journey whether they begin on the website or in
-the iOS companion: optionally add Murph to Contacts, choose a main and optional
-supporting personality, preview and choose a voice, choose formal or casual
-tone, then see the welcome action. Saving those choices or explicitly skipping
-the personality setup completes onboarding for the account. Completing it on
-one surface suppresses it on the other; existing members do not receive it
-retroactively. Contact-card skip alone advances to personality setup and does
-not count as completion.
+New web members can optionally add Murph to Contacts. Adding, skipping or
+dismissing the card completes the existing account onboarding marker; members
+without a text contact complete directly. No personality setup or welcome
+dialog follows. Tone, voice and style levels remain optional Settings controls.
+Installed companion clients retain their existing completion response shape.
 
 ## Murph Safe
 

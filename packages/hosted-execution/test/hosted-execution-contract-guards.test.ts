@@ -1,3 +1,4 @@
+import { parseHostedRuntimeGroupToolResponse } from "../src/parsers/runtime-control.ts";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -200,7 +201,7 @@ describe("hosted execution wake guards", () => {
         kind: "member.preferences.updated",
         occurredAt: "2026-07-20T00:00:00.000Z",
         preferences: {
-          persona: "navy-seal",
+          persona: "classic",
           tone: "casual",
           voice: "drill-sergeant",
         },
@@ -212,7 +213,7 @@ describe("hosted execution wake guards", () => {
       kind: "member.preferences.updated",
       occurredAt: "2026-07-20T00:00:00.000Z",
       preferences: {
-        persona: "navy-seal",
+        persona: "classic",
         tone: "casual",
         voice: "drill-sergeant",
       },
@@ -266,7 +267,7 @@ describe("hosted execution wake guards", () => {
       kind: "member.preferences.updated",
       occurredAt: "2026-07-07T00:00:00.000Z",
       preferences: {
-        persona: "scientist",
+        persona: "classic",
       },
       userId: "user_guard",
     });
@@ -338,5 +339,26 @@ describe("hosted execution wake guards", () => {
         userId: "user_guard",
       }),
     ).toThrow(/at least one setting/u);
+  });
+});
+
+it("normalizes a retired persona in pending-group responses from an older Web", () => {
+  expect(parseHostedRuntimeGroupToolResponse({
+    action: "read_next_group",
+    result: {
+      status: "prepared", expiresAt: "2026-10-19T12:00:00.000Z",
+      setup: {
+        roomContextMarkdown: "Keep the room focused.",
+        style: { persona: "scientist-with-classic", tone: "casual", voice: "warm", personality: { humor: 2 } },
+      },
+    },
+  })).toMatchObject({
+    result: {
+      status: "prepared",
+      setup: {
+        roomContextMarkdown: "Keep the room focused.",
+        style: { persona: "classic", tone: "casual", voice: "warm", personality: { humor: 2 } },
+      },
+    },
   });
 });

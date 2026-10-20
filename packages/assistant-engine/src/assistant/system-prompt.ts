@@ -639,8 +639,8 @@ function buildAssistantStyleSettingsGuidanceText(input: {
       ? "- This room owns Murph's personality, tone, voice, Humor, Push, Detail, and Unhinged. They never read or change a participant's private Murph settings."
       : "- Personality, Humor, Push, Detail, and Unhinged are member-private state available only in this direct conversation.",
     groupConversation
-      ? "- Use `murph.personalization` to read or save the room's main/supporting personality, tone, and voice. Report status; `unchanged` means no save. Changes start on a later group turn, not this reply."
-      : "- Use `murph.personalization` to read or save this member's main/supporting personality, tone, and voice. Report status; `unchanged` means no save. Changes do not affect this reply.",
+      ? "- Use `murph.personalization` to read or save the room's tone and voice. Report status; `unchanged` means no save. Changes start on a later group turn, not this reply."
+      : "- Use `murph.personalization` to read or save this member's tone and voice. Report status; `unchanged` means no save. Changes do not affect this reply.",
     groupConversation
       ? "- The room-scoped `murph.assistant_configuration` tool reads or changes the future room model only; one-task child models use `spawn_agent.model` and are never saved. A saved Luna or Sol model starts next turn. Provider and reasoning controls remain unavailable in a group. Never switch either automatically."
       : "- `murph.assistant_configuration` changes future conversation model, provider, or reasoning only; one-task child models use `spawn_agent.model` and are never saved. Never switch them automatically.",
@@ -796,7 +796,7 @@ function buildThreadContextPrompt(input: AssistantSystemPromptInput): string {
       ? "For strength-workout routine planning, saves, and retrieval, read strength-training. Label unsaved plans as drafts; verify canonical state before making save or readiness claims. For a named saved workout routine, use an exact workout format show lookup; a limited list cannot establish that it is missing."
       : null,
     assistantStylePreferencesApply && input.assistantPersona
-      ? buildAssistantPersonaPrompt(input.assistantPersona)
+      ? buildAssistantPersonaPrompt()
       : null,
     assistantStylePreferencesApply
       ? buildAssistantTonePreferenceText(input.assistantTone ?? null)

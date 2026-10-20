@@ -72,10 +72,6 @@ import { JoinFamilyBillingRecoveryStudy } from "./join-family-billing-recovery-s
 import { OpsUsageStudy } from "./ops-usage-study";
 import { OpsOperatorTaskStudy } from "./ops-operator-task-study";
 import { JunctionRecoveryStudy, RuntimeMaintenanceStudy } from "./runtime-maintenance-study";
-import {
-  PersonaOnboardingStudy,
-  PersonaSettingsStudy,
-} from "./persona-onboarding-study";
 import { SettingsAuthRequiredStudy } from "./settings-auth-required-study";
 import { SignupReferralFlowStudy } from "./signup-referral-study";
 import { StructuredReviewResultsStudy } from "./structured-review-results-study";
@@ -637,16 +633,6 @@ export function SectionsContent({
 
       {category === "account" ? (
         <>
-          <Separator />
-
-          <StudySection title="Persona onboarding with stacked tone samples">
-            <div data-design-section="persona-onboarding">
-              <PersonaOnboardingStudy />
-              <Separator />
-              <PersonaSettingsStudy />
-            </div>
-          </StudySection>
-
           <Separator />
 
           <StudySection title="Family plan invite acceptance">

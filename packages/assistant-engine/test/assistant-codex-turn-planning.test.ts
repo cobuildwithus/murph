@@ -447,7 +447,7 @@ describe('assistant Codex turn planning', () => {
       Object.entries(plans).map(([name, plan]) => [name, digestPlan(plan)]),
     )).toMatchInlineSnapshot(`
       {
-        "direct": "46fd6b9c0de0239b431d374320fe018e35ea300479038487a60d9656ff6cb8ee",
+        "direct": "c238ff63a1da54dffe9fb37caf59d2906ab3907340cd97a3925ee8dea0372413",
         "group": "ae7e3a55c2d1698c756c2f7ad37f5c75399f19717d3ac18fac3719b2540bfceb",
         "maintenance": "4def8e201c9fe004f9f60f5ac3ec5ecf084f63f7bc5c70e1a6409107487300be",
         "outputOnly": "7f13d7195b8e231e1fba2e5bd5e91437b30756cd8fcf763edd47fe27de6f7d6e",
@@ -952,7 +952,7 @@ describe('assistant Codex turn planning', () => {
           vault,
         },
         preferenceContext: {
-          assistantPersona: 'navy-seal',
+          assistantPersona: 'classic',
           assistantPersonality: {
             detail: 10,
             humor: 10,
@@ -987,7 +987,7 @@ describe('assistant Codex turn planning', () => {
       expect(plan.systemPrompt).toContain('output-only turn')
       expect(plan.systemPrompt).not.toContain('CLI bootstrap')
       expect(plan.systemPrompt).not.toContain('Hosted tool guidance')
-      expect(plan.systemPrompt).not.toContain('Be direct, disciplined, and accountable.')
+      expect(plan.systemPrompt).not.toContain('Stay balanced, warm, capable, and adaptable.')
       expect(plan.systemPrompt).not.toContain('Assistant personality preferences')
       expect(plan.systemPrompt).not.toContain('Assistant tone preference:')
       expect(plan.turnContextPrompt).toContain('current mobility prescription')
@@ -1027,7 +1027,7 @@ describe('assistant Codex turn planning', () => {
           vault,
         },
         preferenceContext: {
-          assistantPersona: 'navy-seal',
+          assistantPersona: 'classic',
           assistantPersonality: {
             detail: 10,
             humor: 10,
@@ -1116,7 +1116,7 @@ describe('assistant Codex turn planning', () => {
           vault,
         },
         preferenceContext: {
-          assistantPersona: 'navy-seal',
+          assistantPersona: 'classic',
           assistantPersonality: {
             detail: 10,
             humor: 10,
@@ -1158,7 +1158,7 @@ describe('assistant Codex turn planning', () => {
       expect(plan.systemPrompt).not.toContain('PRIVATE_CONTEXT_SNAPSHOT')
       expect(plan.systemPrompt).not.toContain('PRIVATE_HOSTED_CONTEXT')
       expect(plan.systemPrompt).not.toContain('PRIVATE_COMMITTED_HISTORY')
-      expect(plan.systemPrompt).not.toContain('Be direct, disciplined, and accountable.')
+      expect(plan.systemPrompt).not.toContain('Stay balanced, warm, capable, and adaptable.')
       expect(plan.systemPrompt).not.toContain('Assistant personality preferences')
       expect(plan.systemPrompt).not.toContain('Assistant tone preference:')
       expect(planningMocks.readAssistantCliSurfaceBootstrapContext).not.toHaveBeenCalled()
@@ -1234,7 +1234,7 @@ describe('assistant Codex turn planning', () => {
           vault,
         },
         preferenceContext: {
-          assistantPersona: 'navy-seal',
+          assistantPersona: 'classic',
           assistantPersonality: {
             detail: 10,
             humor: 10,
@@ -1346,7 +1346,7 @@ describe('assistant Codex turn planning', () => {
       },
     }
     const preferenceContext = {
-      assistantPersona: 'navy-seal' as const,
+      assistantPersona: 'classic' as const,
       assistantPersonality: {
         detail: 10,
         humor: 10,
@@ -1410,7 +1410,7 @@ describe('assistant Codex turn planning', () => {
     )
     expect(maintenancePlan.systemPrompt).not.toContain('Humor 10/10')
     expect(maintenancePlan.systemPrompt).not.toContain(
-      'Be direct, disciplined, and accountable.',
+      'Stay balanced, warm, capable, and adaptable.',
     )
     expect(maintenancePlan.systemPrompt).not.toContain(
       'Assistant tone preference:',
@@ -1447,7 +1447,7 @@ describe('assistant Codex turn planning', () => {
       'Assistant personality preferences',
     )
     expect(ordinaryPlan.systemPrompt).toContain('Humor 10/10')
-    expect(ordinaryPlan.systemPrompt).toContain('Be direct, disciplined, and accountable.')
+    expect(ordinaryPlan.systemPrompt).toContain('Stay balanced, warm, capable, and adaptable.')
     expect(ordinaryPlan.systemPrompt).toContain('Assistant tone preference:')
     expect(ordinaryPlan.sessionContext).toEqual({
       binding: expect.anything(),
@@ -1488,13 +1488,13 @@ describe('assistant Codex turn planning', () => {
       'Assistant tone preference:',
     )
     expect(scheduledNewsletterPlan.systemPrompt).toContain(
-      'Be direct, disciplined, and accountable.',
+      'Stay balanced, warm, capable, and adaptable.',
     )
     expect(scheduledNewsletterPlan.systemPrompt).toContain('Humor 10/10')
     expect(scheduledNewsletterPlan.systemPrompt).toContain('Push 10/10')
     expect(scheduledNewsletterPlan.systemPrompt).toContain('Detail 10/10')
     expect(scheduledNewsletterPlan.assistantPreferredElevenLabsVoiceId).toBe(
-      resolveAssistantVoiceOptionElevenLabsVoiceId('drill-sergeant'),
+      resolveAssistantVoiceOptionElevenLabsVoiceId('upbeat'),
     )
     expect(scheduledNewsletterPlan.dynamicTools.map((tool) => tool.name)).toEqual(
       ordinaryToolNames.filter((name) =>
@@ -2296,7 +2296,7 @@ describe('assistant Codex turn planning', () => {
     const personaPlan = await resolveAssistantRouteTurnPlan({
       ...common,
       preferenceContext: {
-        assistantPersona: 'navy-seal',
+        assistantPersona: 'classic',
         assistantPersonality: null,
         assistantTone: null,
         assistantVoice: null,
@@ -2316,11 +2316,11 @@ describe('assistant Codex turn planning', () => {
       baseline.assistantContractFingerprint,
     )
     expect(personaPlan.developerInstructions).toContain(
-      'Be direct, disciplined, and accountable.',
+      'Stay balanced, warm, capable, and adaptable.',
     )
-    expect(personaPlan.developerInstructions).toContain('Humor 1/10')
-    expect(personaPlan.developerInstructions).toContain('Push 10/10')
-    expect(personaPlan.developerInstructions).toContain('Detail 2/10')
+    expect(personaPlan.developerInstructions).toContain('Humor 3/10')
+    expect(personaPlan.developerInstructions).toContain('Push 3/10')
+    expect(personaPlan.developerInstructions).toContain('Detail 5/10')
     // A persona never contributes an Unhinged band: the member here saved no
     // Unhinged preference, so the sparse thread contract renders no band.
     // (The reusable style-settings guidance still names the Unhinged dial.)
@@ -2329,13 +2329,13 @@ describe('assistant Codex turn planning', () => {
       'Assistant tone preference:',
     )
     expect(personaPlan.assistantPreferredElevenLabsVoiceId).toBe(
-      resolveAssistantVoiceOptionElevenLabsVoiceId('drill-sergeant'),
+      resolveAssistantVoiceOptionElevenLabsVoiceId('upbeat'),
     )
 
     const staleVoicePlan = await resolveAssistantRouteTurnPlan({
       ...common,
       preferenceContext: {
-        assistantPersona: 'navy-seal',
+        assistantPersona: 'classic',
         assistantPersonality: null,
         assistantTone: null,
         assistantVoice: 'stale-roster-id',
@@ -4540,7 +4540,7 @@ describe('assistant Codex turn planning', () => {
     const plan = await resolveAssistantRouteTurnPlan({
       ...groupPlanInput,
       preferenceContext: {
-        assistantPersona: 'scientist-with-classic',
+        assistantPersona: 'classic',
         assistantPersonality: {
           humor: 9,
         },
@@ -4561,10 +4561,10 @@ describe('assistant Codex turn planning', () => {
       'Assistant personality preferences for this group room:',
     )
     expect(plan.developerInstructions).toContain('Humor 9/10')
-    expect(plan.developerInstructions).toContain('Push 4/10')
-    expect(plan.developerInstructions).toContain('Detail 9/10')
+    expect(plan.developerInstructions).toContain('Push 3/10')
+    expect(plan.developerInstructions).toContain('Detail 5/10')
     expect(plan.developerInstructions).toContain(
-      'Lead with rigorous curiosity and calibrated evidence, while keeping the explanation warm, balanced, and easy to use.',
+      'Stay balanced, warm, capable, and adaptable.',
     )
     expect(plan.developerInstructions).toContain(
       'Casual is a persistent user-facing writing invariant',
@@ -4593,17 +4593,17 @@ describe('assistant Codex turn planning', () => {
     const personaDefaultPlan = await resolveAssistantRouteTurnPlan({
       ...groupPlanInput,
       preferenceContext: {
-        assistantPersona: 'hype-coach',
+        assistantPersona: 'classic',
         assistantPersonality: null,
         assistantTone: null,
         assistantVoice: null,
       },
     })
     expect(personaDefaultPlan.developerInstructions).toContain(
-      'Casual is a persistent user-facing writing invariant',
+      'Formal is the default and a persistent user-facing writing invariant',
     )
     expect(personaDefaultPlan.assistantPreferredElevenLabsVoiceId).toBe(
-      resolveAssistantVoiceOptionElevenLabsVoiceId('football-announcer'),
+      resolveAssistantVoiceOptionElevenLabsVoiceId('upbeat'),
     )
     expect(plan.developerInstructions).not.toContain('Hosted wearable connection links are available')
     expect(plan.developerInstructions).toContain(
