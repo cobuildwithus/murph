@@ -1,5 +1,8 @@
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { GameInviteShareCard } from "@/app/g/[token]/invite-share-card";
 import type { GameInvitePreview } from "@/src/lib/game/contract";
 
 const mocks = vi.hoisted(() => ({ readInvitePreview: vi.fn() }));
@@ -8,9 +11,12 @@ vi.mock("@/src/lib/game/service", () => ({ readInvitePreview: mocks.readInvitePr
 
 const { generateMetadata } = await import("@/app/g/[token]/page");
 
+// The challenger's private name for the invitee: it must never reach a link preview.
+const PRIVATE_INVITEE_NAME = "Babe";
+
 const OPEN: GameInvitePreview = {
   expiresAt: "2026-10-26T15:00:00.000Z",
-  inviteeFirstName: "Ava",
+  inviteeFirstName: PRIVATE_INVITEE_NAME,
   inviterFirstName: "Leo",
   startsOn: null,
   status: "open",
@@ -44,6 +50,15 @@ describe("weekly game invite link preview", () => {
     expect(metadata.twitter).toMatchObject({ card: "summary_large_image", images: [image], title: "Leo challenged you" });
     expect(metadata.robots).toEqual({ follow: false, index: false });
     expect(metadata.referrer).toBe("no-referrer");
+    // Title, description, and alt text name the challenger, never the invitee's private label.
+    expect(JSON.stringify(metadata)).not.toContain(PRIVATE_INVITEE_NAME);
+  });
+
+  it("puts the challenger against \"You\" on the card, never the invitee's private name", () => {
+    const html = renderToStaticMarkup(createElement(GameInviteShareCard, { preview: OPEN }));
+    expect(html).toContain("Leo");
+    expect(html).toContain("You");
+    expect(html).not.toContain(PRIVATE_INVITEE_NAME);
   });
 
   it("describes a per-miss stake, and encodes the token in the card's address", async () => {
@@ -67,6 +82,6 @@ describe("weekly game invite link preview", () => {
     expect(metadata.openGraph).toMatchObject({ title: "This invite isn't available" });
     expect(metadata.robots).toEqual({ follow: false, index: false });
     // Nothing from any invite reaches a closed link's preview.
-    expect(JSON.stringify(metadata)).not.toMatch(/Leo|Ava|pushups|abs|Breakfast/u);
+    expect(JSON.stringify(metadata)).not.toMatch(/Leo|Babe|pushups|abs|Breakfast/u);
   });
 });

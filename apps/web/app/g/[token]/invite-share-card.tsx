@@ -17,12 +17,16 @@ const SAGE = "#5A6E32";
 const TICKET_INK = "#3B2A12";
 const WIDTH = 520;
 const PLAYER_WIDTH = 190;
+// The link reaches the invitee, and anyone they forward it to: name them as the page does.
+const INVITEE_NAME = "You";
 
 /**
- * The /g/[token] link unfurl. An open invite shows the challenge itself:
- * both first names, their tasks, the days, and the stake, which the invite
- * page already shows to anyone holding the link. A used, expired, or missing
- * invite shows only that it isn't available. Pure inline styles with no node
+ * The /g/[token] link unfurl. An open invite shows the challenge itself: the
+ * challenger's first name against "You", both tasks, the days, and the stake,
+ * which the invite page already shows to anyone holding the link. The name the
+ * challenger typed for the invitee is their private label, so it never
+ * appears. A used, expired, or missing invite shows only that it isn't
+ * available. Pure inline styles with no node
  * imports, so the opengraph-image route (satori) and the /design study render
  * the same card. Fraunces is upright SemiBold throughout; there's no logo.
  */
@@ -48,7 +52,7 @@ function OpenTicket({ preview }: { preview: Extract<GameInvitePreview, { status:
   const stake = preview.terms.stakes[0];
   const when = describeSchedule(preview.terms.schedule).toUpperCase()
     + (preview.startsOn ? ` · STARTS ${describeStartDate(preview.startsOn).toUpperCase()}` : "");
-  const nameSize = nameFontSize(Math.max(preview.inviterFirstName.length, preview.inviteeFirstName.length));
+  const nameSize = nameFontSize(Math.max(preview.inviterFirstName.length, INVITEE_NAME.length));
   return (
     <div
       style={{
@@ -77,7 +81,7 @@ function OpenTicket({ preview }: { preview: Extract<GameInvitePreview, { status:
           <div style={{ color: FAINT, display: "flex", fontFamily: "Fraunces", fontSize: 30, fontWeight: 600, lineHeight: `${nameSize + 8}px` }}>
             vs.
           </div>
-          <Player bar={SIENNA} name={preview.inviteeFirstName} size={nameSize} task={taskFor(tasks, 1)} />
+          <Player bar={SIENNA} name={INVITEE_NAME} size={nameSize} task={taskFor(tasks, 1)} />
         </div>
         <Label color={FAINT} size={18} spacing={3.6}>{when}</Label>
       </div>

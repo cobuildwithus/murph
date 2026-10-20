@@ -28,9 +28,10 @@ for (const width of [390, 1280]) {
     }
     await expect(study.locator('[data-design-state="open"]')).toContainText("Leo challenged you");
     await expect(study.locator('[data-design-state="open"]')).toContainText("Mon, Wed, Fri");
-    // The link preview names both players for an open invite, and nobody for a closed one.
+    // The link preview names the challenger against "You" (never the invitee's private name), and nobody when closed.
     await expect(study.locator('[data-design-state="link-open"]')).toContainText("Leo");
-    await expect(study.locator('[data-design-state="link-open"]')).toContainText("Ava");
+    await expect(study.locator('[data-design-state="link-open"]')).toContainText("You");
+    await expect(study.locator('[data-design-state="link-open"]')).not.toContainText("Ava");
     await expect(study.locator('[data-design-state="link-closed"]')).not.toContainText("Leo");
     const output = process.env.DESIGN_PROOF_OUTPUT_DIR;
     if (!output) return;

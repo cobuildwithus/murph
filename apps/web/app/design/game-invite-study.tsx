@@ -79,8 +79,9 @@ export function GameInviteStudy() {
         ))}
       </div>
       <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
-        The 1200x630 link preview from <code>/g/[token]/opengraph-image</code>. An open invite shows the same
-        first names, tasks, days, and stake the page shows to anyone holding the link; a closed one names nobody.
+        The 1200x630 link preview from <code>/g/[token]/opengraph-image</code>. An open invite shows the challenger
+        against &ldquo;You&rdquo; with the tasks, days, and stake the page shows to anyone holding the link; the
+        name the challenger typed for the invitee stays private. A closed one names nobody.
       </p>
       <div className="grid items-start gap-6 md:grid-cols-2">
         {LINK_PREVIEWS.map((state) => (
