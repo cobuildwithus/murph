@@ -185,12 +185,6 @@ export const HOSTED_RUNNER_WEB_CONTROL_ROUTES = {
     "clinical_records_record_outcome",
     HOSTED_CLINICAL_RECORDS_RUNTIME_RECORD_OUTCOME_PATH,
   ),
-  // Transitional consumer for old runners during Worker-first activation.
-  // Remove after producer drain and Web retirement; see hosted-runtime-protocol.md.
-  codexAuthUpdate: defineHostedRunnerWebControlPostRoute(
-    "codex_auth_update",
-    "/api/internal/hosted-runtime/codex-auth",
-  ),
   connectedApps: defineHostedRunnerWebControlPostRoute(
     "connected_apps",
     HOSTED_CONNECTED_APPS_PATH,

@@ -5,7 +5,6 @@ const mocks = vi.hoisted(() => ({
   getPrisma: vi.fn(),
   issueMurphContactCardHandoffClaim: vi.fn(),
   lookupHostedMemberByVerifiedEmailAddress: vi.fn(),
-  parseHostedInitialOnboardingCompletionRequest: vi.fn(),
   readHostedInitialOnboardingState: vi.fn(),
   readHostedMemberMessagingSetupState: vi.fn(),
   readHostedMurphContactContextForMember: vi.fn(),
@@ -19,12 +18,16 @@ vi.mock("@/src/lib/hosted-onboarding/request-auth", () => ({
     mocks.requireActiveHostedMemberAuthFromBearerToken,
 }));
 
-vi.mock("@/src/lib/hosted-onboarding/initial-onboarding", () => ({
-  COMPANION_INITIAL_ONBOARDING_SCHEMA:
-    "murph.companion.initial-onboarding.v1",
+// The completion writer is already stubbed below. Keep its unused mailbox
+// dependency out of this route/parser proof; no persistence helper may run here.
+vi.mock("@/src/lib/hosted-onboarding/member-preferences", () => ({
+  projectHostedMemberAssistantPreferences: () => { throw new Error("Unexpected preference projection."); },
+  upsertHostedMemberAssistantPreferencesTx: () => { throw new Error("Unexpected preference write."); },
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/initial-onboarding", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/src/lib/hosted-onboarding/initial-onboarding")>(),
   completeHostedInitialOnboardingTx: mocks.completeHostedInitialOnboardingTx,
-  parseHostedInitialOnboardingCompletionRequest:
-    mocks.parseHostedInitialOnboardingCompletionRequest,
   readHostedInitialOnboardingState: mocks.readHostedInitialOnboardingState,
 }));
 
@@ -91,9 +94,6 @@ describe("companion initial onboarding routes", () => {
       initialContactChannels: { email: false, telegram: false, text: true },
       murphEmailAddress: null,
       murphPhoneNumber: "+15555550123",
-    });
-    mocks.parseHostedInitialOnboardingCompletionRequest.mockReturnValue({
-      action: "skip",
     });
     mocks.completeHostedInitialOnboardingTx.mockResolvedValue({
       completedNow: true,
@@ -327,6 +327,38 @@ describe("companion initial onboarding routes", () => {
       prisma: { tx: true },
       request: { action: "skip" },
     });
+  });
+
+  it("rejects a retired native selection before completion or mailbox dispatch", async () => {
+    const response = await route.POST(new Request(
+      "https://app.example.test/api/device-sync/companion/initial-onboarding",
+      { method: "POST", headers: { authorization: "Bearer identity-token", "content-type": "application/json" },
+        body: JSON.stringify({ action: "save", preferences: {
+          persona: "scientist-with-classic", tone: "casual", voice: "warm",
+        } }) },
+    ));
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({ error: {
+        code: "INITIAL_ONBOARDING_REQUEST_INVALID",
+        message: "Refresh Murph before completing setup.",
+      } });
+    expect(mocks.requireActiveHostedMemberAuthFromBearerToken).toHaveBeenCalledOnce();
+    expect(mocks.transaction).not.toHaveBeenCalled();
+    expect(mocks.completeHostedInitialOnboardingTx).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
+  });
+
+  it("accepts a current native Classic save without changing tone or voice", async () => {
+    const preferences = { persona: "classic", tone: "casual", voice: "warm" };
+    const response = await route.POST(new Request(
+      "https://app.example.test/api/device-sync/companion/initial-onboarding",
+      { method: "POST", headers: { authorization: "Bearer identity-token", "content-type": "application/json" },
+        body: JSON.stringify({ action: "save", preferences }) },
+    ));
+    expect(response.status).toBe(200);
+    expect(mocks.completeHostedInitialOnboardingTx).toHaveBeenCalledWith(
+      expect.objectContaining({ request: { action: "save", preferences } }),
+    );
   });
 
   it("mints an absolute short-lived contact-card handoff after bearer auth", async () => {
