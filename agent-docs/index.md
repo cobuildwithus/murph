@@ -1,4 +1,8 @@
 Documentation guard diagnostic clarification is tracked in
+
+Native base image publication recovery is tracked in
+[the publisher plan](exec-plans/active/2026-10-20-runner-base-publisher.md);
+the current build and deployment authority remains in `apps/cloudflare/DEPLOY.md`.
 [the diagnostic plan](exec-plans/completed/2026-10-19-frog-docs-diagnostic-4205.md).
 
 Snapshot upload failure phases are owned by
