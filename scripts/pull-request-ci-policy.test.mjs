@@ -854,10 +854,21 @@ test("only documented lightweight PR workflows retain synchronize", async () => 
   }
   assert.deepEqual(
     pullRequestWorkflows.sort(),
-    [...EXPENSIVE_WORKFLOWS.keys(), "pr-evidence.yml", "pr-head-change.yml"].sort(),
+    [...EXPENSIVE_WORKFLOWS.keys(), "compiler-benchmark.yml", "pr-evidence.yml", "pr-head-change.yml"].sort(),
   );
   assert.deepEqual(triggerTypes(await workflow("pr-evidence.yml")), ["opened", "synchronize", "reopened", "edited"]);
   assert.deepEqual(triggerTypes(await workflow("pr-head-change.yml")), ["synchronize"]);
+  const benchmark = await workflow("compiler-benchmark.yml");
+  assert.deepEqual(triggerTypes(benchmark), READY_ONLY_TYPES);
+  assert.match(benchmark, /^  workflow_dispatch:$/mu);
+  assert.match(benchmark, /^permissions:\n  contents: read$/mu);
+  assert.doesNotMatch(benchmark, /pull_request_target|secrets\.|^\s+environment:/mu);
+  // This diagnostic is not required release proof. Drafts can skip it without
+  // changing any required owner's fail-closed draft admission above.
+  assert.match(
+    jobBlock(benchmark, "paired"),
+    /^    if: \$\{\{ github\.event_name != 'pull_request' \|\| !github\.event\.pull_request\.draft \}\}$/mu,
+  );
 });
 
 test("complexity evidence and exact-candidate regression guards remain required", async () => {
