@@ -1888,23 +1888,23 @@ whole optional timing object containing a new name while preserving legacy
 usage accounting; do not rely on that during rollout.
 
 **Release route.** The unmerged-candidate blocker above describes the earlier
-rebuild-phase patch and is not this change's route. This task authorizes a
-reviewed merge plus the normal main-only protected deployment, only after a
-green ReviewGPT review and green CI on the exact head. The parent owns that
-release: Web, then the Worker, then the Runner, each verified before the next.
-None of those gates or deployments has happened yet. Treat this change as **not
-deployed** until release proof records the deployed revisions and natural
-end-to-end admission of the new names.
+rebuild-phase patch and is not this change's route. Release follows the normal
+reviewed merge to main and the main-only protected deployment, only after a
+green review and green CI on the exact head: Web, then the Worker, then the
+Runner, each verified before the next. Establish deployed status only from
+recorded proof of the deployed revision and binding for each surface. Record
+natural end-to-end admission of the new names separately; absent subphases
+may mean insufficient qualifying traffic, not a failed release.
 
-**Observation.** After verified deployment, the task requires an immediate
-check and then a check every 30 minutes for four hours. That covers deploy
-health and first admission only. It is separate from, and does not replace,
-the 24-hour preliminary and 72-hour baseline sampling windows, which also start
-only after verified production deployment and use the bounded inspection below
-with the same retained-sample, coverage and drop caveats. App heartbeat
-scheduling tools are currently unavailable. That blocks automatic scheduling of
-the 30-minute checks. It does not block deployment authority. Until those tools
-return, the parent must run or arrange each check manually.
+**Observation.** After verified deployment, run an immediate check and then a
+check every 30 minutes for four hours. That covers deploy health and first
+admission only. It is separate from, and does not replace, the 24-hour
+preliminary and 72-hour baseline sampling windows, which also start only after
+verified production deployment and use the bounded inspection below with the
+same retained-sample, coverage and drop caveats. When app heartbeat scheduling
+is unavailable, record that as an explicit observation-scheduling blocker and
+do not claim the watch was scheduled or completed. This grants no manual
+scheduler substitute or new automation.
 
 **Proof.** Query `metric-projection-steps.test.ts` covers step bracketing,
 complete-output parity with and without an observer, observer failures,
