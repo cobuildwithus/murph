@@ -145,7 +145,6 @@ import { HostedFamilyManager } from "@/src/components/settings/hosted-family-set
 import { HostedPlanChangeConfirmationContent } from "@/src/components/settings/hosted-plan-change-button";
 import { UpgradeToEdgeButton } from "@/src/components/settings/hosted-plan-upgrade-button";
 import { HostedPlanUpdateReturn } from "@/src/components/settings/hosted-plan-update-return";
-import { FoodBrandVisualStudy } from "./food-label-lab-study";
 import { MurphPersonalitySettingsDialog } from "@/src/components/settings/murph-personality-settings-dialog";
 import {
   DESIGN_AI_USAGE_ACTIVITY,
@@ -684,16 +683,6 @@ export function ComponentsContent() {
 
         <Separator />
 
-        <div data-design-component="food-brand-visual" id="food-brand-visual" inert>
-          <Section title="Food brand visual">
-            <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
-              Brand-aware food identity with a local category-art fallback.
-            </p>
-            <FoodBrandVisualStudy />
-          </Section>
-        </div>
-
-        <Separator />
 
         <div data-design-component="public-trust-page" id="public-trust-page">
           <Section title="Public trust page">

@@ -2644,54 +2644,16 @@ within the admitted set rather than exhaustive across the full food catalog.
 Private food ranking favors query terms covered by the name and brand and
 scores that compact identity rather than the extended catalog search text.
 Exact-id and UPC lookups retain their direct indexed paths;
-supplement generic search and the public projection retain their pre-existing
+supplement generic search retains its pre-existing
 ranking and candidate contracts. Existing labels databases must receive the
 foods name-rank and exact-name-rank indexes before this private-food query shape
-is deployed. The public
-projection of that database is Murph Safe at `/search` and the branded-food
-comparison at `/food`, plus the
-read-only Murph Product Data API under `/api/public/v1`. Wire contracts belong
-to `@murphai/contracts`; one web-owned service maps bounded database records to
-those contracts. Browser search posts to the public route, while the
-server-rendered detail page calls the same service directly. The public catalog
-excludes generic food origins, never returns raw labels wholesale, and links
-tests only by the selected row's exact foreign key. Public search uses bounded
-SQL candidate sets. Its optional food evidence order checks indexed exact test
-links only inside the 250-row public candidate bound. The food comparison also
-has an optional category-popularity order. It matches a dated US Google Shopping
-brand snapshot against at most 10,000 indexed text candidates. Soda searches
-may add at most 900 rows through bounded probes of the existing `foods(brand)`
-index. The query then retains 250 rows, spreads early results across brands, and
-applies indexed exact test counts as a secondary signal. Comparison-ready
-search also rejects empty, zero-only, and physically impossible per-100-gram
-nutrition. Queries without a matching snapshot keep the stable relevance
-fallback. Detail reads cap stored label transfer and aggregate DTO size.
-One Vercel-aware singleton pool is shared by public and private label
-readers. Vercel custom firewall rules sit in front of public search and detail,
-and the production build verifies their exact active configuration.
-
-`/food` keeps temporary comparison state in the browser and derives six
-nutrition comparisons plus a separate exact-evidence summary from existing
-public DTOs. Its share URL contains only public product references and the
-nutrition basis; the raw search query stays out of the URL. It derives
-related-search categories from its existing local food
-taxonomy and does not persist them as product truth. A nutrition winner exists only when every compared product has the
-metric. Evidence keeps the DTO's returned, total, and truncated observation
-scope. The evidence meter and drawer statuses derive only from DTO fields
-(nutrition rows, serving mass, ingredients, returned observations and their
-screening results), and the drawer renders the DTO-owned unknown entries. Compatible browsers receive four page-scoped
-WebMCP tools through
-`document.modelContext.registerTool`. These tools call the same bounded page
-actions as manual controls. Their comparison result carries the same four
-metric values, completeness, ties, and winners as the visible table, plus the
-per-product row-win counts behind its rows-led caption. The tools disappear when the page unmounts. They do not
-create a remote MCP service, a second data owner, or an authenticated path.
+is deployed.
 
 Each product-test observation may preserve evidence and sampling context,
 sample or lot identity, result bounds and qualifiers, analytical limits, and
 the raw reported product identifier. Only checksum-valid GTINs enter the
-canonical UPC field. Private label lookup and the bounded public product-detail
-contract expose the same additive metadata so a regulatory finding or sampled
+canonical UPC field. Private label lookup exposes this additive metadata so a
+regulatory finding or sampled
 package is not presented as a timeless product claim. One-time acquisition,
 reconciliation, and remap tooling is operational research rather than deployed
 application code.

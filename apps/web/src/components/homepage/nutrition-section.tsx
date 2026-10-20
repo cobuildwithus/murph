@@ -1,4 +1,3 @@
-import Link from "next/link";
 
 import { PRODUCT_DATABASE_STATS } from "@/src/lib/product-database-stats";
 
@@ -139,14 +138,6 @@ export function NutritionSection() {
 
           <div className="flex w-full max-w-[400px] flex-col gap-8 lg:mx-auto">
             <DatabaseFactsPanel />
-            <p className="text-[0.9375rem] leading-[1.55]">
-              <Link
-                className="font-medium text-[#26311f] underline decoration-[#3d5028]/40 decoration-2 underline-offset-4 transition-colors hover:decoration-[#26311f]"
-                href="/search"
-              >
-                Search the whole database yourself
-              </Link>
-            </p>
           </div>
         </div>
       </div>

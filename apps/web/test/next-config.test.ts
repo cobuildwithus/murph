@@ -863,7 +863,6 @@ test("buildHostedWebContentSecurityPolicy includes Privy, WalletConnect, and hos
   assert.match(csp, /script-src [^;]*https:\/\/challenges\.cloudflare\.com/);
   assert.match(csp, /script-src-attr 'none'/);
   assert.match(csp, /style-src 'self' 'unsafe-inline'/);
-  assert.match(csp, /img-src [^;]*https:\/\/cdn\.brandfetch\.io/);
   assert.match(csp, /manifest-src 'self'/);
   assert.match(csp, /media-src 'self' blob:/);
   assert.match(csp, /object-src 'none'/);
@@ -884,21 +883,10 @@ test("buildHostedWebContentSecurityPolicy includes Privy, WalletConnect, and hos
   assert.match(csp, /connect-src [^;]*https:\/\/\*\.rpc\.privy\.systems/);
   assert.match(csp, /connect-src [^;]*https:\/\/explorer-api\.walletconnect\.com/);
   assert.match(csp, /connect-src [^;]*https:\/\/status\.withmurph\.ai/);
-  assert.match(csp, /connect-src [^;]*https:\/\/api\.brandfetch\.io/);
-  assert.match(csp, /img-src [^;]*https:\/\/cdn\.brandfetch\.io/);
   assert.match(csp, /upgrade-insecure-requests/);
   assert.doesNotMatch(csp, /'unsafe-eval'/);
 });
 
-test("next.config permits only the Brandfetch CDN for remote brand images", () => {
-  assert.deepEqual(productionNextConfig.images?.remotePatterns, [
-    {
-      protocol: "https",
-      hostname: "cdn.brandfetch.io",
-      pathname: "/**",
-    },
-  ]);
-});
 
 test("buildHostedWebContentSecurityPolicy keeps production script origins on a tight allowlist", () => {
   const csp = buildHostedWebContentSecurityPolicy(createProcessEnv({
@@ -1007,11 +995,11 @@ test("buildHostedWebSecurityHeaders adds production-only HSTS alongside the CSP 
   );
 });
 
-test("next.config serves global security headers and stricter Murph Safe referrer privacy", async () => {
+test("next.config serves global security headers", async () => {
   const routes = await productionNextConfig.headers?.();
 
   assert.ok(routes);
-  assert.equal(routes.length, 2);
+  assert.equal(routes.length, 1);
   assert.equal(routes[0]?.source, "/(.*)");
   assert.deepEqual(
     routes[0]?.headers.map((header) => header.key),
@@ -1033,13 +1021,6 @@ test("next.config serves global security headers and stricter Murph Safe referre
       value: "strict-origin",
     },
   );
-  assert.equal(routes[1]?.source, "/search/:path*");
-  assert.deepEqual(routes[1]?.headers, [
-    {
-      key: "Referrer-Policy",
-      value: "no-referrer",
-    },
-  ]);
 });
 
 function resolveHostedOptionalModule(): boolean {
