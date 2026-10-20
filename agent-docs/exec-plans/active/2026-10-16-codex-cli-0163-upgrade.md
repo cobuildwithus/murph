@@ -391,7 +391,8 @@ release coordinator's reservation and all production admission gates.
 - Refreshed remote main `f54875376973da0c36a8eece4bb63ad91edbad96` matches
   `ls-remote` and retains Codex 0.160.0. Merge-tree proof is clean; intervening
   invite-UI and documentation changes do not alter this upgrade's owners.
-- Hosted candidate proof `39328858199` attempt 2 remains pending. Host Support
+- Hosted candidate proof `39328858199` attempt 2 failed at the held-response
+  fixture boundary described below. Host Support
   `39328838919` diagnostic attempt 3 failed when the hosted runner lost
   communication; its build and diagnostic logs were never uploaded. Attempt 1
   canceled during compilation, and attempt 2 logged `Killed` / exit 137 before
@@ -407,3 +408,31 @@ release coordinator's reservation and all production admission gates.
   substantive ReviewGPT round under completion eligibility. Round 2 PASS still
   covers the production source. Fresh exact-head CI is required for the new
   setting, and the plan remains active until it and hosted proof are reviewed.
+
+### Hosted response-stream boundary correction
+
+- Candidate proof `39328858199` attempt 2 built and launched the actual patched
+  Codex 0.163.0 image. Its first scenario then failed while waiting for instant
+  steering; vault persistence, Linq delivery, and reminders did not run.
+- Diagnosis is specific to the fixture: its function-call `beforeResponse`
+  gate withheld HTTP headers. Verified upstream commit `83086188` in
+  `codex-rs/core/src/session/turn.rs` awaits stream creation with full-turn
+  cancellation, then applies the instant-steer preemption token inside the
+  stream-read loop. The test required an active-stream behavior before that
+  stream existed; this is not a newly introduced production regression.
+- Preserve the existing header barrier and its assertion. A distinct
+  `beforeStreamContent` hook emits `response.created` before holding the tool
+  item. The hosted scenario waits for that boundary before steering. Its
+  forbidden stale-tool, exact reply, mailbox, fence-clearance, and fresh-wake
+  assertions remain unchanged. Architecture guidance now names the existing
+  pre-header limit.
+- Negative proof: the new wire test fails before the hook implementation
+  because the held tool item is delivered. Positive proof: all 40 provider
+  support tests pass, including concurrent correction while tool content is
+  held and the unchanged header-barrier case. Workspace typecheck passes.
+- Real pinned-binary proof passes three focused cases: interruption before a
+  held shell tool creates its file (file absent, two provider requests, only
+  the corrected reply), ordinary unfinished-SSE preemption, and the explicit
+  disable control. There are 138 unrelated filtered cases. Production source
+  and image fingerprint are unchanged; hosted execution of the corrected
+  fixture and all three unexecuted scenarios remains required.

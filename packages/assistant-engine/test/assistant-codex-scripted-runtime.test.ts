@@ -10759,6 +10759,50 @@ text(JSON.stringify(result));
     }
   }
 
+  it('preempts an open SSE stream before its held tool call can execute', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    let requestStarted!: () => void
+    const firstRequest = new Promise<void>((resolve) => { requestStarted = resolve })
+    const marker = 'stale-steer-proof.txt'
+    scenario.stub.queue(
+      {
+        beforeRespond: async () => { requestStarted() },
+        delayAfterCreatedMs: 30_000,
+        functionCall: {
+          name: 'exec_command',
+          arguments: { cmd: `printf stale > ${marker}` },
+        },
+      },
+      {
+        requestIncludes: ['Use corrected detail before running tools.'],
+        requestExcludes: [marker],
+        text: 'STEERED_BEFORE_TOOL_OK',
+      },
+    )
+    let steered: Promise<void> | null = null
+    const startedAt = Date.now()
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      prompt: 'Answer the first synthetic message.',
+      onLiveTurn: (turn: CodexAppServerLiveTurn) => {
+        steered = firstRequest.then(() => turn.steer({
+          prompt: 'Use corrected detail before running tools.',
+        }))
+        return () => {}
+      },
+    })
+    expect(steered).not.toBeNull()
+    await steered
+    expect(result.finalMessage).toBe('STEERED_BEFORE_TOOL_OK')
+    expect(result.precedingAgentMessageSegments).toEqual([])
+    expect(scenario.stub.requestCountSinceBaseline()).toBe(2)
+    expect(Date.now() - startedAt).toBeLessThan(20_000)
+    await expect(readFile(path.join(scenario.turnInput.workingDirectory, marker)))
+      .rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
   it('preempts an unfinished SSE answer on steer and delivers only the steered reply', {
     timeout: TURN_TIMEOUT_MS,
   }, async () => {

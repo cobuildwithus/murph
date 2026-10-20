@@ -99,11 +99,15 @@ describe("hosted local Linq lost active-operation e2e", () => {
     const replyPath = `/chats/${encodeURIComponent(chatId)}/messages`;
     const outboundCountBeforeReply = requireLinqStub().countObservedSends(replyPath);
     let releaseFirstProviderResponse!: () => void;
+    let firstProviderStreamStarted = false;
     const firstProviderResponseGate = new Promise<void>((resolve) => { releaseFirstProviderResponse = resolve; });
     requireScenario().queueAssistantResponses([
       {
         ...buildAssistantProviderShellCommandCall("echo first-turn-held"),
-        beforeResponse: () => firstProviderResponseGate,
+        beforeStreamContent: () => {
+          firstProviderStreamStarted = true;
+          return firstProviderResponseGate;
+        },
       },
       unsteeredFirstReplyText,
     ], {
@@ -136,6 +140,12 @@ describe("hosted local Linq lost active-operation e2e", () => {
         "Expected the first hosted assistant turn to reach the provider before dropping active operation.",
       );
       firstTurnProviderRequestCount = countResponsesApiRequests();
+      // Upstream instant steering begins after HTTP stream establishment.
+      // Keep the tool content held, but let response.created reach Codex.
+      await waitForCondition(
+        () => firstProviderStreamStarted,
+        "Expected the provider stream to open before steering its held tool content.",
+      );
       const firstTurnFence = await readActiveRuntimeFenceForTest();
       expect(firstTurnFence).not.toBeNull();
       await requireScenario().harness.dropRunnerActiveOperationForTest(userId, {

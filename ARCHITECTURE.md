@@ -4206,7 +4206,9 @@ preempts unfinished generation inside the same Codex turn instead of waiting for
 the stale answer: over HTTP/SSE Codex drops the response stream, and over
 WebSocket it requests `response.interrupt` with `discard_partial_items`. A
 provider that ignores that request completes the stale answer, which Murph then
-delivers as an ordinary preceding segment exactly as before. Preemption does not
+delivers as an ordinary preceding segment exactly as before. An HTTP request
+still awaiting response headers has not entered the stream-read loop; its queued
+steer takes effect after stream establishment. Preemption does not
 abort tool calls already issued; a code-mode `exec` or `wait` yields its running
 cell so the steer reaches the model while the effect finishes once. An
 interrupted turn stops its code-mode cells, and App Server aborts a finished
