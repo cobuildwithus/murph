@@ -329,7 +329,6 @@ function createExperimentRunCardClient(status: BrowserVaultExperimentRunCardStat
       replicaSchema: BROWSER_VAULT_REPLICA_SCHEMA,
       sourceBundleHash: "b".repeat(64),
     },
-    personalPatterns: undefined,
     policy: {
       bodyPreviewChars: 280,
       excludedFamilies: [],

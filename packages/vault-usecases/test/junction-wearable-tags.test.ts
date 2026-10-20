@@ -8,7 +8,6 @@ import {
 import * as coreRuntime from '@murphai/core'
 import { importDeviceProviderSnapshot } from '@murphai/importers'
 import {
-  buildPersonalPatternReportRuntime,
   listCanonicalEntities,
   rebuildQueryProjection,
 } from '@murphai/query'
@@ -18,20 +17,17 @@ import { expect, test } from 'vitest'
 const SENSITIVE_NOTE_VALUE = 'SENSITIVE_VALUE_SENTINEL'
 const INITIAL_OURA_TAGS = ['sauna', 'headache', 'late meal', 'recovery', 'custom tag']
 const EDITED_OURA_TAGS = ['headache', 'late meal', 'recovery', 'custom tag']
-const PATTERN_AS_OF = '2026-03-15T12:00:00.000Z'
 
-test('replayed Junction tags persist neutrally and Oura sauna reaches Personal Patterns', async () => {
-  const parentRoot = await mkdtemp(path.join(tmpdir(), 'junction-oura-tags-patterns-'))
+test('replayed Junction tags persist neutrally without retaining provider free text', async () => {
+  const parentRoot = await mkdtemp(path.join(tmpdir(), 'junction-wearable-tags-'))
   const vaultRoot = path.join(parentRoot, 'vault')
   const start = '2026-01-05'
   const ouraDates = Array.from({ length: 5 }, (_, index) => addDays(start, index * 14))
   const initialSnapshot = buildSnapshot({
-    includeSleep: true,
     importedAt: '2026-04-28T12:00:00.000Z',
     noteValue: `${SENSITIVE_NOTE_VALUE}_INITIAL`,
     ouraDates,
     ouraTags: INITIAL_OURA_TAGS,
-    start,
   })
   try {
     await coreRuntime.initializeVault({
@@ -66,18 +62,6 @@ test('replayed Junction tags persist neutrally and Oura sauna reaches Personal P
     )).toBe(true)
     expect(initialGarminNotes.every((entity) =>
       JSON.stringify(entity.tags) === JSON.stringify(['sauna'])
-    )).toBe(true)
-
-    const initialReport = await buildPersonalPatternReportRuntime(vaultRoot, {
-      asOf: PATTERN_AS_OF,
-    })
-    expect(initialReport.factors).toEqual([
-      expect.objectContaining({ id: 'sauna', kind: 'intervention', observedDays: 5 }),
-    ])
-    expect(initialReport.cells.some((cell) =>
-      cell.factorId === 'sauna'
-      && cell.grade === 'C'
-      && cell.classification === 'pattern'
     )).toBe(true)
 
     await expect(directoryContainsText(vaultRoot, SENSITIVE_NOTE_VALUE))
@@ -201,34 +185,14 @@ test('edited and cleared Junction tags revise the same neutral notes', async () 
 })
 
 function buildSnapshot(input: {
-  includeSleep: boolean
   importedAt: string
   noteValue: string
   ouraDates: readonly string[]
   ouraTags: readonly string[]
-  start: string
 }) {
   return {
     importedAt: input.importedAt,
-    summaries: input.includeSleep ? {
-      sleep: Array.from({ length: 70 }, (_, index) => {
-        const date = addDays(input.start, index)
-        const followsSauna = input.ouraDates.includes(addDays(date, -1))
-        return {
-          average_hrv: followsSauna ? 70 : 50,
-          bedtime_start: `${date}T00:00:00.000Z`,
-          bedtime_stop: `${date}T08:00:00.000Z`,
-          calendar_date: date,
-          duration: 28_800,
-          id: `sleep-${date}`,
-          recovery_readiness_score: followsSauna ? 90 : 70,
-          score: followsSauna ? 92 : 78,
-          sourceProviderSlug: 'oura',
-          sourceType: 'ring',
-          total: 25_200,
-        }
-      }),
-    } : {},
+    summaries: {},
     timeseries: {
       note: [
         ...input.ouraDates.map((date, index) => ({

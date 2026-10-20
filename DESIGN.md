@@ -753,30 +753,6 @@ Wide horizon, small human — spacious, warm, quietly cinematic. Amber-gold sunr
 
 Before shipping any Murph image, verify: (1) warm not hyped, (2) breathing room for copy, (3) real place with real light, (4) quiet human presence, (5) still feels like Murph without the logo.
 
-### Personal Patterns Matrix
-
-Use one flat paper surface for repeated action-to-outcome comparisons. Put Quiver-style factor illustrations on rows and outcomes on columns. Use one marker size. The arrow shows direction, and the percentage shows the size of the difference. Color reflects the meaning of the outcome, not the arrow alone: sage for a favorable change, red for an unfavorable change, and a warm neutral when higher or lower is contextual.
-
-Keep the matrix focused on usable comparisons. Hide a factor row or outcome
-column when every cell still needs more data. Use distinct compact icons for
-`No clear pattern` and `Not enough data`, with details on hover or focus. Show
-factor coverage as a compact five-segment bar. Its tooltip uses `Data coverage` as the
-title and gives the exact recorded-case count below it. Label total sleep time
-as `Sleep duration`. Group sleep score and sleep efficiency under `Sleep quality`. Keep
-their calculations separate and identify the metric in each result popover.
-Keep outcome headings clear without separate help controls. Keep `No clear pattern`
-descriptions to one short sentence.
-
-Keep the copy observational and conversational. Prefer `You slept less after cycling` over a statistical sentence. Never use `caused` or `proved`. Show the activity result and other comparable days as two labeled bars in the cell detail. Keep matched-day counts out of the main result grid; expose them in supporting detail. On narrow screens, use one card per factor with its illustration, compact evidence-coverage bars, and available comparisons in a two-column grid. Use serif values for changed results. Show changed results without a neutral-results footer. Neutral-only cards use a compact factor header with a plain `No clear changes` status beneath the name and no expandable list. Omit measures without enough comparable data from mobile cards. Open mobile result details in a bottom drawer with comparison bars, evidence dates, a close control, and safe-area spacing. Keep mobile result headlines free of redundant metric eyebrows. Show the number of days beside each comparison label in mobile detail drawers. Coverage bars open their own mobile drawer leading with the recorded-day count and the factor name underneath. Reuse the detail content in desktop hover popovers. Desktop keeps the sortable comparison matrix.
-
-Comparison details keep their average bars and expose saved dates in one
-`Days compared` disclosure. Use a week-column calendar with filled factor marks,
-bordered sand confirmed-absence marks, and hollow unrecorded marks. Dates reveal
-their group on selection or keyboard focus. Use `Not recorded` in the legend
-for unrecorded comparisons, with no repeated disclaimer beneath it. Label partial
-arrays beside `Days compared` and omit the calendar when no valid saved dates exist.
-Do not repeat statistics, evidence grades, or idle tap instructions below it.
-
 ## 6. Do's and Don'ts
 
 ### Do:

@@ -9,10 +9,6 @@
     "summary": "Personal Patterns now shows distinct illustrations for activities and tags, while phone layouts keep three next-day outcomes visible without sideways scrolling.",
     "details": "Unrecognized activities and custom tags use neutral illustrations. Pattern calculations and evidence thresholds are unchanged.",
     "relevanceTags": ["patterns", "wearables", "mobile"],
-    "sourcePullRequests": [1692],
-    "tryIt": {
-      "href": "/patterns",
-      "label": "View your patterns"
-    }
+    "sourcePullRequests": [1692]
   }
 }

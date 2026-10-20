@@ -100,11 +100,6 @@ import {
 } from "./projection/wearable-summary-store.ts";
 import { resolveWearableSleepPatternReadFilters } from "./wearables/sleep-pattern.ts";
 import { createVaultReadModel } from "./read-model.ts";
-import {
-  buildPersonalPatternReportFromWearableBundleAndMetricPoints,
-  type PersonalPatternReport,
-} from "./personal-patterns.ts";
-import { readBrowserVaultPersonalPatternVocabulary } from "./browser-replica/source.ts";
 
 export type {
   QueryCanonicalEntityFilters,
@@ -405,36 +400,6 @@ export async function summarizeWearableSleepPatternRuntime(
       : vaultTimeZone
         ? "vault_metadata"
         : undefined,
-  });
-}
-
-export async function buildPersonalPatternReportRuntime(
-  vaultRoot: string,
-  options: { asOf?: Date | string; windowDays?: number } = {},
-): Promise<PersonalPatternReport> {
-  const location = await ensureFreshQueryProjection(vaultRoot);
-  const vault = timeCliPhaseSync("query-entity-read", () => {
-    const snapshot = readStoredVaultSource(location);
-    return createVaultReadModel({
-      entities: snapshot.entities,
-      metadata: snapshot.metadata,
-      vaultRoot,
-    });
-  });
-  const wearableBundle = timeCliPhaseSync("query-wearable-compose", () =>
-    readStoredPublicWearableSummaryBundle(location, {}));
-  const metricPoints = timeCliPhaseSync("query-metric-read", () => listStoredMetricPoints(
-    location,
-    normalizeMetricPointFilters({ limit: null }),
-  ));
-  return timeCliPhase("query-pattern-report", async () => {
-    const vocabulary = await readBrowserVaultPersonalPatternVocabulary(vaultRoot);
-    return buildPersonalPatternReportFromWearableBundleAndMetricPoints(
-      vault,
-      wearableBundle,
-      metricPoints,
-      { ...options, vocabulary },
-    );
   });
 }
 

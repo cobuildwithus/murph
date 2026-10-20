@@ -548,8 +548,8 @@ Prepared device-webhook revision rebinding and content-free transport/replan
 diagnostics are owned by `agent-docs/RELIABILITY.md`; local PostgreSQL burst and
 cryptographic-binding proof is indexed in `agent-docs/references/testing-ci-map.md`.
 
-Personal Patterns usage-pause alert suppression, expiry, and checkpoint wake diagnostics are specified in
-`agent-docs/RELIABILITY.md` and the hosted runtime protocol reference.
+Managed automation retirement is specified in `ARCHITECTURE.md`; the existing
+retirement owner disables the former Personal Patterns recipe.
 
 Runtime-owned terminal Linq send recovery and replacement receipt ownership
 are specified by `ARCHITECTURE.md`, `agent-docs/RELIABILITY.md`, and
@@ -727,7 +727,6 @@ Package verifier worker-exit result preservation is tracked in
 | `agent-docs/exec-plans/completed/2026-09-12-channel-welcome-reader-rollout.md` | Consumer-first release extraction for channel welcomes; production rollout remains with the deployment owners. | Historical implementation evidence | Low | 2026-09-12 |
 | `agent-docs/product-specs/imessage-workout-tracking.md` | iMessage workout product spec, verified editor attachment, and installed-client-compatible message/result transport. | iMessage workout product spec | High | 2026-09-08 |
 | `agent-docs/product-specs/journal.md` | Native timeline and companion API, shared projection, connected plans, and morning reminder reconciliation; retired website timeline. | Journal product spec | High | 2026-09-23 |
-| `agent-docs/product-specs/personal-patterns.md` | Private context-to-outcome findings, desktop comparisons, and mobile cards with changed results, compact neutral states, tappable recorded-day counts, and inline comparison sample sizes. | Personal Patterns product spec | High | 2026-09-10 |
 | `agent-docs/product-specs/repo.md` | Canonical repository posture and success criteria. | Current repo product spec | High | 2026-04-06 |
 | `agent-docs/product-specs/starter-usage.md` | Non-expiring $4.50 starter usage on the immutable credit ledger, text entry, subscription access for Images and Responses HTTP/WebSocket generation, and abuse alerts; retained paid legacy compatibility. | Hosted access/billing product spec | High | 2026-09-11 |
 | `agent-docs/product-specs/hosted-plan-downgrades.md` | Period-end plan switches, self-service scheduled-cancellation recovery, and web-owned assistant configuration and personalization resolvers. | Hosted billing/current-state spec | High | 2026-10-16 |
@@ -991,9 +990,8 @@ Warm-wake request reduction evidence: [`2026-09-20-edge-request-reduction.md`](e
 Authoritative empty-day recovery is recorded in
 [`2026-09-18-canonical-empty-day-recovery.md`](exec-plans/completed/2026-09-18-canonical-empty-day-recovery.md).
 
-Personal Patterns repeat-suppression proof is recorded in
-[`2026-09-20-insight-dedupe.md`](exec-plans/completed/2026-09-20-insight-dedupe.md);
-`ARCHITECTURE.md` owns the current cross-automation history contract.
+Historical Personal Patterns repeat-suppression proof is recorded in
+[`2026-09-20-insight-dedupe.md`](exec-plans/completed/2026-09-20-insight-dedupe.md).
 
 Interactive voice-orb design playground implementation and proof are tracked in
 [`2026-09-20-voice-orb.md`](exec-plans/completed/2026-09-20-voice-orb.md).

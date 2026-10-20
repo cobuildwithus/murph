@@ -183,7 +183,7 @@ export async function createHostedBrowserVaultReplicaForSourceState(input: {
   } = await import("@murphai/query/browser-replica-server");
   input.onRefreshStep?.("replica_construction_source_read");
   input.signal?.throwIfAborted();
-  const { metricPoints, personalPatternVocabulary, vault } =
+  const { metricPoints, vault } =
     await readBrowserVaultReplicaSource(input.vaultRoot, {
       onSourceStep: input.onSourceStep,
       signal: input.signal,
@@ -202,7 +202,6 @@ export async function createHostedBrowserVaultReplicaForSourceState(input: {
     experimentOutcomes: outcomeProjection.outcomes,
     generatedAt: input.generatedAt,
     metricPoints,
-    personalPatternVocabulary,
     signal: input.signal,
     sourceBundleHash: input.sourceStateHash,
     vault,
@@ -554,24 +553,19 @@ export async function hashHostedBrowserVaultReplicaSources(
 ): Promise<CanonicalQuerySourceHash> {
   const {
     hashCanonicalQuerySources,
-    readBrowserVaultPersonalPatternVocabulary,
     readBrowserVaultReplicaExperiments,
   } = await import("@murphai/query/browser-replica-server");
   signal?.throwIfAborted();
-  const [canonicalSourceResult, experimentsResult, vocabularyResult] =
+  const [canonicalSourceResult, experimentsResult] =
     await Promise.allSettled([
       hashCanonicalQuerySources(vaultRoot, { signal }),
       readBrowserVaultReplicaExperiments(vaultRoot, { signal }),
-      readBrowserVaultPersonalPatternVocabulary(vaultRoot),
     ]);
   if (canonicalSourceResult.status === "rejected") {
     throw canonicalSourceResult.reason;
   }
   if (experimentsResult.status === "rejected") {
     throw experimentsResult.reason;
-  }
-  if (vocabularyResult.status === "rejected") {
-    throw vocabularyResult.reason;
   }
   signal?.throwIfAborted();
   const outcomeProjection = await readHostedBrowserVaultExperimentOutcomes(
@@ -583,11 +577,6 @@ export async function hashHostedBrowserVaultReplicaSources(
   const digest = createHash("sha256");
   digest.update("murph.hosted-browser-vault-source.v1\0");
   digest.update(canonicalSourceResult.value.hash);
-  digest.update("\0");
-  const vocabularyJson = vocabularyResult.value
-    ? JSON.stringify(vocabularyResult.value)
-    : "";
-  digest.update(vocabularyJson);
   digest.update("\0");
 
   for (const source of outcomeProjection.sources) {
@@ -602,12 +591,10 @@ export async function hashHostedBrowserVaultReplicaSources(
   return {
     fileCount:
       canonicalSourceResult.value.fileCount +
-      outcomeProjection.sources.length +
-      (vocabularyJson ? 1 : 0),
+      outcomeProjection.sources.length,
     hash: digest.digest("hex"),
     totalBytes:
       canonicalSourceResult.value.totalBytes +
-      Buffer.byteLength(vocabularyJson) +
       outcomeProjection.sources.reduce((total, source) => total + source.byteLength, 0),
   };
 }
