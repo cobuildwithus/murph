@@ -296,7 +296,10 @@ describe('automation model input schema', () => {
     expect(collectKeys(schema, '$ref')).toEqual([])
     const patch = actionContract(schema, 'patch')
     expect(asObject(patch.properties).expectedUpdatedAt).toMatchObject({
-      type: 'string',
+      anyOf: [
+        expect.objectContaining({ type: 'string' }),
+        expect.objectContaining({ type: 'string' }),
+      ],
       description: expect.stringContaining('most recent readback'),
     })
     expect(MURPH_AUTOMATION_TOOL.description).toMatch(/^To edit an existing automation: inspect it, then patch/u)

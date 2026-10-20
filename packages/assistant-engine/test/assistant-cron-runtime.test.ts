@@ -9345,6 +9345,169 @@ describe('assistant cron runtime orchestration', () => {
     })
   })
 
+  it('keeps minute-precision offset timestamps from persisted records readable and due without rewriting them', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T10:05:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-minute-precision-timestamps-',
+    )
+    const unrelatedJob = await createCanonicalJob(vaultRoot, 'unrelated due check-in')
+    const legacyRoute: AutomationRoute = {
+      channel: 'telegram',
+      deliverySource: null,
+      deliveryTarget: 'room-1',
+      identityId: null,
+      participantId: null,
+      threadId: 'room-1',
+      threadIsDirect: true,
+    }
+    getVaultAutomationStore(vaultRoot).push(
+      {
+        activeUntil: '2026-04-08T09:45-04:00',
+        automationId: 'automation-legacy-minute-one-shot',
+        continuityPolicy: 'fresh',
+        createdAt: '2026-04-07T08:00:00.000Z',
+        instructions: 'Send the legacy one-shot reminder.',
+        relativePath: 'bank/automations/legacy-minute-one-shot.md',
+        route: legacyRoute,
+        schedule: {
+          at: '2026-04-08T08:30-04:00',
+          kind: 'at',
+        },
+        slug: 'legacy-minute-one-shot',
+        status: 'active',
+        tags: ['assistant', 'scheduled'],
+        title: 'Legacy minute one-shot',
+        updatedAt: '2026-04-07T08:00:00.000Z',
+      },
+      {
+        activeUntil: '2026-03-02T09:00+00:00',
+        automationId: 'automation-legacy-minute-archived',
+        continuityPolicy: 'fresh',
+        createdAt: '2026-03-01T08:00:00.000Z',
+        instructions: 'Historical reminder that already ran.',
+        relativePath: 'bank/automations/legacy-minute-archived.md',
+        route: legacyRoute,
+        schedule: {
+          at: '2026-03-01T09:00+00:00',
+          kind: 'at',
+        },
+        slug: 'legacy-minute-archived',
+        status: 'archived',
+        tags: ['assistant', 'scheduled'],
+        title: 'Legacy minute archived',
+        updatedAt: '2026-03-01T09:05:00.000Z',
+      },
+    )
+    getVaultScheduledLogStore(vaultRoot).push({
+      action: {
+        kind: 'measurement.add',
+        measurements: [
+          {
+            metric: 'body-weight',
+            unit: 'lb',
+            value: 180.8,
+          },
+        ],
+      },
+      body: 'Write the morning measurement event.',
+      createdAt: '2026-04-07T08:00:00.000Z',
+      docType: 'scheduled_log',
+      markdown: 'scheduled log markdown',
+      relativePath: 'bank/scheduled-logs/legacy-minute-measurement.md',
+      schedule: {
+        at: '2026-04-08T06:00-04:00',
+        kind: 'at',
+      },
+      schemaVersion: 'murph.frontmatter.scheduled-log.v1',
+      scheduledLogId: 'slog_01JX8VCQY2M5ZBV64ZP4N1DRBD',
+      slug: 'legacy-minute-measurement',
+      status: 'active',
+      summary: 'Record the morning measurement.',
+      tags: ['measurement'],
+      title: 'Legacy minute measurement',
+      updatedAt: '2026-04-07T08:00:00.000Z',
+    })
+
+    const sources = await listCanonicalAssistantCronRecords(vaultRoot)
+    expect(sources).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        activeUntil: '2026-04-08T09:45-04:00',
+        automationId: 'automation-legacy-minute-one-shot',
+        schedule: { at: '2026-04-08T08:30-04:00', kind: 'at' },
+      }),
+      expect.objectContaining({
+        kind: 'scheduledLog',
+        schedule: { at: '2026-04-08T06:00-04:00', kind: 'at' },
+        scheduledLogId: 'slog_01JX8VCQY2M5ZBV64ZP4N1DRBD',
+      }),
+    ]))
+    expect(sources.some((source) =>
+      source.kind === 'automation' &&
+      source.automationId === 'automation-legacy-minute-archived'
+    )).toBe(false)
+    const legacyJob = await getAssistantCronJob(
+      vaultRoot,
+      'automation-legacy-minute-one-shot',
+    )
+    expect(legacyJob.schedule).toEqual({
+      at: '2026-04-08T08:30-04:00',
+      kind: 'at',
+    })
+    expect(legacyJob.state.nextRunAt).toBe('2026-04-08T08:30-04:00')
+
+    const summary = await processDueAssistantCronJobsLocal({
+      limit: 10,
+      vault: vaultRoot,
+    })
+
+    expect(summary).toEqual({
+      failed: 0,
+      processed: 2,
+      succeeded: 2,
+    })
+    expect(cronMocks.executeScheduledLogOccurrence).toHaveBeenCalledTimes(1)
+    expect(cronMocks.executeScheduledLogOccurrence).toHaveBeenCalledWith(expect.objectContaining({
+      occurrenceAt: '2026-04-08T06:00-04:00',
+      scheduledLogId: 'slog_01JX8VCQY2M5ZBV64ZP4N1DRBD',
+      vaultRoot,
+    }))
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledTimes(1)
+    await expect(
+      listAssistantCronRuns({ job: unrelatedJob.jobId, vault: vaultRoot }),
+    ).resolves.toMatchObject({
+      runs: [expect.objectContaining({ status: 'succeeded' })],
+    })
+    await expect(
+      listAssistantCronRuns({
+        job: 'automation-legacy-minute-one-shot',
+        vault: vaultRoot,
+      }),
+    ).resolves.toEqual({
+      jobId: 'automation-legacy-minute-one-shot',
+      runs: [],
+    })
+    expect(
+      findCanonicalAutomation(vaultRoot, 'automation-legacy-minute-one-shot'),
+    ).toMatchObject({
+      activeUntil: '2026-04-08T09:45-04:00',
+      schedule: { at: '2026-04-08T08:30-04:00', kind: 'at' },
+      status: 'active',
+    })
+    expect(
+      findCanonicalAutomation(vaultRoot, 'automation-legacy-minute-archived'),
+    ).toMatchObject({
+      activeUntil: '2026-03-02T09:00+00:00',
+      schedule: { at: '2026-03-01T09:00+00:00', kind: 'at' },
+      status: 'archived',
+      updatedAt: '2026-03-01T09:05:00.000Z',
+    })
+    expect(
+      (await getAssistantCronJob(vaultRoot, 'automation-legacy-minute-one-shot'))
+        .state.nextRunAt,
+    ).toBe('2026-04-08T08:30-04:00')
+  })
+
   it('yields canonical scheduled-log cron before writing when foreground work appears after claim', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-04-08T13:00:00.000Z'))

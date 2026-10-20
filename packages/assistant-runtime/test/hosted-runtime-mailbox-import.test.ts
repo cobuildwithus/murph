@@ -13,6 +13,7 @@ import type {
 import {
   HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
   HOSTED_MAILBOX_PAYLOAD_SCHEMA,
+  HOSTED_RETIRED_MAILBOX_KINDS,
 } from "@murphai/hosted-execution/runtime-control";
 
 import {
@@ -162,18 +163,18 @@ describe("hosted mailbox import loop", () => {
     ]);
   });
 
-  test("skips a retired newsletter row and continues with later system work", async () => {
+  test.each(HOSTED_RETIRED_MAILBOX_KINDS)("skips a retired %s row and continues with later system work", async (kind) => {
     const items = [
       createMailboxItem({
-        id: "mailbox_item_retired_newsletter",
-        kind: "group-newsletter.email-needed",
+        id: "mailbox_item_retired",
+        kind,
         lane: "system",
         laneSeq: "1",
         payloadInlineCiphertext: null,
-        payloadRef: "hosted-mailbox-payload:mailbox_item_retired_newsletter",
+        payloadRef: "hosted-mailbox-payload:mailbox_item_retired",
       }),
       createMailboxItem({
-        id: "mailbox_item_system_after_retired_newsletter",
+        id: "mailbox_item_system_after_retired",
         kind: "member.activated",
         lane: "system",
         laneSeq: "2",
@@ -192,21 +193,21 @@ describe("hosted mailbox import loop", () => {
       limitPerLane: 10,
       mailboxPort,
       now: () => TEST_NOW,
-      requestId: "request_skip_retired_newsletter",
+      requestId: "request_skip_retired",
       state: createEmptyHostedMailboxImportState(),
     });
 
     assert.deepEqual(payloadFetchRequests, []);
-    assert.deepEqual(imported, ["mailbox_item_system_after_retired_newsletter"]);
+    assert.deepEqual(imported, ["mailbox_item_system_after_retired"]);
     assert.deepEqual(result.blocked, []);
     assert.equal(result.importedCount, 1);
     assert.equal(result.state.watermarks.system, "2");
     assert.deepEqual(result.state.recentStatuses, [
       {
-        itemKind: "group-newsletter.email-needed",
+        itemKind: kind,
         lane: "system",
         occurredAt: TEST_NOW,
-        reasonCode: "legacy_group_newsletter_email_needed.retired",
+        reasonCode: "mailbox.kind_retired",
         seq: "1",
         status: "skipped",
       },

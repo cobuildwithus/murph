@@ -3,7 +3,6 @@ import { headers } from "next/headers";
 
 import { AsksGridSection } from "@/src/components/homepage/asks-section";
 import { AssistantSection } from "@/src/components/homepage/assistant-section";
-import { EnvironmentSection } from "@/src/components/homepage/environment-section";
 import { ErrandsSection } from "@/src/components/homepage/errands-section";
 import { FaqSection } from "@/src/components/homepage/faq-section";
 import {
@@ -161,7 +160,6 @@ export default async function HomePage() {
         <TrustSection />
         <MealPhotosSection authenticated={authenticated} />
         <NutritionSection />
-        <EnvironmentSection />
         <PersonasSection murphHeadshotSrc={murphHeadshotSrc} />
         <ErrandsSection />
         <IntegrationsSection authenticated={authenticated} />

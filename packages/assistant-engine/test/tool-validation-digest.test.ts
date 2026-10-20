@@ -11,6 +11,27 @@ import {
 } from '../src/assistant/tool-validation-digest.ts'
 
 describe('buildSafeToolCallValidationDigest', () => {
+  it.each([
+    { value: undefined, missing: true },
+    { value: null, missing: false },
+    { value: 'synthetic-invalid-timestamp', missing: false },
+  ])('classifies a rejected datetime union without confusing absent and invalid values: $missing / $value', ({ value, missing }) => {
+    const schema = z.object({ expectedUpdatedAt: z.isoDateTime({ offset: true }) })
+    const rawInput = { expectedUpdatedAt: value }
+    const parsed = schema.safeParse(rawInput)
+    if (parsed.success) throw new Error('expected timestamp validation to fail')
+    const digest = buildSafeToolCallValidationDigest({
+      error: parsed.error,
+      rawInput,
+      schemaRootKeys: ['expectedUpdatedAt'],
+      toolName: 'murph.synthetic',
+    })
+    expect(digest.missingPaths ?? []).toEqual(missing ? ['expectedUpdatedAt'] : [])
+    expect(digest.invalidPaths ?? []).toEqual(missing ? [] : ['expectedUpdatedAt'])
+    expect(digest.issueCodes).toEqual([missing ? 'missing_required' : 'invalid_union'])
+    expect(JSON.stringify(digest)).not.toContain('synthetic-invalid-timestamp')
+  })
+
   it('returns the complete Zod reason to the model while keeping the digest value-free', () => {
     const schema = z.object({
       alpha: z.string(),

@@ -4029,15 +4029,6 @@ function isBrowserVaultReplicaRefreshSystemMailboxPreparation(
     && systemMailboxPreparation.item.wake.kind === "runtime.browser-vault-refresh-requested";
 }
 
-function isEnvironmentInterviewSystemMailboxPreparation(
-  systemMailboxPreparation: HostedSystemMailboxPreparation,
-): boolean {
-  return "item" in systemMailboxPreparation
-    && systemMailboxPreparation.status === "processed"
-    && systemMailboxPreparation.item.routeAction === "run-environment-interview"
-    && systemMailboxPreparation.item.wake.kind === "environment-interview.completed";
-}
-
 function resolveHostedAssistantCronWakeState(
   phaseInput: HostedWorkspaceRuntimeAssistantPhaseInput,
   cronStatus: HostedAssistantCronStatus,
@@ -5661,8 +5652,7 @@ async function runSystemMailboxMaintenancePhase(
   const shouldRecordSystemMailbox = systemMailboxPreparation.status === "processed"
     || systemMailboxPreparation.status === "recording";
   const browserVaultReplicaRefreshRequested =
-    isBrowserVaultReplicaRefreshSystemMailboxPreparation(systemMailboxPreparation)
-    || isEnvironmentInterviewSystemMailboxPreparation(systemMailboxPreparation);
+    isBrowserVaultReplicaRefreshSystemMailboxPreparation(systemMailboxPreparation);
   const foregroundPrioritySystemCompletionProcessed =
     isForegroundPrioritySystemCompletionProcessed(systemMailboxPreparation);
   const shouldRunPostSystemCheckpoint = shouldRecordSystemMailbox

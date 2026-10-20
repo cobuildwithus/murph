@@ -11,9 +11,17 @@ Final reply post-generation delivery telemetry and alerting are owned by
 implementation is recorded in
 [the completed delivery latency plan](exec-plans/completed/2026-10-19-post-generation-delivery-latency.md).
 
+Environment removal validation follow-up: [missing-version feedback](exec-plans/completed/2026-10-19-environment-validation-feedback.md).
+
+Environment removal compatibility review: [timestamp preservation](exec-plans/completed/2026-10-19-environment-timestamp-compatibility.md).
+
+Environment removal dependency follow-up: [runner schema runtime proof](exec-plans/completed/2026-10-19-environment-boot-dependency.md).
+
 ReviewGPT artifact identity adoption: [completed plan](exec-plans/completed/2026-10-18-frog-reviewgpt-artifact-4186.md).
 
 Canary reply observation diagnostics: [completed plan](exec-plans/completed/2026-10-18-canary-reply-observation-diagnostics.md).
+
+Fixed-canary server timing diagnostics: [active plan](exec-plans/completed/2026-10-20-canary-turn-diagnostics.md).
 
 Hosted live-journey configuration is owned by `../packages/assistant-engine/README.md`;
 shared behavior and permission proof are tracked in
@@ -73,6 +81,10 @@ Garmin history import coalescing and synthetic fetch-work evidence are recorded
 in [the import-speed plan](exec-plans/completed/2026-09-24-garmin-import-speed.md).
 
 # Murph Agent Docs Index
+
+Exact provider-event correlation for reaction typing alerts is owned by
+`RELIABILITY.md`; implementation and synthetic PostgreSQL proof are recorded in
+[`reaction typing coverage`](exec-plans/completed/2026-10-19-reaction-typing-coverage.md).
 
 Failure-only startup context telemetry is tracked in
 [the startup failure context plan](exec-plans/active/2026-10-18-startup-failure-context.md);
@@ -760,7 +772,7 @@ Package verifier worker-exit result preservation is tracked in
 | `agent-docs/product-specs/query-metric-universality.md` | Universal metric queryability invariant: every metric-bearing canonical event yields a query metric point through the generic extraction rule. | Query metric product spec | High | 2026-07-22 |
 | `agent-docs/product-specs/companion-app-mvp.md` | Companion app build and authentication recovery telemetry contract. | Companion app build plan | High | 2026-09-05 |
 | `agent-docs/product-specs/ios-address-book-advisory-names.md` | Companion/group privacy contract. | Companion/group privacy contract | High | 2026-08-28 |
-| `agent-docs/product-specs/habitat.md` | Habitat product spec. | Habitat product spec | High | 2026-08-11 |
+| `agent-docs/product-specs/habitat.md` | Canonical Habitat context, browser projection removal and saved-state Environment retirement. | Habitat product spec | High | 2026-10-19 |
 | `agent-docs/product-specs/murph-contact-card-picker.md` | Post-signup add-Murph-to-contacts step with member-chosen contact-card avatar, independent from `/home` first-visit personalization. | Contact-card picker spec | Medium | 2026-07-22 |
 | `agent-docs/product-specs/murph-personas.md` | Classic assistant defaults, retained style preferences and retired-persona compatibility. | Assistant style behavior | High | 2026-10-19 |
 | `agent-docs/product-specs/murph-tone-and-voice.md` | Murph speaking-style preferences, Eleven v4 expressive cues, and conversational voice language memory. | Murph speaking-style preference spec | Medium | 2026-09-29 |
@@ -791,7 +803,7 @@ Package verifier worker-exit result preservation is tracked in
 | `agent-docs/feature-user-story-audit/testing-errors.md` | Test errors captured during the feature user-story audit. | Point-in-time feature audit | Low | 2026-06-21 |
 | `agent-docs/references/README.md` | Reference-pack overview and maintenance rules. | Reference pack conventions | Medium | 2026-03-12 |
 | `agent-docs/references/repo-scope.md` | Concrete repo scope and routing boundaries. | Repo ownership boundary | High | 2026-04-06 |
-| `agent-docs/references/testing-ci-map.md` | Verification map for packages, apps, locked usage-period acquisition, full canonical Codex tool-contract/CLI-upgrade guards and payload captures, hosted media follow-up proof, smoke flows, cancellation-config parity, exact-head PR CI, protected-main runtime proof, deferred-tool advertisement fixtures, canonical executors, shared runtime fixture preparation, compiler cache policy, and current coverage owners, including composed vault-share deadline, device dirty-payload classification/reconnect PostgreSQL proof, encrypted v2 hosted-local snapshot fixtures and canonical assertion readers with marked Docker bridge admission and canonical base64url IV validation, and independent Environment checkpoint ownership that preserves the earlier default-owned prefix, actual Habitat replica content, and metadata-only checkpoint timing with exact future-continuation owner release, accepted-runtime admission observation for reminder/device fairness, real Junction replay through a retained consumer wake and strict hosted completion with progress/auth checks, restored Environment completion after foreground replacement with real retry and second-message preemption proof, structural provider-stub failure diagnostics, shared Linq fixture CDN origins that preserve canonical metadata authentication, standby deadline fixtures, contention-aware PostgreSQL milestone proof, and monotonic foreground mailbox frontiers with same-user successor continuation evidence. Includes explicit native-binary selection, bounded live selector diagnostics, read-only exact-name discovery, selectable latency-query correctness and stress proof, migrated-database setup for the composed usage-denial proof, and bounded signed Linq webhook redelivery proof, plus deployed-binary Codex WebSocket acknowledgement and stall proof, and real-binary SSE/WebSocket instant-steering proof. | Testing and CI truth | High | 2026-10-18 |
+| `agent-docs/references/testing-ci-map.md` | Verification map for packages, apps, locked usage-period acquisition, full canonical Codex tool-contract/CLI-upgrade guards and payload captures, hosted media follow-up proof, smoke flows, cancellation-config parity, exact-head PR CI, protected-main runtime proof, deferred-tool advertisement fixtures, canonical executors, shared runtime fixture preparation, compiler cache policy, and current coverage owners, including composed vault-share deadline, device dirty-payload classification/reconnect PostgreSQL proof, encrypted v2 hosted-local snapshot fixtures and canonical assertion readers with marked Docker bridge admission and canonical base64url IV validation, and independent system-work checkpoint ownership, active replica content, and metadata-only checkpoint timing with exact future-continuation owner release, accepted-runtime admission observation for reminder/device fairness, real Junction replay through a retained consumer wake and strict hosted completion with progress/auth checks, restored system-work completion after foreground replacement with real retry and second-message preemption proof, structural provider-stub failure diagnostics, shared Linq fixture CDN origins that preserve canonical metadata authentication, standby deadline fixtures, contention-aware PostgreSQL milestone proof, and monotonic foreground mailbox frontiers with same-user successor continuation evidence. Includes explicit native-binary selection, bounded live selector diagnostics, read-only exact-name discovery, selectable latency-query correctness and stress proof, migrated-database setup for the composed usage-denial proof, and bounded signed Linq webhook redelivery proof, plus deployed-binary Codex WebSocket acknowledgement and stall proof, and real-binary SSE/WebSocket instant-steering proof. | Testing and CI truth | High | 2026-10-18 |
 | `packages/core/bench/README.md` | Secret-free Docker import and hydration reproduction, required one-vCPU latency CI budgets, and sizing evidence limits. | Container CPU benchmark | Medium | 2026-09-04 |
 | `packages/core/bench/container-sizing.md` | Synthetic Docker CPU/RAM sizing matrix, foreground profiling, and limits of production downsizing evidence. | Container sizing investigation | Medium | 2026-09-09 |
 | `packages/query/bench/README.md` | Reproduce synthetic query resource measurements through public canonical and query APIs in constrained Docker containers. | Query resource benchmarks | Medium | 2026-09-09 |
