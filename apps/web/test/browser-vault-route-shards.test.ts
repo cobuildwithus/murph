@@ -11,7 +11,6 @@ test.each([
   ["/training", ["core"]],
   ["/home", ["core"]],
   ["/overview", ["core"]],
-  ["/journal", ["core"]],
   ["/history", ["core"]],
   ["/environment", ["core"]],
   ["/environment/print", ["core"]],

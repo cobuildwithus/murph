@@ -183,29 +183,14 @@ test("Sidebar exposes primary destinations without Voice or the internal Overvie
   const markup = renderToStaticMarkup(createElement(Sidebar));
 
   assert.match(markup, /href="\/home"[^>]*>\s*<svg/);
-  assert.match(markup, /href="\/journal"/);
-  assert.match(markup, />Journal<\/a>/);
+  assert.doesNotMatch(markup, /href="\/journal"/);
+  assert.doesNotMatch(markup, />Journal<\/a>/);
   assert.doesNotMatch(markup, /href="\/voice"/);
   assert.doesNotMatch(markup, />Voice<\/a>/);
   assert.doesNotMatch(markup, /href="\/patterns"/);
   assert.doesNotMatch(markup, />Patterns<\/a>/);
   assert.doesNotMatch(markup, /href="\/overview"/);
   assert.doesNotMatch(markup, />Overview<\/a>/);
-});
-
-test.each([
-  ["/journal", "Journal"],
-])("Sidebar marks %s as the active primary destination", (pathname, label) => {
-  mocks.usePathname.mockReturnValue(pathname);
-
-  const markup = renderToStaticMarkup(createElement(Sidebar));
-
-  assert.match(
-    markup,
-    new RegExp(
-      `data-active="true">\\s*<a[^>]*href="${pathname}"[^>]*>[\\s\\S]*${label}<\\/a>`,
-    ),
-  );
 });
 
 test("Sidebar renders Environment as an active primary destination", () => {
