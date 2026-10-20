@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import { JOURNAL_ICON_IDS, JOURNAL_TIMINGS } from '@murphai/contracts/journal-presentation'
 import { Cli, z } from 'incur'
+import { isoDateTime } from '@murphai/contracts/zod-runtime'
 import {
   ADVERSE_EFFECT_SEVERITIES,
   EVENT_KINDS,
@@ -267,9 +268,9 @@ function normalizeEventTags(value: readonly string[] | undefined): string[] {
 }
 
 const journalPlanOptions = {
-  planEndsAt: z.string().datetime({ offset: true }).optional().describe('Journal plan end instant, with explicit offset. All-day plans use the exclusive local date boundary.'),
+  planEndsAt: isoDateTime({ offset: true }).optional().describe('Journal plan end instant, with explicit offset. All-day plans use the exclusive local date boundary.'),
   planStatus: z.enum(['planned', 'tentative', 'canceled']).optional(),
-  planVerifiedAt: z.string().datetime({ offset: true }).optional().describe('Actual successful source verification instant; never advance after a failed read.'),
+  planVerifiedAt: isoDateTime({ offset: true }).optional().describe('Actual successful source verification instant; never advance after a failed read.'),
   planCategory: slugSchema.optional(),
   planAccountId: z.string().min(1).max(200).optional().describe('Connected account owning an automatically captured plan; omit for a directly supplied member plan.'),
 }

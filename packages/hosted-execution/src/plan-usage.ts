@@ -32,7 +32,7 @@ export const HOSTED_PLAN_USAGE_UNAVAILABLE_REASONS = [
 export const HOSTED_ADD_USAGE_SETTINGS_URL =
   "/settings?addUsage=true#subscription" as const;
 
-const hostedPlanUsageGeneratedAtSchema = z.string().datetime({ offset: true });
+const hostedPlanUsageGeneratedAtSchema = z.isoDateTime({ offset: true });
 
 const hostedPlanUsageActionLabelSchema = z.string().trim().min(1).max(80);
 
@@ -66,7 +66,7 @@ const hostedPlanUsageRecommendedActionSchema = z.discriminatedUnion("kind", [
 const hostedPlanUsageSubscriptionActionQuoteSchema = z
   .object({
     action: z.literal("change_plan"),
-    expiresAt: z.string().datetime({ offset: true }),
+    expiresAt: z.isoDateTime({ offset: true }),
     label: z.string().trim().min(1).max(80),
     monthlyPriceUsdCents: z.number().int().positive(),
     quoteId: z.string().trim().min(1).max(1_024),
@@ -94,14 +94,14 @@ const hostedPlanUsageScheduledPlanSchema = z
       ...HOSTED_PLAN_USAGE_DIRECT_BILLING_PLAN_CODES,
     ]),
     displayName: z.enum(["Group", "Pulse", "Edge", "Max"]),
-    effectiveAt: z.string().datetime({ offset: true }).nullable(),
+    effectiveAt: z.isoDateTime({ offset: true }).nullable(),
   })
   .strict();
 
 const hostedPlanUsageForecastSchema = z
   .object({
     estimatedDaysRemaining: z.number().int().positive(),
-    estimatedExhaustionAt: z.string().datetime({ offset: true }),
+    estimatedExhaustionAt: z.isoDateTime({ offset: true }),
   })
   .strict();
 
@@ -111,9 +111,9 @@ const hostedPlanUsageAvailableSchema = z
     availablePlans: z.array(hostedPlanUsageAvailablePlanSchema).optional(),
     forecast: hostedPlanUsageForecastSchema.nullable(),
     generatedAt: hostedPlanUsageGeneratedAtSchema,
-    periodEnd: z.string().datetime({ offset: true }),
+    periodEnd: z.isoDateTime({ offset: true }),
     periodKind: z.enum(["lifetime", "monthly"]),
-    periodStart: z.string().datetime({ offset: true }),
+    periodStart: z.isoDateTime({ offset: true }),
     planCode: z.enum([
       ...HOSTED_PLAN_USAGE_DIRECT_BILLING_PLAN_CODES,
     ]),

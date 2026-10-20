@@ -82,7 +82,6 @@ export type HostedRuntimeProcessingMode = HostedWorkspaceInvocationProcessingMod
 export const HOSTED_SYSTEM_MAILBOX_MODEL_FREE_KINDS = [
   "assistant.notification.requested",
   "device-sync.wake",
-  "environment-interview.completed",
   "health.daily-metric.reported",
   "journal.group-fact.recorded",
   "member.channels.updated",

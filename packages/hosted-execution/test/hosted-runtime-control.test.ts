@@ -74,8 +74,6 @@ import {
   parseHostedMailboxPayloadFetchResponse,
   parseHostedBrowserVaultReplicaPublishRequest,
   parseHostedBrowserVaultReplicaPublishResponse,
-  parseHostedCodexAuthUpdate,
-  parseHostedCodexAuthUpdateResponse,
   parseHostedRuntimeDeviceSyncBridgeEnvelope,
   parseHostedRuntimeAssistantConfigurationControlRequest,
   parseHostedRuntimeAssistantConfigurationToolRequest,
@@ -246,8 +244,6 @@ describe("hosted runtime control contracts", () => {
       "clinical-records.sync-requested",
       "clinical-records.enrichment-requested",
       "device-sync.wake",
-      "environment-interview.completed",
-      "environment-voice.captured",
       "journal.group-fact.recorded",
       "health.daily-metric.reported",
       "meal-photo.captured",
@@ -255,6 +251,8 @@ describe("hosted runtime control contracts", () => {
       "member.action.completed",
       "vault-share.delivery",
       "vault-share.revoke",
+      "environment-interview.completed",
+      "environment-voice.captured",
       "group-newsletter.email-needed",
       "runtime.manual-requested",
       "runtime.pending-effects-reconcile-requested",
@@ -265,6 +263,8 @@ describe("hosted runtime control contracts", () => {
       "runtime.mailbox-lag-observed",
     ]);
     expect(HOSTED_RETIRED_MAILBOX_KINDS).toEqual([
+      "environment-interview.completed",
+      "environment-voice.captured",
       "group-newsletter.email-needed",
     ]);
     expect(isHostedRetiredMailboxKind("group-newsletter.email-needed")).toBe(true);
@@ -952,6 +952,13 @@ describe("hosted runtime control contracts", () => {
     })).toThrow("Hosted workspace invocation result.idleShutdownCheckpointSkipped is no longer supported.");
   });
 
+  it.each(HOSTED_RETIRED_MAILBOX_KINDS)("reads retained %s metadata as retired", (kind) => {
+    const item = createMailboxItem({ kind, lane: "system" });
+    expect(isHostedMailboxKind(kind)).toBe(true);
+    expect(isHostedRetiredMailboxKind(kind)).toBe(true);
+    expect(parseHostedMailboxItem(item)).toEqual(item);
+  });
+
   it("parses mailbox fetch contracts without run ownership fields", () => {
     const item = createMailboxItem({
       consumedAt: "2026-04-26T00:00:03.000Z",
@@ -1377,54 +1384,6 @@ describe("hosted runtime control contracts", () => {
       recorded: true,
       usageId: usage.usageId,
     })).toThrow(/platformAiUsageAllowedAfter/u);
-  });
-
-  it("parses hosted Codex auth updates with exact bounded callback shapes", () => {
-    expect(parseHostedCodexAuthUpdate({
-      attemptId: "hca_abcdefghijklmnop",
-      phase: "device_code",
-      userCode: "ABCD-EFGH",
-      verificationUrl: "https://auth.openai.com/device",
-    })).toEqual({
-      attemptId: "hca_abcdefghijklmnop",
-      phase: "device_code",
-      userCode: "ABCD-EFGH",
-      verificationUrl: "https://auth.openai.com/device",
-    });
-    expect(parseHostedCodexAuthUpdate({
-      attemptId: "hca_abcdefghijklmnop",
-      phase: "connected",
-    })).toEqual({
-      attemptId: "hca_abcdefghijklmnop",
-      phase: "connected",
-    });
-    expect(parseHostedCodexAuthUpdateResponse({ applied: false })).toEqual({
-      applied: false,
-      status: "superseded",
-    });
-    expect(parseHostedCodexAuthUpdateResponse({
-      applied: true,
-      status: "already_applied",
-    })).toEqual({
-      applied: true,
-      status: "already_applied",
-    });
-    expect(() => parseHostedCodexAuthUpdateResponse({
-      applied: true,
-      status: "superseded",
-    })).toThrow(/conflicts/u);
-
-    expect(() => parseHostedCodexAuthUpdate({
-      attemptId: "hca_abcdefghijklmnop",
-      phase: "device_code",
-      userCode: "ABCD-EFGH",
-      verificationUrl: "https://example.test/device",
-    })).toThrow(/OpenAI auth host/u);
-    expect(() => parseHostedCodexAuthUpdate({
-      attemptId: "hca_abcdefghijklmnop",
-      phase: "connected",
-      verificationUrl: "https://auth.openai.com/device",
-    })).toThrow(/not allowed/u);
   });
 
   it("parses hosted runtime latency trace callbacks with exact safe keys", () => {

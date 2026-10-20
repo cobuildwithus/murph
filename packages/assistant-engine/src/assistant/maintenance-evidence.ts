@@ -29,12 +29,11 @@ export const ASSISTANT_GROUP_ROOM_MODEL_EVIDENCE_HEADING =
 
 export type AssistantMaintenanceProfile =
   | 'member-memory'
-  | 'habitat-voice'
   | 'group-room-model'
 
 export interface AssistantMaintenanceConversationEvidence {
   prompt: string
-  status: 'available' | 'empty' | 'unavailable' | 'not-applicable'
+  status: 'available' | 'empty' | 'unavailable'
 }
 
 interface AssistantMaintenanceEvidenceLimits {
@@ -112,16 +111,6 @@ export async function readAssistantMaintenanceConversationEvidence(input: {
   vault: string
 }): Promise<AssistantMaintenanceConversationEvidence> {
   const profile = input.profile ?? 'member-memory'
-  if (profile === 'habitat-voice') {
-    return {
-      status: 'not-applicable',
-      prompt: [
-        '## Environment voice evidence boundary',
-        '',
-        'Use only the transcript embedded in the maintenance instructions. Do not read conversation history.',
-      ].join('\n'),
-    }
-  }
   const limits = resolveAssistantMaintenanceEvidenceLimits(profile)
   const since = input.now.getTime() - ASSISTANT_MAINTENANCE_EVIDENCE_WINDOW_MS
   let candidates: AssistantMaintenanceEvidenceMessage[]

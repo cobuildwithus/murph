@@ -18,14 +18,8 @@ import {
 import { gameMediaRoutes } from "./route-handlers/game-media.ts";
 import { mealPhotoRoutes } from "./route-handlers/meal-photo-stage.ts";
 import {
-  environmentVoiceRoutes,
-} from "./route-handlers/environment-voice-stage.ts";
-import {
   deviceWebhookEnqueueRoutes,
 } from "./route-handlers/device-webhook-enqueue.ts";
-import {
-  environmentRealtimeRoutes,
-} from "./route-handlers/environment-realtime.ts";
 
 export const workerInternalRoutes = [
   ...deviceWebhookEnqueueRoutes,
@@ -34,8 +28,6 @@ export const workerInternalRoutes = [
   ...userDataDeleteRoutes,
   ...runtimeResourcePurgeRoutes,
   ...telegramUsageLimitNoticeRoutes,
-  ...environmentRealtimeRoutes,
-  ...environmentVoiceRoutes,
   ...mealPhotoRoutes,
   ...gameMediaRoutes,
   ...browserVaultRoutes,

@@ -1,0 +1,21 @@
+{
+  "publishedOn": "2026-10-19",
+  "order": 100,
+  "item": {
+    "id": "follow-up-corrections-redirect-replies",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Corrections redirect replies in progress",
+    "summary": "When you send a follow-up while Murph is still writing a reply, Murph can switch to your correction right away instead of finishing the outdated answer first.",
+    "details": "This applies to quick follow-ups in the same conversation before Murph's reply is complete. Anything Murph has already started, like saving a reminder, finishes once and is not repeated. Occasionally the earlier answer may still arrive just before the corrected one.",
+    "relevanceTags": [
+      "assistant",
+      "messaging",
+      "conversations",
+      "performance"
+    ],
+    "sourcePullRequests": [
+      4194
+    ]
+  }
+}

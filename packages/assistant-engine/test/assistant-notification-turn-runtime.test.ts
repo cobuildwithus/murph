@@ -244,7 +244,6 @@ test.each([
   { profile: 'group-room-model', status: 'empty', page: 'present', skip: false },
   { profile: 'group-room-model', status: 'empty', page: 'unavailable', skip: false },
   { profile: 'group-room-model', status: 'available', page: 'missing', skip: false },
-  { profile: 'habitat-voice', status: 'not-applicable', page: 'missing', skip: false },
 ] as const)('empty maintenance admission: $profile/$status/$page', async ({ profile, status, page, skip }) => {
   vi.doMock('../src/assistant/maintenance-evidence.js', () => ({
     readAssistantMaintenanceConversationEvidence: vi.fn(async () => ({

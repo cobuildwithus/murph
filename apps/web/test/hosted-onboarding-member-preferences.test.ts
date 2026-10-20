@@ -72,13 +72,13 @@ describe("hosted member assistant preferences", () => {
       memberId: "member_123",
       occurredAt: "2026-07-08T12:00:00.000Z",
       preferences: {
-        persona: "navy-seal",
+        persona: "classic",
         tone: "casual",
         voice: "warm",
       },
       prisma,
     })).resolves.toMatchObject({
-      assistantPersona: "navy-seal",
+      assistantPersona: "classic",
       assistantTone: "casual",
       assistantVoice: "warm",
       dispatch: {
@@ -95,7 +95,7 @@ describe("hosted member assistant preferences", () => {
         kind: "member.preferences.updated",
         occurredAt: "2026-07-08T12:00:00.000Z",
         preferences: {
-          persona: "navy-seal",
+          persona: "classic",
           tone: "casual",
           voice: "warm",
         },
@@ -114,7 +114,7 @@ describe("hosted member assistant preferences", () => {
       },
       prisma,
     })).resolves.toMatchObject({
-      assistantPersona: "navy-seal",
+      assistantPersona: "classic",
       assistantTone: "casual",
       assistantVoice: "warm",
       dispatch: {
@@ -160,7 +160,7 @@ describe("hosted member assistant preferences", () => {
       preferences: { tone: "formal" },
       prisma,
     })).resolves.toMatchObject({
-      assistantPersona: "scientist",
+      assistantPersona: "classic",
       assistantTone: "formal",
       updated: false,
     });

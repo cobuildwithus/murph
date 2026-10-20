@@ -7666,8 +7666,6 @@ function parsePersonalizationArguments(
     schemaRootKeys: [
       'action',
       'message_ref',
-      'mainPersona',
-      'supportingPersona',
       'tone',
       'voice',
     ],

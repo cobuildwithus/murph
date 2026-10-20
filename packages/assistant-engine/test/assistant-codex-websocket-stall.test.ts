@@ -111,3 +111,67 @@ it('still needs native idle recovery for a stall after acknowledgement', { timeo
 it('discards interrupted assistant text when native recovery completes the answer', { timeout: 30_000 }, async () => {
   await reproduce('partial-silent', 1_000)
 })
+
+async function steerUnfinishedWebSocketAnswer(interruptBehavior: 'discard' | 'ignore', holdMs: number) {
+  const stub = await startScriptedResponsesStub()
+  const proxy = await startCodexWebSocketProxy(stub.baseUrl)
+  try {
+    const scenario = await prepareScriptedTurnScenario({ ...stub, baseUrl: proxy.baseUrl }, temporaryPaths, {
+      websocket: { streamIdleTimeoutMs: 90_000 },
+    })
+    proxy.setInterruptBehavior(interruptBehavior)
+    let partialSent!: () => void
+    const partial = new Promise<void>((resolve) => { partialSent = resolve })
+    stub.queue(
+      {
+        partialText: { delta: 'STALE_UNFINISHED ', holdMs, onSent: () => partialSent() },
+        text: 'STALE_UNFINISHED COMPLETE',
+      },
+      { requestIncludes: ['Use the corrected synthetic detail.'], text: 'STEERED_FINAL_OK' },
+    )
+    let steered: Promise<void> | null = null
+    const startedAt = Date.now()
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      dynamicTools: [],
+      onLiveTurn: (turn) => {
+        steered = partial.then(() => turn.steer({ prompt: 'Use the corrected synthetic detail.' }))
+        return () => {}
+      },
+      prompt: 'Answer the first synthetic message.',
+    })
+    await steered
+    return { elapsedMs: Date.now() - startedAt, measurements: proxy.measurements(), result, stub }
+  } finally {
+    await stopWarmCodexAppServer()
+    await proxy.close()
+    await stub.close()
+  }
+}
+
+it('asks a WebSocket provider to discard an unfinished answer when a steer arrives', { timeout: 30_000 }, async () => {
+  const { elapsedMs, measurements, result, stub } = await steerUnfinishedWebSocketAnswer('discard', 25_000)
+  expect(measurements).toMatchObject({
+    httpRequests: 0,
+    interruptModes: ['discard_partial_items'],
+    websocketRequests: 2,
+  })
+  expect(stub.abortedResponseCountSinceBaseline()).toBe(1)
+  expect(result.finalMessage).toBe('STEERED_FINAL_OK')
+  expect(result.precedingAgentMessageSegments).toEqual([])
+  expect(elapsedMs).toBeLessThan(15_000)
+})
+
+it('falls back to the queued steer result when a WebSocket provider ignores the interrupt', { timeout: 30_000 }, async () => {
+  const { elapsedMs, measurements, result, stub } = await steerUnfinishedWebSocketAnswer('ignore', 3_000)
+  expect(measurements).toMatchObject({
+    httpRequests: 0,
+    interruptModes: ['discard_partial_items'],
+    websocketRequests: 2,
+  })
+  expect(stub.abortedResponseCountSinceBaseline()).toBe(0)
+  expect(result.finalMessage).toBe('STEERED_FINAL_OK')
+  expect(result.precedingAgentMessageSegments.map((segment) => segment.response))
+    .toEqual(['STALE_UNFINISHED COMPLETE'])
+  expect(elapsedMs).toBeGreaterThanOrEqual(3_000)
+})

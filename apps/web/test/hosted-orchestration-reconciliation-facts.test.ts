@@ -850,11 +850,6 @@ describe("hosted orchestration reconciliation facts", () => {
       "model_free",
     ],
     [
-      "environment-interview.completed",
-      "environment-interview.completed:item",
-      "model_free",
-    ],
-    [
       "assistant.notification.requested",
       "assistant.notification.requested:group-join:membership",
       "model_free",

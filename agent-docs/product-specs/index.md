@@ -5,7 +5,7 @@ Last verified: 2026-08-20
 | Path | Purpose | Status |
 | --- | --- | --- |
 | `agent-docs/product-specs/repo.md` | Canonical repository posture and success criteria for keeping the repo current-state only. | Active |
-| `agent-docs/product-specs/murph-personas.md` | Persona-first onboarding, canonical persona ids, and code-owned style defaults. | Implemented |
+| `agent-docs/product-specs/murph-personas.md` | Classic defaults, retained tone/voice/style controls and retired-persona read compatibility. | Implemented |
 | `agent-docs/product-specs/starter-usage.md` | One idempotent, non-expiring $4.50 starter-usage grant on the existing immutable usage-credit ledger, including migration and legacy Stripe-drain compatibility. | Active |
 | `agent-docs/product-specs/hosted-plan-downgrades.md` | Edge-to-Pulse renewal switches, the billing-gated Edge assistant-model choice, downgrade behavior, deployment compatibility, and the enforced composed usage boundary with separate group funding. | Active |
 | `agent-docs/product-specs/hosted-plan-usage.md` | Web-owned overall available-usage projection and enforced included-plus-generic-credit blocking, including forecast, server-selected actions, group privacy boundaries, and personal or exact Family-member Settings handoffs. | Active |
@@ -21,7 +21,6 @@ Last verified: 2026-08-20
 | `agent-docs/product-specs/hosted-support-escalation.md` | Direct support address plus explicit, member-linked, de-identified product-team escalation with a three-email-per-UTC-day server limit and stable provider idempotency. | Implemented |
 | `agent-docs/product-specs/hosted-family-plan.md` | Hosted Family plan for 2-6 sponsored people with mixed Pulse/Edge seats, exact owner-funded member usage top-ups, private member accounts, chat-first invites, and privacy boundaries. | Active |
 | `agent-docs/product-specs/health-commons.md` | Health Commons page graph, catalog, versioning, future aggregate outcome summaries, and artifact-storage product boundary. | Active |
-| `agent-docs/product-specs/public-goal-guides.md` | Public outcome-first Goal guides, Health Commons contract, messaging handoff, private setup workflow, SEO boundaries, and exact revision lineage. | Active |
 | `agent-docs/product-specs/murph-safe-public-product-search.md` | Public supplement and branded-food evidence search, normalized API contract, exact product-test semantics, privacy, and abuse bounds. | Active |
 | `agent-docs/product-specs/protocol-summary-copy.md` | Source-of-truth copy rules for Health Commons protocol `summary:` fields shown on `/experiments` cards. | Active |
 | `agent-docs/product-specs/murph-onboarding.md` | Aspiration-anchored onboarding through a compact progressive-disclosure skill: private relationship, observable bounded-history resume rules, brief aspiration-thread capture, explicit park, progressive health foundation, contextual return, collaborative first step, finite completion, and one code-owned first personal read. | Active |
@@ -33,7 +32,7 @@ Last verified: 2026-08-20
 | `agent-docs/product-specs/companion-app.md` | Native Swift iOS companion for broad Apple Health sync, closed WHOOP Recovery/Strain metadata enrichment, and an authorization- and validation-gated beta WHOOP 5/MG overnight PRV estimate. | Active |
 | `agent-docs/product-specs/query-metric-universality.md` | Invariant that every metric-bearing canonical event yields a query metric point through one generic rule; summary pipeline becomes presentation + precedence, never a gatekeeper. | Specified |
 | `agent-docs/product-specs/companion-app-mvp.md` | Two-screen companion build spec plus bounded WHOOP metadata enrichment and strict six-field overnight-PRV ingress over one active member-owned Junction connection. | Active |
-| `agent-docs/product-specs/habitat.md` | Habitat: progressive member life-context — domains, `habitat` bank family, domain catalog, coverage derivation, context-dividend collection rules, and environment/workspace v1 indicators. | Specified |
+| `agent-docs/product-specs/habitat.md` | Canonical Habitat context, conversational collection and Environment feature retirement. | Implemented |
 | `agent-docs/product-specs/murph-contact-card-picker.md` | Post-signup add-Murph-to-contacts step where the member picks the avatar on Murph's vCard; picker components live on `/design`. | Implemented |
 | `agent-docs/product-specs/murph-tone-and-voice.md` | Five controls for how Murph talks, owned independently by a person's private Murph or a hosted group's synthetic room runtime. | Implemented |
 | `agent-docs/product-specs/shared-message-targeting.md` | One accepted-message reference and resolver shared by optional native replies and exact-message reactions in private and group conversations. | Implemented |

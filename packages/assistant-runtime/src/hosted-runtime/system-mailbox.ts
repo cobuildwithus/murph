@@ -1,6 +1,3 @@
-import { rm } from "node:fs/promises";
-import path from "node:path";
-
 import {
   buildHostedExecutionSafeErrorDiagnostics,
   deriveHostedExecutionErrorCode,
@@ -31,6 +28,7 @@ import {
 import {
   bootstrapHostedMemberContext,
 } from "./context.ts";
+import { removeHostedCodexAuthJson } from "./events/codex-auth.ts";
 import {
   executeHostedMailboxEvent,
 } from "./events.ts";
@@ -90,8 +88,6 @@ import {
 } from "./runtime-logs.ts";
 import type { HostedBackgroundMaintenanceYieldReason } from "./background-maintenance-cancellation.ts";
 
-const HOSTED_CODEX_HOME_DIR_NAME = ".codex-hosted";
-const HOSTED_CODEX_AUTH_FILE_NAME = "auth.json";
 const HOSTED_SYSTEM_MAILBOX_RETRY_DELAY_MS = 60_000;
 const HOSTED_VAULT_SHARE_PROJECTION_FAILED_ERROR_CODE =
   "HOSTED_VAULT_SHARE_PROJECTION_FAILED";
@@ -1623,8 +1619,6 @@ function readHostedSystemMailboxRouteAction(
     || item.route.action === "run-clinical-records-sync"
     || item.route.action === "apply-clinical-enrichment"
     || item.route.action === "run-device-sync-wake"
-    || item.route.action === "run-environment-interview"
-    || item.route.action === "run-environment-voice"
     || item.route.action === "import-group-journal-fact"
     || item.route.action === "import-reported-daily-metric"
     || item.route.action === "apply-runtime-control-request"
@@ -1735,40 +1729,11 @@ async function recordHostedSystemMailboxPostCheckpointRecord(input: {
       };
     }
     case "codex-auth.updated": {
-      const port = input.runtime.platform.codexAuthPort;
-      if (!port) {
-        throw new Error("Hosted Codex auth checkpoint requires a configured Codex auth port.");
-      }
-      const response = await port.update({
-        attemptId: input.record.attemptId,
-        phase: input.record.phase,
-      });
-      if (
-        input.record.phase === "connected"
-        && response.status === "superseded"
-      ) {
-        await removeHostedCodexAuthJson(input.operatorHomeRoot);
-      }
+      await removeHostedCodexAuthJson(input.operatorHomeRoot);
       return {
         newerRevisionPending: false,
         nextWakeAt: null,
-        recorded: response.status === "superseded" ? 0 : 1,
-        stillDirty: false,
-      };
-    }
-    case "environment-voice.audio-delete": {
-      const deleteEnvironmentVoice =
-        input.runtime.platform.effectsPort.deleteEnvironmentVoice;
-      if (!deleteEnvironmentVoice) {
-        throw new Error(
-          "Hosted environment voice checkpoint requires an audio deletion port.",
-        );
-      }
-      await deleteEnvironmentVoice(input.record.audioKey);
-      return {
-        newerRevisionPending: false,
-        nextWakeAt: null,
-        recorded: 1,
+        recorded: 0,
         stillDirty: false,
       };
     }
@@ -1804,18 +1769,6 @@ async function recordHostedSystemMailboxPostCheckpointRecord(input: {
         signal: input.signal ?? null,
       });
   }
-}
-
-async function removeHostedCodexAuthJson(
-  operatorHomeRoot: string | null,
-): Promise<void> {
-  if (!operatorHomeRoot) {
-    return;
-  }
-  await rm(
-    path.join(operatorHomeRoot, HOSTED_CODEX_HOME_DIR_NAME, HOSTED_CODEX_AUTH_FILE_NAME),
-    { force: true },
-  );
 }
 
 async function recordHostedDeviceSyncDirtyProcessedRecords(input: {

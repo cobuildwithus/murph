@@ -4,7 +4,7 @@ Last verified: 2026-08-10
 
 ## Current State
 
-Murph needs a public, living Health Commons for goal guides, protocol pages, biomarker knowledge, evidence/source pages, exact reusable revisions, and redirects/disambiguation. This layer must stay forkable and reviewable like a small wiki while remaining structured enough to bind private goals, runs, outcome cards, and future cohort learning to exact public versions.
+Murph maintains Health Commons content for assistant evidence, goal templates, protocol pages, biomarker knowledge, evidence/source pages, exact reusable revisions, and redirects/disambiguation. The standalone public `/goals` guides and `/knowledge` marketing page are retired. This layer must stay forkable and reviewable like a small wiki while remaining structured enough to bind private goals, runs, outcome cards, and future cohort learning to exact public versions.
 
 ## Product Boundary
 

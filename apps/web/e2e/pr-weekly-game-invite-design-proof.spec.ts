@@ -8,6 +8,9 @@ const STATES = {
   open: "Open in Murph",
   "open-any-days": "Any 5 days a week",
   used: "This challenge was already accepted.",
+  "link-open": "Breakfast in bed",
+  "link-open-any-days": "STARTS OCT 19",
+  "link-closed": "This invite isn't available",
 } as const;
 
 for (const width of [390, 1280]) {
@@ -25,12 +28,18 @@ for (const width of [390, 1280]) {
     }
     await expect(study.locator('[data-design-state="open"]')).toContainText("Leo challenged you");
     await expect(study.locator('[data-design-state="open"]')).toContainText("Mon, Wed, Fri");
+    // The link preview names the challenger against "You" (never the invitee's private name), and nobody when closed.
+    await expect(study.locator('[data-design-state="link-open"]')).toContainText("Leo");
+    await expect(study.locator('[data-design-state="link-open"]')).toContainText("You");
+    await expect(study.locator('[data-design-state="link-open"]')).not.toContainText("Ava");
+    await expect(study.locator('[data-design-state="link-closed"]')).not.toContainText("Leo");
     const output = process.env.DESIGN_PROOF_OUTPUT_DIR;
     if (!output) return;
     await mkdir(output, { recursive: true });
     const style = "nextjs-portal { visibility: hidden; }";
     if (width < 768) {
       await study.locator('[data-design-state="open"]').screenshot({ path: path.join(output, `game-invite-open-${width}.png`), style });
+      await study.locator('[data-design-state="link-open"]').screenshot({ path: path.join(output, `game-invite-link-open-${width}.png`), style });
     } else {
       await study.screenshot({ path: path.join(output, `game-invite-states-${width}.png`), style });
     }

@@ -12,7 +12,7 @@ export const clinicalFactSchema = z.object({
   subject: z.enum(["member", "family", "unknown"]),
   // The containing note's timestamp dates its documentation. Null here must
   // never be interpreted as a clinical event on that timestamp.
-  clinicalDate: z.union([z.iso.date(), z.iso.datetime({ offset: true }), z.null()]),
+  clinicalDate: z.union([z.iso.date(), z.isoDateTime({ offset: true }), z.null()]),
   statement: z.string().trim().min(1).max(2_000),
   value: z.union([z.number().finite(), z.string().min(1).max(2_000), z.boolean()]).optional(),
   unit: z.string().trim().min(1).max(120).optional(),

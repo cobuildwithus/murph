@@ -793,7 +793,7 @@ describe("hosted execution coverage gaps", () => {
 
     const exportKeys = Object.keys(packageJson.exports ?? {}).sort();
 
-    expect(packageJson.dependencies?.zod).toBe("^4.4.3");
+    expect(packageJson.dependencies?.zod).toBe("^4.5.4");
     expect(packageJson.devDependencies?.zod).toBeUndefined();
     expect(exportKeys).toEqual([
       ".",
@@ -1015,7 +1015,6 @@ describe("hosted execution coverage gaps", () => {
       "HOSTED_RUNTIME_ASSISTANT_ASK_CONTROL_PATH",
       "HOSTED_RUNTIME_ASSISTANT_CONFIGURATION_TOOL_PATH",
       "HOSTED_RUNTIME_BROWSER_VAULT_REPLICA_PUBLISH_PATH",
-      "HOSTED_RUNTIME_CODEX_AUTH_PATH",
       "HOSTED_RUNTIME_CRYPTO_CONTEXT_PATH",
       "HOSTED_RUNTIME_CRYPTO_ROOT_PATH",
       "HOSTED_RUNTIME_EMAIL_EGRESS_RECIPIENT_PATH",

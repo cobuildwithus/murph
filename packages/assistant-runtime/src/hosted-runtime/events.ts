@@ -389,32 +389,6 @@ async function executeHostedSystemWake(input: {
           ? { systemProgressed: true as const }
           : {}),
       });
-    case "environment-voice.captured": {
-      const { executeHostedEnvironmentVoiceWake } = await import(
-        "./events/environment-voice.ts"
-      );
-      return await executeHostedEnvironmentVoiceWake({
-        executionContext: input.executionContext,
-        runtime: input.runtime,
-        signal: input.signal,
-        turnEnvironment: createHostedAssistantTurnEnvironment({
-          operatorHomeRoot: input.operatorHomeRoot,
-          runtimeEnv: input.runtimeEnv,
-          vaultRoot: input.vaultRoot,
-        }),
-        vaultRoot: input.vaultRoot,
-        wake: input.wake,
-      });
-    }
-    case "environment-interview.completed": {
-      const { executeHostedEnvironmentInterviewWake } = await import(
-        "./events/environment-interview.ts"
-      );
-      return await executeHostedEnvironmentInterviewWake({
-        vaultRoot: input.vaultRoot,
-        wake: input.wake,
-      });
-    }
     case "runtime.manual-requested":
     case "runtime.pending-effects-reconcile-requested":
     case "runtime.browser-vault-refresh-requested":
@@ -440,10 +414,6 @@ async function executeHostedSystemWake(input: {
       );
       return await executeHostedCodexAuthWake({
         operatorHomeRoot: input.operatorHomeRoot,
-        platform: input.runtime.platform,
-        runtimeEnv: input.runtimeEnv,
-        vaultRoot: input.vaultRoot,
-        wake: input.wake,
       });
     }
     case "assistant.ask.requested":

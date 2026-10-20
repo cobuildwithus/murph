@@ -46,8 +46,6 @@ import type {
   HostedRuntimeGroupToolResponse,
   HostedRuntimeProductFeedbackRecord,
   HostedRuntimeProductFeedbackRecordResponse,
-  HostedCodexAuthUpdate,
-  HostedCodexAuthUpdateResponse,
   HostedRuntimeUsageNoticeDeliveryTarget,
   HostedRuntimeUsageRecordResponse as HostedExecutionRuntimeUsageRecordResponse,
   HostedWorkspaceCheckpointRequest,
@@ -516,8 +514,6 @@ type HostedRuntimeEffectsPortBase = {
     request: HostedRuntimeTelegramGetFileRequest,
     context?: { signal?: AbortSignal | null },
   ): Promise<HostedRuntimeTelegramFile | null>;
-  deleteEnvironmentVoice?(audioKey: string): Promise<void>;
-  readEnvironmentVoice?(audioKey: string): Promise<Uint8Array | null>;
   deleteMealPhoto?(mealPhotoKey: string): Promise<void>;
   readMealPhoto?(mealPhotoKey: string): Promise<Uint8Array | null>;
   readRawEmailMessage(rawMessageKey: string): Promise<Uint8Array | null>;
@@ -704,10 +700,6 @@ export interface HostedRuntimeGroupToolPort {
   directAttachmentRouteStatus?():
     | { status: "ok" }
     | { status: "unavailable"; unavailableReason: string };
-}
-
-export interface HostedRuntimeCodexAuthPort {
-  update(update: HostedCodexAuthUpdate): Promise<HostedCodexAuthUpdateResponse>;
 }
 
 export interface HostedRuntimePhoneCallPort {
@@ -906,7 +898,6 @@ export interface HostedRuntimePlatform {
   artifactStore: HostedRuntimeArtifactStore;
   mediaStore?: HostedRuntimeMediaStore | null;
   browserVaultReplicaPort?: HostedRuntimeBrowserVaultReplicaPort | null;
-  codexAuthPort?: HostedRuntimeCodexAuthPort | null;
   clinicalRecordsPort?: HostedRuntimeClinicalRecordsPort | null;
   connectedApps?: AssistantConnectedAppsPort | null;
   deviceSyncPort?: HostedRuntimeDeviceSyncPort | null;

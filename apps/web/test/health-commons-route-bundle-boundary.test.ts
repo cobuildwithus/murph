@@ -10,14 +10,11 @@ const sourceFiles: readonly string[] = [
   "apps/web/src/lib/health-commons/generated-measurement-method-artifacts.ts",
   "apps/web/src/lib/health-commons/experiment-projections.ts",
   "apps/web/src/lib/health-commons/measurement-method-detail.ts",
-  "apps/web/src/lib/health-commons/goal-projections.ts",
   "apps/web/app/(dashboard)/experiments/page.tsx",
   "apps/web/app/(dashboard)/experiments/[experimentId]/layout.tsx",
   "apps/web/app/(dashboard)/experiments/[experimentId]/page.tsx",
   "apps/web/app/(dashboard)/experiments/[experimentId]/research/page.tsx",
   "apps/web/app/(dashboard)/experiments/[experimentId]/results/page.tsx",
-  "apps/web/app/goals/page.tsx",
-  "apps/web/app/goals/[goalId]/page.tsx",
   "apps/web/app/measurement-methods/[measurementMethodId]/page.tsx",
 ] as const;
 
@@ -66,28 +63,6 @@ describe("Health Commons route-bundle boundary", () => {
     );
 
     expect(source).not.toContain("@murphai/health-commons/runtime");
-  });
-
-  it("keeps Goal projections on the narrow Goal runtime", () => {
-    for (const relativePath of [
-      "apps/web/src/lib/goals/goal-models.ts",
-      "apps/web/src/lib/health-commons/goal-projections.ts",
-    ]) {
-      const source = readFileSync(path.join(repoRoot, relativePath), "utf8");
-
-      expect(source, relativePath).toContain("@murphai/health-commons/goal-runtime");
-      expect(source, relativePath).not.toContain("@murphai/health-commons/runtime");
-    }
-  });
-
-  it("keeps public Goal recovery on the validated index-only runtime", () => {
-    const relativePath =
-      "apps/web/src/lib/hosted-onboarding/visible-secondary-webhooks.ts";
-    const source = readFileSync(path.join(repoRoot, relativePath), "utf8");
-
-    expect(source).toContain("@murphai/health-commons/goal-index-runtime");
-    expect(source).not.toContain("@murphai/health-commons/goal-runtime");
-    expect(source).not.toContain("@murphai/health-commons/generated/");
   });
 
   it("fails if existing Next traces include the monolithic generated catalog in public Health Commons routes", () => {
@@ -260,10 +235,8 @@ function isHealthCommonsRouteTrace(filePath: string, source: string): boolean {
   const normalizedPath = filePath.replace(/\\/gu, "/");
   return (
     normalizedPath.includes("/experiments/") ||
-    normalizedPath.includes("/goals/") ||
     normalizedPath.includes("/measurement-methods/") ||
     source.includes("experiment-detail") ||
-    source.includes("goal-projections") ||
     source.includes("measurement-method-detail")
   );
 }

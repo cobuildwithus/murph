@@ -13,9 +13,6 @@ import { mkdtemp, rm, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 
-import type {
-  HostedCodexAuthAction,
-} from '@murphai/hosted-execution/contracts'
 import {
   MURPH_MEMBER_WORKSPACE_PERMISSION_PROFILE,
 } from '@murphai/hosted-execution/assistant-permissions'
@@ -154,6 +151,7 @@ import {
 } from './assistant-codex/final-response-completion.js'
 import {
   resolveCodexChildEnv,
+  withCodexAppServerSteeringFeatureOverrides,
   withHostedCodexModelCatalogConfigOverride,
 } from './assistant-codex/config.js'
 import {
@@ -267,11 +265,6 @@ function loadMurphDynamicToolRuntime(): Promise<MurphDynamicToolRuntime> {
     import('./assistant-codex/dynamic-tools.js')
   return murphDynamicToolRuntimePromise
 }
-const CODEX_MANAGED_ACCOUNT_LOGIN_TIMEOUT_MS = 10 * 60 * 1000
-const CODEX_MANAGED_ACCOUNT_CONFIG_OVERRIDES = [
-  'model_provider="openai"',
-  'cli_auth_credentials_store="file"',
-] as const
 const CODEX_APP_SERVER_COMMAND = 'app-server'
 const CODEX_APP_SERVER_TIMING_TRACE_SCHEMA =
   'murph.assistant-codex-app-server-timing.v1'
@@ -1156,11 +1149,12 @@ async function prepareCodexAppServerProcessInput(
     env: input.env,
   })
   const codexCommand = resolveCodexAppServerCommand(input.codexCommand)
-  const configOverrides =
+  const configOverrides = withCodexAppServerSteeringFeatureOverrides(
     withHostedCodexModelCatalogConfigOverride({
       configOverrides: input.configOverrides,
       env: input.env,
-    }) ?? []
+    }) ?? [],
+  )
   const args = buildCodexAppServerArgs({
     configOverrides,
     oss: input.oss,
@@ -2696,304 +2690,6 @@ export async function waitForWarmCodexBackgroundWork(
 
 registerStopWarmCodexAppServer(stopWarmCodexAppServer)
 registerWaitForWarmCodexBackgroundWork(waitForWarmCodexBackgroundWork)
-
-export interface CodexManagedAccountDeviceCode {
-  userCode: string
-  verificationUrl: string
-}
-
-export interface CodexManagedAccountOperationInput {
-  action: HostedCodexAuthAction
-  abortSignal?: AbortSignal | null
-  codexCommand?: string | null
-  codexHome?: string | null
-  env?: NodeJS.ProcessEnv
-  onDeviceCode?: ((deviceCode: CodexManagedAccountDeviceCode) => Promise<void> | void) | null
-  timeoutMs?: number | null
-  workingDirectory: string
-}
-
-export type CodexManagedAccountOperationResult =
-  | { kind: 'connected' }
-  | { kind: 'disconnected' }
-
-interface CodexManagedAccountLoginCompletion {
-  error: string | null
-  success: boolean
-}
-
-/**
- * Runs one managed ChatGPT account operation through the same app-server
- * transport used by turns. The child is intentionally short lived: account
- * notifications must never leak into the idle warm-turn process, and only one
- * process may write CODEX_HOME at a time.
- */
-export async function executeCodexManagedAccountOperation(
-  input: CodexManagedAccountOperationInput,
-): Promise<CodexManagedAccountOperationResult> {
-  if (warmCodexWorkspaceBoundaryActive) {
-    throw buildWarmCodexWorkspaceBoundaryBusyError()
-  }
-  const workingDirectory = path.resolve(input.workingDirectory)
-  await assertCodexAppServerWorkingDirectory(workingDirectory)
-  const env = await resolveCodexChildEnv({
-    codexHome: input.codexHome,
-    env: input.env,
-  })
-  const codexCommand = resolveCodexAppServerCommand(input.codexCommand)
-  const args = buildCodexAppServerArgs({
-    configOverrides: CODEX_MANAGED_ACCOUNT_CONFIG_OVERRIDES,
-  })
-  const launchKey = buildCodexAppServerLaunchKey({
-    args,
-    codexCommand,
-    env,
-  })
-
-  await stopWarmCodexAppServer('managed-account-operation')
-  const processInstance = await getOrStartWarmCodexProcess({
-    args,
-    codexCommand,
-    env,
-    launchKey,
-  })
-
-  let settleAccountUpdate!: () => void
-  let rejectAccountUpdate!: (error: unknown) => void
-  const accountUpdate = new Promise<void>((resolve, reject) => {
-    settleAccountUpdate = resolve
-    rejectAccountUpdate = reject
-  })
-  void accountUpdate.catch(() => undefined)
-  let settleCompletion!: (completion: CodexManagedAccountLoginCompletion) => void
-  let rejectCompletion!: (error: unknown) => void
-  const completion = new Promise<CodexManagedAccountLoginCompletion>((resolve, reject) => {
-    settleCompletion = resolve
-    rejectCompletion = reject
-  })
-  void completion.catch(() => undefined)
-  let expectedLoginId: string | null = null
-  let acceptChatGptAccountUpdate = false
-  let bufferedChatGptAccountUpdate = false
-  const bufferedCompletions = new Map<string, CodexManagedAccountLoginCompletion>()
-
-  const binding: CodexAppServerActiveTurnBinding = {
-    onClose(code, signal) {
-      const error = new VaultCliError(
-        'ASSISTANT_CODEX_AUTH_PROCESS_EXITED',
-        'Codex app-server exited during ChatGPT account authentication.',
-        {
-          code,
-          retryable: true,
-          signal,
-        },
-      )
-      rejectCompletion(error)
-      rejectAccountUpdate(error)
-    },
-    onError(error) {
-      rejectCompletion(error)
-      rejectAccountUpdate(error)
-    },
-    onFramingError() {
-      const error = new VaultCliError(
-        'ASSISTANT_CODEX_APP_SERVER_FRAMING_ERROR',
-        'Codex app-server emitted malformed JSON during account authentication.',
-        { retryable: false },
-      )
-      rejectCompletion(error)
-      rejectAccountUpdate(error)
-    },
-    onRpcResponse(_message, method) {
-      if (method === null) {
-        const error = new VaultCliError(
-          'ASSISTANT_CODEX_APP_SERVER_PROTOCOL_ERROR',
-          'Codex app-server returned an unexpected response during account authentication.',
-          { retryable: false },
-        )
-        rejectCompletion(error)
-        rejectAccountUpdate(error)
-      }
-    },
-    onParsedMessage(message) {
-      const requestId = readCodexRpcServerRequestId(message)
-      if (requestId !== null) {
-        denyUnsupportedCodexServerRequest({
-          message,
-          requestId,
-          writeRpcMessage: (payload) => processInstance.writeRpcMessage(payload),
-        })
-        return
-      }
-
-      const eventMethod = readCodexEventMethod(message)
-      if (eventMethod === 'account/updated') {
-        const params = asCodexRecord(message.params)
-        if (asCodexString(params?.authMode) !== 'chatgpt') {
-          return
-        }
-        if (!acceptChatGptAccountUpdate) {
-          return
-        }
-        if (expectedLoginId === null) {
-          bufferedChatGptAccountUpdate = true
-        } else {
-          settleAccountUpdate()
-        }
-        return
-      }
-
-      if (eventMethod !== 'account/login/completed') {
-        return
-      }
-      const params = asCodexRecord(message.params)
-      const loginId = asCodexString(params?.loginId)
-      if (!loginId) {
-        return
-      }
-      const completionResult: CodexManagedAccountLoginCompletion = {
-        error: asCodexString(params?.error),
-        success: params?.success === true,
-      }
-      if (loginId === expectedLoginId) {
-        settleCompletion(completionResult)
-      } else {
-        bufferedCompletions.set(loginId, completionResult)
-      }
-    },
-    onStderrLine: () => {},
-    onStderrText: () => {},
-    onStdinError(error) {
-      rejectCompletion(error)
-      rejectAccountUpdate(error)
-      return null
-    },
-    onStdoutText: () => {},
-  }
-
-  const onAbort = () => {
-    const error = new VaultCliError(
-      'ASSISTANT_CODEX_AUTH_ABORTED',
-      'ChatGPT account authentication was interrupted.',
-      { retryable: true },
-    )
-    rejectCompletion(error)
-    rejectAccountUpdate(error)
-  }
-
-  try {
-    processInstance.bindTurn(binding)
-    input.abortSignal?.addEventListener('abort', onAbort, { once: true })
-    if (input.abortSignal?.aborted) {
-      onAbort()
-    }
-    await processInstance.waitForSpawn()
-    await processInstance.initialize()
-
-    if (input.action === 'disconnect') {
-      await withCodexRpcTimeout(
-        processInstance.sendRequest('account/logout', {}),
-        CODEX_RPC_DEFAULT_TIMEOUT_MS,
-        'account/logout',
-      ).catch(() => undefined)
-      return { kind: 'disconnected' }
-    }
-
-    if (isCodexChatGptAccountReadResult(await readCodexManagedAccount(processInstance))) {
-      return { kind: 'connected' }
-    }
-
-    acceptChatGptAccountUpdate = true
-    const startResult = asCodexRecord(await withCodexRpcTimeout(
-      processInstance.sendRequest('account/login/start', {
-        type: 'chatgptDeviceCode',
-      }),
-      CODEX_RPC_DEFAULT_TIMEOUT_MS,
-      'account/login/start',
-    ))
-    const loginId = asCodexString(startResult?.loginId)
-    const verificationUrl = asCodexString(startResult?.verificationUrl)
-    const userCode = asCodexString(startResult?.userCode)
-    if (
-      startResult?.type !== 'chatgptDeviceCode'
-      || !loginId
-      || !verificationUrl
-      || !userCode
-    ) {
-      throw new VaultCliError(
-        'ASSISTANT_CODEX_AUTH_PROTOCOL_ERROR',
-        'Codex app-server returned an invalid ChatGPT device-code response.',
-        { retryable: false },
-      )
-    }
-
-    expectedLoginId = loginId
-    const buffered = bufferedCompletions.get(loginId)
-    if (buffered !== undefined) {
-      settleCompletion(buffered)
-    }
-    if (bufferedChatGptAccountUpdate) {
-      settleAccountUpdate()
-    }
-    await input.onDeviceCode?.({ userCode, verificationUrl })
-
-    const loginCompletion = await withCodexRpcTimeout(
-      completion,
-      normalizeCodexManagedAccountTimeout(input.timeoutMs),
-      'account/login/completed',
-    )
-    if (!loginCompletion.success) {
-      throw new VaultCliError(
-        'ASSISTANT_CODEX_AUTH_FAILED',
-        'ChatGPT account authentication did not complete successfully.',
-        {
-          ...(loginCompletion.error ? { codexLoginError: loginCompletion.error } : {}),
-          retryable: false,
-        },
-      )
-    }
-    await withCodexRpcTimeout(
-      accountUpdate,
-      CODEX_RPC_DEFAULT_TIMEOUT_MS,
-      'account/updated',
-    )
-    if (!isCodexChatGptAccountReadResult(await readCodexManagedAccount(processInstance))) {
-      throw new VaultCliError(
-        'ASSISTANT_CODEX_AUTH_FAILED',
-        'Codex app-server completed authentication without a ChatGPT account.',
-        { retryable: false },
-      )
-    }
-    return { kind: 'connected' }
-  } finally {
-    input.abortSignal?.removeEventListener('abort', onAbort)
-    processInstance.releaseTurn(binding)
-    processInstance.releaseReservation()
-    await processInstance.stop('managed-account-operation-complete').catch(() => undefined)
-  }
-}
-
-async function readCodexManagedAccount(
-  processInstance: CodexAppServerProcess,
-): Promise<unknown> {
-  return await withCodexRpcTimeout(
-    processInstance.sendRequest('account/read', { refreshToken: false }),
-    CODEX_RPC_DEFAULT_TIMEOUT_MS,
-    'account/read',
-  )
-}
-
-function isCodexChatGptAccountReadResult(value: unknown): boolean {
-  const record = asCodexRecord(value)
-  const account = asCodexRecord(record?.account) ?? record
-  return asCodexString(account?.type) === 'chatgpt'
-}
-
-function normalizeCodexManagedAccountTimeout(value: number | null | undefined): number {
-  return typeof value === 'number' && Number.isSafeInteger(value) && value > 0
-    ? value
-    : CODEX_MANAGED_ACCOUNT_LOGIN_TIMEOUT_MS
-}
 
 export interface CodexWarmThreadCompactionUsage {
   cachedInputTokens: number | null
@@ -5648,9 +5344,12 @@ async function runCodexAppServerTurnOnProcess(
             : {}),
         }
         completedFinalAgentMessage = null
-        assistantStreams.clear()
-        assistantStreamOrder.length = 0
       }
+      // A completed reply moved to the trailing candidate above. Anything left
+      // is unfinished text from a preempted answer (instant steering), never a
+      // reply, so it must not become fallback text for the steered response.
+      assistantStreams.clear()
+      assistantStreamOrder.length = 0
       responseMedia = []
       responseCard = null
       responseCardTextFallback = null

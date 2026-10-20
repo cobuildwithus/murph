@@ -156,6 +156,8 @@ export function readHostedRuntimeFailurePhaseCode(
 // Migration-only reader metadata. Remove after one mailbox retention window
 // has elapsed since the old producer was retired and no retained rows remain.
 export const HOSTED_RETIRED_MAILBOX_KINDS = [
+  "environment-interview.completed",
+  "environment-voice.captured",
   "group-newsletter.email-needed",
 ] as const;
 
@@ -173,8 +175,6 @@ export const HOSTED_MAILBOX_KINDS = [
   "clinical-records.sync-requested",
   "clinical-records.enrichment-requested",
   "device-sync.wake",
-  "environment-interview.completed",
-  "environment-voice.captured",
   "journal.group-fact.recorded",
   "health.daily-metric.reported",
   "meal-photo.captured",
@@ -2323,32 +2323,6 @@ export type HostedRuntimeAssistantConfigurationToolResponse =
         status: HostedRuntimeAssistantConfigurationUpdateStatus;
       };
     };
-
-export type HostedCodexAuthUpdate =
-  | {
-      attemptId: string;
-      phase: "device_code";
-      userCode: string;
-      verificationUrl: string;
-    }
-  | {
-      attemptId: string;
-      phase: "connected" | "disconnected" | "failed";
-    };
-
-export const HOSTED_CODEX_AUTH_UPDATE_RESPONSE_STATUSES = [
-  "applied",
-  "already_applied",
-  "superseded",
-] as const;
-
-export type HostedCodexAuthUpdateResponseStatus =
-  (typeof HOSTED_CODEX_AUTH_UPDATE_RESPONSE_STATUSES)[number];
-
-export interface HostedCodexAuthUpdateResponse {
-  applied: boolean;
-  status: HostedCodexAuthUpdateResponseStatus;
-}
 
 export interface HostedRuntimeIssueExportRequest {
   issues: AssistantRuntimeIssueRecord[];
