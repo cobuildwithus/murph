@@ -117,7 +117,6 @@ import {
 import { AuthProvider } from "@/src/components/hosted-onboarding/auth-dialog-provider";
 import { requestHostedPrivyCompletionWithRetry } from "@/src/components/hosted-onboarding/hosted-privy-auth-support";
 import { logoutHostedAppSession, verifyHostedAppSession } from "@/src/components/hosted-onboarding/hosted-app-session-client";
-import EnvironmentPageClient from "../app/(dashboard)/environment/environment-page-client";
 
 beforeEach(() => {
   // The warm path lives in module memory; reset it so ready snapshots and
@@ -165,7 +164,7 @@ test.each(["/settings", "/settings/", "/connect", "/records", "/records/connect"
   },
 );
 
-test.each(["/home", "/environment", "/experiments", "/training", "/ops"])(
+test.each(["/home", "/experiments", "/training", "/ops"])(
   "data route %s retains its session load",
   async (pathname) => {
     mocks.usePathname.mockReturnValue(pathname);
@@ -2578,150 +2577,6 @@ test("a post-request runtime refresh survives the production checkpoint floor", 
     const body = JSON.parse(String(init?.body));
     return body.requestRefresh === true;
   }).length, 1);
-
-  await rendered.cleanup();
-});
-
-test("Environment keeps one refresh boundary through delayed checkpoint recovery", async () => {
-  vi.useFakeTimers();
-  mocks.usePathname.mockReturnValue("/environment");
-  const currentRef = createReplicaRef();
-  const replacementRef = createReplicaRef({
-    dataVersion: "f".repeat(64),
-    keyId: "browser-vault-replica:f",
-    objectKey: "users/browser-vault-replicas/opaque/environment-replacement.json",
-    sourceBundleHash: "c".repeat(64),
-  });
-  let processing = true;
-  let replacementPublished = false;
-  const fetchMock = vi.fn(async (
-    input: string | URL | Request,
-    init?: RequestInit,
-  ) => {
-    const url = typeof input === "string" ? input : input.toString();
-    if (url === "/api/environment/realtime/topics") {
-      return jsonResponse({ processing });
-    }
-    assert.equal(url, "/api/browser-vault/session");
-    const body = JSON.parse(String(init?.body));
-    if (!body.knownReplicaRef) {
-      return jsonResponse({
-        encryptedReplica: createReplicaEnvelope(),
-        replicaAad: createReplicaAad(),
-        replicaKeyEnvelope: createReplicaKeyEnvelope(),
-        replicaRef: currentRef,
-        state: "ready",
-      });
-    }
-    if (replacementPublished) {
-      return jsonResponse({
-        encryptedReplica: createReplicaEnvelope("f"),
-        replicaAad: createReplicaAad("member_123", "f", {
-          objectKey: replacementRef.objectKey,
-          sourceBundleHash: replacementRef.sourceBundleHash,
-        }),
-        replicaKeyEnvelope: createReplicaKeyEnvelope("member_123", "f"),
-        replicaRef: replacementRef,
-        state: "ready",
-      });
-    }
-    return jsonResponse({
-      encryptedReplica: null,
-      memberId: "member_123",
-      replicaAad: null,
-      replicaKeyEnvelope: null,
-      replicaRef: currentRef,
-      refreshPending: false,
-      state: "not_modified",
-    });
-  });
-
-  installBrowserVaultCryptoMocks();
-  mocks.decryptHostedStoragePayload
-    .mockReset()
-    .mockResolvedValueOnce(
-      new TextEncoder().encode(JSON.stringify(createReplica())),
-    )
-    .mockResolvedValueOnce(new TextEncoder().encode(JSON.stringify(createReplica({
-      source: {
-        dataVersion: replacementRef.dataVersion,
-        sourceBundleHash: replacementRef.sourceBundleHash,
-      },
-    }))));
-  vi.stubGlobal("fetch", fetchMock);
-
-  const rendered = await renderClientComponent(
-    createAuthenticatedBrowserVaultElement(
-      createElement(EnvironmentPageClient, { contactOptions: [] }),
-    ),
-    {
-      location: {
-        hash: "",
-        href: "https://local.withmurph.ai/environment",
-        origin: "https://local.withmurph.ai",
-        pathname: "/environment",
-        search: "",
-      },
-      requireButton: false,
-    },
-  );
-  await waitForText(rendered.container, "Murph is saving your answers");
-
-  processing = false;
-  await act(async () => {
-    await vi.advanceTimersByTimeAsync(2_000);
-  });
-  await waitForText(rendered.container, "Murph is saving your answers");
-  const countForcedRefreshes = () => fetchMock.mock.calls.filter(([, init]) => {
-    if (!init?.body) {
-      return false;
-    }
-    const body = JSON.parse(String(init.body));
-    return body.requestRefresh === true;
-  }).length;
-  assert.equal(countForcedRefreshes(), 1);
-
-  await act(async () => {
-    await vi.advanceTimersByTimeAsync(118_000);
-  });
-  await waitForText(rendered.container, "Murph is taking longer than usual");
-  const firstCheckAgain = Array.from(
-    rendered.window.document.querySelectorAll("button"),
-  ).find((button) => button.textContent?.includes("Check again"));
-  assert.ok(firstCheckAgain instanceof rendered.window.HTMLButtonElement);
-  await act(async () => {
-    firstCheckAgain.click();
-    await Promise.resolve();
-  });
-  assert.equal(countForcedRefreshes(), 1);
-
-  await act(async () => {
-    await vi.advanceTimersByTimeAsync(240_000);
-  });
-  await waitForText(rendered.container, "Murph is taking longer than usual");
-  assert.equal(countForcedRefreshes(), 2);
-  const callsAtPollingBoundary = fetchMock.mock.calls.length;
-
-  await act(async () => {
-    await vi.advanceTimersByTimeAsync(60_000);
-  });
-  assert.ok(fetchMock.mock.calls.length > callsAtPollingBoundary);
-  assert.equal(countForcedRefreshes(), 2);
-
-  const recoveryCheckAgain = Array.from(
-    rendered.window.document.querySelectorAll("button"),
-  ).find((button) => button.textContent?.includes("Check again"));
-  assert.ok(recoveryCheckAgain instanceof rendered.window.HTMLButtonElement);
-  replacementPublished = true;
-  await act(async () => {
-    recoveryCheckAgain.click();
-    await Promise.resolve();
-    await Promise.resolve();
-    await vi.advanceTimersByTimeAsync(15_000);
-  });
-  assert.equal(countForcedRefreshes(), 3);
-  await waitForText(rendered.container, "The report was not updated");
-  assert.equal(countForcedRefreshes(), 3);
 
   await rendered.cleanup();
 });

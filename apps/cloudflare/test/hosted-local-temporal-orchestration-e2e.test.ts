@@ -7,7 +7,7 @@ import {
 } from "@murphai/hosted-execution/orchestration-control";
 import {
   buildHostedExecutionDeviceSyncWake,
-  buildHostedExecutionEnvironmentInterviewCompletedWake,
+  buildHostedExecutionGroupJournalFactRecordedWake,
   buildHostedExecutionMemberActivatedWake,
   buildHostedExecutionMemberChannelsUpdatedWake,
   buildHostedExecutionMemberPreferencesUpdatedWake,
@@ -42,8 +42,8 @@ const modelFreeFrontierUserId =
   `member_local_temporal_model_free_frontier_${Date.now()}`;
 const defaultOwnedFrontierUserId =
   `member_local_temporal_default_owned_frontier_${Date.now()}`;
-const environmentInterviewUserId =
-  `member_local_temporal_environment_interview_${Date.now()}`;
+const journalFactUserId =
+  `member_local_temporal_journal_fact_${Date.now()}`;
 
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
 const workerPersistDirOverride = process.env.MURPH_E2E_CF_PERSIST_DIR?.trim() || null;
@@ -139,17 +139,17 @@ describe("hosted local Temporal orchestration e2e", () => {
     expect(finalStatus.lastErrorCode ?? null).toBeNull();
   }, 300_000);
 
-  it("routes an Environment interview through its model-free runtime owner", async () => {
+  it("routes a Journal fact through its model-free runtime owner", async () => {
     const activeScenario = requireScenario();
     await activeScenario.seedActiveHostedMember({
-      memberId: environmentInterviewUserId,
+      memberId: journalFactUserId,
     });
     await activeScenario.runWake(
-      buildActivationWake(environmentInterviewUserId, "environment-interview"),
-      environmentInterviewUserId,
+      buildActivationWake(journalFactUserId, "journal-fact"),
+      journalFactUserId,
     );
     const activationStatus = await activeScenario.waitForHostedCompletion(
-      environmentInterviewUserId,
+      journalFactUserId,
     );
     const activationReplicaRef =
       activationStatus.workspace?.browserVaultReplicaRef;
@@ -157,30 +157,26 @@ describe("hosted local Temporal orchestration e2e", () => {
     const providerRequestBaseline = activeScenario.assistantProviderRequests.length;
     const completedAt = new Date().toISOString();
     const completionId = randomUUID();
-    const eventId = `environment-interview:${completionId}`;
+    const eventId = `journal-fact:${completionId}`;
     const append = await appendHostedExecutionWakeForTest({
       environment: activeScenario.runtimeEnv,
-      wake: buildHostedExecutionEnvironmentInterviewCompletedWake({
-        completedAt,
-        completionId,
+      wake: buildHostedExecutionGroupJournalFactRecordedWake({
         eventId,
-        memberId: environmentInterviewUserId,
+        memberId: journalFactUserId,
         occurredAt: completedAt,
-        topics: [{
-          answers: [{
-            aspectId: "sleep-environment",
-            indicatorId: "night_temp_c",
-            note: "The bedroom stays near 19 degrees at night.",
-            value: 19,
-          }],
-          topicId: "sleep:0",
-        }],
+        journalFact: {
+          date: completedAt.slice(0, 10),
+          factIndex: 1,
+          note: "Synthetic journal checkpoint proof.",
+          noteType: "journal-factor",
+          title: "Temporal journal fixture",
+        },
       }),
     });
     const signalStartedAt = new Date();
     const signal = await signalHostedMailboxAppendRuntimeForTest({
       environment: activeScenario.runtimeEnv,
-      expectedUserId: environmentInterviewUserId,
+      expectedUserId: journalFactUserId,
       mailboxItemId: append.wake.id,
     });
 
@@ -194,16 +190,16 @@ describe("hosted local Temporal orchestration e2e", () => {
 
     await waitForSystemMailboxHandledThrough({
       expectedSeq: append.wake.seq,
-      userId: environmentInterviewUserId,
+      userId: journalFactUserId,
     });
     await expect.poll(async () =>
-      (await activeScenario.harness.readUserStatus(environmentInterviewUserId))
+      (await activeScenario.harness.readUserStatus(journalFactUserId))
         .workspace?.browserVaultReplicaRef, {
       interval: 250,
       timeout: 120_000,
     }).not.toEqual(activationReplicaRef);
     const finalStatus = await activeScenario.harness.readUserStatus(
-      environmentInterviewUserId,
+      journalFactUserId,
     );
     expect(finalStatus.lastErrorCode ?? null).toBeNull();
     expect(finalStatus.workspace?.browserVaultReplicaRef).not.toBeNull();
@@ -213,9 +209,9 @@ describe("hosted local Temporal orchestration e2e", () => {
     await expect(readHostedMailboxItemForTest({
       dedupeKey: eventId,
       environment: activeScenario.runtimeEnv,
-      userId: environmentInterviewUserId,
+      userId: journalFactUserId,
     })).resolves.toMatchObject({
-      kind: "environment-interview.completed",
+      kind: "journal.group-fact.recorded",
       lane: "system",
     });
     expect(activeScenario.assistantProviderRequests).toHaveLength(

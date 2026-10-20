@@ -68,13 +68,9 @@
               ]
             },
             "isDirect": {
-              "anyOf": [
-                {
-                  "type": "boolean"
-                },
-                {
-                  "type": "null"
-                }
+              "type": [
+                "boolean",
+                "null"
               ]
             }
           },
@@ -369,13 +365,9 @@
               ]
             },
             "isDirect": {
-              "anyOf": [
-                {
-                  "type": "boolean"
-                },
-                {
-                  "type": "null"
-                }
+              "type": [
+                "boolean",
+                "null"
               ]
             }
           },

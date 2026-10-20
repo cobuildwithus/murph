@@ -1,15 +1,18 @@
 import {
   TEST_NOW,
+  TEST_USER_ID,
   createBrowserVaultReplicaRef,
   createDeferred,
+  createDeviceSyncResolvedConfig,
   createMailboxItem,
   createMailboxPort,
   createPlatform,
+  createResolvedDeviceSyncSystemMailboxItem,
+  createSnapshotDeviceSyncPort,
   createVaultSnapshotBundle,
   createWorkspacePort,
   createWorkspaceRuntimeJobInput,
   createWorkspaceState,
-  enqueueEnvironmentInterviewSystemMailboxItemForTest,
   mocks,
   removeTempRoot,
   runHostedWorkspaceRuntimeJobInProcess,
@@ -22,6 +25,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { test, vi } from "vitest";
 import { initializeVault } from "@murphai/core";
+import type { HostedRuntimeLatencyTraceRequest, HostedWorkspaceCheckpointRequest } from "@murphai/hosted-execution/runtime-control";
 import { parseBrowserVaultReplica } from "@murphai/query/browser";
 import {
   applyMurphManagedAutomations,
@@ -30,13 +34,17 @@ import {
   type RunAssistantAutomationPassInput,
 } from "@murphai/assistant-engine";
 import { writeAssistantAutoReplyReplyTerminalEvidence } from "@murphai/assistant-engine/assistant-automation";
-import type { HostedRuntimeLatencyTraceRequest, HostedWorkspaceCheckpointRequest } from "@murphai/hosted-execution/runtime-control";
 import { createCoalescingRuntimeWakeSignal } from "../src/hosted-runtime/runtime-wake.ts";
 import { runHostedWorkspaceAssistantPhase } from "../src/hosted-runtime/workspace-assistant-phase.ts";
 import { readHostedAssistantInputCurrentDeliveryRoute } from "../src/hosted-runtime/current-delivery-route.ts";
 import { readHostedProviderCleanupCheckpoint } from "../src/hosted-runtime/provider-cleanup.ts";
+import { enqueueHostedSystemMailboxItem } from "../src/hosted-runtime/system-mailbox.ts";
 import { readHostedSystemMailboxState, resolveHostedSystemMailboxWakeCandidates } from "../src/hosted-runtime/system-mailbox-state.ts";
 import * as systemWork from "../src/hosted-runtime/workspace-system-work.ts";
+
+const CONNECTION_ID = "synthetic-recording-connection";
+const SLEEP_ID = "synthetic-recording-sleep";
+const SLEEP_END = "2026-04-26T07:30:00.000Z";
 
 test.each([
   "success",
@@ -48,8 +56,8 @@ test.each([
   "refresh-foreground",
   "refresh-read-error",
   "refresh-incomplete",
-] as const)("settles checkpointed Environment recording in the foreground replacement: %s", async (scenario) => {
-  let vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-environment-interrupted-recording-"));
+] as const)("settles a checkpointed system recording in the foreground replacement: %s", async (scenario) => {
+  let vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-interrupted-system-recording-"));
   const roots = [vaultRoot];
   const replacementError = new Error("Synthetic foreground replacement released the system owner.");
   let initialSystemOwner = true;
@@ -92,31 +100,47 @@ test.each([
   let assistantPasses = 0;
   let idleCheckpoints = 0;
   const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
-  const attemptId = "attempt_synthetic_environment_followup";
+  const attemptId = "attempt_synthetic_system_recording_followup";
   const originalAutomation = mocks.runAssistantAutomationPass.getMockImplementation();
   let controller = new AbortController();
   let runtimeCompletion: ReturnType<typeof runHostedWorkspaceRuntimeJobInProcess> | null = null;
   let inputId: string | null = null;
   const repliedInputIds = new Set<string>();
-  const environmentItem = createMailboxItem({
-    id: "mailbox_item_synthetic_environment_followup",
-    dedupeKey: "environment-interview.completed:synthetic-followup",
-    kind: "environment-interview.completed", lane: "system", laneSeq: "1",
+  let recordedRetainUntil: string | null = null;
+  const deviceItem = createMailboxItem({
+    id: "mailbox_item_synthetic_device_followup",
+    dedupeKey: "device-sync.wake:synthetic-followup",
+    kind: "device-sync.wake", lane: "system", laneSeq: "1",
   });
-  const items = [environmentItem];
+  const items = [deviceItem];
+  const deviceSyncPort = createSnapshotDeviceSyncPort({ connectionId: CONNECTION_ID, nextReconcileAt: TEST_NOW });
   const facts = () => JSON.stringify({
     events: events.filter((event) => !event.startsWith("artifact.")), effectContexts, inputStaged: inputId !== null, replies: repliedInputIds.size,
     assistantPasses,
     idleCheckpoints,
+    checkpointReasons: checkpointRequests.map((request) => request.reason),
     replySent: events.includes("reply.sent"),
     replicaPublished: events.includes("replica.publish"),
   });
   vi.stubGlobal("fetch", vi.fn(async (request: string | URL | Request) => {
-    const pathname = new URL(request instanceof Request ? request.url : String(request)).pathname;
-    if (pathname.includes("/messages/synthetic-environment-reply")) return new Response(null, { status: 204 });
+    const url = new URL(request instanceof Request ? request.url : String(request));
+    const pathname = url.pathname;
+    if (url.hostname === "whoop.example.test") {
+      // The reconcile pass reads each scoped WHOOP collection once; only sleep has a record.
+      events.push("device.provider:" + pathname);
+      return new Response(JSON.stringify({
+        next_token: null,
+        records: pathname.endsWith("/v2/activity/sleep") ? [{
+          id: SLEEP_ID, nap: false, score_state: "SCORED",
+          start: "2026-04-26T00:30:00.000Z", end: SLEEP_END,
+          updated_at: "2026-04-26T08:00:00.000Z",
+        }] : [],
+      }), { headers: { "content-type": "application/json" }, status: 200 });
+    }
+    if (pathname.includes("/messages/synthetic-system-recording-reply")) return new Response(null, { status: 204 });
     assert.ok(pathname.endsWith("/messages"));
     events.push("reply.sent");
-    return new Response(JSON.stringify({ message: { id: "synthetic-environment-reply" } }), {
+    return new Response(JSON.stringify({ message: { id: "synthetic-system-recording-reply" } }), {
       headers: { "content-type": "application/json" }, status: 200,
     });
   }));
@@ -127,16 +151,21 @@ test.each([
       await input.onProviderRequestStarted?.({ assistantInputIds: [inputId], providerRequestOrdinal: 0, source: "linq", startedAt: TEST_NOW });
       const retained = (await readHostedSystemMailboxState(vaultRoot)).pending;
       assert.equal(retained[0]?.status, "recording");
-      assert.equal(retained[0]?.postCheckpointRecord, null);
+      // A completed reconcile holds only its completion fence until recorded.
+      const record = retained[0]?.postCheckpointRecord;
+      assert.equal(record?.kind, "device-sync.dirty-processed-batch");
+      assert.deepEqual(record.records, []);
+      assert.equal(record.retainedWake?.eventId, deviceItem.dedupeKey);
+      recordedRetainUntil = record.retainMailboxItemUntil ?? null;
       assert.equal(retained[0]?.lastErrorCode, null);
       assert.equal(retained[0]?.nextAttemptAt, null);
       events.push("foreground.provider");
       if (repliedInputIds.size === 2) projectionRelease.resolve();
       const intent = await createAssistantOutboxIntent({
-        channel: "linq", createdAt: TEST_NOW, dedupeToken: "synthetic-environment-reply-" + repliedInputIds.size,
+        channel: "linq", createdAt: TEST_NOW, dedupeToken: "synthetic-system-recording-reply-" + repliedInputIds.size,
         explicitTarget: "thread_1", identityId: "synthetic-member", message: "Your message is received.",
-        sessionId: "synthetic-environment-session", threadId: "thread_1", threadIsDirect: true,
-        turnId: "synthetic-environment-turn", turnTrigger: "automation-auto-reply", vault: vaultRoot,
+        sessionId: "synthetic-system-recording-session", threadId: "thread_1", threadIsDirect: true,
+        turnId: "synthetic-system-recording-turn", turnTrigger: "automation-auto-reply", vault: vaultRoot,
       });
       await writeAssistantAutoReplyReplyTerminalEvidence({
         captureIds: [], deliveryIntentId: intent.intentId, inputIds: [inputId], outcome: "deferred",
@@ -152,7 +181,7 @@ test.each([
 
     const mailboxPort = createMailboxPort({ events, items });
     const basePlatform = createPlatform({
-      events, artifactBytesByHash, latencyTraceRequests,
+      events, artifactBytesByHash, latencyTraceRequests, deviceSyncPort,
       mailboxPort: {
         ...mailboxPort,
         async fetch(request, context) {
@@ -183,6 +212,10 @@ test.each([
             browserVaultReplicaRef: currentWorkspace.browserVaultReplicaRef,
           };
           if (request.reason === "idle_shutdown") idleCheckpoints += 1;
+          if (initialSystemOwner) {
+            const retained = (await readHostedSystemMailboxState(vaultRoot)).pending;
+            events.push("system.checkpoint:" + request.reason + ":" + (retained[0]?.status ?? "none"));
+          }
           if (request.reason === "idle_shutdown" && initialSystemOwner) {
             const retained = (await readHostedSystemMailboxState(vaultRoot)).pending;
             assert.equal(retained[0]?.status, "recording");
@@ -195,11 +228,13 @@ test.each([
       },
       browserVaultReplicaPort: {
         async write({ replica, signal }) {
-          assert.ok(events.includes("reply.sent"), "Foreground reply precedes Environment publication.");
-          const habitat = parseBrowserVaultReplica(replica).entities.find((entity) => entity.family === "habitat" && entity.attributes.aspect === "sleep-environment");
-          const indicators = habitat?.attributes.indicators;
-          assert.ok(indicators && typeof indicators === "object" && "night_temp_c" in indicators);
-          assert.equal(indicators.night_temp_c, 19);
+          events.push("replica.write.attempt");
+          assert.ok(events.includes("reply.sent"), "Foreground reply precedes system recording publication. " + facts());
+          // Browser replicas redact device attributes; the imported sleep stays a dated ledger event.
+          const sleep = parseBrowserVaultReplica(replica).entities.find((entity) =>
+            entity.family === "event" && entity.kind === "sleep_session"
+            && entity.occurredAt === SLEEP_END && entity.date === "2026-04-26");
+          assert.ok(sleep, "The browser replica carries the device-imported WHOOP sleep. " + facts());
           events.push("replica.write");
           if ((scenario === "scheduler-refresh" || scenario.startsWith("refresh-")) && !refreshWakeSent) {
             refreshWakeSent = true;
@@ -263,8 +298,7 @@ test.each([
       request: { attemptId: attemptId + "-" + processingMode, runnerIdleTtlMs: 1_500, processingMode, workspaceVersion: currentWorkspace.version },
       forwardedEnv: { LINQ_API_TOKEN: "synthetic-linq-token" },
       resolvedConfig: {
-        channelCapabilities: { emailSendReady: false, telegramBotConfigured: false },
-        deviceSync: null,
+        ...createDeviceSyncResolvedConfig(),
         managedAutoReplyChannels: [{ capabilityReady: true, channel: "linq", memberChannel: "linq" }],
       },
     }), {
@@ -316,7 +350,17 @@ test.each([
           });
           return { assistantInputId: inputId, status: "imported" };
         }
-        await enqueueEnvironmentInterviewSystemMailboxItemForTest({ item: item.item, vaultRoot });
+        // The shared system-work owner runs the device import, then holds the
+        // item in recording until its checkpoint, projection, and publication.
+        await enqueueHostedSystemMailboxItem({
+          item: createResolvedDeviceSyncSystemMailboxItem(item.item), vaultRoot,
+          wake: {
+            connectionId: CONNECTION_ID, eventId: deviceItem.dedupeKey, expectedConnectedAt: TEST_NOW,
+            hint: { nextReconcileAt: TEST_NOW, occurredAt: TEST_NOW },
+            kind: "device-sync.wake", occurredAt: TEST_NOW, provider: "whoop", reason: "reconcile_due", userId: TEST_USER_ID,
+          },
+        });
+        events.push("device.staged");
         return { status: "imported" };
       },
       async runAssistantPhase(input) {
@@ -340,11 +384,18 @@ test.each([
       },
     });
     runtimeCompletion = runInvocation("system_mailbox");
-    await assert.rejects(withRealTimeout(runtimeCompletion, 10_000, facts), replacementError);
+    await assert.rejects(withRealTimeout(runtimeCompletion, 10_000, facts), (error) => {
+      assert.equal(error, replacementError, facts());
+      return true;
+    });
     assert.ok(events.includes("system.recording.checkpoint"));
     assert.equal(events.includes("replica.publish"), false);
+    const providerReads = () => events.filter((event) => event.startsWith("device.provider:"));
+    const admittedProviderReads = providerReads();
+    assert.ok(admittedProviderReads.includes("device.provider:/developer/v2/activity/sleep"), facts());
+    assert.ok(events.indexOf("device.provider:/developer/v2/activity/sleep") < events.indexOf("system.recording.checkpoint"), facts());
     initialSystemOwner = false;
-    vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-environment-foreground-replacement-"));
+    vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-system-recording-foreground-replacement-"));
     roots.push(vaultRoot);
     controller = new AbortController();
     items.push(createMailboxItem({ id: "mailbox_item_synthetic_foreground", laneSeq: "1" }));
@@ -363,7 +414,7 @@ test.each([
       const cleanupRetryAt = Date.parse((await readHostedProviderCleanupCheckpoint(vaultRoot))?.nextWakeAt ?? "");
       const futureRetryNow = Math.min(retryAt, Number.isFinite(cleanupRetryAt) ? cleanupRetryAt : retryAt) - 1;
       projectionFailureActive = false;
-      vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-environment-future-retry-"));
+      vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-system-recording-future-retry-"));
       roots.push(vaultRoot);
       const effectContextsBeforeFutureRetry = [...effectContexts];
       // This invocation observes future wakes. Hold Date before the first due
@@ -390,11 +441,14 @@ test.each([
         assert.equal(result.nextWakeAt, (await readHostedProviderCleanupCheckpoint(vaultRoot))?.nextWakeAt);
       }
       await new Promise<void>((resolve) => setTimeout(resolve, Math.max(0, retryAt - Date.now())));
-      vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-environment-due-retry-"));
+      vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-system-recording-due-retry-"));
       roots.push(vaultRoot);
       runtimeCompletion = runInvocation("system_mailbox");
       result = await withRealTimeout(runtimeCompletion, 10_000, facts);
     }
+    // Cold restores record the checkpointed import; they never re-read the provider.
+    assert.deepEqual(providerReads(), admittedProviderReads, facts());
+    assert.equal(deviceSyncPort.fetchSnapshotCalls, 1, facts());
     if (scenario === "scheduler-refresh" || scenario.startsWith("refresh-")) {
       assert.ok(refreshWakeSent, facts());
     }
@@ -414,8 +468,17 @@ test.each([
       assert.equal(events.filter((event) => event === "refresh.wake_hint").length, 3, facts());
       assert.equal(events.filter((event) => event === "refresh.mailbox_read").length, 3, facts());
     }
+    // The recording settled. A restored owner did not admit the pass, so it
+    // keeps the device owner pending behind its completion fence.
     const pending = (await readHostedSystemMailboxState(vaultRoot)).pending;
-    assert.equal(pending.length, 0, JSON.stringify({ retry: pending.map(({ status, lastErrorCode, nextAttemptAt }) => ({ status, lastErrorCode, nextAttemptAt })), ...JSON.parse(facts()) }));
+    assert.ok(recordedRetainUntil, facts());
+    assert.deepEqual(pending.map(({ itemId, status, postCheckpointRecord, lastErrorCode, nextAttemptAt }) =>
+      ({ itemId, status, postCheckpointRecord, lastErrorCode, nextAttemptAt })), [{
+      itemId: deviceItem.id, status: "pending", postCheckpointRecord: null, lastErrorCode: null,
+      nextAttemptAt: recordedRetainUntil,
+    }], facts());
+    const retainedWake = pending[0]?.wake;
+    assert.equal(retainedWake?.kind === "device-sync.wake" ? retainedWake.hint?.reason : null, "retained_completion_fence");
     assert.ok(events.includes("reply.sent"), facts());
     assert.equal(result.redactedStatus?.hostedMailboxSystemHandledThroughSeq, "1", facts());
     assert.ok(events.includes("replica.publish"), facts());

@@ -52,7 +52,6 @@ import {
   findCaptureByLookup,
   initializeVault,
   patchAutomation,
-  readHabitatAspect,
   readIntegrationIngestEntries,
   readJsonlRecords,
   repairVault,

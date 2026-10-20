@@ -20,7 +20,7 @@ export const hostedPhysicalNoteRecipientSchema = z
 
 export const hostedPhysicalNoteArtworkSchema = z
   .object({
-    expiresAt: z.string().datetime({ offset: true }),
+    expiresAt: z.isoDateTime({ offset: true }),
     sha256: z.string().regex(/^[0-9a-f]{64}$/u),
     url: z.string().url().max(4_096).regex(/^https:\/\//u),
   })
@@ -91,7 +91,7 @@ export const hostedPhysicalNoteRecoveryRequestSchema = z
 export const hostedPhysicalNoteRecoveryResponseSchema = z
   .object({
     remainingUnresolved: z.boolean().nullable(),
-    retryAfter: z.string().datetime({ offset: true }).nullable(),
+    retryAfter: z.isoDateTime({ offset: true }).nullable(),
     settledUsageCostUsdMicros: z.string().regex(/^\d+$/u).nullable(),
     status: z.enum([
       "accepted",

@@ -8,7 +8,7 @@ import { deleteHostedAccountData } from "@/src/lib/hosted-privacy/account-data-s
 export const maxDuration = 300;
 const bodySchema = z.object({
   memberId: z.string().regex(/^[A-Za-z0-9_.:-]{1,256}$/u),
-  createdAt: z.iso.datetime(),
+  createdAt: z.isoDateTime(),
   confirmation: z.literal("DELETE UNUSED SIGNUP"),
 }).strict();
 

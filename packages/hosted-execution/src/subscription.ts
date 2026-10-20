@@ -141,7 +141,7 @@ export const hostedRuntimeSubscriptionControlRequestSchema = z
 export const hostedRuntimeSubscriptionToolResponseSchema = z.union([
   z.object({
     action: z.literal("change_plan"),
-    effectiveAt: z.string().datetime({ offset: true }).optional(),
+    effectiveAt: z.isoDateTime({ offset: true }).optional(),
     plan: hostedRuntimeDirectPlanTermsSchema,
     status: hostedRuntimeNonPaymentResponseStatusSchema,
   }).strict(),

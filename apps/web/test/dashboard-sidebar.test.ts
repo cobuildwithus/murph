@@ -188,22 +188,21 @@ test("Sidebar exposes primary destinations without Voice or the internal Overvie
   assert.doesNotMatch(markup, /href="\/voice"/);
   assert.doesNotMatch(markup, />Voice<\/a>/);
   assert.doesNotMatch(markup, /href="\/biomarkers/);
-  assert.match(markup, /href="\/environment"/);
+  assert.doesNotMatch(markup, /href="\/environment"/);
   assert.doesNotMatch(markup, /href="\/patterns"/);
   assert.doesNotMatch(markup, />Patterns<\/a>/);
   assert.doesNotMatch(markup, /href="\/overview"/);
   assert.doesNotMatch(markup, />Overview<\/a>/);
 });
 
-test("Sidebar renders Environment as an active primary destination", () => {
-  mocks.usePathname.mockReturnValue("/environment");
+test("Sidebar keeps retired Environment out of primary navigation", () => {
+  mocks.usePathname.mockReturnValue("/home");
 
   const markup = renderToStaticMarkup(createElement(Sidebar));
 
-  assert.match(
-    markup,
-    /data-active="true">\s*<a[^>]*href="\/environment"[^>]*>[\s\S]*Environment<\/a>/,
-  );
+  assert.doesNotMatch(markup, /href="\/environment(?:\/|"|\?)/);
+  assert.doesNotMatch(markup, />Environment</);
+  assert.match(markup, /href="\/home"/);
 });
 
 test("Sidebar keeps public Goal guides out of authenticated dashboard navigation", () => {

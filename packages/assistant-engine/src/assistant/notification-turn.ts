@@ -1952,51 +1952,19 @@ function assistantMaintenanceRawEventsIncludeMutation(
   rawEvents: readonly unknown[],
   profile: AssistantMaintenanceProfile,
 ): boolean {
-  return rawEvents.some((rawEvent) => {
-    const event = normalizeCodexEvent(rawEvent)
-    const dynamicMutationActions = profile === 'group-room-model'
-      ? ['delete', 'upsert'] as const
-      : profile === 'member-memory'
-        ? ['forget', 'update', 'upsert'] as const
-        : null
-    const dynamicMutationTool = profile === 'group-room-model'
-      ? 'group_room_model'
-      : profile === 'member-memory'
-        ? 'member_memory'
-        : null
-    if (
-      dynamicMutationActions &&
-      dynamicMutationTool &&
-      assistantMaintenanceDynamicMutationCompleted({
-        actions: dynamicMutationActions,
-        event,
-        toolName: dynamicMutationTool,
-      })
-    ) {
-      return true
-    }
-    return (
-      event.kind === 'status_item' &&
-      event.itemType === 'commandExecution' &&
-      event.itemState === 'completed' &&
-      event.exitCode === 0 &&
-      isAssistantMaintenanceMutationCommand(event.commandLabel, profile)
-    )
-  })
-}
-
-function isAssistantMaintenanceMutationCommand(
-  commandLabel: string | null,
-  profile: AssistantMaintenanceProfile,
-): boolean {
-  const normalized = normalizeNullableString(commandLabel)
-  if (normalized === null) {
-    return false
-  }
-  if (profile !== 'habitat-voice') {
-    return false
-  }
-  return /\bvault-cli\b[\s\S]*\bhabitat\s+save\b/u.test(normalized)
+  const actions = profile === 'group-room-model'
+    ? ['delete', 'upsert'] as const
+    : ['forget', 'update', 'upsert'] as const
+  const toolName = profile === 'group-room-model'
+    ? 'group_room_model'
+    : 'member_memory'
+  return rawEvents.some((rawEvent) =>
+    assistantMaintenanceDynamicMutationCompleted({
+      actions,
+      event: normalizeCodexEvent(rawEvent),
+      toolName,
+    }),
+  )
 }
 
 function assistantMaintenanceDynamicMutationCompleted(input: {

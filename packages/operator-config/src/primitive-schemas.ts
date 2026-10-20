@@ -4,8 +4,7 @@ import * as z from '@murphai/contracts/zod-runtime'
 // assistant contracts avoid evaluating the full vault CLI schema surface.
 
 export const isoTimestampSchema = z
-  .string()
-  .datetime({ offset: true })
+  .isoDateTime({ offset: true })
   .describe('Timestamp in ISO 8601 format with an explicit UTC offset.')
 
 export const pathSchema = z

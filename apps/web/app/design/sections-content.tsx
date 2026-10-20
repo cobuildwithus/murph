@@ -66,8 +66,6 @@ import {
 } from "./group-usage-funding-study";
 import { ExperimentResultsShareStudy } from "./experiment-results-share-study";
 import { ExperimentRepeatedResultsStudy } from "./experiment-repeated-results-study";
-import { EnvironmentProgressStudy } from "./environment-progress-study";
-import { EnvironmentPrintStudy } from "./environment-print-study";
 import { BrowserVaultLoadingTransitionsStudy } from "./browser-vault-loading-transitions-study";
 import { FoodLabelLabStudy } from "./food-label-lab-study";
 import {
@@ -266,18 +264,6 @@ export function SectionsContent({
             <div className="-mx-5 sm:-mx-8 lg:-mx-12" inert>
               <FoodLabelLabStudy />
             </div>
-          </StudySection>
-
-          <Separator />
-
-          <StudySection title="Environment full-width progressive voice capture">
-            <EnvironmentProgressStudy />
-          </StudySection>
-
-          <Separator />
-
-          <StudySection title="Private Environment print report loading and ready states">
-            <EnvironmentPrintStudy />
           </StudySection>
 
           <Separator />

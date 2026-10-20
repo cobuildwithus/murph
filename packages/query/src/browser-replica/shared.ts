@@ -48,7 +48,6 @@ export const INCLUDED_FAMILIES = [
   "family",
   "genetics",
   "goal",
-  "habitat",
   "journal",
   "protocol",
   "regimen",
@@ -61,6 +60,7 @@ export const EXCLUDED_FAMILIES = [
   "audit",
   "core",
   "food",
+  "habitat",
   "recipe",
 ] as const;
 

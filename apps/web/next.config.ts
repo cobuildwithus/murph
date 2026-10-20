@@ -246,8 +246,7 @@ export function buildHostedWebSecurityHeaders(
     },
     {
       key: "Permissions-Policy",
-      // The Environment recorder is same-origin and still requires the
-      // browser's explicit per-site permission. Embedded origins stay blocked.
+      // Browser voice calls require same-origin microphone permission.
       value: "camera=(), geolocation=(), microphone=(self)",
     },
   ];
@@ -412,7 +411,6 @@ export function buildHostedWebNextConfig(
       "/opengraph-image": OG_SHARE_ASSET_TRACE_INCLUDES,
       "/changelog/card/v1/[items]": OG_SHARE_ASSET_TRACE_INCLUDES,
       "/experiments/[experimentId]/card": OG_SHARE_ASSET_TRACE_INCLUDES,
-      "/api/environment/share-card": OG_SHARE_ASSET_TRACE_INCLUDES,
       "/api/murph-contact-card": MURPH_CONTACT_CARD_AVATAR_TRACE_INCLUDES,
       "/imessage/card/v1/[payload]": OG_SHARE_ASSET_TRACE_INCLUDES,
     },
