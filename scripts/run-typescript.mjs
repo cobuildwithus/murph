@@ -9,7 +9,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 const scriptPath = fileURLToPath(import.meta.url);
 const defaultRepoRoot = path.resolve(path.dirname(scriptPath), "..");
-const lanes = new Set(["package", "web", "workspace-build", "watch"]);
+const lanes = new Set(["package", "check", "web", "workspace-build", "watch"]);
 const budgetFlags = new Set([
   "--builders",
   "--checkers",
@@ -18,14 +18,14 @@ const budgetFlags = new Set([
 
 /**
  * @param {string[]} argv
- * @returns {{ lane: "package" | "web" | "workspace-build" | "watch", args: string[] }}
+ * @returns {{ lane: "package" | "check" | "web" | "workspace-build" | "watch", args: string[] }}
  */
 export function parseTypeScriptRunnerArgs(argv) {
   const [lane, ...args] = argv;
 
   if (!lane || !lanes.has(lane)) {
     throw new Error(
-      "Usage: run-typescript.mjs <package|web|workspace-build|watch> [tsc args...]",
+      "Usage: run-typescript.mjs <package|check|web|workspace-build|watch> [tsc args...]",
     );
   }
 
@@ -37,13 +37,13 @@ export function parseTypeScriptRunnerArgs(argv) {
 }
 
 /**
- * @param {"package" | "web" | "workspace-build" | "watch"} lane
+ * @param {"package" | "check" | "web" | "workspace-build" | "watch"} lane
  * @param {string[]} callerArgs
  * @param {NodeJS.ProcessEnv | Record<string, string | undefined>} env
  * @returns {{
  *   args: string[];
  *   budget: {
- *     lane: "package" | "web" | "workspace-build" | "watch";
+ *     lane: "package" | "check" | "web" | "workspace-build" | "watch";
  *     profile: "default" | "shared";
  *     mode: "checkers" | "single-threaded";
  *     checkers: number | null;
@@ -65,7 +65,7 @@ export function buildTypeScriptInvocation(lane, callerArgs, env = {}) {
   let checkers = null;
   let builders = null;
 
-  if (lane === "package") {
+  if (["package", "check"].includes(lane)) {
     mode = readPackageMode(env.MURPH_TSC_PACKAGE_MODE);
 
     if (mode === "single-threaded") {
@@ -135,7 +135,7 @@ export function buildTypeScriptInvocation(lane, callerArgs, env = {}) {
       checkers,
       builders,
       packageBoundary:
-        lane === "package" && isSourceResolvedPackageTypecheck(callerArgs)
+        (["package", "check"].includes(lane)) && isSourceResolvedPackageTypecheck(callerArgs)
           ? "unchecked"
           : null,
     },
@@ -144,7 +144,7 @@ export function buildTypeScriptInvocation(lane, callerArgs, env = {}) {
 
 /**
  * @param {{
- *   lane: "package" | "web" | "workspace-build" | "watch";
+ *   lane: "package" | "check" | "web" | "workspace-build" | "watch";
  *   profile: "default" | "shared";
  *   mode: "checkers" | "single-threaded";
  *   checkers: number | null;
@@ -161,7 +161,7 @@ export function formatTypeScriptBudget(budget) {
     `checkers=${budget.checkers ?? "default"}`,
   ];
 
-  if (budget.lane === "package" || budget.lane === "workspace-build") {
+  if (budget.lane === "package" || budget.lane === "check" || budget.lane === "workspace-build") {
     parts.push(`builders=${budget.builders ?? "default"}`);
   }
 
@@ -202,6 +202,44 @@ export function resolveRootTypeScriptCompiler(repoRoot = defaultRepoRoot) {
   return {
     compilerPath: path.resolve(path.dirname(packageJsonPath), compilerRelativePath),
     version,
+  };
+}
+
+/**
+ * Checking is an explicit lane: never infer no-emit safety from a config filename.
+ * tsrs currently publishes Linux x64/arm64 and macOS arm64 binaries only.
+ * @param {string} lane
+ * @param {NodeJS.ProcessEnv | Record<string, string | undefined>} [env]
+ * @param {string} [platform]
+ * @param {string} [arch]
+ * @returns {"tsrs" | "typescript"}
+ */
+export function selectTypeScriptCompiler(lane, env = {}, platform = process.platform, arch = process.arch) {
+  const requested = env.MURPH_TYPECHECK_COMPILER;
+  if (requested !== undefined && requested !== "tsrs" && requested !== "typescript") {
+    throw new Error("MURPH_TYPECHECK_COMPILER must be tsrs or typescript when set.");
+  }
+  if (!["check", "web", "watch"].includes(lane)) return "typescript";
+  const supported = (platform === "linux" && ["x64", "arm64"].includes(arch))
+    || (platform === "darwin" && arch === "arm64");
+  if (requested === "tsrs" && !supported) {
+    throw new Error(`tsrs does not publish a binary for ${platform}/${arch}.`);
+  }
+  return requested ?? (supported ? "tsrs" : "typescript");
+}
+
+/** @param {string} [repoRoot] */
+export function resolveRootTsrsCompiler(repoRoot = defaultRepoRoot) {
+  const requireFromRoot = createRequire(path.join(repoRoot, "package.json"));
+  const packageJsonPath = requireFromRoot.resolve("tsrs/package.json");
+  const packageJson = JSON.parse(readFileSync(packageJsonPath, "utf8"));
+  const bin = packageJson.bin?.tsrs;
+  if (typeof bin !== "string" || bin.length === 0) {
+    throw new Error("The root tsrs package does not declare a tsrs binary.");
+  }
+  return {
+    compilerPath: path.resolve(path.dirname(packageJsonPath), bin),
+    version: packageJson.version,
   };
 }
 
@@ -279,10 +317,21 @@ async function main() {
       invocation.args,
       process.env,
     );
-    const compiler = resolveRootTypeScriptCompiler();
+    const compilerName = selectTypeScriptCompiler(invocation.lane, process.env);
+    const compiler = compilerName === "tsrs"
+      ? resolveRootTsrsCompiler()
+      : resolveRootTypeScriptCompiler();
+    // Bound tsrs to the existing TS7 default outside the shared profile too.
+    if (compilerName === "tsrs" && configured.budget.checkers === null) {
+      configured.args.push("--checkers", "4");
+      configured.budget.checkers = 4;
+    }
+    if (["check", "web", "watch"].includes(invocation.lane)) {
+      configured.args.push("--noEmit");
+    }
 
     if (process.env.MURPH_TSC_BUDGET_ANNOUNCED !== "1") {
-      console.error(formatTypeScriptBudget(configured.budget));
+      console.error(`${formatTypeScriptBudget(configured.budget)} compiler=${compilerName}@${compiler.version}`);
     }
 
     const result = await runCompiler(

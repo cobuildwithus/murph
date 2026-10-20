@@ -9,7 +9,6 @@ const scanRoots = ["packages", "apps", "e2e"] as const;
 const blockedExtensions = new Set([".js", ".mjs", ".cjs", ".d.ts"]);
 const allowedSourceArtifacts = new Set([
   "apps/web/postcss.config.mjs",
-  "apps/web/eslint.config.mjs",
   // pnpm links this executable before TypeScript compilation.
   "packages/device-syncd/bin.mjs",
 ]);
@@ -116,7 +115,7 @@ export async function main(): Promise<void> {
   }
 
   console.log(
-    "No handwritten .js, .mjs, .cjs, or .d.ts files beyond the allowlisted Next.js declaration stubs, the fixed {postcss,eslint}.config.mjs framework config paths, and the device-syncd executable shim, and no tracked .env/.env.* private files or dist/, .next/, .next-dev/, .next-smoke*/, .test-dist/, or *.tsbuildinfo artifacts, were found.",
+    "No handwritten .js, .mjs, .cjs, or .d.ts files beyond the allowlisted Next.js declaration stubs, the fixed postcss.config.mjs framework config path, and the device-syncd executable shim, and no tracked .env/.env.* private files or dist/, .next/, .next-dev/, .next-smoke*/, .test-dist/, or *.tsbuildinfo artifacts, were found.",
   );
 }
 

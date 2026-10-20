@@ -1,4 +1,5 @@
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -13,7 +14,7 @@ import path from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-type Lane = "package" | "web" | "workspace-build" | "watch";
+type Lane = "check" | "package" | "web" | "workspace-build" | "watch";
 type Env = Record<string, string | undefined>;
 
 interface Invocation {
@@ -29,6 +30,8 @@ interface Invocation {
 }
 
 interface RunnerModule {
+  selectTypeScriptCompiler(lane: Lane, env?: Env, platform?: string, arch?: string): "tsrs" | "typescript";
+  resolveRootTsrsCompiler(repoRoot?: string): { compilerPath: string; version: string };
   buildTypeScriptInvocation(lane: Lane, args: string[], env?: Env): Invocation;
   containsBuildFlag(args: string[]): boolean;
   formatTypeScriptBudget(budget: Invocation["budget"]): string;
@@ -324,6 +327,56 @@ describe("root TypeScript compiler resolution", () => {
   });
 });
 
+describe("tsrs check routing", () => {
+  it("uses tsrs for no-emit lanes on supported hosts and keeps emission on TypeScript", () => {
+    for (const [platform, arch] of [["darwin", "arm64"], ["linux", "x64"], ["linux", "arm64"]]) {
+      for (const lane of ["check", "web", "watch"] as const) {
+        expect(runner.selectTypeScriptCompiler(lane, {}, platform, arch)).toBe("tsrs");
+      }
+      for (const lane of ["package", "workspace-build"] as const) {
+        expect(runner.selectTypeScriptCompiler(lane, { MURPH_TYPECHECK_COMPILER: "tsrs" }, platform, arch)).toBe("typescript");
+      }
+    }
+    expect(runner.selectTypeScriptCompiler("check", {}, "darwin", "x64")).toBe("typescript");
+    expect(runner.selectTypeScriptCompiler("check", {}, "win32", "x64")).toBe("typescript");
+    expect(runner.selectTypeScriptCompiler("check", { MURPH_TYPECHECK_COMPILER: "typescript" }, "linux", "x64")).toBe("typescript");
+    expect(() => runner.selectTypeScriptCompiler("check", { MURPH_TYPECHECK_COMPILER: "tsrs" }, "darwin", "x64")).toThrow("does not publish a binary");
+    expect(() => runner.selectTypeScriptCompiler("check", { MURPH_TYPECHECK_COMPILER: "typo" })).toThrow("must be tsrs or typescript");
+  });
+
+  it("preserves package budgets and boundary reporting in the check lane", () => {
+    const result = runner.buildTypeScriptInvocation("check", ["-p", "tsconfig.typecheck.json"], { MURPH_VERIFY_SHARED_HOST: "1" });
+    expect(result.args).toEqual(["-p", "tsconfig.typecheck.json", "--checkers", "1"]);
+    expect(result.budget.packageBoundary).toBe("unchecked");
+  });
+
+  it("detects and repairs incremental errors across compiler switches without emitting", () => {
+    const root = mkdtempSync(path.join(os.tmpdir(), "murph-compiler-check-"));
+    temporaryRoots.push(root);
+    const source = path.join(root, "index.ts");
+    const config = path.join(root, "tsconfig.json");
+    writeFileSync(config, JSON.stringify({ compilerOptions: { strict: true, incremental: true, types: [], target: "es2022", tsBuildInfoFile: "check.tsbuildinfo" }, files: ["index.ts"] }));
+    const check = (compiler: "typescript" | "tsrs") => spawnSync(process.execPath, [
+      path.resolve(import.meta.dirname, "run-typescript.mjs"), "check", "-p", config, "--pretty", "false",
+    ], { encoding: "utf8", env: { ...process.env, MURPH_TYPECHECK_COMPILER: compiler, MURPH_VERIFY_SHARED_HOST: "1" } });
+    writeFileSync(source, 'export const value: number = 1;\n');
+    const initial = check("typescript");
+    expect(initial.status, initial.stdout + initial.stderr).toBe(0);
+    const candidate = runner.selectTypeScriptCompiler("check");
+    writeFileSync(source, 'export const value: number = "invalid";\n');
+    for (const compiler of [candidate, "typescript"] as const) {
+      const invalid = check(compiler);
+      expect(invalid.status, invalid.stderr).not.toBe(0);
+      expect(invalid.stdout).toContain("TS2322");
+    }
+    writeFileSync(source, 'export const value: number = 2;\n');
+    const repaired = check(candidate);
+    expect(repaired.status, repaired.stdout + repaired.stderr).toBe(0);
+    expect(existsSync(path.join(root, "index.js"))).toBe(false);
+    expect(existsSync(path.join(root, "check.tsbuildinfo"))).toBe(true);
+  }, 30_000);
+});
+
 describe("TypeScript script ownership", () => {
   it("routes workspace package and app compiler scripts through the root runner", () => {
     const repoRoot = path.resolve(import.meta.dirname, "..");
@@ -357,6 +410,10 @@ describe("TypeScript script ownership", () => {
         }
         if (command.includes("scripts/run-typescript.mjs")) {
           routedScriptCount += 1;
+          if (scriptName.startsWith("typecheck")) {
+            expect(command, `${path.relative(repoRoot, manifestPath)}#${scriptName}`)
+              .not.toContain("run-typescript.mjs package");
+          }
         }
       }
     }

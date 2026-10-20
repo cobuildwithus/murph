@@ -91,7 +91,6 @@ minimumReleaseAgeExclude:
   - '@next/swc-win32-arm64-msvc@16.3.0'
   - '@next/swc-win32-x64-msvc@16.3.0'
   - '@onkernel/sdk@0.76.0'
-  - eslint-config-next@16.3.0
   - next@16.3.0
   - '@openai/codex@0.163.0||0.163.0-darwin-arm64||0.163.0-darwin-x64||0.163.0-linux-arm64||0.163.0-linux-x64||0.163.0-win32-arm64||0.163.0-win32-x64'
   - '@temporalio/activity@1.16.3'
