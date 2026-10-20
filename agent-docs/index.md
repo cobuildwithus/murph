@@ -79,6 +79,8 @@ in [the import-speed plan](exec-plans/completed/2026-09-24-garmin-import-speed.m
 Local idle-cleanup veto ordering and completion-preflight evidence are recorded
 in [owner request reduction](exec-plans/completed/2026-10-02-owner-cleanup-request-reduction.md);
 the current contract remains in `references/hosted-postgres-runtime.md`.
+Current lost-result recovery reconciliation is recorded in
+[the completion reconciliation plan](exec-plans/completed/2026-10-20-pr3994-completion-reconciliation.md).
 
 Exact provider-event correlation for reaction typing alerts is owned by
 `RELIABILITY.md`; implementation and synthetic PostgreSQL proof are recorded in

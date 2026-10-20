@@ -164,10 +164,13 @@ receipt and either a settled native invocation or an inactive runtime fence
 proved during reconciliation. Successful release retains the member's
 warm target. Failed or ambiguous retirement requires exact native stop proof
 before clearing its assignment. Bound slots never return to shared inventory.
-Idle cleanup first checks native status, active jobs, and the trusted conversation
-receipt deadline. Those local vetoes need no owner callback; a future receipt
-deadline schedules cleanup directly at that deadline. Only an otherwise eligible
-stop reconciles the canonical owner. A matching starting, active or retiring owner
+Without a completed native invocation receipt, idle cleanup first checks native
+status, active jobs, and the trusted conversation receipt deadline. Those local
+vetoes need no owner callback; a future receipt deadline schedules cleanup directly
+at that deadline. A bound completed native receipt still reconciles the canonical
+owner before applying local warmth, because native completion does not prove
+canonical acknowledgment. Otherwise only an eligible stop reconciles the owner.
+A matching starting, active or retiring owner
 protects the readiness-to-launch handoff, including after Durable Object
 reactivation. Failed reads and incomplete cutover preserve the existing scheduled
 lifecycle recheck; they do not grant a new conversation lease. Cleanup rechecks

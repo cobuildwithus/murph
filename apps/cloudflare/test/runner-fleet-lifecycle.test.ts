@@ -370,8 +370,10 @@ describe("bound runner idle cleanup respects canonical runtime ownership", () =>
     assert.equal(calls.destroy, 0);
   });
 
-  it.each([false, true])("releases a completed lost outer result without another wake (reactivated=%s)", async (reactivated) => {
-    const initial = runnerHarness({ running: true });
+  it.each([[false, false], [true, false], [false, true], [true, true]])(
+    "releases a completed lost outer result without another wake (reactivated=%s, warm=%s)", async (reactivated, warm) => {
+    const health = warm ? { conversationActivityReceivedAtEpochMs: Date.now() } : {};
+    const initial = runnerHarness({ running: true, health });
     await initial.container.bindStandbySlot(claimInput());
     const current = { ...owner("retiring"), completedAt: new Date().toISOString() };
     const receipt = new RunnerInvocationReceiptStore(initial.sql);
@@ -387,13 +389,49 @@ describe("bound runner idle cleanup respects canonical runtime ownership", () =>
       }
       return { cutover: "postgres", status: "observed", owner: current };
     });
-    const { container, calls } = reactivated ? runnerHarness({ running: true, durable: initial }) : initial;
+    const { container, calls } = reactivated ? runnerHarness({ running: true, durable: initial, health }) : initial;
     await container.onActivityExpired();
     assert.equal(current.phase, "idle");
     assert.equal(calls.destroy, 0);
     assert.equal((await container.listSchedules("onActivityExpired")).length, 1);
     await container.onActivityExpired();
-    assert.equal(calls.destroy, 1);
+    assert.equal(calls.destroy, warm ? 0 : 1);
+  });
+
+  it.each([false, true])("retries lost-result recovery before warmth expires (reactivated=%s)", async (reactivated) => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const now = Date.parse("2026-10-20T12:00:00Z");
+      vi.setSystemTime(now);
+      const health = { conversationActivityReceivedAtEpochMs: now };
+      const initial = runnerHarness({ running: true, health });
+      await initial.container.bindStandbySlot(claimInput());
+      const current = { ...owner("retiring"), completedAt: new Date().toISOString() };
+      const receipt = new RunnerInvocationReceiptStore(initial.sql);
+      const identity = { attemptId: current.attemptId!, generation: current.generation };
+      receipt.register(identity);
+      receipt.complete(identity, false);
+      let completionCalls = 0;
+      vi.mocked(commandHostedRuntimeOwner).mockImplementation(async ({ command }) => {
+        if (command.operation === "complete") {
+          completionCalls++;
+          throw new Error("synthetic unavailable completion");
+        }
+        return { cutover: "postgres", status: "observed", owner: current };
+      });
+      const { container, calls } = reactivated
+        ? runnerHarness({ running: true, durable: initial, health }) : initial;
+      for (const elapsed of [0, 60_000]) {
+        vi.setSystemTime(now + elapsed);
+        await container.onActivityExpired();
+        assert.equal(completionCalls, elapsed / 60_000 + 1);
+        assert.equal(calls.destroy, 0);
+        assert.deepEqual((await container.listSchedules("onActivityExpired")).map(s => s.time),
+          [(now + elapsed + 60_000) / 1_000]);
+      }
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it.each(["registered", "wrong-attempt", "wrong-generation", "active", "unknown", "failed-completion", "successor"] as const)(

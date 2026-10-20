@@ -2236,9 +2236,12 @@ export class RunnerContainer extends Container {
       return;
     }
 
-    // Local work and receipt warmth already prevent a stop. Check them before
-    // Web so a retained conversation schedules its deadline without owner polls.
-    if (!await this.canStopWarmContainer({
+    // A completed native receipt does not prove canonical completion. Preserve
+    // owner reconciliation (and its short retry) even while the shell is warm.
+    // Otherwise local vetoes can avoid Web without suppressing that recovery.
+    const hasCompletedNativeReceipt = this.readRunnerSlotBindingOptional()?.state === "bound"
+      && this.requireInvocationReceiptStore().read()?.state === "completed";
+    if (!hasCompletedNativeReceipt && !await this.canStopWarmContainer({
       expectedInteractionGeneration: input.expectedInteractionGeneration,
       lifecycleStagePrefix,
       userId: input.userId,
