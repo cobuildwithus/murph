@@ -1304,3 +1304,7 @@ Member ChatGPT linking retirement is tracked in
 [`the removal plan`](exec-plans/completed/2026-10-19-remove-member-inference.md);
 the retained mailbox cleanup contract is owned by
 [`hosted runtime protocol`](references/hosted-runtime-protocol.md).
+
+Temporary legacy auth callback forwarding is tracked in
+[the compatibility plan](exec-plans/active/2026-10-20-legacy-auth-callback-bridge.md);
+its rollout/removal contract lives in [the runtime protocol](references/hosted-runtime-protocol.md).

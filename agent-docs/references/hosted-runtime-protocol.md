@@ -3060,17 +3060,67 @@ workspace may still hit the runtime's format gate on its next wake, so the
 operator rollout gate is zero known v1 hosted snapshots before returning to
 normal traffic.
 
-Member ChatGPT account linking is retired. Web no longer creates linking attempts
-or accepts runtime auth callbacks, and the runtime performs no member OAuth or
-remote logout. Legacy `runtime.codex-auth-requested` wakes and
-`codex-auth.updated` checkpoint records remain readable solely to delete local
-`auth.json`; deletion failures retain retryable mailbox work. Remove those
-readers only after retained mailbox records and snapshots have drained. Existing
-connection rows remain available to account export/deletion and retirement
-cleanup. No schema drop, billing change, or ordinary provider-selection change
-is part of this retirement; local/operator authentication remains supported.
-Deploy the runtime/Worker consumer before removing Web callback routes, and
-ensure old callback-producing runtime instances have drained before Web rollout.
+Member ChatGPT account linking is retired in the current runtime and Web code.
+The runtime performs no member OAuth or remote logout. Legacy
+`runtime.codex-auth-requested` wakes and `codex-auth.updated` checkpoint records
+remain readable solely to delete local `auth.json`; deletion failures retain
+retryable mailbox work. Remove those readers only after retained mailbox records
+and snapshots have drained. Existing connection rows remain available to account
+export/deletion and retirement cleanup. No schema drop, billing change, or ordinary
+provider-selection change is part of this retirement; local/operator
+authentication remains supported.
+
+The Worker web-control policy temporarily retains only the legacy
+`POST /api/internal/hosted-runtime/codex-auth` consumer. Its existing proxy token,
+bound member, signed body/runtime authority and Web admission remain mandatory;
+upstream rejection is forwarded unchanged. This is forwarding compatibility,
+not a restored runtime OAuth port or a new Web linking API. Its owner is
+`apps/cloudflare/src/runner-outbound/shared-web-control-policy.ts`.
+
+The deployment activates the staged Worker before replacing native runners.
+Keep the old Web callback consumer serving while that compatible Worker and the
+cleanup-only runtime roll out. The old UI can still offer linking during this
+window, but a request consumed by the new runtime performs credential cleanup
+only and cannot complete a new link. The forwarding entry preserves callbacks
+from old producers; it does not restore linking for upgraded runtimes. Before
+promoting Web route removal, the release owner must record all of the following:
+
+- The intended Worker and runtime image/source receipts match the release, native
+  rollout is terminal, and every callback-capable running or startable target is
+  accounted for. Include previous warm releases and retained next/small/standby
+  bindings, not just the active application. Old targets must be proven stopped
+  and unable to receive new work, or proven to run the cleanup-only image.
+- Old callback-producing invocations and their OAuth children have ended, with
+  no old-version attempt still executing or eligible to restart. Preserve the
+  existing runtime ownership and fencing rules; do not force completion or
+  stop accepted work merely to make this gate pass.
+- Already-forwarded callback requests have completed or reached a verified
+  terminal deadline at both Worker and Web. Application rollout completion,
+  client fetch timeout, or a quiet/sampled log interval alone cannot prove this.
+  Old checkpoint callbacks retry without a terminal attempt limit, so an OAuth
+  login timeout is not a drain deadline. If existing operational receipts cannot
+  prove this boundary, keep the consumer and report the gap.
+
+Queued legacy records in dormant snapshots need not all execute before Web
+promotion: they must be guaranteed to resume on the cleanup-only runtime, with
+legacy readers retained. Observe cleanup failures through the existing mailbox
+owner; do not replay historical work to manufacture drain evidence. After the
+producer/request boundary is proven, promote and verify Web route removal. Only
+a later reviewed Worker change may remove the temporary forwarding entry. Keep
+all other persisted-event reader floors. Reintroducing an old callback producer
+after consumer removal is unsafe; any exact rollback requires separate approval
+and compatibility assessment, not an automatic release retry.
+
+When this runtime-first transition also contains persona retirement, existing or
+newly saved old persona choices resolve to Classic; explicit tone, voice, Humor,
+Push and Detail remain effective. The old UI can still display choices until
+Web promotion, and stale open clients can retain them until refreshed; requests
+with retired fields then fail the new browser API. There is no fixed duration:
+close the mismatch by promoting Web promptly after the proven drain. Read-time
+normalization alone does not rewrite the stored selection, but subsequent
+canonical writes can persist Classic and code rollback cannot reconstruct the
+retired choice. The release owner must explicitly accept this consequence when
+approving the combined sequence.
 
 Hosted device-sync webhook freshness is owned by web dirty state, not mailbox
 completion. The route claims the exact provider trace, writes sparse

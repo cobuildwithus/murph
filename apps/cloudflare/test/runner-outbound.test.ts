@@ -238,7 +238,20 @@ type HostedSystemProgressProjection = Required<Pick<
   | "nextDefaultProcessingWakeReason"
   | "systemMailboxProgressGeneration"
 >>;
+const LEGACY_CODEX_AUTH_CALLBACK_PATH = "/api/internal/hosted-runtime/codex-auth";
 const ALLOWLISTED_WEB_CONTROL_CASES = [
+  ...["device_code", "connected", "failed", "disconnected"].map((phase) => ({
+    body: {
+      attemptId: "hca_abcdefghijklmnop",
+      phase,
+      ...(phase === "device_code" ? {
+        userCode: "SYNTHETIC-CODE",
+        verificationUrl: "https://auth.example.test/device",
+      } : {}),
+    },
+    name: `legacy ChatGPT auth callback ${phase}`,
+    path: LEGACY_CODEX_AUTH_CALLBACK_PATH,
+  })),
   {
     body: { days: 7, limit: 10 },
     name: "hosted usage diagnostics",
@@ -710,9 +723,9 @@ describe("handleRunnerOutboundRequest", () => {
       path: HOSTED_RUNTIME_CRYPTO_ROOT_PATH,
     },
     {
-      body: { attemptId: "hca_abcdefghijklmnop", phase: "connected" },
-      name: "retired member ChatGPT auth callback",
-      path: "/api/internal/hosted-runtime/codex-auth",
+      body: { action: "connect" },
+      name: "retired member ChatGPT settings",
+      path: "/api/settings/chatgpt",
     },
   ])("rejects unavailable web-control proxy path: $name", async ({ body, path }) => {
     expect(isAllowedHostedRunnerWebControlRequest({
@@ -895,6 +908,84 @@ describe("handleRunnerOutboundRequest", () => {
       expect(timeoutSpy).toHaveBeenCalledWith(45_000);
     },
   );
+
+  it.each([
+    { name: "GET", method: "GET", headers: createRunnerWriteFenceProxyHeaders(), status: 404 },
+    { name: "PUT", method: "PUT", headers: createRunnerWriteFenceProxyHeaders(), status: 405 },
+    { name: "missing proxy token", method: "POST", headers: {}, status: 401 },
+    { name: "missing runtime fence", method: "POST", headers: createRunnerProxyHeaders(), status: 401 },
+    { name: "missing generation", method: "POST", headers: createRunnerProxyHeaders({
+      "x-hosted-runtime-attempt-id": "attempt_1",
+    }), status: 401 },
+  ])("rejects legacy auth callback with $name before forwarding", async ({ method, headers, status }) => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const response = await handleRunnerOutboundRequest(
+      new Request(`http://web-control.worker${LEGACY_CODEX_AUTH_CALLBACK_PATH}`, { method, headers }),
+      createRunnerOutboundEnv(),
+      "member_123",
+    );
+    expect(response.status).toBe(status);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("signs the legacy callback body and runtime authority for only the bound user", async () => {
+    const payload = JSON.stringify({ attemptId: "hca_abcdefghijklmnop", phase: "connected" });
+    const fetchMock = vi.fn<typeof fetch>(async () => Response.json({ applied: true, status: "applied" }));
+    vi.stubGlobal("fetch", fetchMock);
+    const env = createRunnerOutboundEnv();
+    const response = await handleRunnerOutboundRequest(
+      new Request(`http://web-control.worker${LEGACY_CODEX_AUTH_CALLBACK_PATH}`, {
+        method: "POST", body: payload,
+        headers: createRunnerWriteFenceProxyHeaders({ "x-hosted-execution-user-id": "member_spoofed" }),
+      }),
+      env,
+      "member_123",
+    );
+    expect(response.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledOnce();
+    const [url, init] = fetchMock.mock.calls[0]!;
+    const request = new Request(String(url), init);
+    expect(await request.clone().text()).toBe(payload);
+    expect(request.headers.get("x-hosted-execution-user-id")).toBe("member_123");
+    expect(new URL(request.url).searchParams.get("runtimeAttempt")).toBe("attempt_1");
+    expect(new URL(request.url).searchParams.get("runtimeGeneration")).toBe("9");
+    const privateKeyJwkJson = env.HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK;
+    assert.ok(typeof privateKeyJwkJson === "string");
+    const signatureInput = {
+      environment: { keyId: "v1", privateKeyJwkJson },
+      method: "POST", nonceStore: { consume: vi.fn(async () => true) },
+      path: LEGACY_CODEX_AUTH_CALLBACK_PATH, payload, request,
+      search: new URL(request.url).search,
+    };
+    await expect(verifyHostedWebCallbackSignatureHeaders({
+      ...signatureInput, userId: "member_spoofed",
+    })).resolves.toBe(false);
+    await expect(verifyHostedWebCallbackSignatureHeaders({
+      ...signatureInput, userId: "member_123", payload: payload.replace("connected", "disconnected"),
+    })).resolves.toBe(false);
+    await expect(verifyHostedWebCallbackSignatureHeaders({
+      ...signatureInput, userId: "member_123",
+    })).resolves.toBe(true);
+  });
+
+  it.each([401, 404, 409, 500])("preserves legacy callback Web rejection %s without retrying", async (status) => {
+    const body = JSON.stringify({ error: "synthetic callback rejection" });
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(body, { status }));
+    vi.stubGlobal("fetch", fetchMock);
+    const response = await handleRunnerOutboundRequest(
+      new Request(`http://web-control.worker${LEGACY_CODEX_AUTH_CALLBACK_PATH}`, {
+        method: "POST", body: JSON.stringify({ attemptId: "hca_abcdefghijklmnop", phase: "failed" }),
+        headers: createRunnerWriteFenceProxyHeaders({ "x-hosted-runtime-attempt-id": "attempt_stale" }),
+      }),
+      createRunnerOutboundEnv(),
+      "member_123",
+    );
+    expect(response.status).toBe(status);
+    expect(await response.text()).toBe(body);
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(new Headers(fetchMock.mock.calls[0]?.[1]?.headers).get("x-hosted-runtime-attempt-id")).toBe("attempt_stale");
+  });
 
   it("rejects assistant personalization without the active runtime fence", async () => {
     const validateRuntimeWriteFence = vi.fn(async () => true);
