@@ -119,6 +119,7 @@ vi.mock("@murphai/hosted-execution", async () => {
 
 import {
   buildHostedExecutionStructuredLogRecord,
+  deriveHostedExecutionErrorCode,
   readHostedRuntimeSafeErrorText,
 } from "@murphai/hosted-execution";
 import {
@@ -870,6 +871,115 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     }
   }, 15_000);
 
+  it.each([
+    { boundary: "prepare", fetchCount: 0 },
+    { boundary: "presign", fetchCount: 1 },
+    { boundary: "transfer", fetchCount: 2 },
+    { boundary: "receipt", fetchCount: 2 },
+  ])("labels the snapshot upload $boundary failure boundary", async ({ boundary, fetchCount }) => {
+    const encryptedBytes = new Uint8Array([1, 2, 3, 4, 5]);
+    const tempRoot = await mkdtemp(path.join(tmpdir(), "murph-snapshot-upload-phase-"));
+    try {
+      const sourceFilePath = path.join(tempRoot, "snapshot.enc");
+      await writeFile(sourceFilePath, encryptedBytes);
+      const ref = createWorkspaceSnapshotV2Ref({ encryptedByteSize: encryptedBytes.length });
+      const timeout = new Error("Synthetic upload timed out.");
+      const fetchMock = vi.fn(async (...args: Parameters<typeof fetch>) => {
+        const request = requireFetchRequest(args, "snapshot upload phase");
+        if (request.url.endsWith("/presign-put")) {
+          if (boundary === "presign") throw timeout;
+          return Response.json({
+            expiresAt: new Date(Date.now() + 60_000).toISOString(),
+            managedUploadId: "synthetic-upload",
+            putUrl: "https://r2.example.test/snapshot",
+          });
+        }
+        await request.arrayBuffer();
+        if (boundary === "transfer") throw timeout;
+        return new Response(null, { status: 200 });
+      });
+      const platform = buildTestHostedExecutionRuntimePlatform({
+        boundUserId: "member_123",
+        fetchImpl: fetchMock as typeof fetch,
+      });
+      const failure = await platform.workspaceSnapshotPort!.putSnapshotObjectDirect({
+        encryptedByteSize: encryptedBytes.length,
+        encryptedObjectSha256: ref.archive.encryptedObjectSha256,
+        objectKey: ref.objectKey,
+        snapshotId: ref.snapshotId,
+        sourceFilePath: boundary === "prepare" ? `${sourceFilePath}.missing` : sourceFilePath,
+      }).catch((error: unknown) => error);
+
+      expect(failure).toMatchObject({ phase: `upload_${boundary}` });
+      expect(failure).not.toHaveProperty("timeoutMs");
+      expect(fetchMock).toHaveBeenCalledTimes(fetchCount);
+      if (boundary === "presign" || boundary === "transfer") {
+        expect(readHostedRuntimeSafeErrorText(failure)).toContain(timeout.message);
+        expect(deriveHostedExecutionErrorCode(failure)).toBe("timeout");
+      }
+      if (boundary === "receipt") {
+        expect(failure).toBeInstanceOf(Error);
+        expect(readHostedRuntimeSafeErrorText(failure)).toContain("part ETag");
+      }
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    { name: "mutable", error: new TypeError("Synthetic boundary timed out.", { cause: new Error("Synthetic original cause.") }) },
+    { name: "frozen", error: Object.freeze(new TypeError("Synthetic boundary timed out.")) },
+    { name: "primitive", error: "Synthetic boundary timed out." },
+    { name: "undefined", error: undefined },
+    { name: "existing phase", error: Object.assign(new Error("Synthetic failure."), { phase: "underlying_phase" }) },
+    { name: "frozen existing phase", error: Object.freeze(Object.assign(new Error("Synthetic failure."), { phase: "underlying_phase" })) },
+    { name: "inherited phase", error: Object.create(Object.assign(new Error("Synthetic failure."), { phase: "underlying_phase" })) },
+    { name: "accessor phase", error: Object.defineProperty(new Error("Synthetic failure."), "phase", { get() { throw new Error("Must not read a phase getter."); } }) },
+  ])("preserves $name errors while labeling snapshot upload authorization", async ({ error }) => {
+    const tempRoot = await mkdtemp(path.join(tmpdir(), "murph-snapshot-upload-error-"));
+    try {
+      const hadPhase = error instanceof Error && "phase" in error;
+      const phaseDescriptor = hadPhase ? Object.getOwnPropertyDescriptor(error, "phase") : undefined;
+      const originalCause = error instanceof Error ? error.cause : undefined;
+      const sourceFilePath = path.join(tempRoot, "snapshot.enc");
+      await writeFile(sourceFilePath, new Uint8Array([1]));
+      const ref = createWorkspaceSnapshotV2Ref({ encryptedByteSize: 1 });
+      const fetchMock = vi.fn();
+      const platform = buildTestHostedExecutionRuntimePlatform({
+        boundUserId: "member_123",
+        fetchImpl: fetchMock as typeof fetch,
+        workspaceCheckpointBridge: { readCurrentLease: () => { throw error; } },
+      });
+      const failure = await platform.workspaceSnapshotPort!.putSnapshotObjectDirect({
+        encryptedByteSize: 1,
+        encryptedObjectSha256: ref.archive.encryptedObjectSha256,
+        objectKey: ref.objectKey,
+        snapshotId: ref.snapshotId,
+        sourceFilePath,
+      }).catch((caught: unknown) => caught);
+
+      if (hadPhase) {
+        expect(failure).toBe(error);
+        expect(Object.getOwnPropertyDescriptor(failure, "phase")).toEqual(phaseDescriptor);
+      } else {
+        expect(failure).toMatchObject({ phase: "upload_presign" });
+        expect(deriveHostedExecutionErrorCode(failure)).toBe(deriveHostedExecutionErrorCode(error));
+        if (error instanceof Error && Object.isExtensible(error)) {
+          expect(failure).toBe(error);
+          expect(failure).toHaveProperty("cause", originalCause);
+        } else {
+          expect(failure).toHaveProperty("cause", error);
+          if (error instanceof Error) {
+            expect(failure).toMatchObject({ message: error.message, name: error.name });
+          }
+        }
+      }
+      expect(fetchMock).not.toHaveBeenCalled();
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
   it("sends direct R2 workspace snapshot PUTs with signed metadata headers", async () => {
     const encryptedBytes = new Uint8Array([1, 2, 3, 4, 5]);
     const tempRoot = await mkdtemp(path.join(tmpdir(), "murph-runner-platform-r2-put-"));
@@ -1160,6 +1270,9 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       // forever for retry jitter that an incorrect status classifier skipped.
       await Promise.race([retryJitter.advance(), outcome]);
       await outcome;
+      if (nextStatus !== 200) {
+        await expect(upload).rejects.toMatchObject({ phase: "upload_transfer" });
+      }
 
       expect(fetchMock).toHaveBeenCalledTimes(3);
       expect(putAttempt).toBe(2);
@@ -1310,6 +1423,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         "Hosted workspace snapshot direct R2 upload is not resumable after a transport failure;",
       );
       await expect(upload).rejects.not.toBe(wakeError);
+      await expect(upload).rejects.toMatchObject({ phase: "upload_transfer" });
       expect(fetchMock).toHaveBeenCalledTimes(2);
     } finally {
       await rm(tempRoot, { force: true, recursive: true });
@@ -1701,13 +1815,15 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         fetchImpl: fetchMock as typeof fetch,
       });
 
-      await expect(platform.workspaceSnapshotPort!.putSnapshotObjectDirect({
+      const upload = platform.workspaceSnapshotPort!.putSnapshotObjectDirect({
         encryptedByteSize: encryptedBytes.byteLength,
         encryptedObjectSha256: "c".repeat(64),
         objectKey,
         snapshotId: "snapshot_runner_platform",
         sourceFilePath: encryptedFilePath,
-      })).rejects.toThrow("Hosted workspace snapshot presign PUT request failed.");
+      });
+      await expect(upload).rejects.toThrow("Hosted workspace snapshot presign PUT request failed.");
+      await expect(upload).rejects.toMatchObject({ phase: "upload_presign" });
 
       expect(fetchMock).toHaveBeenCalledTimes(2);
       const firstPresignRequest = requireFetchRequest(
@@ -1760,13 +1876,15 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         fetchImpl: fetchMock as typeof fetch,
       });
 
-      await expect(platform.workspaceSnapshotPort!.putSnapshotObjectDirect({
+      const upload = platform.workspaceSnapshotPort!.putSnapshotObjectDirect({
         encryptedByteSize: encryptedBytes.byteLength,
         encryptedObjectSha256: "c".repeat(64),
         objectKey,
         snapshotId: "snapshot_runner_platform",
         sourceFilePath: encryptedFilePath,
-      })).rejects.toThrow(
+      });
+      await expect(upload).rejects.toMatchObject({ phase: "upload_presign" });
+      await expect(upload).rejects.toThrow(
         "Hosted workspace snapshot presign putUrl must be a non-empty string.",
       );
 
@@ -1779,11 +1897,12 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     }
   });
 
-  it("preserves cancellation while a direct R2 snapshot presign is pending", async () => {
+  it.each([false, true])("preserves cancellation while a direct R2 snapshot presign is pending (frozen=%s)", async (frozen) => {
     const encryptedBytes = new Uint8Array([1, 2, 3, 4, 5]);
     const tempRoot = await mkdtemp(path.join(tmpdir(), "murph-runner-platform-r2-presign-abort-"));
     const abortController = new AbortController();
     const abortReason = new Error("foreground wake interrupted snapshot presign");
+    if (frozen) Object.freeze(abortReason);
     let resolvePresignStarted: (() => void) | null = null;
     const presignStarted = new Promise<void>((resolve) => {
       resolvePresignStarted = resolve;
@@ -1818,6 +1937,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       abortController.abort(abortReason);
 
       await expect(upload).rejects.toBe(abortReason);
+      expect(abortReason).not.toHaveProperty("phase");
       expect(fetchMock).toHaveBeenCalledOnce();
     } finally {
       await rm(tempRoot, {
@@ -1827,11 +1947,12 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     }
   });
 
-  it("preserves cancellation while the direct R2 snapshot PUT is pending", async () => {
+  it.each([false, true])("preserves cancellation while the direct R2 snapshot PUT is pending (frozen=%s)", async (frozen) => {
     const encryptedBytes = new Uint8Array([1, 2, 3, 4, 5]);
     const tempRoot = await mkdtemp(path.join(tmpdir(), "murph-runner-platform-r2-put-abort-"));
     const abortController = new AbortController();
     const abortReason = new Error("foreground wake interrupted snapshot PUT");
+    if (frozen) Object.freeze(abortReason);
     const objectKey =
       "users/hsn_0123456789abcdef01234567/workspace-snapshots/snapshot_runner_platform.snapshot.enc";
     const putUrl =
@@ -1883,6 +2004,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       abortController.abort(abortReason);
 
       await expect(upload).rejects.toBe(abortReason);
+      expect(abortReason).not.toHaveProperty("phase");
       expect(fetchMock).toHaveBeenCalledTimes(2);
       const putRequest = requireFetchRequest(
         fetchMock.mock.calls[1],
@@ -1955,6 +2077,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         "Hosted workspace snapshot direct R2 upload is not resumable after a transport failure;",
       );
       await expect(upload).rejects.not.toBe(abortReason);
+      await expect(upload).rejects.toMatchObject({ phase: "upload_transfer" });
       expect(fetchMock).toHaveBeenCalledTimes(2);
       expect(putAttempt).toBe(1);
     } finally {

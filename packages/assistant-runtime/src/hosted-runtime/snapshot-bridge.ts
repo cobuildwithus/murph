@@ -1139,16 +1139,11 @@ function appendHostedCheckpointSnapshotFailureDiagnostics(
   }
 
   const diagnostics = buildHostedExecutionSafeErrorDiagnostics(error);
-  const sessionFailure = readHostedWorkspaceSnapshotFailure(error);
-  if (sessionFailure?.kind === "start") {
-    redactedJson.snapshotSessionStartFailurePhase = sessionFailure.phase;
-    if (sessionFailure.timeoutMs !== undefined) {
-      redactedJson.snapshotSessionStartTimeoutMs = sessionFailure.timeoutMs;
-    }
-  } else if (sessionFailure?.kind === "complete") {
-    redactedJson.snapshotSessionCompleteFailurePhase = sessionFailure.phase;
-    if (sessionFailure.timeoutMs !== undefined) {
-      redactedJson.snapshotSessionCompleteTimeoutMs = sessionFailure.timeoutMs;
+  const snapshotFailure = readHostedWorkspaceSnapshotFailure(error);
+  if (snapshotFailure) {
+    redactedJson[`${snapshotFailure.prefix}FailurePhase`] = snapshotFailure.phase;
+    if (snapshotFailure.timeoutMs !== undefined) {
+      redactedJson[`${snapshotFailure.prefix}TimeoutMs`] = snapshotFailure.timeoutMs;
     }
   }
   let safeDiagnosticDetail: string | null = null;
@@ -1224,9 +1219,15 @@ const HOSTED_WORKSPACE_SNAPSHOT_SESSION_COMPLETE_FAILURE_PHASES = new Set([
   "session_complete_response_decode",
   "session_complete_write_fence_headers",
 ]);
+const HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_FAILURE_PHASES = new Set([
+  "upload_prepare",
+  "upload_presign",
+  "upload_transfer",
+  "upload_receipt",
+]);
 
 function readHostedWorkspaceSnapshotFailure(error: unknown): {
-  kind: "complete" | "start";
+  prefix: "snapshotSessionComplete" | "snapshotSessionStart" | "snapshotUpload";
   phase: string;
   timeoutMs?: number;
 } | null {
@@ -1240,22 +1241,25 @@ function readHostedWorkspaceSnapshotFailure(error: unknown): {
   if (typeof phase !== "string") {
     return null;
   }
-  const kind = HOSTED_WORKSPACE_SNAPSHOT_SESSION_START_FAILURE_PHASES.has(phase)
-    ? "start"
+  const prefix = HOSTED_WORKSPACE_SNAPSHOT_SESSION_START_FAILURE_PHASES.has(phase)
+    ? "snapshotSessionStart"
     : HOSTED_WORKSPACE_SNAPSHOT_SESSION_COMPLETE_FAILURE_PHASES.has(phase)
-      ? "complete"
-      : null;
-  if (!kind) {
+      ? "snapshotSessionComplete"
+      : HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_FAILURE_PHASES.has(phase)
+        ? "snapshotUpload"
+        : null;
+  if (!prefix) {
     return null;
   }
   if (
-    typeof timeoutMs !== "number"
+    prefix === "snapshotUpload"
+    || typeof timeoutMs !== "number"
     || !Number.isSafeInteger(timeoutMs)
     || timeoutMs < 0
   ) {
-    return { kind, phase };
+    return { prefix, phase };
   }
-  return { kind, phase, timeoutMs };
+  return { prefix, phase, timeoutMs };
 }
 
 function normalizeHostedWorkspaceSnapshotDiagnosticsHashSecret(

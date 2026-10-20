@@ -4649,6 +4649,15 @@ fixed `snapshotStage`: `plan`, `session`, `archive`, `upload`, or `checkpoint`.
 These events prove local progress only; they do not claim that Web accepted a
 checkpoint.
 
+An upload failure may also carry `snapshotUploadFailurePhase`, limited to
+`upload_prepare` (local file verification and hashing), `upload_presign`
+(write-fence headers and presign request/response validation), `upload_transfer`
+(direct PUT and its existing bounded retries), or `upload_receipt` (managed-part
+receipt processing). The terminal owner reads the existing safe error phase and
+omits unrecognized values. An underlying phase is preserved instead of replaced,
+and exact caller interruptions remain unchanged. Session-start and completion
+phase/timeout diagnostics and successful upload timings retain their contracts.
+
 Runtime logs remain lossy observability. Finished and preempted info events use
 the bounded process-global best-effort queue; failure warning/error events
 bypass that verbose queue but still swallow log-endpoint failure, and a runtime
