@@ -160,15 +160,12 @@ export function buildHostedRuntimeTypingAlertQuery(input: {
       -- exact event, including reactions whose synthetic message identity
       -- differs from the provider's reacted-to message. Later events cannot
       -- change this input's origin or conversation.
-      LEFT JOIN LATERAL (
-        SELECT event.provider_created_at, event.linq_chat_lookup_key
-        FROM hosted_mailbox_item AS mailbox
-        JOIN hosted_linq_provider_event AS event
-          ON event.event_id = ${buildProviderEventLookupKeySql(Prisma.sql`mailbox.dedupe_key`)}
-        WHERE trace.source = 'linq'
-          AND mailbox.id = trace.mailbox_item_id
-          AND mailbox.user_id = trace.user_id
-      ) AS provider_event ON TRUE
+      LEFT JOIN hosted_mailbox_item AS mailbox
+        ON mailbox.id = trace.mailbox_item_id
+       AND mailbox.user_id = trace.user_id
+      LEFT JOIN hosted_linq_provider_event AS provider_event
+        ON trace.source = 'linq'
+       AND provider_event.event_id = ${buildProviderEventLookupKeySql(Prisma.sql`mailbox.dedupe_key`)}
       CROSS JOIN LATERAL (SELECT LEAST(trace.webhook_received_at,
         provider_event.provider_created_at) AS at) AS origin
       WHERE trace.source IN ('linq', 'telegram')
@@ -176,12 +173,7 @@ export function buildHostedRuntimeTypingAlertQuery(input: {
         AND trace.accepted_at >= ${new Date(input.now.getTime() - 7 * 24 * 60 * 60_000)}
         AND trace.webhook_received_at <= ${input.now}
         ${scope}
-        AND NOT EXISTS (
-          SELECT 1 FROM hosted_mailbox_item AS mailbox
-          WHERE mailbox.id = trace.mailbox_item_id
-            AND mailbox.user_id = trace.user_id
-            AND mailbox.ai_usage_denied_at IS NOT NULL
-        )
+        AND mailbox.ai_usage_denied_at IS NULL
         AND NOT EXISTS (
           SELECT 1 FROM hosted_linq_alert AS alert
           WHERE alert.id = 'runtime-typing/' || trace.id

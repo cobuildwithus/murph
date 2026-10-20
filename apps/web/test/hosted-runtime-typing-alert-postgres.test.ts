@@ -454,17 +454,24 @@ describe.skipIf(!enabled)("per-message typing alert PostgreSQL proof", () => {
       await insertTrace(tx, "denied-later-typing", { source, elapsed: 20_000, usageDeniedAt });
       await insertTrace(tx, "allowed-slow", { source, elapsed: 4000 });
       await insertTrace(tx, "allowed-missing", { source, cold: null, elapsed: null });
+      await insertTrace(tx, "absent-mailbox", { source, elapsed: 4000 });
+      await tx.$executeRaw`DELETE FROM hosted_mailbox_item WHERE id = 'mailbox-absent-mailbox'`;
+      await insertTrace(tx, "foreign-denial", { source, elapsed: 4000, usageDeniedAt });
+      await tx.$executeRaw`UPDATE hosted_mailbox_item SET user_id = 'foreign-member'
+        WHERE id = 'mailbox-foreign-denial'`;
 
       const fetchImpl = vi.fn<typeof fetch>().mockImplementation(async () =>
         new Response(JSON.stringify({ id: "synthetic-email" }), { status: 200 }));
       expect(await runHostedRuntimeTypingAlertMonitor({ env, fetchImpl, now, prisma: tx })).toEqual({
-        queuedCount: 2, scanTruncated: false,
+        queuedCount: 4, scanTruncated: false,
       });
-      expect(fetchImpl).toHaveBeenCalledTimes(2);
+      expect(fetchImpl).toHaveBeenCalledTimes(4);
       const alerts = await tx.hostedLinqAlert.findMany({ select: { id: true, status: true } });
       expect(alerts.sort((a, b) => a.id.localeCompare(b.id))).toEqual([
+        { id: "runtime-typing/absent-mailbox", status: "sent" },
         { id: "runtime-typing/allowed-missing", status: "sent" },
         { id: "runtime-typing/allowed-slow", status: "sent" },
+        { id: "runtime-typing/foreign-denial", status: "sent" },
       ]);
     });
   });
