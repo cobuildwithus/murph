@@ -29,9 +29,6 @@ vi.mock("@/src/lib/hosted-execution/internal-request-nonces", () => ({
 vi.mock("@/src/lib/hosted-runtime-log/write", () => ({ writeHostedRuntimeLogs: edges.write }));
 vi.mock("@/src/lib/hosted-workspace/store", () => ({ claimHostedAcceptedAttemptFailureRecheck: async () => false }));
 vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({ signalHostedRuntimeRecheckRuntime: vi.fn() }));
-vi.mock("@/src/lib/hosted-runtime-log/personal-patterns-run-alert", () => ({
-  hasHostedPersonalPatternsRunAlert: () => false, reportHostedPersonalPatternsRunAlerts: vi.fn(),
-}));
 
 import { GET } from "../app/api/internal/hosted-runtime/protocol-admission/route";
 import { POST as log } from "../app/api/internal/hosted-runtime/log/route";

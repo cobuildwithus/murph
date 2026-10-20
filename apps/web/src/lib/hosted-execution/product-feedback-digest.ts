@@ -5,7 +5,6 @@ import {
   formatTimeZoneDateTimeParts,
 } from "@murphai/contracts";
 import {
-  HOSTED_PATTERN_ENGINE_AUDIT_PREFIX,
   HOSTED_PRODUCT_FEEDBACK_KINDS,
   HOSTED_PRODUCT_SUPPORT_ESCALATION_PREFIX,
   HOSTED_USAGE_OPTIMIZATION_AUDIT_PREFIX,
@@ -171,16 +170,11 @@ export async function readHostedProductFeedbackDigestBatch(input: {
     kind: {
       in: [...HOSTED_PRODUCT_FEEDBACK_KINDS],
     },
-    // Internal pattern audits and support details have their own review paths.
+    // Support details and usage audits have their own review paths.
     NOT: [
       {
         summary: {
           startsWith: HOSTED_PRODUCT_SUPPORT_ESCALATION_PREFIX,
-        },
-      },
-      {
-        summary: {
-          startsWith: HOSTED_PATTERN_ENGINE_AUDIT_PREFIX,
         },
       },
       ...(!input.usageReportsOnly

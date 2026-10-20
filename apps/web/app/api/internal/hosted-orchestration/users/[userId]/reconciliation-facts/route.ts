@@ -1,5 +1,3 @@
-import { after } from "next/server";
-import { reportHostedRuntimeUsageGateObservation } from "@/src/lib/hosted-runtime-log/usage-gate";
 import {
   parseHostedRuntimeReconciliationFactsRequest,
 } from "@murphai/hosted-execution/parsers";
@@ -85,15 +83,7 @@ export const GET = withJsonError(async (
     >;
     try {
       facts = await readHostedRuntimeReconciliationFactsWithVisibleAccess(
-        {
-          ...factsRequest,
-          onUsageGateDecision: (observation) => {
-            after(() => reportHostedRuntimeUsageGateObservation({
-              ...observation,
-              userId: authenticatedUserId,
-            }));
-          },
-        },
+        factsRequest,
         (stage) => {
           failureStage = stage;
           reportStage(stage);

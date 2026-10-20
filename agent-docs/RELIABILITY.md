@@ -2438,39 +2438,12 @@ to apply after cutover.
   projection of id, lifecycle status, and setup phase. Selection never opens
   credential ciphertext; connect and resume mutation owners still revalidate
   the exact selected connection and source authority.
-- Personal Patterns operator email excludes usage-limit interruptions. Explicit
-  `ASSISTANT_CODEX_USAGE_LIMIT` terminal failures stay quiet. Expirations stay
-  quiet when the authenticated member's retained usage-gate observations show
-  a limit at the occurrence or during its wait, or a retained failure for that
-  exact occurrence records a provider usage limit. An allowed decision before the
-  occurrence closes the earlier pause; a later reset does not erase it.
-  Web records actual authoritative gate decisions with type `runtime.ai_usage_gate`
-  inside the existing `assistant.automation_detail` event after the response; read-only status, ungated model-free work,
-  and diagnostics never alter admission. A selected inference override records
-  an unpaused decision. The existing isolated log store and retention own this
-  metadata; no billing state or new scheduler is introduced. One bounded,
-  subject-scoped query classifies at most 50 candidates before email coalescing.
-  Missing/retired history and diagnostic failures preserve ordinary alerts,
-  and non-usage terminal failures still alert even beside a suppressed expiry.
-  All remaining Personal Patterns operator email is terminal-state only. A failed cron
-  attempt remains silent while the finalized job has a scheduled retry. Web
-  treats an absent retry disposition from an older runner as non-terminal, so
-  the consumer can deploy first. Terminal failures and expired occurrences for
-  one scheduled time share one generic body and one member-independent Resend
-  idempotency key. Concurrent failures therefore produce at most one operator
-  email for that occurrence without adding a database row, queue, or second
-  retry owner.
-  The generic body explicitly covers both expiry and terminal failure; expiry
-  does not establish that model execution or automatic retry occurred. The
-  expiry event carries `priorFailureCount` from the existing cron state
-  (`failurePriorFailureCount` in hosted logs), where zero means no retained
-  prior failures, not proof that no attempt ran. Snapshot lifecycle diagnostics
-  classify ordinary and default-processing wake timestamps as `omitted`,
-  `none`, `invalid`, `due`, or `future`, with signed millisecond offsets measured
-  when the diagnostic is built. Negative means overdue. These describe the
-  requested checkpoint; only the finished event's `webCheckpointAccepted`
-  establishes Web acceptance. Malformed timestamp values and raw wake reasons
-  are never copied into these fields.
+- Snapshot lifecycle diagnostics classify ordinary and default-processing wake
+  timestamps as `omitted`, `none`, `invalid`, `due`, or `future`, with signed
+  millisecond offsets measured when built. Negative means overdue. These describe
+  the requested checkpoint; only the finished event's `webCheckpointAccepted`
+  establishes Web acceptance. Malformed timestamps and raw wake reasons are
+  never copied into these fields.
 - Per-message typing alerts independently measure the member's wait through the
   earliest accepted typing indicator: strictly over 2.5 seconds for a warm
   workspace and over 7 seconds for a cold workspace. Linq waits start at the

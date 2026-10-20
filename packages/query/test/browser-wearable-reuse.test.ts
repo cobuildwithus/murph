@@ -5,7 +5,6 @@ import { createBrowserVaultReplica } from "../src/browser-replica/build.ts";
 import { createVaultReadModel } from "../src/read-model.ts";
 import { isDefaultProjectedQueryEntity } from "../src/query-visibility.ts";
 import { buildMetricProjection } from "../src/metrics/projection.ts";
-import * as patterns from "../src/personal-patterns.ts";
 import * as wearables from "../src/wearables.ts";
 import * as candidates from "../src/wearables/candidates.ts";
 
@@ -40,29 +39,23 @@ for (const filtered of [false, true]) {
     const build = wearables.buildWearableSummaryBundle;
     const selectHealth = wearables.summarizeWearableSourceHealthFromBundle;
     const selectAssistant = wearables.buildWearableAssistantSummaryFromBundle;
-    const selectPatterns = patterns.buildPersonalPatternReportFromWearableBundleAndMetricPoints;
     const bundles = vi.spyOn(wearables, "buildWearableSummaryBundle").mockImplementation((...args) => freeze(build(...args)));
     const collected = vi.spyOn(candidates, "collectWearableDataset");
     const health = vi.spyOn(wearables, "summarizeWearableSourceHealthFromBundle");
     const assistant = vi.spyOn(wearables, "buildWearableAssistantSummaryFromBundle");
-    const personal = vi.spyOn(patterns, "buildPersonalPatternReportFromWearableBundleAndMetricPoints");
     const replica = await createBrowserVaultReplica(input);
-    assert.equal(bundles.mock.calls.length, filtered ? 1 : 2);
-    assert.equal(collected.mock.calls.length, filtered ? 1 : 2);
+    assert.equal(bundles.mock.calls.length, 1);
+    assert.equal(collected.mock.calls.length, 1);
     const defaultBundle = health.mock.calls[0]![0];
     assert.equal(assistant.mock.calls[0]![0], defaultBundle);
-    assert.equal(personal.mock.calls[0]![0], input.vault);
-    assert.equal(personal.mock.calls[0]![1] === defaultBundle, filtered);
     assert.equal(JSON.stringify(input), before);
     vi.restoreAllMocks();
-    // Independent old inputs for the three consumers; reuse the unchanged
+    // Independent old inputs for the two consumers; reuse the unchanged
     // replica renderer/hash instead of copying an entire alternative builder.
     vi.spyOn(wearables, "summarizeWearableSourceHealthFromBundle")
       .mockImplementation((_bundle, filters) => selectHealth(build(defaultVault), filters));
     vi.spyOn(wearables, "buildWearableAssistantSummaryFromBundle")
       .mockImplementation((_bundle, filters) => selectAssistant(build(defaultVault), filters));
-    vi.spyOn(patterns, "buildPersonalPatternReportFromWearableBundleAndMetricPoints")
-      .mockImplementation((vault, _bundle, points, options) => selectPatterns(vault, build(vault), points, options));
     const reference = await createBrowserVaultReplica(input);
     assert.equal(JSON.stringify(replica), JSON.stringify(reference));
     assert.equal(replica.source.dataVersion, reference.source.dataVersion);

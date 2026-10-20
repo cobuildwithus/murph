@@ -27,7 +27,6 @@ import {
   HOSTED_PRODUCT_SUPPORT_ESCALATION_PREFIX,
   HOSTED_PRODUCT_SUPPORT_ESCALATION_RECORD_SUMMARY,
 } from "@/src/lib/hosted-execution/product-feedback";
-import { HOSTED_PATTERN_ENGINE_AUDIT_PREFIX } from "@murphai/hosted-execution/runtime-control";
 
 const feedbackDigestEnv = {
   HOSTED_LINQ_ALERT_EMAIL_FROM: "Murph Alerts <alerts@example.test>",
@@ -235,11 +234,6 @@ describe("hosted product feedback digest", () => {
         {
           summary: {
             startsWith: "Support escalation:",
-          },
-        },
-        {
-          summary: {
-            startsWith: HOSTED_PATTERN_ENGINE_AUDIT_PREFIX,
           },
         },
         {

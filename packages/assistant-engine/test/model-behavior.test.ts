@@ -648,7 +648,7 @@ describe('assistant execution prompt contract', () => {
     expect(directPrompt).toContain('journal-outcome')
     expect(directPrompt).toContain('per independent fact')
     expect(directPrompt).toContain('--related-id')
-    expect(directPrompt).toContain('missing data remains unknown')
+    expect(directPrompt).toContain('Missing reports never mean absence')
     expect(directPrompt).toContain('even when the member is asking for advice')
     expect(directPrompt).toContain('An extra request to save is not required')
     expect(directPrompt).toContain('short English event name')
@@ -662,13 +662,11 @@ describe('assistant execution prompt contract', () => {
     expect(directPrompt).toContain('hypothetical questions are not events')
     expect(directPrompt).toContain('use `note` when none fits')
     expect(directPrompt).toContain('start one workout')
-    expect(directPrompt).toContain("member's assigned local schedule")
-    expect(directPrompt).not.toContain('Check at 13:00 local')
-    expect(directPrompt).toContain(
-      'vault-cli wearables patterns --date <local-date> --format json',
-    )
-    expect(directPrompt).toContain('exactly once')
-    expect(directPrompt).toContain('stop proactive questions when asked')
+    expect(directPrompt).not.toContain('Types and Pattern tags')
+    expect(directPrompt).not.toContain('scored Pattern outcome')
+    expect(directPrompt).not.toContain('wearables patterns')
+    expect(directPrompt).not.toContain('personal-pattern-notifications')
+    expect(directPrompt).toContain('Stop proactive questions when asked')
     expect(directPrompt).toContain('read the relevant canonical records with a bounded query')
     expect(directPrompt).toContain(
       'tell users to ask Murph; never claim web controls',

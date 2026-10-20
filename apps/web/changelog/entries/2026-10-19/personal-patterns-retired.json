@@ -1,0 +1,19 @@
+{
+  "publishedOn": "2026-10-19",
+  "order": 100,
+  "item": {
+    "id": "personal-patterns-retired",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Personal Patterns has been retired",
+    "summary": "The Patterns page and its automatic daily updates have been removed.",
+    "details": "Journal and wearable summaries remain available. Existing health records and saved notes are kept.",
+    "relevanceTags": [
+      "journal",
+      "wearables"
+    ],
+    "sourcePullRequests": [
+      4215
+    ]
+  }
+}
