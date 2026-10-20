@@ -41,8 +41,8 @@ export function inspectHostedStripeBillingWorkflow(
   );
   requireText(
     "missing-live-schedule",
-    '  schedule:\n    - cron: "23 8 * * *"\n',
-    "Live Stripe proof must run once daily.",
+    '  schedule:\n    - cron: "23 8 * * 1,4"\n',
+    "Live Stripe proof must run twice weekly on Monday and Thursday (UTC).",
   );
   if (source.includes("pull_request_target")) {
     issues.push({

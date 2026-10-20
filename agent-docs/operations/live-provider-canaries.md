@@ -78,7 +78,8 @@ release-required proof. Actual billed savings depend on executed job duration.
   send-to-reply and inter-reply budgets remain 20 seconds; canonical observation
   time is excluded. The workflow has a 55-minute cap covering reset, all three
   observations, replies, setup, and final exact-deployment verification.
-- Stripe runs its protected sandbox browser matrix daily. Hermetic billing checks
+- Stripe runs its protected sandbox browser matrix Monday and Thursday at 08:23 UTC.
+  Hermetic billing checks
   remain on every eligible PR and main push; a scheduled run requires live success.
   After the browser
   schedules Edge to Pulse, a real owned test clock advances through renewal and
@@ -113,7 +114,10 @@ release-required proof. Actual billed savings depend on executed job duration.
 ## Garmin execution boundary
 
 The public `.github/workflows/junction-wearable-canary.yml` controller runs on
-a daily schedule and manual recovery. It reuses only the existing
+a Monday/Thursday 05:43 UTC schedule and manual recovery. Both Garmin and Stripe
+run twice weekly, down from seven slots: 72/96-hour nominal gaps, with no DST
+shift or month-boundary reset. This approximates one-third of the former cadence.
+The controller reuses only the existing
 `temporal-compatibility` Environment's repository-scoped GitHub App authority:
 private Actions write and Contents read for `cobuildwithus/murph-cloud`. It never
 checks out private source, receives provider credentials, or downloads private
