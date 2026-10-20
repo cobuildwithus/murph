@@ -733,10 +733,18 @@ to apply after cutover.
   the existing authenticated control/session and decryption owners; it never
   refreshes a replica or wakes the runtime. Readiness requires no uncheckpointed
   conversation input, a replica matching the current canonical source checkpoint,
-  and unchanged identity/checkpoint across the read. Only readiness, total goal
-  count, fixed synthetic goal count, and distinct canonical goal ID count leave
-  the boundary, with `Cache-Control: no-store`. Titles, member IDs, source refs, decrypted data,
-  and ephemeral key material remain request-local and are never logged or returned.
+  and unchanged identity/checkpoint across the read. Readiness and canonical
+  total/active/distinct-ID Goal counts retain their existing semantics. Optional
+  timing diagnostics read at most four projected Linq traces for that authorized
+  member, using the existing member/accepted-time index within a server-owned
+  ten-minute window. At most three observations leave the boundary, with fixed
+  stages, booleans and bounded durations only; they never assert an exact turn
+  match. Identity and active/runtime access are rechecked before returning any
+  observations, including when Goals are not ready. Trace failure is best effort;
+  canonical Goal read failure remains unavailable. No external work is wrapped
+  in a transaction. The response remains `Cache-Control: no-store`. Titles,
+  member/mailbox/attempt/message IDs, absolute timestamps, source refs, decrypted
+  data, provider payloads and ephemeral key material are never logged or returned.
 - Privy completion with an ambient Murph app session is same-member reauthentication, not account switching. The fresh Privy user id and resolved member id must both match that app session before web issues a replacement session; a member who intends to switch accounts must end the current app session first.
 - Provider-observed Linq email identity retains its encrypted normalized source
   separately from verified-email authorization. Every canonical verified-email
