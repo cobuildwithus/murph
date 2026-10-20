@@ -129,7 +129,8 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
 
     const preview = await readInvitePreview(token);
     if (preview?.status !== "open") throw new Error("expected an open invite");
-    expect(preview).toMatchObject({ inviteeFirstName: "Ava", inviterFirstName: "Leo" });
+    expect(preview).toMatchObject({ inviterFirstName: "Leo" });
+    expect(preview).not.toHaveProperty("inviteeFirstName");
     expect(preview.terms.tasks[0].text).toBe("100 pushups");
 
     // Accept (from New York, so Start now below starts today for both); the
@@ -343,10 +344,13 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
       type: "createGame",
     })).toBe("INVALID_REQUEST");
 
-    const created = await ok(leo, { gameId: randomUUID(), inviteeFirstName: "Ava", terms: { ...TERMS, startsOn }, type: "createGame" });
+    // The name Leo types for the invitee is his private label: the public preview never carries it.
+    const created = await ok(leo, { gameId: randomUUID(), inviteeFirstName: "Babe", terms: { ...TERMS, startsOn }, type: "createGame" });
     expect(created!.startsOn).toBe(startsOn);
     const preview = await readInvitePreview(created!.inviteToken!);
-    expect(preview).toMatchObject({ startsOn, status: "open" });
+    expect(preview).toMatchObject({ inviterFirstName: "Leo", startsOn, status: "open" });
+    expect(preview).not.toHaveProperty("inviteeFirstName");
+    expect(JSON.stringify(preview)).not.toContain("Babe");
 
     const joined = await ok(ava, { termsVersion: 1, timeZone: "Australia/Sydney", token: created!.inviteToken!, type: "join" });
     expect(joined).toMatchObject({ startsOn, status: "live" });

@@ -11,12 +11,8 @@ vi.mock("@/src/lib/game/service", () => ({ readInvitePreview: mocks.readInvitePr
 
 const { generateMetadata } = await import("@/app/g/[token]/page");
 
-// The challenger's private name for the invitee: it must never reach a link preview.
-const PRIVATE_INVITEE_NAME = "Babe";
-
 const OPEN: GameInvitePreview = {
   expiresAt: "2026-10-26T15:00:00.000Z",
-  inviteeFirstName: PRIVATE_INVITEE_NAME,
   inviterFirstName: "Leo",
   startsOn: null,
   status: "open",
@@ -50,15 +46,13 @@ describe("weekly game invite link preview", () => {
     expect(metadata.twitter).toMatchObject({ card: "summary_large_image", images: [image], title: "Leo challenged you" });
     expect(metadata.robots).toEqual({ follow: false, index: false });
     expect(metadata.referrer).toBe("no-referrer");
-    // Title, description, and alt text name the challenger, never the invitee's private label.
-    expect(JSON.stringify(metadata)).not.toContain(PRIVATE_INVITEE_NAME);
   });
 
-  it("puts the challenger against \"You\" on the card, never the invitee's private name", () => {
+  // The preview never carries the invitee's name (the challenger's private label), so the card says "You".
+  it("puts the challenger against \"You\" on the card", () => {
     const html = renderToStaticMarkup(createElement(GameInviteShareCard, { preview: OPEN }));
     expect(html).toContain("Leo");
     expect(html).toContain("You");
-    expect(html).not.toContain(PRIVATE_INVITEE_NAME);
   });
 
   it("describes a per-miss stake, and encodes the token in the card's address", async () => {

@@ -821,16 +821,15 @@ export async function readInvitePreview(token: string): Promise<GameInvitePrevie
   const expired = row.status === "void"
     || (row.status === "invited" && row.inviteExpiresAt !== null && row.inviteExpiresAt.getTime() < now.getTime());
   if (row.status !== "invited" || expired) return { status: expired ? "expired" : "used" };
-  const label = parsePendingLabel(row.pendingLabel);
-  const [inviterFirstName, inviteeFirstName, words] = await openGameTexts([
+  // The invitee's name stays out: the challenger typed it as their own private
+  // label, and this preview is public to anyone holding the link.
+  const [inviterFirstName, words] = await openGameTexts([
     { field: "first_name", memberId: row.createdBy, rowId: row.createdBy, table: "game_profile", value: row.creator.firstNameEncrypted },
-    { ...labelTarget(row.createdBy, "name"), value: label.nameEncrypted },
     { ...gameTarget(row, "terms_words"), value: row.termsWordsEncrypted },
   ]);
   const game = toRuleStateGame(row, parseStoredTerms(row.terms));
   return {
     expiresAt: (row.inviteExpiresAt ?? row.createdAt).toISOString(),
-    inviteeFirstName: inviteeFirstName ?? "",
     inviterFirstName: inviterFirstName ?? "",
     startsOn: game.startsOn,
     status: "open",

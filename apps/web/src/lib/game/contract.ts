@@ -219,7 +219,13 @@ export type GameInvitePreview =
   | {
       status: "open";
       inviterFirstName: string;
-      inviteeFirstName: string;
+      /**
+       * Never sent. The name a challenger types for the invitee is their own
+       * private label, and this preview is served to anyone holding the link
+       * without sign-in. Kept optional so older clients that decode it still
+       * parse; they fall back to the member's own first name.
+       */
+      inviteeFirstName?: never;
       terms: GameTermsVersion;
       /** The picked Day 1, if the challenger chose one. */
       startsOn: string | null;

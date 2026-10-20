@@ -16,7 +16,6 @@ vi.mock("next/image", () => ({
 
 const OPEN: GameInvitePreview = {
   expiresAt: "2026-10-23T15:00:00.000Z",
-  inviteeFirstName: "Ava",
   inviterFirstName: "Leo",
   startsOn: null,
   status: "open",
