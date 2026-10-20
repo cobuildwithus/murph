@@ -43,12 +43,10 @@ export type { HealthCommonsGoalSource } from "./goal-sources.ts";
 import {
   getGeneratedHealthCommonsWebGoalIndex,
   loadGeneratedHealthCommonsWebGoalIndex,
-  loadGeneratedHealthCommonsWebGoalPage,
-} from "./goal-runtime.ts";
+} from "./goal-index-runtime.ts";
 export {
   getGeneratedHealthCommonsWebGoalIndex,
   loadGeneratedHealthCommonsWebGoalIndex,
-  loadGeneratedHealthCommonsWebGoalPage,
 };
 import {
   defaultHealthCommonsPackageRootUrl,

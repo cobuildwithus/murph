@@ -42,7 +42,6 @@ import {
   buildCodexAppServerArgs,
   compactWarmCodexThread,
   executeCodexAppServerTurn as executeCodexAppServerTurnUnchecked,
-  executeCodexManagedAccountOperation,
   preinitializeCodexAppServer,
   readCodexAppServerTurnFailureContext,
   resolveCodexDisplayOptions,
@@ -974,13 +973,6 @@ describe('assistant codex runtime', () => {
     const boundary = waitForWarmCodexBackgroundWork()
     await boundaryRequestObserved.promise
     await expect(waitForWarmCodexBackgroundWork()).rejects.toMatchObject({
-      code: 'ASSISTANT_CODEX_APP_SERVER_BUSY',
-    })
-    await expect(executeCodexManagedAccountOperation({
-      action: 'disconnect',
-      codexHome,
-      workingDirectory,
-    })).rejects.toMatchObject({
       code: 'ASSISTANT_CODEX_APP_SERVER_BUSY',
     })
     await expect(executeCodexAppServerTurn({

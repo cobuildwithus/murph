@@ -8,7 +8,6 @@ import {
 } from "../src/knowledge-index.ts";
 import {
   loadGeneratedHealthCommonsWebGoalIndex,
-  loadGeneratedHealthCommonsWebGoalPage,
 } from "../src/runtime.ts";
 
 const knowledgeIndexPath = fileURLToPath(
@@ -36,7 +35,7 @@ describe("Health Commons full-catalog knowledge retrieval", () => {
     expect(result.items.every((item) => item.sources.length > 0)).toBe(true);
   });
 
-  it("keeps colliding goals on the dedicated goal list and show surfaces", () => {
+  it("keeps colliding goals in the dedicated compact goal index", () => {
     const listedGoal = loadGeneratedHealthCommonsWebGoalIndex().goals.find(
       (goal) => goal.key === "goal_template:improve-deep-sleep",
     );
@@ -48,20 +47,6 @@ describe("Health Commons full-catalog knowledge retrieval", () => {
       title: "Improve My Deep Sleep",
     });
 
-    expect(loadGeneratedHealthCommonsWebGoalPage({
-      routeId: "improve-deep-sleep",
-    })).toMatchObject({
-      goal: {
-        goalPhrase: "improve my deep sleep",
-        indexable: true,
-      },
-      key: "goal_template:improve-deep-sleep",
-      route: {
-        entityType: "goal_template",
-        routeId: "improve-deep-sleep",
-      },
-      title: "Improve My Deep Sleep",
-    });
   });
 
   it("does not substitute nearby topics for unsupported queries", () => {

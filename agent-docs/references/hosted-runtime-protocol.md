@@ -3060,15 +3060,17 @@ workspace may still hit the runtime's format gate on its next wake, so the
 operator rollout gate is zero known v1 hosted snapshots before returning to
 normal traffic.
 
-Hosted Codex auth is system-mailbox runtime-control work, but hosted ChatGPT
-connect is disabled until credentials have an isolated control-plane owner
-outside the hosted tool filesystem. Already-queued connect wakes fail closed
-without starting OAuth. Disconnect remains local-revocation-first for cleanup:
-remote app-server logout is best effort, local `auth.json` deletion is required,
-and a local deletion failure keeps the system-mailbox item retryable instead of
-consuming a revocation request. Any terminal `connected` callback from an old
-in-flight wake prunes local managed `auth.json` and is reported as a failed
-connection cleanup callback, not as a durable connected state.
+Member ChatGPT account linking is retired. Web no longer creates linking attempts
+or accepts runtime auth callbacks, and the runtime performs no member OAuth or
+remote logout. Legacy `runtime.codex-auth-requested` wakes and
+`codex-auth.updated` checkpoint records remain readable solely to delete local
+`auth.json`; deletion failures retain retryable mailbox work. Remove those
+readers only after retained mailbox records and snapshots have drained. Existing
+connection rows remain available to account export/deletion and retirement
+cleanup. No schema drop, billing change, or ordinary provider-selection change
+is part of this retirement; local/operator authentication remains supported.
+Deploy the runtime/Worker consumer before removing Web callback routes, and
+ensure old callback-producing runtime instances have drained before Web rollout.
 
 Hosted device-sync webhook freshness is owned by web dirty state, not mailbox
 completion. The route claims the exact provider trace, writes sparse

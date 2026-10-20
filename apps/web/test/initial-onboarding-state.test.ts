@@ -35,7 +35,7 @@ describe("cross-platform initial onboarding state", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.upsertHostedMemberAssistantPreferencesTx.mockResolvedValue({
-      assistantPersona: "navy-seal-with-classic",
+      assistantPersona: "classic",
       assistantTone: "formal",
       assistantVoice: "drill-sergeant",
       dispatch: { mailboxItemId: "mailbox_preferences" },
@@ -58,7 +58,7 @@ describe("cross-platform initial onboarding state", () => {
       request: {
         action: "save",
         preferences: {
-          persona: "navy-seal-with-classic",
+          persona: "classic",
           tone: "formal",
           voice: "drill-sergeant",
         },
@@ -85,7 +85,7 @@ describe("cross-platform initial onboarding state", () => {
       request: {
         action: "save",
         preferences: {
-          persona: "navy-seal-with-classic",
+          persona: "classic",
           tone: "formal",
           voice: "drill-sergeant",
         },
@@ -96,7 +96,7 @@ describe("cross-platform initial onboarding state", () => {
       completedNow: true,
       dispatch: { mailboxItemId: "mailbox_preferences" },
       preferences: {
-        persona: "navy-seal-with-classic",
+        persona: "classic",
         tone: "formal",
         voice: "drill-sergeant",
       },
@@ -106,7 +106,7 @@ describe("cross-platform initial onboarding state", () => {
       memberId: "member_123",
       occurredAt: "2026-08-04T12:00:00.000Z",
       preferences: {
-        persona: "navy-seal-with-classic",
+        persona: "classic",
         tone: "formal",
         voice: "drill-sergeant",
       },
@@ -145,6 +145,16 @@ describe("cross-platform initial onboarding state", () => {
         voice: "not-a-voice",
       },
     })).toThrow("Choose a valid Murph persona, tone, and voice");
+  });
+
+  it("normalizes a retired installed-companion persona without losing tone or voice", () => {
+    expect(onboarding.parseHostedInitialOnboardingCompletionRequest({
+      action: "save",
+      preferences: { persona: "scientist-with-classic", tone: "casual", voice: "warm" },
+    })).toEqual({
+      action: "save",
+      preferences: { persona: "classic", tone: "casual", voice: "warm" },
+    });
   });
 
   it("backfills pre-existing members and protects legacy rolling-deploy writers", () => {

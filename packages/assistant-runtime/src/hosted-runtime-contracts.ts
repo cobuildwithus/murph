@@ -26,7 +26,6 @@ export type {
   HostedRuntimeMediaStore,
   HostedRuntimeMediaWriter,
   HostedRuntimeClinicalRecordsPort,
-  HostedRuntimeCodexAuthPort,
   HostedRuntimeDeviceSyncMessagingReturnTarget,
   HostedRuntimeDeviceSyncPort,
   HostedRuntimeEffectsPort,

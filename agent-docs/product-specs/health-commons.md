@@ -4,11 +4,11 @@ Last verified: 2026-10-19
 
 ## Current State
 
-Health Commons is Murph's public, source-backed reference corpus: biomarker
-knowledge, outcome-first Goal guides, measurement methods, source pages, exact
-reusable revisions, and redirects. It stays forkable and reviewable like a small
-wiki while remaining structured enough to bind private goals to exact public
-versions.
+Murph maintains Health Commons content for assistant evidence, goal templates,
+biomarker knowledge, measurement methods, source pages, exact reusable revisions,
+and redirects. It stays forkable and reviewable like a small wiki while remaining
+structured enough to bind private goals to exact public versions. The standalone
+public `/goals` guides and `/knowledge` marketing page are retired.
 
 The public experiment catalog is retired. Commons no longer publishes protocol
 variants, experiment families, their onboarding blocks, test plans, media, or

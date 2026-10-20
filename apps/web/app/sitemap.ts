@@ -1,9 +1,7 @@
 import type { MetadataRoute } from "next";
 
 import { listComparisonSitemapEntries } from "@/src/lib/comparisons/catalog";
-import { listHealthCommonsGoalRouteParams } from "@/src/lib/health-commons/goal-projections";
 import { listHealthCommonsMeasurementMethodRoutes } from "@/src/lib/health-commons/measurement-method-detail";
-import { GOAL_CATEGORIES } from "@/src/lib/goals/goal-categories";
 import { MURPH_PUBLIC_SITE_URL } from "@/src/lib/site-metadata";
 
 const STATIC_PUBLIC_ROUTES = [
@@ -13,10 +11,7 @@ const STATIC_PUBLIC_ROUTES = [
   "/clubs",
   "/contact",
   "/consumer-health-data-privacy-policy",
-  "/goals",
-  "/goals/methodology",
   "/food",
-  "/knowledge",
   "/legal",
   "/legal/health-ai-safety-disclosure",
   "/legal/privacy",
@@ -32,12 +27,6 @@ export default function sitemap(): MetadataRoute.Sitemap {
     (measurementMethodId) =>
       `/measurement-methods/${encodeURIComponent(measurementMethodId)}`,
   );
-  const goalRoutes = [
-    ...GOAL_CATEGORIES.map((category) => `/goals/${category.slug}`),
-    ...listHealthCommonsGoalRouteParams().map(
-      ({ goalId }) => `/goals/${encodeURIComponent(goalId)}`,
-    ),
-  ];
   const comparisonEntries = listComparisonSitemapEntries();
   const comparisonLastModifiedByRoute = new Map(
     comparisonEntries.map(({ lastModified, route }) => [route, lastModified]),
@@ -47,7 +36,6 @@ export default function sitemap(): MetadataRoute.Sitemap {
     ...STATIC_PUBLIC_ROUTES,
     ...comparisonLastModifiedByRoute.keys(),
     ...measurementMethodRoutes,
-    ...goalRoutes,
   ]
     .sort()
     .map((route) => ({

@@ -14,7 +14,6 @@ import { SecurityTeaserSection } from "@/src/components/homepage/security-teaser
 import { SiteFooter } from "@/src/components/homepage/site-footer";
 import { TechnicalCapabilitiesSection } from "@/src/components/homepage/technical-capabilities-section";
 import { TogetherSection } from "@/src/components/homepage/together-section";
-import { DeepCarouselSection } from "@/src/components/knowledge/deep-carousel-section";
 import {
   ReferralPageContent,
   ReferralRewardCards,
@@ -24,21 +23,6 @@ import { HostedAssistantModelSettings } from "@/src/components/settings/hosted-a
 import { Separator } from "@/src/components/ui/separator";
 import { isMurphAndroidAppEnabled } from "@murphai/hosted-execution/env";
 import { HOSTED_PUBLIC_REFERRAL_REWARDS } from "@/src/lib/hosted-growth/referral-program";
-import {
-  AskSlide,
-  BusinessModelSlide,
-  CompetitionSlide,
-  ExperimentSlide,
-  InsightSlide,
-  MoatSlide,
-  ProblemSlide,
-  ProductSlide,
-  SpreadSlide,
-  TeamSlide,
-  TitleSlide,
-  ValidationSlide,
-  WhyNowSlide,
-} from "../pitch/_components/slides";
 import {
   projectHostedVaultShareProjectionDisplays,
   resolveHostedGroupAccessOfferProjectionScopes,
@@ -72,10 +56,6 @@ import { JoinFamilyBillingRecoveryStudy } from "./join-family-billing-recovery-s
 import { OpsUsageStudy } from "./ops-usage-study";
 import { OpsOperatorTaskStudy } from "./ops-operator-task-study";
 import { JunctionRecoveryStudy, RuntimeMaintenanceStudy } from "./runtime-maintenance-study";
-import {
-  PersonaOnboardingStudy,
-  PersonaSettingsStudy,
-} from "./persona-onboarding-study";
 import { SettingsAuthRequiredStudy } from "./settings-auth-required-study";
 import { SignupReferralFlowStudy } from "./signup-referral-study";
 import { TrainingDashboardStudy } from "./training-dashboard-study";
@@ -109,23 +89,6 @@ function StudySection({
     </section>
   );
 }
-
-// Every pitch deck slide, in deck order, each under its own anchor.
-const PITCH_SLIDE_STUDIES = [
-  { id: "pitch-title-slide", Slide: TitleSlide },
-  { id: "pitch-problem-slide", Slide: ProblemSlide },
-  { id: "pitch-insight-slide", Slide: InsightSlide },
-  { id: "pitch-why-now-slide", Slide: WhyNowSlide },
-  { id: "pitch-product-slide", Slide: ProductSlide },
-  { id: "pitch-experiment-slide", Slide: ExperimentSlide },
-  { id: "pitch-spread-slide", Slide: SpreadSlide },
-  { id: "pitch-progress-slide", Slide: ValidationSlide },
-  { id: "pitch-competition-slide", Slide: CompetitionSlide },
-  { id: "pitch-moat-slide", Slide: MoatSlide },
-  { id: "pitch-business-model-slide", Slide: BusinessModelSlide },
-  { id: "pitch-team-slide", Slide: TeamSlide },
-  { id: "pitch-ask-slide", Slide: AskSlide },
-] as const;
 
 export function SectionsContent({
   category,
@@ -168,19 +131,6 @@ export function SectionsContent({
                 messengerChannel="imessage"
                 murphHeadshotSrc={DEFAULT_MURPH_HEADSHOT}
               />
-            </div>
-          </StudySection>
-
-          <Separator />
-
-          <StudySection title="Knowledge topic depth">
-            <div
-              id="knowledge-topic-depth"
-              data-design-section="knowledge-topic-depth"
-              className="-mx-5 sm:-mx-8 lg:-mx-12"
-              inert
-            >
-              <DeepCarouselSection />
             </div>
           </StudySection>
 
@@ -635,16 +585,6 @@ export function SectionsContent({
         <>
           <Separator />
 
-          <StudySection title="Persona onboarding with stacked tone samples">
-            <div data-design-section="persona-onboarding">
-              <PersonaOnboardingStudy />
-              <Separator />
-              <PersonaSettingsStudy />
-            </div>
-          </StudySection>
-
-          <Separator />
-
           <StudySection title="Family plan invite acceptance">
             <FamilyInviteJoinStudy />
           </StudySection>
@@ -827,22 +767,6 @@ export function SectionsContent({
 
       {category === "ops" ? (
         <>
-          <Separator />
-
-          <StudySection title="Pitch deck slides">
-            {PITCH_SLIDE_STUDIES.map(({ id, Slide }) => (
-              <div
-                key={id}
-                id={id}
-                data-design-section={id}
-                className="-mx-5 overflow-hidden sm:-mx-8 lg:-mx-12"
-                inert
-              >
-                <Slide />
-              </div>
-            ))}
-          </StudySection>
-
           <Separator />
 
           <StudySection title="Ops weekly growth compass with referral-link usage, sponsorship accounting, messaging activity, message volume, and monthly revenue history">
