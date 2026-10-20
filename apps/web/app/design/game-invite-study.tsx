@@ -1,6 +1,11 @@
 import { GameInviteView } from "@/app/g/[token]/game-invite-view";
+import { GameInviteShareCard } from "@/app/g/[token]/invite-share-card";
 import { gameInviteAppUrl } from "@/src/lib/game/access";
 import type { GameInvitePreview } from "@/src/lib/game/contract";
+
+import { ScaledSharePreview } from "./scaled-share-preview";
+
+import "./share-preview-fonts.css";
 
 // The study links to the Murph app the way production does.
 const DESIGN_APP_URL = gameInviteAppUrl("design_invite_token", {});
@@ -42,6 +47,13 @@ const STATES: ReadonlyArray<{ id: string; label: string; preview: GameInvitePrev
   { id: "missing", label: "Missing or turned off", preview: null },
 ];
 
+// The link preview Messages shows for the same invite: the production card.
+const LINK_PREVIEWS: ReadonlyArray<{ id: string; label: string; preview: GameInvitePreview | null }> = [
+  { id: "link-open", label: "Link preview, open", preview: OPEN_PREVIEW },
+  { id: "link-open-any-days", label: "Link preview, any days, picked start", preview: { ...ANY_DAYS_PREVIEW, startsOn: "2026-10-19" } },
+  { id: "link-closed", label: "Link preview, used, expired, or missing", preview: { status: "used" } },
+];
+
 export function GameInviteStudy() {
   return (
     <div className="flex flex-col gap-8" data-design-study="game-invite" id="game-invite">
@@ -62,6 +74,24 @@ export function GameInviteStudy() {
               inert
             >
               <GameInviteView appUrl={DESIGN_APP_URL} preview={state.preview} />
+            </div>
+          </figure>
+        ))}
+      </div>
+      <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
+        The 1200x630 link preview from <code>/g/[token]/opengraph-image</code>. An open invite shows the same
+        first names, tasks, days, and stake the page shows to anyone holding the link; a closed one names nobody.
+      </p>
+      <div className="grid items-start gap-6 md:grid-cols-2">
+        {LINK_PREVIEWS.map((state) => (
+          <figure className="flex flex-col gap-3" data-design-state={state.id} id={`game-invite-${state.id}`} key={state.id}>
+            <figcaption className="font-mono text-xs uppercase tracking-[0.12em] text-muted-foreground">
+              {state.label}
+            </figcaption>
+            <div inert>
+              <ScaledSharePreview frameId={`game-invite-${state.id}`}>
+                <GameInviteShareCard preview={state.preview} />
+              </ScaledSharePreview>
             </div>
           </figure>
         ))}
