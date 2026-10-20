@@ -1,6 +1,6 @@
 # Metric projection subphase telemetry
 
-Status: active
+Status: completed
 Created: 2026-10-19
 Updated: 2026-10-19
 
@@ -65,7 +65,23 @@ measured about 5% on a synthetic fixture. Neither explains the severe stage.
 - Typecheck: query (including tests), runtime-state and the query bench.
 - Mechanism benchmark: rotated default, inactive-observer and enabled runs on
   the same dense fixture, with complete-output parity and no asserted threshold.
-- Final review, exact-head CI and closure belong to the parent.
+- Exact-head CI and closure belong to the parent.
+
+## Final evidence
+
+- Parent runs: query 79 passed with 1 opt-in skip; runtime-state 57 passed
+  with the compat base at pre-admission
+  `f54875376973da0c36a8eece4bb63ad91edbad96`; assistant-engine
+  transport/profile 16 passed; Worker `usage-record-port` 6 passed.
+- Query, runtime-state and bench typechecks, docs drift and complexity passed.
+- Dense benchmark, 5 rotated rounds with complete-output parity. Medians:
+  default 2558.3 ms (2551.7–2596.3), inactive observer 2573.4 ms
+  (2563.8–2616.8), enabled 2593.7 ms (2562.5–2614.6). Ranges overlap, so no
+  precise overhead claim is made.
+- ReviewGPT final round 1 PASS on `09da032a2d542a530817621a524256ed8fa55061`:
+  GPT-6 Pro Hercules, full 10-file snapshot, at least 5 minutes, exact-turn
+  match and attachment verified.
+- PR: https://github.com/cobuildwithus/murph/pull/4217. Issue #3997 stays open.
 
 ## Rollout
 
@@ -73,11 +89,13 @@ Consumer-first, per `docs/hosted-runtime-log-database.md` § Metric projection
 subphases: Web, then the Cloudflare worker, then the runner image. The older
 unmerged-candidate blocker in that doc does not apply here. This task authorizes
 a reviewed merge plus the normal main-only protected deployment, after green
-ReviewGPT and green exact-head CI. The parent owns that release. No gate has
-passed and nothing is deployed yet. Release proof is still pending.
+ReviewGPT and green exact-head CI. The parent owns that release. ReviewGPT has
+passed. Required CI and release are still pending. Nothing has been deployed or
+observed.
 
 After a verified deployment, the parent runs an immediate check and then a check
 every 30 minutes for four hours. That is separate from the 24-hour and 72-hour
 sampling windows, which also start only after verified production deployment.
 App heartbeat scheduling tools are currently unavailable. That blocks scheduling
 the observations, not deployment authority.
+Completed: 2026-10-19
