@@ -1,6 +1,6 @@
 # TypeScript Verification Performance
 
-Last verified: 2026-07-29
+Last verified: 2026-10-20
 
 ## Purpose
 
@@ -10,30 +10,43 @@ method.
 
 The design stays deliberately small:
 
-- Normal verification keeps TypeScript's worker defaults.
+- Normal emission keeps TypeScript's worker defaults; tsrs checking uses four checkers.
 - When selected locally, Codex `test:diff` and acceptance commands use the
   conservative shared-host profile by default; explicit offload can run them
   through Crabbox on a dedicated static Mac.
-- One root runner selects the canonical TypeScript 7 compiler and adds only the
-  lane's configured worker flags.
+- One root runner selects pinned tsrs for no-emit checks and TypeScript 7 for
+  emission, and owns the lane's worker flags.
 - Host admission uses temporary directories. It has no daemon, database,
   persistent coordinator, hardware detector, or cross-worktree config file.
 - The admission helper never signals or terminates another worktree's process.
 
 ## Compiler Boundaries
 
-Repo package, app-source, and project-reference checks run through the root
-TypeScript 7 compiler. When no `MURPH_TSC_*` override is set and the shared-host
-profile is off, existing finite build and verification lanes pass no checker or
-builder flags, so TypeScript keeps its defaults.
+`scripts/run-typescript.mjs` selects pinned tsrs for the explicit `check`,
+`web`, and `watch` lanes and forces `--noEmit`. Package emission (`package`)
+and the root project-reference graph (`workspace-build`) retain TypeScript 7:
+the adoption benchmark found identical JavaScript but differing declaration
+output, so this change does not adopt tsrs emission.
+
+The pinned tsrs release publishes Linux x64/arm64 and macOS arm64 binaries.
+Other hosts, including Intel Macs, use TypeScript 7. Set
+`MURPH_TYPECHECK_COMPILER=typescript` to compare or troubleshoot; an explicit
+`tsrs` selection fails on unsupported hosts. Missing binaries on a supported
+host fail closed. The Linux CI typecheck explicitly selects tsrs. The same
+entrypoints work on GitHub-hosted or Blacksmith Linux runners without a
+provider-specific compiler setup.
+
+Both compilers use the existing `MURPH_TSC_*` budgets. Outside shared-host mode,
+tsrs gets four checkers unless overridden, matching the former TS7 default
+instead of inheriting tsrs's larger worker count. Emission keeps TS7 defaults.
 
 `apps/web` still owns a local TypeScript 5 compatibility compiler for Next and
-other tools that require the legacy compiler API or peer range. The TypeScript
-7 source check does not replace Next's generated route and page contract check.
+other tools that require the legacy compiler API or peer range. The tsrs
+source check does not replace Next's generated route and page contract check.
 
-Root acceptance checks hosted-web source with TypeScript 7 before app
+Root acceptance checks hosted-web source with tsrs before app
 verification. Only after that succeeds may the acceptance lane skip the
-duplicate app-local TypeScript 7 source pass. A direct
+duplicate app-local tsrs source pass. A direct
 `pnpm --dir apps/web verify` remains self-contained and still runs its source
 check. Next's TypeScript 5 contract check is never replaced by this reuse.
 
@@ -107,9 +120,9 @@ not multiply TypeScript's internal workers:
 
 | Lane | Normal mode | Shared-host default | Override |
 | --- | --- | --- | --- |
-| Package no-emit | TypeScript default | `--checkers 1` | `MURPH_TSC_PACKAGE_CHECKERS` |
+| Package no-emit (`check`) | tsrs `--checkers 4` | `--checkers 1` | `MURPH_TSC_PACKAGE_CHECKERS` |
 | Package `-b` | TypeScript default | `--builders 1 --checkers 1` | Package checker override; builders stay `1` |
-| Hosted-web source | TypeScript default | `--checkers 2` | `MURPH_TSC_WEB_CHECKERS` |
+| Hosted-web source | tsrs `--checkers 4` | `--checkers 2` | `MURPH_TSC_WEB_CHECKERS` |
 | Root workspace graph | TypeScript default | `--builders 2 --checkers 1` | `MURPH_TSC_BUILDERS`, `MURPH_TSC_BUILD_CHECKERS` |
 | Hosted-web watch | `--checkers 1` | `--checkers 1` | `MURPH_TSC_WEB_WATCH_CHECKERS` |
 
@@ -149,9 +162,11 @@ apps/web/.next/cache/tsconfig.next.tsbuildinfo
 
 The root typecheck and app-verification lanes use separate cache namespaces.
 Keys include runner OS and architecture plus Node, lockfile, package-manifest,
-and TypeScript-config inputs. That also ties reuse to the compiler version in
+compiler-runner, and TypeScript-config inputs. That also ties reuse to the compiler version in
 the dependency manifests and lockfile. GitHub saves the cache only after a
-successful job.
+successful job. Compiler-version changes invalidate build info; the runner
+regression test switches compilers through a failing edit and repair to prove
+that a warm cache cannot hide the diagnostic.
 
 Do not broaden these paths to all build output or the whole Next cache. The
 clean workspace build runs before any typecheck cache restore, so the release's
@@ -159,6 +174,9 @@ clean-build proof remains cold. Incremental state accelerates later typecheck
 and app-verification work; it never redefines clean-build proof.
 
 ## Editor And Watch Use
+
+`.vscode/extensions.json` also recommends the official Oxc extension for Web
+lint diagnostics. CLI lint uses the Web-local pinned binary and config.
 
 `.vscode/extensions.json` recommends `TypeScriptTeam.native-preview`, but the
 repo does not force TypeScript 7 editor settings. Enable it per developer or
@@ -182,7 +200,7 @@ pnpm --dir apps/web typecheck:watch
 ```
 
 The command prepares Health Commons output, Prisma, and route stubs once, then
-runs the TypeScript 7 watcher with its own
+runs the tsrs watcher with its own
 `apps/web/typecheck.watch.tsbuildinfo`. It is never auto-started and never takes
 a shared-host slot. When editing Health Commons source, run its generator watch
 separately:

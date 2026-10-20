@@ -53,7 +53,7 @@
   },
   "scripts": {
     "build": "pnpm --dir ../.. exec tsx --tsconfig tsconfig.base.json packages/importers/scripts/safe-build.ts",
-    "typecheck": "node ../../scripts/run-typescript.mjs package -p tsconfig.typecheck.json --pretty false",
+    "typecheck": "node ../../scripts/run-typescript.mjs check -p tsconfig.typecheck.json --pretty false",
     "test": "pnpm exec vitest run --config vitest.config.ts --no-coverage",
     "test:coverage": "pnpm exec vitest run --config vitest.config.ts --coverage"
   },
