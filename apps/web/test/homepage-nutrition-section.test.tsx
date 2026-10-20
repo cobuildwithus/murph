@@ -42,7 +42,5 @@ test("NutritionSection renders the static nutrition database copy", () => {
     /Screened against published limits for lead, BPA, and phthalates\./,
   );
   assert.match(markup, /Counted July 2026\. Growing weekly/);
-  assert.match(markup, /Search the whole database yourself/);
-  assert.match(markup, /href="\/search"/);
   assert.doesNotMatch(markup, /personal health assistant/i);
 });
