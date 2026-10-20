@@ -923,10 +923,18 @@ async function buildViews(games: readonly LoadedGame[], viewerId: string, clock:
     label.subjectMemberId,
     ask(labelTarget(viewerId, "relationship"), label.relationshipEncrypted),
   ]));
+  // A game's own link belongs to its people: while invited, the challenger and
+  // an addressed invitee; after go-live, both players (the token is spent).
+  const tokenAt = games.map((game) => {
+    const { row } = game;
+    const holds = row.status === "invited"
+      ? row.createdBy === viewerId || row.inviteeMemberId === viewerId
+      : game.state.players.some((player) => player.memberId === viewerId);
+    return holds ? ask(gameTarget(row, "invite_token"), row.inviteTokenEncrypted) : null;
+  });
   const inviteAt = games.map((game) => {
     const { row } = game;
     if (row.status !== "invited") return null;
-    const token = () => ask(gameTarget(row, "invite_token"), row.inviteTokenEncrypted);
     if (row.createdBy === viewerId) {
       const pending = parsePendingLabel(row.pendingLabel);
       return {
@@ -934,11 +942,10 @@ async function buildViews(games: readonly LoadedGame[], viewerId: string, clock:
         name: ask(labelTarget(viewerId, "name"), pending.nameEncrypted),
         photoKey: pending.photoKey,
         relationship: ask(labelTarget(viewerId, "relationship"), pending.relationshipEncrypted),
-        token: token(),
       };
     }
     // The addressed invitee sees themselves by their own name, never the challenger's private label.
-    if (row.inviteeMemberId === viewerId) return { memberId: viewerId, name: null, photoKey: null, relationship: null, token: token() };
+    if (row.inviteeMemberId === viewerId) return { memberId: viewerId, name: null, photoKey: null, relationship: null };
     return null;
   });
   const textAt = new Map<string, number>();
@@ -968,12 +975,13 @@ async function buildViews(games: readonly LoadedGame[], viewerId: string, clock:
   const entryWords = new Map([...textAt].map(([entryId, at]) => [entryId, { text: plain[at] }]));
   return games.map((game, index) => {
     const invite = inviteAt[index];
+    const tokenIndex = tokenAt[index];
     const result: StoredResult | null = game.row.result ? parseStoredResult(game.row.result) : null;
     return buildGameView({
       avatarKeys,
       entryWords,
       inviteExpiresAt: game.row.inviteExpiresAt,
-      inviteToken: invite ? plain[invite.token] : null,
+      inviteToken: tokenIndex === null ? null : plain[tokenIndex],
       invitee: invite
         ? {
           memberId: invite.memberId,

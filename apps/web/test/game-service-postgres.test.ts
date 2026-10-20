@@ -290,7 +290,24 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     expect(await readGame(rematch!.id, kat)).toBeNull();
 
     const accepted = await ok(ava, { termsVersion: 1, timeZone: "Australia/Sydney", token: addressed!.inviteToken!, type: "join" });
-    expect(accepted).toMatchObject({ inviteToken: null, round: 2, status: "live" });
+    expect(accepted).toMatchObject({ inviteToken: rematch!.inviteToken, round: 2, status: "live" });
+  });
+
+  it("keeps a game's own invite token for its players after go-live, and never shows it to anyone else", async () => {
+    const leo = await member("Leo", "America/New_York");
+    const ava = await member("Ava", "America/New_York");
+    const kat = await member("Kat", "America/New_York");
+    const { gameId, token } = await startGame(leo, ava);
+    // Live: both players can recognize their own link; a third person can't read the game at all.
+    expect((await readGame(gameId, leo))!.inviteToken).toBe(token);
+    expect((await readGame(gameId, ava))!.inviteToken).toBe(token);
+    expect(await readGame(gameId, kat)).toBeNull();
+    expect(JSON.stringify(await readHome(kat))).not.toContain(token);
+    // Settled: still theirs, and a spent token can't be accepted again.
+    await devSettleNow(gameId, leo);
+    expect((await readHome(leo)).games.find((game) => game.id === gameId)!.inviteToken).toBe(token);
+    expect((await readGame(gameId, ava))!.inviteToken).toBe(token);
+    expect(await errorCode(kat, { termsVersion: 1, timeZone: "America/New_York", token, type: "join" })).toBe("INVITE_USED");
   });
 
   it("lets a ticket expire 14 days after it's issued, refusing to redeem it then", async () => {

@@ -196,8 +196,11 @@ export interface GameView {
   days: GameDayView[];
   retakeAvailable: boolean;
   /**
-   * Present while invited, for the challenger (to build the link) and for a
-   * rematch's addressed invitee (to accept with POST /invites/:token/accept).
+   * The game's own invite token, for the people it belongs to: while invited,
+   * the challenger (to build the link) and a rematch's addressed invitee (to
+   * accept with POST /invites/:token/accept); once it's live or over, both
+   * players, so the app can recognize its own link. A used token can't be
+   * accepted again. Everyone else gets null.
    */
   inviteToken: string | null;
   inviteExpiresAt: string | null;
