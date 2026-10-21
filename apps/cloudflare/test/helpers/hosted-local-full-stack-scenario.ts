@@ -18,7 +18,6 @@ import {
   DEFAULT_DATABASE_URL,
 } from "@murphai/hosted-local-harness/dev-hosted-local/constants";
 import { loadHostedLocalBaseEnvironment } from "@murphai/hosted-local-harness/dev-hosted-local/environment";
-import { shouldUseHostedWebProductionStart } from "@murphai/hosted-local-harness/dev-hosted-local/web-production-start";
 import {
   TEST_HOSTED_WEB_CALLBACK_PRIVATE_JWK_JSON,
   TEST_HOSTED_WEB_CALLBACK_PUBLIC_JWK_JSON,
@@ -587,9 +586,7 @@ async function startHostedLocalFullStackScenarioAttempt(
             HOSTED_APP_SESSION_HMAC_KEY: scenarioHarness.hostedAppSessionHmacKey,
             HOSTED_BETTER_AUTH_SECRET: scenarioHarness.hostedBetterAuthSecret,
             HOSTED_AUTH_STORAGE_KEY: scenarioHarness.hostedAuthStorageKey,
-            NODE_ENV: await shouldUseHostedWebProductionStart({
-              env: scenarioRuntimeEnv,
-            }) ? "production" : "test",
+            NODE_ENV: "test",
           }),
           memberId: sessionInput.memberId,
           secureCookieMode: scenarioHarness.webUsesProductionArtifact,
