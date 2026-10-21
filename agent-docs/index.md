@@ -1,3 +1,6 @@
+Hosted-local snapshot marker restart recovery is recorded in
+[the fixture correction plan](exec-plans/completed/2026-10-20-hosted-local-locator-restart.md).
+
 Linq line lock-order repair is tracked in
 [the active lock-order plan](exec-plans/completed/2026-10-20-linq-line-lock-order.md).
 
