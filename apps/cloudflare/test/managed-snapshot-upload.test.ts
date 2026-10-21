@@ -104,6 +104,53 @@ describe("managed snapshot uploads", () => {
     expect(h.bucket.resumeMultipartUpload).toHaveBeenCalledOnce();
   });
 
+  it.each(["allocation", "admission", "unused_allocation_abort", "signing"] as const)(
+    "preserves managed presign failure identity and cleanup at %s", async stage => {
+      for (const failure of [Object.freeze(new Error("synthetic private failure")), Object.freeze({ private: "synthetic thrown value" })]) {
+        const h = harness();
+        const source = { BUNDLES: h.bucket, HOSTED_R2_PRESIGN_ACCOUNT_ID: "synthetic-account",
+          HOSTED_R2_PRESIGN_BUCKET_NAME: "synthetic-bucket", HOSTED_R2_PRESIGN_ACCESS_KEY_ID: "synthetic-access",
+          HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY: "synthetic-secret" };
+        resource.command.mockReset().mockImplementation(async ({ command }) => {
+          if (command.operation === "snapshot_managed_admit" && stage === "admission") throw failure;
+          return { cutover: "postgres", applied: true, session, managedUpload: {
+            ...receipt, uploadId: stage === "unused_allocation_abort" ? "existing-upload" : receipt.uploadId,
+          } };
+        });
+        if (stage === "allocation") vi.mocked(h.bucket.createMultipartUpload!).mockRejectedValueOnce(failure);
+        if (stage === "unused_allocation_abort") h.abort.mockRejectedValueOnce(failure);
+        const sign = stage === "signing" ? vi.spyOn(crypto.subtle, "sign").mockRejectedValueOnce(failure) : null;
+        try {
+          await expect(presignManagedSnapshot({ source, session, encryptedByteSize: bytes.length, encryptedSha256, expiresSeconds: 60 })).rejects.toBe(failure);
+        } finally {
+          sign?.mockRestore();
+        }
+        expect(h.bucket.createMultipartUpload).toHaveBeenCalledOnce();
+        expect(h.abort).toHaveBeenCalledTimes(stage === "unused_allocation_abort" ? 2 : stage === "admission" ? 1 : 0);
+        expect(resource.command.mock.calls.map(([input]) => input.command.operation)).toEqual(
+          stage === "allocation" ? [] : stage === "admission" || stage === "unused_allocation_abort"
+            ? ["snapshot_managed_admit", "snapshot_managed_settled"] : ["snapshot_managed_admit"],
+        );
+        expect(h.bucket.resumeMultipartUpload).not.toHaveBeenCalled();
+        expect(h.upload.uploadPart).not.toHaveBeenCalled();
+        expect(h.complete).not.toHaveBeenCalled();
+      }
+    },
+  );
+
+  it.each(["abort", "settlement"] as const)("preserves admission failure identity when %s cleanup fails", async cleanup => {
+    const h = harness();
+    const failure = Object.freeze(new Error("synthetic admission reply lost"));
+    if (cleanup === "abort") h.abort.mockRejectedValueOnce(new Error("synthetic abort reply lost"));
+    if (cleanup === "settlement") h.settle.mockRejectedValueOnce(new Error("synthetic settlement reply lost"));
+    await expect(prepareManagedSnapshotUpload({ ...h, session, encryptedByteSize: bytes.length, encryptedSha256,
+      admit: async () => { throw failure; },
+    })).rejects.toBe(failure);
+    expect(h.abort).toHaveBeenCalledOnce();
+    expect(h.settle).toHaveBeenCalledTimes(cleanup === "abort" ? 0 : 1);
+    if (cleanup === "settlement") expect(h.settle).toHaveBeenCalledWith(receipt, false);
+  });
+
   it("hashes through the platform digest stream when the runtime provides one", async () => {
     const { createHash } = await import("node:crypto");
     class SyntheticDigestStream extends WritableStream<Uint8Array> {

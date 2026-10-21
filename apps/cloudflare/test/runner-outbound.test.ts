@@ -9,6 +9,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { buildHostedExecutionStructuredLogRecord } from "@murphai/hosted-execution";
 import { HostedRuntimeResourceRejectedError } from "../src/runtime-resource-client.ts";
+import type { HostedRuntimeManagedSnapshotUpload } from "@murphai/hosted-execution/runtime-resources";
 import { HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_BYTES_HEADER } from "@murphai/device-syncd/hosted-runtime";
 
 const hostedExecutionMocks = vi.hoisted(() => ({
@@ -5871,6 +5872,141 @@ describe("handleRunnerOutboundRequest", () => {
     expect(putUrl.searchParams.get("X-Amz-Signature")).toEqual(expect.stringMatching(/^[0-9a-f]{64}$/u));
     expect(presignBody.expiresAt).toEqual(expect.stringMatching(/^20/u));
     expect(runner.createHostedWorkspaceSnapshotUploadSession).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    ["prepare", ["snapshot_read"]],
+    ["allocation", ["snapshot_read", "allocate"]],
+    ["admission", ["snapshot_read", "allocate", "snapshot_managed_admit", "abort", "snapshot_managed_settled"]],
+    ["receipt_validation", ["snapshot_read", "allocate", "snapshot_managed_admit", "abort", "snapshot_managed_settled"]],
+    ["unused_allocation_abort", ["snapshot_read", "allocate", "snapshot_managed_admit", "abort", "abort", "snapshot_managed_settled"]],
+    ["terminal_receipt", ["snapshot_read", "allocate", "snapshot_managed_admit"]],
+    ["signing", ["snapshot_read", "allocate", "snapshot_managed_admit"]],
+  ] as const)("managed presign failure attribution identifies %s without changing effects", async (stage, effects) => {
+    const test = await createManagedPresignDiagnosticFixture();
+    const failure = Object.freeze(new Error("SYNTHETIC_PRIVATE_PRESIGN_FAILURE", {
+      cause: new Error("SYNTHETIC_PRIVATE_PRESIGN_CAUSE"),
+    }));
+    switch (stage) {
+      case "prepare": delete test.env.BUNDLES.resumeMultipartUpload; break;
+      case "allocation": test.allocate.mockImplementationOnce(async () => { test.effects.push("allocate"); throw failure; }); break;
+      case "admission": test.admit.mockRejectedValueOnce(failure); break;
+      case "receipt_validation": test.admit.mockResolvedValueOnce({ ...test.receipt, encryptedSha256: "b".repeat(64) }); break;
+      case "unused_allocation_abort":
+        test.admit.mockResolvedValueOnce({ ...test.receipt, uploadId: "SYNTHETIC_PRIVATE_EXISTING_UPLOAD" });
+        test.abort.mockImplementationOnce(async () => { test.effects.push("abort"); throw failure; });
+        break;
+      case "terminal_receipt": test.admit.mockResolvedValueOnce({ ...test.receipt, completedAt: "2026-05-01T00:01:00.000Z" }); break;
+      case "signing": vi.spyOn(crypto.subtle, "sign").mockRejectedValueOnce(failure); break;
+    }
+
+    const response = await handleRunnerOutboundRequest(test.request, test.env, "member_123");
+    expect(response.status).toBe(500);
+    expect(await response.json()).toEqual({
+      code: "runtime_error", error: "Hosted execution runtime failed.", errorName: "Error",
+    });
+    expect(test.effects).toEqual(effects);
+    expect(test.fetch).not.toHaveBeenCalled();
+    expect(test.allocated.uploadPart).not.toHaveBeenCalled();
+    expect(test.allocated.complete).not.toHaveBeenCalled();
+    expect(test.runner.workspaceSnapshotUploadSessions.get(test.session.snapshotId)).toBe(test.session);
+    expect(hostedExecutionMocks.emitHostedExecutionStructuredLog).toHaveBeenCalledExactlyOnceWith({
+      component: "runner",
+      details: {
+        errorCode: "runtime_error", errorName: "Error", hostKind: "workspace_snapshot_store",
+        method: "POST", operation: "workspace_snapshot_presign_put", userIdPresent: true,
+        runtimeAttemptId: test.session.attemptId, snapshotPresignFailureStage: stage,
+      },
+      level: "error", message: "Hosted runner outbound request failed.", phase: "wake.running",
+    });
+    const event = hostedExecutionMocks.emitHostedExecutionStructuredLog.mock.calls[0]![0];
+    const record = buildHostedExecutionStructuredLogRecord(event);
+    expect(record.details).toEqual(event.details);
+    for (const property of ["error", "cause", "stack", "headers", "url", "body"]) {
+      expect(event).not.toHaveProperty(property);
+      expect(event.details).not.toHaveProperty(property);
+    }
+    const logs = JSON.stringify({ event, record });
+    for (const sentinel of ["member_123", test.session.snapshotId, test.session.objectKey, test.allocated.uploadId,
+      "SYNTHETIC_PRIVATE_EXISTING_UPLOAD", failure.message, "SYNTHETIC_PRIVATE_PRESIGN_CAUSE", RUNNER_PROXY_TOKEN,
+      test.request.url, test.receipt.encryptedSha256, "r2_signing_fixture_test"]) {
+      expect(logs).not.toContain(sentinel);
+    }
+  });
+
+  it.each(["lookup_failure", "forged_header", "stale_session", "foreign_session"] as const)(
+    "managed presign failure attribution excludes unvalidated identity: %s", async failure => {
+      const test = await createManagedPresignDiagnosticFixture();
+      if (failure === "lookup_failure") test.runner.readHostedWorkspaceSnapshotUploadSession.mockRejectedValueOnce(new Error("SYNTHETIC_PRIVATE_LOOKUP"));
+      if (failure === "forged_header") test.request.headers.set(HOSTED_RUNTIME_ATTEMPT_ID_HEADER, "SYNTHETIC_PRIVATE_HEADER_ATTEMPT");
+      if (failure === "stale_session") test.session.workspaceVersion = "5";
+      if (failure === "foreign_session") test.session.userId = "SYNTHETIC_PRIVATE_SESSION_MEMBER";
+      const response = await handleRunnerOutboundRequest(test.request, test.env, "member_123");
+      expect(response.status).toBe(failure === "lookup_failure" ? 500 : failure === "foreign_session" ? 403 : 409);
+      expect(test.allocate).not.toHaveBeenCalled();
+      expect(test.admit).not.toHaveBeenCalled();
+      expect(test.fetch).not.toHaveBeenCalled();
+      const events = hostedExecutionMocks.emitHostedExecutionStructuredLog.mock.calls.map(([event]) => event);
+      expect(events).toHaveLength(failure === "lookup_failure" ? 1 : 0);
+      for (const event of events) {
+        expect(event.details).not.toHaveProperty("runtimeAttemptId");
+        expect(event.details).not.toHaveProperty("snapshotPresignFailureStage");
+      }
+      expect(JSON.stringify(events)).not.toContain("SYNTHETIC_PRIVATE_");
+    },
+  );
+
+  it.each(["null_receipt", "owner_rejected", "abort_failed", "settlement_failed"] as const)(
+    "managed presign failure attribution preserves admission outcome through %s", async outcome => {
+      const test = await createManagedPresignDiagnosticFixture();
+      const failure = outcome === "owner_rejected"
+        ? new HostedRuntimeResourceRejectedError("HOSTED_RUNTIME_OWNER_STALE")
+        : Object.freeze(new Error("SYNTHETIC_PRIVATE_ADMISSION_FAILURE"));
+      if (outcome === "null_receipt") test.admit.mockResolvedValueOnce(null);
+      else test.admit.mockRejectedValueOnce(failure);
+      if (outcome === "abort_failed") test.abort.mockImplementationOnce(async () => {
+        test.effects.push("abort"); throw new Error("SYNTHETIC_PRIVATE_CLEANUP_FAILURE");
+      });
+      if (outcome === "settlement_failed") test.settle.mockRejectedValueOnce(new Error("SYNTHETIC_PRIVATE_CLEANUP_FAILURE"));
+      const response = await handleRunnerOutboundRequest(test.request, test.env, "member_123");
+      expect(response.status).toBe(outcome === "owner_rejected" ? 409 : 500);
+      expect(await response.json()).toEqual(failure instanceof HostedRuntimeResourceRejectedError
+        ? { code: failure.code, error: failure.message }
+        : { code: "runtime_error", error: "Hosted execution runtime failed.", errorName: "Error" });
+      expect(test.effects).toEqual(["snapshot_read", "allocate", "snapshot_managed_admit", "abort",
+        ...(outcome === "abort_failed" ? [] : ["snapshot_managed_settled"])]);
+      const events = hostedExecutionMocks.emitHostedExecutionStructuredLog.mock.calls.map(([event]) => event);
+      expect(events).toHaveLength(outcome === "owner_rejected" ? 0 : 1);
+      if (outcome !== "owner_rejected") expect(events[0]).toMatchObject({
+        message: "Hosted runner outbound request failed.",
+        details: { snapshotPresignFailureStage: "admission", runtimeAttemptId: test.session.attemptId },
+      });
+      expect(JSON.stringify(events)).not.toContain("SYNTHETIC_PRIVATE_");
+      expect(test.fetch).not.toHaveBeenCalled();
+      expect(test.runner.workspaceSnapshotUploadSessions.get(test.session.snapshotId)).toBe(test.session);
+    },
+  );
+
+  it.each([false, true])("managed presign failure attribution stays silent on success with MD5 receipt %s", async withMd5 => {
+    const test = await createManagedPresignDiagnosticFixture();
+    test.admit.mockResolvedValueOnce({ ...test.receipt, ...(withMd5 ? { encryptedMd5: "c".repeat(32) } : {}) });
+    const response = await handleRunnerOutboundRequest(test.request, test.env, "member_123");
+    expect(response.status).toBe(200);
+    const body = requireTestObject(await response.json(), "managed presign response");
+    expect(Object.keys(body).sort()).toEqual(["expiresAt", "managedUploadId", "putUrl"]);
+    const url = new URL(requireTestString(body.putUrl, "managed presign URL"));
+    expect(url.searchParams.get("uploadId")).toBe(test.receipt.uploadId);
+    expect(url.searchParams.get("partNumber")).toBe("1");
+    expect(body.managedUploadId).toBe(test.receipt.uploadId);
+    expect(test.effects).toEqual(["snapshot_read", "allocate", "snapshot_managed_admit"]);
+    expect(JSON.stringify(vi.mocked(runtimeResourceClient.commandHostedRuntimeSnapshot).mock.calls)).not.toMatch(/runtimeAttemptId|snapshotPresignFailureStage|diagnostics/u);
+    expect(test.receipt).toEqual({
+      userId: test.session.userId, snapshotId: test.session.snapshotId, objectKey: test.session.objectKey,
+      uploadId: test.allocated.uploadId, attemptId: test.session.attemptId, generation: test.session.leaseGeneration,
+      encryptedByteSize: 4, encryptedSha256: "a".repeat(64), completedAt: null, verifiedAt: null,
+    });
+    expect(test.fetch).not.toHaveBeenCalled();
+    expect(hostedExecutionMocks.emitHostedExecutionStructuredLog).not.toHaveBeenCalled();
   });
 
   it("records snapshot PUT drain deadlines and rejects stale drain writes", async () => {
@@ -11987,6 +12123,54 @@ function createWorkspaceSnapshotCompleteRequest(input: {
       method: "POST",
     },
   );
+}
+
+async function createManagedPresignDiagnosticFixture() {
+  const runner = createWorkspaceVersionAwareUserRunner();
+  const snapshotId = "snapshot_PRIVATE_PRESIGN_SENTINEL";
+  const objectKey = await hostedWorkspaceSnapshotObjectKey({ snapshotId, userId: "member_123" });
+  const ref = createWorkspaceSnapshotV2Ref({
+    encryptedByteSize: 4, encryptedObjectSha256: "a".repeat(64), objectKey, snapshotId, userId: "member_123",
+  });
+  const session = createWorkspaceSnapshotUploadSession(ref);
+  runner.workspaceSnapshotUploadSessions.set(snapshotId, session);
+  const effects: string[] = [];
+  const abort = vi.fn(async () => { effects.push("abort"); });
+  const allocated = { uploadId: "SYNTHETIC_PRIVATE_ALLOCATED_UPLOAD", abort,
+    uploadPart: vi.fn(async () => ({ partNumber: 1, etag: "synthetic-etag" })), complete: vi.fn(async () => {}) };
+  const allocate = vi.fn(async () => { effects.push("allocate"); return allocated; });
+  const receipt: HostedRuntimeManagedSnapshotUpload = {
+    userId: session.userId, snapshotId, objectKey, uploadId: allocated.uploadId,
+    attemptId: session.attemptId, generation: session.leaseGeneration,
+    encryptedByteSize: 4, encryptedSha256: ref.archive.encryptedObjectSha256, completedAt: null, verifiedAt: null,
+  };
+  const admit = vi.fn(async (): Promise<HostedRuntimeManagedSnapshotUpload | null> => receipt);
+  const settle = vi.fn(async () => true);
+  const originalCommand = vi.mocked(runtimeResourceClient.commandHostedRuntimeSnapshot).getMockImplementation();
+  assert(originalCommand);
+  vi.mocked(runtimeResourceClient.commandHostedRuntimeSnapshot).mockImplementation(async input => {
+    effects.push(input.command.operation);
+    if (input.command.operation === "snapshot_managed_admit") {
+      return { cutover: "postgres", applied: true, session, managedUpload: await admit() };
+    }
+    if (input.command.operation === "snapshot_managed_settled") {
+      expect(input.command).toMatchObject({ uploadId: allocated.uploadId, verified: false });
+      return { cutover: "postgres", applied: await settle(), session, managedUpload: null };
+    }
+    return originalCommand(input);
+  });
+  const env = createRunnerOutboundEnv({ runtimeControl: { getByName: runner.getByName } });
+  env.BUNDLES.createMultipartUpload = allocate;
+  const legacyRequest = createWorkspaceSnapshotPresignPutRequest({
+    encryptedByteSize: 4, encryptedObjectSha256: receipt.encryptedSha256, objectKey, snapshotId, workspaceVersion: "4",
+  });
+  const request = new Request(legacyRequest.url, {
+    headers: legacyRequest.headers, method: "POST",
+    body: JSON.stringify({ ...requireTestObject(await legacyRequest.json(), "presign request"), supportsManagedUpload: true, encryptedMd5: "c".repeat(32) }),
+  });
+  const fetchMock = vi.fn();
+  vi.stubGlobal("fetch", fetchMock);
+  return { runner, session, env, request, allocated, allocate, abort, admit, settle, receipt, effects, fetch: fetchMock };
 }
 
 function createWorkspaceSnapshotPresignPutRequest(input: {
