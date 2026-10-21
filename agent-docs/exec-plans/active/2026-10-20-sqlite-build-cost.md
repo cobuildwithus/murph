@@ -101,6 +101,9 @@ span, attribute evidence/extraction/precedence/target work, then reproduce that
 stage with synthetic cardinality and scheduling pressure. No claim of resolving
 that severe event or exact production speedup is justified by this local sample.
 
+PR #4251 contains the scoped candidate. Changelog generation, all 10 archive
+render tests and Web typecheck pass. The task-created restricted private copy
+and generated databases were deleted; the original archive is untouched.
 ReviewGPT, required exact-head CI, protected deployment and four-hour observation
 remain pending. No temporary app heartbeat capability is currently exposed;
 that prevents claiming scheduled observation until a heartbeat can be verified.
