@@ -315,6 +315,9 @@ jobs:
           pnpm --dir packages/hosted-local-harness verify:package-boundary:prepared
 
       - name: Test repo verification tools
+        env:
+          MURPH_VITEST_FILE_PARALLELISM: "1"
+          MURPH_VITEST_MAX_WORKERS: "2"
         run: pnpm test:repo-tools
 
       - name: Artifact hygiene
