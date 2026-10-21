@@ -268,7 +268,7 @@ test("Sidebar ignores supplied signed-in user labels in the account trigger", ()
     }),
   );
 
-  assert.match(markup, /href="\/settings"[^>]*>Settings<\/a>/);
+  assert.match(markup, /href="\/settings"[^>]*>.*Settings<\/a>/);
   assert.match(markup, /Sign out/);
   assert.match(markup, /aria-label="Open user menu"/);
   assert.doesNotMatch(markup, /initial@example\.com/);
@@ -287,7 +287,7 @@ test("Sidebar renders signed-in account controls without a visible fallback labe
     }),
   );
 
-  assert.match(markup, /href="\/settings"[^>]*>Settings<\/a>/);
+  assert.match(markup, /href="\/settings"[^>]*>.*Settings<\/a>/);
   assert.match(markup, /Sign out/);
   assert.doesNotMatch(markup, />Account</);
   assert.doesNotMatch(markup, /\*{3,4}\s*\d{4}/);
@@ -397,24 +397,22 @@ test("Sidebar surfaces a visible error when sign out fails", async () => {
   assert.equal(container.querySelector('[role="alert"]'), null);
 });
 
-test("Sidebar keeps Settings out of the primary navigation", () => {
-  mocks.usePathname.mockReturnValue("/settings");
-
-  const markup = renderToStaticMarkup(
-    createElement(Sidebar, {
-      initialAuth: {
-        authenticated: true,
-        label: null,
-      },
-    }),
-  );
-
-  assert.match(markup, /href="\/settings"[^>]*>Settings<\/a>/);
-  assert.doesNotMatch(
-    markup,
-    /data-active="true">\s*<a[^>]*href="\/settings"[^>]*>Settings<\/a>/,
-  );
-});
+test.each(["/connect", "/settings", "/settings/billing"])(
+  "Sidebar highlights the direct account destination for %s",
+  (pathname) => {
+    mocks.usePathname.mockReturnValue(pathname);
+    const markup = renderToStaticMarkup(
+      createElement(Sidebar, {
+        initialAuth: { authenticated: true, label: null },
+      }),
+    );
+    const href = pathname.startsWith("/settings") ? "/settings" : "/connect";
+    assert.match(markup, new RegExp(`data-active="true"><a[^>]*href="${href}"`));
+    assert.equal((markup.match(/href="\/connect"/g) ?? []).length, 1);
+    assert.equal((markup.match(/href="\/settings"/g) ?? []).length, 1);
+    assert.match(markup, /Sign out/);
+  },
+);
 
 test("Sidebar renders the supplied server chat action", () => {
   mocks.usePathname.mockReturnValue("/biomarkers");

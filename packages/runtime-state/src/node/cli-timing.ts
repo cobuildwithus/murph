@@ -1,7 +1,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { createSocket, type Socket } from "node:dgram";
 import {
-  CLI_TIMING_ENDPOINT_ENV, addCliPhaseSample, cliTimingCommand, CLI_TIMING_MAX_REPORT_BYTES, CLI_TIMING_MAX_SPANS,
+  CLI_TIMING_CPU_PHASES, CLI_TIMING_ENDPOINT_ENV, addCliPhaseSample, cliTimingCommand, CLI_TIMING_MAX_REPORT_BYTES, CLI_TIMING_MAX_SPANS,
   emptyCliTiming, incrementCliTimingDrop, mergeCliTiming, normalizeCliTiming,
   cliTimingFailureCode, cliTimingFailureStage, cliTimingRejectionFailure, cliTimingValidationFailure,
   readCliTimingOwnData as ownData, type CliFailureTiming,
@@ -32,6 +32,9 @@ interface Invocation {
 const invocations = new AsyncLocalStorage<Invocation>();
 const noop = () => {};
 const elapsedUs = (start: bigint) => Number((process.hrtime.bigint() - start) / 1_000n);
+function readProcessCpu(previous?: NodeJS.CpuUsage): NodeJS.CpuUsage | undefined {
+  try { return process.cpuUsage(previous); } catch { return undefined; }
+}
 
 /** Inclusive spans, summed per fixed name. Overlapping/nested spans are NOT additive.
  * No samples from another invocation, completed scope, or unawaited late work escape.
@@ -46,13 +49,16 @@ export function startCliPhase(phase: CliTimingPhase): () => void {
   invocation.spans += 1;
   invocation.activeSpans += 1;
   const started = process.hrtime.bigint();
+  const startedCpu = CLI_TIMING_CPU_PHASES.includes(phase) ? readProcessCpu() : undefined;
   let ended = false;
   return () => {
     if (ended) return;
     ended = true;
     invocation.activeSpans -= 1;
     if (invocation.closed || invocation.collection.closed) return;
-    if (!addCliPhaseSample(invocation.phases, phase, elapsedUs(started))) {
+    const us = elapsedUs(started);
+    const cpu = startedCpu ? readProcessCpu(startedCpu) : undefined;
+    if (!addCliPhaseSample(invocation.phases, phase, us, cpu ? cpu.user + cpu.system : undefined)) {
       invocation.collection.report.droppedSpans = incrementCliTimingDrop(invocation.collection.report.droppedSpans);
     }
   };

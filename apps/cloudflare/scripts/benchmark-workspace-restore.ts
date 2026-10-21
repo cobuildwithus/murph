@@ -42,6 +42,7 @@ const plainMiB = process.env.MURPH_BENCH_PLAIN_MIB === undefined
 assert.ok(plainMiB === null || plainMiB >= bundleMiB,
   "MURPH_BENCH_PLAIN_MIB must be at least MURPH_BENCH_BUNDLE_MIB");
 const fileCount = setting("MURPH_BENCH_FILES", 1000, 1, 10000);
+const repeatEvery = setting("MURPH_BENCH_REPEAT_EVERY_FILES", 0, 0, fileCount);
 const iterations = setting("MURPH_BENCH_ITERATIONS", 7, 1, 100);
 const networkMiBps = setting("MURPH_BENCH_NETWORK_MIBPS", 0, 0, 1000);
 const chunkBytes = setting("MURPH_BENCH_CHUNK_KIB", 64, 1, 1024) * 1024;
@@ -93,10 +94,15 @@ try {
   for (let index = 0; index < fileCount; index += 1) {
     const archivePath = `record-${String(index).padStart(5, "0")}.bin`;
     const absolutePath = path.join(sourceRoot, archivePath);
+    // Repeated distant payloads model data shared by canonical files and caches.
+    // The default keeps the independent high-entropy control unchanged.
+    const repeatedEntropy = repeatEvery === 0 ? null : createCipheriv("aes-256-ctr",
+      createHash("sha256").update(`synthetic-block-${index % repeatEvery}`).digest(), Buffer.alloc(16, 5));
     const content = Buffer.concat([
-      entropy.update(Buffer.alloc(fileBytes(totalEntropyBytes, index))),
+      (repeatedEntropy ?? entropy).update(Buffer.alloc(fileBytes(totalEntropyBytes, index))),
       Buffer.alloc(fileBytes(totalPlainBytes - totalEntropyBytes, index), "synthetic workspace record\n"),
     ]);
+    repeatedEntropy?.final();
     await writeFile(absolutePath, content, { mode: 0o600 });
     digests.set(archivePath, createHash("sha256").update(content).digest("hex"));
     entries.push({ absolutePath, archivePath, kind: "file" });
@@ -166,7 +172,7 @@ try {
       }) },
     }),
   }));
-  console.log(JSON.stringify({ benchmark: "fixture", operation, bundleMiB, plainMiB, fileCount, networkMiBps,
+  console.log(JSON.stringify({ benchmark: "fixture", operation, bundleMiB, plainMiB, fileCount, repeatEvery, networkMiBps,
     chunkBytes, encryptedBytes: encrypted?.encryptedByteSize, plainBytes: totalPlainBytes,
     platform: process.platform, arch: process.arch, node: process.version }));
   let restoreCount = 0;
@@ -188,6 +194,7 @@ try {
       }
       const wallMs = performance.now() - started;
       const used = process.cpuUsage(cpu);
+      let creationRestoreMs: number | undefined;
       assert.ok(encrypted);
       if (operation === "create") {
         assert.equal(encrypted.fileCount, fileCount);
@@ -201,9 +208,11 @@ try {
         assert.equal(encryptedBytes, encrypted.encryptedByteSize);
         assert.equal(encryptedHash.digest("hex"), encrypted.encryptedObjectSha256);
         // Both creation variants use the current production restore owner.
-        await variant.port.restoreWorkspaceSnapshot({
+        const restoreStarted = performance.now();
+        timing = await variant.port.restoreWorkspaceSnapshot({
           durableRoot: variant.durableRoot, ref: snapshotRef(encrypted),
         });
+        creationRestoreMs = performance.now() - restoreStarted;
       }
       for (const [relativePath, digest] of digests) {
         assert.equal(createHash("sha256").update(await readFile(path.join(variant.durableRoot, relativePath))).digest("hex"), digest);
@@ -213,7 +222,7 @@ try {
       console.log(JSON.stringify({ benchmark: operation, variant: variant.label,
         iteration, warmup: iteration === 0, wallMs,
         nodeCpuMs: (used.user + used.system) / 1000, rssBytes: process.memoryUsage().rss,
-        verifiedFiles: digests.size, encryptedBytes: encrypted.encryptedByteSize, timing }));
+        verifiedFiles: digests.size, encryptedBytes: encrypted.encryptedByteSize, creationRestoreMs, timing }));
       if (iteration > 0) variant.samples.push(wallMs);
       if (operation === "create") await rm(encrypted.temporaryDirectoryPath, { recursive: true, force: true });
     }

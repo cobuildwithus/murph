@@ -4,6 +4,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { afterEach, test, vi } from "vitest";
+import { normalizeCliTiming, type CliTiming } from "@murphai/runtime-state/cli-timing";
+import { startCliPhase, withCliTiming } from "@murphai/runtime-state/node/cli-timing";
 
 import type { CanonicalEntity } from "../src/canonical-entities.ts";
 import * as metricPoints from "../src/metrics/index.ts";
@@ -121,4 +123,18 @@ test("the shared projection owner's import graph stays free of Node builtins and
     }
   }
   assert.ok(visited.size > 1);
+});
+
+
+test("real CLI observer retains CPU coverage and identical complete metric projection output", async () => {
+  const vault = syntheticVault();
+  const expected = buildMetricProjection(vault);
+  let captured!: CliTiming;
+  const actual = await withCliTiming(async () => buildMetricProjection(vault, { startStep: startCliPhase }),
+    timing => { captured = timing; });
+  assert.deepEqual(actual, expected);
+  const phases = captured.commands[0]!.phases.filter(phase => steps.includes(phase.phase));
+  assert.deepEqual(phases.map(phase => phase.phase), steps);
+  assert.ok(phases.every(phase => phase.count === 1 && phase.cpu?.count === 1));
+  assert.deepEqual(normalizeCliTiming(captured), captured);
 });

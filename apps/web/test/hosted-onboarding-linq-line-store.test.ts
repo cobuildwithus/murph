@@ -337,6 +337,7 @@ describe("listHostedLinqAssignableHomeLines", () => {
     expect(findMany).toHaveBeenCalledWith(expect.objectContaining({
       take: HOSTED_LINQ_ASSIGNABLE_HOME_LINE_LIMIT + 1,
       where: {
+        assignmentWeight: { gt: 0 },
         configuredAt: { not: null },
         egressPolicy: "enabled",
         healthStatus: { in: ["healthy", "unknown"] },
@@ -739,6 +740,7 @@ describe("hosted Linq proactive-conversation capacity", () => {
 
     expect(updateMany).toHaveBeenCalledWith({
       where: {
+        assignmentWeight: { gt: 0 },
         phoneNumberLookupKey: "lookup:line-1",
         proactiveConversationCount: { lt: 50 },
         proactiveConversationDayUtc: dayUtc,
@@ -767,6 +769,7 @@ describe("hosted Linq proactive-conversation capacity", () => {
 
     expect(updateMany).toHaveBeenNthCalledWith(2, {
       where: {
+        assignmentWeight: { gt: 0 },
         phoneNumberLookupKey: "lookup:line-1",
         OR: [
           { proactiveConversationDayUtc: null },

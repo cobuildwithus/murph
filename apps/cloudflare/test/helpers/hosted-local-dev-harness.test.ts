@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   HOSTED_EXECUTION_USER_ID_HEADER,
@@ -92,6 +92,159 @@ vi.mock("@murphai/hosted-local-harness/dev-hosted-local/stack", () => ({
 afterEach(() => {
   vi.clearAllMocks();
   vi.unstubAllGlobals();
+});
+
+describe("hosted-local locator marker restart recovery", () => {
+  const userId = "member_marker_fixture+retry";
+  const pathname = `/__test/users/${encodeURIComponent(userId)}/direct-r2-locator-marker`;
+  const restartBody = "Your worker restarted mid-request. Please try sending the request again. Only GET or HEAD requests are retried automatically.";
+  const markerBody = JSON.stringify({
+    objectKey: "synthetic-snapshot-object-key",
+    snapshotId: "snapshot-marker-fixture",
+  });
+  const init: RequestInit = {
+    body: markerBody,
+    headers: {
+      "content-type": "application/json",
+      [HOSTED_EXECUTION_USER_ID_HEADER]: userId,
+    },
+    method: "POST",
+  };
+
+  async function startHarness() {
+    const { startHostedLocalDevHarness } = await import("./hosted-local-dev-harness.js");
+    return await startHostedLocalDevHarness({
+      env: { MURPH_HOSTED_LOCAL_PROFILE: "e2e:stub", NEXT_DIST_DIR_MODE: "smoke" },
+      persistDirPrefix: "murph-marker-restart-test-",
+      testControls: true,
+    });
+  }
+
+  it("returns the real success after an exact restart with the same authenticated marker request", async () => {
+    const success = Response.json({ ok: true });
+    const fetch = vi.fn<typeof globalThis.fetch>()
+      .mockResolvedValueOnce(new Response(restartBody, { status: 503 }))
+      .mockResolvedValueOnce(success);
+    vi.stubGlobal("fetch", fetch);
+    const harness = await startHarness();
+    const signal = new AbortController().signal;
+
+    try {
+      const response = await harness.request(pathname, { ...init, signal });
+      expect(response).toBe(success);
+      await expect(response.json()).resolves.toEqual({ ok: true });
+      expect(fetch).toHaveBeenCalledTimes(2);
+      for (const [url, request] of fetch.mock.calls) {
+        expect(String(url)).toBe(`${harness.workerBaseUrl}${pathname}`);
+        expect(request?.method).toBe("POST");
+        expect(request?.body).toBe(markerBody);
+        expect(request?.signal).toBe(signal);
+        expect(Object.fromEntries(new Headers(request?.headers))).toEqual({
+          authorization: "Bearer oidc-token",
+          "content-type": "application/json",
+          [HOSTED_EXECUTION_USER_ID_HEADER]: userId,
+        });
+      }
+      expect(fetch.mock.calls[1]?.[1]).toBe(fetch.mock.calls[0]?.[1]);
+      expect(harness.interventionCount).toBe(1);
+    } finally {
+      await harness.stop();
+    }
+  });
+
+  it("exhausts five attempts with bounded waits and the final real failure diagnostics", async () => {
+    let attempts = 0;
+    const fetch = vi.fn<typeof globalThis.fetch>(async () =>
+      new Response(`${restartBody}\nSynthetic restart attempt ${++attempts}.`, { status: 503 })
+    );
+    vi.stubGlobal("fetch", fetch);
+    startHostedLocalDevStack.mockResolvedValueOnce({
+      ...createHostedLocalDevStack(),
+      stdoutTail: () => "Synthetic marker stdout.",
+      stderrTail: () => "Synthetic marker stderr.",
+    });
+    const harness = await startHarness();
+    const timeout = vi.spyOn(globalThis, "setTimeout");
+
+    try {
+      await expect(harness.request(pathname, init)).rejects.toThrow([
+        `POST ${pathname} failed with HTTP 503.`,
+        `body: ${restartBody}`,
+        "Synthetic restart attempt 5.",
+        "stdout tail: Synthetic marker stdout.",
+        "stderr tail: Synthetic marker stderr.",
+      ].join("\n"));
+      expect(fetch).toHaveBeenCalledTimes(5);
+      expect(timeout.mock.calls.map(([, delay]) => delay)).toEqual([250, 500, 750, 1_000]);
+    } finally {
+      timeout.mockRestore();
+      await harness.stop();
+    }
+  });
+
+  it.each([
+    { status: 400, body: restartBody },
+    { status: 401, body: "Synthetic authentication rejection." },
+    { status: 500, body: restartBody },
+    { status: 503, body: "Synthetic application unavailable." },
+  ])("does not retry HTTP $status with $body", async ({ status, body }) => {
+    const fetch = vi.fn<typeof globalThis.fetch>(async () => new Response(body, { status }));
+    vi.stubGlobal("fetch", fetch);
+    const harness = await startHarness();
+    try {
+      await expect(harness.request(pathname, init)).rejects.toThrow(`failed with HTTP ${status}.\nbody: ${body}`);
+      expect(fetch).toHaveBeenCalledOnce();
+    } finally {
+      await harness.stop();
+    }
+  });
+
+  it.each([false, true])("does not retry a network failure after prior restart: %s", async (afterRestart) => {
+    const fetch = vi.fn<typeof globalThis.fetch>().mockRejectedValue(new Error("Synthetic transport failure."));
+    if (afterRestart) {
+      fetch.mockResolvedValueOnce(new Response(restartBody, { status: 503 }));
+    }
+    vi.stubGlobal("fetch", fetch);
+    const harness = await startHarness();
+    try {
+      await expect(harness.request(pathname, init)).rejects.toThrow(
+        "failed before an HTTP response was received.\nSynthetic transport failure.",
+      );
+      expect(fetch).toHaveBeenCalledTimes(afterRestart ? 2 : 1);
+    } finally {
+      await harness.stop();
+    }
+  });
+
+  it.each([
+    { path: `/__test/users/${encodeURIComponent(userId)}/direct-r2-presigned-put`, method: "POST" },
+    { path: `${pathname}/extra`, method: "POST" },
+    { path: pathname, method: "PUT" },
+    { path: `https://unrelated.example.test${pathname}`, method: "POST" },
+  ])("does not retry a restart for unrelated $method $path", async ({ path: requestPath, method }) => {
+    const fetch = vi.fn<typeof globalThis.fetch>(async () => new Response(restartBody, { status: 503 }));
+    vi.stubGlobal("fetch", fetch);
+    const harness = await startHarness();
+    try {
+      await expect(harness.request(requestPath, { ...init, method })).rejects.toThrow("failed with HTTP 503.");
+      expect(fetch).toHaveBeenCalledOnce();
+    } finally {
+      await harness.stop();
+    }
+  });
+
+  it("does not admit a marker request with a non-string body", async () => {
+    const fetch = vi.fn<typeof globalThis.fetch>(async () => new Response(restartBody, { status: 503 }));
+    vi.stubGlobal("fetch", fetch);
+    const harness = await startHarness();
+    try {
+      await expect(harness.request(pathname, { ...init, body: new Blob([markerBody]) }))
+        .rejects.toThrow("failed with HTTP 503.");
+      expect(fetch).toHaveBeenCalledOnce();
+    } finally {
+      await harness.stop();
+    }
+  });
 });
 
 it("passes host-only web overrides with the harness process pid", async () => {

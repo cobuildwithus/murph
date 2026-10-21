@@ -3,7 +3,11 @@ import path from "node:path";
 import { buildHostedExecutionRuntimeControlWake } from "@murphai/hosted-execution";
 import type {
   HostedRuntimeLogRequest,
+  HostedWorkspaceState,
 } from "@murphai/hosted-execution/runtime-control";
+import {
+  HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON,
+} from "@murphai/hosted-execution/orchestration-control";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -49,6 +53,7 @@ const mocks = vi.hoisted(() => ({
   resolveHostedProviderCleanupFirstDeferredWakeAt: vi.fn(),
   resolveHostedProviderCleanupScheduledWakeAt: vi.fn(),
   resolveHostedAssistantOutboxNextWakeAt: vi.fn(),
+  resolveHostedDeviceSyncNextWakeAt: vi.fn(),
   resolveHostedSystemMailboxNextWakeCandidate: vi.fn(),
   resolveHostedSystemMailboxNextWakeAt: vi.fn(),
   runHostedAssistantAutomationLane: vi.fn(),
@@ -115,6 +120,7 @@ vi.mock("../src/hosted-runtime/maintenance.ts", () => ({
 vi.mock("../src/hosted-runtime/device-sync-maintenance-import.ts", () => ({
   isHostedDeviceSyncMaintenanceModuleLoadError: vi.fn(() => false),
   loadHostedDeviceSyncMaintenanceModule: vi.fn(async () => ({
+    resolveHostedDeviceSyncNextWakeAt: mocks.resolveHostedDeviceSyncNextWakeAt,
     runHostedDeviceSyncWakeLane: mocks.runHostedDeviceSyncWakeLane,
   })),
 }));
@@ -151,6 +157,7 @@ import {
   runHostedWorkspaceAssistantPhase as runHostedWorkspaceAssistantPhaseWithoutDrain,
   type HostedWorkspaceRuntimeAssistantPhaseInput,
 } from "../src/hosted-runtime/workspace-assistant-phase.ts";
+import type { HostedAssistantAutomationLaneMetrics } from "../src/hosted-runtime/models.ts";
 import { drainHostedRuntimeLogWritesBestEffort } from "../src/hosted-runtime/runtime-logs.ts";
 
 afterEach(async () => {
@@ -261,6 +268,7 @@ beforeEach(() => {
   });
   mocks.resolveHostedProviderCleanupScheduledWakeAt.mockResolvedValue(null);
   mocks.resolveHostedAssistantOutboxNextWakeAt.mockResolvedValue(null);
+  mocks.resolveHostedDeviceSyncNextWakeAt.mockReturnValue(null);
   mocks.resolveHostedSystemMailboxNextWakeAt.mockResolvedValue(null);
   mocks.resolveHostedSystemMailboxNextWakeCandidate.mockImplementation(async () => {
     const at = await mocks.resolveHostedSystemMailboxNextWakeAt();
@@ -270,14 +278,10 @@ beforeEach(() => {
     };
   });
   mocks.runHostedAssistantAutomationLane.mockResolvedValue({
-    deviceSyncProcessed: 0,
-    deviceSyncSkipped: true,
+    assistantAutomationProgressed: false,
     nextWakeAt: null,
-    parserProcessed: 0,
-    postCheckpointRecord: null,
-    progressed: false,
     redactedLogEntries: [],
-  });
+  } satisfies HostedAssistantAutomationLaneMetrics);
   mocks.runHostedDeviceSyncWakeLane.mockResolvedValue({
     deviceSyncProcessed: 0,
     deviceSyncSkipped: true,
@@ -288,6 +292,156 @@ beforeEach(() => {
 });
 
 describe("hosted workspace assistant diagnostics detail logs", () => {
+  it.each([
+    { nextWakeReason: "assistant", deviceSyncConfigured: false },
+    { nextWakeReason: null, deviceSyncConfigured: false },
+    { nextWakeReason: "assistant", deviceSyncConfigured: true },
+    { nextWakeReason: null, deviceSyncConfigured: true },
+  ])("does not claim progress from a newer clock for the same due obligation (reason: $nextWakeReason, device sync: $deviceSyncConfigured)", async ({ nextWakeReason, deviceSyncConfigured }) => {
+    const logRequests: HostedRuntimeLogRequest[] = [];
+    const input = createPhaseInput({ deviceSyncConfigured, logRequests });
+    input.workspace = createPhaseWorkspace("2026-04-26T23:59:00.000Z", nextWakeReason);
+
+    for (const now of ["2026-04-27T00:00:00.000Z", "2026-04-27T00:01:00.000Z"]) {
+      input.now = () => now;
+      mocks.resolveHostedSystemMailboxNextWakeAt.mockResolvedValue(now);
+      const result = await runHostedWorkspaceAssistantPhase(input);
+      expect(result.progressed).toBe(false);
+      expect(result.nextWakeAt).toBe(now);
+      expect(result.checkpointReason).toBeUndefined();
+      expect(result.afterCheckpoint).toBeUndefined();
+      expect(logRequests.flatMap((request) => request.entries).reverse().find(
+        (entry) => entry.eventCode === "assistant.pass_finished",
+      )?.redactedJson).toEqual(expect.objectContaining({
+        progressed: false,
+        wakeStateProgressed: false,
+      }));
+      input.workspace.nextWakeAt = now;
+    }
+    expect(mocks.runHostedDeviceSyncWakeLane).not.toHaveBeenCalled();
+  });
+
+  it.each(["assistant", null])("still checkpoints clearing a consumed legacy device alarm (reason: %s)", async (nextWakeReason) => {
+    const input = createPhaseInput({ deviceSyncConfigured: true, logRequests: [] });
+    input.now = () => "2026-04-27T00:00:00.000Z";
+    input.workspace = createPhaseWorkspace("2026-04-26T23:59:00.000Z", nextWakeReason);
+
+    const result = await runHostedWorkspaceAssistantPhase(input);
+    expect(result.progressed).toBe(true);
+    expect(result.nextWakeAt).toBeNull();
+    expect(result.checkpointReason).toBe("canonical_runtime_commit");
+    expect(mocks.runHostedDeviceSyncWakeLane).not.toHaveBeenCalled();
+  });
+
+  it("preserves a future device follow-up and its maintenance owner", async () => {
+    const input = createPhaseInput({ deviceSyncConfigured: true, logRequests: [] });
+    input.now = () => "2026-04-27T00:00:00.000Z";
+    input.workspace = createPhaseWorkspace("2026-04-26T23:59:00.000Z");
+    const nextWakeAt = "2026-04-27T01:00:00.000Z";
+    mocks.resolveHostedDeviceSyncNextWakeAt.mockReturnValue(nextWakeAt);
+
+    const result = await runHostedWorkspaceAssistantPhase(input);
+    expect(result.progressed).toBe(true);
+    expect(result.nextWakeAt).toBe(nextWakeAt);
+    expect(result.nextWakeReason).toBe("device-sync.reconcile");
+    expect(mocks.runHostedDeviceSyncWakeLane).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { previous: "2026-04-26T23:59:00.000Z", next: null, label: "cleared due wake" },
+    { previous: "2026-04-27T01:00:00.000Z", next: "2026-04-27T01:00:00.000Z", label: "unchanged future wake" },
+  ])("does not manufacture progress from a $label", async ({ previous, next }) => {
+    const input = createPhaseInput({ logRequests: [] });
+    input.now = () => "2026-04-27T00:00:00.000Z";
+    input.workspace = createPhaseWorkspace(previous);
+    mocks.resolveHostedSystemMailboxNextWakeAt.mockResolvedValue(next);
+
+    const result = await runHostedWorkspaceAssistantPhase(input);
+    expect(result.progressed).toBe(false);
+    expect(result.nextWakeAt ?? null).toBe(next);
+    expect(result.checkpointReason).toBeUndefined();
+  });
+
+  it("preserves a newly imported obligation even when its wake has the same due reason", async () => {
+    const input = createPhaseInput({ logRequests: [] });
+    input.now = () => "2026-04-27T00:00:00.000Z";
+    input.workspace = createPhaseWorkspace("2026-04-26T23:59:00.000Z");
+    input.initialMailboxImport.importResult.fetchedCount = 1;
+    input.initialMailboxImport.importResult.importedCount = 1;
+    input.initialMailboxImport.importResult.consumedSeqByLane.system = "1";
+    input.initialMailboxImport.importResult.state.watermarks.system = "1";
+    input.initialMailboxImport.state = input.initialMailboxImport.importResult.state;
+    input.initialMailboxImport.stateChanged = true;
+    mocks.resolveHostedSystemMailboxNextWakeAt.mockResolvedValue(input.now());
+
+    const result = await runHostedWorkspaceAssistantPhase(input);
+    expect(result.progressed).toBe(true);
+    expect(result.nextWakeAt).toBe(input.now());
+  });
+
+  it.each([
+    { previous: null, next: "2026-04-27T00:00:00.000Z", label: "new due obligation" },
+    { previous: "2026-04-27T01:00:00.000Z", next: "2026-04-27T00:00:00.000Z", label: "newly due obligation" },
+    { previous: "2026-04-26T23:59:00.000Z", next: "2026-04-27T01:00:00.000Z", label: "due-to-future schedule" },
+    { previous: "2026-04-27T01:00:00.000Z", next: "2026-04-27T02:00:00.000Z", label: "changed future schedule" },
+  ])("checkpoints a $label without canonical automation progress", async ({ previous, next }) => {
+    const logRequests: HostedRuntimeLogRequest[] = [];
+    const input = createPhaseInput({ logRequests });
+    input.now = () => "2026-04-27T00:00:00.000Z";
+    input.workspace = previous ? createPhaseWorkspace(previous) : null;
+    if (Date.parse(next) > Date.parse(input.now())) {
+      mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
+        assistantAutomationProgressed: false,
+        nextWakeAt: next,
+        redactedLogEntries: [],
+      } satisfies HostedAssistantAutomationLaneMetrics);
+    } else {
+      mocks.resolveHostedSystemMailboxNextWakeAt.mockResolvedValue(next);
+    }
+
+    const result = await runHostedWorkspaceAssistantPhase(input);
+    expect(result.progressed).toBe(true);
+    expect(result.nextWakeAt).toBe(next);
+    expect(result.checkpointReason).toBe("canonical_runtime_commit");
+  });
+
+  it.each(["2026-04-26T23:59:00.000Z", "2026-04-27T00:00:00.000Z"])("preserves a new due delivery owner at %s", async (next) => {
+    const input = createPhaseInput({ logRequests: [] });
+    input.now = () => "2026-04-27T00:00:00.000Z";
+    input.workspace = createPhaseWorkspace("2026-04-26T23:59:00.000Z");
+    mocks.resolveHostedAssistantOutboxNextWakeAt.mockResolvedValue(next);
+
+    const result = await runHostedWorkspaceAssistantPhase(input);
+    expect(result.progressed).toBe(true);
+    expect(result.nextWakeAt).toBe(next);
+    expect(result.nextWakeReason).toBe(HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON);
+  });
+
+  it("preserves canonical automation progress while the same system obligation remains due", async () => {
+    const logRequests: HostedRuntimeLogRequest[] = [];
+    const input = createPhaseInput({ logRequests });
+    input.now = () => "2026-04-27T00:00:00.000Z";
+    input.workspace = createPhaseWorkspace("2026-04-26T23:59:00.000Z");
+    mocks.resolveHostedSystemMailboxNextWakeAt.mockResolvedValue(input.now());
+    mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
+      assistantAutomationProgressed: true,
+      nextWakeAt: null,
+      redactedLogEntries: [],
+    } satisfies HostedAssistantAutomationLaneMetrics);
+
+    const result = await runHostedWorkspaceAssistantPhase(input);
+    expect(result.progressed).toBe(true);
+    expect(Date.parse(result.nextWakeAt ?? "")).toBeLessThanOrEqual(Date.parse(input.now()));
+    expect(result.checkpointReason).toBe("canonical_runtime_commit");
+    expect(logRequests.flatMap((request) => request.entries).reverse().find(
+      (entry) => entry.eventCode === "assistant.pass_finished",
+    )?.redactedJson).toEqual(expect.objectContaining({
+      assistantAutomationProgressed: true,
+      progressed: true,
+      wakeStateProgressed: false,
+    }));
+  });
+
   it.each([
     { systemWakeAt: "2026-04-26T23:59:00.000Z", expectedSystemOffsetMs: -60_000,
       expectedNextOffsetMs: -60_000 },
@@ -672,7 +826,25 @@ describe("hosted workspace assistant diagnostics detail logs", () => {
   });
 });
 
+function createPhaseWorkspace(
+  nextWakeAt: string,
+  nextWakeReason: string | null = "assistant",
+): HostedWorkspaceState {
+  return {
+    checkpointedAt: "2026-04-26T23:59:00.000Z",
+    createdAt: "2026-04-26T23:59:00.000Z",
+    nextWakeAt,
+    nextWakeReason,
+    redactedStatus: null,
+    snapshotRef: null,
+    updatedAt: "2026-04-26T23:59:00.000Z",
+    userId: "member_synthetic_phase",
+    version: "8",
+  };
+}
+
 function createPhaseInput(input: {
+  deviceSyncConfigured?: boolean;
   logRequests: HostedRuntimeLogRequest[];
 }): HostedWorkspaceRuntimeAssistantPhaseInput {
   const testTempRoot = process.env.MURPH_VITEST_TEMP_ROOT;
@@ -765,7 +937,11 @@ function createPhaseInput(input: {
           emailSendReady: false,
           telegramBotConfigured: false,
         },
-        deviceSync: null,
+        deviceSync: input.deviceSyncConfigured ? {
+          providerConfigs: {},
+          publicBaseUrl: "https://device-sync.example.test",
+          secret: "synthetic-device-sync-secret",
+        } : null,
       },
       userEnv: {},
     },

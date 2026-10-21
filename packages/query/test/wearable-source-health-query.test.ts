@@ -522,7 +522,19 @@ function assertRebuildTiming(report: CliTiming, expected: readonly CliTimingPhas
   assert.deepEqual(command.phases.filter(phase => metricSubphases.some(name => name === phase.phase))
     .map(phase => phase.phase), expectedMetric);
   for (const phase of command.phases) {
-    assert.deepEqual(Object.keys(phase).sort(), ["buckets", "count", "maxUs", "phase", "sumUs"]);
+    const measuredCpu = phase.phase === "query-metric-projection" || metricSubphases.some(name => name === phase.phase);
+    assert.deepEqual(Object.keys(phase).sort(), measuredCpu
+      ? ["buckets", "count", "cpu", "maxUs", "phase", "sumUs"]
+      : ["buckets", "count", "maxUs", "phase", "sumUs"]);
+    if (measuredCpu) {
+      assert.ok(phase.cpu);
+      assert.deepEqual(Object.keys(phase.cpu).sort(), ["count", "maxUs", "sumUs"]);
+      assert.equal(phase.cpu.count, phase.count);
+      for (const value of [phase.cpu.count, phase.cpu.sumUs, phase.cpu.maxUs]) {
+        assert.ok(Number.isSafeInteger(value) && value >= 0);
+      }
+      assert.ok(phase.cpu.maxUs <= phase.cpu.sumUs);
+    }
     for (const value of [phase.count, phase.sumUs, phase.maxUs, ...phase.buckets]) {
       assert.ok(Number.isSafeInteger(value) && value >= 0);
     }
