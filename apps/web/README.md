@@ -1944,6 +1944,13 @@ contract migration
 `20260728031000_resynchronize_hosted_usage_credit_purchase_grants` now performs
 only the idempotent purchase-projection resynchronization.
 
+The `20261021180000_game_heart_rate_entry` predeploy exception only widens the
+existing game-entry kind check with `heart_rate`. It preserves photo/excuse
+writes and attempt limits. The five-second lock bound and atomic `NOT VALID`
+replacement avoid a retained-row scan under the metadata lock; validation runs
+in a second transaction. Deploy this expansion and compatible graph readers
+before enabling native graph submissions.
+
 Production `DATABASE_URL` must use PlanetScale's transaction-mode PgBouncer
 endpoint (normally port `6432`); `DIRECT_DATABASE_URL` remains the direct
 Postgres endpoint for migrations and other session-scoped administration. The
