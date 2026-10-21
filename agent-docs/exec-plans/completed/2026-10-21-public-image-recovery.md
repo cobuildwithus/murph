@@ -1,6 +1,6 @@
 # Make public image attachment failures recoverable
 
-Status: active
+Status: completed
 Created: 2026-10-21
 Updated: 2026-10-21
 
@@ -58,3 +58,13 @@ No production sends or deployment are included.
 - After integrating the prerequisite and removing its writer gate, 75 focused
   request/read tests and assistant-engine typecheck passed. Independent persisted
   descriptor hash tests remain after removing reader-only rejection assertions.
+- Changelog generation and 10 render tests passed after recovery copy was added;
+  complexity diff passed with unchanged existing hotspot debt. Parent review
+  checked the complete feature diff against the reader prerequisite, initial
+  tool definitions, fixed error privacy, and removal of the temporary gate.
+- Reader prerequisite PR #4286 and stacked feature PR #4287 are open. CI and final
+  ReviewGPT are completion gates tracked on those PRs; no merge or deployment
+  occurred during implementation. The reader review required a supported browser
+  lane retry after a pre-submission launch failure; no review was claimed from
+  that failed attempt.
+Completed: 2026-10-21
