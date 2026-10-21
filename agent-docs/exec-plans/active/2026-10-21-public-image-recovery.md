@@ -51,3 +51,10 @@ No production sends or deployment are included.
 - Live local-subscription journey with gpt-6.1-sol passed: two attachment attempts
   (optimizer rejected, original accepted), exactly one media item, concise reply,
   no website-link fallback. Provider receipt remains outside this synthetic proof.
+- Rollout correction: prerequisite PR #4286 keeps the original send allowlist
+  while expanding verified readers and cleanup. The writer change removes that
+  temporary gate. Merge/deploy the prerequisite alone and prove native reader
+  convergence before merging/deploying the writer; no deployment is authorized.
+- After integrating the prerequisite and removing its writer gate, 75 focused
+  request/read tests and assistant-engine typecheck passed. Independent persisted
+  descriptor hash tests remain after removing reader-only rejection assertions.
