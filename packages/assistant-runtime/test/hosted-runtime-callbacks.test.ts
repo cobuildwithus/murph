@@ -42,6 +42,7 @@ import {
   ASSISTANT_GENERATED_DELIVERY_DIRECTORY,
 } from "@murphai/runtime-state/assistant-generated-deliveries";
 import type { HostedEmailSendRequest } from "../src/hosted-email.ts";
+import { parseHostedRuntimeLogRequest } from "@murphai/hosted-execution/parsers";
 import type { HostedRuntimeLogPort } from "../src/hosted-runtime/platform.ts";
 
 const mocks = vi.hoisted(() => ({
@@ -8891,6 +8892,7 @@ describe("hosted runtime callbacks", () => {
         TELEGRAM_FILE_BASE_URL: "https://files.telegram.example",
       },
       fetchImplementation: providerFetch,
+      onTextSendAccepted: expect.any(Function),
       signal: undefined,
     });
     expect(outcomes).toEqual([
@@ -9669,6 +9671,74 @@ describe("hosted runtime callbacks", () => {
         phase: "outbox",
       }),
     );
+  });
+
+  it("logs Telegram text acceptance through the real adapter without waiting for the log sink", async () => {
+    const target = "123";
+    const effect = createEffect({
+      bindingDeliveryKind: "thread",
+      bindingDeliveryTarget: target,
+      threadId: target,
+      threadIsDirect: true,
+    });
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+      const delivery = await dependencies.sendTelegram({
+        message: "Synthetic reminder",
+        target,
+      });
+      return createDispatchResult({
+        delivery: createDelivery({ providerMessageId: delivery.providerMessageId, target }),
+        status: "sent",
+      });
+    });
+    const logWrite = vi.fn<HostedRuntimeLogPort["write"]>(async ({ entries }) => ({ loggedCount: entries.length }));
+    const providerFetch = vi.fn<typeof fetch>(async () => Response.json({
+      ok: true,
+      result: {
+        date: Date.parse("2026-01-02T18:00:00.000Z") / 1000,
+        message_id: 41,
+        text: "private provider payload",
+        chat: { id: 123, username: "synthetic_private_handle" },
+      },
+    }));
+    await expect(drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub(),
+      forwardedEnv: {},
+      platform: { logPort: { write: logWrite } },
+      platformEnv: {
+        TELEGRAM_API_BASE_URL: "https://telegram.example",
+        TELEGRAM_BOT_TOKEN: "telegram-actual-runtime-token",
+      },
+      providerFetch,
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    })).resolves.toEqual([expect.objectContaining({ deliveryStatus: "sent" })]);
+    // Info telemetry stays in the existing bounded queue until a later drain.
+    expect(logWrite).not.toHaveBeenCalled();
+    await drainHostedRuntimeLogWritesBestEffort();
+    const events = logWrite.mock.calls.flatMap(([request]) => request.entries)
+      .filter((entry) => entry.eventCode === "outbox.telegram_text_accepted");
+    expect(events).toHaveLength(1);
+    expect(parseHostedRuntimeLogRequest({ entries: events })).toEqual({ entries: events });
+    expect(events[0]).toMatchObject({
+      component: "outbox",
+      level: "info",
+      outboxIntentRef: "intent_123",
+      redactedJson: {
+        providerSentAt: "2026-01-02T18:00:00.000Z",
+        providerMessageIdStatus: "positive",
+        requestDurationMs: expect.any(Number),
+        requestStartedAt: expect.any(String),
+        responseReceivedAt: expect.any(String),
+      },
+    });
+    expect(Object.keys(events[0]!.redactedJson!).sort()).toEqual([
+      "providerMessageIdStatus", "providerSentAt", "requestDurationMs",
+      "requestStartedAt", "responseReceivedAt",
+    ]);
+    expect(JSON.stringify(events)).not.toMatch(/private provider|synthetic_private_handle|telegram-actual-runtime-token/);
+    expect(providerFetch).toHaveBeenCalledOnce();
   });
 
   it("pins private Telegram delivery against provider migration", async () => {

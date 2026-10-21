@@ -1542,6 +1542,7 @@ async function sendTelegramMessageDetailed(
           : buildTelegramMessageEntities(chunk.decorations),
         fetchImplementation,
         maxDeliveryAttempts,
+        onTextSendAccepted: dependencies.onTextSendAccepted,
         replyToMessageId,
         signal: dependencies.signal,
         target,
@@ -1721,6 +1722,7 @@ async function sendTelegramTextChunk(input: {
   baseUrl: string
   entities: TelegramMessageEntity[]
   fetchImplementation: TelegramFetchImplementation
+  onTextSendAccepted?: TelegramRuntimeDependencies['onTextSendAccepted']
   maxDeliveryAttempts: number
   replyToMessageId: string | null
   signal?: AbortSignal
@@ -1749,6 +1751,7 @@ async function sendTelegramTextChunk(input: {
       operation: 'sendMessage',
       result: await sendTelegramTextChunkOnce({
         baseUrl: input.baseUrl,
+        onTextSendAccepted: input.onTextSendAccepted,
         entities: input.entities,
         fetchImplementation: input.fetchImplementation,
         replyToMessageId: input.replyToMessageId,
@@ -2428,6 +2431,7 @@ function assertSingleTelegramRichFallbackMessage(
 }
 
 async function sendTelegramTextChunkOnce(input: {
+  onTextSendAccepted?: TelegramRuntimeDependencies['onTextSendAccepted']
   baseUrl: string
   entities: TelegramMessageEntity[]
   fetchImplementation: TelegramFetchImplementation
@@ -2438,6 +2442,8 @@ async function sendTelegramTextChunkOnce(input: {
   text: string
   token: string
 }): Promise<TelegramSendAttemptResult> {
+  const requestStartedAt = new Date().toISOString()
+  const started = performance.now()
   try {
     const result = await sendTelegramBotApiRequest({
       baseUrl: input.baseUrl,
@@ -2457,6 +2463,15 @@ async function sendTelegramTextChunkOnce(input: {
       token: input.token,
     })
 
+    if (result.response.ok && isTelegramSuccessResponse(result.payload)) {
+      observeTelegramTextSendAcceptance({
+        observer: input.onTextSendAccepted,
+        payload: result.payload,
+        requestStartedAt,
+        requestDurationMs: Math.max(0, Math.round(performance.now() - started)),
+        responseReceivedAt: new Date().toISOString(),
+      })
+    }
     return {
       kind: 'response',
       ...result,
@@ -2484,6 +2499,40 @@ async function sendTelegramTextChunkOnce(input: {
         },
       ),
     }
+  }
+}
+
+function observeTelegramTextSendAcceptance(input: {
+  observer: TelegramRuntimeDependencies['onTextSendAccepted']
+  payload: unknown
+  requestStartedAt: string
+  responseReceivedAt: string
+  requestDurationMs: number
+}): void {
+  if (!input.observer) return
+  try {
+    const result = (input.payload as { result?: { date?: unknown; message_id?: unknown } }).result
+    const date = result?.date
+    // Telegram dates are Unix seconds. Bound conversion before toISOString;
+    // absent/malformed metadata must not invalidate an accepted send.
+    const providerSentAt = typeof date === 'number' && Number.isSafeInteger(date)
+      && date > 0 && date <= 8_640_000_000_000
+      ? new Date(date * 1000).toISOString()
+      : null
+    const messageId = result?.message_id
+    const providerMessageIdStatus = typeof messageId === 'number'
+      && Number.isSafeInteger(messageId) && messageId >= 0
+      ? (messageId === 0 ? 'zero' : 'positive')
+      : 'missing_or_invalid'
+    void Promise.resolve(input.observer({
+      providerSentAt,
+      providerMessageIdStatus,
+      requestStartedAt: input.requestStartedAt,
+      responseReceivedAt: input.responseReceivedAt,
+      requestDurationMs: input.requestDurationMs,
+    })).catch(() => {})
+  } catch {
+    // A diagnostic failure must never retry a non-idempotent accepted message.
   }
 }
 

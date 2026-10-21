@@ -141,6 +141,10 @@ Dependency review source inclusion is tracked in
 Pinned Containers SDK patch and mapping inclusion is tracked in
 [the SDK snapshot plan](exec-plans/completed/2026-10-18-frog-sdk-patch-context-4192.md).
 
+Telegram text acceptance timing is owned by
+[`the runtime telemetry contract`](../docs/hosted-runtime-log-database.md#telegram-text-acceptance-timing);
+it distinguishes provider send time from local acceptance without claiming device visibility.
+
 Private vault-file preparation failure evidence is owned by
 [`the runtime telemetry contract`](../docs/hosted-runtime-log-database.md#private-vault-file-preparation-failure-evidence);
 implementation, complexity repair and validation/release handoff are tracked in

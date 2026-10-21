@@ -43,6 +43,39 @@ The isolated database does not store the raw hosted member id and has no
 cross-database foreign key. Attempt ids and other existing redacted operational
 correlation fields retain their current contract and limits.
 
+### Telegram text acceptance timing
+
+`outbox.telegram_text_accepted` records each successful `sendMessage` response
+from the hosted outbox text adapter, including each accepted chunk. It does not
+cover native rich-message or media sends, typing, or standalone control notices.
+The existing outbox intent reference correlates it with the saved occurrence and
+terminal delivery outcome. Acceptance can precede a later chunk failure and
+rollback; this event is not a substitute for the terminal outbox status.
+
+The engine projects only `providerSentAt` (Telegram `Message.date`, Unix seconds
+converted to UTC), `providerMessageIdStatus` (`positive`, `zero`, or
+`missing_or_invalid`), local `requestStartedAt` and `responseReceivedAt` (UTC),
+and monotonic `requestDurationMs`. Missing or invalid dates are null. A zero
+message ID is distinguishable because Telegram may use it for a scheduled message;
+this diagnostic does not change existing receipt or retry behavior. No raw message,
+chat, username, token, target, or provider message ID enters the log payload.
+
+Compare the saved scheduled occurrence with `requestStartedAt` for pre-send delay,
+then local response time with `providerSentAt` for provider timing differences.
+Telegram's timestamp has one-second precision and clocks can differ; do not
+interpret small or negative differences as transport delay. Neither timestamp
+proves device notification arrival or that a member saw the message.
+
+These info entries use the existing bounded queue and seven-day retention.
+They add no awaited I/O; failures or pending observers cannot change delivery or
+cause retries. Missing rows are unknown evidence. No receipt schema changes.
+Deploy the Web log consumer before the updated runtime producer: the new event
+code expands the existing closed protocol vocabulary, so normal protocol admission
+must succeed before Worker release. Old runners remain readable. A rollback below
+the event consumer must first drain or replace producing runners to avoid rejecting
+mixed log batches. Query the isolated runtime-log database by bounded `at` window,
+event code, and existing subject/intent correlation after release.
+
 ### Computer evaluation failure categories
 
 `assistant.computer_tool_failed` retains its existing best-effort scheduling and

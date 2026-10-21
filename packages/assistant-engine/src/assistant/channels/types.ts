@@ -40,6 +40,14 @@ export interface AssistantChannelActivityHandle {
   stop: (options?: AssistantChannelActivityStopOptions) => Promise<void>
 }
 
+export interface TelegramTextSendAcceptance {
+  providerSentAt: string | null
+  providerMessageIdStatus: 'positive' | 'zero' | 'missing_or_invalid'
+  requestStartedAt: string
+  responseReceivedAt: string
+  requestDurationMs: number
+}
+
 export interface TelegramRuntimeDependencies {
   authorityBoundTarget?: string | null
   env?: NodeJS.ProcessEnv
@@ -49,6 +57,8 @@ export interface TelegramRuntimeDependencies {
   ) => Promise<Uint8Array>
   loadVaultFile?: (media: AssistantVaultFileResponseMedia) => Promise<Uint8Array>
   maxDeliveryAttempts?: number
+  // Diagnostics only: never awaited and isolated from delivery/retry decisions.
+  onTextSendAccepted?: (acceptance: TelegramTextSendAcceptance) => void | Promise<void>
   signal?: AbortSignal
 }
 
