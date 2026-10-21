@@ -1602,6 +1602,31 @@ identity compatibility floor described in the migration section.
 
 The production smoke also runs one real `gpt-6-luna` model turn inside the deployed runner container (`HOSTED_EXECUTION_SMOKE_LIVE_MODEL_TURN=true`, set by the deploy workflow's `live_model_turn` input, default on). The container runs a single non-interactive `codex exec` in a scratch workspace with the injected-credential placeholder; the Worker egress intercept authorizes exactly one deploy-smoke fenced `POST /v1/responses` request for `gpt-6-luna` and injects the real Worker-owned `OPENAI_API_KEY`, so the smoke proves the rollout target's OpenAI auth, account availability, quota, request compatibility, and network path without the raw key ever entering the container. The container accepts the smoke only when Codex JSONL reports the final agent output as exactly `OK`. Cost posture: each enabled behavioral smoke phase runs one bounded model turn; an image release checks the isolated artifact before serving replacement and retains the existing post-rollout checks; the flag remains disabled in per-PR CI and hosted-local E2E.
 
+## Twelve-hour prompt cache rollout
+
+The pinned native Codex request builder sets `prompt_cache_options.ttl: "12h"`
+for supported product models only when `MURPH_HOSTED_RUNTIME_PROCESS=1` and the
+provider uses `OPENAI_API_KEY`. This covers native HTTP, WebSocket continuations,
+prewarm, and Responses-based compaction. Implicit caching, prompt keys, model
+selection, and `store: false` remain unchanged. Subscription auth and non-hosted
+runs retain provider defaults. The Worker continues opaque socket forwarding;
+HTTP diagnostics recognize the finite `12h` TTL without logging request content.
+
+Deploy Web's allowance consumer before the new runner image. Native usage carries
+the provider-reported twelve-hour write subset through cumulative totals,
+per-turn deltas, and measured idle compaction into sanitized `rawUsageJson`.
+Web prices those tokens at twice the thirty-minute write rate, then applies the
+existing service-tier and long-context rules. Old runners and records lacking
+the subset retain thirty-minute accounting. No database migration or backfill is
+needed. Rolling back the runner restores default requests; retain the new Web
+consumer while twelve-hour usage can still arrive or be replayed.
+
+After deployment, check HTTP `cacheTtlKind`, successful ordinary replies, and
+allowance snapshots with `tokens.cacheWrite12h` and its corresponding rate.
+Cache hits remain provider-dependent. Twelve hours is minimum cache coverage,
+not a deletion deadline; it does not alter OpenAI's maximum data-retention policy.
+See the [OpenAI cache lifetime contract](https://developers.openai.com/api/docs/guides/prompt-caching#cache-lifetime).
+
 ## OpenAI-only inference cutover
 
 Retiring alternative inference requires a coordinated Web, Worker, and runner

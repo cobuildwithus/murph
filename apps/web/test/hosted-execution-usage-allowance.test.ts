@@ -5395,3 +5395,30 @@ describe("operator-funded allowance accounting", () => {
     })).rejects.toThrow("authorized task");
   });
 });
+
+// Each write replaces ordinary input pricing; twelve-hour writes cost twice
+// thirty-minute writes, before the existing service-tier adjustment.
+it.each([
+  ["standard", 1n, 1n], ["openai-flex", 1n, 2n], ["openai-priority", 2n, 1n],
+] as const)("prices mixed cache lifetimes once on %s", (tokenPricingBasis, numerator, denominator) => {
+  const record = {
+    ...BASE_USAGE_RECORD, requestedModel: "gpt-6.1-sol", servedModel: "gpt-6.1-sol",
+    inputTokens: 200_000, cachedInputTokens: 100_000, cacheWriteTokens: 60_000,
+    outputTokens: 0, tokenPricingBasis,
+    rawUsageJson: { cacheWrite12hInputTokens: 40_000 },
+  };
+  const result = priceHostedAiUsageForAllowance(parseAssistantUsageRecord(record));
+  // 40k ordinary at $2 + 100k reads at $0.10 + 20k 30m writes at $2.50 + 40k 12h at $5.
+  expect(result.costUsdMicros).toBe(340_000n * numerator / denominator);
+  expect(result.pricingSnapshot).toMatchObject({
+    ratesUsdMicrosPerMillionTokens: { cacheWrite: "2500000", cacheWrite12h: "5000000" },
+    tokens: { cacheWrite: "60000", cacheWrite12h: "40000", billableInput: "40000" },
+  });
+  expect(priceHostedAiUsageForAllowance({ ...record, rawUsageJson: null }).costUsdMicros)
+    .toBe(240_000n * numerator / denominator);
+});
+it("rejects a twelve-hour write subset exceeding aggregate writes", () => {
+  expect(() => priceHostedAiUsageForAllowance({
+    ...BASE_USAGE_RECORD, cacheWriteTokens: 10, rawUsageJson: { cacheWrite12hInputTokens: 11 },
+  })).toThrow("Twelve-hour cache writes exceed total cache writes");
+});

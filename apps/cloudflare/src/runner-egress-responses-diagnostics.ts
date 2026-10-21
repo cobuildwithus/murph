@@ -247,7 +247,7 @@ async function appendCacheSettingsDiagnostics(
   diagnostic.comparisonResponsePresent = readStringRecordProperty(options, "comparison_response_id") !== null;
   for (const [field, value, allowed] of [
     ["cacheModeKind", options.mode, ["implicit", "explicit"]],
-    ["cacheTtlKind", options.ttl, ["30m"]],
+    ["cacheTtlKind", options.ttl, ["30m", "12h"]],
     ["reasoningEffortKind", reasoning.effort, ["none", "minimal", "low", "medium", "high", "xhigh"]],
     ["verbosityKind", text.verbosity, ["low", "medium", "high"]],
     ["serviceTierKind", parsed.service_tier, ["auto", "default", "flex", "priority"]],
