@@ -98,8 +98,6 @@ jobs:
           MURPH_E2E_STREAM_DEV_LOGS: "1"
           NEXT_DIST_DIR_MODE: smoke
           NEXT_DIST_DIR_SUFFIX: murph-cloud-integration
-          NEXT_PUBLIC_PRIVY_APP_ID: cm_app_smoke_placeholder1
-          PRIVY_VERIFICATION_KEY: ci-hosted-web-verification-key
         run: |
           pnpm install --frozen-lockfile
           pnpm --dir packages/hosted-execution build

@@ -1,6 +1,6 @@
 # Hosted authentication migration
 
-Status: first-party adoption merged; final retirement remains gated. This document owns the rollout from Privy to Better Auth. Final pushed-head CI remains a merge gate; source review and local proof do not establish deployment or activation.
+Status: first-party-only Web is live; legacy schema and project configuration are retired as of 2026-10-21. Native SDK removals are merged. Store publication and deletion of the downgraded vendor app are separate, unfinished actions; see the rollout record below. This document owns the rollout from Privy to Better Auth.
 
 ## Target and boundaries
 
@@ -21,7 +21,7 @@ Use no planned service outage. Prefer natural compatibility drain over elaborate
 
 Four Murph PRs are integration boundaries. iOS and Android changes are reviewed in their own repositories and pinned to the corresponding backend protocol; native store publication is a separate event from merging code.
 
-Current candidates and code qualification:
+Historical candidates and code qualification:
 
 | Stage | Candidate | Reviewed source and remaining preparation |
 | --- | --- | --- |
@@ -40,41 +40,36 @@ Web adoption now invalidates the previous decrypted vault at successful replacem
 
 Android adoption uses the existing AndroidX Core AtomicFile to stage first writes consistently on supported platforms. Both empty and partial initial-write interruptions reproduce the old failure on API 29; all nine actual Keystore/storage/HTTP/composed recovery cases pass with the fix on API 28, 29 and 36. CI also passes all 44 synthetic cases on each of API 28/29/30. There is no new storage format, dependency or platform branch. The SDK-free release preserves this same secure-record owner, encryption key and local member binding. iOS retirement passes 601 unit tests and Debug/Release simulator builds.
 
-These are code candidates, not deployed versions. Do not merge retirement candidates or distribute SDK-free apps until every retirement gate passes. Keep the transition app available while eligible installed sessions still need its one-time bridge. Real delivery, installed/signed-device upgrades and dormant/skipped-version recovery remain release qualification work.
+The table above records historical source qualification, not current deployment state. The rollout record below owns the executed retirement. Real delivery, installed/signed-device upgrades and dormant/skipped-version recovery remain separate native publication evidence.
 
 
 ## Current rollout record
 
-The earlier reviewed-head table is historical candidate evidence. Current state:
+Executed 2026-10-21. The operator accepted older-native update/re-login risk,
+confirmed wallets were unused, and authorized retirement. This acceptance is
+not a claim that every installed device upgraded or that new SDK-free binaries
+were published.
 
-| Work | State and next gate |
+| Work | Executed result and remaining boundary |
 | --- | --- |
-| Web adoption #3127, #3128, #3132 | Merged; current first-party production records observed. |
-| Passkey repair #3504 | Merged after the original retirement candidate; its canonical login and revocation safeguards are preserved by this reconciliation. |
-| Web retirement #3134 | Reconciled with current main, preserving passkey repair, native messaging, deletion diagnostics and subsequent feature removals. Historical round 3 passed at `12bd39220dd5a3e06dfa916227b62e28cedc1134`; the renewed candidate requires fresh full review and green final-head CI. Consult the PR ledger for current evidence. Merge/deployment hold is unchanged. |
-| Targeted signup cleanup #3589 | Merged additive guarded Ops endpoint with second full review and green required CI. Production deployment of merge `e42b2b81f8264af6fc37ba75c8db1168d6bf937e` is ready; no production deletion performed. Live legacy sessions independently block execution. This retirement source removes the temporary endpoint after its obligations converge. |
-| iOS adoption #150 / Android adoption #39 | Merged. Store distribution and installed-device upgrades remain unqualified by merge evidence. |
-| Android retirement #40 | Reconciled with main and #44 at `a16e52cf31c748732bf008c73b9fe5cef7671866`; validated full review PASS and all hosted checks green. Debug/Release builds and lint pass, 2,835 unit-test executions pass, and nine real Keystore/HTTP/interrupted-write cases pass on API 36. Current synthetic screenshots were inspected. Native distribution/recovery and shared provider obligations still hold merge/publication. |
-| iOS retirement #151 | Reconciled with main at `cc32d748f8db612234c3f234e693c95a9d6baa54`. Round 3 passed after removing the unreachable provider diagnostic adapter; all 629 host tests and Debug/Release simulator builds pass. The prior reconciliation passed 67 UI tests with three hosted/configuration cases skipped; no UI changed afterward. Native distribution/recovery and shared provider obligations still hold merge/publication. |
-| Android CI cleanup #41 | Reconciled with #40; the trusted-base review still sees only two unused public placeholders removed. All hosted checks green; open and stacked after #40. |
-| Android canary setup #44 | Merged as `929d9493e178d12523ac4705963326199bae37a3` after validated PASS and green CI; explicit `platform-tools` avoids the removed package requested by the pinned action default. |
-| Privy browser test #3221 | Closed as obsolete; branch and historical evidence retained. |
+| Web retirement #3134 | Merged after round-5 PASS and required CI. Production now serves `5d56f443eb1b2e705b47f3b1e227c6c02ec79932`, including browser-fixture corrections #4276 and #4280. Exact-candidate production admission [39640574045](https://github.com/cobuildwithus/murph/actions/runs/39640574045) passed all hosted browser/runtime scenarios. |
+| Canonical signup cleanup | The explicitly authorized unused-signup deletion completed through the guarded canonical Ops owner with terminal cleanup. No retained member was deleted to satisfy convergence. The temporary endpoint is removed. |
+| Schema contraction | [39642935706](https://github.com/cobuildwithus/murph/actions/runs/39642935706) verified the production alias, drained prior functions, and applied guarded contract migrations. Read-only catalog checks confirmed the legacy session table and all nine retired identity/wallet/cleanup columns are absent. |
+| Deployed configuration | Removed all 14 Privy project settings across Vercel production, preview, and development; metadata inventory is clear. The shared session HMAC key remains for billing, referrals, and device flows. Existing immutable deployment snapshots are not vendor credential revocation. |
+| Android retirement #40 | Merged as `b05c926b592b2feab5773b808eaec9c4827b482c`. Validated exact-head [ReviewGPT PASS](https://chatgpt.com/c/6ad8f1ec-c458-83ea-aa99-69cfe9cc0aef), zero findings, and all three required checks green. Local proof: 2,975 unit-test executions, lint/builds, nine real-Keystore API36 cases, and inspected synthetic screenshots. Interrupted sign-out with absent credentials reaches login only after health teardown. |
+| Android CI cleanup #41 | Merged as `ce3450cda5d7e0359cd4ec31095997644b3754d6`; independent control review and required checks passed. Only obsolete CI inputs and Gradle comments were removed. Review-export correction #63 was separately reviewed and merged before final product review. |
+| iOS retirement #151 | Merged as `b79432de259f0417ac8ca187ac686382da295e85` after validated round-4 PASS and required checks. Local signed host tests passed: 718 passed, one skipped. Post-merge CI subsequently failed two different APIClient/wearable fixture tests across two attempts; those runs are not recorded as passes. |
+| Native publication | No new App Store or Play binary was published by this retirement operation. API28/29 hosted Android emulators failed during setup before test execution. Installed upgrades, skipped versions, real OTP delivery, physical devices, provider integration, and signed-candidate checks remain publication gates. Native canary source pins were not advanced here. |
+| Vendor account | The operator already downgraded Privy. Vendor-app deletion and vendor-side credential revocation were deferred; neither is claimed complete or required for the now-independent live backend. |
 
-Keep live inventory results private and recheck them before shipping. Signup-only
-`lastSeenAt` is not return-visit telemetry. The targeted deletion owner checks no
-live legacy session and no durable product use under the canonical deletion
-locks; no compatibility code is added for unresolved accounts. Empty pending
-provider cleanup receipts do not prove provider-orphan inventory or wallet/export
-completion.
+Unauthenticated production smoke checks returned 200 for the homepage, 401 for
+both browser/native session readers, and 404 for the retired native exchange
+and Privy onboarding endpoints. These checks do not prove authenticated native
+store behavior. Production identity and cleanup records remain private.
 
-The public native controllers still pin older private sources. The iOS canary
-last failed at its legacy OTP stage; the last Android run failed at SDK setup before instrumentation, now corrected by #44 but not yet requalified.
-Neither supplies first-party rollout evidence. Update source pins only to reviewed
-immutable commits and qualify actual generated-code delivery, installed updates
-and dormant/skipped-version recovery. Do not revive provider fixed-code login.
-
-Preserve the shared HMAC key for billing, referrals and device flows. Keep
-contraction and vendor removal held until every recorded obligation converges.
+The contracted deployment is the rollback floor: do not restore a reader that
+requires the removed schema. Use the normal reviewed Git deployment path for
+any correction. Preserve the shared session HMAC key.
 
 ## Backend configuration and deployment
 
