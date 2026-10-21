@@ -89,7 +89,6 @@ test("JoinInvitePageView renders verify copy without exposing the masked phone h
         status: createStatus({
           capabilities: {
             billingReady: true,
-            phoneAuthReady: true,
           },
         }),
       }),
@@ -418,7 +417,6 @@ test("JoinInvitePageView keeps messaging setup before Starter activation when bi
         status: createStatus({
           capabilities: {
             billingReady: false,
-            phoneAuthReady: true,
           },
           messagingSetupRequired: true,
           session: {
@@ -596,7 +594,6 @@ function createStatus(
     },
     capabilities: {
       billingReady: true,
-      phoneAuthReady: true,
       ...overrides.capabilities,
     },
     invite: {

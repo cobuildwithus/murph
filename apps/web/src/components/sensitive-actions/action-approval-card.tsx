@@ -8,7 +8,6 @@ import {
   ActionApprovalDecisionFallback,
   ActionApprovalScreen,
 } from "@/src/components/sensitive-actions/action-approval-screen";
-import { AuthButton } from "@/src/components/ui/auth-button";
 import { Button } from "@/src/components/ui/button";
 import type {
   HostedActionApprovalDecisionResponse,
@@ -93,19 +92,13 @@ export function ActionApprovalCard({
   }
 
   const busy = submission !== null;
-  const clientAuthenticationRequired =
-    authorization.setup.ready && !authorization.setup.clientAuthenticated;
-  const primaryLabel = clientAuthenticationRequired
-    ? "Sign in to approve"
-    : authorization.setup.pendingLabel
-    ?? (submission === "approving" ? "Verifying approval…" : "Approve with passkey");
+  const primaryLabel = submission === "approving" ? "Verifying approval…" : "Approve with passkey";
   const returningDecision = submission === "returning-approved"
     ? "approved"
     : submission === "returning-denied"
       ? "denied"
       : null;
-  const busyStatus = authorization.setup.pendingLabel
-    ?? (submission === "approving"
+  const busyStatus = (submission === "approving"
       ? "Verifying approval…"
       : submission === "denying"
         ? "Denying…"
@@ -118,7 +111,7 @@ export function ActionApprovalCard({
               ? "Denied. Returning to Murph…"
               : "Denied."
           : null);
-  const surfacedError = error ?? authorization.setup.error;
+  const surfacedError = error;
 
   return (
     <ActionApprovalScreen
@@ -140,8 +133,7 @@ export function ActionApprovalCard({
           aria-busy={busy}
           className="flex flex-col gap-3 sm:flex-row sm:items-center"
         >
-          <AuthButton
-            authSatisfied={!clientAuthenticationRequired}
+          <Button
             className="w-full sm:w-auto"
             disabled={busy}
             onClick={approve}
@@ -149,7 +141,7 @@ export function ActionApprovalCard({
             type="button"
           >
             {primaryLabel}
-          </AuthButton>
+          </Button>
           <Button
             className="w-full sm:w-auto sm:px-5"
             disabled={busy}

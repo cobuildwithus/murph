@@ -22392,7 +22392,7 @@ describeRealCodex('real Codex generic transcript memory judgment e2e', () => {
 })
 
 describeRealCodex('real Codex morning reminder reconciliation e2e', () => {
-  it('uses shared read guidance and repairs context timing completion and duplicates without new connections', async () => {
+  it('uses shared read guidance and excludes maintenance from bounded reminder inventory while repairing context timing completion and duplicates without new connections', async () => {
     const config = await resolveRealCodexE2eConfig()
     const seed = MURPH_MANAGED_AUTOMATIONS.find(candidate => candidate.slug === 'journal-connected-context-morning')
     if (!seed) throw new Error('Missing morning automation.')
@@ -22447,7 +22447,15 @@ describeRealCodex('real Codex morning reminder reconciliation e2e', () => {
         })).record)
       }
       expect(new Set(records.map(record => record.automationId)).size).toBe(12)
-      expect((await listAutomations({ vaultRoot: workingDirectory })).items).toHaveLength(12)
+      const maintenanceRecords = []
+      for (const routine of [MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION, ...MURPH_MANAGED_AUTOMATIONS].filter(item => item.ownerScope === 'member')) {
+        maintenanceRecords.push((await upsertAutomation({ vaultRoot: workingDirectory,
+          automationId: routine.automationId, slug: routine.slug, title: routine.title,
+          instructions: routine.instructions, schedule: routine.schedule, route,
+          continuityPolicy: 'fresh', status: 'active', now,
+        })).record)
+      }
+      expect((await listAutomations({ vaultRoot: workingDirectory })).items).toHaveLength(12 + maintenanceRecords.length)
       const runTurn = async () => executeRealCodexAppServerTurn({
         approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
         abortSignal: AbortSignal.timeout(600_000),
@@ -22521,6 +22529,7 @@ describeRealCodex('real Codex morning reminder reconciliation e2e', () => {
         .filter(line => /^automation list\b/u.test(line) && !isRecordedVaultHelpCommand(line))
       expect(firstInventoryCommands).toHaveLength(1)
       expect(firstInventoryCommands[0]).toContain('--include-instructions')
+      expect(firstInventoryCommands[0]).toContain('--exclude-maintenance')
       // Patch receipts omit instructions. One exact verification read for the
       // changed instruction is useful; rereading unchanged inventory is not.
       const inspectedIds = new Set<string>()
@@ -22566,7 +22575,11 @@ describeRealCodex('real Codex morning reminder reconciliation e2e', () => {
       expect(parseAssistantNotificationDecision(repeat.finalMessage).kind).toBe('skip')
       expect(requests.filter(request => request.action === 'patch')).toHaveLength(4)
       expect(await readAll()).toEqual(after)
-      expect((await listAutomations({ vaultRoot: workingDirectory })).items).toHaveLength(records.length)
+      expect((await listAutomations({ vaultRoot: workingDirectory })).items).toHaveLength(records.length + maintenanceRecords.length)
+      for (const routine of maintenanceRecords) {
+        expect(await showAutomation({ vaultRoot: workingDirectory, automationId: routine.automationId })).toEqual(routine)
+        expect(requests.some(request => 'lookup' in request && request.lookup === routine.automationId)).toBe(false)
+      }
       const allInventoryCommands = expandRecordedVaultCommands((await readFile(path.join(workingDirectory, 'commands.log'), 'utf8')).split('\n').filter(Boolean))
         .filter(line => /^automation list\b/u.test(line) && !isRecordedVaultHelpCommand(line))
       expect(allInventoryCommands).toHaveLength(2)

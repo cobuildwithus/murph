@@ -6,10 +6,6 @@ type PrismaModule = typeof import("@/src/lib/prisma");
 
 const serviceMocks = vi.hoisted(() => ({
   readHostedLinqProductionCanaryMemberId: vi.fn(),
-  assertUnusedHostedSignupTx: vi.fn(),
-  acquireHostedPrivyPhoneTransferPhoneLocksTx: vi.fn(),
-  assertHostedPrivyPhoneTransferSourceRetirementFenceTx: vi.fn(),
-  buildHostedPrivySessionState: vi.fn(),
   connectedAppsClient: {
     deleteAccount: vi.fn(),
     disconnectAccount: vi.fn(),
@@ -18,8 +14,8 @@ const serviceMocks = vi.hoisted(() => ({
   createComposioConnectedAppsClient: vi.fn(),
   createHostedDeviceSyncControlPlane: vi.fn(),
   createHostedDeviceSyncRegistry: vi.fn(),
+  createHostedDeviceSyncRegistryWithProviderConfigs: vi.fn(),
 
-  deleteHostedPrivyUser: vi.fn(),
   deleteHostedRunnerUserDataBestEffort: vi.fn(),
   decryptHostedWebNullableFields:
     vi.fn<HostedWebEncryptionModule["decryptHostedWebNullableFields"]>(),
@@ -44,8 +40,8 @@ const serviceMocks = vi.hoisted(() => ({
   persistHostedAccountDeletionCleanupTx: vi.fn(),
   prepareHostedAccountDeletionCleanup: vi.fn(),
   readHostedConnectedAppsConfig: vi.fn(),
-  readHostedPrivyUserById: vi.fn(),
-  reconcileHostedPrivyIdentityOnMemberTx: vi.fn(),
+
+
   prepareHostedMemberIdentityWrite: vi.fn(),
   readHostedMemberIdentity: vi.fn(),
   readHostedMemberSnapshot: vi.fn(),
@@ -61,20 +57,15 @@ const serviceMocks = vi.hoisted(() => ({
   assertHostedPhoneCallsReadyForAccountDeletionTx: vi.fn(),
   deleteHostedPhoneCallsForAccountDeletion: vi.fn(),
   terminateHostedUserRuntimeWorkflowBestEffort: vi.fn(),
-  prepareHostedPrivyPhoneTransferSourceRetirement: vi.fn(),
-  prepareHostedPrivyPhoneTransferSourceRetirementTx: vi.fn(),
 
+
+  resolveDeviceProviderApplicationForConnection: vi.fn(),
   revokeStravaDeviceSyncAccess: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/linq-production-canary", () => ({
   readHostedLinqProductionCanaryMemberId: serviceMocks.readHostedLinqProductionCanaryMemberId,
 }));
-
-vi.mock("@/src/lib/hosted-privacy/unused-signup", () => ({
-  assertUnusedHostedSignupTx: serviceMocks.assertUnusedHostedSignupTx,
-}));
-
 vi.mock("@/src/lib/prisma", async (importOriginal) => {
   const original = await importOriginal<PrismaModule>();
   serviceMocks.runPrismaInteractiveTransactionOriginal =
@@ -140,16 +131,6 @@ vi.mock("@/src/lib/device-sync/providers", () => ({
 
 }));
 
-vi.mock("@/src/lib/hosted-onboarding/privy", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@/src/lib/hosted-onboarding/privy")>()),
-  deleteHostedPrivyUser: serviceMocks.deleteHostedPrivyUser,
-  readHostedPrivyUserById: serviceMocks.readHostedPrivyUserById,
-}));
-
-vi.mock("@/src/lib/hosted-onboarding/privy-user", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@/src/lib/hosted-onboarding/privy-user")>()),
-  buildHostedPrivySessionState: serviceMocks.buildHostedPrivySessionState,
-}));
 
 vi.mock("@/src/lib/hosted-onboarding/member-channel-sync", () => ({
   commitPreparedHostedMemberChannelsUpdatedTx:
@@ -160,8 +141,6 @@ vi.mock("@/src/lib/hosted-onboarding/member-channel-sync", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-identity-store", () => ({
-  commitPreparedHostedMemberIdentityWriteTx:
-    serviceMocks.reconcileHostedPrivyIdentityOnMemberTx,
   prepareHostedMemberIdentityWrite: serviceMocks.prepareHostedMemberIdentityWrite,
   readHostedMemberIdentity: serviceMocks.readHostedMemberIdentity,
 }));
@@ -175,20 +154,6 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-stripe-customer", () => ({
     serviceMocks.resumeHostedMemberStripeCustomerClaimForAccountDeletion,
 }));
 
-vi.mock("@/src/lib/hosted-onboarding/privy-phone-transfer-retirement", () => ({
-  HOSTED_PRIVY_PHONE_TRANSFER_RETIREMENT_TRANSACTION_OPTIONS: {
-    maxWait: 5_000,
-    timeout: 30_000,
-  },
-  acquireHostedPrivyPhoneTransferPhoneLocksTx:
-    serviceMocks.acquireHostedPrivyPhoneTransferPhoneLocksTx,
-  assertHostedPrivyPhoneTransferSourceRetirementFenceTx:
-    serviceMocks.assertHostedPrivyPhoneTransferSourceRetirementFenceTx,
-  prepareHostedPrivyPhoneTransferSourceRetirement:
-    serviceMocks.prepareHostedPrivyPhoneTransferSourceRetirement,
-  prepareHostedPrivyPhoneTransferSourceRetirementTx:
-    serviceMocks.prepareHostedPrivyPhoneTransferSourceRetirementTx,
-}));
 
 vi.mock("@/src/lib/hosted-onboarding/runtime", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/src/lib/hosted-onboarding/runtime")>()),
@@ -240,7 +205,6 @@ import {
   buildHostedLinqInviteSignupEffectIdMemberPrefix,
 } from "@/src/lib/hosted-onboarding/linq-invite-signup-effect-id";
 import {
-  createHostedPrivyUserLookupKey,
   createHostedStripeCheckoutSessionLookupKey,
   createHostedStripeCustomerLookupKey,
   createHostedStripeSubscriptionLookupKey,
@@ -258,14 +222,12 @@ import { encryptHostedWebNullableString } from "@/src/lib/hosted-web/encryption"
 import {
   deleteHostedAccountData,
   deleteHostedLinqProductionCanaryAccountData,
-  deleteHostedPrivyPhoneTransferSourceAccountData,
   HOSTED_ACCOUNT_DATA_STORE_COVERAGE,
   parseHostedAccountDeletionRequest,
 } from "@/src/lib/hosted-privacy/account-data-service";
 
 const REQUIRED_STORE_SLUGS = [
   "prisma.hosted_member",
-  "prisma.hosted_web_session",
   "prisma.hosted_sensitive_action_challenge",
   "prisma.hosted_member_identity",
   "prisma.hosted_group_participant_observation",
@@ -340,7 +302,7 @@ const REQUIRED_STORE_SLUGS = [
   "providers.oura_whoop_strava",
   "providers.composio_connected_apps",
   "providers.linq_telegram_email_messages",
-  "providers.stripe_privy",
+  "providers.stripe",
   "backups",
 ] as const;
 
@@ -417,7 +379,6 @@ const HOSTED_ACCOUNT_DELETION_RAW_COUNT_KEYS = [
   "prisma.hosted_pending_group_setup",
   "prisma.hosted_member_routing",
   "prisma.hosted_sensitive_action_challenge",
-  "prisma.hosted_web_session",
   "prisma.hosted_member_identity",
   "prisma.hosted_thread_container",
   "prisma.hosted_connected_app_connect_intent",
@@ -442,40 +403,13 @@ const HOSTED_ACCOUNT_DELETION_ERASURE_STATEMENT_BOUND = 14;
 beforeEach(() => {
   serviceMocks.readHostedLinqProductionCanaryMemberId.mockReset();
   serviceMocks.readHostedLinqProductionCanaryMemberId.mockResolvedValue(null);
-  serviceMocks.assertUnusedHostedSignupTx.mockReset();
-  serviceMocks.assertUnusedHostedSignupTx.mockResolvedValue(undefined);
   vi.stubEnv("KERNEL_API_KEY", "");
   serviceMocks.runPrismaInteractiveTransaction.mockReset();
   serviceMocks.runPrismaInteractiveTransaction.mockImplementation(
     serviceMocks.runPrismaInteractiveTransactionOriginal!,
   );
-  serviceMocks.acquireHostedPrivyPhoneTransferPhoneLocksTx.mockReset();
-  serviceMocks.acquireHostedPrivyPhoneTransferPhoneLocksTx.mockResolvedValue(
-    undefined,
-  );
-  serviceMocks.assertHostedPrivyPhoneTransferSourceRetirementFenceTx.mockReset();
-  serviceMocks.assertHostedPrivyPhoneTransferSourceRetirementFenceTx.mockResolvedValue(
-    undefined,
-  );
-  serviceMocks.buildHostedPrivySessionState.mockReset();
-  serviceMocks.buildHostedPrivySessionState.mockReturnValue({
-    identity: {
-      phone: {
-        number: "+15551234567",
-        verifiedAt: new Date("2026-07-30T12:00:00.000Z"),
-      },
-      telegram: null,
-      userId: "did:privy:target",
-    },
-    linkedAccounts: [{
-      phoneNumber: "+15551234567",
-      type: "phone",
-      verifiedAt: "2026-07-30T12:00:00.000Z",
-    }],
-    verifiedPrivyUser: {
-      id: "did:privy:target",
-    },
-  });
+
+
   serviceMocks.connectedAppsClient.deleteAccount.mockReset();
   serviceMocks.connectedAppsClient.deleteAccount.mockResolvedValue(undefined);
   serviceMocks.connectedAppsClient.disconnectAccount.mockReset();
@@ -491,8 +425,8 @@ beforeEach(() => {
 
   serviceMocks.revokeStravaDeviceSyncAccess.mockReset();
   serviceMocks.revokeStravaDeviceSyncAccess.mockResolvedValue(undefined);
-  serviceMocks.deleteHostedPrivyUser.mockReset();
-  serviceMocks.deleteHostedPrivyUser.mockResolvedValue(true);
+
+
   serviceMocks.decryptHostedWebNullableFields.mockReset();
   serviceMocks.decryptHostedWebNullableFields.mockImplementation(
     serviceMocks.decryptHostedWebNullableFieldsOriginal!,
@@ -535,15 +469,13 @@ beforeEach(() => {
     phoneLookupKey: null,
     phoneNumber: null,
     phoneNumberVerifiedAt: null,
-    privyUserId: "did:privy:target",
+
     signupPhoneCodeSendAttemptId: null,
     signupPhoneCodeSendAttemptStartedAt: null,
     signupPhoneCodeSentAt: null,
     signupPhoneNumber: null,
-    walletAddress: null,
-    walletChainType: null,
-    walletCreatedAt: null,
-    walletProvider: null,
+
+
   });
   serviceMocks.readHostedMemberSnapshot.mockReset();
   serviceMocks.readHostedMemberSnapshot.mockResolvedValue({ identity: {} });
@@ -571,7 +503,6 @@ beforeEach(() => {
         r2Supported: null,
         runnerStateDeleted: null,
       },
-      privyUser: { errorCode, status: "failed" },
       stripeCustomer: { errorCode, status: "failed" },
     }),
   );
@@ -585,8 +516,6 @@ beforeEach(() => {
     kmsKeyName: "test-key",
     nextAttemptAt: input.now,
     payloadCiphertext: "encrypted",
-    privyCompletedAt: null,
-    privyUserLookupKey: createHostedPrivyUserLookupKey(input.privyUserId),
     runtimeLogsCompletedAt: null,
     runtimeMemberIds: [...input.runtimeMemberIds],
     stripeCustomerIds: [...input.stripeCustomerIds],
@@ -602,24 +531,8 @@ beforeEach(() => {
     maxAccountsPerToolkit: 5,
     toolkits: ["gmail", "googlecalendar"],
   });
-  serviceMocks.readHostedPrivyUserById.mockReset();
-  serviceMocks.readHostedPrivyUserById.mockResolvedValue({
-    id: "did:privy:target",
-  });
-  serviceMocks.reconcileHostedPrivyIdentityOnMemberTx.mockReset();
-  serviceMocks.reconcileHostedPrivyIdentityOnMemberTx.mockResolvedValue(undefined);
-  serviceMocks.prepareHostedPrivyPhoneTransferSourceRetirement.mockReset();
-  serviceMocks.prepareHostedPrivyPhoneTransferSourceRetirement.mockResolvedValue({
-    rawFingerprint: "prepared-fingerprint",
-    sourceIdentity: null,
-    sourceMemberId: "member_123",
-    targetIdentity: null,
-    targetMemberId: "member_target",
-  });
-  serviceMocks.prepareHostedPrivyPhoneTransferSourceRetirementTx.mockReset();
-  serviceMocks.prepareHostedPrivyPhoneTransferSourceRetirementTx.mockResolvedValue({
-    sourceMemberId: "member_123",
-  });
+
+
   serviceMocks.assertHostedUsageCreditPurchasesReadyForAccountDeletionTx.mockReset();
   serviceMocks.assertHostedUsageCreditPurchasesReadyForAccountDeletionTx.mockResolvedValue(
     undefined,
@@ -769,7 +682,7 @@ describe("HOSTED_ACCOUNT_DATA_STORE_COVERAGE", () => {
 
     expect(bySlug.get("cloudflare.runner_durable_object")?.deletion).toBe("best-effort-delete");
     expect(bySlug.get("cloudflare.r2_user_artifacts")?.deletion).toBe("best-effort-delete");
-    expect(bySlug.get("providers.stripe_privy")?.deletion).toBe("best-effort-delete");
+    expect(bySlug.get("providers.stripe")?.deletion).toBe("best-effort-delete");
     expect(bySlug.get("backups")?.deletion).toBe("documented-retention");
   });
 
@@ -811,33 +724,8 @@ describe("HOSTED_ACCOUNT_DATA_STORE_COVERAGE", () => {
   });
 });
 
+
 describe("deleteHostedAccountData", () => {
-  it("refuses changed unused-signup targets before suspension commits or external cleanup", async () => {
-    const changed = new Error("unused signup changed");
-    serviceMocks.assertUnusedHostedSignupTx.mockRejectedValue(changed);
-    const prisma = createHostedAccountDeletionPrismaForTest({ onTransaction: vi.fn() });
-    await expect(deleteHostedAccountData({
-      memberId: "member_123", unusedSignupCreatedAt: new Date("2026-01-01T00:00:00Z"),
-      prisma, request: new Request("https://join.example.test/settings"),
-    })).rejects.toBe(changed);
-    expect(serviceMocks.resumeHostedMemberStripeCustomerClaimForAccountDeletion).not.toHaveBeenCalled();
-    expect(serviceMocks.prepareHostedAccountDeletionCleanup).not.toHaveBeenCalled();
-    expect(serviceMocks.deleteHostedPrivyUser).not.toHaveBeenCalled();
-  });
-
-  it("reuses receipt-owned cleanup after locked unused-signup admission", async () => {
-    const prisma = createHostedAccountDeletionPrismaForTest({ onTransaction: vi.fn() });
-    await expect(deleteHostedAccountData({
-      memberId: "member_123", unusedSignupCreatedAt: new Date("2026-01-01T00:00:00Z"),
-      prisma, request: new Request("https://join.example.test/settings"),
-    })).resolves.toMatchObject({ memberId: "member_123" });
-    expect(serviceMocks.assertUnusedHostedSignupTx).toHaveBeenCalledTimes(1);
-    expect(serviceMocks.assertUnusedHostedSignupTx.mock.invocationCallOrder[0]).toBeLessThan(
-      serviceMocks.resumeHostedMemberStripeCustomerClaimForAccountDeletion.mock.invocationCallOrder[0]);
-    expect(serviceMocks.persistHostedAccountDeletionCleanupTx).toHaveBeenCalledTimes(1);
-    expect(serviceMocks.runHostedAccountDeletionCleanup).toHaveBeenCalledTimes(1);
-  });
-
   it("stops before external cleanup when sponsorship cancellation cannot commit", async () => {
     const sponsorshipError = new Error("sponsorship cancellation unavailable");
     const onTransaction = vi.fn();
@@ -898,9 +786,9 @@ describe("deleteHostedAccountData", () => {
     ]);
   });
 
-  it("starts all four ordinary target reads before waiting and holds the terminal transaction", async () => {
+  it("starts all three ordinary target reads before waiting and holds the terminal transaction", async () => {
     const onTransaction = vi.fn();
-    const gate = createHostedAccountDeletionConcurrentReadGate(4);
+    const gate = createHostedAccountDeletionConcurrentReadGate(3);
     const prisma = createHostedAccountDeletionPrismaForTest({
       onTransaction,
     });
@@ -914,9 +802,6 @@ describe("deleteHostedAccountData", () => {
     root.hostedAccountGroupBillingRef.findMany = gate.wrap(
       root.hostedAccountGroupBillingRef.findMany,
     );
-    root.hostedMemberIdentity.findUnique = gate.wrap(
-      root.hostedMemberIdentity.findUnique,
-    );
 
     const deletion = deleteHostedAccountData({
       memberId: "member_123",
@@ -926,8 +811,8 @@ describe("deleteHostedAccountData", () => {
 
     await gate.allStarted;
     try {
-      expect(gate.peak).toBe(4);
-      expect(gate.started).toBe(4);
+      expect(gate.peak).toBe(3);
+      expect(gate.started).toBe(3);
       expect(onTransaction).toHaveBeenCalledTimes(2);
       expect(serviceMocks.persistHostedAccountDeletionCleanupTx).not.toHaveBeenCalled();
     } finally {
@@ -938,297 +823,6 @@ describe("deleteHostedAccountData", () => {
     expect(onTransaction).toHaveBeenCalledTimes(3);
   });
 
-  it("starts all six phone-transfer fingerprint reads before waiting and holds the terminal transaction", async () => {
-    const onTransaction = vi.fn();
-    const gate = createHostedAccountDeletionConcurrentReadGate(6);
-    const vendorRows = await makeVendorAccountRowsForTest("member_123", {
-      privyUserId: null,
-      stripeCheckoutSessionId: null,
-      stripeCustomerId: null,
-      stripeSubscriptionId: null,
-    });
-    let phoneTransferSessionReadCount = 0;
-    let fingerprintReadsArmed = false;
-    serviceMocks.readHostedPrivyUserById.mockImplementation(async () => {
-      phoneTransferSessionReadCount += 1;
-      if (phoneTransferSessionReadCount === 2) {
-        fingerprintReadsArmed = true;
-      }
-      return { id: "did:privy:target" };
-    });
-    const prisma = createHostedAccountDeletionPrismaForTest({
-      ...vendorRows,
-      onTransaction,
-    });
-    const root = prisma as unknown as HostedAccountDeletionRootReadFake;
-    const gateFingerprintRead = (read: HostedAccountDeletionTestRead) =>
-      gate.wrap(read, () => fingerprintReadsArmed);
-    root.hostedMemberIdentity.findUnique = gateFingerprintRead(
-      root.hostedMemberIdentity.findUnique,
-    );
-    root.hostedMember.findUnique = gateFingerprintRead(
-      root.hostedMember.findUnique,
-    );
-    root.hostedMemberEmailAuthorization.findUnique = gateFingerprintRead(
-      root.hostedMemberEmailAuthorization.findUnique,
-    );
-    root.hostedMemberRouting.findUnique = gateFingerprintRead(
-      root.hostedMemberRouting.findUnique,
-    );
-
-    const deletion = deleteHostedPrivyPhoneTransferSourceAccountData({
-      prisma,
-      request: new Request("https://join.example.test/settings"),
-      retirement: {
-        sourceMemberId: "member_123",
-      },
-      targetMember: {
-        billingStatus: "active",
-        createdAt: new Date("2026-07-30T12:00:00.000Z"),
-        id: "member_target",
-        suspendedAt: null,
-        updatedAt: new Date("2026-07-30T12:00:00.000Z"),
-      },
-      targetPhoneNumberBeforeTransfer: null,
-      targetPrivyUserId: "did:privy:target",
-      transfer: {
-        phoneNumber: "+15551234567",
-        sourceMemberId: "member_123",
-        sourcePrivyUserId: "did:privy:source",
-      },
-    });
-
-    await gate.allStarted;
-    try {
-      expect(gate.peak).toBe(6);
-      expect(gate.started).toBe(6);
-      expect(onTransaction).toHaveBeenCalledTimes(3);
-      expect(serviceMocks.persistHostedAccountDeletionCleanupTx).not.toHaveBeenCalled();
-    } finally {
-      gate.release();
-    }
-
-    await expect(deletion).resolves.toMatchObject({
-      deletion: { memberId: "member_123" },
-    });
-    expect(onTransaction).toHaveBeenCalledTimes(4);
-  });
-
-  it("atomically retires an untouched Starter transfer source without Stripe effects", async () => {
-    const order: string[] = [];
-    serviceMocks.readHostedPrivyUserById.mockImplementation(async () => {
-      order.push("privy:read");
-      return { id: "did:privy:target" };
-    });
-    serviceMocks.prepareHostedPrivyPhoneTransferSourceRetirement.mockImplementation(
-      async () => {
-        order.push("transfer:prepare");
-        return {
-          rawFingerprint: "prepared-fingerprint",
-          sourceIdentity: null,
-          sourceMemberId: "member_123",
-          targetIdentity: null,
-          targetMemberId: "member_target",
-        };
-      },
-    );
-    serviceMocks.prepareHostedPrivyPhoneTransferSourceRetirementTx.mockImplementation(
-      async () => {
-        order.push("transfer:recheck");
-        return {
-          sourceMemberId: "member_123",
-        };
-      },
-    );
-    serviceMocks.assertHostedPrivyPhoneTransferSourceRetirementFenceTx.mockImplementation(
-      async () => {
-        order.push("transfer:fence");
-      },
-    );
-    serviceMocks.prepareHostedMemberIdentityWrite.mockImplementation(async () => {
-      order.push("target:identity-prepare");
-      return {
-        create: { memberId: "member_target" },
-        update: {},
-      };
-    });
-    serviceMocks.prepareHostedMemberChannelsUpdatedForSnapshot.mockImplementation(
-      async () => {
-        order.push("target:channel-prepare");
-        return {
-          dedupeKey: "member.channels.updated:test",
-          existingItemId: "mailbox_target",
-          itemKind: "member.channels.updated",
-          lane: "control",
-          mode: "existing",
-          payloadBytes: 64,
-          payloadHash: "payload-hash",
-          payloadSchema: "hosted-mailbox-item-payload-v1",
-          userId: "member_target",
-        };
-      },
-    );
-    serviceMocks.acquireHostedPrivyPhoneTransferPhoneLocksTx.mockImplementation(
-      async () => {
-        order.push("transfer:phone-locks");
-      },
-    );
-    serviceMocks.persistHostedAccountDeletionCleanupTx.mockImplementation(async () => {
-      order.push("persist:cleanup");
-    });
-    serviceMocks.reconcileHostedPrivyIdentityOnMemberTx.mockImplementation(async () => {
-      order.push("target:reconcile");
-    });
-    serviceMocks.enqueueHostedMemberChannelsUpdatedForActiveMemberTx.mockImplementation(
-      async () => {
-        order.push("target:enqueue");
-        return { mailboxItemId: "mailbox_target" };
-      },
-    );
-    const vendorRows = await makeVendorAccountRowsForTest("member_123", {
-      stripeCheckoutSessionId: null,
-      stripeCustomerId: null,
-      stripeSubscriptionId: null,
-    });
-    const prisma = createHostedAccountDeletionPrismaForTest({
-      ...vendorRows,
-      onTransaction: () => order.push("prisma"),
-      operationOrder: order,
-    });
-
-    const result = await deleteHostedPrivyPhoneTransferSourceAccountData({
-      prisma,
-      request: new Request("https://join.example.test/settings"),
-      retirement: {
-        sourceMemberId: "member_123",
-      },
-      targetMember: {
-        billingStatus: "active",
-        createdAt: new Date("2026-07-30T12:00:00.000Z"),
-        id: "member_target",
-        suspendedAt: null,
-        updatedAt: new Date("2026-07-30T12:00:00.000Z"),
-      },
-      targetPhoneNumberBeforeTransfer: null,
-      targetPrivyUserId: "did:privy:target",
-      transfer: {
-        phoneNumber: "+15551234567",
-        sourceMemberId: "member_123",
-        sourcePrivyUserId: "did:privy:source",
-      },
-    });
-
-    const finalTransactionStart = order.lastIndexOf("prisma");
-    const finalTransactionOrder = order.slice(finalTransactionStart + 1);
-    expect(order.indexOf("privy:read")).toBeGreaterThan(order.indexOf("prisma"));
-    expect(order.lastIndexOf("privy:read")).toBeLessThan(finalTransactionStart);
-    expect(order.indexOf("transfer:prepare")).toBeLessThan(
-      order.indexOf("transfer:recheck"),
-    );
-    expect(
-      serviceMocks.prepareHostedPrivyPhoneTransferSourceRetirement,
-    ).toHaveBeenCalledWith({
-      prisma,
-      sourceMemberId: "member_123",
-      targetMemberId: "member_target",
-    });
-    const recheckTransactionStart = order.indexOf(
-      "prisma",
-      order.indexOf("transfer:prepare") + 1,
-    );
-    expect(order.indexOf("transfer:prepare")).toBeLessThan(
-      recheckTransactionStart,
-    );
-    expect(order.indexOf("transfer:recheck")).toBeGreaterThan(
-      recheckTransactionStart,
-    );
-    expect(
-      serviceMocks.prepareHostedPrivyPhoneTransferSourceRetirementTx,
-    ).toHaveBeenCalledWith(expect.objectContaining({
-      prepared: {
-        rawFingerprint: "prepared-fingerprint",
-        sourceIdentity: null,
-        sourceMemberId: "member_123",
-        targetIdentity: null,
-        targetMemberId: "member_target",
-      },
-    }));
-    expect(serviceMocks.getHostedOnboardingStripe).not.toHaveBeenCalled();
-    expect(finalTransactionOrder.slice(0, 4)).toEqual([
-      "transfer:phone-locks",
-      "queryRaw",
-      "queryRaw:member_123",
-      "queryRaw:member_target",
-    ]);
-    expect(order.indexOf("transfer:fence")).toBeLessThan(finalTransactionStart);
-    expect(order.indexOf("target:identity-prepare")).toBeLessThan(
-      finalTransactionStart,
-    );
-    expect(order.indexOf("target:channel-prepare")).toBeLessThan(
-      finalTransactionStart,
-    );
-    expect(finalTransactionOrder).not.toContain("transfer:fence");
-    expect(finalTransactionOrder).not.toContain("target:identity-prepare");
-    expect(finalTransactionOrder).not.toContain("target:channel-prepare");
-    expect(finalTransactionOrder.indexOf("persist:cleanup")).toBeLessThan(
-      finalTransactionOrder.indexOf("delete:hostedMember"),
-    );
-    expect(finalTransactionOrder.indexOf("delete:hostedMember")).toBeLessThan(
-      finalTransactionOrder.indexOf("target:reconcile"),
-    );
-    expect(finalTransactionOrder.indexOf("target:reconcile")).toBeLessThan(
-      finalTransactionOrder.indexOf("target:enqueue"),
-    );
-    expect(result.channelSyncDispatch).toEqual({
-      mailboxItemId: "mailbox_target",
-    });
-  });
-
-  it.each(["sub_delete_123", "sub_other"])(
-    "does not cancel or retire a transfer source retaining subscription %s",
-    async (stripeSubscriptionId) => {
-      const operationOrder: string[] = [];
-      const cancel = vi.fn();
-      serviceMocks.getHostedOnboardingStripe.mockReturnValue({
-        subscriptions: { cancel },
-      });
-      const vendorRows = await makeVendorAccountRowsForTest("member_123", {
-        stripeSubscriptionId,
-      });
-      const prisma = createHostedAccountDeletionPrismaForTest({
-        ...vendorRows,
-        onTransaction: () => undefined,
-        operationOrder,
-      });
-
-      await expect(deleteHostedPrivyPhoneTransferSourceAccountData({
-        prisma,
-        request: new Request("https://join.example.test/settings"),
-        retirement: { sourceMemberId: "member_123" },
-        targetMember: {
-          billingStatus: "active",
-          createdAt: new Date("2026-07-30T12:00:00.000Z"),
-          id: "member_target",
-          suspendedAt: null,
-          updatedAt: new Date("2026-07-30T12:00:00.000Z"),
-        },
-        targetPhoneNumberBeforeTransfer: null,
-        targetPrivyUserId: "did:privy:target",
-        transfer: {
-          phoneNumber: "+15551234567",
-          sourceMemberId: "member_123",
-          sourcePrivyUserId: "did:privy:source",
-        },
-      })).rejects.toMatchObject({
-        code: "PRIVY_PHONE_TRANSFER_REQUIRES_SUPPORT",
-      });
-
-      expect(cancel).not.toHaveBeenCalled();
-      expect(operationOrder).not.toContain("delete:hostedMember");
-      expect(serviceMocks.reconcileHostedPrivyIdentityOnMemberTx).not.toHaveBeenCalled();
-      expect(serviceMocks.enqueueHostedMemberChannelsUpdatedForActiveMemberTx).not.toHaveBeenCalled();
-    },
-  );
 
   it("keeps the deletion fence when durable cleanup ownership cannot be prepared", async () => {
     const onTransaction = vi.fn();
@@ -2185,7 +1779,7 @@ describe("deleteHostedAccountData", () => {
     expect(result.cloudflare.deleted).toBe(true);
     expect(serviceMocks.prepareHostedAccountDeletionCleanup).toHaveBeenCalledWith({
       now: expect.any(Date),
-      privyUserId: null,
+
       runtimeMemberIds: ["member_123", "member_thread_container_123"],
       stripeCustomerIds: [],
       stripeSubscriptionIds: [],
@@ -2253,7 +1847,7 @@ describe("deleteHostedAccountData", () => {
     }));
   });
 
-  it("decrypts the prepared Stripe and Privy targets once before the terminal transaction", async () => {
+  it("decrypts the prepared Stripe targets once before the terminal transaction", async () => {
     const operationOrder: string[] = [];
     serviceMocks.getHostedOnboardingStripe.mockReturnValue({
       checkout: {
@@ -2317,7 +1911,6 @@ describe("deleteHostedAccountData", () => {
     ).toEqual([
       "hosted-member-billing-ref.stripe-customer-id",
       "hosted-member-billing-ref.stripe-subscription-id",
-      "hosted-member-identity.privy-user-id",
       "hosted-member-subscription-checkout.stripe-session-id",
       "hosted-member-subscription-checkout.stripe-session-id",
       "hosted-account-group-billing-ref.stripe-checkout-session-id",
@@ -2332,7 +1925,6 @@ describe("deleteHostedAccountData", () => {
       "root:target:member-billing",
       "root:target:checkout",
       "root:target:family-billing",
-      "root:target:identity",
     ]);
     const terminalTransactionStart = operationOrder.lastIndexOf("transaction");
     expect(operationOrder.indexOf("decrypt:targets")).toBeGreaterThan(
@@ -2355,7 +1947,6 @@ describe("deleteHostedAccountData", () => {
       "tx:target:member-billing",
       "tx:target:checkout",
       "tx:target:family-billing",
-      "tx:target:identity",
     ]);
   });
 
@@ -2448,7 +2039,7 @@ describe("deleteHostedAccountData", () => {
     });
     const initialVendorRows = await makeVendorAccountRowsForTest("member_123");
     const changedVendorRows = await makeVendorAccountRowsForTest("member_123", {
-      privyUserId: "privy-user-late",
+
       stripeCustomerId: "cus_late",
       stripeSubscriptionId: "sub_late",
     });
@@ -2613,14 +2204,14 @@ describe("deleteHostedAccountData", () => {
     expect(stripe.subscriptions.cancel).toHaveBeenCalledWith("sub_delete_123");
     expect(serviceMocks.prepareHostedAccountDeletionCleanup).toHaveBeenCalledWith({
       now: expect.any(Date),
-      privyUserId: "privy-user-delete-123",
+
       runtimeMemberIds: ["member_123"],
       stripeCustomerIds: ["cus_delete_123"],
       stripeSubscriptionIds: ["sub_delete_123"],
     });
     expect(stripe.customers.del).not.toHaveBeenCalled();
     expect(result.vendorAccounts).toEqual({
-      privyUser: { errorCode: null, status: "completed" },
+      privyUser: { errorCode: null, status: "skipped_no_record" },
       stripeCustomer: { errorCode: null, status: "completed" },
       stripeSubscription: { errorCode: null, status: "completed" },
     });
@@ -2819,7 +2410,7 @@ describe("deleteHostedAccountData", () => {
       },
     };
     serviceMocks.getHostedOnboardingStripe.mockReturnValue(stripe);
-    serviceMocks.deleteHostedPrivyUser.mockImplementation(async () => true);
+
     const vendorRows = await makeVendorAccountRowsForTest("member_123");
     const familyBillingRefRecord = await makeFamilyBillingRefRowForTest({
       groupId: "family_group_123",
@@ -2844,7 +2435,7 @@ describe("deleteHostedAccountData", () => {
     expect(stripe.subscriptions.cancel).toHaveBeenCalledWith("sub_family_123");
     expect(serviceMocks.prepareHostedAccountDeletionCleanup).toHaveBeenCalledWith({
       now: expect.any(Date),
-      privyUserId: "privy-user-delete-123",
+
       runtimeMemberIds: ["member_123"],
       stripeCustomerIds: ["cus_delete_123", "cus_family_123"],
       stripeSubscriptionIds: ["sub_delete_123", "sub_family_123"],
@@ -2892,7 +2483,7 @@ describe("deleteHostedAccountData", () => {
       serviceMocks.closeHostedUsageCreditPurchasesForAccountDeletion,
     ).not.toHaveBeenCalled();
     expect(stripe.customers.del).not.toHaveBeenCalled();
-    expect(serviceMocks.deleteHostedPrivyUser).not.toHaveBeenCalled();
+
   });
 
   it("skips the cancel call when the Stripe subscription is already canceled", async () => {
@@ -2925,7 +2516,6 @@ describe("deleteHostedAccountData", () => {
   it("reports skipped vendor deletions when no vendor records exist", async () => {
     serviceMocks.runHostedAccountDeletionCleanup.mockResolvedValue(
       makeCleanupRunResult({
-        privyUser: { errorCode: null, status: "skipped_no_record" },
         stripeCustomer: { errorCode: null, status: "skipped_no_record" },
       }),
     );
@@ -2944,7 +2534,7 @@ describe("deleteHostedAccountData", () => {
       stripeCustomer: { errorCode: null, status: "skipped_no_record" },
       stripeSubscription: { errorCode: null, status: "skipped_no_record" },
     });
-    expect(serviceMocks.deleteHostedPrivyUser).not.toHaveBeenCalled();
+
   });
 
   it("reports durable vendor cleanup as pending without failing committed deletion", async () => {
@@ -2963,7 +2553,6 @@ describe("deleteHostedAccountData", () => {
     serviceMocks.runHostedAccountDeletionCleanup.mockResolvedValue(
       makeCleanupRunResult({
         cleanupPending: true,
-        privyUser: { errorCode: "PRIVY_UNAVAILABLE", status: "failed" },
         stripeCustomer: { errorCode: "STRIPE_UNAVAILABLE", status: "failed" },
       }),
     );
@@ -2981,7 +2570,7 @@ describe("deleteHostedAccountData", () => {
 
     expect(result.vendorAccounts.stripeSubscription).toEqual({ errorCode: null, status: "completed" });
     expect(result.vendorAccounts.stripeCustomer.status).toBe("failed");
-    expect(result.vendorAccounts.privyUser.status).toBe("failed");
+    expect(result.vendorAccounts.privyUser.status).toBe("skipped_no_record");
     expect(result.cleanupPending).toBe(true);
   });
 
@@ -3018,7 +2607,6 @@ describe("deleteHostedAccountData", () => {
       );
       expect(result.cleanupPending).toBe(true);
       expect(result.vendorAccounts).toMatchObject({
-        privyUser: { errorCode: "KmsUnavailableError", status: "failed" },
         stripeCustomer: { errorCode: "KmsUnavailableError", status: "failed" },
       });
     } finally {
@@ -3031,7 +2619,6 @@ describe("deleteHostedAccountData", () => {
     serviceMocks.runHostedAccountDeletionCleanup.mockResolvedValue(
       makeCleanupRunResult({
         cleanupPending: true,
-        privyUser: { errorCode: null, status: "skipped_not_configured" },
         stripeCustomer: { errorCode: null, status: "skipped_not_configured" },
       }),
     );
@@ -3050,7 +2637,7 @@ describe("deleteHostedAccountData", () => {
     });
 
     expect(result.vendorAccounts).toEqual({
-      privyUser: { errorCode: null, status: "skipped_not_configured" },
+      privyUser: { errorCode: null, status: "skipped_no_record" },
       stripeCustomer: { errorCode: null, status: "skipped_not_configured" },
       stripeSubscription: { errorCode: null, status: "skipped_no_record" },
     });
@@ -3079,7 +2666,7 @@ describe("deleteHostedAccountData", () => {
     expect(error).toBeInstanceOf(HostedOnboardingError);
     expect((error as HostedOnboardingError).code).toBe("ACCOUNT_DELETION_STRIPE_NOT_CONFIGURED");
     expect(onTransaction).toHaveBeenCalledTimes(2);
-    expect(serviceMocks.deleteHostedPrivyUser).not.toHaveBeenCalled();
+
   });
 
   it("deletes sensitive-action challenges explicitly with account data", async () => {
@@ -5905,7 +5492,6 @@ function makeHostedComputerRunRowForDeletionTest(
 }
 
 async function makeVendorAccountRowsForTest(memberId: string, overrides?: {
-  privyUserId?: string | null;
   stripeCheckoutSessionId?: string | null;
   stripeCustomerId?: string | null;
   stripeSubscriptionId?: string | null;
@@ -5930,9 +5516,7 @@ async function makeVendorAccountRowsForTest(memberId: string, overrides?: {
   const identityPrivateColumns = await buildHostedMemberIdentityPrivateColumns({
     memberId,
     phoneNumber: null,
-    privyUserId: overrides?.privyUserId === undefined
-      ? "privy-user-delete-123"
-      : overrides.privyUserId,
+
     signupPhoneCodeSendAttemptId: null,
     signupPhoneCodeSendAttemptStartedAt: null,
     signupPhoneCodeSentAt: null,
@@ -5974,16 +5558,8 @@ async function makeVendorAccountRowsForTest(memberId: string, overrides?: {
       : [],
     identityRecord: {
       memberId,
-      privyUserLookupKey: createHostedPrivyUserLookupKey(
-        overrides?.privyUserId === undefined
-          ? "privy-user-delete-123"
-          : overrides.privyUserId,
-      ),
-      walletAddressEncrypted: null,
-      walletAddressLookupKey: null,
-      walletChainType: null,
-      walletCreatedAt: null,
-      walletProvider: null,
+
+
       ...identityPrivateColumns,
     },
   };
@@ -6177,14 +5753,13 @@ function makeCloudflareDeletionResult(): {
 function makeCleanupRunResult(input: {
   cleanupPending?: boolean;
   cloudflare?: ReturnType<typeof makeCloudflareDeletionResult>;
-  privyUser?: { errorCode: string | null; status: string };
   stripeCustomer?: { errorCode: string | null; status: string };
 } = {}) {
   return {
     cleanupPending: input.cleanupPending ?? false,
     cloudflare: input.cloudflare ?? makeCloudflareDeletionResult(),
     vendorAccounts: {
-      privyUser: input.privyUser ?? { errorCode: null, status: "completed" },
+      privyUser: { errorCode: null, status: "skipped_no_record" },
       stripeCustomer:
         input.stripeCustomer ?? { errorCode: null, status: "completed" },
     },

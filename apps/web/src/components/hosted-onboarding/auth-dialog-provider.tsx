@@ -28,7 +28,7 @@ import {
   parseHostedBillingPlanChangeReturnValue,
 } from "@/src/lib/hosted-onboarding/billing-plan-change-contract";
 import { isHostedOnboardingAccessibleStage } from "@/src/lib/hosted-onboarding/stage";
-import type { HostedPrivyCompletionPayload } from "@/src/lib/hosted-onboarding/types";
+import type { HostedAuthenticationCompletionPayload } from "@/src/lib/hosted-onboarding/types";
 import { subscribeBrowserVaultSessionInvalidation } from "@/src/lib/browser-vault/session-invalidation";
 import {
   hasStagedClinicalRecordsConnectIntentForCurrentPath,
@@ -160,7 +160,7 @@ export function AuthProvider({
     }
   }), []);
 
-  const handleAuthCompleted = useCallback((payload: HostedPrivyCompletionPayload) => {
+  const handleAuthCompleted = useCallback((payload: HostedAuthenticationCompletionPayload) => {
     if (authIntent === "data-privacy") {
       navigateHostedAuthRedirect(SETTINGS_DATA_PRIVACY_PATH);
       return;
@@ -229,7 +229,7 @@ export function AuthProvider({
   );
 }
 
-function shouldResumeCurrentAuthUrl(payload: HostedPrivyCompletionPayload): boolean {
+function shouldResumeCurrentAuthUrl(payload: HostedAuthenticationCompletionPayload): boolean {
   return (
     shouldResumeCurrentActionApprovalUrl(payload)
     || shouldResumeCurrentConnectIndexUrl(payload)
@@ -250,7 +250,7 @@ function shouldResumeCurrentAuthUrl(payload: HostedPrivyCompletionPayload): bool
 }
 
 function shouldResumeCurrentSettingsFamilyRecoveryUrl(
-  payload: HostedPrivyCompletionPayload,
+  payload: HostedAuthenticationCompletionPayload,
 ): boolean {
   if (!isHostedOnboardingAccessibleStage(payload.stage)) {
     return false;
@@ -267,7 +267,7 @@ function shouldResumeCurrentSettingsFamilyRecoveryUrl(
 }
 
 function shouldResumeCurrentSettingsFamilyInviteReturnUrl(
-  payload: HostedPrivyCompletionPayload,
+  payload: HostedAuthenticationCompletionPayload,
 ): boolean {
   if (!isHostedOnboardingAccessibleStage(payload.stage)) {
     return false;
@@ -285,7 +285,7 @@ function shouldResumeCurrentSettingsFamilyInviteReturnUrl(
 }
 
 function shouldResumeCurrentSettingsUsageRecoveryUrl(
-  payload: HostedPrivyCompletionPayload,
+  payload: HostedAuthenticationCompletionPayload,
 ): boolean {
   if (!isHostedOnboardingAccessibleStage(payload.stage)) {
     return false;
@@ -302,7 +302,7 @@ function shouldResumeCurrentSettingsUsageRecoveryUrl(
 }
 
 function shouldResumeCurrentSettingsUsageCreditReturnUrl(
-  payload: HostedPrivyCompletionPayload,
+  payload: HostedAuthenticationCompletionPayload,
 ): boolean {
   if (!isHostedOnboardingAccessibleStage(payload.stage)) {
     return false;
@@ -324,7 +324,7 @@ function shouldResumeCurrentSettingsUsageCreditReturnUrl(
 }
 
 function shouldResumeCurrentConnectIndexUrl(
-  payload: HostedPrivyCompletionPayload,
+  payload: HostedAuthenticationCompletionPayload,
 ): boolean {
   return (
     isHostedOnboardingAccessibleStage(payload.stage)
@@ -334,7 +334,7 @@ function shouldResumeCurrentConnectIndexUrl(
 }
 
 function shouldResumeCurrentSettingsPlanChangeUrl(
-  payload: HostedPrivyCompletionPayload,
+  payload: HostedAuthenticationCompletionPayload,
 ): boolean {
   if (!isHostedOnboardingAccessibleStage(payload.stage)) {
     return false;
@@ -355,7 +355,7 @@ function shouldResumeCurrentSettingsPlanChangeUrl(
 // the payment-return params. Sending them to /home instead would strand the
 // plan choice they just added a card to complete.
 function shouldResumeCurrentSettingsGroupPaymentUrl(
-  payload: HostedPrivyCompletionPayload,
+  payload: HostedAuthenticationCompletionPayload,
 ): boolean {
   if (!isHostedOnboardingAccessibleStage(payload.stage)) {
     return false;
@@ -372,7 +372,7 @@ function shouldResumeCurrentSettingsGroupPaymentUrl(
 }
 
 function shouldResumeCurrentClinicalRecordsIndexUrl(
-  payload: HostedPrivyCompletionPayload,
+  payload: HostedAuthenticationCompletionPayload,
 ): boolean {
   return (
     isHostedOnboardingAccessibleStage(payload.stage)
@@ -382,7 +382,7 @@ function shouldResumeCurrentClinicalRecordsIndexUrl(
 }
 
 function shouldResumeCurrentClinicalRecordsConnectUrl(
-  payload: HostedPrivyCompletionPayload,
+  payload: HostedAuthenticationCompletionPayload,
 ): boolean {
   return (
     isHostedOnboardingAccessibleStage(payload.stage)
@@ -398,7 +398,7 @@ function readCurrentBrowserPath(): string {
 }
 
 function shouldResumeCurrentActionApprovalUrl(
-  payload: HostedPrivyCompletionPayload,
+  payload: HostedAuthenticationCompletionPayload,
 ): boolean {
   if (!isHostedOnboardingAccessibleStage(payload.stage)) {
     return false;
@@ -412,7 +412,7 @@ function shouldResumeCurrentActionApprovalUrl(
 }
 
 function shouldResumeCurrentDeviceConnectIntentUrl(
-  payload: HostedPrivyCompletionPayload,
+  payload: HostedAuthenticationCompletionPayload,
 ): boolean {
   if (!isHostedOnboardingAccessibleStage(payload.stage)) {
     return false;
@@ -431,7 +431,7 @@ function shouldResumeCurrentDeviceConnectIntentUrl(
 }
 
 function shouldResumeCurrentComputerHandoffUrl(
-  payload: HostedPrivyCompletionPayload,
+  payload: HostedAuthenticationCompletionPayload,
 ): boolean {
   if (!isHostedOnboardingAccessibleStage(payload.stage)) {
     return false;
@@ -445,7 +445,7 @@ function shouldResumeCurrentComputerHandoffUrl(
 }
 
 function shouldResumeCurrentIntegrationsConnectUrl(
-  payload: HostedPrivyCompletionPayload,
+  payload: HostedAuthenticationCompletionPayload,
 ): boolean {
   if (!isHostedOnboardingAccessibleStage(payload.stage)) {
     return false;

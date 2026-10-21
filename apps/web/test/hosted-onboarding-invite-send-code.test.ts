@@ -176,11 +176,11 @@ describe("invite send-code lifecycle", () => {
     const preparedFirst = makeIdentityRecord();
     const currentFirst = makeIdentityRecord({
       updatedAt: new Date("2026-04-07T01:00:01.000Z"),
-      walletAddressEncrypted: "ciphertext-wallet-v2",
+
     });
     const currentSecond = makeIdentityRecord({
       updatedAt: new Date("2026-04-07T01:00:02.000Z"),
-      walletAddressEncrypted: "ciphertext-wallet-v3",
+
     });
     const harness = makeInvitePrisma({
       preparedIdentityRecords: [preparedFirst, currentFirst],
@@ -436,18 +436,15 @@ function makeIdentityRecord(
     phoneLookupKey: "hbidx:phone:v1:abc123",
     phoneNumberEncrypted: null,
     phoneNumberVerifiedAt: null,
-    privyUserIdEncrypted: null,
-    privyUserLookupKey: null,
+
+
     signupPhoneCodeSendAttemptId: null,
     signupPhoneCodeSendAttemptStartedAt: null,
     signupPhoneCodeSentAt: null,
     signupPhoneNumberEncrypted: "ciphertext-signup-phone",
     updatedAt: new Date("2026-04-01T00:00:00.000Z"),
-    walletAddressEncrypted: null,
-    walletAddressLookupKey: null,
-    walletChainType: null,
-    walletCreatedAt: null,
-    walletProvider: null,
+
+
     ...overrides,
   };
 }

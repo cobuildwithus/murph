@@ -50,7 +50,6 @@ import {
   readHostedMemberSignupPhoneCodeAttempt,
   writeHostedMemberSignupPhoneState,
 } from "./hosted-member-identity-store";
-import { hasHostedPrivyPhoneAuthConfig } from "./privy";
 import {
   getHostedOnboardingEnvironment,
   requireHostedOnboardingPublicBaseUrl,
@@ -103,7 +102,6 @@ export async function getHostedInviteStatus(input: {
   )
     ? getHostedDefaultBillingPlanCode()
     : (billingPlans[0]?.code ?? null);
-  const phoneAuthReady = hasHostedPrivyPhoneAuthConfig();
 
   if (!invite) {
     return {
@@ -113,7 +111,6 @@ export async function getHostedInviteStatus(input: {
       },
       capabilities: {
         billingReady,
-        phoneAuthReady,
       },
       invite: null,
       messagingSetupRequired: false,
@@ -189,7 +186,6 @@ export async function getHostedInviteStatus(input: {
     },
     capabilities: {
       billingReady,
-      phoneAuthReady,
     },
     invite: {
       code: invite.inviteCode,

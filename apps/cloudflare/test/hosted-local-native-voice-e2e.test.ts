@@ -66,7 +66,7 @@ describe.skipIf(!audioPath)("hosted local native voice e2e", () => {
     await seedHostedLaunchConsentForTest({ environment: scenario.runtimeEnv, memberId: userId });
     await seedWorkspace(scenario);
     const session = await scenario.issueHostedAppSession({
-      memberId: userId, privyUserId: `did:privy:${userId}`,
+      memberId: userId,
     });
     const browserEnv: NodeJS.ProcessEnv = {};
     for (const key of ["PATH", "HOME", "TMPDIR", "LANG", "PLAYWRIGHT_BROWSERS_PATH"]) {

@@ -110,7 +110,6 @@ function createMismatchStatus(): HostedInviteStatusPayload {
     },
     capabilities: {
       billingReady: true,
-      phoneAuthReady: true,
     },
     invite: {
       code: "invite-code",

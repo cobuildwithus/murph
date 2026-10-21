@@ -119,21 +119,22 @@ export function readAssistantAutoReplyReceiptMetadata(
 }
 
 export function isAssistantProviderCapacityError(error: unknown): boolean {
+  const context = readAssistantProviderErrorContext(error)
+  if (context?.codexErrorInfo === 'serverOverloaded'
+    || context?.codexErrorInfo === 'flexUnavailable') {
+    return true
+  }
   const message = errorMessage(error).toLowerCase()
   const code = readAssistantProviderErrorCode(error)
   const hasCapacitySignal =
     code.includes('RATE') ||
     code.includes('LIMIT') ||
     code.includes('QUOTA') ||
-    message.includes('rate limit') ||
-    message.includes('usage limit') ||
-    message.includes('quota') ||
-    message.includes('too many requests') ||
-    message.includes('purchase more credits') ||
-    message.includes('out of credits') ||
-    message.includes('credit balance') ||
-    message.includes('please check your plan and billing details') ||
-    message.includes('try again at ')
+    [
+      'rate limit', 'usage limit', 'quota', 'too many requests',
+      'purchase more credits', 'out of credits', 'credit balance',
+      'please check your plan and billing details', 'try again at ',
+    ].some(signal => message.includes(signal))
 
   if (!hasCapacitySignal) {
     return false

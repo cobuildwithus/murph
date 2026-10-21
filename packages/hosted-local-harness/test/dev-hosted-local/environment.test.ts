@@ -208,6 +208,8 @@ describe("mergeCloudflareLocalEnv", () => {
       config: localConfig,
       existing: {
         HOSTED_APP_SESSION_HMAC_KEY: "web-only-key",
+        HOSTED_BETTER_AUTH_SECRET: "synthetic-auth",
+        HOSTED_AUTH_STORAGE_KEY: "synthetic-storage",
         HOSTED_CRYPTO_ENV: "local",
         HOSTED_EXECUTION_INTERNAL_PROXY_UPSTREAM_BASE_URL: "http://127.0.0.1:9998",
         HOSTED_EXECUTION_LOCAL_LOOPBACK_PROXY_TOKEN: "stale-token",
@@ -273,6 +275,8 @@ describe("mergeCloudflareLocalEnv", () => {
     expect(merged.HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK).toBe(callbackPrivateJwkJson);
     expect(merged.HOSTED_WEB_BASE_URL).toBe("http://localhost:3000");
     expect(merged.HOSTED_APP_SESSION_HMAC_KEY).toBeUndefined();
+    expect(merged.HOSTED_BETTER_AUTH_SECRET).toBeUndefined();
+    expect(merged.HOSTED_AUTH_STORAGE_KEY).toBeUndefined();
   });
 
   it("preserves an existing hosted-local log fingerprint secret", () => {

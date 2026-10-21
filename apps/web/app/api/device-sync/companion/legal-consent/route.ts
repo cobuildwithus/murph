@@ -19,7 +19,7 @@ function isLaunchScope(scope: string): scope is HostedConsentLaunchScope {
 }
 
 // Native consent recovery uses the same persisted grants and current document
-// registry as the hosted Web surface. Privy bearer auth deliberately has no
+// registry as the hosted Web surface. First-party bearer auth deliberately has no
 // cookie fallback and no active-subscription gate: a signed-in member must be
 // able to review and accept legal terms before protected product access resumes.
 export const GET = withJsonError(async (request: Request) => {

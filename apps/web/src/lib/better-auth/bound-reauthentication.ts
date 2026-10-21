@@ -6,7 +6,7 @@ import { assertHostedAppSessionCurrentTx, requireHostedAppSessionFromRequest } f
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import { lockHostedMemberRow } from "../hosted-onboarding/shared";
 import { readCanonicalCredentialIdentity, readHostedLoginMethods } from "./credential-change";
-import { readHostedAuthSourceSnapshot } from "./migration-source";
+import { readHostedAuthSourceSnapshot } from "./member-snapshot";
 import { prepareHostedAuthSessionSet } from "./session-limit";
 
 type Client = PrismaClient | Prisma.TransactionClient;

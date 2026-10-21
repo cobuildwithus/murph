@@ -21,13 +21,7 @@ for (const width of [390, 1440]) {
     await expect(settings.locator('a[href^="sms:"]')).toHaveText("Text Murph");
     await expect(settings.locator('a[href^="mailto:"]')).toHaveText("Email Murph");
     await expect(settings.getByText("Change", { exact: true })).toHaveCount(2);
-    const retry = study.locator('[data-channel-state="retry"]');
-    await expect(retry.locator("input")).toHaveValue("connected@example.test");
-    await expect(retry.locator("input")).toBeDisabled();
-    await expect(retry.locator("button")).toHaveText("Retry saving");
-    const saving = study.locator('[data-channel-state="saving"]');
-    await expect(saving.locator("button")).toHaveText("Saving...");
-    await expect(saving.locator("button")).toBeDisabled();
+    await expect(settings.locator('button[aria-label="Add Telegram"]')).toHaveCount(1);
     await page.evaluate(async () => {
       await document.fonts.ready;
       await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
@@ -36,7 +30,7 @@ for (const width of [390, 1440]) {
     const output = process.env.DESIGN_PROOF_OUTPUT_DIR;
     if (output) {
       await mkdir(output, { recursive: true });
-      for (const state of ["settings", "retry", "saving"]) {
+      for (const state of ["settings"]) {
         const surface = study.locator(`[data-channel-state="${state}"]`);
         await surface.scrollIntoViewIfNeeded();
         expect(await surface.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);

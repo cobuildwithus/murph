@@ -158,7 +158,8 @@ beforeEach(() => {
   mocks.useStateSetters = [];
   mocks.useStateValues = [];
   mocks.authorize.mockResolvedValue({
-    signature: `0x${"11".repeat(65)}`,
+    method: "passkey",
+    assertion: { id: "synthetic-passkey", type: "public-key", response: { authenticatorData: "synthetic", clientDataJSON: "synthetic", signature: "synthetic" } },
     token: "sac_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef",
   });
   mocks.loadBrowserVaultExport.mockResolvedValue({
@@ -179,7 +180,6 @@ beforeEach(() => {
       },
       deletedAt: "2026-04-29T01:02:03.000Z",
       vendorAccounts: {
-        privyUser: { errorCode: null, status: "completed" },
         stripeCustomer: { errorCode: null, status: "completed" },
         stripeSubscription: { errorCode: null, status: "completed" },
       },
@@ -202,7 +202,6 @@ describe("HostedDataPrivacySettings", () => {
       cloudflare: { configured: false, deleted: false },
       deletedAt: "2026-07-26T12:00:00.000Z",
       vendorAccounts: {
-        privyUser: { errorCode: null, status: "completed" },
         stripeCustomer: { errorCode: null, status: "completed" },
         stripeSubscription: { errorCode: null, status: "completed" },
       },
@@ -212,7 +211,6 @@ describe("HostedDataPrivacySettings", () => {
       cloudflare: { configured: false, deleted: false },
       deletedAt: "2026-07-26T12:00:00.000Z",
       vendorAccounts: {
-        privyUser: { errorCode: null, status: "completed" },
         stripeCustomer: { errorCode: null, status: "completed" },
         stripeSubscription: { errorCode: null, status: "completed" },
       },
@@ -344,7 +342,8 @@ describe("HostedDataPrivacySettings", () => {
     expect(mocks.authorize).toHaveBeenCalledWith("vault.export");
     expect(mocks.loadBrowserVaultExport).toHaveBeenCalledWith({
       authorization: {
-        signature: `0x${"11".repeat(65)}`,
+        method: "passkey",
+    assertion: { id: "synthetic-passkey", type: "public-key", response: { authenticatorData: "synthetic", clientDataJSON: "synthetic", signature: "synthetic" } },
         token: "sac_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef",
       },
     });
@@ -644,7 +643,6 @@ describe("HostedDataPrivacySettings", () => {
           cloudflare: { configured: true, deleted: true },
           deletedAt: "2026-04-29T01:02:03.000Z",
           vendorAccounts: {
-            privyUser: { errorCode: null, status: "completed" },
             stripeCustomer: { errorCode: null, status: "completed" },
             stripeSubscription: { errorCode: null, status: "completed" },
           },

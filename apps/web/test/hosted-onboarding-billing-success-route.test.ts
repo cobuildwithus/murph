@@ -54,7 +54,6 @@ describe("hosted onboarding billing success route", () => {
       },
       capabilities: {
         billingReady: true,
-        phoneAuthReady: true,
       },
       invite: {
         code: "invite-code",
@@ -98,7 +97,6 @@ describe("hosted onboarding billing success route", () => {
       },
       capabilities: {
         billingReady: true,
-        phoneAuthReady: true,
       },
       invite: {
         code: "invite-code",

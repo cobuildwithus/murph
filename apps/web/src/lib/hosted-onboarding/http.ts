@@ -9,7 +9,7 @@ import {
   readRawBodyBuffer,
   sanitizeJsonLogString,
 } from "../http";
-import { getHostedAuthMigrationConflictReasonForLog, getHostedLinqRouteAuthorityMismatchReasonForLog, hostedOnboardingError, isHostedOnboardingError } from "./errors";
+import { getHostedAuthIdentityConflictReasonForLog, getHostedLinqRouteAuthorityMismatchReasonForLog, hostedOnboardingError, isHostedOnboardingError } from "./errors";
 
 const HOSTED_ONBOARDING_DEFAULT_HEADERS = {
   "Cache-Control": "no-store",
@@ -115,7 +115,7 @@ function mapHostedOnboardingError(error: unknown) {
 
   const mapping = mapDomainJsonError(error);
   const logDetails = describeHostedOnboardingDomainErrorDetailsForLog(error.details);
-  const reconciliationReason = getHostedAuthMigrationConflictReasonForLog(error);
+  const reconciliationReason = getHostedAuthIdentityConflictReasonForLog(error);
   const linqRouteAuthorityMismatchReason = getHostedLinqRouteAuthorityMismatchReasonForLog(error);
 
   return logDetails || reconciliationReason || linqRouteAuthorityMismatchReason

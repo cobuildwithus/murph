@@ -361,6 +361,10 @@ General correction scope and canonical-owner verification are tracked in
 Automation database load, daily scheduling, and Flex retry work:
 [`2026-09-21-automation-query-load.md`](exec-plans/completed/2026-09-21-automation-query-load.md).
 
+Maintenance exclusion from the morning reminder inventory and synthetic response
+measurement are recorded in
+[`2026-10-20-usage-reminder-inventory.md`](exec-plans/completed/2026-10-20-usage-reminder-inventory.md).
+
 Canonical device import preparation reuse is owned by `packages/core/README.md`;
 regression proof and local measurements are tracked in
 [`2026-09-21-device-import-write-cost.md`](exec-plans/completed/2026-09-21-device-import-write-cost.md).
@@ -758,7 +762,7 @@ Package verifier worker-exit result preservation is tracked in
 | `docs/device-sync-hosted-control-plane.md` | Current hosted control-plane direction for device sync. | Device-sync architecture direction | Medium | 2026-09-08 |
 | `docs/device-provider-contribution-kit.md` | Maintainer guide for adding wearable providers. | Provider contribution workflow | Medium | 2026-05-13 |
 | `docs/device-provider-compatibility-matrix.md` | Canonical provider planning matrix and evidence expectations. | Device-provider normalization planning | Medium | 2026-07-14 |
-| `docs/hosted-auth-migration.md` | Staged Privy removal, encrypted Better Auth backend, Ops import, approved credential changes, saved-key recovery, shared account connections, temporary Ops unused-signup cleanup, session/native continuity, conditional iPhone update policy and retirement gates. | Hosted auth migration rollout | High | 2026-09-10 |
+| `docs/hosted-auth-migration.md` | Four-stage Privy removal, reviewed candidate heads, merge/deploy order, transition-only import, session continuity, recovery and guarded schema/vendor retirement. | Hosted auth migration rollout | High | 2026-09-10 |
 | `agent-docs/exec-plans/completed/2026-09-28-passkey-smoke-origin.md` | Domain-origin browser proof for the passkey smoke harness. | Historical browser proof implementation | Low | 2026-09-28 |
 | `docs/hosted-contact-privacy-rotation.md` | Hosted blind-index keyring seam and future rotation constraints. | Hosted contact-privacy rotation seam | Medium | 2026-07-16 |
 | `docs/hosted-linq-db-home-lines-migration.md` | Database-backed Linq home-line assignment, provider inventory freshness, and bounded Serializable snapshot recovery. | Hosted Linq line ownership and rollout | High | 2026-09-11 |
@@ -1351,6 +1355,11 @@ Member ChatGPT linking retirement is tracked in
 [`the removal plan`](exec-plans/completed/2026-10-19-remove-member-inference.md);
 the retained mailbox cleanup contract is owned by
 [`hosted runtime protocol`](references/hosted-runtime-protocol.md).
+
+Scheduled Standard-tier recovery and structured capacity failure classification
+are owned by `ARCHITECTURE.md`; implementation proof is tracked in
+[`scheduled recovery`](exec-plans/completed/2026-10-20-automation-standard-fallback.md)
+and the [five-attempt policy](exec-plans/completed/2026-10-21-scheduled-five-flex-attempts.md).
 
 Bounded long-distance workspace compression and synthetic cold-restore proof are
 recorded in [`workspace restore speed`](exec-plans/completed/2026-10-20-snapshot-restore-speed.md);

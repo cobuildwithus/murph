@@ -7,7 +7,7 @@ import { readHostedAuthSession } from "./session";
 import { classifyHostedNativeCredential } from "./transport";
 
 export async function requireNativeMessagingSession(request: Request): Promise<HostedAppSession> {
-  const credential = classifyHostedNativeCredential({ authorization: request.headers.get("authorization"), cookie: request.headers.get("cookie"), legacyAllowed: false });
+  const credential = classifyHostedNativeCredential({ authorization: request.headers.get("authorization"), cookie: request.headers.get("cookie") });
   const result = await readHostedAuthSession({ ...requireHostedBetterAuthConfig(), credential: credential.token, transport: "native", prisma: getPrisma() });
   if (!result.session) throw hostedOnboardingError({ code: "AUTH_REQUIRED", httpStatus: 401, message: "Sign in to continue." });
   const { proof, ...session } = result.session;

@@ -20,7 +20,7 @@ import {
 } from "./helpers/hosted-local-junction-support.js";
 
 const userId = `member_local_junction_link_${Date.now()}`;
-const privyUserId = "privy_user_local_junction_link_connect";
+
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
 const workerPersistDirOverride = process.env.MURPH_E2E_CF_PERSIST_DIR?.trim() || null;
 const localDatabaseUrl = process.env.DATABASE_URL?.trim() || undefined;
@@ -80,7 +80,7 @@ describe("hosted local junction link connect e2e", () => {
     await activeScenario.seedActiveHostedMember({ memberId: userId });
     const session = await activeScenario.issueHostedAppSession({
       memberId: userId,
-      privyUserId,
+
     });
     const sessionCookie = `${session.cookieName}=${session.cookieValue}`;
 

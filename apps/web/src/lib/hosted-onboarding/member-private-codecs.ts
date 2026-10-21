@@ -18,10 +18,7 @@ import {
 } from "../hosted-web/encryption";
 import { normalizeNullableString } from "./shared";
 
-export const HOSTED_MEMBER_IDENTITY_PRIVY_USER_FIELD =
-  "hosted-member-identity.privy-user-id";
 const HOSTED_MEMBER_IDENTITY_PHONE_NUMBER_FIELD = "hosted-member-identity.phone-number";
-const HOSTED_MEMBER_IDENTITY_WALLET_ADDRESS_FIELD = "hosted-member-identity.wallet-address";
 const HOSTED_MEMBER_IDENTITY_SIGNUP_PHONE_FIELD = "hosted-member-identity.signup-phone-number";
 const HOSTED_MEMBER_ROUTING_HOME_LINQ_CHAT_FIELD = "hosted-member-routing.home-linq-chat-id";
 const HOSTED_MEMBER_ROUTING_HOME_LINQ_RECIPIENT_PHONE_FIELD =
@@ -50,12 +47,10 @@ const HOSTED_MEMBER_BILLING_STRIPE_CHECKOUT_SESSION_FIELD =
 
 export interface HostedMemberIdentityPrivateState {
   phoneNumber: string | null;
-  privyUserId: string | null;
   signupPhoneCodeSendAttemptId: string | null;
   signupPhoneCodeSendAttemptStartedAt: Date | null;
   signupPhoneCodeSentAt: Date | null;
   signupPhoneNumber: string | null;
-  walletAddress: string | null;
 }
 
 export interface HostedMemberRoutingPrivateState {
@@ -82,7 +77,6 @@ export async function buildHostedMemberIdentityPrivateColumns(input: {
   phoneNumber: string | null;
   preparedRoot?: PreparedHostedWebEncryptionRoot;
   prisma?: HostedWebEncryptionPrismaClient;
-  privyUserId: string | null;
   signupPhoneCodeSendAttemptId: string | null;
   signupPhoneCodeSendAttemptStartedAt: Date | null;
   signupPhoneCodeSentAt: Date | null;
@@ -107,10 +101,6 @@ export async function buildHostedMemberIdentityPrivateColumns(input: {
     HOSTED_MEMBER_IDENTITY_PHONE_NUMBER_FIELD,
     input.phoneNumber,
   );
-  const privyUserIdEncrypted = await encryptPrivateField(
-    HOSTED_MEMBER_IDENTITY_PRIVY_USER_FIELD,
-    input.privyUserId,
-  );
   const signupPhoneNumberEncrypted = await encryptPrivateField(
     HOSTED_MEMBER_IDENTITY_SIGNUP_PHONE_FIELD,
     input.signupPhoneNumber,
@@ -123,7 +113,6 @@ export async function buildHostedMemberIdentityPrivateColumns(input: {
           input.linqEmailHandle,
         ) }),
     phoneNumberEncrypted,
-    privyUserIdEncrypted,
     signupPhoneCodeSendAttemptId: normalizeNullableString(input.signupPhoneCodeSendAttemptId),
     signupPhoneCodeSendAttemptStartedAt: input.signupPhoneCodeSendAttemptStartedAt,
     signupPhoneCodeSentAt: input.signupPhoneCodeSentAt,
@@ -136,49 +125,35 @@ export async function readHostedMemberIdentityPrivateState(
     HostedMemberIdentity,
     | "memberId"
     | "phoneNumberEncrypted"
-    | "privyUserIdEncrypted"
     | "signupPhoneCodeSendAttemptId"
     | "signupPhoneCodeSendAttemptStartedAt"
     | "signupPhoneCodeSentAt"
     | "signupPhoneNumberEncrypted"
-    | "walletAddressEncrypted"
   >,
   prisma?: HostedWebEncryptionPrismaClient,
 ): Promise<HostedMemberIdentityPrivateState> {
   const [
     phoneNumber,
-    privyUserId,
     signupPhoneNumber,
-    walletAddress,
   ] = await decryptHostedWebNullableFields({
     entries: [{
       field: HOSTED_MEMBER_IDENTITY_PHONE_NUMBER_FIELD,
       memberId: identity.memberId,
       value: identity.phoneNumberEncrypted,
     }, {
-      field: HOSTED_MEMBER_IDENTITY_PRIVY_USER_FIELD,
-      memberId: identity.memberId,
-      value: identity.privyUserIdEncrypted,
-    }, {
       field: HOSTED_MEMBER_IDENTITY_SIGNUP_PHONE_FIELD,
       memberId: identity.memberId,
       value: identity.signupPhoneNumberEncrypted,
-    }, {
-      field: HOSTED_MEMBER_IDENTITY_WALLET_ADDRESS_FIELD,
-      memberId: identity.memberId,
-      value: identity.walletAddressEncrypted,
     }],
     prisma,
   });
 
   return {
     phoneNumber: phoneNumber ?? null,
-    privyUserId: privyUserId ?? null,
     signupPhoneCodeSendAttemptId: normalizeNullableString(identity.signupPhoneCodeSendAttemptId),
     signupPhoneCodeSendAttemptStartedAt: identity.signupPhoneCodeSendAttemptStartedAt,
     signupPhoneCodeSentAt: identity.signupPhoneCodeSentAt,
     signupPhoneNumber: signupPhoneNumber ?? null,
-    walletAddress: walletAddress ?? null,
   };
 }
 

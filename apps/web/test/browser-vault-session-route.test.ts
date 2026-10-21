@@ -150,7 +150,7 @@ describe("browser vault session route", () => {
       member: {
         id: "member_123",
       },
-      privyUserId: "privy-user-123",
+
       sessionId: "session_123",
     });
     mocks.verifyAndConsumeSensitiveActionChallenge.mockResolvedValue(undefined);
@@ -409,7 +409,7 @@ describe("browser vault session route", () => {
       kind: "vault.export",
       memberId: "member_123",
       prisma: mocks.prismaClient,
-      privyUserId: "privy-user-123",
+
     });
     expect(createBrowserVaultExportSession).toHaveBeenCalledTimes(1);
     expect(createBrowserVaultSession).not.toHaveBeenCalled();

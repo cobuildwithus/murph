@@ -65,7 +65,7 @@ export const POST = withJsonError(async (
         memberId: session.member.id,
         now,
         prisma,
-        privyUserId: session.privyUserId,
+
         sessionId: session.sessionId,
         authProof: session.authProof,
       })
@@ -115,7 +115,7 @@ async function approveHostedAction(input: {
   memberId: string;
   now: Date;
   prisma: ReturnType<typeof getPrisma>;
-  privyUserId: string | null;
+
   request: Request;
   sessionId: string;
   authProof?: import("@/src/lib/better-auth/session").HostedAuthSessionProof;
@@ -133,7 +133,7 @@ async function approveHostedAction(input: {
     memberId: input.memberId,
     now: input.now,
     prisma: input.prisma,
-    privyUserId: input.privyUserId,
+
   });
 
   return input.prisma.$transaction(async (tx) => {

@@ -28,7 +28,7 @@ import {
   type GroupJoinPostJoinDestination,
 } from "@/src/lib/hosted-groups/group-join-handoff";
 import type { HostedConsentStatus } from "@/src/lib/legal/consent";
-import type { HostedPrivyCompletionPayload } from "@/src/lib/hosted-onboarding/types";
+import type { HostedAuthenticationCompletionPayload } from "@/src/lib/hosted-onboarding/types";
 import type { MurphContactOption } from "@/src/lib/murph-contact-routing";
 import { cn } from "@/src/lib/utils";
 
@@ -48,7 +48,7 @@ export function GroupJoinSignInButton(input: {
 }) {
   const [open, setOpen] = useState(true);
 
-  function handleCompleted(payload: HostedPrivyCompletionPayload) {
+  function handleCompleted(payload: HostedAuthenticationCompletionPayload) {
     navigateHostedAuthRedirect(buildGroupJoinPostAuthReturnPath({
       currentPath: readCurrentGroupJoinPath(),
       payload,
@@ -65,7 +65,7 @@ export function GroupJoinSignInButton(input: {
         // A group-join invite reached by cold outreach is phone-bound: the
         // provisional member was created from an inbound text, and
         // authentication-service resolves that invite to the phone method and
-        // rejects a Privy identity without one. Offering Telegram or email here
+        // rejects an account without a verified phone. Offering Telegram or email here
         // would let someone finish an entire sign-in that cannot complete.
         {...(input.inviteCode ? { methods: ["phone"] as const } : {})}
         open={open}

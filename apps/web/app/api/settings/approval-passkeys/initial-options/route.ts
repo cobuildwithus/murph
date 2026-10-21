@@ -1,8 +1,4 @@
-import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
-import { createInitialApprovalPasskeyRegistrationOptions } from "@/src/lib/sensitive-actions/passkey-enrollment";
-import { readApprovalPasskeyRequest } from "@/src/lib/sensitive-actions/passkey-http";
+import { withJsonError } from "@/src/lib/hosted-onboarding/http";
+import { initialApprovalEnrollmentRequest } from "@/src/lib/sensitive-actions/initial-passkey-enrollment-request";
 
-export const POST = withJsonError(async (request: Request) => {
-  const { prisma, session } = await readApprovalPasskeyRequest(request);
-  return jsonOk(await createInitialApprovalPasskeyRegistrationOptions({ prisma, session }));
-});
+export const POST = withJsonError((request: Request) => initialApprovalEnrollmentRequest(request, "options"));

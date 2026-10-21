@@ -1,11 +1,8 @@
 import { randomInt, randomUUID } from "node:crypto";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
-const mocks = vi.hoisted(() => ({ key: vi.fn(), provider: vi.fn() }));
+const mocks = vi.hoisted(() => ({ key: vi.fn() }));
 vi.mock("jose", async (original) => ({ ...await original<typeof import("jose")>(), createRemoteJWKSet: () => mocks.key }));
-vi.mock("../src/lib/hosted-onboarding/privy", async (original) => ({
-  ...await original<typeof import("../src/lib/hosted-onboarding/privy")>(), readHostedPrivyUserById: mocks.provider,
-}));
 vi.mock("../src/lib/hosted-crypto/domain-root-store", async (original) => ({
   ...await original<typeof import("../src/lib/hosted-crypto/domain-root-store")>(),
   provisionActiveHostedDomainRootEnvelopeForUserOnly: async () => undefined,
@@ -31,7 +28,7 @@ import { POST as prepareCredential } from "../app/api/settings/login-methods/tel
 import { POST as verifyCredential } from "../app/api/settings/login-methods/telegram/verify/route";
 import { POST as removeCredential } from "../app/api/settings/login-methods/remove/route";
 import { POST as credentialChallenge } from "../app/api/settings/login-methods/challenge/route";
-import { POST as legacyRepairOptions } from "../app/api/settings/approval-passkeys/legacy-options/route";
+import { POST as legacyRepairOptions } from "../app/api/settings/approval-passkeys/initial-options/route";
 import { readHostedMemberIdentity } from "../src/lib/hosted-onboarding/hosted-member-identity-store";
 import { POST as initialPasskeyOptions } from "../app/api/settings/approval-passkeys/initial-options/route";
 import { POST as registerPasskey } from "../app/api/settings/approval-passkeys/register/route";
@@ -62,7 +59,7 @@ describe.skipIf(!enabled)("Telegram public login PostgreSQL composition", () => 
   const nonces = new Set<string>();
   beforeAll(async () => { keys = await generateKeyPair("ES256"); });
   beforeEach(() => {
-    mocks.key.mockResolvedValue(keys.publicKey); mocks.provider.mockReset();
+    mocks.key.mockResolvedValue(keys.publicKey);
     vi.stubEnv("HOSTED_AUTH_STORAGE_KEY", Buffer.alloc(32, 17).toString("base64url"));
     vi.stubEnv("HOSTED_BETTER_AUTH_ENABLED", "true"); vi.stubEnv("HOSTED_BETTER_AUTH_SECRET", secret);
     vi.stubEnv("HOSTED_ONBOARDING_PUBLIC_BASE_URL", baseURL); vi.stubEnv("HOSTED_AUTH_TELEGRAM_CLIENT_ID", clientId);
@@ -81,7 +78,7 @@ describe.skipIf(!enabled)("Telegram public login PostgreSQL composition", () => 
       { id: { in: ["start", "verify"].map((operation) => `arl_${authLookupKey("verification", "rate-limit", `telegram:${operation}:ip:${ip}`)}`) } },
     ] } });
     await prisma.hostedAuthRecord.deleteMany({ where: { model: "verification", id: { in: [
-      `legacy-approval-repair:ip:${ip}`, ...[...memberIds].map((id) => `legacy-approval-repair:member:${id}`),
+      `initial-approval-enrollment:ip:${ip}`, ...[...memberIds].map((id) => `initial-approval-enrollment:member:${id}`),
     ].map((value) => `arl_${authLookupKey("verification", "rate-limit", value)}`) } } });
     memberIds.clear(); telegramIds.clear(); nonces.clear();
   });
@@ -128,7 +125,7 @@ describe.skipIf(!enabled)("Telegram public login PostgreSQL composition", () => 
     const cookie = issuedCookie(login); const prisma = getPrisma();
     const identity = await readHostedMemberIdentity({ memberId, prisma });
     await prisma.$transaction((tx) => upsertHostedMemberIdentity({ ...identity!, memberId,
-      privyUserId: `did:privy:${memberId}`, preparedControlRoot: { domain: "control", userId: memberId, rootKeyId: "synthetic-root" }, prisma: tx,
+      preparedControlRoot: { domain: "control", userId: memberId, rootKeyId: "synthetic-root" }, prisma: tx,
     }));
     // Match an imported legacy user rather than a newly created first-party user.
     await hostedAuthAdapter(prisma)({ user: { additionalFields: { credentialsChangedAt: { type: "date" } } } }).update({
@@ -138,24 +135,22 @@ describe.skipIf(!enabled)("Telegram public login PostgreSQL composition", () => 
     await hostedAuthAdapter(prisma)({ session: { additionalFields: { primaryAuthenticatedAt: { type: "date" } } } }).update({
       model: "session", where: [{ field: "id", value: session!.sessionId }], update: { primaryAuthenticatedAt: null },
     });
-    mocks.provider.mockRejectedValue(new Error("Privy is unavailable"));
     vi.stubEnv("HOSTED_APPROVAL_PASSKEY_ENROLLMENT_ENABLED", "true");
-    expect((await legacyRepairOptions(request("/api/settings/approval-passkeys/legacy-options", {}, cookie))).status).toBe(403);
+    expect((await legacyRepairOptions(request("/api/settings/approval-passkeys/initial-options", {}, cookie))).status).toBe(403);
     const proof = await beginReauthentication(cookie, flow.id);
     const result = await verify(request("/api/auth/telegram/verify", { idToken: proof.idToken, reauthenticate: true }, proof.cookie));
     expect(result.status).toBe(200);
     expect(await result.json()).toMatchObject({ memberId });
     const renewedCookie = issuedCookie(result);
     expect((await getHostedAppSessionFromRequest(request("/home", {}, renewedCookie)))?.primaryAuthenticatedAt).toBeInstanceOf(Date);
-    const options = await legacyRepairOptions(request("/api/settings/approval-passkeys/legacy-options", {}, renewedCookie));
+    const options = await legacyRepairOptions(request("/api/settings/approval-passkeys/initial-options", {}, renewedCookie));
     expect(options.status).toBe(200);
     const registration = await options.json();
     const key = authenticator("synthetic Telegram legacy repair", baseURL);
     expect((await registerPasskey(request("/api/settings/approval-passkeys/register", {
-      legacyRepairToken: registration.token, response: key.registration(true, registration.options.challenge),
+      initialToken: registration.token, response: key.registration(true, registration.options.challenge),
     }, renewedCookie))).status).toBe(200);
     expect(await getHostedAppSessionFromRequest(request("/home", {}, cookie))).toBeNull();
-    expect(mocks.provider).not.toHaveBeenCalled();
   });
 
   it("reauthentication nonce cannot move between sessions/members, become ordinary login, or be replayed", async () => {
@@ -174,7 +169,6 @@ describe.skipIf(!enabled)("Telegram public login PostgreSQL composition", () => 
     expect((await verify(request("/api/auth/telegram/verify", { idToken: proof.idToken }, proof.cookie))).status).toBe(401);
     expect((await verify(request("/api/auth/telegram/verify", payload, proof.cookie))).status).toBe(200);
     expect((await verify(request("/api/auth/telegram/verify", payload, proof.cookie))).status).toBe(401);
-    expect(mocks.provider).not.toHaveBeenCalled();
   });
 
   it("bound Telegram reauthentication cannot adopt an unlinked profile", async () => {
@@ -183,7 +177,6 @@ describe.skipIf(!enabled)("Telegram public login PostgreSQL composition", () => 
     const proof = await beginReauthentication(issuedCookie(login), otherId);
     expect((await verify(request("/api/auth/telegram/verify", { idToken: proof.idToken, reauthenticate: true }, proof.cookie))).status).toBe(409);
     expect(await getPrisma().hostedAuthRecord.count({ where: { model: "account", lookupKey: authLookupKey("account", "accountId", otherId) } })).toBe(0);
-    expect(mocks.provider).not.toHaveBeenCalled();
   });
 
   async function credentialMember(withApproval = true) {
@@ -327,7 +320,6 @@ describe.skipIf(!enabled)("Telegram public login PostgreSQL composition", () => 
     expect((await readHostedMemberRoutingState({ memberId: member.memberId, prisma }))?.telegramUserId).toBeNull();
     expect(await getHostedAppSessionFromRequest(request("/home", {}, other.cookie))).toBeNull();
     expect((await getHostedAppSessionFromRequest(request("/home", {}, member.cookie)))?.member.id).toBe(member.memberId);
-    expect(mocks.provider).not.toHaveBeenCalled();
   });
 
   it("never exchanges Telegram login and credential nonces or browser sessions", async () => {
@@ -387,7 +379,6 @@ describe.skipIf(!enabled)("Telegram public login PostgreSQL composition", () => 
       expect(result.status).toBe(200); expect(await result.json()).toMatchObject({ ok: true, launchConsentGranted: false });
     }
     expect((await prisma.hostedMember.findUniqueOrThrow({ where: { id: body.memberId } })).billingStatus).toBe("not_started");
-    expect(mocks.provider).not.toHaveBeenCalled();
   });
 
   it("reuses the same member on repeat login and rejects a consumed nonce", async () => {
@@ -412,18 +403,16 @@ describe.skipIf(!enabled)("Telegram public login PostgreSQL composition", () => 
 
   it("preserves an existing independently reconciled Telegram member", async () => {
     const prisma = getPrisma(); const memberId = `telegram-existing-${randomUUID()}`; memberIds.add(memberId);
-    const flow = await begin(); const principal = `did:privy:${memberId}`;
+    const flow = await begin();
     await prisma.hostedMember.create({ data: { id: memberId } });
     await prisma.$transaction(async (tx) => {
-      await upsertHostedMemberIdentity({ memberId, prisma: tx, privyUserId: principal, phoneNumber: null, phoneNumberVerifiedAt: null,
+      await upsertHostedMemberIdentity({ memberId, prisma: tx, phoneNumber: null, phoneNumberVerifiedAt: null,
         phoneLookupKey: null, maskedPhoneNumberHint: null, signupPhoneCodeSendAttemptId: null,
         signupPhoneCodeSendAttemptStartedAt: null, signupPhoneCodeSentAt: null, signupPhoneNumber: null });
       await upsertHostedMemberTelegramRoutingBindingTx({ memberId, telegramUserId: flow.id, prisma: tx });
     });
-    mocks.provider.mockResolvedValue({ id: principal, linked_accounts: [{ type: "telegram", telegram_user_id: flow.id }] });
     const response = await finish(flow); expect(response.status).toBe(200); expect(await response.json()).toMatchObject({ memberId });
-    expect(mocks.provider).toHaveBeenCalledTimes(1);
-    expect((await finish(await begin(flow.id))).status).toBe(200); expect(mocks.provider).toHaveBeenCalledTimes(1);
+    expect((await finish(await begin(flow.id))).status).toBe(200);
   });
 
   it("rolls back referral claim and nonce consumption when session creation fails, then retries the same proof", async () => {
