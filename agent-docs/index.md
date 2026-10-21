@@ -1325,4 +1325,4 @@ the retained mailbox cleanup contract is owned by
 
 Scheduled Standard-tier recovery and structured capacity failure classification
 are owned by `ARCHITECTURE.md`; implementation proof is tracked in
-[`scheduled recovery`](exec-plans/active/2026-10-20-automation-standard-fallback.md).
+[`scheduled recovery`](exec-plans/completed/2026-10-20-automation-standard-fallback.md).
