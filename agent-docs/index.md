@@ -1324,4 +1324,4 @@ the retained mailbox cleanup contract is owned by
 Stale onboarding selection rejection is tracked in
 [the onboarding compatibility plan](exec-plans/active/2026-10-20-stale-onboarding-personas.md).
 
-Profile-photo implementation is tracked in [`game profile photos`](exec-plans/active/2026-10-20-game-profile-photos.md).
+Profile-photo implementation is tracked in [`game profile photos`](exec-plans/completed/2026-10-20-game-profile-photos.md).
