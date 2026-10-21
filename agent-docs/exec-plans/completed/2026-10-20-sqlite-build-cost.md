@@ -1,6 +1,6 @@
 # Reduce measured query SQLite rebuild cost
 
-Status: active
+Status: completed
 Created: 2026-10-20
 Updated: 2026-10-20
 
@@ -104,6 +104,19 @@ that severe event or exact production speedup is justified by this local sample.
 PR #4251 contains the scoped candidate. Changelog generation, all 10 archive
 render tests and Web typecheck pass. The task-created restricted private copy
 and generated databases were deleted; the original archive is untouched.
-ReviewGPT, required exact-head CI, protected deployment and four-hour observation
-remain pending. No temporary app heartbeat capability is currently exposed;
+Final ReviewGPT passed on f0e8b500bcd28e4d49edb96b0406dd27972ffe30 after more
+than five minutes on the Eragon GPT-6 Pro lane, with exact attached snapshot,
+head/hash validation, substantive response and REVIEW_COMPLETE. Parent accepts
+PASS with no findings. The reviewer independently executed 2,030 base/head
+sanitizer comparisons, including sparse/dense zero histories and provider/legacy
+boundaries; sparse associations fell from 32,942 to 183. It did not execute the
+full SQLite suite; parent integration proof above covers that boundary. The
+first 126-second response was rejected by the repository minimum and is not
+counted as approval. Parent final diff and privacy review pass.
+
+Required final-head CI, protected deployment and four-hour observation remain
+pending; this closes the implementation plan, not the production investigation.
+The missing CPU-versus-wall attribution is now implemented independently in
+PR #4254 under the telemetry prerequisite and remains subject to its own gates. No temporary app heartbeat capability is currently exposed;
 that prevents claiming scheduled observation until a heartbeat can be verified.
+Completed: 2026-10-20
