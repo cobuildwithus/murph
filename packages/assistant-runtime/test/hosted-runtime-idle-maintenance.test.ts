@@ -242,7 +242,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
   ])("records measured compact operations once: %j", async ({ kind, failFirstWrite }) => {
     const response = {
       responseId: "resp_compact_synthetic_1", inputTokens: 1400, cachedInputTokens: 900,
-      cacheWriteInputTokens: 100, outputTokens: 90, reasoningOutputTokens: 30, totalTokens: 1490,
+      cacheWriteInputTokens: 100, cacheWrite12hInputTokens: 40, outputTokens: 90, reasoningOutputTokens: 30, totalTokens: 1490,
     };
     compactWarmCodexThread.mockResolvedValue({
       kind, reason: "timeout", durationMs: 1200, threadContextTokensBefore: 140_000,
@@ -268,6 +268,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       reasoningTokens: 30, totalTokens: 1490, requestedModel: "gpt-6.1-sol", servedModel: null,
       tokenPricingBasis: "openai-flex", usageExtractionSourcePath: "rawResponse.completed.usage",
       usageExtractionVersion: "codex-idle-compaction-raw-v1",
+      rawUsageJson: { cacheWrite12hInputTokens: 40 },
     });
     expect(recorded[0]?.rawUsageJson).not.toHaveProperty("responseId");
   });

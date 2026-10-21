@@ -9,7 +9,7 @@ import { join } from 'node:path';
 import { setImmediate } from 'node:timers/promises';
 import { test } from 'vitest';
 
-import { normalizeCliTiming, type CliTiming } from '../src/cli-timing.ts';
+import { CLI_TIMING_CPU_PHASES, CLI_TIMING_MAX_REPORT_BYTES, normalizeCliTiming, type CliTiming } from '../src/cli-timing.ts';
 
 const source = new URL('../src/node/cli-timing.ts', import.meta.url).href;
 const key = '0123456789abcdef0123456789abcdef';
@@ -33,7 +33,7 @@ if (mode === 'bound' || transport === 'bind-failure') {
 if (transport === 'send-failure') {
   Socket.prototype.send = function () { throw new Error('SYNTHETIC_SEND_FAILURE'); };
 }
-const { withCliTiming, timeCliDispatch, noteCliTimingFailure, noteCliTimingExit } = await import(source);
+const { withCliTiming, timeCliDispatch, timeCliPhaseSync, noteCliTimingFailure, noteCliTimingExit } = await import(source);
 const reject = async () => {
   noteCliTimingFailure({ code: 'exercise_not_found', message: 'SYNTHETIC_HEALTH_SECRET', stage: 'read' });
   noteCliTimingExit(1, mode !== 'natural-error');
@@ -42,7 +42,19 @@ const reject = async () => {
 };
 await withCliTiming(async () => {
   if (mode === 'bound') { assert.ok(listening); await listening; }
-  if (mode === 'nested') {
+  if (mode === 'success-cpu-budget') {
+    await timeCliDispatch('batch', async () => {
+      for (const command of ['goal list', 'memory show', 'event list', 'samples list',
+        'wearables day', 'wearables latest', 'measurement list', 'query projection status']) {
+        await withCliTiming(() => timeCliDispatch(command, async () => {
+          for (const phase of ['query-metric-projection', 'query-metric-samples',
+            'query-metric-evidence', 'query-metric-extract', 'query-metric-precedence', 'query-metric-targets']) {
+            timeCliPhaseSync(phase, () => 42);
+          }
+        }));
+      }
+    });
+  } else if (mode === 'nested') {
     await timeCliDispatch('batch', () => withCliTiming(() => timeCliDispatch('exercise show', reject)));
   } else {
     await timeCliDispatch('exercise show', mode === 'success' ? async () => {} : reject);
@@ -88,12 +100,13 @@ async function run(mode: string, transport: Transport = 'healthy') {
     const [code, signal] = await once(child, 'close');
     await setImmediate(); // Let the parent dispatch already-queued loopback reads.
     assert.equal(signal, null);
-    assert.equal(code, mode === 'success' ? 0 : 1);
+    assert.equal(code, mode.startsWith('success') ? 0 : 1);
     assert.equal(stdout, '');
     assert.equal(stderr, '');
     assert.equal(messages.length, transport === 'healthy' ? 1 : 0);
     assert.ok(!JSON.stringify(messages).includes('SYNTHETIC_HEALTH_SECRET'));
     if (!messages.length) return null;
+    assert.ok(Buffer.byteLength(messages[0]!) <= CLI_TIMING_MAX_REPORT_BYTES);
     const envelope = JSON.parse(messages[0]!);
     assert.equal(envelope.key, key);
     const report = normalizeCliTiming(envelope.timing);
@@ -140,3 +153,16 @@ test('absent, rejected, dead and failed transports never replace exits, print or
     await run('success', transport);
   }
 }, 60_000);
+
+
+test('CPU metadata survives real UDP normalization without exceeding the existing byte budget', async () => {
+  const report = await run('success-cpu-budget');
+  assert.ok(report);
+  assert.ok(report.droppedCalls > 0);
+  assert.equal(report.commands.reduce((sum, command) => sum + command.calls, 0) + report.droppedCalls, 8);
+  const cpuPhases = report.commands.flatMap(command => command.phases)
+    .filter(phase => CLI_TIMING_CPU_PHASES.includes(phase.phase));
+  assert.ok(cpuPhases.length > 0);
+  assert.ok(cpuPhases.every(phase => phase.cpu?.count === phase.count));
+  assert.deepEqual(normalizeCliTiming(report), report);
+}, 10_000);

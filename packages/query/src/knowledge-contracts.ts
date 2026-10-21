@@ -253,7 +253,9 @@ export const knowledgeAbsentPageResultSchema = z.object({
 
 // Both branches are objects; the root type keeps MCP structured results.
 export const knowledgeShowResultSchema = z.union([
-  knowledgeGetResultSchema,
+  knowledgeGetResultSchema.extend({
+    page: knowledgePageSchema.partial({ markdown: true }),
+  }),
   knowledgeAbsentPageResultSchema,
 ]).meta({ type: "object" });
 

@@ -5214,3 +5214,23 @@ describe('Codex assistant registry helpers', () => {
     })
   })
 })
+
+it('keeps twelve-hour cache writes in the current turn delta and sanitized usage', () => {
+  const usage = (writes: number, twelveHour: number) => ({
+    inputTokens: 100, cachedInputTokens: 20, cacheWriteInputTokens: writes,
+    cacheWrite12hInputTokens: twelveHour, outputTokens: 10, reasoningOutputTokens: 0, totalTokens: 110,
+  })
+  const extracted = extractExactCodexAssistantProviderUsage({
+    providerConfig: normalizeAssistantProviderConfig({ provider: 'codex-cli', model: 'gpt-6.1-sol', modelProvider: 'openai', oss: false }),
+    rawEvents: [
+      { method: 'turn/started', params: { turn: { id: 'turn-cache-test' } } },
+      { method: 'thread/tokenUsage/updated', params: {
+        threadId: 'thread-cache-test', turnId: 'turn-cache-test',
+        tokenUsage: { last: usage(30, 10), total: usage(80, 40) },
+      } },
+      { method: 'turn/completed', params: { turn: { id: 'turn-cache-test', model: 'gpt-6.1-sol' } } },
+    ],
+  })
+  expect(extracted).toMatchObject({ cacheWriteTokens: 30,
+    rawUsageJson: { cacheWriteInputTokens: 30, cacheWrite12hInputTokens: 10 } })
+})

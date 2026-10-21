@@ -3841,6 +3841,14 @@ fallible, source events and the accepted-input journal own recovery; canonical
 user transcript entries and their journal references materialize only after
 the selected turn crosses `commit-started`. A failed request 1 can therefore
 retry the same source events without leaving duplicate transcript history.
+
+When a checkpoint rejection or fatal steer failure cancels the held-draft
+wait, the active-turn controller propagates its recorded fatal admission
+error unchanged through existing fatal handling and redacted runtime
+diagnostics. Without a recorded fatal admission error, the original rejection,
+including caller cancellation, is preserved. A late inactive-steer rejection
+still leaves the input pending for reconsideration.
+
 Final-delivery and hosted-tool effect keys use the newest accepted causal input
 as the stable
 replay anchor while the full answered-mailbox set remains attached as evidence.

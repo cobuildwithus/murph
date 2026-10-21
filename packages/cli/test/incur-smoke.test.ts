@@ -2985,6 +2985,7 @@ test('knowledge upsert persists assistant-authored pages through the built CLI b
         'knowledge',
         'show',
         'sleep-quality',
+        '--raw',
         '--vault',
         vaultRoot,
       ]),
@@ -3049,6 +3050,7 @@ test('knowledge upsert persists assistant-authored pages through the built CLI b
         'knowledge',
         'show',
         'sleep-quality',
+        '--raw',
         '--vault',
         vaultRoot,
       ]),
@@ -3111,6 +3113,7 @@ test('knowledge append-section appends one dated page section through the built 
       'knowledge',
       'show',
       'weekly-health-insights',
+      '--raw',
       '--vault',
       vaultRoot,
     ])

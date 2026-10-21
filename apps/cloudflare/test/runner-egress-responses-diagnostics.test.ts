@@ -837,3 +837,12 @@ describe("Responses request diagnostic projection", () => {
     expect(tooLargeDiagnostic.inputNestedMetricBytes).toBeUndefined();
   });
 });
+
+it.each(["30m", "12h", "private-invalid-ttl"])("reports only allowlisted cache TTL %s", async (ttl) => {
+  const diagnostic = await buildHostedOpenAiCacheDiagnostic({
+    endpointKind: "responses", method: "POST", fingerprintSecret: null,
+    requestBytes: TEST_TEXT_ENCODER.encode(JSON.stringify({ prompt_cache_options: { ttl } })),
+  });
+  expect(diagnostic.cacheTtlKind).toBe(ttl === "private-invalid-ttl" ? "other" : ttl);
+  expect(JSON.stringify(diagnostic)).not.toContain("private-");
+});

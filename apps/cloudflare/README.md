@@ -94,6 +94,20 @@ an existing Wrangler upload bundle for repeated measurements. Keep raw profiles,
 bundles, and source maps local; they may contain filesystem paths. Local timings
 identify initialization costs but do not predict production latency.
 
+Browser replica parsing imports the public experiment-outcome contract leaf;
+vault sharing imports the public sleep-session leaf. Their original contract
+exports remain aliases of the same schemas. Keep the broad contracts schema
+module outside the emitted Worker graph when adding startup dependencies.
+
+The Node runner owns one internal HTTP connection pool across invocations,
+with a five-minute idle ceiling and shorter server keep-alive hints respected.
+It applies only to the existing internal hostnames; public/provider requests
+keep native fetch defaults. Hostnames, request authority, aborts, timeouts, and
+retries retain their existing owners. There is no DNS cache or keep-alive traffic.
+Internal success logging keeps Web forwarding/completion and correlated mailbox
+phase timing; duplicate runtime/intercept start and success records are omitted.
+Non-OK responses, transport failures, and authority rejections remain logged.
+
 The resource client's media, orphan, and replica contracts already belong to
 the Worker's eager graph. Keep those imports static: dynamic imports preserve
 unused exports from their shared dependencies and increase startup work.
@@ -308,7 +322,7 @@ Root `pnpm dev` starts the same local Cloudflare container path and uses the ima
 ## Storage Contract
 
 - The live v2 workspace snapshot is one encrypted zstd-compressed tar object under `users/<namespace>/workspace-snapshots/<snapshotId>.snapshot.enc`. The container uploads that object directly to the canonical ENAM R2 bucket through a short-lived presigned `PUT` URL minted by the Worker, and restores through a presigned `GET`; Worker routes carry JSON session/presign/complete metadata only and never receive the snapshot body. This v2 format is a greenfield zstd hard cut: gzip v2 refs are not produced or restored.
-- V2 snapshot creation validates the planned durable-root entries, then streams `tar -> zstd -> AES-GCM` into the encrypted object. Creation uses zstd level 9 with two compression workers: it spends more CPU during the existing idle checkpoint to reduce the bytes uploaded and later downloaded, authenticated, and decrypted. Existing readers can restore both compression levels with their current bounds. Restore treats v2 snapshots as first-party authenticated artifacts: it verifies the encrypted object size/hash, AES-GCM tag, and plaintext compressed archive hash, extracts once into a temporary root, then swaps that root into place. Restore does not re-list tar members; a valid encrypted snapshot is trusted as output from the snapshot writer.
+- V2 snapshot creation validates the planned durable-root entries, then streams `tar -> zstd -> AES-GCM` into the encrypted object. Creation uses zstd level 9 with two compression workers and a bounded 128 MiB long-distance window (`--long=27`), allowing repeated cache/ledger bytes farther apart than the default 4 MiB history to share compressed references. The existing idle checkpoint pays the compression cost; restored contents and snapshot selection are unchanged. The window stays within the existing zstd decoder default, so both older short-window and new long-window snapshots remain readable without a ref migration or decoder flag change. Compression and decompression use more memory; independent compressed media may not shrink. See the synthetic comparison in `scripts/benchmark-workspace-restore.md` before making latency claims. Restore treats v2 snapshots as first-party authenticated artifacts: it verifies the encrypted object size/hash, AES-GCM tag, and plaintext compressed archive hash, extracts once into a temporary root, then swaps that root into place. Restore does not re-list tar members; a valid encrypted snapshot is trusted as output from the snapshot writer.
 - Ordinary inbound hosted video bytes are not portable workspace state. Snapshot planning excludes normalized video paths derived from validated canonical inbox captures even while accepted input still protects the local file; invalid capture metadata fails planning closed. Unprotected videos are immediately eligible for the existing atomic inbox-retention cleanup, while explicit canonical event raw references remain the durable-save exception.
 - Live workspace restore and checkpoint construction accept v2 refs or null bootstrap state. Legacy ref decoders and object cleanup remain for retained orphan metadata; canonical write receipt artifact recovery remains supported.
 - Managed snapshot completion returns HTTP 409 when its upload, owner, or byte identity does not match the admitted receipt. Rejection happens before multipart completion, object reads, or checkpoint publication; resource transport and storage failures remain errors rather than conflicts.

@@ -481,6 +481,7 @@ function sanitizeCodexUsage(
 ): Record<string, unknown> {
   return {
     cacheWriteInputTokens: usage.cacheWriteInputTokens,
+    ...(usage.cacheWrite12hInputTokens ? { cacheWrite12hInputTokens: usage.cacheWrite12hInputTokens } : {}),
     cachedInputTokens: usage.cachedInputTokens,
     inputTokens: usage.inputTokens,
     outputTokens: usage.outputTokens,
@@ -1011,6 +1012,9 @@ function subtractCodexTokenUsage(
   subtrahend: CodexTokenUsageBreakdown,
 ): CodexTokenUsageBreakdown {
   return {
+    ...((minuend.cacheWrite12hInputTokens ?? 0) > (subtrahend.cacheWrite12hInputTokens ?? 0)
+      ? { cacheWrite12hInputTokens: (minuend.cacheWrite12hInputTokens ?? 0) - (subtrahend.cacheWrite12hInputTokens ?? 0) }
+      : {}),
     cacheWriteInputTokens: Math.max(
       0,
       minuend.cacheWriteInputTokens - subtrahend.cacheWriteInputTokens,

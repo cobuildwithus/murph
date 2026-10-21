@@ -11,8 +11,38 @@ import {
 } from '../src/assistant/system-prompt.js'
 
 describe('connected-apps skill and system-prompt coverage', () => {
+  it('routes morning reads to one packaged policy without loading write and service instructions', async () => {
+    const root = resolveAssistantSkillsRoot()
+    const [main, reading, journal] = await Promise.all([
+      readFile(path.join(root, 'connected-apps/SKILL.md'), 'utf8'),
+      readFile(path.join(root, 'connected-apps/references/reading.md'), 'utf8'),
+      readFile(path.join(root, 'journal-connected-context/SKILL.md'), 'utf8'),
+    ])
+    const reference = '$MURPH_ASSISTANT_SKILLS_ROOT/connected-apps/references/reading.md'
+    expect(main).toContain('Read `references/reading.md` before selecting accounts')
+    expect(journal).toContain(reference)
+    expect(journal).not.toContain('read the `connected-apps` skill')
+    expect(journal.indexOf('A global opt-out is a hard stop')).toBeLessThan(journal.indexOf(reference))
+    for (const heading of ['Select the right surface', 'Read narrowly and treat results as evidence', 'Group boundary', 'Outdoor reminder location']) {
+      expect(reading).toContain(`## ${heading}`)
+      expect(main).not.toContain(`## ${heading}`)
+    }
+    expect(reading).not.toMatch(/GMAIL_SEND_EMAIL|OUTLOOK_SEND_EMAIL|GOOGLECALENDAR_CREATE_EVENT/u)
+    expect(main).toContain('GMAIL_SEND_EMAIL')
+    // This is the full read-policy payload, including location, not a truncated excerpt.
+    expect(Buffer.byteLength(reading)).toBeLessThan(8_500)
+    expect(Buffer.byteLength(journal + reading)).toBeLessThan(32_000)
+    const prompt = buildAssistantSystemPrompt(createPromptInput({
+      turnTrigger: 'automation-cron', scheduledOccurrenceAt: '2026-06-25T13:00:00.000Z',
+    }))
+    expect(prompt).toContain(`For connected-account reads or outdoor-reminder location, read \`${reference}\``)
+    expect(prompt).not.toContain('- Read `$MURPH_ASSISTANT_SKILLS_ROOT/connected-apps/SKILL.md`.')
+    expect(prompt).not.toContain('read the `connected-apps` skill')
+    expect(prompt).toContain('For account changes, provider writes, other built-in services, or unsupported-provider exports')
+  })
+
   it('reuses same-turn discovery without treating it as live authority or complete data', async () => {
-    const skill = (await readFile(path.join(resolveAssistantSkillsRoot(), 'connected-apps', 'SKILL.md'), 'utf8')).replace(/\s+/gu, ' ')
+    const skill = (await readConnectedAppsSkill()).replace(/\s+/gu, ' ')
     expect(skill).toContain('Reuse an exact slug and complete schema already discovered in this turn')
     expect(skill).toContain('not current account access, approval, or write authority')
     expect(skill).toContain('Retain pagination, truncation, errors and source identifiers')
@@ -255,10 +285,9 @@ describe('connected-apps skill and system-prompt coverage', () => {
 })
 
 async function readConnectedAppsSkill(): Promise<string> {
-  return readFile(
-    path.join(resolveAssistantSkillsRoot(), 'connected-apps', 'SKILL.md'),
-    'utf8',
-  )
+  return (await Promise.all(['SKILL.md', 'references/reading.md'].map(file =>
+    readFile(path.join(resolveAssistantSkillsRoot(), 'connected-apps', file), 'utf8'),
+  ))).join('\n')
 }
 
 function createPromptInput(

@@ -20,5 +20,5 @@ export async function respondToGameCommand(
   const body = options.body ? await readJsonObject(request, { limitBytes: BODY_LIMIT_BYTES }) : {};
   const result = await runGameCommand({ actorMemberId: memberId, command: command(body) });
   if (!result.ok) throw gameCommandError(result.error, result.status);
-  return jsonOk({ ok: true, game: result.game });
+  return jsonOk({ ok: true, game: result.game, ...(result.profile ? { profile: result.profile } : {}) });
 }

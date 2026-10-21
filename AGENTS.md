@@ -52,6 +52,11 @@ immutable historical evidence, never current operating instructions.
   require explicit current-task permission for any Temporal mutation.
 - A Cloudflare rollback, including restoring older versions or repointing aliases,
   requires explicit permission for that exact rollback.
+- Before sending an operator-initiated message to a member through Ops or any
+  other channel, show the proposed message and intended recipient and obtain
+  explicit user confirmation immediately before sending. A general request to
+  investigate or contact the member does not replace this confirmation.
+  Read-only diagnostics may proceed without this messaging approval.
 - Preserve unrelated edits and active work. Before resuming an existing PR,
   establish ownership from its head, worktree, and handoff. An ambiguous owner or
   unexpected head movement blocks mutation until an explicit handoff.

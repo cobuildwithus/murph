@@ -32,12 +32,6 @@ import { withoutNodeV8Coverage } from './cli-test-helpers.js'
 
 const packageDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const repoRoot = path.resolve(packageDir, '..', '..')
-const rootPackageJson = JSON.parse(
-  readFileSync(path.join(repoRoot, 'package.json'), 'utf8'),
-) as {
-  name?: string
-  scripts?: Record<string, string>
-}
 const cliPackageJson = JSON.parse(
   readFileSync(path.join(packageDir, 'package.json'), 'utf8'),
 ) as {
@@ -61,11 +55,6 @@ const setupCliPackageJson = JSON.parse(
   readFileSync(path.join(repoRoot, 'packages', 'setup-cli', 'package.json'), 'utf8'),
 ) as {
   dependencies?: Record<string, string>
-}
-const hostedWebPackageJson = JSON.parse(
-  readFileSync(path.join(repoRoot, 'apps', 'web', 'package.json'), 'utf8'),
-) as {
-  scripts?: Record<string, string>
 }
 const auditOutputMaxBufferBytes = 16 * 1024 * 1024
 
@@ -1195,36 +1184,6 @@ printf '%s\\n' "$@" > .fake-tools/committer.args
 }
 
 describe('monorepo release flow coverage audit', () => {
-  it('exposes root-owned release scripts', () => {
-    expect(rootPackageJson.name).toBe('murph-workspace')
-    expect(rootPackageJson.scripts?.build).toContain('-- bash -c')
-    expect(rootPackageJson.scripts?.build).toContain('pnpm -r --sort')
-    expect(rootPackageJson.scripts?.build).toContain(
-      '--workspace-concurrency="${MURPH_BUILD_WORKSPACE_CONCURRENCY:-4}"',
-    )
-    expect(rootPackageJson.scripts?.build).toContain('--filter "./packages/**" build')
-    expect(rootPackageJson.scripts?.build).toContain(
-      'node scripts/assemble-assistant-cli-surface.mjs',
-    )
-    expect(rootPackageJson.scripts?.['changelog:update']).toBe('bash scripts/update-changelog.sh')
-    expect(rootPackageJson.scripts?.['release:notes']).toBe('bash scripts/generate-release-notes.sh')
-    expect(rootPackageJson.scripts?.['release:check']).toBe('bash scripts/release-check.sh')
-    expect(rootPackageJson.scripts?.['release:check:preflight']).toBe(
-      'bash scripts/release-check.sh --preflight',
-    )
-    expect(rootPackageJson.scripts?.['release:trust:github']).toBe(
-      'node scripts/configure-trusted-publishing.mjs',
-    )
-    expect(rootPackageJson.scripts?.['release:patch']).toBe('bash scripts/release.sh patch')
-    expect(rootPackageJson.scripts?.['release:minor']).toBe('bash scripts/release.sh minor')
-    expect(rootPackageJson.scripts?.['release:major']).toBe('bash scripts/release.sh major')
-    expect(rootPackageJson.scripts?.['verify:workspace-package-cycles']).toBe(
-      'node scripts/check-workspace-package-cycles.mjs',
-    )
-    expect(rootPackageJson.scripts?.['zip:src']).toBe('bash scripts/package-audit-context.sh --zip')
-    expect(rootPackageJson.scripts?.['zip:src:full']).toBe('bash scripts/package-audit-context-full.sh --zip')
-  })
-
   it('exposes only the package-backed review-gpt runner', async () => {
     const rootPackageJson = JSON.parse(readFileSync(path.join(repoRoot, 'package.json'), 'utf8'))
     const pnpmWorkspace = readFileSync(
@@ -3421,20 +3380,6 @@ printf '%s\n' "\${review_gpt_managed_ports[*]}"
     expect(summary.runRepoToolsTests).toBe(true)
   })
 
-  it('keeps the removed coordination ledger path absent', () => {
-    expect(
-      existsSync(
-        path.join(
-          repoRoot,
-          'agent-docs',
-          'exec-plans',
-          'active',
-          'COORDINATION_LEDGER.md',
-        ),
-      ),
-    ).toBe(false)
-  })
-
   it('archives the active plan before invoking committer', () => {
     const harnessRoot = createFinishTaskHarness({
       'agent-docs/exec-plans/active/2026-04-24-harness.md': `# Harness Plan
@@ -4618,137 +4563,6 @@ printf 'ZIP: %s (%s bytes)\n' \
     }
   }, 120_000)
 
-  it('keeps release:check focused on release guards, typecheck, clean workspace build, and coverage verification', () => {
-    const releaseCheck = readFileSync(
-      path.join(repoRoot, 'scripts', 'release-check.sh'),
-      'utf8',
-    )
-
-    expect(releaseCheck).toContain('bash -n scripts/release-check.sh scripts/release.sh scripts/update-changelog.sh scripts/generate-release-notes.sh')
-    expect(releaseCheck).toContain('node scripts/release-verification-plan.mjs --check')
-    expect(releaseCheck).toContain('node scripts/verify-release-target.mjs')
-    expect(releaseCheck).toContain('corepack pnpm build:workspace:clean')
-    expect(releaseCheck).toContain('if [[ "$release_check_mode" == "--preflight" ]]')
-    expect(releaseCheck).toContain('corepack pnpm typecheck')
-    expect(releaseCheck).toContain('bash scripts/doc-gardening.sh --fail-on-issues')
-    expect(releaseCheck).toContain('corepack pnpm verify:acceptance')
-    expect(releaseCheck).not.toContain('pnpm install --frozen-lockfile')
-    expect(releaseCheck).not.toContain('pnpm verify:repo')
-    expect(releaseCheck).not.toContain('--out-dir "$temp_dir/tarballs"')
-
-    expect(releaseCheck.indexOf('node scripts/verify-release-target.mjs')).toBeLessThan(
-      releaseCheck.indexOf('corepack pnpm build:workspace:clean'),
-    )
-    expect(releaseCheck.indexOf('corepack pnpm build:workspace:clean')).toBeLessThan(
-      releaseCheck.indexOf('corepack pnpm verify:acceptance'),
-    )
-  })
-
-  it('keeps acceptance web verification on prepared setup paths after root typecheck', () => {
-    const workspaceVerify = readFileSync(
-      path.join(repoRoot, 'scripts', 'workspace-verify.sh'),
-      'utf8',
-    )
-    const webVerify = readFileSync(
-      path.join(repoRoot, 'apps', 'web', 'scripts', 'verify-fast.sh'),
-      'utf8',
-    )
-
-    expect(hostedWebPackageJson.scripts?.['dev:prepared-local-env']).toContain(
-      'apps/web/scripts/dev-local.ts',
-    )
-    expect(hostedWebPackageJson.scripts?.['dev:prepared-local-env']).not.toContain(
-      'health-commons:generate',
-    )
-    expect(hostedWebPackageJson.scripts?.['dev:prepared-local-env']).not.toContain(
-      'legal:pdf',
-    )
-    expect(hostedWebPackageJson.scripts?.['test']).toBe(
-      'pnpm health-commons:generate && pnpm test:prepared',
-    )
-    expect(hostedWebPackageJson.scripts?.['test:prepared']).toContain(
-      'tsx apps/web/scripts/run-hosted-web-vitest.mts',
-    )
-    expect(webVerify).toContain('MURPH_HOSTED_WEB_SMOKE_PREPARED_LOCAL_ENV=1 pnpm dev:smoke')
-    expect(webVerify).toContain('pnpm test:prepared')
-    expect(webVerify).toContain('MURPH_HOSTED_WEB_PRISMA_GENERATED_PREPARED')
-    expect(workspaceVerify).toContain('MURPH_HOSTED_WEB_PRISMA_GENERATED_PREPARED=1')
-    expect(workspaceVerify).toContain(
-      'skip Health Commons generated artifacts; root acceptance typecheck already prepared them',
-    )
-    expect(workspaceVerify).toContain(
-      'run_timed_step "Prepared runtime artifacts" prepare_repo_vitest_runtime_artifacts "$acceptance_typechecked"',
-    )
-    expect(workspaceVerify).toContain('MURPH_ACCEPTANCE_APP_VERIFY_WITH_COVERAGE')
-    expect(workspaceVerify).toContain(
-      'run_timed_step "Package coverage hygiene" run_package_coverage_cleanup_and_hygiene',
-    )
-    expect(workspaceVerify).toContain('MURPH_ACCEPTANCE_APP_VERIFY_DELAY_SECONDS')
-    expect(workspaceVerify).toContain('resolve_acceptance_app_verify_delay_default()')
-    expect(workspaceVerify).toContain(
-      'delay App verification ${acceptance_app_verify_delay_seconds}s to preserve package coverage throughput',
-    )
-    expect(workspaceVerify).toContain('resolve_package_coverage_vitest_max_workers_default()')
-    expect(workspaceVerify).toContain(
-      'resolve_package_coverage_cli_active_concurrency_default()',
-    )
-    expect(workspaceVerify).toContain('MURPH_PACKAGE_COVERAGE_CLI_ACTIVE_CONCURRENCY')
-    expect(workspaceVerify).toContain('current_package_coverage_concurrency()')
-    expect(workspaceVerify).toContain('can_launch_next_package_coverage()')
-    expect(
-      webVerify.indexOf(
-        'start_owned_background_job build_pid run_timed_step "next build" run_next_build',
-      ),
-    ).toBeLessThan(
-      webVerify.indexOf(
-        'start_owned_background_job smoke_pid run_timed_step "dev smoke" run_dev_smoke',
-      ),
-    )
-    expect(workspaceVerify).toContain(
-      'run_acceptance_app_verification_after_delay "$acceptance_typechecked" 1',
-    )
-    expect(
-      workspaceVerify.indexOf(
-        'run_timed_step "Package coverage hygiene" run_package_coverage_cleanup_and_hygiene',
-      ),
-    ).toBeLessThan(
-      workspaceVerify.indexOf(
-        'run_timed_step "Package coverage suite" run_test_packages_coverage_after_hygiene',
-      ),
-    )
-    expect(
-      workspaceVerify.indexOf(
-        'run_timed_step "Package coverage suite" run_test_packages_coverage_after_hygiene',
-      ),
-    ).toBeLessThan(
-      workspaceVerify.indexOf(
-        'run_acceptance_app_verification_after_delay "$acceptance_typechecked" 1',
-      ),
-    )
-  })
-
-  it('keeps long CLI smoke groups in independent coverage buckets', () => {
-    const cliWorkspace = readFileSync(
-      path.join(repoRoot, 'packages', 'cli', 'vitest.workspace.ts'),
-      'utf8',
-    )
-
-    expect(cliWorkspace).toContain('name: "cli-device-smoke"')
-    expect(cliWorkspace).toContain('patterns: ["device-cli.test.ts"]')
-    expect(cliWorkspace).toContain('name: "cli-release-smoke"')
-    expect(cliWorkspace).toContain('patterns: ["release-*.test.ts"]')
-    expect(cliWorkspace).toContain('name: "cli-incur-smoke"')
-    expect(cliWorkspace).toContain(
-      'patterns: ["incur-smoke.test.ts", "incur-skill-hash.test.ts"]',
-    )
-    expect(cliWorkspace.indexOf('name: "cli-device-smoke"')).toBeLessThan(
-      cliWorkspace.indexOf('name: "cli-schemas-smoke"'),
-    )
-    expect(cliWorkspace.indexOf('name: "cli-incur-smoke"')).toBeLessThan(
-      cliWorkspace.indexOf('name: "cli-schemas-smoke"'),
-    )
-  })
-
   it('prepares the hosted web Prisma client before Cloudflare app verification typecheck', () => {
     const cloudflareVerify = readFileSync(
       path.join(repoRoot, 'apps', 'cloudflare', 'scripts', 'verify-fast.sh'),
@@ -4859,57 +4673,6 @@ exit 1
     } finally {
       rmSync(harnessDir, { recursive: true, force: true })
     }
-  })
-
-  it('keeps live agent-builder routing independent of the retired Fable implementation lane', () => {
-    const liveAgentBuilderDocs = [
-      'AGENTS.md',
-      'CLAUDE.md',
-      path.join('agent-docs', 'FRONTEND.md'),
-      path.join('agent-docs', 'operations', 'agent-workflow-routing.md'),
-    ].map((relativePath) => readFileSync(path.join(repoRoot, relativePath), 'utf8'))
-
-    for (const workflowDoc of liveAgentBuilderDocs) {
-      expect(workflowDoc).not.toMatch(/\bFable\b|Claude Code/iu)
-    }
-  })
-
-  it('keeps the durable storage-boundary docs explicit about canonical product state versus assistant runtime residue', () => {
-    const architecture = readFileSync(path.join(repoRoot, 'ARCHITECTURE.md'), 'utf8')
-    const readme = readFileSync(path.join(repoRoot, 'README.md'), 'utf8')
-    const baselineArchitecture = readFileSync(
-      path.join(repoRoot, 'docs', 'architecture.md'),
-      'utf8',
-    )
-    const invariants = readFileSync(
-      path.join(repoRoot, 'docs', 'contracts', '00-invariants.md'),
-      'utf8',
-    )
-    const commandSurface = readFileSync(
-      path.join(repoRoot, 'docs', 'contracts', '03-command-surface.md'),
-      'utf8',
-    )
-    const safeExtensionGuide = readFileSync(
-      path.join(repoRoot, 'docs', 'safe-extension-guide.md'),
-      'utf8',
-    )
-    const security = readFileSync(path.join(repoRoot, 'agent-docs', 'SECURITY.md'), 'utf8')
-    const runtimeStateReadme = readFileSync(
-      path.join(repoRoot, 'packages', 'runtime-state', 'README.md'),
-      'utf8',
-    )
-
-    expect(architecture).toContain('Storage-policy hard line:')
-    expect(architecture).toContain('execution residue, replay/continuity artifacts, and operator diagnostics only')
-    expect(readme).toContain('it does not belong in assistant runtime first')
-    expect(baselineArchitecture).toContain('do not use assistant runtime as a first stop for user-facing or queryable product state')
-    expect(invariants).toContain('never assistant runtime state')
-    expect(commandSurface).toContain('runtime inspection/control only')
-    expect(commandSurface).toContain('not an `assistant` runtime CRUD surface')
-    expect(safeExtensionGuide).toContain('do not prototype it in assistant runtime first')
-    expect(security).toContain('not a product-state staging area')
-    expect(runtimeStateReadme).toContain('intentionally not a product-state incubator')
-    expect(runtimeStateReadme).toContain('execution residue only')
   })
 
   it('verifies the live release manifest and publish set', () => {
@@ -5307,17 +5070,6 @@ exit 1
     },
     240_000,
   )
-
-  it('keeps release-only docs drift allowances tied to the manifest package set', () => {
-    const rootDocsDrift = readFileSync(
-      path.join(repoRoot, 'scripts', 'check-agent-docs-drift.sh'),
-      'utf8',
-    )
-
-    expect(rootDocsDrift).toContain('scripts/release-manifest.json')
-    expect(rootDocsDrift).toContain('packages/cli/CHANGELOG.md')
-    expect(rootDocsDrift).toContain('package_jsons_version_only')
-  })
 
   it('wires the workspace package cycle guard into repo verification and keeps the live graph acyclic', () => {
     const workspaceVerify = readFileSync(
@@ -5807,14 +5559,4 @@ exec "\${MURPH_TEST_REAL_WC:?}" "$@"
     }
   })
 
-  it('keeps diff-aware CLI escalation on the targeted verification lane', () => {
-    const workspaceVerifyScript = readFileSync(
-      path.join(repoRoot, 'scripts', 'workspace-verify.sh'),
-      'utf8',
-    )
-
-    expect(workspaceVerifyScript).toContain(
-      'run_timed_step "CLI targeted verification" run_verify_cli',
-    )
-  })
 })

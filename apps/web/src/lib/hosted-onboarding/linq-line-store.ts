@@ -578,6 +578,7 @@ export async function listHostedLinqHealthyProactiveLines(input: {
   const limit = HOSTED_LINQ_ASSIGNABLE_HOME_LINE_LIMIT;
   const rows = await input.prisma.hostedLinqLine.findMany({
     where: {
+      assignmentWeight: { gt: 0 },
       configuredAt: { not: null },
       egressPolicy: "enabled",
       healthStatus: "healthy",
@@ -789,6 +790,7 @@ export async function claimHostedLinqProactiveConversationCapacityTx(input: {
   const incremented = await input.prisma.hostedLinqLine.updateMany({
     where: {
       ...requiredLineStateWhere,
+      assignmentWeight: { gt: 0 },
       phoneNumberLookupKey: input.phoneNumberLookupKey,
       proactiveConversationCount: {
         lt: input.limit,
@@ -808,6 +810,7 @@ export async function claimHostedLinqProactiveConversationCapacityTx(input: {
   const started = await input.prisma.hostedLinqLine.updateMany({
     where: {
       ...requiredLineStateWhere,
+      assignmentWeight: { gt: 0 },
       phoneNumberLookupKey: input.phoneNumberLookupKey,
       OR: [
         { proactiveConversationDayUtc: null },
@@ -839,6 +842,7 @@ export async function assertHostedLinqAssignableHomeLinePoolReady(input: {
 
 function buildHostedLinqAssignableHomeLineWhere(): Prisma.HostedLinqLineWhereInput {
   return {
+    assignmentWeight: { gt: 0 },
     configuredAt: { not: null },
     egressPolicy: "enabled",
     healthStatus: { in: ["healthy", "unknown"] },

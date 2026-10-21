@@ -35,7 +35,7 @@ import {
   readCloudflareHostedProviderFetchBaseUrls,
 } from "./runtime-platform.ts";
 import type { HostedRuntimeFetchTransportDiagnostics } from "./runtime-platform/fetch-transport-collector.ts";
-import { normalizeCloudflareWorkerFetch } from "./worker-fetch.ts";
+import { fetchHostedRunnerInternal } from "./hosted-runner-internal-fetch.ts";
 import {
   createCloudflareHostedMailboxPayloadDecoder,
 } from "./runtime-bridge-mailbox-payload-decode.ts";
@@ -197,6 +197,7 @@ export async function runHostedWorkspaceInvocation(
     const platform = buildHostedExecutionRuntimePlatform({
       boundUserId,
       fetchTransportDiagnostics: options.fetchTransportDiagnostics,
+      fetchImpl: fetchHostedRunnerInternal,
       commitTimeoutMs: job.runtime?.commitTimeoutMs ?? null,
       physicalNotesEnabled:
         job.runtime?.platformEnv?.HOSTED_PHYSICAL_NOTES_ENABLED
@@ -256,7 +257,7 @@ export async function runHostedWorkspaceInvocation(
     });
     const webControlFetch = createCloudflareHostedTrustedInternalFetch(
       boundUserId,
-      normalizeCloudflareWorkerFetch(),
+      fetchHostedRunnerInternal,
       {
         injectBoundUserIdHeader: true,
       },

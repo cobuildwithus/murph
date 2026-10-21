@@ -157,27 +157,21 @@ async function fetchCloudflareHostedInternalRequest(input: {
     userIdPresent: input.boundUserId.length > 0,
   };
 
-  emitHostedExecutionStructuredLog({
-    component: "assistant-delivery",
-    details,
-    message: "Hosted runtime internal request started.",
-    phase: "outbox",
-    userId: input.boundUserId,
-  });
-
   try {
     const response = await input.fetchImpl(internalRequest);
-    emitHostedExecutionStructuredLog({
-      component: "assistant-delivery",
-      details: {
-        ...details,
-        ok: response.ok ? "true" : "false",
-        status: String(response.status),
-      },
-      message: "Hosted runtime internal request completed.",
-      phase: "outbox",
-      userId: input.boundUserId,
-    });
+    if (!response.ok) {
+      emitHostedExecutionStructuredLog({
+        component: "assistant-delivery",
+        details: {
+          ...details,
+          ok: "false",
+          status: String(response.status),
+        },
+        message: "Hosted runtime internal request completed.",
+        phase: "outbox",
+        userId: input.boundUserId,
+      });
+    }
     if (isInternalAuthorityRejectedStatus(response.status)) {
       const error = new HostedRuntimeInternalAuthorityRejectedError({
         description: readHostedRuntimeInternalRequestDescription({

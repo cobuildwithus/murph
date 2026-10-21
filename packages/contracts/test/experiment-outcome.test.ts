@@ -7,6 +7,21 @@ import {
   experimentOutcomeSchema,
 } from "../src/zod.ts";
 
+import {
+  experimentOutcomeSchema as leafExperimentOutcomeSchema,
+} from "../src/experiment-outcome.ts";
+import {
+  sleepSessionTypeSchema as leafSleepSessionTypeSchema,
+  sleepSessionStateSchema as leafSleepSessionStateSchema,
+} from "../src/sleep-session.ts";
+import { sleepSessionTypeSchema, sleepSessionStateSchema } from "../src/zod.ts";
+
+it("preserves schema identity through the existing and narrow entrypoints", () => {
+  expect(leafExperimentOutcomeSchema).toBe(experimentOutcomeSchema);
+  expect(leafSleepSessionTypeSchema).toBe(sleepSessionTypeSchema);
+  expect(leafSleepSessionStateSchema).toBe(sleepSessionStateSchema);
+});
+
 function currentOutcome(): Record<string, unknown> {
   return {
     adherenceSummary: {
