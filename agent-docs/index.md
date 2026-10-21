@@ -1322,3 +1322,7 @@ Member ChatGPT linking retirement is tracked in
 [`the removal plan`](exec-plans/completed/2026-10-19-remove-member-inference.md);
 the retained mailbox cleanup contract is owned by
 [`hosted runtime protocol`](references/hosted-runtime-protocol.md).
+
+Scheduled Standard-tier recovery and structured capacity failure classification
+are owned by `ARCHITECTURE.md`; implementation proof is tracked in
+[`scheduled recovery`](exec-plans/active/2026-10-20-automation-standard-fallback.md).

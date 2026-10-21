@@ -53,19 +53,19 @@ import type {
 export const ASSISTANT_CRON_JOB_SCHEMA = 'murph.assistant-cron-job.v1'
 export const ASSISTANT_CRON_NOTIFICATION_EXPIRES_AFTER_MS = 60 * 60 * 1000
 
-// These managed jobs have no user-promised delivery minute, so they keep Flex
-// pricing on retries. Timed reminders, meal closeouts and independent
+// These managed jobs have no user-promised delivery minute, so they retain
+// a longer recovery window. Timed reminders, meal closeouts and independent
 // follow-ups retain standard-tier recovery and the default window.
-export const ASSISTANT_CRON_FLEX_RETRY_AUTOMATION_IDS: ReadonlySet<string> = new Set([
+export const ASSISTANT_CRON_EXTENDED_RETRY_AUTOMATION_IDS: ReadonlySet<string> = new Set([
   MURPH_JOURNAL_CONNECTED_CONTEXT_MORNING_AUTOMATION_ID,
   MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID,
   MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID,
   MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID,
   MURPH_MONTHLY_IMPROVEMENT_COACH_AUTOMATION_ID,
 ])
-// Flex capacity shortages last hours at peak. Hourly retries inside this
-// window delay a run rather than lose it.
-export const ASSISTANT_CRON_FLEX_RETRY_EXPIRES_AFTER_MS = 6 * 60 * 60 * 1000
+// Provider shortages can last hours. Standard-tier retries remain bounded
+// by this window and the next occurrence.
+export const ASSISTANT_CRON_EXTENDED_RETRY_EXPIRES_AFTER_MS = 6 * 60 * 60 * 1000
 
 export interface CanonicalAutomationAssistantCronJobRecord {
   kind: 'automation'
@@ -425,8 +425,8 @@ export function isCanonicalAssistantCronNotificationOccurrenceDeliverable(
 
   return isAssistantCronNotificationOccurrenceFresh({
     ...input,
-    expiresAfterMs: hasAssistantCronFlexRetryWindow({ ...input, source: input.source })
-      ? ASSISTANT_CRON_FLEX_RETRY_EXPIRES_AFTER_MS
+    expiresAfterMs: hasAssistantCronExtendedRetryWindow({ ...input, source: input.source })
+      ? ASSISTANT_CRON_EXTENDED_RETRY_EXPIRES_AFTER_MS
       : undefined,
   })
 }
@@ -478,15 +478,15 @@ export function widenAssistantCronActiveUntilForFinalOccurrence(input: {
   return widenedMs > cutoffMs ? new Date(widenedMs).toISOString() : input.activeUntil
 }
 
-// Only a recurring Flex-retry run whose next occurrence is at least the window
+// Only a recurring managed run whose next occurrence is at least the window
 // away keeps it, so a late retry never replays a superseded occurrence.
-function hasAssistantCronFlexRetryWindow(input: {
+function hasAssistantCronExtendedRetryWindow(input: {
   occurrenceAt: string
   source: CanonicalAutomationAssistantCronJobRecord
 }): boolean {
   const { source } = input
   if (
-    !ASSISTANT_CRON_FLEX_RETRY_AUTOMATION_IDS.has(source.automationId)
+    !ASSISTANT_CRON_EXTENDED_RETRY_AUTOMATION_IDS.has(source.automationId)
     || (source.schedule.kind !== 'dailyLocal' && source.schedule.kind !== 'cron')
   ) {
     return false
@@ -501,7 +501,7 @@ function hasAssistantCronFlexRetryWindow(input: {
   )
   return nextOccurrenceAt !== null
     && Date.parse(nextOccurrenceAt) - Date.parse(input.occurrenceAt)
-      >= ASSISTANT_CRON_FLEX_RETRY_EXPIRES_AFTER_MS
+      >= ASSISTANT_CRON_EXTENDED_RETRY_EXPIRES_AFTER_MS
 }
 
 function resolveCanonicalAssistantCronUnboundedOccurrenceAt(

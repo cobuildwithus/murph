@@ -131,7 +131,6 @@ import { readAssistantDeviceActivityParentAutomation } from '../device-activity-
 import {
   buildCanonicalAutomationUpsertInput,
   buildVisibleLocalAssistantCronStore,
-  ASSISTANT_CRON_FLEX_RETRY_AUTOMATION_IDS,
   isAssistantCronNotificationOccurrenceFresh,
   isCanonicalAssistantCronNotificationOccurrenceDeliverable,
   isCanonicalAssistantCronSourceEnabled,
@@ -212,8 +211,8 @@ export const ASSISTANT_CRON_MEMBER_WORDING_INSTRUCTIONS = [
 // Hosted cron turns are off the user hotpath, so clean first runs prefer the
 // OpenAI flex tier (~50% token cost). The Codex provider boundary validates
 // route support and bounds flex execution with a deadline; failures land in the
-// normal cron backoff (30s first retry). Maintenance stays on Flex; ordinary
-// reminders may retry at standard tier to bound delivery lateness.
+// normal cron backoff (30s first retry). Private maintenance stays on Flex; all other
+// scheduled turns retry at standard tier to bound delivery lateness.
 
 interface DueAssistantCronCandidate {
   canonicalEntry?: {
@@ -860,7 +859,7 @@ export async function executeClaimedAssistantCronJob(
         const serviceTier = resolveAssistantCronTurnServiceTier({
           executionContext: input.executionContext ?? null,
           job: claimedJob,
-          backgroundMaintenance: assistantCronJobPrefersFlexRetries(input.job),
+          backgroundMaintenance: assistantCronJobIsPreemptibleBackgroundMaintenance(input.job),
         })
         const scheduledInvocationAuthority =
           resolveAssistantCronScheduledInvocationAuthority({
@@ -2148,12 +2147,6 @@ async function runAssistantCronAutomationPreconditions(input: {
   return lifecycleSkipReason
 }
 
-function assistantCronJobPrefersFlexRetries(job: ResolvedAssistantCronJob): boolean {
-  return assistantCronJobIsPreemptibleBackgroundMaintenance(job)
-    || (job.kind === 'canonical' && job.source.kind === 'automation'
-      && ASSISTANT_CRON_FLEX_RETRY_AUTOMATION_IDS.has(job.source.automationId))
-}
-
 function resolveAssistantCronTurnServiceTier(input: {
   backgroundMaintenance: boolean
   executionContext: AssistantExecutionContext | null
@@ -2165,7 +2158,7 @@ function resolveAssistantCronTurnServiceTier(input: {
   }
 
   // Maintenance tolerates capacity delays and retains Flex pricing on retries.
-  // Ordinary reminders retain the standard-tier fallback after their first failure.
+  // Every other scheduled turn falls back to Standard after its first failure.
   return input.backgroundMaintenance || input.job.state.consecutiveFailures === 0
     ? 'flex'
     : null

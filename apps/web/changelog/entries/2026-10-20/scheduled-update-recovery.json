@@ -1,0 +1,17 @@
+{
+  "publishedOn": "2026-10-20",
+  "order": 100,
+  "item": {
+    "id": "scheduled-update-recovery",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "More reliable scheduled updates",
+    "summary": "Weekly digests and other scheduled updates can recover sooner when background processing is busy.",
+    "details": "Retries use an alternative processing tier while keeping the original delivery window, saved preferences and duplicate-message protections.",
+    "relevanceTags": [
+      "automations",
+      "reliability"
+    ],
+    "sourcePullRequests": []
+  }
+}

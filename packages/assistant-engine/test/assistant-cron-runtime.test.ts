@@ -5783,6 +5783,15 @@ describe('assistant cron runtime orchestration', () => {
         }),
       ],
     })
+    vi.setSystemTime(new Date(runtimeRecord!.state.retryAfterAt!))
+    await processDueAssistantCronJobsLocal({
+      executionContext: { hosted: { memberId: 'member-hosted', userEnvKeys: [] } },
+      limit: 1,
+      vault: vaultRoot,
+    })
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenNthCalledWith(
+      2, expect.objectContaining({ serviceTier: 'flex' }),
+    )
   })
 
   it('consumes overnight memory consolidation when foreground yield appears after maintenance success', async () => {
@@ -6446,12 +6455,11 @@ describe('assistant cron runtime orchestration', () => {
       [MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID, 'Weekly research'],
       [MURPH_MONTHLY_IMPROVEMENT_COACH_AUTOMATION_ID, 'Monthly coach'],
     ].map(([automationId, name]) => ({ automationId: automationId!, name, occurrenceAt: '2026-04-08T13:00:00.000Z' })),
-  ])('keeps Flex and recovers a managed $name occurrence after a prolonged capacity shortage', async ({
+  ].flatMap(testCase => [30_000, 5 * 60 * 60_000].map(retryDelayMs => ({ ...testCase, retryDelayMs }))))('falls back to Standard and recovers a managed $name occurrence after $retryDelayMs ms', async ({
     automationId,
     occurrenceAt,
+    retryDelayMs,
   }) => {
-    // Past the default hour and the former four-hour window, inside six hours.
-    const retryDelayMs = 5 * 60 * 60_000
     vi.useFakeTimers()
     vi.setSystemTime(new Date(occurrenceAt))
     const { vaultRoot } = await createRuntimeContext(
@@ -6484,13 +6492,18 @@ describe('assistant cron runtime orchestration', () => {
         })
         throw new Error('Synthetic Flex provider capacity failure.')
       })
-      .mockResolvedValueOnce({
+      .mockResolvedValueOnce(retryDelayMs === 30_000 ? {
+        decision: { kind: 'send_message', text: 'Your synthetic weekly update.', privateSummary: 'Prepared the scheduled update.' },
+        response: 'Your synthetic weekly update.',
+        deliveryOutcome: buildSentReminderDeliveryOutcome('outbox-managed-recovery'),
+        session: { sessionId: 'session-managed-standard-retry' },
+      } : {
         decision: {
           kind: 'skip',
           privateSummary: 'No new background context required attention.',
         },
         response: null,
-        session: { sessionId: 'session-managed-flex-retry' },
+        session: { sessionId: 'session-managed-standard-retry' },
       })
 
     const first = await processDueAssistantCronJobsLocal({
@@ -6529,6 +6542,8 @@ describe('assistant cron runtime orchestration', () => {
     })
 
     expect(retried).toEqual({ failed: 0, processed: 1, succeeded: 1 })
+    expect((await listAssistantCronRuns({ job: automationId, vault: vaultRoot })).runs[0])
+      .toMatchObject({ outcome: retryDelayMs === 30_000 ? 'delivered' : 'no_op' })
     expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledTimes(2)
     expect(
       (cronMocks.sendAssistantMessageLocal.mock.calls[1]?.[0] as { instructions?: string } | undefined)
@@ -6541,14 +6556,21 @@ describe('assistant cron runtime orchestration', () => {
           ? { assistantTargetOverride: seed.assistantTargetOverride }
           : {}),
         scheduledInvocationAuthority: { automationId, occurrenceAt },
-        serviceTier: 'flex',
+        serviceTier: null,
         turnTrigger: 'automation-cron',
       }),
     )
+    await processDueAssistantCronJobsLocal({ executionContext, limit: 1, vault: vaultRoot })
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledTimes(2)
     const completedJob = await getAssistantCronJob(vaultRoot, automationId)
     expect(completedJob.state.consecutiveFailures).toBe(0)
     expect(completedJob.state.nextRunAt).toBe(
       new Date(Date.parse(occurrenceAt) + 86_400_000).toISOString(),
+    )
+    vi.setSystemTime(new Date(completedJob.state.nextRunAt!))
+    await processDueAssistantCronJobsLocal({ executionContext, limit: 1, vault: vaultRoot })
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenNthCalledWith(
+      3, expect.objectContaining({ serviceTier: 'flex' }),
     )
   })
 
