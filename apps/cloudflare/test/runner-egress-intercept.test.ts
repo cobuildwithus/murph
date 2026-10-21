@@ -821,19 +821,9 @@ describe("hostedRunnerIntercept", () => {
     expect(response.status).toBe(200);
     expect(validateRuntimeWriteFence).not.toHaveBeenCalled();
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+    expect(mocks.emitHostedExecutionStructuredLog).not.toHaveBeenCalledWith(
       expect.objectContaining({
-        component: "runner",
-        details: expect.objectContaining({
-          boundUserIdHeaderPresent: true,
-          containerIdPresent: false,
-          hostKind: "web_control_plane",
-          method: "GET",
-          operation: "workspace_read",
-          runtimeAuthorityHeadersPresent: true,
-        }),
-        message: "Hosted runner internal outbound request received.",
-        phase: "wake.running",
+        message: expect.stringMatching(/^Hosted runner internal outbound/),
       }),
     );
   });
@@ -893,7 +883,7 @@ describe("hostedRunnerIntercept", () => {
           method: "other",
           operation: "web_control_blocked",
         }),
-        message: "Hosted runner internal outbound request received.",
+        message: "Hosted runner internal outbound response completed.",
         phase: "wake.running",
       }),
     );

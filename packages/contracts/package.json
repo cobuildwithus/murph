@@ -26,6 +26,16 @@
       "import": "./dist/index.js",
       "default": "./dist/index.js"
     },
+    "./sleep-session": {
+      "types": "./dist/sleep-session.d.ts",
+      "import": "./dist/sleep-session.js",
+      "default": "./dist/sleep-session.js"
+    },
+    "./experiment-outcome": {
+      "types": "./dist/experiment-outcome.d.ts",
+      "import": "./dist/experiment-outcome.js",
+      "default": "./dist/experiment-outcome.js"
+    },
     "./journal-presentation": {
       "types": "./dist/journal-presentation.d.ts",
       "import": "./dist/journal-presentation.js",

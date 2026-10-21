@@ -94,6 +94,20 @@ an existing Wrangler upload bundle for repeated measurements. Keep raw profiles,
 bundles, and source maps local; they may contain filesystem paths. Local timings
 identify initialization costs but do not predict production latency.
 
+Browser replica parsing imports the public experiment-outcome contract leaf;
+vault sharing imports the public sleep-session leaf. Their original contract
+exports remain aliases of the same schemas. Keep the broad contracts schema
+module outside the emitted Worker graph when adding startup dependencies.
+
+The Node runner owns one internal HTTP connection pool across invocations,
+with a five-minute idle ceiling and shorter server keep-alive hints respected.
+It applies only to the existing internal hostnames; public/provider requests
+keep native fetch defaults. Hostnames, request authority, aborts, timeouts, and
+retries retain their existing owners. There is no DNS cache or keep-alive traffic.
+Internal success logging keeps Web forwarding/completion and correlated mailbox
+phase timing; duplicate runtime/intercept start and success records are omitted.
+Non-OK responses, transport failures, and authority rejections remain logged.
+
 The resource client's media, orphan, and replica contracts already belong to
 the Worker's eager graph. Keep those imports static: dynamic imports preserve
 unused exports from their shared dependencies and increase startup work.
