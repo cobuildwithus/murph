@@ -3702,7 +3702,24 @@ async function deliverHostedPreparedAssistantDelivery(input: {
           if (!privateCompletion && !trackedPhoneCallResult) {
             providerDispatchEntered = true;
           }
-          const result = await sendTelegramMessage(request, dependencies);
+          const result = await sendTelegramMessage(request, {
+            ...dependencies,
+            onTextSendAccepted: (acceptance) => {
+              if (!input.platform?.logPort) return;
+              void writeHostedRuntimeLogBestEffort({
+                entry: {
+                  at: acceptance.responseReceivedAt,
+                  component: "outbox",
+                  eventCode: "outbox.telegram_text_accepted",
+                  level: "info",
+                  ...(mirrorState.intent ? { outboxIntentRef: mirrorState.intent.intentId } : {}),
+                  phase: "outbox",
+                  redactedJson: { ...acceptance },
+                },
+                platform: input.platform,
+              });
+            },
+          });
           if (trackedPhoneCallResult) {
             // Telegram has accepted the non-idempotent result; preserve the
             // receipt through the existing outbox confirmation path.
