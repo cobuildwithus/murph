@@ -288,6 +288,11 @@ class AssistantActiveTurnInputController {
       ? signals[0]!
       : AbortSignal.any(signals)
     const outcome = this.runDraftWindow(draftWindowSignal)
+      .catch((error: unknown) => {
+        // fail() cancels the wait; preserve the fatal error that caused it.
+        this.throwFatalAdmissionError()
+        throw error
+      })
     outcome.catch(() => undefined)
     this.draftWindowOutcome = outcome
     return outcome
