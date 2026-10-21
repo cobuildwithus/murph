@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-10-20",
+  "order": 100,
+  "item": {
+    "id": "smaller-workspace-restores",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Less to load when a conversation wakes up",
+    "summary": "Murph compresses repeated workspace data more efficiently, reducing what needs to load after an inactive conversation wakes up.",
+    "details": "Your saved context stays intact. The improvement depends on the workspace; photos and other already-compressed files may not become smaller.",
+    "relevanceTags": ["messaging", "performance"],
+    "sourcePullRequests": [4253]
+  }
+}
