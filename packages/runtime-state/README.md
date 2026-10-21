@@ -90,6 +90,25 @@ loopback UDP datagram per subprocess. The CLI exit owner observes the existing
 exit code before calling `process.exit`; it does not await telemetry. Bundled
 and source entrypoints continue to share the existing timing owner.
 
+The six synchronous `query-metric-*` spans optionally include `cpu` with
+`count`, `sumUs` and `maxUs`: process CPU microseconds for measured observations.
+CPU coverage is separate from wall-span count; missing CPU is not zero. CPU can
+exceed wall time because it includes other threads in the CLI process, and
+nested inclusive spans are not additive. Only these fixed synchronous phases
+sample CPU; asynchronous database/provider spans do not. Sampling is inactive
+outside the existing collection and failures preserve wall timing and command
+behavior. No data contents, arguments, identifiers or workload values are logged.
+
+Older readers discard this optional field while preserving the existing timing
+object; newer readers accept old reports. Deploy the Web reader before the
+runner producer for measurement coverage, then verify bounded aggregates for
+CPU coverage, CPU/wall ratios and error outcomes over 24 and 72 hours of normal
+traffic. For CPU/wall ratios, require `cpu.count === count` within each phase
+aggregate; partial coverage cannot identify its matching wall sum. Maxima may come from
+different calls. Existing 8 KiB/report, command/span and receiver report limits
+remain unchanged, and transport truncation remains explicit. This instrumentation
+addresses the missing attribution in issue #3997; no production speedup is implied.
+
 The sender uses a fixed synchronous `127.0.0.1` lookup for both bind and send,
 and an exclusive ephemeral bind. Node's default numeric-address lookup still
 schedules asynchronous work; a following `process.exit` can otherwise discard
