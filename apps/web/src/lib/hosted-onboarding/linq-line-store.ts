@@ -166,14 +166,9 @@ async function upsertHostedLinqLineForPhoneInTransaction(input: {
     throw new TypeError("Hosted Linq line upsert requires a valid phone number.");
   }
 
-  await acquireHostedLinqLinePhoneLockTx({
-    phoneNumber: normalizedPhoneNumber,
-    prisma: input.prisma,
-  });
-
   const providerStatus = normalizeNullableString(input.providerStatus);
   const phoneNumberEncrypted = encryptHostedLinqLinePhoneNumber(normalizedPhoneNumber);
-  const existingLines = await input.prisma.hostedLinqLine.findMany({
+  const existingLineQuery = {
     where: {
       phoneNumberLookupKey: {
         in: lookupKeyReadCandidates,
@@ -182,7 +177,18 @@ async function upsertHostedLinqLineForPhoneInTransaction(input: {
     select: {
       phoneNumberLookupKey: true,
     },
-  });
+  } satisfies Prisma.HostedLinqLineFindManyArgs;
+  let existingLines = await input.prisma.hostedLinqLine.findMany(existingLineQuery);
+  if (existingLines.length === 0) {
+    // Only creation needs the phone lock. Existing rows may already be locked
+    // by proactive capacity, so taking it there would invert the lock order.
+    await acquireHostedLinqLinePhoneLockTx({
+      phoneNumber: normalizedPhoneNumber,
+      prisma: input.prisma,
+    });
+    // A concurrent creator may have used a readable legacy key while we waited.
+    existingLines = await input.prisma.hostedLinqLine.findMany(existingLineQuery);
+  }
   const targetLookupKey =
     chooseHostedLinqLineWriteLookupKey(existingLines, lookupKeyReadCandidates, lookupKey)
     ?? lookupKey;
