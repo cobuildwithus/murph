@@ -17,49 +17,33 @@ categories:
   - "measurement-method"
   - "image-analysis"
 relations:
+  - type: measures
+    target: biomarker:periocular-wrinkle-score
+  - type: measures
+    target: biomarker:skin-texture-roughness-score
+  - type: safety_outcome
+    target: biomarker:skin-tolerability-symptoms
+  - type: cites
+    target: source_artifact:pmid-40167796
+  - type: cites
+    target: source_artifact:pmid-36780572
+  - type: cites
+    target: source_artifact:pmid-16414908
+  - type: cites
+    target: source_artifact:pmid-17566756
+  - type: cites
+    target: source_artifact:doi-10.3390-cosmetics12010004
+  - type: cites
+    target: source_artifact:pmid-41091280
+  - type: cites
+    target: source_artifact:pmid-39133416
+  - type: cites
+    target: source_artifact:pmid-37522497
+  - type: cites
+    target: source_artifact:pmid-32649063
+  - type: cites
+    target: source_artifact:pmid-24286286
 
-  -
-    type: "related_protocol"
-    target: "protocol_variant:skin-photobiomodulation/red-near-infrared-skin-texture-photoaging"
-  -
-    type: "measures"
-    target: "biomarker:periocular-wrinkle-score"
-  -
-    type: "measures"
-    target: "biomarker:skin-texture-roughness-score"
-  -
-    type: "safety_outcome"
-    target: "biomarker:skin-tolerability-symptoms"
-  -
-    type: "cites"
-    target: "source_artifact:pmid-40167796"
-  -
-    type: "cites"
-    target: "source_artifact:pmid-36780572"
-  -
-    type: "cites"
-    target: "source_artifact:pmid-16414908"
-  -
-    type: "cites"
-    target: "source_artifact:pmid-17566756"
-  -
-    type: "cites"
-    target: "source_artifact:doi-10.3390-cosmetics12010004"
-  -
-    type: "cites"
-    target: "source_artifact:pmid-41091280"
-  -
-    type: "cites"
-    target: "source_artifact:pmid-39133416"
-  -
-    type: "cites"
-    target: "source_artifact:pmid-37522497"
-  -
-    type: "cites"
-    target: "source_artifact:pmid-32649063"
-  -
-    type: "cites"
-    target: "source_artifact:pmid-24286286"
 measurementMethod:
   shortName: "Home Photo ROI Analysis"
   displayName: "Home Standardized Photo ROI Analysis"

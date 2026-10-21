@@ -9,10 +9,6 @@ export type {
   JournalView,
   JournalWeekSummary,
 } from "./journal-view.ts";
-export {
-  selectBrowserVaultExperimentSummary,
-  selectBrowserVaultTrackedExperiments,
-} from "./browser-replica/tracked-experiments.ts";
 export { buildOverviewWeeklyStatsFromDailySampleSummaries } from "./overview-weekly-stats.ts";
 export { resolveAdherenceObservationActivityKind } from "./experiment-adherence.ts";
 export {
@@ -21,11 +17,6 @@ export {
 } from "./overview-status.ts";
 export type {
   BrowserVaultCoreCapableQueryClient,
-  BrowserVaultExperimentRunCard,
-  BrowserVaultExperimentRunCardDailyCadence,
-  BrowserVaultExperimentRunCardLookup,
-  BrowserVaultExperimentRunCardMetric,
-  BrowserVaultExperimentRunCardSummary,
   BrowserVaultQueryClient,
   BrowserVaultTimelineRow,
 } from "./browser-replica/shared.ts";

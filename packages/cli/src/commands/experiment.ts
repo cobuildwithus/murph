@@ -1,4 +1,3 @@
-import { AsyncLocalStorage } from 'node:async_hooks'
 import {
   EVENT_SOURCES,
   EXPERIMENT_OUTCOME_STATISTICS,
@@ -7,8 +6,6 @@ import {
   HEALTH_COMMONS_EXPERIMENT_ONBOARDING_CAUTION_LEVELS,
   HEALTH_COMMONS_EXPERIMENT_ONBOARDING_MISSED_LOG_POLICIES,
   HEALTH_COMMONS_EXPERIMENT_ONBOARDING_POSITIVE_DISPOSITIONS,
-  commonsProtocolRefSchema,
-  effectiveProtocolSnapshotSchema,
   experimentAnalysisPlanSchema,
   experimentAssistantSupportSchema,
   experimentFrontmatterSchema,
@@ -23,10 +20,7 @@ import {
   type ExperimentOutcomeStatistic,
   type ExperimentPrimaryOutcome,
   type ExperimentRunScheduleIntent,
-  type HealthCommonsExpectedSignalDescription,
-  type HealthCommonsTestPlan,
 } from '@murphai/contracts'
-import type { HealthCommonsProtocolRunSpec } from '@murphai/health-commons/runtime'
 import {
   assessExperimentPrimaryMetricCapture,
   resolveExperimentSessionMetricSpec,
@@ -98,32 +92,6 @@ const experimentFollowupReasonSchema = z.enum([
   'weekly_digest_not_due',
   'weekly_digest_due',
 ])
-const experimentCommandArgvStorage = new AsyncLocalStorage<readonly string[]>()
-const experimentCommandArgvInstalled = new WeakSet<Cli.Cli>()
-
-function installExperimentCommandArgvContext(cli: Cli.Cli): void {
-  if (experimentCommandArgvInstalled.has(cli)) {
-    return
-  }
-
-  const serve = cli.serve.bind(cli)
-  cli.serve = async (argv = process.argv.slice(2), options = {}) =>
-    experimentCommandArgvStorage.run([...argv], () => serve(argv, options))
-  experimentCommandArgvInstalled.add(cli)
-}
-
-function currentCommandIncludesFlag(flag: string): boolean {
-  return experimentCommandArgvStorage.getStore()?.includes(flag) === true
-}
-
-type ProtocolVariantEntity = HealthCommonsProtocolRunSpec
-const sha256RevisionOptionSchema = z
-  .string()
-  .regex(
-    /^sha256:[a-f0-9]{64}$/u,
-    'Expected sha256: followed by 64 lowercase hexadecimal characters.',
-  )
-  .describe('Content revision id in sha256:<64 lowercase hex> form.')
 const experimentLookupArgSchema = z.object({
   id: z.string().min(1).describe('Experiment id or slug to resolve.'),
 })
@@ -157,7 +125,7 @@ const repeatableTextOptionSchema = (description: string) =>
 const experimentOnboardingOptionSchemas = {
   onboardingCompletedAt: isoTimestampSchema
     .optional()
-    .describe('Timestamp when the protocol onboarding capture completed.'),
+    .describe('Timestamp when the experiment onboarding capture completed.'),
   setupAnswer: repeatableTextOptionSchema(
     'Setup answer as key=value. Repeat --setup-answer for multiple setup slots.',
   ),
@@ -309,93 +277,6 @@ function shiftLocalDate(date: string, days: number): string {
   return shifted.toISOString().slice(0, 10)
 }
 
-function normalizeProtocolVariantKey(value: string, optionName = 'protocol-key'): string {
-  const trimmed = value.trim()
-  if (!trimmed.startsWith('protocol_variant:')) {
-    throw new VaultCliError(
-      'invalid_option',
-      `--${optionName} must be a full protocol_variant:<family>/<variant> key.`,
-    )
-  }
-
-  return trimmed
-}
-
-async function resolveProtocolVariantEntity(
-  lookup: string,
-  optionName = 'from-protocol',
-): Promise<ProtocolVariantEntity> {
-  const trimmed = lookup.trim()
-  const { getGeneratedHealthCommonsProtocolRunSpecReader } = await import(
-    '@murphai/health-commons/runtime'
-  )
-  const reader = getGeneratedHealthCommonsProtocolRunSpecReader()
-  const entity = reader.findByLookup(
-    trimmed.startsWith('protocol_variant:')
-      ? normalizeProtocolVariantKey(trimmed, optionName)
-      : trimmed,
-  )
-
-  if (!entity) {
-    throw new VaultCliError(
-      'not_found',
-      `No Health Commons protocol variant matched --${optionName} "${lookup}".`,
-    )
-  }
-
-  return entity
-}
-
-function resolveProtocolTestPlan(input: {
-  entity: ProtocolVariantEntity
-  testPlanId?: string
-}): HealthCommonsTestPlan | undefined {
-  const planId =
-    input.testPlanId ??
-    input.entity.experimentOnboarding?.planDefaults?.testPlanId ??
-    (input.entity.testPlans.length === 1 ? input.entity.testPlans[0]?.planId : undefined)
-
-  if (planId === undefined) {
-    return undefined
-  }
-
-  const testPlan = input.entity.testPlans.find((candidate) => candidate.planId === planId)
-  if (!testPlan) {
-    throw new VaultCliError(
-      'invalid_option',
-      `--test-plan-id ${planId} does not exist on ${input.entity.key}.`,
-    )
-  }
-
-  return testPlan
-}
-
-function mapExpectedSignalDirection(
-  direction: string | undefined,
-): z.infer<typeof experimentSignalDirectionSchema> | undefined {
-  switch (direction) {
-    case 'up':
-    case 'up_or_stable':
-      return 'increase'
-    case 'down':
-    case 'down_or_stable':
-      return 'decrease'
-    case 'stable':
-      return 'stabilize'
-    default:
-      return undefined
-  }
-}
-
-function findExpectedSignal(
-  entity: ProtocolVariantEntity,
-  biomarkerKey: string,
-): HealthCommonsExpectedSignalDescription | undefined {
-  return entity.expectedSignalDescriptions?.find(
-    (signal) => signal.biomarkerKey === biomarkerKey,
-  )
-}
-
 function normalizeExpectedDirectionEntries(
   values: readonly string[] | undefined,
 ) {
@@ -478,58 +359,6 @@ function truncateBoundedText(
   }
 
   return value.slice(0, maxLength - 3).trimEnd() + '...'
-}
-
-export function buildEffectiveSnapshotFromCommonsProtocol(
-  entity: ProtocolVariantEntity,
-) {
-  if (!entity.protocol) {
-    throw new VaultCliError(
-      'invalid_payload',
-      `${entity.key} does not expose a runnable protocol spec.`,
-    )
-  }
-
-  const effectiveSpecHash = entity.revision.runSpecRevisionId
-  if (!effectiveSpecHash) {
-    throw new VaultCliError(
-      'invalid_payload',
-      `${entity.key} is missing runSpecRevisionId and cannot be started as an experiment.`,
-    )
-  }
-
-  return effectiveProtocolSnapshotSchema.parse(
-    compactRecord({
-      effectiveSpecHash,
-      doseSignature: truncateBoundedText(entity.protocol.doseSignature, 240),
-      modality: truncateBoundedText(entity.protocol.target, 160),
-      activitySessionEvidence: entity.protocol.activitySessionEvidence,
-      frequency: entity.protocol.frequency,
-      durationMinutes: entity.protocol.durationMinutes,
-      temperatureC: entity.protocol.temperatureC,
-      targetSessions: entity.protocol.interventionSessionsTarget,
-      minimumUsefulSessions: entity.protocol.interventionSessionsMinimum,
-      stopConditions: entity.protocol.stopConditions,
-    }),
-  )
-}
-
-function assertProtocolRevisionExpectation(input: {
-  actual: string | null | undefined
-  expected: string | undefined
-  optionName: 'page-revision-id' | 'run-spec-revision-id'
-  protocolKey: string
-}) {
-  if (input.expected === undefined) {
-    return
-  }
-
-  if (input.expected !== input.actual) {
-    throw new VaultCliError(
-      'invalid_option',
-      `--${input.optionName} revision expectation ${input.expected} does not match current ${input.protocolKey} revision ${input.actual ?? 'none'}. Refresh the protocol and retry.`,
-    )
-  }
 }
 
 function assertPrimaryOutcomeIsCapturable(input: {
@@ -770,12 +599,6 @@ type ExperimentPlanOptions = {
   startedOn?: string
   status?: z.infer<typeof experimentStatusSchema>
   body?: string
-  fromProtocol?: string
-  custom?: boolean
-  publicProtocol?: boolean
-  testPlanId?: string
-  pageRevisionId?: string
-  runSpecRevisionId?: string
   baselineStart?: string
   baselineEnd?: string
   baselineDays?: number
@@ -824,97 +647,8 @@ type ExperimentPlanOptions = {
   weeklyDigestEnabled?: boolean
 }
 
-async function resolveExperimentPlanSource(options: ExperimentPlanOptions) {
-  const fromProtocol = options.fromProtocol?.trim()
-  const custom = options.custom === true
-
-  if (fromProtocol !== undefined && custom) {
-    throw new VaultCliError(
-      'invalid_option',
-      'experiment start accepts either --from-protocol or --custom, not both.',
-    )
-  }
-
-  const noPublicProtocolFallback = options.publicProtocol === false
-  const explicitNoPublicProtocolFallback = currentCommandIncludesFlag('--no-public-protocol')
-  const explicitCustomFallback =
-    custom &&
-    noPublicProtocolFallback &&
-    currentCommandIncludesFlag('--custom') &&
-    explicitNoPublicProtocolFallback
-
-  if (explicitNoPublicProtocolFallback && !custom) {
-    throw new VaultCliError(
-      'invalid_option',
-      '--no-public-protocol is only valid with --custom.',
-    )
-  }
-
-  if (fromProtocol === undefined && !custom) {
-    throw new VaultCliError(
-      'invalid_option',
-      'experiment start must choose a source: use --from-protocol <key-or-route> for a Health Commons protocol-backed run. Only use --custom --no-public-protocol after Health Commons has no matching public protocol.',
-    )
-  }
-
-  if (custom && !explicitCustomFallback) {
-    throw new VaultCliError(
-      'invalid_option',
-      'custom experiment starts are disabled by default. Use --from-protocol <key-or-route> for protocol-backed runs, or include --custom --no-public-protocol in this command only after `vault-cli commons protocol explore <query> --format json` has no relevant public protocol. Config defaults do not count for this fallback.',
-    )
-  }
-
-  if (
-    custom &&
-    (options.testPlanId !== undefined ||
-      options.pageRevisionId !== undefined ||
-      options.runSpecRevisionId !== undefined)
-  ) {
-    throw new VaultCliError(
-      'invalid_option',
-      '--test-plan-id, --page-revision-id, and --run-spec-revision-id are only valid with --from-protocol.',
-    )
-  }
-
-  const protocol =
-    fromProtocol === undefined
-      ? undefined
-      : await resolveProtocolVariantEntity(fromProtocol, 'from-protocol')
-  if (protocol) {
-    assertProtocolRevisionExpectation({
-      actual: protocol.revision.pageRevisionId,
-      expected: options.pageRevisionId,
-      optionName: 'page-revision-id',
-      protocolKey: protocol.key,
-    })
-    assertProtocolRevisionExpectation({
-      actual: protocol.revision.runSpecRevisionId,
-      expected: options.runSpecRevisionId,
-      optionName: 'run-spec-revision-id',
-      protocolKey: protocol.key,
-    })
-  }
-  const testPlan = protocol
-    ? resolveProtocolTestPlan({
-        entity: protocol,
-        testPlanId: options.testPlanId,
-      })
-    : undefined
-
-  return { protocol, testPlan }
-}
-
-function resolveExperimentAnalysisDefaults(
-  options: ExperimentPlanOptions,
-  protocol: ProtocolVariantEntity | undefined,
-  testPlan: HealthCommonsTestPlan | undefined,
-) {
-  const measurementPlan =
-    protocol?.experimentOnboarding?.adaptationPolicy?.measurementPlan
-  const primaryBiomarkerKey =
-    options.primaryBiomarkerKey ??
-    measurementPlan?.requiredSignals?.[0] ??
-    testPlan?.primaryBiomarkerKey
+function resolveExperimentAnalysisDefaults(options: ExperimentPlanOptions) {
+  const primaryBiomarkerKey = options.primaryBiomarkerKey
   if (
     options.primaryOutcomeKey !== undefined &&
     options.primaryBiomarkerKey !== undefined
@@ -930,55 +664,27 @@ function resolveExperimentAnalysisDefaults(
   })
   const effectivePrimaryOutcomeKey = primaryOutcome?.key ?? primaryBiomarkerKey
   const secondaryBiomarkerKeys = uniqueNonEmptyStrings(
-    options.secondaryBiomarkerKey ?? [
-      ...(measurementPlan?.optionalSignals ?? []),
-      ...(testPlan?.secondaryBiomarkerKeys ?? []),
-    ],
+    options.secondaryBiomarkerKey ?? [],
   ).filter((key) => key !== effectivePrimaryOutcomeKey)
-  const derivedExpectedDirections =
-    effectivePrimaryOutcomeKey === undefined || protocol === undefined
-      ? undefined
-      : uniqueNonEmptyStrings([effectivePrimaryOutcomeKey, ...secondaryBiomarkerKeys]).flatMap(
-          (biomarkerKey) => {
-            const direction = mapExpectedSignalDirection(
-              findExpectedSignal(protocol, biomarkerKey)?.expectedDirection,
-            )
-            return direction === undefined ? [] : [{ biomarkerKey, direction }]
-          },
-        )
-  const expectedDirections =
-    normalizeExpectedDirectionEntries(options.expectedDirection) ??
-    (derivedExpectedDirections && derivedExpectedDirections.length > 0
-      ? derivedExpectedDirections
-      : undefined)
-  const desiredDirection =
-    options.desiredDirection ??
-    derivedExpectedDirections?.find(
-      (signal) => signal.biomarkerKey === effectivePrimaryOutcomeKey,
-    )?.direction
 
   return {
     primaryBiomarkerKey: primaryOutcome ? undefined : primaryBiomarkerKey,
     primaryOutcome,
     secondaryBiomarkerKeys:
       secondaryBiomarkerKeys.length > 0 ? secondaryBiomarkerKeys : undefined,
-    desiredDirection,
-    expectedDirections,
+    desiredDirection: options.desiredDirection,
+    expectedDirections: normalizeExpectedDirectionEntries(options.expectedDirection),
   }
 }
 
-async function buildExperimentPlanPayloadFromTypedOptions(input: {
+function buildExperimentPlanPayloadFromTypedOptions(input: {
   slug: string
   options: ExperimentPlanOptions
 }) {
   const { options } = input
-  const { protocol, testPlan } = await resolveExperimentPlanSource(options)
-  const onboarding = protocol?.experimentOnboarding
   const windows = resolveStartWindows({
     ...options,
-    baselineDays: options.baselineDays ?? testPlan?.baselineDays,
     clearBaselineWindow: options.baselineDays === 0,
-    interventionDays: options.interventionDays ?? testPlan?.interventionDays,
   })
 
   if (!windows.interventionStart) {
@@ -988,20 +694,11 @@ async function buildExperimentPlanPayloadFromTypedOptions(input: {
     )
   }
 
-  const effectiveProtocolSnapshot = protocol
-    ? buildEffectiveSnapshotFromCommonsProtocol(protocol)
-    : undefined
-
-  const protocolSpec = protocol?.protocol
   // Resolve outcome and direction errors before schedule/onboarding validation.
   // The analysis schema and measurement flags still run after run-plan validation.
-  const analysisDefaults = resolveExperimentAnalysisDefaults(options, protocol, testPlan)
+  const analysisDefaults = resolveExperimentAnalysisDefaults(options)
   const schedule = buildRunScheduleFromOptions(options)
-  const sessionFields =
-    options.sessionField ??
-    protocolSpec?.sessionFieldIds
-  const confounderFields =
-    options.confounderField ?? onboarding?.trackingHints?.confounderFields
+  const sessionFields = options.sessionField
   const onboardingCapture = buildExperimentOnboardingCaptureFromOptions(options)
   const assistantSupport =
     buildExperimentAssistantSupportFromOptions(options) ??
@@ -1013,28 +710,20 @@ async function buildExperimentPlanPayloadFromTypedOptions(input: {
       baselineEnd: windows.baselineEnd,
       interventionStart: windows.interventionStart,
       interventionEnd: windows.interventionEnd,
-      modality: truncateBoundedText(options.modality ?? protocolSpec?.target, 160),
+      modality: truncateBoundedText(options.modality, 160),
       schedule,
-      dose: truncateBoundedText(options.dose ?? protocolSpec?.doseSignature, 160),
-      sessionsPerWeek:
-        options.sessionsPerWeek ??
-        protocolSpec?.frequency?.sessionsPerWeek,
-      targetSessions:
-        options.targetSessions ??
-        testPlan?.targetAdherenceSessions ??
-        protocolSpec?.interventionSessionsTarget,
-      minimumUsefulSessions:
-        options.minimumUsefulSessions ??
-        testPlan?.minimumAdherenceSessions ??
-        protocolSpec?.interventionSessionsMinimum,
+      dose: truncateBoundedText(options.dose, 160),
+      sessionsPerWeek: options.sessionsPerWeek,
+      targetSessions: options.targetSessions,
+      minimumUsefulSessions: options.minimumUsefulSessions,
       logging:
         sessionFields === undefined
           ? undefined
           : compactRecord({
               sessionFields,
-              confounderFields,
+              confounderFields: options.confounderField,
             }),
-      stopConditions: options.stopCondition ?? protocolSpec?.stopConditions,
+      stopConditions: options.stopCondition,
     }),
   )
   const analysisPlan = experimentAnalysisPlanSchema.parse(
@@ -1055,14 +744,9 @@ async function buildExperimentPlanPayloadFromTypedOptions(input: {
   const resolvedPrimaryOutcomeKey =
     analysisPlan.primaryOutcome?.key ?? analysisPlan.primaryBiomarkerKey
   if (!resolvedPrimaryOutcomeKey) {
-    const missingPrimaryOutcomeMessage =
-      protocol === undefined
-        ? 'Custom experiment starts require --primary-outcome-key biomarker:<outcome-slug> because there is no protocol/test-plan default primary outcome.'
-        : 'experiment start requires --primary-outcome-key or a protocol/test-plan default primary outcome.'
-
     throw new VaultCliError(
       'invalid_option',
-      missingPrimaryOutcomeMessage,
+      'experiment start requires --primary-outcome-key biomarker:<outcome-slug>.',
     )
   }
 
@@ -1075,175 +759,21 @@ async function buildExperimentPlanPayloadFromTypedOptions(input: {
   return jsonObjectSchema.parse(
     compactRecord({
       schemaVersion: 'murph.experiment-plan.v1',
-      source: {
-        kind: protocol === undefined ? 'custom' : 'health_commons_protocol',
-      },
+      source: { kind: 'custom' },
       experiment: compactRecord({
         slug: input.slug,
-        title: options.title ?? protocol?.title ?? input.slug,
+        title: options.title ?? input.slug,
         hypothesis: options.hypothesis,
         startedOn: options.startedOn ?? windows.interventionStart,
         status: options.status ?? 'active',
         body: options.body,
       }),
-      commonsProtocolRef:
-        protocol === undefined
-          ? undefined
-          : compactRecord({
-              key: protocol.key,
-              pageRevisionId: protocol.revision.pageRevisionId,
-              runSpecRevisionId: protocol.revision.runSpecRevisionId,
-              testPlanId: testPlan?.planId,
-            }),
-      effectiveProtocolSnapshot,
       runPlan,
       analysisPlan,
       onboarding: onboardingCapture,
       assistantSupport,
     }),
   )
-}
-
-async function hydrateExperimentProtocolDefaults(input: {
-  services: VaultServices
-  vault: string
-  requestId: string | null
-  lookup: string
-  options: {
-    status?: z.infer<typeof experimentStatusSchema>
-    protocolKey?: string
-    testPlanId?: string
-    interventionStart?: string
-    interventionEnd?: string
-    interventionDays?: number
-    baselineStart?: string
-    baselineEnd?: string
-    baselineDays?: number
-    onboardingCompletedAt?: string
-    setupAnswer?: readonly string[]
-    safetyCautionLevel?: z.infer<typeof experimentSafetyCautionLevelSchema>
-    safetyDisposition?: z.infer<typeof experimentSafetyDispositionSchema>
-    positiveQuestionId?: readonly string[]
-    safetyNote?: readonly string[]
-    contextNote?: readonly string[]
-    skipAnalysisPlanDefaults?: boolean
-  }
-}) {
-  const shown = await input.services.query.showExperiment({
-    vault: input.vault,
-    requestId: input.requestId,
-    lookup: input.lookup,
-  })
-  const { experimentSlug, relatedIds, ...frontmatterData } = shown.entity.data
-  void experimentSlug
-  void relatedIds
-  const current = experimentFrontmatterSchema.parse(frontmatterData)
-  const protocolKey = input.options.protocolKey ?? current.commonsProtocolRef?.key
-  const clearBaselineWindow = input.options.baselineDays === 0
-
-  if (protocolKey === undefined) {
-    throw new VaultCliError(
-      'invalid_option',
-      '--hydrate-protocol-defaults requires --protocol-key when the experiment has no commonsProtocolRef.',
-    )
-  }
-
-  const payload = await buildExperimentPlanPayloadFromTypedOptions({
-    slug: current.slug,
-    options: {
-      fromProtocol: protocolKey,
-      testPlanId: input.options.testPlanId ?? current.commonsProtocolRef?.testPlanId,
-      baselineStart: input.options.baselineStart ?? current.runPlan?.baselineStart,
-      baselineEnd: input.options.baselineEnd ?? current.runPlan?.baselineEnd,
-      baselineDays: input.options.baselineDays,
-      interventionStart:
-        input.options.interventionStart ?? current.runPlan?.interventionStart,
-      interventionEnd: input.options.interventionEnd ?? current.runPlan?.interventionEnd,
-      interventionDays: input.options.interventionDays,
-    },
-  })
-
-  const defaultRunPlan = experimentRunPlanSchema.parse(payload.runPlan)
-  const currentRunPlan = clearBaselineWindow
-    ? omitRunBaselineWindow(current.runPlan)
-    : current.runPlan
-  const defaultAnalysisPlan =
-    input.options.skipAnalysisPlanDefaults === true
-      ? undefined
-      : experimentAnalysisPlanSchema.parse(payload.analysisPlan)
-  const defaultAssistantSupport = experimentAssistantSupportSchema.parse(
-    payload.assistantSupport,
-  )
-  const onboardingCapture = buildExperimentOnboardingCaptureFromOptions(
-    {
-      onboardingCompletedAt: input.options.onboardingCompletedAt,
-      setupAnswer: input.options.setupAnswer,
-      safetyCautionLevel: input.options.safetyCautionLevel,
-      safetyDisposition: input.options.safetyDisposition,
-      positiveQuestionId: input.options.positiveQuestionId,
-      safetyNote: input.options.safetyNote,
-      contextNote: input.options.contextNote,
-    },
-    current.onboarding,
-  )
-  const defaultRunLogging =
-    defaultRunPlan.logging === undefined && current.runPlan?.logging === undefined
-      ? undefined
-      : {
-          ...(defaultRunPlan.logging ?? {}),
-          ...(current.runPlan?.logging ?? {}),
-        }
-  const defaultRunBaseline =
-    defaultRunPlan.baseline === undefined && current.runPlan?.baseline === undefined
-      ? undefined
-      : {
-          ...(defaultRunPlan.baseline ?? {}),
-          ...(current.runPlan?.baseline ?? {}),
-        }
-
-  return input.services.core.updateExperiment({
-    vault: input.vault,
-    requestId: input.requestId,
-    lookup: input.lookup,
-    status: input.options.status,
-    commonsProtocolRef:
-      current.commonsProtocolRef ??
-      commonsProtocolRefSchema.parse(payload.commonsProtocolRef),
-    effectiveProtocolSnapshot:
-      current.effectiveProtocolSnapshot ??
-      effectiveProtocolSnapshotSchema.parse(payload.effectiveProtocolSnapshot),
-    runPlan: experimentRunPlanSchema.parse({
-      ...defaultRunPlan,
-      ...(currentRunPlan ?? {}),
-      logging: defaultRunLogging,
-      baseline: defaultRunBaseline,
-    }),
-    analysisPlan:
-      defaultAnalysisPlan === undefined
-        ? current.analysisPlan
-        : experimentAnalysisPlanSchema.parse({
-            ...defaultAnalysisPlan,
-            ...(current.analysisPlan ?? {}),
-          }),
-    assistantSupport: experimentAssistantSupportSchema.parse({
-      ...defaultAssistantSupport,
-      ...(current.assistantSupport ?? {}),
-    }),
-    onboarding: onboardingCapture,
-  })
-}
-
-function omitRunBaselineWindow(
-  runPlan: z.infer<typeof experimentRunPlanSchema> | undefined,
-) {
-  if (runPlan === undefined) {
-    return undefined
-  }
-
-  const { baselineStart, baselineEnd, ...withoutRunBaselineWindow } = runPlan
-  void baselineStart
-  void baselineEnd
-  return withoutRunBaselineWindow
 }
 
 type ExperimentSessionConfounderValue = string | number | boolean | null
@@ -1612,15 +1142,13 @@ export function registerExperimentCommands(
   cli: Cli.Cli,
   services: VaultServices,
 ) {
-  installExperimentCommandArgvContext(cli)
-
   const experiment = Cli.create('experiment', {
     description: 'Experiment bank commands routed through the core write and query APIs.',
   })
 
   experiment.command('start', {
     description:
-      'Start a typed experiment run from a Health Commons protocol; custom runs require explicit no-public-protocol fallback.',
+      'Start a private typed experiment run with an explicit outcome, schedule, and analysis plan.',
     args: z.object({
       slug: slugSchema,
     }),
@@ -1630,38 +1158,6 @@ export function registerExperimentCommands(
       startedOn: localDateSchema.optional().describe('Optional experiment start date.'),
       status: experimentStatusSchema.optional().describe('Optional experiment status.'),
       body: z.string().min(1).optional().describe('Optional markdown body.'),
-      fromProtocol: z
-        .string()
-        .min(1)
-        .optional()
-        .describe(
-          'Health Commons protocol_variant key or experiment route id. This is the default experiment-start path whenever a public protocol exists.',
-        ),
-      custom: z
-        .boolean()
-        .optional()
-        .describe(
-          'Fallback for an intentionally unlinked custom experiment. Requires --no-public-protocol and should only follow a Health Commons protocol search/explore with no relevant match.',
-        ),
-      publicProtocol: z
-        .boolean()
-        .optional()
-        .describe(
-          'Protocol-first guard for experiment starts. Pass --no-public-protocol with --custom in the current command only after confirming no relevant public Health Commons protocol is available; config defaults do not count.',
-        ),
-      testPlanId: z
-        .string()
-        .min(1)
-        .optional()
-        .describe(
-          'Chosen Health Commons test plan id for this run. Only valid with --from-protocol.',
-        ),
-      pageRevisionId: sha256RevisionOptionSchema
-        .optional()
-        .describe('Expected current protocol page revision. Fails on mismatch; only valid with --from-protocol.'),
-      runSpecRevisionId: sha256RevisionOptionSchema
-        .optional()
-        .describe('Expected current protocol run-spec revision. Fails on mismatch; only valid with --from-protocol.'),
       baselineStart: localDateSchema.optional().describe('Baseline window start date.'),
       baselineEnd: localDateSchema.optional().describe('Baseline window end date.'),
       baselineDays: z
@@ -1738,7 +1234,7 @@ export function registerExperimentCommands(
         .min(1)
         .optional()
         .describe(
-          'Stable first-class primary outcome identity. Required for new custom runs; use biomarker:<outcome-slug>.',
+          'Stable first-class primary outcome identity. Required for new runs; use biomarker:<outcome-slug>.',
         ),
       primaryOutcomeKind: experimentPrimaryOutcomeKindSchema
         .optional()
@@ -1800,7 +1296,7 @@ export function registerExperimentCommands(
     }),
     output: experimentStartResultSchema,
     async run({ args, options }) {
-      const payload = await buildExperimentPlanPayloadFromTypedOptions({
+      const payload = buildExperimentPlanPayloadFromTypedOptions({
         slug: args.slug,
         options: {
           ...options,
@@ -1912,22 +1408,6 @@ export function registerExperimentCommands(
         .array(slugSchema)
         .optional()
         .describe('Optional tags to store on the experiment. Repeat --tag for multiple values.'),
-      protocolKey: z
-        .string()
-        .min(1)
-        .optional()
-        .describe('Health Commons protocol variant key to store under commonsProtocolRef.key.'),
-      pageRevisionId: sha256RevisionOptionSchema
-        .optional()
-        .describe('Protocol page content revision id in sha256:<64 lowercase hex> form.'),
-      runSpecRevisionId: sha256RevisionOptionSchema
-        .optional()
-        .describe('Protocol run spec revision id in sha256:<64 lowercase hex> form.'),
-      testPlanId: z
-        .string()
-        .min(1)
-        .optional()
-        .describe('Chosen Health Commons test plan id for this run.'),
       baselineStart: localDateSchema
         .optional()
         .describe('Canonical baseline window start date.'),
@@ -2063,16 +1543,9 @@ export function registerExperimentCommands(
       ),
       ...experimentOnboardingOptionSchemas,
       ...experimentAssistantSupportOptionSchemas,
-      hydrateProtocolDefaults: z
-        .boolean()
-        .optional()
-        .describe(
-          'Fill missing structured setup fields from the selected Health Commons protocol without replacing existing values.',
-        ),
     }),
     output: experimentUpdateResultSchema,
     async run({ args, options }) {
-      const hasStructuredHydration = options.hydrateProtocolDefaults === true
       const hasAnalysisFields =
         options.primaryBiomarkerKey !== undefined ||
         options.primaryOutcomeKey !== undefined ||
@@ -2088,11 +1561,7 @@ export function registerExperimentCommands(
         options.analysisAnchor !== undefined ||
         options.plannedMeasurement !== undefined ||
         options.analysisNote !== undefined
-      const hasTypedSetupFields =
-        options.protocolKey !== undefined ||
-        options.pageRevisionId !== undefined ||
-        options.runSpecRevisionId !== undefined ||
-        options.testPlanId !== undefined ||
+      const hasStructuredFields =
         options.baselineStart !== undefined ||
         options.baselineEnd !== undefined ||
         options.baselineDays !== undefined ||
@@ -2123,7 +1592,6 @@ export function registerExperimentCommands(
         options.notificationStyle !== undefined ||
         options.missedLogFollowup !== undefined ||
         options.weeklyDigestEnabled !== undefined
-      const hasStructuredFields = hasStructuredHydration || hasTypedSetupFields
       const hasScalarWriteFields =
         options.title !== undefined ||
         options.hypothesis !== undefined ||
@@ -2154,59 +1622,11 @@ export function registerExperimentCommands(
         return updateScalarFields()
       }
 
-      const hydrationResult = hasStructuredHydration
-        ? await hydrateExperimentProtocolDefaults({
-            services,
-            vault: String(options.vault ?? ''),
-            requestId: requestIdFromOptions(options),
-            lookup: args.id,
-            options: {
-              status: options.status,
-              protocolKey: options.protocolKey,
-              testPlanId: options.testPlanId,
-              baselineStart: options.baselineStart,
-              baselineEnd: options.baselineEnd,
-              baselineDays: options.baselineDays,
-              interventionStart: options.interventionStart,
-              interventionEnd: options.interventionEnd,
-              interventionDays: options.interventionDays,
-              onboardingCompletedAt: options.onboardingCompletedAt,
-              setupAnswer: normalizeSetupAnswerOptions(options.setupAnswer),
-              safetyCautionLevel: options.safetyCautionLevel,
-              safetyDisposition: options.safetyDisposition,
-              positiveQuestionId: normalizeRepeatableFlagOption(
-                options.positiveQuestionId,
-                'positive-question-id',
-              ),
-              safetyNote: normalizeRepeatableTextFlagOption(options.safetyNote),
-              contextNote: normalizeRepeatableTextFlagOption(options.contextNote),
-              skipAnalysisPlanDefaults: hasAnalysisFields,
-            },
-          })
-        : undefined
-
-      if (!hasTypedSetupFields && options.status === undefined) {
-        if (hydrationResult === undefined) {
-          throw new VaultCliError(
-            'invalid_option',
-            'experiment edit requires at least one typed field to change.',
-          )
-        }
-        if (!hasScalarWriteFields) {
-          return hydrationResult
-        }
-        return updateScalarFields()
-      }
-
       const structuredResult = await services.core.applyExperimentOnboarding({
         vault: String(options.vault ?? ''),
         requestId: requestIdFromOptions(options),
         lookup: args.id,
         status: options.status,
-        protocolKey: options.protocolKey,
-        pageRevisionId: options.pageRevisionId,
-        runSpecRevisionId: options.runSpecRevisionId,
-        testPlanId: options.testPlanId,
         baselineStart: options.baselineStart,
         baselineEnd: options.baselineEnd,
         baselineDays: options.baselineDays,

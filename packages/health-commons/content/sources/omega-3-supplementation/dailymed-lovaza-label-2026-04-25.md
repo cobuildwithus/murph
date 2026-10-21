@@ -11,13 +11,8 @@ aliases:
 - 'DailyMed label: LOVAZA (omega-3-acid ethyl esters) capsules'
 categories:
 - omega-3-supplementation
-relations:
--
-  type: related_protocol
-  target: protocol_variant:omega-3-supplementation/oral-epa-dha-supplementation
--
-  type: parent_family
-  target: experiment_family:omega-3-supplementation
+relations: []
+
 source:
   kind: web_page
   title: 'DailyMed label: LOVAZA (omega-3-acid ethyl esters) capsules'

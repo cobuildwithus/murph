@@ -53,8 +53,6 @@ import {
 } from "./metric-points.ts";
 import { toBrowserVaultLabResultRows } from "./lab-results.ts";
 import { projectBrowserTrainingSession } from "./training.ts";
-import { buildBrowserVaultExperimentRunCards } from "./experiment-run-cards.ts";
-import { createBrowserVaultProjectionQueryClient } from "./query.ts";
 import { stringifyJsonCooperatively } from "./json.ts";
 import { cloneJson, isBrowserSafeJson } from "./json-values.ts";
 
@@ -116,7 +114,6 @@ export async function createBrowserVaultReplica(
     experimentOutcomes: (input.experimentOutcomes ?? []).map((outcome) =>
       experimentOutcomeSchema.parse(outcome)
     ),
-    experimentRunCards: [],
     generatedAt,
     generation: BROWSER_VAULT_REPLICA_CURRENT_GENERATION,
     hasLabBiomarkers: metricRows.some((row) =>
@@ -142,23 +139,17 @@ export async function createBrowserVaultReplica(
     timelineRows,
     weeklySampleSummaries,
   };
-  const replicaWithDerivedCards: BrowserVaultReplica = {
-    ...replicaWithoutVersion,
-    experimentRunCards: await buildBrowserVaultExperimentRunCards(
-      createBrowserVaultProjectionQueryClient(replicaWithoutVersion),
-    ),
-  };
   input.signal?.throwIfAborted();
   const dataVersion = await hashBrowserVaultReplicaData(
-    replicaWithDerivedCards,
+    replicaWithoutVersion,
     input.signal,
   );
   input.signal?.throwIfAborted();
 
   return {
-    ...replicaWithDerivedCards,
+    ...replicaWithoutVersion,
     source: {
-      ...replicaWithDerivedCards.source,
+      ...replicaWithoutVersion.source,
       dataVersion,
     },
   };

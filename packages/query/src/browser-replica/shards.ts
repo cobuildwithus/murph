@@ -42,7 +42,11 @@ export interface BrowserVaultCoreShard extends Pick<
   | "timelineRows"
   | "weeklySampleSummaries"
 > {
-  experimentRunCards: NonNullable<BrowserVaultReplica["experimentRunCards"]>;
+  /**
+   * Always empty. Web builds from before experiment run cards were removed
+   * still require this core-shard array; drop it once they cannot be served.
+   */
+  experimentRunCards: [];
   hasLabBiomarkers: NonNullable<BrowserVaultReplica["hasLabBiomarkers"]>;
   identity: BrowserVaultReplicaShardIdentity;
   schema: typeof BROWSER_VAULT_CORE_SHARD_SCHEMA;
@@ -159,7 +163,7 @@ export async function splitBrowserVaultReplica(
     core: {
       assistantSummary: replica.assistantSummary,
       entities: replica.entities,
-      experimentRunCards: replica.experimentRunCards ?? [],
+      experimentRunCards: [],
       hasLabBiomarkers: replica.hasLabBiomarkers ?? false,
       identity,
       ...(replica.journal === undefined ? {} : { journal: replica.journal }),
@@ -199,7 +203,6 @@ export function assembleBrowserVaultCoreReplica(core: BrowserVaultCoreShard): Br
   return {
     assistantSummary: core.assistantSummary,
     entities: core.entities,
-    experimentRunCards: core.experimentRunCards,
     generatedAt: identity.generatedAt,
     ...(identity.generation === undefined ? {} : { generation: identity.generation }),
     hasLabBiomarkers: core.hasLabBiomarkers,

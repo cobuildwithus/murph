@@ -147,15 +147,16 @@ describe("cross-platform initial onboarding state", () => {
     })).toThrow("Choose a valid Murph persona, tone, and voice");
   });
 
-  it("normalizes a retired installed-companion persona without losing tone or voice", () => {
-    expect(onboarding.parseHostedInitialOnboardingCompletionRequest({
-      action: "save",
-      preferences: { persona: "scientist-with-classic", tone: "casual", voice: "warm" },
-    })).toEqual({
-      action: "save",
-      preferences: { persona: "classic", tone: "casual", voice: "warm" },
-    });
-  });
+  it.each(["scientist-with-classic", "navy-seal", "longevity-scientist"])(
+    "rejects a new onboarding save with retired persona %s instead of silently changing it",
+    (persona) => {
+      expect(() => onboarding.parseHostedInitialOnboardingCompletionRequest({
+        action: "save",
+        preferences: { persona, tone: "casual", voice: "warm" },
+      })).toThrow("Refresh Murph before completing setup.");
+      expect(mocks.upsertHostedMemberAssistantPreferencesTx).not.toHaveBeenCalled();
+    },
+  );
 
   it("backfills pre-existing members and protects legacy rolling-deploy writers", () => {
     const migration = readFileSync(

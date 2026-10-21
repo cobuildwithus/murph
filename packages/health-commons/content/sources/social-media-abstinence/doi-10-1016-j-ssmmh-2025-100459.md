@@ -10,11 +10,8 @@ quality: "usable"
 categories: 
   - "social-media-abstinence"
   - "social-media-fast"
-relations: 
-  - type: "parent_family"
-    target: "experiment_family:social-media-abstinence"
-  - type: "related_protocol"
-    target: "protocol_variant:social-media-abstinence/social-media-fast"
+relations: []
+
 sourceIdentity: 
   identityKind: "scholarly_work"
   canonicalIdBasis: "doi"

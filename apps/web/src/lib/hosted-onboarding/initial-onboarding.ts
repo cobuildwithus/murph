@@ -1,6 +1,6 @@
 import type { Prisma, PrismaClient } from "@prisma/client";
 import {
-  normalizeStoredAssistantPersonaId,
+  isAssistantPersonaId,
   isAssistantTonePreference,
   isAssistantVoiceOptionId,
   type AssistantPersonaId,
@@ -157,10 +157,12 @@ export function parseHostedInitialOnboardingCompletionRequest(
     throw invalidCompletionRequest("Choose a valid Murph persona, tone, and voice.");
   }
   rejectUnknownFields(body.preferences, COMPLETION_PREFERENCE_FIELDS);
-  const persona = normalizeStoredAssistantPersonaId(body.preferences.persona);
+  const persona = body.preferences.persona;
+  if (!isAssistantPersonaId(persona)) {
+    throw invalidCompletionRequest("Refresh Murph before completing setup.");
+  }
   if (
-    !persona
-    || !isAssistantTonePreference(body.preferences.tone)
+    !isAssistantTonePreference(body.preferences.tone)
     || !isAssistantVoiceOptionId(body.preferences.voice)
   ) {
     throw invalidCompletionRequest("Choose a valid Murph persona, tone, and voice.");
