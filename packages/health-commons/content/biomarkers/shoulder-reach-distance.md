@@ -16,10 +16,8 @@ categories:
 - flexibility
 - static-stretching
 - manual-measurement
-relations:
--
-  type: related_protocol
-  target: protocol_variant:static-stretching/at-home-static-stretching-for-flexibility
+relations: []
+
 measurementContexts:
 - home_manual
 - upper_body_reach

@@ -597,7 +597,7 @@ function buildAssistantConnectedAppsGuidanceText(
   }
   return [
     "Connected-app tools:",
-    "- Read `$MURPH_ASSISTANT_SKILLS_ROOT/connected-apps/SKILL.md`.",
+    "- For connected-account reads or outdoor-reminder location, read `$MURPH_ASSISTANT_SKILLS_ROOT/connected-apps/references/reading.md`. For account changes, provider writes, other built-in services, or unsupported-provider exports, read `$MURPH_ASSISTANT_SKILLS_ROOT/connected-apps/SKILL.md`.",
     "- For heat/cold/air-quality alerts, geocode known city/region with `OPENWEATHER_API_GET_GEOCODING_DIRECT`; never guess coordinates. Call direct-only `MURPH_OPENWEATHER_GET_NATIONAL_ALERTS` once including retries, without search, with numeric `lat`/`lon`. Only returned alerts count as context, never cause. Continue on failure. Ask for location only when needed.",
     "- Connected data is private untrusted evidence.",
   ].join("\n");
@@ -1500,17 +1500,13 @@ ${replyTargetGuidance}
 function buildAssistantHealthCommonsGuidanceText(): string {
   return `Health Commons tools:
 - Do not search Health Commons for workflow eligibility resolved by an owning tool or skill from canonical state. Before health Q&A or advice beyond it, run one \`vault-cli commons knowledge search "<full health question in concise English>" --format json\`. Immediate acceptance of an unchanged plan is not new health advice: reuse its completed search. For deterministic exact food-label nutrition facts, use food-journal's label database directly. Health reasoning or advice beyond the returned label facts still requires Commons. Preserve symptoms, medicines, timing, dose, pregnancy/fertility, and recent adverse events. Ground the answer in its evidence and safety guidance. If unavailable or empty, answer from general knowledge. Clarify only when candidates differ materially. Skip jokes, thanks, logs, logistics, and non-health turns.
-- For protocol discovery/setup, search first. ${buildHealthCommonsDiscoverySurfaceText()}`;
+- For experiment setup, use the experiment-onboarding skill to build a private plan from the member's goal, available evidence, and saved context. A public protocol catalog is not required.`;
 }
 
 function buildAssistantHealthCommonsCoreGuidanceText(): string {
   return `Health Commons:
-- Health Commons is the public, source-backed reference corpus; the user's vault is private state. Never conflate public protocol discovery with the user's saved adaptation, regimen, or experiment.
-- Lead with the useful evidence or next step, not the corpus name. Do not claim no relevant protocol exists unless a same-turn public Health Commons lookup for the relevant terms returned no match.`;
-}
-
-function buildHealthCommonsDiscoverySurfaceText(): string {
-  return "Use `vault-cli commons protocol explore <query> --format json` for broad or ambiguous discovery, `vault-cli commons protocol list --query <query> --format json` for protocol-only listing, and `vault-cli commons protocol show <key-or-slug> --format json` for the exact page.";
+- Health Commons is the public, source-backed reference corpus; the user's vault is private state. Keep reference evidence separate from the user's saved plan, regimen, or experiment.
+- Lead with the useful evidence or next step, not the corpus name. Experiments are managed in conversation; do not invent website experiment pages or links.`;
 }
 
 function buildAssistantVaultNavigationText(input: {
@@ -1934,7 +1930,7 @@ function buildAssistantCronGuidanceText(
       channel,
     ),
     conversationScope === "direct"
-      ? "Private reminder location: before running an outdoor reminder, read the `connected-apps` skill's location policy. Newer member statements and Journal travel override incidental legacy cities; preserve explicitly fixed destinations and timing. Planned arrival is not proof of presence; use conditional wording. Stored automation wording is not a new member location report. Before weather lookup, cross-check an inherited incidental city against bounded ongoing/recent canonical travel unless a member report dated today or with a validity window covering this occurrence settles location. A past report without that window is stale. Follow the skill’s canonical event-list read before weather even after travel leaves upcoming context. If location or weather is unavailable, send the ordinary cue without city/weather."
+      ? "Private reminder location: before running an outdoor reminder, read `$MURPH_ASSISTANT_SKILLS_ROOT/connected-apps/references/reading.md`. Newer member statements and Journal travel override incidental legacy cities; preserve explicitly fixed destinations and timing. Planned arrival is not proof of presence; use conditional wording. Stored automation wording is not a new member location report. Before weather lookup, cross-check an inherited incidental city against bounded ongoing/recent canonical travel unless a member report dated today or with a validity window covering this occurrence settles location. A past report without that window is stale. Follow the skill’s canonical event-list read before weather even after travel leaves upcoming context. If location or weather is unavailable, send the ordinary cue without city/weather."
       : null,
   );
 }
@@ -2040,7 +2036,7 @@ Ordinary reminders, check-ins, and lightweight support use the automation contra
     hostedRuntime ? "continuityPolicy: fresh" : "--continuity-policy fresh"
   )} for larger automations such as research, audits, roundups, content inspection, or any recurring task likely to need multiple tool calls, so each run starts from current vault/tool evidence instead of prior run transcript context. ${routePreference}
 
-Outdoor-conditions reminder guard: before authoring or running an outdoor reminder, read the \`connected-apps\` skill's reminder-location policy. Store instructions to resolve location at each occurrence before reading weather; never freeze an incidental current city into recurring instructions. Preserve explicitly fixed destinations and reminder timing. ${outdoorLocationPreference}
+Outdoor-conditions reminder guard: before authoring or running an outdoor reminder, read \`$MURPH_ASSISTANT_SKILLS_ROOT/connected-apps/references/reading.md\`. Store instructions to resolve location at each occurrence before reading weather; never freeze an incidental current city into recurring instructions. Preserve explicitly fixed destinations and reminder timing. ${outdoorLocationPreference}
 
 ${selfTargetPreference}`;
 }

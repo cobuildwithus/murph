@@ -22,6 +22,9 @@ import {
 } from "@/src/lib/hosted-execution/imessage-contact-tool";
 import {
   claimHostedLinqProactiveConversationCapacityTx,
+  listHostedLinqAssignableHomeLines,
+  listHostedLinqHealthyProactiveLines,
+  readHostedLinqIncomingLineState,
 } from "@/src/lib/hosted-onboarding/linq-line-store";
 import {
   appendHostedMailboxEnvelopeWithSourceMessageTx,
@@ -194,6 +197,40 @@ async function acquireHostedMailboxSourceLocksForTest(input: {
 describe.skipIf(!runPostgresConcurrencyProof)(
   "hosted Linq home-routing PostgreSQL concurrency",
   () => {
+    it("drains automatic placement while preserving managed inbound and refusing stale capacity claims", async () => {
+      const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: databaseUrl }) });
+      const digits = String(Number.parseInt(randomUUID().replaceAll("-", "").slice(0, 7), 16) % 10_000_000).padStart(7, "0");
+      const phoneNumber = `+1557${digits}`;
+      const lineKey = requireString(createHostedPhoneLookupKey(phoneNumber));
+      const dayUtc = startOfUtcDay(new Date());
+      try {
+        await prisma.hostedLinqLine.create({ data: {
+          phoneNumberLookupKey: lineKey,
+          phoneNumberEncrypted: encryptHostedLinqLinePhoneNumber(phoneNumber),
+          phoneNumberHint: "*** test",
+          configuredAt: new Date(), healthStatus: "healthy", egressPolicy: "enabled",
+          assignmentWeight: 100, proactiveConversationDayUtc: dayUtc, proactiveConversationCount: 0,
+        } });
+        expect((await listHostedLinqAssignableHomeLines({ prisma })).some(line => line.phoneNumberLookupKey === lineKey)).toBe(true);
+        await prisma.hostedLinqLine.update({ where: { phoneNumberLookupKey: lineKey }, data: { assignmentWeight: 0 } });
+        expect((await listHostedLinqAssignableHomeLines({ prisma })).some(line => line.phoneNumberLookupKey === lineKey)).toBe(false);
+        expect((await listHostedLinqHealthyProactiveLines({ prisma })).some(line => line.phoneNumberLookupKey === lineKey)).toBe(false);
+        await expect(readHostedLinqIncomingLineState({ phoneNumberLookupKeys: [lineKey], prisma })).resolves.toMatchObject({ kind: "assignable" });
+        for (const claimDay of [dayUtc, new Date(dayUtc.getTime() + 86_400_000)]) {
+          await expect(prisma.$transaction(tx => claimHostedLinqProactiveConversationCapacityTx({
+            dayUtc: claimDay, limit: 50, phoneNumberLookupKey: lineKey, prisma: tx,
+          }))).resolves.toBe(false);
+        }
+        const stored = await prisma.hostedLinqLine.findUniqueOrThrow({ where: { phoneNumberLookupKey: lineKey } });
+        expect(stored).toMatchObject({ assignmentWeight: 0, egressPolicy: "enabled", healthStatus: "healthy", proactiveConversationCount: 0 });
+        await prisma.hostedLinqLine.update({ where: { phoneNumberLookupKey: lineKey }, data: { assignmentWeight: 100 } });
+        expect((await listHostedLinqAssignableHomeLines({ prisma })).some(line => line.phoneNumberLookupKey === lineKey)).toBe(true);
+      } finally {
+        await prisma.hostedLinqLine.deleteMany({ where: { phoneNumberLookupKey: lineKey } });
+        await prisma.$disconnect();
+      }
+    });
+
     it.each(["foreign-key insert", "member writer", "route writer", "runtime callback"] as const)(
       "prepared direct admission remains safe with a held %s",
       async (lockHolder) => {

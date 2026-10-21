@@ -914,6 +914,7 @@ function resolveHostedAiUsageAllowancePricingDecision(
   const cacheWriteTokens = normalizeTokenCount(record.cacheWriteTokens);
   const cacheWriteUsdMicrosPerMillionTokens =
     prices.cacheWriteUsdMicrosPerMillionTokens ?? 0n;
+  const twelveHourWrites = readTwelveHourCacheWrites(record, cacheWriteTokens, cacheWriteUsdMicrosPerMillionTokens);
   const inputTokens = normalizeTokenCount(record.inputTokens);
   const outputTokens = normalizeTokenCount(record.outputTokens);
   const inputTokenSubsetTokens = cachedInputTokens + (
@@ -932,7 +933,7 @@ function resolveHostedAiUsageAllowancePricingDecision(
       prices.cachedInputUsdMicrosPerMillionTokens,
     )
     + priceTokenBucketUsdMicros(
-      cacheWriteTokens,
+      cacheWriteTokens + twelveHourWrites.tokens,
       cacheWriteUsdMicrosPerMillionTokens,
     )
     + priceTokenBucketUsdMicros(
@@ -958,6 +959,7 @@ function resolveHostedAiUsageAllowancePricingDecision(
           ...(cacheWriteUsdMicrosPerMillionTokens > 0n
             ? { cacheWrite: cacheWriteUsdMicrosPerMillionTokens.toString() }
             : {}),
+          ...twelveHourWrites.rateSnapshot,
           input: prices.inputUsdMicrosPerMillionTokens.toString(),
           output: prices.outputUsdMicrosPerMillionTokens.toString(),
         },
@@ -971,10 +973,28 @@ function resolveHostedAiUsageAllowancePricingDecision(
         tokens: {
           ...tokenSnapshot,
           billableInput: billableInputTokens.toString(),
+          ...twelveHourWrites.tokenSnapshot,
         },
       },
       pricingVersion: resolvedTokenPricing.pricingVersion,
     },
+  };
+}
+
+// A 12h write replaces the 30m write at twice its rate. Keep its subset
+// evidence in the existing raw usage and pricing snapshot for replay/skew.
+function readTwelveHourCacheWrites(record: AssistantUsageRecord, totalWrites: bigint, shortWriteRate: bigint) {
+  const tokens = normalizeTokenCount(
+    typeof record.rawUsageJson?.cacheWrite12hInputTokens === "number"
+      ? record.rawUsageJson.cacheWrite12hInputTokens : null,
+  );
+  if (tokens > totalWrites) {
+    throw new TypeError("Twelve-hour cache writes exceed total cache writes.");
+  }
+  return {
+    tokens,
+    rateSnapshot: tokens > 0n ? { cacheWrite12h: (shortWriteRate * 2n).toString() } : {},
+    tokenSnapshot: tokens > 0n ? { cacheWrite12h: tokens.toString() } : {},
   };
 }
 

@@ -13,6 +13,7 @@ const ASSISTANT_USAGE_RAW_TOKEN_KEYS = new Set<string>([
   "cachedContentTokenCount",
   "candidatesTokenCount",
   "cacheWriteInputTokens",
+  "cacheWrite12hInputTokens",
   "cacheWriteTokens",
   "cache_write_tokens",
   "cachedInputTokens",

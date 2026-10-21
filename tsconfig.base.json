@@ -18,6 +18,12 @@
       "@murphai/contracts": [
         "./packages/contracts/src/index.ts"
       ],
+      "@murphai/contracts/sleep-session": [
+        "./packages/contracts/src/sleep-session.ts"
+      ],
+      "@murphai/contracts/experiment-outcome": [
+        "./packages/contracts/src/experiment-outcome.ts"
+      ],
       "@murphai/contracts/browser-vault": [
         "./packages/contracts/src/browser-vault.ts"
       ],

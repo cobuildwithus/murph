@@ -9,18 +9,14 @@ import type {
   JournalView,
   JournalWeekSummary,
 } from "../journal-view.ts";
-import { experimentOutcomeSchema } from "@murphai/contracts";
+import { experimentOutcomeSchema } from "@murphai/contracts/experiment-outcome";
 import { parseJournalTiming } from "@murphai/contracts/journal-presentation";
 import {
   BROWSER_VAULT_REPLICA_POLICY_ID,
   BROWSER_VAULT_REPLICA_SCHEMA,
-  BROWSER_VAULT_EXPERIMENT_RUN_CARD_SCHEMA,
   type BrowserVaultAssistantSummary,
   type BrowserVaultEntity,
   type BrowserVaultEntityLink,
-  type BrowserVaultExperimentRunCard,
-  type BrowserVaultExperimentRunCardMetric,
-  type BrowserVaultExperimentRunCardSummary,
   type BrowserVaultLabResultReferenceRange,
   type BrowserVaultLabResultRow,
   type BrowserVaultLabSpecimenKind,
@@ -80,12 +76,6 @@ export function parseBrowserVaultReplica(value: unknown, label = "Browser vault 
       : requireArray(record.experimentOutcomes, `${label}.experimentOutcomes`).map((entry) =>
           experimentOutcomeSchema.parse(entry)
         ),
-    experimentRunCards: readOptionalArray(
-      record.experimentRunCards,
-      `${label}.experimentRunCards`,
-    ).map((entry, index) =>
-      parseExperimentRunCard(entry, `${label}.experimentRunCards[${index}]`)
-    ),
     generatedAt,
     ...(record.generation === undefined
       ? {}
@@ -128,12 +118,9 @@ export function parseBrowserVaultCoreShard(
     entities: requireArray(record.entities, `${label}.entities`).map((entry, index) =>
       parseEntity(entry, `${label}.entities[${index}]`)
     ),
-    experimentRunCards: requireArray(
-      record.experimentRunCards,
-      `${label}.experimentRunCards`,
-    ).map((entry, index) =>
-      parseExperimentRunCard(entry, `${label}.experimentRunCards[${index}]`)
-    ),
+    // Shards from producers that predate run-card removal may still carry
+    // cards; nothing reads them, so they are dropped without validation.
+    experimentRunCards: [],
     hasLabBiomarkers: requireBoolean(
       record.hasLabBiomarkers,
       `${label}.hasLabBiomarkers`,
@@ -285,147 +272,6 @@ function parseJournalRecord(value: unknown, label: string): JournalRecord {
     summary: readNullableString(record.summary),
     tags: requireStringArray(record.tags, `${label}.tags`),
     timeZone: readNullableString(record.timeZone),
-  };
-}
-
-function parseExperimentRunCard(
-  value: unknown,
-  label: string,
-): BrowserVaultExperimentRunCard {
-  const record = requireRecord(value, label);
-  const schema = requireExpectedSchema(
-    record.schema,
-    BROWSER_VAULT_EXPERIMENT_RUN_CARD_SCHEMA,
-    `${label}.schema`,
-  );
-  const lookupKeys = requireRecord(record.lookupKeys, `${label}.lookupKeys`);
-  const status = requireString(record.status, `${label}.status`);
-  if (
-    status !== "active"
-    && status !== "paused"
-    && status !== "finished"
-    && status !== "stopped"
-  ) {
-    throw new TypeError(`${label}.status must be active, paused, finished, or stopped.`);
-  }
-
-  return {
-    id: requireString(record.id, `${label}.id`),
-    lookupKeys: {
-      experimentIds: requireStringArray(
-        lookupKeys.experimentIds,
-        `${label}.lookupKeys.experimentIds`,
-      ),
-      protocolKeys: requireStringArray(
-        lookupKeys.protocolKeys,
-        `${label}.lookupKeys.protocolKeys`,
-      ),
-      slugs: requireStringArray(lookupKeys.slugs, `${label}.lookupKeys.slugs`),
-    },
-    requiredMetricBuckets: readOptionalArray(
-      record.requiredMetricBuckets,
-      `${label}.requiredMetricBuckets`,
-    ).map((entry, index) => requireBrowserVaultMetricBucketId(
-      entry,
-      `${label}.requiredMetricBuckets[${index}]`,
-    )),
-    runSummary: parseExperimentRunCardSummary(
-      record.runSummary,
-      `${label}.runSummary`,
-    ),
-    schema,
-    slug: readNullableString(record.slug),
-    startedOn: readNullableString(record.startedOn),
-    status,
-    statusLabel: requireString(record.statusLabel, `${label}.statusLabel`),
-    summary: readNullableString(record.summary),
-    summaryDetail: readNullableString(record.summaryDetail),
-    tags: requireStringArray(record.tags, `${label}.tags`),
-    title: requireString(record.title, `${label}.title`),
-  };
-}
-
-function parseExperimentRunCardSummary(
-  value: unknown,
-  label: string,
-): BrowserVaultExperimentRunCardSummary {
-  const record = requireRecord(value, label);
-  return {
-    ...(record.completionPercent === undefined
-      ? {}
-      : {
-          completionPercent: requireNonNegativeInteger(
-            record.completionPercent,
-            `${label}.completionPercent`,
-          ),
-        }),
-    ...(record.dailyCadence === undefined
-      ? {}
-      : {
-          dailyCadence: parseExperimentRunCardDailyCadence(
-            record.dailyCadence,
-            `${label}.dailyCadence`,
-          ),
-        }),
-    ...(record.dateRange === undefined
-      ? {}
-      : { dateRange: requireString(record.dateRange, `${label}.dateRange`) }),
-    ...(record.day === undefined
-      ? {}
-      : { day: requireNonNegativeInteger(record.day, `${label}.day`) }),
-    ...(record.metric === undefined
-      ? {}
-      : { metric: parseExperimentRunCardMetric(record.metric, `${label}.metric`) }),
-    metrics: requireArray(record.metrics, `${label}.metrics`).map((entry, index) =>
-      parseExperimentRunCardMetric(entry, `${label}.metrics[${index}]`)
-    ),
-  };
-}
-
-function parseExperimentRunCardDailyCadence(
-  value: unknown,
-  label: string,
-): NonNullable<BrowserVaultExperimentRunCardSummary["dailyCadence"]> {
-  const record = requireRecord(value, label);
-  return {
-    cadence: requireString(record.cadence, `${label}.cadence`),
-    completed: requireNonNegativeInteger(record.completed, `${label}.completed`),
-    expected: requireNonNegativeInteger(record.expected, `${label}.expected`),
-    ...(record.label === undefined
-      ? {}
-      : { label: requireString(record.label, `${label}.label`) }),
-  };
-}
-
-function parseExperimentRunCardMetric(
-  value: unknown,
-  label: string,
-): BrowserVaultExperimentRunCardMetric {
-  const record = requireRecord(value, label);
-  const direction = record.direction === undefined
-    ? undefined
-    : requireString(record.direction, `${label}.direction`);
-  if (
-    direction !== undefined
-    && direction !== "down"
-    && direction !== "neutral"
-    && direction !== "up"
-  ) {
-    throw new TypeError(`${label}.direction must be down, neutral, or up.`);
-  }
-  return {
-    ...(record.baseline === undefined
-      ? {}
-      : { baseline: requireString(record.baseline, `${label}.baseline`) }),
-    ...(record.biomarkerKey === undefined
-      ? {}
-      : { biomarkerKey: requireString(record.biomarkerKey, `${label}.biomarkerKey`) }),
-    current: requireString(record.current, `${label}.current`),
-    ...(record.delta === undefined
-      ? {}
-      : { delta: requireString(record.delta, `${label}.delta`) }),
-    ...(direction === undefined ? {} : { direction }),
-    label: requireString(record.label, `${label}.label`),
   };
 }
 

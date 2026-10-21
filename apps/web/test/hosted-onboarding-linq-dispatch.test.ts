@@ -12782,6 +12782,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         proactiveConversationCount: { increment: 1 },
       },
       where: {
+        assignmentWeight: { gt: 0 },
         phoneNumberLookupKey: createHostedPhoneLookupKey(fallbackLinePhone),
         proactiveConversationCount: { lt: 10 },
         proactiveConversationDayUtc: startOfUtcDayForTest(new Date()),

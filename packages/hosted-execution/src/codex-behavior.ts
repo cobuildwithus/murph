@@ -23,15 +23,9 @@ const HOSTED_CODEX_SUBAGENT_DEVELOPER_INSTRUCTIONS_TEXT = [
   "No dynamic/server tools, browser, phone, external actions, messaging, scheduled automation changes, saved model changes, secrets, or expanded access. Leave safety-sensitive decisions, permissions, external effects, and final synthesis to the parent. Report an unsupported step instead of bypassing it with shell, HTTP, or another provider.",
   "Do not spawn, message, resume, or delegate to another agent. Stop after the bounded assignment; return uncertainty honestly and only a short result with the evidence needed by the parent.",
 ].join(" ");
-// Hosted thread cost scales linearly with this ceiling: every tool round-trip
-// re-sends the whole thread, and OpenAI Standard-tier prompt caches evict
-// within ~45 minutes regardless of prefix size or prompt_cache_retention
-// (measured 2026-06-10 across 32k-170k prefixes), so member messages after an
-// idle gap re-pay the full thread at uncached input rates. Keep the ceiling at
-// 132k to reduce uncached resend cost while retaining room for longer tool
-// loops. The separate idle-shutdown compaction threshold intentionally stays
-// lower so off-hot-path checkpointing can clean up large threads before the
-// next wake.
+// Keep the context ceiling bounded even with twelve-hour hosted cache coverage:
+// fresh prefixes, compaction, or expired entries still incur cache-write costs.
+// Idle-shutdown compaction uses its separate lower threshold.
 export const HOSTED_CODEX_AUTO_COMPACT_TOKEN_LIMIT = 132_000;
 const HOSTED_CODEX_NATIVE_MEMORY_CONFIG = {
   featureEnabled: false,

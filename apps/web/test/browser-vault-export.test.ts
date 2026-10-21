@@ -528,7 +528,6 @@ function createReplica(): BrowserVaultReplica {
     },
     entities: [],
     experimentOutcomes: [createExportOutcome()],
-    experimentRunCards: [],
     generatedAt: "2026-08-13T12:00:00.000Z",
     generation: BROWSER_VAULT_REPLICA_CURRENT_GENERATION,
     hasLabBiomarkers: false,

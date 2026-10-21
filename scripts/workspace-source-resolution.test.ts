@@ -87,8 +87,8 @@ describe("workspace source resolution", () => {
     expect(resolveAliasReplacement(aliases, "@murphai/runtime-state/node/assistant-state-fs")).toBe(
       path.join(repoRoot, "packages/runtime-state/src/node/assistant-state-fs.ts"),
     );
-    expect(resolveAliasReplacement(aliases, "@murphai/health-commons/generated/protocol-index.json")).toBe(
-      path.join(repoRoot, "packages/health-commons/generated/protocol-index.json"),
+    expect(resolveAliasReplacement(aliases, "@murphai/health-commons/generated/biomarker-desired-directions.json")).toBe(
+      path.join(repoRoot, "packages/health-commons/generated/biomarker-desired-directions.json"),
     );
   });
 

@@ -4,8 +4,9 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
   ChevronsUpDown,
-  FlaskConical,
   Home,
+  Settings,
+  Watch,
 } from "lucide-react";
 import {
   useEffect,
@@ -27,7 +28,6 @@ import {
   DropdownMenuContent,
   DropdownMenuGroup,
   DropdownMenuItem,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/src/components/ui/dropdown-menu";
 import {
@@ -62,7 +62,8 @@ const navItems: {
   icon?: ElementType;
 }[] = [
   { label: "Home", href: "/home", icon: Home },
-  { label: "Experiments", href: "/experiments", icon: FlaskConical },
+  { label: "Devices", href: "/connect", icon: Watch },
+  { label: "Settings", href: "/settings", icon: Settings },
 ];
 
 const sidebarThemeStyle = {
@@ -208,15 +209,6 @@ function AccountMenu({
               <ChevronsUpDown className="ml-auto size-3.5 shrink-0 text-white/50" />
             </DropdownMenuTrigger>
             <DropdownMenuContent side="top" align="end" className="min-w-56">
-              <DropdownMenuGroup>
-                <DropdownMenuItem render={<Link href="/connect" />}>
-                  Devices
-                </DropdownMenuItem>
-                <DropdownMenuItem render={<Link href="/settings" />}>
-                  Settings
-                </DropdownMenuItem>
-              </DropdownMenuGroup>
-              <DropdownMenuSeparator />
               <DropdownMenuGroup>
                 <DropdownMenuItem
                   disabled={signOutPending}

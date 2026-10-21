@@ -241,6 +241,7 @@ import {
 } from '../src/assistant/service.ts'
 import {
   appendAssistantTranscriptEntries,
+  getAssistantSession,
   listAssistantTranscriptEntries,
   saveAssistantSession,
 } from '../src/assistant/store.ts'
@@ -2140,14 +2141,15 @@ interface ResumeCacheProbeSummary {
   }
 }
 
-const EXPERIMENT_START_EXACT_KEY =
-  'protocol_variant:dry-sauna/bryan-johnson-blueprint'
-const EXPERIMENT_START_STARTER_KEY =
-  'protocol_variant:dry-sauna/murph-finnish-standard-3x-week'
-const EXPERIMENT_START_PAGE_REVISION = `sha256:${'1'.repeat(64)}`
-const EXPERIMENT_START_RUN_SPEC_REVISION = `sha256:${'2'.repeat(64)}`
-const EXPERIMENT_START_SLUG = 'bryan-johnson-sauna'
-const EXPERIMENT_START_INTERVENTION_DATE = '2026-07-30'
+const PRIVATE_EXPERIMENT_START_ID = 'exp_01PRIVATEWALKSLEEP0000000'
+const PRIVATE_EXPERIMENT_START_INTERVENTION_DATE = '2026-07-30'
+const PRIVATE_EXPERIMENT_RETIRED_START_FLAGS = [
+  '--from-protocol',
+  '--custom',
+  '--no-public-protocol',
+  '--page-revision-id',
+  '--run-spec-revision-id',
+] as const
 const VAULT_E2E_CLI_ENTRYPOINT = fileURLToPath(
   new URL('../../cli/src/bin.ts', import.meta.url),
 )
@@ -4518,7 +4520,7 @@ describe('real Codex live fixture contracts', () => {
                 stdout: '',
               },
               {
-                argv: ['commons', 'protocol', 'show', EXPERIMENT_START_EXACT_KEY],
+                argv: ['experiment', 'show', PRIVATE_EXPERIMENT_START_ID],
                 durationMs: 1,
                 index: 1,
                 ok: true,
@@ -4564,7 +4566,7 @@ describe('real Codex live fixture contracts', () => {
       },
       {
         command:
-          `vault-cli commons protocol show ${EXPERIMENT_START_EXACT_KEY}`,
+          `vault-cli experiment show ${PRIVATE_EXPERIMENT_START_ID}`,
         eventIndex: 0,
         kind: 'command',
         ok: true,
@@ -4586,31 +4588,27 @@ describe('real Codex live fixture contracts', () => {
     )).toHaveLength(1)
   })
 
-  it('keeps the experiment-start fixture aligned with the protocol-backed CLI contract', async () => {
+  it('keeps the private experiment-start fixture on the catalog-free CLI contract', async () => {
     const workingDirectory = await mkdtemp(
-      path.join(tmpdir(), 'murph-experiment-start-fixture-'),
+      path.join(tmpdir(), 'murph-private-experiment-start-fixture-'),
     )
 
     try {
       const binDirectory = path.join(workingDirectory, 'bin')
-      await materializeExperimentStartVaultCli({
+      const commandLogPath = path.join(workingDirectory, 'commands.log')
+      await materializePrivateExperimentStartVaultCli({
         binDirectory,
-        dryRunRevisionMismatch: false,
-        exactTitleAvailable: true,
+        commandLogPath,
       })
       const executablePath = path.join(binDirectory, 'vault-cli')
       const requiredArguments = [
         'experiment',
         'start',
-        EXPERIMENT_START_SLUG,
-        '--from-protocol',
-        EXPERIMENT_START_EXACT_KEY,
-        '--page-revision-id',
-        EXPERIMENT_START_PAGE_REVISION,
-        '--run-spec-revision-id',
-        EXPERIMENT_START_RUN_SPEC_REVISION,
+        'after-dinner-walk-sleep',
         '--intervention-start',
-        EXPERIMENT_START_INTERVENTION_DATE,
+        PRIVATE_EXPERIMENT_START_INTERVENTION_DATE,
+        '--primary-outcome-label',
+        'Sleep score',
       ]
 
       await expect(execFileAsync(executablePath, [
@@ -4618,16 +4616,28 @@ describe('real Codex live fixture contracts', () => {
         '--dry-run',
       ])).resolves.toMatchObject({ stdout: expect.stringContaining('"dryRun":true') })
       await expect(execFileAsync(executablePath, requiredArguments))
-        .resolves.toMatchObject({ stdout: expect.stringContaining('experiment-bryan') })
+        .resolves.toMatchObject({
+          stdout: expect.stringContaining(PRIVATE_EXPERIMENT_START_ID),
+        })
+      await expect(execFileAsync(executablePath, [
+        'experiment',
+        'progress',
+        PRIVATE_EXPERIMENT_START_ID,
+      ])).resolves.toMatchObject({
+        stdout: expect.stringContaining(PRIVATE_EXPERIMENT_START_ID),
+      })
 
       for (const invalidArguments of [
-        requiredArguments.filter((argument) => argument !== EXPERIMENT_START_SLUG),
-        requiredArguments.filter((argument) => argument !== EXPERIMENT_START_INTERVENTION_DATE),
-        requiredArguments.map((argument) =>
-          argument === EXPERIMENT_START_EXACT_KEY
-            ? EXPERIMENT_START_STARTER_KEY
-            : argument
+        requiredArguments.filter((argument) =>
+          argument !== PRIVATE_EXPERIMENT_START_INTERVENTION_DATE
         ),
+        requiredArguments.filter((argument) => argument !== 'Sleep score'),
+        ...PRIVATE_EXPERIMENT_RETIRED_START_FLAGS.map((flag) => [
+          ...requiredArguments,
+          flag,
+          'retired',
+        ]),
+        ['commons', 'protocol', 'explore', 'walking', '--format', 'json'],
       ]) {
         await expect(execFileAsync(executablePath, invalidArguments))
           .rejects.toMatchObject({ code: 64 })
@@ -5220,6 +5230,65 @@ describeRealCodex('real Codex missing knowledge recovery e2e', () => {
       await removeRealCodexTemporaryPaths(config.temporaryPaths)
     }
   }, 300_000)
+})
+
+describeRealCodex('real Codex compact knowledge read e2e', () => {
+  it('answers from the complete compact knowledge body with one read and no writes', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-compact-knowledge-e2e-'))
+    const vaultRoot = path.join(workingDirectory, 'vault')
+    const binDirectory = path.join(workingDirectory, 'bin')
+    const commandLogPath = path.join(workingDirectory, 'commands.log')
+    try {
+      await initializeVault({ title: 'Synthetic knowledge read', timezone: 'UTC', vaultRoot })
+      await upsertKnowledgePage({
+        vault: vaultRoot, slug: 'trail-gear-list', title: 'Trail gear list',
+        body: '# Trail gear list\n\nPack the green rain jacket and a spare headlamp. Leave the umbrella at home because this route is exposed.',
+      })
+      await materializeRealWorkoutVaultCli({ binDirectory, commandLogPath, vaultRoot })
+      const vaultBefore = await snapshotRealCodexCanonicalVault(vaultRoot)
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome,
+        developerInstructions: buildAssistantSystemPrompt({
+          assistantCliContract: null, assistantContextSnapshotPrompt: null,
+          assistantHostedDeviceConnectAvailable: false, assistantHostedDeviceConnectProviders: [],
+          assistantKnowledgeToolsAvailable: false, channel: 'linq',
+          cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+          conversationScope: 'direct', currentLocalDate: '2026-09-04', currentTimeZone: 'UTC',
+          hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false,
+          turnTrigger: null,
+        }),
+        dynamicTools: [],
+        env: { ...config.env, PATH: `${binDirectory}:${config.env.PATH ?? ''}` },
+        model: config.model, modelProvider: config.modelProvider,
+        prompt: 'What should I pack from my saved wiki page trail-gear-list, and what should I leave behind? Read that page once with vault-cli knowledge show and answer briefly. Do not change anything or look elsewhere.',
+        reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
+      })
+      const commands = (await readFile(commandLogPath, 'utf8')).split('\n').filter(Boolean)
+        .filter((command) => !isRecordedVaultHelpCommand(command))
+      expect(commands).toEqual([expect.stringMatching(/^knowledge show trail-gear-list(?:\s|$)/u)])
+      expect(commands[0]).not.toMatch(/--raw/u)
+      const reads = readCapabilityRoutingActions(result.jsonEvents)
+        .filter((action) => action.kind === 'command' && action.command.includes('knowledge show'))
+      expect(reads).toHaveLength(1)
+      expect(reads[0]?.output).toContain('green rain jacket')
+      expect(reads[0]?.output).toContain('pageRevisionDigest')
+      expect(reads[0]?.output).not.toMatch(/"markdown"\s*:/u)
+      expect(await snapshotRealCodexCanonicalVault(vaultRoot)).toEqual(vaultBefore)
+      expect(await listAssistantOutboxIntents(vaultRoot)).toEqual([])
+      expect(result.finalMessage).toMatch(/green rain jacket/iu)
+      expect(result.finalMessage).toMatch(/spare headlamp/iu)
+      expect(result.finalMessage).toMatch(/(?:leave|skip|without|don.t|do not)[\s\S]{0,60}umbrella/iu)
+      expect(result.finalMessage).not.toMatch(/updated|saved it|changed your|couldn.t find/iu)
+      expect(result.finalMessage.length).toBeLessThan(500)
+      process.stdout.write(`[compact-knowledge-e2e] ${JSON.stringify({ finalMessage: result.finalMessage })}\n`)
+    } finally {
+      await removeRealCodexTemporaryPath(workingDirectory)
+      await removeRealCodexTemporaryPaths(config.temporaryPaths)
+    }
+  }, 600_000)
 })
 
 describeRealCodex('real Codex optional knowledge show e2e', () => {
@@ -22323,7 +22392,7 @@ describeRealCodex('real Codex generic transcript memory judgment e2e', () => {
 })
 
 describeRealCodex('real Codex morning reminder reconciliation e2e', () => {
-  it('reviews a bounded instruction inventory and repairs context timing completion and duplicates without new connections', async () => {
+  it('uses shared read guidance and repairs context timing completion and duplicates without new connections', async () => {
     const config = await resolveRealCodexE2eConfig()
     const seed = MURPH_MANAGED_AUTOMATIONS.find(candidate => candidate.slug === 'journal-connected-context-morning')
     if (!seed) throw new Error('Missing morning automation.')
@@ -22442,6 +22511,11 @@ describeRealCodex('real Codex morning reminder reconciliation e2e', () => {
         sandbox: 'workspace-write', workingDirectory,
       })
       const first = await runTurn()
+      const skillReads = readCapabilityRoutingActions(first.jsonEvents)
+        .filter(action => action.kind === 'command').map(action => action.output).join('\n')
+      expect(skillReads).toContain('# Connected-app reading and reminder location')
+      expect(skillReads).not.toContain('## Prefer connected email over webmail')
+      expect(skillReads).not.toContain('## Unsupported health and fitness sources')
       expect(parseAssistantNotificationDecision(first.finalMessage).kind).toBe('skip')
       const firstInventoryCommands = expandRecordedVaultCommands((await readFile(path.join(workingDirectory, 'commands.log'), 'utf8')).split('\n').filter(Boolean))
         .filter(line => /^automation list\b/u.test(line) && !isRecordedVaultHelpCommand(line))
@@ -24692,7 +24766,7 @@ describeRealCodex('real Codex experiment onboarding e2e', () => {
         const policyOutput = actions.filter((action) => action.kind === 'command')
           .map((action) => action.output).join('\n')
         // Run-setup policy remains in the entrypoint for conservative routing.
-        expect(policyOutput).toContain('## Protocol resolution')
+        expect(policyOutput).toContain('## Designing the experiment')
         // Active-session safeguards stay in the entrypoint even during repair.
         expect(policyOutput).toContain('## Active experiment support')
         expect(skillRead, 'experiment-onboarding skill read').toBeDefined()
@@ -24747,149 +24821,113 @@ describeRealCodex('real Codex experiment onboarding e2e', () => {
   )
 
   it(
-    'resolves a name-first experiment start without replacing the exact match with its starter',
+    'starts a private after-dinner walk experiment without catalog discovery or a webpage link',
     async () => {
-      const result = await runNameFirstExperimentStartProbe({
-        dryRunRevisionMismatch: false,
-        exactTitleAvailable: true,
-      })
-      const startCommands = result.actions.filter((action) =>
-        action.kind === 'command'
-        && action.ok
-        && action.command.includes('vault-cli experiment start')
-        && !isRecordedVaultHelpCommand(action.command)
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-private-experiment-start-e2e-'),
       )
+      const skillsRoot = path.join(workingDirectory, 'skills')
+      const binDirectory = path.join(workingDirectory, 'bin')
+      const commandLogPath = path.join(workingDirectory, 'commands.log')
 
-      expect(
-        result.actions.some((action) =>
-          action.kind === 'command'
-          && action.ok
-          && action.command.includes('vault-cli commons protocol show')
-          && action.command.includes(EXPERIMENT_START_EXACT_KEY)
-        ),
-        'exact named protocol show',
-      ).toBe(true)
-      expect(startCommands).toHaveLength(2)
-      expect(
-        startCommands.filter((action) =>
-          action.kind === 'command' && action.command.includes('--dry-run')
-        ),
-      ).toHaveLength(1)
-      for (const action of startCommands) {
-        if (action.kind !== 'command') {
-          continue
+      try {
+        await materializeAssistantSkill({
+          skillsRoot,
+          slug: 'experiment-onboarding',
+        })
+        await materializeAssistantSkill({
+          skillsRoot,
+          slug: 'daily-activity',
+        })
+        await materializePrivateExperimentStartVaultCli({
+          binDirectory,
+          commandLogPath,
+        })
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions:
+            buildExperimentOnboardingDeveloperInstructions(),
+          env: {
+            ...config.env,
+            PATH: `${binDirectory}:${config.env.PATH ?? ''}`,
+            [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+          },
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt: [
+            'I want to see whether a 10-minute walk after dinner improves my sleep score.',
+            'Run it for 14 days starting tomorrow and use my Oura sleep score as the result.',
+            'I have no health conditions or medicines that matter here, no other experiments are running, and I do not want reminders or check-ins.',
+            'Go ahead and set it up now.',
+          ].join(' '),
+          reasoningEffort: 'low',
+          sandbox: 'workspace-write',
+          workingDirectory,
+        })
+        const commandLog = (await readFile(commandLogPath, 'utf8'))
+          .split('\n')
+          .filter((line) => line.length > 0)
+        const startCommands = commandLog.filter((command) =>
+          command.startsWith('experiment start ')
+          && !isRecordedVaultHelpCommand(command)
+        )
+        const realStarts = startCommands.filter((command) =>
+          !command.split(/\s+/u).includes('--dry-run')
+        )
+        const reply = result.finalMessage.trim()
+
+        process.stdout.write(`[private-experiment-start-e2e] ${JSON.stringify({
+          commands: commandLog.map(redactRealCodexDiagnosticText),
+          reply,
+          scenario: 'private-after-dinner-walk-sleep-start',
+        })}\n`)
+
+        expect(
+          commandLog.filter((command) => command.startsWith('commons protocol')),
+          'no retired public protocol discovery',
+        ).toEqual([])
+        for (const command of startCommands) {
+          const tokens = command.split(/\s+/u)
+          for (const flag of PRIVATE_EXPERIMENT_RETIRED_START_FLAGS) {
+            expect(
+              tokens.filter((token) =>
+                token === flag || token.startsWith(`${flag}=`)
+              ),
+              `retired start flag ${flag}`,
+            ).toEqual([])
+          }
         }
-        const normalizedCommand = action.command.replaceAll(/['"]/gu, '')
-        expect(normalizedCommand).toContain(
-          `experiment start ${EXPERIMENT_START_SLUG}`,
+        expect(realStarts, 'exactly one persisted private run').toHaveLength(1)
+        const [realStart] = realStarts
+        expect(realStart).toMatch(new RegExp(
+          `--intervention-start[= ]${PRIVATE_EXPERIMENT_START_INTERVENTION_DATE}(?:\\s|$)`,
+          'u',
+        ))
+        expect(realStart).toMatch(/--primary-outcome-label[= ]\S/u)
+        expect(realStart).toMatch(/sleep/iu)
+        expect(startCommands.at(-1), 'no start after the persisted run').toBe(
+          realStart,
         )
-        expect(normalizedCommand).toContain(
-          `--from-protocol ${EXPERIMENT_START_EXACT_KEY}`,
-        )
-        expect(normalizedCommand).toContain(
-          `--page-revision-id ${EXPERIMENT_START_PAGE_REVISION}`,
-        )
-        expect(normalizedCommand).toContain(
-          `--run-spec-revision-id ${EXPERIMENT_START_RUN_SPEC_REVISION}`,
-        )
-        expect(normalizedCommand).toContain(
-          `--intervention-start ${EXPERIMENT_START_INTERVENTION_DATE}`,
-        )
-        expect(normalizedCommand).not.toContain(EXPERIMENT_START_STARTER_KEY)
+
+        expect(reply).toMatch(/walk/iu)
+        expect(reply).toMatch(/sleep/iu)
+        expect(reply).toMatch(/set up|saved|started|created|starts|is on|ready|all set/iu)
+        expect(reply).not.toMatch(/https?:\/\//iu)
+        expect(reply).not.toMatch(/\/experiments\b|withmurph\.ai/iu)
+        expect(reply).not.toMatch(/experiment (?:page|library|catalog)|Health Commons/iu)
+        expect(reply).not.toContain(PRIVATE_EXPERIMENT_START_ID)
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
       }
-    },
-    360_000,
-  )
-
-  it(
-    'answers a stale title-only Start draft without clarification or a write',
-    async () => {
-      const result = await runNameFirstExperimentStartProbe({
-        dryRunRevisionMismatch: false,
-        exactTitleAvailable: false,
-      })
-
-      expect(
-        result.actions.some((action) =>
-          action.kind === 'command'
-          && action.ok
-          && (
-            action.command.includes('vault-cli commons protocol explore')
-            || action.command.includes('vault-cli commons protocol list')
-          )
-        ),
-        'current public protocol lookup',
-      ).toBe(true)
-      expect(
-        result.actions.some((action) =>
-          action.kind === 'command'
-          && action.command.includes('vault-cli commons protocol show')
-          && action.command.includes(EXPERIMENT_START_EXACT_KEY)
-        ),
-        'no unavailable exact protocol show',
-      ).toBe(false)
-      expect(
-        result.actions.some((action) =>
-          action.kind === 'command'
-          && action.command.includes('vault-cli experiment start')
-        && !isRecordedVaultHelpCommand(action.command)
-        ),
-        'no experiment write without an exact match',
-      ).toBe(false)
-      expect(result.finalMessage).toMatch(/not currently available/iu)
-      expect(result.finalMessage).toMatch(/no (?:run|experiment) was created|(?:have not|did not|haven.t|didn.t) create(?:d)? (?:a |an |the )?(?:run|experiment)/iu)
-      expect(result.finalMessage).toMatch(/Finnish Dry Sauna/iu)
-      expect(result.finalMessage).not.toMatch(/which experiment|clarif/iu)
-      expect(result.finalMessage).not.toMatch(/refresh|reopen/iu)
-      expect(result.finalMessage).not.toContain(EXPERIMENT_START_EXACT_KEY)
-      expect(result.finalMessage).not.toContain(EXPERIMENT_START_STARTER_KEY)
-      expect(result.finalMessage).not.toContain('sha256:')
-    },
-    360_000,
-  )
-
-  it(
-    'stops after a name-first revision mismatch instead of retrying unpinned',
-    async () => {
-      const result = await runNameFirstExperimentStartProbe({
-        dryRunRevisionMismatch: true,
-        exactTitleAvailable: true,
-      })
-      const startCommands = result.actions.filter((action) =>
-        action.kind === 'command'
-        && action.command.includes('vault-cli experiment start')
-        && !isRecordedVaultHelpCommand(action.command)
-      )
-
-      expect(startCommands.length).toBeGreaterThan(0)
-      expect(
-        startCommands.some((action) =>
-          action.kind === 'command' && !action.command.includes('--dry-run')
-        ),
-        'no real start after revision mismatch',
-      ).toBe(false)
-      for (const action of startCommands) {
-        if (action.kind !== 'command') {
-          continue
-        }
-        const normalizedCommand = action.command.replaceAll(/['"]/gu, '')
-        expect(normalizedCommand).toContain(
-          `experiment start ${EXPERIMENT_START_SLUG}`,
-        )
-        expect(normalizedCommand).toContain(
-          `--from-protocol ${EXPERIMENT_START_EXACT_KEY}`,
-        )
-        expect(normalizedCommand).toContain(
-          `--page-revision-id ${EXPERIMENT_START_PAGE_REVISION}`,
-        )
-        expect(normalizedCommand).toContain(
-          `--run-spec-revision-id ${EXPERIMENT_START_RUN_SPEC_REVISION}`,
-        )
-        expect(normalizedCommand).toContain(
-          `--intervention-start ${EXPERIMENT_START_INTERVENTION_DATE}`,
-        )
-      }
-      expect(result.finalMessage).toMatch(/changed|revision|updated/iu)
     },
     360_000,
   )
@@ -35849,6 +35887,134 @@ describeRealCodex('real Codex weekly usage optimizer e2e', () => {
   }, 720_000)
 })
 
+describeRealCodex('real Codex isolated usage review e2e', () => {
+  it('isolates the silent optimizer while preserving canonical preferences and chat continuity', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const vault = await mkdtemp(path.join(tmpdir(), 'murph-isolated-usage-review-'))
+    const permissionHome = await materializeRealCodexHostedPermissionHome(config)
+    const bin = path.join(vault, '.local', 'bin')
+    const codexCommand = normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined
+    const env = { ...config.env, HOME: vault, PATH: `${bin}${path.delimiter}${config.env.PATH ?? ''}`, VAULT: vault }
+    const message = (prompt: string, sessionId?: string) => sendAssistantMessageLocal({
+      approvalPolicy: 'never', channel: 'telegram', codexCommand, codexHome: permissionHome.codexHome,
+      deliverResponse: false, includeEarlySessionOnboarding: false,
+      model: config.model, modelProvider: config.modelProvider, provider: 'codex-cli',
+      executionContext: { hosted: { memberId: 'synthetic-member', userEnvKeys: [],
+        usageRecorder: { async recordUsage(usage) { recordRealCodexProviderUsage({ ...usage, providerMetadataJson: null }) } },
+      } },
+      prompt, reasoningEffort: 'medium', sandbox: 'workspace-write', sessionId,
+      threadId: 'synthetic-usage-review-thread', threadIsDirect: true,
+      turnEnvironment: { currentWorkingDirectory: vault, env }, vault, workingDirectory: vault,
+    })
+    const events: unknown[] = []
+    const requests: AssistantHostedAutomationToolRequest[] = []
+    const feedback: Array<{ summary: string }> = []
+    const usageRequests: unknown[] = []
+    try {
+      await initializeVault({ timezone: 'UTC', vaultRoot: vault })
+      await mkdir(bin, { recursive: true })
+      const cli = fileURLToPath(new URL('../../cli/dist/bin.js', import.meta.url))
+      const records: Array<Awaited<ReturnType<typeof upsertAutomation>>['record']> = []
+      for (const [slug, instructions] of [
+        ['cue', 'Say: Time for your short stretch break.'],
+        ['pinned', 'The member explicitly requested GPT-6.1 Sol for this reminder. Keep that model. Say: Time for your break.'],
+      ]) {
+        const saved = await upsertAutomation({
+          vaultRoot: vault, slug: `synthetic-review-${slug}`, title: `Synthetic ${slug}`,
+          instructions, status: 'active', continuityPolicy: 'preserve', tags: [],
+          schedule: { kind: 'dailyLocal', localTime: '09:00', timeZone: 'UTC' },
+          assistantTargetOverride: { model: 'gpt-6.1-sol', reasoningEffort: 'medium' },
+          route: { channel: 'telegram', identityId: null, participantId: null,
+            threadId: 'synthetic-usage-review-thread', threadIsDirect: true, deliveryTarget: null },
+        })
+        records.push(saved.record)
+      }
+      const inventory = await execFileAsync(process.execPath,
+        [cli, 'automation', 'list', '--compact', '--status', 'active', '--limit', '200', '--format', 'json'],
+        { cwd: vault, env, timeout: 30_000 })
+      expect(JSON.parse(inventory.stdout).totalCount).toBe(2)
+      // Keep the inventory boundary synthetic: the hosted permission profile
+      // cannot launch this host's Node installation. The payload still comes
+      // from the shipped CLI and all inspections/patches use canonical storage.
+      await writeFile(path.join(bin, 'vault-cli'), [
+        '#!/bin/sh', 'set -eu', 'case "$*" in',
+        `  automation\\ list*) printf '%s\\n' ${quoteNutritionShellLiteral(inventory.stdout.trim())} ;;`,
+        '  *) echo "Unexpected inventory operation." >&2; exit 2 ;;', 'esac',
+      ].join('\n') + '\n', { mode: 0o700 })
+      const prior = await message('For this conversation only, the synthetic demonstration label is copper kite. Do not save it or create anything. Reply only: Understood.')
+      const foregroundResume = prior.session.resumeState
+      expect(foregroundResume).not.toBeNull()
+      const target = createAssistantModelTarget({
+        approvalPolicy: 'never', codexCommand, codexHome: permissionHome.codexHome,
+        model: config.model, modelProvider: config.modelProvider, provider: 'codex-cli',
+        reasoningEffort: 'medium', sandbox: 'workspace-write',
+      })
+      if (!target) throw new Error('Expected a real review model target.')
+      const occurrenceAt = '2030-01-10T12:00:00.000Z'
+      const result = await sendAssistantNotificationLocal({
+        channel: 'telegram', threadId: prior.session.binding.threadId, threadIsDirect: true,
+        sessionId: prior.session.sessionId, vault, workingDirectory: vault,
+        instructions: MURPH_WEEKLY_USAGE_OPTIMIZER_AUTOMATION.instructions,
+        scheduledOccurrenceAt: occurrenceAt, turnTrigger: 'automation-cron',
+        scheduledInvocationAuthority: { automationId: MURPH_WEEKLY_USAGE_OPTIMIZER_AUTOMATION.automationId, occurrenceAt },
+        turnEnvironment: { currentWorkingDirectory: vault, env },
+        onTraceEvent: event => events.push(event.rawEvent),
+        executionContext: { hosted: {
+          usageRecorder: { async recordUsage(usage) { recordRealCodexProviderUsage({ ...usage, providerMetadataJson: null }) } },
+          defaultTarget: target, memberId: 'synthetic-member', userEnvKeys: [],
+          usageDiagnostics: { async read(request) { usageRequests.push(request); return syntheticUsageDiagnostics() } },
+          productFeedbackCandidateSink: { acceptProductFeedbackCandidate(candidate, authorization) {
+            expect(authorization?.committedUsageOptimizerScope).toEqual({ memberId: 'synthetic-member', occurrenceAt })
+            feedback.push(candidate)
+          } },
+          automationTool: { async request(request) {
+            requests.push(request)
+            if (request.action !== 'inspect' && request.action !== 'patch') throw new Error('Unexpected automation action.')
+            let record = await showAutomation({ vaultRoot: vault, automationId: request.lookup })
+            if (!record) throw new Error('Expected the canonical reminder.')
+            if (request.action === 'patch') {
+              expect(record.automationId).toBe(records[0]!.automationId)
+              expect(Object.keys(request).sort()).toEqual(['action', 'assistantTargetOverride', 'expectedUpdatedAt', 'lookup'])
+              record = (await patchAutomation({ lookup: record.automationId, expectedUpdatedAt: request.expectedUpdatedAt, assistantTargetOverride: request.assistantTargetOverride, vaultRoot: vault })).record
+            }
+            const common = { automationId: record.automationId, lookupId: record.automationId,
+              title: record.title, status: record.status, updatedAt: record.updatedAt,
+              schedule: record.schedule, contextReferences: record.contextReferences ?? [],
+              assistantTargetOverride: record.assistantTargetOverride ?? null,
+              effectiveTimeZone: 'UTC', occurrenceProjection: { status: 'resolved' as const, nextOccurrenceAt: null },
+              routeBinding: 'preserved' as const }
+            return request.action === 'inspect'
+              ? { ...common, action: 'inspect', view: 'model_review', managed: false, instructions: record.instructions }
+              : { ...common, action: 'patch', created: false }
+          } },
+        } },
+      })
+      expect(readCapabilityRoutingActions(events).filter(action => action.kind === 'command' && action.command.includes('automation list'))).toHaveLength(1)
+      expect(result.decision.kind).toBe('skip')
+      expect(result.response).toBeNull()
+      expect(await listAssistantOutboxIntents(vault)).toHaveLength(0)
+      expect(usageRequests).toEqual([{ days: 14, limit: 10 }])
+      expect(feedback).toHaveLength(1)
+      expect(feedback[0]?.summary).toMatch(/^Usage optimization audit:/u)
+      expect(feedback[0]?.summary).not.toMatch(/copper kite|synthetic-member|Synthetic cue|Synthetic pinned/iu)
+      expect(requests.filter(request => request.action === 'inspect'), feedback[0]?.summary).toHaveLength(2)
+      expect(requests.filter(request => request.action === 'patch')).toHaveLength(1)
+      expect((await showAutomation({ vaultRoot: vault, automationId: records[0]!.automationId }))?.assistantTargetOverride)
+        .toEqual({ model: 'gpt-6-luna', reasoningEffort: 'high' })
+      expect(await showAutomation({ vaultRoot: vault, automationId: records[1]!.automationId })).toEqual(records[1])
+      expect((await getAssistantSession(vault, prior.session.sessionId)).resumeState).toEqual(foregroundResume)
+      const followup = await message('What was the demonstration label from this conversation? Reply only with the label.', prior.session.sessionId)
+      expect(followup.response).toMatch(/copper kite/iu)
+      process.stdout.write(`[isolated-usage-review-live] ${JSON.stringify({ model: config.model, decision: result.decision.kind,
+        diagnostics: usageRequests.length, inspections: 2, patches: 1, reports: feedback.length,
+        foregroundResumePreserved: true, followup: followup.response })}\n`)
+    } finally {
+      await stopWarmCodexAppServer('isolated-usage-review-complete')
+      await removeRealCodexTemporaryPaths([vault, ...permissionHome.temporaryPaths, ...config.temporaryPaths])
+    }
+  }, 720_000)
+})
+
 describeRealCodex('real Codex Luna bounded reminder lookup e2e', () => {
   it('reads one completion record and skips a completed reminder without rewriting it', async () => {
     const config = await resolveRealCodexE2eConfig()
@@ -40015,77 +40181,6 @@ async function materializeRealWorkoutVaultCli(input: {
   await chmod(executablePath, 0o700)
 }
 
-async function runNameFirstExperimentStartProbe(input: {
-  dryRunRevisionMismatch: boolean
-  exactTitleAvailable: boolean
-}): Promise<{
-  actions: CapabilityRoutingAction[]
-  finalMessage: string
-}> {
-  const config = await resolveRealCodexE2eConfig()
-  const workingDirectory = await mkdtemp(
-    path.join(tmpdir(), 'murph-name-first-experiment-e2e-'),
-  )
-
-  try {
-    const skillsRoot = path.join(workingDirectory, 'skills')
-    const binDirectory = path.join(workingDirectory, 'bin')
-    await materializeAssistantSkill({
-      skillsRoot,
-      slug: 'experiment-onboarding',
-    })
-    await materializeExperimentStartVaultCli({
-      binDirectory,
-      dryRunRevisionMismatch: input.dryRunRevisionMismatch,
-      exactTitleAvailable: input.exactTitleAvailable,
-    })
-    const result = await executeRealCodexAppServerTurn({
-      approvalPolicy: 'never',
-      baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
-      codexCommand:
-        normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
-        ?? undefined,
-      codexHome: config.codexHome,
-      developerInstructions:
-        buildExperimentOnboardingDeveloperInstructions(),
-      env: {
-        ...config.env,
-        PATH: `${binDirectory}:${config.env.PATH ?? ''}`,
-        [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
-      },
-      model: config.model,
-      modelProvider: config.modelProvider,
-      prompt: input.exactTitleAvailable
-        ? [
-            'I want to start the Bryan Johnson Sauna experiment.',
-            'Use its default one-day test plan starting tomorrow.',
-            'There are no active experiments or saved-context changes, its safety screen has no questions, and I decline reminders or other support.',
-            input.dryRunRevisionMismatch
-              ? 'If the selected protocol changed during validation, stop and tell me; do not retry or start a different revision.'
-              : 'Create the run now after the required dry run.',
-          ].join(' ')
-        : 'I want to start the Bryan Johnson Sauna experiment.',
-      reasoningEffort: 'low',
-      sandbox: 'workspace-write',
-      workingDirectory,
-    })
-
-    process.stdout.write(`[name-first-experiment-e2e] ${JSON.stringify({
-      ...input, reply: result.finalMessage, actions: readCapabilityRoutingActions(result.jsonEvents).map(action =>
-        action.kind === 'command' ? { command: redactRealCodexDiagnosticText(action.command), ok: action.ok } : { tool: action.tool, success: action.success }),
-    })}\n`)
-    return {
-      actions: readCapabilityRoutingActions(result.jsonEvents),
-      finalMessage: result.finalMessage,
-    }
-  } finally {
-    await removeRealCodexTemporaryPaths([
-      workingDirectory,
-      ...config.temporaryPaths,
-    ])
-  }
-}
-
 async function runHealthCommonsKnowledgeProbe(prompt: string): Promise<{
   actions: CapabilityRoutingAction[]
   finalMessage: string
@@ -40691,160 +40786,97 @@ async function materializeExperimentSupportInventoryVaultCli(input: {
   await chmod(executablePath, 0o700)
 }
 
-async function materializeExperimentStartVaultCli(input: {
+async function materializePrivateExperimentStartVaultCli(input: {
   binDirectory: string
-  dryRunRevisionMismatch: boolean
-  exactTitleAvailable: boolean
+  commandLogPath: string
 }): Promise<void> {
   await mkdir(input.binDirectory, { recursive: true })
   const executablePath = path.join(input.binDirectory, 'vault-cli')
-  const exploreResult = input.exactTitleAvailable
-    ? JSON.stringify({
-        groups: [{
-          matchedProtocol: {
-            key: EXPERIMENT_START_EXACT_KEY,
-            title: 'Bryan Johnson Sauna',
-          },
-          starterCandidate: {
-            protocol: {
-              key: EXPERIMENT_START_STARTER_KEY,
-              title: 'Finnish Dry Sauna',
-            },
-          },
-        }],
-        matchedEntity: {
-          entityType: 'protocol_variant',
-          key: EXPERIMENT_START_EXACT_KEY,
-          revision: {
-            pageRevisionId: EXPERIMENT_START_PAGE_REVISION,
-            runSpecRevisionId: EXPERIMENT_START_RUN_SPEC_REVISION,
-          },
-          title: 'Bryan Johnson Sauna',
-        },
-        starterCandidate: {
-          protocol: {
-            key: EXPERIMENT_START_STARTER_KEY,
-            title: 'Finnish Dry Sauna',
-          },
-        },
-      })
-    : JSON.stringify({
-        groups: [{
-          starterCandidate: {
-            protocol: {
-              key: EXPERIMENT_START_STARTER_KEY,
-              title: 'Finnish Dry Sauna',
-            },
-          },
-        }],
-        matchedEntity: null,
-      })
-  const showResult = JSON.stringify({
-    protocol: {
-      experimentOnboarding: {
-        safetyScreen: {
-          mustAsk: [],
-        },
-        setupSlots: [],
-      },
-      key: EXPERIMENT_START_EXACT_KEY,
-      protocol: {
-        sessionFieldIds: [],
-      },
-      revision: {
-        pageRevisionId: EXPERIMENT_START_PAGE_REVISION,
-        runSpecRevisionId: EXPERIMENT_START_RUN_SPEC_REVISION,
-      },
-      routeId: 'bryan-johnson-sauna',
-      safety: {
-        stopIf: [],
-      },
-      testPlans: [{
-        baselineDays: 0,
-        id: 'default',
-        interventionDays: 1,
-        primaryBiomarkerKey: 'biomarker:heat-exposure',
-      }],
-      title: 'Bryan Johnson Sauna',
+  const startHelp = [
+    'Usage: vault-cli experiment start <slug> [options]',
+    '  --title <text> --hypothesis <text> --status <status>',
+    '  --intervention-start <YYYY-MM-DD> --intervention-days <n>',
+    '  --baseline-start <YYYY-MM-DD> --baseline-end <YYYY-MM-DD> --baseline-days <n>',
+    '  --primary-outcome-kind <metric|structured_review> --primary-outcome-key <key> --primary-outcome-label <label>',
+    '  --primary-outcome-source-metric-key <key> --primary-outcome-session-field <id>',
+    '  --stop-condition <text> --notification-style <skip_by_default|send_scheduled_summary>',
+    '  --dry-run --format json',
+  ].join('\n')
+  const progressResult = JSON.stringify({
+    ok: true,
+    progress: {
+      experimentId: PRIVATE_EXPERIMENT_START_ID,
+      phase: 'planned',
     },
   })
-  const starterShowResult = JSON.stringify({
-    protocol: {
-      experimentOnboarding: {
-        safetyScreen: {
-          mustAsk: [],
-        },
-        setupSlots: [],
-      },
-      key: EXPERIMENT_START_STARTER_KEY,
-      protocol: {
-        sessionFieldIds: [],
-      },
-      revision: {
-        pageRevisionId: `sha256:${'3'.repeat(64)}`,
-        runSpecRevisionId: `sha256:${'4'.repeat(64)}`,
-      },
-      routeId: 'finnish-dry-sauna',
-      safety: {
-        stopIf: [],
-      },
-      testPlans: [{
-        baselineDays: 0,
-        id: 'default',
-        interventionDays: 1,
-        primaryBiomarkerKey: 'biomarker:heat-exposure',
-      }],
-      title: 'Finnish Dry Sauna',
-    },
+  const wearableSleepResult = JSON.stringify({
+    ok: true,
+    metrics: [{
+      date: '2026-07-28',
+      key: 'sleep_score',
+      provider: 'oura',
+      value: 78,
+    }],
   })
-  const exactShowResult = input.exactTitleAvailable
-    ? [`    printf '%s\\n' '${showResult}'`]
-    : [
-        '    printf \'%s\\n\' \'protocol not found\' >&2',
-        '    exit 1',
-      ]
-  const dryRunResult = input.dryRunRevisionMismatch
-    ? '{"error":{"code":"protocol_revision_mismatch","message":"The selected protocol changed."}}'
-    : '{"dryRun":true,"ok":true}'
-  const dryRunExit = input.dryRunRevisionMismatch ? 'exit 1' : 'exit 0'
+  const retiredFlagPattern = PRIVATE_EXPERIMENT_RETIRED_START_FLAGS
+    .flatMap((flag) => [flag, `${flag}=*`])
+    .join('|')
 
   await writeFile(
     executablePath,
     [
       '#!/bin/sh',
+      `printf '%s\\n' "$*" >> ${quoteNutritionShellLiteral(input.commandLogPath)}`,
+      'dry_run=0',
       'for arg in "$@"; do',
-      `  if [ "$arg" = --help ]; then exec ${quoteNutritionShellLiteral(process.execPath)} ${quoteNutritionShellLiteral(fileURLToPath(new URL('../../cli/dist/bin.js', import.meta.url)))} "$@"; fi`,
+      '  case "$arg" in',
+      `    --help|-h|--schema) printf '%s\\n' ${quoteNutritionShellLiteral(startHelp)}; exit 0 ;;`,
+      `    ${retiredFlagPattern}) printf '%s\\n' '{"error":"unknown option"}' >&2; exit 64 ;;`,
+      '    --dry-run) dry_run=1 ;;',
+      '  esac',
       'done',
-      'command_line="$*"',
-      'case "$command_line" in',
-      '  *"commons protocol explore"*|*"commons protocol list"*)',
-      `    printf '%s\\n' '${exploreResult}'`,
-      '    ;;',
-      `  *"commons protocol show ${EXPERIMENT_START_EXACT_KEY}"*)`,
-      ...exactShowResult,
-      '    ;;',
-      `  *"commons protocol show ${EXPERIMENT_START_STARTER_KEY}"*)`,
-      `    printf '%s\\n' '${starterShowResult}'`,
-      '    ;;',
-      '  *"commons protocol show"*)',
-      '    printf \'%s\\n\' \'unexpected protocol key\' >&2',
+      'case "$*" in',
+      '  "commons protocol"*)',
+      '    printf \'%s\\n\' \'{"error":"unknown command"}\' >&2',
       '    exit 64',
       '    ;;',
-      '  *"experiment start "*)',
-      `    case "$command_line" in *"experiment start ${EXPERIMENT_START_SLUG} "*) ;; *) printf '%s\\n' '{"error":"experiment start requires the fixture slug"}' >&2; exit 64 ;; esac`,
-      `    case "$command_line" in *"--from-protocol ${EXPERIMENT_START_EXACT_KEY}"*) ;; *) printf '%s\\n' '{"error":"experiment start requires the exact protocol"}' >&2; exit 64 ;; esac`,
-      `    case "$command_line" in *"--page-revision-id ${EXPERIMENT_START_PAGE_REVISION}"*) ;; *) printf '%s\\n' '{"error":"experiment start requires the page revision"}' >&2; exit 64 ;; esac`,
-      `    case "$command_line" in *"--run-spec-revision-id ${EXPERIMENT_START_RUN_SPEC_REVISION}"*) ;; *) printf '%s\\n' '{"error":"experiment start requires the run-spec revision"}' >&2; exit 64 ;; esac`,
-      `    case "$command_line" in *"--intervention-start ${EXPERIMENT_START_INTERVENTION_DATE}"*) ;; *) printf '%s\\n' '{"error":"experiment start requires the intervention start"}' >&2; exit 64 ;; esac`,
-      '    case "$command_line" in',
-      '      *"--dry-run"*)',
-      `        printf '%s\\n' '${dryRunResult}'`,
-      `        ${dryRunExit}`,
-      '        ;;',
-      '      *)',
-      '        printf \'%s\\n\' \'{"experiment":{"id":"experiment-bryan"},"ok":true}\'',
-      '        ;;',
-      '    esac',
+      '  "experiment start "*)',
+      '    intervention_ok=0',
+      '    label_ok=0',
+      '    previous=""',
+      '    for arg in "$@"; do',
+      '      case "$previous" in',
+      `        --intervention-start) [ "$arg" = ${PRIVATE_EXPERIMENT_START_INTERVENTION_DATE} ] && intervention_ok=1 ;;`,
+      '        --primary-outcome-label) case "$arg" in ""|--*) ;; *) label_ok=1 ;; esac ;;',
+      '      esac',
+      '      case "$arg" in',
+      `        --intervention-start=${PRIVATE_EXPERIMENT_START_INTERVENTION_DATE}) intervention_ok=1 ;;`,
+      '        --primary-outcome-label=?*) label_ok=1 ;;',
+      '      esac',
+      '      previous="$arg"',
+      '    done',
+      '    if [ "$intervention_ok" -ne 1 ] || [ "$label_ok" -ne 1 ]; then',
+      '      printf \'%s\\n\' \'{"error":"experiment start requires tomorrow and a primary outcome label"}\' >&2',
+      '      exit 64',
+      '    fi',
+      '    if [ "$dry_run" -eq 1 ]; then',
+      '      printf \'%s\\n\' \'{"dryRun":true,"ok":true}\'',
+      '    else',
+      `      printf '%s\\n' '{"experiment":{"id":"${PRIVATE_EXPERIMENT_START_ID}","status":"active"},"ok":true}'`,
+      '    fi',
+      '    ;;',
+      `  "experiment progress ${PRIVATE_EXPERIMENT_START_ID}"*|"experiment show ${PRIVATE_EXPERIMENT_START_ID}"*)`,
+      `    printf '%s\\n' '${progressResult}'`,
+      '    ;;',
+      '  "experiment list"*)',
+      '    printf \'%s\\n\' \'{"experiments":[],"ok":true}\'',
+      '    ;;',
+      '  "wearables "*)',
+      `    printf '%s\\n' '${wearableSleepResult}'`,
+      '    ;;',
+      '  "batch "*)',
+      '    printf \'%s\\n\' \'{"error":"batch is unavailable in this fixture; run each command directly"}\' >&2',
+      '    exit 64',
       '    ;;',
       '  *)',
       '    printf \'%s\\n\' \'{"data":[],"ok":true}\'',

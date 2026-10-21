@@ -11,13 +11,8 @@ aliases:
 - Standards of Care in Diabetes—2026
 categories:
 - post-meal-walking
-relations:
--
-  type: related_protocol
-  target: protocol_variant:post-meal-walking/walking-after-every-meal
--
-  type: parent_family
-  target: experiment_family:post-meal-walking
+relations: []
+
 source:
   kind: guideline
   title: Standards of Care in Diabetes—2026

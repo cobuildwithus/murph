@@ -45,6 +45,9 @@ const DELETED_COMMONS_COMMANDS = [
   'commons search',
   'commons get',
   'commons source list',
+  'commons protocol list',
+  'commons protocol show',
+  'commons protocol explore',
 ] as const
 let inProcessCliProcessStateQueue: Promise<void> = Promise.resolve()
 
@@ -2184,7 +2187,7 @@ test('clinical import descriptors expose scaffolds and payload schemas', () => {
   }
 })
 
-test('experiment descriptor describes the explicit start source choice', () => {
+test('experiment descriptor describes a private start without a public catalog', () => {
   const descriptor = vaultCliCommandDescriptors.find(
     (candidate) => candidate.id === 'experiment',
   )
@@ -2198,9 +2201,8 @@ test('experiment descriptor describes the explicit start source choice', () => {
   )
 
   assert.notEqual(startCommand, undefined, 'expected experiment start descriptor')
-  assert.match(startCommand?.description ?? '', /Health Commons protocol/u)
-  assert.match(startCommand?.description ?? '', /no-public-protocol fallback/u)
-  assert.doesNotMatch(startCommand?.description ?? '', /protocol key is supplied/u)
+  assert.match(startCommand?.description ?? '', /private typed experiment run/u)
+  assert.doesNotMatch(startCommand?.description ?? '', /Health Commons|protocol/u)
 })
 
 test('retired age commands follow the existing unsupported-command behavior', async () => {
@@ -2983,6 +2985,7 @@ test('knowledge upsert persists assistant-authored pages through the built CLI b
         'knowledge',
         'show',
         'sleep-quality',
+        '--raw',
         '--vault',
         vaultRoot,
       ]),
@@ -3047,6 +3050,7 @@ test('knowledge upsert persists assistant-authored pages through the built CLI b
         'knowledge',
         'show',
         'sleep-quality',
+        '--raw',
         '--vault',
         vaultRoot,
       ]),
@@ -3109,6 +3113,7 @@ test('knowledge append-section appends one dated page section through the built 
       'knowledge',
       'show',
       'weekly-health-insights',
+      '--raw',
       '--vault',
       vaultRoot,
     ])
@@ -3950,11 +3955,7 @@ test('compact llms json manifest remains available', async () => {
     true,
   )
   assert.equal(
-    manifest.commands.some((command) => command.name === 'commons protocol show'),
-    true,
-  )
-  assert.equal(
-    manifest.commands.some((command) => command.name === 'commons protocol explore'),
+    manifest.commands.some((command) => command.name === 'commons goal show'),
     true,
   )
   for (const deletedCommand of DELETED_COMMONS_COMMANDS) {
@@ -4034,7 +4035,7 @@ test('full llms json manifest remains available for schema-rich commands', async
   assert.doesNotMatch(String(automationSaveCommand?.description ?? ''), /update/u)
   assert.doesNotMatch(String(automationImportCommand?.description ?? ''), /bulk-edit/u)
   assert.equal(
-    manifest.commands.some((command) => command.name === 'commons protocol list'),
+    manifest.commands.some((command) => command.name === 'commons knowledge search'),
     true,
   )
   for (const deletedCommand of DELETED_COMMONS_COMMANDS) {

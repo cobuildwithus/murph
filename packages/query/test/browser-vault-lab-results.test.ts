@@ -9,7 +9,6 @@ import {
   createBrowserVaultReplica,
   createVaultReadModel,
   parseBrowserVaultReplica,
-  selectBrowserVaultExperimentResults,
   splitBrowserVaultReplica,
 } from "../src/browser.ts";
 import {
@@ -642,34 +641,6 @@ function createLabTest(
     testCategory: "blood",
     testName: "blood_panel",
   });
-}
-
-function createExperiment(
-  entityId: string,
-  experimentSlug: string,
-  analysisPlan: Record<string, unknown>,
-): CanonicalEntity {
-  return {
-    attributes: {},
-    body: null,
-    date: "2026-01-01",
-    entityId,
-    experimentSlug,
-    family: "experiment",
-    frontmatter: { analysisPlan, status: "active" },
-    kind: "experiment",
-    links: [],
-    lookupIds: [entityId, experimentSlug],
-    occurredAt: "2026-01-01T00:00:00.000Z",
-    path: `bank/experiments/${experimentSlug}.md`,
-    primaryLookupId: entityId,
-    recordClass: "bank",
-    relatedIds: [],
-    status: "active",
-    stream: null,
-    tags: [],
-    title: "BUN alias experiment",
-  } satisfies CanonicalEntity;
 }
 
 function createEvent(

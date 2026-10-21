@@ -3550,85 +3550,6 @@
                     }
                   }
                 },
-                "protocol": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "properties": {
-                    "commands": {
-                      "type": "object",
-                      "additionalProperties": false,
-                      "properties": {
-                        "list": {
-                          "type": "object",
-                          "additionalProperties": false,
-                          "properties": {
-                            "options": {
-                              "type": "object",
-                              "additionalProperties": false,
-                              "properties": {
-                                "query": {
-                                  "description": "Optional text filter over protocol title, summary, aliases, categories, and body.",
-                                  "type": "string",
-                                  "minLength": 1
-                                },
-                                "status": {
-                                  "description": "Optional Health Commons page status filter: draft, field-testing, reviewed, deprecated, community. Use * for all.",
-                                  "type": "string",
-                                  "enum": [
-                                    "draft",
-                                    "field-testing",
-                                    "reviewed",
-                                    "deprecated",
-                                    "community",
-                                    "*"
-                                  ]
-                                },
-                                "category": {
-                                  "description": "Optional protocol category filter. Repeat --category for multiple values.",
-                                  "type": "array",
-                                  "items": {
-                                    "type": "string",
-                                    "minLength": 1
-                                  }
-                                },
-                                "limit": {
-                                  "default": 10,
-                                  "description": "Maximum number of public protocol variants to return.",
-                                  "type": "integer",
-                                  "exclusiveMinimum": 0,
-                                  "maximum": 500
-                                }
-                              }
-                            }
-                          }
-                        },
-                        "show": {
-                          "type": "object",
-                          "additionalProperties": false
-                        },
-                        "explore": {
-                          "type": "object",
-                          "additionalProperties": false,
-                          "properties": {
-                            "options": {
-                              "type": "object",
-                              "additionalProperties": false,
-                              "properties": {
-                                "limit": {
-                                  "default": 5,
-                                  "description": "Maximum number of matched protocol groups to return before family expansion.",
-                                  "type": "integer",
-                                  "exclusiveMinimum": 0,
-                                  "maximum": 100
-                                }
-                              }
-                            }
-                          }
-                        }
-                      }
-                    }
-                  }
-                },
                 "knowledge": {
                   "type": "object",
                   "additionalProperties": false,
@@ -11779,34 +11700,6 @@
                           "type": "string",
                           "minLength": 1
                         },
-                        "fromProtocol": {
-                          "description": "Health Commons protocol_variant key or experiment route id. This is the default experiment-start path whenever a public protocol exists.",
-                          "type": "string",
-                          "minLength": 1
-                        },
-                        "custom": {
-                          "description": "Fallback for an intentionally unlinked custom experiment. Requires --no-public-protocol and should only follow a Health Commons protocol search/explore with no relevant match.",
-                          "type": "boolean"
-                        },
-                        "publicProtocol": {
-                          "description": "Protocol-first guard for experiment starts. Pass --no-public-protocol with --custom in the current command only after confirming no relevant public Health Commons protocol is available; config defaults do not count.",
-                          "type": "boolean"
-                        },
-                        "testPlanId": {
-                          "description": "Chosen Health Commons test plan id for this run. Only valid with --from-protocol.",
-                          "type": "string",
-                          "minLength": 1
-                        },
-                        "pageRevisionId": {
-                          "description": "Expected current protocol page revision. Fails on mismatch; only valid with --from-protocol.",
-                          "type": "string",
-                          "pattern": "^sha256:[a-f0-9]{64}$"
-                        },
-                        "runSpecRevisionId": {
-                          "description": "Expected current protocol run-spec revision. Fails on mismatch; only valid with --from-protocol.",
-                          "type": "string",
-                          "pattern": "^sha256:[a-f0-9]{64}$"
-                        },
                         "baselineStart": {
                           "description": "Baseline window start date.",
                           "type": "string",
@@ -11919,7 +11812,7 @@
                           "minLength": 1
                         },
                         "primaryOutcomeKey": {
-                          "description": "Stable first-class primary outcome identity. Required for new custom runs; use biomarker:<outcome-slug>.",
+                          "description": "Stable first-class primary outcome identity. Required for new runs; use biomarker:<outcome-slug>.",
                           "type": "string",
                           "minLength": 1
                         },
@@ -12015,7 +11908,7 @@
                           }
                         },
                         "onboardingCompletedAt": {
-                          "description": "Timestamp when the protocol onboarding capture completed.",
+                          "description": "Timestamp when the experiment onboarding capture completed.",
                           "anyOf": [
                             {
                               "type": "string",
@@ -12241,26 +12134,6 @@
                             "description": "Stable lowercase kebab-case identifier."
                           }
                         },
-                        "protocolKey": {
-                          "description": "Health Commons protocol variant key to store under commonsProtocolRef.key.",
-                          "type": "string",
-                          "minLength": 1
-                        },
-                        "pageRevisionId": {
-                          "description": "Protocol page content revision id in sha256:<64 lowercase hex> form.",
-                          "type": "string",
-                          "pattern": "^sha256:[a-f0-9]{64}$"
-                        },
-                        "runSpecRevisionId": {
-                          "description": "Protocol run spec revision id in sha256:<64 lowercase hex> form.",
-                          "type": "string",
-                          "pattern": "^sha256:[a-f0-9]{64}$"
-                        },
-                        "testPlanId": {
-                          "description": "Chosen Health Commons test plan id for this run.",
-                          "type": "string",
-                          "minLength": 1
-                        },
                         "baselineStart": {
                           "description": "Canonical baseline window start date.",
                           "type": "string",
@@ -12469,7 +12342,7 @@
                           }
                         },
                         "onboardingCompletedAt": {
-                          "description": "Timestamp when the protocol onboarding capture completed.",
+                          "description": "Timestamp when the experiment onboarding capture completed.",
                           "anyOf": [
                             {
                               "type": "string",
@@ -12577,10 +12450,6 @@
                         },
                         "weeklyDigestEnabled": {
                           "description": "Whether weekly assistant digests are enabled for the run.",
-                          "type": "boolean"
-                        },
-                        "hydrateProtocolDefaults": {
-                          "description": "Fill missing structured setup fields from the selected Health Commons protocol without replacing existing values.",
                           "type": "boolean"
                         }
                       }
@@ -13840,6 +13709,10 @@
                           "type": "string",
                           "minLength": 1,
                           "maxLength": 128
+                        },
+                        "raw": {
+                          "description": "Also include the exact stored Markdown, including YAML frontmatter, in page.markdown.",
+                          "type": "boolean"
                         },
                         "ifExists": {
                           "description": "For an optional page, return `page: null` instead of failing when no derived page exists for the slug. Fails instead when any invalid page leaves absence unconfirmed, and for unreadable, duplicate, or reserved pages.",

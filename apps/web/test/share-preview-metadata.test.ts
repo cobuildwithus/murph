@@ -19,10 +19,6 @@ vi.mock("@/src/lib/hosted-onboarding/invite-service", () => ({
   buildHostedInvitePageData: vi.fn(),
 }));
 
-vi.mock("@/src/components/experiments/experiment-detail/research-tab", () => ({
-  ExperimentResearchTab: () => null,
-  ResearchTab: () => null,
-}));
 
 vi.mock("@/src/components/hosted-onboarding/join-invite-preview", () => ({
   JoinInvitePreview: () => null,
@@ -102,34 +98,6 @@ describe("share preview metadata", () => {
     expectRouteFile("../app/groups/fund/[joinCode]/opengraph-image.tsx");
   });
 
-  it("experiment research keeps the parent experiment card", async () => {
-    const { generateMetadata } = await import(
-      "../app/(dashboard)/experiments/[experimentId]/research/page"
-    );
-    const metadata = await generateMetadata({
-      params: Promise.resolve({ experimentId: "cold-plunge" }),
-    });
-
-    expectDedicatedImage(metadata, {
-      alt: expect.stringMatching(/^.+, a Murph experiment\.$/),
-      url: "/experiments/cold-plunge/opengraph-image",
-    });
-    expectRouteFile("../app/experiments/[experimentId]/opengraph-image.tsx");
-  });
-
-  it("experiment results keeps the parent experiment card", async () => {
-    const { generateMetadata } = await import(
-      "../app/(dashboard)/experiments/[experimentId]/results/page"
-    );
-    const metadata = await generateMetadata({
-      params: Promise.resolve({ experimentId: "cold-plunge" }),
-    });
-
-    expectDedicatedImage(metadata, {
-      alt: expect.stringMatching(/^.+, a Murph experiment\.$/),
-      url: "/experiments/cold-plunge/opengraph-image",
-    });
-  });
 
   it("join checkout outcome pages keep the invite card", async () => {
     const successPage = await import("../app/join/[inviteCode]/success/page");

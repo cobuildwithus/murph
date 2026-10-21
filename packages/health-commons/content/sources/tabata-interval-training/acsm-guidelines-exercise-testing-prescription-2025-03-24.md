@@ -11,14 +11,8 @@ aliases:
   - ACSM's Guidelines for Exercise Testing and Prescription, 12th Edition
 categories:
   - tabata-interval-training
-relations:
+relations: []
 
-  -
-    type: related_protocol
-    target: protocol_variant:tabata-interval-training/tabata-20-10-interval-training
-  -
-    type: parent_family
-    target: experiment_family:tabata-interval-training
 source:
   kind: guideline
   title: ACSM's Guidelines for Exercise Testing and Prescription, 12th Edition

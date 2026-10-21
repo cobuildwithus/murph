@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 
-import { metadata as experimentsMetadata } from "../app/(dashboard)/experiments/page";
 import { metadata as dashboardMetadata } from "../app/(dashboard)/layout";
 import { metadata as designMetadata } from "../app/design/page";
 import robots from "../app/robots";
@@ -9,10 +8,8 @@ import {
   listComparisonRoutes,
   listComparisonSitemapEntries,
 } from "../src/lib/comparisons/catalog";
-import { listHealthCommonsExperimentRouteParams } from "../src/lib/health-commons/experiment-browse";
 import { listHealthCommonsMeasurementMethodRoutes } from "../src/lib/health-commons/measurement-method-detail";
 import {
-  MURPH_INDEXABLE_PAGE_ROBOTS,
   MURPH_NOINDEX_PAGE_ROBOTS,
   MURPH_PUBLIC_SITE_URL,
 } from "../src/lib/site-metadata";
@@ -25,7 +22,6 @@ const EXPECTED_STATIC_PUBLIC_ROUTES = [
   "/clubs",
   "/contact",
   "/consumer-health-data-privacy-policy",
-  "/experiments",
   "/legal",
   "/legal/health-ai-safety-disclosure",
   "/legal/privacy",
@@ -57,10 +53,6 @@ describe("public search indexing metadata", () => {
     const expectedRoutes = [
       ...EXPECTED_STATIC_PUBLIC_ROUTES,
       ...listComparisonRoutes(),
-      ...listHealthCommonsExperimentRouteParams().flatMap(({ experimentId }) => {
-        const route = `/experiments/${encodeURIComponent(experimentId)}`;
-        return [route, `${route}/research`];
-      }),
       ...listHealthCommonsMeasurementMethodRoutes().map((measurementMethodId) =>
         `/measurement-methods/${encodeURIComponent(measurementMethodId)}`
       ),
@@ -79,17 +71,10 @@ describe("public search indexing metadata", () => {
         : {}),
       url: publicUrl(route),
     })));
-
-    for (const { experimentId } of listHealthCommonsExperimentRouteParams()) {
-      const route = `/experiments/${encodeURIComponent(experimentId)}`;
-      expect(expectedRoutes).not.toContain(`${route}/results`);
-    }
   });
 
-  it("defaults private routes to noindex and opts the public experiment index back in", () => {
+  it("defaults private routes to noindex", () => {
     expect(dashboardMetadata.robots).toEqual(MURPH_NOINDEX_PAGE_ROBOTS);
     expect(designMetadata.robots).toEqual(MURPH_NOINDEX_PAGE_ROBOTS);
-    expect(experimentsMetadata.alternates?.canonical).toBe("/experiments");
-    expect(experimentsMetadata.robots).toEqual(MURPH_INDEXABLE_PAGE_ROBOTS);
   });
 });

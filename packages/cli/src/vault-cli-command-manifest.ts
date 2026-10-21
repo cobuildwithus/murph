@@ -38,9 +38,6 @@ import {
 import {
   commonsGoalListResultSchema,
   commonsGoalShowResultSchema,
-  commonsProtocolExploreResultSchema,
-  commonsProtocolListResultSchema,
-  commonsProtocolShowResultSchema,
   registerCommonsCommands,
 } from './commands/commons.js'
 import {
@@ -770,24 +767,6 @@ export const vaultCliCommandDescriptors = [
         description:
           'Show one compact public Health Commons outcome guide by key, slug, route id, or alias, including exact revisions.',
         output: commonsGoalShowResultSchema,
-      },
-      {
-        path: ['commons', 'protocol', 'list'],
-        description:
-          'List public Health Commons protocol variants with optional text, status, and category filters.',
-        output: commonsProtocolListResultSchema,
-      },
-      {
-        path: ['commons', 'protocol', 'show'],
-        description:
-          'Show one public Health Commons protocol variant by key, slug, or alias, including exact revision ids.',
-        output: commonsProtocolShowResultSchema,
-      },
-      {
-        path: ['commons', 'protocol', 'explore'],
-        description:
-          'Explore candidate public Health Commons protocol variants for a broad or fuzzy protocol request.',
-        output: commonsProtocolExploreResultSchema,
       },
     ],
     register({ cli }) {
@@ -1541,7 +1520,7 @@ export const vaultCliCommandDescriptors = [
       {
         path: ['experiment', 'start'],
         description:
-          'Start a typed experiment run from a Health Commons protocol; custom runs require explicit no-public-protocol fallback.',
+          'Start a private typed experiment run with an explicit outcome, schedule, and analysis plan.',
       },
       {
         path: ['experiment', 'show'],
@@ -1740,7 +1719,7 @@ export const vaultCliCommandDescriptors = [
       {
         path: ['knowledge', 'show'],
         description:
-          'Show one derived knowledge page by slug. `--if-exists` returns `page: null` only when absence is confirmed by a fully valid knowledge graph; invalid, unreadable, duplicate, and reserved pages still fail.',
+          'Show one derived knowledge page body, metadata, and revision digest. `--raw` also includes the exact stored Markdown. `--if-exists` returns `page: null` only when absence is confirmed by a fully valid knowledge graph; invalid, unreadable, duplicate, and reserved pages still fail.',
         output: knowledgeShowResultSchema,
       },
       {

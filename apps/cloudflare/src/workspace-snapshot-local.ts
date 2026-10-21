@@ -38,6 +38,9 @@ import {
 const HOSTED_WORKSPACE_SNAPSHOT_AUTH_TAG_BYTES = 16;
 const HOSTED_WORKSPACE_SNAPSHOT_ZSTD_ARGS = [
   "-9",
+  // Reuse distant cache/ledger content within the existing decoder's 128 MiB
+  // window limit. This changes compression only, not the archive or ref format.
+  "--long=27",
   "--no-progress",
   "-T2",
 ] as const;

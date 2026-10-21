@@ -2309,6 +2309,7 @@ model HostedLinqLine {
   maxOutboundPerDay          Int?      @map("max_outbound_per_day")
   warmupStartedAt            DateTime? @map("warmup_started_at")
   warmupEndsAt               DateTime? @map("warmup_ends_at")
+  /// Zero excludes automatic placement; existing routes and managed inbound remain valid.
   assignmentWeight           Int       @default(100) @map("assignment_weight")
   notes                      String?
   createdAt                  DateTime  @default(now()) @map("created_at")
@@ -2745,6 +2746,7 @@ model HostedConversationPollVote {
 // ids, numbers and dates stay plain.
 
 model GameProfile {
+  photoKey           String?            @map("photo_key")
   memberId           String             @id @map("member_id")
   firstNameEncrypted String             @map("first_name_encrypted")
   timeZone           String             @map("time_zone")

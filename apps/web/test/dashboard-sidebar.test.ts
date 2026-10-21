@@ -168,7 +168,7 @@ afterEach(async () => {
 });
 
 beforeEach(() => {
-  mocks.usePathname.mockReturnValue("/experiments");
+  mocks.usePathname.mockReturnValue("/biomarkers");
   mocks.logoutHostedAppSession.mockReset();
   mocks.logoutHostedAppSession.mockResolvedValue(undefined);
   mocks.requestHostedOnboardingJson.mockReset();
@@ -178,7 +178,7 @@ beforeEach(() => {
 });
 
 test("Sidebar exposes primary destinations without Voice or the internal Overview route", () => {
-  mocks.usePathname.mockReturnValue("/experiments");
+  mocks.usePathname.mockReturnValue("/biomarkers");
 
   const markup = renderToStaticMarkup(createElement(Sidebar));
 
@@ -193,6 +193,7 @@ test("Sidebar exposes primary destinations without Voice or the internal Overvie
   assert.doesNotMatch(markup, />Patterns<\/a>/);
   assert.doesNotMatch(markup, /href="\/overview"/);
   assert.doesNotMatch(markup, />Overview<\/a>/);
+  assert.doesNotMatch(markup, /href="\/experiments"/);
 });
 
 test("Sidebar keeps retired Environment out of primary navigation", () => {
@@ -256,7 +257,7 @@ test("Sidebar keeps Records out of navigation", () => {
 });
 
 test("Sidebar ignores supplied signed-in user labels in the account trigger", () => {
-  mocks.usePathname.mockReturnValue("/experiments");
+  mocks.usePathname.mockReturnValue("/biomarkers");
 
   const markup = renderToStaticMarkup(
     createElement(Sidebar, {
@@ -267,7 +268,7 @@ test("Sidebar ignores supplied signed-in user labels in the account trigger", ()
     }),
   );
 
-  assert.match(markup, /href="\/settings"[^>]*>Settings<\/a>/);
+  assert.match(markup, /href="\/settings"[^>]*>.*Settings<\/a>/);
   assert.match(markup, /Sign out/);
   assert.match(markup, /aria-label="Open user menu"/);
   assert.doesNotMatch(markup, /initial@example\.com/);
@@ -275,7 +276,7 @@ test("Sidebar ignores supplied signed-in user labels in the account trigger", ()
 });
 
 test("Sidebar renders signed-in account controls without a visible fallback label", () => {
-  mocks.usePathname.mockReturnValue("/experiments");
+  mocks.usePathname.mockReturnValue("/biomarkers");
 
   const markup = renderToStaticMarkup(
     createElement(Sidebar, {
@@ -286,7 +287,7 @@ test("Sidebar renders signed-in account controls without a visible fallback labe
     }),
   );
 
-  assert.match(markup, /href="\/settings"[^>]*>Settings<\/a>/);
+  assert.match(markup, /href="\/settings"[^>]*>.*Settings<\/a>/);
   assert.match(markup, /Sign out/);
   assert.doesNotMatch(markup, />Account</);
   assert.doesNotMatch(markup, /\*{3,4}\s*\d{4}/);
@@ -396,27 +397,25 @@ test("Sidebar surfaces a visible error when sign out fails", async () => {
   assert.equal(container.querySelector('[role="alert"]'), null);
 });
 
-test("Sidebar keeps Settings out of the primary navigation", () => {
-  mocks.usePathname.mockReturnValue("/settings");
-
-  const markup = renderToStaticMarkup(
-    createElement(Sidebar, {
-      initialAuth: {
-        authenticated: true,
-        label: null,
-      },
-    }),
-  );
-
-  assert.match(markup, /href="\/settings"[^>]*>Settings<\/a>/);
-  assert.doesNotMatch(
-    markup,
-    /data-active="true">\s*<a[^>]*href="\/settings"[^>]*>Settings<\/a>/,
-  );
-});
+test.each(["/connect", "/settings", "/settings/billing"])(
+  "Sidebar highlights the direct account destination for %s",
+  (pathname) => {
+    mocks.usePathname.mockReturnValue(pathname);
+    const markup = renderToStaticMarkup(
+      createElement(Sidebar, {
+        initialAuth: { authenticated: true, label: null },
+      }),
+    );
+    const href = pathname.startsWith("/settings") ? "/settings" : "/connect";
+    assert.match(markup, new RegExp(`data-active="true"><a[^>]*href="${href}"`));
+    assert.equal((markup.match(/href="\/connect"/g) ?? []).length, 1);
+    assert.equal((markup.match(/href="\/settings"/g) ?? []).length, 1);
+    assert.match(markup, /Sign out/);
+  },
+);
 
 test("Sidebar renders the supplied server chat action", () => {
-  mocks.usePathname.mockReturnValue("/experiments");
+  mocks.usePathname.mockReturnValue("/biomarkers");
 
   const markup = renderToStaticMarkup(
     createElement(Sidebar, {
@@ -439,7 +438,7 @@ test("Sidebar renders the supplied server chat action", () => {
 });
 
 test("Sidebar renders a login CTA card when signed out", () => {
-  mocks.usePathname.mockReturnValue("/experiments");
+  mocks.usePathname.mockReturnValue("/biomarkers");
 
   const markup = renderToStaticMarkup(createElement(Sidebar));
 
@@ -452,7 +451,7 @@ test("Sidebar renders a login CTA card when signed out", () => {
 });
 
 test("Sidebar uses initial server app-session auth", () => {
-  mocks.usePathname.mockReturnValue("/experiments");
+  mocks.usePathname.mockReturnValue("/biomarkers");
 
   const markup = renderToStaticMarkup(
     createElement(Sidebar, {
@@ -470,7 +469,7 @@ test("Sidebar uses initial server app-session auth", () => {
 });
 
 test("Sidebar does not render a hardcoded wearable connection status", () => {
-  mocks.usePathname.mockReturnValue("/experiments");
+  mocks.usePathname.mockReturnValue("/biomarkers");
 
   const markup = renderToStaticMarkup(
     createElement(Sidebar, {

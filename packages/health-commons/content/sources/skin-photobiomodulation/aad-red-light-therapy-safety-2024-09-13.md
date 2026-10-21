@@ -12,11 +12,8 @@ aliases:
 - Is red light therapy right for your skin?
 categories:
 - skin-photobiomodulation
-relations:
-- type: related_protocol
-  target: protocol_variant:skin-photobiomodulation/red-near-infrared-skin-texture-photoaging
-- type: parent_family
-  target: experiment_family:skin-photobiomodulation
+relations: []
+
 source:
   kind: web_page
   title: Is red light therapy right for your skin?

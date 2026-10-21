@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { createInterface } from 'node:readline'
@@ -590,7 +591,7 @@ test('knowledge commands round-trip the registered CLI against a temp vault', as
   assert.equal(shown.exitCode, null)
   assert.equal(shown.envelope.ok, true)
   assert.equal(shown.envelope.data.degradation, null)
-  assert.match(shown.envelope.data.page.markdown, /# Magnesium and sleep continuity/u)
+  assert.match(shown.envelope.data.page.body, /# Magnesium and sleep continuity/u)
 
   const linted = await runInProcessJsonCli<KnowledgeLintResult>(cli, [
     'knowledge',
@@ -807,6 +808,47 @@ test('missing wiki page recovery survives the production CLI error bridge', asyn
   assert.match(missing.envelope.error.hint ?? '', /Do not retry the same missing slug/u)
   assert.match(missing.envelope.error.hint ?? '', /authorized write/u)
   assert.match(missing.envelope.error.hint ?? '', /continue without the page/u)
+})
+
+test('knowledge show returns complete content once and preserves explicit raw export and revision', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext('murph-knowledge-projection-')
+  cleanupPaths.push(parentRoot)
+  const pagePath = 'derived/knowledge/pages/synthetic-ledger.md'
+  const body = 'A synthetic retained fact with its original qualifier.\n'.repeat(1000)
+  const markdown = [
+    '---', 'title: Synthetic ledger', 'slug: synthetic-ledger', 'pageType: ledger',
+    'status: active', '---', '', '# Synthetic ledger', '', body,
+  ].join('\n')
+  await writeVaultFile(vaultRoot, pagePath, markdown)
+  const cli = createVaultCli()
+  const args = ['knowledge', 'show', 'synthetic-ledger', '--vault', vaultRoot]
+  const show = (...flags: string[]) => runInProcessJsonCli<KnowledgeShowResult>(cli, [...args, ...flags])
+  const compact = await show()
+  const optional = await show('--if-exists')
+  const raw = await show('--raw')
+  const optionalRaw = await show('--raw', '--if-exists')
+  assert.equal(compact.envelope.ok, true)
+  assert.equal(optional.envelope.ok, true)
+  assert.equal(raw.envelope.ok, true)
+  assert.equal(optionalRaw.envelope.ok, true)
+  const compactPage = compact.envelope.data.page
+  assert.equal(Object.hasOwn(compactPage, 'markdown'), false)
+  assert.ok(compactPage.body.endsWith(body.trim()))
+  assert.equal(compactPage.pageRevisionDigest, createHash('sha256').update(markdown).digest('hex'))
+  assert.deepEqual(optional.envelope.data, compact.envelope.data)
+  assert.deepEqual(raw.envelope.data, { ...compact.envelope.data, page: { ...compactPage, markdown } })
+  assert.deepEqual(optionalRaw.envelope.data, raw.envelope.data)
+  const compactBytes = Buffer.byteLength(JSON.stringify(compact.envelope.data))
+  const rawBytes = Buffer.byteLength(JSON.stringify(raw.envelope.data))
+  assert.ok(compactBytes < rawBytes * 0.55, 'default output omits the duplicate complete file')
+  process.stdout.write(`[knowledge-projection] ${JSON.stringify({ compactBytes, rawBytes })}\n`)
+
+  for (const flags of [[], ['--raw']]) {
+    const built = await runCli<KnowledgeShowResult>([...args, ...flags])
+    assert.equal(built.ok, true)
+    assert.deepEqual(built.data, flags.length ? raw.envelope.data : compact.envelope.data)
+  }
+  assert.equal(await readFile(path.join(vaultRoot, pagePath), 'utf8'), markdown)
 })
 
 test('optional knowledge show returns an absent page only when the graph confirms absence', async () => {

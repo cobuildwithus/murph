@@ -62,6 +62,9 @@ Do not commit bundled executables, fixtures, or raw profiles.
 | --- | ---: | --- |
 | `MURPH_BENCH_BUNDLE_MIB` | 50 | Incompressible MiB, range 1–256 |
 | `MURPH_BENCH_FILES` | 1000 | Number of files, range 1–10000 |
+| `MURPH_BENCH_REPEAT_EVERY_FILES` | 0 | Zero keeps independent entropy; otherwise repeat payloads after this many files to model distant canonical/cache duplication |
+| `MURPH_BENCH_OPERATION` | `restore` | `create` compares snapshot writers and also reports each object's `creationRestoreMs` through the production restore port |
+| `MURPH_BENCH_PLAIN_MIB` | unset | Optional exact unpacked MiB, at least `MURPH_BENCH_BUNDLE_MIB`; otherwise use the default 2.5× shape |
 | `MURPH_BENCH_ITERATIONS` | 7 | Measured restores after one warmup, range 1–100 |
 | `MURPH_BENCH_CHUNK_KIB` | 64 | HTTP server file-read chunk size, range 1–1024 |
 | `MURPH_BENCH_NETWORK_MIBPS` | 0 | Optional aggregate response pacing; zero is unrestricted |
@@ -112,6 +115,48 @@ concurrent runtime hydration, or the provider turn.
 - Preserve authentication and both digest checks before extraction. Corruption,
   decoder/extractor failures, cancellation, and retry exhaustion must never
   replace existing durable files.
+
+## Bounded long-distance compression
+
+The writer retains level 9 and two workers and adds `--long=27`. The 128 MiB
+window shares distant repeated data within and between files; the existing
+decoder accepts it with its default memory limit. No ref, encryption, selection,
+or extraction change is needed. This adds native compressor/decoder memory and
+can add checkpoint CPU for independent data. It does not reduce arbitrary media.
+
+Baseline: `14be5174d5`, bundled from `workspace-snapshot-local.ts` using the
+esbuild command above with that file as the entrypoint. Use `create` mode because
+each writer produces a different encrypted object; restore-only mode intentionally
+uses one identical object and cannot measure compression savings.
+
+```sh
+MURPH_BENCH_OPERATION=create \
+MURPH_BENCH_BASELINE_MODULE=.artifacts/workspace-restore-bench/baseline-local.mjs \
+MURPH_BENCH_BUNDLE_MIB=48 MURPH_BENCH_PLAIN_MIB=120 \
+MURPH_BENCH_FILES=600 MURPH_BENCH_REPEAT_EVERY_FILES=200 \
+MURPH_BENCH_NETWORK_MIBPS=10 MURPH_BENCH_ITERATIONS=3 \
+  node .artifacts/workspace-restore-bench/paired.mjs
+```
+
+Native ARM macOS, Node 24.14.1, zstd 1.5.7. Three alternating measured pairs
+followed one warmup per writer; every restored file passed SHA-256 readback.
+Each fixture contains 120 MiB unpacked. Repeated payloads recur roughly 40 MiB
+apart. The control uses the same settings with repetition disabled.
+
+| Fixture / metric | Baseline | Long window |
+| --- | ---: | ---: |
+| Repeated payloads: encrypted bytes | 50,497,755 | 16,864,195 |
+| Repeated payloads: median create | 109 ms | 123 ms |
+| Repeated payloads: median restore at 10 MiB/s | 5,004 ms | 1,796 ms |
+| Independent payloads: encrypted bytes | 50,498,789 | 50,482,220 |
+| Independent payloads: median create | 110 ms | 190 ms |
+| Independent payloads: median restore at 10 MiB/s | 5,006 ms | 5,116 ms |
+
+These are synthetic local results, not production predictions. The control
+shows essentially unchanged transfer bytes and a small restore regression.
+Savings depend on repeated data within the window; stronger compression cannot
+remove unrelated request/startup latency. Native Linux and post-deploy natural
+cold-start measurements remain necessary for a production speed claim.
 
 ## Ciphertext-copy reduction experiment
 

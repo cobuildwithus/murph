@@ -12,11 +12,8 @@ aliases:
 categories:
 - iliotibial-band-syndrome-rehabilitation
 - external_clinical_protocol
-relations:
-- type: related_protocol
-  target: protocol_variant:iliotibial-band-syndrome-rehabilitation/it-band-syndrome-rehab-and-return-to-run
-- type: parent_family
-  target: experiment_family:iliotibial-band-syndrome-rehabilitation
+relations: []
+
 source:
   kind: guideline
   title: Running Injury Prevention Tips & Return to Running Program

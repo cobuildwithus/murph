@@ -13,6 +13,7 @@ import {
   knowledgeLintResultSchema,
   knowledgeLogTailResultSchema,
   knowledgePageReferenceSchema,
+  knowledgePageSchema,
   knowledgeSearchResultSchema,
   knowledgeUpsertResultSchema,
 } from "../src/index.ts";
@@ -180,15 +181,32 @@ describe("knowledge contracts", () => {
     ).toBe("warning");
   });
 
-  it("keeps the show union exact while declaring its object root for MCP output", () => {
+  it("keeps internal raw reads strict while show accepts compact and raw pages with an object root", () => {
     const strictSchema = z.toJSONSchema(knowledgeGetResultSchema);
     const showSchema = z.toJSONSchema(knowledgeShowResultSchema);
     expect(strictSchema.type).toBe("object");
     expect(showSchema.type).toBe("object");
     expect(showSchema.anyOf).toEqual([
-      strictSchema,
+      z.toJSONSchema(knowledgeGetResultSchema.extend({
+        page: knowledgePageSchema.partial({ markdown: true }),
+      })),
       z.toJSONSchema(knowledgeAbsentPageResultSchema),
     ].map(({ $schema: _schema, ...branch }) => branch));
+
+    const compact = {
+      degradation: null,
+      page: { ...reference, body: "Complete body.", pageRevisionDigest: "a".repeat(64) },
+      vault: "/vault",
+    };
+    expect(knowledgeShowResultSchema.parse(compact)).toEqual(compact);
+    expect(knowledgeGetResultSchema.safeParse(compact).success).toBe(false);
+    const raw = { ...compact, page: { ...compact.page, markdown: "# Example\n\nComplete body." } };
+    expect(knowledgeShowResultSchema.parse(raw)).toEqual(raw);
+    expect(knowledgeGetResultSchema.parse(raw)).toEqual(raw);
+    for (const required of ["body", "pageRevisionDigest"] as const) {
+      const { [required]: _omitted, ...page } = compact.page;
+      expect(knowledgeShowResultSchema.safeParse({ ...compact, page }).success).toBe(false);
+    }
 
     const absent = { degradation: null, page: null, slug: "example", vault: "/vault" };
     expect(knowledgeShowResultSchema.parse(absent)).toEqual(absent);

@@ -597,29 +597,13 @@ describe("hosted browser-vault replica refresh preparation", () => {
       });
 
       expect(replica.experimentOutcomes).toEqual([written.outcome]);
-
-      const {
-        createBrowserVaultQueryClient,
-        selectBrowserVaultExperimentResults,
-      } = await import("@murphai/query/browser");
-      const results = selectBrowserVaultExperimentResults(
-        createBrowserVaultQueryClient(replica),
-        "writer-projection",
-      );
-      expect(results?.savedOutcomeStatus).toBe("available");
-      expect(results?.persistedOutcome).toEqual(written.outcome);
-      expect(results?.experiment.commonsProtocolRef).toEqual(
-        written.outcome.commonsProtocolRef,
-      );
-      expect(results?.experiment.effectiveProtocolSnapshot).toEqual(
-        written.outcome.effectiveProtocolSnapshot,
-      );
-      expect(results?.experiment.phase).toBe("completed");
-      expect(results?.experiment.protocolRef).toEqual(written.outcome.protocolRef);
-      expect(results?.experiment.status).toBe(written.outcome.experiment.status);
-      expect(results?.experiment.title).toBe(written.outcome.experiment.title);
-      expect(results?.experiment.windows).toEqual(written.outcome.windows);
-      expect(results?.persistedOutcome?.windows).toEqual({
+      expect(replica.entities.find((entity) =>
+        entity.family === "experiment" && entity.experimentSlug === "writer-projection"
+      )).toMatchObject({
+        status: "paused",
+        title: "Renamed writer projection",
+      });
+      expect(written.outcome.windows).toEqual({
         baselineEnd: "2026-06-03",
         baselineStart: "2026-06-01",
         interventionEnd: "2026-06-10",

@@ -288,24 +288,6 @@ export function buildHostedWebNextConfig(
       webpackMemoryOptimizations: true,
     },
     outputFileTracingIncludes: {
-      "/experiments": [
-        "../../packages/health-commons/generated/web/browse/experiments.json",
-      ],
-      "/experiments/[experimentId]": [
-        "../../packages/health-commons/generated/web/routes/index.json",
-        "../../packages/health-commons/generated/web/shell/experiments/**/*.json",
-        "../../packages/health-commons/generated/web/tabs/experiments/**/*.json",
-      ],
-      "/experiments/[experimentId]/research": [
-        "../../packages/health-commons/generated/web/routes/index.json",
-        "../../packages/health-commons/generated/web/shell/experiments/**/*.json",
-        "../../packages/health-commons/generated/web/tabs/experiments/**/*.json",
-      ],
-      "/experiments/[experimentId]/results": [
-        "../../packages/health-commons/generated/web/routes/index.json",
-        "../../packages/health-commons/generated/web/shell/experiments/**/*.json",
-        "../../packages/health-commons/generated/web/tabs/experiments/**/*.json",
-      ],
       "/measurement-methods/[measurementMethodId]": [
         "../../packages/health-commons/generated/web/routes/index.json",
         "../../packages/health-commons/generated/web/bundles/measurement_method/**/*.json",
@@ -313,11 +295,10 @@ export function buildHostedWebNextConfig(
       // Keys are picomatch globs matched with `contains: true` against the
       // route path (route groups stripped), so "/opengraph-image" covers every
       // `opengraph-image` metadata route: the static marketing images and the
-      // dynamic invite/group/biomarker/experiment unfurls that are never
+      // dynamic invite/group/biomarker unfurls that are never
       // prerendered. Share-card route handlers are keyed explicitly.
       "/opengraph-image": OG_SHARE_ASSET_TRACE_INCLUDES,
       "/changelog/card/v1/[items]": OG_SHARE_ASSET_TRACE_INCLUDES,
-      "/experiments/[experimentId]/card": OG_SHARE_ASSET_TRACE_INCLUDES,
       "/api/murph-contact-card": MURPH_CONTACT_CARD_AVATAR_TRACE_INCLUDES,
       "/imessage/card/v1/[payload]": OG_SHARE_ASSET_TRACE_INCLUDES,
     },

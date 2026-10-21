@@ -64,7 +64,7 @@ describe('assistant manual provider export guidance', () => {
       'without a proven direct Murph connection',
     )
     expect(buildDirectPrompt()).toContain(
-      'Read `$MURPH_ASSISTANT_SKILLS_ROOT/connected-apps/SKILL.md`.',
+      'For account changes, provider writes, other built-in services, or unsupported-provider exports, read `$MURPH_ASSISTANT_SKILLS_ROOT/connected-apps/SKILL.md`.',
     )
     expect(skill).toContain('references/provider-data-exports.md')
     expect(normalizedSkill).toContain(

@@ -474,6 +474,7 @@ async function recordIdleCompactionUsage(input: {
           rawUsageJson: {
             cachedInputTokens: response.cachedInputTokens,
             cacheWriteInputTokens: response.cacheWriteInputTokens,
+            ...(response.cacheWrite12hInputTokens ? { cacheWrite12hInputTokens: response.cacheWrite12hInputTokens } : {}),
             inputTokens: response.inputTokens,
             outputTokens: response.outputTokens,
             reasoningOutputTokens: response.reasoningOutputTokens,

@@ -641,16 +641,6 @@ function JoinInviteActivePanel({
           ))}
         </div>
       </div>
-
-      <Button
-        render={<Link href="/experiments" />}
-        nativeButton={false}
-        variant="link"
-        size="sm"
-        className="h-auto w-fit p-0 text-sm font-medium text-muted-foreground hover:text-foreground"
-      >
-        View experiments
-      </Button>
     </div>
   );
 }

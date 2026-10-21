@@ -41,10 +41,6 @@ test("the persistent dashboard layout fences fresh vault authority to its server
 
 test("dashboard route consumers no longer wrap their own BrowserVaultProvider", () => {
   const formerWrapperFiles = [
-    "app/(dashboard)/experiments/experiments-page-client.tsx",
-    "app/(dashboard)/experiments/[experimentId]/experiment-start-or-run-status.tsx",
-    "app/(dashboard)/experiments/[experimentId]/active-run-summary-client.tsx",
-    "app/(dashboard)/experiments/[experimentId]/results/results-tab-client.tsx",
     "src/components/home/browser-vault-onboarding-steps.tsx",
   ];
 

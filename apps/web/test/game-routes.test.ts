@@ -130,7 +130,16 @@ describe("weekly game routes", () => {
   });
 
   describe("auth", () => {
-    it("requires a signed-in session and never reaches the game", async () => {
+    it("returns the definitive profile for photo-only updates under the authenticated account", async () => {
+    const profile = { memberId: LEO, firstName: "Leo", timeZone: "UTC", avatarUrl: null };
+    mocks.runGameCommand.mockResolvedValue({ ok: true, game: null, profile });
+    const response = await routes.profile.PUT(writeRequest("PUT", "/me/profile", { photoKey: null, memberId: AVA }));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ ok: true, profile });
+    expect(mocks.runGameCommand).toHaveBeenCalledWith({ actorMemberId: LEO, command: { type: "setProfile", photoKey: null, memberId: AVA } });
+  });
+
+  it("requires a signed-in session and never reaches the game", async () => {
       mocks.requireHostedMemberAuthFromBearerToken.mockRejectedValue(
         hostedOnboardingError({ code: "AUTH_REQUIRED", httpStatus: 401, message: "Sign in to continue." }),
       );

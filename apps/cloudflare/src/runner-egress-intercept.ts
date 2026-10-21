@@ -391,12 +391,6 @@ export async function handleHostedRunnerInternalOutbound(
     }),
     runtimeAuthorityHeadersPresent: hostedRuntimeAuthorityHeadersPresent(request.headers),
   } satisfies HostedExecutionStructuredLogDetails;
-  emitHostedExecutionStructuredLog({
-    component: "runner",
-    details: diagnosticDetails,
-    message: "Hosted runner internal outbound request received.",
-    phase: "wake.running",
-  });
   // Container fatal reports are accepted before the user-binding gate: the
   // unattributable container deaths this sink exists for happen outside any
   // invocation, when no bound user or write fence exists.
@@ -463,6 +457,8 @@ async function emitHostedRunnerInternalOutboundResponseCompleted(input: {
   response: Response;
   startedAt: number;
 }): Promise<void> {
+  if (input.response.ok) return;
+
   emitHostedExecutionStructuredLog({
     component: "runner",
     details: {
@@ -470,11 +466,9 @@ async function emitHostedRunnerInternalOutboundResponseCompleted(input: {
       durationMs: Date.now() - input.startedAt,
       responseOk: input.response.ok,
       responseStatus: input.response.status,
-      ...(input.response.ok
-        ? {}
-        : await readHostedRunnerSafeResponseBodyMetadata(input.response.clone())),
+      ...await readHostedRunnerSafeResponseBodyMetadata(input.response.clone()),
     },
-    level: input.response.ok ? "info" : "warn",
+    level: "warn",
     message: "Hosted runner internal outbound response completed.",
     phase: "wake.running",
   });

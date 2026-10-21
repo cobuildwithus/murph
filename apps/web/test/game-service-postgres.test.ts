@@ -102,6 +102,63 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     await rm(mediaDir, { force: true, recursive: true });
   });
 
+  it("syncs canonical profile photos, preserves private overrides and scopes media to game participants", async () => {
+    const leo = await member("Leo", "America/New_York");
+    const ava = await member("Ava", "Australia/Sydney");
+    const stranger = await member("Sam", "UTC");
+    const canonical = await upload(ava, "canonical");
+    const privatePhoto = await upload(leo, "private-contact");
+    const missing = `${mediaKeyPrefixFor(ava)}${"0".repeat(64)}.jpg`;
+    expect(await errorCode(ava, { type: "setProfile", photoKey: privatePhoto })).toBe("MEDIA_MISSING");
+    expect(await errorCode(ava, { type: "setProfile", photoKey: missing })).toBe("MEDIA_MISSING");
+    const saved = await run(ava, { type: "setProfile", photoKey: canonical });
+    expect(saved).toMatchObject({ ok: true, profile: { memberId: ava, firstName: "Ava", timeZone: "Australia/Sydney" } });
+    expect(await authorizeMediaRead(ava, canonical)).toBe(true);
+    expect(await authorizeMediaRead(leo, canonical)).toBe(false);
+    expect(await authorizeMediaRead(stranger, canonical)).toBe(false);
+    const homePhoto = (await readHome(ava)).me.avatarUrl;
+    expect(homePhoto).toContain(encodeURIComponent(canonical));
+    await ok(ava, { firstName: "Ava", timeZone: "Australia/Sydney", type: "setProfile" });
+    expect((await readHome(ava)).me.avatarUrl).toBe(homePhoto);
+
+    const gameId = randomUUID();
+    const created = await ok(leo, { gameId, inviteeFirstName: "Friend", inviteeLabel: { photoKey: privatePhoto }, terms: TERMS, type: "createGame" });
+    const preview = await readInvitePreview(created!.inviteToken!);
+    expect(preview).not.toHaveProperty("avatarUrl");
+    expect(preview).not.toHaveProperty("profileAvatarUrl");
+    const joined = await ok(ava, { type: "join", token: created!.inviteToken!, termsVersion: 1, timeZone: "Australia/Sydney" });
+    expect(joined!.players[1]).toMatchObject({ avatarUrl: homePhoto, profileAvatarUrl: homePhoto });
+    const opponentView = (await readGame(gameId, leo))!.players[1];
+    expect(opponentView.avatarUrl).toContain(encodeURIComponent(privatePhoto));
+    expect(opponentView.profileAvatarUrl).toBe(homePhoto);
+    expect(await authorizeMediaRead(leo, canonical)).toBe(true);
+    expect(await authorizeMediaRead(stranger, canonical)).toBe(false);
+    expect(await authorizeMediaRead(ava, privatePhoto)).toBe(false);
+
+    const replacement = await upload(ava, "replacement");
+    await ok(ava, { type: "setProfile", photoKey: replacement });
+    expect(await authorizeMediaRead(leo, canonical)).toBe(false);
+    expect(await authorizeMediaRead(leo, replacement)).toBe(true);
+    await Promise.all([
+      ok(ava, { type: "setProfile", photoKey: null }),
+      ok(ava, { type: "setProfile", firstName: "Avery" }),
+    ]);
+    expect((await readHome(ava)).me).toMatchObject({ firstName: "Avery", avatarUrl: null, timeZone: "Australia/Sydney" });
+    expect(await authorizeMediaRead(leo, replacement)).toBe(false);
+    const removed = (await readGame(gameId, leo))!.players[1];
+    expect(removed.profileAvatarUrl).toBeNull();
+    expect(removed.avatarUrl).toBe(opponentView.avatarUrl);
+    expect((await getPrisma().gameContactLabel.findUnique({ where: { ownerMemberId_subjectMemberId: { ownerMemberId: leo, subjectMemberId: ava } } }))!.photoKey).toBe(privatePhoto);
+  });
+
+  it("requires initial name and time zone before a photo-only profile update", async () => {
+    const id = `hbm_gametest_new_${randomUUID().slice(0, 8)}`;
+    await getPrisma().hostedMember.create({ data: { billingStatus: "active", id } });
+    memberIds.push(id);
+    expect(await errorCode(id, { type: "setProfile", photoKey: null })).toBe("PROFILE_REQUIRED");
+    expect(await getPrisma().gameProfile.findUnique({ where: { memberId: id } })).toBeNull();
+  });
+
   it("plays a full 1v1 game through the one write path", async () => {
     const leoNoProfile = `hbm_gametest_new_${randomUUID().slice(0, 8)}`;
     await getPrisma().hostedMember.create({ data: { billingStatus: "active", id: leoNoProfile } });
@@ -277,15 +334,20 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     const ava = await member("Ava", "Australia/Sydney");
     const kat = await member("Kat", "Europe/London");
     const first = await startGame(leo, ava);
+    const photoKey = await upload(ava, "rematch-profile");
+    await ok(ava, { type: "setProfile", photoKey });
     await devSettleNow(first.gameId, leo);
     const rematch = await ok(leo, { gameId: randomUUID(), inviteeFirstName: "Babe", previousGameId: first.gameId, terms: TERMS, type: "createGame" });
     expect(await getPrisma().game.findUniqueOrThrow({ where: { id: rematch!.id } })).toMatchObject({ inviteeMemberId: ava });
 
+    expect(rematch!.players[1].avatarUrl).toContain(encodeURIComponent(photoKey));
+    expect(rematch!.players[1].profileAvatarUrl).toBe(rematch!.players[1].avatarUrl);
     const avaHome = await readHome(ava);
     const addressed = avaHome.games.find((game) => game.id === rematch!.id);
     expect(addressed).toMatchObject({ inviteToken: rematch!.inviteToken, round: 2, status: "invited" });
     // She sees herself by her own name, never the challenger's private one for her.
     expect(addressed!.players.map((player) => [player.firstName, player.isMe])).toEqual([["Leo", false], ["Ava", true]]);
+    expect(addressed!.players[1].profileAvatarUrl).toBe(avaHome.me.avatarUrl);
     expect(JSON.stringify(addressed)).not.toContain("Babe");
     expect((await readHome(kat)).games.map((game) => game.id)).not.toContain(rematch!.id);
     expect(await readGame(rematch!.id, kat)).toBeNull();
