@@ -66,7 +66,7 @@ async function upload(memberId: string, name: string): Promise<string> {
   return putGameMedia({ bytes, contentType: "image/jpeg", prefix: mediaKeyPrefixFor(memberId) });
 }
 
-async function photo(actor: string, gameId: string, name: string, text?: string): Promise<GameCommand> {
+async function photo(actor: string, gameId: string, name: string, text?: string): Promise<Extract<GameCommand, { type: "post" }>> {
   return {
     entryId: randomUUID(),
     gameId,
@@ -100,6 +100,30 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     await getPrisma().hostedMember.deleteMany({ where: { id: { in: memberIds } } });
     delete process.env.MURPH_GAME_MEDIA_DIR;
     await rm(mediaDir, { force: true, recursive: true });
+  });
+
+  it("stores the agreed graph, rejects photos, and preserves private media and retries", async () => {
+    const leo = await member("Leo", "America/New_York");
+    const ava = await member("Ava", "America/New_York");
+    const stranger = await member("Sam", "UTC");
+    const { gameId } = await startGame(leo, ava, { terms: { ...TERMS, checkInKind: "heart_rate" } });
+    await devStartNow(gameId, leo);
+    expect((await readGame(gameId, leo))?.terms.checkInKind).toBe("heart_rate");
+    const key = await upload(ava, "synthetic-graph");
+    const graph: GameCommand = { type: "post", entryId: randomUUID(), gameId, kind: "heart_rate", mediaKeys: [key] };
+    const accepted = await ok(ava, graph);
+    expect(accepted?.days[0]?.mine).toMatchObject({ kind: "heart_rate" });
+    await ok(ava, graph);
+    expect(await getPrisma().gameEntry.count({ where: { gameId, memberId: ava } })).toBe(1);
+    expect(await authorizeMediaRead(leo, key)).toBe(false);
+    expect(await authorizeMediaRead(stranger, key)).toBe(false);
+    expect(await errorCode(leo, await photo(leo, gameId, "synthetic-photo"))).toBe("INVALID_REQUEST");
+    await ok(leo, { ...await photo(leo, gameId, "synthetic-own-graph"), kind: "heart_rate" });
+    expect(await authorizeMediaRead(leo, key)).toBe(true);
+    expect((await readGame(gameId, leo))?.days[0]?.others[0]?.entry).toMatchObject({ kind: "heart_rate" });
+    await ok(ava, { ...await photo(ava, gameId, "synthetic-retake"), kind: "heart_rate" });
+    expect(await errorCode(ava, { ...graph, entryId: randomUUID() })).toBe("RETAKE_USED");
+    expect(await authorizeMediaRead(leo, key)).toBe(false);
   });
 
   it("syncs canonical profile photos, preserves private overrides and scopes media to game participants", async () => {

@@ -2842,9 +2842,9 @@ model GameEntry {
   gameId          String     @map("game_id")
   memberId        String     @map("member_id")
   dayIndex        Int        @map("day_index")
-  // 1 or 2 for photos (2 is the retake), 0 for an excuse: caps each player-day.
+  // 1 or 2 for check-ins (2 is the retake), 0 for an excuse: caps each player-day.
   attempt         Int
-  // photo or excuse (a voice memo, with its transcript as text)
+  // photo, heart_rate (rendered graph), or excuse (transcript text only)
   kind            String
   textEncrypted   String?    @map("text_encrypted")
   mediaKeys       String[]   @default([]) @map("media_keys")

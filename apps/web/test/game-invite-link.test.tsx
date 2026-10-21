@@ -40,6 +40,13 @@ describe("weekly game invite link", () => {
     expect(gameInviteAppUrl("a/b c", {})).toBe("ai.withmurph.app://invite/a%2Fb%20c");
   });
 
+  it("discloses the required check-in before acceptance, including legacy photos", () => {
+    if (OPEN.status !== "open") throw new Error("Expected open fixture");
+    const render = (preview: GameInvitePreview) => renderToStaticMarkup(createElement(GameInviteView, { appUrl: "ai.withmurph.app://invite/synthetic", preview }));
+    expect(render(OPEN)).toContain("Photo");
+    expect(render({ ...OPEN, terms: { ...OPEN.terms, checkInKind: "heart_rate" } })).toContain("Heart-rate graph · wearable required");
+  });
+
   it("puts that link on the page's Open in Murph button", () => {
     const appUrl = gameInviteAppUrl("tok_1", { MURPH_GAME_APP_URL_SCHEME: "ai.withmurph.app.dev" });
     const html = renderToStaticMarkup(createElement(GameInviteView, { appUrl, preview: OPEN }));

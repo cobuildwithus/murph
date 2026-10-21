@@ -34,8 +34,12 @@ export interface GameTask {
   text: string;
 }
 
+export const GAME_CHECK_IN_KINDS = ["photo", "heart_rate"] as const;
+export type GameCheckInKind = (typeof GAME_CHECK_IN_KINDS)[number];
+
 /** One version of what everyone agreed to, applying from `fromDay`. */
 export interface GameTermsVersion {
+  checkInKind?: GameCheckInKind;
   n: number;
   fromDay: number;
   tasks: GameTask[];
@@ -45,6 +49,8 @@ export interface GameTermsVersion {
 
 /** What a new game starts with (version 1, from day 0). */
 export interface GameTermsInput {
+  /** Shared by all players. Omission preserves the original photo requirement. */
+  checkInKind?: GameCheckInKind;
   tasks: GameTask[];
   schedule: GameSchedule;
   stakes: GameStake[];
@@ -58,10 +64,10 @@ export interface GameTermsInput {
 }
 
 /**
- * A photo, or an excuse for a missed day: only its words (the transcript the
+ * A photo, an explicitly shared heart-rate graph image, or an excuse for a missed day: only its words (the transcript the
  * phone made on-device). No audio is uploaded or stored.
  */
-export const GAME_ENTRY_KINDS = ["photo", "excuse"] as const;
+export const GAME_ENTRY_KINDS = ["photo", "heart_rate", "excuse"] as const;
 export type GameEntryKind = (typeof GAME_ENTRY_KINDS)[number];
 
 /** The words a challenger attaches to whoever they invite; only they ever see them. */
@@ -111,7 +117,8 @@ export interface AcceptInviteBody {
 }
 
 /**
- * POST /games/:id/entries. A photo needs 1-4 `mediaKeys` (.jpg/.heic); an
+ * POST /games/:id/entries. A photo needs 1-4 `mediaKeys` (.jpg/.heic); a
+ * heart_rate check-in needs exactly one rendered JPEG graph, with no raw samples. An
  * excuse needs `text` (1-500 characters) and no media, and applies to your most
  * recent missed scheduled day, never today.
  */

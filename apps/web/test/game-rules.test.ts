@@ -133,6 +133,13 @@ function codeOf(run: () => unknown): string {
 }
 
 describe("weekly game: terms", () => {
+  it("defaults old stored terms to photos and rejects unknown requirements", () => {
+    const stored = invited().game.terms;
+    expect(parseStoredTerms(stored).versions[0].checkInKind).toBe("photo");
+    expect(codeOf(() => post(live(), LEO, at(live(), LEO, 0, 9), { kind: "heart_rate" }))).toBe("INVALID_REQUEST");
+    expect(() => parseStoredTerms({ ...stored, versions: [{ ...stored.versions[0], checkInKind: "video" }] })).toThrow();
+  });
+
   it("validates the challenge and gives every stake a fresh key", () => {
     let next = 0;
     const newKey = () => `gsk_new_${(next += 1)}`;
@@ -149,6 +156,7 @@ describe("weekly game: terms", () => {
     );
     expect(made.lengthDays).toBe(7);
     expect(made.terms.versions[0]).toEqual({
+      checkInKind: "photo",
       fromDay: 0,
       n: 1,
       schedule: { days: [0, 2, 4] },
@@ -328,18 +336,30 @@ describe("weekly game: posting", () => {
     expect(codeOf(() => post(state, LEO, at(state, LEO, 6, 11), { kind: "excuse" }))).toBe("DAY_CLOSED");
   });
 
-  it("needs media for photo kinds and only your own uploads", () => {
+  it.each(["photo", "heart_rate"] as const)("needs owned media for %s check-ins", (kind) => {
     const state = live();
     const base = { captureAgeMs: null, hasText: false, memberId: LEO, now: at(state, LEO, 0, 9) };
-    expect(codeOf(() => decidePost(state, { ...base, kind: "photo", mediaKeyPrefix: mediaKeyPrefixFor(LEO), mediaKeys: [] })))
+    expect(codeOf(() => decidePost(state, { ...base, kind, mediaKeyPrefix: mediaKeyPrefixFor(LEO), mediaKeys: [] })))
       .toBe("MEDIA_MISSING");
     expect(codeOf(() => decidePost(state, {
       ...base,
-      kind: "photo",
+      kind,
       mediaKeyPrefix: mediaKeyPrefixFor(LEO),
       mediaKeys: [`${mediaKeyPrefixFor(AVA)}x.jpg`],
     }))).toBe("MEDIA_MISSING");
     expect(codeOf(() => post(live(), "hbm_kat", at(state, LEO, 0, 9)))).toBe("NOT_A_PLAYER");
+  });
+
+  it("enforces the agreed graph requirement while retaining scoring and retakes", () => {
+    let state = live();
+    state.game.terms.versions[0].checkInKind = "heart_rate";
+    state = post(state, LEO, at(state, LEO, 0, 9), { kind: "heart_rate" });
+    expect(scorePlayer(state, playerFor(state, LEO)!)).toMatchObject({ score: 1 });
+    expect(state.entries[0]).toMatchObject({ attempt: 1, kind: "heart_rate" });
+    expect(codeOf(() => post(state, LEO, at(state, LEO, 0, 10), { kind: "photo" }))).toBe("INVALID_REQUEST");
+    state = post(state, LEO, at(state, LEO, 0, 10), { kind: "heart_rate" });
+    expect(scorePlayer(state, playerFor(state, LEO)!)).toMatchObject({ score: 1 });
+    expect(codeOf(() => post(state, LEO, at(state, LEO, 0, 11), { kind: "heart_rate" }))).toBe("RETAKE_USED");
   });
 
   it("closes before Day 1 and after the last day, at each player's own 3am", () => {

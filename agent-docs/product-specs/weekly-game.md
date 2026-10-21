@@ -65,8 +65,11 @@ this default without deleting other people's private contact choices.
   3am. Start now is a dev tool today.
 - **Weekdays.** A set-weekdays game is on and off on the same dates for
   everyone, because every player's day number falls on the same date.
-- **Posting.** One photo a day. Taking it back and retaking is allowed once per
-  day (two photos in total, withdrawn ones included).
+- **Posting.** One check-in a day: a live-camera photo or an explicitly shared
+  heart-rate graph recorded over Bluetooth from Start to Stop. Taking it back
+  and recording or photographing again is allowed once per day (two attempts
+  total, across both kinds, including withdrawn entries). A graph records
+  heart rate, not verified repetitions or automatic task completion.
 - **Excuses.** An excuse explains a missed day in a few words: the phone
   transcribes the voice note on-device and sends only the transcript (1-500
   characters); no audio is uploaded or stored, and it's never replayed. It
@@ -123,3 +126,24 @@ this default without deleting other people's private contact choices.
 
 `ARCHITECTURE.md` § Weekly Game owns the storage, write path, and route
 boundaries. The wire contract is `apps/web/src/lib/game/contract.ts`.
+
+## Heart-rate graph artifacts
+
+`heart_rate` entries carry exactly one rendered JPEG in the existing sealed
+media store. The native app retains raw samples only in memory and sends no
+sample arrays, device identity, or new health-data records. The server applies
+identical owner checks, post-to-unlock, day boundaries, idempotency, attempt caps,
+withdrawal and scoring to both check-in kinds. The challenge creator chooses Photo or Heart rate in setup for both players.
+The versioned `terms.checkInKind` defaults to `photo` when absent; unknown
+values are rejected. The posting day’s terms enforce the required kind before
+an attempt is consumed. Excuses retain their existing rules.
+
+On native Home, Start opens the wearable drawer. Stop & share ends recording
+and uploads the graph; interrupted capture needs an explicit partial-share
+action. Media authorization remains participant-scoped.
+
+Apply the additive entry-constraint migration and deploy the reader/writer
+before enabling native sends. Older native builds decode the unknown kind but
+omit graph downloads; players need the updated app to see this artifact. The
+new native reader displays both kinds in the home card, week and recap using
+the full graph image. No live release is implied by this implementation.
