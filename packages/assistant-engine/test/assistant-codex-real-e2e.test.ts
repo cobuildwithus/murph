@@ -2487,6 +2487,45 @@ describeRealCodex('real Codex common media file delivery e2e', () => {
   }, 360_000)
 })
 
+describeRealCodex('real Codex public image URL recovery e2e', () => {
+  it('recovers an optimizer rejection by attaching its original public image', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-image-recovery-e2e-'))
+    const originalUrl = 'https://cdn.example.test/landscape.jpg'
+    const optimizerUrl = `https://catalog.example.test/_next/image?url=${encodeURIComponent(originalUrl)}&w=800&q=75`
+    try {
+      await initializeVault({ vaultRoot: workingDirectory, timezone: 'UTC' })
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome,
+        developerInstructions: buildAssistantSystemPrompt({
+          assistantCliContract: null, assistantContextSnapshotPrompt: null,
+          assistantHostedDeviceConnectAvailable: false, assistantHostedDeviceConnectProviders: [],
+          assistantKnowledgeToolsAvailable: false, channel: 'linq',
+          cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+          conversationScope: 'direct', currentLocalDate: '2026-10-21', currentTimeZone: 'UTC',
+          hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false, turnTrigger: null,
+        }),
+        dynamicTools: [MURPH_ATTACH_RESPONSE_MEDIA_TOOL],
+        env: config.env, model: config.model, modelProvider: config.modelProvider,
+        prompt: `Attach this landscape photo directly in chat: ${optimizerUrl}. Use that exact URL on your first attachment attempt. If the tool rejects it, follow its recovery guidance. I cannot open website links.`,
+        reasoningEffort: 'low', sandbox: 'read-only', workingDirectory,
+      })
+      const calls = readDynamicToolAttempts(result.jsonEvents)
+      expect(calls.map(call => call.tool)).toEqual(['attach_response_media', 'attach_response_media'])
+      expect(calls[0]?.argumentsValue).toMatchObject({ media: [{ url: optimizerUrl }] })
+      expect(calls[1]?.argumentsValue).toMatchObject({ media: [{ url: originalUrl }] })
+      expect(result.responseMedia).toEqual([expect.objectContaining({ kind: 'image', url: originalUrl })])
+      const reply = result.finalMessage.trim()
+      expect(reply).not.toMatch(/https?:|open (?:the|this) (?:link|website)|delivered|received|approved/iu)
+      process.stdout.write(`[public-image-recovery-e2e] ${JSON.stringify({ reply, attachmentAttempts: calls.length, acceptedMedia: result.responseMedia.length })}\n`)
+    } finally {
+      await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+    }
+  }, 360_000)
+})
+
 describeRealCodex('real Codex direct route planning e2e', () => {
   it(
     'answers once from an early detail retained across sixty committed messages',

@@ -152,9 +152,10 @@ describe('murph.generate_voice_memo dynamic tool execution', () => {
     expect(generateAndUpload).not.toHaveBeenCalled()
   })
 
-  it('returns the full URL validation reason without executing invalid public media', async () => {
-    const privateUrl =
-      'http://synthetic-private.example.test/catalog/private-file.png?token=private'
+  it.each([
+    'http://synthetic-private.example.test/catalog/private-file.png?token=private',
+    'https://synthetic-private.example.test/_next/image?url=https%3A%2F%2Fcdn.example.test%2Fprivate-file.png&w=800&q=75',
+  ])('returns actionable URL recovery without executing invalid public media: %s', async (privateUrl) => {
     const request = readTestMurphDynamicToolRequest({
       id: 15,
       method: 'item/tool/call',
@@ -198,6 +199,10 @@ describe('murph.generate_voice_memo dynamic tool execution', () => {
     expect(feedback).not.toContain('private-file.png')
     expect(feedback).not.toContain('token=private')
     expect(feedback).not.toContain('"received"')
+    expect(feedback).toContain('without credentials, query strings, or fragments')
+    expect(feedback).toContain('original public image URL')
+    expect(feedback).toContain('send_vault_file')
+    expect(feedback).toContain('approval')
     expect(result.responseMediaPatch).toBeUndefined()
     expect(fetchImpl).not.toHaveBeenCalled()
     expect(nextUsageOrdinal).not.toHaveBeenCalled()
