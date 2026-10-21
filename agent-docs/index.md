@@ -1322,3 +1322,7 @@ Member ChatGPT linking retirement is tracked in
 [`the removal plan`](exec-plans/completed/2026-10-19-remove-member-inference.md);
 the retained mailbox cleanup contract is owned by
 [`hosted runtime protocol`](references/hosted-runtime-protocol.md).
+
+Bounded long-distance workspace compression and synthetic cold-restore proof are
+recorded in [`workspace restore speed`](exec-plans/completed/2026-10-20-snapshot-restore-speed.md);
+the live storage contract remains in `../apps/cloudflare/README.md`.

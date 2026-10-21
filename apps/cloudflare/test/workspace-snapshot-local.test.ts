@@ -1485,6 +1485,53 @@ while :; do sleep 0.01; done
     }
   });
 
+  it("compresses distant duplicate payloads and restores every file with the existing decoder", async () => {
+    const tempRoot = await mkdtemp(path.join(tmpdir(), "workspace-snapshot-distance-test-"));
+    const durableRoot = path.join(tempRoot, "source");
+    const restoredRoot = path.join(tempRoot, "restored");
+    const dataKey = encodeHostedWorkspaceSnapshotV2DataKey(new Uint8Array(32).fill(7));
+    const objectKey = "users/synthetic/workspace-snapshots/distant.snapshot.enc";
+    const snapshotId = "distant";
+    const userId = "synthetic";
+    const aad = buildHostedWorkspaceSnapshotV2Aad({ objectKey, snapshotId, userId });
+    const entropy = createCipheriv("aes-256-ctr", Buffer.alloc(32, 3), Buffer.alloc(16, 5));
+    // Each copy is larger than level 9's default history. Only distant matching
+    // can share these bytes; local repetition alone cannot satisfy the bound.
+    const payload = entropy.update(Buffer.alloc(8 * 1024 * 1024));
+    entropy.final();
+    const archivePaths = ["canonical.bin", "query-cache.bin", "search-cache.bin"];
+    try {
+      await mkdir(durableRoot);
+      for (const archivePath of archivePaths) {
+        await writeFile(path.join(durableRoot, archivePath), payload);
+      }
+      const encrypted = await createEncryptedWorkspaceSnapshotFile({
+        aad,
+        archiveEntries: archivePaths.map((archivePath) => ({
+          absolutePath: path.join(durableRoot, archivePath), archivePath, kind: "file" as const,
+        })),
+        dataKey, durableRoot,
+        ivBase64: Buffer.alloc(12, 9).toString("base64url"),
+        maxEncryptedBytes: 32 * 1024 * 1024,
+        outputDir: path.join(tempRoot, "scratch"),
+      });
+      expect(encrypted.fileCount).toBe(3);
+      expect(encrypted.totalPlainBytes).toBe(3 * payload.length);
+      expect(encrypted.encryptedByteSize).toBeLessThan(1.5 * payload.length);
+      await restoreEncryptedWorkspaceSnapshot({
+        dataKey, durableRoot: restoredRoot, encryptedFilePath: encrypted.encryptedFilePath,
+        ref: createHostedWorkspaceSnapshotTestRef({ aad, encrypted, objectKey, snapshotId, userId }),
+      });
+      const digest = createHash("sha256").update(payload).digest("hex");
+      for (const archivePath of archivePaths) {
+        expect(createHash("sha256").update(await readFile(path.join(restoredRoot, archivePath))).digest("hex"))
+          .toBe(digest);
+      }
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
   it("creates and restores with only the archive and compression processes", async () => {
     const tempRoot = await mkdtemp(path.join(tmpdir(), "workspace-snapshot-local-test-"));
     const durableRoot = path.join(tempRoot, "durable");
