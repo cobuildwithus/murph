@@ -986,8 +986,15 @@ External conversation directness is three-state authority. Explicit direct evide
 
 Assistant-authored cron schedules require a literal wildcard in either day-of-month or day-of-week. The shared automation tool argument schema rejects combined restrictions before creation or schedule replacement and returns repair guidance through the existing validation feedback. Finite recurrences keep their repeating days in the schedule and their exclusive expiration in `activeUntil`. Canonical cron retains standard OR semantics for existing records and operator workflows; inspection and patches without a replacement schedule remain compatible.
 
-A private hosted biweekly usage review is an ordinary fresh managed automation,
-pinned to GPT-6.1 Sol medium. It reads bounded current-member diagnostics from
+A private hosted biweekly usage review is a managed automation pinned to
+GPT-6.1 Sol medium. Its verified private hosted occurrence uses the existing
+isolated conversation/provider-turn profile: it neither resumes the member's
+provider thread nor replays committed chat history. Canonical context and the
+ordinary tool and delivery authorities remain available. Success and terminal
+failure preserve the foreground resume binding; all isolated notification
+profiles preserve it, except the explicit context-handoff reset. Other scheduled
+automations keep ordinary conversation continuity. The review reads bounded
+current-member diagnostics from
 the canonical hosted AI usage ledger, preserving recorded allowance costs and
 explicit missing/truncated coverage. Existing sanitized turn profiles attribute
 tool output bytes; bytes are not token counts or per-tool dollar charges. The
@@ -2676,6 +2683,7 @@ application code.
 - Audio/video transcript outputs under `derived/inbox/**` are rebuildable and never canonical health facts. They may survive an earlier raw-media byte pass, but the owning inbound message-content pass deletes them at the receipt-plus-14-day deadline. PDFs, documents, CSVs, and other inspectable attachment files follow their existing raw-inbox lifecycle unless a user or importer creates durable promoted artifacts; they are not reclassified as message-body text by this policy.
 - `bank/library/**` is the stable health reference layer for durable shared entities such as biomarkers, domains, protocol variants, and source artifacts.
 - Model-authored compiled knowledge pages under `derived/knowledge/**` are the separate non-canonical, rebuildable personal wiki layer that synthesizes local vault evidence and saved research notes without becoming a second source of truth. `derived/knowledge/index.md` is the content catalog, `derived/knowledge/log.md` is the append-only write log, and `derived/knowledge/pages/*.md` stores the assistant-authored pages themselves.
+- `vault-cli knowledge show` returns the complete rendered body, metadata, and exact file revision digest once; `--raw` additionally includes the stored Markdown with frontmatter. Internal knowledge reads retain that Markdown for compare-and-set writes. Optional absence and degraded-page handling use the same existing knowledge owner.
 - Inbox runtime state is split between a rebuildable local projection under `.runtime/projections/inboxd.sqlite` and durable daemon/config JSON state under `.runtime/operations/inbox/*.json`; the projection remains rebuildable from canonical inbox capture records, raw inbox envelopes, and inbox attachment retention records.
 - Assistant channel identities, delivery thread bindings, and channel credentials remain non-canonical runtime concerns; transport credentials stay in operator or hosted-platform environment boundaries and never belong in the vault.
 - Query runtime state is local-only under `.runtime/projections/query.sqlite`, is rebuildable from canonical query-visible vault evidence, and remains strictly read-only relative to canonical writes. Dense provider telemetry does not enter the default query/read/browser/assistant model: generic `ledger/samples/**` shards are explicit import/debug ledgers, while `readVault()` and `readVaultTolerant()` materialize sparse canonical product records plus display-grade `ledger/metric-samples/**`. Browser-vault refresh instead reads one strict canonical snapshot and derives its compact metric projection in memory without reading, rebuilding, or mutating that SQLite projection. Dense metric rows remain lookback-bounded, while sparse lab history uses a dedicated all-history browser projection derived only from collapsed live canonical test events; it preserves structured result facts needed for measured-biomarker history without adding raw reports, notes, raw references, or external identifiers to the browser replica. `readVaultRawTolerant()` is the explicit repair/debug source hydration path and bypasses default projection filtering. In `readVault()`, `family: "sample"` means display-grade `kind: "metric_sample"` product facts only; it must not be used as a signal that generic raw sample telemetry is back in the default read model.

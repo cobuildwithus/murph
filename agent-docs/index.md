@@ -1,3 +1,14 @@
+Held group draft failure propagation is owned by
+[`hosted-runtime-protocol.md`](references/hosted-runtime-protocol.md);
+[the cause-preservation plan](exec-plans/completed/2026-10-20-group-draft-failure-cause.md)
+records deterministic failure and cancellation proof.
+
+Hosted-local snapshot marker restart recovery is recorded in
+[the fixture correction plan](exec-plans/completed/2026-10-20-hosted-local-locator-restart.md).
+
+Query SQLite rebuild cost and sparse-zero sleep repair evidence are tracked in
+[the completed build-cost plan](exec-plans/completed/2026-10-20-sqlite-build-cost.md).
+
 Linq line lock-order repair is tracked in
 [the active lock-order plan](exec-plans/completed/2026-10-20-linq-line-lock-order.md).
 
@@ -32,6 +43,10 @@ ReviewGPT artifact identity adoption: [completed plan](exec-plans/completed/2026
 
 Canary reply observation diagnostics: [completed plan](exec-plans/completed/2026-10-18-canary-reply-observation-diagnostics.md).
 
+Metric projection CPU attribution is tracked in
+[the completed CPU timing plan](exec-plans/completed/2026-10-20-metric-projection-cpu.md);
+`../packages/runtime-state/README.md` owns the optional timing contract.
+
 Fixed-canary server timing diagnostics: [active plan](exec-plans/completed/2026-10-20-canary-turn-diagnostics.md).
 
 Hosted live-journey configuration is owned by `../packages/assistant-engine/README.md`;
@@ -51,6 +66,10 @@ Dated sleep-list row selection and its synthetic evidence are recorded in
 Entrypoint test worker build prerequisites are owned by
 `../packages/assistant-runtime/README.md#focused-tests`; repair evidence is tracked
 in [the worker preflight plan](exec-plans/completed/2026-10-09-frog-entrypoint-build-preflight.md).
+
+Due-wake progress and operator diagnostic handoff proof are recorded in
+[the wake-progress plan](exec-plans/completed/2026-10-21-operator-wake-progress.md);
+`../packages/assistant-runtime/README.md` owns the runtime contract.
 
 OpenAI-only mixed-version rollout preparation is tracked in
 [the rollout plan](exec-plans/completed/2026-10-07-openai-rollout.md); the live
@@ -540,6 +559,10 @@ recorded in `exec-plans/completed/2026-09-20-memory-current-context.md`.
 
 Malformed referral-path routing plan: [`2026-10-05-referral-path-routing.md`](exec-plans/completed/2026-10-05-referral-path-routing.md).
 
+Connected-account reads and outdoor-reminder location share the runtime policy in
+`packages/assistant-engine/skills/connected-apps/references/reading.md`; the
+connected-apps entrypoint owns other services, writes, and account changes.
+
 ## Purpose
 
 Deferred device hints honor their persisted retry time in wake projection and
@@ -843,11 +866,11 @@ Package verifier worker-exit result preservation is tracked in
 | `agent-docs/research/2026-07-10-junction-labs-commerce-and-fulfillment.md` | Point-in-time Junction lab-ordering research and phased product, commerce, fulfillment, result-import, and launch-gate proposal. | Research and future planning artifact | Medium | 2026-07-10 |
 | `agent-docs/research/2026-09-11-junction-historical-sweep-efficiency.md` | Official Junction webhook/history contracts, daily safety-sweep rationale, targeted refreshes, and validation gaps. | Research and future planning artifact | Medium | 2026-09-11 |
 | `agent-docs/research/2026-06-25-imessage-line-flag-evidence.md` | Point-in-time redacted evidence note for the 2026-06-25 iMessage line flag investigation. | Investigation artifact | Medium | 2026-06-26 |
-| `agent-docs/operations/agent-workflow-routing.md` | Task scope, authority, checkout, commits, and instruction ownership. | Agent workflow routing | High | 2026-09-11 |
+| `agent-docs/operations/agent-workflow-routing.md` | Task scope, authority, member-outreach confirmation, checkout, commits, and instruction ownership. | Agent workflow routing | High | 2026-10-20 |
 | `agent-docs/operations/product-ux.md` | Product UX workflow. | Product UX workflow | High | 2026-08-31 |
 | `agent-docs/operations/live-provider-canaries.md` | Fresh native, Linq, Stripe and Garmin provider outcomes; bounded Linq observation retries, GitHub dispatch, protected execution, exact receipts and cross-repository rollout. UTC weekly cadence (nine Linq, five per native platform, two Garmin/Stripe) and unchanged manual/release proof. | Live provider proof | High | 2026-10-20 |
 | `agent-docs/operations/native-android-hosted-e2e.md` | Native Android verification operations. | Native Android verification operations | High | 2026-09-01 |
-| `agent-docs/operations/verification-and-runtime.md` | Verification ownership by delivery path, fresh-checkout Cloudflare generated-client prerequisites, Draft-before-push readiness, CI compiler memory and production-build proof, independent worktree build outputs, verified remote-tracking base refresh, authorized base reconciliation with bounded conflict resolution, Temporal integration build/process-shard proof, remote browser health readiness, wearable browser failure evidence captured before cleanup, and HTTP/destination validation before persisted connection assertions. Wearable production Web preparation, stage forwarding, numeric host progress, and bounded Actions notice retention, with Vercel initial typecheck budget ownership, managed build-cache refresh, and case-insensitive APT numeric-policy verification. Includes tsrs check routing and Oxlint ownership. | Verification policy | High | 2026-10-20 |
+| `agent-docs/operations/verification-and-runtime.md` | Verification ownership by delivery path, fresh-checkout Cloudflare generated-client prerequisites, Draft-before-push readiness, CI compiler memory and production-build proof, independent worktree build outputs, verified remote-tracking base refresh, authorized base reconciliation with bounded conflict resolution, Temporal integration build/process-shard proof, remote browser health readiness, wearable browser failure evidence captured before cleanup, and HTTP/destination validation before persisted connection assertions. Wearable production Web preparation, stage forwarding, numeric host progress, and bounded Actions notice retention, with Vercel initial typecheck budget ownership, managed build-cache refresh, and case-insensitive APT numeric-policy verification. Includes tsrs check routing, Oxlint ownership, and equivalent set-based doc gardening. | Verification policy | High | 2026-10-20 |
 | `agent-docs/operations/database-transaction-starvation-audit.md` | Database critical-section reliability. | Database critical-section reliability | High | 2026-08-09 |
 | `agent-docs/operations/typescript-verification-performance.md` | tsrs check/build routing, declaration consumer proof, TypeScript fallback, host compatibility, worker budgets, incremental CI caches, watch and paired compiler benchmarks. | Verification performance policy | Medium | 2026-10-20 |
 | `agent-docs/operations/completion-workflow.md` | Parent-owned completion evidence, final ReviewGPT eligibility and recovery before the first valid review, verified-base mergeability, and Draft-before-push ordering; specialist passes are retired. | Completion workflow | High | 2026-09-11 |
@@ -1328,6 +1351,10 @@ Member ChatGPT linking retirement is tracked in
 [`the removal plan`](exec-plans/completed/2026-10-19-remove-member-inference.md);
 the retained mailbox cleanup contract is owned by
 [`hosted runtime protocol`](references/hosted-runtime-protocol.md).
+
+Bounded long-distance workspace compression and synthetic cold-restore proof are
+recorded in [`workspace restore speed`](exec-plans/completed/2026-10-20-snapshot-restore-speed.md);
+the live storage contract remains in `../apps/cloudflare/README.md`.
 
 Stale onboarding selection rejection is tracked in
 [the onboarding compatibility plan](exec-plans/active/2026-10-20-stale-onboarding-personas.md).

@@ -1,7 +1,6 @@
+import { sleepSessionTypeSchema, sleepSessionStateSchema } from "@murphai/contracts/sleep-session";
 import {
   activityKindAliasGroups,
-  sleepSessionTypeSchema,
-  sleepSessionStateSchema,
   type SleepSessionEventRecord,
   isStrictIsoDate,
   normalizeIanaTimeZone,

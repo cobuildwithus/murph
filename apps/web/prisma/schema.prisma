@@ -2348,6 +2348,7 @@ model HostedLinqLine {
   maxOutboundPerDay          Int?      @map("max_outbound_per_day")
   warmupStartedAt            DateTime? @map("warmup_started_at")
   warmupEndsAt               DateTime? @map("warmup_ends_at")
+  /// Zero excludes automatic placement; existing routes and managed inbound remain valid.
   assignmentWeight           Int       @default(100) @map("assignment_weight")
   notes                      String?
   createdAt                  DateTime  @default(now()) @map("created_at")

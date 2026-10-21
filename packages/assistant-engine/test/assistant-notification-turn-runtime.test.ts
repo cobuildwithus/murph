@@ -1,3 +1,4 @@
+import { MURPH_WEEKLY_USAGE_OPTIMIZER_AUTOMATION } from '../src/assistant/weekly-usage-optimizer.ts'
 import { readTestMurphDynamicToolRequest } from './support/codex-app-server.ts'
 import assert from 'node:assert/strict'
 import path from 'node:path'
@@ -3527,6 +3528,89 @@ test('sendAssistantNotificationLocal forwards one hosted context and leaves audi
   })
 
   expect(groupSharedRead).not.toHaveBeenCalled()
+})
+
+test.each(['authorized', 'ordinary', 'wrong-occurrence', 'wrong-trigger', 'not-hosted', 'group'] as const)(
+  'usage optimizer isolation admission: %s', async (scenario) => {
+    const occurrenceAt = '2030-01-10T12:00:00.000Z'
+    const providerResult = createProviderResult({
+      codexThreadId: 'synthetic-review-thread',
+      response: '{"kind":"skip","privateSummary":"Biweekly usage review completed."}',
+    })
+    const sharedPlan = createSharedPlan()
+    sharedPlan.conversationPolicy.audience.threadIsDirect = scenario !== 'group'
+    const { mocks, sendAssistantNotificationLocal, deliverMessage } = await loadNotificationTurnHarness({
+      providerResult, sharedPlan, turnId: 'synthetic-review-turn',
+    })
+    const result = await sendAssistantNotificationLocal({
+      executionContext: { hosted: scenario === 'not-hosted' ? null : { memberId: 'synthetic-member', userEnvKeys: [] } },
+      instructions: MURPH_WEEKLY_USAGE_OPTIMIZER_AUTOMATION.instructions,
+      scheduledInvocationAuthority: {
+        automationId: scenario === 'ordinary' ? 'synthetic-ordinary' : MURPH_WEEKLY_USAGE_OPTIMIZER_AUTOMATION.automationId,
+        occurrenceAt: scenario === 'wrong-occurrence' ? '2030-01-11T12:00:00.000Z' : occurrenceAt,
+      },
+      scheduledOccurrenceAt: occurrenceAt,
+      turnTrigger: scenario === 'wrong-trigger' ? 'manual-deliver' : 'automation-cron',
+      vault: '/vaults/synthetic-review',
+    })
+    const providerInput = mocks.executeCodexTurnWithRecovery.mock.calls[0]?.[0]
+    expect(providerInput?.profile).toEqual(scenario === 'authorized' ? {
+      nativeResumePolicy: 'disabled', promptProfile: 'conversation',
+      threadScope: 'isolated-thread', toolProfile: 'provider-turn',
+    } : undefined)
+    expect(mocks.persistAssistantTurnAndSession).toHaveBeenCalledWith(expect.objectContaining({
+      providerResumeStateAction: scenario === 'authorized' ? 'preserve-existing' : 'persist-from-provider-turn',
+    }))
+    expect(result.response).toBeNull()
+    expect(deliverMessage).not.toHaveBeenCalled()
+  },
+)
+
+test.each(['creative-response', 'creative-response-text', 'operator-message'] as const)(
+  'scheduled isolated %s preserves foreground resume', async (notificationPromptProfile) => {
+    const providerResult = createProviderResult({
+      codexThreadId: 'synthetic-isolated-thread',
+      response: '{"kind":"skip","privateSummary":"No message needed."}',
+    })
+    const { mocks, sendAssistantNotificationLocal } = await loadNotificationTurnHarness({
+      providerResult, turnId: 'synthetic-isolated-notification',
+    })
+    await sendAssistantNotificationLocal({
+      instructions: 'Evaluate this synthetic notification.', notificationPromptProfile,
+      scheduledOccurrenceAt: '2030-01-10T12:00:00.000Z', vault: '/vaults/synthetic-review',
+    })
+    expect(mocks.persistAssistantTurnAndSession).toHaveBeenCalledWith(expect.objectContaining({
+      providerResumeStateAction: 'preserve-existing',
+    }))
+  },
+)
+
+test('usage optimizer isolation preserves foreground resume on terminal failure', async () => {
+  const providerResult = createProviderResult({ codexThreadId: 'synthetic-review-thread' })
+  const providerError = new Error('Synthetic review failure')
+  const { mocks, sendAssistantNotificationLocal } = await loadNotificationTurnHarness({
+    providerResult, turnId: 'synthetic-review-failure',
+    providerOutcome: {
+      acceptedNoReplyDeliveryContextOrdinals: [], additionalUsages: [],
+      assistantContractFingerprint: providerResult.assistantContractFingerprint,
+      attemptCount: 1, codexContinuation: providerResult.codexContinuation,
+      codexRolloutRelativePath: null, codexThreadId: 'synthetic-review-thread',
+      error: providerError, kind: 'failed_terminal', providerRequestOutcome: 'failed',
+      providerTurnId: null, rawEvents: [], reactions: [], route: providerResult.route,
+      session: providerResult.session, usage: null, usageAttribution: null,
+    },
+  })
+  const occurrenceAt = '2030-01-10T12:00:00.000Z'
+  await expect(sendAssistantNotificationLocal({
+    executionContext: { hosted: { memberId: 'synthetic-member', userEnvKeys: [] } },
+    instructions: MURPH_WEEKLY_USAGE_OPTIMIZER_AUTOMATION.instructions,
+    scheduledInvocationAuthority: { automationId: MURPH_WEEKLY_USAGE_OPTIMIZER_AUTOMATION.automationId, occurrenceAt },
+    scheduledOccurrenceAt: occurrenceAt, turnTrigger: 'automation-cron',
+    vault: '/vaults/synthetic-review',
+  })).rejects.toBe(providerError)
+  expect(mocks.applyAssistantSessionCodexResumeStateAction).toHaveBeenCalledWith(expect.objectContaining({
+    action: 'preserve-existing', session: providerResult.session,
+  }))
 })
 
 test('sendAssistantNotificationLocal releases typing after accepted delivery', async () => {

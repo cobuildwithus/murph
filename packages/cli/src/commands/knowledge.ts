@@ -220,25 +220,32 @@ export function registerKnowledgeCommands(cli: Cli.Cli) {
   })
 
   knowledge.command('show', {
-    description: 'Show one derived knowledge page by slug.',
+    description: 'Show one derived knowledge page body, metadata, and revision digest. Use --raw to also include the exact stored Markdown.',
     args: z.object({
       slug: slugSchema.describe('Knowledge page slug to inspect.'),
     }),
     options: withBaseOptions({
+      raw: z
+        .boolean()
+        .optional()
+        .describe('Also include the exact stored Markdown, including YAML frontmatter, in page.markdown.'),
       ifExists: z
         .boolean()
         .optional()
         .describe('For an optional page, return `page: null` instead of failing when no derived page exists for the slug. Fails instead when any invalid page leaves absence unconfirmed, and for unreadable, duplicate, or reserved pages.'),
     }),
     output: knowledgeShowResultSchema,
-    run({ args, options }) {
+    async run({ args, options }) {
       const input = {
         vault: options.vault,
         slug: args.slug,
       }
-      return options.ifExists === true
+      const result = await (options.ifExists === true
         ? getKnowledgePageIfExists(input)
-        : getKnowledgePage(input)
+        : getKnowledgePage(input))
+      if (options.raw === true || result.page === null) return result
+      const { markdown: _markdown, ...page } = result.page
+      return { ...result, page }
     },
   })
 

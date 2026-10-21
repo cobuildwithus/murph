@@ -37,6 +37,7 @@ import {
   resolveHostedWebDevDistDirName,
   shouldUseHostedWebProductionStart,
 } from "@murphai/hosted-local-harness/dev-hosted-local/web-production-start";
+import { fetchHostedLocalWorkerWithRestartRetry } from "./hosted-local-worker-restart.ts";
 const hostedLocalStatusTimeoutMs = 180_000;
 const hostedLocalStatusRequestTimeoutMs = 10_000;
 const hostedLocalStatusPollIntervalMs = 250;
@@ -521,10 +522,19 @@ export async function startHostedLocalDevHarness(input: {
     interventionCount += countHostedLocalInterventionRequest(pathname, init?.method);
 
     try {
-      response = await fetch(new URL(pathname, `${workerBaseUrl}/`), {
+      const url = new URL(pathname, `${workerBaseUrl}/`);
+      const requestInit = {
         ...init,
         headers: buildAuthenticatedHeaders(stack?.oidcToken ?? "", init?.headers),
-      });
+      };
+      // Repeating this exact zero-byte marker write is safe even if its response was lost.
+      const fetchRequest = url.origin === new URL(workerBaseUrl).origin
+        && requestInit.method?.toUpperCase() === "POST"
+        && /^\/__test\/users\/[^/]+\/direct-r2-locator-marker$/u.test(url.pathname)
+        && typeof requestInit.body === "string"
+        ? fetchHostedLocalWorkerWithRestartRetry
+        : fetch;
+      response = await fetchRequest(url, requestInit);
     } catch (error) {
       throw new Error(formatFailure([
         `${init?.method ?? "GET"} ${pathname} failed before an HTTP response was received.`,

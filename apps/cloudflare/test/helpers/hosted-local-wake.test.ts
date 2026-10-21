@@ -78,6 +78,41 @@ it("ensures workspace processing through the signed callback-only control route"
   expect(commandTimeoutMs).toBeLessThanOrEqual(5_000);
 });
 
+it("preserves the signed control request through an exact worker restart", async () => {
+  const accepted = {
+    action: "woken",
+    kind: "runtime_processing_accepted",
+    recommendedRecheckAt: "2026-04-27T00:00:10.000Z",
+    runtimeAttemptId: "runtime-attempt-test",
+  };
+  const fetchMock = vi.fn<typeof fetch>()
+    .mockResolvedValueOnce(new Response(
+      "Your worker restarted mid-request. Please try sending the request again. Only GET or HEAD requests are retried automatically.",
+      { status: 503 },
+    ))
+    .mockResolvedValueOnce(Response.json(accepted));
+  vi.stubGlobal("fetch", fetchMock);
+
+  await expect(ensureProcessingAfterSyntheticMailboxAppendForTest({
+    harness: {
+      runtimeEnv: {
+        HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: TEST_HOSTED_WEB_CALLBACK_PRIVATE_JWK_JSON,
+      },
+      stderrTail: () => "",
+      stdoutTail: () => "",
+      workerBaseUrl: "https://worker.example.test",
+    } as HostedLocalDevHarness,
+    timeoutMs: 5_000,
+    userId: "member_marker_fixture",
+  })).resolves.toEqual(accepted);
+  expect(fetchMock).toHaveBeenCalledTimes(2);
+  expect(fetchMock.mock.calls[1]).toEqual(fetchMock.mock.calls[0]);
+  expect(fetchMock.mock.calls[1]?.[1]).toBe(fetchMock.mock.calls[0]?.[1]);
+  const headers = new Headers(fetchMock.mock.calls[1]?.[1]?.headers);
+  expect(headers.get(HOSTED_EXECUTION_USER_ID_HEADER)).toBe("member_marker_fixture");
+  expect(headers.get(HOSTED_EXECUTION_SIGNATURE_HEADER)).toBeTruthy();
+});
+
 it("retries retry_later responses until processing is accepted", async () => {
   const retryAt = new Date(Date.now() - 1_000).toISOString();
   const acceptedResponse: HostedRuntimeEnsureProcessingResponse = {

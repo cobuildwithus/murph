@@ -89,6 +89,13 @@ them. Background progress-cause booleans distinguish wake projection changes and
 provider cleanup from actual automation progress. These fields add no reads or
 log events and never control scheduling or expose raw timestamps or payloads.
 
+Refreshing an already-due wake for the same normalized reason does not by itself
+count as assistant-phase progress. The selected due wake remains available to
+its authorized successor; retained operator diagnostics keep the existing
+detached read-only controller after checkpoint handoff. New or newly due wakes,
+reason changes, future schedule changes, and real canonical, foreground, cleanup,
+delivery, and usage work retain their existing checkpoint ownership.
+
 Hosted runtime is a thin containerized runner over the same local assistant input
 spine used by local automation:
 

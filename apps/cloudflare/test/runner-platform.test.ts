@@ -8277,8 +8277,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
 
           const logs = mocks.emitHostedExecutionStructuredLog.mock.calls.map(([input]) => input);
           expect(logs.map((log) => log.message)).toEqual([
-            "Hosted runtime internal request started.",
-            ...(outcome === "transport failure" ? ["Hosted runtime internal request failed."] : [
+            ...(outcome === "success" ? [] : outcome === "transport failure" ? ["Hosted runtime internal request failed."] : [
               "Hosted runtime internal request completed.",
               ...(outcome === "authority rejection" ? [
                 "Hosted runtime internal authority rejected invocation.",
@@ -10801,16 +10800,14 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       expect(logs.map((input) => input.message)).toEqual([
         "Hosted runtime artifact upload started.",
         "Hosted runtime artifact upload authority headers prepared.",
-        "Hosted runtime internal request started.",
         "Hosted runtime internal request failed.",
         "Hosted runtime upstream request failed.",
         "Hosted runtime artifact upload transport recovery backoff.",
-        "Hosted runtime internal request started.",
         "Hosted runtime internal request failed.",
         "Hosted runtime upstream request failed.",
         "Hosted runtime artifact upload failed before response.",
       ]);
-      for (const [index, attempt] of [[5, 1], [9, 2]] as const) {
+      for (const [index, attempt] of [[4, 1], [7, 2]] as const) {
         expect(logs[index]).toMatchObject({
           component: "hosted.runtime.artifact-store",
           level: "warn",
@@ -10831,8 +10828,8 @@ describe("buildHostedExecutionRuntimePlatform", () => {
           expect(logs[index].details).not.toHaveProperty("fetchNetworkErrorCode");
         }
       }
-      expect(logs[5].details).not.toHaveProperty("responseOrigin");
-      expect(JSON.stringify(logs[5])).not.toContain("https://");
+      expect(logs[4].details).not.toHaveProperty("responseOrigin");
+      expect(JSON.stringify(logs[4])).not.toContain("https://");
       const serialized = JSON.stringify(logs);
       for (const hidden of [
         "192.0.2.10", "43210", "192.0.2.11", "example.invalid",
@@ -10845,8 +10842,8 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       await platform.artifactStore.put(artifact);
       await platform.artifactStore.put(artifact);
       expect(fetchMock).toHaveBeenCalledTimes(3);
-      expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledTimes(16);
-      for (const [input] of mocks.emitHostedExecutionStructuredLog.mock.calls.slice(10)) {
+      expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledTimes(12);
+      for (const [input] of mocks.emitHostedExecutionStructuredLog.mock.calls.slice(8)) {
         expect(input.details).not.toHaveProperty("fetchNetworkErrorCode");
       }
     },

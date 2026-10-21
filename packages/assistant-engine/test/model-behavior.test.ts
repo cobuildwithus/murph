@@ -1593,7 +1593,7 @@ describe('assistant execution prompt contract', () => {
   it('routes outdoor authoring and execution to current location policy without freezing a city', () => {
     for (const turnTrigger of [null, 'automation-cron'] as const) {
       const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput({ turnTrigger }))
-      expect(prompt).toContain("before authoring or running an outdoor reminder, read the `connected-apps` skill's reminder-location policy")
+      expect(prompt).toContain("before authoring or running an outdoor reminder, read `$MURPH_ASSISTANT_SKILLS_ROOT/connected-apps/references/reading.md`")
       expect(prompt).toContain('never freeze an incidental current city into recurring instructions')
       expect(prompt).toContain('Preserve explicitly fixed destinations and reminder timing')
       expect(prompt).toContain('Newer member statements and Journal travel override incidental legacy cities')

@@ -9,7 +9,7 @@ import type {
   JournalView,
   JournalWeekSummary,
 } from "../journal-view.ts";
-import { experimentOutcomeSchema } from "@murphai/contracts";
+import { experimentOutcomeSchema } from "@murphai/contracts/experiment-outcome";
 import { parseJournalTiming } from "@murphai/contracts/journal-presentation";
 import {
   BROWSER_VAULT_REPLICA_POLICY_ID,

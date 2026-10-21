@@ -1,4 +1,4 @@
-import { resolveUsageOptimizerFeedbackScope } from './weekly-usage-optimizer.js'
+import { resolveUsageOptimizerFeedbackScope, type UsageOptimizerFeedbackScope } from './weekly-usage-optimizer.js'
 import { prepareAssistantFollowUpEvaluationInput } from './follow-ups.js'
 import * as z from '@murphai/contracts/zod-runtime'
 import type {
@@ -502,7 +502,10 @@ export async function sendAssistantNotificationLocal(
         const notificationProviderRequestStarted =
           messageInput.onProviderRequestStarted ?? null
         let notificationProviderRequestStartedAt: string | undefined
-        const notificationTurnProfile = resolveAssistantNotificationTurnProfile(input)
+        const notificationTurnProfile = resolveAssistantNotificationTurnProfile(
+          input,
+          resolveUsageOptimizerFeedbackScope({ conversationScope, executionContext, messageInput }),
+        )
         const notificationThreadScope =
           notificationTurnProfile?.threadScope ?? 'session-thread'
         const providerOutcome = await executeCodexTurnWithRecovery({
@@ -610,6 +613,7 @@ export async function sendAssistantNotificationLocal(
           resolveAssistantNotificationProviderResumeStateAction({
             input,
             providerResult,
+            threadScope: notificationThreadScope,
           })
         await recordAssistantUsageEvent({
           executionContext,
@@ -1748,15 +1752,12 @@ async function deliverAssistantNotificationMessage(input: {
 function resolveAssistantNotificationProviderResumeStateAction(input: {
   input: AssistantNotificationInput
   providerResult: { codexThreadId?: string | null }
+  threadScope: AssistantCodexTurnThreadScopeProfile['threadScope']
 }): AssistantProviderResumeStateAction {
   if (input.input.notificationPromptProfile === 'context-handoff') {
     return 'clear'
   }
-  if (
-    isAssistantNotificationMaintenanceExactSkip(input.input) ||
-    isAssistantOnboardingGoalCheckinNotification(input.input) ||
-    !isAssistantNotificationScheduledOccurrence(input.input)
-  ) {
+  if (input.threadScope === 'isolated-thread') {
     return 'preserve-existing'
   }
 
@@ -1897,6 +1898,7 @@ function isAssistantNotificationScheduledOccurrence(
 
 function resolveAssistantNotificationTurnProfile(
   input: AssistantNotificationInput,
+  usageOptimizerScope: UsageOptimizerFeedbackScope | null,
 ): Required<AssistantCodexTurnThreadScopeProfile> | null {
   if (isAssistantNotificationMaintenanceExactSkip(input)) {
     return ASSISTANT_MAINTENANCE_TURN_PROFILE
@@ -1919,7 +1921,7 @@ function resolveAssistantNotificationTurnProfile(
     }
     return ASSISTANT_INTERACTIVE_NOTIFICATION_TURN_PROFILE
   }
-  if (isAssistantOnboardingGoalCheckinNotification(input)) {
+  if (isAssistantOnboardingGoalCheckinNotification(input) || usageOptimizerScope !== null) {
     return ASSISTANT_INTERACTIVE_NOTIFICATION_TURN_PROFILE
   }
   return isAssistantNotificationScheduledOccurrence(input)

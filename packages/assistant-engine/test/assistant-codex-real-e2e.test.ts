@@ -241,6 +241,7 @@ import {
 } from '../src/assistant/service.ts'
 import {
   appendAssistantTranscriptEntries,
+  getAssistantSession,
   listAssistantTranscriptEntries,
   saveAssistantSession,
 } from '../src/assistant/store.ts'
@@ -5229,6 +5230,65 @@ describeRealCodex('real Codex missing knowledge recovery e2e', () => {
       await removeRealCodexTemporaryPaths(config.temporaryPaths)
     }
   }, 300_000)
+})
+
+describeRealCodex('real Codex compact knowledge read e2e', () => {
+  it('answers from the complete compact knowledge body with one read and no writes', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-compact-knowledge-e2e-'))
+    const vaultRoot = path.join(workingDirectory, 'vault')
+    const binDirectory = path.join(workingDirectory, 'bin')
+    const commandLogPath = path.join(workingDirectory, 'commands.log')
+    try {
+      await initializeVault({ title: 'Synthetic knowledge read', timezone: 'UTC', vaultRoot })
+      await upsertKnowledgePage({
+        vault: vaultRoot, slug: 'trail-gear-list', title: 'Trail gear list',
+        body: '# Trail gear list\n\nPack the green rain jacket and a spare headlamp. Leave the umbrella at home because this route is exposed.',
+      })
+      await materializeRealWorkoutVaultCli({ binDirectory, commandLogPath, vaultRoot })
+      const vaultBefore = await snapshotRealCodexCanonicalVault(vaultRoot)
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome,
+        developerInstructions: buildAssistantSystemPrompt({
+          assistantCliContract: null, assistantContextSnapshotPrompt: null,
+          assistantHostedDeviceConnectAvailable: false, assistantHostedDeviceConnectProviders: [],
+          assistantKnowledgeToolsAvailable: false, channel: 'linq',
+          cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+          conversationScope: 'direct', currentLocalDate: '2026-09-04', currentTimeZone: 'UTC',
+          hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false,
+          turnTrigger: null,
+        }),
+        dynamicTools: [],
+        env: { ...config.env, PATH: `${binDirectory}:${config.env.PATH ?? ''}` },
+        model: config.model, modelProvider: config.modelProvider,
+        prompt: 'What should I pack from my saved wiki page trail-gear-list, and what should I leave behind? Read that page once with vault-cli knowledge show and answer briefly. Do not change anything or look elsewhere.',
+        reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
+      })
+      const commands = (await readFile(commandLogPath, 'utf8')).split('\n').filter(Boolean)
+        .filter((command) => !isRecordedVaultHelpCommand(command))
+      expect(commands).toEqual([expect.stringMatching(/^knowledge show trail-gear-list(?:\s|$)/u)])
+      expect(commands[0]).not.toMatch(/--raw/u)
+      const reads = readCapabilityRoutingActions(result.jsonEvents)
+        .filter((action) => action.kind === 'command' && action.command.includes('knowledge show'))
+      expect(reads).toHaveLength(1)
+      expect(reads[0]?.output).toContain('green rain jacket')
+      expect(reads[0]?.output).toContain('pageRevisionDigest')
+      expect(reads[0]?.output).not.toMatch(/"markdown"\s*:/u)
+      expect(await snapshotRealCodexCanonicalVault(vaultRoot)).toEqual(vaultBefore)
+      expect(await listAssistantOutboxIntents(vaultRoot)).toEqual([])
+      expect(result.finalMessage).toMatch(/green rain jacket/iu)
+      expect(result.finalMessage).toMatch(/spare headlamp/iu)
+      expect(result.finalMessage).toMatch(/(?:leave|skip|without|don.t|do not)[\s\S]{0,60}umbrella/iu)
+      expect(result.finalMessage).not.toMatch(/updated|saved it|changed your|couldn.t find/iu)
+      expect(result.finalMessage.length).toBeLessThan(500)
+      process.stdout.write(`[compact-knowledge-e2e] ${JSON.stringify({ finalMessage: result.finalMessage })}\n`)
+    } finally {
+      await removeRealCodexTemporaryPath(workingDirectory)
+      await removeRealCodexTemporaryPaths(config.temporaryPaths)
+    }
+  }, 600_000)
 })
 
 describeRealCodex('real Codex optional knowledge show e2e', () => {
@@ -22332,7 +22392,7 @@ describeRealCodex('real Codex generic transcript memory judgment e2e', () => {
 })
 
 describeRealCodex('real Codex morning reminder reconciliation e2e', () => {
-  it('excludes maintenance from bounded reminder inventory and repairs context timing completion and duplicates without new connections', async () => {
+  it('uses shared read guidance and excludes maintenance from bounded reminder inventory while repairing context timing completion and duplicates without new connections', async () => {
     const config = await resolveRealCodexE2eConfig()
     const seed = MURPH_MANAGED_AUTOMATIONS.find(candidate => candidate.slug === 'journal-connected-context-morning')
     if (!seed) throw new Error('Missing morning automation.')
@@ -22459,6 +22519,11 @@ describeRealCodex('real Codex morning reminder reconciliation e2e', () => {
         sandbox: 'workspace-write', workingDirectory,
       })
       const first = await runTurn()
+      const skillReads = readCapabilityRoutingActions(first.jsonEvents)
+        .filter(action => action.kind === 'command').map(action => action.output).join('\n')
+      expect(skillReads).toContain('# Connected-app reading and reminder location')
+      expect(skillReads).not.toContain('## Prefer connected email over webmail')
+      expect(skillReads).not.toContain('## Unsupported health and fitness sources')
       expect(parseAssistantNotificationDecision(first.finalMessage).kind).toBe('skip')
       const firstInventoryCommands = expandRecordedVaultCommands((await readFile(path.join(workingDirectory, 'commands.log'), 'utf8')).split('\n').filter(Boolean))
         .filter(line => /^automation list\b/u.test(line) && !isRecordedVaultHelpCommand(line))
@@ -35832,6 +35897,134 @@ describeRealCodex('real Codex weekly usage optimizer e2e', () => {
       expect(JSON.parse(result.finalMessage.trim())).toMatchObject({ kind: 'skip' })
       expect(result.runtimeIssueInputs).toEqual([])
     } finally { await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths]) }
+  }, 720_000)
+})
+
+describeRealCodex('real Codex isolated usage review e2e', () => {
+  it('isolates the silent optimizer while preserving canonical preferences and chat continuity', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const vault = await mkdtemp(path.join(tmpdir(), 'murph-isolated-usage-review-'))
+    const permissionHome = await materializeRealCodexHostedPermissionHome(config)
+    const bin = path.join(vault, '.local', 'bin')
+    const codexCommand = normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined
+    const env = { ...config.env, HOME: vault, PATH: `${bin}${path.delimiter}${config.env.PATH ?? ''}`, VAULT: vault }
+    const message = (prompt: string, sessionId?: string) => sendAssistantMessageLocal({
+      approvalPolicy: 'never', channel: 'telegram', codexCommand, codexHome: permissionHome.codexHome,
+      deliverResponse: false, includeEarlySessionOnboarding: false,
+      model: config.model, modelProvider: config.modelProvider, provider: 'codex-cli',
+      executionContext: { hosted: { memberId: 'synthetic-member', userEnvKeys: [],
+        usageRecorder: { async recordUsage(usage) { recordRealCodexProviderUsage({ ...usage, providerMetadataJson: null }) } },
+      } },
+      prompt, reasoningEffort: 'medium', sandbox: 'workspace-write', sessionId,
+      threadId: 'synthetic-usage-review-thread', threadIsDirect: true,
+      turnEnvironment: { currentWorkingDirectory: vault, env }, vault, workingDirectory: vault,
+    })
+    const events: unknown[] = []
+    const requests: AssistantHostedAutomationToolRequest[] = []
+    const feedback: Array<{ summary: string }> = []
+    const usageRequests: unknown[] = []
+    try {
+      await initializeVault({ timezone: 'UTC', vaultRoot: vault })
+      await mkdir(bin, { recursive: true })
+      const cli = fileURLToPath(new URL('../../cli/dist/bin.js', import.meta.url))
+      const records: Array<Awaited<ReturnType<typeof upsertAutomation>>['record']> = []
+      for (const [slug, instructions] of [
+        ['cue', 'Say: Time for your short stretch break.'],
+        ['pinned', 'The member explicitly requested GPT-6.1 Sol for this reminder. Keep that model. Say: Time for your break.'],
+      ]) {
+        const saved = await upsertAutomation({
+          vaultRoot: vault, slug: `synthetic-review-${slug}`, title: `Synthetic ${slug}`,
+          instructions, status: 'active', continuityPolicy: 'preserve', tags: [],
+          schedule: { kind: 'dailyLocal', localTime: '09:00', timeZone: 'UTC' },
+          assistantTargetOverride: { model: 'gpt-6.1-sol', reasoningEffort: 'medium' },
+          route: { channel: 'telegram', identityId: null, participantId: null,
+            threadId: 'synthetic-usage-review-thread', threadIsDirect: true, deliveryTarget: null },
+        })
+        records.push(saved.record)
+      }
+      const inventory = await execFileAsync(process.execPath,
+        [cli, 'automation', 'list', '--compact', '--status', 'active', '--limit', '200', '--format', 'json'],
+        { cwd: vault, env, timeout: 30_000 })
+      expect(JSON.parse(inventory.stdout).totalCount).toBe(2)
+      // Keep the inventory boundary synthetic: the hosted permission profile
+      // cannot launch this host's Node installation. The payload still comes
+      // from the shipped CLI and all inspections/patches use canonical storage.
+      await writeFile(path.join(bin, 'vault-cli'), [
+        '#!/bin/sh', 'set -eu', 'case "$*" in',
+        `  automation\\ list*) printf '%s\\n' ${quoteNutritionShellLiteral(inventory.stdout.trim())} ;;`,
+        '  *) echo "Unexpected inventory operation." >&2; exit 2 ;;', 'esac',
+      ].join('\n') + '\n', { mode: 0o700 })
+      const prior = await message('For this conversation only, the synthetic demonstration label is copper kite. Do not save it or create anything. Reply only: Understood.')
+      const foregroundResume = prior.session.resumeState
+      expect(foregroundResume).not.toBeNull()
+      const target = createAssistantModelTarget({
+        approvalPolicy: 'never', codexCommand, codexHome: permissionHome.codexHome,
+        model: config.model, modelProvider: config.modelProvider, provider: 'codex-cli',
+        reasoningEffort: 'medium', sandbox: 'workspace-write',
+      })
+      if (!target) throw new Error('Expected a real review model target.')
+      const occurrenceAt = '2030-01-10T12:00:00.000Z'
+      const result = await sendAssistantNotificationLocal({
+        channel: 'telegram', threadId: prior.session.binding.threadId, threadIsDirect: true,
+        sessionId: prior.session.sessionId, vault, workingDirectory: vault,
+        instructions: MURPH_WEEKLY_USAGE_OPTIMIZER_AUTOMATION.instructions,
+        scheduledOccurrenceAt: occurrenceAt, turnTrigger: 'automation-cron',
+        scheduledInvocationAuthority: { automationId: MURPH_WEEKLY_USAGE_OPTIMIZER_AUTOMATION.automationId, occurrenceAt },
+        turnEnvironment: { currentWorkingDirectory: vault, env },
+        onTraceEvent: event => events.push(event.rawEvent),
+        executionContext: { hosted: {
+          usageRecorder: { async recordUsage(usage) { recordRealCodexProviderUsage({ ...usage, providerMetadataJson: null }) } },
+          defaultTarget: target, memberId: 'synthetic-member', userEnvKeys: [],
+          usageDiagnostics: { async read(request) { usageRequests.push(request); return syntheticUsageDiagnostics() } },
+          productFeedbackCandidateSink: { acceptProductFeedbackCandidate(candidate, authorization) {
+            expect(authorization?.committedUsageOptimizerScope).toEqual({ memberId: 'synthetic-member', occurrenceAt })
+            feedback.push(candidate)
+          } },
+          automationTool: { async request(request) {
+            requests.push(request)
+            if (request.action !== 'inspect' && request.action !== 'patch') throw new Error('Unexpected automation action.')
+            let record = await showAutomation({ vaultRoot: vault, automationId: request.lookup })
+            if (!record) throw new Error('Expected the canonical reminder.')
+            if (request.action === 'patch') {
+              expect(record.automationId).toBe(records[0]!.automationId)
+              expect(Object.keys(request).sort()).toEqual(['action', 'assistantTargetOverride', 'expectedUpdatedAt', 'lookup'])
+              record = (await patchAutomation({ lookup: record.automationId, expectedUpdatedAt: request.expectedUpdatedAt, assistantTargetOverride: request.assistantTargetOverride, vaultRoot: vault })).record
+            }
+            const common = { automationId: record.automationId, lookupId: record.automationId,
+              title: record.title, status: record.status, updatedAt: record.updatedAt,
+              schedule: record.schedule, contextReferences: record.contextReferences ?? [],
+              assistantTargetOverride: record.assistantTargetOverride ?? null,
+              effectiveTimeZone: 'UTC', occurrenceProjection: { status: 'resolved' as const, nextOccurrenceAt: null },
+              routeBinding: 'preserved' as const }
+            return request.action === 'inspect'
+              ? { ...common, action: 'inspect', view: 'model_review', managed: false, instructions: record.instructions }
+              : { ...common, action: 'patch', created: false }
+          } },
+        } },
+      })
+      expect(readCapabilityRoutingActions(events).filter(action => action.kind === 'command' && action.command.includes('automation list'))).toHaveLength(1)
+      expect(result.decision.kind).toBe('skip')
+      expect(result.response).toBeNull()
+      expect(await listAssistantOutboxIntents(vault)).toHaveLength(0)
+      expect(usageRequests).toEqual([{ days: 14, limit: 10 }])
+      expect(feedback).toHaveLength(1)
+      expect(feedback[0]?.summary).toMatch(/^Usage optimization audit:/u)
+      expect(feedback[0]?.summary).not.toMatch(/copper kite|synthetic-member|Synthetic cue|Synthetic pinned/iu)
+      expect(requests.filter(request => request.action === 'inspect'), feedback[0]?.summary).toHaveLength(2)
+      expect(requests.filter(request => request.action === 'patch')).toHaveLength(1)
+      expect((await showAutomation({ vaultRoot: vault, automationId: records[0]!.automationId }))?.assistantTargetOverride)
+        .toEqual({ model: 'gpt-6-luna', reasoningEffort: 'high' })
+      expect(await showAutomation({ vaultRoot: vault, automationId: records[1]!.automationId })).toEqual(records[1])
+      expect((await getAssistantSession(vault, prior.session.sessionId)).resumeState).toEqual(foregroundResume)
+      const followup = await message('What was the demonstration label from this conversation? Reply only with the label.', prior.session.sessionId)
+      expect(followup.response).toMatch(/copper kite/iu)
+      process.stdout.write(`[isolated-usage-review-live] ${JSON.stringify({ model: config.model, decision: result.decision.kind,
+        diagnostics: usageRequests.length, inspections: 2, patches: 1, reports: feedback.length,
+        foregroundResumePreserved: true, followup: followup.response })}\n`)
+    } finally {
+      await stopWarmCodexAppServer('isolated-usage-review-complete')
+      await removeRealCodexTemporaryPaths([vault, ...permissionHome.temporaryPaths, ...config.temporaryPaths])
+    }
   }, 720_000)
 })
 

@@ -205,3 +205,28 @@ Run or keep the existing contact-card reconciliation path enabled after line cha
 ## Logging
 
 Do not log raw line phone numbers, thread ids, member ids, account lookup keys, plaintext, or ciphertext from scripts, provider sync, or migration checks. Use phone hints, aggregate counts, or provider ids for operator evidence.
+
+## Draining automatic assignments
+
+`HostedLinqLine.assignmentWeight = 0` removes a configured line from automatic
+home-line and healthy proactive pools. Positive weights retain their tie-break
+meaning; neither a preferred line nor capacity fallback can revive a zero-weight
+candidate. Proactive capacity claims recheck positive weight after selection.
+Configuration and provider inventory sync preserve this operator-owned weight.
+
+The authenticated ops endpoint `GET /api/ops/linq-line-assignment` returns a
+bounded configured-line inventory containing only hints, lookup keys, and
+weights. From an existing ops session, POST to the same endpoint with
+`{ "phoneNumberLookupKey": "<LINE_LOOKUP_KEY>", "assignmentWeight": 0 }` to
+exclude a line; read it back and verify the retained line is still healthy and
+eligible. The POST requires the existing same-origin mutation guard. Restore
+the prior positive weight to undo the setting. The endpoint can exclude every
+line, so verify the retained pool before changing settings.
+
+This is automatic placement control, not line cancellation: existing direct
+and group routes, replies, contact cards, and provider-attested managed inbound
+relationship binding remain valid. An already-contacted line can still own that
+inbound relationship. It does not migrate members or send announcements.
+Deploy this reader everywhere before zeroing any weights; older readers can
+still select zero-weight lines. Restore positive weights before reverting to an
+older reader. Existing in-flight work is not canceled by the setting.
