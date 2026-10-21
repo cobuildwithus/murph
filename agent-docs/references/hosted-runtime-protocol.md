@@ -1942,7 +1942,18 @@ side table or lane high-water advance past gaps. The runtime-progress monitor
 uses that same terminal distinction without redefining the contiguous floor:
 conversation candidates above the effective floor must still have
 `consumed_at IS NULL`, while system-lane candidates retain their existing
-live-row semantics. Every unhandled system head ages from mailbox creation.
+live-row semantics. A fully imported assistant-owned
+`assistant.notification.requested` head is an intentional pause only while the
+canonical read-only usage gate reports `ai_usage_limit_exceeded`. The monitor
+classifies notification ownership with the shared execution classifier, so
+model-free notifications and device heads remain alertable. Missing, partial,
+or impossible import evidence, invalid chronology, unavailable allowance, and
+checks beyond the per-scan 25-member serial budget retain normal alerting. The
+monitor records only an aggregate excluded-system-lane count and never changes
+mailbox acknowledgements, allowance, or execution. When allowance returns, the
+original handling age applies again. This remains a contiguous-frontier monitor,
+not proof of completion for every later retained system item.
+Every other unhandled system head ages from mailbox creation.
 Import, workspace version, progress generation, and workspace-wide wake changes
 cannot establish completion or a deferral for that particular item. The runtime
 still projects independent model-free and assistant deadlines through `nextWakeAt`
