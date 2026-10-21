@@ -25,6 +25,14 @@ describe("weekly game command validator", () => {
     })).toEqual({ firstName: "Leo", timeZone: "America/New_York", type: "setProfile" });
   });
 
+  it("distinguishes profile photo omission, replacement and removal without requiring unrelated fields", () => {
+    expect(parseGameCommand({ type: "setProfile", photoKey: PHOTO_KEY })).toEqual({ type: "setProfile", photoKey: PHOTO_KEY });
+    expect(parseGameCommand({ type: "setProfile", photoKey: null })).toEqual({ type: "setProfile", photoKey: null });
+    expect(parseGameCommand({ type: "setProfile", firstName: "Ava" })).not.toHaveProperty("photoKey");
+    expect(codeOf(() => parseGameCommand({ type: "setProfile" }))).toBe("INVALID_REQUEST");
+    expect(codeOf(() => parseGameCommand({ type: "setProfile", photoKey: "../photo.jpg" }))).toBe("MEDIA_MISSING");
+  });
+
   it("builds a challenge with its private invitee label, ignoring client stake keys", () => {
     const created = parseGameCommand({
       gameId: "game_0001",

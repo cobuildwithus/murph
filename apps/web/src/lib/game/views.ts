@@ -61,6 +61,8 @@ export interface GameViewInput {
   names: ReadonlyMap<string, string>;
   /** Per member: the photo the viewer attached when they invited them, if any. */
   avatarKeys: ReadonlyMap<string, string | null>;
+  /** Canonical photos, separate from viewer-private overrides for shared exports. */
+  profileAvatarKeys?: ReadonlyMap<string, string | null>;
   /** Per member: the relationship the viewer typed for them, if any. */
   relationships: ReadonlyMap<string, string | null>;
   /**
@@ -148,7 +150,7 @@ export function buildGameView(input: GameViewInput): GameView {
   const { game } = state;
   const players = [...state.players].sort((a, b) => a.seat - b.seat);
   const playerViews = players.map((player) => playerView(input, player));
-  if (input.invitee && players.length < game.seats) playerViews.push(inviteeView(input.invitee, players.length, viewerId));
+  if (input.invitee && players.length < game.seats) playerViews.push(inviteeView(input, input.invitee, players.length, viewerId));
   return {
     days: dayViews(input, players),
     id: game.id,
@@ -180,10 +182,12 @@ function playerView(input: GameViewInput, player: RulePlayer): GamePlayerView {
   const today = game.status === "live" ? dayIndexAt(player, input.now) : null;
   const started = today !== null && today >= 0;
   const resultScore = input.result?.scores.find((score) => score.memberId === player.memberId)?.score;
-  const avatarKey = input.avatarKeys.get(player.memberId) ?? null;
+  const profileKey = input.profileAvatarKeys?.get(player.memberId) ?? null;
+  const avatarKey = input.avatarKeys.get(player.memberId) ?? profileKey;
   const isMe = player.memberId === input.viewerId;
   return {
     avatarUrl: avatarKey ? gameMediaUrl(avatarKey) : null,
+    profileAvatarUrl: profileKey ? gameMediaUrl(profileKey) : null,
     dayIndex: started && today < game.lengthDays ? today : null,
     firstName: input.names.get(player.memberId) ?? "",
     isMe,
@@ -195,9 +199,12 @@ function playerView(input: GameViewInput, player: RulePlayer): GamePlayerView {
 }
 
 /** The challenger's own name for whoever they invited, until that person joins. */
-function inviteeView(invitee: NonNullable<GameViewInput["invitee"]>, seat: number, viewerId: string): GamePlayerView {
+function inviteeView(input: GameViewInput, invitee: NonNullable<GameViewInput["invitee"]>, seat: number, viewerId: string): GamePlayerView {
+  const profileKey = invitee.memberId ? input.profileAvatarKeys?.get(invitee.memberId) ?? null : null;
+  const avatarKey = invitee.photoKey ?? (invitee.memberId ? input.avatarKeys.get(invitee.memberId) : null) ?? profileKey;
   return {
-    avatarUrl: invitee.photoKey ? gameMediaUrl(invitee.photoKey) : null,
+    avatarUrl: avatarKey ? gameMediaUrl(avatarKey) : null,
+    profileAvatarUrl: profileKey ? gameMediaUrl(profileKey) : null,
     dayIndex: null,
     firstName: invitee.name,
     isMe: invitee.memberId === viewerId,

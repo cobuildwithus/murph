@@ -5437,3 +5437,16 @@ envelope in R2 under `hosted-game-media/objects/<namespace>/`, through the
 member-bound `game-media/{stage,read,stat,delete}` control routes; players need
 no hosted workspace. Account deletion clears that prefix. Local stacks keep
 plain files on disk.
+
+The game profile's nullable `photo_key` references an owned, completed upload.
+`PUT /me/profile` accepts partial updates: absent fields remain unchanged, and
+`photoKey: null` removes the canonical photo. Initial creation still requires
+first name and time zone. Its additive `profile` reply returns the committed
+member id, name, zone and `avatarUrl`; `GET /home` includes that same canonical
+photo on `me`. Player `avatarUrl` prefers the viewer's private contact override;
+`profileAvatarUrl` carries only the canonical photo for shared exports. Profile
+reads batch with existing name reads. Media authorization checks the current
+profile key and shared game participation (including addressed rematches), then
+falls back to the existing entry visibility rule. Public preview shapes stay
+unchanged. Deploy the nullable-column migration before Web and the new native
+client; old native clients continue sending name and zone without clearing photos.

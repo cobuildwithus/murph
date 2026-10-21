@@ -25,7 +25,7 @@ export function parseGameCommand(value: unknown): GameCommand {
   const input = record(value, "command");
   switch (input.type) {
     case "setProfile":
-      return { firstName: words(input.firstName, "firstName"), timeZone: timeZone(input.timeZone), type: "setProfile" };
+      return profile(input);
     case "createGame":
       return {
         gameId: clientId(input.gameId, "gameId"),
@@ -87,6 +87,18 @@ function post(input: Record<string, unknown>): GameCommand {
     type: "post",
     ...(text ? { text } : {}),
     ...optional(input.captureAgeMs, (value) => ({ captureAgeMs: integer(value, "captureAgeMs", 0, CAPTURE_AGE_MAX_MS) })),
+  };
+}
+
+function profile(input: Record<string, unknown>): Extract<GameCommand, { type: "setProfile" }> {
+  if (input.firstName === undefined && input.timeZone === undefined && input.photoKey === undefined) {
+    reject("INVALID_REQUEST", "Choose a profile field to update.");
+  }
+  return {
+    type: "setProfile",
+    ...optional(input.firstName, (value) => ({ firstName: words(value, "firstName") })),
+    ...optional(input.timeZone, (value) => ({ timeZone: timeZone(value) })),
+    ...optional(input.photoKey, (value) => ({ photoKey: nullable(value, mediaKey) })),
   };
 }
 

@@ -16,6 +16,7 @@ import {
   type GameEntryKind,
   type GameError,
   type GameHomeView,
+  type GameProfileView,
   type GameInvitePreview,
   type GameStatus,
   type GameView,
@@ -50,7 +51,7 @@ import {
   type TermWords,
 } from "./rules";
 import { gameLocalDate } from "./time";
-import { buildGameView, termsView, ticketView, visibleEntryIds, type GameTicketRow } from "./views";
+import { buildGameView, gameMediaUrl, termsView, ticketView, visibleEntryIds, type GameTicketRow } from "./views";
 
 export { isGameEnabledFor, mediaKeyPrefixFor } from "./access";
 
@@ -63,7 +64,7 @@ interface LoadedGame {
   state: RuleState;
 }
 export type GameCommandResult =
-  | { ok: true; game: GameView | null }
+  | { ok: true; game: GameView | null; profile?: GameProfileView }
   | { ok: false; error: GameError; status: number };
 
 const SYSTEM_ACTOR = "system";
@@ -94,6 +95,9 @@ export async function runGameCommand(input: {
   try {
     const command = parseGameCommand(input.command);
     await requireUploadedMedia(actor, command);
+    if (command.type === "setProfile") {
+      return { game: null, ok: true, profile: await setProfile(actor, command) };
+    }
     const gameId = await runCommand({ actor, now: input.now }, command);
     return { game: gameId ? await readGame(gameId, actor) : null, ok: true };
   } catch (error) {
@@ -110,11 +114,8 @@ interface CommandContext {
 }
 
 /** Applies one command; returns the game to show back, if any. */
-async function runCommand(context: CommandContext, command: GameCommand): Promise<string | null> {
+async function runCommand(context: CommandContext, command: Exclude<GameCommand, { type: "setProfile" }>): Promise<string | null> {
   switch (command.type) {
-    case "setProfile":
-      await setProfile(context.actor, command);
-      return null;
     case "createGame":
       return createGame(context, command);
     case "join":
@@ -130,7 +131,8 @@ async function runCommand(context: CommandContext, command: GameCommand): Promis
 
 /** Every media key a command names must be the actor's own finished upload. */
 async function requireUploadedMedia(actor: string, command: GameCommand): Promise<void> {
-  const labelPhoto = command.type === "createGame" ? command.inviteeLabel?.photoKey : null;
+  const labelPhoto = command.type === "setProfile" ? command.photoKey
+    : command.type === "createGame" ? command.inviteeLabel?.photoKey : null;
   const keys = command.type === "post" ? command.mediaKeys : labelPhoto ? [labelPhoto] : [];
   if (keys.length === 0) return;
   const prefix = mediaKeyPrefixFor(actor);
@@ -202,16 +204,32 @@ function gameTarget(game: { id: string; createdBy: string }, field: string): Gam
   return { field, memberId: game.createdBy, rowId: game.id, table: "game" };
 }
 
-async function setProfile(actor: string, command: Extract<GameCommand, { type: "setProfile" }>): Promise<void> {
-  const firstNameEncrypted = await seal(
-    { field: "first_name", memberId: actor, rowId: actor, table: "game_profile" },
-    command.firstName,
-  );
-  await getPrisma().gameProfile.upsert({
-    create: { firstNameEncrypted, memberId: actor, timeZone: command.timeZone },
-    update: { firstNameEncrypted, timeZone: command.timeZone },
-    where: { memberId: actor },
-  });
+async function setProfile(actor: string, command: Extract<GameCommand, { type: "setProfile" }>): Promise<GameProfileView> {
+  const target: GameSealTarget = { field: "first_name", memberId: actor, rowId: actor, table: "game_profile" };
+  const firstNameEncrypted = command.firstName === undefined ? undefined : await seal(target, command.firstName);
+  const data = {
+    ...(firstNameEncrypted === undefined ? {} : { firstNameEncrypted }),
+    ...(command.timeZone === undefined ? {} : { timeZone: command.timeZone }),
+    ...(command.photoKey === undefined ? {} : { photoKey: command.photoKey }),
+  };
+  const prisma = getPrisma();
+  // Partial updates never read then rewrite unrelated fields. RETURNING also
+  // makes the response describe this write, not a later concurrent update.
+  const profile = firstNameEncrypted !== undefined && command.timeZone !== undefined
+    ? await prisma.gameProfile.upsert({
+      create: { ...data, firstNameEncrypted, memberId: actor, timeZone: command.timeZone },
+      update: data,
+      where: { memberId: actor },
+    })
+    : (await prisma.gameProfile.updateManyAndReturn({ data, where: { memberId: actor } }))[0];
+  if (!profile) return reject("PROFILE_REQUIRED", "Add your first name and time zone first.");
+  const [firstName] = await openGameTexts([{ ...target, value: profile.firstNameEncrypted }]);
+  return {
+    avatarUrl: profile.photoKey ? gameMediaUrl(profile.photoKey) : null,
+    firstName: firstName ?? "",
+    memberId: actor,
+    timeZone: profile.timeZone,
+  };
 }
 
 interface PendingLabel {
@@ -797,7 +815,7 @@ export async function readHome(memberId: string): Promise<GameHomeView> {
     ticketView(toTicketRow(ticket), words.get(ticket.gameId) ?? null, memberId, gameNow(current.clock, ticket.game)));
   return {
     games: views,
-    me: { firstName: firstName ?? null, memberId, timeZone: profile?.timeZone ?? null },
+    me: { avatarUrl: profile?.photoKey ? gameMediaUrl(profile.photoKey) : null, firstName: firstName ?? null, memberId, timeZone: profile?.timeZone ?? null },
     wallet: {
       // Expired tickets stay where they were, marked expired.
       held: wallet.filter((ticket) => ticket.status !== "redeemed" && ticket.youHold),
@@ -838,14 +856,28 @@ export async function readInvitePreview(token: string): Promise<GameInvitePrevie
 }
 
 /**
- * Who may see a stored photo: its uploader (entry and invite label photos),
- * and otherwise exactly the players whose game view shows the entry it
- * belongs to (post-to-unlock, everything after settle).
+ * The uploader can see their photos. The current canonical profile photo is
+ * also visible to shared game participants, including addressed rematches.
+ * Other uploads require a visible entry (post-to-unlock, everything after
+ * settle); private contact photos never acquire access from their label.
  */
 export async function authorizeMediaRead(memberId: string, mediaKey: string): Promise<boolean> {
   const ownerId = mediaKeyOwner(mediaKey);
   if (!ownerId) return false;
   if (ownerId === memberId) return true;
+  const prisma = getPrisma();
+  const profile = await prisma.gameProfile.findUnique({ select: { photoKey: true }, where: { memberId: ownerId } });
+  if (profile?.photoKey === mediaKey) {
+    const participant = (id: string) => ({ OR: [
+      { players: { some: { memberId: id } } },
+      { inviteeMemberId: id, status: "invited" },
+    ] });
+    const sharedGame = await prisma.game.findFirst({
+      select: { id: true },
+      where: { AND: [participant(memberId), participant(ownerId)] },
+    });
+    if (sharedGame) return true;
+  }
   // Keys come from the bytes, so one file can belong to several entries; check the latest few.
   const entries = await getPrisma().gameEntry.findMany({
     orderBy: { receivedAt: "desc" },
@@ -899,7 +931,7 @@ async function buildViews(games: readonly LoadedGame[], viewerId: string, clock:
   // An addressed rematch's invitee isn't a player yet, but the challenger's label for them still applies.
   const labelSubjects = [...memberIds, ...games.flatMap((game) => (game.row.inviteeMemberId ? [game.row.inviteeMemberId] : []))];
   const [profiles, labels, tickets] = await Promise.all([
-    prisma.gameProfile.findMany({ where: { memberId: { in: memberIds } } }),
+    prisma.gameProfile.findMany({ where: { memberId: { in: labelSubjects } } }),
     prisma.gameContactLabel.findMany({ where: { ownerMemberId: viewerId, subjectMemberId: { in: labelSubjects } } }),
     prisma.gameTicket.findMany({
       where: { gameId: { in: games.map((game) => game.row.id) }, OR: [{ owedTo: viewerId }, { owedBy: viewerId }] },
@@ -965,6 +997,7 @@ async function buildViews(games: readonly LoadedGame[], viewerId: string, clock:
   }
   // Only the viewer's own invite photos and relationships: nobody else ever sees them.
   const avatarKeys = new Map(labels.map((label) => [label.subjectMemberId, label.photoKey]));
+  const profileAvatarKeys = new Map(profiles.map((profile) => [profile.memberId, profile.photoKey]));
   const relationships = new Map([...labelRelationshipAt].map(([memberId, at]) => [memberId, plain[at]]));
   /** The invite's own typed relationship, else the viewer's existing label for an addressed rematch. */
   const inviteeRelationship = (invite: NonNullable<(typeof inviteAt)[number]>) => {
@@ -978,6 +1011,7 @@ async function buildViews(games: readonly LoadedGame[], viewerId: string, clock:
     const result: StoredResult | null = game.row.result ? parseStoredResult(game.row.result) : null;
     return buildGameView({
       avatarKeys,
+      profileAvatarKeys,
       entryWords,
       inviteExpiresAt: game.row.inviteExpiresAt,
       inviteToken: tokenIndex === null ? null : plain[tokenIndex],

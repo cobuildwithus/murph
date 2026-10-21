@@ -91,6 +91,22 @@ function noonOnDay(state: RuleState, memberId: string, dayIndex: number, hour = 
 }
 
 describe("weekly game views: tickets", () => {
+  it("separates canonical profile photos from viewer-private overrides for shared exports", () => {
+    const state = liveState();
+    const profile = "game/hbm_ava/profile.jpg";
+    const privatePhoto = "game/hbm_leo/contact.jpg";
+    const input = { profileAvatarKeys: new Map([[AVA, profile]]) };
+    const plain = view(state, LEO, JOIN_AT, input).players[1];
+    expect(plain.avatarUrl).toBe(plain.profileAvatarUrl);
+    expect(plain.profileAvatarUrl).toContain(encodeURIComponent(profile));
+    const overridden = view(state, LEO, JOIN_AT, { ...input, avatarKeys: new Map([[AVA, privatePhoto]]) }).players[1];
+    expect(overridden.avatarUrl).toContain(encodeURIComponent(privatePhoto));
+    expect(overridden.profileAvatarUrl).toBe(plain.profileAvatarUrl);
+    const removed = view(state, LEO, JOIN_AT, { avatarKeys: new Map([[AVA, privatePhoto]]) }).players[1];
+    expect(removed.profileAvatarUrl).toBeNull();
+    expect(removed.avatarUrl).toBe(overridden.avatarUrl);
+  });
+
   it("expires an open ticket just after its 14-day use-by time, and never a redeemed one", () => {
     const row = {
       createdAt: new Date("2026-10-24T17:00:00Z"),

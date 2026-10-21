@@ -2785,6 +2785,7 @@ model HostedConversationPollVote {
 // ids, numbers and dates stay plain.
 
 model GameProfile {
+  photoKey           String?            @map("photo_key")
   memberId           String             @id @map("member_id")
   firstNameEncrypted String             @map("first_name_encrypted")
   timeZone           String             @map("time_zone")
