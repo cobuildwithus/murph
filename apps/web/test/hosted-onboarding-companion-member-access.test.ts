@@ -4,12 +4,13 @@ import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 
 const mocks = vi.hoisted(() => ({
   auth: vi.fn(), consent: vi.fn(), completion: vi.fn(), timeZone: vi.fn(),
-  access: vi.fn(), requireAccess: vi.fn(), enroll: vi.fn(), wake: vi.fn(), prisma: vi.fn(),
+  access: vi.fn(), requireAccess: vi.fn(), enroll: vi.fn(), wake: vi.fn(), prisma: vi.fn(), phoneWelcome: vi.fn(),
 }));
 vi.mock("@/src/lib/better-auth/native-auth", () => ({ readHostedNativeMemberAuth: mocks.auth }));
 vi.mock("@/src/lib/prisma", () => ({ getPrisma: mocks.prisma }));
 vi.mock("@/src/lib/legal/consent", () => ({ assertHostedHistoricalLaunchConsentGranted: mocks.consent }));
 vi.mock("@/src/lib/hosted-onboarding/authentication-completion", () => ({ readHostedAuthenticationCompletion: mocks.completion }));
+vi.mock("@/src/lib/hosted-onboarding/phone-welcome", () => ({ ensureHostedMemberPhoneWelcome: mocks.phoneWelcome }));
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", () => ({ updateHostedMemberPendingActivationTimeZoneIfActivationPending: mocks.timeZone }));
 vi.mock("@/src/lib/hosted-onboarding/starter-usage-enrollment-service", () => ({
   ensureHostedStarterUsageEnrollment: mocks.enroll, retryPendingHostedStarterUsageActivationRuntimeWake: mocks.wake,
@@ -60,6 +61,7 @@ describe("native companion canonical admission", () => {
     expect(mocks.timeZone).not.toHaveBeenCalled();
     expect(mocks.completion).not.toHaveBeenCalled();
     expect(mocks.enroll).not.toHaveBeenCalled();
+    expect(mocks.phoneWelcome).not.toHaveBeenCalled();
   });
 
   it("returns the fixed response for an active member and retries its pending wake", async () => {
@@ -70,6 +72,7 @@ describe("native companion canonical admission", () => {
     expect(mocks.enroll).not.toHaveBeenCalled();
     expect(mocks.completion).not.toHaveBeenCalled();
     expect(mocks.wake).toHaveBeenCalledWith({ memberId: member.id, prisma });
+    expect(mocks.phoneWelcome).toHaveBeenCalledWith({ memberId: member.id, prisma });
   });
 
   it("keeps admission retryable until the activation wake is accepted", async () => {

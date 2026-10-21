@@ -29,6 +29,12 @@ Historical ReviewGPT round 3 passed. The renewed user request to finish and ship
 - PostgreSQL selection: 324 passed initially; the one failing passkey fixture needed the production request-IP header under the new rate-limited enrollment owner. The corrected member suite passes all 107 cases, completing 325 cases across 11 suites before contraction.
 - All three actual contract-SQL guards reject synthetic live sessions, unimported identities, and pending provider receipts. The actual contraction succeeds on the isolated local database; all 325 cases across 11 suites pass afterward.
 - Web and harness typechecks and focused oxlint pass. Hosted harness: 513 passed, one skipped across 33 files. Complexity guard passes; remaining hotspots retain their existing owner boundaries and do not justify unrelated restructuring.
+- Current CI found one stale provider field in the native voice test fixture. Removing that field passes the full workspace typecheck and 39 hosted-local scenario helper tests. The opt-in live voice suite imports successfully but skips without synthetic audio and provider configuration; no live voice qualification is claimed.
+
+## Round 4 disposition and authorized correction
+Accepted the High finding that active native admission skipped the existing phone welcome/route initializer after an email-only member added their first phone. The parent traced the original completion path, canonical credential commit, consumed activation retry and channel-update effect. The user explicitly resumed after the finding report and authorized correction and fresh review.
+
+Restore the existing idempotent phone welcome call on active admission. Two production lines reuse the current owner without adding state, grants, invites, dependencies or provider compatibility. The composed PostgreSQL regression reproduces the missing route before the fix and passes afterward: actual email OTP login, consent, Starter activation, consumed activation item, native phone verification, repeat admission, one phone welcome, visible Messages action, unchanged invite/credit/grant counts and no device connection. Both affected suites pass all 18 cases; Web typecheck passes. Fresh full review retains the original baseline and prior reviewed head; rollout gates remain independent.
 
 ## Release disposition
 Hold. Native distribution/recovery, terminal account migration disposition, and provider/wallet obligations remain independent live gates. No production mutation, account deletion, wallet operation, or vendor shutdown was performed.

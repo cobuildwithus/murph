@@ -3,6 +3,7 @@ import { readHostedNativeMemberAuth } from "../better-auth/native-auth";
 import { getPrisma } from "../prisma";
 import { assertHostedHistoricalLaunchConsentGranted } from "../legal/consent";
 import { readHostedAuthenticationCompletion } from "./authentication-completion";
+import { ensureHostedMemberPhoneWelcome } from "./phone-welcome";
 import { updateHostedMemberPendingActivationTimeZoneIfActivationPending } from "./hosted-member-store";
 import { ensureHostedStarterUsageEnrollment, retryPendingHostedStarterUsageActivationRuntimeWake } from "./starter-usage-enrollment-service";
 import { hostedOnboardingError } from "./errors";
@@ -22,6 +23,7 @@ export async function requireHostedCompanionMemberIdFromRequest(input: {
   // Existing active members do not need acquisition data or a new invite.
   if (await readActiveHostedMemberAccess({ memberId: auth.member.id, prisma })) {
     await requireHostedCompanionActivationRuntimeWake({ memberId: auth.member.id, prisma });
+    await ensureHostedMemberPhoneWelcome({ memberId: auth.member.id, prisma });
     return auth.member.id;
   }
 

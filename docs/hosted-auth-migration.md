@@ -51,21 +51,21 @@ The earlier reviewed-head table is historical candidate evidence. Current state:
 | --- | --- |
 | Web adoption #3127, #3128, #3132 | Merged; current first-party production records observed. |
 | Passkey repair #3504 | Merged after the original retirement candidate; its canonical login and revocation safeguards are preserved by this reconciliation. |
-| Web retirement #3134 | Reconciled with main and passkey repair. Full sensitive round 3 passed at `12bd39220dd5a3e06dfa916227b62e28cedc1134`; isolated fixture corrections pass all hosted checks at `638aaf2cbaf1c5bdb96fd4337b992a5e098d692b`. Final documentation closeout must retain green exact-head CI. Merge/deployment hold is unchanged. |
+| Web retirement #3134 | Reconciled with current main, preserving passkey repair, native messaging, deletion diagnostics and subsequent feature removals. Historical round 3 passed at `12bd39220dd5a3e06dfa916227b62e28cedc1134`; the renewed candidate requires fresh full review and green final-head CI. Consult the PR ledger for current evidence. Merge/deployment hold is unchanged. |
 | Targeted signup cleanup #3589 | Merged additive guarded Ops endpoint with second full review and green required CI. Production deployment of merge `e42b2b81f8264af6fc37ba75c8db1168d6bf937e` is ready; no production deletion performed. Live legacy sessions independently block execution. This retirement source removes the temporary endpoint after its obligations converge. |
 | iOS adoption #150 / Android adoption #39 | Merged. Store distribution and installed-device upgrades remain unqualified by merge evidence. |
 | Android retirement #40 | Reconciled with main and #44 at `a16e52cf31c748732bf008c73b9fe5cef7671866`; validated full review PASS and all hosted checks green. Debug/Release builds and lint pass, 2,835 unit-test executions pass, and nine real Keystore/HTTP/interrupted-write cases pass on API 36. Current synthetic screenshots were inspected. Native distribution/recovery and shared provider obligations still hold merge/publication. |
-| iOS retirement #151 | Reconciled with main at `cc32d748f8db612234c3f234e693c95a9d6baa54`. Round 2 found only an unreachable provider diagnostic adapter; its removal deletes 96 net production lines and passes all 629 current host tests plus Debug/Release simulator builds. The prior reconciliation passed 67 UI tests with three hosted/configuration cases skipped; no UI changed afterward. Final round 3 is required; consult the PR ledger for its validated outcome. Native distribution/recovery and shared provider obligations still hold merge/publication. |
+| iOS retirement #151 | Reconciled with main at `cc32d748f8db612234c3f234e693c95a9d6baa54`. Round 3 passed after removing the unreachable provider diagnostic adapter; all 629 host tests and Debug/Release simulator builds pass. The prior reconciliation passed 67 UI tests with three hosted/configuration cases skipped; no UI changed afterward. Native distribution/recovery and shared provider obligations still hold merge/publication. |
 | Android CI cleanup #41 | Reconciled with #40; the trusted-base review still sees only two unused public placeholders removed. All hosted checks green; open and stacked after #40. |
 | Android canary setup #44 | Merged as `929d9493e178d12523ac4705963326199bae37a3` after validated PASS and green CI; explicit `platform-tools` avoids the removed package requested by the pinned action default. |
 | Privy browser test #3221 | Closed as obsolete; branch and historical evidence retained. |
 
-Read-only production aggregates still show valid legacy browser sessions and one
-provider-bound signup without a first-party user. Signup-only `lastSeenAt` is not
-return-visit telemetry. The targeted deletion owner checks no live legacy session
-and no durable product use under the canonical deletion locks; no compatibility
-code is added for that account. Zero pending provider targets in cleanup receipts
-does not prove provider-orphan inventory or wallet/export completion.
+Keep live inventory results private and recheck them before shipping. Signup-only
+`lastSeenAt` is not return-visit telemetry. The targeted deletion owner checks no
+live legacy session and no durable product use under the canonical deletion
+locks; no compatibility code is added for unresolved accounts. Empty pending
+provider cleanup receipts do not prove provider-orphan inventory or wallet/export
+completion.
 
 The public native controllers still pin older private sources. The iOS canary
 last failed at its legacy OTP stage; the last Android run failed at SDK setup before instrumentation, now corrected by #44 but not yet requalified.
