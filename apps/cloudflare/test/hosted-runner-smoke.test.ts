@@ -134,13 +134,10 @@ describe("runHostedRunnerSmokeDetailed", () => {
             healthCommonsCatalogHash: "sha256:catalog",
             healthCommonsCliGoalProofCount:
               HOSTED_RUNNER_SMOKE_HEALTH_COMMONS_CLI_GOAL_PROOF_COUNT,
-            healthCommonsCliProtocolListBytes: 768,
-            healthCommonsFinnishDrySaunaTitle: "Finnish Dry Sauna",
-            healthCommonsRuntimeProtocolHitKeys: [
-              "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
-            ],
-            healthCommonsRuntimeSearchHitKeys: [
-              "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+            healthCommonsCliKnowledgeSearchBytes: 768,
+            healthCommonsRuntimeBiomarkerDesiredDirection: "lower_or_stable",
+            healthCommonsRuntimeKnowledgeEntityKeys: [
+              "biomarker:deep-sleep-minutes",
             ],
             murphCommandDiscovered: true,
             operatorHomeRebound: true,
@@ -150,7 +147,7 @@ describe("runHostedRunnerSmokeDetailed", () => {
             reportedVaultIdMatchesExpected: true,
             ripgrepCommandDiscovered: true,
             ripgrepVersion: "ripgrep 13.0.0",
-            schema: "murph.cloudflare-hosted-runner-smoke.v2",
+            schema: "murph.cloudflare-hosted-runner-smoke.v3",
             vaultCliCommandDiscovered: true,
             vaultRootRebound: true,
             vaultShowBytes: 128,
@@ -212,7 +209,9 @@ describe("runHostedRunnerSmokeDetailed", () => {
       expect(result.healthCommonsCliGoalProofCount).toBe(
         HOSTED_RUNNER_SMOKE_HEALTH_COMMONS_CLI_GOAL_PROOF_COUNT,
       );
-      expect(result.healthCommonsFinnishDrySaunaTitle).toBe("Finnish Dry Sauna");
+      expect(result.healthCommonsRuntimeBiomarkerDesiredDirection).toBe(
+        "lower_or_stable",
+      );
       expect(result.murphCommandDiscovered).toBe(true);
       expect(result.audioNormalizedMp3Bytes).toBe(9216);
       expect(result.audioPreparedWavBytes).toBe(35328);

@@ -13,11 +13,8 @@ aliases:
 - Cosmetics 2025 LED facial mask anti-aging
 categories:
 - skin-photobiomodulation
-relations:
-- type: related_protocol
-  target: protocol_variant:skin-photobiomodulation/red-near-infrared-skin-texture-photoaging
-- type: parent_family
-  target: experiment_family:skin-photobiomodulation
+relations: []
+
 source:
   kind: journal_article
   title: In Vivo Application of the Effects of Red-to-Near-Infrared Light Spectroscopy on Skin-Brightening and Anti-Aging Properties via LED Facial Masks

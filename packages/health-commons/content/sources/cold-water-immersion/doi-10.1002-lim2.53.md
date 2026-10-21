@@ -10,11 +10,8 @@ quality: usable
 categories:
 - cold-water-immersion
 - cold-plunge
-relations:
-- type: parent_family
-  target: experiment_family:cold-water-immersion
-- type: related_protocol
-  target: protocol_variant:cold-water-immersion/cold-plunge
+relations: []
+
 source:
   kind: journal_article
   title: Improved mood following a single immersion in cold water

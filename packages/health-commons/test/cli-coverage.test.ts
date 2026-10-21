@@ -57,8 +57,8 @@ describe("@murphai/health-commons coverage scaffolding", () => {
         generatedRoot,
       });
 
-      const protocolIndexJson = await readFile(path.join(generatedRoot, "protocol-index.json"), "utf8");
-      expect(protocolIndexJson).toContain("\"catalogHash\"");
+      const routeIndexJson = await readFile(path.join(generatedRoot, "web/routes/index.json"), "utf8");
+      expect(routeIndexJson).toContain("\"catalogHash\"");
 
       await writeHealthCommonsGeneratedArtifacts({
         check: true,

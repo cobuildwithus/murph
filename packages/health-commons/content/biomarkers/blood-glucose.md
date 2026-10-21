@@ -92,52 +92,31 @@ biomarker:
       - meter strip storage or expiration
       - device, sensor, or calibration changes
 relations:
-
-  -
-    type: related_protocol
-    target: protocol_variant:norwegian-4x4/norwegian-4x4
-  -
-    type: related_protocol
-    target: protocol_variant:evening-light-reduction/red-light-glasses-before-bed
-  -
-    type: related_protocol
-    target: protocol_variant:dry-sauna/murph-finnish-standard-3x-week
-  -
-    type: cites
+  - type: cites
     target: source_artifact:ada-standards-2026-diagnosis
-  -
-    type: cites
+  - type: cites
     target: source_artifact:ada-standards-2026-glycemic-goals
-  -
-    type: cites
+  - type: cites
     target: source_artifact:ada-diabetes-diagnosis
-  -
-    type: cites
+  - type: cites
     target: source_artifact:niddk-diabetes-prediabetes-tests
-  -
-    type: cites
+  - type: cites
     target: source_artifact:cdc-manage-blood-sugar-2024
-  -
-    type: cites
+  - type: cites
     target: source_artifact:cdc-low-blood-sugar-2024
-  -
-    type: cites
+  - type: cites
     target: source_artifact:ada-blood-glucose-meters
-  -
-    type: cites
+  - type: cites
     target: source_artifact:fda-noninvasive-glucose-wearable-warning-2024
-  -
-    type: cites
+  - type: cites
     target: source_artifact:pmid-11832527
-  -
-    type: cites
+  - type: cites
     target: source_artifact:pmid-35029593
-  -
-    type: cites
+  - type: cites
     target: source_artifact:pmid-36715875
-  -
-    type: cites
+  - type: cites
     target: source_artifact:pmid-31915891
+
 claims:
 
   -

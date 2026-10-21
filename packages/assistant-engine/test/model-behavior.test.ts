@@ -2113,10 +2113,14 @@ describe('assistant user-facing wording guidance', () => {
       'Health Commons is the public, source-backed reference corpus; the user\'s vault is private state.',
     )
     expect(prompt).toContain(
-      'Never conflate public protocol discovery with the user\'s saved adaptation, regimen, or experiment.',
+      'Keep reference evidence separate from the user\'s saved plan, regimen, or experiment.',
     )
+    expect(prompt).not.toContain('public protocol discovery')
     expect(prompt).toContain(
       'Lead with the useful evidence or next step, not the corpus name.',
+    )
+    expect(prompt).toContain(
+      'Experiments are managed in conversation; do not invent website experiment pages or links.',
     )
   })
 
@@ -2588,7 +2592,7 @@ describe('assistant system prompt cache stability', () => {
       'Current Murph product base URL for user-facing app links: http://localhost:3000',
     )
     expect(promptA.cacheMetadata.staticPromptHash).toBe(
-      '2fced832928b88ac3ecfca1b7928cf95f58e987ea8bae42879cfe9c03f7bb7ff',
+      '76af77f6c1d1efb2f1a0b4e344ed0d8408ca87a4dc236a01c0ebd9b8621feb30',
     )
     expect(promptA.cacheMetadata.toolSchemaHash).toBe(
       'assistant-tool-schema-common-codex-test',
@@ -2733,7 +2737,7 @@ describe('assistant system prompt cache stability', () => {
 })
 
 describe('assistant experiment onboarding guidance', () => {
-  it('keeps protocol discovery task-time instead of rendering a resident index', () => {
+  it('routes experiment setup to a private plan without a resident or public protocol catalog', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
 
     expect(prompt).not.toContain('Supported experiment protocols:')
@@ -2770,14 +2774,11 @@ describe('assistant experiment onboarding guidance', () => {
     expect(prompt).not.toContain('same catalogHash')
     expect(prompt).not.toContain('use 2 only')
     expect(prompt).toContain(
-      '`vault-cli commons protocol explore <query> --format json` for broad or ambiguous discovery',
+      '- For experiment setup, use the experiment-onboarding skill to build a private plan from the member\'s goal, available evidence, and saved context. A public protocol catalog is not required.',
     )
-    expect(prompt).toContain(
-      '`vault-cli commons protocol list --query <query> --format json` for protocol-only listing',
-    )
-    expect(prompt).toContain(
-      '`vault-cli commons protocol show <key-or-slug> --format json` for the exact page',
-    )
+    expect(prompt).not.toContain('vault-cli commons protocol')
+    expect(prompt).not.toContain('For protocol discovery/setup, search first.')
+    expect(prompt).not.toMatch(/\/experiments(?:\/|\b)/u)
   })
 
   it('keeps only the resident completion and authorization invariant', () => {

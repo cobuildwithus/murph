@@ -1,6 +1,0 @@
-{
-  "schemaVersion": "murph.commons.artifact-manifest.v1",
-  "manifestKey": "artifact_manifest:static-stretching/research-artifacts",
-  "description": "Rights-safe static-stretching research artifact manifest. The canonical ledger and batch artifact candidates marked all third-party PDFs/full text as metadata-only or requiring rights review; no copyrighted PDFs are committed or selected for storage by default. Source-page Markdown is committed under packages/health-commons/content/sources/static-stretching/.",
-  "artifacts": []
-}

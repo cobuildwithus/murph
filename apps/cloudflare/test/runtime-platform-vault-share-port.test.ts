@@ -1,4 +1,6 @@
 import {
+  HOSTED_VAULT_SHARE_CONTENT_DIGEST_CAPABILITY_PARAM,
+  HOSTED_VAULT_SHARE_CONTENT_DIGEST_CAPABILITY_VERSION,
   HOSTED_VAULT_SHARE_DELIVERY_EFFECT_TIMEOUT_MS,
   HOSTED_VAULT_SHARE_DELIVERY_TRANSPORT_MARGIN_MS,
   HOSTED_VAULT_SHARE_EFFECT_DEADLINE_HEADER,
@@ -64,6 +66,8 @@ describe("createHostedWebVaultSharePort", () => {
       expect(url.pathname).toBe("/api/internal/hosted-runtime/vault-share/active-kinds");
       expect(url.searchParams.get("sourceWorkspaceVersion"))
         .toBe(sourceWorkspaceVersion ?? null);
+      expect(url.searchParams.get(HOSTED_VAULT_SHARE_CONTENT_DIGEST_CAPABILITY_PARAM))
+        .toBe(HOSTED_VAULT_SHARE_CONTENT_DIGEST_CAPABILITY_VERSION);
     },
   );
 

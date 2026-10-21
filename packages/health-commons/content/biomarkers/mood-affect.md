@@ -17,22 +17,15 @@ categories:
   - self-report
   - manual-checkin
 relations:
-
-  -
-    type: related_protocol
-    target: protocol_variant:cold-water-immersion/cold-plunge
-  -
-    type: cites
+  - type: cites
     target: source_artifact:doi-10.1002-lim2.53
-  -
-    type: cites
+  - type: cites
     target: source_artifact:pmid-36829490
-  -
-    type: cites
+  - type: cites
     target: source_artifact:pmid-37866096
-  -
-    type: cites
+  - type: cites
     target: source_artifact:pmid-39879231
+
 measurementContexts:
   - same_day_self_report
 unit: score

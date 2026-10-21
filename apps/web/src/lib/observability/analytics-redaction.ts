@@ -11,7 +11,6 @@ export const VERCEL_TELEMETRY_PATHNAMES = [
   "/contact",
   "/design",
   "/device-sync/connect/complete",
-  "/experiments",
   "/family/setup",
   "/farewell",
   "/groups/start",
@@ -54,27 +53,6 @@ const VERCEL_TELEMETRY_DYNAMIC_PATHNAME_RULES = [
       "iu",
     ),
     pathname: "/compare/[competitor]",
-  },
-  {
-    pattern: new RegExp(
-      `^/experiments/(?!runs(?:/|$))(?:${PUBLIC_PATH_SEGMENT_PATTERN}|\\[experimentId\\])$`,
-      "iu",
-    ),
-    pathname: "/experiments/[experiment]",
-  },
-  {
-    pattern: new RegExp(
-      `^/experiments/(?!runs(?:/|$))(?:${PUBLIC_PATH_SEGMENT_PATTERN}|\\[experimentId\\])/research$`,
-      "iu",
-    ),
-    pathname: "/experiments/[experiment]/research",
-  },
-  {
-    pattern: new RegExp(
-      `^/experiments/(?!runs(?:/|$))(?:${PUBLIC_PATH_SEGMENT_PATTERN}|\\[experimentId\\])/results$`,
-      "iu",
-    ),
-    pathname: "/experiments/[experiment]/results",
   },
   {
     pattern: new RegExp(

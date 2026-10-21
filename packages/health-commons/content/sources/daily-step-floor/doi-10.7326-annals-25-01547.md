@@ -12,11 +12,8 @@ aliases:
 - doi-10.7326-annals-25-01547
 categories:
 - daily-step-floor
-relations:
-- type: related_protocol
-  target: protocol_variant:daily-step-floor/daily-step-floor
-- type: parent_family
-  target: experiment_family:daily-step-floor
+relations: []
+
 source:
   kind: journal_article
   title: Step Accumulation Patterns and Risk for Cardiovascular Events and Mortality Among Suboptimally Active Adults

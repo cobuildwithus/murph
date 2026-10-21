@@ -361,21 +361,6 @@ Hosted E2E orchestration helpers live under `apps/web/test/support`, not
 as client factories and dependency-bearing functions; the testkit owns smoke-env
 adaptation, seed composition, and cross-app E2E imports.
 
-## Experiment detail data sources
-
-The experiment detail routes compose two narrow data sources:
-
-- Health Commons is the public protocol source of truth. Server components resolve generated route projections for the Protocol, Research, and public portion of Your results.
-- The browser vault is the private run source. The Your results client decrypts the dashboard snapshot in-browser, projects the matching active run or newest completed run, and renders private status, timeline, context, next-step, and outcome fields. Completed and low-confidence runs remain reachable at `/experiments/[experimentId]/results`.
-
-Private measurements and conclusions never enter the server-rendered route payload. Public protocol prose, citations, and commons revisions are never copied into private run state.
-
-For a runnable public protocol, Start opens the member's connected channel with
-one human-readable sentence naming the experiment. The draft does not expose
-Health Commons keys or revision hashes. Murph resolves that name through the
-generated protocol discovery surface, then the protocol-backed run owner stores
-the exact key and revisions used at creation.
-
 ## Saved biomarker reference context
 
 Saved lab-result pages keep the imported source flag and per-result laboratory

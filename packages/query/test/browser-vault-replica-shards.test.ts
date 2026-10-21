@@ -4,6 +4,7 @@ import type { ExperimentOutcome } from "@murphai/contracts";
 import { test } from "vitest";
 
 import {
+  assembleBrowserVaultCoreReplica,
   assembleBrowserVaultReplicaShards,
   BROWSER_VAULT_CORE_SHARD_SCHEMA,
   BROWSER_VAULT_LABS_SHARD_SCHEMA,
@@ -29,6 +30,24 @@ import {
   splitBrowserVaultReplica,
   type BrowserVaultReplica,
 } from "../src/browser.ts";
+
+test("core shards keep an empty run-card array for Web skew and drop older producers' cards", async () => {
+  const shards = await splitBrowserVaultReplica(createReplica());
+  // Web builds from before run-card removal still require this core array.
+  assert.deepEqual(shards.core.experimentRunCards, []);
+
+  const olderProducerCore = JSON.parse(JSON.stringify({
+    ...shards.core,
+    experimentRunCards: [{ schema: "murph.browser-vault.experiment-run-card.v1" }],
+  })) as unknown;
+  assert.deepEqual(parseBrowserVaultCoreShard(olderProducerCore).experimentRunCards, []);
+  assert.equal(
+    "experimentRunCards" in assembleBrowserVaultCoreReplica(
+      parseBrowserVaultCoreShard(olderProducerCore),
+    ),
+    false,
+  );
+});
 
 test("legacy Patterns payloads are ignored without losing Journal data", async () => {
   const replica = createReplica();
@@ -383,7 +402,6 @@ function createReplica(): BrowserVaultReplica {
     },
     entities: [],
     experimentOutcomes: [],
-    experimentRunCards: [],
     generatedAt: "2026-08-13T12:00:00.000Z",
     generation: BROWSER_VAULT_REPLICA_CURRENT_GENERATION,
     hasLabBiomarkers: false,

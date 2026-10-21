@@ -66,30 +66,19 @@ biomarker:
     - prior complicated withdrawal
     - active AUD treatment needs
 relations:
--
-  type: related_protocol
-  target: protocol_variant:alcohol-abstinence/short-term-alcohol-abstinence
--
-  type: parent_family
-  target: experiment_family:alcohol-abstinence
--
-  type: cites
-  target: source_artifact:nice-alcohol-physical-complications-2017-04-12
--
-  type: cites
-  target: source_artifact:nice-alcohol-dependence-assessment-2014-10-21
--
-  type: cites
-  target: source_artifact:pmid-24657098
--
-  type: cites
-  target: source_artifact:pmid-25346507
--
-  type: cites
-  target: source_artifact:pmid-25999438
--
-  type: cites
-  target: source_artifact:pmid-32511109
+  - type: cites
+    target: source_artifact:nice-alcohol-physical-complications-2017-04-12
+  - type: cites
+    target: source_artifact:nice-alcohol-dependence-assessment-2014-10-21
+  - type: cites
+    target: source_artifact:pmid-24657098
+  - type: cites
+    target: source_artifact:pmid-25346507
+  - type: cites
+    target: source_artifact:pmid-25999438
+  - type: cites
+    target: source_artifact:pmid-32511109
+
 claims:
 -
   claimId: withdrawal-screening-first
