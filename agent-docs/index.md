@@ -1,3 +1,6 @@
+Query SQLite rebuild cost and sparse-zero sleep repair evidence are tracked in
+[the active build-cost plan](exec-plans/active/2026-10-20-sqlite-build-cost.md).
+
 Linq line lock-order repair is tracked in
 [the active lock-order plan](exec-plans/completed/2026-10-20-linq-line-lock-order.md).
 
