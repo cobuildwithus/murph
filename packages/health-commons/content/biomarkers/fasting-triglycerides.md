@@ -19,25 +19,17 @@ categories:
   - "lab-marker"
   - "lipids"
 relations:
+  - type: cites
+    target: source_artifact:pmid-37264945
+  - type: cites
+    target: source_artifact:pmid-18774613
+  - type: cites
+    target: source_artifact:pmid-38317191
+  - type: cites
+    target: source_artifact:pmid-22113870
+  - type: cites
+    target: source_artifact:pmid-22962670
 
-  -
-    type: "related_protocol"
-    target: "protocol_variant:omega-3-supplementation/oral-epa-dha-supplementation"
-  -
-    type: "cites"
-    target: "source_artifact:pmid-37264945"
-  -
-    type: "cites"
-    target: "source_artifact:pmid-18774613"
-  -
-    type: "cites"
-    target: "source_artifact:pmid-38317191"
-  -
-    type: "cites"
-    target: "source_artifact:pmid-22113870"
-  -
-    type: "cites"
-    target: "source_artifact:pmid-22962670"
 unit: "mg/dL"
 measurementContexts:
   - "fasting_lipid_panel"
@@ -96,7 +88,6 @@ claims:
 
 ## Role in this protocol
 
-Fasting Triglycerides is used as a secondary endpoint for `protocol_variant:omega-3-supplementation/oral-epa-dha-supplementation`.
 
 ## Interpretation
 

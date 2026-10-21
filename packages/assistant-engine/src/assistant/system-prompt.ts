@@ -1500,17 +1500,13 @@ ${replyTargetGuidance}
 function buildAssistantHealthCommonsGuidanceText(): string {
   return `Health Commons tools:
 - Do not search Health Commons for workflow eligibility resolved by an owning tool or skill from canonical state. Before health Q&A or advice beyond it, run one \`vault-cli commons knowledge search "<full health question in concise English>" --format json\`. Immediate acceptance of an unchanged plan is not new health advice: reuse its completed search. For deterministic exact food-label nutrition facts, use food-journal's label database directly. Health reasoning or advice beyond the returned label facts still requires Commons. Preserve symptoms, medicines, timing, dose, pregnancy/fertility, and recent adverse events. Ground the answer in its evidence and safety guidance. If unavailable or empty, answer from general knowledge. Clarify only when candidates differ materially. Skip jokes, thanks, logs, logistics, and non-health turns.
-- For protocol discovery/setup, search first. ${buildHealthCommonsDiscoverySurfaceText()}`;
+- For experiment setup, use the experiment-onboarding skill to build a private plan from the member's goal, available evidence, and saved context. A public protocol catalog is not required.`;
 }
 
 function buildAssistantHealthCommonsCoreGuidanceText(): string {
   return `Health Commons:
-- Health Commons is the public, source-backed reference corpus; the user's vault is private state. Never conflate public protocol discovery with the user's saved adaptation, regimen, or experiment.
-- Lead with the useful evidence or next step, not the corpus name. Do not claim no relevant protocol exists unless a same-turn public Health Commons lookup for the relevant terms returned no match.`;
-}
-
-function buildHealthCommonsDiscoverySurfaceText(): string {
-  return "Use `vault-cli commons protocol explore <query> --format json` for broad or ambiguous discovery, `vault-cli commons protocol list --query <query> --format json` for protocol-only listing, and `vault-cli commons protocol show <key-or-slug> --format json` for the exact page.";
+- Health Commons is the public, source-backed reference corpus; the user's vault is private state. Keep reference evidence separate from the user's saved plan, regimen, or experiment.
+- Lead with the useful evidence or next step, not the corpus name. Experiments are managed in conversation; do not invent website experiment pages or links.`;
 }
 
 function buildAssistantVaultNavigationText(input: {

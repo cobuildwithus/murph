@@ -12,13 +12,8 @@ aliases:
 - Nagy 2025 one-month alcohol abstinence
 categories:
 - alcohol-abstinence
-relations:
--
-  type: related_protocol
-  target: protocol_variant:alcohol-abstinence/short-term-alcohol-abstinence
--
-  type: parent_family
-  target: experiment_family:alcohol-abstinence
+relations: []
+
 source:
   kind: journal_article
   title: Preliminary Results of a Voluntary One-Month Abstinence Program on Drinking Refusal Self-Efficacy and Craving

@@ -20,25 +20,17 @@ categories:
   - recovery
   - sleep-diary
 relations:
-
-  -
-    type: related_protocol
-    target: protocol_variant:morning-light-exposure/morning-outdoor-light-exposure
-  -
-    type: cites
+  - type: cites
     target: source_artifact:pmid-28786887
-  -
-    type: cites
+  - type: cites
     target: source_artifact:doi-10.31086-tjgeri.2020.147
-  -
-    type: cites
+  - type: cites
     target: source_artifact:pmid-19560724
-  -
-    type: cites
+  - type: cites
     target: source_artifact:pmid-41053799
-  -
-    type: cites
+  - type: cites
     target: source_artifact:pmid-39077837
+
 measurementContexts:
   - morning_self_report
   - sleep_diary

@@ -16,16 +16,15 @@ categories:
 - walking
 - self-report
 relations:
-- type: related_protocol
-  target: protocol_variant:daily-step-floor/daily-step-floor
-- type: cites
-  target: source_artifact:pmid-17521443
-- type: cites
-  target: source_artifact:pmid-26289360
-- type: cites
-  target: source_artifact:pmid-22843637
-- type: cites
-  target: source_artifact:pmid-25012720
+  - type: cites
+    target: source_artifact:pmid-17521443
+  - type: cites
+    target: source_artifact:pmid-26289360
+  - type: cites
+    target: source_artifact:pmid-22843637
+  - type: cites
+    target: source_artifact:pmid-25012720
+
 measurementContexts:
 - manual_log
 - symptom_rating

@@ -13,14 +13,8 @@ aliases:
   - "How to Measure Physical Activity Intensity"
 categories:
   - "aerobic-base-training"
-relations:
+relations: []
 
-  -
-    type: "related_protocol"
-    target: "protocol_variant:aerobic-base-training/zone-2-aerobic-base-block"
-  -
-    type: "parent_family"
-    target: "experiment_family:aerobic-base-training"
 source:
   kind: "web_page"
   title: "How to Measure Physical Activity Intensity"

@@ -211,7 +211,7 @@ describe('assistant dynamic context prompt blocks', () => {
     expect(prompt).toContain('Complex and low-capacity care:')
     expect(prompt).toContain('Never psychologize physical illness')
     expect(prompt).toContain('route the affected person to appropriate urgent or emergency help')
-    expect(prompt).toContain('Never conflate public protocol discovery')
+    expect(prompt).toContain("Keep reference evidence separate from the user's saved plan, regimen, or experiment")
     expect(prompt).toContain('In group email, do not use the CLI or shell')
     expect(prompt).toContain('Understand before recommending')
     expect(prompt).toContain('dangerous sleepiness')

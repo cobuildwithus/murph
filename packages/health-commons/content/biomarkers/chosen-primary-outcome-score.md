@@ -66,21 +66,15 @@ biomarker:
     - illness or travel
     - new supplement or medication
 relations:
--
-  type: related_protocol
-  target: protocol_variant:collagen-supplementation/hydrolyzed-collagen-peptides
--
-  type: cites
-  target: source_artifact:pmid-39212129
--
-  type: cites
-  target: source_artifact:pmid-33742704
--
-  type: cites
-  target: source_artifact:pmid-30609761
--
-  type: cites
-  target: source_artifact:pmid-38590831
+  - type: cites
+    target: source_artifact:pmid-39212129
+  - type: cites
+    target: source_artifact:pmid-33742704
+  - type: cites
+    target: source_artifact:pmid-30609761
+  - type: cites
+    target: source_artifact:pmid-38590831
+
 ---
 
 # Chosen Primary Outcome Score

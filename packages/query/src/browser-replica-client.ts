@@ -1,7 +1,6 @@
 export {
   BROWSER_VAULT_REPLICA_POLICY_ID,
   BROWSER_VAULT_REPLICA_SCHEMA,
-  BROWSER_VAULT_EXPERIMENT_RUN_CARD_SCHEMA,
 } from "./browser-replica/shared.ts";
 export {
   assembleBrowserVaultCoreReplica,
@@ -27,13 +26,6 @@ export type {
   BrowserVaultEntityFamily,
   BrowserVaultEntityFilters,
   BrowserVaultEntityLink,
-  BrowserVaultExperimentRunCard,
-  BrowserVaultExperimentRunCardDailyCadence,
-  BrowserVaultExperimentRunCardLookup,
-  BrowserVaultExperimentRunCardLookupKeys,
-  BrowserVaultExperimentRunCardMetric,
-  BrowserVaultExperimentRunCardStatus,
-  BrowserVaultExperimentRunCardSummary,
   BrowserVaultLabsCapableQueryClient,
   BrowserVaultLabsQueryClient,
   BrowserVaultLabsReplica,
@@ -105,8 +97,3 @@ export {
   requireBrowserVaultMetricBucketId,
 } from "./browser-replica/metric-buckets.ts";
 export type { BrowserVaultMetricBucketId } from "./browser-replica/metric-buckets.ts";
-export { buildBrowserVaultExperimentRunCards } from "./browser-replica/experiment-run-cards.ts";
-export {
-  resolveBrowserVaultExperimentEntityMetricKeys,
-  selectBrowserVaultExperimentMetricKeys,
-} from "./browser-replica/experiments.ts";

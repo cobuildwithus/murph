@@ -4,7 +4,6 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
   ChevronsUpDown,
-  FlaskConical,
   Home,
 } from "lucide-react";
 import {
@@ -62,7 +61,6 @@ const navItems: {
   icon?: ElementType;
 }[] = [
   { label: "Home", href: "/home", icon: Home },
-  { label: "Experiments", href: "/experiments", icon: FlaskConical },
 ];
 
 const sidebarThemeStyle = {

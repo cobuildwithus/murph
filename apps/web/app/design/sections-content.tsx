@@ -58,15 +58,11 @@ import { OpsOperatorTaskStudy } from "./ops-operator-task-study";
 import { JunctionRecoveryStudy, RuntimeMaintenanceStudy } from "./runtime-maintenance-study";
 import { SettingsAuthRequiredStudy } from "./settings-auth-required-study";
 import { SignupReferralFlowStudy } from "./signup-referral-study";
-import { StructuredReviewResultsStudy } from "./structured-review-results-study";
 import { TrainingDashboardStudy } from "./training-dashboard-study";
 import {
   GroupUsageFundingStudy,
   PersonalUsageCreditOwnerStudy,
 } from "./group-usage-funding-study";
-import { ExperimentResultsShareStudy } from "./experiment-results-share-study";
-import { ExperimentRepeatedResultsStudy } from "./experiment-repeated-results-study";
-import { BrowserVaultLoadingTransitionsStudy } from "./browser-vault-loading-transitions-study";
 import {
   SCREENSHOT_CATEGORIES,
   type ScreenshotCategory,
@@ -653,12 +649,6 @@ export function SectionsContent({
 
           <Separator />
 
-          <StudySection title="Browser Vault progressive loading and biomarker result detail transitions">
-            <BrowserVaultLoadingTransitionsStudy />
-          </StudySection>
-
-          <Separator />
-
           <StudySection title="Home onboarding steps">
             <HomeOnboardingStepsStudy />
           </StudySection>
@@ -753,22 +743,6 @@ export function SectionsContent({
         </>
       ) : null}
 
-      {category === "messages" ? (
-        <>
-          <Separator />
-
-          <StudySection title="Private experiment results share">
-            <ExperimentResultsShareStudy />
-          </StudySection>
-
-          <Separator />
-
-          <StudySection title="Private structured-review result">
-            <StructuredReviewResultsStudy />
-          </StudySection>
-        </>
-      ) : null}
-
       {category === "ops" ? (
         <>
           <Separator />
@@ -781,16 +755,7 @@ export function SectionsContent({
         </>
       ) : null}
 
-      {category === "health" ? (
-        <>
 
-          <Separator />
-
-          <StudySection title="Repeated-session experiment Results">
-            <ExperimentRepeatedResultsStudy />
-          </StudySection>
-        </>
-      ) : null}
     </div>
   );
 }
