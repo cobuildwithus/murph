@@ -131,6 +131,7 @@ import { readAssistantDeviceActivityParentAutomation } from '../device-activity-
 import {
   buildCanonicalAutomationUpsertInput,
   buildVisibleLocalAssistantCronStore,
+  hasAssistantCronExtendedRetryWindow,
   isAssistantCronNotificationOccurrenceFresh,
   isCanonicalAssistantCronNotificationOccurrenceDeliverable,
   isCanonicalAssistantCronSourceEnabled,
@@ -211,8 +212,9 @@ export const ASSISTANT_CRON_MEMBER_WORDING_INSTRUCTIONS = [
 // Hosted cron turns are off the user hotpath, so clean first runs prefer the
 // OpenAI flex tier (~50% token cost). The Codex provider boundary validates
 // route support and bounds flex execution with a deadline; failures land in the
-// normal cron backoff (30s first retry). Private maintenance stays on Flex; all other
-// scheduled turns retry at standard tier to bound delivery lateness.
+// normal cron backoff (30s first retry). Extended-window managed updates get five
+// Flex attempts; ordinary reminders fall back after one. Private maintenance
+// stays on Flex.
 
 interface DueAssistantCronCandidate {
   canonicalEntry?: {
@@ -858,8 +860,9 @@ export async function executeClaimedAssistantCronJob(
         }
         const serviceTier = resolveAssistantCronTurnServiceTier({
           executionContext: input.executionContext ?? null,
-          job: claimedJob,
-          backgroundMaintenance: assistantCronJobIsPreemptibleBackgroundMaintenance(input.job),
+          job: input.job,
+          consecutiveFailures: claimedJob.state.consecutiveFailures,
+          occurrenceAt,
         })
         const scheduledInvocationAuthority =
           resolveAssistantCronScheduledInvocationAuthority({
@@ -2148,20 +2151,29 @@ async function runAssistantCronAutomationPreconditions(input: {
 }
 
 function resolveAssistantCronTurnServiceTier(input: {
-  backgroundMaintenance: boolean
+  consecutiveFailures: number
   executionContext: AssistantExecutionContext | null
-  job: AssistantCronJob
+  job: ResolvedAssistantCronJob
+  occurrenceAt: string
 }): AssistantProviderServiceTier | null {
   // Hosted API-key turns only; dev/local Codex subscription auth has no tiers.
   if (!input.executionContext?.hosted) {
     return null
   }
 
-  // Maintenance tolerates capacity delays and retains Flex pricing on retries.
-  // Every other scheduled turn falls back to Standard after its first failure.
-  return input.backgroundMaintenance || input.job.state.consecutiveFailures === 0
-    ? 'flex'
-    : null
+  if (assistantCronJobIsPreemptibleBackgroundMaintenance(input.job)) {
+    return 'flex'
+  }
+
+  // Only extended-window updates can spend five attempts on Flex without
+  // placing their first Standard retry beyond the ordinary one-hour window.
+  const flexAttemptLimit = input.job.kind === 'canonical'
+    && input.job.source.kind === 'automation'
+    && hasAssistantCronExtendedRetryWindow({
+      occurrenceAt: input.occurrenceAt,
+      source: input.job.source,
+    }) ? 5 : 1
+  return input.consecutiveFailures < flexAttemptLimit ? 'flex' : null
 }
 
 function resolveAssistantCronAutomationTargetOverride(

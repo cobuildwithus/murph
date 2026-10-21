@@ -480,7 +480,7 @@ export function widenAssistantCronActiveUntilForFinalOccurrence(input: {
 
 // Only a recurring managed run whose next occurrence is at least the window
 // away keeps it, so a late retry never replays a superseded occurrence.
-function hasAssistantCronExtendedRetryWindow(input: {
+export function hasAssistantCronExtendedRetryWindow(input: {
   occurrenceAt: string
   source: CanonicalAutomationAssistantCronJobRecord
 }): boolean {

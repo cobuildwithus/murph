@@ -371,9 +371,12 @@ the same automation tool through one execution-context factory. Cron supplies it
 verified delivery route before actual turn planning; the shared context has no
 ambient mutation tool. The canonical tool still owns version checks, route
 preservation, and readback. No per-job mutation allowlist or parallel repair API.
-Hosted scheduled turns start on Flex and retry at Standard after the first
-failed attempt, including Journal, weekly digest/insight/research and monthly
-coaching. Only private memory/room-model maintenance retains Flex on retries. The provider boundary validates model and catalog support
+Hosted scheduled turns start on Flex. Managed Journal, weekly digest/insight/
+research and monthly coaching occurrences eligible for the six-hour recovery
+window use Flex for the first five attempts, then Standard from attempt six.
+Ordinary reminders and managed schedules without that extended window use
+Standard after the first failed attempt. Private memory/room-model maintenance
+retains Flex on all retries. The provider boundary validates model and catalog support
 before selecting Flex; existing bounded failure backoff remains controlling.
 Structured Codex overload and Flex-unavailable errors are retryable provider
 failures, not transport loss. Foreground recovery retains those inputs through
