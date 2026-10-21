@@ -55,8 +55,25 @@ import {
 } from './onboarding-followup-automation.js'
 import {
   seedMurphOnboardingFollowupFromStartedOnboarding,
+  seedMurphOnboardingEarlyStallAutomation,
 } from './onboarding-followup-seed.js'
+import { MURPH_WEEKLY_USAGE_OPTIMIZER_AUTOMATION } from './weekly-usage-optimizer.js'
+import {
+  MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID,
+  MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID,
+  MURPH_JOURNAL_CONNECTED_CONTEXT_MORNING_AUTOMATION_ID,
+  MURPH_MONTHLY_IMPROVEMENT_COACH_AUTOMATION_ID,
+  MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID,
+} from './managed-automation-ids.js'
 import { assistantRouteSupportsGroupRoomModel } from './group-room-model.js'
+
+export {
+  MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID,
+  MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID,
+  MURPH_JOURNAL_CONNECTED_CONTEXT_MORNING_AUTOMATION_ID,
+  MURPH_MONTHLY_IMPROVEMENT_COACH_AUTOMATION_ID,
+  MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID,
+} from './managed-automation-ids.js'
 
 export { MURPH_ONBOARDING_FOLLOWUP_AUTOMATION }
 
@@ -149,20 +166,8 @@ export interface MurphOnboardingFollowupDiagnostic {
   scheduleKind: AutomationSchedule['kind']
 }
 
-export const MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID =
-  'automation_01JNW7YJ7MNE7M9Q2QWQK4Z3FY'
-export const MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID =
-  'automation_X3GPAWV2CCHNCYHAAJ4CE2M144'
-export const MURPH_PERSONAL_PATTERNS_UPDATE_AUTOMATION_ID =
-  'automation_01M0A7T3RN5VPD8C2K4V6X9ZBQ'
-export const MURPH_JOURNAL_CONNECTED_CONTEXT_MORNING_AUTOMATION_ID =
-  'automation_01M1J7C8M0RN1NGC0NT3XT7D2A'
 export const MURPH_JOURNAL_CONNECTED_CONTEXT_AFTERNOON_AUTOMATION_ID =
   'automation_01M1J7C8AFT3RN00NC0NT3XT7A'
-export const MURPH_MONTHLY_IMPROVEMENT_COACH_AUTOMATION_ID =
-  'automation_01K2WKKY3F8Q4R5S6T7V8W9XAB'
-export const MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID =
-  'automation_01K0EXA5C0VT9F7X3KG6JMPZ5A'
 export const MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID =
   'automation_01K4Y0Q5C8M9N2P3R4S5T6V7WX'
 export const MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_PRIVATE_SUMMARY =
@@ -175,6 +180,8 @@ const MURPH_RETIRED_GROUP_SUNDAY_SUPERLATIVES_AUTOMATION_ID =
   'automation_01K55N7S9X4Q2M6P8R3T0V1WYZ'
 export const MURPH_RETIRED_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID =
   'automation_01K0Z7X9Y8W6V5T4S3R2Q1P0NM'
+export const MURPH_RETIRED_PERSONAL_PATTERNS_UPDATE_AUTOMATION_ID =
+  'automation_01M0A7T3RN5VPD8C2K4V6X9ZBQ'
 export const MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID =
   'automation_01KZZM3A9C7P4R6T8V2W5X0YQZ'
 
@@ -182,6 +189,7 @@ const MURPH_RETIRED_MANAGED_AUTOMATION_IDS = new Set<string>([
   MURPH_RETIRED_GROUP_SUNDAY_SUPERLATIVES_AUTOMATION_ID,
   MURPH_RETIRED_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
   MURPH_JOURNAL_CONNECTED_CONTEXT_AFTERNOON_AUTOMATION_ID,
+  MURPH_RETIRED_PERSONAL_PATTERNS_UPDATE_AUTOMATION_ID,
 ])
 
 export function isRetiredMurphManagedAutomationId(
@@ -402,6 +410,7 @@ const MURPH_PROACTIVE_HEALTH_OUTREACH_POLICY = [
 ].join('\n')
 
 export const MURPH_MANAGED_AUTOMATIONS = [
+  MURPH_WEEKLY_USAGE_OPTIMIZER_AUTOMATION,
   {
     automationId: MURPH_JOURNAL_CONNECTED_CONTEXT_MORNING_AUTOMATION_ID,
     slug: 'journal-connected-context-morning',
@@ -415,60 +424,20 @@ export const MURPH_MANAGED_AUTOMATIONS = [
     ownerScope: 'member',
     hostedRuntimeOnly: true,
     assistantTargetOverride: {
-      model: 'gpt-5.6-luna',
-      reasoningEffort: 'high',
+      model: 'gpt-6-luna',
+      reasoningEffort: 'xhigh',
     },
     tags: ['murph-managed:journal-connected-context'],
     instructions: [
       'Run the private Journal connected-context morning pass.',
       '',
-      'Read and follow `$MURPH_ASSISTANT_SKILLS_ROOT/journal-connected-context/SKILL.md`. Run its eligibility and opt-out check, calendar pass, email travel pass, due follow-up checks, and canonical plan reconciliation. Upcoming context is derived automatically from Journal. Preserve Journal writes, source reconciliation, and existing one-shot follow-ups. Use the engine-supplied occurrence local date and timezone as the time anchor.',
+      'Read and follow `$MURPH_ASSISTANT_SKILLS_ROOT/journal-connected-context/SKILL.md`. Run its eligibility and opt-out check, calendar pass, email travel pass, due follow-up checks, canonical plan reconciliation, and existing reminder reconciliation. Review existing private reminders against current permitted context on every run, even without new plans or eligible connections. Repair supported errors in instructions, timing, references, and lifecycle through version-checked patches; follow the skill’s evidence and ownership rules. Upcoming context is derived automatically from Journal. Preserve Journal writes and source reconciliation. Apply the skill’s health-purpose eligibility to new and existing follow-ups; preserve explicit member requests. Use the engine-supplied occurrence local date and timezone as the time anchor.',
       '',
       'Do not send a connection announcement or wait for a prior notice. Read eligible active sources in this run while preserving explicit opt-outs.',
       '',
       'This scheduled run may read connected calendar and email only through that skill. It must never send email, create provider calendar events, or use group context.',
       '',
       'If the skill finds nothing user-facing, return `{"kind":"skip","privateSummary":"No new connected Journal context required attention."}`.',
-    ].join('\n'),
-  },
-  {
-    automationId: MURPH_PERSONAL_PATTERNS_UPDATE_AUTOMATION_ID,
-    slug: 'personal-patterns-update',
-    title: 'Personal Patterns update',
-    summary: 'Checks for new personal observations and patterns each day.',
-    schedule: {
-      kind: 'cron',
-      expression: '0 13 * * *',
-    },
-    continuityPolicy: 'fresh',
-    ownerScope: 'member',
-    assistantTargetOverride: {
-      model: 'gpt-5.6-luna',
-      reasoningEffort: 'high',
-    },
-    tags: [
-      'murph-managed:personal-patterns-update',
-    ],
-    instructions: [
-      'On this scheduled run, check whether Personal Patterns contains a factor-and-outcome result that this member has not seen before. Send at most one compact message about exactly one factor-and-outcome result for the run. Never send one message per result.',
-      '',
-      '- Run `vault-cli wearables patterns --date YYYY-MM-DD --format json` with the current local date.',
-      '- Use only the named `vault-cli` reads and writes for this decision. Do not search the workspace or inspect the `vault-cli` executable or implementation.',
-      '- Read `vault-cli knowledge show journal-pattern-vocabulary`, `vault-cli knowledge show personal-pattern-notifications`, and `vault-cli wearables sources list` exactly once each. Missing Knowledge pages are expected; do not retry or search for them another way.',
-      '- Keep `journal-pattern-vocabulary` as compact JSON with this exact shape: `{"version":1,"concepts":[{"id":"short-stable-id","label":"Short label","icon":"closed-icon","aliases":["raw-factor-id"]}]}`. Allowed icons are activity, alcohol, bed, caffeine, cycling, dance, meal, medication, mind-body, recovery, red-light, running, strength, swimming, travel, walking, and wellness. Preserve valid existing concepts, but revise an existing label when it can be clearer or shorter without losing a distinction. Add a concept only when it improves a visible base factor label or icon, or merges clear base aliases. Derived detail ids containing `--` do not need concepts. Add no unseen base factor ids. Merge clear synonyms into one concept and leave uncertain factors separate. Use one to three plain words for each member-facing label. Remove redundant timing or context words, but never truncate blindly or merge distinct factors only to shorten a label. Expand a common abbreviation when its meaning is clear in the health context. Never use an unexplained abbreviation as the member-facing label, and never guess when it is ambiguous. Use at most 50 concepts and 20 aliases per concept. Store no dates, health values, effect sizes, grades, device data, or user prose.',
-      '- If the vocabulary needs a change, write the complete JSON exactly once with `vault-cli knowledge upsert --slug journal-pattern-vocabulary --title "Journal and Pattern vocabulary" --page-type ledger --body <json>`, then run the patterns command once more. The total limit is two patterns commands. Never run a third patterns command or a second vocabulary write. Pass JSON directly as the `--body` value; do not use a shell environment variable. When an alias moves to a canonical id, carry matching seen and muted notification identities to that id before checking for new results. A rename must not create a notification.',
-      '- Finish vocabulary normalization and notification-ledger migration before deciding whether any result is new. A result seen under a concept id or any of its aliases is already seen under the canonical id. A rename or merge is never a new result.',
-      '- If the notification ledger is missing, do not assume the first report is complete. Treat it as complete only when every contributing wearable source covers the full report window, or trusted device status explicitly says its initial import completed. If completion cannot be proved, write the current identities as pending import state and return skip without messaging.',
-      '- On the first report whose import completion is proved, send one compact first update with exactly one eligible grade A-D result, using the member-facing wording below, then mark the initial digest sent. If there are no grade A-D results, mark it sent and stay quiet.',
-      '- A result identity is `factorId + outcomeId + comparisonBasis + outcome lagDays`. Direction, effect size, grade, and classification can change without creating a new result.',
-      '- Determine new identities against the notification ledger read at the start of this run, after alias migration. `initialDigestSent` only records completion of the first digest; report stages such as `seen_again` describe evidence strength, not notification history. An eligible identity absent from that ledger is new. Preserve this decision when adding identities to the ledger before sending.',
-      '- After the initial digest is sent, only a previously unseen grade A-D identity can trigger a message. Grade E observations stay quiet. Use the same member-facing wording as the first digest.',
-      '- Member-facing wording: lead directly with what you noticed, like a natural text message. Use one short conversational paragraph, usually one or two sentences. Grades are internal selection and ledger metadata; never include letter grades, "grade A association", "evidence days", or report classifications in the message. Use evidence strength to calibrate the sentence: A/B have more repeated support, while C/D need a light qualifier such as "tended to" or "an early hint". A qualifier within the finding is enough; do not repeat uncertainty or add a standalone causation disclaimer. Include the supporting count in plain language, such as "on 8 comparable days", using the report\'s actual unit (days or independent cases/episodes); do not turn cases into days. Name the comparison baseline and outcome timing. When the report supplies an effect size, include that one number rather than listing both group averages. Never imply cause or medical certainty, or turn a tentative finding into advice to change a habit.',
-      '- Honor muted factors and result identities in the ledger. Record them as seen, but do not mention them.',
-      '- If several eligible results are new, choose exactly one: the strongest or most useful factor-and-outcome result. Do not add another outcome for the same factor or a second finding. Record all reviewed identities as usual; do not queue the unselected results for later messages. Do not include a link, refer to the Patterns page, or add a see-the-rest footer.',
-      '- Rewrite `personal-pattern-notifications` as versioned JSON with `vault-cli knowledge upsert --slug personal-pattern-notifications --title "Personal Pattern notifications" --page-type ledger --body <json>`. Pass JSON directly as the `--body` value; do not rely on a shell environment variable. Use exactly this shape: `{"version":1,"initialDigestSent":false,"reviewedFactorIds":[],"mutedFactorIds":[],"results":[{"factorId":"factor-id","outcomeId":"outcome-id","comparisonBasis":"confirmed_absence","lagDays":1,"lastSeenGrade":"A","firstSharedDate":null,"muted":false}]}`. The example result is a schema example, never an entry to copy. `reviewedFactorIds` contains every current report factor id after vocabulary normalization. Each result is unique by factorId, outcomeId, comparisonBasis, and lagDays; comparisonBasis is confirmed_absence or unobserved_baseline, lagDays is the matching report outcome lagDays (falling back to report lagDays), and lastSeenGrade is A-E. Preserve all existing result entries, firstSharedDate values (YYYY-MM-DD or null), result mutes, and factor mutes; add every current graded identity and update its lastSeenGrade before sending. Keep pending-import identities while initialDigestSent is false; set it true only under the first-complete-report rules above. Convert a legacy ledger only when all its history and preferences can be preserved; otherwise keep its existing format intact. Do not copy health values or user prose into the structured ledger. The scheduler can skip a later model run only when this ledger proves its factors, identities, and grades are already reviewed.',
-      '- If the initial import is still pending, the first complete report has no grade A-D result, or no later eligible identity is new, return `{"kind":"skip","privateSummary":"No new Personal Pattern result appeared."}`. Grade changes belong in the weekly health insight, not a separate notification.',
-      '- If new identities exist, write one natural member-facing message from the report. Do not include the structured report or internal fields in the message. Do not mention the ledger, scheduled run, model, or internal calculation. Before returning it, check that it contains exactly one finding and no link or Patterns-page invitation.',
     ].join('\n'),
   },
   {
@@ -542,7 +511,7 @@ export const MURPH_MANAGED_AUTOMATIONS = [
     continuityPolicy: 'fresh',
     ownerScope: 'member',
     assistantTargetOverride: {
-      model: 'gpt-5.6-sol',
+      model: 'gpt-6.1-sol',
       reasoningEffort: 'high',
     },
     tags: [
@@ -565,17 +534,10 @@ export const MURPH_MANAGED_AUTOMATIONS = [
       '',
       'Before choosing a finding:',
       '- Read the derived knowledge index.',
-      '- Read `vault-cli knowledge show weekly-health-insights`. If the page is missing, treat that as no prior weekly health insights.',
-      '- Read `vault-cli knowledge show personal-pattern-notifications`. Compare its last-seen grades and identities with the current report. A useful strengthening, weakening, or no-longer-supported result may appear inside this weekly note. Do not send a separate change message.',
-      '- Use `weekly-health-insights` as the dedupe ledger. Do not scan every wiki page and do not create per-week insight pages.',
+      '- Read `vault-cli knowledge show weekly-health-insights --if-exists`. If the page is missing, treat that as no prior weekly health insights. If this read fails, return skip.',
+      '- Use `weekly-health-insights` as the dedupe ledger. Do not repeat a previously covered finding merely with different wording or more detail. A strengthening, weakening, no-longer-supported result, or new explanation may appear inside this weekly note only when it materially changes the takeaway; state what changed without recycling the earlier headline. Do not scan every wiki page and do not create per-week insight pages.',
       '- Search other knowledge pages only when the index suggests a candidate finding may already be covered elsewhere.',
-      '- Run `vault-cli wearables patterns --date YYYY-MM-DD --format json` with the current local date. This is the first evidence pass for repeated factor links with same-day subjective outcomes and next-day sleep or recovery.',
-      '- Read grades A-E as evidence strength: A-C are Patterns, D is an Early signal, and E is one Observation. Grade changes can inform this weekly note, but they do not require a separate message.',
-      '- If the patterns command is unavailable, fails, or does not return a usable report, continue with the existing bounded manual candidate search. Do not treat command failure as evidence that no pattern exists, and do not send a setup or process note to the member.',
-      '- Independently inspect the same bounded canonical evidence, then compare your best supported findings with the mathematical report. Do not assume either result is correct.',
-      '- Only when a stable, reproducible candidate exposes a material engine gap, call `murph.submit_product_feedback` once with kind `feature_request`. Start the summary with `Pattern engine audit:` and include a self-contained prompt under 1,800 characters for Codex to add or improve a deterministic test before changing the engine. Remove member ids, names, exact dates, raw messages, source paths, and identifying context. Use rounded or relative values. Do not submit an audit merely to produce one, and never mention it to the member.',
-      '- Treat legacy stages as compatibility labels, not proof. Use `no_clear_pattern` to reject a hunch, not to force an outbound note.',
-      '- Inspect the underlying canonical dates and other vault context before sending. Check plausible alternatives. The pattern report narrows the search; it does not make the final judgment.',
+      '- Inspect the underlying canonical dates and other vault context before sending. Check plausible alternatives.',
       '- Treat canonical food, supplement, medication, and event records behind Journal as evidence. When they suggest an important timing or combination issue, verify the personal pattern and the health claim with the narrow owning skill and, when web search is available, credible current sources before surfacing it. If web search is unavailable, the owning skill and the member\'s own records decide. Do not turn a generic rule into a personal finding, and recommend clinician or pharmacist review before any medication or consequential supplement change.',
       '- Inspect only enough recent and historical vault data to test candidate patterns.',
       '- For a candidate centered on a connected wearable recovery/readiness decline, when `murph.device` is available call it with `action: list_accounts`; always read `vault-cli wearables sources list`. Verify the contributing source is healthy, its `lastDate` covers the claimed window, and `stalenessVsNewestDays` or sync gaps do not explain the decline. If source health or freshness cannot be proved, suppress the candidate.',
@@ -621,7 +583,7 @@ export const MURPH_MANAGED_AUTOMATIONS = [
       '',
       'If something clears the bar:',
       '- Use the current local date as the section heading: `YYYY-MM-DD`.',
-      '- If `weekly-health-insights` already has a `YYYY-MM-DD` section, read it as this run\'s candidate and do not append another section. Send from it only if it still clears the current interestingness bar and is useful enough to repeat now; otherwise return `{"kind":"skip","privateSummary":"Existing weekly health insight did not clear the current send bar."}`.',
+      '- If `weekly-health-insights` already has a `YYYY-MM-DD` section, read it as this run\'s candidate and do not append another section. Send from it only if it still clears the current interestingness bar and does not repeat an already-covered takeaway; otherwise return `{"kind":"skip","privateSummary":"Existing weekly health insight did not clear the current send bar."}`.',
       '- Otherwise append one dated section to the single rolling page with the locked append surface, for example: `vault-cli knowledge append-section weekly-health-insights YYYY-MM-DD --title "Weekly health insights" --body <markdown> --source-path <canonical-vault-path>`. Cite only canonical vault source paths, never `derived/**` or `.runtime/**` paths.',
       '- If append-section reports that the section already exists, another run created it first: read `weekly-health-insights` and apply the same current interestingness gate before deciding whether to send or return a `{"kind":"skip","privateSummary":"Existing weekly health insight did not clear the current send bar."}` decision.',
       '- Then, only when the finding clears the bar, send one concise note in plain adult language: a clear claim anchored in recognizable context, compact evidence, the simple translation, and a light optional follow-up.',
@@ -646,7 +608,7 @@ export const MURPH_MANAGED_AUTOMATIONS = [
     continuityPolicy: 'fresh',
     ownerScope: 'member',
     assistantTargetOverride: {
-      model: 'gpt-5.6-sol',
+      model: 'gpt-6.1-sol',
       reasoningEffort: 'high',
     },
     tags: [
@@ -678,11 +640,11 @@ export const MURPH_MANAGED_AUTOMATIONS = [
       '- Sleep validity: consumer deep/REM estimates and vendor sleep scores cannot create an opportunity on their own. Require reliable timing/opportunity or disruption evidence plus a meaningful independent signal such as next-day function or the member\'s stated concern. Do not diagnose a sleep disorder from device data.',
       '',
       'Dedupe and pacing:',
-      '- Read `vault-cli knowledge show improvement-opportunities`. If the page is missing, treat that as no prior runs or outreach. Use `improvement-opportunities` as the only run and outreach ledger; do not create per-month pages or write this operational history to memory.',
+      '- Read `vault-cli knowledge show improvement-opportunities --if-exists`. If the page is missing, treat that as no prior runs or outreach; if either ledger read fails, return skip. Use `improvement-opportunities` as the only run and outreach ledger; do not create per-month pages or write this operational history to memory.',
       '- Never re-offer a domain whose prior `opportunity` record is less than 90 days old. After 90 days, require meaningfully new evidence or a materially different lever.',
       '- If no earlier record has `outreach: delivery_requested`, the unanswered-question gate does not block outreach. Otherwise apply it to the most recent such record. Treat `delivery_requested` as ledger intent, not proof that the user received the question. A later occurrence may proceed when platform context affirmatively proves that request never entered dispatch. Otherwise recent conversation must show that the prior coach `outbound_text` surfaced as an assistant message and that a later user reply answered, declined, acknowledged, or otherwise closed that coach question. An unrelated inbound does not close it. If neither non-dispatch nor closure can be verified, decide `no_send`; still record this month\'s work, but do not stack another question on an unanswered one.',
       '- Skip a domain when recent conversation shows the member declined help, wants less outreach, or already has a useful plan in motion and no new lever emerged.',
-      '- Read `vault-cli knowledge show weekly-health-insights` as well, and do not send something that repeats a recent insight or digest.',
+      '- Read `vault-cli knowledge show weekly-health-insights --if-exists` as well, and do not send something that repeats a recent insight or digest.',
       '- Offer at most one domain per run: the one with the strongest evidence, clearest user relevance, and most realistic low-burden path.',
       '',
       'Open check-in fallback. Consider this only after no opportunity clears every gate:',
@@ -749,7 +711,7 @@ export const MURPH_MANAGED_AUTOMATIONS = [
       '',
       'Evidence and retrieval budget:',
       '- Read the derived knowledge index.',
-      '- Read `vault-cli knowledge show weekly-health-research-scout`. If missing, treat as no prior research scout ledger.',
+      '- Read `vault-cli knowledge show weekly-health-research-scout --if-exists`. If missing, treat as no prior research scout ledger. If the read fails, return skip.',
       '- Check that `EXA_API_KEY` is available in the runtime environment. If it is missing, suppress the scheduled message and do not append to the wiki.',
       '- Before calling external research, identify at least one ongoing goal, stated health interest, habit, experiment, plan, metric, symptom, lab, wearable trend, or clinician question that makes the search relevant. An ongoing goal or interest is enough without a recent change or open decision. If none exists, suppress the scheduled message without calling `vault-cli research scout-batch` and do not append to the wiki.',
       '- Build a compact local research profile from the vault: labs/biomarkers, activity, sleep, recovery, supplements, conditions or concerns, active experiments, and stated goals.',
@@ -825,12 +787,17 @@ export const MURPH_MANAGED_AUTOMATIONS = [
     ],
     instructions: [
       'Goal: consolidate durable user context from recent assistant/user conversation history into the canonical vault memory surface.',
-      'Read existing saved context by calling `murph.member_memory` with `action="show"` first. Existing memory is for deduplication and mutation targeting only; it is never an independent source for new writes.',
-      'Retrieval budget: use only the engine-supplied "Conversation evidence" section appended to this prompt. It already contains the bounded committed user and assistant conversation messages from the last 7 days. If that section reports no messages, do not write any new memory.',
-      'Write durable memory only by calling `murph.member_memory` with `action="upsert"` or `action="update"` when a concise, user-useful fact is clearly supported by the supplied conversation evidence and is not already represented. For update, pass the target record\'s exact `updatedAt` from show as `expectedUpdatedAt`.',
+      'Read existing saved context by calling `murph.member_memory` with `action="show"` first. Existing memory may support faithful shortening of that same record; it cannot support new facts, inferred traits, or broader preferences.',
+      'Retrieval budget: use only the engine-supplied "Conversation evidence" section appended to this prompt. It already contains the bounded committed user and assistant conversation messages from the last 7 days. If that section reports a collection failure, make no mutations. If it reports no messages, do not add facts; only maintain existing records under the rules below.',
+      'For additions and factual changes, write durable memory only by calling `murph.member_memory` with `action="upsert"` or `action="update"` when a concise, user-useful fact is clearly supported by the supplied conversation evidence and is not already represented. For update, pass the target record\'s exact `updatedAt` from show as `expectedUpdatedAt`.',
       'For `action="update"` or `action="forget"`, pass the target record\'s exact `updatedAt` as `expectedUpdatedAt`. If either action reports that memory changed after show, leave the newer value unchanged and end that write attempt.',
-      'Before returning, validate each proposed write against existing memory and the supplied conversation evidence. Skip anything uncertain, duplicated, sensitive, or merely transient task detail.',
+      'Maintain a compact profile: Identity for enduring background, Preferences for stable choices and constraints, Instructions for explicit ways the user wants help, and Context for current circumstances. Save one self-contained fact per record. Prefer concise wording, but preserve conditions, exceptions, dates, negation, and uncertainty even when that needs more space.',
+      'First apply clear user corrections and withdrawals to the exact existing record. Then inspect every remaining shown non-health record for repeated explanations of the same fact and remove that repetition with update. Complete this cleanup even when you already saved conversation changes; those writes do not finish the existing-record review. This is wording-only cleanup, not a factual replacement, and needs no new conversation evidence. Never combine records, delete apparent duplicates, drop a qualification to fit a budget, or rewrite an already concise record. Preserve source dates in the text; updatedAt records an edit, not fresh confirmation by the user. Make at most one mutation per shown record in this pass.',
+      'Capture explicit procedural preferences in Instructions as a concise condition and desired response: what situation triggers it and how the user wants help. Do not turn a single situational request into a permanent rule, infer personality or wealth, or treat preferences as tool or external-action permission.',
+      'Preserve explicit dates and temporary scope during wording-only compaction. When the user clearly withdraws a temporary fact with no useful lasting replacement, use forget; do not turn it into a negative or historical note. Elapsed time changes relevance, not permission to erase a memory: never automatically forget or remove a fact because its date passed. Only clear user evidence may initiate factual replacement or forgetting. Never infer expiry from updatedAt, silence, or an unanchored relative date, and never infer completion from a goal deadline. Do not recreate withdrawn facts from older messages in the overlapping evidence window.',
+      'Before returning, validate every addition or factual change against supplied conversation evidence; validate faithful shortening against the exact shown record as well. Do not add duplicate facts. Skip anything uncertain, sensitive, or merely transient task detail.',
       'Do not use the shell or read transcript files, session storage, hidden Codex memory state, assistant runtime logs, filesystem trees, or vault health data. Do not call external services or send the user a message.',
+      'Connected-account baselines, provider/source ids, capture progress, and automation execution status are operational state, not member facts. Do not add or refresh them in memory; their existing Knowledge ledger or automation owner is authoritative. Preserve actual member preferences and opt-outs. Existing misplaced records still require explicit user correction or withdrawal before forgetting.',
       'Do not save assistant speculation, generic advice, transient task details, credentials, payment details, contact details, identifiers of any kind, or medical or health details from conversation text.',
       `Return exactly \`{"kind":"skip","privateSummary":"${MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_PRIVATE_SUMMARY}"}\`.`,
     ].join('\n'),
@@ -1123,7 +1090,7 @@ export async function applyMurphManagedAutomations(
 
   if (input.seeds === undefined) {
     reportMurphManagedAutomationDiagnosticStage(input, { stage: 'onboarding_followup' })
-    const followup = await reconcileMurphManagedOnboardingFollowup({
+    const followup = await reconcileMurphManagedOnboardingAutomations({
       ...input,
       defaultRoute: createRoute === undefined ? input.defaultRoute : createRoute,
       now,
@@ -1159,6 +1126,29 @@ export async function applyMurphManagedAutomations(
   }
 
   return result
+}
+
+// Background maintenance owns both opportunities. Activation may continue to
+// enroll only the daily recovery before its welcome delivery.
+async function reconcileMurphManagedOnboardingAutomations(
+  input: Parameters<typeof reconcileMurphManagedOnboardingFollowup>[0],
+): Promise<ApplyMurphManagedAutomationsResult> {
+  const followup = await reconcileMurphManagedOnboardingFollowup(input)
+  if (followup.yielded === true || input.shouldYield?.() === true) {
+    return { ...followup, yielded: true }
+  }
+  const route = await resolveMurphManagedAutomationCreateRoute(input)
+  if (!route) return followup
+  const early = await seedMurphOnboardingEarlyStallAutomation({
+    now: input.now, route, vault: input.vaultRoot,
+    routeValidationProfile: input.routeValidationProfile,
+    shouldYield: input.shouldYield,
+  })
+  return {
+    ...followup,
+    created: followup.created + (early === 'created' ? 1 : 0),
+    ...(early === 'yielded' ? { yielded: true as const } : {}),
+  }
 }
 
 export async function reconcileMurphManagedOnboardingFollowup(

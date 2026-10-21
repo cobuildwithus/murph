@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from "node:util";
 import {
   inboxCaptureRecordSchema,
   safeParseContract,
@@ -334,6 +335,13 @@ async function planShardRedaction(input: {
     storedPathsToDelete.push(...redacted.storedPathsToDelete);
   }
 
+  const compacted = compactRetiredCaptureCopies(records, {
+    limit: input.remaining,
+    selectedCaptureIds,
+    redactedCaptureIds,
+  });
+  hasMore ||= compacted.hasMore;
+
   if (redactedCaptureIds.length === 0) {
     return { hasMore, legacyCapturesSkipped, nextEligibleAt, shard: null };
   }
@@ -344,12 +352,57 @@ async function planShardRedaction(input: {
     nextEligibleAt,
     shard: {
       expiredCaptures: selectedCaptureIds.size,
-      records,
+      records: compacted.records,
       redactedCaptureIds,
       relativePath: input.relativePath,
       storedPathsToDelete,
     },
   };
+}
+
+// Migration leaves v1 beside v2. Retire only an exactly equivalent expired copy;
+// the current row keeps every identity, link, attachment and source field.
+function compactRetiredCaptureCopies(records: InboxCaptureRecord[], budget: {
+  limit: number;
+  selectedCaptureIds: Set<string>;
+  redactedCaptureIds: string[];
+}): { records: InboxCaptureRecord[]; hasMore: boolean } {
+  const parsed = records.map((record) => safeParseContract<InboxCaptureRecord>(inboxCaptureRecordSchema, record));
+  const currentById = new Map<string, CurrentInboxCaptureRecord[]>();
+  for (const result of parsed) {
+    if (!result.success || result.data.schemaVersion !== "murph.inbox-capture.v2" || !result.data.textRetiredAt) continue;
+    const current = result.data;
+    const entries = currentById.get(current.captureId) ?? [];
+    entries.push(current);
+    currentById.set(current.captureId, entries);
+  }
+  let hasMore = false;
+  const retained = records.filter((_, index) => {
+    const result = parsed[index];
+    if (!result?.success || result.data.schemaVersion !== "murph.inbox-capture.v1" || !result.data.textRetiredAt) return true;
+    const legacy = result.data;
+    if (!currentById.get(legacy.captureId)?.some((current) => equivalentRetiredCapture(legacy, current))) return true;
+    if (!budget.selectedCaptureIds.has(legacy.captureId) && budget.selectedCaptureIds.size >= budget.limit) {
+      hasMore = true;
+      return true;
+    }
+    budget.selectedCaptureIds.add(legacy.captureId);
+    budget.redactedCaptureIds.push(legacy.captureId);
+    return false;
+  });
+  return { records: retained, hasMore };
+}
+
+function equivalentRetiredCapture(
+  legacy: Extract<InboxCaptureRecord, { schemaVersion: "murph.inbox-capture.v1" }>,
+  current: CurrentInboxCaptureRecord,
+): boolean {
+  const { schemaVersion: _legacyVersion, envelopePath, textRetiredAt: _legacyRetiredAt, ...legacyFields } = legacy;
+  const { schemaVersion: _currentVersion, textRetiredAt: _currentRetiredAt, ...currentFields } = current;
+  return isDeepStrictEqual({
+    ...legacyFields,
+    rawRefs: legacyFields.rawRefs.filter((ref) => normalizeStoredPath(ref) !== normalizeStoredPath(envelopePath)),
+  }, currentFields);
 }
 
 function redactLegacyCaptureRecord(

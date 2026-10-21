@@ -120,7 +120,7 @@ function validatePrComplexitySummary({ changedPaths, prBodyHtml }) {
         "Set `Guard:` to `pass` for authored JavaScript or TypeScript changes.",
       );
     }
-    if (!/\bpnpm\s+complexity:diff\b/iu.test(guardValue)) {
+    if (!/\bpnpm\s+(?:--silent\s+)?complexity:diff\b/iu.test(guardValue)) {
       errors.push(
         "Name `pnpm complexity:diff` in `Guard:` for authored JavaScript or TypeScript changes.",
       );

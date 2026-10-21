@@ -40,7 +40,7 @@ export function assistantSelectionToOperatorDefaults(
         sandbox: assistant.sandbox,
         approvalPolicy: assistant.approvalPolicy,
         profile: assistant.profile,
-        oss: assistant.oss === true,
+        oss: false,
       },
     }),
     account: assistant.account ?? null,
@@ -62,13 +62,6 @@ export function assistantOperatorDefaultsMatch(
 export function formatAssistantDefaultsSummary(
   assistant: SetupConfiguredAssistant,
 ): string {
-  if (assistant.oss) {
-    return appendAssistantAccountSummary(
-      `${assistant.model ?? 'the configured local model'} via Codex OSS app-server`,
-      assistant.account ?? null,
-    )
-  }
-
   return appendAssistantAccountSummary(
     `${assistant.model ?? 'the configured model'} via Codex app-server`,
     assistant.account ?? null,
@@ -84,9 +77,7 @@ export function formatSavedAssistantDefaultsSummary(
   }
 
   return appendAssistantAccountSummary(
-    backend.oss
-      ? `${backend.model ?? 'the configured local model'} via Codex OSS app-server`
-      : `${backend.model ?? 'the configured model'} via Codex app-server`,
+    `${backend.model ?? 'the configured model'} via Codex app-server`,
     defaults?.account ?? null,
   )
 }
@@ -104,12 +95,10 @@ export function buildSetupAssistantOptionsFromDefaults(
   return {
     assistantPreset: 'codex',
     assistantModel: savedDefaults?.model ?? undefined,
-    assistantModelProvider: savedDefaults?.modelProvider ?? undefined,
     assistantCodexCommand: savedDefaults?.codexCommand ?? undefined,
     assistantCodexHome: savedDefaults?.codexHome ?? undefined,
     assistantProfile: savedDefaults?.profile ?? undefined,
     assistantReasoningEffort: savedDefaults?.reasoningEffort ?? undefined,
-    assistantOss: savedDefaults?.oss === true ? true : undefined,
   }
 }
 

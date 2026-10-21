@@ -33,6 +33,7 @@ import {
   applyCanonicalWriteBatch,
   importEventBatch,
   isVaultError,
+  withCanonicalWriteLock,
 } from "@murphai/core";
 import {
   resolveRuntimePaths,
@@ -40,7 +41,12 @@ import {
 } from "@murphai/runtime-state/node";
 import * as z from "@murphai/contracts/zod-runtime";
 
+import { clinicalStructuredSources, type ClinicalStructuredSource } from "./clinical-structured-enrichment.ts";
+import { retainUnchangedClinicalParserHolds } from "./clinical-parser-holds.ts";
+
 import { extractClinicalDocumentText } from "./clinical-document-text.js";
+import { readMinimizedClinicalDocument } from "./clinical-document-storage.ts";
+export { minimizeClinicalDocumentImages, readClinicalStoredDocument } from "./clinical-document-storage.ts";
 
 import { loadRuntimeModule } from "./runtime-import.js";
 
@@ -173,6 +179,7 @@ export interface ClinicalFhirRetrievalCheckpointRecord {
 }
 
 export interface ClinicalFhirSnapshotImportResult {
+  structuredEnrichmentSources?: ClinicalStructuredSource[];
   canonical: {
     applied: boolean;
     createdCount: number;
@@ -481,38 +488,42 @@ export async function importClinicalFhirSnapshot(
   await yieldClinicalFhirImportControl(input.signal ?? null);
   await input.assertCurrent?.();
   input.signal?.throwIfAborted();
-  const reviewDecisionCount = plan.decisions.filter(
+  let reviewDecisionCount = plan.decisions.filter(
     (decision) => decision.action === "review",
   ).length;
-  const rawContents = [
-    ...prepareClinicalDocumentRawContents(input, prepared.manifestPath),
-    ...prepared.pages.map((page) => ({
-      allowExistingMatch: true,
-      content: page.content,
-      mediaType: JSON_MEDIA_TYPE,
-      originalFileName: path.posix.basename(page.relativePath),
-      targetRelativePath: page.rawPath,
-    })),
-    {
-      allowExistingMatch: true,
-      content: `${JSON.stringify(prepared.manifest, null, 2)}\n`,
-      mediaType: "application/json",
-      originalFileName: "manifest.json",
-      targetRelativePath: prepared.manifestPath,
-    },
-  ];
-
+  let rawFileCount = 0;
   try {
-    await applyCanonicalWriteBatch({
-      audit: {
-        action: "raw_copy",
-        commandName: "vault-usecases.importClinicalFhirSnapshot",
-        summary: "Persisted an immutable clinical FHIR retrieval snapshot.",
-      },
-      operationType: "clinical_fhir_snapshot",
-      rawContents,
-      summary: "Persist clinical FHIR retrieval snapshot",
-      vaultRoot: input.vaultRoot,
+    await withCanonicalWriteLock(input.vaultRoot, async () => {
+      const rawContents = [
+        ...await prepareClinicalDocumentRawContents(input, prepared.manifestPath),
+        ...prepared.pages.map((page) => ({
+          allowExistingMatch: true,
+          content: page.content,
+          mediaType: JSON_MEDIA_TYPE,
+          originalFileName: path.posix.basename(page.relativePath),
+          targetRelativePath: page.rawPath,
+        })),
+        {
+          allowExistingMatch: true,
+          content: `${JSON.stringify(prepared.manifest, null, 2)}\n`,
+          mediaType: "application/json",
+          originalFileName: "manifest.json",
+          targetRelativePath: prepared.manifestPath,
+        },
+      ];
+
+      await applyCanonicalWriteBatch({
+        audit: {
+          action: "raw_copy",
+          commandName: "vault-usecases.importClinicalFhirSnapshot",
+          summary: "Persisted an immutable clinical FHIR retrieval snapshot.",
+        },
+        operationType: "clinical_fhir_snapshot",
+        rawContents,
+        summary: "Persist clinical FHIR retrieval snapshot",
+        vaultRoot: input.vaultRoot,
+      });
+      rawFileCount = rawContents.length;
     });
   } catch (error) {
     rethrowClinicalFhirImportError(error);
@@ -524,6 +535,7 @@ export async function importClinicalFhirSnapshot(
     input.signal?.throwIfAborted();
   }
 
+  let retainedLabCount = 0;
   const canonical = executableDecisions.length === 0
     ? {
         applied: false,
@@ -532,10 +544,16 @@ export async function importClinicalFhirSnapshot(
         skippedExistingCount: 0,
         supersededCount: 0,
       }
-    : await importClinicalEventDecisions({
-        decisions: executableDecisions,
-        signal: input.signal,
-        vaultRoot: input.vaultRoot,
+    : await withCanonicalWriteLock(input.vaultRoot, async () => {
+        const retained = await retainUnchangedClinicalParserHolds({
+          vaultRoot: input.vaultRoot, decisions: executableDecisions, manifest: prepared.manifest,
+          pages: new Map(prepared.pages.map((page) => [page.rawPath, page.content])),
+        });
+        reviewDecisionCount += retained.retainedCount;
+        retainedLabCount = retained.retainedLabCount;
+        return importClinicalEventDecisions({
+          decisions: retained.decisions, signal: input.signal, vaultRoot: input.vaultRoot,
+        });
       });
 
   return {
@@ -546,12 +564,13 @@ export async function importClinicalFhirSnapshot(
       skippedExistingCount: canonical.skippedExistingCount,
       supersededCount: canonical.supersededCount,
     },
+    structuredEnrichmentSources: clinicalStructuredSources(plan, new Map(prepared.pages.map((page) => [page.rawPath, page.content]))),
     executableDecisionCount: executableDecisions.length,
-    labResultCount: plan.decisions.filter((decision) => decision.action === "upsert" && decision.payload.kind === "test" && decision.payload.testCategory === "laboratory").length,
+    labResultCount: plan.decisions.filter((decision) => decision.action === "upsert" && decision.payload.kind === "test" && decision.payload.testCategory === "laboratory").length - retainedLabCount,
     incompleteRevisionCount: plan.decisions.filter((decision) => decision.action === "review" && decision.disposition === "incomplete").length,
     manifestPath: prepared.manifestPath,
     manifestSha256: createHash("sha256").update(`${JSON.stringify(prepared.manifest, null, 2)}\n`, "utf8").digest("hex"),
-    rawFileCount: rawContents.length,
+    rawFileCount,
     reviewDecisionCount,
   };
 }
@@ -764,7 +783,7 @@ function prepareClinicalFhirSnapshot(input: ClinicalFhirSnapshotImportInput): {
   };
 }
 
-function prepareClinicalDocumentRawContents(
+async function prepareClinicalDocumentRawContents(
   input: ClinicalFhirSnapshotImportInput,
   manifestPath: string,
 ) {
@@ -777,9 +796,15 @@ function prepareClinicalDocumentRawContents(
     if (!bytes || bytes.length !== attachment.byteLength || hashClinicalDocumentBytes(bytes) !== attachment.sha256) {
       throw new ClinicalFhirSnapshotRejectedError(new TypeError("Clinical document bytes do not match the manifest."));
     }
+    const rawRef = clinicalRawPathSchema.parse(`${path.posix.dirname(manifestPath)}/${attachment.relativePath}`);
+    // Replays still validate the original provider bytes above. Retention receipts
+    // permit an exact existing minimized postimage without restoring omitted data.
+    const retained = await readMinimizedClinicalDocument({ vaultRoot: input.vaultRoot,
+      source: { rawRef, sha256: attachment.sha256, byteLength: attachment.byteLength, mediaType: attachment.mediaType },
+    }) ?? bytes;
     prepared.set(attachment.relativePath, {
       allowExistingMatch: true,
-      content: bytes,
+      content: retained,
       mediaType: attachment.mediaType,
       originalFileName: path.posix.basename(attachment.relativePath),
       targetRelativePath: clinicalRawPathSchema.parse(`${path.posix.dirname(manifestPath)}/${attachment.relativePath}`),

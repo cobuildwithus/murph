@@ -13,9 +13,6 @@ import { mkdtemp, rm, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 
-import type {
-  HostedCodexAuthAction,
-} from '@murphai/hosted-execution/contracts'
 import {
   MURPH_MEMBER_WORKSPACE_PERMISSION_PROFILE,
 } from '@murphai/hosted-execution/assistant-permissions'
@@ -105,6 +102,7 @@ import {
   type AnalyzeVideoToolRuntime,
 } from './assistant-codex/analyze-video-tool.js'
 import {
+  CODEX_APP_SERVER_INTERRUPT_CLEANUP_TIMEOUT_MS,
   attachCodexAppServerProcessExitCleanup,
   attachCodexAbortListener,
   consumeCompleteLines,
@@ -132,11 +130,28 @@ import {
   type CodexTokenUsageBreakdown,
 } from './assistant-codex/app-server-protocol.js'
 import {
+  CodexRealtimeBinding,
+  isCodexRealtimeNotification,
+  type CodexRealtimeOptions,
+  type CodexRealtimeSession,
+} from './assistant-codex/realtime.js'
+export type {
+  CodexRealtimeClosure,
+  CodexRealtimeInput,
+  CodexRealtimeOptions,
+  CodexRealtimeSession,
+} from './assistant-codex/realtime.js'
+import {
   collectCodexCompactionResponseUsage,
   type CodexCompactionResponseUsage,
 } from './assistant-codex/compaction-usage.js'
 import {
+  createCodexFinalResponseCompletionTracker,
+  type CodexFinalResponseCompletionTracker,
+} from './assistant-codex/final-response-completion.js'
+import {
   resolveCodexChildEnv,
+  withCodexAppServerSteeringFeatureOverrides,
   withHostedCodexModelCatalogConfigOverride,
 } from './assistant-codex/config.js'
 import {
@@ -250,12 +265,6 @@ function loadMurphDynamicToolRuntime(): Promise<MurphDynamicToolRuntime> {
     import('./assistant-codex/dynamic-tools.js')
   return murphDynamicToolRuntimePromise
 }
-const CODEX_APP_SERVER_INTERRUPT_CLEANUP_TIMEOUT_MS = 15_000
-const CODEX_MANAGED_ACCOUNT_LOGIN_TIMEOUT_MS = 10 * 60 * 1000
-const CODEX_MANAGED_ACCOUNT_CONFIG_OVERRIDES = [
-  'model_provider="openai"',
-  'cli_auth_credentials_store="file"',
-] as const
 const CODEX_APP_SERVER_COMMAND = 'app-server'
 const CODEX_APP_SERVER_TIMING_TRACE_SCHEMA =
   'murph.assistant-codex-app-server-timing.v1'
@@ -273,7 +282,6 @@ const CODEX_APP_SERVER_STARTUP_STDERR_MAX_LENGTH = 16_384
 type CodexAppServerProcessState =
   | 'idle'
   | 'reserved'
-  | 'running'
   | 'stopped'
   | 'stopping'
 
@@ -336,6 +344,7 @@ type CodexAppServerActiveTurnBinding = {
   onError(error: Error): void
   onFramingError(line: string): void
   onParsedMessage(message: CodexRpcMessage): void
+  onRpcResponse(message: CodexRpcMessage, method: string | null): void
   onSubagentMessage?(message: CodexRpcMessage): void
   onStderrLine(line: string): void
   onStderrText(text: string): void
@@ -407,6 +416,18 @@ function isCodexContextCompactionCompletion(message: CodexRpcMessage): boolean {
   }
   return readCodexRecord(readCodexRecord(message.params)?.item)?.type
     === 'contextCompaction'
+}
+
+function observeCodexContextCompactionActivity(
+  tracker: CodexFinalResponseCompletionTracker,
+  message: CodexRpcMessage,
+): void {
+  if (
+    isCodexContextCompactionStarted(message)
+    || isCodexContextCompactionCompletion(message)
+  ) {
+    tracker.observeProviderActivity()
+  }
 }
 
 function isCodexContextCompactionCompletionForThread(
@@ -578,6 +599,33 @@ export interface CodexAppServerPreinitialization {
   cancelPending(): Promise<void>
 }
 
+export interface CodexAppServerRealtimeInput extends CodexAppServerLaunchInput, CodexRealtimeOptions {
+  model?: string | null
+  modelProvider?: string | null
+}
+
+/** The native media thread has no Murph tools; accepted work uses the ordinary turn path. */
+export async function startCodexAppServerRealtime(
+  input: CodexAppServerRealtimeInput,
+): Promise<CodexRealtimeSession> {
+  const prepared = await prepareCodexAppServerProcessInput(input)
+  // Media attachment is process setup, not an ordinary turn. Keep lifecycle
+  // operations behind the existing slot lock until startup settles; a checkpoint
+  // must wait here instead of mistaking negotiation for an in-flight host turn.
+  return await withWarmCodexSlotLock(async () => {
+    const existing = warmCodexProcess?.canShareForLaunch(prepared.launchKey)
+      ? warmCodexProcess
+      : null
+    const processInstance = existing ?? await claimWarmCodexProcess(prepared)
+    try {
+      await processInstance.initialize()
+      return await processInstance.startRealtime({ ...input, workingDirectory: prepared.workingDirectory })
+    } finally {
+      if (!existing) processInstance.releaseReservation()
+    }
+  })
+}
+
 export interface CodexAppServerTurnFailureContext {
   jsonEvents: unknown[]
   additionalUsages: AssistantProviderUsageDraft[]
@@ -657,6 +705,8 @@ export interface CodexAppServerTurnResult {
   /** Accepted input selected as the native target for the final reply, if any. */
   targetInputId: string | null
   additionalUsages: AssistantProviderUsageDraft[]
+  /** Local receipt of the final `rawResponse/completed` for the selected reply. */
+  finalResponseCompletion?: AssistantProviderTurnExecutionResult['finalResponseCompletion']
   responseMedia: AssistantResponseMedia[]
   followUpRequest: AssistantProviderTurnExecutionResult["followUpRequest"]
   responseCard: AssistantResponseCard | null
@@ -1099,11 +1149,12 @@ async function prepareCodexAppServerProcessInput(
     env: input.env,
   })
   const codexCommand = resolveCodexAppServerCommand(input.codexCommand)
-  const configOverrides =
+  const configOverrides = withCodexAppServerSteeringFeatureOverrides(
     withHostedCodexModelCatalogConfigOverride({
       configOverrides: input.configOverrides,
       env: input.env,
-    }) ?? []
+    }) ?? [],
+  )
   const args = buildCodexAppServerArgs({
     configOverrides,
     oss: input.oss,
@@ -1161,7 +1212,7 @@ export function buildCodexAppServerArgs(
   }
 
   if (input.oss) {
-    args.push('--oss')
+    throw new VaultCliError('invalid_option', 'Assistant models must use OpenAI.')
   }
 
   args.push(CODEX_APP_SERVER_COMMAND)
@@ -1178,11 +1229,11 @@ class CodexAppServerProcess {
   readonly startedAt = Date.now()
 
   private activeTurn: CodexAppServerActiveTurnBinding | null = null
+  private realtime: CodexRealtimeBinding | null = null
   private boundThreadGroupConversation = false
   private boundThreadId: string | null = null
   private boundThreadModel: string | null = null
   private boundThreadServiceTier: AssistantProviderServiceTier | null = null
-  private boundTurnId: string | null = null
   private cleanupProcessExitListener: () => void
   private completedTurn = false
   private lastThreadTokenUsage: CodexWarmThreadTokenUsage | null = null
@@ -1200,17 +1251,21 @@ class CodexAppServerProcess {
   // admitted since the last workspace boundary so checkpointing waits for and
   // scans all of them, including children that completed before their parent
   // reply.
-  private readonly detachedChildParentTurnIds = new Map<string, string>()
-  private readonly detachedCompletedChildThreadIds = new Set<string>()
+  private readonly detachedChildTurns = new Map<string, {
+    turnId: string | null
+    completed: boolean
+  }>()
+  private detachedChildWorkGeneration = 0
   private readonly detachedChildMessageHandlers = new Map<
     string,
     NonNullable<CodexAppServerActiveTurnBinding['onSubagentMessage']>
   >()
-  private detachedChildViolation: string | null = null
-  private readonly detachedRootThreadIdsByTurnId = new Map<string, string>()
+  private detachedChildLifecycleMalformed = false
   private readonly detachedRootThreadIds = new Set<string>()
   private readonly pendingDetachedUsageReports = new Set<Promise<void>>()
   private stopCompleted = false
+  // Reservation owns occupancy until release, including the gap before the
+  // caller can construct its callbacks. Binding does not change occupancy.
   private state: CodexAppServerProcessState = 'idle'
   private stderrBuffer = ''
   private startupStderr = ''
@@ -1306,7 +1361,7 @@ class CodexAppServerProcess {
   }
 
   get hasInFlightTurn(): boolean {
-    return this.state === 'reserved' || this.state === 'running'
+    return this.state === 'reserved'
   }
 
   get isStopped(): boolean {
@@ -1326,10 +1381,14 @@ class CodexAppServerProcess {
   }
 
   canClaimForLaunch(launchKey: string): boolean {
+    return this.state === 'idle' && this.canShareForLaunch(launchKey)
+  }
+
+  canShareForLaunch(launchKey: string): boolean {
     return (
       this.launchKey === launchKey &&
       !this.poisoned &&
-      this.state === 'idle' &&
+      (this.state === 'idle' || this.state === 'reserved') &&
       this.child.exitCode === null &&
       this.child.signalCode === null
     )
@@ -1354,7 +1413,6 @@ class CodexAppServerProcess {
   reserveTurn(): void {
     if (
       this.state !== 'idle' ||
-      this.activeTurn ||
       this.poisoned ||
       this.child.exitCode !== null ||
       this.child.signalCode !== null
@@ -1368,7 +1426,7 @@ class CodexAppServerProcess {
   bindTurn(binding: CodexAppServerActiveTurnBinding): void {
     this.throwStartupFailure()
     if (
-      (this.state !== 'idle' && this.state !== 'reserved') ||
+      this.state !== 'reserved' ||
       this.activeTurn ||
       this.poisoned ||
       this.child.exitCode !== null ||
@@ -1378,7 +1436,6 @@ class CodexAppServerProcess {
     }
 
     this.activeTurn = binding
-    this.state = 'running'
   }
 
   releaseTurn(binding: CodexAppServerActiveTurnBinding): void {
@@ -1387,7 +1444,7 @@ class CodexAppServerProcess {
     }
 
     this.activeTurn = null
-    if (this.state === 'running') {
+    if (this.state === 'reserved') {
       this.state = 'idle'
     }
   }
@@ -1395,6 +1452,40 @@ class CodexAppServerProcess {
   releaseReservation(): void {
     if (this.state === 'reserved' && !this.activeTurn) {
       this.state = 'idle'
+    }
+  }
+
+  async startRealtime(input: CodexAppServerRealtimeInput): Promise<CodexRealtimeSession> {
+    if (this.realtime) throw this.buildBusyError('A native voice session is already attached.')
+    const result = readCodexRecord(await this.sendRequestWithTimeout({
+      method: 'thread/start',
+      params: {
+        cwd: input.workingDirectory,
+        model: input.model ?? null,
+        modelProvider: input.modelProvider ?? null,
+        approvalPolicy: 'never',
+        sandbox: 'read-only',
+        dynamicTools: [],
+        ephemeral: true,
+        config: { 'features.realtime_conversation': true },
+      },
+      timeoutLabel: 'voice thread',
+      timeoutMs: 30_000,
+    }))
+    const threadId = readCodexNonEmptyString(readCodexRecord(result?.thread)?.id)
+    if (!threadId) throw new Error('Native voice thread did not return an identity.')
+    const binding = new CodexRealtimeBinding(threadId, input, (method, params) => this.sendRequestWithTimeout({
+      method, params, timeoutLabel: method, timeoutMs: 30_000,
+    }))
+    this.realtime = binding
+    void binding.closed.then(() => {
+      if (this.realtime === binding) this.realtime = null
+    })
+    try {
+      return await binding.start()
+    } catch (error) {
+      await binding.close()
+      throw error
     }
   }
 
@@ -1406,7 +1497,7 @@ class CodexAppServerProcess {
       message,
       {
         retryable: true,
-        state: this.state,
+        state: this.state === 'reserved' && this.activeTurn ? 'running' : this.state,
       },
     )
   }
@@ -1551,13 +1642,24 @@ class CodexAppServerProcess {
     try {
       throwIfCodexBackgroundWorkWaitAborted(signal)
       this.assertBackgroundWorkProcessAvailable()
-      await this.waitForDetachedChildren(signal)
-      this.assertDetachedChildrenQuiescent()
-      await this.waitForDetachedUsageReports(signal)
-      await this.assertNoBackgroundTerminals(signal)
-      throwIfCodexBackgroundWorkWaitAborted(signal)
-      this.assertBackgroundWorkProcessAvailable()
-      this.assertDetachedChildrenQuiescent()
+      const deadline = Date.now() + CODEX_BACKGROUND_WORK_WAIT_TIMEOUT_MS
+      while (true) {
+        await this.waitForDetachedChildren(signal, deadline)
+        if (this.hasPendingDetachedChildren()) {
+          continue
+        }
+        const scannedGeneration = this.detachedChildWorkGeneration
+        await this.waitForDetachedUsageReports(signal)
+        await this.assertNoBackgroundTerminals(signal)
+        throwIfCodexBackgroundWorkWaitAborted(signal)
+        this.assertBackgroundWorkProcessAvailable()
+        this.assertDetachedChildLifecycleValid()
+        // A follow-up can start while the terminal RPCs or usage reports are
+        // settling. Wait and scan again, including newly admitted children.
+        if (scannedGeneration === this.detachedChildWorkGeneration) {
+          break
+        }
+      }
       this.clearDetachedChildBoundary()
     } catch (error) {
       if (signal?.aborted) {
@@ -1591,20 +1693,22 @@ class CodexAppServerProcess {
   }
 
   private hasPendingDetachedChildren(): boolean {
-    for (const threadId of this.detachedChildParentTurnIds.keys()) {
-      if (!this.detachedCompletedChildThreadIds.has(threadId)) {
+    for (const turn of this.detachedChildTurns.values()) {
+      if (!turn.completed) {
         return true
       }
     }
     return false
   }
 
-  private async waitForDetachedChildren(signal: AbortSignal | null): Promise<void> {
-    const deadline = Date.now() + CODEX_BACKGROUND_WORK_WAIT_TIMEOUT_MS
-    while (this.hasPendingDetachedChildren()) {
+  private async waitForDetachedChildren(
+    signal: AbortSignal | null,
+    deadline: number,
+  ): Promise<void> {
+    while (true) {
       throwIfCodexBackgroundWorkWaitAborted(signal)
       this.assertBackgroundWorkProcessAvailable()
-      this.assertDetachedChildContractSupported()
+      this.assertDetachedChildLifecycleValid()
       if (Date.now() >= deadline) {
         throw new VaultCliError(
           'ASSISTANT_CODEX_BACKGROUND_WORK_TIMEOUT',
@@ -1612,26 +1716,18 @@ class CodexAppServerProcess {
           { retryable: true },
         )
       }
+      if (!this.hasPendingDetachedChildren()) {
+        return
+      }
       await waitForCodexBackgroundWorkPoll(signal)
     }
   }
 
-  private assertDetachedChildContractSupported(): void {
-    if (this.detachedChildViolation) {
+  private assertDetachedChildLifecycleValid(): void {
+    if (this.detachedChildLifecycleMalformed) {
       throw new VaultCliError(
-        'ASSISTANT_CODEX_BACKGROUND_WORK_UNSUPPORTED',
-        this.detachedChildViolation,
-        { retryable: true },
-      )
-    }
-  }
-
-  private assertDetachedChildrenQuiescent(): void {
-    this.assertDetachedChildContractSupported()
-    if (this.hasPendingDetachedChildren()) {
-      throw new VaultCliError(
-        'ASSISTANT_CODEX_BACKGROUND_WORK_FAILED',
-        'Detached Codex work was still active at the workspace boundary.',
+        'ASSISTANT_CODEX_BACKGROUND_WORK_MALFORMED_LIFECYCLE',
+        'Codex child turn identity could not be established before the workspace boundary.',
         { retryable: true },
       )
     }
@@ -1649,16 +1745,20 @@ class CodexAppServerProcess {
   ): Promise<void> {
     while (this.pendingDetachedUsageReports.size > 0) {
       throwIfCodexBackgroundWorkWaitAborted(signal)
-      await Promise.all([...this.pendingDetachedUsageReports])
+      await waitForCodexBackgroundWorkOperation(
+        Promise.all([...this.pendingDetachedUsageReports]),
+        signal,
+      )
     }
   }
 
   private async assertNoBackgroundTerminals(
     signal: AbortSignal | null,
   ): Promise<void> {
+    const generation = this.detachedChildWorkGeneration
     const threadIds = new Set([
       ...this.detachedRootThreadIds,
-      ...this.detachedChildParentTurnIds.keys(),
+      ...this.detachedChildTurns.keys(),
     ])
     for (const threadId of threadIds) {
       throwIfCodexBackgroundWorkWaitAborted(signal)
@@ -1673,6 +1773,9 @@ class CodexAppServerProcess {
         ),
         signal,
       )
+      if (this.detachedChildWorkGeneration !== generation) {
+        return
+      }
       if (readCodexBackgroundTerminalPresence(result)) {
         throw new VaultCliError(
           'ASSISTANT_CODEX_BACKGROUND_TERMINAL_UNSUPPORTED',
@@ -1684,121 +1787,54 @@ class CodexAppServerProcess {
   }
 
   private clearDetachedChildBoundary(): void {
-    this.boundTurnId = null
-    this.detachedChildParentTurnIds.clear()
-    this.detachedCompletedChildThreadIds.clear()
+    this.detachedChildTurns.clear()
+    this.detachedChildWorkGeneration = 0
     this.detachedChildMessageHandlers.clear()
-    this.detachedChildViolation = null
-    this.detachedRootThreadIdsByTurnId.clear()
+    this.detachedChildLifecycleMalformed = false
     this.detachedRootThreadIds.clear()
   }
 
-  private recordDetachedChildViolation(message: string): void {
-    this.detachedChildViolation ??= message
-  }
-
-  private admitDetachedChild(input: {
-    parentThreadId: string
-    parentTurnId: string
-    threadId: string
-  }): void {
-    if (
-      this.detachedRootThreadIdsByTurnId.get(input.parentTurnId)
-      !== input.parentThreadId
-    ) {
-      this.recordDetachedChildViolation(
-        'Codex emitted a detached child outside the active root turn.',
-      )
-      return
-    }
-
-    const existingParentTurnId = this.detachedChildParentTurnIds.get(
-      input.threadId,
-    )
-    if (
-      existingParentTurnId !== undefined
-      && existingParentTurnId !== input.parentTurnId
-    ) {
-      this.recordDetachedChildViolation(
-        'Codex reused a detached child across root turns.',
-      )
-      return
-    }
-    this.detachedChildParentTurnIds.set(input.threadId, input.parentTurnId)
-  }
-
   private observeDetachedChildLifecycle(message: CodexRpcMessage): void {
-    const activity = readCodexSubagentActivity(message)
-    if (activity) {
-      const senderThreadId = extractCodexThreadIdFromMessage(message)
-      if (
-        activity.kind === 'malformed'
-        || !activity.agentThreadId
-        || !activity.turnId
-      ) {
-        this.recordDetachedChildViolation(
-          'Codex emitted a malformed detached-child lifecycle.',
-        )
-      } else if (activity.kind === 'started') {
-        if (
-          !senderThreadId
-          || this.detachedRootThreadIdsByTurnId.get(activity.turnId)
-            !== senderThreadId
-        ) {
-          this.recordDetachedChildViolation(
-            'Detached Codex children may not spawn nested children.',
-          )
-        } else {
-          this.admitDetachedChild({
-            parentThreadId: senderThreadId,
-            parentTurnId: activity.turnId,
-            threadId: activity.agentThreadId,
-          })
-          if (this.activeTurn?.onSubagentMessage) {
-            this.detachedChildMessageHandlers.set(
-              activity.agentThreadId,
-              this.activeTurn.onSubagentMessage,
-            )
-          }
-        }
-      } else if (activity.kind === 'completed') {
-        const currentParentThreadId = this.detachedRootThreadIdsByTurnId.get(
-          activity.turnId,
-        )
-        // A prior turn is absent after its boundary clears, so its delayed
-        // acknowledgement is inert. A current turn must name an admitted child.
-        if (currentParentThreadId !== undefined) {
-          if (
-            senderThreadId === currentParentThreadId
-            && this.detachedChildParentTurnIds.get(activity.agentThreadId)
-              === activity.turnId
-          ) {
-            this.detachedCompletedChildThreadIds.add(activity.agentThreadId)
-          } else {
-            this.recordDetachedChildViolation(
-              'Codex emitted an untracked detached-child completion.',
-            )
-          }
-        }
-      } else {
-        this.recordDetachedChildViolation(
-          'Detached Codex children may not be messaged, reused, or interrupted.',
-        )
+    const childThreadId = readCodexStartedChildThreadId(message)
+    if (childThreadId && !this.detachedChildTurns.has(childThreadId)) {
+      // Spawn acknowledgement may precede the child's native turn start.
+      // Reserve it as pending, without treating ancestry or activity summaries
+      // as authority to finish work or reject a checkpoint.
+      this.detachedChildTurns.set(childThreadId, { turnId: null, completed: false })
+      this.detachedChildWorkGeneration += 1
+      if (this.activeTurn?.onSubagentMessage) {
+        this.detachedChildMessageHandlers.set(childThreadId, this.activeTurn.onSubagentMessage)
       }
     }
+    this.observeDetachedChildTurn(message)
+  }
 
-    const method = typeof message.method === 'string' ? message.method : null
-    if (!isCodexTurnCompletedMethod(method)) {
+  private observeDetachedChildTurn(message: CodexRpcMessage): void {
+    const method = readCodexEventMethod(message)
+    if (!isCodexTurnStartedMethod(method) && !isCodexTurnCompletedMethod(method)) {
       return
     }
     const threadId = extractCodexThreadIdFromMessage(message)
-    if (!threadId || this.detachedRootThreadIds.has(threadId)) {
+    if (!threadId || threadId === this.boundThreadId || this.detachedRootThreadIds.has(threadId)) {
       return
     }
-    this.detachedCompletedChildThreadIds.add(threadId)
+    const turnId = extractCodexTurnIdFromMessage(message)
+    if (!turnId) {
+      this.detachedChildLifecycleMalformed = true
+      return
+    }
+    if (isCodexTurnStartedMethod(method)) {
+      this.detachedChildTurns.set(threadId, { turnId, completed: false })
+      this.detachedChildWorkGeneration += 1
+    } else {
+      const currentTurnId = this.detachedChildTurns.get(threadId)?.turnId
+      if (currentTurnId == null || currentTurnId === turnId) {
+        this.detachedChildTurns.set(threadId, { turnId, completed: true })
+      }
+    }
   }
 
-  consumeIgnoredResponseId(id: CodexRpcId): boolean {
+  private consumeIgnoredResponseId(id: CodexRpcId): boolean {
     return this.ignoredResponseIds.delete(id)
   }
 
@@ -1833,6 +1869,8 @@ class CodexAppServerProcess {
     this.endReason ??= resolveCodexAppServerEndReason(reason)
     this.normalShutdown = true
     this.state = 'stopping'
+    // The process owns native media shutdown as well as backing-turn teardown.
+    await this.realtime?.close()
     this.rejectPending(
       new VaultCliError(
         'ASSISTANT_CODEX_APP_SERVER_STOPPED',
@@ -1935,6 +1973,7 @@ class CodexAppServerProcess {
         stderr: this.startupStderr,
       })
     this.stdinFailure = failure
+    this.realtime?.processClosed()
     this.poisoned = true
     if (!this.initialized) {
       this.startupFailure ??= failure
@@ -1947,6 +1986,7 @@ class CodexAppServerProcess {
   }
 
   private handleProcessError(error: Error): void {
+    this.realtime?.processClosed()
     const failure = normalizeCodexStartupFailure({
       codexCommand: this.codexCommand,
       error,
@@ -1985,8 +2025,8 @@ class CodexAppServerProcess {
 
   get hasUncheckpointedDetachedWork(): boolean {
     return (
-      this.detachedChildParentTurnIds.size > 0 ||
-      this.detachedChildViolation !== null
+      this.detachedChildTurns.size > 0 ||
+      this.detachedChildLifecycleMalformed
     )
   }
 
@@ -2038,13 +2078,6 @@ class CodexAppServerProcess {
     }
   }
 
-  noteBoundTurn(threadId: string, turnId: string): void {
-    this.boundThreadId = threadId
-    this.boundTurnId = turnId
-    this.detachedRootThreadIds.add(threadId)
-    this.detachedRootThreadIdsByTurnId.set(turnId, threadId)
-  }
-
   noteBoundThreadServiceTier(serviceTier: AssistantProviderServiceTier | null): void {
     this.boundThreadServiceTier = serviceTier
   }
@@ -2058,19 +2091,6 @@ class CodexAppServerProcess {
   }
 
   private handleIdleServerMessage(message: CodexRpcMessage): void {
-    const responseId = readCodexRpcResponseId(message)
-    if (responseId !== null) {
-      const resolved = resolvePendingCodexRpcRequest({
-        message,
-        pendingRequests: this.pendingRequests,
-        responseId,
-      })
-      if (resolved === 'unknown_response_id') {
-        this.consumeIgnoredResponseId(responseId)
-      }
-      return
-    }
-
     const requestId = readCodexRpcServerRequestId(message)
     if (requestId === null) {
       return
@@ -2084,10 +2104,6 @@ class CodexAppServerProcess {
   }
 
   private routeSubagentMessage(message: CodexRpcMessage): boolean {
-    if (readCodexRpcResponseId(message) !== null) {
-      return false
-    }
-
     const threadId = extractCodexThreadIdFromMessage(message)
     if (!threadId || this.detachedRootThreadIds.has(threadId)) {
       return false
@@ -2107,28 +2123,17 @@ class CodexAppServerProcess {
       return false
     }
 
-    if (
-      isCodexTurnStartedMethod(readCodexEventMethod(message))
-      && !this.detachedChildParentTurnIds.has(threadId)
-    ) {
-      if (this.boundThreadId && this.boundTurnId) {
-        this.admitDetachedChild({
-          parentThreadId: this.boundThreadId,
-          parentTurnId: this.boundTurnId,
-          threadId,
-        })
-      } else {
-        this.recordDetachedChildViolation(
-          'Codex emitted a detached child outside the active root turn.',
-        )
-      }
-    }
     handler(message)
     return true
   }
 
   private handleStdoutLine(line: string): void {
     const parsed = tryParseJsonLine(line)
+    // Voice notifications are not another turn's transcript or tool stream.
+    if (parsed.ok && isCodexRealtimeNotification(parsed.value)) {
+      this.realtime?.handle(parsed.value)
+      return
+    }
     if (!parsed.ok || (parsed.value.method !== 'rawResponseItem/completed'
       && parsed.value.method !== 'rawResponse/completed')) {
       this.activeTurn?.onStdoutText(`${line}\n`)
@@ -2136,6 +2141,22 @@ class CodexAppServerProcess {
     if (parsed.ok) {
       this.observeDetachedChildLifecycle(parsed.value)
       this.observeThreadTokenUsage(parsed.value)
+      const responseId = readCodexRpcResponseId(parsed.value)
+      if (responseId !== null) {
+        const pending = this.pendingRequests.get(responseId)
+        const resolved = resolvePendingCodexRpcRequest({
+          message: parsed.value,
+          pendingRequests: this.pendingRequests,
+          responseId,
+        })
+        if (resolved !== 'unknown_response_id' || !this.consumeIgnoredResponseId(responseId)) {
+          // Promise continuations run after this stdout batch. Keep turn-id
+          // establishment and compaction acceptance synchronous before the next
+          // notification or server request, even though RPC resolution is shared.
+          this.activeTurn?.onRpcResponse(parsed.value, pending?.method ?? null)
+        }
+        return
+      }
       if (this.routeSubagentMessage(parsed.value)) {
         return
       }
@@ -2171,6 +2192,7 @@ class CodexAppServerProcess {
       this.handleStdoutLine(this.stdoutBuffer)
     }
     this.stdoutBuffer = ''
+    this.realtime?.processClosed()
 
     if (!this.normalShutdown) {
       this.poisoned = true
@@ -2280,38 +2302,14 @@ function readCodexBackgroundTerminalPresence(value: unknown): boolean {
   return data.length > 0
 }
 
-function readCodexSubagentActivity(message: CodexRpcMessage): {
-  agentThreadId: string | null
-  kind: 'completed' | 'interacted' | 'interrupted' | 'malformed' | 'started'
-  turnId: string | null
-} | null {
-  const method = typeof message.method === 'string' ? message.method : null
-  if (method !== 'item/completed') {
+function readCodexStartedChildThreadId(message: CodexRpcMessage): string | null {
+  if (message.method !== 'item/completed') {
     return null
   }
   const item = asCodexRecord(asCodexRecord(message.params)?.item)
-  if (asCodexString(item?.type) !== 'subAgentActivity') {
-    return null
-  }
-  const agentThreadId = asCodexString(item?.agentThreadId)
-  const kind = asCodexString(item?.kind)
-  const turnId = asCodexString(asCodexRecord(message.params)?.turnId)
-  if (
-    !agentThreadId
-    || (
-      kind !== 'completed'
-      && kind !== 'started'
-      && kind !== 'interacted'
-      && kind !== 'interrupted'
-    )
-  ) {
-    return {
-      agentThreadId: agentThreadId ?? null,
-      kind: 'malformed',
-      turnId: turnId ?? null,
-    }
-  }
-  return { agentThreadId, kind, turnId: turnId ?? null }
+  return item?.type === 'subAgentActivity' && item.kind === 'started'
+    ? asCodexString(item.agentThreadId)
+    : null
 }
 
 function throwIfCodexBackgroundWorkWaitAborted(
@@ -2445,39 +2443,44 @@ async function getOrStartWarmCodexProcess(
   if (warmCodexWorkspaceBoundaryActive) {
     throw buildWarmCodexWorkspaceBoundaryBusyError()
   }
-  const launchKey = input.launchKey
-  return await withWarmCodexSlotLock(async () => {
-    const previousProcess = warmCodexProcess
-    if (previousProcess) {
-      if (previousProcess.canClaimForLaunch(launchKey)) {
-        previousProcess.reserveTurn()
-        return previousProcess
-      }
-      if (previousProcess.hasInFlightTurn) {
-        throw previousProcess.buildBusyError(
-          'Codex app-server process is already serving a turn.',
-        )
-      }
-      const processExited =
-        previousProcess.child.exitCode !== null ||
-        previousProcess.child.signalCode !== null
-      const stopReason = processExited
-        ? 'process-exited'
-        : previousProcess.launchKey !== launchKey
-          ? 'launch-identity-changed'
-          : 'process-unhealthy'
-      await previousProcess.stop(stopReason)
-    }
+  return await withWarmCodexSlotLock(() => claimWarmCodexProcess(input))
+}
 
-    const processInstance = new CodexAppServerProcess({
-      ...input,
-      coldStartReason:
-        previousProcess?.nextColdStartReason ?? 'node-process-first-use',
-    })
-    warmCodexProcess = processInstance
-    processInstance.reserveTurn()
-    return processInstance
+/** Caller holds the warm slot lock through selection and reservation. */
+async function claimWarmCodexProcess(
+  input: CodexAppServerProcessInput,
+): Promise<CodexAppServerProcess> {
+  const launchKey = input.launchKey
+  const previousProcess = warmCodexProcess
+  if (previousProcess) {
+    if (previousProcess.canClaimForLaunch(launchKey)) {
+      previousProcess.reserveTurn()
+      return previousProcess
+    }
+    if (previousProcess.hasInFlightTurn) {
+      throw previousProcess.buildBusyError(
+        'Codex app-server process is already serving a turn.',
+      )
+    }
+    const processExited =
+      previousProcess.child.exitCode !== null ||
+      previousProcess.child.signalCode !== null
+    const stopReason = processExited
+      ? 'process-exited'
+      : previousProcess.launchKey !== launchKey
+        ? 'launch-identity-changed'
+        : 'process-unhealthy'
+    await previousProcess.stop(stopReason)
+  }
+
+  const processInstance = new CodexAppServerProcess({
+    ...input,
+    coldStartReason:
+      previousProcess?.nextColdStartReason ?? 'node-process-first-use',
   })
+  warmCodexProcess = processInstance
+  processInstance.reserveTurn()
+  return processInstance
 }
 
 async function stopExactUnclaimedWarmCodexProcess(
@@ -2688,315 +2691,6 @@ export async function waitForWarmCodexBackgroundWork(
 registerStopWarmCodexAppServer(stopWarmCodexAppServer)
 registerWaitForWarmCodexBackgroundWork(waitForWarmCodexBackgroundWork)
 
-export interface CodexManagedAccountDeviceCode {
-  userCode: string
-  verificationUrl: string
-}
-
-export interface CodexManagedAccountOperationInput {
-  action: HostedCodexAuthAction
-  abortSignal?: AbortSignal | null
-  codexCommand?: string | null
-  codexHome?: string | null
-  env?: NodeJS.ProcessEnv
-  onDeviceCode?: ((deviceCode: CodexManagedAccountDeviceCode) => Promise<void> | void) | null
-  timeoutMs?: number | null
-  workingDirectory: string
-}
-
-export type CodexManagedAccountOperationResult =
-  | { kind: 'connected' }
-  | { kind: 'disconnected' }
-
-interface CodexManagedAccountLoginCompletion {
-  error: string | null
-  success: boolean
-}
-
-/**
- * Runs one managed ChatGPT account operation through the same app-server
- * transport used by turns. The child is intentionally short lived: account
- * notifications must never leak into the idle warm-turn process, and only one
- * process may write CODEX_HOME at a time.
- */
-export async function executeCodexManagedAccountOperation(
-  input: CodexManagedAccountOperationInput,
-): Promise<CodexManagedAccountOperationResult> {
-  if (warmCodexWorkspaceBoundaryActive) {
-    throw buildWarmCodexWorkspaceBoundaryBusyError()
-  }
-  const workingDirectory = path.resolve(input.workingDirectory)
-  await assertCodexAppServerWorkingDirectory(workingDirectory)
-  const env = await resolveCodexChildEnv({
-    codexHome: input.codexHome,
-    env: input.env,
-  })
-  const codexCommand = resolveCodexAppServerCommand(input.codexCommand)
-  const args = buildCodexAppServerArgs({
-    configOverrides: CODEX_MANAGED_ACCOUNT_CONFIG_OVERRIDES,
-  })
-  const launchKey = buildCodexAppServerLaunchKey({
-    args,
-    codexCommand,
-    env,
-  })
-
-  await stopWarmCodexAppServer('managed-account-operation')
-  const processInstance = await getOrStartWarmCodexProcess({
-    args,
-    codexCommand,
-    env,
-    launchKey,
-  })
-
-  let settleAccountUpdate!: () => void
-  let rejectAccountUpdate!: (error: unknown) => void
-  const accountUpdate = new Promise<void>((resolve, reject) => {
-    settleAccountUpdate = resolve
-    rejectAccountUpdate = reject
-  })
-  void accountUpdate.catch(() => undefined)
-  let settleCompletion!: (completion: CodexManagedAccountLoginCompletion) => void
-  let rejectCompletion!: (error: unknown) => void
-  const completion = new Promise<CodexManagedAccountLoginCompletion>((resolve, reject) => {
-    settleCompletion = resolve
-    rejectCompletion = reject
-  })
-  void completion.catch(() => undefined)
-  let expectedLoginId: string | null = null
-  let acceptChatGptAccountUpdate = false
-  let bufferedChatGptAccountUpdate = false
-  const bufferedCompletions = new Map<string, CodexManagedAccountLoginCompletion>()
-
-  const binding: CodexAppServerActiveTurnBinding = {
-    onClose(code, signal) {
-      const error = new VaultCliError(
-        'ASSISTANT_CODEX_AUTH_PROCESS_EXITED',
-        'Codex app-server exited during ChatGPT account authentication.',
-        {
-          code,
-          retryable: true,
-          signal,
-        },
-      )
-      rejectCompletion(error)
-      rejectAccountUpdate(error)
-    },
-    onError(error) {
-      rejectCompletion(error)
-      rejectAccountUpdate(error)
-    },
-    onFramingError() {
-      const error = new VaultCliError(
-        'ASSISTANT_CODEX_APP_SERVER_FRAMING_ERROR',
-        'Codex app-server emitted malformed JSON during account authentication.',
-        { retryable: false },
-      )
-      rejectCompletion(error)
-      rejectAccountUpdate(error)
-    },
-    onParsedMessage(message) {
-      const responseId = readCodexRpcResponseId(message)
-      if (responseId !== null) {
-        const resolved = resolvePendingCodexRpcRequest({
-          message,
-          pendingRequests: processInstance.pendingRequests,
-          responseId,
-        })
-        if (
-          resolved === 'unknown_response_id'
-          && !processInstance.consumeIgnoredResponseId(responseId)
-        ) {
-          const error = new VaultCliError(
-            'ASSISTANT_CODEX_APP_SERVER_PROTOCOL_ERROR',
-            'Codex app-server returned an unexpected response during account authentication.',
-            { retryable: false },
-          )
-          rejectCompletion(error)
-          rejectAccountUpdate(error)
-        }
-        return
-      }
-
-      const requestId = readCodexRpcServerRequestId(message)
-      if (requestId !== null) {
-        denyUnsupportedCodexServerRequest({
-          message,
-          requestId,
-          writeRpcMessage: (payload) => processInstance.writeRpcMessage(payload),
-        })
-        return
-      }
-
-      const eventMethod = readCodexEventMethod(message)
-      if (eventMethod === 'account/updated') {
-        const params = asCodexRecord(message.params)
-        if (asCodexString(params?.authMode) !== 'chatgpt') {
-          return
-        }
-        if (!acceptChatGptAccountUpdate) {
-          return
-        }
-        if (expectedLoginId === null) {
-          bufferedChatGptAccountUpdate = true
-        } else {
-          settleAccountUpdate()
-        }
-        return
-      }
-
-      if (eventMethod !== 'account/login/completed') {
-        return
-      }
-      const params = asCodexRecord(message.params)
-      const loginId = asCodexString(params?.loginId)
-      if (!loginId) {
-        return
-      }
-      const completionResult: CodexManagedAccountLoginCompletion = {
-        error: asCodexString(params?.error),
-        success: params?.success === true,
-      }
-      if (loginId === expectedLoginId) {
-        settleCompletion(completionResult)
-      } else {
-        bufferedCompletions.set(loginId, completionResult)
-      }
-    },
-    onStderrLine: () => {},
-    onStderrText: () => {},
-    onStdinError(error) {
-      rejectCompletion(error)
-      rejectAccountUpdate(error)
-      return null
-    },
-    onStdoutText: () => {},
-  }
-
-  const onAbort = () => {
-    const error = new VaultCliError(
-      'ASSISTANT_CODEX_AUTH_ABORTED',
-      'ChatGPT account authentication was interrupted.',
-      { retryable: true },
-    )
-    rejectCompletion(error)
-    rejectAccountUpdate(error)
-  }
-
-  try {
-    processInstance.bindTurn(binding)
-    input.abortSignal?.addEventListener('abort', onAbort, { once: true })
-    if (input.abortSignal?.aborted) {
-      onAbort()
-    }
-    await processInstance.waitForSpawn()
-    await processInstance.initialize()
-
-    if (input.action === 'disconnect') {
-      await withCodexRpcTimeout(
-        processInstance.sendRequest('account/logout', {}),
-        CODEX_RPC_DEFAULT_TIMEOUT_MS,
-        'account/logout',
-      ).catch(() => undefined)
-      return { kind: 'disconnected' }
-    }
-
-    if (isCodexChatGptAccountReadResult(await readCodexManagedAccount(processInstance))) {
-      return { kind: 'connected' }
-    }
-
-    acceptChatGptAccountUpdate = true
-    const startResult = asCodexRecord(await withCodexRpcTimeout(
-      processInstance.sendRequest('account/login/start', {
-        type: 'chatgptDeviceCode',
-      }),
-      CODEX_RPC_DEFAULT_TIMEOUT_MS,
-      'account/login/start',
-    ))
-    const loginId = asCodexString(startResult?.loginId)
-    const verificationUrl = asCodexString(startResult?.verificationUrl)
-    const userCode = asCodexString(startResult?.userCode)
-    if (
-      startResult?.type !== 'chatgptDeviceCode'
-      || !loginId
-      || !verificationUrl
-      || !userCode
-    ) {
-      throw new VaultCliError(
-        'ASSISTANT_CODEX_AUTH_PROTOCOL_ERROR',
-        'Codex app-server returned an invalid ChatGPT device-code response.',
-        { retryable: false },
-      )
-    }
-
-    expectedLoginId = loginId
-    const buffered = bufferedCompletions.get(loginId)
-    if (buffered !== undefined) {
-      settleCompletion(buffered)
-    }
-    if (bufferedChatGptAccountUpdate) {
-      settleAccountUpdate()
-    }
-    await input.onDeviceCode?.({ userCode, verificationUrl })
-
-    const loginCompletion = await withCodexRpcTimeout(
-      completion,
-      normalizeCodexManagedAccountTimeout(input.timeoutMs),
-      'account/login/completed',
-    )
-    if (!loginCompletion.success) {
-      throw new VaultCliError(
-        'ASSISTANT_CODEX_AUTH_FAILED',
-        'ChatGPT account authentication did not complete successfully.',
-        {
-          ...(loginCompletion.error ? { codexLoginError: loginCompletion.error } : {}),
-          retryable: false,
-        },
-      )
-    }
-    await withCodexRpcTimeout(
-      accountUpdate,
-      CODEX_RPC_DEFAULT_TIMEOUT_MS,
-      'account/updated',
-    )
-    if (!isCodexChatGptAccountReadResult(await readCodexManagedAccount(processInstance))) {
-      throw new VaultCliError(
-        'ASSISTANT_CODEX_AUTH_FAILED',
-        'Codex app-server completed authentication without a ChatGPT account.',
-        { retryable: false },
-      )
-    }
-    return { kind: 'connected' }
-  } finally {
-    input.abortSignal?.removeEventListener('abort', onAbort)
-    processInstance.releaseTurn(binding)
-    processInstance.releaseReservation()
-    await processInstance.stop('managed-account-operation-complete').catch(() => undefined)
-  }
-}
-
-async function readCodexManagedAccount(
-  processInstance: CodexAppServerProcess,
-): Promise<unknown> {
-  return await withCodexRpcTimeout(
-    processInstance.sendRequest('account/read', { refreshToken: false }),
-    CODEX_RPC_DEFAULT_TIMEOUT_MS,
-    'account/read',
-  )
-}
-
-function isCodexChatGptAccountReadResult(value: unknown): boolean {
-  const record = asCodexRecord(value)
-  const account = asCodexRecord(record?.account) ?? record
-  return asCodexString(account?.type) === 'chatgpt'
-}
-
-function normalizeCodexManagedAccountTimeout(value: number | null | undefined): number {
-  return typeof value === 'number' && Number.isSafeInteger(value) && value > 0
-    ? value
-    : CODEX_MANAGED_ACCOUNT_LOGIN_TIMEOUT_MS
-}
-
 export interface CodexWarmThreadCompactionUsage {
   cachedInputTokens: number | null
   inputTokens: number
@@ -3155,31 +2849,15 @@ export async function compactWarmCodexThread(input: {
     onClose: () => settleCompaction('process_exit'),
     onError: () => settleCompaction('rpc_error'),
     onFramingError: () => settleCompaction('rpc_error'),
-    onParsedMessage: (message) => {
-      const responseId = readCodexRpcResponseId(message)
-      if (responseId !== null) {
-        const pending = processInstance.pendingRequests.get(responseId)
-        const resolveResult = resolvePendingCodexRpcRequest({
-          message,
-          pendingRequests: processInstance.pendingRequests,
-          responseId,
-        })
-        if (resolveResult === 'unknown_response_id') {
-          processInstance.consumeIgnoredResponseId(responseId)
+    onRpcResponse(message, method) {
+      if (method === 'thread/compact/start' && !message.error) {
+        compactRequestAccepted = true
+        if (compactCompletionBuffered) {
+          settleCompaction('compacted')
         }
-        if (
-          resolveResult !== 'unknown_response_id' &&
-          pending?.method === 'thread/compact/start' &&
-          !message.error
-        ) {
-          compactRequestAccepted = true
-          if (compactCompletionBuffered) {
-            settleCompaction('compacted')
-          }
-        }
-        return
       }
-
+    },
+    onParsedMessage: (message) => {
       const requestId = readCodexRpcServerRequestId(message)
       if (requestId !== null) {
         rejectCodexServerRequest({
@@ -3367,12 +3045,15 @@ function readCodexSubagentEffectiveMetadataResult(input: {
 
   const model = readCodexNonEmptyString(result.model)
   const modelProvider = readCodexNonEmptyString(result.modelProvider)
-  const serviceTier = result.serviceTier
+  // Codex reports an explicit standard-tier selection as "default".
+  // Normalize it at the provider boundary to our existing standard-tier value.
+  const serviceTier = result.serviceTier === 'default' ? null
+    : result.serviceTier === 'fast' ? 'priority' : result.serviceTier
   if (
     !model ||
     !modelProvider ||
     !Object.hasOwn(result, 'serviceTier') ||
-    (serviceTier !== null && serviceTier !== 'flex')
+    (serviceTier !== null && serviceTier !== 'flex' && serviceTier !== 'priority')
   ) {
     return null
   }
@@ -3419,13 +3100,12 @@ function buildCodexTransportDiagnosticsTraceEvent(input: {
     normalizedText.includes('falling back from websockets to https transport')
   const [, timeoutPhase] = ([
     ['idle timeout sending websocket request', 'websocket-send'],
+    ['timeout waiting for websocket response acknowledgement', 'websocket-ack'],
     ['idle timeout waiting for websocket', 'websocket-read'],
     ['idle timeout waiting for sse', 'http-read'],
   ] as const).find(([phrase]) => normalizedText.includes(phrase)) ?? ['', null]
   const idleTimeout = timeoutPhase !== null
-  const streamDisconnected =
-    normalizedText.includes('stream disconnected') ||
-    normalizedText.includes('response stream disconnected')
+  const streamDisconnected = normalizedText.includes('stream disconnected')
 
   if (!fallbackActivated && !idleTimeout && !streamDisconnected && !retryProgress) {
     return null
@@ -3709,6 +3389,7 @@ async function runCodexAppServerTurnOnProcess(
   let firstProviderReceiptElapsedMs: number | null = null
   let firstAssistantReceiptElapsedMs: number | null = null
   let lastProviderReceiptElapsedMs: number | null = null
+  const finalResponseCompletion = createCodexFinalResponseCompletionTracker()
   let providerReceiptCount = 0
   let currentTurnStartedNotificationObserved = false
   let liveInterruptRequested = false
@@ -3718,6 +3399,7 @@ async function runCodexAppServerTurnOnProcess(
   let failTurn: ((error: unknown) => void) | null = null
   let liveTurnOpen = false
   let turnTerminal = false
+  let interruptedTurnError: VaultCliError | null = null
   let providerRequestStartedNotified = false
   let contextCompactionProgressNotified = false
   let contextCompactionProgressPending = false
@@ -3992,6 +3674,7 @@ async function runCodexAppServerTurnOnProcess(
   }
 
   const recordProviderReceipt = (kind: 'assistant' | 'reasoning' | 'tool') => {
+    finalResponseCompletion.observeProviderActivity()
     if (!input.onTraceEvent || turnId === null || codexProviderRequestStartedAtMs === null) return
     const elapsedMs = Math.max(0, Date.now() - codexProviderRequestStartedAtMs)
     const first = firstProviderReceiptElapsedMs === null
@@ -4129,7 +3812,6 @@ async function runCodexAppServerTurnOnProcess(
     abortSignal: input.abortSignal,
     onAbort: () => {
       abortRequested = true
-      codexProcess.noteTurnAbort()
       if (codexThreadId && turnId) {
         codexProcess.sendUntrackedRequest(
           'turn/interrupt',
@@ -4138,9 +3820,11 @@ async function runCodexAppServerTurnOnProcess(
             turnId,
           }),
         )
+      } else {
+        codexProcess.noteTurnAbort()
+        terminationSignalSent = 'SIGINT'
+        codexProcess.signal('SIGINT')
       }
-      terminationSignalSent = 'SIGINT'
-      codexProcess.signal('SIGINT')
       scheduleInterruptCleanupTimeout()
     },
   })
@@ -5531,6 +5215,7 @@ async function runCodexAppServerTurnOnProcess(
     }
     lastEventError = extractCodexErrorMessage(message) ?? lastEventError
     lastEventErrorInfo = extractCodexErrorInfo(message) ?? lastEventErrorInfo
+    observeCodexContextCompactionActivity(finalResponseCompletion, message)
 
     const normalizedEvent = normalizeCodexEvent(message)
     recordProviderEventReceipt(normalizedEvent)
@@ -5659,9 +5344,12 @@ async function runCodexAppServerTurnOnProcess(
             : {}),
         }
         completedFinalAgentMessage = null
-        assistantStreams.clear()
-        assistantStreamOrder.length = 0
       }
+      // A completed reply moved to the trailing candidate above. Anything left
+      // is unfinished text from a preempted answer (instant steering), never a
+      // reply, so it must not become fallback text for the steered response.
+      assistantStreams.clear()
+      assistantStreamOrder.length = 0
       responseMedia = []
       responseCard = null
       responseCardTextFallback = null
@@ -5694,10 +5382,17 @@ async function runCodexAppServerTurnOnProcess(
     }
 
     const status = extractCodexTurnStatus(message)
-    if (
-      status === 'interrupted' &&
-      terminalNoReplyInterruptRequested
-    ) {
+    if (status === 'interrupted') {
+      if (!terminalNoReplyInterruptRequested) {
+        interruptedTurnError = buildCodexTurnFailedError({
+          errorInfo: null,
+          fallback: null,
+          providerActionCount,
+          codexThreadId,
+          status,
+        })
+        dynamicToolAbortController.abort()
+      }
       turnTerminal = true
       completeTurn?.()
       return
@@ -5848,43 +5543,34 @@ async function runCodexAppServerTurnOnProcess(
       return
     }
     if (codexThreadId) {
-      codexProcess.noteBoundTurn(codexThreadId, candidateTurnId)
+      codexProcess.noteBoundThreadId(codexThreadId)
+    }
+  }
+
+  function handleRpcResponse(message: CodexRpcMessage, method: string | null): void {
+    if (method === null) {
+      return
+    }
+    acceptJsonEvent(message)
+    if (message.error) {
+      return
+    }
+    if (method === 'turn/start') {
+      if (
+        codexProviderRequestStartedAtMs !== null &&
+        codexTimingTurnStartAckElapsedMs === null
+      ) {
+        codexTimingTurnStartAckElapsedMs = Math.max(
+          0,
+          Date.now() - codexProviderRequestStartedAtMs,
+        )
+      }
+      const resultTurnId = extractCodexTurnIdFromResult(message.result)
+      acceptTurnId(resultTurnId)
     }
   }
 
   function handleParsedMessage(message: CodexRpcMessage): void {
-    const responseId = readCodexRpcResponseId(message)
-    if (responseId !== null) {
-      const pending = codexProcess.pendingRequests.get(responseId)
-      const resolveResult = resolvePendingCodexRpcRequest({
-        message,
-        pendingRequests: codexProcess.pendingRequests,
-        responseId,
-      })
-      if (resolveResult === 'unknown_response_id') {
-        codexProcess.consumeIgnoredResponseId(responseId)
-        return
-      }
-      acceptJsonEvent(message)
-      if (message.error) {
-        return
-      }
-      if (pending?.method === 'turn/start') {
-        if (
-          codexProviderRequestStartedAtMs !== null &&
-          codexTimingTurnStartAckElapsedMs === null
-        ) {
-          codexTimingTurnStartAckElapsedMs = Math.max(
-            0,
-            Date.now() - codexProviderRequestStartedAtMs,
-          )
-        }
-        const resultTurnId = extractCodexTurnIdFromResult(message.result)
-        acceptTurnId(resultTurnId)
-      }
-      return
-    }
-
     const messageTurnId = extractCodexTurnIdFromMessage(message)
     const method = readCodexEventMethod(message)
     const requestId = readCodexRpcServerRequestId(message)
@@ -5946,7 +5632,13 @@ async function runCodexAppServerTurnOnProcess(
       method === 'rawResponse/completed'
     ) {
       // Raw response notifications can contain provider payload content and
-      // do not belong in the parent turn's persisted event surface.
+      // do not belong in the parent turn's persisted event surface. Only the
+      // receipt instant of a turn-scoped completion is kept.
+      finalResponseCompletion.observeRawNotification({
+        activeTurnId: turnId,
+        messageTurnId,
+        method,
+      })
       return
     }
 
@@ -6171,6 +5863,7 @@ async function runCodexAppServerTurnOnProcess(
       )
     },
     onParsedMessage: handleParsedMessage,
+    onRpcResponse: handleRpcResponse,
     onSubagentMessage(message) {
       const threadId = extractCodexThreadIdFromMessage(message)
       if (threadId) {
@@ -6300,26 +5993,18 @@ async function runCodexAppServerTurnOnProcess(
     if (stdinFailure) {
       throw stdinFailure
     }
-    await settleNoReplyFinalActions()
-    if (abortRequested || terminationSignalSent) {
-      normalShutdown = true
-      lifecycleStage = 'abort_cleanup'
-      await codexProcess.poison('turn-completed-after-abort')
-      lifecycleStage = 'shutdown_complete'
-      emitAppServerTimingTrace(
-        input.processLifetime === 'one-shot'
-          ? 'one-shot-abort-stopped'
-          : 'warm-abort-poisoned',
-      )
-    } else {
-      lifecycleStage = 'idle'
-      codexProcess.releaseTurn(activeTurnBinding)
-      emitAppServerTimingTrace(
-        input.processLifetime === 'one-shot'
-          ? 'one-shot-complete'
-          : 'warm-idle',
-      )
+    const terminationError = buildRecordedTerminationError(lastEventError)
+    if (terminationError) {
+      throw terminationError
     }
+    await settleNoReplyFinalActions()
+    lifecycleStage = 'idle'
+    codexProcess.releaseTurn(activeTurnBinding)
+    emitAppServerTimingTrace(
+      input.processLifetime === 'one-shot'
+        ? 'one-shot-complete'
+        : 'warm-idle',
+    )
   } catch (error) {
     const recordedEndReason = codexProcess.recordedEndReason
     const preserveInterruptCleanupTimeout =
@@ -6372,6 +6057,13 @@ async function runCodexAppServerTurnOnProcess(
     codexProcess.noteBoundThreadId(codexThreadId)
     codexProcess.releaseTurn(activeTurnBinding)
     codexProcess.releaseReservation()
+  }
+
+  // Native interruption is a terminal turn result, not a process failure.
+  // Drain effects and release the resident process before reporting it upstream.
+  if (interruptedTurnError) {
+    annotateTurnFailureContext(interruptedTurnError)
+    throw interruptedTurnError
   }
 
   const extractedFinalMessage =
@@ -6514,6 +6206,9 @@ async function runCodexAppServerTurnOnProcess(
     targetInputId:
       resolveReplyTargetPatch(finalDeliveryContextOrdinal)?.targetInputId ?? null,
     additionalUsages: [...additionalUsages, ...buildSubagentUsageDrafts()],
+    finalResponseCompletion: finalResponseCompletion.read({
+      selectedFromEarlierSampling: finalResponseCandidate !== null,
+    }),
     responseMedia: finalHasDeliverableOutput ? [...finalResponseMedia] : [],
     followUpRequest: finalFollowUpRequest(finalDeliveryContextOrdinal, finalHasDeliverableOutput),
     responseCard: finalHasDeliverableOutput ? deliveredFinalResponseCard : null,
@@ -6651,40 +6346,42 @@ function isInvalidDynamicToolRequest(
   return 'validationDigest' in request
 }
 
-function isSerializedDynamicToolRequest(
-  request: MurphDynamicToolRequest,
-): boolean {
-  return request.kind === 'automation' ||
-    request.kind === 'automation-local-at-recovery-dismissal' ||
-    request.kind === 'invalid-automation-arguments' ||
-    request.kind === 'device' ||
-    request.kind === 'generate-image' ||
-    request.kind === 'generate-voice-memo' ||
-    request.kind === 'generate-song' ||
-    request.kind === 'attach-group-challenge-response-card' ||
-    request.kind === 'attach-response-card' ||
-    request.kind === 'response-card-envelope-too-large' ||
-    request.kind === 'attach-response-media' ||
-    request.kind === 'send-vault-file' ||
-    request.kind === 'pending-vault-files-list' ||
-    request.kind === 'pending-vault-files-cancel' ||
-    request.kind === 'assistant-configuration' ||
-    request.kind === 'assistant-style' ||
-    request.kind === 'personalization' ||
-    request.kind === 'subscription' ||
-    request.kind === 'analyze-video' ||
-    (request.kind === 'group' &&
-      request.request.action === 'ask_current_sender' &&
-      request.request.mode !== 'new') ||
-    request.kind === 'react-to-message' ||
-    request.kind === 'select-reply-target' ||
-    request.kind === 'computer-open' ||
-    request.kind === 'computer-act' ||
-    request.kind === 'computer-os-control' ||
-    request.kind === 'computer-pause-for-user' ||
-    request.kind === 'computer-finish-run' ||
-    request.kind === 'invalid-computer-arguments'
+function isSerializedDynamicToolRequest(request: MurphDynamicToolRequest): boolean {
+  return serializedDynamicToolKinds.has(request.kind) ||
+    (request.kind === 'group' && request.request.action === 'ask_current_sender' && request.request.mode !== 'new')
 }
+
+const serializedDynamicToolKinds: ReadonlySet<MurphDynamicToolRequest['kind']> = new Set([
+  'poll',
+  'invalid-poll-arguments',
+  'automation',
+  'automation-local-at-recovery-dismissal',
+  'invalid-automation-arguments',
+  'device',
+  'generate-image',
+  'generate-voice-memo',
+  'generate-song',
+  'attach-group-challenge-response-card',
+  'attach-response-card',
+  'response-card-envelope-too-large',
+  'attach-response-media',
+  'send-vault-file',
+  'pending-vault-files-list',
+  'pending-vault-files-cancel',
+  'assistant-configuration',
+  'assistant-style',
+  'personalization',
+  'subscription',
+  'analyze-video',
+  'react-to-message',
+  'select-reply-target',
+  'computer-open',
+  'computer-act',
+  'computer-os-control',
+  'computer-pause-for-user',
+  'computer-finish-run',
+  'invalid-computer-arguments',
+])
 
 function isResponseAttachmentDynamicToolRequest(
   request: MurphDynamicToolRequest,
@@ -6702,7 +6399,9 @@ function isResponseAttachmentDynamicToolRequest(
 function isInvocationScopedRootToolRequest(
   request: MurphDynamicToolRequest,
 ): boolean {
-  return request.kind === 'automation' ||
+  return request.kind === 'poll' ||
+    request.kind === 'invalid-poll-arguments' ||
+    request.kind === 'automation' ||
     request.kind === 'automation-local-at-recovery-dismissal' ||
     request.kind === 'invalid-automation-arguments' ||
     request.kind === 'device' ||

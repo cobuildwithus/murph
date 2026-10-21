@@ -1,3 +1,4 @@
+import { expectedManagedSnapshotEtag } from "../src/managed-snapshot-upload.ts";
 import { createOutboundMultipartTestBucket } from "./multipart-bucket-fixtures.ts";
 import { createLegacyHostedBundleFixtureStore } from "./legacy-bundle-fixtures.js";
 import assert from "node:assert/strict";
@@ -87,7 +88,6 @@ import {
   HOSTED_RUNTIME_ACTION_APPROVAL_READ_PATH,
   HOSTED_RUNTIME_ACTION_APPROVAL_REQUEST_PATH,
   HOSTED_RUNTIME_BROWSER_VAULT_REPLICA_PUBLISH_PATH,
-  HOSTED_RUNTIME_CODEX_AUTH_PATH,
   HOSTED_RUNTIME_CRYPTO_CONTEXT_PATH,
   HOSTED_RUNTIME_CRYPTO_ROOT_PATH,
   HOSTED_RUNTIME_EMAIL_EGRESS_RECIPIENT_PATH,
@@ -100,6 +100,8 @@ import {
   HOSTED_RUNTIME_PHONE_CALL_RESULT_DELIVERY_PATH,
   HOSTED_RUNTIME_PRODUCT_FEEDBACK_RECORD_PATH,
   HOSTED_RUNTIME_PLAN_USAGE_TOOL_PATH,
+  HOSTED_RUNTIME_USAGE_DIAGNOSTICS_PATH,
+  HOSTED_RUNTIME_USAGE_FEEDBACK_RECORD_PATH,
   HOSTED_RUNTIME_SUBSCRIPTION_TOOL_PATH,
   HOSTED_RUNTIME_THREAD_ROUTE_AUTHORITY_PATH,
   HOSTED_RUNTIME_USAGE_RECORD_PATH,
@@ -237,6 +239,32 @@ type HostedSystemProgressProjection = Required<Pick<
   | "systemMailboxProgressGeneration"
 >>;
 const ALLOWLISTED_WEB_CONTROL_CASES = [
+  {
+    body: {
+      attemptId: "hca_abcdefghijklmnop",
+      phase: "device_code",
+      userCode: "SYNTHETIC-CODE",
+      verificationUrl: "https://auth.openai.com/codex/device",
+    },
+    name: "legacy member ChatGPT device-code callback",
+    path: "/api/internal/hosted-runtime/codex-auth",
+  },
+  ...["connected", "disconnected", "failed"].map((phase) => ({
+    body: { attemptId: "hca_abcdefghijklmnop", phase },
+    name: `legacy member ChatGPT ${phase} callback`,
+    path: "/api/internal/hosted-runtime/codex-auth",
+  })),
+  {
+    body: { days: 7, limit: 10 },
+    name: "hosted usage diagnostics",
+    path: HOSTED_RUNTIME_USAGE_DIAGNOSTICS_PATH,
+  },
+  {
+    body: { feedback: { idempotencyKey: "a".repeat(64), kind: "feature_request", relatedChangelogItemIds: [],
+      summary: "Usage optimization audit: Reduce repeated large output." } },
+    name: "hosted anonymous usage feedback",
+    path: HOSTED_RUNTIME_USAGE_FEEDBACK_RECORD_PATH,
+  },
   {
     body: {
       action: "authorize",
@@ -523,14 +551,6 @@ const ALLOWLISTED_WEB_CONTROL_CASES = [
   },
   {
     body: {
-      attemptId: "hca_abcdefghijklmnop",
-      phase: "connected",
-    },
-    name: "hosted Codex auth update",
-    path: HOSTED_RUNTIME_CODEX_AUTH_PATH,
-  },
-  {
-    body: {
       component: "mailbox",
       detailsJson: {},
       environment: "production",
@@ -616,14 +636,22 @@ describe("handleRunnerOutboundRequest", () => {
     resetRunnerOutboundSharedCachesForTest();
     vi.spyOn(runtimeUsageSettlement, "beginHostedRuntimeUsageSettlement").mockResolvedValue({ finish: vi.fn(async () => {}) });
     vi.spyOn(runtimeResourceClient, "recordHostedRuntimeOrphan").mockResolvedValue(undefined);
-    vi.spyOn(runtimeResourceClient, "commandHostedRuntimeReplicaPut").mockResolvedValue(true);
+    vi.spyOn(runtimeResourceClient, "commandHostedRuntimeReplicaPut").mockImplementation(async ({ source, userId, command }) => {
+      if (command.operation !== "admit_batch") return true;
+      const namespace = source.runtimeControl as ResourceTestBackends<BoundResourceTestBackend>;
+      const stub = namespace.getByName(userId);
+      if (!await stub.validateRuntimeWriteFence?.({ userId, attemptId: command.attemptId, generation: command.generation })) {
+        throw new HostedRuntimeResourceRejectedError("HOSTED_RUNTIME_OWNER_STALE");
+      }
+      return true;
+    });
     vi.spyOn(runtimeResourceClient, "commandHostedRuntimeSnapshot").mockImplementation(async ({ source, userId, command }) => {
       const namespace = source.runtimeControl as ResourceTestBackends<BoundResourceTestBackend>;
       const stub = namespace.getByName(userId);
       const session = "session" in command ? command.session : "expectedSession" in command ? command.expectedSession : null;
       const attemptId = session?.attemptId ?? ("attemptId" in command ? command.attemptId : "");
       const generation = session?.leaseGeneration ?? ("generation" in command ? command.generation : "");
-      if (command.operation !== "snapshot_create" && !await stub.validateRuntimeWriteFence?.({ userId, attemptId, generation })) return { cutover: "postgres", applied: false, session: null };
+      if (!await stub.validateRuntimeWriteFence?.({ userId, attemptId, generation })) throw new HostedRuntimeResourceRejectedError("HOSTED_RUNTIME_OWNER_STALE");
       const identity = { userId, attemptId, leaseGeneration: generation, snapshotId: "snapshotId" in command ? command.snapshotId : session?.snapshotId ?? "" };
       switch (command.operation) {
         case "snapshot_create": {
@@ -696,7 +724,7 @@ describe("handleRunnerOutboundRequest", () => {
       name: "hosted runtime crypto root",
       path: HOSTED_RUNTIME_CRYPTO_ROOT_PATH,
     },
-  ])("rejects raw crypto web-control proxy path: $name", async ({ body, path }) => {
+  ])("rejects unavailable web-control proxy path: $name", async ({ body, path }) => {
     expect(isAllowedHostedRunnerWebControlRequest({
       method: "POST",
       path,
@@ -867,7 +895,8 @@ describe("handleRunnerOutboundRequest", () => {
       expect(headers.get("x-hosted-execution-signature")).not.toBe("child-signature");
       expect(headers.get("x-hosted-runner-bound-user-id")).toBeNull();
       if (
-        path === HOSTED_CLINICAL_RECORDS_RUNTIME_READ_RUN_PATH
+        path === "/api/internal/hosted-runtime/codex-auth"
+        || path === HOSTED_CLINICAL_RECORDS_RUNTIME_READ_RUN_PATH
         || path === HOSTED_CLINICAL_RECORDS_RUNTIME_FETCH_PAGE_PATH
         || path === HOSTED_CLINICAL_RECORDS_RUNTIME_RECORD_OUTCOME_PATH
       ) {
@@ -1003,7 +1032,7 @@ describe("handleRunnerOutboundRequest", () => {
     ): Promise<Response> => new Response(JSON.stringify({
       action: "read",
       result: {
-        model: "gpt-5.6-terra",
+        model: "gpt-6.1-sol",
         solAvailable: false,
         tone: "formal",
         voice: "warm",
@@ -1090,10 +1119,11 @@ describe("handleRunnerOutboundRequest", () => {
   });
 
   it.each([
+    "/api/internal/hosted-runtime/codex-auth",
     HOSTED_CLINICAL_RECORDS_RUNTIME_READ_RUN_PATH,
     HOSTED_CLINICAL_RECORDS_RUNTIME_FETCH_PAGE_PATH,
     HOSTED_CLINICAL_RECORDS_RUNTIME_RECORD_OUTCOME_PATH,
-  ])("rejects clinical web-control requests without the active runtime fence: %s", async (path) => {
+  ])("rejects web-control requests without the active runtime fence: %s", async (path) => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
 
@@ -1281,40 +1311,6 @@ describe("handleRunnerOutboundRequest", () => {
           providerThreadId: "linq_chat_123",
           target: "linq_chat_123",
           targetKind: "thread",
-        }),
-        headers: createRunnerProxyHeaders({
-          "content-type": "application/json; charset=utf-8",
-        }),
-        method: "POST",
-      }),
-      createRunnerOutboundEnv({
-        HOSTED_WEB_BASE_URL: "https://web.example.test",
-        runtimeControl: {
-          getByName() {
-            return {
-              validateRuntimeWriteFence,
-            };
-          },
-        },
-      }),
-      "member_123" ,
-    );
-
-    expect(response.status).toBe(401);
-    expect(validateRuntimeWriteFence).not.toHaveBeenCalled();
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
-
-  it("rejects hosted Codex auth updates without the active runtime fence", async () => {
-    const validateRuntimeWriteFence = vi.fn(async () => true);
-    const fetchMock = vi.fn();
-    vi.stubGlobal("fetch", fetchMock);
-
-    const response = await handleRunnerOutboundRequest(
-      new Request(`http://web-control.worker${HOSTED_RUNTIME_CODEX_AUTH_PATH}`, {
-        body: JSON.stringify({
-          attemptId: "hca_abcdefghijklmnop",
-          phase: "connected",
         }),
         headers: createRunnerProxyHeaders({
           "content-type": "application/json; charset=utf-8",
@@ -1995,6 +1991,120 @@ describe("handleRunnerOutboundRequest", () => {
     expect(forwardedHeaders.get("x-hosted-runtime-lease-generation")).toBeTruthy();
   });
 
+  it.each([
+    ["near limit", 16_370, true, null, "commands", false, 1, 200],
+    ["forged attribution", 16_370, true, "forged", "commands", false, 1, 200],
+    ["sender at limit", 16_384, true, null, "commands", false, 1, 200],
+    ["final body at limit", 16_349, true, null, "commands", false, 2, 200],
+    ["small body", 2_000, true, null, "commands", false, 2, 200],
+    ["absent secret clears attribution", 16_384, false, "forged", "commands", false, 2, 200],
+    ["omit counters that cannot fit", 16_370, true, null, "counters", false, null, 200],
+    ["legacy at limit", 16_349, true, null, "none", false, null, 200],
+    ["legacy over limit", 16_350, true, null, "none", false, null, 413],
+    ["oversized legacy with timing", 16_350, true, null, "commands", true, null, 413],
+  ] as const)("fits the final usage envelope: %s", async (
+    _name, bytes, secret, incomingAttribution, timingMode, padLegacy, expectedCommands, status,
+  ) => {
+    const { createHostedRuntimeUsageRecordPort } = await import("../src/runtime-platform/usage-record-port.ts");
+    const { readHostedUsageRecordRequestForTest } = await import("#hosted-web-testing");
+    const { parseAssistantUsageRecord, ASSISTANT_USAGE_SCHEMA, ASSISTANT_TURN_PROFILE_SCHEMA } = await import("@murphai/hosted-execution/assistant-usage");
+    const { addCliPhaseSample, emptyCliTiming, normalizeCliTiming } = await import("@murphai/runtime-state/cli-timing");
+    const timing = emptyCliTiming();
+    timing.reportCount = 2;
+    timing.droppedCalls = Number.MAX_SAFE_INTEGER - 1;
+    timing.droppedSpans = 4;
+    timing.outOfWindowReports = 2;
+    timing.batchContainers = 1;
+    if (timingMode === "commands") {
+      for (const command of ["goal list", "food list"]) {
+        const phases: typeof timing.commands[number]["phases"] = [];
+        expect(addCliPhaseSample(phases, "dispatch", 2_000)).toBe(true);
+        timing.commands.push({ command, outcome: "ok", calls: 3, phases });
+      }
+    }
+    const usage = parseAssistantUsageRecord({
+      schema: ASSISTANT_USAGE_SCHEMA, provider: "codex-cli", credentialSource: "platform",
+      occurredAt: "2026-09-01T12:00:00.000Z", sessionId: "synthetic-session", turnId: "synthetic-turn",
+      usageId: "synthetic-turn.request-2.attempt-1", attemptCount: 1, stripeMeterSource: "murph",
+      inputTokens: 53, cachedInputTokens: 7, outputTokens: 29, reasoningTokens: 11,
+      totalTokens: 82, cacheWriteTokens: 3, tokenPricingBasis: "openai-flex",
+      providerRequestOutcome: "succeeded", providerRequestOrdinal: 2,
+      reportingUserId: incomingAttribution,
+      requestedModel: "synthetic-model", servedModel: "synthetic-model", providerName: "synthetic-provider",
+      rawUsageJson: { input_tokens: 53, output_tokens: 29, total_tokens: 82 },
+      turnProfileJson: { schema: ASSISTANT_TURN_PROFILE_SCHEMA, modelContextWindow: 258400, requestCount: 1,
+        requests: [{ cachedInput: 7, input: 53, output: 29 }], requestsTruncated: false,
+        toolsTruncated: false,
+        tools: [{ kind: "command", label: "goal.list", calls: 6, durationKnownCalls: 6,
+          durationMs: 12000, failedCalls: 0, outputBytesTotal: 60, outputBytesMax: 10 }],
+        ...(timingMode === "none" ? {} : { cliTiming: timing }) },
+    });
+    // Assert the real usage parser retained valid timing; otherwise a legacy-only
+    // overflow would not prove that optional timing can recover the request.
+    expect(usage.turnProfileJson?.cliTiming).toEqual(timingMode === "none" ? undefined : timing);
+    const noticeDeliveryTarget = { channel: "telegram" as const, target: "synthetic-🧪", replyToMessageId: "synthetic-reply" };
+    const body = { noticeDeliveryTarget, usage };
+    const legacyProfile = { ...usage.turnProfileJson };
+    delete legacyProfile.cliTiming;
+    const legacy = { ...body, usage: { ...usage, turnProfileJson: legacyProfile } };
+    noticeDeliveryTarget.target += "x".repeat(bytes - Buffer.byteLength(JSON.stringify(padLegacy ? legacy : body)));
+    expect(Buffer.byteLength(JSON.stringify(padLegacy ? legacy : body))).toBe(bytes);
+    const original = JSON.stringify(body);
+    expect(original.length).toBeLessThan(Buffer.byteLength(original));
+    const reportingSecret = secret ? "synthetic-reporting-secret" : null;
+    const reportingUserId = createAssistantUsageReportingUserId({ memberId: "synthetic-member", reportingSecret });
+    const env = createRunnerOutboundEnv({
+      ...(reportingSecret ? { HOSTED_AI_USAGE_REPORTING_SECRET: reportingSecret } : {}),
+    });
+    const privateKeyJwkJson = env.HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK;
+    assert.ok(typeof privateKeyJwkJson === "string");
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = new Request(input, init);
+      const finalBody = await request.clone().text();
+      const forwarded = JSON.parse(finalBody);
+      const kept = normalizeCliTiming(forwarded.usage.turnProfileJson?.cliTiming);
+      expect(kept?.commands.length ?? null).toBe(expectedCommands);
+      if (kept) {
+        expect(kept).toEqual({ ...timing, commands: timing.commands.slice(0, expectedCommands ?? 0),
+          droppedCalls: expectedCommands === timing.commands.length ? timing.droppedCalls : Number.MAX_SAFE_INTEGER });
+      }
+      delete forwarded.usage.turnProfileJson.cliTiming;
+      expect(forwarded).toEqual({ ...legacy, usage: { ...legacy.usage, reportingUserId } });
+      expect(request.headers.get("x-hosted-runtime-attempt-id")).toBe("attempt_1");
+      expect(request.headers.get("x-hosted-runtime-lease-generation")).toBe("9");
+      expect(await verifyHostedWebCallbackSignatureHeaders({
+        environment: { keyId: "v1", privateKeyJwkJson },
+        method: request.method, path: HOSTED_RUNTIME_USAGE_RECORD_PATH, payload: finalBody,
+        request, search: new URL(request.url).search, userId: "synthetic-member", nonceStore: { consume: async () => true },
+      })).toBe(true);
+      if (status === 413) {
+        expect(Buffer.byteLength(finalBody)).toBe(16_385);
+        await expect(readHostedUsageRecordRequestForTest(request)).rejects.toThrow(RangeError);
+        return Response.json({ error: { message: "Request body exceeded 16384 bytes" } }, { status: 413 });
+      }
+      expect(Buffer.byteLength(finalBody)).toBeLessThanOrEqual(16_384);
+      if (bytes === 16_349) expect(Buffer.byteLength(finalBody)).toBe(16_384);
+      const received = await readHostedUsageRecordRequestForTest(request);
+      return Response.json({ platformAiUsageAllowedAfter: true, recorded: true, usageId: received.usage.usageId });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const senderFetch = vi.fn<typeof fetch>(async (input, init) => {
+      const request = new Request(input, init);
+      const headers = new Headers(request.headers);
+      for (const [key, value] of Object.entries(createRunnerWriteFenceProxyHeaders())) headers.set(key, value);
+      return handleRunnerOutboundRequest(new Request(request, { headers }), env, "synthetic-member");
+    });
+    const port = createHostedRuntimeUsageRecordPort({
+      boundUserId: "synthetic-member", timeoutMs: 1000, transport: { mode: "proxy" }, fetchImpl: senderFetch,
+    });
+    const result = port.recordUsage(usage, noticeDeliveryTarget);
+    if (status === 413) await expect(result).rejects.toThrow("Request body exceeded 16384 bytes");
+    else await expect(result).resolves.toEqual({ platformAiUsageAllowedAfter: true, recorded: true, usageId: usage.usageId });
+    expect(JSON.stringify(body)).toBe(original);
+    expect(senderFetch).toHaveBeenCalledOnce();
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
   it("adds hosted usage reporting attribution inside the Worker web-control proxy", async () => {
     const revokeActiveRuntimePlatformAiUsage = vi.fn(async () => true);
     const fetchMock = vi.fn(async (
@@ -2413,7 +2523,7 @@ describe("handleRunnerOutboundRequest", () => {
       cutover: "postgres", status: "observed", owner: {
         userId: "member_123", attemptId: "attempt_1", generation: "9", phase: "active",
         processingMode: "default", allocationId: "allocation_synthetic", runnerContainerName: "runner_synthetic",
-        workspaceVersion: "4", customInferenceEnvelope: null, platformAiUsageAllowed: true,
+        workspaceVersion: "4", platformAiUsageAllowed: true,
         startedAt: "2026-09-17T00:00:00.000Z", acceptedAt: null, completedAt: null,
         failureCount: 0, lastErrorCode: null,
       },
@@ -2429,7 +2539,10 @@ describe("handleRunnerOutboundRequest", () => {
       }), createRunnerOutboundEnv({ RUNNER_CONTAINER: { getByName } }), "member_123",
     );
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({ completed: matched && receipt });
+    await expect(response.json()).resolves.toEqual({
+      completed: matched && receipt,
+      ...(!matched ? { reason: generation === "8" ? "superseded" : "owner_unconfirmed" } : {}),
+    });
     expect(runtimeOwnerClient.commandHostedRuntimeOwner).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
       userId: "member_123", command: { operation: "reconcile" },
     }));
@@ -5335,8 +5448,8 @@ describe("handleRunnerOutboundRequest", () => {
 
   it.each([
     {
-      durationKey: "snapshotStartWriteFenceOwnerValidationDurationMs",
-      stage: "write_fence_owner_validation",
+      durationKey: "snapshotStartSessionCreateStorageDurationMs",
+      stage: "session_create_storage",
     },
     {
       durationKey: "snapshotStartCryptoDataKeyDurationMs",
@@ -5356,7 +5469,7 @@ describe("handleRunnerOutboundRequest", () => {
         throw new TypeError("Workspace snapshot write-fence stub is unavailable.");
       }
       const timedStub: ResourceTestBackend =
-        stage === "write_fence_owner_validation"
+        stage === "session_create_storage"
           ? {
               ...runnerStub,
               async validateRuntimeWriteFence(request) {
@@ -5595,11 +5708,10 @@ describe("handleRunnerOutboundRequest", () => {
     );
     expect(completeResponse.status).toBe(200);
     expect(runner.workspaceSnapshotUploadSessions.get(snapshotId)).toMatchObject({
-      checkpointHandoffCompletedAt: expect.any(String),
       replacedSnapshotRef,
       snapshotId,
     });
-    expect(runner.completeHostedWorkspaceSnapshotUploadSession).toHaveBeenCalledOnce();
+    expect(runner.completeHostedWorkspaceSnapshotUploadSession).not.toHaveBeenCalled();
 
     const abortResponse = await handleRunnerOutboundRequest(
       createWorkspaceSnapshotAbortRequest({
@@ -5705,7 +5817,7 @@ describe("handleRunnerOutboundRequest", () => {
     await expect(response.json()).resolves.toEqual({
       error: "Hosted workspace snapshot start reason must be idle_shutdown.",
     });
-    expect(runner.ownsActiveInvocationLease).toHaveBeenCalledOnce();
+    expect(runner.ownsActiveInvocationLease).not.toHaveBeenCalled();
     expect(runner.createHostedWorkspaceSnapshotUploadSession).not.toHaveBeenCalled();
     expect(runner.workspaceSnapshotUploadSessions.size).toBe(0);
   });
@@ -6865,6 +6977,8 @@ describe("handleRunnerOutboundRequest", () => {
     );
 
     expect(response.status).toBe(200);
+    expect(runtimeOwnerClient.commandHostedRuntimeOwner).not.toHaveBeenCalled();
+    expect(runtimeResourceClient.commandHostedRuntimeSnapshot).toHaveBeenCalledOnce();
     expect(runner.validateRuntimeWriteFence).toHaveBeenCalledWith({
       attemptId: "attempt_1",
       generation: "9",
@@ -6977,7 +7091,9 @@ describe("handleRunnerOutboundRequest", () => {
         version: "5",
       }),
     }));
-    expect(runner.ownsActiveInvocationLease).toHaveBeenCalledTimes(5);
+    expect(runner.ownsActiveInvocationLease).toHaveBeenCalledOnce();
+    expect(runtimeOwnerClient.commandHostedRuntimeOwner).not.toHaveBeenCalled();
+    expect(runtimeResourceClient.commandHostedRuntimeSnapshot).toHaveBeenCalledOnce();
     expect(fetchMock).toHaveBeenCalledTimes(baseline === "omitted" ? 2 : 1);
     expect(fetchMock.mock.calls.filter(isHostedWorkspaceReadFetch)).toHaveLength(baseline === "omitted" ? 1 : 0);
     expect(fetchMock.mock.lastCall?.[0]).toBe("https://web.example.test/api/internal/hosted-workspace/checkpoint?runtimeAuthority=1&runtimeAttempt=attempt_1&runtimeGeneration=9&runtimeWorkspaceVersion=5");
@@ -8337,6 +8453,9 @@ describe("handleRunnerOutboundRequest", () => {
     );
 
     expect(response.status).toBe(200);
+    expect(runtimeOwnerClient.commandHostedRuntimeOwner).not.toHaveBeenCalled();
+    expect(vi.mocked(runtimeResourceClient.commandHostedRuntimeSnapshot).mock.calls.map(([input]) => input.command.operation))
+      .toEqual(["snapshot_read", "snapshot_delete"]);
     await expect(response.json()).resolves.toEqual({
       aborted: true,
       ok: true,
@@ -8413,9 +8532,11 @@ describe("handleRunnerOutboundRequest", () => {
 
     expect(response.status).toBe(409);
     await expect(response.json()).resolves.toEqual({
-      error: "Hosted workspace snapshot upload session is stale.",
+      code: "HOSTED_RUNTIME_OWNER_STALE",
+      error: "Hosted runtime resource rejected: HOSTED_RUNTIME_OWNER_STALE.",
     });
     expect(runner.validateRuntimeWriteFence).toHaveBeenCalledTimes(2);
+    expect(runtimeOwnerClient.commandHostedRuntimeOwner).not.toHaveBeenCalled();
     expect(runner.deleteHostedWorkspaceSnapshotUploadSession).not.toHaveBeenCalled();
     expect(runner.workspaceSnapshotUploadSessions.has(snapshotId)).toBe(false);
     expect(runner.workspaceSnapshotUploadSessions.get(activeSnapshotId)).toEqual(activeSession);
@@ -8473,7 +8594,7 @@ describe("handleRunnerOutboundRequest", () => {
     expect(runner.workspaceSnapshotUploadSessions.has(snapshotId)).toBe(false);
   });
 
-  it("ignores a stale abort without touching the current session or object", async () => {
+  it("rejects a stale abort without touching the current session or object", async () => {
     const runner = createWorkspaceVersionAwareUserRunner({
       leaseGeneration: "10",
     });
@@ -8512,9 +8633,10 @@ describe("handleRunnerOutboundRequest", () => {
       "member_123",
     );
 
-    expect(response.status).toBe(200);
+    expect(response.status).toBe(409);
     await expect(response.json()).resolves.toEqual({
-      aborted: false, ok: true,
+      code: "HOSTED_RUNTIME_OWNER_STALE",
+      error: "Hosted runtime resource rejected: HOSTED_RUNTIME_OWNER_STALE.",
     });
     expect(runner.validateRuntimeWriteFence).toHaveBeenCalledWith({
       attemptId: "attempt_1",
@@ -8823,6 +8945,16 @@ describe("handleRunnerOutboundRequest", () => {
       return staleSession;
     });
 
+    const originalCommand = vi.mocked(runtimeResourceClient.commandHostedRuntimeSnapshot).getMockImplementation();
+    if (!originalCommand) throw new Error("Missing resource command fixture.");
+    vi.mocked(runtimeResourceClient.commandHostedRuntimeSnapshot).mockImplementation(async commandInput => {
+      const result = await originalCommand(commandInput);
+      if (commandInput.command.operation === "snapshot_delete" && !result.applied) {
+        throw new HostedRuntimeResourceRejectedError("HOSTED_RUNTIME_OWNER_STALE");
+      }
+      return result;
+    });
+
     const deleteObject = vi.fn(async () => {});
     const headObject = vi.fn();
     const env = createRunnerOutboundEnv({
@@ -8850,7 +8982,8 @@ describe("handleRunnerOutboundRequest", () => {
 
     expect(response.status).toBe(409);
     await expect(response.json()).resolves.toEqual({
-      error: "Hosted workspace snapshot upload session is stale.",
+      code: "HOSTED_RUNTIME_OWNER_STALE",
+      error: "Hosted runtime resource rejected: HOSTED_RUNTIME_OWNER_STALE.",
     });
     expect(runner.validateRuntimeWriteFence).toHaveBeenCalledTimes(2);
     expect(runner.readHostedWorkspaceSnapshotUploadSession).toHaveBeenCalledOnce();
@@ -8986,7 +9119,7 @@ describe("handleRunnerOutboundRequest", () => {
     expect(runner.workspaceSnapshotUploadSessions.has(snapshotId)).toBe(false);
   });
 
-  it("deletes replaced state without deleting the current snapshot", async () => {
+  it.each([false, true])("defers expired snapshot retirement to Web and preserves deletion rejection (stale: %s)", async stale => {
     const runner = createWorkspaceVersionAwareUserRunner();
     const progressProjection: HostedSystemProgressProjection = {
       nextDefaultProcessingWakeAt: "2026-05-02T00:05:00.000Z",
@@ -9050,6 +9183,12 @@ describe("handleRunnerOutboundRequest", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
+    if (stale) {
+      vi.mocked(runtimeResourceClient.recordHostedRuntimeOrphan).mockImplementationOnce(async () => {
+        runner.setActiveWriteFence({ attemptId: "replacement-attempt", leaseGeneration: "10" });
+      });
+    }
+
     const response = await handleRunnerOutboundRequest(
       createWorkspaceSnapshotCompleteRequest({
         progressProjection,
@@ -9062,6 +9201,14 @@ describe("handleRunnerOutboundRequest", () => {
     );
 
     const responseBody = requireTestObject(await response.json(), "expired current retry response");
+    expect(runtimeOwnerClient.commandHostedRuntimeOwner).toHaveBeenCalledOnce();
+    if (stale) {
+      expect(response.status).toBe(409);
+      expect(responseBody).toMatchObject({ code: "HOSTED_RUNTIME_OWNER_STALE" });
+      expect(runner.workspaceSnapshotUploadSessions.has(snapshotId)).toBe(true);
+      expect(runner.deleteHostedWorkspaceSnapshotUploadSession).not.toHaveBeenCalled();
+      return;
+    }
     expect(response.status).toBe(200);
     expect(responseBody.checkpoint).toEqual(expect.objectContaining({
       checkpointed: true,
@@ -9078,9 +9225,10 @@ describe("handleRunnerOutboundRequest", () => {
       snapshotId,
     }));
     expect(fetchMock).toHaveBeenCalledOnce();
-    expect(deleteObject).toHaveBeenCalledWith(replacedObjectKey);
-    expect(deleteObject).not.toHaveBeenCalledWith(objectKey);
-    expect(runtimeResourceClient.recordHostedRuntimeOrphan).not.toHaveBeenCalled();
+    expect(deleteObject).not.toHaveBeenCalled();
+    expect(runtimeResourceClient.recordHostedRuntimeOrphan).toHaveBeenCalledWith(expect.objectContaining({
+      userId: "member_123", resource: { kind: "snapshot", objectKey: replacedObjectKey },
+    }));
     expect(runner.deleteHostedWorkspaceSnapshotUploadSession).toHaveBeenCalledWith({
       snapshotId,
       userId: "member_123",
@@ -9221,9 +9369,10 @@ describe("handleRunnerOutboundRequest", () => {
       "member_123",
     );
 
-    expect(response.status).toBe(404);
+    expect(response.status).toBe(409);
     await expect(response.json()).resolves.toEqual({
-      error: "Not found",
+      code: "HOSTED_RUNTIME_OWNER_STALE",
+      error: "Hosted runtime resource rejected: HOSTED_RUNTIME_OWNER_STALE.",
     });
     expect(fetchMock).not.toHaveBeenCalled();
     expect(runner.validateRuntimeWriteFence).toHaveBeenCalledWith({
@@ -9297,7 +9446,7 @@ describe("handleRunnerOutboundRequest", () => {
       error: "Hosted workspace snapshot upload session is stale.",
     });
     expect(fetchMock).toHaveBeenCalledOnce();
-    expect(runner.validateRuntimeWriteFence).toHaveBeenCalledTimes(2);
+    expect(runner.validateRuntimeWriteFence).toHaveBeenCalledOnce();
     expect(deleteObject).not.toHaveBeenCalled();
     expect(runtimeResourceClient.recordHostedRuntimeOrphan).not.toHaveBeenCalled();
     expect(runner.deleteHostedWorkspaceSnapshotUploadSession).not.toHaveBeenCalled();
@@ -9382,8 +9531,7 @@ describe("handleRunnerOutboundRequest", () => {
       error: "Hosted workspace replaced snapshot cleanup failed.",
     });
     expect(fetchMock).toHaveBeenCalledOnce();
-    expect(deleteObject).toHaveBeenCalledWith(replacedObjectKey);
-    expect(deleteObject).not.toHaveBeenCalledWith(objectKey);
+    expect(deleteObject).not.toHaveBeenCalled();
     expect(runtimeResourceClient.recordHostedRuntimeOrphan).toHaveBeenCalledOnce();
     expect(runner.deleteHostedWorkspaceSnapshotUploadSession).not.toHaveBeenCalled();
     expect(runner.workspaceSnapshotUploadSessions.get(snapshotId)).toMatchObject({
@@ -9439,9 +9587,10 @@ describe("handleRunnerOutboundRequest", () => {
       "member_123",
     );
 
-    expect(response.status).toBe(404);
+    expect(response.status).toBe(409);
     await expect(response.json()).resolves.toEqual({
-      error: "Not found",
+      code: "HOSTED_RUNTIME_OWNER_STALE",
+      error: "Hosted runtime resource rejected: HOSTED_RUNTIME_OWNER_STALE.",
     });
     expect(runner.validateRuntimeWriteFence).toHaveBeenCalledWith({
       attemptId: "attempt_1",
@@ -9519,7 +9668,8 @@ describe("handleRunnerOutboundRequest", () => {
     });
     const fetchMock = createWorkspaceSnapshotCompleteWebFetchMock({
       onCheckpoint: () => {
-        throw new Error("stale completion must not checkpoint");
+        // The final Web publication owns fresh authority after external R2 work.
+        return Response.json({ error: { code: "HOSTED_RUNTIME_OWNER_STALE" } }, { status: 409 });
       },
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -9538,10 +9688,10 @@ describe("handleRunnerOutboundRequest", () => {
     await expect(response.json()).resolves.toEqual({
       error: "Hosted workspace snapshot upload session is stale.",
     });
-    expect(runner.validateRuntimeWriteFence).toHaveBeenCalledTimes(3);
+    expect(runner.validateRuntimeWriteFence).toHaveBeenCalledTimes(2);
     expect(runner.readHostedWorkspaceSnapshotUploadSession).toHaveBeenCalledOnce();
     expect(headObject).toHaveBeenCalledWith(objectKey);
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(runner.deleteHostedWorkspaceSnapshotUploadSession).not.toHaveBeenCalled();
     expect(runner.workspaceSnapshotUploadSessions.has(snapshotId)).toBe(false);
     expect(runner.workspaceSnapshotUploadSessions.get(activeSnapshotId)).toEqual(activeSession);
@@ -10337,11 +10487,73 @@ it("returns foreground-pending checkpoint responses from snapshot completion wit
     );
 
     expect(response.status).toBe(409);
-    expect(runner.validateRuntimeWriteFence).toHaveBeenCalledTimes(4);
+    expect(runner.validateRuntimeWriteFence).toHaveBeenCalledTimes(2);
     expect(runner.deleteHostedWorkspaceSnapshotUploadSession).toHaveBeenCalledOnce();
     expect(runner.workspaceSnapshotUploadSessions.has(snapshotId)).toBe(false);
     expect(deleteObject).not.toHaveBeenCalledWith(objectKey);
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("completes a managed snapshot with one combined read, one settlement and one fenced publication", async () => {
+    const runner = createWorkspaceVersionAwareUserRunner();
+    const snapshotId = "snapshot_combined_managed_read";
+    const objectKey = await hostedWorkspaceSnapshotObjectKey({ snapshotId, userId: "member_123" });
+    const snapshotRef = createWorkspaceSnapshotV2Ref({ encryptedByteSize: 4,
+      encryptedObjectSha256: "a".repeat(64), objectKey, snapshotId, userId: "member_123" });
+    const session = createWorkspaceSnapshotUploadSession(snapshotRef, { replacedSnapshotRef: null });
+    const receipt = { userId: session.userId, snapshotId, objectKey, uploadId: "synthetic-upload",
+      attemptId: session.attemptId, generation: session.leaseGeneration,
+      encryptedByteSize: 4, encryptedSha256: snapshotRef.archive.encryptedObjectSha256,
+      encryptedMd5: "b".repeat(32), completedAt: null, verifiedAt: null };
+    const operations: string[] = [];
+    vi.mocked(runtimeResourceClient.commandHostedRuntimeSnapshot).mockImplementation(async ({ command }) => {
+      operations.push(command.operation);
+      if (command.operation === "snapshot_managed_read") {
+        return { cutover: "postgres", applied: true, session, managedUpload: receipt };
+      }
+      if (command.operation === "snapshot_managed_settled") {
+        expect(command).toMatchObject({ snapshotId, uploadId: receipt.uploadId,
+          attemptId: receipt.attemptId, generation: receipt.generation, verified: true });
+        return { cutover: "postgres", applied: true, session: null, managedUpload: receipt };
+      }
+      throw new Error(`Unexpected snapshot coordination: ${command.operation}`);
+    });
+    const complete = vi.fn(async () => {});
+    const abort = vi.fn(async () => {});
+    const env = createRunnerOutboundEnv({
+      BUNDLES: {
+        ...createWorkspaceSnapshotBucket(async key => ({ key, size: 4 }), async key => ({
+          key, size: 4, etag: expectedManagedSnapshotEtag(receipt.encryptedMd5),
+          customMetadata: { ...createWorkspaceSnapshotHeadMetadata(snapshotRef), managedupload: "1" },
+        })),
+      },
+      runtimeControl: { getByName: runner.getByName },
+    });
+    env.BUNDLES.resumeMultipartUpload = (key, uploadId) => {
+      expect([key, uploadId]).toEqual([objectKey, receipt.uploadId]);
+      return { uploadId, complete, abort, uploadPart: async () => { throw new Error("Completion cannot upload new bytes."); } };
+    };
+    const fetchMock = createWorkspaceSnapshotCompleteWebFetchMock({
+      onCheckpoint: args => {
+        const request = readTestFetchBodyObject(args, "combined snapshot checkpoint");
+        expect(request).toMatchObject({ attemptId: receipt.attemptId, leaseGeneration: receipt.generation,
+          expectedWorkspaceVersion: "4", snapshotRef: { snapshotId, objectKey } });
+        return Response.json(createHostedWorkspaceCheckpointResponseWithSnapshotRef("5", request.snapshotRef));
+      },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const request = createWorkspaceSnapshotCompleteRequest({ snapshotId, snapshotRef, workspaceVersion: "4" });
+    const body = requireTestObject(await request.json(), "managed completion request");
+    const response = await handleRunnerOutboundRequest(new Request(request.url, {
+      headers: request.headers, method: "POST",
+      body: JSON.stringify({ ...body, managedPart: { uploadId: receipt.uploadId, etag: "synthetic-etag" } }),
+    }), env, "member_123");
+    expect(operations).toEqual(["snapshot_managed_read", "snapshot_managed_settled"]);
+    expect(response.status, await response.clone().text()).toBe(200);
+    expect(runtimeOwnerClient.commandHostedRuntimeOwner).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(complete).toHaveBeenCalledOnce();
+    expect(abort).not.toHaveBeenCalled();
   });
 
   it.each(["missing", "digest_mismatch"])("returns a conflict for %s managed completion authority without publishing", async rejection => {
@@ -10358,7 +10570,7 @@ it("returns foreground-pending checkpoint responses from snapshot completion wit
     vi.mocked(runtimeResourceClient.commandHostedRuntimeSnapshot).mockImplementation(input => {
       if (input.command.operation !== "snapshot_managed_read") return originalCommand(input);
       return Promise.resolve({
-        cutover: "postgres", applied: rejection !== "missing", session: null,
+        cutover: "postgres", applied: true, session,
         managedUpload: rejection === "missing" ? null : {
           userId: session.userId, snapshotId, objectKey, uploadId: "synthetic-upload",
           attemptId: session.attemptId, generation: session.leaseGeneration,
@@ -10696,7 +10908,7 @@ it("returns foreground-pending checkpoint responses from snapshot completion wit
     );
 
     expect(response.status).toBe(503);
-    expect(runner.validateRuntimeWriteFence).toHaveBeenCalledTimes(4);
+    expect(runner.validateRuntimeWriteFence).toHaveBeenCalledTimes(2);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -10714,14 +10926,14 @@ it("returns foreground-pending checkpoint responses from snapshot completion wit
       expect(response.status).toBe(409);
       expect(await response.json()).toEqual({ code, error: "Hosted runtime replica write rejected." });
       expect(put).not.toHaveBeenCalled();
-      expect(vi.mocked(runtimeResourceClient.commandHostedRuntimeReplicaPut).mock.calls.map(([input]) => input.command.operation)).toEqual(["admit"]);
+      expect(vi.mocked(runtimeResourceClient.commandHostedRuntimeReplicaPut).mock.calls.map(([input]) => input.command.operation)).toEqual(["admit_batch", "release_batch"]);
       expect(hostedExecutionMocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(expect.objectContaining({
         message: "Hosted runtime replica write rejected.", details: { errorCode: code, status: 409 },
       }));
     },
   );
 
-  it("writes browser-vault replicas after live lease validation", async () => {
+  it("writes all browser-vault objects after one live batch admission", async () => {
     const fixture = await createHostedRuntimeCryptoContextFixture();
     const runner = createWorkspaceVersionAwareUserRunner();
     const events: string[] = [];
@@ -10730,7 +10942,7 @@ it("returns foreground-pending checkpoint responses from snapshot completion wit
       events.push(`record:${resource.objectKey}`);
     });
     vi.mocked(runtimeResourceClient.commandHostedRuntimeReplicaPut).mockImplementation(async ({ command }) => {
-      if (command.operation === "admit" && !command.multipart) events.push(`admit:${command.objectKey}`);
+      if (command.operation === "admit_batch") events.push(`admit:${command.objectKey}`);
       return true;
     });
     const defaultEnv = createRunnerOutboundEnv();
@@ -10781,7 +10993,7 @@ it("returns foreground-pending checkpoint responses from snapshot completion wit
       }),
     });
     expect(publishedReplicaRef?.shards).toBeDefined();
-    expect(runner.ownsActiveInvocationLease).toHaveBeenCalledOnce();
+    expect(runtimeOwnerClient.commandHostedRuntimeOwner).not.toHaveBeenCalled();
     expect(fixture.fetchMock).toHaveBeenCalledOnce();
     expect(runtimeResourceClient.recordHostedRuntimeOrphan).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
       userId: "member_123", resource: { kind: "replica", objectKey: replacedReplicaRef.objectKey },
@@ -10790,8 +11002,10 @@ it("returns foreground-pending checkpoint responses from snapshot completion wit
     expect(events.slice(0, 2)).toEqual([`record:${replacedReplicaRef.objectKey}`, `admit:${plannedObjectKeys[0]}`]);
     expect(new Set(events.slice(2))).toEqual(new Set(plannedObjectKeys.map(key => `put:${key}`)));
     const admissions = vi.mocked(runtimeResourceClient.commandHostedRuntimeReplicaPut).mock.calls
-      .map(([input]) => input.command).filter(command => command.operation === "admit");
-    expect(admissions.filter(command => command.multipart)).toHaveLength(plannedObjectKeys.length);
+      .map(([input]) => input.command).filter(command => command.operation === "admit_batch");
+    expect(admissions).toHaveLength(1);
+    expect(admissions[0]!.uploads).toHaveLength(plannedObjectKeys.length);
+    expect(runtimeResourceClient.commandHostedRuntimeReplicaPut).toHaveBeenCalledTimes(2);
     expect(admissions.every(command => command.objectKey === plannedObjectKeys[0])).toBe(true);
 
   });
@@ -10940,10 +11154,11 @@ it("returns foreground-pending checkpoint responses from snapshot completion wit
       "member_123" ,
     );
 
-    expect(response.status).toBe(401);
+    expect(response.status).toBe(409);
     expect(bindUser).not.toHaveBeenCalled();
     expect(ownsActiveInvocationLease).toHaveBeenCalledOnce();
-    expect(fixture.fetchMock).not.toHaveBeenCalled();
+    expect(fixture.fetchMock).toHaveBeenCalledOnce();
+    expect(runtimeOwnerClient.commandHostedRuntimeOwner).not.toHaveBeenCalled();
   });
 
   it("rejects browser-vault replica writes when the invocation proxy token is missing", async () => {
@@ -12558,12 +12773,12 @@ function requireTestString(value: unknown, label: string): string {
 
 function readRootReplicaAdmission() {
   return vi.mocked(runtimeResourceClient.commandHostedRuntimeReplicaPut).mock.calls
-    .map(([input]) => input.command).filter(command => command.operation === "admit").find(command => !command.multipart);
+    .map(([input]) => input.command).find(command => command.operation === "admit_batch");
 }
 function rootReplicaAdmissionReleased(): boolean {
   const root = readRootReplicaAdmission();
   return root !== undefined && vi.mocked(runtimeResourceClient.commandHostedRuntimeReplicaPut).mock.calls
-    .some(([input]) => input.command.operation === "release" && input.command.writeId === root.writeId);
+    .some(([input]) => input.command.operation === "release_batch" && input.command.writeIds.includes(root.uploads.find(upload => upload.objectKey === root.objectKey)!.writeId));
 }
 
 type OutboundTestEnvironment = RunnerOutboundEnvironmentSource & {

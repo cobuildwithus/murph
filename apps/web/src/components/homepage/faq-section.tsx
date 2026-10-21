@@ -65,20 +65,7 @@ const FAQ_ITEMS = [
   ],
 ] as const;
 
-const MODEL_PROVIDER_FAQ_ITEM = [
-  "Can I choose which AI provider Murph uses?",
-  "Yes. In Settings, choose OpenAI or Venice for Murph’s core assistant replies. Specialized tools can still use their own managed providers.",
-] as const;
-
-export function FaqSection({
-  veniceAvailable = false,
-}: {
-  veniceAvailable?: boolean;
-} = {}) {
-  const items = veniceAvailable
-    ? [...FAQ_ITEMS, MODEL_PROVIDER_FAQ_ITEM]
-    : FAQ_ITEMS;
-
+export function FaqSection() {
   return (
     <section id="faq" className="px-5 py-16 sm:px-10 lg:px-16 lg:py-24">
       <div className="mx-auto max-w-[1080px]">
@@ -89,7 +76,7 @@ export function FaqSection({
             </h2>
           </div>
           <div className="grid gap-x-16 gap-y-0 sm:grid-cols-2">
-            {items.map(([question, answer]) => (
+            {FAQ_ITEMS.map(([question, answer]) => (
               <div key={question} className="border-b border-[#c4a882]/15 py-5">
                 <p className="text-[0.9375rem] font-semibold text-[#2d3436]">
                   {question}

@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-10-05",
+  "order": 100,
+  "item": {
+    "id": "faster-dropped-connection-recovery",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Faster replies after a dropped connection",
+    "summary": "When Murph's connection to its model drops before a reply starts, Murph recovers after 15 seconds instead of 90.",
+    "details": "Replies that have already started keep their existing time, so longer reasoning and tool work can still finish.",
+    "relevanceTags": ["messaging", "reliability"],
+    "sourcePullRequests": [4022]
+  }
+}

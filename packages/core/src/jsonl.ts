@@ -2,11 +2,7 @@ import { createReadStream } from "node:fs";
 import { createInterface } from "node:readline";
 
 import { VaultError } from "./errors.ts";
-import {
-  isEventLedgerLogicalPath,
-  readEventLedgerShardRecords,
-  visitEventLedgerShardRecordsInterruptible,
-} from "./event-ledger-storage.ts";
+import { canonicalJsonlStorageForPath } from "./canonical-jsonl-storage.ts";
 import { readUtf8File } from "./fs.ts";
 import {
   assertPathWithinVaultOnDisk,
@@ -37,8 +33,9 @@ export async function readJsonlRecords({
   relativePath: string;
 }): Promise<UnknownRecord[]> {
   const normalizedRelativePath = normalizeRelativeVaultPath(relativePath);
-  if (isEventLedgerLogicalPath(normalizedRelativePath)) {
-    return await readEventLedgerShardRecords({
+  const storage = canonicalJsonlStorageForPath(normalizedRelativePath);
+  if (storage) {
+    return await storage.readJsonlShardRecords({
       vaultRoot,
       relativePath: normalizedRelativePath,
     });
@@ -67,8 +64,9 @@ export async function visitJsonlRecordsInterruptible({
   visitedCount: number;
 }> {
   const normalizedRelativePath = normalizeRelativeVaultPath(relativePath);
-  if (isEventLedgerLogicalPath(normalizedRelativePath)) {
-    return await visitEventLedgerShardRecordsInterruptible({
+  const storage = canonicalJsonlStorageForPath(normalizedRelativePath);
+  if (storage) {
+    return await storage.visitJsonlShardRecordsInterruptible({
       relativePath: normalizedRelativePath,
       shouldContinue,
       signal,

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  findUnique: vi.fn(),
   checkHostedAiUsageGate: vi.fn(),
   readHostedAiUsageGate: vi.fn(),
   readHostedRuntimeAiAccessDecision: vi.fn(),
@@ -8,13 +9,19 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@/src/lib/hosted-execution/usage-allowance", () => ({
+  hostedAiUsageMemberSelect: {},
   checkHostedAiUsageGate: mocks.checkHostedAiUsageGate,
   readHostedAiUsageGate: mocks.readHostedAiUsageGate,
   resolveHostedAiUsageGate: mocks.resolveHostedAiUsageGate,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/member-access", () => ({
+  hostedRuntimeAiMemberAccessSelect: { threadContainer: { select: {} } },
   readHostedRuntimeAiAccessDecision: mocks.readHostedRuntimeAiAccessDecision,
+}));
+
+vi.mock("@/src/lib/prisma", () => ({
+  getPrisma: () => ({ hostedMember: { findUnique: mocks.findUnique } }),
 }));
 
 import {
@@ -26,11 +33,28 @@ import {
 
 describe("resolveHostedRuntimeAiUsageGate", () => {
   beforeEach(() => {
+    mocks.findUnique.mockReset().mockResolvedValue(undefined);
     mocks.checkHostedAiUsageGate.mockReset();
     mocks.readHostedAiUsageGate.mockReset();
     mocks.resolveHostedAiUsageGate.mockReset();
     mocks.readHostedRuntimeAiAccessDecision.mockReset();
     mocks.readHostedRuntimeAiAccessDecision.mockResolvedValue({ allowed: true });
+  });
+
+  it("shares one projection inside a request and reads a fresh one on the next request", async () => {
+    const first = { billingStatus: "active" };
+    const second = { billingStatus: "paused" };
+    mocks.findUnique.mockResolvedValueOnce(first).mockResolvedValueOnce(second);
+    mocks.readHostedAiUsageGate.mockResolvedValue(buildAllowedUsageGateDecision({ remainingUsdMicros: 8_000_000n }));
+    await resolveHostedRuntimeAiUsageGate({ mode: "read_only", userId: "member_123" });
+    await resolveHostedRuntimeAiUsageGate({ mode: "read_only", userId: "member_123" });
+    expect(mocks.findUnique).toHaveBeenCalledTimes(2);
+    for (const [index, memberState] of [first, second].entries()) {
+      expect(mocks.readHostedRuntimeAiAccessDecision).toHaveBeenNthCalledWith(index + 1,
+        expect.objectContaining({ memberState }));
+      expect(mocks.readHostedAiUsageGate).toHaveBeenNthCalledWith(index + 1,
+        expect.objectContaining({ memberState }));
+    }
   });
 
   it.each([
@@ -53,7 +77,7 @@ describe("resolveHostedRuntimeAiUsageGate", () => {
       expect(mocks[owner]).toHaveBeenCalledWith({
         memberId: "member_123",
         now: new Date("2026-06-12T12:00:00.000Z"),
-        prisma: undefined,
+        prisma: { hostedMember: { findUnique: mocks.findUnique } },
       });
       expect(mocks[owner]).toHaveBeenCalledTimes(1);
       for (const [otherOwner, otherMock] of [

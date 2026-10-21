@@ -1,0 +1,19 @@
+{
+  "publishedOn": "2026-10-05",
+  "order": 100,
+  "item": {
+    "id": "reliable-phone-welcome-handoff",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "More reliable phone welcomes",
+    "summary": "Murph can finish setting up your private phone conversation after a welcome message is accepted, including when you add a phone after signing up by email.",
+    "details": "The handoff still checks your verified phone and assigned Murph number before linking the conversation.",
+    "relevanceTags": [
+      "onboarding",
+      "messaging"
+    ],
+    "sourcePullRequests": [
+      4015
+    ]
+  }
+}

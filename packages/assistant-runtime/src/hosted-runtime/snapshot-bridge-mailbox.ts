@@ -1,3 +1,4 @@
+import { isHostedRetiredMailboxKind } from "@murphai/hosted-execution/runtime-control";
 import {
   isHostedLinqConversationMessageWake,
   isHostedTelegramConversationMessageWake,
@@ -204,9 +205,9 @@ async function importHostedWorkspaceBridgeMailboxItem(
   }
 
   if (input.item.route.action === "skip-retired-mailbox-item") {
-    if (input.item.item.kind !== "group-newsletter.email-needed") {
+    if (!isHostedRetiredMailboxKind(input.item.item.kind)) {
       return {
-        reasonCode: "legacy_group_newsletter_email_needed.route_mismatch",
+        reasonCode: "mailbox.retired_kind_mismatch",
         retryable: false,
         status: "blocked",
       };
@@ -215,7 +216,7 @@ async function importHostedWorkspaceBridgeMailboxItem(
     // This compatibility reader only advances past rows accepted before the
     // producer was retired. It deliberately does not decrypt or import them.
     return {
-      reasonCode: "legacy_group_newsletter_email_needed.retired",
+      reasonCode: "mailbox.kind_retired",
       status: "skipped",
     };
   }

@@ -1,4 +1,5 @@
 import * as z from "./zod-runtime.ts";
+import { clinicalFactSchema } from "./clinical-fact.ts";
 
 import { withContractMetadata } from "./schema-metadata.ts";
 import {
@@ -1280,6 +1281,7 @@ const symptomEventFieldsShape = {
 
 const noteEventFieldsShape = {
   ...experimentLinkShape,
+  clinicalFact: clinicalFactSchema.optional(),
   note: boundedString(1, 4000),
   noteType: boundedString(1, 120).optional(),
   plan: z.object({

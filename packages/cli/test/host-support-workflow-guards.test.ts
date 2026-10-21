@@ -67,7 +67,7 @@ describe('host support workflow guards', () => {
     expect(workflow).toContain(
       'MURPH_SUPPLEMENT_SEARCH_TEST_DB_URL: postgresql://postgres:postgres@127.0.0.1:5432/murph_search_test',
     )
-    expect(workflow).toContain('image: public.ecr.aws/docker/library/postgres:17')
+    expect(workflow).toContain('image: postgres:17')
     expect(workflow).toContain('POSTGRES_DB: murph_search_test')
     expect(workflow).toContain('POSTGRES_USER: postgres')
     expect(workflow).toContain('MURPH_VERIFY_STEP_PARALLEL: "1"')
@@ -89,7 +89,7 @@ describe('host support workflow guards', () => {
       'release-package-coverage-linux',
     )
     const cacheInputHash =
-      "${{ hashFiles('.nvmrc', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', 'package.json', 'packages/*/package.json', 'apps/*/package.json', 'tsconfig*.json', 'packages/*/tsconfig*.json', 'apps/*/tsconfig*.json') }}"
+      "${{ hashFiles('scripts/run-typescript.mjs', '.nvmrc', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', 'package.json', 'packages/*/package.json', 'apps/*/package.json', 'tsconfig*.json', 'packages/*/tsconfig*.json', 'apps/*/tsconfig*.json') }}"
 
     expect(buildTypecheckJob.match(new RegExp(actionsCacheV5, 'gu')) ?? []).toHaveLength(1)
     expect(buildTypecheckJob).toContain(`- name: Restore release typecheck build info

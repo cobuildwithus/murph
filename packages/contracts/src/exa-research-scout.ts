@@ -374,8 +374,8 @@ export const researchScoutBatchPayloadSchema = z
 export const researchScoutInputSchema = z
   .object({
     profile: researchScoutProfileSchema,
-    since: z.string().datetime(),
-    until: z.string().datetime(),
+    since: z.isoDateTime(),
+    until: z.isoDateTime(),
     maxCandidates: z
       .number()
       .int()
@@ -391,8 +391,8 @@ const researchScoutTagInputSchema = researchScoutInputSchema
 
 export const researchScoutBatchInputSchema = researchScoutBatchPayloadSchema
   .extend({
-    since: z.string().datetime(),
-    until: z.string().datetime(),
+    since: z.isoDateTime(),
+    until: z.isoDateTime(),
     maxCandidatesPerLane: z
       .number()
       .int()

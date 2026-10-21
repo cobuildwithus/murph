@@ -1,0 +1,19 @@
+{
+  "publishedOn": "2026-09-24",
+  "order": 100,
+  "item": {
+    "id": "recurring-report-corrections",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Lasting corrections carry forward",
+    "summary": "Corrections meant for future behavior are saved in the right place before Murph confirms them.",
+    "details": "Changes scoped to one task stay with that task; broader reply preferences use your settings. One-off edits leave saved preferences unchanged.",
+    "relevanceTags": [
+      "reminders",
+      "group-chat"
+    ],
+    "sourcePullRequests": [
+      3697
+    ]
+  }
+}

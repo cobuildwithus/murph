@@ -17,7 +17,7 @@ const PROJECTION_MAX_BYTES = 24 * 1024
 const MAX_SCANNED_RECORDS = 100_000
 const MAX_SHARDS = 128
 const STALE_AFTER_MS = 48 * 60 * 60 * 1_000
-const instant = z.string().datetime({ offset: true })
+const instant = z.isoDateTime({ offset: true })
 
 const entrySchema = z.object({
   eventId: z.string().regex(/^evt_[0-9A-HJKMNP-TV-Z]{26}$/u),

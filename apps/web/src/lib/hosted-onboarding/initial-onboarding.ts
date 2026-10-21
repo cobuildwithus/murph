@@ -1,6 +1,6 @@
 import type { Prisma, PrismaClient } from "@prisma/client";
 import {
-  isAssistantPersonaId,
+  normalizeStoredAssistantPersonaId,
   isAssistantTonePreference,
   isAssistantVoiceOptionId,
   type AssistantPersonaId,
@@ -157,8 +157,9 @@ export function parseHostedInitialOnboardingCompletionRequest(
     throw invalidCompletionRequest("Choose a valid Murph persona, tone, and voice.");
   }
   rejectUnknownFields(body.preferences, COMPLETION_PREFERENCE_FIELDS);
+  const persona = normalizeStoredAssistantPersonaId(body.preferences.persona);
   if (
-    !isAssistantPersonaId(body.preferences.persona)
+    !persona
     || !isAssistantTonePreference(body.preferences.tone)
     || !isAssistantVoiceOptionId(body.preferences.voice)
   ) {
@@ -168,7 +169,7 @@ export function parseHostedInitialOnboardingCompletionRequest(
   return {
     action: "save",
     preferences: {
-      persona: body.preferences.persona,
+      persona,
       tone: body.preferences.tone,
       voice: body.preferences.voice,
     },

@@ -29,9 +29,6 @@ vi.mock("@/src/lib/hosted-execution/internal-request-nonces", () => ({
 vi.mock("@/src/lib/hosted-runtime-log/write", () => ({ writeHostedRuntimeLogs: edges.write }));
 vi.mock("@/src/lib/hosted-workspace/store", () => ({ claimHostedAcceptedAttemptFailureRecheck: async () => false }));
 vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({ signalHostedRuntimeRecheckRuntime: vi.fn() }));
-vi.mock("@/src/lib/hosted-runtime-log/personal-patterns-run-alert", () => ({
-  hasHostedPersonalPatternsRunAlert: () => false, reportHostedPersonalPatternsRunAlerts: vi.fn(),
-}));
 
 import { GET } from "../app/api/internal/hosted-runtime/protocol-admission/route";
 import { POST as log } from "../app/api/internal/hosted-runtime/log/route";
@@ -155,5 +152,17 @@ describe("served Web protocol admission", () => {
     for (const value of [{ authorized: false }, { authorized: true, threadIsDirect: null }, { authorized: true, assistantAskFallbackRequired: "yes" }]) {
       expect(() => parseHostedExternalThreadRouteAuthorityResponse(value)).toThrow();
     }
+  });
+});
+
+describe("replica batch rollout admission", () => {
+  it("accepts the deployed batch parsers and blocks missing or incomplete old-Web evidence", async () => {
+    const probe = await request();
+    const evidence = await (await GET(probe)).json();
+    const nonce = probe.headers.get(HOSTED_EXECUTION_NONCE_HEADER)!;
+    expect(() => assertHostedRuntimeWebProtocolAdmission(evidence, nonce)).not.toThrow();
+    expect(() => assertHostedRuntimeWebProtocolAdmission({ ...evidence, runtimeReplicaBatch: undefined }, nonce)).toThrow("replica_batch");
+    expect(() => assertHostedRuntimeWebProtocolAdmission({ ...evidence, runtimeReplicaBatch: { ...evidence.runtimeReplicaBatch,
+      admission: { ...evidence.runtimeReplicaBatch.admission, uploads: evidence.runtimeReplicaBatch.admission.uploads.slice(1) } } }, nonce)).toThrow("replica_batch");
   });
 });

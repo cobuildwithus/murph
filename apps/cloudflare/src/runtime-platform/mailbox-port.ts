@@ -1,4 +1,9 @@
-import type { HostedRuntimePlatform } from "@murphai/assistant-runtime/hosted-runtime-contracts";
+import { emitHostedExecutionStructuredLog } from "@murphai/hosted-execution";
+import { HOSTED_RUNTIME_FETCH_CORRELATION_ID_HEADER } from "../runner-outbound/headers.ts";
+import type {
+  HostedRuntimeMailboxFetchResponse,
+  HostedRuntimePlatform,
+} from "@murphai/assistant-runtime/hosted-runtime-contracts";
 import {
   parseHostedMailboxFetchResponse,
   parseHostedExecutionWake,
@@ -10,50 +15,113 @@ import {
   HOSTED_RUNNER_WEB_CONTROL_ROUTES,
   type HostedWebControlTransport,
 } from "./web-control-transport.ts";
+import type { HostedRuntimeRedactedObject } from "@murphai/hosted-execution/runtime-control";
+import {
+  summarizeFetchTransport,
+  type HostedRuntimeFetchTransportDiagnostics,
+  type HostedRuntimeFetchTransportRecorder,
+} from "./fetch-transport-collector.ts";
+import { observeFirstHostedRuntimeFetch } from "./fetch-transport-diagnostics.ts";
 
 export function createHostedWebMailboxPort(input: {
   boundUserId: string;
   fetchImpl: typeof fetch;
+  fetchTransportDiagnostics?: HostedRuntimeFetchTransportDiagnostics | null;
   timeoutMs: number;
   transport: HostedWebControlTransport;
 }) {
   return {
+    async admitVoiceInput(
+      request: Parameters<NonNullable<NonNullable<HostedRuntimePlatform["mailboxPort"]>["admitVoiceInput"]>>[0],
+    ) {
+      const payload = await fetchHostedWebControlPlaneJson({
+        body: request,
+        boundUserId: input.boundUserId,
+        description: "Hosted voice input admission",
+        fetchImpl: input.fetchImpl,
+        route: HOSTED_RUNNER_WEB_CONTROL_ROUTES.voiceInput,
+        replayOnceOnRetryableFailure: true,
+        timeoutMs: input.timeoutMs,
+        transport: input.transport,
+      });
+      if (typeof payload !== "object" || payload === null
+        || !("mailboxItemId" in payload) || typeof payload.mailboxItemId !== "string"
+        || !payload.mailboxItemId.trim()) {
+        throw new TypeError("Hosted voice input admission response is invalid.");
+      }
+      return { mailboxItemId: payload.mailboxItemId };
+    },
     async fetch(
       request: Parameters<NonNullable<HostedRuntimePlatform["mailboxPort"]>["fetch"]>[0],
       context?: Parameters<NonNullable<HostedRuntimePlatform["mailboxPort"]>["fetch"]>[1],
-    ) {
-      let payload: unknown;
+    ): Promise<HostedRuntimeMailboxFetchResponse> {
+      const correlationId = crypto.randomUUID();
+      const startedAt = performance.now();
+      const startedAtEpochMs = Date.now();
+      let decodedAt: number | null = null;
+      let decodedAtEpochMs: number | null = null;
+      let importReadyAtEpochMs: number | null = null;
+      // A conversation read carries its own first-attempt timing to the import pass
+      // that consumes it; the invocation-first claim reuses that same observation.
+      const readTransport = request.lanes.some(({ lane }) => lane === "conversation")
+        ? observeHostedMailboxReadTransport(
+          input.fetchImpl,
+          input.fetchTransportDiagnostics?.claimConversationMailboxFetch() ?? null,
+        )
+        : null;
       try {
-        payload = await fetchReplaySafeHostedWebControlPlaneJson({
-          body: { ...request, decodeInlinePayloads: true },
-          boundUserId: input.boundUserId,
-          description: "Hosted mailbox fetch",
-          fetchImpl: input.fetchImpl,
-          route: HOSTED_RUNNER_WEB_CONTROL_ROUTES.mailboxFetch,
-          ...(context?.signal ? { signal: context.signal } : {}),
-          timeoutMs: input.timeoutMs,
-          transport: input.transport,
-        });
-      } catch (error) {
-        if (context?.signal?.aborted) {
-          throw context.signal.reason;
+        let payload: unknown;
+        try {
+          payload = await fetchReplaySafeHostedWebControlPlaneJson({
+            body: { ...request, decodeInlinePayloads: true },
+            boundUserId: input.boundUserId,
+            description: "Hosted mailbox fetch",
+            fetchImpl: readTransport?.fetchImpl ?? input.fetchImpl,
+            headers: new Headers({ [HOSTED_RUNTIME_FETCH_CORRELATION_ID_HEADER]: correlationId }),
+            route: HOSTED_RUNNER_WEB_CONTROL_ROUTES.mailboxFetch,
+            ...(context?.signal ? { signal: context.signal } : {}),
+            timeoutMs: input.timeoutMs,
+            transport: input.transport,
+          });
+        } catch (error) {
+          if (context?.signal?.aborted) throw context.signal.reason;
+          throw error;
         }
-        throw error;
+        decodedAt = performance.now();
+        decodedAtEpochMs = Date.now();
+        const mailbox = parseHostedMailboxFetchResponse(payload);
+        // The ordinary parser proves these item records. Only the Worker port
+        // accepts this ephemeral enrichment; Web's canonical parser discards it.
+        const rawItems = (payload as { items: Array<Record<string, unknown>> }).items;
+        const result = {
+          ...mailbox,
+          items: mailbox.items.map((item, index) => ({
+            ...item,
+            ...(rawItems[index]?.decodedWake === undefined ? {} : {
+              decodedWake: parseHostedExecutionWake(rawItems[index]!.decodedWake),
+            }),
+          })),
+        };
+        importReadyAtEpochMs = Date.now();
+        return readTransport ? { ...result, transportTiming: readTransport.read() } : result;
+      } finally {
+        emitHostedExecutionStructuredLog({
+          component: "mailbox",
+          details: {
+            mailboxFetchCorrelationId: correlationId,
+            mailboxRuntimeFetchStartedAtEpochMs: startedAtEpochMs,
+            mailboxRuntimeResponseDecodedAtEpochMs: decodedAtEpochMs,
+            mailboxRuntimeImportReadyAtEpochMs: importReadyAtEpochMs,
+            mailboxRuntimeFetchAndDecodeMs: decodedAt === null ? null : Math.max(0, Math.round(decodedAt - startedAt)),
+            mailboxRuntimeParseMs: decodedAt === null ? null : Math.max(0, Math.round(performance.now() - decodedAt)),
+            mailboxRuntimeTotalMs: Math.max(0, Math.round(performance.now() - startedAt)),
+            mailboxRuntimeImportReady: importReadyAtEpochMs !== null,
+          },
+          level: importReadyAtEpochMs === null ? "warn" : "info",
+          message: "Hosted runtime mailbox fetch finished.",
+          phase: "wake.running",
+        });
       }
-
-      const mailbox = parseHostedMailboxFetchResponse(payload);
-      // The ordinary parser proves these item records. Only the Worker port
-      // accepts this ephemeral enrichment; Web's canonical parser discards it.
-      const rawItems = (payload as { items: Array<Record<string, unknown>> }).items;
-      return {
-        ...mailbox,
-        items: mailbox.items.map((item, index) => ({
-          ...item,
-          ...(rawItems[index]?.decodedWake === undefined ? {} : {
-            decodedWake: parseHostedExecutionWake(rawItems[index]!.decodedWake),
-          }),
-        })),
-      };
     },
     async fetchPayload(
       request: Parameters<NonNullable<HostedRuntimePlatform["mailboxPort"]>["fetchPayload"]>[0],
@@ -99,5 +167,25 @@ export function createHostedWebMailboxPort(input: {
         throw new TypeError("Hosted member action outcome response is invalid.");
       }
     },
+  };
+}
+
+/** Observe one logical read's first attempt and count its attempts; retries pass through. */
+function observeHostedMailboxReadTransport(
+  fetchImpl: typeof fetch,
+  recordInvocationFirst: HostedRuntimeFetchTransportRecorder | null,
+) {
+  let attemptCount = 0;
+  let timing: HostedRuntimeRedactedObject | null = null;
+  const observed = observeFirstHostedRuntimeFetch(fetchImpl, (transport, response) => {
+    timing = summarizeFetchTransport("passMailboxFetch", transport, response);
+    recordInvocationFirst?.(transport, response);
+  });
+  return {
+    fetchImpl: ((resource: RequestInfo | URL, init?: RequestInit) => {
+      attemptCount += 1;
+      return observed(resource, init);
+    }) as typeof fetch,
+    read: (): HostedRuntimeRedactedObject => ({ ...timing, passMailboxFetchAttemptCount: attemptCount }),
   };
 }

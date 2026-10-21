@@ -1,4 +1,8 @@
-import { HOSTED_RUNTIME_RESOURCES_PATH, parseHostedRuntimeSnapshotResponse, type HostedRuntimeSnapshotCommand } from "@murphai/hosted-execution/runtime-resources";
+// These contracts already load with the Worker. Dynamic imports retain unused
+// exports from their shared graph and increase cold-start initialization.
+import { HOSTED_RUNTIME_REPLICA_PUT_PATH, HOSTED_RUNTIME_RESOURCES_PATH, parseHostedRuntimeSnapshotResponse, type HostedRuntimeReplicaPutCommand, type HostedRuntimeSnapshotCommand } from "@murphai/hosted-execution/runtime-resources";
+import { HOSTED_RUNTIME_MEDIA_PATH, parseHostedRuntimeMediaResponse, type HostedRuntimeMediaCommand } from "@murphai/hosted-execution/runtime-media";
+import { HOSTED_RUNTIME_ORPHAN_RECORD_PATH, type HostedRuntimeResourcePurge } from "@murphai/hosted-execution/runtime-resource-purge";
 import { readHostedExecutionEnvironment } from "./env.ts";
 import { asWorkerStringEnvironment } from "./worker-contracts.ts";
 import { fetchHostedExecutionWebControlPlaneResponse } from "./web-control-plane.ts";
@@ -31,16 +35,15 @@ export async function commandHostedRuntimeSnapshot(input: {
 
 export async function commandHostedRuntimeMedia(input: {
   source: Readonly<Record<string, unknown>>; userId: string;
-  command: import("@murphai/hosted-execution/runtime-media").HostedRuntimeMediaCommand;
+  command: HostedRuntimeMediaCommand;
 }) {
-  const { HOSTED_RUNTIME_MEDIA_PATH, parseHostedRuntimeMediaResponse } = await import("@murphai/hosted-execution/runtime-media");
   const env = readHostedExecutionEnvironment(asWorkerStringEnvironment(input.source));
   const response = await fetchHostedExecutionWebControlPlaneResponse({
     baseUrl: env.hostedWebBaseUrl, allowHttpHosts: env.hostedWebAllowHttpHosts,
     callbackSigning: env.webCallbackSigning, boundUserId: input.userId,
     method: "POST", path: HOSTED_RUNTIME_MEDIA_PATH, body: JSON.stringify(input.command), timeoutMs: env.webControlTimeoutMs,
   });
-  if (!response.ok) throw new Error(`Hosted runtime media command returned HTTP ${response.status}.`);
+  if (!response.ok) await throwRuntimeResourceRejection(response, env.webControlTimeoutMs, "media");
   const result = parseHostedRuntimeMediaResponse(JSON.parse(await readHostedWebControlPlaneResponseText({
     response, description: "Hosted runtime media", maxBytes: 16 * 1024, signal: null, timeoutMs: env.webControlTimeoutMs,
   })));
@@ -50,9 +53,8 @@ export async function commandHostedRuntimeMedia(input: {
 
 export async function recordHostedRuntimeOrphan(input: {
   source: Readonly<Record<string, unknown>>; userId: string;
-  resource: import("@murphai/hosted-execution/runtime-resource-purge").HostedRuntimeResourcePurge;
+  resource: HostedRuntimeResourcePurge;
 }): Promise<void> {
-  const { HOSTED_RUNTIME_ORPHAN_RECORD_PATH } = await import("@murphai/hosted-execution/runtime-resource-purge");
   const env = readHostedExecutionEnvironment(asWorkerStringEnvironment(input.source));
   const response = await fetchHostedExecutionWebControlPlaneResponse({
     baseUrl: env.hostedWebBaseUrl, allowHttpHosts: env.hostedWebAllowHttpHosts,
@@ -66,9 +68,8 @@ export async function recordHostedRuntimeOrphan(input: {
 
 export async function commandHostedRuntimeReplicaPut(input: {
   source: Readonly<Record<string, unknown>>; userId: string;
-  command: import("@murphai/hosted-execution/runtime-resources").HostedRuntimeReplicaPutCommand;
+  command: HostedRuntimeReplicaPutCommand;
 }): Promise<boolean> {
-  const { HOSTED_RUNTIME_REPLICA_PUT_PATH } = await import("@murphai/hosted-execution/runtime-resources");
   const env = readHostedExecutionEnvironment(asWorkerStringEnvironment(input.source));
   const response = await fetchHostedExecutionWebControlPlaneResponse({
     baseUrl: env.hostedWebBaseUrl, allowHttpHosts: env.hostedWebAllowHttpHosts,
@@ -84,7 +85,7 @@ export async function commandHostedRuntimeReplicaPut(input: {
 async function throwRuntimeResourceRejection(
   response: Response,
   timeoutMs: number,
-  operation: "snapshot" | "replica PUT",
+  operation: "snapshot" | "replica PUT" | "media",
 ): Promise<never> {
   let code: unknown;
   if (response.status === 409) {

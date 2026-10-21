@@ -16,6 +16,7 @@ import {
 import { buildDeviceSyncTokenCipherOptions, createSecretCodec } from "./local-secret-codec.ts";
 import { deviceSyncError, isDeviceSyncError } from "./errors.ts";
 import { JunctionTimeseriesProgressError } from "./junction-timeseries-progress.ts";
+import { readSafeJunctionRequestTimeoutDiagnostics } from "./junction-request-timeout-diagnostics.ts";
 import {
   isJunctionCompanionHrvRmssdJob,
   isJunctionSparseCalendarRefreshJob,
@@ -66,6 +67,7 @@ import type {
   DeviceSyncAccount,
   DeviceSyncCanonicalImportReceipt,
   DeviceSyncImporterPort,
+  DeviceSyncJobIdentity,
   DeviceSyncJobInput,
   DeviceSyncJobRecord,
   DeviceSyncJobTimingDiagnostic,
@@ -265,7 +267,7 @@ export interface DeviceSyncService {
   disconnectAccount(accountId: string, expectedConnectedAt: string): Promise<DisconnectAccountResult>;
   getNextJobWakeAt(): string | null;
   getNextWakeAt(now?: string): string | null;
-  runSchedulerOnce(accountId?: string): Promise<DeviceSyncJobRecord[]>;
+  runSchedulerOnce(accountId?: string, options?: { reconcileBefore?: string }): Promise<DeviceSyncJobRecord[]>;
   runWorkerOnce(accountId?: string): Promise<DeviceSyncJobRecord | null>;
   // Drains up to `limit` durable job rows. One worker pass starts from one
   // claimed seed job, but provider batching still counts every claimed row.
@@ -630,12 +632,18 @@ class DeviceSyncServiceController {
     return this.jobFailureDiagnostics.map((entry) => ({
       ...entry,
       details: { ...entry.details },
+      ...(entry.jobIdentities
+        ? { jobIdentities: entry.jobIdentities.map((identity) => ({ ...identity })) }
+        : {}),
     }));
   }
 
   listJobTimingDiagnostics(): DeviceSyncJobTimingDiagnostic[] {
     return this.jobTimingDiagnostics.map((entry) => ({
       ...entry,
+      ...(entry.jobIdentities
+        ? { jobIdentities: entry.jobIdentities.map((identity) => ({ ...identity })) }
+        : {}),
       snapshotImportOutcomes: { ...entry.snapshotImportOutcomes },
       completeSourceDayImportOutcomes: { ...entry.completeSourceDayImportOutcomes },
     }));
@@ -845,9 +853,15 @@ class DeviceSyncServiceController {
     return this.store.readNextJobWakeAt();
   }
 
-  async runSchedulerOnce(accountId?: string): Promise<DeviceSyncJobRecord[]> {
+  async runSchedulerOnce(
+    accountId?: string,
+    options: { reconcileBefore?: string } = {},
+  ): Promise<DeviceSyncJobRecord[]> {
     return await this.schedulerMutex.runIfIdle(async () => {
       const now = this.nowIso();
+      // An already active hosted pass may pull a nearby cadence forward for
+      // this account. The same durable jobs and retry owner still perform it.
+      const reconcileBefore = accountId ? options.reconcileBefore ?? now : now;
       const queuedJobs: DeviceSyncJobRecord[] = [];
 
       try {
@@ -857,7 +871,7 @@ class DeviceSyncServiceController {
             || account.status !== "active"
             || isDeviceSyncConnectionSetupPending(account)
             || !account.nextReconcileAt
-            || Date.parse(account.nextReconcileAt) > Date.parse(now)
+            || Date.parse(account.nextReconcileAt) > Date.parse(reconcileBefore)
           ) {
             continue;
           }
@@ -938,6 +952,7 @@ class DeviceSyncServiceController {
 
     let activeJobs: DeviceSyncJobRecord[] = [job];
     let canonicalProgressCommitted = false;
+    let continuationProgressCommitted = false;
     let connectionSourceReadCount = 0;
     let connectionSourceReadElapsedMs = 0;
     let credentialRefreshCount = 0;
@@ -972,6 +987,9 @@ class DeviceSyncServiceController {
         ...(canonicalProgressCommitted
           ? { canonicalProgressCommitted: true as const }
           : {}),
+        ...(continuationProgressCommitted
+          ? { continuationProgressCommitted: true as const }
+          : {}),
         connectionSourceReadCount,
         connectionSourceReadElapsedMs,
         credentialRefreshCount,
@@ -981,6 +999,7 @@ class DeviceSyncServiceController {
         ...scheduledJobDiagnostics,
         elapsedMs: nonnegativeDeviceSyncDurationMs(now, finishedAt),
         jobCount: Math.max(1, activeJobs.length),
+        jobIdentities: activeJobs.map(toDeviceSyncJobIdentity),
         jobKind: job.kind,
         outcome,
         provider: job.provider,
@@ -1055,6 +1074,7 @@ class DeviceSyncServiceController {
         code,
         details: {},
         jobDisposition: failureTransition.disposition,
+        jobIdentities: [toDeviceSyncJobIdentity(job)],
         jobKind: job.kind,
         maxAttempts: failureTransition.maxAttempts,
         provider: job.provider,
@@ -1568,6 +1588,7 @@ class DeviceSyncServiceController {
 
       outcome = "completed";
       durableProgressCommitted = true;
+      continuationProgressCommitted = result.continuationProgress === true;
       return finishPass();
     } catch (error) {
       if (isDeviceSyncJobExecutionYielded(error, jobAbortController.signal)) {
@@ -1671,6 +1692,7 @@ class DeviceSyncServiceController {
         code: failure.code,
         details: failure.details,
         jobDisposition: diagnosticTransition.transition.disposition,
+        jobIdentities: failureTransitions.map(({ activeJob }) => toDeviceSyncJobIdentity(activeJob)),
         jobKind: diagnosticTransition.activeJob.kind,
         maxAttempts: diagnosticTransition.transition.maxAttempts,
         provider: provider.provider,
@@ -2168,7 +2190,7 @@ export function createDeviceSyncService(input: CreateDeviceSyncServiceInput): De
       controller.disconnectAccount(accountId, expectedConnectedAt),
     getNextJobWakeAt: () => controller.getNextJobWakeAt(),
     getNextWakeAt: (now) => controller.getNextWakeAt(now),
-    runSchedulerOnce: (accountId) => controller.runSchedulerOnce(accountId),
+    runSchedulerOnce: (accountId, options) => controller.runSchedulerOnce(accountId, options),
     runWorkerOnce: (accountId) => controller.runWorkerOnce(accountId),
     drainWorker: (limit, accountId, options) =>
       controller.drainWorker(limit, accountId, options),
@@ -2192,6 +2214,10 @@ function summarizeDeviceSyncScheduledJobs(
     scheduledJobCount: jobs.length,
     nextScheduledJobDelayMs,
   };
+}
+
+function toDeviceSyncJobIdentity(job: DeviceSyncJobRecord): DeviceSyncJobIdentity {
+  return { accountId: job.accountId, dedupeKey: job.dedupeKey, jobId: job.id };
 }
 
 function nonnegativeDeviceSyncDurationMs(startAt: string, endAt: string): number {
@@ -2557,6 +2583,7 @@ function buildDeviceSyncErrorFailureDiagnostics(
     providerRequestBodyKind: readSafeDiagnosticToken(error.details?.requestBodyKind),
     ...junctionEcgContext,
     ...workoutCandidateContext,
+    ...readSafeJunctionRequestTimeoutDiagnostics(error.code, error.details),
     providerRequestContentType: readSafeDiagnosticToken(error.details?.requestContentType),
     providerRequestCredentialPresent: readSafeDiagnosticBoolean(error.details?.requestCredentialPresent),
     providerRequestEndpointKind,
@@ -2709,6 +2736,7 @@ function readSafeJunctionEcgFailureContext(
   | "junctionEcgGroupCount"
   | "junctionEcgProviderMatchGroupCount"
   | "junctionEcgInstanceMatchGroupCount"
+  | "junctionEcgInstanceMissingGroupCount"
   | "junctionEcgMatchedGroupCount"
   | "junctionEcgExpectedRecordingCount"
   | "junctionEcgExpectedSampleCount"
@@ -2735,6 +2763,7 @@ function readSafeJunctionEcgFailureContext(
     junctionEcgGroupCount: readSafeJunctionEcgDiagnosticCount(error.details?.groupCount),
     junctionEcgProviderMatchGroupCount: readSafeJunctionEcgDiagnosticCount(error.details?.providerMatchGroupCount),
     junctionEcgInstanceMatchGroupCount: readSafeJunctionEcgDiagnosticCount(error.details?.instanceMatchGroupCount),
+    junctionEcgInstanceMissingGroupCount: readSafeJunctionEcgDiagnosticCount(error.details?.instanceMissingGroupCount),
     junctionEcgMatchedGroupCount: readSafeJunctionEcgDiagnosticCount(error.details?.matchedGroupCount),
     junctionEcgExpectedRecordingCount: readSafeJunctionEcgDiagnosticCount(
       error.details?.expectedRecordingCount,

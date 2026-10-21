@@ -8,7 +8,7 @@ import {
   isStrictIsoDateTime,
   normalizeActivityKindToken,
 } from "@murphai/contracts";
-import { resolveWearableProviderDescriptor } from "@murphai/health-metrics";
+import { resolveWearableProviderDescriptor } from "@murphai/health-metrics/wearable-provider-catalog";
 
 import {
   readNullableStringValue,
@@ -97,6 +97,7 @@ export const HOSTED_VAULT_SHARE_DEFERRED_WORK_CAPABILITY_VERSION = "v1";
 export const HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE =
   "first-materialization";
 export const HOSTED_VAULT_SHARE_PROJECTION_MODE_PARAM = "projectionMode";
+export const HOSTED_VAULT_SHARE_SOURCE_WORKSPACE_VERSION_PARAM = "sourceWorkspaceVersion";
 
 export type HostedVaultShareProjectionMode =
   typeof HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE;
@@ -215,7 +216,8 @@ function buildHostedVaultShareActivitySelectorKinds(
       .flatMap((group) => [...group])
       .map((kind) => normalizeActivityKindToken(kind))
       .filter((kind): kind is string => kind !== null))]
-      .sort((left, right) => left.localeCompare(right)),
+      // Normalized kinds are ASCII; code-unit order avoids ICU collator setup at Worker startup.
+      .sort(),
   );
 }
 
@@ -388,6 +390,21 @@ export type HostedVaultShareProjectionKind =
 /** Maximum snapshot replacements one durable first-materialization pass may attempt. */
 export const HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_PAGE_MAX = 25;
 
+// New share kinds do not expose app contact until deliberately classified here.
+const companionContactKinds = new Set<HostedVaultShareProjectionKind>([
+  "device-sync-status.v0", "sleep-times.v0", "workout-days.v0", "workouts.v0",
+  "heart-rate-zones-days.v0", "activity-days.v0", "sleep-duration-days.v0",
+  "deep-sleep-days.v0", "deep-sleep-sources-days.v1", "rem-sleep-days.v0", "rem-sleep-sources-days.v1",
+  "steps-days.v0", "max-heart-rate-days.v0", "distance-days.v0", "active-calories-days.v0",
+  "elevation-gain-days.v0", "floors-climbed-days.v0", "day-strain-days.v0", "workout-strain-days.v0",
+  "activity-score-days.v0", "vo2-max-days.v0", "resting-heart-rate-days.v0", "hrv-days.v0",
+  "activity-minutes-days.v1", "activity-distance-days.v1", "activity-session-count-days.v1",
+]);
+
+export function sharesCompanionContact(kind: HostedVaultShareProjectionKind): boolean {
+  return companionContactKinds.has(kind);
+}
+
 export interface HostedVaultShareFixedProjectionScope {
   projectionKind: HostedVaultShareFixedProjectionKind;
 }
@@ -443,6 +460,11 @@ export const HOSTED_VAULT_SHARE_KNOWN_PROJECTION_SCOPES =
     ...HOSTED_VAULT_SHARE_FIXED_PROJECTION_KINDS.map((projectionKind) => ({ projectionKind })),
     ...HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES,
   ] satisfies HostedVaultShareProjectionScope[]));
+
+// One canonical key per scope. The email grant itself is carried separately
+// from the data/profile authorization snapshot (99 of the current 100 scopes).
+export const HOSTED_RUNTIME_GROUP_EMAIL_AUTHORIZED_SHARES_PER_PARTICIPANT_MAX =
+  HOSTED_VAULT_SHARE_KNOWN_PROJECTION_SCOPES.length - 1;
 
 function uniqueHostedVaultShareProjectionScopeList(
   projectionScopes: readonly HostedVaultShareProjectionScope[],
@@ -2491,7 +2513,7 @@ function assertHostedVaultSharePublicSourceCapacity(parsedRecords: readonly Host
   }
 }
 
-function requireHostedVaultShareSourceWorkspaceVersion(value: unknown): string {
+export function requireHostedVaultShareSourceWorkspaceVersion(value: unknown): string {
   const sourceWorkspaceVersion = requireString(
     value,
     "Vault share deliver request sourceWorkspaceVersion",

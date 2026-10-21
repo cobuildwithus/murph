@@ -97,6 +97,22 @@ test("withMurphContactOptionBody updates wrapped mailto shortcuts", () => {
   );
 });
 
+test("withMurphContactOptionBody percent-encodes Telegram prefills so Telegram shows spaces, not plus signs", () => {
+  process.env.MURPH_TELEGRAM_USERNAME_OVERRIDE = "@murphdevelopment_bot";
+  const [option] = resolveMurphContactOptions({
+    contactChannels: { telegram: true },
+    message: { body: "Hey Murph" },
+  });
+  assert.ok(option);
+  const updated = withMurphContactOptionBody(option, "Hey Murph, do your thing");
+  assert.equal(
+    updated.href,
+    "https://t.me/murphdevelopment_bot?text=Hey%20Murph%2C%20do%20your%20thing",
+  );
+  assert.ok(!updated.href.includes("+"));
+  assert.equal(new URL(updated.href).searchParams.get("text"), "Hey Murph, do your thing");
+});
+
 test("resolveMurphContactOptions honors the Murph Telegram username override", () => {
   process.env.MURPH_TELEGRAM_USERNAME_OVERRIDE = "@murphdevelopment_bot";
 
@@ -110,7 +126,7 @@ test("resolveMurphContactOptions honors the Murph Telegram username override", (
   assert.equal(options[0]?.copyValue, "@murphdevelopment_bot");
   assert.equal(
     options[0]?.href,
-    "https://t.me/murphdevelopment_bot?text=Start+local+dev",
+    "https://t.me/murphdevelopment_bot?text=Start%20local%20dev",
   );
   assert.equal(options[0]?.target, "_blank");
   assert.equal(options[0]?.rel, "noopener noreferrer");
@@ -128,7 +144,7 @@ test("resolveMurphContactOptions uses Telegram web links for prefilled text", ()
 
   assert.equal(
     options[0]?.href,
-    "https://t.me/murphdevelopment_bot?text=Let%27s+sync%3A+A%26B",
+    "https://t.me/murphdevelopment_bot?text=Let's%20sync%3A%20A%26B",
   );
 });
 

@@ -35,7 +35,7 @@ from request windows, event/sample times, and the normalized batch. That
 fallback is a replay anchor, not proof of actual arrival time. Receipt identity
 remains payload-derived and does not change with an explicit receipt time.
 
-If a provider adapter returns a non-empty snapshot without any provider-owned raw artifacts, the import bridge adds one fallback `provider-snapshot` raw artifact before building the receipt. Adapters that intentionally drop dense provider payloads must sanitize those dropped sections or emit a tiny compact artifact first, so the fallback never re-stores the firehose under a generic role.
+If a provider adapter returns a non-empty snapshot without any provider-owned raw artifacts, the import bridge adds one fallback `provider-snapshot` raw artifact before building the receipt. Adapters that intentionally drop dense provider payloads must sanitize those dropped sections or emit a tiny compact artifact first, so the fallback never re-stores the firehose under a generic role. Explicitly empty Junction collections retain their resource evidence independently of poll timestamps and window bounds, so an unchanged empty poll does not create another raw receipt or ingest/audit write. Complete-set normalization continues to own absence authority, and nonempty unnormalized provider evidence remains retained.
 
 Built-in providers now share one descriptor surface in `device-providers/provider-descriptors.ts`. That descriptor is the single source for provider key, transport modes, OAuth paths/scopes, webhook support, default sync windows, metric families, and source-priority hints, so importers and `device-syncd` no longer drift on provider metadata.
 

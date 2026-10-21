@@ -15,7 +15,6 @@ import {
   createBrowserVaultReplica,
   createVaultReadModel,
   parseBrowserVaultReplica,
-  selectBrowserVaultBiomarkerPanel,
   selectBrowserVaultExperimentResults,
 } from "../src/browser.ts";
 import {
@@ -478,20 +477,6 @@ test("unitless catalog labs stay raw and cannot drive metric consumers", async (
   const unitlessSelection = unitlessClient.metricSelections.get("ldl-c");
   const unitlessGoal = unitlessClient.metricGoals.progress({ goalId: "goal_ldl_unit_provenance" })[0];
   const unitlessExperiment = selectBrowserVaultExperimentResults(unitlessClient, "ldl-unit-provenance");
-  const unitlessPanel = selectBrowserVaultBiomarkerPanel({
-    biomarkerKey: "biomarker:ldl-c",
-    client: unitlessClient,
-    label: "LDL-C",
-    metricKey: "ldl-c",
-    trendDefaults: {
-      aggregation: "mean",
-      comparisonWindowDays: 30,
-      latestWindowDays: 30,
-      minimumPoints: 1,
-    },
-    unit: "mg/dL",
-    valuePrecision: 0,
-  });
 
   assert.deepEqual(
     unitlessClient.labResults.list({ metricKey: "ldl-c" }).map((row) => [
@@ -507,8 +492,6 @@ test("unitless catalog labs stay raw and cannot drive metric consumers", async (
   assert.equal(unitlessSelection.status, "no_data");
   assert.equal(unitlessSelection.value, null);
   assert.equal(unitlessSelection.selectedMetricRowId, null);
-  assert.equal(unitlessPanel.status, "no_data");
-  assert.equal(unitlessPanel.primary, null);
   assert.ok(unitlessGoal);
   assert.equal(unitlessGoal.status, "unsupported");
   assert.equal(unitlessGoal.currentValue, null);
@@ -1095,7 +1078,7 @@ test("query projection rebuild stores shared event and wearable metric points in
           source_kind AS sourceKind,
           source_record_id AS sourceRecordId,
           metric_point_json AS metricPointJson
-        FROM query_metric_points
+        FROM query_metric_points JOIN query_metric_payloads USING (payload_id)
         ORDER BY metric_key ASC
       `).all() as Array<{
         biomarkerKey: string | null;

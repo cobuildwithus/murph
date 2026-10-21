@@ -108,6 +108,7 @@ const baseSmokeImportPaths = [
   "packages/exercise-library/dist/index.js",
   "packages/exercise-library/dist/runtime.js",
   "packages/assistant-engine/dist/index.js",
+  "packages/assistant-runtime/dist/hosted-vault-share-capture-worker.js",
   "packages/core/dist/index.js",
   "packages/importers/dist/index.js",
   "packages/importers/dist/core-port.js",
@@ -133,6 +134,10 @@ const publishedWorkspaceSmokeImportSpecifiers = ownerPackageSmokeImports.flatMap
   (ownerPackageSmokeImport) => ownerPackageSmokeImport.publishedImportSpecifiers,
 );
 const publishedSelfSmokeImportGroups = [
+  {
+    cwd: path.join(repoRoot, "packages/assistant-runtime"),
+    specifiers: ["@murphai/assistant-runtime/hosted-vault-share-capture-worker"],
+  },
   {
     cwd: path.join(repoRoot, "packages/runtime-state"),
     specifiers: ["@murphai/runtime-state", "@murphai/runtime-state/node"],

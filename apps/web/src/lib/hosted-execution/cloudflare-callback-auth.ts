@@ -10,7 +10,7 @@ import {
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import { readRawBodyBuffer } from "../http";
 import { getPrisma } from "../prisma";
-import { requireHostedRuntimeCallbackTx } from "./runtime-owner";
+import { requireHostedRuntimeCallback } from "./runtime-owner";
 import {
   PrismaHostedCallbackRequestNonceStore,
   type HostedCallbackRequestNonceStore,
@@ -72,7 +72,7 @@ export async function requireHostedCloudflareCallbackRequest(
   const legacyRuntimeHeaders = request.headers.has("x-hosted-runtime-attempt-id")
     || request.headers.has("x-hosted-runtime-lease-generation");
   if ((authority || legacyRuntimeHeaders) && options.runtimeAuthority !== "caller_transaction") {
-    await getPrisma().$transaction((tx) => requireHostedRuntimeCallbackTx(tx, userId, authority ? { ...authority, userId } : null));
+    await requireHostedRuntimeCallback(getPrisma(), userId, authority ? { ...authority, userId } : null);
   }
   return userId;
 }

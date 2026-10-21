@@ -248,7 +248,7 @@ describe('live workout model', () => {
     })
     assert.equal(completed?.workout.state, 'completed')
     assert.equal(completed?.workout.exercises[0]?.sets[2]?.status, 'skipped')
-    assert.equal(completed?.editor, null)
+    assert.match(completed!.editor.actionBinding, /^[a-f0-9]{64}$/u)
   })
 
   test('projects exact editable field families from canonical set state', () => {
@@ -442,7 +442,7 @@ describe('live workout model', () => {
     )
   })
 
-  test('keeps coordinate-indistinguishable duplicate exercises on the read-only card', () => {
+  test('rejects coordinate-indistinguishable duplicate exercises', () => {
     const presentation = {
       version: 1 as const,
       state: 'active' as const,
@@ -495,7 +495,7 @@ describe('live workout model', () => {
     { label: 'reps with note', set: { note: 'Slow tempo', reps: 8 } },
     { label: 'note with set unit', set: { note: 'Slow tempo', weightUnit: 'kg' as const } },
     { label: 'weight and reps with RPE', set: { reps: 8, rpe: 8, weight: 100 } },
-  ])('keeps a canonical $label result on the read-only card', ({ set }) => {
+  ])('rejects an unsupported canonical $label result', ({ set }) => {
     const presentation = {
       version: 1 as const,
       state: 'active' as const,
@@ -522,7 +522,7 @@ describe('live workout model', () => {
     assert.equal(presentation.exercises[0]?.sets[0]?.actual, 'Exact result')
   })
 
-  test('keeps a pending set with an unprojected unit on the read-only card', () => {
+  test('rejects a pending set with an unprojected unit', () => {
     const presentation = {
       version: 1 as const,
       state: 'active' as const,
@@ -553,7 +553,7 @@ describe('live workout model', () => {
     'weighted_bodyweight',
     'duration',
     'cardio',
-  ] as const)('keeps a pending %s exercise on the read-only card', (mode) => {
+  ] as const)('rejects an unsupported pending %s exercise', (mode) => {
     const presentation = {
       version: 1 as const,
       state: 'active' as const,

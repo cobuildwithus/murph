@@ -2,7 +2,7 @@ import { resolveHostedOperatorModelProvider } from "../codex-runtime-env.ts";
 import { HOSTED_ASSISTANT_SOL_MODEL } from "@murphai/hosted-execution/assistant-model";
 import { createHash } from "node:crypto";
 
-import type { AutomationRoute } from "@murphai/contracts";
+import { buildHostedNotificationAutomationRoute } from "../current-delivery-route.ts";
 import { deterministicContractId, ID_PREFIXES } from "@murphai/core";
 import {
   buildHostedAssistantContextFingerprintDetails,
@@ -235,7 +235,7 @@ export async function executeHostedMemberActivatedWake(input: {
     : null;
   const followup = onboardingFollowupRoute
     ? await reconcileMurphManagedOnboardingFollowup({
-        defaultRoute: buildOnboardingFollowupAutomationRoute(onboardingFollowupRoute),
+        defaultRoute: buildHostedNotificationAutomationRoute(onboardingFollowupRoute),
         routeValidationProfile: "hosted",
         shouldYield: input.shouldYield,
         stableKey: input.wake.userId,
@@ -562,34 +562,6 @@ export async function executeHostedAssistantNotificationWake(input: {
     mailboxLane: "assistant-notification",
     redactedLogEntries,
   });
-}
-
-function buildOnboardingFollowupAutomationRoute(
-  route: HostedExecutionAssistantNotificationRoute,
-): AutomationRoute {
-  const delivery = route.delivery;
-  if (route.channel === "linq") {
-    return {
-      channel: route.channel,
-      deliverySource: delivery.source ?? null,
-      deliveryTarget: delivery.kind === "participant" ? null : delivery.target,
-      identityId: route.identityId,
-      participantId: delivery.kind === "participant" ? delivery.target : null,
-      threadId: null,
-      threadIsDirect: route.threadIsDirect,
-    };
-  }
-
-  return {
-    channel: route.channel,
-    deliverySource: delivery.source ?? null,
-    deliveryTarget: delivery.kind === "participant" ? null : delivery.target,
-    identityId: route.identityId,
-    participantId: delivery.kind === "participant" ? delivery.target : null,
-    threadId:
-      route.threadId ?? (delivery.kind === "thread" ? delivery.target : null),
-    threadIsDirect: route.threadIsDirect,
-  };
 }
 
 function shouldSkipFailedHostedAssistantNotification(

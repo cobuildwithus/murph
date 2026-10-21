@@ -97,13 +97,20 @@ import {
   HostedRuntimeArtifactWriteError,
   type HostedRuntimeDeviceSyncPort,
 } from "../src/hosted-runtime/platform.ts";
-import { runHostedDeviceSyncPass } from "../src/hosted-runtime/device-sync-maintenance.ts";
+import {
+  buildHostedDeviceSyncFailureJobLineage,
+  buildHostedDeviceSyncPassLineageDiagnostics,
+  runHostedDeviceSyncPass,
+} from "../src/hosted-runtime/device-sync-maintenance.ts";
+import type { HostedMaintenanceMetrics } from "../src/hosted-runtime/models.ts";
 import {
   prepareHostedSystemMailboxItemForCheckpoint,
   recordHostedDeviceSyncDirtyPostCheckpointRecord,
   recordHostedSystemMailboxItemAfterCheckpoint,
 } from "../src/hosted-runtime/system-mailbox.ts";
 import {
+  findNextHostedSystemMailboxQueueItem,
+  projectHostedDeviceHintCoverage,
   readHostedSystemMailboxState,
   systemMailboxItemIsDue,
   updateHostedSystemMailboxState,
@@ -2689,14 +2696,8 @@ describe("hosted device-sync runtime", () => {
       });
       const localAccountId = firstState.hostedToLocalAccountIds.get(hostedConnectionId);
       assert.ok(localAccountId);
-      const fitbitSourceInstanceKey = buildJunctionProviderSourceInstanceKey({
-        connectionId: localAccountId,
-        sourceProviderSlug: "fitbit",
-      });
-      const googleSourceInstanceKey = buildJunctionProviderSourceInstanceKey({
-        connectionId: localAccountId,
-        sourceProviderSlug: "google_health",
-      });
+      const fitbitSourceInstanceKey = hostedFitbitSourceInstanceKey;
+      const googleSourceInstanceKey = hostedGoogleSourceInstanceKey;
       assert.ok(fitbitSourceInstanceKey);
       assert.ok(googleSourceInstanceKey);
       const firstSources = getStore(service).listConnectionSources({
@@ -3604,7 +3605,7 @@ describe("hosted device-sync runtime", () => {
           finalSources.find((source) => source.sourceProviderSlug === "garmin")
             ?.sourceInstanceKey,
           buildJunctionProviderSourceInstanceKey({
-            connectionId: localAccountId,
+            connectionId: hostedConnectionId,
             sourceProviderSlug: "garmin",
           }),
         );
@@ -3955,12 +3956,7 @@ describe("hosted device-sync runtime", () => {
         state: disconnectedState,
       });
 
-      assert.deepEqual(appliedRequests, [
-        {
-          occurredAt: "2026-04-06T09:17:00.000Z",
-          updates: [],
-        },
-      ]);
+      assert.equal(appliedRequests.length, 0);
     } finally {
       closeHostedRuntimeDeviceSyncService(service);
       await cleanup();
@@ -4830,10 +4826,7 @@ describe("hosted device-sync runtime", () => {
         state,
       });
 
-      assert.deepEqual(requireApplyUpdatesRequest(appliedRequest), {
-        occurredAt: "2026-04-06T09:20:00.000Z",
-        updates: [],
-      });
+      assert.equal(appliedRequest, null);
     } finally {
       closeHostedRuntimeDeviceSyncService(service);
       await cleanup();
@@ -4927,12 +4920,7 @@ describe("hosted device-sync runtime", () => {
         state,
       });
 
-      assert.equal(
-        requireApplyUpdatesRequest(appliedRequest).updates.some((update) =>
-          Object.prototype.hasOwnProperty.call(update, "credential")
-        ),
-        false,
-      );
+      assert.equal(appliedRequest, null);
     } finally {
       closeHostedRuntimeDeviceSyncService(service);
       await cleanup();
@@ -6060,6 +6048,134 @@ describe("hosted device-sync runtime", () => {
     assert.equal(processedIds.size, 500);
     assert.equal(pendingIndexes.size, 0);
   });
+
+  test.each(["completed", "cold-restored", "yielded", "preexisting", "failed", "disjoint", "long-union", "new-arrival"] as const)(
+    "overlapping Garmin fetch windows preserve every payload owner: %s",
+    async (scenario) => {
+      const workspace = await createHostedRuntimeWorkspace("hosted-garmin-coalescing-");
+      const restoredWorkspace = await createHostedRuntimeWorkspace("hosted-garmin-restored-");
+      await mkdir(workspace.vaultRoot, { recursive: true });
+      await mkdir(restoredWorkspace.vaultRoot, { recursive: true });
+      const executions: DeviceSyncJobRecord[] = [];
+      const provider = createFakeProvider({
+        provider: "junction",
+        jobExecutor: { async executeJob(_context, job) {
+          if (scenario === "failed") throw deviceSyncError({
+            code: "synthetic_terminal_failure", message: "Synthetic terminal failure", retryable: false,
+          });
+          if (scenario === "yielded" && executions.length === 0) {
+            executions.push({ ...job, payload: { ...job.payload, windowEnd: day(10) } });
+            return { scheduledJobs: [{
+              kind: job.kind, dedupeKey: job.dedupeKey ?? undefined,
+              payload: { ...job.payload, windowStart: day(10) },
+            }] };
+          }
+          executions.push(job);
+          return {};
+        } },
+      });
+      const service = createDeviceSyncServiceForVault(workspace.vaultRoot, [provider]);
+      const restoredService = createDeviceSyncServiceForVault(restoredWorkspace.vaultRoot, [provider]);
+      const connectionId = "hosted_garmin_coalescing";
+      const snapshot = buildRuntimeSnapshot({ connectionId, provider: "junction", externalAccountId: "synthetic-garmin" });
+      const day = (offset: number) => new Date(Date.UTC(2026, 0, 1 + offset)).toISOString();
+      const stride = scenario === "disjoint" ? 35 : scenario === "long-union" ? 90 : 3;
+      const duration = scenario === "long-union" ? 300 : 30;
+      const resources = Array.from({ length: 5 }, (_, index) => ({
+        count: 1,
+        dirtyPayloadId: `dsp_garmin_window_${index}`,
+        jobKind: "resource" as const,
+        payload: {
+          eventType: "daily.data.steps.created",
+          objectId: `synthetic_event_${index}`,
+          occurredAt: day(50),
+          resource: "steps",
+          resourceCategory: "timeseries",
+          sourceProviderSlug: "garmin",
+          windowStart: day(index * stride),
+          windowEnd: day(duration + index * stride),
+        },
+        resource: "steps",
+        resourceCategory: "timeseries",
+        sourceProviderSlug: "garmin",
+        windowStart: day(index * stride),
+        windowEnd: day(duration + index * stride),
+      }));
+      let visibleResources = scenario === "preexisting" ? resources.slice(0, 1) : resources;
+      const port: HostedRuntimeDeviceSyncPort = {
+        ...createSnapshotOnlyDeviceSyncPort(snapshot),
+        async fetchDirtyStates() {
+          return { hasMore: false, items: [buildDirtyState({
+            connectionId, provider: "junction", dirtyRevision: "5", dirtyResources: visibleResources,
+          })], nextWakeAt: null, userId: "member_123" };
+        },
+      };
+      const wake = buildDirtyDeviceSyncWake(connectionId, day(50), "junction");
+      try {
+        let state = await syncHostedDeviceSyncControlPlaneState({
+          deviceSyncPort: port, secret: DEVICE_SYNC_SECRET, service, wake,
+        });
+        let activeService = service;
+        if (scenario === "preexisting") {
+          visibleResources = resources;
+          state = await syncHostedDeviceSyncControlPlaneState({
+            deviceSyncPort: port, secret: DEVICE_SYNC_SECRET, service, wake,
+          });
+        }
+        if (scenario === "new-arrival") {
+          visibleResources = [...resources, { ...resources[0]!, dirtyPayloadId: "dsp_garmin_fresh" }];
+          state = await syncHostedDeviceSyncControlPlaneState({
+            deviceSyncPort: port, secret: DEVICE_SYNC_SECRET, service, wake,
+          });
+        }
+        if (scenario === "yielded") {
+          const accountId = state.hostedToLocalAccountIds.get(connectionId);
+          assert.ok(accountId);
+          assert.equal(await service.drainWorker(1, accountId), 1);
+        }
+        if (scenario === "cold-restored" || scenario === "yielded") {
+          visibleResources = [...resources].reverse();
+          const recovery = resolveHostedDeviceSyncWakeRecovery({ service, state, wake });
+          assert.ok(recovery);
+          state = await syncHostedDeviceSyncControlPlaneState({
+            deviceSyncPort: port, secret: DEVICE_SYNC_SECRET, service: restoredService, wake: recovery.wake,
+          });
+          activeService = restoredService;
+        }
+        const accountId = state.hostedToLocalAccountIds.get(connectionId);
+        assert.ok(accountId);
+        const jobs = readJobsForAccount(activeService, accountId);
+        const separate = ["preexisting", "disjoint", "long-union"].includes(scenario);
+        assert.equal(jobs.length, separate ? 5 : scenario === "new-arrival" ? 2 : 1);
+        if (scenario === "yielded") assert.equal(JSON.parse(jobs[0]!.payloadJson).windowStart, day(10));
+        assert.equal(state.pendingDirtyPayloadJobs.length, visibleResources.length);
+        assert.equal(new Set(state.pendingDirtyPayloadJobs.map((job) => job.jobId)).size,
+          scenario === "new-arrival" ? 1 : jobs.length);
+        promoteHostedCompletedDirtyPayloadAcks({ service: activeService, state });
+        assert.equal(state.pendingDirtyPayloadJobs.length, visibleResources.length);
+        assert.equal(await activeService.drainWorker(100, accountId), jobs.length);
+        const fetchedDays = executions.reduce((total, job) => total
+          + (Date.parse(String(job.payload.windowEnd)) - Date.parse(String(job.payload.windowStart)))
+            / 86_400_000, 0);
+        // Five overlapping 30-day windows retain all 42 unique days, with 3.57x less work.
+        const expectedDays = scenario === "failed" ? 0 : separate ? duration * 5 : scenario === "new-arrival" ? 84 : 42;
+        assert.equal(fetchedDays, expectedDays);
+        if (scenario !== "failed") assert.ok(executions.some((job) => job.payload.windowStart === day(0)));
+        if (scenario === "completed" || scenario === "cold-restored") {
+          assert.equal(executions[0]?.payload.windowEnd, day(42));
+        }
+        promoteHostedCompletedDirtyPayloadAcks({ service: activeService, state });
+        assert.equal(state.pendingDirtyPayloadJobs.length, 0);
+        assert.deepEqual(new Set(state.pendingDirtyAcks[0]?.processedDirtyPayloadIds),
+          new Set(visibleResources.map((resource) => resource.dirtyPayloadId)));
+      } finally {
+        closeHostedRuntimeDeviceSyncService(service);
+        closeHostedRuntimeDeviceSyncService(restoredService);
+        await workspace.cleanup();
+        await restoredWorkspace.cleanup();
+      }
+    },
+  );
 
   test.each([0, 150])("a cold-restored full dirty page relinks every retained job with %i follow-ups", async (followUpCount) => {
     const firstWorkspace = await createHostedRuntimeWorkspace(
@@ -8310,7 +8426,7 @@ describe("hosted device-sync runtime", () => {
           state,
         });
 
-        assert.deepEqual(requireApplyUpdatesRequest(appliedRequest).updates, []);
+        assert.equal(appliedRequest, null);
       } finally {
         closeHostedRuntimeDeviceSyncService(service);
         await cleanup();
@@ -10514,7 +10630,7 @@ describe("hosted device-sync runtime", () => {
         state,
       });
 
-      assert.deepEqual(requireApplyUpdatesRequest(appliedRequest).updates, []);
+      assert.equal(appliedRequest, null);
     } finally {
       closeHostedRuntimeDeviceSyncService(service);
       await cleanup();
@@ -13131,20 +13247,24 @@ describe("hosted device-sync runtime", () => {
   });
 
   test.each(["blood_oxygen", "electrocardiogram_voltage"])(
-    "retained Junction %s validation restores from a hosted continuation without losing its delay or payload",
+    "retained Junction %s validation restores from a hosted continuation with its delay, payload, and transport budget",
     async (resource) => {
       const occurredAt = "2026-04-04T09:00:00.000Z";
       vi.useFakeTimers();
       vi.setSystemTime(new Date(occurredAt));
       const first = await createHostedRuntimeWorkspace("hosted-validation-first-");
       const cold = await createHostedRuntimeWorkspace("hosted-validation-cold-");
-      let corrected = false;
+      let outcome: "validation" | "transport" | "valid" = "validation";
       const baseProvider = createFakeProvider();
       const provider = createFakeProvider({
         provider: "junction",
         descriptor: { ...baseProvider.descriptor, provider: "junction" },
         jobExecutor: { async executeJob() {
-          if (corrected) return {};
+          if (outcome === "valid") return {};
+          if (outcome === "transport") {
+            throw deviceSyncError({ code: "JUNCTION_API_REQUEST_FAILED",
+              message: "Synthetic provider failure.", retryable: true, httpStatus: 500 });
+          }
           if (resource === "blood_oxygen") {
             throw new JunctionSparseCalendarRepairNormalizationError({ reason: "daily.value_out_of_range" });
           }
@@ -13186,7 +13306,7 @@ describe("hosted device-sync runtime", () => {
         assert.ok(recovery);
         const retry = recovery.wake.hint?.jobs?.[0];
         assert.ok(retry);
-        assert.equal(retry.maxAttempts, 1);
+        assert.equal(retry.maxAttempts, 5);
         assert.equal(retry.availableAt, "2026-04-04T09:30:00.000Z");
         assert.deepEqual(retry.payload, job.payload);
         assert.deepEqual(parseHostedExecutionWake(recovery.wake), recovery.wake);
@@ -13199,13 +13319,16 @@ describe("hosted device-sync runtime", () => {
         assert.ok(restored);
         assert.deepEqual(restored.payload, job.payload);
         assert.equal(restored.availableAt, retry.availableAt);
+        assert.equal(restored.maxAttempts - restored.attempts, 5);
         assert.equal(await coldService.runWorkerOnce(coldAccountId), null);
         vi.setSystemTime(new Date(retry.availableAt));
+        outcome = "transport";
         assert.equal((await coldService.runWorkerOnce(coldAccountId))?.id, restored.id);
         const pending = getStore(coldService).getJobById(restored.id);
         assert.equal(pending?.status, "queued");
-        assert.equal(pending.availableAt, "2026-04-04T10:00:00.000Z");
-        corrected = true;
+        assert.equal(pending.lastErrorCode, "JUNCTION_API_REQUEST_FAILED");
+        assert.equal(pending.maxAttempts - pending.attempts, 4);
+        outcome = "valid";
         vi.setSystemTime(new Date(pending.availableAt));
         await coldService.runWorkerOnce(coldAccountId);
         assert.equal(getStore(coldService).getJobById(restored.id)?.status, "succeeded");
@@ -13393,12 +13516,7 @@ describe("hosted device-sync runtime", () => {
         state: firstState,
         wake,
       });
-      assert.equal(
-        appliedRequests.at(-1)?.updates.some(
-          (update) => update.localState?.nextReconcileAt !== undefined,
-        ),
-        false,
-      );
+      assert.equal(appliedRequests.length, 0);
 
       const restoredState = await syncHostedDeviceSyncControlPlaneState({
         deviceSyncPort: createPort(),
@@ -14745,7 +14863,7 @@ describe("hosted device-sync runtime", () => {
         state: hydratedState,
       });
 
-      assert.deepEqual(requireApplyUpdatesRequest(appliedRequest).updates, []);
+      assert.equal(appliedRequest, null);
     } finally {
       closeHostedRuntimeDeviceSyncService(service);
       await cleanup();
@@ -14865,10 +14983,7 @@ describe("hosted device-sync runtime", () => {
         },
       });
 
-      assert.deepEqual(requireApplyUpdatesRequest(appliedRequest), {
-        occurredAt: "2026-04-06T10:10:00.000Z",
-        updates: [],
-      });
+      assert.equal(appliedRequest, null);
     } finally {
       closeHostedRuntimeDeviceSyncService(service);
       await cleanup();
@@ -15039,10 +15154,7 @@ describe("hosted device-sync runtime", () => {
         service,
         state,
       });
-      assert.deepEqual(appliedRequests, [{
-        occurredAt: "2026-04-06T09:36:00.000Z",
-        updates: [],
-      }]);
+      assert.equal(appliedRequests.length, 0);
 
       getStore(service).patchAccount(localAccountId, {
         displayName: null,
@@ -15067,7 +15179,6 @@ describe("hosted device-sync runtime", () => {
       });
 
       assert.deepEqual(appliedRequests, [
-        { occurredAt: "2026-04-06T09:36:00.000Z", updates: [] },
         {
           occurredAt: "2026-04-06T10:10:00.000Z",
           updates: [{
@@ -15547,10 +15658,7 @@ describe("hosted device-sync runtime", () => {
         state,
       });
 
-      assert.deepEqual(requireApplyUpdatesRequest(appliedRequest), {
-        occurredAt: "2026-04-06T10:10:00.000Z",
-        updates: [],
-      });
+      assert.equal(appliedRequest, null);
     } finally {
       closeHostedRuntimeDeviceSyncService(service);
       await cleanup();
@@ -15609,18 +15717,15 @@ describe("hosted device-sync runtime", () => {
         service,
       });
 
-      await reconcileHostedDeviceSyncControlPlaneState({
+      assert.equal(await reconcileHostedDeviceSyncControlPlaneState({
         deviceSyncPort,
         wake: buildCronWake("2026-04-06T10:10:00.000Z"),
         secret: DEVICE_SYNC_SECRET,
         service,
         state,
-      });
+      }), true);
 
-      assert.deepEqual(requireApplyUpdatesRequest(appliedRequest), {
-        occurredAt: "2026-04-06T10:10:00.000Z",
-        updates: [],
-      });
+      assert.equal(appliedRequest, null);
     } finally {
       closeHostedRuntimeDeviceSyncService(service);
       await cleanup();
@@ -16047,6 +16152,189 @@ describe("hosted device-sync runtime", () => {
       deviceSyncPort: port, wake: { ...wake, expectedConnectedAt: "2026-03-01T00:00:00.000Z" },
     });
     assert.equal(applied.length, 1);
+  });
+
+  test("job lineage joins one failed logical job to its retry after hosted cold handoff", async () => {
+    const connectionId = "hosted_conn_lineage";
+    const occurredAt = "2026-04-04T10:00:00.000Z";
+    const workspaces = await Promise.all(["failed", "restored"].map((slug) =>
+      createHostedRuntimeWorkspace(`hosted-device-sync-lineage-${slug}-`)
+    ));
+    const [failedRuntime, restoredRuntime] = workspaces;
+    assert.ok(failedRuntime && restoredRuntime);
+    await Promise.all(workspaces.map((workspace) => mkdir(workspace.vaultRoot, { recursive: true })));
+    let failing = true;
+    const provider = createFakeProvider({
+      jobExecutor: {
+        async executeJob() {
+          if (failing) {
+            throw deviceSyncError({
+              code: "SYNTHETIC_PROVIDER_UNAVAILABLE",
+              httpStatus: 503,
+              message: "Synthetic provider outage.",
+              retryable: true,
+            });
+          }
+          return {};
+        },
+      },
+    });
+    const port = createSnapshotOnlyDeviceSyncPort(buildRuntimeSnapshot({
+      connectionId,
+      externalAccountId: "demo-lineage",
+    }));
+    const wake = buildDeviceSyncWake({
+      connectionId,
+      hint: { jobs: [{ dedupeKey: "synthetic-window-a", kind: "resource", payload: {
+        windowEnd: "2026-04-02T00:00:00.000Z", windowStart: "2026-04-01T00:00:00.000Z",
+      } }] },
+      occurredAt,
+      reason: "reconcile_due",
+    });
+    const readLineage = (value: unknown): string[] => {
+      assert.ok(Array.isArray(value));
+      return value.flatMap((chunk) => String(chunk).split(","));
+    };
+    const passMetrics = (
+      postCheckpointRecord: HostedMaintenanceMetrics["postCheckpointRecord"],
+    ): HostedMaintenanceMetrics => ({
+      deviceSyncProcessed: 2,
+      deviceSyncSkipped: false,
+      nextWakeAt: null,
+      parserProcessed: 0,
+      postCheckpointRecord,
+    });
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(occurredAt));
+    const first = createDeviceSyncServiceForVault(failedRuntime.vaultRoot, [provider]);
+    const second = createDeviceSyncServiceForVault(restoredRuntime.vaultRoot, [provider]);
+    try {
+      const firstState = await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort: port, secret: DEVICE_SYNC_SECRET, service: first, wake,
+      });
+      const localAccountId = firstState.hostedToLocalAccountIds.get(connectionId);
+      assert.ok(localAccountId);
+      // A local row without a dedupe key is identified by its handoff key.
+      getStore(first).enqueueJob({
+        accountId: localAccountId, availableAt: occurredAt, kind: "resource", payload: {}, provider: "demo",
+      });
+      assert.equal(await first.drainWorker(10, localAccountId), 2);
+
+      const failures = first.listJobFailureDiagnostics();
+      assert.equal(failures.length, 2);
+      const failedLineage = failures.map((failureDiagnostic) => buildHostedDeviceSyncFailureJobLineage({
+        failureDiagnostic,
+        hostedConnectionIds: firstState.localToHostedAccountIds,
+        userId: wake.userId,
+      }));
+      const failedFingerprints = failedLineage.flatMap((lineage) => {
+        assert.equal(lineage.failureJobLineageTruncated, false);
+        return readLineage(lineage.failureJobLineage);
+      });
+      assert.equal(failedFingerprints.length, 2);
+      assert.ok(failedFingerprints.every((fingerprint) => /^[a-f0-9]{16}$/u.test(fingerprint)));
+      assert.notEqual(failedFingerprints[0], failedFingerprints[1]);
+
+      const recovery = resolveHostedDeviceSyncWakeRecovery({ service: first, state: firstState, wake });
+      assert.ok(recovery);
+      const firstPass = buildHostedDeviceSyncPassLineageDiagnostics({
+        hostedConnectionIds: firstState.localToHostedAccountIds,
+        jobTimingDiagnostics: first.listJobTimingDiagnostics(),
+        processedJobs: 2,
+        result: passMetrics({
+          kind: "device-sync.dirty-processed-batch",
+          records: [],
+          retainMailboxItemUntil: recovery.retryAt,
+          retainedWake: recovery.wake,
+        }),
+        wake,
+      });
+      assert.deepEqual(
+        readLineage(firstPass.deviceSyncJobLineage).sort(),
+        failedFingerprints.map((fingerprint) => `${fingerprint}:f0s`).sort(),
+      );
+      assert.equal(firstPass.deviceSyncJobLineageUnknownCount, 0);
+      assert.equal(firstPass.deviceSyncJobLineageTruncated, false);
+      const [incomingFingerprint] = readLineage(firstPass.incomingRetainedJobLineage);
+      assert.ok(incomingFingerprint && failedFingerprints.includes(incomingFingerprint));
+      assert.deepEqual(readLineage(firstPass.outgoingRetainedJobLineage), [...failedFingerprints].sort());
+
+      // Cold handoff: a fresh runtime hydrates only the retained wake.
+      vi.setSystemTime(new Date("2026-04-04T10:05:00.000Z"));
+      failing = false;
+      const secondState = await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort: port, secret: DEVICE_SYNC_SECRET, service: second, wake: recovery.wake,
+      });
+      const restoredAccountId = secondState.hostedToLocalAccountIds.get(connectionId);
+      assert.ok(restoredAccountId);
+      assert.equal(await second.drainWorker(10, restoredAccountId), 2);
+      // Restored rows restart their local counter, so attempts cannot prove a retry.
+      assert.deepEqual(second.listJobTimingDiagnostics().map((timing) => timing.attempts), [1, 1]);
+      const secondPass = buildHostedDeviceSyncPassLineageDiagnostics({
+        hostedConnectionIds: secondState.localToHostedAccountIds,
+        jobTimingDiagnostics: second.listJobTimingDiagnostics(),
+        processedJobs: 2,
+        result: passMetrics(null),
+        wake: recovery.wake,
+      });
+      assert.deepEqual(
+        readLineage(secondPass.incomingRetainedJobLineage),
+        readLineage(firstPass.outgoingRetainedJobLineage),
+      );
+      assert.deepEqual(
+        readLineage(secondPass.deviceSyncJobLineage).sort(),
+        failedFingerprints.map((fingerprint) => `${fingerprint}:c0s`).sort(),
+      );
+      assert.deepEqual(secondPass.outgoingRetainedJobLineage, []);
+
+      // The same logical job is unlinkable across members and connections, and
+      // missing connection context is reported as unknown rather than guessed.
+      const [firstFailure] = failures;
+      assert.ok(firstFailure);
+      for (const isolated of [
+        { hostedConnectionIds: firstState.localToHostedAccountIds, userId: "member_other" },
+        { hostedConnectionIds: new Map([[localAccountId, "hosted_conn_other"]]), userId: wake.userId },
+      ]) {
+        const lineage = buildHostedDeviceSyncFailureJobLineage({ failureDiagnostic: firstFailure, ...isolated });
+        assert.equal(readLineage(lineage.failureJobLineage).some((fingerprint) =>
+          failedFingerprints.includes(fingerprint)
+        ), false);
+      }
+      assert.deepEqual(buildHostedDeviceSyncFailureJobLineage({
+        failureDiagnostic: firstFailure, hostedConnectionIds: new Map(), userId: wake.userId,
+      }), { failureJobLineage: null, failureJobLineageTruncated: null });
+      const { jobIdentities: _identities, ...failureWithoutIdentity } = firstFailure;
+      assert.deepEqual(buildHostedDeviceSyncFailureJobLineage({
+        failureDiagnostic: failureWithoutIdentity,
+        hostedConnectionIds: firstState.localToHostedAccountIds,
+        userId: wake.userId,
+      }), { failureJobLineage: null, failureJobLineageTruncated: null });
+
+      const request = parseHostedRuntimeLogRequest({ entries: [
+        {
+          at: occurredAt, component: "device-sync", errorCode: "SYNTHETIC_PROVIDER_UNAVAILABLE",
+          eventCode: "device-sync.job_failed", level: "warn", phase: "invoke",
+          redactedJson: { failureSummary: "Synthetic provider outage.", ...failedLineage[0] },
+        },
+        ...[firstPass, secondPass].map((redactedJson) => ({
+          at: occurredAt, component: "device-sync", eventCode: "device-sync.pass_finished",
+          level: "info", phase: "invoke", redactedJson,
+        })),
+      ] });
+      const serialized = JSON.stringify(request);
+      for (const raw of [
+        "synthetic-window-a", "hosted-device-sync-job:", "2026-04-01", "2026-04-02",
+        connectionId, localAccountId, restoredAccountId, wake.userId,
+        ...failures.flatMap((failure) => failure.jobIdentities?.map((identity) => identity.jobId) ?? []),
+      ]) {
+        assert.equal(serialized.includes(raw), false, `lineage leaked ${raw}`);
+      }
+    } finally {
+      closeHostedRuntimeDeviceSyncService(first);
+      closeHostedRuntimeDeviceSyncService(second);
+      vi.useRealTimers();
+      await Promise.all(workspaces.map((workspace) => workspace.cleanup()));
+    }
   });
 
   test("checkpoints Junction sweep suppression with recoverable jobs across hosted cold restores", async () => {
@@ -16881,4 +17169,87 @@ describe("hosted device-sync runtime", () => {
       await cleanup();
     }
   });
+});
+
+
+test.each([
+  { minutesUntilDue: 25, dirty: true, retained: false, expectedReconcile: true },
+  { minutesUntilDue: 25, dirty: true, retained: true, expectedReconcile: true },
+  { minutesUntilDue: 25, dirty: false, retained: true, expectedReconcile: false },
+  { minutesUntilDue: 45, dirty: true, retained: true, expectedReconcile: false },
+  { minutesUntilDue: 45, dirty: true, retained: false, expectedReconcile: false },
+  { minutesUntilDue: 25, dirty: false, expectedReconcile: false },
+])("hosted webhook cadence coalescing: $minutesUntilDue minutes, dirty=$dirty retained=$retained", async ({ minutesUntilDue, dirty, retained, expectedReconcile }) => {
+  const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace("hosted-cadence-coalescing-");
+  const now = new Date().toISOString();
+  const connectionId = "hosted-synthetic-coalescing";
+  await initializeVault({ createdAt: now, timezone: "UTC", vaultRoot });
+  const snapshot = buildRuntimeSnapshot({
+    connectionId, connectedAt: now, externalAccountId: "synthetic-provider-account", provider: "junction",
+    credential: { kind: "provider_config", providerConfigKey: "junction", credentialMetadata: {} },
+    localState: { lastSyncCompletedAt: now, nextReconcileAt: new Date(Date.parse(now) + minutesUntilDue * 60_000).toISOString() },
+    sources: [],
+  });
+  const port: HostedRuntimeDeviceSyncPort = {
+    ...createSnapshotOnlyDeviceSyncPort(snapshot),
+    async fetchDirtyStates() {
+      return { hasMore: false, nextWakeAt: null, userId: "member_123", items: dirty ? [buildDirtyState({
+        connectionId, provider: "junction", dirtyResources: [{
+          count: 1, dirtyPayloadId: "synthetic-dirty-payload", jobKind: "resource",
+          resource: "activity", resourceCategory: "summary", sourceProviderSlug: null,
+          windowStart: now, windowEnd: now,
+        }],
+      })] : [] };
+    },
+  };
+  let yieldBeforeDrain = false;
+  try {
+    let wake: HostedExecutionDeviceSyncWake = buildDeviceSyncWake({
+      connectionId, expectedConnectedAt: now, occurredAt: now, provider: "junction", reason: "webhook_hint",
+    });
+    if (retained) {
+      const retryAt = new Date(Date.parse(now) + 24 * 60 * 60_000).toISOString();
+      const item: HostedSystemMailboxPendingItem = {
+        attemptCount: 1, deviceSyncContinuationOwner: true, itemId: "synthetic-retained-owner", lastAttemptAt: now,
+        lastErrorCode: null, lastErrorMessage: null, mailboxDedupeKey: "evt_device_sync_wake",
+        mailboxLaneSeq: "1", nextAttemptAt: retryAt, occurredAt: now,
+        postCheckpointRecord: null, requestId: null, routeAction: "run-device-sync-wake",
+        status: "pending", wake: buildDeviceSyncWake({
+          connectionId, expectedConnectedAt: now, occurredAt: now, provider: "junction", reason: "reconcile_due",
+          hint: { jobs: [{ kind: "resource", availableAt: retryAt, dedupeKey: "synthetic-future-history",
+            payload: { resource: "weight", resourceCategory: "timeseries" } }] },
+        }),
+      };
+      const pending = [item, {
+        ...item, attemptCount: 0, lastAttemptAt: null, deviceSyncContinuationOwner: undefined,
+        itemId: "synthetic-webhook", mailboxLaneSeq: "2", nextAttemptAt: null, wake,
+      }];
+      const selected = findNextHostedSystemMailboxQueueItem({ now, state: { pending }, allowedRouteActions: ["run-device-sync-wake"] });
+      assert.ok(selected);
+      assert.equal(selected.itemId, item.itemId);
+      assert.equal(selected.nextAttemptAt, null);
+      const coverage = projectHostedDeviceHintCoverage({ now, pending });
+      assert.equal(coverage.get(item.itemId)?.coveredHintIds.has("synthetic-webhook"), true);
+      assert.equal(coverage.get(item.itemId)?.admittedWake, undefined);
+      assert.equal(selected.wake.kind, "device-sync.wake");
+      if (selected.wake.kind !== "device-sync.wake") throw new Error("Expected retained device wake");
+      wake = selected.wake;
+      assert.equal(wake.reason, "reconcile_due");
+    }
+    await withHostedCanonicalWritePort({ async persistCanonicalWrite() {}, async persistRuntimeState() {} }, () => runHostedDeviceSyncPass(wake, vaultRoot, {
+      providerConfigs: { junction: { environment: "sandbox", region: "us" } },
+      publicBaseUrl: "https://sync.example.test", secret: DEVICE_SYNC_SECRET,
+    }, port, 120_000, {
+      platformEnv: { JUNCTION_API_KEY: "sk_us_test_123", JUNCTION_CLIENT_USER_ID_SECRET: "synthetic-coalescing-secret", JUNCTION_ENV: "sandbox", JUNCTION_REGION: "us" },
+      retainFollowUpWakeUntilCheckpoint: true,
+      shouldYield: () => yieldBeforeDrain,
+      onStage(stage) { if (stage === "worker_drain") yieldBeforeDrain = true; },
+    }));
+    const database = openSqliteRuntimeDatabase(path.join(vaultRoot, ".runtime", "operations", "device-sync", "state.sqlite"));
+    try {
+      const jobs = database.prepare("select kind from device_job where status = 'queued'").all();
+      assert.equal(jobs.some((job) => job.kind === "reconcile"), expectedReconcile);
+      assert.equal(jobs.some((job) => job.kind === "resource"), dirty || retained === true);
+    } finally { database.close(); }
+  } finally { await cleanup(); }
 });

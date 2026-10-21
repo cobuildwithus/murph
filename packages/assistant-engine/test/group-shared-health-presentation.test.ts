@@ -8,9 +8,36 @@ import {
 } from '../src/assistant/system-prompt.js'
 
 describe('group shared metric presentation prompt', () => {
+  it('allows requested name formatting without changing row attribution', () => {
+    const prompt = buildHostedGroupSharedPrompt()
+    expect(prompt).toContain('Apply requested presentation changes consistently using only evidence in each current row')
+    expect(prompt).toContain('Transform a supplied label only when its meaning is unambiguous')
+    expect(prompt).toContain('When a requested format would collapse distinct source labels into identical output labels')
+    expect(prompt).toContain('keep enough of each original label to distinguish its row even if that prevents the exact requested format')
+    expect(prompt).toContain('Never expand an initial or borrow a name from another row or conversation')
+  })
+
+  it.each([
+    { channel: 'email', available: true },
+    { channel: 'linq', available: false },
+  ])('does not instruct an unavailable route to persist corrections: $channel/$available', ({ channel, available }) => {
+    const prompt = buildAssistantSystemPrompt({
+      assistantCliContract: null, assistantHostedAutomationAvailable: available,
+      channel, cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+      conversationScope: 'group', hostedRuntime: true, onboardingGuidance: false,
+      modelBehaviorProfile: 'gpt5-agentic', currentLocalDate: '2030-02-12', currentTimeZone: 'UTC',
+    })
+    expect(prompt).toContain('never creates new permission or overrides consent, audience, or tool restrictions')
+    expect(prompt).toContain(channel === 'email'
+      ? 'Group-email replies cannot create, edit, import, pause, reactivate, or reroute automations'
+      : 'Scheduled automation changes are unavailable in this turn')
+  })
+
   it('qualifies short and tentative sleep in the assembled group prompt', () => {
     const prompt = buildHostedGroupSharedPrompt()
-    expect(prompt).toContain('`sleepType=short_sleep` identifies a short session, not a confirmed nap or complete night')
+    expect(prompt).toContain('`sleepType=short_sleep` is a short session')
+    expect(prompt).toContain('Show each with a plain label and no mark, such as "Avery: 42-minute short sleep" or "Jordan: 6h 45m, preliminary"')
+    expect(prompt).not.toContain('keep overnight sleep unconfirmed')
     expect(prompt).toContain('`sleepState=tentative` is a preliminary provider estimate')
     expect(prompt).toContain('do not score a nightly target from them')
   })
@@ -34,13 +61,36 @@ describe('group shared metric presentation prompt', () => {
     expect(scheduled).toContain('still report the actual check time')
     expect(scheduled).toContain('Permission gaps (`not_granted`) are not a timing problem')
     expect(scheduled).toContain('was declined or a previous offer remains unanswered')
-    expect(scheduled).toContain('Offer to move future updates 30 minutes later only for a `recent_reporting` gap')
+    expect(scheduled).toContain('explicit evidence that the missing records usually arrive after the scheduled cutoff')
+    expect(scheduled).toContain('without that timing evidence, report the gap without a later-time offer')
+    expect(prompt).toContain('every metric/date you will report, including each historical date in a multi-day update')
+    expect(prompt).toContain('A connected status or completed connection sync does not establish fresh data')
+    expect(prompt).toContain('`needs-attention` can reflect stalled delivery')
     expect(scheduled).toContain('`no_recent_reporting` or `unknown_history` must not by themselves trigger a later-time offer')
     expect(scheduled).not.toContain('when the freshness read still lacks requested current sleep under active sharing')
     expect(prompt).toContain('Only after an authorized affirmative reply')
     expect(prompt).toContain('preserving its timezone, recurrence, content, and destination')
     expect(prompt).toContain('Confirm the saved local time with its timezone when it differs from the chat timezone')
     expect(prompt).toContain('A refusal or unrelated reply leaves the schedule unchanged')
+  })
+
+  it('keeps gap rules out of group recap copy', () => {
+    const prompt = buildHostedGroupSharedPrompt()
+    expect(prompt).toContain('Data, status, and evidence rules decide what you count and claim; they are not reply text.')
+    expect(prompt).toContain('let the counts carry coverage, such as "across 6 nights" or "3 workout days"')
+    expect(prompt).toContain('Mention missing data only for someone missing the current day or the whole period, or for a date the request names individually')
+    expect(prompt).toContain('Do not add a coverage note, list other missing dates, restate the date range for each metric, or note excluded days.')
+    expect(prompt).toContain('Do not describe something by what it is not, list what stayed unchanged or did not happen, or add caveats nobody asked for.')
+    expect(prompt).toContain("A loaded skill's required completeness line still applies.")
+    expect(prompt).toContain('a gap is never a zero')
+    expect(prompt).toContain('For a current-day gap, with `no_recent_reporting` say only that no recent shared data is available; with `recent_reporting` or `unknown_history`, give the actual last check time')
+    for (const removed of [
+      'An absent historical date does not prove',
+      'distinguish an ongoing absence from a new delay',
+      'An ongoing absence alone does not need a check-time footer',
+      'For recent or unknown gaps, give the actual last check time',
+      'State requested versus actually available date coverage',
+    ]) expect(prompt).not.toContain(removed)
   })
 
   it('separates same-row name presentation from sender effects', () => {

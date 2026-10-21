@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 const codexAppServerMocks = vi.hoisted(() => ({
   executeCodexAppServerTurn: vi.fn(),
   preinitializeCodexAppServer: vi.fn(),
+  startCodexAppServerRealtime: vi.fn(),
   readCodexAppServerTurnFailureContext: vi.fn(),
 }))
 const diagnosticsMocks = vi.hoisted(() => ({
@@ -15,6 +16,7 @@ const turnsMocks = vi.hoisted(() => ({
 vi.mock('../src/assistant-codex.ts', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../src/assistant-codex.ts')>()),
   executeCodexAppServerTurn: codexAppServerMocks.executeCodexAppServerTurn,
+  startCodexAppServerRealtime: codexAppServerMocks.startCodexAppServerRealtime,
   preinitializeCodexAppServer:
     codexAppServerMocks.preinitializeCodexAppServer,
   readCodexAppServerTurnFailureContext:
@@ -70,6 +72,7 @@ import {
   executeCodexAssistantTurnAttempt as executeCodexAssistantTurnAttemptUnchecked,
   executeCodexAssistantTurnAttemptFromInput,
   prepareHostedCodexAssistantProcess,
+  startHostedCodexAssistantVoice,
   resolveCodexAssistantCapabilities,
   resolveCodexAssistantLabel,
   resolveCodexAssistantTargetCapabilities,
@@ -241,6 +244,7 @@ function executeCodexAssistantTurnAttempt(
 afterEach(() => {
   codexAppServerMocks.executeCodexAppServerTurn.mockReset()
   codexAppServerMocks.preinitializeCodexAppServer.mockReset()
+  codexAppServerMocks.startCodexAppServerRealtime.mockReset()
   codexAppServerMocks.readCodexAppServerTurnFailureContext.mockReset()
   diagnosticsMocks.recordAssistantDiagnosticEvent.mockReset()
   turnsMocks.appendAssistantTurnReceiptEvent.mockReset()
@@ -304,83 +308,6 @@ function findProviderPromptSizeTraceRawEvent(
 }
 
 describe('Codex assistant registry helpers', () => {
-  it('derives hosted process preparation from the same launch input as a real turn', async () => {
-    const target = {
-      adapter: 'codex-cli',
-      approvalPolicy: 'never',
-      codexCommand: '/runtime/bin/codex',
-      codexHome: '/runtime/codex-home',
-      model: 'gpt-5.6-terra',
-      modelProvider: 'hosted-openai',
-      oss: false,
-      profile: 'hosted',
-      reasoningEffort: 'low',
-      sandbox: 'danger-full-access',
-    } as const
-    const env = {
-      [HOSTED_RUNTIME_PROCESS_ENV_MARKER]: '1',
-      CODEX_HOME: '/runtime/codex-home',
-      GEMINI_API_KEY: 'worker-owned-sentinel',
-      HOME: '/runtime/home',
-      PATH: '/usr/bin',
-    }
-    const signal = new AbortController().signal
-    codexAppServerMocks.preinitializeCodexAppServer.mockResolvedValue(null)
-    codexAppServerMocks.executeCodexAppServerTurn.mockResolvedValue({
-      finalMessage: 'ok',
-      precedingAgentMessageSegments: [],
-      responseDeliveryContextOrdinal: 0,
-      transcriptMessage: 'ok',
-      jsonEvents: [],
-      providerActionCount: 0,
-      sessionId: 'codex-thread-preinitialized',
-      stderr: '',
-      stdout: '',
-      threadId: 'codex-thread-preinitialized',
-      turnId: 'turn-preinitialized',
-    })
-
-    await prepareHostedCodexAssistantProcess({
-      env,
-      signal,
-      target,
-      workingDirectory: '/runtime/vault',
-    })
-    await executeCodexAssistantTurnAttemptFromInput({
-      providerConfig: assistantModelTargetToProviderConfigInput(target),
-      turn: {
-        dynamicTools: [],
-        env,
-        prompt: 'Answer the current message.',
-        workingDirectory: '/runtime/vault',
-      },
-    })
-
-    const preparationInput =
-      codexAppServerMocks.preinitializeCodexAppServer.mock.calls[0]?.[0]
-    const turnInput =
-      codexAppServerMocks.executeCodexAppServerTurn.mock.calls[0]?.[0]
-    for (const key of [
-      'codexCommand',
-      'codexHome',
-      'configOverrides',
-      'env',
-      'oss',
-      'profile',
-      'workingDirectory',
-    ] as const) {
-      expect(preparationInput?.[key]).toEqual(turnInput?.[key])
-    }
-    expect(preparationInput?.signal).toBe(signal)
-    expect(preparationInput?.env).not.toHaveProperty('GEMINI_API_KEY')
-    expect(turnInput?.env).not.toHaveProperty('GEMINI_API_KEY')
-    expect(turnInput?.analyzeVideoRuntime).toMatchObject({
-      apiKey: 'worker-owned-sentinel',
-    })
-    expect(preparationInput).not.toHaveProperty('prompt')
-    expect(preparationInput).not.toHaveProperty('resumeSessionId')
-    expect(preparationInput).not.toHaveProperty('dynamicTools')
-  })
 
   it('finish_without_reply description does not claim to withdraw completed replies', () => {
     const finishWithoutReply = MURPH_DYNAMIC_TOOLS.find(
@@ -401,14 +328,8 @@ describe('Codex assistant registry helpers', () => {
       ),
     ).toBe('Codex app-server')
 
-    expect(
-      resolveCodexAssistantLabel(
-        normalizeAssistantProviderConfig({
-          provider: 'codex-cli',
-          oss: true,
-        }),
-      ),
-    ).toBe('Codex OSS app-server')
+    expect(() => normalizeAssistantProviderConfig({ provider: 'codex-cli', oss: true }))
+      .toThrow(/must use OpenAI/u)
   })
 
   it('extracts Codex usage from sparse provider metadata', () => {
@@ -417,7 +338,7 @@ describe('Codex assistant registry helpers', () => {
         providerConfig: normalizeAssistantProviderConfig({
           provider: 'codex-cli',
           model: 'codex-mini',
-          modelProvider: 'vercel-ai-gateway',
+          modelProvider: 'hosted-openai',
           oss: false,
         }),
         rawEvents: [
@@ -429,7 +350,7 @@ describe('Codex assistant registry helpers', () => {
     ).toMatchObject({
       inputTokens: null,
       outputTokens: null,
-      providerName: 'vercel-ai-gateway',
+      providerName: 'hosted-openai',
       providerMetadataJson: null,
       providerRequestId: null,
       rawUsageJson: null,
@@ -688,7 +609,7 @@ describe('Codex assistant registry helpers', () => {
       method: 'thread/settings/updated',
       params: {
         threadSettings: {
-          model: 'gpt-5.6-terra',
+          model: 'gpt-6.1-sol',
           modelProvider: 'openai',
           serviceTier: 'flex',
         },
@@ -698,7 +619,7 @@ describe('Codex assistant registry helpers', () => {
       method: 'thread.settings.updated',
       params: {
         thread_settings: {
-          model: 'gpt-5.6-terra',
+          model: 'gpt-6.1-sol',
           model_provider: 'hosted-openai',
           service_tier: 'flex',
         },
@@ -706,27 +627,27 @@ describe('Codex assistant registry helpers', () => {
     }
 
     expect(resolveCodexAssistantProviderTokenPricingBasis({
-      model: 'gpt-5.6-terra',
+      model: 'gpt-6.1-sol',
       modelProvider: 'openai',
       serviceTier: 'flex',
     })).toBe('openai-flex')
     expect(resolveCodexAssistantProviderTokenPricingBasis({
-      model: 'gpt-5.6-terra',
+      model: 'gpt-6.1-sol',
       modelProvider: 'hosted-openai',
       serviceTier: 'flex',
     })).toBe('openai-flex')
     expect(resolveCodexAssistantProviderTokenPricingBasis({
-      model: 'gpt-5.6-terra',
+      model: 'gpt-6.1-sol',
       modelProvider: HOSTED_LOCAL_TEST_CODEX_MODEL_PROVIDER_ID,
       serviceTier: 'flex',
     })).toBe('openai-flex')
     expect(resolveCodexAssistantProviderTokenPricingBasis({
-      model: 'gpt-5.6-terra',
-      modelProvider: 'vercel-ai-gateway',
+      model: 'gpt-6.1-sol',
+      modelProvider: 'hosted-openai',
       serviceTier: 'flex',
-    })).toBe('standard')
+    })).toBe('openai-flex')
     expect(resolveCodexAssistantProviderTokenPricingBasis({
-      model: 'gpt-5.6-terra',
+      model: 'gpt-6.1-sol',
       modelProvider: 'openai',
       serviceTier: null,
     })).toBe('standard')
@@ -740,7 +661,7 @@ describe('Codex assistant registry helpers', () => {
       extractCodexAssistantProviderUsage({
         providerConfig: normalizeAssistantProviderConfig({
           provider: 'codex-cli',
-          model: 'gpt-5.6-terra',
+          model: 'gpt-6.1-sol',
           modelProvider: HOSTED_LOCAL_TEST_CODEX_MODEL_PROVIDER_ID,
           oss: false,
         }),
@@ -755,7 +676,7 @@ describe('Codex assistant registry helpers', () => {
       extractCodexAssistantProviderUsage({
         providerConfig: normalizeAssistantProviderConfig({
           provider: 'codex-cli',
-          model: 'gpt-5.6-terra',
+          model: 'gpt-6.1-sol',
           modelProvider: 'openai',
           oss: false,
         }),
@@ -770,7 +691,7 @@ describe('Codex assistant registry helpers', () => {
       extractCodexAssistantProviderUsage({
         providerConfig: normalizeAssistantProviderConfig({
           provider: 'codex-cli',
-          model: 'gpt-5.6-terra',
+          model: 'gpt-6.1-sol',
           modelProvider: 'openai',
           oss: false,
         }),
@@ -785,7 +706,7 @@ describe('Codex assistant registry helpers', () => {
       extractCodexAssistantProviderUsage({
         providerConfig: normalizeAssistantProviderConfig({
           provider: 'codex-cli',
-          model: 'gpt-5.6-terra',
+          model: 'gpt-6.1-sol',
           modelProvider: 'openai',
           oss: false,
         }),
@@ -800,7 +721,7 @@ describe('Codex assistant registry helpers', () => {
       extractCodexAssistantProviderUsage({
         providerConfig: normalizeAssistantProviderConfig({
           provider: 'codex-cli',
-          model: 'gpt-5.6-terra',
+          model: 'gpt-6.1-sol',
           modelProvider: 'openai',
           oss: false,
         }),
@@ -821,15 +742,15 @@ describe('Codex assistant registry helpers', () => {
       }),
     ).toMatchObject({
       providerName: 'openai',
-      requestedModel: 'gpt-5.6-terra',
-      servedModel: 'gpt-5.6-terra',
+      requestedModel: 'gpt-6.1-sol',
+      servedModel: 'gpt-6.1-sol',
       tokenPricingBasis: 'openai-flex',
     })
     expect(
       extractCodexAssistantProviderUsage({
         providerConfig: normalizeAssistantProviderConfig({
           provider: 'codex-cli',
-          model: 'gpt-5.6-terra',
+          model: 'gpt-6.1-sol',
           modelProvider: 'hosted-openai',
           oss: false,
         }),
@@ -845,14 +766,14 @@ describe('Codex assistant registry helpers', () => {
         providerConfig: normalizeAssistantProviderConfig({
           provider: 'codex-cli',
           model: 'codex-mini',
-          modelProvider: 'vercel-ai-gateway',
+          modelProvider: 'hosted-openai',
           oss: false,
         }),
         rawEvents: [codexSettingsFlexEvent],
         serviceTier: 'flex',
       }),
     ).toMatchObject({
-      providerName: 'vercel-ai-gateway',
+      providerName: 'hosted-openai',
       tokenPricingBasis: 'standard',
     })
     expect(
@@ -874,7 +795,7 @@ describe('Codex assistant registry helpers', () => {
       extractCodexAssistantProviderUsage({
         providerConfig: normalizeAssistantProviderConfig({
           provider: 'codex-cli',
-          model: 'gpt-5.6-terra',
+          model: 'gpt-6.1-sol',
           modelProvider: 'openai',
           oss: false,
         }),
@@ -883,7 +804,7 @@ describe('Codex assistant registry helpers', () => {
             method: 'thread/settings/updated',
             params: {
               threadSettings: {
-                model: 'gpt-5.6-terra',
+                model: 'gpt-6.1-sol',
                 modelProvider: 'openai',
                 serviceTier: null,
               },
@@ -902,7 +823,7 @@ describe('Codex assistant registry helpers', () => {
     const usage = extractCodexAssistantProviderUsage({
       providerConfig: normalizeAssistantProviderConfig({
         provider: 'codex-cli',
-        model: 'gpt-5.6-terra',
+        model: 'gpt-6.1-sol',
         oss: false,
       }),
       rawEvents: [
@@ -1091,9 +1012,13 @@ describe('Codex assistant registry helpers', () => {
   })
 
   it.each([false, true])('preserves finite batch attribution alongside direct knowledge counters (batch first: %s)', (batchFirst) => {
+    const directError = JSON.stringify({ code: 'knowledge_page_conflict', message: 'synthetic conflict', retryable: false })
     const items = [{
       type: 'commandExecution', command: 'vault-cli knowledge list', exitCode: 0,
       aggregatedOutput: '[]',
+    }, {
+      type: 'commandExecution', command: 'vault-cli knowledge upsert private-slug', exitCode: 1,
+      durationMs: 2, aggregatedOutput: directError,
     }, {
       type: 'commandExecution', command: 'vault-cli batch --compact', exitCode: 1,
       aggregatedOutput: JSON.stringify({
@@ -1111,16 +1036,15 @@ describe('Codex assistant registry helpers', () => {
         method: 'item/completed', params: { item },
       })),
     })
-    expect(profile?.tools).toEqual([expect.objectContaining({
-      calls: 1, failedCalls: 1, label: 'other',
-    }), expect.objectContaining({
-      calls: 1, failedCalls: 0, label: 'vault-cli knowledge',
+    expect(profile?.tools).toEqual([{
+      calls: 3, failedCalls: 2, kind: 'command', label: 'vault-cli knowledge',
+      durationKnownCalls: 2, durationMs: 3,
+      outputBytesMax: Buffer.byteLength(directError, 'utf8'), outputBytesTotal: Buffer.byteLength(directError, 'utf8') + 2,
       knowledgeCounts: {
-        showCalls: 0, listCalls: 1, searchCalls: 0, writeCalls: 0, otherCalls: 0,
-        notFoundFailures: 0, invalidFailures: 0, conflictFailures: 0, otherFailures: 0,
+        showCalls: 1, listCalls: 1, searchCalls: 0, writeCalls: 1, otherCalls: 0,
+        notFoundFailures: 1, invalidFailures: 0, conflictFailures: 1, otherFailures: 0,
       },
-    })])
-    expect((profile?.tools as Record<string, unknown>[])[0]).not.toHaveProperty('knowledgeCounts')
+    }])
     expect(parseAssistantUsageRecord({
       attemptCount: 1, credentialSource: 'platform', inputTokens: 1, outputTokens: 1,
       occurredAt: '2026-06-10T12:00:00.000Z', provider: 'codex-cli', schema: ASSISTANT_USAGE_SCHEMA,
@@ -1128,6 +1052,104 @@ describe('Codex assistant registry helpers', () => {
       usageId: 'turn_mixed_knowledge.attempt-1', turnProfileJson: profile,
     }).turnProfileJson).toEqual(profile)
     expect(JSON.stringify(profile)).not.toMatch(/private-slug|private page detail/u)
+  })
+
+  it.each([false, true])('retains exact batch knowledge/event metrics and old-reader parity (compact: %s)', (compact) => {
+    const cases = [
+      ['knowledge', 'show', true, undefined],
+      ['knowledge', 'show', true, 'knowledge_page_not_found'],
+      ['knowledge', 'show', false, 'knowledge_page_not_found'],
+      ['knowledge', 'show', false, 'knowledge_page_invalid'],
+      ['knowledge', 'show', false, 'knowledge_page_conflict'],
+      ['knowledge', 'show', false, 'knowledge_duplicate_slug'],
+      ['knowledge', 'show', false, 'SYNTHETIC_PRIVATE_ERROR'],
+      ['knowledge', 'show', false, undefined],
+      ['event', 'show', true, undefined],
+      ['event', 'show', false, 'not_found'],
+      ['event', 'payload-schema', true, undefined],
+      ['event', 'payload-schema', false, 'invalid_payload'],
+      ['knowledge', 'list', false, 'knowledge_page_not_found'],
+      ['knowledge', 'SYNTHETIC_PRIVATE_OPERATION', true, undefined],
+      ['event', 'SYNTHETIC_PRIVATE_OPERATION', false, 'not_found'],
+    ] as const
+    // Deliberately not a structured error: counters come only from parsed
+    // child error.code, never arbitrary stdout/data or the outer exit status.
+    const stdout = 'SYNTHETIC_PRIVATE_CONTENT_é🙂_knowledge_page_not_found'
+    const bytes = Buffer.byteLength(stdout, 'utf8')
+    const commands = cases.map(([head, operation, ok, code], index) => ({
+      index, argv: [head, operation, 'SYNTHETIC_PRIVATE_SLUG'], durationMs: index + 1,
+      ok, outputBytes: bytes, outputChars: stdout.length, stdout: compact ? '' : stdout,
+      data: { content: 'SYNTHETIC_PRIVATE_RESULT' },
+      ...(code === undefined ? {} : { error: { code, message: 'SYNTHETIC_PRIVATE_MESSAGE' } }),
+    }))
+    const aggregatedOutput = JSON.stringify({
+      schema: VAULT_CLI_BATCH_RESULT_SCHEMA, vault: '/synthetic/vault',
+      count: commands.length, failed: 10, commands,
+    })
+    const profile = buildAssistantCodexTurnProfileJson({
+      turnId: 'synthetic-batch-turn',
+      rawEvents: [{ method: 'item/completed', params: { item: {
+        type: 'commandExecution', command: compact ? 'vault-cli batch --compact' : 'vault-cli batch',
+        durationMs: 999, exitCode: 0, aggregatedOutput,
+      } } }],
+    })
+    expect(profile?.tools).toEqual([
+      { calls: 4, failedCalls: 2, kind: 'command', label: 'vault-cli event',
+        durationKnownCalls: 4, durationMs: 42, outputBytesMax: bytes, outputBytesTotal: bytes * 4 },
+      { calls: 3, failedCalls: 2, kind: 'command', label: 'other',
+        durationKnownCalls: 3, durationMs: 42, outputBytesMax: bytes, outputBytesTotal: bytes * 3 },
+      { calls: 8, failedCalls: 6, kind: 'command', label: 'vault-cli knowledge',
+        durationKnownCalls: 8, durationMs: 36, outputBytesMax: bytes, outputBytesTotal: bytes * 8,
+        knowledgeCounts: {
+          showCalls: 8, listCalls: 0, searchCalls: 0, writeCalls: 0, otherCalls: 0,
+          notFoundFailures: 1, invalidFailures: 1, conflictFailures: 2, otherFailures: 2,
+        } },
+    ])
+    expect(profile?.schema).toBe('murph.assistant-turn-profile.v2')
+    expect(profile?.toolsTruncated).toBe(false)
+    const usage = {
+      attemptCount: 1, credentialSource: 'platform', inputTokens: 1, outputTokens: 1,
+      occurredAt: '2026-06-10T12:00:00.000Z', provider: 'codex-cli', schema: ASSISTANT_USAGE_SCHEMA,
+      sessionId: 'synthetic-session', turnId: 'synthetic-batch-turn', usageId: 'synthetic-batch-turn.attempt-1',
+    }
+    expect(parseAssistantUsageRecord({ ...usage, turnProfileJson: profile }).turnProfileJson).toEqual(profile)
+    const legacy = { ...profile, tools: (profile?.tools as Record<string, unknown>[]).map((tool) => {
+      const { knowledgeCounts: _counts, ...withoutCounts } = tool
+      return withoutCounts
+    }) }
+    expect(parseAssistantUsageRecord({ ...usage, turnProfileJson: legacy }).turnProfileJson).toEqual(legacy)
+    expect(JSON.stringify(profile)).not.toMatch(/SYNTHETIC_PRIVATE|knowledge_page_not_found|\/synthetic\/vault/u)
+  })
+
+  it.each(['count', 'index', 'bytes', 'unknown-field', 'error-shape', 'json'])('keeps malformed known batches on the outer fallback (%s)', (malformation) => {
+    const envelope = {
+      schema: VAULT_CLI_BATCH_RESULT_SCHEMA, vault: '/synthetic/vault', count: 1, failed: 1,
+      commands: [{
+        index: 0, argv: ['knowledge', 'show', 'SYNTHETIC_PRIVATE_SLUG'],
+        durationMs: 3, ok: false, outputBytes: 2, outputChars: 1, stdout: 'é',
+        error: { code: 'knowledge_page_not_found', message: 'SYNTHETIC_PRIVATE_MESSAGE' },
+      }],
+    }
+    if (malformation === 'count') envelope.count = 2
+    if (malformation === 'index') envelope.commands[0]!.index = 1
+    if (malformation === 'bytes') envelope.commands[0]!.outputBytes = 1
+    if (malformation === 'unknown-field') Object.assign(envelope, { unknown: 'SYNTHETIC_PRIVATE' })
+    if (malformation === 'error-shape') envelope.commands[0]!.error.message = ''
+    const aggregatedOutput = malformation === 'json' ? 'SYNTHETIC_PRIVATE_NON_JSON' : JSON.stringify(envelope)
+    const profile = buildAssistantCodexTurnProfileJson({
+      turnId: 'synthetic-batch-turn', rawEvents: [{ method: 'item/completed', params: { item: {
+        type: 'commandExecution', command: 'vault-cli batch --compact', durationMs: 7,
+        exitCode: 1, aggregatedOutput,
+      } } }],
+    })
+    expect(profile?.tools).toEqual([{
+      calls: 1, failedCalls: 1, kind: 'command', label: 'vault-cli batch',
+      durationKnownCalls: 1, durationMs: 7,
+      outputBytesMax: Buffer.byteLength(aggregatedOutput, 'utf8'),
+      outputBytesTotal: Buffer.byteLength(aggregatedOutput, 'utf8'),
+    }])
+    expect(profile?.toolsTruncated).toBe(true)
+    expect(JSON.stringify(profile)).not.toContain('SYNTHETIC_PRIVATE')
   })
 
   it('separates tool kinds and distinguishes unknown duration from measured zero', () => {
@@ -1753,10 +1775,13 @@ describe('Codex assistant registry helpers', () => {
     expect(JSON.stringify(profile)).not.toContain('/private/member/vault')
   })
 
-  it('accepts the producer batch maximum and rejects an oversized envelope', () => {
+  it.each([
+    { argv: ['goal', 'list'], label: 'goal.list' },
+    { argv: ['knowledge', 'show'], label: 'vault-cli knowledge' },
+  ])('accepts the producer batch maximum and rejects an oversized envelope ($label)', ({ argv, label }) => {
     const buildProfile = (commandCount: number) => {
       const commands = Array.from({ length: commandCount }, (_, index) => ({
-        argv: ['goal', 'list'],
+        argv,
         durationMs: 1,
         index,
         ok: true,
@@ -1795,10 +1820,16 @@ describe('Codex assistant registry helpers', () => {
       expect.objectContaining({
         calls: 50,
         kind: 'command',
-        label: 'goal.list',
+        label,
       }),
     ])
     expect(atLimit?.toolsTruncated).toBe(false)
+    if (label === 'vault-cli knowledge') {
+      expect(atLimit?.tools).toEqual([expect.objectContaining({ knowledgeCounts: {
+        showCalls: 50, listCalls: 0, searchCalls: 0, writeCalls: 0, otherCalls: 0,
+        notFoundFailures: 0, invalidFailures: 0, conflictFailures: 0, otherFailures: 0,
+      } })])
+    }
 
     const oversized = buildProfile(51)
     expect(oversized?.tools).toEqual([
@@ -3449,7 +3480,7 @@ describe('Codex assistant registry helpers', () => {
     expect(prompt).not.toContain(deliveryTarget)
   })
 
-  it('prepends turn context to explicit prompts before Codex execution', async () => {
+  it('pins an unconfigured provider to OpenAI while prepending turn context', async () => {
     codexAppServerMocks.executeCodexAppServerTurn.mockResolvedValue({
       finalMessage: 'ok',
       precedingAgentMessageSegments: [],
@@ -3477,6 +3508,8 @@ describe('Codex assistant registry helpers', () => {
     })
 
     expect(attempt.ok).toBe(true)
+    expect(codexAppServerMocks.executeCodexAppServerTurn.mock.calls[0]?.[0]?.modelProvider)
+      .toBe('openai')
     expect(
       codexAppServerMocks.executeCodexAppServerTurn.mock.calls[0]?.[0]?.prompt,
     ).toBe(
@@ -3736,37 +3769,6 @@ describe('Codex assistant registry helpers', () => {
     })
   })
 
-  it('exposes Codex-only registry capabilities and static model lists', () => {
-    expect(resolveCodexAssistantCapabilities()).toEqual({
-      supportedUserMessageContentTypes: ['text', 'image'],
-      supportsNativeResume: true,
-      supportsReasoningEffort: true,
-      supportsRichUserMessageContent: true,
-    })
-
-    expect(
-      resolveCodexAssistantTargetCapabilities({
-        provider: 'codex-cli',
-      }),
-    ).toEqual({
-      supportedUserMessageContentTypes: ['text', 'image'],
-      supportsNativeResume: true,
-      supportsReasoningEffort: true,
-      supportsRichUserMessageContent: true,
-    })
-    expect(
-      resolveCodexAssistantTargetCapabilities({
-        modelProvider: 'hosted-custom-inference',
-        provider: 'codex-cli',
-      }),
-    ).toEqual({
-      supportedUserMessageContentTypes: ['text', 'image'],
-      supportsNativeResume: true,
-      supportsReasoningEffort: false,
-      supportsRichUserMessageContent: true,
-    })
-
-  })
 
   it('merges progress activity labels into successful delegated execution attempts', async () => {
     const executionResult: AssistantProviderTurnExecutionResult = {
@@ -4114,48 +4116,6 @@ describe('Codex assistant registry helpers', () => {
     expect(attempt.result.responseDeliveryContextOrdinal).toBe(0)
   })
 
-  it('passes Venice provider id and config overrides through the Codex app-server seam', async () => {
-    codexAppServerMocks.executeCodexAppServerTurn.mockResolvedValueOnce({
-      finalMessage: 'Completed with Venice.',
-      precedingAgentMessageSegments: [],
-      responseDeliveryContextOrdinal: 0,
-      transcriptMessage: 'Completed with Venice.',
-      jsonEvents: [],
-      providerActionCount: 0,
-      sessionId: 'venice-thread',
-      stderr: '',
-      stdout: '',
-      threadId: 'venice-thread',
-      turnId: 'turn-venice',
-    })
-
-    const attempt = await executeCodexAssistantTurnAttempt({
-      providerConfig: normalizeAssistantProviderConfig({
-        provider: 'codex-cli',
-        model: 'venice-model',
-        modelProvider: 'venice',
-      }),
-      userPrompt: 'Run Venice.',
-      workingDirectory: '/tmp/provider-tests',
-    })
-
-    expect(attempt.ok).toBe(true)
-    const appServerInput = codexAppServerMocks.executeCodexAppServerTurn.mock
-      .calls[0]?.[0]
-    expect(appServerInput).toMatchObject({
-      model: 'venice-model',
-      modelProvider: 'venice',
-    })
-    expect(appServerInput?.configOverrides).toEqual(
-      expect.arrayContaining([
-        'model_providers.venice.name="Venice.ai"',
-        'model_providers.venice.base_url="https://api.venice.ai/api/v1"',
-        'model_providers.venice.env_key="VENICE_API_KEY"',
-        'model_providers.venice.wire_api="responses"',
-        'model_providers.venice.requires_openai_auth=false',
-      ]),
-    )
-  })
 
   it('never passes a multi_agent_v2 CLI override on hosted turns', async () => {
     // Hosted config.toml owns [features.multi_agent_v2] (including
@@ -4198,98 +4158,6 @@ describe('Codex assistant registry helpers', () => {
         (override: string) => override.includes('multi_agent'),
       ) ?? false,
     ).toBe(false)
-  })
-
-  it('forwards the selected hosted provider credential to the Codex process', async () => {
-    codexAppServerMocks.executeCodexAppServerTurn.mockResolvedValueOnce({
-      finalMessage: 'Completed hosted Venice turn.',
-      precedingAgentMessageSegments: [],
-      responseDeliveryContextOrdinal: 0,
-      transcriptMessage: 'Completed hosted Venice turn.',
-      jsonEvents: [],
-      providerActionCount: 0,
-      sessionId: 'hosted-venice-thread',
-      stderr: '',
-      stdout: '',
-      threadId: 'hosted-venice-thread',
-      turnId: 'turn-hosted-venice',
-    })
-
-    const attempt = await executeCodexAssistantTurnAttempt({
-      env: {
-        [HOSTED_RUNTIME_PROCESS_ENV_MARKER]: '1',
-        HOSTED_ASSISTANT_PROVIDER: 'venice',
-        PATH: '/usr/bin',
-        VENICE_API_KEY: 'signed-venice-egress-credential',
-      },
-      providerConfig: normalizeAssistantProviderConfig({
-        provider: 'codex-cli',
-        model: 'venice-model',
-        modelProvider: 'venice',
-      }),
-      userPrompt: 'Run hosted Venice turn.',
-      workingDirectory: '/tmp/provider-tests',
-    })
-
-    expect(attempt.ok).toBe(true)
-    expect(
-      codexAppServerMocks.executeCodexAppServerTurn.mock.calls[0]?.[0]?.env,
-    ).toMatchObject({
-      HOSTED_ASSISTANT_PROVIDER: 'venice',
-      VENICE_API_KEY: 'signed-venice-egress-credential',
-    })
-  })
-
-  it('keeps thread restrictions out of provider launch configuration', async () => {
-    codexAppServerMocks.executeCodexAppServerTurn.mockResolvedValueOnce({
-      finalMessage: 'Completed turn-local override.',
-      precedingAgentMessageSegments: [],
-      responseDeliveryContextOrdinal: 0,
-      transcriptMessage: 'Completed turn-local override.',
-      jsonEvents: [],
-      providerActionCount: 0,
-      sessionId: 'turn-local-override-thread',
-      stderr: '',
-      stdout: '',
-      threadId: 'turn-local-override-thread',
-      turnId: 'turn-local-override',
-    })
-
-    const attempt = await executeCodexAssistantTurnAttempt({
-      codexThreadConfig: {
-        'features.shell_tool': false,
-        'memories.generate_memories': false,
-        'memories.use_memories': false,
-      },
-      providerConfig: normalizeAssistantProviderConfig({
-        codexHome: '/tmp/provider-tests/shared-codex-home',
-        provider: 'codex-cli',
-        model: 'hosted-model',
-        modelProvider: 'venice',
-      }),
-      showThinkingTraces: true,
-      userPrompt: 'Run with turn-local overrides.',
-      workingDirectory: '/tmp/provider-tests',
-    })
-
-    expect(attempt.ok).toBe(true)
-    const appServerInput = codexAppServerMocks.executeCodexAppServerTurn.mock
-      .calls[0]?.[0]
-    expect(appServerInput?.configOverrides).toEqual([
-      'model_providers.venice.name="Venice.ai"',
-      'model_providers.venice.base_url="https://api.venice.ai/api/v1"',
-      'model_providers.venice.env_key="VENICE_API_KEY"',
-      'model_providers.venice.wire_api="responses"',
-      'model_providers.venice.requires_openai_auth=false',
-    ])
-    expect(appServerInput?.threadConfig).toEqual({
-      'features.shell_tool': false,
-      'memories.generate_memories': false,
-      'memories.use_memories': false,
-      hide_agent_reasoning: false,
-      model_reasoning_summary: 'auto',
-    })
-    expect(appServerInput?.codexHome).toBe('/tmp/provider-tests/shared-codex-home')
   })
 
   it('forwards ephemeral read-only turns while preserving dynamic tools', async () => {
@@ -5303,53 +5171,6 @@ describe('Codex assistant registry helpers', () => {
     expect(JSON.stringify(traceEvents)).not.toContain('example.invalid')
   })
 
-  it('adds the Venice runtime hint when native resume has invalid output', async () => {
-    const authHeaderPrefix = ['Authorization:', 'Bearer'].join(' ')
-    const sentinel = 'venice_secret_SENTINEL'
-    const expectedError = new VaultCliError(
-      'ASSISTANT_CODEX_FAILED',
-      'Codex app-server turn failed. status failed. {"error":{"type":"invalid_request_error","message":"input.7.output: Invalid input"}}',
-    )
-    const fallbackError = new VaultCliError(
-      'ASSISTANT_CODEX_FAILED',
-      `fallback failed: ${authHeaderPrefix} ${sentinel}; VENICE_API_KEY=${sentinel}; raw ${sentinel}`,
-    )
-
-    codexAppServerMocks.executeCodexAppServerTurn
-      .mockRejectedValueOnce(expectedError)
-      .mockRejectedValueOnce(fallbackError)
-    codexAppServerMocks.readCodexAppServerTurnFailureContext.mockReturnValueOnce({
-      jsonEvents: [{ method: 'turn/completed' }],
-      providerActionCount: 0,
-      codexThreadId: 'corrupt-venice-thread',
-      providerTurnId: 'turn-invalid-output',
-    })
-
-    const attempt = await executeCodexAssistantTurnAttempt({
-      providerConfig: normalizeAssistantProviderConfig({
-        provider: 'codex-cli',
-        modelProvider: 'venice',
-      }),
-      env: {
-        VENICE_API_KEY: sentinel,
-      },
-      resume: testCodexResume('corrupt-venice-thread'),
-      userPrompt: 'late follow up',
-      workingDirectory: '/tmp/provider-tests',
-    })
-
-    expect(attempt.ok).toBe(false)
-    if (attempt.ok) {
-      throw new Error('expected failed provider attempt')
-    }
-    expect(attempt.error).toMatchObject({
-      code: 'ASSISTANT_CODEX_FAILED',
-      message: expect.stringContaining('Venice via Codex Responses failed.'),
-    })
-    const error = attempt.error as Error
-    expect(error.message).not.toContain(sentinel)
-    expect(codexAppServerMocks.executeCodexAppServerTurn).toHaveBeenCalledTimes(1)
-  })
 
   it('returns failed delegated execution attempts with merged labels from emitted progress', async () => {
     const expectedError = new Error('provider crashed')

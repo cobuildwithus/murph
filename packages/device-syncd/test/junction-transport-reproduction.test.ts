@@ -2,12 +2,16 @@ import { createServer } from "node:http";
 import { expect, test } from "vitest";
 import { JunctionClient } from "../src/providers/junction-client.ts";
 
-test("a real HTTP response stalled at the server produces the local retryable Junction deadline error", async () => {
+test.each([false, true])("real HTTP timeout reports whether headers arrived: %s", async (headersReceived) => {
   let requests = 0;
-  const server = createServer((request) => {
+  const server = createServer((request, response) => {
     requests += 1;
     request.resume();
-    // Deliberately leave this synthetic response open until the client deadline.
+    if (headersReceived) {
+      response.writeHead(200, { "Content-Type": "application/json" });
+      response.write('{"providers":[');
+    }
+    // Stall either before headers or partway through the real response body.
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   try {
@@ -24,7 +28,13 @@ test("a real HTTP response stalled at the server produces the local retryable Ju
       code: "JUNCTION_API_REQUEST_TIMEOUT",
       httpStatus: 504,
       retryable: true,
-      cause: expect.objectContaining({ name: "TimeoutError" }),
+      details: expect.objectContaining({
+        providerRequestTimeoutMs: 1_000,
+        providerRequestElapsedMs: expect.any(Number),
+        providerRequestAttempt: 1,
+        providerRequestStage: headersReceived ? "response_body" : "awaiting_headers",
+        providerResponseHeadersPresent: headersReceived,
+      }),
     });
     expect(requests).toBe(1);
   } finally {

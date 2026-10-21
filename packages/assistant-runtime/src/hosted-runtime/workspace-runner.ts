@@ -125,6 +125,7 @@ import {
 import {
   markHostedWorkspaceLiveRuntimeStateDirtyForSnapshotRefBestEffort,
 } from "./workspace-restore.ts";
+import type { HostedBackgroundMaintenanceYieldReason } from "./background-maintenance-cancellation.ts";
 
 export interface HostedWorkspaceCheckpointMetadata {
   attemptId: string;
@@ -473,6 +474,7 @@ export interface HostedWorkspaceRunnerInput {
   runtimePassDiagnostics?: HostedWorkspaceRunnerRuntimePassDiagnostics | null;
   runtimeWakeSignal?: RuntimeWakeSignal | null;
   shouldYieldBackgroundMaintenance?: (() => boolean) | null;
+  backgroundMaintenanceYieldReason?: HostedBackgroundMaintenanceYieldReason;
   signal?: AbortSignal | null;
   runtimeLogContext?: HostedRuntimeLogContext | null;
   runAssistantPhase?: (
@@ -2579,6 +2581,7 @@ async function writeHostedMailboxImportRuntimeLog(input: {
         importedCount: input.result.importResult.importedCount,
         laneCount: lanes.length,
         ...(input.result.importResult.conversationImportTiming ?? {}),
+        ...(input.result.importResult.fetchTransportTiming ?? {}),
         retryableBlockedCount,
         stateChanged: input.result.stateChanged,
         systemSeqEnd: input.result.state.watermarks.system,
@@ -3571,6 +3574,19 @@ function createHostedWorkspaceCheckpointRequestSession(
       const importedConsumedSeq = parseHostedConversationMailboxSeq(
         result.importResult.consumedSeqByLane?.conversation ?? null,
       );
+      const recordedConsumedValue = checkpointRequestBuilder.readRedactedStatus()
+        ?.hostedMailboxConversationConsumedSeq;
+      const recordedConsumedSeq = parseHostedConversationMailboxSeq(
+        typeof recordedConsumedValue === "string" ? recordedConsumedValue : null,
+      );
+      // Empty imports can still observe committed acknowledgments. Preserve
+      // them for idle compaction without creating a separate checkpoint.
+      if (importedConsumedSeq !== null
+        && (recordedConsumedSeq === null || importedConsumedSeq > recordedConsumedSeq)) {
+        checkpointRequestBuilder.recordRedactedStatus({
+          hostedMailboxConversationConsumedSeq: importedConsumedSeq.toString(),
+        });
+      }
       if (
         importedConsumedSeq !== null
         && (

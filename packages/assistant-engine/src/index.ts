@@ -35,6 +35,7 @@ export type {
   AssistantGroupRoomModelInitializeResult,
 } from './assistant/group-room-model.js'
 export * from './assistant/hosted-image-completion.js'
+export { scopeAssistantAutomationToolToRoute } from './assistant/execution-context.js'
 export type {
   AssistantAutomationOccurrenceProjection,
   AssistantAutomationOccurrenceProjectionIssue,

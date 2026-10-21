@@ -29,12 +29,11 @@ export const ASSISTANT_GROUP_ROOM_MODEL_EVIDENCE_HEADING =
 
 export type AssistantMaintenanceProfile =
   | 'member-memory'
-  | 'habitat-voice'
   | 'group-room-model'
 
 export interface AssistantMaintenanceConversationEvidence {
   prompt: string
-  status: 'available' | 'empty' | 'unavailable' | 'not-applicable'
+  status: 'available' | 'empty' | 'unavailable'
 }
 
 interface AssistantMaintenanceEvidenceLimits {
@@ -79,7 +78,7 @@ const GROUP_ROOM_MODEL_EVIDENCE_LIMITS: AssistantMaintenanceEvidenceLimits = {
 }
 
 const ASSISTANT_MAINTENANCE_EVIDENCE_EMPTY_BODY =
-  'No committed user or assistant conversation messages were found in this window. Do not write any new memory this run.'
+  'No committed user or assistant conversation messages were found in this window. Do not add facts; only maintain existing records under the authorized faithful-compaction rules.'
 const ASSISTANT_GROUP_ROOM_MODEL_EVIDENCE_EMPTY_BODY =
   'No committed group conversation or reaction entries were found in this window. Do not create or update the group room model this run.'
 const ASSISTANT_GROUP_REACTION_TARGET_TEXT_MAX_CODE_POINTS = 1_000
@@ -112,16 +111,6 @@ export async function readAssistantMaintenanceConversationEvidence(input: {
   vault: string
 }): Promise<AssistantMaintenanceConversationEvidence> {
   const profile = input.profile ?? 'member-memory'
-  if (profile === 'habitat-voice') {
-    return {
-      status: 'not-applicable',
-      prompt: [
-        '## Environment voice evidence boundary',
-        '',
-        'Use only the transcript embedded in the maintenance instructions. Do not read conversation history.',
-      ].join('\n'),
-    }
-  }
   const limits = resolveAssistantMaintenanceEvidenceLimits(profile)
   const since = input.now.getTime() - ASSISTANT_MAINTENANCE_EVIDENCE_WINDOW_MS
   let candidates: AssistantMaintenanceEvidenceMessage[]
@@ -149,7 +138,9 @@ export async function readAssistantMaintenanceConversationEvidence(input: {
     ? 'unavailable'
     : selected.length === 0 ? 'empty' : 'available'
   if (profile === 'member-memory') {
-    const body = selected.length === 0
+    const body = collectionFailed
+      ? 'Conversation evidence collection failed. Newer corrections or extensions may be missing. Make no memory mutations this pass.'
+      : selected.length === 0
       ? ASSISTANT_MAINTENANCE_EVIDENCE_EMPTY_BODY
       : [
           `Engine-selected committed conversation messages (newest kept, up to ${limits.maxEntries} messages / ${limits.maxTotalBytes} bytes).`,

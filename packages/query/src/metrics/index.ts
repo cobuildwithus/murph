@@ -1,3 +1,4 @@
+import { isRetiredDeviceFeature } from "../retired-device-features.ts";
 import { HOSTED_MAILBOX_CAUSAL_SEQ_QUALIFIER } from "@murphai/contracts";
 import {
   METRIC_POINT_SCHEMA_VERSION,
@@ -245,6 +246,8 @@ function metricPointFromMetricRow(row: MetricRowEvidence): MetricPoint[] {
 }
 
 function metricPointsFromCanonicalEntity(entity: CanonicalEntity): MetricPoint[] {
+  if (isRetiredDeviceFeature(entity)) return [];
+
   if (entity.family === "sample" && entity.kind === "metric_sample") {
     return metricSampleMetricPoints(entity);
   }

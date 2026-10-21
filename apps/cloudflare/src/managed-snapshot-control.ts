@@ -43,15 +43,12 @@ export async function presignManagedSnapshot(input: {
 
 export async function completeManagedSnapshotForSession(input: {
   source: SnapshotSource; session: HostedWorkspaceSnapshotUploadSession; part: unknown;
+  receipt: HostedRuntimeManagedSnapshotUpload | null;
   encryptedByteSize: number; encryptedSha256: string;
 }): Promise<string> {
   const { uploadId, etag } = parseManagedPart(input.part);
-  const result = await commandHostedRuntimeSnapshot({ source: input.source, userId: input.session.userId, command: {
-    operation: "snapshot_managed_read", snapshotId: input.session.snapshotId,
-    attemptId: input.session.attemptId, generation: input.session.leaseGeneration,
-  } });
-  const receipt = result.managedUpload;
-  if (!result.applied || !receipt || receipt.uploadId !== uploadId || receipt.objectKey !== input.session.objectKey
+  const receipt = input.receipt;
+  if (!receipt || receipt.uploadId !== uploadId || receipt.objectKey !== input.session.objectKey
     || receipt.userId !== input.session.userId || receipt.snapshotId !== input.session.snapshotId
     || receipt.attemptId !== input.session.attemptId || receipt.generation !== input.session.leaseGeneration
     || receipt.encryptedByteSize !== input.encryptedByteSize || receipt.encryptedSha256 !== input.encryptedSha256) {

@@ -1,0 +1,19 @@
+{
+  "publishedOn": "2026-09-30",
+  "order": 100,
+  "item": {
+    "id": "clinical-runtime-facts",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "More usable details from medical records",
+    "summary": "Imported questionnaire answers, scores and medical history can now retain structured values, statuses and source details.",
+    "details": "Unknown dates and missing units stay unknown. Murph can also read RTF text and continue through longer documents, while keeping unclear facts and unreviewed images marked as unresolved. Your original evidence remains in the vault.",
+    "relevanceTags": [
+      "clinical-records",
+      "vault"
+    ],
+    "sourcePullRequests": [
+      3917
+    ]
+  }
+}

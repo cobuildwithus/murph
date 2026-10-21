@@ -17,6 +17,7 @@ pnpm hosted-local e2e linq-delivery temporal-orchestration --no-bundle
 pnpm hosted-local e2e linq-scheduled-reminder
 pnpm hosted-local e2e codex-gateway-prefix --profile e2e:live
 pnpm hosted-local e2e vault-persistence --profile e2e:live
+MURPH_E2E_VOICE_AUDIO_PATH=/tmp/synthetic-voice.wav pnpm hosted-local e2e native-voice --profile e2e:live
 pnpm hosted-local e2e --list
 pnpm hosted-local profiles
 pnpm hosted-local doctor
@@ -24,6 +25,24 @@ pnpm hosted-local run -- pnpm --dir apps/cloudflare test:workers
 ```
 
 Root `pnpm dev` is a thin alias for `pnpm hosted-local up`.
+
+`vault-persistence` also runs with the default `e2e:stub` profile: the scripted
+provider asks the real candidate Codex binary to write a synthetic vault file,
+then the scenario verifies its encrypted checkpoint before and after a stack
+restart and exactly one reply. `e2e:live` retains the real-model journey and
+requires a development provider key; missing credentials fail instead of skip.
+
+E2E MinIO cleanup uses the suite's existing local build identity, including after
+scenario failure or interruption. It removes that build's exact container and
+matching build-labelled leftovers; other E2E builds keep their storage service.
+
+The manual `native-voice` scenario needs a development OpenAI key entitled to
+GPT Live and a synthetic WAV saying “Read notes/synthetic-code.txt in my vault
+and tell me the code.” It seeds an isolated member and encrypted vault, then
+uses the real authenticated Voice page, Worker egress, native CLI, mailbox,
+and usage ledger. Only the physical microphone is replaced. The browser
+receives no provider credential. Missing audio skips this opt-in scenario;
+it is not part of `all` or ordinary credential-free CI.
 
 Runner readiness smoke polls every second locally, while retaining the canonical
 smoke client's attempt and wall-clock budgets. Standby preparation includes
@@ -91,8 +110,14 @@ MURPH_DEV_TEMPORAL_WORKER_PACKAGE_DIR=../murph-cloud/packages/hosted-orchestrato
 ```
 
 The setting changes only the package directory passed to `pnpm --dir` for
-`temporal:worker` and `temporal:ensure-device-sync-reconciler-schedule`. The
-Temporal address, namespace, task queue, and signed Web/Cloudflare HTTP
+`temporal:worker`, `temporal:ensure-device-sync-reconciler-schedule`, and
+`temporal:check-reconciliation-compatibility --fixtures <absolute-json-path>`.
+Before stack setup, the last command must parse every synthetic reconciliation
+fixture produced by this checkout using the same parser as the worker, without
+connecting to Temporal or requiring credentials. Missing commands, incompatible
+parsers, and checks exceeding 30 seconds stop startup with an update hint.
+Update the consumer package before adopting this harness contract; disabling
+Temporal skips this check. The Temporal address, namespace, task queue, and signed Web/Cloudflare HTTP
 contracts remain unchanged. The private package is not mirrored into public
 Murph: when the setting is unset or blank, hosted-local fails before starting
 Temporal and points to this variable or `MURPH_DEV_TEMPORAL=disabled`. This

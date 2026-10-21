@@ -79,7 +79,7 @@ describe.skipIf(!enabled)("member-scoped Postgres migration admission", () => {
       migrationPhase: "pending", migrationId: null, generation: 0n,
     });
     expect(await readHostedRuntimeMemberBackend(prisma, userId)).toBe("draining");
-    expect(await claimHostedRuntime({ prisma, userId, processingMode: "default" })).toEqual({ status: "blocked", reason: "cutover" });
+    expect(await claimHostedRuntime({ prisma, userId, processingMode: "default" })).toEqual({ cutover: "draining", status: "blocked", reason: "cutover" });
     await expect(prisma.$transaction(tx => requireHostedRuntimeCallbackTx(tx, userId, null)))
       .rejects.toMatchObject({ code: "HOSTED_RUNTIME_OWNER_STALE" });
     await prisma.hostedMember.delete({ where: { id: userId } });
@@ -179,9 +179,9 @@ describe.skipIf(!enabled)("member-scoped Postgres migration admission", () => {
       { userId: migrated, migrationPhase: "postgres", generation: 9n },
     ] });
     expect(await readHostedRuntimeMemberBackend(prisma, legacy)).toBe("legacy");
-    expect(await claimHostedRuntime({ prisma, userId: legacy, processingMode: "default" })).toEqual({ status: "blocked", reason: "cutover" });
+    expect(await claimHostedRuntime({ prisma, userId: legacy, processingMode: "default" })).toEqual({ cutover: "legacy", status: "blocked", reason: "cutover" });
     expect(await readHostedRuntimeMemberBackend(prisma, importing)).toBe("draining");
-    expect(await claimHostedRuntime({ prisma, userId: importing, processingMode: "default" })).toEqual({ status: "blocked", reason: "cutover" });
+    expect(await claimHostedRuntime({ prisma, userId: importing, processingMode: "default" })).toEqual({ cutover: "draining", status: "blocked", reason: "cutover" });
     const result = await claimHostedRuntime({ prisma, userId: migrated, processingMode: "default" });
     expect(result.status).toBe("claimed");
     if (result.status !== "blocked") expect(result.owner.generation).toBe(10n);
@@ -224,7 +224,7 @@ describe.skipIf(!enabled)("member-scoped Postgres migration admission", () => {
     expect(results).toEqual(["legacy", "legacy"]);
     expect(await prisma.hostedRuntimeOwner.count({ where: { userId } })).toBe(1);
     await prisma.hostedRuntimeOwner.update({ where: { userId }, data: { migrationPhase: "postgres" } });
-    expect(await claimHostedRuntime({ prisma, userId, processingMode: "default" })).toEqual({ status: "blocked", reason: "admission" });
+    expect(await claimHostedRuntime({ prisma, userId, processingMode: "default" })).toEqual({ cutover: "postgres", status: "blocked", reason: "admission" });
   });
 
   it("excludes unfinished imports before the cleanup batch limit", async () => {

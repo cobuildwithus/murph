@@ -15,18 +15,22 @@ import {
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 describe("workspace source resolution", () => {
-  it("resolves the Web device-sync service through source when package dist is absent", () => {
+  it.each([
+    { packageName: "device-syncd", entry: "service.ts", specifier: "@murphai/device-syncd/service", symbol: "SqliteDeviceSyncStore" },
+    { packageName: "hosted-execution", entry: "usage-diagnostics.ts", specifier: "@murphai/hosted-execution/usage-diagnostics", symbol: "parseHostedUsageDiagnosticsRequest" },
+    { packageName: "importers", entry: "clinical-records/index.ts", specifier: "@murphai/importers/clinical-records", symbol: "readClinicalAttachmentText" },
+  ])("resolves $specifier through Web source when package dist is absent", ({ packageName, entry, specifier, symbol }) => {
     const fixtureRoot = fs.mkdtempSync(path.join(tmpdir(), "murph-web-source-"));
     const webDir = path.join(fixtureRoot, "apps/web");
-    const packageDir = path.join(fixtureRoot, "packages/device-syncd");
-    const servicePath = path.join(packageDir, "src/service.ts");
+    const packageDir = path.join(fixtureRoot, "packages", packageName);
+    const servicePath = path.join(packageDir, "src", entry);
 
     try {
       fs.mkdirSync(webDir, { recursive: true });
       fs.mkdirSync(path.dirname(servicePath), { recursive: true });
       fs.mkdirSync(path.join(webDir, "node_modules/@murphai"), { recursive: true });
-      fs.symlinkSync(packageDir, path.join(webDir, "node_modules/@murphai/device-syncd"), "dir");
-      for (const relativePath of ["tsconfig.base.json", "packages/device-syncd/package.json", "packages/device-syncd/src/service.ts"]) {
+      fs.symlinkSync(packageDir, path.join(webDir, "node_modules/@murphai", packageName), "dir");
+      for (const relativePath of ["tsconfig.base.json", `packages/${packageName}/package.json`, `packages/${packageName}/src/${entry}`]) {
         fs.copyFileSync(path.join(repoRoot, relativePath), path.join(fixtureRoot, relativePath));
       }
       const config = JSON.parse(fs.readFileSync(path.join(repoRoot, "apps/web/tsconfig.json"), "utf8"));
@@ -37,7 +41,7 @@ describe("workspace source resolution", () => {
       config.compilerOptions.plugins = [];
       delete config.compilerOptions.tsBuildInfoFile;
       fs.writeFileSync(path.join(webDir, "tsconfig.json"), JSON.stringify(config));
-      fs.writeFileSync(path.join(webDir, "probe.ts"), 'import { SqliteDeviceSyncStore } from "@murphai/device-syncd/service";\nvoid SqliteDeviceSyncStore;\n');
+      fs.writeFileSync(path.join(webDir, "probe.ts"), `import { ${symbol} } from "${specifier}";\nvoid ${symbol};\n`);
 
       const output = execFileSync(process.execPath, [
         path.join(repoRoot, "scripts/run-typescript.mjs"),
@@ -101,12 +105,12 @@ describe("workspace source resolution", () => {
     expect(
       resolveAliasReplacement(
         aliases,
-        "@murphai/cloudflare-hosted-control/inference-verification",
+        "@murphai/cloudflare-hosted-control/device-webhook-queue",
       ),
     ).toBe(
       path.join(
         repoRoot,
-        "packages/cloudflare-hosted-control/src/inference-verification.ts",
+        "packages/cloudflare-hosted-control/src/device-webhook-queue.ts",
       ),
     );
     expect(resolveAliasReplacement(aliases, "@murphai/cloudflare-hosted-control/routes")).toBe(
@@ -129,6 +133,9 @@ describe("workspace source resolution", () => {
     );
 
     expect(resolveAliasReplacement(aliases, "@murphai/hosted-execution/parsers/assertions")).toBeNull();
+    expect(
+      resolveAliasReplacement(aliases, "@murphai/cloudflare-hosted-control/inference-verification"),
+    ).toBeNull();
     expect(
       aliases.some((alias) => alias.find.test("@murphai/hosted-execution/private-internal")),
     ).toBe(false);
@@ -169,6 +176,9 @@ describe("workspace source resolution", () => {
     expect(resolveAliasReplacement(aliases, "@murphai/core")).toBe(
       path.join(repoRoot, "packages/core/src/index.ts"),
     );
+    expect(resolveAliasReplacement(aliases, "@murphai/hosted-execution/usage-diagnostics")).toBe(
+      path.join(repoRoot, "packages/hosted-execution/src/usage-diagnostics.ts"),
+    );
     expect(resolveAliasReplacement(aliases, "@murphai/vault-usecases/testing")).toBe(
       path.join(repoRoot, "packages/vault-usecases/src/testing.ts"),
     );
@@ -207,6 +217,8 @@ describe("workspace source resolution", () => {
     ]);
     expect(tsconfig.compilerOptions?.paths?.["@murphai/hosted-execution/plan-usage"])
       .toEqual(["./packages/hosted-execution/src/plan-usage.ts"]);
+    expect(tsconfig.compilerOptions?.paths?.["@murphai/hosted-execution/usage-diagnostics"])
+      .toEqual(["./packages/hosted-execution/src/usage-diagnostics.ts"]);
     expect(tsconfig.compilerOptions?.paths?.["@murphai/hosted-execution/assistant-identifiers"])
       .toEqual(["./packages/hosted-execution/src/assistant-identifiers.ts"]);
     expect(tsconfig.compilerOptions?.paths?.["@murphai/hosted-execution/assistant-personalization"])

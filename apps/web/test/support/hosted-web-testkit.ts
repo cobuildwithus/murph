@@ -70,7 +70,6 @@ import { readdir, readFile } from "node:fs/promises";
 import type { HostedBrowserVaultReplicaRef } from "@murphai/hosted-execution/contracts";
 import type { HostedExecutionSnapshotRef } from "@murphai/hosted-execution/contracts";
 import type { HostedExecutionWake } from "@murphai/hosted-execution/contracts";
-import type { HostedAssistantProvider } from "@murphai/hosted-execution/assistant-model";
 import {
   parseHostedExecutionWake,
   parseHostedRuntimeLatencyTraceEvent,
@@ -96,6 +95,15 @@ import type { HostedBillingStatusForTest } from "./hosted-billing-live-testkit";
 export async function postHostedDeviceSyncSnapshotForTest(request: Request): Promise<Response> {
   const routeModuleSpecifier = new URL(
     "../../app/api/internal/device-sync/runtime/snapshot/route.ts", import.meta.url,
+  ).href;
+  const { POST } = await import(routeModuleSpecifier);
+  return POST(request);
+}
+
+// Mixed-version callbacks use the real Web authentication and canonical consumer.
+export async function postHostedCodexAuthUpdateForTest(request: Request): Promise<Response> {
+  const routeModuleSpecifier = new URL(
+    "../../app/api/internal/hosted-runtime/codex-auth/route.ts", import.meta.url,
   ).href;
   const { POST } = await import(routeModuleSpecifier);
   return POST(request);
@@ -141,10 +149,6 @@ const hostedSignalRuntimeModuleSpecifier = new URL(
 ).href;
 const hostedActionApprovalModuleSpecifier = new URL(
   "../../src/lib/action-approvals.ts",
-  import.meta.url,
-).href;
-const hostedAssistantModelPreferenceModuleSpecifier = new URL(
-  "../../src/lib/hosted-onboarding/assistant-model-preference.ts",
   import.meta.url,
 ).href;
 const hostedUsageCreditModuleSpecifier = new URL(
@@ -813,18 +817,6 @@ interface HostedActionApprovalModuleForTest {
     now: Date;
     prisma: unknown;
   }): Promise<HostedActionApprovalIdentityForTest>;
-}
-
-interface HostedAssistantModelPreferenceModule {
-  updateHostedMemberAssistantConfigurationTx(input: {
-    memberId: string;
-    prisma: unknown;
-    provider: HostedAssistantProvider;
-  }): Promise<{
-    effectiveProviderUpdated: boolean;
-    provider: HostedAssistantProvider;
-    updated: boolean;
-  }>;
 }
 
 interface HostedUsageCreditModule {
@@ -2395,27 +2387,6 @@ export async function signalHostedRuntimeWakeRuntimeForTest(input: {
   });
 }
 
-export async function updateHostedMemberAssistantProviderForTest(input: {
-  environment?: NodeJS.ProcessEnv;
-  provider: HostedAssistantProvider;
-  userId: string;
-}): Promise<{
-  effectiveProviderUpdated: boolean;
-  provider: HostedAssistantProvider;
-  updated: boolean;
-}> {
-  return withHostedWebTestkitDeps(input.environment, async (deps) => {
-    const preferenceModule = await loadHostedAssistantModelPreferenceModule();
-    return await deps.prisma.$transaction(async (tx) =>
-      await preferenceModule.updateHostedMemberAssistantConfigurationTx({
-        memberId: input.userId,
-        prisma: tx,
-        provider: input.provider,
-      })
-    );
-  });
-}
-
 export async function createHostedWebTestkitDeps(
   source: NodeJS.ProcessEnv = process.env,
 ): Promise<HostedWebTestkitDeps> {
@@ -2546,14 +2517,6 @@ async function loadHostedActionApprovalModuleForTest(): Promise<
   return await import(
     hostedActionApprovalModuleSpecifier
   ) as HostedActionApprovalModuleForTest;
-}
-
-async function loadHostedAssistantModelPreferenceModule(): Promise<
-  HostedAssistantModelPreferenceModule
-> {
-  return await import(
-    hostedAssistantModelPreferenceModuleSpecifier
-  ) as HostedAssistantModelPreferenceModule;
 }
 
 async function loadHostedUsageCreditModule(): Promise<HostedUsageCreditModule> {

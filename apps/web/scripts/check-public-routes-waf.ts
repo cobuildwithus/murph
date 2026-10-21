@@ -3,9 +3,6 @@ import { fileURLToPath } from "node:url";
 
 export const COMPANION_AUTH_DIAGNOSTICS_PATH =
   "/api/device-sync/companion/auth-diagnostics";
-export const MURPH_SAFE_SEARCH_PATH = "/api/public/v1/products/search";
-export const MURPH_SAFE_API_DETAIL_PREFIX = "/api/public/v1/products/";
-export const MURPH_SAFE_WEB_DETAIL_PREFIX = "/search/products/";
 export const SIGNUP_REFERRAL_CLAIM_PATH_PREFIX = "/r/";
 export const SIGNUP_REFERRAL_CLAIM_PATH_SUFFIX = "/claim";
 
@@ -13,10 +10,6 @@ export const COMPANION_AUTH_DIAGNOSTICS_ENABLED_ENV =
   "MURPH_COMPANION_AUTH_DIAGNOSTICS_ENABLED";
 export const COMPANION_AUTH_DIAGNOSTICS_WAF_RULE_ENV =
   "MURPH_COMPANION_AUTH_DIAGNOSTICS_WAF_RULE_ID";
-export const MURPH_SAFE_SEARCH_WAF_RULE_ENV =
-  "MURPH_SAFE_SEARCH_WAF_RULE_ID";
-export const MURPH_SAFE_DETAIL_WAF_RULE_ENV =
-  "MURPH_SAFE_DETAIL_WAF_RULE_ID";
 export const SIGNUP_REFERRAL_CLAIM_WAF_RULE_ENV =
   "MURPH_SIGNUP_REFERRAL_CLAIM_WAF_RULE_ID";
 export const PUBLIC_ROUTES_WAF_REQUIRED_ENV =
@@ -37,8 +30,6 @@ type FetchImplementation = typeof fetch;
 type JsonRecord = Record<string, unknown>;
 type PublicRoutesWafRuleIds = {
   companionDiagnosticsRuleId?: string;
-  detailRuleId: string;
-  searchRuleId: string;
   signupReferralClaimRuleId: string;
 };
 type RuleCondition = {
@@ -66,21 +57,6 @@ const COMPANION_DIAGNOSTICS_CONDITION_GROUPS = [[
     value: COMPANION_AUTH_DIAGNOSTICS_PATH,
   },
 ]] as const satisfies readonly (readonly RuleCondition[])[];
-
-const MURPH_SAFE_SEARCH_CONDITION_GROUPS = [[
-  { op: "eq", type: "path", value: MURPH_SAFE_SEARCH_PATH },
-  { op: "eq", type: "method", value: "POST" },
-]] as const satisfies readonly (readonly RuleCondition[])[];
-
-const MURPH_SAFE_DETAIL_CONDITION_GROUPS = [
-  [
-    { op: "pre", type: "path", value: MURPH_SAFE_API_DETAIL_PREFIX },
-    { neg: true, op: "eq", type: "path", value: MURPH_SAFE_SEARCH_PATH },
-  ],
-  [
-    { op: "pre", type: "path", value: MURPH_SAFE_WEB_DETAIL_PREFIX },
-  ],
-] as const satisfies readonly (readonly RuleCondition[])[];
 
 const SIGNUP_REFERRAL_CLAIM_CONDITION_GROUPS = [[
   { op: "pre", type: "path", value: SIGNUP_REFERRAL_CLAIM_PATH_PREFIX },
@@ -176,14 +152,6 @@ export async function runPublicRoutesWafPreflight(
     return;
   }
 
-  const searchRuleId = requireEnvironmentVariable(
-    source,
-    MURPH_SAFE_SEARCH_WAF_RULE_ENV,
-  );
-  const detailRuleId = requireEnvironmentVariable(
-    source,
-    MURPH_SAFE_DETAIL_WAF_RULE_ENV,
-  );
   const signupReferralClaimRuleId = requireEnvironmentVariable(
     source,
     SIGNUP_REFERRAL_CLAIM_WAF_RULE_ENV,
@@ -195,8 +163,6 @@ export async function runPublicRoutesWafPreflight(
 
   const ruleIds = {
     companionDiagnosticsRuleId,
-    detailRuleId,
-    searchRuleId,
     signupReferralClaimRuleId,
   } satisfies PublicRoutesWafRuleIds;
   assertDistinctRuleIds(ruleIds);
@@ -256,18 +222,6 @@ function buildRuleSpecs(ruleIds: PublicRoutesWafRuleIds): RuleSpec[] {
   }
   specs.push(
     {
-      conditionGroups: MURPH_SAFE_SEARCH_CONDITION_GROUPS,
-      id: ruleIds.searchRuleId,
-      label: "Murph Safe search",
-      limit: 30,
-    },
-    {
-      conditionGroups: MURPH_SAFE_DETAIL_CONDITION_GROUPS,
-      id: ruleIds.detailRuleId,
-      label: "Murph Safe detail",
-      limit: 120,
-    },
-    {
       allowSafePredecessors: true,
       conditionGroups: SIGNUP_REFERRAL_CLAIM_CONDITION_GROUPS,
       id: ruleIds.signupReferralClaimRuleId,
@@ -281,8 +235,6 @@ function buildRuleSpecs(ruleIds: PublicRoutesWafRuleIds): RuleSpec[] {
 function assertDistinctRuleIds(ruleIds: PublicRoutesWafRuleIds): void {
   const ids = [
     ruleIds.companionDiagnosticsRuleId,
-    ruleIds.searchRuleId,
-    ruleIds.detailRuleId,
     ruleIds.signupReferralClaimRuleId,
   ].filter((value): value is string => value !== undefined);
   if (new Set(ids).size !== ids.length) {

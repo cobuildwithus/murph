@@ -119,6 +119,10 @@ test("hosted web tsconfig resolves Temporal orchestration-control from source", 
     ["../../packages/hosted-execution/src/plan-usage.ts"],
   );
   assert.deepEqual(
+    tsconfig.compilerOptions?.paths?.["@murphai/hosted-execution/usage-diagnostics"],
+    ["../../packages/hosted-execution/src/usage-diagnostics.ts"],
+  );
+  assert.deepEqual(
     tsconfig.compilerOptions?.paths?.["@murphai/hosted-execution/subscription"],
     ["../../packages/hosted-execution/src/subscription.ts"],
   );
@@ -482,93 +486,13 @@ test("next.config uses Workflow lazy discovery to avoid eager dev rebuild loops"
 
 test("next.config traces generated Health Commons route files without the monolithic catalog", () => {
   assert.deepEqual(
-    productionNextConfig.outputFileTracingIncludes?.["/goals"],
-    [
-      "../../packages/health-commons/generated/web/browse/goals.json",
-    ],
-  );
-  assert.deepEqual(
-    productionNextConfig.outputFileTracingIncludes?.["/goals/[goalId]"],
-    [
-      "../../packages/health-commons/generated/web/browse/goals.json",
-      "../../packages/health-commons/generated/web/routes/index.json",
-      "../../packages/health-commons/generated/web/pages/goals/**/*.json",
-    ],
-  );
-  assert.deepEqual(
-    productionNextConfig.outputFileTracingIncludes?.["/api/goals/contact"],
-    [
-      "../../packages/health-commons/generated/web/browse/goals.json",
-    ],
-  );
-  for (const route of [
-    "/api/hosted-onboarding/linq/webhook",
-    "/api/hosted-onboarding/telegram/webhook",
-  ]) {
-    assert.deepEqual(
-      productionNextConfig.outputFileTracingIncludes?.[route],
-      ["../../packages/health-commons/generated/web/browse/goals.json"],
-    );
-  }
-  const expectedGoalTraceExcludes = [
-    "../../packages/health-commons/generated/web/browse/biomarkers.json",
-    "../../packages/health-commons/generated/web/browse/experiments.json",
-    "../../packages/health-commons/generated/web/bundles/**/*.json",
-    "../../packages/health-commons/generated/web/pages/biomarkers/**/*.json",
-    "../../packages/health-commons/generated/web/shell/**/*.json",
-    "../../packages/health-commons/generated/web/tabs/**/*.json",
-  ];
-  assert.deepEqual(
-    productionNextConfig.outputFileTracingExcludes?.["/goals"],
-    expectedGoalTraceExcludes,
-  );
-  assert.deepEqual(
-    productionNextConfig.outputFileTracingExcludes?.["/goals/[goalId]"],
-    expectedGoalTraceExcludes,
-  );
-  const expectedGoalIndexOnlyTraceExcludes = [
-    "../../packages/health-commons/generated/web/pages/goals/**/*.json",
-    "../../packages/health-commons/generated/web/routes/index.json",
-  ];
-  assert.deepEqual(
-    productionNextConfig.outputFileTracingExcludes?.["/goals!(/**)"],
-    expectedGoalIndexOnlyTraceExcludes,
-  );
-  assert.deepEqual(
-    productionNextConfig.outputFileTracingExcludes?.["/api/goals/contact"],
-    [
-      ...expectedGoalTraceExcludes,
-      ...expectedGoalIndexOnlyTraceExcludes,
-    ],
-  );
-  for (const route of [
-    "/api/hosted-onboarding/linq/webhook",
-    "/api/hosted-onboarding/telegram/webhook",
-  ]) {
-    assert.deepEqual(
-      productionNextConfig.outputFileTracingExcludes?.[route],
-      [
-        ...expectedGoalTraceExcludes,
-        ...expectedGoalIndexOnlyTraceExcludes,
-      ],
-    );
-  }
-  assert.deepEqual(
     productionNextConfig.outputFileTracingIncludes?.["/measurement-methods/[measurementMethodId]"],
     [
       "../../packages/health-commons/generated/web/routes/index.json",
       "../../packages/health-commons/generated/web/bundles/measurement_method/**/*.json",
     ],
   );
-  assert.deepEqual(
-    productionNextConfig.outputFileTracingIncludes?.["/biomarkers"],
-    [
-      "../../packages/health-commons/generated/web/browse/biomarkers.json",
-      "../../packages/health-commons/generated/web/routes/index.json",
-      "../../packages/health-commons/generated/web/shell/biomarkers/**/*.json",
-      "../../packages/health-commons/generated/web/pages/biomarkers/**/*.json",
-    ],
-  );
+  assert.equal(productionNextConfig.outputFileTracingIncludes?.["/biomarkers"], undefined);
   assert.equal(
     productionNextConfig.outputFileTracingIncludes?.["/biomarkers/[biomarkerId]"],
     undefined,
@@ -735,15 +659,6 @@ test("hosted Web accepts an implicit callback when every browser surface shares 
 });
 
 
-test("next.config permits only the Brandfetch CDN for remote brand images", () => {
-  assert.deepEqual(productionNextConfig.images?.remotePatterns, [
-    {
-      protocol: "https",
-      hostname: "cdn.brandfetch.io",
-      pathname: "/**",
-    },
-  ]);
-});
 
 test("buildHostedWebContentSecurityPolicy keeps production script origins on a tight allowlist", () => {
   const csp = buildHostedWebContentSecurityPolicy(createProcessEnv({
@@ -835,11 +750,11 @@ test("buildHostedWebSecurityHeaders adds production-only HSTS alongside the CSP 
   );
 });
 
-test("next.config serves global security headers and stricter Murph Safe referrer privacy", async () => {
+test("next.config serves global security headers", async () => {
   const routes = await productionNextConfig.headers?.();
 
   assert.ok(routes);
-  assert.equal(routes.length, 2);
+  assert.equal(routes.length, 1);
   assert.equal(routes[0]?.source, "/(.*)");
   assert.deepEqual(
     routes[0]?.headers.map((header) => header.key),
@@ -861,13 +776,6 @@ test("next.config serves global security headers and stricter Murph Safe referre
       value: "strict-origin",
     },
   );
-  assert.equal(routes[1]?.source, "/search/:path*");
-  assert.deepEqual(routes[1]?.headers, [
-    {
-      key: "Referrer-Policy",
-      value: "no-referrer",
-    },
-  ]);
 });
 
 function resolveHostedOptionalModule(): boolean {

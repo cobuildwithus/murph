@@ -8,7 +8,7 @@ import {
   CLINICAL_RAW_MANIFEST_MAX_RESOURCES_PER_FILE,
   CLINICAL_RAW_RESOURCE_FILE_MAX_BYTES,
 } from "@murphai/clinical-records";
-import { findEventByExternalRef, initializeVault } from "@murphai/core";
+import { findEventByExternalRef, importEventBatch, initializeVault } from "@murphai/core";
 import {
   HOSTED_CLINICAL_RECORDS_AUTHORIZATION_REQUIRED_ERROR_CODE,
   type HostedClinicalRecordsRunDescriptor,
@@ -51,6 +51,63 @@ beforeEach(async () => { vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cl
 afterEach(async () => { vi.useRealTimers(); await rm(vaultRoot, { force: true, recursive: true }); });
 
 describe("hosted clinical records maintenance", () => {
+  it("durably admits retained structured records for enrichment before finishing retrieval", async () => {
+    await initializeVault({ vaultRoot, timezone: "UTC" });
+    const retained = { resourceType: "Observation", id: "narrative-vital", status: "final",
+      subject: { reference: "Patient/patient-1" }, meta: { lastUpdated: RUN.fetchedAt },
+      effectiveDateTime: "2020-03-12T12:00:00Z", code: { text: "Narrative vital" }, valueString: "Resting heart rate 73 bpm." };
+    const importSnapshot = vi.fn(importClinicalFhirSnapshot);
+    const result = await run(createPort({ fetchPage: async () => ({ status: "page", body: bundle([retained, lab("structured")]), nextCursor: null }) }), importSnapshot);
+    expect(result).toMatchObject({ status: "completed", counts: { createdCount: 2 } });
+    const imported = await importSnapshot.mock.results[0]!.value;
+    expect(imported.structuredEnrichmentSources).toHaveLength(1);
+    expect((await readHostedSystemMailboxState(vaultRoot)).pending).toEqual([expect.objectContaining({
+      routeAction: "apply-clinical-enrichment", wake: expect.objectContaining({ jobId: imported.manifestSha256 }),
+    })]);
+    expect(await readNextClinicalEnrichment({ vaultRoot })).toMatchObject({
+      status: "extract", source: { resource: { resourceId: "narrative-vital" } },
+    });
+    expect(await checkpoint()).toBeNull();
+  });
+
+  it.each(["qualitative-range", "source-note", "component-range", "prior-result", "prior-component", "prior-source-note"])("completes a real refresh past a historical %s hold and advances both pages", async (shape) => {
+    await initializeVault({ vaultRoot, timezone: "UTC" });
+    const heldResource = { resourceType: "Observation", id: "historical-hold", status: "final", subject: { reference: "Patient/patient-1" },
+      meta: { lastUpdated: "2026-07-01T12:00:00.000Z" }, effectiveDateTime: "2026-07-01T11:00:00.000Z",
+      code: { text: "Example assessment" }, valueString: "Source finding",
+      ...(!shape.endsWith("source-note") ? { category: [{ coding: [{ system: "http://terminology.hl7.org/CodeSystem/observation-category", code: "laboratory" }] }], referenceRange: [{ low: { value: 2, unit: "ng/mL" } }] } : {}),
+    };
+    if (shape.includes("component")) {
+      Object.assign(heldResource, { valueString: undefined, referenceRange: undefined,
+        component: [{ code: { text: "Example assay" }, valueString: "Source finding", referenceRange: [{ low: { value: 2, unit: "ng/mL" } }] }] });
+    }
+    if (shape.startsWith("prior-")) {
+      await importClinicalFhirSnapshot({ ...RUN, vaultRoot, completedRetrievalSlices: [], retrievalJobId: "prior-successful",
+        pages: [{ resourceType: "Observation", queryScopeId: "observation", sliceId: "whole",
+          content: bundle([{ ...lab(heldResource.id), meta: { lastUpdated: "2026-06-01T12:00:00.000Z" } }]) }] });
+    }
+    let checks = 0;
+    await expect(importClinicalFhirSnapshot({ ...RUN, vaultRoot, completedRetrievalSlices: [], retrievalJobId: "historical-batch", fetchedAt: "2026-07-02T12:00:00.000Z",
+      pages: [{ resourceType: "Observation", queryScopeId: "observation", sliceId: "whole", content: bundle([heldResource]) }],
+      assertCurrent: async () => { if (++checks === 2) throw new Error("fixture pauses before canonical import"); },
+    })).rejects.toThrow("fixture pauses");
+    const externalRef = { system: `epic-fhir-${RUN.fhirBaseUrlHash}-${RUN.patientIdHash}`, resourceType: "observation", resourceId: heldResource.id, version: heldResource.meta.lastUpdated };
+    await importEventBatch({ vaultRoot, apply: true, decisions: [{ action: "retract", externalRef,
+      reason: shape.endsWith("source-note") ? "observation code is not importable" : shape.includes("component") ? "laboratory observation component result is not importable" : "laboratory observation result is not importable",
+      evidence: [{ rawRef: `raw/clinical/fhir/${RUN.connectionId}/historical-batch/observation/whole/Observation/page-0001.json`, sourceLabel: "Observation/historical-hold" }],
+    }] });
+    const held = await findEventByExternalRef({ vaultRoot, ...externalRef, includeDeleted: true });
+    const nextUrl = "https://ehr.example.test/fhir/Observation?page=2";
+    const fetchPage = vi.fn<HostedRuntimeClinicalRecordsPort["fetchPage"]>()
+      .mockResolvedValueOnce({ body: bundle([heldResource, lab("same-page-new")], nextUrl), nextCursor: "next", status: "page" })
+      .mockResolvedValueOnce({ body: bundle([lab("later-page-new")]), pageUrlHash: hash(nextUrl), nextCursor: null, status: "page" });
+    const result = await run(createPort({ fetchPage }), vi.fn(importClinicalFhirSnapshot));
+    expect(result).toMatchObject({ status: "completed", counts: { createdCount: 2, labResultCount: 2, reviewDecisionCount: 1, fetchedPageCount: 2, fetchedResourceFamilyCount: 1 } });
+    expect(await checkpoint()).toBeNull();
+    expect(await findEventByExternalRef({ vaultRoot, ...externalRef, includeDeleted: true })).toEqual(held);
+    for (const resourceId of ["same-page-new", "later-page-new"]) expect(await findEventByExternalRef({ vaultRoot, ...externalRef, version: undefined, resourceId })).not.toBeNull();
+  });
+
   it("imports each page before fetching the next and accumulates counts without claiming complete batch coverage", async () => {
     const nextUrl = "https://ehr.example.test/fhir/Observation?page=2";
     const bodies = [bundle([lab("first")], nextUrl), bundle([lab("second")])];
@@ -94,6 +151,18 @@ describe("hosted clinical records maintenance", () => {
       body: bundle([{ resourceType: "OperationOutcome", issue: [{ severity, code: "incomplete" }] }]),
     }) }), successfulImport());
     expect(result).toMatchObject({ status: "partial", outcome: { errorCode: "provider-search-incomplete" } });
+  });
+
+  it.each(["4101", "4119"])("finishes retrieval with expected Epic patient notice %s", async (code) => {
+    const result = await run(createPort({ fetchPage: async () => ({ status: "page", nextCursor: null,
+      body: bundle([lab("notice-lab"), { resourceType: "OperationOutcome", issue: [{
+        severity: "warning", code: "processing", details: { coding: [{
+          system: "urn:oid:1.2.840.114350.1.13.999.2.7.2.657369", code,
+        }] },
+      }] }]),
+    }) }), successfulImport());
+    expect(result).toMatchObject({ status: "completed", counts: { createdCount: 1 } });
+    expect(result.outcome).not.toHaveProperty("errorCode");
   });
 
   it("retains committed same-resource query slices across preemption without replaying imports", async () => {

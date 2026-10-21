@@ -1,0 +1,21 @@
+{
+  "publishedOn": "2026-09-28",
+  "order": 100,
+  "item": {
+    "id": "models-ordered-by-usage",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Model choices ordered by usage",
+    "summary": "Settings lists Luna, Sol, and Astra from lowest to highest usage.",
+    "relevanceTags": [
+      "settings"
+    ],
+    "tryIt": {
+      "label": "Choose your model",
+      "href": "/settings"
+    },
+    "sourcePullRequests": [
+      3746
+    ]
+  }
+}

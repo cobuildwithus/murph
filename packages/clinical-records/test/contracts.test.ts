@@ -666,6 +666,31 @@ describe("clinical search warning completeness", () => {
     }))).toBe(incomplete);
   });
 
+  it.each(["4101", "4119"])("separates Epic notice %s from retrieval failure without proving clinical absence", (code) => {
+    const page = JSON.stringify({ resourceType: "Bundle", entry: [{ resource: {
+      resourceType: "OperationOutcome", issue: [{ severity: "warning", code: "processing", details: {
+        coding: [{ system: "urn:oid:1.2.840.114350.1.13.999.2.7.2.657369", code }],
+      } }],
+    } }] });
+    expect(clinicalFhirPageHasIncompleteSearchOutcome(page)).toBe(true);
+    expect(clinicalFhirPageHasIncompleteSearchOutcome(page, { ignorePatientAccessNotices: true })).toBe(false);
+  });
+
+  it.each([
+    { severity: "error", code: "processing", codes: ["4119"] },
+    { severity: "warning", code: "suppressed", codes: ["59204"] },
+    { severity: "warning", code: "processing", codes: ["4119", "4122"] },
+    { severity: "warning", code: "processing", codes: ["4119"], system: "https://example.test/codes" },
+    { severity: "warning", code: "processing", codes: [] },
+  ])("does not suppress denied, unknown, or malformed outcomes %#", ({ codes, system, ...issue }) => {
+    const page = JSON.stringify({ resourceType: "Bundle", entry: [{ resource: {
+      resourceType: "OperationOutcome", issue: [{ ...issue, details: {
+        coding: codes.map((code) => ({ code, system: system ?? "urn:oid:1.2.840.114350.1.13.999.2.7.2.657369" })),
+      } }],
+    } }] });
+    expect(clinicalFhirPageHasIncompleteSearchOutcome(page, { ignorePatientAccessNotices: true })).toBe(true);
+  });
+
   it("rejects malformed JSON at the evidence boundary", () => {
     expect(() => clinicalFhirPageHasIncompleteSearchOutcome("{")).toThrow(SyntaxError);
   });

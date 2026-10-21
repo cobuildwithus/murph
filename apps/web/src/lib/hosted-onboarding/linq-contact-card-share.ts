@@ -19,6 +19,7 @@ import {
   resolveMurphHostedLinqContactCardBackupPhoneNumber,
 } from "./linq-contact-card";
 import { normalizePhoneNumber } from "./phone";
+import { resolveHostedLinqEgressPolicyForRuntime } from "./linq-egress-engagement";
 
 type HostedLinqContactCardSharePersistenceClient =
   {
@@ -71,6 +72,8 @@ type HostedLinqContactCardShareFindManyInput = {
 // arrives minutes later, after the card is already in the chat, so 90s is
 // imperceptible to it while still covering the retry backoff.
 const HOSTED_LINQ_CONTACT_CARD_SHARE_THROTTLE_MS = 90 * 1000;
+// Native identity sharing is provider-recommended at most once per active day.
+const HOSTED_LINQ_NATIVE_CONTACT_CARD_SHARE_THROTTLE_MS = 24 * 60 * 60 * 1000;
 
 // A personalized send must reach a terminal result inside the runner's
 // 30-second web-control hop, or the turn reports something the send owner never
@@ -130,6 +133,7 @@ export async function reserveHostedLinqContactCardShareAttempt(input: {
   memberId: string;
   now?: Date;
   prisma: HostedLinqContactCardSharePersistenceClient;
+  throttleMs?: number;
 }): Promise<HostedLinqContactCardShareReserveDecision> {
   const now = input.now ?? new Date();
   const chatLookup = resolveHostedLinqContactCardShareLookup(input.chatId);
@@ -141,7 +145,7 @@ export async function reserveHostedLinqContactCardShareAttempt(input: {
   }
 
   const attemptBefore = new Date(
-    now.getTime() - HOSTED_LINQ_CONTACT_CARD_SHARE_THROTTLE_MS,
+    now.getTime() - (input.throttleMs ?? HOSTED_LINQ_CONTACT_CARD_SHARE_THROTTLE_MS),
   );
   const existingRows = await input.prisma.hostedLinqContactCardShare.findMany({
     where: {
@@ -309,6 +313,7 @@ export type MurphHostedLinqContactCardVcfShareOutcome =
   | {
       status: "skipped";
       reason:
+        | "egress_blocked"
         | "line_unresolved"
         | "missing_chat_id"
         | "photo_unavailable"
@@ -326,6 +331,7 @@ export type MurphHostedLinqNativeContactCardShareOutcome =
   | {
       status: "skipped";
       reason:
+        | "egress_blocked"
         | "line_card_has_image"
         | "line_card_unverified"
         | "missing_chat_id";
@@ -359,9 +365,24 @@ export async function shareMurphHostedLinqNativeContactCardToChat(input: {
   chatId: string;
   memberId: string;
   now?: Date;
-  prisma: HostedLinqContactCardSharePersistenceClient;
+  prisma: PrismaClient;
   signal?: AbortSignal;
 }): Promise<MurphHostedLinqNativeContactCardShareOutcome> {
+  const now = input.now ?? new Date();
+  const chatLookup = resolveHostedLinqContactCardShareLookup(input.chatId);
+  if (!chatLookup) return { status: "skipped", reason: "missing_chat_id" };
+  // Most delivered messages should require no provider work. The reservation
+  // below repeats this check atomically after preflight for concurrent receipts.
+  const previous = await input.prisma.hostedLinqContactCardShare.findMany({
+    where: { linqChatLookupKey: { in: [...chatLookup.readCandidates] } },
+    select: { lastContactCardShareAttemptedAt: true, linqChatLookupKey: true },
+  });
+  if (previous.some((row) => row.lastContactCardShareAttemptedAt
+    && row.lastContactCardShareAttemptedAt.getTime()
+      > now.getTime() - HOSTED_LINQ_NATIVE_CONTACT_CARD_SHARE_THROTTLE_MS)) {
+    return { status: "already_shared" };
+  }
+
   try {
     const handles = await getHostedLinqChatHandles({
       chatId: input.chatId,
@@ -393,6 +414,15 @@ export async function shareMurphHostedLinqNativeContactCardToChat(input: {
     if (lineCard.imageUrl !== null) {
       return { status: "skipped", reason: "line_card_has_image" };
     }
+    const { policy } = await resolveHostedLinqEgressPolicyForRuntime({
+      fromPhoneNumber: linePhoneNumber,
+      prisma: input.prisma,
+      target: input.chatId,
+      targetKind: "thread",
+    });
+    if (policy.kind === "block") {
+      return { status: "skipped", reason: "egress_blocked" };
+    }
   } catch {
     return { status: "skipped", reason: "line_card_unverified" };
   }
@@ -400,8 +430,9 @@ export async function shareMurphHostedLinqNativeContactCardToChat(input: {
   const reservation = await reserveHostedLinqContactCardShareAttempt({
     chatId: input.chatId,
     memberId: input.memberId,
-    ...(input.now ? { now: input.now } : {}),
+    now,
     prisma: input.prisma,
+    throttleMs: HOSTED_LINQ_NATIVE_CONTACT_CARD_SHARE_THROTTLE_MS,
   });
   if (reservation.action !== "share") {
     return reservation.reason === "recent_attempt"
@@ -479,9 +510,7 @@ export async function shareMurphHostedLinqContactCardVcfToChat(
     : input.signal;
   const preSendSignalOption = preSendSignal ? { signal: preSendSignal } : {};
 
-  // A personalized card is saved over the member's working Murph contact, so
-  // an obsolete or ambiguous line is worse than no card. Require exactly one
-  // active self handle, matching the native line-card path.
+  // Every saved card must use the current line, matching native card sharing.
   let linePhoneNumber: string | null = null;
   let rosterPresent = false;
   try {
@@ -490,18 +519,12 @@ export async function shareMurphHostedLinqContactCardVcfToChat(
       ...preSendSignalOption,
     });
     rosterPresent = handles.length > 0;
-    if (personalized) {
-      const activeSelfHandles = handles.filter((handle) =>
-        handle.isMe && handle.status?.trim().toLowerCase() === "active",
-      );
-      linePhoneNumber = activeSelfHandles.length === 1
-        ? normalizePhoneNumber(activeSelfHandles[0]?.handle ?? null)
-        : null;
-    } else {
-      linePhoneNumber = normalizePhoneNumber(
-        handles.find((handle) => handle.isMe)?.handle ?? null,
-      );
-    }
+    const activeSelfHandles = handles.filter((handle) =>
+      handle.isMe && handle.status?.trim().toLowerCase() === "active",
+    );
+    linePhoneNumber = activeSelfHandles.length === 1
+      ? normalizePhoneNumber(activeSelfHandles[0]?.handle ?? null)
+      : null;
   } catch {
     return { status: "skipped", reason: "provider_unavailable" };
   }
@@ -510,6 +533,16 @@ export async function shareMurphHostedLinqContactCardVcfToChat(
   }
   if (!linePhoneNumber) {
     return { status: "skipped", reason: "line_unresolved" };
+  }
+
+  const { policy } = await resolveHostedLinqEgressPolicyForRuntime({
+    fromPhoneNumber: linePhoneNumber,
+    prisma: input.prisma,
+    target: input.chatId,
+    targetKind: "thread",
+  });
+  if (policy.kind === "block") {
+    return { status: "skipped", reason: "egress_blocked" };
   }
 
   let reservation: Extract<

@@ -1,5 +1,4 @@
-import { readFile, rm } from 'node:fs/promises'
-import path from 'node:path'
+import { rm } from 'node:fs/promises'
 
 import {
   initializeVault,
@@ -16,9 +15,6 @@ import {
   listMurphDynamicToolNames,
 } from '../src/assistant-codex/dynamic-tools.js'
 import {
-  resolveAssistantSkillsRoot,
-} from '../src/assistant-skill-assets.js'
-import {
   refreshReminderAvailability,
 } from '../src/assistant/reminder-availability-maintenance.js'
 import {
@@ -29,6 +25,7 @@ import {
   type AssistantSystemPromptInput,
 } from '../src/assistant/system-prompt.js'
 import { createTempVaultContext } from './test-helpers.js'
+import { readWorkflowSkillPolicy } from './support/workflow-skill-policy.js'
 
 const tempRoots: string[] = []
 const REMINDER_AUTOMATION_ID = 'automation_01K5A7B9C2D4E6F8G0H1J3K5MN'
@@ -402,14 +399,7 @@ describe('reminder availability maintenance', () => {
     expect(layers.stableRouteCapabilityPrompt).not.toContain(
       'Availability calendar account: <toolkit> / <account-id>',
     )
-    const skill = await readFile(
-      path.join(
-        resolveAssistantSkillsRoot(),
-        'behavior-followthrough',
-        'SKILL.md',
-      ),
-      'utf8',
-    )
+    const skill = await readWorkflowSkillPolicy('behavior-followthrough')
     expect(skill).toContain('### Repair a mistimed interruption')
     expect(skill).toContain('treat it as feedback about the')
     expect(skill).toContain('Availability conflict policy: skip-when-busy')

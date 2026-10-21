@@ -164,7 +164,7 @@ jobs:
 
       - name: Test Temporal compatibility control contract
         if: ${{ github.event_name != 'pull_request' || needs.markdown-docs-scope.outputs.markdown_only != 'true' }}
-        run: node --test scripts/hosted-orchestration-compatibility.test.mjs
+        run: node --test scripts/hosted-orchestration-compatibility.test.mjs scripts/hosted-integration-web-artifact.test.mjs
 
       - name: Check tracked private/build artifacts
         if: ${{ github.event_name != 'pull_request' || needs.markdown-docs-scope.outputs.markdown_only != 'true' }}

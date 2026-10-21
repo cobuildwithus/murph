@@ -416,6 +416,60 @@ function createDeferred<T = void>() {
 }
 
 describe("startHostedContainerEntrypoint", () => {
+  it("binds voice HTTP commands to the active invocation and releases them with it", async () => {
+    const ready = createDeferred();
+    const release = createDeferred();
+    const connect = vi.fn(async () => "v=0\r\nanswer");
+    const closeCall = vi.fn(async () => ({ providerConfirmed: true, providerSessionId: "synthetic-provider", seconds: 12 }));
+    vi.spyOn(hostedInvocation, "runHostedWorkspaceInvocation").mockImplementation(async (_job, options) => {
+      options.onVoiceReady?.({ connect, closeCall });
+      ready.resolve();
+      await release.promise;
+      return buildWorkspaceRunnerResult();
+    });
+    const server = await startHostedContainerEntrypoint({ port: 0 });
+    servers.push(server);
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("TCP listener missing.");
+    const origin = `http://127.0.0.1:${address.port}`;
+    const invocation = fetch(origin + "/internal/workspace-invocation", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify(buildJobBody({ wake: {
+        event: { kind: "runtime.timer", triggerKind: "runtime_timer", userId: "u1" },
+        eventId: "voice-control", occurredAt: "2026-09-21T12:00:00.000Z",
+      } })),
+    });
+    const command = { userId: "u1", attemptId: "attempt_voice-control", leaseGeneration: "1",
+      callId: "call-synthetic", action: "connect", sdp: "v=0\r\noffer" };
+    const post = (body: unknown) => fetch(origin + "/internal/voice-control", {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body),
+    });
+    try {
+      await ready.promise;
+      for (const change of [{ userId: "other" }, { attemptId: "old" }, { leaseGeneration: "2" }]) {
+        expect(await (await post({ ...command, ...change })).json()).toEqual({ kind: "unavailable" });
+      }
+      expect(connect).not.toHaveBeenCalled();
+      expect(await (await post(command)).json()).toEqual({ kind: "connected", sdp: "v=0\r\nanswer" });
+      expect(connect).toHaveBeenCalledExactlyOnceWith("call-synthetic", command.sdp);
+      const { sdp: _sdp, ...close } = { ...command, action: "close" };
+      expect(await (await post(close)).json()).toEqual({ kind: "closed", providerConfirmed: true, seconds: 12 });
+      expect(closeCall).toHaveBeenCalledExactlyOnceWith("call-synthetic");
+      expect((await post({ ...command, extra: true })).status).toBe(400);
+      expect((await post({ ...command, sdp: "x".repeat(74000) })).status).toBe(413);
+      const malformed = await fetch(origin + "/internal/voice-control", {
+        method: "POST", headers: { "content-type": "application/json" }, body: "private-synthetic-offer",
+      });
+      expect(malformed.status).toBe(400);
+      expect(await malformed.text()).not.toContain("private-synthetic-offer");
+      expect(JSON.stringify(mocks.emitHostedExecutionStructuredLog.mock.calls)).not.toContain("private-synthetic-offer");
+    } finally {
+      release.resolve();
+      await invocation;
+    }
+    expect(await (await post(command)).json()).toEqual({ kind: "unavailable" });
+    expect(connect).toHaveBeenCalledTimes(1);
+  });
   it("serves a lightweight health endpoint", async () => {
     const server = await startHostedContainerEntrypoint({
       port: 0,
@@ -814,6 +868,104 @@ describe("startHostedContainerEntrypoint", () => {
     }
   });
 
+  it("keeps a settling completion callback alive across shutdown without advertising absence", async () => {
+    const completionStarted = createDeferred();
+    const releaseCompletion = createDeferred();
+    mocks.recordHostedContainerRuntimeCompletionBestEffort.mockImplementationOnce(async () => {
+      completionStarted.resolve();
+      await releaseCompletion.promise;
+    });
+    const exit = vi.spyOn(process, "exit").mockImplementation((() => undefined) as never);
+    const server = await startHostedContainerEntrypoint({ port: 0 });
+    servers.push(server);
+    const address = server.address();
+    if (!address || typeof address === "string") {
+      throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
+    }
+
+    try {
+      const response = await sendHostedContainerJsonRequest({
+        body: JSON.stringify(buildWorkspaceJobBody()),
+        path: "/internal/workspace-invocation",
+        port: address.port,
+      });
+      expect(response.status).toBe(200);
+      await completionStarted.promise;
+      expect((await sendHostedContainerGetRequest({ path: "/health", port: address.port })).json)
+        .toMatchObject({ activeJobCount: 1, settlingCompletionCallbackCount: 1 });
+
+      process.emit("SIGTERM", "SIGTERM");
+      const lateWake = await fetch(`http://127.0.0.1:${address.port}/internal/runtime-wake`, {
+        body: JSON.stringify({ attemptId: "attempt_container_workspace", leaseGeneration: "8", userId: "u_container_workspace" }),
+        headers: { "content-type": "application/json; charset=utf-8" },
+        method: "POST",
+      });
+      expect(lateWake.headers.get("x-runtime-wake-accepted")).toBe("0");
+      expect(lateWake.headers.get("x-runtime-wake-absent")).not.toBe("1");
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(exit).not.toHaveBeenCalled();
+    } finally {
+      releaseCompletion.resolve();
+    }
+
+    await vi.waitFor(() => {
+      expect(exit).toHaveBeenCalledWith(0);
+    });
+    const serverIndex = servers.indexOf(server);
+    if (serverIndex !== -1) {
+      servers.splice(serverIndex, 1);
+    }
+  });
+
+  it("admits past settling callbacks but never past running work, and balances overlapping callbacks", async () => {
+    const callbacks: Array<ReturnType<typeof createDeferred<void>>> = [];
+    mocks.recordHostedContainerRuntimeCompletionBestEffort.mockImplementation(async () => {
+      const callback = createDeferred();
+      callbacks.push(callback);
+      await callback.promise;
+    });
+    const releaseRunning = createDeferred();
+    const runningStarted = createDeferred();
+    mocks.runHostedWorkspaceInvocation
+      .mockResolvedValueOnce(buildWorkspaceRunnerResult())
+      .mockImplementationOnce(async () => {
+        runningStarted.resolve();
+        await releaseRunning.promise;
+        return buildWorkspaceRunnerResult();
+      });
+    const server = await startHostedContainerEntrypoint({ port: 0 });
+    servers.push(server);
+    const address = server.address();
+    if (!address || typeof address === "string") {
+      throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
+    }
+    const invoke = () => sendHostedContainerJsonRequest({
+      body: JSON.stringify(buildWorkspaceJobBody()),
+      path: "/internal/workspace-invocation",
+      port: address.port,
+    });
+    const health = async () => (await sendHostedContainerGetRequest({ path: "/health", port: address.port })).json;
+
+    expect((await invoke()).status).toBe(200);
+    await vi.waitFor(() => expect(callbacks).toHaveLength(1));
+    const running = invoke();
+    await runningStarted.promise;
+    // Real running work still blocks admission while another callback settles.
+    expect(await health()).toMatchObject({ activeJobCount: 2, settlingCompletionCallbackCount: 1 });
+    expect((await invoke()).status).toBe(409);
+
+    releaseRunning.resolve();
+    expect((await running).status).toBe(200);
+    await vi.waitFor(() => expect(callbacks).toHaveLength(2));
+    expect(await health()).toMatchObject({ activeJobCount: 2, settlingCompletionCallbackCount: 2 });
+
+    callbacks[1]?.resolve();
+    await vi.waitFor(async () => expect(await health()).toMatchObject({ activeJobCount: 1, settlingCompletionCallbackCount: 1 }));
+    callbacks[0]?.resolve();
+    await vi.waitFor(async () => expect(await health()).toMatchObject({ activeJobCount: 0, settlingCompletionCallbackCount: 0 }));
+    expect(mocks.runHostedWorkspaceInvocation).toHaveBeenCalledTimes(2);
+  });
+
   it("rejects active runtime wakes after shutdown starts without advertising absence", async () => {
     const invocationReady = createDeferred();
     const releaseInvocation = createDeferred();
@@ -1015,7 +1167,7 @@ describe("startHostedContainerEntrypoint", () => {
     expect(mocks.stopWarmCodexAppServer).toHaveBeenCalledWith("container-server-close");
   });
 
-  it("accepts runtime wakes only after the active invocation reports readiness", async () => {
+  it.each(["covered", "unknown first", "unknown second", "malformed second"])("coalesces %s mailbox coverage before runtime readiness", async (coverage) => {
     const invocationStarted = createDeferred();
     const allowInvocationReady = createDeferred();
     const invocationReady = createDeferred();
@@ -1073,6 +1225,16 @@ describe("startHostedContainerEntrypoint", () => {
     });
 
     await invocationStarted.promise;
+    const pendingVoiceWake = await fetch(`http://127.0.0.1:${address.port}/internal/runtime-wake`, {
+      body: JSON.stringify({
+        attemptId: "attempt_evt_runtime_wake_ready", leaseGeneration: "1",
+        userId: "u1", voiceCallId: "call-synthetic",
+      }),
+      headers: { "content-type": "application/json" },
+      method: "POST",
+    });
+    expect(pendingVoiceWake.headers.get("x-runtime-wake-accepted")).toBe("0");
+    expect(pendingVoiceWake.headers.get("x-runtime-wake-pending")).toBeNull();
     const pendingWake = await fetch(`http://127.0.0.1:${address.port}/internal/runtime-wake`, {
       body: JSON.stringify({
         attemptId: "attempt_evt_runtime_wake_ready",
@@ -1081,6 +1243,7 @@ describe("startHostedContainerEntrypoint", () => {
           activeWakeStartedAtEpochMs: 1_777_009_999_950,
           cloudflareRouteReceivedAtEpochMs: 1_777_009_999_900,
         },
+        ...(coverage === "unknown first" ? {} : { mailboxWakeHighWater: { conversation: "4", system: "3" } }),
         requestedProcessingMode: "default",
         userId: "u1",
       }),
@@ -1091,6 +1254,14 @@ describe("startHostedContainerEntrypoint", () => {
     });
     nowEpochMs = secondPendingWakeAcceptedAtEpochMs;
     const secondPendingWake = await fetch(`http://127.0.0.1:${address.port}/internal/runtime-wake`, {
+      ...(coverage === "unknown second" ? {} : {
+        body: JSON.stringify({
+          attemptId: "attempt_evt_runtime_wake_ready", leaseGeneration: "1", userId: "u1",
+          mailboxWakeHighWater: coverage === "malformed second"
+            ? { conversation: "5" } : { conversation: "5", system: "2" },
+        }),
+        headers: { "content-type": "application/json; charset=utf-8" },
+      }),
       method: "POST",
     });
     nowEpochMs = runtimeReadyAtEpochMs;
@@ -1099,6 +1270,11 @@ describe("startHostedContainerEntrypoint", () => {
 
     nowEpochMs = firstWakeAcceptedAtEpochMs;
     const firstWake = await fetch(`http://127.0.0.1:${address.port}/internal/runtime-wake`, {
+      body: JSON.stringify({
+        attemptId: "attempt_evt_runtime_wake_ready", leaseGeneration: "1", userId: "u1", voiceCallId: "call-synthetic",
+        mailboxWakeHighWater: { conversation: "6", system: "3" },
+      }),
+      headers: { "content-type": "application/json; charset=utf-8" },
       method: "POST",
     });
     nowEpochMs = secondWakeAcceptedAtEpochMs;
@@ -1128,6 +1304,7 @@ describe("startHostedContainerEntrypoint", () => {
     expect(runtimeWakeCount).toBe(3);
     expect(runtimeWakeNotifications).toEqual([
       {
+        ...(coverage === "covered" ? { mailboxWakeHighWater: { conversation: "5", system: "3" } } : {}),
         notifiedAtEpochMs: pendingWakeAcceptedAtEpochMs,
         orchestration: {
           activeWakeAccepted: true,
@@ -1137,7 +1314,7 @@ describe("startHostedContainerEntrypoint", () => {
         },
         requestedProcessingMode: "default",
       },
-      { notifiedAtEpochMs: firstWakeAcceptedAtEpochMs },
+      { notifiedAtEpochMs: firstWakeAcceptedAtEpochMs, voiceCallId: "call-synthetic", mailboxWakeHighWater: { conversation: "6", system: "3" } },
       { notifiedAtEpochMs: secondWakeAcceptedAtEpochMs },
     ]);
     expect(invocationResponse.status).toBe(200);
@@ -1171,6 +1348,19 @@ describe("startHostedContainerEntrypoint", () => {
           runtimeWakeHandledAtEpochMs: expect.any(Number),
           workspaceAttemptId: null,
           workspacePendingAttemptId: null,
+        },
+        {
+          activeHostedRunnerJobCount: 1,
+          activeRuntimeWakePending: false,
+          activeRuntimeWakePresent: false,
+          runtimeWakeAccepted: false,
+          runtimeWakeAbsent: false,
+          runtimeWakeMismatch: false,
+          runtimeWakePending: false,
+          runtimeWakeReceivedAtEpochMs: expect.any(Number),
+          runtimeWakeHandledAtEpochMs: expect.any(Number),
+          workspaceAttemptId: null,
+          workspacePendingAttemptId: "attempt_evt_runtime_wake_ready",
         },
         {
           activeHostedRunnerJobCount: 1,
@@ -1471,7 +1661,7 @@ describe("startHostedContainerEntrypoint", () => {
     expect(readFile).toHaveBeenCalledTimes(1);
   });
 
-  it("runs the managed-container Codex shell smoke through the app-server hook", async () => {
+  it.each(["", "?scope=readiness"])("runs deployment smoke and publishes its legacy health receipt for query=%s", async (query) => {
     const runCodexShellSmoke = vi.fn(async () => ({
       client: "codex-app-server" as const,
       cliSurfaceContractBytes: 37282,
@@ -1499,7 +1689,7 @@ describe("startHostedContainerEntrypoint", () => {
 
     const response = await sendHostedContainerJsonRequest({
       body: "",
-      path: "/internal/deploy-codex-shell-smoke",
+      path: "/internal/deploy-codex-shell-smoke" + query,
       port: address.port,
     });
 
@@ -1522,6 +1712,84 @@ describe("startHostedContainerEntrypoint", () => {
     expect(runCodexShellSmoke).toHaveBeenCalledWith({
       signal: expect.any(AbortSignal),
     });
+    const health = await sendHostedContainerGetRequest({ path: "/health", port: address.port });
+    expect(health.json).toMatchObject({
+      codexShellPreflightStatus: "ready",
+      codexShellPreflightCompletedAtEpochMs: expect.any(Number),
+    });
+  });
+
+  it.each([
+    ["", false],
+    ["?scope=readiness", false],
+    ["", true],
+  ] as const)("runs full deployment proof for query=%s with invalid environment=%s", async (query, invalidEnvironment) => {
+    const smokeHomeParent = await mkdtemp(path.join("/var/tmp", "murph-standby-proof-"));
+    vi.stubEnv("HOSTED_HOME", smokeHomeParent);
+    vi.stubEnv("MURPH_HEALTH_COMMONS_PACKAGE_ROOT", "/app/node_modules/@murphai/health-commons");
+    const methods: string[] = [];
+    const commands: string[][] = [];
+    const kill = vi.fn(() => true);
+    mocks.spawn.mockImplementationOnce(() => {
+      const stdout = new EventEmitter();
+      return Object.assign(new EventEmitter(), {
+        stdout,
+        stderr: new EventEmitter(),
+        kill,
+        stdin: {
+          end() {},
+          write(line: string, callback?: (error?: Error) => void) {
+            const request = JSON.parse(line) as {
+              id?: number; method: string; params: { command?: string[] };
+            };
+            methods.push(request.method);
+            const command = request.params.command;
+            if (command) commands.push(command);
+            // Every deployment request must continue into the CLI suite.
+            // Stop at that boundary so this test never launches real commands.
+            const result = command ? {
+              exitCode: command[0] === "node" ? 0 : 1,
+              stderr: "",
+              stdout: JSON.stringify({
+                murphPathBytes: 20, vaultCliPathBytes: 24,
+                providerCredentialPresent: invalidEnvironment,
+                vaultRootInherited: true,
+              }),
+            } : {};
+            callback?.();
+            if (request.id !== undefined) queueMicrotask(() => {
+              stdout.emit("data", JSON.stringify({ id: request.id, result }) + "\n");
+            });
+          },
+        },
+      });
+    });
+    try {
+      const server = await startHostedContainerEntrypoint({ port: 0 });
+      servers.push(server);
+      const address = server.address();
+      if (!address || typeof address === "string") throw new Error("Expected TCP listener");
+      const response = await sendHostedContainerJsonRequest({
+        body: "", port: address.port,
+        path: "/internal/deploy-codex-shell-smoke" + query,
+      });
+      expect(response.status).toBe(500);
+      expect(commands.map((command) => command[0])).toEqual(
+        invalidEnvironment ? ["node"] : ["node", "vault-cli"],
+      );
+      expect(methods).toEqual([
+        "initialize", "initialized", "command/exec",
+        ...(invalidEnvironment ? [] : ["command/exec"]),
+      ]);
+      expect(kill).toHaveBeenCalledOnce();
+      const health = await sendHostedContainerGetRequest({ path: "/health", port: address.port });
+      expect(health.json).toMatchObject({
+        codexShellPreflightStatus: "failed",
+      });
+    } finally {
+      vi.unstubAllEnvs();
+      await rm(smokeHomeParent, { force: true, recursive: true });
+    }
   });
 
   it("surfaces content-free Codex shell smoke failure diagnostics", async () => {
@@ -1690,8 +1958,8 @@ describe("startHostedContainerEntrypoint", () => {
       expect(codexConfigToml).toContain('wire_api = "responses"');
       expect(codexConfigToml).toContain("requires_openai_auth = false");
       expect(codexConfigToml).toContain("supports_websockets = false");
-      expect(codexConfigToml).toContain("request_max_retries = 4");
-      expect(codexConfigToml).toContain("stream_max_retries = 5");
+      expect(codexConfigToml).toContain("request_max_retries = 0");
+      expect(codexConfigToml).toContain("stream_max_retries = 0");
       expect(codexConfigToml).toContain("multi_agent_v2 = true");
       expectCodexConfigDisablesLoginShellAtTopLevel(codexConfigToml);
     } finally {
@@ -3041,33 +3309,146 @@ describe("startHostedContainerEntrypoint", () => {
     });
   });
 
-  it("observes response close separately from request abort", async () => {
-    const request = new EventEmitter();
-    const response = new EventEmitter() as EventEmitter & { writableEnded: boolean };
-    response.writableEnded = false;
+  it.each([
+    ["GET", "/health", "health", 200],
+    ["POST", "/internal/runtime-wake", "runtime-wake", 400],
+    ["POST", "/internal/workspace-invocation/abort", "workspace-invocation-abort", 400],
+    ["POST", "/internal/voice-control", "voice-control", 400],
+    ["POST", "/internal/deploy-codex-shell-smoke", "codex-shell-smoke", 500],
+    ["POST", "/internal/deploy-live-model-turn-smoke", "live-model-smoke", 500],
+    ["POST", "/internal/direct-r2-presigned-put-smoke", "direct-r2-smoke", 400],
+    ["POST", "/internal/workspace-invocation", "workspace-invocation", 409],
+    ["POST", "/internal/synthetic-private-path", "unknown", 404],
+    ["POST", "/health", "unknown", 404],
+    ["GET", "/internal/workspace-invocation", "unknown", 404],
+  ] as const)("logs only the finite request kind for %s %s", async (method, requestPath, requestKind, status) => {
+    const failSmoke = vi.fn(async () => { throw new Error("Synthetic smoke failure."); });
+    const server = await startHostedContainerEntrypoint({
+      port: 0,
+      runtime: {
+        runCodexShellSmoke: failSmoke,
+        runDirectR2PresignedPutSmoke: failSmoke,
+        runLiveModelTurnSmoke: failSmoke,
+      },
+    });
+    servers.push(server);
+    const address = server.address();
+    if (!address || typeof address === "string") {
+      throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
+    }
+    server.prependListener("request", (_request, response) => {
+      const end = response.end.bind(response);
+      vi.spyOn(response, "end").mockImplementation((...args) => {
+        // Inject the transport event before even synchronous routes finish.
+        response.emit("close");
+        return end(...args);
+      });
+    });
+    const body = JSON.stringify({
+      attemptId: "synthetic-private-unparsed-attempt",
+      privateBody: "synthetic-private-body",
+      userId: "synthetic-private-member",
+    });
+    const responseStatus = await new Promise<number>((resolve, reject) => {
+      const request = httpRequest({
+        headers: {
+          "connection": "close",
+          "content-length": Buffer.byteLength(body),
+          "content-type": "application/json",
+          "x-synthetic-private": "synthetic-private-header",
+        },
+        host: "127.0.0.1",
+        method,
+        path: `${requestPath}?private=synthetic-private-query`,
+        port: address.port,
+      }, (response) => {
+        response.resume();
+        response.on("end", () => resolve(response.statusCode ?? 0));
+        response.on("error", reject);
+      });
+      request.on("error", reject);
+      request.end(body);
+    });
+    expect(responseStatus).toBe(status);
+    const exitWarnings = mocks.emitHostedExecutionStructuredLog.mock.calls
+      .map(([entry]) => entry)
+      .filter((entry) => entry.details?.exitReason);
+    expect(exitWarnings).toEqual([{
+      component: "container",
+      details: { exitReason: "response.closed", requestKind, workspaceAttemptId: false },
+      level: "warn",
+      message: "Hosted container entrypoint exited because the response closed before completion.",
+      phase: "failed",
+    }]);
+    expect(JSON.stringify(exitWarnings)).not.toContain("synthetic-private-");
+  });
 
-    const controller = createRequestAbortController(request, response);
+  it.each(["response.closed", "request.aborted"] as const)(
+    "preserves uncontextualized controller signals and one warning when %s happens first",
+    (exitReason) => {
+      const request = new EventEmitter();
+      const response = new EventEmitter() as EventEmitter & { writableEnded: boolean };
+      response.writableEnded = false;
 
-    response.emit("close");
+      const controller = createRequestAbortController(request, response);
+      const initialLogCount = mocks.emitHostedExecutionStructuredLog.mock.calls.length;
 
-    expect(controller.signal.aborted).toBe(true);
-    expect(controller.signal.reason).toBeInstanceOf(Error);
-    expect((controller.signal.reason as Error).message).toMatch(/response closed before completion/u);
-    expect(controller.requestSignal.aborted).toBe(false);
-    expect(controller.responseClosed()).toBe(true);
-    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
-      expect.objectContaining({
-        component: "container",
-        details: expect.objectContaining({
-          exitReason: "response.closed",
+      if (exitReason === "response.closed") {
+        response.emit("close");
+      } else {
+        request.emit("aborted");
+      }
+
+      expect(controller.signal.aborted).toBe(true);
+      expect(controller.signal.reason).toBeInstanceOf(Error);
+      const firstReason = controller.signal.reason;
+      expect((firstReason as Error).message).toBe(exitReason === "response.closed"
+        ? "Hosted runner response closed before completion."
+        : "Hosted runner request aborted before completion.");
+      expect(controller.requestSignal.aborted).toBe(exitReason === "request.aborted");
+      expect(controller.responseClosed()).toBe(exitReason === "response.closed");
+      expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+        expect.objectContaining({
+          component: "container",
+          details: { exitReason, requestKind: "unknown", workspaceAttemptId: false },
+          level: "warn",
+          message: exitReason === "response.closed"
+            ? "Hosted container entrypoint exited because the response closed before completion."
+            : "Hosted container entrypoint exited because the request aborted before completion.",
+          phase: "failed",
         }),
-        level: "warn",
-        message: "Hosted container entrypoint exited because the response closed before completion.",
-        phase: "failed",
-      }),
-    );
+      );
 
+      request.emit("aborted");
+      response.emit("close");
+      request.emit("aborted");
+      response.emit("close");
+      expect(controller.signal.reason).toBe(firstReason);
+      expect(controller.requestSignal.aborted).toBe(true);
+      expect(controller.responseClosed()).toBe(true);
+      expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledTimes(initialLogCount + 1);
+      controller.cleanup();
+      expect(request.listenerCount("aborted")).toBe(0);
+      expect(response.listenerCount("close")).toBe(0);
+    },
+  );
+
+  it.each(["completed", "cleaned up"])("ignores transport events after the response is %s", (state) => {
+    const request = new EventEmitter();
+    const response = Object.assign(new EventEmitter(), { writableEnded: state === "completed" });
+    const controller = createRequestAbortController(request, response);
+    if (state === "cleaned up") {
+      controller.cleanup();
+      request.emit("aborted");
+    }
+    response.emit("close");
+    expect(controller.signal.aborted).toBe(false);
+    expect(controller.requestSignal.aborted).toBe(false);
+    expect(controller.responseClosed()).toBe(false);
+    expect(mocks.emitHostedExecutionStructuredLog).not.toHaveBeenCalled();
     controller.cleanup();
+    expect(request.listenerCount("aborted")).toBe(0);
+    expect(response.listenerCount("close")).toBe(0);
   });
 
   it("bounds shutdown while heavy runtime hydration remains pending", async () => {
@@ -3211,7 +3592,11 @@ describe("classifyRunnerJobError", () => {
     expect(JSON.stringify(classified.payload)).not.toContain("boom");
   });
 
-  it("transports a phase alongside a generic control-plane failure code", () => {
+  it.each([
+    "EACCES",
+    "ASSISTANT_CODEX_BACKGROUND_WORK_UNTRACKED_COMPLETION",
+    "ASSISTANT_CODEX_BACKGROUND_WORK_INTERACTED",
+  ])("transports phase and finite failure code %s without private details", (code) => {
     const fetchFailure = new HostedRuntimeControlPlaneFetchError({
       cause: new TypeError("hidden control-plane transport failure"),
       description: "Hosted workspace snapshot",
@@ -3226,7 +3611,7 @@ describe("classifyRunnerJobError", () => {
       new Error("hidden snapshot wrapper at /private/workspace/vault", {
         cause: fetchFailure,
       }),
-      { code: "EACCES" },
+      { code },
     );
     attachHostedRuntimeFailurePhaseCode(
       wrappedFailure,
@@ -3239,7 +3624,7 @@ describe("classifyRunnerJobError", () => {
       payload: {
         code: "runtime_error",
         details: {
-          errorCodeDetail: "EACCES",
+          errorCodeDetail: code,
           runtimeFailurePhaseCode:
             "runtime_phase:workspace.checkpoint.idle_compact",
         },

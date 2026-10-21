@@ -2515,7 +2515,7 @@ test("Junction polling skips ambiguous optional resource responses and records t
     }),
   );
 
-  assert.equal(importedSnapshots.length, 1);
+  assert.equal(importedSnapshots.length, 0);
   assert.deepEqual(warnings, [
     {
       errorCode: "JUNCTION_API_REQUEST_FAILED",
@@ -2696,7 +2696,7 @@ test("Junction polling treats missing profile summary as a one-shot optional ski
     }),
   );
 
-  assert.equal(importedSnapshots.length, 1);
+  assert.equal(importedSnapshots.length, 0);
   assert.deepEqual(warnings.map((warning) => ({
     reason: warning.reason,
     resource: warning.resource,
@@ -2801,7 +2801,7 @@ test("Junction polling skips request-shape optional resource failures as ambiguo
       }),
     );
 
-    assert.equal(importedSnapshots.length, 1);
+    assert.equal(importedSnapshots.length, 0);
     assert.deepEqual(warnings, [
       {
         errorCode: "JUNCTION_API_REQUEST_FAILED",

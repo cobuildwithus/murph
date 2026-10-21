@@ -1,3 +1,4 @@
+import { wearableHapticActionSchema, type WearableHapticAuthority } from "@murphai/hosted-execution/wearable-haptics";
 import type { MurphDynamicToolExecutionResult } from '../dynamic-tools.js'
 import {
   toolTextResult as deviceTextResult,
@@ -27,6 +28,8 @@ const deviceProviderSchema = z
   .regex(/^[a-z0-9][a-z0-9_-]*$/u)
 
 const deviceArgumentsSchema = z.union([
+  wearableHapticActionSchema,
+  z.object({ action: z.literal('companion_status') }).strict(),
   z.object({
     action: z.literal('list_accounts'),
     provider: deviceProviderSchema.nullable().optional(),
@@ -57,7 +60,7 @@ export const MURPH_DEVICE_TOOL = {
   namespace: 'murph',
   name: 'device',
   description:
-    'Work with the current authenticated member’s wearable and health-device accounts. list_accounts returns matching accountId, provider, status, last sync, and safe error context. connect returns a short-lived connectUrl for a supported provider. reconcile queues a refresh for one returned accountId; queued does not mean completed. configure_no_data_outreach changes Garmin (sourceProvider garmin), Apple Health (sourceProvider apple_health_kit), or WHOOP (sourceProvider whoop_v2) check-in timing: use after_days with 5–30 days, off, or default only when the current private member message states that preference. Call configure_no_data_outreach at most once for that message; after any result, do not retry. A saved result confirms the check-in preference: acknowledge it once and finish. Off stops only these check-ins; connection and syncing stay unchanged. Never call it from a group or scheduled turn or for another provider. No data is not proof of disconnection or app closure; reserve reconnect guidance for explicit authentication failure. Never ask for or pass provider credentials, tokens, delivery routes, or generic commands.',
+    'Work with the current authenticated member’s wearable and health-device accounts. haptic sends a brief buzz or stop to wearable whoop or garmin through the connected Murph iOS app; operation status checks availability without buzzing. Garmin uses Find Device and may also sound. Only use buzz/stop when the private member request or scheduled reminder calls for it. For a requested wait under one minute, such as wait 5 seconds then buzz, sleep for that long in this turn with a shell command, then call haptic. For a minute or longer, use the existing automation scheduler, then call haptic when due; do not also buzz now as a test unless asked, and never configure a watch alarm. Each band gets one buzz per member message or reminder occurrence: repeating that call later in the turn returns the first command’s current status, such as claimed or acknowledged, without buzzing again. Only when the member is testing or troubleshooting delivery, wait a few seconds and repeat it once to check. A recent Murph iOS app can deliver while Murph is in the background or the phone is locked, best with Murph notifications on; it is best effort and can miss if Murph was force-quit or iOS defers background work, so when explaining delivery call it best effort, never guaranteed. When a scheduled buzz fires, still reply with one short status line, since the band can miss it. Older apps need Murph open. queued or claimed is not an acknowledgement; acknowledged means the band accepted the command, not proof the person felt it. For unavailable, use unavailableReason: app_unreachable means open Murph, update it if needed, and check the phone connection; device_disconnected means the app recently checked in but the band is not ready, so check Settings > Connect device; busy means another command is pending. Missing reasons need the generic open-app/connect-band guidance. A stale heartbeat never proves the app was quit. companion_status reports lastContactAt (foreground or opportunistic background contact) and lastForegroundAt; use it alongside list_accounts when debugging Apple Health. recently_active is contact evidence only, never proof of successful Health sync, granted Health permissions, or continuous background execution. unknown includes older apps without heartbeat support. Do not automatically retry a buzz after unknown, expired or cancelled. For a test buzz plus a question about usefulness, send one authorized buzz, read existing reminders and the full details of a relevant routine, and suggest one concrete use grounded in it. Keep the explanation brief. If an existing routine has a duration, offer a wrist cue at its end after the member tells you they are starting. A suggestion does not authorize creating or changing a reminder. When setting a private reminder, briefly offer an optional wrist cue if already-known WHOOP/Garmin ownership and the task make it useful: a duration-based activity or a discreet reminder. Fulfill the requested reminder first; do not read accounts or devices just to pitch this feature. Do not offer it routinely, repeat a declined offer, or mention devices the member is not known to own. An offer authorizes no buzz, connection, or extra timer. For an activity-end cue, start the timer only from the member’s actual start unless they explicitly authorize a fixed end time. In the offer, briefly say the band must be connected in Murph Settings > Connect device and that background delivery works best with Murph notifications on; never pitch Garmin as silent because it may also sound. Wrist cues supplement sensitive reminders, never replace their requested delivery. These Bluetooth connections are separate from health-data accounts. list_accounts returns matching accountId, provider, status, last sync, and safe error context. connect returns a short-lived connectUrl for a supported provider. reconcile queues a refresh for one returned accountId; queued does not mean completed. configure_no_data_outreach changes Garmin (sourceProvider garmin), Apple Health (sourceProvider apple_health_kit), or WHOOP (sourceProvider whoop_v2) check-in timing: use after_days with 5–30 days, off, or default only when the current private member message states that preference. Call configure_no_data_outreach at most once for that message; after any result, do not retry. A saved result confirms the check-in preference: acknowledge it once and finish. Off stops only these check-ins; connection and syncing stay unchanged. Never call it from a group or scheduled turn or for another provider. No data is not proof of disconnection or app closure; reserve reconnect guidance for explicit authentication failure. Never ask for or pass provider credentials, tokens, delivery routes, or generic commands.',
   inputSchema: z.toJSONSchema(deviceArgumentsSchema, { io: 'input' }),
 } as const
 
@@ -88,6 +91,8 @@ export function readDeviceDynamicToolRequest(input: {
       'mode',
       'provider',
       'sourceProvider',
+      'wearable',
+      'operation',
     ],
     toolName: 'murph.device',
     value: input.arguments,
@@ -102,12 +107,16 @@ export function readDeviceDynamicToolRequest(input: {
 }
 
 export async function executeDeviceDynamicTool(input: {
+  hapticAuthority?: WearableHapticAuthority | null
   acceptedInputAuthority?: { assistantInputId: string } | null
   abortSignal?: AbortSignal | null
   deviceTool: AssistantHostedDeviceTool
   request: Extract<DeviceDynamicToolRequest, { kind: 'device' }>
 }): Promise<MurphDynamicToolExecutionResult> {
   try {
+    if (input.request.request.action === 'haptic' && !input.hapticAuthority) {
+      return deviceTextResult(false, 'Wrist reminders require private member or scheduled reminder authority.', 'authority_rejected')
+    }
     if (
       input.request.request.action === 'configure_no_data_outreach'
       && !input.acceptedInputAuthority
@@ -119,13 +128,17 @@ export async function executeDeviceDynamicTool(input: {
       )
     }
     const response = await input.deviceTool.request(input.request.request, {
+      ...(input.request.request.action === 'haptic' && input.hapticAuthority
+        ? { hapticAuthority: input.hapticAuthority } : {}),
       ...(input.request.request.action === 'configure_no_data_outreach'
         && input.acceptedInputAuthority
         ? { acceptedInputAuthority: input.acceptedInputAuthority }
         : {}),
       signal: input.abortSignal ?? null,
     })
-    if (response.action !== input.request.request.action) {
+    if (response.action !== input.request.request.action
+      || (response.action === 'haptic' && input.request.request.action === 'haptic'
+        && (response.wearable !== input.request.request.wearable || response.operation !== input.request.request.operation))) {
       return deviceTextResult(
         false,
         serializeDeviceToolError(
@@ -188,6 +201,9 @@ interface DeviceToolErrorProjection {
 function projectDeviceResponseMismatch(
   action: AssistantHostedDeviceToolRequest['action'],
 ): DeviceToolErrorProjection {
+  if (action === 'haptic') {
+    return { code: 'device_haptic_outcome_unknown', message: 'The wrist command outcome could not be confirmed.', retryable: false, stage: deviceToolStage(action), hint: 'Do not retry the buzz. Ask for a fresh member instruction before another attempt.' }
+  }
   if (action === 'configure_no_data_outreach') {
     return {
       code: 'device_response_mismatch',
@@ -201,10 +217,10 @@ function projectDeviceResponseMismatch(
   return {
     code: 'device_response_mismatch',
     message: 'The device response action did not match the requested action.',
-    retryable: action === 'list_accounts',
+    retryable: action === 'list_accounts' || action === 'companion_status',
     stage: deviceToolStage(action),
-    hint: action === 'list_accounts'
-      ? 'Retry list_accounts. If it repeats, treat device management as temporarily unavailable.'
+    hint: action === 'list_accounts' || action === 'companion_status'
+      ? `Retry ${action}. If it repeats, treat device management as temporarily unavailable.`
       : `Run list_accounts and inspect the current account state before deciding whether to retry ${action}.`,
   }
 }
@@ -350,6 +366,9 @@ function projectUnclassifiedDeviceToolFailure(
   callerSignalAborted: boolean,
 ): DeviceToolErrorProjection {
   const stage = deviceToolStage(action)
+  if (action === 'haptic') {
+    return { code: 'device_haptic_outcome_unknown', message: 'The wrist command outcome could not be confirmed.', retryable: false, stage: deviceToolStage(action), hint: 'Do not retry the buzz. Ask for a fresh member instruction before another attempt.' }
+  }
   if (action === 'configure_no_data_outreach') {
     return {
       code: 'device_operation_outcome_unknown',
@@ -368,13 +387,13 @@ function projectUnclassifiedDeviceToolFailure(
       hint: 'Do not retry unless the member asks to continue.',
     }
   }
-  if (action === 'list_accounts') {
+  if (action === 'list_accounts' || action === 'companion_status') {
     return {
       code: 'device_operation_unavailable',
       message: 'The device operation could not be completed.',
       retryable: true,
       stage,
-      hint: 'Retry list_accounts. If it repeats, treat device management as temporarily unavailable.',
+      hint: `Retry ${action}. If it repeats, treat device management as temporarily unavailable.`,
     }
   }
   return {
@@ -450,7 +469,11 @@ function serializeDeviceToolError(
 function serializeDeviceToolResponse(
   response: AssistantHostedDeviceToolResponse,
 ): string | { failureReason: 'oversized_result' | 'result_serialization_failed' } {
-  const payload = response.action === 'list_accounts'
+  const payload = response.action === 'haptic'
+    ? { action: response.action, wearable: response.wearable, operation: response.operation, status: response.status, ...(response.unavailableReason ? { unavailableReason: response.unavailableReason } : {}) }
+    : response.action === 'companion_status'
+      ? { action: response.action, status: response.status, lastContactAt: response.lastContactAt, lastForegroundAt: response.lastForegroundAt }
+    : response.action === 'list_accounts'
     ? {
         accounts: response.accounts.map((account) => ({
           accountId: account.accountId,

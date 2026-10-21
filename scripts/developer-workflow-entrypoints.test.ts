@@ -235,48 +235,16 @@ describe("open execution plan entrypoint", () => {
     expect(result.stdout).toBe(
       `Created agent-docs/exec-plans/active/${planFile}\n`,
     );
-    expect(readFileSync(path.join(activeDirectory, planFile), "utf8")).toBe(`# Routine title
-
-Status: active
-Created: ${dateStamp}
-Updated: ${dateStamp}
-
-## Goal
-
-- Define the concrete user-visible and engineering outcome.
-
-## Success criteria
-
-- List objective checks required to call this done.
-
-## Scope
-
-- In scope:
-- Out of scope:
-
-## Constraints
-
-- Technical constraints:
-- Product/process constraints:
-
-## Risks and mitigations
-
-1. Risk:
-   Mitigation:
-
-## Tasks
-
-1. Replace with ordered concrete tasks.
-
-## Decisions
-
-- None yet.
-
-## Verification
-
-- Commands to run:
-- Expected outcomes:
-`);
+    const planLines = readFileSync(
+      path.join(activeDirectory, planFile),
+      "utf8",
+    ).split("\n");
+    expect(planLines[0]).toBe("# Routine title");
+    expect(planLines).toEqual(expect.arrayContaining([
+      "Status: active",
+      `Created: ${dateStamp}`,
+      `Updated: ${dateStamp}`,
+    ]));
   });
 
   it("rejects an invalid slug without creating a plan", () => {

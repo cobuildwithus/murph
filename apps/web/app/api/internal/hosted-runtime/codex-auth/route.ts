@@ -21,15 +21,29 @@ export const POST = withJsonError(async (request: Request) => {
     maxBodyBytes: BODY_LIMIT_BYTES,
     payloadText,
   });
-  const update = parseHostedCodexAuthUpdate(
-    payloadText.trim() ? JSON.parse(payloadText) : {},
-  );
+  const update = parseHostedCodexAuthUpdateBody(payloadText);
 
   return jsonOk(await applyHostedCodexAuthUpdate({
     memberId,
     update,
   }));
 });
+
+function parseHostedCodexAuthUpdateBody(payloadText: string) {
+  try {
+    return parseHostedCodexAuthUpdate(payloadText.trim() ? JSON.parse(payloadText) : {});
+  } catch (error) {
+    // The shared HTTP wrapper logs error messages. JSON snippets and unknown
+    // field names can contain private callback content; keep parse errors fixed.
+    if (error instanceof SyntaxError) {
+      throw new SyntaxError("Hosted Codex auth update JSON is invalid.");
+    }
+    if (error instanceof TypeError) {
+      throw new TypeError("Hosted Codex auth update is invalid.");
+    }
+    throw error;
+  }
+}
 
 function requireHostedCodexAuthWriteFenceHeaders(request: Request): void {
   const attemptId = request.headers.get(HOSTED_RUNTIME_ATTEMPT_ID_HEADER)?.trim() ?? "";

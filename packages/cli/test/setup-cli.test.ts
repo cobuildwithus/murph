@@ -1665,7 +1665,6 @@ test('interactive onboarding carries the Codex wizard preset into assistant setu
   }> = []
   const assistantCalls: Array<{
     options: {
-      assistantModelProvider: string | null | undefined
     }
     preset: string
   }> = []
@@ -1675,7 +1674,6 @@ test('interactive onboarding carries the Codex wizard preset into assistant setu
       async resolve(input: any) {
         assistantCalls.push({
           options: {
-            assistantModelProvider: input.options.assistantModelProvider,
           },
           preset: input.preset,
         })
@@ -1687,7 +1685,7 @@ test('interactive onboarding carries the Codex wizard preset into assistant setu
           detail: 'configured',
           enabled: true,
           model: 'gpt-5.4',
-          modelProvider: input.options.assistantModelProvider ?? null,
+          modelProvider: null,
           oss: false,
           preset: input.preset,
           profile: null,
@@ -1751,7 +1749,6 @@ test('interactive onboarding carries the Codex wizard preset into assistant setu
     assert.deepEqual(assistantCalls, [
       {
         options: {
-          assistantModelProvider: undefined,
         },
         preset: 'codex',
       },
@@ -1865,20 +1862,9 @@ test('interactive onboarding keeps Codex selections clear of endpoint defaults',
 test('wizard infers Codex cloud for signed-in Codex defaults', () => {
   assert.equal(
     inferSetupWizardAssistantProvider({
-      oss: false,
       preset: 'codex',
     }),
     'codex-cloud',
-  )
-})
-
-test('wizard infers Codex local for OSS defaults', () => {
-  assert.equal(
-    inferSetupWizardAssistantProvider({
-      oss: true,
-      preset: 'codex',
-    }),
-    'codex-local',
   )
 })
 
@@ -1946,7 +1932,6 @@ test('onboard resolves assistant defaults from explicit Codex options when the w
         resolvedAssistants.push({
           allowPrompt: input.allowPrompt,
           assistantModel: input.options.assistantModel,
-          assistantModelProvider: input.options.assistantModelProvider,
           preset: input.preset,
         })
 
@@ -1955,22 +1940,20 @@ test('onboard resolves assistant defaults from explicit Codex options when the w
           enabled: true,
           provider: 'codex-cli',
           model: input.options.assistantModel ?? 'gpt-5.4',
-          modelProvider: input.options.assistantModelProvider ?? null,
+          modelProvider: null,
           codexCommand: null,
           profile: null,
           reasoningEffort: null,
           sandbox: 'danger-full-access',
           approvalPolicy: 'never',
           oss: false,
-          detail: 'Use Codex with the selected model provider.',
+          detail: 'Use Codex with the selected OpenAI model.',
         }
       },
     },
     runtimeEnv: {
       getCurrentEnv() {
-        return {
-          VERCEL_AI_API_KEY: 'vercel-test-key',
-        }
+        return {}
       },
       async promptForMissing() {
         throw new Error('noninteractive setup must not prompt for provider keys')
@@ -1990,9 +1973,7 @@ test('onboard resolves assistant defaults from explicit Codex options when the w
       '--assistantPreset',
       'codex',
       '--assistantModel',
-      'gpt-5.6-terra',
-      '--assistantModelProvider',
-      'vercel-ai-gateway',
+      'gpt-6.1-sol',
       '--format',
       'json',
       '--full-output',
@@ -2007,8 +1988,7 @@ test('onboard resolves assistant defaults from explicit Codex options when the w
   assert.deepEqual(resolvedAssistants, [
     {
       allowPrompt: false,
-      assistantModel: 'gpt-5.6-terra',
-      assistantModelProvider: 'vercel-ai-gateway',
+      assistantModel: 'gpt-6.1-sol',
       preset: 'codex',
     },
   ])
@@ -2017,15 +1997,15 @@ test('onboard resolves assistant defaults from explicit Codex options when the w
       preset: 'codex',
       enabled: true,
       provider: 'codex-cli',
-      model: 'gpt-5.6-terra',
-      modelProvider: 'vercel-ai-gateway',
+      model: 'gpt-6.1-sol',
+      modelProvider: null,
       codexCommand: null,
       profile: null,
       reasoningEffort: null,
       sandbox: 'danger-full-access',
       approvalPolicy: 'never',
       oss: false,
-      detail: 'Use Codex with the selected model provider.',
+      detail: 'Use Codex with the selected OpenAI model.',
     },
   ])
 })
@@ -2863,8 +2843,8 @@ test.sequential('setup persistence can replace unsupported assistant defaults', 
       buildAssistantProviderDefaultsPatch({
         defaults: null,
         providerConfig: {
-          model: 'gpt-5.6-terra',
-          modelProvider: 'vercel-ai-gateway',
+          model: 'gpt-6.1-sol',
+          modelProvider: null,
           sandbox: 'danger-full-access',
           approvalPolicy: 'never',
           oss: false,
@@ -2880,13 +2860,13 @@ test.sequential('setup persistence can replace unsupported assistant defaults', 
       config?.assistant?.backend?.adapter === 'codex-cli'
         ? config.assistant.backend.model
         : null,
-      'gpt-5.6-terra',
+      'gpt-6.1-sol',
     )
     assert.equal(
       config?.assistant?.backend?.adapter === 'codex-cli'
         ? config.assistant.backend.modelProvider
         : null,
-      'vercel-ai-gateway',
+      null,
     )
   } finally {
     await rm(tempRoot, { recursive: true, force: true })
@@ -3700,7 +3680,7 @@ test.sequential('setup-macos wrapper dry-run prints a plan without mutating the 
     assert.match(result.stdout, /Detected: macos/u)
     assert.match(result.stdout, /Install plan/u)
     assert.match(result.stdout, /Dry run requested/u)
-    assert.match(result.stdout, /Node requirement: >= 24\.14\.1/u)
+    assert.match(result.stdout, /Node requirement: \^24\.14\.1/u)
     assert.match(
       result.stdout,
       new RegExp(`pnpm: ${pnpmVersion.replaceAll('.', '\\.')} via corepack`, 'u'),
@@ -3714,7 +3694,7 @@ test.sequential('setup-macos wrapper dry-run prints a plan without mutating the 
       /vault bootstrap, default config, user-level murph\/vault-cli shims, onboarding channel selection, wearables, and assistant automation\/chat handoff/u,
     )
     assert.match(result.stdout, /Ensure Homebrew is available/u)
-    assert.match(result.stdout, /Ensure Node >= 24\.14\.1/u)
+    assert.match(result.stdout, /Ensure Node \^24\.14\.1/u)
     assert.match(result.stdout, /corepack pnpm install/u)
     assert.match(
       result.stdout,

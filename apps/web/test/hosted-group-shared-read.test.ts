@@ -697,6 +697,24 @@ describe("heart-rate-zones-days.v0 snapshot bounds", () => {
 });
 
 describe("readHostedGroupSharedDataByRuntimeMemberId", () => {
+  it("adds only consented Apple Health app contact for capable group readers", async () => {
+    const contact = new Date("2026-10-01T12:00:00.000Z");
+    const share = { ...shareRow({ id: "share_steps_a", memberId: "member_a", projectionScope: STEPS_SCOPE }),
+      grantor: { companionLastContactAt: contact } };
+    const { prisma, deviceConnectionFindMany } = createPrisma({ shares: [share], connections: [{ userId: "member_a" }] });
+    const input = { prisma, projectionScopes: [STEPS_SCOPE], runtimeMemberId: RUNTIME_MEMBER_ID };
+    const legacy = await readHostedGroupSharedDataByRuntimeMemberId(input);
+    expect(legacy.status).toBe("ok");
+    if (legacy.status !== "ok") throw new Error("expected shared result");
+    expect(legacy.members.every((member) => member.companionLastContactAt === undefined)).toBe(true);
+    expect(deviceConnectionFindMany).not.toHaveBeenCalled();
+    const result = await readHostedGroupSharedDataByRuntimeMemberId({ ...input, includeCompanionPresence: true });
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") throw new Error("expected shared result");
+    expect(result.members.find((member) => member.memberId === "member_a")?.companionLastContactAt).toBe(contact.toISOString());
+    expect(result.members.find((member) => member.memberId === "member_b")).not.toHaveProperty("companionLastContactAt");
+  });
+
   it("reads only group-safe profile names when no health scopes are requested", async () => {
     const profile = snapshot({
       id: "share_profile_a",
@@ -910,7 +928,7 @@ describe("readHostedGroupSharedDataByRuntimeMemberId", () => {
     expect(result.requestedProjectionScopeKeys).toEqual([STEPS_KEY, DEVICE_KEY]);
     expect(result.members).toHaveLength(3);
     expect(result.members[0]).toMatchObject({
-      displayName: "Alex",
+      displayName: expect.stringMatching(/^Alex \([A-F0-9]{12}\)$/u),
       memberId: "member_a",
       participantId: "participant_a",
       projections: [
@@ -934,7 +952,7 @@ describe("readHostedGroupSharedDataByRuntimeMemberId", () => {
       source: "garmin",
     });
     expect(result.members[1]).toMatchObject({
-      displayName: "Alex",
+      displayName: expect.stringMatching(/^Alex \([A-F0-9]{12}\)$/u),
       memberId: "member_b",
       participantId: "participant_b",
       projections: [
@@ -958,7 +976,7 @@ describe("readHostedGroupSharedDataByRuntimeMemberId", () => {
       "participant_c",
     ]);
     expect(result.members[2]).toMatchObject({
-      displayName: null,
+      displayName: expect.stringMatching(/^Participant [A-F0-9]{12}$/u),
       memberId: "member_c",
       participantId: "participant_c",
       projections: [
@@ -998,6 +1016,8 @@ describe("readHostedGroupSharedDataByRuntimeMemberId", () => {
         setupPhase: true,
         sources: expect.objectContaining({
           select: {
+            firstSeenAt: true,
+            lastDataAt: true,
             sourceProviderSlug: true,
             status: true,
             updatedAt: true,
@@ -1145,6 +1165,8 @@ describe("readHostedGroupSharedDataByRuntimeMemberId", () => {
     expect(result.members).toEqual([expect.objectContaining({
       memberId: "member_zero",
       participantId: "participant_zero",
+      displayName: expect.stringMatching(/^Participant [A-F0-9]{12}$/u),
+      currentTurnHandles: [],
       projections: [expect.objectContaining({
         dataStatus: "available",
         grantStatus: "granted",
@@ -1824,6 +1846,8 @@ describe("readHostedGroupSharedDataByRuntimeMemberId", () => {
           provider: "junction",
           setupPhase: null,
           sources: [{
+            firstSeenAt: new Date(Date.now() - 24 * 60 * 60_000),
+            lastDataAt: new Date(Date.now() - 60_000),
             sourceProviderSlug: "apple_health_kit",
             status: "disconnected",
             updatedAt: staleObservedAt,
@@ -1841,6 +1865,8 @@ describe("readHostedGroupSharedDataByRuntimeMemberId", () => {
           provider: "junction",
           setupPhase: null,
           sources: [{
+            firstSeenAt: new Date(Date.now() - 24 * 60 * 60_000),
+            lastDataAt: new Date(Date.now() - 60_000),
             sourceProviderSlug: "apple_health_kit",
             status: "connected",
             updatedAt: currentObservedAt,
@@ -1903,12 +1929,16 @@ describe("readHostedGroupSharedDataByRuntimeMemberId", () => {
         sources: [
           {
             lastSeenAt: olderLastSeenAt,
+            firstSeenAt: new Date(Date.now() - 24 * 60 * 60_000),
+            lastDataAt: new Date(Date.now() - 60_000),
             sourceProviderSlug: "apple_health_kit",
             status: "connected",
             updatedAt: olderObservedAt,
           },
           {
             lastSeenAt: newerLastSeenAt,
+            firstSeenAt: new Date(Date.now() - 24 * 60 * 60_000),
+            lastDataAt: new Date(Date.now() - 60_000),
             sourceProviderSlug: "apple_health",
             status: "reauthorization_required",
             updatedAt: newerObservedAt,
@@ -1982,6 +2012,8 @@ describe("readHostedGroupSharedDataByRuntimeMemberId", () => {
           provider: "internal_source_owner",
           setupPhase: null,
           sources: [{
+            firstSeenAt: new Date(Date.now() - 24 * 60 * 60_000),
+            lastDataAt: new Date(Date.now() - 60_000),
             sourceProviderSlug: "internal_source_key",
             status: "connected",
             updatedAt: observedAt,
@@ -2159,5 +2191,53 @@ it("bounds a maximum 200-member three-scope read to sequential four-snapshot bat
   for (const [request] of hostedVaultShareFindMany.mock.calls.slice(2)) {
     expect(request).toMatchObject({ take: 4, select: { id: true, projectionSnapshotCiphertext: true }, where: { destinationMemberId: RUNTIME_MEMBER_ID, status: "granted" } });
     expect(request.where.id.in).toHaveLength(4);
+  }
+});
+
+it.each([
+  { provider: "garmin", arrivalHours: 40, firstSeenHours: 240, status: "connected", expected: "needs-attention" },
+  { provider: "garmin", arrivalHours: 1, firstSeenHours: 240, status: "connected", expected: "connected" },
+  { provider: "garmin", arrivalHours: null, firstSeenHours: 8, status: "connected", expected: "needs-attention" },
+  { provider: "garmin", arrivalHours: null, firstSeenHours: 2, status: "connected", expected: "connected" },
+  { provider: "apple_health_kit", arrivalHours: 96, firstSeenHours: 240, status: "connected", expected: "needs-attention" },
+  { provider: "oura", arrivalHours: 96, firstSeenHours: 240, status: "connected", expected: "connected" },
+  { provider: "garmin", arrivalHours: 40, firstSeenHours: 240, status: "disconnected", expected: "disconnected" },
+  { provider: "garmin", arrivalHours: 40, firstSeenHours: 240, status: "reauthorization_required", expected: "needs-reconnect" },
+])("reports delivery attention independently of successful polling: $provider/$arrivalHours/$status", async (scenario) => {
+  installCiphertexts({});
+  const now = Date.now();
+  const recent = new Date(now - 60_000);
+  const source = {
+    firstSeenAt: new Date(now - scenario.firstSeenHours * 3_600_000),
+    lastDataAt: scenario.arrivalHours === null ? null : new Date(now - scenario.arrivalHours * 3_600_000),
+    sourceProviderSlug: scenario.provider, status: scenario.status, updatedAt: recent,
+  };
+  const { prisma, deviceConnectionFindMany } = createPrisma({
+    shares: [shareRow({ id: "share_device_a", memberId: "member_a", projectionScope: DEVICE_SCOPE })],
+    connections: [{ userId: "member_a", provider: "junction", status: "active", setupPhase: null,
+      lastSyncCompletedAt: recent, lastSyncErrorAt: null, updatedAt: recent, sources: [source] }],
+  });
+  const read = () => readHostedGroupSharedDataByRuntimeMemberId({
+    prisma, projectionScopes: [DEVICE_SCOPE], runtimeMemberId: RUNTIME_MEMBER_ID,
+  });
+  const result = await read();
+  expect(result.status).toBe("ok");
+  if (result.status !== "ok") throw new Error("expected consented status");
+  expect(result.members[0]?.projections[0]?.records[0]?.data).toMatchObject({
+    sources: [{ status: scenario.expected, connectionSyncJobCompletedAt: recent.toISOString() }],
+  });
+  expect(JSON.stringify(result)).not.toMatch(/lastDataAt|firstSeenAt|sourceProviderSlug/);
+  expect(deviceConnectionFindMany).toHaveBeenCalledTimes(1);
+  expect(deviceConnectionFindMany.mock.calls[0]?.[0]).toMatchObject({
+    select: { sources: { select: { lastDataAt: true, firstSeenAt: true } } },
+  });
+  if (scenario.expected === "needs-attention") {
+    source.lastDataAt = recent;
+    const recovered = await read();
+    expect(recovered.status).toBe("ok");
+    if (recovered.status !== "ok") throw new Error("expected recovered status");
+    expect(recovered.members[0]?.projections[0]?.records[0]?.data).toMatchObject({
+      sources: [{ status: "connected" }],
+    });
   }
 });

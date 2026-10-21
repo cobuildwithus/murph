@@ -30,6 +30,27 @@ Account deletion is intentionally deliberate but does not introduce a separate p
 12. The per-user Temporal runtime workflow is terminated best-effort before deletion starts, again after the Prisma transaction commits, and again after Cloudflare runner/R2 cleanup, so live runtime writers are stopped before local rows are removed and stale wake state is neutralized after cleanup.
 13. The Stripe subscription is canceled before the Prisma transaction and fails closed: if the cancel call fails, deletion aborts with a retryable error so a deleted account can never keep an active subscription billing it. Stripe customer, Cloudflare runner-state/R2, and isolated runtime-log deletion run immediately after the local wipe and remain owned by the encrypted cleanup receipt until every target confirms completion.
 
+## Production canary reset exception
+
+The authenticated Linq production canary reset deletes the configured canary
+account's content and runtime state through a dedicated account-deletion entrypoint.
+That entrypoint verifies the current fixed canary identity and preserves primary
+ingress traces and isolated runtime logs under their existing retention deadlines.
+It settles runtime-log cleanup as a no-op in the encrypted retry receipt, so a
+later vendor-cleanup retry cannot erase the diagnostics. It skips explicit ingress
+trace deletion; the diagnostic-retention migration removes the mailbox cascade.
+
+This exception is unavailable to ordinary account-deletion callers. Settings
+deletion, including deletion of the canary through the ordinary service, still
+explicitly erases ingress traces and retries isolated runtime-log deletion.
+No member or mailbox payload remains solely to retain canary diagnostics.
+Both ingress trace-creation paths lock the unsuspended member during their insert,
+so the ordinary account-deletion suspension fence also prevents late trace
+recreation after the mailbox cascade is removed. Roll out those writers and drain
+old Web instances before applying the diagnostic-retention contract migration
+from `apps/web/prisma/contract-migrations`. The existing post-promotion runner
+owns its alias check and drain; it must not run in the predeploy Prisma lane.
+
 ## Export contract
 
 The Settings **Export vault** workflow downloads the browser-vault replica schema `murph.browser-vault-replica`.
@@ -143,6 +164,10 @@ The Settings vault export does not include:
 | `prisma.device_connect_intent` | Live delete | Metadata/counts | Deletes short-lived hosted device connect intents. Export reports safe metadata only and omits assertion/nonces and routing internals. |
 | `prisma.device_oauth_session` | Live delete | Metadata/counts | Deletes pending provider OAuth state. Admission-expiry, invalid-browser-proof, definitive first-delivery no-provider callbacks, and inactive-owner cleanup apply only to exact unconsumed rows. Every consumed callback state is retained across expiry, replay, suspension, and ambiguous provider outcomes until the exact epoch transfers atomically into a successful connection, durable cleanup owner, or confirmed no-authority terminal outcome. Terminal erasure fails closed while such a claim remains. |
 | `prisma.device_agent_session` | Live delete | Metadata/counts | Deletes local agent bearer-token hashes and agent session metadata. |
+| `prisma.companion_push_route` | Live delete | Not exported secret | Deletes the Apple push token, installation id, environment, and alert preference used only to wake the companion app. Browser-vault export omits the route and token. |
+| `prisma.companion_wearable_link` | Live delete | Not included in vault export | Deletes which installation last reported a WHOOP or Garmin Bluetooth link and its opaque link id. No Bluetooth identifiers, device names, or health values are stored. |
+| `prisma.companion_wearable_session` | Live delete | Not included in vault export | Deletes short foreground poll leases for wrist reminders: a random session id and expiry. |
+| `prisma.companion_wearable_command` | Live delete | Not included in vault export | Deletes wrist command keys, statuses, and expiries. Rows hold no reminder text and exist to prevent duplicate physical effects. |
 | `prisma.device_browser_assertion_nonce` | Live delete | Metadata/counts | Deletes outstanding browser assertion nonces. |
 | `prisma.clinical_record_connect_intent` | Live delete | Metadata/counts | Deletes short-lived member-bound Clinical Records claims; raw claims are never stored or exported. |
 | `prisma.clinical_record_oauth_session` | Live delete | Not exported secret | Deletes SMART state rows and encrypted PKCE verifiers; state, verifier, endpoint, and scope details are omitted from export. |

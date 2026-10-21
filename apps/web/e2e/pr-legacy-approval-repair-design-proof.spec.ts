@@ -2,13 +2,6 @@ import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { expect, test, type Locator, type Page } from "@playwright/test";
 
-// WebAuthn needs a domain relying party; the smoke server binds 127.0.0.1, so open it as localhost.
-function proofUrl(path: string) {
-  const base = new URL(test.info().project.use.baseURL ?? "http://127.0.0.1:3210");
-  base.hostname = "localhost";
-  return `${base.origin}${path}`;
-}
-
 async function overflowOffenders(target: Locator) {
   return target.evaluate((element) => {
     const limit = element.getBoundingClientRect().right + 1;
@@ -36,6 +29,33 @@ async function capture(page: Page, target: Locator, name: string) {
     await target.screenshot({ path: path.join(output, `${name}.png`), style: "nextjs-portal { visibility: hidden; }" });
   }
 }
+
+test("shared smoke origin supports a virtual passkey", async ({ page, context, baseURL }) => {
+  expect(baseURL).toBeTruthy();
+  const proofUrl = new URL("/__synthetic-passkey-origin", baseURL);
+  await page.route(proofUrl.href, (route) => route.fulfill({
+    contentType: "text/html",
+    body: "<!doctype html><title>Synthetic passkey proof</title>",
+  }));
+  const cdp = await context.newCDPSession(page);
+  await cdp.send("WebAuthn.enable");
+  await cdp.send("WebAuthn.addVirtualAuthenticator", { options: {
+    protocol: "ctap2", transport: "internal", hasResidentKey: true,
+    hasUserVerification: true, isUserVerified: true, automaticPresenceSimulation: true,
+  } });
+  await page.goto("/__synthetic-passkey-origin");
+  const credentialType = await page.evaluate(async () => {
+    const credential = await navigator.credentials.create({ publicKey: {
+      rp: { id: location.hostname, name: "Synthetic" },
+      user: { id: new Uint8Array([1, 2, 3, 4]), name: "synthetic", displayName: "Synthetic" },
+      challenge: new Uint8Array(32).fill(1),
+      pubKeyCredParams: [{ type: "public-key", alg: -7 }],
+      timeout: 5_000,
+    } });
+    return credential?.type;
+  });
+  expect(credentialType).toBe("public-key");
+});
 
 for (const width of [390, 1280]) {
   for (const fresh of [false, true]) {
@@ -107,7 +127,7 @@ for (const width of [390, 1280]) {
         return route.fulfill({ json: { ok: true, memberId: "member" } });
       });
       await page.route("**/api/auth/complete", (route) => { completions += 1; return route.fulfill({ status: 500 }); });
-      await page.goto(proofUrl("/screenshots/messages#action-approval-lifecycle"), { waitUntil: "load", timeout: 90_000 });
+      await page.goto("/screenshots/messages#action-approval-lifecycle", { waitUntil: "load", timeout: 90_000 });
       const panel = page.locator('[data-approval-study="pending"]');
       await panel.evaluate((element) => {
         for (let ancestor: Element | null = element; ancestor; ancestor = ancestor.parentElement) ancestor.removeAttribute("inert");

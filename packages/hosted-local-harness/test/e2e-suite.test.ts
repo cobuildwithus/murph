@@ -16,7 +16,7 @@ const runForegroundCommand = vi.hoisted(() =>
 );
 const cleanupHostedRunnerContainers = vi.hoisted(() => vi.fn(async () => {}));
 const cleanupHostedRunnerImages = vi.hoisted(() => vi.fn(async () => {}));
-const cleanupHostedLocalMinioBuildContainersBestEffort = vi.hoisted(() => vi.fn(async () => {}));
+const cleanupHostedLocalMinioBuildContainersBestEffort = vi.hoisted(() => vi.fn(async (_env: NodeJS.ProcessEnv, _buildId: string) => {}));
 const cleanupHostedLocalMinioE2eContainersBestEffort = vi.hoisted(() => vi.fn(async () => {}));
 
 vi.mock("../src/process.ts", () => {
@@ -677,11 +677,7 @@ describe("hosted-local E2E suite preparation", () => {
       }),
       expect.stringMatching(/^hosted-local-e2e-/u),
     );
-    expect(cleanupHostedLocalMinioE2eContainersBestEffort).toHaveBeenCalledWith(
-      expect.objectContaining({
-        MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED: "1",
-      }),
-    );
+    expect(cleanupHostedLocalMinioE2eContainersBestEffort).not.toHaveBeenCalled();
   });
 
   test("stops before scenario launch when Worker dependency preparation fails", async () => {
@@ -880,6 +876,39 @@ describe("hosted-local E2E suite preparation", () => {
     expect(cleanupHostedRunnerImages).not.toHaveBeenCalled();
   });
 
+  test.each([false, true])("preserves another build's MinIO when scenario failure is %s", async (fails) => {
+    const liveBuilds = new Set(["owned-e2e-build", "other-e2e-build"]);
+    cleanupHostedLocalMinioBuildContainersBestEffort.mockImplementation(async (_env, buildId) => {
+      liveBuilds.delete(buildId);
+    });
+    cleanupHostedLocalMinioE2eContainersBestEffort.mockImplementation(async () => {
+      liveBuilds.clear();
+    });
+    runForegroundCommand.mockImplementation(async (input) => {
+      if (input.args.includes("vitest")) {
+        liveBuilds.add("owned-e2e-build");
+        if (fails) throw new Error("synthetic scenario failure");
+      }
+    });
+    try {
+      const result = runHostedLocalE2eSuite({
+        env: { MURPH_HOSTED_RUNNER_LOCAL_BUILD_ID: "owned-e2e-build" },
+        prepareRunnerBundle: false,
+        scenario: "checkpoint-baseline",
+      });
+      if (fails) await expect(result).rejects.toThrow("synthetic scenario failure");
+      else await result;
+      expect(liveBuilds).toEqual(new Set(["other-e2e-build"]));
+      expect(cleanupHostedLocalMinioBuildContainersBestEffort).toHaveBeenCalledWith(
+        expect.objectContaining({ MURPH_HOSTED_RUNNER_LOCAL_BUILD_ID: "owned-e2e-build" }),
+        "owned-e2e-build",
+      );
+    } finally {
+      cleanupHostedLocalMinioBuildContainersBestEffort.mockResolvedValue(undefined);
+      cleanupHostedLocalMinioE2eContainersBestEffort.mockResolvedValue(undefined);
+    }
+  });
+
   test("cleans up runner artifacts when a focused scenario fails", async () => {
     runForegroundCommand.mockImplementation(async (input) => {
       if (input.args.includes("vitest")) {
@@ -901,7 +930,7 @@ describe("hosted-local E2E suite preparation", () => {
       }),
     );
     expect(cleanupHostedRunnerImages).toHaveBeenCalledTimes(1);
-    expect(cleanupHostedLocalMinioE2eContainersBestEffort).toHaveBeenCalled();
+    expect(cleanupHostedLocalMinioE2eContainersBestEffort).not.toHaveBeenCalled();
   });
 
   test("runs an explicit scenario group in one prepared suite", async () => {

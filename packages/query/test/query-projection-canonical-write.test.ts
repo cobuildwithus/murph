@@ -11,7 +11,7 @@ import { test, vi } from "vitest";
 import { initializeVault, withCanonicalWriteLock } from "@murphai/core";
 import * as core from "@murphai/core";
 import { createWorkspaceSourceImportExecOptions } from "../../../config/workspace-source-resolution.js";
-import { listCanonicalEntitiesRuntime, getQueryProjectionStatus, summarizeWearableSourceHealthRuntime, rebuildQueryProjection } from "../src/query-projection.ts";
+import { listCanonicalEntitiesRuntime, listCanonicalEventEntitiesRuntime, getQueryProjectionStatus, summarizeWearableSourceHealthRuntime, rebuildQueryProjection } from "../src/query-projection.ts";
 import { readExperimentQuerySource } from "../src/experiment-query-source.ts";
 import { isWearableProjectionFresh } from "../src/projection/freshness.ts";
 import { currentQueryProjectionLocation } from "../src/projection/schema.ts";
@@ -19,12 +19,12 @@ import { listCanonicalSourceManifest } from "../src/vault-source.ts";
 
 const packageDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
-for (const reader of ["projection", "experiment", "source-health", "source-health-fresh"] as const) {
+for (const reader of ["projection", "event", "event-fresh", "experiment", "source-health", "source-health-fresh"] as const) {
 for (const outcome of ["commit", "rollback"] as const) {
   test(`a separate canonical writer's ${outcome} completes before a ${reader} query publishes its snapshot`, async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-query-write-"));
     await initializeVault({ vaultRoot });
-    if (reader === "source-health-fresh") await rebuildQueryProjection(vaultRoot);
+    if (reader === "source-health-fresh" || reader === "event-fresh") await rebuildQueryProjection(vaultRoot);
     const options = createWorkspaceSourceImportExecOptions(packageDir);
     const child = spawn(process.execPath, [
       "--import", "tsx/esm", "--input-type=module", "--eval", `
@@ -71,9 +71,11 @@ for (const outcome of ["commit", "rollback"] as const) {
       assert.match(started, /persistence-pending/u);
       query = reader === "projection"
         ? listCanonicalEntitiesRuntime(vaultRoot)
-        : reader === "experiment"
-          ? readExperimentQuerySource(vaultRoot).then(source => source.readModel.entities)
-          : summarizeWearableSourceHealthRuntime(vaultRoot);
+        : reader.startsWith("event")
+          ? listCanonicalEventEntitiesRuntime(vaultRoot)
+          : reader === "experiment"
+            ? readExperimentQuerySource(vaultRoot).then(source => source.readModel.entities)
+            : summarizeWearableSourceHealthRuntime(vaultRoot);
       // The writer is parked after canonical files changed and before persistence
       // succeeds or rolls back. A query must not expose this uncommitted state.
       const beforePersistence = await Promise.race([
@@ -102,6 +104,7 @@ for (const outcome of ["commit", "rollback"] as const) {
         assert.equal(meals.length, outcome === "commit" ? 1 : 0);
       }
       if (reader === "projection") assert.equal((await getQueryProjectionStatus(vaultRoot)).fresh, true);
+      if (reader === "event") assert.equal((await getQueryProjectionStatus(vaultRoot)).exists, false);
     } finally {
       if (!child.stdin.destroyed) child.stdin.end("release\n");
       await exited;

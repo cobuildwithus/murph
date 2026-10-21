@@ -1,16 +1,36 @@
 # Live provider canaries
 
-Last verified: 2026-09-17
+Last verified: 2026-10-20
 
 A passing live canary means its actual journey and business assertions completed.
 A successful scheduler, skipped job, connection-only result, or unavailable
 credential is not equivalent evidence. GitHub completion timestamps identify the
 age of an executed run; this system adds no product-state receipt database.
 
+## Scheduled cadence
+
+Schedules use GitHub Actions UTC cron entries without a timezone override, so
+DST does not shift their UTC slots. GitHub may delay or drop scheduled runs;
+these are admission opportunities, not completion or freshness guarantees.
+Manual recovery, release gates, PR/push proof, journey assertions, permissions,
+source pins, and non-canceling concurrency retain their existing behavior.
+
+| Journey | UTC slots | Weekly admissions | Gap between nominal slots |
+| --- | --- | ---: | --- |
+| Linq | Sun/Wed/Sat 00:17; Sun/Wed 18:17; Mon/Thu 12:17; Tue/Fri 06:17 | 9 (was 28) | Eight 18-hour gaps and one 24-hour gap |
+| iOS | Sun/Wed/Sat 00:17; Mon/Thu 12:17 | 5 (was 14) | Four 36-hour gaps and one 24-hour gap |
+| Android | Same native days/hours at minute 47 | 5 (was 14) | Four 36-hour gaps and one 24-hour gap |
+
+This retains about one-third of the preceding admission frequency (32.1% for
+Linq and 35.7% for each native platform), using calendar entries alone. No
+skip job, elapsed-time state, or new scheduler is needed. Native platforms stay
+30 minutes apart. The increased observation gaps do not relax reply budgets or
+release-required proof. Actual billed savings depend on executed job duration.
+
 ## Existing journeys
 
-- Native iOS and Android execute on every staggered twelve-hour schedule, including
-  unchanged revisions. They retain immutable private-source pins, exact deployed
+- Native iOS and Android execute on every admitted staggered UTC calendar slot,
+  including unchanged revisions. They retain immutable private-source pins, exact deployed
   revision checks, non-destructive identity ownership, and fixed non-canceling
   concurrency. Manual recovery is restricted to current protected main. iOS
   independently selects and verifies the actual production deployment, including
@@ -18,12 +38,25 @@ age of an executed run; this system adds no product-state receipt database.
   deployment selected at launch, not an assertion that production stays frozen
   for the entire native journey. Ordinary promotions do not invalidate successful
   native business assertions; the canary emits no per-commit acceptance status.
-- Linq resolves the actual production alias before its six-hour journey, verifies
+- Linq resolves the actual production alias before its scheduled journey, verifies
   protected-main ancestry and exact deployment, and repeats deployment validation
   after execution. A manual requested SHA must match the deployed revision.
   The fixed canary account is reset through its existing input-free owner.
-  After onboarding, the journey requires zero goals, one canonical fixed-goal
-  write, a later model readback, and exactly one persisted goal. Pending
+  Phone-account creation saves an explicit GPT-6 Luna preference only for the
+  server-configured Linq canary number. Each reset recreates that preference;
+  ordinary member defaults and existing saved model choices are unchanged.
+  The canary retains the normal first-day priority policy and member pricing.
+  After the identity exchange, the person asks for a manageable walking plan
+  and accepts the proposal in ordinary language. Canonical observations require
+  zero Goals after identity and proposal, then exactly one active Goal after
+  acceptance, with valid bank/goal provenance and a distinct canonical ID. The
+  model may choose its title. The conversation contains no storage command or
+  exact-title readback demand; exact save/readback is covered separately by
+  `packages/cli/test/health-goal-save.test.ts`. A focused real-model journey
+  shares the canary messages and checks the walking plan and linked Goal;
+  production counts alone prove lifecycle and provenance, not plan semantics.
+  Deploy the active-Goal observer before running the new conversation controller.
+  Pending
   conversation work or a checkpoint change during the read prevents accepting
   the result. The observer parses the live v2 checkpoint and compares its complete
   fingerprint before and after decryption. Published-replica freshness uses the
@@ -36,14 +69,17 @@ age of an executed run; this system adds no product-state receipt database.
   Each canonical observation allows the shared default runner quiet window plus
   two minutes for publication, currently twelve minutes with at most 720 serial
   one-second polling attempts and a ten-second per-request cap inside that
-  overall deadline. This accommodates the normal ten-minute quiet window before
+  overall deadline. A timed-out read (including its response body) or HTTP 503
+  uses the next existing poll without extending the deadline or repeating a
+  message/reset. Persistent unavailability fails at the deadline; other HTTP
+  errors, malformed evidence, and incorrect goal counts still fail immediately.
+  This accommodates the normal ten-minute quiet window before
   checkpointing and subsequent replica publication. The separate
   send-to-reply and inter-reply budgets remain 20 seconds; canonical observation
   time is excluded. The workflow has a 55-minute cap covering reset, all three
   observations, replies, setup, and final exact-deployment verification.
-- Assistant real-model journeys run daily on protected main and by manual recovery.
-  Every admitted run still requires all three real-provider journeys.
-- Stripe runs its protected sandbox browser matrix daily. Hermetic billing checks
+- Stripe runs its protected sandbox browser matrix Monday and Thursday at 08:23 UTC.
+  Hermetic billing checks
   remain on every eligible PR and main push; a scheduled run requires live success.
   After the browser
   schedules Edge to Pulse, a real owned test clock advances through renewal and
@@ -53,19 +89,35 @@ age of an executed run; this system adds no product-state receipt database.
   ordinary browser/application clocks remain unchanged. Cleanup waits for clock
   settlement before deleting dependent objects, and failed clocks cannot be
   silently abandoned as successful cleanup.
-- Garmin uses actual positive completed-day provider activity, with an initially
-  empty canonical steps view. The browser stays connected while the ordinary
-  callback-owned Temporal/runtime pipeline imports data. Provider day/value/unit
-  and Garmin activity-summary provenance must match canonical query output.
-  Missing real data fails; the test invents no sandbox samples and forces no
-  ensure-processing call. Only after comparison, UI disconnect, and final owned
-  cleanup does the suite write its private temporary receipt. This proves pull
-  and canonical ingestion; it does not claim provider webhook-delivery proof.
+- Garmin requires real provider login, callback completion, persisted connection
+  reload, and cleanup. The scheduled private executor selects
+  `MURPH_E2E_JUNCTION_WEARABLE_DATA=synthetic_webhook` to replace asynchronous
+  Garmin delivery with a signed synthetic activity sent to the harness's local
+  public Junction webhook route. An ephemeral harness-only signing secret
+  exercises normal signature verification. The existing control plane, managed
+  Temporal worker, importer, canonical mutation path, replica publication, and
+  encrypted member readback remain real. No direct vault writes or forced wakes
+  are used. The initial canonical steps view must be empty; success requires a
+  fresh replica with the fixture's day/value/unit and Garmin activity-summary
+  provenance, followed by UI disconnect and final provider cleanup.
+  The version-3 private receipt uses `dataOutcome: synthetic_webhook_matched`;
+  output explicitly identifies synthetic delivery. It does not prove live Garmin
+  delivery latency or live upstream data availability. Missing persisted data,
+  malformed proof, auth failure, cancellation, and cleanup failure still fail.
+  Optional manual mode `MURPH_E2E_JUNCTION_WEARABLE_DATA=1` retains the strict
+  independent live-provider oracle and bounded closed-category diagnostics.
+  That mode requires a real provider/canonical match and writes a version-2
+  `matched` receipt. Empty live provider reads still fail. Both modes require
+  sole Garmin selection, sandbox authority, and the real managed private worker.
+
 
 ## Garmin execution boundary
 
 The public `.github/workflows/junction-wearable-canary.yml` controller runs on
-a daily schedule and manual recovery. It reuses only the existing
+a Monday/Thursday 05:43 UTC schedule and manual recovery. Both Garmin and Stripe
+run twice weekly, down from seven slots: 72/96-hour nominal gaps, with no DST
+shift or month-boundary reset. This approximates one-third of the former cadence.
+The controller reuses only the existing
 `temporal-compatibility` Environment's repository-scoped GitHub App authority:
 private Actions write and Contents read for `cobuildwithus/murph-cloud`. It never
 checks out private source, receives provider credentials, or downloads private
@@ -79,20 +131,24 @@ private revision on attempt one, and requires exactly one successful final job:
 `Junction wearable canary proof / <digest>`. The digest is SHA-256 of version,
 public SHA, private SHA, and request id, each newline terminated. Completion
 must be from this dispatch, not an old run or a skipped proof. Private main is
-revalidated before acceptance. The controller polls boundedly for 54 minutes
+revalidated before acceptance. The controller polls boundedly for 74 minutes
 and never retries an ambiguous dispatch or cancels provider work.
 
 The private executor owns managed Temporal, the worker package, local PostgreSQL,
-runner, dedicated Garmin browser profile, and sandbox provider authority. Its
+runner, a fresh provider browser without saved login state, and sandbox provider
+authority. Its
 new `junction-wearable-canary` Environment must be separately provisioned by an
 authorized operator with the existing dedicated sandbox credentials. Local
-agents must not retrieve or copy those credentials. Missing configuration or
-missing real provider data fails closed.
+agents must not retrieve or copy those credentials. Missing configuration fails closed. The synthetic-delivery result is explicit;
+empty provider results cannot establish canonical persistence.
 
 ## Safe rollout and recovery
 
-1. Land the private executor with canonical-data receipt validation. It must
-   reject an older public revision that supports only connection proof.
+1. Land public synthetic-mode support while the private executor still uses the
+   existing strict live-data mode. Then enable the private synthetic workflow
+   together with its version-3 receipt reader. The reader retains legacy matched
+   receipts and rejects empty/connection-only proof. To roll back public support,
+   first restore the private workflow's live-data mode.
 2. Let every prior provider-bearing public Garmin run finish naturally before
    the first private provider run. Cross-repository concurrency group names alone
    do not serialize an old public executor with the new private executor.

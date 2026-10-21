@@ -1545,6 +1545,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("skips syste
   });
 
   it("exposes safe hosted device list, connect, and reconcile actions from the platform port", async () => {
+    const hapticRequests: Array<Parameters<NonNullable<RuntimeDeviceSyncPort["haptic"]>>[0]> = [];
     const connectLinkRequests: RuntimeDeviceSyncConnectLinkRequest[] = [];
     const noDataOutreachRequests: Array<
       Parameters<NonNullable<RuntimeDeviceSyncPort["configureNoDataOutreach"]>>[0]
@@ -1604,6 +1605,10 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("skips syste
           provider: request.connectTarget,
           providerLabel: "WHOOP",
         };
+      },
+      async haptic(input) {
+        hapticRequests.push(input);
+        return { ...input.request, status: "queued" as const };
       },
       async configureNoDataOutreach(request) {
         noDataOutreachRequests.push(request);
@@ -1686,6 +1691,11 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("skips syste
     if (!deviceTool) {
       throw new Error("Expected hosted device tool.");
     }
+    const hapticRequest = { action: "haptic", wearable: "garmin", operation: "buzz" } as const;
+    await expect(deviceTool.request(hapticRequest)).rejects.toThrow("Wrist reminders are unavailable");
+    const hapticAuthority = { kind: "automation_occurrence", automationId: "synthetic-meditation", occurrenceAt: "2026-10-01T12:10:00.000Z" } as const;
+    await expect(deviceTool.request(hapticRequest, { hapticAuthority })).resolves.toEqual({ ...hapticRequest, status: "queued" });
+    expect(hapticRequests).toEqual([{ request: hapticRequest, authority: hapticAuthority, signal: null }]);
     const abortController = new AbortController();
     await expect(deviceTool.request({
       action: "list_accounts",

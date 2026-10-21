@@ -1,3 +1,6 @@
+import type { HostedRuntimeVoice } from "./hosted-runtime/voice-call.ts";
+export { createHostedRuntimeVoice, createHostedRuntimeVoiceCall } from "./hosted-runtime/voice-call.ts";
+export type { HostedRuntimeVoice } from "./hosted-runtime/voice-call.ts";
 import type {
   HostedRuntimeLatencyTraceStagedMilestones,
 } from "@murphai/hosted-execution/runtime-control";
@@ -7,6 +10,7 @@ import {
   type HostedAssistantRuntimeConfig,
   type HostedAssistantWorkspaceRuntimeJobInput,
   type HostedAssistantWorkspaceRuntimeJobResult,
+  type HostedWorkspaceRuntimeJobOptions,
   type RuntimeWakeSignal,
 } from "./hosted-runtime.ts";
 export { drainHostedRuntimeDeferredUsageCompletionsBestEffort } from "./hosted-runtime.ts";
@@ -47,12 +51,14 @@ export type {
 } from "./hosted-runtime/snapshot-bridge.ts";
 
 export interface HostedWorkspaceInvocationInput {
+  voice?: HostedRuntimeVoice | null;
   job: HostedAssistantWorkspaceRuntimeJobInput;
   latencyMilestones?: HostedRuntimeLatencyTraceStagedMilestones | null;
   mailboxPayloadDecoder: HostedWorkspaceMailboxPayloadDecoder;
   onConversationActivityObserved?: (receivedAtEpochMs: number) => void;
   platform: HostedRuntimePlatform;
   preparedWorkspaceRestore?: HostedWorkspaceRestorePreparation | null;
+  fetchTransportDiagnostics?: HostedWorkspaceRuntimeJobOptions["fetchTransportDiagnostics"];
   readCurrentLease: () =>
     | HostedRuntimeBridgeCheckpointLease
     | null
@@ -93,11 +99,13 @@ export async function runHostedWorkspaceInvocation(
   try {
     return await runHostedWorkspaceRuntimeJobInProcess(input.job, {
       ...options,
+      voice: input.voice ?? null,
       latencyMilestones: input.latencyMilestones ?? null,
       onConversationActivityObserved: input.onConversationActivityObserved,
       ...(input.preparedWorkspaceRestore
         ? { preparedWorkspaceRestore: input.preparedWorkspaceRestore }
         : {}),
+      fetchTransportDiagnostics: input.fetchTransportDiagnostics,
       runtimeIssueProvenance: input.runtimeIssueProvenance ?? null,
       runtimeWakeSignal,
       shutdownSignal: input.shutdownSignal ?? null,

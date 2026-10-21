@@ -115,8 +115,7 @@ export async function findLiveWorkoutActionTargets(
       exactReplays.push(shown)
     }
     if (
-      isOpenLiveWorkout(workout)
-      && !hasAmbiguousWorkoutActionExerciseCoordinates(workout)
+      !hasAmbiguousWorkoutActionExerciseCoordinates(workout)
       && workoutActionBindingMatchesCurrentState(
         shown.entity.id,
         workout,

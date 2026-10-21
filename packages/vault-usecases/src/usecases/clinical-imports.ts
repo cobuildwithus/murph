@@ -9,6 +9,7 @@ import {
   TEST_RESULT_STATUSES,
   bloodTestResultSchema,
   clinicalEvidenceRefSchema,
+  clinicalFactSchema,
   clinicalNoteSectionSchema,
   eventRelationLinkSchema,
   eventSourceSchema,
@@ -159,6 +160,7 @@ export const diagnosticTestSavePayloadSchema = commonEventPayloadSchema.extend(d
 export const diagnosticTestImportPayloadSchema = commonImportEventPayloadSchema.extend(diagnosticTestPayloadShape)
 
 const clinicalNotePayloadShape = {
+  clinicalFact: clinicalFactSchema.optional(),
   title: z.string().min(1).max(160).default('Clinical note'),
   note: z.string().min(1).max(4000).optional(),
   noteType: z.string().min(1).max(120).default('clinical_note'),
@@ -609,6 +611,7 @@ function buildClinicalNoteEventPayload(
     facility: payload.facility,
     encounterId: payload.encounterId,
     sections: payload.sections,
+    clinicalFact: payload.clinicalFact,
   })
 }
 

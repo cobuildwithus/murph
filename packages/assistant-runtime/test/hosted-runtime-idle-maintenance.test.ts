@@ -34,9 +34,11 @@ vi.mock("../src/hosted-runtime/pending-input-index.ts", () => ({
 }));
 const archiveClosedIntegrationIngestShards = vi.fn();
 const archiveClosedEventLedgerShards = vi.fn();
+const archiveClosedAuditShards = vi.fn();
 const runGeneratedImageCaptureRetention = vi.fn();
 vi.mock("@murphai/core", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@murphai/core")>()),
+  archiveClosedAuditShards: (input: unknown) => archiveClosedAuditShards(input),
   archiveClosedEventLedgerShards: (input: unknown) =>
     archiveClosedEventLedgerShards(input),
   archiveClosedIntegrationIngestShards: (input: unknown) =>
@@ -157,6 +159,15 @@ beforeEach(() => {
     scannedShardCount: 0,
     sourceByteCount: 0,
   });
+  archiveClosedAuditShards.mockReset();
+  archiveClosedAuditShards.mockResolvedValue({
+    archivedByteCount: 0,
+    archivedShardCount: 0,
+    blockedShardCount: 0,
+    repairedShardCount: 0,
+    scannedShardCount: 0,
+    sourceByteCount: 0,
+  });
   runGeneratedImageCaptureRetention.mockReset();
   runGeneratedImageCaptureRetention.mockResolvedValue({
     blockedCaptureCount: 0,
@@ -183,7 +194,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       await runHostedIdleCheckpointMaintenance({
         credentialSource: "platform",
         memberId: "member_1",
-        model: "gpt-5.6-terra",
+        model: "gpt-6.1-sol",
         providerName: "hosted-openai",
         pendingWork: false,
         recordUsage: null,
@@ -211,7 +222,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       await runHostedIdleCheckpointMaintenance({
         credentialSource: "platform",
         memberId: "member_1",
-        model: "gpt-5.6-terra",
+        model: "gpt-6.1-sol",
         providerName: " ",
         pendingWork: false,
         recordUsage: null,
@@ -235,7 +246,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
     };
     compactWarmCodexThread.mockResolvedValue({
       kind, reason: "timeout", durationMs: 1200, threadContextTokensBefore: 140_000,
-      threadId: "thread_xyz", serviceTier: "flex", model: "gpt-5.6-terra",
+      threadId: "thread_xyz", serviceTier: "flex", model: "gpt-6.1-sol",
       usage: { cachedInputTokens: 1800, inputTokens: 2800, outputTokens: 180, totalTokens: 2980,
         source: "measured", responses: [response, { ...response, responseId: "resp_compact_synthetic_2" }] },
     });
@@ -254,7 +265,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
     expect(recorded[0]).toMatchObject({
       providerRequestId: response.responseId, providerRequestOutcome: kind === "failed" ? "failed" : "succeeded",
       cacheWriteTokens: 100, cachedInputTokens: 900, inputTokens: 1400, outputTokens: 90,
-      reasoningTokens: 30, totalTokens: 1490, requestedModel: "gpt-5.6-terra", servedModel: null,
+      reasoningTokens: 30, totalTokens: 1490, requestedModel: "gpt-6.1-sol", servedModel: null,
       tokenPricingBasis: "openai-flex", usageExtractionSourcePath: "rawResponse.completed.usage",
       usageExtractionVersion: "codex-idle-compaction-raw-v1",
     });
@@ -268,7 +279,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       threadContextTokensBefore: 140_000,
       threadId: "thread_xyz",
       serviceTier: "flex",
-      model: "gpt-5.6-terra",
+      model: "gpt-6.1-sol",
       usage: {
         cachedInputTokens: 96_000,
         inputTokens: 140_000,
@@ -314,7 +325,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       outputTokens: 900,
       providerName: "hosted-openai",
       providerRequestId: "thread_xyz",
-      requestedModel: "gpt-5.6-terra",
+      requestedModel: "gpt-6.1-sol",
       sessionId: "asst_real_session",
       tokenPricingBasis: "openai-flex",
       totalTokens: 140_900,
@@ -534,7 +545,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       const outcome = await runHostedIdleCheckpointMaintenance({
         credentialSource: "platform",
         memberId: "member_1",
-        model: "gpt-5.6-terra",
+        model: "gpt-6.1-sol",
         providerName: "hosted-openai",
         pendingWork: false,
         recordUsage: null,
@@ -574,7 +585,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       const outcome = await runHostedIdleCheckpointMaintenance({
         credentialSource: "platform",
         memberId: "member_1",
-        model: "gpt-5.6-terra",
+        model: "gpt-6.1-sol",
         providerName: "hosted-openai",
         pendingWork: false,
         recordUsage: null,
@@ -614,7 +625,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       const outcome = await runHostedIdleCheckpointMaintenance({
         credentialSource: "platform",
         memberId: "member_1",
-        model: "gpt-5.6-terra",
+        model: "gpt-6.1-sol",
         providerName: "hosted-openai",
         pendingWork: false,
         recordUsage: null,
@@ -666,7 +677,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       credentialSource: "platform",
       materializeRetentionCandidatePaths,
       memberId: "member_1",
-      model: "gpt-5.6-terra",
+      model: "gpt-6.1-sol",
       pendingWork: false,
       protectedAttachmentIds: ["att_pending"],
       protectedCaptureIds: ["cap_pending"],
@@ -722,7 +733,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
     await expect(runHostedIdleCheckpointMaintenance({
       credentialSource: "platform",
       memberId: "member_1",
-      model: "gpt-5.6-terra",
+      model: "gpt-6.1-sol",
       pendingWork: false,
       providerName: "hosted-openai",
       recordUsage: null,
@@ -858,7 +869,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       credentialSource: "platform",
       generatedImageRetentionMaxCaptures: 7,
       memberId: "member_1",
-      model: "gpt-5.6-terra",
+      model: "gpt-6.1-sol",
       pendingWork: false,
       providerName: "hosted-openai",
       recordUsage: null,
@@ -888,7 +899,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
         credentialSource: "platform",
         generatedImageRetentionMaxCaptures: 0,
         memberId: "member_1",
-        model: "gpt-5.6-terra",
+        model: "gpt-6.1-sol",
         pendingWork: false,
         persistGeneratedImageRetention,
         providerName: "hosted-openai",
@@ -931,7 +942,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
     const outcome = await runHostedIdleCheckpointMaintenance({
       credentialSource: "platform",
       memberId: "member_1",
-      model: "gpt-5.6-terra",
+      model: "gpt-6.1-sol",
       providerName: "hosted-openai",
       pendingWork: false,
       recordUsage: null,
@@ -970,7 +981,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
     const outcome = await runHostedIdleCheckpointMaintenance({
       credentialSource: "platform",
       memberId: "member_1",
-      model: "gpt-5.6-terra",
+      model: "gpt-6.1-sol",
       providerName: "hosted-openai",
       pendingWork: false,
       recordUsage: null,
@@ -1006,7 +1017,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
     const outcome = await runHostedIdleCheckpointMaintenance({
       credentialSource: "platform",
       memberId: "member_1",
-      model: "gpt-5.6-terra",
+      model: "gpt-6.1-sol",
       providerName: "hosted-openai",
       pendingWork: false,
       recordUsage: null,
@@ -1036,7 +1047,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
     await runHostedIdleCheckpointMaintenance({
       credentialSource: "platform",
       memberId: "member_1",
-      model: "gpt-5.6-terra",
+      model: "gpt-6.1-sol",
       providerName: "hosted-openai",
       pendingWork: true,
       recordUsage: null,
@@ -1071,7 +1082,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       const outcome = await runHostedIdleCheckpointMaintenance({
         credentialSource: "platform",
         memberId: "member_1",
-        model: "gpt-5.6-terra",
+        model: "gpt-6.1-sol",
         providerName: "hosted-openai",
         pendingWork: false,
         recordUsage: null,
@@ -1110,7 +1121,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
     const outcome = await runHostedIdleCheckpointMaintenance({
       credentialSource: "platform",
       memberId: "member_1",
-      model: "gpt-5.6-terra",
+      model: "gpt-6.1-sol",
       providerName: "hosted-openai",
       pendingWork: false,
       recordUsage: null,
@@ -1151,7 +1162,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       const outcome = await runHostedIdleCheckpointMaintenance({
         credentialSource: "platform",
         memberId: "member_1",
-        model: "gpt-5.6-terra",
+        model: "gpt-6.1-sol",
         providerName: "hosted-openai",
         pendingWork: false,
         recordUsage: null,
@@ -1201,7 +1212,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       const interrupted = await runHostedIdleCheckpointMaintenance({
         credentialSource: "platform",
         memberId: "member_1",
-        model: "gpt-5.6-terra",
+        model: "gpt-6.1-sol",
         providerName: "hosted-openai",
         pendingWork: false,
         recordUsage: null,
@@ -1229,7 +1240,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       const resumed = await runHostedIdleCheckpointMaintenance({
         credentialSource: "platform",
         memberId: "member_1",
-        model: "gpt-5.6-terra",
+        model: "gpt-6.1-sol",
         providerName: "hosted-openai",
         pendingWork: false,
         recordUsage: null,
@@ -1270,7 +1281,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
     await runHostedIdleCheckpointMaintenance({
       credentialSource: "platform",
       memberId: "member_1",
-      model: "gpt-5.6-terra",
+      model: "gpt-6.1-sol",
       pendingWork: false,
       protectedAttachmentIds: ["att_active_01"],
       protectedCaptureIds: ["cap_active"],
@@ -1302,7 +1313,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       threadContextTokensBefore: 140_000,
       threadId: "thread_xyz",
       serviceTier: null,
-      model: "gpt-5.6-terra",
+      model: "gpt-6.1-sol",
       usage: {
         cachedInputTokens: null,
         inputTokens: 140_000,
@@ -1316,7 +1327,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
     const outcome = await runHostedIdleCheckpointMaintenance({
       credentialSource: "platform",
       memberId: "member_1",
-      model: "gpt-5.6-terra",
+      model: "gpt-6.1-sol",
       providerName: "hosted-openai",
       pendingWork: false,
       recordUsage: async (record) => {
@@ -1339,7 +1350,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       outputTokens: null,
       providerName: "hosted-openai",
       providerRequestId: "thread_xyz",
-      requestedModel: "gpt-5.6-terra",
+      requestedModel: "gpt-6.1-sol",
       sessionId: "asst_real_session",
       surface: "hosted-runtime",
       tokenPricingBasis: "standard",
@@ -1357,7 +1368,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       threadContextTokensBefore: 120_000,
       threadId: "thread_xyz",
       serviceTier: null,
-      model: "gpt-5.6-terra",
+      model: "gpt-6.1-sol",
       usage: {
         cachedInputTokens: 0,
         inputTokens: 120_000,
@@ -1370,7 +1381,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
     const outcome = await runHostedIdleCheckpointMaintenance({
       credentialSource: "platform",
       memberId: "member_1",
-      model: "gpt-5.6-terra",
+      model: "gpt-6.1-sol",
       providerName: "hosted-openai",
       pendingWork: false,
       recordUsage: async () => {
@@ -1410,7 +1421,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       const outcome = await runHostedIdleCheckpointMaintenance({
         credentialSource: "platform",
         memberId: "member_1",
-        model: "gpt-5.6-terra",
+        model: "gpt-6.1-sol",
         providerName: "hosted-openai",
         pendingWork: false,
         recordUsage: null,
@@ -1452,7 +1463,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
     const outcome = await runHostedIdleCheckpointMaintenance({
       credentialSource: "platform",
       memberId: "member_1",
-      model: "gpt-5.6-terra",
+      model: "gpt-6.1-sol",
       providerName: "hosted-openai",
       pendingWork: false,
       recordUsage: null,
@@ -1469,7 +1480,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       await runHostedIdleCheckpointMaintenance({
         credentialSource: "platform",
         memberId: "member_1",
-        model: "gpt-5.6-terra",
+        model: "gpt-6.1-sol",
         providerName: "hosted-openai",
         pendingWork: true,
         recordUsage: null,
@@ -1480,8 +1491,51 @@ describe("runHostedIdleCheckpointMaintenance", () => {
     ).toEqual({ kind: "skipped", reason: "pending_work", threadContextTokensBefore: null });
     expect(compactWarmCodexThread).not.toHaveBeenCalled();
     expect(archiveClosedEventLedgerShards).not.toHaveBeenCalled();
+    expect(archiveClosedAuditShards).not.toHaveBeenCalled();
     expect(archiveClosedIntegrationIngestShards).not.toHaveBeenCalled();
   });
+
+  it.each([undefined, "default", "system_mailbox", "inbox_media_retention"] as const)(
+    "retains every content cleanup and limits unrelated archives for %s processing",
+    async (processingMode) => {
+      const nextWakeAt = "2026-10-01T12:00:00.000Z";
+      runInboxTextRetention.mockResolvedValue({
+        expiredCaptures: 1,
+        hasMoreEligibleCaptures: false,
+        legacyCapturesSkipped: 0,
+        nextEligibleAt: nextWakeAt,
+      });
+      const outcome = await runHostedIdleCheckpointMaintenance({
+        credentialSource: "platform",
+        memberId: "member_retention_scope",
+        model: null,
+        pendingWork: false,
+        processingMode,
+        providerName: null,
+        recordUsage: null,
+        resolveAssistantSessionId: null,
+        shutdownSignal: null,
+        vaultRoot: "/synthetic-vault",
+        wakeSignal: null,
+      });
+      expect(outcome).toMatchObject({ nextWakeAt, nextWakeReason: "inbox_media_retention" });
+      for (const cleanup of [
+        runHostedPendingAssistantInputContentRetention,
+        runAssistantTranscriptContentRetention,
+        runInboxMediaRetention,
+        runGeneratedImageCaptureRetention,
+        runInboxEnvelopeMigration,
+        runInboxTextRetention,
+      ]) {
+        expect(cleanup).toHaveBeenCalledOnce();
+      }
+      const expectedArchiveCalls = processingMode === "inbox_media_retention" ? 0 : 1;
+      expect(archiveClosedEventLedgerShards).toHaveBeenCalledTimes(expectedArchiveCalls);
+      expect(archiveClosedAuditShards).toHaveBeenCalledTimes(expectedArchiveCalls);
+      expect(archiveClosedIntegrationIngestShards).toHaveBeenCalledTimes(expectedArchiveCalls);
+      expect(compactWarmCodexThread).not.toHaveBeenCalled();
+    },
+  );
 
   it("archives closed event and integration shards only on a true idle checkpoint", async () => {
     compactWarmCodexThread.mockResolvedValue({
@@ -1493,7 +1547,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
     await runHostedIdleCheckpointMaintenance({
       credentialSource: "platform",
       memberId: "member_1",
-      model: "gpt-5.6-terra",
+      model: "gpt-6.1-sol",
       pendingWork: false,
       providerName: "hosted-openai",
       recordUsage: null,
@@ -1509,9 +1563,12 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       vaultRoot: "/vault",
     });
     expect(archiveClosedIntegrationIngestShards).toHaveBeenCalledOnce();
+    expect(archiveClosedIntegrationIngestShards.mock.calls[0]?.[0]?.archiveCurrentMonth).toBe(true);
     const eventSignal = archiveClosedEventLedgerShards.mock.calls[0]?.[0]?.signal;
     const integrationSignal = archiveClosedIntegrationIngestShards.mock.calls[0]?.[0]?.signal;
     expect(integrationSignal).toBe(eventSignal);
+    expect(archiveClosedAuditShards).toHaveBeenCalledOnce();
+    expect(archiveClosedAuditShards.mock.calls[0]?.[0]?.signal).toBe(eventSignal);
   });
 
   it("archives later healthy history after a long malformed event shard", async () => {
@@ -1546,6 +1603,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       archiveClosedEventLedgerShards.mockImplementation(
         actualCore.archiveClosedEventLedgerShards,
       );
+      archiveClosedAuditShards.mockImplementation(actualCore.archiveClosedAuditShards);
 
       compactWarmCodexThread.mockResolvedValue({
         kind: "skipped",
@@ -1556,7 +1614,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       await expect(runHostedIdleCheckpointMaintenance({
         credentialSource: "platform",
         memberId: "member_event_archive",
-        model: "gpt-5.6-terra",
+        model: "gpt-6.1-sol",
         pendingWork: false,
         providerName: "hosted-openai",
         recordUsage: null,
@@ -1570,6 +1628,8 @@ describe("runHostedIdleCheckpointMaintenance", () => {
         threadContextTokensBefore: 20_000,
       });
 
+      await expect(fs.access(path.join(vaultRoot, "audit/2020/2020-01.jsonl"))).rejects.toThrow();
+      await expect(fs.access(path.join(vaultRoot, "audit/2020/2020-01.jsonl.br"))).resolves.toBeUndefined();
       await expect(fs.access(malformedRawAbsolutePath)).resolves.toBeUndefined();
       await expect(fs.access(`${malformedRawAbsolutePath}.br`)).rejects.toThrow();
       await expect(fs.access(rawAbsolutePath)).rejects.toThrow();
@@ -1625,7 +1685,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       const maintenance = runHostedIdleCheckpointMaintenance({
         credentialSource: "platform",
         memberId: "member_event_archive_wake",
-        model: "gpt-5.6-terra",
+        model: "gpt-6.1-sol",
         pendingWork: false,
         providerName: "hosted-openai",
         recordUsage: null,
@@ -1668,7 +1728,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
     await expect(runHostedIdleCheckpointMaintenance({
       credentialSource: "platform",
       memberId: "member_1",
-      model: "gpt-5.6-terra",
+      model: "gpt-6.1-sol",
       pendingWork: false,
       providerName: "hosted-openai",
       recordUsage: null,
@@ -1698,7 +1758,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
     await expect(runHostedIdleCheckpointMaintenance({
       credentialSource: "platform",
       memberId: "member_1",
-      model: "gpt-5.6-terra",
+      model: "gpt-6.1-sol",
       pendingWork: false,
       providerName: "hosted-openai",
       recordUsage: null,
@@ -1729,7 +1789,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
     await expect(runHostedIdleCheckpointMaintenance({
       credentialSource: "platform",
       memberId: "member_1",
-      model: "gpt-5.6-terra",
+      model: "gpt-6.1-sol",
       pendingWork: false,
       providerName: "hosted-openai",
       recordUsage: null,
@@ -1745,9 +1805,10 @@ describe("runHostedIdleCheckpointMaintenance", () => {
     expect(compactWarmCodexThread).not.toHaveBeenCalled();
   });
 
-  it("aborts event archiving before later maintenance when a member-visible wake arrives", async () => {
+  it.each(["event", "audit"] as const)("aborts %s archiving before later maintenance when a member-visible wake arrives", async (family) => {
     const wakeSignal = createCoalescingRuntimeWakeSignal();
-    archiveClosedEventLedgerShards.mockImplementation(
+    const archive = family === "audit" ? archiveClosedAuditShards : archiveClosedEventLedgerShards;
+    archive.mockImplementation(
       async (input: { signal: AbortSignal }) =>
         await new Promise((_resolve, reject) => {
           input.signal.addEventListener("abort", () => reject(input.signal.reason), {
@@ -1760,7 +1821,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
     await expect(runHostedIdleCheckpointMaintenance({
       credentialSource: "platform",
       memberId: "member_1",
-      model: "gpt-5.6-terra",
+      model: "gpt-6.1-sol",
       pendingWork: false,
       providerName: "hosted-openai",
       recordUsage: null,
@@ -1793,7 +1854,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
         runHostedIdleCheckpointMaintenance({
           credentialSource: "platform",
           memberId: "member_1",
-          model: "gpt-5.6-terra",
+          model: "gpt-6.1-sol",
           pendingWork: true,
           protectedCaptureIds: ["cap_pending"],
           providerName: "hosted-openai",
@@ -1861,7 +1922,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       await runHostedIdleCheckpointMaintenance({
         credentialSource: "platform",
         memberId: "member_1",
-        model: "gpt-5.6-terra",
+        model: "gpt-6.1-sol",
         providerName: "hosted-openai",
         pendingWork: false,
         recordUsage: null,
@@ -1879,7 +1940,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       threadContextTokensBefore: 110_000,
       threadId: "thread_orphan",
       serviceTier: null,
-      model: "gpt-5.6-terra",
+      model: "gpt-6.1-sol",
       usage: {
         cachedInputTokens: 0,
         inputTokens: 110_000,
@@ -1892,7 +1953,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
     const outcome = await runHostedIdleCheckpointMaintenance({
       credentialSource: "platform",
       memberId: "member_1",
-      model: "gpt-5.6-terra",
+      model: "gpt-6.1-sol",
       providerName: "hosted-openai",
       pendingWork: false,
       recordUsage: async (record) => {

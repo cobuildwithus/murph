@@ -94,7 +94,7 @@ describe("KernelComputerClient", () => {
     });
   });
 
-  it("starts automation on a blank page while preserving login state and disabling telemetry", async () => {
+  it("starts automation without loading or saving a prior account session", async () => {
     kernelSdkMocks.browserCreate.mockResolvedValueOnce({
       cdp_ws_url: "wss://cdp.test-browser.onkernel.com/session/1",
       session_id: "kernel-session-1",
@@ -103,8 +103,6 @@ describe("KernelComputerClient", () => {
 
     await expect(client.createAutomationBrowser({
       headless: true,
-      profileName: "profile-1",
-      saveChanges: true,
       timeoutSeconds: 480,
     })).resolves.toEqual({
       cdpWsUrl: "wss://cdp.test-browser.onkernel.com/session/1",
@@ -113,10 +111,6 @@ describe("KernelComputerClient", () => {
 
     expect(kernelSdkMocks.browserCreate).toHaveBeenCalledWith({
       headless: true,
-      profile: {
-        name: "profile-1",
-        save_changes: true,
-      },
       start_url: "about:blank",
       stealth: true,
       telemetry: { enabled: false },
@@ -380,6 +374,19 @@ describe("KernelComputerClient", () => {
       code: "HOSTED_COMPUTER_MANAGED_AUTH_INVALID",
       retryable: true,
     });
+  });
+
+  it("records the actual rounded execution budget and elapsed provider time on evaluation failure", async () => {
+    const clock = vi.spyOn(performance, "now").mockReturnValueOnce(100).mockReturnValueOnce(20100);
+    try {
+      kernelSdkMocks.playwrightExecute.mockResolvedValueOnce({ success: false, error: "TimeoutError" });
+      const client = new KernelComputerClient({ apiKey: "test-kernel-key" });
+      await expect(client.executePlaywright({ code: "return null;", sessionId: "synthetic-session", timeoutMs: 22500 }))
+        .rejects.toMatchObject({ details: { kernelExecutionTimeoutMs: 23000, kernelExecutionElapsedMs: 20000 } });
+      expect(kernelSdkMocks.playwrightExecute).toHaveBeenCalledExactlyOnceWith("synthetic-session", {
+        code: "return null;", timeout_sec: 23,
+      });
+    } finally { clock.mockRestore(); }
   });
 
   it("bounds long Playwright evaluation diagnostics", async () => {

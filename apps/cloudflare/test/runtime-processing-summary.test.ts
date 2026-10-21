@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { HostedRuntimeEnsureProcessingResponse } from "@murphai/hosted-execution/orchestration-control";
 import { ensurePostgresRuntimeProcessing } from "../src/runtime-processing.ts";
 import { recordRuntimeProcessingSummary } from "../src/user-runner/diagnostics.ts";
 import { handleRuntimeEnsureProcessingRoute } from "../src/worker/route-handlers/runtime-control.ts";
@@ -30,43 +31,110 @@ function harness() {
 describe("Postgres processing summaries", () => {
   beforeEach(() => { vi.clearAllMocks(); });
 
-  it.each(["runtime_processing_accepted", "retry_later"] as const)("records %s without waiting for telemetry", async kind => {
+  it("does not schedule a summary callback for a successful warm wake", async () => {
     const { context, pending } = harness();
+    const result: HostedRuntimeEnsureProcessingResponse = {
+      kind: "runtime_processing_accepted", action: "woken", runtimeAttemptId: "runtime-a",
+      recommendedRecheckAt: new Date(Date.now() + 300_000).toISOString(),
+    };
+    vi.mocked(ensurePostgresRuntimeProcessing).mockResolvedValueOnce(result);
+
+    const response = await handleRuntimeEnsureProcessingRoute(context, "member-a");
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual(result);
+    expect(ensurePostgresRuntimeProcessing).toHaveBeenCalledTimes(1);
+    expect(pending).toHaveLength(0);
+    expect(recordRuntimeProcessingSummary).not.toHaveBeenCalled();
+  });
+
+  it.each([1_000, 1_001, 9_000])("retains native timing for a successful %i ms wake only above the slow threshold", async elapsedMs => {
+    const { context, pending } = harness();
+    const now = Date.now();
+    context.runtimeControlAuthTiming = {
+      runtimeControlAuthStartedAtEpochMs: now - elapsedMs,
+      runtimeControlAuthFinishedAtEpochMs: now - elapsedMs,
+    };
+    const clock = vi.spyOn(Date, "now").mockReturnValue(now);
+    const result: HostedRuntimeEnsureProcessingResponse = {
+      kind: "runtime_processing_accepted", action: "woken", runtimeAttemptId: "runtime-a",
+      recommendedRecheckAt: new Date(now + 300_000).toISOString(),
+    };
+    vi.mocked(ensurePostgresRuntimeProcessing).mockImplementationOnce(async (_source, _input, diagnostics) => {
+      if (!diagnostics) throw new Error("Missing request diagnostics");
+      diagnostics.wakeDetails = { wakeEnteredAtEpochMs: now - 70, wakeHandlerAcceptedAtEpochMs: now - 50 };
+      return result;
+    });
+    try {
+      const response = await handleRuntimeEnsureProcessingRoute(context, "member-a");
+      expect(await response.json()).toEqual(result);
+      expect(pending).toHaveLength(elapsedMs > 1_000 ? 1 : 0);
+      await Promise.all(pending);
+      if (elapsedMs > 1_000) expect(recordRuntimeProcessingSummary).toHaveBeenCalledWith(expect.objectContaining({
+        entry: expect.objectContaining({ redactedJson: expect.objectContaining({
+          wakeEnteredAtEpochMs: now - 70, wakeHandlerAcceptedAtEpochMs: now - 50,
+          runtimeProcessingAction: "woken",
+        }) }),
+      }));
+    } finally { clock.mockRestore(); }
+  });
+
+  it.each(["started", "replaced", "already_running", "retry_later"] as const)("records %s without waiting for telemetry", async outcome => {
+    const { context, pending } = harness();
+    const result: HostedRuntimeEnsureProcessingResponse = outcome === "retry_later"
+      ? { kind: "retry_later", retryAt: new Date(Date.now() + 3000).toISOString() }
+      : { kind: "runtime_processing_accepted", action: outcome, runtimeAttemptId: "runtime-a",
+        recommendedRecheckAt: new Date(Date.now() + 300_000).toISOString() };
+    const stage = outcome === "started" || outcome === "replaced" ? "fresh_start" : "active_wake";
     let release!: () => void;
     vi.mocked(recordRuntimeProcessingSummary).mockImplementationOnce(() => new Promise(resolve => { release = resolve; }));
     vi.mocked(ensurePostgresRuntimeProcessing).mockImplementationOnce(async (_source, _input, diagnostics) => {
       if (!diagnostics) throw new Error("Missing request diagnostics");
-      diagnostics.stage = "active_wake";
-      diagnostics.details.runtimeProcessingRetryReason = "wake_unconfirmed";
-      return kind === "retry_later" ? { kind, retryAt: new Date(Date.now() + 3000).toISOString() }
-        : { kind, action: "woken", runtimeAttemptId: "runtime-a", recommendedRecheckAt: new Date(Date.now() + 300_000).toISOString() };
+      diagnostics.stage = stage;
+      if (outcome === "retry_later") {
+        diagnostics.details.runtimeProcessingRetryReason = "wake_unconfirmed";
+        // Accepted headers do not prove a successful wake if the final drain fails.
+        diagnostics.wakeDetails = { wakeAccepted: true };
+      }
+      return result;
     });
     try {
       const response = await handleRuntimeEnsureProcessingRoute(context, "member-a");
-      expect(await response.json()).toMatchObject({ kind });
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual(result);
       expect(pending).toHaveLength(1);
+      expect(recordRuntimeProcessingSummary).toHaveBeenCalledTimes(1);
       expect(recordRuntimeProcessingSummary).toHaveBeenCalledWith(expect.objectContaining({
         orchestrationAttemptId: "summary-request", userId: "member-a",
         entry: expect.objectContaining({ eventCode: "runner.processing_finished", redactedJson: expect.objectContaining({
-          runtimeProcessingBackend: "postgres", runtimeProcessingOutcome: kind,
-          runtimeProcessingStage: "active_wake", runtimeProcessingRetryReason: "wake_unconfirmed",
+          runtimeProcessingBackend: "postgres", runtimeProcessingOutcome: result.kind,
+          runtimeProcessingStage: stage,
+          ...(result.kind === "retry_later" ? {
+            runtimeProcessingRetryReason: "wake_unconfirmed", wakeAccepted: true,
+            runtimeProcessingRetryAtEpochMs: Date.parse(result.retryAt),
+          } : { runtimeProcessingAction: result.action }),
         }) }),
       }));
-    } finally { release(); await Promise.all(pending); }
+    } finally { release?.(); await Promise.all(pending); }
   });
 
-  it("records a thrown admission failure and owns rejected telemetry", async () => {
+  it.each(["admission", "active_wake", "fresh_start"] as const)("records a thrown %s failure and owns rejected telemetry", async stage => {
     const { context, pending } = harness();
-    vi.mocked(ensurePostgresRuntimeProcessing).mockRejectedValueOnce(new Error("Synthetic admission failure"));
+    vi.mocked(ensurePostgresRuntimeProcessing).mockImplementationOnce(async (_source, _input, diagnostics) => {
+      if (!diagnostics) throw new Error("Missing request diagnostics");
+      diagnostics.stage = stage;
+      throw new Error("Synthetic processing failure");
+    });
     vi.mocked(recordRuntimeProcessingSummary).mockRejectedValueOnce(new Error("Synthetic telemetry failure"));
     const response = await handleRuntimeEnsureProcessingRoute(context, "member-a");
     expect(response.status).toBe(500);
     expect(await response.json()).toMatchObject({ code: "runtime_ensure_processing_failed" });
+    expect(pending).toHaveLength(1);
     await expect(Promise.all(pending)).resolves.toEqual([undefined]);
+    expect(recordRuntimeProcessingSummary).toHaveBeenCalledTimes(1);
     expect(recordRuntimeProcessingSummary).toHaveBeenCalledWith(expect.objectContaining({
-      entry: expect.objectContaining({ redactedJson: expect.objectContaining({ runtimeProcessingOutcome: "threw" }) }),
+      entry: expect.objectContaining({ level: "warn", redactedJson: expect.objectContaining({
+        runtimeProcessingOutcome: "threw", runtimeProcessingStage: stage,
+      }) }),
     }));
   });
-
-
 });

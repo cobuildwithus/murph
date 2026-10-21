@@ -22,6 +22,7 @@ import {
   buildIntegrationIngestRecord,
   HOSTED_CANONICAL_WRITE_RECEIPT_SCHEMA_VERSION,
   initializeVault,
+  importDeviceBatch,
   integrationIngestShardPath,
   listIntegrationIngestsForEvent,
   MAX_INTEGRATION_INGEST_ZIP_ARCHIVE_BYTES,
@@ -520,6 +521,7 @@ test("closed integration ingest months archive deterministically while current a
     vaultRoot: firstVaultRoot,
   });
   const secondResult = await archiveClosedIntegrationIngestShards({
+    archiveCurrentMonth: true,
     now: new Date("2026-06-20T12:00:00.000Z"),
     vaultRoot: secondVaultRoot,
   });
@@ -651,7 +653,7 @@ test("first canonical amendment repairs an interrupted archive only in its targe
   }
 });
 
-test("canonical readers leave current-month interrupted integration ingest representations unchanged", async () => {
+test("canonical readers recover exact current-month interrupted integration ingest representations", async () => {
   const vaultRoot = await makeTempDirectory("murph-integration-ingest-active-archive");
   try {
     const now = new Date().toISOString();
@@ -664,9 +666,8 @@ test("canonical readers leave current-month interrupted integration ingest repre
     });
     await writeIntegrationIngestJsonl(vaultRoot, logicalPath, [record]);
     await writeIntegrationIngestGzipArchive(vaultRoot, logicalPath, [record]);
-    await assert.rejects(readIntegrationIngestEntries(vaultRoot), (error: unknown) =>
-      error instanceof VaultError && error.code === "INTEGRATION_INGEST_SHARD_REPRESENTATION_CONFLICT");
-    await fs.access(path.join(vaultRoot, logicalPath));
+    assert.deepEqual((await readIntegrationIngestEntries(vaultRoot)).map((entry) => entry.record), [record]);
+    await assert.rejects(fs.access(path.join(vaultRoot, logicalPath)));
     await fs.access(path.join(vaultRoot, `${logicalPath}.gz`));
   } finally {
     await fs.rm(vaultRoot, { recursive: true, force: true });
@@ -2221,4 +2222,49 @@ test("validateVault reports integration ingest archive conflicts and invalid arc
       && issue.path === `${invalidPath}.zip`,
     ),
   );
+});
+
+
+test("large active ingest shards compress losslessly and remain writable and replayable", async () => {
+  const vaultRoot = await makeTempDirectory("murph-active-ingest-compression");
+  const now = new Date();
+  const importedAt = now.toISOString();
+  const logicalPath = integrationIngestShardPath(importedAt);
+  try {
+    await initializeVault({ vaultRoot, createdAt: importedAt });
+    const small = makeIntegrationIngestRecord({ id: "xfm_ActiveSmall", eventId: "evt_ActiveSmall", importedAt });
+    await writeIntegrationIngestJsonl(vaultRoot, logicalPath, [small]);
+    assert.equal((await archiveClosedIntegrationIngestShards({ vaultRoot, now, archiveCurrentMonth: true })).archivedShardCount, 0);
+    const large = makeIntegrationIngestRecord({
+      id: "xfm_ActiveLarge", eventId: "evt_ActiveLarge", importedAt,
+      partContent: JSON.stringify({ evidence: "source evidence ".repeat(300_000) }),
+    });
+    await writeIntegrationIngestJsonl(vaultRoot, logicalPath, [small, large]);
+    const original = await fs.readFile(path.join(vaultRoot, logicalPath));
+    assert.equal((await archiveClosedIntegrationIngestShards({ vaultRoot, now })).archivedShardCount, 0);
+    const compressed = await archiveClosedIntegrationIngestShards({ vaultRoot, now, archiveCurrentMonth: true });
+    assert.equal(compressed.archivedShardCount, 1);
+    assert.ok(compressed.archivedByteCount < compressed.sourceByteCount / 10);
+    assert.deepEqual(brotliDecompressSync(await fs.readFile(path.join(vaultRoot, `${logicalPath}.br`))), original);
+    const input = {
+      vaultRoot, provider: "synthetic", importedAt,
+      evidenceParts: [{ role: "reading", fileName: "reading.json", content: { value: 12 } }],
+      events: [], samples: [],
+    };
+    const imported = await importDeviceBatch(input);
+    assert.ok(imported.applied);
+    const archiveAfterImport = await fs.readFile(path.join(vaultRoot, `${logicalPath}.br`));
+    assert.deepEqual(brotliDecompressSync(archiveAfterImport).subarray(0, original.length), original);
+    assert.equal((await readIntegrationIngestById(vaultRoot, imported.ingestId))?.record.id, imported.ingestId);
+    assert.equal((await importDeviceBatch(input)).applied, false);
+    assert.deepEqual(await fs.readFile(path.join(vaultRoot, `${logicalPath}.br`)), archiveAfterImport);
+    assert.equal((await archiveClosedIntegrationIngestShards({ vaultRoot, now, archiveCurrentMonth: true })).archivedShardCount, 0);
+    await assert.rejects(fs.access(path.join(vaultRoot, logicalPath)));
+    // Conflicting partial publication must never discard either representation.
+    await fs.writeFile(path.join(vaultRoot, logicalPath), original);
+    await assert.rejects(readIntegrationIngestEntries(vaultRoot), (error: unknown) =>
+      error instanceof VaultError && error.code === "INTEGRATION_INGEST_SHARD_REPRESENTATION_CONFLICT");
+    assert.deepEqual(await fs.readFile(path.join(vaultRoot, logicalPath)), original);
+    assert.deepEqual(await fs.readFile(path.join(vaultRoot, `${logicalPath}.br`)), archiveAfterImport);
+  } finally { await fs.rm(vaultRoot, { recursive: true, force: true }); }
 });

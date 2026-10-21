@@ -4,6 +4,7 @@ import {
 import {
   executeCodexAppServerTurn,
   preinitializeCodexAppServer,
+  startCodexAppServerRealtime,
   readCodexAppServerTurnFailureContext,
 } from '../../assistant-codex.js'
 import {
@@ -53,6 +54,8 @@ import type {
   CodexAppServerTurnInput,
   CodexAppServerTurnFailureContext,
   CodexAppServerLiveTurn,
+  CodexRealtimeOptions,
+  CodexRealtimeSession,
 } from '../../assistant-codex.js'
 import { extractCodexAppServerUserMessageImages } from '../../assistant-codex/images.js'
 
@@ -182,6 +185,26 @@ export async function preinitializeCodexAssistantProcess(
   })
 }
 
+export async function startCodexAssistantVoice(
+  input: CodexAssistantProcessPreparationInput & CodexRealtimeOptions & {
+    mediaModel: string
+    mediaModelProvider: string
+  },
+): Promise<CodexRealtimeSession> {
+  return await startCodexAppServerRealtime({
+    ...resolveCodexAssistantProcessLaunchInput(input),
+    model: input.mediaModel,
+    modelProvider: input.mediaModelProvider,
+    sessionId: input.sessionId,
+    sdp: input.sdp,
+    prompt: input.prompt,
+    voice: input.voice,
+    signal: input.signal,
+    onInput: input.onInput,
+    onUsage: input.onUsage,
+  })
+}
+
 export async function executeCodexAssistantTurnAttempt(
   input: AssistantProviderTurnExecutionInput,
 ): Promise<AssistantProviderTurnAttemptResult> {
@@ -250,7 +273,7 @@ export async function executeCodexAssistantTurnAttempt(
     hostedToolContext: input.hostedToolContext ?? null,
     materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts ?? null,
     model: providerConfig.target.model ?? undefined,
-    modelProvider: providerConfig.target.modelProvider ?? undefined,
+    modelProvider: providerConfig.target.modelProvider ?? 'openai',
     onAdditionalUsage: input.onAdditionalUsage ?? null,
     onFinishWithoutReplyAccepted: input.onFinishWithoutReplyAccepted ?? null,
     onFinishWithoutReplyRecorded: input.onFinishWithoutReplyRecorded ?? null,
@@ -451,6 +474,7 @@ export async function executeCodexAssistantTurnAttempt(
           }
         : {}),
       response: result.finalMessage,
+      finalResponseCompletion: result.finalResponseCompletion,
       ...(result.providerAuthoredFinalMessage === undefined
         ? {}
         : {
@@ -1374,7 +1398,7 @@ function asDiagnosticRecord(value: unknown): Record<string, unknown> | null {
 }
 
 export function resolveCodexAssistantLabel(
-  config: AssistantProviderTurnExecutionInput['providerConfig'],
+  _config: AssistantProviderTurnExecutionInput['providerConfig'],
 ): string {
-  return config.target.oss ? 'Codex OSS app-server' : 'Codex app-server'
+  return 'Codex app-server'
 }

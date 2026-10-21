@@ -25,7 +25,7 @@ describe("hosted assistant personalization tool port", () => {
       action: "update",
       result: {
         mainPersona: "classic",
-        model: "gpt-5.6-terra",
+        model: "gpt-6-sol",
         modelChangeAppliesNextRun: false,
         modelUpdated: false,
         solAvailable: true,

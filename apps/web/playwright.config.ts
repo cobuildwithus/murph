@@ -12,7 +12,8 @@ import { createHostedWebSmokeEnvironment } from "./next-artifacts";
 // The server uses its own dist dir suffix (`.next-smoke-overflow`) so it never
 // contends with the concurrent `dev:smoke` lock in `apps/web verify`.
 
-const host = "127.0.0.1";
+// WebAuthn relying-party ids require a domain, including in local browser proof.
+const host = "localhost";
 const port = Number.parseInt(process.env.VIEWPORT_OVERFLOW_PORT ?? "3210", 10);
 const baseURL = `http://${host}:${port}`;
 const devCommand =
@@ -36,7 +37,7 @@ export default defineConfig({
     : [["list"]],
   use: {
     baseURL,
-    reducedMotion: "reduce",
+    contextOptions: { reducedMotion: "reduce" },
     trace: "off",
   },
   // Bundled Chromium only (no `channel`), so `playwright install chromium` in

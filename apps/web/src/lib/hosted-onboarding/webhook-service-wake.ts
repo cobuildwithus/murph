@@ -3,6 +3,7 @@ import {
   type HostedIngressLatencySource,
   type HostedRuntimeLatencyPhaseBreakdown,
 } from "@murphai/hosted-execution/runtime-control";
+import { Prisma } from "@prisma/client";
 import type {
   HostedDirectRuntimeWakeTiming,
 } from "../hosted-execution/direct-runtime-wake";
@@ -55,6 +56,7 @@ export async function maybeHandoffHostedExecutionWebhookWake(input: {
     acceptedLinqDeliveryId,
     eventId,
     mailboxItemId,
+    originalInboundMailboxItemId,
     source,
     userId,
     wakeMailboxCheckpoint,
@@ -110,6 +112,7 @@ export async function maybeHandoffHostedExecutionWebhookWake(input: {
       webhookReceivedAt: input.webhookReceivedAt,
       ingressTypingAcceptedAt: input.ingressTypingAcceptedAt,
       mailboxItemId,
+      originalInboundMailboxItemId,
       scheduleAfterResponse: input.scheduleAfterResponse,
       source,
       temporalSignalAcceptedAt,
@@ -127,6 +130,7 @@ export async function maybeHandoffHostedExecutionWebhookWake(input: {
     webhookReceivedAt: input.webhookReceivedAt,
     ingressTypingAcceptedAt: input.ingressTypingAcceptedAt,
     mailboxItemId,
+    originalInboundMailboxItemId,
     scheduleAfterResponse: input.scheduleAfterResponse,
     source,
     temporalSignalAcceptedAt,
@@ -198,6 +202,7 @@ async function recordHostedDirectEnsureWakeTimingBestEffort(timingRecord: {
   } catch (error) {
     console.warn("Hosted direct ensure wake timing record failed.", {
       errorName: deriveHostedOnboardingTimingErrorName(error),
+      ...(error instanceof Prisma.PrismaClientKnownRequestError ? { prismaCode: error.code } : {}),
       source: timingRecord.source,
     });
   }
@@ -208,6 +213,7 @@ function scheduleHostedWebhookIngressLatencyTraceWritesAfterResponse(input: {
   webhookReceivedAt?: Date;
   ingressTypingAcceptedAt?: Promise<Date | null>;
   mailboxItemId: string;
+  originalInboundMailboxItemId?: string;
   scheduleAfterResponse?: HostedWebhookPostResponseScheduler;
   source: "linq" | "telegram";
   temporalSignalAcceptedAt: Date | null;
@@ -222,7 +228,10 @@ function scheduleHostedWebhookIngressLatencyTraceWritesAfterResponse(input: {
       try {
         await linkHostedIngressLatencyTracesToAcceptedLinqDelivery({
           authenticatedUserId: input.userId,
-          answeredMailboxItemIds: [input.mailboxItemId],
+          answeredMailboxItemIds: input.originalInboundMailboxItemId
+            && input.originalInboundMailboxItemId !== input.mailboxItemId
+            ? [input.mailboxItemId, input.originalInboundMailboxItemId]
+            : [input.mailboxItemId],
           linqDeliveryId: input.acceptedLinqDeliveryId,
           replyRuntimeAttemptId: null,
         });

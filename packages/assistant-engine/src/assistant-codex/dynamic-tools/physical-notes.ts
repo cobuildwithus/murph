@@ -124,6 +124,7 @@ export const MURPH_RESOLVE_PHYSICAL_NOTE_TOOL = {
 export const MURPH_SEND_PHYSICAL_NOTE_TOOL = {
   namespace: 'murph',
   name: 'send_physical_note',
+  deferLoading: true,
   description: [
     'Before creating or mailing a physical note, read $MURPH_ASSISTANT_SKILLS_ROOT/physical-notes/SKILL.md.',
     'On a trusted hosted image-completion turn whose generation was launched with the exact authorizing message_ref, omit image_ref, image_sha256, and message_ref so runtime code binds the exact generated image and request automatically.',

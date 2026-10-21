@@ -19,10 +19,6 @@ const MAX_PRODUCT_LABEL_BRAND_SCOPES = 12;
 const PRODUCT_LABEL_GTIN_LENGTHS = new Set([8, 12, 13, 14]);
 const PRODUCT_CONTAMINANT_ALERT_LIMIT = 5;
 const PRODUCT_CONTAMINANT_OBSERVATION_LIMIT = 20;
-const PUBLIC_PRODUCT_LABEL_JSON_LIMIT_BYTES = 256 * 1_024;
-const PUBLIC_PRODUCT_SEARCH_CANDIDATE_LIMIT = 250;
-const PUBLIC_PRODUCT_POPULAR_BRAND_MATCH_LIMIT = 10;
-const PUBLIC_PRODUCT_SEARCH_MATCH_LIMIT = 500;
 const PRODUCT_LABEL_SEARCH_MATCH_LIMIT = 10_000;
 const PRODUCT_LABEL_SEARCH_EXACT_NAME_LIMIT = 250;
 const PRODUCT_CONTAMINANT_CONCERN_RANK: Record<
@@ -127,51 +123,6 @@ export type ProductLabelDetail = ProductLabelSearchItem;
 type ProductLabelSourceItem = Omit<ProductLabelSearchItem, "contaminants">;
 type ProductLabelSearchRow = ProductLabelSourceItem & {
   canonicalKey?: string | null;
-};
-
-export type PublicProductLabelTestingSummary = {
-  status: ProductContaminantStatus;
-  observationCount: number;
-  sourceCount: number;
-  latestReportDate: string | null;
-};
-
-export type PublicProductLabelSearchItem = {
-  id: string;
-  dataOrigin: string;
-  dataOriginId: string;
-  dataOriginUrl: string | null;
-  importedAt: string;
-  name: string;
-  brand: string | null;
-  servingGrams?: number | null;
-  upc: string | null;
-  testing: PublicProductLabelTestingSummary;
-};
-
-export type PublicProductLabelRecord = {
-  id: string;
-  dataOrigin: string;
-  dataOriginId: string;
-  dataOriginUrl: string | null;
-  importedAt: string;
-  releaseDate: string | null;
-  lastSeenAt: string | null;
-  name: string;
-  brand: string | null;
-  upc: string | null;
-  servingGrams: number | null;
-  label: unknown;
-  labelOmitted: boolean;
-};
-
-type PublicProductLabelSearchRow = Omit<
-  PublicProductLabelSearchItem,
-  "testing"
-> & {
-  observationCount: number;
-  sourceCount: number;
-  latestReportDate: string | null;
 };
 
 export type ProductContaminantConcernLevel =
@@ -316,29 +267,6 @@ export type ProductContaminantSummary = {
   observations: ProductContaminantObservation[];
 };
 
-export type PublicProductTestObservation = ProductContaminantObservation & {
-  id: string;
-  sourceResultId: string;
-  labName: string | null;
-  testMethod: string | null;
-  importedAt: string;
-  screening: {
-    comparison: "exceeds" | "does_not_exceed";
-    threshold: ProductContaminantAlert["threshold"];
-    screeningPolicy?: ProductContaminantAlert["screeningPolicy"];
-  } | null;
-  alert: ProductContaminantAlert | null;
-};
-
-export type PublicProductTestEvidence = {
-  status: ProductContaminantStatus;
-  total: number;
-  returned: number;
-  truncated: boolean;
-  observations: PublicProductTestObservation[];
-  alerts: ProductContaminantAlert[];
-};
-
 export type ProductLabelsQueries = {
   getById: (input: {
     id: string;
@@ -354,23 +282,6 @@ export type ProductLabelsQueries = {
     limit: number;
     q: string;
   }) => Promise<ProductLabelSearchItem[]>;
-};
-
-export type PublicProductLabelsQueries = {
-  searchCompact: (input: {
-    comparisonReadyOnly?: boolean;
-    foodSearchOrder?: "relevance" | "evidence" | "popular";
-    limit: number;
-    offset?: number;
-    popularBrandKeys?: readonly string[];
-    popularBrandNames?: readonly string[];
-    popularCategorySearchQuery?: string | null;
-    q: string;
-  }) => Promise<PublicProductLabelSearchItem[]>;
-  getRecordById: (input: {
-    id: string;
-  }) => Promise<PublicProductLabelRecord | null>;
-  getEvidence: (input: { id: string }) => Promise<PublicProductTestEvidence>;
 };
 
 export function createProductLabelsQueries(
@@ -465,11 +376,7 @@ export function createProductLabelsQueries(
         const rows = await searchBrandScopedProductLabels(client, tableSql, {
           ...input,
           brandScopes,
-          comparisonReadyOnly: false,
-          excludedDataOrigins: [],
-          offset: 0,
           productQ: buildBrandScopedProductLabelQuery(searchQ, brandScopes),
-          projection: "private",
           q: searchQ,
         });
 
@@ -485,16 +392,11 @@ export function createProductLabelsQueries(
 
     return await searchGenericProductLabels(client, tableSql, {
       ...input,
-      comparisonReadyOnly: false,
-      excludedDataOrigins: [],
-      foodSearchOrder: "relevance",
       genericSearchDataOrigins:
         genericOnly && genericSearchDataOrigins
           ? genericSearchDataOrigins
           : null,
-      projection: "private",
       q: searchQ,
-      offset: 0,
       stemmedSearch,
     });
   }
@@ -618,156 +520,6 @@ export function createProductLabelsQueries(
   };
 }
 
-export function createPublicProductLabelsQueries(
-  client: ProductLabelsQueryClient,
-  table: ProductLabelsTable,
-  options: {
-    brandScoping?: boolean;
-    excludedDataOrigins?: readonly string[];
-    stemmedSearch?: boolean;
-    weakQueryTokens?: readonly string[];
-  } = {},
-): PublicProductLabelsQueries {
-  const tableSql = productLabelsTableSql(table);
-  const brandScoping = options.brandScoping ?? false;
-  const excludedDataOrigins = options.excludedDataOrigins ?? [];
-  const stemmedSearch = options.stemmedSearch ?? false;
-  const weakQueryTokens = new Set(
-    (options.weakQueryTokens ?? [])
-      .map((token) => normalizeProductLabelSearchPhrase(token))
-      .filter((token) => token.length > 0 && !token.includes(" ")),
-  );
-  let brandIndexCache: ProductLabelBrandIndexCache | null = null;
-
-  async function getBrandIndex(): Promise<ProductLabelBrandIndexEntry[]> {
-    const now = Date.now();
-
-    if (!brandIndexCache || brandIndexCache.expiresAt <= now) {
-      brandIndexCache = {
-        expiresAt: now + PRODUCT_LABEL_BRAND_INDEX_TTL_MS,
-        promise: loadProductLabelBrandIndex(client, tableSql),
-      };
-    }
-
-    const promise = brandIndexCache.promise;
-
-    try {
-      return await promise;
-    } catch (error) {
-      if (brandIndexCache?.promise === promise) {
-        brandIndexCache = null;
-      }
-      throw error;
-    }
-  }
-
-  return {
-    async searchCompact(input) {
-      const comparisonReadyOnly = input.comparisonReadyOnly === true;
-      const foodSearchOrder = input.foodSearchOrder ?? "relevance";
-      const offset = input.offset ?? 0;
-      const normalizedGtin = normalizeProductLabelGtinQuery(input.q);
-      if (normalizedGtin) {
-        if (offset > 0) {
-          return [];
-        }
-        const exact = await getPublicProductLabelByUpc(
-          client,
-          tableSql,
-          normalizedGtin,
-          excludedDataOrigins,
-          comparisonReadyOnly,
-        );
-
-        if (exact) {
-          return [toPublicProductLabelSearchItem(exact)];
-        }
-      }
-
-      const q = brandScoping
-        ? normalizeProductLabelSearchInput(input.q)
-        : input.q.trim();
-      const searchQ = removeWeakProductLabelQueryTokens(q, weakQueryTokens);
-
-      if (!q || !searchQ) {
-        return [];
-      }
-
-      if (brandScoping) {
-        const brandScopes = findProductLabelBrandScopes(
-          await getBrandIndex(),
-          q,
-        );
-
-        if (brandScopes.length > 0) {
-          const rows = await searchBrandScopedProductLabels(client, tableSql, {
-            brandScopes,
-            comparisonReadyOnly,
-            excludedDataOrigins,
-            includeOffMarket: false,
-            limit: input.limit,
-            offset,
-            productQ: buildBrandScopedProductLabelQuery(searchQ, brandScopes),
-            projection: "public",
-            q: searchQ,
-          });
-
-          if (rows.length > 0) {
-            return rows.map(toPublicProductLabelSearchItem);
-          }
-        }
-      }
-
-      const rows = await searchGenericProductLabels(client, tableSql, {
-        comparisonReadyOnly,
-        excludedDataOrigins,
-        foodSearchOrder,
-        genericSearchDataOrigins: null,
-        includeOffMarket: false,
-        limit: input.limit,
-        offset,
-        popularBrandKeys: input.popularBrandKeys ?? [],
-        popularBrandNames: input.popularBrandNames ?? [],
-        projection: "public",
-        q: searchQ,
-        stemmedSearch,
-      });
-
-      return rows.map(toPublicProductLabelSearchItem);
-    },
-
-    async getRecordById(input) {
-      const id = input.id.trim();
-
-      if (!isProductLabelLookupId(id)) {
-        return null;
-      }
-
-      return await getPublicProductLabelRecordById(
-        client,
-        tableSql,
-        id,
-        excludedDataOrigins,
-      );
-    },
-
-    async getEvidence(input) {
-      const id = input.id.trim();
-
-      if (!isProductLabelLookupId(id)) {
-        return createEmptyPublicProductTestEvidence();
-      }
-
-      return await loadPublicProductTestEvidence(
-        client,
-        tableSql,
-        { productId: id },
-        excludedDataOrigins,
-      );
-    },
-  };
-}
-
 function productLabelsTableSql(
   table: ProductLabelsTable,
 ): ProductLabelsTableSql {
@@ -841,14 +593,6 @@ type ProductContaminantQueryRow = {
   thresholdName: string | null;
   thresholdUrl: string | null;
   concernLevelIfExceeded: string | null;
-};
-
-type PublicProductTestQueryRow = ProductContaminantQueryRow & {
-  productTestId: string;
-  observationTotal: number;
-  labName: string | null;
-  testMethod: string | null;
-  importedAt: string;
 };
 
 function productContaminantThresholdLateralSql(
@@ -1132,214 +876,6 @@ async function loadProductContaminantSummaries(
       finalizeProductContaminantSummary(builder),
     ]),
   );
-}
-
-async function loadPublicProductTestEvidence(
-  client: ProductLabelsQueryClient,
-  tableSql: ProductLabelsTableSql,
-  target: Pick<ProductContaminantLookupTarget, "productId">,
-  excludedDataOrigins: readonly string[],
-): Promise<PublicProductTestEvidence> {
-  const excludedDataOriginsSql = productLabelExcludedDataOriginsFilterSql(
-    "labels.data_origin",
-    excludedDataOrigins,
-  );
-  const productColumnSql = productContaminantProductColumnSql(tableSql);
-  const linkedObservationsSql = `
-    WITH linked_observations AS MATERIALIZED (
-      SELECT DISTINCT ON (product_tests.id)
-        $1::text AS target_product_id,
-        product_tests.*,
-        labels.serving_grams
-      FROM product_tests
-      JOIN ${tableSql} labels
-        ON labels.id = product_tests.${productColumnSql}
-      WHERE
-        labels.id = $1
-        AND labels.off_market = false
-        AND ${productLabelSourceFilterSql("labels.data_origin")}
-        AND ${excludedDataOriginsSql}
-      ORDER BY product_tests.id ASC
-    )`;
-
-  let rows: PublicProductTestQueryRow[];
-  try {
-    const result = await client.query<PublicProductTestQueryRow>(
-      `
-        ${linkedObservationsSql},
-        ranked_observations AS MATERIALIZED (
-          SELECT
-            linked_observations.*,
-            (COUNT(*) OVER ())::integer AS observation_total,
-            (ROW_NUMBER() OVER (
-              ORDER BY
-                linked_observations.report_date DESC NULLS LAST,
-                linked_observations.contaminant_key ASC,
-                linked_observations.source_key ASC,
-                linked_observations.source_result_id ASC,
-                linked_observations.id ASC
-            ))::integer AS observation_rank
-          FROM linked_observations
-        ),
-        bounded_observations AS MATERIALIZED (
-          SELECT *
-          FROM ranked_observations
-          WHERE observation_rank <= ${PRODUCT_CONTAMINANT_OBSERVATION_LIMIT}
-        )
-        SELECT
-          product_tests.target_product_id AS "productId",
-          product_tests.id AS "productTestId",
-          product_tests.observation_total AS "observationTotal",
-          product_tests.serving_grams::double precision AS "servingGrams",
-          product_tests.source_key AS "sourceKey",
-          product_tests.source_name AS "sourceName",
-          product_tests.source_url AS "sourceUrl",
-          product_tests.source_report_title AS "sourceReportTitle",
-          product_tests.report_date::text AS "reportDate",
-          product_tests.source_result_id AS "sourceResultId",
-          product_tests.tested_product_name AS "testedProductName",
-          product_tests.tested_product_brand AS "testedProductBrand",
-          product_tests.tested_product_upc AS "testedProductUpc",
-          product_tests.tested_product_upc_raw AS "testedProductUpcRaw",
-          product_tests.tested_source_product_id AS "testedSourceProductId",
-          product_tests.evidence_type AS "evidenceType",
-          product_tests.sampling_context AS "samplingContext",
-          product_tests.source_sample_id AS "sourceSampleId",
-          product_tests.source_sample_count AS "sourceSampleCount",
-          product_tests.tested_lot_code AS "testedLotCode",
-          product_tests.tested_best_by AS "testedBestBy",
-          product_tests.tested_package_size AS "testedPackageSize",
-          product_tests.collected_on::text AS "collectedOn",
-          product_tests.tested_on::text AS "testedOn",
-          product_tests.match_method AS "matchMethod",
-          product_tests.contaminant_key AS "contaminantKey",
-          product_tests.contaminant_name AS "contaminantName",
-          product_tests.result_operator AS "resultOperator",
-          product_tests.result_value::double precision AS "resultValue",
-          product_tests.result_upper_value::double precision AS "resultUpperValue",
-          product_tests.result_unit AS "resultUnit",
-          product_tests.result_basis AS "resultBasis",
-          product_tests.normalized_value::double precision AS "normalizedValue",
-          product_tests.normalized_upper_value::double precision AS "normalizedUpperValue",
-          product_tests.normalized_unit AS "normalizedUnit",
-          product_tests.normalized_basis AS "normalizedBasis",
-          product_tests.result_qualifier AS "resultQualifier",
-          product_tests.detection_limit_value::double precision AS "detectionLimitValue",
-          product_tests.detection_limit_unit AS "detectionLimitUnit",
-          product_tests.quantification_limit_value::double precision AS "quantificationLimitValue",
-          product_tests.quantification_limit_unit AS "quantificationLimitUnit",
-          product_tests.reporting_limit_value::double precision AS "reportingLimitValue",
-          product_tests.reporting_limit_unit AS "reportingLimitUnit",
-          product_tests.uncertainty_value::double precision AS "uncertaintyValue",
-          product_tests.uncertainty_unit AS "uncertaintyUnit",
-          product_tests.lab_name AS "labName",
-          product_tests.test_method AS "testMethod",
-          ${productLabelTimestampIsoSql(
-            "product_tests.imported_at",
-          )} AS "importedAt",
-          thresholds.id AS "thresholdId",
-          thresholds.threshold_value::double precision AS "thresholdValue",
-          thresholds.threshold_unit AS "thresholdUnit",
-          thresholds.threshold_basis AS "thresholdBasis",
-          thresholds.normalized_value::double precision AS "thresholdNormalizedValue",
-          thresholds.normalized_unit AS "thresholdNormalizedUnit",
-          thresholds.normalized_basis AS "thresholdNormalizedBasis",
-          thresholds.authority_name AS "thresholdAuthorityName",
-          thresholds.threshold_name AS "thresholdName",
-          thresholds.threshold_url AS "thresholdUrl",
-          thresholds.concern_level_if_exceeded AS "concernLevelIfExceeded"
-        FROM bounded_observations product_tests
-        ${productContaminantThresholdLateralSql("product_tests.serving_grams")}
-        ORDER BY
-          product_tests.observation_rank ASC,
-          thresholds.id ASC NULLS LAST
-      `,
-      [target.productId],
-    );
-    rows = result.rows;
-  } catch (error) {
-    if (isMissingProductContaminantSchemaError(error)) {
-      throw new ProductContaminantSchemaMissingError();
-    }
-
-    throw error;
-  }
-
-  if (rows.length === 0) {
-    return createEmptyPublicProductTestEvidence();
-  }
-
-  const observations = rows.map(createPublicProductTestObservation);
-  const alerts = observations
-    .flatMap((observation) => (observation.alert ? [observation.alert] : []))
-    .sort(compareProductContaminantAlerts)
-    .slice(0, PRODUCT_CONTAMINANT_ALERT_LIMIT);
-  const total = rows[0]?.observationTotal ?? 0;
-
-  return {
-    status: "known_product_tests",
-    total,
-    returned: observations.length,
-    truncated: total > observations.length,
-    observations,
-    alerts,
-  };
-}
-
-function createPublicProductTestObservation(
-  row: PublicProductTestQueryRow,
-): PublicProductTestObservation {
-  const thresholdScore = scoreProductContaminantThreshold(row);
-
-  return {
-    ...createProductContaminantObservation(row),
-    id: row.productTestId,
-    sourceResultId: row.sourceResultId,
-    labName: row.labName,
-    testMethod: row.testMethod,
-    importedAt: row.importedAt,
-    screening: createPublicProductTestScreening(row, thresholdScore),
-    alert: createProductContaminantAlert(row, thresholdScore),
-  };
-}
-
-function createPublicProductTestScreening(
-  row: ProductContaminantQueryRow,
-  thresholdScore: ProductContaminantThresholdScore,
-): PublicProductTestObservation["screening"] {
-  if (
-    thresholdScore.comparison === "unknown" ||
-    row.thresholdAuthorityName == null ||
-    row.thresholdName == null
-  ) {
-    return null;
-  }
-
-  return {
-    comparison: thresholdScore.comparison,
-    threshold: {
-      value: thresholdScore.threshold.value,
-      unit: thresholdScore.threshold.unit,
-      basis: thresholdScore.threshold.basis,
-      authority: row.thresholdAuthorityName,
-      name: row.thresholdName,
-      url: row.thresholdUrl,
-    },
-    ...(thresholdScore.screeningPolicy
-      ? { screeningPolicy: thresholdScore.screeningPolicy }
-      : {}),
-  };
-}
-
-function createEmptyPublicProductTestEvidence(): PublicProductTestEvidence {
-  return {
-    status: "no_known_product_tests",
-    total: 0,
-    returned: 0,
-    truncated: false,
-    observations: [],
-    alerts: [],
-  };
 }
 
 type ProductContaminantSummaryBuilder = {
@@ -1902,44 +1438,10 @@ function isObjectRecord(value: unknown): value is { [key: string]: unknown } {
   return typeof value === "object" && value !== null;
 }
 
-function productLabelExcludedDataOriginsFilterSql(
-  columnSql: string,
-  excludedDataOrigins: readonly string[],
-): string {
-  if (excludedDataOrigins.length === 0) {
-    return "true";
-  }
-
-  return `${columnSql} NOT IN (${excludedDataOrigins
-    .map(sqlStringLiteral)
-    .join(", ")})`;
-}
-
-function productLabelTimestampIsoSql(columnSql: string): string {
-  return `to_char(${columnSql} AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')`;
-}
-
-function publicProductTestingSummaryLateralSql(
-  tableSql: ProductLabelsTableSql,
-): string {
-  const productColumnSql = productContaminantProductColumnSql(tableSql);
-  return `
-    LEFT JOIN LATERAL (
-      SELECT
-        COUNT(DISTINCT product_tests.id)::integer AS "observationCount",
-        COUNT(DISTINCT product_tests.source_key)::integer AS "sourceCount",
-        MAX(product_tests.report_date)::text AS "latestReportDate"
-      FROM product_tests
-      WHERE product_tests.${productColumnSql} = selected.id
-    ) test_summary ON true`;
-}
-
 function productLabelSearchFinalProjectionSql(
   tableSql: ProductLabelsTableSql,
-  projection: ProductLabelSearchProjection,
 ): string {
-  if (projection === "private") {
-    return `
+  return `
       SELECT
         selected.id,
         selected.canonical_key AS "canonicalKey",
@@ -1954,448 +1456,12 @@ function productLabelSearchFinalProjectionSql(
       JOIN ${tableSql} labels
         ON labels.id = selected.id
       ORDER BY selected.result_rank`;
-  }
-
-  return `
-    SELECT
-      selected.id,
-      selected."dataOrigin",
-      selected."dataOriginId",
-      labels.data_origin_url AS "dataOriginUrl",
-      ${productLabelTimestampIsoSql("labels.imported_at")} AS "importedAt",
-      selected.name,
-      selected.brand,
-      labels.serving_grams::double precision AS "servingGrams",
-      selected.upc,
-      COALESCE(test_summary."observationCount", 0)::integer AS "observationCount",
-      COALESCE(test_summary."sourceCount", 0)::integer AS "sourceCount",
-      test_summary."latestReportDate"
-    FROM selected
-    JOIN ${tableSql} labels
-      ON labels.id = selected.id
-    ${publicProductTestingSummaryLateralSql(tableSql)}
-    ORDER BY selected.result_rank`;
 }
-
-function publicFoodNutritionRowSqlParts(rowSql: string): {
-  nameSql: string;
-  unitSql: string;
-  valueSql: string;
-} {
-  const nameSql = `regexp_replace(lower(btrim(${rowSql}->>'name')), '\\s+', ' ', 'g')`;
-  const unitSql = `lower(btrim(${rowSql}->>'unit'))`;
-  const valueSql = `CASE
-    WHEN jsonb_typeof(${rowSql}->'amount') = 'number'
-      THEN (${rowSql}->>'amount')::numeric
-    WHEN jsonb_typeof(${rowSql}->'amount') = 'string'
-      AND ${rowSql}->>'amount' ~ '^[[:space:]]*[0-9]+(?:\\.[0-9]+)?[[:space:]]*$'
-      THEN (${rowSql}->>'amount')::numeric
-    WHEN jsonb_typeof(${rowSql}->'value') = 'number'
-      THEN (${rowSql}->>'value')::numeric
-    WHEN jsonb_typeof(${rowSql}->'value') = 'string'
-      AND ${rowSql}->>'value' ~ '^[[:space:]]*[0-9]+(?:\\.[0-9]+)?[[:space:]]*$'
-      THEN (${rowSql}->>'value')::numeric
-    ELSE NULL
-  END`;
-
-  return { nameSql, unitSql, valueSql };
-}
-
-function publicFoodNutritionCoreMetricReadySql(
-  rowSql: string,
-  metric: "calories" | "protein" | "sugars" | "fat",
-): string {
-  const { nameSql, unitSql, valueSql } = publicFoodNutritionRowSqlParts(rowSql);
-  const positiveValueSql =
-    metric === "calories" ? `${valueSql} > 0` : `${valueSql} >= 0`;
-  const metricSql =
-    metric === "calories"
-      ? `${nameSql} IN ('calories', 'energy') AND ${unitSql} IN ('cal', 'kcal', 'kcalories')`
-      : metric === "protein"
-      ? `${nameSql} = 'protein' AND ${unitSql} IN ('g', 'gram', 'grams')`
-      : metric === "sugars"
-      ? `${nameSql} IN ('total sugars', 'sugars, total', 'sugars') AND ${unitSql} IN ('g', 'gram', 'grams')`
-      : `${nameSql} IN ('total fat', 'total lipid (fat)', 'fat, total') AND ${unitSql} IN ('g', 'gram', 'grams')`;
-
-  return `(${positiveValueSql} AND ${metricSql})`;
-}
-
-function publicFoodNutritionRowImplausibleSql(rowSql: string): string {
-  const { nameSql, unitSql, valueSql } = publicFoodNutritionRowSqlParts(rowSql);
-
-  return `
-    (
-      ${nameSql} IN ('calories', 'energy')
-      AND ${unitSql} IN ('cal', 'kcal', 'kcalories')
-      AND ${valueSql} > 1000
-    )
-    OR (
-      ${nameSql} IN (
-        'protein',
-        'total sugars',
-        'sugars, total',
-        'sugars',
-        'total fat',
-        'total lipid (fat)',
-        'fat, total',
-        'saturated fat',
-        'fatty acids, total saturated'
-      )
-      AND ${unitSql} IN ('g', 'gram', 'grams')
-      AND ${valueSql} > 100
-    )
-    OR (
-      ${nameSql} IN ('sodium', 'sodium, na')
-      AND ${unitSql} = 'mg'
-      AND ${valueSql} > 100000
-    )`;
-}
-
-function publicFoodComparisonReadyFilterSql(
-  tableSql: ProductLabelsTableSql,
-  enabled: boolean,
-  productIdSql: string,
-): string {
-  if (!enabled || tableSql !== "foods") {
-    return "";
-  }
-
-  return `
-    AND EXISTS (
-      SELECT 1
-      FROM foods comparison_labels
-      CROSS JOIN LATERAL (
-        SELECT
-          COALESCE(
-            bool_or(${publicFoodNutritionCoreMetricReadySql(
-              "comparison_nutrient",
-              "calories",
-            )}),
-            false
-          ) AS has_calories,
-          COALESCE(
-            bool_or(${publicFoodNutritionCoreMetricReadySql(
-              "comparison_nutrient",
-              "protein",
-            )}),
-            false
-          ) AS has_protein,
-          COALESCE(
-            bool_or(${publicFoodNutritionCoreMetricReadySql(
-              "comparison_nutrient",
-              "sugars",
-            )}),
-            false
-          ) AS has_sugars,
-          COALESCE(
-            bool_or(${publicFoodNutritionCoreMetricReadySql(
-              "comparison_nutrient",
-              "fat",
-            )}),
-            false
-          ) AS has_fat,
-          COALESCE(
-            bool_or((${publicFoodNutritionRowImplausibleSql(
-              "comparison_nutrient",
-            )})),
-            false
-          ) AS has_implausible
-        FROM jsonb_array_elements(
-          CASE
-            WHEN jsonb_typeof(comparison_labels.label->'nutrientsPer100g') = 'array'
-              THEN comparison_labels.label->'nutrientsPer100g'
-            ELSE '[]'::jsonb
-          END
-        ) comparison_nutrient
-      ) comparison_per_100_g
-      CROSS JOIN LATERAL (
-        SELECT
-          COALESCE(
-            bool_or(${publicFoodNutritionCoreMetricReadySql(
-              "comparison_serving_nutrient",
-              "calories",
-            )}),
-            false
-          ) AS has_calories,
-          COALESCE(
-            bool_or(${publicFoodNutritionCoreMetricReadySql(
-              "comparison_serving_nutrient",
-              "protein",
-            )}),
-            false
-          ) AS has_protein,
-          COALESCE(
-            bool_or(${publicFoodNutritionCoreMetricReadySql(
-              "comparison_serving_nutrient",
-              "sugars",
-            )}),
-            false
-          ) AS has_sugars,
-          COALESCE(
-            bool_or(${publicFoodNutritionCoreMetricReadySql(
-              "comparison_serving_nutrient",
-              "fat",
-            )}),
-            false
-          ) AS has_fat
-        FROM jsonb_array_elements(
-          (CASE
-            WHEN jsonb_typeof(comparison_labels.label->'nutrientsPerServing') = 'array'
-              THEN comparison_labels.label->'nutrientsPerServing'
-            ELSE '[]'::jsonb
-          END)
-          ||
-          (CASE
-            WHEN jsonb_typeof(comparison_labels.label->'nutritionRows') = 'array'
-              THEN comparison_labels.label->'nutritionRows'
-            ELSE '[]'::jsonb
-          END)
-        ) comparison_serving_nutrient
-      ) comparison_per_serving
-      WHERE
-        comparison_labels.id = ${productIdSql}
-        AND NOT comparison_per_100_g.has_implausible
-        AND (
-          comparison_per_100_g.has_calories
-          OR (
-            comparison_labels.serving_grams IS NOT NULL
-            AND (
-              comparison_per_serving.has_calories
-              OR CASE
-                WHEN jsonb_typeof(comparison_labels.label->'calories') = 'number'
-                  THEN (comparison_labels.label->>'calories')::numeric
-                WHEN jsonb_typeof(comparison_labels.label->'calories') = 'string'
-                  AND comparison_labels.label->>'calories'
-                    ~ '^[[:space:]]*[0-9]+(?:\\.[0-9]+)?[[:space:]]*$'
-                  THEN (comparison_labels.label->>'calories')::numeric
-                ELSE NULL
-              END > 0
-            )
-          )
-        )
-        AND (
-          comparison_per_100_g.has_protein
-          OR (
-            comparison_labels.serving_grams IS NOT NULL
-            AND comparison_per_serving.has_protein
-          )
-        )
-        AND (
-          comparison_per_100_g.has_sugars
-          OR (
-            comparison_labels.serving_grams IS NOT NULL
-            AND comparison_per_serving.has_sugars
-          )
-        )
-        AND (
-          comparison_per_100_g.has_fat
-          OR (
-            comparison_labels.serving_grams IS NOT NULL
-            AND comparison_per_serving.has_fat
-          )
-        )
-    )`;
-}
-
-function publicFoodSpecificProductFilterSql(
-  tableSql: ProductLabelsTableSql,
-  productIdSql: string,
-): string {
-  if (tableSql !== "foods") {
-    return "";
-  }
-
-  return `
-    AND NOT EXISTS (
-      SELECT 1
-      FROM foods identity_labels
-      WHERE
-        identity_labels.id = ${productIdSql}
-        AND identity_labels.data_origin = 'usda_branded'
-        AND NULLIF(btrim(identity_labels.label->>'brandName'), '') IS NULL
-        AND NULLIF(btrim(identity_labels.label->>'subbrandName'), '') IS NULL
-        AND NULLIF(
-          regexp_replace(
-            lower(btrim(COALESCE(identity_labels.label->>'category', ''))),
-            '[^a-z0-9]+',
-            '',
-            'g'
-          ),
-          ''
-        ) IS NOT NULL
-        AND regexp_replace(
-          lower(btrim(identity_labels.name)),
-          '[^a-z0-9]+',
-          '',
-          'g'
-        ) = regexp_replace(
-          lower(btrim(identity_labels.label->>'category')),
-          '[^a-z0-9]+',
-          '',
-          'g'
-        )
-    )`;
-}
-
-function toPublicProductLabelSearchItem(
-  row: PublicProductLabelSearchRow,
-): PublicProductLabelSearchItem {
-  return {
-    id: row.id,
-    dataOrigin: row.dataOrigin,
-    dataOriginId: row.dataOriginId,
-    dataOriginUrl: row.dataOriginUrl,
-    importedAt: row.importedAt,
-    name: row.name,
-    brand: row.brand,
-    servingGrams: row.servingGrams,
-    upc: row.upc,
-    testing: {
-      status:
-        row.observationCount > 0
-          ? "known_product_tests"
-          : "no_known_product_tests",
-      observationCount: row.observationCount,
-      sourceCount: row.sourceCount,
-      latestReportDate: row.latestReportDate,
-    },
-  };
-}
-
-function normalizeProductLabelGtinQuery(value: string): string | null {
-  const trimmed = value.trim();
-  if (!trimmed || !/^[\d\s().-]+$/u.test(trimmed)) {
-    return null;
-  }
-
-  const digits = trimmed.replace(/\D/gu, "");
-  return PRODUCT_LABEL_GTIN_LENGTHS.has(digits.length) ? digits : null;
-}
-
-async function getPublicProductLabelByUpc(
-  client: ProductLabelsQueryClient,
-  tableSql: ProductLabelsTableSql,
-  upc: string,
-  excludedDataOrigins: readonly string[],
-  comparisonReadyOnly: boolean,
-): Promise<PublicProductLabelSearchRow | null> {
-  const upcVariants = buildUpcLookupVariants(upc);
-  if (upcVariants.length === 0) {
-    return null;
-  }
-
-  const excludedDataOriginsSql = productLabelExcludedDataOriginsFilterSql(
-    "data_origin",
-    excludedDataOrigins,
-  );
-  const { rows } = await client.query<PublicProductLabelSearchRow>(
-    `
-      WITH selected AS (
-        SELECT
-          id,
-          canonical_key,
-          data_origin AS "dataOrigin",
-          data_origin_id AS "dataOriginId",
-          name,
-          brand,
-          upc,
-          off_market AS "offMarket",
-          1::integer AS result_rank
-        FROM ${tableSql}
-        WHERE
-          upc = ANY($1::text[])
-          AND off_market = false
-          AND ${PRODUCT_LABEL_SOURCE_FILTER_SQL}
-          AND ${excludedDataOriginsSql}
-          ${publicFoodComparisonReadyFilterSql(
-            tableSql,
-            comparisonReadyOnly,
-            `${tableSql}.id`,
-          )}
-        ORDER BY
-          array_position($1::text[], upc) ASC,
-          data_origin_priority ASC,
-          name ASC,
-          id ASC
-        LIMIT 1
-      )
-      ${productLabelSearchFinalProjectionSql(tableSql, "public")}
-    `,
-    [upcVariants],
-  );
-
-  return rows[0] ?? null;
-}
-
-async function getPublicProductLabelRecordById(
-  client: ProductLabelsQueryClient,
-  tableSql: ProductLabelsTableSql,
-  id: string,
-  excludedDataOrigins: readonly string[],
-): Promise<PublicProductLabelRecord | null> {
-  const excludedDataOriginsSql = productLabelExcludedDataOriginsFilterSql(
-    "labels.data_origin",
-    excludedDataOrigins,
-  );
-  const sourceDatesSql =
-    tableSql === "foods"
-      ? `
-      labels.fdc_release_date::text AS "releaseDate",
-      ${productLabelTimestampIsoSql("labels.last_seen_at")} AS "lastSeenAt",`
-      : `
-      NULL::text AS "releaseDate",
-      NULL::text AS "lastSeenAt",`;
-  const { rows } = await client.query<PublicProductLabelRecord>(
-    `
-      SELECT
-        labels.id,
-        labels.data_origin AS "dataOrigin",
-        labels.data_origin_id AS "dataOriginId",
-        labels.data_origin_url AS "dataOriginUrl",
-        ${productLabelTimestampIsoSql("labels.imported_at")} AS "importedAt",
-        ${sourceDatesSql}
-        labels.name,
-        labels.brand,
-        labels.upc,
-        labels.serving_grams::double precision AS "servingGrams",
-        CASE
-          WHEN octet_length(labels.label::text) <= ${PUBLIC_PRODUCT_LABEL_JSON_LIMIT_BYTES}
-            THEN labels.label
-          ELSE NULL
-        END AS label,
-        (
-          COALESCE(octet_length(labels.label::text), 0) >
-            ${PUBLIC_PRODUCT_LABEL_JSON_LIMIT_BYTES}
-        ) AS "labelOmitted"
-      FROM ${tableSql} labels
-      WHERE
-        labels.id = $1
-        AND labels.off_market = false
-        AND ${productLabelSourceFilterSql("labels.data_origin")}
-        AND ${excludedDataOriginsSql}
-        ${publicFoodSpecificProductFilterSql(tableSql, "labels.id")}
-      LIMIT 1
-    `,
-    [id],
-  );
-
-  return rows[0] ?? null;
-}
-
-type ProductLabelSearchProjection = "private" | "public";
 
 type GenericProductLabelSearchInput = {
-  comparisonReadyOnly: boolean;
-  excludedDataOrigins: readonly string[];
-  foodSearchOrder: "relevance" | "evidence" | "popular";
   genericSearchDataOrigins: readonly string[] | null;
   includeOffMarket: boolean;
   limit: number;
-  offset: number;
-  popularBrandKeys?: readonly string[];
-  popularBrandNames?: readonly string[];
-  popularCategorySearchQuery?: string | null;
-  projection: ProductLabelSearchProjection;
   q: string;
   stemmedSearch: boolean;
 };
@@ -2413,7 +1479,7 @@ function buildFoodStemmedSearchSql(stemmed: boolean): FoodStemmedSearchSql {
       directMatchSql:
         "to_tsvector('simple', search_text) @@ websearch_to_tsquery('simple', $1)",
       querySelectSql: "",
-      rankSql: "ts_rank_cd(to_tsvector('simple', search_text), query.tsq)",
+      rankSql: `ts_rank_cd(simple_identity, query.tsq)`,
       stemmedNameMatchSql: "0",
     };
   }
@@ -2426,8 +1492,8 @@ function buildFoodStemmedSearchSql(stemmed: boolean): FoodStemmedSearchSql {
     querySelectSql: `,
             websearch_to_tsquery('english', $1) AS stemmed_tsq`,
     rankSql: `greatest(
-              ts_rank_cd(to_tsvector('simple', search_text), query.tsq),
-              ts_rank_cd(to_tsvector('english', search_text), query.stemmed_tsq)
+              ts_rank_cd(simple_identity, query.tsq),
+              ts_rank_cd(english_identity, query.stemmed_tsq)
             )`,
     stemmedNameMatchSql: `CASE
               WHEN to_tsvector('english', name) = to_tsvector('english', query.raw_q) THEN 1
@@ -2436,324 +1502,14 @@ function buildFoodStemmedSearchSql(stemmed: boolean): FoodStemmedSearchSql {
   };
 }
 
-type FoodPopularitySearchSql = {
-  candidateOrderSql: string;
-  directMatchesCteSql: string;
-  directMatchesUnionSql: string;
-  evidenceOrder: boolean;
-  popularityOrder: boolean;
-  rankColumnsSql: string;
-  rankJoinSql: string;
-};
-
-function buildFoodPopularitySearchSql(
-  tableSql: ProductLabelsTableSql,
-  input: GenericProductLabelSearchInput,
-  excludedDataOriginsSql: string,
-): FoodPopularitySearchSql {
-  const popularityOrder =
-    input.projection === "public" && input.foodSearchOrder === "popular";
-  const evidenceOrder =
-    input.projection === "public" &&
-    (input.foodSearchOrder === "evidence" || popularityOrder);
-  if (!popularityOrder) {
-    return {
-      candidateOrderSql: "",
-      directMatchesCteSql: "",
-      directMatchesUnionSql: "",
-      evidenceOrder,
-      popularityOrder,
-      rankColumnsSql: "",
-      rankJoinSql: "",
-    };
-  }
-
-  return {
-    candidateOrderSql: `CASE WHEN brand_popularity_rank < 2147483647 THEN 0 ELSE 1 END ASC,
-            CASE
-              WHEN brand_popularity_rank < 2147483647 THEN brand_candidate_rank
-              ELSE 2147483647
-            END ASC,
-            brand_popularity_rank ASC,`,
-    directMatchesCteSql: `,
-        popular_brand_matches AS MATERIALIZED (
-          SELECT matched.*
-          FROM unnest($7::text[]) AS preferred_brand(value)
-          CROSS JOIN LATERAL (
-            SELECT
-              id,
-              canonical_key,
-              data_origin,
-              data_origin_id,
-              name,
-              brand,
-              upc,
-              off_market,
-              search_text,
-              data_origin_priority
-            FROM ${tableSql}
-            WHERE
-              brand = preferred_brand.value
-              AND to_tsvector('english', search_text)
-                @@ websearch_to_tsquery('english', $8::text)
-              AND ($2::boolean OR off_market = false)
-              AND ${PRODUCT_LABEL_SOURCE_FILTER_SQL}
-              AND ($4::text[] IS NULL OR data_origin = ANY($4::text[]))
-              AND ${excludedDataOriginsSql}
-            ORDER BY
-              off_market ASC,
-              CASE WHEN data_origin = 'usda_branded' THEN 0 ELSE 1 END ASC,
-              data_origin_priority ASC,
-              char_length(name) ASC,
-              name ASC,
-              id ASC
-            LIMIT ${PUBLIC_PRODUCT_POPULAR_BRAND_MATCH_LIMIT}
-          ) matched
-        )`,
-    directMatchesUnionSql: `
-          UNION
-          SELECT * FROM popular_brand_matches`,
-    evidenceOrder,
-    popularityOrder,
-    rankColumnsSql: `,
-            COALESCE(popularity_match.name_rank, 2147483647)
-              AS name_popularity_rank,
-            COALESCE(
-              popularity_match.name_rank,
-              popularity_match.brand_rank,
-              2147483647
-            ) AS brand_popularity_rank`,
-    rankJoinSql: `
-          CROSS JOIN LATERAL (
-            SELECT
-              (MIN(preferred.ordinality) FILTER (
-                WHERE popularity_source.normalized_name <> ''
-                  AND (
-                    popularity_source.normalized_name = preferred.brand_key
-                    OR popularity_source.normalized_name LIKE preferred.brand_key || '%'
-                  )
-              ))::integer AS name_rank,
-              (MIN(preferred.ordinality) FILTER (
-                WHERE popularity_source.normalized_brand <> ''
-                  AND (
-                    popularity_source.normalized_brand = preferred.brand_key
-                    OR popularity_source.normalized_brand LIKE '%' || preferred.brand_key || '%'
-                  )
-              ))::integer AS brand_rank
-            FROM unnest($6::text[]) WITH ORDINALITY
-              AS preferred(brand_key, ordinality)
-          ) popularity_match`,
-  };
-}
-
-function buildPublicFoodCandidatesCteSql(
-  tableSql: ProductLabelsTableSql,
-  input: GenericProductLabelSearchInput,
-  popularity: FoodPopularitySearchSql,
-): string {
-  if (input.projection !== "public") {
-    return "";
-  }
-  if (!popularity.popularityOrder) {
-    return `,
-        public_candidates AS MATERIALIZED (
-          SELECT *
-          FROM ranked
-          WHERE dedupe_rank = 1
-          ${publicFoodSpecificProductFilterSql(tableSql, "ranked.id")}
-          ORDER BY
-            name_phrase_match DESC,
-            name_phrase_length DESC,
-            stemmed_name_match DESC,
-            name_similarity DESC,
-            search_rank DESC,
-            data_origin_priority ASC,
-            name ASC,
-            id ASC
-          LIMIT ${PUBLIC_PRODUCT_SEARCH_CANDIDATE_LIMIT}
-        )`;
-  }
-
-  return `,
-        popularity_source AS MATERIALIZED (
-          SELECT
-            ranked.*,
-            regexp_replace(
-              replace(lower(coalesce(ranked.name, '')), '&', 'and'),
-              '[^a-z0-9]+',
-              '',
-              'g'
-            )
-              AS normalized_name,
-            regexp_replace(
-              replace(lower(coalesce(ranked.brand, '')), '&', 'and'),
-              '[^a-z0-9]+',
-              '',
-              'g'
-            )
-              AS normalized_brand,
-            ranked.name ~* '[[:space:]](?:count|ct|pack|pk)(?:[^[:alpha:]]|$)'
-              AS is_multipack,
-            ranked.name ~* '\m(?:diet|zero|sugar[[:space:]]+free|caffeine[[:space:]]+free)\M'
-              AS is_diet_variant
-          FROM ranked
-          WHERE dedupe_rank = 1
-          ${publicFoodSpecificProductFilterSql(tableSql, "ranked.id")}
-        ),
-        popularity_ranked AS MATERIALIZED (
-          SELECT
-            popularity_source.*${popularity.rankColumnsSql}
-          FROM popularity_source
-          ${popularity.rankJoinSql}
-        ),
-        popularity_diverse AS MATERIALIZED (
-          SELECT
-            popularity_ranked.*,
-            row_number() OVER (
-              PARTITION BY CASE
-                WHEN brand_popularity_rank < 2147483647
-                  THEN 'popular:' || brand_popularity_rank::text
-                ELSE 'catalog:' || coalesce(
-                  nullif(
-                    popularity_ranked.normalized_brand,
-                    ''
-                  ),
-                  popularity_ranked.id
-                )
-              END
-              ORDER BY
-                is_multipack ASC,
-                is_diet_variant ASC,
-                name_phrase_match DESC,
-                name_phrase_length ASC,
-                CASE
-                  WHEN name_popularity_rank = brand_popularity_rank THEN 0
-                  ELSE 1
-                END ASC,
-                char_length(name) ASC,
-                stemmed_name_match DESC,
-                name_similarity DESC,
-                search_rank DESC,
-                data_origin_priority ASC,
-                name ASC,
-                id ASC
-            ) AS brand_candidate_rank
-          FROM popularity_ranked
-          WHERE true
-          ${publicFoodComparisonReadyFilterSql(
-            tableSql,
-            input.comparisonReadyOnly,
-            "popularity_ranked.id",
-          )}
-        ),
-        public_candidates AS MATERIALIZED (
-          SELECT *
-          FROM popularity_diverse
-          ORDER BY
-            ${popularity.candidateOrderSql}
-            name_phrase_match DESC,
-            name_phrase_length DESC,
-            stemmed_name_match DESC,
-            name_similarity DESC,
-            search_rank DESC,
-            data_origin_priority ASC,
-            name ASC,
-            id ASC
-          LIMIT ${PUBLIC_PRODUCT_SEARCH_CANDIDATE_LIMIT}
-        )`;
-}
-
-type FoodEvidenceSearchSql = {
-  candidatesCteSql: string;
-  orderSql: string;
-  selectedComparisonReadyFilterSql: string;
-  selectedSourceSql: string;
-};
-
-function buildFoodEvidenceSearchSql(
-  tableSql: ProductLabelsTableSql,
-  input: GenericProductLabelSearchInput,
-  popularity: FoodPopularitySearchSql,
-): FoodEvidenceSearchSql {
-  const candidatesCteSql =
-    input.projection === "public" && popularity.evidenceOrder
-      ? `,
-        evidence_candidates AS MATERIALIZED (
-          SELECT
-            public_candidates.*,
-            (
-              SELECT COUNT(*)::integer
-              FROM product_tests evidence_tests
-              WHERE evidence_tests.food_id = public_candidates.id
-            ) AS linked_test_count,
-            public_candidates.name ~* '[0-9]+(?:\.[0-9]+)?[[:space:]]*(?:fl[[:space:]]*oz|fluid ounce|ml|liters?|oz|ounces?|grams?|g)(?:[^[:alpha:]]|$)'
-              AS has_package_size
-          FROM public_candidates
-        )`
-      : "";
-  const selectedSourceSql =
-    input.projection === "public"
-      ? popularity.evidenceOrder
-        ? "evidence_candidates"
-        : "public_candidates"
-      : "ranked";
-  const orderSql = popularity.evidenceOrder
-    ? `${popularity.candidateOrderSql} linked_test_count DESC, has_package_size DESC,`
-    : "";
-  const selectedComparisonReadyFilterSql = popularity.popularityOrder
-    ? ""
-    : publicFoodComparisonReadyFilterSql(
-        tableSql,
-        input.comparisonReadyOnly,
-        `${selectedSourceSql}.id`,
-      );
-  return {
-    candidatesCteSql,
-    orderSql,
-    selectedComparisonReadyFilterSql,
-    selectedSourceSql,
-  };
-}
-
-function buildFoodSearchValues(
-  input: GenericProductLabelSearchInput,
-  popularityOrder: boolean,
-): unknown[] {
-  const values: unknown[] = [
-    input.q,
-    input.includeOffMarket,
-    input.limit,
-    input.genericSearchDataOrigins,
-    input.offset,
-  ];
-  if (popularityOrder) {
-    values.push(
-      input.popularBrandKeys ?? [],
-      input.popularBrandNames ?? [],
-      input.popularCategorySearchQuery ?? input.q,
-    );
-  }
-  return values;
-}
-
-async function searchGenericProductLabels(
-  client: ProductLabelsQueryClient,
-  tableSql: ProductLabelsTableSql,
-  input: GenericProductLabelSearchInput & { projection: "private" },
-): Promise<ProductLabelSearchRow[]>;
-async function searchGenericProductLabels(
-  client: ProductLabelsQueryClient,
-  tableSql: ProductLabelsTableSql,
-  input: GenericProductLabelSearchInput & { projection: "public" },
-): Promise<PublicProductLabelSearchRow[]>;
 async function searchGenericProductLabels(
   client: ProductLabelsQueryClient,
   tableSql: ProductLabelsTableSql,
   input: GenericProductLabelSearchInput,
-): Promise<ProductLabelSearchRow[] | PublicProductLabelSearchRow[]> {
+): Promise<ProductLabelSearchRow[]> {
   // Supplements keep their established ranking path. Food searches use the
-  // bounded GIN and GiST candidate path for both private and public callers so
-  // broad queries cannot rank an unbounded share of the two-million-row table.
+  // bounded GIN and GiST candidate path so broad queries cannot rank an
+  // unbounded share of the two-million-row table.
   if (tableSql !== "foods") {
     return await searchOriginalGenericProductLabels(client, tableSql, input);
   }
@@ -2763,25 +1519,23 @@ async function searchGenericProductLabels(
   // exhaustive whole-catalog ranking for completion inside the labels database
   // statement timeout; exact IDs and UPCs use separate direct paths.
   const stemmedSql = buildFoodStemmedSearchSql(input.stemmedSearch);
-  const excludedDataOriginsSql = productLabelExcludedDataOriginsFilterSql(
-    "data_origin",
-    input.excludedDataOrigins,
-  );
-  const searchMatchLimit =
-    input.projection === "public"
-      ? PUBLIC_PRODUCT_SEARCH_MATCH_LIMIT
-      : PRODUCT_LABEL_SEARCH_MATCH_LIMIT;
-  const popularity = buildFoodPopularitySearchSql(
-    tableSql,
-    input,
-    excludedDataOriginsSql,
-  );
-  const publicCandidatesCteSql = buildPublicFoodCandidatesCteSql(
-    tableSql,
-    input,
-    popularity,
-  );
-  const evidence = buildFoodEvidenceSearchSql(tableSql, input, popularity);
+  // Private lookups prioritize complete product identity over partial titles
+  // whose remaining query terms occur only in extended catalog text.
+  const nameMatchSql = `(simple_identity @@ query.tsq${
+    input.stemmedSearch ? " OR english_identity @@ query.stemmed_tsq" : ""
+  })`;
+  // Generic USDA names lead with the primary food ("Milk, whole"). Among
+  // names containing every query word, prefer one whose leading segment the
+  // query covers; after name similarity, prefer fewer unrequested words over
+  // text rank, which rewards words repeated in composite dishes.
+  const genericIdentity = input.genericSearchDataOrigins
+    ? {
+        primarySegmentMatchSql: (completeNameMatchSql: string) =>
+          `CASE WHEN ${completeNameMatchSql} AND to_tsvector('simple', query.raw_q) @@ plainto_tsquery('simple', split_part(name, ',', 1)) THEN 1 ELSE 0 END`,
+        unmatchedWordCountSql:
+          "cardinality(ARRAY(SELECT unnest(tsvector_to_array(to_tsvector('simple', name))) EXCEPT SELECT unnest(tsvector_to_array(to_tsvector('simple', query.raw_q)))))",
+      }
+    : { primarySegmentMatchSql: () => "0", unmatchedWordCountSql: "0" };
   const queryText = `
         WITH query AS (
           SELECT
@@ -2800,7 +1554,6 @@ async function searchGenericProductLabels(
             brand,
             upc,
             off_market,
-            search_text,
             data_origin_priority
           FROM ${tableSql}
           WHERE
@@ -2809,7 +1562,6 @@ async function searchGenericProductLabels(
             AND ($2::boolean OR off_market = false)
             AND ${PRODUCT_LABEL_SOURCE_FILTER_SQL}
             AND ($4::text[] IS NULL OR data_origin = ANY($4::text[]))
-            AND ${excludedDataOriginsSql}
           ORDER BY
             lower(name) ASC,
             data_origin_priority ASC,
@@ -2826,7 +1578,6 @@ async function searchGenericProductLabels(
             brand,
             upc,
             off_market,
-            search_text,
             data_origin_priority
           FROM ${tableSql}
           WHERE
@@ -2839,8 +1590,7 @@ async function searchGenericProductLabels(
             AND ($2::boolean OR off_market = false)
             AND ${PRODUCT_LABEL_SOURCE_FILTER_SQL}
             AND ($4::text[] IS NULL OR data_origin = ANY($4::text[]))
-            AND ${excludedDataOriginsSql}
-          LIMIT ${searchMatchLimit}
+          LIMIT ${PRODUCT_LABEL_SEARCH_MATCH_LIMIT}
         ),
         name_nearest_matches AS MATERIALIZED (
           SELECT
@@ -2860,19 +1610,14 @@ async function searchGenericProductLabels(
             -- indexed full-text match, so this whole-catalog KNN scan can add
             -- no candidate. Only pay for it when the bounded GIN result is
             -- saturated and may have omitted a better nearest-name match.
-            ${
-              input.projection === "public"
-                ? "false"
-                : `(SELECT count(*) FROM fts_index_matches) = ${searchMatchLimit}`
-            }
+            (SELECT count(*) FROM fts_index_matches) = ${PRODUCT_LABEL_SEARCH_MATCH_LIMIT}
             AND
             ($2::boolean OR off_market = false)
             AND ${PRODUCT_LABEL_SOURCE_FILTER_SQL}
             AND ($4::text[] IS NULL OR data_origin = ANY($4::text[]))
-            AND ${excludedDataOriginsSql}
           -- The mutually exclusive typo branch below owns no-FTS searches.
           ORDER BY name <->>> $1::text
-          LIMIT ${searchMatchLimit}
+          LIMIT ${PRODUCT_LABEL_SEARCH_MATCH_LIMIT}
         ),
         fts_nearest_matches AS MATERIALIZED (
           SELECT
@@ -2884,18 +1629,26 @@ async function searchGenericProductLabels(
             brand,
             upc,
             off_market,
-            search_text,
             data_origin_priority
           FROM name_nearest_matches
           WHERE
             ${stemmedSql.directMatchSql}
-        )${popularity.directMatchesCteSql},
+        ),
         fts_matches AS MATERIALIZED (
-          SELECT * FROM fts_exact_name_matches
-          UNION
-          SELECT * FROM fts_index_matches
-          UNION
-          SELECT * FROM fts_nearest_matches${popularity.directMatchesUnionSql}
+          SELECT
+            matches.*,
+            to_tsvector('simple', name || ' ' || coalesce(brand, '')) AS simple_identity${
+              input.stemmedSearch
+                ? ", to_tsvector('english', name || ' ' || coalesce(brand, '')) AS english_identity"
+                : ""
+            }
+          FROM (
+            SELECT * FROM fts_exact_name_matches
+            UNION
+            SELECT * FROM fts_index_matches
+            UNION
+            SELECT * FROM fts_nearest_matches
+          ) matches
         ),
         fts_candidates AS MATERIALIZED (
           SELECT
@@ -2908,9 +1661,10 @@ async function searchGenericProductLabels(
             upc,
             off_market AS "offMarket",
             ${stemmedSql.rankSql} AS search_rank,
+            0 AS whole_name_match,
             strict_word_similarity(query.raw_q, name) AS name_similarity,
             CASE
-              WHEN strpos(' ' || lower(query.raw_q) || ' ', ' ' || lower(name) || ' ') > 0 THEN 1
+              WHEN ${nameMatchSql} THEN 1
               ELSE 0
             END AS name_phrase_match,
             CASE
@@ -2918,6 +1672,8 @@ async function searchGenericProductLabels(
               ELSE 0
             END AS name_phrase_length,
             ${stemmedSql.stemmedNameMatchSql} AS stemmed_name_match,
+            ${genericIdentity.primarySegmentMatchSql(nameMatchSql)} AS primary_segment_match,
+            ${genericIdentity.unmatchedWordCountSql} AS unmatched_word_count,
             data_origin_priority
           FROM fts_matches, query
         ),
@@ -2945,22 +1701,19 @@ async function searchGenericProductLabels(
               data_origin_priority
             FROM ${tableSql}
             WHERE
-              ${
-                input.projection === "public"
-                  ? "false"
-                  : "NOT EXISTS (SELECT 1 FROM fts_index_matches)"
-              }
+              NOT EXISTS (SELECT 1 FROM fts_index_matches)
               AND ($2::boolean OR off_market = false)
               AND ${PRODUCT_LABEL_SOURCE_FILTER_SQL}
               AND ($4::text[] IS NULL OR data_origin = ANY($4::text[]))
-              AND ${excludedDataOriginsSql}
             -- Whole-name distance is exactly the ordering behind the trigram
-            -- threshold below, so eligible rows always precede ineligible
+            -- threshold below, so whole-name-eligible rows precede ineligible
             -- rows while the GiST KNN scan remains bounded.
             ORDER BY name <-> $1::text
-            LIMIT ${searchMatchLimit}
+            LIMIT ${PRODUCT_LABEL_SEARCH_MATCH_LIMIT}
+            -- Strict-word recovery stays inside the existing whole-name KNN
+            -- bound; existing whole-name matches retain priority when ranking.
           ) nearest_names
-          WHERE name % $1::text
+          WHERE name % $1::text OR name %>> $1::text
         ),
         trigram_candidates AS MATERIALIZED (
           SELECT
@@ -2973,6 +1726,7 @@ async function searchGenericProductLabels(
             upc,
             off_market AS "offMarket",
             0::real AS search_rank,
+            CASE WHEN name % query.raw_q THEN 1 ELSE 0 END AS whole_name_match,
             strict_word_similarity(query.raw_q, name) AS name_similarity,
             CASE
               WHEN strpos(' ' || lower(query.raw_q) || ' ', ' ' || lower(name) || ' ') > 0 THEN 1
@@ -2983,6 +1737,8 @@ async function searchGenericProductLabels(
               ELSE 0
             END AS name_phrase_length,
             ${stemmedSql.stemmedNameMatchSql} AS stemmed_name_match,
+            ${genericIdentity.primarySegmentMatchSql("strpos(' ' || lower(query.raw_q) || ' ', ' ' || lower(name) || ' ') > 0")} AS primary_segment_match,
+            ${genericIdentity.unmatchedWordCountSql} AS unmatched_word_count,
             data_origin_priority
           FROM trigram_matches, query
         ),
@@ -2997,10 +1753,13 @@ async function searchGenericProductLabels(
             row_number() OVER (
               PARTITION BY canonical_key
               ORDER BY
+                whole_name_match DESC,
                 name_phrase_match DESC,
                 name_phrase_length DESC,
                 stemmed_name_match DESC,
+                primary_segment_match DESC,
                 name_similarity DESC,
+                unmatched_word_count ASC,
                 search_rank DESC,
                 "offMarket" ASC,
                 data_origin_priority ASC,
@@ -3008,24 +1767,24 @@ async function searchGenericProductLabels(
                 id ASC
             ) AS dedupe_rank
           FROM candidates
-        )${publicCandidatesCteSql}${evidence.candidatesCteSql},
+        ),
         selected_page AS (
           SELECT *
-          FROM ${evidence.selectedSourceSql}
+          FROM ranked
           WHERE dedupe_rank = 1
-          ${evidence.selectedComparisonReadyFilterSql}
           ORDER BY
-            ${evidence.orderSql}
+            whole_name_match DESC,
             name_phrase_match DESC,
             name_phrase_length DESC,
             stemmed_name_match DESC,
+            primary_segment_match DESC,
             name_similarity DESC,
+            unmatched_word_count ASC,
             search_rank DESC,
             data_origin_priority ASC,
             name ASC,
             id ASC
           LIMIT $3
-          OFFSET $5
         ),
         selected AS (
           -- Number only the selected page. Keeping LIMIT below this window
@@ -3034,11 +1793,13 @@ async function searchGenericProductLabels(
             *,
             row_number() OVER (
               ORDER BY
-                ${evidence.orderSql}
+                whole_name_match DESC,
                 name_phrase_match DESC,
                 name_phrase_length DESC,
                 stemmed_name_match DESC,
+                primary_segment_match DESC,
                 name_similarity DESC,
+                unmatched_word_count ASC,
                 search_rank DESC,
                 data_origin_priority ASC,
                 name ASC,
@@ -3046,9 +1807,14 @@ async function searchGenericProductLabels(
             ) AS result_rank
           FROM selected_page
         )
-        ${productLabelSearchFinalProjectionSql(tableSql, input.projection)}
+        ${productLabelSearchFinalProjectionSql(tableSql)}
         `;
-  const values = buildFoodSearchValues(input, popularity.popularityOrder);
+  const values = [
+    input.q,
+    input.includeOffMarket,
+    input.limit,
+    input.genericSearchDataOrigins,
+  ];
 
   const { rows } = await client.query<ProductLabelSearchRow>(queryText, values);
   return rows;
@@ -3058,25 +1824,8 @@ async function searchOriginalGenericProductLabels(
   client: ProductLabelsQueryClient,
   tableSql: ProductLabelsTableSql,
   input: GenericProductLabelSearchInput,
-): Promise<ProductLabelSearchRow[] | PublicProductLabelSearchRow[]> {
+): Promise<ProductLabelSearchRow[]> {
   const stemmed = input.stemmedSearch;
-  const candidateBoundSql =
-    input.projection === "public"
-      ? `
-            ORDER BY
-              name_phrase_match DESC,
-              stemmed_name_match DESC,
-              name_similarity DESC,
-              search_rank DESC,
-              data_origin_priority ASC,
-              name ASC,
-              id ASC
-            LIMIT ${PUBLIC_PRODUCT_SEARCH_CANDIDATE_LIMIT}`
-      : "";
-  const excludedDataOriginsSql = productLabelExcludedDataOriginsFilterSql(
-    "data_origin",
-    input.excludedDataOrigins,
-  );
   const queryText = `
         WITH query AS (
           SELECT
@@ -3137,8 +1886,6 @@ async function searchOriginalGenericProductLabels(
             AND ($2::boolean OR off_market = false)
             AND ${PRODUCT_LABEL_SOURCE_FILTER_SQL}
             AND ($4::text[] IS NULL OR data_origin = ANY($4::text[]))
-            AND ${excludedDataOriginsSql}
-            ${candidateBoundSql}
         ),
         trigram_candidates AS MATERIALIZED (
           SELECT
@@ -3176,8 +1923,6 @@ async function searchOriginalGenericProductLabels(
             AND ($2::boolean OR off_market = false)
             AND ${PRODUCT_LABEL_SOURCE_FILTER_SQL}
             AND ($4::text[] IS NULL OR data_origin = ANY($4::text[]))
-            AND ${excludedDataOriginsSql}
-            ${candidateBoundSql}
         ),
         candidates AS (
           SELECT * FROM fts_candidates
@@ -3228,25 +1973,15 @@ async function searchOriginalGenericProductLabels(
             name ASC,
             id ASC
           LIMIT $3
-          OFFSET $5
         )
-        ${productLabelSearchFinalProjectionSql(tableSql, input.projection)}
+        ${productLabelSearchFinalProjectionSql(tableSql)}
         `;
   const values = [
     input.q,
     input.includeOffMarket,
     input.limit,
     input.genericSearchDataOrigins,
-    input.offset,
   ];
-
-  if (input.projection === "public") {
-    const { rows } = await client.query<PublicProductLabelSearchRow>(
-      queryText,
-      values,
-    );
-    return rows;
-  }
 
   const { rows } = await client.query<ProductLabelSearchRow>(queryText, values);
   return rows;
@@ -3254,35 +1989,17 @@ async function searchOriginalGenericProductLabels(
 
 type BrandScopedProductLabelSearchInput = {
   brandScopes: ProductLabelBrandIndexEntry[];
-  comparisonReadyOnly: boolean;
-  excludedDataOrigins: readonly string[];
   includeOffMarket: boolean;
   limit: number;
-  offset: number;
   productQ: string;
-  projection: ProductLabelSearchProjection;
   q: string;
 };
 
 async function searchBrandScopedProductLabels(
   client: ProductLabelsQueryClient,
   tableSql: ProductLabelsTableSql,
-  input: BrandScopedProductLabelSearchInput & { projection: "private" },
-): Promise<ProductLabelSearchRow[]>;
-async function searchBrandScopedProductLabels(
-  client: ProductLabelsQueryClient,
-  tableSql: ProductLabelsTableSql,
-  input: BrandScopedProductLabelSearchInput & { projection: "public" },
-): Promise<PublicProductLabelSearchRow[]>;
-async function searchBrandScopedProductLabels(
-  client: ProductLabelsQueryClient,
-  tableSql: ProductLabelsTableSql,
   input: BrandScopedProductLabelSearchInput,
-): Promise<ProductLabelSearchRow[] | PublicProductLabelSearchRow[]> {
-  const excludedDataOriginsSql = productLabelExcludedDataOriginsFilterSql(
-    "data_origin",
-    input.excludedDataOrigins,
-  );
+): Promise<ProductLabelSearchRow[]> {
   const queryText = `
     WITH query AS (
       SELECT
@@ -3308,7 +2025,6 @@ async function searchBrandScopedProductLabels(
         brand = ANY($4::text[])
         AND ($2::boolean OR off_market = false)
         AND ${PRODUCT_LABEL_SOURCE_FILTER_SQL}
-        AND ${excludedDataOriginsSql}
     ),
     scored AS (
       SELECT
@@ -3380,16 +2096,6 @@ async function searchBrandScopedProductLabels(
         ) AS result_rank
       FROM ranked
       WHERE dedupe_rank = 1
-      ${
-        input.projection === "public"
-          ? publicFoodSpecificProductFilterSql(tableSql, "ranked.id")
-          : ""
-      }
-      ${publicFoodComparisonReadyFilterSql(
-        tableSql,
-        input.comparisonReadyOnly,
-        "ranked.id",
-      )}
       ORDER BY
         name_phrase_match DESC,
         name_phrase_length DESC,
@@ -3399,9 +2105,8 @@ async function searchBrandScopedProductLabels(
         name ASC,
         id ASC
       LIMIT $3
-      OFFSET $6
     )
-    ${productLabelSearchFinalProjectionSql(tableSql, input.projection)}
+    ${productLabelSearchFinalProjectionSql(tableSql)}
     `;
   const values = [
     input.q,
@@ -3409,16 +2114,7 @@ async function searchBrandScopedProductLabels(
     input.limit,
     input.brandScopes.map((scope) => scope.brand),
     input.productQ,
-    input.offset,
   ];
-
-  if (input.projection === "public") {
-    const { rows } = await client.query<PublicProductLabelSearchRow>(
-      queryText,
-      values,
-    );
-    return rows;
-  }
 
   const { rows } = await client.query<ProductLabelSearchRow>(queryText, values);
   return rows;

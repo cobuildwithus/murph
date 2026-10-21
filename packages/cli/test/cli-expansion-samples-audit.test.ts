@@ -3,7 +3,7 @@ import { access, mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:f
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { VAULT_LAYOUT } from '@murphai/contracts'
-import { initializeVault } from '@murphai/core'
+import { initializeVault, importDeviceBatch, archiveClosedIntegrationIngestShards } from '@murphai/core'
 import { Cli } from 'incur'
 import { test } from 'vitest'
 import { incurErrorBridge } from '../src/incur-error-bridge.js'
@@ -1350,4 +1350,27 @@ test.sequential('audit commands are reachable through the top-level CLI registra
   } finally {
     await rm(vaultRoot, { recursive: true, force: true })
   }
+})
+
+
+test('audit receipt inspects archived automatic publications without an audit row', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-receipt-inspection-'))
+  try {
+    await initializeVault({ vaultRoot, createdAt: '2026-01-01T00:00:00.000Z' })
+    const result = await importDeviceBatch({
+      vaultRoot, provider: 'synthetic', importedAt: '2026-01-02T00:00:00.000Z',
+      evidenceParts: [{ role: 'source', fileName: 'source.json', content: { reading: 12 } }],
+      events: [], samples: [],
+    })
+    assert.ok(result.applied)
+    assert.equal(result.auditPath, null)
+    await archiveClosedIntegrationIngestShards({ vaultRoot, now: new Date('2026-02-01T00:00:00.000Z') })
+    const envelope = await runSliceCli<{ receipt: { record: { id: string; publication: { retractedCount: number }; parts: unknown[] } } }>([
+      'audit', 'receipt', result.ingestId, '--vault', vaultRoot,
+    ])
+    const data = requireData(envelope)
+    assert.equal(data.receipt.record.id, result.ingestId)
+    assert.equal(data.receipt.record.publication.retractedCount, 0)
+    assert.equal(data.receipt.record.parts.length, 1)
+  } finally { await rm(vaultRoot, { recursive: true, force: true }) }
 })

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { access, mkdir, readFile, writeFile } from "node:fs/promises";
+import * as mailboxState from "../src/hosted-runtime/system-mailbox-state.ts";
+import { access, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import {
@@ -93,6 +94,104 @@ import {
 } from "./hosted-runtime-test-helpers.ts";
 
 const FIXED_NOW = "2026-04-27T00:00:00.000Z";
+
+it.each([
+  "pending", "recording", "unmarked", "sending", "unimported-owner", "duplicate-owner",
+  "missing-record", "no-retained-jobs", "no-retention", "record-epoch", "record-connection",
+  "connection", "provider", "epoch", "member", "manual", "webhook", "new-jobs",
+  "equal-cadence", "newer-cadence", "future-occurrence", "missing-cadence", "barrier",
+] as const)(
+  "transfers only proven redundant device schedules during import (%s)",
+  async (scenario) => {
+    const status = scenario === "pending" ? "pending" : "recording";
+    const workspace = await createHostedRuntimeWorkspace("device-schedule-import-");
+    const retryAt = "2026-04-28T00:00:00.000Z";
+    const wake = buildHostedExecutionDeviceSyncWake({
+      connectionId: "synthetic_connection", eventId: "device-sync.wake:owner",
+      expectedConnectedAt: FIXED_NOW, occurredAt: FIXED_NOW,
+      provider: "junction", reason: "reconcile_due", userId: "member_123",
+      hint: { nextReconcileAt: retryAt, jobs: [{
+        kind: "resource", dedupeKey: "synthetic_retained_job", availableAt: retryAt,
+      }] },
+    });
+    const recording = createDeviceSyncCompletionRecordingItem({
+      itemId: "synthetic_owner", retainedWake: wake, retryAt,
+    });
+    const owner: HostedSystemMailboxPendingItem = {
+      ...recording, deviceSyncContinuationOwner: true, preferenceCausalSeq: null, status,
+      wake: status === "recording" ? { ...wake, hint: { ...wake.hint, nextReconcileAt: FIXED_NOW } } : wake,
+      ...(status === "pending" ? { postCheckpointRecord: null, nextAttemptAt: retryAt } : {}),
+    };
+    const hint = { ...wake, eventId: "device-sync.wake:schedule",
+      hint: { nextReconcileAt: FIXED_NOW } };
+    if (scenario === "unmarked") delete owner.deviceSyncContinuationOwner;
+    if (scenario === "sending") owner.status = "sending";
+    if (scenario === "missing-record") owner.postCheckpointRecord = null;
+    if (owner.postCheckpointRecord?.kind === "device-sync.dirty-processed-batch") {
+      if (scenario === "no-retention") {
+        delete owner.postCheckpointRecord.retainMailboxItemUntil;
+        owner.postCheckpointRecord.nextWakeAt = retryAt;
+      }
+      if (scenario === "no-retained-jobs") owner.postCheckpointRecord.retainedWake = {
+        ...wake, hint: { nextReconcileAt: retryAt, jobs: [] },
+      };
+      if (scenario === "record-epoch") owner.postCheckpointRecord.retainedWake = {
+        ...wake, expectedConnectedAt: retryAt,
+      };
+      if (scenario === "record-connection") owner.postCheckpointRecord.retainedWake = {
+        ...wake, connectionId: "synthetic_other_connection",
+      };
+    }
+    if (scenario === "connection") hint.connectionId = "synthetic_other_connection";
+    if (scenario === "provider") hint.provider = "garmin";
+    if (scenario === "epoch") hint.expectedConnectedAt = retryAt;
+    if (scenario === "member") hint.userId = "synthetic_other_member";
+    if (scenario === "manual") Object.assign(hint.hint, { reason: "manual_reconcile" });
+    if (scenario === "webhook") hint.reason = "webhook_hint";
+    if (scenario === "new-jobs") Object.assign(hint.hint, { jobs: [{ kind: "reconcile" }] });
+    if (scenario === "equal-cadence") hint.hint.nextReconcileAt = retryAt;
+    if (scenario === "newer-cadence") hint.hint.nextReconcileAt = "2026-04-29T00:00:00.000Z";
+    if (scenario === "future-occurrence") hint.occurredAt = "2099-01-01T00:00:00.000Z";
+    if (scenario === "missing-cadence") Object.assign(hint, { hint: {} });
+    const pending = [owner];
+    if (scenario === "duplicate-owner") pending.push({ ...owner, itemId: "synthetic_other_owner" });
+    if (scenario === "barrier") {
+      const { deviceSyncContinuationOwner: _continuationOwner, ...base } = owner;
+      pending.push({
+        ...base, itemId: "synthetic_manual_barrier",
+        mailboxLaneSeq: "2", mailboxDedupeKey: "device-sync.wake:manual-barrier",
+        status: "pending", attemptCount: 0, lastAttemptAt: null, postCheckpointRecord: null,
+        wake: { ...wake, eventId: "device-sync.wake:manual-barrier", hint: { reason: "manual_reconcile" } },
+      });
+    }
+    const importedSeq = scenario === "unimported-owner" ? "0" : scenario === "barrier" ? "2" : "1";
+    const hintSeq = scenario === "barrier" ? "3" : "2";
+    const covered = scenario === "pending" || scenario === "recording";
+    try {
+      await writeHostedMailboxImportState({ vaultRoot: workspace.vaultRoot, state: {
+        ...createEmptyHostedMailboxImportState(), watermarks: { conversation: "0", system: importedSeq },
+      } });
+      await updateHostedSystemMailboxState(workspace.vaultRoot, () => ({ pending }));
+      // Restore the exact recording owner before importing the successor. No
+      // provider pass, acknowledgement or assistant turn may be needed.
+      await restoreHostedSystemMailboxCheckpointRollbackState({
+        vaultRoot: workspace.vaultRoot, state: { pending },
+      });
+      await enqueueHostedSystemMailboxItem({
+        item: createResolvedDeviceSyncItem({ id: "synthetic_schedule", dedupeKey: hint.eventId, laneSeq: hintSeq }),
+        vaultRoot: workspace.vaultRoot, wake: hint,
+      });
+      const state = await readHostedSystemMailboxState(workspace.vaultRoot);
+      expect(state.pending.filter((item) => item.itemId !== "synthetic_schedule")).toEqual(pending);
+      expect(state.pending.some((item) => item.itemId === "synthetic_schedule")).toBe(!covered);
+      if (covered) expect(resolveHostedSystemMailboxProgress({ importedSeq: hintSeq, now: FIXED_NOW, state }))
+        .toMatchObject({ handledThroughSeq: hintSeq, firstPendingSeq: null, deviceSyncContinuationSeqs: ["1"] });
+      expect(mocks.executeHostedMailboxEvent).not.toHaveBeenCalled();
+    } finally {
+      await workspace.cleanup();
+    }
+  },
+);
 
 it.each([false, true])("preserves accepted device continuations and reports rejected persistence (invalid: %s)", async (invalid) => {
   const workspace = await createHostedRuntimeWorkspace("device-continuation-persistence-");
@@ -370,161 +469,6 @@ describe("hosted system mailbox notification execution context", () => {
         "assistantNotificationValidationFailureReason",
       );
       expect(JSON.stringify(state)).not.toContain(privateResponseMarker);
-    } finally {
-      await workspace.cleanup();
-    }
-  });
-
-  it("deletes staged environment audio only after the checkpoint boundary", async () => {
-    const workspace = await createHostedRuntimeWorkspace(
-      "murph-hosted-system-mailbox-",
-    );
-    const deleteEnvironmentVoice = vi.fn(async () => undefined);
-    const wake = buildHostedExecutionAssistantNotificationRequestedWake({
-      eventId: "assistant.notification.requested:environment-audio-cleanup",
-      memberId: "member_123",
-      notification: {
-        instructions: "Synthetic checkpoint record.",
-        route: {
-          actorId: "+15550001111",
-          channel: "linq",
-          delivery: {
-            kind: "thread",
-            target: "linq_thread_123",
-          },
-          identityId: "hbidx:phone:v1:test",
-          threadId: "linq_thread_123",
-          threadIsDirect: true,
-        },
-      },
-      occurredAt: FIXED_NOW,
-    });
-    const item = {
-      attemptCount: 1,
-      itemId: "mailbox_environment_voice_1",
-      lastAttemptAt: FIXED_NOW,
-      lastErrorCode: null,
-      lastErrorMessage: null,
-      mailboxDedupeKey: wake.eventId,
-      mailboxLaneSeq: "1",
-      nextAttemptAt: null,
-      occurredAt: FIXED_NOW,
-      postCheckpointRecord: {
-        audioKey: "a".repeat(40),
-        kind: "environment-voice.audio-delete" as const,
-      },
-      requestId: null,
-      routeAction: "dispatch-assistant-notification" as const,
-      status: "recording" as const,
-      wake,
-    } satisfies HostedSystemMailboxPendingItem;
-
-    try {
-      expect(deleteEnvironmentVoice).not.toHaveBeenCalled();
-      await expect(recordHostedSystemMailboxItemAfterCheckpoint({
-        item,
-        runtime: createRuntime({
-          effectsPort: {
-            deleteEnvironmentVoice,
-            async readRawEmailMessage() {
-              return null;
-            },
-            async sendEmail() {},
-          },
-        }),
-        vaultRoot: workspace.vaultRoot,
-      })).resolves.toMatchObject({
-        failed: 0,
-        recorded: 1,
-      });
-      expect(deleteEnvironmentVoice).toHaveBeenCalledWith("a".repeat(40));
-    } finally {
-      await workspace.cleanup();
-    }
-  });
-
-  it("retains the cleanup record for retry when environment audio deletion fails", async () => {
-    const workspace = await createHostedRuntimeWorkspace(
-      "murph-hosted-system-mailbox-",
-    );
-    const wake = buildHostedExecutionAssistantNotificationRequestedWake({
-      eventId: "assistant.notification.requested:environment-audio-retry",
-      memberId: "member_123",
-      notification: {
-        instructions: "Synthetic checkpoint retry record.",
-        route: {
-          actorId: "+15550001111",
-          channel: "linq",
-          delivery: {
-            kind: "thread",
-            target: "linq_thread_123",
-          },
-          identityId: "hbidx:phone:v1:test",
-          threadId: "linq_thread_123",
-          threadIsDirect: true,
-        },
-      },
-      occurredAt: FIXED_NOW,
-    });
-    try {
-      mocks.executeHostedMailboxEvent.mockResolvedValueOnce({
-        bootstrapResult: null,
-        conversationMetrics: null,
-        mailboxLane: "environment-voice",
-        nextWakeAt: null,
-        postCheckpointRecord: {
-          audioKey: "b".repeat(40),
-          kind: "environment-voice.audio-delete",
-        },
-        redactedLogEntries: [],
-      });
-      await enqueueHostedSystemMailboxItem({
-        item: createResolvedNotificationItem({
-          dedupeKey: wake.eventId,
-          id: "mailbox_environment_voice_retry",
-        }),
-        vaultRoot: workspace.vaultRoot,
-        wake,
-      });
-      const runtime = createRuntime({
-        effectsPort: {
-          async deleteEnvironmentVoice() {
-            throw new Error("temporary delete failure");
-          },
-          async readRawEmailMessage() {
-            return null;
-          },
-          async sendEmail() {},
-        },
-      });
-      const prepared = await prepareHostedSystemMailboxItemForCheckpoint({
-        executionContext: null,
-        now: () => FIXED_NOW,
-        runtime,
-        runtimeEnv: {},
-        vaultRoot: workspace.vaultRoot,
-      });
-      assert.ok(prepared);
-      assert.equal(prepared.status, "processed");
-      await expect(recordHostedSystemMailboxItemAfterCheckpoint({
-        item: prepared.item,
-        runtime,
-        vaultRoot: workspace.vaultRoot,
-      })).resolves.toMatchObject({
-        failed: 1,
-        recorded: 0,
-      });
-      const state = await readHostedSystemMailboxState(workspace.vaultRoot);
-      expect(state.pending).toEqual([
-        expect.objectContaining({
-          itemId: "mailbox_environment_voice_retry",
-          postCheckpointRecord: {
-            audioKey: "b".repeat(40),
-            kind: "environment-voice.audio-delete",
-          },
-          status: "recording",
-        }),
-      ]);
     } finally {
       await workspace.cleanup();
     }
@@ -1675,23 +1619,62 @@ describe("hosted system mailbox notification execution context", () => {
         wake,
       });
 
+      // A stale positive read is not execution authority.
+      const originalRead = mailboxState.readHostedSystemMailboxState;
+      const snapshot = await originalRead(workspace.vaultRoot);
+      const stalePositive = vi.spyOn(mailboxState, "readHostedSystemMailboxState")
+        .mockImplementationOnce(async (vaultRoot) => {
+          await updateHostedSystemMailboxState(vaultRoot, () => ({ pending: [] }));
+          return snapshot;
+        });
+      try {
+        await expect(prepareHostedSystemMailboxItemForCheckpoint({
+          allowedRouteActions: ["continue-assistant-ask"],
+          now: () => "2026-04-27T00:01:00.000Z",
+          runtime: createRuntime({}), runtimeEnv: {}, vaultRoot: workspace.vaultRoot,
+        })).resolves.toBeNull();
+        expect(mocks.executeHostedMailboxEvent).not.toHaveBeenCalled();
+      } finally {
+        stalePositive.mockRestore();
+      }
+      // A candidate committed after a negative snapshot survives for the next pass.
+      const staleNegative = vi.spyOn(mailboxState, "readHostedSystemMailboxState")
+        .mockImplementationOnce(async (vaultRoot) => {
+          await updateHostedSystemMailboxState(vaultRoot, () => snapshot);
+          return { pending: [] };
+        });
+      try {
+        await expect(prepareHostedSystemMailboxItemForCheckpoint({
+          allowedRouteActions: ["continue-assistant-ask"],
+          now: () => "2026-04-27T00:01:00.000Z",
+          runtime: createRuntime({}), runtimeEnv: {}, vaultRoot: workspace.vaultRoot,
+        })).resolves.toBeNull();
+        expect(await originalRead(workspace.vaultRoot)).toEqual(snapshot);
+      } finally {
+        staleNegative.mockRestore();
+      }
+
       for (const cutoff of [
         "2026-04-26T23:59:59.000Z",
         FIXED_NOW,
         "not-a-timestamp",
         null,
       ]) {
-        const blocked = await prepareHostedSystemMailboxItemForCheckpoint({
-          allowedRouteActions: ["continue-assistant-ask"],
-          allowedWakeKinds: ["assistant.ask.completed"],
-          assistantAskCompletionOccurredBefore: cutoff,
-          now: () => "2026-04-27T00:01:00.000Z",
-          runtime: createRuntime({}),
-          runtimeEnv: {},
-          vaultRoot: workspace.vaultRoot,
-        });
+        const resolveCutoff = vi.fn(async () => cutoff);
+        for (const cutoffInput of [cutoff, resolveCutoff]) {
+          const blocked = await prepareHostedSystemMailboxItemForCheckpoint({
+            allowedRouteActions: ["continue-assistant-ask"],
+            allowedWakeKinds: ["assistant.ask.completed"],
+            assistantAskCompletionOccurredBefore: cutoffInput,
+            now: () => "2026-04-27T00:01:00.000Z",
+            runtime: createRuntime({}),
+            runtimeEnv: {},
+            vaultRoot: workspace.vaultRoot,
+          });
 
-        assert.equal(blocked, null);
+          assert.equal(blocked, null);
+        }
+        expect(resolveCutoff).toHaveBeenCalledTimes(1);
       }
       assert.equal(mocks.executeHostedMailboxEvent.mock.calls.length, 0);
       assert.equal((await readHostedSystemMailboxState(workspace.vaultRoot)).pending[0]?.attemptCount, 0);
@@ -1699,7 +1682,7 @@ describe("hosted system mailbox notification execution context", () => {
       const prepared = await prepareHostedSystemMailboxItemForCheckpoint({
         allowedRouteActions: ["continue-assistant-ask"],
         allowedWakeKinds: ["assistant.ask.completed"],
-        assistantAskCompletionOccurredBefore: "2026-04-27T00:00:01.000Z",
+        assistantAskCompletionOccurredBefore: async () => "2026-04-27T00:00:01.000Z",
         now: () => "2026-04-27T00:01:00.000Z",
         runtime: createRuntime({}),
         runtimeEnv: {},
@@ -3263,292 +3246,144 @@ describe("hosted system mailbox notification execution context", () => {
     }
   });
 
-  it("records connected Codex auth updates after the checkpoint boundary", async () => {
-    const workspace = await createHostedRuntimeWorkspace("murph-hosted-system-mailbox-");
-    const updateCodexAuth = vi.fn(async () => ({
-      applied: true,
-      status: "applied" as const,
-    }));
-    const wake = buildHostedExecutionCodexAuthRequestedWake({
-      action: "connect",
-      attemptId: "hca_abcdefghijklmnop",
-      eventId: "runtime-control:codex-auth",
-      occurredAt: FIXED_NOW,
-      userId: "member_123",
-    });
-    mocks.executeHostedMailboxEvent.mockResolvedValueOnce({
-      bootstrapResult: null,
-      conversationMetrics: null,
-      mailboxLane: "runtime-control",
-      nextWakeAt: null,
-      postCheckpointRecord: {
+  it.each(["connected", "disconnected"] as const)(
+    "retires persisted %s Codex auth checkpoints by removing local credentials",
+    async (phase) => {
+      const workspace = await createHostedRuntimeWorkspace("murph-hosted-system-mailbox-");
+      const authPath = path.join(workspace.operatorHomeRoot, ".codex-hosted", "auth.json");
+      const wake = buildHostedExecutionCodexAuthRequestedWake({
+        action: phase === "connected" ? "connect" : "disconnect",
         attemptId: "hca_abcdefghijklmnop",
-        kind: "codex-auth.updated",
-        phase: "connected",
-      },
-      redactedLogEntries: [],
-    });
+        eventId: "runtime-control:codex-auth",
+        occurredAt: FIXED_NOW,
+        userId: "member_123",
+      });
+      mocks.executeHostedMailboxEvent.mockResolvedValueOnce({
+        bootstrapResult: null,
+        conversationMetrics: null,
+        mailboxLane: "runtime-control",
+        nextWakeAt: null,
+        postCheckpointRecord: {
+          attemptId: "hca_abcdefghijklmnop",
+          kind: "codex-auth.updated",
+          phase,
+        },
+        redactedLogEntries: [],
+      });
 
-    try {
-      assert.deepEqual(
+      try {
+        await mkdir(path.dirname(authPath), { recursive: true });
+        await writeFile(authPath, '{"auth_mode":"chatgpt"}\n');
         await enqueueHostedSystemMailboxItem({
           item: createResolvedCodexAuthRuntimeControlItem(),
           vaultRoot: workspace.vaultRoot,
           wake,
-        }),
-        {
-          reasonCode: "system_mailbox.queued",
-          status: "imported",
-        },
-      );
+        });
+        const runtime = createRuntime({});
+        const prepared = await prepareHostedSystemMailboxItemForCheckpoint({
+          executionContext: null,
+          now: () => FIXED_NOW,
+          operatorHomeRoot: workspace.operatorHomeRoot,
+          runtime,
+          runtimeEnv: {},
+          vaultRoot: workspace.vaultRoot,
+        });
+        assert.equal(prepared?.status, "processed");
+        await expect(access(authPath)).resolves.toBeUndefined();
 
-      const runtime = createRuntime({
-        codexAuthPort: {
-          update: updateCodexAuth,
-        },
+        // Reload the persisted record through the legacy parser before replay.
+        const [persisted] = (await readHostedSystemMailboxState(workspace.vaultRoot)).pending;
+        assert.ok(persisted);
+        assert.equal(persisted.postCheckpointRecord?.kind, "codex-auth.updated");
+        await expect(recordHostedSystemMailboxItemAfterCheckpoint({
+          item: persisted,
+          operatorHomeRoot: workspace.operatorHomeRoot,
+          runtime,
+          vaultRoot: workspace.vaultRoot,
+        })).resolves.toMatchObject({
+          failed: 0,
+          nextWakeAt: null,
+          recorded: 0,
+        });
+        await expect(access(authPath)).rejects.toMatchObject({ code: "ENOENT" });
+        expect((await readHostedSystemMailboxState(workspace.vaultRoot)).pending).toEqual([]);
+      } finally {
+        await workspace.cleanup();
+      }
+    },
+  );
+
+  it("retries persisted Codex auth cleanup when local credential deletion fails", async () => {
+    const workspace = await createHostedRuntimeWorkspace("murph-hosted-system-mailbox-");
+    const authPath = path.join(workspace.operatorHomeRoot, ".codex-hosted", "auth.json");
+    const wake = buildHostedExecutionCodexAuthRequestedWake({
+      action: "connect",
+      attemptId: "hca_abcdefghijklmnop",
+      eventId: "runtime-control:codex-auth",
+      occurredAt: FIXED_NOW,
+      userId: "member_123",
+    });
+    mocks.executeHostedMailboxEvent.mockResolvedValueOnce({
+      bootstrapResult: null,
+      conversationMetrics: null,
+      mailboxLane: "runtime-control",
+      nextWakeAt: null,
+      postCheckpointRecord: {
+        attemptId: "hca_abcdefghijklmnop",
+        kind: "codex-auth.updated",
+        phase: "connected",
+      },
+      redactedLogEntries: [],
+    });
+
+    try {
+      await mkdir(authPath, { recursive: true });
+      await enqueueHostedSystemMailboxItem({
+        item: createResolvedCodexAuthRuntimeControlItem(),
+        vaultRoot: workspace.vaultRoot,
+        wake,
       });
+      const runtime = createRuntime({});
       const prepared = await prepareHostedSystemMailboxItemForCheckpoint({
         executionContext: null,
         now: () => FIXED_NOW,
+        operatorHomeRoot: workspace.operatorHomeRoot,
         runtime,
         runtimeEnv: {},
         vaultRoot: workspace.vaultRoot,
       });
-
       assert.equal(prepared?.status, "processed");
-      assert.equal(prepared.item.postCheckpointRecord?.kind, "codex-auth.updated");
-      expect(updateCodexAuth).not.toHaveBeenCalled();
-
-      await expect(recordHostedSystemMailboxItemAfterCheckpoint({
-        item: prepared.item,
-        runtime,
-        vaultRoot: workspace.vaultRoot,
-      })).resolves.toEqual({
-        failed: 0,
-        nextWakeAt: null,
-        recorded: 1,
-      });
-      expect(updateCodexAuth).toHaveBeenCalledWith({
-        attemptId: "hca_abcdefghijklmnop",
-        phase: "connected",
-      });
-    } finally {
-      await workspace.cleanup();
-    }
-  });
-
-  it("keeps connected Codex auth updates after the checkpoint boundary", async () => {
-    const workspace = await createHostedRuntimeWorkspace("murph-hosted-system-mailbox-");
-    const updateCodexAuth = vi.fn(async () => ({
-      applied: true,
-      status: "applied" as const,
-    }));
-    const authPath = path.join(workspace.operatorHomeRoot, ".codex-hosted", "auth.json");
-    const wake = buildHostedExecutionCodexAuthRequestedWake({
-      action: "connect",
-      attemptId: "hca_abcdefghijklmnop",
-      eventId: "runtime-control:codex-auth",
-      occurredAt: FIXED_NOW,
-      userId: "member_123",
-    });
-    mocks.executeHostedMailboxEvent.mockResolvedValueOnce({
-      bootstrapResult: null,
-      conversationMetrics: null,
-      mailboxLane: "runtime-control",
-      nextWakeAt: null,
-      postCheckpointRecord: {
-        attemptId: "hca_abcdefghijklmnop",
-        kind: "codex-auth.updated",
-        phase: "connected",
-      },
-      redactedLogEntries: [],
-    });
-
-    try {
-      await mkdir(path.dirname(authPath), { recursive: true });
-      await writeFile(authPath, "{\"auth_mode\":\"chatgpt\"}\n");
-      await enqueueHostedSystemMailboxItem({
-        item: createResolvedCodexAuthRuntimeControlItem(),
-        vaultRoot: workspace.vaultRoot,
-        wake,
-      });
-
-      const runtime = createRuntime({
-        codexAuthPort: {
-          update: updateCodexAuth,
-        },
-      });
-      const prepared = await prepareHostedSystemMailboxItemForCheckpoint({
-        executionContext: null,
-        now: () => FIXED_NOW,
-        operatorHomeRoot: workspace.operatorHomeRoot,
-        runtime,
-        runtimeEnv: {
-          NODE_ENV: "test",
-        },
-        vaultRoot: workspace.vaultRoot,
-      });
-      assert.equal(prepared?.status, "processed");
-
       await expect(recordHostedSystemMailboxItemAfterCheckpoint({
         item: prepared.item,
         operatorHomeRoot: workspace.operatorHomeRoot,
         runtime,
         vaultRoot: workspace.vaultRoot,
-      })).resolves.toEqual({
-        failed: 0,
-        nextWakeAt: null,
-        recorded: 1,
+      })).resolves.toMatchObject({
+        failed: 1,
+        nextWakeAt: expect.any(String),
+        recorded: 0,
       });
-      expect(updateCodexAuth).toHaveBeenCalledWith({
-        attemptId: "hca_abcdefghijklmnop",
-        phase: "connected",
+      const [retry] = (await readHostedSystemMailboxState(workspace.vaultRoot)).pending;
+      assert.ok(retry);
+      expect(retry).toMatchObject({
+        nextAttemptAt: expect.any(String),
+        postCheckpointRecord: { kind: "codex-auth.updated" },
+        status: "recording",
       });
-      await expect(access(authPath)).resolves.toBeUndefined();
-    } finally {
-      await workspace.cleanup();
-    }
-  });
-
-  it("removes connected Codex auth when the checkpoint update is superseded", async () => {
-    const workspace = await createHostedRuntimeWorkspace("murph-hosted-system-mailbox-");
-    const updateCodexAuth = vi.fn(async () => ({
-      applied: false,
-      status: "superseded" as const,
-    }));
-    const authPath = path.join(workspace.operatorHomeRoot, ".codex-hosted", "auth.json");
-    const wake = buildHostedExecutionCodexAuthRequestedWake({
-      action: "connect",
-      attemptId: "hca_abcdefghijklmnop",
-      eventId: "runtime-control:codex-auth",
-      occurredAt: FIXED_NOW,
-      userId: "member_123",
-    });
-    mocks.executeHostedMailboxEvent.mockResolvedValueOnce({
-      bootstrapResult: null,
-      conversationMetrics: null,
-      mailboxLane: "runtime-control",
-      nextWakeAt: null,
-      postCheckpointRecord: {
-        attemptId: "hca_abcdefghijklmnop",
-        kind: "codex-auth.updated",
-        phase: "connected",
-      },
-      redactedLogEntries: [],
-    });
-
-    try {
-      await mkdir(path.dirname(authPath), { recursive: true });
-      await writeFile(authPath, "{\"auth_mode\":\"chatgpt\"}\n");
-      await enqueueHostedSystemMailboxItem({
-        item: createResolvedCodexAuthRuntimeControlItem(),
-        vaultRoot: workspace.vaultRoot,
-        wake,
-      });
-
-      const runtime = createRuntime({
-        codexAuthPort: {
-          update: updateCodexAuth,
-        },
-      });
-      const prepared = await prepareHostedSystemMailboxItemForCheckpoint({
-        executionContext: null,
-        now: () => FIXED_NOW,
-        operatorHomeRoot: workspace.operatorHomeRoot,
-        runtime,
-        runtimeEnv: {
-          NODE_ENV: "test",
-        },
-        vaultRoot: workspace.vaultRoot,
-      });
-      assert.equal(prepared?.status, "processed");
-
+      await rm(authPath, { recursive: true });
+      await writeFile(authPath, '{"auth_mode":"chatgpt"}\n');
       await expect(recordHostedSystemMailboxItemAfterCheckpoint({
-        item: prepared.item,
+        item: retry,
         operatorHomeRoot: workspace.operatorHomeRoot,
         runtime,
         vaultRoot: workspace.vaultRoot,
-      })).resolves.toEqual({
+      })).resolves.toMatchObject({
         failed: 0,
         nextWakeAt: null,
         recorded: 0,
       });
-      expect(updateCodexAuth).toHaveBeenCalledWith({
-        attemptId: "hca_abcdefghijklmnop",
-        phase: "connected",
-      });
       await expect(access(authPath)).rejects.toMatchObject({ code: "ENOENT" });
-    } finally {
-      await workspace.cleanup();
-    }
-  });
-
-  it("keeps connected Codex auth when the checkpoint update was already applied", async () => {
-    const workspace = await createHostedRuntimeWorkspace("murph-hosted-system-mailbox-");
-    const updateCodexAuth = vi.fn(async () => ({
-      applied: true,
-      status: "already_applied" as const,
-    }));
-    const authPath = path.join(workspace.operatorHomeRoot, ".codex-hosted", "auth.json");
-    const wake = buildHostedExecutionCodexAuthRequestedWake({
-      action: "connect",
-      attemptId: "hca_abcdefghijklmnop",
-      eventId: "runtime-control:codex-auth",
-      occurredAt: FIXED_NOW,
-      userId: "member_123",
-    });
-    mocks.executeHostedMailboxEvent.mockResolvedValueOnce({
-      bootstrapResult: null,
-      conversationMetrics: null,
-      mailboxLane: "runtime-control",
-      nextWakeAt: null,
-      postCheckpointRecord: {
-        attemptId: "hca_abcdefghijklmnop",
-        kind: "codex-auth.updated",
-        phase: "connected",
-      },
-      redactedLogEntries: [],
-    });
-
-    try {
-      await mkdir(path.dirname(authPath), { recursive: true });
-      await writeFile(authPath, "{\"auth_mode\":\"chatgpt\"}\n");
-      await enqueueHostedSystemMailboxItem({
-        item: createResolvedCodexAuthRuntimeControlItem(),
-        vaultRoot: workspace.vaultRoot,
-        wake,
-      });
-
-      const runtime = createRuntime({
-        codexAuthPort: {
-          update: updateCodexAuth,
-        },
-      });
-      const prepared = await prepareHostedSystemMailboxItemForCheckpoint({
-        executionContext: null,
-        now: () => FIXED_NOW,
-        operatorHomeRoot: workspace.operatorHomeRoot,
-        runtime,
-        runtimeEnv: {},
-        vaultRoot: workspace.vaultRoot,
-      });
-      assert.equal(prepared?.status, "processed");
-
-      await expect(recordHostedSystemMailboxItemAfterCheckpoint({
-        item: prepared.item,
-        operatorHomeRoot: workspace.operatorHomeRoot,
-        runtime,
-        vaultRoot: workspace.vaultRoot,
-      })).resolves.toEqual({
-        failed: 0,
-        nextWakeAt: null,
-        recorded: 1,
-      });
-      expect(updateCodexAuth).toHaveBeenCalledWith({
-        attemptId: "hca_abcdefghijklmnop",
-        phase: "connected",
-      });
-      await expect(access(authPath)).resolves.toBeUndefined();
+      expect((await readHostedSystemMailboxState(workspace.vaultRoot)).pending).toEqual([]);
     } finally {
       await workspace.cleanup();
     }
@@ -3795,7 +3630,11 @@ describe("hosted system mailbox notification execution context", () => {
     }
   });
 
-  it.each([null, "2026-04-27T00:00:30.000Z"])("publishes device cadence without a runtime wake and preserves maintenance retry %s", async (maintenanceRetryAt) => {
+  it.each([
+    { boundary: "stale", maintenanceRetryAt: null },
+    { boundary: "stale", maintenanceRetryAt: "2026-04-27T00:00:30.000Z" },
+    ...["webhook", "manual", "equal-cadence", "future-cadence", "new-epoch", "other-connection", "unknown-hint", "webhook-barrier"].map((boundary) => ({ boundary, maintenanceRetryAt: null })),
+  ])("publishes device cadence and retires only covered schedules ($boundary, maintenance: $maintenanceRetryAt)", async ({ boundary, maintenanceRetryAt }) => {
     const workspace = await createHostedRuntimeWorkspace("murph-hosted-system-mailbox-");
     const connectionId = "dsc_completion_same_admission";
     const connectedAt = "2026-04-01T00:00:00.000Z";
@@ -3870,6 +3709,7 @@ describe("hosted system mailbox notification execution context", () => {
       }
       await enqueueHostedSystemMailboxItem({
         item: createResolvedDeviceSyncItem({
+          dedupeKey: wake.eventId,
           id: "mailbox_item_system_device_sync_completion_same_admission",
         }),
         vaultRoot: workspace.vaultRoot,
@@ -3887,6 +3727,42 @@ describe("hosted system mailbox notification execution context", () => {
       });
       assert.equal(prepared?.status, "processed");
 
+      // A sweep can enqueue the old cadence while this pass is checkpointing.
+      const staleSchedule = buildHostedExecutionDeviceSyncWake({
+        ...wake,
+        connectionId: boundary === "other-connection" ? "dsc_other_connection" : connectionId,
+        eventId: "device-sync.wake:completed-cadence-duplicate",
+        expectedConnectedAt: boundary === "new-epoch" ? FIXED_NOW : connectedAt,
+        reason: boundary === "webhook" ? "webhook_hint" : "reconcile_due",
+        hint: {
+          nextReconcileAt: boundary === "equal-cadence" ? nextReconcileAt
+            : boundary === "future-cadence" ? "2026-04-27T07:00:00.000Z" : FIXED_NOW,
+          ...(boundary === "manual" ? { reason: "manual_reconcile" } : {}),
+          ...(boundary === "unknown-hint" ? { reason: "future_work_kind" } : {}),
+        },
+      });
+      if (boundary === "webhook-barrier") {
+        const webhook = buildHostedExecutionDeviceSyncWake({
+          ...wake, eventId: "device-sync.wake:new-dirty-work", reason: "webhook_hint",
+        });
+        await enqueueHostedSystemMailboxItem({
+          item: createResolvedDeviceSyncItem({
+            dedupeKey: webhook.eventId, id: "mailbox_item_new_dirty_work", laneSeq: "2",
+          }),
+          vaultRoot: workspace.vaultRoot,
+          wake: webhook,
+        });
+      }
+      await enqueueHostedSystemMailboxItem({
+        item: createResolvedDeviceSyncItem({
+          dedupeKey: staleSchedule.eventId,
+          id: "mailbox_item_completed_cadence_duplicate",
+          laneSeq: "3",
+        }),
+        vaultRoot: workspace.vaultRoot,
+        wake: staleSchedule,
+      });
+
       await expect(recordHostedSystemMailboxItemAfterCheckpoint({
         deviceSyncCompletionAcceptedInCurrentAdmission: true,
         item: prepared.item,
@@ -3895,8 +3771,8 @@ describe("hosted system mailbox notification execution context", () => {
       })).resolves.toEqual({
         deviceSyncWake: undefined,
         failed: 0,
-        nextWakeAt: maintenanceRetryAt,
-        ...(maintenanceRetryAt ? { nextWakeReason: "device-sync.reconcile" } : {}),
+        nextWakeAt: boundary === "stale" ? maintenanceRetryAt : expect.any(String),
+        ...(maintenanceRetryAt || boundary !== "stale" ? { nextWakeReason: "device-sync.reconcile" } : {}),
         recorded: 0,
       });
       expect(fetchSnapshot).toHaveBeenCalledWith({
@@ -3913,10 +3789,20 @@ describe("hosted system mailbox notification execution context", () => {
           observedUpdatedAt: updatedAt,
         }],
       });
-      const remaining = (await readHostedSystemMailboxState(workspace.vaultRoot)).pending;
-      expect(remaining.map((item) => item.nextAttemptAt)).toEqual(
-        maintenanceRetryAt ? [maintenanceRetryAt] : [],
-      );
+      const completedState = await readHostedSystemMailboxState(workspace.vaultRoot);
+      const remaining = completedState.pending;
+      if (boundary === "stale" && !maintenanceRetryAt) {
+        expect(resolveHostedSystemMailboxHandledThroughSeq({
+          importedSeq: "3", now: FIXED_NOW, state: completedState,
+        })).toBe("3");
+      }
+      expect(remaining.filter((item) => item.itemId === "mailbox_item_completed_cadence_duplicate"))
+        .toHaveLength(boundary === "stale" ? 0 : 1);
+      expect(remaining.filter((item) => item.itemId === "mailbox_item_new_dirty_work"))
+        .toHaveLength(boundary === "webhook-barrier" ? 1 : 0);
+      expect(remaining.some((item) => item.itemId === "mailbox_item_system_device_sync_completion_same_admission")).toBe(false);
+      if (maintenanceRetryAt) expect(remaining.map((item) => item.nextAttemptAt)).toEqual([maintenanceRetryAt]);
+      expect(mocks.executeHostedMailboxEvent).toHaveBeenCalledTimes(1);
     } finally {
       vi.useRealTimers();
       await workspace.cleanup();
@@ -6937,7 +6823,7 @@ function createResolvedNotificationItem(overrides: Partial<{
     createdAt: occurredAt,
     dedupeKey:
       overrides.dedupeKey
-      ?? "assistant.notification.requested:gateway-billing",
+      ?? "assistant.notification.requested:openai-billing",
     expiresAt: null,
     id: overrides.id ?? "mailbox_item_system_notification",
     kind: "assistant.notification.requested",

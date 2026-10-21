@@ -121,6 +121,11 @@ type HostedJunctionDeviceSyncReplaySeedArgs =
 type HostedJunctionDeviceSyncConnectionSeedArgs =
   Omit<HostedJunctionDeviceSyncConnectionSeedInput, "environment">;
 
+interface HostedLocalProviderCountDiagnosticScope {
+  providerBaseline: number;
+  promptMarker: string;
+}
+
 export interface HostedLocalFullStackScenario {
   assistantProviderRequests: HostedLocalAssistantProviderStubRequest[];
   assertHealthyHostedRun(
@@ -188,7 +193,11 @@ export interface HostedLocalFullStackScenario {
   ): Promise<HostedRunnerStatusResponse>;
   /** Passively observes new hosted work; it never triggers runtime processing. */
   waitForLatestPendingWake(userId: string): Promise<HostedRunnerStatusResponse>;
-  buildFailureMessage(userId: string, summaryLines: readonly string[]): Promise<string>;
+  buildFailureMessage(
+    userId: string,
+    summaryLines: readonly string[],
+    providerCountScope?: HostedLocalProviderCountDiagnosticScope,
+  ): Promise<string>;
   /**
    * Mints a real hosted app session cookie for a seeded member using the same
    * HMAC key the hosted web process runs with.
@@ -481,8 +490,27 @@ async function startHostedLocalFullStackScenarioAttempt(
       buildFailureMessage: async (
         userId: string,
         summaryLines: readonly string[],
+        providerCountScope?: HostedLocalProviderCountDiagnosticScope,
       ): Promise<string> => {
+        // Snapshot the capture before awaiting the secondary status read.
+        const providerCounts = providerCountScope
+          ? summarizeAssistantProviderRequestCounts(assistantProviderRequests, providerCountScope)
+          : null;
         const status = await scenarioHarness.readUserStatus(userId).catch(() => null);
+        if (providerCounts) {
+          // Count failures need bounded observations, without request paths or log tails.
+          return [
+            ...summaryLines,
+            `assistant provider request counts: ${JSON.stringify(providerCounts)}`,
+            `hosted count-check status: ${JSON.stringify({
+              available: status !== null,
+              lastErrorPresent: status ? Boolean(status.lastErrorCode) : null,
+              mailboxLaggingLaneCount: status
+                ? status.mailboxLag.filter((lane) => lane.lag !== "0").length
+                : null,
+            })}`,
+          ].join("\n");
+        }
         const assistantProviderRequestLog = assistantProviderRequests.map((request) => ({
           bodyBytes: Buffer.byteLength(request.body, "utf8"),
           bodyFingerprint: fingerprintProviderRequestBody(
@@ -859,6 +887,66 @@ function summarizeHostedRuntimeAuthFailureLog(log: HostedRuntimeLogForTestRow): 
 function readHostedRuntimeLogString(record: Record<string, unknown>, key: string): string | null {
   const value = record[key];
   return typeof value === "string" ? value : null;
+}
+
+export async function rethrowHostedLocalProviderCountFailure(
+  error: unknown,
+  input: HostedLocalProviderCountDiagnosticScope & {
+    scenario: Pick<HostedLocalFullStackScenario, "buildFailureMessage">;
+    userId: string;
+  },
+): Promise<never> {
+  let diagnostics = "assistant provider count diagnostics: unavailable";
+  try {
+    diagnostics = await input.scenario.buildFailureMessage(input.userId, [], {
+      providerBaseline: input.providerBaseline,
+      promptMarker: input.promptMarker,
+    });
+  } catch {
+    // A secondary diagnostic failure must never replace the original assertion.
+  }
+  if (error instanceof Error) {
+    error.message += `\n${diagnostics}`;
+  }
+  throw error;
+}
+
+function summarizeAssistantProviderRequestCounts(
+  requests: readonly HostedLocalAssistantProviderStubRequest[],
+  scope: HostedLocalProviderCountDiagnosticScope,
+) {
+  const countedRequests = requests.filter((request) => request.url === "/v1/responses");
+  const requestsSinceBaseline = countedRequests.slice(scope.providerBaseline);
+  const categories = new Map<string, {
+    promptMarkerPresent: boolean;
+    requestKind: NonNullable<HostedLocalAssistantProviderStubRequest["requestKind"]>;
+    fixtureMatch: NonNullable<HostedLocalAssistantProviderStubRequest["fixtureMatch"]>;
+    count: number;
+  }>();
+  let promptMarkerMatchesSinceBaseline = 0;
+  for (const request of requestsSinceBaseline) {
+    // Marker presence is an observation, not proof of request ownership or replay.
+    const promptMarkerPresent = request.body.includes(scope.promptMarker);
+    if (promptMarkerPresent) promptMarkerMatchesSinceBaseline += 1;
+    const requestKind = (["turn", "prewarm", "compaction", "memory", "unknown"] as const)
+      .find((kind) => kind === request.requestKind) ?? "unknown";
+    const fixtureMatch = (["scoped", "unscoped", "none", "compaction", "not_applicable"] as const)
+      .find((match) => match === request.fixtureMatch) ?? "not_applicable";
+    const key = `${promptMarkerPresent}:${requestKind}:${fixtureMatch}`;
+    const category = categories.get(key);
+    if (category) category.count += 1;
+    else categories.set(key, { promptMarkerPresent, requestKind, fixtureMatch, count: 1 });
+  }
+  return {
+    providerBaseline: scope.providerBaseline,
+    observedGlobalCount: countedRequests.length,
+    promptMarkerMatchesBeforeBaseline: countedRequests.slice(0, scope.providerBaseline)
+      .filter((request) => request.body.includes(scope.promptMarker)).length,
+    requestsSinceBaseline: requestsSinceBaseline.length,
+    promptMarkerMatchesSinceBaseline,
+    // At most 2 marker states × 5 request kinds × 5 fixture categories.
+    categories: [...categories.values()],
+  };
 }
 
 function fingerprintProviderRequestBody(value: string, secret: string): string {

@@ -265,7 +265,7 @@ test("UploadLabsMurphContactAction prefers Telegram over email with the lab-repo
 
   assert.match(
     markup,
-    /href="https:\/\/t\.me\/withmurph_bot\?text=Here\+are\+some\+lab\+reports\+I\+want\+you\+to\+check\+out%3A"/,
+    /href="https:\/\/t\.me\/withmurph_bot\?text=Here%20are%20some%20lab%20reports%20I%20want%20you%20to%20check%20out%3A"/,
   );
   assert.match(
     markup,
@@ -309,7 +309,7 @@ test("UploadLabsMurphContactAction opens Telegram with the lab-report draft when
 
   assert.match(
     markup,
-    /href="https:\/\/t\.me\/withmurph_bot\?text=Here\+are\+some\+lab\+reports\+I\+want\+you\+to\+check\+out%3A"/,
+    /href="https:\/\/t\.me\/withmurph_bot\?text=Here%20are%20some%20lab%20reports%20I%20want%20you%20to%20check%20out%3A"/,
   );
   assert.match(
     markup,

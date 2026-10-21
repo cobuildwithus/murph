@@ -317,6 +317,7 @@ it.each(["stdout", "stderr"] as const)("retains %s diagnostics when hosted compl
     expect(failureMessage).toContain("snapshotRefPresent");
     expect(failureMessage).toContain("browserVaultReplicaRefPresent");
     expect(failureMessage).toContain("recentLogsPresent");
+    expect(failureMessage).toContain('"recentLogMetadata":[{"level":"info","component":"mailbox","phase":"import","eventCode":"mailbox.imported"}]');
     expect(failureMessage).not.toContain("snapshot/object-key");
     expect(failureMessage).not.toContain("browser-vault/object-key");
     expect(failureMessage).not.toContain("runtime-root-key");
@@ -1321,4 +1322,33 @@ it("waits for processing acceptance after retry_later before reading idle status
     ]);
     expect(fetch.mock.calls[0]?.[1]?.body).toBe(fetch.mock.calls[1]?.[1]?.body);
   } finally { await harness.stop(); }
+});
+
+
+it("bounds hosted failure log metadata to closed runtime enums", async () => {
+  const { sanitizeHostedStatusForFailureLog } = await import("./hosted-local-dev-harness.js");
+  const status: HostedRunnerStatusResponse = {
+    inFlight: false, lastErrorCode: "runtime_error", mailboxLag: [],
+    userId: "synthetic-member", workspace: null,
+    recentLogs: Array.from({ length: 12 }, (_, index) => ({
+      at: "2026-09-01T00:00:00.000Z", level: "error", component: "runner",
+      phase: "error", eventCode: index < 4 ? "mailbox.imported" : "runner.error", attemptId: "synthetic-private-attempt",
+      errorCode: "synthetic-private-error", redactedJson: { detail: "synthetic-private-payload" },
+    })),
+  };
+  const sanitized = sanitizeHostedStatusForFailureLog(status);
+  expect(sanitized).toMatchObject({
+    recentLogsPresent: true,
+    recentLogMetadata: Array.from({ length: 8 }, () => ({
+      level: "error", component: "runner", phase: "error", eventCode: "runner.error",
+    })),
+  });
+  expect(JSON.stringify(sanitized)).not.toContain("synthetic-private");
+  expect(JSON.stringify(sanitized)).not.toContain("2026-09-01");
+  // Runtime JSON can violate its declared type: each unknown enum fails closed.
+  for (const field of ["level", "component", "phase", "eventCode"]) {
+    const malformed = JSON.parse(JSON.stringify(status));
+    malformed.recentLogs = [{ ...status.recentLogs?.[0], [field]: "synthetic-private-unknown" }];
+    expect(sanitizeHostedStatusForFailureLog(malformed)).toMatchObject({ recentLogMetadata: [] });
+  }
 });

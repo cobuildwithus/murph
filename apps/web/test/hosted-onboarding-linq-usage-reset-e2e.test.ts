@@ -303,10 +303,6 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", async () => {
   };
 });
 
-vi.mock("@/src/lib/hosted-onboarding/webhook-service-stripe", () => ({
-  handleHostedStripeWebhook: vi.fn(),
-}));
-
 vi.mock("@/src/lib/prisma", () => ({
   getPrisma: vi.fn(() => {
     throw new Error("Unexpected getPrisma call in hosted-onboarding-linq-usage-reset-e2e.test.ts");
@@ -725,7 +721,7 @@ function createUsageResetPrismaFixture(input: {
       const strings = taggedTemplate
         ? query as readonly string[]
         : (query as { strings?: readonly string[] }).strings ?? [];
-      return strings.join(" ").toLowerCase().includes("for update skip locked")
+      return /select "id"\s+from "hosted_member"[\s\S]*for no key update/i.test(strings.join(" "))
         ? [{ id: values[0] }]
         : [];
     }),

@@ -10,7 +10,7 @@ import {
 import { submitMemberAction } from "@/src/lib/member-actions/submit";
 import { getPrisma } from "@/src/lib/prisma";
 
-const IMESSAGE_MEMBER_ACTION_BODY_LIMIT_BYTES = 24 * 1_024;
+const IMESSAGE_MEMBER_ACTION_BODY_LIMIT_BYTES = 4 * 1_024 * 1_024;
 
 export const POST = withJsonError(async (request: Request) => {
   const prisma = getPrisma();

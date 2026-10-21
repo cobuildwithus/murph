@@ -1,7 +1,8 @@
+import { readHostedDelegationHintOverrides } from './support/hosted-delegation-hints.js'
 import { MURPH_ATTACH_FOLLOW_UP_TOOL } from '../src/assistant-codex/dynamic-tools/automation.ts'
 import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { cp, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -28,7 +29,8 @@ import type {
 import {
   createDefaultLocalAssistantModelTarget,
 } from '@murphai/operator-config/assistant-backend'
-import { readMemoryDocument } from '@murphai/core'
+import { readMemoryDocument, upsertMemory } from '@murphai/core'
+import { readAssistantCurrentStatePrompt } from '../src/assistant/current-state.ts'
 import {
   HOSTED_OPENAI_CODEX_MODEL_PROVIDER_ID,
 } from '@murphai/operator-config/assistant/target-runtime'
@@ -79,6 +81,7 @@ import {
 } from '../src/assistant-codex/dynamic-tools.ts'
 import {
   MURPH_ATTACH_RESPONSE_CARD_TOOL,
+  MURPH_ATTACH_RESPONSE_MEDIA_TOOL,
   MURPH_FINISH_WITHOUT_REPLY_TOOL,
   MURPH_GROUP_CHALLENGE_RESPONSE_CARD_TOOL,
   MURPH_GROUP_FAMILY_TOOLS,
@@ -125,6 +128,8 @@ import {
   buildAssistantSystemPrompt,
   buildAssistantSystemPromptLayers,
 } from '../src/assistant/system-prompt.ts'
+import { buildAssistantCliSurfaceContract } from '../src/assistant/cli-surface-bootstrap.ts'
+import { readAssistantCliLlmsFullManifestFromCliEntry } from '../src/assistant/cli-surface-manifest.ts'
 import { MURPH_CODEX_BASE_INSTRUCTIONS } from '../src/assistant/codex-base-instructions.ts'
 import {
   ASSISTANT_FIRST_CONTACT_WELCOME_MESSAGE,
@@ -2036,7 +2041,7 @@ text(result.output);
     scenario.stub.queue({
       requestIncludes: [
         'Raw ECG voltage/workout points are not stored',
-        'Burned calories are expenditure; carbs can be partial intake evidence',
+        'Burned calories are expenditure; connected carbs are one input to intake',
       ],
       text: answer,
     })
@@ -3478,6 +3483,103 @@ text(result.output);
     },
   )
 
+  it('keeps fresh Sol child requests free of parent history and member snapshot while accounting native tool work', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario({ multiAgentV2: true })
+    const modelCatalogJson = await writeHostedOpenAiMixedModeModelCatalogJson({
+      codexCommand: scenario.turnInput.codexCommand,
+      directory: scenario.turnInput.codexHome,
+    })
+    const historySentinel = 'PARENT_HISTORY_ONLY_amber_canoe'
+    const snapshotSentinel = 'PARENT_SNAPSHOT_ONLY_cobalt_kite'
+    const childResult = 'The blue parcel weighs 7 kilograms.'
+    const childUsages: unknown[] = []
+    let releaseChildCompletion!: () => void
+    const childCompletionGate = new Promise<void>((resolve) => {
+      releaseChildCompletion = resolve
+    })
+    let parentWaitCount = 0
+    await writeFile(path.join(scenario.turnInput.workingDirectory, 'parcel.txt'), childResult)
+    scenario.stub.captureProviderRequestDiagnostics({ completeInput: true })
+    scenario.stub.queue(
+      {
+        requestIncludes: [historySentinel],
+        functionCall: { namespace: 'collaboration', name: 'spawn_agent', arguments: {
+          task_name: 'fresh_parcel', fork_turns: 'none', model: 'gpt-6.1-sol', reasoning_effort: 'medium',
+          message: 'Direct private task, read-only within this synthetic workspace. Read parcel.txt with the native shell, report its exact contents, then stop. Do not read other files, write, send messages, or use external tools.',
+        } },
+      },
+      {
+        requestIncludes: ['Message Type: NEW_TASK', 'fresh_parcel'],
+        requestExcludes: [historySentinel, snapshotSentinel],
+        customToolCall: { name: 'exec', input: 'text(await tools.exec_command({cmd: "cat parcel.txt", max_output_tokens: 100}));' },
+      },
+      {
+        beforeRespond: () => childCompletionGate,
+        requestIncludes: ['Message Type: NEW_TASK', childResult],
+        requestExcludes: [historySentinel, snapshotSentinel],
+        text: childResult,
+      },
+      // Native waits can time out or wake before the child finishes. Keep a
+      // bounded scripted wait loop, and force one timeout to prove this path.
+      // A one-shot response instead makes the local provider return HTTP 500.
+      ...Array.from({ length: 6 }, (): ScriptedResponse => ({
+        beforeRespond: async () => {
+          parentWaitCount += 1
+          if (parentWaitCount === 2) releaseChildCompletion()
+        },
+        requestIncludes: [historySentinel], requestExcludes: [childResult],
+        functionCall: { namespace: 'collaboration', name: 'wait_agent', arguments: { timeout_ms: 10000 } },
+      })),
+      { requestIncludes: [historySentinel, childResult], text: childResult },
+    )
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      // Match the hosted runtime and other native shell fixtures. OS sandbox
+      // enforcement has its own Linux-capable runner; this proves delegation.
+      sandbox: 'danger-full-access',
+      configOverrides: await readHostedDelegationHintOverrides(),
+      baseInstructions: 'Follow the task and tools. Preserve scope and privacy.',
+      developerInstructions: buildScriptedHostedSystemPrompt('direct') + '\n' + snapshotSentinel,
+      env: { ...scenario.turnInput.env, [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: modelCatalogJson },
+      dynamicTools: [MURPH_FINISH_WITHOUT_REPLY_TOOL],
+      onAdditionalUsage: async (usage) => { childUsages.push(usage) },
+      prompt: `Check the parcel. Irrelevant earlier conversation: ${historySentinel}`,
+    })
+    expect(result.finalMessage).toBe(childResult)
+    const requests = scenario.stub.requestSummariesSinceBaseline()
+    expect(parentWaitCount).toBeGreaterThanOrEqual(2)
+    expect(requests.some((request) => request.functionCallOutputs?.some((output) =>
+      output.includes('"timed_out":true'),
+    ))).toBe(true)
+    const children = requests.filter((request) => request.model === 'gpt-6.1-sol')
+    expect(children).toHaveLength(2)
+    for (const request of children) {
+      const input = request.completeProviderInput?.json
+      expect(input).toContain('bounded one-shot task worker')
+      expect(input).not.toContain(historySentinel)
+      expect(input).not.toContain(snapshotSentinel)
+    }
+    const firstChildJson = children[0]?.completeProviderInput?.json ?? '{}'
+    const advertisedTools = readProviderNativeTools(firstChildJson)
+    process.stdout.write(`[fresh-child-native-contract] ${JSON.stringify({
+      childToolNames: advertisedTools.map(({ namespace, name }) => [namespace, name].filter(Boolean).join('.')),
+      parentDynamicToolAdvertised: firstChildJson.includes('finish_without_reply'),
+      childInputBytes: Buffer.byteLength(children[0]?.completeProviderInput?.json ?? ''),
+      parentInputBytes: Buffer.byteLength(requests[0]?.completeProviderInput?.json ?? ''),
+    })}\n`)
+    expect(advertisedTools.some(({ name }) => name === 'exec_command')).toBe(true)
+    expect(firstChildJson).not.toContain('finish_without_reply')
+    expect(requests[0]?.completeProviderInput?.json).toContain('finish_without_reply')
+    expect(children[1]?.completeProviderInput?.json).toContain(childResult)
+    expect(childUsages).toHaveLength(1)
+    expect(childUsages[0]).toMatchObject({ providerRequestOutcome: 'succeeded', usage: {
+      requestedModel: 'gpt-6.1-sol', servedModel: 'gpt-6.1-sol',
+      usageExtractionSourcePath: 'subagent.turn.tokenUsage.total.delta',
+    } })
+  })
+
   it.each(['gpt-5.5', 'gpt-6-astra'])('rejects an unavailable child model %s before a provider request', {
     timeout: TURN_TIMEOUT_MS,
   }, async (model) => {
@@ -3522,7 +3624,7 @@ text(result.output);
     expect(summaries.flatMap(
       (summary) => summary.functionCallOutputs ?? [],
     )).toEqual([
-      `Unknown model \`${model}\` for spawn_agent. Available models: gpt-5.6-sol, gpt-5.6-terra, gpt-5.6-luna`,
+      `Unknown model \`${model}\` for spawn_agent. Available models: gpt-6.1-sol, gpt-6-sol, gpt-6-luna, gpt-5.6-sol, gpt-5.6-luna`,
     ])
     expect(scenario.stub.requestCountSinceBaseline()).toBe(2)
   })
@@ -3530,7 +3632,9 @@ text(result.output);
   it('composes a reviewed group continuation through the real provider and queues one reply', {
     timeout: TURN_TIMEOUT_MS,
   }, async () => {
-    const scenario = await prepareScriptedTurnScenario()
+    const scenario = await prepareScriptedTurnScenario({
+      modelProvider: HOSTED_OPENAI_CODEX_MODEL_PROVIDER_ID,
+    })
     scenario.stub.captureProviderRequestDiagnostics()
     scenario.stub.queue({
       text: 'First reviewed fact.\n---\nSecond reviewed fact.',
@@ -3540,7 +3644,7 @@ text(result.output);
       codexCommand: scenario.turnInput.codexCommand,
       codexHome: scenario.turnInput.codexHome,
       model: scenario.turnInput.model,
-      modelProvider: null,
+      modelProvider: scenario.turnInput.modelProvider,
       reasoningEffort: 'low' as const,
       sandbox: 'read-only' as const,
     }
@@ -3779,7 +3883,10 @@ text(result.output);
   // Equality projection for this opt-in measurement only. These exact paths
   // differed in all four pinned-App-Server fixture pairs; never scrub metadata
   // wholesale or alter the raw capture used for byte counts and digests.
-  function normalizeSharedSchemaFirstInputForEquality(json: string): {
+  function normalizeSharedSchemaFirstInputForEquality(
+    json: string,
+    fixturePaths: ReadonlyArray<readonly [string, 'codex-home' | 'workspace' | 'temporary-directory']> = [],
+  ): {
     json: string
     normalizedFields: string[]
   } {
@@ -3803,9 +3910,9 @@ text(result.output);
     const identities = [
       ...Array.from({ length: 7 }, (_, index) =>
         [readRecord(input[index]), 'id', `input[${index}].id`] as const),
-      ...['session_id', 'thread_id', 'turn_id', 'root_turn_id', 'x-codex-window-id'].map((key) =>
+      ...['session_id', 'thread_id', 'turn_id', 'root_turn_id', 'x-codex-window-id', 'x-codex-installation-id'].map((key) =>
         [metadata, key, `client_metadata.${key}`] as const),
-      ...['session_id', 'thread_id', 'turn_id', 'window_id', 'context_window_id', 'root_turn_id'].map((key) =>
+      ...['session_id', 'thread_id', 'turn_id', 'window_id', 'context_window_id', 'root_turn_id', 'installation_id'].map((key) =>
         [turnMetadata, key, `${turnMetadataPath}.${key}`] as const),
     ]
     for (const [record, key, field] of identities) {
@@ -3818,6 +3925,34 @@ text(result.output);
     turnMetadata.turn_started_at_unix_ms = 0
     // Decode only in the equality projection; retain every static nested field.
     metadata['x-codex-turn-metadata'] = turnMetadata
+    const normalizedFields = [...identities.map(([, , field]) => field), `${turnMetadataPath}.turn_started_at_unix_ms`]
+    // Only fixture-owned roots in these native-generated messages are incidental.
+    // Keep their suffixes, surrounding policy, other messages, and raw input intact.
+    if (fixturePaths.length > 0) {
+      const roots = [...fixturePaths].sort(([left], [right]) => right.length - left.length)
+      for (const [inputIndex, contentIndex, marker] of [
+        [2, 1, '<skills_instructions>'],
+        [2, 2, '<permissions instructions>'],
+        [5, 0, '<environment_context>'],
+      ] as const) {
+        const content = readRecord(input[inputIndex])?.content
+        const part = readRecord(Array.isArray(content) ? content[contentIndex] : null)
+        const field = `input[${inputIndex}].content[${contentIndex}].text`
+        if (part?.type !== 'input_text' || typeof part.text !== 'string' || !part.text.startsWith(marker)) {
+          throw new Error(`Unexpected generated fixture context at ${field}.`)
+        }
+        let text = part.text
+        for (const [root, name] of roots) {
+          if (!path.isAbsolute(root) || root === path.parse(root).root) {
+            throw new Error('Expected a non-root absolute fixture path.')
+          }
+          const escaped = root.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&')
+          text = text.replace(new RegExp(`(^|[\\s\x60>])${escaped}(?=[/\x60<\\s]|$)`, 'gu'), `$1<fixture-${name}>`)
+        }
+        part.text = text
+        normalizedFields.push(`${field} (fixture roots only)`)
+      }
+    }
     return {
       json: JSON.stringify(body, (_key, value: unknown) => {
         const record = readRecord(value)
@@ -3825,7 +3960,7 @@ text(result.output);
           ? Object.fromEntries(Object.keys(record).sort().map((key) => [key, record[key]]))
           : value
       }),
-      normalizedFields: [...identities.map(([, , field]) => field), `${turnMetadataPath}.turn_started_at_unix_ms`],
+      normalizedFields,
     }
   }
 
@@ -3841,11 +3976,11 @@ text(result.output);
       tools: [{ type: 'function', name: 'synthetic_tool', parameters: { type: 'object' } }],
       client_metadata: {
         session_id: identity, thread_id: identity, turn_id: identity,
-        root_turn_id: identity, 'x-codex-window-id': identity,
+        root_turn_id: identity, 'x-codex-window-id': identity, 'x-codex-installation-id': identity,
         static_client: 'synthetic',
         'x-codex-turn-metadata': JSON.stringify({
           session_id: identity, thread_id: identity, turn_id: identity,
-          window_id: identity, context_window_id: identity, root_turn_id: identity,
+          window_id: identity, context_window_id: identity, root_turn_id: identity, installation_id: identity,
           turn_started_at_unix_ms: identity === 'a' ? 1 : 2,
           static_route: { mode: 'synthetic' },
         }),
@@ -3875,12 +4010,234 @@ text(result.output);
       change(body)
       expect(normalizeSharedSchemaFirstInputForEquality(JSON.stringify(body)).json === normalized.json).toBe(false)
     }
+    const fixturePaths = (identity: string): Array<readonly [string, 'codex-home' | 'workspace' | 'temporary-directory']> => [
+      [`/tmp/first-input-${identity}`, 'temporary-directory'],
+      [`/tmp/first-input-${identity}/home`, 'codex-home'],
+      [`/tmp/first-input-${identity}/workspace`, 'workspace'],
+      [`/private/tmp/first-input-${identity}`, 'temporary-directory'],
+      [`/private/tmp/first-input-${identity}/home`, 'codex-home'],
+      [`/private/tmp/first-input-${identity}/workspace`, 'workspace'],
+    ]
+    const pathFixture = (identity: string) => {
+      const body = fixture(identity)
+      const root = `/tmp/first-input-${identity}`
+      body.input[2]!.content = [
+        { type: 'input_text', text: 'SYNTHETIC unchanged context' },
+        { type: 'input_text', text: `<skills_instructions>Root: ${root}/home/skills/.system` },
+        { type: 'input_text', text: `<permissions instructions>Writable: ${root} ${root}/workspace; read-only: /unrelated` },
+      ]
+      body.input[5]!.content[0]!.text = `<environment_context><cwd>${root}/workspace</cwd><path>/private${root}/workspace/.git</path>`
+      return body
+    }
+    const pathBaseline = normalizeSharedSchemaFirstInputForEquality(JSON.stringify(pathFixture('a')), fixturePaths('a'))
+    expect(normalizeSharedSchemaFirstInputForEquality(JSON.stringify(pathFixture('b')), fixturePaths('b'))).toEqual(pathBaseline)
+    expect(pathBaseline.json).toContain('<fixture-codex-home>/skills/.system')
+    expect(pathBaseline.json).toContain('<fixture-workspace>/.git')
+    expect(pathBaseline.json).toContain('<fixture-temporary-directory>')
+    expect(normalizeSharedSchemaFirstInputForEquality(JSON.stringify(pathFixture('b'))).json === pathBaseline.json).toBe(false)
+    for (const change of [
+      (body: ReturnType<typeof fixture>) => { body.input[2]!.content[1]!.text += ' Changed skill guidance.' },
+      (body: ReturnType<typeof fixture>) => { body.input[2]!.content[2]!.text = body.input[2]!.content[2]!.text.replace('Writable', 'Read-only') },
+      (body: ReturnType<typeof fixture>) => { body.input[5]!.content[0]!.text = body.input[5]!.content[0]!.text.replace('/.git', '/.aws') },
+      (body: ReturnType<typeof fixture>) => { body.input[2]!.content[2]!.text += ' /tmp/first-input-b-unrelated' },
+      (body: ReturnType<typeof fixture>) => { body.input[0]!.content[0]!.text = '/tmp/first-input-b/workspace' },
+    ]) {
+      const body = pathFixture('b')
+      change(body)
+      expect(normalizeSharedSchemaFirstInputForEquality(JSON.stringify(body), fixturePaths('b')).json === pathBaseline.json).toBe(false)
+    }
+    const otherPaths = pathFixture('b')
+    otherPaths.input[2]!.content[2]!.text += ' /tmp/first-input-b-unrelated /other/tmp/first-input-b/workspace'
+    const preservedPaths = normalizeSharedSchemaFirstInputForEquality(JSON.stringify(otherPaths), fixturePaths('b')).json
+    expect(preservedPaths).toContain('/tmp/first-input-b-unrelated')
+    expect(preservedPaths).toContain('/other/tmp/first-input-b/workspace')
+    const wrongContext = pathFixture('b')
+    wrongContext.input[5]!.content[0]!.text = '<user_message>Unexpected context'
+    expect(() => normalizeSharedSchemaFirstInputForEquality(JSON.stringify(wrongContext), fixturePaths('b'))).toThrow()
+    expect(() => normalizeSharedSchemaFirstInputForEquality(JSON.stringify(pathFixture('b')), [['/', 'workspace']])).toThrow()
     for (const invalidMetadata of ['not-json', '[]', '{}']) {
       const body = fixture('b')
       body.client_metadata['x-codex-turn-metadata'] = invalidMetadata
       expect(() => normalizeSharedSchemaFirstInputForEquality(JSON.stringify(body))).toThrow()
     }
   })
+
+  it.each(['direct', 'group'] as const)(
+    'common list limit description preserves complete first provider input (%s)',
+    { timeout: TURN_TIMEOUT_MS * 2 }, async (scope) => {
+      const manifest = await readAssistantCliLlmsFullManifestFromCliEntry({
+        cliEntryPath: fileURLToPath(new URL('../../cli/dist/bin.js', import.meta.url)),
+        workingDirectory: fileURLToPath(new URL('../../../', import.meta.url)),
+      })
+      const description = 'Maximum number of results to return, from 1 to 200.'
+      expect(manifest.commands.find((command) => command.name === 'event list')
+        ?.schema?.options?.properties?.limit?.description).toBe(description)
+      // Reverse only the common limit description in the REAL complete manifest.
+      // Keep every command, numeric constraint, output contract and other field.
+      let restoredDescriptions = 0
+      const baselineManifest = JSON.parse(JSON.stringify(manifest, (key, value: unknown) => {
+        if (key === 'description' && value === description) {
+          restoredDescriptions += 1
+          return 'Maximum number of results to return.'
+        }
+        return value
+      })) as typeof manifest
+      expect(restoredDescriptions).toBeGreaterThan(0)
+      const contracts = [baselineManifest, manifest].map(buildAssistantCliSurfaceContract)
+      expect(contracts.every((contract) => typeof contract === 'string' && contract.length > 0)).toBe(true)
+      expect(contracts[1] === contracts[0]).toBe(true)
+      const groupConversation = scope === 'group'
+      const tools: readonly AssistantProviderDynamicTool[] = resolveMurphDynamicTools({
+        allowFinishWithoutReply: true, assistantConfigurationAvailable: !groupConversation,
+        automationAvailable: true, groupAssistantConfigurationAvailable: groupConversation,
+        groupAvailable: !groupConversation, groupChallengeResponseCardsAvailable: groupConversation,
+        groupSharedReadAvailable: groupConversation, imageGenerationAvailable: false,
+        progressUpdatesAvailable: false, responseCardsAvailable: !groupConversation,
+      })
+      const registeredToolsJson = JSON.stringify(tools)
+      const prompts = contracts.map((assistantCliContract) => {
+        const layers = buildAssistantSystemPromptLayers({
+          assistantCliContract, assistantHostedAutomationAvailable: true,
+          assistantHostedGroupToolSurface: groupConversation ? 'shared_read' : 'families',
+          assistantProgressUpdatesAvailable: false, assistantStyleSettingsAvailable: false,
+          channel: 'linq', cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+          conversationScope: scope, currentLocalDate: '2026-04-11',
+          currentInstant: '2026-04-11T12:00:00.000Z', currentTimeZone: 'UTC',
+          hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic',
+          onboardingGuidance: false, ordinaryInboundTurn: true,
+        })
+        return {
+          developerInstructions: [layers.staticCacheableCorePrompt,
+            layers.stableRouteCapabilityPrompt, layers.threadContextPrompt].join('\n\n'),
+          prompt: [layers.dynamicTurnContextPrompt,
+            'Pull up to 1,000 of my saved notes tagged trip-log and list their titles.'].join('\n\n'),
+        }
+      })
+      // Boolean equality avoids printing complete prompts on assertion failure.
+      expect(JSON.stringify(prompts[1]) === JSON.stringify(prompts[0])).toBe(true)
+      const scenario = await prepareScriptedTurnScenario()
+      const modelCatalogJson = await writeHostedOpenAiMixedModeModelCatalogJson({
+        codexCommand: scenario.turnInput.codexCommand, directory: scenario.turnInput.codexHome,
+      })
+      const captures = []
+      for (const composed of prompts) {
+        await stopWarmCodexAppServer()
+        scenario.stub.markRequestBaseline()
+        scenario.stub.captureProviderRequestDiagnostics({ completeInput: true })
+        scenario.stub.queue({ text: 'SYNTHETIC_LIST_LIMIT_INPUT_CAPTURED' })
+        const result = await executeCodexAppServerTurn({
+          ...scenario.turnInput, ...composed, baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          dynamicTools: tools, groupConversation,
+          env: { ...scenario.turnInput.env, [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: modelCatalogJson },
+        })
+        // One scripted provider request, no tool call, card, or runtime issue.
+        expect(scenario.stub.requestCountSinceBaseline()).toBe(1)
+        expect(result.finalMessage).toBe('SYNTHETIC_LIST_LIMIT_INPUT_CAPTURED')
+        expect(result.responseCard).toBeNull()
+        expect(result.runtimeIssueInputs).toEqual([])
+        expect(result.jsonEvents.filter((event) => readRecord(event)?.method === 'item/tool/call')).toEqual([])
+        expect(JSON.stringify(tools)).toBe(registeredToolsJson)
+        const summary = scenario.stub.requestSummariesSinceBaseline()[0]
+        const capture = summary?.completeProviderInput
+        const wire = summary?.providerRequestDiagnostics
+        if (!capture || !wire) throw new Error('Missing complete first provider input.')
+        for (const text of [MURPH_CODEX_BASE_INSTRUCTIONS, composed.developerInstructions, composed.prompt]) {
+          expect(capture.json.includes(JSON.stringify(text.trim()).slice(1, -1))).toBe(true)
+        }
+        const visible = readProviderNativeTools(capture.json).filter((tool) => tool.namespace === 'murph')
+        const eager = tools.filter((tool) => tool.deferLoading !== true)
+        expect(visible.map((tool) => tool.name).sort()).toEqual(eager.map((tool) => tool.name).sort())
+        for (const tool of eager) {
+          const observed = visible.find((candidate) => candidate.name === tool.name)
+          if (!observed) throw new Error(`Missing eager ${tool.name} on provider wire.`)
+          assertModelVisibleToolContract(tool, observed)
+        }
+        captures.push({
+          capture, wire, equality: normalizeSharedSchemaFirstInputForEquality(capture.json),
+        })
+      }
+      const [baseline, candidate] = captures
+      if (!baseline || !candidate) throw new Error('Missing paired provider captures.')
+      // Print counts/digests only; never dump prompts, tools, or transport identities.
+      process.stdout.write(`[list-limit-first-input] ${JSON.stringify({
+        scope, restoredDescriptions,
+        registeredToolCount: tools.length,
+        registeredDeferredCount: tools.filter((tool) => tool.deferLoading === true).length,
+        completeWire: {
+          baseline: { utf8Bytes: baseline.wire.bytes, sha256: baseline.wire.sha256 },
+          candidate: { utf8Bytes: candidate.wire.bytes, sha256: candidate.wire.sha256 },
+          utf8ByteDelta: candidate.wire.bytes - baseline.wire.bytes,
+        },
+        raw: {
+          baselineUtf8Bytes: Buffer.byteLength(baseline.capture.json, 'utf8'),
+          candidateUtf8Bytes: Buffer.byteLength(candidate.capture.json, 'utf8'),
+        },
+        equality: {
+          normalizedFields: candidate.equality.normalizedFields,
+          excludedTransportFields: candidate.capture.excludedTransportFields,
+          baselineSha256: createHash('sha256').update(baseline.equality.json).digest('hex'),
+          candidateSha256: createHash('sha256').update(candidate.equality.json).digest('hex'),
+          identical: candidate.equality.json === baseline.equality.json,
+        },
+        targetTokenizer: { countBaseline: null, countCandidate: null, delta: null,
+          reason: 'Exact target tokenization is not part of this capture; scripted usage is not a token count.' },
+      })}\n`)
+      expect(candidate.capture.excludedTransportFields).toEqual(baseline.capture.excludedTransportFields)
+      expect(candidate.equality.normalizedFields).toEqual(baseline.equality.normalizedFields)
+      expect(candidate.equality.json === baseline.equality.json).toBe(true)
+    },
+  )
+
+  it.skipIf(process.env.MURPH_MEASURE_MEMORY_INPUT !== '1').each(['direct', 'group'] as const)(
+    'memory profile complete provider input (%s)', { timeout: TURN_TIMEOUT_MS }, async (scope) => {
+      const groupConversation = scope === 'group'
+      const scenario = await prepareScriptedTurnScenario()
+      for (let index = 0; index < 8; index += 1) {
+        await upsertMemory(scenario.turnInput.workingDirectory, {
+          now: new Date(Date.UTC(2030, 0, 1, 12, index)), section: 'Preferences',
+          text: `For synthetic activity ${index}, prefers brief suggestions with one optional next step.`,
+        })
+      }
+      const tools = resolveMurphDynamicTools({
+        allowFinishWithoutReply: true, assistantConfigurationAvailable: !groupConversation,
+        automationAvailable: true, groupAssistantConfigurationAvailable: groupConversation,
+        groupAvailable: !groupConversation, groupChallengeResponseCardsAvailable: groupConversation,
+        groupSharedReadAvailable: groupConversation, imageGenerationAvailable: false,
+        progressUpdatesAvailable: false, responseCardsAvailable: !groupConversation,
+      })
+      const layers = buildAssistantSystemPromptLayers({
+        assistantCliContract: null, assistantHostedAutomationAvailable: true,
+        assistantHostedGroupToolSurface: groupConversation ? 'shared_read' : 'families',
+        assistantProgressUpdatesAvailable: false, assistantStyleSettingsAvailable: false,
+        channel: 'linq', cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+        conversationScope: scope, currentLocalDate: '2030-01-10',
+        currentInstant: '2030-01-10T16:00:00.000Z', currentTimeZone: 'UTC',
+        hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic',
+        onboardingGuidance: false, ordinaryInboundTurn: true,
+      })
+      const developerInstructions = [layers.staticCacheableCorePrompt, layers.stableRouteCapabilityPrompt, layers.threadContextPrompt].join('\n\n')
+      const memory = groupConversation ? null : await readAssistantCurrentStatePrompt({ vaultRoot: scenario.turnInput.workingDirectory })
+      const prompt = [layers.dynamicTurnContextPrompt, memory, 'Suggest a brief reset for this evening.'].filter(Boolean).join('\n\n')
+      scenario.stub.markRequestBaseline()
+      scenario.stub.captureProviderRequestDiagnostics({ completeInput: true })
+      scenario.stub.queue({ text: 'SYNTHETIC_MEMORY_INPUT_CAPTURED' })
+      const result = await executeCodexAppServerTurn({
+        ...scenario.turnInput, baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        developerInstructions, dynamicTools: tools, groupConversation, prompt,
+      })
+      expect(result.finalMessage).toBe('SYNTHETIC_MEMORY_INPUT_CAPTURED')
+      expect(scenario.stub.requestCountSinceBaseline()).toBe(1)
+      const capture = scenario.stub.requestSummariesSinceBaseline()[0]?.completeProviderInput
+      if (!capture) throw new Error('Missing complete provider input')
+      const normalized = normalizeSharedSchemaFirstInputForEquality(capture.json)
+      const directory = process.env.MURPH_MEMORY_INPUT_OUTPUT_DIR
+      if (directory) {
+        await mkdir(directory, { recursive: true })
+        await writeFile(path.join(directory, `${scope}.json`), normalized.json)
+      }
+      process.stdout.write(`[memory-input] ${JSON.stringify({ scope, bytes: Buffer.byteLength(normalized.json), instructionsBytes: Buffer.byteLength(developerInstructions), memoryBytes: Buffer.byteLength(memory ?? ''), toolBytes: Buffer.byteLength(JSON.stringify(tools)) })}\n`)
+    },
+  )
 
   // Optional, synthetic, free measurement against the supplied PR3059 baseline.
   // Both phases retain its card recovery paragraph and identical canonical tools.
@@ -3937,15 +4294,15 @@ text(result.output);
     const prompt = [
       layers.dynamicTurnContextPrompt, 'Compare two synthetic routes: Amber takes ten minutes; Birch takes twenty minutes.',
     ].join('\n\n')
-    const scenario = await prepareScriptedTurnScenario()
-    const modelCatalogJson = await writeHostedOpenAiMixedModeModelCatalogJson({
-      codexCommand: scenario.turnInput.codexCommand,
-      directory: scenario.turnInput.codexHome,
-      ...(toolMode === 'code-only' ? { toolMode: 'code_mode_only' } : {}),
-    })
     const captures = []
     for (const phase of ['baseline', 'candidate'] as const) {
       await stopWarmCodexAppServer()
+      const scenario = await prepareScriptedTurnScenario()
+      const modelCatalogJson = await writeHostedOpenAiMixedModeModelCatalogJson({
+        codexCommand: scenario.turnInput.codexCommand,
+        directory: scenario.turnInput.codexHome,
+        ...(toolMode === 'code-only' ? { toolMode: 'code_mode_only' } : {}),
+      })
       scenario.stub.markRequestBaseline()
       scenario.stub.captureProviderRequestDiagnostics({ completeInput: true })
       scenario.stub.queue({ text: 'SYNTHETIC_FIRST_INPUT_CAPTURED' })
@@ -4009,6 +4366,14 @@ text(result.output);
       } else {
         expect(capture.json).not.toContain('MURPH_INPUT_SCHEMA_JSON:')
       }
+      const fixturePaths: Array<readonly [string, 'codex-home' | 'workspace' | 'temporary-directory']> = []
+      for (const [root, name] of [
+        [scenario.turnInput.codexHome, 'codex-home'],
+        [scenario.turnInput.workingDirectory, 'workspace'],
+        [tmpdir(), 'temporary-directory'],
+      ] as const) {
+        fixturePaths.push([root, name], [await realpath(root), name])
+      }
       captures.push({
         ...capture,
         phase,
@@ -4017,7 +4382,7 @@ text(result.output);
         visibleMurphToolCount: visibleMurphTools.length,
         bytes: Buffer.byteLength(capture.json, 'utf8'),
         sha256: createHash('sha256').update(capture.json).digest('hex'),
-        equalityInput: normalizeSharedSchemaFirstInputForEquality(capture.json),
+        equalityInput: normalizeSharedSchemaFirstInputForEquality(capture.json, fixturePaths),
       })
     }
     const [baseline, candidate] = captures
@@ -4044,13 +4409,13 @@ text(result.output);
         excludedTransportFields: candidate.excludedTransportFields,
       },
       equality: {
-        method: 'Decode x-codex-turn-metadata; normalize only the listed identity/timestamp fields. Preserve every other property/value and array order.',
+        method: 'Decode x-codex-turn-metadata; normalize listed identities/timestamp and exact fixture-owned roots in listed generated context fields. Preserve path suffixes, other text/properties, and array order.',
         normalizedFields: candidate.equalityInput.normalizedFields,
         baselineSha256: createHash('sha256').update(baseline.equalityInput.json).digest('hex'),
         candidateSha256: createHash('sha256').update(candidate.equalityInput.json).digest('hex'),
         identical: candidate.equalityInput.json === baseline.equalityInput.json,
       },
-      targetTokenizer: { countBaseline: null, countCandidate: null, delta: null, reason: 'No exact Terra tokenizer is configured for this measurement; synthetic provider usage is not tokenization.' },
+      targetTokenizer: { countBaseline: null, countCandidate: null, delta: null, reason: 'No exact Sol tokenizer is configured for this measurement; synthetic provider usage is not tokenization.' },
     })}\n`)
     expect(candidate.excludedTransportFields).toEqual(baseline.excludedTransportFields)
     // Remove only the exact added suffixes, after validating actual native
@@ -4060,7 +4425,7 @@ text(result.output);
       const suffix = supplementedTools[index]!.description.slice(tools[index]!.description.length)
       withoutSupplements = withoutSupplements.replaceAll(JSON.stringify(suffix).slice(1, -1), '')
     }
-    expect(withoutSupplements, 'whole first request differs only by derived supplements and listed transport identities').toBe(baseline.equalityInput.json)
+    expect(withoutSupplements === baseline.equalityInput.json, 'whole first request differs only by derived supplements and listed fixture identities').toBe(true)
     expect(registrationBytes.candidate).toBeGreaterThan(registrationBytes.baseline)
   })
 
@@ -4091,7 +4456,7 @@ text(result.output);
     })
   })
 
-  it('uses exact Terra mixed mode to discover a condition reminder schema before one save', {
+  it('uses exact GPT-6 Sol mixed mode to discover a condition reminder schema before one save', {
     timeout: TURN_TIMEOUT_MS,
   }, async () => {
     expect(MURPH_AUTOMATION_TOOL.deferLoading).toBe(true)
@@ -4172,6 +4537,7 @@ text(result.output);
 
     const result = await executeCodexAppServerTurn({
       ...scenario.turnInput,
+      model: 'gpt-6-sol',
       dynamicTools: [MURPH_AUTOMATION_TOOL, ...MURPH_GROUP_FAMILY_TOOLS],
       env: {
         ...scenario.turnInput.env,
@@ -4223,7 +4589,7 @@ text(result.output);
 
     const summaries = scenario.stub.requestSummariesSinceBaseline()
     expect(summaries[0]).toMatchObject({
-      model: 'gpt-5.6-terra',
+      model: 'gpt-6-sol',
       providerRequestDiagnostics: {
         includesAllTools: true,
         includesAutomation: false,
@@ -7356,7 +7722,7 @@ if (!tool) {
     expect(result.finalMessage).not.toMatch(/no (?:future|later) delivery/iu)
   })
 
-  it('preserves current response-card shapes and rejects legacy-only nutrition authoring through the real App Server boundary', {
+  it('preserves current response-card shapes and rejects unverified workouts and legacy-only nutrition authoring through the real App Server boundary', {
     timeout: TURN_TIMEOUT_MS,
   }, async () => {
     const completedWorkoutCard = {
@@ -7448,7 +7814,7 @@ if (!tool) {
             namespace: 'murph',
           },
         },
-        { text: 'CARD_ATTACHED' },
+        { text: 'workout' in card ? 'WORKOUT_CARD_UNAVAILABLE' : 'CARD_ATTACHED' },
       )
 
       const result = await executeCodexAppServerTurn({
@@ -7472,18 +7838,21 @@ if (!tool) {
         'meal totals --from <date> --to <same-date> --resolve-goals --format json',
       )
       expect(JSON.stringify(discovered)).not.toContain('goal list --status active')
-      expect(result.runtimeIssueInputs).toEqual([])
       if ('workout' in card) {
-        expect(result.responseCard).toMatchObject({
-          ...card,
-          tracking: {
-            ...card.tracking,
-            snapshotAt: expect.stringMatching(
-              /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u,
-            ),
-          },
-        })
+        expect(result.responseCard).toBeNull()
+        expect(result.runtimeIssueInputs).toEqual([
+          expect.objectContaining({
+            component: 'assistant.workout-card-editor',
+            errorCode: 'WORKOUT_CARD_EDITOR_UNAVAILABLE',
+          }),
+          expect.objectContaining({
+            component: 'assistant.codex-action',
+            errorCode: 'CODEX_DYNAMIC_TOOL_CALL_FAILED',
+          }),
+        ])
+        expect(result.finalMessage).toBe('WORKOUT_CARD_UNAVAILABLE')
       } else {
+        expect(result.runtimeIssueInputs).toEqual([])
         expect(result.responseCard).toEqual(card)
       }
     }
@@ -7944,6 +8313,10 @@ if (!tool) {
     timeout: TURN_TIMEOUT_MS,
   }, async () => {
     const scenario = await prepareScriptedTurnScenario()
+    const modelCatalogJson = await writeHostedOpenAiMixedModeModelCatalogJson({
+      codexCommand: scenario.turnInput.codexCommand,
+      directory: scenario.turnInput.codexHome,
+    })
     scenario.stub.captureProviderRequestDiagnostics()
     const automationRequests: unknown[] = []
     scenario.stub.queue(
@@ -8009,15 +8382,18 @@ if (!tool) {
         },
         vaultFileSendAvailable: false,
       },
-      model: 'gpt-5.4',
+      env: {
+        ...scenario.turnInput.env,
+        [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: modelCatalogJson,
+      },
       prompt: 'Discover the supported group-avatar path, save the reminder, then reply exactly NATIVE_TOOL_SEARCH_OK.',
     })
 
     const summaries = scenario.stub.requestSummariesSinceBaseline()
     expect(summaries[0]).toMatchObject({
-      model: 'gpt-5.4',
+      model: SCRIPTED_MODEL,
       providerRequestDiagnostics: {
-        includesAllTools: false,
+        includesAllTools: true,
         includesAutomation: false,
         includesGroup: false,
         includesGroupEmail: false,
@@ -8292,7 +8668,7 @@ if (!tool) {
     expect(recoveryResult.finalMessage).toBe('PHYSICAL_NOTE_RECOVERY_OK')
   })
 
-  it('keeps narrow group reads eager beside deferred Terra tools', {
+  it('keeps narrow group reads eager beside deferred Sol tools', {
     timeout: TURN_TIMEOUT_MS,
   }, async () => {
     const scenario = await prepareScriptedTurnScenario()
@@ -8361,6 +8737,7 @@ text(JSON.stringify(result));
       },
     })
     expect(groupSharedRequests).toEqual([{
+      includeCompanionPresence: true,
       projectionScopes: [{ projectionKind: 'steps-days.v0' }],
     }])
     const groupOutput = summaries[1]?.customToolCallOutputs?.join('\n') ?? ''
@@ -8378,24 +8755,22 @@ text(JSON.stringify(result));
     const assistantInputId = `ain_${'g'.repeat(32)}`
     const configurationRequests: unknown[] = []
     const groupSnapshot = (
-      model: 'gpt-5.6-sol' | 'gpt-5.6-terra',
+      model: 'gpt-5.6-sol' | 'gpt-6-sol',
     ): HostedRuntimeAssistantConfigurationSnapshot => ({
       availableModels: [
         'gpt-5.6-luna',
-        'gpt-5.6-terra',
+        'gpt-6-sol',
         'gpt-5.6-sol',
       ],
-      availableProviders: ['openai'],
       availableReasoningEfforts: ['low'],
       configurationAvailable: true,
       dormantSolPreference: false,
       model,
-      provider: 'openai' as const,
       reasoningEffort: 'low' as const,
       solAvailable: true,
     })
     const currentSnapshot = groupSnapshot('gpt-5.6-sol')
-    const updatedSnapshot = groupSnapshot('gpt-5.6-terra')
+    const updatedSnapshot = groupSnapshot('gpt-6-sol')
     const groupDeveloperInstructions = buildAssistantSystemPrompt({
       assistantCliContract: null,
       assistantContextSnapshotPrompt: null,
@@ -8431,7 +8806,7 @@ text(JSON.stringify(result));
           input: `
 const result = await tools.murph__assistant_configuration({
   action: "update",
-  model: "gpt-5.6-terra",
+  model: "gpt-6-sol",
 });
 text(JSON.stringify(result));
 `,
@@ -8486,14 +8861,14 @@ text(JSON.stringify(result));
       },
       model: 'gpt-5.6-sol',
       prompt:
-        'Use the current group room request to switch this room to Terra, then reply exactly GROUP_MODEL_SWITCH_OK.',
+        'Use the current group room request to switch this room to GPT-6 Sol, then reply exactly GROUP_MODEL_SWITCH_OK.',
     })
 
     expect(configurationRequests).toEqual([
       {
         action: 'update',
         assistantInputId,
-        model: 'gpt-5.6-terra',
+        model: 'gpt-6-sol',
       },
     ])
     const summaries = scenario.stub.requestSummariesSinceBaseline()
@@ -8505,7 +8880,7 @@ text(JSON.stringify(result));
     const groupConfigurationOutput =
       summaries[1]?.customToolCallOutputs?.join('\n') ?? ''
     expect(groupConfigurationOutput).toContain('gpt-5.6-sol')
-    expect(groupConfigurationOutput).toContain('gpt-5.6-terra')
+    expect(groupConfigurationOutput).toContain('gpt-6-sol')
     expect(groupConfigurationOutput).toContain('next_turn')
     expect(groupConfigurationOutput).toContain('updated')
     expect(result.finalMessage).toBe('GROUP_MODEL_SWITCH_OK')
@@ -8521,7 +8896,7 @@ text(JSON.stringify(result));
     })
 
     expect(scenario.stub.requestSummariesSinceBaseline()[2]?.model).toBe(
-      'gpt-5.6-terra',
+      'gpt-6-sol',
     )
     expect(nextTurn.finalMessage).toBe('GROUP_MODEL_NEXT_TURN_OK')
     expect(nextTurn.sessionId).toBe(result.sessionId)
@@ -10420,6 +10795,595 @@ text(JSON.stringify(result));
     expect(result.turnId).toEqual(expect.any(String))
     expect(liveTurnReleased).toBe(1)
     expect(scenario.stub.requestCountSinceBaseline()).toBe(2)
+  })
+
+  async function runSteerDuringUnfinishedAnswer(input: {
+    configOverrides?: readonly string[]
+    holdMs: number
+    replacement: ScriptedResponse
+    followingReplacements?: readonly ScriptedResponse[]
+    turnInput?: Partial<Parameters<typeof executeCodexAppServerTurn>[0]>
+  }) {
+    const scenario = await prepareScriptedTurnScenario()
+    let partialSent!: () => void
+    const partial = new Promise<void>((resolve) => {
+      partialSent = resolve
+    })
+    scenario.stub.queue(
+      {
+        partialText: {
+          delta: 'STALE_UNFINISHED ',
+          holdMs: input.holdMs,
+          onSent: () => partialSent(),
+        },
+        text: 'STALE_UNFINISHED COMPLETE',
+      },
+      input.replacement,
+      ...(input.followingReplacements ?? []),
+    )
+    let steered: Promise<void> | null = null
+    const startedAt = Date.now()
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      ...input.turnInput,
+      ...(input.configOverrides ? { configOverrides: input.configOverrides } : {}),
+      onLiveTurn: (turn: CodexAppServerLiveTurn) => {
+        steered = partial.then(() =>
+          turn.steer({ prompt: 'Use the corrected synthetic detail.' }))
+        return () => {}
+      },
+      prompt: 'Answer the first synthetic message.',
+    })
+    expect(steered).not.toBeNull()
+    await steered
+    return {
+      elapsedMs: Date.now() - startedAt,
+      result,
+      stub: scenario.stub,
+    }
+  }
+
+  it('preempts an open SSE stream before its held tool call can execute', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    let requestStarted!: () => void
+    const firstRequest = new Promise<void>((resolve) => { requestStarted = resolve })
+    const marker = 'stale-steer-proof.txt'
+    scenario.stub.queue(
+      {
+        beforeRespond: async () => { requestStarted() },
+        delayAfterCreatedMs: 30_000,
+        functionCall: {
+          name: 'exec_command',
+          arguments: { cmd: `printf stale > ${marker}` },
+        },
+      },
+      {
+        requestIncludes: ['Use corrected detail before running tools.'],
+        requestExcludes: [marker],
+        text: 'STEERED_BEFORE_TOOL_OK',
+      },
+    )
+    let steered: Promise<void> | null = null
+    const startedAt = Date.now()
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      prompt: 'Answer the first synthetic message.',
+      onLiveTurn: (turn: CodexAppServerLiveTurn) => {
+        steered = firstRequest.then(() => turn.steer({
+          prompt: 'Use corrected detail before running tools.',
+        }))
+        return () => {}
+      },
+    })
+    expect(steered).not.toBeNull()
+    await steered
+    expect(result.finalMessage).toBe('STEERED_BEFORE_TOOL_OK')
+    expect(result.precedingAgentMessageSegments).toEqual([])
+    expect(scenario.stub.requestCountSinceBaseline()).toBe(2)
+    expect(Date.now() - startedAt).toBeLessThan(20_000)
+    await expect(readFile(path.join(scenario.turnInput.workingDirectory, marker)))
+      .rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it('preempts an unfinished SSE answer on steer and delivers only the steered reply', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const { elapsedMs, result, stub } = await runSteerDuringUnfinishedAnswer({
+      holdMs: 30_000,
+      replacement: {
+        requestIncludes: ['Use the corrected synthetic detail.'],
+        requestExcludes: ['STALE_UNFINISHED'],
+        text: 'STEERED_FINAL_OK',
+      },
+    })
+
+    expect(result.finalMessage).toBe('STEERED_FINAL_OK')
+    expect(result.precedingAgentMessageSegments).toEqual([])
+    expect(stub.abortedResponseCountSinceBaseline()).toBe(1)
+    expect(stub.requestCountSinceBaseline()).toBe(2)
+    expect(elapsedMs).toBeLessThan(20_000)
+  })
+
+  it('keeps the queued steer behavior when a caller explicitly disables instant steering', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const { elapsedMs, result, stub } = await runSteerDuringUnfinishedAnswer({
+      configOverrides: ['features.instant_interrupt=false'],
+      holdMs: 3_000,
+      replacement: {
+        requestIncludes: [
+          'STALE_UNFINISHED COMPLETE',
+          'Use the corrected synthetic detail.',
+        ],
+        text: 'STEERED_FINAL_OK',
+      },
+    })
+
+    expect(result.finalMessage).toBe('STEERED_FINAL_OK')
+    expect(result.precedingAgentMessageSegments.map((segment) => segment.response))
+      .toEqual(['STALE_UNFINISHED COMPLETE'])
+    expect(stub.abortedResponseCountSinceBaseline()).toBe(0)
+    expect(stub.requestCountSinceBaseline()).toBe(2)
+    expect(elapsedMs).toBeGreaterThanOrEqual(3_000)
+  })
+
+  it('does not reuse unfinished preempted text when the steered reply has no text', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const { result, stub } = await runSteerDuringUnfinishedAnswer({
+      holdMs: 30_000,
+      replacement: {
+        requestIncludes: ['Use the corrected synthetic detail.'],
+        text: '',
+      },
+    })
+
+    expect(stub.abortedResponseCountSinceBaseline()).toBe(1)
+    expect(result.finalMessage ?? '').not.toContain('STALE_UNFINISHED')
+    expect(result.precedingAgentMessageSegments).toEqual([])
+  })
+
+  it('keeps a no-reply code-mode cell and its nested Murph tools inside their turn', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    let phase: 'turn-one' | 'between-turns' | 'turn-two' = 'turn-one'
+    const nestedCalls: Array<{ lookup: string, phase: string }> = []
+    let releaseFirstCall!: () => void
+    const firstCallGate = new Promise<void>((resolve) => {
+      releaseFirstCall = resolve
+    })
+    scenario.stub.queue(
+      {
+        customToolCall: {
+          input: `// @exec: {"yield_time_ms": 1000}
+const first = await tools.murph__automation({ action: "inspect", lookup: "first-call" });
+const second = await tools.murph__automation({ action: "inspect", lookup: "after-interrupt" });
+text(JSON.stringify([first.lookupId, second.lookupId]));
+`,
+          name: 'exec',
+        },
+      },
+      {
+        functionCall: {
+          arguments: {},
+          name: 'finish_without_reply',
+          namespace: 'murph',
+        },
+        requestIncludes: ['Script running'],
+      },
+      { requestExcludes: ['SYNTHETIC_TURN_TWO'], text: '' },
+      { requestIncludes: ['SYNTHETIC_TURN_TWO'], text: 'TURN_TWO_OK' },
+    )
+    const turnInput = {
+      ...scenario.turnInput,
+      allowFinishWithoutReply: true,
+      dynamicTools: [MURPH_AUTOMATION_TOOL, MURPH_FINISH_WITHOUT_REPLY_TOOL],
+      hostedToolContext: {
+        automationTool: {
+          request: async (request: AssistantHostedAutomationToolRequest) => {
+            const lookup = 'lookup' in request ? String(request.lookup) : 'none'
+            nestedCalls.push({ lookup, phase })
+            if (lookup === 'first-call') {
+              // Stay in flight past the cell yield and the no-reply interrupt.
+              setTimeout(releaseFirstCall, 4_000)
+              await firstCallGate
+            }
+            return {
+              action: 'inspect' as const,
+              automationId: `automation-${lookup}`,
+              effectiveTimeZone: 'America/Chicago',
+              lookupId: lookup,
+              occurrenceProjection: {
+                nextOccurrenceAt: '2026-08-11T03:00:00.000Z',
+                status: 'resolved' as const,
+              },
+              routeBinding: 'preserved' as const,
+              schedule: {
+                kind: 'dailyLocal' as const,
+                localTime: '22:00',
+                timeZone: 'America/Chicago',
+              },
+              status: 'active' as const,
+              updatedAt: '2026-08-10T00:00:00.000Z',
+            }
+          },
+        },
+        computerToolsAvailable: false,
+        currentHostedDeliveryContext: () => null,
+        currentHostedMailboxItemIds: () => [],
+        sendVaultFile: async () => {
+          throw new Error('Vault file sends are unavailable in this test.')
+        },
+        vaultFileSendAvailable: false,
+      },
+    }
+
+    const first = await executeCodexAppServerTurn({
+      ...turnInput,
+      prompt: 'Inspect the synthetic reminder, then decide whether to reply.',
+    })
+    phase = 'between-turns'
+    await delay(2_000)
+    phase = 'turn-two'
+    const second = await executeCodexAppServerTurn({
+      ...turnInput,
+      prompt: 'SYNTHETIC_TURN_TWO',
+      resumeSessionId: first.sessionId,
+    })
+    await delay(1_000)
+
+    // Murph drains its own in-flight tool before the no-reply turn closes, so
+    // the cell finishes inside turn one and nothing reaches the resumed turn.
+    expect(first.finalAction).toEqual(expect.objectContaining({ kind: 'none' }))
+    expect(nestedCalls).toEqual([
+      { lookup: 'first-call', phase: 'turn-one' },
+      { lookup: 'after-interrupt', phase: 'turn-one' },
+    ])
+    expect(second.finalMessage).toBe('TURN_TWO_OK')
+  })
+
+  it.each([
+    { codeModeInterrupt: true, interruptAfterMs: 200 },
+    { codeModeInterrupt: false, interruptAfterMs: 200 },
+    // Without an interrupt the flag is not consulted; the Murph default applies.
+    { codeModeInterrupt: null, interruptAfterMs: null },
+  ])('code_mode_interrupt=$codeModeInterrupt interrupt=$interruptAfterMs never carries a yielded cell tool into the next turn', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async ({ codeModeInterrupt, interruptAfterMs }) => {
+    const timeline: string[] = []
+    const onTraceEvent = (event: { rawEvent: unknown }) => {
+      const method = readRecord(event.rawEvent)?.method
+      if (method === 'turn/completed' || method === 'turn/started') {
+        timeline.push(String(method))
+      }
+    }
+    const scenario = await prepareScriptedTurnScenario()
+    let phase: 'turn-one' | 'between-turns' | 'turn-two' = 'turn-one'
+    const nestedCalls: Array<{ lookup: string, phase: string }> = []
+    let releaseFirstCall!: () => void
+    const firstCallGate = new Promise<void>((resolve) => {
+      releaseFirstCall = resolve
+    })
+    let firstCallStarted!: () => void
+    const firstCallStartedPromise = new Promise<void>((resolve) => {
+      firstCallStarted = resolve
+    })
+    scenario.stub.queue(
+      {
+        customToolCall: {
+          input: `// @exec: {"yield_time_ms": 1000}
+const first = await tools.murph__automation({ action: "inspect", lookup: "first-call" });
+const second = await tools.murph__automation({ action: "inspect", lookup: "after-interrupt" });
+text(JSON.stringify([first.lookupId, second.lookupId]));
+`,
+          name: 'exec',
+        },
+        requestExcludes: ['SYNTHETIC_TURN_TWO'],
+      },
+      { requestExcludes: ['SYNTHETIC_TURN_TWO'], text: '' },
+      { requestExcludes: ['SYNTHETIC_TURN_TWO'], text: '' },
+      { requestIncludes: ['SYNTHETIC_TURN_TWO'], text: 'TURN_TWO_OK' },
+      { requestIncludes: ['SYNTHETIC_TURN_TWO'], text: 'TURN_TWO_OK' },
+    )
+    const turnInput = {
+      ...scenario.turnInput,
+      ...(codeModeInterrupt === null
+        ? {}
+        : { configOverrides: [`features.code_mode_interrupt=${codeModeInterrupt}`] }),
+      dynamicTools: [MURPH_AUTOMATION_TOOL],
+      hostedToolContext: {
+        automationTool: {
+          request: async (request: AssistantHostedAutomationToolRequest) => {
+            const lookup = 'lookup' in request ? String(request.lookup) : 'none'
+            nestedCalls.push({ lookup, phase })
+            timeline.push(`murph-tool:${lookup}:${phase}`)
+            if (lookup === 'first-call') {
+              firstCallStarted()
+              await firstCallGate
+            }
+            return {
+              action: 'inspect' as const,
+              automationId: `automation-${lookup}`,
+              effectiveTimeZone: 'America/Chicago',
+              lookupId: lookup,
+              occurrenceProjection: {
+                nextOccurrenceAt: '2026-08-11T03:00:00.000Z',
+                status: 'resolved' as const,
+              },
+              routeBinding: 'preserved' as const,
+              schedule: {
+                kind: 'dailyLocal' as const,
+                localTime: '22:00',
+                timeZone: 'America/Chicago',
+              },
+              status: 'active' as const,
+              updatedAt: '2026-08-10T00:00:00.000Z',
+            }
+          },
+        },
+        computerToolsAvailable: false,
+        currentHostedDeliveryContext: () => null,
+        currentHostedMailboxItemIds: () => [],
+        sendVaultFile: async () => {
+          throw new Error('Vault file sends are unavailable in this test.')
+        },
+        vaultFileSendAvailable: false,
+      },
+    }
+
+    let interrupted: Promise<void> | null = null
+    let interruptOutcome = 'not-requested'
+    let firstSessionId: string | null = null
+    let firstOutcome: string
+    try {
+      const first = await executeCodexAppServerTurn({
+        ...turnInput,
+        onTraceEvent,
+        onLiveTurn: (turn: CodexAppServerLiveTurn) => {
+          interrupted = firstCallStartedPromise
+            .then(async () => {
+              if (interruptAfterMs === null) return
+              await delay(interruptAfterMs)
+              await turn.interrupt().then(
+                () => { interruptOutcome = 'accepted' },
+                (error: unknown) => {
+                  interruptOutcome = `rejected:${error instanceof Error ? error.message : 'unknown'}`
+                },
+              )
+            })
+            .finally(() => setTimeout(releaseFirstCall, 2_000))
+          return () => {}
+        },
+        prompt: 'Inspect the synthetic reminder.',
+      })
+      firstOutcome = `completed:${first.finalMessage}`
+      firstSessionId = first.sessionId
+    } catch (error) {
+      firstOutcome = `failed:${error instanceof Error ? error.message.slice(0, 120) : 'unknown'}`
+    }
+    await interrupted
+    phase = 'between-turns'
+    await delay(3_000)
+    phase = 'turn-two'
+    let secondOutcome: string
+    try {
+      const second = await executeCodexAppServerTurn({
+        ...turnInput,
+        onTraceEvent,
+        prompt: 'SYNTHETIC_TURN_TWO',
+        ...(firstSessionId ? { resumeSessionId: firstSessionId } : {}),
+      })
+      secondOutcome = `completed:${second.finalMessage}`
+    } catch (error) {
+      secondOutcome = `failed:${error instanceof Error ? error.message.slice(0, 120) : 'unknown'}`
+    }
+    await delay(1_000)
+
+    // App Server aborts a turn's pending server requests when the turn ends,
+    // so a yielded cell cannot carry a nested Murph tool into the next turn.
+    expect(interruptOutcome).toBe(interruptAfterMs === null ? 'not-requested' : 'accepted')
+    expect(firstOutcome).toMatch(interruptAfterMs === null ? /^completed:/u : /^failed:.*interrupted/u)
+    expect(nestedCalls).toEqual([{ lookup: 'first-call', phase: 'turn-one' }])
+    expect(timeline).toEqual([
+      'turn/started',
+      'murph-tool:first-call:turn-one',
+      'turn/completed',
+      'turn/started',
+      'turn/completed',
+    ])
+    expect(secondOutcome).toBe('completed:TURN_TWO_OK')
+  })
+
+  it('steers past a slow in-flight nested Murph tool without repeating its effect', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    const effects: string[] = []
+    let releaseEffect!: () => void
+    const effectGate = new Promise<void>((resolve) => {
+      releaseEffect = resolve
+    })
+    let effectStarted!: () => void
+    const effectStartedPromise = new Promise<void>((resolve) => {
+      effectStarted = resolve
+    })
+    let steeredRequestSeenBeforeEffectFinished = false
+    scenario.stub.queue(
+      {
+        customToolCall: {
+          input: `// @exec: {"yield_time_ms": 30000}
+const result = await tools.murph__automation({ action: "inspect", lookup: "slow-effect" });
+text(JSON.stringify(result.lookupId));
+`,
+          name: 'exec',
+        },
+      },
+      {
+        requestIncludes: ['Use the corrected synthetic detail.', 'Script running'],
+        respond: () => {
+          steeredRequestSeenBeforeEffectFinished = effects.length === 1
+          setTimeout(releaseEffect, 500)
+          return { text: 'STEERED_AFTER_YIELD_OK' }
+        },
+      },
+    )
+    let steered: Promise<void> | null = null
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      dynamicTools: [MURPH_AUTOMATION_TOOL],
+      hostedToolContext: {
+        automationTool: {
+          request: async (request: AssistantHostedAutomationToolRequest) => {
+            effects.push('lookup' in request ? String(request.lookup) : 'none')
+            effectStarted()
+            await effectGate
+            return {
+              action: 'inspect' as const,
+              automationId: 'automation-slow-effect',
+              effectiveTimeZone: 'America/Chicago',
+              lookupId: 'slow-effect',
+              occurrenceProjection: {
+                nextOccurrenceAt: '2026-08-11T03:00:00.000Z',
+                status: 'resolved' as const,
+              },
+              routeBinding: 'preserved' as const,
+              schedule: {
+                kind: 'dailyLocal' as const,
+                localTime: '22:00',
+                timeZone: 'America/Chicago',
+              },
+              status: 'active' as const,
+              updatedAt: '2026-08-10T00:00:00.000Z',
+            }
+          },
+        },
+        computerToolsAvailable: false,
+        currentHostedDeliveryContext: () => null,
+        currentHostedMailboxItemIds: () => [],
+        sendVaultFile: async () => {
+          throw new Error('Vault file sends are unavailable in this test.')
+        },
+        vaultFileSendAvailable: false,
+      },
+      onLiveTurn: (turn: CodexAppServerLiveTurn) => {
+        steered = effectStartedPromise.then(() =>
+          turn.steer({ prompt: 'Use the corrected synthetic detail.' }))
+        return () => {}
+      },
+      prompt: 'Inspect the synthetic reminder.',
+    })
+
+    await steered
+    expect(steeredRequestSeenBeforeEffectFinished).toBe(true)
+    expect(effects).toEqual(['slow-effect'])
+    expect(result.finalMessage).toBe('STEERED_AFTER_YIELD_OK')
+    expect(scenario.stub.requestCountSinceBaseline()).toBe(2)
+  })
+
+  it('incorporates rapid successive steers into one reply without stale preempted text', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    let firstPartialSent!: () => void
+    const firstPartial = new Promise<void>((resolve) => { firstPartialSent = resolve })
+    let secondPartialSent!: () => void
+    const secondPartial = new Promise<void>((resolve) => { secondPartialSent = resolve })
+    scenario.stub.queue(
+      {
+        partialText: { delta: 'STALE_FIRST ', holdMs: 30_000, onSent: () => firstPartialSent() },
+        text: 'STALE_FIRST COMPLETE',
+      },
+      {
+        partialText: { delta: 'STALE_SECOND ', holdMs: 30_000, onSent: () => secondPartialSent() },
+        requestIncludes: ['First synthetic correction.'],
+        requestExcludes: ['Second synthetic correction.'],
+        text: 'STALE_SECOND COMPLETE',
+      },
+      {
+        requestIncludes: ['First synthetic correction.', 'Second synthetic correction.'],
+        requestExcludes: ['STALE_FIRST', 'STALE_SECOND'],
+        text: 'BOTH_STEERS_OK',
+      },
+    )
+    const steers: Promise<void>[] = []
+    const startedAt = Date.now()
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      onLiveTurn: (turn: CodexAppServerLiveTurn) => {
+        steers.push(firstPartial.then(() =>
+          turn.steer({ prompt: 'First synthetic correction.' })))
+        steers.push(secondPartial.then(() =>
+          turn.steer({ prompt: 'Second synthetic correction.' })))
+        return () => {}
+      },
+      prompt: 'Answer the first synthetic message.',
+    })
+
+    await Promise.all(steers)
+    expect(result.finalMessage).toBe('BOTH_STEERS_OK')
+    expect(result.precedingAgentMessageSegments).toEqual([])
+    expect(scenario.stub.abortedResponseCountSinceBaseline()).toBe(2)
+    expect(scenario.stub.requestCountSinceBaseline()).toBe(3)
+    expect(Date.now() - startedAt).toBeLessThan(20_000)
+  })
+
+  it('keeps a steered media-only reply free of unfinished preempted text', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const media = [{
+      alt: 'Synthetic chart',
+      kind: 'image',
+      url: 'https://cdn.example.test/assistant/steered-chart.png',
+    }]
+    const { result, stub } = await runSteerDuringUnfinishedAnswer({
+      holdMs: 30_000,
+      replacement: {
+        functionCall: {
+          arguments: { media },
+          name: 'attach_response_media',
+          namespace: 'murph',
+        },
+        requestIncludes: ['Use the corrected synthetic detail.'],
+      },
+      followingReplacements: [{ text: '' }],
+      turnInput: { dynamicTools: [MURPH_ATTACH_RESPONSE_MEDIA_TOOL] },
+    })
+
+    expect(stub.abortedResponseCountSinceBaseline()).toBe(1)
+    expect(result.responseMedia).toEqual([
+      expect.objectContaining({ url: media[0]!.url }),
+    ])
+    expect(result.finalMessage ?? '').not.toContain('STALE_UNFINISHED')
+    expect(result.precedingAgentMessageSegments).toEqual([])
+  })
+
+  it('finishes a steered no-reply turn without delivering unfinished preempted text', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const { result, stub } = await runSteerDuringUnfinishedAnswer({
+      holdMs: 30_000,
+      replacement: {
+        functionCall: {
+          arguments: {},
+          name: 'finish_without_reply',
+          namespace: 'murph',
+        },
+        requestIncludes: ['Use the corrected synthetic detail.'],
+      },
+      followingReplacements: [{ text: '' }],
+      turnInput: {
+        allowFinishWithoutReply: true,
+        dynamicTools: [MURPH_FINISH_WITHOUT_REPLY_TOOL],
+      },
+    })
+
+    expect(stub.abortedResponseCountSinceBaseline()).toBe(1)
+    expect(result.finalAction).toEqual(expect.objectContaining({ kind: 'none' }))
+    expect(result.finalMessage ?? '').not.toContain('STALE_UNFINISHED')
+    expect(result.precedingAgentMessageSegments).toEqual([])
   })
 })
 

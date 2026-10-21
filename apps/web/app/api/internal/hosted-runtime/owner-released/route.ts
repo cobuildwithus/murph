@@ -5,13 +5,7 @@ import {
 import {
   requireHostedCloudflareCallbackRequest,
 } from "@/src/lib/hosted-execution/cloudflare-callback-auth";
-import {
-  readHostedRuntimeOwnerReleaseActionable,
-} from "@/src/lib/hosted-orchestration/runtime-reconciliation-facts";
-import {
-  signalHostedRuntimeOwnerReleasedRuntime,
-  signalHostedRuntimeRecheckRuntime,
-} from "@/src/lib/hosted-orchestration/signal-runtime";
+import { signalHostedRuntimeOwnerRelease } from "@/src/lib/hosted-orchestration/runtime-owner-release";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
 
@@ -21,22 +15,7 @@ export const POST = withJsonError(async (request: Request) => {
   });
   const ownerRelease = readOwnerRelease(request);
 
-  if (
-    !ownerRelease.immediateRecheckRequested
-    && !(await readHostedRuntimeOwnerReleaseActionable({ userId }))
-  ) {
-    return jsonOk({ signaled: false });
-  }
-
-  if (ownerRelease.runtimeAttemptId === null) {
-    await signalHostedRuntimeRecheckRuntime({ userId });
-  } else {
-    await signalHostedRuntimeOwnerReleasedRuntime({
-      runtimeAttemptId: ownerRelease.runtimeAttemptId,
-      userId,
-    });
-  }
-  return jsonOk({ signaled: true });
+  return jsonOk({ signaled: await signalHostedRuntimeOwnerRelease({ userId, ...ownerRelease }) });
 });
 
 function readOwnerRelease(request: Request): {

@@ -77,7 +77,14 @@ export async function enqueueHostedDeviceWebhook(input: {
     });
   }
   try {
-    return await controlClient.enqueueDeviceWebhook(envelope);
+    try {
+      return await controlClient.enqueueDeviceWebhook(envelope);
+    } catch (cause) {
+      if (!(cause instanceof TypeError) || cause.message !== "fetch failed") throw cause;
+      // A lost response may follow acceptance. Reuse the exact envelope so
+      // canonical prepared-event deduplication also covers the second send.
+      return await controlClient.enqueueDeviceWebhook(envelope);
+    }
   } catch (cause) {
     const controlFailure = readCloudflareHostedControlHttpError(cause);
     throw deviceSyncError({

@@ -1,3 +1,5 @@
+import { boundUsageRequestCliTiming } from "../usage-record-body.ts";
+import type { RuntimeProviderCaller } from "../runtime-provider-authorization.ts";
 import { beginHostedRuntimeUsageSettlement } from "../runtime-usage-settlement.ts";
 import { type readHostedExecutionEnvironment } from "../env.ts";
 import {
@@ -44,7 +46,7 @@ import {
 import {
   addRunnerMailboxCryptoContextRequest,
   handleRunnerMailboxPayloadDecodeRequest,
-  decodeRunnerMailboxFetchResponse,
+  completeRunnerMailboxFetchResponse,
 } from "./mailbox-payload-decode.ts";
 import {
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PATH,
@@ -61,17 +63,20 @@ import {
   HOSTED_RUNTIME_ATTEMPT_ID_HEADER,
   HOSTED_RUNTIME_LEASE_GENERATION_HEADER,
   HOSTED_WEB_CONTROL_FORWARDED_RESPONSE_HEADER,
+  readHostedRuntimeFetchCorrelationId,
 } from "./headers.ts";
 
 const HOSTED_RUNNER_WEB_CONTROL_BODY_LIMIT_BYTES = 256 * 1024;
 
 export async function handleRunnerWebControlRequest(input: {
+  caller?: RuntimeProviderCaller;
   env: RunnerOutboundEnvironmentSource;
   environment: ReturnType<typeof readHostedExecutionEnvironment>;
   request: Request;
   url: URL;
   userId: string;
 }): Promise<Response> {
+  const requestStartedAt = performance.now();
   const policy = readHostedRunnerWebControlPolicy({
     method: input.request.method,
     path: input.url.pathname,
@@ -132,7 +137,6 @@ export async function handleRunnerWebControlRequest(input: {
   // The allowlist above already proved each operation's HTTP method.
   const isCheckpointRequest = policy.operation === "workspace_checkpoint";
   const isUsageRecordRequest = policy.operation === "usage_recording";
-  const isBrowserVaultReplicaPublishRequest = policy.operation === "browser_vault_replica_publish";
   const isDeviceSyncRuntimeSnapshotRequest = policy.operation === "device_sync_runtime_snapshot";
   const isVaultShareDeliveryRequest = policy.operation === "vault_share_deliver";
   const vaultShareEffectDeadlineAtEpochMs = isVaultShareDeliveryRequest
@@ -222,8 +226,10 @@ export async function handleRunnerWebControlRequest(input: {
       String(vaultShareEffectDeadlineAtEpochMs),
     );
   }
+  const forwardStartedAt = performance.now();
+  const webControlTiming: { prepareMs?: number; fetchHeadersMs?: number } = {};
   const response = await forwardWithRuntimeUsageSettlement({
-    env: input.env, userId: input.userId, writeAuthority, body, usageRecord: isUsageRecordRequest,
+    caller: input.caller, env: input.env, userId: input.userId, writeAuthority, body, usageRecord: isUsageRecordRequest,
     forward: () => fetchHostedExecutionWebControlPlaneResponse({
       ...(input.environment.hostedWebAllowHttpHosts
         ? { allowHttpHosts: input.environment.hostedWebAllowHttpHosts }
@@ -232,6 +238,7 @@ export async function handleRunnerWebControlRequest(input: {
       body,
       boundUserId: input.userId,
       callbackSigning: input.environment.webCallbackSigning,
+      timing: webControlTiming,
       method: requestMethod,
       path: input.url.pathname,
       search: input.url.search || null,
@@ -251,6 +258,9 @@ export async function handleRunnerWebControlRequest(input: {
         : input.environment.webControlTimeoutMs,
     }),
   });
+  const mailboxResponse = policy.operation === "mailbox_fetch"
+    ? await completeRunnerMailboxFetchResponse({ ...input, response, body, requestStartedAt, forwardStartedAt, webControlTiming })
+    : null;
   const responseBodyMetadata = response.ok || isClinicalRecordsRequest
     ? {}
     : await readHostedRunnerSafeResponseBodyMetadata(response.clone());
@@ -260,6 +270,8 @@ export async function handleRunnerWebControlRequest(input: {
       contentTypePresent: response.headers.has("content-type"),
       method,
       operation: policy.operation,
+      ...mailboxResponse?.timings,
+      ...readMailboxFetchCorrelationDetails(input.request, policy.operation, writeAuthority.attemptId),
       ...responseBodyMetadata,
       ...readHostedSnapshotResponseHeaderMetadata(
         response,
@@ -282,10 +294,7 @@ export async function handleRunnerWebControlRequest(input: {
     }
   }
 
-  if (response.ok && policy.operation === "mailbox_fetch"
-    && body && JSON.parse(body).decodeInlinePayloads === true) {
-    return decodeRunnerMailboxFetchResponse({ ...input, response });
-  }
+  if (mailboxResponse) return mailboxResponse.response;
 
   if (!isVaultShareDeliveryRequest) {
     return response;
@@ -299,14 +308,23 @@ export async function handleRunnerWebControlRequest(input: {
   });
 }
 
+function readMailboxFetchCorrelationDetails(
+  request: Request, operation: string, runtimeAttemptId: string,
+): Record<string, string> {
+  if (operation !== "mailbox_fetch") return {};
+  const mailboxFetchCorrelationId = readHostedRuntimeFetchCorrelationId(request.headers);
+  return mailboxFetchCorrelationId ? { mailboxFetchCorrelationId, runtimeAttemptId } : {};
+}
+
 async function forwardWithRuntimeUsageSettlement(input: {
+  caller?: RuntimeProviderCaller;
   env: RunnerOutboundEnvironmentSource; userId: string; writeAuthority: RunnerRuntimeWriteFenceHeaders;
   body: string | undefined; usageRecord: boolean; forward: () => Promise<Response>;
 }): Promise<Response> {
   if (!input.usageRecord) return input.forward();
   const payload: unknown = JSON.parse(input.body ?? "{}");
   if (!isHostedRunnerRecord(payload) || typeof payload.usage.usageId !== "string") return jsonError("Usage identity is required.", 400);
-  const receipt = await beginHostedRuntimeUsageSettlement({ env: input.env, userId: input.userId,
+  const receipt = await beginHostedRuntimeUsageSettlement({ caller: input.caller, env: input.env, userId: input.userId,
     authority: input.writeAuthority, reportId: payload.usage.usageId });
   let response: Response;
   try {
@@ -407,13 +425,15 @@ function augmentHostedRunnerWebControlBody(input: {
     reportingSecret: readRunnerStringEnv(input.env, "HOSTED_AI_USAGE_REPORTING_SECRET"),
   });
 
-  return JSON.stringify({
+  // Trusted attribution can expand the sender's fitted body. Apply the same
+  // optional-timing policy to the final envelope before signing and Web's body read.
+  return JSON.stringify(boundUsageRequestCliTiming({
     ...payload,
     usage: {
       ...payload.usage,
       reportingUserId: reportingUserId ?? null,
     },
-  });
+  }));
 }
 
 function forceHostedRunnerRuntimeSnapshotCredentialMaterial(body: string): string {

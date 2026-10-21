@@ -5,8 +5,8 @@ import { Prisma, type PrismaClient } from "@prisma/client";
 import { sendPendingHostedLinqAlertsBestEffort } from "../hosted-onboarding/linq-alert-email";
 import { getPrisma } from "../prisma";
 
-export const HOSTED_WARM_TYPING_ALERT_THRESHOLD_MS = 3_000;
-export const HOSTED_COLD_TYPING_ALERT_THRESHOLD_MS = 10_000;
+export const HOSTED_WARM_TYPING_ALERT_THRESHOLD_MS = 2_500;
+export const HOSTED_COLD_TYPING_ALERT_THRESHOLD_MS = 7_000;
 const ALERT_READ_LIMIT = 1_000;
 const ALERT_SEND_LIMIT = 50;
 // Allow delayed telemetry to arrive before calling an absent indicator slow.
@@ -17,6 +17,7 @@ interface TypingAlertRow {
   id: string;
   source: string;
   webhookReceivedAt: Date;
+  providerEventCreatedAtEpochMs: bigint | null;
   silenceStartedAtEpochMs: bigint;
   typingAcceptedAtEpochMs: bigint | null;
   workspaceState: "warm" | "cold" | "unconfirmed";
@@ -52,14 +53,15 @@ export async function runHostedRuntimeTypingAlertMonitor(input: TypingAlertInput
       kind: row.workspaceState === "warm"
         ? "runtime_warm_typing_slow" : "runtime_cold_typing_slow",
       status: "pending",
-      subject: row.workspaceState === "warm"
-        ? "Murph warm workspace typing exceeded 3 seconds"
-        : "Murph cold workspace typing exceeded 10 seconds",
+      subject: `Murph ${row.workspaceState === "warm" ? "warm" : "cold"} workspace typing`
+        + ` exceeded ${row.thresholdMs / 1_000} seconds`,
       // This frozen body survives retries without leaking member/message identity.
       detailsJson: {
         schemaVersion: 1,
         source: row.source,
         webhookReceivedAt: row.webhookReceivedAt.toISOString(),
+        providerEventCreatedAt: row.providerEventCreatedAtEpochMs === null
+          ? null : new Date(Number(row.providerEventCreatedAtEpochMs)).toISOString(),
         silenceStartedAt: new Date(Number(row.silenceStartedAtEpochMs)).toISOString(),
         typingAcceptedAt: row.typingAcceptedAtEpochMs === null
           ? null : new Date(Number(row.typingAcceptedAtEpochMs)).toISOString(),
@@ -108,9 +110,15 @@ export function buildHostedRuntimeTypingAlertQuery(input: {
         trace.user_id,
         trace.mailbox_item_id,
         trace.linq_delivery_id,
+        provider_event.linq_chat_lookup_key,
         trace.webhook_received_at,
         trace.provider_start_at,
         EXTRACT(EPOCH FROM trace.webhook_received_at AT TIME ZONE 'UTC') * 1000 AS received_ms,
+        origin.at AS origin_at,
+        EXTRACT(EPOCH FROM origin.at AT TIME ZONE 'UTC') * 1000 AS origin_ms,
+        CASE WHEN origin.at < trace.webhook_received_at
+          THEN EXTRACT(EPOCH FROM origin.at AT TIME ZONE 'UTC') * 1000
+        END AS provider_event_created_ms,
         EXTRACT(EPOCH FROM GREATEST(trace.accepted_at, trace.webhook_received_at,
           trace.assistant_input_staged_at) AT TIME ZONE 'UTC') * 1000 AS terminal_not_before_ms,
         CASE
@@ -131,7 +139,13 @@ export function buildHostedRuntimeTypingAlertQuery(input: {
           WHEN typing.value ~ '^[0-9]{1,15}$'
             THEN typing.value::bigint
           ELSE NULL
-        END) AS typing_ms
+        END) AS typing_ms,
+        CASE
+          WHEN trace.source = 'telegram'
+            AND jsonb_typeof(reply.value) = 'number'
+            AND reply.value #>> '{}' ~ '^[0-9]{1,15}$'
+            THEN (reply.value #>> '{}')::bigint
+        END AS telegram_reply_ms
       FROM hosted_ingress_latency_trace AS trace
       CROSS JOIN LATERAL (SELECT CASE trace.source
         WHEN 'linq' THEN trace.phase_breakdown_json #>> '{assistant,linqTypingAcceptedAtEpochMs}'
@@ -139,17 +153,27 @@ export function buildHostedRuntimeTypingAlertQuery(input: {
       END AS value) AS typing
       CROSS JOIN LATERAL (SELECT trace.phase_breakdown_json
         #> '{assistant,terminalNonReplyCommittedAtEpochMs}' AS value) AS terminal
+      CROSS JOIN LATERAL (SELECT trace.phase_breakdown_json
+        #> '{assistant,terminalReplyCommittedAtEpochMs}' AS value) AS reply
+      -- The member waits from the provider's event, so time before our route
+      -- runs (such as a fresh Web instance) counts. Mailbox dedupe binds the
+      -- exact event, including reactions whose synthetic message identity
+      -- differs from the provider's reacted-to message. Later events cannot
+      -- change this input's origin or conversation.
+      LEFT JOIN hosted_mailbox_item AS mailbox
+        ON mailbox.id = trace.mailbox_item_id
+       AND mailbox.user_id = trace.user_id
+      LEFT JOIN hosted_linq_provider_event AS provider_event
+        ON trace.source = 'linq'
+       AND provider_event.event_id = ${buildProviderEventLookupKeySql(Prisma.sql`mailbox.dedupe_key`)}
+      CROSS JOIN LATERAL (SELECT LEAST(trace.webhook_received_at,
+        provider_event.provider_created_at) AS at) AS origin
       WHERE trace.source IN ('linq', 'telegram')
         AND trace.webhook_received_at IS NOT NULL
         AND trace.accepted_at >= ${new Date(input.now.getTime() - 7 * 24 * 60 * 60_000)}
         AND trace.webhook_received_at <= ${input.now}
         ${scope}
-        AND NOT EXISTS (
-          SELECT 1 FROM hosted_mailbox_item AS mailbox
-          WHERE mailbox.id = trace.mailbox_item_id
-            AND mailbox.user_id = trace.user_id
-            AND mailbox.ai_usage_denied_at IS NOT NULL
-        )
+        AND mailbox.ai_usage_denied_at IS NULL
         AND NOT EXISTS (
           SELECT 1 FROM hosted_linq_alert AS alert
           WHERE alert.id = 'runtime-typing/' || trace.id
@@ -160,8 +184,19 @@ export function buildHostedRuntimeTypingAlertQuery(input: {
           THEN ${HOSTED_WARM_TYPING_ALERT_THRESHOLD_MS}::integer
           ELSE ${HOSTED_COLD_TYPING_ALERT_THRESHOLD_MS}::integer
         END AS threshold_ms,
-        COALESCE(typing_ms, ${input.now.getTime()}::bigint) - received_ms AS elapsed_ms
+        silence_ended_ms - origin_ms AS elapsed_ms
       FROM observations
+      -- A delivered Telegram reply ends the wait. Linq answers suppress the alert
+      -- below because Linq reply latency has its own monitor; Telegram has none,
+      -- so its reply only caps the measured wait. The stored reply is the latest
+      -- delivered one, so the cap can overstate silence but never hide it.
+      CROSS JOIN LATERAL (SELECT LEAST(
+        COALESCE(typing_ms, ${input.now.getTime()}::bigint),
+        CASE WHEN telegram_reply_ms >= received_ms
+          AND telegram_reply_ms <= ${input.now.getTime()}::bigint
+          THEN telegram_reply_ms
+        END
+      ) AS silence_ended_ms) AS silence
       WHERE (typing_ms <= ${input.now.getTime()}::bigint
         OR (typing_ms IS NULL
           AND received_ms < ${input.now.getTime() - MISSING_TYPING_OBSERVATION_GRACE_MS}::bigint))
@@ -173,7 +208,7 @@ export function buildHostedRuntimeTypingAlertQuery(input: {
           OR terminal_non_reply_ms < terminal_not_before_ms
           OR terminal_non_reply_ms > ${input.now.getTime()}::bigint)
     ), measured AS MATERIALIZED (
-      SELECT observation.*, GREATEST(received_ms,
+      SELECT observation.*, GREATEST(origin_ms,
         EXTRACT(EPOCH FROM ${buildLinqConversationActivitySql(input.now)} AT TIME ZONE 'UTC') * 1000
       ) AS silence_started_ms
       FROM classified AS observation
@@ -188,12 +223,13 @@ export function buildHostedRuntimeTypingAlertQuery(input: {
         )
     )
     SELECT id, source, webhook_received_at AS "webhookReceivedAt",
+      provider_event_created_ms::bigint AS "providerEventCreatedAtEpochMs",
       silence_started_ms::bigint AS "silenceStartedAtEpochMs",
       typing_ms AS "typingAcceptedAtEpochMs", workspace_state AS "workspaceState",
-      (COALESCE(typing_ms, ${input.now.getTime()}::bigint) - silence_started_ms)::bigint AS "elapsedMs",
+      (silence_ended_ms - silence_started_ms)::bigint AS "elapsedMs",
       threshold_ms AS "thresholdMs"
     FROM measured
-    WHERE COALESCE(typing_ms, ${input.now.getTime()}::bigint) - silence_started_ms > threshold_ms
+    WHERE silence_ended_ms - silence_started_ms > threshold_ms
       AND (typing_ms IS NOT NULL
         OR silence_started_ms < ${input.now.getTime() - MISSING_TYPING_OBSERVATION_GRACE_MS}::bigint)
     ORDER BY webhook_received_at, id
@@ -207,10 +243,10 @@ function buildLinqConversationActivitySql(now: Date): Prisma.Sql {
     SELECT GREATEST(
       (
         SELECT MAX(delivery.accepted_at) FROM hosted_linq_delivery AS delivery
-        WHERE delivery.linq_chat_lookup_key = conversation.linq_chat_lookup_key
-          AND delivery.attempted_at >= observation.webhook_received_at - INTERVAL '5 minutes'
+        WHERE delivery.linq_chat_lookup_key = observation.linq_chat_lookup_key
+          AND delivery.attempted_at >= observation.origin_at - INTERVAL '5 minutes'
           AND delivery.attempted_at <= ${now}
-          AND delivery.accepted_at >= observation.webhook_received_at
+          AND delivery.accepted_at >= observation.origin_at
           AND delivery.accepted_at <= LEAST(${now}::timestamp,
             TIMESTAMP 'epoch' + observation.typing_ms * INTERVAL '1 millisecond')
       ),
@@ -221,40 +257,44 @@ function buildLinqConversationActivitySql(now: Date): Prisma.Sql {
           ${now}::timestamp,
           TIMESTAMP 'epoch' + observation.typing_ms * INTERVAL '1 millisecond'
         ))
-        FROM hosted_linq_provider_event AS earlier_event
+        FROM hosted_ingress_latency_trace AS earlier_trace
         JOIN hosted_mailbox_item AS earlier_mailbox
-          ON earlier_mailbox.source_message_lookup_key = earlier_event.message_lookup_key
-         AND earlier_mailbox.user_id = current_mailbox.user_id
-        JOIN hosted_ingress_latency_trace AS earlier_trace
-          ON earlier_trace.mailbox_item_id = earlier_mailbox.id
-         AND earlier_trace.user_id = current_mailbox.user_id
-         AND earlier_trace.source = 'linq'
+          ON earlier_mailbox.id = earlier_trace.mailbox_item_id
+         AND earlier_mailbox.user_id = earlier_trace.user_id
+        JOIN hosted_linq_provider_event AS earlier_event
+          ON earlier_event.event_id = ${buildProviderEventLookupKeySql(Prisma.sql`earlier_mailbox.dedupe_key`)}
         LEFT JOIN hosted_linq_delivery AS earlier_delivery
           ON earlier_delivery.id = earlier_trace.linq_delivery_id
         CROSS JOIN LATERAL (SELECT CASE
           WHEN earlier_trace.phase_breakdown_json #>> '{assistant,linqTypingAcceptedAtEpochMs}' ~ '^[0-9]{1,15}$'
           THEN (earlier_trace.phase_breakdown_json #>> '{assistant,linqTypingAcceptedAtEpochMs}')::bigint
         END AS ms) AS prior_typing
-        WHERE earlier_event.linq_chat_lookup_key = conversation.linq_chat_lookup_key
+        WHERE earlier_trace.user_id = observation.user_id
+          AND earlier_trace.source = 'linq'
+          AND earlier_event.linq_chat_lookup_key = observation.linq_chat_lookup_key
           AND earlier_event.provider_created_at >= observation.webhook_received_at - INTERVAL '5 minutes'
           AND earlier_event.provider_created_at <= observation.webhook_received_at
-          AND earlier_mailbox.id <> current_mailbox.id
+          AND earlier_mailbox.id <> observation.mailbox_item_id
           AND earlier_trace.webhook_received_at <= observation.webhook_received_at
           AND (earlier_delivery.accepted_at IS NULL OR earlier_delivery.accepted_at > observation.webhook_received_at)
           AND prior_typing.ms BETWEEN observation.received_ms - 300000 AND observation.received_ms
       )
     )
-    FROM hosted_mailbox_item AS current_mailbox
-    JOIN LATERAL (
-      SELECT event.linq_chat_lookup_key
-      FROM hosted_linq_provider_event AS event
-      WHERE event.message_lookup_key = current_mailbox.source_message_lookup_key
-        AND event.linq_chat_lookup_key IS NOT NULL
-      ORDER BY event.provider_created_at DESC
-      LIMIT 1
-    ) AS conversation ON TRUE
     WHERE observation.source = 'linq'
-      AND current_mailbox.id = observation.mailbox_item_id
-      AND current_mailbox.user_id = observation.user_id
+      AND observation.linq_chat_lookup_key IS NOT NULL
   )`;
+}
+
+// SQL equivalent of createHostedLinqProviderEventLookupKey. PostgreSQL fixtures
+// use that canonical builder so the immutable s1 hash contract cannot drift.
+function buildProviderEventLookupKeySql(eventId: Prisma.Sql): Prisma.Sql {
+  return Prisma.sql`CASE
+    WHEN ${eventId} ~ '^hbid:linq[.]provider-event:s1:[0-9a-f]{64}$'
+      THEN ${eventId}
+    ELSE 'hbid:linq.provider-event:s1:' || encode(sha256(
+      convert_to('murph.hosted-linq-observability', 'UTF8') || decode('00', 'hex')
+      || convert_to('linq.provider-event', 'UTF8') || decode('00', 'hex')
+      || convert_to(${eventId}, 'UTF8')
+    ), 'hex')
+  END`;
 }

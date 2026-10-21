@@ -31,6 +31,10 @@ and leave an existing paused proposal alone.
 
 - Before treating any target bundle as complete or deciding that a metric is
   missing, run `vault-cli meal totals --from <date> --to <same-date> --resolve-goals --format json`.
+  Alternatively, reuse `dailyTotals.data` from a successful same-date
+  `meal add --with-daily-totals` or `meal import-json --with-daily-totals` when
+  `dailyTotals.status` is `available`. It is the same fresh canonical read,
+  performed after the save; do not run a separate totals query to confirm it.
   The date is the selected card localDate. Copy the fresh canonical totals and
   resolved `goalContext.targets` points. This query owns the complete active
   target scan and deterministic rules below; do not repeat goal list/show to

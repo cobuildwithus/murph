@@ -11,15 +11,108 @@ import {
 } from '../src/assistant/system-prompt.js'
 
 describe('connected-apps skill and system-prompt coverage', () => {
-  it('anchors Journal follow-ups to event end while preserving passive-evidence suppression', async () => {
+  it('reuses same-turn discovery without treating it as live authority or complete data', async () => {
+    const skill = (await readFile(path.join(resolveAssistantSkillsRoot(), 'connected-apps', 'SKILL.md'), 'utf8')).replace(/\s+/gu, ' ')
+    expect(skill).toContain('Reuse an exact slug and complete schema already discovered in this turn')
+    expect(skill).toContain('not current account access, approval, or write authority')
+    expect(skill).toContain('Retain pagination, truncation, errors and source identifiers')
+    expect(skill).toContain('complete source text when required for completeness or attribution')
+  })
+
+  it('requires source geography before treating lodging names as destinations', async () => {
     const skill = (await readFile(path.join(resolveAssistantSkillsRoot(), 'journal-connected-context', 'SKILL.md'), 'utf8')).replace(/\s+/gu, ' ')
-    expect(skill).toContain('one private check-in one hour after the event ends, using its end timestamp rather than its start')
-    expect(skill).toContain('an 18:00–19:00 event gets a 20:00 check-in in the event timezone')
-    expect(skill).toContain('If it already shows what happened, do not ask.')
-    expect(skill).not.toContain('one hour after the event starts')
+    for (const text of [
+      'Listing names, room names, scenic amenities, and provider office/footer addresses do not establish the destination',
+      'read the exact confirmation before assigning a city, region, or destination timezone',
+      'keep the confirmed booking and dates with a neutral lodging title and explicitly unknown destination',
+      'A geocoder match cannot prove where the booking is',
+      're-read its mapped confirmation and correct the same canonical event',
+      'Preserve newer member corrections',
+    ]) expect(skill).toContain(text)
+    expect(skill).toContain('A planned trip does not prove arrival, current location')
     expect(skill).toContain('Routine plan saves, updates, cancellations, and scheduling a future check-in stay silent')
-    expect(skill).toContain('A new saved plan or trip alone is never a reason to send.')
-    expect(skill).toContain('a currently due check-in that passive evidence has not resolved')
+    const connected = (await readConnectedAppsSkill()).replace(/\s+/gu, ' ')
+    expect(connected).toContain('A lodging title alone is not destination evidence')
+  })
+
+  it('requires a health purpose or explicit request for connected-plan follow-ups at creation and execution', async () => {
+    const skill = (await readFile(path.join(resolveAssistantSkillsRoot(), 'journal-connected-context', 'SKILL.md'), 'utf8')).replace(/\s+/gu, ' ')
+    expect(skill).toContain('A saved plan is context, not a reason to interrupt')
+    expect(skill).toContain('Event category alone is insufficient')
+    expect(skill).toContain('There is no default end-plus-one-hour check-in')
+    expect(skill).toContain('Archive an active automatically generated attendance/logistics-only check-in')
+    expect(skill).toContain('Preserve explicit requests, useful health support, pause/archive state, and uncertain cases')
+    expect(skill).not.toContain('Otherwise schedule one private check-in one hour after')
+    expect(skill).not.toContain('For every eligible ongoing or future timed plan, also reconcile its linked follow-up')
+    const scheduled = buildAssistantSystemPrompt(createPromptInput({
+      conversationScope: 'direct', turnTrigger: 'automation-cron',
+      scheduledOccurrenceAt: '2026-06-25T13:00:00.000Z',
+    }))
+    expect(scheduled).toContain('Apply this rule even when older saved instructions require a generic check-in')
+    expect(scheduled).toContain('Without that purpose or an explicit member request for this follow-up, return `skip`')
+    expect(scheduled).toContain('Preserve explicit member-requested reminders (including non-health tasks), useful health reviews, and treatment or safety cues')
+    expect(scheduled).toContain('substitute generic wellness advice')
+    expect(buildAssistantSystemPrompt(createPromptInput())).not.toContain('Connected-plan follow-ups:')
+  })
+
+  it('reconciles all existing private reminders from supported canonical context through the versioned owner', async () => {
+    const skill = (await readFile(path.join(resolveAssistantSkillsRoot(), 'journal-connected-context', 'SKILL.md'), 'utf8')).replace(/\s+/gu, ' ')
+    for (const text of [
+      'Run this every morning, even with no new plans, no travel, or no eligible connected accounts',
+      'vault-cli automation list --status active --status paused --include-instructions --limit 20 --format json',
+      'following `nextCursor` with the same filters until it is null',
+      'Do not individually show or inspect unchanged records whose complete instructions are already on the page',
+      'When `instructionsComplete=false`, read that exact record before assessing it',
+      'A failed page or changing inventory is an incomplete review',
+      'then use the existing version-checked patch path',
+      "Reuse the patch's canonical readback to verify the repair",
+      'Update event-relative timing when the underlying event moves',
+      "preserving the member's requested offset",
+      'Calculate the due instant with timezone-aware code',
+      'canonical timestamp and its explicit offset (`Z` means UTC)',
+      'Check the returned `occurrenceProjection.nextOccurrenceAt` against the calculated instant',
+      'Fix a schedule that contradicts an explicit current member request',
+      'Preserve an explicitly chosen clock time unless the member changed it',
+      'Completion of one occurrence never retires a recurring habit',
+      'Similar titles alone do not establish duplication',
+      'Include paused reminders when correcting their content, but preserve their pause',
+      'Newer explicit member corrections win over older memory or provider evidence',
+      'Preserve delivery route, audience, identity, and all unrelated fields',
+      'Use the owning support/clinical skill',
+      'Uncertain conflicts stay unchanged',
+      'Already correct reminders need no write',
+      'Repairs stay silent and create no extra follow-up or notification',
+      'Do not copy the new itinerary into every reminder',
+      'Make the smallest instruction edit, preserving the original activity and delivery conditions',
+      'Reuse that policy instead of copying its procedure or adding new weather-based suppression rules',
+      'Continue existing reminder reconciliation using only permitted member-supplied canonical context',
+      'including reminder repair and automatic context projection',
+    ]) expect(skill).toContain(text)
+    expect(skill).not.toContain('Change only stale contextual instructions')
+    expect(skill).not.toContain('Inspect each candidate’s instructions')
+  })
+
+  it('keeps weather lookup subordinate to current location and uncertainty', async () => {
+    const skill = (await readConnectedAppsSkill()).replace(/\s+/gu, ' ')
+    for (const text of [
+      'Resolve private reminder location before any weather call, including for legacy instructions naming a city',
+      'Flight arrival can already have passed',
+      'Respect connected-context account/category opt-outs',
+      'vault-cli event list --kind note --from <occurrence-minus-14-days> --to <occurrence-date> --limit 50 --format json',
+      'A past report without a covering window',
+      'event show <id> --format json',
+      'use the destination after its planned arrival and before its known return',
+      'An uncertain old city must not appear even in conditional wording',
+      'make destination wording conditional',
+      'omit city/weather rather than fall back to an old city or ask during the scheduled run',
+      'Never overwrite home/current-location memory or change schedules from a planned trip',
+      'Group reminders use only room-authorized location evidence',
+      'with no account selector',
+      'OPENWEATHER_API_GET_CURRENT_WEATHER', 'OPENWEATHER_API_GET5_DAY_FORECAST',
+      'search first only when their argument schema is unclear',
+      'A decline saves the reminder unchanged',
+      'With no reliable location or a failed read, send the ordinary cue',
+    ]) expect(skill).toContain(text)
   })
 
   it('owns the approved service and toolkit use cases in the skill', async () => {

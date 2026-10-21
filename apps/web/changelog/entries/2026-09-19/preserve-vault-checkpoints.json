@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-09-19",
+  "order": 100,
+  "item": {
+    "id": "preserve-vault-checkpoints",
+    "kind": "improvement",
+    "priority": 4,
+    "title": "More reliable saved vaults",
+    "summary": "Murph better protects saved vault contents when temporary files change during a backup.",
+    "details": "If a file needed for the backup disappears while it is being collected, Murph rejects that backup instead of accepting an incomplete copy. This prevents this failure in new backups; it does not repair an earlier incomplete backup.",
+    "relevanceTags": ["vault", "reliability"],
+    "sourcePullRequests": [3587]
+  }
+}

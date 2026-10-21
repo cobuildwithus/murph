@@ -6,6 +6,7 @@ import type {
 } from '@murphai/operator-config/assistant-cli-contracts'
 import {
   buildSafeToolCallValidationDigest,
+  type SafeToolCallSemanticRejection,
   type SafeToolCallValidationDigest,
 } from '../../assistant/tool-validation-digest.js'
 import type { GenerateVoiceMemoToolResult } from '../generate-voice-memo-tool.js'
@@ -74,6 +75,11 @@ export function parseDynamicToolArguments<T extends z.ZodTypeAny>(
      * the validation fingerprint still emit.
      */
     schemaRootKeys?: readonly string[]
+    /**
+     * Trusted, rejection-only private diagnostic. It must not change the issues
+     * returned to the model.
+     */
+    readSemanticRejection?: (value: unknown) => SafeToolCallSemanticRejection | null
     toolName: string
     value: unknown
   },
@@ -91,6 +97,7 @@ export function parseDynamicToolArguments<T extends z.ZodTypeAny>(
         schemaName: input.schemaName ?? `${input.toolName}.input`,
         schemaPaths: input.schemaPaths,
         schemaRootKeys: input.schemaRootKeys ?? resolveSchemaRootKeys(input.schema),
+        semanticRejection: input.readSemanticRejection?.(input.value),
         toolName: input.toolName,
       }),
     }

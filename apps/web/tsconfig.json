@@ -36,9 +36,6 @@
       "@murphai/clinical-records/retrieval-limits": [
         "../../packages/clinical-records/src/retrieval-limits.ts"
       ],
-      "@murphai/vault-usecases/clinical-records": [
-        "../../packages/vault-usecases/src/clinical-records.ts"
-      ],
       "@murphai/contracts": [
         "../../packages/contracts/src/index.ts"
       ],
@@ -62,9 +59,6 @@
       ],
       "@murphai/health-commons/runtime": [
         "../../packages/health-commons/src/runtime.ts"
-      ],
-      "@murphai/health-commons/goal-runtime": [
-        "../../packages/health-commons/src/goal-runtime.ts"
       ],
       "@murphai/health-commons/goal-index-runtime": [
         "../../packages/health-commons/src/goal-index-runtime.ts"
@@ -92,6 +86,9 @@
       ],
       "@murphai/hosted-execution/auth": [
         "../../packages/hosted-execution/src/auth.ts"
+      ],
+      "@murphai/hosted-execution/voice-control": [
+        "../../packages/hosted-execution/src/voice-control.ts"
       ],
       "@murphai/hosted-execution/assistant-identifiers": [
         "../../packages/hosted-execution/src/assistant-identifiers.ts"
@@ -123,6 +120,9 @@
       "@murphai/hosted-execution/computer-use": [
         "../../packages/hosted-execution/src/computer-use.ts"
       ],
+      "@murphai/hosted-execution/conversation-polls": [
+        "../../packages/hosted-execution/src/conversation-polls.ts"
+      ],
       "@murphai/hosted-execution/connected-apps": [
         "../../packages/hosted-execution/src/connected-apps.ts"
       ],
@@ -144,6 +144,12 @@
       "@murphai/hosted-execution/parsers": [
         "../../packages/hosted-execution/src/parsers.ts"
       ],
+      "@murphai/hosted-execution/parsers/mailbox": [
+        "../../packages/hosted-execution/src/parsers/mailbox.ts"
+      ],
+      "@murphai/hosted-execution/observability": [
+        "../../packages/hosted-execution/src/observability.ts"
+      ],
       "@murphai/hosted-execution/phone-calls": [
         "../../packages/hosted-execution/src/phone-calls.ts"
       ],
@@ -152,6 +158,9 @@
       ],
       "@murphai/hosted-execution/physical-notes": [
         "../../packages/hosted-execution/src/physical-notes.ts"
+      ],
+      "@murphai/hosted-execution/usage-diagnostics": [
+        "../../packages/hosted-execution/src/usage-diagnostics.ts"
       ],
       "@murphai/hosted-execution/plan-usage": [
         "../../packages/hosted-execution/src/plan-usage.ts"
@@ -249,14 +258,14 @@
       "@murphai/health-metrics": [
         "../../packages/health-metrics/src/index.ts"
       ],
+      "@murphai/health-metrics/wearable-provider-catalog": [
+        "../../packages/health-metrics/src/wearable-provider-catalog.ts"
+      ],
       "@murphai/query": [
         "../../packages/query/src/index.ts"
       ],
       "@murphai/query/browser": [
         "../../packages/query/src/browser.ts"
-      ],
-      "@murphai/query/browser-biomarkers": [
-        "../../packages/query/src/browser-biomarkers.ts"
       ],
       "@murphai/query/browser-experiments": [
         "../../packages/query/src/browser-experiments.ts"
@@ -278,6 +287,9 @@
       ],
       "@murphai/importers": [
         "../../packages/importers/src/index.ts"
+      ],
+      "@murphai/importers/clinical-records": [
+        "../../packages/importers/src/clinical-records/index.ts"
       ],
       "@murphai/importers/device-providers/provider-descriptors": [
         "../../packages/importers/src/device-providers/provider-descriptors.ts"
@@ -386,6 +398,12 @@
       ],
       "@murphai/device-syncd/types": [
         "../../packages/device-syncd/src/types.ts"
+      ],
+      "@murphai/hosted-execution/companion-presence": [
+        "../../packages/hosted-execution/src/companion-presence.ts"
+      ],
+      "@murphai/hosted-execution/wearable-haptics": [
+        "../../packages/hosted-execution/src/wearable-haptics.ts"
       ]
     },
     "sourceMap": false,

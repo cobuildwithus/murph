@@ -1,3 +1,4 @@
+import { resolveUsageOptimizerFeedbackScope } from './weekly-usage-optimizer.js'
 import { prepareAssistantFollowUpEvaluationInput } from './follow-ups.js'
 import * as z from '@murphai/contracts/zod-runtime'
 import type {
@@ -22,11 +23,12 @@ import { resolveAssistantOperatorDefaults } from '@murphai/operator-config/opera
 import type { AssistantResponseCard } from '@murphai/operator-config/assistant-response-cards'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
+  readMemoryDocument,
   shouldSkipAutomationOccurrenceForAvailability,
   stripAutomationAvailabilityConflictEvidenceForProvider,
 } from '@murphai/core'
 import { createAssistantRuntimeStateService } from './runtime-state-service.js'
-import { normalizeAssistantExecutionContext } from './execution-context.js'
+import { normalizeAssistantExecutionContext, type AssistantExecutionContext } from './execution-context.js'
 import { resolveAssistantExecutionDefaultTarget } from './execution-context.js'
 import { resolveAssistantExecutionOperatorDefaults } from './execution-context.js'
 import { resolveAssistantSessionForMessage } from './session-resolution.js'
@@ -70,6 +72,7 @@ import { readAssistantGroupRoomModelState } from './group-room-model.js'
 import type {
   AssistantDeliveryOutcome,
   AssistantMessageInput,
+  ExecutedAssistantProviderTurnResult,
   AssistantSessionResolutionFields,
   ResolvedAssistantSession,
 } from './service-contracts.js'
@@ -719,6 +722,7 @@ export async function sendAssistantNotificationLocal(
             turnCreatedAt,
             turnId,
           })
+          acceptCommittedNotificationProductFeedback(executionContext, providerResult, { conversationScope, messageInput })
           return withPostTurnDeliveryExpectations({
             decision,
             response: null,
@@ -840,6 +844,7 @@ export async function sendAssistantNotificationLocal(
             )
           }
 
+          acceptCommittedNotificationProductFeedback(executionContext, providerResult, { conversationScope, messageInput })
           return withPostTurnDeliveryExpectations({
             decision: {
               ...decision,
@@ -942,6 +947,7 @@ export async function sendAssistantNotificationLocal(
           })
         })
 
+        acceptCommittedNotificationProductFeedback(executionContext, providerResult, { conversationScope, messageInput })
         return withPostTurnDeliveryExpectations({
           decision: {
             ...decision,
@@ -960,6 +966,23 @@ export async function sendAssistantNotificationLocal(
       }
     },
   })
+}
+
+function acceptCommittedNotificationProductFeedback(
+  executionContext: AssistantExecutionContext | null | undefined,
+  providerResult: Pick<ExecutedAssistantProviderTurnResult, 'productFeedbackCandidate'>,
+  context: Omit<Parameters<typeof resolveUsageOptimizerFeedbackScope>[0], 'executionContext'>,
+): void {
+  const candidate = providerResult.productFeedbackCandidate
+  const sink = executionContext?.hosted?.productFeedbackCandidateSink
+  if (!candidate || !sink) return
+  try {
+    const scope = resolveUsageOptimizerFeedbackScope({ ...context, executionContext })
+    if (scope) sink.acceptProductFeedbackCandidate(candidate, { committedUsageOptimizerScope: scope })
+    else sink.acceptProductFeedbackCandidate(candidate)
+  } catch {
+    // Optional feedback cannot affect a committed notification turn.
+  }
 }
 
 async function recoverQueuedAssistantOperatorMessage(
@@ -1450,12 +1473,6 @@ function buildAssistantNotificationObservabilityDetails(input: {
   const providerBaseUrl = readAssistantNotificationUrlDetails(
     readAssistantNotificationStringProperty(providerOptions, 'baseUrl'),
   )
-  const gatewayOnlyProviders = summarizeAssistantNotificationGatewayOnlyProviders(
-    readAssistantNotificationStringListProperty(
-      providerOptions,
-      'gatewayOnlyProviders',
-    ),
-  )
 
   return {
     assistantNotificationChannel: channel,
@@ -1468,7 +1485,6 @@ function buildAssistantNotificationObservabilityDetails(input: {
       normalizeNullableString(input.input.identityId) !== null,
     assistantNotificationLinqBaseUrlOrigin: linqBaseUrl.origin,
     assistantNotificationLinqBaseUrlPath: linqBaseUrl.path,
-    assistantNotificationGatewayOnlyProviders: gatewayOnlyProviders,
     assistantNotificationProvider: input.route.provider,
     assistantNotificationProviderBaseUrlOrigin: providerBaseUrl.origin,
     assistantNotificationProviderBaseUrlPath: providerBaseUrl.path,
@@ -1484,18 +1500,6 @@ function buildAssistantNotificationObservabilityDetails(input: {
       normalizeNullableString(input.input.workingDirectory) !== null,
     assistantNotificationHostedExecutionPresent: input.input.executionContext?.hosted != null,
   }
-}
-
-function summarizeAssistantNotificationGatewayOnlyProviders(
-  values: readonly string[] | null | undefined,
-): string | null {
-  const normalized = [...(values ?? [])]
-    .map((value) => normalizeNullableString(value)?.toLowerCase() ?? null)
-    .filter((value): value is string =>
-      value !== null && /^[a-z0-9][a-z0-9._-]*$/u.test(value),
-    )
-
-  return normalized.length > 0 ? Array.from(new Set(normalized)).join(',') : null
 }
 
 function readAssistantNotificationUrlDetails(value: string | null | undefined): {
@@ -1532,18 +1536,6 @@ function readAssistantNotificationStringProperty(
   return typeof candidate === 'string'
     ? normalizeNullableString(candidate)
     : null
-}
-
-function readAssistantNotificationStringListProperty(
-  value: object,
-  key: string,
-): readonly string[] | null {
-  const candidate: unknown = Reflect.get(value, key)
-  if (!Array.isArray(candidate)) {
-    return null
-  }
-
-  return candidate.filter((entry): entry is string => typeof entry === 'string')
 }
 
 function buildAssistantNotificationMessageInput(
@@ -1863,6 +1855,17 @@ async function resolveEmptyAssistantMaintenanceSummary(input: {
   ) {
     return null
   }
+  // Existing memory can need faithful compaction even
+  // without new conversation. Failed reads retain the ordinary tool path.
+  if (policy.maintenanceProfile === 'member-memory') {
+    try {
+      if ((await readMemoryDocument(input.input.vault)).records.length > 0) {
+        return null
+      }
+    } catch {
+      return null
+    }
+  }
   // Existing room pages can need cleanup even without new conversation.
   // Unreadable pages and evidence retain the ordinary maintenance path.
   if (policy.maintenanceProfile === 'group-room-model') {
@@ -1949,51 +1952,19 @@ function assistantMaintenanceRawEventsIncludeMutation(
   rawEvents: readonly unknown[],
   profile: AssistantMaintenanceProfile,
 ): boolean {
-  return rawEvents.some((rawEvent) => {
-    const event = normalizeCodexEvent(rawEvent)
-    const dynamicMutationActions = profile === 'group-room-model'
-      ? ['delete', 'upsert'] as const
-      : profile === 'member-memory'
-        ? ['forget', 'update', 'upsert'] as const
-        : null
-    const dynamicMutationTool = profile === 'group-room-model'
-      ? 'group_room_model'
-      : profile === 'member-memory'
-        ? 'member_memory'
-        : null
-    if (
-      dynamicMutationActions &&
-      dynamicMutationTool &&
-      assistantMaintenanceDynamicMutationCompleted({
-        actions: dynamicMutationActions,
-        event,
-        toolName: dynamicMutationTool,
-      })
-    ) {
-      return true
-    }
-    return (
-      event.kind === 'status_item' &&
-      event.itemType === 'commandExecution' &&
-      event.itemState === 'completed' &&
-      event.exitCode === 0 &&
-      isAssistantMaintenanceMutationCommand(event.commandLabel, profile)
-    )
-  })
-}
-
-function isAssistantMaintenanceMutationCommand(
-  commandLabel: string | null,
-  profile: AssistantMaintenanceProfile,
-): boolean {
-  const normalized = normalizeNullableString(commandLabel)
-  if (normalized === null) {
-    return false
-  }
-  if (profile !== 'habitat-voice') {
-    return false
-  }
-  return /\bvault-cli\b[\s\S]*\bhabitat\s+save\b/u.test(normalized)
+  const actions = profile === 'group-room-model'
+    ? ['delete', 'upsert'] as const
+    : ['forget', 'update', 'upsert'] as const
+  const toolName = profile === 'group-room-model'
+    ? 'group_room_model'
+    : 'member_memory'
+  return rawEvents.some((rawEvent) =>
+    assistantMaintenanceDynamicMutationCompleted({
+      actions,
+      event: normalizeCodexEvent(rawEvent),
+      toolName,
+    }),
+  )
 }
 
 function assistantMaintenanceDynamicMutationCompleted(input: {

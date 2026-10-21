@@ -29,7 +29,6 @@ import {
   findCaptureByLookup,
   initializeVault,
   patchAutomation,
-  readHabitatAspect,
   readJsonlRecords,
   repairVault,
   runCanonicalWrite,
@@ -272,7 +271,7 @@ describe("hosted workspace runtime entrypoint", () => {test("runs deferred durab
             platform: createPlatform({
               mailboxPort: createMailboxPort({
                 events,
-                items: [],
+                items: [createMailboxItem()],
               }),
               workspacePort: createWorkspacePort({
                 checkpointRequests,
@@ -416,7 +415,7 @@ describe("hosted workspace runtime entrypoint", () => {test("runs deferred durab
             platform: createPlatform({
               mailboxPort: createMailboxPort({
                 events,
-                items: [],
+                items: [createMailboxItem()],
               }),
               workspacePort: createWorkspacePort({
                 checkpointRequests,
@@ -554,7 +553,7 @@ describe("hosted workspace runtime entrypoint", () => {test("runs deferred durab
               latencyTraceRequests,
               mailboxPort: createMailboxPort({
                 events,
-                items: [],
+                items: [createMailboxItem()],
               }),
               workspacePort: createWorkspacePort({
                 checkpointRequests,

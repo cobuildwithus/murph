@@ -192,13 +192,7 @@ function workoutPresentation(input: {
   };
 }
 
-function decodeWorkoutCardUrl(cardUrl: string) {
-  const payload = cardUrl.split("#murph-card=")[1];
-  if (payload === undefined) {
-    throw new TypeError("Expected one canonical workout card URL.");
-  }
-  return JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
-}
+
 
 function removeAction(input: {
   expectedSets?: WorkoutMemberActionExpectedSetStateV1[];
@@ -321,9 +315,7 @@ describe("live workout member action", () => {
     if (result.status !== "unchanged") {
       throw new TypeError("Expected the read-only workout result.");
     }
-    const payload = result.result.cardUrl.split("#murph-card=")[1];
-    expect(payload).toBeDefined();
-    expect(JSON.parse(Buffer.from(payload!, "base64url").toString("utf8")))
+    expect(result.result.card)
       .toMatchObject({
         schemaVersion: 6,
         card: { k: "w", t: "Strength" },
@@ -497,7 +489,7 @@ describe("live workout member action", () => {
       throw new TypeError("Expected the authoritative apply card result.");
     }
     expect(applied.result.kind).toBe("workout.live.apply");
-    const envelope = decodeWorkoutCardUrl(applied.result.cardUrl);
+    const envelope = applied.result.card;
     expect(envelope).toMatchObject({
       card: {
         b: deriveWorkoutActionBinding("evt_test_workout", persistedWorkout),
@@ -574,7 +566,7 @@ describe("live workout member action", () => {
     expect(mocks.updateLiveWorkoutExercises).toHaveBeenCalledTimes(1);
   });
 
-  it("keeps an applied write successful when the complete V4 URL is oversized", async () => {
+  it("returns an editable card after a save exceeds the transcript URL limit", async () => {
     const exercises: WorkoutSession["exercises"] = Array.from(
       { length: 8 },
       (_, exerciseIndex) => ({
@@ -633,7 +625,10 @@ describe("live workout member action", () => {
       acceptedAt: ACCEPTED_AT,
       action,
       vault: "/vault",
-    })).resolves.toEqual({ status: "applied" });
+    })).resolves.toMatchObject({
+      status: "applied",
+      result: { kind: "workout.live.apply", card: { schemaVersion: 6 } },
+    });
     expect(mocks.updateLiveWorkoutExercises).toHaveBeenCalledTimes(1);
   });
 
@@ -697,8 +692,8 @@ describe("live workout member action", () => {
     if (result.status !== "applied" || result.result === undefined) {
       throw new TypeError("Expected the completed apply card result.");
     }
-    expect(decodeWorkoutCardUrl(result.result.cardUrl)).toMatchObject({
-      schemaVersion: 4,
+    expect(result.result.card).toMatchObject({
+      schemaVersion: 6,
     });
 
     expect(mocks.withLiveWorkoutMutationLock).toHaveBeenCalledWith(
@@ -1679,7 +1674,7 @@ describe("live workout member action", () => {
     if (result.status !== "applied" || result.result === undefined) {
       throw new TypeError("Expected the structural apply card result.");
     }
-    expect(decodeWorkoutCardUrl(result.result.cardUrl)).toMatchObject({
+    expect(result.result.card).toMatchObject({
       schemaVersion: 6,
     });
     expect(mocks.updateLiveWorkoutExercises.mock.calls[0]?.[2]).toEqual(

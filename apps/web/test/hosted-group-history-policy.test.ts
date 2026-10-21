@@ -14,6 +14,16 @@ const sleep: HostedVaultShareProjectionScope = { projectionKind: "sleep-times.v0
 const email: HostedVaultShareProjectionScope = { projectionKind: "group-email.v0" };
 
 describe("plain-grant group history surfaces", () => {
+  it("discloses app contact only for wearable and source-status sharing", () => {
+    for (const projectionKind of ["steps-days.v0", "sleep-times.v0", "device-sync-status.v0"] as const) {
+      const [display] = projectHostedVaultShareProjectionDisplays([{ projectionKind }]);
+      assert.match(display!.description, /Apple Health sharing includes when the Murph app last checked in/);
+    }
+    for (const projectionKind of ["group-email.v0", "protein-days.v0", "time-zone.v0"] as const) {
+      const [display] = projectHostedVaultShareProjectionDisplays([{ projectionKind }]);
+      assert.doesNotMatch(display!.description, /last checked in/);
+    }
+  });
   it("preserves an immutable seven-day offer's scopes while presenting the current horizon", () => {
     const saved = { schema: HOSTED_GROUP_JOIN_POLICY_SCHEMA, requestedVaultShareProjectionScopes: [sleep, email],
       description: "Shares 7 days of sleep timing." };

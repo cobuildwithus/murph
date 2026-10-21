@@ -35,12 +35,14 @@ export async function withHostedComputerToolFailureRuntimeLog<Result>(input: {
   operation: HostedComputerToolOperation;
   run: () => Promise<Result>;
 }): Promise<Result> {
+  const startedAt = performance.now();
   try {
     return await input.run();
   } catch (error) {
     scheduleHostedComputerToolFailureRuntimeLog({
       action: input.action ?? null,
       error,
+      elapsedMs: Math.round(performance.now() - startedAt),
       memberId: input.memberId,
       operation: input.operation,
     });
@@ -51,6 +53,7 @@ export async function withHostedComputerToolFailureRuntimeLog<Result>(input: {
 function scheduleHostedComputerToolFailureRuntimeLog(input: {
   action: HostedComputerToolAction | null;
   error: unknown;
+  elapsedMs: number;
   memberId: string;
   operation: HostedComputerToolOperation;
 }): void {
@@ -67,6 +70,7 @@ function scheduleHostedComputerToolFailureRuntimeLog(input: {
 async function recordHostedComputerToolFailureBestEffort(input: {
   action: HostedComputerToolAction | null;
   error: unknown;
+  elapsedMs: number;
   memberId: string;
   operation: HostedComputerToolOperation;
 }): Promise<void> {
@@ -84,6 +88,7 @@ async function recordHostedComputerToolFailureBestEffort(input: {
           action: input.action,
           error: input.error,
           errorCode,
+          elapsedMs: input.elapsedMs,
           operation: input.operation,
         }),
       }],
@@ -101,6 +106,7 @@ function buildHostedComputerToolFailureRedactedJson(input: {
   action: HostedComputerToolAction | null;
   error: unknown;
   errorCode: string;
+  elapsedMs: number;
   operation: HostedComputerToolOperation;
 }): HostedRuntimeRedactedJson {
   const domainError = isHostedOnboardingError(input.error) ? input.error : null;
@@ -109,6 +115,7 @@ function buildHostedComputerToolFailureRedactedJson(input: {
 
   return {
     computerOperationKind: input.operation,
+    computerOperationElapsedMs: input.elapsedMs,
     ...readHostedComputerToolActionDetail({
       action,
       operation: input.operation,
@@ -121,7 +128,8 @@ function buildHostedComputerToolFailureRedactedJson(input: {
     ...(domainError ? { retryable: domainError.retryable } : {}),
     ...readHostedComputerManagedLoginDetail(details),
     ...readHostedComputerLiveViewValidationDetail(details),
-    ...readHostedComputerToolFailureCategory(details, domainError?.message ?? null),
+    ...readHostedComputerToolFailureCategory(details, input.error instanceof Error ? input.error.message : null),
+    ...readHostedComputerProviderDiagnostics(input.error, details),
     kernelErrorPresent: details.kernelErrorPresent === true,
     kernelStderrPresent: details.kernelStderrPresent === true,
     kernelStdoutPresent: details.kernelStdoutPresent === true,
@@ -239,7 +247,7 @@ function readHostedComputerToolFailureCategory(
     .join("\n")
     .toLowerCase();
   if (text.length === 0) {
-    return {};
+    return { computerFailureCategory: "unclassified" };
   }
 
   if (text.includes("strict mode violation")) {
@@ -256,7 +264,43 @@ function readHostedComputerToolFailureCategory(
     return { computerFailureCategory: "browser_closed" };
   }
 
-  return {};
+  // Only provider error channels supply new evidence, never stdout or page text.
+  // Match diagnostic headers, not mentions in echoed source, DOM or call logs.
+  const diagnostics = [details.kernelError, details.kernelStderr]
+    .filter((value): value is string => typeof value === "string")
+    .map((value) => value.slice(0, 4_000).trimStart().replace(/^Error(?::[ \t]*|\n)/u, ""));
+  if (diagnostics.some((value) =>
+    /^(?:page\.(?:goto|reload|goBack|goForward|waitForNavigation):[ \t]*)?net::ERR_[A-Z0-9_]+\b/u.test(value)
+    || /^page\.(?:goto|reload|goBack|goForward|waitForNavigation): Navigation\b[^\n]*\binterrupted by another navigation\b/u.test(value)
+    || /^TypeError(?::[ \t]*|\n)(?:Failed to fetch|fetch failed)(?:\n|$)/u.test(value)
+  )) {
+    return { computerFailureCategory: "navigation_network_error" };
+  }
+  if (diagnostics.some((value) =>
+    /^(?:(?:page|frame|locator|jsHandle)\.evaluate(?:Handle)?:[ \t]*)?(?:SyntaxError|ReferenceError|TypeError|RangeError|EvalError|URIError|AggregateError)(?::|\n|$)/u.test(value)
+  )) {
+    return { computerFailureCategory: "javascript_error" };
+  }
+
+  return { computerFailureCategory: "unclassified" };
+}
+
+function readHostedComputerProviderDiagnostics(
+  error: unknown,
+  details: Record<string, unknown>,
+): HostedRuntimeRedactedJson {
+  const output: HostedRuntimeRedactedJson = {};
+  for (const key of ["kernelExecutionTimeoutMs", "kernelExecutionElapsedMs"] as const) {
+    const value = details[key];
+    if (typeof value === "number" && Number.isSafeInteger(value) && value >= 0) {
+      output[key] = value;
+    }
+  }
+  const status = error && typeof error === "object" && "status" in error ? error.status : null;
+  if (typeof status === "number" && Number.isInteger(status) && status >= 400 && status <= 599) {
+    output.providerHttpStatus = status;
+  }
+  return output;
 }
 
 function readHostedComputerToolErrorCode(error: unknown): string {

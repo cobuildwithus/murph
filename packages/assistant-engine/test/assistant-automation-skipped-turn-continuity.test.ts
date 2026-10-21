@@ -189,7 +189,7 @@ function createProviderResult(input: {
 function requireTarget(
   model: string,
   reasoningEffort: string,
-  modelProvider = 'vercel-ai-gateway',
+  modelProvider = 'hosted-openai',
 ): AssistantModelTarget {
   const target = createAssistantModelTarget({
     model,

@@ -1,3 +1,4 @@
+import type { WearableHapticAction } from "@murphai/hosted-execution/wearable-haptics";
 import { HOSTED_WORKSPACE_SYSTEM_WORK_ACTIONS } from "./workspace-system-work.ts";
 import { createHash } from "node:crypto";
 
@@ -9,10 +10,12 @@ import {
   sanitizeHostedExecutionStructuredLogText,
   type HostedAssistantNotificationValidationFailureReason,
   type HostedExecutionSystemWake,
+  type HostedExecutionAssistantNotificationRoute,
   type HostedExecutionRedactedLogEntry,
   type HostedExecutionStructuredLogDetails,
 } from "@murphai/hosted-execution";
 import {
+  isHostedUsageOptimizationAuditFeedback,
   type HostedRuntimeGroupToolResponse,
   type HostedRuntimeProductFeedbackRecord,
   type HostedWorkspaceCheckpointReason,
@@ -42,7 +45,9 @@ import {
   refreshAssistantContextSnapshotBestEffort,
   refreshReminderAvailability,
   resolveAssistantCronDefaultTimeZoneProjection,
+  resolveMurphManagedAutomationOwnerScope,
   upsertAssistantInputEvent,
+  widenAssistantCronActiveUntilForFinalOccurrence,
   type AssistantAutomationOccurrenceProjection,
   type AssistantAutomationOccurrenceProjectionIssue,
   type AssistantAutomationOperationScope,
@@ -59,6 +64,7 @@ import {
   type AssistantTurnEnvironment,
   type HostedAssistantTurnTimingStage,
   stampAssistantProviderStartCriticalPath,
+  scopeAssistantAutomationToolToRoute,
 } from "@murphai/assistant-engine";
 import { VaultCliError } from "@murphai/operator-config/vault-cli-errors";
 import {
@@ -128,6 +134,7 @@ import {
   prepareHostedAssistantAutomationForWake,
 } from "./context.ts";
 import {
+  buildHostedNotificationAutomationRoute,
   readHostedAssistantInputCurrentDeliveryRoute,
   resolveUnambiguousCurrentDeliveryRoute,
 } from "./current-delivery-route.ts";
@@ -146,6 +153,7 @@ import {
   createHostedGroupParticipantDisplayNameReader,
   createHostedGroupSharedReader,
   normalizeHostedGroupSharedProjectionScopes,
+  type HostedGroupSharedReadTelemetry,
 } from "./group-shared-reader.ts";
 import {
   resolveHostedOldestAssistantInputOccurredAt,
@@ -174,6 +182,10 @@ import {
   type HostedSystemMailboxPendingItem,
   type HostedSystemMailboxRouteAction,
 } from "./system-mailbox.ts";
+import {
+  findNextHostedSystemMailboxQueueItem,
+  readHostedSystemMailboxState,
+} from "./system-mailbox-state.ts";
 import type {
   HostedAssistantLinqDeliveryContext,
 } from "./linq-delivery-context.ts";
@@ -443,7 +455,6 @@ function readHostedInitialAssistantInputIds(
 
 function createHostedAssistantAutomationOperationScope(
   input: HostedWorkspaceRuntimeAssistantPhaseInput,
-  redactedLogEntries: HostedExecutionRedactedLogEntry[],
 ): AssistantAutomationOperationScope {
   return {
     async runAutoReplyGroup<T>(scopeInput: {
@@ -475,15 +486,15 @@ function createHostedAssistantAutomationOperationScope(
         groupToolPort: input.runtime.platform.groupToolPort ?? null,
         linqDeliveryContexts: durableContext.linqDeliveryContexts,
         linqService: durableContext.linqService,
+        onGroupSharedReadCompleted: (telemetry) =>
+          writeHostedGroupSharedReadRuntimeLog(input, "interactive", telemetry),
         runtimeMemberId: input.request.userId,
         telegramSenderHandles: durableContext.telegramSenderHandles,
         vaultRoot: input.restored.vaultRoot,
       });
-      const scopedExecutionContext = scopeHostedAutomationToolToAssistantOperation({
+      const scopedExecutionContext = scopeAssistantAutomationToolToRoute({
         executionContext: groupScopedExecutionContext,
-        redactedLogEntries,
         route,
-        vaultRoot: input.restored.vaultRoot,
       });
       const providerStartCriticalPath = stampAssistantProviderStartCriticalPath(
         scopeInput.providerStartCriticalPath,
@@ -689,6 +700,7 @@ function scopeHostedGroupToolToAssistantOperation(input: {
   groupToolPort: NonNullable<HostedRuntimePlatform["groupToolPort"]> | null;
   linqDeliveryContexts: readonly HostedAssistantLinqDeliveryContext[];
   linqService: HostedUsageReferralLinqService | null;
+  onGroupSharedReadCompleted: (telemetry: HostedGroupSharedReadTelemetry) => void;
   runtimeMemberId: string;
   telegramSenderHandles?: readonly string[];
   vaultRoot: string;
@@ -709,6 +721,7 @@ function scopeHostedGroupToolToAssistantOperation(input: {
     freshnessWaitMs: input.groupEmailIngress ? undefined : 15_000,
     groupSharedReadAvailable: input.groupSharedReadAvailable,
     groupToolPort: scopedGroupToolPort,
+    onReadCompleted: input.onGroupSharedReadCompleted,
   });
   if (!sharedScopedExecutionContext.hosted) {
     return sharedScopedExecutionContext;
@@ -749,6 +762,7 @@ function scopeHostedGroupSharedReaderToAssistantOperation(input: {
   freshnessWaitMs?: number;
   groupSharedReadAvailable: boolean;
   groupToolPort: NonNullable<HostedRuntimePlatform["groupToolPort"]> | null;
+  onReadCompleted: (telemetry: HostedGroupSharedReadTelemetry) => void;
 }): AssistantExecutionContext {
   if (!input.executionContext.hosted) {
     return input.executionContext;
@@ -766,6 +780,7 @@ function scopeHostedGroupSharedReaderToAssistantOperation(input: {
             groupSharedReader: createHostedGroupSharedReader({
               groupToolPort: input.groupToolPort,
               freshnessWaitMs: input.freshnessWaitMs,
+              onReadCompleted: input.onReadCompleted,
             }),
           }
         : {}),
@@ -780,6 +795,7 @@ function createHostedScheduledGroupTools(input: {
   channel: string;
   containerMemberId: string;
   groupToolPort: NonNullable<HostedRuntimePlatform["groupToolPort"]> | null;
+  onGroupSharedReadCompleted: (telemetry: HostedGroupSharedReadTelemetry) => void;
   target: string;
   threadIsDirect: boolean;
 }): {
@@ -812,6 +828,7 @@ function createHostedScheduledGroupTools(input: {
   const unobservedGroupSharedReader = createHostedGroupSharedReader({
     groupToolPort: input.groupToolPort,
     freshnessWaitMs: 5 * 60_000,
+    onReadCompleted: input.onGroupSharedReadCompleted,
   });
   const groupSharedReader: AssistantHostedGroupSharedReader = {
     async request(request, context) {
@@ -895,48 +912,40 @@ type HostedAssistantAutomationTool = NonNullable<
   NonNullable<AssistantExecutionContext["hosted"]>["automationTool"]
 >;
 
-function scopeHostedAutomationToolToAssistantOperation(input: {
-  executionContext: AssistantExecutionContext;
-  redactedLogEntries: HostedExecutionRedactedLogEntry[];
-  route: AssistantCurrentDeliveryRoute | null;
-  vaultRoot: string;
-}): AssistantExecutionContext {
-  const hosted = input.executionContext.hosted;
-  if (!hosted) {
-    return input.executionContext;
-  }
-
-  const { automationTool: _unscopedAutomationTool, ...hostedWithoutAutomation } = hosted;
-  void _unscopedAutomationTool;
-  const automationTool = input.route
-    && typeof input.route.threadIsDirect === "boolean"
-    && !(
-      normalizeAssistantRouteString(input.route.channel)?.toLowerCase() === "email"
-      && input.route.threadIsDirect === false
-    )
-    ? createHostedAssistantAutomationTool({
-        redactedLogEntries: input.redactedLogEntries,
-        route: input.route,
-        vaultRoot: input.vaultRoot,
-      })
-    : null;
-
-  return {
-    hosted: {
-      ...hostedWithoutAutomation,
-      ...(automationTool ? { automationTool } : {}),
-    },
-  };
-}
+type MemberNotificationRouteResolver = (
+  context?: { signal?: AbortSignal | null },
+) => Promise<HostedExecutionAssistantNotificationRoute | null>;
 
 function createHostedAssistantAutomationTool(input: {
+  resolveMemberNotificationRoute: MemberNotificationRouteResolver;
   redactedLogEntries: HostedExecutionRedactedLogEntry[];
   route: AssistantCurrentDeliveryRoute;
   vaultRoot: string;
-}): HostedAssistantAutomationTool {
-  const currentRoute = automationRouteSchema.parse(
-    resolveAssistantDeliveryRouteWithCurrentRoute({}, input.route),
-  );
+}): HostedAssistantAutomationTool | null {
+  if (typeof input.route.threadIsDirect !== "boolean"
+    || (normalizeAssistantRouteString(input.route.channel)?.toLowerCase() === "email"
+      && input.route.threadIsDirect === false)) {
+    return null;
+  }
+  const currentRouteBinding = input.route.channel === "voice"
+    ? "member_notification" : "current_conversation";
+  const resolveCurrentRoute = async (context?: { signal?: AbortSignal | null }) => {
+    if (input.route.channel !== "voice") {
+      return automationRouteSchema.parse(
+        resolveAssistantDeliveryRouteWithCurrentRoute({}, input.route),
+      );
+    }
+    const route = await input.resolveMemberNotificationRoute(context);
+    context?.signal?.throwIfAborted();
+    if (!route || route.threadIsDirect !== true
+      || (route.channel !== "linq" && route.channel !== "telegram")) {
+      throw new VaultCliError(
+        "invalid_option",
+        "Connect a messaging destination before scheduling reminders from a voice call.",
+      );
+    }
+    return automationRouteSchema.parse(buildHostedNotificationAutomationRoute(route));
+  };
   let onboardingFirstReadCompletionTransitionConsumed = false;
   return {
     async request(request, context) {
@@ -960,6 +969,7 @@ function createHostedAssistantAutomationTool(input: {
         };
       }
       if (request.action === "save") {
+        const currentRoute = await resolveCurrentRoute(context);
         const existingTarget = request.automationId
           ? await showAutomation({
               automationId: request.automationId,
@@ -1013,9 +1023,12 @@ function createHostedAssistantAutomationTool(input: {
           status,
         });
         const result = await upsertAutomation({
-          ...(request.activeUntil === undefined
-            ? {}
-            : { activeUntil: request.activeUntil }),
+          ...await resolveHostedAutomationActiveUntilWrite({
+            existing: null,
+            requestedActiveUntil: request.activeUntil,
+            requestedSchedule: request.schedule,
+            vaultRoot: input.vaultRoot,
+          }),
           ...(request.assistantTargetOverride === undefined
             ? {}
             : { assistantTargetOverride: request.assistantTargetOverride }),
@@ -1056,7 +1069,7 @@ function createHostedAssistantAutomationTool(input: {
           action: "save",
           redactedLogEntries: input.redactedLogEntries,
           result,
-          routeBinding: "current_conversation",
+          routeBinding: currentRouteBinding,
           vaultRoot: input.vaultRoot,
         });
       }
@@ -1076,22 +1089,26 @@ function createHostedAssistantAutomationTool(input: {
       if (request.action === "inspect") {
         return await buildHostedAutomationToolResponse({
           action: "inspect",
+          view: request.view,
           record: existing,
           routeBinding: "preserved",
           vaultRoot: input.vaultRoot,
         });
       }
       const route = request.retargetToCurrentConversation === true
-        ? currentRoute
+        ? await resolveCurrentRoute(context)
         : existing.route;
       assertActiveHostedAutomationRoute({
         route,
         status: request.status ?? existing.status,
       });
       const result = await patchAutomation({
-        ...(request.activeUntil === undefined
-          ? {}
-          : { activeUntil: request.activeUntil }),
+        ...await resolveHostedAutomationActiveUntilWrite({
+          existing,
+          requestedActiveUntil: request.activeUntil,
+          requestedSchedule: request.schedule,
+          vaultRoot: input.vaultRoot,
+        }),
         ...(request.assistantTargetOverride === undefined
           ? {}
           : { assistantTargetOverride: request.assistantTargetOverride }),
@@ -1114,7 +1131,7 @@ function createHostedAssistantAutomationTool(input: {
           : { plannedOccurrenceOffsetMs: request.plannedOccurrenceOffsetMs }),
         lookup: request.lookup,
         ...(request.retargetToCurrentConversation === true
-          ? { route: currentRoute }
+          ? { route }
           : {}),
         ...(request.schedule === undefined ? {} : { schedule: request.schedule }),
         ...(request.slug === undefined ? {} : { slug: request.slug }),
@@ -1142,7 +1159,7 @@ function createHostedAssistantAutomationTool(input: {
         redactedLogEntries: input.redactedLogEntries,
         result,
         routeBinding: request.retargetToCurrentConversation === true
-          ? "current_conversation"
+          ? currentRouteBinding
           : "preserved",
         vaultRoot: input.vaultRoot,
       });
@@ -1237,6 +1254,7 @@ function assertActiveHostedAutomationRoute(input: {
 type HostedAutomationToolResponseInput =
   | {
       action: "inspect";
+      view?: "full" | "model_review";
       record: AutomationRecord;
       routeBinding: "preserved";
       vaultRoot: string;
@@ -1245,9 +1263,41 @@ type HostedAutomationToolResponseInput =
       action: "patch" | "save";
       redactedLogEntries: HostedExecutionRedactedLogEntry[];
       result: Awaited<ReturnType<typeof upsertAutomation>>;
-      routeBinding: "current_conversation" | "preserved";
+      routeBinding: "current_conversation" | "member_notification" | "preserved";
       vaultRoot: string;
     };
+
+// Widens a finite wall-clock cutoff so its final occurrence keeps the normal
+// delivery window. A schedule-only patch re-checks the stored cutoff and writes
+// it only when widening changes it; a timezone-less replacement schedule keeps
+// the stored timezone, matching core patch resolution.
+async function resolveHostedAutomationActiveUntilWrite(input: {
+  existing: AutomationRecord | null;
+  requestedActiveUntil: string | null | undefined;
+  requestedSchedule: AutomationRecord["schedule"] | undefined;
+  vaultRoot: string;
+}): Promise<{ activeUntil?: string | null }> {
+  const requested = input.requestedActiveUntil;
+  const current = requested !== undefined || input.requestedSchedule === undefined
+    ? requested
+    : input.existing?.activeUntil;
+  const schedule = input.requestedSchedule ?? input.existing?.schedule;
+  if (
+    typeof current !== "string"
+    || (schedule?.kind !== "cron" && schedule?.kind !== "dailyLocal")
+  ) {
+    return requested === undefined ? {} : { activeUntil: requested };
+  }
+  const stored = input.existing?.schedule;
+  const widened = widenAssistantCronActiveUntilForFinalOccurrence({
+    activeUntil: current,
+    schedule,
+    timeZone: schedule.timeZone
+      ?? (stored?.kind === "cron" || stored?.kind === "dailyLocal" ? stored.timeZone : undefined)
+      ?? (await resolveAssistantCronDefaultTimeZoneProjection(input.vaultRoot)).timeZone,
+  });
+  return requested === undefined && widened === current ? {} : { activeUntil: widened };
+}
 
 async function projectHostedAutomationResponseFields(input: {
   record: AutomationRecord;
@@ -1336,7 +1386,10 @@ async function projectHostedAutomationResponseFields(input: {
   }
   return {
     automationId: input.record.automationId,
+    assistantTargetOverride: input.record.assistantTargetOverride,
+    managed: resolveMurphManagedAutomationOwnerScope(input.record.automationId) !== null,
     contextReferences: [...input.record.contextReferences],
+    deliveryChannel: input.record.route.channel,
     effectiveTimeZone,
     lookupId: input.record.slug,
     occurrenceProjection,
@@ -1350,6 +1403,27 @@ async function buildHostedAutomationToolResponse(
   input: HostedAutomationToolResponseInput,
 ): Promise<Awaited<ReturnType<HostedAssistantAutomationTool["request"]>>> {
   const record = input.action === "inspect" ? input.record : input.result.record;
+  if (input.action === "inspect" && input.view === "model_review") {
+    const managed = resolveMurphManagedAutomationOwnerScope(record.automationId) !== null;
+    return {
+      action: "inspect",
+      view: "model_review",
+      automationId: record.automationId,
+      assistantTargetOverride: record.assistantTargetOverride,
+      managed,
+      contextReferences: [...record.contextReferences],
+      ...(managed
+        ? { instructionsOmitted: "managed_model_preserved" as const }
+        : { instructions: record.instructions }),
+      title: record.title,
+      deliveryChannel: record.route.channel,
+      lookupId: record.slug,
+      routeBinding: "preserved",
+      schedule: record.schedule,
+      status: record.status,
+      updatedAt: record.updatedAt,
+    };
+  }
   const responseFields = await projectHostedAutomationResponseFields({
     record,
     vaultRoot: input.vaultRoot,
@@ -1475,8 +1549,14 @@ function buildHostedPhaseOptionalTools(
             input.runtime.platform.assistantPersonalizationToolPort,
         }
       : {}),
+    ...(input.runtime.platform.usageDiagnosticsPort
+      ? { usageDiagnostics: input.runtime.platform.usageDiagnosticsPort }
+      : {}),
     ...(input.runtime.platform.planUsageToolPort
       ? { planUsageTool: input.runtime.platform.planUsageToolPort }
+      : {}),
+    ...(input.runtime.platform.pollToolPort
+      ? { pollTool: input.runtime.platform.pollToolPort }
       : {}),
     ...(input.runtime.platform.imessageContactToolPort
       ? { imessageContactTool: input.runtime.platform.imessageContactToolPort }
@@ -1589,6 +1669,7 @@ export async function runHostedWorkspaceAssistantPhase(
     runtimeAttemptId: input.request.attemptId,
     source: "linq" as const,
   };
+  const committedUsageAuditKeys = new Set<string>();
   const productFeedbackCandidates = new Map<
     string,
     HostedRuntimeProductFeedbackRecord
@@ -1603,10 +1684,19 @@ export async function runHostedWorkspaceAssistantPhase(
     }).catch(() => undefined);
   }
   const executionTargetHydrateStartedAt = Date.now();
+  const assistantAutomationRedactedLogEntries: HostedExecutionRedactedLogEntry[] = [];
   const executionContext: AssistantExecutionContext = await hydrateHostedExecutionDefaultTarget(
     {
       hosted: {
         actionApprovalPort: input.runtime.platform.actionApprovalPort ?? null,
+        createAutomationTool: (route) => createHostedAssistantAutomationTool({
+          redactedLogEntries: assistantAutomationRedactedLogEntries,
+          resolveMemberNotificationRoute: (context) =>
+            input.runtime.platform.effectsPort.resolveMemberNotificationRoute?.(context)
+              ?? Promise.resolve(null),
+          route,
+          vaultRoot: input.restored.vaultRoot,
+        }),
         async assertTurnCommitAuthority({ acceptedInputs }) {
           const linqDeliveryContexts =
             await resolveHostedAssistantInputIdsTurnCommitLinqContexts({
@@ -1669,7 +1759,13 @@ export async function runHostedWorkspaceAssistantPhase(
               productFeedbackCandidateSink: {
                 acceptProductFeedbackCandidate(
                   feedback: HostedRuntimeProductFeedbackRecord,
+                  authorization?: { committedUsageOptimizerScope: { memberId: string; occurrenceAt: string } },
                 ) {
+                  committedUsageAuditKeys.delete(feedback.idempotencyKey);
+                  if (authorization?.committedUsageOptimizerScope.memberId === input.request.userId
+                    && isHostedUsageOptimizationAuditFeedback(feedback)) {
+                    committedUsageAuditKeys.add(feedback.idempotencyKey);
+                  }
                   productFeedbackCandidates.set(
                     feedback.idempotencyKey,
                     feedback,
@@ -1703,6 +1799,8 @@ export async function runHostedWorkspaceAssistantPhase(
             channel,
             containerMemberId: input.request.userId,
             groupToolPort: input.runtime.platform.groupToolPort ?? null,
+            onGroupSharedReadCompleted: (telemetry) =>
+              writeHostedGroupSharedReadRuntimeLog(input, "scheduled", telemetry),
             target,
             threadIsDirect,
           }),
@@ -1796,11 +1894,7 @@ export async function runHostedWorkspaceAssistantPhase(
     },
   );
   const executionTargetHydrateMs = elapsedSince(executionTargetHydrateStartedAt);
-  const assistantAutomationRedactedLogEntries: HostedExecutionRedactedLogEntry[] = [];
-  const automationOperationScope = createHostedAssistantAutomationOperationScope(
-    input,
-    assistantAutomationRedactedLogEntries,
-  );
+  const automationOperationScope = createHostedAssistantAutomationOperationScope(input);
   try {
     const hasFreshConversationInput = hasFreshHostedConversationInput(input);
     const systemMailboxMaintenanceStartedAt = Date.now();
@@ -1987,6 +2081,7 @@ export async function runHostedWorkspaceAssistantPhase(
       systemMailboxMaintenance: Awaited<ReturnType<typeof runSystemMailboxMaintenancePhase>>;
     }) => {
       productFeedbackCandidates.clear();
+      committedUsageAuditKeys.clear();
       const automationLaneStartedAt = Date.now();
       const automationBootstrapStartedAt = Date.now();
       const assistantRuntimeState = await prepareHostedAssistantAutomationForWake(
@@ -2092,6 +2187,7 @@ export async function runHostedWorkspaceAssistantPhase(
           : {
               assistantAutomationProductFeedbackCandidates:
                 [...productFeedbackCandidates.values()],
+              assistantAutomationCommittedUsageAuditKeys: [...committedUsageAuditKeys],
             }),
         ...(assistantAutomationRedactedLogEntries.length === 0
           ? {}
@@ -2261,6 +2357,7 @@ export async function runHostedWorkspaceAssistantPhase(
         stage: "foreground-delivery-phase-started",
       });
       const foregroundAssistantPhaseStartedAt = Date.now();
+      const foregroundDeliveryPhaseStartedAtMonotonicMs = performance.now();
       const writeForegroundAssistantFinishedTiming = () => {
         writeHostedAssistantTurnTimingRuntimeLog({
           currentTurnDeliveryIntentCount: currentTurnDeliveryIntentIds.length,
@@ -2274,6 +2371,7 @@ export async function runHostedWorkspaceAssistantPhase(
       const foregroundAssistantResult = await runForegroundAssistantReplyPhase({
         assistantMetrics,
         currentTurnDeliveryIntentIds,
+        foregroundDeliveryPhaseStartedAtMonotonicMs,
         foregroundCronReconciliationWake,
         foregroundWorkspaceWake: createFutureExistingHostedAssistantWorkspaceWakeCandidate(input),
         input,
@@ -2301,15 +2399,17 @@ export async function runHostedWorkspaceAssistantPhase(
       if (!foregroundAssistantResult.afterCheckpoint) {
         writeForegroundAssistantFinishedTiming();
       }
-      const foregroundResult = mergeContinuingSystemMailboxResult(
-        withFreshHostedManagedAutomationsAfterCheckpoint({
-          input,
-          result: timedForegroundAssistantResult,
-        }),
-      );
+      const foregroundResult = withFreshHostedManagedAutomationsAfterCheckpoint({
+        input,
+        result: mergeContinuingSystemMailboxResult(timedForegroundAssistantResult),
+      });
       const result = withPostForegroundMemberMaintenanceAfterCheckpoint({
         executionContext,
         input,
+        memberMaintenanceDue: await hasDueHostedPostForegroundMemberMaintenance({
+          input,
+          result: foregroundResult,
+        }),
         result: foregroundResult,
         wake,
       });
@@ -2509,11 +2609,12 @@ export async function runHostedWorkspaceAssistantPhase(
         providerCleanup: providerCleanupScheduledWakeAt,
       },
     });
-    const hasPostCommitProviderCleanup = providerCleanupDue
+    const hasCommittedUsageAudit = hasHostedCommittedUsageAudit(assistantMetrics);
+    const hasPostCheckpointWork = hasCommittedUsageAudit || providerCleanupDue
       || deliveryEffects.length > 0
       || providerCleanupStateQueued;
 
-    const phaseProgressed = progressed || providerCleanupDue;
+    const phaseProgressed = progressed || providerCleanupDue || hasCommittedUsageAudit;
     const redactedStatus = buildHostedWorkspaceAssistantPhaseRedactedStatus({
       deliveryEffectCount: deliveryEffects.length,
       nextWakeAt,
@@ -2537,7 +2638,7 @@ export async function runHostedWorkspaceAssistantPhase(
     }
 
     const result = mergeContinuingSystemMailboxResult({
-      ...(hasPostCommitProviderCleanup
+      ...(hasPostCheckpointWork
         ? {
             afterCheckpointKeepsForegroundImportLoop: true,
             afterCheckpoint: async () => {
@@ -2558,6 +2659,11 @@ export async function runHostedWorkspaceAssistantPhase(
                 && !providerCleanupDue
                 && !providerCleanupStateQueued
               ) {
+                await recordHostedProductFeedbackAfterCommittedTurn({
+                  assistantMetrics,
+                  outcomes: [],
+                  port: input.runtime.platform.productFeedbackPort,
+                });
                 return {
                   checkpointReason: "assistant_runtime_commit",
                   nextWakeAt: baseNextWakeAt,
@@ -3113,6 +3219,10 @@ function withFreshHostedManagedAutomationsAfterCheckpoint(input: {
         input.result.afterCheckpoint,
         async () => await applyFreshHostedManagedAutomationsAfterCheckpoint({
           input: input.input,
+          phaseWake: createHostedRuntimeWakeCandidate(
+            input.result.nextWakeAt ?? null,
+            input.result.nextWakeReason ?? null,
+          ),
         }),
       ],
     }),
@@ -3202,27 +3312,42 @@ async function maintainHostedAutoReplyRouteState(
 
 async function applyFreshHostedManagedAutomationsAfterCheckpoint(input: {
   input: HostedWorkspaceRuntimeAssistantPhaseInput;
+  phaseWake: HostedRuntimeWakeCandidate | null;
 }): Promise<HostedWorkspaceRunnerAssistantPhasePostCheckpoint | null> {
   if (input.input.shouldYieldBackgroundMaintenance?.() === true) {
-    return null;
+    const nextWake = selectHostedRuntimeWakeCandidate([
+      input.phaseWake,
+      createHostedRuntimeWakeCandidate(
+        new Date(
+          resolveHostedAssistantPhaseNowMs(input.input)
+            + HOSTED_ASSISTANT_CRON_STATUS_RETRY_DELAY_MS,
+        ).toISOString(),
+        HOSTED_ASSISTANT_WAKE_REASON,
+      ),
+    ]);
+    return {
+      checkpointReason: "assistant_runtime_commit",
+      nextWakeAt: nextWake.at,
+      nextWakeReason: nextWake.reason,
+    };
   }
 
   const defaultRoute = await resolveHostedManagedAutomationDefaultRouteBestEffort({
     input: input.input,
   });
-  if (!defaultRoute) {
+  const managedResult = defaultRoute
+    ? await applyHostedManagedAutomationsBestEffort({
+        defaultRoute,
+        input: input.input,
+        retryStableKeyFailure: true,
+      })
+    : null;
+  if (managedResult && managedResult.progressed !== true) {
     return null;
   }
 
-  const result = await applyHostedManagedAutomationsBestEffort({
-    defaultRoute,
-    input: input.input,
-    retryStableKeyFailure: true,
-  });
-  if (!result || result.progressed !== true) {
-    return null;
-  }
-
+  // A reply can complete onboarding without changing automation records.
+  // Refresh derived eligibility after delivery even when seeding is unchanged.
   const assistantCronWake =
     await resolveHostedAssistantCronWakeStateBestEffort(input.input, {
       interruptOnBackgroundYield: true,
@@ -3233,14 +3358,21 @@ async function applyFreshHostedManagedAutomationsAfterCheckpoint(input: {
         resolveHostedAssistantPhaseNowMs(input.input)
           + HOSTED_ASSISTANT_CRON_STATUS_RETRY_DELAY_MS,
       ).toISOString();
+  if (!managedResult && cronNextWakeAt === null) {
+    return null;
+  }
+  const result: HostedWorkspaceRunnerAssistantPhasePostCheckpoint = managedResult
+    ?? { checkpointReason: "assistant_runtime_commit" };
   const hasManagedNextWakeAt = Object.hasOwn(result, "nextWakeAt");
   const nextWake = selectHostedRuntimeWakeCandidate([
+    // Reprojection must not replace earlier work owned by the phase.
+    input.phaseWake,
     createHostedRuntimeWakeCandidate(
       cronNextWakeAt,
       assistantCronWake.wake?.reason ?? HOSTED_ASSISTANT_WAKE_REASON,
     ),
     createHostedRuntimeWakeCandidate(
-      hasManagedNextWakeAt ? result.nextWakeAt ?? null : null,
+      result.nextWakeAt ?? null,
       result.nextWakeReason ?? HOSTED_ASSISTANT_WAKE_REASON,
     ),
     // When this post-checkpoint result owns a wake it replaces the phase
@@ -3897,15 +4029,6 @@ function isBrowserVaultReplicaRefreshSystemMailboxPreparation(
     && systemMailboxPreparation.item.wake.kind === "runtime.browser-vault-refresh-requested";
 }
 
-function isEnvironmentInterviewSystemMailboxPreparation(
-  systemMailboxPreparation: HostedSystemMailboxPreparation,
-): boolean {
-  return "item" in systemMailboxPreparation
-    && systemMailboxPreparation.status === "processed"
-    && systemMailboxPreparation.item.routeAction === "run-environment-interview"
-    && systemMailboxPreparation.item.wake.kind === "environment-interview.completed";
-}
-
 function resolveHostedAssistantCronWakeState(
   phaseInput: HostedWorkspaceRuntimeAssistantPhaseInput,
   cronStatus: HostedAssistantCronStatus,
@@ -4338,25 +4461,55 @@ function shouldRunShadowedDeviceSyncAfterNoProgressAssistantWake(input: {
   );
 }
 
+async function hasDueHostedPostForegroundMemberMaintenance(input: {
+  input: HostedWorkspaceRuntimeAssistantPhaseInput;
+  result: HostedWorkspaceRunnerAssistantPhaseResult;
+}): Promise<boolean> {
+  // Progressed passes already attach member maintenance; failed replies keep it.
+  if (input.result.progressed === true || input.result.foregroundReplyFailed !== 0) {
+    return false;
+  }
+  const item = findNextHostedSystemMailboxQueueItem({
+    allowedRouteActions: HOSTED_POST_FOREGROUND_MEMBER_MAINTENANCE_ROUTE_ACTIONS,
+    now: new Date(resolveHostedAssistantPhaseNowMs(input.input)).toISOString(),
+    pendingOnly: true,
+    state: await readHostedSystemMailboxState(input.input.restored.vaultRoot),
+  });
+  return item !== null
+    && (HOSTED_POST_FOREGROUND_MEMBER_MAINTENANCE_WAKE_KINDS as readonly string[])
+      .includes(item.wake.kind);
+}
+
 function withPostForegroundMemberMaintenanceAfterCheckpoint(input: {
   executionContext: AssistantExecutionContext;
   input: HostedWorkspaceRuntimeAssistantPhaseInput;
+  memberMaintenanceDue: boolean;
   result: HostedWorkspaceRunnerAssistantPhaseResult;
   wake: ReturnType<typeof buildHostedExecutionRuntimeTimerWake>;
 }): HostedWorkspaceRunnerAssistantPhaseResult {
-  if (
-    input.result.progressed !== true
-    || input.result.foregroundReplyFailed !== 0
-  ) {
+  if (input.result.foregroundReplyFailed !== 0) {
     return input.result;
   }
+  // A clean foreground pass can make no progress when another owner already
+  // answered its input (Web's instant first turn). Due member maintenance
+  // still follows that pass instead of waiting for the idle checkpoint.
+  if (input.result.progressed !== true && !input.memberMaintenanceDue) {
+    return input.result;
+  }
+  const result = input.result.progressed === true
+    ? input.result
+    : {
+        ...input.result,
+        checkpointReason: "system_mailbox_receipt" as const,
+        progressed: true as const,
+      };
 
   return {
-    ...input.result,
+    ...result,
     afterCheckpointKeepsForegroundImportLoop: true,
     afterCheckpoint: composeHostedAssistantPhaseAfterCheckpoint({
       callbacks: [
-        input.result.afterCheckpoint,
+        result.afterCheckpoint,
         async () => {
           const maintenance = await runSystemMailboxMaintenancePhase({
             exclusiveRouteActions:
@@ -4837,16 +4990,16 @@ async function prepareForegroundSystemMailboxSelection(
   const phaseInput = input.input;
   const assistantAskCompletionOccurredBefore = pendingAssistantInputWakeAt === null
     ? undefined
-    : input.hasFreshConversationInput
-    ? await resolveHostedOldestAssistantInputOccurredAt({
-        assistantInputIds: readHostedInitialAssistantInputIds(phaseInput),
-        signal: phaseInput.signal ?? null,
-        vaultRoot: phaseInput.restored.vaultRoot,
-      })
-    : await resolveHostedOldestPendingAssistantInputAt({
-        signal: phaseInput.signal ?? null,
-        vaultRoot: phaseInput.restored.vaultRoot,
-      });
+    : () => input.hasFreshConversationInput
+      ? resolveHostedOldestAssistantInputOccurredAt({
+          assistantInputIds: readHostedInitialAssistantInputIds(phaseInput),
+          signal: phaseInput.signal ?? null,
+          vaultRoot: phaseInput.restored.vaultRoot,
+        })
+      : resolveHostedOldestPendingAssistantInputAt({
+          signal: phaseInput.signal ?? null,
+          vaultRoot: phaseInput.restored.vaultRoot,
+        });
   const hasExclusiveSelection = input.exclusiveRouteActions !== undefined
     || input.exclusiveWakeKinds !== undefined;
   const prepareForegroundMailboxItem = (
@@ -4906,7 +5059,7 @@ async function prepareForegroundSystemMailboxSelection(
     const preCheckpointCompletionOccurredBefore =
       pendingAssistantInputWakeAt === null
         ? undefined
-        : await resolveHostedOldestPendingAssistantInputAt({
+        : () => resolveHostedOldestPendingAssistantInputAt({
             signal: phaseInput.signal ?? null,
             vaultRoot: phaseInput.restored.vaultRoot,
           });
@@ -5192,37 +5345,9 @@ async function runSystemMailboxMaintenancePhase(
         phaseInput,
       })
     : null;
-  if (
-    hostedSystemMailboxWakeIsDueForModelFreeOwner(
-      initialOwnerWake,
-      resolveHostedAssistantPhaseNowMs(phaseInput),
-    )
-  ) {
-    if (phaseInput.shouldYieldBackgroundMaintenance?.() === true) {
-      return {
-        backgroundMaintenanceYielded: true,
-        continueAssistantLane: false,
-        initialProviderCleanupCheckpoint,
-        pendingAssistantInputWakeAt,
-        result: buildPreAutomationLaneSkippedAssistantWakeResult({
-          wakeAt: new Date(resolveHostedAssistantPhaseNowMs(phaseInput)).toISOString(),
-        }),
-      };
-    }
-    return {
-      backgroundMaintenanceYielded: false,
-      continueAssistantLane: false,
-      initialProviderCleanupCheckpoint,
-      pendingAssistantInputWakeAt,
-      result: withHostedRuntimeProjectionCheckpointRequest({
-        requested: staleDefaultProjectionDisproved,
-        result: withHostedRuntimeWakeCandidate({
-          result: { progressed: false },
-          wake: initialOwnerWake,
-        }),
-      }),
-    };
-  }
+  // Apply the existing preferences preplanning owner before handing a model-free
+  // item off. A due preference wake otherwise keeps selecting default mode,
+  // which hands off the earlier refresh forever without advancing either item.
   deferSystemMailboxPreparationForDelivery =
     initialOwnerWake?.reason === HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON;
 
@@ -5230,6 +5355,10 @@ async function runSystemMailboxMaintenancePhase(
     pendingAssistantInputBlocksMaintenance
     && !foregroundCausalAttempted
     && !hasBackgroundSelection
+    && !hostedSystemMailboxWakeIsDueForModelFreeOwner(
+      initialOwnerWake,
+      resolveHostedAssistantPhaseNowMs(phaseInput),
+    )
     && shouldPreflightHostedAssistantCronWakeBeforeSystemMailbox(phaseInput)
   ) {
     const preflightAssistantCronWakeState = await readAssistantCronWakeState();
@@ -5308,9 +5437,12 @@ async function runSystemMailboxMaintenancePhase(
       initialProviderCleanupCheckpoint,
       pendingAssistantInputWakeAt,
       result: mergeMemberPreferencesPrePlanningResult(
-        withHostedRuntimeWakeCandidate({
-          result: { progressed: false },
-          wake: refreshedOwnerWake,
+        withHostedRuntimeProjectionCheckpointRequest({
+          requested: staleDefaultProjectionDisproved,
+          result: withHostedRuntimeWakeCandidate({
+            result: { progressed: false },
+            wake: refreshedOwnerWake,
+          }),
         }),
       ),
     };
@@ -5520,8 +5652,7 @@ async function runSystemMailboxMaintenancePhase(
   const shouldRecordSystemMailbox = systemMailboxPreparation.status === "processed"
     || systemMailboxPreparation.status === "recording";
   const browserVaultReplicaRefreshRequested =
-    isBrowserVaultReplicaRefreshSystemMailboxPreparation(systemMailboxPreparation)
-    || isEnvironmentInterviewSystemMailboxPreparation(systemMailboxPreparation);
+    isBrowserVaultReplicaRefreshSystemMailboxPreparation(systemMailboxPreparation);
   const foregroundPrioritySystemCompletionProcessed =
     isForegroundPrioritySystemCompletionProcessed(systemMailboxPreparation);
   const shouldRunPostSystemCheckpoint = shouldRecordSystemMailbox
@@ -5996,6 +6127,7 @@ async function collectForegroundDeliveryEffects(input: {
 async function runForegroundAssistantReplyPhase(input: {
   assistantMetrics: HostedAssistantMetrics;
   currentTurnDeliveryIntentIds: readonly string[];
+  foregroundDeliveryPhaseStartedAtMonotonicMs: number;
   foregroundCronReconciliationWake: HostedRuntimeWakeCandidate | null;
   foregroundWorkspaceWake: HostedRuntimeWakeCandidate | null;
   input: HostedWorkspaceRuntimeAssistantPhaseInput;
@@ -6055,6 +6187,8 @@ async function runForegroundAssistantReplyPhase(input: {
       baseNextWake: fastDispatchBaseNextWake,
       checkpointReason: "outbox_receipt",
       canConsumeWorkspaceAssistantWake: true,
+      foregroundDeliveryPhaseStartedAtMonotonicMs:
+        input.foregroundDeliveryPhaseStartedAtMonotonicMs,
       input: input.input,
       linqDeliveryContexts: input.linqDeliveryContexts,
       postDeliveryReconciliationWake: input.foregroundCronReconciliationWake,
@@ -6378,6 +6512,8 @@ async function drainHostedPostCheckpointDelivery(input: {
   baseNextWake: HostedRuntimeWakeCandidate;
   checkpointReason: HostedWorkspaceRunnerAssistantPhasePostCheckpoint["checkpointReason"];
   canConsumeWorkspaceAssistantWake: boolean;
+  /** Present only for the fast foreground dispatch; attribution only. */
+  foregroundDeliveryPhaseStartedAtMonotonicMs?: number | null;
   input: HostedWorkspaceRuntimeAssistantPhaseInput;
   linqDeliveryContexts?: readonly HostedAssistantLinqDeliveryContext[] | null;
   providerCleanupPlan: HostedProviderCleanupPlan;
@@ -6392,13 +6528,17 @@ async function drainHostedPostCheckpointDelivery(input: {
   }
 
   let memberChannelBarrier: HostedWorkspaceRunnerAssistantPhasePostCheckpoint | null = null;
+  let memberChannelBarrierMs: number | null = null;
   try {
     if (hasDeliveryEffects && input.shouldYieldBackgroundDrain?.() === true) {
       return await yieldHostedBackgroundPostCheckpointDrain(input);
     }
+    const memberChannelBarrierStartedAt = performance.now();
     memberChannelBarrier = hasDeliveryEffects
       ? await flushHostedMemberChannelUpdatesBeforeAutoReplyDelivery(input)
       : null;
+    // Read only when delivery effects drain below; no effects means no reader.
+    memberChannelBarrierMs = performance.now() - memberChannelBarrierStartedAt;
   } catch (error) {
     await resetHostedPreparedDeliveryForBarrier({
       assistantDeliveryEffects: input.assistantDeliveryEffects,
@@ -6436,6 +6576,9 @@ async function drainHostedPostCheckpointDelivery(input: {
   const outcomes = input.assistantDeliveryEffects.length > 0
     ? await drainHostedPreparedAssistantDeliveries({
         deliveryTraceContext: {
+          foregroundDeliveryPhaseStartedAtMonotonicMs:
+            input.foregroundDeliveryPhaseStartedAtMonotonicMs,
+          memberChannelBarrierMs,
           latencyTracePort: input.input.runtime.platform.latencyTracePort,
           runtimeAttemptId: input.input.request.attemptId,
           runnerIdleTtlMs: input.input.request.runnerIdleTtlMs,
@@ -6469,11 +6612,8 @@ async function drainHostedPostCheckpointDelivery(input: {
         wake: input.wake,
       })
     : [];
-  await recordHostedProductFeedbackAfterMemberDelivery({
-    candidates:
-      input.assistantMetrics?.assistantAutomationProductFeedbackCandidates ?? [],
-    currentTurnDeliveryIntentIds:
-      input.assistantMetrics?.assistantAutomationCurrentTurnDeliveryIntentIds ?? [],
+  await recordHostedProductFeedbackAfterCommittedTurn({
+    assistantMetrics: input.assistantMetrics,
     outcomes,
     port: input.input.runtime.platform.productFeedbackPort ?? null,
   });
@@ -6627,27 +6767,28 @@ async function drainHostedPostCheckpointDelivery(input: {
   };
 }
 
-async function recordHostedProductFeedbackAfterMemberDelivery(input: {
-  candidates: readonly HostedRuntimeProductFeedbackRecord[];
-  currentTurnDeliveryIntentIds: readonly string[];
+function hasHostedCommittedUsageAudit(metrics: HostedAssistantMetrics): boolean {
+  return (metrics.assistantAutomationCommittedUsageAuditKeys?.length ?? 0) > 0;
+}
+
+async function recordHostedProductFeedbackAfterCommittedTurn(input: {
+  assistantMetrics?: HostedAssistantMetrics | null;
   outcomes: readonly HostedAssistantDeliveryOutcome[];
   port: HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["productFeedbackPort"];
 }): Promise<void> {
-  if (
-    !input.port
-    || input.candidates.length === 0
-    || !input.outcomes.some((outcome) =>
-      outcome.deliveryStatus === "sent"
-      && input.currentTurnDeliveryIntentIds.includes(outcome.effectId)
-    )
-  ) {
-    return;
-  }
-
+  const candidates = input.assistantMetrics?.assistantAutomationProductFeedbackCandidates ?? [];
+  const committedUsageAuditKeys = input.assistantMetrics?.assistantAutomationCommittedUsageAuditKeys ?? [];
+  const currentTurnDeliveryIntentIds = input.assistantMetrics?.assistantAutomationCurrentTurnDeliveryIntentIds ?? [];
+  if (!input.port || candidates.length === 0) return;
+  const memberDeliverySent = input.outcomes.some((outcome) =>
+    outcome.deliveryStatus === "sent"
+    && currentTurnDeliveryIntentIds.includes(outcome.effectId)
+  );
   await Promise.allSettled(
-    input.candidates.map((candidate) =>
-      input.port?.recordProductFeedback(candidate)
-    ),
+    candidates.filter((candidate) => memberDeliverySent
+      || (committedUsageAuditKeys.includes(candidate.idempotencyKey)
+        && isHostedUsageOptimizationAuditFeedback(candidate)))
+      .map(async (candidate) => input.port!.recordProductFeedback(candidate)),
   );
 }
 
@@ -7670,6 +7811,39 @@ function writeHostedAssistantTurnTimingRuntimeLog(input: {
   });
 }
 
+const HOSTED_GROUP_SHARED_READ_TIMING_SCHEMA = "murph.hosted-group-shared-read-timing.v1";
+const HOSTED_GROUP_SHARED_READ_TIMING_TYPE = "hosted_group_shared_read_timing";
+
+// One queued info record per accepted shared read; returned so the reader's
+// containment also absorbs any rejection. See docs/hosted-runtime-log-database.md.
+function writeHostedGroupSharedReadRuntimeLog(
+  input: HostedWorkspaceRuntimeAssistantPhaseInput,
+  lane: "interactive" | "scheduled",
+  telemetry: HostedGroupSharedReadTelemetry,
+): Promise<void> {
+  return writeHostedRuntimeLogBestEffort({
+    entry: {
+      ...buildHostedRuntimeLogContextFields({
+        attemptId: input.request.attemptId,
+        leaseGeneration: input.request.leaseGeneration,
+        workspaceVersion: input.request.workspaceVersion,
+      }),
+      component: "assistant",
+      eventCode: "assistant.automation_detail",
+      level: "info",
+      phase: "invoke",
+      redactedJson: {
+        ...telemetry,
+        detailLabel: "Hosted group shared read finished.",
+        groupSharedReadLane: lane,
+        schema: HOSTED_GROUP_SHARED_READ_TIMING_SCHEMA,
+        type: HOSTED_GROUP_SHARED_READ_TIMING_TYPE,
+      },
+    },
+    platform: input.platform,
+  });
+}
+
 async function writeHostedAssistantPassRuntimeLog(input: {
   assistantMetrics: Awaited<ReturnType<typeof runHostedAssistantAutomationLane>>;
   deliveryEffectCount: number;
@@ -8604,6 +8778,46 @@ function buildHostedAssistantCronStatusOptions(
   };
 }
 
+async function requestHostedWearableHaptic(
+  port: NonNullable<HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["deviceSyncPort"]>,
+  request: WearableHapticAction,
+  context: Parameters<NonNullable<NonNullable<AssistantExecutionContext["hosted"]>["deviceTool"]>["request"]>[1],
+) {
+  if (!port.haptic || !context?.hapticAuthority) {
+    throw new VaultCliError("device_haptic_unavailable", "Wrist reminders are unavailable for this turn.");
+  }
+  return port.haptic({ request, authority: context.hapticAuthority, signal: context.signal ?? null });
+}
+
+async function readHostedDeviceAccounts(
+  deviceSyncPort: NonNullable<HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["deviceSyncPort"]>,
+  request: { action: "list_accounts"; provider?: string | null; sourceProvider?: string | null },
+  signal: AbortSignal | null,
+) {
+  const provider = normalizeAssistantRouteString(request.provider);
+  const sourceProvider = normalizeAssistantRouteString(request.sourceProvider);
+  const snapshot = await fetchCompleteHostedDeviceSyncRuntimeSnapshot({
+    deviceSyncPort,
+    includeCredentialMaterial: false,
+    ...(provider ? { provider } : {}),
+    signal,
+    ...(sourceProvider ? { sourceProviderSlug: sourceProvider } : {}),
+  });
+  return {
+    accounts: snapshot.connections.map(({ connection, localState }) => ({
+      accountId: connection.id,
+      displayName: connection.displayName,
+      lastErrorCode: localState.lastErrorCode,
+      lastSyncCompletedAt: localState.lastSyncCompletedAt,
+      provider: connection.provider,
+      status: connection.status,
+    })),
+    action: request.action,
+    provider,
+    sourceProvider,
+  };
+}
+
 function resolveHostedWorkspaceDeviceTool(input: {
   deviceConnectProviders: readonly { label: string; provider: string }[];
   input: HostedWorkspaceRuntimeAssistantPhaseInput;
@@ -8615,30 +8829,17 @@ function resolveHostedWorkspaceDeviceTool(input: {
 
   return {
     async request(request, context) {
-      context?.signal?.throwIfAborted();
+      const signal = context?.signal ?? null;
+      signal?.throwIfAborted();
+      if (request.action === "haptic") {
+        return requestHostedWearableHaptic(deviceSyncPort, request, context);
+      }
+      if (request.action === "companion_status") {
+        if (!deviceSyncPort.companionStatus) throw new VaultCliError("companion_status_unavailable", "App presence is unavailable right now.");
+        return { action: "companion_status", ...await deviceSyncPort.companionStatus({ signal }) };
+      }
       if (request.action === "list_accounts") {
-        const provider = normalizeAssistantRouteString(request.provider);
-        const sourceProvider = normalizeAssistantRouteString(request.sourceProvider);
-        const snapshot = await fetchCompleteHostedDeviceSyncRuntimeSnapshot({
-          deviceSyncPort,
-          includeCredentialMaterial: false,
-          ...(provider ? { provider } : {}),
-          signal: context?.signal ?? null,
-          ...(sourceProvider ? { sourceProviderSlug: sourceProvider } : {}),
-        });
-        return {
-          accounts: snapshot.connections.map(({ connection, localState }) => ({
-            accountId: connection.id,
-            displayName: connection.displayName,
-            lastErrorCode: localState.lastErrorCode,
-            lastSyncCompletedAt: localState.lastSyncCompletedAt,
-            provider: connection.provider,
-            status: connection.status,
-          })),
-          action: request.action,
-          provider,
-          sourceProvider,
-        };
+        return readHostedDeviceAccounts(deviceSyncPort, request, signal);
       }
 
       if (request.action === "reconcile") {
@@ -8650,7 +8851,7 @@ function resolveHostedWorkspaceDeviceTool(input: {
         }
         const result = await deviceSyncPort.reconcileAccount({
           connectionId: request.accountId,
-          signal: context?.signal ?? null,
+          signal,
         });
         return {
           accountId: result.connectionId,
@@ -8672,7 +8873,7 @@ function resolveHostedWorkspaceDeviceTool(input: {
         }
         const common = {
           assistantInputId: context.acceptedInputAuthority.assistantInputId,
-          signal: context.signal ?? null,
+          signal,
           sourceProviderSlug: request.sourceProvider,
         };
         const result = request.mode === "after_days"

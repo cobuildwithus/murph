@@ -422,6 +422,10 @@ async function clearHostedOwnerPendingGroupEventContextTx(input: {
   });
 }
 
+export function isHostedAddressBookAdvisoryEnabled(source: NodeJS.ProcessEnv = process.env): boolean {
+  return isFeatureEnabled(source, HOSTED_ADDRESS_BOOK_ADVISORY_GATE);
+}
+
 export async function readHostedOwnerAddressBookAdvisoryNames(input: {
   containerMemberId: string;
   crypto?: HostedAddressBookCrypto;
@@ -430,7 +434,7 @@ export async function readHostedOwnerAddressBookAdvisoryNames(input: {
   source?: NodeJS.ProcessEnv;
 }): Promise<HostedAddressBookAdvisoryNamesResult> {
   const source = input.source ?? process.env;
-  if (!isFeatureEnabled(source, HOSTED_ADDRESS_BOOK_ADVISORY_GATE)) {
+  if (!isHostedAddressBookAdvisoryEnabled(source)) {
     return emptyHostedAddressBookAdvisoryNamesResult({
       canonicalHandleCount: 0,
       phoneHandles: input.phoneHandles,

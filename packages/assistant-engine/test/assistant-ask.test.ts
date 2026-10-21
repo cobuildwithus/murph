@@ -82,7 +82,7 @@ describe('executeReadOnlyAssistantAsk', () => {
           PATH: '/runtime/bin',
         },
         groupSharedReader,
-        model: 'gpt-5.6-terra',
+        model: 'gpt-6.1-sol',
         modelProvider: 'hosted-openai',
         now,
         question: 'What exercise is prescribed today?',
@@ -110,7 +110,7 @@ describe('executeReadOnlyAssistantAsk', () => {
       developerInstructions: 'Use Murph voice.',
       dynamicTools: [expect.objectContaining({ name: 'group', namespace: 'murph' })],
       ephemeral: true,
-      model: 'gpt-5.6-terra',
+      model: 'gpt-6.1-sol',
       modelProvider: 'hosted-openai',
       outputSchema: READ_ONLY_ASSISTANT_ASK_OUTPUT_SCHEMA,
       permissions: MURPH_GROUP_READ_PERMISSION_PROFILE,
@@ -611,6 +611,9 @@ describe('executeConsentedReadOnlyAssistantAsk', () => {
       })
       expect(turnInput.env.ELEVENLABS_API_KEY).toBeUndefined()
     }
+    expect(answerInput.environments).toBeUndefined()
+    expect(reviewInput.environments).toEqual([])
+    expect(answerInput.threadConfig).toMatchObject({ 'agents.enabled': false, 'features.goals': false })
     expect(answerInput.threadConfig).toBe(READ_ONLY_ASSISTANT_ASK_THREAD_CONFIG)
     expect(answerInput.threadConfig).not.toHaveProperty('features.shell_tool')
     expect(answerInput.workingDirectory).not.toBe(workspaceRoot)

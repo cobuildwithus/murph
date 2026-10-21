@@ -1,3 +1,4 @@
+import { resolveAssistantReactionRoutingInput } from '../reaction-routing.js'
 import type { AutomationContextReference } from '@murphai/contracts'
 import type { InboxServices } from '@murphai/inbox-services'
 import {
@@ -66,6 +67,7 @@ import {
 import type {
   AssistantInputCandidateBatch,
   AssistantInputCandidate,
+  AssistantInputExactLookupObservation,
   AssistantInputSource,
 } from '../input-source.js'
 import {
@@ -233,6 +235,7 @@ export interface AssistantAutoReplyGroupContext {
 }
 
 interface AssistantAutoReplyReplyDecision {
+  reactionRouting: import('../reaction-routing.js').AssistantReactionRoutingInput | null
   crossSessionContext: AssistantAutoReplySelectedCrossSessionContext | null
   bindingDeliveryTarget: string | null
   deliveryMessageReactionsAvailable: boolean | null
@@ -757,6 +760,7 @@ async function resolveAssistantAutoReplyGroupOutcome(input: {
       inputCandidates: context.items.map((item) => item.inputCandidate ?? null),
     }),
     bindingDeliveryTarget: decision.bindingDeliveryTarget,
+    reactionRouting: decision.reactionRouting,
     ...(input.beforeProviderAcceptedInputs
       ? { beforeProviderAcceptedInputs: input.beforeProviderAcceptedInputs }
       : {}),
@@ -1613,6 +1617,9 @@ async function evaluateAssistantAutoReplyGroup(input: {
   )
 
   return {
+    reactionRouting: resolveAssistantReactionRoutingInput(
+      affirmativeReaction, outboxContext.replyTargetDelivery, primaryReplyInput.text,
+    ),
     bindingDeliveryTarget,
     deliveryMessageReactionsAvailable:
       readAutoReplyDeliveryMessageReactionsAvailable({
@@ -2033,6 +2040,7 @@ async function enrichAssistantAutoReplyLinqSpeakerNames(input: {
 }
 
 async function executeAssistantAutoReply(input: {
+  reactionRouting?: import('../reaction-routing.js').AssistantReactionRoutingInput | null
   acceptedTurnInputInitialInputs?: readonly AssistantAcceptedTurnInputItemInput[] | null
   activeTurnCheckpoint?: AssistantActiveTurnInputCheckpointHook
   activeTurnInput?: AssistantActiveTurnInputAdmissionHook
@@ -2117,6 +2125,7 @@ async function executeAssistantAutoReply(input: {
     const result = await sendAssistantMessage({
       vault: input.vault,
       ...automationTurn,
+      reactionRouting: input.reactionRouting,
       ...(input.assistantStyleSettingsAuthorized === undefined
         ? {}
         : {
@@ -2705,8 +2714,13 @@ async function listAutoReplyActiveTurnInputs(input: {
   const exactInputIds = input.inputIds.filter(
     (inputId) => !discoveredInputIds.has(inputId),
   )
-  const exact = exactInputIds.length > 0 && input.inputSource.listInputCandidatesByIds
-    ? await input.inputSource.listInputCandidatesByIds({
+  const listExact = exactInputIds.length > 0
+    ? input.inputSource.listInputCandidatesByIds
+    : undefined
+  // Derived from the branch that actually runs below.
+  const exactLookupCalled = listExact !== undefined
+  const exact: AssistantInputCandidateBatch = listExact
+    ? await listExact.call(input.inputSource, {
         afterCursor: input.afterCursor,
         inputIds: exactInputIds,
         knownInputIds: [...discoveredInputIds],
@@ -2719,9 +2733,20 @@ async function listAutoReplyActiveTurnInputs(input: {
     ...discoveredInputIds,
     ...exact.inputs.map((candidate) => candidate.event.inputId),
   ]
+  // Diagnostics ride this call's own route query, so they cannot attach to
+  // another admission's row.
+  const exactLookupObservation: AssistantInputExactLookupObservation = {
+    called: exactLookupCalled,
+    ...(exactLookupCalled && exact.exactLookupExclusionReasonCounts
+      ? { exclusionReasonCounts: exact.exactLookupExclusionReasonCounts }
+      : {}),
+    requestedCount: exactInputIds.length,
+    returnedCount: exactLookupCalled ? exact.inputs.length : null,
+  }
   const route = input.discoverConversationInputs && input.inputSource.listInputCandidates
     ? await input.inputSource.listInputCandidates({
         afterCursor: input.afterCursor,
+        exactLookupObservation,
         knownInputIds,
         limit: 100,
         signal: input.signal,
@@ -3499,6 +3524,7 @@ function replyTargetUsesThreadAsExplicitDeliveryTarget(
   return channel === 'linq'
     || channel === 'telegram'
     || channel === 'email'
+    || channel === 'voice'
 }
 
 function autoReplyInputCandidatesFromContext(
@@ -5808,7 +5834,7 @@ export function buildTrustedHostedImageCompletionTurnContext(
   ].join('\n')
 }
 
-function buildAssistantAutoReplyReactionTurnContext(
+export function buildAssistantAutoReplyReactionTurnContext(
   message: string | null,
 ): string | null {
   const normalized = normalizeNullableString(message)
@@ -5818,11 +5844,11 @@ function buildAssistantAutoReplyReactionTurnContext(
 
   return [
     'Reaction target:',
-    'The user reacted with a tapback (heart, like, or similar) to this exact assistant message:',
+    'The user reacted to this exact assistant message; the inbound text identifies the actual reaction:',
     '',
     normalized.slice(0, ASSISTANT_AUTO_REPLY_PRIOR_MESSAGE_MAX_LENGTH),
     '',
-    'Interpret the reaction in the context of this message. A tapback usually signals acknowledgment or appreciation. Treat it as a "yes" only when this message asked a single closed yes/no question or proposed one specific action whose affirmative answer is unambiguous; never infer facts about the user or treat a reaction alone as consent or authorization. Respond only in relation to this message; a brief acknowledgment-weight reply is fine.',
+    'Interpret the reaction in the context of this message. A tapback usually signals acknowledgment or appreciation. Treat it as a "yes" only when this message asked a single closed yes/no question or proposed one specific action whose affirmative answer is unambiguous; never infer facts about the user or treat a reaction alone as consent or authorization. A question reaction may request clarification and a negative reaction may signal disagreement. Respond only when an answer or follow-through is useful; ordinary acknowledgment stays quiet.',
   ].join('\n')
 }
 

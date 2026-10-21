@@ -50,9 +50,9 @@ it.skipIf(!hasPoppler)("renders actual scanned clinical pages even when only the
   roots.push(root);
   const documentPath = path.join(root, "synthetic.pdf");
   await writeFile(documentPath, mixedPdf());
-  const cover = await prepareClinicalEnrichmentDocument({ documentPath, mediaType: "application/pdf", page: 1 });
+  const cover = await prepareClinicalEnrichmentDocument({ vaultRoot: path.dirname(documentPath), documentPath, mediaType: "application/pdf", page: 1 });
   roots.push(...cover.scratchRoots);
-  const scan = await prepareClinicalEnrichmentDocument({ documentPath, mediaType: "application/pdf", page: 2 });
+  const scan = await prepareClinicalEnrichmentDocument({ vaultRoot: path.dirname(documentPath), documentPath, mediaType: "application/pdf", page: 2 });
   roots.push(...scan.scratchRoots);
   expect(cover.totalPages).toBe(2);
   expect(cover.extractedText).toBe("Synthetic clinical report cover");

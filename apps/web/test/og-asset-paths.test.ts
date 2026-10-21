@@ -11,7 +11,6 @@ import {
   fraunces400FontPath,
   fraunces600FontPath,
   logoSvgPath,
-  murphMarkSvgPath,
 } from "../app/font-files";
 import { readMurphContactCardAvatarPhoto } from "../app/api/murph-contact-card/avatar-photo";
 import {
@@ -37,7 +36,6 @@ test("resolved OG asset paths point at real files", () => {
     dmSans400FontPath,
     dmSans600FontPath,
     logoSvgPath,
-    murphMarkSvgPath,
   ]) {
     expect(existsSync(assetPath), `expected ${assetPath} to exist`).toBe(true);
   }
@@ -50,7 +48,6 @@ test("candidate resolution covers the apps/web and repo-root runtime layouts", (
     "app/fonts/DMSans-400.ttf",
     "app/fonts/DMSans-600.ttf",
     "public/logo.svg",
-    "public/icons/murph-mark.svg",
   ]) {
     // Local dev, tests, and `next build` run with cwd at apps/web; the
     // deployed serverless function runs with a repo-root-shaped filesystem.

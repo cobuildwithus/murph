@@ -5,7 +5,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { InboxServices } from '@murphai/inbox-services'
 import { serializeHostedEmailThreadTarget } from '@murphai/runtime-state'
-import type { AssistantInputCandidate } from '../src/assistant/input-source.ts'
+import type {
+  AssistantInputCandidate,
+  AssistantInputCandidateBatch,
+} from '../src/assistant/input-source.ts'
 import type { AssistantInputConversationRef } from '../src/assistant/input-store.ts'
 import type {
   AssistantInputProjectionStatus,
@@ -800,14 +803,14 @@ describe('assistant auto-reply event-first path', () => {
     expect(firstDelivery.delivery).toMatchObject({
       providerMessageEffects: [{
         carriesIntentMedia: true,
-        message: 'Generated image',
+        message: null,
         providerMessageId: 'linq-msg-first-generated-avatar',
       }],
     })
     expect(secondDelivery.delivery).toMatchObject({
       providerMessageEffects: [{
         carriesIntentMedia: true,
-        message: 'Generated image',
+        message: null,
         providerMessageId: 'linq-msg-second-generated-avatar',
       }],
     })
@@ -841,8 +844,8 @@ describe('assistant auto-reply event-first path', () => {
     expect(prompt).toContain(firstMedia.sha256)
     expect(prompt).not.toContain(secondMedia.ref)
     expect(prompt).not.toContain(secondMedia.sha256)
-    expect(prompt).toContain('Visible text sent with that image:')
-    expect(prompt).toContain('Generated image')
+    expect(prompt).not.toContain('Visible text sent with that image:')
+    expect(prompt).not.toContain('Generated image')
     expect(prompt).toContain('no effect authority')
     expect(replyEventPathMocks.listAssistantTranscriptEntries)
       .not.toHaveBeenCalled()
@@ -2054,6 +2057,117 @@ describe('assistant auto-reply event-first path', () => {
       'cannot be attested as Murph-authored or linked',
     )
     expect(admitted.prompt).not.toContain('linq-msg-live-initial')
+  })
+
+  it('attaches each admission exact-lookup observation only to that admission route query', async () => {
+    const vault = await createTempVault()
+    const initial = createLinqGroupCandidate({
+      inputId: 'ain_00000000000000000000000000000010',
+      messageId: 'linq-msg-observe-initial',
+      occurredAt: '2026-08-07T21:10:00.000Z',
+      text: 'Initial participant message.',
+    })
+    const resolvers = new Map<string, (batch: AssistantInputCandidateBatch) => void>()
+    const routeQueries: unknown[] = []
+    const inputSource = {
+      checkpointAcceptedInput: vi.fn(async () => undefined),
+      listInputCandidates: vi.fn(async (query: { exactLookupObservation?: unknown }) => {
+        routeQueries.push(query.exactLookupObservation)
+        return { inputs: [], nextCursor: null }
+      }),
+      listInputCandidatesByIds: vi.fn((query: { inputIds: readonly string[] }) =>
+        new Promise<AssistantInputCandidateBatch>((resolve) => {
+          resolvers.set(query.inputIds.join(','), resolve)
+        })),
+      listNewConversationInputs: vi.fn(async () => ({ inputs: [], nextCursor: null })),
+      refresh: vi.fn(async () => ({ progressed: false, reason: 'no_new_input' as const })),
+    }
+    await processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context: createReplyContext(initial),
+      enabledChannels: ['linq'],
+      inboxServices: createInboxServices(),
+      inputSource,
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault,
+    })
+    const admit = readSentInput().activeTurnInput
+    if (!admit) throw new Error('expected an active-turn input admission hook')
+    const base = { sessionId: 'session-observe', turnId: 'turn-observe', vault }
+
+    // Two independent admissions overlap; B's exact lookup settles first.
+    const first = admit({ ...base, availableInputIds: ['ain_a1', 'ain_a2'] })
+    const second = admit({ ...base, availableInputIds: ['ain_b1'] })
+    await vi.waitFor(() => expect(resolvers.size).toBe(2))
+    resolvers.get('ain_b1')!({
+      exactLookupExclusionReasonCounts: { not_grouped_with_anchor: 1 },
+      inputs: [],
+      nextCursor: null,
+    })
+    await vi.waitFor(() => expect(routeQueries).toHaveLength(1))
+    resolvers.get('ain_a1,ain_a2')!({
+      exactLookupExclusionReasonCounts: { missing_event: 1, not_replyable: 1 },
+      inputs: [],
+      nextCursor: null,
+    })
+    await Promise.all([first, second])
+    expect(routeQueries).toEqual([
+      { called: true, exclusionReasonCounts: { not_grouped_with_anchor: 1 }, requestedCount: 1, returnedCount: 0 },
+      { called: true, exclusionReasonCounts: { missing_event: 1, not_replyable: 1 }, requestedCount: 2, returnedCount: 0 },
+    ])
+
+    // No pending IDs: the lookup is skipped, which is distinct from returning zero.
+    await admit({ ...base, availableInputIds: [] })
+    expect(routeQueries.at(-1)).toEqual({ called: false, requestedCount: 0, returnedCount: null })
+    expect(inputSource.listInputCandidatesByIds).toHaveBeenCalledTimes(2)
+
+    // A source that does not report reasons leaves them absent, not zero.
+    inputSource.listInputCandidatesByIds.mockImplementationOnce(async () => ({ inputs: [], nextCursor: null }))
+    await admit({ ...base, availableInputIds: ['ain_c1'] })
+    expect(routeQueries.at(-1)).toEqual({ called: true, requestedCount: 1, returnedCount: 0 })
+
+    // A failed exact lookup fails the admission as before and emits no route query.
+    inputSource.listInputCandidatesByIds.mockImplementationOnce(async () => {
+      throw new Error('synthetic exact lookup failure')
+    })
+    const routeCount = routeQueries.length
+    await expect(admit({ ...base, availableInputIds: ['ain_d1'] })).rejects.toThrow('synthetic exact lookup failure')
+    expect(routeQueries).toHaveLength(routeCount)
+  })
+
+  it('reports a pending exact ID as not called when the source has no exact lookup', async () => {
+    const vault = await createTempVault()
+    const initial = createLinqGroupCandidate({
+      inputId: 'ain_00000000000000000000000000000020',
+      messageId: 'linq-msg-observe-legacy',
+      occurredAt: '2026-08-07T21:10:00.000Z',
+      text: 'Initial participant message.',
+    })
+    const routeQueries: unknown[] = []
+    const inputSource = {
+      checkpointAcceptedInput: vi.fn(async () => undefined),
+      listInputCandidates: vi.fn(async (query: { exactLookupObservation?: unknown }) => {
+        routeQueries.push(query.exactLookupObservation)
+        return { inputs: [], nextCursor: null }
+      }),
+      listNewConversationInputs: vi.fn(async () => ({ inputs: [], nextCursor: null })),
+      refresh: vi.fn(async () => ({ progressed: false, reason: 'no_new_input' as const })),
+    }
+    await processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context: createReplyContext(initial),
+      enabledChannels: ['linq'],
+      inboxServices: createInboxServices(),
+      inputSource,
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault,
+    })
+    const admit = readSentInput().activeTurnInput
+    if (!admit) throw new Error('expected an active-turn input admission hook')
+    await admit({ availableInputIds: ['ain_e1'], sessionId: 's', turnId: 't', vault })
+    expect(routeQueries).toEqual([{ called: false, requestedCount: 1, returnedCount: null }])
   })
 
   it('admits trusted Linq corrections into a live turn while deferring ordinary native replies', async () => {
@@ -5346,7 +5460,7 @@ describe('assistant auto-reply event-first path', () => {
     )
   })
 
-  it('binds an attested same-session affirmative Linq reaction to the exact older target', async () => {
+  it.each(['like', 'question', 'dislike'])('binds an attested same-session Linq %s reaction to the exact older target', async (reaction) => {
     const vault = await createTempVault()
     const automationId = 'automation_01JQ8PWXP5A68SQM1W0GYM42AA'
     const experimentId = 'exp_01JQ8PWXP5A68SQM1W0GYM42AB'
@@ -5398,7 +5512,7 @@ describe('assistant auto-reply event-first path', () => {
         replyToMessageId: 'linq-msg-same-session-target',
         service: 'iMessage',
       },
-      text: 'Reacted with a like reaction.',
+      text: `Reacted with a ${reaction} reaction.`,
       threadIsDirect: true,
     })
 
@@ -5421,13 +5535,14 @@ describe('assistant auto-reply event-first path', () => {
     expect(replyEventPathMocks.sendAssistantMessage).toHaveBeenCalledTimes(1)
     const sendInput = replyEventPathMocks.sendAssistantMessage.mock.calls[0]?.[0]
     const turnContext = sendInput?.turnContext
+    expect(sendInput?.reactionRouting).toEqual({ reaction: `Reacted with a ${reaction} reaction.`, targetMessage: 'Would you like me to continue?' })
     expect(turnContext).toContain([
       'Reaction target:',
-      'The user reacted with a tapback (heart, like, or similar) to this exact assistant message:',
+      'The user reacted to this exact assistant message; the inbound text identifies the actual reaction:',
       '',
       'Would you like me to continue?',
       '',
-      'Interpret the reaction in the context of this message. A tapback usually signals acknowledgment or appreciation. Treat it as a "yes" only when this message asked a single closed yes/no question or proposed one specific action whose affirmative answer is unambiguous; never infer facts about the user or treat a reaction alone as consent or authorization. Respond only in relation to this message; a brief acknowledgment-weight reply is fine.',
+      'Interpret the reaction in the context of this message. A tapback usually signals acknowledgment or appreciation. Treat it as a "yes" only when this message asked a single closed yes/no question or proposed one specific action whose affirmative answer is unambiguous; never infer facts about the user or treat a reaction alone as consent or authorization. A question reaction may request clarification and a negative reaction may signal disagreement. Respond only when an answer or follow-through is useful; ordinary acknowledgment stays quiet.',
     ].join('\n'))
     expect(turnContext).not.toContain('Canonical experiment reminder context:')
     expect(turnContext).not.toContain(`experiment:${experimentId}`)

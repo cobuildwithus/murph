@@ -1,5 +1,6 @@
 import {
   cliTimingLaunchArgs,
+  codexSteeringLaunchArgs,
   CODEX_TRANSPORT_DIAGNOSTICS_TRACE_SCHEMA,
   MockChildProcess,
   asRecord,
@@ -43,7 +44,6 @@ import {
   buildCodexAppServerArgs,
   compactWarmCodexThread,
   executeCodexAppServerTurn as executeCodexAppServerTurnUnchecked,
-  executeCodexManagedAccountOperation,
   preinitializeCodexAppServer,
   readCodexAppServerTurnFailureContext,
   resolveCodexDisplayOptions,
@@ -656,7 +656,7 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
           }))
           child.stdout.write(jsonLine({
             method: 'model/rerouted',
-            params: { toModel: 'gpt-5.6-terra' },
+            params: { toModel: 'gpt-6.1-sol' },
           }))
           child.stdout.write(jsonLine({
             method: 'turn/started',
@@ -756,7 +756,7 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
     expect(onTraceEvent).not.toHaveBeenCalledWith(expect.objectContaining({
       rawEvent: {
         method: 'model/rerouted',
-        params: { toModel: 'gpt-5.6-terra' },
+        params: { toModel: 'gpt-6.1-sol' },
       },
     }))
     expect(codexMocks.spawn).toHaveBeenCalledTimes(1)
@@ -2256,6 +2256,7 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
   it.each([
     { timeoutMessage: 'idle timeout waiting for websocket', timeoutPhase: 'websocket-read', transport: 'websocket' },
     { timeoutMessage: 'idle timeout sending websocket request', timeoutPhase: 'websocket-send', transport: 'websocket' },
+    { timeoutMessage: 'timeout waiting for websocket response acknowledgement', timeoutPhase: 'websocket-ack', transport: 'websocket' },
     { timeoutMessage: 'idle timeout waiting for SSE', timeoutPhase: 'http-read', transport: 'http' },
   ])('emits metadata-only Codex transport diagnostics for $timeoutPhase and fallback', async ({ timeoutMessage, timeoutPhase, transport }) => {
     const workingDirectory = await createTempDir('assistant-codex-transport-diagnostics-')
@@ -3757,7 +3758,7 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
 
     expect(codexMocks.spawn).toHaveBeenCalledWith(
       codexCommand,
-      [...cliTimingLaunchArgs, 'app-server'],
+      [...codexSteeringLaunchArgs, ...cliTimingLaunchArgs, 'app-server'],
       expect.objectContaining({
         cwd: tmpdir(),
         env: expect.objectContaining({
@@ -3778,7 +3779,7 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
       const child = new MockChildProcess()
 
       expect(command).toBe(codexCommand)
-      expect(args).toEqual([...cliTimingLaunchArgs, 'app-server'])
+      expect(args).toEqual([...codexSteeringLaunchArgs, ...cliTimingLaunchArgs, 'app-server'])
       expect(options).toMatchObject({
         env: expect.objectContaining({
           CODEX_HOME: explicitCodexHome,
@@ -3847,7 +3848,7 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
 
     expect(codexMocks.spawn).toHaveBeenCalledWith(
       codexCommand,
-      [...cliTimingLaunchArgs, 'app-server'],
+      [...codexSteeringLaunchArgs, ...cliTimingLaunchArgs, 'app-server'],
       expect.any(Object),
     )
   })
@@ -3899,7 +3900,7 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
 
       expect(codexMocks.spawn).toHaveBeenCalledWith(
         '/tmp/attacker-controlled-codex',
-        [...cliTimingLaunchArgs, 'app-server'],
+        [...codexSteeringLaunchArgs, ...cliTimingLaunchArgs, 'app-server'],
         expect.any(Object),
       )
     } finally {
@@ -3952,7 +3953,7 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
 
     expect(codexMocks.spawn).toHaveBeenCalledWith(
       'codex',
-      [...cliTimingLaunchArgs, 'app-server'],
+      [...codexSteeringLaunchArgs, ...cliTimingLaunchArgs, 'app-server'],
       expect.any(Object),
     )
   })

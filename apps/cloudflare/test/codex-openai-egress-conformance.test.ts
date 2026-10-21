@@ -1,7 +1,9 @@
-import { createPostgresTestOwner, mockPostgresOwnerCommand, forbiddenLegacyRuntime, settledNativeRuntime } from "./postgres-owner-fixtures.ts";
+import type { TestProviderContext } from "./postgres-owner-fixtures.ts";
+import { nativeProviderTestNamespace, createPostgresTestOwner, forbiddenLegacyRuntime, settledNativeRuntime } from "./postgres-owner-fixtures.ts";
 import { execFile } from "node:child_process";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { createRequire } from "node:module";
+import { realpathSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -15,15 +17,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   hostedRunnerIntercept,
 } from "../src/runner-egress-intercept.ts";
-import {
-  createHostedProviderEgressCredential,
-} from "../src/hosted-provider-egress-credential.ts";
+import { createHostedLiveSessionReference } from "../src/runner-egress-openai-live.ts";
+import { nativeLiveRequest } from "./fixtures/native-live-request.ts";
 import type {
   RunnerOutboundEnvironmentSource,
 } from "../src/runner-outbound.ts";
-import type {
-  WorkerProviderEgressCredentialValidationResult,
-} from "../src/worker-contracts.ts";
 import {
   PINNED_CODEX_OPENAI_EGRESS_INVENTORY,
   type PinnedCodexOpenAiEgressRoute,
@@ -39,7 +37,7 @@ const PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET =
   "codex-route-conformance-signing-secret";
 const RUNNER_CONTAINER_NAME = "member_123--v-version_1";
 const TEST_USER_ID = "member_123";
-const SCRIPTED_MODEL = "gpt-5.6-terra";
+const SCRIPTED_MODEL = "gpt-6.1-sol";
 const SCRIPTED_PROVIDER_ENV = "MURPH_CODEX_ROUTE_CONFORMANCE_KEY";
 const TEST_TIMEOUT_MS = 90_000;
 const repoRoot = fileURLToPath(new URL("../../..", import.meta.url));
@@ -87,15 +85,17 @@ describe("pinned Codex OpenAI egress conformance", () => {
       .toBe(expectedVersion);
     expect(installedPackage.version).toBe(expectedVersion);
     expect(baseDockerfile).toContain(`ARG CODEX_CLI_VERSION=${expectedVersion}`);
+    expect(baseDockerfile).toContain(
+      `ARG CODEX_UPSTREAM_REVISION=${PINNED_CODEX_OPENAI_EGRESS_INVENTORY.upstreamCommit}`,
+    );
     expect(workspace).toContain(`'@openai/codex@${expectedVersion}||`);
     expect(PINNED_CODEX_OPENAI_EGRESS_INVENTORY.upstreamTag)
       .toBe(`rust-v${expectedVersion}`);
     expect(PINNED_CODEX_OPENAI_EGRESS_INVENTORY.upstreamCommit)
       .toMatch(/^[0-9a-f]{40}$/u);
     expect(PINNED_CODEX_OPENAI_EGRESS_INVENTORY.upstreamSourceRoot)
-      .toBe("codex-rs/codex-api/src");
-    expect(PINNED_CODEX_OPENAI_EGRESS_INVENTORY.upstreamSourceTree)
-      .toMatch(/^[0-9a-f]{40}$/u);
+      // Guardian Decisions lives outside codex-api; verify every reviewed Rust owner.
+      .toBe("codex-rs");
     expect(cloudflarePackage.scripts?.["verify:codex-upstream-source"])
       .toContain("verify-codex-upstream-source.ts");
     expect(hostSupportWorkflow)
@@ -221,7 +221,7 @@ describe("pinned Codex OpenAI egress conformance", () => {
     const requiredBinaryCorroboration = new Set(
       PINNED_CODEX_OPENAI_EGRESS_INVENTORY.routes
         .filter((route) =>
-          route.owner === "codex" && route.disposition !== "blocked"
+          route.owner === "codex" && route.disposition !== "blocked" && route.proof !== "reviewed_source"
         )
         .map((route) => route.pathname),
     );
@@ -267,13 +267,18 @@ describe("pinned Codex OpenAI egress conformance", () => {
 
   it("keeps every reviewed route aligned with the production Worker decision", async () => {
     const credential = await createTestProviderEgressCredential();
-    const validateRuntimeProviderEgressCredential = vi.fn(
+    const readProviderContext = vi.fn(
       createProviderCredentialValidationResult,
     );
     const env = createOpenAiInterceptEnv({
-      validateRuntimeProviderEgressCredential,
+      readProviderContext,
     });
-    const upstreamFetch = vi.fn<typeof fetch>(async () => new Response("ok"));
+    const upstreamFetch = vi.fn<typeof fetch>(async (input) => {
+      const url = new URL(input instanceof Request ? input.url : String(input));
+      return url.pathname === "/v1/live/sessions" ? Response.json({
+        session: { id: "synthetic-session" }, transport: { type: "webrtc", sdp: "v=0\r\nanswer" },
+      }, { status: 201 }) : new Response("ok");
+    });
     const imageAccessFetch = vi.fn<typeof fetch>(async () =>
       Response.json({ allowed: true, reason: "allowed" })
     );
@@ -288,29 +293,29 @@ describe("pinned Codex OpenAI egress conformance", () => {
     for (const route of PINNED_CODEX_OPENAI_EGRESS_INVENTORY.routes) {
       const imageAccessCallsBefore = imageAccessFetch.mock.calls.length;
       const upstreamCallsBefore = upstreamFetch.mock.calls.length;
-      const validationsBefore = validateRuntimeProviderEgressCredential.mock.calls.length;
+      const validationsBefore = readProviderContext.mock.calls.length;
       const response = await hostedRunnerIntercept(
-        createInventoryRequest(route, credential),
+        await createInventoryRequest(route, credential),
         env,
-        { containerId: "opaque-container-id" },
+        { className: "RunnerContainer", containerId: "opaque-container-id" },
       );
 
       if (route.disposition === "blocked") {
         expect(response.status, `${route.method} ${route.pathname}`).toBe(403);
         expect(upstreamFetch.mock.calls.length, route.feature)
           .toBe(upstreamCallsBefore);
-        expect(validateRuntimeProviderEgressCredential.mock.calls.length, route.feature)
+        expect(readProviderContext.mock.calls.length, route.feature)
           .toBe(validationsBefore);
         continue;
       }
 
-      expect(response.status, `${route.method} ${route.pathname}`).toBe(200);
+      expect(response.status, `${route.method} ${route.pathname}`).toBe(route.pathname === "/v1/live/sessions" ? 201 : 200);
       expect(imageAccessFetch.mock.calls.length, route.feature).toBe(
-        imageAccessCallsBefore + (route.pathname.startsWith("/v1/images/") ? 1 : 0),
+        imageAccessCallsBefore + (route.pathname.startsWith("/v1/images/") || (route.pathname === "/v1/responses" && route.transport === "websocket") ? 1 : 0),
       );
       expect(upstreamFetch.mock.calls.length, route.feature)
         .toBe(upstreamCallsBefore + 1);
-      expect(validateRuntimeProviderEgressCredential.mock.calls.length, route.feature)
+      expect(readProviderContext.mock.calls.length, route.feature)
         .toBe(validationsBefore + 1);
       const forwarded = upstreamFetch.mock.calls.at(-1)?.[0];
       expect(forwarded, route.feature).toBeInstanceOf(Request);
@@ -323,7 +328,7 @@ describe("pinned Codex OpenAI egress conformance", () => {
 
   it("does not treat the reviewed Responses websocket route as ordinary GET egress", async () => {
     const credential = await createTestProviderEgressCredential();
-    const validateRuntimeProviderEgressCredential = vi.fn(
+    const readProviderContext = vi.fn(
       createProviderCredentialValidationResult,
     );
     const upstreamFetch = vi.fn<typeof fetch>(async () => new Response("unexpected"));
@@ -334,12 +339,12 @@ describe("pinned Codex OpenAI egress conformance", () => {
         headers: { authorization: `Bearer ${credential}` },
         method: "GET",
       }),
-      createOpenAiInterceptEnv({ validateRuntimeProviderEgressCredential }),
-      { containerId: "opaque-container-id" },
+      createOpenAiInterceptEnv({ readProviderContext }),
+      { className: "RunnerContainer", containerId: "opaque-container-id" },
     );
 
     expect(response.status).toBe(403);
-    expect(validateRuntimeProviderEgressCredential).not.toHaveBeenCalled();
+    expect(readProviderContext).not.toHaveBeenCalled();
     expect(upstreamFetch).not.toHaveBeenCalled();
   });
 
@@ -418,7 +423,7 @@ describe("pinned Codex OpenAI egress conformance", () => {
       ]);
       const bridge = await startCodexWorkerBridge({
         env: createOpenAiInterceptEnv({
-          validateRuntimeProviderEgressCredential: async (input) =>
+          readProviderContext: async (input) =>
             createProviderCredentialValidationResult(input),
         }),
       });
@@ -517,10 +522,12 @@ function resolveVitestTempRoot(): string {
 }
 
 function resolveInstalledCodexBinary(): string {
+  const explicitBinary = process.env.MURPH_TEST_CODEX_COMMAND?.trim();
+  if (explicitBinary) return explicitBinary;
   const target = resolveCodexTarget();
   const platformPackage = `@openai/codex-${target.packageSuffix}`;
   const requireFromCodex = createRequire(
-    path.join(repoRoot, "packages/assistant-engine/node_modules/@openai/codex/package.json"),
+    realpathSync(path.join(repoRoot, "packages/assistant-engine/node_modules/@openai/codex/package.json")),
   );
   const platformPackageJson = requireFromCodex.resolve(`${platformPackage}/package.json`);
   return path.join(
@@ -533,7 +540,7 @@ function resolveInstalledCodexBinary(): string {
 }
 
 function resolveCodexCommand(): string {
-  return path.join(
+  return process.env.MURPH_TEST_CODEX_COMMAND?.trim() || path.join(
     repoRoot,
     "packages/assistant-engine/node_modules/.bin",
     process.platform === "win32" ? "codex.cmd" : "codex",
@@ -575,10 +582,10 @@ function resolveCodexTarget(): { packageSuffix: string; triple: string } {
   return target;
 }
 
-function createInventoryRequest(
+async function createInventoryRequest(
   route: PinnedCodexOpenAiEgressRoute,
   credential: string,
-): Request {
+): Promise<Request> {
   const headers = new Headers({
     authorization: `Bearer ${credential}`,
   });
@@ -589,7 +596,12 @@ function createInventoryRequest(
     headers.set("upgrade", "websocket");
   }
   const body = buildInventoryRequestBody(route, headers);
-  return new Request(`https://api.openai.com${route.pathname}`, {
+  const pathname = route.disposition === "allowed_scoped_websocket_only"
+    ? `/v1/live/sessions/${await createHostedLiveSessionReference("synthetic-session", {
+        userId: TEST_USER_ID, attemptId: "attempt_codex_route_conformance", leaseGeneration: "7",
+      }, { HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET: PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET })}/attach`
+    : route.pathname;
+  return new Request(`https://api.openai.com${pathname}`, {
     ...(body === undefined ? {} : { body }),
     headers,
     method: route.method,
@@ -613,6 +625,7 @@ function buildInventoryRequestBody(
     return form;
   }
   headers.set("content-type", "application/json");
+  if (route.pathname === "/v1/live/sessions") return JSON.stringify(nativeLiveRequest());
   return JSON.stringify({
     input: "synthetic route contract",
     model: SCRIPTED_MODEL,
@@ -621,20 +634,12 @@ function buildInventoryRequestBody(
 }
 
 async function createTestProviderEgressCredential(): Promise<string> {
-  return await createHostedProviderEgressCredential({
-    providerKind: "openai",
-    runnerContainerName: RUNNER_CONTAINER_NAME,
-    source: {
-      HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET:
-        PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET,
-    },
-    userId: TEST_USER_ID,
-  });
+  return "__cloudflare_injected__";
 }
 
 function createProviderCredentialValidationResult(input: {
   userId: string;
-}): WorkerProviderEgressCredentialValidationResult {
+}): TestProviderContext {
   return {
     attemptId: "attempt_codex_route_conformance",
     leaseGeneration: "7",
@@ -645,18 +650,13 @@ function createProviderCredentialValidationResult(input: {
 }
 
 function createOpenAiInterceptEnv(input: {
-  validateRuntimeProviderEgressCredential: (input: {
+  readProviderContext: (input: {
     providerKind: string;
     runnerContainerName: string;
     userId: string;
-  }) => Promise<WorkerProviderEgressCredentialValidationResult>
-    | WorkerProviderEgressCredentialValidationResult;
+  }) => Promise<TestProviderContext>
+    | TestProviderContext;
 }): RunnerOutboundEnvironmentSource {
-  mockPostgresOwnerCommand(async ({ userId, command }) => {
-    if (command.operation !== "authorize_provider" || !command.runnerContainerName) throw new Error("Unexpected owner operation.");
-    const result = await input.validateRuntimeProviderEgressCredential({ userId, providerKind: command.providerKind, runnerContainerName: command.runnerContainerName });
-    return { cutover: "postgres", status: result.owns ? "authorized" : "stale", owner: result.owns ? createPostgresTestOwner({ userId, attemptId: result.attemptId, generation: result.leaseGeneration, workspaceVersion: result.workspaceVersion, runnerContainerName: command.runnerContainerName }) : null };
-  });
   return {
     ...createHostedExecutionTestEnv(),
     BUNDLES: {} as RunnerOutboundEnvironmentSource["BUNDLES"],
@@ -664,7 +664,11 @@ function createOpenAiInterceptEnv(input: {
       PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET,
     OPENAI_API_KEY: "openai-worker-secret",
     USER_RUNNER: forbiddenLegacyRuntime,
-    RUNNER_CONTAINER: { getByName: () => settledNativeRuntime },
+    RUNNER_CONTAINER: nativeProviderTestNamespace(async () => {
+      const result = await input.readProviderContext({ userId: TEST_USER_ID, providerKind: "openai", runnerContainerName: RUNNER_CONTAINER_NAME });
+      return result.owns ? createPostgresTestOwner({ userId: TEST_USER_ID, attemptId: result.attemptId,
+        generation: result.leaseGeneration, workspaceVersion: result.workspaceVersion }) : null;
+    }),
   };
 }
 
@@ -725,7 +729,7 @@ async function forwardCodexRequestThroughWorker(
       method: request.method ?? "GET",
     }),
     env,
-    { containerId: "opaque-container-id" },
+    { className: "RunnerContainer", containerId: "opaque-container-id" },
   );
   response.statusCode = intercepted.status;
   intercepted.headers.forEach((value, name) => {

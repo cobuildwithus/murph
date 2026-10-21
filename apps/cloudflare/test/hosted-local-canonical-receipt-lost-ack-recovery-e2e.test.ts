@@ -62,7 +62,7 @@ const preferenceRecoveryReplyText =
   "Your saved preferences are restored and this conversation can continue.";
 const linqApiToken = "linq-local-test-token";
 const linqWebhookSecret = "linq-local-canonical-lost-ack-secret";
-const assistantModel = "gpt-5.6-terra";
+const assistantModel = "gpt-6.1-sol";
 const lostAckLogMessage =
   "Hosted-local test dropped a canonical checkpoint acknowledgement after the real checkpoint committed.";
 

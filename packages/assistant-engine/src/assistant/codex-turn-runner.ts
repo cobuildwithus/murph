@@ -1,3 +1,4 @@
+import { resolveUsageOptimizerFeedbackScope } from './weekly-usage-optimizer.js'
 import {
   assistantReasoningEffortValues,
   type AssistantReasoningEffort,
@@ -10,17 +11,18 @@ import {
   resolveAssistantUsageCredentialSource,
 } from '@murphai/hosted-execution/assistant-usage'
 import {
-  HOSTED_CUSTOM_INFERENCE_CODEX_MODEL_PROVIDER_ID,
+  resolveAssistantCodexUsageProviderName,
   HOSTED_LOCAL_TEST_CODEX_MODEL_PROVIDER_ID,
-  HOSTED_LOCAL_TEST_VENICE_CODEX_MODEL_PROVIDER_ID,
 } from '@murphai/operator-config/assistant/target-runtime'
 import {
   MURPH_GROUP_ROOM_MODEL_MAINTENANCE_PERMISSION_PROFILE,
   MURPH_MEMBER_READ_PERMISSION_PROFILE,
   MURPH_MEMBER_WORKSPACE_PERMISSION_PROFILE,
 } from '@murphai/hosted-execution/assistant-permissions'
+import { HOSTED_ASSISTANT_PRIORITY_UNTIL_ENV } from '@murphai/hosted-execution/env'
+import { isHostedAiUsageOpenAiTokenPricingProviderName } from '@murphai/hosted-execution/runtime-control'
 import {
-  hasHostedCodexModelCatalogFlexTier,
+  hasHostedCodexModelCatalogServiceTier,
 } from '../assistant-codex/config.js'
 import {
   executeCodexAssistantTurnAttemptFromInput,
@@ -119,6 +121,7 @@ import {
   resolveAssistantConversationScope,
 } from './conversation-policy.js'
 import { recordAdditionalAssistantUsageEvents } from './service-usage.js'
+import { classifyAssistantReaction } from './reaction-routing.js'
 
 const ASSISTANT_PROVIDER_PLAN_TRACE_SCHEMA =
   'murph.assistant-provider-plan-diagnostics.v1'
@@ -178,10 +181,6 @@ const ASSISTANT_GROUP_EMAIL_THREAD_CONFIG = {
   'features.multi_agent_v2': false,
   'features.shell_tool': false,
   'features.tool_suggest': false,
-} as const
-const ASSISTANT_HABITAT_MAINTENANCE_THREAD_CONFIG = {
-  'memories.generate_memories': false,
-  'memories.use_memories': false,
 } as const
 
 export {
@@ -335,6 +334,91 @@ export async function executeCodexTurnWithRecovery(input: {
   }
 }
 
+async function executeRoutedCodexAttempt(
+  input: AssistantCodexAttemptInput,
+  reasoningEffort: string,
+  usageAttribution: AssistantUsageAttribution | null,
+): Promise<import('./providers/types.js').AssistantProviderTurnAttemptResult> {
+  return await maybeRouteAssistantReaction(input, usageAttribution)
+    ?? await executeCodexAssistantTurnAttemptFromInput(
+      buildCodexAttemptProviderInput(input, reasoningEffort, usageAttribution),
+    )
+}
+
+async function maybeRouteAssistantReaction(
+  input: AssistantCodexAttemptInput,
+  usageAttribution: AssistantUsageAttribution | null,
+): Promise<import('./providers/types.js').AssistantProviderTurnAttemptResult | null> {
+  const { executionPlan, attemptPlan } = input
+  const reaction = executionPlan.input.reactionRouting
+  // A reaction is always an isolated accepted input. A continuation or mixed
+  // input turn must never let one quiet reaction suppress other work.
+  if (!reaction || (input.providerRequestOrdinal ?? 0) !== 0
+    || executionPlan.acceptedInputItems?.length !== 1
+    || !executionPlan.allowFinishWithoutReply) return null
+  const usages: AssistantProviderUsageDraft[] = []
+  let decision: 'quiet' | 'escalate'
+  try {
+    decision = await classifyAssistantReaction({
+      ...reaction,
+      abortSignal: executionPlan.input.abortSignal,
+      codexCommand: attemptPlan.route.codexCommand ?? executionPlan.input.codexCommand ?? undefined,
+      codexHome: attemptPlan.route.providerOptions.codexHome,
+      env: attemptPlan.routePlan.cliEnv,
+      modelProvider: attemptPlan.route.providerOptions.modelProvider,
+      beforeProviderEntry: async () => {
+        notifyProviderRequestStartedBestEffort({
+          event: { providerRequestOrdinal: input.providerRequestOrdinal, startedAt: new Date().toISOString() },
+          hook: input.onProviderRequestStarted ?? null,
+        })
+      },
+      onProviderUsage: ({ usage }) => { usages.push(usage) },
+      onFallback: (reason) => {
+        try {
+          executionPlan.input.onTraceEvent?.({ codexThreadId: null, updates: [], rawEvent: {
+            type: 'assistant.reaction.routing_fallback', reason,
+          } })
+        } catch { /* Diagnostic failures must not suppress the full turn. */ }
+      },
+    })
+  } finally {
+    // The leaf has a separate identity: neither the parent request nor its
+    // dynamic-tool usage ordinals can collide. Failed/aborted leaves count too.
+    await recordAdditionalAssistantUsageEvents({
+      additionalUsages: usages,
+      effectiveEnv: attemptPlan.routePlan.cliEnv,
+      executionContext: executionPlan.executionContext,
+      providerRequestAcceptedInputIds: (executionPlan.acceptedInputItems ?? []).map((item) => item.id),
+      providerResult: {
+        attemptCount: attemptPlan.attemptCount,
+        provider: attemptPlan.route.provider,
+        providerOptions: attemptPlan.route.providerOptions,
+        route: attemptPlan.route,
+        session: attemptPlan.session,
+        usageAttribution: usageAttribution ? { ...usageAttribution, featureKey: 'reaction-routing' } : null,
+      },
+      turnId: `${executionPlan.turnId}:reaction-routing`,
+    })
+  }
+  if (decision !== 'quiet') return null
+  executionPlan.input.abortSignal?.throwIfAborted()
+  await executionPlan.onFinishWithoutReplyAccepted?.({
+    deliveryContextOrdinal: 0, messageReactionPending: false, precedingReplyDeliveryContextOrdinal: null,
+  })
+  await executionPlan.onFinishWithoutReplyRecorded?.({ deliveryContextOrdinal: 0 })
+  return {
+    ok: true,
+    metadata: { activityLabels: [], executedToolCount: 0, providerActionCount: 1, rawToolEvents: [], runtimeIssueInputs: [] },
+    result: {
+      provider: 'codex-cli', providerThreadUnchanged: true,
+      codexThreadId: attemptPlan.routePlan.resume?.codexThreadId ?? null,
+      rawEvents: [], acceptedNoReplyDeliveryContextOrdinals: [0], finalAction: { kind: 'none' },
+      response: '', transcriptResponse: null, responseDeliveryContextOrdinal: 0,
+      stderr: '', stdout: '', usage: null,
+    },
+  }
+}
+
 function createAssistantProviderUsageAttribution(input: {
   attemptPlan: AssistantCodexAttemptPlan
   env: NodeJS.ProcessEnv
@@ -347,11 +431,6 @@ function createAssistantProviderUsageAttribution(input: {
 
   const credentialSource = resolveAssistantUsageCredentialSource({
     apiKeyEnv: null,
-    credentialSourceHint:
-      input.attemptPlan.route.providerOptions.modelProvider
-        === HOSTED_CUSTOM_INFERENCE_CODEX_MODEL_PROVIDER_ID
-        ? 'member'
-        : null,
     effectiveEnv: input.env,
     headers: null,
     provider: input.attemptPlan.route.provider,
@@ -361,6 +440,8 @@ function createAssistantProviderUsageAttribution(input: {
     credentialSource,
     environment: resolveAssistantUsageEnvironment(input.env),
     featureKey: resolveAssistantUsageFeatureKey({
+      scheduledInvocationAuthority: input.executionPlan.input.scheduledInvocationAuthority,
+      scheduledOccurrenceAt: input.executionPlan.input.scheduledOccurrenceAt,
       deliverResponse: input.executionPlan.input.deliverResponse,
       promptProfile: input.executionPlan.profile.promptProfile,
       turnTrigger: input.executionPlan.input.turnTrigger ?? 'manual-ask',
@@ -513,9 +594,7 @@ async function executeAssistantCodexAttempt(
       executionPlan,
       hostedMemberId: executionPlan.executionContext?.hosted?.memberId ?? null,
     })
-    const attemptResult = await executeCodexAssistantTurnAttemptFromInput(
-      buildCodexAttemptProviderInput(input, reasoningEffort, usageAttribution),
-    )
+    const attemptResult = await executeRoutedCodexAttempt(input, reasoningEffort, usageAttribution)
     attemptMetadata = normalizeAssistantProviderAttemptMetadata(attemptResult.metadata)
     recordAssistantRuntimeIssueInputsBestEffort({
       issues: attemptMetadata.runtimeIssueInputs,
@@ -674,9 +753,6 @@ function resolveCodexAttemptCapabilities(
     automationId === MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID
   const toolOnlyMaintenanceTurn =
     groupRoomModelMaintenanceTurn || memberMemoryMaintenanceTurn
-  const habitatVoiceMaintenanceTurn =
-    executionPlan.profile.toolProfile === 'maintenance-turn' &&
-    executionPlan.input.maintenanceProfile === 'habitat-voice'
   const restrictedOneShotTurn =
     toolOnlyMaintenanceTurn || readOnlyAutomationTurn
   const audience = executionPlan.sharedPlan.conversationPolicy.audience
@@ -695,9 +771,7 @@ function resolveCodexAttemptCapabilities(
     !groupEmailTurn
   const hostedLocalTestProviderTurn =
     attemptPlan.route.providerOptions.modelProvider ===
-      HOSTED_LOCAL_TEST_CODEX_MODEL_PROVIDER_ID ||
-    attemptPlan.route.providerOptions.modelProvider ===
-      HOSTED_LOCAL_TEST_VENICE_CODEX_MODEL_PROVIDER_ID
+      HOSTED_LOCAL_TEST_CODEX_MODEL_PROVIDER_ID
   return {
     outputOnlyTurn,
     readOnlyAutomationTurn,
@@ -707,7 +781,6 @@ function resolveCodexAttemptCapabilities(
     groupRoomModelMaintenanceTurn,
     memberMemoryMaintenanceTurn,
     toolOnlyMaintenanceTurn,
-    habitatVoiceMaintenanceTurn,
     restrictedOneShotTurn,
     groupConversation,
     groupEmailTurn,
@@ -732,9 +805,6 @@ function resolveCodexAttemptThreadConfig(
   }
   if (capabilities.readOnlyAutomationTurn) {
     return ASSISTANT_READ_ONLY_AUTOMATION_THREAD_CONFIG
-  }
-  if (capabilities.habitatVoiceMaintenanceTurn) {
-    return ASSISTANT_HABITAT_MAINTENANCE_THREAD_CONFIG
   }
   return capabilities.groupEmailTurn ? ASSISTANT_GROUP_EMAIL_THREAD_CONFIG : null
 }
@@ -764,8 +834,7 @@ function buildCodexAttemptProviderInput(
   const attemptEnv = attemptPlan.routePlan.cliEnv
   const serviceTier = resolveCodexAttemptServiceTier({
     env: attemptEnv,
-    executionContext: executionPlan.executionContext,
-    requestedServiceTier: executionPlan.input.serviceTier ?? null,
+    executionPlan,
     routeModel: attemptPlan.route.providerOptions.model ?? null,
     routeModelProvider: attemptPlan.route.providerOptions.modelProvider ?? null,
   })
@@ -802,7 +871,7 @@ function buildCodexAttemptProviderInput(
             : attemptPlan.route.providerOptions.sandbox,
     },
     turn: {
-      abortSignal: serviceTier
+      abortSignal: serviceTier === 'flex'
         ? composeAssistantProviderFlexDeadlineSignal(executionPlan.input.abortSignal)
         : executionPlan.input.abortSignal,
       analyzeVideoTurnState: input.analyzeVideoTurnState ?? null,
@@ -882,6 +951,11 @@ function buildCodexAttemptProviderInput(
       },
       onTraceEvent: executionPlan.input.onTraceEvent,
       productFeedbackRecorder: createAssistantProductFeedbackRecorder({
+        usageOptimizerScope: resolveUsageOptimizerFeedbackScope({
+          conversationScope: resolveAssistantConversationScope(executionPlan.sharedPlan.conversationPolicy.audience),
+          executionContext: executionPlan.executionContext,
+          messageInput: executionPlan.input,
+        }),
         acceptedInputItems: executionPlan.acceptedInputItems ?? [],
         ...(executionPlan.hostedToolContext
             ?.currentProductFeedbackAcceptedInputIds
@@ -1053,29 +1127,47 @@ function countBucket(value: number):
 
 function resolveCodexAttemptServiceTier(input: {
   env: NodeJS.ProcessEnv
-  executionContext: AssistantCodexTurnExecutionPlan['executionContext']
-  requestedServiceTier: AssistantProviderServiceTier | null
+  executionPlan: AssistantCodexTurnExecutionPlan
   routeModel: string | null
   routeModelProvider: string | null
 }): AssistantProviderServiceTier | null {
-  if (input.requestedServiceTier === null) {
+  const { executionContext, input: turn, profile } = input.executionPlan
+  const requestedServiceTier = turn.serviceTier ?? null
+  if (!executionContext?.hosted) {
     return null
   }
-  if (!input.executionContext?.hosted) {
+  const priorityUntil = Date.parse(input.env[HOSTED_ASSISTANT_PRIORITY_UNTIL_ENV] ?? '')
+  const remainingMs = priorityUntil - Date.now()
+  if (requestedServiceTier === null
+    && profile.promptProfile === 'conversation'
+    && turn.turnTrigger !== 'automation-cron'
+    && !turn.scheduledOccurrenceAt
+    && !turn.maintenanceProfile
+    && remainingMs > 0 && remainingMs <= 86_400_000
+    && isHostedAiUsageOpenAiTokenPricingProviderName(
+      resolveAssistantCodexUsageProviderName(input.routeModelProvider),
+    )
+    && hasHostedCodexModelCatalogServiceTier({
+      env: input.env, model: input.routeModel, serviceTier: 'priority',
+    })) {
+    return 'priority'
+  }
+  if (requestedServiceTier === null) {
     return null
   }
   if (resolveCodexAssistantProviderTokenPricingBasis({
     model: input.routeModel,
     modelProvider: input.routeModelProvider,
-    serviceTier: input.requestedServiceTier,
+    serviceTier: requestedServiceTier,
   }) !== 'openai-flex') {
     return null
   }
-  return hasHostedCodexModelCatalogFlexTier({
+  return hasHostedCodexModelCatalogServiceTier({
+    serviceTier: 'flex',
     env: input.env,
     model: input.routeModel,
   })
-    ? input.requestedServiceTier
+    ? requestedServiceTier
     : null
 }
 

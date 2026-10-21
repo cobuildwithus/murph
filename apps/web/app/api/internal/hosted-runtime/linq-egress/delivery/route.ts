@@ -1,3 +1,5 @@
+import { isHostedMemberSignupWelcomeDeliveryIdentity } from "@murphai/hosted-execution";
+import { queueHostedLinqHomeContactCardAfterDelivery } from "@/src/lib/hosted-onboarding/linq-contact-card-delivery";
 import { after } from "next/server";
 import { lockHostedLinqMessageReceiptsTx } from "@/src/lib/hosted-onboarding/linq-message-receipt-lock";
 
@@ -131,9 +133,8 @@ export const POST = withJsonError(async (request: Request) => {
     threadIsDirect,
     userId,
   } as const;
-  const acceptedSignupWelcome = acceptedAt
-    ? parseHostedSignupWelcomeIdempotencyKey(idempotencyKey)
-    : null;
+  const acceptedSignupWelcome = acceptedAt !== null
+    && isHostedMemberSignupWelcomeDeliveryIdentity(idempotencyKey);
   const claimsParticipantSignupWelcomeNamespace = Boolean(
     acceptedAt
     && targetKind === "participant"
@@ -142,11 +143,8 @@ export const POST = withJsonError(async (request: Request) => {
     ),
   );
   if (
-    (acceptedSignupWelcome && acceptedSignupWelcome !== userId)
-    || (
-      claimsParticipantSignupWelcomeNamespace
-      && acceptedSignupWelcome !== userId
-    )
+    (acceptedSignupWelcome || claimsParticipantSignupWelcomeNamespace)
+    && !isHostedMemberSignupWelcomeDeliveryIdentity(idempotencyKey, userId)
   ) {
     throwHostedSignupWelcomeDeliveryAuthorityInvalid();
   }
@@ -193,8 +191,12 @@ export const POST = withJsonError(async (request: Request) => {
         prisma,
       });
 
-  scheduleHostedLinqTerminalRetriesAfterResponse({
+  await admitHostedLinqTerminalRecovery({ acceptedAt, recorded: result.recorded,
+    chatId: linqChatId, messageIds: providerMessageIds, prisma });
+
+  scheduleHostedLinqDeliveryFollowupsAfterResponse({
     acceptedAt,
+    memberId: userId,
     recorded: result.recorded,
     chatId: linqChatId,
     messageIds: providerMessageIds,
@@ -223,8 +225,21 @@ export const POST = withJsonError(async (request: Request) => {
   });
 });
 
-function scheduleHostedLinqTerminalRetriesAfterResponse(input: {
+async function admitHostedLinqTerminalRecovery(input: {
+  acceptedAt: Date | null; recorded: boolean; chatId: string | null;
+  messageIds: readonly string[]; prisma: ReturnType<typeof getPrisma>;
+}): Promise<void> {
+  // Receipts can precede acceptance. Durable admission must finish before the
+  // callback is acknowledged; replay records the same accepted identity.
+  if (!input.acceptedAt || !input.recorded || !input.chatId) return;
+  for (const messageId of input.messageIds) {
+    await retryHostedLinqTerminalSend({ chatId: input.chatId, messageId, prisma: input.prisma });
+  }
+}
+
+function scheduleHostedLinqDeliveryFollowupsAfterResponse(input: {
   acceptedAt: Date | null;
+  memberId: string;
   recorded: boolean;
   chatId: string | null;
   messageIds: readonly string[];
@@ -232,36 +247,22 @@ function scheduleHostedLinqTerminalRetriesAfterResponse(input: {
 }): void {
   const { chatId, messageIds, prisma } = input;
   if (!input.acceptedAt || !input.recorded || !chatId || messageIds.length === 0) return;
-  // A failure receipt can beat the acceptance callback. Reconcile after the
-  // normal handoff; successful replies do no provider work here.
+  // Contact sharing remains independent post-response follow-up work.
   try {
     after(async () => {
-      for (const messageId of messageIds) {
-        try {
-          await retryHostedLinqTerminalSend({ chatId, messageId, prisma });
-        } catch {
-          console.warn("Hosted Linq terminal retry did not complete.", {
-            code: "HOSTED_LINQ_TERMINAL_RETRY_INCOMPLETE",
-          });
-        }
-      }
+      await queueHostedLinqHomeContactCardAfterDelivery({
+        chatId,
+        expectedMemberId: input.memberId,
+        messageIds,
+        prisma,
+      });
     });
   } catch {
     // Scheduling failure must not invalidate an accepted runtime handoff.
-    console.warn("Hosted Linq terminal retry could not be scheduled.", {
-      code: "HOSTED_LINQ_TERMINAL_RETRY_NOT_SCHEDULED",
+    console.warn("Hosted Linq contact sharing could not be scheduled.", {
+      code: "HOSTED_LINQ_CONTACT_SHARING_NOT_SCHEDULED",
     });
   }
-}
-
-function parseHostedSignupWelcomeIdempotencyKey(
-  value: string | null,
-): string | null {
-  if (!value?.startsWith(HOSTED_LINQ_SIGNUP_WELCOME_IDEMPOTENCY_PREFIX)) {
-    return null;
-  }
-  const memberId = value.slice(HOSTED_LINQ_SIGNUP_WELCOME_IDEMPOTENCY_PREFIX.length);
-  return memberId && !memberId.includes(":") ? memberId : null;
 }
 
 function throwHostedSignupWelcomeDeliveryAuthorityInvalid(): never {

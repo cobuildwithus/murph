@@ -32,15 +32,20 @@ import type {
   DurableObjectSqlValue,
   DurableObjectStateLike,
 } from "../user-runner/types.js";
+import type { WorkerAnalyticsEngineDatasetLike } from "../worker-contracts.js";
 
 const STANDBY_READY_REPROBE_MS = 60_000;
 const STANDBY_CONTROL_RPC_TIMEOUT_MS = 1_000;
 const STANDBY_CLEANUP_BATCH_SIZE = 4;
 const STANDBY_PARALLELISM = 2;
 
+export const HOSTED_STANDBY_INVENTORY_ANALYTICS_SCHEMA =
+  "murph.hosted-standby-inventory.v1";
+
 type Region = HostedStandbyCoordinatorState["region"];
 
 interface StandbyCoordinatorEnvironment extends Readonly<Record<string, unknown>> {
+  HOSTED_STANDBY_ANALYTICS?: WorkerAnalyticsEngineDatasetLike;
   RUNNER_CONTAINER?: HostedStandbyRunnerContainerNamespaceLike;
   NEXT_RUNNER_CONTAINER?: HostedStandbyRunnerContainerNamespaceLike;
   STANDBY_RUNNER_CONTAINER?: HostedStandbyRunnerContainerNamespaceLike;
@@ -63,9 +68,10 @@ interface StandbyClaimRow extends Record<string, DurableObjectSqlValue> {
 }
 
 type CleanupTarget = { slotName: string; claimId?: string };
+type PreparationKind = "refill" | "reproof" | "resume";
 
 export class StandbyRunnerCoordinatorDurableObject extends DurableObject {
-  private fillWork: Promise<void> | null = null;
+  private readonly fillWork = new Set<Promise<void>>();
   private cleanupWork: Promise<void> | null = null;
   private fillRequested = false;
   private cleanupRequested = false;
@@ -96,12 +102,18 @@ export class StandbyRunnerCoordinatorDurableObject extends DurableObject {
       throw new TypeError("Hosted standby claim deadline is invalid.");
     }
     const startedAtMs = Date.now();
+    let replayed = false;
+    let before = { provisioning: 0, ready: 0 };
     const result = this.transactionSync((): HostedStandbyClaimResult => {
       this.store.initialize(input);
+      before = this.store.countInventory();
       // A replay is the original handoff, not another allocation. Preserve it
       // even when its deadline, mode or release has subsequently changed.
       const replay = this.store.readClaim(input.claimId);
-      if (replay) return { outcome: "claimed", slotName: replay.slot_name };
+      if (replay) {
+        replayed = true;
+        return { outcome: "claimed", slotName: replay.slot_name };
+      }
       if (readHostedStandbyMode(this.environment) !== "allocate") {
         return { outcome: "disabled" };
       }
@@ -114,16 +126,27 @@ export class StandbyRunnerCoordinatorDurableObject extends DurableObject {
       const slotName = this.store.claimReadySlot(input.claimId, Date.now());
       return slotName ? { outcome: "claimed", slotName } : { outcome: "no_ready_slot" };
     });
+    const elapsedMs = Math.max(0, Date.now() - startedAtMs);
     emitHostedExecutionStructuredLog({
       component: "cloudflare.standby",
       eventId: input.claimId,
       details: {
-        standbyClaimHandlerElapsedMs: Math.max(0, Date.now() - startedAtMs),
+        standbyClaimHandlerElapsedMs: elapsedMs,
+        standbyClaimProvisioningBefore: before.provisioning,
+        standbyClaimReadyBefore: before.ready,
         standbyClaimRemainingBudgetMs: Math.max(0, input.deadlineAtEpochMs - startedAtMs),
+        standbyClaimReplayed: replayed,
         standbyClaimRpcOutcome: result.outcome,
       },
       message: "Hosted standby coordinator answered a claim.",
       phase: "runtime.starting",
+    });
+    this.recordInventoryEvent({
+      detail: replayed ? "replayed" : result.outcome,
+      durationMs: elapsedMs,
+      event: "claim",
+      inventory: () => before,
+      outcome: "",
     });
     this.startFill();
     this.startCleanup();
@@ -168,24 +191,23 @@ export class StandbyRunnerCoordinatorDurableObject extends DurableObject {
   }
 
   // Independent, coalesced lanes: a slow cleanup batch cannot hold up a claim's
-  // refill. Repeated triggers set one dirty bit, never append maintenance jobs.
+  // refill. Preparation lanes and the cleanup dirty bit bound overlapping work.
   private startFill(): Promise<void> {
-    this.fillRequested = true;
-    if (this.fillWork) return this.fillWork;
-    this.fillWork = Promise.resolve().then(async () => {
-      do {
-        this.fillRequested = false;
-        await this.fillInventory();
-      } while (this.fillRequested);
-    }).catch(async () => {
-      await this.state.storage.setAlarm(Date.now() + HOSTED_STANDBY_RETRY_MS);
-    }).finally(() => {
-      this.fillWork = null;
-      // A trigger may arrive after the loop exits but before this continuation.
-      if (this.fillRequested) this.startFill();
-    });
-    this.state.waitUntil(this.fillWork);
-    return this.fillWork;
+    this.fillRequested = this.fillWork.size === STANDBY_PARALLELISM;
+    // Each trigger can occupy a free lane while earlier preparations are pending.
+    // SQLite owns reservations; this set only bounds this invocation's I/O.
+    for (let lane = this.fillWork.size; lane < STANDBY_PARALLELISM; lane += 1) {
+      const work = Promise.resolve().then(() => this.fillInventory()).catch(async () => {
+        await this.state.storage.setAlarm(Date.now() + HOSTED_STANDBY_RETRY_MS);
+      }).finally(() => {
+        this.fillWork.delete(work);
+        if (this.fillRequested) this.startFill();
+      });
+      this.fillWork.add(work);
+    }
+    const pending = Promise.all([...this.fillWork]).then(() => undefined);
+    this.state.waitUntil(pending);
+    return pending;
   }
 
   private startCleanup(): Promise<void> {
@@ -210,70 +232,69 @@ export class StandbyRunnerCoordinatorDurableObject extends DurableObject {
     // Bound attempts even when every preparation fails. A later alarm retries.
     let remaining = Math.max(STANDBY_PARALLELISM, this.desiredTarget());
     let reprobed = false;
-    const workers = await Promise.allSettled(Array.from({ length: STANDBY_PARALLELISM }, async () => {
-      while (remaining > 0) {
-        const reservation = this.transactionSync(() => {
-          this.rebalance();
-          const target = this.desiredTarget();
-          const state = this.store.readState();
-          if (!target || !state.releaseId) return null;
-          const pending = this.store.readInventory().find((row) =>
-            row.phase === "provisioning" && row.check_at_ms <= Date.now()
-            && !this.preparing.has(row.slot_name));
-          if (pending) return { slotName: pending.slot_name, fresh: false };
-          if (state.readySlotNames.length + state.provisioningSlotNames.length < target) {
-            const slotName = createHostedRunnerSlotName(state.releaseId);
-            this.store.insertProvisioning(slotName);
-            return { slotName, fresh: true };
-          }
-          if (!reprobed && state.provisioningSlotNames.length === 0) {
-            const slotName = this.store.beginReproof(Date.now(), target);
-            if (slotName) {
-              reprobed = true;
-              return { slotName, fresh: false };
-            }
-          }
-          return null;
-        });
-        if (!reservation) break;
-        remaining -= 1;
-        this.preparing.add(reservation.slotName);
-        try {
-          // Persist both the exact intent and its recovery alarm BEFORE even
-          // obtaining the external stub. A reset never substitutes a new name.
-          await this.scheduleRecovery();
-          this.transactionSync(() => this.rebalance());
-          if (!this.store.isProvisioning(reservation.slotName)) {
-            // This invocation alone knows a fresh intent never left the owner.
-            if (reservation.fresh) this.store.forgetSlot(reservation.slotName);
-            continue;
-          }
-          if (!await this.prepareSlot(reservation.slotName)) break;
-        } finally {
-          this.preparing.delete(reservation.slotName);
-          this.store.makeDrainDue(reservation.slotName, Date.now());
-          this.startCleanup();
+    while (remaining > 0) {
+      const reservation = this.transactionSync(() => {
+        this.rebalance();
+        const target = this.desiredTarget();
+        const state = this.store.readState();
+        if (!target || !state.releaseId) return null;
+        const pending = this.store.readInventory().find((row) =>
+          row.phase === "provisioning" && row.check_at_ms <= Date.now()
+          && !this.preparing.has(row.slot_name));
+        if (pending) {
+          return { kind: "resume" as const, slotName: pending.slot_name, fresh: false };
         }
+        if (state.readySlotNames.length + state.provisioningSlotNames.length < target) {
+          const slotName = createHostedRunnerSlotName(state.releaseId);
+          this.store.insertProvisioning(slotName);
+          return { kind: "refill" as const, slotName, fresh: true };
+        }
+        if (!reprobed && state.provisioningSlotNames.length === 0) {
+          const slotName = this.store.beginReproof(Date.now(), target, this.preparing);
+          if (slotName) {
+            reprobed = true;
+            return { kind: "reproof" as const, slotName, fresh: false };
+          }
+        }
+        return null;
+      });
+      if (!reservation) break;
+      remaining -= 1;
+      this.preparing.add(reservation.slotName);
+      try {
+        // Persist both the exact intent and its recovery alarm BEFORE even
+        // obtaining the external stub. A reset never substitutes a new name.
+        await this.scheduleRecovery();
+        this.transactionSync(() => this.rebalance());
+        if (!this.store.isInventoryPhase(reservation.slotName, reservation.kind === "reproof" ? "ready" : "provisioning")) {
+          // This invocation alone knows a fresh intent never left the owner.
+          if (reservation.fresh) this.store.forgetSlot(reservation.slotName);
+          continue;
+        }
+        if (!await this.prepareSlot(reservation.slotName, reservation.kind)) break;
+      } finally {
+        this.preparing.delete(reservation.slotName);
+        this.store.makeDrainDue(reservation.slotName, Date.now());
+        this.startCleanup();
       }
-    }));
-    // A failed worker must not release the fill owner while its peer still
-    // prepares a slot, or the next trigger could start another pair.
-    const failed = workers.find((worker) => worker.status === "rejected");
-    if (failed?.status === "rejected") throw failed.reason;
+    }
     await this.scheduleRecovery();
   }
 
-  private async prepareSlot(slotName: string): Promise<boolean> {
+  private async prepareSlot(slotName: string, kind: PreparationKind): Promise<boolean> {
     const releaseId = readHostedRunnerSlotReleaseId(slotName);
     if (!releaseId) throw new Error("Hosted runner slot identity is invalid.");
+    const startedAtMs = Date.now();
     try {
       const proof = await withRpcDeadline(
         () => this.slot(slotName).prepareStandbySlot({
           releaseId, region: HOSTED_RUNNER_REGION, slotName,
           timeoutMs: HOSTED_STANDBY_READY_TIMEOUT_MS,
+          ...(kind === "reproof" ? { recheck: true as const } : {}),
         }),
         HOSTED_STANDBY_READY_TIMEOUT_MS,
         () => {
+          if (kind === "reproof") return; // Read-only late checks own no cleanup.
           // Timeout is not cancellation. A late completion must still have an
           // exact cleanup target, even if an earlier retirement already settled.
           this.transactionSync(() => this.store.rememberDrain(slotName, Date.now()));
@@ -284,13 +305,17 @@ export class StandbyRunnerCoordinatorDurableObject extends DurableObject {
         || proof.region !== HOSTED_RUNNER_REGION || proof.prepared !== true) {
         throw new Error("Hosted standby preparation proof is invalid.");
       }
+      if (kind === "reproof" && !this.store.isInventoryPhase(slotName, "ready")) return true;
       this.transactionSync(() => {
         this.rebalance();
-        this.store.finishProvisioning(slotName, Date.now(), this.desiredTarget());
+        this.store.finishPreparation(slotName, Date.now(), this.desiredTarget());
       });
+      this.recordPreparation(kind, "ready", startedAtMs);
       return true;
     } catch (error) {
+      if (kind === "reproof" && !this.store.isInventoryPhase(slotName, "ready")) return true;
       this.transactionSync(() => this.store.rememberDrain(slotName, Date.now()));
+      this.recordPreparation(kind, "failed", startedAtMs);
       emitHostedExecutionStructuredLog({
         component: "cloudflare.standby",
         details: {
@@ -302,6 +327,49 @@ export class StandbyRunnerCoordinatorDurableObject extends DurableObject {
         phase: "failed",
       });
       return false;
+    }
+  }
+
+  private recordPreparation(
+    kind: PreparationKind,
+    outcome: "failed" | "ready",
+    startedAtMs: number,
+  ): void {
+    this.recordInventoryEvent({
+      detail: kind,
+      durationMs: Math.max(0, Date.now() - startedAtMs),
+      event: "prepare",
+      inventory: () => this.store.countInventory(),
+      outcome,
+    });
+  }
+
+  // One identifier-free point per claim answer or finished preparation. Claim
+  // inventory is read before selection; preparation inventory after its result.
+  private recordInventoryEvent(input: {
+    detail: string;
+    durationMs: number;
+    event: "claim" | "prepare";
+    inventory: () => { provisioning: number; ready: number };
+    outcome: string;
+  }): void {
+    const analytics = this.environment.HOSTED_STANDBY_ANALYTICS;
+    if (!analytics) return;
+    try {
+      const inventory = input.inventory();
+      analytics.writeDataPoint({
+        indexes: [input.event],
+        blobs: [HOSTED_STANDBY_INVENTORY_ANALYTICS_SCHEMA, input.event, input.detail, input.outcome],
+        doubles: [
+          1,
+          inventory.ready,
+          inventory.provisioning,
+          this.desiredTarget(),
+          input.durationMs,
+        ],
+      });
+    } catch {
+      // Best-effort telemetry must never alter claims or inventory.
     }
   }
 
@@ -441,6 +509,14 @@ class StandbyRunnerCoordinatorStore {
     };
   }
 
+  countInventory(): { provisioning: number; ready: number } {
+    const row = this.sql.exec<{ provisioning: number; ready: number }>(`SELECT
+      COALESCE(SUM(phase = 'ready'), 0) AS ready,
+      COALESCE(SUM(phase = 'provisioning'), 0) AS provisioning
+      FROM standby_coordinator_slot`).toArray()[0];
+    return { provisioning: Number(row?.provisioning ?? 0), ready: Number(row?.ready ?? 0) };
+  }
+
   readInventory(): StandbySlotRow[] {
     return this.sql.exec<StandbySlotRow>(`SELECT slot_name, phase, check_at_ms
       FROM standby_coordinator_slot WHERE phase IN ('ready', 'provisioning')
@@ -457,33 +533,34 @@ class StandbyRunnerCoordinatorStore {
       VALUES (?, 'provisioning', 0)`, slotName);
   }
 
-  isProvisioning(slotName: string): boolean {
+  isInventoryPhase(slotName: string, phase: "ready" | "provisioning"): boolean {
     return this.sql.exec<{ phase: string }>(
       "SELECT phase FROM standby_coordinator_slot WHERE slot_name = ?", slotName,
-    ).toArray()[0]?.phase === "provisioning";
+    ).toArray()[0]?.phase === phase;
   }
 
-  beginReproof(now: number, target: number): string | null {
+  beginReproof(now: number, target: number, preparing: ReadonlySet<string>): string | null {
     const row = this.sql.exec<StandbySlotRow>(`SELECT slot_name, phase, check_at_ms
       FROM standby_coordinator_slot WHERE phase = 'ready' AND check_at_ms <= ?
-      ORDER BY check_at_ms, slot_name LIMIT 1`, now).toArray()[0];
+      ORDER BY check_at_ms, slot_name`, now).toArray().find((slot) => !preparing.has(slot.slot_name));
     if (!row) return null;
-    this.sql.exec("UPDATE standby_coordinator_slot SET phase = 'provisioning' WHERE slot_name = ?", row.slot_name);
+    this.sql.exec("UPDATE standby_coordinator_slot SET check_at_ms = ? WHERE slot_name = ?",
+      now + STANDBY_READY_REPROBE_MS, row.slot_name);
     // Stagger even after downtime made several proofs overdue. Only one ready
-    // slot is withdrawn; finishing it does not make its peers immediately due.
+    // slot is checked at a time; every healthy slot remains claimable.
     this.sql.exec(`UPDATE standby_coordinator_slot SET check_at_ms = MAX(check_at_ms, ?)
       WHERE phase = 'ready'`, now + Math.ceil(STANDBY_READY_REPROBE_MS / target));
     return row.slot_name;
   }
 
-  finishProvisioning(slotName: string, now: number, target: number): void {
+  finishPreparation(slotName: string, now: number, target: number): void {
     if (!target) return;
     const last = this.sql.exec<{ due: number | null }>(`SELECT MAX(check_at_ms) AS due
-      FROM standby_coordinator_slot WHERE phase = 'ready'`).toArray()[0]?.due;
+      FROM standby_coordinator_slot WHERE phase = 'ready' AND slot_name <> ?`, slotName).toArray()[0]?.due;
     const due = Math.max(now + STANDBY_READY_REPROBE_MS,
       (last ?? now) + Math.ceil(STANDBY_READY_REPROBE_MS / target));
     this.sql.exec(`UPDATE standby_coordinator_slot SET phase = 'ready', check_at_ms = ?
-      WHERE slot_name = ? AND phase = 'provisioning'`, due, slotName);
+      WHERE slot_name = ? AND phase IN ('ready', 'provisioning')`, due, slotName);
   }
 
   readClaim(claimId: string): StandbyClaimRow | null {

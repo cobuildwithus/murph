@@ -1,3 +1,6 @@
+import type { CompanionPresence } from "@murphai/hosted-execution/companion-presence";
+import type { WearableHapticRequest, WearableHapticResponse } from "@murphai/hosted-execution/wearable-haptics";
+import type { ConversationPollTool } from "@murphai/hosted-execution/conversation-polls";
 import type {
   HostedClinicalRecordsConnectLinkRequest,
   HostedClinicalRecordsConnectLinkResponse,
@@ -24,6 +27,8 @@ import type {
   HostedMailboxFetchResponse,
   HostedMailboxPayloadFetchRequest,
   HostedMailboxPayloadFetchResponse,
+  HostedRuntimeLatencyTraceBatchRequest,
+  HostedRuntimeLatencyTraceBatchResponse,
   HostedRuntimeLatencyTraceRequest,
   HostedRuntimeLatencyTraceResponse,
   HostedRuntimeLogRequest,
@@ -41,33 +46,32 @@ import type {
   HostedRuntimeGroupToolResponse,
   HostedRuntimeProductFeedbackRecord,
   HostedRuntimeProductFeedbackRecordResponse,
-  HostedCodexAuthUpdate,
-  HostedCodexAuthUpdateResponse,
   HostedRuntimeUsageNoticeDeliveryTarget,
   HostedRuntimeUsageRecordResponse as HostedExecutionRuntimeUsageRecordResponse,
   HostedWorkspaceCheckpointRequest,
   HostedWorkspaceCheckpointResponse,
   HostedWorkspaceReadResponse,
   HostedBrowserVaultReplicaPublishResponse,
+  HostedRuntimeRedactedObject,
 } from "@murphai/hosted-execution/runtime-control";
 import type {
   AssistantUsageRecord,
 } from "@murphai/hosted-execution/assistant-usage";
+import type { AssistantChannelDependencies } from "@murphai/assistant-engine/assistant-runtime";
 import type {
   HostedRuntimeAssistantPersonalizationToolAuthority,
   HostedRuntimeAssistantPersonalizationToolRequest,
   HostedRuntimeAssistantPersonalizationToolResponse,
 } from "@murphai/hosted-execution/assistant-personalization";
-import {
-  assistantResponseMediaSchema,
-  type AssistantResponseMedia,
-} from "@murphai/operator-config/assistant-cli-contracts";
+import { assistantResponseMediaSchema } from "@murphai/operator-config/assistant-delivery-contracts";
+import type { AssistantResponseMedia } from "@murphai/operator-config/assistant-cli-contracts";
 import type {
   AssistantResponseCard,
 } from "@murphai/operator-config/assistant-response-cards";
 import type { MemberActionOutcomeV1 } from "@murphai/contracts";
 import type {
   HostedBrowserVaultReplicaRef,
+  HostedExecutionAssistantNotificationRoute,
   HostedExecutionExternalThreadRouteAuthority,
   HostedExecutionResolvedLinqDeliveryRoute,
 } from "@murphai/hosted-execution/contracts";
@@ -105,6 +109,10 @@ import type {
   HostedPhysicalNoteSendRequest,
   HostedPhysicalNoteSendResponse,
 } from "@murphai/hosted-execution/physical-notes";
+import type {
+  HostedUsageDiagnosticsRequest,
+  HostedUsageDiagnosticsResponse,
+} from "@murphai/hosted-execution/usage-diagnostics";
 import type {
   HostedPlanUsageStatus,
   HostedPlanUsageToolRequest,
@@ -492,6 +500,9 @@ export interface HostedRuntimeLinqDeleteMessagesRequest {
 }
 
 type HostedRuntimeEffectsPortBase = {
+  resolveMemberNotificationRoute?(
+    context?: { signal?: AbortSignal | null },
+  ): Promise<HostedExecutionAssistantNotificationRoute | null>;
   deletePreparedAssistantDelivery?(
     input: Pick<HostedAssistantDeliverySideEffect, "effectId" | "fingerprint">,
   ): Promise<void>;
@@ -503,8 +514,6 @@ type HostedRuntimeEffectsPortBase = {
     request: HostedRuntimeTelegramGetFileRequest,
     context?: { signal?: AbortSignal | null },
   ): Promise<HostedRuntimeTelegramFile | null>;
-  deleteEnvironmentVoice?(audioKey: string): Promise<void>;
-  readEnvironmentVoice?(audioKey: string): Promise<Uint8Array | null>;
   deleteMealPhoto?(mealPhotoKey: string): Promise<void>;
   readMealPhoto?(mealPhotoKey: string): Promise<Uint8Array | null>;
   readRawEmailMessage(rawMessageKey: string): Promise<Uint8Array | null>;
@@ -556,6 +565,8 @@ export type HostedRuntimeEffectsPort = HostedRuntimeEffectsPortBase;
 export type HostedRuntimeDeviceSyncMessagingReturnTarget = "imessage" | "telegram";
 
 export interface HostedRuntimeDeviceSyncPort {
+  companionStatus?(input: { signal?: AbortSignal | null }): Promise<CompanionPresence>;
+  haptic?(input: WearableHapticRequest & { signal?: AbortSignal | null }): Promise<WearableHapticResponse>;
   applyUpdates(input: {
     occurredAt?: string | null;
     signal?: AbortSignal | null;
@@ -642,6 +653,10 @@ export interface HostedRuntimeFamilyPlanToolPort {
   ): Promise<HostedRuntimeFamilyPlanToolResponse>;
 }
 
+export interface HostedRuntimeUsageDiagnosticsPort {
+  read(request: HostedUsageDiagnosticsRequest): Promise<HostedUsageDiagnosticsResponse>;
+}
+
 export interface HostedRuntimePlanUsageToolPort {
   read(request: HostedPlanUsageToolRequest): Promise<HostedPlanUsageStatus>;
 }
@@ -687,10 +702,6 @@ export interface HostedRuntimeGroupToolPort {
     | { status: "unavailable"; unavailableReason: string };
 }
 
-export interface HostedRuntimeCodexAuthPort {
-  update(update: HostedCodexAuthUpdate): Promise<HostedCodexAuthUpdateResponse>;
-}
-
 export interface HostedRuntimePhoneCallPort {
   stop?(
     request: HostedPhoneCallStopRequest,
@@ -727,11 +738,19 @@ export interface HostedRuntimePhysicalNotePort {
   ): Promise<HostedPhysicalNoteSendResponse>;
 }
 
+/** Runtime-only fetch result: optional transport scalars for the read's first attempt. */
+export type HostedRuntimeMailboxFetchResponse = HostedMailboxFetchResponse & {
+  transportTiming?: HostedRuntimeRedactedObject;
+};
+
 export interface HostedRuntimeMailboxPort {
+  admitVoiceInput?(
+    request: import("@murphai/hosted-execution").HostedVoiceInputRequest,
+  ): Promise<{ mailboxItemId: string }>;
   fetch(
     request: HostedMailboxFetchRequest,
     context?: { signal?: AbortSignal | null },
-  ): Promise<HostedMailboxFetchResponse>;
+  ): Promise<HostedRuntimeMailboxFetchResponse>;
   fetchPayload(
     request: HostedMailboxPayloadFetchRequest,
   ): Promise<HostedMailboxPayloadFetchResponse>;
@@ -815,6 +834,8 @@ export interface HostedRuntimeWorkspaceSnapshotPort {
     durableRoot: string;
     ref: HostedWorkspaceSnapshotV2Ref;
     signal?: AbortSignal | null;
+    /** Later checkpoint readers obtain fresh authorization instead of launch preparation. */
+    usePreparedRestore?: boolean;
   }): Promise<HostedRuntimeWorkspaceSnapshotRestoreTimingDetails | void>;
   startSnapshotSession(input: {
     expectedWorkspaceVersion: string;
@@ -835,6 +856,7 @@ export interface HostedRuntimeLogPort {
 }
 
 export interface HostedRuntimeLatencyTracePort {
+  recordBatch?(request: HostedRuntimeLatencyTraceBatchRequest): Promise<HostedRuntimeLatencyTraceBatchResponse>;
   record(request: HostedRuntimeLatencyTraceRequest): Promise<HostedRuntimeLatencyTraceResponse>;
 }
 
@@ -854,6 +876,7 @@ export interface HostedRuntimeVaultSharePort {
   listActiveProjectionScopes(input?: {
     projectionMode?: HostedVaultShareProjectionMode;
     signal?: AbortSignal | null;
+    sourceWorkspaceVersion?: string;
   }): Promise<HostedVaultShareActiveProjectionKindsResponse>;
   deliver(
     request: HostedVaultShareDeliverRequest,
@@ -875,7 +898,6 @@ export interface HostedRuntimePlatform {
   artifactStore: HostedRuntimeArtifactStore;
   mediaStore?: HostedRuntimeMediaStore | null;
   browserVaultReplicaPort?: HostedRuntimeBrowserVaultReplicaPort | null;
-  codexAuthPort?: HostedRuntimeCodexAuthPort | null;
   clinicalRecordsPort?: HostedRuntimeClinicalRecordsPort | null;
   connectedApps?: AssistantConnectedAppsPort | null;
   deviceSyncPort?: HostedRuntimeDeviceSyncPort | null;
@@ -885,12 +907,14 @@ export interface HostedRuntimePlatform {
   providerFetch?: typeof fetch | null;
   publicInternetFetch?: typeof fetch | null;
   issueExportPort?: HostedRuntimeIssueExportPort | null;
+  pollToolPort?: ConversationPollTool | null;
   imessageContactToolPort?: HostedRuntimeIMessageContactToolPort | null;
   latencyTracePort?: HostedRuntimeLatencyTracePort | null;
   labsToolPort?: HostedRuntimeLabsToolPort | null;
   logPort?: HostedRuntimeLogPort | null;
   mailboxPort?: HostedRuntimeMailboxPort | null;
   planUsageToolPort?: HostedRuntimePlanUsageToolPort | null;
+  usageDiagnosticsPort?: HostedRuntimeUsageDiagnosticsPort | null;
   physicalNotes?: HostedRuntimePhysicalNotePort | null;
   privateImageUrlPublisher?: AssistantHostedPrivateImageUrlPublisher | null;
   subscriptionToolPort?: HostedRuntimeSubscriptionToolPort | null;
@@ -900,6 +924,8 @@ export interface HostedRuntimePlatform {
   runtimeLivenessPort?: RuntimeLivenessPort | null;
   runtimeLivenessRequired?: boolean | null;
   usageRecordPort?: HostedRuntimeUsageRecordPort | null;
+  /** Ephemeral, invocation-bound speech; never an independently retried effect. */
+  voicePort?: { speak: NonNullable<AssistantChannelDependencies["sendVoice"]> } | null;
   vaultSharePort?: HostedRuntimeVaultSharePort | null;
   workspacePort?: HostedRuntimeWorkspacePort | null;
   workspaceSnapshotPort?: HostedRuntimeWorkspaceSnapshotPort | null;

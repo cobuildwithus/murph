@@ -14,6 +14,7 @@ import {
   parseHostedEmailThreadTarget,
 } from "@murphai/runtime-state";
 import {
+  normalizeHostedVoiceConversationCapture,
   normalizeHostedEmailConversationCapture,
   normalizeHostedLinqConversationCapture,
   normalizeHostedTelegramConversationCapture,
@@ -574,6 +575,12 @@ async function normalizeHostedConversationMessageWake(input: {
     & Partial<Pick<NormalizedHostedAssistantRuntimeConfig, "parserToolchain">>;
   signal?: AbortSignal | null;
 }) {
+  if (input.wake.message.channel === "voice") {
+    return normalizeHostedVoiceConversationCapture({
+      ...input.wake.message,
+      occurredAt: input.wake.occurredAt,
+    });
+  }
   if (isHostedLinqConversationMessageWake(input.wake)) {
     return normalizeHostedLinqConversationCapture({
       accountId: readHostedLinqConversationMessageAccountLookupKey(input.wake.message),

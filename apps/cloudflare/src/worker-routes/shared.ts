@@ -38,6 +38,8 @@ export interface WorkerRouteContext {
   executionCtx?: WorkerExecutionContext;
   request: Request;
   requestText?: Promise<string>;
+  fetchStartedAtEpochMs?: number;
+  fetchIsFirstRequest?: boolean;
   runtimeControlAuthTiming?: {
     runtimeControlAuthFinishedAtEpochMs: number;
     runtimeControlAuthStartedAtEpochMs: number;

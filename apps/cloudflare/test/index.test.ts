@@ -1,5 +1,6 @@
 import { createOutboundMultipartTestBucket } from "./multipart-bucket-fixtures.ts";
 import { mockPostgresOwnerCommand, createPostgresTestOwner } from "./postgres-owner-fixtures.ts";
+import * as runtimeOwnerClient from "../src/runtime-owner-client.ts";
 import * as runtimeResourceClient from "../src/runtime-resource-client.ts";
 import * as runtimeUserControl from "../src/runtime-user-control.ts";
 import * as runtimeProcessing from "../src/runtime-processing.ts";
@@ -28,6 +29,7 @@ import {
 import { readHostedExecutionEnvironment } from "../src/env.ts";
 import hostedLocalTestWorker from "../src/hosted-local-test-index.ts";
 import worker from "../src/index.ts";
+import { createWorkerFetchHandler } from "../src/worker/fetch-handler.ts";
 import { hostedLocalTestInternalRoutes } from "../src/worker/hosted-local-test-routes.ts";
 import { workerInternalRoutes } from "../src/worker/internal-routes.ts";
 import { workerPublicRoutes } from "../src/worker/public-routes.ts";
@@ -352,17 +354,18 @@ describe("cloudflare worker routes", () => {
       "temporal-worker-binding-admission",
       "deploy-artifact-smoke",
       "deploy-container-smoke",
+      "voice-control",
       "runtime-ensure-processing",
       "runtime-health-data-consent",
-      "inference-verification",
       "user-data-delete",
       "runtime-resource-purge",
       "telegram-usage-limit-notice",
-      "environment-realtime-call",
-      "environment-voice-stage",
-      "environment-voice-delete",
       "meal-photo-stage",
       "meal-photo-delete",
+      "game-media-stage",
+      "game-media-read",
+      "game-media-stat",
+      "game-media-delete",
       "browser-vault-session",
       "user-status",
     ]);
@@ -387,17 +390,18 @@ describe("cloudflare worker routes", () => {
       "temporal-worker-binding-admission",
       "deploy-artifact-smoke",
       "deploy-container-smoke",
+      "voice-control",
       "runtime-ensure-processing",
       "runtime-health-data-consent",
-      "inference-verification",
       "user-data-delete",
       "runtime-resource-purge",
       "telegram-usage-limit-notice",
-      "environment-realtime-call",
-      "environment-voice-stage",
-      "environment-voice-delete",
       "meal-photo-stage",
       "meal-photo-delete",
+      "game-media-stage",
+      "game-media-read",
+      "game-media-stat",
+      "game-media-delete",
       "browser-vault-session",
       "user-status",
     ]);
@@ -881,7 +885,7 @@ describe("cloudflare worker routes", () => {
       },
     });
     const url = new URL(
-      "https://runner.example.test/internal/deploy/container-smoke?liveModelTurn=gpt-5.6-terra",
+      "https://runner.example.test/internal/deploy/container-smoke?liveModelTurn=gpt-6.1-sol",
     );
     const callbackSigning = readHostedExecutionEnvironment(asWorkerStringEnvironment(env)).webCallbackSigning;
     const request = new Request(url, {
@@ -3371,6 +3375,17 @@ describe("cloudflare worker routes", () => {
 
   describe("hosted runtime control", () => {
     beforeEach(() => installOidcJwksFetch());
+    it("rejects voice reservations from signed runtime callbacks before admission", async () => {
+      const env = createWorkerEnv(createUserRunnerStub());
+      const ensure = vi.spyOn(runtimeProcessing, "ensurePostgresRuntimeProcessing");
+      const request = await signWebCallbackControlRequest(new Request("https://runner.example.test/internal/users/test-user/runtime/ensure-processing", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ voiceCallId: "call-synthetic", orchestrationAttemptId: "voice-synthetic" }),
+      }), env);
+      const response = await worker.fetch(request, env);
+      expect(response.status).toBe(400);
+      expect(ensure).not.toHaveBeenCalled();
+    });
     it("wakes the Postgres-owned runtime through the native adapter without activating UserRunner", async () => {
       const wake = vi.fn(async () => ({ kind: "accepted" as const, action: "woken" as const }));
       const env = createWorkerEnv(createUserRunnerStub(), {
@@ -3384,7 +3399,7 @@ describe("cloudflare worker routes", () => {
       installOidcJwksFetch(undefined, { cutover: "postgres", status: "existing", owner: {
         userId: "test-user", attemptId: "attempt-native", generation: "7", phase: "active", processingMode: "default",
         allocationId: "standby-claim-11111111-1111-4111-8111-111111111111", runnerContainerName: `runner--v-release_1--${"1".repeat(32)}`,
-        workspaceVersion: "4", customInferenceEnvelope: null, platformAiUsageAllowed: true,
+        workspaceVersion: "4", platformAiUsageAllowed: true,
         startedAt: new Date().toISOString(), acceptedAt: null, completedAt: null, failureCount: 0, lastErrorCode: null,
       } });
       const response = await worker.fetch(request, env);
@@ -3560,7 +3575,7 @@ describe("cloudflare worker routes", () => {
         userId: "test-user", attemptId: "attempt-test", generation: "1", phase: "active" as const,
         processingMode: "default" as const, allocationId: "allocation-test",
         runnerContainerName: "runner-test", workspaceVersion: "0",
-        customInferenceEnvelope: null, platformAiUsageAllowed: true,
+        platformAiUsageAllowed: true,
         startedAt: "2026-01-01T00:00:00.000Z", acceptedAt: null, completedAt: null,
         failureCount: 0, lastErrorCode: null,
       },
@@ -3691,6 +3706,37 @@ describe("cloudflare worker routes", () => {
       expect(serializedInfoLogs).toContain("web-ingress-attempt-test");
       expect(serializedInfoLogs).toContain("runtime_processing_accepted");
       expect(serializedInfoLogs).toContain("runtime-attempt-test");
+      const completion = infoLog.mock.calls.map(([payload]) => JSON.parse(String(payload)))
+        .find((entry) => entry.details?.reason === "runtime-ensure-processing-direct-completed");
+      expect(completion.details).toMatchObject({
+        workerFetchStartedAtEpochMs: expect.any(Number),
+        workerFetchIsFirstRequest: expect.any(Boolean),
+        runtimeControlAuthStartedAtEpochMs: orchestration!.runtimeControlAuthStartedAtEpochMs,
+        runtimeControlAuthFinishedAtEpochMs: orchestration!.runtimeControlAuthFinishedAtEpochMs,
+        cloudflareRouteReceivedAtEpochMs: orchestration!.cloudflareRouteReceivedAtEpochMs,
+      });
+      expect(completion.details.workerFetchStartedAtEpochMs)
+        .toBeLessThanOrEqual(completion.details.runtimeControlAuthStartedAtEpochMs);
+    });
+
+    it("captures fetch entry before routing and marks only the first request in this handler", async () => {
+      const now = vi.spyOn(Date, "now").mockReturnValue(1_000);
+      const handler = createWorkerFetchHandler({
+        publicRoutes: [],
+        internalRoutes: [{
+          name: "synthetic-timing", methods: ["GET"], match: () => ({}),
+          handle: (context) => Response.json({
+            started: context.fetchStartedAtEpochMs,
+            first: context.fetchIsFirstRequest,
+          }),
+        }],
+      });
+      const env = createWorkerEnv(createUserRunnerStub());
+      const first = await handler(new Request("https://example.test/timing"), env);
+      await expect(first.json()).resolves.toEqual({ started: 1_000, first: true });
+      now.mockReturnValue(2_000);
+      const second = await handler(new Request("https://example.test/timing"), env);
+      await expect(second.json()).resolves.toEqual({ started: 2_000, first: false });
     });
 
     it("returns and logs web-plane OIDC ensure-processing failures", async () => {
@@ -4279,6 +4325,8 @@ describe("cloudflare worker routes", () => {
         descriptor: { byteSize: mediaBytes.byteLength, expiresAt, mediaId, mediaKind: "image", sha256: mediaSha256 } },
     }));
 
+    vi.mocked(runtimeResourceClient.commandHostedRuntimeMedia).mockClear();
+    vi.mocked(runtimeOwnerClient.commandHostedRuntimeOwner).mockClear();
     const readResponse = await callRunnerOutbound(
       new Request(`http://media.worker/media/${mediaId}`, {
         headers: {
@@ -4292,9 +4340,13 @@ describe("cloudflare worker routes", () => {
     );
 
     expect(readResponse.status).toBe(200);
+    expect(runtimeResourceClient.commandHostedRuntimeMedia).toHaveBeenCalledOnce();
+    expect(runtimeOwnerClient.commandHostedRuntimeOwner).not.toHaveBeenCalled();
     expect(Buffer.from(await readResponse.arrayBuffer())).toEqual(mediaBytes);
     expect(runtimeResourceClient.commandHostedRuntimeMedia).toHaveBeenCalledWith(expect.objectContaining({
-      userId: "member_123", command: { operation: "read", descriptor: { byteSize: mediaBytes.byteLength, mediaId, mediaKind: "image", sha256: mediaSha256, expiresAt: null } },
+      userId: "member_123", command: { operation: "admit_read",
+        attemptId: ACTIVE_INVOCATION_LEASE_HEADERS["x-hosted-runtime-attempt-id"], generation: ACTIVE_INVOCATION_LEASE_HEADERS["x-hosted-runtime-lease-generation"],
+        descriptor: { byteSize: mediaBytes.byteLength, mediaId, mediaKind: "image", sha256: mediaSha256, expiresAt: null } },
     }));
     const mediaObjectKey = await hostedMediaObjectKeyForTest(env, "member_123", mediaId);
     expect(env.__bucketStore.keys()).toContain(mediaObjectKey);
@@ -4315,6 +4367,25 @@ describe("cloudflare worker routes", () => {
     }));
     expect(runtimeResourceClient.commandHostedRuntimeMedia).toHaveBeenCalledWith(expect.objectContaining({ command: { operation: "acknowledge_purge", purge: { objectKey: mediaObjectKey, mediaId, revision: "1" } } }));
     expect(env.__bucketStore.keys()).not.toContain(mediaObjectKey);
+  });
+
+  it("rejects stale media read admission before reading ciphertext", async () => {
+    mockCanonicalOutboundStorage();
+    installOidcJwksFetch();
+    const env = createWorkerEnv();
+    const get = vi.spyOn(env.BUNDLES, "get");
+    vi.mocked(runtimeResourceClient.commandHostedRuntimeMedia).mockRejectedValueOnce(
+      new runtimeResourceClient.HostedRuntimeResourceRejectedError("HOSTED_RUNTIME_OWNER_STALE"),
+    );
+    const response = await callRunnerOutbound(new Request(`http://media.worker/media/${"a".repeat(64)}`, {
+      headers: { ...ACTIVE_INVOCATION_LEASE_HEADERS,
+        "x-hosted-runtime-media-byte-size": "4", "x-hosted-runtime-media-kind": "image",
+        "x-hosted-runtime-media-sha256": "b".repeat(64) },
+    }), env);
+    expect(response.status).toBe(401);
+    expect(runtimeResourceClient.commandHostedRuntimeMedia).toHaveBeenCalledOnce();
+    expect(runtimeOwnerClient.commandHostedRuntimeOwner).not.toHaveBeenCalled();
+    expect(get).not.toHaveBeenCalled();
   });
 
   it("keeps hosted media objects isolated per user", async () => {

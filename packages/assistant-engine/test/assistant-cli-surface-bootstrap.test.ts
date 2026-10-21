@@ -1227,3 +1227,16 @@ test('buildAssistantCliSurfaceContract keeps hot-path option signatures beside a
   assert.match(goalSaveLine, /--horizon=short_term\|medium_term\|long_term\|ongoing/u)
   assert.match(goalSaveLine, /--priority=integer/u)
 })
+
+
+test('CLI discovery uses concise help for syntax and reserves schemas for structured contracts', async () => {
+  const { buildAssistantCliSurfaceContract } = await import('../src/assistant/cli-surface-bootstrap.ts')
+  const contract = buildAssistantCliSurfaceContract({
+    commands: [{ name: 'food search-labels', description: 'Look up food labels.' }],
+  })
+  assert.ok(contract)
+  assert.match(contract, /read `vault-cli <command> --help` for positional arguments, flags, and examples/u)
+  assert.match(contract, /Reuse the loaded skill or a precise error hint/u)
+  assert.match(contract, /--schema --format json` only when help omits a needed structured input or output contract/u)
+  assert.doesNotMatch(contract, /Before running.*--schema/u)
+})

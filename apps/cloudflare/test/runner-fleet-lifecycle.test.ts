@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
-import { describe, it, vi } from "vitest";
+import { beforeEach, describe, it, vi } from "vitest";
 import { RunnerContainer, destroyHostedExecutionContainer } from "../src/runner-container.js";
 import { StandbyRunnerContainer } from "../src/standby-runner-container.js";
+import { RunnerInvocationReceiptStore } from "../src/runner-invocation-receipt.ts";
 import { RunnerSlotBindingStore } from "../src/runner-slot-binding.js";
 import {
   HOSTED_RUNNER_REGION, HOSTED_STANDBY_REGION,
@@ -15,6 +16,14 @@ import type { DurableObjectStateLike } from "../src/user-runner/types.js";
 import { HOSTED_RUNTIME_ARCHITECTURE_VERSION } from "../src/hosted-runtime-architecture.js";
 
 import { createTestSqlStorage } from "./sql-storage.js";
+import { commandHostedRuntimeOwner } from "../src/runtime-owner-client.ts";
+import type { HostedRuntimeOwnerSnapshot } from "@murphai/hosted-execution/runtime-owner";
+
+vi.mock("../src/runtime-owner-client.ts", () => ({ commandHostedRuntimeOwner: vi.fn() }));
+beforeEach(() => {
+  vi.mocked(commandHostedRuntimeOwner).mockReset();
+  vi.mocked(commandHostedRuntimeOwner).mockResolvedValue({ cutover: "postgres", status: "observed", owner: null });
+});
 
 // Isolate logging, egress and job transport; lifecycle, binding, SQL, identity
 // validation, startup and retirement below are the actual production owners.
@@ -65,15 +74,19 @@ function runnerHarness(input: {
   legacy?: boolean; slotName?: string; running?: boolean; status?: string;
   health?: Record<string, unknown>; environment?: Record<string, unknown>;
   destroy?: () => Promise<void>; fetchHealth?: () => Promise<void>;
+  durable?: ReturnType<typeof durableState>;
 } = {}) {
   const slotName = input.slotName ?? (input.legacy ? LEGACY_SLOT : GLOBAL_SLOT);
-  const { state, sql } = durableState();
+  const { state, sql } = input.durable ?? durableState();
   let running = input.running ?? false;
   let status = input.status ?? (running ? "running" : "stopped");
-  const calls = { start: 0, destroy: 0, fetch: 0, preflight: 0, renew: 0 };
+  const calls = { start: 0, destroy: 0, fetch: 0, renew: 0 };
   const ContainerClass = input.legacy ? StandbyRunnerContainer : RunnerContainer;
   const container = new ContainerClass({
-    ...state, id: { name: slotName }, container: { get running() { return running; } },
+    ...state, id: { name: slotName }, container: {
+      get running() { return running; },
+      getTcpPort() { return { fetch: (url: string) => container.containerFetch(url) }; },
+    },
   }, {
     CF_VERSION_METADATA: { id: RELEASE },
     HOSTED_EXECUTION_RUNNER_BUNDLE_FINGERPRINT: "bundle-test",
@@ -87,15 +100,10 @@ function runnerHarness(input: {
     renewActivityTimeout() { calls.renew++; },
     async containerFetch(url: string) {
       calls.fetch++;
-      if (url.endsWith("/internal/deploy-codex-shell-smoke")) {
-        calls.preflight++;
-        return Response.json({ ok: true });
-      }
       assert.ok(url.endsWith("/health"), `Unexpected container fetch: ${url}`);
       await input.fetchHealth?.();
       return Response.json({
-        ok: true, activeJobCount: 0, codexShellPreflightStatus: "ready",
-        codexShellPreflightCompletedAtEpochMs: Date.now(),
+        ok: true, activeJobCount: 0,
         cloudflareRegion: input.legacy ? "ENAM" : "WNAM",
         heavyRuntimeHydrationStatus: "ready", heavyRuntimeHydrationCompletedAtEpochMs: Date.now(),
         hostedRuntimeArchitectureVersion: HOSTED_RUNTIME_ARCHITECTURE_VERSION,
@@ -179,7 +187,7 @@ describe("unified runner identity and binding", () => {
     const { container, calls, sql } = runnerHarness();
     const input = claimInput();
     await container.bindStandbySlot(input);
-    assert.deepEqual(calls, { start: 0, destroy: 0, fetch: 0, preflight: 0, renew: 0 });
+    assert.deepEqual(calls, { start: 0, destroy: 0, fetch: 0, renew: 0 });
     assert.deepEqual(await container.bindStandbySlot(input), { bound: true, ...input });
     for (const conflict of [
       { userId: "member-b" }, { claimId: createHostedStandbyClaimId() },
@@ -206,13 +214,13 @@ describe("unified runner identity and binding", () => {
     await container.bindStandbySlot(claimInput());
     await container.ensureReadyForProcessing({ userId: MEMBER, timeoutMs: 1_000 });
     assert.equal(calls.start, 1);
-    assert.equal(calls.preflight, 0);
   });
 
-  it("prepares global pristine inventory without geographic gating or member ownership", async () => {
-    const { container, calls } = runnerHarness();
+  it("prepares global pristine inventory through ordinary health without waiting for hydration", async () => {
+    const { container, calls } = runnerHarness({ health: { heavyRuntimeHydrationStatus: "pending" } });
     await container.prepareStandbySlot({ releaseId: RELEASE, region: HOSTED_RUNNER_REGION, slotName: GLOBAL_SLOT, timeoutMs: 1_000 });
     assert.equal(calls.start, 1);
+    assert.equal(calls.fetch, 2);
     assert.deepEqual(await container.readStandbySlotBinding(), {
       claimId: null, releaseId: RELEASE, region: HOSTED_RUNNER_REGION,
       slotName: GLOBAL_SLOT, state: "unbound", userId: null,
@@ -227,8 +235,8 @@ describe("unified runner identity and binding", () => {
     source: { runnerBundle: { bundleFingerprint: "bundle-test", sourceFingerprint: "bad" } },
     pristine: { workspaceInvocationAcceptedCount: 1 },
     active: { activeJobCount: 1 },
+    settling: { activeJobCount: 1, settlingCompletionCallbackCount: 1 },
     poisoned: { poisoned: true },
-    hydration: { heavyRuntimeHydrationStatus: "pending" },
   })) it(`still rejects invalid global inventory ${label} proof`, async () => {
     const { container } = runnerHarness({ health });
     await assert.rejects(container.prepareStandbySlot({ releaseId: RELEASE, region: HOSTED_RUNNER_REGION, slotName: GLOBAL_SLOT, timeoutMs: 50 }));
@@ -247,6 +255,254 @@ describe("unified runner identity and binding", () => {
     await prepare;
     await bind;
     assert.equal((await container.readStandbySlotBinding()).state, "bound");
+  });
+});
+
+
+describe("bound runner idle cleanup respects canonical runtime ownership", () => {
+  function owner(phase: HostedRuntimeOwnerSnapshot["phase"], runnerContainerName = GLOBAL_SLOT): HostedRuntimeOwnerSnapshot {
+    return {
+      userId: MEMBER, attemptId: "attempt-starting", generation: "1", phase,
+      processingMode: "default", allocationId: "synthetic-allocation", runnerContainerName,
+      workspaceVersion: null, platformAiUsageAllowed: false,
+      startedAt: new Date().toISOString(), acceptedAt: null, completedAt: null,
+      failureCount: 0, lastErrorCode: null,
+    };
+  }
+
+  it.each([false, true])("skips owner polls until the receipt deadline (reactivated=%s)", async (reactivated) => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const receipt = Date.parse("2026-10-01T12:00:00Z");
+      vi.setSystemTime(receipt);
+      const health = { conversationActivityReceivedAtEpochMs: receipt };
+      const initial = runnerHarness({ running: true, health });
+      await initial.container.bindStandbySlot(claimInput());
+      vi.mocked(commandHostedRuntimeOwner).mockResolvedValue({
+        cutover: "postgres", status: "observed", owner: owner("active"),
+      });
+      await initial.container.onActivityExpired();
+      const { container, calls } = reactivated
+        ? runnerHarness({ running: true, health, durable: initial }) : initial;
+      for (let elapsed = 60_000; elapsed < 600_000; elapsed += 60_000) {
+        vi.setSystemTime(receipt + elapsed);
+        await container.onActivityExpired();
+        assert.equal(vi.mocked(commandHostedRuntimeOwner).mock.calls.length, 0);
+        assert.equal(calls.destroy, 0);
+        assert.deepEqual((await container.listSchedules("onActivityExpired")).map(s => s.time),
+          [(receipt + 600_000) / 1_000]);
+      }
+      // Once the local deadline expires, denial has no safe longer deadline.
+      for (const elapsed of [600_000, 660_000]) {
+        vi.setSystemTime(receipt + elapsed);
+        await container.onActivityExpired();
+        assert.equal(vi.mocked(commandHostedRuntimeOwner).mock.calls.length, elapsed / 60_000 - 9);
+        assert.equal(calls.destroy, 0);
+        assert.deepEqual((await container.listSchedules("onActivityExpired")).map(s => s.time),
+          [(receipt + elapsed + 60_000) / 1_000]);
+      }
+      vi.mocked(commandHostedRuntimeOwner).mockResolvedValue({
+        cutover: "postgres", status: "observed", owner: owner("idle"),
+      });
+      vi.setSystemTime(receipt + 720_000);
+      await container.onActivityExpired();
+      assert.equal(calls.destroy, 1);
+      assert.deepEqual(vi.mocked(commandHostedRuntimeOwner).mock.calls.map(([call]) => call.command.operation),
+        ["reconcile", "reconcile", "reconcile", "target_retired"]);
+      assert.deepEqual(await container.listSchedules("onActivityExpired"), []);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it.each([
+    { name: "stopped", running: false, status: "stopped", health: {} },
+    { name: "starting", running: true, status: "starting", health: {} },
+    { name: "active jobs", running: true, status: "running", health: { activeJobCount: 1 } },
+  ])("skips the owner read when local state prevents cleanup: $name", async ({ running, status, health }) => {
+    const { container, calls } = runnerHarness({ running, status, health });
+    await container.bindStandbySlot(claimInput());
+    await container.onActivityExpired();
+    assert.equal(vi.mocked(commandHostedRuntimeOwner).mock.calls.length, 0);
+    assert.equal(calls.destroy, 0);
+  });
+
+  it.each(["jobs", "receipt"] as const)("rechecks local %s under the lock after Web allows cleanup", async (change) => {
+    const health: Record<string, unknown> = {};
+    const { container, calls } = runnerHarness({ running: true, health });
+    await container.bindStandbySlot(claimInput());
+    vi.mocked(commandHostedRuntimeOwner).mockImplementationOnce(async () => {
+      Object.assign(health, change === "jobs"
+        ? { activeJobCount: 1 } : { conversationActivityReceivedAtEpochMs: Date.now() });
+      return { cutover: "postgres", status: "observed", owner: owner("idle") };
+    });
+    await container.onActivityExpired();
+    assert.equal(vi.mocked(commandHostedRuntimeOwner).mock.calls.length, 1);
+    assert.equal(calls.fetch, 2);
+    assert.equal(calls.destroy, 0);
+    assert.equal((await container.listSchedules("onActivityExpired")).length, 1);
+  });
+
+  it.each([false, true])("preserves admitted startup between readiness and launch (reactivated=%s)", async (reactivated) => {
+    const initial = runnerHarness({ running: true });
+    await initial.container.prepareStandbySlot({ releaseId: RELEASE, region: HOSTED_RUNNER_REGION, slotName: GLOBAL_SLOT, timeoutMs: 1_000 });
+    await initial.container.bindStandbySlot(claimInput());
+    await initial.container.ensureReadyForProcessing({ userId: MEMBER, timeoutMs: 1_000 });
+    vi.mocked(commandHostedRuntimeOwner).mockResolvedValue({ cutover: "postgres", status: "observed", owner: owner("starting") });
+    const { container, calls } = reactivated ? runnerHarness({ running: true, durable: initial }) : initial;
+    await container.onActivityExpired();
+    assert.equal(calls.destroy, 0);
+    assert.equal((await container.readStandbySlotBinding()).state, "bound");
+    assert.equal((await container.listSchedules("onActivityExpired")).length, 1);
+    await container.ensureReadyForProcessing({ userId: MEMBER, timeoutMs: 1_000 });
+    assert.equal(calls.start, 0);
+    vi.mocked(commandHostedRuntimeOwner).mockResolvedValue({ cutover: "postgres", status: "observed", owner: owner("idle") });
+    await container.onActivityExpired();
+    assert.equal(calls.destroy, 1);
+    assert.equal((await container.readStandbySlotBinding()).state, "retired");
+  });
+
+  it.each(["active", "retiring"] as const)("preserves an exact %s owner without local work", async (phase) => {
+    const { container, calls } = runnerHarness({ running: true });
+    await container.bindStandbySlot(claimInput());
+    vi.mocked(commandHostedRuntimeOwner).mockResolvedValue({ cutover: "postgres", status: "observed", owner: owner(phase) });
+    await container.onActivityExpired();
+    assert.equal(calls.destroy, 0);
+  });
+
+  it.each([[false, false], [true, false], [false, true], [true, true]])(
+    "releases a completed lost outer result without another wake (reactivated=%s, warm=%s)", async (reactivated, warm) => {
+    const health = warm ? { conversationActivityReceivedAtEpochMs: Date.now() } : {};
+    const initial = runnerHarness({ running: true, health });
+    await initial.container.bindStandbySlot(claimInput());
+    const current = { ...owner("retiring"), completedAt: new Date().toISOString() };
+    const receipt = new RunnerInvocationReceiptStore(initial.sql);
+    const identity = { attemptId: current.attemptId!, generation: current.generation };
+    receipt.register(identity);
+    receipt.complete(identity, false);
+    vi.mocked(commandHostedRuntimeOwner).mockImplementation(async ({ command }) => {
+      if (command.operation === "complete") {
+        assert.deepEqual(command, { operation: "complete", ...identity,
+          settledRunnerContainerName: GLOBAL_SLOT, immediateRecheckRequested: false });
+        current.phase = "idle";
+        return { cutover: "postgres", status: "updated", owner: null };
+      }
+      return { cutover: "postgres", status: "observed", owner: current };
+    });
+    const { container, calls } = reactivated ? runnerHarness({ running: true, durable: initial, health }) : initial;
+    await container.onActivityExpired();
+    assert.equal(current.phase, "idle");
+    assert.equal(calls.destroy, 0);
+    assert.equal((await container.listSchedules("onActivityExpired")).length, 1);
+    await container.onActivityExpired();
+    assert.equal(calls.destroy, warm ? 0 : 1);
+  });
+
+  it.each([false, true])("retries lost-result recovery before warmth expires (reactivated=%s)", async (reactivated) => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const now = Date.parse("2026-10-20T12:00:00Z");
+      vi.setSystemTime(now);
+      const health = { conversationActivityReceivedAtEpochMs: now };
+      const initial = runnerHarness({ running: true, health });
+      await initial.container.bindStandbySlot(claimInput());
+      const current = { ...owner("retiring"), completedAt: new Date().toISOString() };
+      const receipt = new RunnerInvocationReceiptStore(initial.sql);
+      const identity = { attemptId: current.attemptId!, generation: current.generation };
+      receipt.register(identity);
+      receipt.complete(identity, false);
+      let completionCalls = 0;
+      vi.mocked(commandHostedRuntimeOwner).mockImplementation(async ({ command }) => {
+        if (command.operation === "complete") {
+          completionCalls++;
+          throw new Error("synthetic unavailable completion");
+        }
+        return { cutover: "postgres", status: "observed", owner: current };
+      });
+      const { container, calls } = reactivated
+        ? runnerHarness({ running: true, durable: initial, health }) : initial;
+      for (const elapsed of [0, 60_000]) {
+        vi.setSystemTime(now + elapsed);
+        await container.onActivityExpired();
+        assert.equal(completionCalls, elapsed / 60_000 + 1);
+        assert.equal(calls.destroy, 0);
+        assert.deepEqual((await container.listSchedules("onActivityExpired")).map(s => s.time),
+          [(now + elapsed + 60_000) / 1_000]);
+      }
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it.each(["registered", "wrong-attempt", "wrong-generation", "active", "unknown", "failed-completion", "successor"] as const)(
+    "preserves native authority during lost-result recovery: %s", async (condition) => {
+      const h = runnerHarness({ running: true,
+        health: condition === "active" ? { activeJobCount: 1 } : {},
+        fetchHealth: condition === "unknown" ? async () => { throw new Error("synthetic unavailable health"); } : undefined,
+      });
+      await h.container.bindStandbySlot(claimInput());
+      const current = { ...owner("retiring"), completedAt: new Date().toISOString() };
+      const receipt = new RunnerInvocationReceiptStore(h.sql);
+      const identity = { attemptId: condition === "wrong-attempt" ? "other-attempt" : current.attemptId!,
+        generation: condition === "wrong-generation" ? "2" : current.generation };
+      receipt.register(identity);
+      if (condition !== "registered") receipt.complete(identity, true);
+      let completionCalls = 0;
+      vi.mocked(commandHostedRuntimeOwner).mockImplementation(async ({ command }) => {
+        if (command.operation === "complete") {
+          completionCalls++;
+          if (condition === "failed-completion") throw new Error("synthetic unavailable completion");
+          assert.equal(condition, "successor");
+          current.attemptId = "successor-attempt";
+          current.generation = "2";
+          current.phase = "starting";
+          return { cutover: "postgres", status: "stale", owner: null };
+        }
+        return { cutover: "postgres", status: "observed", owner: current };
+      });
+      await h.container.onActivityExpired();
+      assert.equal(completionCalls, ["failed-completion", "successor"].includes(condition) ? 1 : 0);
+      if (condition === "successor") {
+        await h.container.onActivityExpired();
+        assert.equal(completionCalls, 1);
+      }
+      assert.equal(h.calls.destroy, 0);
+      assert.equal((await h.container.listSchedules("onActivityExpired")).length, 1);
+    },
+  );
+
+  it("does not block arriving readiness on an idle owner read or apply its stale cleanup", async () => {
+    const { container, calls } = runnerHarness({ running: true });
+    await container.bindStandbySlot(claimInput());
+    const entered = deferred<void>();
+    const response = deferred<Awaited<ReturnType<typeof commandHostedRuntimeOwner>>>();
+    vi.mocked(commandHostedRuntimeOwner).mockImplementationOnce(() => { entered.resolve(); return response.promise; });
+    const expiry = container.onActivityExpired();
+    await entered.promise;
+    // Must finish while the control read is still unresolved.
+    await container.ensureReadyForProcessing({ userId: MEMBER, timeoutMs: 1_000 });
+    response.resolve({ cutover: "postgres", status: "observed", owner: owner("idle") });
+    await expiry;
+    assert.equal(calls.destroy, 0);
+    assert.equal(calls.start, 0);
+  });
+
+  it("does not let a different target retain an obsolete shell", async () => {
+    const { container, calls } = runnerHarness({ running: true });
+    await container.bindStandbySlot(claimInput());
+    vi.mocked(commandHostedRuntimeOwner).mockResolvedValue({ cutover: "postgres", status: "observed", owner: owner("starting", createHostedRunnerSlotName(RELEASE)) });
+    await container.onActivityExpired();
+    assert.equal(calls.destroy, 1);
+  });
+
+  it.each(["unavailable", "legacy", "draining"] as const)("keeps the scheduled retry when ownership is %s", async (outcome) => {
+    const { container, calls } = runnerHarness({ running: true });
+    await container.bindStandbySlot(claimInput());
+    if (outcome === "unavailable") vi.mocked(commandHostedRuntimeOwner).mockRejectedValue(new Error("synthetic control timeout"));
+    else vi.mocked(commandHostedRuntimeOwner).mockResolvedValue({ cutover: outcome, status: "observed", owner: null });
+    await container.onActivityExpired();
+    assert.equal(calls.destroy, 0);
+    assert.equal((await container.listSchedules("onActivityExpired")).length, 1);
   });
 });
 

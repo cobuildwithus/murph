@@ -8,7 +8,9 @@ import {
 } from '../src/assistant-codex/dynamic-tools.ts'
 import {
   MURPH_GENERATE_VOICE_MEMO_TOOL,
+  parseGenerateVoiceMemoArguments,
 } from '../src/assistant-codex/dynamic-tools/generate-voice-memo.ts'
+import { resolveMurphDynamicTools } from '../src/assistant-codex/dynamic-tool-catalog.ts'
 import type {
   VoiceMemoToolRuntime,
 } from '../src/assistant-codex/generate-voice-memo-tool.ts'
@@ -33,6 +35,30 @@ function createLinqRuntime(
 }
 
 describe('murph.generate_voice_memo dynamic tool execution', () => {
+  it('advertises expressive cues only for an available v4 voice tool and preserves cue text', () => {
+    for (const modelId of ['eleven_v4', 'eleven_multilingual_v2', undefined]) {
+      const tool = resolveMurphDynamicTools({
+        voiceMemoGenerationAvailable: true,
+        voiceMemoModelId: modelId,
+      }).find((candidate) => candidate.name === 'generate_voice_memo')!
+      const schema = JSON.stringify(tool.inputSchema)
+      expect(schema.includes('[yawning]')).toBe(modelId === 'eleven_v4')
+      expect(schema.includes('without bracketed audio directions')).toBe(modelId !== 'eleven_v4')
+      expect(tool.description).toContain('The voice configured for the running turn is authoritative')
+      expect(schema).toContain("Write the spoken text in the user's requested language")
+      expect(schema).toContain('Language choice never authorizes a voice change or personal memory access outside a private conversation')
+      expect(tool.inputSchema).toMatchObject({
+        properties: { text: { maxLength: ELEVENLABS_TTS_MAX_TEXT_LENGTH } },
+      })
+    }
+    expect(resolveMurphDynamicTools({ voiceMemoModelId: 'eleven_v4' })
+      .some((tool) => tool.name === 'generate_voice_memo')).toBe(false)
+    expect(parseGenerateVoiceMemoArguments({ text: '[yawning] Time to wind down.' })).toEqual({
+      ok: true,
+      args: { text: '[yawning] Time to wind down.', userRequestedVoiceOptionId: null },
+    })
+  })
+
   it('keeps accompanying text optional and non-duplicative in the model-visible contract', () => {
     expect(ELEVENLABS_TTS_MAX_TEXT_LENGTH).toBe(1_000)
     expect(MURPH_GENERATE_VOICE_MEMO_TOOL.inputSchema.properties.text.maxLength).toBe(

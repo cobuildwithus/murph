@@ -107,7 +107,6 @@ apps/cloudflare/.deploy
 research-artifacts/
 source-artifacts/
 scripts/murph-age/
-artifacts/exercise-replacement-images/
 
 # Private founder strategy docs & assets — local only, never published
 agent-docs/product-ideas.md
@@ -120,3 +119,9 @@ agent-docs/product-ideas.md
 
 # graft's local graph cache — regenerable, not committed (run `graft build`).
 /graft/
+
+# Local task prompts, downloads, artifacts, and scratch tooling
+/.codex-prompts/
+/downloads/
+/artifacts/
+/scratch-*.mjs

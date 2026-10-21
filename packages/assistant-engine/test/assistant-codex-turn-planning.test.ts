@@ -1,3 +1,4 @@
+import { MURPH_WEEKLY_USAGE_OPTIMIZER_AUTOMATION_ID } from '../src/assistant/managed-automation-ids.js'
 import { createHash } from 'node:crypto'
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
@@ -358,6 +359,32 @@ describe('assistant Codex turn planning', () => {
         }),
       }),
     }
+    // Preserve the weekly audit rule alongside the runtime's wiki guidance;
+    // the complete-plan fingerprints below characterize their composition.
+    for (const plan of [plans.direct, plans.group, plans.scheduledEmail]) {
+      for (const instructions of [plan.systemPrompt, plan.developerInstructions]) {
+        expect(instructions).toContain(
+          'A scheduled usage audit instead reports available evidence and coverage limits without asking a question.',
+        )
+      }
+    }
+    for (const plan of [plans.direct, plans.scheduledEmail]) {
+      for (const instructions of [plan.systemPrompt, plan.developerInstructions]) {
+        expect(instructions).toContain('vault-cli knowledge show <slug> --format json')
+        expect(instructions).toContain('start from exact supplied page references')
+        expect(instructions).toContain(
+          'let the child do this discovery instead of first loading the index and page bodies in root',
+        )
+        expect(instructions).not.toContain(
+          'For wiki work, use `vault-cli knowledge ...` directly in this turn.',
+        )
+        expect(instructions).toContain('`vault-cli knowledge upsert --slug <slug> --body <markdown>`')
+        expect(instructions).not.toContain('dedicated knowledge write surface')
+      }
+    }
+    for (const instructions of [plans.group.systemPrompt, plans.group.developerInstructions]) {
+      expect(instructions).not.toContain('knowledge upsert')
+    }
     const digestPlan = (
       plan: Awaited<ReturnType<typeof resolveAssistantRouteTurnPlan>>,
     ) => {
@@ -420,11 +447,11 @@ describe('assistant Codex turn planning', () => {
       Object.entries(plans).map(([name, plan]) => [name, digestPlan(plan)]),
     )).toMatchInlineSnapshot(`
       {
-        "direct": "7c039c87cb6ddee6e3edbc0bae5a419f726857a7f9a6231e9d2964973d5a58fc",
-        "group": "9636c727f7975ea72c0caf2b80ff473dd1ea7e24347482830943a74740755281",
-        "maintenance": "4c439dbf05ccb6d2cd7540b1ef7f94c99e898afd9b9658abefa860a8b421ca55",
-        "outputOnly": "a83a04afea06e5290de36b14a0fee5d18970077a8294dde129b2e2dfa99116b4",
-        "scheduledEmail": "ec44aaf5882a1171a1528110d8fdacc1ad4787bf90fb0e08706272147bd25f75",
+        "direct": "d83bf06632833487f786e1511efea7010256d131ed29e82016e8a70bea76559b",
+        "group": "f6c26d45dce6890d0161947fcc10c801913a5c4ecc4fca2a1d5d1d22578fbcaa",
+        "maintenance": "4def8e201c9fe004f9f60f5ac3ec5ecf084f63f7bc5c70e1a6409107487300be",
+        "outputOnly": "7f13d7195b8e231e1fba2e5bd5e91437b30756cd8fcf763edd47fe27de6f7d6e",
+        "scheduledEmail": "48f99877a27d2904c7df1b25c66529b9ccbb6a0edec3db804934532100cb6263",
       }
     `)
   })
@@ -479,6 +506,8 @@ describe('assistant Codex turn planning', () => {
     expect(planningMocks.readAssistantContextSnapshotPrompt)
       .toHaveBeenCalledTimes(1)
     expect(directPlan.systemPrompt).toContain('VALUE_FREE_DEGRADED_SNAPSHOT')
+    expect(directPlan.systemPrompt).toContain('Follow relevant saved answer formats; offer at most one optional follow-up.')
+    expect(directPlan.systemPrompt).not.toContain('and offer at most one useful next step.')
 
     planningMocks.refreshAssistantContextSnapshotBestEffort.mockClear()
     planningMocks.readAssistantContextSnapshotPrompt.mockClear()
@@ -923,7 +952,7 @@ describe('assistant Codex turn planning', () => {
           vault,
         },
         preferenceContext: {
-          assistantPersona: 'navy-seal',
+          assistantPersona: 'classic',
           assistantPersonality: {
             detail: 10,
             humor: 10,
@@ -958,7 +987,7 @@ describe('assistant Codex turn planning', () => {
       expect(plan.systemPrompt).toContain('output-only turn')
       expect(plan.systemPrompt).not.toContain('CLI bootstrap')
       expect(plan.systemPrompt).not.toContain('Hosted tool guidance')
-      expect(plan.systemPrompt).not.toContain('Be direct, disciplined, and accountable.')
+      expect(plan.systemPrompt).not.toContain('Stay balanced, warm, capable, and adaptable.')
       expect(plan.systemPrompt).not.toContain('Assistant personality preferences')
       expect(plan.systemPrompt).not.toContain('Assistant tone preference:')
       expect(plan.turnContextPrompt).toContain('current mobility prescription')
@@ -998,7 +1027,7 @@ describe('assistant Codex turn planning', () => {
           vault,
         },
         preferenceContext: {
-          assistantPersona: 'navy-seal',
+          assistantPersona: 'classic',
           assistantPersonality: {
             detail: 10,
             humor: 10,
@@ -1087,7 +1116,7 @@ describe('assistant Codex turn planning', () => {
           vault,
         },
         preferenceContext: {
-          assistantPersona: 'navy-seal',
+          assistantPersona: 'classic',
           assistantPersonality: {
             detail: 10,
             humor: 10,
@@ -1129,7 +1158,7 @@ describe('assistant Codex turn planning', () => {
       expect(plan.systemPrompt).not.toContain('PRIVATE_CONTEXT_SNAPSHOT')
       expect(plan.systemPrompt).not.toContain('PRIVATE_HOSTED_CONTEXT')
       expect(plan.systemPrompt).not.toContain('PRIVATE_COMMITTED_HISTORY')
-      expect(plan.systemPrompt).not.toContain('Be direct, disciplined, and accountable.')
+      expect(plan.systemPrompt).not.toContain('Stay balanced, warm, capable, and adaptable.')
       expect(plan.systemPrompt).not.toContain('Assistant personality preferences')
       expect(plan.systemPrompt).not.toContain('Assistant tone preference:')
       expect(planningMocks.readAssistantCliSurfaceBootstrapContext).not.toHaveBeenCalled()
@@ -1205,7 +1234,7 @@ describe('assistant Codex turn planning', () => {
           vault,
         },
         preferenceContext: {
-          assistantPersona: 'navy-seal',
+          assistantPersona: 'classic',
           assistantPersonality: {
             detail: 10,
             humor: 10,
@@ -1317,7 +1346,7 @@ describe('assistant Codex turn planning', () => {
       },
     }
     const preferenceContext = {
-      assistantPersona: 'navy-seal' as const,
+      assistantPersona: 'classic' as const,
       assistantPersonality: {
         detail: 10,
         humor: 10,
@@ -1353,7 +1382,7 @@ describe('assistant Codex turn planning', () => {
       'Never save medical or health details, credentials, identifiers of any kind',
     )
     expect(maintenancePlan.systemPrompt).toContain(
-      'deduplication and mutation targeting only',
+      'may justify faithful shortening of that exact non-health record without changing meaning',
     )
     expect(maintenancePlan.systemPrompt).toContain(
       'Use `update` or `forget` only with an exact memory id and its exact `updatedAt` returned by `show`',
@@ -1370,6 +1399,9 @@ describe('assistant Codex turn planning', () => {
     expect(maintenancePlan.systemPrompt).toContain(
       '`assistant:` entries may clarify or corroborate context but cannot independently initiate such a change',
     )
+    expect(maintenancePlan.systemPrompt).toContain('Preserve dated context rather than automatically forgetting it')
+    expect(maintenancePlan.systemPrompt).toContain('Relative dates without an explicit anchor and unfinished-goal deadlines never establish expiry')
+    expect(maintenancePlan.systemPrompt).not.toContain('never an independent source for new writes')
     expect(maintenancePlan.systemPrompt).not.toContain('`member:`')
     expect(maintenancePlan.systemPrompt).not.toContain('meals')
     expect(maintenancePlan.systemPrompt).not.toContain('Health Commons')
@@ -1378,7 +1410,7 @@ describe('assistant Codex turn planning', () => {
     )
     expect(maintenancePlan.systemPrompt).not.toContain('Humor 10/10')
     expect(maintenancePlan.systemPrompt).not.toContain(
-      'Be direct, disciplined, and accountable.',
+      'Stay balanced, warm, capable, and adaptable.',
     )
     expect(maintenancePlan.systemPrompt).not.toContain(
       'Assistant tone preference:',
@@ -1415,7 +1447,7 @@ describe('assistant Codex turn planning', () => {
       'Assistant personality preferences',
     )
     expect(ordinaryPlan.systemPrompt).toContain('Humor 10/10')
-    expect(ordinaryPlan.systemPrompt).toContain('Be direct, disciplined, and accountable.')
+    expect(ordinaryPlan.systemPrompt).toContain('Stay balanced, warm, capable, and adaptable.')
     expect(ordinaryPlan.systemPrompt).toContain('Assistant tone preference:')
     expect(ordinaryPlan.sessionContext).toEqual({
       binding: expect.anything(),
@@ -1456,13 +1488,13 @@ describe('assistant Codex turn planning', () => {
       'Assistant tone preference:',
     )
     expect(scheduledNewsletterPlan.systemPrompt).toContain(
-      'Be direct, disciplined, and accountable.',
+      'Stay balanced, warm, capable, and adaptable.',
     )
     expect(scheduledNewsletterPlan.systemPrompt).toContain('Humor 10/10')
     expect(scheduledNewsletterPlan.systemPrompt).toContain('Push 10/10')
     expect(scheduledNewsletterPlan.systemPrompt).toContain('Detail 10/10')
     expect(scheduledNewsletterPlan.assistantPreferredElevenLabsVoiceId).toBe(
-      resolveAssistantVoiceOptionElevenLabsVoiceId('drill-sergeant'),
+      resolveAssistantVoiceOptionElevenLabsVoiceId('upbeat'),
     )
     expect(scheduledNewsletterPlan.dynamicTools.map((tool) => tool.name)).toEqual(
       ordinaryToolNames.filter((name) =>
@@ -2264,7 +2296,7 @@ describe('assistant Codex turn planning', () => {
     const personaPlan = await resolveAssistantRouteTurnPlan({
       ...common,
       preferenceContext: {
-        assistantPersona: 'navy-seal',
+        assistantPersona: 'classic',
         assistantPersonality: null,
         assistantTone: null,
         assistantVoice: null,
@@ -2284,11 +2316,11 @@ describe('assistant Codex turn planning', () => {
       baseline.assistantContractFingerprint,
     )
     expect(personaPlan.developerInstructions).toContain(
-      'Be direct, disciplined, and accountable.',
+      'Stay balanced, warm, capable, and adaptable.',
     )
-    expect(personaPlan.developerInstructions).toContain('Humor 1/10')
-    expect(personaPlan.developerInstructions).toContain('Push 10/10')
-    expect(personaPlan.developerInstructions).toContain('Detail 2/10')
+    expect(personaPlan.developerInstructions).toContain('Humor 3/10')
+    expect(personaPlan.developerInstructions).toContain('Push 3/10')
+    expect(personaPlan.developerInstructions).toContain('Detail 5/10')
     // A persona never contributes an Unhinged band: the member here saved no
     // Unhinged preference, so the sparse thread contract renders no band.
     // (The reusable style-settings guidance still names the Unhinged dial.)
@@ -2297,13 +2329,13 @@ describe('assistant Codex turn planning', () => {
       'Assistant tone preference:',
     )
     expect(personaPlan.assistantPreferredElevenLabsVoiceId).toBe(
-      resolveAssistantVoiceOptionElevenLabsVoiceId('drill-sergeant'),
+      resolveAssistantVoiceOptionElevenLabsVoiceId('upbeat'),
     )
 
     const staleVoicePlan = await resolveAssistantRouteTurnPlan({
       ...common,
       preferenceContext: {
-        assistantPersona: 'navy-seal',
+        assistantPersona: 'classic',
         assistantPersonality: null,
         assistantTone: null,
         assistantVoice: 'stale-roster-id',
@@ -4195,6 +4227,7 @@ describe('assistant Codex turn planning', () => {
           progressUpdatesAvailable: false,
           responseCardsAvailable: true,
           voiceMemoGenerationAvailable: plan.voiceMemoDeliveryChannel !== null,
+          voiceMemoModelId: 'eleven_v4',
         }),
         routeFingerprint: route.routeFingerprint ?? route.routeId,
       }),
@@ -4412,6 +4445,39 @@ describe('assistant Codex turn planning', () => {
     )
   })
 
+  it.each([true, false])('grants anonymous scheduled feedback only to the exact weekly optimizer (%s)', async (optimizer) => {
+    planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
+    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({ supportsNativeResume: false })
+    const occurrenceAt = '2026-10-05T04:00:00.000Z'
+    const plan = await resolveAssistantRouteTurnPlan({
+      executionContext: { hosted: { memberId: 'synthetic-member', userEnvKeys: [],
+        productFeedbackCandidateSink: { acceptProductFeedbackCandidate: vi.fn() } } },
+      input: { ...createMessageInput(), turnTrigger: 'automation-cron', scheduledOccurrenceAt: occurrenceAt,
+        scheduledInvocationAuthority: { automationId: optimizer ? MURPH_WEEKLY_USAGE_OPTIMIZER_AUTOMATION_ID : 'automation_other', occurrenceAt } },
+      profile: { promptProfile: 'conversation', threadScope: 'isolated-thread', toolProfile: 'provider-turn' },
+      promptTimeContext: { currentLocalDate: '2026-10-05', currentTimeZone: 'UTC' },
+      route: createRoute(), session: createSession(), sharedPlan: createPrivateSharedPlan(),
+    })
+    expect(plan.dynamicTools.some(tool => tool.name === 'submit_product_feedback')).toBe(optimizer)
+  })
+
+  it.each([true, false])('offers usage diagnostics in a private turn only with a port (%s)', async (available) => {
+    planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
+    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({ supportsNativeResume: false })
+    const plan = await resolveAssistantRouteTurnPlan({
+      executionContext: null,
+      hostedToolContext: { ...createHostedToolContext(),
+        usageDiagnostics: available ? { read: vi.fn() } : null },
+      input: createMessageInput(),
+      profile: { promptProfile: 'conversation', threadScope: 'session-thread', toolProfile: 'provider-turn' },
+      promptTimeContext: { currentLocalDate: '2026-07-18', currentTimeZone: 'America/New_York' },
+      route: createRoute(), session: createSession(), sharedPlan: createPrivateSharedPlan(),
+    })
+    expect(plan.dynamicTools.some((tool) => tool.name === 'usage_diagnostics')).toBe(available)
+  })
+
   it('derives a group-scoped prompt and tool surface from the audience', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
@@ -4430,6 +4496,7 @@ describe('assistant Codex turn planning', () => {
       groupEmailEffect: { request: vi.fn() },
       personalizationTool: { request: vi.fn() },
       planUsageTool: { read: vi.fn() },
+      usageDiagnostics: { read: vi.fn() },
       phoneCalls: { start: vi.fn() },
       subscriptionTool: { request: vi.fn() },
     }
@@ -4473,7 +4540,7 @@ describe('assistant Codex turn planning', () => {
     const plan = await resolveAssistantRouteTurnPlan({
       ...groupPlanInput,
       preferenceContext: {
-        assistantPersona: 'scientist-with-classic',
+        assistantPersona: 'classic',
         assistantPersonality: {
           humor: 9,
         },
@@ -4494,10 +4561,10 @@ describe('assistant Codex turn planning', () => {
       'Assistant personality preferences for this group room:',
     )
     expect(plan.developerInstructions).toContain('Humor 9/10')
-    expect(plan.developerInstructions).toContain('Push 4/10')
-    expect(plan.developerInstructions).toContain('Detail 9/10')
+    expect(plan.developerInstructions).toContain('Push 3/10')
+    expect(plan.developerInstructions).toContain('Detail 5/10')
     expect(plan.developerInstructions).toContain(
-      'Lead with rigorous curiosity and calibrated evidence, while keeping the explanation warm, balanced, and easy to use.',
+      'Stay balanced, warm, capable, and adaptable.',
     )
     expect(plan.developerInstructions).toContain(
       'Casual is a persistent user-facing writing invariant',
@@ -4526,17 +4593,17 @@ describe('assistant Codex turn planning', () => {
     const personaDefaultPlan = await resolveAssistantRouteTurnPlan({
       ...groupPlanInput,
       preferenceContext: {
-        assistantPersona: 'hype-coach',
+        assistantPersona: 'classic',
         assistantPersonality: null,
         assistantTone: null,
         assistantVoice: null,
       },
     })
     expect(personaDefaultPlan.developerInstructions).toContain(
-      'Casual is a persistent user-facing writing invariant',
+      'Formal is the default and a persistent user-facing writing invariant',
     )
     expect(personaDefaultPlan.assistantPreferredElevenLabsVoiceId).toBe(
-      resolveAssistantVoiceOptionElevenLabsVoiceId('football-announcer'),
+      resolveAssistantVoiceOptionElevenLabsVoiceId('upbeat'),
     )
     expect(plan.developerInstructions).not.toContain('Hosted wearable connection links are available')
     expect(plan.developerInstructions).toContain(
@@ -4596,7 +4663,7 @@ describe('assistant Codex turn planning', () => {
       'synthetic Murph instance for this room',
     )
     expect(groupAssistantConfigurationTool?.description).toContain(
-      'Luna, Terra, or Sol may be selected',
+      'Luna or Sol may be selected',
     )
     const groupAssistantConfigurationSchema = JSON.stringify(
       groupAssistantConfigurationTool?.inputSchema,
@@ -4612,6 +4679,7 @@ describe('assistant Codex turn planning', () => {
       'labs',
       'pending_vault_files',
       'plan_usage',
+      'usage_diagnostics',
       'send_vault_file',
       'subscription',
     ]) {
@@ -5012,6 +5080,27 @@ describe('assistant Codex turn planning', () => {
         'stop_phone_call',
       ]),
     )
+  })
+
+  it.each([
+    ['linq', true, true, false, true],
+    ['linq', false, true, false, false],
+    ['telegram', true, true, false, false],
+    ['email', true, true, false, false],
+    ['linq', true, false, false, false],
+    ['linq', true, true, true, false],
+  ] as const)('gates sender contact for %s direct=%s hosted=%s scheduled=%s', async (channel, threadIsDirect, hosted, scheduled, available) => {
+    const plan = await resolveAssistantRouteTurnPlan({
+      acceptedInputItems: scheduled ? [] : [{ id: `ain_${'d'.repeat(32)}`, source: 'assistant-input' }],
+      executionContext: hosted ? { hosted: { memberId: 'synthetic-contact-member', userEnvKeys: [] } } : null,
+      hostedToolContext: hosted ? createHostedToolContext() : null,
+      input: { ...createMessageInput(), channel, threadIsDirect, turnTrigger: scheduled ? 'automation-cron' : 'automation-auto-reply' },
+      profile: { promptProfile: 'conversation', threadScope: 'session-thread', toolProfile: 'provider-turn' },
+      promptTimeContext: { currentLocalDate: '2030-04-01', currentTimeZone: 'America/New_York' },
+      route: createRoute(), session: createSession(),
+      sharedPlan: createSharedPlan({}, { channel, threadIsDirect, threadId: 'synthetic-contact-thread' }),
+    })
+    expect(plan.dynamicTools.some(tool => tool.name === 'get_sender_contact')).toBe(available)
   })
 
   it.each([
@@ -7932,7 +8021,7 @@ describe('assistant Codex turn planning', () => {
         executionContext: null,
         input: {
           ...createMessageInput(),
-          model: 'gpt-5.6-terra',
+          model: 'gpt-6.1-sol',
           prompt: 'Use medium reasoning now.',
           vault,
         },

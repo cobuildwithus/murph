@@ -8,33 +8,29 @@ export const CLOUDFLARE_HOSTED_CONTROL_MEAL_PHOTO_KEY_HEADER =
   "x-murph-meal-photo-key";
 export const CLOUDFLARE_HOSTED_CONTROL_MEAL_PHOTO_SHA256_HEADER =
   "x-murph-meal-photo-sha256";
-export const CLOUDFLARE_HOSTED_CONTROL_ENVIRONMENT_VOICE_CAPTURE_ID_HEADER =
-  "x-murph-environment-voice-capture-id";
-export const CLOUDFLARE_HOSTED_CONTROL_ENVIRONMENT_VOICE_KEY_HEADER =
-  "x-murph-environment-voice-key";
-export const CLOUDFLARE_HOSTED_CONTROL_ENVIRONMENT_VOICE_SHA256_HEADER =
-  "x-murph-environment-voice-sha256";
-
+/** A weekly game photo's own name: `<sha256 of the plaintext>.<jpg|heic>`. */
+export const CLOUDFLARE_HOSTED_CONTROL_GAME_MEDIA_ID_HEADER =
+  "x-murph-game-media-id";
 export const CLOUDFLARE_HOSTED_CONTROL_USER_ROUTE_SPECS = {
   browserVaultSession: {
     method: "POST",
     suffix: "browser-vault/session",
   },
-  environmentVoiceStage: {
-    method: "POST",
-    suffix: "environment-voice/stage",
-  },
-  environmentVoiceDelete: {
+  gameMediaDelete: {
     method: "DELETE",
-    suffix: "environment-voice/delete",
+    suffix: "game-media/delete",
   },
-  environmentRealtimeCall: {
-    method: "POST",
-    suffix: "environment-realtime/call",
+  gameMediaRead: {
+    method: "GET",
+    suffix: "game-media/read",
   },
-  inferenceVerification: {
+  gameMediaStage: {
     method: "POST",
-    suffix: "inference/verify",
+    suffix: "game-media/stage",
+  },
+  gameMediaStat: {
+    method: "GET",
+    suffix: "game-media/stat",
   },
   mealPhotoStage: {
     method: "POST",
@@ -47,6 +43,10 @@ export const CLOUDFLARE_HOSTED_CONTROL_USER_ROUTE_SPECS = {
   runtimeEnsureProcessing: {
     method: "POST",
     suffix: "runtime/ensure-processing",
+  },
+  voiceControl: {
+    method: "POST",
+    suffix: "runtime/voice",
   },
   runtimeHealthDataConsentReconcile: {
     method: "POST",
@@ -83,15 +83,6 @@ export function buildCloudflareHostedControlUserStatusPath(userId: string): stri
   return buildCloudflareHostedControlUserRoutePath("status", userId);
 }
 
-export function buildCloudflareHostedControlInferenceVerificationPath(
-  userId: string,
-): string {
-  return buildCloudflareHostedControlUserRoutePath(
-    "inferenceVerification",
-    userId,
-  );
-}
-
 export function buildCloudflareHostedControlRuntimeEnsureProcessingPath(userId: string): string {
   return buildCloudflareHostedControlUserRoutePath("runtimeEnsureProcessing", userId);
 }
@@ -103,6 +94,10 @@ export function buildCloudflareHostedControlRuntimeHealthDataConsentPath(
     "runtimeHealthDataConsentReconcile",
     userId,
   );
+}
+
+export function buildCloudflareHostedControlVoiceControlPath(userId: string): string {
+  return buildCloudflareHostedControlUserRoutePath("voiceControl", userId);
 }
 
 export function buildCloudflareHostedControlTelegramUsageLimitNoticePath(userId: string): string {
@@ -125,31 +120,11 @@ export function buildCloudflareHostedControlMealPhotoDeletePath(userId: string):
   return buildCloudflareHostedControlUserRoutePath("mealPhotoDelete", userId);
 }
 
-export function buildCloudflareHostedControlEnvironmentVoiceStagePath(
+export function buildCloudflareHostedControlGameMediaPath(
+  routeName: "gameMediaDelete" | "gameMediaRead" | "gameMediaStage" | "gameMediaStat",
   userId: string,
 ): string {
-  return buildCloudflareHostedControlUserRoutePath(
-    "environmentVoiceStage",
-    userId,
-  );
-}
-
-export function buildCloudflareHostedControlEnvironmentVoiceDeletePath(
-  userId: string,
-): string {
-  return buildCloudflareHostedControlUserRoutePath(
-    "environmentVoiceDelete",
-    userId,
-  );
-}
-
-export function buildCloudflareHostedControlEnvironmentRealtimeCallPath(
-  userId: string,
-): string {
-  return buildCloudflareHostedControlUserRoutePath(
-    "environmentRealtimeCall",
-    userId,
-  );
+  return buildCloudflareHostedControlUserRoutePath(routeName, userId);
 }
 
 export function matchCloudflareHostedControlUserRoutePath(

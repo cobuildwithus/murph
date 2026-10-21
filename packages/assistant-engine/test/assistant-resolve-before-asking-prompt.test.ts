@@ -25,6 +25,22 @@ function buildPrompt(conversationScope: AssistantConversationScope): string {
 }
 
 describe('assistant resolve-before-asking guidance', () => {
+  it('learns voice language through private canonical memory without changing voice or audience authority', () => {
+    const direct = buildPrompt('direct')
+    expect(direct).toContain("Match replies, including voice memo text, to the user's conversational language")
+    expect(direct).toContain('An explicit language request wins; otherwise honor an explicit saved language preference')
+    expect(direct).toContain('proactively remember a clearly established conversational language')
+    expect(direct).toContain('through canonical `vault-cli memory` in this turn, even if replying in text')
+    expect(direct).toContain('update the existing language note rather than duplicating it, and skip unchanged writes')
+    expect(direct).toContain('A quotation, translation exercise, isolated foreign word, or one-off language request is not a new default')
+    expect(direct).toContain('Honor memory opt-outs')
+    expect(direct).toContain('One substantive user message in that language is sufficient; do not wait for a request to remember it')
+    expect(direct).toContain('A language change never changes the saved voice or makes voice output welcome by itself')
+    for (const scope of ['group', 'unverified-external'] as const) {
+      expect(buildPrompt(scope)).not.toContain('proactively remember a clearly established conversational language')
+    }
+  })
+
   it('keeps direct resolution in the canonical turn-priority policy', () => {
     const prompt = buildPrompt('direct')
 

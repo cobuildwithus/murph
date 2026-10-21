@@ -1058,6 +1058,48 @@ test('linq runtime sends a terminal payment URL as a separate rich-link message'
   ])
 })
 
+test('linq runtime sends each X post link in a reply once', async () => {
+  const env = {
+    LINQ_API_BASE_URL: 'https://linq.example.test',
+    LINQ_API_TOKEN: 'linq-token',
+  } satisfies NodeJS.ProcessEnv
+  const coachPost = 'https://x.com/synthetic_coach/status/2100000000000000001'
+  const runnerPost = 'https://x.com/synthetic_runner/status/2100000000000000002'
+  for (const [message, expectedParts] of [
+    [
+      `The screenshot shows a short greeting, then hydration advice.\n\n${coachPost}`,
+      ['The screenshot shows a short greeting, then hydration advice.', coachPost],
+    ],
+    [
+      `The first video shows a squat.\n${coachPost}\n\nThe second video shows strides.\n${runnerPost}`,
+      [`The first video shows a squat.\n${coachPost}\n\nThe second video shows strides.`, runnerPost],
+    ],
+  ] as const) {
+    const bodies: Record<string, unknown>[] = []
+    const fetchImplementation = vi.fn(async (_url: string, init: RequestInit) => {
+      bodies.push(parseJsonRequestBody(requireStringRequestBody(init.body)))
+      return createJsonResponse({
+        chat_id: 'chat-123',
+        message: { id: `message-${bodies.length}` },
+      })
+    })
+
+    await sendLinqChatMessage(
+      { chatId: 'chat-123', idempotencyKey: 'x-post-reply', message },
+      { env, fetchImplementation },
+    )
+
+    assert.deepEqual(
+      bodies.map((body) =>
+        ((body.message as { parts: { value: string }[] }).parts)
+          .map((part) => part.value)
+          .join('')
+      ),
+      expectedParts,
+    )
+  }
+})
+
 test('linq runtime preserves accepted primary media ownership when the rich-link request fails', async () => {
   const env = {
     LINQ_API_BASE_URL: 'https://linq.example.test',
@@ -2159,6 +2201,7 @@ test('linq runtime creates, uploads, and sends voice memo attachments without re
     providerThreadId: 'chat-123',
     target: 'chat-123',
     voiceMemoAttachmentId: 'attachment_voice_1',
+    voiceMemoDurationMs: null,
     voiceMemoUrl: 'https://cdn.example.test/voice-memo.mp3',
   })
 

@@ -1,3 +1,4 @@
+import { createWearableSummaryEncoder, decodeWearableSummaryJson, readWearableSummaryShapes } from "../src/projection/wearable-summary-shapes.ts";
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
@@ -177,8 +178,10 @@ test("first provider-filtered read rebuilds carried v25 underscore provider rows
     }
 
     const currentStatus = await getQueryProjectionStatus(vaultRoot);
-    assert.equal(currentStatus.fresh, true);
-    assert.notEqual(currentStatus.builtAt, legacyBuiltAt);
+    // Upgrading a wearable read certifies only the rebuilt wearable rows.
+    assert.equal(currentStatus.fresh, false);
+    assert.equal(currentStatus.builtAt, null);
+    assert.equal((await rebuildQueryProjection(vaultRoot)).fresh, true);
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }
@@ -524,14 +527,14 @@ test("runtime all-provider wearable source health recomputes provider staleness"
         .get() as { id: string; summaryJson: string } | undefined;
 
       assert.ok(alphaSourceHealthRow);
-      const alphaSourceHealthSummary = JSON.parse(alphaSourceHealthRow.summaryJson);
+      const alphaSourceHealthSummary = JSON.parse(decodeWearableSummaryJson(alphaSourceHealthRow.summaryJson, readWearableSummaryShapes(database)));
       alphaSourceHealthSummary.notes = [
         ...(alphaSourceHealthSummary.notes ?? []),
         "Synthetic stored source-health note that must not survive recomposition.",
       ];
       database
         .prepare("UPDATE query_wearable_summaries SET summary_json = ? WHERE id = ?")
-        .run(JSON.stringify(alphaSourceHealthSummary), alphaSourceHealthRow.id);
+        .run(createWearableSummaryEncoder(database)(JSON.stringify(alphaSourceHealthSummary)), alphaSourceHealthRow.id);
     } finally {
       database.close();
     }
@@ -642,7 +645,7 @@ test("provider-scoped wearable source health does not duplicate unknown rows", a
 
       assert.deepEqual(
         sourceHealthRows.map((row) => ({
-          provider: JSON.parse(row.summaryJson).provider,
+          provider: JSON.parse(decodeWearableSummaryJson(row.summaryJson, readWearableSummaryShapes(database))).provider,
           scope: row.providerScopeKey,
         })),
         [
@@ -760,6 +763,9 @@ test("provider-scoped wearable projection rows use resolved public providers", a
         `)
         .all() as Array<{ providerScopeKey: string; summaryJson: string }>;
 
+      for (const row of activityScopeRows) {
+        row.summaryJson = decodeWearableSummaryJson(row.summaryJson, readWearableSummaryShapes(database));
+      }
       assert.deepEqual(
         activityScopeRows.map((row) => row.providerScopeKey),
         ["providers:garmin", "providers:unknown"],

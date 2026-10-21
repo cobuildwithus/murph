@@ -1,3 +1,5 @@
+import { queueHostedLinqHomeContactCardAfterDelivery } from "./linq-contact-card-delivery";
+import { handleHostedLinqPollWebhook } from "../hosted-polls/linq-webhook";
 import type {
   Prisma,
   PrismaClient,
@@ -80,6 +82,7 @@ import {
   type ParsedHostedLinqProviderEvent,
 } from "./linq-provider-events";
 import {
+  deriveHostedLinqDirectMailboxPreparationReason,
   deriveHostedOnboardingTimingErrorName,
   finishHostedOnboardingTiming,
   logHostedOnboardingDiagnostic,
@@ -175,6 +178,7 @@ import {
 import {
   createHostedPhoneLookupKey,
 } from "./contact-privacy";
+import { readUnchangedHostedLinqHomeRoute } from "./hosted-member-routing-linq";
 import {
   projectHostedMemberRoutingState,
   readHostedMemberRoutingRecord,
@@ -214,7 +218,7 @@ import type {
 } from "./webhook-service-types";
 import {
   reconcileHostedThreadContainerParticipants,
-} from "../hosted-groups/group-tool";
+} from "../hosted-groups/thread-container-participants";
 import {
   lookupHostedGroupParticipantMemberIdsByHandles,
 } from "../hosted-groups/participant-member";
@@ -249,13 +253,6 @@ import {
   readHostedPostCommitRemainingMs,
 } from "./bounded-post-commit";
 import { lockHostedMemberRow } from "./shared";
-
-export {
-  handleHostedStripeWebhook,
-} from "./webhook-service-stripe";
-export type {
-  HostedStripeWebhookResponse,
-} from "./webhook-service-types";
 
 type HostedWebhookPostResponseScheduler = (task: () => Promise<void>) => void;
 type HostedLinqCurrentInboundReplyProof = {
@@ -329,13 +326,9 @@ export async function handleHostedOnboardingLinqWebhook(input: {
       signalAbortedAfterVerify: input.signal?.aborted ?? false,
     });
 
-    if (event.event_type === "chat.typing_indicator.started") {
-      requireHostedLinqTypingIndicatorStartedEvent(event);
-      const response: HostedOnboardingLinqWebhookResponse = {
-        ignored: true,
-        ok: true,
-        reason: "typing-ignored",
-      };
+    const earlyResponse = await handleHostedLinqNonMessageWebhook(event);
+    if (earlyResponse) {
+      const response = earlyResponse;
       responseReason = response.reason ?? null;
       finishHostedOnboardingTiming(timing, "completed", {
         eventIdSuffix: toHostedOnboardingLogIdSuffix(eventId),
@@ -528,12 +521,16 @@ export async function handleHostedOnboardingLinqWebhook(input: {
         if (claim.kind === "unavailable") {
           return;
         }
-        instantOpeningContinuation = claim.openingTone !== undefined;
+        instantOpeningContinuation = claim.opening !== undefined;
+        const generationTiming = startHostedOnboardingTiming(
+          "hosted-onboarding.webhook.linq.first-turn-generation",
+          { openingContinuation: instantOpeningContinuation },
+        );
         const generation = startHostedLinqInstantFirstTurnGeneration({
           claim,
           request,
           ...(input.signal ? { signal: input.signal } : {}),
-        });
+        }).finally(() => finishHostedOnboardingTiming(generationTiming, "settled"));
         // Enrollment or later planning can still choose the ordinary signup
         // path. Observe a rejected speculative generation even when there is
         // then no active-member handoff to await it; the original promise is
@@ -645,6 +642,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
           },
           prepare: async ({ attempt }) => {
             const preparation = await prepareHostedLinqThreadRoutingCrypto({
+              requirePrivateRouting: attempt > 0,
               ...(attempt === 0 && directPreparationMemberId
                 ? { directPreparationMemberId }
                 : {}),
@@ -759,6 +757,9 @@ export async function handleHostedOnboardingLinqWebhook(input: {
             // Reply generation has no side effects, so it can run beside the
             // classifier while provider work still waits for persisted allow.
             await startInstantFirstTurnGeneration();
+            const admissionTiming = startHostedOnboardingTiming(
+              "hosted-onboarding.webhook.linq.first-contact-admission",
+            );
             let classifiedAdmission: Awaited<ReturnType<typeof classifyHostedLinqFirstContactAdmission>>;
             try {
               classifiedAdmission = await classifyHostedLinqFirstContactAdmission({
@@ -770,6 +771,8 @@ export async function handleHostedOnboardingLinqWebhook(input: {
                 throw error;
               }
               classifiedAdmission = buildHostedLinqFirstContactAdmissionClassifierUnavailableDecision();
+            } finally {
+              finishHostedOnboardingTiming(admissionTiming, "settled");
             }
             firstContactAdmissionClassified = true;
 
@@ -800,6 +803,9 @@ export async function handleHostedOnboardingLinqWebhook(input: {
         instantStartTypingHint = startHostedLinqInstantStartTypingHintBestEffort({
           event: planningEvent,
         });
+        const enrollmentTiming = startHostedOnboardingTiming(
+          "hosted-onboarding.webhook.linq.starter-enrollment",
+        );
         let enrollmentFailed = false;
         try {
           const enrollment = await ensureHostedLinqInstantStartStarterUsageEnrollment({
@@ -832,6 +838,8 @@ export async function handleHostedOnboardingLinqWebhook(input: {
               eventIdSuffix: toHostedOnboardingLogIdSuffix(event.event_id),
             },
           );
+        } finally {
+          finishHostedOnboardingTiming(enrollmentTiming, "settled");
         }
         plan = await runPlan({
           instantStartAllowed: !enrollmentFailed,
@@ -880,6 +888,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
         // writer ignores ambiguous and completed deliveries.
         await abandonInstantFirstTurn("planner-failed-before-provider-dispatch");
         finishHostedOnboardingTiming(planTiming, "failed", {
+          directLinqMailboxPreparationReason: deriveHostedLinqDirectMailboxPreparationReason(error),
           errorName: deriveHostedOnboardingTimingErrorName(error),
         });
         throw error;
@@ -1054,6 +1063,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
       scheduleAfterResponse: input.scheduleAfterResponse,
     });
     finishHostedOnboardingTiming(timing, "failed", {
+      directLinqMailboxPreparationReason: deriveHostedLinqDirectMailboxPreparationReason(error),
       errorName: deriveHostedOnboardingTimingErrorName(error),
       eventIdSuffix: toHostedOnboardingLogIdSuffix(eventId),
       eventType,
@@ -1964,6 +1974,13 @@ async function ingestHostedLinqProviderEventDirect(input: {
       scheduleAfterResponse: input.scheduleAfterResponse,
       service: providerResult.restoreOnboardingLink.service,
     });
+  } else if (!providerResult.duplicate && input.event.deliveryStatus === "delivered") {
+    await queueHostedLinqHomeContactCardAfterDelivery({
+      chatId: input.event.linqChatId,
+      prisma: input.prisma,
+      scheduleAfterResponse: input.scheduleAfterResponse,
+      service: input.event.service,
+    });
   }
   return providerResult;
 }
@@ -2325,7 +2342,8 @@ interface HostedThreadRoutingCryptoPreparation {
   preparedDirectTelegramRouting?: HostedDirectTelegramRoutingCryptoPreparation;
   preparedDirectMailboxPayloadRoot?: {
     memberId: string;
-    preparedControlRoot: PreparedHostedDomainRootForWeb;
+    preparedControlRoot: PreparedHostedDomainRootForWeb | null;
+    unchangedHomeRoute?: ReturnType<typeof readUnchangedHostedLinqHomeRoute>;
     preparedCryptoDomainRoots: PreparedHostedCryptoDomainRootCandidates;
     preparedFamilyInvite: HostedFamilyPhoneInvitePreparation | null;
     preparedFamilyOwnerNotification: PreparedHostedFamilyOwnerNotification | null;
@@ -2386,6 +2404,7 @@ async function prepareHostedThreadDeliveryRouteAndWarmMailbox(input: {
 }
 
 async function prepareHostedLinqThreadRoutingCrypto(input: {
+  requirePrivateRouting?: boolean;
   directPreparationMemberId?: string;
   event: Parameters<typeof requireHostedLinqMessageReceivedEvent>[0];
   participantMemberIds: readonly string[];
@@ -2491,6 +2510,7 @@ async function prepareHostedLinqThreadRoutingCrypto(input: {
     return {
       preparedDirectMailboxPayloadRoot:
         await prepareHostedLinqDirectMailboxPayloadRoot({
+          requirePrivateRouting: input.requirePrivateRouting,
           ...(input.directPreparationMemberId
             ? { directPreparationMemberId: input.directPreparationMemberId }
             : {}),
@@ -2952,7 +2972,10 @@ async function runHostedThreadRoutingPreparedTransaction<TResult>(input: {
       ) {
         logHostedOnboardingDiagnostic(
           "hosted-onboarding.webhook.thread-routing-preparation-retry",
-          { code: error.code },
+          {
+            code: error.code,
+            directLinqMailboxPreparationReason: deriveHostedLinqDirectMailboxPreparationReason(error),
+          },
         );
         continue;
       }
@@ -3003,7 +3026,29 @@ export async function warmHostedLinqMailboxPayloadRoot(input: {
   };
 }
 
+function readHostedLinqUnchangedDirectPreparation(input: {
+  requirePrivateRouting?: boolean;
+  accessAllowed: boolean;
+  preparedFamilyInvite: HostedFamilyPhoneInvitePreparation | null;
+  context: ReturnType<typeof resolveHostedOnboardingLinqMessageContext>;
+  routingRecord: HostedMemberRoutingRecord | null;
+}): ReturnType<typeof readUnchangedHostedLinqHomeRoute> {
+  const { context, routingRecord } = input;
+  return !input.requirePrivateRouting
+    && input.accessAllowed && !input.preparedFamilyInvite
+    && context.messageEvent.data.chat?.is_group === false
+    && context.participantContact
+    ? readUnchangedHostedLinqHomeRoute({
+        chatId: context.summary.chatId,
+        participantContact: context.participantContact,
+        recipientPhone: context.recipientPhoneNumber,
+        routingRecord,
+      })
+    : null;
+}
+
 async function prepareHostedLinqDirectMailboxPayloadRoot(input: {
+  requirePrivateRouting?: boolean;
   directPreparationMemberId?: string;
   event: Parameters<typeof requireHostedLinqMessageReceivedEvent>[0];
   prisma: PrismaClient;
@@ -3013,7 +3058,8 @@ async function prepareHostedLinqDirectMailboxPayloadRoot(input: {
   };
 }): Promise<{
   memberId: string;
-  preparedControlRoot: PreparedHostedDomainRootForWeb;
+  preparedControlRoot: PreparedHostedDomainRootForWeb | null;
+  unchangedHomeRoute?: ReturnType<typeof readUnchangedHostedLinqHomeRoute>;
   preparedCryptoDomainRoots: PreparedHostedCryptoDomainRootCandidates;
   preparedFamilyInvite: HostedFamilyPhoneInvitePreparation | null;
   preparedFamilyOwnerNotification: PreparedHostedFamilyOwnerNotification | null;
@@ -3064,12 +3110,21 @@ async function prepareHostedLinqDirectMailboxPayloadRoot(input: {
   const shouldPrepareIngress =
     shouldPrepareFamilyAcceptance
     || (accessAllowed && preparedFamilyInvite?.kind !== "accepted_replay");
+  const unchangedHomeRoute = readHostedLinqUnchangedDirectPreparation({
+    requirePrivateRouting: input.requirePrivateRouting,
+    accessAllowed,
+    preparedFamilyInvite,
+    context,
+    routingRecord,
+  });
   const preparedCryptoDomainRoots =
     await prepareHostedCryptoDomainRootCandidates({
       ...(shouldPrepareFamilyAcceptance
         ? {}
         : {
-            domains: shouldPrepareIngress
+            domains: unchangedHomeRoute
+              ? (["ingress"] as const)
+              : shouldPrepareIngress
               ? (["control", "ingress"] as const)
               : (["control"] as const),
           }),
@@ -3117,6 +3172,9 @@ async function prepareHostedLinqDirectMailboxPayloadRoot(input: {
       ? preserveFirstPreparationError(() => prepareDomainRoot("ingress"))
       : Promise.resolve(null),
     preserveFirstPreparationError(async () => {
+      if (unchangedHomeRoute) {
+        return { preparedControlRoot: null, identityState: null, routingState: null };
+      }
       const preparedControlRoot = await prepareDomainRoot("control");
       for (const rootKeyId of preparedFamilyInvite
         ? readHostedMemberIdentityControlRootKeyIds(identityRecord)
@@ -3171,6 +3229,7 @@ async function prepareHostedLinqDirectMailboxPayloadRoot(input: {
       })
     : null;
   return {
+    unchangedHomeRoute,
     identityRecord,
     identityState: controlRoutingResult.value.identityState,
     memberId,
@@ -3277,4 +3336,11 @@ export async function runHostedOnboardingWebhookTransaction<TResult>(
       ...buildHostedWebhookDbTimingLogDetails(operations),
     });
   }
+}
+
+async function handleHostedLinqNonMessageWebhook(event: HostedLinqWebhookEvent): Promise<HostedOnboardingLinqWebhookResponse | null> {
+  if (await handleHostedLinqPollWebhook(event)) return { ok: true, ignored: true };
+  if (event.event_type !== "chat.typing_indicator.started") return null;
+  requireHostedLinqTypingIndicatorStartedEvent(event);
+  return { ok: true, ignored: true, reason: "typing-ignored" };
 }

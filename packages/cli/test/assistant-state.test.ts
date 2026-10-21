@@ -220,19 +220,19 @@ test('assistant sessions live under the vault runtime area, omit redundant path 
     identityId: 'assistant:primary',
     participantId: 'contact:bob',
     threadId: 'chat-1',
-    model: 'gpt-oss:20b',
+    model: 'gpt-6-sol',
     reasoningEffort: 'high',
     sandbox: 'read-only',
     approvalPolicy: 'never',
-    oss: true,
+    oss: false,
   })
 
   assert.equal(first.created, true)
   assert.equal(first.session.alias, 'telegram:bob')
   assert.equal(first.session.provider, 'codex-cli')
-  assert.equal(first.session.providerOptions.model, 'gpt-oss:20b')
+  assert.equal(first.session.providerOptions.model, 'gpt-6-sol')
   assert.equal(first.session.providerOptions.reasoningEffort, 'high')
-  assert.equal(first.session.providerOptions.oss, true)
+  assert.equal(first.session.providerOptions.oss, false)
   assert.equal(first.session.binding.channel, 'telegram')
   assert.equal(first.session.binding.identityId, 'assistant:primary')
   assert.equal(first.session.binding.actorId, 'contact:bob')
@@ -1167,7 +1167,7 @@ test('getAssistantSession rejects invalid provider payloads instead of coercing 
         provider: 'unsupported-provider',
         providerSessionId: 'thread-legacy',
         providerOptions: {
-          model: 'gpt-oss:20b',
+          model: 'gpt-6-sol',
         },
         alias: 'legacy:bob',
         binding: {

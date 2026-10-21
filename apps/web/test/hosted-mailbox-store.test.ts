@@ -2,7 +2,7 @@ import { Buffer } from "node:buffer";
 
 import {
   buildHostedExecutionAssistantAskRequestedWake,
-  buildHostedExecutionEnvironmentVoiceCapturedWake,
+  buildHostedExecutionDailyMetricReportedWake,
 } from "@murphai/hosted-execution";
 import {
   createHostedMailboxAssistantInputId,
@@ -21,14 +21,12 @@ import {
   appendPreparedHostedMailboxEnvelopeTx,
   appendHostedMailboxEnvelopeWithIdentityTx,
   appendHostedMailboxEnvelopeWithSourceMessageTx,
-  appendHostedEnvironmentVoiceMailboxEnvelopeTx,
   appendHostedMailboxItemTx,
   claimHostedMailboxConversationSubscriptionAction,
   decodeHostedMailboxStoredPayload,
   fetchHostedMailboxPayload,
   fetchHostedMailboxItemsAfterLaneCursors,
   fetchHostedRuntimeMailboxProjection,
-  hasPendingHostedEnvironmentVoiceMailboxItemTx,
   hasHostedMailboxAutomationEngagementSince,
   hasHostedMailboxItemByKind,
   HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
@@ -721,15 +719,19 @@ describe("tryMarkHostedMailboxConversationAiUsageDenied", () => {
 });
 
 describe("appendHostedMailboxItemTx", () => {
-  it("rejects writes for retired mailbox kinds before touching storage", async () => {
+  it.each([
+    "environment-interview.completed",
+    "environment-voice.captured",
+    "group-newsletter.email-needed",
+  ] as const)("rejects writes for retired mailbox kind %s before touching storage", async (kind) => {
     const tx = createHostedMailboxTx({
       hostedMailboxItem: createHostedMailboxItemDelegate(),
       hostedMailboxPayload: createHostedMailboxPayloadDelegate(),
     });
 
     await expect(appendHostedMailboxItemTx({
-      dedupeKey: "dedupe_retired_newsletter_1",
-      kind: "group-newsletter.email-needed",
+      dedupeKey: `dedupe_retired:${kind}`,
+      kind,
       lane: "system",
       occurredAt: "2026-04-26T00:00:00.000Z",
       payloadSerializedJson: JSON.stringify({ kind: "retired" }),
@@ -1163,9 +1165,7 @@ describe("appendHostedMailboxEnvelopeTx", () => {
 
     try {
       await expect(prepareHostedMailboxEnvelopeAppend({
-        envelope: buildHostedEnvironmentVoiceEnvelope(
-          "environment-voice/member_mailbox_1/failed-preparation.webm",
-        ),
+        envelope: buildHostedDailyMetricEnvelope(),
         prisma,
       })).rejects.toThrow("forced prepared mailbox encryption failure");
       expect(tx.$queryRaw).not.toHaveBeenCalled();
@@ -1203,9 +1203,7 @@ describe("appendHostedMailboxEnvelopeTx", () => {
 
     try {
       const prepared = await prepareHostedMailboxEnvelopeAppend({
-        envelope: buildHostedEnvironmentVoiceEnvelope(
-          "environment-voice/member_mailbox_1/prepared.webm",
-        ),
+        envelope: buildHostedDailyMetricEnvelope(),
         prisma,
       });
       expect(encryptionCalls).toBeGreaterThan(0);
@@ -1852,121 +1850,6 @@ describe("appendHostedMailboxEnvelopeTx", () => {
     expect(hostedMailboxItem.create).toHaveBeenCalledTimes(1);
     expect(hostedMailboxPayload.create).not.toHaveBeenCalled();
   });
-
-  it("keeps the first staged object as the canonical exact-duplicate environment recording", async () => {
-    const rows: HostedMailboxItemRow[] = [];
-    const hostedMailboxItem = createHostedMailboxItemDelegate({
-      create: vi.fn<HostedMailboxCreate>(async (args) => {
-        const row = buildHostedMailboxItemRow(args.data);
-        rows.push(row);
-        return row;
-      }),
-      findUnique: vi.fn<HostedMailboxFindUnique>(async (args) => {
-        const where = readHostedMailboxFindUniqueWhere(args);
-        return rows.find((row) => (
-          row.userId === where.userId && row.dedupeKey === where.dedupeKey
-        )) ?? null;
-      }),
-    });
-    const tx = createHostedMailboxTx({
-      hostedMailboxItem,
-      hostedMailboxPayload: createHostedMailboxPayloadDelegate(),
-    });
-
-    const first = await appendHostedEnvironmentVoiceMailboxEnvelopeTx({
-      envelope: buildHostedEnvironmentVoiceEnvelope("a".repeat(40)),
-      tx,
-    });
-    const duplicate = await appendHostedEnvironmentVoiceMailboxEnvelopeTx({
-      envelope: buildHostedEnvironmentVoiceEnvelope("b".repeat(40)),
-      tx,
-    });
-
-    expect(first).toMatchObject({
-      claimedAudioKey: "a".repeat(40),
-      dedupeConflict: false,
-      duplicate: false,
-      inserted: true,
-    });
-    expect(duplicate).toMatchObject({
-      claimedAudioKey: "a".repeat(40),
-      dedupeConflict: false,
-      duplicate: true,
-      inserted: false,
-      item: { id: first.item.id },
-    });
-    expect(hostedMailboxItem.create).toHaveBeenCalledTimes(1);
-  });
-
-  it("detects an environment recording ahead of the system lane watermark", async () => {
-    const findFirst = vi.fn<HostedMailboxItemFindFirst>(async () => (
-      buildHostedMailboxItemRow({
-        kind: "environment-voice.captured",
-        lane: "system",
-        laneSeq: 8n,
-        userId: "member_mailbox_1",
-      })
-    ));
-    const findUnique = vi.fn(async () => ({ consumedSeq: 7n }));
-    const tx = createHostedMailboxTx({
-      hostedMailboxItem: createHostedMailboxItemDelegate({ findFirst }),
-      hostedMailboxLaneCounter: { findUnique },
-      hostedMailboxPayload: createHostedMailboxPayloadDelegate(),
-    });
-
-    await expect(
-      hasPendingHostedEnvironmentVoiceMailboxItemTx({
-        tx,
-        userId: "member_mailbox_1",
-      }),
-    ).resolves.toBe(true);
-    expect(findUnique).toHaveBeenCalledWith({
-      select: { consumedSeq: true },
-      where: {
-        userId_lane: {
-          lane: "system",
-          userId: "member_mailbox_1",
-        },
-      },
-    });
-    expect(findFirst).toHaveBeenCalledWith({
-      select: { id: true },
-      where: {
-        kind: "environment-voice.captured",
-        lane: "system",
-        laneSeq: { gt: 7n },
-        userId: "member_mailbox_1",
-      },
-    });
-  });
-
-  it("does not treat an environment recording behind the system lane watermark as pending", async () => {
-    const findFirst = vi.fn<HostedMailboxItemFindFirst>(async () => null);
-    const tx = createHostedMailboxTx({
-      hostedMailboxItem: createHostedMailboxItemDelegate({ findFirst }),
-      hostedMailboxLaneCounter: {
-        findUnique: vi.fn(async () => ({ consumedSeq: 8n })),
-      },
-      hostedMailboxPayload: createHostedMailboxPayloadDelegate(),
-    });
-
-    await expect(
-      hasPendingHostedEnvironmentVoiceMailboxItemTx({
-        tx,
-        userId: "member_mailbox_1",
-      }),
-    ).resolves.toBe(false);
-    expect(findFirst).toHaveBeenCalledWith({
-      select: { id: true },
-      where: {
-        kind: "environment-voice.captured",
-        lane: "system",
-        laneSeq: { gt: 8n },
-        userId: "member_mailbox_1",
-      },
-    });
-  });
-
 });
 
 describe("fetchHostedMailboxItemsAfterLaneCursors", () => {
@@ -2526,7 +2409,7 @@ describe("fetchHostedMailboxItemsAfterLaneCursors", () => {
         laneSeq: { gt: 4n },
         userId: "member_mailbox_1",
         AND: [{ OR: expect.arrayContaining([
-          { kind: { in: expect.arrayContaining(["device-sync.wake", "environment-interview.completed"]) } },
+          { kind: { in: expect.arrayContaining(["device-sync.wake", "health.daily-metric.reported"]) } },
         ]) }],
       }),
     });
@@ -3378,22 +3261,15 @@ function buildHostedGroupEmailEnvelope(userId: string) {
   };
 }
 
-function buildHostedEnvironmentVoiceEnvelope(
-  audioKey: string,
-  capturedAt = "2026-07-30T12:00:00.000Z",
-) {
-  const captureId = "c".repeat(64);
-  return buildHostedExecutionEnvironmentVoiceCapturedWake({
-    audioKey,
-    byteLength: 64_000,
-    captureId,
-    capturedAt,
-    contentType: "audio/webm",
-    durationMs: 12_000,
-    eventId: `environment-voice:${captureId}`,
+function buildHostedDailyMetricEnvelope() {
+  return buildHostedExecutionDailyMetricReportedWake({
+    date: "2026-04-26",
+    eventId: "daily-metric:member_mailbox_1:steps",
     memberId: "member_mailbox_1",
-    occurredAt: capturedAt,
-    sha256: captureId,
+    metric: "steps",
+    occurredAt: FIXED_NOW.toISOString(),
+    unit: "count",
+    value: 1_000,
   });
 }
 
@@ -3694,6 +3570,7 @@ describe("readHostedMailboxConsumedSeqByLane", () => {
       { consumedSeq: "14", lane: "system" },
     ]);
     expect(findFirst).toHaveBeenNthCalledWith(1, {
+      select: { laneSeq: true },
       orderBy: {
         laneSeq: "asc",
       },
@@ -3703,6 +3580,7 @@ describe("readHostedMailboxConsumedSeqByLane", () => {
       }),
     });
     expect(findFirst).toHaveBeenNthCalledWith(2, {
+      select: { laneSeq: true },
       orderBy: {
         laneSeq: "asc",
       },

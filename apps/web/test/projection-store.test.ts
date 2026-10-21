@@ -144,7 +144,7 @@ function createPrisma(events?: string[]) {
   const prisma = createPrismaClientTestDouble({
     $transaction: transaction,
   });
-  return { prisma, queryRaw, transaction, updateMany };
+  return { prisma, queryRaw, transaction, tx, updateMany };
 }
 
 function buildShareRow(index: number) {
@@ -403,14 +403,17 @@ describe("replaceHostedVaultShareProjectionSnapshot", () => {
     const events: string[] = [];
     const codec = createSnapshotTestCodec(events);
     const { prisma, queryRaw, transaction, updateMany } = createPrisma(events);
+    const onDeferral = vi.fn();
 
     await expect(replaceHostedVaultShareProjectionSnapshot({
+      onDeferral,
       prisma,
       records: [RECORD],
       share: SHARE,
       sourceWorkspaceVersion: SOURCE_WORKSPACE_VERSION,
     })).resolves.toBe("replaced");
 
+    expect(onDeferral).not.toHaveBeenCalled();
     expect(events.slice(0, 2)).toEqual(["encrypt", "transaction"]);
     expect(codec.encryptInputs).toHaveLength(1);
     expect(transaction).toHaveBeenCalledOnce();
@@ -421,7 +424,10 @@ describe("replaceHostedVaultShareProjectionSnapshot", () => {
       [SHARE.grantorMemberId, SHARE.destinationMemberId],
       { prisma: expect.any(Object) },
     );
-    expect(queryRaw).toHaveBeenCalledOnce();
+    expect(queryRaw).toHaveBeenCalledExactlyOnceWith(expect.any(Array), SHARE.grantorMemberId);
+    expect(queryRaw.mock.calls[0]?.[0].join("?").replace(/\s+/gu, " ").trim()).toBe(
+      "SELECT version FROM hosted_workspace WHERE user_id = ? FOR UPDATE",
+    );
     expect(updateMany).toHaveBeenCalledOnce();
     expect(codec.encryptInputs).toEqual([expect.objectContaining({
       aad: {
@@ -695,6 +701,132 @@ describe("replaceHostedVaultShareProjectionSnapshot", () => {
     expect(updateMany).not.toHaveBeenCalled();
   });
 
+  describe.each([false, true])("deferral observer throws: %s", (observerThrows) => {
+    it.each([
+      ["inactive member", "inactive_access"],
+      ["authority change", "inactive_access"],
+      ["missing workspace", "source_workspace_changed"],
+      ["changed workspace", "source_workspace_changed"],
+      ["changed grant", "conditional_update_not_applied"],
+      ["already materialized", "conditional_update_not_applied"],
+    ] as const)("observes %s only after transaction settlement", async (failure, reason) => {
+      createSnapshotTestCodec();
+      const { prisma, queryRaw, transaction, tx, updateMany } = createPrisma();
+      if (reason === "inactive_access") {
+        const error = failure === "authority change"
+          ? hostedOnboardingError({
+              code: "HOSTED_RUNTIME_ACCESS_AUTHORITY_CHANGED",
+              httpStatus: 409,
+              message: "Synthetic authority change.",
+              retryable: true,
+            })
+          : new Error("Synthetic inactive access.");
+        mocks.requireHostedRuntimeMembersActiveAccessForUpdateTx.mockRejectedValueOnce(error);
+        mocks.isHostedRuntimeInactiveAccessError.mockImplementation(
+          (value: unknown) => failure === "inactive member" && value === error,
+        );
+      } else if (reason === "source_workspace_changed") {
+        queryRaw.mockResolvedValue(failure === "missing workspace" ? [] : [{ version: 8n }]);
+      } else {
+        updateMany.mockResolvedValue({ count: 0 });
+      }
+      const callbackFinished = createDeferred<unknown>();
+      const settleTransaction = createDeferred<void>();
+      const execute = transaction.getMockImplementation()!;
+      transaction.mockImplementation(async (callback) => {
+        const result = await execute(callback);
+        callbackFinished.resolve(result);
+        await settleTransaction.promise;
+        return result;
+      });
+      const onDeferral = vi.fn(() => {
+        if (observerThrows) throw new Error("Synthetic private observer failure.");
+      });
+      const replacement = replaceHostedVaultShareProjectionSnapshot({
+        onDeferral,
+        prisma,
+        ...(failure === "already materialized"
+          ? { projectionMode: HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE }
+          : {}),
+        records: [RECORD],
+        share: SHARE,
+        sourceWorkspaceVersion: SOURCE_WORKSPACE_VERSION,
+      });
+
+      try {
+        await expect(callbackFinished.promise).resolves.toBe("no-active-share");
+        expect(onDeferral).not.toHaveBeenCalled();
+      } finally {
+        settleTransaction.resolve();
+      }
+      await expect(replacement).resolves.toBe("no-active-share");
+      expect(onDeferral).toHaveBeenCalledExactlyOnceWith(reason);
+      expect(transaction).toHaveBeenCalledOnce();
+      expect(mocks.requireHostedRuntimeMembersActiveAccessForUpdateTx)
+        .toHaveBeenCalledExactlyOnceWith(
+          [SHARE.grantorMemberId, SHARE.destinationMemberId],
+          { prisma: tx },
+        );
+      expect(queryRaw).toHaveBeenCalledTimes(reason === "inactive_access" ? 0 : 1);
+      expect(updateMany).toHaveBeenCalledTimes(reason === "conditional_update_not_applied" ? 1 : 0);
+      if (reason === "conditional_update_not_applied") {
+        expect(updateMany).toHaveBeenCalledWith({
+          data: {
+            projectionSnapshotCiphertext: "sealed:1",
+            projectionSourceWorkspaceVersion: 7n,
+          },
+          where: {
+            destinationMemberId: SHARE.destinationMemberId,
+            grantorMemberId: SHARE.grantorMemberId,
+            id: SHARE.id,
+            projectionKind: SHARE.projectionKind,
+            projectionScopeKey: SHARE.projectionScopeKey,
+            ...(failure === "already materialized" ? { projectionSnapshotCiphertext: null } : {}),
+            status: "granted",
+          },
+        });
+      }
+    });
+  });
+
+  it.each(["encryption", "access", "workspace", "update", "settlement"] as const)(
+    "propagates an unrelated %s exception unchanged without observing a deferral",
+    async (boundary) => {
+      createSnapshotTestCodec();
+      const { prisma, queryRaw, transaction, updateMany } = createPrisma();
+      const error = new Error("Synthetic private failure.");
+      if (boundary === "encryption") {
+        setHostedSecureBoxStringTestCodecForTests({
+          decrypt() { throw error; },
+          encrypt() { throw error; },
+        });
+      } else if (boundary === "access") {
+        mocks.requireHostedRuntimeMembersActiveAccessForUpdateTx.mockRejectedValueOnce(error);
+      } else if (boundary === "workspace") {
+        queryRaw.mockRejectedValueOnce(error);
+      } else if (boundary === "update") {
+        updateMany.mockRejectedValueOnce(error);
+      } else {
+        // A callback result alone is not a settled replacement outcome.
+        updateMany.mockResolvedValue({ count: 0 });
+        const execute = transaction.getMockImplementation()!;
+        transaction.mockImplementation(async (callback) => {
+          await execute(callback);
+          throw error;
+        });
+      }
+      const onDeferral = vi.fn();
+      await expect(replaceHostedVaultShareProjectionSnapshot({
+        onDeferral,
+        prisma,
+        records: [RECORD],
+        share: SHARE,
+        sourceWorkspaceVersion: SOURCE_WORKSPACE_VERSION,
+      })).rejects.toBe(error);
+      expect(onDeferral).not.toHaveBeenCalled();
+    },
+  );
+
   it("keeps the newer snapshot when an older encrypted delivery finishes last", async () => {
     createSnapshotTestCodec();
     const oldWriterAtFence = createDeferred<void>();
@@ -773,6 +905,100 @@ function assertStoredCiphertext(value: string | null): asserts value is string {
 }
 
 describe("readDeliverableHostedVaultShareProjectionScopeGenerations", () => {
+  it("skips a fully current scope but discovers a new grant with the complete cohort token", async () => {
+    const rows = [buildShareRow(1), buildShareRow(2)].map((row) => ({
+      ...row,
+      projectionSnapshotCiphertext: "sealed:materialized" as string | null,
+      projectionSourceWorkspaceVersion: 7n as bigint | null,
+    }));
+    const findMany = vi.fn(async () => rows);
+    const prisma = createPrismaClientTestDouble({ hostedVaultShare: { findMany } });
+    const input = { grantorMemberId: SHARE.grantorMemberId, prisma, sourceWorkspaceVersion: "7" };
+
+    await expect(readDeliverableHostedVaultShareProjectionScopeGenerations(input))
+      .resolves.toEqual({ generations: [], hasDeferredProjectionWork: false });
+    await expect(readDeliverableHostedVaultShareProjectionScopeGenerations({
+      ...input, sourceWorkspaceVersion: undefined,
+    })).resolves.toMatchObject({ generations: [{ projectionScope: SLEEP_SCOPE }] });
+
+    rows.push({
+      ...buildShareRow(3),
+      id: "share_new_generation",
+      projectionSnapshotCiphertext: null,
+      projectionSourceWorkspaceVersion: null,
+    });
+    const discovery = await readDeliverableHostedVaultShareProjectionScopeGenerations(input);
+    expect(discovery).toEqual({
+      generations: [{
+        generationToken: buildHostedVaultShareGenerationToken(rows.map((row) => row.id)),
+        projectionScope: SLEEP_SCOPE,
+      }],
+      hasDeferredProjectionWork: false,
+    });
+    const page = await findActiveHostedVaultSharePage({ ...input, projectionScope: SLEEP_SCOPE });
+    expect(page.generationToken).toBe(discovery.generations[0]?.generationToken);
+    expect(page.shares.map((row) => row.id)).toEqual(["share_new_generation"]);
+    expect(findMany).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      select: expect.objectContaining({ projectionSourceWorkspaceVersion: true }),
+    }));
+  });
+
+  it("retains partial destination pages until every row is current without changing the token", async () => {
+    const rows = Array.from({ length: 64 }, (_, index) => ({
+      ...buildShareRow(index),
+      projectionSnapshotCiphertext: "sealed:previous",
+      projectionSourceWorkspaceVersion: 7n,
+    }));
+    const findMany = vi.fn(async () => rows);
+    const prisma = createPrismaClientTestDouble({ hostedVaultShare: { findMany } });
+    const input = { grantorMemberId: SHARE.grantorMemberId, prisma, sourceWorkspaceVersion: "8" };
+    const expectedToken = buildHostedVaultShareGenerationToken(rows.map((row) => row.id));
+    const pageSizes: number[] = [];
+
+    for (let pageNumber = 0; pageNumber < 3; pageNumber += 1) {
+      const discovery = await readDeliverableHostedVaultShareProjectionScopeGenerations(input);
+      expect(discovery.generations).toEqual([{
+        generationToken: expectedToken,
+        projectionScope: SLEEP_SCOPE,
+      }]);
+      const page = await findActiveHostedVaultSharePage({ ...input, projectionScope: SLEEP_SCOPE });
+      expect(page.generationToken).toBe(expectedToken);
+      pageSizes.push(page.shares.length);
+      for (const share of page.shares) {
+        const row = rows.find((candidate) => candidate.id === share.id);
+        if (row) row.projectionSourceWorkspaceVersion = 8n;
+      }
+    }
+
+    expect(pageSizes).toEqual([25, 25, 14]);
+    await expect(readDeliverableHostedVaultShareProjectionScopeGenerations(input))
+      .resolves.toEqual({ generations: [], hasDeferredProjectionWork: false });
+  });
+
+  it("keeps first materialization governed by null snapshots regardless of source version", async () => {
+    const rows = [
+      { ...buildShareRow(1), projectionSnapshotCiphertext: "sealed:materialized", projectionSourceWorkspaceVersion: 6n },
+      { ...buildShareRow(2), projectionSnapshotCiphertext: null, projectionSourceWorkspaceVersion: 7n },
+    ];
+    const findMany = vi.fn(async () => rows);
+    const prisma = createPrismaClientTestDouble({ hostedVaultShare: { findMany } });
+    const input = {
+      grantorMemberId: SHARE.grantorMemberId,
+      prisma,
+      projectionMode: HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE,
+      projectionScope: SLEEP_SCOPE,
+      sourceWorkspaceVersion: "7",
+    } as const;
+
+    const discovery = await readDeliverableHostedVaultShareProjectionScopeGenerations(input);
+    const page = await findActiveHostedVaultSharePage(input);
+    expect(discovery.generations).toEqual([{
+      generationToken: page.generationToken,
+      projectionScope: SLEEP_SCOPE,
+    }]);
+    expect(page.shares.map((row) => row.id)).toEqual([rows[1]?.id]);
+  });
+
   it("hashes owner- and participant-backed destinations together while excluding inactive rows", async () => {
     const profileScope = hostedVaultShareProjectionKindToScope("profile-name.v0");
     const deviceScope = hostedVaultShareProjectionKindToScope("device-sync-status.v0");

@@ -30,11 +30,11 @@ async function findCanonicalMember(prisma: Client, contact: HostedLinqParticipan
     where: { pendingLinqParticipantContactLookupKey: { in: createHostedLinqParticipantContactLookupKeyReadCandidates(contact) } },
     select: { memberId: true }, take: 2,
   });
-  if (pending.length > 1) throw new HostedAuthIdentityConflictError();
+  if (pending.length > 1) throw new HostedAuthIdentityConflictError("pending_contact_ambiguous");
   if (!pending[0]) return null;
   const routing = await readHostedMemberRoutingState({ memberId: pending[0].memberId, prisma });
   if (routing?.pendingLinqParticipantContact?.kind !== contact.kind || routing.pendingLinqParticipantContact.value !== contact.value) {
-    throw new HostedAuthIdentityConflictError();
+    throw new HostedAuthIdentityConflictError("credential_binding_mismatch");
   }
   return readHostedMemberCoreState({ memberId: pending[0].memberId, prisma });
 }
@@ -48,11 +48,11 @@ export async function prepareHostedAuthOtpMember(input: {
     ? await requireHostedInviteForAuthentication(input.inviteCode, input.prisma, new Date()) : null;
   const prepared = await prepareContactMember({ ...input, invitedMemberId: invite?.member.id });
   if (!invite) return prepared;
-  if (invite.member.id !== prepared.memberId) throw new HostedAuthIdentityConflictError();
+  if (invite.member.id !== prepared.memberId) throw new HostedAuthIdentityConflictError("invite_member_mismatch");
   return { ...prepared, commitMember: async (tx) => {
     await prepared.commitMember(tx);
     const current = await requireHostedInviteForAuthentication(input.inviteCode!, tx, new Date());
-    if (current.member.id !== prepared.memberId) throw new HostedAuthIdentityConflictError();
+    if (current.member.id !== prepared.memberId) throw new HostedAuthIdentityConflictError("invite_member_mismatch");
   } };
 }
 
@@ -66,7 +66,7 @@ async function prepareContactMember(input: { contact: HostedLinqParticipantConta
     const user = await openAuthRecord(row, prisma);
     const valid = contact.kind === "email" ? user.emailVerified && user.email === contact.value
       : user.phoneNumberVerified && user.phoneNumber === contact.value;
-    if (!valid) throw new HostedAuthIdentityConflictError();
+    if (!valid) throw new HostedAuthIdentityConflictError("credential_binding_mismatch");
     const root = await prepareHostedDomainRootForWeb({
       domain: "control", prepareMissing: false, prisma, userId: user.id, reason: "hosted-auth.login",
     });
@@ -74,16 +74,19 @@ async function prepareContactMember(input: { contact: HostedLinqParticipantConta
       await acquireHostedLinqParticipantContactLockTx({ contact, tx, lockTimeoutMs: 5_000 });
       await lockHostedMemberRow(tx, user.id, { timeoutMs: 5_000 });
       const member = await readHostedMemberCoreState({ memberId: user.id, prisma: tx });
-      if (!member) throw new HostedAuthIdentityConflictError();
+      if (!member) throw new HostedAuthIdentityConflictError("member_missing");
       assertHostedMemberNotSuspended(member);
       const current = await tx.hostedAuthRecord.findUnique({ where: { model_id: { model: "user", id: user.id } } });
-      if (!current || JSON.stringify(current) !== JSON.stringify(row)) throw new HostedAuthIdentityConflictError();
+      if (!current || JSON.stringify(current) !== JSON.stringify(row)) throw new HostedAuthIdentityConflictError("prepared_state_changed");
       await openAuthRecord(current, tx);
       await revalidatePreparedHostedDomainRootForWebTx({ prepared: root, tx });
     } };
   }
   const member = await findCanonicalMember(prisma, contact);
   if (member) assertHostedMemberNotSuspended(member);
+  if (member && await prisma.hostedAuthRecord.findUnique({ where: { model_id: { model: "user", id: member.id } } })) {
+    throw new HostedAuthIdentityConflictError("credential_not_in_projection");
+  }
   return prepareUnclaimedLogin(prisma, contact, member?.id ?? null, member ? undefined : input.invitedMemberId);
 }
 
@@ -100,7 +103,7 @@ export async function assertHostedAuthPristineInviteMember(prisma: Client, membe
   ]);
   if (!member || member.billingStatus !== HostedBillingStatus.not_started || member.suspendedAt || member.initialOnboardingCompletedAt
     || identity?.phoneNumber || identity?.signupPhoneNumber || member.identity?.linqEmailHandleEncrypted || email || routing || user) {
-    throw new HostedAuthIdentityConflictError();
+    throw new HostedAuthIdentityConflictError("invite_not_pristine");
   }
 }
 
@@ -119,7 +122,7 @@ async function prepareUnclaimedLogin(prisma: PrismaClient, contact: HostedLinqPa
     const current = await findCanonicalMember(tx, contact);
     const owned = await tx.hostedAuthRecord.findUnique({ where: { model_id: { model: "user", id: memberId } } });
     if ((current?.id ?? null) !== existingId || owned || snapshot !== await readHostedAuthSourceSnapshot(tx, memberId)) {
-      throw new HostedAuthIdentityConflictError();
+      throw new HostedAuthIdentityConflictError("prepared_state_changed");
     }
     if (current) assertHostedMemberNotSuspended(current);
     else if (!invitedMemberId) await createHostedMember({ memberId, billingStatus: HostedBillingStatus.not_started, prisma: tx });

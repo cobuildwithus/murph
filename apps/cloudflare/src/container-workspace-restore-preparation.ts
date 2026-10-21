@@ -25,6 +25,7 @@ import {
 import {
   createCloudflareMediaStore,
 } from "./runtime-platform/media-store.ts";
+import type { HostedRuntimeFetchTransportDiagnostics } from "./runtime-platform/fetch-transport-collector.ts";
 import { createHostedWebMailboxPort } from "./runtime-platform/mailbox-port.ts";
 import {
   createHostedWebRuntimeLogPort,
@@ -44,6 +45,7 @@ import {
 } from "./runtime-platform/workspace-snapshot-port.ts";
 
 export async function prepareHostedContainerWorkspaceRestore(input: {
+  fetchTransportDiagnostics?: HostedRuntimeFetchTransportDiagnostics | null;
   job: HostedExecutionWorkspaceInvocationJobInput;
   signal: AbortSignal;
 }): Promise<HostedWorkspaceRestorePreparation> {
@@ -112,6 +114,7 @@ export async function prepareHostedContainerWorkspaceRestore(input: {
     mailboxPort: createHostedWebMailboxPort({
       boundUserId: input.job.request.userId,
       fetchImpl: internalFetch,
+      fetchTransportDiagnostics: input.fetchTransportDiagnostics,
       timeoutMs,
       transport,
     }),

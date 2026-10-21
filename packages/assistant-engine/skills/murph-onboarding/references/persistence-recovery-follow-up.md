@@ -6,8 +6,7 @@ constraints. Read it whenever the current turn persists or
 interprets a skip or deferral, handles a scheduled onboarding occurrence, or
 needs the cross-stage reply rules.
 
-The injected onboarding instructions own the early-stall check-in and identity
-persistence. Do not read this reference for that opening transition.
+The injected onboarding instructions own opening identity persistence. Do not read this reference for that opening transition.
 
 ## Context persistence
 
@@ -74,8 +73,7 @@ non-obvious context dividend.
 ### Finite three-day recovery
 
 A managed owner may invoke this skill at most once on each of the next three
-local days after the welcome. This fixed window is the only scheduled recovery
-after the early-stall window. Each day's opportunity is consumed whether it
+local days after the welcome. This fixed window is the only scheduled onboarding recovery. Each day's opportunity is consumed whether it
 sends or skips; no occurrence may create, re-enable, extend, rotate, or
 reschedule the owner.
 
@@ -121,10 +119,8 @@ reschedule the owner.
   timing.
 - If the last onboarding question is still unanswered, do not send a different
   setup question. Wait for a reply or later inbound message instead of
-  escalating a drip questionnaire. Inside the first-minutes stall window, the
-  scheduled early-stall check-in in the injected onboarding instructions is
-  the only permitted nudge and it never repeats. The separate finite three-day recovery rule above owns the only
-  later scheduled exception.
+  escalating a drip questionnaire. Do not schedule a first-minutes nudge. The
+  finite three-day recovery rule above owns the only scheduled exception.
 - Skip visible onboarding advancement when the user asks for no follow-up, the
   situation is urgent or safety-sensitive, the immediate task failed and needs
   attention, or the current health-data reply should stand alone.

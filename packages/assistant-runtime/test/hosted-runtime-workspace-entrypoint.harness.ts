@@ -18,7 +18,6 @@ import {
   findCaptureByLookup,
   initializeVault,
   patchAutomation,
-  readHabitatAspect,
   readJsonlRecords,
   repairVault,
   runCanonicalWrite,
@@ -33,7 +32,6 @@ import {
 } from "@murphai/inboxd";
 import {
   buildHostedExecutionAssistantNotificationRequestedWake,
-  buildHostedExecutionEnvironmentInterviewCompletedWake,
   buildHostedExecutionLinqConversationMessageWake,
   buildHostedExecutionMemberActivatedWake,
   buildHostedExecutionRuntimeControlWake,
@@ -147,6 +145,7 @@ import {
   readHostedExecutionSnapshotBaseRef,
 } from "@murphai/hosted-execution/parsers";
 import { describe, expect, type Mock, test, vi } from "vitest";
+import { assertHostedVaultShareWorkerBuilt } from "./hosted-vault-share-worker-build.ts";
 
 type HasCompleteAssistantAutoReplyDeliveryTerminalEvidence = (
   input: {
@@ -941,19 +940,18 @@ function createPlatform(input: {
   workspacePort: HostedRuntimeWorkspacePort | null;
   workspaceSnapshotPort?: HostedRuntimePlatform["workspaceSnapshotPort"] | null;
 }): HostedRuntimePlatform {
+  if (input.vaultSharePort) assertHostedVaultShareWorkerBuilt();
   const uploadedArtifactBytesByHash = new Map<string, Uint8Array>();
   const defaultAssistantConfigurationToolPort: NonNullable<
     HostedRuntimePlatform["assistantConfigurationToolPort"]
   > = {
     async request(request) {
       const snapshot: HostedRuntimeAssistantConfigurationSnapshot = {
-        availableModels: ["gpt-5.6-luna", "gpt-5.6-terra"],
-        availableProviders: ["openai", "venice"],
+        availableModels: ["gpt-5.6-luna", "gpt-6-sol"],
         availableReasoningEfforts: ["low", "medium", "high", "xhigh"],
         configurationAvailable: true,
         dormantSolPreference: false,
-        model: "gpt-5.6-terra",
-        provider: "openai",
+        model: "gpt-6-sol",
         reasoningEffort: "low",
         solAvailable: false,
       };
@@ -1069,7 +1067,7 @@ function createPlatform(input: {
       async completeSnapshotSession() { throw new Error("Snapshot publication is injected by each test."); },
       async putSnapshotObjectDirect() { throw new Error("Snapshot publication is injected by each test."); },
       async startSnapshotSession() { throw new Error("Snapshot publication is injected by each test."); },
-      async restoreWorkspaceSnapshot({ durableRoot, ref }) {
+      async restoreWorkspaceSnapshot({ durableRoot, ref, usePreparedRestore }) {
         // Fixture archives use the portable codec; the runtime sees only the v2 port.
         // Encrypted tar transport and staged installation are covered by Cloudflare tests.
         const bytes = await platform.artifactStore.get(ref.archive.plaintextArchiveSha256, { purpose: "workspace_restore" });
@@ -1079,7 +1077,7 @@ function createPlatform(input: {
           await restoreHostedBundleRoots({
             bytes,
             expectedKind: "vault",
-            roots: { vault: path.join(stagedRoot, input.snapshotFixtureVaultRelativePath ?? "") },
+            roots: { vault: path.join(stagedRoot, input.snapshotFixtureVaultRelativePath ?? (usePreparedRestore === false ? "vault" : "")) },
           });
           await rm(durableRoot, { force: true, recursive: true });
           await rename(stagedRoot, durableRoot);
@@ -1278,8 +1276,6 @@ async function writeMailboxImportStateFile(
 }
 
 function createMailboxPort(input: {
-  assistantProvider?: HostedMailboxFetchResponse["assistantProvider"];
-  assistantCustomInferenceRevision?: number | null;
   consumedSeqByLane?: HostedMailboxFetchResponse["consumedSeqByLane"];
   events: string[];
   fetchRequests?: HostedMailboxFetchRequest[];
@@ -1292,10 +1288,6 @@ function createMailboxPort(input: {
         input.events.push("mailbox.fetch");
         input.fetchRequests?.push(request);
         return {
-          assistantProvider: input.assistantProvider ?? "openai",
-          ...(input.assistantCustomInferenceRevision === undefined ? {} : {
-            assistantCustomInferenceRevision: input.assistantCustomInferenceRevision,
-          }),
           ...(input.consumedSeqByLane === undefined
             ? {}
             : { consumedSeqByLane: input.consumedSeqByLane }),
@@ -1903,52 +1895,6 @@ async function enqueueDeviceSyncSystemMailboxItemForTest(input: {
   });
 }
 
-async function enqueueEnvironmentInterviewSystemMailboxItemForTest(input: {
-  item: HostedMailboxItem;
-  vaultRoot: string;
-}) {
-  return await enqueueHostedSystemMailboxItem({
-    item: {
-      item: input.item,
-      payload: {
-        payloadCiphertext: "ciphertext",
-        payloadSchema: HOSTED_MAILBOX_PAYLOAD_SCHEMA,
-        requestId: "request_entrypoint_environment_interview",
-        source: "inline",
-        status: "resolved",
-      },
-      route: {
-        action: "run-environment-interview",
-        advanceProgress: true,
-        itemRef: {
-          id: input.item.id,
-          kind: input.item.kind,
-          lane: input.item.lane,
-          laneSeq: input.item.laneSeq,
-        },
-        state: "route",
-      },
-    },
-    vaultRoot: input.vaultRoot,
-    wake: buildHostedExecutionEnvironmentInterviewCompletedWake({
-      completedAt: input.item.occurredAt,
-      completionId: "550e8400-e29b-41d4-a716-446655440000",
-      eventId: input.item.dedupeKey,
-      memberId: TEST_USER_ID,
-      occurredAt: input.item.occurredAt,
-      topics: [{
-        answers: [{
-          aspectId: "sleep-environment",
-          indicatorId: "night_temp_c",
-          note: "The bedroom stays near 19 degrees at night.",
-          value: 19,
-        }],
-        topicId: "sleep:0",
-      }],
-    }),
-  });
-}
-
 function createResolvedPendingEffectsSystemMailboxItem(
   item: HostedMailboxItem,
 ): HostedMailboxResolvedImportItem {
@@ -2096,10 +2042,10 @@ function createAssistantUsageRecord(
     rawUsageJsonHash: null,
     reasoningTokens: null,
     reportingUserId: null,
-    requestedModel: "gpt-5.6-terra",
+    requestedModel: "gpt-6-sol",
     routeId: "primary",
     schema: ASSISTANT_USAGE_SCHEMA,
-    servedModel: "gpt-5.6-terra",
+    servedModel: "gpt-6-sol",
     sessionId: "asst_entrypoint_usage",
     stripeMeterSource: "murph",
     surface: null,
@@ -2169,6 +2115,7 @@ function createDeviceSyncResolvedConfig(): HostedAssistantRuntimeResolvedConfig 
 
 function createSnapshotDeviceSyncPort(input: {
   connectionId: string;
+  connectionStatus?: "active" | "disconnected";
   nextReconcileAt: string;
   onApplyUpdates?: (() => Promise<void> | void) | null;
   onFetchSnapshot?: ((signal: AbortSignal | null) => Promise<void> | void) | null;
@@ -2187,7 +2134,13 @@ function createSnapshotDeviceSyncPort(input: {
       await input.onApplyUpdates?.();
       return {
         appliedAt: request.occurredAt ?? new Date().toISOString(),
-        updates: [],
+        updates: request.updates.map((update) => ({
+          connection: null,
+          connectionId: update.connectionId,
+          status: "updated" as const,
+          tokenUpdate: "unchanged" as const,
+          writeUpdate: "applied" as const,
+        })),
         userId: TEST_USER_ID,
       };
     },
@@ -2221,7 +2174,7 @@ function createSnapshotDeviceSyncPort(input: {
               metadata: {},
               provider: "whoop",
               scopes: ["offline", "read:recovery", "read:sleep", "read:workout"],
-              status: "active",
+              status: input.connectionStatus ?? "active",
               updatedAt: TEST_NOW,
             },
             credential: {
@@ -2673,7 +2626,6 @@ export {
   createWorkspaceState,
   describeCheckpointConversationWatermarkTransition,
   enqueueDeviceSyncSystemMailboxItemForTest,
-  enqueueEnvironmentInterviewSystemMailboxItemForTest,
   enqueuePendingEffectsSystemMailboxItemForTest,
   ensureHostedBootstrapMetadataForSystemMailboxTest,
   execFileAsync,

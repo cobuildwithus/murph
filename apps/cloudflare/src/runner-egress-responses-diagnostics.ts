@@ -1,7 +1,3 @@
-import {
-  HOSTED_ASSISTANT_VENICE_PROVIDER_MODELS,
-} from "@murphai/hosted-execution/assistant-model";
-
 const OPENAI_CACHE_DIAGNOSTIC_MODEL_KINDS = new Set([
   "gpt-4.1",
   "gpt-4.1-mini",
@@ -9,17 +5,17 @@ const OPENAI_CACHE_DIAGNOSTIC_MODEL_KINDS = new Set([
   "gpt-5.2",
   "gpt-5.3-codex",
   "gpt-5.3-codex-spark",
+  "gpt-6.1-sol",
+  "gpt-6-sol",
+  "gpt-6-luna",
   "gpt-5.6-luna",
   "gpt-5.6-sol",
-  "gpt-5.6-terra",
+  "gpt-6-astra",
   "o3",
   "o3-mini",
   "o4-mini",
 ]);
-const VENICE_CACHE_DIAGNOSTIC_MODEL_KINDS: ReadonlySet<string> = new Set(
-  Object.values(HOSTED_ASSISTANT_VENICE_PROVIDER_MODELS),
-);
-const HOSTED_OPENAI_CACHE_DIAGNOSTIC_VERSION = 3;
+const HOSTED_OPENAI_CACHE_DIAGNOSTIC_VERSION = 4;
 const OPENAI_CACHE_DIAGNOSTIC_MAX_JSON_BYTES = 6 * 1024 * 1024;
 const OPENAI_CACHE_DIAGNOSTIC_MAX_FULL_FINGERPRINT_BYTES = 256 * 1024;
 const OPENAI_CACHE_DIAGNOSTIC_MIN_DIGEST_BYTES = 4 * 1024;
@@ -64,6 +60,7 @@ const OPENAI_CACHE_DIAGNOSTIC_SAFE_FUNCTION_NAME_PATTERN =
 const OPENAI_CACHE_DIAGNOSTIC_UNSAFE_FUNCTION_NAME_PATTERN =
   /authorization|bearer|cookie|password|secret|token|api_?key|(?:sk|pk|rk)_(?:live|test)_|whsec_/iu;
 const OPENAI_CACHE_DIAGNOSTIC_INPUT_ITEM_TYPE_KINDS = [
+  "additional_tools",
   "computer_call",
   "computer_call_output",
   "file_search_call",
@@ -115,31 +112,17 @@ const OPENAI_CACHE_DIAGNOSTIC_CODEX_COMPACTION_PHASE_KINDS = new Set([
   "standalone_turn",
 ]);
 
-export type HostedOpenAiCacheDiagnosticEndpointKind = "responses" | "responses_compact";
-export type HostedResponsesDiagnosticProviderKind = "openai" | "venice";
+export type HostedOpenAiCacheDiagnosticEndpointKind = "responses";
 type HostedRunnerDiagnosticScalar = boolean | null | number | string;
 export type HostedRunnerDiagnosticJson = Record<
   string,
   HostedRunnerDiagnosticScalar | HostedRunnerDiagnosticScalar[]
 >;
 
-export function readHostedResponsesRequestModelKind(body: ArrayBuffer): string | null {
-  try {
-    const parsed = JSON.parse(OPENAI_CACHE_DIAGNOSTIC_TEXT_DECODER.decode(body));
-    return isHostedOpenAiDiagnosticRecord(parsed)
-      ? readStringRecordProperty(parsed, "model")
-      : null;
-  } catch {
-    return null;
-  }
-}
-
 export async function buildHostedOpenAiCacheDiagnostic(input: {
-  canonicalModelKind?: string | null;
   endpointKind: HostedOpenAiCacheDiagnosticEndpointKind;
   fingerprintSecret?: string | null;
   method: string;
-  providerKind?: HostedResponsesDiagnosticProviderKind;
   requestBytes: Uint8Array;
   turnMetadataHeader?: string | null;
 }): Promise<HostedRunnerDiagnosticJson> {
@@ -153,7 +136,7 @@ export async function buildHostedOpenAiCacheDiagnostic(input: {
     jsonType: "unknown",
     jsonValid: false,
     methodKind: readOpenAiDiagnosticMethodKind(input.method),
-    providerKind: input.providerKind ?? "openai",
+    providerKind: "openai",
     requestBytes: input.requestBytes.byteLength,
   };
   await appendCodexTurnMetadataDiagnostics({
@@ -189,13 +172,9 @@ export async function buildHostedOpenAiCacheDiagnostic(input: {
   }
 
   diagnostic.requestFieldCount = Object.keys(parsed).length;
-  const requestModel = readStringRecordProperty(parsed, "model");
   diagnostic.modelKind = readOpenAiDiagnosticModelKind(
-    input.canonicalModelKind ?? requestModel,
+    readStringRecordProperty(parsed, "model"),
   );
-  if ((input.providerKind ?? "openai") === "venice") {
-    diagnostic.upstreamModelKind = readVeniceDiagnosticModelKind(requestModel);
-  }
   diagnostic.cacheRetentionKind = readOpenAiCacheRetentionKind(parsed.prompt_cache_retention);
 
   const cacheNamespace = readStringRecordProperty(parsed, "prompt_cache_key");
@@ -247,11 +226,54 @@ export async function buildHostedOpenAiCacheDiagnostic(input: {
   });
 
   diagnostic.toolCount = Array.isArray(parsed.tools) ? parsed.tools.length : 0;
+  await appendCacheSettingsDiagnostics(parsed, diagnostic, fingerprintKey);
   diagnostic.includeCount = Array.isArray(parsed.include) ? parsed.include.length : 0;
   diagnostic.storePresent = Object.hasOwn(parsed, "store");
   diagnostic.streamPresent = Object.hasOwn(parsed, "stream");
 
   return diagnostic;
+}
+
+async function appendCacheSettingsDiagnostics(
+  parsed: Record<string, unknown>,
+  diagnostic: HostedRunnerDiagnosticJson,
+  fingerprintKey: CryptoKey | null,
+): Promise<void> {
+  const record = (value: unknown): Record<string, unknown> =>
+    isHostedOpenAiDiagnosticRecord(value) ? value : {};
+  const options = record(parsed.prompt_cache_options);
+  const reasoning = record(parsed.reasoning);
+  const text = record(parsed.text);
+  diagnostic.comparisonResponsePresent = readStringRecordProperty(options, "comparison_response_id") !== null;
+  for (const [field, value, allowed] of [
+    ["cacheModeKind", options.mode, ["implicit", "explicit"]],
+    ["cacheTtlKind", options.ttl, ["30m"]],
+    ["reasoningEffortKind", reasoning.effort, ["none", "minimal", "low", "medium", "high", "xhigh"]],
+    ["verbosityKind", text.verbosity, ["low", "medium", "high"]],
+    ["serviceTierKind", parsed.service_tier, ["auto", "default", "flex", "priority"]],
+  ] as const) {
+    appendAllowedStringDiagnosticKind({ allowed: new Set<string>(allowed), field, output: diagnostic, value });
+  }
+  // Responses Lite moves tools into input. Top-level toolCount alone reports
+  // zero even when native Codex sent its complete tool surface.
+  const additionalTools = (Array.isArray(parsed.input) ? parsed.input : [])
+    .filter((item) => record(item).type === "additional_tools")
+    .map((item) => record(item).tools);
+  diagnostic.additionalToolsItemCount = additionalTools.length;
+  diagnostic.additionalToolCount = additionalTools.reduce<number>((sum, tools) => sum + (Array.isArray(tools) ? tools.length : 0), 0);
+  for (const [field, value] of [
+    ["effectiveTools", [parsed.tools ?? [], ...additionalTools]],
+    ["responseFormat", text.format ?? null],
+  ] as const) {
+    if (field === "responseFormat" && value === null) continue;
+    const bytes = encodeOpenAiDiagnosticJsonValue(value);
+    diagnostic[`${field}Bytes`] = bytes?.byteLength ?? 0;
+    const eligible = Boolean(fingerprintKey && bytes && bytes.byteLength <= OPENAI_CACHE_DIAGNOSTIC_MAX_FULL_FINGERPRINT_BYTES);
+    diagnostic[`${field}FingerprintPresent`] = eligible;
+    if (eligible && fingerprintKey && bytes) {
+      diagnostic[`${field}Fingerprint`] = await hmacDiagnosticFingerprint({ bytes, fieldPrefix: field, fingerprintKey });
+    }
+  }
 }
 
 async function appendFingerprintDiagnostics(input: {
@@ -347,16 +369,6 @@ function readOpenAiDiagnosticModelKind(value: string | null): string {
     return "missing";
   }
   return OPENAI_CACHE_DIAGNOSTIC_MODEL_KINDS.has(normalized) ? normalized : "other";
-}
-
-export function readVeniceDiagnosticModelKind(value: string | null): string {
-  const normalized = value?.split(":", 1)[0]?.trim() ?? "";
-  if (!normalized) {
-    return "missing";
-  }
-  return VENICE_CACHE_DIAGNOSTIC_MODEL_KINDS.has(normalized)
-    ? normalized
-    : "other";
 }
 
 function readOpenAiCacheRetentionKind(value: unknown): string {

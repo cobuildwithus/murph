@@ -40,6 +40,7 @@ import {
 import { describe, expect, it, vi } from "vitest";
 
 import type { AssistantHostedToolContext } from "../src/assistant/hosted-tool-context.ts";
+import { createAssistantGroupEmailOutboxTool } from "../src/assistant/group-email-outbox.ts";
 import type {
   AssistantHostedGroupSharedReader,
   AssistantHostedPrivateImageUrlPublisher,
@@ -272,6 +273,10 @@ describe("murph.group dynamic tool", () => {
       .toContain("trusted host owns the exact consent copy");
     expect(GROUP_TOOL_INPUT_PROPERTIES.projectionScopes.description)
       .toContain("actual scope snapshot");
+    expect(GROUP_TOOL_INPUT_PROPERTIES.projectionScopes.description)
+      .toContain("Let reported counts carry date coverage");
+    expect(GROUP_TOOL_INPUT_PROPERTIES.projectionScopes.description)
+      .not.toContain("State requested versus actually available date coverage");
     expect(GROUP_TOOL_INPUT_PROPERTIES.membershipId.description)
       .toContain("exact opaque membershipId from list_memberships");
     expect(GROUP_TOOL_INPUT_PROPERTIES.cursor.description)
@@ -286,6 +291,21 @@ describe("murph.group dynamic tool", () => {
       .toBe(
         'Required for action="set_chat_avatar" with avatarSource="image_ref". Use the exact JPG/PNG/WebP ref under raw/inbox/** (user-sent) or raw/captures/** (including generated captures); never invent or modify it.',
       );
+  });
+
+  it("exposes authorized group data without a discovery round in group conversations", () => {
+    const direct = resolveMurphDynamicTools({ groupAvailable: true, progressUpdateMode: "direct" });
+    const group = resolveMurphDynamicTools({ groupAvailable: true, progressUpdateMode: "group" });
+    const directData = direct.find((tool) => tool.name === "group_data");
+    const groupData = group.find((tool) => tool.name === "group_data");
+    expect(directData).toMatchObject({ deferLoading: true });
+    expect(groupData).toMatchObject({ deferLoading: false });
+    expect(groupData?.inputSchema).toBe(directData?.inputSchema);
+    expect(group.map((tool) => tool.name)).toEqual(direct.map((tool) => tool.name));
+    expect(group.filter((tool) => tool.name.startsWith("group_") && tool.name !== "group_data")
+      .every((tool) => "deferLoading" in tool && tool.deferLoading === true)).toBe(true);
+    expect(resolveMurphDynamicTools({ groupAvailable: false, progressUpdateMode: "group" })
+      .some((tool) => tool.name === "group_data")).toBe(false);
   });
 
   it("advertises family-bounded schemas", () => {
@@ -377,7 +397,7 @@ describe("murph.group dynamic tool", () => {
     expect(MURPH_GROUP_SHARED_READ_TOOL.description)
       .toContain('status="partial" means omittedParticipantIds');
     expect(MURPH_GROUP_SHARED_READ_TOOL.description)
-      .toContain("result is incomplete");
+      .toContain("infer nothing else about them");
     const scheduledGroupTools = resolveMurphDynamicTools({
       groupAvailable: false,
       groupPermissionOfferAvailable: true,
@@ -1424,6 +1444,8 @@ describe("murph.group dynamic tool", () => {
   it("uses the existing metric scope for bounded participant history, including detached reads", async () => {
     expect(MURPH_GROUP_SHARED_READ_TOOL.inputSchema.properties.history.description).toContain("every active metric grant already covers this window");
     expect(MURPH_GROUP_SHARED_READ_TOOL.inputSchema.properties.history.description).toContain("not_granted means the metric itself is unshared");
+    expect(MURPH_GROUP_SHARED_READ_TOOL.inputSchema.properties.history.description).toContain("Let trend counts carry date coverage");
+    expect(MURPH_GROUP_SHARED_READ_TOOL.inputSchema.properties.history.description).not.toContain("State requested range");
     expect(JSON.stringify(MURPH_GROUP_SHARED_READ_TOOL.inputSchema)).not.toContain("historyDays");
     const args = {
       action: "read_shared", participantId: "participant_history",
@@ -1449,6 +1471,7 @@ describe("murph.group dynamic tool", () => {
       nextUsageOrdinal: () => 1, progressDelivery: null, request, vaultRoot: null,
     });
     expect(groupSharedReadRequest).toHaveBeenCalledExactlyOnceWith({
+      includeCompanionPresence: true,
       projectionScopes: args.projectionScopes, participantId: args.participantId, history: args.history,
     });
   });
@@ -1495,7 +1518,7 @@ describe("murph.group dynamic tool", () => {
       env: {}, fetchImpl: fetch, hostedToolContext: createGroupHostedToolContext({ groupSharedReadRequest, groupToolAvailable: false }),
       nextUsageOrdinal: () => 1, progressDelivery: null, request, vaultRoot: null,
     });
-    expect(groupSharedReadRequest).toHaveBeenCalledWith({ projectionScopes, freshness });
+    expect(groupSharedReadRequest).toHaveBeenCalledWith({ includeCompanionPresence: true, projectionScopes, freshness });
     expect(readGroupToolPayload(result)).toMatchObject({ result: { freshness: metadata } });
     expect(MURPH_GROUP_SHARED_READ_PERMISSION_OFFER_TOOL.inputSchema.properties).toHaveProperty("freshness");
     expect(MURPH_GROUP_SHARED_READ_TOOL.inputSchema.properties).not.toHaveProperty("freshness");
@@ -1730,6 +1753,7 @@ describe("murph.group dynamic tool", () => {
 
     expect(result.rpcResult.success).toBe(true);
     expect(groupSharedReadRequest).toHaveBeenCalledWith({
+      includeCompanionPresence: true,
       projectionScopes: [
         { projectionKind: "steps-days.v0" },
         { projectionKind: "device-sync-status.v0" },
@@ -6227,6 +6251,96 @@ describe("murph.group dynamic tool", () => {
 });
 
 describe("murph.group email actions", () => {
+  it.each(["labels", "participant", "member", "handles"] as const)(
+    "merges email batches with %s changes while preserving authority", async (change) => {
+      const vaultRoot = await mkdtemp(join(tmpdir(), "group-email-label-batches-"));
+      try {
+        await initializeVault({ vaultRoot });
+        const scopes = [
+          { projectionKind: "steps-days.v0" as const },
+          { projectionKind: "sleep-times.v0" as const },
+          { projectionKind: "deep-sleep-sources-days.v1" as const },
+          { projectionKind: "workouts.v0" as const },
+        ];
+        const authority = { automationId: "automation_report", occurrenceAt: "2026-08-10T13:00:00.000Z" };
+        const groupRequest = vi.fn<GroupToolRequest>(async () => ({
+          action: "prepare_email", result: {
+            status: "ok", authorizationProof: "a".repeat(64), groupId: "group_report",
+            missingEmailParticipants: [],
+            participants: ["a", "b"].map((id) => ({
+              memberId: `member_${id}`, hasEmail: true,
+              authorizedShares: scopes.map((scope) => ({
+                projectionScopeKey: scope.projectionKind, shareId: `share_${id}_${scope.projectionKind}`,
+              })),
+            })),
+          },
+        }));
+        const groupSharedReadRequest = vi.fn<GroupSharedReadRequest>(async ({ projectionScopes }) => {
+          const sparse = projectionScopes.length === 1;
+          return { status: "ok", requestedProjectionScopeKeys: projectionScopes.map((scope) => scope.projectionKind),
+            members: ["a", "b"].map((id, index) => {
+              const row = sharedEmailMember({ memberId: `member_${id}`, participantId: `participant_${id}`,
+                values: { steps: 8400 + index, workouts: 0 } });
+              return { ...row,
+                displayName: sparse ? ["Participant FE225EF08E25", "Cedar"][index]! : ["Cedar", "Rowan"][index]!,
+                participantId: sparse && change === "participant" ? `changed_${id}` : row.participantId,
+                memberId: sparse && change === "member" ? `changed_${id}` : row.memberId,
+                currentTurnHandles: sparse && change === "handles" ? ["+12125550123"] : [],
+                projections: row.projections.filter((projection) =>
+                  projectionScopes.some((scope) => scope.projectionKind === projection.projectionScopeKey)
+                ).map((projection) => sparse
+                  ? { ...projection, dataStatus: "missing" as const, records: [] } : projection),
+              };
+            }),
+          };
+        });
+        const effect = createAssistantGroupEmailOutboxTool({
+          authority, groupTool: { request: groupRequest },
+          sessionId: "session_report", turnId: "turn_report", vault: vaultRoot,
+        });
+        const closeCapability = vi.fn(() => effect.closeCapability());
+        const context = { ...createGroupHostedToolContext({
+          currentScheduledAutomationAuthority: () => authority, groupSharedReadRequest,
+        }), groupEmailEffect: effect, closeGroupEmailCapability: closeCapability };
+        const request = readMurphDynamicToolRequest(groupToolCall({
+          action: "read_shared", audience: "group_email", projectionScopes: scopes,
+        }));
+        if (!request) throw new Error("Expected email preparation request.");
+        const result = await executeMurphDynamicToolRequest({
+          env: {}, fetchImpl: fetch, hostedToolContext: context,
+          nextUsageOrdinal: () => 1, progressDelivery: null, request, vaultRoot,
+        });
+        expect(groupSharedReadRequest).toHaveBeenCalledTimes(2);
+        expect(readGroupToolPayload(result)).toMatchObject({
+          result: { status: change === "labels" ? "ok" : "unavailable" },
+        });
+        if (change === "labels") {
+          expect(readGroupToolPayload(result)).toMatchObject({ result: {
+            status: "ok", requestedProjectionScopeKeys: scopes.map((scope) => scope.projectionKind),
+            members: ["Cedar", "Rowan"].map((displayName) => ({
+              displayName, projections: {
+                "steps-days.v0": { status: "available" },
+                "sleep-times.v0": { status: "available" },
+                "deep-sleep-sources-days.v1": { status: "available" },
+                "workouts.v0": { status: "missing" },
+              },
+            })),
+          } });
+          expect(closeCapability).not.toHaveBeenCalled();
+        } else {
+          expect(closeCapability).toHaveBeenCalledOnce();
+        }
+        const sent = await effect.request({ action: "send_email", subject: "Report",
+          text: "Weekly report", html: "<p>Weekly report</p>" });
+        expect(sent).toMatchObject({ result: { status: change === "labels" ? "accepted" : "unavailable" } });
+        expect(await listAssistantOutboxIntents(vaultRoot)).toHaveLength(change === "labels" ? 1 : 0);
+      } finally {
+        await rm(vaultRoot, { recursive: true, force: true });
+      }
+    },
+  );
+
+
   it("parses email preparation as an audience-bound shared read", () => {
     expect(readMurphDynamicToolRequest(groupToolCall({
       action: "read_shared",

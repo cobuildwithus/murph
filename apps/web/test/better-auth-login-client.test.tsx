@@ -38,7 +38,7 @@ const acceptedConsent: HostedConsentStatus = {
 const payload: HostedAuthenticationCompletionPayload = {
   inviteCode: "synthetic-invite", joinUrl: "/join/synthetic-invite", launchConsentGranted: true,
   messagingSetupRequired: false, stage: "active", status: {
-    billing: { defaultPlanCode: null, plans: [] }, capabilities: { billingReady: true, phoneAuthReady: true },
+    billing: { defaultPlanCode: null, plans: [] }, capabilities: { billingReady: true },
     invite: null, messagingSetupRequired: false, stage: "active", telegramStartRequired: false,
     session: { authenticated: true, expiresAt: "2099-01-01T00:00:00Z", matchesInvite: true },
   },
@@ -89,6 +89,29 @@ test("bootstrap outages retry account loading without another OTP verification",
   expect(mocks.request.mock.calls.filter(([input]) => input.url.endsWith("/verify"))).toHaveLength(1);
   expect(mocks.request.mock.calls.filter(([input]) => input.url.endsWith("/complete"))).toHaveLength(2);
   expect(mocks.completed).toHaveBeenCalledWith(payload);
+});
+
+test("successful sign-in holds one loading state through the redirect without retry controls", async () => {
+  let finish!: (value: HostedAuthenticationCompletionPayload) => void;
+  mocks.request.mockImplementation(async ({ url }: { url: string }) => url.endsWith("/complete")
+    ? new Promise((resolve) => { finish = resolve; }) : { ok: true, memberId: "synthetic-member" });
+  await render();
+  let verifying!: Promise<void>;
+  await act(async () => { verifying = mocks.contact!.onVerify("+15555550127", "123456", new AbortController().signal); });
+  expect(rendered!.container.querySelector("[role=status]")?.textContent).toBe("Loading your account...");
+  expect(rendered!.container.querySelectorAll("button")).toHaveLength(0);
+  await act(async () => { finish(payload); await verifying; });
+  expect(mocks.completed).toHaveBeenCalledWith(payload);
+  expect(rendered!.container.querySelector("[role=status]")?.textContent).toBe("Loading your account...");
+  expect(rendered!.container.textContent).not.toContain("You’re signed in");
+  const restored = new rendered!.window.Event("pageshow");
+  Object.defineProperty(restored, "persisted", { value: true });
+  await act(async () => { rendered!.window.dispatchEvent(restored); });
+  expect(rendered!.container.textContent).toContain("You’re signed in");
+  await click("Continue");
+  expect(rendered!.container.querySelector("[role=status]")?.textContent).toBe("Loading your account...");
+  await act(async () => { finish(payload); });
+  expect(mocks.completed).toHaveBeenCalledTimes(2);
 });
 
 test.each(["active", "checkout"] as const)("%s completion waits for current launch consent", async (stage) => {

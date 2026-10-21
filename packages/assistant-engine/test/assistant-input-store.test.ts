@@ -372,6 +372,60 @@ describe('assistant input event store', () => {
     expect(replay.content.attachmentDescriptors[0]?.fileName).toBeNull()
   })
 
+  it.each(['+12125550123', 'member@example.invalid', null])(
+    'replays legacy private Linq input when sender context becomes %s',
+    async (senderHandle) => {
+      const { vaultRoot } = await createAssistantInputStoreVault('assistant-input-legacy-sender-')
+      const event = {
+        ...createHostedMailboxEventInput({
+          eventId: 'evt_legacy_sender', laneSeq: '42',
+          occurredAt: '2026-04-22T10:00:00.000Z', text: 'synthetic input', threadId: 'chat_1',
+        }),
+        sourceMetadata: {
+          kind: 'linq' as const, externalThreadRouteAuthorityPresent: false,
+          partCount: 1, replyToMessageId: null, service: 'iMessage',
+        },
+      }
+      const first = await upsertAssistantInputEvent({ event, vault: vaultRoot })
+      const enriched = { ...event, sourceMetadata: { ...event.sourceMetadata, senderHandle } }
+      expect(await upsertAssistantInputEvent({ event: enriched, vault: vaultRoot })).toEqual(first)
+      expect(await readAssistantInputEvent({ inputId: first.inputId, vault: vaultRoot })).toEqual(first)
+      for (const conflicting of [
+        { ...enriched, content: { text: 'changed input' } },
+        { ...enriched, sourceMetadata: { ...enriched.sourceMetadata, service: 'SMS' } },
+        { ...enriched, sourceMetadata: { ...enriched.sourceMetadata, externalThreadRouteAuthorityPresent: true } },
+      ]) {
+        await expect(upsertAssistantInputEvent({ event: conflicting, vault: vaultRoot }))
+          .rejects.toMatchObject({ code: 'ASSISTANT_INPUT_EVENT_CONFLICT' })
+      }
+      const retired = await retireAssistantInputEventContent({ inputId: first.inputId, vault: vaultRoot })
+      expect(await upsertAssistantInputEvent({ event: enriched, vault: vaultRoot })).toEqual(retired.event)
+      expect(retired.event?.content.text).toBeNull()
+    },
+  )
+
+  it.each([
+    { externalThreadRouteAuthorityPresent: false, senderHandle: '+12125550123' },
+    { externalThreadRouteAuthorityPresent: false, senderHandle: null },
+    { externalThreadRouteAuthorityPresent: true },
+  ])('rejects changed sender identity outside legacy private inputs: %j', async (metadata) => {
+    const { vaultRoot } = await createAssistantInputStoreVault('assistant-input-sender-conflict-')
+    const event = {
+      ...createHostedMailboxEventInput({
+        eventId: 'evt_sender_conflict', laneSeq: '42',
+        occurredAt: '2026-04-22T10:00:00.000Z', text: 'synthetic input', threadId: 'chat_1',
+      }),
+      sourceMetadata: {
+        kind: 'linq' as const, partCount: 1, replyToMessageId: null, service: 'iMessage', ...metadata,
+      },
+    }
+    await upsertAssistantInputEvent({ event, vault: vaultRoot })
+    await expect(upsertAssistantInputEvent({
+      event: { ...event, sourceMetadata: { ...event.sourceMetadata, senderHandle: '+12125550124' } },
+      vault: vaultRoot,
+    })).rejects.toMatchObject({ code: 'ASSISTANT_INPUT_EVENT_CONFLICT' })
+  })
+
   it('uses source-neutral ids for stored inbox source refs', async () => {
     const { vaultRoot } = await createAssistantInputStoreVault(
       'assistant-input-store-inbox-id-',

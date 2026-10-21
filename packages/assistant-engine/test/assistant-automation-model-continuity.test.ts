@@ -1,3 +1,4 @@
+import { buildAssistantAutomationTurnEnvelope } from '../src/assistant/automation/turn-envelope.ts'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import {
@@ -11,9 +12,6 @@ import {
 import {
   buildCodexResumeState,
 } from '@murphai/operator-config/assistant/codex-resume-state'
-import {
-  HOSTED_CUSTOM_INFERENCE_CODEX_MODEL_PROVIDER_ID,
-} from '@murphai/operator-config/assistant/target-runtime'
 import type {
   AssistantTurnSharedPlan,
   ExecutedAssistantProviderTurnResult,
@@ -65,13 +63,88 @@ beforeEach(() => {
 })
 
 describe('automation model continuity', () => {
+  it.each(['automation-cron', 'automation-auto-reply'] as const)(
+    'upgrades an inherited GPT-6 Sol target only during %s', (turnTrigger) => {
+      const target = requireTarget('gpt-6-sol', 'high', 'openai')
+      const session = createGroupSession(target, null)
+      const input = { prompt: 'Send the reminder.', turnTrigger, vault: '/vault' }
+      const route = resolveAssistantTurnRoute(input, null, resolvedSession(session))
+      expect(route.providerOptions).toMatchObject({ model: 'gpt-6.1-sol', reasoningEffort: 'high' })
+      const explicitEffort = resolveAssistantTurnRoute({ ...input, assistantTargetOverride: { reasoningEffort: 'medium' } }, null, resolvedSession(session))
+      expect(explicitEffort.providerOptions).toMatchObject({ model: 'gpt-6.1-sol', reasoningEffort: 'medium' })
+      const reply = resolveAssistantTurnRoute({ prompt: 'Thanks.', vault: '/vault' }, null, resolvedSession(session))
+      expect(reply.providerOptions).toMatchObject({ model: 'gpt-6-sol', reasoningEffort: 'high' })
+      expect(session.target).toEqual(target)
+    },
+  )
+
+
   it.each([
-    ['gpt-5.6-luna', 'high'],
-    ['gpt-5.6-terra', 'low'],
-    ['gpt-5.6-sol', 'low'],
+    ['gpt-6-sol', 'gpt-6.1-sol'],
+    ['gpt-5.6-luna', 'gpt-6-luna'],
+    ['gpt-5.6-sol', 'gpt-6.1-sol'],
+    ['gpt-5.6-terra', 'gpt-6.1-sol'],
+  ])('upgrades a saved %s pin only for its OpenAI execution', (storedModel, model) => {
+    const preference = Object.freeze({ model: storedModel })
+    const envelope = buildAssistantAutomationTurnEnvelope({
+      assistantTargetOverride: preference,
+      scheduledOccurrenceAt: '2026-09-23T15:00:00.000Z',
+      turnTrigger: 'automation-cron',
+    })
+    expect(envelope.assistantTargetOverride).toEqual(preference)
+    for (const modelProvider of ['openai', 'hosted-openai', 'hosted-chatgpt-openai', 'openai-local-test']) {
+      const session = createGroupSession(requireTarget('gpt-6-sol', 'xhigh', modelProvider), null)
+      for (const serviceTier of ['flex', null] as const) {
+        const route = resolveAssistantTurnRoute(
+          { ...createAutomationInput(preference), ...envelope, serviceTier },
+          null,
+          resolvedSession(session),
+        )
+        expect(route.providerOptions).toMatchObject({ model, modelProvider, reasoningEffort: 'low' })
+      }
+      expect(session.target).toEqual(requireTarget('gpt-6-sol', 'xhigh', modelProvider))
+    }
+    expect(preference).toEqual({ model: storedModel })
+    expect(envelope.scheduledOccurrenceAt).toBe('2026-09-23T15:00:00.000Z')
+  })
+
+  it.each(['gpt-6-luna', 'gpt-6.1-sol', 'gpt-6-astra', 'custom-openai-model'])(
+    'preserves a model without a replacement entry: %s', (model) => {
+      const session = createGroupSession(requireTarget('gpt-6-sol', 'low', 'openai'), null)
+      const route = resolveAssistantTurnRoute(createAutomationInput({ model, reasoningEffort: 'medium' }), null, resolvedSession(session))
+      expect(route.providerOptions).toMatchObject({ model, reasoningEffort: 'medium' })
+    },
+  )
+
+  it('keeps an upgraded reminder scoped to its turn and returns to the conversation target', async () => {
+    const selected = requireTarget('gpt-6-sol', 'medium', 'openai')
+    const session = createGroupSession(selected, createResumeState(selected, 'synthetic-existing-thread'))
+    const turnInput = createAutomationInput({ model: 'gpt-5.6-luna' })
+    const route = resolveAssistantTurnRoute(turnInput, null, resolvedSession(session))
+    expect(route.providerOptions).toMatchObject({ model: 'gpt-6-luna', reasoningEffort: 'low' })
+    const saved = await persistAutomationTurn({ route, session, text: 'Time to put the recycling bin outside.', threadId: 'synthetic-existing-thread', turnInput })
+    expect(saved.target).toEqual(selected)
+    const reply = resolveAssistantTurnRoute({ prompt: 'Done, thanks.', vault: '/vault' }, null, resolvedSession(saved))
+    expect(reply.providerOptions).toMatchObject({ model: 'gpt-6-sol', reasoningEffort: 'medium' })
+    expect(resolveAssistantRouteResumeBinding({ route: reply, sessionResumeState: saved.resumeState })?.threadId).toBe('synthetic-existing-thread')
+  })
+
+  it('upgrades a persisted Terra automation preference without mutating it', () => {
+    const preference = Object.freeze({ model: 'gpt-5.6-terra' })
+    const session = createGroupSession(requireTarget('gpt-6-sol', 'low', 'openai'), null)
+    const route = resolveAssistantTurnRoute(createAutomationInput(preference), null, resolvedSession(session))
+    expect(route.providerOptions).toMatchObject({ model: 'gpt-6.1-sol', reasoningEffort: 'low' })
+    expect(preference.model).toBe('gpt-5.6-terra')
+  })
+
+
+
+  it.each([
+    ['gpt-6-sol', 'gpt-6.1-sol', 'low'],
+    ['gpt-6-luna', 'gpt-6-luna', 'low'],
   ] as const)(
     'applies the canonical %s reasoning default to model-only stored overrides',
-    (model, reasoningEffort) => {
+    (model, expectedModel, reasoningEffort) => {
       const selectedTarget = requireTarget('gpt-5.6-sol', 'xhigh')
       const session = createGroupSession(selectedTarget, null)
 
@@ -82,7 +155,7 @@ describe('automation model continuity', () => {
       )
 
       expect(route.providerOptions).toMatchObject({
-        model,
+        model: expectedModel,
         reasoningEffort,
       })
     },
@@ -107,7 +180,7 @@ describe('automation model continuity', () => {
     const reminderText = 'Burpee time. Twenty clean reps, then continue your day.'
 
     expect(lunaRoute.providerOptions).toMatchObject({
-      model: 'gpt-5.6-luna',
+      model: 'gpt-6-luna',
       reasoningEffort: 'high',
     })
 
@@ -188,140 +261,6 @@ describe('automation model continuity', () => {
     expect(saved.codexResume).toBeNull()
   })
 
-  it('inherits member custom inference and preserves its compatible resume state', async () => {
-    const customTarget = requireTarget(
-      'glm-5.2',
-      'low',
-      HOSTED_CUSTOM_INFERENCE_CODEX_MODEL_PROVIDER_ID,
-    )
-    const providerThreadId = 'provider-custom-thread'
-    const session = createGroupSession(
-      customTarget,
-      createResumeState(customTarget, providerThreadId),
-    )
-    const turnInput = createAutomationInput({
-      model: 'gpt-5.6-luna',
-      reasoningEffort: 'high',
-    })
-    const route = resolveAssistantTurnRoute(
-      turnInput,
-      null,
-      resolvedSession(session),
-    )
-
-    expect(route.providerOptions).toMatchObject({
-      model: 'glm-5.2',
-      modelProvider: HOSTED_CUSTOM_INFERENCE_CODEX_MODEL_PROVIDER_ID,
-      reasoningEffort: 'low',
-    })
-
-    const saved = await persistAutomationTurn({
-      route,
-      session,
-      text: 'Custom inference reminder.',
-      threadId: providerThreadId,
-      turnInput,
-    })
-
-    expect(saved.target).toEqual(customTarget)
-    expect(saved.resumeState?.threadId).toBe(providerThreadId)
-    expect(
-      resolveAssistantRouteResumeBinding({
-        route,
-        sessionResumeState: saved.resumeState,
-      })?.threadId,
-    ).toBe(providerThreadId)
-  })
-
-  it('keeps arbitrary custom model overrides turn-scoped and falls back through history', async () => {
-    const customTarget = requireTarget(
-      'glm-5.2',
-      'low',
-      HOSTED_CUSTOM_INFERENCE_CODEX_MODEL_PROVIDER_ID,
-    )
-    const session = createGroupSession(
-      customTarget,
-      createResumeState(customTarget, 'provider-custom-52-thread'),
-    )
-    const turnInput = createAutomationInput({
-      model: 'glm-5.3',
-      reasoningEffort: 'high',
-    })
-    const route = resolveAssistantTurnRoute(
-      turnInput,
-      null,
-      resolvedSession(session),
-    )
-
-    expect(route.providerOptions).toMatchObject({
-      model: 'glm-5.3',
-      modelProvider: HOSTED_CUSTOM_INFERENCE_CODEX_MODEL_PROVIDER_ID,
-      reasoningEffort: 'low',
-    })
-
-    const saved = await persistAutomationTurn({
-      route,
-      session,
-      text: 'Custom model reminder.',
-      threadId: 'provider-custom-53-thread',
-      turnInput,
-    })
-
-    expect(saved.target).toEqual(customTarget)
-    expect(saved.resumeState).toBeNull()
-    expect(saved.codexResume).toBeNull()
-  })
-
-  it('evaluates the automation preference after a current-turn provider transition', () => {
-    const customTarget = requireTarget(
-      'glm-5.2',
-      'low',
-      HOSTED_CUSTOM_INFERENCE_CODEX_MODEL_PROVIDER_ID,
-    )
-    const session = createGroupSession(customTarget, null)
-
-    const route = resolveAssistantTurnRoute(
-      {
-        ...createAutomationInput({ model: 'gpt-5.6-luna' }),
-        model: 'gpt-5.6-sol',
-        modelProvider: 'vercel-ai-gateway',
-        reasoningEffort: 'low',
-      },
-      null,
-      resolvedSession(session),
-    )
-
-    expect(route.providerOptions).toMatchObject({
-      model: 'gpt-5.6-luna',
-      modelProvider: 'vercel-ai-gateway',
-      reasoningEffort: 'high',
-    })
-  })
-
-  it('preserves an explicit provider transition authored through the canonical contract', () => {
-    const customTarget = requireTarget(
-      'glm-5.2',
-      'low',
-      HOSTED_CUSTOM_INFERENCE_CODEX_MODEL_PROVIDER_ID,
-    )
-    const session = createGroupSession(customTarget, null)
-
-    const route = resolveAssistantTurnRoute(
-      createAutomationInput({
-        model: 'gpt-5.6-luna',
-        modelProvider: 'vercel-ai-gateway',
-        reasoningEffort: 'high',
-      }),
-      null,
-      resolvedSession(session),
-    )
-
-    expect(route.providerOptions).toMatchObject({
-      model: 'gpt-5.6-luna',
-      modelProvider: 'vercel-ai-gateway',
-      reasoningEffort: 'high',
-    })
-  })
 })
 
 function createAutomationInput(
@@ -448,7 +387,7 @@ function resolvedSession(session: AssistantSession): Parameters<
 function requireTarget(
   model: string,
   reasoningEffort: string,
-  modelProvider = 'vercel-ai-gateway',
+  modelProvider = 'hosted-openai',
 ): AssistantModelTarget {
   const target = createAssistantModelTarget({
     model,

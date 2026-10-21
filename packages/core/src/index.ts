@@ -348,6 +348,7 @@ export {
   GENERATED_IMAGE_CAPTURE_TAGS,
   findCaptureByLookup,
   findEventByExternalRef,
+  findEventsByExternalRefs,
   findEventsByRawRefs,
   readStoredCaptureLookupIndex,
   isGeneratedImageCaptureEvent,
@@ -456,3 +457,5 @@ export type {
   EventLedgerShardSource,
 } from "./event-ledger-storage.ts";
 export * from "./integration-ingest-migration.ts";
+
+export { archiveClosedAuditShards, listAuditShardPaths, listAuditShardSources, readAuditShardRows } from "./audit-storage.ts";

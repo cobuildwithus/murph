@@ -29,7 +29,7 @@ export const commonListLimitOptionSchema = z
   .positive()
   .max(200)
   .default(10)
-  .describe('Maximum number of results to return.')
+  .describe('Maximum number of results to return, from 1 to 200.')
 
 export const commonDateRangeOptionDescriptions = {
   from: 'Optional inclusive lower date bound in YYYY-MM-DD form.',

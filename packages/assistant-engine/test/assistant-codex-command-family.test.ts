@@ -7,6 +7,9 @@ import {
 
 describe('Codex command family classification', () => {
   it.each([
+    [['event', 'payload-schema'], 'vault-cli event'],
+    [['event', 'show'], 'vault-cli event'],
+    [['knowledge', 'show'], 'vault-cli knowledge'],
     [['food', 'search-labels'], 'food.search-labels'],
     [['food', 'search-labels-batch'], 'food.search-labels-batch'],
     [['goal', 'list'], 'goal.list'],
@@ -46,6 +49,14 @@ describe('Codex command family classification', () => {
       argv: ['food', 'private-command', 'private-argument'],
       source: 'batch_argv',
     })).toBe('other')
+  })
+
+  it.each([
+    { argv: ['knowledge', 'list'] }, { argv: ['knowledge', 'show-private'] },
+    { argv: ['event', 'list'] }, { argv: ['event', 'payload-schema-private'] },
+    { argv: ['private', 'show'] }, { argv: [] }, { argv: ['knowledge'] },
+  ])('does not broaden the batch command vocabulary for $argv', ({ argv }) => {
+    expect(resolveCodexCommandFamily({ argv, source: 'batch_argv' })).toBe('other')
   })
 
   it.each([

@@ -121,6 +121,9 @@ test("importAssessmentResponse normalizes the payload and ignores the removed va
       filePath: `  ${filePath}  `,
       vault: "  legacy-vault  ",
       title: "  Sleep Survey  ",
+      assessmentType: "clinical-observation",
+      questionnaireSlug: "sleep-survey",
+      relatedIds: ["evt_01J00000000000000000000001"],
       occurredAt: "2026-03-11T14:00:00-05:00",
       importedAt: "2026-03-11T19:05:00Z",
       source: "  manual  ",
@@ -139,10 +142,28 @@ test("importAssessmentResponse normalizes the payload and ignores the removed va
   assert.deepEqual(receivedPayload, {
     sourcePath: filePath,
     title: "Sleep Survey",
+    assessmentType: "clinical-observation",
+    questionnaireSlug: "sleep-survey",
+    relatedIds: ["evt_01J00000000000000000000001"],
     recordedAt: "2026-03-11T19:00:00.000Z",
     importedAt: "2026-03-11T19:05:00.000Z",
     source: "manual",
   });
+});
+
+test("assessment metadata rejects invalid categories and links before calling the writer", async () => {
+  const filePath = await createTempFile("assessment.json", "{}");
+  let writes = 0;
+  for (const metadata of [
+    { assessmentType: "Not A Slug" },
+    { questionnaireSlug: "../questionnaire" },
+    { relatedIds: ["not-a-canonical-id"] },
+  ]) {
+    await assert.rejects(() => importAssessmentResponse({ filePath, ...metadata }, {
+      corePort: { importAssessmentResponse() { writes += 1; } },
+    }));
+  }
+  assert.equal(writes, 0);
 });
 
 test("prepareMealImport and assessment import reject invalid typed fields with stable messages", async () => {

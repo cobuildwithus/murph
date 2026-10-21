@@ -29,6 +29,27 @@ export type NormalizeHostedEmailConversationInput = Omit<
   rawMessage: Uint8Array | ArrayBuffer | string;
 };
 
+/** The trusted runtime supplies normalized text, not browser transcript events. */
+export function normalizeHostedVoiceConversationCapture(input: {
+  callId: string;
+  inputId: string;
+  text: string;
+  occurredAt: string;
+}): InboundCapture {
+  return {
+    source: "voice",
+    externalId: input.inputId,
+    accountId: null,
+    thread: { id: input.callId, isDirect: true },
+    actor: { isSelf: false },
+    occurredAt: input.occurredAt,
+    receivedAt: input.occurredAt,
+    text: input.text,
+    attachments: [],
+    raw: {},
+  };
+}
+
 export async function normalizeHostedLinqConversationCapture(
   input: NormalizeHostedLinqConversationMessageInput,
 ): Promise<InboundCapture> {

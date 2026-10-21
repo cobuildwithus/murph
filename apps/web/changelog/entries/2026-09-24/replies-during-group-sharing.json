@@ -1,0 +1,20 @@
+{
+  "publishedOn": "2026-09-24",
+  "order": 100,
+  "item": {
+    "id": "replies-during-group-sharing",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Keep chatting while group data updates",
+    "summary": "Murph can start answering new messages while shared group data updates in the background.",
+    "details": "Sharing continues when a new message arrives, using saved data and your existing sharing permissions.",
+    "relevanceTags": [
+      "messaging",
+      "groups",
+      "performance"
+    ],
+    "sourcePullRequests": [
+      3684
+    ]
+  }
+}

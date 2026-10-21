@@ -2723,7 +2723,14 @@ test("Junction resource job with an unresolvable resource records an observable 
 
 test("Junction import accountId is stable across local account row re-registration", async () => {
   const importedAccountIds: string[] = [];
-  const provider = createEmptyJunctionBackfillProvider();
+  const provider = createJunctionProvider(async (input) => {
+    const pathname = new URL(readUrl(input)).pathname;
+    if (pathname === "/v2/user/providers/junction-user-1") {
+      return createJsonResponse({ providers: [] });
+    }
+    assert.equal(pathname, "/v2/summary/activity/junction-user-1");
+    return createJsonResponse({ data: [{ id: "synthetic-activity", steps: 4321 }] });
+  }, { summaryResources: ["activity"], timeseriesResources: [] });
 
   const runReconcileWithAccountRowId = async (rowId: string) => {
     await executeJunctionJob(
@@ -4022,6 +4029,7 @@ test.each([
   { label: "empty matching group", reason: "voltage_samples_empty" },
   { label: "missing device identity", reason: "voltage_source_mismatch" },
   { label: "different device identity", reason: "voltage_source_mismatch" },
+  { label: "missing and different device identities", reason: "voltage_source_mismatch" },
   { label: "different source type", reason: "voltage_source_mismatch" },
   { label: "missing sample", reason: "sample_count_mismatch" },
 ])("Junction ECG voltage rejects $label and recovers when corrected", async ({ label, reason }) => {
@@ -4068,7 +4076,8 @@ test.each([
             source: {
               provider: "apple_health_kit",
               type: !corrected && label === "different source type" ? "phone" : "watch",
-              device_id: !corrected && label === "missing device identity"
+              device_id: !corrected && (label === "missing device identity"
+                || label === "missing and different device identities")
                 ? undefined
                 : !corrected && label === "different device identity" ? "watch-b" : "watch-a",
             },
@@ -4081,7 +4090,10 @@ test.each([
                 value: index === 0 ? -0.1 : 0.1,
               }),
             ),
-          }],
+          }, ...(!corrected && label === "missing and different device identities" ? [{
+            source: { provider: "apple_health_kit", type: "watch", device_id: "watch-b" },
+            data: [{ timestamp: "2026-04-02T12:00:00.000Z", type: "lead_i", unit: "mV", value: 0.1 }],
+          }] : [])],
         },
       });
     }
@@ -4112,12 +4124,15 @@ test.each([
       assert.equal(error.failure.retryable, true);
       assert.equal(error.failure.details?.reason, reason);
       if (reason !== "sample_count_mismatch") {
+        const twoGroups = label === "missing and different device identities";
         assert.equal(error.failure.details?.pageCount, 1);
-        assert.equal(error.failure.details?.groupCount, label === "missing groups" ? 0 : 1);
-        assert.equal(error.failure.details?.providerMatchGroupCount, label === "missing groups" ? 0 : 1);
+        assert.equal(error.failure.details?.groupCount, label === "missing groups" ? 0 : twoGroups ? 2 : 1);
+        assert.equal(error.failure.details?.providerMatchGroupCount, label === "missing groups" ? 0 : twoGroups ? 2 : 1);
         assert.equal(error.failure.details?.instanceMatchGroupCount,
           label === "different source type" || label === "empty matching group" ? 1 : 0);
         assert.equal(error.failure.details?.matchedGroupCount, label === "empty matching group" ? 1 : 0);
+        assert.equal(error.failure.details?.instanceMissingGroupCount,
+          label === "missing device identity" || twoGroups ? 1 : 0);
       }
       assert.equal(error.windowStart, job.payload.windowStart);
       return true;

@@ -8,7 +8,7 @@ import {
 
 import { ProviderSearchView, type ProviderSearchViewProps } from "@/app/(dashboard)/records/connect/provider-search-view";
 
-import { ConnectionRow, DisconnectDialog, RecordsPrivacyControls } from "@/app/(dashboard)/records/records-page-client";
+import { ConnectionRow, DisconnectDialog, RecordsPageClient, RecordsPrivacyControls } from "@/app/(dashboard)/records/records-page-client";
 import type { ClinicalRecordConnectionContract } from "@/src/lib/clinical-records/client-contracts";
 
 const savedSource: ClinicalRecordConnectionContract = {
@@ -56,6 +56,17 @@ export function ClinicalRecordsConnectLauncherStudy() {
       data-design-section="clinical-records-connect-launcher"
       inert
     >
+      <div id="records-overview" className="xl:col-span-2">
+        <RecordsPageClient
+          authenticated
+          initialCallback={null}
+          initialLoadError={false}
+          initialConnections={[{
+            ...savedSource, displayName: "Northstar Health", lastCheckedAt: null, nextSyncAt: null,
+            latestRun: { ...savedSource.latestRun!, importedCount: 248, status: "partial", reviewCount: 12, skippedExistingCount: 6 },
+          }]}
+        />
+      </div>
       <StudyState label="Find your provider">
         <ProviderSearchView {...searchPreview} />
       </StudyState>
@@ -75,6 +86,9 @@ export function ClinicalRecordsConnectLauncherStudy() {
       </StudyState>
       <StudyState label="Incomplete import">
         <ul><ConnectionRow connection={{ ...savedSource, latestRun: { ...savedSource.latestRun!, status: "partial", reviewCount: 2, skippedExistingCount: 1 } }} disabled={false} onDisconnect={() => {}} /></ul>
+      </StudyState>
+      <StudyState label="Limited portal coverage">
+        <ul><ConnectionRow connection={{ ...savedSource, lastErrorCode: "provider-search-incomplete", latestRun: { ...savedSource.latestRun!, status: "partial", reviewCount: 4, skippedExistingCount: 2 } }} disabled={false} onDisconnect={() => {}} /></ul>
       </StudyState>
       <StudyState label="Partial results after access ends">
         <ul>

@@ -46,7 +46,9 @@ import {
 } from './reply-delivery-context.js'
 import {
   assistantChannelSupportsReplyBubbles,
+  placeAssistantResponseMediaInReplyBubbles,
   splitAssistantReplyBubbles,
+  stripAssistantResponseMediaPlacement,
 } from './reply-bubbles.js'
 
 export interface AssistantPrecedingReplySegment {
@@ -231,7 +233,7 @@ export async function deliverAssistantReply(input: {
       deliveryIdempotencyKey: hostedDelivery.deliveryIdempotencyKey,
       deliveryTransportIdempotent: hostedDelivery.deliveryTransportIdempotent,
       input: input.input,
-      media: deliveryMedia,
+      media: stripAssistantResponseMediaPlacement(deliveryMedia),
       message: input.response,
       session: input.session,
       sharedPlan: input.sharedPlan,
@@ -243,6 +245,10 @@ export async function deliverAssistantReply(input: {
   const replyBubbles = input.input.reviewedAssistantAskCompletionExpiresAt
     ? [splitReplyBubbles.join('\n\n')]
     : splitReplyBubbles
+  const bubbleMedia = placeAssistantResponseMediaInReplyBubbles({
+    bubbleCount: replyBubbles.length,
+    media: deliveryMedia,
+  })
   if (replyBubbles.length <= 1) {
     return await deliverAssistantCurrentAudienceMessage({
     followUpRequest: input.followUpRequest,
@@ -251,7 +257,7 @@ export async function deliverAssistantReply(input: {
       deliveryIdempotencyKey: hostedDelivery.deliveryIdempotencyKey,
       deliveryTransportIdempotent: hostedDelivery.deliveryTransportIdempotent,
       input: input.input,
-      media: deliveryMedia,
+      media: bubbleMedia[0]!,
       message: replyBubbles[0]!,
       session: input.session,
       sharedPlan: input.sharedPlan,
@@ -281,10 +287,10 @@ export async function deliverAssistantReply(input: {
           channel: deliveryFields.channel,
           deliveryIdempotencyKey: bubbleIdempotencyKey,
           executionContext: input.input.executionContext,
-          media: [],
+          media: bubbleMedia[bubbleIndex]!,
         }),
       input: input.input,
-      media: [],
+      media: bubbleMedia[bubbleIndex]!,
       message: replyBubbles[bubbleIndex]!,
       session,
       sharedPlan: input.sharedPlan,
@@ -296,19 +302,20 @@ export async function deliverAssistantReply(input: {
     }
   }
 
-  return await deliverAssistantCurrentAudienceMessage({
+  const finalOutcome = await deliverAssistantCurrentAudienceMessage({
     followUpRequest: input.followUpRequest,
     dedupeToken: baseDedupeToken,
     answeredMailboxItemIds: input.input.answeredMailboxItemIds ?? [],
     deliveryIdempotencyKey: hostedDelivery.deliveryIdempotencyKey,
     deliveryTransportIdempotent: hostedDelivery.deliveryTransportIdempotent,
     input: input.input,
-    media: deliveryMedia,
+    media: bubbleMedia.at(-1)!,
     message: replyBubbles[replyBubbles.length - 1]!,
     session,
     sharedPlan: input.sharedPlan,
     turnId: input.turnId,
   })
+  return { ...finalOutcome, media: bubbleMedia.flat() }
 }
 
 export function buildAssistantReplyBubbleDeliveryIdempotencyKey(input: {

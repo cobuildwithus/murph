@@ -4,9 +4,11 @@ import {
 } from '@murphai/contracts'
 import {
   HOSTED_ASSISTANT_ASTRA_MODEL,
+  HOSTED_ASSISTANT_GPT_6_SOL_MODEL,
+  HOSTED_ASSISTANT_GPT_61_SOL_MODEL,
+  HOSTED_ASSISTANT_GPT_6_LUNA_MODEL,
   HOSTED_ASSISTANT_LUNA_MODEL,
   HOSTED_ASSISTANT_SOL_MODEL,
-  HOSTED_ASSISTANT_TERRA_MODEL,
   isHostedAssistantProductModel,
   type HostedAssistantProductModel,
   type HostedAssistantReasoningEffort,
@@ -16,20 +18,39 @@ import {
   type AssistantModelTarget,
 } from '@murphai/operator-config/assistant-backend'
 import {
-  compactAssistantProviderConfigInput,
   type AssistantProviderConfigInput,
 } from '@murphai/operator-config/assistant/provider-config'
 import {
-  assistantCodexModelProviderRequiresModelThreadCompatibility,
+  OPENAI_CODEX_MODEL_PROVIDER_ID,
+  HOSTED_OPENAI_CODEX_MODEL_PROVIDER_ID,
+  HOSTED_CHATGPT_OPENAI_CODEX_MODEL_PROVIDER_ID,
+  HOSTED_LOCAL_TEST_CODEX_MODEL_PROVIDER_ID,
 } from '@murphai/operator-config/assistant/target-runtime'
 
 import { normalizeNullableString } from '../shared.js'
 
+// Reviewed replacements apply at execution, after the provider is resolved.
+// Keep stored pins intact so their original preference remains inspectable.
+const AUTOMATION_OPENAI_MODEL_REPLACEMENTS = new Map<string, HostedAssistantProductModel>([
+  [HOSTED_ASSISTANT_LUNA_MODEL, HOSTED_ASSISTANT_GPT_6_LUNA_MODEL],
+  [HOSTED_ASSISTANT_SOL_MODEL, HOSTED_ASSISTANT_GPT_61_SOL_MODEL],
+  ['gpt-5.6-terra', HOSTED_ASSISTANT_GPT_61_SOL_MODEL],
+  [HOSTED_ASSISTANT_GPT_6_SOL_MODEL, HOSTED_ASSISTANT_GPT_61_SOL_MODEL],
+])
+const AUTOMATION_OPENAI_MODEL_PROVIDERS = new Set<string>([
+  OPENAI_CODEX_MODEL_PROVIDER_ID,
+  HOSTED_OPENAI_CODEX_MODEL_PROVIDER_ID,
+  HOSTED_CHATGPT_OPENAI_CODEX_MODEL_PROVIDER_ID,
+  HOSTED_LOCAL_TEST_CODEX_MODEL_PROVIDER_ID,
+])
+
 const AUTOMATION_DEFAULT_REASONING_BY_HOSTED_PRODUCT_MODEL = {
   [HOSTED_ASSISTANT_LUNA_MODEL]: 'high',
-  [HOSTED_ASSISTANT_TERRA_MODEL]: 'low',
   [HOSTED_ASSISTANT_SOL_MODEL]: 'low',
   [HOSTED_ASSISTANT_ASTRA_MODEL]: 'low',
+  [HOSTED_ASSISTANT_GPT_6_SOL_MODEL]: 'low',
+  [HOSTED_ASSISTANT_GPT_61_SOL_MODEL]: 'low',
+  [HOSTED_ASSISTANT_GPT_6_LUNA_MODEL]: 'low',
 } as const satisfies Record<
   HostedAssistantProductModel,
   HostedAssistantReasoningEffort
@@ -58,8 +79,13 @@ export function compactAutomationAssistantTargetOverride(
 
 function resolveAutomationAssistantTargetOverrideDefaults(
   input: AutomationAssistantTargetOverride | null | undefined,
+  modelProvider: string | null | undefined,
 ): AutomationAssistantTargetOverride | null {
-  const target = compactAutomationAssistantTargetOverride(input)
+  const storedTarget = compactAutomationAssistantTargetOverride(input)
+  const replacement = modelProvider && AUTOMATION_OPENAI_MODEL_PROVIDERS.has(modelProvider)
+    ? AUTOMATION_OPENAI_MODEL_REPLACEMENTS.get(storedTarget?.model ?? '')
+    : undefined
+  const target = replacement ? { ...storedTarget, model: replacement } : storedTarget
   if (
     !target?.model ||
     target.reasoningEffort ||
@@ -77,8 +103,9 @@ function resolveAutomationAssistantTargetOverrideDefaults(
 
 export function automationAssistantTargetOverrideToProviderConfigInput(
   input: AutomationAssistantTargetOverride | null | undefined,
+  modelProvider?: string | null,
 ): AssistantProviderConfigInput | null {
-  const target = resolveAutomationAssistantTargetOverrideDefaults(input)
+  const target = resolveAutomationAssistantTargetOverrideDefaults(input, modelProvider)
   if (!target) {
     return null
   }
@@ -90,60 +117,41 @@ export function automationAssistantTargetOverrideToProviderConfigInput(
   }
 }
 
-/**
- * Resolve a persisted turn override against the model provider that will
- * actually execute it. Hosted product model names are managed-inference
- * preferences, not portable model ids for endpoints whose thread identity
- * depends on the exact model. Explicit provider transitions and arbitrary
- * custom model ids remain available to canonical CLI/internal authors.
- */
 export function resolveAutomationAssistantTargetOverrideForTarget(
   input: AutomationAssistantTargetOverride | null | undefined,
   baseTarget: AssistantModelTarget | null | undefined,
+  scheduledTurn = false,
 ): AssistantProviderConfigInput | null {
-  const override = automationAssistantTargetOverrideToProviderConfigInput(input)
-  if (!override) {
-    return null
-  }
-
   const baseConfig = baseTarget
     ? assistantBackendTargetToProviderConfigInput(baseTarget)
     : null
-  const explicitModelProvider = normalizeNullableString(override.modelProvider)
+  const storedOverride = compactAutomationAssistantTargetOverride(input)
+  const inheritedOverride = resolveInheritedScheduledSolOverride(storedOverride, baseConfig, scheduledTurn)
+  if (!storedOverride) {
+    return inheritedOverride
+  }
+  const explicitModelProvider = normalizeNullableString(storedOverride.modelProvider)
   const effectiveModelProvider =
     explicitModelProvider ?? normalizeNullableString(baseConfig?.modelProvider)
-  if (!effectiveModelProvider) {
-    return override
+  const override = automationAssistantTargetOverrideToProviderConfigInput(
+    storedOverride,
+    effectiveModelProvider,
+  )
+  return override ? { ...inheritedOverride, ...override } : inheritedOverride
+}
+
+function resolveInheritedScheduledSolOverride(
+  input: AutomationAssistantTargetOverride | null | undefined,
+  baseConfig: AssistantProviderConfigInput | null,
+  scheduledTurn: boolean,
+): AssistantProviderConfigInput | null {
+  if (!scheduledTurn || input?.model || baseConfig?.model !== HOSTED_ASSISTANT_GPT_6_SOL_MODEL) {
+    return null
   }
-
-  const supportsReasoningEffort =
-    !assistantCodexModelProviderRequiresModelThreadCompatibility(
-      effectiveModelProvider,
-    )
-  const inheritedModelSpecificProvider =
-    explicitModelProvider === null &&
-    assistantCodexModelProviderRequiresModelThreadCompatibility(
-      effectiveModelProvider,
-    )
-  if (
-    !inheritedModelSpecificProvider &&
-    supportsReasoningEffort
-  ) {
-    return override
+  const provider = input?.modelProvider ?? baseConfig.modelProvider
+  if (!provider || !AUTOMATION_OPENAI_MODEL_PROVIDERS.has(provider)) {
+    return null
   }
-
-  const suppressProductModel =
-    inheritedModelSpecificProvider &&
-    Boolean(override.model) &&
-    isHostedAssistantProductModel(override.model)
-  const model = suppressProductModel ? null : override.model ?? null
-  const reasoningEffort = supportsReasoningEffort
-    ? override.reasoningEffort ?? null
-    : null
-
-  return compactAssistantProviderConfigInput({
-    ...(model ? { model } : {}),
-    ...(explicitModelProvider ? { modelProvider: explicitModelProvider } : {}),
-    ...(reasoningEffort ? { reasoningEffort } : {}),
-  })
+  // Inherited reasoning stays on the conversation target; only replace its model.
+  return { model: AUTOMATION_OPENAI_MODEL_REPLACEMENTS.get(baseConfig.model) }
 }

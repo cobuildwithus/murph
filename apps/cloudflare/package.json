@@ -22,7 +22,7 @@
   },
   "scripts": {
     "build": "node ../../scripts/rm-paths.mjs dist && node ../../scripts/run-typescript.mjs package -b tsconfig.build.json --pretty false",
-    "typecheck": "node ../../scripts/run-typescript.mjs package -p tsconfig.typecheck.json --pretty false",
+    "typecheck": "node ../../scripts/run-typescript.mjs check -p tsconfig.typecheck.json --pretty false",
     "test": "pnpm typecheck && pnpm test:node",
     "test:node": "pnpm test:node:workspace && pnpm test:node:containers-helper",
     "test:node:workspace": "pnpm --dir ../.. exec vitest run --config apps/cloudflare/vitest.node.workspace.ts --no-coverage",
@@ -56,6 +56,7 @@
     "runner:docker:smoke:image": "docker build --platform linux/amd64 -f ../../Dockerfile.cloudflare-hosted-runner --build-arg HOSTED_RUNNER_BUNDLE_DIR=.deploy/runner-smoke-bundle -t murph-cloudflare-runner .",
     "runner:docker:smoke:prepared-base": "pnpm runner:docker:smoke:prepare && pnpm runner:docker:smoke:image && pnpm runner:docker:smoke:built",
     "runner:docker:smoke": "pnpm runner:bundle && pnpm runner:docker:base && pnpm runner:docker:smoke:prepare && pnpm runner:docker:smoke:image && pnpm runner:docker:smoke:built",
+    "worker:startup:profile": "mkdir -p .tmp/startup && WRANGLER_WRITE_LOGS=false WRANGLER_SEND_METRICS=false wrangler check startup --args=--containers-rollout=none --outfile=.tmp/startup/worker.cpuprofile",
     "worker:dev:prepared": "pnpm --dir ../.. exec tsx --tsconfig apps/cloudflare/tsconfig.scripts.json apps/cloudflare/scripts/dev-worker.ts",
     "worker:deployment:status": "pnpm exec wrangler deployments status",
     "worker:dev": "pnpm runner:docker:base && pnpm exec wrangler dev",
@@ -77,20 +78,22 @@
     "@murphai/parsers": "workspace:*",
     "@murphai/query": "workspace:*",
     "@murphai/runtime-state": "workspace:*",
-    "jose": "^6.2.3",
-    "openai": "6.45.0"
+    "jose": "^6.2.3"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.16.3",
     "@cloudflare/workers-types": "4.20260518.1",
+    "@murphai/core": "workspace:*",
     "@murphai/hosted-local-harness": "workspace:*",
     "@murphai/operator-config": "workspace:*",
     "@types/node": "^25.6.2",
+    "@types/ws": "8.18.1",
     "esbuild": "^0.28.1",
     "tsx": "^4.20.6",
     "typescript": "^7.0.2",
     "undici": "7.28.0",
     "vitest": "^4.1.6",
-    "wrangler": "4.93.0"
+    "wrangler": "4.93.0",
+    "ws": "8.21.0"
   }
 }

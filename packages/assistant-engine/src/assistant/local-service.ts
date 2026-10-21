@@ -49,7 +49,10 @@ import {
   emitHostedAssistantContextTimingTrace,
   emitHostedAssistantContextSessionResolvedTrace,
 } from './hosted-context-diagnostics.js'
-import { emitHostedAssistantTurnTimingTrace } from './hosted-turn-timing.js'
+import {
+  buildHostedAssistantFinalResponseCompletionTiming,
+  emitHostedAssistantTurnTimingTrace,
+} from './hosted-turn-timing.js'
 import {
   deliverAssistantPrecedingReplies,
   deliverAssistantReaction,
@@ -177,6 +180,7 @@ import { resolveAssistantConversationScope } from './conversation-policy.js'
 import {
   assistantChannelSupportsReplyBubbles,
   stripAssistantReplyBubbleDelimiters,
+  stripAssistantResponseMediaPlacement,
 } from './reply-bubbles.js'
 import type {
   AssistantMessageInput,
@@ -517,7 +521,7 @@ function buildCompletedAssistantAskResult(input: {
     ...(input.responseDisposition === 'none'
       ? { responseDisposition: 'none' as const }
       : {}),
-    media: outcome.media,
+    media: stripAssistantResponseMediaPlacement(outcome.media),
     session: outcome.session,
     delivery: outcome.kind === 'sent' ? outcome.delivery : null,
     deliveryDeferred: outcome.kind === 'queued',
@@ -1529,6 +1533,8 @@ export async function sendAssistantMessageLocal(
           acceptedInputItemsForProviderRequest
         let providerRequestStartedAtMs: number | null = null
         let providerResultReturnedAt: number | null = null
+        // Same instant as providerResultReturnedAt, on the monotonic clock.
+        let providerResultReturnedAtMonotonicMs: number | null = null
         const emitTurnTiming = (timingInput: Parameters<
           typeof emitHostedAssistantTurnTimingTrace
         >[0]) => {
@@ -1842,6 +1848,7 @@ export async function sendAssistantMessageLocal(
             turnId: currentUserTurn.turnId,
           })
           providerResultReturnedAt = Date.now()
+          providerResultReturnedAtMonotonicMs = performance.now()
           emitTurnTiming({
             elapsedMs: elapsedSince(turnTimingStartedAt),
             providerOutcomeKind: providerOutcome.kind,
@@ -2290,6 +2297,7 @@ export async function sendAssistantMessageLocal(
             ? 'clear'
             : resolveAssistantProviderResumeStateAction({
                 codexThreadId: providerResult.codexThreadId ?? null,
+                providerThreadUnchanged: providerResult.providerThreadUnchanged,
                 threadScope,
               })
         if (
@@ -2555,6 +2563,12 @@ export async function sendAssistantMessageLocal(
               ? null
               : Math.max(0, providerResultReturnedAt - providerRequestStartedAtMs),
           providerRequestOrdinal,
+          ...buildHostedAssistantFinalResponseCompletionTiming({
+            completion: providerResult.finalResponseCompletion,
+            finalReplySelected: finalResponseText !== null,
+            providerResultAtEpochMs: providerResultReturnedAt,
+            providerResultAtMonotonicMs: providerResultReturnedAtMonotonicMs,
+          }),
           sinceProviderResultMs:
             providerResultReturnedAt === null || replyIntentReadyAt === null
               ? null

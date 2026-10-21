@@ -4,6 +4,8 @@ import { parseAllowedString, readNullableString, requireBoolean, requireNonNegat
 export const HOSTED_RUNTIME_OWNER_PATH = "/api/internal/hosted-runtime/owner";
 export const HOSTED_RUNTIME_OWNER_PHASES = ["idle", "starting", "active", "retiring"] as const;
 export const HOSTED_RUNTIME_CUTOVER_PHASES = ["legacy", "draining", "postgres"] as const;
+/** `admission`: the member is inactive, suspended or withdrew health-data consent. */
+export const HOSTED_RUNTIME_OWNER_BLOCKED_REASONS = ["admission", "cutover"] as const;
 
 export interface HostedRuntimeOwnerIdentity {
   attemptId: string;
@@ -19,7 +21,6 @@ export interface HostedRuntimeOwnerSnapshot {
   allocationId: string | null;
   runnerContainerName: string | null;
   workspaceVersion: string | null;
-  customInferenceEnvelope: string | null;
   platformAiUsageAllowed: boolean;
   startedAt: string | null;
   acceptedAt: string | null;
@@ -37,10 +38,11 @@ export type HostedRuntimeOwnerCommand =
   | { operation: "claim"; processingMode: HostedWorkspaceInvocationProcessingMode }
   | ({ operation: "select_target"; runnerContainerName: string } & HostedRuntimeOwnerIdentity)
   | ({ operation: "prepare_launch"; runnerContainerName: string; workspaceVersion: string;
-      providerEgressTokenHash: string | null; customInferenceEnvelope: string | null;
+      providerEgressTokenHash: string | null;
       platformAiUsageAllowed: boolean; processingMode: HostedWorkspaceInvocationProcessingMode } & HostedRuntimeOwnerIdentity)
   | ({ operation: "accepted" | "revoke_ai_usage" } & HostedRuntimeOwnerIdentity)
   | ({ operation: "record_failure"; errorCode: string } & HostedRuntimeOwnerIdentity)
+  | ({ operation: "complete"; settledRunnerContainerName: string | null; immediateRecheckRequested: boolean } & HostedRuntimeOwnerIdentity)
   | ({ operation: "retire"; completed: boolean } & HostedRuntimeOwnerIdentity)
   | ({ operation: "release"; runnerContainerName: string | null } & HostedRuntimeOwnerIdentity)
   | ({ operation: "release_completed"; runnerContainerName: string } & HostedRuntimeOwnerIdentity)
@@ -50,6 +52,8 @@ export interface HostedRuntimeOwnerResponse {
   cutover: (typeof HOSTED_RUNTIME_CUTOVER_PHASES)[number];
   status: "claimed" | "existing" | "blocked" | "updated" | "stale" | "observed" | "authorized";
   owner: HostedRuntimeOwnerSnapshot | null;
+  /** Advisory claim detail; absent from older Web releases and other commands. */
+  blockedReason?: (typeof HOSTED_RUNTIME_OWNER_BLOCKED_REASONS)[number];
 }
 
 export function parseHostedRuntimeOwnerCommand(value: unknown): HostedRuntimeOwnerCommand {
@@ -87,7 +91,6 @@ function parseInvocationCommand(r: Record<string, unknown>, operation: string): 
       runnerContainerName: requireString(r.runnerContainerName, "Runtime target"),
       workspaceVersion: requireNonNegativeBigIntString(r.workspaceVersion, "Workspace version"),
       providerEgressTokenHash: readNullableString(r.providerEgressTokenHash, "Provider token hash"),
-      customInferenceEnvelope: readNullableString(r.customInferenceEnvelope, "Inference envelope"),
       platformAiUsageAllowed: requireBoolean(r.platformAiUsageAllowed, "Managed AI admission"),
       processingMode: parseAllowedString(r.processingMode, "Runtime processing mode", HOSTED_WORKSPACE_INVOCATION_PROCESSING_MODES),
     };
@@ -97,6 +100,9 @@ function parseInvocationCommand(r: Record<string, unknown>, operation: string): 
       if (r.errorCode !== "runtime_error" && !isHostedRuntimeFailurePhaseCode(r.errorCode)) throw new TypeError("Unsupported runtime failure code.");
       return { operation, ...identity, errorCode: r.errorCode };
     }
+    case "complete": return { operation, ...identity,
+      settledRunnerContainerName: readNullableString(r.settledRunnerContainerName, "Settled target"),
+      immediateRecheckRequested: requireBoolean(r.immediateRecheckRequested, "Immediate runtime recheck") };
     case "retire": return { operation, ...identity, completed: requireBoolean(r.completed, "Runtime completion") };
     case "release": return { operation, ...identity, runnerContainerName: readNullableString(r.runnerContainerName, "Retired target") };
     case "release_completed": return { operation, ...identity, runnerContainerName: requireString(r.runnerContainerName, "Completed target") };
@@ -113,10 +119,16 @@ function parseInvocationCommand(r: Record<string, unknown>, operation: string): 
 export function parseHostedRuntimeOwnerResponse(value: unknown): HostedRuntimeOwnerResponse {
   const r = requireObject(value, "Runtime ownership response");
   const owner = r.owner === null ? null : parseOwner(r.owner);
+  const status = parseAllowedString(r.status, "Runtime ownership status", ["claimed", "existing", "blocked", "updated", "stale", "observed", "authorized"] as const);
+  // Unknown reasons are dropped, not rejected: a newer Web must not break claims.
+  const blockedReason = status === "blocked"
+    ? HOSTED_RUNTIME_OWNER_BLOCKED_REASONS.find((reason) => reason === r.blockedReason)
+    : undefined;
   return {
     cutover: parseAllowedString(r.cutover, "Runtime cutover phase", HOSTED_RUNTIME_CUTOVER_PHASES),
-    status: parseAllowedString(r.status, "Runtime ownership status", ["claimed", "existing", "blocked", "updated", "stale", "observed", "authorized"] as const),
+    status,
     owner,
+    ...(blockedReason ? { blockedReason } : {}),
   };
 }
 
@@ -141,7 +153,6 @@ function parseOwner(value: unknown): HostedRuntimeOwnerSnapshot {
     allocationId: readNullableString(r.allocationId, "Runtime allocation"),
     runnerContainerName: readNullableString(r.runnerContainerName, "Runtime target"),
     workspaceVersion: r.workspaceVersion === null ? null : requireNonNegativeBigIntString(r.workspaceVersion, "Workspace version"),
-    customInferenceEnvelope: readNullableString(r.customInferenceEnvelope, "Inference envelope"),
     platformAiUsageAllowed: requireBoolean(r.platformAiUsageAllowed, "Managed AI admission"),
     startedAt: readNullableString(r.startedAt, "Runtime start"),
     acceptedAt: readNullableString(r.acceptedAt, "Runtime acceptance"),

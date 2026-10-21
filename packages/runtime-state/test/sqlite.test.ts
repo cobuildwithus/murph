@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { copyFileSync, existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -41,6 +41,47 @@ describe("runtime-state sqlite", () => {
       expect(tableExists(database, "missing_entries")).toBe(false);
     } finally {
       database.close();
+    }
+  });
+
+  it("sets new page size before WAL and preserves committed sidecars on restore", () => {
+    const root = mkdtempSync(path.join(tmpdir(), "runtime-state-pages-"));
+    tempRoots.push(root);
+    const databasePath = path.join(root, "state.sqlite");
+    const restoredPath = path.join(root, "restored.sqlite");
+    const database = openSqliteRuntimeDatabase(databasePath, { pageSize: 8192 });
+    try {
+      expect(database.prepare("PRAGMA page_size").get()?.page_size).toBe(8192);
+      expect(database.prepare("PRAGMA journal_mode").get()?.journal_mode).toBe("wal");
+      database.exec("PRAGMA wal_autocheckpoint = 0; CREATE TABLE entries (value TEXT)");
+      database.prepare("INSERT INTO entries VALUES (?)").run("committed in WAL");
+      // The writer is quiescent but open: the committed row still needs its WAL.
+      for (const suffix of ["", "-wal", "-shm"]) {
+        copyFileSync(`${databasePath}${suffix}`, `${restoredPath}${suffix}`);
+      }
+      const restored = openSqliteRuntimeDatabase(restoredPath, { readOnly: true, pageSize: 4096 });
+      try {
+        expect(restored.prepare("PRAGMA page_size").get()?.page_size).toBe(8192);
+        expect(restored.prepare("SELECT value FROM entries").get()?.value).toBe("committed in WAL");
+        expect(restored.prepare("PRAGMA integrity_check").get()?.integrity_check).toBe("ok");
+      } finally {
+        restored.close();
+      }
+    } finally {
+      database.close();
+    }
+    const reopened = openSqliteRuntimeDatabase(databasePath, { pageSize: 4096 });
+    try {
+      expect(reopened.prepare("PRAGMA page_size").get()?.page_size).toBe(8192);
+      expect(reopened.prepare("SELECT value FROM entries").get()?.value).toBe("committed in WAL");
+    } finally {
+      reopened.close();
+    }
+    const defaultDatabase = openSqliteRuntimeDatabase(path.join(root, "default.sqlite"));
+    try {
+      expect(defaultDatabase.prepare("PRAGMA page_size").get()?.page_size).toBe(4096);
+    } finally {
+      defaultDatabase.close();
     }
   });
 

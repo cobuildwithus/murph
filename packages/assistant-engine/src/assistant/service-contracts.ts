@@ -130,6 +130,8 @@ export interface AssistantTurnEnvironment {
 }
 
 export interface AssistantMessageInput extends AssistantSessionResolutionFields {
+  /** Host-attested exact reaction target; never extracted from prompt text. */
+  reactionRouting?: import('./reaction-routing.js').AssistantReactionRoutingInput | null
   abortSignal?: AbortSignal
   // Exact-turn authorization for private assistant style settings. Email
   // ingress must opt in after authenticating the current member sender.

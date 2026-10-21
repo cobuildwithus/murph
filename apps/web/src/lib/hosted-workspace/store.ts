@@ -967,9 +967,13 @@ function assertHostedSystemMailboxProgressGenerationTransition(input: {
     ? input.requested === 0n || input.requested === 1n
     : input.requested === input.current || input.requested === input.current + 1n;
   if (!transitionAllowed) {
-    throw new TypeError(
+    throw Object.assign(new TypeError(
       "Hosted workspace systemMailboxProgressGeneration must stay equal or advance by one.",
-    );
+    ), {
+      code: input.current === null ? "HOSTED_WORKSPACE_PROGRESS_INVALID_INITIAL"
+        : input.requested < input.current ? "HOSTED_WORKSPACE_PROGRESS_REGRESSED"
+        : "HOSTED_WORKSPACE_PROGRESS_SKIPPED_INCREMENT",
+    });
   }
 }
 

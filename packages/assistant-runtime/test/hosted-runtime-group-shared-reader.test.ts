@@ -100,6 +100,16 @@ describe("createHostedGroupSharedReader", () => {
     });
   });
 
+  it("requests contact metadata only when the caller opts in", async () => {
+    const request = vi.fn(async (): Promise<HostedRuntimeGroupToolResponse> => ({ action: "read_shared", result: { status: "none", members: [], requestedProjectionScopeKeys: ["steps-days.v0"] } }));
+    const reader = createHostedGroupSharedReader({ groupToolPort: { request } as HostedRuntimeGroupToolPort });
+    await reader.request({ projectionScopes: [STEPS_SCOPE], includeCompanionPresence: true });
+    expect(request).toHaveBeenCalledExactlyOnceWith({ action: "read_shared", projectionScopes: [STEPS_SCOPE], includeCompanionPresence: true });
+    request.mockClear();
+    await reader.request({ projectionScopes: [STEPS_SCOPE] });
+    expect(request).toHaveBeenCalledExactlyOnceWith({ action: "read_shared", projectionScopes: [STEPS_SCOPE] });
+  });
+
   it("rejects empty and duplicate scope requests without Web I/O", async () => {
     const request = vi.fn();
     const reader = createHostedGroupSharedReader({

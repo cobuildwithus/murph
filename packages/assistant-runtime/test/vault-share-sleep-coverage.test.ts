@@ -104,17 +104,23 @@ it.each([
   "rem-sleep-days.v0", "rem-sleep-sources-days.v1",
 ] as const)("keeps a nap-only date missing in shared %s", async (scope) => {
   const root = await createVault(sleepRecords({ provider: "oura", sleepType: "nap" }));
-  // Warm the ordinary store before the share reads its existing provider summaries.
+  // A cold personal sleep read need not materialize unrelated global metrics.
   const personal = await summarizeWearableSleepRuntime(root, { date: DATE });
   expect(personal[0]?.sleepType).toBe("nap");
   expect(personal[0]?.totalSleepMinutes.selection.value).toBe(22);
+  const [projected] = await listMetricPointsByPublicSource(root, {
+    from: DATE, to: DATE, providers: ["oura"], metricKeys: ["total-sleep-minutes"],
+  });
+  expect(projected?.points[0]).toMatchObject({ value: 22, context: { sleepType: "nap" } });
   // Simulate cached MetricPoints from before sleepType was propagated.
   const database = openSqliteRuntimeDatabase(join(root, QUERY_DB_RELATIVE_PATH), { create: false });
   try {
     const update = database.prepare(`
-      UPDATE query_metric_points
+      UPDATE query_metric_payloads
       SET metric_point_json = json_remove(metric_point_json, '$.context.sleepType')
-      WHERE metric_key = 'total-sleep-minutes'
+      WHERE payload_id IN (
+        SELECT payload_id FROM query_metric_points WHERE metric_key = 'total-sleep-minutes'
+      )
     `).run();
     expect(update.changes).toBeGreaterThan(0);
   } finally {

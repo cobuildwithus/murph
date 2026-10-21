@@ -1,6 +1,6 @@
 {
   "name": "@murphai/gateway-core",
-  "version": "1.3.3",
+  "version": "1.3.5",
   "private": false,
   "type": "module",
   "license": "Apache-2.0",
@@ -26,7 +26,7 @@
   ],
   "scripts": {
     "build": "node ../../scripts/rm-paths.mjs dist .tsbuildinfo && node ../../scripts/run-typescript.mjs package -b tsconfig.json",
-    "typecheck": "node ../../scripts/run-typescript.mjs package -p tsconfig.typecheck.json --pretty false",
+    "typecheck": "node ../../scripts/run-typescript.mjs check -p tsconfig.typecheck.json --pretty false",
     "test": "vitest run --config vitest.config.ts --no-coverage",
     "test:coverage": "vitest run --config vitest.config.ts --coverage"
   },
@@ -34,7 +34,7 @@
     "node": ">=24.14.1"
   },
   "dependencies": {
-    "zod": "^4.4.3"
+    "zod": "^4.5.4"
   },
   "devDependencies": {
     "typescript": "^7.0.2",

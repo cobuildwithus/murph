@@ -22,14 +22,20 @@ Cloudflare execution worker.
 New hosted runtime code should import mailbox, workspace checkpoint, runtime log,
 and workspace invocation contracts from
 `@murphai/hosted-execution/runtime-control`. Temporal processing/status
-contracts live in `@murphai/hosted-execution/orchestration-control`. Use
+contracts live in `@murphai/hosted-execution/orchestration-control`. Workflow
+consumers also use that entrypoint for `isHostedMailboxLane`; its runtime graph
+stays independent of runtime-control and health schemas. Runtime-control retains
+the same exports for execution consumers. Use
 `@murphai/hosted-execution/routes` for stable route constants and builders.
 Runtime log and redacted-status validation is owned by
 `src/parsers/runtime-log.ts`, exported through `@murphai/hosted-execution/parsers`.
 Workspace checkpoints and runner/Web status compose that same validator;
 receipt-specific reserved keys remain with checkpoint parsing. Shared scalar
 checks stay in `src/parsers/assertions.ts`, while `src/observability.ts` owns
-producer sanitization.
+producer sanitization, exposed through `@murphai/hosted-execution/observability`.
+Mailbox-only fetch/item consumers use `@murphai/hosted-execution/parsers/mailbox`
+to avoid loading device-sync and other control parsers. The existing parser
+barrel retains the same exports.
 Use `@murphai/hosted-execution/assistant-usage` for the hosted assistant usage
 record contract, parser, id helper, and credential-source helper.
 The v2 turn profile may include `knowledgeCounts` on the `vault-cli knowledge`
@@ -67,6 +73,11 @@ mention the deleted generic state.
 
 ## Contract
 
+- modules have no required import-time effects; `sideEffects: false` allows unused
+  contract and parser modules to be removed from consumer bundles. Keep process
+  registration and I/O out of module initialization. Shared display constants
+  belong with dependency-free runtime values, not schema construction.
+- assistant configuration accepts supported OpenAI models and reasoning effort
 - signed callback canonicalization stays timestamped and request-bound across app-local signers and verifiers
 - the shared control/status path layout stays stable between callers and the worker
 - non-direct route-authorized Linq and Telegram conversation wakes may carry an
@@ -112,3 +123,9 @@ Configuration request/response parsers live with the model and provider values
 in `@murphai/hosted-execution/assistant-model`. Consumers that only need those
 parsers should use that entrypoint to avoid initializing unrelated runtime and
 device-sync parsers. The existing `parsers` exports forward to the same functions.
+
+The `usage-diagnostics` entrypoint owns the strict, read-only member usage
+request/response contract. Query options are bounded and contain no identity;
+only the signed host supplies member authority. Responses distinguish recorded
+allowance costs from current informational model rates and tool output bytes
+from tokens. Unknown response fields are rejected at the runtime boundary.

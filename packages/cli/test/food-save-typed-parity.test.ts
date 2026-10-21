@@ -237,6 +237,53 @@ test('food search-labels calls the hosted data API with the hosted provider cred
   }
 })
 
+test('food search-labels named query uses the same compact request as a positional query', async () => {
+  const restoreEnv = setHostedDataApiEnv()
+  const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({ items: [] })))
+  vi.stubGlobal('fetch', fetchMock)
+  try {
+    for (const argv of [['rolled oats'], ['--query', ' rolled oats '], ['--query=rolled oats']]) {
+      const result = await runInProcessJsonCli(createFoodCli(), ['food', 'search-labels', ...argv, '--generic'])
+      assert.equal(result.exitCode, null)
+      assert.equal(result.envelope.ok, true)
+    }
+    assert.equal(fetchMock.mock.calls.length, 3)
+    assert.equal(new Set(fetchMock.mock.calls.map(([url]) => String(url))).size, 1)
+    assert.equal(String(fetchMock.mock.calls[0]?.[0]),
+      'http://murph-data-api.worker/api/foods?q=rolled+oats&limit=1&genericOnly=true&nutritionOnly=true')
+  } finally {
+    vi.unstubAllGlobals()
+    restoreEnv()
+  }
+})
+
+test('food search-labels rejects missing or conflicting queries with a bounded repair before provider access', async () => {
+  const fetchMock = vi.fn<typeof fetch>(async () => { throw new Error('Unexpected provider request') })
+  vi.stubGlobal('fetch', fetchMock)
+  try {
+    for (const argv of [[], ['SyntheticPrivateQuery', '--query', 'SyntheticOtherQuery']]) {
+      const result = await runInProcessJsonCli(createFoodCli(), ['food', 'search-labels', ...argv])
+      assert.equal(result.exitCode, 1)
+      assert.equal(result.envelope.ok, false)
+      if (result.envelope.ok) throw new Error('Expected a validation failure')
+      assert.equal(result.envelope.error.code, 'VALIDATION_ERROR')
+      assert.equal(result.envelope.error.stage, 'validation')
+      assert.match(result.envelope.error.hint ?? '', /food search-labels "rolled oats"/u)
+      assert.match(result.envelope.error.hint ?? '', /food search-labels-batch/u)
+      assert.ok(Buffer.byteLength(JSON.stringify(result.envelope)) < 1_000)
+      assert.doesNotMatch(JSON.stringify(result.envelope), /SyntheticPrivateQuery|SyntheticOtherQuery/u)
+    }
+    for (const query of ['', ' ', 'x'.repeat(257)]) {
+      const result = await runInProcessJsonCli(createFoodCli(), ['food', 'search-labels', '--query', query])
+      assert.equal(result.exitCode, 1)
+      assert.equal(result.envelope.ok, false)
+    }
+    assert.equal(fetchMock.mock.calls.length, 0)
+  } finally {
+    vi.unstubAllGlobals()
+  }
+})
+
 test('food search-labels accepts a trimmed query at the provider length boundary', async () => {
   const restoreHostedDataApiEnv = setHostedDataApiEnv()
   const normalizedQuery = 'x'.repeat(256)

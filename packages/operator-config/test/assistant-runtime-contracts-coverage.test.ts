@@ -13,15 +13,15 @@ import {
 test('assistant session options expose only Codex app-server execution and resume values', () => {
   const options = serializeAssistantProviderSessionOptions({
     provider: 'codex-cli',
-    model: 'gpt-5.6-terra',
-    modelProvider: 'vercel-ai-gateway',
+    model: 'gpt-6.1-sol',
+    modelProvider: 'openai',
     reasoningEffort: 'medium',
     sandbox: 'danger-full-access',
     approvalPolicy: 'never',
   })
   assert.equal(options.executionDriver, 'codex-app-server')
   assert.equal(options.resumeKind, 'codex-thread')
-  assert.equal(options.modelProvider, 'vercel-ai-gateway')
+  assert.equal(options.modelProvider, 'openai')
   assert.equal(options.provider, 'codex-cli')
 
   assert.throws(
@@ -39,8 +39,8 @@ test('assistant session parsing resolves Codex modelProvider and status automati
     provider: 'codex-cli',
     approvalPolicy: 'never',
     codexHome: '/tmp/codex-home',
-    model: 'gpt-5.6-terra',
-    modelProvider: 'vercel-ai-gateway',
+    model: 'gpt-6.1-sol',
+    modelProvider: 'openai',
     oss: false,
     profile: 'default',
     reasoningEffort: 'medium',
@@ -70,8 +70,8 @@ test('assistant session parsing resolves Codex modelProvider and status automati
       adapter: 'codex-cli',
       approvalPolicy: 'never',
       codexHome: '/tmp/codex-home',
-      model: 'gpt-5.6-terra',
-      modelProvider: 'vercel-ai-gateway',
+      model: 'gpt-6.1-sol',
+      modelProvider: 'openai',
       oss: false,
       profile: 'default',
       reasoningEffort: 'medium',
@@ -88,7 +88,7 @@ test('assistant session parsing resolves Codex modelProvider and status automati
     sessionOptions.continuityFingerprint,
   )
   assert.equal(parsedSession.providerOptions.executionDriver, 'codex-app-server')
-  assert.equal(parsedSession.providerOptions.modelProvider, 'vercel-ai-gateway')
+  assert.equal(parsedSession.providerOptions.modelProvider, 'openai')
   assert.equal(parsedSession.providerOptions.resumeKind, 'codex-thread')
 
   const statusAutomation = assistantStatusAutomationSchema.parse({

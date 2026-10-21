@@ -5,10 +5,62 @@ Workspace-private read-helper, filter, derived-retrieval, and export-pack surfac
 Stale projection readers acquire the existing reentrant canonical write lock,
 recheck freshness, and rebuild only when needed. Source capture and publication
 stay inside that boundary. Ordinary fresh indexed reads take no lock (the
-source-health snapshot exception is below). Do not coalesce rebuilds
+focused wearable snapshot exceptions are below). Do not coalesce rebuilds
 with a separate pending promise: a lock owner could join a reader waiting for
 that same lock. The `query-wait` timing span measures acquisition;
 `query-rebuild` measures actual rebuilding.
+
+Query SQLite version 30 rebuilds the derived cache with a partial biomarker
+index: metric points without a biomarker key remain queryable but occupy no
+biomarker-index entries. Writable query connections enable SQLite
+`secure_delete` so table replacement clears obsolete payload bytes instead of
+carrying previous generations into compressed workspace snapshots. This adds
+no work to fresh read-only queries. The complete query database
+and its required sidecars remain eligible for encrypted checkpoint/restore;
+canonical source manifests still decide whether a restored cache is fresh.
+Malformed plain or archived audit JSONL retains the safe query-source error contract:
+logical vault-relative path and line number, without storage parser causes or
+source content.
+Version 31 creates query databases with 8 KiB pages to reduce overflow-page
+waste for JSON-heavy rows. The four standalone entity/search date indexes are
+omitted: existing date predicates use `COALESCE`/`substr`, while lexical search
+uses FTS rowids. Family/kind, metric, and wearable range indexes remain. The version reset creates this page-size layout. Runtime SQLite stores outside query retain their default page size.
+Version 32 stores identical compact metric payloads once per full publication in
+`query_metric_payloads`; metric rows retain their indexed scalars and reference
+payloads by integer key. The existing metric query joins the payload table, using
+the same codec, filters, order and limits. Replacement deletes metric rows before
+payloads inside the existing transaction, so rollback restores both. An
+insertion-local map shares exact serialized payloads without a duplicate text
+index; no canonical data or restored SQLite content is omitted.
+Version 33 stops projecting untouched legacy Junction oxygen feature measurements
+(policy `junction.blood_oxygen_feature_envelope.v1`, device source, `features`
+facet, initial event revision). Entity lists, search and generic metric extraction
+share this eligibility rule. Historical canonical evidence remains intact; later
+revisions remain visible conservatively because they can contain member edits.
+Ordinary oxygen readings and v2 temporal features are unchanged. Restored older
+query stores rebuild once under this policy; the complete query database remains
+part of workspace restore.
+
+Version 35 adds allowlisted typed clinical-fact terms to private search. The
+index includes source labels, values, status, coding and qualifiers without
+recursing into raw attributes. Safe shared search still excludes structured
+payloads. This projection remains rebuildable from canonical notes.
+
+Version 34 shares ordered JSON field-name dictionaries across wearable summary
+rows in `query_wearable_summary_shapes`. Tagged object/array values preserve all
+summary facts and internal composition evidence; public summary JSON is unchanged.
+Replacement clears rows and dictionaries in the same transaction. Readers load
+both under one read transaction, including when a writer publishes concurrently.
+Full rebuilds run SQLite `VACUUM` after publication, while holding the existing
+canonical writer lock, to reclaim pages and improve snapshot compression. Search
+documents use an explicit integer primary rowid so compaction preserves their
+external-content FTS references. SQLite owns compaction's atomic write; a failed
+compaction leaves the committed projection usable. It can temporarily require up
+to twice the database size in free space. Fresh queries and wearable-only rebuilds
+do not compact; restored caches still include both SQLite rows and dictionaries.
+
+Older runners reject the new cache version and rebuild derived state through
+the existing reset path; the canonical format and query results do not change.
 
 Exact and family-local reads must not rebuild or hydrate that shared projection.
 Use core-owned exact readers when the canonical owner exposes one, or use
@@ -17,6 +69,27 @@ bounded query-shaped family read. Alias resolution stays inside the selected
 family, and exact canonical ids retain precedence over aliases. Collection
 reads that still need projection freshness should use filtered APIs such as
 `listCanonicalEntities()` rather than materializing the complete vault model.
+
+Event listing uses `listCanonicalEventEntities()` to reuse an already-fresh
+indexed projection without forcing a rebuild. If missing, stale, unsupported or
+wearable-only, it takes the same reentrant canonical write lock, rechecks freshness,
+and reads `readCanonicalEntityFamilySource(vaultRoot, "event")` when still needed.
+The lock covers strict source capture, lifecycle collapse, visibility and selection;
+no cache is published or certified fresh. Kind/date predicates match the existing
+indexed operation, including its date fallback. The result is unlimited and in
+canonical order so the usecase applies tag/experiment filters before its limit.
+Event-source errors remain strict; malformed unrelated families no longer block
+this event-only read. Explicit global readers retain their existing strict errors
+and rebuild policy. No other collection endpoint changes. Manifest/status checks
+still inspect shared freshness, and repeated stale event reads reread the ledger.
+
+Experiment listing reads `readCanonicalEntityFamilySource(vaultRoot, "experiment")`
+under core's reentrant canonical write lock, including when a global index is
+fresh. It preserves strict experiment-source validation, ordering, status-before-
+limit and the existing list envelope. Malformed unrelated families no longer
+block this list; global readers keep their strict policy. No query cache is read,
+published or certified fresh. Repeated lists rescan experiments; a later global
+read still performs its own work. Progress, journal and lifecycle APIs are unchanged.
 
 Narrow health collection reads should query that projection by family/kind/date
 before decoding records. Exact blood-test and immunization lookups use the
@@ -34,6 +107,136 @@ companion estimate uses `whoop-ble-overnight-prv-rmssd` with no generic `hrv`
 or biomarker alias, so it cannot silently alias or aggregate with provider HRV.
 
 Root wearable summary APIs should use the runtime projection helpers such as `summarizeWearableLatestRuntime()` and `summarizeWearableActivityRuntime()`. The lower-level read-model helpers in `src/wearables.ts` are package-internal and expect a full raw/debug read model or an intentionally full source model, not the default `readVault()` projection.
+
+### Ordinary wearable reads
+
+Day, latest, metric latest/trend, drift, activity, body and recovery runtime
+readers use the private `readFreshPublicWearableSummaryBundle()` helper. Its
+unlocked preflight uses the same `readProjectionStatus()` predicate as the old
+ordinary global path: current schema/version, complete global tables, non-null
+built-at, exact canonical manifest and matching wearable manifest. Only when
+that full predicate is fresh does it use the old stored bundle read without
+acquiring or waiting for the canonical writer lock.
+
+Otherwise `readFreshWearableSummaryRows()` remains the synchronous owner of the
+locked recheck, strict source validation, wearable-only publication and capture.
+Wearable-only freshness does not authorize an unlocked read: even an atomic
+wearable publication can occur inside an outer reentrant writer before that
+writer commits. Sleep-list retains its pre-task direct focused-row read and
+normal composition, including on fresh global state; source-health retains its
+focused owner and specialized `sourceHealthOnly` composition. Neither gets the
+ordinary fast path. Ordinary readers keep their original normal composer and
+summarizers, including public days and source health.
+
+Ordinary readers push only provider selection into the stored-row read.
+Sleep-list additionally pushes its day-prefixed `date`/`from`/`to` bounds, but
+never a summary-kind filter: composed multi-provider sleep reads shared
+recovery/activity keys such as HRV and SpO2. In every reader the composer still
+applies date and range filters, ordering, complete cross-provider composition
+and limits, preserving prior/next canonical evidence. At the
+service boundary an omitted or empty provider array is unrestricted; a nonempty
+array normalized to no providers selects nothing.
+
+Multi-provider composition ends in `projectPublicWearableSummaryBundle()`, which
+copies the composed plain objects directly instead of stringifying and parsing
+each summary. The copy applies the same key policy as
+`stringifyPublicWearableProjectionSummary()` (emptied `candidates`, `paths` and
+`recordIds`; omitted provenance keys) and the same JSON value results, with
+fresh containers. It is not a general serializer: any value outside that plain
+shape, such as a prototype other than `Object`/`null`, `toJSON`, bigint or an
+over-deep graph, takes the unchanged stringify/parse path and its errors. The
+current composer produces only plain objects; it does not define accessors or
+proxies, and the copy makes no promise about them. Stored rows, the stored
+codec and the stringify function itself are unchanged, so persisted and public
+bytes are identical.
+
+The exact ordered path/size/mtime manifest, strict current canonical validation,
+atomic row/dictionary/manifest publication and failure behavior below apply to
+all these readers. Corrections, deletions, unrelated ledger edits and timestamp-
+only manifest changes still invalidate freshness. This preserves the timestamp
+contract; it does not assert how frequently timestamp-only changes occur in
+production or introduce a restore workaround. Even an empty selected provider
+scope must validate stale canonical input. No new staleness heuristic or schema.
+
+Cold/stale ordinary reads publish no global metrics/targets, entities/search,
+global completion metadata or `VACUUM`. A later explicit global operation must
+still do its distinct work and compaction, reusing current wearable rows. This
+avoids global work for wearable-only workflows and defers it for mixed workflows;
+complete mixed costs must include that later work. Fresh global rows remain
+reusable without the new lock wait introduced by the first implementation packet.
+
+The fresh-global check and stored read are not one canonical transaction, just
+as before this task. A canonical write after the fresh observation may leave
+that request reading the prior projection; the next request checks again. The
+stored reader's SQLite read transaction captures its dictionary and rows in one
+generation. A reset or malformed store after the check retains the old direct
+read's success/error behavior, including its required-table guard and empty
+provider short-circuit. There is no catch-and-retry, optimistic wearable-only
+branch, schema-race repair protocol or stronger commit guarantee.
+
+Refresh remains synchronous when the checks require it; there is no new stale-
+while-refresh policy. The existing CLI process already keeps this CPU work off
+the hosted conversation event loop. The canonical lock remains the focused
+source/publication boundary, not a claim that every fresh read is nonblocking.
+There is no background owner, daemon, pending-promise coordinator, monitor or
+member-fact cache. A stale focused refresh still reads the
+strict canonical snapshot required by the existing wearable owner, rather than
+pretending unrelated malformed input can be ignored.
+
+Timing charges the global preflight and any focused recheck separately: one
+`query-freshness` span containing manifest/status on the fast path, or two
+non-overlapping freshness spans on fallback, with the latter including lock wait
+and required refresh work. Manifest/status subspans remain inclusive; do not add
+them to their parent spans or omit the extra preflight from workflow costs.
+
+Sleep-pattern remains outside this patch because it also owns current timezone
+metadata capture. See the
+[ordinary-read and whole-rebuild proof](../vault-usecases/bench/global-projection.md)
+for the eight-reader oracle, real CLI/assistant gates, exact byte comparisons,
+phase counts and paired workflow measurement. Parent evidence is required before
+claiming a measured improvement. The historical
+[sleep-list proof](../vault-usecases/bench/wearable-sleep.md) remains unchanged.
+
+### Blood-test lists and Browser Vault reuse
+
+`listBloodTests()` acquires unlimited test events through the existing
+`listCanonicalEventEntitiesRuntime()` owner. Fresh global indexed rows remain a
+read accelerator; otherwise that owner captures strict current events under the
+reentrant canonical lock without publishing any projection. Every stale repeat
+re-reads events; no stale facts or new cache is introduced. Blood classification,
+text/status/date filtering and stable ordering still precede the final limit.
+Malformed selected event sources still fail, including for empty result scopes;
+unrelated malformed families no longer force an unrelated global read. A later
+explicit global query still performs its necessary validation/publication work.
+Generic entity queries and other health collections keep their original policy.
+
+Browser Vault builds one default-visible wearable bundle for source health and
+the assistant summary. `buildWearableAssistantSummaryFromBundle()`
+expects an already-filtered normal bundle; the existing public vault wrapper
+still performs the same filtering and returns the complete original summary.
+There is no persistent cache. Raw/default visibility, journal input, cancellation
+yields, timestamps and dataVersion hashing are unchanged. This remains correct
+whether the upstream source reader returns raw or already-filtered entities.
+
+The proposed single-pass metric aggregation is not implemented: exported evidence
+constructors accept noncanonical date strings whose locale equality makes the
+unchanged comparator nontransitive. The new cross-producer differential regression
+records the concrete parity boundary instead of changing ordering, validation or
+adding a fallback. See the [incremental benchmark and proof](../vault-usecases/bench/global-projection.md#incremental-additions-first-packet-versus-this-packet).
+
+### Empty stored-envelope verification
+
+The stored codec reuses only module-private expected-empty JSON strings for the
+finite summary metric keys. Each string comes from the same `resolveMetric(key,
+[])` constructor and public serializer used by the previous write-side check.
+Every actual envelope is still serialized and compared **exactly**, including
+field order and unexpected fields; a mismatch still stores the full envelope.
+Nonempty verification is unchanged. Stored/public bytes and the SQLite version
+are unchanged; no member facts, decoder objects or parsed JSON are cached.
+Decoding still constructs fresh objects/arrays for each empty metric and each
+read. Call-count tests distinguish removed expected serialization from the
+required actual-envelope comparison, while existing codec tests retain sparse,
+rich, conflict and fallback coverage.
 
 ### Source-health reads
 

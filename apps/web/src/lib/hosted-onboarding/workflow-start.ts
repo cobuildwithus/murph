@@ -1,5 +1,3 @@
-import { start } from "workflow/api";
-
 import { waitForAbortableSettlement } from "./abortable-settlement";
 import { hostedOnboardingError } from "./errors";
 
@@ -16,6 +14,8 @@ export async function startHostedPointerWorkflow<TInput>(input: {
 }): Promise<{ runId: string }> {
   try {
     input.signal?.throwIfAborted();
+    // Load the large Workflow client SDK only when a workflow actually starts.
+    const { start } = await import("workflow/api");
     const pendingStart = start(input.workflow, [input.payload]);
     const run = input.signal
       ? await waitForAbortableSettlement(pendingStart, input.signal)

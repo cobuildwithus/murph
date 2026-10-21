@@ -122,44 +122,6 @@ describe("assistant style settings route", () => {
     });
   });
 
-  it("persists persona, writing style, and voice in one preference write", async () => {
-    mocks.upsertHostedMemberAssistantPreferencesTx.mockResolvedValueOnce({
-      assistantPersona: "navy-seal-with-classic",
-      assistantPersonality: { detail: 2, humor: 1, push: 10 },
-      assistantTone: "formal",
-      assistantVoice: "drill-sergeant",
-      dispatch: { mailboxItemId: "mailbox_item_persona" },
-      updated: true,
-    });
-
-    const response = await route.POST(jsonRequest({
-      persona: "navy-seal-with-classic",
-      tone: "formal",
-      voice: "drill-sergeant",
-    }));
-
-    expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toMatchObject({
-      assistantPersona: "navy-seal-with-classic",
-      assistantTone: "formal",
-      assistantVoice: "drill-sergeant",
-      ok: true,
-      runTriggered: true,
-    });
-    expect(mocks.transaction).toHaveBeenCalledTimes(1);
-    expect(mocks.upsertHostedMemberAssistantPreferencesTx).toHaveBeenCalledWith({
-      memberId: "member_123",
-      occurredAt: "2026-07-08T12:00:00.000Z",
-      preferences: {
-        persona: "navy-seal-with-classic",
-        tone: "formal",
-        voice: "drill-sergeant",
-      },
-      prisma: { tx: true },
-    });
-    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledTimes(1);
-  });
-
   it("persists a sparse validated personality update", async () => {
     const response = await route.POST(jsonRequest({
       personality: {
@@ -303,13 +265,13 @@ describe("assistant style settings route", () => {
     });
   });
 
-  it("rejects invalid and legacy personas before opening the persistence transaction", async () => {
+  it("rejects removed persona selection before opening the persistence transaction", async () => {
     const response = await route.POST(jsonRequest({ persona: "wise-elder" }));
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toEqual({
       error: {
-        code: "ASSISTANT_STYLE_INVALID_PERSONA",
-        message: "Choose a valid Murph persona.",
+        code: "ASSISTANT_STYLE_UNKNOWN_FIELD",
+        message: "Assistant style request contains an unknown field.",
         retryable: false,
       },
     });
@@ -404,7 +366,7 @@ describe("assistant style settings route", () => {
     await expect(response.json()).resolves.toEqual({
       error: {
         code: "ASSISTANT_STYLE_MIXED_UPDATE",
-        message: "Update personality separately from persona, tone, and voice.",
+        message: "Update personality separately from tone and voice.",
         retryable: false,
       },
     });
@@ -418,7 +380,7 @@ describe("assistant style settings route", () => {
     await expect(response.json()).resolves.toEqual({
       error: {
         code: "ASSISTANT_STYLE_EMPTY_UPDATE",
-        message: "Choose a persona, tone, voice, or personality setting before continuing.",
+        message: "Choose a tone, voice, or personality setting before continuing.",
         retryable: false,
       },
     });

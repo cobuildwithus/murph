@@ -175,7 +175,20 @@ export const automationFullListResultSchema = z.object({
   items: z.array(automationListItemSchema),
 });
 
+export const automationInstructionListResultSchema = z.object({
+  ...automationListResultFields,
+  includeInstructions: z.literal(true),
+  items: z.array(automationListItemSchema.extend({
+    instructions: z.string().nullable(),
+    instructionsComplete: z.boolean(),
+  })),
+});
+
+const AUTOMATION_INSTRUCTION_PAGE_MAX_BYTES = 48 * 1024;
+const AUTOMATION_INSTRUCTION_PAGE_MAX_ITEMS = 20;
+
 export const automationListResultSchema = z.union([
+  automationInstructionListResultSchema,
   automationCompactListResultSchema,
   automationFullListResultSchema,
 ]);
@@ -240,6 +253,37 @@ function automationCompactListItem(
     supportKind: record.supportKind,
     updatedAt: record.updatedAt,
   };
+}
+
+function automationInstructionPage(
+  result: Omit<z.infer<typeof automationInstructionListResultSchema>, "includeInstructions" | "items">,
+  records: readonly z.infer<typeof automationRecordSchema>[],
+): z.infer<typeof automationInstructionListResultSchema> {
+  const items: z.infer<typeof automationInstructionListResultSchema>["items"] = [];
+  const instructionResult = () => ({
+    ...result,
+    includeInstructions: true as const,
+    count: items.length,
+    nextCursor: items.length < records.length
+      ? items.at(-1)?.automationId ?? null
+      : result.nextCursor,
+    items,
+  });
+  if (Buffer.byteLength(JSON.stringify(instructionResult()), "utf8") > AUTOMATION_INSTRUCTION_PAGE_MAX_BYTES) {
+    return invalidAutomationOption("Automation instruction-page filters exceed the byte limit; shorten the filters.");
+  }
+  for (const record of records) {
+    items.push({ ...automationListItem(record), instructions: record.instructions, instructionsComplete: true });
+    if (Buffer.byteLength(JSON.stringify(instructionResult()), "utf8") <= AUTOMATION_INSTRUCTION_PAGE_MAX_BYTES) continue;
+    items.pop();
+    if (items.length > 0) break;
+    // A large record must not prevent traversal or imply its omitted body was reviewed.
+    items.push({ ...automationListItem(record), instructions: null, instructionsComplete: false });
+    if (Buffer.byteLength(JSON.stringify(instructionResult()), "utf8") > AUTOMATION_INSTRUCTION_PAGE_MAX_BYTES) {
+      return invalidAutomationOption(`Automation ${record.automationId} metadata exceeds the instruction-page byte limit; read that record exactly.`);
+    }
+  }
+  return instructionResult();
 }
 
 function invalidAutomationOption(
@@ -1355,7 +1399,7 @@ export function registerAutomationCommands(
   automation.command("list", {
     args: z.object({}),
     description: "List automation records with optional filters.",
-    hint: "Use --compact --text <words> to find matching ids with small output; use automation show <id> for instructions and full readback before editing. Use automation edit <id> for sparse operator edits, preserving omitted fields.",
+    hint: "Use --compact --text <words> to find ids. For inventory review use --include-instructions --limit 20 and follow nextCursor; instructionsComplete=false requires automation show for that record. Use automation show <id> for full readback before editing. Use automation edit <id> for sparse operator edits, preserving omitted fields.",
     options: withBaseOptions({
       status: z
         .array(z.enum(automationStatusValues))
@@ -1375,17 +1419,23 @@ export function registerAutomationCommands(
         .string()
         .min(1)
         .optional()
-        .describe("Continue an exact support-series listing after this automation id."),
+        .describe("Continue a support-series or --include-instructions listing after this immutable automation id, preserving the filters."),
       compact: z.boolean().default(false).describe(
         "Return identifiers, current updatedAt, and basic lifecycle and schedule state; use automation show for complete details.",
+      ),
+      includeInstructions: z.boolean().default(false).describe(
+        "Review instructions and metadata together in immutable-id order. At most 20 records and 48 KiB per page; follow nextCursor. Oversized instructions are null with instructionsComplete=false: read that record exactly before judging it. Incompatible with --compact.",
       ),
       limit: z.number().int().positive().max(200).default(10),
     }),
     output: automationListResultSchema,
     async run(context): Promise<z.infer<typeof automationListResultSchema>> {
-      if (context.options.cursor !== undefined && context.options.supportSeriesId === undefined) {
+      if (context.options.compact && context.options.includeInstructions) {
+        return invalidAutomationOption("--compact cannot be combined with --include-instructions.");
+      }
+      if (context.options.cursor !== undefined && context.options.supportSeriesId === undefined && !context.options.includeInstructions) {
         return invalidAutomationOption(
-          "--cursor requires --support-series-id so pagination uses immutable automation ids.",
+          "--cursor requires --support-series-id or --include-instructions so pagination uses immutable automation ids.",
         );
       }
       const supportSeriesId = context.options.supportSeriesId?.trim();
@@ -1395,7 +1445,10 @@ export function registerAutomationCommands(
       const page = await listAutomationPageForCommand(context.options.vault, {
         cursor: context.options.cursor,
         exactTag,
-        limit: context.options.limit,
+        limit: context.options.includeInstructions
+          ? Math.min(context.options.limit, AUTOMATION_INSTRUCTION_PAGE_MAX_ITEMS)
+          : context.options.limit,
+        ...(context.options.includeInstructions ? { orderById: true } : {}),
         status: context.options.status,
         text: context.options.text,
       });
@@ -1413,6 +1466,10 @@ export function registerAutomationCommands(
         totalCount: page.totalCount,
         nextCursor: page.nextCursor,
       };
+
+      if (context.options.includeInstructions) {
+        return automationInstructionPage(result, page.items);
+      }
 
       if (context.options.compact) {
         return {

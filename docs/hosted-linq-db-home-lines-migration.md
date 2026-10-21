@@ -11,7 +11,7 @@ This cutover moves new hosted-member Linq home-line assignment from the env phon
 - Direct-member counts come from canonical member home-line bindings. Group counts come from `hosted_thread_route.account_lookup_key`, which is projected atomically from the canonical encrypted delivery route rather than inferred from the container owner.
 - Lines below 5,000 planned messages are preferred. If every otherwise eligible line is at or above 5,000, assignment selects the least-loaded line instead of rejecting the member.
 - Within the below-target pool, genuinely new non-preferred placement ranks exact trailing-168-hour accepted-outbound plus inbound-message effects before weighted planning load and today's new-conversation count. If every line is at or above target, weighted planning load remains the first fallback signal and recent traffic breaks planning ties.
-- Daily new-conversation caps remain a separate proactive/deliverability guard enforced at assignment time with the existing home-line advisory lock.
+- Daily new-conversation caps remain a separate proactive/deliverability guard enforced by conditional updates to the selected line's UTC-day counter.
 - Contact-card reconciliation syncs Linq provider phone inventory before reconciling DB-backed lines.
 
 The 5,000 value is only a soft assignment target. A healthy line contacted by a member-initiated first inbound keeps that conversation on the contacted line without consulting planning load or proactive pacing; weighted selection applies to proactive placement and genuinely degraded-line fallback. Planning does not cap traffic and must not reject inbound group provisioning, inbound messages, or replies in an existing conversation. Linq's 7,000 combined inbound-plus-outbound messages per line per UTC day remains the provider performance guideline. Existing line-keyed `HostedLinqProviderEvent` and `HostedLinqDelivery` rows remain the traffic-observability owners; this rollout adds no 5,000- or 7,000-message runtime rejection path.
@@ -30,6 +30,68 @@ transaction timeout. Cancellation interrupts the wait and is checked before
 each new attempt. Unrecognized errors remain terminal; retries do not refetch
 the provider snapshot or repeat crypto preparation. Callers supplying their own
 transaction retain responsibility for retrying that entire transaction.
+
+## Line Identity and Capacity Locking
+
+`linq-line-store.ts` owns singular line upserts. It first reads only the primary
+keys matching the normalized phone's current and retained privacy-key candidates
+(at most two). An existing row is updated directly, preserving its lookup key,
+refreshing its encrypted phone and hint, and retaining the source-specific
+metadata writes. Runtime line writers do not move or delete these primary keys.
+The row write serializes with proactive-capacity updates on that same identity;
+an existing-row upsert must not subsequently acquire the phone advisory lock.
+
+Only an initially missing row takes
+`pg_advisory_xact_lock(hashtext('hosted_linq_line_phone'), hashtext(normalizedPhone))`.
+It then rereads the same candidates under the lock before choosing a row to
+update or create. This recheck preserves the existing current-key preference and
+legacy-key reuse when another singular creator commits while this one waits.
+The public upsert keeps both reads, the lock, and the write inside one transaction
+when given a root client. Existing stronger-isolation conflict handling remains
+with the caller; this is not an added transaction retry.
+
+This contract permits capacity followed by delivery claim in email recovery,
+home-line reservation, and group-join outreach without a line-row-to-phone-lock
+cycle against an ordinary upsert. The capacity predicates, atomic UTC rollover,
+delivery authorization, durable idempotency, and delivery success criteria retain
+their existing owners. Line encryption is local; this owner makes no provider or
+KMS call. Direct email recovery still calls the provider after its preparation
+transaction commits.
+
+The application-call bounds below count awaited Prisma operations, excluding
+`BEGIN`/`COMMIT` and unchanged provider/outcome work:
+
+| Composed segment | Previous maximum | Current maximum |
+| --- | ---: | ---: |
+| Existing line, webhook/configured singular upsert | 3 | 2 |
+| Initially missing line, webhook/configured singular upsert | 3 | 4 |
+| Existing line capacity plus provider dispatch claim, including claim conflict/reclaim branches | 9 | 8 |
+| Fresh email-recovery preparation, uncontended delivery insert, including day rollover | 12 | 11 |
+| Email-recovery preparation including delivery insert conflict/reclaim | 14 | 13 |
+
+Provider-source upserts add one guarded `providerFirstSeenAt` update in either
+version. Each candidate read uses at most two keys and selects only the primary
+key. The extra read occurs only when the initial read is empty; established-line
+foreground dispatch removes one advisory-lock call. Transaction timeouts and
+existing retry policies are unchanged, and no numeric production latency
+improvement is inferred from these bounds.
+Operations remain serial on the existing transaction connection; this change
+adds no concurrent query, pool slot, or transaction.
+
+At the existing 250-line pool cap, home-line reservation still makes at most
+1,004 calls (pool read, two planning reads, recent-effects read, and two attempts
+of at most two conditional writes per candidate). Composing it with one
+existing-line dispatch claim changes that segment's bound from 1,011 to 1,010.
+Outreach's healthy-pool read, planning reads, and at most two capacity writes per
+candidate remain at most 504 calls; including its dispatch claim changes that
+segment from 511 to 510. These bounds exclude unchanged member/group authority,
+pacing, and outcome work; no candidate loop or concurrency is added.
+
+The opt-in `apps/web/test/linq-line-lock-order-diagnostic.test.ts` regression
+uses only synthetic rows in an isolated loopback PostgreSQL database. It retains
+the exact lock namespace as a scheduling barrier and exercises real capacity,
+line-upsert, and transport/delivery owners. Unit proof also covers a creator that
+finds a legacy row only after acquiring the phone lock.
 
 ## Deploy Order
 

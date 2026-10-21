@@ -141,12 +141,12 @@ import {
   groupChallengeScoreResultSchema,
 } from '@murphai/assistant-engine'
 import {
-  knowledgeGetResultSchema as knowledgeShowResultSchema,
   knowledgeIndexRebuildResultSchema,
   knowledgeLintResultSchema,
   knowledgeListResultSchema,
   knowledgeLogTailResultSchema,
   knowledgeSearchResultSchema,
+  knowledgeShowResultSchema,
   knowledgeUpsertResultSchema,
 } from '@murphai/query'
 import { registerReadCommands } from './commands/read.js'
@@ -173,7 +173,6 @@ import {
   wearablesBodyStateListResultSchema,
   wearablesDayResultSchema,
   wearablesDriftResultSchema,
-  wearablesPersonalPatternsResultSchema,
   wearablesLatestResultSchema,
   wearablesMetricLatestResultSchema,
   wearablesMetricTrendResultSchema,
@@ -1514,11 +1513,6 @@ export const vaultCliCommandDescriptors = [
         description: 'Explain the biggest normalized wearable drift Murph sees across the current wearable surfaces.',
         output: wearablesDriftResultSchema,
       },
-      {
-        path: ['wearables', 'patterns'],
-        description: 'Compare repeated activity and intervention days with next-day sleep and recovery outcomes.',
-        output: wearablesPersonalPatternsResultSchema,
-      },
     ],
     directVaultServiceBindings: assumeDirectVaultServiceBindings({
       query: [
@@ -1533,7 +1527,6 @@ export const vaultCliCommandDescriptors = [
         'listWearableRecovery',
         'listWearableSources',
         'showWearableDrift',
-        'showPersonalPatterns',
       ],
     }),
     register({ cli, services }) {
@@ -1746,7 +1739,8 @@ export const vaultCliCommandDescriptors = [
       },
       {
         path: ['knowledge', 'show'],
-        description: 'Show one derived knowledge page by slug.',
+        description:
+          'Show one derived knowledge page by slug. `--if-exists` returns `page: null` only when absence is confirmed by a fully valid knowledge graph; invalid, unreadable, duplicate, and reserved pages still fail.',
         output: knowledgeShowResultSchema,
       },
       {

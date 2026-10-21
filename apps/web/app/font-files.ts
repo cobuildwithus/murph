@@ -19,6 +19,3 @@ export const dmSans600FontPath = resolveRuntimeAssetPath(
 );
 
 export const logoSvgPath = resolveRuntimeAssetPath("public/logo.svg");
-export const murphMarkSvgPath = resolveRuntimeAssetPath(
-  "public/icons/murph-mark.svg",
-);

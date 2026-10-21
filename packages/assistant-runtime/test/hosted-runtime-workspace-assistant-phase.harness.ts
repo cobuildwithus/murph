@@ -366,6 +366,9 @@ type RuntimeUsageRecordPort = NonNullable<
 type RuntimeAssistantConfigurationToolPort = NonNullable<
   HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["assistantConfigurationToolPort"]
 >;
+type RuntimeUsageDiagnosticsPort = NonNullable<
+  HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["usageDiagnosticsPort"]
+>;
 type RuntimeLabsToolPort = NonNullable<
   HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["labsToolPort"]
 >;
@@ -1301,6 +1304,7 @@ function createPhaseInput(input: {
   >;
   runtimeAssistantConfigurationToolPort?: RuntimeAssistantConfigurationToolPort;
   runtimeLabsToolPort?: RuntimeLabsToolPort;
+  runtimeUsageDiagnosticsPort?: RuntimeUsageDiagnosticsPort;
   runtimeSubscriptionToolPort?: RuntimeSubscriptionToolPort;
   runtimeUsageRecordPort?: RuntimeUsageRecordPort;
   runtimeUserEnv?: Record<string, string>;
@@ -1459,6 +1463,9 @@ function createPhaseInput(input: {
                 input.runtimeAssistantConfigurationToolPort,
             }
           : {}),
+        ...(input.runtimeUsageDiagnosticsPort
+          ? { usageDiagnosticsPort: input.runtimeUsageDiagnosticsPort }
+          : {}),
         ...(input.runtimeLabsToolPort
           ? { labsToolPort: input.runtimeLabsToolPort }
           : {}),
@@ -1543,10 +1550,10 @@ function createAssistantUsageRecord(): AssistantUsageRecord {
     rawUsageJsonHash: null,
     reasoningTokens: null,
     reportingUserId: null,
-    requestedModel: "gpt-5.6-terra",
+    requestedModel: "gpt-6.1-sol",
     routeId: "primary",
     schema: ASSISTANT_USAGE_SCHEMA,
-    servedModel: "gpt-5.6-terra",
+    servedModel: "gpt-6.1-sol",
     sessionId: "asst_direct_usage",
     stripeMeterSource: "murph",
     surface: null,
@@ -1628,8 +1635,8 @@ async function seedDirectLinqAssistantInputRoute(input: {
       approvalPolicy: "never",
       codexCommand: null,
       codexHome: null,
-      model: "gpt-5.6-terra",
-      modelProvider: "vercel-ai-gateway",
+      model: "gpt-6.1-sol",
+      modelProvider: "hosted-openai",
       oss: false,
       profile: null,
       reasoningEffort: "medium",
@@ -2142,6 +2149,7 @@ export type {
   RuntimeDeviceSyncConnectLinkRequest,
   RuntimeDeviceSyncPort,
   RuntimeLabsToolPort,
+  RuntimeUsageDiagnosticsPort,
   RuntimeSubscriptionToolPort,
   RuntimeUsageRecordPort,
 };

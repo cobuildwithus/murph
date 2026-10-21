@@ -1,0 +1,109 @@
+diff --git a/dist/cli/internal/publish.d.ts b/dist/cli/internal/publish.d.ts
+index d9b9bef12bfab01c5957bb45ff1fe66f146f1fe4..a31c8d16da94f211fbd6adaabad0c3cfd749179c 100644
+--- a/dist/cli/internal/publish.d.ts
++++ b/dist/cli/internal/publish.d.ts
+@@ -25,6 +25,8 @@ export type Outcome = {
+ };
+ export type Ready = {
+     client: Github.Client;
++    /** Per-publish indexes shared across bounded filing batches. */
++    indexes?: Map<string, { matcher: Github.Matcher; seen: Map<string, Github.Issue> }> | undefined;
+     /** Label used to find issues Frog already filed. */
+     label: string;
+     repo: string;
+diff --git a/dist/cli/internal/publish.js b/dist/cli/internal/publish.js
+index 7cde16e8d77d48a9c0e73802cfee6b0cd4e59807..1e62e244e0fcbb641f336b442766290c13fabcd5 100644
+--- a/dist/cli/internal/publish.js
++++ b/dist/cli/internal/publish.js
+@@ -29,6 +29,7 @@ export async function prepare(options) {
+             retryable: true,
+         };
+     return {
++        indexes: new Map(),
+         client: octokit.client({
+             token: resolved,
+             ...(env.GITHUB_API_URL ? { baseUrl: env.GITHUB_API_URL } : {}),
+@@ -72,19 +73,23 @@ export async function file(options) {
+     // A cross-repo target may name its own labels, in which case dedupe must index by one of those and
+     // not by the sender's.
+     const applied = options.labels?.length ? options.labels : config.labels;
+-    const matcher = await Github.matcher(client, {
+-        ...(expectedAuthor ? { expectedAuthor } : {}),
+-        label: applied[0] ?? label,
+-        repo,
+-    });
++    const indexKey = JSON.stringify([repo, applied[0] ?? label, expectedAuthor ?? null]);
++    const index = options.indexes?.get(indexKey) ?? {
++        matcher: await Github.matcher(client, {
++            ...(expectedAuthor ? { expectedAuthor } : {}),
++            label: applied[0] ?? label,
++            repo,
++        }),
++        seen: new Map(),
++    };
++    options.indexes?.set(indexKey, index);
++    const { matcher, seen } = index;
+     const [author, sha] = await Promise.all([Git.author({ cwd: root }), Git.head({ cwd: root })]);
+     const commented = [];
+     let consumed = 0;
+     const created = [];
+     const deferred = [];
+     const written = [];
+-    /** Filed during this run, so two entries with one title collapse onto one issue. */
+-    const seen = new Map();
+     const outcome = () => ({
+         commented,
+         consumed,
+diff --git a/src/cli/internal/publish.ts b/src/cli/internal/publish.ts
+index 605ce711e4be690a364ec7cc451b959b46051996..b3340257001e84f222905056c27589eda4cff169 100644
+--- a/src/cli/internal/publish.ts
++++ b/src/cli/internal/publish.ts
+@@ -23,6 +23,8 @@ export type Outcome = {
+ 
+ export type Ready = {
+   client: Github.Client
++  /** Per-publish indexes shared across bounded filing batches. */
++  indexes?: Map<string, { matcher: Github.Matcher; seen: Map<string, Github.Issue> }> | undefined
+   /** Label used to find issues Frog already filed. */
+   label: string
+   repo: string
+@@ -62,6 +64,7 @@ export async function prepare(options: prepare.Options): Promise<Blocked | Ready
+     }
+ 
+   return {
++    indexes: new Map(),
+     client: octokit.client({
+       token: resolved,
+       ...(env.GITHUB_API_URL ? { baseUrl: env.GITHUB_API_URL } : {}),
+@@ -133,11 +136,17 @@ export async function file(options: file.Options): Promise<Outcome> {
+   // not by the sender's.
+   const applied = options.labels?.length ? options.labels : config.labels
+ 
+-  const matcher = await Github.matcher(client, {
+-    ...(expectedAuthor ? { expectedAuthor } : {}),
+-    label: applied[0] ?? label,
+-    repo,
+-  })
++  const indexKey = JSON.stringify([repo, applied[0] ?? label, expectedAuthor ?? null])
++  const index = options.indexes?.get(indexKey) ?? {
++    matcher: await Github.matcher(client, {
++      ...(expectedAuthor ? { expectedAuthor } : {}),
++      label: applied[0] ?? label,
++      repo,
++    }),
++    seen: new Map<string, Github.Issue>(),
++  }
++  options.indexes?.set(indexKey, index)
++  const { matcher, seen } = index
+   const [author, sha] = await Promise.all([Git.author({ cwd: root }), Git.head({ cwd: root })])
+ 
+   const commented: Link[] = []
+@@ -145,8 +154,6 @@ export async function file(options: file.Options): Promise<Outcome> {
+   const created: Link[] = []
+   const deferred: Outcome['deferred'] = []
+   const written: string[] = []
+-  /** Filed during this run, so two entries with one title collapse onto one issue. */
+-  const seen = new Map<string, Github.Issue>()
+   const outcome = (): Outcome => ({
+     commented,
+     consumed,

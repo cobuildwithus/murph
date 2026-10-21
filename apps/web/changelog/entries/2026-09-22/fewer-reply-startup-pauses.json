@@ -1,0 +1,19 @@
+{
+  "publishedOn": "2026-09-22",
+  "order": 100,
+  "item": {
+    "id": "fewer-reply-startup-pauses",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Fewer avoidable pauses before replies",
+    "summary": "Murph keeps a ready session available while an incoming message is being handed off for processing.",
+    "details": "This avoids an unnecessary restart during that handoff. Normal idle cleanup and recovery still apply.",
+    "relevanceTags": [
+      "messaging",
+      "reliability"
+    ],
+    "sourcePullRequests": [
+      3664
+    ]
+  }
+}

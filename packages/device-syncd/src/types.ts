@@ -87,7 +87,22 @@ export type DeviceSyncProviderRequestCandidateAliasSource =
   | "workoutId"
   | "workout_id";
 
-export interface DeviceSyncJobFailureDiagnosticDetails {
+export type JunctionRequestStage =
+  | "request_setup"
+  | "awaiting_headers"
+  | "response_body"
+  | "post_body";
+
+/** Metadata-only observations of one JUNCTION_API_REQUEST_TIMEOUT attempt. */
+export interface JunctionRequestTimeoutDiagnosticDetails {
+  providerRequestTimeoutMs?: number;
+  providerRequestElapsedMs?: number;
+  providerRequestAttempt?: number;
+  providerRequestStage?: JunctionRequestStage;
+  providerResponseHeadersPresent?: boolean;
+}
+
+export interface DeviceSyncJobFailureDiagnosticDetails extends JunctionRequestTimeoutDiagnosticDetails {
   failureCauseCode?: string;
   failureCauseName?: string;
   failureErrorCause?: string;
@@ -102,6 +117,7 @@ export interface DeviceSyncJobFailureDiagnosticDetails {
   junctionEcgGroupCount?: number;
   junctionEcgProviderMatchGroupCount?: number;
   junctionEcgInstanceMatchGroupCount?: number;
+  junctionEcgInstanceMissingGroupCount?: number;
   junctionEcgMatchedGroupCount?: number;
   junctionEcgExpectedRecordingCount?: number;
   junctionEcgExpectedSampleCount?: number;
@@ -163,6 +179,16 @@ export interface DeviceSyncJobFailureDiagnosticDetails {
   providerOAuthResponseShapeKind?: string;
 }
 
+/**
+ * In-memory logical identity of one claimed job row. Hosted telemetry emits
+ * only context-separated digests of it; never log these values directly.
+ */
+export interface DeviceSyncJobIdentity {
+  accountId: string;
+  dedupeKey: string | null;
+  jobId: string;
+}
+
 export interface DeviceSyncJobFailureDiagnostic {
   accountId: string;
   accountStatus: DeviceSyncAccountStatus | null;
@@ -174,6 +200,8 @@ export interface DeviceSyncJobFailureDiagnostic {
   details: DeviceSyncJobFailureDiagnosticDetails;
   /** Actual committed queue transition for this failed attempt, when known. */
   jobDisposition?: DeviceSyncJobFailureDisposition;
+  /** Rows whose failure transition committed in this attempt, when known. */
+  jobIdentities?: DeviceSyncJobIdentity[];
   /** Job kind of the failing job (for example `resource`, `reconcile`), when known. */
   jobKind?: string;
   /** Maximum attempt budget committed on the failing job row, when known. */
@@ -204,14 +232,17 @@ export type DeviceSyncImportOutcomeCounts = {
 };
 
 /**
- * Bounded metadata for one claimed worker attempt. This intentionally omits
- * account/job ids, payloads, cursors, provider responses, and health values so
- * hosted runtimes can persist it as privacy-safe operational telemetry.
+ * Bounded metadata for one claimed worker attempt. Apart from the in-memory
+ * `jobIdentities`, this intentionally omits account/job ids, payloads, cursors,
+ * provider responses, and health values so hosted runtimes can persist it as
+ * privacy-safe operational telemetry.
  */
 export interface DeviceSyncJobTimingDiagnostic {
   at: string;
   attempts: number;
   canonicalProgressCommitted?: true;
+  /** Provider-proven forward coverage, published with the owned continuation. */
+  continuationProgressCommitted?: true;
   connectionSourceReadCount: number;
   connectionSourceReadElapsedMs: number;
   credentialRefreshCount: number;
@@ -222,6 +253,8 @@ export interface DeviceSyncJobTimingDiagnostic {
   scheduledJobCount?: number;
   nextScheduledJobDelayMs?: number | null;
   jobCount: number;
+  /** Rows covered by this claimed attempt; never emit these values directly. */
+  jobIdentities?: DeviceSyncJobIdentity[];
   jobKind: string;
   outcome: DeviceSyncJobTimingOutcome;
   provider: string;
@@ -1053,6 +1086,8 @@ export interface ProviderJobContext {
 }
 
 export interface ProviderJobResult {
+  /** A finite existing scan advanced; retries, rescheduling, and new jobs are not progress. */
+  continuationProgress?: true;
   scheduledJobs?: DeviceSyncJobInput[];
   metadataPatch?: Record<string, unknown>;
   nextReconcileAt?: string | null;

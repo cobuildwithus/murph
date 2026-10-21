@@ -1,6 +1,6 @@
 # PR ReviewGPT Completion Loops
 
-Last verified: 2026-09-04
+Last verified: 2026-09-25
 
 Use this runbook only when `completion-workflow.md` selects final ReviewGPT or
 the user requests it. It owns the managed-browser review, exact-head packaging,
@@ -28,6 +28,9 @@ Both lean and full guarded archives include the tracked native CI controller
 policy, PR evidence template, and assistant verification skill through the
 existing exact always-path manifest. These inputs remain available when they
 are unchanged by the candidate.
+The exact always-path manifest also includes the pinned Containers SDK patch,
+`pnpm-lock.yaml`, and `pnpm-workspace.yaml`, so included readiness tests retain
+the dependency implementation correction and its version/integrity mapping.
 
 Round 1 is always a full-patch audit. On round 2 or later, the packager reads the
 PR body's explicit context
@@ -52,12 +55,21 @@ the prepared draft or conversation is the user-facing result. Never implement
 this cleanup as a profile-wide tab sweep or close a target that the current run
 did not create.
 
+Synchronous prompt insertion uses the configured draft timeout so healthy large
+multiline inserts can finish. Other page commands retain their shorter deadline;
+insertion still fails when its configured budget expires.
+
 Normal reviews use regular Chat, never ChatGPT Work. The package confirms that
 surface before model selection, before staging, and immediately before send. A
 fresh new-chat target switches the Chat/Work control to Chat when necessary; an
 existing Work conversation or an unconfirmed new-chat surface fails closed.
 Deep Research remains on its dedicated surface. Keep this browser-DOM policy in
 ReviewGPT rather than duplicating it in Murph's lane wrapper or prompts.
+
+The GPT-6 picker can expose a `GPT-6` family row and a separate `Power` control.
+The pinned ReviewGPT package combines that picker state with the sent request's
+model evidence to verify GPT-6 Pro. A generic `Pro` label alone is insufficient;
+keep the concrete model requirement when recovering from picker changes.
 
 This ownership rule is required because the managed browser lanes keep
 background response-polling timers reliable and ReviewGPT pins only the owned
@@ -141,6 +153,43 @@ owner and paced polling rule. If identity or model evidence remains missing,
 report that gap without treating a visible answer as a pass. Close only any
 remaining task-owned recovery tab after capture; shared lanes remain untouched.
 Confirmed capability limits retain the separate lane-recovery rule below.
+
+An accepted send can briefly expose a `WEB:<uuid>` conversation URL. New captures
+retain the exact original target and verified committed-turn receipt in that
+case. Once that target obtains its canonical URL, use the unchanged metadata
+with `thread export`; never resend to obtain a different receipt. A missing
+original target cannot be recreated from the transient ID. Older digest-only
+captures retain their strict comparison and do not gain weaker recovery rules.
+
+### Include an authorized companion repository
+
+For a review whose scope includes another repository, pass one
+`--companion-snapshot` JSON descriptor per companion through `pnpm review:gpt`.
+Each descriptor contains `repo` (the local checkout), `head` (its full commit
+SHA), and `prUrl` (its same-repository GitHub PR). The companion must be clean,
+match the live PR head, and declare its committed canonical config and guarded
+packager. Include only repository scopes authorized for that review.
+
+ReviewGPT runs each companion's own guarded packager and retains its full-snapshot
+review-round metadata. It checks the exact head before and after packaging and
+stages each unchanged archive as a separate named attachment. It does not accept
+arbitrary ZIP paths or reuse the primary repository's packaging overrides. All
+expected attachments must survive onto the exact accepted user turn before the
+review receipt can be used. This adds context to the existing review owner; it
+does not start a separate review or satisfy another PR's exact-head gate.
+
+### Review patched tooling dependency source
+
+When a PR changes a locked `@cobuild/review-gpt` or `@cobuild/repo-tools` patch,
+the canonical packager adds the exact registry package and patch from the
+reviewed head under `review-gpt-pr-context/dependencies/`, and the base version
+under `dependencies/base/`. These are the only supported dependency packages.
+Each version must match its source commit’s registry integrity and patch hash;
+only bounded regular files pass the existing archive and privacy checks.
+Provenance records the reviewed head, source commit, role, and individual file
+hashes. Use the included reconstruction instructions to compare complete
+patched owners. This source is part of the guarded snapshot; no inline encoded
+package or separate unguarded archive is needed.
 
 ## Finding Disposition Boundary
 
@@ -284,6 +333,20 @@ the current user explicitly asks for it.
    pass the substantive round through `REVIEW_GPT_ROUND_NUMBER`. Round 1 adds
    the full PR body, current patch,
    exact round metadata, and guarded repository snapshot to `codebase.zip`:
+
+   Full snapshots include `patches/codex-public-live.patch` even when unchanged,
+   because the hosted runner applies that production-source patch during its
+   native Codex build. Keep it with the Dockerfiles in the mandatory snapshot paths.
+
+   When the PR changes that patch, the existing packager also includes complete
+   patched native text files and the bounded
+   configuration/instruction/authentication/transport/recovery owner list under
+   `review-gpt-pr-context/dependencies/codex-<version>/`. It reads the reviewed
+   commit's package pin, Docker source SHA, and patch, verifies the official
+   upstream tag, and applies the patch only to an isolated Git index. The
+   provenance manifest records file hashes and omitted generated/binary paths.
+   No upstream code runs; unavailable source, mismatched pins, unsafe paths,
+   failed patch application, or exceeded bounds stop packaging.
 
    - `review-gpt-pr-context/pr-body.md`
    - `review-gpt-pr-context/pr.diff`

@@ -1,11 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { HostedRuntimeOwnerSnapshot } from "@murphai/hosted-execution/runtime-owner";
 import type { HostedExecutionContainerStubLike } from "../src/runner-container.ts";
-import { deletePostgresRunnerUserData, readPostgresRunnerStatus, reconcilePostgresRuntimeConsent, stopPostgresRuntimeForUser } from "../src/runtime-user-control.ts";
+import { controlPostgresRuntimeVoice, deletePostgresRunnerUserData, readPostgresRunnerStatus, reconcilePostgresRuntimeConsent, stopPostgresRuntimeForUser } from "../src/runtime-user-control.ts";
 import { commandHostedRuntimeOwner } from "../src/runtime-owner-client.ts";
 import { fetchHostedExecutionWebControlPlaneResponse } from "../src/web-control-plane.ts";
 import { createHostedExecutionTestEnv } from "./hosted-execution-fixtures.ts";
-import { hostedMediaObjectKey } from "../src/storage-paths.ts";
+import { hostedGameMediaObjectKey, hostedMediaObjectKey } from "../src/storage-paths.ts";
 import { MemoryEncryptedR2Bucket } from "./test-helpers.ts";
 
 vi.mock("../src/runtime-owner-client.ts", () => ({ commandHostedRuntimeOwner: vi.fn() }));
@@ -24,9 +24,10 @@ function harness() {
   const target = `runner--v-release_1--${"1".repeat(32)}`;
   const owner: HostedRuntimeOwnerSnapshot = { userId, attemptId: "synthetic-control-attempt", generation: "1",
     phase: "active", processingMode: "default", allocationId: "standby-claim-11111111-1111-4111-8111-111111111111",
-    runnerContainerName: target, workspaceVersion: "0", customInferenceEnvelope: null, platformAiUsageAllowed: true,
+    runnerContainerName: target, workspaceVersion: "0", platformAiUsageAllowed: true,
     startedAt: "2026-09-15T00:00:00.000Z", acceptedAt: null, completedAt: null, failureCount: 0, lastErrorCode: null };
   const slot = { invoke: vi.fn(), smokeHealth: vi.fn(), destroyInstance: vi.fn(),
+    controlVoice: vi.fn(async () => ({ kind: "closed" as const, providerConfirmed: true, seconds: 12 })),
     bindStandbySlot: vi.fn(), prepareStandbySlot: vi.fn(), resolveRetainedStandbySlot: vi.fn(),
     readStandbySlotCoordinatorState: vi.fn(), retireStandbySlot: vi.fn(async () => ({ retired: true as const })),
     readStandbySlotBinding: vi.fn(async () => ({ state: "retired" as const, slotName: target, claimId: null,
@@ -42,6 +43,45 @@ function harness() {
 }
 
 describe("Postgres runtime user controls", () => {
+  it("rejects an older container without voice capability before media startup", async () => {
+    const h = harness();
+    const { controlVoice: _voice, ...oldContainer } = h.slot;
+    const source = { ...h.source, RUNNER_CONTAINER: { getByName: () => oldContainer } };
+    expect(await controlPostgresRuntimeVoice(source, h.userId, {
+      action: "connect", callId: "call-synthetic", attemptId: h.owner.attemptId!,
+      leaseGeneration: h.owner.generation, sdp: "v=0\r\noffer",
+    })).toEqual({ kind: "unavailable" });
+    expect(h.slot.invoke).not.toHaveBeenCalled();
+  });
+  it("routes voice to the persisted exact owner without invoking or allocating work", async () => {
+    const h = harness();
+    const request = { action: "close" as const, callId: "call-synthetic",
+      attemptId: h.owner.attemptId!, leaseGeneration: h.owner.generation };
+    expect(await controlPostgresRuntimeVoice(h.source, h.userId, request)).toMatchObject({ kind: "closed", providerConfirmed: true });
+    expect(h.source.RUNNER_CONTAINER.getByName).toHaveBeenCalledExactlyOnceWith(h.target);
+    expect(h.slot.controlVoice).toHaveBeenCalledExactlyOnceWith({ ...request, userId: h.userId });
+    expect(h.slot.invoke).not.toHaveBeenCalled();
+    expect(h.slot.bindStandbySlot).not.toHaveBeenCalled();
+  });
+
+  it.each([{ attemptId: "old-attempt" }, { leaseGeneration: "0" }])("rejects stale voice authority before container lookup", async (change) => {
+    const h = harness();
+    expect(await controlPostgresRuntimeVoice(h.source, h.userId, {
+      action: "close", callId: "call-synthetic", attemptId: h.owner.attemptId!,
+      leaseGeneration: h.owner.generation, ...change,
+    })).toEqual({ kind: "unavailable" });
+    expect(h.source.RUNNER_CONTAINER.getByName).not.toHaveBeenCalled();
+  });
+
+  it("permits close after usage revocation while denying another connection", async () => {
+    const h = harness();
+    h.owner.platformAiUsageAllowed = false;
+    const request = { action: "connect" as const, callId: "call-synthetic", sdp: "v=0\r\noffer",
+      attemptId: h.owner.attemptId!, leaseGeneration: h.owner.generation };
+    expect(await controlPostgresRuntimeVoice(h.source, h.userId, request)).toEqual({ kind: "unavailable" });
+    expect(h.slot.controlVoice).not.toHaveBeenCalled();
+    expect(await controlPostgresRuntimeVoice(h.source, h.userId, { ...request, action: "close" })).toMatchObject({ kind: "closed" });
+  });
   beforeEach(() => vi.clearAllMocks());
 
   it("reads Web status and owner state without activating UserRunner", async () => {
@@ -79,6 +119,23 @@ describe("Postgres runtime user controls", () => {
       stateOwner: "postgres", runtimeStateCleared: true, r2: { deletedObjectCount: 1 },
       durableObject: { stateDeleted: false, deleteAllCompleted: false, alarmCleared: false } });
     expect(await h.source.BUNDLES.get(key)).toBeNull();
+  });
+
+  it("deletes a game-only member's photos though they never had a runtime", async () => {
+    const h = harness();
+    vi.mocked(commandHostedRuntimeOwner).mockImplementation(async ({ command }) => ({ cutover: "postgres",
+      status: command.operation === "deletion_ready" ? "authorized" : "observed", owner: null }));
+    const photos = await Promise.all(["a", "b"].map((digit) =>
+      hostedGameMediaObjectKey({ userId: h.userId, mediaId: `${digit.repeat(64)}.jpg` })));
+    const otherPlayer = await hostedGameMediaObjectKey({ userId: "synthetic-other-player", mediaId: `${"a".repeat(64)}.jpg` });
+    for (const key of [...photos, otherPlayer]) await h.source.BUNDLES.put(key, "synthetic-sealed-photo");
+
+    expect(await deletePostgresRunnerUserData(h.source, h.userId)).toMatchObject({ ok: true,
+      stateOwner: "postgres", runtimeStateCleared: true, r2: { deletedObjectCount: 2, supported: true } });
+    for (const key of photos) expect(await h.source.BUNDLES.get(key)).toBeNull();
+    expect(await h.source.BUNDLES.get(otherPlayer)).not.toBeNull();
+    expect(h.source.RUNNER_CONTAINER.getByName).not.toHaveBeenCalled();
+    expect(vi.mocked(commandHostedRuntimeOwner).mock.calls.map(([input]) => input.command.operation)).toEqual(["reconcile", "deletion_ready"]);
   });
 
   it("preserves R2 data when independent uploads have not drained", async () => {

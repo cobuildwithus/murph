@@ -1192,7 +1192,7 @@ run_all_package_coverage() {
         local status_file="${active_status_files[$active_index]}"
 
         if [[ ! -f "$status_file" ]]; then
-          if package_coverage_pid_finished_without_status "$active_pid"; then
+          if package_coverage_pid_finished_without_status "$active_pid" && [[ ! -f "$status_file" ]]; then
             wait "$active_pid" 2>/dev/null || true
             unregister_background_pid "$active_pid"
             if [[ "$active_pid" == "$cli_coverage_pid" ]]; then
@@ -1409,7 +1409,7 @@ run_typecheck_preflight() {
   run_timed_step "Hosted crypto hard-cut guard" pnpm hosted-crypto:guard
   run_timed_step "Raw health log payload guard" pnpm logs:guard
   run_timed_step "Provider request boundary guard" pnpm provider-requests:guard
-  run_timed_step "Repo TS tools typecheck" node "scripts/run-typescript.mjs" package -p "tsconfig.tools.json" --pretty false
+  run_timed_step "Repo TS tools typecheck" node "scripts/run-typescript.mjs" check -p "tsconfig.tools.json" --pretty false
   run_timed_step "Contracts build" pnpm --dir "packages/contracts" build
 }
 
@@ -1461,7 +1461,7 @@ run_typecheck_overlapped() {
   pids+=("$provider_request_guard_pid")
   register_background_pid "$provider_request_guard_pid"
 
-  run_timed_step "Repo TS tools typecheck" node "scripts/run-typescript.mjs" package -p "tsconfig.tools.json" --pretty false &
+  run_timed_step "Repo TS tools typecheck" node "scripts/run-typescript.mjs" check -p "tsconfig.tools.json" --pretty false &
   local repo_tools_typecheck_pid="$!"
   pids+=("$repo_tools_typecheck_pid")
   register_background_pid "$repo_tools_typecheck_pid"
@@ -1658,7 +1658,7 @@ run_diff_repo_internal_fast_path() {
   run_timed_step "Hosted crypto hard-cut guard" pnpm hosted-crypto:guard
   run_timed_step "Raw health log payload guard" pnpm logs:guard
   run_timed_step "Provider request boundary guard" pnpm provider-requests:guard
-  run_timed_step "Repo TS tools typecheck" node "scripts/run-typescript.mjs" package -p "tsconfig.tools.json" --pretty false
+  run_timed_step "Repo TS tools typecheck" node "scripts/run-typescript.mjs" check -p "tsconfig.tools.json" --pretty false
 }
 
 run_test_diff() {

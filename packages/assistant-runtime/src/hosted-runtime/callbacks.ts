@@ -140,6 +140,7 @@ import {
   resolveHostedAssistantLinqReactionDeliveryContextFromCandidatesForRequest,
   type HostedAssistantLinqDeliveryContext,
 } from "./linq-delivery-context.ts";
+import { buildHostedLinqLinkDelayNotice } from "./linq-link-delay-notice.ts";
 import {
   requireHostedProviderFetch,
   requireHostedProviderFetchDependencies,
@@ -151,6 +152,7 @@ import {
 import {
   recordHostedDeliveryCommittedBestEffort,
   type HostedDeliveryTraceContext,
+  writeHostedLinqDispatchEnteredTiming,
 } from "./delivery-latency-trace.ts";
 
 const HOSTED_MAX_BACKGROUND_DELIVERY_EFFECTS = 1;
@@ -2208,7 +2210,7 @@ export async function drainHostedPreparedAssistantDeliveries(input: {
   onBackgroundDeliveryYield?: (input: {
     yieldedEffectCount: number;
   }) => void;
-  platform?: Pick<HostedRuntimePlatform, "logPort"> | null;
+  platform?: Pick<HostedRuntimePlatform, "logPort" | "voicePort"> | null;
   platformEnv?: Readonly<Record<string, string>>;
   preparedDispatches?: readonly HostedAssistantDeliveryPreparedDispatch[] | null;
   providerFetch?: typeof fetch | null;
@@ -3310,6 +3312,52 @@ async function confirmHostedAcceptedLinqReactionDelivery(input: {
   return confirmation.delivery;
 }
 
+async function maybeSendHostedLinqLinkDelayNotice(input:
+  Parameters<typeof deliverHostedPreparedAssistantDelivery>[0] & {
+    intent: AssistantOutboxIntent;
+    previousIntent: AssistantOutboxIntent | null;
+  },
+): Promise<void> {
+  const { intent } = input;
+  const delivery = intent.delivery;
+  if (
+    input.assistantDeliveryEffect.deliveryPhase !== "foreground_current_turn"
+    || intent.threadIsDirect !== true
+    || intent.channel !== "linq"
+    || intent.status !== "retryable"
+    || !intent.nextAttemptAt
+    || intent.deliveryConfirmationPending
+    || input.previousIntent?.delivery
+    || delivery?.channel !== "linq"
+    || delivery.kind === "message-reaction"
+    || delivery.providerMessageIds?.length !== 1
+  ) {
+    return;
+  }
+
+  // The newly persisted partial receipt owns this best-effort notice. Replays
+  // already have that receipt, so they only retry the original delivery.
+  try {
+    await createHostedAssistantLinqSendDependency({
+      assertLiveness: input.assertLiveness,
+      effectsPort: input.effectsPort,
+      linqEnv: input.linqEnv,
+      linqDeliveryContexts: input.linqDeliveryContexts,
+      platform: input.platform,
+      providerFetch: input.providerFetch,
+      signal: input.signal,
+    })({
+      idempotencyKey: `assistant-link-delay:${intent.intentId}`,
+      message: buildHostedLinqLinkDelayNotice(intent.intentId),
+      target: delivery.target,
+      targetKind: delivery.targetKind,
+    });
+  } catch {
+    // A failed notice must neither change the original retry nor enqueue more
+    // notices when the messaging transport is itself unavailable.
+  }
+}
+
 async function deliverHostedPreparedAssistantDelivery(input: {
   deliveryTraceContext?: HostedDeliveryTraceContext | null;
   actionApprovalPort: HostedRuntimeActionApprovalPort | null;
@@ -3322,7 +3370,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
   shouldYieldBackgroundDelivery: (() => boolean) | null;
   linqEnv: NodeJS.ProcessEnv;
   linqDeliveryContexts: readonly HostedAssistantLinqDeliveryContext[];
-  platform: Pick<HostedRuntimePlatform, "logPort"> | null;
+  platform: Pick<HostedRuntimePlatform, "logPort" | "voicePort"> | null;
   preparedDispatch: HostedAssistantDeliveryPreparedDispatch | null;
   telegramEnv: NodeJS.ProcessEnv;
   telegramVoiceMemoEnv: NodeJS.ProcessEnv;
@@ -3441,6 +3489,19 @@ async function deliverHostedPreparedAssistantDelivery(input: {
       trackMessageVolumeReceipt:
         input.effectsPort.recordOutboundMessageVolumeReceipt !== undefined,
       dependencies: {
+        sendVoice: async (request) => {
+          const voicePort = input.platform?.voicePort;
+          if (!voicePort) {
+            throw Object.assign(new VaultCliError(
+              "ASSISTANT_VOICE_DELIVERY_UNAVAILABLE",
+              "The accepted voice call is no longer available.",
+            ), { deliveryMayHaveSucceeded: false, retryable: false });
+          }
+          await assertHostedDeliveryCanEnterProvider(input);
+          providerDispatchEntered = true;
+          await voicePort.speak(request);
+          await assertHostedDeliveryLiveNow(input);
+        },
         sendEmail: async (request) => {
           if (request.targetKind === "participant") {
             throw new VaultCliError(
@@ -3907,6 +3968,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
         sendLinq: createHostedAssistantLinqSendDependency({
           actionApprovalPort: input.actionApprovalPort,
           assertLiveness: input.assertLiveness,
+          dispatchTimingContext: input.deliveryTraceContext,
           deliveryRouteContext: {
             actorId: input.assistantDeliveryEffect.payload.actorId,
             identityId: input.assistantDeliveryEffect.payload.identityId,
@@ -4106,6 +4168,12 @@ async function deliverHostedPreparedAssistantDelivery(input: {
           }
         : {}),
       vault: input.vaultRoot,
+    });
+    await maybeSendHostedLinqLinkDelayNotice({
+      ...input,
+      intent: dispatched.intent,
+      linqDeliveryContexts,
+      previousIntent: mirrorState.intent,
     });
     const resetDispatchResult = await maybeResetHostedPreparedDeliveryAfterPreProviderAbort({
       assistantDeliveryEffect: input.assistantDeliveryEffect,
@@ -4633,6 +4701,8 @@ function createHostedAssistantLinqSendDependency(input: {
     HostedAssistantDeliveryPayload,
     "actorId" | "identityId" | "threadId" | "threadIsDirect"
   > | null;
+  /** Enables one timing row per existing provider-dispatch boundary. */
+  dispatchTimingContext?: HostedDeliveryTraceContext | null;
   effectsPort?: Pick<
     HostedRuntimeEffectsPort,
     | "assertAssistantAskPrivateCompletionAuthority"
@@ -4662,6 +4732,7 @@ function createHostedAssistantLinqSendDependency(input: {
     platform: input.platform ?? null,
   });
   return async (request) => {
+    const sendStartedAtMonotonicMs = performance.now();
     await assertHostedDeliveryLiveNow(input);
     const idempotencyKey = request.idempotencyKey?.trim() || null;
     const privateAssistantAskCompletion = idempotencyKey?.startsWith(
@@ -4739,6 +4810,7 @@ function createHostedAssistantLinqSendDependency(input: {
         target: deliveryContext?.target ?? request.target,
       });
     }
+    const routeAuthorityStartedAtMonotonicMs = performance.now();
     const engagement =
       await assertHostedAssistantLinqRecentInboundEngagementForDelivery({
         answeredMailboxItemIds: request.answeredMailboxItemIds,
@@ -4761,6 +4833,8 @@ function createHostedAssistantLinqSendDependency(input: {
         target: deliveryContext?.target ?? request.target,
         targetKind: request.targetKind ?? null,
       });
+    const routeAuthorityCheckMs =
+      performance.now() - routeAuthorityStartedAtMonotonicMs;
     const resolvedRoute = requireHostedAssistantLinqResolvedRoute(engagement);
     const directRecipientPhoneNumber = resolvedRoute.directRecipientPhoneNumber;
     const fromPhoneNumber = resolvedRoute.fromPhoneNumber;
@@ -4845,6 +4919,7 @@ function createHostedAssistantLinqSendDependency(input: {
         }
       },
       onProviderDispatchEntered: async () => {
+        const providerEntryFenceStartedAtMonotonicMs = performance.now();
         try {
           const reviewedCompletionExpiresAt = reviewedAssistantAskCompletion
             ? await prepareHostedReviewedAssistantAskProviderEntry({
@@ -4881,6 +4956,17 @@ function createHostedAssistantLinqSendDependency(input: {
             attemptedAt: new Date(),
             idempotencyKey: deliveryIdempotencyKey,
           };
+          // One row per provider boundary: a primary and a fallback entry
+          // each write their own row, which the reader treats as ambiguous.
+          writeHostedLinqDispatchEnteredTiming({
+            context: input.dispatchTimingContext,
+            dispatchEnteredAtMonotonicMs: performance.now(),
+            intentId: input.intentId,
+            platform: input.platform,
+            providerEntryFenceStartedAtMonotonicMs,
+            routeAuthorityCheckMs,
+            sendStartedAtMonotonicMs,
+          });
           input.onProviderDispatchEntered?.();
         } catch (error) {
           if (isHostedLinqProviderOutcomeAmbiguous(error)) {

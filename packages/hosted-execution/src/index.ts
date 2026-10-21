@@ -1,5 +1,4 @@
 export * from "./auth.ts";
-export * from "./assistant-inference.ts";
 export * from "./assistant-usage.ts";
 export * from "./assistant-personalization.ts";
 export * from "./pending-group-setup.ts";
@@ -56,6 +55,8 @@ export * from "./computer-use.ts";
 export * from "./phone-calls.ts";
 export * from "./physical-notes.ts";
 export * from "./email-ingress.ts";
+export * from "./voice-input.ts";
+export * from "./voice-control.ts";
 export * from "./env.ts";
 export * from "./group-reactions.ts";
 export * from "./hosted-email.ts";

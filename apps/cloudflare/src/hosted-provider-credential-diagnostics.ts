@@ -1,7 +1,4 @@
 import {
-  isHostedProviderEgressCredential,
-} from "./hosted-provider-egress-credential.ts";
-import {
   HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
 } from "./runner-injected-credential.ts";
 
@@ -24,7 +21,7 @@ export function readHostedProviderCredentialDiagnosticKind(
   if (credential === HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL) {
     return "sentinel";
   }
-  if (isHostedProviderEgressCredential(credential)) {
+  if (credential.startsWith("murph_provider_egress_v1.")) {
     return "provider_egress";
   }
   return "other";

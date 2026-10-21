@@ -107,12 +107,16 @@ new Stripe read, card setup flow, account field, or cached entitlement.
 
 The Cloudflare provider interceptor enforces the signed, runtime-member-bound
 Web decision before Images API generation/editing and native `image_generation`
-tools in Responses HTTP requests and WebSocket frames, including later images
-on an existing socket. Ordinary text adds no access callback. Bounded JSON
-inspection and the ordered Responses relay retain the shared 32 MiB queued-frame
-budget. Native-memory accounting stays restricted to its authenticated lane.
-Missing, failed, or incompatible access responses cannot authorize image spend;
-the caller cannot select a different payer. Local image generation is unchanged.
+tools in Responses HTTP requests. Opaque Responses WebSockets require image
+access once at handshake; missing, failed, incompatible, or denied access returns
+HTTP 426 so native Codex uses HTTPS with the per-request image gate. Ordinary
+HTTP text adds no image callback. An admitted socket retains its eligibility
+until it closes; subscription changes apply on the next connection, while
+consent withdrawal uses existing container destruction. The Worker forwards
+unaccepted upgrades without a frame relay. HTTP Responses inspection retains
+the 32 MiB body limit. Codex-native memory stays disabled; its unused egress
+accounting is removed. The caller cannot select a different payer. Local image
+generation is unchanged.
 
 A denied image completion directs the member to normal subscription Settings
 and invites them to request the image again after subscribing. It never starts

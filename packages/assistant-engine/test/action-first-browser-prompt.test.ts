@@ -9,6 +9,14 @@ import {
 } from '../src/assistant/system-prompt.js'
 
 describe('action-first browser prompt contract', () => {
+  it('routes public facts through structured lookup and web before live-browser escalation', () => {
+    const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
+
+    expect(prompt).toContain('then web search/text reading (`web.run` when available)')
+    expect(prompt).toContain('Browser use needs a website action or a material fact requiring interaction/visual inspection')
+    expect(prompt).toContain('preserve uncertainty and safety-critical or requested exact verification')
+  })
+
   it('treats lookup as preflight for browser-backed real-world actions', () => {
     const executionText = buildAssistantExecutionBehaviorText({
       profile: 'gpt5-agentic',

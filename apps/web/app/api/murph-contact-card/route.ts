@@ -87,23 +87,7 @@ export const GET = withJsonError(async (request: Request) => {
   });
 
   const prisma = getPrisma();
-  const routing = await readHostedMemberRoutingState({
-    memberId: authority.memberId,
-    prisma,
-  });
-  // Same phone authority as the invite/home surfaces that show the CTA: a
-  // freshly signed-up member may only have a pending line committed yet.
-  const phoneNumber = routing?.linqRecipientPhone
-    ?? routing?.pendingLinqRecipientPhone
-    ?? null;
-  if (!phoneNumber) {
-    throw hostedOnboardingError({
-      code: "MURPH_TEXT_LINE_NOT_READY",
-      message: "Your Murph text line is not set up yet, so there is no contact card to download.",
-      httpStatus: 409,
-      retryable: true,
-    });
-  }
+  const phoneNumber = await requireMurphContactCardPhoneNumber(authority.memberId);
 
   const [photo, backupPhoneNumber] = await Promise.all([
     requireMurphContactCardAvatarPhoto(authority.avatar),
@@ -139,6 +123,7 @@ export const POST = withJsonError(async (request: Request) => {
     limitBytes: MURPH_CONTACT_CARD_HANDOFF_BODY_LIMIT_BYTES,
   });
   const avatar = requireRequestedHandoffAvatar(payload.avatar);
+  await requireMurphContactCardPhoneNumber(session.member.id);
   await requireMurphContactCardAvatarPhoto(avatar);
 
   return jsonOk({
@@ -149,6 +134,28 @@ export const POST = withJsonError(async (request: Request) => {
     }),
   });
 });
+
+async function requireMurphContactCardPhoneNumber(memberId: string): Promise<string> {
+  const routing = await readHostedMemberRoutingState({
+    memberId,
+    prisma: getPrisma(),
+  });
+  // Same phone authority as the invite/home surfaces that show the CTA: a
+  // freshly signed-up member may only have a pending line committed yet.
+  const phoneNumber = routing?.linqRecipientPhone
+    ?? routing?.pendingLinqRecipientPhone
+    ?? null;
+  if (!phoneNumber) {
+    throw hostedOnboardingError({
+      code: "MURPH_TEXT_LINE_NOT_READY",
+      message: "Your Murph text line is not set up yet, so there is no contact card to download.",
+      httpStatus: 409,
+      retryable: true,
+    });
+  }
+
+  return phoneNumber;
+}
 
 async function requireMurphContactCardAuthority(input: {
   request: Request;

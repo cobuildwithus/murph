@@ -93,6 +93,37 @@ describe("sendPendingHostedLinqAlertsBestEffort", () => {
     expect(body).not.toContain("Silence measured from");
   });
 
+  it("renders final reply delivery alerts with both named measurements", async () => {
+    const fixture = createAlertEmailPrismaFixture();
+    fixture.hostedLinqAlertFindMany.mockResolvedValue([{
+      id: "synthetic-final-reply-alert", kind: "runtime_final_reply_delivery_slow",
+      subject: "Final reply delay",
+      detailsJson: {
+        schemaVersion: 1, acceptedAt: "2026-01-10T11:50:00.000Z", scope: "direct", thresholdMs: 5000,
+        triggerOrigins: ["provider_result"],
+        providerResultToAccepted: { elapsedMs: 5001, status: "observed" },
+        finalResponseCompletedToAccepted: { status: "unavailable" },
+        components: { attemptToAcceptedMs: 100, providerResultToAttemptMs: 4901, providerResultToIntentMs: 4501 },
+        deliveryAttemptRelation: "same",
+        dispatchAttribution: { routeAuthorityCheckMs: 20, status: "observed" },
+      },
+    }]);
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(JSON.stringify({ id: "synthetic-email" }), { status: 200 }),
+    );
+    await sendPendingHostedLinqAlertsBestEffort({
+      alertIds: ["synthetic-final-reply-alert"], env: buildAlertEmailEnv(), fetchImpl,
+      prisma: fixture.prisma as never,
+    });
+    const body = String(fetchImpl.mock.calls[0]?.[1]?.body);
+    expect(body).toContain("Provider result to Linq acceptance: 5001 ms");
+    expect(body).toContain("Final response completion observed to Linq acceptance: not measured (unavailable)");
+    expect(body).toContain("Route authority check: 20 ms");
+    expect(body).toContain("Provider result to Linq send attempt: 4901 ms");
+    expect(body).toContain("strictly greater than 5000 ms");
+    expect(body).not.toContain("Linq operational alert");
+  });
+
   it("marks alerts failed without throwing when Resend rejects the send", async () => {
     const fixture = createAlertEmailPrismaFixture();
     const fetchImpl = vi.fn(async () => new Response("nope", {

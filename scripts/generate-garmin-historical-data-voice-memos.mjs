@@ -12,7 +12,7 @@ const OUTPUT_DIR = path.join(
   REPO_ROOT,
   "apps/web/public/audio/garmin-historical-data-memos",
 );
-const DEFAULT_ELEVENLABS_MODEL_ID = "eleven_v3";
+const DEFAULT_ELEVENLABS_MODEL_ID = "eleven_v4";
 const DEFAULT_CLASSIC_VOICE_ID = "tCM7x6cGUkyoHo8AMYRn";
 const MEMO_TEXT =
   "Hey, quick heads-up. When Garmin opens, turn on Historical Data before you approve, so I can see the recent history Garmin shares.";

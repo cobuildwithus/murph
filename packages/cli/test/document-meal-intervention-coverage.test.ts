@@ -663,6 +663,7 @@ test('document and meal command handlers exercise nullish fallbacks directly', a
     mealId: 'meal_01JNV422Y2M5ZBV64ZP4N1DRB1',
     event: {
       id: 'evt_01JNV422Y2M5ZBV64ZP4N1DRB1',
+      dayKey: '2026-04-10',
       occurredAt: null,
       note: 'Normalized direct meal note',
       source: 'derived' as const,

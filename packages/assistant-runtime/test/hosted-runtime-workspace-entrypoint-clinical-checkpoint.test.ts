@@ -23,7 +23,7 @@ test("drains checkpoint-ready effects before restarting an unfinished clinical p
   const successorAt = new Date(Date.now() + 600_000).toISOString();
   const actualRunOne = clinicalEnrichment.runOneHostedClinicalEnrichment;
   const readNextClinicalEnrichment = vi.fn(async () => ({
-    status: "extract" as const, jobId: "a".repeat(64), page: 2,
+    status: "extract" as const, jobId: "a".repeat(64), page: 2, timeZone: "UTC",
     source: { rawRef: "raw/clinical-records/synthetic/source.pdf", sha256: "b".repeat(64), mediaType: "application/pdf" },
     documentPath: "/synthetic-vault/raw/clinical-records/synthetic/source.pdf",
   }));

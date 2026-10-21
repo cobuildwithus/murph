@@ -657,7 +657,6 @@ function createStatus(
     },
     capabilities: {
       billingReady: true,
-      phoneAuthReady: true,
       ...overrides.capabilities,
     },
     invite: {

@@ -154,6 +154,8 @@ export interface UpsertAutomationInput extends AutomationScaffoldPayload {
   allowSlugRename?: boolean;
   automationId?: string;
   createOnly?: boolean;
+  /** Scheduler-only lower bound for the first occurrence after a cadence migration. */
+  scheduleNotBefore?: Date;
   followUpSourceIntentId?: string;
   followUpParentAutomationId?: string;
   now?: Date;
@@ -167,6 +169,8 @@ export interface UpsertAutomationResult {
 }
 
 export interface PatchAutomationInput {
+  /** Scheduler-only lower bound, committed atomically with the replacement cadence. */
+  scheduleNotBefore?: Date;
   activeUntil?: string | null;
   continuityPolicy?: AutomationContinuityPolicy;
   expectedUpdatedAt?: string;
@@ -1207,6 +1211,7 @@ export async function patchAutomation(
       title: input.title ?? existingRecord.title,
       vaultRoot: input.vaultRoot,
       allowSlugRename: input.slug !== undefined,
+      scheduleNotBefore: input.scheduleNotBefore,
     }, records);
   });
 }
@@ -1684,6 +1689,24 @@ function resolveAdvancedDeviceActivityCursor(input: {
     : null;
 }
 
+function resolveAutomationScheduleAnchorAt(input: {
+  existingRecord: AutomationRecord | null;
+  schedule: AutomationSchedule;
+  status: AutomationStatus;
+  now: string;
+  scheduleNotBefore?: Date;
+}): string {
+  const { existingRecord, schedule, status, now } = input;
+  const anchor = existingRecord === null
+    || !isDeepStrictEqual(existingRecord.schedule, schedule)
+    || (existingRecord.status !== "active" && status === "active")
+    ? now
+    : existingRecord.scheduleAnchorAt ?? existingRecord.createdAt;
+  return input.scheduleNotBefore === undefined ? anchor : new Date(Math.max(
+    Date.parse(anchor), input.scheduleNotBefore.getTime(),
+  )).toISOString();
+}
+
 async function upsertAutomationWithLatestRegistry(
   input: UpsertAutomationInput,
   records?: AutomationRecord[],
@@ -1737,13 +1760,8 @@ async function upsertAutomationWithLatestRegistry(
     : normalizeAutomationActiveUntil(input.activeUntil);
   assertAutomationActiveUntilMatchesSchedule({ activeUntil, schedule });
   const status = normalizeAutomationStatus(input.status ?? existingRecord?.status);
-  const scheduleAnchorAt = (
-    existingRecord === null ||
-    !isDeepStrictEqual(existingRecord.schedule, schedule) ||
-    (existingRecord.status !== "active" && status === "active")
-  )
-    ? now
-    : existingRecord.scheduleAnchorAt ?? existingRecord.createdAt;
+  const scheduleAnchorAt = resolveAutomationScheduleAnchorAt({ existingRecord, schedule, status, now,
+    scheduleNotBefore: input.scheduleNotBefore });
   const requestedTags = input.tags === undefined
     ? existingRecord?.tags ?? []
     : normalizeAutomationTags(input.tags);

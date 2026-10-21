@@ -1,6 +1,7 @@
+import type { RuntimeProviderCaller } from "./runtime-provider-authorization.ts";
 import { createRuntimeReplicaWriteBucket } from "./runtime-replica-upload.ts";
 import { presignManagedSnapshot, completeManagedSnapshotForSession, ManagedSnapshotCompletionRejectedError } from "./managed-snapshot-control.ts";
-import { commandHostedRuntimeSnapshot, recordHostedRuntimeOrphan, commandHostedRuntimeReplicaPut, HostedRuntimeResourceRejectedError } from "./runtime-resource-client.ts";
+import { commandHostedRuntimeSnapshot, recordHostedRuntimeOrphan, HostedRuntimeResourceRejectedError } from "./runtime-resource-client.ts";
 import { executeRunnerMediaCommand, createRuntimeMediaWriteBucket } from "./runtime-media.ts";
 import { createHostedArtifactStore, createHostedMediaStore } from "./bundle-store.ts";
 import { HostedEncryptedR2PayloadUnreadableError } from "./crypto.ts";
@@ -156,6 +157,7 @@ export async function handleRunnerOutboundRequest(
   request: Request,
   env: RunnerOutboundEnvironmentSource,
   userId: string,
+  caller?: RuntimeProviderCaller,
 ): Promise<Response> {
   try {
     const url = new URL(request.url);
@@ -174,6 +176,7 @@ export async function handleRunnerOutboundRequest(
 
     if (url.hostname === CLOUDFLARE_HOSTED_RUNTIME_HOSTS.webControlPlane) {
       return handleRunnerWebControlRequest({
+        caller,
         env,
         environment,
         request,
@@ -541,11 +544,8 @@ async function handleRunnerMediaRequest(input: {
     });
   };
 
-  const writeAuthority = await readRunnerMediaWriteAuthority({
-    env: input.env,
-    request: input.request,
-    userId: input.userId,
-  });
+  // Media commands validate this identity in their owning Web transaction.
+  const writeAuthority = readRunnerRuntimeWriteFenceHeaders(input.request);
   if (!writeAuthority) {
     emitCompleted({
       mediaAuthorized: false,
@@ -554,31 +554,11 @@ async function handleRunnerMediaRequest(input: {
   }
 
   try {
-    const crypto = await resolveRunnerOutboundUserCryptoContext({
-      bucket: input.bucket,
-      domain: "runtime",
-      env: input.env,
-      environment: input.environment,
-      userId: input.userId,
-    });
-    const mediaStore = createHostedMediaStore({
-      bucket: descriptor ? createRuntimeMediaWriteBucket({
-        source: input.env, userId: input.userId, attemptId: writeAuthority.attemptId,
-        generation: writeAuthority.generation, media: { descriptor },
-      }) : input.bucket,
-      key: crypto.rootKey,
-      keyId: crypto.rootKeyId,
-      keysById: crypto.keysById,
-      resolveKeyById: crypto.resolveKeyById,
-      userId: input.userId,
-    });
-
     if (input.request.method === "DELETE") {
       return await handleRunnerMediaDeleteRequest({
         env: input.env,
         emitCompleted,
         mediaId: input.mediaId,
-        mediaStore,
         userId: input.userId,
         writeAuthority,
       });
@@ -586,16 +566,6 @@ async function handleRunnerMediaRequest(input: {
 
     if (!descriptor) {
       throw new Error("Hosted media descriptor missing after validation.");
-    }
-
-    if (input.request.method === "GET") {
-      return await handleRunnerMediaGetRequest({
-        descriptor,
-        emitCompleted,
-        env: input.env,
-        mediaStore,
-        userId: input.userId,
-      });
     }
 
     if (input.request.method === "POST") {
@@ -608,6 +578,12 @@ async function handleRunnerMediaRequest(input: {
       });
     }
 
+    const storeInput = { ...input, descriptor, writeAuthority };
+    if (input.request.method === "GET") {
+      return await handleRunnerMediaGetRequest({ ...storeInput, emitCompleted });
+    }
+
+    const mediaStore = await createRunnerMediaStore(storeInput);
     return await handleRunnerMediaPutRequest({
       descriptor,
       emitCompleted,
@@ -618,6 +594,13 @@ async function handleRunnerMediaRequest(input: {
       userId: input.userId,
     });
   } catch (error) {
+    if (error instanceof HostedRuntimeResourceRejectedError) {
+      const response = error.code === "HOSTED_RUNTIME_OWNER_STALE"
+        ? unauthorized()
+        : jsonError("Media mutation was rejected.", 409);
+      emitCompleted({ mediaAuthorized: false, errorCode: error.code }, response.status);
+      return response;
+    }
     emitHostedExecutionStructuredLog({
       component: "runner",
       details: {
@@ -663,7 +646,6 @@ async function handleRunnerMediaDeleteRequest(input: {
   env: RunnerOutboundEnvironmentSource;
   emitCompleted: RunnerMediaRequestCompletedEmitter;
   mediaId: string;
-  mediaStore: RunnerMediaStore;
   userId: string;
   writeAuthority: RunnerRuntimeWriteFenceHeaders;
 }): Promise<Response> {
@@ -689,26 +671,49 @@ async function handleRunnerMediaDeleteRequest(input: {
   });
 }
 
-async function handleRunnerMediaGetRequest(input: {
-  descriptor: HostedRunnerMediaDescriptor;
-  emitCompleted: RunnerMediaRequestCompletedEmitter;
+type RunnerMediaStoreInput = {
+  bucket: RunnerOutboundEnvironmentSource["BUNDLES"];
   env: RunnerOutboundEnvironmentSource;
-  mediaStore: RunnerMediaStore;
+  environment: ReturnType<typeof readHostedExecutionEnvironment>;
+  descriptor: HostedRunnerMediaDescriptor;
   userId: string;
-}): Promise<Response> {
-  const readAdmission = await admitHostedMediaRead({
-    descriptor: input.descriptor,
+  writeAuthority: RunnerRuntimeWriteFenceHeaders;
+};
+
+async function createRunnerMediaStore(input: RunnerMediaStoreInput): Promise<RunnerMediaStore> {
+  const crypto = await resolveRunnerOutboundUserCryptoContext({
+    bucket: input.bucket,
+    domain: "runtime",
     env: input.env,
+    environment: input.environment,
     userId: input.userId,
   });
-  if (!readAdmission.ok) {
-    input.emitCompleted({
-      mediaReadable: false,
-      mediaReadAdmissionReason: readAdmission.reason,
-    }, 404);
+  return createHostedMediaStore({
+    bucket: createRuntimeMediaWriteBucket({
+      source: input.env, userId: input.userId, attemptId: input.writeAuthority.attemptId,
+      generation: input.writeAuthority.generation, media: { descriptor: input.descriptor },
+    }),
+    key: crypto.rootKey,
+    keyId: crypto.rootKeyId,
+    keysById: crypto.keysById,
+    resolveKeyById: crypto.resolveKeyById,
+    userId: input.userId,
+  });
+}
+
+async function handleRunnerMediaGetRequest(input: RunnerMediaStoreInput & {
+  emitCompleted: RunnerMediaRequestCompletedEmitter;
+}): Promise<Response> {
+  const admission = await executeRunnerMediaCommand({ source: input.env, userId: input.userId, command: {
+    operation: "admit_read", attemptId: input.writeAuthority.attemptId, generation: input.writeAuthority.generation,
+    descriptor: { ...input.descriptor, expiresAt: input.descriptor.expiresAt ?? null },
+  } });
+  if (!admission.applied) {
+    input.emitCompleted({ mediaReadable: false, mediaReadAdmissionReason: admission.reason ?? "expired" }, 404);
     return notFound();
   }
-  const bytes = await input.mediaStore.readMedia(input.descriptor);
+  const mediaStore = await createRunnerMediaStore(input);
+  const bytes = await mediaStore.readMedia(input.descriptor);
   if (!bytes) {
     input.emitCompleted({
       mediaFound: false,
@@ -836,32 +841,6 @@ function readHostedRunnerMediaExpiresAt(headers: Headers): string | null | false
   return Number.isFinite(expiresAtMs)
     ? new Date(expiresAtMs).toISOString()
     : false;
-}
-
-async function readRunnerMediaWriteAuthority(input: {
-  env: RunnerOutboundEnvironmentSource;
-  request: Request;
-  userId: string;
-}): Promise<RunnerRuntimeWriteFenceHeaders | null> {
-  try {
-    return await requireRunnerRuntimeWriteFence(input);
-  } catch (error) {
-    if (error instanceof RunnerRuntimeWriteFenceError) {
-      return null;
-    }
-    throw error;
-  }
-}
-
-async function admitHostedMediaRead(input: {
-  descriptor: NonNullable<ReturnType<typeof readHostedRunnerMediaDescriptor>>;
-  env: RunnerOutboundEnvironmentSource;
-  userId: string;
-}) {
-  const result = await executeRunnerMediaCommand({ source: input.env, userId: input.userId, command: {
-    operation: "read", descriptor: { ...input.descriptor, expiresAt: input.descriptor.expiresAt ?? null },
-  } });
-  return { ok: result.applied, reason: result.reason ?? "expired" };
 }
 
 async function recordHostedMediaAsset(input: {
@@ -1227,6 +1206,8 @@ async function handleRunnerWorkspaceSnapshotStartRequest(input: {
       "write_fence_owner_validation",
       async () => {
         const writeFence = await requireWorkspaceSnapshotWriteFence({
+          // snapshot_create validates this identity in its ownership transaction.
+          deferToResourceCommand: true,
           env: input.env,
           request: input.request,
           userId: input.userId,
@@ -1398,6 +1379,9 @@ async function handleRunnerWorkspaceSnapshotStartRequest(input: {
       snapshotId: crypto.snapshotId,
     }), "created");
   } catch (error) {
+    if (error instanceof HostedRuntimeResourceRejectedError) {
+      return complete(jsonError("Hosted workspace snapshot upload session is stale.", 409), "stale_owner");
+    }
     emitHostedWorkspaceSnapshotStartRouteDiagnostics({
       diagnostics,
       errorCode: deriveHostedExecutionErrorCode(error),
@@ -2215,10 +2199,6 @@ async function handleRunnerWorkspaceSnapshotAbortRequest(input: {
     return jsonError("Hosted workspace snapshot upload session is stale.", 409);
   }
 
-  if (!await requestOwnsWorkspaceSnapshotSession(input, session)) {
-    return jsonError("Hosted workspace snapshot upload session is stale.", 409);
-  }
-
   await deleteWorkspaceSnapshotUploadSession({
     session,
     env: input.env,
@@ -2257,12 +2237,19 @@ async function handleRunnerWorkspaceSnapshotCompleteRequest(input: {
   if (requestedSnapshotId !== input.snapshotId) {
     return jsonError("Hosted workspace snapshot complete snapshotId does not match its route.", 400);
   }
-  const session = await readWorkspaceSnapshotUploadSession({
-    writeAuthority: writeFence,
-    env: input.env,
-    snapshotId: input.snapshotId,
+  // Managed reads already return both the session and its exact upload receipt.
+  // Web fences this read; final checkpoint publication fences the owner again.
+  const resource = await commandHostedRuntimeSnapshot({
+    source: input.env,
     userId: input.userId,
+    command: {
+      operation: body.managedPart === undefined ? "snapshot_read" : "snapshot_managed_read",
+      snapshotId: input.snapshotId,
+      attemptId: writeFence.attemptId,
+      generation: writeFence.generation,
+    },
   });
+  const session = resource.applied ? resource.session : null;
   if (!session) {
     return notFound();
   }
@@ -2280,9 +2267,6 @@ async function handleRunnerWorkspaceSnapshotCompleteRequest(input: {
     || session.leaseGeneration !== writeFence.generation
     || session.workspaceVersion !== writeFence.workspaceVersion
   ) {
-    return jsonError("Hosted workspace snapshot upload session is stale.", 409);
-  }
-  if (!await requestOwnsWorkspaceSnapshotSession(input, session)) {
     return jsonError("Hosted workspace snapshot upload session is stale.", 409);
   }
   const checkpointRequestWithoutSnapshotRef = parseHostedWorkspaceCheckpointRequest({
@@ -2351,7 +2335,7 @@ async function handleRunnerWorkspaceSnapshotCompleteRequest(input: {
     return jsonError("Hosted workspace snapshot exceeds the total plain size limit.", 413);
   }
   const managedSha256 = body.managedPart === undefined ? null : await completeManagedSnapshotForSession({
-    source: input.env, session, part: body.managedPart,
+    source: input.env, session, part: body.managedPart, receipt: resource.managedUpload ?? null,
     encryptedByteSize: snapshotRef.archive.encryptedByteSize, encryptedSha256: snapshotRef.archive.encryptedObjectSha256,
   });
   const snapshotObjectStore = createWorkspaceSnapshotObjectStore({
@@ -2371,9 +2355,6 @@ async function handleRunnerWorkspaceSnapshotCompleteRequest(input: {
     return jsonError("Hosted workspace snapshot object metadata is unavailable.", 503);
   }
   const object = await snapshotObjectStore.head(snapshotRef.objectKey);
-  if (!await requestOwnsWorkspaceSnapshotSession(input, session)) {
-    return jsonError("Hosted workspace snapshot upload session is stale.", 409);
-  }
   if (!object) {
     await deleteWorkspaceSnapshotUploadSession({
       session,
@@ -2472,9 +2453,6 @@ async function handleRunnerWorkspaceSnapshotCompleteRequest(input: {
       return jsonError("Hosted workspace snapshot current state is unavailable.", 502);
     }
   }
-  if (!await requestOwnsWorkspaceSnapshotSession(input, session)) {
-    return jsonError("Hosted workspace snapshot upload session is stale.", 409);
-  }
   if (
     preCheckpointReplacedSnapshotRef
     && !isReplacementRefSameAsSnapshotRef(preCheckpointReplacedSnapshotRef, snapshotRef)
@@ -2487,9 +2465,6 @@ async function handleRunnerWorkspaceSnapshotCompleteRequest(input: {
         userId: input.userId,
       });
       if (!remembered) {
-        return jsonError("Hosted workspace snapshot upload session is stale.", 409);
-      }
-      if (!await requestOwnsWorkspaceSnapshotSession(input, session)) {
         return jsonError("Hosted workspace snapshot upload session is stale.", 409);
       }
       session.replacedSnapshotRef = preCheckpointReplacedSnapshotRef;
@@ -2539,14 +2514,10 @@ async function handleRunnerWorkspaceSnapshotCompleteRequest(input: {
   }
   if (!checkpoint.checkpointed) {
     const cleanupRetryResponse = await completeAlreadyCheckpointedWorkspaceSnapshotResponse({
-      attemptId: writeFence.attemptId,
       checkpointRequest,
       checkpoint,
-      env: input.env,
-      leaseGeneration: writeFence.generation,
       session,
       snapshotRef,
-      userId: input.userId,
     });
     if (cleanupRetryResponse) {
       return cleanupRetryResponse;
@@ -2591,14 +2562,6 @@ async function handleRunnerWorkspaceSnapshotCompleteRequest(input: {
     }
     return jsonError("Hosted workspace snapshot checkpoint ref mismatch.", 502);
   }
-
-  await completeWorkspaceSnapshotUploadSessionHandoffBestEffort({
-    attemptId: writeFence.attemptId,
-    env: input.env,
-    leaseGeneration: writeFence.generation,
-    snapshotId: input.snapshotId,
-    userId: input.userId,
-  });
 
   return json({
     checkpoint,
@@ -2668,8 +2631,7 @@ function isReplacementRefSameAsSnapshotRef(
     && hostedWorkspaceSnapshotV2RefsMatch(replacedSnapshotRef, snapshotRef);
 }
 
-async function deleteReplacedWorkspaceSnapshotRef(input: {
-  bucket: WorkspaceSnapshotR2BucketLike | null;
+async function retireReplacedWorkspaceSnapshotRef(input: {
   env: RunnerOutboundEnvironmentSource;
   environment: ReturnType<typeof readHostedExecutionEnvironment>;
   replacedSnapshotRef: HostedExecutionSnapshotRefValue;
@@ -2686,14 +2648,8 @@ async function deleteReplacedWorkspaceSnapshotRef(input: {
     ) {
       return true;
     }
-    const deleted = await deleteWorkspaceSnapshotObjectBestEffort({
-      bucket: input.bucket,
-      env: input.env,
-      objectKey: replacedSnapshotRef.objectKey,
-    });
-    if (deleted) {
-      return true;
-    }
+    // Web records the complete accepted reference and owns its recovery
+    // retention. An adapter must never bypass that window with an R2 delete.
     const orphanRecorded = await recordWorkspaceSnapshotOrphanCandidate(input.env, {
       createdAt: new Date().toISOString(),
       objectKey: replacedSnapshotRef.objectKey,
@@ -2763,14 +2719,10 @@ async function recordReplacedWorkspaceSnapshotOrphanCandidate(input: {
 }
 
 async function completeAlreadyCheckpointedWorkspaceSnapshotResponse(input: {
-  attemptId: string;
   checkpointRequest: ReturnType<typeof parseHostedWorkspaceCheckpointRequest>;
   checkpoint: ReturnType<typeof parseHostedWorkspaceCheckpointResponse>;
-  env: RunnerOutboundEnvironmentSource;
-  leaseGeneration: string;
   session: HostedWorkspaceSnapshotUploadSession;
   snapshotRef: HostedWorkspaceSnapshotV2Ref;
-  userId: string;
 }): Promise<Response | null> {
   const currentSnapshotRef = input.checkpoint.workspace.snapshotRef;
   if (
@@ -2786,14 +2738,6 @@ async function completeAlreadyCheckpointedWorkspaceSnapshotResponse(input: {
     return jsonError("Hosted workspace snapshot checkpoint state mismatch.", 409);
   }
   const replacedSnapshotRef = input.session.replacedSnapshotRef ?? null;
-  await completeWorkspaceSnapshotUploadSessionHandoffBestEffort({
-    attemptId: input.attemptId,
-    env: input.env,
-    leaseGeneration: input.leaseGeneration,
-    snapshotId: input.session.snapshotId,
-    userId: input.userId,
-  });
-
   return json({
     checkpoint: {
       checkpointed: true,
@@ -2862,8 +2806,7 @@ async function completeExpiredCurrentWorkspaceSnapshotUploadSession(input: {
 
   const replacedSnapshotRef = input.session.replacedSnapshotRef ?? null;
   if (replacedSnapshotRef) {
-    const replacedSnapshotCleanupSucceeded = await deleteReplacedWorkspaceSnapshotRef({
-      bucket: input.bucket,
+    const replacedSnapshotCleanupSucceeded = await retireReplacedWorkspaceSnapshotRef({
       env: input.env,
       environment: input.environment,
       replacedSnapshotRef,
@@ -2874,16 +2817,14 @@ async function completeExpiredCurrentWorkspaceSnapshotUploadSession(input: {
     }
   }
 
-  if (!await requestOwnsWorkspaceSnapshotSession(input, input.session)) {
-    return jsonError("Hosted workspace snapshot upload session is stale.", 409);
-  }
-
   await deleteWorkspaceSnapshotUploadSession({
     session: input.session,
     env: input.env,
     snapshotId: currentSnapshotRef.snapshotId,
     userId: input.userId,
-  }).catch(() => undefined);
+  }).catch((error: unknown) => {
+    if (error instanceof HostedRuntimeResourceRejectedError) throw error;
+  });
 
   return json({
     checkpoint: {
@@ -3338,19 +3279,9 @@ async function handleRunnerBrowserVaultReplicaWriteRequest(input: {
   request: Request;
   userId: string;
 }): Promise<Response> {
-  let writeAuthority: Awaited<ReturnType<typeof requireRunnerRuntimeWriteFence>>;
-  try {
-    writeAuthority = await requireRunnerRuntimeWriteFence({
-      env: input.env,
-      request: input.request,
-      userId: input.userId,
-    });
-  } catch (error) {
-    if (!(error instanceof RunnerRuntimeWriteFenceError)) {
-      throw error;
-    }
-    return unauthorized();
-  }
+  // The batch admission below checks live ownership under the Web transaction.
+  const writeAuthority = readRunnerRuntimeWriteFenceHeaders(input.request);
+  if (!writeAuthority) return unauthorized();
 
   const body = await readJsonObject(input.request, {
     limitBytes: HOSTED_BROWSER_VAULT_REPLICA_MAX_BYTES + 1024 * 1024,
@@ -3370,12 +3301,10 @@ async function handleRunnerBrowserVaultReplicaWriteRequest(input: {
     environment: input.environment,
     userId: input.userId,
   });
-  let admittedRootObjectKey: string | null = null;
+  const replicaWrites = createRuntimeReplicaWriteBucket({ source: input.env,
+    userId: input.userId, attemptId: writeAuthority.attemptId, generation: writeAuthority.generation });
   const replicaStore = createHostedBrowserVaultReplicaStore({
-    bucket: createRuntimeReplicaWriteBucket({ source: input.env,
-      userId: input.userId, attemptId: writeAuthority.attemptId, generation: writeAuthority.generation,
-      readRootObjectKey: () => admittedRootObjectKey,
-    }),
+    bucket: replicaWrites.bucket,
     keysById: crypto.keysById,
     resolveRootKeyById: crypto.resolveKeyById,
     rootKey: crypto.rootKey,
@@ -3390,31 +3319,17 @@ async function handleRunnerBrowserVaultReplicaWriteRequest(input: {
       userId: input.userId,
     });
   }
-  let activePutWriteId: string | null = null;
+  let writeFailed = false;
   try {
     return json({
       replicaRef: await replicaStore.writeBrowserVaultReplica({
-        beforeWrite: async (plannedReplicaRef) => {
-          const writeId = globalThis.crypto.randomUUID();
-          const putAdmitted = await admitBrowserVaultReplicaDirectPut({
-            objectKey: plannedReplicaRef.objectKey,
-            attemptId: writeAuthority.attemptId,
-            env: input.env,
-            leaseGeneration: writeAuthority.generation,
-            userId: input.userId,
-            writeId,
-          });
-          if (!putAdmitted) {
-            throw new RunnerRuntimeWriteFenceError();
-          }
-          activePutWriteId = writeId;
-          admittedRootObjectKey = plannedReplicaRef.objectKey;
-        },
+        beforeWrite: plannedReplicaRef => replicaWrites.admit(plannedReplicaRef.objectKey),
         replica: body.replica,
         userId: input.userId,
       }),
     });
   } catch (error) {
+    writeFailed = true;
     if (!(error instanceof HostedRuntimeResourceRejectedError)) throw error;
     emitHostedExecutionStructuredLog({
       component: "runner", phase: "wake.running", level: "warn",
@@ -3423,36 +3338,9 @@ async function handleRunnerBrowserVaultReplicaWriteRequest(input: {
     });
     return json({ code: error.code, error: "Hosted runtime replica write rejected." }, error.status);
   } finally {
-    if (activePutWriteId) {
-      await releaseBrowserVaultReplicaDirectPut({
-        env: input.env,
-        userId: input.userId,
-        writeId: activePutWriteId,
-      });
-    }
+    try { await replicaWrites.settle(); }
+    catch (error) { if (!writeFailed) throw error; }
   }
-}
-
-async function admitBrowserVaultReplicaDirectPut(input: {
-  objectKey: string;
-  attemptId: string;
-  env: RunnerOutboundEnvironmentSource;
-  leaseGeneration: string;
-  userId: string;
-  writeId: string;
-}): Promise<boolean> {
-  return commandHostedRuntimeReplicaPut({ source: input.env, userId: input.userId, command: {
-    operation: "admit", attemptId: input.attemptId, generation: input.leaseGeneration, writeId: input.writeId, objectKey: input.objectKey,
-  } });
-}
-
-async function releaseBrowserVaultReplicaDirectPut(input: {
-  env: RunnerOutboundEnvironmentSource;
-  userId: string;
-  writeId: string;
-}): Promise<void> {
-  await commandHostedRuntimeReplicaPut({ source: input.env, userId: input.userId, command: { operation: "release", writeId: input.writeId } });
-  return;
 }
 
 async function writeRequestOwnsRuntimeWriteFence(input: {
@@ -3532,50 +3420,6 @@ async function heartbeatWorkspaceSnapshotUploadSession(input: {
   return (await commandHostedRuntimeSnapshot({ source: input.env, userId: input.userId, command: {
     operation: "snapshot_heartbeat", snapshotId: input.snapshotId, attemptId: input.attemptId, generation: input.leaseGeneration,
   } })).applied;
-}
-
-async function completeWorkspaceSnapshotUploadSessionHandoff(input: {
-  attemptId: string;
-  env: RunnerOutboundEnvironmentSource;
-  leaseGeneration: string;
-  snapshotId: string;
-  userId: string;
-}): Promise<boolean> {
-  return (await commandHostedRuntimeSnapshot({ source: input.env, userId: input.userId, command: {
-    operation: "snapshot_complete", snapshotId: input.snapshotId, attemptId: input.attemptId, generation: input.leaseGeneration,
-  } })).applied;
-}
-
-async function completeWorkspaceSnapshotUploadSessionHandoffBestEffort(input: {
-  attemptId: string;
-  env: RunnerOutboundEnvironmentSource;
-  leaseGeneration: string;
-  snapshotId: string;
-  userId: string;
-}): Promise<void> {
-  try {
-    if (await completeWorkspaceSnapshotUploadSessionHandoff(input)) {
-      return;
-    }
-    emitHostedExecutionStructuredLog({
-      component: "runner",
-      details: { checkpointHandoffCompletionRecorded: false },
-      level: "warn",
-      message: "Hosted workspace snapshot handoff completion marker was stale.",
-      phase: "checkpoint",
-      userId: input.userId,
-    });
-  } catch (error) {
-    emitHostedExecutionStructuredLog({
-      component: "runner",
-      details: { checkpointHandoffCompletionRecorded: false },
-      error,
-      level: "warn",
-      message: "Hosted workspace snapshot handoff completion marker failed.",
-      phase: "checkpoint",
-      userId: input.userId,
-    });
-  }
 }
 
 async function readWorkspaceSnapshotUploadSession(input: {

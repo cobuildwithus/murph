@@ -39,7 +39,7 @@ export async function readClinicalEnrichmentParentEligibility(input: {
     || attachment.byteLength !== input.attachment.byteLength) throw invalidParent();
   const parent = await readAttestedParent({ ...input, manifest, attachment });
   validateParentPatient(parent, manifest);
-  validateParentAttachment(parent, attachment);
+  const hasInlineContent = validateParentAttachment(parent, attachment);
   // Same revision rule as the importer: an absent `meta.lastUpdated` binds the
   // parent to the retrieval batch, so derived facets match the imported parent.
   const revision = resolveClinicalFhirSourceRevision({
@@ -51,7 +51,7 @@ export async function readClinicalEnrichmentParentEligibility(input: {
   const eligibility = clinicalDocumentParentEligibility({ resourceType: attachment.resourceType,
     status: parent.status, docStatus: parent.docStatus });
   return { eligible: eligibility.action === "eligible", ...("reason" in eligibility ? { reason: eligibility.reason } : {}),
-    parentExternalRef, parentRevision: revision,
+    parentExternalRef, parentRevision: revision, hasInlineContent,
     clinicalOccurredAt: readParentClinicalDate(parent), retrievedAt: manifest.fetchedAt };
 }
 
@@ -94,13 +94,14 @@ function validateParentPatient(parent: Record<string, unknown>, manifest: Clinic
   if (!patientId || hashClinicalFhirPatientId(patientId) !== manifest.patientIdHash) throw invalidParent();
 }
 
-function validateParentAttachment(parent: Record<string, unknown>, attachment: DownloadedAttachment): void {
+function validateParentAttachment(parent: Record<string, unknown>, attachment: DownloadedAttachment): boolean {
   const source = listClinicalFhirAttachments(parent)[attachment.attachmentIndex];
   if (!source || (!source.data && !source.url)) throw invalidParent();
   if (source.data) {
     const bytes = decodeClinicalDocumentBase64(source.data);
     if (!bytes || hashClinicalDocumentBytes(bytes) !== attachment.sha256) throw invalidParent();
   }
+  return Boolean(source.data);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

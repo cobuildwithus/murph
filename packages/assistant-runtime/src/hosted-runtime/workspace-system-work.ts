@@ -22,7 +22,6 @@ export const HOSTED_WORKSPACE_SYSTEM_WORK_ACTIONS = [
   "run-device-sync-wake",
   "run-clinical-records-sync",
   "apply-clinical-enrichment",
-  "run-environment-interview",
 ] as const satisfies readonly HostedSystemMailboxRouteAction[];
 
 /** Attempts belong to the fenced workspace. Mailbox claims own exclusion and retry. */
@@ -33,7 +32,7 @@ export function createHostedWorkspaceSystemWork(input: {
   >;
   runnerInput: HostedWorkspaceRunnerInput;
   onCompleted(
-    result: HostedWorkspaceRunnerAssistantPhasePostCheckpoint,
+    result: HostedWorkspaceRunnerAssistantPhasePostCheckpoint & { systemProgressed?: true },
     notify: boolean,
   ): void;
   onFailure(error: unknown, notify: boolean): void;
@@ -50,6 +49,8 @@ export function createHostedWorkspaceSystemWork(input: {
     });
     input.onCompleted({
       checkpointReason: "system_mailbox_receipt",
+      ...(preparation.status === "processed" && preparation.metrics.systemProgressed === true
+        ? { systemProgressed: true as const } : {}),
       nextWakeAt: nextWake.at,
       nextWakeReason: nextWake.reason,
       ...(preparation.status === "processed" || preparation.status === "recording"
@@ -111,6 +112,7 @@ export function createHostedWorkspaceSystemWork(input: {
               runtimeLogContext: input.runnerInput.runtimeLogContext,
               retainProcessedItemUntilRecorded: true,
               shouldYieldBackgroundMaintenance: input.runnerInput.shouldYieldBackgroundMaintenance,
+              backgroundMaintenanceYieldReason: input.runnerInput.backgroundMaintenanceYieldReason,
               signal,
             }),
           });

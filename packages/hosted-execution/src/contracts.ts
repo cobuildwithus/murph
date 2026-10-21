@@ -110,8 +110,6 @@ export const HOSTED_EXECUTION_WAKE_KINDS = [
   "clinical-records.sync-requested",
   "clinical-records.enrichment-requested",
   "device-sync.wake",
-  "environment-interview.completed",
-  "environment-voice.captured",
   "journal.group-fact.recorded",
   "health.daily-metric.reported",
   "meal-photo.captured",
@@ -132,6 +130,7 @@ export const HOSTED_EXECUTION_CONVERSATION_MESSAGE_CHANNELS = [
   "linq",
   "telegram",
   "email",
+  "voice",
 ] as const;
 
 export type HostedExecutionConversationMessageChannel =
@@ -792,10 +791,19 @@ export interface HostedExecutionEmailConversationMessagePayload {
   to?: string[];
 }
 
+/** Native normalized speech admitted by the authenticated call owner. */
+export interface HostedExecutionVoiceConversationMessagePayload {
+  channel: "voice";
+  callId: string;
+  inputId: string;
+  text: string;
+}
+
 export type HostedExecutionConversationMessagePayload =
   | HostedExecutionLinqConversationMessagePayload
   | HostedExecutionTelegramConversationMessagePayload
-  | HostedExecutionEmailConversationMessagePayload;
+  | HostedExecutionEmailConversationMessagePayload
+  | HostedExecutionVoiceConversationMessagePayload;
 
 /**
  * Returns only the human-authored text represented by a conversation wake.
@@ -812,7 +820,7 @@ export function readHostedExecutionConversationMessageText(
       .join("\n")
     : payload.channel === "telegram"
       ? payload.telegramMessage.text ?? ""
-      : "";
+      : payload.channel === "voice" ? payload.text : "";
   const normalized = text.trim();
   return normalized.length > 0 ? normalized : null;
 }
@@ -897,33 +905,6 @@ export interface HostedExecutionClinicalEnrichmentRequestedWake
   kind: "clinical-records.enrichment-requested";
 }
 
-export const HOSTED_EXECUTION_ENVIRONMENT_VOICE_MAX_BYTES = 3 * 1024 * 1024;
-
-export const HOSTED_EXECUTION_ENVIRONMENT_VOICE_CONTENT_TYPES = [
-  "audio/mp4",
-  "audio/ogg",
-  "audio/webm",
-] as const;
-
-export type HostedExecutionEnvironmentVoiceContentType =
-  (typeof HOSTED_EXECUTION_ENVIRONMENT_VOICE_CONTENT_TYPES)[number];
-
-export interface HostedExecutionEnvironmentVoiceCapturedPayload {
-  audioKey: string;
-  byteLength: number;
-  captureId: string;
-  capturedAt: string;
-  contentType: HostedExecutionEnvironmentVoiceContentType;
-  durationMs: number;
-  sha256: string;
-}
-
-export interface HostedExecutionEnvironmentVoiceCapturedWake
-  extends HostedExecutionBaseWake {
-  environmentVoice: HostedExecutionEnvironmentVoiceCapturedPayload;
-  kind: "environment-voice.captured";
-}
-
 export const HOSTED_EXECUTION_DAILY_METRIC_MAX_METRIC_LENGTH = 120;
 export const HOSTED_EXECUTION_DAILY_METRIC_MAX_UNIT_LENGTH = 80;
 
@@ -961,28 +942,6 @@ export interface HostedExecutionGroupJournalFactRecordedWake
   extends HostedExecutionBaseWake {
   journalFact: HostedExecutionGroupJournalFactPayload;
   kind: "journal.group-fact.recorded";
-}
-
-export interface HostedExecutionEnvironmentInterviewTopicCompletion {
-  answers: Array<{
-    aspectId: string;
-    indicatorId: string;
-    note?: string | null;
-    value: string | number | boolean;
-  }>;
-  topicId: string;
-}
-
-export interface HostedExecutionEnvironmentInterviewCompletedPayload {
-  completedAt: string;
-  completionId: string;
-  topics: HostedExecutionEnvironmentInterviewTopicCompletion[];
-}
-
-export interface HostedExecutionEnvironmentInterviewCompletedWake
-  extends HostedExecutionBaseWake {
-  environmentInterview: HostedExecutionEnvironmentInterviewCompletedPayload;
-  kind: "environment-interview.completed";
 }
 
 export const HOSTED_EXECUTION_MEAL_PHOTO_MAX_BYTES = 4 * 1024 * 1024;
@@ -1050,8 +1009,6 @@ export type HostedExecutionWake =
   | HostedExecutionClinicalRecordsSyncRequestedWake
   | HostedExecutionClinicalEnrichmentRequestedWake
   | HostedExecutionDeviceSyncWake
-  | HostedExecutionEnvironmentInterviewCompletedWake
-  | HostedExecutionEnvironmentVoiceCapturedWake
   | HostedExecutionGroupJournalFactRecordedWake
   | HostedExecutionDailyMetricReportedWake
   | HostedExecutionMealPhotoCapturedWake

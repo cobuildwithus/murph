@@ -1,0 +1,19 @@
+{
+  "publishedOn": "2026-10-01",
+  "order": 100,
+  "item": {
+    "id": "wrist-reminders",
+    "kind": "feature",
+    "priority": 3,
+    "title": "Wrist reminders through the iPhone app",
+    "summary": "Connect a compatible band in Settings > Connect device, test a buzz, then ask Murph how wrist reminders could help.",
+    "details": "Murph can send an immediate wrist reminder or schedule one for later. Keep the app open with the band connected when it is due. Garmin may also make a sound; device compatibility is still being verified.",
+    "relevanceTags": [
+      "reminders",
+      "wearables"
+    ],
+    "sourcePullRequests": [
+      3949
+    ]
+  }
+}

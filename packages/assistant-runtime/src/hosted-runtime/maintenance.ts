@@ -1,4 +1,6 @@
+import { cancelHostedLinqInputTyping } from "./channel-activity.ts";
 import {
+  ASSISTANT_INPUT_EXACT_LOOKUP_EXCLUSION_REASONS,
   DEFAULT_ASSISTANT_AUTOMATION_SCAN_LIMIT,
   type AssistantExecutionContext,
   type AssistantAutomationOperationScope,
@@ -6,6 +8,7 @@ import {
   type AssistantBeforeProviderAcceptedInputsHook,
   type AssistantInputCandidateBatch,
   type AssistantInputCandidateQuery,
+  type AssistantInputExactLookupObservation,
   type AssistantInputSource,
   type AssistantProviderStartCriticalPathContext,
   type AssistantProviderStartCriticalPathTiming,
@@ -64,6 +67,7 @@ import { emitHostedAssistantTurnTimingTraceLog } from "./turn-timing-diagnostics
 import { normalizeHostedFutureWakeAt } from "./wake-time.ts";
 import {
   recordHostedAssistantMilestonesBestEffort,
+  waitForHostedStagedLatencyTraceWrites,
   type HostedAssistantMilestoneTraceContext,
 } from "./assistant-latency-trace.ts";
 import {
@@ -566,6 +570,12 @@ export async function runHostedAssistantAutomation(
         });
       },
       onTerminalNonReplyCommitted: (event) => {
+        if (event.source === "linq") {
+          void cancelHostedLinqInputTyping({
+            inputIds: event.inputIds,
+            runtimeAttemptId: options?.runtimeAttemptId,
+          });
+        }
         recordHostedAssistantTerminalNonReplyBestEffort({
           commitTimeoutMs: options?.commitTimeoutMs ?? null,
           event,
@@ -951,6 +961,7 @@ async function recordHostedAssistantProviderStartLatencyTraceWithRetry(
   latencyTracePort: NonNullable<HostedRuntimePlatform["latencyTracePort"]>,
   request: Parameters<NonNullable<HostedRuntimePlatform["latencyTracePort"]>["record"]>[0],
 ): Promise<void> {
+  await waitForHostedStagedLatencyTraceWrites();
   let response = await latencyTracePort.record(request);
 
   for (const delayMs of HOSTED_ASSISTANT_PROVIDER_START_TRACE_RETRY_DELAYS_MS) {
@@ -1067,6 +1078,7 @@ function buildHostedAssistantInputCandidateQueryLogDetails(input: {
       input.result.inputs.map((candidate) => candidate.event.source),
     ),
     elapsedMs: input.elapsedMs,
+    ...buildHostedAssistantExactLookupLogDetails(input.query.exactLookupObservation),
     knownInputIdCount: input.query.knownInputIds?.length ?? 0,
     limit: normalizeHostedRuntimeLogLimit(input.query.limit),
     nextCursorPresent: input.result.nextCursor !== null,
@@ -1096,6 +1108,42 @@ function buildHostedAssistantNewConversationInputQueryLogDetails(input: {
     nextCursorPresent: input.result.nextCursor !== null,
     type: "assistant.new_conversation_inputs.listed",
   };
+}
+
+// Present only on an admission's route query; absent rows made no exact
+// observation. A null summary means the source did not report reasons.
+function buildHostedAssistantExactLookupLogDetails(
+  observation: AssistantInputExactLookupObservation | undefined,
+): Record<string, boolean | number | string | null> {
+  if (!observation) return {};
+  return {
+    exactLookupCalled: observation.called,
+    exactLookupExclusionSummary: summarizeHostedAssistantExactLookupExclusions(observation),
+    exactLookupRequestedCount: observation.requestedCount,
+    exactLookupReturnedCount: observation.returnedCount,
+  };
+}
+
+// Emits only the declared reason codes. Unknown keys, malformed counts or a
+// total above the requested inputs yield "invalid", never a clean "none".
+function summarizeHostedAssistantExactLookupExclusions(
+  observation: AssistantInputExactLookupObservation,
+): string | null {
+  const counts: Readonly<Record<string, unknown>> | undefined = observation.exclusionReasonCounts;
+  if (!counts) return null;
+  const known = new Set<string>(ASSISTANT_INPUT_EXACT_LOOKUP_EXCLUSION_REASONS);
+  if (Object.keys(counts).some((key) => !known.has(key))) return "invalid";
+  const parts: string[] = [];
+  let total = 0;
+  for (const reason of ASSISTANT_INPUT_EXACT_LOOKUP_EXCLUSION_REASONS) {
+    const count = counts[reason];
+    if (count === undefined || count === 0) continue;
+    if (typeof count !== "number" || !Number.isSafeInteger(count) || count < 0) return "invalid";
+    total += count;
+    parts.push(`${reason}:${count}`);
+  }
+  if (total > observation.requestedCount) return "invalid";
+  return parts.length === 0 ? "none" : parts.join(",");
 }
 
 function summarizeHostedRuntimeLogCodeCounts(values: readonly string[]): string {
@@ -1210,12 +1258,7 @@ function shouldAlwaysPersistHostedAssistantAutomationEvent(
   event: AssistantRunEvent,
 ): boolean {
   return event.type === "input.reply-failed"
-    || event.type === "onboarding.followup.completed"
-    || (
-      (event.type === "cron.job.completed"
-        || event.type === "cron.occurrence.expired")
-      && event.failureContext?.automationSlug === "personal-patterns-update"
-    );
+    || event.type === "onboarding.followup.completed";
 }
 
 export function runHostedNoopSystemWakeLane(): HostedMaintenanceMetrics {

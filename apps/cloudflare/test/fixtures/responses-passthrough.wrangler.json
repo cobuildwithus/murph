@@ -1,0 +1,6 @@
+{
+  "name": "responses-passthrough-test",
+  "compatibility_date": "2026-04-23",
+  "compatibility_flags": ["nodejs_compat"],
+  "tsconfig": "../../tsconfig.json"
+}

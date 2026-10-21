@@ -48,8 +48,9 @@ then signal the pointer-only hosted Temporal workflow for the affected member.
 Device-sync webhook freshness is a dirty-state path instead: web records
 trace/audit facts, widens per-connection dirty resources, completes the trace in
 that transaction, and appends one deterministic `device-sync.wake` mailbox
-handoff only when the connection moves clean-to-dirty. Already-dirty level hints
-coalesce without another mailbox row. The dirty row remains the source of truth;
+handoff only when the connection moves clean-to-dirty. Routine Junction daily
+totals defer that handoff up to fifteen minutes and the scheduled recovery sweep
+releases it. Already-dirty level hints coalesce without another mailbox row. The dirty row remains the source of truth;
 the mailbox row is only the durable handoff into the normal Temporal wake path.
 Post-commit Temporal signal failures are logged as best-effort mailbox handoff
 failures; repeated dirty hints while a connection is already dirty do not retry
@@ -58,6 +59,11 @@ device-sync recovery path.
 Hosted execution no longer flows through a web-owned acquire/commit/finalize run
 protocol; the restored local runtime imports mailbox items, pulls dirty
 device-sync state, and checkpoints its own workspace state.
+Status checkpoints retaining the same normalized snapshot skip cleanup bookkeeping
+entirely. New publication and migration own resource registration; unchanged status
+updates introduce no new resource. Retirement validation and workspace CAS still
+run. Changed references record current and replaced resources, preserving recovery
+deadlines and metadata.
 
 Accessible auth completion routes to `/home`, which reads the member-owned
 onboarding completion state on every load. Pending members with a resolved text
@@ -85,6 +91,56 @@ workspace-runtime pass, and checkpoints through the web-owned workspace CAS. It 
 opaque encrypted runtime blobs and explicit execution-time callback data, but it is not the
 canonical owner of hosted product facts.
 
+## Browser and SMS failure diagnostics
+
+The existing `assistant.computer_tool_failed` runtime-log event retains
+`computerOperationElapsedMs` for the whole failed operation. Evaluation failures
+also retain `kernelExecutionTimeoutMs` (the rounded budget sent to Kernel) and
+`kernelExecutionElapsedMs` (the provider-call duration). SDK failures can retain
+a numeric `providerHttpStatus` from 400 through 599. Failure categories are
+closed values: `strict_mode_violation`, `timeout`, `browser_closed`,
+`navigation_network_error`, `javascript_error`, or `unclassified`.
+These hints do not prove whether a browser action took effect and never change
+retry or unknown-outcome handling. The event omits provider prose, scripts,
+URLs, and page contents; its existing private subject binding is unchanged.
+
+Twilio Verify send failures with HTTP 400 and numeric code 21614 return the
+existing invalid-request response with guidance to use an SMS-capable mobile
+number. This classification does not apply to verification checks, string codes,
+or other HTTP statuses. Code 60200 retains its exact allowlisted `To` parameter
+requirement.
+
+Twilio failures use the existing private route-error cause. Alongside operation,
+HTTP status, numeric provider code, and exact allowlisted parameter labels, it
+records whether the bounded response was parsed, missing, oversized, invalid
+JSON, an invalid shape, or unreadable. For code 60200, parameter recognition is
+explicitly recognized, unrecognized, or missing. Unknown labels and values are
+never retained. These additive diagnostics describe new failures only; they
+cannot reconstruct previously discarded historical details. Verify using
+natural traffic after the managed production deployment reaches its domains.
+
+## Connected-app transport diagnostics
+
+Composio failures without a provider HTTP status append a fixed
+`Transport diagnostic: <category>.` observation to the existing private route-error cause
+message. The six categories are `sdk_timeout`, `abort`, `dns`, `connect`, `socket`,
+and `unknown`; cause traversal is bounded to eight nodes and handles cycles.
+Only SDK classes and exact allowlisted names/codes select categories. Raw cause
+names, codes, prose, stacks, URLs, arguments and payloads are never added.
+
+`sdk_timeout` means the installed SDK classified the failure as a timeout; its
+own upstream normalization can use error text, so this does not prove that the
+configured request deadline elapsed. Categories cannot prove whether a write
+took effect. Public errors, retryability, ambiguous-write handling, cause chains,
+provider calls and existing event counts remain unchanged.
+
+After the managed Web deployment reaches production, inspect natural
+`Hosted onboarding route failed.` records whose existing `errorDetails.type`
+is `composio_transport_error`, grouping only the fixed category from
+`errorCauseMessage`. Keep failures without a category as pre-deployment or
+missing evidence. No new event is emitted on success, and historical causes
+cannot be reconstructed from this observation.
+
 ## Reconciliation-facts failure observability
 
 The success record's diagnostic `status` is `blocked` when access is blocked,
@@ -111,6 +167,32 @@ schema, then count grouped only by message, `stage`, and `errorClass`. The recor
 is additive and Web-only: older deployments and readers tolerate its absence,
 and recovery uses a fresh revert or forward-fix commit on `main` so the replacement
 deployment receives current production admission.
+
+## Checkpoint failure observability
+
+After callback authentication succeeds, the Web checkpoint route emits at most
+one additional failure record: `Hosted workspace checkpoint failed.` with
+schema `murph.hosted-workspace.checkpoint.failure.v1`. Metadata contains only
+`schema`, `stage`, and `errorClass`. The five stages are `request_body`,
+`request_schema`, `runtime_authority`, `publication`, and `response`.
+`publication` includes the missing-workspace invariant; `response` starts after
+existing post-commit wake scheduling and covers parsing and JSON construction.
+Error classes are `type_error`, `range_error`, `error`, and `non_error`.
+
+The record contains no identifiers, versions, request values, paths, raw errors,
+messages, stacks, causes, or arbitrary metadata. Success, CAS conflict, and
+pre-authentication rejection add no observation. Diagnostic failure is isolated;
+the original error continues to the existing response mapper. Later asynchronous
+wake-signal failures retain their existing separate observation.
+
+Query natural production Vercel traffic by the exact message and schema, from
+the Web deployment-ready timestamp onward, and aggregate only by stage and
+error class. Existing Vercel request correlation joins the record to the callback;
+a later checkpoint alone does not establish acceptance of the earlier source
+state. No synthetic production failure is needed. Old and new Web/Worker/runtime
+combinations preserve identical request and response contracts; only new Web
+emits this optional log. A fresh revert or forward-fix must pass current Web
+production admission; restoring an old deployment is not the recovery path.
 
 ## Health-data withdrawal rollback floor
 
@@ -151,8 +233,8 @@ Browser-vault dashboard sessions and public-homepage preparation read only the
 published replica ref and workspace version. Refresh orchestration is imported
 only when the existing after-response refresh path needs it. The browser loader
 constructs one query client for the route's requested capability; the combined
-metrics/labs client reuses its metrics client's core access. Patterns reads its
-precomputed report directly. Session reauthorization, exact replica identity,
+metrics/labs client reuses its metrics client's core access. Session
+reauthorization, exact replica identity,
 route-scoped shard retention, and encrypted transport remain unchanged.
 
 ## Browser-vault member-proof rollback floor
@@ -310,7 +392,6 @@ specimens omit the comparator.
 
 The `/settings` Data & privacy export uses that same in-browser browser-vault replica path. It downloads the decrypted `murph.browser-vault-replica` JSON that dashboard pages can already read, rather than making the primary user export the older hosted account metadata bundle.
 
-The Overview Personal Patterns section also uses the encrypted browser-vault replica. The query projection compares repeated activity or intervention days with existing daily wearable sleep and recovery summaries. The browser receives only the derived report. Raw device observations stay outside the replica. The same query result is available to the assistant through `vault-cli wearables patterns`.
 
 ## Core responsibilities
 
@@ -374,6 +455,21 @@ card without fallback text remains contentless there rather than receiving the
 active-member placeholder. This rule is app-card-specific; legacy media-only
 first contacts retain their existing behavior.
 
+The Web proxy rejects referral paths whose `/refer` prefix is immediately
+followed by a single-encoded slash or backslash, plus paths beginning with
+`/%5C` (case-insensitive percent encoding), before generated page loading.
+The root check does not decode paths or queries and excludes the `/%2F` and
+`/%255C` families. The narrow matchers and fixed 404 preserve valid referral
+paths, encoded query values, normal missing-route handling, homepage negotiation,
+and signed API/workflow paths, including workflow token validation.
+The isolated production routing fixture requires the fixed `Not Found` body
+for `/%5C` and `/%5c`, rather than accepting an ordinary app 404, and uses no
+production credentials or full Web build:
+
+```sh
+pnpm exec node --import tsx apps/web/scripts/verify-referral-proxy-routing.ts
+```
+
 The public homepage also owns the browser fallback for shared response-card
 URLs. After hydration, a non-empty `#murph-card=` fragment opens the iPhone App
 Store handoff; the client compares only the prefix and presence of a value and
@@ -407,12 +503,9 @@ retention/deletion, and security practices.
 The hosted Prisma schema keeps ownership sharp and nested:
 
 - `HostedMember` is the core member row plus activation/billing status. Its
-  nullable assistant provider/model/reasoning fields are the Web-owned
-  execution preference; OpenAI is the default, and the nullable Venice override
-  is projected only while `HOSTED_VENICE_ENABLED` is enabled. Settings and the
-  input-bound assistant-configuration tool share the same transaction, rollout
-  gate, and canonical response so a model-only save cannot preserve a stale
-  provider in the client. Its nullable
+  nullable assistant model/reasoning fields are the Web-owned execution
+  preference for OpenAI. Settings and the input-bound assistant-configuration
+  tool share the same transaction and canonical response. Its nullable
   assistant tone, voice, Humor, Push, and Detail columns are only the
   authenticated Settings display/write projection; canonical personality
   preferences remain in `bank/preferences.json`. Settings writes strict sparse
@@ -754,7 +847,6 @@ Optional but recommended:
 - `HOSTED_WEB_BASE_URL`
 - `MURPH_LABELS_DB_URL` for the shared product labels Postgres database required by `/api/foods` and `/api/supplements`
 - `MURPH_DATA_API_KEY` for server-to-server data API auth on `/api/foods` and `/api/supplements`; hosted Cloudflare owns the same secret for Worker-side injection and the key must not be exposed to browsers or runner env
-- `BRANDFETCH_CLIENT_ID` enables brand logos on the public `/food` page. It is a browser-safe Brandfetch client identifier, not server authority. The page searches Brandfetch with a bounded brand and broad food category, accepts only matching brand names from the fixed Brandfetch CDN, falls back to local category art, and keeps results only in page memory.
 - `CRON_SECRET`
 - `HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_JWK`
 - `HOSTED_WEB_CALLBACK_SIGNING_KEY_ID`
@@ -892,58 +984,17 @@ explicitly. After this constraint is installed, importer rollback must stay at
 or above the first version that bounds and validates the affected payload
 fields; an older importer requires an explicit constraint rollback first.
 
-## Murph Safe public product data
-
-`/search` exposes the public Murph Safe product-evidence experience. `/food`
-uses the same records for a conclusion-first comparison of up to ten branded
-foods. Browser searches call `POST /api/public/v1/products/search`;
-server-rendered product details use the same service as
-`GET /api/public/v1/products/[productRef]`. The generated OpenAPI 3.1 document
-is available at `/api/public/v1/openapi.json`, and the current schema id is
-`murph.public-products.v1`.
-
-On `/food`, autocomplete keeps relevance order. Category comparisons and the
-related-product grid use a dated US Google Shopping brand snapshot for 342 food
-queries. The database keeps category relevance and usable nutrition as gates,
-spreads results across brands, then uses exact-linked test count as a secondary
-signal. It rejects empty, zero-only, and physically impossible nutrition rows.
-A single exact food derives a peer category when the local food taxonomy can
-identify one, so a branded soda can lead to other sodas.
-Share URLs contain only public product references and the nutrition basis. They
-never contain the typed search query.
-
-The public catalog includes current supplement and branded-food sources and
-excludes generic food origins. Search and detail DTOs are bounded normalized
-projections; product tests join only through the selected row's exact
-`food_id` or `supplement_id`. Search terms stay in POST bodies and are not
-echoed, persisted, analyzed, or logged.
-
-Compatible browsers expose four page-scoped, read-only WebMCP tools while
-`/food` is open: `search_food_products`, `compare_food_products`,
-`get_food_comparison`, and `show_food_evidence`. The tools use exact public
-product references and update the same visible page state as manual controls.
-Comparison results carry returned, total, and truncated observation scope so a
-bounded evidence response cannot look complete to an agent. They also include
-the same four nutrition values, complete-row winners, ties, and the row-win
-counts behind the visible rows-led caption.
-One abort signal removes every registration when the page unmounts. This is a
-browser surface, not a remote MCP server, and it adds no account or vault access.
+## Public route firewall verification
 
 Before a production build, configure these Production-scoped server values:
 
 - `MURPH_PUBLIC_ROUTES_WAF_REQUIRED=1`
-- `MURPH_SAFE_SEARCH_WAF_RULE_ID`
-- `MURPH_SAFE_DETAIL_WAF_RULE_ID`
 - `MURPH_SIGNUP_REFERRAL_CLAIM_WAF_RULE_ID`
 - `HOSTED_WEB_VERCEL_PROJECT_ID`
 - optional `HOSTED_WEB_VERCEL_TEAM_ID`
 - `HOSTED_WEB_VERCEL_TOKEN`, limited to reading the project's firewall config
 
-The exact-id Murph Safe rules must be the first active rules after the optional
-companion diagnostics rule. Search is an exact POST path with a fixed-window
-per-IP 429 at 30 requests per 60 seconds. Detail covers the public API prefix
-while excluding search, plus the public web-detail prefix, at 120 requests per
-60 seconds. The signup-referral claim rule matches only POST paths that start
+The signup-referral claim rule matches only POST paths that start
 with `/r/` and end with `/claim`, with a fixed-window per-IP 429 at 10 requests
 per 60 seconds. It may follow other scoped active rules but never an active
 bypass rule. `pnpm public-routes:waf-check` reads the active Vercel firewall
@@ -1015,11 +1066,11 @@ Hosted onboarding extras:
   `HOSTED_LINQ_ALERT_EMAIL_FROM`, and `HOSTED_LINQ_ALERT_EMAILS`. The historical
   Linq-prefixed email names are shared operational configuration; neither path
   sends through or falls back to Linq/iMessage. The latency monitor uses the
-  fixed 30-second product
+  fixed 60-second alert
   boundary for the first accepted user-visible response: either a progress
   update or the final reply. Completed grouped traces count once by their
   shared Linq delivery, and traces for one in-flight provider request count
-  once while unresolved. Progress accepted before 30 seconds suppresses that
+  once while unresolved. Progress accepted before 60 seconds suppresses that
   turn; progress at or after the boundary remains alertable. Fresh conversation
   mailbox rows explicitly stamped by the existing AI usage gate are excluded
   before the bounded scan and grouping only while execution remains blocked;
@@ -1148,14 +1199,14 @@ Hosted AI usage metering:
 - GPT-6 Astra is an optional managed OpenAI model for active paid individual Edge/Max
   and active Family Edge/Max seats. The existing assistant preference owner enforces
   eligibility on writes and runtime reads; losing Edge/Max access retains the preference
-  while using Terra until access returns. Group rooms retain Luna/Terra/Sol.
+  while using the GPT-6.1 Sol default until access returns. Group rooms retain Luna and Sol.
   Astra uses $10 input, $1 cache reads, $12.50 cache writes, and $50 output per
   million tokens; OpenAI Flex uses half those rates. Exact requests above 272K
   input use twice the input/cache rates and 1.5 times the output rate. Hosted
   Codex keeps Astra context at 272K, so cumulative turn/subagent usage is charged
   at ordinary rates even when several requests together exceed that threshold.
   Rates: https://developers.openai.com/api/docs/models/gpt-6-astra
-- Hosted AI included-allowance accounting is app-owned: web prices recorded `HostedAiUsage` rows by canonical model and recorded provider into allowance columns and maintains `HostedAiUsagePeriod` spend snapshots from current hosted billing state. OpenAI and Venice GPT-5.6 usage therefore use their respective documented input, cache-read, cache-write, and output rates. Settings discloses Venice's higher provider-rate capacity use both while it is selected as a pending choice and after it is saved. Subsequent usage-bearing work is blocked when included capacity and usage credit are both exhausted. The operation that crosses the boundary may finish; its accepted input is not discarded.
+- Hosted AI included-allowance accounting is app-owned: web prices recorded `HostedAiUsage` rows by canonical model and recorded provider into allowance columns and maintains `HostedAiUsagePeriod` spend snapshots from current hosted billing state. OpenAI usage uses the supported model rate table; previously settled usage retains its original pricing snapshot. Subsequent usage-bearing work is blocked when included capacity and usage credit are both exhausted. The operation that crosses the boundary may finish; its accepted input is not discarded.
 - Retell phone calls use the same ledger through a web-internal deterministic row keyed by the Murph call id. Web records Retell's final provider-reported combined cost, including discounts and transfer-leg cost, and never accepts that cost field from the hosted-runtime usage callback. `transfer_ended` and the pre-armed phone-call reconciliation workflow prevent a provisional transfer cost or lost callback from becoming permanent undercounting.
 - Usage credit is separate from the included-allowance period. A beneficiary-serialized transaction consumes included capacity first, then purchase/referral grant entries with remaining capacity in FIFO order, while `HostedMember` carries the bounded balance/version hot-path projection. Unused credit carries across allowance periods and does not create subscription entitlement. Stripe refunds and disputes may reverse only purchase-backed entries; earned referral grants are final.
 - Web derives one read-only member plan-usage projection from that same allowance resolver and usage ledger for Settings and `murph.plan_usage`. It persists no forecast and performs no Stripe read. `recommendedAction` is thresholded and may return `add_usage` only for eligible direct paid Pulse and Edge members; the authenticated Settings surface exposes the fixed $5, $10, and $25 catalog, including the active Family owner's authorized own-seat target. An opted-in `subscriptionActionQuote` returns current terms for an explicit subscription request even below the threshold; it is not a recommendation or consent. Callers that send the original empty request receive the original response shape with that field omitted.
@@ -1175,7 +1226,7 @@ Hosted AI usage metering:
   Murph usage days derived from the persisted grant and policy basis. It is
   never translated into a message count or calendar/trial duration. Exact
   qualification counters remain server-only.
-  The standalone minute recovery cron is the normal settlement owner for
+  The standalone five-minute recovery cron is the normal settlement owner for
   attributed stable-link activations. Conversational referrals also use
   immediate post-commit reconciliation, and that same cron converges on one
   final referral grant and one atomic source-mailbox celebration fence.
@@ -1203,6 +1254,14 @@ Hosted AI usage metering:
 - Homepage period facts come from the same allowance owner. Spend accounting ensure-creates a fresh billing or calendar period inside the spend transaction, with no reset cron.
 - Web applies the composed access-and-usage gate in runtime reconciliation and
   mailbox fetch/payload routes before exhausted work reaches the runner.
+  Reconciliation uses the existing read-first allowance gate: successful checks
+  neither lock members nor create usage periods, while denials are confirmed
+  through the mutating owner before notices or blocked decisions. Spend
+  accounting remains responsible for creating missing periods.
+  Reconciliation reads both mailbox lanes' high-water and effective consumed
+  sequences in one payload-free statement using the mailbox fetch projection's
+  existing retention and expiry predicates. Its four indexed, one-row lane
+  probes use one checkout; the system frontier retains its separate live read.
   Temporal owns only the resulting blocked orchestration facts; Cloudflare
   receives no billing or credit projection. Runtime usage is recorded after it
   exists.
@@ -1371,14 +1430,34 @@ Callback auth contract:
   the control-plane, external-provider, and runtime-maintenance crons; a
   caught-up hour still stops after the first short batch. Account deletion
   still independently deletes the member's nonce rows
-- the other hourly retention routes are staggered and independently bounded:
+- the other retention routes are staggered and independently bounded:
   `/api/internal/hosted-execution/retention/control-plane/cron` at minute 20
   for ordinary primary-database cleanup,
-  `/api/internal/hosted-execution/retention/external/cron` at minute 35 for
-  account and computer provider cleanup, and
+  `/api/internal/hosted-execution/retention/external/cron` every five minutes
+  starting at minute 2 for account, computer and runtime resource cleanup, and
   `/api/internal/hosted-execution/retention/runtime/cron` at minute 50 for
   runtime signals followed by best-effort isolated diagnostic-log cleanup. Each has a 300-second
   duration; none invokes the nonce owner
+- Runtime resource cleanup warns once per caught failure with the static message
+  `Hosted runtime resource cleanup failed.` and only `resourceKind` (`snapshot`,
+  `replica`, `legacy_snapshot`, `media`, `unknown`), `stage` (`parse`, `purge`,
+  `acknowledge`), `errorCategory` (`timeout`, `abort`, `http`, `validation`,
+  `database`, `other`), optional integer `httpStatus` (100–599), and optional
+  `resourceFingerprint` for snapshot, replica, and legacy-snapshot orphans.
+  The fingerprint is the full lowercase SHA-256 hex of the UTF-8 encoding of
+  `JSON.stringify(["murph.runtime-resource-cleanup.orphan.v1", userId, kind, resourceId, String(revision)])`.
+  Only own data properties with nonempty primitive string identities and a
+  positive primitive bigint revision qualify; invalid or unreadable identities
+  and hash failures omit the fingerprint. Authorized read-only canonical-row
+  inspection can recompute it and check that exact revision's `purgedAt`;
+  aggregate backlog clearance or a different revision cannot prove recovery.
+  Media warnings retain request context only. No raw identities, paths, contents,
+  secrets, or error/provider data are logged. Hashing occurs only for existing
+  orphan warnings (at most 50 per sweep), with cost linear in identity bytes and
+  one fixed 64-character value per resource generation, reused across retries.
+  Success, disabled, and deadline-skipped work stay quiet. Diagnostic
+  inspection/logging failures cannot change claims, counts, fences, retry timing,
+  or failure propagation.
 - Hosted member private fields, device-sync credentials, mailbox payloads, and
   runtime execution state use signed hosted domain-root secure-box envelopes;
   lookup fingerprints/indexes use separate HMAC-only keys.
@@ -1411,6 +1490,178 @@ start; the callback path may differ. Do not use a separate device-sync subdomain
 or an ephemeral preview deployment URL as a long-lived provider callback or
 webhook base. Web build validation and the browser start boundary reject a
 hostname mismatch before provider authorization begins.
+
+### Direct Linq preparation diagnostics
+
+The existing `hosted-onboarding.webhook.thread-routing-preparation-retry`
+diagnostic and failed Linq planning, service, and route timing records include
+`directLinqMailboxPreparationReason` only for a typed
+`HOSTED_THREAD_ROUTE_PREPARATION_REQUIRED` error targeting
+`direct_linq_mailbox`. Its closed vocabulary is `control-root`,
+`home-chat-owner`, `ingress-root`, `member`, `routing`, or `thread-route`.
+Unknown, malformed, unrelated, and unreadable metadata omits the field; error
+messages, causes, and other details are never projected. The field distinguishes
+the existing preparation checks without adding events, I/O, retries, or state.
+Provider redelivery success alone does not identify the original stale fact.
+
+### Vault-share delivery deferral diagnostics
+
+`POST /api/internal/hosted-runtime/vault-share/deliver` emits at most one
+best-effort warning per deferred request with schema
+`murph.hosted-vault-share-delivery-deferred.v1`. Its only other field, `reason`,
+is `pagination_generation_changed`, `stale_generation_unmaterialized`,
+`inactive_generation_unmaterialized`, or `replacement_no_active_share`.
+The last value identifies a guarded replacement result, not its deeper cause.
+Successful requests emit no new diagnostic. The record contains no identifiers,
+projection kinds, content, versions, counts, credentials or error prose; the
+existing request log supplies correlation. Logging failure preserves the same
+generic retryable response. No new reads, writes, retries or network work occur.
+
+### Linq provider dispatch claims
+
+The signed `POST /api/internal/hosted-runtime/linq-egress/engagement` callback
+returns HTTP 200 with `providerDispatchClaimed: false` when the dispatch fence
+already exists. This is an expected claim result, not a route failure or proof
+of delivery. Current authority and egress checks still run before returning it.
+The runtime permits replay only for provider-idempotent sends; non-idempotent
+voice and reaction effects remain confirmation-pending without provider re-entry.
+Runtime support for the legacy `HOSTED_LINQ_PROVIDER_DISPATCH_ALREADY_STARTED`
+409 remains for Web rollback compatibility.
+
+Member-route `HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH` warnings include the
+private `linqRouteAuthorityMismatchReason` from the existing rejection site:
+`durable_thread_container_mismatch`, `durable_target_missing`,
+`requested_target_missing`, `member_routing_missing`, `target_not_owned`,
+`pending_recipient_invalid`, `member_identity_missing`, or
+`member_recipient_invalid`. The projection guard reports its first failed check,
+in the existing short-circuit order:
+
+- `route_projection_chat_missing`: normalized private chat is absent.
+- `route_projection_chat_lookup_key_missing`: normalized chat lookup key is absent.
+- `route_projection_chat_lookup_key_mismatch`: chat does not match its lookup key.
+- `route_projection_sender_phone_missing_or_invalid`: a line lookup key exists but the sender normalizes to null.
+- `route_projection_sender_lookup_key_mismatch`: sender does not match the existing line lookup key.
+
+The sender checks remain conditional on a non-null line lookup key. The reader
+also accepts legacy `route_projection_mismatch` values. These reasons identify
+failed predicates, not functional root causes. The durable-target check is
+defensive because the current reader
+rejects empty targets before returning a durable route. The closed reader omits
+malformed metadata without getters or coercion. No values or identifiers enter
+the diagnostic; error names, public 403 JSON, checks, reads, and provider admission
+are unchanged. The separate route assertion and later resolved-route guard do
+not emit this reason.
+
+### Workspace read timing
+
+`GET /api/internal/hosted-workspace` records content-free
+`hosted-workspace.read.timing` diagnostics for the first request in a module,
+failed requests, and requests with at least 250 ms of handler work or verified
+signed-request age at handler entry. It measures authentication, workspace,
+assistant configuration, usage and response preparation through the existing
+Prisma operation and pool-acquisition collectors. The three reads overlap:
+their durations and the database/pool totals must not be added to request time.
+An early read failure records unfinished sibling phases without waiting for them
+or replacing the original failure.
+
+Optional `murph_workspace_*` Server-Timing fields describe completed phases and
+handler total. Signed-request age includes transport, startup and clock skew;
+first-module status is not proof of a platform cold start. Query/pool samples
+are capped at 24, with aggregate counts and durations. No request, member,
+credential, SQL parameter, row content or error prose enters this event.
+Diagnostics add no database or network work and cannot change response behavior.
+
+A processing action of `started` means a new invocation, not necessarily a new
+container. The existing container-ready event's `startMode` and
+`readinessLatencyMs` establish native warmth; a retained member target is
+considered before pristine standby allocation. A warm target still needs the
+fresh workspace, configuration and usage callback before invocation.
+
+### Mailbox fetch timing
+
+Mailbox reads use the allowance owner's narrow Family sponsorship projection,
+with sponsorship and billing-period fields joined in one SQL statement. The
+allowance reader imports plan constants from `billing-plans`, not the Family
+mutation workflow, so checking messages does not initialize its Stripe, email,
+or Temporal signaling dependencies. Active membership, group access, tier
+validation and billing-period fallback remain owned by the allowance reader.
+
+`/api/internal/hosted-mailbox/fetch` emits one content-free
+`hosted-mailbox.fetch.timing` record for the first request in a module instance,
+a failed request, or a request with at least 250 ms of handler work or verified
+signed-request age at handler entry. Fast later requests remain quiet.
+
+`phaseMs` separates authentication (including replay-nonce persistence), parsing,
+transaction acquisition, runtime authority locks/reads, member projection, access,
+mailbox projection, usage, response projection, transaction finish, optional group
+presentation, ingress-envelope verification, and serialization. `failedPhase`
+retains the failing phase even when the transaction rolls back afterward.
+`totalMs` stops when the handler constructs its response; it excludes framework
+response flushing and network transport.
+
+`poolAcquireMs` records actual pg checkouts, including new connection setup or
+pool queuing. Matching `poolBeforeAcquire` counts show idle/total connections and
+queued requests at checkout start. These help distinguish an empty pool from
+contention but do not independently measure TCP, TLS, or server-side waits.
+`dbNN.<model>.<operation>` gives query wall time without SQL, parameters or row
+contents. The record includes at most 24 operations and 24 pool samples plus
+aggregate counts/totals. Pool durations overlap query and transaction phase
+durations: do not add them together. The authority phase includes lock waits and
+SQL/network work, rather than claiming a pure server lock-wait measurement.
+
+`handlerStartedAt` and verified `signedAt` support platform-log correlation.
+`signedRequestToHandlerMs` also includes transport and inter-host clock skew;
+`firstRequestInModule` is not a Vercel cold-start verdict. Request bodies, member
+and attempt identifiers, nonce values, signatures and error prose are excluded.
+Diagnostics add no database writes or network requests and logging failure cannot
+replace the response or original error.
+
+Google auth and Vercel OIDC load only for real KMS operations. Ingress-envelope
+reads verify signatures locally without evaluating those SDKs. The four KMS
+operations use bounded HTTPS REST requests; the KMS RPC SDK, generated protobuf
+and gRPC initialization are absent from this path. Google auth still owns
+Workload Identity token refresh and sharing between concurrent operations.
+
+Concurrent first operations share auth client construction inside the existing
+`sdk_initialize` deadline/cancellation boundary. The `kms_rpc` duration includes
+auth header acquisition, HTTP transport and bounded response consumption. REST
+uses base64 bytes and decimal CRC32C strings; resource binding, verification
+flags and response integrity checks remain mandatory. Redirects are rejected,
+response bodies are capped at 128 KiB, and caller/attempt cancellation aborts
+fetch and response consumption. Known connection failures and HTTP 503/504
+without a valid Google status map to the existing transient/deadline reasons;
+only decrypt may retry once within its existing aggregate deadline. Certificate,
+auth, quota, malformed-response and integrity failures remain terminal.
+
+The existing Web control connection owner records `hosted-control.connect.timing`
+for a failed connection or setup taking at least 250 ms. It records only elapsed
+milliseconds, TLS presence and completion, never destinations or error prose.
+This measures new connection setup, not request handling, reused sockets or
+cross-host clock skew. It adds no requests or waits, and logger failure cannot
+prevent connection completion.
+
+This is Web-only, requires no migration or Worker rollout order, and preserves
+the existing response contract. After deployment, compare first-operation crypto
+and control-connection records with webhook-to-typing milestones. Local import
+benchmarks alone do not establish production latency savings.
+
+### Vercel source previews
+
+For an authorized source preview, run from the repository root of the task
+checkout already linked to the hosted Web Vercel project. Keep the project's
+configured root directory at `apps/web` so the upload includes workspace owners
+and Vercel builds the Web app:
+
+```sh
+vercel deploy --yes --target=preview --archive=tgz --no-wait
+```
+
+Use archive mode for this monorepo: its source tree can exceed Vercel's
+[15,000-file CLI upload limit](https://vercel.com/docs/limits#files).
+The [archive option](https://vercel.com/docs/cli/deploy#archive) compresses the
+deployment source before upload. The command uses the existing project link
+and credentials; `--no-wait` returns before the build finishes, so verify the
+preview's completed build before using it as review evidence.
 
 ### Vercel setup
 
@@ -1769,6 +2020,27 @@ number multiplied by the live Fluid instance count. Leaving
 without silently changing capacity. Use the pressure, acquisition, and callback
 measurements to re-baseline representative ingress, runtime-log, device-sync,
 signup, and Stripe workloads before choosing an explicit per-instance value.
+The same line carries `processUptimeMs` at that first database use, which
+separates a freshly booted Fluid instance from a long-lived one. The Linq
+webhook's `hosted-onboarding.route.linq-webhook` timing adds `processUptimeMs`,
+`routeModuleAgeMs`, and `routeModuleRequestOrdinal` at route start. Compare them
+with Vercel's function start to attribute time spent before the handler, which
+`webhook_received_at` cannot see, to process boot, lazy route loading, or the
+platform.
+
+Next on Vercel loads a route's whole static import graph on that route's first
+request in each process, and most inbound Linq messages are such a first
+request. Keep other providers' handlers and optional SDKs off the Linq webhook
+graph: the Stripe webhook handler and the group tool are separate modules, and
+the Workflow client SDK (`workflow/api`) loads only when a workflow is started
+or resumed. `hosted-onboarding-linq-webhook-graph-boundary.test.ts` guards these
+edges.
+
+The generated Prisma client uses the supported `small` query compiler to reduce
+fresh-instance loading and first-query initialization. This is a build choice,
+not a database migration; query contracts, pool ownership, retries and transaction
+limits remain the same. Compare both cold and warm queries when changing it.
+Local startup measurements do not establish an end-to-end production deadline.
 
 Destructive contract cleanup belongs under
 `apps/web/prisma/contract-migrations` and runs through the
@@ -2016,10 +2288,11 @@ Webpack worker. Node's V8 heap limits do not cover these services. This is a
 or container limit. Keep it on the Next compilation command: applying the same
 target to the whole package build would also constrain the much larger native
 TypeScript source check. Route type generation and the separate TypeScript
-compatibility check retain their existing environment and heap budgets.
+contract check retain their existing environment; the contract check now uses
+the root native compiler and runs outside V8.
 
 The production runner first performs route type generation and an explicit
-app-local generated-contract TypeScript check with a 6 GiB limit. It marks
+native generated-contract TypeScript check through the root `web` lane. It marks
 only that prepared check complete before starting Webpack. The Next CLI parent
 uses a 1 GiB old-space limit and the isolated Webpack worker uses 3 GiB. The
 worker exits and releases compiler memory before static-generation workers
@@ -2346,6 +2619,7 @@ Internal hosted maintenance and Cloudflare callback routes:
 - `POST /api/internal/device-sync/reconcile`
 - `POST /api/internal/hosted-execution/usage/record`
 - `POST /api/internal/hosted-execution/plan-usage/tool`
+- `POST /api/internal/hosted-execution/usage/diagnostics`
 - `POST /api/internal/hosted-execution/subscription/tool`
 - `POST /api/internal/hosted-mailbox/fetch`
 - `POST /api/internal/hosted-mailbox/payload/fetch`
@@ -2545,3 +2819,73 @@ Current hosted billing assumptions:
   submitted as separate emails in one strict Resend batch with a Preview-bound
   idempotency key, so an ambiguous response can be retried without duplicate
   delivery. Logs contain aggregate counts and safe provider status only.
+
+## Bundled Web fonts
+
+`app/font-assets.ts` uses `next/font/local` and committed WOFF2 assets so Web
+builds never fetch Google Fonts. Keep the existing CSS variables, Fraunces
+400/600, DM Sans 100–1000, and DM Mono 400 when updating these assets.
+The separate TTF assets used for social cards remain unchanged.
+
+Font sources and licenses:
+
+- `Fraunces-400.woff2` and `Fraunces-600.woff2` are lossless WOFF2 encodings of
+  the adjacent committed TTF files. They retain all 624 character mappings.
+- `DMSans-Variable.woff2` comes from `ofl/dmsans/DMSans[opsz,wght].ttf`, with
+  optical size pinned to the default 9 used by the previous Google loader and
+  the complete weight axis retained. It has 403 character mappings.
+- `DMMono-400.woff2` comes from `ofl/dmmono/DMMono-Regular.ttf` and retains all
+  381 character mappings.
+- Upstream files and the three adjacent `*-OFL.txt` licenses come from
+  [Google Fonts commit 23e54b5](https://github.com/google/fonts/tree/23e54b51ddffbc7713c583748e3bd86f62b1fa4a/ofl).
+
+To refresh, review the upstream font and license changes, use FontTools
+`varLib.instancer` to pin DM Sans `opsz=9`, and encode with
+`TTFont.flavor = "woff2"` and Brotli. This is asset preparation only, never a
+build step or application dependency. Verify the local loader emits all four
+files without Google responses, then check the rendered families and weights.
+
+### Private usage diagnostics
+
+The signed `usage/diagnostics` callback reads only the callback-bound private
+member's existing `hosted_ai_usage` ledger. Its strict request accepts `days`
+(default 7, maximum 31) and `limit` (default 10, maximum 20); it never accepts
+member identity, SQL, or arbitrary filters. Group runtimes and inactive access
+are denied; exhausted private members may still inspect usage. Operator tasks
+are excluded. One index-bounded SQL window aggregates recorded allowance costs,
+token counts, models, trigger/feature sources, and the most expensive turns.
+A source joins available `triggerKind` and `featureKey` with a colon, keeping
+reaction classification distinguishable from ordinary conversation work. Model/source
+groups are capped at 20 with explicit truncation flags. Costs are allowance
+consumption, not additional card charges; unaccounted rows are identified and
+historical charges are never recalculated using current prices. Only rows whose
+canonical `allowance_counted` flag remains true contribute cost; forgiven or
+otherwise uncounted rows retain their workload counts/tokens but not allowance
+cost. `coverage.allowanceExcludedRecords` reports their count in the window.
+
+The response projects only existing normalized v2 tool-profile labels, counts,
+and output bytes from the latest retained profile of each selected turn. Missing
+or legacy profiles report unavailable; truncated profiles report partial.
+Bytes are not tokens or independently attributable tool cost. The current Sol
+and Luna rate table derives from the canonical allowance-pricing constants,
+including Standard, Flex, and Priority multipliers. No prompts, tool bodies,
+raw usage, member identifiers, or copied vault ledger are returned.
+
+Roll out this Web callback and its shared response reader before enabling the
+Cloudflare runtime port and assistant tool. The capability is absent in local
+runtimes without that port. Keep the compatible Web callback through runner
+convergence and any rollback window.
+
+New managed automation usage records use fixed workflow feature keys (including
+Morning Journal, research, and the weekly usage review).
+They derive only from the runtime-bound built-in occurrence identity and do not
+change model selection or pricing. Older generic `assistant_cron` or internal
+reply rows remain generic; diagnostics cannot reconstruct their workflow names.
+
+Weekly usage audits use `/api/internal/hosted-execution/usage/feedback`, the
+existing feedback parser and persistence owner, and the existing app-session
+HMAC key with a separate domain. The persisted id binds the callback member and
+stable occurrence key without storing member linkage or an enumerable unkeyed
+hash. Missing key configuration fails closed. Deploy Web first, then the Worker
+allowlist and runtime producer; older Web returns 404 and the producer must not
+fall back to ordinary member-linked feedback. Ordinary feedback remains unchanged.

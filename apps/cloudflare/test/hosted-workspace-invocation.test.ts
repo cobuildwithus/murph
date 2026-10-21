@@ -21,7 +21,12 @@ vi.mock("@murphai/assistant-runtime", async () => {
 });
 
 vi.mock("@murphai/assistant-runtime/hosted-invocation", async () => {
+  const actual = await vi.importActual<typeof import("@murphai/assistant-runtime/hosted-invocation")>(
+    "@murphai/assistant-runtime/hosted-invocation",
+  );
   return {
+    createHostedRuntimeVoice: actual.createHostedRuntimeVoice,
+    createHostedRuntimeVoiceCall: actual.createHostedRuntimeVoiceCall,
     createHostedWorkspaceInvocationLease: (input: HostedExecutionWorkspaceInvocationJobInput) => ({
       attemptId: input.request.attemptId,
       leaseGeneration: input.request.leaseGeneration,
@@ -67,6 +72,59 @@ import type {
 const waitForBackgroundAssistantWork = async (_signal: AbortSignal | null): Promise<void> => {};
 
 describe("runHostedWorkspaceInvocation", () => {
+  it.each(["cold", "warm"] as const)("composes a %s call with the invocation's signed mailbox port", async (mode) => {
+    type InvocationInput = Parameters<typeof import("@murphai/assistant-runtime/hosted-invocation").runHostedWorkspaceInvocation>[0];
+    type Voice = NonNullable<InvocationInput["voice"]>;
+    type NativeOptions = Parameters<Parameters<Voice["bindStart"]>[0]>[0];
+    const job = createWorkspaceJob({
+      forwardedEnv: { HOSTED_ASSISTANT_MODEL: "gpt-job", HOSTED_ASSISTANT_PROVIDER: "openai", NODE_ENV: "production" },
+    });
+    if (mode === "cold") job.request.voiceCallId = "call-synthetic";
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      expect(new URL(request.url).pathname).toBe("/api/internal/hosted-mailbox/voice-input");
+      expect(request.headers.get(HOSTED_RUNNER_BOUND_USER_ID_HEADER)).toBe(job.request.userId);
+      expect(request.headers.get(HOSTED_RUNTIME_ATTEMPT_ID_HEADER)).toBe(job.request.attemptId);
+      expect(request.headers.get(HOSTED_RUNTIME_LEASE_GENERATION_HEADER)).toBe(job.request.leaseGeneration);
+      expect(await request.json()).toEqual({
+        callId: "call-synthetic", inputId: "input-synthetic", text: "Read my calendar.",
+        occurredAt: expect.any(String),
+      });
+      return Response.json({ mailboxItemId: "mailbox-synthetic" });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const onRuntimeWakeReady = vi.fn();
+    const onVoiceReady = vi.fn();
+    const close = vi.fn(async () => ({ providerConfirmed: true, providerSessionId: "provider-synthetic", seconds: 0 }));
+    mocks.runPackageHostedWorkspaceInvocation.mockImplementation(async (input: InvocationInput) => {
+      const voice = input.voice!;
+      const sendWake = onRuntimeWakeReady.mock.calls[0]![0];
+      expect(onVoiceReady).toHaveBeenCalledWith(voice);
+      expect(voice.isHoldingRuntime()).toBe(mode === "cold");
+      expect(sendWake({ voiceCallId: "call-synthetic" })).toBe(true);
+      expect(sendWake({ voiceCallId: "call-conflict" })).toBe(false);
+      let nativeOptions!: NativeOptions;
+      voice.bindStart(async (options) => {
+        nativeOptions = options;
+        return { sdp: "answer", speak: vi.fn(), close, closed: new Promise(() => {}) };
+      });
+      expect(await voice.connect("call-synthetic", "offer")).toBe("answer");
+      nativeOptions.onInput({ inputId: "input-synthetic", text: "Read my calendar." });
+      // Final cleanup joins the actual mailbox port's admission before release.
+      await voice.closeCall("call-synthetic");
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(voice.isHoldingRuntime()).toBe(false);
+      return { nextWakeAt: null, status: "idle" };
+    });
+    await runHostedWorkspaceInvocation(job, {
+      onRuntimeWakeReady, onVoiceReady,
+      supervisorEnv: { NODE_ENV: "production", HOSTED_ASSISTANT_PROVIDER: "openai", HOSTED_ASSISTANT_MODEL: "gpt-job" },
+      waitForBackgroundAssistantWork,
+    });
+    expect(close).toHaveBeenCalledTimes(1);
+    expect(onRuntimeWakeReady.mock.calls[0]![0]({ voiceCallId: "call-after-release" })).toBe(false);
+  });
+
   afterEach(async () => {
     vi.clearAllMocks();
     vi.unstubAllGlobals();

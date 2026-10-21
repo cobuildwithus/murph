@@ -1,6 +1,7 @@
 import { chmod, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
+import { buildHostedCodexBehaviorTomlLines, HOSTED_CODEX_AUTO_COMPACT_TOKEN_LIMIT } from "@murphai/hosted-execution/codex-behavior";
 import {
   MURPH_ASSISTANT_SKILLS_ROOT_ENV,
   resolveAssistantSkillsRoot,
@@ -23,7 +24,6 @@ import {
   HOSTED_ASSISTANT_API_KEY_ENV,
   HOSTED_ASSISTANT_BASE_URL_ENV,
   HOSTED_ASSISTANT_CODEX_COMMAND_ENV,
-  HOSTED_ASSISTANT_GATEWAY_ONLY_PROVIDERS_ENV,
   HOSTED_ASSISTANT_OSS_ENV,
   HOSTED_ASSISTANT_PROFILE_ENV,
   HOSTED_ASSISTANT_PROVIDER_NAME_ENV,
@@ -31,11 +31,9 @@ import {
 import {
   type AssistantCodexModelProviderConfig,
   HOSTED_CHATGPT_OPENAI_CODEX_MODEL_PROVIDER_ID,
-  HOSTED_CUSTOM_INFERENCE_CODEX_MODEL_PROVIDER_ID,
+  HOSTED_OPENAI_CODEX_MODEL_PROVIDER_ID,
   HOSTED_LOCAL_TEST_CODEX_MODEL_PROVIDER_ID,
-  HOSTED_LOCAL_TEST_VENICE_CODEX_MODEL_PROVIDER_ID,
   OPENAI_CODEX_MODEL_PROVIDER_CONFIG,
-  VENICE_CODEX_MODEL_PROVIDER_ID,
   resolveAssistantCodexModelProviderConfig,
 } from "@murphai/operator-config/assistant/target-runtime";
 import {
@@ -72,72 +70,31 @@ const HOSTED_CODEX_AUTH_FILE_NAME = "auth.json";
 const DEFAULT_HOSTED_CODEX_REASONING_EFFORT = "low";
 const DEFAULT_HOSTED_CODEX_APPROVAL_POLICY = "never";
 const DEFAULT_HOSTED_CODEX_SANDBOX = "danger-full-access";
-const HOSTED_CODEX_MULTI_AGENT_USAGE_HINT_TEXT = [
-  "When the active route or skill contract permits delegation, proactively spawn a hosted child for genuinely bounded, self-contained background work whose result is not needed in the current reply, then reply without waiting.",
-  "Use the child to replace a later root pass, not duplicate work; skip tiny tasks whose assignment and readback cost exceeds doing them once in the root.",
-  "Follow the active route or skill contract for the exact leaf assignment and completion proof.",
-].join(" ");
-const HOSTED_CODEX_MULTI_AGENT_MODE_HINT_TEXT =
-  "Murph bounded background delegation mode is active; reply-critical work stays in the root.";
-const HOSTED_CODEX_SUBAGENT_USAGE_HINT_TEXT = [
-  "This hosted child is a one-shot leaf.",
-  "Complete only the self-contained assignment and stop.",
-  "Do not spawn or delegate to another child.",
-].join(" ");
-// Hosted thread cost scales linearly with this ceiling: every tool round-trip
-// re-sends the whole thread, and OpenAI Standard-tier prompt caches evict
-// within ~45 minutes regardless of prefix size or prompt_cache_retention
-// (measured 2026-06-10 across 32k-170k prefixes), so member messages after an
-// idle gap re-pay the full thread at uncached input rates. Keep the ceiling at
-// 132k to reduce uncached resend cost while retaining room for longer tool
-// loops. The separate idle-shutdown compaction threshold intentionally stays
-// lower so off-hot-path checkpointing can clean up large threads before the
-// next wake.
-const DEFAULT_HOSTED_CODEX_AUTO_COMPACT_TOKEN_LIMIT = 132_000;
 const DEFAULT_HOSTED_CODEX_LOG_DIR = "/tmp/murph-codex-log";
 const HOSTED_CODEX_PROVIDER_REQUEST_MAX_RETRIES = 4;
 // Hosted runs get one WebSocket attempt, then Codex replays the request over
 // HTTPS. Repeating the full idle window here can outlive the enclosing hosted
 // attempt and make Codex's native transport fallback unreachable.
 const HOSTED_CODEX_PROVIDER_STREAM_MAX_RETRIES = 0;
-// Bound OpenAI data-stream silence, not total reasoning or local tool time.
-// Other providers retain their prior window until separately measured.
-function hostedCodexProviderStreamIdleTimeoutMs(providerId: string): number {
-  return providerId === OPENAI_CODEX_MODEL_PROVIDER_CONFIG.id
-    || providerId === HOSTED_CODEX_OPENAI_MODEL_PROVIDER_ID
-    || providerId === HOSTED_CHATGPT_OPENAI_CODEX_MODEL_PROVIDER_ID
-    || providerId === HOSTED_LOCAL_TEST_CODEX_MODEL_PROVIDER_ID
-    ? 30_000
-    : 90_000;
-}
-const HOSTED_CODEX_NATIVE_MEMORY_CONFIG = {
-  featureEnabled: false,
-  generateMemories: false,
-  useMemories: false,
-} as const;
-export const HOSTED_CODEX_OPERATOR_MEMORY_DIAGNOSTICS = {
-  codexOperatorMemoryFeatureEnabled:
-    HOSTED_CODEX_NATIVE_MEMORY_CONFIG.featureEnabled,
-  codexOperatorMemoryGenerateMemories:
-    HOSTED_CODEX_NATIVE_MEMORY_CONFIG.generateMemories,
-  codexOperatorMemoryMode: "disabled",
-  codexOperatorMemoryUseMemories:
-    HOSTED_CODEX_NATIVE_MEMORY_CONFIG.useMemories,
-} as const;
-export function hostedCodexProviderTransportDiagnostics(providerId: string) {
+// Native Responses compaction shares this window with ordinary sampling and
+// can be silent while producing its replacement history. A 30-second window
+// can abort valid slow compactions. Keep retries owned by Codex
+// and retain the existing outer attempt/idle-maintenance wall-clock bounds.
+// The deployed Codex patch separately fails a WebSocket request that receives
+// no provider frame within 15 seconds, so a dropped reused socket falls back
+// to HTTPS without waiting for this window.
+const HOSTED_CODEX_PROVIDER_STREAM_IDLE_TIMEOUT_MS = 90_000;
+export function hostedCodexProviderTransportDiagnostics() {
   return {
-    codexProviderRequestMaxRetries: providerId === HOSTED_CUSTOM_INFERENCE_CODEX_MODEL_PROVIDER_ID
-      ? 1 : HOSTED_CODEX_PROVIDER_REQUEST_MAX_RETRIES,
-    codexProviderStreamIdleTimeoutMs: hostedCodexProviderStreamIdleTimeoutMs(providerId),
+    codexProviderRequestMaxRetries: HOSTED_CODEX_PROVIDER_REQUEST_MAX_RETRIES,
+    codexProviderStreamIdleTimeoutMs: HOSTED_CODEX_PROVIDER_STREAM_IDLE_TIMEOUT_MS,
     codexProviderStreamMaxRetries: HOSTED_CODEX_PROVIDER_STREAM_MAX_RETRIES,
-    codexProviderTransportMode: "codex-native-provider-transport",
   } as const;
 }
 const HOSTED_CODEX_REJECTED_SEED_ENV_KEYS = [
   HOSTED_ASSISTANT_API_KEY_ENV,
   HOSTED_ASSISTANT_BASE_URL_ENV,
   HOSTED_ASSISTANT_CODEX_COMMAND_ENV,
-  HOSTED_ASSISTANT_GATEWAY_ONLY_PROVIDERS_ENV,
   HOSTED_ASSISTANT_OSS_ENV,
   HOSTED_ASSISTANT_PROFILE_ENV,
   HOSTED_ASSISTANT_PROVIDER_NAME_ENV,
@@ -150,7 +107,6 @@ const HOSTED_CODEX_SUPPORTED_PROVIDER_IDS = new Set<string>(
 );
 const HOSTED_CODEX_SUPPORTED_PROVIDER_LABEL =
   [...HOSTED_CODEX_SUPPORTED_PROVIDER_IDS].join(" or ");
-const HOSTED_CODEX_OPENAI_MODEL_PROVIDER_ID = "hosted-openai";
 const HOSTED_CODEX_BOUND_USER_ID_ENV = "MURPH_HOSTED_CODEX_BOUND_USER_ID";
 const HOSTED_CODEX_RUNTIME_ATTEMPT_ID_ENV = "MURPH_HOSTED_CODEX_RUNTIME_ATTEMPT_ID";
 const HOSTED_CODEX_RUNTIME_LEASE_GENERATION_ENV =
@@ -201,17 +157,10 @@ export async function prepareHostedCodexRuntimeEnvironment(
     provider: normalizeHostedCodexEnvString(input.runtimeEnv.HOSTED_ASSISTANT_PROVIDER),
     runtimeEnv: input.runtimeEnv,
   });
-  const customInferenceProvider =
-    providerConfig.id === HOSTED_CUSTOM_INFERENCE_CODEX_MODEL_PROVIDER_ID;
-  const contextWindowTokens = customInferenceProvider
-    ? requireHostedCustomInferenceContextWindowTokens(
-        input.runtimeEnv.HOSTED_ASSISTANT_CONTEXT_WINDOW_TOKENS,
-      )
-    : null;
   const codexHome = path.join(input.operatorHomeRoot, HOSTED_CODEX_CONFIG_DIR_NAME);
   const codexConfigPath = path.join(codexHome, HOSTED_CODEX_CONFIG_FILE_NAME);
   const codexAuthPath = path.join(codexHome, HOSTED_CODEX_AUTH_FILE_NAME);
-  const openAiProvider = providerConfig.id === HOSTED_CODEX_OPENAI_MODEL_PROVIDER_ID;
+  const openAiProvider = providerConfig.id === HOSTED_OPENAI_CODEX_MODEL_PROVIDER_ID;
   const seededChatGptAuthJson = openAiProvider
     ? readHostedCodexChatGptAuthJson(input.runtimeEnv)
     : null;
@@ -279,15 +228,11 @@ export async function prepareHostedCodexRuntimeEnvironment(
     buildHostedCodexConfigToml({
       chatGptAuth,
       model: normalizeHostedCodexEnvString(runtimeEnv.HOSTED_ASSISTANT_MODEL),
-      contextWindowTokens,
       exposeSpawnAgentModelOverrides:
-        !customInferenceProvider
-        && input.runtimeEnv[HOSTED_RUNTIME_SUBAGENT_MODEL_OVERRIDES_ALLOWED_ENV]
+        input.runtimeEnv[HOSTED_RUNTIME_SUBAGENT_MODEL_OVERRIDES_ALLOWED_ENV]
           === "1",
       provider: providerConfig,
-      reasoningEffort: customInferenceProvider
-        ? null
-        : runtimeEnv.HOSTED_ASSISTANT_REASONING_EFFORT,
+      reasoningEffort: runtimeEnv.HOSTED_ASSISTANT_REASONING_EFFORT,
     }),
     {
       encoding: "utf8",
@@ -461,7 +406,7 @@ function resolveHostedCodexModelProviderConfig(input: {
   const providerConfig = resolvedProviderConfig.id === OPENAI_CODEX_MODEL_PROVIDER_CONFIG.id
     ? {
         ...resolvedProviderConfig,
-        id: HOSTED_CODEX_OPENAI_MODEL_PROVIDER_ID,
+        id: HOSTED_OPENAI_CODEX_MODEL_PROVIDER_ID,
       }
     : resolvedProviderConfig;
 
@@ -507,11 +452,7 @@ function resolveHostedCodexModelProviderConfig(input: {
   return {
     ...providerConfig,
     baseUrl: url.toString(),
-    id: providerConfig.id === VENICE_CODEX_MODEL_PROVIDER_ID
-      ? HOSTED_LOCAL_TEST_VENICE_CODEX_MODEL_PROVIDER_ID
-      : providerConfig.id === HOSTED_CODEX_OPENAI_MODEL_PROVIDER_ID
-        ? HOSTED_LOCAL_TEST_CODEX_MODEL_PROVIDER_ID
-        : providerConfig.id,
+    id: HOSTED_LOCAL_TEST_CODEX_MODEL_PROVIDER_ID,
     supportsWebSockets: false,
   };
 }
@@ -565,24 +506,6 @@ function normalizeHostedCodexUrlHostname(hostname: string): string {
   return hostname.replace(/^\[/u, "").replace(/\]$/u, "");
 }
 
-function requireHostedCustomInferenceContextWindowTokens(value: unknown): number {
-  const normalized = typeof value === "string" ? value.trim() : "";
-  if (!/^[0-9]+$/u.test(normalized)) {
-    throw new HostedAssistantConfigurationError(
-      "HOSTED_ASSISTANT_CONFIG_INVALID",
-      "Custom inference requires HOSTED_ASSISTANT_CONTEXT_WINDOW_TOKENS.",
-    );
-  }
-  const parsed = Number(normalized);
-  if (!Number.isSafeInteger(parsed) || parsed < 8_192 || parsed > 2_000_000) {
-    throw new HostedAssistantConfigurationError(
-      "HOSTED_ASSISTANT_CONFIG_INVALID",
-      "HOSTED_ASSISTANT_CONTEXT_WINDOW_TOKENS is outside the supported range.",
-    );
-  }
-  return parsed;
-}
-
 function buildHostedCodexProviderTomlLines(input: {
   provider: AssistantCodexModelProviderConfig;
   chatGptAuth?: boolean;
@@ -590,7 +513,7 @@ function buildHostedCodexProviderTomlLines(input: {
   const modelProviderId = input.chatGptAuth
     ? HOSTED_CHATGPT_OPENAI_CODEX_MODEL_PROVIDER_ID
     : input.provider.id;
-  const transport = hostedCodexProviderTransportDiagnostics(modelProviderId);
+  const transport = hostedCodexProviderTransportDiagnostics();
   return [
     `[model_providers.${tomlQuotedKey(modelProviderId)}]`,
     `name = ${tomlString(input.provider.name)}`,
@@ -614,7 +537,6 @@ function buildHostedCodexProviderTomlLines(input: {
 
 export function buildHostedCodexConfigToml(input: {
   chatGptAuth?: boolean;
-  contextWindowTokens?: number | null;
   exposeSpawnAgentModelOverrides: boolean;
   model: string | null;
   provider: AssistantCodexModelProviderConfig;
@@ -623,16 +545,12 @@ export function buildHostedCodexConfigToml(input: {
   const modelProviderId = input.chatGptAuth
     ? HOSTED_CHATGPT_OPENAI_CODEX_MODEL_PROVIDER_ID
     : input.provider.id;
-  const autoCompactTokenLimit = input.contextWindowTokens === null
-      || input.contextWindowTokens === undefined
-    ? DEFAULT_HOSTED_CODEX_AUTO_COMPACT_TOKEN_LIMIT
-    : Math.min(
-        DEFAULT_HOSTED_CODEX_AUTO_COMPACT_TOKEN_LIMIT,
-        Math.max(4_096, Math.floor(input.contextWindowTokens * 0.75)),
-      );
   const operatorModelProvider = resolveHostedOperatorModelProvider(modelProviderId);
   const providerConfigLines = [
     ...buildHostedCodexProviderTomlLines(input),
+    ...(input.chatGptAuth ? buildHostedCodexProviderTomlLines({
+      provider: { ...OPENAI_CODEX_MODEL_PROVIDER_CONFIG, id: HOSTED_OPENAI_CODEX_MODEL_PROVIDER_ID },
+    }) : []),
     ...(operatorModelProvider === modelProviderId ? [] : buildHostedCodexProviderTomlLines({
       provider: {
         ...OPENAI_CODEX_MODEL_PROVIDER_CONFIG,
@@ -651,10 +569,7 @@ export function buildHostedCodexConfigToml(input: {
     ...(input.reasoningEffort
       ? [`model_reasoning_effort = ${tomlString(input.reasoningEffort)}`]
       : []),
-    ...(input.contextWindowTokens
-      ? [`model_context_window = ${input.contextWindowTokens}`]
-      : []),
-    `model_auto_compact_token_limit = ${autoCompactTokenLimit}`,
+    `model_auto_compact_token_limit = ${HOSTED_CODEX_AUTO_COMPACT_TOKEN_LIMIT}`,
     `log_dir = ${tomlString(DEFAULT_HOSTED_CODEX_LOG_DIR)}`,
     `approval_policy = ${tomlString(DEFAULT_HOSTED_CODEX_APPROVAL_POLICY)}`,
     `sandbox_mode = ${tomlString(DEFAULT_HOSTED_CODEX_SANDBOX)}`,
@@ -667,50 +582,7 @@ export function buildHostedCodexConfigToml(input: {
     "",
     ...providerConfigLines,
     ...buildMurphHostedPermissionProfileTomlLines(),
-    "# Hosted runs should not perform Codex plugin marketplace or remote plugin",
-    "# sync work on cold wake; Murph owns the hosted runtime tool surface.",
-    "[features]",
-    "plugins = false",
-    `memories = ${HOSTED_CODEX_NATIVE_MEMORY_CONFIG.featureEnabled}`,
-    "",
-    "[features.current_time_reminder]",
-    "enabled = true",
-    'clock_source = "system"',
-    'delivery_mode = "after_user_or_tool_output"',
-    "reminder_interval_seconds = 60",
-    "",
-    "# This table owns enablement and the proactive per-turn mode/tool hints.",
-    "# A CLI boolean override would replace the table and silently drop them.",
-    "[features.multi_agent_v2]",
-    "enabled = true",
-    `expose_spawn_agent_model_overrides = ${
-      input.exposeSpawnAgentModelOverrides ? "true" : "false"
-    }`,
-    "# V2 counts the root in this limit: four means root plus three children.",
-    "max_concurrent_threads_per_session = 4",
-    `usage_hint_text = ${tomlString(HOSTED_CODEX_MULTI_AGENT_USAGE_HINT_TEXT)}`,
-    `multi_agent_mode_hint_text = ${tomlString(HOSTED_CODEX_MULTI_AGENT_MODE_HINT_TEXT)}`,
-    `subagent_usage_hint_text = ${tomlString(HOSTED_CODEX_SUBAGENT_USAGE_HINT_TEXT)}`,
-    "",
-    "# Codex-native memory generation and use stay disabled. The feature gate stops",
-    "# startup processing of previously eligible rollouts, while the explicit values",
-    "# keep newly created threads ineligible if the feature is toggled independently.",
-    "# Murph product memory remains canonical in the vault.",
-    "[memories]",
-    `use_memories = ${HOSTED_CODEX_NATIVE_MEMORY_CONFIG.useMemories}`,
-    `generate_memories = ${HOSTED_CODEX_NATIVE_MEMORY_CONFIG.generateMemories}`,
-    "",
-    "# Keep Codex skill file instructions out of hosted prompts. Their temporary",
-    "# runner paths change on each wake and break provider prefix caching.",
-    "[skills]",
-    "include_instructions = false",
-    "",
-    "[skills.bundled]",
-    "enabled = false",
-    "",
-    "[history]",
-    'persistence = "none"',
-    "",
+    ...buildHostedCodexBehaviorTomlLines(input),
     "[shell_environment_policy]",
     `inherit = ${tomlString(HOSTED_CODEX_SHELL_ENVIRONMENT_INHERITANCE)}`,
     // include_only is the single gate for shell env. Codex's default

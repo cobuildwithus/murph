@@ -110,7 +110,7 @@ function completionPayload(): HostedAuthenticationCompletionPayload {
     stage: "active",
     status: {
       billing: { defaultPlanCode: null, plans: [] },
-      capabilities: { billingReady: true, phoneAuthReady: true },
+      capabilities: { billingReady: true },
       invite: null,
       messagingSetupRequired: false,
       session: { authenticated: true, expiresAt: null, matchesInvite: true },

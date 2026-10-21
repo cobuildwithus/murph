@@ -178,10 +178,12 @@ export const assistantResponseCardAuthoringSchema: z.ZodType<
 export const assistantWorkoutResponseCardSemanticSchema =
   compactTableWorkoutSemanticResponseCardV1Schema
 
+// Authoring schemas are optional for runtime consumers. These builders only
+// return schema objects, so unused exports need no initialization.
 export const assistantResponseCardJsonSchema =
-  createAssistantResponseCardJsonSchema()
+  /* @__PURE__ */ createAssistantResponseCardJsonSchema()
 export const exerciseRoutineResponseCardJsonSchema =
-  createExerciseRoutineResponseCardJsonSchema()
+  /* @__PURE__ */ createExerciseRoutineResponseCardJsonSchema()
 export const telegramRichContentResponseCardJsonSchema = {
   type: 'object',
   additionalProperties: false,
@@ -197,7 +199,7 @@ export const telegramRichContentResponseCardJsonSchema = {
   required: ['kind', 'version', 'html'],
 } as const
 export const challengeStandingsResponseCardJsonSchema =
-  createChallengeStandingsResponseCardJsonSchema()
+  /* @__PURE__ */ createChallengeStandingsResponseCardJsonSchema()
 
 export const DAILY_NUTRITION_OPTIONAL_GOALS_INTRO =
   'Here’s your nutrition card. If you’d like, we can set up goals too.'
@@ -493,30 +495,11 @@ export function encodeWorkoutSessionAppCardUrl(
 
 export function encodeWorkoutSessionSnapshotAppCardUrl(
   presentation: WorkoutSessionPresentationV1 & {
-    editor?: WorkoutSessionEditorProjectionV1
+    editor: WorkoutSessionEditorProjectionV1
   },
 ): string {
-  if (presentation.editor !== undefined) {
-    const editablePayload = encodeAppCardEnvelopePayload(
-      buildWorkoutSessionAppCardEnvelopeV6({
-        editor: presentation.editor,
-        title: presentation.title,
-        subtitle: presentation.subtitle,
-        footer: presentation.footer,
-        workout: presentation.workout,
-      }),
-    )
-    if (
-      `${IMESSAGE_APP_CARD_URL_PREFIX}${editablePayload}`.length
-      < IMESSAGE_APP_CARD_URL_MAX_LENGTH
-    ) {
-      return encodeAppCardEnvelopeUrl(editablePayload)
-    }
-  }
   return encodeAppCardEnvelopeUrl(
-    encodeAppCardEnvelopePayload(
-      buildWorkoutSessionAppCardEnvelopeV4(presentation),
-    ),
+    encodeAppCardEnvelopePayload(buildWorkoutSessionAppCardEnvelopeV6(presentation)),
   )
 }
 
@@ -589,23 +572,22 @@ function encodeWorkoutSessionAppCardPayload(
   card: Extract<CompactTableResponseCardV1, { workout: unknown }>,
   includeActionBinding: boolean,
 ): string {
-  return encodeAppCardEnvelopePayload(
-    includeActionBinding
-      && card.editor !== undefined
-      ? buildWorkoutSessionAppCardEnvelopeV6({
-          editor: card.editor,
-          title: card.title,
-          subtitle: card.subtitle,
-          footer: card.footer,
-          workout: card.workout,
-        })
-      : buildWorkoutSessionAppCardEnvelopeV4({
-          title: card.title,
-          subtitle: card.subtitle,
-          footer: card.footer,
-          workout: card.workout,
-        }),
-  )
+  // Image previews carry no edit authority.
+  if (!includeActionBinding) {
+    return encodeAppCardEnvelopePayload(buildWorkoutSessionAppCardEnvelopeV4(card))
+  }
+  if (card.editor === undefined) {
+    throw new TypeError('A workout card requires a verified editor.')
+  }
+  // Shared Messages links must also render on installed clients that reject completed V6.
+  // Capable clients receive completed editors through authenticated refresh/save results.
+  if (card.workout.state === 'completed') {
+    return encodeAppCardEnvelopePayload(buildWorkoutSessionAppCardEnvelopeV4(card))
+  }
+  return encodeAppCardEnvelopePayload(buildWorkoutSessionAppCardEnvelopeV6({
+    ...card,
+    editor: card.editor,
+  }))
 }
 
 function encodeAppCardEnvelopePayload(

@@ -10,15 +10,17 @@ import { setImmediate } from 'node:timers/promises'
 import { fileURLToPath } from 'node:url'
 import { test } from 'vitest'
 import { createEmptyMemoryDocument, memoryDocumentRelativePath, renderMemoryDocument, upsertMemoryRecord } from '@murphai/contracts'
-import { CLI_TIMING_MAX_REPORT_BYTES, normalizeCliTiming, type CliTiming, type CliValidationDiagnostic } from '@murphai/runtime-state/cli-timing'
+import { CLI_TIMING_MAX_REPORT_BYTES, normalizeCliTiming, type CliTiming, type CliTimingParseRejection, type CliValidationDiagnostic } from '@murphai/runtime-state/cli-timing'
 import { syntheticOats } from './fixtures/food-label-response.ts'
 
 const root = fileURLToPath(new URL('../../..', import.meta.url))
 const childFile = fileURLToPath(new URL('./fixtures/cli-timing-child.ts', import.meta.url))
 const tsx = import.meta.resolve('tsx')
 const key = '0123456789abcdef0123456789abcdef'
-const sentinels = ['SYNTHETIC_SECRET_TOKEN', 'SYNTHETIC_HEALTH_HISTORY', 'SYNTHETIC_PRIVATE_PATH',
-  'SYNTHETIC_MEMORY_VALUE', 'mem_synthetic_missing', 'bank/memory.md', 'synthetic-invalid']
+const sentinels = ['PRIVATE_SENTINEL', 'meal_synthetic_missing', 'SYNTHETIC_SECRET_TOKEN', 'SYNTHETIC_HEALTH_HISTORY', 'SYNTHETIC_PRIVATE_PATH',
+  'SYNTHETIC_MEMORY_VALUE', 'mem_synthetic_missing', 'bank/memory.md', 'synthetic-invalid',
+  'SYNTHETIC_INVALID_SLUG!', 'synthetic-page', 'SYNTHETIC_KNOWLEDGE_VALUE',
+  'SYNTHETIC_MEASUREMENT_METRIC', 'SYNTHETIC_INVALID_DATE', '2001-02-30']
 
 async function tree(directory: string): Promise<unknown> {
   const names = (await readdir(directory, { withFileTypes: true })).sort((a, b) => a.name.localeCompare(b.name))
@@ -86,14 +88,27 @@ async function isolated(run: (directory: string, invoke: (
   } finally { await rm(directory, { recursive: true, force: true }) }
 }
 
-type Case = { name: string; argv: string[]; command: string; code?: string; field?: string;
-  validation?: CliValidationDiagnostic; requests?: number }
+type Case = { name: string; argv: string[]; trailing?: string[]; command: string; code?: string; field?: string;
+  validation?: CliValidationDiagnostic; rejection?: CliTimingParseRejection; requests?: number }
 const cases: Case[] = [
+  { name: 'food conflicting query forms', argv: ['food', 'search-labels', 'synthetic oats', '--query', 'PRIVATE_SENTINEL'],
+    command: 'food search-labels', code: 'VALIDATION_ERROR', field: 'query',
+    validation: { field: 'query', code: 'custom', missing: false } },
   { name: 'food limit validation before provider access', argv: ['food', 'search-labels', 'synthetic oats', '--limit', '999'],
     command: 'food search-labels', code: 'VALIDATION_ERROR', field: 'limit',
     validation: { field: 'limit', code: 'too_big', missing: false } },
   { name: 'exercise invalid kind', argv: ['exercise', 'list', '--kind', 'synthetic-invalid'],
-    command: 'exercise list', code: 'VALIDATION_ERROR', field: 'kind' },
+    command: 'exercise list', code: 'VALIDATION_ERROR', field: 'kind',
+    validation: { field: 'kind', code: 'invalid_value', missing: false } },
+  { name: 'exercise excessive limit', argv: ['exercise', 'list', '--limit', '501'],
+    command: 'exercise list', code: 'VALIDATION_ERROR', field: 'limit',
+    validation: { field: 'limit', code: 'too_big', missing: false } },
+  { name: 'exercise unknown option', argv: ['exercise', 'list', '--PRIVATE_SENTINEL'],
+    command: 'exercise list', code: 'VALIDATION_ERROR', field: 'arguments',
+    validation: { field: 'arguments', code: 'custom', missing: false }, rejection: 'unknown_flag' },
+  { name: 'exercise missing option value', argv: ['exercise', 'list'], trailing: ['--limit'],
+    command: 'exercise list', code: 'VALIDATION_ERROR', field: 'arguments',
+    validation: { field: 'arguments', code: 'custom', missing: false }, rejection: 'missing_value' },
   { name: 'exercise missing lookup', argv: ['exercise', 'show', 'synthetic-no-such-exercise'],
     command: 'exercise show', code: 'exercise_not_found' },
   { name: 'nearby successful catalog lookup', argv: ['exercise', 'list', '--query', 'squat', '--limit', '1'],
@@ -112,6 +127,46 @@ const cases: Case[] = [
   { name: 'knowledge append missing heading', argv: ['knowledge', 'append-section', 'synthetic-page', '--body', 'SYNTHETIC_HEALTH_HISTORY'],
     command: 'knowledge append-section', code: 'VALIDATION_ERROR', field: 'heading',
     validation: { field: 'heading', code: 'invalid_type', missing: true } },
+  { name: 'knowledge show rejects named slug before effects', argv: ['knowledge', 'show', '--slug', 'synthetic-page'],
+    command: 'knowledge show', code: 'VALIDATION_ERROR', field: 'arguments',
+    validation: { field: 'arguments', code: 'custom', missing: false }, rejection: 'unknown_flag' },
+  { name: 'knowledge upsert rejects unknown option before writes', argv: ['knowledge', 'upsert', '--body', 'SYNTHETIC_HEALTH_HISTORY', '--PRIVATE_SENTINEL'],
+    command: 'knowledge upsert', code: 'VALIDATION_ERROR', field: 'arguments',
+    validation: { field: 'arguments', code: 'custom', missing: false }, rejection: 'unknown_flag' },
+  { name: 'meal edit rejects unknown option before lookup or writes', argv: ['meal', 'edit', 'meal_synthetic_missing', '--PRIVATE_SENTINEL'],
+    command: 'meal edit', code: 'VALIDATION_ERROR', field: 'arguments',
+    validation: { field: 'arguments', code: 'custom', missing: false } },
+  { name: 'knowledge show missing slug', argv: ['knowledge', 'show'],
+    command: 'knowledge show', code: 'VALIDATION_ERROR', field: 'slug',
+    validation: { field: 'slug', code: 'invalid_type', missing: true } },
+  { name: 'knowledge show invalid slug', argv: ['knowledge', 'show', 'SYNTHETIC_INVALID_SLUG!'],
+    command: 'knowledge show', code: 'VALIDATION_ERROR', field: 'slug',
+    validation: { field: 'slug', code: 'invalid_format', missing: false } },
+  { name: 'event schema missing kind', argv: ['event', 'payload-schema'],
+    command: 'event payload-schema', code: 'VALIDATION_ERROR', field: 'kind',
+    validation: { field: 'kind', code: 'invalid_value', missing: true } },
+  { name: 'event schema invalid kind', argv: ['event', 'payload-schema', '--kind', 'synthetic-invalid'],
+    command: 'event payload-schema', code: 'VALIDATION_ERROR', field: 'kind',
+    validation: { field: 'kind', code: 'invalid_value', missing: false } },
+  { name: 'event schema invalid for', argv: ['event', 'payload-schema', '--kind', 'note', '--for', 'synthetic-invalid'],
+    command: 'event payload-schema', code: 'VALIDATION_ERROR', field: 'for',
+    validation: { field: 'for', code: 'invalid_value', missing: false } },
+  { name: 'event schema default for', argv: ['event', 'payload-schema', '--kind', 'note'],
+    command: 'event payload-schema' },
+  { name: 'event schema explicit for', argv: ['event', 'payload-schema', '--kind', 'note', '--for', 'import-jsonl'],
+    command: 'event payload-schema' },
+  { name: 'measurement entry missing metric', argv: ['measurement', 'entry', 'list'],
+    command: 'measurement entry list', code: 'VALIDATION_ERROR', field: 'metric',
+    validation: { field: 'metric', code: 'invalid_type', missing: true } },
+  { name: 'measurement entry invalid from', argv: ['measurement', 'entry', 'list', '--metric', 'SYNTHETIC_MEASUREMENT_METRIC', '--from', 'SYNTHETIC_INVALID_DATE'],
+    command: 'measurement entry list', code: 'VALIDATION_ERROR', field: 'from',
+    validation: { field: 'from', code: 'invalid_format', missing: false } },
+  { name: 'measurement entry invalid to', argv: ['measurement', 'entry', 'list', '--metric', 'SYNTHETIC_MEASUREMENT_METRIC', '--to', '2001-02-30'],
+    command: 'measurement entry list', code: 'VALIDATION_ERROR', field: 'to',
+    validation: { field: 'to', code: 'custom', missing: false } },
+  { name: 'measurement entry invalid limit', argv: ['measurement', 'entry', 'list', '--metric', 'SYNTHETIC_MEASUREMENT_METRIC', '--limit', '201'],
+    command: 'measurement entry list', code: 'VALIDATION_ERROR', field: 'limit',
+    validation: { field: 'limit', code: 'too_big', missing: false } },
   { name: 'automation invalid limit', argv: ['automation', 'list', '--limit', '201'],
     command: 'automation list', code: 'VALIDATION_ERROR', field: 'limit',
     validation: { field: 'limit', code: 'too_big', missing: false } },
@@ -124,7 +179,8 @@ const cases: Case[] = [
 
 for (const sample of cases) test(`real subprocess: ${sample.name}`, async () => {
   await isolated(async (directory, invoke) => {
-    const argv = [...sample.argv, '--vault', path.join(directory, 'vault'), '--format', 'json']
+    const argv = [...sample.argv, '--vault', path.join(directory, 'vault'), '--format', 'json',
+      ...(sample.trailing ?? [])]
     const off = await invoke(argv, sample.requests, false)
     const on = await invoke(argv, sample.requests)
     assert.deepEqual({ ...on, timing: null }, off, 'exit and complete model-visible output/hints must be byte-identical')
@@ -133,7 +189,7 @@ for (const sample of cases) test(`real subprocess: ${sample.name}`, async () => 
     if (sample.code) {
       assert.equal(output.code, sample.code)
       assert.equal(typeof output.message, 'string')
-      if (sample.command === 'automation list') assert.equal(output.stage, 'validation')
+      if (sample.validation) assert.equal(output.stage, 'validation')
       if (sample.field) {
         assert.ok(output.fieldErrors.some((error: { path: string }) =>
           error.path === sample.field))
@@ -145,6 +201,12 @@ for (const sample of cases) test(`real subprocess: ${sample.name}`, async () => 
       } else {
         assert.equal(output.message, 'No public exercise catalog item matched "synthetic-no-such-exercise".')
       }
+    } else if (sample.command === 'event payload-schema') {
+      assert.equal(output.schemaVersion, 'murph.payload-schema.v1')
+      assert.equal(output.command, 'event import-jsonl')
+      assert.equal(output.lineSchemaName, 'event-import-jsonl-row-note')
+      assert.equal(output.mediaType, 'application/jsonl')
+      assert.equal(output.schema.type, 'object')
     } else if (sample.command === 'automation list') {
       assert.deepEqual(output, { vault: path.join(directory, 'vault'),
         filters: { status: null, text: null, supportSeriesId: null, cursor: null, limit: 1 },
@@ -157,6 +219,7 @@ for (const sample of cases) test(`real subprocess: ${sample.name}`, async () => 
       assert.equal(output.items.length, 1)
       assert.equal(typeof output.items[0].id, 'string')
     }
+    assert.equal(on.timing!.reportCount, 1)
     const commands = on.timing!.commands
     assert.equal(commands.length, 1)
     assert.equal(commands[0]!.command, sample.command)
@@ -164,7 +227,61 @@ for (const sample of cases) test(`real subprocess: ${sample.name}`, async () => 
     assert.equal(commands[0]!.calls, 1)
     assert.deepEqual(commands[0]!.failures, sample.code
       ? [{ code: sample.code, stage: sample.field ? 'validation' : 'unknown', count: 1,
-          ...(sample.validation ? { validation: sample.validation } : {}) }] : undefined)
+          ...(sample.validation ? { validation: sample.validation } : {}),
+          ...(sample.rejection ? { rejection: sample.rejection } : {}) }] : undefined)
+  })
+}, 90_000)
+
+test('real exercise schema and help preserve output and effects with timing on or off', async () => {
+  await isolated(async (directory, invoke) => {
+    for (const flag of ['--schema', '--help']) {
+      const argv = ['exercise', 'list', '--vault', path.join(directory, 'vault'), '--format', 'json', flag]
+      const off = await invoke(argv, 0, false)
+      const on = await invoke(argv)
+      assert.deepEqual({ ...on, timing: null }, off)
+      assert.equal(on.code, 0)
+      assert.ok(on.stdout.trim().length > 0)
+      assert.equal(on.timing!.reportCount, 1)
+      assert.equal(on.timing!.commands.length, 1)
+      assert.equal(on.timing!.commands[0]!.outcome, 'ok')
+      assert.equal(on.timing!.commands[0]!.calls, 1)
+      assert.equal(on.timing!.commands[0]!.failures, undefined)
+    }
+  })
+}, 120_000)
+
+for (const exists of [false, true]) test(`real knowledge read: ${exists ? 'valid' : 'missing page'}`, async () => {
+  await isolated(async (directory, invoke) => {
+    const vault = path.join(directory, 'vault')
+    const markdown = '---\nslug: synthetic-page\ntitle: Synthetic page\n---\n\n# Synthetic page\n\nSYNTHETIC_KNOWLEDGE_VALUE\n'
+    if (exists) {
+      const pagePath = path.join(vault, 'derived/knowledge/pages/synthetic-page.md')
+      await mkdir(path.dirname(pagePath), { recursive: true })
+      await writeFile(pagePath, markdown)
+    }
+    const argv = ['knowledge', 'show', 'synthetic-page', '--vault', vault, '--format', 'json']
+    const off = await invoke(argv, 0, false)
+    const on = await invoke(argv)
+    assert.deepEqual({ ...on, timing: null }, off, 'telemetry cannot change output, exits, errors or hints')
+    assert.equal(on.code, exists ? 0 : 1)
+    const output = JSON.parse(on.stdout)
+    if (exists) {
+      assert.equal(output.page.slug, 'synthetic-page')
+      assert.equal(output.page.markdown, markdown)
+    } else {
+      assert.equal(output.code, 'knowledge_page_not_found')
+      assert.equal(output.stage, 'read')
+      assert.equal(output.retryable, false)
+      assert.equal(output.message, 'No derived knowledge page exists for slug "synthetic-page".')
+    }
+    assert.equal(on.timing!.reportCount, 1)
+    assert.equal(on.timing!.commands.length, 1)
+    const command = on.timing!.commands[0]!
+    assert.equal(command.command, 'knowledge show')
+    assert.equal(command.outcome, exists ? 'ok' : 'error')
+    assert.equal(command.calls, 1)
+    assert.deepEqual(command.failures, exists ? undefined
+      : [{ code: 'knowledge_page_not_found', stage: 'read', count: 1 }])
   })
 }, 90_000)
 
@@ -198,8 +315,10 @@ test('early root/built-in parse rejection and natural version success retain exa
 test('real batch children report once, preserve stop-on-error and reject nested batches unchanged', async () => {
   await isolated(async (directory, invoke) => {
     const common = ['--vault', path.join(directory, 'vault'), '--format', 'json']
-    const argv = ['batch', '--compact', '--stop-on-error', '--command', JSON.stringify(cases[3]!.argv),
-      '--command', JSON.stringify(cases[1]!.argv), '--command', JSON.stringify(cases[4]!.argv), ...common]
+    const argv = ['batch', '--compact', '--stop-on-error',
+      '--command', JSON.stringify(['exercise', 'list', '--query', 'squat', '--limit', '1']),
+      '--command', JSON.stringify(['exercise', 'list', '--kind', 'synthetic-invalid']),
+      '--command', JSON.stringify(['food', 'search-labels', 'synthetic oats', '--limit', '1']), ...common]
     const off = await invoke(argv, 0, false)
     const on = await invoke(argv)
     assert.deepEqual({ ...on, timing: null }, off)

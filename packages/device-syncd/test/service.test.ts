@@ -710,7 +710,7 @@ test("device sync service records privacy-safe job phase timings", async () => {
       },
       connectedAt: now.toISOString(),
     });
-    store.enqueueJob({
+    const job = store.enqueueJob({
       accountId: account.id,
       provider: "demo",
       kind: "resource",
@@ -734,6 +734,7 @@ test("device sync service records privacy-safe job phase timings", async () => {
       scheduledJobCount: 1,
       nextScheduledJobDelayMs: 86_400_000,
       jobCount: 1,
+      jobIdentities: [{ accountId: account.id, dedupeKey: null, jobId: job.id }],
       jobKind: "resource",
       outcome: "completed",
       provider: "demo",
@@ -1812,7 +1813,8 @@ test("local Junction workers exclude a disconnected source from production-norma
             return createJsonResponse({
               data: [
                 {
-                  id: "garmin-activity-1",
+                  // Opaque identities may contain digits from a disconnected measurement.
+                  id: "garmin-activity-1234",
                   connectionId: "provider-garmin-1",
                   observedAt: "2026-07-27T12:00:00.000Z",
                   steps: 4321,
@@ -1925,8 +1927,8 @@ test("local Junction workers exclude a disconnected source from production-norma
     assert.equal(await service.runWorkerOnce(), null);
     assert.equal(importerInputs.length, 4);
     const durableInput = JSON.stringify(importerInputs);
-    assert.match(durableInput, /garmin-activity-1|garmin-blood-oxygen-1/u);
-    assert.doesNotMatch(durableInput, /fitbit|provider-fitbit-1|1234|"value":91/u);
+    assert.match(durableInput, /garmin-activity-1234|garmin-blood-oxygen-1/u);
+    assert.doesNotMatch(durableInput, /fitbit|provider-fitbit-1|"steps":1234[,}]|"value":91[,}]/u);
 
     const durableResults = importerResults as Array<{
       authoritativeEventSets?: unknown[];
@@ -2650,12 +2652,21 @@ test("Junction historical suffix persistence lets a same-priority update run fir
       async importDeviceProviderSnapshot(input) {
         const snapshot = input.snapshot as {
           timeseries?: { floors_climbed?: unknown[] };
+          windowEnd?: string;
           windowStart?: string;
         };
-        assert.equal(snapshot.timeseries?.floors_climbed?.length, 1);
-        const importedWindowStart = snapshot.windowStart;
-        assert.ok(importedWindowStart);
-        importedDays.push(importedWindowStart.slice(0, 10));
+        assert.ok(snapshot.windowStart && snapshot.windowEnd);
+        // Consecutive closed days share one canonical import; each day has one record.
+        const batchDays: string[] = [];
+        for (
+          let dayMs = Date.parse(snapshot.windowStart);
+          dayMs < Date.parse(snapshot.windowEnd);
+          dayMs += 24 * 60 * 60_000
+        ) {
+          batchDays.push(new Date(dayMs).toISOString().slice(0, 10));
+        }
+        assert.equal(snapshot.timeseries?.floors_climbed?.length, batchDays.length);
+        importedDays.push(...batchDays);
         if (!competingUpdateId) {
           const enqueue = queueCompetingUpdate;
           assert.ok(enqueue);
@@ -5672,6 +5683,69 @@ test("device sync service retains one accepted companion RMSSD job until canonic
   }
 });
 
+test.each([
+  { label: "absent instance group", missing: 1, expected: 1 },
+  { label: "present unequal instance group", missing: 0, expected: 0 },
+  { label: "older producer", missing: undefined, expected: undefined },
+  { label: "out-of-range count", missing: Number.MAX_SAFE_INTEGER, expected: undefined },
+  { label: "negative count", missing: -1, expected: undefined },
+  { label: "fractional count", missing: 0.5, expected: undefined },
+  { label: "string count", missing: "1", expected: undefined },
+  { label: "private identity", missing: "synthetic-private-device", expected: undefined },
+])("Junction ECG binding diagnostics project only a bounded missing-instance count: $label", async ({ missing, expected }) => {
+  const vaultRoot = await makeTempDirectory("murph-junction-ecg-instance-diagnostic");
+  const now = new Date("2026-04-03T12:00:00.000Z");
+  const fixture = createServiceFixture({
+    secret: "secret-for-tests",
+    clock: { now: () => now },
+    config: { vaultRoot, publicBaseUrl: "https://sync.example.test", stateDatabasePath: path.join(vaultRoot, "state.sqlite") },
+    providers: [createFakeProvider({
+      provider: "junction",
+      descriptor: JUNCTION_DEVICE_PROVIDER_DESCRIPTOR,
+      async executeJob() {
+        throw deviceSyncError({
+          code: "JUNCTION_ECG_RECORDING_BINDING_INCOMPLETE",
+          message: "Synthetic ECG source mismatch.", retryable: true,
+          details: { reason: "voltage_source_mismatch", pageCount: 1, groupCount: 2,
+            providerMatchGroupCount: 2, instanceMatchGroupCount: 0, matchedGroupCount: 0,
+            ...(missing === undefined ? {} : { instanceMissingGroupCount: missing }) },
+        });
+      },
+    })],
+  });
+  try {
+    const account = fixture.store.upsertAccount({
+      provider: "junction", externalAccountId: "junction-ecg-instance-diagnostic",
+      displayName: "Junction", scopes: [], status: "active",
+      credential: { kind: "provider_config", providerConfigKey: "junction", credentialMetadata: {} },
+      connectedAt: now.toISOString(),
+    });
+    const job = fixture.store.enqueueJob({
+      accountId: account.id, provider: "junction", kind: "resource", maxAttempts: 1,
+      availableAt: now.toISOString(), dedupeKey: "ecg-instance-diagnostic",
+      payload: { resource: "electrocardiogram_voltage", resourceCategory: "timeseries",
+        sourceProviderSlug: "apple_health_kit",
+        windowStart: "2026-04-02T00:00:00.000Z", windowEnd: "2026-04-03T00:00:00.000Z" },
+    });
+    assert.equal((await fixture.service.runWorkerOnce())?.id, job.id);
+    const diagnostic = fixture.service.listJobFailureDiagnostics().at(-1);
+    assert.ok(diagnostic);
+    assert.equal(diagnostic.code, "JUNCTION_ECG_RECORDING_BINDING_INCOMPLETE");
+    assert.equal(diagnostic.details.junctionEcgProviderMatchGroupCount, 2);
+    assert.equal(diagnostic.details.junctionEcgInstanceMatchGroupCount, 0);
+    if (expected === undefined) {
+      // Unknown producers and rejected values omit the field rather than imply zero.
+      assert.equal(Object.hasOwn(diagnostic.details, "junctionEcgInstanceMissingGroupCount"), false);
+    } else {
+      assert.equal(diagnostic.details.junctionEcgInstanceMissingGroupCount, expected);
+    }
+    assert.doesNotMatch(JSON.stringify(diagnostic), /synthetic-private/u);
+  } finally {
+    fixture.close();
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
 test.each(["blood_oxygen", "electrocardiogram_voltage"])(
   "Junction %s validation remains pending across exhaustion and restart until corrected",
   async (resource) => {
@@ -5758,6 +5832,182 @@ test.each(["blood_oxygen", "electrocardiogram_voltage"])(
     }
   },
 );
+
+test.each([
+  ["blood_oxygen", "warm"],
+  ["blood_oxygen", "cold"],
+  ["electrocardiogram_voltage", "warm"],
+  ["electrocardiogram_voltage", "cold"],
+] as const)(
+  "Junction %s validation keeps a bounded transport retry across %s restart",
+  async (resource, restart) => {
+    const vaultRoot = await makeTempDirectory("murph-junction-validation-transport-retry");
+    let now = new Date("2026-04-03T12:00:00.000Z");
+    let stateDatabaseName = "state.sqlite";
+    let outcome: "validation" | "transport" | "valid" = "validation";
+    const createFixture = () => createServiceFixture({
+      secret: "secret-for-tests",
+      clock: { now: () => now },
+      config: { vaultRoot, publicBaseUrl: "https://sync.example.test",
+        stateDatabasePath: path.join(vaultRoot, stateDatabaseName) },
+      providers: [createFakeProvider({
+        provider: "junction",
+        descriptor: JUNCTION_DEVICE_PROVIDER_DESCRIPTOR,
+        async executeJob() {
+          if (outcome === "valid") return {};
+          if (outcome === "transport") {
+            throw deviceSyncError({ code: "JUNCTION_API_REQUEST_FAILED",
+              message: "Synthetic Junction request failure.", retryable: true, httpStatus: 500 });
+          }
+          if (resource === "blood_oxygen") {
+            throw new JunctionSparseCalendarRepairNormalizationError({
+              reason: "daily.value_out_of_range", valueKind: "number",
+              valueRange: "negative", unitKind: "percent",
+            });
+          }
+          throw deviceSyncError({
+            code: "JUNCTION_ECG_RECORDING_BINDING_INCOMPLETE",
+            message: "Synthetic incomplete ECG collection.", retryable: true,
+            details: { reason: "voltage_collection_empty", pageCount: 1, groupCount: 0,
+              providerMatchGroupCount: 0, instanceMatchGroupCount: 0, matchedGroupCount: 0 },
+          });
+        },
+      })],
+    });
+    let fixture = createFixture();
+    const upsertAccount = () => fixture.store.upsertAccount({
+      provider: "junction", externalAccountId: "junction-validation-transport-retry",
+      displayName: "Junction", scopes: [], status: "active",
+      credential: { kind: "provider_config", providerConfigKey: "junction", credentialMetadata: {} },
+      connectedAt: "2026-04-03T12:00:00.000Z",
+    });
+    const enqueue = (accountId: string, maxAttempts: number) => fixture.store.enqueueJob({
+      accountId, provider: "junction", kind: "resource", maxAttempts,
+      availableAt: now.toISOString(), dedupeKey: "validation-transport-resource-day",
+      payload: { resource, resourceCategory: "timeseries", sourceProviderSlug: "withings",
+        windowStart: "2026-04-02T00:00:00.000Z", windowEnd: "2026-04-03T00:00:00.000Z" },
+    });
+    try {
+      let account = upsertAccount();
+      let job = enqueue(account.id, 1);
+      for (let attempt = 1; attempt <= 3; attempt += 1) {
+        assert.equal((await fixture.service.runWorkerOnce())?.id, job.id);
+        const retained = fixture.store.getJobById(job.id);
+        assert.ok(retained);
+        assert.equal(retained.status, "queued");
+        now = new Date(retained.availableAt);
+      }
+      const pastAllowance = fixture.store.getJobById(job.id);
+      assert.ok(pastAllowance);
+      assert.equal(pastAllowance.attempts, 3);
+      // Hosted cold handoff carries remaining attempts as maxAttempts and
+      // rehydrates the job with zero attempts in fresh local state.
+      const remainingAttempts = Math.max(1, pastAllowance.maxAttempts - pastAllowance.attempts);
+      fixture.close();
+      if (restart === "cold") stateDatabaseName = "cold-state.sqlite";
+      fixture = createFixture();
+      if (restart === "cold") {
+        account = upsertAccount();
+        job = enqueue(account.id, remainingAttempts);
+      }
+
+      outcome = "transport";
+      assert.equal((await fixture.service.runWorkerOnce())?.id, job.id);
+      const afterTransport = fixture.store.getJobById(job.id);
+      assert.ok(afterTransport);
+      assert.equal(afterTransport.status, "queued");
+      assert.equal(afterTransport.lastErrorCode, "JUNCTION_API_REQUEST_FAILED");
+      assert.equal(remainingAttempts, 5);
+      assert.equal(afterTransport.maxAttempts - afterTransport.attempts, 4);
+
+      outcome = "valid";
+      now = new Date(afterTransport.availableAt);
+      assert.equal((await fixture.service.runWorkerOnce())?.id, job.id);
+      assert.equal(fixture.store.getJobById(job.id)?.status, "succeeded");
+      assert.equal(fixture.store.getAccountById(account.id)?.lastErrorCode, null);
+    } finally {
+      fixture.close();
+      await rm(vaultRoot, { recursive: true, force: true });
+    }
+  },
+);
+
+test("Junction validation transport retries stay bounded beside terminal and ordinary failures", async () => {
+  const vaultRoot = await makeTempDirectory("murph-junction-validation-transport-bounds");
+  let now = new Date("2026-04-03T12:00:00.000Z");
+  let outcome: "validation" | "transport" | "fatal" = "validation";
+  const { service, store, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    clock: { now: () => now },
+    config: { vaultRoot, publicBaseUrl: "https://sync.example.test",
+      stateDatabasePath: path.join(vaultRoot, "state.sqlite") },
+    providers: [createFakeProvider({
+      provider: "junction",
+      descriptor: JUNCTION_DEVICE_PROVIDER_DESCRIPTOR,
+      async executeJob(_context, job) {
+        if (job.payload.resource === "heartrate" || outcome === "transport") {
+          throw deviceSyncError({ code: "JUNCTION_API_REQUEST_FAILED",
+            message: "Synthetic Junction request failure.", retryable: true, httpStatus: 500 });
+        }
+        if (outcome === "fatal") {
+          throw deviceSyncError({ code: "SYNTHETIC_NONRETRYABLE_FAILURE",
+            message: "Synthetic nonretryable failure.", retryable: false, httpStatus: 400 });
+        }
+        throw deviceSyncError({
+          code: "JUNCTION_ECG_RECORDING_BINDING_INCOMPLETE",
+          message: "Synthetic incomplete ECG collection.", retryable: true,
+          details: { reason: "voltage_collection_empty", pageCount: 1, groupCount: 0,
+            providerMatchGroupCount: 0, instanceMatchGroupCount: 0, matchedGroupCount: 0 },
+        });
+      },
+    })],
+  });
+  try {
+    const account = store.upsertAccount({
+      provider: "junction", externalAccountId: "junction-validation-transport-bounds",
+      displayName: "Junction", scopes: [], status: "active",
+      credential: { kind: "provider_config", providerConfigKey: "junction", credentialMetadata: {} },
+      connectedAt: now.toISOString(),
+    });
+    const enqueue = (resource: string, dedupeKey: string) => store.enqueueJob({
+      accountId: account.id, provider: "junction", kind: "resource", maxAttempts: 1,
+      availableAt: now.toISOString(), dedupeKey,
+      payload: { resource, resourceCategory: "timeseries", sourceProviderSlug: "withings",
+        windowStart: "2026-04-02T00:00:00.000Z", windowEnd: "2026-04-03T00:00:00.000Z" },
+    });
+    const runStatus = async (jobId: string) => {
+      assert.equal((await service.runWorkerOnce())?.id, jobId);
+      const stored = store.getJobById(jobId);
+      assert.ok(stored);
+      now = new Date(Math.max(now.getTime(), Date.parse(stored.availableAt)));
+      return stored.status;
+    };
+
+    const ordinary = enqueue("heartrate", "ordinary-resource-day");
+    assert.equal(await runStatus(ordinary.id), "dead");
+
+    const repeated = enqueue("electrocardiogram_voltage", "validation-repeated-transport");
+    assert.equal(await runStatus(repeated.id), "queued");
+    outcome = "transport";
+    const transportStatuses: string[] = [];
+    for (let attempt = 1; attempt <= 5; attempt += 1) {
+      transportStatuses.push(await runStatus(repeated.id));
+    }
+    assert.deepEqual(transportStatuses, ["queued", "queued", "queued", "queued", "dead"]);
+    assert.equal(store.getJobById(repeated.id)?.lastErrorCode, "JUNCTION_API_REQUEST_FAILED");
+    assert.equal(await service.runWorkerOnce(), null);
+
+    outcome = "validation";
+    const terminal = enqueue("electrocardiogram_voltage", "validation-then-nonretryable");
+    assert.equal(await runStatus(terminal.id), "queued");
+    outcome = "fatal";
+    assert.equal(await runStatus(terminal.id), "dead");
+    assert.equal(store.getJobById(terminal.id)?.lastErrorCode, "SYNTHETIC_NONRETRYABLE_FAILURE");
+  } finally {
+    close();
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
 
 test("device sync service retains one accepted sparse calendar job until canonical import succeeds", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-syncd-calendar-retained-import");
@@ -6955,6 +7205,82 @@ test("device sync service lets providers execute compatible due jobs as one boun
   assert.equal(store.getAccountById(account.id)?.nextReconcileAt, "2026-03-18T12:00:00.000Z");
 
   close();
+});
+
+test("device sync job diagnostics carry in-memory identity for every row of a failed batch", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-batch-identity");
+  const { service, store, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+      log: { warn() {} },
+    },
+    providers: [
+      createFakeProvider({
+        describeJobBatch(job) {
+          return job.kind === "resource" && job.payload.group === "activity"
+            ? { key: "resource:activity", estimatedBytes: 1 }
+            : null;
+        },
+        maxJobBatchSize: 3,
+        async executeJobBatch() {
+          throw new Error("Synthetic batch failure");
+        },
+      }),
+    ],
+  });
+  try {
+    const account = store.upsertAccount({
+      provider: "demo",
+      externalAccountId: "demo-batch-identity",
+      scopes: ["read:data"],
+      tokens: {
+        accessToken: "synthetic-access",
+        accessTokenEncrypted: encryptStoredAccessToken("demo", "demo-batch-identity", "synthetic-access"),
+      },
+      connectedAt: "2026-03-17T10:00:00.000Z",
+    });
+    const keyed = store.enqueueJob({
+      accountId: account.id,
+      provider: "demo",
+      kind: "resource",
+      dedupeKey: "synthetic-window-a",
+      payload: { group: "activity" },
+      availableAt: "2026-03-17T10:00:00.000Z",
+    });
+    const unkeyed = store.enqueueJob({
+      accountId: account.id,
+      provider: "demo",
+      kind: "resource",
+      payload: { group: "activity" },
+      availableAt: "2026-03-17T10:00:01.000Z",
+    });
+
+    assert.equal(await service.drainWorker(5), 2);
+
+    const expected = [
+      { accountId: account.id, dedupeKey: "synthetic-window-a", jobId: keyed.id },
+      { accountId: account.id, dedupeKey: null, jobId: unkeyed.id },
+    ];
+    const [failure] = service.listJobFailureDiagnostics();
+    assert.deepEqual(failure?.jobIdentities, expected);
+    const [timing] = service.listJobTimingDiagnostics();
+    assert.equal(timing?.outcome, "failed");
+    assert.equal(timing?.jobCount, 2);
+    assert.deepEqual(timing?.jobIdentities, expected);
+    // Returned identities cannot mutate the service's retained diagnostics.
+    const [failureIdentity] = failure?.jobIdentities ?? [];
+    const [timingIdentity] = timing?.jobIdentities ?? [];
+    assert.ok(failureIdentity && timingIdentity);
+    failureIdentity.dedupeKey = "mutated";
+    timingIdentity.dedupeKey = "mutated";
+    assert.equal(service.listJobFailureDiagnostics()[0]?.jobIdentities?.[0]?.dedupeKey, "synthetic-window-a");
+    assert.equal(service.listJobTimingDiagnostics()[0]?.jobIdentities?.[0]?.dedupeKey, "synthetic-window-a");
+  } finally {
+    close();
+  }
 });
 
 test("device sync service counts provider batch rows against drainWorker limits", async () => {
@@ -15553,5 +15879,121 @@ test("canonical lock contention does not override foreground abort or ordinary s
     await owner.release();
     fixture.close();
     await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+
+test("an active account can pull a nearby full reconcile forward without widening the global scheduler", async () => {
+  const now = new Date("2026-06-12T12:00:00.000Z");
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-coalescing");
+  const { service, store, close } = createServiceFixture({
+    secret: "synthetic-coalescing-secret", clock: { now: () => now },
+    config: { vaultRoot, publicBaseUrl: "https://sync.example.test", stateDatabasePath: ":memory:" },
+    providers: [createFakeProvider({
+      createScheduledJobs(account, at) {
+        return { jobs: [{ kind: "reconcile", dedupeKey: `cadence:${account.id}` }],
+          nextReconcileAt: new Date(Date.parse(at) + 60 * 60_000).toISOString() };
+      },
+    })],
+  });
+  try {
+    const account = store.upsertAccount({ provider: "demo", externalAccountId: "synthetic-cadence",
+      scopes: [], credential: { kind: "provider_config", providerConfigKey: "demo", credentialMetadata: {} },
+      connectedAt: now.toISOString(), nextReconcileAt: "2026-06-12T12:25:00.000Z" });
+    assert.equal((await service.runSchedulerOnce(account.id)).length, 0);
+    const options = { reconcileBefore: "2026-06-12T12:30:00.000Z" };
+    assert.equal((await service.runSchedulerOnce(undefined, options)).length, 0);
+    const queued = await service.runSchedulerOnce(account.id, options);
+    assert.equal(queued.length, 1);
+    assert.equal(queued[0]?.kind, "reconcile");
+    assert.equal(store.getAccountById(account.id)?.nextReconcileAt, "2026-06-12T13:00:00.000Z");
+    assert.equal((await service.runSchedulerOnce(account.id, options)).length, 0);
+    assert.equal(store.listPendingJobsForAccount(account.id, 10).length, 1,
+      "the full pull retains its durable queue owner until completed");
+  } finally { close(); }
+});
+
+
+test.each([false, true])("device sync credits continuation progress only after owned commit: %s", async (commitSucceeds) => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-continuation-progress");
+  const { service, store, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    providers: [createFakeProvider({
+      async executeJob() {
+        return {
+          continuationProgress: true,
+          scheduledJobs: [{ kind: "resource", payload: { windowStart: "2026-03-17T00:00:00.000Z" } }],
+        };
+      },
+    })],
+  });
+  try {
+    const begin = await service.startConnection({ provider: "demo" });
+    const connected = await service.handleOAuthCallback({ provider: "demo", state: begin.state, code: "progress" });
+    if (!commitSucceeds) {
+      const commit = store.completeJobsMarkSyncSucceededAndEnqueueJobs.bind(store);
+      store.completeJobsMarkSyncSucceededAndEnqueueJobs = (input) => {
+        store.patchAccount(connected.account.id, { metadata: { revisionChanged: true } });
+        return commit(input);
+      };
+    }
+    await service.runWorkerOnce();
+    const diagnostic = service.listJobTimingDiagnostics()[0];
+    assert.ok(diagnostic);
+    expect(diagnostic).toMatchObject({ durableProgressCommitted: commitSucceeds });
+    assert.equal(Object.hasOwn(diagnostic, "continuationProgressCommitted"), commitSucceeds);
+    assert.equal(Object.hasOwn(diagnostic, "canonicalProgressCommitted"), false);
+    const jobs = readJobsForAccountForTesting(store, connected.account.id);
+    assert.equal(jobs.some(job => job.kind === "resource"), commitSucceeds);
+  } finally { close(); }
+});
+
+test.each([
+  {
+    label: "valid timeout", code: "JUNCTION_API_REQUEST_TIMEOUT",
+    details: { providerRequestTimeoutMs: 12_000, providerRequestElapsedMs: 12_004,
+      providerRequestAttempt: 1, providerRequestStage: "response_body", providerResponseHeadersPresent: true },
+    expected: { providerRequestTimeoutMs: 12_000, providerRequestElapsedMs: 12_004,
+      providerRequestAttempt: 1, providerRequestStage: "response_body", providerResponseHeadersPresent: true },
+  },
+  {
+    label: "malformed timeout", code: "JUNCTION_API_REQUEST_TIMEOUT",
+    details: { providerRequestTimeoutMs: Infinity, providerRequestElapsedMs: -1,
+      providerRequestAttempt: 101, providerRequestStage: "synthetic-private-stage", providerResponseHeadersPresent: "true" },
+    expected: {},
+  },
+  {
+    label: "unrelated provider failure", code: "WHOOP_TOKEN_REQUEST_FAILED",
+    details: { providerRequestTimeoutMs: 12_000, providerRequestElapsedMs: 12_004,
+      providerRequestAttempt: 1, providerRequestStage: "response_body", providerResponseHeadersPresent: true },
+    expected: {},
+  },
+])("device sync service scopes bounded Junction timeout diagnostics: $label", async ({ code, details, expected }) => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-timeout-diagnostics");
+  const { service, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    config: { vaultRoot, publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite") },
+    providers: [createFakeProvider({ async executeJob() {
+      throw deviceSyncError({ code, message: "Synthetic request timeout", retryable: true,
+        httpStatus: 504, details: { ...details, requestUrl: "https://example.test/private-synthetic-resource" } });
+    } })],
+  });
+  try {
+    const begin = await service.startConnection({ provider: "demo" });
+    await service.handleOAuthCallback({ provider: "demo", state: begin.state, code: "synthetic-timeout" });
+    await service.runWorkerOnce();
+    const diagnostic = service.listJobFailureDiagnostics()[0];
+    assert.ok(diagnostic);
+    assert.equal(diagnostic.code, code);
+    assert.deepEqual(diagnostic.details, { providerHttpStatus: 504, ...expected });
+    assert.equal(JSON.stringify(diagnostic).includes("private-synthetic-resource"), false);
+  } finally {
+    close();
   }
 });

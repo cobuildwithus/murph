@@ -1,0 +1,23 @@
+{
+  "publishedOn": "2026-09-24",
+  "order": 100,
+  "item": {
+    "id": "voice-stays-connected-during-background-work",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Voice stays connected during background work",
+    "summary": "A voice request can interrupt background work without disconnecting your call.",
+    "details": "Murph can answer and continue the conversation on the same call while keeping background work under its existing controls.",
+    "relevanceTags": [
+      "voice",
+      "reliability"
+    ],
+    "sourcePullRequests": [
+      3693
+    ],
+    "tryIt": {
+      "label": "Open voice",
+      "href": "/voice"
+    }
+  }
+}

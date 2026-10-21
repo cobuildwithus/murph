@@ -16,11 +16,10 @@ import {
   HOSTED_ASSISTANT_LUNA_MODEL,
   HOSTED_ASSISTANT_MODEL_OVERRIDES,
   HOSTED_ASSISTANT_PRODUCT_MODELS,
-  HOSTED_ASSISTANT_PROVIDERS,
   HOSTED_ASSISTANT_REASONING_EFFORT_OVERRIDES,
   HOSTED_ASSISTANT_REASONING_EFFORTS,
   HOSTED_ASSISTANT_SOL_MODEL,
-  HOSTED_ASSISTANT_TERRA_MODEL,
+  HOSTED_ASSISTANT_DEFAULT_MODEL,
   isHostedAssistantProductModel,
   isHostedAssistantReasoningEffort,
   parseHostedAssistantModelOverride,
@@ -64,6 +63,7 @@ import {
   verifyHostedAiUsageAllowDecision,
 } from "../src/runtime-control.ts";
 import {
+  parseHostedCodexAuthUpdate,
   parseHostedMailboxFetchRequest,
   parseHostedMailboxFetchResponse,
   parseHostedMailboxItem,
@@ -75,8 +75,6 @@ import {
   parseHostedMailboxPayloadFetchResponse,
   parseHostedBrowserVaultReplicaPublishRequest,
   parseHostedBrowserVaultReplicaPublishResponse,
-  parseHostedCodexAuthUpdate,
-  parseHostedCodexAuthUpdateResponse,
   parseHostedRuntimeDeviceSyncBridgeEnvelope,
   parseHostedRuntimeAssistantConfigurationControlRequest,
   parseHostedRuntimeAssistantConfigurationToolRequest,
@@ -86,6 +84,8 @@ import {
   parseHostedRuntimeIssueExportRequest,
   parseHostedRuntimeIssueExportResponse,
   parseHostedRuntimeHealthDataAdmissionResponse,
+  parseHostedRuntimeLatencyTraceBatchRequest,
+  parseHostedRuntimeLatencyTraceBatchResponse,
   parseHostedRuntimeLatencyTraceRequest,
   parseHostedRuntimeLatencyTraceResponse,
   parseHostedRuntimeUsageRecordRequest,
@@ -103,6 +103,60 @@ it("preserves configuration parser identity through the legacy export", () => {
   expect(parseHostedRuntimeAssistantConfigurationControlRequest).toBe(parseConfigurationControlRequest);
   expect(parseHostedRuntimeAssistantConfigurationToolRequest).toBe(parseConfigurationToolRequest);
   expect(parseHostedRuntimeAssistantConfigurationToolResponse).toBe(parseConfigurationToolResponse);
+});
+
+describe("retained legacy Codex auth callback contract", () => {
+  const attemptId = "hca_synthetic_attempt_01";
+  const deviceCode = {
+    attemptId,
+    phase: "device_code",
+    userCode: "SYNTHETIC-CODE",
+    verificationUrl: "https://auth.openai.com/codex/device",
+  };
+
+  it("accepts the former device-code and terminal callback shapes", () => {
+    expect(parseHostedCodexAuthUpdate(deviceCode)).toEqual(deviceCode);
+    for (const phase of ["connected", "disconnected", "failed"]) {
+      expect(parseHostedCodexAuthUpdate({ attemptId, phase })).toEqual({ attemptId, phase });
+    }
+    for (const length of [16, 64]) {
+      const boundary = { ...deviceCode, attemptId: `hca_${"a".repeat(length)}`, userCode: "a".repeat(128) };
+      expect(parseHostedCodexAuthUpdate(boundary)).toEqual(boundary);
+    }
+  });
+
+  it.each([
+    null,
+    [],
+    {},
+    { attemptId, phase: "connecting" },
+    { attemptId, phase: "connected", userCode: "SYNTHETIC-CODE" },
+    { attemptId, phase: "failed", memberId: "member_other" },
+    { ...deviceCode, accessToken: "synthetic-not-a-token" },
+    { ...deviceCode, userCode: "" },
+    { ...deviceCode, userCode: "a".repeat(129) },
+    { ...deviceCode, userCode: 123 },
+    { ...deviceCode, attemptId: `hca_${"a".repeat(15)}` },
+    { ...deviceCode, attemptId: `hca_${"a".repeat(65)}` },
+    { ...deviceCode, attemptId: "hca_synthetic.attempt.01" },
+    { ...deviceCode, attemptId: " hca_synthetic_attempt_01" },
+    { ...deviceCode, attemptId: "synthetic_attempt_01" },
+  ])("rejects malformed, over-bound, or extended callback payload %#", (payload) => {
+    expect(() => parseHostedCodexAuthUpdate(payload)).toThrow(TypeError);
+  });
+
+  it.each([
+    "",
+    "/codex/device",
+    "http://auth.openai.com/codex/device",
+    "https://example.com/codex/device",
+    "https://auth.openai.com.example.com/codex/device",
+    "https://synthetic@auth.openai.com/codex/device",
+    "https://synthetic:password@auth.openai.com/codex/device",
+    "https://auth.openai.com@other.example/codex/device",
+  ])("rejects untrusted verification URL %#", (verificationUrl) => {
+    expect(() => parseHostedCodexAuthUpdate({ ...deviceCode, verificationUrl })).toThrow(TypeError);
+  });
 });
 
 describe("hosted runtime control contracts", () => {
@@ -245,8 +299,6 @@ describe("hosted runtime control contracts", () => {
       "clinical-records.sync-requested",
       "clinical-records.enrichment-requested",
       "device-sync.wake",
-      "environment-interview.completed",
-      "environment-voice.captured",
       "journal.group-fact.recorded",
       "health.daily-metric.reported",
       "meal-photo.captured",
@@ -254,6 +306,8 @@ describe("hosted runtime control contracts", () => {
       "member.action.completed",
       "vault-share.delivery",
       "vault-share.revoke",
+      "environment-interview.completed",
+      "environment-voice.captured",
       "group-newsletter.email-needed",
       "runtime.manual-requested",
       "runtime.pending-effects-reconcile-requested",
@@ -264,6 +318,8 @@ describe("hosted runtime control contracts", () => {
       "runtime.mailbox-lag-observed",
     ]);
     expect(HOSTED_RETIRED_MAILBOX_KINDS).toEqual([
+      "environment-interview.completed",
+      "environment-voice.captured",
       "group-newsletter.email-needed",
     ]);
     expect(isHostedRetiredMailboxKind("group-newsletter.email-needed")).toBe(true);
@@ -285,6 +341,7 @@ describe("hosted runtime control contracts", () => {
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("mailbox.appended");
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("mailbox.dedupe_conflict");
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("mailbox.post_checkpoint_effects_finished");
+    expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("mailbox.progress_alert_sampled");
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("assistant.device_connect");
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain(
       "assistant.device_activity_automation_failed",
@@ -378,12 +435,12 @@ describe("hosted runtime control contracts", () => {
   });
 
   it("normalizes hosted AI usage priced model aliases without accepting unpriced models", () => {
-    expect(normalizeHostedAiUsageAllowancePricedModelId("gpt-5.6-terra")).toBe("gpt-5.6-terra");
-    expect(normalizeHostedAiUsageAllowancePricedModelId("openai/gpt-5.6-terra")).toBe("gpt-5.6-terra");
-    expect(normalizeHostedAiUsageAllowancePricedModelId("gpt-5.6-terra-2026-07-08")).toBe("gpt-5.6-terra");
-    expect(normalizeHostedAiUsageAllowancePricedModelId("openai/gpt-5.6-terra-2026-07-08")).toBe("gpt-5.6-terra");
+    expect(normalizeHostedAiUsageAllowancePricedModelId("gpt-6.1-sol")).toBe("gpt-6.1-sol");
+    expect(normalizeHostedAiUsageAllowancePricedModelId("openai/gpt-6.1-sol")).toBe("gpt-6.1-sol");
+    expect(normalizeHostedAiUsageAllowancePricedModelId("gpt-6.1-sol-2026-07-08")).toBe("gpt-6.1-sol");
+    expect(normalizeHostedAiUsageAllowancePricedModelId("openai/gpt-6.1-sol-2026-07-08")).toBe("gpt-6.1-sol");
     expect(normalizeHostedAiUsageAllowancePricedModelId("gpt-5.6-sol")).toBe("gpt-5.6-sol");
-    expect(normalizeHostedAiUsageAllowancePricedModelId("openai/gpt-5.6-terra-2026-07-08")).toBe("gpt-5.6-terra");
+    expect(normalizeHostedAiUsageAllowancePricedModelId("openai/gpt-6.1-sol-2026-07-08")).toBe("gpt-6.1-sol");
     expect(normalizeHostedAiUsageAllowancePricedModelId("gpt-5.6-luna-2026-07-08")).toBe("gpt-5.6-luna");
     expect(normalizeHostedAiUsageAllowancePricedModelId("gpt-5.5")).toBeNull();
     expect(normalizeHostedAiUsageAllowancePricedModelId("gpt-sol")).toBeNull();
@@ -396,26 +453,31 @@ describe("hosted runtime control contracts", () => {
 
   it("parses the hosted assistant product models and nullable default override", () => {
     expect(HOSTED_ASSISTANT_PRODUCT_MODELS).toEqual([
+      "gpt-6.1-sol",
+      "gpt-6-sol",
+      "gpt-6-luna",
       HOSTED_ASSISTANT_LUNA_MODEL,
-      HOSTED_ASSISTANT_TERRA_MODEL,
       HOSTED_ASSISTANT_SOL_MODEL,
       "gpt-6-astra",
     ]);
     expect(HOSTED_ASSISTANT_MODEL_OVERRIDES).toEqual([
+      "gpt-6.1-sol",
+      "gpt-6-sol",
+      "gpt-6-luna",
       HOSTED_ASSISTANT_LUNA_MODEL,
       HOSTED_ASSISTANT_SOL_MODEL,
       "gpt-6-astra",
     ]);
     expect(isHostedAssistantProductModel(HOSTED_ASSISTANT_LUNA_MODEL)).toBe(true);
-    expect(isHostedAssistantProductModel(HOSTED_ASSISTANT_TERRA_MODEL)).toBe(true);
+    expect(isHostedAssistantProductModel(HOSTED_ASSISTANT_DEFAULT_MODEL)).toBe(true);
     expect(isHostedAssistantProductModel(HOSTED_ASSISTANT_SOL_MODEL)).toBe(true);
     expect(isHostedAssistantProductModel("gpt-5.5")).toBe(false);
     expect(parseHostedAssistantModelOverride(HOSTED_ASSISTANT_LUNA_MODEL))
       .toBe(HOSTED_ASSISTANT_LUNA_MODEL);
     expect(parseHostedAssistantModelOverride(HOSTED_ASSISTANT_SOL_MODEL))
       .toBe(HOSTED_ASSISTANT_SOL_MODEL);
-    expect(parseHostedAssistantModelOverride(HOSTED_ASSISTANT_TERRA_MODEL))
-      .toBeNull();
+    expect(parseHostedAssistantModelOverride(HOSTED_ASSISTANT_DEFAULT_MODEL))
+      .toBe(HOSTED_ASSISTANT_DEFAULT_MODEL);
     expect(parseHostedAssistantModelOverride(" gpt-5.6-sol ")).toBeNull();
   });
 
@@ -460,12 +522,10 @@ describe("hosted runtime control contracts", () => {
         reasoningEffort,
       })).toEqual({ action: "update", reasoningEffort });
     }
-    for (const provider of HOSTED_ASSISTANT_PROVIDERS) {
-      expect(parseHostedRuntimeAssistantConfigurationToolRequest({
-        action: "update",
-        provider,
-      })).toEqual({ action: "update", provider });
-    }
+    expect(() => parseHostedRuntimeAssistantConfigurationToolRequest({
+      action: "update",
+      provider: "openai",
+    })).toThrow(/not allowed/u);
     expect(parseHostedRuntimeAssistantConfigurationToolRequest({
       action: "update",
       model: HOSTED_ASSISTANT_LUNA_MODEL,
@@ -478,7 +538,7 @@ describe("hosted runtime control contracts", () => {
 
     expect(() => parseHostedRuntimeAssistantConfigurationToolRequest({
       action: "update",
-    })).toThrow(/requires a model, provider, or reasoning effort/u);
+    })).toThrow(/requires a model or reasoning effort/u);
     expect(() => parseHostedRuntimeAssistantConfigurationToolRequest({
       action: "read",
       model: HOSTED_ASSISTANT_LUNA_MODEL,
@@ -489,15 +549,11 @@ describe("hosted runtime control contracts", () => {
     })).toThrow(/not supported/u);
 
     const assistantInputId = `ain_${"c".repeat(32)}`;
-    expect(parseHostedRuntimeAssistantConfigurationControlRequest({
+    expect(() => parseHostedRuntimeAssistantConfigurationControlRequest({
       action: "update",
       assistantInputId,
-      provider: "venice",
-    })).toEqual({
-      action: "update",
-      assistantInputId,
-      provider: "venice",
-    });
+      provider: "openai",
+    })).toThrow(/not allowed/u);
     expect(parseHostedRuntimeAssistantConfigurationControlRequest({
       action: "update",
       assistantInputId,
@@ -568,19 +624,17 @@ describe("hosted runtime control contracts", () => {
       approval: {},
       reasoningEffort: "high",
       target: {
-        model: HOSTED_ASSISTANT_TERRA_MODEL,
+        model: HOSTED_ASSISTANT_DEFAULT_MODEL,
         reasoningEffort: "high",
       },
     })).toThrow(/not allowed/u);
 
     const snapshot = {
       availableModels: [...HOSTED_ASSISTANT_PRODUCT_MODELS],
-      availableProviders: ["openai", "venice"] as const,
       availableReasoningEfforts: [...HOSTED_ASSISTANT_REASONING_EFFORTS],
       configurationAvailable: true,
       dormantSolPreference: false,
-      model: HOSTED_ASSISTANT_TERRA_MODEL,
-      provider: "openai" as const,
+      model: HOSTED_ASSISTANT_DEFAULT_MODEL,
       reasoningEffort: "low" as const,
       solAvailable: false,
     };
@@ -591,29 +645,10 @@ describe("hosted runtime control contracts", () => {
       action: "read",
       result: snapshot,
     });
-    const {
-      availableProviders: _legacyAvailableProviders,
-      provider: _legacyProvider,
-      ...legacySnapshot
-    } = snapshot;
-    expect(parseHostedRuntimeAssistantConfigurationToolResponse({
-      action: "read",
-      result: legacySnapshot,
-    })).toEqual({
-      action: "read",
-      result: {
-        ...legacySnapshot,
-        availableProviders: ["openai"],
-        provider: "openai",
-      },
-    });
     expect(() => parseHostedRuntimeAssistantConfigurationToolResponse({
       action: "read",
-      result: {
-        ...snapshot,
-        provider: undefined,
-      },
-    })).toThrow(/provider is not supported/u);
+      result: { ...snapshot, unknownSetting: true },
+    })).toThrow(/not allowed/u);
     expect(parseHostedRuntimeAssistantConfigurationToolResponse({
       action: "update",
       result: {
@@ -640,6 +675,38 @@ describe("hosted runtime control contracts", () => {
     })).toThrow(/not supported/u);
   });
 
+  it.each(["read", "update"] as const)("discards retired provider fields from older Web %s responses", (action) => {
+    const snapshot = {
+      availableModels: [...HOSTED_ASSISTANT_PRODUCT_MODELS],
+      availableReasoningEfforts: [...HOSTED_ASSISTANT_REASONING_EFFORTS],
+      configurationAvailable: true,
+      dormantSolPreference: false,
+      model: HOSTED_ASSISTANT_DEFAULT_MODEL,
+      reasoningEffort: "low" as const,
+      solAvailable: false,
+    };
+    const result = action === "read" ? snapshot : {
+      ...snapshot,
+      appliesAt: "next_turn",
+      requiredPlan: null,
+      status: "updated",
+    };
+    const legacyResult = {
+      ...result,
+      availableProviders: ["openai", "venice"],
+      provider: "openai",
+    };
+
+    expect(parseHostedRuntimeAssistantConfigurationToolResponse({
+      action,
+      result: legacyResult,
+    })).toEqual({ action, result });
+    expect(() => parseHostedRuntimeAssistantConfigurationToolResponse({
+      action,
+      result: { ...legacyResult, unknownSetting: true },
+    })).toThrow(/unknownSetting is not allowed/u);
+  });
+
   it.each(["gpt-image-2", "gpt-image-2.5-flare"])("normalizes %s image usage aliases separately", (model) => {
     expect(normalizeHostedAiUsageAllowanceOpenAiImageModelId(model))
       .toBe(model);
@@ -647,18 +714,24 @@ describe("hosted runtime control contracts", () => {
       .toBe(model);
     expect(normalizeHostedAiUsageAllowanceOpenAiImageModelId(`${model}-2026-09-08`))
       .toBe(model);
-    expect(normalizeHostedAiUsageAllowanceOpenAiImageModelId("gpt-5.6-terra"))
+    expect(normalizeHostedAiUsageAllowanceOpenAiImageModelId("gpt-6.1-sol"))
       .toBeNull();
+  });
+
+  it.each(["priority", "fast"])("keeps member pricing standard for the platform-funded %s boost", (serviceTier) => {
+    expect(resolveHostedAiUsageTokenPricingBasis({
+      model: "gpt-6-sol", providerName: "hosted-openai", serviceTier,
+    })).toBe("standard");
   });
 
   it("uses OpenAI flex token pricing only for supported OpenAI flex models", () => {
     expect(resolveHostedAiUsageTokenPricingBasis({
-      model: "gpt-5.6-terra",
+      model: "gpt-6.1-sol",
       providerName: "hosted-openai",
       serviceTier: "flex",
     })).toBe("openai-flex");
     expect(resolveHostedAiUsageTokenPricingBasis({
-      model: "openai/gpt-5.6-terra-2026-07-08",
+      model: "openai/gpt-6.1-sol-2026-07-08",
       providerName: "openai",
       serviceTier: "flex",
     })).toBe("openai-flex");
@@ -668,7 +741,7 @@ describe("hosted runtime control contracts", () => {
       serviceTier: "flex",
     })).toBe("openai-flex");
     expect(resolveHostedAiUsageTokenPricingBasis({
-      model: "openai/gpt-5.6-terra-2026-07-08",
+      model: "openai/gpt-6.1-sol-2026-07-08",
       providerName: "openai",
       serviceTier: "flex",
     })).toBe("openai-flex");
@@ -678,7 +751,7 @@ describe("hosted runtime control contracts", () => {
       serviceTier: "flex",
     })).toBe("openai-flex");
     expect(resolveHostedAiUsageTokenPricingBasis({
-      model: "gpt-5.6-terra",
+      model: "gpt-6.1-sol",
       providerName: "openai-local-test",
       serviceTier: "flex",
     })).toBe("standard");
@@ -693,7 +766,7 @@ describe("hosted runtime control contracts", () => {
       serviceTier: "flex",
     })).toBe("standard");
     expect(resolveHostedAiUsageTokenPricingBasis({
-      model: "gpt-5.6-terra",
+      model: "gpt-6.1-sol",
       providerName: "hosted-openai",
       serviceTier: null,
     })).toBe("standard");
@@ -754,6 +827,26 @@ describe("hosted runtime control contracts", () => {
     expect(parseHostedWorkspaceInvocationRequest(workspaceInvocationRequest)).toEqual(
       workspaceInvocationRequest,
     );
+    expect(parseHostedWorkspaceInvocationRequest({
+      ...workspaceInvocationRequest, voiceCallId: "call-synthetic",
+    }).voiceCallId).toBe("call-synthetic");
+    for (const processingMode of ["system_mailbox", "inbox_media_retention"]) {
+      expect(() => parseHostedWorkspaceInvocationRequest({
+        ...workspaceInvocationRequest, voiceCallId: "call-synthetic", processingMode,
+      })).toThrow("Voice reservation requires default processing mode.");
+    }
+    expect(() => parseHostedWorkspaceInvocationRequest({
+      ...workspaceInvocationRequest, voiceCallId: "call:invalid",
+    })).toThrow("Hosted voice input identity is invalid.");
+    expect(parseHostedWorkspaceInvocationRequest({
+      ...workspaceInvocationRequest,
+      hostedAssistantPriorityUntil: "2026-09-24T00:00:00Z",
+      workspace: null,
+    }).hostedAssistantPriorityUntil).toBe("2026-09-24T00:00:00Z");
+    expect(() => parseHostedWorkspaceInvocationRequest({
+      ...workspaceInvocationRequest,
+      hostedAssistantPriorityUntil: 123,
+    })).toThrow("hostedAssistantPriorityUntil");
     expect(() => parseHostedWorkspaceInvocationRequest({
       ...workspaceInvocationRequest,
       budget: {
@@ -914,6 +1007,13 @@ describe("hosted runtime control contracts", () => {
     })).toThrow("Hosted workspace invocation result.idleShutdownCheckpointSkipped is no longer supported.");
   });
 
+  it.each(HOSTED_RETIRED_MAILBOX_KINDS)("reads retained %s metadata as retired", (kind) => {
+    const item = createMailboxItem({ kind, lane: "system" });
+    expect(isHostedMailboxKind(kind)).toBe(true);
+    expect(isHostedRetiredMailboxKind(kind)).toBe(true);
+    expect(parseHostedMailboxItem(item)).toEqual(item);
+  });
+
   it("parses mailbox fetch contracts without run ownership fields", () => {
     const item = createMailboxItem({
       consumedAt: "2026-04-26T00:00:03.000Z",
@@ -939,7 +1039,6 @@ describe("hosted runtime control contracts", () => {
     });
     expect(parseHostedMailboxFetchResponse({
       conversationUsageStatus: "low",
-      assistantProvider: "openai",
       fetchedAt: "2026-04-26T00:00:02.000Z",
       items: [item],
       maxSeqByLane: [
@@ -949,7 +1048,6 @@ describe("hosted runtime control contracts", () => {
       userId: "member_123",
     })).toEqual({
       conversationUsageStatus: "low",
-      assistantProvider: "openai",
       fetchedAt: "2026-04-26T00:00:02.000Z",
       items: [item],
       maxSeqByLane: [
@@ -958,49 +1056,14 @@ describe("hosted runtime control contracts", () => {
       ],
       userId: "member_123",
     });
-    for (const revision of [null, 1, 3]) {
-      expect(parseHostedMailboxFetchResponse({
-        assistantProvider: "openai",
-        assistantCustomInferenceRevision: revision,
-        fetchedAt: "2026-04-26T00:00:02.000Z",
-        items: [],
-        maxSeqByLane: [],
-        userId: "member_123",
-      }).assistantCustomInferenceRevision).toBe(revision);
-    }
-    for (const revision of [0, -1, 1.5, "3"]) {
-      expect(() => parseHostedMailboxFetchResponse({
-        assistantProvider: "openai",
-        assistantCustomInferenceRevision: revision,
-        fetchedAt: "2026-04-26T00:00:02.000Z",
-        items: [],
-        maxSeqByLane: [],
-        userId: "member_123",
-      })).toThrow();
-    }
-    expect(parseHostedMailboxFetchResponse({
-      assistantProvider: "venice",
-      fetchedAt: "2026-04-26T00:00:02.000Z",
-      items: [],
-      maxSeqByLane: [],
-      userId: "member_123",
-    })).toEqual({
-      assistantProvider: "venice",
-      fetchedAt: "2026-04-26T00:00:02.000Z",
-      items: [],
-      maxSeqByLane: [],
-      userId: "member_123",
-    });
     expect(parseHostedMailboxFetchResponse({
       conversationUsageStatus: null,
-      assistantProvider: "openai",
       fetchedAt: "2026-04-26T00:00:02.000Z",
       items: [],
       maxSeqByLane: [],
       userId: "member_123",
     })).toEqual({
       conversationUsageStatus: null,
-      assistantProvider: "openai",
       fetchedAt: "2026-04-26T00:00:02.000Z",
       items: [],
       maxSeqByLane: [],
@@ -1040,14 +1103,12 @@ describe("hosted runtime control contracts", () => {
     })).toThrow(/Hosted mailbox fetch request cursorMode/u);
     expect(() => parseHostedMailboxFetchResponse({
       conversationUsageStatus: "healthy",
-      assistantProvider: "openai",
       fetchedAt: "2026-04-26T00:00:02.000Z",
       items: [],
       maxSeqByLane: [],
       userId: "member_123",
     })).toThrow(/conversationUsageStatus/u);
     expect(() => parseHostedMailboxFetchResponse({
-      assistantProvider: "openai",
       fetchedAt: "2026-04-26T00:00:02.000Z",
       items: [],
       maxSeqByLane: [
@@ -1056,21 +1117,6 @@ describe("hosted runtime control contracts", () => {
       userId: "member_123",
     })).toThrow(/non-negative base-10 integer string/u);
   });
-
-  it.each([undefined, null, "", "invalid", "OPENAI", 0, {}, ["openai"]].map(
-    (assistantProvider) => ({ assistantProvider }),
-  ))(
-    "rejects a mailbox fetch response with a missing or invalid provider: %j",
-    ({ assistantProvider }) => {
-      expect(() => parseHostedMailboxFetchResponse({
-        ...(assistantProvider === undefined ? {} : { assistantProvider }),
-        fetchedAt: "2026-04-26T00:00:02.000Z",
-        items: [],
-        maxSeqByLane: [],
-        userId: "member_123",
-      })).toThrow(/provider/iu);
-    },
-  );
 
   it("parses minimal mailbox records and payload sidecars", () => {
     const minimalItem = {
@@ -1393,54 +1439,6 @@ describe("hosted runtime control contracts", () => {
       recorded: true,
       usageId: usage.usageId,
     })).toThrow(/platformAiUsageAllowedAfter/u);
-  });
-
-  it("parses hosted Codex auth updates with exact bounded callback shapes", () => {
-    expect(parseHostedCodexAuthUpdate({
-      attemptId: "hca_abcdefghijklmnop",
-      phase: "device_code",
-      userCode: "ABCD-EFGH",
-      verificationUrl: "https://auth.openai.com/device",
-    })).toEqual({
-      attemptId: "hca_abcdefghijklmnop",
-      phase: "device_code",
-      userCode: "ABCD-EFGH",
-      verificationUrl: "https://auth.openai.com/device",
-    });
-    expect(parseHostedCodexAuthUpdate({
-      attemptId: "hca_abcdefghijklmnop",
-      phase: "connected",
-    })).toEqual({
-      attemptId: "hca_abcdefghijklmnop",
-      phase: "connected",
-    });
-    expect(parseHostedCodexAuthUpdateResponse({ applied: false })).toEqual({
-      applied: false,
-      status: "superseded",
-    });
-    expect(parseHostedCodexAuthUpdateResponse({
-      applied: true,
-      status: "already_applied",
-    })).toEqual({
-      applied: true,
-      status: "already_applied",
-    });
-    expect(() => parseHostedCodexAuthUpdateResponse({
-      applied: true,
-      status: "superseded",
-    })).toThrow(/conflicts/u);
-
-    expect(() => parseHostedCodexAuthUpdate({
-      attemptId: "hca_abcdefghijklmnop",
-      phase: "device_code",
-      userCode: "ABCD-EFGH",
-      verificationUrl: "https://example.test/device",
-    })).toThrow(/OpenAI auth host/u);
-    expect(() => parseHostedCodexAuthUpdate({
-      attemptId: "hca_abcdefghijklmnop",
-      phase: "connected",
-      verificationUrl: "https://auth.openai.com/device",
-    })).toThrow(/not allowed/u);
   });
 
   it("parses hosted runtime latency trace callbacks with exact safe keys", () => {
@@ -2573,6 +2571,12 @@ describe("hosted runtime control contracts", () => {
       hostedAssistantReasoningEffortOverride: "high",
       workspace: null,
     });
+    expect(parseHostedWorkspaceReadResponse({
+      fetchedAt: "2026-09-23T00:00:00Z", hostedAssistantPriorityUntil: "2026-09-24T00:00:00Z", workspace: null,
+    }).hostedAssistantPriorityUntil).toBe("2026-09-24T00:00:00Z");
+    expect(parseHostedWorkspaceReadResponse({
+      fetchedAt: "2026-09-23T00:00:00Z", workspace: null,
+    }).hostedAssistantPriorityUntil).toBeUndefined();
     expect(() => parseHostedWorkspaceReadResponse({
       fetchedAt: "2026-04-26T00:00:02.000Z",
       hostedAssistantAstraAllowed: "true",
@@ -2601,7 +2605,6 @@ describe("hosted runtime control contracts", () => {
     });
     for (const invalidOverride of [
       null,
-      HOSTED_ASSISTANT_TERRA_MODEL,
       "gpt-5.5",
       " gpt-5.6-sol ",
       56,
@@ -3191,3 +3194,27 @@ function createAssistantRuntimeIssueRecord(): AssistantRuntimeIssueRecord {
     surface: "hosted-runtime",
   };
 }
+
+
+it("keeps bounded milestone batches additive to the deployed singleton wire contract", () => {
+  const event = { type: "assistant_milestone", source: "linq", runtimeAttemptId: "synthetic-attempt",
+    assistantInputIds: ["synthetic-input"], at: "2026-09-01T00:00:00.000Z", milestone: "first_codex_output_observed" };
+  const events = Array.from({ length: 8 }, () => event);
+  expect(parseHostedRuntimeLatencyTraceBatchRequest({ events })).toEqual({ events });
+  expect(parseHostedRuntimeLatencyTraceRequest({ event })).toEqual({ event });
+  const runtimeEvents = ["email", "linq", "telegram"].map(source => ({
+    type: "runtime_milestone", source, runtimeAttemptId: "synthetic-attempt",
+    at: event.at, milestone: "checkpoint_publication_expected_by",
+  }));
+  expect(parseHostedRuntimeLatencyTraceBatchRequest({ events: runtimeEvents })).toEqual({ events: runtimeEvents });
+  expect(() => parseHostedRuntimeLatencyTraceRequest({ events })).toThrow();
+  for (const payload of [{ events: [] }, { events: [...events, event] }, { events, event },
+    { events: [{ ...event, type: "runtime_milestone" }] }, { events: [{ ...event, privateText: "synthetic" }] }]) {
+    expect(() => parseHostedRuntimeLatencyTraceBatchRequest(payload)).toThrow();
+  }
+  const ok = { matchedCount: 1, recorded: true, unmatchedCount: 0 };
+  expect(parseHostedRuntimeLatencyTraceBatchResponse({ results: [ok, null] })).toEqual({ results: [ok, null] });
+  for (const results of [[], Array.from({ length: 9 }, () => ok), [{ ...ok, unmatchedCount: -1 }]]) {
+    expect(() => parseHostedRuntimeLatencyTraceBatchResponse({ results })).toThrow();
+  }
+});

@@ -29,6 +29,8 @@ export const HOSTED_RUNTIME_MEDIA_READ_PURPOSE_HEADER =
   "x-hosted-runtime-media-read-purpose";
 export const HOSTED_RUNTIME_MEDIA_FETCH_CORRELATION_ID_HEADER =
   "x-hosted-runtime-media-fetch-correlation-id";
+export const HOSTED_RUNTIME_FETCH_CORRELATION_ID_HEADER =
+  "x-hosted-runtime-fetch-correlation-id";
 export const HOSTED_RUNTIME_MEDIA_BYTE_SIZE_HEADER =
   "x-hosted-runtime-media-byte-size";
 export const HOSTED_RUNTIME_MEDIA_KIND_HEADER =
@@ -46,6 +48,12 @@ const HOSTED_RUNTIME_MEDIA_READ_PURPOSE_SET = new Set<string>(
 );
 const HOSTED_RUNTIME_ARTIFACT_FETCH_CORRELATION_ID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
+
+/** Diagnostic only: never a routing or authorization input. */
+export function readHostedRuntimeFetchCorrelationId(headers: Headers): string | null {
+  const value = headers.get(HOSTED_RUNTIME_FETCH_CORRELATION_ID_HEADER);
+  return value && HOSTED_RUNTIME_ARTIFACT_FETCH_CORRELATION_ID_PATTERN.test(value) ? value : null;
+}
 
 export interface HostedRuntimeArtifactFetchTelemetry {
   correlationId: string;

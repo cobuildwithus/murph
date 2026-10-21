@@ -4,7 +4,6 @@ import { resolveMetricInputKey } from "@murphai/health-metrics";
 import type { VaultReadModel } from "../read-model.ts";
 import { summarizeDailySamples, type DailySampleSummary } from "../summaries.ts";
 import {
-  buildWearableSummaryBundle,
   buildWearableSummaryBundleFromDataset,
   summarizeWearableActivityFromBundle,
   summarizeWearableBodyStateFromBundle,
@@ -37,8 +36,19 @@ export interface MetricProjection {
   wearableMetricRows: MetricRowEvidence[];
 }
 
+// Fixed diagnostic names, also admitted by the portable CLI timing vocabulary.
+// Declared here so this browser-consumed owner never imports Node timing.
+export type MetricProjectionStep =
+  | "query-metric-samples"
+  | "query-metric-evidence"
+  | "query-metric-extract"
+  | "query-metric-precedence";
+
 export interface BuildMetricProjectionOptions {
   wearableDataset?: WearableDataset;
+  // Synchronous, best-effort operation boundary from a Node-only owner. It
+  // receives only a fixed name and returns that step's end callback.
+  startStep?: (step: MetricProjectionStep) => () => void;
 }
 
 interface WearableMetricProjectionEvidence {
@@ -55,28 +65,59 @@ export function buildMetricProjection(
   vault: VaultReadModel,
   options: BuildMetricProjectionOptions = {},
 ): MetricProjection {
-  const dailySampleSummaries = summarizeDailySamples(vault);
-  const wearableMetricEvidence = resolveWearableMetricProjectionEvidence(vault, options);
+  const { startStep } = options;
+  const dailySampleSummaries = observeMetricProjectionStep(startStep, "query-metric-samples",
+    () => summarizeDailySamples(vault));
+  const wearableMetricEvidence = observeMetricProjectionStep(startStep, "query-metric-evidence",
+    () => resolveWearableMetricProjectionEvidence(vault, options));
   const wearableMetricRows = wearableMetricEvidence.rows;
-  const metricPoints = extractMetricPoints({
+  const metricPoints = observeMetricProjectionStep(startStep, "query-metric-extract", () => extractMetricPoints({
     metricRows: wearableMetricRows,
     sampleSummaries: dailySampleSummaries,
     vault,
-  });
+  }));
   return {
     dailySampleSummaries,
-    metricPoints: applyJunctionPreciseBodyObservationPrecedence(
-      applyWearableSummaryMetricPrecedence(
-        metricPoints,
-        wearableMetricEvidence.suppressionEvidence,
-      ),
-    ),
+    metricPoints: observeMetricProjectionStep(startStep, "query-metric-precedence", () =>
+      applyJunctionPreciseBodyObservationPrecedence(
+        applyWearableSummaryMetricPrecedence(
+          metricPoints,
+          wearableMetricEvidence.suppressionEvidence,
+        ),
+      )),
     wearableMetricRows,
   };
 }
 
+function observeMetricProjectionStep<T>(
+  startStep: BuildMetricProjectionOptions["startStep"],
+  step: MetricProjectionStep,
+  run: () => T,
+): T {
+  if (!startStep) {
+    return run();
+  }
+  let endStep: (() => void) | undefined;
+  try {
+    endStep = startStep(step);
+  } catch {
+    // Optional diagnostics must not change projection output or errors.
+  }
+  try {
+    return run();
+  } finally {
+    try {
+      endStep?.();
+    } catch {
+      // Keep the original result or thrown error.
+    }
+  }
+}
+
 export function buildWearableMetricEvidence(vault: VaultReadModel): MetricRowEvidence[] {
-  return buildWearableMetricProjectionEvidenceFromBundle(buildWearableSummaryBundle(vault)).rows;
+  return buildWearableMetricProjectionEvidenceFromBundle(
+    buildWearableSummaryBundleFromDataset(collectWearableDataset(vault, {}), { includeSourceHealth: false }),
+  ).rows;
 }
 
 export function buildWearableMetricEvidenceFromBundle(bundle: WearableSummaryBundle): MetricRowEvidence[] {
@@ -89,7 +130,7 @@ function resolveWearableMetricProjectionEvidence(
 ): WearableMetricProjectionEvidence {
   const dataset = options.wearableDataset ?? collectWearableDataset(vault, {});
   return buildWearableMetricProjectionEvidenceFromBundle(
-    buildWearableSummaryBundleFromDataset(dataset),
+    buildWearableSummaryBundleFromDataset(dataset, { includeSourceHealth: false }),
     dataset.metricSuppressionEvidence,
   );
 }

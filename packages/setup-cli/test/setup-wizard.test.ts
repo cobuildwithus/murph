@@ -136,40 +136,6 @@ test('setup wizard selection toggles keep channels and wearables in canonical or
   assert.deepEqual(toggleSetupWizardWearable(['garmin', 'oura'], 'garmin'), ['oura'])
 })
 
-test('setup wizard exposes Venice through the registry-backed assistant selection', () => {
-  assert.equal(
-    inferSetupWizardAssistantProvider({
-      modelProvider: ' Venice ',
-      oss: false,
-      preset: 'codex',
-    }),
-    'venice',
-  )
-  assert.ok(
-    listSetupWizardAssistantProviderOptions().some(
-      (option) =>
-        option.provider === 'venice' &&
-        option.title === 'Venice.ai' &&
-        /API key/u.test(option.description),
-    ),
-  )
-  assert.deepEqual(
-    resolveSetupWizardAssistantSelection({
-      method: 'venice',
-      provider: 'venice',
-    }),
-    {
-      detail: 'Murph will ask which Venice model id to save next.',
-      methodLabel: null,
-      modelProvider: 'venice',
-      oss: false,
-      preset: 'codex',
-      providerLabel: 'Venice.ai',
-      summary: 'Venice.ai',
-    },
-  )
-})
-
 test('setup wizard exported defaults and wrapper controller keep platform-specific decisions stable', async () => {
   assert.deepEqual(getDefaultSetupWizardChannels('darwin'), [])
   assert.deepEqual(getDefaultSetupWizardChannels('linux'), [])
@@ -220,8 +186,6 @@ test.sequential('setup wizard preserves an explicit empty channel selection on d
     await writeInput('\r')
 
     assert.deepEqual(await wizardResultPromise, {
-      assistantModelProvider: null,
-      assistantOss: null,
       assistantPreset: 'skip',
       channels: [],
       scheduledUpdates: [
@@ -368,95 +332,6 @@ test('setup wizard runtime-status helpers preserve defaulting, detail copy, and 
     { label: 'macOS only', tone: 'accent' },
   ])
 })
-
-test.sequential('setup wizard carries Codex local selection into confirm review', async () => {
-  await withMockProcessTty(async ({ flush, readOutput, writeInput }) => {
-    const wizardResultPromise = runSetupWizard({
-      initialAssistantOss: true,
-      initialAssistantPreset: 'codex',
-      platform: 'linux',
-      vault: './wizard-codex-local',
-    })
-
-    const introOutput = await waitForRenderedText(flush, readOutput, /Before you start/u)
-    assert.match(introOutput, /Before you start/u)
-    await writeInput('\r')
-    await waitForRenderedText(flush, readOutput, /How should Murph answer\?/u)
-    await writeInput('\r')
-    await waitForRenderedText(flush, readOutput, /Auto updates/u)
-    await writeInput('\r')
-    await waitForRenderedText(flush, readOutput, /Chat channels/u)
-    await writeInput('\r')
-    await waitForRenderedText(flush, readOutput, /Health data/u)
-    await writeInput('\r')
-
-    const confirmOutput = await waitForRenderedText(flush, readOutput, /Review/u)
-    assert.match(confirmOutput, /Review your setup/u)
-    assert.match(confirmOutput, /Assistant: Codex local model/u)
-
-    await writeInput('\r')
-
-    assert.deepEqual(await wizardResultPromise, {
-      assistantModelProvider: null,
-      assistantOss: true,
-      assistantPreset: 'codex',
-      channels: [],
-      scheduledUpdates: [
-        'environment-health-watch',
-        'weekly-health-snapshot',
-      ],
-      wearables: [],
-    })
-  })
-}, WIZARD_TEST_TIMEOUT_MS)
-
-test.sequential('setup wizard preserves current provider-backed Codex selection', async () => {
-  await withMockProcessTty(async ({ flush, readOutput, writeInput }) => {
-    const wizardResultPromise = runSetupWizard({
-      initialAssistantModelProvider: 'vercel-ai-gateway',
-      initialAssistantOss: false,
-      initialAssistantPreset: 'codex',
-      platform: 'linux',
-      vault: './wizard-vercel-gateway',
-    })
-
-    await flush()
-    await writeInput('\r')
-    const assistantOutput = await waitForRenderedText(
-      flush,
-      readOutput,
-      /How should Murph answer\?/u,
-    )
-    assert.match(assistantOutput, /Vercel AI Gateway/u)
-    await writeInput('\r')
-    await waitForRenderedText(flush, readOutput, /Auto updates/u)
-    await writeInput('\r')
-    await waitForRenderedText(flush, readOutput, /Chat channels/u)
-    await writeInput('\r')
-    await waitForRenderedText(flush, readOutput, /Health data/u)
-    await writeInput('\r')
-    const confirmOutput = await waitForRenderedText(
-      flush,
-      readOutput,
-      /Review your setup/u,
-    )
-    assert.match(confirmOutput, /Assistant: Vercel AI Gateway/u)
-
-    await writeInput('\r')
-
-    assert.deepEqual(await wizardResultPromise, {
-      assistantModelProvider: 'vercel-ai-gateway',
-      assistantOss: false,
-      assistantPreset: 'codex',
-      channels: [],
-      scheduledUpdates: [
-        'environment-health-watch',
-        'weekly-health-snapshot',
-      ],
-      wearables: [],
-    })
-  })
-}, WIZARD_TEST_TIMEOUT_MS)
 
 test('setup wizard public URL guidance keeps local callbacks when a public webhook base is already set', () => {
   const review = buildSetupWizardPublicUrlReview({
@@ -879,8 +754,6 @@ test.sequential('setup wizard runs the public-link flow, preserves explicit opt-
 
     await assert.doesNotReject(wizardResultPromise)
     assert.deepEqual(await wizardResultPromise, {
-      assistantModelProvider: null,
-      assistantOss: null,
       assistantPreset: 'skip',
       channels: [],
       scheduledUpdates: [],
@@ -892,7 +765,6 @@ test.sequential('setup wizard runs the public-link flow, preserves explicit opt-
 test.sequential('setup wizard keeps Codex cloud review guidance when no public-link step is needed', async () => {
   await withMockProcessTty(async ({ flush, readOutput, writeInput }) => {
     const wizardResultPromise = runSetupWizard({
-      initialAssistantOss: false,
       initialAssistantPreset: 'codex',
       platform: 'linux',
       vault: './wizard-codex',
@@ -923,8 +795,6 @@ test.sequential('setup wizard keeps Codex cloud review guidance when no public-l
     await writeInput('\r')
 
     assert.deepEqual(await wizardResultPromise, {
-      assistantModelProvider: null,
-      assistantOss: false,
       assistantPreset: 'codex',
       channels: [],
       scheduledUpdates: [
@@ -1019,8 +889,6 @@ test.sequential('setup wizard accepts wrapped selection navigation plus space-ba
     await writeInput(' ')
 
     assert.deepEqual(await wizardResultPromise, {
-      assistantModelProvider: null,
-      assistantOss: null,
       assistantPreset: 'skip',
       channels: ['telegram'],
       scheduledUpdates: [],

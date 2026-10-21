@@ -156,7 +156,7 @@ export function buildAssistantAutoReplyPrompt(
         projectionStatus: entry.projection?.status ?? null,
         replyContext:
           entry.replyContext ?? entry.telegramMetadata?.replyContext ?? null,
-        senderHandle: readAssistantInputGroupSenderHandle(entry.sourceMetadata),
+        senderHandle: readAssistantInputGroupSenderHandle(entry.sourceMetadata, entry.conversation),
         speakerLabel: readAssistantInputGroupSpeakerLabel(entry),
         totalInputs: inputs.length,
         trustedHostedImageCompletion:
@@ -250,7 +250,7 @@ export async function prepareAssistantAutoReplyInput(
         projectionStatus: entry.projection?.status ?? null,
         replyContext:
           entry.replyContext ?? entry.telegramMetadata?.replyContext ?? null,
-        senderHandle: readAssistantInputGroupSenderHandle(entry.sourceMetadata),
+        senderHandle: readAssistantInputGroupSenderHandle(entry.sourceMetadata, entry.conversation),
         speakerLabel: readAssistantInputGroupSpeakerLabel(entry),
         totalInputs: preparedInputs.length,
         trustedHostedImageCompletion:
@@ -368,7 +368,9 @@ export function renderAssistantInputAttachmentDescriptorPromptSection(input: {
 
 function readAssistantInputGroupSenderHandle(
   metadata: AssistantInputSourceMetadata | null,
+  conversation: AssistantInputConversationRef,
 ): string | null {
+  if (metadata?.kind === 'linq' && conversation.threadIsDirect !== false) return null
   return metadata?.kind === 'linq' || metadata?.kind === 'telegram'
     ? normalizeNullableString(metadata.senderHandle)
     : null
@@ -393,7 +395,7 @@ function readAssistantInputGroupSpeakerLabel(
   >,
 ): AssistantInputGroupSpeakerLabel | null {
   const metadata = input.sourceMetadata
-  if (!readAssistantInputGroupSenderHandle(metadata)) {
+  if (!readAssistantInputGroupSenderHandle(metadata, input.conversation)) {
     return null
   }
   if (

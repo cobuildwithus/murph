@@ -36,7 +36,7 @@ import {
 } from "./runner-container-ca-env.ts";
 
 const HOSTED_CONTAINER_CODEX_SHELL_SMOKE_TIMEOUT_MS = 45_000;
-const HOSTED_CONTAINER_CODEX_SHELL_SMOKE_MODEL = "gpt-5.6-terra";
+const HOSTED_CONTAINER_CODEX_SHELL_SMOKE_MODEL = "gpt-6.1-sol";
 const HOSTED_CONTAINER_LIVE_MODEL_TURN_SMOKE_TIMEOUT_MS = 60_000;
 const HOSTED_CONTAINER_LIVE_MODEL_TURN_SMOKE_STDOUT_TAIL_MAX_CHARS = 16 * 1024;
 const HOSTED_CONTAINER_LIVE_MODEL_TURN_SMOKE_ERROR_MESSAGE_MAX_CHARS = 512;
@@ -555,8 +555,10 @@ export function buildHostedContainerCodexShellSmokeConfig(model: string): string
     'wire_api = "responses"',
     'requires_openai_auth = false',
     "supports_websockets = false",
-    "request_max_retries = 4",
-    "stream_max_retries = 5",
+    // The deploy-smoke egress fence admits exactly one provider request, so a
+    // retry could only be refused and would hide the original failure.
+    "request_max_retries = 0",
+    "stream_max_retries = 0",
     "",
     "[skills]",
     "include_instructions = false",

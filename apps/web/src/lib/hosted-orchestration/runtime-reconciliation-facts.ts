@@ -34,13 +34,13 @@ import {
 } from "../hosted-mailbox/ai-usage-gate";
 import {
   decodeHostedMailboxStoredPayload,
-  readHostedMailboxConsumedSeqByLane,
   readHostedMailboxFirstLiveSystemItemAfterSeq,
   readHostedMailboxLatestPendingConversationItem,
   readHostedMailboxMaxSeqByLane,
   readHostedMailboxPayload,
   tryMarkHostedMailboxConversationAiUsageDenied,
 } from "../hosted-mailbox/store";
+import { readHostedMailboxProgress } from "../hosted-mailbox/projection";
 import {
   sendClaimedHostedAiUsageLimitNoticeToLinqChat,
   sendClaimedHostedAiUsageLimitNoticeToTelegramThread,
@@ -59,10 +59,6 @@ import {
   resolveHostedRuntimeAiUsageGate,
   type HostedRuntimeUsageGateCheck,
 } from "./runtime-usage-decision";
-import type { HostedRuntimeUsageGateObservation } from "../hosted-runtime-log/usage-gate";
-import {
-  readSelectedHostedInferenceConnectionOverride,
-} from "../hosted-inference/connection-store";
 
 type HostedRuntimeReconciliationUsageGateStatus =
   | HostedRuntimeUsageGateCheck["status"]
@@ -132,7 +128,6 @@ export async function readHostedRuntimeReconciliationFacts(
     decisionSource?: HostedRuntimeReconciliationDecisionSource;
     now?: Date | string;
     usageGateMode?: HostedRuntimeReconciliationUsageGateMode;
-    onUsageGateDecision?: (observation: HostedRuntimeUsageGateObservation) => void;
   },
   reportStage?: (stage: HostedRuntimeReconciliationFactsStage) => void,
 ): Promise<HostedRuntimeReconciliationFacts> {
@@ -197,17 +192,9 @@ export async function readHostedRuntimeReconciliationFacts(
   }
 
   reportStage?.("canonical_mailbox");
-  const [
-    maxSeqByLane,
-    consumedSeqByLane,
-  ] = await Promise.all([
-    readHostedMailboxMaxSeqByLane({ prisma, userId: input.userId }),
-    readHostedMailboxConsumedSeqByLane({
-      lanes: ["conversation"],
-      prisma,
-      userId: input.userId,
-    }),
-  ]);
+  const { maxSeqByLane, consumedSeqByLane } = await readHostedMailboxProgress({
+    now, prisma, userId: input.userId,
+  });
   reportStage?.("canonical_projection");
   const redactedStatus = readHostedMailboxRedactedStatusRecord(
     workspace?.redactedStatusJson,
@@ -264,7 +251,9 @@ export async function readHostedRuntimeReconciliationFacts(
 
   if (usageGateRequired) {
     const gate = await resolveHostedRuntimeAiUsageGate({
-      mode: input.usageGateMode ?? "mutating",
+      // Reconciliation predicts runnable work; spend accounting owns period
+      // creation. Confirm denials under the existing lock before acting on them.
+      mode: input.usageGateMode === "read_only" ? "read_only" : "read_first",
       now,
       userId: input.userId,
     });
@@ -287,13 +276,7 @@ export async function readHostedRuntimeReconciliationFacts(
       return facts;
     }
 
-    if (
-      gate.status === "denied"
-      && !(await readSelectedHostedInferenceConnectionOverride({
-        memberId: input.userId,
-        prisma,
-      }))
-    ) {
+    if (gate.status === "denied") {
       let noticeRetryAt: Date | null = null;
       if ((input.usageGateMode ?? "mutating") === "mutating") {
         if (freshConversationMailboxLag) {
@@ -641,7 +624,6 @@ function emitHostedRuntimeReconciliationFacts(event: {
   usageGateStatus: HostedRuntimeReconciliationUsageGateStatus;
 }): void {
   const { blocked, mailboxLag, workspace } = event.facts;
-  observeHostedRuntimeUsageGateDecision(event);
   const workspaceWakeDue = [
     workspace?.nextWakeAt,
     workspace?.nextDefaultProcessingWakeAt,
@@ -682,24 +664,6 @@ function emitHostedRuntimeReconciliationFacts(event: {
       workspace?.systemMailboxProgressGeneration !== undefined,
     workspacePresent: workspace !== null,
   });
-}
-
-function observeHostedRuntimeUsageGateDecision(
-  event: Parameters<typeof emitHostedRuntimeReconciliationFacts>[0],
-): void {
-  if (
-    event.request.usageGateMode !== "read_only"
-    && (event.usageGateStatus === "allowed" || event.usageGateStatus === "denied")
-  ) {
-    try {
-      event.request.onUsageGateDecision?.({
-        at: event.now.toISOString(),
-        usageLimited: event.usageLimitExceeded === true,
-      });
-    } catch {
-      console.warn("Runtime usage-gate diagnostic could not be scheduled.");
-    }
-  }
 }
 
 function describeHostedRuntimeWakeReasonForLog(reason: string | null): string | null {

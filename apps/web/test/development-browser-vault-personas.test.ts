@@ -2,12 +2,10 @@ import assert from "node:assert/strict";
 
 import { test } from "vitest";
 
-import { createBrowserVaultQueryClient } from "@murphai/query/browser";
-import { selectEnvironmentHabitatValues } from "../app/(dashboard)/environment/habitat-values";
 import { buildDevelopmentPersonaReplica } from "@/src/lib/browser-vault/development-personas.server";
 import { DEVELOPMENT_PERSONAS } from "@/src/lib/browser-vault/development-personas";
 
-test("each development persona exercises the real Journal and Patterns projections", async () => {
+test("each development persona exercises the real Journal projection", async () => {
   for (const persona of DEVELOPMENT_PERSONAS) {
     const replica = await buildDevelopmentPersonaReplica(
       persona.id,
@@ -15,19 +13,15 @@ test("each development persona exercises the real Journal and Patterns projectio
     );
 
     assert.ok(replica.journal);
-    assert.ok(replica.personalPatterns);
     if (persona.id === "new") {
       assert.equal(replica.journal.eventCount, 0);
-      assert.equal(replica.personalPatterns.factors.length, 0);
-      assert.equal(replica.personalPatterns.outcomes.length, 0);
     } else {
       assert.ok(replica.journal.eventCount > 0, persona.id);
-      assert.ok(replica.personalPatterns.factors.length > 0, persona.id);
     }
     if (persona.id === "active" || persona.id === "new") {
-      assert.equal(replica.personalPatterns.outcomes.length, 0);
+      assert.equal(replica.metricRows.length, 0);
     } else {
-      assert.ok(replica.personalPatterns.outcomes.length > 2, persona.id);
+      assert.ok(replica.metricRows.length > 0, persona.id);
     }
   }
 });
@@ -44,10 +38,10 @@ test("Family persona covers private group context alongside wearable data", asyn
     ),
     true,
   );
-  assert.ok((replica.personalPatterns?.outcomes.length ?? 0) > 2);
+  assert.ok(replica.metricRows.length > 0);
   assert.equal(
-    replica.personalPatterns?.factors.some(
-      (factor) => factor.id === "football",
+    replica.journal?.days.some((day) =>
+      day.events.some((event) => event.title === "Football"),
     ),
     true,
   );
@@ -58,52 +52,18 @@ test("Oura persona covers a varied activity history", async () => {
     "oura",
     new Date("2026-08-26T20:00:00.000Z"),
   );
-  const factorIds = new Set(
-    replica.personalPatterns?.factors.map((factor) => factor.id),
-  );
+  const activityTypes = readActivityTypes(replica);
 
   for (const expected of [
     "cycling",
     "hiking",
     "running",
-    "strength",
+    "strength-training",
     "tennis",
-    "yardwork",
+    "yard-work",
   ]) {
-    assert.ok(factorIds.has(expected), expected);
+    assert.ok(activityTypes.has(expected), expected);
   }
-  assert.equal(
-    replica.personalPatterns?.factors.find((factor) => factor.id === "strength")
-      ?.label,
-    "Strength training",
-  );
-
-  const detectedCells =
-    replica.personalPatterns?.cells.filter(
-      (cell) =>
-        cell.stage === "new_clue" ||
-        cell.stage === "seen_again" ||
-        cell.stage === "worth_testing",
-    ) ?? [];
-  const detectedFactors = new Set(detectedCells.map((cell) => cell.factorId));
-  const detectedOutcomes = new Set(detectedCells.map((cell) => cell.outcomeId));
-
-  for (const expected of ["cycling", "late-caffeine", "running", "strength"]) {
-    assert.ok(detectedFactors.has(expected), expected);
-  }
-  for (const expected of [
-    "deep-sleep",
-    "rem-sleep",
-    "sleep-efficiency",
-    "total-sleep",
-  ]) {
-    assert.ok(detectedOutcomes.has(expected), expected);
-  }
-  assert.ok(
-    replica.personalPatterns?.cells.some(
-      (cell) => cell.stage === "no_clear_pattern",
-    ),
-  );
 });
 
 test("Whoop persona exposes provider-specific sleep and recovery outcomes", async () => {
@@ -111,20 +71,17 @@ test("Whoop persona exposes provider-specific sleep and recovery outcomes", asyn
     "whoop",
     new Date("2026-08-26T20:00:00.000Z"),
   );
-  const outcomeIds = new Set(
-    replica.personalPatterns?.outcomes.map((outcome) => outcome.id),
-  );
+  const metricKeys = new Set(replica.metricRows.map((row) => row.metricKey));
 
   for (const expected of [
-    "deep-sleep",
-    "rem-sleep",
-    "recovery-score",
+    "deep-sleep-minutes",
+    "rem-sleep-minutes",
     "respiratory-rate",
     "spo2",
   ]) {
     assert.ok(
-      outcomeIds.has(expected),
-      `${expected}: ${[...outcomeIds].join(", ")}`,
+      metricKeys.has(expected),
+      `${expected}: ${[...metricKeys].join(", ")}`,
     );
   }
 
@@ -136,18 +93,15 @@ test("Whoop persona exposes provider-specific sleep and recovery outcomes", asyn
   assert.notEqual(sleep.metrics.deepSleepMinutes, null);
   assert.notEqual(sleep.metrics.spo2Percent, null);
 
-  const factorIds = new Set(
-    replica.personalPatterns?.factors.map((factor) => factor.id),
-  );
+  const activityTypes = readActivityTypes(replica);
   for (const expected of [
     "cycling",
     "functional-fitness",
     "running",
-    "strength",
+    "strength-training",
   ]) {
-    assert.ok(factorIds.has(expected), expected);
+    assert.ok(activityTypes.has(expected), expected);
   }
-  const metricKeys = new Set(replica.metricRows.map((row) => row.metricKey));
   for (const expected of [
     "active-calories",
     "activity-average-heart-rate",
@@ -183,15 +137,13 @@ test("Whoop persona covers the Journal connections used across the product", asy
   }
 });
 
-test("New member exercises the empty Journal and Patterns states", async () => {
+test("New member exercises the empty Journal state", async () => {
   const replica = await buildDevelopmentPersonaReplica(
     "new",
     new Date("2026-08-26T20:00:00.000Z"),
   );
 
   assert.equal(replica.journal?.eventCount, 0);
-  assert.deepEqual(replica.personalPatterns?.factors, []);
-  assert.deepEqual(replica.personalPatterns?.outcomes, []);
   assert.equal(replica.entities.length, 0);
   assert.equal(replica.metricRows.length, 0);
 });
@@ -215,15 +167,7 @@ test("Oura persona joins meals, travel, and environment context into one private
     events.some((event) => event.title === "Bedroom temperature changed"),
     true,
   );
-  assert.equal(
-    replica.entities.some((entity) => entity.family === "habitat"),
-    true,
-  );
-  const environment = selectEnvironmentHabitatValues(
-    createBrowserVaultQueryClient(replica),
-  );
-  assert.equal(environment["sleep-environment"]?.night_temp_c, 18);
-  assert.equal(environment["home-location"]?.location, "Warsaw");
+
 });
 
 test("Active persona has varied recent context without wearable outcomes", async () => {
@@ -237,7 +181,6 @@ test("Active persona has varied recent context without wearable outcomes", async
   assert.ok(events.length >= 8);
   assert.ok(recentKinds.has("activity"));
   assert.ok(recentKinds.has("meal"));
-  assert.deepEqual(replica.personalPatterns?.outcomes, []);
   assert.equal(replica.metricRows.length, 0);
 });
 
@@ -276,16 +219,6 @@ test("training and group personas show completed actions and private context", a
         entity.attributes.source === "murph-live",
     ).length >= 12,
   );
-  assert.equal(
-    training.personalPatterns?.cells.some(
-      (cell) =>
-        cell.factorId === "strength" &&
-        cell.outcomeId === "deep-sleep" &&
-        cell.stage !== "insufficient" &&
-        cell.stage !== "no_clear_pattern",
-    ),
-    true,
-  );
 
   const familyEvents = family.journal?.days.flatMap((day) => day.events) ?? [];
   assert.equal(
@@ -307,3 +240,13 @@ test("training and group personas show completed actions and private context", a
     true,
   );
 });
+
+function readActivityTypes(
+  replica: Awaited<ReturnType<typeof buildDevelopmentPersonaReplica>>,
+): Set<unknown> {
+  return new Set(
+    (replica.journal?.days.flatMap((day) => day.events) ?? [])
+      .filter((event) => event.kind === "activity")
+      .map((event) => event.title.toLowerCase().replaceAll(" ", "-")),
+  );
+}

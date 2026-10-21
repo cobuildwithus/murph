@@ -71,7 +71,7 @@ import {
 import {
   MURPH_ONBOARDING_FOLLOWUP_AUTOMATION,
 } from '../src/assistant/onboarding-followup-automation.ts'
-import { applyMurphManagedAutomations } from '../src/assistant/managed-automations.ts'
+import { applyMurphManagedAutomations, MURPH_RETIRED_PERSONAL_PATTERNS_UPDATE_AUTOMATION_ID } from '../src/assistant/managed-automations.ts'
 import { readAssistantDiagnosticsSnapshot } from '../src/assistant/diagnostics.ts'
 import { runAssistantAutomationPass } from '../src/assistant/automation/run-loop.ts'
 import {
@@ -1235,6 +1235,34 @@ describe('assistant outbox runtime', () => {
 
     const retry = await createIntent(vaultRoot, intentInput)
     expect(retry.intentId).not.toBe(failed.intentId)
+  })
+
+  it('persists outbox media without authored bubble placement', async () => {
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-outbox-media-placement-',
+    )
+    const media = {
+      alt: null,
+      kind: 'image' as const,
+      source: null,
+      url: 'https://cdn.example.test/step-two.png',
+    }
+    const intent = await createIntent(vaultRoot, {
+      actorId: null,
+      channel: 'linq',
+      createdAt: '2026-04-08T00:30:00.000Z',
+      dedupeToken: 'media-placement',
+      explicitTarget: 'linq-media-placement-thread',
+      identityId: null,
+      media: [{ ...media, bubble: 2 }],
+      message: 'Step two.',
+      sessionId: 'session-media-placement',
+      threadId: 'linq-media-placement-thread',
+      threadIsDirect: false,
+      turnId: 'turn-media-placement',
+    })
+
+    expect(intent.media).toStrictEqual([media])
   })
 
   it('persists native reply intent explicitly while omitting it from legacy messages', async () => {
@@ -2423,11 +2451,25 @@ describe('assistant outbox runtime', () => {
     })
   })
 
-  it.each(['goal-aware', 'totals-only'] as const)('persists one %s text fallback identity before acceptance and reuses it after restart', async (mode) => {
+  it.each(['goal-aware', 'totals-only', 'legacy-active-workout', 'legacy-completed-workout'] as const)('persists one %s text fallback identity before acceptance and reuses it after restart', async (mode) => {
     const { vaultRoot } = await createInitializedAssistantVault(
       'assistant-outbox-card-fallback-restart-',
     )
-    const card = mode === 'goal-aware' ? NUTRITION_RESPONSE_CARD : {
+    const legacyWorkout = mode === 'legacy-active-workout' || mode === 'legacy-completed-workout'
+    const card = legacyWorkout ? {
+      ...WORKOUT_RESPONSE_CARD,
+      workout: {
+        ...WORKOUT_RESPONSE_CARD.workout,
+        state: mode === 'legacy-active-workout' ? 'active' as const : 'completed' as const,
+        exercises: WORKOUT_RESPONSE_CARD.workout.exercises.map((exercise) => ({
+          ...exercise,
+          sets: exercise.sets.map((set) => ({
+            ...set,
+            status: mode === 'legacy-completed-workout' ? 'skipped' as const : set.status,
+          })),
+        })),
+      },
+    } : mode === 'goal-aware' ? NUTRITION_RESPONSE_CARD : {
       ...NUTRITION_RESPONSE_CARD,
       goals: { calories: null, proteinGrams: null, carbsGrams: null, fatGrams: null, fiberGrams: null },
     }
@@ -2448,7 +2490,9 @@ describe('assistant outbox runtime', () => {
       vault: vaultRoot,
     })
     const originalIdempotencyKey = `assistant-outbox:${intent.intentId}`
-    const fallbackIdempotencyKey = `${originalIdempotencyKey}:fallback`
+    const fallbackIdempotencyKey = legacyWorkout
+      ? originalIdempotencyKey
+      : `${originalIdempotencyKey}:fallback`
     const processTerminated = new Error('simulated process termination')
     const sendLinq = vi.fn<NonNullable<AssistantChannelDependencies['sendLinq']>>()
     const providerRequests: Array<Record<string, unknown>> = []
@@ -2503,7 +2547,7 @@ describe('assistant outbox runtime', () => {
           deliveryIdempotencyKey: fallbackIdempotencyKey,
           status: 'sending',
         })
-      expect(delivered.idempotencyKey).toBe(fallbackIdempotencyKey)
+      expect(delivered.idempotencyKey ?? request.idempotencyKey).toBe(fallbackIdempotencyKey)
       throw processTerminated
     })
 
@@ -2551,10 +2595,13 @@ describe('assistant outbox runtime', () => {
       message,
     })
     expect(sendLinq.mock.calls[1]?.[0]).not.toHaveProperty('card')
-    expect(providerRequests).toHaveLength(4)
-    expect(providerRequests.slice(1).map((request) => (
+    expect(providerRequests).toHaveLength(legacyWorkout ? 2 : 4)
+    expect(providerRequests.slice(legacyWorkout ? 0 : 1).map((request) => (
       request.message as { idempotency_key?: string }
-    ).idempotency_key)).toEqual([
+    ).idempotency_key)).toEqual(legacyWorkout ? [
+      originalIdempotencyKey,
+      originalIdempotencyKey,
+    ] : [
       originalIdempotencyKey,
       fallbackIdempotencyKey,
       fallbackIdempotencyKey,
@@ -2571,7 +2618,7 @@ describe('assistant outbox runtime', () => {
     const sentMemory = await readMemoryDocument(vaultRoot)
     expect(sentMemory.records.some((record) => record.text === NUTRITION_GOAL_INVITATION_SENT_MEMORY))
       .toBe(mode === 'totals-only')
-    if (mode === 'goal-aware') expect(sentMemory).toMatchObject({ exists: memoryBefore.exists, records: memoryBefore.records })
+    if (mode !== 'totals-only') expect(sentMemory).toMatchObject({ exists: memoryBefore.exists, records: memoryBefore.records })
 
   })
 
@@ -5768,29 +5815,31 @@ describe('assistant outbox runtime', () => {
     expect(mockedDeliverAssistantMessageOverBinding).toHaveBeenCalledOnce()
   })
 
-  it('fails an active revision-matching retired Sunday intent before provider entry', async () => {
-    const retiredAutomationId = 'automation_01K55N7S9X4Q2M6P8R3T0V1WYZ'
+  it.each([
+    { retiredAutomationId: 'automation_01K55N7S9X4Q2M6P8R3T0V1WYZ', slug: 'group-sunday-superlatives', threadIsDirect: false },
+    { retiredAutomationId: MURPH_RETIRED_PERSONAL_PATTERNS_UPDATE_AUTOMATION_ID, slug: 'personal-patterns-update', threadIsDirect: true },
+  ])('fails an active revision-matching retired $slug intent before provider entry', async ({ retiredAutomationId, slug, threadIsDirect }) => {
     const { vaultRoot } = await createInitializedAssistantVault(
-      'assistant-outbox-retired-sunday-',
+      'assistant-outbox-retired-managed-',
     )
     const scaffold = scaffoldAutomationPayload()
     const automation = await upsertAutomation({
       ...scaffold,
       automationId: retiredAutomationId,
       continuityPolicy: 'fresh',
-      instructions: 'Legacy Sunday group superlatives instructions.',
+      instructions: 'Legacy managed automation instructions.',
       now: new Date('2026-07-26T17:59:00.000Z'),
       route: {
         ...scaffold.route,
         deliveryTarget: 'telegram-group-thread',
         threadId: 'telegram-group-thread',
-        threadIsDirect: false,
+        threadIsDirect,
       },
       schedule: { kind: 'cron', expression: '0 18 * * 0' },
-      slug: 'group-sunday-superlatives',
+      slug,
       status: 'active',
       tags: ['assistant', 'scheduled', 'murph-managed'],
-      title: 'Sunday group superlatives',
+      title: 'Retired managed automation',
       vaultRoot,
     })
     const queued = await deliverAssistantOutboxMessage({
@@ -5801,10 +5850,10 @@ describe('assistant outbox runtime', () => {
       channel: 'telegram',
       dispatchMode: 'queue-only',
       explicitTarget: 'telegram-group-thread',
-      message: 'Legacy Sunday group superlatives.',
+      message: 'Legacy managed notification.',
       sessionId: 'session-outbox-retired-sunday',
       threadId: 'telegram-group-thread',
-      threadIsDirect: false,
+      threadIsDirect,
       turnId: 'turn-outbox-retired-sunday',
       vault: vaultRoot,
     })

@@ -44,7 +44,6 @@ import {
 import {
   HOSTED_RUNTIME_EMAIL_EGRESS_RECIPIENT_PATH,
   HOSTED_RUNTIME_GROUP_TOOL_PATH,
-  HOSTED_RUNTIME_CODEX_AUTH_PATH,
   HOSTED_RUNTIME_LINQ_EGRESS_DELIVERY_PATH,
   HOSTED_RUNTIME_LINQ_EGRESS_ENGAGEMENT_PATH,
   HOSTED_RUNTIME_OPERATOR_TASK_CONTROL_PATH,
@@ -119,14 +118,17 @@ vi.mock("@murphai/hosted-execution", async () => {
 
 import {
   buildHostedExecutionStructuredLogRecord,
+  deriveHostedExecutionErrorCode,
   readHostedRuntimeSafeErrorText,
 } from "@murphai/hosted-execution";
 import {
   parseHostedRuntimeLogRequest,
 } from "@murphai/hosted-execution/parsers";
+import * as hostedExecutionParsers from "@murphai/hosted-execution/parsers";
 import {
   buildHostedExecutionRuntimePlatform,
   createCloudflareHostedProviderFetch,
+  createCloudflareHostedTrustedInternalFetch,
   createHostedBrowserVaultReplicaWriteHeaders,
   HostedRuntimeInternalAuthorityRejectedError,
   isHostedRuntimeInternalAuthorityRejectedError,
@@ -289,7 +291,7 @@ function createAssistantUsageRecord(): AssistantUsageRecord {
     rawUsageJsonHash: null,
     reasoningTokens: null,
     reportingUserId: null,
-    requestedModel: "gpt-5.6-terra",
+    requestedModel: "gpt-6.1-sol",
     routeId: "route_usage",
     schema: ASSISTANT_USAGE_SCHEMA,
     servedModel: null,
@@ -868,6 +870,115 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     }
   }, 15_000);
 
+  it.each([
+    { boundary: "prepare", fetchCount: 0 },
+    { boundary: "presign", fetchCount: 1 },
+    { boundary: "transfer", fetchCount: 2 },
+    { boundary: "receipt", fetchCount: 2 },
+  ])("labels the snapshot upload $boundary failure boundary", async ({ boundary, fetchCount }) => {
+    const encryptedBytes = new Uint8Array([1, 2, 3, 4, 5]);
+    const tempRoot = await mkdtemp(path.join(tmpdir(), "murph-snapshot-upload-phase-"));
+    try {
+      const sourceFilePath = path.join(tempRoot, "snapshot.enc");
+      await writeFile(sourceFilePath, encryptedBytes);
+      const ref = createWorkspaceSnapshotV2Ref({ encryptedByteSize: encryptedBytes.length });
+      const timeout = new Error("Synthetic upload timed out.");
+      const fetchMock = vi.fn(async (...args: Parameters<typeof fetch>) => {
+        const request = requireFetchRequest(args, "snapshot upload phase");
+        if (request.url.endsWith("/presign-put")) {
+          if (boundary === "presign") throw timeout;
+          return Response.json({
+            expiresAt: new Date(Date.now() + 60_000).toISOString(),
+            managedUploadId: "synthetic-upload",
+            putUrl: "https://r2.example.test/snapshot",
+          });
+        }
+        await request.arrayBuffer();
+        if (boundary === "transfer") throw timeout;
+        return new Response(null, { status: 200 });
+      });
+      const platform = buildTestHostedExecutionRuntimePlatform({
+        boundUserId: "member_123",
+        fetchImpl: fetchMock as typeof fetch,
+      });
+      const failure = await platform.workspaceSnapshotPort!.putSnapshotObjectDirect({
+        encryptedByteSize: encryptedBytes.length,
+        encryptedObjectSha256: ref.archive.encryptedObjectSha256,
+        objectKey: ref.objectKey,
+        snapshotId: ref.snapshotId,
+        sourceFilePath: boundary === "prepare" ? `${sourceFilePath}.missing` : sourceFilePath,
+      }).catch((error: unknown) => error);
+
+      expect(failure).toMatchObject({ phase: `upload_${boundary}` });
+      expect(failure).not.toHaveProperty("timeoutMs");
+      expect(fetchMock).toHaveBeenCalledTimes(fetchCount);
+      if (boundary === "presign" || boundary === "transfer") {
+        expect(readHostedRuntimeSafeErrorText(failure)).toContain(timeout.message);
+        expect(deriveHostedExecutionErrorCode(failure)).toBe("timeout");
+      }
+      if (boundary === "receipt") {
+        expect(failure).toBeInstanceOf(Error);
+        expect(readHostedRuntimeSafeErrorText(failure)).toContain("part ETag");
+      }
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    { name: "mutable", error: new TypeError("Synthetic boundary timed out.", { cause: new Error("Synthetic original cause.") }) },
+    { name: "frozen", error: Object.freeze(new TypeError("Synthetic boundary timed out.")) },
+    { name: "primitive", error: "Synthetic boundary timed out." },
+    { name: "undefined", error: undefined },
+    { name: "existing phase", error: Object.assign(new Error("Synthetic failure."), { phase: "underlying_phase" }) },
+    { name: "frozen existing phase", error: Object.freeze(Object.assign(new Error("Synthetic failure."), { phase: "underlying_phase" })) },
+    { name: "inherited phase", error: Object.create(Object.assign(new Error("Synthetic failure."), { phase: "underlying_phase" })) },
+    { name: "accessor phase", error: Object.defineProperty(new Error("Synthetic failure."), "phase", { get() { throw new Error("Must not read a phase getter."); } }) },
+  ])("preserves $name errors while labeling snapshot upload authorization", async ({ error }) => {
+    const tempRoot = await mkdtemp(path.join(tmpdir(), "murph-snapshot-upload-error-"));
+    try {
+      const hadPhase = error instanceof Error && "phase" in error;
+      const phaseDescriptor = hadPhase ? Object.getOwnPropertyDescriptor(error, "phase") : undefined;
+      const originalCause = error instanceof Error ? error.cause : undefined;
+      const sourceFilePath = path.join(tempRoot, "snapshot.enc");
+      await writeFile(sourceFilePath, new Uint8Array([1]));
+      const ref = createWorkspaceSnapshotV2Ref({ encryptedByteSize: 1 });
+      const fetchMock = vi.fn();
+      const platform = buildTestHostedExecutionRuntimePlatform({
+        boundUserId: "member_123",
+        fetchImpl: fetchMock as typeof fetch,
+        workspaceCheckpointBridge: { readCurrentLease: () => { throw error; } },
+      });
+      const failure = await platform.workspaceSnapshotPort!.putSnapshotObjectDirect({
+        encryptedByteSize: 1,
+        encryptedObjectSha256: ref.archive.encryptedObjectSha256,
+        objectKey: ref.objectKey,
+        snapshotId: ref.snapshotId,
+        sourceFilePath,
+      }).catch((caught: unknown) => caught);
+
+      if (hadPhase) {
+        expect(failure).toBe(error);
+        expect(Object.getOwnPropertyDescriptor(failure, "phase")).toEqual(phaseDescriptor);
+      } else {
+        expect(failure).toMatchObject({ phase: "upload_presign" });
+        expect(deriveHostedExecutionErrorCode(failure)).toBe(deriveHostedExecutionErrorCode(error));
+        if (error instanceof Error && Object.isExtensible(error)) {
+          expect(failure).toBe(error);
+          expect(failure).toHaveProperty("cause", originalCause);
+        } else {
+          expect(failure).toHaveProperty("cause", error);
+          if (error instanceof Error) {
+            expect(failure).toMatchObject({ message: error.message, name: error.name });
+          }
+        }
+      }
+      expect(fetchMock).not.toHaveBeenCalled();
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
   it("sends direct R2 workspace snapshot PUTs with signed metadata headers", async () => {
     const encryptedBytes = new Uint8Array([1, 2, 3, 4, 5]);
     const tempRoot = await mkdtemp(path.join(tmpdir(), "murph-runner-platform-r2-put-"));
@@ -1087,7 +1198,11 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     }
   });
 
-  it.each([429, 500, 503])("retries HTTP %i direct R2 responses without an R2 error code", async (status) => {
+  it.each([429, 500, 502, 503, 504].flatMap((status) =>
+    [false, true].flatMap((managed) =>
+      [200, status, 412].map((nextStatus) => ({ status, managed, nextStatus }))
+    )
+  ))("bounds HTTP $status snapshot PUT retries with managed=$managed and next HTTP $nextStatus", async ({ status, managed, nextStatus }) => {
     const encryptedBytes = new Uint8Array([1, 2, 3, 4, 5]);
     const tempRoot = await mkdtemp(path.join(tmpdir(), "murph-runner-platform-r2-put-retry-"));
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
@@ -1108,6 +1223,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
             JSON.stringify({
               expiresAt: new Date(Date.now() + 60_000).toISOString(),
               putUrl,
+              ...(managed ? { managedUploadId: "synthetic-upload" } : {}),
             }),
             {
               headers: {
@@ -1119,11 +1235,17 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         }
 
         putAttempt += 1;
-        await request.arrayBuffer();
+        expect(request.url).toBe(putUrl);
+        expect(request.method).toBe("PUT");
+        expect(request.headers.get("if-none-match")).toBe(managed ? null : "*");
+        expect(new Uint8Array(await request.arrayBuffer())).toEqual(encryptedBytes);
         if (putAttempt === 1) {
           return new Response("retry later", { status });
         }
-        return new Response(null, { status: 200 });
+        return new Response(null, {
+          headers: { etag: '"synthetic-part-etag"' },
+          status: nextStatus,
+        });
       });
       const platform = buildTestHostedExecutionRuntimePlatform({
         boundUserId: "member_123",
@@ -1137,11 +1259,19 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         snapshotId: "snapshot_runner_platform",
         sourceFilePath: encryptedFilePath,
       });
-      await retryJitter.advance();
-      await expect(upload).resolves.toEqual({
-        snapshotDirectR2PresignElapsedMs: expect.any(Number),
-        snapshotDirectR2PutElapsedMs: expect.any(Number),
-      });
+      const outcome = nextStatus === 200
+        ? expect(upload).resolves.toEqual({
+            snapshotDirectR2PresignElapsedMs: expect.any(Number),
+            snapshotDirectR2PutElapsedMs: expect.any(Number),
+          })
+        : expect(upload).rejects.toThrow(`not resumable after HTTP ${nextStatus};`);
+      // Surface an early rejection as a failed assertion rather than waiting
+      // forever for retry jitter that an incorrect status classifier skipped.
+      await Promise.race([retryJitter.advance(), outcome]);
+      await outcome;
+      if (nextStatus !== 200) {
+        await expect(upload).rejects.toMatchObject({ phase: "upload_transfer" });
+      }
 
       expect(fetchMock).toHaveBeenCalledTimes(3);
       expect(putAttempt).toBe(2);
@@ -1292,6 +1422,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         "Hosted workspace snapshot direct R2 upload is not resumable after a transport failure;",
       );
       await expect(upload).rejects.not.toBe(wakeError);
+      await expect(upload).rejects.toMatchObject({ phase: "upload_transfer" });
       expect(fetchMock).toHaveBeenCalledTimes(2);
     } finally {
       await rm(tempRoot, { force: true, recursive: true });
@@ -1683,13 +1814,15 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         fetchImpl: fetchMock as typeof fetch,
       });
 
-      await expect(platform.workspaceSnapshotPort!.putSnapshotObjectDirect({
+      const upload = platform.workspaceSnapshotPort!.putSnapshotObjectDirect({
         encryptedByteSize: encryptedBytes.byteLength,
         encryptedObjectSha256: "c".repeat(64),
         objectKey,
         snapshotId: "snapshot_runner_platform",
         sourceFilePath: encryptedFilePath,
-      })).rejects.toThrow("Hosted workspace snapshot presign PUT request failed.");
+      });
+      await expect(upload).rejects.toThrow("Hosted workspace snapshot presign PUT request failed.");
+      await expect(upload).rejects.toMatchObject({ phase: "upload_presign" });
 
       expect(fetchMock).toHaveBeenCalledTimes(2);
       const firstPresignRequest = requireFetchRequest(
@@ -1742,13 +1875,15 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         fetchImpl: fetchMock as typeof fetch,
       });
 
-      await expect(platform.workspaceSnapshotPort!.putSnapshotObjectDirect({
+      const upload = platform.workspaceSnapshotPort!.putSnapshotObjectDirect({
         encryptedByteSize: encryptedBytes.byteLength,
         encryptedObjectSha256: "c".repeat(64),
         objectKey,
         snapshotId: "snapshot_runner_platform",
         sourceFilePath: encryptedFilePath,
-      })).rejects.toThrow(
+      });
+      await expect(upload).rejects.toMatchObject({ phase: "upload_presign" });
+      await expect(upload).rejects.toThrow(
         "Hosted workspace snapshot presign putUrl must be a non-empty string.",
       );
 
@@ -1761,11 +1896,12 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     }
   });
 
-  it("preserves cancellation while a direct R2 snapshot presign is pending", async () => {
+  it.each([false, true])("preserves cancellation while a direct R2 snapshot presign is pending (frozen=%s)", async (frozen) => {
     const encryptedBytes = new Uint8Array([1, 2, 3, 4, 5]);
     const tempRoot = await mkdtemp(path.join(tmpdir(), "murph-runner-platform-r2-presign-abort-"));
     const abortController = new AbortController();
     const abortReason = new Error("foreground wake interrupted snapshot presign");
+    if (frozen) Object.freeze(abortReason);
     let resolvePresignStarted: (() => void) | null = null;
     const presignStarted = new Promise<void>((resolve) => {
       resolvePresignStarted = resolve;
@@ -1800,6 +1936,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       abortController.abort(abortReason);
 
       await expect(upload).rejects.toBe(abortReason);
+      expect(abortReason).not.toHaveProperty("phase");
       expect(fetchMock).toHaveBeenCalledOnce();
     } finally {
       await rm(tempRoot, {
@@ -1809,11 +1946,12 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     }
   });
 
-  it("preserves cancellation while the direct R2 snapshot PUT is pending", async () => {
+  it.each([false, true])("preserves cancellation while the direct R2 snapshot PUT is pending (frozen=%s)", async (frozen) => {
     const encryptedBytes = new Uint8Array([1, 2, 3, 4, 5]);
     const tempRoot = await mkdtemp(path.join(tmpdir(), "murph-runner-platform-r2-put-abort-"));
     const abortController = new AbortController();
     const abortReason = new Error("foreground wake interrupted snapshot PUT");
+    if (frozen) Object.freeze(abortReason);
     const objectKey =
       "users/hsn_0123456789abcdef01234567/workspace-snapshots/snapshot_runner_platform.snapshot.enc";
     const putUrl =
@@ -1865,6 +2003,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       abortController.abort(abortReason);
 
       await expect(upload).rejects.toBe(abortReason);
+      expect(abortReason).not.toHaveProperty("phase");
       expect(fetchMock).toHaveBeenCalledTimes(2);
       const putRequest = requireFetchRequest(
         fetchMock.mock.calls[1],
@@ -1937,6 +2076,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         "Hosted workspace snapshot direct R2 upload is not resumable after a transport failure;",
       );
       await expect(upload).rejects.not.toBe(abortReason);
+      await expect(upload).rejects.toMatchObject({ phase: "upload_transfer" });
       expect(fetchMock).toHaveBeenCalledTimes(2);
       expect(putAttempt).toBe(1);
     } finally {
@@ -2700,15 +2840,15 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       snapshotId,
     });
 
-    expect(fetchMock).toHaveBeenCalledTimes(3);
-    const abortRequest = requireFetchRequest(fetchMock.mock.calls[2], "workspace snapshot abort");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const abortRequest = requireFetchRequest(fetchMock.mock.calls[1], "workspace snapshot abort");
     expect(abortRequest.method).toBe("DELETE");
     expect(abortRequest.headers.get("x-hosted-runtime-attempt-id")).toBe("attempt_1");
     expect(abortRequest.headers.get("x-hosted-runtime-lease-generation")).toBe("9");
     expect(abortRequest.headers.get("x-hosted-runtime-workspace-version")).toBe("4");
   });
 
-  it("heartbeats immediately and stops on abort before session cleanup settles", async () => {
+  it("makes no background requests while constructing a snapshot or waiting for abort cleanup", async () => {
     vi.useFakeTimers();
     const snapshotId = "snapshot_runner_platform_heartbeat";
     const objectKey =
@@ -2724,12 +2864,6 @@ describe("buildHostedExecutionRuntimePlatform", () => {
           dataKeyBase64,
           objectKey,
           snapshotId,
-        });
-      }
-      if (request.url.endsWith(`/workspace-snapshots/${snapshotId}/heartbeat`)) {
-        return new Response(JSON.stringify({ alive: true, ok: true }), {
-          headers: { "content-type": "application/json; charset=utf-8" },
-          status: 200,
         });
       }
       if (request.url.endsWith(`/workspace-snapshots/${snapshotId}`)) {
@@ -2756,23 +2890,17 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       reason: "idle_shutdown",
       signal: snapshotAbort.signal,
     });
-    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
-    const heartbeatRequest = requireFetchRequest(
-      fetchMock.mock.calls[1],
-      "workspace snapshot heartbeat",
-    );
-    expect(heartbeatRequest.method).toBe("POST");
-    expect(heartbeatRequest.headers.get("x-hosted-runtime-attempt-id")).toBe("attempt_1");
-    expect(heartbeatRequest.headers.get("x-hosted-runtime-lease-generation")).toBe("9");
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(fetchMock).toHaveBeenCalledOnce();
 
     snapshotAbort.abort(new Error("foreground preemption"));
     const abortSnapshotSession = platform.workspaceSnapshotPort!.abortSnapshotSession({
       objectKey,
       snapshotId,
     });
-    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     await vi.advanceTimersByTimeAsync(10_000);
-    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
     abortResponse.resolve(new Response(JSON.stringify({ aborted: true, ok: true }), {
       headers: { "content-type": "application/json; charset=utf-8" },
       status: 200,
@@ -2813,7 +2941,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         reason: "idle_shutdown",
       });
       await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
-      vi.setSystemTime(startedAtMs + 5_500);
+      vi.setSystemTime(startedAtMs + 29_500);
       startResponse.resolve(new Response(
         new ReadableStream<Uint8Array>({ start: () => undefined }),
         {
@@ -2837,13 +2965,13 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         phase: "session_start_response_decode",
         timeoutMs: 500,
       });
-      expect(timeoutControllers.some(({ delayMs }) => delayMs === 6_000)).toBe(true);
+      expect(timeoutControllers.some(({ delayMs }) => delayMs === 30_000)).toBe(true);
     } finally {
       timeoutSpy.mockRestore();
     }
   });
 
-  it("abandons session start when its handoff timeout fires", async () => {
+  it("abandons session start when its configured timeout fires", async () => {
     const timeoutControllers: Array<{
       controller: AbortController;
       delayMs: number;
@@ -2872,7 +3000,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       await vi.waitFor(() =>
         expect(fetchMock).toHaveBeenCalledOnce()
       );
-      const startTimeout = timeoutControllers.find(({ delayMs }) => delayMs === 6_000);
+      const startTimeout = timeoutControllers.find(({ delayMs }) => delayMs === 30_000);
       if (!startTimeout) {
         throw new Error("Workspace snapshot start timeout was not created.");
       }
@@ -2883,7 +3011,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       await expect(startSnapshotSession).rejects.toBe(timeoutError);
       expect(timeoutError).toMatchObject({
         phase: "session_start_request",
-        timeoutMs: 6_000,
+        timeoutMs: 30_000,
       });
       expect(fetchMock).toHaveBeenCalledOnce();
     } finally {
@@ -2898,6 +3026,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     }));
     const platform = buildTestHostedExecutionRuntimePlatform({
       boundUserId: "member_123",
+      commitTimeoutMs: 30_000,
       fetchImpl: fetchMock as typeof fetch,
     });
 
@@ -2908,11 +3037,11 @@ describe("buildHostedExecutionRuntimePlatform", () => {
 
     expect(failure).toMatchObject({
       phase: "session_start_response_decode",
-      timeoutMs: 6_000,
+      timeoutMs: 30_000,
     });
   });
 
-  it("preserves the handoff timeout when a runtime wake arrives afterward", async () => {
+  it("preserves the configured timeout when a runtime wake arrives afterward", async () => {
     const timeoutControllers: Array<{
       controller: AbortController;
       delayMs: number;
@@ -2943,22 +3072,22 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         signal: snapshotAbort.signal,
       });
       await vi.waitFor(() =>
-        expect(timeoutControllers.some(({ delayMs }) => delayMs === 6_000)).toBe(true)
+        expect(timeoutControllers.some(({ delayMs }) => delayMs === 30_000)).toBe(true)
       );
-      const startTimeout = timeoutControllers.find(({ delayMs }) => delayMs === 6_000);
+      const startTimeout = timeoutControllers.find(({ delayMs }) => delayMs === 30_000);
       if (!startTimeout) {
         throw new Error("Workspace snapshot start timeout was not created.");
       }
       const timeoutError = new Error("The operation timed out.");
       timeoutError.name = "TimeoutError";
-      const wakeError = new Error("runtime wake arrived after handoff timeout");
+      const wakeError = new Error("runtime wake arrived after configured timeout");
       startTimeout.controller.abort(timeoutError);
       snapshotAbort.abort(wakeError);
 
       await expect(startSnapshotSession).rejects.toBe(timeoutError);
       expect(timeoutError).toMatchObject({
         phase: "session_start_response_decode",
-        timeoutMs: 6_000,
+        timeoutMs: 30_000,
       });
       expect(fetchMock).toHaveBeenCalledOnce();
     } finally {
@@ -3026,67 +3155,10 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       phase: "session_start_request",
       status: 503,
       statusCode: 503,
-      timeoutMs: 6_000,
+      timeoutMs: 30_000,
     });
     await expect(start).rejects.not.toBe(wakeError);
     expect(fetchMock).toHaveBeenCalledOnce();
-  });
-
-  it("starts the next serialized heartbeat without another idle interval", async () => {
-    vi.useFakeTimers();
-    const startedAtMs = Date.parse("2026-04-27T00:00:00.000Z");
-    vi.setSystemTime(startedAtMs);
-    const snapshotId = "snapshot_runner_platform_serial_heartbeat";
-    const objectKey =
-      `users/hsn_0123456789abcdef01234567/workspace-snapshots/${snapshotId}.snapshot.enc`;
-    const dataKeyBase64 = encodeHostedWorkspaceSnapshotV2DataKey(
-      Uint8Array.from({ length: 32 }, (_, index) => index + 1),
-    );
-    const firstHeartbeat = createDeferred<Response>();
-    const heartbeatStartedAt: number[] = [];
-    const fetchMock = vi.fn(async (...args: Parameters<typeof fetch>) => {
-      const request = requireFetchRequest(args, "serialized workspace snapshot heartbeat");
-      if (request.url.endsWith("/workspace-snapshots/start")) {
-        return createWorkspaceSnapshotSessionStartResponse({
-          dataKeyBase64,
-          objectKey,
-          snapshotId,
-        });
-      }
-      if (request.url.endsWith(`/workspace-snapshots/${snapshotId}/heartbeat`)) {
-        heartbeatStartedAt.push(Date.now());
-        if (heartbeatStartedAt.length === 1) {
-          return await firstHeartbeat.promise;
-        }
-        return new Response(JSON.stringify({ alive: true, ok: true }), {
-          headers: { "content-type": "application/json; charset=utf-8" },
-          status: 200,
-        });
-      }
-      return new Response("unexpected", { status: 500 });
-    });
-    const snapshotAbort = new AbortController();
-    const platform = buildTestHostedExecutionRuntimePlatform({
-      boundUserId: "member_123",
-      commitTimeoutMs: 30_000,
-      fetchImpl: fetchMock as typeof fetch,
-    });
-
-    await platform.workspaceSnapshotPort!.startSnapshotSession({
-      expectedWorkspaceVersion: "4",
-      reason: "idle_shutdown",
-      signal: snapshotAbort.signal,
-    });
-    await vi.waitFor(() => expect(heartbeatStartedAt).toEqual([startedAtMs]));
-    vi.setSystemTime(startedAtMs + 2_000);
-    const timeoutError = new Error("The operation timed out.");
-    timeoutError.name = "TimeoutError";
-    firstHeartbeat.reject(timeoutError);
-    await vi.advanceTimersByTimeAsync(0);
-    await vi.waitFor(() => expect(heartbeatStartedAt).toHaveLength(2));
-
-    expect(heartbeatStartedAt).toEqual([startedAtMs, startedAtMs + 2_000]);
-    snapshotAbort.abort(new Error("test complete"));
   });
 
   it("reuses the snapshot session write fence when completing after the runtime lease changes", async () => {
@@ -3178,14 +3250,14 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       ref,
     })).rejects.toThrow("Hosted workspace snapshot complete failed with HTTP 409.");
 
-    expect(fetchMock).toHaveBeenCalledTimes(4);
-    const completeRequest = requireFetchRequest(fetchMock.mock.calls[3], "workspace snapshot complete");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const completeRequest = requireFetchRequest(fetchMock.mock.calls[1], "workspace snapshot complete");
     expect(completeRequest.method).toBe("POST");
     expect(completeRequest.headers.get("x-hosted-runtime-attempt-id")).toBe("attempt_1");
     expect(completeRequest.headers.get("x-hosted-runtime-lease-generation")).toBe("9");
     expect(completeRequest.headers.get("x-hosted-runtime-workspace-version")).toBe("4");
     await vi.advanceTimersByTimeAsync(10_000);
-    expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it("replays one transport-ambiguous snapshot completion with the identical payload and headers", async () => {
@@ -3388,7 +3460,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         reason: "idle_shutdown",
         signal: abortController.signal,
       });
-      await vi.waitFor(() => expect(heartbeatCalls).toBe(1));
+      expect(heartbeatCalls).toBe(0);
       const completion = platform.workspaceSnapshotPort!.completeSnapshotSession({
         checkpointRequest: createWorkspaceSnapshotCheckpointRequest(ref),
         ref,
@@ -3397,11 +3469,8 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       completionFailure.reject(new TypeError("fetch failed"));
       abortController.abort(abortReason);
       await vi.waitFor(() => expect(completionCalls).toBe(2));
-      const heartbeatCountAfterWake = heartbeatCalls;
       await vi.advanceTimersByTimeAsync(2_000);
-      await vi.waitFor(() =>
-        expect(heartbeatCalls).toBeGreaterThan(heartbeatCountAfterWake)
-      );
+      expect(heartbeatCalls).toBe(0);
       completionReplay.resolve(createWorkspaceSnapshotCompleteResponse(ref));
 
       const completed = await completion;
@@ -3532,7 +3601,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(failure).not.toHaveProperty("timeoutMs");
   });
 
-  it("keeps snapshot heartbeat and stored headers through replay, then clears both", async () => {
+  it("keeps stored snapshot headers through replay, then clears them without background requests", async () => {
     vi.useFakeTimers();
     const ref = createWorkspaceSnapshotV2Ref({ encryptedByteSize: 4 });
     const dataKeyBase64 = encodeHostedWorkspaceSnapshotV2DataKey(
@@ -3594,7 +3663,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         expectedWorkspaceVersion: "4",
         reason: "idle_shutdown",
       });
-      await vi.waitFor(() => expect(heartbeatHeaders).toHaveLength(1));
+      expect(heartbeatHeaders).toHaveLength(0);
       currentLease = {
         attemptId: "attempt_2",
         leaseGeneration: "10",
@@ -3608,7 +3677,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       });
       await vi.waitFor(() => expect(completionHeaders).toHaveLength(2));
       await vi.advanceTimersByTimeAsync(2_000);
-      await vi.waitFor(() => expect(heartbeatHeaders).toHaveLength(3));
+      expect(heartbeatHeaders).toHaveLength(0);
 
       expect(Object.fromEntries(completionHeaders[0] ?? [])).toEqual(expect.objectContaining({
         "x-hosted-runtime-attempt-id": "attempt_1",
@@ -3616,11 +3685,6 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         "x-hosted-runtime-workspace-version": "4",
       }));
       expect(completionHeaders[1]).toEqual(completionHeaders[0]);
-      expect(Object.fromEntries(heartbeatHeaders.at(-1) ?? [])).toEqual(expect.objectContaining({
-        "x-hosted-runtime-attempt-id": "attempt_1",
-        "x-hosted-runtime-lease-generation": "9",
-        "x-hosted-runtime-workspace-version": "4",
-      }));
 
       replayResponse.resolve(createWorkspaceSnapshotCompleteResponse(ref));
       await completion;
@@ -3761,8 +3825,8 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     }));
     expect(completed.snapshotRef).toEqual(ref);
     expect(recordCheckpoint).not.toHaveBeenCalled();
-    expect(fetchMock).toHaveBeenCalledTimes(4);
-    const completeRequest = requireFetchRequest(fetchMock.mock.calls[3], "workspace snapshot complete");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const completeRequest = requireFetchRequest(fetchMock.mock.calls[1], "workspace snapshot complete");
     expect(completeRequest.method).toBe("POST");
     expect(completeRequest.headers.get("x-hosted-runtime-attempt-id")).toBe("attempt_1");
     expect(completeRequest.headers.get("x-hosted-runtime-lease-generation")).toBe("9");
@@ -5923,9 +5987,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(request.headers.has("x-hosted-runtime-lease-generation")).toBe(false);
     expect(request.headers.has("x-hosted-runtime-workspace-version")).toBe(false);
     expect(request.headers.get(HOSTED_RUNNER_BOUND_USER_ID_HEADER)).toBe("member_123");
-    expect(request.headers.get(HOSTED_PROVIDER_EGRESS_TOKEN_HEADER)).toBe(
-      "provider-egress-token-123",
-    );
+    expect(request.headers.get(HOSTED_PROVIDER_EGRESS_TOKEN_HEADER)).toBeNull();
   });
 
   it("calls ambient Worker fetch with the global receiver across hosted fetch boundaries", async () => {
@@ -6075,9 +6137,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(forwarded.headers.has("x-hosted-runtime-lease-generation")).toBe(false);
     expect(forwarded.headers.has("x-hosted-runtime-workspace-version")).toBe(false);
     expect(forwarded.headers.get(HOSTED_RUNNER_BOUND_USER_ID_HEADER)).toBe("member_123");
-    expect(forwarded.headers.get(HOSTED_PROVIDER_EGRESS_TOKEN_HEADER)).toBe(
-      "provider-egress-token-456",
-    );
+    expect(forwarded.headers.get(HOSTED_PROVIDER_EGRESS_TOKEN_HEADER)).toBeNull();
     expect(forwarded.headers.has(HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER)).toBe(false);
     expect(forwarded.method).toBe("PUT");
     expect(await forwarded.text()).toBe("b");
@@ -6138,9 +6198,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(request.headers.has("x-hosted-runtime-lease-generation")).toBe(false);
     expect(request.headers.has("x-hosted-runtime-workspace-version")).toBe(false);
     expect(request.headers.get(HOSTED_RUNNER_BOUND_USER_ID_HEADER)).toBe("member_123");
-    expect(request.headers.get(HOSTED_PROVIDER_EGRESS_TOKEN_HEADER)).toBe(
-      "provider-egress-token-local",
-    );
+    expect(request.headers.get(HOSTED_PROVIDER_EGRESS_TOKEN_HEADER)).toBeNull();
   });
 
   it("rejects configured local provider fetches outside the configured base path", async () => {
@@ -6290,9 +6348,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     );
     expect(request.url).toBe("http://172.17.0.1:4012/bot__cloudflare_injected__/sendMessage");
     expect(request.headers.get(HOSTED_RUNNER_BOUND_USER_ID_HEADER)).toBe("member_123");
-    expect(request.headers.get(HOSTED_PROVIDER_EGRESS_TOKEN_HEADER)).toBe(
-      "provider-egress-token-local",
-    );
+    expect(request.headers.get(HOSTED_PROVIDER_EGRESS_TOKEN_HEADER)).toBeNull();
 
     const rejectedFetchMock = vi.fn(async () => new Response(null, { status: 204 }));
     const rejectedFetch = createCloudflareHostedProviderFetch(
@@ -6359,9 +6415,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(request.headers.has("x-hosted-runtime-lease-generation")).toBe(false);
     expect(request.headers.has("x-hosted-runtime-workspace-version")).toBe(false);
     expect(request.headers.get(HOSTED_RUNNER_BOUND_USER_ID_HEADER)).toBe("member_123");
-    expect(request.headers.get(HOSTED_PROVIDER_EGRESS_TOKEN_HEADER)).toBe(
-      "provider-egress-token-linq-local",
-    );
+    expect(request.headers.get(HOSTED_PROVIDER_EGRESS_TOKEN_HEADER)).toBeNull();
   });
 
   it("does not require external provider fetches to carry a runtime write-fence lease", async () => {
@@ -6413,9 +6467,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(request.headers.has("x-hosted-runtime-lease-generation")).toBe(false);
     expect(request.headers.has("x-hosted-runtime-workspace-version")).toBe(false);
     expect(request.headers.get(HOSTED_RUNNER_BOUND_USER_ID_HEADER)).toBe("member_123");
-    expect(request.headers.get(HOSTED_PROVIDER_EGRESS_TOKEN_HEADER)).toBe(
-      "provider-egress-token-platform",
-    );
+    expect(request.headers.get(HOSTED_PROVIDER_EGRESS_TOKEN_HEADER)).toBeNull();
   });
 
   it("keeps public Internet fetches free of runtime authority headers", async () => {
@@ -6705,15 +6757,6 @@ describe("buildHostedExecutionRuntimePlatform", () => {
           status: 200,
         });
       }
-      if (url.pathname.endsWith(HOSTED_RUNTIME_CODEX_AUTH_PATH)) {
-        return new Response(JSON.stringify({
-          applied: true,
-          status: "applied",
-        }), {
-          headers: { "content-type": "application/json; charset=utf-8" },
-          status: 200,
-        });
-      }
       if (url.pathname.endsWith("/api/internal/hosted-execution/issues/record")) {
         return new Response(JSON.stringify({
           issueIds: ["issue_123"],
@@ -6774,7 +6817,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
           action: "read",
           result: {
             mainPersona: "classic",
-            model: "gpt-5.6-terra",
+            model: "gpt-6-sol",
             solAvailable: false,
             supportingPersona: null,
             tone: "formal",
@@ -6838,7 +6881,6 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(platform.workspacePort).toBeDefined();
     expect(platform.logPort).toBeDefined();
     expect(platform.latencyTracePort).toBeDefined();
-    expect(platform.codexAuthPort).toBeDefined();
     expect(platform.issueExportPort).toBeDefined();
     expect(platform.usageRecordPort).toBeDefined();
     expect(platform.productFeedbackPort).toBeDefined();
@@ -6882,10 +6924,6 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         type: "assistant_input_staged",
       },
     });
-    await platform.codexAuthPort!.update({
-      attemptId: "hca_abcdefghijklmnop",
-      phase: "connected",
-    });
     await platform.issueExportPort!.recordIssues([{ code: "runtime.issue" }]);
     await platform.usageRecordPort!.recordUsage(createAssistantUsageRecord());
     await platform.productFeedbackPort!.recordProductFeedback({
@@ -6905,7 +6943,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         action: "read",
         result: {
           mainPersona: "classic",
-          model: "gpt-5.6-terra",
+          model: "gpt-6-sol",
           solAvailable: false,
           supportingPersona: null,
           tone: "formal",
@@ -6962,7 +7000,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       connectionId: "conn_123",
     });
 
-    expect(fetchMock).toHaveBeenCalledTimes(16);
+    expect(fetchMock).toHaveBeenCalledTimes(15);
     const requests = fetchMock.mock.calls.map((call, index) =>
       requireFetchRequest(call, `callback web-control request ${index}`)
     );
@@ -6971,7 +7009,6 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       "http://web-control.worker/api/internal/hosted-workspace",
       "http://web-control.worker/api/internal/hosted-runtime/log",
       "http://web-control.worker/api/internal/hosted-runtime/latency",
-      "http://web-control.worker/api/internal/hosted-runtime/codex-auth",
       "http://web-control.worker/api/internal/hosted-execution/issues/record",
       "http://web-control.worker/api/internal/hosted-execution/usage/record",
       "http://web-control.worker/api/internal/hosted-execution/product-feedback/record",
@@ -6986,7 +7023,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     ]);
     // The composed group and both publication paths advertise one canonical
     // scope per metric, not a second history registry or capability flag.
-    for (const request of requests.slice(12, 15)) {
+    for (const request of requests.slice(11, 14)) {
       const url = new URL(request.url);
       const scopes = url.searchParams.getAll("supportedProjectionScope");
       expect(scopes).toHaveLength(100);
@@ -7000,7 +7037,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       expect(request.headers.get("x-hosted-runtime-workspace-version")).toBe("6");
       expect(request.headers.has("x-hosted-execution-runner-proxy-token")).toBe(false);
     }
-    await expect(requests[11]?.clone().json()).resolves.toEqual({
+    await expect(requests[10]?.clone().json()).resolves.toEqual({
       action: HOSTED_RUNTIME_ASSISTANT_PERSONALITY_UPDATE_ACTION,
       personality: {
         detail: null,
@@ -7216,59 +7253,206 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(request.headers.get("x-hosted-execution-user-id")).toBe("member_123");
   });
 
-  it.each([undefined, true, false, "invalid", null])("write-fences external route authority and validates audience %s", async (threadIsDirect) => {
+  describe.each(["direct", "proxy"] as const)("external route authority validation (%s)", (transport) => {
     const authority = {
       channel: "telegram" as const,
       containerMemberId: "member_123",
       threadId: "telegram_group_123",
     };
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const request = input instanceof Request ? input : new Request(input, init);
-      expect(new URL(request.url).pathname).toBe(
-        HOSTED_RUNTIME_THREAD_ROUTE_AUTHORITY_PATH,
-      );
-      await expect(request.json()).resolves.toEqual(authority);
-      return new Response(JSON.stringify({ authorized: true, threadIsDirect }), {
-        headers: { "content-type": "application/json; charset=utf-8" },
-        status: 200,
+    const diagnosticMessage =
+      "Hosted external thread route authority response validation failed.";
+
+    function createAuthorityEffect(respond: () => Response | Promise<Response>) {
+      const fetchMock = vi.fn<typeof fetch>(async () => respond());
+      const readCurrentLease = vi.fn(() => ({
+        attemptId: "runtime_write_123",
+        leaseGeneration: "7",
+        userId: "member_123",
+        workspaceVersion: "6",
+      }));
+      const environment = readHostedExecutionEnvironment(createHostedExecutionTestEnv({
+        HOSTED_WEB_BASE_URL: "https://web.example.test",
+      }));
+      const platform = buildTestHostedExecutionRuntimePlatform({
+        boundUserId: "member_123",
+        fetchImpl: fetchMock,
+        ...(transport === "direct" ? {
+          webCallbackSigning: environment.webCallbackSigning,
+          webControlBaseUrl: "https://web.example.test",
+        } : {}),
+        workspaceCheckpointBridge: { readCurrentLease },
       });
-    });
-    const environment = readHostedExecutionEnvironment(createHostedExecutionTestEnv({
-      HOSTED_WEB_BASE_URL: "https://web.example.test",
-    }));
-    const platform = buildTestHostedExecutionRuntimePlatform({
-      boundUserId: "member_123",
-      fetchImpl: fetchMock as typeof fetch,
-      webCallbackSigning: environment.webCallbackSigning,
-      webControlBaseUrl: "https://web.example.test",
-    });
-
-    const assertExternalThreadRouteAuthority =
-      platform.effectsPort.assertExternalThreadRouteAuthority;
-    if (!assertExternalThreadRouteAuthority) {
-      throw new Error("Expected external thread route authority effect.");
-    }
-    if (threadIsDirect !== undefined && typeof threadIsDirect !== "boolean") {
-      await expect(assertExternalThreadRouteAuthority(authority)).rejects.toThrow(
-        "Hosted external thread route authority response is invalid.",
-      );
-    } else {
-      await expect(assertExternalThreadRouteAuthority(authority)).resolves.toEqual(
-        threadIsDirect === undefined ? undefined : { threadIsDirect },
-      );
+      const assertAuthority = platform.effectsPort.assertExternalThreadRouteAuthority;
+      if (!assertAuthority) {
+        throw new Error("Expected external thread route authority effect.");
+      }
+      return { assertAuthority, fetchMock, readCurrentLease };
     }
 
-    const request = requireFetchRequest(
-      fetchMock.mock.calls[0],
-      "direct external thread route authority request",
+    async function expectOnlyAuthorityRequest(effect: ReturnType<typeof createAuthorityEffect>) {
+      expect(effect.fetchMock).toHaveBeenCalledTimes(1);
+      // Direct transport already revalidates the fence; telemetry adds no read.
+      expect(effect.readCurrentLease).toHaveBeenCalledTimes(transport === "direct" ? 2 : 1);
+      const request = requireFetchRequest(effect.fetchMock.mock.calls[0], "external route authority");
+      expect(request.url).toBe(
+        `${transport === "direct" ? "https://web.example.test" : "http://web-control.worker"}${HOSTED_RUNTIME_THREAD_ROUTE_AUTHORITY_PATH}${transport === "direct" ? "?runtimeAuthority=1&runtimeAttempt=runtime_write_123&runtimeGeneration=7&runtimeWorkspaceVersion=6" : ""}`,
+      );
+      expect(request.method).toBe("POST");
+      await expect(request.json()).resolves.toEqual(authority);
+      expectDefaultRuntimeWriteFenceHeaders(request);
+      if (transport === "direct") {
+        expect(request.headers.get("x-hosted-execution-user-id")).toBe("member_123");
+        expect(request.headers.get("x-hosted-execution-signature")).toMatch(/^[A-Za-z0-9\-_]+$/u);
+      }
+    }
+
+    function readValidationDiagnostics() {
+      return mocks.emitHostedExecutionStructuredLog.mock.calls
+        .map(([entry]) => entry)
+        .filter((entry) => entry.message === diagnosticMessage);
+    }
+
+    it.each([
+      { name: "legacy", payload: { authorized: true }, expected: undefined },
+      { name: "direct", payload: { authorized: true, threadIsDirect: true }, expected: { threadIsDirect: true } },
+      { name: "group", payload: { authorized: true, threadIsDirect: false }, expected: { threadIsDirect: false } },
+      { name: "fallback only", payload: { authorized: true, assistantAskFallbackRequired: true }, expected: { assistantAskFallbackRequired: true } },
+      { name: "both false", payload: { authorized: true, assistantAskFallbackRequired: false, threadIsDirect: false }, expected: { assistantAskFallbackRequired: false, threadIsDirect: false } },
+    ])("preserves $name without a validation diagnostic", async ({ payload, expected }) => {
+      const effect = createAuthorityEffect(() => Response.json(payload));
+      await expect(effect.assertAuthority(authority)).resolves.toEqual(expected);
+      expect(readValidationDiagnostics()).toEqual([]);
+      await expectOnlyAuthorityRequest(effect);
+    });
+
+    const nonObjectShape = {
+      responseIsObject: false,
+      authorizedValid: false,
+      assistantAskFallbackRequiredValid: false,
+      threadIsDirectValid: false,
+    };
+    it.each([
+      { name: "null body", payload: null, invalid: nonObjectShape },
+      { name: "array body", payload: [], invalid: nonObjectShape },
+      { name: "scalar body", payload: "synthetic-private-value", invalid: nonObjectShape },
+      { name: "missing authorized", payload: {}, invalid: { authorizedValid: false } },
+      { name: "false authorized", payload: { authorized: false }, invalid: { authorizedValid: false } },
+      { name: "non-boolean authorized", payload: { authorized: "invalid" }, invalid: { authorizedValid: false } },
+      { name: "invalid audience", payload: { authorized: true, threadIsDirect: "invalid" }, invalid: { threadIsDirectValid: false } },
+      { name: "null audience", payload: { authorized: true, threadIsDirect: null }, invalid: { threadIsDirectValid: false } },
+      { name: "invalid fallback", payload: { authorized: true, assistantAskFallbackRequired: "invalid" }, invalid: { assistantAskFallbackRequiredValid: false } },
+      { name: "null fallback", payload: { authorized: true, assistantAskFallbackRequired: null }, invalid: { assistantAskFallbackRequiredValid: false } },
+      {
+        name: "multiple invalid fields and private extras",
+        payload: {
+          authorized: false,
+          assistantAskFallbackRequired: "synthetic-private-value",
+          threadIsDirect: "synthetic-private-value",
+          syntheticPrivateKey: { nested: ["synthetic-private-value"] },
+          body: "synthetic-private-value",
+          url: "https://synthetic-private.example.test",
+          headers: { authorization: "synthetic-private-value" },
+        },
+        invalid: { authorizedValid: false, assistantAskFallbackRequiredValid: false, threadIsDirectValid: false },
+      },
+    ])("observes $name once and preserves the parser error", async ({ payload, invalid }) => {
+      const parser = vi.spyOn(hostedExecutionParsers, "parseHostedExternalThreadRouteAuthorityResponse");
+      try {
+        const effect = createAuthorityEffect(() => Response.json(payload));
+        const result = effect.assertAuthority(authority);
+        await expect(result).rejects.toBeInstanceOf(TypeError);
+        expect(parser).toHaveBeenCalledTimes(1);
+        expect(parser.mock.results[0]?.type).toBe("throw");
+        await expect(result).rejects.toBe(parser.mock.results[0]?.value);
+        const details = {
+          operation: "thread_route_authority",
+          responseIsObject: true,
+          authorizedValid: true,
+          assistantAskFallbackRequiredValid: true,
+          threadIsDirectValid: true,
+          ...invalid,
+          transport,
+          workspaceAttemptId: "runtime_write_123",
+        };
+        await expect(result).rejects.toHaveProperty("message", details.responseIsObject
+          ? "Hosted external thread route authority response is invalid."
+          : "Hosted external thread route authority response must be an object.");
+        const diagnostics = readValidationDiagnostics();
+        expect(diagnostics).toHaveLength(1);
+        expect(diagnostics[0]).toEqual({
+          component: "hosted.runtime.control-plane",
+          details,
+          level: "warn",
+          message: diagnosticMessage,
+          phase: "runtime.starting",
+          userId: null,
+        });
+        const sanitized = buildHostedExecutionStructuredLogRecord(diagnostics[0]);
+        expect(sanitized.details).toEqual(details);
+        expect(sanitized).not.toHaveProperty("errorMessage");
+        const serialized = JSON.stringify([diagnostics, sanitized]);
+        for (const excluded of [
+          "syntheticPrivateKey", "synthetic-private", authority.containerMemberId, authority.threadId,
+        ]) {
+          expect(serialized).not.toContain(excluded);
+        }
+        await expectOnlyAuthorityRequest(effect);
+      } finally {
+        parser.mockRestore();
+      }
+    });
+
+    it.each(["http", "network", "invalid-json", "body-read"] as const)(
+      "does not emit this diagnostic or retry on %s failure",
+      async (failure) => {
+        const effect = createAuthorityEffect(() => {
+          if (failure === "network") throw new TypeError("Synthetic transport failure.");
+          if (failure === "http") return Response.json({ authorized: false }, { status: 503 });
+          if (failure === "invalid-json") return new Response("{");
+          return new Response(new ReadableStream({
+            start(controller) { controller.error(new Error("Synthetic body read failure.")); },
+          }));
+        });
+        const parser = vi.spyOn(hostedExecutionParsers, "parseHostedExternalThreadRouteAuthorityResponse");
+        try {
+          await expect(effect.assertAuthority(authority)).rejects.toBeInstanceOf(Error);
+          expect(parser).not.toHaveBeenCalled();
+          expect(readValidationDiagnostics()).toEqual([]);
+          await expectOnlyAuthorityRequest(effect);
+        } finally {
+          parser.mockRestore();
+        }
+      },
     );
-    expect(request.url).toBe(
-      `https://web.example.test${HOSTED_RUNTIME_THREAD_ROUTE_AUTHORITY_PATH}?runtimeAuthority=1&runtimeAttempt=runtime_write_123&runtimeGeneration=7&runtimeWorkspaceVersion=6`,
-    );
-    expectDefaultRuntimeWriteFenceHeaders(request);
-    expect(request.headers.get("x-hosted-execution-user-id")).toBe("member_123");
-    expect(request.headers.get("x-hosted-execution-signature"))
-      .toMatch(/^[A-Za-z0-9\-_]+$/u);
+
+    it("preserves the exact parser error even when the existing log sink throws", async () => {
+      const actual = await vi.importActual<typeof import("@murphai/hosted-execution")>(
+        "@murphai/hosted-execution",
+      );
+      const parser = vi.spyOn(hostedExecutionParsers, "parseHostedExternalThreadRouteAuthorityResponse");
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {
+        throw new Error("Synthetic log sink failure.");
+      });
+      vi.stubEnv("MURPH_HOSTED_EXECUTION_STDIO_LOGS", "on");
+      mocks.emitHostedExecutionStructuredLog.mockImplementation((entry) => {
+        if (entry.message === diagnosticMessage) return actual.emitHostedExecutionStructuredLog(entry);
+      });
+      try {
+        const effect = createAuthorityEffect(() => Response.json({ authorized: false }));
+        const result = effect.assertAuthority(authority);
+        await expect(result).rejects.toBeInstanceOf(TypeError);
+        expect(parser).toHaveBeenCalledTimes(1);
+        expect(parser.mock.results[0]?.type).toBe("throw");
+        await expect(result).rejects.toBe(parser.mock.results[0]?.value);
+        expect(readValidationDiagnostics()).toHaveLength(1);
+        expect(warn).toHaveBeenCalledTimes(1);
+        await expectOnlyAuthorityRequest(effect);
+      } finally {
+        parser.mockRestore();
+        warn.mockRestore();
+        vi.unstubAllEnvs();
+      }
+    });
   });
 
   it("binds private Assistant Ask completion proof to its exact authorized direct route", async () => {
@@ -7999,6 +8183,134 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     });
     expect(readCurrentLease).toHaveBeenCalledTimes(1);
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  describe("internal fetch attempt correlation", () => {
+    describe.each([
+      ["current lease", "http://web-control.worker/api/internal/hosted-runtime/log"],
+      ["supplied snapshot", "http://workspace-snapshots.worker/workspace-snapshots/start"],
+      ["supplied latency", "http://web-control.worker/api/internal/hosted-runtime/latency"],
+      ["trusted", "http://web-control.worker/api/internal/hosted-runtime/log"],
+    ] as const)("%s", (source, url) => {
+      it.each(["transport failure", "authority rejection", "success"] as const)(
+        "preserves %s with only the request-start lease correlation",
+        async (outcome) => {
+          const lease = {
+            attemptId: "attempt_started",
+            leaseGeneration: "7",
+            userId: "member_123",
+            workspaceVersion: "6",
+          };
+          let currentLease = lease;
+          const readCurrentLease = vi.fn(() => currentLease);
+          const started = createDeferred<void>();
+          const transport = createDeferred<Response>();
+          const fetchMock = vi.fn((..._args: Parameters<typeof fetch>) => {
+            started.resolve();
+            return transport.promise;
+          });
+          const hostedFetch = source === "trusted"
+            ? createCloudflareHostedTrustedInternalFetch("member_123", fetchMock as typeof fetch, {
+              injectBoundUserIdHeader: true,
+            })
+            : createCloudflareHostedProviderFetch("member_123", fetchMock as typeof fetch, {
+              injectBoundUserIdHeader: true,
+              readCurrentLease,
+            });
+          const privateHeader = "synthetic-private-header-sentinel";
+          const request = new Request(url, {
+            body: "synthetic-private-body",
+            headers: {
+              [HOSTED_RUNTIME_ATTEMPT_ID_HEADER]: privateHeader,
+              [HOSTED_RUNTIME_LEASE_GENERATION_HEADER]: "1",
+              ...(source === "supplied latency" ? {} : {
+                [HOSTED_RUNTIME_WORKSPACE_VERSION_HEADER]: "2",
+              }),
+              "x-synthetic-private": privateHeader,
+            },
+            method: "POST",
+          });
+          const pending = hostedFetch(request).then(
+            (value) => ({ status: "fulfilled" as const, value }),
+            (reason: unknown) => ({ status: "rejected" as const, reason }),
+          );
+          await started.promise;
+          lease.attemptId = "attempt_mutated";
+          currentLease = { ...lease, attemptId: "attempt_later" };
+
+          const readsLease = source === "current lease";
+          const forwarded = requireFetchRequest(fetchMock.mock.calls[0], "internal fetch");
+          expect(forwarded.url).toBe(request.url);
+          expect(forwarded.method).toBe("POST");
+          expect(Object.fromEntries(forwarded.headers)).toEqual({
+            ...Object.fromEntries(request.headers),
+            [HOSTED_RUNNER_BOUND_USER_ID_HEADER]: "member_123",
+            ...(readsLease ? {
+              [HOSTED_RUNTIME_ATTEMPT_ID_HEADER]: "attempt_started",
+              [HOSTED_RUNTIME_LEASE_GENERATION_HEADER]: "7",
+              [HOSTED_RUNTIME_WORKSPACE_VERSION_HEADER]: "6",
+            } : {}),
+          });
+          await expect(forwarded.text()).resolves.toBe("synthetic-private-body");
+
+          const failure = new TypeError("fetch failed");
+          const response = new Response(null, {
+            status: outcome === "authority rejection" ? 401 : 204,
+          });
+          if (outcome === "transport failure") transport.reject(failure);
+          else transport.resolve(response);
+          const result = await pending;
+          expect(result.status).toBe(outcome === "success" ? "fulfilled" : "rejected");
+          if (result.status === "fulfilled") {
+            expect(result.value).toBe(response);
+          } else if (outcome === "authority rejection") {
+            expect(result.reason).toBeInstanceOf(HostedRuntimeInternalAuthorityRejectedError);
+            expect(result.reason).toMatchObject({ status: 401 });
+          } else {
+            expect(result.reason).toBe(failure);
+          }
+          expect(readCurrentLease).toHaveBeenCalledTimes(readsLease ? 1 : 0);
+          expect(fetchMock).toHaveBeenCalledTimes(1);
+
+          const logs = mocks.emitHostedExecutionStructuredLog.mock.calls.map(([input]) => input);
+          expect(logs.map((log) => log.message)).toEqual([
+            "Hosted runtime internal request started.",
+            ...(outcome === "transport failure" ? ["Hosted runtime internal request failed."] : [
+              "Hosted runtime internal request completed.",
+              ...(outcome === "authority rejection" ? [
+                "Hosted runtime internal authority rejected invocation.",
+              ] : []),
+            ]),
+          ]);
+          if (result.status === "rejected") expect(logs.at(-1)?.error).toBe(result.reason);
+          const records = logs.map((log) => buildHostedExecutionStructuredLogRecord(log));
+          for (const record of records) {
+            if (readsLease && record.level === "warn") {
+              expect(record.details?.workspaceAttemptId).toBe("attempt_started");
+            } else {
+              expect(record.details).not.toHaveProperty("workspaceAttemptId");
+            }
+          }
+          const serialized = JSON.stringify({ logs, records });
+          expect(serialized).not.toContain(privateHeader);
+          expect(serialized).not.toContain("synthetic-private-body");
+        },
+      );
+    });
+
+    it.each(["missing authority", "empty lease"])("preserves %s rejection before fetch or logging", async (source) => {
+      const readCurrentLease = vi.fn(() => null);
+      const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
+      const hostedFetch = createCloudflareHostedProviderFetch("member_123", fetchMock as typeof fetch, {
+        ...(source === "empty lease" ? { readCurrentLease } : {}),
+      });
+      await expect(hostedFetch("http://web-control.worker/api/internal/hosted-runtime/log", {
+        headers: { [HOSTED_RUNTIME_ATTEMPT_ID_HEADER]: "synthetic-private-header-sentinel" },
+      })).rejects.toThrow(`missing a runtime write-fence ${source === "empty lease" ? "lease" : "authority"}`);
+      expect(readCurrentLease).toHaveBeenCalledTimes(source === "empty lease" ? 1 : 0);
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(mocks.emitHostedExecutionStructuredLog).not.toHaveBeenCalled();
+    });
   });
 
   it("overwrites caller-supplied web-control write-fence headers outside latency telemetry", async () => {
@@ -9921,7 +10233,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       ref,
     });
 
-    expect(fetchMock).toHaveBeenCalledTimes(5);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
     const startRequest = requireFetchRequest(fetchMock.mock.calls[1], "advanced snapshot start");
     expect(startRequest.headers.get("x-hosted-runtime-attempt-id")).toBe("attempt_1");
     expect(startRequest.headers.get("x-hosted-runtime-lease-generation")).toBe("9");
@@ -9930,7 +10242,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       expectedWorkspaceVersion: "5",
       reason: "idle_shutdown",
     }));
-    const completeRequest = requireFetchRequest(fetchMock.mock.calls[4], "advanced snapshot complete");
+    const completeRequest = requireFetchRequest(fetchMock.mock.calls[2], "advanced snapshot complete");
     expect(completeRequest.headers.get("x-hosted-runtime-attempt-id")).toBe("attempt_1");
     expect(completeRequest.headers.get("x-hosted-runtime-lease-generation")).toBe("9");
     expect(completeRequest.headers.get("x-hosted-runtime-workspace-version")).toBe("5");

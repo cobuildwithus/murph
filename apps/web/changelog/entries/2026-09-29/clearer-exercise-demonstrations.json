@@ -1,0 +1,18 @@
+{
+  "publishedOn": "2026-09-29",
+  "order": 100,
+  "item": {
+    "id": "clearer-exercise-demonstrations",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Clearer exercise demonstrations",
+    "summary": "Corrected images across 123 exercises make poses, movement phases, and side changes easier to follow.",
+    "details": "The updates replace mismatched exercise pictures, fill in missing movement phases, and clarify confusing limb positions and labels.",
+    "relevanceTags": [
+      "exercise"
+    ],
+    "sourcePullRequests": [
+      3804
+    ]
+  }
+}

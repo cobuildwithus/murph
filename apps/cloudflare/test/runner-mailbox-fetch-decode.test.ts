@@ -1,3 +1,4 @@
+import { HOSTED_RUNTIME_FETCH_CORRELATION_ID_HEADER } from "../src/runner-outbound/headers.ts";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { buildHostedExecutionLinqConversationMessageWake } from "@murphai/hosted-execution";
 import { buildHostedSecureBoxAad, sealHostedSecureBox, serializeHostedSecureBoxEnvelope } from "@murphai/runtime-state";
@@ -5,7 +6,11 @@ import { buildHostedMailboxPayloadScope, buildHostedMailboxPayloadSecureBoxAad, 
 import { parseHostedMailboxFetchResponse } from "@murphai/hosted-execution/parsers";
 
 const mocks = vi.hoisted(() => ({ forward: vi.fn(), crypto: vi.fn(),
-  suppliedCrypto: vi.fn(), cached: vi.fn() }));
+  suppliedCrypto: vi.fn(), cached: vi.fn(), log: vi.fn() }));
+vi.mock("@murphai/hosted-execution", async (original) => ({
+  ...await original<typeof import("@murphai/hosted-execution")>(),
+  emitHostedExecutionStructuredLog: mocks.log,
+}));
 vi.mock("../src/hosted-crypto/runtime-user-crypto-context.ts", async (original) => ({
   ...await original<typeof import("../src/hosted-crypto/runtime-user-crypto-context.ts")>(),
   requireHostedUserCryptoContextFromResponse: mocks.suppliedCrypto,
@@ -96,9 +101,79 @@ describe("Worker mailbox fetch/decode composition", () => {
     const headers = new Headers(mocks.forward.mock.calls[0]![0].headers);
     expect(headers.get("x-hosted-runtime-attempt-id")).toBe("synthetic-attempt");
     expect(headers.get("x-hosted-runtime-lease-generation")).toBe("1");
+    expect(headers.has(HOSTED_RUNTIME_FETCH_CORRELATION_ID_HEADER)).toBe(false);
+    const logs = mocks.log.mock.calls.map(([entry]) => entry);
+    const runtimeLog = logs.find(entry => entry.message === "Hosted runtime mailbox fetch finished.");
+    const workerLog = logs.find(entry => entry.message === "Hosted runner web-control response received.");
+    expect(runtimeLog?.details).toMatchObject({ mailboxRuntimeImportReady: true,
+      mailboxRuntimeFetchAndDecodeMs: expect.any(Number), mailboxRuntimeParseMs: expect.any(Number) });
+    expect(runtimeLog?.details.mailboxFetchCorrelationId).toMatch(/^[0-9a-f-]{36}$/);
+    expect(workerLog?.details).toMatchObject({
+      mailboxFetchCorrelationId: runtimeLog?.details.mailboxFetchCorrelationId,
+      runtimeAttemptId: "synthetic-attempt", mailboxWorkerTotalMs: expect.any(Number),
+    });
+    expect(JSON.stringify([runtimeLog, workerLog])).not.toContain(wake.userId);
+    expect(runtimeLog.details.mailboxRuntimeImportReadyAtEpochMs).toBeGreaterThanOrEqual(
+      runtimeLog.details.mailboxRuntimeResponseDecodedAtEpochMs);
     // Canonical Web parsing never accepts the ephemeral plaintext field.
     expect(parseHostedMailboxFetchResponse(fetched).items[0]).not.toHaveProperty("decodedWake");
   });
+  it("records a failed mailbox readiness boundary while preserving cancellation", async () => {
+    const controller = new AbortController();
+    const reason = new Error("Synthetic canceled mailbox read");
+    const fetchImpl = vi.fn<typeof fetch>(async () => { controller.abort(reason); throw reason; });
+    const port = createHostedWebMailboxPort({ boundUserId: wake.userId, fetchImpl,
+      timeoutMs: 1000, transport: { mode: "proxy" } });
+    await expect(port.fetch(requestBody, { signal: controller.signal })).rejects.toBe(reason);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    const log = mocks.log.mock.calls.find(([entry]) => entry.message === "Hosted runtime mailbox fetch finished.")?.[0];
+    expect(log.details).toMatchObject({ mailboxRuntimeImportReady: false,
+      mailboxRuntimeResponseDecodedAtEpochMs: null, mailboxRuntimeImportReadyAtEpochMs: null });
+  });
+
+  it("retains one logical mailbox correlation across an existing transport retry", async () => {
+    const mailbox = await mailboxFixture();
+    const fetchImpl = vi.fn<typeof fetch>()
+      .mockRejectedValueOnce(new TypeError("fetch failed"))
+      .mockResolvedValueOnce(Response.json(mailbox));
+    const port = createHostedWebMailboxPort({ boundUserId: wake.userId, fetchImpl,
+      timeoutMs: 1000, transport: { mode: "proxy" } });
+    await port.fetch(requestBody);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    const ids = fetchImpl.mock.calls.map(([url, init]) =>
+      new Request(url, init).headers.get(HOSTED_RUNTIME_FETCH_CORRELATION_ID_HEADER));
+    expect(ids[0]).toMatch(/^[0-9a-f-]{36}$/);
+    expect(ids[1]).toBe(ids[0]);
+    const logs = mocks.log.mock.calls.filter(([entry]) => entry.message === "Hosted runtime mailbox fetch finished.");
+    expect(logs).toHaveLength(1);
+    expect(logs[0]![0].details).toMatchObject({ mailboxFetchCorrelationId: ids[0], mailboxRuntimeImportReady: true });
+  });
+
+  it.each(["previous", "current", "retired-provider"])(
+    "returns fixed OpenAI wire metadata and decoded wakes for a %s Web response",
+    async (webContract) => {
+      const { assistantProvider: _previousProvider, ...mailbox } = await mailboxFixture();
+      mocks.forward.mockImplementation(async () => Response.json({
+        ...mailbox,
+        ...(webContract === "current" ? {} : {
+          assistantProvider: webContract === "previous" ? "openai" : "retired-provider",
+          assistantCustomInferenceRevision: null,
+        }),
+      }));
+      const response = await handle(request());
+      expect(response.status).toBe(200);
+      const bridged = await response.json();
+      expect(bridged).toMatchObject({ assistantProvider: "openai", items: [{ decodedWake: wake }] });
+      expect(bridged).not.toHaveProperty("assistantCustomInferenceRevision");
+
+      const port = createHostedWebMailboxPort({ boundUserId: wake.userId,
+        fetchImpl: vi.fn<typeof fetch>(async () => Response.json(bridged)),
+        timeoutMs: 1000, transport: { mode: "proxy" } });
+      const fetched = await port.fetch(requestBody);
+      expect(fetched).not.toHaveProperty("assistantProvider");
+      expect(fetched.items[0]?.decodedWake).toEqual(wake);
+    },
+  );
   it.each([2, 100])("resolves ingress context once for %i inline items", async (count) => {
     const mailbox = await mailboxFixture();
     for (let index = 2; index <= count; index += 1) {
@@ -112,6 +187,31 @@ describe("Worker mailbox fetch/decode composition", () => {
     expect(await response.json()).toMatchObject({ items: Array.from({ length: count }, (_, index) => ({
       decodedWake: index === 0 ? wake : { ...wake, eventId: `synthetic-event-${index + 1}` },
     })) });
+    expect(mocks.crypto).toHaveBeenCalledTimes(1);
+  });
+  it("logs finite Web phases and Worker decoding on the same mailbox response", async () => {
+    const mailbox = await mailboxFixture();
+    mocks.forward.mockImplementation(async (input) => {
+      Object.assign(input.timing, { prepareMs: 4, fetchHeadersMs: 750 });
+      return Response.json(mailbox, { headers: {
+      "server-timing": "murph_mailbox_total;dur=640, murph_mailbox_auth;dur=120, murph_mailbox_projection;dur=400, private_field;dur=99",
+      "x-vercel-id": "sfo1::iad1::synthetic-private-request",
+    } });
+    });
+    expect((await handle(request())).status).toBe(200);
+    const entry = mocks.log.mock.calls.map(([entry]) => entry).find((entry) =>
+      entry.message === "Hosted runner web-control response received.");
+    expect(entry.details).toMatchObject({ mailboxWebTotalMs: 640, mailboxWebAuthMs: 120,
+      mailboxWebProjectionMs: 400, mailboxWorkerDecodedCount: 1, mailboxWorkerDecodeFailedCount: 0,
+      mailboxWorkerCallbackPrepareMs: 4, mailboxWorkerFetchHeadersMs: 750, mailboxVercelRegions: "sfo1::iad1" });
+    for (const field of ["mailboxWorkerPrepareMs", "mailboxWorkerWebFetchMs", "mailboxWorkerResponseBodyMs",
+      "mailboxWorkerCryptoContextMs", "mailboxWorkerPayloadDecryptMs", "mailboxWorkerSerializeMs", "mailboxWorkerTotalMs"]) {
+      expect(entry.details[field]).toBeGreaterThanOrEqual(0);
+    }
+    expect(JSON.stringify(entry)).not.toContain("private_field");
+    expect(JSON.stringify(entry)).not.toContain("Hello");
+    expect(JSON.stringify(entry)).not.toContain("synthetic-private-request");
+    expect(mocks.forward).toHaveBeenCalledTimes(1);
     expect(mocks.crypto).toHaveBeenCalledTimes(1);
   });
   it.each([2, 100])("decodes %i items with one supplied ingress context and no context RPC", async (count) => {
@@ -149,7 +249,9 @@ describe("Worker mailbox fetch/decode composition", () => {
     mocks.suppliedCrypto.mockRejectedValue(new Error("Invalid envelope signature"));
     const response = await handle(request());
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual(parseHostedMailboxFetchResponse(mailbox));
+    await expect(response.json()).resolves.toEqual({
+      ...parseHostedMailboxFetchResponse(mailbox), assistantProvider: "openai",
+    });
     expect(mocks.suppliedCrypto).toHaveBeenCalledTimes(1);
     expect(mocks.crypto).not.toHaveBeenCalled();
   });

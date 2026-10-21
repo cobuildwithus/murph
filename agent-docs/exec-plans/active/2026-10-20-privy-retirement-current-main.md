@@ -1,0 +1,34 @@
+# Complete Privy retirement on current main
+
+## Outcome and scope
+Reconcile PR #3134 with current main, preserving newer authentication, account deletion, and feature retirement behavior. Remove obsolete Privy owners without adding replacement product features. Ship only after the existing live migration and native qualification requirements are satisfied.
+
+## Product UX
+Preserve first-party sign-in, session renewal/logout, account recovery, and passkey approval. Existing migrated members retain their accounts. Dormant native installations must have a qualified recovery path. No forced session expiry or deletion of retained members to satisfy retirement.
+
+## Plan
+- [x] Reconcile current main and inspect obsolete-provider references and changed owners.
+- [x] Run focused auth/deletion tests and relevant typechecks; review the resulting patch.
+- [ ] Verify migration convergence, native distribution/recovery, and provider obligations through their existing owners.
+- [ ] Push the candidate, obtain applicable ReviewGPT and CI evidence, then merge and deploy when gates permit.
+
+## Evidence and decisions
+The historical retirement PR already contains guarded contract SQL and an explicit release hold. Current production evidence remains private and is reported only as aggregates in the task conversation. Native release qualification is requested from the operator; code review does not establish distribution or recovery evidence.
+
+## Status
+In progress. No production mutation or vendor deletion performed.
+
+## Reconciliation and review retrospective
+Current-main conflict resolution preserves native messaging, canonical credential ownership, canary-only diagnostic retention, newer retention categories, and prior feature removals. The shared identity-conflict error keeps current diagnostic reason allowlisting while removing importer-only reasons. Removed the obsolete, unconsumed phone-auth readiness capability instead of retaining its outdated SMS configuration reader. No new state, dependency, authentication fallback, or product surface.
+
+Historical ReviewGPT round 3 passed. The renewed user request to finish and ship retirement, followed by an explicit continue instruction, authorizes continuing this existing task. Current-main changes require a fresh full audit with the original first-reviewed baseline preserved; historical source review does not establish current runtime or rollout proof. The scope remains the same provider retirement, with the existing production hold retained.
+
+## Current verification
+- Reconciled non-PostgreSQL selection: 1,870 passed, 25 skipped across 64 files; the database-gated suite is tested separately.
+- Follow-up invite/login capability removal: 189 passed across 13 files.
+- PostgreSQL selection: 324 passed initially; the one failing passkey fixture needed the production request-IP header under the new rate-limited enrollment owner. The corrected member suite passes all 107 cases, completing 325 cases across 11 suites before contraction.
+- All three actual contract-SQL guards reject synthetic live sessions, unimported identities, and pending provider receipts. The actual contraction succeeds on the isolated local database; all 325 cases across 11 suites pass afterward.
+- Web and harness typechecks and focused oxlint pass. Hosted harness: 513 passed, one skipped across 33 files. Complexity guard passes; remaining hotspots retain their existing owner boundaries and do not justify unrelated restructuring.
+
+## Release disposition
+Hold. Native distribution/recovery, terminal account migration disposition, and provider/wallet obligations remain independent live gates. No production mutation, account deletion, wallet operation, or vendor shutdown was performed.

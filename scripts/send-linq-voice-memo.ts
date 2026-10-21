@@ -44,6 +44,7 @@ export interface LinqVoiceMemoSendReport {
     providerThread: RedactedIdentifier;
     voiceMemoAttachment: RedactedIdentifier;
     voiceMemoUrlPresent: boolean;
+    durationMs: number | null;
   };
 }
 
@@ -179,6 +180,7 @@ export async function runLinqVoiceMemoSend(
       providerThread: redactIdentifier(voiceMemo.providerThreadId, context),
       voiceMemoAttachment: redactIdentifier(voiceMemo.voiceMemoAttachmentId, context),
       voiceMemoUrlPresent: voiceMemo.voiceMemoUrl !== null,
+      durationMs: voiceMemo.voiceMemoDurationMs,
     },
   };
 }

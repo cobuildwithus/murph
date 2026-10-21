@@ -1,5 +1,10 @@
 import "server-only";
+import { readSharedCompanionContact } from "./shared-companion-presence";
 
+import {
+  evaluatePushPrimarySourceStaleness,
+  isSourceRecoveryNoticeEligible,
+} from "@murphai/device-syncd/source-staleness";
 import { resolveDeviceConnectSourceById } from "@murphai/device-syncd/connect-config";
 import { Prisma, type PrismaClient } from "@prisma/client";
 import {
@@ -98,6 +103,7 @@ import {
   type HostedGroupJoinConfirmationSignal,
 } from "./group-join-confirmation";
 import { normalizeHostedGroupKind, type HostedGroupKind } from "./types";
+import { labelHostedGroupSharedMembers } from "./shared-participant-labels";
 
 export type HostedGroupsReadClient = PrismaClient | Prisma.TransactionClient;
 
@@ -455,6 +461,8 @@ interface HostedGroupSharedDeviceConnectionSnapshot {
   provider: string;
   setupPhase: string | null;
   sources: Array<{
+    firstSeenAt: Date;
+    lastDataAt: Date | null;
     sourceProviderSlug: string;
     status: string;
     updatedAt: Date;
@@ -746,6 +754,7 @@ export async function readHostedGroupParticipantDisplayNameCandidatesByRuntimeMe
  * database authority window.
  */
 export async function readHostedGroupSharedDataByRuntimeMemberId(input: HostedGroupSharedReadOptions & {
+  includeCompanionPresence?: true;
   linqSenderHandles?: readonly string[];
   prisma?: PrismaClient;
   telegramSenderHandles?: readonly string[];
@@ -957,6 +966,8 @@ export async function readHostedGroupSharedDataByRuntimeMemberId(input: HostedGr
                   { sourceProviderSlug: "asc" },
                 ],
                 select: {
+                  firstSeenAt: true,
+                  lastDataAt: true,
                   sourceProviderSlug: true,
                   status: true,
                   updatedAt: true,
@@ -1002,6 +1013,10 @@ export async function readHostedGroupSharedDataByRuntimeMemberId(input: HostedGr
     const snapshotData = await readHostedGroupSharedSnapshots({ capture, prisma, now, options, runtimeMemberId: input.runtimeMemberId });
     if (!snapshotData) return sharedReadCapacityUnavailable();
     const { recordsByMemberAndScope, readableGrantIds, dateCoverage } = snapshotData;
+    const companionContacts = input.includeCompanionPresence ? await readSharedCompanionContact({
+      prisma, runtimeMemberId: input.runtimeMemberId,
+      grants: capture.grants.filter((grant) => readableGrantIds.has(grant.id)),
+    }).catch(() => new Map<string, string | null>()) : new Map<string, string | null>();
 
     const grantsByMember = new Map<
       string,
@@ -1041,6 +1056,7 @@ export async function readHostedGroupSharedDataByRuntimeMemberId(input: HostedGr
         displayName,
         memberId,
         participantId,
+        ...(companionContacts.has(memberId) ? { companionLastContactAt: companionContacts.get(memberId) ?? null } : {}),
         projections: projectionScopes.map((projectionScope, index) => {
           const projectionScopeKey = requestedProjectionScopeKeys[index];
           if (!projectionScopeKey) {
@@ -1099,7 +1115,10 @@ export async function readHostedGroupSharedDataByRuntimeMemberId(input: HostedGr
       ))].sort();
     }
     const result: HostedRuntimeGroupSharedReadResult = {
-      members, requestedProjectionScopeKeys, status: "ok",
+      members: await labelHostedGroupSharedMembers({
+        members, prisma, runtimeMemberId: input.runtimeMemberId,
+      }),
+      requestedProjectionScopeKeys, status: "ok",
       ...(options.history ? { dateCoverage: dateCoverage
         ?? pageHostedGroupSharedHistory([], options.history).dateCoverage } : {}),
     };
@@ -1328,8 +1347,9 @@ function buildHostedGroupSharedDeviceSyncSources(
       ? connection.sources.map((source) => ({
           label: formatHostedDeviceSyncSourceLabel(source.sourceProviderSlug),
           status: resolveHostedGroupSharedSourceStatus(
-            source.status,
+            source,
             connectionStatus,
+            now,
           ),
           updatedAt: source.updatedAt,
         }))
@@ -1398,14 +1418,24 @@ function resolveHostedGroupSharedConnectionStatus(
 }
 
 function resolveHostedGroupSharedSourceStatus(
-  sourceStatus: string,
+  source: HostedGroupSharedDeviceConnectionSnapshot["sources"][number],
   connectionStatus: HostedVaultShareDeviceSyncSourceStatus,
+  now: Date,
 ): HostedVaultShareDeviceSyncSourceStatus {
   if (connectionStatus !== "connected") return connectionStatus;
-  if (sourceStatus === "connected") return "connected";
-  if (sourceStatus === "disconnected") return "disconnected";
-  if (sourceStatus === "reauthorization_required") return "needs-reconnect";
-  return "needs-attention";
+  if (source.status === "disconnected") return "disconnected";
+  if (source.status === "reauthorization_required") return "needs-reconnect";
+  if (source.status !== "connected") return "needs-attention";
+  const evidence = {
+    firstSeenAt: source.firstSeenAt.toISOString(),
+    lastDataAt: source.lastDataAt?.toISOString() ?? null,
+    sourceProviderSlug: source.sourceProviderSlug,
+    status: "connected" as const,
+  };
+  const observedAt = now.toISOString();
+  const stalled = evaluatePushPrimarySourceStaleness({ now: observedAt, sources: [evidence] }).length > 0
+    || isSourceRecoveryNoticeEligible({ ...evidence, now: observedAt });
+  return stalled ? "needs-attention" : "connected";
 }
 
 function latestDate(left: Date, right: Date): Date {

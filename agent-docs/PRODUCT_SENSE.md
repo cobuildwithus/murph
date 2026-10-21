@@ -49,14 +49,10 @@ Last verified: 2026-09-09
 - A member with no current goal is not a failed onboarding case. Murph may
   offer one optional baseline review, then remain available without inventing
   a problem.
-- Hosted landing-page signup should hand members directly toward messaging
-  Murph. Signup-oriented accessible-stage landing auth routes to
-  `/home?initialVisit=true`, where members with a resolved text contact first see
-  the contact-card picker and then the one-shot four-step Murph personality
-  picker. Members without a text contact start at the personality picker. A
-  successful personality save ends in the Welcome to Murph dialog and its
-  current messaging action; skipping or dismissing the picker ends the handoff
-  without that dialog.
+- Hosted landing-page signup routes members to `/home?initialVisit=true`.
+  Pending members with a text contact can add Murph to Contacts; add, skip or
+  dismiss completes the existing account onboarding marker. Other members
+  complete directly. No personality setup or welcome dialog follows.
   Login-oriented landing CTAs continue to route to ordinary `/home`.
 - The public changelog opens on a bounded seven-day window of dated editions.
   Every edition remains a stable cursor, and API or digest links to an older
@@ -279,34 +275,3 @@ Assistant runtime state is never the source of truth for these objects.
   exact protocol revision, test plan, and confidence language that produced it.
 - If user-visible behavior is still undefined, record it in
   `agent-docs/product-specs/` before it spreads into copy, UI, or runtime code.
-
-## Public product evidence
-
-Murph Safe is a public evidence surface, not a certification mark. Organize the
-answer around the exact product record, what its label says, what tests are
-linked to that record, what threshold was used for any comparison, and what
-remains unknown. Never collapse those facts into a safe/unsafe verdict or make
-missing testing sound reassuring. Keep supplement and branded-food search
-useful without implying that separately ranked corpora are directly
-comparable. Generic foods, inferred test linkage, and formula-revision claims
-remain outside the surface until their product meaning is explicitly defined.
-
-Food comparison should give the useful conclusion before the supporting data.
-Show one quiet winner per complete nutrition metric with its row rule, and at
-most one plain sentence that counts visible rows led. Never turn that result
-into a universal health or safety score. Keep exact test results, evidence
-coverage, and unknowns behind one evidence meter and one combined side sheet.
-Use a short popover for one metric, with raw reports hidden until requested. Never rank an incomplete
-metric or assign unequal ranks to tied values. When evidence is bounded, show
-returned and total observation scope. Render the public DTO's unknowns directly
-instead of rebuilding evidence completeness in the page. Do not infer sample
-coverage from report or lot metadata. A screened observation must keep its
-measured result, threshold, basis, and authority inspectable.
-
-## Home setup surface
-
-The signed-in `/home` page shows remaining messaging, device, and lab setup
-cards. When none remain, it offers a Message Murph button using the sidebar’s contact action. Experiment runs,
-experiment suggestions, and feature promotions do not appear on Home. Existing
-initial personality onboarding, connection results, usage notices, and load
-errors retain their current owners.

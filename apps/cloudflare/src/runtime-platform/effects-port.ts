@@ -6,9 +6,13 @@ import type {
   HostedEmailDeliverySummary,
 } from "@murphai/assistant-runtime/hosted-email";
 import {
+  emitHostedExecutionStructuredLog,
   parseHostedOperatorTaskControlResponse,
 } from "@murphai/hosted-execution";
-import { parseHostedExternalThreadRouteAuthorityResponse } from "@murphai/hosted-execution/parsers";
+import {
+  parseHostedExternalThreadRouteAuthorityResponse,
+  parseHostedExecutionAssistantNotificationRoute,
+} from "@murphai/hosted-execution/parsers";
 import {
   parseHostedExecutionResolvedLinqDeliveryRoute,
   HOSTED_RUNTIME_LINQ_DELIVERY_BLOCK_CODES,
@@ -21,14 +25,12 @@ import {
   buildHostedExecutionRunnerMealPhotoPath,
 } from "../runner-meal-photo-route.ts";
 import {
-  buildHostedExecutionRunnerEnvironmentVoicePath,
-} from "../runner-environment-voice-route.ts";
-import {
   HOSTED_EXECUTION_RUNNER_TELEGRAM_DOWNLOAD_FILE_PATH,
   HOSTED_EXECUTION_RUNNER_TELEGRAM_GET_FILE_PATH,
   parseHostedRunnerTelegramDownloadFileResponse,
   parseHostedRunnerTelegramGetFileResponse,
 } from "../runner-effects-contract.ts";
+import { HOSTED_RUNTIME_ATTEMPT_ID_HEADER } from "../runner-outbound/headers.ts";
 import type { HostedWorkspaceCheckpointBridgeAuthority } from "./authority-headers.ts";
 import { requireHostedRuntimeWriteFenceHeaders } from "./authority-headers.ts";
 import {
@@ -113,48 +115,6 @@ export function createCloudflareEffectsPort(input: {
 
   return {
     ...providerFileEffectsPort,
-    async deleteEnvironmentVoice(audioKey) {
-      const response = await fetchHostedResponse({
-        description: "Hosted environment voice delete",
-        fetchImpl: input.fetchImpl,
-        init: {
-          headers: await requireHostedEffectsRuntimeWriteFenceHeaders({
-            description: "Hosted environment voice delete",
-            workspaceCheckpointBridge: input.workspaceCheckpointBridge ?? null,
-          }),
-          method: "DELETE",
-        },
-        timeoutMs: input.timeoutMs,
-        url: new URL(
-          buildHostedExecutionRunnerEnvironmentVoicePath(audioKey),
-          `${CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS.effectsPort}/`,
-        ),
-      });
-      assertHostedOk(response, "Hosted environment voice delete");
-    },
-    async readEnvironmentVoice(audioKey) {
-      const response = await fetchHostedResponse({
-        description: "Hosted environment voice read",
-        fetchImpl: input.fetchImpl,
-        init: {
-          headers: await requireHostedEffectsRuntimeWriteFenceHeaders({
-            description: "Hosted environment voice read",
-            workspaceCheckpointBridge: input.workspaceCheckpointBridge ?? null,
-          }),
-          method: "GET",
-        },
-        timeoutMs: input.timeoutMs,
-        url: new URL(
-          buildHostedExecutionRunnerEnvironmentVoicePath(audioKey),
-          `${CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS.effectsPort}/`,
-        ),
-      });
-      if (response.status === 404) {
-        return null;
-      }
-      assertHostedOk(response, "Hosted environment voice read");
-      return new Uint8Array(await response.arrayBuffer());
-    },
     async deleteMealPhoto(mealPhotoKey) {
       const response = await fetchHostedResponse({
         description: "Hosted meal photo delete",
@@ -266,6 +226,10 @@ export function createCloudflareEffectsPort(input: {
             }
           },
           async assertExternalThreadRouteAuthority(authority, context) {
+            const headers = await requireHostedEffectsRuntimeWriteFenceHeaders({
+              description: "Hosted external thread route authority assertion",
+              workspaceCheckpointBridge: input.workspaceCheckpointBridge ?? null,
+            });
             const payload = await fetchHostedWebControlPlaneJson({
               body: context?.assistantAskCompletion
                 ? {
@@ -276,16 +240,48 @@ export function createCloudflareEffectsPort(input: {
               boundUserId: input.boundUserId,
               description: "Hosted external thread route authority assertion",
               fetchImpl: input.fetchImpl,
-              headers: await requireHostedEffectsRuntimeWriteFenceHeaders({
-                description: "Hosted external thread route authority assertion",
-                workspaceCheckpointBridge: input.workspaceCheckpointBridge ?? null,
-              }),
+              headers,
               route: HOSTED_RUNNER_WEB_CONTROL_ROUTES.threadRouteAuthority,
               signal: context?.signal ?? null,
               timeoutMs: input.timeoutMs,
               transport: webControlTransport,
             });
-            return parseHostedExternalThreadRouteAuthorityResponse(payload);
+            try {
+              return parseHostedExternalThreadRouteAuthorityResponse(payload);
+            } catch (error) {
+              try {
+                const record = payload !== null
+                  && typeof payload === "object"
+                  && !Array.isArray(payload)
+                  ? payload as Record<string, unknown>
+                  : null;
+                emitHostedExecutionStructuredLog({
+                  component: "hosted.runtime.control-plane",
+                  details: {
+                    operation: HOSTED_RUNNER_WEB_CONTROL_ROUTES.threadRouteAuthority.operation,
+                    responseIsObject: record !== null,
+                    authorizedValid: record !== null && record.authorized === true,
+                    assistantAskFallbackRequiredValid: record !== null && (
+                      record.assistantAskFallbackRequired === undefined
+                      || typeof record.assistantAskFallbackRequired === "boolean"
+                    ),
+                    threadIsDirectValid: record !== null && (
+                      record.threadIsDirect === undefined
+                      || typeof record.threadIsDirect === "boolean"
+                    ),
+                    transport: webControlTransport.mode,
+                    workspaceAttemptId: headers.get(HOSTED_RUNTIME_ATTEMPT_ID_HEADER),
+                  },
+                  level: "warn",
+                  message: "Hosted external thread route authority response validation failed.",
+                  phase: "runtime.starting",
+                  userId: null,
+                });
+              } finally {
+                // Even a failing log sink must preserve the parser's exact error.
+                throw error;
+              }
+            }
           },
           async controlOperatorTask(request, context) {
             return parseHostedOperatorTaskControlResponse(
@@ -337,6 +333,28 @@ export function createCloudflareEffectsPort(input: {
               );
             }
             return deliveryTarget;
+          },
+          async resolveMemberNotificationRoute(context) {
+            const description = "Hosted member notification route";
+            const payload = await fetchHostedWebControlPlaneJson({
+              body: {},
+              boundUserId: input.boundUserId,
+              description,
+              fetchImpl: input.fetchImpl,
+              headers: await requireHostedEffectsRuntimeWriteFenceHeaders({
+                description,
+                workspaceCheckpointBridge: input.workspaceCheckpointBridge ?? null,
+              }),
+              route: HOSTED_RUNNER_WEB_CONTROL_ROUTES.memberNotificationRoute,
+              signal: context?.signal ?? null,
+              timeoutMs: input.timeoutMs,
+              transport: webControlTransport,
+            });
+            if (!payload || typeof payload !== "object" || !("route" in payload)) {
+              throw new TypeError("Hosted member notification route response is invalid.");
+            }
+            return payload.route === null ? null
+              : parseHostedExecutionAssistantNotificationRoute(payload.route, description);
           },
           async assertLinqRecentInboundEngagement(request, context) {
             const payload = await fetchHostedWebControlPlaneJson({

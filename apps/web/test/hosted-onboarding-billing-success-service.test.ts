@@ -627,7 +627,6 @@ function createStatus(input?: {
     },
     capabilities: {
       billingReady: true,
-      phoneAuthReady: true,
     },
     invite: {
       code: "invite-code",

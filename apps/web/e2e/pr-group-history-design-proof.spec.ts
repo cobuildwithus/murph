@@ -28,6 +28,7 @@ for (const width of [390, 1280]) {
     await expect(choices.nth(0)).toBeChecked();
     const fresh = page.locator('[data-design-state="group-join-comprehensive-default"]');
     await expect(fresh).toContainText("90 days");
+    await expect(fresh).toContainText("Apple Health sharing includes when the Murph app last checked in.");
     for (const choice of await fresh.getByRole("checkbox").all()) await expect(choice).toBeChecked();
     for (const surface of [upgrade, fresh]) {
       expect(await surface.evaluate((element) => element.scrollWidth <= element.clientWidth + 1)).toBe(true);

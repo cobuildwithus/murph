@@ -9,6 +9,8 @@ ranges are part of this package's root entrypoint. Importers, query, CLI, and We
 consume them here directly; ingestion and Health Commons packages do not
 re-export these neutral primitives. Health Commons continues to own authored
 page guidance and its parity checks against the reviewed runtime range catalog.
+Consumers needing only wearable provider identity use
+`@murphai/health-metrics/wearable-provider-catalog` without loading metric definitions.
 
 Decision-grade metric-window comparisons use normalized `MetricPoint` values
 and the shared series/window selectors. Wearable day summaries are presentation

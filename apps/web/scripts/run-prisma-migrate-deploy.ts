@@ -105,6 +105,12 @@ const hostedWebPrismaPredeployHistoricalMigrationIds = new Set([
 
 const hostedWebPrismaPredeployCompatibleMigrationReasons = new Map([
   [
+    "20261008210000_linq_bounded_terminal_recovery",
+    // Constant zero/empty-array defaults preserve existing rows and old inserts.
+    // All other new fields are nullable; no recovery starts during migration.
+    new Set(["ADD COLUMN NOT NULL"]),
+  ],
+  [
     "20260915223000_hosted_runtime_legacy_import",
     // The new cursor/count fields have constant defaults, so existing rows and
     // old writers retain the empty-inventory shape before cutover begins.
@@ -226,6 +232,12 @@ const hostedWebPrismaPredeployCompatibleMigrationReasons = new Map([
     // The replacement check is a strict superset of the existing cap set.
     // Old writers remain valid, while predeploy makes the new $50 value safe
     // before a new Web build can present or persist it.
+    new Set(["ADD CONSTRAINT CHECK", "DROP CONSTRAINT"]),
+  ],
+  [
+    "20260922170000_hosted_sponsorship_topup_margin",
+    // A strict expansion from the historical $5 grant to $4 or $5 grants.
+    // Preserve old writers and frozen purchases before deploying the new catalog.
     new Set(["ADD CONSTRAINT CHECK", "DROP CONSTRAINT"]),
   ],
 ]);

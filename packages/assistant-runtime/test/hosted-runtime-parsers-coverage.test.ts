@@ -55,6 +55,7 @@ describe("hosted runtime parser coverage", () => {
           secret: "secret_123",
         },
         managedAutoReplyChannels: [
+          { capabilityReady: true, channel: "voice" },
           {
             capabilityReady: true,
             channel: "email",

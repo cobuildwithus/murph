@@ -9,6 +9,28 @@ import {
 } from "@/src/lib/linq/api";
 
 describe("hosted Linq SDK boundary", () => {
+  it("sends native polls and reads results through the configured SDK transport", async () => {
+    const fetchImplementation = vi.fn(async (
+      _request: string | URL | Request,
+      _init?: RequestInit,
+    ) => Response.json({ chat_id: "chat", message_id: "message", poll: { options: [], total_voters: 0 } }));
+    const client = createLinqApiClient({
+      apiBaseUrl: "https://linq.example.test/custom/v3",
+      apiToken: "synthetic-token",
+      fetchImplementation,
+    });
+    const body = { poll: { options: [{ text: "Saturday" }, { text: "Sunday" }], idempotency_key: "synthetic-poll" } };
+    await client.chats.polls.create("chat", body);
+    await client.messages.poll.retrieve("message");
+    expect(fetchImplementation.mock.calls.map(([request]) => String(request))).toEqual([
+      "https://linq.example.test/custom/v3/chats/chat/polls",
+      "https://linq.example.test/custom/v3/messages/message/poll",
+    ]);
+    expect(fetchImplementation.mock.calls[0]?.[1]?.method).toBe("POST");
+    expect(JSON.parse(String(fetchImplementation.mock.calls[0]?.[1]?.body))).toEqual(body);
+    expect(fetchImplementation.mock.calls[1]?.[1]?.method).toBe("GET");
+  });
+
   it("maps generated resources onto the configured root without composing retries", async () => {
     const fetchImplementation = vi.fn(async (
       _request: string | URL | Request,

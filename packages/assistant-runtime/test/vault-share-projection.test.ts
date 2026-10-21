@@ -19,6 +19,7 @@ import {
   HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE,
   HOSTED_VAULT_SHARE_HEART_RATE_ZONE_LABEL_MAX_LENGTH,
   HOSTED_VAULT_SHARE_HEART_RATE_ZONES_MAX_PER_DAY,
+  HOSTED_VAULT_SHARE_SERIALIZED_PROJECTION_MAX_BYTES,
   HOSTED_VAULT_SHARE_SOURCE_TAGGED_WORKOUTS_MAX_PER_DAY,
   HOSTED_VAULT_SHARE_WORKOUT_TIME_SEMANTICS,
   HOSTED_VAULT_SHARE_WORKOUTS_MAX_PER_DAY,
@@ -120,6 +121,7 @@ async function offerHostedVaultShareProjectionBestEffort(input: {
   }
   const scopeResolution = await resolveHostedVaultShareProjectionScopesBestEffort({
     ...(input.projectionMode ? { projectionMode: input.projectionMode } : {}),
+    sourceWorkspaceVersion: TEST_SOURCE_WORKSPACE_VERSION,
     vaultSharePort: input.vaultSharePort,
   });
   if (scopeResolution.outcome !== "active-scopes") {
@@ -690,7 +692,7 @@ describe("offerHostedVaultShareProjectionBestEffort", () => {
       },
     });
 
-    expect(result.outcome).toBe("delivered");
+    expect(result).toEqual({ outcome: "delivered" });
     expect(deliver).toHaveBeenCalledTimes(1);
     expect(deliver).toHaveBeenCalledWith({
       expectedGenerationToken: GENERATION_TOKEN,
@@ -760,7 +762,7 @@ describe("offerHostedVaultShareProjectionBestEffort", () => {
       },
     });
 
-    expect(result).toEqual({ outcome: "error" });
+    expect(result).toEqual({ failureReason: "scope_failed", outcome: "error" });
     expect(deliver).toHaveBeenCalledTimes(3);
     expect(deliver.mock.calls.map(([request]) => request.projectionKind)).toEqual([
       "profile-name.v0",
@@ -782,7 +784,7 @@ describe("offerHostedVaultShareProjectionBestEffort", () => {
       },
     });
 
-    expect(result).toEqual({ outcome: "error" });
+    expect(result).toEqual({ failureReason: "delivery_exception", outcome: "error" });
     expect(deliver).toHaveBeenCalledTimes(1);
     expect(deliver.mock.calls[0]?.[0]).toMatchObject({
       projectionKind: "profile-name.v0",
@@ -812,6 +814,94 @@ describe("offerHostedVaultShareProjectionBestEffort", () => {
     expect(deliver.mock.calls[0]?.[0]).toMatchObject({
       projectionKind: "profile-name.v0",
     });
+  });
+
+  it.each([
+    { failureReason: "serialized_projection_too_large", earlierScopeFailed: false },
+    { failureReason: "delivery_exception", earlierScopeFailed: false },
+    { failureReason: "serialized_projection_too_large", earlierScopeFailed: true },
+    { failureReason: "delivery_exception", earlierScopeFailed: true },
+  ] as const)("reports $failureReason and stops the suffix (earlierScopeFailed=$earlierScopeFailed)", async ({
+    failureReason,
+    earlierScopeFailed,
+  }) => {
+    const scopes = [TIME_ZONE_SCOPE, SLEEP_SCOPE, PROFILE_SCOPE, WORKOUTS_SCOPE];
+    const deliver = vi.fn(async (request: HostedVaultShareDeliverRequest) => {
+      if (request.projectionKind === TIME_ZONE_SCOPE.projectionKind && earlierScopeFailed) {
+        return { status: "scope-failed" as const };
+      }
+      if (request.projectionKind === PROFILE_SCOPE.projectionKind) {
+        throw new Error(
+          "Synthetic response-contract rejection: member=synthetic-private-member "
+            + "vault=/private/synthetic-vault health=synthetic-private-record",
+        );
+      }
+      return { status: "delivered" as const };
+    });
+    const shouldStop = vi.fn(() => false);
+    const result = await offerCapturedHostedVaultShareProjectionBestEffort({
+      capture: {
+        hasDeferredProjectionWork: true,
+        projectionMode: HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE,
+        snapshots: scopes.map((projectionScope) => ({
+          generationToken: GENERATION_TOKEN,
+          projectionScope,
+          // Exercise the captured-offer byte gate directly with synthetic UTF-8 padding.
+          records: projectionScope === PROFILE_SCOPE
+            && failureReason === "serialized_projection_too_large"
+            ? [{
+              data: { displayName: "é".repeat(HOSTED_VAULT_SHARE_SERIALIZED_PROJECTION_MAX_BYTES / 2) },
+              occurredAt: "2026-07-01T00:00:00.000Z",
+              recordKey: "profile-name",
+            }]
+            : [],
+        })),
+        sourceWorkspaceVersion: TEST_SOURCE_WORKSPACE_VERSION,
+      },
+      shouldStop,
+      vaultSharePort: {
+        deliver,
+        async listActiveProjectionScopes() {
+          throw new Error("Immutable delivery must not resolve scopes again.");
+        },
+      },
+    });
+
+    expect(result).toEqual({ failureReason, outcome: "error" });
+    expect(shouldStop).toHaveBeenCalledTimes(3);
+    expect(deliver.mock.calls.map(([request]) => request.projectionKind)).toEqual(
+      scopes.slice(0, failureReason === "serialized_projection_too_large" ? 2 : 3)
+        .map((scope) => scope.projectionKind),
+    );
+    for (const [request] of deliver.mock.calls) {
+      expect(request).toMatchObject({
+        expectedGenerationToken: GENERATION_TOKEN,
+        projectionMode: HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE,
+        records: [],
+        sourceWorkspaceVersion: TEST_SOURCE_WORKSPACE_VERSION,
+      });
+    }
+  });
+
+  it("omits an earlier scope failure reason when the remaining scopes are preempted", async () => {
+    const vaultRoot = await createProfileAndTimeZoneVault("Theo", "UTC");
+    let stopped = false;
+    const deliver = vi.fn(async () => {
+      stopped = true;
+      return { status: "scope-failed" as const };
+    });
+    const result = await offerHostedVaultShareProjectionBestEffort({
+      shouldStop: () => stopped,
+      vaultRoot,
+      vaultSharePort: {
+        deliver,
+        listActiveProjectionScopes: async () =>
+          activeProjectionResponse(PROFILE_SCOPE, TIME_ZONE_SCOPE),
+      },
+    });
+
+    expect(result).toEqual({ outcome: "preempted" });
+    expect(deliver).toHaveBeenCalledTimes(1);
   });
 
   it("starts no delivery when its owner ended before the first scope", async () => {
@@ -891,15 +981,19 @@ describe("offerHostedVaultShareProjectionBestEffort", () => {
 
   it("does not read or deliver payloads when the control plane reports no active kinds", async () => {
     const deliver = vi.fn();
+    const listActiveProjectionScopes = vi.fn(async () => activeProjectionResponse());
     const result = await offerHostedVaultShareProjectionBestEffort({
       vaultRoot: "/nonexistent",
       vaultSharePort: {
         deliver,
-        listActiveProjectionScopes: async () => activeProjectionResponse(),
+        listActiveProjectionScopes,
       },
     });
 
     expect(result.outcome).toBe("no-active-share");
+    expect(listActiveProjectionScopes).toHaveBeenCalledWith({
+      sourceWorkspaceVersion: TEST_SOURCE_WORKSPACE_VERSION,
+    });
     expect(deliver).not.toHaveBeenCalled();
   });
 
@@ -918,7 +1012,7 @@ describe("offerHostedVaultShareProjectionBestEffort", () => {
       projectionMode: HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE,
     });
 
-    expect(result.outcome).toBe("deferred");
+    expect(result).toEqual({ outcome: "deferred" });
     expect(deliver).not.toHaveBeenCalled();
   });
 
@@ -957,7 +1051,7 @@ describe("offerHostedVaultShareProjectionBestEffort", () => {
       projectionMode: HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE,
     });
 
-    expect(result.outcome).toBe("continued");
+    expect(result).toEqual({ outcome: "continued" });
     expect(deliver).toHaveBeenCalledTimes(1);
     expect(deliver).toHaveBeenCalledWith(expect.objectContaining({
       projectionMode: HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE,
@@ -975,7 +1069,7 @@ describe("offerHostedVaultShareProjectionBestEffort", () => {
       projectionMode: HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE,
     });
 
-    expect(result.outcome).toBe("error");
+    expect(result).toEqual({ outcome: "error" });
     expect(deliver).not.toHaveBeenCalled();
   });
 
@@ -992,7 +1086,7 @@ describe("offerHostedVaultShareProjectionBestEffort", () => {
       },
     });
 
-    expect(result.outcome).toBe("error");
+    expect(result).toEqual({ outcome: "error" });
     expect(deliver).not.toHaveBeenCalled();
   });
 
@@ -1043,7 +1137,7 @@ describe("offerHostedVaultShareProjectionBestEffort", () => {
       },
     });
 
-    expect(result.outcome).toBe("error");
+    expect(result).toEqual({ outcome: "error" });
     expect(deliver).not.toHaveBeenCalled();
   });
 

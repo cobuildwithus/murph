@@ -47,6 +47,7 @@ import {
 } from "../src/runner-container-ca-env.ts";
 import {
   HOSTED_RUNNER_SHUTTING_DOWN_ERROR_CODE,
+  type RunnerContainerColdWaitDirectCause,
 } from "../src/runner-container-error-codes.ts";
 import {
   DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
@@ -54,6 +55,13 @@ import {
 import {
   buildHostedRunnerRedactedErrorJson,
 } from "../src/user-runner/diagnostics.ts";
+
+const SDK_INSTANCE_START_ABORT_MESSAGE =
+  "Aborted waiting for container to start as we received a cancellation signal";
+const SDK_PORT_WAIT_ABORT_MESSAGE = "Container request aborted.";
+const NATIVE_NO_INSTANCE_MESSAGE =
+  "there is no container instance that can be provided to this durable object";
+const NATIVE_PORT_NOT_LISTENING_MESSAGE = "the container is not listening";
 
 const EXPECTED_RUNNER_CONTAINER_ENV = {
   ...buildHostedRunnerContainerCaEnv(),
@@ -79,6 +87,9 @@ type RunnerContainerLocalStartupFailureStage = Exclude<
 
 function expectRunnerContainerStartupFailureObservation(input: {
   cleanupUnsettled: boolean;
+  expectedColdWaitDirectCause?: RunnerContainerColdWaitDirectCause;
+  expectedColdWaitFailure?: "instance_start_aborted" | "port_wait_aborted" | "unclassified";
+  expectedColdWaitNativeRunning?: boolean | "unavailable";
   expectedElapsedMs?: number;
   expectedOrchestrationAttemptId?: string;
   expectedTimeoutMs?: number;
@@ -102,6 +113,15 @@ function expectRunnerContainerStartupFailureObservation(input: {
       ...(input.expectedOrchestrationAttemptId === undefined
         ? {}
         : { orchestrationAttemptId: input.expectedOrchestrationAttemptId }),
+      ...(input.expectedColdWaitFailure === undefined
+        ? {}
+        : { runtimeStartupColdWaitFailure: input.expectedColdWaitFailure }),
+      ...(input.expectedColdWaitDirectCause === undefined
+        ? {}
+        : { runtimeStartupColdWaitDirectCause: input.expectedColdWaitDirectCause }),
+      ...(input.expectedColdWaitNativeRunning === undefined
+        ? {}
+        : { runtimeStartupColdWaitNativeRunning: input.expectedColdWaitNativeRunning }),
       runtimeStartupConfirmTimeoutMs: input.expectedTimeoutMs ?? expect.any(Number),
       runtimeStartupCleanupUnsettled: input.cleanupUnsettled,
       runtimeStartupFailureElapsedMs: expect.any(Number),
@@ -133,13 +153,39 @@ function expectRunnerContainerStartupFailureObservation(input: {
   if (input.expectedElapsedMs !== undefined) {
     expect(elapsedMs).toBe(input.expectedElapsedMs);
   }
+  const record = buildHostedExecutionStructuredLogRecord(observation);
+  expect(record.details).toEqual(observation.details);
   const serialized = JSON.stringify(observation);
   for (const forbiddenValue of input.forbiddenValues ?? []) {
     expect(serialized).not.toContain(forbiddenValue);
+    expect(JSON.stringify(record)).not.toContain(forbiddenValue);
   }
 }
 
 describe("RunnerContainer", () => {
+  it("forwards voice controls directly to an existing container without startup", async () => {
+    const fetchControl = vi.fn(async () => Response.json({ kind: "connected", sdp: "v=0\r\nanswer" }));
+    const h = createContainerDouble({ platformRunning: true, containerFetch: fetchControl });
+    const request = { action: "connect" as const, callId: "call-synthetic", attemptId: "attempt-synthetic",
+      leaseGeneration: "1", userId: "member-synthetic", sdp: "v=0\r\noffer" };
+    expect(await h.container.controlVoice(request)).toEqual({ kind: "connected", sdp: "v=0\r\nanswer" });
+    expect(fetchControl).toHaveBeenCalledWith("http://container/internal/voice-control", expect.objectContaining({
+      method: "POST", body: JSON.stringify(request),
+    }));
+    expect(h.start).not.toHaveBeenCalled();
+    expect(h.startAndWaitForPorts).not.toHaveBeenCalled();
+  });
+
+  it("never starts a stopped container for a voice command", async () => {
+    const h = createContainerDouble({ platformRunning: false });
+    expect(await h.container.controlVoice({
+      action: "close", callId: "call-synthetic", attemptId: "attempt-synthetic",
+      leaseGeneration: "1", userId: "member-synthetic",
+    })).toEqual({ kind: "unavailable" });
+    expect(h.containerFetch).not.toHaveBeenCalled();
+    expect(h.start).not.toHaveBeenCalled();
+    expect(h.startAndWaitForPorts).not.toHaveBeenCalled();
+  });
   beforeEach(() => {
     vi.clearAllMocks();
     vi.spyOn(runtimeOwnerClient, "commandHostedRuntimeOwner").mockResolvedValue({ cutover: "postgres", status: "updated", owner: null });
@@ -2165,6 +2211,10 @@ describe("RunnerContainer", () => {
             === "Hosted execution container startup confirmation failed.",
       ),
     ).toHaveLength(0);
+    for (const [observation] of mocks.emitHostedExecutionStructuredLog.mock.calls) {
+      expect(observation.details).not.toHaveProperty("runtimeStartupColdWaitDirectCause");
+      expect(observation.details).not.toHaveProperty("runtimeStartupColdWaitNativeRunning");
+    }
   });
 
   it("reproduces the old deployment gap: new Worker fingerprints reject an available previous image", async () => {
@@ -2568,11 +2618,22 @@ describe("RunnerContainer", () => {
     })).rejects.toBe(stateReadFailure);
   });
 
-  it("classifies cold start and port-readiness failures", async () => {
+  it.each([
+    { label: "initial SDK wait", startFailure: new Error(SDK_INSTANCE_START_ABORT_MESSAGE), expected: "instance_start_aborted", expectedCause: "absent" },
+    { label: "separate SDK port wait", startFailure: new Error(SDK_PORT_WAIT_ABORT_MESSAGE), expected: "port_wait_aborted", expectedCause: "absent" },
+    { label: "unknown error", startFailure: new Error("port wait failed with token=private-start-token"), expected: "unclassified", expectedCause: "absent" },
+    { label: "changed initial message", startFailure: new Error(`${SDK_INSTANCE_START_ABORT_MESSAGE}.`), expected: "unclassified", expectedCause: "absent" },
+    { label: "changed port message", startFailure: new Error(`${SDK_PORT_WAIT_ABORT_MESSAGE} changed`), expected: "unclassified", expectedCause: "absent" },
+    { label: "non-Error string", startFailure: SDK_PORT_WAIT_ABORT_MESSAGE, expected: "unclassified", expectedCause: "other" },
+    { label: "non-Error object", startFailure: { message: SDK_INSTANCE_START_ABORT_MESSAGE }, expected: "unclassified", expectedCause: "other" },
+    { label: "null", startFailure: null, expected: "unclassified", expectedCause: "other" },
+    { label: "wrapped cancellation", startFailure: new Error("Synthetic wrapper", { cause: new Error(SDK_PORT_WAIT_ABORT_MESSAGE) }), expected: "unclassified", expectedCause: "other" },
+    { label: "unreadable message", startFailure: Object.defineProperty(new Error(), "message", {
+      get() { throw new Error("Synthetic unreadable message"); },
+    }), expected: "unclassified", expectedCause: "absent" },
+  ] as const)("classifies only the caught cold wait: $label", async ({ startFailure, expected, expectedCause }) => {
     const orchestrationAttemptId = "test-cold-start-timeout-correlation";
-    const privateErrorText = "port wait failed with token=private-start-token";
-    const startFailure = new Error(privateErrorText);
-    const { container } = createContainerDouble({
+    const { container, destroy, startAndWaitForPorts } = createContainerDouble({
       startAndWaitForPorts: vi.fn(async () => {
         throw startFailure;
       }),
@@ -2584,13 +2645,138 @@ describe("RunnerContainer", () => {
       userId: "member_private_cold_start",
     })).rejects.toBe(startFailure);
 
+    expect(startAndWaitForPorts).toHaveBeenCalledOnce();
+    expect(destroy).not.toHaveBeenCalled();
+    expect(Reflect.get(container, "currentContainerStart")).toMatchObject({
+      pendingUntilMs: expect.any(Number),
+      readyObservedBy: null,
+    });
     expectRunnerContainerStartupFailureObservation({
       cleanupUnsettled: false,
+      expectedColdWaitDirectCause: expectedCause,
+      expectedColdWaitFailure: expected,
+      expectedColdWaitNativeRunning: "unavailable",
       expectedOrchestrationAttemptId: orchestrationAttemptId,
       expectedTimeoutMs: 15_000,
-      forbiddenValues: [privateErrorText, "member_private_cold_start"],
+      forbiddenValues: [
+        SDK_INSTANCE_START_ABORT_MESSAGE, SDK_PORT_WAIT_ABORT_MESSAGE,
+        "private-start-token", "member_private_cold_start", "Synthetic wrapper",
+      ],
       stage: "cold_start_or_ports",
     });
+  });
+
+  it.each([
+    { label: "instance abort retaining no instance", message: SDK_INSTANCE_START_ABORT_MESSAGE, cause: new Error(NATIVE_NO_INSTANCE_MESSAGE), running: true, expectedCause: "native_no_instance" },
+    { label: "port abort retaining no instance", message: SDK_PORT_WAIT_ABORT_MESSAGE, cause: new Error(NATIVE_NO_INSTANCE_MESSAGE), running: true, expectedCause: "native_no_instance" },
+    { label: "port refusal after lost no-instance cause", message: SDK_PORT_WAIT_ABORT_MESSAGE, cause: new Error(NATIVE_PORT_NOT_LISTENING_MESSAGE), running: false, expectedCause: "port_not_listening" },
+    { label: "missing direct cause", message: SDK_PORT_WAIT_ABORT_MESSAGE, cause: undefined, running: undefined, expectedCause: "absent" },
+    { label: "changed no-instance message", message: SDK_PORT_WAIT_ABORT_MESSAGE, cause: new Error(`${NATIVE_NO_INSTANCE_MESSAGE}.`), running: true, expectedCause: "other" },
+    { label: "changed port message", message: SDK_PORT_WAIT_ABORT_MESSAGE, cause: new Error(`${NATIVE_PORT_NOT_LISTENING_MESSAGE} changed`), running: false, expectedCause: "other" },
+    { label: "deeper no-instance cause", message: SDK_PORT_WAIT_ABORT_MESSAGE, cause: new Error("synthetic-private-cause", { cause: new Error(NATIVE_NO_INSTANCE_MESSAGE) }), running: undefined, expectedCause: "other" },
+    { label: "non-Error direct cause", message: SDK_PORT_WAIT_ABORT_MESSAGE, cause: { message: NATIVE_NO_INSTANCE_MESSAGE }, running: undefined, expectedCause: "other" },
+    { label: "null direct cause", message: SDK_PORT_WAIT_ABORT_MESSAGE, cause: null, running: undefined, expectedCause: "other" },
+  ] as const)("observes bounded cold wait context: $label", async ({ message, cause, running, expectedCause }) => {
+    const startFailure = new Error(message, { cause });
+    const { container, containerFetch, destroy, getState, start, startAndWaitForPorts } = createContainerDouble({
+      platformRunning: running,
+      startAndWaitForPorts: vi.fn(async () => { throw startFailure; }),
+    });
+
+    await expect(container.ensureReadyForProcessing({
+      timeoutMs: 15_000, userId: "member_123",
+    })).rejects.toBe(startFailure);
+
+    expectRunnerContainerStartupFailureObservation({
+      cleanupUnsettled: false,
+      expectedColdWaitDirectCause: expectedCause,
+      expectedColdWaitFailure: message === SDK_INSTANCE_START_ABORT_MESSAGE
+        ? "instance_start_aborted" : "port_wait_aborted",
+      expectedColdWaitNativeRunning: running ?? "unavailable",
+      forbiddenValues: [NATIVE_NO_INSTANCE_MESSAGE, NATIVE_PORT_NOT_LISTENING_MESSAGE, "synthetic-private-cause"],
+      stage: "cold_start_or_ports",
+    });
+    expect(startAndWaitForPorts).toHaveBeenCalledOnce();
+    expect(getState).toHaveBeenCalledOnce();
+    expect(containerFetch).not.toHaveBeenCalled();
+    expect(start).not.toHaveBeenCalled();
+    expect(destroy).not.toHaveBeenCalled();
+    expect(Reflect.get(container, "currentContainerStart")).toMatchObject({
+      pendingUntilMs: expect.any(Number), readyObservedBy: null,
+    });
+  });
+
+  it.each(["cause", "cause message", "native running", "native container"] as const)(
+    "keeps the original cold failure when the %s getter throws",
+    async (unreadable) => {
+      const privateSentinel = "synthetic-private-getter-value";
+      const unreadableGetter = vi.fn(() => { throw new Error(privateSentinel); });
+      const directCause = new Error(NATIVE_NO_INSTANCE_MESSAGE);
+      const startFailure = new Error(SDK_PORT_WAIT_ABORT_MESSAGE, { cause: directCause });
+      const nativeContainer = { running: true };
+      if (unreadable === "cause") Object.defineProperty(startFailure, "cause", { get: unreadableGetter });
+      if (unreadable === "cause message") Object.defineProperty(directCause, "message", { get: unreadableGetter });
+      const { container, containerFetch, destroy } = createContainerDouble({
+        state: { container: nativeContainer },
+        startAndWaitForPorts: vi.fn(async () => { throw startFailure; }),
+      });
+      if (unreadable === "native running") Object.defineProperty(nativeContainer, "running", { get: unreadableGetter });
+      if (unreadable === "native container") {
+        Object.defineProperty(requireObject(Reflect.get(container, "ctx"), "container context"), "container", { get: unreadableGetter });
+      }
+
+      await expect(container.ensureReadyForProcessing({
+        timeoutMs: 15_000, userId: "member_123",
+      })).rejects.toBe(startFailure);
+
+      expectRunnerContainerStartupFailureObservation({
+        cleanupUnsettled: false,
+        expectedColdWaitDirectCause: unreadable === "cause" || unreadable === "cause message"
+          ? "unreadable" : "native_no_instance",
+        expectedColdWaitFailure: "port_wait_aborted",
+        expectedColdWaitNativeRunning: unreadable === "native running" || unreadable === "native container"
+          ? "unavailable" : true,
+        forbiddenValues: [privateSentinel, NATIVE_NO_INSTANCE_MESSAGE],
+        stage: "cold_start_or_ports",
+      });
+      expect(unreadableGetter).toHaveBeenCalledOnce();
+      expect(containerFetch).not.toHaveBeenCalled();
+      expect(destroy).not.toHaveBeenCalled();
+    },
+  );
+
+  it("does not traverse, serialize, enumerate, or coerce cold wait context", async () => {
+    const privateSentinel = "synthetic-private-nested-value";
+    const forbiddenRead = vi.fn(() => { throw new Error(privateSentinel); });
+    const opaqueValue = { [Symbol.toPrimitive]: forbiddenRead, toJSON: forbiddenRead, toString: forbiddenRead };
+    const directCause = new Proxy(Object.defineProperties(new Error(), {
+      message: { value: opaqueValue },
+      cause: { get: forbiddenRead },
+      stack: { get: forbiddenRead },
+      privatePayload: { enumerable: true, get: forbiddenRead },
+      toJSON: { get: forbiddenRead },
+    }), { ownKeys: forbiddenRead });
+    const startFailure = new Error(SDK_PORT_WAIT_ABORT_MESSAGE, { cause: directCause });
+    const { container, containerFetch, destroy } = createContainerDouble({
+      state: { container: { running: opaqueValue } },
+      startAndWaitForPorts: vi.fn(async () => { throw startFailure; }),
+    });
+
+    await expect(container.ensureReadyForProcessing({
+      timeoutMs: 15_000, userId: "member_123",
+    })).rejects.toBe(startFailure);
+
+    expectRunnerContainerStartupFailureObservation({
+      cleanupUnsettled: false,
+      expectedColdWaitDirectCause: "other",
+      expectedColdWaitFailure: "port_wait_aborted",
+      expectedColdWaitNativeRunning: "unavailable",
+      forbiddenValues: [privateSentinel, "privatePayload"],
+      stage: "cold_start_or_ports",
+    });
+    expect(forbiddenRead).not.toHaveBeenCalled();
+    expect(containerFetch).not.toHaveBeenCalled();
+    expect(destroy).not.toHaveBeenCalled();
   });
 
   it("classifies cold health and readiness-finalization failures", async () => {
@@ -2649,8 +2835,38 @@ describe("RunnerContainer", () => {
   });
 
   it.each([
+    { name: "only a settling completion callback", health: { activeJobCount: 1, settlingCompletionCallbackCount: 1 }, ready: true },
+    { name: "an older child without the settling count", health: { activeJobCount: 1 }, ready: false },
+    { name: "running work beside a settling callback", health: { activeJobCount: 2, settlingCompletionCallbackCount: 1 }, ready: false },
+    { name: "a non-numeric settling count", health: { activeJobCount: 1, settlingCompletionCallbackCount: "1" }, ready: false },
+    { name: "a negative settling count", health: { activeJobCount: 1, settlingCompletionCallbackCount: -1 }, ready: false },
+    { name: "a fractional settling count", health: { activeJobCount: 1, settlingCompletionCallbackCount: 0.5 }, ready: false },
+    { name: "a settling count above the total", health: { activeJobCount: 1, settlingCompletionCallbackCount: 2 }, ready: false },
+    { name: "a null settling count", health: { activeJobCount: 1, settlingCompletionCallbackCount: null }, ready: false },
+    { name: "a null total beside a settling count", health: { activeJobCount: null, settlingCompletionCallbackCount: 0 }, ready: false },
+    { name: "a string total beside a settling count", health: { activeJobCount: "1", settlingCompletionCallbackCount: 1 }, ready: false },
+    { name: "a negative total beside a settling count", health: { activeJobCount: -1, settlingCompletionCallbackCount: 0 }, ready: false },
+    { name: "a fractional total beside a settling count", health: { activeJobCount: 1.5, settlingCompletionCallbackCount: 1 }, ready: false },
+    { name: "an unsafe total beside a settling count", health: { activeJobCount: 2 ** 53, settlingCompletionCallbackCount: 2 ** 53 }, ready: false },
+    { name: "a missing total beside a settling count", health: { activeJobCount: undefined, settlingCompletionCallbackCount: 0 }, ready: false },
+    { name: "an idle older child", health: { activeJobCount: 0 }, ready: true },
+  ])("admits a warm runner reporting $name only when nothing else is busy", async ({ health, ready }) => {
+    const containerFetch = vi.fn(async () => new Response(JSON.stringify({
+      ...createRunnerHealthResult(), ...health,
+    }), { headers: { "content-type": "application/json" } }));
+    const { container, destroy } = createContainerDouble({ initialStatus: "running", containerFetch });
+
+    const readiness = await container.ensureReadyForProcessing({ timeoutMs: 15_000, userId: "member_123" });
+    if (ready) expect(readiness).toMatchObject({ kind: "ready" });
+    else expect(readiness).toEqual({ kind: "cleanup_unsettled" });
+    expect(destroy).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { phase: "instance", expired: true },
     { phase: "ports", expired: true },
     { phase: "health", expired: true },
+    { phase: "instance", expired: false },
     { phase: "ports", expired: false },
     { phase: "health", expired: false },
   ] as const)(
@@ -2664,7 +2880,10 @@ describe("RunnerContainer", () => {
         .mockImplementation((ms) => originalTimeout(ms));
       const transportStarted = createDeferred<void>();
       const transportFailure = createDeferred<never>();
-      const sdkFailure = new Error("Synthetic SDK cancellation without a typed reason");
+      const sdkFailure = new Error(phase === "instance"
+        ? SDK_INSTANCE_START_ABORT_MESSAGE : SDK_PORT_WAIT_ABORT_MESSAGE, {
+        cause: new Error(NATIVE_NO_INSTANCE_MESSAGE),
+      });
       const rejectOnAbort = (signal: AbortSignal) => {
         signal.addEventListener("abort", () => transportFailure.reject(sdkFailure), { once: true });
         transportStarted.resolve(undefined);
@@ -2673,12 +2892,12 @@ describe("RunnerContainer", () => {
       const startAndWaitForPorts = vi.fn(async (input: {
         cancellationOptions: { abort: AbortSignal };
       }) => {
-        if (phase === "ports") await rejectOnAbort(input.cancellationOptions.abort);
+        if (phase !== "health") await rejectOnAbort(input.cancellationOptions.abort);
       });
       const containerFetch = vi.fn(async (_url: string, init: { signal: AbortSignal }) =>
         rejectOnAbort(init.signal));
       const { container, destroy } = createContainerDouble({
-        initialStatus: "stopped", startAndWaitForPorts, containerFetch,
+        initialStatus: "stopped", platformRunning: true, startAndWaitForPorts, containerFetch,
       });
       try {
         const readiness = container.ensureReadyForProcessing({
@@ -2693,11 +2912,64 @@ describe("RunnerContainer", () => {
         expect(startAndWaitForPorts).toHaveBeenCalledOnce();
         expect(containerFetch).toHaveBeenCalledTimes(phase === "health" ? 1 : 0);
         expect(destroy).not.toHaveBeenCalled();
+        expect(Reflect.get(container, "currentContainerStart")).toMatchObject({
+          pendingUntilMs: expect.any(Number),
+          readyObservedBy: null,
+        });
+        expectRunnerContainerStartupFailureObservation({
+          cleanupUnsettled: false,
+          expectedColdWaitDirectCause: phase === "health" ? undefined : "native_no_instance",
+          expectedColdWaitFailure: phase === "health" ? undefined
+            : phase === "instance" ? "instance_start_aborted" : "port_wait_aborted",
+          expectedColdWaitNativeRunning: phase === "health" ? undefined : true,
+          stage: phase === "health" ? "cold_health_or_finalization" : "cold_start_or_ports",
+          forbiddenValues: [sdkFailure.message, deadlineReason.message, NATIVE_NO_INSTANCE_MESSAGE],
+        });
       } finally {
         timeout.mockRestore();
       }
     },
   );
+
+  it("omits the cold-wait diagnostic when the SDK wait has not rejected", async () => {
+    vi.useFakeTimers();
+    const deadline = new AbortController();
+    const timeout = vi.spyOn(AbortSignal, "timeout").mockReturnValue(deadline.signal);
+    const waitStarted = createDeferred<void>();
+    const wait = createDeferred<void>();
+    const { container, destroy, startAndWaitForPorts } = createContainerDouble({
+      startAndWaitForPorts: vi.fn(() => {
+        waitStarted.resolve(undefined);
+        return wait.promise;
+      }),
+    });
+    try {
+      const readiness = container.ensureReadyForProcessing({
+        timeoutMs: 15_000, userId: "member_123",
+      });
+      await waitStarted.promise;
+      deadline.abort(new DOMException("Synthetic readiness deadline", "TimeoutError"));
+      await vi.advanceTimersByTimeAsync(5_000);
+      await expect(readiness).resolves.toEqual({ kind: "cleanup_unsettled" });
+      expectRunnerContainerStartupFailureObservation({
+        cleanupUnsettled: true,
+        stage: "cold_start_or_ports",
+      });
+      // A later rejection must not mutate the record or add another failure observation.
+      wait.reject(new Error(SDK_PORT_WAIT_ABORT_MESSAGE));
+      await vi.advanceTimersByTimeAsync(0);
+      expectRunnerContainerStartupFailureObservation({
+        cleanupUnsettled: true,
+        stage: "cold_start_or_ports",
+      });
+      expect(startAndWaitForPorts).toHaveBeenCalledOnce();
+      expect(destroy).not.toHaveBeenCalled();
+    } finally {
+      wait.resolve(undefined);
+      timeout.mockRestore();
+      vi.useRealTimers();
+    }
+  });
 
   it("starts the readiness deadline before lifecycle-lock admission", async () => {
     const firstDeadline = new AbortController();
@@ -3687,7 +3959,7 @@ describe("RunnerContainer", () => {
       startObserved.resolve(undefined);
       await new Promise<never>((_, reject) => {
         input.cancellationOptions.abort.addEventListener("abort", () => {
-          reject(input.cancellationOptions.abort.reason);
+          reject(new Error(SDK_PORT_WAIT_ABORT_MESSAGE));
         }, { once: true });
       });
     });
@@ -3772,6 +4044,9 @@ describe("RunnerContainer", () => {
       expect(startAndWaitForPorts).toHaveBeenCalledTimes(2);
       expectRunnerContainerStartupFailureObservation({
         cleanupUnsettled: true,
+        expectedColdWaitDirectCause: "absent",
+        expectedColdWaitFailure: "port_wait_aborted",
+        expectedColdWaitNativeRunning: "unavailable",
         stage: "cold_start_or_ports",
       });
     } finally {
@@ -5489,6 +5764,51 @@ describe("RunnerContainer", () => {
     }
   });
 
+  it("keeps activity expiry cycling while a real invocation holds the lifecycle lock", async () => {
+    const invocationStarted = createDeferred<void>();
+    const runnerResponse = createDeferred<Response>();
+    const { container, destroy } = createContainerDouble({
+      containerFetch: vi.fn(async (url: string) => {
+        if (url.endsWith("/health")) {
+          return Response.json(createRunnerHealthResult());
+        }
+        invocationStarted.resolve();
+        return await runnerResponse.promise;
+      }),
+    });
+    const invocation = container.invoke({
+      job: { kind: "workspace-invocation", request: createRunnerRequest() },
+      timeoutMs: 60_000,
+      userId: "member_123",
+    });
+    await invocationStarted.promise;
+    let invocationFinished = false;
+    void invocation.then(() => { invocationFinished = true; });
+    const expiries: Promise<void>[] = [];
+    vi.useFakeTimers();
+    try {
+      for (let cycle = 0; cycle < 3; cycle += 1) {
+        vi.setSystemTime(Date.now() + 60_000);
+        let expiryFinished = false;
+        const expiry = container.onActivityExpired();
+        expiries.push(expiry);
+        void expiry.then(() => { expiryFinished = true; });
+        await vi.advanceTimersByTimeAsync(1);
+        expect(expiryFinished).toBe(true);
+        expect(invocationFinished).toBe(false);
+        expect(destroy).not.toHaveBeenCalled();
+        const schedules = await container.listSchedules("onActivityExpired");
+        expect(schedules).toHaveLength(1);
+        expect((schedules[0]?.time ?? 0) * 1_000).toBeGreaterThan(Date.now());
+      }
+    } finally {
+      vi.useRealTimers();
+      runnerResponse.resolve(Response.json(createRunnerResult()));
+      await invocation;
+      await Promise.all(expiries);
+    }
+  });
+
   it("records activity-expiry diagnostics while yielding to active workspace work", async () => {
     vi.useFakeTimers();
 
@@ -5559,6 +5879,144 @@ describe("RunnerContainer", () => {
     } finally { vi.useRealTimers(); }
   });
 
+  it.each(["before-result", "after-result"] as const)("concurrent exact completion notifications %s still stop a drained background invocation", async (arrival) => {
+    const started = createDeferred<void>();
+    const finished = createDeferred<void>();
+    const { container, destroy } = createContainerDouble({
+      containerFetch: vi.fn(async (url: string) => {
+        if (url.endsWith("/health")) return Response.json(createRunnerHealthResult());
+        started.resolve();
+        await finished.promise;
+        return Response.json(createRunnerResult());
+      }),
+    });
+    const request = createRunnerRequest("evt_concurrent_completion_cleanup");
+    const invocation = container.invoke({
+      job: { kind: "workspace-invocation", request },
+      timeoutMs: 60_000,
+      userId: request.userId,
+    });
+    await started.promise;
+    if (arrival === "after-result") {
+      finished.resolve();
+      await invocation;
+    }
+    const completion = {
+      attemptId: request.attemptId,
+      leaseGeneration: request.leaseGeneration,
+      userId: request.userId,
+    };
+    const notifications = Promise.all([
+      container.onRuntimeCompletionRecorded(completion),
+      container.onRuntimeCompletionRecorded(completion),
+    ]);
+    expect(destroy).not.toHaveBeenCalled();
+    finished.resolve();
+    await Promise.all([invocation, notifications]);
+    expect(destroy).toHaveBeenCalledOnce();
+    expect(await container.listSchedules("onActivityExpired")).toEqual([]);
+  });
+
+  it("concurrent old completion notifications preserve a queued successor invocation", async () => {
+    const successorStarted = createDeferred<void>();
+    const successorFinished = createDeferred<void>();
+    let invocationCount = 0;
+    const { container, destroy } = createContainerDouble({
+      containerFetch: vi.fn(async (url: string) => {
+        if (url.endsWith("/health")) return Response.json(createRunnerHealthResult());
+        if (++invocationCount === 2) {
+          successorStarted.resolve();
+          await successorFinished.promise;
+        }
+        return Response.json(createRunnerResult());
+      }),
+    });
+    const request = createRunnerRequest("evt_old_completion_cleanup");
+    await container.invoke({ job: { kind: "workspace-invocation", request }, timeoutMs: 60_000, userId: request.userId });
+    const completion = { attemptId: request.attemptId, leaseGeneration: request.leaseGeneration, userId: request.userId };
+    const firstNotification = container.onRuntimeCompletionRecorded(completion);
+    const successorRequest = createRunnerRequest("evt_successor_completion_cleanup");
+    const successor = container.invoke({ job: { kind: "workspace-invocation", request: successorRequest }, timeoutMs: 60_000, userId: request.userId });
+    const secondNotification = container.onRuntimeCompletionRecorded(completion);
+    await successorStarted.promise;
+    expect(destroy).not.toHaveBeenCalled();
+    successorFinished.resolve();
+    await Promise.all([successor, firstNotification, secondNotification]);
+    expect(destroy).not.toHaveBeenCalled();
+    await container.onRuntimeCompletionRecorded({ attemptId: successorRequest.attemptId, leaseGeneration: successorRequest.leaseGeneration, userId: successorRequest.userId });
+    expect(destroy).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    ["before-result", "drained"], ["after-result", "drained"],
+    ["before-result", "active-child"], ["after-result", "active-child"],
+    ["before-result", "conversation-warm"], ["after-result", "conversation-warm"],
+    ["before-result", "unknown-health"], ["after-result", "unknown-health"],
+  ] as const)("rechecks an accepted wake's completion %s with %s health", async (arrival, protection) => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const response = createDeferred<Response>();
+    try {
+      const completedAt = Date.parse("2026-08-01T12:00:00.125Z");
+      vi.setSystemTime(completedAt);
+      const started = createDeferred<void>();
+      let completed = false;
+      const { container, destroy } = createContainerDouble({
+        containerFetch: vi.fn(async (url: string) => {
+          if (url.endsWith("/health")) {
+            if (completed && protection === "unknown-health") return new Response(null, { status: 503 });
+            return Response.json({
+              ...createRunnerHealthResult(),
+              activeJobCount: completed && protection === "active-child" ? 1 : 0,
+              conversationActivityReceivedAtEpochMs: completed && protection === "conversation-warm" ? completedAt : null,
+            });
+          }
+          if (url.endsWith("/internal/runtime-wake")) return new Response(null, {
+            status: 204,
+            headers: { "x-runtime-wake-accepted": "1", "x-runtime-wake-identity-checked": "1" },
+          });
+          started.resolve();
+          return await response.promise;
+        }),
+      });
+      const request = createRunnerRequest("evt_wake_drained_before_completion");
+      const invocation = container.invoke({ job: { kind: "workspace-invocation", request }, timeoutMs: 60_000, userId: request.userId });
+      await started.promise;
+      const completion = { attemptId: request.attemptId, leaseGeneration: request.leaseGeneration, userId: request.userId };
+      await expect(container.wakeRuntime(completion)).resolves.toMatchObject({ action: "woken", kind: "accepted" });
+      if (arrival === "after-result") {
+        completed = true;
+        response.resolve(Response.json(createRunnerResult()));
+        await invocation;
+      }
+      const notification = container.onRuntimeCompletionRecorded(completion);
+      completed = true;
+      response.resolve(Response.json(createRunnerResult()));
+      await Promise.all([invocation, notification]);
+      // The old completion generation cannot stop even a drained child.
+      expect(destroy).not.toHaveBeenCalled();
+      const schedules = await container.listSchedules("onActivityExpired");
+      expect(schedules).toHaveLength(1);
+      const recheckAt = schedules[0]!.time * 1_000;
+      expect(recheckAt - completedAt).toBeGreaterThanOrEqual(1_000);
+      expect(recheckAt - completedAt).toBeLessThanOrEqual(2_000);
+      vi.setSystemTime(recheckAt);
+      await container.onActivityExpired();
+      if (protection === "drained") {
+        expect(destroy).toHaveBeenCalledOnce();
+        expect(await container.listSchedules("onActivityExpired")).toEqual([]);
+      } else {
+        expect(destroy).not.toHaveBeenCalled();
+        const expectedAt = protection === "conversation-warm"
+          ? Math.ceil((completedAt + 600_000) / 1_000)
+          : (recheckAt + 60_000) / 1_000;
+        expect(await container.listSchedules("onActivityExpired")).toMatchObject([{ time: expectedAt }]);
+      }
+    } finally {
+      response.resolve(Response.json(createRunnerResult()));
+      vi.useRealTimers();
+    }
+  });
+
   it("native deadline cleanup does not depend on platform activity renewal", async () => {
     const renewActivityTimeout = vi.fn(() => { throw new Error("synthetic renewal failure"); });
     const { container, destroy } = createContainerDouble({ initialStatus: "running" });
@@ -5568,6 +6026,73 @@ describe("RunnerContainer", () => {
     expect(renewActivityTimeout).not.toHaveBeenCalled();
     expect(await container.listSchedules("onActivityExpired")).toEqual([]);
   });
+
+  it.each(["drained", "still-active", "conversation-warm"] as const)(
+    "rechecks a completed invocation's callback drain once, preserving %s evidence",
+    async (outcome) => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      try {
+        const completedAt = Date.parse("2026-08-01T12:00:00.125Z");
+        vi.setSystemTime(completedAt);
+        let callbackPending = false;
+        let receipt: number | null = null;
+        const { container, destroy } = createContainerDouble({
+          containerFetch: vi.fn(async (url: string) => Response.json(
+            url.endsWith("/health") ? {
+              ...createRunnerHealthResult(),
+              activeJobCount: callbackPending ? 1 : 0,
+              conversationActivityReceivedAtEpochMs: receipt,
+            } : createRunnerResult(),
+          )),
+        });
+        const request = createRunnerRequest("evt_completion_callback_drain");
+        await container.invoke({
+          job: { kind: "workspace-invocation", request },
+          timeoutMs: 60_000, userId: request.userId,
+        });
+        // The HTTP response settled, but the entrypoint's finally block still
+        // owns the active count while its completion callback awaits this DO.
+        callbackPending = true;
+        const completion = {
+          attemptId: request.attemptId, leaseGeneration: request.leaseGeneration,
+          userId: request.userId,
+        };
+        await Promise.all([
+          container.onRuntimeCompletionRecorded(completion),
+          container.onRuntimeCompletionRecorded(completion),
+        ]);
+        expect(destroy).not.toHaveBeenCalled();
+        const schedules = await container.listSchedules("onActivityExpired");
+        expect(schedules).toHaveLength(1);
+        const recheckAt = schedules[0]!.time * 1_000;
+        expect(recheckAt - completedAt).toBeGreaterThanOrEqual(1_000);
+        expect(recheckAt - completedAt).toBeLessThanOrEqual(2_000);
+
+        callbackPending = outcome === "still-active";
+        receipt = outcome === "conversation-warm" ? completedAt : null;
+        vi.setSystemTime(recheckAt);
+        await container.onActivityExpired();
+        if (outcome === "drained") {
+          expect(destroy).toHaveBeenCalledOnce();
+          expect(await container.listSchedules("onActivityExpired")).toEqual([]);
+        } else {
+          expect(destroy).not.toHaveBeenCalled();
+          const nextAt = outcome === "conversation-warm"
+            ? Math.ceil((completedAt + 600_000) / 1_000)
+            : (recheckAt + 60_000) / 1_000;
+          expect(await container.listSchedules("onActivityExpired"))
+            .toMatchObject([{ time: nextAt }]);
+          if (outcome === "still-active") {
+            vi.setSystemTime(nextAt * 1_000);
+            await container.onActivityExpired();
+            expect(destroy).not.toHaveBeenCalled();
+            expect(await container.listSchedules("onActivityExpired"))
+              .toMatchObject([{ time: nextAt + 60 }]);
+          }
+        }
+      } finally { vi.useRealTimers(); }
+    },
+  );
 
   it.each(["default", "system_mailbox"] as const)(
     "lets active %s work cross expiry, then stops without a new grace period",
@@ -9028,7 +9553,11 @@ describe("RunnerContainer", () => {
     expect(JSON.stringify(failureLogInput)).not.toContain("placeholder");
   });
 
-  it("preserves runtime phase detail through the thrown and persisted error shapes", async () => {
+  it.each([
+    "EACCES",
+    "ASSISTANT_CODEX_BACKGROUND_WORK_UNTRACKED_COMPLETION",
+    "ASSISTANT_CODEX_BACKGROUND_WORK_INTERACTED",
+  ])("preserves runtime phase and %s through thrown and persisted errors", async (code) => {
     const { container } = createContainerDouble({
       containerFetch: vi.fn(async (url: string) => {
         if (url.endsWith("/health")) {
@@ -9043,7 +9572,7 @@ describe("RunnerContainer", () => {
         return new Response(JSON.stringify({
           code: "runtime_error",
           details: {
-            errorCodeDetail: "EACCES",
+            errorCodeDetail: code,
             errorDetail: "Missing required file \"vault.json\".",
             runtimeFailurePhaseCode:
               "runtime_phase:workspace.checkpoint.idle_compact",
@@ -9071,13 +9600,13 @@ describe("RunnerContainer", () => {
     expect(thrown).toMatchObject({
       code: "runtime_error",
       details: {
-        errorCodeDetail: "EACCES",
+        errorCodeDetail: code,
         errorDetailPresent: true,
         payloadDetailsPresent: true,
         runtimeFailurePhaseCode:
           "runtime_phase:workspace.checkpoint.idle_compact",
       },
-      message: "Hosted execution runtime failed. Code: EACCES. Status: 500.",
+      message: `Hosted execution runtime failed. Code: ${code}. Status: 500.`,
       name: "Error",
       status: 500,
       statusCode: 500,
@@ -9087,7 +9616,7 @@ describe("RunnerContainer", () => {
       errorCode: "runtime_error",
       errorCodeDetail: "runtime_phase:workspace.checkpoint.idle_compact",
       safeErrorDetail:
-        "Hosted execution runtime failed. Code: EACCES. Status: 500.",
+        `Hosted execution runtime failed. Code: ${code}. Status: 500.`,
     });
     expect(JSON.stringify(thrown)).not.toContain("vault.json");
   });
@@ -9359,11 +9888,29 @@ describe("RunnerContainer", () => {
 
     await expect(container.onActivityExpired()).resolves.toBeUndefined();
 
-    expect(containerFetch).toHaveBeenCalledOnce();
+    // Check local eligibility before Web, then recheck under the lifecycle lock.
+    expect(containerFetch).toHaveBeenCalledTimes(2);
     expect(containerFetch).toHaveBeenCalledWith(
       "http://container/health",
       expect.objectContaining({ method: "GET" }),
     );
+    expect(destroy).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not idle-stop a child while a finished job's completion callback is settling", async () => {
+    let health: Record<string, unknown> = { activeJobCount: 1, settlingCompletionCallbackCount: 1 };
+    const containerFetch = vi.fn(async () => new Response(JSON.stringify({
+      ...createRunnerHealthResult(), ...health,
+    }), { headers: { "content-type": "application/json; charset=utf-8" }, status: 200 }));
+    const destroy = vi.fn(async () => {});
+    const { container } = createContainerDouble({ containerFetch, destroy, initialStatus: "running" });
+
+    await expect(container.onActivityExpired()).resolves.toBeUndefined();
+    // Lifetime work still includes the settling callback, so idle cleanup waits.
+    expect(destroy).not.toHaveBeenCalled();
+
+    health = { activeJobCount: 0, settlingCompletionCallbackCount: 0 };
+    await expect(container.onActivityExpired()).resolves.toBeUndefined();
     expect(destroy).toHaveBeenCalledTimes(1);
   });
 
@@ -9671,7 +10218,7 @@ describe("RunnerContainer", () => {
     }
 
     expect(destroy).toHaveBeenCalledTimes(2);
-    expect(containerFetch).toHaveBeenCalledOnce();
+    expect(containerFetch).toHaveBeenCalledTimes(2);
     expect(containerFetch).toHaveBeenCalledWith(
       "http://container/health",
       expect.objectContaining({ method: "GET" }),
@@ -10334,7 +10881,7 @@ describe("RunnerContainer", () => {
     let statusReadCount = 0;
     const getState = vi.fn(async () => {
       statusReadCount += 1;
-      if (statusReadCount === 2) {
+      if (statusReadCount === 3) {
         finalStatusStarted.resolve();
         await releaseFinalStatus.promise;
       }
@@ -10392,7 +10939,7 @@ describe("RunnerContainer", () => {
     let statusReadCount = 0;
     const getState = vi.fn(async () => {
       statusReadCount += 1;
-      if (statusReadCount === 2) {
+      if (statusReadCount === 3) {
         finalStatusStarted.resolve(undefined);
         await releaseFinalStatus.promise;
       }

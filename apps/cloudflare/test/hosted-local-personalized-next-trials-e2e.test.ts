@@ -28,7 +28,7 @@ const replyPath = `/chats/${encodeURIComponent(chatId)}/messages`;
 const linqApiToken = "linq-local-personalized-next-trials-token";
 const linqWebhookSecret = "linq-local-personalized-next-trials-secret";
 const safeLiveAssistantModel =
-  process.env.MURPH_HOSTED_LOCAL_LIVE_E2E_MODEL?.trim() || "gpt-5.6-terra";
+  process.env.MURPH_HOSTED_LOCAL_LIVE_E2E_MODEL?.trim() || "gpt-6.1-sol";
 const protectedCanonicalPrefixes = ["bank/automations/", "bank/experiments/"] as const;
 
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";

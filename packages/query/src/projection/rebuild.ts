@@ -1,6 +1,6 @@
 import { withCanonicalWriteLock } from "@murphai/core";
 import { withImmediateTransaction } from "@murphai/runtime-state/node";
-import { startCliPhase, timeCliPhase } from "@murphai/runtime-state/node/cli-timing";
+import { startCliPhase, timeCliPhase, timeCliPhaseSync } from "@murphai/runtime-state/node/cli-timing";
 
 import { isDefaultProjectedQueryEntity, isSearchIndexedQueryEntity } from "../query-visibility.ts";
 import { createVaultReadModel } from "../read-model.ts";
@@ -19,7 +19,6 @@ import {
 } from "../vault-source.ts";
 import { collectWearableDataset } from "../wearables/candidates.ts";
 import type { RebuildQueryProjectionResult } from "../query-projection-types.ts";
-import type { WearableSummaryFilters } from "../wearables.ts";
 import { insertQueryEntities } from "./entity-store.ts";
 import {
   isWearableProjectionFresh,
@@ -49,6 +48,7 @@ import {
   readWearableSummaryRows,
   type QueryWearableSummaryRow,
   type QueryWearableSummaryRowSet,
+  type ReadWearableSummaryRowsFilters,
 } from "./wearable-summary-store.ts";
 
 export async function rebuildQueryProjectionFromCanonicalSource(
@@ -81,12 +81,15 @@ export async function rebuildQueryProjectionFromCanonicalSource(
     let metricTargets: ReturnType<typeof extractMetricTargetsFromCanonicalEntities>;
     const endMetrics = startCliPhase("query-metric-projection");
     try {
+      // Nested fixed subphases; the shared owner stays free of Node timing.
       const metricProjection = buildMetricProjection(snapshotReadModel, {
+        startStep: startCliPhase,
         wearableDataset,
       });
       dailySampleSummaries = metricProjection.dailySampleSummaries;
       metricPoints = metricProjection.metricPoints;
-      metricTargets = extractMetricTargetsFromCanonicalEntities(snapshot.entities);
+      metricTargets = timeCliPhaseSync("query-metric-targets",
+        () => extractMetricTargetsFromCanonicalEntities(snapshot.entities));
     } finally {
       endMetrics();
     }
@@ -125,6 +128,7 @@ export async function rebuildQueryProjectionFromCanonicalSource(
           database.exec(`
             DELETE FROM query_entities;
             DELETE FROM query_metric_points;
+            DELETE FROM query_metric_payloads;
             DELETE FROM query_metric_targets;
             DELETE FROM query_source_manifest;
             DELETE FROM query_search_document;
@@ -145,6 +149,12 @@ export async function rebuildQueryProjectionFromCanonicalSource(
           writeMeta(database, "metadata_json", JSON.stringify(snapshot.metadata ?? null));
           return builtAt;
         });
+
+        // Full rebuilds already replace the global tables. Repack once here,
+        // after commit and under the canonical writer lock. Fresh reads and
+        // wearable-only publications never pay this cost. Explicit search
+        // INTEGER PRIMARY KEY rowids keep the external-content FTS links stable.
+        database.exec("VACUUM");
 
         return {
           dbPath: location.dbPath,
@@ -169,7 +179,7 @@ export async function rebuildQueryProjectionFromCanonicalSource(
  * lock. A stale read publishes only wearables, never global query work. */
 export async function readFreshWearableSummaryRows(
   vaultRoot: string,
-  filters: Pick<WearableSummaryFilters, "providers">,
+  filters: ReadWearableSummaryRowsFilters,
 ): Promise<QueryWearableSummaryRowSet> {
   const endFreshness = startCliPhase("query-freshness");
   const endWait = startCliPhase("query-wait");
@@ -230,7 +240,10 @@ function replaceWearableProjection(
   rows: readonly QueryWearableSummaryRow[],
   manifest: readonly QuerySourceManifestEntry[],
 ): void {
-  database.exec("DELETE FROM query_wearable_summaries");
+  database.exec(`
+    DELETE FROM query_wearable_summaries;
+    DELETE FROM query_wearable_summary_shapes;
+  `);
   insertWearableSummaryRows(database, rows);
   writeWearableSourceManifest(database, manifest);
 }

@@ -23,7 +23,6 @@ export interface HostedInviteStatusPayload {
   };
   capabilities: {
     billingReady: boolean;
-    phoneAuthReady: boolean;
   };
   invite: {
     code: string;

@@ -443,7 +443,6 @@ export function GroupMemberPlanStudy() {
             currentBillingPlanCode="launch_monthly"
             currentPeriodEnd={new Date("2026-08-27T04:00:00.000Z")}
             payerMemberId="design_usage_recovery_direct"
-            usageRecoveryInitialOpen
             usageStatus={EXHAUSTED_PULSE_USAGE_STATUS}
             usageTopUpOffers={[{
               amountLabel: "$10",
@@ -466,7 +465,6 @@ export function GroupMemberPlanStudy() {
             currentPeriodEnd={new Date("2026-09-07T20:00:00.000Z")}
             payerMemberId="design_usage_recovery_max"
             showMaxPlan
-            usageRecoveryInitialOpen
             usageStatus={EXHAUSTED_MAX_USAGE_STATUS}
             usageTopUpOffers={[{
               amountLabel: "$10",
@@ -485,7 +483,6 @@ export function GroupMemberPlanStudy() {
             authenticated
             billingStatus="active"
             familyState="sponsored"
-            usageRecoveryInitialOpen
             usageStatus={{
               ...EXHAUSTED_PULSE_USAGE_STATUS,
               accessKind: "family_sponsored",
@@ -551,7 +548,6 @@ export function GroupMemberPlanStudy() {
               },
             ]}
             usageRecoveryAvailable
-            usageRecoveryInitialOpen
             usageTopUpOffers={[{
               amountLabel: "$5",
               offerCode: "usage_5_usd",

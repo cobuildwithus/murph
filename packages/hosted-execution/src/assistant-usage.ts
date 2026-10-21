@@ -50,6 +50,8 @@ const ASSISTANT_USAGE_RAW_DETAIL_TOKEN_KEYS = new Map<string, ReadonlySet<string
 const ASSISTANT_USAGE_RAW_AUDIO_KEYS = new Set<string>([
   "audioBytes",
   "durationMs",
+  "startDurationMs",
+  "endDurationMs",
 ]);
 const ASSISTANT_USAGE_RAW_TTS_KEYS = new Set<string>([
   "characterCount",
@@ -154,7 +156,7 @@ function isAssistantTurnProfileIdentifierComponent(value: string): boolean {
     && ASSISTANT_TURN_PROFILE_IDENTIFIER_COMPONENT_PATTERN.test(value);
 }
 
-function isAssistantTurnProfileToolIdentityLabel(
+export function isAssistantTurnProfileToolIdentityLabel(
   kind: "dynamic_tool" | "mcp_tool",
   label: string,
 ): boolean {
@@ -593,6 +595,55 @@ export function buildAssistantMaintenanceUsageRecord(input: {
   });
 }
 
+export const HOSTED_LIVE_USAGE_SOURCE = "codex.live.session.usage";
+export const HOSTED_LIVE_USAGE_VERSION = "codex-live-duration-v1";
+
+/** One non-overlapping interval from trusted native cumulative usage. */
+export function buildHostedLiveUsageRecord(input: {
+  sessionId: string;
+  memberId: string;
+  occurredAt: string;
+  startDurationMs: number;
+  endDurationMs: number;
+}): AssistantUsageRecord {
+  if (!input.sessionId.trim() || !input.memberId.trim()) {
+    throw new TypeError("Live usage requires a session and member.");
+  }
+  if (!Number.isSafeInteger(input.startDurationMs) || input.startDurationMs < 0
+    || !Number.isSafeInteger(input.endDurationMs)
+    || input.endDurationMs <= input.startDurationMs) {
+    throw new TypeError("Live usage requires an increasing duration interval.");
+  }
+  const digest = createHash("sha256")
+    .update(JSON.stringify([input.memberId, input.sessionId, input.startDurationMs, input.endDurationMs]))
+    .digest("hex");
+  const turnId = `turn_live_${digest}`;
+  return parseAssistantUsageRecord({
+    apiKeyEnv: "OPENAI_API_KEY",
+    attemptCount: 1,
+    baseUrl: "https://api.openai.com/v1",
+    credentialSource: "platform",
+    featureKey: "live-voice",
+    memberId: input.memberId,
+    occurredAt: input.occurredAt,
+    provider: "codex-cli",
+    providerName: "openai",
+    rawUsageJson: {
+      startDurationMs: input.startDurationMs,
+      endDurationMs: input.endDurationMs,
+    },
+    requestedModel: "gpt-live-1",
+    schema: ASSISTANT_USAGE_SCHEMA,
+    sessionId: input.sessionId,
+    surface: "hosted-runtime",
+    triggerKind: "live-voice",
+    turnId,
+    usageId: createAssistantUsageId({ attemptCount: 1, turnId }),
+    usageExtractionSourcePath: HOSTED_LIVE_USAGE_SOURCE,
+    usageExtractionVersion: HOSTED_LIVE_USAGE_VERSION,
+  });
+}
+
 // Usage record for Worker-mediated Workers AI audio transcription. It runs
 // outside any member turn (hosted attachment parse jobs), so it uses a
 // synthetic turn id like the maintenance record above. Cost basis is audio
@@ -793,73 +844,6 @@ function readNonNegativeInteger(value: unknown): number | null {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0
     ? value
     : null;
-}
-
-// Exact usage for Codex-native memory work intercepted outside the foreground
-// app-server turn. Provider response ids make re-observation idempotent while
-// the provider timestamp keeps the immutable record stable across retries.
-export function buildHostedCodexMemoryUsageRecord(input: {
-  apiKeyEnv: string;
-  baseUrl: string;
-  cacheWriteTokens: number | null;
-  cachedInputTokens: number | null;
-  inputTokens: number;
-  memberId: string;
-  occurredAt: string;
-  outputTokens: number;
-  providerName: string;
-  providerRequestId: string;
-  providerRequestOutcome: AssistantProviderRequestOutcome;
-  rawUsageJson: Record<string, unknown>;
-  reasoningTokens: number | null;
-  requestedModel: string;
-  servedModel?: string | null;
-  tokenPricingBasis?: AssistantUsageTokenPricingBasis;
-  totalTokens: number;
-}): AssistantUsageRecord {
-  const digest = createHash("sha256")
-    .update("murph.hosted-codex-memory-usage.v1")
-    .update("\0")
-    .update(input.memberId)
-    .update("\0")
-    .update(input.providerName)
-    .update("\0")
-    .update(input.providerRequestId)
-    .digest("hex")
-    .slice(0, 32);
-  const turnId = `turn_codex_memory_${digest}`;
-
-  return parseAssistantUsageRecord({
-    apiKeyEnv: input.apiKeyEnv,
-    attemptCount: 1,
-    baseUrl: input.baseUrl,
-    cacheWriteTokens: input.cacheWriteTokens,
-    cachedInputTokens: input.cachedInputTokens,
-    credentialSource: "platform",
-    featureKey: "codex-native-memory",
-    inputTokens: input.inputTokens,
-    memberId: input.memberId,
-    occurredAt: input.occurredAt,
-    outputTokens: input.outputTokens,
-    provider: "codex-cli",
-    providerName: input.providerName,
-    providerRequestId: input.providerRequestId,
-    providerRequestOutcome: input.providerRequestOutcome,
-    rawUsageJson: input.rawUsageJson,
-    reasoningTokens: input.reasoningTokens,
-    requestedModel: input.requestedModel,
-    schema: ASSISTANT_USAGE_SCHEMA,
-    servedModel: input.servedModel ?? null,
-    sessionId: turnId,
-    surface: "hosted-runner",
-    tokenPricingBasis: input.tokenPricingBasis ?? "standard",
-    totalTokens: input.totalTokens,
-    triggerKind: "codex-native-memory",
-    turnId,
-    usageId: createAssistantUsageId({ attemptCount: 1, turnId }),
-    usageExtractionSourcePath: "codex.responses.terminal",
-    usageExtractionVersion: "codex-native-memory-v1",
-  });
 }
 
 // Raw usage keys copied verbatim from the xAI Responses API usage object.
@@ -1308,6 +1292,10 @@ function normalizeOptionalRawUsageJsonRecord(
 // The profile is droppable telemetry: an invalid profile becomes null instead
 // of rejecting the whole usage record, so token accounting never fails open
 // because of a telemetry-only validation mismatch.
+export function normalizeAssistantTurnProfileJson(value: unknown): Record<string, unknown> | null {
+  return normalizeOptionalTurnProfileJson(value, "turnProfileJson");
+}
+
 function normalizeOptionalTurnProfileJson(
   value: unknown,
   label: string,

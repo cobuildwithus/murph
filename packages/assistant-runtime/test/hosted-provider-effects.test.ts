@@ -398,7 +398,7 @@ describe("hosted provider effects", () => {
     })).resolves.toEqual({
       providerMessageEffects: [{
         carriesIntentMedia: true,
-        message: "hello\n\nDead bug setup",
+        message: "hello",
         providerMessageId: "recovered-message",
       }],
       providerMessageId: "recovered-message",
@@ -939,7 +939,7 @@ describe("hosted provider effects", () => {
     })).resolves.toEqual({
       providerMessageEffects: [{
         carriesIntentMedia: true,
-        message: "hello\n\nDead bug setup",
+        message: "hello",
         providerMessageId: "recovered-message",
       }],
       providerMessageId: "recovered-message",
@@ -965,7 +965,7 @@ describe("hosted provider effects", () => {
           parts: [
             {
               type: "text",
-              value: "hello\n\nDead bug setup",
+              value: "hello",
             },
             {
               type: "media",

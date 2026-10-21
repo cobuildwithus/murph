@@ -469,18 +469,20 @@ describe("deleteHostedRunnerUserDataBestEffort", () => {
     vi.mocked(readHostedExecutionControlClientIfConfigured).mockReturnValue({
       createBrowserVaultExportSession: vi.fn(),
       createBrowserVaultSession: vi.fn(),
-      createEnvironmentRealtimeCall: vi.fn(),
-      deleteEnvironmentVoice: vi.fn(),
+      controlVoice: vi.fn(),
+      deleteGameMedia: vi.fn(),
       deleteMealPhoto: vi.fn(),
       deleteUserData,
       purgeRuntimeResource: vi.fn(),
+      putGameMedia: vi.fn(),
+      readGameMedia: vi.fn(),
       enqueueDeviceWebhook: vi.fn(),
       ensureRuntimeProcessing: vi.fn(),
       getRunnerStatus: vi.fn(),
       reconcileRuntimeHealthDataConsent: vi.fn(),
       sendTelegramUsageLimitNotice: vi.fn(),
-      stageEnvironmentVoice: vi.fn(),
       stageMealPhoto: vi.fn(),
+      statGameMedia: vi.fn(),
       verifyInferenceConnection: vi.fn(),
     } as ReturnType<typeof readHostedExecutionControlClientIfConfigured>);
 
@@ -506,10 +508,12 @@ describe("deleteHostedRunnerUserDataBestEffort", () => {
     vi.mocked(readHostedExecutionControlClientIfConfigured).mockReturnValue({
       createBrowserVaultExportSession: vi.fn(),
       createBrowserVaultSession: vi.fn(),
-      createEnvironmentRealtimeCall: vi.fn(),
-      deleteEnvironmentVoice: vi.fn(),
+      controlVoice: vi.fn(),
+      deleteGameMedia: vi.fn(),
       deleteMealPhoto: vi.fn(),
       purgeRuntimeResource: vi.fn(),
+      putGameMedia: vi.fn(),
+      readGameMedia: vi.fn(),
       deleteUserData: vi.fn().mockResolvedValue({
         deletedAt: "2026-04-29T00:00:00.000Z",
         durableObject: {
@@ -530,8 +534,8 @@ describe("deleteHostedRunnerUserDataBestEffort", () => {
       getRunnerStatus: vi.fn(),
       reconcileRuntimeHealthDataConsent: vi.fn(),
       sendTelegramUsageLimitNotice: vi.fn(),
-      stageEnvironmentVoice: vi.fn(),
       stageMealPhoto: vi.fn(),
+      statGameMedia: vi.fn(),
       verifyInferenceConnection: vi.fn(),
     } as ReturnType<typeof readHostedExecutionControlClientIfConfigured>);
 
@@ -555,18 +559,20 @@ describe("deleteHostedRunnerUserDataBestEffort", () => {
       vi.mocked(readHostedExecutionControlClientIfConfigured).mockReturnValue({
         createBrowserVaultExportSession: vi.fn(),
         createBrowserVaultSession: vi.fn(),
-        createEnvironmentRealtimeCall: vi.fn(),
-        deleteEnvironmentVoice: vi.fn(),
+      controlVoice: vi.fn(),
+        deleteGameMedia: vi.fn(),
         deleteMealPhoto: vi.fn(),
         deleteUserData,
         purgeRuntimeResource: vi.fn(),
+        putGameMedia: vi.fn(),
+        readGameMedia: vi.fn(),
         enqueueDeviceWebhook: vi.fn(),
         ensureRuntimeProcessing: vi.fn(),
         getRunnerStatus: vi.fn(),
         reconcileRuntimeHealthDataConsent: vi.fn(),
         sendTelegramUsageLimitNotice: vi.fn(),
-        stageEnvironmentVoice: vi.fn(),
         stageMealPhoto: vi.fn(),
+        statGameMedia: vi.fn(),
         verifyInferenceConnection: vi.fn(),
       } as ReturnType<typeof readHostedExecutionControlClientIfConfigured>);
 

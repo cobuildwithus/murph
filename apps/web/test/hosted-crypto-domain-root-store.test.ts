@@ -1229,6 +1229,10 @@ test("more than fifteen stored mailbox payloads use one envelope query with at m
   const prisma = Object.assign(tx.prisma, {
     hostedUserCryptoEnvelope: { findMany: envelopeFindMany },
   });
+  // Model a cold Web crypto owner after fixture sealing warmed ingress roots.
+  // This test still proves the batch provider concurrency bound on cache misses.
+  assert.ok(gcpKmsMock.client);
+  gcpKmsMock.client = { ...gcpKmsMock.client };
   resetLocalKmsDecryptMetrics(decryptMetrics, { yieldBeforeReturn: true });
 
   await expect(decodeHostedMailboxStoredPayloads({
@@ -3450,7 +3454,7 @@ test.each([false, true])("phone channel welcome prepares real routing and mailbo
   const member = {
     id: memberId, billingStatus: HostedBillingStatus.active, suspendedAt: null,
     createdAt: new Date(), updatedAt: new Date(), billingRef: null, emailAuthorization: null,
-    routing: null, threadContainer: null, accountGroupMemberships: [], assistantProviderPreference: null,
+    routing: null, threadContainer: null, accountGroupMemberships: [],
     identity: { ...identity, memberId, phoneLookupKey: createHostedPhoneLookupKey(phone), phoneNumberVerifiedAt: new Date() },
   };
   const routingWrite = vi.fn(async (_input: { create: { linqRecipientPhoneEncrypted: string } }) => {
@@ -3820,8 +3824,9 @@ function createCapturingTransaction(): HostedCryptoTestTransaction {
 
       const rootKeyId = values.find((value): value is string =>
         typeof value === "string" && value.startsWith("udrk:"));
-      const domain = values.find((value): value is HostedDomainRootKeyEnvelopeV1["domain"] =>
-        value === "control" || value === "device" || value === "ingress" || value === "runtime");
+      const domain = sql.includes("domain = 'ingress'::hosted_crypto_domain") ? "ingress"
+        : values.find((value): value is HostedDomainRootKeyEnvelopeV1["domain"] =>
+          value === "control" || value === "device" || value === "ingress" || value === "runtime");
       const envelope = persistedEnvelopes.find((candidate) =>
         candidate.userId === userId
         && candidate.domain === domain

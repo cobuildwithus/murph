@@ -3,67 +3,21 @@ import { describe, expect, it } from "vitest";
 
 import {
   resolveHostedStripeBillingStatusForWrite,
-  resolveHostedSubscriptionBillingStatus,
 } from "../src/lib/hosted-onboarding/stripe-billing-status";
 
-describe("resolveHostedSubscriptionBillingStatus", () => {
-  it("keeps active subscriptions active when billing is already active", () => {
-    expect(
-      resolveHostedSubscriptionBillingStatus({
-        currentBillingStatus: HostedBillingStatus.active,
-        nextBillingStatus: HostedBillingStatus.active,
-      }),
-    ).toBe(HostedBillingStatus.active);
-  });
-
-  it("downgrades active subscription events for expired Pulse Trial state until invoice confirmation arrives", () => {
-    expect(
-      resolveHostedSubscriptionBillingStatus({
-        currentBillingPhase: "trial",
-        currentBillingStatus: HostedBillingStatus.active,
-        currentCheckoutOffer: "pulse_trial_7d",
-        currentTrialEndsAt: new Date("2026-06-21T12:00:00.000Z"),
-        eventCreatedAt: new Date("2026-06-21T12:00:00.000Z"),
-        nextBillingStatus: HostedBillingStatus.active,
-        sourceType: "stripe.customer.subscription.updated",
-      }),
-    ).toBe(HostedBillingStatus.incomplete);
-  });
-
-  it("keeps resumed expired Pulse Trial subscriptions incomplete until invoice confirmation arrives", () => {
-    expect(
-      resolveHostedSubscriptionBillingStatus({
-        currentBillingPhase: "trial",
-        currentBillingStatus: HostedBillingStatus.paused,
-        currentCheckoutOffer: "pulse_trial_7d",
-        currentTrialEndsAt: new Date("2026-06-21T12:00:00.000Z"),
-        eventCreatedAt: new Date("2026-06-22T12:00:00.000Z"),
-        nextBillingStatus: HostedBillingStatus.active,
-        sourceType: "stripe.customer.subscription.resumed",
-      }),
-    ).toBe(HostedBillingStatus.incomplete);
-  });
-
-  it("downgrades first active subscription events to incomplete until invoice confirmation arrives", () => {
-    expect(
-      resolveHostedSubscriptionBillingStatus({
-        currentBillingStatus: HostedBillingStatus.not_started,
-        nextBillingStatus: HostedBillingStatus.active,
-      }),
-    ).toBe(HostedBillingStatus.incomplete);
-  });
-});
-
 describe("resolveHostedStripeBillingStatusForWrite", () => {
-  it("prefers canonical subscription state for subscription events", () => {
+  it.each([
+    [HostedBillingStatus.active, HostedBillingStatus.active],
+    [HostedBillingStatus.not_started, HostedBillingStatus.incomplete],
+  ])("maps an active canonical subscription for a %s member to %s", (currentBillingStatus, expectedStatus) => {
     expect(
       resolveHostedStripeBillingStatusForWrite({
         billingStatus: HostedBillingStatus.past_due,
         canonicalBillingStatus: HostedBillingStatus.active,
-        currentBillingStatus: HostedBillingStatus.active,
+        currentBillingStatus,
         sourceType: "stripe.customer.subscription.updated",
       }),
-    ).toBe(HostedBillingStatus.active);
+    ).toBe(expectedStatus);
   });
 
   it("treats trial_will_end as a canonical subscription event", () => {

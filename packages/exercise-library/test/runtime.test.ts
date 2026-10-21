@@ -60,14 +60,14 @@ describe("exercise-library runtime", () => {
     expect(artifacts.details.items[0]?.sourceIds.length).toBeGreaterThan(0);
     const catalogImages = artifacts.details.items.flatMap((item) => item.images);
     expect(artifacts.details.items.filter((item) => item.images.length > 0)).toHaveLength(1748);
-    expect(catalogImages).toHaveLength(5340);
+    expect(catalogImages).toHaveLength(5350);
     expect(new Set(catalogImages.map((image) => image.url)).size).toBe(catalogImages.length);
     expect(catalogImages.every((image) => image.step.length > 0 && image.alt.length > 0)).toBe(true);
     expect(catalogImages.every((image) => image.alt.length <= 500)).toBe(true);
     expect(artifacts.details.items.find((item) => item.slug === "stretch-cat-cow")?.images).toEqual([
       expect.objectContaining({
         step: "Tabletop setup",
-        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/889a5f43-1d35-4eae-a98e-7ae69e96a800/public",
+        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/exercise-repair-07aa46fa8b2ad2958ceb795863869596/public",
       }),
       expect.objectContaining({
         step: "Cow position",
@@ -75,47 +75,47 @@ describe("exercise-library runtime", () => {
       }),
       expect.objectContaining({
         step: "Cat position",
-        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/7f90ecd5-5f6b-4ddf-5997-c1d5893e0300/public",
+        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/exercise-repair-46cc11ca510b33557a5c600bf9437231/public",
       }),
       expect.objectContaining({
         step: "Slow flow",
-        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/8d1a1b7c-6780-4345-b5e6-bffb32ec5a00/public",
+        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/exercise-repair-d6766cf3a371ea773a7395b3b04281c0/public",
       }),
     ]);
     expect(artifacts.details.items.find((item) => item.slug === "bird-dog")?.images).toEqual([
       expect.objectContaining({
-        step: "Tabletop setup",
-        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/79a37dfb-073c-4b11-4698-de12aaf81b00/public",
+        step: "Start on hands and knees with hands under shoulders and knees under hips.",
+        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/exercise-repair-b27c2c418c18c7d3c26599d81d8571d8/public",
       }),
       expect.objectContaining({
-        step: "Reach side A",
-        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/77a9a44d-5c51-4f6b-66f1-678b58793400/public",
+        step: "Reach one arm forward and the opposite leg back, keeping the supporting knee grounded.",
+        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/exercise-repair-77906174823f37eb56a88388d7763b83/public",
       }),
       expect.objectContaining({
-        step: "Reach side B",
-        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a8dc06cf-82b5-43e0-2d7d-1be450eadd00/public",
+        step: "Return through all fours, then reach the near arm and far leg while the far palm and near knee support.",
+        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/exercise-repair-4ac1fc7be2440f23f6fed0916cd5abd1/public",
       }),
       expect.objectContaining({
-        step: "Form check",
-        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ab24a93b-6a01-4a4e-5c61-43b746baff00/public",
+        step: "Return to both hands and knees, keeping shoulders and hips level.",
+        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/exercise-repair-b27c2c418c18c7d3c26599d8-0db15b4f/public",
       }),
     ]);
     expect(artifacts.details.items.find((item) => item.slug === "tabletop-opposite-arm-leg-reach")?.images).toEqual([
       expect.objectContaining({
         step: "Dead-bug tabletop",
-        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a7ed18ac-b0c9-47b1-609b-c295df3c4e00/public",
+        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/exercise-repair-7b2f6104247e56a85e0cb4374b7af43c/public",
       }),
       expect.objectContaining({
-        step: "Right arm left leg reach",
-        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/580eee7d-19d1-4a0d-262b-adc9b96a7400/public",
+        step: "First opposite pair",
+        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/exercise-repair-a8800ca5a83e35ab05fd705f0f16a258/public",
       }),
       expect.objectContaining({
         step: "Reset to tabletop",
-        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/82224abf-e4fb-4ecb-54a0-3bf3584bc500/public",
+        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/exercise-repair-f7ba007887d8c9b02f94efa5f2e3e75a/public",
       }),
       expect.objectContaining({
-        step: "Left arm right leg reach",
-        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/0b81fc09-ccd7-4c08-4dfe-53d0c57a3200/public",
+        step: "Other opposite pair",
+        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/exercise-repair-74833845f2b9fbf6ffc6bd16600f2fcf/public",
       }),
     ]);
     expect(artifacts.details.items.find((item) => item.slug === "glute-bridge")?.images).toEqual([
@@ -172,8 +172,8 @@ describe("exercise-library runtime", () => {
         url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/f2f399c4-eaa6-4e01-6613-0fe171aedb00/public",
       }),
       expect.objectContaining({
-        step: "Lift",
-        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/6112ec51-4742-43bd-09e4-1205b21f5100/public",
+        step: "Lift the hips while keeping both heels on the chair.",
+        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/exercise-repair-6fd6a8e222d5c08815380c5fb35eef5d/public",
       }),
     ]);
     expect(artifacts.details.items.find((item) => item.slug === "shoulders-elevated-hip-thrust")?.images).toEqual([
@@ -273,7 +273,7 @@ describe("exercise-library runtime", () => {
     ].filter((exerciseId) => exerciseId !== "EX136");
     for (const exerciseId of generatedExerciseImageIds) {
       const item = artifacts.details.items.find((candidate) => candidate.id === exerciseId);
-      expect(item?.images, exerciseId).toHaveLength(2);
+      expect(item?.images, exerciseId).toHaveLength(exerciseId === "EX185" ? 3 : 2);
       expect(item?.images.every((image) => image.url.startsWith("https://imagedelivery.net/"))).toBe(true);
       expect(item?.images.every((image) => image.step.length > 0 && image.alt.length > 0)).toBe(true);
     }
@@ -397,8 +397,8 @@ describe("exercise-library runtime", () => {
     ]);
     expect(artifacts.details.items.find((item) => item.slug === "tibialis-raise")?.images).toEqual([
       expect.objectContaining({
-        step: "Setup",
-        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/439efe55-c1f8-4058-8269-5d3b6644f200/public",
+        step: "Place the back against the wall with feet forward and toes down.",
+        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/exercise-repair-0bc38be4ae792aa1711dd54076ce31ee/public",
       }),
       expect.objectContaining({
         step: "Toes lift",

@@ -37,56 +37,12 @@ export interface WorkerAnalyticsEngineDatasetLike {
   }): void;
 }
 
-export type WorkerProviderEgressTokenValidationRejectReason =
-  | "missing_provider_egress_token"
-  | "missing_runner_state"
-  | "missing_write_fence"
-  | "provider_egress_token_mismatch"
-  | "write_fence_mismatch";
-
-export type WorkerProviderEgressTokenValidationResult =
-  | {
-      owns: false;
-      reason?: WorkerProviderEgressTokenValidationRejectReason;
-    }
-  | {
-      attemptId: string;
-      customInferenceEnvelope?: string;
-      leaseGeneration: string;
-      owns: true;
-      platformAiUsageAllowed?: boolean;
-      userId: string;
-      workspaceVersion: string | null;
-    };
-
-export type WorkerProviderEgressCredentialValidationRejectReason =
-  | "missing_runner_state"
-  | "missing_write_fence"
-  | "provider_egress_not_allowed"
-  | "runner_container_mismatch"
-  | "write_fence_mismatch";
-
-export type WorkerProviderEgressCredentialValidationResult =
-  | {
-      owns: false;
-      reason?: WorkerProviderEgressCredentialValidationRejectReason;
-    }
-  | {
-      attemptId: string;
-      leaseGeneration: string;
-      owns: true;
-      platformAiUsageAllowed?: boolean;
-      userId: string;
-      workspaceVersion: string | null;
-    };
-
 /**
  * Snapshot of the RunnerContainer DO's in-memory active workspace-invocation
  * operation. "Active" spans the whole DO-side invoke, including its
  * pre-dispatch readiness window — it proves the operation is in flight, not
  * that the runner child has accepted work. Consumers narrow what they need:
- * provider-egress fallback binds on `userId` only; the transport-failure
- * liveness probe matches the full attempt identity.
+ * the transport-failure liveness probe matches the full attempt identity.
  */
 export type WorkerActiveRuntimeUserFenceResult =
   | {
@@ -108,7 +64,7 @@ export interface WorkerRuntimeCompletionReceipt {
 }
 
 export interface WorkerRunnerContainerStubLike extends Pick<HostedExecutionContainerStubLike,
-  "beginRuntimeUsageSettlement" | "finishRuntimeUsageSettlement" | "runtimeUsageSettlementAllowsProviders" | "readSupervisedInvocation" | "recordSupervisedRuntimeCompletion"
+  "beginRuntimeUsageSettlement" | "finishRuntimeUsageSettlement" | "readProviderAuthority" | "runtimeUsageSettlementAllowsProviders" | "readSupervisedInvocation" | "recordSupervisedRuntimeCompletion"
 > {
   readActiveRuntimeUserFence?(): Promise<WorkerActiveRuntimeUserFenceResult>;
 }
@@ -204,7 +160,7 @@ export interface WorkerEnvironmentContract extends Readonly<Record<string, unkno
   HOSTED_DATABASE_ALERT_PLANETSCALE_SERVICE_TOKEN?: string;
   HOSTED_DATABASE_ALERT_PLANETSCALE_SERVICE_TOKEN_ID?: string;
   HOSTED_PRIVATE_MEDIA_CAPABILITY_SECRET?: string;
-  HOSTED_RUNTIME_RETRY_ANALYTICS?: WorkerAnalyticsEngineDatasetLike;
+  HOSTED_STANDBY_ANALYTICS?: WorkerAnalyticsEngineDatasetLike;
   HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS?: string;
   HOSTED_AI_USAGE_REPORTING_SECRET?: string;
   HOSTED_LOG_FINGERPRINT_SECRET?: string;
@@ -217,7 +173,6 @@ export interface WorkerEnvironmentContract extends Readonly<Record<string, unkno
   ELEVENLABS_API_KEY?: string;
   OPENAI_API_KEY?: string;
   OPENAI_AUTHORIZATION_ALERT_MONITOR?: WorkerOpenAiAuthorizationAlertNamespaceLike;
-  VENICE_API_KEY?: string;
   HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET?: string;
   HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON?: string;
   HOSTED_EXECUTION_MAX_EVENT_ATTEMPTS?: string;

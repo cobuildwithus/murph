@@ -35,7 +35,6 @@ import {
   findCaptureByLookup,
   initializeVault,
   patchAutomation,
-  readHabitatAspect,
   readJsonlRecords,
   repairVault,
   runCanonicalWrite,
@@ -1591,7 +1590,7 @@ describe("hosted workspace runtime entrypoint", () => {test("retained post-check
       const platform = createPlatform({
         mailboxPort: createMailboxPort({
           events,
-          items: [],
+          items: [createMailboxItem()],
         }),
         workspacePort: createWorkspacePort({
           checkpointRequests,

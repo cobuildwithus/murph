@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { constants } from "node:fs";
+import { constants, existsSync } from "node:fs";
 import { access, copyFile, cp, readFile, rename, rm, symlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { Writable } from "node:stream";
@@ -182,49 +182,6 @@ const cleanupHostedRunnerContainerLocalState = vi.fn<
   }) => Promise<void>
 >(async () => {});
 const collectDockerDevDiagnostics = vi.fn(async () => "Docker diagnostics:\n- docker version: ok");
-const DEFAULT_CODEX_MODEL_CATALOG_TEXT = JSON.stringify({
-  models: [
-    {
-      name: "GPT-5.6-Sol",
-      service_tiers: [
-        {
-          id: "priority",
-          name: "Priority",
-        },
-      ],
-      slug: "gpt-5.6-sol",
-      tool_mode: "code_mode_only",
-    },
-    {
-      name: "GPT-5.6-Terra",
-      service_tiers: [
-        {
-          id: "priority",
-          name: "Priority",
-        },
-      ],
-      slug: "gpt-5.6-terra",
-      tool_mode: "code_mode_only",
-    },
-    {
-      name: "GPT-5.6-Luna",
-      service_tiers: [
-        {
-          id: "priority",
-          name: "Priority",
-        },
-      ],
-      slug: "gpt-5.6-luna",
-      tool_mode: "code_mode_only",
-    },
-    {
-      display_name: "GPT-5.4-Mini",
-      priority: 4,
-      service_tiers: [],
-      slug: "gpt-5.4-mini",
-    },
-  ],
-});
 const defaultSpawnSyncImplementation = (
   command: string,
   args: readonly string[],
@@ -233,25 +190,13 @@ const defaultSpawnSyncImplementation = (
   status: number;
   stdout: string;
 } => {
-  if (
-    command === "codex" &&
-    args[0] === "debug" &&
-    args[1] === "models" &&
-    args[2] === "--bundled"
-  ) {
-    return {
-      error: undefined,
-      status: 0,
-      stdout: DEFAULT_CODEX_MODEL_CATALOG_TEXT,
-    };
-  }
-
   return {
     error: undefined,
     status: 0,
     stdout: "",
   };
 };
+const execFileSync = vi.fn<() => Buffer>(() => { throw new Error("caddy not found"); });
 const spawnSync = vi.fn<(
   command: string,
   args: readonly string[],
@@ -304,6 +249,7 @@ const cleanupHostedLocalMinioContainerBestEffort = vi.fn(async () => {});
 const startHostedLocalTemporalRuntime = vi.fn<
   (input: unknown) => Promise<HostedLocalTemporalRuntime | null>
 >(async () => null);
+const preflightHostedLocalTemporalWorker = vi.fn(async () => {});
 const requireHostedLocalTemporalWorkerPackageDir = vi.fn(
   (source: Readonly<Record<string, string | undefined>>): string => {
     const packageDir =
@@ -329,9 +275,8 @@ vi.mock("node:fs/promises", () => ({
   mkdir: vi.fn(async () => {}),
   mkdtemp: vi.fn(async () => "/tmp/murph-dev-env-test"),
   readFile: vi.fn(async (filePath) => {
-    if (String(filePath).endsWith(".murph-runner-bundle-manifest.json")) {
-      return defaultRunnerBundleManifestText;
-    }
+    const fixture = readRunnerBundleManifestFixture(filePath);
+    if (fixture !== null) return fixture;
     const error = new Error("File not found") as Error & { code: string };
     error.code = "ENOENT";
     throw error;
@@ -355,6 +300,7 @@ vi.mock("node:fs", async (importOriginal) => {
 });
 
 vi.mock("node:child_process", () => ({
+  execFileSync,
   spawnSync,
 }));
 
@@ -450,7 +396,7 @@ vi.mock("../../src/dev-hosted-local/environment.ts", () => ({
         /^(?:HOSTED_)?TEMPORAL_/u.test(name)
       ),
     ),
-    HOSTED_ASSISTANT_MODEL: input.overrides?.HOSTED_ASSISTANT_MODEL ?? "gpt-5.6-terra",
+    HOSTED_ASSISTANT_MODEL: input.overrides?.HOSTED_ASSISTANT_MODEL ?? "gpt-6.1-sol",
     HOSTED_ASSISTANT_PROVIDER:
       input.overrides?.HOSTED_ASSISTANT_PROVIDER ?? "openai",
     OPENAI_API_KEY: input.overrides?.OPENAI_API_KEY,
@@ -501,6 +447,10 @@ vi.mock("../../src/dev-hosted-local/linq-webhook-tunnel.ts", () => ({
 vi.mock("../../src/dev-hosted-local/minio.ts", () => ({
   cleanupHostedLocalMinioContainerBestEffort,
   maybeStartHostedLocalMinio,
+}));
+
+vi.mock("../../src/dev-hosted-local/temporal-preflight.ts", () => ({
+  preflightHostedLocalTemporalWorker,
 }));
 
 vi.mock("../../src/dev-hosted-local/temporal.ts", async (importOriginal) => ({
@@ -628,7 +578,90 @@ describe("hosted local dev stack", () => {
     vi.unstubAllGlobals();
   });
 
+  it.each(["missing Caddy", "missing Caddyfile"])("rejects advertised managed HTTPS with %s", async (missing) => {
+    const environmentModule = await import("../../src/dev-hosted-local/environment.ts");
+    vi.mocked(environmentModule.buildHostedLocalDevOverrides).mockReturnValueOnce({
+      HOSTED_WEB_BASE_URL: "https://local.withmurph.ai:3443",
+    });
+    const original = vi.mocked(existsSync).getMockImplementation()!;
+    if (missing === "missing Caddyfile") {
+      vi.mocked(existsSync).mockImplementation(filePath =>
+        String(filePath).endsWith("Caddyfile") ? false : original(filePath));
+    }
+    try {
+      const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
+      const startup = startHostedLocalDevStack({ env: process.env }).then(async (stack) => {
+        await stack.stop();
+        return "unexpected successful startup";
+      });
+      await expect(startup).rejects.toThrow(
+        missing === "missing Caddy"
+          ? "Canonical local HTTPS requires Caddy on PATH"
+          : "Canonical local HTTPS requires the repository Caddyfile",
+      );
+      expect(waitForHealthyHttpEndpoint).not.toHaveBeenCalled();
+      expect(spawnChildProcess.mock.calls.some(([name]) => name === "tls-proxy")).toBe(false);
+      expect(terminateChildProcessAndWait).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.mocked(existsSync).mockImplementation(original);
+    }
+  });
+
+  it("rejects another session's HTTPS listener before direct health can declare readiness", async () => {
+    execFileSync.mockReturnValueOnce(Buffer.alloc(0));
+    const environmentModule = await import("../../src/dev-hosted-local/environment.ts");
+    const runtimeModule = await import("../../src/dev-hosted-local/runtime.ts");
+    vi.mocked(environmentModule.buildHostedLocalDevOverrides).mockReturnValueOnce({
+      HOSTED_WEB_BASE_URL: "https://local.withmurph.ai:3443",
+    });
+    vi.mocked(runtimeModule.assertPortAvailable).mockImplementation(async (_host, port, message) => {
+      if (port === 3443) throw new Error(message);
+    });
+    try {
+      const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
+      const startup = startHostedLocalDevStack({ env: process.env }).then(async (stack) => {
+        await stack.ready;
+        await stack.stop();
+      });
+      await expect(startup).rejects.toThrow("Canonical local HTTPS is already owned by another listener");
+      expect(runtimeModule.assertPortAvailable).toHaveBeenCalledWith(
+        "127.0.0.1", 3443, expect.stringContaining("explicit handoff"),
+      );
+      expect(waitForHealthyHttpEndpoint).not.toHaveBeenCalled();
+      expect(spawnChildProcess.mock.calls.some(([name]) => name === "tls-proxy")).toBe(false);
+      expect(terminateChildProcessAndWait).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.mocked(runtimeModule.assertPortAvailable).mockImplementation(async () => {});
+    }
+  });
+
+  it("preserves explicit proxy skipping with an advertised HTTPS origin", async () => {
+    const environmentModule = await import("../../src/dev-hosted-local/environment.ts");
+    vi.mocked(environmentModule.buildHostedLocalDevOverrides).mockReturnValueOnce({
+      HOSTED_WEB_BASE_URL: "https://local.withmurph.ai:3443",
+    });
+    const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
+    const stack = await startHostedLocalDevStack({env: {...process.env, MURPH_DEV_SKIP_TLS_PROXY: "1"}});
+    await stack.ready;
+    expect(stack.webBaseUrl).toBe("https://local.withmurph.ai:3443");
+    expect(execFileSync).not.toHaveBeenCalled();
+    const runtimeModule = await import("../../src/dev-hosted-local/runtime.ts");
+    expect(vi.mocked(runtimeModule.assertPortAvailable).mock.calls.some(([, port]) => port === 3443)).toBe(false);
+    await stack.stop();
+  });
+
+  it("keeps direct HTTP ready when optional Caddy is unavailable", async () => {
+    const stderrTarget = new CapturingWritable();
+    const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
+    const stack = await startHostedLocalDevStack({ env: process.env, stderrTarget });
+    await stack.ready;
+    expect(stack.webBaseUrl).toBe("http://localhost:3000");
+    expect(stderrTarget.text()).toContain("skipping local HTTPS proxy");
+    await stack.stop();
+  });
+
   it("starts Cloudflare with web-only process environment overrides", async () => {
+    execFileSync.mockReturnValueOnce(Buffer.alloc(0));
     vi.stubEnv("OPENAI_API_KEY", "local-openai-key");
     const inheritedAppSessionHmacKey = Buffer.alloc(32, 9).toString("base64url");
     const localAppSessionHmacKey = Buffer.alloc(32, 8).toString("base64url");
@@ -701,6 +734,15 @@ describe("hosted local dev stack", () => {
     await stack.stop();
 
     expect(stack.webBaseUrl).toBe("https://local.withmurph.ai:3443");
+    expect(execFileSync).toHaveBeenCalledWith("which", ["caddy"], { stdio: "ignore" });
+    expect(runtimeModule.assertPortAvailable).toHaveBeenCalledWith(
+      "127.0.0.1", 3443, expect.stringContaining("explicit handoff"),
+    );
+    expect(spawnChildProcess).toHaveBeenCalledWith(
+      "tls-proxy", "caddy", expect.arrayContaining(["run", "--config"]),
+      expect.objectContaining({ HOSTED_WEB_BASE_URL: "https://local.withmurph.ai:3443" }),
+      expect.any(Object),
+    );
     expect(process.env.HOSTED_APP_SESSION_HMAC_KEY).toBeUndefined();
     expect(stack.runtimeEnv.LINQ_API_BASE_URL).toBe(
       "http://host.docker.internal:4011",
@@ -745,7 +787,7 @@ describe("hosted local dev stack", () => {
         HOSTED_EXECUTION_RUNNER_HOST_ALIAS: "host.docker.internal",
         HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK:
           expect.stringContaining("automation-d"),
-        HOSTED_ASSISTANT_MODEL: "gpt-5.6-terra",
+        HOSTED_ASSISTANT_MODEL: "gpt-6.1-sol",
         HOSTED_ASSISTANT_PROVIDER: "openai",
         MURPH_DEV_SKIP_RUNNER_BUNDLE: "1",
         NODE_ENV: "development",
@@ -915,7 +957,7 @@ describe("hosted local dev stack", () => {
     );
     expect(vi.mocked(environmentModule.buildWranglerLocalDevConfig)).toHaveBeenCalledWith(
       expect.objectContaining({
-        HOSTED_ASSISTANT_MODEL: "gpt-5.6-terra",
+        HOSTED_ASSISTANT_MODEL: "gpt-6.1-sol",
         MURPH_HOSTED_LOCAL_DEPLOY_SMOKE_USE_BUILD_ID: "1",
       }),
       {
@@ -987,7 +1029,7 @@ describe("hosted local dev stack", () => {
       }),
     );
     expect(stack.config.workerPersistDir).toBe("/tmp/murph-dev-env-test/wrangler-state");
-    expect(terminateChildProcessAndWait).toHaveBeenCalledTimes(2);
+    expect(terminateChildProcessAndWait).toHaveBeenCalledTimes(3);
     expect(waitForHealthyHttpEndpoint).toHaveBeenCalledTimes(2);
     expect(waitForHealthyHttpEndpoint).toHaveBeenNthCalledWith(1, {
       signal: expect.any(AbortSignal),
@@ -1271,6 +1313,25 @@ describe("hosted local dev stack", () => {
     expect(spawnStripeListenerWithSecretCapture).not.toHaveBeenCalled();
     expect(resolveHostedLocalLinqWebhookSetup).not.toHaveBeenCalled();
     expect(registerHostedLocalLinqWebhookSubscription).not.toHaveBeenCalled();
+    expect(maybeStartHostedLocalMinio).not.toHaveBeenCalled();
+    expect(startHostedLocalTemporalRuntime).not.toHaveBeenCalled();
+  });
+
+  it("rejects an incompatible Temporal worker before stack side effects", async () => {
+    const configModule = await import("../../src/dev-hosted-local/config.ts");
+    vi.mocked(configModule.resolveHostedLocalDevConfig).mockReturnValueOnce({
+      ...defaultConfig,
+      temporal: { ...defaultConfig.temporal, mode: "managed" },
+    });
+    preflightHostedLocalTemporalWorker.mockRejectedValueOnce(new Error("incompatible parser"));
+    const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
+    await expect(startHostedLocalDevStack({
+      env: { MURPH_DEV_TEMPORAL_WORKER_PACKAGE_DIR: "/synthetic/worker" },
+    })).rejects.toThrow("incompatible parser");
+    expect(runCommand).not.toHaveBeenCalled();
+    expect(spawnChildProcess).not.toHaveBeenCalled();
+    expect(spawnStripeListenerWithSecretCapture).not.toHaveBeenCalled();
+    expect(resolveHostedLocalLinqWebhookSetup).not.toHaveBeenCalled();
     expect(maybeStartHostedLocalMinio).not.toHaveBeenCalled();
     expect(startHostedLocalTemporalRuntime).not.toHaveBeenCalled();
   });
@@ -3051,72 +3112,6 @@ describe("hosted local dev stack", () => {
     spawnChildProcess
       .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "cloudflare", pid: 125 }))
       .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "web", pid: 126 }));
-    spawnSync.mockImplementation((command, args) => {
-      if (
-        command === "codex" &&
-        args[0] === "debug" &&
-        args[1] === "models" &&
-        args[2] === "--bundled"
-      ) {
-        return {
-          error: undefined,
-          status: 0,
-          stdout: JSON.stringify({
-            models: [
-              {
-                name: "GPT-5.6-Sol",
-                service_tiers: [
-                  {
-                    id: "priority",
-                    name: "Priority",
-                  },
-                ],
-                slug: "gpt-5.6-sol",
-                tool_mode: "code_mode_only",
-              },
-              {
-                name: "GPT-5.6-Terra",
-                service_tiers: [
-                  {
-                    id: "priority",
-                    name: "Priority",
-                  },
-                ],
-                slug: "gpt-5.6-terra",
-                tool_mode: "code_mode_only",
-              },
-              {
-                name: "GPT-5.6-Luna",
-                service_tiers: [
-                  {
-                    id: "priority",
-                    name: "Priority",
-                  },
-                ],
-                slug: "gpt-5.6-luna",
-                tool_mode: "code_mode_only",
-              },
-              {
-                display_name: "GPT-5.4-Mini",
-                priority: 4,
-                service_tiers: [],
-                slug: "gpt-5.4-mini",
-              },
-              {
-                display_name: "Bundled Nano",
-                service_tiers: [{ id: "auto", name: "Auto" }],
-                slug: "gpt-5.4-nano",
-                supports_parallel_tool_calls: true,
-                supports_search_tool: true,
-              },
-            ],
-          }),
-        };
-      }
-
-      return defaultSpawnSyncImplementation(command, args);
-    });
-
     const environmentModule = await import("../../src/dev-hosted-local/environment.ts");
     const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
 
@@ -3127,7 +3122,6 @@ describe("hosted local dev stack", () => {
         HOSTED_ASSISTANT_PROVIDER: "openai",
         MURPH_HOSTED_CODEX_MODEL_CATALOG_JSON: "/tmp/spoofed-catalog.json",
         OPENAI_API_KEY: "local-openai-key",
-        VENICE_API_KEY: "local-venice-key",
       },
     });
     await stack.ready;
@@ -3138,11 +3132,9 @@ describe("hosted local dev stack", () => {
     const cloudflareEnv = cloudflareCall?.[3] as NodeJS.ProcessEnv;
     expect(cloudflareEnv.CODEX_HOME).toBeUndefined();
     expect(cloudflareEnv.OPENAI_API_KEY).toBe("local-openai-key");
-    expect(cloudflareEnv.VENICE_API_KEY).toBe("local-venice-key");
     expect(cloudflareEnv.HOSTED_ASSISTANT_PROVIDER).toBe("openai");
-    expect(cloudflareEnv.MURPH_HOSTED_CODEX_MODEL_CATALOG_JSON).toBe(
-      "/tmp/murph-dev-env-test/codex-model-catalog.openai-flex.json",
-    );
+    // The image owns the Codex model catalog; inherited values are stripped.
+    expect(cloudflareEnv.MURPH_HOSTED_CODEX_MODEL_CATALOG_JSON).toBeUndefined();
     expect(cloudflareEnv.MURPH_DEV_CODEX_APP_SERVER_PROXY_TOKEN).toBeUndefined();
     expect(cloudflareEnv.MURPH_DEV_CODEX_APP_SERVER_PROXY_URL).toBeUndefined();
     for (const [, , options] of runCommand.mock.calls) {
@@ -3162,119 +3154,9 @@ describe("hosted local dev stack", () => {
       .mock.calls.at(-1)?.[0] as NodeJS.ProcessEnv;
     expect(envFileSource.CODEX_HOME).toBeUndefined();
     expect(envFileSource.OPENAI_API_KEY).toBe("local-openai-key");
-    expect(envFileSource.VENICE_API_KEY).toBe("local-venice-key");
     expect(envFileSource.HOSTED_ASSISTANT_PROVIDER).toBe("openai");
-    expect(envFileSource.MURPH_HOSTED_CODEX_MODEL_CATALOG_JSON).toBe(
-      "/tmp/murph-dev-env-test/codex-model-catalog.openai-flex.json",
-    );
-    const catalogWrite = vi.mocked(writeFile).mock.calls.find(([filePath]) =>
-      filePath === "/tmp/murph-dev-env-test/codex-model-catalog.openai-flex.json"
-    );
-    expect(catalogWrite).toBeDefined();
-    expect(JSON.parse(String(catalogWrite?.[1]))).toMatchObject({
-      models: [
-        {
-          service_tiers: expect.arrayContaining([
-            expect.objectContaining({ id: "flex" }),
-          ]),
-          slug: "gpt-5.6-sol",
-          tool_mode: "code_mode",
-        },
-        {
-          service_tiers: expect.arrayContaining([
-            expect.objectContaining({ id: "flex" }),
-          ]),
-          slug: "gpt-5.6-terra",
-          tool_mode: "code_mode",
-        },
-        {
-          service_tiers: expect.arrayContaining([
-            expect.objectContaining({ id: "flex" }),
-          ]),
-          slug: "gpt-5.6-luna",
-          tool_mode: "code_mode",
-        },
-        {
-          display_name: "GPT-5.4-Mini",
-          slug: "gpt-5.4-mini",
-        },
-        {
-          display_name: "GPT-5.4-Nano",
-          service_tiers: [],
-          slug: "gpt-5.4-nano",
-          supports_parallel_tool_calls: false,
-          supports_search_tool: false,
-          use_responses_lite: false,
-        },
-      ],
-    });
-    expect(spawnSync).toHaveBeenCalledWith(
-      "codex",
-      ["debug", "models", "--bundled"],
-      expect.objectContaining({
-        encoding: "utf8",
-        stdio: ["ignore", "pipe", "pipe"],
-      }),
-    );
+    expect(envFileSource.MURPH_HOSTED_CODEX_MODEL_CATALOG_JSON).toBeUndefined();
   });
-
-  it.each([
-    {
-      expectedMessage: "Hosted local dev received an invalid Codex model catalog.",
-      stdout: "{not-json",
-    },
-    {
-      expectedMessage: "Hosted local dev Codex model catalog is missing gpt-5.6-sol.",
-      stdout: JSON.stringify({ models: [] }),
-    },
-    {
-      expectedMessage: "Hosted local dev Codex model catalog is missing gpt-5.4-mini.",
-      stdout: JSON.stringify({
-        models: [
-          { slug: "gpt-5.6-sol" },
-          { slug: "gpt-5.6-terra" },
-          { slug: "gpt-5.6-luna" },
-        ],
-      }),
-    },
-  ])(
-    "fails closed when Codex bundled model catalog prep fails: $expectedMessage",
-    async ({ expectedMessage, stdout }) => {
-      spawnSync.mockImplementation((command, args) => {
-        if (
-          command === "codex" &&
-          args[0] === "debug" &&
-          args[1] === "models" &&
-          args[2] === "--bundled"
-        ) {
-          return {
-            error: undefined,
-            status: 0,
-            stdout,
-          };
-        }
-
-        return defaultSpawnSyncImplementation(command, args);
-      });
-
-      const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
-
-      await expect(startHostedLocalDevStack({
-        env: {
-          ...process.env,
-          HOSTED_ASSISTANT_PROVIDER: "openai",
-          OPENAI_API_KEY: "local-openai-key",
-        },
-      })).rejects.toThrow(expectedMessage);
-      expect(spawnChildProcess).not.toHaveBeenCalledWith(
-        "cloudflare",
-        expect.any(String),
-        expect.any(Array),
-        expect.any(Object),
-        expect.any(Object),
-      );
-    },
-  );
 
   it("defaults the hosted assistant provider to OpenAI when only the key is configured", async () => {
     spawnChildProcess
@@ -3554,13 +3436,6 @@ describe("hosted local dev stack", () => {
           error: undefined,
           status: 0,
           stdout: "cloudflare-dev/deploysmokerunnercontainer:4e19cead e144c487891e\n",
-        };
-      }
-      if (command === "codex" && args[0] === "debug") {
-        return {
-          error: undefined,
-          status: 0,
-          stdout: DEFAULT_CODEX_MODEL_CATALOG_TEXT,
         };
       }
       return {
@@ -3918,13 +3793,13 @@ describe("hosted local dev stack", () => {
       .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "web", pid: 302 }));
 
     vi.stubEnv("HOSTED_ASSISTANT_PROVIDER", "openai");
-    vi.stubEnv("HOSTED_ASSISTANT_MODEL", "gpt-5.6-terra");
+    vi.stubEnv("HOSTED_ASSISTANT_MODEL", "gpt-6.1-sol");
 
     const environmentModule = await import("../../src/dev-hosted-local/environment.ts");
 
     vi.mocked(environmentModule.readSimpleEnvFile).mockResolvedValueOnce({
       HOSTED_ASSISTANT_MODEL: "stale-pulled-model",
-      HOSTED_ASSISTANT_PROVIDER: "venice",
+      HOSTED_ASSISTANT_PROVIDER: "openai",
     });
 
     const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
@@ -3940,7 +3815,7 @@ describe("hosted local dev stack", () => {
       "pnpm",
       expect.any(Array),
       expect.objectContaining({
-        HOSTED_ASSISTANT_MODEL: "gpt-5.6-terra",
+        HOSTED_ASSISTANT_MODEL: "gpt-6.1-sol",
         HOSTED_ASSISTANT_PROVIDER: "openai",
       }),
       expect.any(Object),

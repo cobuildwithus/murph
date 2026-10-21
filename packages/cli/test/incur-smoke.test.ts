@@ -2595,6 +2595,15 @@ test('supplement search-labels-batch schema exposes hosted batch lookup inputs',
   )
 })
 
+test('food search-labels help explains both query forms without the output schema', async () => {
+  const help = await runSourceCliRaw(['food', 'search-labels', '--help'])
+  assert.match(help, /--query/u)
+  assert.match(help, /never both/u)
+  assert.match(help, /rolled oats/u)
+  assert.ok(Buffer.byteLength(help) < 8_000)
+  assert.doesNotMatch(help, /contaminantSummary/u)
+})
+
 test('food search-labels schema exposes hosted label lookup inputs', async () => {
   const schema = JSON.parse(
     await runSourceCliRaw(['food', 'search-labels', '--schema', '--format', 'json']),
@@ -2608,8 +2617,9 @@ test('food search-labels schema exposes hosted label lookup inputs', async () =>
     }
   }
 
-  assert.deepEqual(schema.args.required, ['query'])
+  assert.deepEqual(schema.args.required ?? [], [])
   assert.equal(schema.args.properties.query?.maxLength, 256)
+  assert.match(String(schema.options.properties.query?.description ?? ''), /Alternative to the positional query/u)
   assert.match(
     String(schema.args.properties.query?.description ?? ''),
     /Food product, brand, USDA FDC id, UPC, or generic ingredient/u,
@@ -2698,11 +2708,8 @@ test('model schema explains preset-gated non-interactive updates', async () => {
   assert.equal('baseUrl' in schema.options.properties, false)
   assert.equal('apiKeyEnv' in schema.options.properties, false)
   assert.equal('headersJson' in schema.options.properties, false)
-  assert.equal('modelProvider' in schema.options.properties, true)
-  assert.match(
-    String(schema.options.properties.modelProvider?.description ?? ''),
-    /Codex model provider/u,
-  )
+  assert.equal('modelProvider' in schema.options.properties, false)
+  assert.equal('oss' in schema.options.properties, false)
   assert.match(
     String(schema.options.properties.profile?.description ?? ''),
     /Only applies with `--preset codex`/u,
@@ -3789,12 +3796,71 @@ test('owned date-range list help reuses consistent date and limit descriptions',
       help,
       /--to <string>\s+Optional inclusive upper date bound in YYYY-MM-DD form\./u,
     )
+  }
+  for (const help of [journalListHelp, eventListHelp]) {
     assert.match(
       help,
-      /--limit <number>\s+Maximum number of results to return\./u,
+      /--limit <number>\s+Maximum number of results to return, from 1 to 200\. \(default: 10\)/u,
     )
   }
+  assert.match(
+    workoutListHelp,
+    /--limit <number>\s+Maximum number of results to return\. Defaults to 5\./u,
+  )
 }, INCUR_HELP_TIMEOUT_MS)
+
+test('event list help discloses the enforced limit cap and rejects oversized limits before reading', async () => {
+  const help = await runSourceCliRaw(['event', 'list', '--help'])
+  assert.match(
+    help,
+    /--limit <number>\s+Maximum number of results to return, from 1 to 200\. \(default: 10\)/u,
+  )
+
+  const schema = JSON.parse(
+    await runSourceCliRaw(['event', 'list', '--schema', '--format', 'json']),
+  ) as { options: { properties: { limit: Record<string, unknown> } } }
+  assert.equal(schema.options.properties.limit.maximum, 200)
+  assert.equal(schema.options.properties.limit.default, 10)
+
+  const tempRoot = await mkdtemp(path.join(tmpdir(), 'murph-event-list-limit-'))
+  const vaultRoot = path.join(tempRoot, 'vault')
+  try {
+    await initializeVault({ vaultRoot })
+    const before = await snapshotVaultFiles(vaultRoot)
+
+    const oversized = await runJsonCli(
+      createVaultCli(),
+      ['event', 'list', '--limit', '201', '--vault', vaultRoot],
+    )
+    assert.equal(oversized.exitCode, 1)
+    assertSafeInputValidationEnvelope(oversized.envelope, {
+      code: 'too_big',
+      missing: false,
+      path: 'limit',
+    })
+    assert.deepEqual(await snapshotVaultFiles(vaultRoot), before)
+
+    for (const [limitArgs, expectedLimit] of [
+      [['--limit', '200'], 200],
+      [['--limit', '1'], 1],
+      [[], 10],
+    ] as const) {
+      const result = await runJsonCli<{ filters: { limit?: number }; items: unknown[] }>(
+        createVaultCli(),
+        ['event', 'list', ...limitArgs, '--vault', vaultRoot],
+      )
+      assert.equal(result.exitCode, null)
+      assert.equal(result.envelope.ok, true)
+      if (result.envelope.ok) {
+        assert.equal(result.envelope.data.filters.limit, expectedLimit)
+        assert.deepEqual(result.envelope.data.items, [])
+      }
+    }
+    assert.deepEqual(await snapshotVaultFiles(vaultRoot), before)
+  } finally {
+    await rm(tempRoot, { force: true, recursive: true })
+  }
+}, INCUR_KNOWLEDGE_BOUNDARY_TIMEOUT_MS)
 
 test('command schema reflects only domain-specific options', async () => {
   const schema = JSON.parse(

@@ -1,4 +1,4 @@
-import { runtimeAdmission } from "./support/hosted-runtime-admission-fixture";
+import { Prisma } from "@prisma/client";
 import {
   beforeEach,
   describe,
@@ -8,7 +8,6 @@ import {
 } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  executeHostedRuntimeOwnerCommand: vi.fn(),
   ensureRuntimeProcessing: vi.fn(),
   linkHostedIngressLatencyTracesToAcceptedLinqDelivery: vi.fn(async () => ({ matchedCount: 1, recorded: true })),
   readHostedExecutionControlClientIfConfigured: vi.fn(),
@@ -22,9 +21,6 @@ const mocks = vi.hoisted(() => ({
   signalHostedMailboxAppendRuntime: vi.fn(),
 }));
 
-vi.mock("@/src/lib/hosted-execution/runtime-owner-control", () => ({
-  executeHostedRuntimeOwnerCommand: mocks.executeHostedRuntimeOwnerCommand,
-}));
 vi.mock("@/src/lib/hosted-execution/control", () => ({
   readHostedExecutionControlClientIfConfigured:
     mocks.readHostedExecutionControlClientIfConfigured,
@@ -97,7 +93,6 @@ function buildWakeHandoff(
 describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.executeHostedRuntimeOwnerCommand.mockImplementation(async ({ userId }) => runtimeAdmission(userId));
     mocks.recordHostedIngressDirectEnsureTiming.mockResolvedValue({
       matchedCount: 1,
       recorded: true,
@@ -118,26 +113,47 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
     });
   });
 
-  it.each([false, true])("links accepted instant replies after response even when the wake fails: %s", async (wakeFails) => {
-    const tasks: Array<() => Promise<void>> = [];
-    if (wakeFails) mocks.signalHostedMailboxAppendRuntime.mockRejectedValueOnce(new Error("synthetic signal failure"));
-    const result = maybeHandoffHostedExecutionWebhookWake({
-      response,
-      webhookReceivedAt: new Date("2026-09-01T12:00:00Z"),
-      scheduleAfterResponse: (task) => { tasks.push(task); },
-      wakeHandoff: buildWakeHandoff({ acceptedLinqDeliveryId: "delivery_instant" }),
+  for (const wakeFails of [false, true]) {
+    it.each([
+      { originalInboundMailboxItemId: undefined, answeredMailboxItemIds: ["mailbox_123"] },
+      { originalInboundMailboxItemId: "mailbox_inbound", answeredMailboxItemIds: ["mailbox_123", "mailbox_inbound"] },
+      { originalInboundMailboxItemId: "mailbox_123", answeredMailboxItemIds: ["mailbox_123"] },
+    ])(`links instant replies after response with $originalInboundMailboxItemId and wake failure=${wakeFails}`, async ({ originalInboundMailboxItemId, answeredMailboxItemIds }) => {
+      const tasks: Array<() => Promise<void>> = [];
+      if (wakeFails) mocks.signalHostedMailboxAppendRuntime.mockRejectedValueOnce(new Error("synthetic signal failure"));
+      const result = maybeHandoffHostedExecutionWebhookWake({
+        response,
+        webhookReceivedAt: new Date("2026-09-01T12:00:00Z"),
+        scheduleAfterResponse: (task) => { tasks.push(task); },
+        wakeHandoff: buildWakeHandoff({ acceptedLinqDeliveryId: "delivery_instant", originalInboundMailboxItemId }),
+      });
+      if (wakeFails) await expect(result).rejects.toThrow("synthetic signal failure");
+      else await result;
+      expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledExactlyOnceWith({
+        abortSignal: expect.any(AbortSignal),
+        expectedUserId: "member_123",
+        knownCheckpoint: { lane: "conversation", laneSeq: "42", userId: "member_123" },
+        mailboxItemId: "mailbox_123",
+        onSignalStarted: expect.any(Function),
+      });
+      if (wakeFails) expect(mocks.ensureRuntimeProcessing).not.toHaveBeenCalled();
+      else expect(mocks.ensureRuntimeProcessing).toHaveBeenCalledExactlyOnceWith({
+        commandTimeoutMs: 25_000,
+        onTiming: expect.any(Function),
+        orchestrationAttemptId: expect.stringMatching(/^web-ingress-[0-9a-f-]{36}$/u),
+        signal: expect.any(AbortSignal),
+        userId: "member_123",
+      });
+      expect(mocks.linkHostedIngressLatencyTracesToAcceptedLinqDelivery).not.toHaveBeenCalled();
+      for (const task of tasks) await task();
+      expect(mocks.linkHostedIngressLatencyTracesToAcceptedLinqDelivery).toHaveBeenCalledExactlyOnceWith({
+        authenticatedUserId: "member_123",
+        answeredMailboxItemIds,
+        linqDeliveryId: "delivery_instant",
+        replyRuntimeAttemptId: null,
+      });
     });
-    if (wakeFails) await expect(result).rejects.toThrow("synthetic signal failure");
-    else await result;
-    expect(mocks.linkHostedIngressLatencyTracesToAcceptedLinqDelivery).not.toHaveBeenCalled();
-    for (const task of tasks) await task();
-    expect(mocks.linkHostedIngressLatencyTracesToAcceptedLinqDelivery).toHaveBeenCalledExactlyOnceWith({
-      authenticatedUserId: "member_123",
-      answeredMailboxItemIds: ["mailbox_123"],
-      linqDeliveryId: "delivery_instant",
-      replyRuntimeAttemptId: null,
-    });
-  });
+  }
 
   it("retains ingress timing when optional instant-reply linking fails", async () => {
     const tasks: Array<() => Promise<void>> = [];
@@ -146,7 +162,7 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
     await maybeHandoffHostedExecutionWebhookWake({
       response,
       scheduleAfterResponse: (task) => { tasks.push(task); },
-      wakeHandoff: buildWakeHandoff({ acceptedLinqDeliveryId: "delivery_instant" }),
+      wakeHandoff: buildWakeHandoff({ acceptedLinqDeliveryId: "delivery_instant", originalInboundMailboxItemId: "mailbox_inbound" }),
     });
     for (const task of tasks) await expect(task()).resolves.toBeUndefined();
     expect(mocks.recordHostedIngressTemporalSignalAccepted).toHaveBeenCalled();
@@ -237,7 +253,6 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
     expect(wakeOrder).toEqual(["temporal", "direct"]);
     expect(mocks.ensureRuntimeProcessing).toHaveBeenCalledTimes(1);
     expect(mocks.ensureRuntimeProcessing).toHaveBeenCalledWith({
-      admission: runtimeAdmission("member_123"),
       commandTimeoutMs: 25_000,
       onTiming: expect.any(Function),
       orchestrationAttemptId: expect.stringMatching(/^web-ingress-[0-9a-f-]{36}$/u),
@@ -347,14 +362,20 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
     consoleInfo.mockRestore();
   });
 
-  it("logs only aggregate metadata when direct timing no longer matches", async () => {
+  it.each(["unmatched", "prisma", "unknown"])("keeps direct timing failure diagnostics private: %s", async (failure) => {
     const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const afterResponseTasks: Array<() => Promise<void>> = [];
-    mocks.recordHostedIngressDirectEnsureTiming.mockResolvedValueOnce({
-      matchedCount: 0,
-      recorded: false,
-      unmatchedCount: 1,
-    });
+    if (failure === "unmatched") {
+      mocks.recordHostedIngressDirectEnsureTiming.mockResolvedValueOnce({
+        matchedCount: 0, recorded: false, unmatchedCount: 1,
+      });
+    } else {
+      mocks.recordHostedIngressDirectEnsureTiming.mockRejectedValueOnce(failure === "prisma"
+        ? new Prisma.PrismaClientKnownRequestError("synthetic private SQL detail", {
+          clientVersion: "test", code: "P2028", meta: { privateField: "synthetic private value" },
+        })
+        : new Error("synthetic private detail"));
+    }
     mocks.ensureRuntimeProcessing.mockImplementationOnce(async (input: DirectEnsureInput) => {
       input.onTiming({
         directEnsureAction: "woken",
@@ -388,13 +409,18 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
       await Promise.all(afterResponseTasks.map((task) => task()));
 
       expect(consoleWarn).toHaveBeenCalledWith(
-        "Hosted direct ensure wake timing record did not match.",
-        {
+        failure === "unmatched" ? "Hosted direct ensure wake timing record did not match." : "Hosted direct ensure wake timing record failed.",
+        failure === "unmatched" ? {
           matchedCount: 0,
           source: "linq",
           unmatchedCount: 1,
+        } : {
+          errorName: failure === "prisma" ? "PrismaClientKnownRequestError" : "Error",
+          ...(failure === "prisma" ? { prismaCode: "P2028" } : {}),
+          source: "linq",
         },
       );
+      expect(JSON.stringify(consoleWarn.mock.calls)).not.toContain("synthetic private");
     } finally {
       consoleWarn.mockRestore();
     }

@@ -118,7 +118,7 @@ describe('assistant nutrition strategy skill', () => {
       'A named diet is a rule package, not the user\'s goal.',
     )
     expect(nutrition).toContain(
-      'Popularity is evidence of demand, not efficacy.',
+      'Judge each claim by its evidence for the member\'s goal, never by popularity, and rate it as strong, mixed, or weak.',
     )
     expect(nutrition).toContain(
       'Child references are progressive disclosure, not separately registered skills.',

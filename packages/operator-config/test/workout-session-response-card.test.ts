@@ -216,7 +216,7 @@ describe('workout session response cards', () => {
         subtitle: ACTIVE_WORKOUT_CARD.subtitle,
         footer: ACTIVE_WORKOUT_CARD.footer,
         workout: ACTIVE_WORKOUT_CARD.workout,
-        editor: ACTIVE_WORKOUT_CARD.editor,
+        editor: ACTIVE_WORKOUT_CARD.editor!,
       }),
     )
 
@@ -290,8 +290,7 @@ describe('workout session response cards', () => {
           ? 'Reply with the exercise, set, and result to log or correct it.'
           : 'Workout completed.',
         workout,
-        ...(state === 'active'
-          ? {
+        ...{
               editor: {
                 actionBinding: 'a'.repeat(64),
                 version: 1 as const,
@@ -309,8 +308,7 @@ describe('workout session response cards', () => {
                   })),
                 })),
               },
-            }
-          : {}),
+            },
       }
     }
 
@@ -323,7 +321,11 @@ describe('workout session response cards', () => {
       return encodeWorkoutSessionAppCardUrl(card)
     })
 
-    expect(urls.map((url) => url.length)).toEqual([1624, 1905, 1624])
+    expect(urls.map(decodeAppCardUrl)).toEqual([
+      expect.objectContaining({ schemaVersion: 6 }),
+      expect.objectContaining({ schemaVersion: 6 }),
+      expect.objectContaining({ schemaVersion: 4 }),
+    ])
     expect(urls.every((url) => url.length < 2_048)).toBe(true)
 
     const oversizedEditorCard = {
@@ -341,15 +343,13 @@ describe('workout session response cards', () => {
     ) {
       throw new TypeError('Expected an editable workout fixture.')
     }
-    const fallback = encodeWorkoutSessionSnapshotAppCardUrl({
+    expect(() => encodeWorkoutSessionSnapshotAppCardUrl({
       title: oversizedEditorCard.title,
       subtitle: oversizedEditorCard.subtitle,
       footer: oversizedEditorCard.footer,
       workout: oversizedEditorCard.workout,
-      editor: oversizedEditorCard.editor,
-    })
-    expect(fallback.length).toBeLessThan(2_048)
-    expect(decodeAppCardUrl(fallback)).toMatchObject({ schemaVersion: 4 })
+      editor: oversizedEditorCard.editor!,
+    })).toThrow('exceeds the inline size limit')
   })
 
   it('encodes a complete 11×3 late-active card when its measured URL fits', () => {
@@ -396,14 +396,24 @@ describe('workout session response cards', () => {
       },
     }
 
+    card.editor = {
+      actionBinding: 'a'.repeat(64), setRemovalBinding: 'b'.repeat(64), version: 1,
+      exercises: card.workout.exercises.map((exercise) => ({
+        unitOverride: null,
+        sets: exercise.sets.map((set) => ({
+          logged: set.status === 'completed',
+          result: set.status === 'completed' ? { kind: 'reps' as const, reps: 8 } : null,
+        })),
+      })),
+    }
     expect(assistantResponseCardSchema.parse(card)).toEqual(card)
     const url = encodeWorkoutSessionAppCardUrl(card)
     expect(url.length).toBeLessThan(2_048)
     expect(decodeAppCardUrl(url)).toMatchObject({
-      schemaVersion: 4,
+      schemaVersion: 6,
       card: {
         e: expect.arrayContaining([
-          ['Farmer carry', expect.any(Array)],
+          ['Farmer carry', null, expect.any(Array)],
         ]),
       },
     })
@@ -438,12 +448,8 @@ describe('workout session response cards', () => {
     expect(renderAssistantResponseCardText(legacyCard).match(
       /3\/6 sets complete/gu,
     )).toHaveLength(1)
-    expect(decodeAppCardUrl(
-      encodeWorkoutSessionAppCardUrl(legacyCard),
-    )).toMatchObject({
-      schemaVersion: 4,
-      card: { u: '3/6 sets complete' },
-    })
+    expect(() => encodeWorkoutSessionAppCardUrl(legacyCard)).toThrow('requires a verified editor')
+
   })
 
   it('preserves a completed extra set without inventing a target', () => {
@@ -580,6 +586,7 @@ describe('workout session response cards', () => {
   it('renders a completed workout and both skipped-set variants', () => {
     const { editor: _editor, ...activePresentation } = ACTIVE_WORKOUT_CARD
     const completedCard = {
+      editor: ACTIVE_WORKOUT_CARD.editor!,
       ...activePresentation,
       subtitle: null,
       footer: null,
@@ -676,6 +683,9 @@ describe('workout session response cards', () => {
         ],
       },
     })
+    expect(decodeAppCardUrl(encodeWorkoutSessionSnapshotAppCardUrl({
+      ...completedCard, editor: completedCard.editor,
+    }))).toMatchObject({ schemaVersion: 6, card: { s: 'c', b: completedCard.editor.actionBinding } })
   })
 
 })

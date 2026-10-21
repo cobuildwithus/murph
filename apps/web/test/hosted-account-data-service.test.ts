@@ -5,8 +5,7 @@ type HostedWebEncryptionModule =
 type PrismaModule = typeof import("@/src/lib/prisma");
 
 const serviceMocks = vi.hoisted(() => ({
-
-
+  readHostedLinqProductionCanaryMemberId: vi.fn(),
   connectedAppsClient: {
     deleteAccount: vi.fn(),
     disconnectAccount: vi.fn(),
@@ -64,6 +63,9 @@ const serviceMocks = vi.hoisted(() => ({
   revokeStravaDeviceSyncAccess: vi.fn(),
 }));
 
+vi.mock("@/src/lib/hosted-onboarding/linq-production-canary", () => ({
+  readHostedLinqProductionCanaryMemberId: serviceMocks.readHostedLinqProductionCanaryMemberId,
+}));
 vi.mock("@/src/lib/prisma", async (importOriginal) => {
   const original = await importOriginal<PrismaModule>();
   serviceMocks.runPrismaInteractiveTransactionOriginal =
@@ -219,14 +221,13 @@ import {
 import { encryptHostedWebNullableString } from "@/src/lib/hosted-web/encryption";
 import {
   deleteHostedAccountData,
-
+  deleteHostedLinqProductionCanaryAccountData,
   HOSTED_ACCOUNT_DATA_STORE_COVERAGE,
   parseHostedAccountDeletionRequest,
 } from "@/src/lib/hosted-privacy/account-data-service";
 
 const REQUIRED_STORE_SLUGS = [
   "prisma.hosted_member",
-  "prisma.hosted_inference_connection",
   "prisma.hosted_sensitive_action_challenge",
   "prisma.hosted_member_identity",
   "prisma.hosted_group_participant_observation",
@@ -363,7 +364,6 @@ const HOSTED_ACCOUNT_DELETION_RAW_COUNT_KEYS = [
   "prisma.hosted_ai_usage_period",
   "prisma.hosted_product_feedback",
   "prisma.hosted_codex_auth_connection",
-  "prisma.hosted_inference_connection",
   "prisma.hosted_linq_daily_state",
   "prisma.hosted_invite",
   "prisma.hosted_consent_event",
@@ -390,6 +390,10 @@ const HOSTED_ACCOUNT_DELETION_RAW_COUNT_KEYS = [
   "prisma.device_agent_session",
   "prisma.device_browser_assertion_nonce",
   "prisma.hosted_web_internal_request_nonce",
+  "prisma.companion_push_route",
+  "prisma.companion_wearable_link",
+  "prisma.companion_wearable_session",
+  "prisma.companion_wearable_command",
 
   "prisma.hosted_member",
 ] as const;
@@ -397,6 +401,8 @@ const HOSTED_ACCOUNT_DELETION_RAW_COUNT_KEYS = [
 const HOSTED_ACCOUNT_DELETION_ERASURE_STATEMENT_BOUND = 14;
 
 beforeEach(() => {
+  serviceMocks.readHostedLinqProductionCanaryMemberId.mockReset();
+  serviceMocks.readHostedLinqProductionCanaryMemberId.mockResolvedValue(null);
   vi.stubEnv("KERNEL_API_KEY", "");
   serviceMocks.runPrismaInteractiveTransaction.mockReset();
   serviceMocks.runPrismaInteractiveTransaction.mockImplementation(
@@ -510,8 +516,7 @@ beforeEach(() => {
     kmsKeyName: "test-key",
     nextAttemptAt: input.now,
     payloadCiphertext: "encrypted",
-
-
+    runtimeLogsCompletedAt: null,
     runtimeMemberIds: [...input.runtimeMemberIds],
     stripeCustomerIds: [...input.stripeCustomerIds],
     stripeCompletedAt: null,
@@ -984,6 +989,43 @@ describe("deleteHostedAccountData", () => {
 
     expect(serviceMocks.prepareHostedAccountDeletionCleanup).toHaveBeenCalledOnce();
     expect(operationOrder).not.toContain("delete:hostedMember");
+  });
+
+  it.each(["canary-reset", "ordinary-deletion"] as const)("%s keeps its diagnostic policy in the deletion transaction", async (mode) => {
+    serviceMocks.readHostedLinqProductionCanaryMemberId.mockResolvedValue("member_123");
+    const rawDeletionQueries: HostedAccountDeletionRawQuery[] = [];
+    const operationOrder: string[] = [];
+    const prisma = createHostedAccountDeletionPrismaForTest({
+      onTransaction: () => undefined,
+      operationOrder,
+      rawDeletionQueries,
+    });
+    const deleteAccount = mode === "canary-reset"
+      ? deleteHostedLinqProductionCanaryAccountData
+      : deleteHostedAccountData;
+    await deleteAccount({
+      memberId: "member_123", prisma,
+      request: new Request("https://join.example.test/settings"),
+    });
+
+    expect(operationOrder).toContain("delete:hostedMember");
+    const persisted = serviceMocks.persistHostedAccountDeletionCleanupTx.mock.calls[0]?.[0].cleanup;
+    expect(persisted.runtimeLogsCompletedAt).toEqual(mode === "canary-reset" ? expect.any(Date) : null);
+    const traceDeletion = rawDeletionQueries.find((query) => query.sql.includes("deleted_ingress_traces AS"));
+    expect(traceDeletion).toBeDefined();
+    expect(traceDeletion?.values.filter((value) => typeof value === "boolean")).toEqual([mode !== "canary-reset"]);
+  });
+
+  it.each([null, "member_another"])("rejects a mismatched canary target before any account cleanup (%s)", async (canaryMemberId) => {
+    serviceMocks.readHostedLinqProductionCanaryMemberId.mockResolvedValue(canaryMemberId);
+    const onTransaction = vi.fn();
+    await expect(deleteHostedLinqProductionCanaryAccountData({
+      memberId: "member_123",
+      prisma: createHostedAccountDeletionPrismaForTest({ onTransaction }),
+      request: new Request("https://join.example.test/settings"),
+    })).rejects.toMatchObject({ code: "HOSTED_LINQ_PRODUCTION_CANARY_TARGET_MISMATCH" });
+    expect(serviceMocks.prepareHostedAccountDeletionCleanup).not.toHaveBeenCalled();
+    expect(onTransaction).not.toHaveBeenCalled();
   });
 
   it("persists cleanup ownership in the canonical deletion transaction before member removal", async () => {

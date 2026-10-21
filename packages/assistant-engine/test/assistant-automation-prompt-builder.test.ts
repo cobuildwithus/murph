@@ -783,7 +783,18 @@ describe('buildAssistantAutoReplyPrompt', () => {
     expect(result.prompt).toContain('Message text:\nmorning crew')
   })
 
-  it('preserves legacy direct Linq speaker presentation and ignores group-only labels', () => {
+  it.each(['+12125550123', 'member@example.test', null])('omits private Linq sender from ordinary prompt: %s', (senderHandle) => {
+    const result = buildAssistantAutoReplyPrompt([createPromptInput({
+      captureOverrides: { source: 'linq', text: 'Call me tomorrow.', threadIsDirect: true },
+      sourceMetadata: { kind: 'linq', externalThreadRouteAuthorityPresent: false,
+        senderHandle, partCount: 1, reactionEligible: false, replyToMessageId: null, service: 'iMessage' },
+    })])
+    if (result.kind !== 'ready') throw new Error('Expected private prompt.')
+    expect(result.prompt).not.toContain('Sender:')
+    if (senderHandle) expect(result.prompt).not.toContain(senderHandle)
+  })
+
+  it('omits legacy direct Linq sender presentation and group-only labels', () => {
     const result = buildAssistantAutoReplyPrompt([
       createPromptInput({
         captureOverrides: { text: 'direct hello', threadIsDirect: true },
@@ -808,9 +819,8 @@ describe('buildAssistantAutoReplyPrompt', () => {
     if (result.kind !== 'ready') {
       throw new Error('Expected a ready prompt result.')
     }
-    expect(result.prompt).toContain(
-      'Sender: +15551110000\n\nSpeaker name: \"Legacy Direct Name\"',
-    )
+    expect(result.prompt).not.toContain('Sender:')
+    expect(result.prompt).not.toContain('Legacy Direct Name')
     expect(result.prompt).not.toContain('Must Not Render')
     expect(result.prompt).not.toContain('Profile name:')
     expect(result.prompt).not.toContain(

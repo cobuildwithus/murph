@@ -10,6 +10,7 @@ import {
   clearLiveWorkoutSet,
   finishLiveWorkout,
   logLiveWorkoutSet,
+  removeLiveWorkoutExercise,
   setLiveWorkoutExerciseReps,
   startLiveWorkout,
   type StartLiveWorkoutExerciseInput,
@@ -364,6 +365,33 @@ export function registerWorkoutLiveCommands(workout: Cli.Cli): void {
     },
   })
 
+  exercise.command('remove', {
+    description: 'Remove one explicitly selected exercise and its sets, preserving the rest of the exact workout.',
+    args: z.object({
+      exercise: z.string().min(1).max(160).optional().describe('Optional exact exercise name.'),
+    }),
+    options: withBaseOptions({
+      workoutId: workoutIdOption,
+      exerciseId: exerciseIdOption,
+      exerciseOrder: exerciseOrderOption,
+      expectedRevision: z.number().int().positive().describe(
+        'Exact lifecycle revision from the workout read approved for this removal.',
+      ),
+    }),
+    hint: 'Read the exact workout first. Stale revisions or ambiguous exercise names make no write. Remaining exercise orders and results are preserved.',
+    output: showResultSchema,
+    async run({ args, options }) {
+      return removeLiveWorkoutExercise({
+        vault: options.vault,
+        workoutId: options.workoutId,
+        exerciseId: options.exerciseId,
+        exerciseName: args.exercise,
+        exerciseOrder: options.exerciseOrder,
+        expectedRevision: options.expectedRevision,
+      })
+    },
+  })
+
   exercise.command('set-reps', {
     description:
       'Store or clear the exact member-stated repetition count that applies to every set of one exercise.',
@@ -412,6 +440,8 @@ export function registerWorkoutLiveCommands(workout: Cli.Cli): void {
   set.command('log', {
     description:
       'Log or correct one exact set. Values may be omitted only when the exercise has a stored member repetition count.',
+    hint:
+      'Exact-read the workout before logging. If memberRepsPerSet is omitted, restore an applicable saved every-set instruction with workout exercise set-reps before logging; its scope must identify this exact workout exercise. A null value is an explicit withdrawal: ask for repetitions and do not restore a historical instruction.',
     args: z.object({
       exercise: z
         .string()

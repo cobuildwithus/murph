@@ -42,6 +42,7 @@ import {
 } from "@murphai/importers/device-providers/junction";
 import {
   normalizeJunctionSourceProviderSlug,
+  readJunctionSourceProviderSlug,
   resolveJunctionOrigin,
 } from "@murphai/importers/device-providers/junction-origin";
 import {
@@ -72,6 +73,7 @@ import {
 } from "../junction-inline-authority.ts";
 import {
   addJunctionExtendedTimeseriesHistoryBackfillCoverage,
+  buildJunctionScheduleTimeHistoryDedupeKey,
   addJunctionHistoricalBackfillEvidence,
   canRepresentJunctionExtendedTimeseriesHistoryBackfillCoverage,
   canCurrentRuntimeMutateJunctionExtendedTimeseriesHistoryBackfillCoverage,
@@ -179,6 +181,7 @@ import type {
   DeviceSyncJobInput,
   DeviceSyncJobRecord,
   DeviceJobExecutor,
+  DeviceJobBatchExecutor,
   ScheduledReconcileProbeResult,
   DeviceSyncProvider,
   DeviceSyncProviderRequestCandidateAliasSource,
@@ -650,6 +653,18 @@ const JUNCTION_JOB_MAX_OWNER_UNITS = 16;
 // Stop starting cheap full-job units after five seconds. Each unit retains its
 // existing request bounds and the worker's foreground/abort deadline.
 const JUNCTION_FULL_JOB_TIMESERIES_BATCH_MS = 5_000;
+// Every canonical write persists a receipt and its artifacts, and a hosted
+// runtime yields after 63 receipts. One write per closed day made historical
+// imports write-bound, so uncapped closed-day resources commit up to eight
+// consecutive days at once. Replays restart at the first uncommitted day, and
+// record identity keeps them idempotent. Records stay far below the
+// importer's 10,000 normalized event bound.
+const JUNCTION_DAILY_TIMESERIES_IMPORT_BATCH_MAX_DAYS = 8;
+const JUNCTION_DAILY_TIMESERIES_IMPORT_BATCH_MAX_RECORDS = 4_000;
+// A yield or pass deadline aborts the job and rejects later writes, so slow
+// but successful reads must not hold uncommitted days: a batch also commits
+// once it has accumulated for five seconds, like full-job continuations.
+const JUNCTION_DAILY_TIMESERIES_IMPORT_BATCH_MS = 5_000;
 // A date-only provider query can contain source-local records from UTC-12.
 // Delay calendar-day ownership until that date has closed in every admitted
 // civil offset instead of treating UTC midnight as globally complete.
@@ -661,34 +676,32 @@ const JUNCTION_SPARSE_CALENDAR_AGGREGATE_RESOURCE_SET = new Set<string>([
   "mindfulness_minutes",
 ]);
 const TIMESERIES_HOUR_MS = 60 * 60_000;
-// Three single-attempt pages allow ordinary pagination while capping provider
-// wait at 24 seconds, below the hosted job's 45-second outer budget.
+// Three single-attempt pages allow ordinary pagination with a 12-second cap
+// per request. This is an inner bound, not a promise about the outer job budget.
 const JUNCTION_FULL_JOB_TIMESERIES_COLLECTION_WORK_LIMIT = Object.freeze({
   maxAttemptsPerPage: 1,
   maxPages: 3,
-  requestTimeoutMs: 8_000,
+  requestTimeoutMs: 12_000,
 } satisfies JunctionCollectionWorkLimit);
 // Most hosted summary continuation units contain one resource. Match the
-// bounded timeseries contract so a complete three-page unit remains below the
-// 45-second outer maintenance budget and can persist its next cursor.
+// bounded timeseries requests; foreground cancellation still takes precedence.
 const JUNCTION_FULL_JOB_SUMMARY_COLLECTION_WORK_LIMIT = Object.freeze({
   maxAttemptsPerPage: 1,
   maxPages: 3,
-  requestTimeoutMs: 8_000,
+  requestTimeoutMs: 12_000,
 } satisfies JunctionCollectionWorkLimit);
-// Sleep summaries and sleep cycles share canonical stage ownership, so they
-// must be normalized in one import. Keep their combined worst-case provider
-// wait at 30 seconds to leave room for projection/import inside the hosted
-// worker's 45-second outer maintenance budget.
+// Sleep summaries and sleep cycles share canonical stage ownership and must
+// be normalized in one import. Keep a smaller per-request cap for this coupled
+// unit without assuming a fixed outer maintenance budget.
 const JUNCTION_FULL_JOB_COUPLED_SUMMARY_COLLECTION_WORK_LIMIT = Object.freeze({
   maxAttemptsPerPage: 1,
   maxPages: 3,
-  requestTimeoutMs: 5_000,
+  requestTimeoutMs: 7_500,
 } satisfies JunctionCollectionWorkLimit);
 const JUNCTION_FULL_JOB_INVENTORY_COLLECTION_WORK_LIMIT = Object.freeze({
   maxAttemptsPerPage: 1,
   maxPages: 1,
-  requestTimeoutMs: 8_000,
+  requestTimeoutMs: 12_000,
 } satisfies JunctionCollectionWorkLimit);
 const JUNCTION_TEMPORAL_AUTHORITY_LAG_MS = TIMESERIES_CHUNK_MS;
 const JUNCTION_TEMPORAL_AUTHORITY_RESOURCES = new Set([
@@ -1925,7 +1938,7 @@ export function createJunctionDeviceSyncProvider(
     const baseTimeseriesWindowStart = job.kind === "backfill"
       ? maxIsoTimestamp(window.windowStart, subtractDays(window.windowEnd, timeseriesBackfillDays))
       : window.windowStart;
-    if (job.kind !== "backfill" || summaryHasFetchedRecords) {
+    if (summaryHasFetchedRecords) {
       await commitPreparedJunctionCanonicalImport(
         context,
         preparedSummaryImport,
@@ -2736,19 +2749,34 @@ export function createJunctionDeviceSyncProvider(
       listedSourceProviders = sourceProviders;
       return sourceProviders;
     };
-    const loadAndProjectSourceProviders = async (): Promise<readonly JunctionProviderConnection[]> => {
+    const loadAndProjectSourceProviders = async (
+      admissionSources?: readonly JunctionImportAdmissionSource[],
+    ): Promise<readonly JunctionProviderConnection[]> => {
       if (projectedSourceProviders) {
         return projectedSourceProviders;
       }
       const sourceProviders = await loadSourceProviders();
-      await projectJunctionSources(context, sourceProviders);
+      await projectJunctionSources(context, sourceProviders, {
+        admissionSources: context.listConnectionSources ? admissionSources : undefined,
+      });
       projectedSourceProviders = sourceProviders;
       if (inventoryKey) {
         passInventories?.set(inventoryKey, sourceProviders);
       }
       return sourceProviders;
     };
-    return { loadSourceProviders, loadAndProjectSourceProviders };
+    const loadImportAdmission = async () => {
+      const sourceProviders = await loadSourceProviders();
+      // Hosted projection cannot change Web authority. Local projection can
+      // disconnect SQLite sources, so local admission must read after projection.
+      const hostedSources = context.connectionSourceAdmissionMode === "listed_only"
+        ? await readJunctionImportSources(context)
+        : undefined;
+      await loadAndProjectSourceProviders(hostedSources);
+      const currentSources = hostedSources ?? await readJunctionImportSources(context);
+      return { sourceProviders, currentSources };
+    };
+    return { loadSourceProviders, loadAndProjectSourceProviders, loadImportAdmission };
   }
 
   async function executeResourceJob(
@@ -2910,11 +2938,13 @@ export function createJunctionDeviceSyncProvider(
       );
     }
 
-    const sourceProviders = await inventory.loadAndProjectSourceProviders();
-    const preparedImport = await prepareJunctionImportSnapshot(
-      context,
+    const { sourceProviders, currentSources } = await inventory.loadImportAdmission();
+    const preparedImport = prepareJunctionImportSnapshotForSources(
       summaries,
       sourceProviders,
+      currentSources,
+      {},
+      { allowUnlistedSources: context.connectionSourceAdmissionMode !== "listed_only" },
     );
     await commitPreparedJunctionCanonicalImport(
       context,
@@ -4437,23 +4467,27 @@ export function createJunctionDeviceSyncProvider(
       }
     }
 
-    const preparedSummaryImport = await prepareJunctionImportSnapshot(
-      input.context,
-      summaries,
-      input.sourceProviders,
-    );
-    await commitPreparedJunctionCanonicalImport(
-      input.context,
-      preparedSummaryImport,
-      {
-        importedAt: input.summaryWindow.windowEnd,
-        windowStart: input.summaryWindow.windowStart,
-        windowEnd: input.summaryWindow.windowEnd,
-        summaries: preparedSummaryImport.snapshots,
-        timeseries: {},
-      },
-      input.context.now,
-    );
+    // Empty summaries have no canonical records or authoritative deletions.
+    // The continuation is admitted afresh; there is no import to authorize here.
+    if (hasJunctionSnapshotRecords(summaries)) {
+      const preparedSummaryImport = await prepareJunctionImportSnapshot(
+        input.context,
+        summaries,
+        input.sourceProviders,
+      );
+      await commitPreparedJunctionCanonicalImport(
+        input.context,
+        preparedSummaryImport,
+        {
+          importedAt: input.summaryWindow.windowEnd,
+          windowStart: input.summaryWindow.windowStart,
+          windowEnd: input.summaryWindow.windowEnd,
+          summaries: preparedSummaryImport.snapshots,
+          timeseries: {},
+        },
+        input.context.now,
+      );
+    }
 
     const nextResource = eligibleUnits[cursorIndex >= 0 ? cursorIndex + 1 : 1]?.[0] ?? null;
     const sourceProviderSlug = normalizeProviderSlug(
@@ -4719,13 +4753,18 @@ export function createJunctionDeviceSyncProvider(
         break;
       }
 
-      executionWindowStart ??= window.windowStart;
+      // Historical imports stop at their first populated window. Empty prefixes
+      // need no import owner, so keep that populated window's original boundary.
+      executionWindowStart = options.preservePartialRetryableFailure === true
+        ? window.windowStart
+        : executionWindowStart ?? window.windowStart;
       executionWindowEnd = window.windowEnd;
       accumulatedRecords = accumulatedRecords.concat(records);
-      if (
-        options.preservePartialRetryableFailure === true
-        && index < preciseWindows.length - 1
-      ) {
+      if (shouldCheckpointJunctionPreciseTimeseriesWindow({
+        options,
+        providerRecordCount: accumulatedRecords.length,
+        remainingWindowCount: preciseWindows.length - index - 1,
+      })) {
         fetchComplete = false;
         yieldedAt = window.windowEnd;
         break;
@@ -5126,6 +5165,18 @@ export function createJunctionDeviceSyncProvider(
     workoutStreamEmptySeen = false,
     historicalResourceJobWorkBudget?: JunctionHistoricalResourceJobWorkBudget,
   ): Promise<JunctionDailyTimeseriesImportResult> {
+    if (canBatchJunctionDailyTimeseriesImports(resource)) {
+      return await importBatchedTimeseriesDailySnapshots({
+        context,
+        historicalResourceJobWorkBudget,
+        resource,
+        skippedOptionalResources,
+        sourceProviderSlug,
+        sourceProviders,
+        windowEnd,
+        windowStart,
+      });
+    }
     let resumeWorkoutStreamIdentities = new Set(completedWorkoutStreamIdentities);
     let madeProgress = false;
 
@@ -5238,6 +5289,159 @@ export function createJunctionDeviceSyncProvider(
     };
   }
 
+  // Same per-day fetches, source admission and canonical import as the
+  // single-day owner. The first nonempty day commits alone; later consecutive
+  // closed days share a commit bounded by days, records and accumulation time.
+  // Yield handling mirrors the one-day owner: once committed, stop before the
+  // next read; a yielded job's writes are rejected by the service, so
+  // uncommitted days replay from the batch start.
+  async function importBatchedTimeseriesDailySnapshots(input: {
+    context: ProviderJobContext;
+    historicalResourceJobWorkBudget?: JunctionHistoricalResourceJobWorkBudget;
+    resource: string;
+    skippedOptionalResources: JunctionSkippedOptionalResource[];
+    sourceProviderSlug?: string | null;
+    sourceProviders: readonly JunctionProviderConnection[];
+    windowEnd: string;
+    windowStart: string;
+  }): Promise<JunctionDailyTimeseriesImportResult> {
+    const { context } = input;
+    let pending: JunctionDailyImportBatch | null = null;
+    let committedProgress = false;
+    let currentWindowStart = input.windowStart;
+    const finish = (yieldedAt: string | null): JunctionDailyTimeseriesImportResult => ({
+      workoutStreamCursor: null,
+      workoutStreamEmptySeen: false,
+      yieldedAt,
+    });
+    // Uncommitted days replay from the batch start; committed days never do.
+    const firstUncommittedDay = (): string => pending?.windowStart ?? currentWindowStart;
+    const yieldBeforeWrite = (): boolean =>
+      committedProgress && context.shouldYield?.() === true;
+    const flush = async (): Promise<void> => {
+      if (!pending) return;
+      await commitJunctionDailyImportBatch(input, pending);
+      pending = null;
+      committedProgress = true;
+    };
+
+    try {
+      for (const window of buildClosedDailyWindows(input.windowStart, input.windowEnd)) {
+        currentWindowStart = window.windowStart;
+        if (context.shouldYield?.()) {
+          if (committedProgress) return finish(firstUncommittedDay());
+          context.throwIfAborted?.();
+        }
+        if (!tryStartJunctionHistoricalResourceJobOwnerUnit(input.historicalResourceJobWorkBudget)) {
+          if (yieldBeforeWrite()) return finish(firstUncommittedDay());
+          await flush();
+          return finish(window.windowStart);
+        }
+        const dayStartedAtMs = Date.now();
+        const records = await fetchJunctionDailyTimeseriesRecords(input, window, async () => {
+          // Keep the days already read, as one-day owners did, before the
+          // retryable failure schedules a resume at the failing day.
+          if (!yieldBeforeWrite()) await flush();
+        });
+        if (records.length === 0 && !pending) {
+          committedProgress = true;
+          continue;
+        }
+        pending = appendJunctionDailyImportBatch(pending, records, window, dayStartedAtMs);
+        // A job's first nonempty day commits alone, as the one-day owner did, so
+        // every pass that completes a day keeps it even if the next read is slow.
+        if (!committedProgress || isJunctionDailyImportBatchFull(pending, Date.now())) {
+          if (yieldBeforeWrite()) return finish(firstUncommittedDay());
+          await flush();
+        }
+      }
+      if (pending && yieldBeforeWrite()) return finish(firstUncommittedDay());
+      await flush();
+      return finish(null);
+    } catch (error) {
+      if (isJunctionJobSignalAbort(error, context.signal)) {
+        if (committedProgress) return finish(firstUncommittedDay());
+        throw error;
+      }
+      if (isRetryableDeviceSyncFailure(error)) {
+        throw new JunctionTimeseriesProgressError(error, firstUncommittedDay(), null);
+      }
+      throw error;
+    }
+  }
+
+  async function fetchJunctionDailyTimeseriesRecords(
+    input: {
+      context: ProviderJobContext;
+      resource: string;
+      skippedOptionalResources: JunctionSkippedOptionalResource[];
+      sourceProviderSlug?: string | null;
+    },
+    window: { windowEnd: string; windowStart: string },
+    beforeRetryableFailure: () => Promise<void>,
+  ): Promise<unknown[]> {
+    const skippedResourceCountBeforeFetch = input.skippedOptionalResources.length;
+    let fetched: Awaited<ReturnType<typeof fetchTimeseriesResourceInChunks>>;
+    try {
+      fetched = await fetchTimeseriesResourceInChunks(
+        input.context,
+        input.resource,
+        window.windowStart,
+        window.windowEnd,
+        input.skippedOptionalResources,
+        input.sourceProviderSlug,
+        { dateQueryFormat: "date" },
+      );
+    } catch (error) {
+      if (isRetryableDeviceSyncFailure(error)) await beforeRetryableFailure();
+      throw error;
+    }
+    return input.skippedOptionalResources.length > skippedResourceCountBeforeFetch
+      ? []
+      : scopeJunctionRecordsToSourceProvider(fetched.records, input.sourceProviderSlug);
+  }
+
+  // The batch's live source-authority read follows every provider read in it.
+  async function commitJunctionDailyImportBatch(
+    input: {
+      context: ProviderJobContext;
+      resource: string;
+      sourceProviders: readonly JunctionProviderConnection[];
+    },
+    batch: JunctionDailyImportBatch,
+  ): Promise<void> {
+    const { context } = input;
+    const currentSources = await readJunctionTimeseriesImportSources({
+      context,
+      hasCanonicalWork: true,
+      sourceLifecycleFence: null,
+    });
+    if (!currentSources) return;
+    const preparedImport = prepareJunctionImportSnapshotForSources(
+      { [input.resource]: batch.records },
+      input.sourceProviders,
+      currentSources,
+      {},
+      {
+        allowUnlistedSources: context.connectionSourceAdmissionMode !== "listed_only",
+        sourceStatusRequirement: "not_disconnected",
+      },
+    );
+    if (!hasJunctionSnapshotRecords(preparedImport.snapshots)) return;
+    await commitPreparedJunctionCanonicalImport(
+      context,
+      preparedImport,
+      {
+        importedAt: batch.windowEnd,
+        windowStart: batch.windowStart,
+        windowEnd: batch.windowEnd,
+        summaries: {},
+        timeseries: preparedImport.snapshots,
+      },
+      context.now,
+    );
+  }
+
   async function executeFullJobTimeseriesContinuation(
     context: ProviderJobContext,
     job: DeviceSyncJobRecord,
@@ -5246,10 +5450,12 @@ export function createJunctionDeviceSyncProvider(
   ): Promise<ProviderJobResult> {
     const startedAt = Date.now();
     let emptySourceFence: JunctionSourceLifecycleFence | null = null;
-    const deferEmptySourceCheck = job.kind === "reconcile"
-      && !normalizeProviderSlug(job.payload.sourceProviderSlug)
-      ? (fence: JunctionSourceLifecycleFence) => { emptySourceFence ??= fence; }
-      : undefined;
+    const deferEmptySourceCheck = (fence: JunctionSourceLifecycleFence) => {
+      emptySourceFence ??= fence;
+    };
+    // Inventory is descriptive; reuse it only within this bounded job. Each
+    // canonical import still reads live source authority after its fetch.
+    const inventory: { providers: readonly JunctionProviderConnection[] | null } = { providers: null };
     let currentJob = job;
     for (let units = 1; ; units += 1) {
       const result = await executeFullJobTimeseriesContinuationUnit(
@@ -5257,6 +5463,7 @@ export function createJunctionDeviceSyncProvider(
         currentJob,
         skippedOptionalResources,
         completedWorkoutStreamIdentities,
+        inventory,
         deferEmptySourceCheck,
       );
       const next = result.scheduledJobs?.[0];
@@ -5297,7 +5504,8 @@ export function createJunctionDeviceSyncProvider(
     job: DeviceSyncJobRecord,
     skippedOptionalResources: JunctionSkippedOptionalResource[],
     completedWorkoutStreamIdentities: ReadonlySet<string>,
-    deferEmptySourceCheck?: (fence: JunctionSourceLifecycleFence) => void,
+    inventory: { providers: readonly JunctionProviderConnection[] | null },
+    deferEmptySourceCheck: (fence: JunctionSourceLifecycleFence) => void,
   ): Promise<ProviderJobResult> {
     const window = resolveJobWindow(
       job,
@@ -5345,7 +5553,7 @@ export function createJunctionDeviceSyncProvider(
       throw invalidJunctionTimeseriesResourceProgress();
     }
     const listedSourceProviders = sourceProviderSlug || resource === "workout_stream"
-      ? await measureJunctionProviderRequest(
+      ? inventory.providers ??= await measureJunctionProviderRequest(
           context,
           "inventory",
           () => client.listUserProviders(context.account.externalAccountId, {
@@ -6115,7 +6323,16 @@ export function createJunctionDeviceSyncProvider(
     windowStart: string;
   }): ProviderJobResult {
     const followUp = buildYieldedJunctionFollowUpJob(input);
+    // Empty provider days still advance coverage. Credit only a strict suffix
+    // of the same finite resource window, never a retry or a reset scan.
+    const advancesCoverage = followUp !== null
+      && input.job.kind === "resource"
+      && typeof input.job.payload.windowStart === "string"
+      && input.windowEnd === input.job.payload.windowEnd
+      && Date.parse(input.windowStart) > Date.parse(input.job.payload.windowStart)
+      && Date.parse(input.windowStart) < Date.parse(input.windowEnd);
     return {
+      ...(advancesCoverage ? { continuationProgress: true as const } : {}),
       ...(followUp
         ? {
             scheduledJobs: [{
@@ -6585,9 +6802,10 @@ export function createJunctionDeviceSyncProvider(
       createScheduledJobs,
       probeScheduledReconcile,
       executeJob,
+      batch: createJunctionDailyResourceBatchExecutor(executeJob),
       createPassExecutor(): DeviceJobExecutor {
         const passInventories = new Map<string, readonly JunctionProviderConnection[]>();
-        return {
+        const pass: DeviceJobExecutor = {
           async executeJob(context, job) {
             if (
               (job.kind !== "resource" && job.kind !== "reconcile")
@@ -6603,7 +6821,50 @@ export function createJunctionDeviceSyncProvider(
             }
           },
         };
+        pass.batch = createJunctionDailyResourceBatchExecutor(pass.executeJob);
+        return pass;
       },
+    },
+  };
+}
+
+const JUNCTION_DAILY_RESOURCE_BATCH_FIELDS = new Set([
+  "eventType", "objectId", "occurredAt", "resource", "resourceCategory",
+  "sourceProviderSlug", "windowStart", "windowEnd",
+]);
+
+function createJunctionDailyResourceBatchExecutor(
+  execute: DeviceJobExecutor["executeJob"],
+): DeviceJobBatchExecutor {
+  return {
+    maxJobs: 16,
+    describe(job) {
+      const resource = normalizeJunctionResourceName(job.payload.resource);
+      const start = toIsoTimestampIfValid(job.payload.windowStart);
+      const end = toIsoTimestampIfValid(job.payload.windowEnd);
+      if (
+        job.kind !== "resource"
+        || !resource || !JUNCTION_CLOSED_DAY_TIMESERIES_RESOURCES.has(resource)
+        || job.payload.resourceCategory !== "timeseries"
+        || (job.payload.eventType !== `daily.data.${resource}.created`
+          && job.payload.eventType !== `daily.data.${resource}.updated`)
+        || Object.keys(job.payload).some((key) => !JUNCTION_DAILY_RESOURCE_BATCH_FIELDS.has(key))
+        || !start || !end || start >= end
+      ) return null;
+      return {
+        key: JSON.stringify([
+          resource, canonicalizeJunctionProviderSlug(job.payload.sourceProviderSlug),
+          floorUtcDayTimestamp(start), floorUtcDayTimestamp(end),
+        ]),
+      };
+    },
+    async execute(context, jobs) {
+      const [first] = jobs;
+      if (!first) throw new TypeError("Junction daily resource batch requires a job.");
+      // Every already-claimed notification describes the same closed daily
+      // reads. The existing account lease and batch completion own retries;
+      // later arrivals remain queued. No provider result or authority is cached.
+      return execute(context, first);
     },
   };
 }
@@ -9110,7 +9371,7 @@ function isJunctionImportRecordAdmitted(
 
   const fallback = readJunctionSourceReference(record, sourceReferences);
   const sourceProviderSlug = canonicalizeJunctionProviderSlug(
-    resolveJunctionOrigin(record, fallback).sourceProviderSlug,
+    readJunctionSourceProviderSlug(record, fallback),
   );
   if (sourceProviderSlug) {
     if (!isJunctionSourceAdmittedForImport(
@@ -10176,7 +10437,8 @@ function isFullJobTimeseriesContinuation(job: DeviceSyncJobRecord): boolean {
 
 function isJunctionTimeseriesWindowTooLarge(error: unknown): boolean {
   return isDeviceSyncError(error)
-    && error.code === "JUNCTION_API_WINDOW_TOO_LARGE";
+    && (error.code === "JUNCTION_API_WINDOW_TOO_LARGE"
+      || error.code === "JUNCTION_API_RECORD_LIMIT");
 }
 
 function resolveNextFullJobTimeseriesContinuation(input: {
@@ -10604,6 +10866,22 @@ function resolveGloballyClosedProviderDayEnd(windowEnd: string, asOf: string): n
   return Math.min(requestedClosedEndMs, globallyClosedEndMs);
 }
 
+function shouldCheckpointJunctionPreciseTimeseriesWindow(input: {
+  options: JunctionPreciseTimeseriesImportOptions;
+  providerRecordCount: number;
+  remainingWindowCount: number;
+}): boolean {
+  if (
+    input.options.preservePartialRetryableFailure !== true
+    || input.remainingWindowCount === 0
+  ) {
+    return false;
+  }
+  // Calendar history shares only empty windows within the existing owner-unit
+  // budget. Exact-record history and populated dates retain their checkpoint.
+  return input.options.dateQueryFormat !== "date" || input.providerRecordCount > 0;
+}
+
 function buildPreciseTimeseriesWindows(
   windowStart: string,
   windowEnd: string,
@@ -10648,6 +10926,60 @@ function floorUtcDayTimestamp(timestamp: string): string {
     date.getUTCMonth(),
     date.getUTCDate(),
   )).toISOString();
+}
+
+// Only uncapped dense day/hour aggregates batch: their normalizers already
+// accept multi-day snapshots, as accumulated precise imports do. Capped
+// windows would truncate, calendar-day resources own per-day closure, and
+// workout streams and ECG own their cursors, so those keep one day per write.
+function canBatchJunctionDailyTimeseriesImports(resource: string): boolean {
+  const policy = resolveJunctionTimeseriesResourcePolicy(resource);
+  return policy !== undefined && policy !== null
+    && policy.historyWindow === "dense_timeseries"
+    && (policy.normalizationMode === "daily_aggregate"
+      || policy.normalizationMode === "hourly_or_session_feature")
+    && policy.fetchMode === undefined
+    && policy.maxCanonicalRecordsPerWindow === undefined
+    && policy.maxRecordsPerWindow === undefined
+    && policy.maxSamplesPerRecord === undefined
+    && policy.maxSamplesPerWindow === undefined
+    && !JUNCTION_CALENDAR_DAY_AGGREGATE_RESOURCE_SET.has(resource);
+}
+
+interface JunctionDailyImportBatch {
+  days: number;
+  records: unknown[];
+  startedAtMs: number;
+  windowEnd: string;
+  windowStart: string;
+}
+
+function appendJunctionDailyImportBatch(
+  batch: JunctionDailyImportBatch | null,
+  records: readonly unknown[],
+  window: { windowEnd: string; windowStart: string },
+  dayStartedAtMs: number,
+): JunctionDailyImportBatch {
+  return batch
+    ? {
+        ...batch,
+        days: batch.days + 1,
+        records: batch.records.concat(records),
+        windowEnd: window.windowEnd,
+      }
+    : {
+        days: 1,
+        records: [...records],
+        startedAtMs: dayStartedAtMs,
+        windowEnd: window.windowEnd,
+        windowStart: window.windowStart,
+      };
+}
+
+function isJunctionDailyImportBatchFull(batch: JunctionDailyImportBatch, nowMs: number): boolean {
+  return batch.days >= JUNCTION_DAILY_TIMESERIES_IMPORT_BATCH_MAX_DAYS
+    || batch.records.length >= JUNCTION_DAILY_TIMESERIES_IMPORT_BATCH_MAX_RECORDS
+    || nowMs - batch.startedAtMs >= JUNCTION_DAILY_TIMESERIES_IMPORT_BATCH_MS;
 }
 
 function hasJunctionSnapshotRecords(snapshot: Record<string, unknown[]>): boolean {
@@ -11873,14 +12205,10 @@ function buildJunctionExtendedTimeseriesBackfillDedupeKey(
 
   const coverageVersion = readJunctionHistoricalBackfillVersion(payload);
   if (policy.anchor === "current_day" || policy.completion !== "exact_records") {
-    return sha256Text(JSON.stringify([
-      "junction",
-      "extended-timeseries-backfill",
-      canonicalizeJunctionProviderSlug(payload.sourceProviderSlug),
-      resource,
-      sourceLifecycleEpoch,
-      coverageVersion,
-    ]));
+    return buildJunctionScheduleTimeHistoryDedupeKey({
+      sourceProviderSlug: canonicalizeJunctionProviderSlug(payload.sourceProviderSlug),
+      resource, sourceLifecycleEpoch, coverageVersion,
+    });
   }
 
   return sha256Text(JSON.stringify([

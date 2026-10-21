@@ -106,7 +106,7 @@ test("dashboard sign-in opens on entry, respects dismissal, and opens on another
   expect(mocks.authDialogProps?.open).toBe(false);
 
   mocks.segment = "(dashboard)";
-  mocks.pathname = "/journal";
+  mocks.pathname = "/patterns";
   await rendered.rerender(view());
   expect(mocks.authDialogProps?.open).toBe(true);
 
@@ -138,7 +138,7 @@ test.each([
   await rendered.cleanup();
 });
 
-test.each(["/home", "/patterns", "/journal", "/biomarkers/example"])(
+test.each(["/home", "/experiments/example"])(
   "dashboard sign-in resumes the full current URL: %s",
   async (pathname) => {
     const { AuthProvider } = await import(
@@ -529,54 +529,6 @@ test("AuthProvider returns an unauthenticated medical-records viewer to that pag
         href: "https://join.example.test/records",
         origin: "https://join.example.test",
         pathname: "/records",
-        search: "",
-      },
-    },
-  );
-
-  await act(async () => {
-    rendered.button.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
-  });
-  await act(async () => {
-    await mocks.authDialogProps?.onCompleted?.({
-      activationPending: false,
-      inviteCode: "invite-code",
-      joinUrl: "/join/invite-code",
-      stage: "active",
-    });
-  });
-
-  expect(rendered.reload).toHaveBeenCalledTimes(1);
-  expect(rendered.assign).not.toHaveBeenCalled();
-  await rendered.cleanup();
-});
-
-test("AuthProvider returns an Environment voice user to that page", async () => {
-  const { AuthProvider, useAuth } = await import(
-    "@/src/components/hosted-onboarding/auth-dialog-provider"
-  );
-
-  function OpenAuthButton() {
-    const { openAuthDialog } = useAuth();
-    return createElement(
-      "button",
-      { type: "button", onClick: openAuthDialog },
-      "Sign in",
-    );
-  }
-
-  const rendered = await renderClientComponent(
-    createElement(
-      AuthProvider,
-      { authenticated: false },
-      createElement(OpenAuthButton),
-    ),
-    {
-      location: {
-        hash: "",
-        href: "https://join.example.test/environment",
-        origin: "https://join.example.test",
-        pathname: "/environment",
         search: "",
       },
     },
@@ -1267,9 +1219,9 @@ test("AuthProvider keeps the default home redirect for ordinary sign-in completi
     value: {
       assign,
       hash: "",
-      href: "https://join.example.test/search",
+      href: "https://join.example.test/compare",
       origin: "https://join.example.test",
-      pathname: "/search",
+      pathname: "/compare",
       search: "",
     },
   });

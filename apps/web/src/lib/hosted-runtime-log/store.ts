@@ -202,11 +202,17 @@ export async function listHostedRuntimeLogs(input: {
   return result.rows.map((row) => projectHostedRuntimeLogRow(row, userId));
 }
 
+export type HostedRuntimeTurnTimingLogStage =
+  | "linq-dispatch-entered"
+  | "reply-dispatched";
+
 export async function listHostedRuntimeTurnTimingLogs(input: {
   attemptIds: readonly string[];
   database?: HostedRuntimeLogSqlDatabase;
   from: Date;
   limit: number;
+  /** Turn-timing stages to read; defaults to the reply-dispatched stage. */
+  stages?: readonly HostedRuntimeTurnTimingLogStage[];
   to: Date;
 }): Promise<HostedRuntimeTurnTimingLogRow[]> {
   const attemptIds = [...new Set(input.attemptIds.map(requireHostedRuntimeLogAttemptId))];
@@ -228,10 +234,16 @@ export async function listHostedRuntimeTurnTimingLogs(input: {
       AND event_code = 'assistant.automation_detail'
       AND redacted_json->>'schema' = 'murph.assistant-turn-timing.v1'
       AND redacted_json->>'type' = 'assistant.turn.timing'
-      AND redacted_json->>'turnTimingStage' = 'reply-dispatched'
+      AND redacted_json->>'turnTimingStage' = ANY($5::text[])
     ORDER BY at DESC, id DESC
     LIMIT $4
-  `, [input.from, input.to, attemptIds, limit]);
+  `, [
+    input.from,
+    input.to,
+    attemptIds,
+    limit,
+    [...new Set(input.stages ?? ["reply-dispatched"])],
+  ]);
 
   return result.rows.map((row) => ({
     at: requireDate(row.at, "Hosted runtime timing log at").toISOString(),

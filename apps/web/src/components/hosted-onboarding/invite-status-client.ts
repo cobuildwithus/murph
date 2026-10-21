@@ -7,6 +7,8 @@ import type { HostedInviteStatusPayload } from "@/src/lib/hosted-onboarding/type
 import { requestHostedOnboardingJson } from "./client-api";
 
 const HOSTED_INVITE_STATUS_POLL_INTERVAL_MS = 3_000;
+const HOSTED_INVITE_STATUS_FAST_WINDOW_MS = 30_000;
+const HOSTED_INVITE_STATUS_IDLE_POLL_INTERVAL_MS = 30_000;
 
 export async function fetchHostedInviteStatus(inviteCode: string): Promise<HostedInviteStatusPayload> {
   return requestHostedOnboardingJson<HostedInviteStatusPayload>({
@@ -67,31 +69,45 @@ export function useHostedInviteStatusRefresh(input: {
 
     let cancelled = false;
     let timer: number | null = null;
+    let refreshing = false;
+    let fastWindowStartedAt = Date.now();
 
     const scheduleNextPoll = () => {
-      if (cancelled) {
+      if (cancelled || document.visibilityState === "hidden" || timer !== null) {
         return;
       }
 
       timer = window.setTimeout(() => {
         timer = null;
         void runRefreshCycle();
-      }, HOSTED_INVITE_STATUS_POLL_INTERVAL_MS);
+      }, Date.now() - fastWindowStartedAt < HOSTED_INVITE_STATUS_FAST_WINDOW_MS
+        ? HOSTED_INVITE_STATUS_POLL_INTERVAL_MS
+        : HOSTED_INVITE_STATUS_IDLE_POLL_INTERVAL_MS);
     };
 
     const runRefreshCycle = async () => {
+      if (cancelled || refreshing || document.visibilityState === "hidden") return;
+      refreshing = true;
       await refreshStatusEffect();
-
-      if (cancelled) {
-        return;
-      }
-
+      refreshing = false;
       scheduleNextPoll();
     };
 
+    const onVisibilityChange = () => {
+      if (timer !== null) {
+        window.clearTimeout(timer);
+        timer = null;
+      }
+      if (document.visibilityState !== "hidden") {
+        fastWindowStartedAt = Date.now();
+        void runRefreshCycle();
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibilityChange);
     scheduleNextPoll();
 
     return () => {
+      document.removeEventListener("visibilitychange", onVisibilityChange);
       cancelled = true;
       if (timer !== null) {
         window.clearTimeout(timer);

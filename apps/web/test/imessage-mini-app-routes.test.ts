@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { buildWorkoutSessionAppCardEnvelopeV6 } from "@murphai/contracts";
 
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -155,6 +156,37 @@ describe("iMessage mini-app routes", () => {
       workflowId: "hosted-user-runtime:member-1",
     });
     mocks.readHostedMailboxWakeByDedupeKey.mockResolvedValue(null);
+  });
+
+  it("accepts corrections across a 16 by 16 workout above the former request budget", async () => {
+    const result = { kind: "weight_reps", reps: 12, weight: 135, weightUnit: "lb" };
+    const body = { schemaVersion: 1, actionId: "2f1c1fdc-c7b0-4d90-b902-8e6295959243",
+      requestedAt: new Date().toISOString(), action: {
+        kind: "workout.live.apply", version: 1,
+        expectedWorkout: { actionBinding: "a".repeat(64),
+          exercises: Array.from({ length: 16 }, (_, i) => ({ name: `Exercise ${i + 1}`,
+            sets: Array.from({ length: 16 }, () => ({ logged: false })) })),
+        },
+        mutations: Array.from({ length: 256 }, (_, i) => ({ kind: "set.put",
+          exerciseName: `Exercise ${Math.floor(i / 16) + 1}`, exercisePosition: Math.floor(i / 16) + 1,
+          setPosition: i % 16 + 1, expectedResult: null, result })),
+        presentation: { title: "Workout", subtitle: null, footer: null,
+          workout: { version: 1, state: "completed",
+            exercises: Array.from({ length: 16 }, (_, i) => ({ name: `Exercise ${i + 1}`,
+              sets: Array.from({ length: 16 }, () => ({ status: "skipped", actual: null, target: null })) })),
+          },
+        },
+      },
+    };
+    expect(Buffer.byteLength(JSON.stringify(body))).toBeGreaterThan(24 * 1_024);
+    const original = await vi.importActual<typeof import("../src/lib/http")>("../src/lib/http");
+    mocks.readJsonObject.mockImplementationOnce(original.readJsonObject);
+    const response = await memberActionRoute.POST(jsonRequest(
+      "https://example.test/api/device-sync/companion/imessage-mini-app/member-actions",
+      MESSAGES_TOKEN, "POST", body,
+    ));
+    expect(response.status).toBe(202);
+    expect(mocks.appendHostedMailboxEnvelopeWithPreparedCryptoTx).toHaveBeenCalledTimes(1);
   });
 
   it("exchanges a verified Privy member session for a scoped derived credential", async () => {
@@ -685,6 +717,88 @@ describe("iMessage mini-app routes", () => {
     });
   });
 
+  it.each([
+    ["active", "workout.live.snapshot"],
+    ["completed", "workout.live.snapshot"],
+    ["active", "workout.live.apply"],
+    ["completed", "workout.live.apply"],
+  ] as const)("keeps %s %s results readable by old and opted-in clients without rewriting receipts", async (state, kind) => {
+    const actionId = validSnapshotRequest().actionId;
+    const card = compatibilityWorkoutEnvelope(state);
+    const outcome = {
+      actionId,
+      completedAt: "2026-09-22T15:00:01.000Z",
+      reason: null,
+      result: { card, kind, version: 1 },
+      schemaVersion: 1,
+      status: kind === "workout.live.apply" ? "applied" : "unchanged",
+    };
+    const before = JSON.stringify(outcome);
+    mocks.readHostedMailboxWakeByDedupeKey.mockResolvedValue({
+      kind: "member.action.completed", outcome,
+    });
+
+    for (const format of [null, "unknown", "envelope-v6"]) {
+      const response = await memberActionStatusRoute.GET(createBearerRequest(
+        `https://example.test/api/device-sync/companion/imessage-mini-app/member-actions/${actionId}`,
+        MESSAGES_TOKEN,
+        { method: "GET", headers: format ? { "X-Murph-Workout-Card-Format": format } : {} },
+      ), { params: Promise.resolve({ actionId }) });
+      expect(response.status).toBe(200);
+      const body = await response.json();
+      if (format === "envelope-v6") {
+        expect(body).toEqual(outcome);
+      } else {
+        expect(body).toEqual({
+          ...outcome,
+          result: { kind, version: 1, cardUrl: expect.any(String) },
+        });
+        expect(body.result.cardUrl.length).toBeLessThan(2_048);
+        const decoded = JSON.parse(Buffer.from(
+          body.result.cardUrl.split("#murph-card=")[1], "base64url",
+        ).toString("utf8"));
+        expect(decoded.schemaVersion).toBe(state === "active" ? 6 : 4);
+        expect(decoded.card.s).toBe(state === "active" ? "a" : "c");
+        if (state === "completed") {
+          expect(decoded.card).not.toHaveProperty("b");
+          expect(decoded.card.e[0][1][0]).toEqual(["c", "8 reps", "8 reps"]);
+        } else {
+          expect(decoded).toEqual(card);
+        }
+      }
+      expect(response.headers.get("cache-control")).toContain("no-store");
+    }
+    expect(JSON.stringify(outcome)).toBe(before);
+    expect(mocks.appendHostedMailboxEnvelopeWithPreparedCryptoTx).not.toHaveBeenCalled();
+    expect(mocks.readHostedMailboxWakeByDedupeKey).toHaveBeenCalledTimes(3);
+  });
+
+  it.each(["workout.live.apply", "workout.live.snapshot"] as const)("preserves the legacy oversized %s outcome and full opted-in editor", async (kind) => {
+    const actionId = validSnapshotRequest().actionId;
+    const outcome = {
+      actionId, completedAt: "2026-09-22T15:00:01.000Z", reason: null,
+      result: { card: compatibilityWorkoutEnvelope("active", true), kind, version: 1 },
+      schemaVersion: 1,
+      status: kind === "workout.live.apply" ? "applied" : "unchanged",
+    };
+    mocks.readHostedMailboxWakeByDedupeKey.mockResolvedValue({ kind: "member.action.completed", outcome });
+    for (const direct of [false, true]) {
+      const response = await memberActionStatusRoute.GET(createBearerRequest(
+        `https://example.test/api/device-sync/companion/imessage-mini-app/member-actions/${actionId}`,
+        MESSAGES_TOKEN,
+        { method: "GET", headers: direct ? { "X-Murph-Workout-Card-Format": "envelope-v6" } : {} },
+      ), { params: Promise.resolve({ actionId }) });
+      const body = await response.json();
+      if (direct) expect(body).toEqual(outcome);
+      else expect(body).toEqual({
+        actionId, completedAt: outcome.completedAt, schemaVersion: 1,
+        status: kind === "workout.live.apply" ? "applied" : "rejected",
+        reason: kind === "workout.live.apply" ? null : "workout_changed",
+      });
+    }
+    expect(mocks.appendHostedMailboxEnvelopeWithPreparedCryptoTx).not.toHaveBeenCalled();
+  });
+
   it("rejects an indistinguishable destructive batch before mailbox append", async () => {
     const request = validMemberActionRequest();
     const response = await memberActionRoute.POST(jsonRequest(
@@ -1079,4 +1193,24 @@ function invocationOrder(
     throw new TypeError("Expected the mocked call to have an invocation order.");
   }
   return order;
+}
+
+function compatibilityWorkoutEnvelope(state: "active" | "completed", oversized = false) {
+  const exercises = Array.from({ length: oversized ? 16 : 1 }, (_, i) => ({
+    name: oversized ? `Exercise ${i + 1} with a long but valid display name` : "Cable Row",
+    sets: Array.from({ length: oversized ? 16 : 1 }, () => ({
+      status: "completed" as const, target: "8 reps", actual: "8 reps",
+    })),
+  }));
+  return buildWorkoutSessionAppCardEnvelopeV6({
+    title: "Strength", subtitle: null, footer: null,
+    workout: { version: 1, state, exercises },
+    editor: {
+      version: 1, actionBinding: "a".repeat(64), setRemovalBinding: "b".repeat(64),
+      exercises: exercises.map((exercise) => ({
+        unitOverride: null,
+        sets: exercise.sets.map(() => ({ logged: true, result: { kind: "reps" as const, reps: 8 } })),
+      })),
+    },
+  });
 }

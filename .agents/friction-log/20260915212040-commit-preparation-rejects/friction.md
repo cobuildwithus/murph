@@ -1,6 +1,7 @@
 ---
 title: 'Commit preparation rejects a Git index stat-cache refresh'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3830'
 ---
 
 ## Expected Behavior

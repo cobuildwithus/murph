@@ -428,6 +428,45 @@ describe("foreground checkpoint lease diagnostics", () => {
 });
 
 describe("runHostedWorkspaceUntilIdleOrBudget", () => {
+  test.each([
+    { recorded: "0", fetched: "64", expected: "64" },
+    { recorded: "65", fetched: "64", expected: "65" },
+    { recorded: "65", fetched: null, expected: "65" },
+  ])("keeps empty-import consumption monotonic ($recorded / $fetched)", async ({ recorded, fetched, expected }) => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-empty-consumed-"));
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const builder = createHostedWorkspaceCheckpointRequestBuilder({
+      attemptId: "attempt_empty_consumed", expectedWorkspaceVersion: "0",
+      leaseGeneration: "1", snapshotRef: null,
+    });
+    builder.recordRedactedStatus({ hostedMailboxConversationConsumedSeq: recorded });
+    try {
+      const state = createEmptyHostedMailboxImportState();
+      state.watermarks.conversation = "65";
+      await writeHostedMailboxImportState({ state, vaultRoot });
+      const result = await runHostedWorkspaceUntilIdleOrBudget({
+        checkpointRequestBuilder: builder,
+        expectedUserId: TEST_USER_ID,
+        async importItem() { throw new Error("Empty imports cannot stage work."); },
+        limitPerLane: 10,
+        platform: createPlatform({
+          mailboxPort: createMailboxPort({
+            items: [],
+            consumedSeqByLane: fetched === null ? undefined : [{ lane: "conversation", consumedSeq: fetched }],
+          }).mailboxPort,
+          workspacePort: createWorkspacePort({ checkpointRequests }),
+        }),
+        requestId: "request_empty_consumed",
+        async runAssistantPhase() { return { progressed: false }; },
+        vaultRoot, workspace: createWorkspaceState({ version: "0" }), now: () => TEST_NOW,
+      });
+      assert.equal(result.initialMailboxImport.stateChanged, false);
+      assert.equal(builder.readRedactedStatus()?.hostedMailboxConversationConsumedSeq, expected);
+      assert.equal(checkpointRequests.length, 0, "The frontier update uses the existing idle checkpoint.");
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
   test("keeps a newly staged receipt when an older metadata publication finishes", async () => {
     const builder = createHostedWorkspaceCheckpointRequestBuilder({
       attemptId: "attempt_synthetic_publication", expectedWorkspaceVersion: "0",
@@ -2689,7 +2728,6 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         assert.ok(lane);
         if (lane.lane === "conversation") {
           return {
-            assistantProvider: "openai",
             fetchedAt: TEST_NOW,
             items: [conversationItem],
             maxSeqByLane: [{
@@ -2706,7 +2744,6 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
             consumedSeq: "0",
             lane: "system",
           }],
-          assistantProvider: "openai",
           fetchedAt: TEST_NOW,
           items: systemFetchCount === 1 ? [] : [channelUpdateItem],
           maxSeqByLane: [{
@@ -3057,7 +3094,6 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
               consumedSeq: "80",
               lane: "conversation",
             }],
-            assistantProvider: "openai",
             fetchedAt: TEST_NOW,
             items: [
               createMailboxItem({
@@ -3082,7 +3118,6 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
             consumedSeq: "0",
             lane: "system",
           }],
-          assistantProvider: "openai",
           fetchedAt: TEST_NOW,
           items: [],
           maxSeqByLane: [{
@@ -4731,6 +4766,10 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
   test("checkpoints mailbox progress when its canonical receipt is already durable", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const checkpointStarted = createDeferred<void>();
+    const releaseCheckpoint = createDeferred<void>();
+    const events: string[] = [];
+    let running: ReturnType<typeof runHostedWorkspaceUntilIdleOrBudget> | null = null;
     const mailboxItem = createMailboxItem({
       id: "mailbox_item_runner_durable_canonical_receipt",
       laneSeq: "1",
@@ -4744,12 +4783,20 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     });
 
     try {
-      await runHostedWorkspaceUntilIdleOrBudget({
-        checkpointRuntimeRedactedStatus: createRuntimeRedactedStatusCheckpoint({
-          attemptId: "attempt_synthetic_runner_durable_mailbox_receipt",
-          checkpointRequests,
-          leaseGeneration: "1",
-        }),
+      const checkpointRuntimeRedactedStatus = createRuntimeRedactedStatusCheckpoint({
+        attemptId: "attempt_synthetic_runner_durable_mailbox_receipt",
+        checkpointRequests,
+        leaseGeneration: "1",
+      });
+      running = runHostedWorkspaceUntilIdleOrBudget({
+        async checkpointRuntimeRedactedStatus(request) {
+          events.push("checkpoint:start");
+          checkpointStarted.resolve();
+          await releaseCheckpoint.promise;
+          const result = await checkpointRuntimeRedactedStatus(request);
+          events.push("checkpoint:done");
+          return result;
+        },
         checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
           attemptId: "attempt_synthetic_runner_durable_mailbox_receipt",
           expectedWorkspaceVersion: "0",
@@ -4760,6 +4807,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         }),
         expectedUserId: TEST_USER_ID,
         async importItem() {
+          events.push("mailbox:imported");
           return { status: "imported" };
         },
         limitPerLane: 10,
@@ -4768,10 +4816,25 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
           workspacePort: createWorkspacePort({ checkpointRequests }),
         }),
         requestId: "request_synthetic_runner_durable_mailbox_receipt",
+        async runAssistantPhase() {
+          events.push("assistant:admitted");
+          return { progressed: false };
+        },
         vaultRoot,
         workspace,
         now: () => TEST_NOW,
       });
+
+      await withTestTimeout(checkpointStarted.promise);
+      assert.deepEqual(events, ["mailbox:imported", "checkpoint:start"]);
+      releaseCheckpoint.resolve();
+      await running;
+      assert.deepEqual(events, [
+        "mailbox:imported",
+        "checkpoint:start",
+        "checkpoint:done",
+        "assistant:admitted",
+      ]);
 
       assert.deepEqual(checkpointRequests.map((request) => request.reason), [
         "canonical_runtime_commit",
@@ -4787,6 +4850,8 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         "a".repeat(64),
       );
     } finally {
+      releaseCheckpoint.resolve();
+      await running?.catch(() => undefined);
       await rm(vaultRoot, {
         force: true,
         recursive: true,
@@ -11247,7 +11312,6 @@ function createMailboxPort(input: {
           ...(consumedSeqByLane === undefined
             ? {}
             : { consumedSeqByLane }),
-          assistantProvider: "openai",
           fetchedAt: TEST_NOW,
           items: request.lanes.flatMap((lane) => {
             const importedSeq = BigInt(lane.importedSeq);
@@ -11494,10 +11558,10 @@ function createAssistantUsageRecord(
     rawUsageJsonHash: null,
     reasoningTokens: null,
     reportingUserId: null,
-    requestedModel: "gpt-5.6-terra",
+    requestedModel: "gpt-6.1-sol",
     routeId: "primary",
     schema: ASSISTANT_USAGE_SCHEMA,
-    servedModel: "gpt-5.6-terra",
+    servedModel: "gpt-6.1-sol",
     sessionId: "asst_runner_usage",
     stripeMeterSource: "murph",
     surface: null,
@@ -12045,7 +12109,7 @@ describe("foreground device ingestion", () => {
       });
       const fetchCount = fixture.providerFetches;
       fixture.effects.splice(0);
-      await fixture.owner?.recover(["run-environment-interview"]);
+      await fixture.owner?.recover(["apply-runtime-control-request"]);
       assert.equal(fixture.effects.length, 0);
       await fixture.owner?.recover();
       assert.equal(fixture.providerFetches, fetchCount);

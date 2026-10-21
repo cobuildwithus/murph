@@ -3,6 +3,11 @@
 Workspace-private shared runtime-state helpers for Murph packages that need explicit local state
 next to a vault without turning that state into canonical product truth.
 
+Directory locks publish their complete metadata through one atomic directory
+rename. The unpublished metadata file needs no separate atomic rename; its
+private permissions and the existing ownership and stale-lock checks remain
+required.
+
 ## Scope
 
 - root `@murphai/runtime-state` exports the worker-safe hosted email/env/loopback helpers plus pure hosted bundle identity types/equality used by shared contracts
@@ -28,6 +33,12 @@ The bounded presentation-only group participant display-name cache at `.runtime/
 The exact flat `.runtime/operations/assistant/generated-deliveries/<filename>` subtree is declared portable for active one-time delivery continuity. Encrypted hosted checkpoints include it, while portable support ZIPs exclude it with all `.runtime/**`. After the reader-compatible release converges, initial and retry file-send preparation may adopt only this exact direct regular file: assistant-runtime parents are tightened to `0700`, the file to `0600`, and path/type/symlink state is revalidated before reading or hashing. Quiescent cleanup retains exact active descriptors and removes only terminal, changed, or orphaned direct files after the direct inventory and outbox state are trusted. A legacy nested directory is counted and retained as opaque residue without blocking independent direct-file cleanup; it never gains generated-delivery ownership. No generic `exports/**` path is reserved by this contract, and the reader-compatible release remains the rollback floor while a persisted ref may exist.
 
 Direct-R2 v2 hosted snapshots keep that broad runtime continuity policy and write one encrypted compressed workspace archive directly to R2 from the hosted container during `idle_shutdown`. Hosted Codex native memory generation and reads are currently disabled. The dormant portability boundary preserves only the exact Codex-owned read artifacts `.codex-hosted/memories/raw_memories.md`, `.codex-hosted/memories/MEMORY.md`, and `.codex-hosted/memories/memory_summary.md`, plus active `.codex-hosted/sessions/YYYY/MM/DD/rollout-*.jsonl` files referenced by live assistant session resume state. Skills, extensions, rollout summaries, Git state and history, arbitrary memory descendants, memory/state SQLite databases and sidecars, and credential, secret, key, certificate, auth, config, cache, temp, lock, pid, socket, log, history, and prompt-history files are not portable. Cold and warm-clean restore both prune Codex home back to those exact read artifacts and referenced rollouts. Full native-memory workspace persistence remains deferred until Codex owns a sealed or quiesced export that can prove excluded credential material is absent from live files and history. Foreground assistant turns do not publish a separate Codex continuity artifact or workspace pointer. If a warm container dies before the next idle-shutdown v2 snapshot, restore must still be correct from durable mailbox, audit transcript records, and assistant runtime state even when provider-native resume optimization is unavailable; bounded committed transcript history may be included only in fresh-thread prompts or stale-resume fallback prompts. `canonical_runtime_commit` stores exact hosted canonical write receipts in supervisor-owned artifacts and durably checkpoints the receipt-log ref in workspace status until the idle checkpoint snapshot becomes authoritative and omits the receipt-log ref from committed workspace status. Pre-checkpoint foreground reruns append from that in-flight log; restore replays artifact-backed receipt logs only for legacy or interrupted checkpoint states that still expose a log ref, and never replays assistant-local receipt files. Legacy hosted-bundle full/base, hot, and delta producers remain compatibility surfaces for old refs and tests only; new production workspace snapshots are produced by the direct-R2 v2 `idle_shutdown` path.
+
+Snapshot inventory filters excluded paths before filesystem inspection. A root
+absent at its initial inspection remains optional for uninitialized workspaces;
+once an included file or directory is observed, its disappearance fails planning
+instead of accepting a partial replacement snapshot. This applies to both vault
+and operator-home traversal.
 
 The hosted container synchronously stops the resident Codex process before
 starting every cold or warm-clean restore. The next process rebuilds its private

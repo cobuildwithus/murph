@@ -538,6 +538,42 @@ export class PrismaDeviceSyncControlPlaneStore
     return this.dirtyConnections.shouldRequestWakeForDirtyConnectionUpsert(input);
   }
 
+  async deferDirtyConnectionWakeTx(
+    input: Parameters<PrismaHostedDirtyConnectionStore["deferDirtyConnectionWakeTx"]>[0],
+  ): Promise<void> {
+    return this.dirtyConnections.deferDirtyConnectionWakeTx(input);
+  }
+
+  async advanceDeferredDirtyConnectionWakeTx(
+    input: Parameters<PrismaHostedDirtyConnectionStore["advanceDeferredDirtyConnectionWakeTx"]>[0],
+  ): Promise<void> {
+    return this.dirtyConnections.advanceDeferredDirtyConnectionWakeTx(input);
+  }
+
+  async listDueDeferredDirtyConnectionWakes(
+    input: Parameters<PrismaHostedDirtyConnectionStore["listDueDeferredDirtyConnectionWakes"]>[0],
+  ) {
+    return this.dirtyConnections.listDueDeferredDirtyConnectionWakes(input);
+  }
+
+  async readDueDeferredDirtyConnectionWake(
+    input: Parameters<PrismaHostedDirtyConnectionStore["readDueDeferredDirtyConnectionWake"]>[0],
+  ) {
+    return this.dirtyConnections.readDueDeferredDirtyConnectionWake(input);
+  }
+
+  async postponeDeferredDirtyConnectionWake(
+    input: Parameters<PrismaHostedDirtyConnectionStore["postponeDeferredDirtyConnectionWake"]>[0],
+  ): Promise<void> {
+    return this.dirtyConnections.postponeDeferredDirtyConnectionWake(input);
+  }
+
+  async clearDeferredDirtyConnectionWake(
+    input: Parameters<PrismaHostedDirtyConnectionStore["clearDeferredDirtyConnectionWake"]>[0],
+  ): Promise<void> {
+    return this.dirtyConnections.clearDeferredDirtyConnectionWake(input);
+  }
+
   async hasPendingDirtyConnectionForUser(
     userId: string,
     tx?: HostedPrismaTransactionClient,

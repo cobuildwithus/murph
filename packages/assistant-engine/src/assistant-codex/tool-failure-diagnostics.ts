@@ -1,4 +1,8 @@
 import { types } from 'node:util'
+import {
+  HOSTED_USAGE_OPTIMIZATION_AUDIT_REJECTIONS,
+  type HostedUsageOptimizationAuditRejection,
+} from '@murphai/hosted-execution/runtime-control'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import type { AssistantHostedDeviceToolRequest } from '../assistant/execution-context.js'
 import type { AssistantRuntimeIssueInput } from '../assistant/issue-reporting.js'
@@ -12,9 +16,56 @@ export interface ToolFailureDiagnostic {
   failureStage: 'admission' | 'execution' | 'result' | 'validation' | 'delivery'
   failureReason: ToolFailureReason
   errorCategory?: ToolErrorCategory
+  automationAction?: Extract<MurphDynamicToolRequest, { kind: 'automation' }>['request']['action']
+  automationErrorCode?: AutomationToolFailureCode
   deviceAction?: AssistantHostedDeviceToolRequest['action']
   deviceErrorCode?: DeviceToolFailureCode
   deviceHttpStatus?: number
+  connectedAppsHttpStatus?: number
+  vaultFileErrorCode?: VaultFileToolFailureCode
+  productFeedbackAuditRejection?: HostedUsageOptimizationAuditRejection
+}
+
+// Core patch/reconciliation owners called by the hosted automation adapter.
+// These are diagnostic evidence only; unknown error categories stay unknown.
+const AUTOMATION_FAILURE_CODES = [
+  'VAULT_AUTOMATION_EMPTY_PATCH',
+  'VAULT_AUTOMATION_MISSING',
+  'VAULT_AUTOMATION_RECONCILIATION_LIMIT_EXCEEDED',
+] as const
+
+type AutomationToolFailureCode = typeof AUTOMATION_FAILURE_CODES[number]
+
+/** Private evidence only at the automation adapter's caught handler failure. */
+export function withAutomationToolFailureDetails(
+  result: MurphDynamicToolExecutionResult,
+  action: NonNullable<ToolFailureDiagnostic['automationAction']>,
+  error: unknown,
+): MurphDynamicToolExecutionResult {
+  if (result.rpcResult.success || !result.failureDiagnostic) return result
+  const automationErrorCode = readAutomationFailureCode(error)
+  return {
+    ...result,
+    failureDiagnostic: {
+      ...result.failureDiagnostic,
+      // Includes inspect_models, whose port calls use the inspect action.
+      automationAction: action,
+      ...(automationErrorCode === undefined ? {} : { automationErrorCode }),
+    },
+  }
+}
+
+function readAutomationFailureCode(error: unknown): AutomationToolFailureCode | undefined {
+  // Reject proxies before descriptors and accept only an own data code.
+  // Never invoke accessors, coerce values, or follow prototypes/context/causes.
+  if (typeof error !== 'object' || error === null || types.isProxy(error)) return undefined
+  try {
+    const descriptor = Object.getOwnPropertyDescriptor(error, 'code')
+    if (!descriptor || !Object.hasOwn(descriptor, 'value')) return undefined
+    return AUTOMATION_FAILURE_CODES.find((known) => known === descriptor.value)
+  } catch {
+    return undefined
+  }
 }
 
 // Exactly the source-owned codes recognized by the device adapter, not a
@@ -74,6 +125,100 @@ function readDeviceFailureErrorDetails(error: unknown): Pick<
     }
   } catch {
     return {}
+  }
+}
+
+/** Private status evidence only at the connected-app adapter's caught failure. */
+export function withConnectedAppsToolFailureDetails(
+  result: MurphDynamicToolExecutionResult,
+  error: unknown,
+): MurphDynamicToolExecutionResult {
+  if (result.rpcResult.success || !result.failureDiagnostic) return result
+  // Match device telemetry's own-data discipline without changing its reader.
+  // Reject proxies before descriptors; never inspect causes, context or prose.
+  if (typeof error !== 'object' || error === null || types.isProxy(error)) return result
+  try {
+    const read = (key: 'status' | 'statusCode'): unknown => {
+      const descriptor = Object.getOwnPropertyDescriptor(error, key)
+      return descriptor && Object.hasOwn(descriptor, 'value') ? descriptor.value : undefined
+    }
+    const status = read('status') ?? read('statusCode')
+    if (typeof status !== 'number' || !Number.isInteger(status) || status < 100 || status > 599) return result
+    return {
+      ...result,
+      failureDiagnostic: { ...result.failureDiagnostic, connectedAppsHttpStatus: status },
+    }
+  } catch {
+    return result
+  }
+}
+
+// Request/file-preparation owners only; delivery-time and provider codes do not
+// belong here. Missing files retain their existing not_found category.
+const VAULT_FILE_FAILURE_CODES = [
+  'ASSISTANT_EXPORT_PACK_RETIREMENT_INVALID',
+  'ASSISTANT_GENERATED_DELIVERY_IDENTITY_REQUIRED',
+  'ASSISTANT_PATH_OUTSIDE_VAULT',
+  'ASSISTANT_VAULT_FILE_CHANNEL_UNSUPPORTED',
+  'ASSISTANT_VAULT_FILE_TARGET_UNAVAILABLE',
+  'ASSISTANT_VAULT_FILE_REF_INVALID',
+  'ASSISTANT_VAULT_FILE_TYPE_UNSUPPORTED',
+  'ASSISTANT_VAULT_FILE_NOT_REGULAR_FILE',
+  'ASSISTANT_VAULT_FILE_SIZE_UNSUPPORTED',
+  'ASSISTANT_VAULT_FILE_PERMISSIONS_UNSAFE',
+  'ASSISTANT_VAULT_FILE_CHANGED_DURING_READ',
+] as const
+
+type VaultFileToolFailureCode = typeof VAULT_FILE_FAILURE_CODES[number]
+
+/** Recognize the existing active-send outcome without invoking a code getter. */
+export function isAlreadyActiveVaultFileSendError(error: unknown): boolean {
+  if (types.isProxy(error) || !(error instanceof VaultCliError)) return false
+  const descriptor = Object.getOwnPropertyDescriptor(error, 'code')
+  return descriptor !== undefined
+    && Object.hasOwn(descriptor, 'value')
+    && descriptor.value === 'ASSISTANT_VAULT_FILE_SEND_ALREADY_ACTIVE'
+}
+
+/** Private source-owned evidence only at the vault-file preparation catch. */
+export function withVaultFileToolFailureDetails(
+  result: MurphDynamicToolExecutionResult,
+  error: unknown,
+): MurphDynamicToolExecutionResult {
+  if (result.rpcResult.success || !result.failureDiagnostic) return result
+  if (typeof error !== 'object' || error === null || types.isProxy(error)) return result
+  try {
+    const descriptor = Object.getOwnPropertyDescriptor(error, 'code')
+    if (!descriptor || !Object.hasOwn(descriptor, 'value')) return result
+    const vaultFileErrorCode = VAULT_FILE_FAILURE_CODES.find((known) => known === descriptor.value)
+    if (vaultFileErrorCode === undefined) return result
+    return {
+      ...result,
+      failureDiagnostic: { ...result.failureDiagnostic, vaultFileErrorCode },
+    }
+  } catch {
+    return result
+  }
+}
+
+/** Private source-owned audit evidence only at the feedback adapter's catch. */
+export function withProductFeedbackAuditFailureDetails(
+  result: MurphDynamicToolExecutionResult,
+  error: unknown,
+): MurphDynamicToolExecutionResult {
+  if (result.rpcResult.success || !result.failureDiagnostic) return result
+  if (typeof error !== 'object' || error === null || types.isProxy(error)) return result
+  try {
+    const descriptor = Object.getOwnPropertyDescriptor(error, 'productFeedbackAuditRejection')
+    if (!descriptor || !Object.hasOwn(descriptor, 'value')) return result
+    const rejection = HOSTED_USAGE_OPTIMIZATION_AUDIT_REJECTIONS.find((known) => known === descriptor.value)
+    if (rejection === undefined) return result
+    return {
+      ...result,
+      failureDiagnostic: { ...result.failureDiagnostic, productFeedbackAuditRejection: rejection },
+    }
+  } catch {
+    return result
   }
 }
 
@@ -175,6 +320,7 @@ const ERROR_CATEGORIES = new Map<string, ToolErrorCategory>([
   ['CONNECTED_APPS_MEMBER_INACTIVE', 'authority_rejected'],
   ['CONNECTED_APPS_PERSONAL_MEMBER_REQUIRED', 'authority_rejected'],
   ['CONNECTED_APPS_REQUEST_INVALID', 'invalid_input'],
+  ['CONNECTED_APPS_RESPONSE_SCHEMA_INVALID', 'invalid_result'],
   ['CONNECTED_APPS_TOOLKIT_MISMATCH', 'invalid_input'],
   ['CONNECTED_APPS_TOOLKIT_NOT_CONFIGURED', 'unavailable'],
   ['CONNECTED_APPS_WRITE_ARGUMENT_NOT_ALLOWED', 'invalid_input'],

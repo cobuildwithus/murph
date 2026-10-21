@@ -30,7 +30,11 @@ describe('assistant proactive follow-through', () => {
       profile: 'gpt5-agentic',
       progressUpdateMode: 'group',
     })
-    const skill = await readFile(behaviorFollowthroughSkillPath, 'utf8')
+    const setup = await readFile(behaviorFollowthroughSkillPath, 'utf8')
+    expect(setup).toContain('Before previewing, creating, changing, delivering, or stopping reminders or')
+    expect(setup).toContain('references/support-runtime.md')
+    const support = await readFile(path.join(path.dirname(behaviorFollowthroughSkillPath), 'references/support-runtime.md'), 'utf8')
+    const skill = [setup, support].join('\n')
     const normalizedSkill = skill.replace(/\s+/g, ' ')
 
     expect(ASSISTANT_SKILLS.find(({ slug }) =>

@@ -17,6 +17,68 @@ function health(observations: DeviceImportObservation[], due = true) {
 }
 
 describe("device import progress and efficiency alerts", () => {
+  function withPublication(observations: DeviceImportObservation[], patch: {
+    subjectKey?: string; attemptId?: string; expectedBy?: Date;
+  } = {}) {
+    return summarizeDeviceImportHealth({ now, observations,
+      dueSubjects: new Set(["synthetic-subject"]),
+      checkpointPublications: new Map([[patch.subjectKey ?? "synthetic-subject", {
+        attemptId: patch.attemptId ?? "attempt-a",
+        expectedBy: patch.expectedBy ?? new Date(+now + 4 * minute),
+      }]]),
+    });
+  }
+
+  it.each([{ runnable: false }, { progressed: true }])(
+    "honors a matching foreground publication deadline for unsaved work (%j)", (patch) => {
+      const rows = [row(28, { progressed: true }), checkpoint(27), row(20, patch)];
+      expect(health(rows).stalled.anomalous).toBe(true);
+      expect(withPublication(rows).stalled.anomalous).toBe(false);
+      expect(withPublication(rows, { expectedBy: now }).stalled.anomalous).toBe(false);
+      const expired = withPublication(rows, { expectedBy: new Date(+now - 1) });
+      expect(expired.stalled).toEqual(health(rows).stalled);
+      // A later foreground completion may publish a new deadline without
+      // changing the retained import observations or their progress clock.
+      expect(withPublication(rows, { expectedBy: new Date(+now + minute) }).stalled.anomalous).toBe(false);
+    },
+  );
+
+  it("does not grant grace from another subject, attempt, or invalid deadline", () => {
+    const rows = [row(25, { runnable: false })];
+    for (const patch of [
+      { subjectKey: "other-subject" }, { attemptId: "other-attempt" },
+      { expectedBy: new Date(NaN) },
+    ]) expect(withPublication(rows, patch).stalled.anomalous).toBe(true);
+  });
+
+  it("does not let a foreground deadline hide older unsaved attempts or runnable no-progress work", () => {
+    expect(withPublication([row(26, { attemptId: "old-attempt" }),
+      row(18, { runnable: false })]).stalled.anomalous).toBe(true);
+    for (const runnable of [true, null]) {
+      expect(withPublication([row(25, { runnable })]).stalled.anomalous).toBe(true);
+    }
+    expect(withPublication([row(25, { runnable: false, attemptId: null })])
+      .stalled.anomalous).toBe(true);
+  });
+
+  it("keeps grace connection-scoped and stops granting it after checkpoint acceptance", () => {
+    const deferred = [row(25, { runnable: false })];
+    expect(withPublication(deferred).stalled.anomalous).toBe(false);
+    expect(withPublication([...deferred, row(24, { connectionKey: "b".repeat(64) })])
+      .stalled.anomalous).toBe(true);
+    expect(withPublication([...deferred, checkpoint(1)]).stalled.anomalous).toBe(true);
+    expect(withPublication([...deferred, row(1, { pending: false }), checkpoint(0)])
+      .stalled.anomalous).toBe(false);
+  });
+
+  it("does not count foreground publication grace as saved progress or silence cycling", () => {
+    const rows = [19, 14, 9, 4].map(age => row(age, { restarted: true, progressed: true }));
+    const result = withPublication(rows);
+    expect(result.stalled.anomalous).toBe(false);
+    expect(result.cycling).toEqual(health(rows).cycling);
+    expect(result.cycling.savedProgressPassCount).toBe(0);
+  });
+
   it("detects 15 minutes without saved progress, including a silent due queue", () => {
     expect(health([row(15)]).stalled.anomalous).toBe(true);
     expect(health([row(14.99)]).stalled.anomalous).toBe(false);
@@ -69,6 +131,57 @@ describe("device import progress and efficiency alerts", () => {
   it("does not let repeated unchanged checkpoints reset a stall", () => {
     expect(health([row(20), checkpoint(19), row(10), checkpoint(9), row(1), checkpoint(0.5)])
       .stalled.anomalous).toBe(true);
+  });
+
+  it("allows scheduled-only work to publish without inventing import progress", () => {
+    const rows = [row(22, { progressed: true }), checkpoint(21),
+      row(7, { attemptId: "scheduled", runnable: false })];
+    expect(health(rows, false).stalled.anomalous).toBe(false);
+    expect(health([...rows, checkpoint(1, { attemptId: "scheduled" })], false)
+      .stalled.anomalous).toBe(false);
+    // Deferral and an unchanged checkpoint cannot hide an overdue device wake.
+    expect(health(rows, true).stalled.anomalous).toBe(true);
+    expect(health([...rows, checkpoint(1, { attemptId: "scheduled" })], true)
+      .stalled.anomalous).toBe(true);
+  });
+
+  it("bounds deferred checkpoint grace by the first unsaved pass across attempts", () => {
+    const first = row(15, { runnable: false });
+    const rows = [row(28), checkpoint(27)];
+    expect(health([...rows, { ...first, at: new Date(+first.at + 1) }], false)
+      .stalled.anomalous).toBe(false);
+    for (const attemptId of ["attempt-a", "restarted"]) {
+      const repeated = row(1, { attemptId, runnable: false });
+      expect(health([...rows, first, repeated], false).stalled.anomalous).toBe(true);
+      expect(health([...rows, first, repeated, checkpoint(0.5, { attemptId: "unrelated" })], false)
+        .stalled.anomalous).toBe(true);
+      expect(health([...rows, first, repeated, checkpoint(0.5, { checkpointAccepted: false })], false)
+        .stalled.anomalous).toBe(true);
+    }
+  });
+
+  it("grants deferred grace only to the latest owned, non-runnable pass", () => {
+    const rows = [row(26), checkpoint(25), row(12)];
+    for (const patch of [
+      { runnable: true }, { runnable: null }, { attemptId: null },
+      { connectionKey: "b".repeat(64) },
+    ]) {
+      expect(health([...rows, row(1, { runnable: false, ...patch })], false)
+        .stalled.anomalous).toBe(true);
+    }
+  });
+
+  it("does not let deferral refresh an older unsaved runnable pass", () => {
+    expect(health([row(29), checkpoint(28), row(16, { runnable: true }),
+      row(2, { runnable: false })], false).stalled.anomalous).toBe(true);
+  });
+
+  it("allows a new deferred publication window only after matching checkpoint acceptance", () => {
+    const rows = [row(40), checkpoint(39), row(26, { runnable: false }),
+      row(13, { runnable: false }), checkpoint(12),
+      row(1, { runnable: false })];
+    expect(health(rows, false).stalled.anomalous).toBe(false);
+    expect(health(rows, true).stalled.anomalous).toBe(true);
   });
 
   it("requires an overdue wake for a checkpointed queue but not for unsaved active work", () => {
@@ -194,6 +307,63 @@ describe("device import progress and efficiency alerts", () => {
     // Old runners retain the conservative behavior during a rolling deploy.
     expect(health(rows.map(observation => ({ ...observation, runnable: null })), false)
       .backlog.anomalous).toBe(true);
+  });
+
+  it("does not count webhook starts across checkpointed scheduled-only queues as cycling", () => {
+    const rows = [39, 27, 15, 3, 2, 1].flatMap((age, index) => {
+      const attemptId = `webhook-${index}`;
+      return [
+        row(age + 0.1, { eventCode: "runner.processing_finished", pending: null, restarted: true, attemptId }),
+        row(age, { runnable: false, progressed: index === 3 || index === 5, attemptId }),
+        ...(index === 5 ? [] : [checkpoint(age - 0.1, { attemptId })]),
+      ];
+    });
+    expect(health(rows, false).cycling.anomalous).toBe(false);
+    // A genuinely overdue wake remains a stall even for saved deferred work.
+    const unchanged = rows.map(observation => ({ ...observation, progressed: false }));
+    expect(health(unchanged, true).stalled.anomalous).toBe(true);
+    expect(health(rows.map(observation => ({ ...observation, runnable: null })), false)
+      .cycling.anomalous).toBe(true);
+  });
+
+  it("requires matching checkpoint acceptance before deferral clears cycling", () => {
+    const rows = [19, 14, 9, 4].map(age => row(age, { restarted: true, runnable: true }));
+    const deferred = row(1, { runnable: false, attemptId: "deferred" });
+    for (const extra of [
+      [],
+      [checkpoint(0.5)],
+      [checkpoint(0.5, { attemptId: "deferred", checkpointAccepted: false })],
+    ]) {
+      expect(health([...rows, deferred, ...extra], false).cycling.anomalous).toBe(true);
+    }
+    expect(health([...rows, deferred, checkpoint(0.5, { attemptId: "deferred" })], false)
+      .cycling.anomalous).toBe(false);
+    expect(health([14, 9, 4, 1].map(age => row(age, { restarted: true, runnable: age === 14 })), false)
+      .cycling.anomalous).toBe(true);
+  });
+
+  it("counts only cycles since the latest saved deferral when work becomes runnable again", () => {
+    const deferred = [19, 14, 9, 4].flatMap(age => [
+      row(age, { runnable: false, restarted: true }), checkpoint(age - 0.1),
+    ]);
+    const resumed = row(3, { runnable: true, restarted: true });
+    expect(health([...deferred, resumed], false).cycling.anomalous).toBe(false);
+    const result = health([...deferred, resumed,
+      ...[2, 1, 0].map(age => row(age, { runnable: true, restarted: true }))], false);
+    expect(result.cycling).toMatchObject({
+      anomalous: true, restartCount: 4, oldestBacklogMs: 3 * minute,
+    });
+  });
+
+  it("does not let a deferred connection hide another cycling connection", () => {
+    const rows = [19, 14, 9, 4].flatMap(age => [
+      row(age, { runnable: true, restarted: true }),
+      row(age, { runnable: false, connectionKey: "b".repeat(64), attemptId: "deferred" }),
+      checkpoint(age - 0.1, { attemptId: "deferred" }),
+    ]);
+    expect(health(rows, false).cycling).toMatchObject({
+      anomalous: true, affectedRuntimeCount: 1, restartCount: 4,
+    });
   });
 
   it("starts backlog age when scheduled work becomes runnable", () => {

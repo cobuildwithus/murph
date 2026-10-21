@@ -2,7 +2,7 @@ name: Hosted Stripe Billing
 
 on:
   schedule:
-    - cron: "23 8 * * *"
+    - cron: "23 8 * * 1,4"
   pull_request:
     types: [opened, reopened, ready_for_review]
   push:
@@ -149,7 +149,7 @@ jobs:
       queue: max
     services:
       postgres:
-        image: public.ecr.aws/docker/library/postgres:17
+        image: postgres:17
         env:
           POSTGRES_DB: murph_hosted_stripe_billing
           POSTGRES_PASSWORD: postgres
@@ -279,7 +279,7 @@ jobs:
               ;;
             push)
               if [[ "$HERMETIC_RESULT" != "success" || "$LIVE_RESULT" != "skipped" ]]; then
-                echo "Main pushes require hermetic proof; live Stripe proof runs on its daily schedule." >&2
+                echo "Main pushes require hermetic proof; live Stripe proof runs on its twice-weekly schedule." >&2
                 exit 1
               fi
               echo "Hosted Stripe billing boundary satisfied by hermetic main-push proof."

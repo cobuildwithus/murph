@@ -35,6 +35,7 @@ import { assertHostedStripeEffectClaimAbsent } from "../hosted-onboarding/hosted
 import {
   resumeHostedMemberStripeCustomerClaimForAccountDeletion,
 } from "../hosted-onboarding/hosted-member-stripe-customer";
+import { readHostedLinqProductionCanaryMemberId } from "../hosted-onboarding/linq-production-canary";
 import {
   HOSTED_ACCOUNT_GROUP_BILLING_STRIPE_CHECKOUT_SESSION_FIELD,
   HOSTED_ACCOUNT_GROUP_BILLING_STRIPE_CUSTOMER_FIELD,
@@ -137,12 +138,6 @@ export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
     label: "Prisma hosted member record",
     deletion: "live-delete",
     note: "Deletes the member row after child stores are explicitly deleted; Prisma cascade remains a safety net.",
-  },
-  {
-    slug: "prisma.hosted_inference_connection",
-    label: "Encrypted custom inference connection",
-    deletion: "live-delete",
-    note: "Deletes the selected state, encrypted endpoint and credential, model, protocol, capabilities, and verification metadata before the member row. Browser-facing projections expose only sanitized connection metadata and never the credential or ciphertext.",
   },
   {
     slug: "prisma.hosted_sensitive_action_challenge",
@@ -559,6 +554,30 @@ export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
     note: "Deletes bearer-token hashes and session metadata for local device sync agents and short-lived companion extension credentials.",
   },
   {
+    slug: "prisma.companion_push_route",
+    label: "Companion app push address",
+    deletion: "live-delete",
+    note: "Deletes the Apple push token, installation id, environment, and alert preference used only to wake the member's companion app. Browser-vault export omits the route and token.",
+  },
+  {
+    slug: "prisma.companion_wearable_link",
+    label: "Companion wearable link reports",
+    deletion: "live-delete",
+    note: "Deletes which installation last reported a WHOOP or Garmin Bluetooth link and its opaque link id. No Bluetooth identifiers, device names, or health values are stored; browser-vault export omits these rows.",
+  },
+  {
+    slug: "prisma.companion_wearable_session",
+    label: "Companion wearable poll sessions",
+    deletion: "live-delete",
+    note: "Deletes short foreground poll leases for wrist reminders. Rows hold only a random session id and expiry; browser-vault export omits them.",
+  },
+  {
+    slug: "prisma.companion_wearable_command",
+    label: "Companion wrist command ledger",
+    deletion: "live-delete",
+    note: "Deletes buzz and stop command keys, statuses, and expiries. Rows hold no reminder text or payload and exist to prevent duplicate physical effects; browser-vault export omits them.",
+  },
+  {
     slug: "prisma.device_browser_assertion_nonce",
     label: "Device browser assertion nonces",
     deletion: "live-delete",
@@ -819,6 +838,35 @@ export async function deleteHostedAccountData(input: {
   providerAccessRemovalConfirmationToken?: string | null;
   request: Request;
 }): Promise<HostedAccountDeletionResult> {
+  return deleteHostedAccountDataInternal({ ...input, retainRuntimeDiagnostics: false });
+}
+
+// Only the fixed canary reset may retain diagnostics. Normal account deletion
+// has no retention option, including when the account happens to be the canary.
+export async function deleteHostedLinqProductionCanaryAccountData(input: {
+  memberId: string;
+  prisma: PrismaClient;
+  request: Request;
+}): Promise<HostedAccountDeletionResult> {
+  const canaryMemberId = await readHostedLinqProductionCanaryMemberId({ prisma: input.prisma });
+  if (!canaryMemberId || canaryMemberId !== input.memberId) {
+    throw hostedOnboardingError({
+      code: "HOSTED_LINQ_PRODUCTION_CANARY_TARGET_MISMATCH",
+      httpStatus: 409,
+      message: "The production canary reset target changed.",
+    });
+  }
+  return deleteHostedAccountDataInternal({ ...input, exitFeedback: null, retainRuntimeDiagnostics: true });
+}
+
+async function deleteHostedAccountDataInternal(input: {
+  retainRuntimeDiagnostics: boolean;
+  exitFeedback?: HostedAccountExitFeedback | null;
+  memberId: string;
+  prisma: PrismaClient;
+  providerAccessRemovalConfirmationToken?: string | null;
+  request: Request;
+}): Promise<HostedAccountDeletionResult> {
   const member = await input.prisma.hostedMember.findUnique({
     select: { billingStatus: true, createdAt: true, id: true },
     where: { id: input.memberId },
@@ -907,6 +955,11 @@ export async function deleteHostedAccountData(input: {
       stripeCustomerIds,
       stripeSubscriptionIds,
     });
+    if (input.retainRuntimeDiagnostics) {
+      // Persist the settled no-op with the existing retry owner, so a later
+      // vendor-cleanup retry cannot erase the retained canary runtime logs.
+      preparedCleanup.runtimeLogsCompletedAt = deletionStartedAt;
+    }
   } catch (error) {
     throw hostedOnboardingError({
       code: "ACCOUNT_DELETION_CLEANUP_OWNER_CREATE_FAILED",
@@ -1120,6 +1173,7 @@ export async function deleteHostedAccountData(input: {
       connectionIdentities: deviceConnectionIdentities,
       memberIds: transactionDeletionMemberIds,
       prisma: tx,
+      retainRuntimeDiagnostics: input.retainRuntimeDiagnostics,
     });
 
     return {
@@ -2436,6 +2490,7 @@ async function deleteHostedAccountPrismaRows(input: {
   connectionIdentities: readonly DeviceConnectionIdentity[];
   memberIds: readonly string[];
   prisma: Prisma.TransactionClient;
+  retainRuntimeDiagnostics: boolean;
 }): Promise<HostedAccountDataCounts> {
   const memberIds = uniqueStrings(input.memberIds);
   const memberIdsSql = buildPostgresTextArray(memberIds);
@@ -2516,6 +2571,7 @@ async function deleteHostedAccountPrismaRows(input: {
         deleted_ingress_traces AS (
           DELETE FROM hosted_ingress_latency_trace AS trace
           WHERE trace.user_id IN (SELECT id FROM target_members)
+            AND ${input.retainRuntimeDiagnostics !== true}
           RETURNING 1
         ),
         deleted_usage_credit_grants AS (
@@ -2926,11 +2982,6 @@ async function deleteHostedAccountPrismaRows(input: {
           WHERE connection.member_id IN (SELECT id FROM target_members)
           RETURNING 1
         ),
-        deleted_inference_connections AS (
-          DELETE FROM hosted_inference_connection AS connection
-          WHERE connection.member_id IN (SELECT id FROM target_members)
-          RETURNING 1
-        ),
         deleted_linq_daily_states AS (
           DELETE FROM hosted_linq_daily_state AS daily_state
           WHERE daily_state.member_id IN (SELECT id FROM target_members)
@@ -3061,6 +3112,26 @@ async function deleteHostedAccountPrismaRows(input: {
           DELETE FROM hosted_web_internal_request_nonce AS nonce
           WHERE nonce.user_id IN (SELECT id FROM target_members)
           RETURNING 1
+        ),
+        deleted_companion_push_routes AS (
+          DELETE FROM companion_push_route AS route
+          WHERE route.user_id IN (SELECT id FROM target_members)
+          RETURNING 1
+        ),
+        deleted_companion_wearable_links AS (
+          DELETE FROM companion_wearable_link AS link
+          WHERE link.user_id IN (SELECT id FROM target_members)
+          RETURNING 1
+        ),
+        deleted_companion_wearable_sessions AS (
+          DELETE FROM companion_wearable_session AS session
+          WHERE session.user_id IN (SELECT id FROM target_members)
+          RETURNING 1
+        ),
+        deleted_companion_wearable_commands AS (
+          DELETE FROM companion_wearable_command AS command
+          WHERE command.user_id IN (SELECT id FROM target_members)
+          RETURNING 1
         )
         SELECT
           (SELECT count(*) FROM deleted_mailbox_lane_counters)
@@ -3079,8 +3150,6 @@ async function deleteHostedAccountPrismaRows(input: {
             AS "prisma.hosted_product_feedback",
           (SELECT count(*) FROM deleted_codex_connections)
             AS "prisma.hosted_codex_auth_connection",
-          (SELECT count(*) FROM deleted_inference_connections)
-            AS "prisma.hosted_inference_connection",
           (SELECT count(*) FROM deleted_linq_daily_states)
             AS "prisma.hosted_linq_daily_state",
           (SELECT count(*) FROM deleted_invites)
@@ -3132,7 +3201,15 @@ async function deleteHostedAccountPrismaRows(input: {
           (SELECT count(*) FROM deleted_device_browser_nonces)
             AS "prisma.device_browser_assertion_nonce",
           (SELECT count(*) FROM deleted_web_internal_nonces)
-            AS "prisma.hosted_web_internal_request_nonce"
+            AS "prisma.hosted_web_internal_request_nonce",
+          (SELECT count(*) FROM deleted_companion_push_routes)
+            AS "prisma.companion_push_route",
+          (SELECT count(*) FROM deleted_companion_wearable_links)
+            AS "prisma.companion_wearable_link",
+          (SELECT count(*) FROM deleted_companion_wearable_sessions)
+            AS "prisma.companion_wearable_session",
+          (SELECT count(*) FROM deleted_companion_wearable_commands)
+            AS "prisma.companion_wearable_command"
       `,
     ),
   );

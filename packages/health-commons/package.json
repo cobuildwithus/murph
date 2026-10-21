@@ -17,11 +17,6 @@
       "import": "./dist/runtime.js",
       "default": "./dist/runtime.js"
     },
-    "./goal-runtime": {
-      "types": "./dist/goal-runtime.d.ts",
-      "import": "./dist/goal-runtime.js",
-      "default": "./dist/goal-runtime.js"
-    },
     "./goal-index-runtime": {
       "types": "./dist/goal-index-runtime.d.ts",
       "import": "./dist/goal-index-runtime.js",
@@ -43,7 +38,7 @@
   ],
   "scripts": {
     "build": "node ../../scripts/rm-paths.mjs dist .tsbuildinfo && node ../../scripts/run-typescript.mjs package -b tsconfig.json --pretty false && node dist/build.js",
-    "typecheck": "pnpm generate && node ../../scripts/run-typescript.mjs package -p tsconfig.typecheck.json --pretty false",
+    "typecheck": "pnpm generate && node ../../scripts/run-typescript.mjs check -p tsconfig.typecheck.json --pretty false",
     "generate": "pnpm --dir ../.. exec tsx --tsconfig packages/health-commons/tsconfig.json packages/health-commons/src/build.ts",
     "generate:watch": "pnpm --dir ../.. health-commons:generate:watch",
     "generate:check": "pnpm generate --check",

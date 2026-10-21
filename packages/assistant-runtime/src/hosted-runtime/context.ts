@@ -90,7 +90,7 @@ export type HostedAssistantAutoReplyReadinessState =
 type HostedAssistantAutoReplyChannelState = Pick<
   HostedBootstrapResult,
   "emailAutoReplyEnabled" | "linqAutoReplyEnabled" | "telegramAutoReplyEnabled"
->;
+> & { voiceAutoReplyEnabled?: true };
 
 const EMPTY_HOSTED_AUTO_REPLY_CHANNEL_STATE: HostedAssistantAutoReplyChannelState = {
   emailAutoReplyEnabled: false,
@@ -733,6 +733,7 @@ function resolveHostedAssistantAutoReplyState(
     emailAutoReplyEnabled: channelSet.has("email"),
     linqAutoReplyEnabled: channelSet.has("linq"),
     telegramAutoReplyEnabled: channelSet.has("telegram"),
+    ...(channelSet.has("voice") ? { voiceAutoReplyEnabled: true as const } : {}),
   };
 }
 

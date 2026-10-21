@@ -1,12 +1,10 @@
 import {
+  HOSTED_GROUP_MEMBER_PLAN_DISPLAY_NAME,
   HOSTED_FAMILY_PLAN_CODES,
   HOSTED_PLAN_CODES,
   type HostedFamilyPlanCode,
   type HostedPlanCode,
 } from "@murphai/hosted-execution/runtime-control";
-import {
-  HOSTED_GROUP_MEMBER_PLAN_DISPLAY_NAME,
-} from "@murphai/hosted-execution/plan-usage";
 
 export {
   HOSTED_FAMILY_PLAN_CODES,
@@ -14,6 +12,8 @@ export {
   type HostedFamilyPlanCode,
   type HostedPlanCode,
 };
+
+export const HOSTED_FAMILY_BILLING_PLAN_CODE = "launch_family_monthly" as const;
 
 export const HOSTED_BILLING_PLAN_CODES = [
   "launch_monthly",

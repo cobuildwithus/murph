@@ -240,6 +240,29 @@ describe("check-provider-request-boundaries", () => {
     `, "apps/web/src/lib/connected-apps/composio.ts")).toEqual([]);
   });
 
+  it("limits the KMS REST exception to one call in the authenticated crypto owner", () => {
+    const source = `
+      class HostedGcpKmsRestTransport {
+        async callUnary(url: URL) {
+          await import("google-auth-library");
+          return fetch(url);
+        }
+      }
+    `;
+    const owner = "apps/web/src/lib/hosted-crypto/gcp-kms.ts";
+    expect(violations(source, owner)).toEqual([]);
+    expect(violations(source, "packages/example/src/gcp-kms.ts"))
+      .toEqual(["raw-provider-http"]);
+    expect(violations(source.replace("callUnary", "otherCall"), owner))
+      .toEqual(["raw-provider-http"]);
+    expect(violations(source.replace('await import("google-auth-library");', ""), owner))
+      .toEqual(["invalid-approved-owner"]);
+    expect(violations(source.replace("return fetch(url);", "await fetch(url); return fetch(url);"), owner))
+      .toEqual(["approved-owner-overflow"]);
+    expect(violations(source.replace("fetch(url)", 'fetch("https://api.openai.com/v1/responses")'), owner))
+      .toEqual(["raw-provider-http"]);
+  });
+
   it("checks a provider-named owner's runtime import on a generic path", () => {
     expect(violations(`
       import { type ElevenLabsClient } from "@murphai/operator-config/elevenlabs-runtime";

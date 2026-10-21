@@ -6,12 +6,18 @@ This package exists so hosted runtimes such as `apps/cloudflare` do not need to 
 
 Current responsibilities:
 
+- configure hosted assistant execution for OpenAI models, including managed API
+  credentials, local OpenAI test stubs, and local ChatGPT subscription auth
+
 - import each manual app meal photo once, then queue its existing mailbox item
   for a private estimation or clarification turn through ordinary model
   admission and delivery idempotency; automatic photos remain import-only
 
 - run bounded hosted workspace invocations for assistant, inbox, and device-sync work behind an explicit runtime context object
-- preserve independent system-work completion across empty runtime nudges during projection discovery/delivery, browser-vault publication, recording, and snapshotting; qualify notifications against the bounded conversation mailbox and reuse that fetched batch for a real foreground handoff
+- yield system-mailbox completion during container shutdown, drain owned projection
+  work, and retain checkpointed recording with its due successor wake; explicit
+  host aborts and checkpoint failures remain errors
+- preserve system-work admission and completion across empty runtime nudges during startup, projection discovery/delivery, browser-vault publication, recording, and snapshotting; qualify notifications through the same bounded foreground mailbox prefetch and current due-work projection, reuse that fetched batch for a real foreground handoff, and avoid qualification reads when no hint arrived
 - settle independent system-work writes before a clean foreground return so late
   completion enters the existing durable checkpoint and browser publication path;
   a real projection failure retains the mailbox item and its existing retry wake
@@ -27,6 +33,12 @@ Current responsibilities:
   carries same-epoch provider cadence and dirty terminal evidence, and retries
   that reconciliation, while restored records repeat the full path and
   authorityless legacy or terminal records drain without a cadence write
+- transfer a plain scheduled device hint during import only when a validated
+  retained connection owner already covers its cadence; a recording owner's
+  retained jobs and matching completion record may prove that coverage, while
+  the record and retry remain unchanged until normal checkpoint publication.
+  Manual refreshes, dirty webhooks, new jobs, and mismatched connection epochs
+  retain ordinary admission. Import rollback restores the prior frontier.
 - drain each hosted device-sync pass through one bounded worker call so
   canonical imports can safely reuse a pass-local event identity index, while
   cumulative progress remains observable and the service-owned foreground
@@ -53,18 +65,10 @@ Current responsibilities:
 - project a saved outbox retry as `assistant_delivery`, distinct from model-capable `assistant` work, so Web can admit delivery reconciliation after managed AI usage is exhausted while the existing assistant phase remains the sole delivery owner
 - release foreground ownership after terminal reply delivery, abort in-flight provider cleanup when later conversation input is staged, and reserve exact automation reconciliation for canonical automation writes or maintenance wakes
 - keep foreground pending-input checks read-only; incomplete indexes schedule bounded maintenance while compaction and legacy backfill remain maintenance-owned
+- reject empty or unrelated system-mailbox selections from a read-only snapshot before taking the shared runtime write lock; positive selections re-read and claim current state under that lock, later arrivals stay queued for a later pass, and conversation occurrence timestamps are loaded outside the lock only after the snapshot contains an eligible foreground candidate
 - apply every Web-approved sparse `member.preferences.updated` delta with that event's own cross-lane mailbox sequence, so the canonical preference owner preserves approved event order while stale-no-oping only affected fields; bounded per-field watermarks in `bank/assistant-preference-mutations.json` make replay idempotent without reservation or receipt retention
 - admit one bounded, cursor-ordered batch of same-conversation, same-reply-anchor mailbox inputs only when their positive causal sequences are exact successors; pass the terminal accepted input id to hosted personality commands so Web derives the compound turn frontier from its member-bound mailbox row, and leave gaps, legacy input, overflow, and later arrivals pending
 - recover late foreground input from the current invocation's exact imported-ID snapshot when best-effort active-turn notifications are early or missed; at admission, compose that recovered cursor-ordered prefix with any notified exact IDs, admit every valid same-room successor up to the existing cumulative cap, and reuse the same replyability, route, and capacity checks without scanning or mutating the broad pending index
-- re-read Web's effective core-provider choice immediately before every
-  target-owned provider entry: resident accepted input, joined-group Assistant
-  Ask, consented private candidate, authenticated operator diagnostic, and
-  private disclosure review; a missing or
-  invalid owner response uses the existing typed retry, while a mismatch closes
-  detached work in the stale invocation, requeues any claimed ask through its
-  existing encrypted mailbox with no delay, suppresses provider-backed idle
-  compaction, and forces the dirty checkpoint and fresh invocation without
-  consuming the input
 - expose invocation-scoped automation and device authority only through narrow typed tools on the active root turn, never through Codex App Server or descendant shell env; the runtime supplies existing domain ports directly, canonical automation records remain owned by the already-bound vault, route writes use the trusted current destination rather than model-supplied locators, and the automation tool remains unavailable to scheduled turns and descendants
 - keep automation occurrence projection explicit and operation-local: responses distinguish resolved timing, healthy in-flight scheduler work, and unavailable projection; only unavailable projection receives one bounded read-only readback and typed content-free diagnostics through the existing nonblocking assistant automation-detail log path, without model mediation, retries, new persistence, or a second scheduler owner
 - enroll every activated member in one finite hosted onboarding follow-up independently of optional welcome delivery: activation persists canonical onboarding start once and carries any available direct route separately from the welcome, immediate route-bearing activation performs the canonical idempotent upsert, and route-less Telegram activation remains silent until ordinary managed reconciliation sees a later direct route; delayed creation preserves the activation-anchored window, transient failures reuse the activation mailbox or existing bounded managed-setup retry ladder, and completed, expired, group, or archived follow-ups stay closed; the exact current seed, PR 1203 one-shot, older recurring fingerprint, or bounded original legacy seed is reconciled without granting execution authority to editable metadata; reconciliation preserves the signup-selected daily minute or derives it from an exact one-shot's stored occurrence, and conversion durably binds that occurrence before exposing the daily schedule; the notification gets one opportunity on each of the next three local days in a stable per-member window from 1:30 PM through 2:29 PM, reserves at least 30 minutes for execution before delivery authority closes at 3:00 PM on the third day, checks canonical onboarding state before provider entry, tool execution, delivery, commit, and queued external transport without mutating it, consumes each daily opportunity after either one reply-oriented continuation or a skip, and emits metadata-only seed, reconciliation, state-source, decision, delivery, and run-outcome diagnostics
@@ -120,6 +124,12 @@ projection-aware runner because the preceding v2 value reader is strict; deploy
 this runner with immediate container rollout and use a forward fix below that
 floor rather than adding a second compatibility owner for a derived hint.
 
+Snapshot session start/complete annotations on `checkpoint.snapshot_failed`
+use fixed phase allowlists. Recognized phases survive absent or invalid optional
+timeouts; unknown phases are omitted. Timeout diagnostics include only
+nonnegative safe integers in milliseconds, including values above 60 seconds.
+This validates telemetry only and imposes no execution timeout limit.
+
 For hosted conversation traffic, the mailbox importer is the source adapter. It
 stages bounded `AssistantInputEvent` records in the warm live workspace.
 Plain-text Linq plus attachment-free Telegram and WhatsApp input proceeds
@@ -154,8 +164,18 @@ forwarded into a claimed parse attempt. If an earlier input needs retry, a compl
 sibling's local raw/derived result remains reusable on replay, but its assistant
 evidence, pending visibility, and notification stay withheld behind that input.
 This does not add a retry owner or strengthen the existing checkpoint/crash boundary.
-Existing attachment typing starts during staging, remains available for the reply
-handoff after admission, and is released for any staged input left unadmitted.
+Eligible Linq text and attachment inputs start best-effort typing immediately
+following durable staging, before pending-reply notification, mailbox progress
+publication, or assistant preparation. The existing per-chat claim and refresh
+loop pass to the admitted turn without another start request, even while initial
+provider acceptance is pending. Typing never blocks admission. Failed staging,
+self-authored input, consumed replay, disabled auto-replies, and unbound routes do
+not start preparation; failed admission cancels an unclaimed handle. Attachment
+evidence and canonical receipt/watermark checkpoints keep their existing gates.
+Runtime status checkpoints resolve independent pending-input, outbox,
+provider-cleanup, system-mailbox and cron wake reads concurrently (at most five).
+Wake selection keeps its existing precedence; every started read settles before
+failure can release or replace the workspace.
 The existing content-free import diagnostic may include `audioPairCount`,
 `audioPairPreparationMs` (whole pair preparation wall span), and
 `audioParsePreparationOverlapMs` (intersection of artifact/parse/scratch-cleanup
@@ -183,6 +203,17 @@ without moving the conversation or checkpoint clocks. Once a checkpoint pauses
 background reads, they stay paused through checkpoint retries, effect drain and
 return. Foreground work still proceeds; unfinished asks and clinical extraction
 retain their durable successors instead of repeatedly reclaiming canceled work.
+
+Finite `inbox_media_retention` checkpoints run the existing transient-content
+cleanup owners and publish their next deadlines. They do not scan or compress
+unrelated canonical event, audit, or integration history; ordinary idle checkpoints
+remain responsible for those archives. This separation does not change content
+eligibility, protected pending work, or the maximum retention deadline.
+
+Post-device-sync dense raw retention receives up to forty-five seconds within
+the remaining overall device-pass budget. Time spent fetching or importing does
+not consume that separate stage allowance. An exhausted overall budget, remaining
+retention work, or a failure still uses the existing bounded continuation wake.
 
 The conversation-activity callback carries the original persisted
 `AssistantInputEvent.receivedAt` epoch milliseconds (mailbox `createdAt`), not
@@ -240,7 +271,7 @@ Current non-goals:
 - owning shared hosted execution contracts, worker topology, child-process launch policy, or side-effect codecs that belong in `@murphai/hosted-execution` or the host app
 - replacing the canonical vault or hosted bundle model
 
-`HostedRuntimePlatform` is the only hosted transport seam this package expects. Runtime code talks to semantic capabilities such as `artifactStore`, `effectsPort`, `deviceSyncPort`, `issueExportPort`, `usageRecordPort`, the read-only `planUsageToolPort`, the read-only `labsToolPort`, and the bounded `subscriptionToolPort`; it does not reconstruct internal URLs, inspect hostnames, default Cloudflare worker topology, or interpret billing or provider catalog state. The plan-usage and Labs ports pass through to assistant context without mutation authority; the Labs port receives only normalized facts and never a Junction credential. The subscription port is available only for private interactive input and attaches the current accepted input id before calling the host; it never exposes Stripe credentials or a general billing client.
+`HostedRuntimePlatform` is the only hosted transport seam this package expects. Runtime code talks to semantic capabilities such as `artifactStore`, `effectsPort`, `deviceSyncPort`, `issueExportPort`, `usageRecordPort`, the read-only `planUsageToolPort` and `usageDiagnosticsPort`, the read-only `labsToolPort`, and the bounded `subscriptionToolPort`; it does not reconstruct internal URLs, inspect hostnames, default Cloudflare worker topology, or interpret billing or provider catalog state. The plan-usage and Labs ports pass through to assistant context without mutation authority; the Labs port receives only normalized facts and never a Junction credential. The subscription port is available only for private interactive input and attaches the current accepted input id before calling the host; it never exposes Stripe credentials or a general billing client.
 Artifact reads require a fixed-vocabulary purpose so the host can correlate
 secret-safe timing across retries without exposing a content hash or payload.
 Automation-document inventory reads are bounded to small concurrent batches,
@@ -282,3 +313,22 @@ manifest shape come from this package.
 Hosted runner executable lookup is also package-owned: `PATH` is projected from
 the canonical runner image entries plus absolute ambient extras, while forwarded
 and per-user env are not allowed to override it.
+
+System-mailbox preparation reads continuation ownership only when the requested
+selection has eligible items. A selection that neither admits work nor retires
+a covered hint leaves mailbox state untouched; idle housekeeping is not a reason
+to rewrite the mailbox on a fresh conversation's path.
+
+## Focused tests
+
+Run `pnpm build:test-runtime:prepared` before invoking the package Vitest config
+from a fresh checkout. Vault-share entrypoint cases use the real isolated capture
+worker through its published package entrypoint; Vitest source aliases do not
+compile that separate Node worker. The prepared build includes this package and
+checks the compiled worker and its public import before reporting success.
+The entrypoint test harness rejects a missing capture worker as soon as a
+vault-share port is configured, with the package build command to run before
+retrying; this avoids misleading projection-delivery timeouts.
+
+Device import yield reasons and receipt-capacity slicing are specified in
+[`agent-docs/RELIABILITY.md`](../../agent-docs/RELIABILITY.md).

@@ -7,9 +7,7 @@ import { describe, expect, it } from "vitest";
 import {
   CLOUDFLARE_HOSTED_CONTROL_USER_ROUTE_SPECS,
   buildCloudflareHostedControlBrowserVaultSessionPath,
-  buildCloudflareHostedControlEnvironmentRealtimeCallPath,
-  buildCloudflareHostedControlEnvironmentVoiceDeletePath,
-  buildCloudflareHostedControlEnvironmentVoiceStagePath,
+  buildCloudflareHostedControlGameMediaPath,
   buildCloudflareHostedControlMealPhotoDeletePath,
   buildCloudflareHostedControlMealPhotoStagePath,
   buildCloudflareHostedControlRuntimeEnsureProcessingPath,
@@ -18,11 +16,15 @@ import {
   buildCloudflareHostedControlTelegramUsageLimitNoticePath,
   buildCloudflareHostedControlUserDataDeletionPath,
   buildCloudflareHostedControlUserStatusPath,
+  buildCloudflareHostedControlVoiceControlPath,
   matchCloudflareHostedControlUserRoutePath,
 } from "../src/routes.ts";
 
 describe("cloudflare hosted control routes", () => {
   it("builds the narrowed internal routes with encoded identifiers", () => {
+    expect(buildCloudflareHostedControlVoiceControlPath("user/a b")).toBe("/internal/users/user%2Fa%20b/runtime/voice");
+    expect(matchCloudflareHostedControlUserRoutePath("voiceControl",
+      buildCloudflareHostedControlVoiceControlPath("user/a b"))).toEqual({ userId: "user%2Fa%20b" });
     expect(buildCloudflareHostedControlBrowserVaultSessionPath("user/a b")).toBe(
       "/internal/users/user%2Fa%20b/browser-vault/session",
     );
@@ -47,23 +49,21 @@ describe("cloudflare hosted control routes", () => {
     expect(buildCloudflareHostedControlMealPhotoDeletePath("user/a b")).toBe(
       "/internal/users/user%2Fa%20b/meal-photos/delete",
     );
-    expect(buildCloudflareHostedControlEnvironmentVoiceStagePath("user/a b")).toBe(
-      "/internal/users/user%2Fa%20b/environment-voice/stage",
-    );
-    expect(buildCloudflareHostedControlEnvironmentVoiceDeletePath("user/a b")).toBe(
-      "/internal/users/user%2Fa%20b/environment-voice/delete",
-    );
-    expect(buildCloudflareHostedControlEnvironmentRealtimeCallPath("user/a b")).toBe(
-      "/internal/users/user%2Fa%20b/environment-realtime/call",
-    );
+    for (const [routeName, suffix] of [
+      ["gameMediaDelete", "game-media/delete"],
+      ["gameMediaRead", "game-media/read"],
+      ["gameMediaStage", "game-media/stage"],
+      ["gameMediaStat", "game-media/stat"],
+    ] as const) {
+      const built = buildCloudflareHostedControlGameMediaPath(routeName, "user/a b");
+      expect(built).toBe(`/internal/users/user%2Fa%20b/${suffix}`);
+      expect(matchCloudflareHostedControlUserRoutePath(routeName, built)).toEqual({ userId: "user%2Fa%20b" });
+    }
   });
 
   it("rejects blank user identifiers before building routes", () => {
     for (const buildPath of [
       buildCloudflareHostedControlBrowserVaultSessionPath,
-      buildCloudflareHostedControlEnvironmentVoiceDeletePath,
-      buildCloudflareHostedControlEnvironmentRealtimeCallPath,
-      buildCloudflareHostedControlEnvironmentVoiceStagePath,
       buildCloudflareHostedControlMealPhotoDeletePath,
       buildCloudflareHostedControlMealPhotoStagePath,
       buildCloudflareHostedControlUserDataDeletionPath,
@@ -80,24 +80,6 @@ describe("cloudflare hosted control routes", () => {
     const userId = "user/a b";
     const encodedUserId = "user%2Fa%20b";
 
-    expect(
-      matchCloudflareHostedControlUserRoutePath(
-        "environmentRealtimeCall",
-        buildCloudflareHostedControlEnvironmentRealtimeCallPath(userId),
-      ),
-    ).toEqual({ userId: encodedUserId });
-    expect(
-      matchCloudflareHostedControlUserRoutePath(
-        "environmentVoiceDelete",
-        buildCloudflareHostedControlEnvironmentVoiceDeletePath(userId),
-      ),
-    ).toEqual({ userId: encodedUserId });
-    expect(
-      matchCloudflareHostedControlUserRoutePath(
-        "environmentVoiceStage",
-        buildCloudflareHostedControlEnvironmentVoiceStagePath(userId),
-      ),
-    ).toEqual({ userId: encodedUserId });
     expect(
       matchCloudflareHostedControlUserRoutePath(
         "mealPhotoDelete",
@@ -160,13 +142,14 @@ describe("cloudflare hosted control routes", () => {
     ).toBeNull();
     expect(CLOUDFLARE_HOSTED_CONTROL_USER_ROUTE_SPECS).toEqual({
       browserVaultSession: { method: "POST", suffix: "browser-vault/session" },
-      environmentRealtimeCall: { method: "POST", suffix: "environment-realtime/call" },
-      environmentVoiceDelete: { method: "DELETE", suffix: "environment-voice/delete" },
-      environmentVoiceStage: { method: "POST", suffix: "environment-voice/stage" },
-      inferenceVerification: { method: "POST", suffix: "inference/verify" },
+      gameMediaDelete: { method: "DELETE", suffix: "game-media/delete" },
+      gameMediaRead: { method: "GET", suffix: "game-media/read" },
+      gameMediaStage: { method: "POST", suffix: "game-media/stage" },
+      gameMediaStat: { method: "GET", suffix: "game-media/stat" },
       mealPhotoDelete: { method: "DELETE", suffix: "meal-photos/delete" },
       mealPhotoStage: { method: "POST", suffix: "meal-photos/stage" },
       runtimeEnsureProcessing: { method: "POST", suffix: "runtime/ensure-processing" },
+      voiceControl: { method: "POST", suffix: "runtime/voice" },
       runtimeResourcePurge: { method: "POST", suffix: "runtime/resource-purge" },
       runtimeHealthDataConsentReconcile: {
         method: "POST",
@@ -196,7 +179,6 @@ describe("cloudflare hosted control routes", () => {
     expect(Object.keys(packageJson.exports ?? {}).sort()).toEqual([
       "./client",
       "./device-webhook-queue",
-      "./inference-verification",
       "./routes",
     ]);
     expect(packageJson).not.toHaveProperty("main");
@@ -219,18 +201,13 @@ describe("cloudflare hosted control routes", () => {
     });
     expect(Object.keys(routesModule).sort()).toEqual([
       "CLOUDFLARE_HOSTED_CONTROL_BROWSER_VAULT_REPLICA_NOT_FOUND_CODE",
-      "CLOUDFLARE_HOSTED_CONTROL_ENVIRONMENT_VOICE_CAPTURE_ID_HEADER",
-      "CLOUDFLARE_HOSTED_CONTROL_ENVIRONMENT_VOICE_KEY_HEADER",
-      "CLOUDFLARE_HOSTED_CONTROL_ENVIRONMENT_VOICE_SHA256_HEADER",
+      "CLOUDFLARE_HOSTED_CONTROL_GAME_MEDIA_ID_HEADER",
       "CLOUDFLARE_HOSTED_CONTROL_MEAL_PHOTO_CAPTURE_ID_HEADER",
       "CLOUDFLARE_HOSTED_CONTROL_MEAL_PHOTO_KEY_HEADER",
       "CLOUDFLARE_HOSTED_CONTROL_MEAL_PHOTO_SHA256_HEADER",
       "CLOUDFLARE_HOSTED_CONTROL_USER_ROUTE_SPECS",
       "buildCloudflareHostedControlBrowserVaultSessionPath",
-      "buildCloudflareHostedControlEnvironmentRealtimeCallPath",
-      "buildCloudflareHostedControlEnvironmentVoiceDeletePath",
-      "buildCloudflareHostedControlEnvironmentVoiceStagePath",
-      "buildCloudflareHostedControlInferenceVerificationPath",
+      "buildCloudflareHostedControlGameMediaPath",
       "buildCloudflareHostedControlMealPhotoDeletePath",
       "buildCloudflareHostedControlMealPhotoStagePath",
       "buildCloudflareHostedControlRuntimeEnsureProcessingPath",
@@ -239,14 +216,11 @@ describe("cloudflare hosted control routes", () => {
       "buildCloudflareHostedControlTelegramUsageLimitNoticePath",
       "buildCloudflareHostedControlUserDataDeletionPath",
       "buildCloudflareHostedControlUserStatusPath",
+      "buildCloudflareHostedControlVoiceControlPath",
       "matchCloudflareHostedControlUserRoutePath",
     ]);
     expect(routesModule).toMatchObject({
       buildCloudflareHostedControlBrowserVaultSessionPath: expect.any(Function),
-      buildCloudflareHostedControlEnvironmentVoiceDeletePath: expect.any(Function),
-      buildCloudflareHostedControlEnvironmentRealtimeCallPath: expect.any(Function),
-      buildCloudflareHostedControlEnvironmentVoiceStagePath: expect.any(Function),
-      buildCloudflareHostedControlInferenceVerificationPath: expect.any(Function),
       buildCloudflareHostedControlMealPhotoDeletePath: expect.any(Function),
       buildCloudflareHostedControlMealPhotoStagePath: expect.any(Function),
       buildCloudflareHostedControlRuntimeHealthDataConsentPath: expect.any(Function),

@@ -1,3 +1,4 @@
+import type { ConversationPollTool } from "@murphai/hosted-execution/conversation-polls";
 import { createHash } from 'node:crypto'
 
 import type {
@@ -8,10 +9,6 @@ import type {
   HostedRuntimeGroupEmailScheduledAuthority,
   HostedRuntimeScheduledAutomationAuthority,
 } from '@murphai/hosted-execution/runtime-control'
-import {
-  HOSTED_ASSISTANT_DEFAULT_PROVIDER,
-  HOSTED_ASSISTANT_VENICE_PROVIDER,
-} from '@murphai/hosted-execution/assistant-model'
 import type {
   HostedExecutionAssistantAskOrigin,
 } from '@murphai/hosted-execution/contracts'
@@ -49,6 +46,7 @@ import type {
   AssistantHostedGroupEmailEffect,
   AssistantHostedPersonalizationTool,
   AssistantHostedPlanUsageTool,
+  AssistantHostedUsageDiagnostics,
   AssistantPhysicalNotePort,
   AssistantHostedPrivateImageUrlPublisher,
   AssistantHostedSubscriptionTool,
@@ -145,6 +143,7 @@ export interface AssistantHostedToolContext {
   readonly groupPermissionOfferTool?: AssistantHostedGroupPermissionOfferTool | null
   readonly groupSharedReader?: AssistantHostedGroupSharedReader | null
   readonly groupTool?: AssistantHostedGroupTool | null
+  readonly pollTool?: ConversationPollTool | null
   readonly imessageContactTool?: AssistantHostedIMessageContactTool | null
   readonly labsTool?: AssistantHostedLabsTool | null
   readonly imageGenerationLauncher?: AssistantHostedImageGenerationLauncher | null
@@ -152,6 +151,7 @@ export interface AssistantHostedToolContext {
   readonly groupEmailEffect?: AssistantHostedGroupEmailEffect | null
   readonly personalizationTool?: AssistantHostedPersonalizationTool | null
   readonly planUsageTool?: AssistantHostedPlanUsageTool | null
+  readonly usageDiagnostics?: AssistantHostedUsageDiagnostics | null
   readonly physicalNotes?: AssistantPhysicalNotePort | null
   readonly privateImageUrlPublisher?: AssistantHostedPrivateImageUrlPublisher | null
   readonly subscriptionTool?: AssistantHostedSubscriptionTool | null
@@ -160,7 +160,6 @@ export interface AssistantHostedToolContext {
   currentHostedDeliveryContext(): AssistantHostedDeliveryContext | null
   currentAssistantTarget?(): {
     model: string | null
-    provider: string | null
     reasoningEffort: string | null
   }
   currentHostedMailboxItemIds(): readonly string[]
@@ -425,6 +424,7 @@ export function createAssistantHostedToolContext(input: {
       executionContext?.groupPermissionOfferTool ?? null,
     groupSharedReader: executionContext?.groupSharedReader ?? null,
     groupTool: executionContext?.groupTool ?? null,
+    pollTool: readPollTool(executionContext),
     imessageContactTool: executionContext?.imessageContactTool ?? null,
     labsTool: executionContext?.labsTool ?? null,
     imageGenerationLauncher: imageGenerationLauncher
@@ -438,7 +438,7 @@ export function createAssistantHostedToolContext(input: {
       executionContext?.persistGeneratedImageCapture ?? null,
     groupEmailEffect,
     personalizationTool: executionContext?.personalizationTool ?? null,
-    planUsageTool: executionContext?.planUsageTool ?? null,
+    ...readUsageTools(executionContext),
     physicalNotes: executionContext?.physicalNotes ?? null,
     privateImageUrlPublisher:
       executionContext?.privateImageUrlPublisher ?? null,
@@ -508,10 +508,6 @@ export function createAssistantHostedToolContext(input: {
       const session = readDeliveryContext().session
       return {
         model: session.providerOptions.model ?? null,
-        provider:
-          session.providerOptions.modelProvider === HOSTED_ASSISTANT_VENICE_PROVIDER
-            ? HOSTED_ASSISTANT_VENICE_PROVIDER
-            : HOSTED_ASSISTANT_DEFAULT_PROVIDER,
         reasoningEffort: session.providerOptions.reasoningEffort ?? null,
       }
     },
@@ -713,4 +709,15 @@ function normalizeHostedDeliveryContextValue(value: unknown): string | null {
   return typeof value === 'string' && value.trim().length > 0
     ? value.trim()
     : null
+}
+
+function readUsageTools(context: AssistantHostedExecutionContext | null) {
+  return {
+    planUsageTool: context?.planUsageTool ?? null,
+    usageDiagnostics: context?.usageDiagnostics ?? null,
+  }
+}
+
+function readPollTool(context: AssistantHostedExecutionContext | null): ConversationPollTool | null {
+  return context?.pollTool ?? null
 }

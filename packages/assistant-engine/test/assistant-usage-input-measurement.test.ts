@@ -1,0 +1,174 @@
+import assert from 'node:assert/strict'
+import { execFileSync } from 'node:child_process'
+import { createHash } from 'node:crypto'
+import { readFile, rm } from 'node:fs/promises'
+import { fileURLToPath, pathToFileURL } from 'node:url'
+import { runInNewContext } from 'node:vm'
+
+import { HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV } from '@murphai/hosted-execution/env'
+import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+
+import { executeCodexAppServerTurn, resolveMurphDynamicTools, stopWarmCodexAppServer } from '../src/assistant-codex.ts'
+import { MURPH_CODEX_BASE_INSTRUCTIONS } from '../src/assistant/codex-base-instructions.ts'
+import { buildAssistantSystemPromptLayers } from '../src/assistant/system-prompt.ts'
+import { writeHostedOpenAiMixedModeModelCatalogJson } from './support/codex-model-catalog.ts'
+import { prepareScriptedTurnScenario, readRecord, startScriptedResponsesStub } from './support/codex-scripted-provider.ts'
+import { assertModelVisibleToolContract, readProviderNativeTools } from './support/codex-tool-contract-proof.ts'
+import { materializeUsageInputBaseline } from './support/usage-input-baseline.ts'
+
+// Snapshot all assistant-engine source together so relative imports cannot fall
+// through to head modules. Public workspace dependencies and Codex stay installed
+// at the candidate version; the output records that measurement boundary.
+let base = process.env.MURPH_USAGE_INPUT_BASE ?? 'origin/main'
+const repository = fileURLToPath(new URL('../../../', import.meta.url))
+const configPath = 'packages/assistant-runtime/src/hosted-runtime/codex-config.ts'
+const temporaryPaths: string[] = []
+const noExternalFetch: typeof fetch = async () => { throw new Error('Unexpected external effect') }
+
+function gitSource(file: string): string {
+  return execFileSync('git', ['show', `${base}:${file}`], { cwd: repository, encoding: 'utf8' })
+}
+
+async function nativeDelegationSource(phase: 'base' | 'head'): Promise<string> {
+  const sharedPath = 'packages/hosted-execution/src/codex-behavior.ts'
+  if (phase === 'base') {
+    const committed = execFileSync('git', ['ls-tree', '--name-only', base, '--', sharedPath], { cwd: repository, encoding: 'utf8' }).trim()
+    return gitSource(committed === sharedPath ? sharedPath : configPath)
+  }
+  return readFile(new URL(`../../../${sharedPath}`, import.meta.url), 'utf8')
+}
+
+function nativeDelegationConfig(source: string): string[] {
+  const names = [
+    ['usage_hint_text', 'HOSTED_CODEX_MULTI_AGENT_USAGE_HINT_TEXT'],
+    ['multi_agent_mode_hint_text', 'HOSTED_CODEX_MULTI_AGENT_MODE_HINT_TEXT'],
+    ['subagent_usage_hint_text', 'HOSTED_CODEX_SUBAGENT_USAGE_HINT_TEXT'],
+    ['subagent_developer_instructions', 'HOSTED_CODEX_SUBAGENT_DEVELOPER_INSTRUCTIONS_TEXT'],
+  ] as const
+  return [
+    '[features.multi_agent_v2]', 'enabled = true',
+    'expose_spawn_agent_model_overrides = true', 'max_concurrent_threads_per_session = 4',
+    ...names.flatMap(([key, name]) => {
+      const expression = new RegExp(`const ${name} =\\s*([\\s\\S]*?);\\n`).exec(source)?.[1]
+      if (!expression && key === 'subagent_developer_instructions') return []
+      assert.ok(expression, `Expected production constant ${name}`)
+      // Evaluate only a trusted repository string expression, never a prompt or
+      // external response. Do not duplicate or shorten production hint text.
+      const value: unknown = runInNewContext(`(${expression})`, {}, { timeout: 100 })
+      assert.equal(typeof value, 'string')
+      return [`${key} = ${JSON.stringify(value)}`]
+    }),
+  ]
+}
+
+afterAll(async () => {
+  await stopWarmCodexAppServer()
+  await Promise.all(temporaryPaths.map((directory) => rm(directory, { recursive: true, force: true })))
+})
+
+describe.skipIf(process.env.MURPH_MEASURE_USAGE_INPUT !== '1')('usage efficiency initial input', () => {
+  beforeAll(() => {
+    // Freeze mutable refs once before any source or config reads.
+    base = execFileSync('git', ['rev-parse', '--verify', '--end-of-options', `${base}^{commit}`], {
+      cwd: repository, encoding: 'utf8', timeout: 30_000,
+    }).trim()
+  })
+
+  it.each(['direct', 'group', 'groupAvailable'] as const)('complete first provider request (%s)', { timeout: 180_000 }, async (fixture) => {
+    const scope = fixture === 'direct' ? 'direct' : 'group'
+    const groupAvailable = fixture === 'groupAvailable'
+    const baselineRoot = await materializeUsageInputBaseline(repository, base)
+    temporaryPaths.push(baselineRoot)
+    const stub = await startScriptedResponsesStub()
+    try {
+      const baseline: typeof import('../src/assistant/system-prompt.ts') = await import(pathToFileURL(`${baselineRoot}/src/assistant/system-prompt.ts`).href)
+      const baselineCatalog: typeof import('../src/assistant-codex/dynamic-tool-catalog.ts') = await import(pathToFileURL(`${baselineRoot}/src/assistant-codex/dynamic-tool-catalog.ts`).href)
+      const baselineInstructions: typeof import('../src/assistant/codex-base-instructions.ts') = await import(pathToFileURL(`${baselineRoot}/src/assistant/codex-base-instructions.ts`).href)
+      const availability: Parameters<typeof resolveMurphDynamicTools>[0] = {
+        allowFinishWithoutReply: true, automationAvailable: true,
+        personalizationAvailable: scope === 'direct', groupSharedReadAvailable: fixture === 'group',
+        ...(groupAvailable ? { groupAvailable: true } : {}),
+        imageGenerationAvailable: false, progressUpdatesAvailable: true, progressUpdateMode: scope,
+      }
+      const captures = []
+      let workingDirectory: string | undefined
+      for (const phase of ['base', 'head'] as const) {
+        const tools = (phase === 'base' ? baselineCatalog.resolveMurphDynamicTools : resolveMurphDynamicTools)(availability)
+        const configSource = await nativeDelegationSource(phase)
+        const scenario = await prepareScriptedTurnScenario(stub, temporaryPaths, {
+          model: 'gpt-6.1-sol', additionalTomlLines: nativeDelegationConfig(configSource),
+        })
+        workingDirectory ??= scenario.turnInput.workingDirectory
+        scenario.turnInput.workingDirectory = workingDirectory
+        const build = phase === 'base' ? baseline.buildAssistantSystemPromptLayers : buildAssistantSystemPromptLayers
+        const layers = build({
+          assistantCliContract: null, assistantHostedAutomationAvailable: true,
+          assistantProgressUpdatesAvailable: true, channel: 'linq',
+          ...(groupAvailable ? { assistantHostedGroupToolSurface: 'families' as const } : {}),
+          cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' }, conversationScope: scope,
+          currentLocalDate: '2030-01-10', currentInstant: '2030-01-10T16:00:00.000Z', currentTimeZone: 'UTC',
+          hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false,
+          ordinaryInboundTurn: true,
+        })
+        const catalog = await writeHostedOpenAiMixedModeModelCatalogJson({
+          codexCommand: scenario.turnInput.codexCommand, directory: scenario.turnInput.codexHome,
+        })
+        stub.markRequestBaseline()
+        stub.captureProviderRequestDiagnostics({ completeInput: true })
+        stub.queue({ text: 'SYNTHETIC_USAGE_INPUT_CAPTURED' })
+        const result = await executeCodexAppServerTurn({
+          ...scenario.turnInput, dynamicTools: tools, groupConversation: scope === 'group',
+          fetchImpl: noExternalFetch, publicInternetFetch: noExternalFetch,
+          baseInstructions: phase === 'base' ? baselineInstructions.MURPH_CODEX_BASE_INSTRUCTIONS : MURPH_CODEX_BASE_INSTRUCTIONS,
+          developerInstructions: [layers.staticCacheableCorePrompt, layers.stableRouteCapabilityPrompt, layers.threadContextPrompt].join('\n\n'),
+          prompt: [layers.dynamicTurnContextPrompt, groupAvailable
+            ? 'Summarize the shared sleep duration for January 10, 2030, with the shared timezone for each person. Keep it brief.'
+            : 'Review the existing reminders and summarize which need attention.'].join('\n\n'),
+          env: { ...scenario.turnInput.env, [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: catalog },
+        })
+        expect(result.finalMessage).toBe('SYNTHETIC_USAGE_INPUT_CAPTURED')
+        expect(result.runtimeIssueInputs).toEqual([])
+        expect(result.jsonEvents.filter((event) => readRecord(event)?.method === 'item/tool/call')).toEqual([])
+        expect(stub.requestCountSinceBaseline()).toBe(1)
+        const capture = stub.requestSummariesSinceBaseline()[0]?.completeProviderInput
+        assert.ok(capture)
+        const body = readRecord(JSON.parse(capture.json))
+        assert.ok(body)
+        expect(body.model).toBe('gpt-6.1-sol')
+        expect(capture.json).toContain('functions')
+        if (groupAvailable) {
+          const registered = tools.find((tool) => tool.namespace === 'murph' && tool.name === 'group_data')
+          assert.ok(registered, 'The affected fixture must register murph.group_data, not murph.group')
+          expect(registered).toMatchObject({ deferLoading: false })
+          const observed = readProviderNativeTools(capture.json)
+            .filter((tool) => tool.namespace === 'murph' && tool.name === 'group_data')
+          expect(observed).toHaveLength(1)
+          const visible = observed[0]
+          assert.ok(visible)
+          assertModelVisibleToolContract(registered, visible)
+        }
+        captures.push({
+          phase, bytes: Buffer.byteLength(capture.json),
+          sha256: createHash('sha256').update(capture.json).digest('hex'),
+          providerFields: Object.keys(body).sort(), exclusions: capture.excludedTransportFields,
+          registeredTools: tools.map((tool) => `${tool.namespace}.${tool.name}`),
+          registeredToolBytes: Buffer.byteLength(JSON.stringify(tools)),
+        })
+        await stopWarmCodexAppServer()
+      }
+      const [before, after] = captures
+      assert.ok(before && after)
+      process.stdout.write(`[usage-input-proof] ${JSON.stringify({
+        fixture, scope, base, model: 'gpt-6.1-sol', provider: 'scripted-loopback', nativeDelegation: true, captures,
+        comparison: 'base/head assistant-engine source and native delegation text; identical fixture and workspace',
+        sharedDependencies: 'candidate request adapter and public workspace packages, installed Codex and model catalog',
+        deltaBytes: after.bytes - before.bytes, deltaPercent: (after.bytes - before.bytes) / before.bytes * 100,
+        tokens: null, tokenDelta: null, tokenLimitation: 'No exact GPT-6.1 Sol tokenizer is configured; no estimate is substituted.',
+      })}\n`)
+    } finally {
+      await stopWarmCodexAppServer()
+      await stub.close()
+      await rm(baselineRoot, { recursive: true, force: true })
+    }
+  })
+})

@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-09-25",
+  "order": 201,
+  "item": {
+    "id": "faster-reply-preparation",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Less work before replies",
+    "summary": "Reduced background bookkeeping while Murph prepares a reply.",
+    "details": "Independent checks run together, and repeated checkpoint work is skipped while preserving your saved progress.",
+    "relevanceTags": ["messaging", "reliability"],
+    "sourcePullRequests": [3723]
+  }
+}

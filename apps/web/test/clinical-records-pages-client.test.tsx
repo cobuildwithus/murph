@@ -889,6 +889,22 @@ describe("Clinical Records connect page", () => {
 });
 
 describe("Clinical Records status page", () => {
+  it("opens the public privacy policy from connection management", async () => {
+    const { RecordsPageClient } = await import("../app/(dashboard)/records/records-page-client");
+    const rendered = await renderClientComponent(createElement(RecordsPageClient, {
+      authenticated: true, initialCallback: null, initialConnections: [makeConnection()], initialLoadError: false,
+    }), { requireButton: false });
+    cleanup = rendered.cleanup;
+    const management = rendered.container.querySelector("details");
+    assert.ok(management);
+    await act(async () => { management.open = true; });
+    const privacyLink = Array.from(management.querySelectorAll("a"))
+      .find((link) => link.textContent === "How Murph uses your data");
+    assert.ok(privacyLink);
+    expect(privacyLink.getAttribute("href")).toBe("/legal/privacy");
+    expect(mocks.requestHostedOnboardingJson).not.toHaveBeenCalled();
+  });
+
   it("routes the empty state through the shared launcher without creating a claim", async () => {
     const { RecordsPageClient } = await import("../app/(dashboard)/records/records-page-client");
     const rendered = await renderClientComponent(createElement(RecordsPageClient, {
@@ -900,6 +916,24 @@ describe("Clinical Records status page", () => {
     expect(links[0]?.textContent).toContain("Import records");
     expect(mocks.requestHostedOnboardingJson).not.toHaveBeenCalled();
     expect(rendered.container.textContent).toContain("No records imported yet");
+  });
+
+  it("explains portal coverage limits and counts skips without claiming existing results", async () => {
+    const connection = makeConnection();
+    const { RecordsPageClient } = await import("../app/(dashboard)/records/records-page-client");
+    const rendered = await renderClientComponent(createElement(RecordsPageClient, {
+      authenticated: true,
+      initialCallback: null,
+      initialConnections: [{ ...connection, lastErrorCode: "provider-search-incomplete",
+        latestRun: { ...connection.latestRun!, skippedExistingCount: 2 } }],
+      initialLoadError: false,
+    }), { requireButton: false });
+    cleanup = rendered.cleanup;
+    expect(rendered.container.textContent).toContain("Limited portal coverage");
+    expect(rendered.container.textContent).toContain("Your portal reported limited coverage. Any records saved are ready to use.");
+    expect(rendered.container.textContent).toContain("2 repeated items skipped.");
+    expect(rendered.container.textContent).not.toContain("already in Murph");
+    expect(rendered.container.textContent).toContain("3 records added");
   });
 
   it("renders truthful partial status, strips callback state, and deduplicates disconnect attempts", async () => {
@@ -1092,8 +1126,8 @@ describe("Clinical Records status page", () => {
     const completeBadge = Array.from(rendered.container.querySelectorAll("span"))
       .find((span) => span.textContent === "Imported");
     assert.ok(completeBadge);
-    expect(completeBadge.className).toContain("bg-primary");
-    expect(rendered.container.querySelector('a[href="/biomarkers"]')?.textContent).toBe("View lab results");
+    expect(completeBadge.className).toContain("sr-only");
+    expect(rendered.container.querySelector('a[href="/biomarkers"]')).toBeNull();
     expect(rendered.container.textContent).toContain(
       "Your records are saved and ready for conversations with Murph.",
     );
@@ -1144,7 +1178,7 @@ describe("Clinical Records status page", () => {
     }));
     expect(rendered.container.textContent).toContain("3 records added");
     expect(rendered.container.textContent).toContain("2 items saved for reference");
-    expect(rendered.container.querySelector('a[href="/biomarkers"]')).not.toBeNull();
+    expect(rendered.container.querySelector('a[href="/biomarkers"]')).toBeNull();
     expect(Array.from(rendered.container.querySelectorAll("a")).find((link) => link.textContent === "Reconnect")?.getAttribute("href")).toBe("/records/connect?launch=clinical-records");
     const reauthorizationBadge = Array.from(rendered.container.querySelectorAll("span"))
       .find((span) => span.textContent === "Portal access ended");

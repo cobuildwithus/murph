@@ -2,7 +2,6 @@ import {
   parseHostedRuntimeLogRequest,
   parseHostedRuntimeLogResponse,
 } from "@murphai/hosted-execution/parsers";
-import { after } from "next/server";
 
 import {
   requireHostedCloudflareCallbackRequest,
@@ -15,13 +14,10 @@ import {
 } from "@/src/lib/hosted-orchestration/signal-runtime";
 import { readOptionalJsonObject } from "@/src/lib/http";
 import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
+import { isHostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import {
   writeHostedRuntimeLogs,
 } from "@/src/lib/hosted-runtime-log/write";
-import {
-  hasHostedPersonalPatternsRunAlert,
-  reportHostedPersonalPatternsRunAlerts,
-} from "@/src/lib/hosted-runtime-log/personal-patterns-run-alert";
 import {
   claimHostedAcceptedAttemptFailureRecheck,
 } from "@/src/lib/hosted-workspace/store";
@@ -31,9 +27,21 @@ const ACCEPTED_RUNTIME_ATTEMPT_RECHECK_COOLDOWN_MS = 30_000;
 const HOSTED_RUNTIME_LOG_CALLBACK_BODY_LIMIT_BYTES = 256 * 1024;
 
 export const POST = withJsonError(async (request: Request) => {
-  const userId = await requireHostedCloudflareCallbackRequest(request, {
-    maxBodyBytes: HOSTED_RUNTIME_LOG_CALLBACK_BODY_LIMIT_BYTES,
-  });
+  let userId: string;
+  try {
+    userId = await requireHostedCloudflareCallbackRequest(request, {
+      maxBodyBytes: HOSTED_RUNTIME_LOG_CALLBACK_BODY_LIMIT_BYTES,
+    });
+  } catch (error) {
+    if (!isHostedOnboardingError(error)
+      || error.code !== "HOSTED_RUNTIME_OWNER_STALE"
+      || error.httpStatus !== 409) {
+      throw error;
+    }
+    // Bounded shutdown drains can leave authenticated telemetry in flight after
+    // retirement. Discard it before persistence or recovery signals.
+    return jsonOk(parseHostedRuntimeLogResponse({ loggedCount: 0 }));
+  }
   const body = parseHostedRuntimeLogRequest(await readOptionalJsonObject(request));
 
   // Recovery runs before persistence, not after it: a failed diagnostic insert
@@ -51,12 +59,6 @@ export const POST = withJsonError(async (request: Request) => {
     entries: body.entries,
     userId,
   });
-  if (loggedCount > 0 && hasHostedPersonalPatternsRunAlert(body.entries)) {
-    after(() => reportHostedPersonalPatternsRunAlerts({
-      userId,
-      entries: body.entries,
-    }));
-  }
 
   return jsonOk(parseHostedRuntimeLogResponse({
     loggedCount,

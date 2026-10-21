@@ -640,7 +640,7 @@ function createPreviewDeploymentEnv(
     CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-staging",
     CF_PUBLIC_BASE_URL: "https://hosted-runner-staging.example.test",
     CF_WORKER_NAME: "hosted-runner-staging",
-    HOSTED_ASSISTANT_MODEL: "gpt-5.6-terra",
+    HOSTED_ASSISTANT_MODEL: "gpt-6.1-sol",
     HOSTED_ASSISTANT_PROVIDER: "openai",
     HOSTED_CRYPTO_ENV: "preview",
     HOSTED_EXECUTION_DEPLOY_CONTEXT: "preview",

@@ -1,0 +1,24 @@
+{
+  "publishedOn": "2026-10-01",
+  "order": 150,
+  "item": {
+    "id": "app-contact-and-wrist-recovery",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Clearer app and wrist connection help",
+    "summary": "With a compatible Murph iPhone app, Murph can report when the app last checked in and explain why a wrist reminder could not be sent.",
+    "details": "For a useful timer or discreet reminder, Murph can offer an optional wrist cue when it already knows you wear WHOOP or Garmin. App contact includes background activity when iOS permits it, but does not prove Health sync or app closure. Groups can see last contact when you share wearable data from an active Apple Health connection.",
+    "relevanceTags": [
+      "apple-health",
+      "wearables",
+      "groups"
+    ],
+    "sourcePullRequests": [
+      3973
+    ],
+    "tryIt": {
+      "label": "Check app contact",
+      "prompt": "When did my Murph app last check in, and when did Apple Health last sync?"
+    }
+  }
+}

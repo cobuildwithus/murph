@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-09-25",
+  "order": 100,
+  "item": {
+    "id": "imessage-image-captions",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Cleaner image replies in iMessage",
+    "summary": "Image replies no longer add a separate image description to the message.",
+    "details": "Murph keeps the written reply and image together without automatically inserting the image's alt text as another paragraph.",
+    "relevanceTags": ["imessage", "images"],
+    "sourcePullRequests": [3725]
+  }
+}

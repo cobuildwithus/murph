@@ -31,12 +31,6 @@ export function readAssistantEnvString(
   return typeof value === 'string' ? normalizeNullableText(value) : null
 }
 
-export function isAssistantVercelAIGatewayBaseUrl(
-  value: string | null | undefined,
-): boolean {
-  return matchesAssistantHttpsHost(value, 'ai-gateway.vercel.sh')
-}
-
 export function isAssistantLocalDevelopmentBaseUrl(
   value: string | null | undefined,
 ): boolean {
@@ -52,20 +46,4 @@ export function isAssistantLocalDevelopmentBaseUrl(
     'host.docker.internal',
     'localhost',
   ].includes(parsed.hostname.toLowerCase())
-}
-
-function matchesAssistantHttpsHost(
-  value: string | null | undefined,
-  expectedHostname: string,
-): boolean {
-  const parsed = parseAssistantBaseUrl(value)
-  if (!parsed) {
-    return false
-  }
-
-  return (
-    parsed.protocol === 'https:' &&
-    parsed.hostname.toLowerCase() === expectedHostname &&
-    parsed.port === ''
-  )
 }

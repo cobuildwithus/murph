@@ -4,7 +4,7 @@
   "private": true,
   "license": "Apache-2.0",
   "engines": {
-    "node": ">=24.14.1"
+    "node": "^24.14.1"
   },
   "scripts": {
     "dev": "vercel env run -- pnpm dev:local-env",
@@ -19,7 +19,7 @@
     "og-assets:trace-check": "pnpm --dir ../.. exec tsx apps/web/scripts/check-og-asset-traces.ts",
     "og-assets:runtime-check": "pnpm --dir ../.. exec tsx apps/web/scripts/check-og-emitted-runtime.ts",
     "og-assets:render": "pnpm --dir ../.. exec tsx apps/web/scripts/render-og-image.ts",
-    "lint": "eslint .",
+    "lint": "oxlint .",
     "start": "next start",
     "dev:smoke": "pnpm --dir ../.. exec tsx apps/web/scripts/dev-smoke.ts",
     "product-labels:env-check": "pnpm --dir ../.. exec tsx apps/web/scripts/check-product-label-runtime-env.ts",
@@ -33,7 +33,6 @@
     "privacy:backfill-phone-calls": "pnpm --dir ../.. exec tsx --tsconfig apps/web/tsconfig.json apps/web/scripts/backfill-hosted-phone-call-private-content.ts",
     "privacy:backfill-vault-share-recent-dates": "pnpm --dir ../.. exec tsx --tsconfig apps/web/tsconfig.json apps/web/scripts/backfill-hosted-vault-share-recent-date-generations.ts",
     "stripe:migrate-legacy-usage-items": "pnpm --dir ../.. exec tsx --tsconfig apps/web/tsconfig.json apps/web/scripts/migrate-legacy-stripe-usage-items.ts",
-    "pitch:pdf": "pnpm --dir ../.. exec tsx apps/web/scripts/export-pitch-pdf.ts",
     "legal:pdf": "pnpm --dir ../.. exec tsx apps/web/scripts/generate-legal-pdfs.ts",
     "typecheck": "pnpm health-commons:generate && pnpm prisma:generate && pnpm typecheck:prepared",
     "typecheck:prepared": "pnpm changelog:generate && pnpm --dir ../.. exec tsx scripts/ensure-next-route-type-stubs.ts apps/web && node ../../scripts/run-typescript.mjs web -p tsconfig.json --pretty false",
@@ -57,7 +56,6 @@
   "dependencies": {
     "@base-ui/react": "1.4.1",
     "@composio/client": "0.1.0-alpha.76",
-    "@google-cloud/kms": "6.0.0",
     "@junction-api/sdk": "1.2.0",
     "@linqapp/sdk": "0.34.0",
     "@lob/lob-typescript-sdk": "1.4.0",
@@ -112,6 +110,7 @@
     "@murphai/core": "workspace:*",
     "@murphai/hosted-local-harness": "workspace:*",
     "@murphai/vault-usecases": "workspace:*",
+    "@next/eslint-plugin-next": "16.3.0",
     "@playwright/test": "^1.59.1",
     "@spectrum-ts/core": "12.8.0",
     "@spectrum-ts/imessage": "12.8.0",
@@ -119,9 +118,10 @@
     "@types/pg": "8.20.0",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
-    "eslint": "^9.39.4",
-    "eslint-config-next": "^16.3.0",
+    "eslint-plugin-react": "7.37.5",
+    "eslint-plugin-react-hooks": "7.1.1",
     "linkedom": "0.18.12",
+    "oxlint": "1.88.0",
     "prisma": "^7.8.0",
     "tailwindcss": "^4.3.0",
     "typescript": "^5.9.3"

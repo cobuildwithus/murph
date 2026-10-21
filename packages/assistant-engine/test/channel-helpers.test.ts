@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import {
@@ -523,7 +524,7 @@ describe('channel helper seams', () => {
     const telegramVoiceFetch = vi.fn<typeof fetch>(async (input) => {
       const url = String(input)
       if (url.startsWith('https://api.elevenlabs.io/')) {
-        return new Response(new Uint8Array([1, 2, 3]), {
+        return new Response(new Uint8Array(readFileSync(new URL('../../../fixtures/generated-audio/speech.mp3', import.meta.url))), {
           headers: {
             'content-type': 'audio/mpeg',
           },
@@ -742,7 +743,7 @@ describe('channel helper seams', () => {
     const telegramFetch = vi.fn<typeof fetch>(async (input) => {
       const url = String(input)
       if (url.startsWith('https://api.elevenlabs.io/')) {
-        return new Response(new Uint8Array([1, 2, 3]), {
+        return new Response(new Uint8Array(readFileSync(new URL('../../../fixtures/generated-audio/speech.mp3', import.meta.url))), {
           headers: { 'content-type': 'audio/mpeg' },
           status: 200,
         })
@@ -1100,7 +1101,7 @@ describe('channel helper seams', () => {
     const telegramFetch = vi.fn<typeof fetch>(async (input) => {
       const url = String(input)
       if (url.startsWith('https://api.elevenlabs.io/')) {
-        return new Response(new Uint8Array([1, 2, 3]), {
+        return new Response(new Uint8Array(readFileSync(new URL('../../../fixtures/generated-audio/speech.mp3', import.meta.url))), {
           headers: { 'content-type': 'audio/mpeg' },
           status: 200,
         })

@@ -684,6 +684,28 @@ test("hosted provider cleanup scheduled read surfaces an immediate wake for due 
   }
 });
 
+test("hosted provider cleanup changes a stored future wake to an immediate wake when it becomes due", async () => {
+  const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace("hosted-provider-cleanup-");
+  const wakeAt = "2026-07-01T00:09:00.000Z";
+  const wakeMs = Date.parse(wakeAt);
+  try {
+    await recordHostedProviderCleanupBeforeCommit({
+      linqMessageIds: ["linq_inbound_1"],
+      checkpoint: { nextWakeAt: wakeAt },
+      vaultRoot,
+    });
+    for (const offset of [-1, 0, 51]) {
+      assert.equal(
+        await resolveHostedProviderCleanupScheduledWakeAt({ nowMs: wakeMs + offset, vaultRoot }),
+        offset < 0 ? wakeAt : new Date(wakeMs + offset).toISOString(),
+      );
+      assert.deepEqual(await readHostedProviderCleanupCheckpoint(vaultRoot), { nextWakeAt: wakeAt });
+    }
+  } finally {
+    await cleanup();
+  }
+});
+
 test("hosted provider cleanup first defer wake follows the idle checkpoint delay", () => {
   assert.equal(
     resolveHostedProviderCleanupFirstDeferredWakeAt({

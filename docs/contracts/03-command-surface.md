@@ -30,6 +30,7 @@ vault-cli vault repair-inbox-envelopes --vault <path> [--dry-run] [--apply] [--m
 vault-cli vault compact-inbox-parser-attempts --vault <path> [--dry-run] [--apply] [--max-attempts <count>] [--request-id <id>]
 vault-cli vault repair-junction-hr-zones --vault <path> [--dry-run] [--apply] [--request-id <id>]
 vault-cli vault update --vault <path> [--title <title>] [--timezone <tz>] [--request-id <id>]
+vault-cli audit receipt <xfm_id> --vault <path> [--request-id <id>]
 vault-cli audit show <id> --vault <path> [--request-id <id>]
 vault-cli audit list --vault <path> [--action <action>] [--actor <actor>] [--status <status>] [--from <date>] [--to <date>] [--sort asc|desc] [--limit <n>] [--request-id <id>]
 vault-cli audit tail --vault <path> [--limit <n>] [--request-id <id>]
@@ -38,7 +39,7 @@ vault-cli knowledge upsert --vault <path> --body <markdown> [--title <title>] [-
 vault-cli knowledge append-section <slug> <heading> --vault <path> --body <markdown> [--title <title>] [--position prepend|append] [--source-path <path> ...] [--request-id <id>]
 vault-cli knowledge list --vault <path> [--page-type <type>] [--status <status>] [--request-id <id>]
 vault-cli knowledge search <query> --vault <path> [--page-type <type>] [--status <status>] [--limit <n>] [--request-id <id>]
-vault-cli knowledge show <slug> --vault <path> [--request-id <id>]
+vault-cli knowledge show <slug> --vault <path> [--if-exists] [--request-id <id>]
 vault-cli knowledge lint --vault <path> [--request-id <id>]
 vault-cli knowledge log tail --vault <path> [--limit <n>] [--request-id <id>]
 vault-cli knowledge index rebuild --vault <path> [--request-id <id>]
@@ -61,7 +62,7 @@ vault-cli memory forget <memoryId> --vault <path> [--compact]
 vault-cli automation scaffold --vault <path>
 vault-cli automation save <title> --vault <path> --instructions <text> --schedule-kind <kind> [--channel <channel>] [...]
 vault-cli automation show <lookup> --vault <path>
-vault-cli automation list --vault <path> [--status <status> ...] [--text <query>] [--limit <n>]
+vault-cli automation list --vault <path> [--status <status> ...] [--text <query>] [--limit <n>] [--include-instructions] [--cursor <automation-id>]
 vault-cli automation import-json --vault <path> --input @payload.json|-
 vault-cli device provider list --vault <path> [--baseUrl <url>]
 vault-cli device connect <target> --vault <path> [--baseUrl <url>] [--returnTo <url>] [--open]
@@ -223,6 +224,14 @@ vault-cli supplement compound list --vault <path> [--status <status>] [--limit <
 vault-cli supplement compound show <compound> --vault <path> [--status <status>] [--request-id <id>]
 ```
 
+`automation list --include-instructions` returns at most 20 records and 48 KiB
+of data JSON per page in immutable-id order. Follow every `nextCursor`, retaining
+the same filters. An oversized instruction body is `null` with
+`instructionsComplete: false`; read that exact automation before judging it.
+This mode is incompatible with `--compact`. Ordinary listings retain their
+existing projection and ordering. Mutation candidates still require exact
+readback and their current revision.
+
 When `experiment session log` receives `--reminder-intent-id`, the strict sent outbox intent is the immutable occurrence proof. The canonical writer validates private provider delivery, the exact `experiment:<experimentId>` support owner, `scheduledOccurrenceAt`, and `plannedOccurrenceAt`; derives one event identity from the experiment and planned occurrence; returns the existing event when the same planned session is confirmed through an identical retry or another accepted reminder; rejects a replay that changes the already logged effect so the caller can edit that event explicitly; and includes canonical experiment progress in the result. `--date`, `--occurred-at`, and `--source` are invalid in this mode because the writer derives the occurrence and records an explicit manual report. A legacy reminder without `plannedOccurrenceAt` remains conversational context and must use ordinary plan-based session resolution rather than this strict writer. Later automation edits, archival, or deletion do not invalidate the historical occurrence; the current automation revision and consent remain pre-send authority for future delivery.
 
 `medication history add` is a medication-only facade over the private regimen registry for completed courses copied from records. It creates `kind: medication` regimen records, defaults to `status: completed` and `group: medication/history`, and uses a date-qualified slug derived from the title plus `startedOn`/`stoppedOn` so repeated historical courses do not collide or become active regimens or point-in-time intake events. Current medication creation and updates stay on `regimen save --kind medication`.
@@ -263,7 +272,7 @@ Assistant delivery targets are transport-native strings only; serialized objects
 
 The existing assistant runtime commands remain runtime inspection/control only. Any future user-facing, queryable, or durable assistant setting must pass the persisted-state placement gate: canonical product state is not an `assistant` runtime CRUD surface, so it must use a core-owned canonical record or explicit derived materialization.
 
-`vault-cli knowledge *` manages Murph's non-canonical personal compiled wiki under `derived/knowledge/**`. That wiki is distinct from the stable reference layer under `bank/library/**`: `bank/library` is durable shared health context, while `derived/knowledge` is the assistant-authored user-specific synthesis layer. `knowledge upsert` writes one page and refreshes `derived/knowledge/index.md`. `knowledge append-section` creates the page when needed or appends/prepends one `## <heading>` section through the same locked write path, rejects duplicate section headings on the target page, refuses to overwrite an existing page file that cannot be loaded as a knowledge graph page, refreshes the index, and appends the write log. Each successful upsert or append also appends a chronological entry to `derived/knowledge/log.md`, and whitespace-only bodies are rejected before any write. `knowledge log tail` is the intentionally small operator-facing log inspection surface; richer wiki-maintainer behavior belongs in the assistant runtime prompt plus the first-class assistant knowledge tools, not in `AGENTS.md`.
+`vault-cli knowledge *` manages Murph's non-canonical personal compiled wiki under `derived/knowledge/**`. That wiki is distinct from the stable reference layer under `bank/library/**`: `bank/library` is durable shared health context, while `derived/knowledge` is the assistant-authored user-specific synthesis layer. `knowledge upsert` writes one page and refreshes `derived/knowledge/index.md`. `knowledge append-section` creates the page when needed or appends/prepends one `## <heading>` section through the same locked write path, rejects duplicate section headings on the target page, refuses to overwrite an existing page file that cannot be loaded as a knowledge graph page, refreshes the index, and appends the write log. `knowledge show` fails with `knowledge_page_not_found` for a missing slug; for an optional page, `--if-exists` instead returns `page: null` and `degradation: null`, but only when every generic page parses, because an invalid page could still declare the slug. Otherwise it fails with `knowledge_page_invalid`, and it never writes. Each successful upsert or append also appends a chronological entry to `derived/knowledge/log.md`, and whitespace-only bodies are rejected before any write. `knowledge log tail` is the intentionally small operator-facing log inspection surface; richer wiki-maintainer behavior belongs in the assistant runtime prompt, which routes wiki reads and writes through these `vault-cli knowledge` commands, not in `AGENTS.md`.
 
 The per-command synopses above intentionally omit incur-owned global output and discovery flags such as `--format`, `--json`, `--full-output`, `--schema`, `--llms`, `skills add/list`, and `--mcp`. Leaf-command `--schema --format json` returns that command's args/options/output schema. Root or group `--schema --format json` returns a `murph.schema-index.v1` command index so agents do not receive human help text for a JSON request. For commands that take `--input @file.json|-` or `--input @file.jsonl|-`, the command schema intentionally describes the file option; a matching `payload-schema` command, where present, is the first-class file-body contract and returns the Murph-owned JSON contract as `murph.payload-schema.v1`. Scaffold commands are examples, not complete writable contracts. The current supported payload-schema tranche covers `condition import-json`, `blood-test import-json`, `encounter import-json`, `workout import-json`, `assertion import-json`, `vitals import-json`, `diagnostic-test import-json`, `clinical-note import-json`, `social-history import-json`, and per-line `event import-jsonl` rows. The payload-schema migration plan in `docs/incur-payload-schema-migration-guide.md` defines the rollout for remaining import surfaces. These surfaces are provided by incur and thin Murph CLI adapters and are not re-frozen command-by-command in this contract.
 

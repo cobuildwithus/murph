@@ -1,7 +1,8 @@
 import { buildRuntimeProcessingSummaryEntry, recordRuntimeProcessingSummary, type RuntimeProcessingDiagnostics } from "../../user-runner/diagnostics.ts";
-import { readPostgresRunnerStatus, reconcilePostgresRuntimeConsent } from "../../runtime-user-control.ts";
+import { controlPostgresRuntimeVoice, readPostgresRunnerStatus, reconcilePostgresRuntimeConsent } from "../../runtime-user-control.ts";
 import {
   emitHostedExecutionStructuredLog,
+  parseHostedVoiceControlRequest,
 } from "@murphai/hosted-execution";
 import type {
   HostedRuntimeEnsureProcessingRequest,
@@ -75,6 +76,25 @@ const runtimeEnsureProcessingRoute = {
   wrongMethodResponse: "method-not-allowed",
 } satisfies DeclarativeRoute<WorkerRouteContext>;
 
+const voiceControlRoute = {
+  authorizeBeforeMethod: true,
+  authorization: "vercel-oidc",
+  beforeMethod(context, params) {
+    return requireBoundInternalRouteUser(context, params, "voice-control");
+  },
+  async handle(context, params) {
+    const body = await readCachedRequestText(context, { limitBytes: 72 * 1024 });
+    let command;
+    try { command = parseHostedVoiceControlRequest(JSON.parse(body)); }
+    catch { return json({ error: "Invalid voice command." }, 400); }
+    return json(await controlPostgresRuntimeVoice(context.env, decodeRouteParam(params.userId), command));
+  },
+  match: (pathname) => matchCloudflareHostedControlUserRoutePath("voiceControl", pathname),
+  methods: [CLOUDFLARE_HOSTED_CONTROL_USER_ROUTE_SPECS.voiceControl.method],
+  name: "voice-control",
+  wrongMethodResponse: "method-not-allowed",
+} satisfies DeclarativeRoute<WorkerRouteContext>;
+
 const runtimeHealthDataConsentRoute = {
   authorizeBeforeMethod: true,
   authorization: "vercel-oidc",
@@ -117,6 +137,7 @@ const userStatusRoute = {
 } satisfies DeclarativeRoute<WorkerRouteContext>;
 
 export const runtimeProcessingRoutes = [
+  voiceControlRoute,
   runtimeEnsureProcessingRoute,
   runtimeHealthDataConsentRoute,
 ] as const;
@@ -177,7 +198,7 @@ export async function handleRuntimeEnsureProcessingRoute(
     );
     commandTimeoutMs = readRuntimeEnsureProcessingCommandTimeoutMs(context.request.headers);
     const authorizationKind = readPresentedWorkerRouteAuthorization(context.request);
-    if (ensureRequest.admission && authorizationKind !== "vercel-oidc") {
+    if ((ensureRequest.admission || ensureRequest.voiceCallId) && authorizationKind !== "vercel-oidc") {
       throw new TypeError("Runtime admission may only be supplied by authenticated Web requests.");
     }
     orchestration = readRuntimeEnsureProcessingOrchestrationDiagnostics(
@@ -205,6 +226,12 @@ export async function handleRuntimeEnsureProcessingRoute(
               reason: "runtime-ensure-processing-direct-completed",
               routeName: "runtime-ensure-processing",
             }, context.request, userId),
+            // Keep these request-local: merged runtime seeds may describe a
+            // competing Temporal wake instead of this direct HTTP request.
+            workerFetchStartedAtEpochMs: context.fetchStartedAtEpochMs ?? null,
+            workerFetchIsFirstRequest: context.fetchIsFirstRequest ?? null,
+            ...context.runtimeControlAuthTiming,
+            cloudflareRouteReceivedAtEpochMs,
             orchestrationAttemptId: ensureRequest.orchestrationAttemptId,
             ...(result.kind === "runtime_processing_accepted"
               ? {
@@ -333,12 +360,17 @@ async function runRuntimeEnsureProcessingForUser(input: {
   try {
     postgres = await ensurePostgresRuntimeProcessing(input.context.env, command, diagnostics);
   } finally {
-    // Snapshot before detaching so telemetry cannot extend the command budget.
-    const entry = buildRuntimeProcessingSummaryEntry(diagnostics, postgres, input.commandStartedAtEpochMs);
-    const telemetry = Promise.resolve().then(() => recordRuntimeProcessingSummary({
-      env: input.context.environment, entry, orchestrationAttemptId: command.orchestrationAttemptId, userId: input.userId,
-    })).catch(() => undefined);
-    try { input.context.executionCtx?.waitUntil(telemetry); } catch { /* Rejection is already owned. */ }
+    if (postgres?.kind !== "runtime_processing_accepted" || postgres.action !== "woken"
+      || Date.now() - input.commandStartedAtEpochMs > 1_000) {
+      // Fast wakes stay quiet; successful slow wakes still need their native
+      // dispatch/handler timings to explain foreground latency.
+      // Snapshot before detaching so telemetry cannot extend the command budget.
+      const entry = buildRuntimeProcessingSummaryEntry(diagnostics, postgres, input.commandStartedAtEpochMs);
+      const telemetry = Promise.resolve().then(() => recordRuntimeProcessingSummary({
+        env: input.context.environment, entry, orchestrationAttemptId: command.orchestrationAttemptId, userId: input.userId,
+      })).catch(() => undefined);
+      try { input.context.executionCtx?.waitUntil(telemetry); } catch { /* Rejection is already owned. */ }
+    }
   }
   return postgres;
 }

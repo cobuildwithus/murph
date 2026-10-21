@@ -793,14 +793,13 @@ describe("hosted execution coverage gaps", () => {
 
     const exportKeys = Object.keys(packageJson.exports ?? {}).sort();
 
-    expect(packageJson.dependencies?.zod).toBe("^4.4.3");
+    expect(packageJson.dependencies?.zod).toBe("^4.5.4");
     expect(packageJson.devDependencies?.zod).toBeUndefined();
     expect(exportKeys).toEqual([
       ".",
       "./action-approval",
       "./assistant-capabilities",
       "./assistant-identifiers",
-      "./assistant-inference",
       "./assistant-model",
       "./assistant-permissions",
       "./assistant-personalization",
@@ -810,17 +809,22 @@ describe("hosted execution coverage gaps", () => {
       "./bundles",
       "./clinical-records",
       "./clinical-records-boundary",
+      "./codex-behavior",
+      "./companion-presence",
       "./computer-use",
       "./connected-apps",
       "./contracts",
+      "./conversation-polls",
       "./dashboard-replica",
       "./env",
       "./hosted-codex-subscription-auth",
       "./hosted-email",
       "./labs",
       "./legacy-dashboard-replica",
+      "./observability",
       "./orchestration-control",
       "./parsers",
+      "./parsers/mailbox",
       "./pending-group-setup",
       "./phone-calls",
       "./physical-notes",
@@ -837,15 +841,13 @@ describe("hosted execution coverage gaps", () => {
       "./storage-paths",
       "./subscription",
       "./temporal-env",
+      "./usage-diagnostics",
       "./vault-share",
+      "./voice-control",
+      "./wearable-haptics",
       "./workspace-snapshot-store",
       "./workspace-snapshot-v2",
     ]);
-    expect(
-      exportKeys.filter(
-        (key) => key.startsWith("./") && key.slice(2).includes("/"),
-      ),
-    ).toEqual([]);
     expect(exportKeys).not.toContain("./dispatch-ref");
     expect(exportKeys).not.toContain("./client");
     expect(exportKeys).not.toContain("./outbox-payload");
@@ -896,8 +898,10 @@ describe("hosted execution coverage gaps", () => {
       false,
     );
     expect(assistantModelModule.HOSTED_ASSISTANT_PRODUCT_MODELS).toEqual([
+      "gpt-6.1-sol",
+      "gpt-6-sol",
+      "gpt-6-luna",
       "gpt-5.6-luna",
-      "gpt-5.6-terra",
       "gpt-5.6-sol",
       "gpt-6-astra",
     ]);
@@ -1031,6 +1035,7 @@ describe("hosted execution coverage gaps", () => {
       "HOSTED_RUNTIME_MAILBOX_FETCH_PATH",
       "HOSTED_RUNTIME_MAILBOX_PAYLOAD_FETCH_PATH",
       "HOSTED_RUNTIME_MEMBER_ACTION_OUTCOME_PATH",
+      "HOSTED_RUNTIME_MEMBER_NOTIFICATION_ROUTE_PATH",
       "HOSTED_RUNTIME_OPERATOR_TASK_CONTROL_PATH",
       "HOSTED_RUNTIME_OUTBOUND_MESSAGE_VOLUME_RECEIPT_PATH",
       "HOSTED_RUNTIME_OWNER_RELEASED_PATH",
@@ -1038,15 +1043,19 @@ describe("hosted execution coverage gaps", () => {
       "HOSTED_RUNTIME_OWNER_RELEASE_IMMEDIATE_RECHECK_QUERY",
       "HOSTED_RUNTIME_PHONE_CALL_RESULT_DELIVERY_PATH",
       "HOSTED_RUNTIME_PLAN_USAGE_TOOL_PATH",
+      "HOSTED_RUNTIME_POLL_TOOL_PATH",
       "HOSTED_RUNTIME_PRODUCT_FEEDBACK_RECORD_PATH",
       "HOSTED_RUNTIME_STATUS_PATH",
       "HOSTED_RUNTIME_SUBSCRIPTION_TOOL_PATH",
       "HOSTED_RUNTIME_THREAD_ROUTE_AUTHORITY_PATH",
+      "HOSTED_RUNTIME_USAGE_DIAGNOSTICS_PATH",
+      "HOSTED_RUNTIME_USAGE_FEEDBACK_RECORD_PATH",
       "HOSTED_RUNTIME_USAGE_RECORD_PATH",
       "HOSTED_RUNTIME_VAULT_SHARE_ACTIVE_KINDS_PATH",
       "HOSTED_RUNTIME_VAULT_SHARE_DELIVER_CONTINUATION_FIELD",
       "HOSTED_RUNTIME_VAULT_SHARE_DELIVER_CONTINUATION_MAX_LENGTH",
       "HOSTED_RUNTIME_VAULT_SHARE_DELIVER_PATH",
+      "HOSTED_RUNTIME_VOICE_INPUT_PATH",
       "HOSTED_RUNTIME_WORKSPACE_CHECKPOINT_PATH",
       "HOSTED_RUNTIME_WORKSPACE_PATH",
       "buildHostedRuntimeOwnerReleaseSearch",

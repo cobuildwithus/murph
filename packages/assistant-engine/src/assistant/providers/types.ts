@@ -121,7 +121,7 @@ export interface AssistantProviderFinishWithoutReplyAcceptedEvent {
  * never enter `CodexThreadIdentity`/route fingerprints or persisted session
  * target config, because tier changes must not fork thread continuity.
  */
-export type AssistantProviderServiceTier = 'flex'
+export type AssistantProviderServiceTier = 'flex' | 'priority'
 
 export interface AssistantProviderDynamicTool {
   readonly deferLoading?: boolean
@@ -253,6 +253,17 @@ export type AssistantProviderRequestOutcome =
   | 'partial'
   | 'succeeded'
 
+/**
+ * `observed` carries a same-process `performance.now()` reading. `unavailable`
+ * means no completion notification arrived; `superseded` means later provider
+ * activity followed the last one, or the selected response came from an
+ * earlier sampling. Neither may be replaced by another boundary.
+ */
+export type AssistantProviderFinalResponseCompletion =
+  | { kind: 'observed'; observedAtMonotonicMs: number }
+  | { kind: 'superseded' }
+  | { kind: 'unavailable' }
+
 export type AssistantNoReplyDisposition = {
   kind: 'none'
 }
@@ -264,6 +275,8 @@ export interface AssistantTargetedMessageReactionAction {
 }
 
 export interface AssistantProviderTurnExecutionResult {
+  /** A confined routing leaf completed without starting or resuming the root thread. */
+  providerThreadUnchanged?: true
   codexRolloutRelativePath?: string | null
   additionalUsages?: readonly AssistantProviderUsageDraft[] | null
   provider: AssistantChatProvider
@@ -275,6 +288,11 @@ export interface AssistantProviderTurnExecutionResult {
   response: string
   /** Final provider-authored text before runtime-owned presentation transforms. */
   providerAuthoredResponse?: string | null
+  /**
+   * Murph-local receipt of the provider's final per-response completion for
+   * this result. Absent when the provider cannot report it.
+   */
+  finalResponseCompletion?: AssistantProviderFinalResponseCompletion
   /** Capability-free semantic response persisted into model-visible history. */
   transcriptResponse: string | null
   // Completed final answers that were followed by a steered user message and

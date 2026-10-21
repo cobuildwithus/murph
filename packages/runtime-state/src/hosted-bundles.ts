@@ -1956,8 +1956,6 @@ async function collectHostedWorkspaceRootArchiveEntries(input: {
 
   async function visit(currentPath: string): Promise<void> {
     assertHostedWorkspaceSnapshotArchivePlanLive(input.signal);
-    const stats = await lstat(currentPath);
-    assertHostedWorkspaceSnapshotArchivePlanLive(input.signal);
     const relativePath = normalizeWorkspaceSnapshotRelativePath(
       path.relative(rootPath, currentPath).split(path.sep).join(path.posix.sep),
     );
@@ -1972,6 +1970,19 @@ async function collectHostedWorkspaceRootArchiveEntries(input: {
     if (relativePath.length > 0 && !policyIncluded && !explicitIncluded && !explicitDescendant) {
       return;
     }
+    let stats;
+    try {
+      stats = await lstat(currentPath);
+    } catch (error) {
+      assertHostedWorkspaceSnapshotArchivePlanLive(input.signal);
+      // An uninitialized root is optional; a vanished descendant invalidates
+      // the inventory and must never publish a partial replacement snapshot.
+      if (currentPath === rootPath && isMissingPathError(error)) {
+        return;
+      }
+      throw error;
+    }
+    assertHostedWorkspaceSnapshotArchivePlanLive(input.signal);
     if (stats.isSymbolicLink()) {
       throw new Error("Hosted workspace snapshot durable root contains symlinks.");
     }
@@ -2012,22 +2023,9 @@ async function collectHostedWorkspaceRootArchiveEntries(input: {
       });
     }
 
-    if (relativePath.length > 0 && !policyIncluded && !explicitDescendant) {
-      return;
-    }
-
-    let children;
-    try {
-      assertHostedWorkspaceSnapshotArchivePlanLive(input.signal);
-      children = await readdir(currentPath);
-      assertHostedWorkspaceSnapshotArchivePlanLive(input.signal);
-    } catch (error) {
-      assertHostedWorkspaceSnapshotArchivePlanLive(input.signal);
-      if (isMissingPathError(error)) {
-        return;
-      }
-      throw error;
-    }
+    assertHostedWorkspaceSnapshotArchivePlanLive(input.signal);
+    const children = await readdir(currentPath);
+    assertHostedWorkspaceSnapshotArchivePlanLive(input.signal);
     for (const child of children.sort((left, right) => left.localeCompare(right))) {
       assertHostedWorkspaceSnapshotArchivePlanLive(input.signal);
       await visit(path.join(currentPath, child));
@@ -2036,15 +2034,9 @@ async function collectHostedWorkspaceRootArchiveEntries(input: {
   }
 
   try {
-    assertHostedWorkspaceSnapshotArchivePlanLive(input.signal);
     await visit(rootPath);
+  } finally {
     assertHostedWorkspaceSnapshotArchivePlanLive(input.signal);
-  } catch (error) {
-    assertHostedWorkspaceSnapshotArchivePlanLive(input.signal);
-    if (isMissingPathError(error)) {
-      return;
-    }
-    throw error;
   }
 }
 

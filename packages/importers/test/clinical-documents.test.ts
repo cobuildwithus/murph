@@ -39,6 +39,15 @@ function snapshot(resource: object, documents: Array<{ bytes: Buffer; mediaType:
   };
 }
 
+it("keeps versioned parent prose unchanged while exposing RTF to background extraction", () => {
+  const bytes = Buffer.from(String.raw`{\rtf1 Explicit source finding.}`);
+  const resource = { ...baseResource, content: [{ attachment: { contentType: "application/rtf", url: "Binary/rtf" } }] };
+  const plan = buildClinicalImportPlanFromSnapshot(snapshot(resource, [{ bytes, mediaType: "application/rtf", attachmentIndex: 0 }]));
+  expect(readClinicalAttachmentText(bytes, "application/rtf")).toBe("Explicit source finding.");
+  expect(JSON.stringify(plan.decisions)).not.toContain("Explicit source finding.");
+  expect(plan.decisions[0]).toMatchObject({ action: "upsert", payload: { kind: "note" } });
+});
+
 describe("clinical document bodies", () => {
   it.each(["DocumentReference", "DiagnosticReport"])("records a scanned %s revision, retires older extraction, and materializes same-revision text", async (resourceType) => {
     const resource = resourceType === "DocumentReference"

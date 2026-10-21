@@ -45,6 +45,7 @@ import {
   type HostedLocalAssistantProviderScriptedResponse,
 } from "./helpers/hosted-local-e2e-support.js";
 import {
+  rethrowHostedLocalProviderCountFailure,
   startHostedLocalFullStackScenario,
   type HostedLocalFullStackScenario,
 } from "./helpers/hosted-local-full-stack-scenario.js";
@@ -97,7 +98,7 @@ const directRetryRecoveryReplyText =
 const richLinkLostAckUrl = "https://example.test/continue/lost-ack";
 const richLinkRetryRecoveryUrl = "https://example.test/continue/recovered";
 const richLinkFallbackUrl = "https://example.test/continue/fallback";
-const productionLikeAssistantModel = "gpt-5.6-terra";
+const productionLikeAssistantModel = "gpt-6.1-sol";
 const localRunnerIdleTtlMs = "300000";
 const runRealInstantFirstTurn =
   process.env.MURPH_RUN_REAL_LINQ_FIRST_TURN_E2E === "1";
@@ -808,6 +809,7 @@ productionDescribe("hosted local Linq first-contact e2e", () => {
     const chatId = `chat_local_linq_link_retry_recovery_${Date.now()}`;
     const replyPath = `/chats/${encodeURIComponent(chatId)}/messages`;
     const primaryText = "Continue after confirmation:";
+    const promptMarker = "Give me the recovery link";
     const eventId = `evt_linq_link_retry_recovery_${richLinkRetryRecoveryUserId}`;
     await requireScenario().seedActiveHostedLinqMember({
       homePhone: buildLinqHomePhoneNumber(richLinkRetryRecoveryUserId),
@@ -849,7 +851,7 @@ productionDescribe("hosted local Linq first-contact e2e", () => {
     requireScenario().queueAssistantResponses([
       `${primaryText}\n${richLinkRetryRecoveryUrl}`,
     ], {
-      matchInputContains: "Give me the recovery link",
+      matchInputContains: promptMarker,
     });
 
     const response = await postSignedLinqWebhook(buildHostedLinqInboundEvent(
@@ -904,7 +906,16 @@ productionDescribe("hosted local Linq first-contact e2e", () => {
     );
     expect(completed.lastErrorCode ?? null).toBeNull();
     expect(completed.mailboxLag.every((lane) => lane.lag === "0")).toBe(true);
-    expect(countAssistantProviderResponsesApiRequests()).toBe(providerBaseline + 1);
+    try {
+      expect(countAssistantProviderResponsesApiRequests()).toBe(providerBaseline + 1);
+    } catch (error) {
+      await rethrowHostedLocalProviderCountFailure(error, {
+        scenario: requireScenario(),
+        userId: richLinkRetryRecoveryUserId,
+        providerBaseline,
+        promptMarker,
+      });
+    }
     expect(requireLinqStub().countAcceptedSends(replyPath, primaryMatcher)).toBe(
       primaryBaseline + 1,
     );
@@ -925,7 +936,16 @@ productionDescribe("hosted local Linq first-contact e2e", () => {
     });
     expect(lateEnsure.kind).toBe("runtime_processing_accepted");
     await requireScenario().waitForHostedIdle(richLinkRetryRecoveryUserId);
-    expect(countAssistantProviderResponsesApiRequests()).toBe(providerBaseline + 1);
+    try {
+      expect(countAssistantProviderResponsesApiRequests()).toBe(providerBaseline + 1);
+    } catch (error) {
+      await rethrowHostedLocalProviderCountFailure(error, {
+        scenario: requireScenario(),
+        userId: richLinkRetryRecoveryUserId,
+        providerBaseline,
+        promptMarker,
+      });
+    }
     expect(requireLinqStub().countAcceptedSends(replyPath, primaryMatcher)).toBe(
       primaryBaseline + 1,
     );

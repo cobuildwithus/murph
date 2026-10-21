@@ -13,6 +13,7 @@ import type {
 import {
   HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
   HOSTED_MAILBOX_PAYLOAD_SCHEMA,
+  HOSTED_RETIRED_MAILBOX_KINDS,
 } from "@murphai/hosted-execution/runtime-control";
 
 import {
@@ -23,6 +24,7 @@ import {
   fetchAndProcessHostedMailboxPrefix,
   prefetchHostedMailboxPrefix,
 } from "../src/hosted-runtime/mailbox-import.ts";
+import { hostedMailboxPrefixPrefetchCoversWake } from "../src/hosted-runtime/mailbox-prefetch.ts";
 import type {
   HostedRuntimeMailboxPort,
 } from "../src/hosted-runtime-contracts.ts";
@@ -161,18 +163,18 @@ describe("hosted mailbox import loop", () => {
     ]);
   });
 
-  test("skips a retired newsletter row and continues with later system work", async () => {
+  test.each(HOSTED_RETIRED_MAILBOX_KINDS)("skips a retired %s row and continues with later system work", async (kind) => {
     const items = [
       createMailboxItem({
-        id: "mailbox_item_retired_newsletter",
-        kind: "group-newsletter.email-needed",
+        id: "mailbox_item_retired",
+        kind,
         lane: "system",
         laneSeq: "1",
         payloadInlineCiphertext: null,
-        payloadRef: "hosted-mailbox-payload:mailbox_item_retired_newsletter",
+        payloadRef: "hosted-mailbox-payload:mailbox_item_retired",
       }),
       createMailboxItem({
-        id: "mailbox_item_system_after_retired_newsletter",
+        id: "mailbox_item_system_after_retired",
         kind: "member.activated",
         lane: "system",
         laneSeq: "2",
@@ -191,21 +193,21 @@ describe("hosted mailbox import loop", () => {
       limitPerLane: 10,
       mailboxPort,
       now: () => TEST_NOW,
-      requestId: "request_skip_retired_newsletter",
+      requestId: "request_skip_retired",
       state: createEmptyHostedMailboxImportState(),
     });
 
     assert.deepEqual(payloadFetchRequests, []);
-    assert.deepEqual(imported, ["mailbox_item_system_after_retired_newsletter"]);
+    assert.deepEqual(imported, ["mailbox_item_system_after_retired"]);
     assert.deepEqual(result.blocked, []);
     assert.equal(result.importedCount, 1);
     assert.equal(result.state.watermarks.system, "2");
     assert.deepEqual(result.state.recentStatuses, [
       {
-        itemKind: "group-newsletter.email-needed",
+        itemKind: kind,
         lane: "system",
         occurredAt: TEST_NOW,
-        reasonCode: "legacy_group_newsletter_email_needed.retired",
+        reasonCode: "mailbox.kind_retired",
         seq: "1",
         status: "skipped",
       },
@@ -293,6 +295,54 @@ describe("hosted mailbox import loop", () => {
     assert.equal(systemResult.state.watermarks.system, "1");
   });
 
+  test("covered wake reuse preserves bounded prefix cursors and backlog continuation", async () => {
+    const state = createEmptyHostedMailboxImportState();
+    const { fetchRequests, mailboxPort } = createMailboxPort({
+      items: [1, 2, 3].map((seq) => createMailboxItem({
+        id: `mailbox_bounded_${seq}`, laneSeq: String(seq),
+      })),
+    });
+    const fetch = mailboxPort.fetch.bind(mailboxPort);
+    mailboxPort.fetch = async (request, context) => {
+      const response = await fetch(request, context);
+      return { ...response, items: response.items.slice(0, request.limitPerLane) };
+    };
+    const prefetch = prefetchHostedMailboxPrefix({
+      lanes: ["conversation", "system"], limitPerLane: 1, mailboxPort,
+      requestId: "bounded_prefetch", state,
+    });
+    assert.equal(await hostedMailboxPrefixPrefetchCoversWake(prefetch, {
+      conversation: "3", system: "0",
+    }), true);
+    const imported: string[] = [];
+    const result = await fetchAndProcessHostedMailboxPrefix({
+      expectedUserId: TEST_USER_ID,
+      async importItem(input) { imported.push(input.item.laneSeq); return { status: "imported" }; },
+      lanes: ["conversation"], limitPerLane: 1, mailboxPort, now: () => TEST_NOW,
+      prefetch, requestId: "bounded_import", state,
+    });
+    assert.deepEqual(imported, ["1"]);
+    assert.equal(result.state.watermarks.conversation, "1");
+    assert.equal(result.state.watermarks.system, "0");
+    assert.equal(result.nextRetryAt, TEST_NOW);
+    assert.equal(fetchRequests.length, 1);
+  });
+
+  test("coverage selection propagates an aborted speculative fetch", async () => {
+    const controller = new AbortController();
+    const aborted = new Error("Synthetic speculative fetch aborted.");
+    const { mailboxPort } = createMailboxPort({ items: [] });
+    mailboxPort.fetch = async () => { throw aborted; };
+    controller.abort(aborted);
+    const prefetch = prefetchHostedMailboxPrefix({
+      limitPerLane: 1, mailboxPort, requestId: "aborted_prefetch", signal: controller.signal,
+      state: createEmptyHostedMailboxImportState(),
+    });
+    await assert.rejects(hostedMailboxPrefixPrefetchCoversWake(prefetch, {
+      conversation: "0", system: "0",
+    }), (error) => error === aborted);
+  });
+
   test("falls back independently by lane when the mixed prefetch rejects", async () => {
     const state = createEmptyHostedMailboxImportState();
     const fetchRequests: HostedMailboxFetchRequest[] = [];
@@ -312,7 +362,6 @@ describe("hosted mailbox import loop", () => {
             });
         return {
           consumedSeqByLane: [{ consumedSeq: "0", lane }],
-          assistantProvider: "openai",
           fetchedAt: TEST_NOW,
           items: [item],
           maxSeqByLane: [{ lane, maxSeq: "1" }],
@@ -694,7 +743,6 @@ describe("hosted mailbox import loop", () => {
               lane: "conversation",
             },
           ],
-          assistantProvider: "openai",
           fetchedAt: TEST_NOW,
           items: [nextItem],
           maxSeqByLane: [
@@ -780,7 +828,6 @@ describe("hosted mailbox import loop", () => {
               lane: "conversation",
             },
           ],
-          assistantProvider: "openai",
           fetchedAt: TEST_NOW,
           items: [item],
           maxSeqByLane: [
@@ -846,7 +893,6 @@ describe("hosted mailbox import loop", () => {
               lane: "conversation",
             },
           ],
-          assistantProvider: "openai",
           fetchedAt: TEST_NOW,
           items: [item],
           maxSeqByLane: [
@@ -963,7 +1009,6 @@ describe("hosted mailbox import loop", () => {
               lane: "conversation",
             },
           ],
-          assistantProvider: "openai",
           fetchedAt: TEST_NOW,
           items: [replayStart, replayNext, freshItem],
           maxSeqByLane: [
@@ -1165,7 +1210,6 @@ describe("hosted mailbox import loop", () => {
               lane: "conversation",
             },
           ],
-          assistantProvider: "openai",
           fetchedAt: TEST_NOW,
           items: [retainedStart, retainedNext],
           maxSeqByLane: [
@@ -1233,7 +1277,6 @@ describe("hosted mailbox import loop", () => {
               lane: "conversation",
             },
           ],
-          assistantProvider: "openai",
           fetchedAt: TEST_NOW,
           items: [freshItem],
           maxSeqByLane: [
@@ -1286,7 +1329,6 @@ describe("hosted mailbox import loop", () => {
       async fetch(request): Promise<HostedMailboxFetchResponse> {
         fetchRequests.push(request);
         return {
-          assistantProvider: "openai",
           fetchedAt: TEST_NOW,
           items: [item],
           maxSeqByLane: [
@@ -1362,7 +1404,6 @@ describe("hosted mailbox import loop", () => {
               lane: "conversation",
             },
           ],
-          assistantProvider: "openai",
           fetchedAt: TEST_NOW,
           items: [staleReplay, freshTail],
           maxSeqByLane: [
@@ -1426,7 +1467,6 @@ describe("hosted mailbox import loop", () => {
               lane: "conversation",
             },
           ],
-          assistantProvider: "openai",
           fetchedAt: TEST_NOW,
           items: [
             createMailboxItem({
@@ -2303,7 +2343,6 @@ function createMailboxPort(input: {
           ...(input.groupRunningBit === undefined
             ? {}
             : { groupRunningBit: input.groupRunningBit }),
-          assistantProvider: "openai",
           fetchedAt: TEST_NOW,
           items: input.items.filter((item) =>
             request.lanes.some((lane) =>
@@ -2366,3 +2405,71 @@ function createMailboxPayload(overrides: Partial<HostedMailboxPayload> = {}): Ho
     ...overrides,
   };
 }
+
+describe("hosted mailbox import pass read timing", () => {
+  function withReadTimings(
+    mailboxPort: HostedRuntimeMailboxPort,
+    reads: Array<"fail" | Record<string, number>>,
+  ): HostedRuntimeMailboxPort {
+    let call = 0;
+    return {
+      ...mailboxPort,
+      async fetch(request, context) {
+        const next = reads[call++];
+        if (next === "fail") throw new Error("synthetic prefetch failure");
+        const response = await mailboxPort.fetch(request, context);
+        return next ? { ...response, transportTiming: next } : response;
+      },
+    };
+  }
+  const importItem = async () => ({ status: "imported" as const });
+
+  test("each pass records the timing of the read it imported, never an earlier pass's", async () => {
+    const state = createEmptyHostedMailboxImportState();
+    const { mailboxPort: base } = createMailboxPort({ items: [createMailboxItem({ laneSeq: "1" })] });
+    const mailboxPort = withReadTimings(base, [
+      { passMailboxFetchResponseWaitMs: 11, passMailboxFetchAttemptCount: 1 },
+      { passMailboxFetchResponseWaitMs: 333, passMailboxFetchAttemptCount: 1 },
+    ]);
+    const prefetch = prefetchHostedMailboxPrefix({
+      lanes: ["conversation"], limitPerLane: 10, mailboxPort, requestId: "synthetic_wake_1", state,
+    });
+    const first = await fetchAndProcessHostedMailboxPrefix({
+      expectedUserId: TEST_USER_ID, importItem, lanes: ["conversation"], limitPerLane: 10,
+      mailboxPort, now: () => TEST_NOW, prefetch, requestId: "synthetic_pass_1", state,
+    });
+    const second = await fetchAndProcessHostedMailboxPrefix({
+      expectedUserId: TEST_USER_ID, importItem, lanes: ["conversation"], limitPerLane: 10,
+      mailboxPort, now: () => TEST_NOW, requestId: "synthetic_pass_2", state: first.state,
+    });
+    assert.deepEqual(first.fetchTransportTiming,
+      { passMailboxFetchResponseWaitMs: 11, passMailboxFetchAttemptCount: 1 });
+    assert.deepEqual(second.fetchTransportTiming,
+      { passMailboxFetchResponseWaitMs: 333, passMailboxFetchAttemptCount: 1 });
+  });
+
+  test("a failed prefetch is replaced by the refetch's own timing", async () => {
+    const state = createEmptyHostedMailboxImportState();
+    const { fetchRequests, mailboxPort: base } = createMailboxPort({ items: [createMailboxItem({ laneSeq: "1" })] });
+    const mailboxPort = withReadTimings(base, ["fail", { passMailboxFetchResponseWaitMs: 77 }]);
+    const prefetch = prefetchHostedMailboxPrefix({
+      lanes: ["conversation"], limitPerLane: 10, mailboxPort, requestId: "synthetic_wake", state,
+    });
+    const result = await fetchAndProcessHostedMailboxPrefix({
+      expectedUserId: TEST_USER_ID, importItem, lanes: ["conversation"], limitPerLane: 10,
+      mailboxPort, now: () => TEST_NOW, prefetch, requestId: "synthetic_pass", state,
+    });
+    assert.equal(fetchRequests.length, 1);
+    assert.deepEqual(result.fetchTransportTiming, { passMailboxFetchResponseWaitMs: 77 });
+  });
+
+  test("omits pass read timing when the read carries none", async () => {
+    const { mailboxPort } = createMailboxPort({ items: [createMailboxItem({ laneSeq: "1" })] });
+    const result = await fetchAndProcessHostedMailboxPrefix({
+      expectedUserId: TEST_USER_ID, importItem, lanes: ["conversation"], limitPerLane: 10,
+      mailboxPort, now: () => TEST_NOW, requestId: "synthetic_pass",
+      state: createEmptyHostedMailboxImportState(),
+    });
+    assert.equal(result.fetchTransportTiming, undefined);
+  });
+});

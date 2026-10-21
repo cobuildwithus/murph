@@ -25,73 +25,81 @@ to apply after cutover.
   write per message (at most ten, sequentially), within the existing database-only
   transaction. No historical repair or provider request is added.
 
-- Runtime-owned Linq iMessages with code `4001` and the exact terminal
-  reason `Message send failed` may resend each failed provider message once.
-  The existing delivery-message row owns the permanent attempt timestamp and
-  original lookup key; a parent delivery lock serializes competing claims.
-  Terminal receipt ingestion and runtime acceptance first serialize their
-  transactions by a stable hashed provider-message identity. Replacement
-  acceptance uses the same lock before the parent lock. Acceptance takes at
-  most ten message locks in sorted order; signup-welcome callbacks take them
-  before route/member materialization. This prevents concurrent transactions
-  from each missing the other's uncommitted receipt or accepted identity.
-  Legacy parent-only receipt writes take the parent lock, recheck promoted
-  message ownership and fence the active key before mutating the parent.
-  Acceptance replaces the existing active message key (and matching parent
-  scalar key), preserving the established receipt-reader contract. Receipt
-  updates recheck that active key after acquiring the parent lock.
-  Duplicate webhooks, callback replay, and a failed or transport-ambiguous
-  replacement never create another attempt. The original failure remains
-  observable, while replacement receipts advance the same logical delivery;
-  receipts for a replaced original cannot regress it. Group multi-message
-  delivery retries only the failed part and preserves no-receipt status.
-  Recovery runs after failure ingestion and after runtime acceptance to cover
-  both receipt/acceptance arrival orders. It is limited to deliveries accepted
-  within 24 hours and current configured sender, route, account access, and
-  line/chat egress policy. Read the exact failed outbound through the official
-  SDK (three-second limit). When retrieved actual service is null or omitted,
-  only the matching terminal failed receipt's exact `iMessage` service may
-  supply transport evidence: the matching child, or the legacy scalar only
-  when there are no children. Never borrow a sibling or multipart parent
-  projection. Recheck this evidence under the existing parent claim lock.
-  Explicit non-iMessage/unknown retrieved service and contradictory/unknown
-  preferred service stay closed. Then claim in a short database-only transaction
-  and resend once (five-second limit, SDK retries disabled) into that same
-  chat with explicit `preferred_service: iMessage` and a stable retry idempotency
-  key. Retrieved content stays in memory.
-  Text, native links, and non-audio attachments preserve their send shape;
-  voice memos, app cards, absent/expired content, and other non-reconstructible
-  formats retain the original failure instead of changing their semantics.
-  Web-owned onboarding sends and manual/provider-only sends retain their
-  existing recovery owners. Other `4001` reasons and `4006` remain excluded
-  because they can still deliver late. Scheduling failure cannot invalidate an
-  accepted runtime handoff. An unavailable provider response or interrupted
-  post-dispatch recording may leave failure evidence unresolved; the consumed
-  claim deliberately prevents a further resend.
-  Web structured logs use `hosted-onboarding.linq.terminal-retry` for every
-  failed-event evaluation and exceptional acceptance reconciliation. They
-  report the trigger, stage, finite outcome/reason, elapsed time, event suffix,
-  message correlation digest and whether this evaluation consumed the permanent
-  claim. When available, `providerServiceClass`, `providerPreferredServiceClass`,
-  and `receiptServiceClass` report only `omitted`, `null`, `imessage`, `sms`,
-  `rcs`, or `unknown`; receipt classification uses the candidate evaluated at
-  the latest checkpoint. These distinguish absent actual transport from an
-  explicit provider value without retaining raw strings or adding log events.
-  Provider failures expose only bounded HTTP status and a closed error class;
-  bodies, attachment URLs, sender/chat identities and provider prose stay out.
-  Normal successful acceptance checks stay quiet. An accepted replacement is
-  explicitly delivery-unconfirmed; canonical delivery/message receipts prove
-  recovery. Logging failure cannot change the send or release its claim.
-  The post-response acceptance check performs one exact delivery lookup
-  per provider ID (at most ten, sequentially), with no provider work on normal
-  success. Recovery reads at most eleven child rows to reject an oversized
-  delivery, reuses bounded canonical access reads, and opens at most one
-  transaction/connection per invocation at a time. Network calls occur between
-  the claim and acceptance transactions; there is no collection worker,
-  scheduler, or new retry queue.
-  Apply the additive delivery-message migration before deploying the new Web
-  reader/writer. Existing Web readers continue using the active message key;
-  the new nullable fields do not require a Cloudflare runtime deployment.
+- Runtime-owned Linq replies with code `4001` and the exact reason
+  `Message send failed` can make at most four replacement sends within three
+  minutes of original acceptance (five total sends). Each replacement needs its
+  own definitive failed receipt; acceptance alone never proves delivery.
+  Other `4001` reasons, `4006`, missing receipts, and ambiguous dispatch remain
+  closed because they may deliver late. Existing first-delivery evidence also
+  denies a resend, even if a newer receipt reports failure.
+  The existing delivery-message row owns count, immutable expiry, persisted due
+  time, exact claimed message key, encrypted recovery context, and up to four
+  blinded previous-message keys. Delays are 10/20/40/80 seconds with 80–100%
+  jitter, measured after the failure is observed. A remaining-time check reserves
+  the bounded GET/send budget. Expiry may prevent the full attempt count. This
+  is a new-dispatch deadline anchored to the original recorded acceptance, not
+  a guarantee of final delivery by that instant. A provider may still finish an
+  already-accepted attempt afterward. Provider terminal-failure latency consumes
+  the same window; five total sends is a maximum, never a target that extends it.
+  A pointer-only Web Workflow wakes the row; it does not own send authority.
+  Duplicate starts cannot move the due time or pass the parent-locked count/key
+  claim twice. A durable step retry rechecks the permanent claim, so a crash or
+  timeout after claiming never creates a fresh-key send. There is intentionally
+  no automatic ambiguous-send recovery.
+  Failure webhooks await durable admission before acknowledgement. Runtime
+  acceptance also awaits admission to cover receipt-before-acceptance; normal
+  successful callbacks do bounded database reads without provider work. A
+  failed admission leaves the accepted identity intact and returns retryable
+  failure; runtime accepted-delivery confirmation preserves its existing
+  may-have-succeeded fence. The first admission atomically sets the legacy
+  attempt timestamp, closing old one-shot writers during rollout. Previously
+  consumed legacy attempts without new recovery state remain permanently closed.
+  Existing hashed message receipt locks precede the delivery parent lock when
+  recording acceptance. Exact attempt/key compare-and-set replaces the active
+  child and matching scalar key, appends blinded history, and catches up any
+  receipt that arrived before replacement acceptance. Old receipts map to the
+  same logical delivery but cannot regress the current attempt. Replayed original
+  callbacks cannot reset its active key. Multipart recovery replaces only the
+  failed child and preserves the existing group receipt policy.
+  Every dispatch checks current configured sender, exact route, consent-aware
+  account access, line/chat egress and expiry, before retrieval and again under
+  the parent claim lock. A newer runtime delivery already accepted in the same
+  chat suppresses stale recovery; this is not a provider-level FIFO guarantee
+  against another send already in flight. Provider GET has a three-second limit;
+  POST has a five-second limit and SDK retries disabled. Each claimed attempt
+  uses a deterministic new idempotency key after definitive terminal failure.
+  Linq's send guide says a processed key returns the original response; its
+  [4006 documentation](https://docs.linqapp.com/channel/imessage/error/codes/4xxx/4006/)
+  explicitly says reusing the original key returns the stored failed message
+  without sending. A transport replay of one attempt and a replacement after
+  terminal failure are different operations. Do not change this rule based only
+  on an ambiguous instruction to retry idempotently. The provider's suggestion
+  to retry timeouts after a brief wait does not establish no-delivery certainty;
+  this owner still excludes `4006` and all ambiguous POST outcomes.
+  GET must match message, chat, sender,
+  outbound direction and failed status without delivery/read evidence.
+  Missing actual transport is valid for a definitive no-send. Preserve the
+  retrieved original preference: explicit `iMessage` stays explicit; null or
+  omitted preference remains omitted (the provider's automatic fallback policy).
+  Explicit non-iMessage/unknown actual, receipt or preferred service stays closed.
+  Service evidence belongs to the exact failed child, or the scalar only when
+  no children exist; sibling and parent projections never grant authority.
+  Text, native links and non-audio attachments preserve send semantics. Voice
+  memos, app cards, missing content and unsupported shapes stay failed. Provider
+  content is transient. Only chat/message identities are sealed with the member
+  secure-box codec, bound to the delivery-message row, for pointer wake recovery;
+  they follow delivery-row retention and are unusable past the retry expiry.
+  Workflow errors are sanitized before journaling. Structured diagnostics retain
+  finite classification, hashed correlation, attempt count and outcome, never
+  provider bodies, attachment URLs or raw chat/sender/message identities.
+  Retrieval and sealing are outside short database-only transactions. Reads are
+  exact or chat-indexed and bounded to eleven children (oversize fails closed).
+  No historical sweep or runtime queue is introduced. Apply the additive Web
+  migration before deployment; no runtime deployment or historical resend is
+  required. Workflow/CI validation and rollout remain separate release gates.
+  Provider references: [4001 classification](https://docs.linqapp.com/channel/imessage/error/codes/4xxx/4001/),
+  [protocol selection](https://docs.linqapp.com/channel/imessage/guides/messaging/protocol-selection/),
+  [idempotency](https://docs.linqapp.com/channel/imessage/guides/messaging/sending-messages/#idempotency).
 
 - Keep behavior deterministic and documented as the first modules are added.
 - Prefer explicit failure paths and actionable errors over silent fallback behavior.
@@ -110,7 +118,7 @@ to apply after cutover.
   missing verifier before database authority or SQL, and recovery must roll
   forward to the floor or newer rather than re-running an older base-domain-only
   workflow.
-- The Linq production canary runs from one staggered hourly schedule only after
+- The Linq production canary runs in nine weekly UTC calendar slots only after
   the actual current Vercel alias passes exact deployment verification and
   protected-main ancestry. Manual dispatch remains available for recovery. One
   fixed Photon identity starts a five-turn private iMessage conversation, and
@@ -158,20 +166,41 @@ to apply after cutover.
   and exact `code` matching against `HOSTED_ACCESS_REQUIRED`,
   `HOSTED_MEMBER_SUSPENDED`, and `HOSTED_CONSENT_REQUIRED`. Foreign/lookalike and
   unknown errors, or failures during classification, yield `other`, which narrows
-  no cause and does not imply a database failure. Non-authority exceptions remain
-  completely uninspected. Raw errors, messages, stacks, causes, details,
-  identifiers, refs, keys, payloads and goal contents remain excluded. Existing
-  successful/not-ready paths and their literal stage assignments are unchanged;
-  diagnostic allocation and emission remain failure-only. The
-  four-value reason only refines two of the eleven stages; logging volume stays
-  at most one warning per failed read. Classification or logging failure still
-  yields the unchanged generic 503, with no API or authorization change. For a
-  bounded natural-traffic query, filter the last 24 hours of Web logs by that
-  exact message and return only counts grouped by stage and, at authority stages,
-  the closed reason; do not invoke extra canaries, poll the endpoint, retry, wake
-  or refresh to collect evidence.
-- Protected native iOS and Android hosted E2E controllers run staggered every
-  twelve hours and execute each admitted journey even when the same revision
+  no cause and does not imply a database failure. Only `session_request` adds
+  `sessionRequestFailureReason`: `http`, `timeout`, `abort`, or `other`, plus
+  `httpStatus` only for a helper-recognized HTTP error with a finite numeric own
+  data status. The HTTP helper receives inert code/status data with the caught
+  value's prototype, never its code/status getters or freeform server code.
+  Timeout/abort use the native, brand-checked DOMException code accessor.
+  `TypeError` and `SyntaxError` remain `other`: this boundary includes auth,
+  fetch, JSON parsing and typed validation, so they do not identify a substage.
+  Unknown/hostile values and failed classification yield `other`. Other
+  non-authority stages remain completely uninspected. Raw errors, messages,
+  stacks, causes, details, identifiers, refs, keys, payloads and goal contents
+  remain excluded. The warning remains failure-only, with at most one warning
+  per failed read. Classification or logging failure still yields the unchanged
+  generic 503. For a bounded natural-traffic query, filter the last
+  24 hours of Web logs by that exact message and return only counts grouped by
+  stage and the applicable closed reason (plus finite HTTP status at
+  `session_request`); do not invoke extra canaries, poll the endpoint, retry,
+  wake or refresh to collect evidence.
+  The outcome response's optional timing diagnostics are recent observations,
+  never a proven failed-turn match. Empty and unavailable reads are distinct;
+  multiple rows or truncation are ambiguous. Each observation marks incomplete
+  milestones and age over two minutes separately. Ages use the server sample,
+  and intervals outside zero through ten minutes are omitted, never clamped.
+  Stage denotes the furthest populated boundary; runtime/provider-to-delivery
+  time includes reply preparation. Instant welcome delivery origin bypasses
+  runtime intervals even if its continuation later acquires provider milestones.
+  After a slow or unavailable reply, the existing protected canary runner makes
+  one input-free outcome GET with a three-second request/body deadline, validates
+  its closed diagnostic shape and emits one content-free record. Older Web
+  responses, malformed diagnostics and failed reads retain the original canary
+  failure. Successful journeys emit no new diagnostic records; reply budgets,
+  canonical outcome polling, reset count and sends are unchanged. This read
+  never polls, retries, resets or resends to collect diagnostic evidence.
+- Protected native iOS and Android hosted E2E controllers run in five staggered
+  weekly UTC calendar slots and execute each admitted journey even when the same revision
   previously passed. Provider behavior can change independently of source.
   Manual recovery requires `refs/heads/main` and the exact current `main` SHA
   before protected environment work. Native source pins are committed with
@@ -407,8 +436,8 @@ to apply after cutover.
 - Update architecture and verification docs in the same change that introduces new runtime entrypoints.
 - Avoid hidden coupling between scripts, docs, and runtime code; document new dependencies in `ARCHITECTURE.md` and `agent-docs/references/testing-ci-map.md`.
 - Codex App Server owns managed OpenAI standalone web search. Its exact
-  `POST /v1/alpha/search` request uses the existing signed provider credential
-  and Worker egress owner; a provider rejection remains the current tool
+  `POST /v1/alpha/search` request uses native container authority
+  and the Worker egress owner; a provider rejection remains the current tool
   failure and must not create a Murph-side retry, fallback search provider,
   queue, or durable search state. Unsupported methods, paths, providers, and
   invalid runtime identity fail closed before Worker-owned credential
@@ -425,30 +454,24 @@ to apply after cutover.
   scheduled selection and wake admission both exclude explicit revocation; and
   queued model work rechecks authority before usage is consumed. Renewal is a
   new durable grant, not an implicit cleanup rollback.
-- Venice core inference requires one optional Worker secret. The regular
-  Venice GPT-5.6 Luna/Terra/Sol mapping is code-owned and derived at egress;
-  there are no duplicate model vars that can become partial or mismatched.
-  Web keeps Venice hidden and projects OpenAI until the Worker/runner
-  deployment has been verified. Unsupported paths/models, malformed JSON, and
-  request bodies above 20 MiB
-  fail closed before provider egress. Rollback removes Web exposure first; it
-  does not add a queue, repair pass, provider fallback, or second preference
-  owner. Codex Responses Lite `/responses` requests also receive one explicit
-  prompt-cache breakpoint at the end of their stable leading developer prefix,
-  while retaining Codex's stable cache key and Venice's implicit-cache fallback.
-  Activation requires two sequential, capped requests from one resumed thread
-  through the exact candidate's pinned Codex App Server, not hand-authored
-  ordinary Responses payloads. Candidate proof must join that real Responses
-  Lite envelope to the production Worker transform and show the stable key,
-  restored tools, removed `additional_tools`, and one correctly placed marker.
-  The live second request must report a nonzero cache read and materially fewer
-  cache-write tokens. Otherwise Venice remains hidden and rollback begins at
-  Web exposure.
-- Web selects immutable allowance rates from both the canonical product model
-  and recorded provider. Venice standard usage uses Venice's documented
-  input, cache-read, cache-write, and output rates and records the provider
-  model and pricing source in the snapshot; unknown non-Venice standard
-  provider evidence retains the existing OpenAI-compatible behavior.
+- Hosted core assistant inference uses the existing OpenAI Responses transport.
+  Web prices new usage from the supported OpenAI model rate table and stores an
+  immutable pricing snapshot. Previously settled usage is not repriced.
+- Member usage diagnostics read one authenticated member and at most 31 days
+  from `hosted_ai_usage`, returning bounded model/source groups and expensive
+  turns. Recorded allowance costs remain authoritative; unpriced rows and absent
+  tool profiles are visible coverage gaps. Tool volume uses the latest sanitized
+  profile per returned turn and is measured in bytes, never invented token cost.
+  The weekly optimizer makes bounded version-checked model-only edits and one
+  member/occurrence-idempotent anonymous report; failed feedback cannot prevent
+  cron completion. Only host-authorized, successfully committed weekly audit
+  candidates can schedule feedback without member delivery. They keep the
+  existing post-checkpoint hook active with no delivery or cleanup work; ordinary
+  feedback still requires a sent current-turn delivery. Cancellation or failure
+  before checkpoint prevents the audit callback.
+  Web callback consumers deploy before runtime producers;
+  absent ports or older callback routes return unavailable without retries or
+  an alternate ledger owner.
 - The operator `/ops/usage` collection is bounded independently of lifetime
   member count. The ordinary list reads at most 26 hosted-member primary keys
   to admit a 25-row page. Search instead reads one ID-ordered cap-plus-one
@@ -582,7 +605,12 @@ to apply after cutover.
   of preserving stale authority. Orchestration may delay repeated system-only
   processing for 30 seconds, two minutes, then ten minutes while the progress
   generation and handled-through frontier remain unchanged. Workspace-version,
-  attempt, signal, and selected-wake churn are not progress.
+  attempt, signal, and selected-wake churn are not progress. A Junction resource
+  scan that advances the start of the same finite window also proves progress,
+  including empty dates. The provider reports that strict suffix; the device
+  service credits it only after the owned continuation commits, and the runtime
+  publishes it through the existing checkpoint generation. Unchanged cursors,
+  new work, failed commits, and mere retry rescheduling do not qualify.
   Local system timers use the same execution-class predicate as imported work;
   a missing Web lane sequence changes handled-prefix accounting, never wake
   ownership. Known device reconciliation wakes cannot acquire default-owner
@@ -617,7 +645,7 @@ to apply after cutover.
   starving the other. The durable null snapshot remains an explicit `pending`
   shared-read state until the member runtime materializes it.
 - Direct hosted Codex process projection includes the selected core provider
-  and only that provider's signed egress credential. Changing providers
+  and that provider's SDK credential placeholder. Changing providers
   therefore changes the warm-process launch identity; the replacement process
   cannot inherit the prior provider's endpoint or credential.
 - Explicit remote verification is fail-closed. The dispatcher never retries on
@@ -770,6 +798,11 @@ to apply after cutover.
   children stop without another grace period; future durable wakes can start
   cold. DO reactivation preserves the SDK task, while process replacement does
   not inherit a completed process's watermark.
+  Activity expiry rearms and yields to an active invocation before acquiring the
+  lifecycle lock, which the invocation retains until its response settles.
+  Maintenance must not hold the SDK alarm open behind that long-running work.
+  Destructive cleanup remains locked and rechecks interaction ownership after
+  external reads; scheduling a future check grants no new conversation warmth.
 - The production database-health operator alert is an independent Cloudflare
   singleton so the monitored Postgres database cannot take down its own page
   owner. A five-minute Cron Trigger records one normalized PlanetScale sample
@@ -1493,8 +1526,9 @@ to apply after cutover.
   a local/provider deadline or provider `UNAVAILABLE` result may trigger the
   second attempt, after 100–300 ms of abortable jitter. Encrypt, sign, MAC,
   permission/authentication, quota, input, and integrity failures remain
-  single-attempt and fail closed; the official SDK's broad default retry budget
-  stays disabled. Retry, provider-response, and terminal-failure logs contain
+  single-attempt and fail closed. The REST transport adds no retry loop; known
+  connection failures and HTTP 503/504 without a valid Google status map to
+  the same unavailable/deadline reasons. Google auth retries stay disabled. Retry, provider-response, and terminal-failure logs contain
   only the operation and outcome, normalized provider reason, exact bounded
   auth/RPC stage, attempt and aggregate budget state, per-stage elapsed
   milliseconds, workload-refresh presence, and provider-payload/AAD byte
@@ -1502,6 +1536,12 @@ to apply after cutover.
   not claim decrypt recovery before plaintext and CRC integrity checks pass.
   These logs never contain credentials, resource names, AAD, ciphertext, or
   plaintext.
+- The Web workspace checkpoint route loads the runtime signal owner only inside
+  its existing post-response wake task. Importing the route must not initialize
+  Temporal or KMS solely for an optional recheck. Signal success still precedes
+  acknowledgement, and failed signals leave the durable recheck pending. One
+  value-free log marks the first handler invocation per route module instance,
+  separating startup from callback verification in platform log timelines.
 - Hosted workspace checkpoint session-start and completion failures preserve
   cancellation reasons and extensible `Error` identity while adding allowlisted
   phases for write-fence acquisition, deadline-bound request headers, response
@@ -1513,7 +1553,8 @@ to apply after cutover.
   checkpoint failure record also includes the matching phase and measured
   session-start or completion elapsed milliseconds; a phase timeout is recorded
   only for a deadline-bound request/decode phase. These diagnostics do not
-  increase the handoff deadline or add another checkpoint retry owner.
+  add another checkpoint retry owner. Session start and completion use the
+  configured commit deadline; no snapshot heartbeat controls that deadline.
 - Successful authorized Web device-sync runtime snapshot responses serialize
   once and carry the optional `x-murph-device-sync-snapshot-bytes` diagnostic:
   the UTF-8 byte count of that serialized JSON, before transport encoding. The
@@ -1858,7 +1899,13 @@ to apply after cutover.
   malformed, and unknown reasons are omitted. Finite nonnegative integer counts
   bounded by the ECG sample limit plus one describe expected/actual recordings
   and samples, pages, total groups, provider-matching groups, instance-matching
-  groups, and fully matching groups. Empty collections, unmatched sources, and
+  groups, and fully matching groups. `junctionEcgInstanceMissingGroupCount`
+  counts provider-matching groups rejected because a requested instance had no
+  group instance identity; provider-matching minus instance-matching minus that
+  count gives present-but-unequal identities. Older producers omit it, and
+  absence means unknown, never zero. It stays only if 24-72 hours of natural
+  failures after producer convergence separate those diagnoses; otherwise a
+  later reviewed change removes it. Empty collections, unmatched sources, and
   matched groups without samples have distinct reasons, evaluated after all
   bounded pages. `providerHttpStatusSource=local_validation` distinguishes the
   validator's status from a provider HTTP response. Identifiers, raw errors,
@@ -1873,7 +1920,11 @@ to apply after cutover.
   For Junction resource jobs, blood-oxygen incomplete-normalization failures
   and ECG binding failures retain the existing queued job beyond its initial
   attempt allowance, rechecking after 30 minutes. `validationRetryDelayMs`
-  records that policy. Complete-day and ECG binding validation still fail before
+  records that policy. Each such failure leaves at least the default five-attempt
+  budget from that attempt, so a later retryable transport failure keeps ordinary
+  bounded retries; consecutive non-validation failures consume it and terminalize
+  normally. Warm restart keeps that count, and hosted cold handoff carries it as
+  `maxAttempts`. Complete-day and ECG binding validation still fail before
   canonical replacement. Numeric-zero blood-oxygen samples, including finite
   numeric-string aliases, are unusable and skipped; other invalid values and
   source/day validation still reject. A complete-source-day blood-oxygen response
@@ -1911,6 +1962,15 @@ to apply after cutover.
   clearing remain authoritative; secret filtering and size limits still apply.
   This prevents local metadata eviction from manufacturing a canonical apply
   conflict, without weakening Web's version or historical-progress fences.
+  Workspace-owned device sync receives the base runner's receipt-capacity
+  predicate, not the broader system-mailbox completion predicate. At 63 pending
+  canonical receipts it yields, allowing an already-admitted write to finish.
+  The system owner snapshots to clear receipt pressure and returns the retained
+  device wake. A progressing history import can therefore span many invocations
+  without failed jobs or new mailbox input. Its cooperative yield is labeled
+  `canonical_receipt_capacity`; callers without a specific reason retain the
+  `foreground` default. Outer abort and timeout reasons keep precedence. These
+  diagnostic labels do not change foreground priority or retry ownership.
   Every hosted device-sync lane also enqueues a best-effort
   `device-sync.pass_started` marker before snapshot/provider work and a paired
   `device-sync.pass_finished` marker before returning or rethrowing. Both use
@@ -1920,8 +1980,8 @@ to apply after cutover.
   generation, and workspace version in typed log columns. The terminal marker
   contains only bounded metadata: the last pass stage, outcome, elapsed time,
   processed-job count, checkpoint/retry presence, and a typed yield reason
-  (`foreground`, `timeout`, `invocation_preempted`, `container_destroyed`,
-  `outer_signal`, or `unknown`). It also carries up to 16 slowest claimed-job
+  (`foreground`, `canonical_receipt_capacity`, `timeout`, `invocation_preempted`,
+  `container_destroyed`, `outer_signal`, or `unknown`). It also carries up to 16 slowest claimed-job
   summaries with provider, job kind, code-owned resource class, outcome,
   attempt/job counts, durable-progress presence, total/provider execution time,
   provider time unattributed after subtracting measured callbacks, and measured
@@ -1984,23 +2044,15 @@ to apply after cutover.
   fail-soft to the completed personal import and foreground reply, but they do
   not consume the existing dirty or system-mailbox recording obligation; that
   owner reuses its bounded device-sync continuation before acknowledgement.
-  Active-scope resolution is a side-effect-free network read and receives the
-  owning invocation's abort signal. Once
-  scopes resolve, the runtime materializes all selected records before releasing
-  its restored-vault ownership; a wake during those bounded local reads is
-  observed after capture drains, and the capture is discarded without delivery.
-  Delivery remains owned by the same invocation. Once immutable delivery
-  starts, foreground conversation work may proceed without waiting for
-  publication. The first foreground preemption marks the remaining captured
-  scopes deferred: the current scope reaches a terminal boundary, no later scope
-  starts, and the partial offer reports preempted rather than aggregating its
-  successful prefix as complete. That stop bit belongs only to the active
-  delivery promise; after it settles, a later opportunity starts unpreempted and
-  the existing dirty or recording owner retries every undispatched scope before
-  acknowledgement. The same between-scope predicate observes exact host abort
-  and shutdown before every scope, so those owner-ending conditions drain an
-  active request but never admit a request that has not started. The invocation
-  starts no second projection and does not release its
+  One invocation-owned projection resolves scopes, restores the committed snapshot
+  into private scratch, and captures records in a worker thread. It never reads
+  the live mutable vault. Conversation wakes release the foreground wait without
+  canceling or draining scope lookup, capture, or publication; the task continues
+  across replies. Only one projection may run at a time. Shutdown or exact host
+  abort stops admission, terminates an active capture thread, and drains an active
+  delivery before invocation release. Scratch cleanup follows worker exit. A
+  partial or failed offer leaves the existing dirty or recording obligation
+  replayable; no separate queue or retry owner is added. The invocation retains
   runner ownership until the real proxy-to-Web response is terminal. Web owns a
   finite effect deadline for each delivery, stops admitting destination
   replacements on deadline or request cancellation, and gives the final
@@ -2142,7 +2194,14 @@ to apply after cutover.
   caller-supplied ciphertext, new key owner or cross-request cache is added.
 - Queue-enabled provider webhooks verify once, freeze a versioned prepared
   event, and encrypt before any Postgres read. Raw provider signature headers
-  and payload bytes do not enter Queue state. The prepared event enters one
+  and payload bytes do not enter Queue state. Web retries enqueue once
+  only when fetch reports a network failure before returning
+  a response. The retry reuses the exact encrypted envelope and transport id;
+  canonical prepared-event deduplication covers a lost acceptance response.
+  Each attempt retains the configured control timeout, with at most two calls.
+  HTTP rejections, invalid responses, cancellation and timeout are not retried
+  here. Exhaustion still returns retryable 503 without synchronous fallback.
+  The prepared event enters the existing
   Cloudflare Queue consumer configured for batches of 100, five-second
   collection, concurrency one, ten retries, and an encrypted DLQ. The consumer
   decrypts outside Postgres and partitions Web callbacks by exact UTF-8 size at
@@ -2288,8 +2347,11 @@ to apply after cutover.
   failures and history discard reuse. A new inventory read is one attempt capped
   at eight seconds, accepts at most 64 provider rows, and its source projection
   reads the current local source set once before at most 64 serial upserts.
-  Every summary admission still reads live sources after the provider fetch,
-  independently of provider cardinality or inventory reuse. Ordinary units contain
+  Populated summary admission still reads live sources after the provider fetch,
+  independently of provider cardinality or inventory reuse. Empty summaries have
+  no canonical records or authoritative deletions, so they skip import; bounded
+  empty summary units also skip the import-only source read and advance their
+  existing continuation. Historical and timeseries coverage checks are unchanged. Ordinary units contain
   one resource and allow at most three sequential pages with one eight-second
   request attempt per page.
   Sleep and sleep-cycle remain one canonical unit so
@@ -2389,56 +2451,37 @@ to apply after cutover.
   projection of id, lifecycle status, and setup phase. Selection never opens
   credential ciphertext; connect and resume mutation owners still revalidate
   the exact selected connection and source authority.
-- Personal Patterns operator email excludes usage-limit interruptions. Explicit
-  `ASSISTANT_CODEX_USAGE_LIMIT` terminal failures stay quiet. Expirations stay
-  quiet when the authenticated member's retained usage-gate observations show
-  a limit at the occurrence or during its wait, or a retained failure for that
-  exact occurrence records a provider usage limit. An allowed decision before the
-  occurrence closes the earlier pause; a later reset does not erase it.
-  Web records actual authoritative gate decisions with type `runtime.ai_usage_gate`
-  inside the existing `assistant.automation_detail` event after the response; read-only status, ungated model-free work,
-  and diagnostics never alter admission. A selected inference override records
-  an unpaused decision. The existing isolated log store and retention own this
-  metadata; no billing state or new scheduler is introduced. One bounded,
-  subject-scoped query classifies at most 50 candidates before email coalescing.
-  Missing/retired history and diagnostic failures preserve ordinary alerts,
-  and non-usage terminal failures still alert even beside a suppressed expiry.
-  All remaining Personal Patterns operator email is terminal-state only. A failed cron
-  attempt remains silent while the finalized job has a scheduled retry. Web
-  treats an absent retry disposition from an older runner as non-terminal, so
-  the consumer can deploy first. Terminal failures and expired occurrences for
-  one scheduled time share one generic body and one member-independent Resend
-  idempotency key. Concurrent failures therefore produce at most one operator
-  email for that occurrence without adding a database row, queue, or second
-  retry owner.
-  The generic body explicitly covers both expiry and terminal failure; expiry
-  does not establish that model execution or automatic retry occurred. The
-  expiry event carries `priorFailureCount` from the existing cron state
-  (`failurePriorFailureCount` in hosted logs), where zero means no retained
-  prior failures, not proof that no attempt ran. Snapshot lifecycle diagnostics
-  classify ordinary and default-processing wake timestamps as `omitted`,
-  `none`, `invalid`, `due`, or `future`, with signed millisecond offsets measured
-  when the diagnostic is built. Negative means overdue. These describe the
-  requested checkpoint; only the finished event's `webCheckpointAccepted`
-  establishes Web acceptance. Malformed timestamp values and raw wake reasons
-  are never copied into these fields.
-- Per-message typing alerts independently measure the Web route's receipt instant
-  through the earliest accepted typing indicator: strictly over 3 seconds for a
-  warm workspace and over 10 seconds for a cold workspace. Mailbox acceptance
-  remains its existing timestamp; it never substitutes for webhook receipt.
+- Snapshot lifecycle diagnostics classify ordinary and default-processing wake
+  timestamps as `omitted`, `none`, `invalid`, `due`, or `future`, with signed
+  millisecond offsets measured when built. Negative means overdue. These describe
+  the requested checkpoint; only the finished event's `webCheckpointAccepted`
+  establishes Web acceptance. Malformed timestamps and raw wake reasons are
+  never copied into these fields.
+- Per-message typing alerts independently measure the member's wait through the
+  earliest accepted typing indicator: strictly over 2.5 seconds for a warm
+  workspace and over 7 seconds for a cold workspace. Linq waits start at the
+  exact provider event bound by the member's mailbox dedupe identity, never
+  after the Web route's receipt instant, so
+  time before the route runs, such as a fresh Web instance boot, counts.
+  Without that event, and for Telegram, the wait starts at route receipt.
+  Mailbox acceptance remains its existing timestamp; it never substitutes for
+  either start.
   For unanswered Linq inputs, the latest accepted message in the same chat
-  resets the silence start between receipt and the first typing acceptance
+  resets the silence start between that start and the first typing acceptance
   (or the missing-observation check). A reply does not exempt subsequent silence.
   An accepted reply linked to this exact input ends its wait; no later typing
-  is required for an already-answered input. Existing blinded provider message/chat
-  keys establish the exact conversation; another chat cannot reset the clock,
+  is required for an already-answered input. Existing hashed provider-event and
+  blinded chat keys establish the exact conversation, including reactions whose
+  synthetic message identity differs from the reacted-to message. Later edits
+  or receipts cannot change an older input's origin. Another chat cannot reset the clock,
   and another member cannot supply prior-typing evidence.
   An earlier accepted typing session covers arrival until its linked reply or
   five-minute expiry, then silence resumes from that endpoint. Missing correlation,
   failed sends, and sends after the measured typing endpoint cannot reset the clock.
   Missing typing retains a 30-second telemetry grace from the silence start;
-  observed typing uses the strict warm/cold threshold. Frozen emails retain both
-  receipt and silence-start timestamps; older records retain their original text.
+  observed typing uses the strict warm/cold threshold. Frozen emails retain the
+  receipt and silence-start timestamps, plus the provider event's creation when
+  it preceded receipt; older records retain their original text.
   Telegram retains exact-input typing observations and the existing thresholds.
   Accepted-typing persistence waits for competing short trace-row writes in the
   detached callback; other retry-backed milestones keep skipping locked rows.
@@ -2447,7 +2490,7 @@ to apply after cutover.
   or delivery operation waits for this diagnostic persistence.
   A restore completed before the message arrived, or an explicit reused restore,
   identifies warmth. This includes later messages within an invocation that
-  originally started cold. Missing warmth evidence uses the 10-second cutoff and
+  originally started cold. Missing warmth evidence uses the 7-second cutoff and
   is labeled unconfirmed; deployment version, rollout convergence, canary identity,
   access changes, other incidents, and quiet hours do not suppress these alerts.
   An exact member-bound mailbox item with recorded `ai_usage_denied_at` is
@@ -2471,7 +2514,16 @@ to apply after cutover.
   evidence. The existing per-chat claim retains one preparation handle; the
   validated turn takes it only through the same provider-fetch authority,
   rebinding cancellation without another start or a reset session budget.
-  Import failure cancels only an unclaimed preparation. Provider acceptance,
+  Preparation uses the invocation cancellation signal, not the temporary import
+  pass signal: a completed import yielding to foreground work must not stop its
+  admitted indicator before turn handoff.
+  Import failure cancels only an unclaimed preparation. Terminal non-reply
+  completion also cancels the exact input's preparation in the same runtime;
+  invocation cleanup drains its remaining unclaimed preparations. A canceled
+  preparation settles any pending provider start and stop before a successor
+  turn starts typing. These best-effort effects never gate model admission,
+  never stop a handed-off turn, and retain the existing full-session cooldown.
+  Cleanup identity is independent of optional latency telemetry. Provider acceptance,
   never staging or a claimed target alone, supplies the retained timestamp.
   Its readiness promise covers admission before or after typing starts without
   a foreground telemetry wait. Telegram keeps turn-owned start. Failed
@@ -2479,10 +2531,15 @@ to apply after cutover.
   evidence. Linq's existing provider cooldown is unchanged. Signup's
   early Web typing hint is also retained, so neither produces a missing-typing
   false positive. Provider-accepted Web instant replies carry their existing
-  delivery identity into the post-response trace writer, including completed
-  webhook replays. The ordinary accepted-delivery link resolves that exact
-  synthetic conversation item without inventing a runtime attempt or placing
-  telemetry on the reply path. Sends without provider acceptance gain no accepted link.
+  delivery identity and original inbound mailbox ID as in-memory telemetry
+  context into the post-response trace writer, including completed webhook
+  replays and failed wakes. Its one existing accepted-delivery link call covers
+  at most two deduplicated candidates: the original input and accepted outbound
+  echo, with a null reply runtime attempt and unchanged member, suspension,
+  lane, and write-once guards. The actual wake/checkpoint and ingress timing
+  writes still observe the echo. Trace writes remain optional and best-effort;
+  no telemetry failure blocks ingress. Sends without provider acceptance gain
+  no accepted link.
   Callback arrival order cannot replace an earlier acceptance.
   No acceptance observation after 30 seconds is eligible as missing evidence;
   the existing five-minute alert cron provides fallback evaluation, while staged
@@ -2551,6 +2608,18 @@ to apply after cutover.
   updates cover all three channels and preserve stale-lease rejection. These
   facts never acknowledge mailbox consumption; the checkpoint retains ownership.
   A system head ages from its accepted mailbox creation time.
+  Imported `member.activated` and `device-sync.wake` work may defer their alerts
+  while the active default-mode runtime owner matches the latest foreground
+  trace's attempt and lease generation. The workspace system-mailbox progress
+  generation is an independent counter and never binds this evidence. That trace must prove a terminal
+  reply or no-reply after the system head and last workspace checkpoint, with an
+  unexpired runtime-owned checkpoint deadline. Read only the newest trace through
+  the existing member/acceptance index; never fall back to older evidence when
+  that trace is incomplete. Expiry restores the original system-head age. This
+  grace respects foreground priority without treating a device import or a
+  future retry wake as completion. Other system kinds, unimported heads, retired
+  owners, generation mismatches, and already-published completion retain normal
+  stall classification.
   Lane high-water reads select only sequence and update time; they never fetch
   inline or externalized mailbox ciphertext.
   Import and unrelated
@@ -2579,7 +2648,13 @@ to apply after cutover.
   ownership. An imported sequence above durable high water is unknown and
   contributes no imported-but-unhandled count; equality is full coverage.
   They never contain member, mailbox, phone, message, trace, or exception
-  identifiers. The existing terminal runtime-invocation log records
+  identifiers. A newly built alert or reminder whose claim commits also
+  schedules, after the response, at most 20 subject-scoped
+  `mailbox.progress_alert_sampled` runtime-log entries for its oldest sampled
+  stalled lane heads (see `docs/hosted-runtime-log-database.md`). Retries that
+  reuse a persisted message never record a new sample. The observation is best
+  effort: missing entries are not evidence, and it never gates delivery.
+  The existing terminal runtime-invocation log records
   the public runner release SHA, result status, selected wake, and derived
   system imported/handled/first-pending sequences, including returns that
   require no checkpoint. That return reuses the current system-mailbox state
@@ -2612,9 +2687,13 @@ to apply after cutover.
   continuation availability; running jobs and missing/invalid availability remain
   runnable. Only a completed/yielded pass with a complete queue sample and zero
   runnable jobs in both sources can prove deferral. The notice applies the same
-  matching-checkpoint and continuity rules to this runnable signal. Stall and
-  cycling detection retain all pending retry obligations, including scheduled
-  jobs, so an overdue wake still exposes a stalled import. Failed, missing,
+  matching-checkpoint and continuity rules to this runnable signal. Cycling
+  detection uses that same runnable summary: a matching accepted checkpoint
+  proving deferral ends the cycling window, so subsequent webhook starts cannot
+  accumulate against future-scheduled jobs. Local deferral without that checkpoint
+  cannot clear an existing runnable window. Stall detection retains all pending
+  retry obligations, including scheduled jobs, so an overdue wake still exposes
+  a stalled import. Failed, missing,
   malformed, truncated, or legacy runnable evidence falls back to the existing
   pending signal. This additive reader deploys before the runner; remove its
   legacy fallback only after old producers and the two-hour observation window
@@ -2649,8 +2728,26 @@ to apply after cutover.
   unrelated connections and unkeyed attempts cannot grant it. An unchanged
   checkpoint does not count as import progress; once accepted, the canonical wake
   controls stall eligibility.
-  Cycling detection uses pending observations and backlog detection uses runnable
-  observations within the same 15-minute continuity window independently of the
+  A latest owned pass proving that no retained jobs are runnable also receives
+  publication time when the canonical device wake is not overdue. Its allowance
+  expires 15 minutes after the oldest outstanding pass for that connection,
+  across attempts; repeated deferrals and restarts cannot extend it. Only the
+  matching accepted checkpoint removes an outstanding pass. Runnable or unknown
+  queue evidence and overdue wakes retain conservative stall detection unless
+  the connection is awaiting its active foreground attempt's recorded checkpoint
+  publication deadline. The bounded workspace read selects only the latest
+  ingress trace in the observation window, matches the active default-mode
+  owner's attempt and lease generation, and requires a completed foreground turn
+  with a valid unexpired deadline. It does not fall back to an older trace when
+  the latest evidence is missing or invalid. This grace applies only to unsaved
+  progress or a latest pass proving no runnable work, with all outstanding passes
+  owned by that same attempt. It ends at checkpoint acceptance or deadline expiry;
+  an older unsaved attempt, another connection's runnable no-progress work, and
+  a saved overdue queue remain eligible for alerts. The runtime may extend its
+  deadline after another foreground turn without resetting import progress.
+  No additional persisted state or runtime protocol is introduced. Deferred
+  publication never counts as saved progress. Cycling and backlog detection use
+  runnable observations within the same 15-minute continuity window independently of the
   wake, so eligibility cannot
   lapse before the evidence itself resets and a continuing incident reminds
   instead of re-alerting after the next pass. The backlog notice also requires
@@ -2700,7 +2797,7 @@ to apply after cutover.
 - Hosted managed-automation reconciliation persists retry generation in the existing workspace checkpoint owner. Only eligible, explicitly retryable failures receive the bounded 30-second, 2-minute, and 10-minute backoff sequence; unclassified or permanent failures are logged without manufacturing another wake, and a later successful pass clears the retry generation.
 - Managed automation ownership is exact-seed and route-authority based. Built-in seeds without an explicit scope default to `member`; member seeds run only on personal/direct routes, while `authenticated-group` seeds run only on live non-direct Linq/iMessage or Telegram routes. Group email is excluded. Reconciliation archives every nonterminal wrong-owner built-in record, including paused records, while already archived records and caller-supplied unscoped custom seeds retain their prior behavior. Claimed static built-ins and registered dynamic identities resolve immutable ownership by automation id before lifecycle hooks and revalidate the same owner and live route before provider admission, tools, delivery, and commit; editable tags, slugs, titles, and instructions cannot acquire authority. Permanently retired built-in IDs are not seeds: reconciliation archives matching persisted records and claimed occurrences fail closed before lifecycle or model work. The post-onboarding choice point is the one registered dynamic member identity. Dynamically generated experiment-lifecycle seeds remain on their existing path until their separately coordinated owner exposes an exact resolver. Immutable personal-memory and group-room-model IDs still exclusively select silent maintenance policy and its provider-admission replay barrier.
 - The unfinished-onboarding follow-up is one finite daily-local automation with exactly three local-day opportunities, anchored to its original first occurrence and closed at 3:00 PM on day three. Member activation is the sole enrollment owner: it persists canonical onboarding start at the activation timestamp and carries any available direct route separately from the optional welcome. Every newly built activation wake emits enrollment intent, defaulting genuine member activation to enrolled; the synthetic group-thread container producer explicitly opts out so it can initialize its vault and room model without acquiring personal onboarding state. A missing intent remains enrolled only for compatibility with pre-deployment wakes. Standard Linq welcome and Linq instant-start therefore share the same seed; an established Telegram direct thread can seed while its welcome remains suppressed. Route-less Telegram activation stays silent, and ordinary managed reconciliation may create the same canonical automation only after a later deliverable direct route appears and only inside the original activation window. Activation-path write failures retry through the activation mailbox; route-later failures reuse the existing bounded managed-setup wake ladder. Canonical slug idempotency prevents duplicates, while completed, expired, group, and archived follow-ups stay closed. No receipt lookup, channel-specific state, queue, or scheduler is another correctness owner. Migration recognizes PR 1203's exact one-shot, the older exact recurring fingerprint, and the bounded original legacy fingerprint; it preserves the one-shot's stored occurrence, derives that record's recurring local minute from the occurrence, preserves an existing daily-local minute instead of rehashing another identity, bounds a fresh recurring predecessor from its creation time, archives an established predecessor whose original three-day window already elapsed, and never restarts an old account from the current maintenance time. Conversion first leaves the source as a finite `at` schedule, durably binds that occurrence in canonical runtime state, and only then exposes the daily-local schedule, so a partial write cannot run on the signup day and normal managed reconciliation can finish a staged conversion. Each occurrence reads canonical onboarding authority before provider entry and again before tool, delivery, and commit boundaries. Queue-only delivery carries the automation revision into the existing outbox authority fence, which re-reads onboarding state at external provider entry; completed state makes the intent terminally stale, while unreadable state fails closed with `ASSISTANT_ONBOARDING_AUTHORITY_UNAVAILABLE` and remains retryable only inside the finite window. When an obsolete predecessor intent settles authority-stale, the hosted post-delivery owner re-reads cron status, preserves the resulting retry wake, and suppresses the generic delivery-failure input because the cancellation was intentional. The latest in-turn lifecycle read replaces the occurrence's earlier diagnostic snapshot. Metadata-only hosted logs identify seed, reconciliation action, persisted-versus-missing state source, status and timestamps, schedule window, model decision, delivery outcome, and run outcome without creating a second correctness owner or storing message content.
-- Personal memory consolidation and reminder availability are independent: memory remains a nightly one-shot model turn whose exact managed id alone receives the host-owned `murph.member_memory` state tool, uses the shared restricted maintenance configuration, emits no member message, and needs no separate permission profile; native control requests do not become another memory owner and their effects are suppressed by the host in this lane. Availability is a deterministic stage of the existing hosted background automation pass. It skips exact-time automations and connected reads when no eligible snapshot is due, processes at most 100 due reminders per pass, derives the fixed seven-day request, rejects incomplete or unsupported provider results, normalizes timestamps, and applies the suffix only when the automation version and exact calendar account binding observed before the read still match. A clean empty read writes an empty timestamp-only snapshot. The pass derives the earliest next refresh from canonical `generatedAt`, makes the snapshot due at 23 hours, and persists that deadline through the existing workspace checkpoint and Temporal timer owner, leaving one hour of headroom before delivery's 24-hour evidence limit without a retry queue, separate scheduler, or second state owner. Foreground conversation admission aborts an in-flight connected-app read through the existing background-maintenance signal; ordinary runtime shutdown remains its fallback. A failed, partial, disconnected, or concurrent refresh leaves canonical instructions unchanged and delivery fail-open. Changing a reminder to an exact-time schedule atomically converts it to fixed delivery and removes its availability source, account, and snapshot. Scheduled delivery uses evidence only for a non-exact-time schedule while the current policy/source/account binding remains exact and the snapshot is canonical, unexpired, and covers an occurrence scheduled within 24 hours of generation. The host strips that data-only suffix before any provider turn. Disconnect or provider revocation stops successful future refreshes but does not synchronously cancel the current short lease. Policy removal or account replacement invalidates it immediately; a missed first refresh remains pending and delivers normally, while missed later refreshes age out.
+- Personal memory consolidation and reminder availability are independent: memory remains a Mon/Wed/Fri 03:00 local one-shot model turn whose exact managed id alone receives the host-owned `murph.member_memory` state tool, uses the shared restricted maintenance configuration, emits no member message, and needs no separate permission profile; native control requests do not become another memory owner and their effects are suppressed by the host in this lane. Availability is a deterministic stage of the existing hosted background automation pass. It skips exact-time automations and connected reads when no eligible snapshot is due, processes at most 100 due reminders per pass, derives the fixed seven-day request, rejects incomplete or unsupported provider results, normalizes timestamps, and applies the suffix only when the automation version and exact calendar account binding observed before the read still match. A clean empty read writes an empty timestamp-only snapshot. The pass derives the earliest next refresh from canonical `generatedAt`, makes the snapshot due at 23 hours, and persists that deadline through the existing workspace checkpoint and Temporal timer owner, leaving one hour of headroom before delivery's 24-hour evidence limit without a retry queue, separate scheduler, or second state owner. Foreground conversation admission aborts an in-flight connected-app read through the existing background-maintenance signal; ordinary runtime shutdown remains its fallback. A failed, partial, disconnected, or concurrent refresh leaves canonical instructions unchanged and delivery fail-open. Changing a reminder to an exact-time schedule atomically converts it to fixed delivery and removes its availability source, account, and snapshot. Scheduled delivery uses evidence only for a non-exact-time schedule while the current policy/source/account binding remains exact and the snapshot is canonical, unexpired, and covers an occurrence scheduled within 24 hours of generation. The host strips that data-only suffix before any provider turn. Disconnect or provider revocation stops successful future refreshes but does not synchronously cancel the current short lease. Policy removal or account replacement invalidates it immediately; a missed first refresh remains pending and delivers normally, while missed later refreshes age out.
 - The post-onboarding choice point is installed as one ordinary managed one-shot after answered onboarding. Its original window begins 21 local-calendar days after completion and expires seven days later. Maintenance gives an eligible older member one future same-weekday occurrence instead of dropping all pre-existing completions or sending a late catch-up immediately; once installed, that occurrence remains anchored. Claim and queued delivery revalidate canonical answered-onboarding authority so a successfully read reopened, declined, manual, or replaced completion state cannot send. An unreadable or malformed authority document is availability failure, not revocation: the existing cron or outbox owner retains and retries the same occurrence or intent within its finite window. The restricted provider attempt uses a fresh ephemeral one-shot process with committed session history and preserves the ordinary provider resume state. A current-home Linq correction derives the conversation locator from the canonical route participant lookup key, including email-keyed routes, with member phone identity only as a legacy fallback. The occurrence otherwise uses the ordinary scheduled notification path and its existing retry, outbox, session, and tool owners. A model skip consumes the one-shot normally and never creates a nag loop.
 - Closed event-ledger and integration-ingest months compact only in the abortable hosted idle-shutdown lane and share its existing 30-second archive budget. Core publishes a fully validated deterministic gzip before deleting raw bytes, and normal readers and amendments stream bounded gzip output. A foreground wake aborts archive work before later maintenance, while a timeout, malformed shard, or ordinary archive failure leaves that source intact and does not block checkpointing. Remaining raw months are the next pass's durable worklist, so no cursor, repair queue, or second maintenance owner exists. Integration-ingest startup repair removes only an independently valid, newline-terminated, byte-identical raw/gzip pair; every mismatch remains a fail-closed representation conflict.
 - Closed event-ledger months retain the reader-first gzip rollback floor. Core and query resolve one bounded plain-or-gzip representation through the logical `.jsonl` path, reject ambiguous pairs, and preserve decompressed base receipts across local writes, hosted receipt replay, retry, and rollback. Event append operations and receipts remain representation-neutral; the canonical write owner selects plain versus gzip from the logical path while holding the existing write lock. Backdated writes atomically replace and verify the archive; the current UTC month remains plain. The deployed reader-compatible core/query/CLI/runner release must drain before hosted idle maintenance creates its first event archive. Once any event `.jsonl.gz` exists, that reader-compatible release is the rollback floor; use a forward fix or losslessly restore plain JSONL with a compatible binary before downgrading.
@@ -2943,7 +3040,7 @@ to apply after cutover.
   pre-expiry provider evidence delivered later can still qualify; the first
   referrer-serialized expiry boundary after the grace is authoritative
   finality. The immediate ingress handoff for conversational referrals and a
-  bounded Vercel-authenticated minute recovery pass both retry idempotent
+  bounded Vercel-authenticated five-minute recovery pass both retry idempotent
   reward reconciliation. For stable signup-link activations, that recovery
   pass is the normal settlement owner and scans oldest first in a fixed 50-row
   batch; no immediate activation handoff exists. The source mailbox append and
@@ -3366,16 +3463,15 @@ to apply after cutover.
    requeues unfinished work, and proves exit before releasing the workspace.
 - Manual photo import queues estimation only for an unconsumed server-owned manual capture, using the original system mailbox item and stable notification delivery identity. Canonical import and staging cleanup keep their existing checkpoint boundary. Model-free admission must leave that model-capable item pending; foreground work keeps priority. Replays do not create another meal or delivery obligation. A restored snapshot with pending manual estimation requires the compatible runtime until those items drain.
 - Automatic meal-photo enrollment ordering is replay-safe through one Web-owned per-installation revision high-water mark. A schema-v2 disable persists a tombstone even when its earlier enable has not arrived; delayed or duplicate enables cannot rotate credentials or clear that tombstone, an exact disabled-revision replay succeeds without mutation, and only a higher explicit enable restores authority. Schema-v2 enable is prepared before it is active: a credential response is not upload authority until the foreground iOS app durably saves it and an exact bodyless scoped activation commits. Lost responses and delayed prepares therefore remain inactive. Activation replay is idempotent, and activation/deletion use the same member lock plus exact-token reread so deletion wins in either serialization order. Activation also locks active Family membership and group access rows before its authority read; Family billing locks its owner and active roster members in stable order before changing those rows, so sponsor removal or group access loss either commits first and makes activation fail or waits behind a valid activation without a member-to-group deadlock. Schema-v1 behavior remains immediately active only while the row is at revision zero. Each completed schema-v1 identity or scoped revocation advances the same row's ID as a generation; an older prepared enrollment fails without a crypto retry, while a later foreground request can explicitly re-enroll. Automatic meal-photo uploads are replay-safe only through the capture id derived by the enrolled installation. Manual uploads use a UUID stable for the life of the in-memory selection; Web domain-separates it with the authenticated member into the same 64-character capture-id contract, so retrying a failed selection converges while another member or UUID remains independent. Manual partial failure stays phone-owned: accepted items leave memory and only failed items remain for an explicit retry. Each staging attempt must own a distinct object. Under the per-capture mailbox lock, the first accepted item chooses the canonical object for exact duplicates; later attempts delete only their own losing object. Failed or ambiguous appends must reconcile the mailbox claim before cleanup so they never delete an accepted object's bytes. Web must reject conflicting reuse, re-signal exact mailbox duplicates, lock the hosted member and active sponsorship source rows before rechecking final upload authority, and acknowledge an upload only after private object staging and canonical mailbox append both succeed. Automatic final authority rereads enrollment; manual final authority rereads the Privy binding through its narrow blind-index core projection. Both recheck active access and historical launch consent inside the same short transaction. Provider-capable mailbox root work and the exact existing dedupe wake read finish in one request-scoped cache before that transaction; a replay under a decrypt-only retained root therefore performs only local decryption after the lock. Exact database root revalidation and local encryption remain within it. Ambiguous cleanup similarly prewarms the exact claim in a fresh cache before its provider-disabled lock-and-read transaction; a race or unreadable claim retains the attempt object rather than risking deletion of accepted bytes. The direct route and any verified-email fallback are projected before staging, then their exact raw owner records are locked and compared after final authority recheck but before mailbox append; any change returns the typed route-required conflict and cleans up only the current attempt's staging object. Runtime import must check the canonical external reference before writing, verify staged length and SHA-256 before import, and delete staging only through a post-checkpoint effect; cleanup derives the user-namespaced object path without requiring encryption-context rediscovery. After failed cleanup, the R2 lifecycle rule makes staging eligible for asynchronous deletion at 31 days, one day beyond mailbox recovery retention, rather than guaranteeing deletion at that exact age. A missing control client, staged object, write fence, mailbox append, or runtime read is a visible retryable failure rather than a successful setup/upload.
-- Environment voice upload uses the same single-owner staging pattern without becoming a messaging flow. The authenticated Web route validates origin, active membership, allowlisted audio container signature, byte cap, capture hash, and rejects only invalid or materially future capture times before staging; an old capture time is metadata and must not prevent a first-seen retry after an interrupted upload. A first-seen capture must pass the existing read-first AI-usage gate. Under the member lock, Web admits at most one unconsumed Environment recording per member, while an exact capture retry bypasses those new-work gates and resolves to the existing canonical claim. Each attempt owns a distinct application-encrypted R2 object; the per-capture mailbox claim selects one canonical object and cleanup deletes only a losing attempt. Runtime verifies the canonical byte count and SHA-256, then forces audio through ffmpeg with a three-minute output cap before transcription instead of trusting caller duration metadata. It then runs one Habitat-only silent maintenance turn. Processing failure leaves the mailbox item and staged bytes retryable. Successful fact extraction records audio deletion as a post-checkpoint effect, so audio is never deleted before the mutated vault is durable; deletion failure retains that effect for retry. The 24-hour lifecycle rule is an asynchronous recovery backstop, not proof that deletion happened at the exact deadline.
 - Automatic meal import is complete only after the stable 9pm managed automation exists. Capture enrollment and upload require a current active private route, including a verified email fallback, which Web includes in the private mailbox envelope. The import writes the canonical meal first, then idempotently ensures that automation from the envelope route; if the upsert fails, the mailbox item stays retryable. Direct email delivery replaces the saved address with the current verified address through the existing signed Web-control boundary before every provider call, and fails closed when Web no longer returns one. Reconciliation evaluates AI usage for runnable model work even when system lag is present, while blocked model work can still admit deterministic system-mailbox processing. System-mailbox mode must checkpoint the generic cron projection from the mutated vault before running post-checkpoint staging cleanup; a projection read failure leaves the import uncheckpointed for retry. An accepted meal capture qualifies as engagement for the existing 28-day iMessage outreach policy. Linq inactivity does not pause other channels, and engagement does not bypass AI-usage authorization. Authorized fresh conversation owns the ordinary foreground pass so a retryable system item cannot starve it. A same-workspace retry finds the existing meal, while a retry from the last checkpoint safely repeats the deterministic canonical write before ensuring the missing postcondition. The automation uses the ordinary cron planner and delivery path. `meal closeout-work` derives one bounded batch directly from canonical meals: same-occurrence removal revisions first, then the oldest retained automatic-capture photos. The photos remain the only pending-work queue, so old captures eventually drain without a cursor or another state store. If the provider fails after cleanup begins, a photo-removal revision recorded at or after the scheduled occurrence instant remains evidence only for that occurrence's retry; remaining photos and those revisions reconstruct partial work, while a later occurrence cannot resend the completed one. Photo cleanup is a canonical, idempotent meal mutation that fails closed on changed bytes, mismatched manifest ownership, ordinary meal photos, or partial writes.
 - Exercise routine cards remain that same one outbox-owned immutable effect. A dedicated Telegram tool keeps each model-facing schema below the Codex compaction limit, while both card tools produce the same response-card effect. Authenticated direct and group Telegram turns may expose it; Linq/iMessage does not and keeps its existing catalog response-media path. Routine timing is model-authored presentation: shared agent guidance requires an honest comparison between the stated total and the visible work without adding another runtime truth owner. Images are optional bounded HTTPS catalog results with exact alt text and directly constructible `exercise_catalog:<returned-item-id>:<1-based-image-position>` provenance; routine cards never combine with response media. Telegram sends one `sendRichMessage` request with collapsed instructions and an optional per-exercise slideshow. Hosted rich sends enter through the same callback-owned authority, secret, fetch, and liveness checks as hosted text sends. A valid Telegram `ok: false` response proves non-acceptance: a definitive non-retryable rich rejection can use the one text fallback, while a retryable rejection stays with the existing outbox owner. A transport failure or an HTTP response without a valid Telegram success or rejection envelope is ambiguous. It becomes terminal and cannot release the non-idempotent effect for replay. The same invalid-envelope rule applies to existing Telegram `sendMessage`, `sendPhoto`, and `sendVoice` operations because all four provider effects are non-idempotent and share one outcome resolver. Every rich-card fallback must fit one 4,096-character Telegram text message before provider entry, and that fallback gets one provider attempt without starting a second retry owner. Existing outbox replay and terminal evidence remain the only retry and completion owners. During mixed-version rollout, deploy the Worker operation allowlist before the new runner can emit `sendRichMessage`. An older Worker rejection is not a Telegram envelope, so the runner terminally abandons that effect without text fallback; it must not treat policy prose as proof that Telegram rejected the request. An older runner keeps its existing text-only behavior.
 - Model-authored Telegram rich-content cards use that same response-card effect and rich delivery owner. Their contract derives one deterministic text fallback from the validated HTML before provider entry and admits no separate model-authored fallback. Authenticated direct and group Telegram turns may expose the generic card and exercise card as presentation options. One shared audience predicate admits those two kinds at outbox creation, persisted intent parsing, and hosted delivery parsing; private semantic cards remain direct-only and Linq group standings keep their existing rule. Private nutrition and tracked-workout authority remains unchanged, and presentation cannot bypass their canonical reads, writes, or safety workflows. The generic card alone sets Telegram `skip_entity_detection`, so provider-created links, emails, mentions, hashtags, commands, and phone actions stay disabled without changing existing semantic-card behavior. A defensive Linq replay path uses the derived text and skips native-card capability checks. The card adds no retry loop, provider call, queue, callback, or mutable state owner. Deploy this audience expansion with `container_rollout=immediate` and require the exact new runner fingerprint before group-card authoring is converged. Before the first Telegram group presentation-card intent or effect is persisted, the preceding runner remains a safe rollback. After that write, the audience-capable runner is the forward-fix floor because the preceding strict readers reject or quarantine the non-direct card. Monitor `outbox.intent.quarantined`, strict response-card parse failures, and stale runner fingerprints. Restore a quarantined intent only after a compatible bundle is live.
-- Daily nutrition response cards remain one outbox-owned immutable effect. The runtime retains the V1 parser for existing outbox and checkpoint state, while V2 adds canonical fiber plus nullable goal snapshots. Ordinary private-direct interactive turns, exact private-direct scheduled turns, and the managed meal closeout use the same attachment tool. Scheduled use requires saved instructions that explicitly request a card; occurrence authority alone is not intent. Because a card replaces the whole final response, it is eligible only when the card alone completely satisfies the current request, except for the fixed first totals-only introduction inside that same effect. New accepted input in the same live turn invalidates an earlier card-only decision. A fresh attachment may target the latest accepted-input context, while an attachment whose tool request belongs to an older context is rejected. Every card copies each total from the immediately preceding single-date canonical meal-totals read. It may copy a target only after a bounded active-goal read proves a complete result with exactly one qualifying record for that daily metric and unit; fresh saturated or multiple-match authority blocks the card; a genuinely missing bundle selects all-null totals-only, never a mixed fresh card. Missing or partial totals can carry only an `unavailable` status, and an assessed status must not point opposite the frozen total and target. The semantic target status is frozen presentation context for the one message, not durable goal progress and not a threshold recomputed by iOS. Linq always requests the shipping Messages extension's interactive balloon (`interactive:true`), including all-null totals-only V2; attached goal targets never select the presentation mode. Recipients without that extension, including Messages on macOS, receive a provider static layout whose generated image mirrors the compact SwiftUI balloon's default calorie-ring and one-row nutrient composition. The bitmap is rectangular so the provider owns the outer mask. The installed extension retains its native icon and interactive identity, while the provider request omits the optional App Store id; app-absent static cards therefore receive no provider app art, and the bitmap embeds the checked-in canonical Murph mark in the native 36×27pt upper-left badge footprint. The static image intentionally omits the native tap-to-reveal target state and repeated direction labels; the provider's safe text recovery retains the complete status meaning outside the raster while null and unavailable goals stay neutral. Goal-aware null, incomplete, and unavailable calorie-goal states retain a neutral ring. Totals-only static fallback images have no ring or target placeholders, show estimated/logged-so-far values, date and logged meal coverage, and use the fixed introduction or coverage subcaption. Installed extensions own their native rendering of the same immutable snapshot. The value-free provider message-body fallback is only the short `Your daily nutrition.` label, keeping private nutrition values out of conversation-list, lock-screen, and notification text while avoiding Apple data detectors that can downgrade the card. Capability failure or a definitive pre-acceptance card rejection still replaces the card with the complete deterministic semantic text through the existing outbox path. The HTTPS message URL carries the immutable V1 or V2 snapshot in the existing bounded Base64URL fragment family for offline extension rendering; the queryless image path carries the same bounded presentation envelope to a stateless Vercel `ImageResponse` route for Linq rehosting. Encoding is not encryption, and neither representation may contain member identity, a canonical record reference, credential, or other authority. The route performs no database or remote read, rejects invalid input before asset reads, emits no application log or analytics event, and returns private no-store/no-index headers. Deploy the compatible iOS reader first, the Web image route second, and the runtime producer last; the Web route must remain available while any sent static image URL may still be fetched. Interactive rollout requires production-device proof because provider acceptance and delivery receipts do not prove the extension draw, provider-owned static composition, image-failure result, or VoiceOver output. After the first V2 card-bearing state or effect, the V2-capable Worker and runner are the rollback floor.
+- Daily nutrition response cards remain one outbox-owned immutable effect. The runtime retains the V1 parser for existing outbox and checkpoint state, while V2 adds canonical fiber plus nullable goal snapshots. Ordinary private-direct interactive turns, exact private-direct scheduled turns, and the managed meal closeout use the same attachment tool. Scheduled use requires saved instructions that explicitly request a card; occurrence authority alone is not intent. Because a card replaces the whole final response, it is eligible only when the card alone completely satisfies the current request, except for the fixed first totals-only introduction inside that same effect. New accepted input in the same live turn invalidates an earlier card-only decision. A fresh attachment may target the latest accepted-input context, while an attachment whose tool request belongs to an older context is rejected. Every card copies each total from the immediately preceding single-date canonical meal-totals read. It may copy a target only after a bounded active-goal read proves a complete result with exactly one qualifying record for that daily metric and unit; fresh saturated or multiple-match authority blocks the card; a genuinely missing bundle selects all-null totals-only, never a mixed fresh card. Missing or partial totals can carry only an `unavailable` status, and an assessed status must not point opposite the frozen total and target. The semantic target status is frozen presentation context for the one message, not durable goal progress and not a threshold recomputed by iOS. Linq always requests the shipping Messages extension's interactive balloon (`interactive:true`), including all-null totals-only V2; attached goal targets never select the presentation mode. Recipients without that extension, including Messages on macOS, receive a provider static layout whose generated image mirrors the compact SwiftUI balloon's default calorie-ring and one-row nutrient composition. The bitmap is rectangular so the provider owns the outer mask. The installed extension retains its native icon and interactive identity. The provider request carries Murph's App Store id, so app-absent static cards receive Messages-drawn app art in the native 36×27pt upper-left badge footprint; the bitmap leaves that footprint empty rather than painting a second mark. The static image intentionally omits the native tap-to-reveal target state and repeated direction labels; the provider's safe text recovery retains the complete status meaning outside the raster while null and unavailable goals stay neutral. Goal-aware null, incomplete, and unavailable calorie-goal states retain a neutral ring. Totals-only static fallback images have no ring or target placeholders, show estimated/logged-so-far values, date and logged meal coverage, and use the fixed introduction or coverage subcaption. Installed extensions own their native rendering of the same immutable snapshot. The value-free provider message-body fallback is only the short `Your daily nutrition.` label, keeping private nutrition values out of conversation-list, lock-screen, and notification text while avoiding Apple data detectors that can downgrade the card. Capability failure or a definitive pre-acceptance card rejection still replaces the card with the complete deterministic semantic text through the existing outbox path. The HTTPS message URL carries the immutable V1 or V2 snapshot in the existing bounded Base64URL fragment family for offline extension rendering; the queryless image path carries the same bounded presentation envelope to a stateless Vercel `ImageResponse` route for Linq rehosting. Encoding is not encryption, and neither representation may contain member identity, a canonical record reference, credential, or other authority. The route performs no database or remote read, rejects invalid input before asset reads, emits no application log or analytics event, and returns private no-store/no-index headers. Deploy the compatible iOS reader first, the Web image route second, and the runtime producer last; the Web route must remain available while any sent static image URL may still be fetched. Interactive rollout requires production-device proof because provider acceptance and delivery receipts do not prove the extension draw, provider-owned static composition, image-failure result, or VoiceOver output. After the first V2 card-bearing state or effect, the V2-capable Worker and runner are the rollback floor.
 - Linq nutrition-card recipient, sender, target, and directness come only from one ephemeral Web-resolved send-time route, which the runtime reasserts unchanged before capability access and provider dispatch. An authorized private scheduled occurrence therefore performs extension capability lookup and sends its native card without requiring a foreground actor; route drift is provider-skipped and cannot become a plaintext fallback, while non-authority capability failure or unavailability and definitive card rejection retain the existing persisted text recovery.
 - Daily nutrition targets are optional. Fresh V2 authoring is exactly all-null totals-only or all-five accepted compatible snapshots, never mixed; historical nullable replay remains supported. `meal totals --resolve-goals` owns exact same-date totals and target authority: `ready` uses all five snapshots, `missing` uses all nulls even with a compatible subset, and conflict/incompatible/capacity remains text-only without mutations. Ordinary private meal replies, including ordinary scheduled-check-in replies, have default card intent after verified capture, not authority to repair unrelated meals or accept targets. Explicit summaries retain exact-meal recovery and informed explicit partial requests. Complete stored records do not prove every meal eaten was logged. Number-sensitive/intuitive-eating/eating-disorder contexts suppress numerical cards; a constraint affecting target advice does not automatically suppress benign logged totals. Missing target-derivation inputs do not trigger a universal medical or measurement preflight. Only explicit target-setting enters the existing paused proposal, explanation, acceptance and decline workflow. A meal, summary, card request, silence or scheduled closeout never proposes, accepts, activates, revises or abandons targets. Scheduled work keeps its existing date, cleanup and question authority and never invites goal setup.
 - The only companion allowance is the fixed, brief optional-goals introduction on a first suitable complete totals-only card. It is frozen in the same semantic message/outbox effect, not a second send or arbitrary analysis. Canonical memory/instructions and conversation own prior decline and number preferences; an existing managed proposal of any status or the canonical sent note suppresses introduction. The outbox records that note only after successful send evidence, including definitive text fallback; a confirmation failure retries reconciliation without resending. Pending/staged copy is not delivery. Concurrent pre-confirmation turns can both select the optional introduction; no new global reservation, store or workflow is introduced. See `agent-docs/product-specs/nutrition-totals-card.md` for the bounded tradeoff and proof requirements.
-- Compact-table response cards use the same one-effect delivery and stateless image fallback as nutrition cards. Generic tables encode strict authority-free V3 presentation data; workout tables encode strict authority-free V4 tuples and derive progress only from those workout sets. The rectangular image embeds the canonical Murph mark in the native upper-left badge footprint and leaves the outer corner mask to Messages; it reserves no larger empty icon gutter. Generic-table provider chrome preserves its rows and cells. Exact intrinsic header-and-cell track width plus gutters is the sole layout selector: fitting tables, including four-column tables, keep one shared header, while genuinely overwide tables repeat each measured header above its full-width value so every contract-valid token is contained. Structured-workout chrome stays bounded to the title and derived progress. The complete workout semantics remain in the deterministic text renderer, and the image-failure recovery fallback carries no private values. Both the native fragment and queryless image URL remain below the provider limit, and invalid image requests fail closed without changing that text fallback. Deploy the compatible V4 native reader first, the shared Web image route second, and the Worker and runner producer last. Keep the Web route available while a sent image URL may be fetched. Once either persisted owner accepts V4, the compatible Worker and runner remain the rollback floor. Static and interactive rollout still require macOS and no-extension iPhone proof, including image failure, accessibility behavior, and absence of App Store fallback artwork.
-- Challenge-standings response cards reuse that one-effect, stateless fallback path with a strict authority-free V5 envelope. The native fragment and provider captions preserve the complete room-authorized snapshot. The queryless image payload instead uses a fixed title, no subtitle or footer, and ordinal participant or team labels so its path contains no member, team, or challenge identity; scorer-owned order, scores, coverage, target, and collective counts remain unchanged. The generated image mirrors the ranked and collective hierarchy without format or per-row coverage labels, embeds the canonical mark in the native badge footprint, and places the title beside it in the shared fallback header. The contract admits a card only when both its native fragment and queryless image URL remain below the provider limit, so adding the image fallback cannot turn a valid card into a provider-rejected send. Deploy the compatible V5 iOS reader first, the shared Web image route second, and the Worker and runner producer last. Keep the Web route available while a sent standings image URL may be fetched; after the first V5 card-bearing effect, the compatible Worker and runner remain the rollback floor.
+- Compact-table response cards use the same one-effect delivery and stateless image fallback as nutrition cards. Generic tables encode strict authority-free V3 presentation data; workout tables encode strict authority-free V4 tuples and derive progress only from those workout sets. The rectangular image leaves the native upper-left badge footprint empty for the Messages-drawn app art and leaves the outer corner mask to Messages; it reserves no larger empty icon gutter. Generic-table provider chrome preserves its rows and cells. Exact intrinsic header-and-cell track width plus gutters is the sole layout selector: fitting tables, including four-column tables, keep one shared header, while genuinely overwide tables repeat each measured header above its full-width value so every contract-valid token is contained. Structured-workout chrome stays bounded to the title and derived progress. The complete workout semantics remain in the deterministic text renderer, and the image-failure recovery fallback carries no private values. Both the native fragment and queryless image URL remain below the provider limit, and invalid image requests fail closed without changing that text fallback. Deploy the compatible V4 native reader first, the shared Web image route second, and the Worker and runner producer last. Keep the Web route available while a sent image URL may be fetched. Once either persisted owner accepts V4, the compatible Worker and runner remain the rollback floor. Static and interactive rollout still require macOS and no-extension iPhone proof, including image failure, accessibility behavior, and exactly one Messages-drawn app badge.
+- Challenge-standings response cards reuse that one-effect, stateless fallback path with a strict authority-free V5 envelope. The native fragment and provider captions preserve the complete room-authorized snapshot. The queryless image payload instead uses a fixed title, no subtitle or footer, and ordinal participant or team labels so its path contains no member, team, or challenge identity; scorer-owned order, scores, coverage, target, and collective counts remain unchanged. The generated image mirrors the ranked and collective hierarchy without format or per-row coverage labels, leaves the native badge footprint empty for the Messages-drawn app art, and places the title beside it in the shared fallback header. The contract admits a card only when both its native fragment and queryless image URL remain below the provider limit, so adding the image fallback cannot turn a valid card into a provider-rejected send. Deploy the compatible V5 iOS reader first, the shared Web image route second, and the Worker and runner producer last. Keep the Web route available while a sent standings image URL may be fetched; after the first V5 card-bearing effect, the compatible Worker and runner remain the rollback floor.
 - Tool-enabled assistant provider turns should disable automatic model retries once local side-effecting tools are in play, so bounded assistant/vault operations are never replayed implicitly by transport-layer retry. Bound tool execution failures should be returned to the model as structured tool results so the model can recover inside the same turn instead of aborting the provider turn.
 - Assistant product-feedback capture is available only with current accepted-message authority and accepts at most one in-memory candidate during a successful provider turn. The assistant execution context can only hand that candidate to its hosted invocation synchronously; the existing web-control write remains post-checkpoint and starts only after a current-turn member-channel send succeeds. Scheduled occurrences create no ordinary feedback candidate, staged delivery obligation, or no-reply exception. Feedback never counts as a provider side effect for transport retry safety, and persistence remains best-effort with a two-second maximum deadline, no retry queue, and no user-visible delivery state. The accepted-input-derived idempotency key remains the ambiguity fence when a timed-out write may already have reached Web.
 - Exact private support escalation remains the bounded in-turn exception to ordinary post-reply feedback persistence. Under the same member-scoped advisory lock, Web writes the fixed member marker plus the anonymous bounded and sanitized issue Murph wrote in its own words, reads and validates both rows, and ranks the member marker for the three-per-UTC-day alert cap. An eligible provider attempt formats from the first stored issue rather than callback memory and uses the feedback-derived Resend idempotency key, so replay has one stable body even when a later callback supplies different wording; missing, member-linked, unsanitized, still-prefixed, or malformed stored detail fails before email. Later records remain durable without another alert; missing email configuration or provider failure remains visible to the current turn without adding a retry queue or second delivery owner.
@@ -3503,6 +3599,18 @@ to apply after cutover.
   not block snapshot capture and retry only while the source evidence remains
   retained.
 - Observability writes (logs, latency traces, diagnostics, metrics) must never block user-facing latency: queue or fire-and-forget them off the reply hot path and flush at invocation end, per the `Foreground Reply Critical Path` invariants in `docs/contracts/00-invariants.md`. Only warn/error crash-tail writes may block, bounded by the process exit backstop.
+- Already-available assistant latency milestones share a bounded callback (at most
+  eight events within the existing 32 KiB body limit). There is no coalescing
+  timer or invocation-end buffer. Web validates every event's exact attempt fence
+  before writing and processes events serially through the existing store, so
+  each batch uses at most one active persistence operation. Positional outcomes
+  retain each event's existing three-attempt retry budget, timestamps and typing
+  alert scheduling; successful events do not retry with failed siblings. Detached
+  staging may still arrive later, so unmatched events retain their bounded retry.
+  Singleton producers and ports remain supported. The existing Web protocol
+  admission requires the batch parser before new Worker activation; deploy Web
+  first and retain its reader until batch-producing runners drain.
+
 - The best-effort ingress-latency checkpoint-publication milestone updates at
   most 250 of the newest currently staged, unconsumed traces for the
   authenticated member and source in one set-based statement. A 251st locked

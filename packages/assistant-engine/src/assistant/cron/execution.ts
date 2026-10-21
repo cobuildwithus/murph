@@ -48,6 +48,7 @@ import {
 } from '../automation/shared.js'
 import {
   appendAssistantHostedDynamicContextPrompt,
+  scopeAssistantAutomationToolToRoute,
   type AssistantExecutionContext,
 } from '../execution-context.js'
 import {
@@ -71,8 +72,6 @@ import {
 import {
   runOnboardingGoalCheckinAuthorityPrecondition,
 } from '../onboarding-goal-checkin-automation.js'
-import { canSkipManagedJournalConnectedContext } from '../journal-connected-context-eligibility.js'
-import { canSkipManagedPersonalPatterns } from '../personal-patterns-eligibility.js'
 import { canSkipManagedAutomaticMealCloseout } from '../automatic-meal-closeout-eligibility.js'
 import {
   buildAssistantLinqDeliveryPosturePrompt,
@@ -132,6 +131,7 @@ import { readAssistantDeviceActivityParentAutomation } from '../device-activity-
 import {
   buildCanonicalAutomationUpsertInput,
   buildVisibleLocalAssistantCronStore,
+  ASSISTANT_CRON_FLEX_RETRY_AUTOMATION_IDS,
   isAssistantCronNotificationOccurrenceFresh,
   isCanonicalAssistantCronNotificationOccurrenceDeliverable,
   isCanonicalAssistantCronSourceEnabled,
@@ -201,10 +201,19 @@ export const ASSISTANT_CRON_INDEPENDENT_AUTOMATION_AUTHORITY_INSTRUCTIONS = [
   '- Completion of a broader plan is not proof that this occurrence\'s requested action already happened.',
   '- You may still skip when the saved instructions authorize that outcome or current evidence proves the requested action already happened.',
 ].join('\n')
+export const ASSISTANT_CRON_MEMBER_WORDING_INSTRUCTIONS = [
+  'Member-facing wording (engine-supplied; applies to any message this run sends):',
+  "- The saved instructions above are Murph's own notes, not message copy. The member may not have thought about this plan for days and has probably been texting about other things since, so the message must make sense on its own.",
+  '- Name the specific plan, task, or item in everyday words that respect any saved privacy boundary, and refer to earlier messages by what they said and when.',
+  '- Never call an earlier message a "cue" or "check-in", and never write disposition, support kind, or subject anchor. These are internal labels, even when the saved instructions use them. Say what the earlier message reminded or asked instead. For example, say "the monday walk reminders and friday questions about your walks" instead of "the monday cue and friday check-in".',
+  '- Do not describe what context or evidence you could or could not see.',
+  '- Keep saved wording verbatim only when the member dictated that exact copy.',
+].join('\n')
 // Hosted cron turns are off the user hotpath, so clean first runs prefer the
 // OpenAI flex tier (~50% token cost). The Codex provider boundary validates
 // route support and bounds flex execution with a deadline; failures land in the
-// normal cron backoff (30s first retry), and that retry runs at standard tier.
+// normal cron backoff (30s first retry). Maintenance stays on Flex; ordinary
+// reminders may retry at standard tier to bound delivery lateness.
 
 interface DueAssistantCronCandidate {
   canonicalEntry?: {
@@ -483,6 +492,28 @@ export function buildRunnableAssistantCronJobProjection(input: {
   }
 }
 
+export async function resolveAssistantCronWakeEntries(input: {
+  entries: readonly RunnableAssistantCronCanonicalEntry[]
+  vault: string
+}): Promise<readonly RunnableAssistantCronCanonicalEntry[]> {
+  const blockedCandidates = new Set(input.entries.filter((entry) =>
+    entry.job.enabled
+    && entry.runtimeState.state.runningAt === null
+    && entry.runtimeState.state.pendingDeliveryIntentId === null
+    && entry.runtimeState.state.retryAfterAt === null
+    && isResearchOrientedManagedAutomationCronJob({ kind: 'canonical', ...entry })
+  ))
+  if (blockedCandidates.size === 0) return input.entries
+
+  // Suppression is derived from onboarding, never a persisted pause. Hosted
+  // foreground completion refreshes the projection after delivery. Uncertain reads
+  // keep the ordinary timer so a transient failure cannot strand future work.
+  const onboarding = await readAssistantOnboardingState(input.vault).catch(() => null)
+  return onboarding?.status === 'open'
+    ? input.entries.filter((entry) => !blockedCandidates.has(entry))
+    : input.entries
+}
+
 export function isAssistantCronBackgroundMaintenanceYieldError(
   error: unknown,
 ): error is VaultCliError {
@@ -732,8 +763,6 @@ export async function executeClaimedAssistantCronJob(
       }
       lifecycleSkipReason = await runAssistantCronAutomationPreconditions({
         trigger: input.trigger,
-        consecutiveFailures: claimedJob.state.consecutiveFailures,
-        nowIso: startedAt,
         source: input.job.source,
         occurrenceAt,
         vault: input.vault,
@@ -831,6 +860,7 @@ export async function executeClaimedAssistantCronJob(
         const serviceTier = resolveAssistantCronTurnServiceTier({
           executionContext: input.executionContext ?? null,
           job: claimedJob,
+          backgroundMaintenance: assistantCronJobPrefersFlexRetries(input.job),
         })
         const scheduledInvocationAuthority =
           resolveAssistantCronScheduledInvocationAuthority({
@@ -890,7 +920,7 @@ export async function executeClaimedAssistantCronJob(
                 authorizedDelivery.deliveryPosture,
               ),
             })
-          const notificationExecutionContext =
+          const groupScopedExecutionContext =
             scopeAssistantCronScheduledGroupTools({
               channel: claimedJob.target.channel,
               executionContext: postureExecutionContext,
@@ -898,6 +928,12 @@ export async function executeClaimedAssistantCronJob(
               routeAuthorityVerified: !maintenanceJob,
               scheduledInvocationAuthority,
             })
+          const notificationExecutionContext = scopeAssistantCronAutomationTool({
+            executionContext: groupScopedExecutionContext,
+            target: claimedJob.target,
+            authorizedDelivery,
+            routeAuthorityVerified: !maintenanceJob,
+          })
           const assertNotificationStillAuthorized = async (
             authorityGate: AssistantCronOnboardingFollowupDiagnostic['authorityGate'],
           ): Promise<void> => {
@@ -1873,6 +1909,7 @@ export function buildAssistantCronExecutionInstructions(
   )
   const recurringReminderConversation =
     buildAssistantCronRecurringReminderConversationInstructions(job)
+  const memberWording = buildAssistantCronMemberWordingInstructions(job)
   const overlays = [
     buildMurphManagedJournalCalendarWindowInstructions(
       job.kind === 'canonical' && job.source.kind === 'automation' ? job.source.automationId : null,
@@ -1884,6 +1921,7 @@ export function buildAssistantCronExecutionInstructions(
     recurringReminderConversation,
     supportScope,
     exerciseCue,
+    memberWording,
   ]
     .filter((section): section is string => section !== null)
   const providerSafeBase =
@@ -1959,6 +1997,22 @@ function buildAssistantCronIndependentAutomationAuthorityInstructions(
   return ASSISTANT_CRON_INDEPENDENT_AUTOMATION_AUTHORITY_INSTRUCTIONS
 }
 
+function buildAssistantCronMemberWordingInstructions(
+  job: ResolvedAssistantCronJob,
+): string | null {
+  // Murph-managed jobs follow their owning skill's message shape.
+  if (
+    job.kind !== 'canonical' ||
+    job.source.kind !== 'automation' ||
+    assistantCronJobIsPreemptibleBackgroundMaintenance(job) ||
+    resolveMurphManagedAutomationOwnerScope(job.source.automationId) !== null
+  ) {
+    return null
+  }
+
+  return ASSISTANT_CRON_MEMBER_WORDING_INSTRUCTIONS
+}
+
 function buildAssistantCronSupportScopeInstructions(
   job: ResolvedAssistantCronJob,
 ): string | null {
@@ -1977,7 +2031,7 @@ function buildAssistantCronSupportScopeInstructions(
     ? 'Deliver only the agreed reminder purpose, including a consented first-session walkthrough when the automation says so, plus any necessary skip or invalid-state note. For a recurring reminder, the engine-supplied cadence-administration question is the sole allowed exception to cue-only delivery. Do not ask whether the action was completed or add a proactive repair, accountability, or reflection question.'
     : job.source.supportKind === 'check_in'
       ? 'Ask at most one narrow check-in or repair question about the current plan. Do not expand into a review, digest, or new coaching agenda.'
-      : "Conduct only the bounded review and ask at most one question requesting the user's continue, modify, pause, stop, or escalate decision. Do not record or apply that decision until the user replies in a later turn. Do not add a recurring accountability loop."
+      : "Conduct only the bounded review and ask exactly one question about what the user wants next; fold any question about whether the support helped into it. Offer the next-step options the saved instructions name; if they name none, ask whether to continue, modify, pause, stop, or escalate. Do not record or apply that decision until the user replies in a later turn. Do not add a recurring accountability loop."
 
   return [
     'Accepted support scope (engine-supplied; this overrides any broader repair or follow-up option above):',
@@ -2051,8 +2105,6 @@ function assistantCronTimestampIsLater(
 
 async function runAssistantCronAutomationPreconditions(input: {
   trigger: AssistantCronTrigger
-  consecutiveFailures: number
-  nowIso: string
   source: CanonicalAutomationAssistantCronJobRecord
   occurrenceAt: string
   vault: string
@@ -2083,29 +2135,6 @@ async function runAssistantCronAutomationPreconditions(input: {
   if (lifecycleResult?.kind === 'skip') {
     lifecycleSkipReason = lifecycleResult.reason
   }
-  if (
-    lifecycleSkipReason === null &&
-    await canSkipManagedJournalConnectedContext({
-      automationId: input.source.automationId,
-      connectedApps: input.executionContext?.hosted?.connectedApps ?? null,
-      signal: input.signal,
-      vaultRoot: input.vault,
-    })
-  ) {
-    lifecycleSkipReason = 'Journal connected context has no connected accounts or existing ledger.'
-  }
-  if (lifecycleSkipReason === null
-    && input.trigger === 'scheduled' && input.consecutiveFailures === 0
-    && await canSkipManagedPersonalPatterns({
-      automationId: input.source.automationId,
-      instructions: input.source.instructions,
-      nowIso: input.nowIso,
-      signal: input.signal,
-      timeZone: input.source.timeZone,
-      vaultRoot: input.vault,
-    })) {
-    lifecycleSkipReason = 'Personal Patterns factors, results, and grades are already reviewed.'
-  }
   if (lifecycleSkipReason === null && input.trigger === 'scheduled'
     && await canSkipManagedAutomaticMealCloseout({
       automationId: input.source.automationId,
@@ -2119,7 +2148,14 @@ async function runAssistantCronAutomationPreconditions(input: {
   return lifecycleSkipReason
 }
 
+function assistantCronJobPrefersFlexRetries(job: ResolvedAssistantCronJob): boolean {
+  return assistantCronJobIsPreemptibleBackgroundMaintenance(job)
+    || (job.kind === 'canonical' && job.source.kind === 'automation'
+      && ASSISTANT_CRON_FLEX_RETRY_AUTOMATION_IDS.has(job.source.automationId))
+}
+
 function resolveAssistantCronTurnServiceTier(input: {
+  backgroundMaintenance: boolean
   executionContext: AssistantExecutionContext | null
   job: AssistantCronJob
 }): AssistantProviderServiceTier | null {
@@ -2128,9 +2164,11 @@ function resolveAssistantCronTurnServiceTier(input: {
     return null
   }
 
-  // Retries after a failed (or deadline-aborted) flex run use the standard
-  // tier so the existing 30s failure backoff bounds reminder lateness.
-  return input.job.state.consecutiveFailures === 0 ? 'flex' : null
+  // Maintenance tolerates capacity delays and retains Flex pricing on retries.
+  // Ordinary reminders retain the standard-tier fallback after their first failure.
+  return input.backgroundMaintenance || input.job.state.consecutiveFailures === 0
+    ? 'flex'
+    : null
 }
 
 function resolveAssistantCronAutomationTargetOverride(
@@ -2320,7 +2358,7 @@ function finalizeAssistantCronJobAfterRun(input: {
       new Date(input.finishedAt),
     )
 
-    if (input.run.outcome === 'failed') {
+    if (input.run.outcome === 'failed' || input.run.outcome === 'expired') {
       return assistantCronJobSchema.parse({
         ...input.job,
         enabled:
@@ -2543,7 +2581,7 @@ function finalizeCanonicalAssistantCronRuntimeAfterRun(input: {
       input.failureConsumesOccurrence,
     )
   ) {
-    if (input.run.outcome === 'failed') {
+    if (input.run.outcome === 'failed' || input.run.outcome === 'expired') {
       return {
         ...input.runtimeState,
         sessionId: input.responseSessionId ?? input.runtimeState.sessionId,
@@ -2856,6 +2894,29 @@ function assistantCronExecutionDeliveryTargetProfile(input: {
   const isHostedExecution =
     normalizeNullableString(input.executionContext?.hosted?.memberId) !== null
   return isHostedExecution ? 'hosted' : 'local'
+}
+
+function scopeAssistantCronAutomationTool(input: {
+  executionContext: AssistantExecutionContext | null | undefined
+  target: AssistantCronJob['target']
+  authorizedDelivery: AssistantCronAuthorizedNotificationDelivery
+  routeAuthorityVerified: boolean
+}): AssistantExecutionContext {
+  const { route, conversationThreadId } = input.authorizedDelivery
+  const deliveryTarget = route.bindingDelivery?.target ?? route.deliveryTarget
+  return scopeAssistantAutomationToolToRoute({
+    executionContext: input.executionContext ?? { hosted: null },
+    route: input.routeAuthorityVerified && input.target.channel && deliveryTarget
+      ? {
+          channel: input.target.channel,
+          deliveryTarget,
+          identityId: input.target.identityId,
+          participantId: input.target.participantId,
+          threadId: conversationThreadId ?? input.target.threadId,
+          threadIsDirect: route.threadIsDirect,
+        }
+      : null,
+  })
 }
 
 function scopeAssistantCronScheduledGroupTools(input: {

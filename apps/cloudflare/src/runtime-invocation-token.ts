@@ -5,7 +5,6 @@ export interface RunnerWriteFenceToken {
   generation: string;
   kind: "runtime";
   processingMode: HostedWorkspaceInvocationProcessingMode;
-  providerEgressToken: string | null;
   runnerContainerName: string | null;
   startedAt: string;
   userId: string;

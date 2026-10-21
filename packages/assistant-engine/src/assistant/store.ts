@@ -139,7 +139,6 @@ async function resolveAssistantSessionWithPersistence(
     await Promise.all([
       ensureAssistantStateDirectory(paths.sessionsDirectory),
       ensureAssistantStateDirectory(paths.stateDirectory),
-      ensureAssistantStateDirectory(paths.sessionSecretsDirectory),
     ])
     const requestedProviderOptions =
       resolveAssistantSessionRequestedProviderOptions(input)

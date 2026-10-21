@@ -603,6 +603,24 @@ describe("hosted web production migration guard", () => {
     );
   });
 
+  test("limits Linq recovery compatibility to its additive defaulted fields", async () => {
+    const migrationsDir = await mkdtemp(path.join(tmpdir(), "hosted-web-prisma-migrations-"));
+    const migrationId = "20261008210000_linq_bounded_terminal_recovery";
+    try {
+      const sql = await readFile(path.join(appRoot, "prisma", "migrations", migrationId, "migration.sql"), "utf8");
+      await writeMigrationSql(migrationsDir, migrationId, sql);
+      assert.deepEqual(await findHostedWebPrismaPredeployDestructiveMigrations(migrationsDir), []);
+      await writeMigrationSql(migrationsDir, migrationId, `${sql}\nDROP TABLE "hosted_member";`);
+      assert.deepEqual(
+        (await findHostedWebPrismaPredeployDestructiveMigrations(migrationsDir))
+          .map(({ migrationId: id, reason }) => ({ migrationId: id, reason })),
+        [{ migrationId, reason: "DROP TABLE" }],
+      );
+    } finally {
+      await rm(migrationsDir, { force: true, recursive: true });
+    }
+  });
+
   test("limits the detached direct-proof predeploy exception to its proved DDL", async () => {
     const migrationsDir = await mkdtemp(
       path.join(tmpdir(), "hosted-web-prisma-migrations-"),
@@ -2031,7 +2049,7 @@ describe("hosted web production migration guard", () => {
     assert.match(productionNextBuildScript, /^#!\/usr\/bin\/env bash\nset -euo pipefail$/mu);
     assert.match(productionNextBuildScript, /parent_old_space_mb=1024/u);
     assert.match(productionNextBuildScript, /build_worker_old_space_mb=3072/u);
-    assert.match(productionNextBuildScript, /typecheck_old_space_mb=6144/u);
+    assert.match(productionNextBuildScript, /\.\.\/\.\.\/scripts\/run-typescript\.mjs web/u);
     assert.match(
       productionNextBuildScript,
       /build_cache_epoch=webpack-next-16\.3-v6-isolated-worker-no-webpack-cache/u,
@@ -2581,7 +2599,7 @@ fi
       ),
       {
         path: "/api/internal/hosted-growth/usage-referral/cron",
-        schedule: "* * * * *",
+        schedule: "*/5 * * * *",
       },
     );
     assert.deepEqual(

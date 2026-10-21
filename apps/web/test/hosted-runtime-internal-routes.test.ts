@@ -9,7 +9,12 @@ import {
   parseHostedWorkspaceReadResponse,
 } from "@murphai/hosted-execution/parsers";
 import { Prisma } from "@prisma/client";
+import { NextResponse } from "next/server";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+
+import { readRawBodyBuffer } from "../src/lib/http";
+import { hostedOnboardingError } from "../src/lib/hosted-onboarding/errors";
+import { HOSTED_RUNTIME_LATENCY_TRACE_BODY_LIMIT_BYTES } from "@murphai/hosted-execution/runtime-control";
 
 const FIXED_NOW = "2026-04-26T00:00:00.000Z";
 const MAILBOX_ITEM_2_PAYLOAD_REF = "hosted-mailbox-payload:mailbox_item_2";
@@ -31,9 +36,7 @@ const mocks = vi.hoisted(() => ({
   requireHostedRuntimeCallbackTx: vi.fn(),
   isHostedRuntimeLogDatabaseConfigured: vi.fn(),
   listHostedRuntimeLogs: vi.fn(),
-  hasHostedPersonalPatternsRunAlert: vi.fn(),
   publishLatestBrowserVaultReplicaRef: vi.fn(),
-  reportHostedPersonalPatternsRunAlerts: vi.fn(),
   claimHostedAcceptedAttemptFailureRecheck: vi.fn(),
   readHostedMailboxConsumedSeqByLane: vi.fn(),
   readHostedMailboxItemByDedupeKey: vi.fn(),
@@ -85,12 +88,15 @@ vi.mock("@/src/lib/hosted-mailbox/store", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/src/lib/hosted-mailbox/store")>()),
   fetchHostedMailboxItemsAfterLaneCursors: mocks.fetchHostedMailboxItemsAfterLaneCursors,
   fetchHostedMailboxPayload: mocks.fetchHostedMailboxPayload,
-  fetchHostedRuntimeMailboxProjection: mocks.fetchHostedRuntimeMailboxProjection,
   readHostedMailboxConsumedSeqByLane: mocks.readHostedMailboxConsumedSeqByLane,
   readHostedMailboxItemByDedupeKey: mocks.readHostedMailboxItemByDedupeKey,
   readHostedMailboxMaxSeqByLane: mocks.readHostedMailboxMaxSeqByLane,
-  tryMarkHostedMailboxConversationAiUsageDenied:
-    mocks.tryMarkHostedMailboxConversationAiUsageDenied,
+}));
+
+vi.mock("@/src/lib/hosted-mailbox/projection", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/src/lib/hosted-mailbox/projection")>(),
+  fetchHostedRuntimeMailboxProjection: mocks.fetchHostedRuntimeMailboxProjection,
+  tryMarkHostedMailboxConversationAiUsageDenied: mocks.tryMarkHostedMailboxConversationAiUsageDenied,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", () => ({
@@ -99,8 +105,6 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", () => ({
 
 vi.mock("@/src/lib/hosted-onboarding/assistant-model-preference", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/src/lib/hosted-onboarding/assistant-model-preference")>()),
-  isHostedVeniceAssistantEnabled: () =>
-    process.env.HOSTED_VENICE_ENABLED === "1",
   readHostedMemberAssistantModelPreference:
     mocks.readHostedMemberAssistantModelPreference,
 }));
@@ -134,13 +138,6 @@ vi.mock("@/src/lib/hosted-workspace/runtime-publication", () => ({
 
 vi.mock("@/src/lib/hosted-runtime-log/write", () => ({
   writeHostedRuntimeLogs: mocks.recordHostedRuntimeLogs,
-}));
-
-vi.mock("@/src/lib/hosted-runtime-log/personal-patterns-run-alert", () => ({
-  hasHostedPersonalPatternsRunAlert:
-    mocks.hasHostedPersonalPatternsRunAlert,
-  reportHostedPersonalPatternsRunAlerts:
-    mocks.reportHostedPersonalPatternsRunAlerts,
 }));
 
 vi.mock("@/src/lib/hosted-runtime-log/database", async (importOriginal) => ({
@@ -204,6 +201,85 @@ let runtimeLatencyRoute: RuntimeLatencyRoute;
 let runtimeStatusRoute: RuntimeStatusRoute;
 
 describe("hosted runtime internal web routes", () => {
+  it.each(["streamed", "declared"])("keeps latency batch requests inside the existing byte limit: %s", async mode => {
+    mocks.requireHostedCloudflareCallbackJsonRequest.mockImplementation(async (request: Request, options: { maxBodyBytes: number }) => ({
+      payload: JSON.parse((await readRawBodyBuffer(request, { limitBytes: options.maxBodyBytes })).toString("utf8")),
+      userId: "member_routes_1",
+    }));
+    const ok = { matchedCount: 1, recorded: true, unmatchedCount: 0 };
+    mocks.recordHostedIngressAssistantMilestone.mockResolvedValue(ok);
+    const payload = JSON.stringify({ events: [{ type: "assistant_milestone", source: "linq", runtimeAttemptId: "attempt_routes_1",
+      assistantInputIds: ["synthetic-input"], milestone: "first_codex_output_observed", at: FIXED_NOW }] });
+    const atLimit = payload + " ".repeat(HOSTED_RUNTIME_LATENCY_TRACE_BODY_LIMIT_BYTES - Buffer.byteLength(payload));
+    const request = (body: string) => new Request("https://web.example.test/api/internal/hosted-runtime/latency", {
+      method: "POST", body, headers: { ...runtimeWriteFenceHeaders(), "content-type": "application/json",
+        ...(mode === "declared" ? { "content-length": String(Buffer.byteLength(body)) } : {}) },
+    });
+    expect((await runtimeLatencyRoute.POST(request(atLimit))).status).toBe(200);
+    expect((await runtimeLatencyRoute.POST(request(atLimit + " "))).status).toBe(413);
+    expect(mocks.recordHostedIngressAssistantMilestone).toHaveBeenCalledOnce();
+  });
+
+  it("records milestone batches serially with per-event results and immediate typing alerts", async () => {
+    const ok = { matchedCount: 1, recorded: true, unmatchedCount: 0 };
+    let releaseFirst!: () => void;
+    const first = new Promise<void>(resolve => { releaseFirst = resolve; });
+    mocks.recordHostedIngressAssistantMilestone
+      .mockImplementationOnce(async () => { await first; return ok; })
+      .mockRejectedValueOnce(new Error("Synthetic persistence failure"))
+      .mockResolvedValueOnce(ok);
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const milestones = ["linq_typing_accepted", "first_codex_output_observed", "first_codex_text_observed"];
+    const events = milestones.map((milestone, index) => ({
+      type: "assistant_milestone", source: "linq", runtimeAttemptId: "attempt_routes_1",
+      assistantInputIds: ["synthetic-input"], milestone, at: `2026-04-26T00:00:00.00${index}Z`,
+    }));
+    try {
+      const pending = runtimeLatencyRoute.POST(jsonRequest("/api/internal/hosted-runtime/latency", { events }, runtimeWriteFenceHeaders()));
+      await vi.waitFor(() => expect(mocks.recordHostedIngressAssistantMilestone).toHaveBeenCalledOnce());
+      releaseFirst();
+      const response = await pending;
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ results: [ok, null, ok] });
+      expect(mocks.recordHostedIngressAssistantMilestone.mock.calls.map(([event]) => event.milestone)).toEqual(milestones);
+      expect(mocks.recordHostedIngressAssistantMilestone.mock.calls.map(([event]) => event.at)).toEqual(events.map(event => event.at));
+      expect(mocks.after).toHaveBeenCalledOnce();
+      await mocks.after.mock.calls[0]?.[0]();
+      expect(mocks.reportHostedRuntimeTypingAlerts).toHaveBeenCalledWith({ userId: "member_routes_1", assistantInputIds: ["synthetic-input"] });
+    } finally { releaseFirst(); error.mockRestore(); }
+  });
+
+  it.each([false, true])("records runtime milestone batches with the existing attempt fence (mismatch=%s)", async mismatch => {
+    const ok = { matchedCount: 1, recorded: true, unmatchedCount: 0 };
+    mocks.recordHostedIngressRuntimeMilestone.mockResolvedValue(ok);
+    const events = ["email", "linq", "telegram"].map(source => ({
+      type: "runtime_milestone", source, at: FIXED_NOW,
+      runtimeAttemptId: mismatch && source === "telegram" ? "other-attempt" : "attempt_routes_1",
+      milestone: "checkpoint_publication_expected_by",
+    }));
+    const response = await runtimeLatencyRoute.POST(jsonRequest("/api/internal/hosted-runtime/latency", { events }, runtimeWriteFenceHeaders()));
+    expect(response.status).toBe(mismatch ? 401 : 200);
+    expect(mocks.recordHostedIngressRuntimeMilestone).toHaveBeenCalledTimes(mismatch ? 0 : 3);
+    if (!mismatch) {
+      expect(await response.json()).toEqual({ results: [ok, ok, ok] });
+      expect(mocks.recordHostedIngressRuntimeMilestone.mock.calls.map(([event]) => event.source)).toEqual(["email", "linq", "telegram"]);
+    }
+    expect(mocks.recordHostedIngressAssistantMilestone).not.toHaveBeenCalled();
+  });
+
+  it.each(["fence", "event", "count", "empty", "ambiguous"])("rejects invalid milestone batches before any persistence: %s", async invalid => {
+    const event = { type: "assistant_milestone", source: "linq", runtimeAttemptId: "attempt_routes_1",
+      assistantInputIds: ["synthetic-input"], milestone: "first_codex_output_observed", at: FIXED_NOW };
+    const payload = invalid === "empty" ? { events: [] }
+      : invalid === "count" ? { events: Array.from({ length: 9 }, () => event) }
+      : invalid === "ambiguous" ? { event, events: [event] }
+      : { events: [event, { ...event, ...(invalid === "fence" ? { runtimeAttemptId: "other-attempt" } : { milestone: "invalid" }) }] };
+    const response = await runtimeLatencyRoute.POST(jsonRequest("/api/internal/hosted-runtime/latency", payload, runtimeWriteFenceHeaders()));
+    expect(response.status).toBe(invalid === "fence" ? 401 : 400);
+    expect(mocks.recordHostedIngressAssistantMilestone).not.toHaveBeenCalled();
+    expect(mocks.after).not.toHaveBeenCalled();
+  });
+
   beforeAll(async () => {
     mailboxFetchRoute = await import("../app/api/internal/hosted-mailbox/fetch/route");
     mailboxPayloadFetchRoute = await import(
@@ -231,10 +307,7 @@ describe("hosted runtime internal web routes", () => {
       schema: "murph.hosted-runtime-crypto-context.v1", userId: "member_routes_1",
       cacheMaxAgeMs: 300_000, cryptoContextVersion: "synthetic-version", envelopes: { ingress: {} },
     });
-    mocks.hasHostedPersonalPatternsRunAlert.mockReturnValue(false);
     delete process.env.HOSTED_CUSTOM_CHAT_COMPLETIONS_ENABLED;
-    delete process.env.HOSTED_CUSTOM_INFERENCE_ENABLED;
-    delete process.env.HOSTED_VENICE_ENABLED;
     mocks.hostedRuntimeMailboxMemberFindUnique.mockResolvedValue(
       buildRuntimeMailboxAccessRecord(),
     );
@@ -299,7 +372,8 @@ describe("hosted runtime internal web routes", () => {
     });
     mocks.readHostedMailboxItemByDedupeKey.mockResolvedValue(null);
     mocks.readHostedMemberAssistantModelPreference.mockResolvedValue({
-      model: "gpt-5.6-terra",
+      availableModels: [],
+      model: "gpt-6.1-sol",
       solAvailable: false,
     });
     mocks.readHostedActiveGroupRunningBit.mockResolvedValue(null);
@@ -528,31 +602,46 @@ describe("hosted runtime internal web routes", () => {
     },
   );
 
-  it.each([
-    { selected: true, revision: 3, expected: 3 },
-    { selected: true, revision: 4, expected: 4 },
-    { selected: false, revision: 4, expected: null },
-  ])("projects the saved custom revision on an empty mailbox: $expected", async ({ selected, revision, expected }) => {
-    mocks.hostedRuntimeMailboxMemberFindUnique.mockResolvedValueOnce({
-      ...buildRuntimeMailboxAccessRecord(),
-      inferenceConnection: { selected, revision },
+  it("reports mailbox timings without adding reads or putting identifiers in headers", async () => {
+    let elapsed = 0;
+    const clock = vi.spyOn(performance, "now").mockImplementation(() => elapsed);
+    const prisma = createPrismaClientStub();
+    prisma.$transaction = async (run) => {
+      elapsed += 80;
+      const value = await run(prisma);
+      elapsed += 20;
+      return value;
+    };
+    mocks.getPrisma.mockReturnValue(prisma);
+    mocks.requireHostedCloudflareCallbackRequest.mockImplementationOnce(async () => {
+      elapsed += 30;
+      return "member_routes_1";
     });
-    mocks.fetchHostedMailboxItemsAfterLaneCursors.mockResolvedValueOnce({ items: [] });
-    mocks.readHostedMailboxMaxSeqByLane.mockResolvedValueOnce([]);
-    const response = await mailboxFetchRoute.POST(jsonRequest(
-      "/api/internal/hosted-mailbox/fetch",
-      {
-        lanes: [{ importedSeq: "0", lane: "conversation" }],
-        limitPerLane: 10,
-        requestId: "request_custom_route_identity",
-      },
-    ));
-    expect(response.status).toBe(200);
-    const payload = parseHostedMailboxFetchResponse(await response.json());
-    expect(payload.assistantCustomInferenceRevision).toBe(expected);
-    expect(payload.items).toEqual([]);
-    expect(mocks.hostedRuntimeMailboxMemberFindUnique).toHaveBeenCalledOnce();
-    expect(mocks.readHostedMemberAssistantModelPreference).not.toHaveBeenCalled();
+    mocks.requireHostedRuntimeCallbackTx.mockImplementationOnce(async () => { elapsed += 40; });
+    mocks.hostedRuntimeMailboxMemberFindUnique.mockImplementationOnce(async () => {
+      elapsed += 50;
+      return buildRuntimeMailboxAccessRecord();
+    });
+    mocks.fetchHostedRuntimeMailboxProjection.mockImplementationOnce(async () => {
+      elapsed += 400;
+      return { items: [], consumedSeqByLane: [], maxSeqByLane: [] };
+    });
+    try {
+      const response = await mailboxFetchRoute.POST(jsonRequest("/api/internal/hosted-mailbox/fetch", {
+        lanes: [{ importedSeq: "0", lane: "conversation" }], limitPerLane: 10, requestId: "synthetic-timing",
+      }));
+      expect(response.status).toBe(200);
+      const header = response.headers.get("server-timing");
+      for (const metric of ["auth;dur=30", "transaction_start;dur=80", "fence;dur=40",
+        "member;dur=50", "projection;dur=400", "transaction_finish;dur=20", "total;dur=620"]) {
+        expect(header).toContain(`murph_mailbox_${metric}`);
+      }
+      expect(header).not.toContain("member_routes_1");
+      expect(parseHostedMailboxFetchResponse(await response.json()).items).toEqual([]);
+      expect(mocks.hostedRuntimeMailboxMemberFindUnique).toHaveBeenCalledOnce();
+      expect(mocks.fetchHostedRuntimeMailboxProjection).toHaveBeenCalledOnce();
+      expect(mocks.readHostedRuntimeIngressCryptoContextForWorker).not.toHaveBeenCalled();
+    } finally { clock.mockRestore(); }
   });
 
   it.each(["fresh", "old-worker", "no-inline-decode", "empty", "consumed", "floor", "sidecar", "system", "denied", "inactive", "no-workspace", "crypto-failure"])(
@@ -571,7 +660,7 @@ describe("hosted runtime internal web routes", () => {
       });
       if (scenario === "denied") mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValueOnce({ status: "denied" });
       if (scenario === "inactive") mocks.hostedRuntimeMailboxMemberFindUnique.mockResolvedValueOnce(null);
-      if (scenario === "no-workspace") mocks.hostedWorkspaceFindUnique.mockResolvedValueOnce(null);
+      if (scenario === "no-workspace") mocks.readHostedRuntimeIngressCryptoContextForWorker.mockRejectedValueOnce(new Error("Unavailable"));
       if (scenario === "crypto-failure") mocks.readHostedRuntimeIngressCryptoContextForWorker.mockRejectedValueOnce(new Error("Unavailable"));
       const response = await mailboxFetchRoute.POST(jsonRequest("/api/internal/hosted-mailbox/fetch", {
         requestId: "synthetic-request", limitPerLane: 10,
@@ -581,10 +670,9 @@ describe("hosted runtime internal web routes", () => {
       }));
       const payload = await response.json();
       expect(response.status).toBe(scenario === "inactive" ? 403 : 200);
-      const shouldReadWorkspace = ["fresh", "no-workspace", "crypto-failure"].includes(scenario);
-      expect(mocks.hostedWorkspaceFindUnique).toHaveBeenCalledTimes(shouldReadWorkspace ? 1 : 0);
+      expect(mocks.hostedWorkspaceFindUnique).not.toHaveBeenCalled();
       expect(mocks.readHostedRuntimeIngressCryptoContextForWorker).toHaveBeenCalledTimes(
-        scenario === "fresh" || scenario === "crypto-failure" ? 1 : 0);
+        ["fresh", "no-workspace", "crypto-failure"].includes(scenario) ? 1 : 0);
       if (scenario === "fresh") {
         expect(payload.ingressCryptoContext).toMatchObject({ userId: "member_routes_1", envelopes: { ingress: {} } });
         expect(payload.ingressCryptoContext.fetchedAt).toEqual(expect.any(String));
@@ -596,9 +684,8 @@ describe("hosted runtime internal web routes", () => {
   );
 
   it("fetches mailbox DTOs by lane cursor without hydrating sidecar payload bodies", async () => {
-    process.env.HOSTED_VENICE_ENABLED = "1";
     mocks.hostedRuntimeMailboxMemberFindUnique.mockResolvedValueOnce(
-      buildRuntimeMailboxAccessRecord({ assistantProviderPreference: "venice" }),
+      buildRuntimeMailboxAccessRecord(),
     );
     mocks.readHostedMailboxConsumedSeqByLane.mockResolvedValueOnce([
       {
@@ -681,13 +768,7 @@ describe("hosted runtime internal web routes", () => {
     expect(mocks.requireHostedCloudflareCallbackRequest).toHaveBeenCalledTimes(1);
     expect(mocks.fetchHostedRuntimeMailboxProjection).toHaveBeenCalledTimes(1);
     expect(mocks.readHostedActiveGroupRunningBit).not.toHaveBeenCalled();
-    expect(payload.assistantProvider).toBe("venice");
-    expect(payload.assistantCustomInferenceRevision).toBeNull();
     expect(mocks.hostedRuntimeMailboxMemberFindUnique).toHaveBeenCalledTimes(1);
-    expect(mocks.hostedRuntimeMailboxMemberFindUnique).toHaveBeenCalledWith({
-      select: expect.objectContaining({ assistantProviderPreference: true }),
-      where: { id: "member_routes_1" },
-    });
     expect(mocks.readHostedMemberAssistantModelPreference).not.toHaveBeenCalled();
     expect(mocks.fetchHostedRuntimeMailboxProjection).toHaveBeenCalledWith({
       prisma: expect.objectContaining({ kind: "prisma" }),
@@ -861,44 +942,9 @@ describe("hosted runtime internal web routes", () => {
     });
   });
 
-  it.each(["conversation", "system"] as const)("returns changed provider preferences with empty %s fetches", async (lane) => {
-    process.env.HOSTED_VENICE_ENABLED = "1";
-    mocks.fetchHostedRuntimeMailboxProjection.mockResolvedValue({
-      consumedSeqByLane: [{ lane, consumedSeq: "3" }],
-      items: [],
-      maxSeqByLane: [{ lane, maxSeq: "3" }],
-    });
-
-    for (const provider of ["venice", "openai"] as const) {
-      mocks.hostedRuntimeMailboxMemberFindUnique.mockResolvedValueOnce(
-        buildRuntimeMailboxAccessRecord({ assistantProviderPreference: provider }),
-      );
-      const response = await mailboxFetchRoute.POST(jsonRequest(
-        "/api/internal/hosted-mailbox/fetch",
-        {
-          lanes: [{ importedSeq: "3", lane }],
-          limitPerLane: 10,
-          requestId: `request_empty_provider_${provider}`,
-        },
-      ));
-      expect(response.status).toBe(200);
-      expect(parseHostedMailboxFetchResponse(await response.json())).toMatchObject({
-        assistantProvider: provider,
-        items: [],
-      });
-    }
-
-    expect(mocks.hostedRuntimeMailboxMemberFindUnique).toHaveBeenCalledTimes(2);
-    expect(mocks.readHostedMemberAssistantModelPreference).not.toHaveBeenCalled();
-    expect(mocks.resolveHostedRuntimeAiUsageGate).not.toHaveBeenCalled();
-    expect(mocks.readHostedActiveGroupRunningBit).not.toHaveBeenCalled();
-  });
-
-  it("keeps participant-backed group access while using the group provider", async () => {
-    process.env.HOSTED_VENICE_ENABLED = "1";
+  it("keeps participant-backed group access", async () => {
     mocks.hostedRuntimeMailboxMemberFindUnique.mockResolvedValueOnce(
       buildRuntimeMailboxAccessRecord({
-        assistantProviderPreference: "venice",
         threadContainer: {
           owner: buildRuntimeMailboxAccessRecord({ billingStatus: "paused" }),
         },
@@ -923,8 +969,6 @@ describe("hosted runtime internal web routes", () => {
     ));
 
     expect(response.status).toBe(200);
-    expect(parseHostedMailboxFetchResponse(await response.json()).assistantProvider)
-      .toBe("openai");
     expect(mocks.hostedRuntimeMailboxMemberFindUnique).toHaveBeenCalledTimes(1);
     expect(mocks.hostedThreadContainerParticipantFindFirst).toHaveBeenCalledTimes(1);
     expect(mocks.readHostedMemberAssistantModelPreference).not.toHaveBeenCalled();
@@ -1523,10 +1567,9 @@ describe("hosted runtime internal web routes", () => {
     ).not.toHaveBeenCalled();
   });
 
-  it("returns the current provider and unchanged cursor when AI usage denies mailbox consumption", async () => {
-    process.env.HOSTED_VENICE_ENABLED = "1";
+  it("returns the unchanged cursor when AI usage denies mailbox consumption", async () => {
     mocks.hostedRuntimeMailboxMemberFindUnique.mockResolvedValueOnce(
-      buildRuntimeMailboxAccessRecord({ assistantProviderPreference: "venice" }),
+      buildRuntimeMailboxAccessRecord(),
     );
     mocks.readHostedMailboxConsumedSeqByLane.mockResolvedValueOnce([
       {
@@ -1580,7 +1623,6 @@ describe("hosted runtime internal web routes", () => {
 
     expect(response.status).toBe(200);
     expect(parseHostedMailboxFetchResponse(await response.json())).toMatchObject({
-      assistantProvider: "venice",
       consumedSeqByLane: [{ lane: "conversation", consumedSeq: "11" }],
       items: [],
       maxSeqByLane: [{ lane: "conversation", maxSeq: "11" }],
@@ -1778,7 +1820,6 @@ describe("hosted runtime internal web routes", () => {
     // work, without advancing either cursor.
     expect(response.status).toBe(200);
     expect(parseHostedMailboxFetchResponse(await response.json())).toMatchObject({
-      assistantProvider: "openai",
       consumedSeqByLane: [
         { lane: "system", consumedSeq: "11" },
         { lane: "conversation", consumedSeq: "11" },
@@ -2072,25 +2113,6 @@ describe("hosted runtime internal web routes", () => {
     });
   });
 
-  it("omits a stored Venice override while the rollout gate is disabled", async () => {
-    mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({ version: "4" }));
-    mocks.readHostedMemberAssistantModelPreference.mockResolvedValueOnce({
-      hostedAssistantProviderOverride: "venice",
-      model: "gpt-5.6-terra",
-      reasoningEffort: "low",
-      solAvailable: false,
-    });
-
-    const response = await workspaceRoute.GET(new Request(
-      "https://join.example.test/api/internal/hosted-workspace",
-      { method: "GET" },
-    ));
-    const payload = parseHostedWorkspaceReadResponse(await response.json());
-
-    expect(response.status).toBe(200);
-    expect(payload.hostedAssistantProviderOverride).toBeUndefined();
-  });
-
   it("starts the usage read while workspace and preference reads are still pending", async () => {
     let releaseReads!: () => void;
     const pending = new Promise<void>(resolve => { releaseReads = resolve; });
@@ -2127,7 +2149,6 @@ describe("hosted runtime internal web routes", () => {
     expect(response.status).toBe(200);
     expect(payload.hostedAssistantSubagentModelOverridesAllowed).toBe(false);
     expect(payload.platformAiUsageAllowed).toBe(false);
-    expect(payload.hostedAssistantCustomInferenceOverride).toBeUndefined();
     expect(mocks.resolveHostedRuntimeAiUsageGate).toHaveBeenCalledWith({
       mode: "read_only",
       prisma: expect.any(Object),
@@ -2135,149 +2156,37 @@ describe("hosted runtime internal web routes", () => {
     });
   });
 
-  it("projects a selected custom route without managed inference facts", async () => {
-    process.env.HOSTED_CUSTOM_INFERENCE_ENABLED = "1";
-    mocks.readHostedWorkspace.mockResolvedValue(
-      buildWorkspaceRecord({ version: "4" }),
-    );
-    mocks.readHostedMemberAssistantModelPreference.mockResolvedValueOnce({
-      customInferenceReverificationRequired: false,
-      customInferenceSelected: true,
-      hostedAssistantCustomInferenceOverride: {
-        contextWindowTokens: 131_072,
-        modelAlias: "murph-custom-r3",
-        protocol: "responses",
-        revision: 3,
-        supportsImages: false,
-        verificationProfile:
-          "murph-codex-0.151.0-portable-responses-v1",
-      },
-      hostedAssistantModelOverride: "gpt-5.6-sol",
-      hostedAssistantProviderOverride: "venice",
-      hostedAssistantReasoningEffortOverride: "high",
-      model: "gpt-5.6-sol",
-      reasoningEffort: "high",
-      solAvailable: true,
-    });
-    mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValueOnce({
-      status: "denied",
-    });
-
-    const response = await workspaceRoute.GET(new Request(
-      "https://join.example.test/api/internal/hosted-workspace"
-        + "?customInferenceVersion=1",
-    ));
-    const payload = parseHostedWorkspaceReadResponse(await response.json());
-
-    expect(response.status).toBe(200);
-    expect(payload).toMatchObject({
-      hostedAssistantCustomInferenceOverride: {
-        modelAlias: "murph-custom-r3",
-        protocol: "responses",
-        revision: 3,
-      },
-      hostedAssistantSubagentModelOverridesAllowed: false,
-      platformAiUsageAllowed: false,
-    });
-    expect(payload.hostedAssistantModelOverride).toBeUndefined();
-    expect(payload.hostedAssistantProviderOverride).toBeUndefined();
-    expect(payload.hostedAssistantReasoningEffortOverride).toBeUndefined();
-  });
-
-  it("fails closed when the runtime cannot consume a selected custom route", async () => {
-    process.env.HOSTED_CUSTOM_INFERENCE_ENABLED = "1";
-    mocks.readHostedMemberAssistantModelPreference.mockResolvedValueOnce({
-      customInferenceReverificationRequired: false,
-      customInferenceSelected: true,
-      hostedAssistantCustomInferenceOverride: {
-        contextWindowTokens: 131_072,
-        modelAlias: "murph-custom-r3",
-        protocol: "responses",
-        revision: 3,
-        supportsImages: false,
-        verificationProfile:
-          "murph-codex-0.151.0-portable-responses-v1",
-      },
-      model: "gpt-5.6-terra",
-      solAvailable: false,
-    });
-
-    const response = await workspaceRoute.GET(new Request(
-      "https://join.example.test/api/internal/hosted-workspace",
-    ));
-
-    expect(response.status).toBe(409);
-    await expect(response.json()).resolves.toMatchObject({
-      error: {
-        code: "HOSTED_CUSTOM_INFERENCE_CONSUMER_UNSUPPORTED",
-      },
-    });
-    expect(mocks.resolveHostedRuntimeAiUsageGate).toHaveBeenCalledOnce();
-  });
-
-  it("fails closed when a selected Chat route is not enabled", async () => {
-    process.env.HOSTED_CUSTOM_INFERENCE_ENABLED = "1";
-    mocks.readHostedMemberAssistantModelPreference.mockResolvedValueOnce({
-      customInferenceReverificationRequired: false,
-      customInferenceSelected: true,
-      hostedAssistantCustomInferenceOverride: {
-        contextWindowTokens: 131_072,
-        modelAlias: "murph-custom-r3",
-        protocol: "chat_completions",
-        revision: 3,
-        supportsImages: false,
-        verificationProfile:
-          "murph-codex-0.151.0-portable-responses-v1",
-      },
-      model: "gpt-5.6-terra",
-      solAvailable: false,
-    });
-
-    const response = await workspaceRoute.GET(new Request(
-      "https://join.example.test/api/internal/hosted-workspace"
-        + "?customInferenceVersion=1",
-    ));
-
-    expect(response.status).toBe(409);
-    await expect(response.json()).resolves.toMatchObject({
-      error: {
-        code: "HOSTED_CUSTOM_CHAT_COMPLETIONS_UNAVAILABLE",
-      },
-    });
-    expect(mocks.resolveHostedRuntimeAiUsageGate).toHaveBeenCalledOnce();
-  });
-
   it.each([
-    ["individual Edge", "launch_edge_monthly", null, false, "openai", true],
-    ["Family Edge", null, "edge", false, "openai", true],
-    ["individual Pulse", "launch_monthly", null, false, "openai", false],
-    ["Family Pulse", null, "pulse", false, "openai", false],
-    ["Edge on Venice", "launch_edge_monthly", null, false, "venice", false],
-    ["group", "launch_max_monthly", null, true, "openai", false],
-    ["individual Max", "launch_max_monthly", null, false, "openai", true],
-    ["Family Max", null, "max", false, "openai", true],
-    ["Max on Venice", "launch_max_monthly", null, false, "venice", false],
+    ["individual Edge", "launch_edge_monthly", null, false, true],
+    ["Family Edge", null, "edge", false, true],
+    ["individual Pulse", "launch_monthly", null, false, false],
+    ["Family Pulse", null, "pulse", false, false],
+    ["group", "launch_max_monthly", null, true, false],
+    ["individual Max", "launch_max_monthly", null, false, true],
+    ["Family Max", null, "max", false, true],
   ] as const)("projects native Astra authority from canonical %s eligibility", async (
-    _name, plan, familyPlan, group, provider, astraAllowed,
+    _name, plan, familyPlan, group, astraAllowed,
   ) => {
-    process.env.HOSTED_VENICE_ENABLED = "1";
-    const { resolveHostedMemberAssistantModel } = await vi.importActual<
+    const { readHostedMemberAssistantModelPreference } = await vi.importActual<
       typeof import("@/src/lib/hosted-onboarding/assistant-model-preference")
     >("@/src/lib/hosted-onboarding/assistant-model-preference");
-    const configuration = resolveHostedMemberAssistantModel({
+    const member = {
       accountGroupMemberships: familyPlan ? [{
         group: { billingStatus: "active", suspendedAt: null },
         planCode: familyPlan,
         status: "active",
       }] : [],
       assistantModelPreference: null,
-      assistantProviderPreference: provider,
       assistantReasoningEffortPreference: null,
       billingRef: plan ? { currentBillingPhase: "paid", currentBillingPlanCode: plan } : null,
+      createdAt: new Date("2026-09-23T12:00:00Z"),
       billingStatus: familyPlan ? "not_started" : "active",
-      inferenceConnection: null,
       suspendedAt: null,
       threadContainer: group ? { memberId: "synthetic_group_member" } : null,
+    };
+    const configuration = await readHostedMemberAssistantModelPreference({
+      memberId: "member_onboarding",
+      prisma: { hostedMember: { findUnique: vi.fn().mockResolvedValue(member) } },
     });
     mocks.readHostedMemberAssistantModelPreference.mockResolvedValueOnce(configuration);
     const response = await workspaceRoute.GET(new Request(
@@ -2286,11 +2195,294 @@ describe("hosted runtime internal web routes", () => {
     expect(response.status).toBe(200);
     const workspace = parseHostedWorkspaceReadResponse(await response.json());
     expect(workspace.hostedAssistantAstraAllowed).toBe(astraAllowed);
+    expect(workspace.hostedAssistantPriorityUntil).toBe(!group
+      ? "2026-09-24T12:00:00.000Z" : undefined);
     expect(workspace.hostedAssistantSubagentModelOverridesAllowed).toBe(!["individual Pulse", "Family Pulse"].includes(_name));
   });
 
+  describe("checkpoint failure observations", () => {
+    const path = "/api/internal/hosted-workspace/checkpoint";
+    const failureMessage = "Hosted workspace checkpoint failed.";
+    const failureSchema = "murph.hosted-workspace.checkpoint.failure.v1";
+    const checkpointRequest = (body: Record<string, unknown> = {}, search = "") =>
+      jsonRequest(`${path}${search}`, {
+        attemptId: UNSAFE_SENTINEL,
+        expectedWorkspaceVersion: "4",
+        leaseGeneration: "9",
+        reason: "canonical_runtime_commit",
+        snapshotRef: createBundleRef(UNSAFE_SENTINEL),
+        ...body,
+      }, runtimeWriteFenceHeaders());
+    const diagnostics = () => vi.mocked(console.warn).mock.calls.filter(
+      ([message]) => message === failureMessage,
+    );
+
+    beforeEach(() => {
+      vi.spyOn(console, "warn").mockImplementation(() => undefined);
+      vi.spyOn(console, "error").mockImplementation(() => undefined);
+      mocks.checkpointHostedWorkspace.mockResolvedValue({
+        status: "updated",
+        replacedSnapshotRef: null,
+        workspace: buildWorkspaceRecord(),
+      });
+    });
+
+    it("distinguishes independent schema and publication failures with identical HTTP 400 responses", async () => {
+      const malformed = await workspaceCheckpointRoute.POST(checkpointRequest({
+        reason: UNSAFE_SENTINEL,
+      }));
+      expect(mocks.checkpointHostedWorkspace).not.toHaveBeenCalled();
+      mocks.checkpointHostedWorkspace.mockRejectedValueOnce(new TypeError(UNSAFE_SENTINEL));
+      const publication = await workspaceCheckpointRoute.POST(checkpointRequest());
+
+      expect(malformed.status).toBe(400);
+      expect(publication.status).toBe(malformed.status);
+      expect([...malformed.headers]).toEqual([
+        ["cache-control", "no-store"],
+        ["content-type", "application/json"],
+      ]);
+      expect([...publication.headers]).toEqual([...malformed.headers]);
+      expect(await malformed.clone().json()).toEqual({
+        error: { code: "INVALID_REQUEST", message: "Invalid request." },
+      });
+      expect(await publication.text()).toBe(await malformed.text());
+      expect(mocks.checkpointHostedWorkspace).toHaveBeenCalledOnce();
+      expect(mocks.after).not.toHaveBeenCalled();
+      // A later successful request must not inherit or overwrite either observation.
+      expect((await workspaceCheckpointRoute.POST(checkpointRequest())).status).toBe(200);
+      expect(diagnostics()).toEqual([
+        [failureMessage, { schema: failureSchema, stage: "request_schema", errorClass: "type_error" }],
+        [failureMessage, { schema: failureSchema, stage: "publication", errorClass: "type_error" }],
+      ]);
+    });
+
+    it.each([
+      [4n, "3", 4n, "rejected", "HOSTED_WORKSPACE_PROGRESS_REGRESSED"],
+      [4n, "6", 4n, "rejected", "HOSTED_WORKSPACE_PROGRESS_SKIPPED_INCREMENT"],
+      [null, "2", 4n, "rejected", "HOSTED_WORKSPACE_PROGRESS_INVALID_INITIAL"],
+      [null, "0", 4n, "updated", null],
+      [null, "1", 4n, "updated", null],
+      [4n, "4", 4n, "updated", null],
+      [4n, "5", 4n, "updated", null],
+      [4n, "3", 5n, "conflict", null],
+      [4n, "6", 5n, "conflict", null],
+      [null, "2", 5n, "conflict", null],
+    ] as const)("observes only rejected store transitions: %s -> %s at version %s (%s)", async (
+      currentGeneration, requestedGeneration, currentVersion, outcome, errorCode,
+    ) => {
+      const { checkpointHostedWorkspaceTx } = await vi.importActual<
+        typeof import("@/src/lib/hosted-workspace/store")
+      >("@/src/lib/hosted-workspace/store");
+      const current = {
+        ...buildWorkspaceRecord({ snapshotRef: null }),
+        createdAt: new Date(FIXED_NOW),
+        updatedAt: new Date(FIXED_NOW),
+        systemMailboxProgressGeneration: currentGeneration,
+        version: currentVersion,
+      };
+      const queryRaw = vi.fn(async (_query: Prisma.Sql) => outcome === "updated" ? [{
+        ...current,
+        replacedSnapshotRef: null,
+        systemMailboxProgressGeneration: BigInt(requestedGeneration),
+        version: 5n,
+      }] : []);
+      const findUnique = vi.fn(async () => current);
+      const tx = Object.assign(Object.create(null), {
+        $queryRaw: queryRaw,
+        hostedWorkspace: { findUnique },
+      }) as Parameters<typeof checkpointHostedWorkspaceTx>[0]["tx"];
+      mocks.checkpointHostedWorkspace.mockImplementationOnce((
+        input: Omit<Parameters<typeof checkpointHostedWorkspaceTx>[0], "tx">,
+      ) => checkpointHostedWorkspaceTx({ ...input, tx }));
+
+      const response = await workspaceCheckpointRoute.POST(checkpointRequest({
+        nextDefaultProcessingWakeAt: null,
+        nextDefaultProcessingWakeReason: null,
+        snapshotRef: null,
+        systemMailboxProgressGeneration: requestedGeneration,
+      }));
+      expect(response.status).toBe(outcome === "rejected" ? 400 : 200);
+      expect([...response.headers]).toEqual([
+        ["cache-control", "no-store"],
+        ["content-type", "application/json"],
+      ]);
+      if (outcome === "rejected") {
+        expect(await response.json()).toEqual({
+          error: { code: "INVALID_REQUEST", message: "Invalid request." },
+        });
+        expect(diagnostics()).toEqual([
+          [failureMessage, {
+            schema: failureSchema, stage: "publication", errorClass: "type_error", errorCode,
+          }],
+        ]);
+      } else {
+        expect(parseHostedWorkspaceCheckpointResponse(await response.json())).toMatchObject({
+          checkpointed: outcome === "updated",
+          ...(outcome === "conflict" ? { checkpointConflictReason: "workspace_version" } : {}),
+          workspace: {
+            version: "5",
+            systemMailboxProgressGeneration: outcome === "updated"
+              ? requestedGeneration : currentGeneration?.toString() ?? null,
+          },
+        });
+        expect(diagnostics()).toEqual([]);
+      }
+      expect(queryRaw).toHaveBeenCalledOnce();
+      expect(findUnique).toHaveBeenCalledTimes(outcome === "updated" ? 0 : 1);
+      const sql = queryRaw.mock.calls[0]?.[0].sql;
+      expect(sql).toContain("workspace.version =");
+      expect(sql).toContain("workspace.system_mailbox_progress_generation IS NULL");
+      expect(sql).toContain("IN (0, 1)");
+      expect(sql).toContain("workspace.system_mailbox_progress_generation =");
+      expect(sql).toContain("workspace.system_mailbox_progress_generation + 1 =");
+      expect(mocks.checkpointHostedWorkspace).toHaveBeenCalledOnce();
+      expect(mocks.after).not.toHaveBeenCalled();
+      expect(mocks.signalHostedRuntimeRecheckRuntime).not.toHaveBeenCalled();
+      expect(JSON.stringify(diagnostics())).not.toContain(UNSAFE_SENTINEL);
+    });
+
+    it.each([
+      ["non-object JSON", "request_body", () => new Request(`https://join.example.test${path}`, {
+        method: "POST",
+        body: JSON.stringify([UNSAFE_SENTINEL]),
+      })],
+      ["signed authority/body mismatch", "runtime_authority", () => checkpointRequest({},
+        "?runtimeAuthority=1&runtimeAttempt=attempt_routes_1&runtimeGeneration=9&runtimeWorkspaceVersion=4",
+      )],
+      ["missing workspace invariant", "publication", () => {
+        mocks.checkpointHostedWorkspace.mockResolvedValueOnce({ status: "updated", workspace: null });
+        return checkpointRequest();
+      }],
+      ["response schema after publication", "response", () => {
+        mocks.checkpointHostedWorkspace.mockResolvedValueOnce({
+          status: "updated",
+          workspace: buildWorkspaceRecord({ version: UNSAFE_SENTINEL, nextWakeAt: FIXED_NOW }),
+        });
+        return checkpointRequest();
+      }],
+      ["JSON response construction", "response", () => {
+        mocks.checkpointHostedWorkspace.mockResolvedValueOnce({
+          status: "updated",
+          workspace: buildWorkspaceRecord({ nextWakeAt: FIXED_NOW }),
+        });
+        vi.spyOn(NextResponse, "json").mockImplementationOnce(() => {
+          throw new TypeError(UNSAFE_SENTINEL);
+        });
+        return checkpointRequest();
+      }],
+    ] as const)("observes %s at %s", async (_case, stage, request) => {
+      const response = await workspaceCheckpointRoute.POST(request());
+      expect(response.status).toBe(400);
+      expect(await response.json()).toEqual({
+        error: { code: "INVALID_REQUEST", message: "Invalid request." },
+      });
+      expect(diagnostics()).toEqual([
+        [failureMessage, { schema: failureSchema, stage, errorClass: "type_error" }],
+      ]);
+      expect(mocks.checkpointHostedWorkspace).toHaveBeenCalledTimes(
+        stage === "publication" || stage === "response" ? 1 : 0,
+      );
+      // Response construction still follows post-commit signal scheduling.
+      expect(mocks.after).toHaveBeenCalledTimes(stage === "response" ? 1 : 0);
+      expect(mocks.signalHostedRuntimeRecheckRuntime).not.toHaveBeenCalled();
+    });
+
+    it("observes malformed JSON without changing its INVALID_JSON response", async () => {
+      const response = await workspaceCheckpointRoute.POST(new Request(`https://join.example.test${path}`, {
+        method: "POST",
+        body: `{${UNSAFE_SENTINEL}`,
+      }));
+      expect(response.status).toBe(400);
+      expect(await response.json()).toEqual({ error: { code: "INVALID_JSON", message: "Invalid JSON." } });
+      expect(diagnostics()).toEqual([
+        [failureMessage, { schema: failureSchema, stage: "request_body", errorClass: "error" }],
+      ]);
+      expect(mocks.checkpointHostedWorkspace).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ["type_error", new TypeError(UNSAFE_SENTINEL), 400],
+      ["range_error", new RangeError(UNSAFE_SENTINEL), 400],
+      ["error", new Error(UNSAFE_SENTINEL), 500],
+      ["non_error", { message: UNSAFE_SENTINEL }, 500],
+    ] as const)("logs only the %s error class", async (errorClass, error, status) => {
+      Object.assign(error, {
+        code: UNSAFE_SENTINEL,
+        name: UNSAFE_SENTINEL,
+        stack: UNSAFE_SENTINEL,
+        cause: { [UNSAFE_SENTINEL]: UNSAFE_SENTINEL },
+        [UNSAFE_SENTINEL]: UNSAFE_SENTINEL,
+      });
+      mocks.checkpointHostedWorkspace.mockRejectedValueOnce(error);
+      const response = await workspaceCheckpointRoute.POST(checkpointRequest());
+      expect(response.status).toBe(status);
+      expect(diagnostics()).toEqual([
+        [failureMessage, { schema: failureSchema, stage: "publication", errorClass }],
+      ]);
+      expect(JSON.stringify(diagnostics())).not.toContain(UNSAFE_SENTINEL);
+    });
+
+    it.each(["updated", "conflict"] as const)("keeps %s checkpoint responses quiet", async (status) => {
+      mocks.checkpointHostedWorkspace.mockResolvedValueOnce({
+        status,
+        replacedSnapshotRef: null,
+        workspace: buildWorkspaceRecord({ nextWakeAt: FIXED_NOW }),
+      });
+      const response = await workspaceCheckpointRoute.POST(checkpointRequest());
+      expect(response.status).toBe(200);
+      expect(response.headers.get("cache-control")).toBe("no-store");
+      expect(parseHostedWorkspaceCheckpointResponse(await response.json())).toMatchObject({
+        checkpointed: status === "updated",
+        ...(status === "conflict" ? { checkpointConflictReason: "workspace_version" } : {}),
+        workspace: { version: "4", nextWakeAt: FIXED_NOW },
+      });
+      expect(mocks.after).toHaveBeenCalledTimes(status === "updated" ? 1 : 0);
+      await mocks.after.mock.calls[0]?.[0]();
+      expect(diagnostics()).toEqual([]);
+    });
+
+    it("does not diagnose pre-auth rejection or continue to parsing/publication", async () => {
+      mocks.requireHostedCloudflareCallbackRequest.mockRejectedValueOnce(hostedOnboardingError({
+        code: "HOSTED_CLOUDFLARE_CALLBACK_UNAUTHORIZED",
+        httpStatus: 401,
+        message: "Unauthorized hosted Cloudflare callback.",
+      }));
+      const request = checkpointRequest({ reason: UNSAFE_SENTINEL });
+      const response = await workspaceCheckpointRoute.POST(request);
+      expect(response.status).toBe(401);
+      expect(request.bodyUsed).toBe(false);
+      expect(mocks.checkpointHostedWorkspace).not.toHaveBeenCalled();
+      expect(mocks.after).not.toHaveBeenCalled();
+      expect(diagnostics()).toEqual([]);
+    });
+
+    it.each([
+      undefined,
+      "HOSTED_WORKSPACE_PROGRESS_REGRESSED",
+    ])("preserves the original failure when the diagnostic throws (code: %s)", async (code) => {
+      vi.mocked(console.warn).mockImplementation((message) => {
+        if (message === failureMessage) throw new Error(UNSAFE_SENTINEL);
+      });
+      mocks.checkpointHostedWorkspace.mockRejectedValueOnce(Object.assign(
+        new TypeError(UNSAFE_SENTINEL), code ? { code } : {},
+      ));
+      const response = await workspaceCheckpointRoute.POST(checkpointRequest());
+      expect(response.status).toBe(400);
+      expect(await response.json()).toEqual({
+        error: { code: "INVALID_REQUEST", message: "Invalid request." },
+      });
+      expect(diagnostics()).toEqual([
+        [failureMessage, {
+          schema: failureSchema, stage: "publication", errorClass: "type_error",
+          ...(code ? { errorCode: code } : {}),
+        }],
+      ]);
+      expect(mocks.checkpointHostedWorkspace).toHaveBeenCalledOnce();
+      expect(mocks.after).not.toHaveBeenCalled();
+    });
+  });
+
   it("reads workspace state and checkpoints with the workspace CAS fence", async () => {
-    process.env.HOSTED_VENICE_ENABLED = "1";
     mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
       nextDefaultProcessingWakeAt: "2026-04-26T00:08:00.000Z",
       nextDefaultProcessingWakeReason: "assistant_due",
@@ -2300,8 +2492,8 @@ describe("hosted runtime internal web routes", () => {
       version: "4",
     }));
     mocks.readHostedMemberAssistantModelPreference.mockResolvedValueOnce({
+      availableModels: ["gpt-5.6-sol"],
       hostedAssistantModelOverride: "gpt-5.6-sol",
-      hostedAssistantProviderOverride: "venice",
       hostedAssistantReasoningEffortOverride: "high",
       model: "gpt-5.6-sol",
       reasoningEffort: "high",
@@ -2340,7 +2532,6 @@ describe("hosted runtime internal web routes", () => {
       .toMatchObject({
         hostedAssistantSubagentModelOverridesAllowed: true,
         hostedAssistantModelOverride: "gpt-5.6-sol",
-        hostedAssistantProviderOverride: "venice",
         hostedAssistantReasoningEffortOverride: "high",
         workspace: {
           nextDefaultProcessingWakeAt: "2026-04-26T00:08:00.000Z",
@@ -2620,10 +2811,15 @@ describe("hosted runtime internal web routes", () => {
   it("returns a due workspace checkpoint before running its recheck signal", async () => {
     const nextWakeAt = "2026-04-25T23:59:00.000Z";
     let resolveSignal!: () => void;
+    let markSignalStarted!: () => void;
+    const signalStarted = new Promise<void>((resolve) => {
+      markSignalStarted = resolve;
+    });
     mocks.signalHostedRuntimeRecheckRuntime.mockImplementationOnce(
       async () =>
         await new Promise<void>((resolve) => {
           resolveSignal = resolve;
+          markSignalStarted();
         }),
     );
     mocks.checkpointHostedWorkspace.mockResolvedValue({
@@ -2663,6 +2859,7 @@ describe("hosted runtime internal web routes", () => {
     expect(mocks.signalHostedRuntimeRecheckRuntime).not.toHaveBeenCalled();
 
     const signalTask = mocks.after.mock.calls[0]?.[0]();
+    await signalStarted;
     expect(mocks.signalHostedRuntimeRecheckRuntime).toHaveBeenCalledWith({
       userId: "member_routes_1",
     });
@@ -3038,6 +3235,54 @@ describe("hosted runtime internal web routes", () => {
     });
   });
 
+  it("acknowledges stale runtime telemetry without persistence or recovery", async () => {
+    mocks.requireHostedCloudflareCallbackRequest.mockRejectedValueOnce(hostedOnboardingError({
+      code: "HOSTED_RUNTIME_OWNER_STALE",
+      httpStatus: 409,
+      message: "Synthetic retired runtime.",
+    }));
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const response = await runtimeLogRoute.POST(jsonRequest(
+        "/api/internal/hosted-runtime/log",
+        { entries: [{ at: FIXED_NOW, component: "runner", eventCode: "runner.accepted_attempt_failed", level: "error", phase: "invoke" }] },
+      ));
+      expect(response.status).toBe(200);
+      expect(parseHostedRuntimeLogResponse(await response.json())).toEqual({ loggedCount: 0 });
+      expect(mocks.recordHostedRuntimeLogs).not.toHaveBeenCalled();
+      expect(mocks.claimHostedAcceptedAttemptFailureRecheck).not.toHaveBeenCalled();
+      expect(mocks.signalHostedRuntimeRecheckRuntime).not.toHaveBeenCalled();
+      expect(mocks.after).not.toHaveBeenCalled();
+      expect(warn).not.toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it.each([
+    ["HOSTED_CLOUDFLARE_CALLBACK_UNAUTHORIZED", 401],
+    ["HOSTED_CLOUDFLARE_CALLBACK_REPLAYED", 401],
+    ["HOSTED_RUNTIME_RESOURCE_RETIRED", 409],
+    ["HOSTED_RUNTIME_OWNER_STALE", 503],
+  ])("preserves runtime log admission failures for %s with status %i", async (code, httpStatus) => {
+    mocks.requireHostedCloudflareCallbackRequest.mockRejectedValueOnce(hostedOnboardingError({
+      code, httpStatus, message: "Synthetic callback rejection.",
+    }));
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const response = await runtimeLogRoute.POST(jsonRequest("/api/internal/hosted-runtime/log", { entries: [] }));
+      expect(response.status).toBe(httpStatus);
+      expect(await response.json()).toMatchObject({ error: { code } });
+      expect(mocks.recordHostedRuntimeLogs).not.toHaveBeenCalled();
+      expect(mocks.claimHostedAcceptedAttemptFailureRecheck).not.toHaveBeenCalled();
+      expect(mocks.after).not.toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+      error.mockRestore();
+    }
+  });
+
   it("writes the maximum runtime log batch with a single database call", async () => {
     // The callback accepts 50 entries and the pool defaults to 15 clients, so
     // one Prisma call per entry would make the pool the request's concurrency
@@ -3066,35 +3311,21 @@ describe("hosted runtime internal web routes", () => {
     expect(mocks.recordHostedRuntimeLogs.mock.calls[0]?.[0]?.entries).toHaveLength(50);
   });
 
-  it("schedules a Personal Patterns alert after runtime logs persist", async () => {
-    mocks.recordHostedRuntimeLogs.mockResolvedValue(1);
-    mocks.hasHostedPersonalPatternsRunAlert.mockReturnValue(true);
-    const entries = [{
-      at: FIXED_NOW,
-      component: "runtime",
-      eventCode: "assistant.automation_detail",
-      level: "info",
-      phase: "invoke",
-      redactedJson: {
-        failureAutomationSlug: "personal-patterns-update",
-        failureOccurrenceAt: FIXED_NOW,
-        failureRunOutcome: "failed",
-        type: "cron.job.completed",
-      },
-    }];
-
-    const response = await runtimeLogRoute.POST(jsonRequest(
-      "/api/internal/hosted-runtime/log",
-      { entries },
-    ));
-
-    expect(response.status).toBe(200);
-    expect(mocks.after).toHaveBeenCalledOnce();
-    await mocks.after.mock.calls[0]?.[0]();
-    expect(mocks.reportHostedPersonalPatternsRunAlerts).toHaveBeenCalledWith({
-      userId: "member_routes_1",
-      entries,
-    });
+  it("does not turn a persistence failure into a discarded telemetry acknowledgement", async () => {
+    mocks.recordHostedRuntimeLogs.mockRejectedValueOnce(hostedOnboardingError({
+      code: "HOSTED_RUNTIME_OWNER_STALE", httpStatus: 409, message: "Synthetic persistence failure.",
+    }));
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const response = await runtimeLogRoute.POST(jsonRequest("/api/internal/hosted-runtime/log", {
+        entries: [{ at: FIXED_NOW, component: "mailbox", eventCode: "mailbox.imported", level: "info", phase: "import" }],
+      }));
+      expect(response.status).toBe(409);
+      expect(await response.json()).toMatchObject({ error: { code: "HOSTED_RUNTIME_OWNER_STALE" } });
+      expect(mocks.recordHostedRuntimeLogs).toHaveBeenCalledOnce();
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   it("reports zero persisted logs when deletion wins the diagnostic race", async () => {
@@ -4331,7 +4562,6 @@ function createPrismaClientStub() {
 
 function buildRuntimeMailboxAccessRecord(overrides: Partial<{
   id: string;
-  assistantProviderPreference: string | null;
   accountGroupMemberships: Array<{
     group: { billingStatus: string; suspendedAt: Date | null };
     status: string;
@@ -4351,7 +4581,6 @@ function buildRuntimeMailboxAccessRecord(overrides: Partial<{
 }> = {}) {
   return {
     id: "member_routes_1",
-    assistantProviderPreference: null,
     accountGroupMemberships: [],
     billingStatus: "active",
     suspendedAt: null,

@@ -1,0 +1,18 @@
+{
+  "publishedOn": "2026-10-02",
+  "order": 100,
+  "item": {
+    "id": "weekly-usage-review",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "A clearer view of your usage",
+    "summary": "Ask Murph what used your allowance, with a breakdown by model and activity and a closer look at expensive turns.",
+    "details": "A quiet weekly review can move suitable reminders to Luna while preserving explicit model preferences and more demanding work. Reviews are bounded, and missing usage details are marked as unavailable rather than estimated as zero.",
+    "relevanceTags": ["usage", "reminders"],
+    "sourcePullRequests": [],
+    "tryIt": {
+      "label": "Review my usage",
+      "prompt": "What used my allowance over the last seven days, and where could we save usage?"
+    }
+  }
+}

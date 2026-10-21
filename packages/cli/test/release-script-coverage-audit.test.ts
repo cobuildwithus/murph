@@ -1232,7 +1232,7 @@ describe('monorepo release flow coverage audit', () => {
       'utf8',
     )
     const repoToolsPatch = readFileSync(
-      path.join(repoRoot, 'patches', '@cobuild__repo-tools@0.1.17.patch'),
+      path.join(repoRoot, 'patches', '@cobuild__repo-tools@0.1.18.patch'),
       'utf8',
     )
     const reviewGptConfig = readFileSync(
@@ -1306,13 +1306,13 @@ describe('monorepo release flow coverage audit', () => {
     expect(existsSync(path.join(repoRoot, 'scripts', 'chatgpt-managed-browser.test.mjs'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt.sh'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt-cli.sh'))).toBe(false)
-    expect(rootPackageJson.devDependencies?.['@cobuild/review-gpt']).toBe('^0.5.147')
+    expect(rootPackageJson.devDependencies?.['@cobuild/review-gpt']).toBe('0.5.154')
     expect(
       pnpmWorkspace
         .match(/^minimumReleaseAgeExclude:\n((?:  - .+\n)+)/mu)?.[1]
         ?.split('\n')
         .filter((line) => line.includes('@cobuild/review-gpt')),
-    ).toEqual(["  - '@cobuild/review-gpt@0.5.147'"])
+    ).toEqual(["  - '@cobuild/review-gpt@0.5.154'"])
     expect(
       pnpmWorkspace
         .match(/^minimumReleaseAgeExclude:\n((?:  - .+\n)+)/mu)?.[1],
@@ -1329,8 +1329,9 @@ describe('monorepo release flow coverage audit', () => {
     ).toEqual(
       [
         "'@cloudflare/containers@0.3.7': patches/@cloudflare__containers@0.3.7.patch",
-        "'@cobuild/repo-tools@0.1.17': patches/@cobuild__repo-tools@0.1.17.patch",
-        "'@cobuild/review-gpt@0.5.147': patches/@cobuild__review-gpt@0.5.147.patch",
+        "'@cobuild/repo-tools@0.1.18': patches/@cobuild__repo-tools@0.1.18.patch",
+        "'@cobuild/review-gpt@0.5.154': patches/@cobuild__review-gpt@0.5.154.patch",
+        'frog@1.1.0: patches/frog@1.1.0.patch',
         'incur@0.4.5: patches/incur@0.4.5.patch',
         'incur@0.5.1: patches/incur@0.5.1.patch',
         'ink@6.8.0: patches/ink@6.8.0.patch',
@@ -1343,7 +1344,7 @@ describe('monorepo release flow coverage audit', () => {
     expect(repoToolsPatch).toContain('add -u -- "${tracked_files[@]}"')
     expect(repoToolsPatch).toContain('add -A -- "${untracked_files[@]}"')
     expect(
-      existsSync(path.join(repoRoot, 'patches', '@cobuild__review-gpt@0.5.147.patch')),
+      existsSync(path.join(repoRoot, 'patches', '@cobuild__review-gpt@0.5.154.patch')),
     ).toBe(true)
     expect(
       existsSync(path.join(repoRoot, 'patches', '@cobuild__review-gpt@0.5.142.patch')),
@@ -4530,6 +4531,20 @@ printf 'ZIP: %s (%s bytes)\n' \
     try {
       const leanEntries = listZipEntries(leanBundle.zipPath)
       const fullEntries = listZipEntries(fullBundle.zipPath)
+
+      const containersPatch = 'patches/@cloudflare__containers@0.3.7.patch'
+      expect(fullEntries).toContain('apps/cloudflare/test/containers-helper-readiness.test.ts')
+      for (const [bundle, entries] of [[fullBundle, fullEntries], [leanBundle, leanEntries]] as const) {
+        for (const dependencyInput of [containersPatch, 'pnpm-lock.yaml', 'pnpm-workspace.yaml']) {
+          expect(entries, `missing dependency input: ${dependencyInput}`).toContain(dependencyInput)
+          const archived = execFileSync('unzip', ['-p', bundle.zipPath, dependencyInput])
+          expect(archived.equals(readFileSync(path.join(repoRoot, dependencyInput)))).toBe(true)
+        }
+      }
+      expect(readFileSync(path.join(repoRoot, 'pnpm-workspace.yaml'), 'utf8'))
+        .toContain(`'@cloudflare/containers@0.3.7': ${containersPatch}`)
+      expect(readFileSync(path.join(repoRoot, 'pnpm-lock.yaml'), 'utf8'))
+        .toContain(`path: ${containersPatch}`)
 
       for (const relativePath of [
         '.github/native-hosted-e2e-controller.json',

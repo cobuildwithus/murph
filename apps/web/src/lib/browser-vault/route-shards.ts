@@ -21,15 +21,6 @@ const CORE_AND_METRICS_INDEX_SHARDS = [
   "core",
   "metricsIndex",
 ] as const satisfies readonly BrowserVaultReplicaShard[];
-const CORE_AND_LABS_SHARDS = [
-  "core",
-  "labs",
-] as const satisfies readonly BrowserVaultReplicaShard[];
-const BIOMARKERS_INDEX_SHARDS = [
-  "core",
-  "labs",
-  "metricsIndex",
-] as const satisfies readonly BrowserVaultReplicaShard[];
 
 /**
  * Returns the complete Browser Vault shard demand for one dashboard route.
@@ -40,22 +31,6 @@ export function planBrowserVaultRouteShards(
   pathname: string,
 ): readonly BrowserVaultReplicaShard[] {
   const normalizedPathname = normalizePathname(pathname);
-
-  if (normalizedPathname === "/biomarkers") {
-    return BIOMARKERS_INDEX_SHARDS;
-  }
-
-  if (/^\/biomarkers\/results\/[^/]+$/u.test(normalizedPathname)) {
-    return CORE_AND_LABS_SHARDS;
-  }
-
-  if (/^\/biomarkers\/[^/]+\/research$/u.test(normalizedPathname)) {
-    return CORE_SHARDS;
-  }
-
-  if (normalizedPathname.startsWith("/biomarkers/")) {
-    return CORE_AND_METRICS_INDEX_SHARDS;
-  }
 
   if (
     /^\/experiments\/runs\/[^/]+$/u.test(normalizedPathname)

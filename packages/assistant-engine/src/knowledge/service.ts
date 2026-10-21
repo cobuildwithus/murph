@@ -13,6 +13,7 @@ import {
   DERIVED_KNOWLEDGE_INDEX_PATH,
   DERIVED_KNOWLEDGE_LOG_PATH,
   KNOWLEDGE_READ_RECOVERY_ACTION,
+  type KnowledgeAbsentPageResult,
   type KnowledgeGetResult,
   type KnowledgeIndexRebuildResult,
   type KnowledgeListResult,
@@ -619,6 +620,32 @@ export async function getKnowledgePage(
   input: KnowledgeGetInput,
   dependencies: Pick<KnowledgeServiceDependencies, 'readTextFile'> = {},
 ): Promise<KnowledgeGetResult> {
+  const result = await readKnowledgePageBySlug(input, dependencies, false)
+  if (!result) {
+    throw knowledgePageNotFoundError(input.slug)
+  }
+  return result
+}
+
+// Absence is reported only when the whole generic graph parsed cleanly: a
+// malformed page under another filename may still declare this slug.
+export async function getKnowledgePageIfExists(
+  input: KnowledgeGetInput,
+  dependencies: Pick<KnowledgeServiceDependencies, 'readTextFile'> = {},
+): Promise<KnowledgeGetResult | KnowledgeAbsentPageResult> {
+  return await readKnowledgePageBySlug(input, dependencies, true) ?? {
+    degradation: null,
+    page: null,
+    slug: normalizeKnowledgeSlug(input.slug),
+    vault: input.vault,
+  }
+}
+
+async function readKnowledgePageBySlug(
+  input: KnowledgeGetInput,
+  dependencies: Pick<KnowledgeServiceDependencies, 'readTextFile'>,
+  confirmAbsence: boolean,
+): Promise<KnowledgeGetResult | null> {
   const slug = normalizeKnowledgeSlug(input.slug)
   assertGenericKnowledgePageSlug(slug, 'show')
   const readResult = await readDerivedKnowledgeGraphWithIssues(input.vault)
@@ -635,7 +662,10 @@ export async function getKnowledgePage(
     )) {
       throw knowledgePageInvalidError(slug)
     }
-    throw knowledgePageNotFoundError(input.slug)
+    if (confirmAbsence && toKnowledgeReadDegradation(readResult.issues)) {
+      throw knowledgePageAbsenceUnconfirmedError(slug)
+    }
+    return null
   }
 
   const absolutePath = await resolveAssistantVaultPath(input.vault, page.relativePath, 'file path')
@@ -677,9 +707,21 @@ function malformedKnowledgePageMatchesSlug(
 }
 
 function knowledgePageInvalidError(slug: string): VaultCliError {
+  return knowledgeIntegrityError(
+    `The derived knowledge page for slug "${slug}" exists but is invalid.`,
+  )
+}
+
+function knowledgePageAbsenceUnconfirmedError(slug: string): VaultCliError {
+  return knowledgeIntegrityError(
+    `No valid derived knowledge page has slug "${slug}", but an invalid page could still declare it, so its absence is unconfirmed.`,
+  )
+}
+
+function knowledgeIntegrityError(message: string): VaultCliError {
   return new VaultCliError(
     'knowledge_page_invalid',
-    `The derived knowledge page for slug "${slug}" exists but is invalid.`,
+    message,
     {
       hint: 'Run `knowledge lint` for bounded repair details, then retry `knowledge show`.',
       retryable: false,

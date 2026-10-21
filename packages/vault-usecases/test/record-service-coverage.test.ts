@@ -1675,7 +1675,14 @@ describe("record service seams", () => {
               title: "Core",
               occurredAt: "2026-04-08T11:00:00.000Z",
             })]
-          : []),
+          : family === "experiment"
+            ? [sampleQueryRecord({
+                entityId: "exp_1",
+                primaryLookupId: "exp_1",
+                family: "experiment",
+                kind: "experiment",
+              })]
+            : []),
       listEntities: vi.fn(() => [sampleQueryRecord({
         entityId: "exp_1",
         primaryLookupId: "exp_1",
@@ -1727,7 +1734,13 @@ describe("record service seams", () => {
       })),
       "../src/query-runtime.ts": mockActualModule("../src/query-runtime.ts", (actual) => ({
         ...actual,
-        loadQueryRuntime: vi.fn(async () => journalQuery),
+        loadQueryRuntime: vi.fn(async () => ({
+          ...journalQuery,
+          readExperimentQuerySource: vi.fn(async () => ({
+            readModel: await journalQuery.readVault(),
+            listMetricPoints: journalQuery.listMetricPoints,
+          })),
+        })),
       })),
     });
     assert.deepEqual(await journal.createExperimentRecord({ vault: "./vault", slug: "focus-sprint" }), {
@@ -2071,7 +2084,14 @@ describe("record service seams", () => {
         })),
         "../src/query-runtime.ts": mockActualModule("../src/query-runtime.ts", (actual) => ({
           ...actual,
-          loadQueryRuntime: vi.fn(async () => experimentOutcomeQuery),
+          loadQueryRuntime: vi.fn(async () => ({
+            ...experimentOutcomeQuery,
+            resolveCanonicalEntityInFamily: vi.fn(async () => experimentOutcomeQuery.lookupEntityById()),
+            readExperimentQuerySource: vi.fn(async () => ({
+              readModel: await journalQuery.readVault(),
+              listMetricPoints: () => [],
+            })),
+          })),
         })),
       });
 

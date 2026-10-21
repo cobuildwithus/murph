@@ -106,7 +106,7 @@ describe("hosted account settings snapshot", () => {
     mocks.resolveHostedMemberAssistantModel.mockReturnValue({
       configurationAvailable: true,
       dormantSolPreference: false,
-      model: "gpt-5.6-terra",
+      model: "gpt-6.1-sol",
       solAvailable: false,
     });
     mocks.runWithHostedDomainRootUnwrapCache.mockImplementation(
@@ -235,7 +235,7 @@ describe("hosted account settings snapshot", () => {
     });
     expect(result.account).toMatchObject({
       assistant: {
-        model: "gpt-5.6-terra",
+        model: "gpt-6.1-sol",
       },
       phone: {
         number: "+15550100002",
@@ -318,7 +318,7 @@ describe("hosted account settings snapshot", () => {
     expect(result).toMatchObject({
       account: {
         assistant: {
-          model: "gpt-5.6-terra",
+          model: "gpt-6.1-sol",
         },
         email: {
           address: null,
@@ -407,7 +407,7 @@ describe("hosted account settings snapshot", () => {
       memberId: "member_123",
     });
 
-    expect(snapshot.assistant?.persona).toBe("scientist-with-classic");
+    expect(snapshot.assistant?.persona).toBe("classic");
     expect(snapshot.assistant?.personality).toEqual({
       detail: 8,
       humor: 7,
@@ -429,14 +429,13 @@ describe("hosted account settings snapshot", () => {
       assistant: {
         configurationAvailable: true,
         dormantSolPreference: false,
-        model: "gpt-5.6-terra",
-        persona: "scientist-with-classic",
+        model: "gpt-6.1-sol",
+        persona: "classic",
         personality: {
           detail: null,
           humor: null,
           push: null,
         },
-        provider: "openai",
         solAvailable: false,
         tone: "casual",
         voice: "warm",
@@ -455,7 +454,7 @@ describe("hosted account settings snapshot", () => {
       memberId: "member_123",
     })).resolves.toMatchObject({
       assistant: {
-        model: "gpt-5.6-terra",
+        model: "gpt-6.1-sol",
         persona: null,
         personality: {
           detail: null,
@@ -474,7 +473,7 @@ describe("hosted account settings snapshot", () => {
       memberId: "member_123",
     })).resolves.toMatchObject({
       assistant: {
-        model: "gpt-5.6-terra",
+        model: "gpt-6.1-sol",
         persona: null,
         personality: {
           detail: null,
@@ -518,7 +517,7 @@ describe("hosted account settings snapshot", () => {
     mocks.resolveHostedMemberAssistantModel.mockReturnValue({
       configurationAvailable: true,
       dormantSolPreference: true,
-      model: "gpt-5.6-terra",
+      model: "gpt-6.1-sol",
       solAvailable: false,
     });
 
@@ -528,7 +527,7 @@ describe("hosted account settings snapshot", () => {
       assistant: {
         configurationAvailable: true,
         dormantSolPreference: true,
-        model: "gpt-5.6-terra",
+        model: "gpt-6.1-sol",
         solAvailable: false,
       },
     });
@@ -546,7 +545,7 @@ function makeSettingsMemberRecord(
     assistantHumor: null,
     assistantModelPreference: null,
     assistantPersona: null,
-    assistantProviderPreference: null,
+
     assistantPush: null,
     assistantUnhinged: null,
     assistantReasoningEffortPreference: null,

@@ -22,6 +22,12 @@ Cloudflare-hosted execution plane for the hosted Murph path.
 
 ## Focused tests
 
+Hosted-local failure status retains at most eight recent runtime log metadata
+entries, selected only from the existing level, component, phase and event-code
+enums. The formatter omits timestamps, identifiers, free-form errors and all log
+payloads; raw stream text still uses its existing redaction path. Unknown enum
+values contribute no metadata entry.
+
 Hosted-local barrier and fault-injection controls use the existing member-keyed
 RunnerContainer test RPCs to update test-isolate memory before allocation.
 They do not reconcile the runtime owner or select a physical runner. Shutdown,
@@ -29,8 +35,23 @@ activity expiry, and operation-drop controls still require the selected Postgres
 target. These routes exist only in the hosted-local test entrypoint and retain
 its environment, signature, and bound-member checks.
 
-Run these commands from the repository root. To run one Node workspace test,
-pass its repository-relative filename directly to Vitest:
+Run these commands from the repository root. After installing dependencies in a
+fresh checkout, prepare the Web-owned Prisma client before running the standalone
+Cloudflare typecheck:
+
+```bash
+pnpm --dir apps/web prisma:generate
+pnpm --dir apps/cloudflare typecheck
+```
+
+Cloudflare's hosted-runtime migration test helpers import that generated client.
+Repeat generation after changing the Prisma schema. The root typecheck and
+`pnpm --dir apps/cloudflare verify` already prepare it; app-local `typecheck`
+remains a no-emit check so prepared parallel verification does not regenerate
+shared inputs.
+
+To run one Node workspace test, pass its repository-relative filename directly
+to Vitest:
 
 ```bash
 pnpm exec vitest run --config apps/cloudflare/vitest.node.workspace.ts --no-coverage apps/cloudflare/test/workspace-snapshot-local.test.ts
@@ -48,6 +69,36 @@ composite commands do not apply positional file filters to every stage: a
 filename reaches only the final Containers helper command, while the Node
 workspace still runs in full. Use the direct invocation above for focused
 workspace proof.
+
+## Worker startup profiling
+
+Profile the Worker's global-scope startup locally with the pinned Wrangler:
+
+```bash
+pnpm --dir apps/cloudflare worker:startup:profile
+```
+
+The command passes `--containers-rollout=none` to Wrangler's nested deployment
+**dry run**, so it neither builds container images nor deploys anything. It uses
+the checked-in Wrangler configuration directly, preserving the entrypoint,
+compatibility flags, and bundling options without a scratch config copy. Docker
+and production credentials are not required.
+
+The profile is written to the ignored
+`apps/cloudflare/.tmp/startup/worker.cpuprofile`; each run replaces that file.
+Open it in Chrome DevTools or VS Code to inspect the flamegraph.
+
+Compare alternating runs of the baseline and candidate on the same machine,
+excluding idle samples from CPU totals. `--worker=<multipart-bundle>` can reuse
+an existing Wrangler upload bundle for repeated measurements. Keep raw profiles,
+bundles, and source maps local; they may contain filesystem paths. Local timings
+identify initialization costs but do not predict production latency.
+
+The resource client's media, orphan, and replica contracts already belong to
+the Worker's eager graph. Keep those imports static: dynamic imports preserve
+unused exports from their shared dependencies and increase startup work.
+Response-card authoring schema builders are also marked pure at their owner, so
+runtime consumers omit their unused JSON Schema conversion work.
 
 ## Route Surface
 
@@ -118,14 +169,39 @@ authenticated request carrying `conversationWorkPending: true` may claim a slot.
 Temporal derives that fact from fresh admitted conversation lag. Background-only
 work reuses its own warm target or starts a cold target in the same fleet.
 A missed or unavailable claim falls back to that same cold allocation lifecycle.
-The coordinator fills a deficit in bounded parallel work; it owns only pristine
-inventory and abandoned handoff cleanup, not member execution or capacity leases.
+An admitted foreground claim can retire an unlaunched background owner. The slot
+cancels readiness before acquiring its retirement lifecycle lock; exact native
+stop and Postgres release must settle before foreground obtains a replacement.
+If background launch preparation already won, foreground wakes that same child.
+See [runtime ownership](../../agent-docs/references/hosted-postgres-runtime.md)
+for the transaction boundary and mixed-version deployment order.
+Each claim immediately fills a deficit using any free preparation lane, including
+while another preparation is pending. At most two preparations run concurrently;
+SQLite reservations and recovery alarms retain reset and retry ownership. The
+coordinator owns only pristine inventory and abandoned handoff cleanup, not member
+execution or capacity leases.
 The public banner and health response expose the effective mode, and deployment
 smoke checks the newly deployed Worker version against the rendered mode.
 
-Readiness verifies the exact release, bundle/source fingerprints, architecture,
-heavy runtime hydration, pristine job counters, and a disposable content-free
-Codex initialization probe. Global eligibility imposes no ENAM health requirement.
+Standby uses ordinary container startup and health, then verifies the exact release,
+bundle/source fingerprints, architecture, and pristine job counters. Heavy runtime
+hydration begins automatically at startup; standby does not wait for it or launch a
+throwaway Codex process. Actual invocation joins hydration through the normal path.
+Full Codex and CLI validation stays in deployment smoke. Its health receipt remains
+compatible with preceding Workers that still request a per-slot preflight; their
+legacy readiness query is ignored and runs the full smoke. Global eligibility
+imposes no ENAM health requirement.
+Periodic health rechecks leave ready slots claimable, including a target of one.
+They observe the existing process directly without the binding lifecycle lock or
+SDK auto-start. The coordinator advances the existing check deadline and applies
+a result only while the exact slot remains ready inventory: a racing claim wins,
+and late success, failure or timeout cannot restore or retire its handoff. Failed
+unclaimed checks use existing fenced retirement and refill. Rechecks preserve
+activity renewal; initial preparation still owns startup and full pristine proof.
+Existing persisted provisioning rows continue through ordinary preparation after
+a reset or Worker upgrade. This Worker-only correction uses the existing container
+health response and needs no Web or container-image protocol change.
+
 No member, workspace, or provider credential enters a slot before binding.
 The member-specific resident Codex process starts after encrypted-workspace restore.
 
@@ -142,9 +218,50 @@ identity for recovery. New allocations do not create either legacy target shape.
 Deployment uses one total fleet budget and an explicit temporary reservation for
 the legacy standby application; see [deployment migration](DEPLOY.md#unified-fleet-migration-and-rollback).
 
+When evaluating cost, separate pristine inventory from member-bound execution.
+A container instance can wait unbound before a member claims it; attributing its
+entire daily bill to that member overstates their execution time. Correlate the
+instance's billing intervals with the exact attempt's admission and completion,
+and keep boundary intervals and unmatched usage explicitly unassigned. Use
+Cloudflare's `containersUsageAdaptiveGroups` for billing estimates and
+`containersMetricsAdaptiveGroups` for application resource behavior; the latter
+excludes platform overhead. See the [metrics contract](https://developers.cloudflare.com/analytics/graphql-api/tutorials/querying-container-metrics/).
+
+Fixed ready inventory incurs reserved memory and disk charges even without
+foreground demand. Its allocation budget is approximately `target × 24` hours per
+day, plus replacement/preparation overlap. `off`, or a target of zero, uses the
+existing safe inventory retirement and cold-allocation path; it does not delay
+device webhook admission. Evaluate foreground cold-start latency before changing
+that production policy. Expiring slots while retaining the same fixed target
+merely triggers replacement, rather than reducing reserved capacity.
+
+For sizing comparisons, calculate active CPU seconds separately from allocated
+GiB-seconds and GB-seconds using [current pricing](https://developers.cloudflare.com/containers/platform/pricing/).
+The current cost-reduction work preserves two vCPUs. Custom sizing must satisfy Cloudflare's [instance constraints](https://developers.cloudflare.com/containers/platform/limits/),
+including the minimum memory per vCPU. Re-measure useful-work duration and tail
+latency when reducing CPU; low average utilization alone does not establish an
+equivalent runtime. Configuration or simulated savings are not deployed savings.
+
 Hosted assistant delivery recovery comes from the encrypted local runtime outbox state inside the workspace checkpoint plus web-owned hosted-runtime logs/status.
-The runner container sends runtime internal Worker requests to normal virtual hosts such as `results.worker`, `runner-control.worker`, and `web-control.worker`. Cloudflare Container outbound interception routes those requests back into Worker-owned handlers, using the runtime write-fence headers as authority. After a successful invocation, the container entrypoint clears the invocation's wake and abort pointers, decrements active work, and cleans request transport before it sends the exact result, attempt, and generation through `runner-control.worker` to the Postgres runtime owner. Web applies the existing exact completion compare-and-swap, so an activation reset cannot strand a completed write fence and a successor cannot race a process that still reports busy. The ordinary outer result remains the normal completion path; the one-second best-effort receipt logs `recorded` or `not_recorded` and never changes that result. No recovery queue, alarm, poller, persisted promise, or second state owner is added.
+The runner container sends runtime internal Worker requests to normal virtual hosts such as `results.worker`, `runner-control.worker`, and `web-control.worker`. Cloudflare Container outbound interception routes those requests back into Worker-owned handlers, using the runtime write-fence headers as authority. After returning a successful invocation result, the container entrypoint clears the invocation's wake and abort pointers and cleans request transport, then sends the exact result, attempt, and generation through `runner-control.worker` to the Postgres runtime owner. Active work remains counted until that completion callback settles, preserving admission and shutdown-drain fencing. Web applies the existing exact completion compare-and-swap, so an activation reset cannot strand a completed write fence and a successor cannot race a process that still reports busy. The ordinary outer result remains the normal completion path; the one-second best-effort receipt logs `recorded` or `not_recorded` and never changes that result. Optional closed receipt reasons classify an already-completed generation only when the owner has `completedAt`, is idle, and has released its attempt (the warm target may remain); a strictly newer generation means only `superseded`, not completion or delivery. These obsolete callbacks remain `completed: false` / `not_recorded` and log at info. Unconfirmed owners, native receipt mismatches, canonical completion rejections, malformed receipts, HTTP/transport errors, and timeouts remain warnings. Boolean-only receipts stay compatible across Worker/container versions; missing or unknown reasons never suppress a false-receipt warning, and reasons cannot override successful completion. No recovery queue, alarm, poller, persisted promise, or second state owner is added.
+
+The shared canonical completion publisher additionally emits one failure-isolated info observation per existing call after it settles: `runtimeCompletionCaller` is `runtime_callback` without native settlement evidence or `native_invocation` when the call supplies the settled target. The latter includes exact native-receipt reconciliation and does not exclusively identify the outer supervisor. `runtimeCompletionOutcome` is `updated` for an acknowledged canonical update, `not_updated` for a settled non-update, or `unconfirmed` when the call throws. The event reuses `workspaceAttemptId` correlation; user identity is handled by the existing structured-log redaction. It contains no target, generation, error text, or payload and adds no I/O, retry, timer, or control decision. Join this observation to callback warnings on the exact attempt: a newer attempt cannot prove the older one completed, and canonical acknowledgment does not prove message delivery. Missing observations on older Workers or unexercised paths remain unknown.
 Shared runtime ports cannot supply raw Web-control methods or paths. They must use a branded route descriptor from the same registry that derives the Worker proxy allowlist; bounded query-bearing and device-connect variants can only bind to an already-registered pathname. Cloudflare typecheck rejects an unregistered caller at compile time, and the Node route-contract suite enumerates the registry to prove each exact method/path is allowed while the opposite method and path variants remain blocked.
+
+The existing `Hosted runtime control-plane response returned invalid JSON.` warning
+includes `responseMimeCategory` (`missing`, `json`, `html`, `text`, `other`) for
+non-device responses too, including sensitive bodies. It categorizes only the
+server-declared `content-type`, without logging raw header values; it does not
+prove body contents or root cause. This is failure-only enrichment: no new events
+or success log volume, and no changes to snapshot-only fields. Follow up on natural
+traffic using a fixed 24-hour UTC window after rollout (`start <= timestamp < start + 24h`):
+filter `component = "hosted.runtime.control-plane"` and
+`message = "Hosted runtime control-plane response returned invalid JSON."`, then
+count by `details.path`, `details.responseStatus`, and `details.responseMimeCategory`.
+Include the production runner-container application streams as well as the Worker;
+container records identify their application through `$containers.applicationId`.
+An absent field is unknown, not `missing`; zero matches do not establish health.
+
 The phone-call start port is one bounded `web-control.worker` callback into `apps/web`; its protocol floor is 45 seconds even when the generic web-control timeout is 30 seconds, so the web-owned 40-second aggregate deadline finishes before the caller gives up. Deploy and prove convergence of this 45-second Cloudflare caller before deploying a web build with the 40-second deadline. The longer caller is backward compatible with older web builds; an old 30-second caller is not compatible with the 40-second web deadline, so Cloudflare cannot be rolled back below 45 seconds while that web build is active. Retell credentials and provider calls remain web-owned and are never forwarded into the runner.
 `murph.plan_usage` uses one allowlisted signed `web-control.worker` callback.
 Cloudflare transports and validates the strict result but owns no billing or
@@ -172,23 +289,7 @@ The usage-record callback may also transport one bounded Linq group delivery
 target captured from the accepted mailbox input. The target includes the
 existing thread-route authority and is advisory to web-owned accounting; the
 Worker does not resolve, persist, or authorize an alternate recipient.
-The runner container also uses Cloudflare HTTPS outbound interception for hosted provider egress. OpenAI, Exa, Mapbox, Linq, Telegram, hosted data API, and Workers AI transcription real credentials stay in Worker env. Native child-process integrations for OpenAI, Exa, Mapbox, `murph_data_api`, and `workers_ai_transcribe` receive a runner-scoped signed Murph provider credential in the provider's native credential slot; the Worker verifies that credential as `provider + user + runner`, asks the Postgres owner whether the same runner currently has an active runtime for that user/provider, then injects the real Worker-owned credential only into the upstream request. Runtime-controlled provider calls may instead carry exact write-fence headers or a provider-egress token; there is no tokenless active-user-fence provider authorization path. Delivery providers (Linq and Telegram) and ElevenLabs continue to require exact write-fence headers or a provider-egress token, because those effects must stay behind recipient binding, journaling, and idempotency. The Worker constrains Codex-native managed OpenAI search to exact `POST /v1/alpha/search`, constrains Exa to `POST /search`, constrains Linq to the runtime route matrix (`GET /phone_numbers`, `GET /attachments/:id`, `POST /attachments`, `POST /chats`, `POST /chats/:id/messages`, `POST /chats/:id/voicememo`, `POST /chats/:id/typing`, `DELETE /chats/:id/typing`, `POST /chats/:id/read`, `POST /messages/:id/reactions`, `DELETE /messages/:id`), constrains Telegram to its explicit operation allowlist, including `sendRichMessage`, constrains Mapbox to read-only GET allowlisted path families, and strips runtime authority headers before upstream provider egress leaves Cloudflare. Runtime code does not call Linq's contact-card provider endpoint directly; first-contact native contact-card sharing stays web-owned. Hosted generated-image turns call OpenAI through the runner-scoped provider credential path, persist the validated bytes as a canonical vault capture, and return private `vault_image` media. Final message delivery reloads and hash-verifies those bytes, then uses Linq's attachment upload or Telegram multipart `sendPhoto`. Linq group-avatar mutation is the narrow URL-only exception: after preflight, the write-fenced Worker route stores one deterministic application-encrypted R2 object and returns an opaque at-most-one-day capability on Murph's fixed Worker origin directly to the runtime provider boundary. The capability reveals no member id, R2 key, storage namespace, or image hash; the public Worker route decrypts and verifies the object and returns `private, no-store`. Retries reuse the deterministic object only while its original 24-hour lifecycle window remains, and each capability expiry is capped at that object's lifecycle boundary. At or after the boundary, the Worker replaces the same deterministic key before returning a newly bounded capability; the R2 lifecycle and account deletion still own cleanup without relying on Linq fetch acceptance. The URL is not response media or model-visible state. Runner container names identify the runner for server-side validation; `ctx.containerId` is not provider-egress authorization. Unknown egress currently passes through during migration and logs only sanitized method/host/path metadata. Adding a new hosted provider API, method, or runtime tool that calls an intercepted provider is not complete until this egress boundary and its regression tests allow the exact upstream operation. Updating the Codex pin additionally requires a source-manifest review: required CI resolves `rust-v<version>` from OpenAI, verifies its exact commit and `codex-rs/codex-api/src` tree, and then uses native binary scanning only as cross-platform corroboration. The test-only inventory cannot generate or widen the Worker policy.
-Venice joins that same Worker-owned credential boundary for core inference.
-The Worker permits only `POST /api/v1/responses` and
-`POST /api/v1/responses/compact`, accepts only canonical Luna/Terra/Sol request
-models, and replaces the model with the matching regular Venice provider id
-(`openai-gpt-56-luna`, `openai-gpt-56-terra`, or `openai-gpt-56-sol`) while disabling
-Venice's added system prompt, web search, and web scraping at the final egress
-boundary. Runtime egress derives the provider id from the same shared map that
-Web records in its pricing snapshot, so the allowance rate remains bound to
-the actual upstream model. Codex Responses Lite `/responses` requests also have
-their standard top-level tools restored and receive an explicit GPT-5.6 prompt
-cache breakpoint on the final block of the contiguous leading developer prefix.
-The Worker preserves the stable cache key and caller-owned cache controls, does
-not modify compact or ordinary Responses cache behavior, and never logs prompt
-content or cache keys. Specialized
-tools such as generated images continue to use their own managed providers even
-when Venice owns the core assistant turn.
+The runner container also uses Cloudflare HTTPS outbound interception for hosted provider egress. OpenAI, Exa, Mapbox, Linq, Telegram, hosted data API, and Workers AI transcription real credentials stay in Worker env. Native provider clients receive SDK placeholders. The Worker resolves platform-supplied `ctx.containerId` and `ctx.className` to the exact controller and reads its immutable member binding, registered invocation context, and usage-settlement state before injecting the real upstream credential. The ordinary path needs one native RPC and no Web authorization callback. Completion and native retirement deny new effects; already admitted effects may finish. Legacy credentials and caller-supplied headers do not grant access. Recipient binding, journaling, and idempotency remain runtime responsibilities. The Worker constrains Codex-native managed OpenAI search to exact `POST /v1/alpha/search`, constrains Exa to `POST /search`, constrains Linq to the runtime route matrix (`GET /phone_numbers`, `GET /attachments/:id`, `POST /attachments`, `POST /chats`, `POST /chats/:id/messages`, `POST /chats/:id/voicememo`, `POST /chats/:id/typing`, `DELETE /chats/:id/typing`, `POST /chats/:id/read`, `POST /messages/:id/reactions`, `DELETE /messages/:id`), constrains Telegram to its explicit operation allowlist, including `sendRichMessage`, constrains Mapbox to read-only GET allowlisted path families, and strips runtime authority headers before upstream provider egress leaves Cloudflare. Runtime code does not call Linq's contact-card provider endpoint directly; first-contact native contact-card sharing stays web-owned. Hosted generated-image turns call OpenAI through native container authorization, persist the validated bytes as a canonical vault capture, and return private `vault_image` media. Final message delivery reloads and hash-verifies those bytes, then uses Linq's attachment upload or Telegram multipart `sendPhoto`. Linq group-avatar mutation is the narrow URL-only exception: after preflight, the write-fenced Worker route stores one deterministic application-encrypted R2 object and returns an opaque at-most-one-day capability on Murph's fixed Worker origin directly to the runtime provider boundary. The capability reveals no member id, R2 key, storage namespace, or image hash; the public Worker route decrypts and verifies the object and returns `private, no-store`. Retries reuse the deterministic object only while its original 24-hour lifecycle window remains, and each capability expiry is capped at that object's lifecycle boundary. At or after the boundary, the Worker replaces the same deterministic key before returning a newly bounded capability; the R2 lifecycle and account deletion still own cleanup without relying on Linq fetch acceptance. The URL is not response media or model-visible state. The platform container coordinates select the existing native authority; neither request headers nor caller-supplied container names can select another member. Unknown egress currently passes through during migration and logs only sanitized method/host/path metadata. Adding a new hosted provider API, method, or runtime tool that calls an intercepted provider is not complete until this egress boundary and its regression tests allow the exact upstream operation. Updating the Codex pin additionally requires a source-manifest review: required CI resolves `rust-v<version>` from OpenAI, verifies its exact commit, which pins the `codex-rs` tree (including provider APIs and Guardian Decisions), and then uses native binary scanning only as cross-platform corroboration. The test-only inventory cannot generate or widen the Worker policy.
 Hosted Linq container requests use the canonical HTTPS API base even when the
 Worker has a custom `LINQ_API_BASE_URL`. The existing outbound handler maps that
 canonical request to the Worker-owned upstream and injects the provider token.
@@ -207,7 +308,7 @@ Root `pnpm dev` starts the same local Cloudflare container path and uses the ima
 ## Storage Contract
 
 - The live v2 workspace snapshot is one encrypted zstd-compressed tar object under `users/<namespace>/workspace-snapshots/<snapshotId>.snapshot.enc`. The container uploads that object directly to the canonical ENAM R2 bucket through a short-lived presigned `PUT` URL minted by the Worker, and restores through a presigned `GET`; Worker routes carry JSON session/presign/complete metadata only and never receive the snapshot body. This v2 format is a greenfield zstd hard cut: gzip v2 refs are not produced or restored.
-- V2 snapshot creation validates the planned durable-root entries, then streams `tar -> zstd -> AES-GCM` into the encrypted object. Restore treats v2 snapshots as first-party authenticated artifacts: it verifies the encrypted object size/hash, AES-GCM tag, and plaintext compressed archive hash, extracts once into a temporary root, then swaps that root into place. Restore does not re-list tar members; a valid encrypted snapshot is trusted as output from the snapshot writer.
+- V2 snapshot creation validates the planned durable-root entries, then streams `tar -> zstd -> AES-GCM` into the encrypted object. Creation uses zstd level 9 with two compression workers: it spends more CPU during the existing idle checkpoint to reduce the bytes uploaded and later downloaded, authenticated, and decrypted. Existing readers can restore both compression levels with their current bounds. Restore treats v2 snapshots as first-party authenticated artifacts: it verifies the encrypted object size/hash, AES-GCM tag, and plaintext compressed archive hash, extracts once into a temporary root, then swaps that root into place. Restore does not re-list tar members; a valid encrypted snapshot is trusted as output from the snapshot writer.
 - Ordinary inbound hosted video bytes are not portable workspace state. Snapshot planning excludes normalized video paths derived from validated canonical inbox captures even while accepted input still protects the local file; invalid capture metadata fails planning closed. Unprotected videos are immediately eligible for the existing atomic inbox-retention cleanup, while explicit canonical event raw references remain the durable-save exception.
 - Live workspace restore and checkpoint construction accept v2 refs or null bootstrap state. Legacy ref decoders and object cleanup remain for retained orphan metadata; canonical write receipt artifact recovery remains supported.
 - Managed snapshot completion returns HTTP 409 when its upload, owner, or byte identity does not match the admitted receipt. Rejection happens before multipart completion, object reads, or checkpoint publication; resource transport and storage failures remain errors rather than conflicts.
@@ -365,6 +466,18 @@ roles. Zero branch series distinguishes provider omission from unusable primary
 provenance. These diagnostics contain no label values or raw metrics, add no
 provider calls, and do not change paging or persisted samples.
 
+When `planetscale_pgbouncer_current_connections` is missing, the existing failed
+collection warning also includes `pgbouncerCurrentConnectionSeries`: one entry
+per successfully parsed scrape in collection order, at most two entries. Each
+entry contains only `branch`, `primary`, `replica`, `unrecognizedRole`, and
+`primaryMissingPod` series counts. Counts use the already parsed points for the
+configured branch; `primaryMissingPod` counts primary series with a missing or
+empty pod label, which makes the per-pod sum unavailable. Zero branch series
+means no matching series, whether the family is absent or appears only on other
+branches; these counts do not establish a provider cause. No label values,
+identifiers, or metric payloads are included. The diagnostic adds no requests,
+logs, or storage and does not change null values, retries, conditions, or paging.
+
 Discovery selects exactly one target by organization, database name, and branch
 name. The configured branch ID then filters the selected Prometheus payload's
 metric series. Both selectors are required because one organization can have
@@ -507,7 +620,9 @@ Defaulted worker vars:
 
 - `HOSTED_EXECUTION_MAX_EVENT_ATTEMPTS=3`
 - `HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS=600000` (also the shared code default)
-  for the runtime quiet window and conversation warmth. Container warmth ends
+  for the foreground runtime quiet window and conversation warmth. Background-only
+  assistant work checkpoints when settled and reaches the existing cleanup path
+  without this additional wait. Container warmth ends
   ten minutes after the latest accepted inbound message's original server receipt,
   never ten minutes after invocation completion. Active work remains protected.
 - `HOSTED_EXECUTION_RUNNER_LIFECYCLE_REEVALUATION_MS=60000` (also the code
@@ -534,19 +649,18 @@ facts. Postgres owns runtime admission and resource cleanup; there is no per-use
 coordination Durable Object or alarm.
 RunnerContainer reuses the Containers SDK's own scheduling/alarm owner solely
 for safe idle-container cleanup, not mailbox or checkpoint scheduling.
+Activity expiry rearms that schedule and yields to a registered invocation before
+taking the lifecycle lock. The invocation holds that lock until its response
+settles; waiting behind it would strand the current SDK alarm instead of letting
+the next alarm run. Destructive cleanup still takes the lock and rechecks the
+interaction generation after external ownership reads. This removes an
+application-owned alarm stall, not the platform's ability to reset a controller.
 
 Optional execution vars and secrets:
 
 - `HOSTED_WEB_CALLBACK_SIGNING_KEY_ID` for callback key rotation metadata on the required signed hosted-web path
 - `HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS` and `HOSTED_EXECUTION_RUNNER_ENV_PROFILES` for execution-time secret forwarding
-- `HOSTED_ASSISTANT_PROVIDER=openai` for Codex hosted assistant execution through the Worker egress intercept. The standard deploy preflight requires Worker-owned `OPENAI_API_KEY` plus `HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET`; hosted Codex receives only a signed Murph provider credential, never the real OpenAI key. Host Codex bridge/proxy env is not accepted
-- Optional Venice core inference uses the Worker-owned `VENICE_API_KEY` secret.
-  The regular provider ids `openai-gpt-56-luna`, `openai-gpt-56-terra`, and
-  `openai-gpt-56-sol` are code-owned and derived from Murph's canonical model;
-  there are no separate operator model vars. The fleet default remains
-  `HOSTED_ASSISTANT_PROVIDER=openai`; Web projects the per-member
-  Venice override for an invocation only after its separate rollout flag is
-  enabled. The runner receives only a signed Venice credential.
+- `HOSTED_ASSISTANT_PROVIDER=openai` for Codex hosted assistant execution through the Worker egress intercept. The standard deploy preflight requires Worker-owned `OPENAI_API_KEY` plus `HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET`; hosted Codex receives only an SDK placeholder, never the real OpenAI key. The existing signing secret remains required for Live resource references; provider credential minting is removed. Host Codex bridge/proxy env is not accepted
 - `HOSTED_R2_PRESIGN_ENDPOINT` can override the default account-scoped R2 S3 endpoint for direct snapshot URL generation. Production deploys must leave it as the account-scoped R2 HTTPS origin. Hosted-local dev, worker-only, and E2E profiles start a MinIO sidecar and inject local S3-compatible endpoints behind the local-only `HOSTED_R2_PRESIGN_ALLOW_LOCAL_ENDPOINT=1` guard; those local endpoint flags are not deploy vars.
 - `HOSTED_AI_USAGE_REPORTING_SECRET` is an optional Worker-owned platform
   secret. It must not be forwarded into the hosted runtime env; usage
@@ -560,23 +674,217 @@ The runtime always includes the minimal `assistant` env profile. Deploy automati
 
 Cloudflare keeps only the wake-payload decryption lane plus the worker-owned callback-signing key. Broad web-private-field encryption stays in `apps/web`, and the hosted runtime reaches the web control plane through the worker proxy instead of holding callback-signing material directly.
 
+## CLI access for operational reads
+
+Cloudflare's `cf` CLI is Murph's default for direct Cloudflare API operations,
+including diagnostics, resource inspection, and explicitly authorized management.
+Start command discovery with `cf cli search`, then inspect the selected command's
+`--help` and `cf schema` before execution. Search queries must describe only the
+action and resource type: omit account/resource identifiers, domains, names,
+and private incident details. Search results are suggestions, not authorization;
+choose read-only operations for diagnostic tasks.
+
+Install the reviewed open-beta version separately from workspace dependencies:
+
+```sh
+npm install --global cf@1.0.0-beta.5
+cf --version
+cf cli search "look at messages stuck in my queue"
+cf cli search "query historical worker observability logs"
+cf observability telemetry query --help
+cf schema observability telemetry query
+```
+
+Use the JSON output to select only the fields needed for the task. Check existing
+authentication privately with `cf auth whoami`; use `cf auth login` when needed.
+Keep the version pinned in any future automation and reverify commands when
+upgrading. The earlier `cf@0.11.0` preview predates this search-first release.
+See [Cloudflare's launch and migration guidance](https://blog.cloudflare.com/cloudflare-cf-cli-launch/)
+and [the official CLI repository](https://github.com/cloudflare/cf).
+
+### Existing Wrangler workflow exceptions
+
+Use `cf` for new direct operations. Existing package scripts and the hosted-local
+harness still use pinned Wrangler for Worker/Containers development, secret
+provisioning, deployment status, and the staged deployment contract in
+[DEPLOY.md](./DEPLOY.md). Continue invoking those repository entrypoints until
+their migration is tested; do not alias `wrangler` to `cf`, mechanically rename
+commands/config files, or bypass version-upload, native rollout, and smoke gates
+with a bare `cf deploy`.
+
+`cf migrate apps/cloudflare/wrangler.jsonc --dry-run --no-install` provides a
+non-writing migration preview. With the reviewed beta, its Wrangler-bundler path
+requires Wrangler 4.100.0 or newer for `wrangler/experimental-config`; Murph
+currently pins 4.93.0. A full migration must update that dependency and lockfile,
+prove generated-config and binding parity, then validate the hosted-local and
+private Murph Cloud deployment flows. Cloudflare supports Wrangler delegation
+for existing esbuild builds during the beta. This CLI preference does not claim
+that those workflows have already migrated.
+
+### Historical logs and authentication
+
+For operator-authorized historical-log reads, use scoped OAuth authentication:
+
+```sh
+cf auth login --scopes account:read user:read workers_observability:read workers_observability:write workers_observability_telemetry:write
+```
+
+Approve the requested optional scopes in Cloudflare's consent dialog. A successful
+Wrangler login or live tail does not prove historical-query access: the
+[telemetry query API](https://developers.cloudflare.com/api/resources/workers/subresources/observability/subresources/telemetry/methods/query/)
+requires Observability permissions. Verify access with an actual bounded query;
+report HTTP 403 as an access gap rather than repeating the same Wrangler login.
+The permission's write label does not authorize production mutations.
+
+Resolve the intended account through `cf accounts list` and set
+`CLOUDFLARE_ACCOUNT_ID` for the query process. Use
+`cf observability telemetry query --body '<query-json>'` with a temporary
+`queryId`, explicit millisecond `timeframe.from` and `timeframe.to`, a small
+`limit`, and appropriate dataset/service filters. Set `dry: true` to execute
+without persisting query results; `--dry-run` only validates the command and does
+not establish access. Workers and Containers use distinct datasets, so a Worker
+service filter alone may omit container shutdown logs. Narrow each query to the
+relevant runtime and time window, and paginate or refine filters when the limit
+is reached before claiming complete coverage.
+
+Capture responses privately and project only the required timestamps, event
+labels, timings, bounded counts, and outcome codes. Never print tokens or put
+them in command arguments, copy production secrets locally, or commit raw logs,
+account/member identifiers, or incident row contents. Existing authorization and
+private deployment boundaries still apply.
+
 ## Private Operational Telemetry
 
-Responses WebSocket observations retain completion, close-side, close-code and
-diagnostic scheduling fields through the structured logger's bounded 64-key
-objects. The relay keeps at most four ordinary diagnostic writes and one
-reserved terminal write in flight. It uses request-scoped `waitUntil` when the
-Containers outbound context does not supply it; persistence remains best-effort
-and never delays forwarding or changes accounting. Missing log rows remain
-missing evidence, not successful transport. Upstream and client frame inspection
-share a six-megacharacter bound; larger frames remain uninspected and are
-forwarded under the existing relay admission rules. First-frame classification
-reuses the response observation parser.
-Abnormal closes during an attributable, inspected single-request generation
-with no terminal response are warnings even after response frames arrive.
-The diagnostic outcome remains `closed`; it does not assert that Codex recovery
-failed. Completed, normal, prewarm and ambiguous closes keep their existing
-classification. Frame-send counts record relay calls, not client receipt proof.
+Existing internal-request failure and authority-rejection warnings include
+`workspaceAttemptId` from the canonical lease already read to fence that request.
+The value is captured before fetch and cannot follow a later lease change. Join
+it to the exact invocation's checkpoint/completion and work-mode records; it does
+not establish a failure's cause. Supplied workspace-snapshot fences, supplied
+POST latency-trace fences, and trusted internal fetches omit correlation because
+they do not read the current lease. Missing or rejected lease reads still fail
+before the existing request logs. No supplied header is used for diagnostics,
+and this adds no lease read, I/O, retry, or success-path logging. Shipping this
+runtime change requires rebuilding and deploying the runner image.
+
+The existing container request-exit warning retains `exitReason` and adds
+`requestKind` from the finite method/route owner (`unknown` for an unmatched or
+unclassified request), plus `workspaceAttemptId` from this request's successfully
+parsed workspace-invocation job. `workspaceAttemptId: false` explicitly means no
+parsed job attempt is available, including other request kinds; unlike `null`,
+it survives structured-log sanitization without inventing an attempt ID. These
+fields never borrow a concurrent invocation's identity or include raw request
+paths, queries, headers or bodies. They are observations only: `response.closed`
+does not prove accepted work was aborted; invocation lifetime retains its
+separate explicit-abort owner. This change requires rebuilding and deploying the
+runner image, which bundles `container-entrypoint.ts`; a Worker-only deployment
+cannot ship it.
+
+For `usage_settlement_pending` only, the existing `Hosted runner provider egress
+completed.` warning includes `runtimeAttemptId` when its already-read native
+ContainerProxy authority supplies a write fence. Caller headers never supply
+this join. The existing 503 response with `retry-after: 1` returns without an
+upstream request; associated tracing lacks the attempt, and the separate typing-start
+correlation below does not cover this rejection. The extension adds at most one
+scalar under the structured logger's existing sanitization and size bounds, with
+distinct values limited to native attempts represented in these warnings. It
+adds no event, I/O or wait; other diagnostics retain their existing details.
+This observes the rejected attempt. It does not repair settlement failures or
+establish their cause or recovery.
+
+Linq typing-start fetches mint one random UUID in
+`x-hosted-runtime-fetch-correlation-id`. The runtime records
+`providerRuntimeStartedAtEpochMs`, `providerRuntimeResumedAtEpochMs` and monotonic
+`providerRuntimeRoundTripMs` under `providerFetchCorrelationId`. The Worker adds
+the same ID, native-authorized `runtimeAttemptId` and
+`providerWorkerStartedAtEpochMs` to its existing total, authorization and upstream
+duration record. Subtracting Worker elapsed time from runtime elapsed time shows
+time outside Worker processing; it does not distinguish outbound proxy queueing,
+network transit or a delayed runtime continuation. Epoch clocks can differ across
+hosts and cannot independently prove an event-loop stall.
+
+Mailbox port fetches use the same private header with `mailboxFetchCorrelationId`.
+The Worker attaches the authorized attempt to existing mailbox timing fields.
+The runtime records fetch start, response JSON decoded and validated import-ready
+epoch markers, plus monotonic fetch/decode, parse and total milliseconds. One
+logical fetch ID spans existing read retries and can join multiple Worker records;
+its total includes retry waits. A failed/canceled fetch records false
+`mailboxRuntimeImportReady` and unset markers for unfinished phases (null in the
+emitter input; omitted by structured-log sanitization). Import-ready
+means the port can return validated items, not that the runtime has imported or
+staged them; compare the subsequent mailbox milestones separately.
+
+These IDs are diagnostic only. The Worker accepts UUID-v4 shape only and strips
+the header before provider or Web forwarding; request bodies, recipients and
+credentials are excluded. Old runtimes omit the header, and old Workers ignore
+it for behavior. Roll out the Worker before the runtime image so newly emitted
+headers are stripped at egress; complete joins require both new revisions.
+Use ordinary authorized traffic to verify correlation after rollout. Missing
+historical IDs cannot be reconstructed or treated as zero latency.
+
+Container stdout, including the runtime-side records above, is not queryable from
+Workers Observability. Each invocation therefore also copies transport scalars for
+its first-started Linq typing start and the first attempt of its first-started
+conversation-lane mailbox fetch onto its existing `runtime.invocation_finished`
+runtime-log entry (no additional request). The claim is taken when the request
+starts, so an overlapping later request that settles first never replaces it, and
+only the claimed request is observed. The snapshot-fetch observer supplies `firstTypingFetch*` and
+`firstMailboxFetch*` fields: start epoch, duration, response status, new
+connection count, pooled-socket reuse, DNS/TCP/TLS setup, request-sent time,
+response wait after sending, headers-to-resolution delay, process event-loop
+active/idle time, process CPU user/system time and last observed stage. The CPU
+values are the observer's existing `process.cpuUsage` deltas over the same fetch.
+They count every process thread and can exceed wall time. They only narrow
+CPU-cost hypotheses for the observed fetch window: they cannot cleanly decompose
+event-loop wait, do not attribute a main-thread cause, and say nothing about time
+before the fetch starts. Connection setup and
+headers-to-resolution delay are runtime-local monotonic spans. Response wait still
+combines both transit directions and Worker or upstream work; join it with the
+Worker record by attempt. Later typing starts and mailbox fetches in a long warm
+invocation are not recorded. A failed or unobserved phase is null, and a claimed
+request that never settles leaves its fields absent. These fields are
+diagnostic only and add no ordering, retry or authority behavior.
+
+Each conversation-lane mailbox read also reports its own first attempt as
+`passMailboxFetch*` scalars on the existing `mailbox.imported` row of the import
+pass that consumed it. The pass is fed by either the wake prefetch or the pass's
+own read, including a refetch after a failed prefetch. The scalars use the same
+observer and fields, plus `passMailboxFetchAttemptCount` for that logical read.
+When a retry delivered the data, the timing still describes the first, failed
+attempt, and the count is greater than one. The invocation-first claim reuses the
+same observation, so no request is observed twice. System-only reads carry no pass
+timing.
+
+Successful warm ensure-processing requests omit the detached processing summary
+only when they complete within one second. Slower successes retain the existing
+native wake entry, dispatch, response, and handler timing fields, so platform
+dispatch delay can be distinguished from work inside the runner. Logging remains
+detached and cannot extend the command budget or change admission.
+
+OpenAI Responses upgrades return the upstream `Response` and unaccepted
+`webSocket` unchanged. Cloudflare forwards the connection; native Codex owns
+continuation, idle reuse, and reconnect/fallback. The Worker owns handshake
+runtime authorization and API-key injection, with no frame relay or socket
+registry. HTTP response diagnostics remain as Worker structured logs, and native
+Codex transport diagnostics remain.
+
+An opaque socket is admitted only after the existing image-access callback
+allows the runtime member. Otherwise HTTP 426 activates native Codex HTTPS
+fallback, preserving ordinary text and per-request image authorization. Image
+eligibility is a handshake admission decision for the lifetime of that socket;
+subscription changes take effect on its next connection. Existing runtime
+termination and consent-withdrawal container destruction remain the revocation
+owners. No per-frame authority lookup or immediate subscription-revocation
+promise is made. Codex-native memory remains disabled in hosted configuration;
+its unused egress accounting and relay diagnostics have been removed.
+
+`codex-websocket-passthrough.test.ts` runs the pinned binary through a real local
+workerd fetch boundary across a 35-second idle gap, then exercises explicit
+close recovery and HTTP 426 fallback. The Workers test proves exact upgrade
+identity, bidirectional traffic, and denied/revoked admission. This local proof
+does not reproduce the managed Containers outbound proxy or establish
+production latency. After rollout, compare native `transport-fallback` /
+`websocket-read` events and first-provider-receipt latency, and verify that the
+removed relay no longer creates Worker invocation failures.
 
 Postgres processing logs the failed operation, elapsed time, remaining command
 budget and timeout classification. Command-budget and execution transport
@@ -639,45 +947,20 @@ the aggregate queries in
 to detect affected runtimes and their later mailbox outcomes without returning
 subject keys or raw JSON.
 
-The `HOSTED_RUNTIME_RETRY_ANALYTICS` Analytics Engine binding records one
-identifier-free data point only after the runtime owner has decided to return
-`retry_later`. `index1` is the sole index and `blob2` repeats the bounded retry
-reason, `blob1` is the schema `murph.hosted-runtime-retry.v1`, `double1` is the
-event count, and `double2` is the selected retry delay in milliseconds. For
-`container_busy` only, optional `blob3` records one of these closed control-path
-stages:
-
-- `active_runtime_contention`: an active runtime fence remains contended after
-  the liveness check.
-- `background_preemption_unavailable`: the active container exposes no
-  background-abort capability.
-- `background_preemption_not_accepted`: background abort returned a bounded
-  non-accepted, non-failure status.
-- `stopped_container_record_pending`: a destroyed pending stop target could not
-  yet be cleared from the runner record.
-
-Historical reports still recognize `non_runtime_write_fence` and
-`cooperative_handoff_pending`; current code no longer emits them. An exact
-system-mailbox child that accepts a foreground wake is acknowledged without
-requiring a new owner. The child retains its existing authority checks.
-
-The stage is a finite mechanism label, not a processing mode, scenario name,
-identifier, free-text value, or private-state projection. Other retry reasons
-must omit it. This is an optional-field evolution of the existing v1 point:
-historical points have no `blob3`, and the report groups them explicitly as
-`unattributed`. The write remains exactly one immediate, unawaited,
-best-effort point per existing retry and is absent from successful processing.
-Run
-[`scripts/runtime-retry-reasons.sql`](./scripts/runtime-retry-reasons.sql)
-through the private Cloudflare Analytics Engine SQL API or dashboard to get a
-sampling-corrected reason-plus-stage breakdown. It defaults to the trailing 24
-hours; for later two-hour comparisons, replace its first timestamp predicate
-with the commented half-open fixed UTC bounds and run once for each adjacent
-window. The corresponding Workers structured log includes the bounded retry
-reason, `runtimeProcessingRetryStage` for `container_busy`, and the existing
-`orchestrationAttemptId` for request-level joins. No identifier or user,
-workspace, message, command, provider, health, path, content, credential, or
-raw-error value is copied into Analytics Engine blobs, indexes, or doubles.
+The `HOSTED_STANDBY_ANALYTICS` Analytics Engine binding records one
+identifier-free data point per standby coordinator claim answer and per finished
+slot preparation in `murph_hosted_standby_inventory`. `index1` and `blob2` are
+the event (`claim` or `prepare`), `blob1` is the schema
+`murph.hosted-standby-inventory.v1`, `double1` is the event count, `double2` and
+`double3` are the ready and provisioning inventory, `double4` is the configured
+target, and `double5` is the duration in milliseconds. A claim's `blob3` is its
+outcome (`claimed`, `no_ready_slot`, `replayed`, `disabled`, `stale_release` or
+`deadline_expired`) and its inventory is read before selection, so a claimed
+point with target two and one ready slot shows overlapping demand, and
+`no_ready_slot` shows a foreground cold fallback. A preparation's `blob3` is
+`refill`, `resume` or `reproof`, `blob4` is `ready` or `failed`, and its
+inventory is read after the result. Query daily claims and preparation latency
+with [`scripts/standby-inventory.sql`](scripts/standby-inventory.sql).
 
 For the primary production control database, run the identifier-free cold-start
 report through the read-only helper:
@@ -706,6 +989,24 @@ Historical observations recorded one terminal operation outcome; later hints
 could increase only its bounded coalesced-hint count before readiness consumed
 it. Current runtime preparation no longer forwards hint observations; stored
 fields remain readable by the latency schema and report.
+
+For warm direct wakes, generic orchestration leaves can describe a competing
+Temporal request. Use the direct response durations and correlate the Worker
+completion log by orchestration attempt. Its request-local
+`workerFetchStartedAtEpochMs`, auth timestamps and route receipt distinguish
+fetch-handler routing from the preceding platform interval. `workerFetchIsFirstRequest`
+means the first default-fetch invocation through that handler instance; it does
+not measure isolate startup time or prove that the platform delay was a cold start.
+
+Web owner and checkpoint callbacks emit `Hosted runtime callback timing.` for
+first calls, failures, or handler/signed-arrival durations of at least 250 ms.
+Authentication and work use a local monotonic clock. Signed-request age is read
+only after verification and includes transport, startup and cross-host clock
+skew. Owner logs include bounded database/pool samples; checkpoint publication
+owns its separate database and pool timing log at the same 250 ms threshold.
+Pool acquisition overlaps query/transaction timing; these numbers are not additive.
+These records contain no request body, URL, member ID or credential. Provider
+egress logs already split authority validation from upstream provider duration.
 
 The remaining report deduplicates causal rows by runtime attempt and keeps direct
 cold starts separate from Temporal recovery. A direct sample must be the only
@@ -828,6 +1129,14 @@ result in either arrival order and then runs the same lifecycle decision used by
 single interaction generation captured when that invocation enters the
 container. A later interaction, active invocation, active child work, or
 uncertain health/stop result defers cleanup to the pre-armed SDK safety check.
+Completion cleanup prearms one short check using the one-second completion
+callback budget before checking its interaction generation or live health. A wake
+handled during the invocation can invalidate the completion generation even when
+the child later drains; only the subsequent expiry may evaluate fresh ownership
+and health. The same check covers the entrypoint callback still holding its active
+count. If work or uncertainty remains at expiry, the normal recovery interval
+resumes. A proved warm conversation replaces that check with its absolute receipt
+expiry. No stale completion gains permission to destroy a newer interaction.
 A valid receipt within the ten-minute window schedules its absolute expiry.
 Missing receipt metadata grants no idle warmth; the active-work count still
 protects old children during rollout. A missing completion notification or DO
@@ -866,9 +1175,9 @@ Foreground progress recovery is write-fenced instead of container-destroy
 driven. A write fence is commit authority, not liveness proof; the exact wake,
 replacement, ambiguous-wake, and fresh-startup retry contract is documented in
 `agent-docs/references/hosted-runtime-protocol.md`. Live runner side effects validate the runtime-kind write fence by attempt,
-generation, and user identity. Hosted OpenAI and Venice provider egress paths
-validate the signed Murph provider credential's user and runner against
-the Postgres owner's current active runtime state.
+generation, and user identity. Hosted OpenAI provider egress resolves the
+platform's native container identity and validates its bound member, registered
+invocation, and usage-settlement state before sending the request upstream.
 Workspace version remains a checkpoint/restore freshness guard, not generic
 side-effect authority.
 Active, unsupported, error, and timeout liveness outcomes preserve the write
@@ -913,23 +1222,72 @@ Deploy smoke pins the 100% Worker version, verifies the response-reported versio
 
 See [DEPLOY.md](./DEPLOY.md) for the exact GitHub environment surface, lifecycle rules, and smoke workflow.
 
+### Patched Codex runner package
+
+The runner base image owns the native Codex build. Its Dockerfile pins the upstream
+release archive, Rust builder, and matching npm helper package, applies
+`patches/codex-public-live.patch`, and replaces only the CLI. The bundled Code Mode
+host, shell resources, and sandbox helper remain from the same release. The image
+records the upstream revision and patch SHA-256 in `murph-source-revision`.
+Cargo concurrency is capped at two jobs so a high CPU count does not expand the
+native build's memory demand; the upstream release optimization profile is kept.
+
+For developer verification, the patch also exposes the opt-in App Server
+`--ignore-user-config` switch. It skips personal behavioral configuration and
+global user instructions while retaining the auth home, credential-store/keyring
+backend selection, login/workspace restrictions and ChatGPT auth endpoint at their
+normal layer precedence. It does not restore personal proxy preferences or other
+feature switches, or disable managed requirements, project instructions or exec rules. The default startup path is unchanged;
+canonical local journey launchers explicitly select this option. CLI overrides
+still supply the hosted behavior and local installation read roots.
+
+Public Live transcript fragments use Codex's native normalized event stream and
+bounded transcript collection. Handoffs without separate task text use upstream
+transcript fallback and delegation formatting, including escaped, bounded input
+and transcript fields. Raw transcript/delegation notifications are not duplicated
+onto App Server; browser captions still arrive through the provider data channel.
+Outgoing results reuse the native context-message builders and UTF-8 chunking;
+only the final serialization maps those frames to public Live append events.
+
+Public WebRTC sessions restrict browser commands to mute, unmute, and close.
+Instructions and delegated results stay on the native trusted connection; the
+browser receives only call state, transcripts, usage, and bounded protocol notices.
+
+`runner:docker:base` fingerprints both the Dockerfile and patch. The protected
+deployment workflow still forces a source build; its shared Docker layer cache
+can reuse unchanged compilation inputs. Application-only edits therefore do not
+require a native rebuild when that cache is available. A cache miss builds from
+source. Cache-writer protection is a prerequisite for activating the private
+workflow companion; cache timing and deployment are separate rollout evidence.
+
+To update the patch, regenerate it against the exact pinned release, retain its
+focused upstream tests and generated protocol schemas, and run
+`pnpm --dir apps/cloudflare verify:codex-upstream-source`. Keep the release's
+matching npm helpers and sandbox checksum aligned when changing the version.
+Focused upstream Rust tests also need that release's Code Mode helper: a partial
+Cargo build may omit it and fail during startup prewarm before voice is exercised.
+Supply the matching package's `bin/codex-code-mode-host` through the test harness's
+`CARGO_BIN_EXE_codex-code-mode-host` environment variable when it is not built locally.
+The runner permission workflow extracts the actual image's CLI and checks native
+voice input ownership, successive tool-backed turns, provider closure, provider-route
+inventory, and sandbox confinement. Local hosted development uses this same
+image recipe; no manual binary installation or separate release service is needed.
+
 ### Astra model catalog
 
-The native runner image has a default Luna/Terra/Sol catalog and an expanded
+The native runner image has a default GPT-6.1 Sol, GPT-6 Sol/Luna, and GPT-5.6 Sol/Luna catalog and an expanded
 `.astra` catalog with `gpt-6-astra` and OpenAI Flex support. The runtime chooses
 the latter only from Web's explicit Max/OpenAI workspace authorization. Missing
-authority, Edge, group, and Venice runtimes retain the default catalog and its
+authority, Edge, and group runtimes retain the default catalog and its
 existing delegation choices. The
-pinned Linux Codex 0.151.0 catalog omits Astra, so the image adds a compatibility
-entry using Sol's shared Responses capabilities when Astra is absent. Murph
-supplies its own base instructions for each turn. Existing native Astra metadata
-is preserved; remove the compatibility branch when the Linux catalog includes it.
+pinned Codex 0.163.0 release supplies every entry natively; the image validates
+its bundled catalog without a separate launch supplement. Murph supplies its own base
+instructions for each turn.
 The Astra context window remains at most 272,000 tokens, verified while building the
 image. This bound lets allowance accounting price cumulative Codex turn and
 subagent usage without mistaking multiple requests for one long-context request.
 Changing this bound requires request-level long-context metering first. Astra
-selection remains owned by the Web Max-plan eligibility check. Venice mappings
-remain limited to Luna, Terra, and Sol.
+selection remains owned by the Web Max-plan eligibility check.
 
 ## Workspace restore benchmark
 

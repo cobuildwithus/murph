@@ -9,22 +9,24 @@ import {
   generateElevenLabsSpeechMp3,
 } from './elevenlabs-speech-generation.mjs'
 
-test('shared ElevenLabs helper uses the SDK request shape and returns MP3 bytes', async () => {
+test.each(['eleven_v3', 'eleven_v4'])('shared ElevenLabs helper posts the %s preview request shape', async (modelId) => {
   const audioBytes = new Uint8Array([4, 5, 6])
   const fetchImplementation = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
     assert.equal(
       url,
-      'https://api.elevenlabs.io/v1/text-to-speech/voice_123?output_format=mp3_44100_64',
+      modelId === 'eleven_v4'
+        ? 'https://api.elevenlabs.io/v1/text-to-dialogue?output_format=mp3_44100_64'
+        : 'https://api.elevenlabs.io/v1/text-to-speech/voice_123?output_format=mp3_44100_64',
     )
     assert.equal(init?.method, 'POST')
     const headers = new Headers(init?.headers)
     assert.equal(headers.get('accept'), 'audio/mpeg')
     assert.equal(headers.get('content-type'), 'application/json')
     assert.equal(headers.get('xi-api-key'), 'elevenlabs-key')
-    assert.deepEqual(JSON.parse(String(init?.body)), {
-      model_id: 'eleven_v3',
-      text: 'Preview text.',
-    })
+    assert.deepEqual(JSON.parse(String(init?.body)), modelId === 'eleven_v4' ? {
+      inputs: [{ text: 'Preview text.', voice_id: 'voice_123' }],
+      model_id: modelId,
+    } : { model_id: modelId, text: 'Preview text.' })
     return new Response(audioBytes, { status: 200 })
   })
 
@@ -32,7 +34,7 @@ test('shared ElevenLabs helper uses the SDK request shape and returns MP3 bytes'
     generateElevenLabsSpeechMp3({
       apiKey: 'elevenlabs-key',
       fetchImplementation,
-      modelId: 'eleven_v3',
+      modelId,
       text: 'Preview text.',
       voiceId: 'voice_123',
     }),

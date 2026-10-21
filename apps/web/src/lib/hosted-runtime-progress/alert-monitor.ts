@@ -1,7 +1,12 @@
 import "server-only";
 
 import { Prisma, type PrismaClient } from "@prisma/client";
+import { classifyHostedSystemMailboxExecutionClass } from "@murphai/hosted-execution/orchestration-control";
 
+import type { HostedRuntimeLogEntry } from "@murphai/hosted-execution/runtime-control";
+import { after } from "next/server";
+
+import { readHostedAiUsageGate } from "../hosted-execution/usage-allowance";
 import { HOSTED_MAILBOX_RETENTION_MS } from "../hosted-mailbox/store";
 import {
   readHostedRuntimeAiAllowedMemberIds,
@@ -10,7 +15,6 @@ import {
   runHostedOperationalEmailIncident,
   type HostedOperationalAlertMonitorOutcome,
   type HostedOperationalAlertMonitorSpec,
-  type HostedOperationalAlertPrismaClient,
   type HostedOperationalAlertSend,
 } from "../hosted-operational-alert/incident-email-monitor";
 import {
@@ -19,10 +23,13 @@ import {
   readHostedRuntimeTerminalNonReplyCommittedAt,
   readHostedRuntimeTerminalReplyCommittedAt,
 } from "../hosted-runtime-latency/alert-monitor";
+import { writeHostedRuntimeLogs } from "../hosted-runtime-log/write";
 import { getPrisma } from "../prisma";
 
 export const HOSTED_RUNTIME_PROGRESS_STALL_THRESHOLD_MS = 15 * 60_000;
 export const HOSTED_RUNTIME_PROGRESS_REMINDER_INTERVAL_MS = 6 * 60 * 60_000;
+export const HOSTED_RUNTIME_PROGRESS_ALERT_SAMPLE_LIMIT = 20;
+const HOSTED_RUNTIME_PROGRESS_ALERT_OBSERVATION_BUDGET_MS = 10_000;
 
 const HOSTED_RUNTIME_PROGRESS_MONITOR_ID = "hosted-runtime-progress-monitor:v1";
 const HOSTED_RUNTIME_PROGRESS_MONITOR_KIND = "hosted_runtime_progress_monitor";
@@ -32,6 +39,7 @@ const HOSTED_RUNTIME_PROGRESS_MONITOR_SUBJECT =
   "Hosted runtime progress stalled";
 const HOSTED_RUNTIME_PROGRESS_READ_LIMIT = 20_000;
 const HOSTED_RUNTIME_PROGRESS_READ_PAGE_SIZE = 500;
+export const HOSTED_RUNTIME_PROGRESS_USAGE_READ_LIMIT = 25;
 
 const MONITOR_STATUS = {
   alertFailed: "progress_alert_failed",
@@ -40,20 +48,17 @@ const MONITOR_STATUS = {
   healthy: "progress_healthy",
 } as const;
 
-type HostedRuntimeProgressPrismaClient =
-  & Pick<
-    PrismaClient,
-    "$queryRaw" | "hostedMember" | "hostedThreadContainerParticipant"
-  >
-  & HostedOperationalAlertPrismaClient;
+type HostedRuntimeProgressPrismaClient = Prisma.TransactionClient;
 
 export interface HostedRuntimeProgressHealthRow {
+  foregroundCheckpointEvidence: unknown;
   checkpointEvidence: unknown;
   deliveryAcceptedAt: Date | null;
   chronologyInvalid: boolean;
   durableHighWaterSeq: bigint;
   effectiveConsumedSeq: bigint;
   headKind: string;
+  headDedupeKey?: string | null;
   headLaneSeq: bigint;
   lane: string;
   nextDefaultProcessingWakeAt: Date | null;
@@ -75,6 +80,7 @@ export interface HostedRuntimeProgressHealth {
   anomalous: boolean;
   excludedInactiveLaneCount: number;
   excludedUsageBlockedConversationLaneCount: number;
+  excludedUsageBlockedSystemLaneCount: number;
   invalidRowCount: number;
   oldestStalledAgeMs: number | null;
   pendingItemCount: number;
@@ -109,6 +115,21 @@ export interface HostedRuntimeStalledRecheckCandidateScan {
   candidates: HostedRuntimeStalledRecheckCandidate[];
   scanTruncated: boolean;
 }
+
+interface HostedRuntimeProgressStalledLaneSample {
+  headLaneSeq: bigint;
+  lane: "conversation" | "system";
+  runtimeKey: string;
+}
+
+// The cron route serializes health, so private lane samples stay off that object.
+const stalledLaneSamplesByHealth = new WeakMap<
+  HostedRuntimeProgressHealth,
+  readonly HostedRuntimeProgressStalledLaneSample[]
+>();
+
+export type HostedRuntimeProgressObservationScheduler =
+  (task: () => Promise<void>) => void;
 
 export type HostedRuntimeProgressAlertMonitorOutcome =
   | HostedOperationalAlertMonitorOutcome
@@ -151,8 +172,10 @@ export async function runHostedRuntimeProgressAlertMonitor(input: {
   env?: Readonly<Record<string, string | undefined>>;
   now?: Date;
   prisma?: HostedRuntimeProgressPrismaClient;
+  scheduleObservation?: HostedRuntimeProgressObservationScheduler;
   sendAlert?: HostedOperationalAlertSend;
   signal?: AbortSignal;
+  writeRuntimeLogs?: typeof writeHostedRuntimeLogs;
 } = {}): Promise<HostedRuntimeProgressAlertMonitorResult> {
   const now = input.now ?? new Date();
   const prisma = input.prisma ?? getPrisma();
@@ -177,7 +200,15 @@ export async function runHostedRuntimeProgressAlertMonitor(input: {
     prisma,
     sendAlert: input.sendAlert,
     signal: input.signal,
-    spec: HOSTED_RUNTIME_PROGRESS_MONITOR_SPEC,
+    spec: {
+      ...HOSTED_RUNTIME_PROGRESS_MONITOR_SPEC,
+      // A scheduler failure is caught by the claim hook; the observation is dropped.
+      onNotificationClaimed: (claim) => {
+        const schedule = input.scheduleObservation ?? after;
+        const write = input.writeRuntimeLogs ?? writeHostedRuntimeLogs;
+        schedule(() => recordHostedRuntimeProgressAlertObservation({ ...claim, write }));
+      },
+    },
   });
 
   return {
@@ -189,10 +220,7 @@ export async function runHostedRuntimeProgressAlertMonitor(input: {
 
 export async function readHostedRuntimeProgressHealth(input: {
   now?: Date;
-  prisma?: Pick<
-    PrismaClient,
-    "$queryRaw" | "hostedMember" | "hostedThreadContainerParticipant"
-  >;
+  prisma?: Prisma.TransactionClient;
 } = {}): Promise<HostedRuntimeProgressHealth> {
   const now = input.now ?? new Date();
   const prisma = input.prisma ?? getPrisma();
@@ -205,6 +233,8 @@ export async function readHostedRuntimeProgressHealth(input: {
     excludedInactiveLaneCount: observation.excludedInactiveLaneCount,
     excludedUsageBlockedConversationLaneCount:
       observation.excludedUsageBlockedConversationLaneCount,
+    excludedUsageBlockedSystemLaneCount:
+      observation.excludedUsageBlockedSystemLaneCount,
     now,
     rows: observation.alertableRows,
     scanTruncated: observation.scanTruncated,
@@ -213,10 +243,7 @@ export async function readHostedRuntimeProgressHealth(input: {
 
 export async function readHostedRuntimeStalledRecheckCandidates(input: {
   now?: Date;
-  prisma?: Pick<
-    PrismaClient,
-    "$queryRaw" | "hostedMember" | "hostedThreadContainerParticipant"
-  >;
+  prisma?: Prisma.TransactionClient;
 } = {}): Promise<HostedRuntimeStalledRecheckCandidateScan> {
   const now = input.now ?? new Date();
   const prisma = input.prisma ?? getPrisma();
@@ -254,6 +281,7 @@ interface HostedRuntimeProgressObservation {
   alertableRows: HostedRuntimeProgressQueryRow[];
   excludedInactiveLaneCount: number;
   excludedUsageBlockedConversationLaneCount: number;
+  excludedUsageBlockedSystemLaneCount: number;
   scanTruncated: boolean;
 }
 
@@ -269,10 +297,7 @@ function compareHostedRuntimeRecheckCandidates(
 
 async function readHostedRuntimeProgressObservation(input: {
   now: Date;
-  prisma: Pick<
-    PrismaClient,
-    "$queryRaw" | "hostedMember" | "hostedThreadContainerParticipant"
-  >;
+  prisma: Prisma.TransactionClient;
 }): Promise<HostedRuntimeProgressObservation> {
   const { now, prisma } = input;
   const stalledBefore = new Date(
@@ -284,6 +309,8 @@ async function readHostedRuntimeProgressObservation(input: {
   let candidateRowCount = 0;
   let excludedInactiveLaneCount = 0;
   let excludedUsageBlockedConversationLaneCount = 0;
+  let excludedUsageBlockedSystemLaneCount = 0;
+  let usageReadCount = 0;
 
   while (candidateRowCount <= HOSTED_RUNTIME_PROGRESS_READ_LIMIT) {
     const pageLimit = Math.min(
@@ -325,6 +352,25 @@ async function readHostedRuntimeProgressObservation(input: {
         excludedUsageBlockedConversationLaneCount += 1;
         continue;
       }
+      if (isImportedAssistantNotificationHead(row, now)
+        && usageReadCount < HOSTED_RUNTIME_PROGRESS_USAGE_READ_LIMIT) {
+        usageReadCount += 1;
+        // Each page has one head per lane. Bound sequential, read-only allowance
+        // checks across the scan; an unknown decision must retain the alert.
+        try {
+          const gate = await readHostedAiUsageGate({
+            memberId: row.runtimeKey,
+            now,
+            prisma,
+          });
+          if (!gate.allowed && gate.reason === "ai_usage_limit_exceeded") {
+            excludedUsageBlockedSystemLaneCount += 1;
+            continue;
+          }
+        } catch {
+          // A failed read is not proof of an intentional pause.
+        }
+      }
       alertableRows.push(row);
     }
 
@@ -351,8 +397,25 @@ async function readHostedRuntimeProgressObservation(input: {
     alertableRows,
     excludedInactiveLaneCount,
     excludedUsageBlockedConversationLaneCount,
+    excludedUsageBlockedSystemLaneCount,
     scanTruncated,
   };
+}
+
+function isImportedAssistantNotificationHead(
+  row: HostedRuntimeProgressHealthRow,
+  now: Date,
+): boolean {
+  return row.lane === "system"
+    && row.headKind === "assistant.notification.requested"
+    && row.headDedupeKey != null
+    && classifyHostedSystemMailboxExecutionClass({
+      kind: row.headKind,
+      dedupeKey: row.headDedupeKey,
+    }) === "default_owned"
+    && row.workspaceSystemImportedSeq !== null
+    && row.workspaceSystemImportedSeq === row.durableHighWaterSeq
+    && classifyHostedRuntimeProgressRow(row, now) === "stalled";
 }
 
 interface HostedRuntimeProgressReadCursor {
@@ -419,6 +482,7 @@ async function readHostedRuntimeProgressCandidatePage(input: {
         pending_head.created_at AS head_created_at,
         pending_head.id AS head_item_id,
         pending_head.kind AS head_kind,
+        pending_head.dedupe_key AS head_dedupe_key,
         pending_head.pending_count
       FROM lane_boundary
       JOIN LATERAL (
@@ -427,6 +491,7 @@ async function readHostedRuntimeProgressCandidatePage(input: {
           mailbox_item.created_at,
           mailbox_item.id,
           mailbox_item.kind,
+          mailbox_item.dedupe_key,
           mailbox_item.lane_seq,
           COUNT(*) OVER () AS pending_count
         FROM hosted_mailbox_item AS mailbox_item
@@ -485,6 +550,7 @@ async function readHostedRuntimeProgressCandidatePage(input: {
     progress_evidence AS (
       SELECT
         workspace_evidence.*,
+        foreground_checkpoint.evidence AS foreground_checkpoint_evidence,
         CASE WHEN delivery.status IN ('accepted', 'delivered', 'sent_no_receipt_expected')
           THEN delivery.accepted_at ELSE NULL END AS delivery_accepted_at,
         jsonb_build_object('assistant', jsonb_build_object(
@@ -507,6 +573,34 @@ async function readHostedRuntimeProgressCandidatePage(input: {
         AND trace.mailbox_item_id = workspace_evidence.head_item_id
       LEFT JOIN hosted_linq_delivery AS delivery
         ON delivery.id = trace.linq_delivery_id
+      LEFT JOIN LATERAL (
+        SELECT jsonb_build_object('assistant', jsonb_build_object(
+          'checkpointPublicationExpectedByEpochMs',
+            foreground.phase_breakdown_json -> 'assistant' -> 'checkpointPublicationExpectedByEpochMs',
+          'terminalReplyCommittedAtEpochMs',
+            foreground.phase_breakdown_json -> 'assistant' -> 'terminalReplyCommittedAtEpochMs',
+          'terminalNonReplyCommittedAtEpochMs',
+            foreground.phase_breakdown_json -> 'assistant' -> 'terminalNonReplyCommittedAtEpochMs'
+        )) AS evidence
+        FROM (
+          SELECT candidate.runtime_attempt_id, candidate.phase_breakdown_json
+          FROM hosted_ingress_latency_trace AS candidate
+          WHERE workspace_evidence.lane = 'system'
+            AND workspace_evidence.head_kind IN ('member.activated', 'device-sync.wake')
+            AND candidate.user_id = workspace_evidence.user_id
+            AND candidate.accepted_at >= workspace_evidence.head_created_at
+            AND candidate.accepted_at <= ${input.now}
+          ORDER BY candidate.accepted_at DESC
+          LIMIT 1
+        ) AS foreground
+        JOIN hosted_runtime_owner AS owner
+          ON owner.user_id = workspace_evidence.user_id
+          AND owner.phase = 'active'
+          AND owner.processing_mode = 'default'
+          AND owner.completed_at IS NULL
+          AND owner.attempt_id = foreground.runtime_attempt_id
+          AND owner.generation::text = foreground.phase_breakdown_json -> 'assistant' ->> 'runtimeLeaseGeneration'
+      ) AS foreground_checkpoint ON TRUE
       LEFT JOIN LATERAL (
         SELECT
           MIN(execution_evidence.at) FILTER (
@@ -537,11 +631,13 @@ async function readHostedRuntimeProgressCandidatePage(input: {
     progress_lane AS (
       SELECT
         progress_evidence.user_id,
+        progress_evidence.foreground_checkpoint_evidence,
         progress_evidence.delivery_accepted_at,
         progress_evidence.checkpoint_evidence,
         progress_evidence.durable_high_water_seq,
         progress_evidence.effective_consumed_seq,
         progress_evidence.head_kind,
+        progress_evidence.head_dedupe_key,
         progress_evidence.head_lane_seq,
         progress_evidence.lane,
         progress_evidence.pending_count,
@@ -586,12 +682,14 @@ async function readHostedRuntimeProgressCandidatePage(input: {
       FROM progress_evidence
     )
     SELECT
+      progress_lane.foreground_checkpoint_evidence AS "foregroundCheckpointEvidence",
       progress_lane.checkpoint_evidence AS "checkpointEvidence",
       progress_lane.delivery_accepted_at AS "deliveryAcceptedAt",
       progress_lane.chronology_invalid AS "chronologyInvalid",
       progress_lane.durable_high_water_seq AS "durableHighWaterSeq",
       progress_lane.effective_consumed_seq AS "effectiveConsumedSeq",
       progress_lane.head_kind AS "headKind",
+      progress_lane.head_dedupe_key AS "headDedupeKey",
       progress_lane.head_lane_seq AS "headLaneSeq",
       progress_lane.lane,
       progress_lane.workspace_next_default_processing_wake_at
@@ -628,6 +726,7 @@ export function summarizeHostedRuntimeProgressRows(input: {
   activeRuntimeKeys: readonly string[];
   excludedInactiveLaneCount?: number;
   excludedUsageBlockedConversationLaneCount?: number;
+  excludedUsageBlockedSystemLaneCount?: number;
   now: Date;
   rows: readonly HostedRuntimeProgressHealthRow[];
   scanTruncated?: boolean;
@@ -643,6 +742,7 @@ export function summarizeHostedRuntimeProgressRows(input: {
   let stalledConversationLaneCount = 0;
   let stalledLaneCount = 0;
   let stalledSystemLaneCount = 0;
+  const stalledLaneSamples: HostedRuntimeProgressStalledLaneSample[] = [];
   const systemDiagnostics: HostedRuntimeProgressSystemDiagnostics = {
     assistantWakeLaneCount: 0,
     deviceSyncHeadLaneCount: 0,
@@ -677,6 +777,13 @@ export function summarizeHostedRuntimeProgressRows(input: {
 
     stalledLaneCount += 1;
     stalledRuntimeKeys.add(row.runtimeKey);
+    if (stalledLaneSamples.length < HOSTED_RUNTIME_PROGRESS_ALERT_SAMPLE_LIMIT) {
+      stalledLaneSamples.push({
+        headLaneSeq: row.headLaneSeq,
+        lane: row.lane === "conversation" ? "conversation" : "system",
+        runtimeKey: row.runtimeKey,
+      });
+    }
     oldestStalledAgeMs = Math.max(
       oldestStalledAgeMs ?? 0,
       input.now.getTime() - progressOriginAtMs,
@@ -691,10 +798,11 @@ export function summarizeHostedRuntimeProgressRows(input: {
   }
 
   const scanTruncated = input.scanTruncated === true;
-  return {
+  const health: HostedRuntimeProgressHealth = {
     anomalous: stalledLaneCount > 0 || invalidRowCount > 0 || scanTruncated,
     excludedInactiveLaneCount,
     excludedUsageBlockedConversationLaneCount,
+    excludedUsageBlockedSystemLaneCount: input.excludedUsageBlockedSystemLaneCount ?? 0,
     invalidRowCount,
     oldestStalledAgeMs,
     pendingItemCount,
@@ -706,6 +814,63 @@ export function summarizeHostedRuntimeProgressRows(input: {
     systemDiagnostics,
     thresholdMs: HOSTED_RUNTIME_PROGRESS_STALL_THRESHOLD_MS,
   };
+  stalledLaneSamplesByHealth.set(health, stalledLaneSamples);
+  return health;
+}
+
+// Records which lane heads a newly built notification sampled. Writes are
+// best effort and run after the response; absence is never evidence. The
+// budget only stops starting writes; each write keeps its store's own bounds.
+async function recordHostedRuntimeProgressAlertObservation(input: {
+  attemptedAt: Date;
+  health: HostedRuntimeProgressHealth;
+  healthCheckedAt: Date;
+  incidentId: string;
+  write: typeof writeHostedRuntimeLogs;
+}): Promise<void> {
+  const samples = stalledLaneSamplesByHealth.get(input.health) ?? [];
+  if (samples.length === 0) {
+    return;
+  }
+  const deadlineMs = Date.now() + HOSTED_RUNTIME_PROGRESS_ALERT_OBSERVATION_BUDGET_MS;
+  const redactedJson = {
+    alertIncidentId: input.incidentId,
+    healthCheckedAt: input.healthCheckedAt.toISOString(),
+    sampleCount: samples.length,
+    sampleOverflowCount: Math.max(0, input.health.stalledLaneCount - samples.length),
+    scanTruncated: input.health.scanTruncated,
+  };
+  const samplesByRuntime = new Map<string, HostedRuntimeProgressStalledLaneSample[]>();
+  for (const sample of samples) {
+    const group = samplesByRuntime.get(sample.runtimeKey) ?? [];
+    group.push(sample);
+    samplesByRuntime.set(sample.runtimeKey, group);
+  }
+  for (const [runtimeKey, group] of samplesByRuntime) {
+    if (Date.now() >= deadlineMs) {
+      return;
+    }
+    try {
+      await input.write({
+        entries: group.map((sample): HostedRuntimeLogEntry => ({
+          at: input.attemptedAt.toISOString(),
+          component: "mailbox",
+          eventCode: "mailbox.progress_alert_sampled",
+          level: "warn",
+          mailboxLane: sample.lane,
+          mailboxSeqEnd: sample.headLaneSeq.toString(),
+          mailboxSeqStart: sample.headLaneSeq.toString(),
+          phase: "invoke",
+          redactedJson,
+        })),
+        userId: runtimeKey,
+      });
+    } catch (error) {
+      console.warn("Hosted runtime progress alert observation write failed.", {
+        errorName: error instanceof Error ? error.name : typeof error,
+      });
+    }
+  }
 }
 
 function summarizeHostedRuntimeSystemDiagnostics(
@@ -774,7 +939,10 @@ function classifyHostedRuntimeProgressRow(
   ) {
     return "invalid";
   }
-  if (row.lane === "conversation" && isConversationAwaitingCheckpoint(row, now)) {
+  if (row.lane === "conversation" && isCompletionAwaitingCheckpoint(row, now)) {
+    return "fresh";
+  }
+  if (isSystemWorkAwaitingForegroundCheckpoint(row, now)) {
     return "fresh";
   }
   return now.getTime() - progressOriginAtMs
@@ -783,8 +951,36 @@ function classifyHostedRuntimeProgressRow(
     : "fresh";
 }
 
-function isConversationAwaitingCheckpoint(
+function isSystemWorkAwaitingForegroundCheckpoint(
   row: HostedRuntimeProgressHealthRow,
+  now: Date,
+): boolean {
+  if (
+    row.lane !== "system"
+    || (row.headKind !== "member.activated" && row.headKind !== "device-sync.wake")
+    || row.workspaceSystemImportedSeq === null
+    || row.workspaceSystemImportedSeq < row.headLaneSeq
+    || row.workspaceSystemImportedSeq > row.durableHighWaterSeq
+    || row.workspaceCheckpointedAt === null
+  ) {
+    return false;
+  }
+  // Activation and device sync yield to foreground work and publish handling
+  // through checkpoints. Only current-owner evidence may defer their alerts.
+  const completedAt = readHostedRuntimeTerminalReplyCommittedAt(row.foregroundCheckpointEvidence)
+    ?? readHostedRuntimeTerminalNonReplyCommittedAt(row.foregroundCheckpointEvidence);
+  return completedAt !== null
+    && completedAt.getTime() > row.workspaceCheckpointedAt.getTime()
+    && isCompletionAwaitingCheckpoint({
+      progressOriginAt: row.progressOriginAt,
+      checkpointEvidence: row.foregroundCheckpointEvidence,
+      deliveryAcceptedAt: null,
+    }, now);
+}
+
+function isCompletionAwaitingCheckpoint(
+  row: Pick<HostedRuntimeProgressHealthRow,
+    "checkpointEvidence" | "deliveryAcceptedAt" | "progressOriginAt">,
   now: Date,
 ): boolean {
   const expectedBy = readHostedRuntimeCheckpointPublicationExpectedBy(row.checkpointEvidence);
@@ -810,6 +1006,8 @@ function buildHostedRuntimeProgressAlertDetails(input: {
       excludedInactiveLaneCount: input.health.excludedInactiveLaneCount,
       excludedUsageBlockedConversationLaneCount:
         input.health.excludedUsageBlockedConversationLaneCount,
+      excludedUsageBlockedSystemLaneCount:
+        input.health.excludedUsageBlockedSystemLaneCount,
       invalidRowCount: input.health.invalidRowCount,
       oldestStalledAgeMs: input.health.oldestStalledAgeMs,
       pendingItemCount: input.health.pendingItemCount,

@@ -636,6 +636,9 @@ describe("appendHostedLinqGroupReactionMailboxTx", () => {
 describe("buildHostedLinqAffirmativeReactionMessageEvent", () => {
   it.each([
     ["like", undefined, "Reacted with a like reaction."],
+    ["question", undefined, "Reacted with a question reaction."],
+    ["dislike", undefined, "Reacted with a dislike reaction."],
+    ["laugh", undefined, "Reacted with a laugh reaction."],
     ["heart", undefined, "Reacted with a heart reaction."],
     ["custom", "👍", "Reacted with 👍."],
     ["custom", "❤", "Reacted with ❤."],
@@ -658,10 +661,7 @@ describe("buildHostedLinqAffirmativeReactionMessageEvent", () => {
     },
   );
 
-  it("leaves laughs and removals on the consumed context-only path", async () => {
-    await expect(buildHostedLinqAffirmativeReactionMessageEvent({
-      event: buildReactionEvent({ reactionType: "laugh" }),
-    })).resolves.toBeNull();
+  it("leaves removals on the consumed context-only path", async () => {
     await expect(buildHostedLinqAffirmativeReactionMessageEvent({
       event: buildReactionEvent({
         eventType: "reaction.removed",

@@ -206,7 +206,7 @@ describe("deviceSyncProviderManifests", () => {
   });
 
   it.each([
-    [undefined, 3_600_000],
+    [undefined, 21_600_000],
     [0, 60_000],
     [1, 60_000],
     [59_999, 60_000],

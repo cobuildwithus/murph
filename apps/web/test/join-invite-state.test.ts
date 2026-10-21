@@ -157,7 +157,6 @@ function createStatus(
     },
     capabilities: {
       billingReady: capabilities?.billingReady ?? true,
-      phoneAuthReady: capabilities?.phoneAuthReady ?? true,
     },
     invite: {
       code: "invite-code",

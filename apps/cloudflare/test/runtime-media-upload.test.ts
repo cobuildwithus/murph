@@ -41,6 +41,16 @@ describe("recoverable runtime media uploads", () => {
     expect(h.uploaded[0]).toContain("ciphertext");
     expect(h.bucket.put).not.toHaveBeenCalled();
   });
+  it("never uploads bytes when the transactional media owner rejects admission", async () => {
+    const h = harness();
+    h.commands.mockRejectedValueOnce(new resourceClient.HostedRuntimeResourceRejectedError("HOSTED_RUNTIME_OWNER_STALE"));
+    const bucket = createRuntimeMediaWriteBucket({ source: h.source, ...identity, media: { descriptor } });
+    await expect(bucket.put(await hostedMediaObjectKey({ userId, mediaId: descriptor.mediaId }), "synthetic-encrypted-payload"))
+      .rejects.toMatchObject({ code: "HOSTED_RUNTIME_OWNER_STALE" });
+    expect(h.upload.uploadPart).not.toHaveBeenCalled();
+    expect(h.upload.complete).not.toHaveBeenCalled();
+    expect(h.upload.abort).toHaveBeenCalledOnce();
+  });
   it("keeps uncertain aborts pending and recognizes only the provider's exact missing-upload code", async () => {
     const h = harness();
     h.upload.complete.mockRejectedValue(new Error("synthetic unknown completion"));

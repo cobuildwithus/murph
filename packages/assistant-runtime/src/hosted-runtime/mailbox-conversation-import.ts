@@ -94,8 +94,9 @@ import {
 } from "./events/email.ts";
 import {
   recordHostedAssistantMilestonesBestEffort,
+  recordHostedStagedLatencyTraceBestEffort,
 } from "./assistant-latency-trace.ts";
-import { startHostedLinqAttachmentTyping } from "./channel-activity.ts";
+import { startHostedLinqInputTyping } from "./channel-activity.ts";
 
 const CONVERSATION_PROJECTION_FAILED_REASON =
   "conversation-import.projection-failed";
@@ -267,7 +268,7 @@ export type HostedConversationMailboxImportOutcome =
 type HostedConversationMailboxImportContext = Pick<
   HostedConversationMailboxImportInput,
   | "latencyMilestones" | "onConversationActivityObserved" | "onConversationInputStaged"
-  | "runtimeAttemptId" | "signal"
+  | "runtimeAttemptId" | "signal" | "typingSignal"
 >;
 
 type HostedConversationMailboxImporter = ((
@@ -316,6 +317,7 @@ interface HostedConversationMailboxImportInput {
   runtime: HostedConversationMailboxRuntime;
   runtimeAttemptId?: string | null;
   signal?: AbortSignal | null;
+  typingSignal?: AbortSignal | null;
   stageAssistantInputEvent?: HostedConversationMailboxAssistantInputStager;
   vaultRoot: string;
 }
@@ -527,30 +529,30 @@ async function stageHostedConversationMailboxItem(
     metrics: createEmptyHostedConversationWakeMetrics(),
     status: "imported" as const,
   };
-  const cancelAttachmentTyping = startHostedConversationAttachmentTyping({
+  const cancelInputTyping = startHostedConversationInputTyping({
     foregroundAssistantInputId,
     linqDeliveryContext,
     runtime: input.runtime,
     runtimeAttemptId: input.runtimeAttemptId,
     signal: input.signal,
-    stagedInput,
+    typingSignal: input.typingSignal,
   });
-  let attachmentImportSucceeded = false;
+  let importSucceeded = false;
   return {
     status: "staged",
     cancelUnadmittedTyping() {
-      if (!attachmentImportSucceeded) cancelAttachmentTyping?.();
+      if (!importSucceeded) cancelInputTyping?.();
     },
     async complete(preparedProjection) {
-      if (!attachmentAdmissionDeferred) {
-        await enqueuePendingReply();
-        await notifyActiveTurnInputAvailable();
-      }
-      if (!inboxProjectionRequired) {
-        attachmentImportSucceeded = true;
-        return importedOutcome;
-      }
       try {
+        if (!attachmentAdmissionDeferred) {
+          await enqueuePendingReply();
+          await notifyActiveTurnInputAvailable();
+        }
+        if (!inboxProjectionRequired) {
+          importSucceeded = true;
+          return importedOutcome;
+        }
         const projectionEffect = await projectHostedConversationAssistantInputBestEffort({
           importConversationWake,
           preparedProjection,
@@ -592,31 +594,33 @@ async function stageHostedConversationMailboxItem(
           await enqueuePendingReply();
           await notifyActiveTurnInputAvailable();
         }
-        attachmentImportSucceeded = true;
+        importSucceeded = true;
         return {
           ...importedOutcome,
           conversationImportTiming: projectionEffect.timing,
           ...(projectionEffect.effect.reasonCode ? { reasonCode: projectionEffect.effect.reasonCode } : {}),
         };
       } finally {
-        if (!attachmentImportSucceeded) cancelAttachmentTyping?.();
+        if (!importSucceeded) cancelInputTyping?.();
       }
     },
   };
 }
 
-function startHostedConversationAttachmentTyping(input: {
+function startHostedConversationInputTyping(input: {
   foregroundAssistantInputId: string | null;
   linqDeliveryContext: HostedAssistantLinqDeliveryContext | null;
   runtime: HostedConversationMailboxRuntime;
   runtimeAttemptId?: string | null;
   signal?: AbortSignal | null;
-  stagedInput: HostedConversationMailboxAssistantInputStageResult;
-}): ReturnType<typeof startHostedLinqAttachmentTyping> {
-  if (!input.foregroundAssistantInputId || !input.stagedInput.attachmentEvidenceRequired) {
+  typingSignal?: AbortSignal | null;
+}): ReturnType<typeof startHostedLinqInputTyping> {
+  if (!input.foregroundAssistantInputId) {
     return null;
   }
-  return startHostedLinqAttachmentTyping({
+  return startHostedLinqInputTyping({
+    inputId: input.foregroundAssistantInputId,
+    runtimeAttemptId: input.runtimeAttemptId,
     forwardedEnv: input.runtime.forwardedEnv,
     latencyTraceContext: input.runtimeAttemptId ? {
       assistantInputIds: [input.foregroundAssistantInputId],
@@ -626,7 +630,9 @@ function startHostedConversationAttachmentTyping(input: {
     } : null,
     linqDeliveryContext: input.linqDeliveryContext,
     providerFetch: input.runtime.platform.providerFetch,
-    signal: input.signal ?? undefined,
+    // An admitted preparation outlives an import pass yielding to foreground
+    // work. Import failure still cancels it; the turn rebinds its owner.
+    signal: input.typingSignal ?? input.signal ?? undefined,
     userEnv: input.runtime.userEnv,
   });
 }
@@ -903,7 +909,7 @@ function recordHostedConversationLatencyTraceAssistantInputStagedBestEffort(inpu
   });
 
   try {
-    void latencyTracePort.record({
+    recordHostedStagedLatencyTraceBestEffort(latencyTracePort, {
       event: {
         assistantInputId: input.inputId,
         at: new Date().toISOString(),
@@ -924,8 +930,6 @@ function recordHostedConversationLatencyTraceAssistantInputStagedBestEffort(inpu
           ? {}
           : { workspaceRestoreDoneAt: latencyMilestones.workspaceRestoreDoneAt }),
       },
-    }).catch(() => {
-      // Latency traces are diagnostic-only and must not affect runtime progress.
     });
   } catch {
     // Latency traces are diagnostic-only and must not affect runtime progress.
@@ -1522,6 +1526,8 @@ function isHostedConversationMailboxPendingReplyEligible(input: {
       return input.assistantRuntimeState.linqAutoReplyEnabled;
     case "telegram":
       return input.assistantRuntimeState.telegramAutoReplyEnabled;
+    case "voice":
+      return input.assistantRuntimeState.voiceAutoReplyEnabled === true;
     default:
       return false;
   }
@@ -1715,6 +1721,10 @@ function createHostedConversationAssistantInputText(
   const authoredText = normalizeHostedAssistantInputText(
     readHostedExecutionConversationMessageText(wake.message) ?? "",
   );
+  if (wake.message.channel === "voice") {
+    if (!authoredText) throw new TypeError("Voice input requires normalized speech text.");
+    return authoredText;
+  }
   if (isHostedLinqConversationMessageWake(wake)) {
     if (authoredText) {
       return authoredText;
@@ -1897,6 +1907,16 @@ function createHostedConversationAssistantInputConversation(
   wake: HostedExecutionConversationMessageWake,
   identifierBlind: HostedAssistantConversationIdentifierBlind,
 ): UpsertAssistantInputEventInput["conversation"] {
+  if (wake.message.channel === "voice") {
+    return {
+      accountId: null,
+      actorId: null,
+      actorIsSelf: false,
+      source: "voice",
+      threadId: hashHostedAssistantConversationIdentifier(identifierBlind, wake.message.callId),
+      threadIsDirect: true,
+    };
+  }
   if (isHostedLinqConversationMessageWake(wake)) {
     const accountLookupKey = readHostedLinqConversationMessageAccountLookupKey(wake.message);
     return {
@@ -1974,6 +1994,9 @@ function createHostedConversationAssistantInputConversation(
 function createHostedConversationAssistantInputReplyTarget(
   wake: HostedExecutionConversationMessageWake,
 ): UpsertAssistantInputEventInput["replyTarget"] {
+  if (wake.message.channel === "voice") {
+    return { channel: "voice", messageId: wake.message.inputId, threadId: wake.message.callId };
+  }
   if (isHostedLinqConversationMessageWake(wake)) {
     return {
       channel: "linq",
@@ -2054,16 +2077,11 @@ function createHostedConversationAssistantInputSourceMetadata(
       replyToMessageId: normalizeHostedAssistantInputSourceMetadataToken(
         wake.message.linqMessage.replyToMessageId ?? null,
       ),
-      // Thread-container (group) inbound carries the sending participant's
-      // handle so the assistant can attribute messages; 1:1 home threads have
-      // a single known sender and stay handle-free.
-      ...(externalThreadRouteAuthorityPresent
-        ? {
-            senderHandle: normalizeHostedAssistantInputSourceMetadataToken(
-              wake.message.linqMessage.from ?? null,
-            ),
-          }
-        : {}),
+      // Preserve the authenticated sender for private "call me" requests too.
+      // This is contact context, never a replacement for runtime authority.
+      senderHandle: normalizeHostedAssistantInputSourceMetadataToken(
+        wake.message.linqMessage.from ?? null,
+      ),
       service: normalizeHostedAssistantInputSourceMetadataToken(
         wake.message.linqMessage.service ?? null,
       ),

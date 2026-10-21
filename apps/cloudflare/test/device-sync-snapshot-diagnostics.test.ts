@@ -408,7 +408,11 @@ describe("device-sync snapshot producer/decoder diagnostics", () => {
     for (const [entry] of mocks.log.mock.calls) {
       expect(entry.details).not.toHaveProperty("responseByteCountComparison");
       expect(entry.details).not.toHaveProperty("responseBodyShape");
-      expect(entry.details).not.toHaveProperty("responseMimeCategory");
+      if (entry.message === invalidJsonMessage) {
+        expect(entry.details).toHaveProperty("responseMimeCategory", "text");
+      } else {
+        expect(entry.details).not.toHaveProperty("responseMimeCategory");
+      }
       expect(entry.details).not.toHaveProperty("responseContentEncodingCategory");
       expect(entry.details).not.toHaveProperty("responseContentLengthCategory");
     }

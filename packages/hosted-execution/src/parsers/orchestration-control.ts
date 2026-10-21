@@ -1,4 +1,6 @@
+import { parseHostedVoiceCallId } from "../voice-input.ts";
 import {
+  readHostedMailboxWakeHighWater,
   type HostedMailboxLaneLag,
 } from "../runtime-control.ts";
 import { parseHostedRuntimeOwnerResponse } from "../runtime-owner.ts";
@@ -256,6 +258,8 @@ export function parseHostedRuntimeEnsureProcessingRequest(
     "admission",
     "assistantExecutionBlocked",
     "conversationWorkPending",
+    "voiceCallId",
+    "mailboxWakeHighWater",
     "orchestrationAttemptId",
     "processingMode",
   ]);
@@ -267,6 +271,7 @@ export function parseHostedRuntimeEnsureProcessingRequest(
         "Hosted runtime ensure-processing request processingMode",
         HOSTED_RUNTIME_PROCESSING_MODES,
       );
+  const effectiveProcessingMode = processingMode ?? "default";
   const assistantExecutionBlocked = record.assistantExecutionBlocked === undefined
     ? undefined
     : requireExactTrue(
@@ -278,26 +283,35 @@ export function parseHostedRuntimeEnsureProcessingRequest(
       "Hosted runtime ensure-processing request assistantExecutionBlocked requires system_mailbox processingMode.",
     );
   }
+  if (record.voiceCallId !== undefined && effectiveProcessingMode !== "default") {
+    throw new TypeError("Voice reservation requires default processing mode.");
+  }
+  const mailboxWakeHighWater = readHostedMailboxWakeHighWater(record.mailboxWakeHighWater);
+  if (record.mailboxWakeHighWater !== undefined && !mailboxWakeHighWater) {
+    throw new TypeError("Hosted runtime ensure-processing request mailboxWakeHighWater requires both mailbox lanes.");
+  }
   const conversationWorkPending = record.conversationWorkPending === undefined
     ? undefined
     : requireExactTrue(
         record.conversationWorkPending,
         "Hosted runtime ensure-processing request conversationWorkPending",
       );
-  if (conversationWorkPending && processingMode != null && processingMode !== "default") {
+  if (conversationWorkPending && effectiveProcessingMode !== "default") {
     throw new TypeError(
       "Hosted runtime ensure-processing request conversationWorkPending requires default processingMode.",
     );
   }
 
   return {
+    ...(record.voiceCallId === undefined ? {} : { voiceCallId: parseHostedVoiceCallId(record.voiceCallId) }),
     ...(record.admission === undefined ? {} : {
-      admission: parseRuntimeProcessingAdmission(record.admission, processingMode ?? "default"),
+      admission: parseRuntimeProcessingAdmission(record.admission, effectiveProcessingMode),
     }),
     ...(assistantExecutionBlocked === undefined
       ? {}
       : { assistantExecutionBlocked }),
     ...(conversationWorkPending === undefined ? {} : { conversationWorkPending }),
+    ...(mailboxWakeHighWater ? { mailboxWakeHighWater } : {}),
     orchestrationAttemptId: requireOpaqueIdentifier(
       record.orchestrationAttemptId,
       "Hosted runtime ensure-processing request orchestrationAttemptId",

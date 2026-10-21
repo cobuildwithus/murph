@@ -1,6 +1,8 @@
+export const HOSTED_RUNTIME_POLL_TOOL_PATH = "/api/internal/hosted-execution/polls/tool";
 import type { HostedExecutionResolvedLinqDeliveryRoute } from "./contracts.ts";
 
 export const HOSTED_RUNTIME_MAILBOX_FETCH_PATH = "/api/internal/hosted-mailbox/fetch";
+export const HOSTED_RUNTIME_VOICE_INPUT_PATH = "/api/internal/hosted-mailbox/voice-input";
 export const HOSTED_RUNTIME_MAILBOX_PAYLOAD_FETCH_PATH =
   "/api/internal/hosted-mailbox/payload/fetch";
 export const HOSTED_RUNTIME_MEMBER_ACTION_OUTCOME_PATH =
@@ -107,10 +109,15 @@ export const HOSTED_RUNTIME_CRYPTO_ROOT_PATH =
   "/api/internal/hosted-runtime/crypto-context/root";
 export const HOSTED_RUNTIME_USAGE_RECORD_PATH =
   "/api/internal/hosted-execution/usage/record";
+export const HOSTED_RUNTIME_USAGE_FEEDBACK_RECORD_PATH =
+  "/api/internal/hosted-execution/usage/feedback";
 export const HOSTED_RUNTIME_PRODUCT_FEEDBACK_RECORD_PATH =
   "/api/internal/hosted-execution/product-feedback/record";
 export const HOSTED_RUNTIME_FAMILY_PLAN_TOOL_PATH =
   "/api/internal/hosted-execution/family-plan/tool";
+export const HOSTED_RUNTIME_USAGE_DIAGNOSTICS_PATH =
+  "/api/internal/hosted-execution/usage/diagnostics";
+
 export const HOSTED_RUNTIME_PLAN_USAGE_TOOL_PATH =
   "/api/internal/hosted-execution/plan-usage/tool";
 export const HOSTED_RUNTIME_IMESSAGE_CONTACT_TOOL_PATH =
@@ -188,6 +195,8 @@ export const HOSTED_RUNTIME_EMAIL_EGRESS_RECIPIENT_PATH =
   "/api/internal/hosted-runtime/email-egress/recipient";
 export const HOSTED_RUNTIME_THREAD_ROUTE_AUTHORITY_PATH =
   "/api/internal/hosted-runtime/thread-route/authority";
+export const HOSTED_RUNTIME_MEMBER_NOTIFICATION_ROUTE_PATH =
+  "/api/internal/hosted-runtime/member-notification-route";
 export const HOSTED_DEVICE_SYNC_RECOVERY_SWEEP_PATH =
   "/api/internal/device-sync/recovery-sweep";
 export const HOSTED_DEVICE_SYNC_RECOVERY_SWEEP_CALLBACK_USER_ID =

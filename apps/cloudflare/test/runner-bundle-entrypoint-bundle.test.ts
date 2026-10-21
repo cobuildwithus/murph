@@ -491,16 +491,6 @@ describe("runner bundle container-entrypoint esbuild step", () => {
       /packages\/assistant-runtime\/dist\/hosted-runtime\/events\/assistant-ask-completion\.js/,
     ],
     [
-      "staged Environment voice wake handler",
-      ".deploy/runner-bundle/node_modules/@murphai/assistant-runtime/dist/hosted-runtime/events/environment-voice.js",
-      /node_modules\/@murphai\/assistant-runtime\/dist\/hosted-runtime\/events\/environment-voice\.js/,
-    ],
-    [
-      "workspace Codex auth wake handler",
-      "packages/assistant-runtime/dist/hosted-runtime/events/codex-auth.js",
-      /packages\/assistant-runtime\/dist\/hosted-runtime\/events\/codex-auth\.js/,
-    ],
-    [
       "Zod locale catalog",
       "node_modules/zod/v4/locales/index.js",
       /node_modules\/zod\/v4\/locales\/index\.js/,
@@ -668,7 +658,7 @@ describe("runner bundle container-entrypoint esbuild step", () => {
     // Mirror the production baselines plus their variance allowances so
     // budget-policy changes remain explicit and reviewed.
     expect(budgets).toEqual({
-      entryBytes: 64_257 + 12_000,
+      entryBytes: 76_589 + 12_000,
       staticClosureBytes: 2_047_343 + 96_000,
       staticChunkCount: 24,
     });

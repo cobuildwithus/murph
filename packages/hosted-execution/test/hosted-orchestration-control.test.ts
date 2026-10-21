@@ -334,8 +334,8 @@ describe("hosted orchestration control contracts", () => {
 
   it("classifies the generic first system-mailbox frontier", () => {
     expect(classifyHostedSystemMailboxExecutionClass({
-      dedupeKey: "environment-interview.completed:completion",
-      kind: "environment-interview.completed",
+      dedupeKey: "journal.group-fact.recorded:fact",
+      kind: "journal.group-fact.recorded",
     })).toBe("model_free");
     expect(classifyHostedSystemMailboxExecutionClass({
       dedupeKey: "member.channels.updated:settings-change",
@@ -430,7 +430,7 @@ describe("hosted orchestration control contracts", () => {
         userId: "test-user", attemptId: "attempt-test", generation: "1", phase: "active" as const,
         processingMode: "default" as const, allocationId: "allocation-test",
         runnerContainerName: "runner-test", workspaceVersion: "0",
-        customInferenceEnvelope: null, platformAiUsageAllowed: true,
+        platformAiUsageAllowed: true,
         startedAt: "2026-01-01T00:00:00.000Z", acceptedAt: null, completedAt: null,
         failureCount: 0, lastErrorCode: null,
       },
@@ -531,6 +531,21 @@ describe("hosted orchestration control contracts", () => {
   });
 
   it.each([undefined, null, "default"] as const)(
+    "preserves a voice reservation for foreground processing mode %s",
+    (processingMode) => {
+      const request = { voiceCallId: "call-synthetic", orchestrationAttemptId: "orchestration-voice",
+        ...(processingMode === undefined ? {} : { processingMode }) };
+      expect(parseHostedRuntimeEnsureProcessingRequest(request)).toEqual(request);
+    },
+  );
+
+  it.each(["system_mailbox", "inbox_media_retention"])("rejects voice reservation in %s", (processingMode) => {
+    expect(() => parseHostedRuntimeEnsureProcessingRequest({
+      voiceCallId: "call-synthetic", orchestrationAttemptId: "orchestration-voice", processingMode,
+    })).toThrow("Voice reservation requires default processing mode.");
+  });
+
+  it.each([undefined, null, "default"] as const)(
     "preserves pending conversation work for default processing mode %s",
     (processingMode) => {
       const request = {
@@ -566,6 +581,21 @@ describe("hosted orchestration control contracts", () => {
       );
     },
   );
+
+  it("preserves complete mailbox-only wake coverage without requiring it from old producers", () => {
+    const base = { orchestrationAttemptId: "orchestration_attempt_mailbox" };
+    expect(parseHostedRuntimeEnsureProcessingRequest(base)).toEqual(base);
+    const request = { ...base, mailboxWakeHighWater: { conversation: "9007199254740993", system: "0" } };
+    expect(parseHostedRuntimeEnsureProcessingRequest(request)).toEqual(request);
+  });
+
+  it.each([null, {}, { conversation: "1" }, { conversation: "1", system: "-1" },
+    { conversation: "01", system: "2" }, { conversation: 1, system: "2" },
+    { conversation: "1", system: "2", extra: "3" }])("rejects incomplete or malformed mailbox wake coverage %j", (mailboxWakeHighWater) => {
+    expect(() => parseHostedRuntimeEnsureProcessingRequest({
+      orchestrationAttemptId: "orchestration_attempt_mailbox", mailboxWakeHighWater,
+    })).toThrow("mailboxWakeHighWater requires both mailbox lanes");
+  });
 
   it("rejects raw payload-shaped fields and completion shortcuts in ensure-processing contracts", () => {
     expect(() => parseHostedRuntimeEnsureProcessingRequest({

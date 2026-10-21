@@ -52,6 +52,7 @@ export type {
 export {
   deleteEvent,
   findEventByExternalRef,
+  findEventsByExternalRefs,
   findEventsByRawRefs,
   readEvent,
   readOwnedEvent,

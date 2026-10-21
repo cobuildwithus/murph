@@ -5,6 +5,7 @@ import path from "node:path";
 import { beforeEach, test, vi } from "vitest";
 
 import {
+  buildHostedExecutionConversationMessageWake,
   buildHostedExecutionDeviceSyncWake,
   buildHostedExecutionLinqConversationMessageWake,
   buildHostedExecutionMemberActivatedWake,
@@ -65,16 +66,16 @@ const DEFAULT_MEMBER_CHANNELS = {
 } as const;
 const HOSTED_ASSISTANT_SEED_ENV = {
   HOSTED_ASSISTANT_APPROVAL_POLICY: "never",
-  HOSTED_ASSISTANT_MODEL: "gpt-5.6-terra",
+  HOSTED_ASSISTANT_MODEL: "gpt-6.1-sol",
   HOSTED_ASSISTANT_PROVIDER: "openai",
   HOSTED_ASSISTANT_REASONING_EFFORT: "medium",
   HOSTED_ASSISTANT_SANDBOX: "danger-full-access",
 } as const;
-const HOSTED_CODEX_VERCEL_GATEWAY_TARGET = {
+const HOSTED_CODEX_OPENAI_TARGET = {
   adapter: "codex-cli",
   approvalPolicy: "never",
   codexCommand: null,
-  model: "gpt-5.6-terra",
+  model: "gpt-6.1-sol",
   modelProvider: "openai",
   oss: false,
   profile: null,
@@ -555,7 +556,7 @@ test("initial hosted bootstrap is reused while later configuration reads observe
       vaultRoot, wake, HOSTED_ASSISTANT_SEED_ENV, HOSTED_RUNTIME_RESOLVED_CONFIG,
       { assistantBootstrap: bootstrap, operatorHomeRoot },
     );
-    assert.deepEqual(target, HOSTED_CODEX_VERCEL_GATEWAY_TARGET);
+    assert.deepEqual(target, HOSTED_CODEX_OPENAI_TARGET);
     assert.equal(readiness.assistantConfigured, true);
     assert.equal(readConfig.mock.calls.length, 0);
 
@@ -598,7 +599,7 @@ test("hosted assistant bootstrap exposes an execution default target for later m
 
       const defaultTarget = await readHostedAssistantExecutionDefaultTarget();
 
-      assert.deepEqual(defaultTarget, HOSTED_CODEX_VERCEL_GATEWAY_TARGET);
+      assert.deepEqual(defaultTarget, HOSTED_CODEX_OPENAI_TARGET);
     });
   } finally {
     restoreHostedAssistantSeedEnv(previousHostedAssistantEnv);
@@ -958,6 +959,28 @@ test("hosted wake context does not change auto-reply state on non-channel follow
       assert.deepEqual((await readAutomationState(vaultRoot)).autoReply, autoReplyAfterActivation);
     });
   } finally {
+    await cleanup();
+  }
+});
+
+test("accepted voice enables ordinary replies without requiring a live media port", async () => {
+  const { cleanup, operatorHomeRoot, vaultRoot } = await createHostedRuntimeWorkspace("hosted-voice-context-");
+  const previousHostedAssistantEnv = setHostedAssistantSeedEnv();
+  try {
+    await withOperatorHomeRoot(operatorHomeRoot, async () => {
+      const config = { channelCapabilities: { emailSendReady: false, telegramBotConfigured: false }, deviceSync: null };
+      const wake = buildHostedExecutionConversationMessageWake({
+        eventId: "synthetic-voice-accepted", userId: "member_synthetic_voice",
+        occurredAt: "2026-09-21T12:00:00.000Z",
+        message: { channel: "voice", callId: "synthetic-call", inputId: "synthetic-input", text: "Read the current record." },
+      });
+      const state = await prepareHostedAssistantAutoReplyForWake(vaultRoot, wake, buildHostedAssistantSeedRuntimeEnv(), config);
+      assert.equal(state.assistantConfigured, true);
+      assert.equal(state.voiceAutoReplyEnabled, true);
+      assert.deepEqual(summarizeAutoReply(await readAutomationState(vaultRoot)), [{ channel: "voice", eligibleAfter: null }]);
+    });
+  } finally {
+    restoreHostedAssistantSeedEnv(previousHostedAssistantEnv);
     await cleanup();
   }
 });

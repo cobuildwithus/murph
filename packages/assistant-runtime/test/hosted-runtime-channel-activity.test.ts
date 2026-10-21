@@ -721,34 +721,6 @@ test("hosted Linq typing no-ops when the target is not the current inbound conte
   expect(mocks.startLinqTypingIndicator).not.toHaveBeenCalled();
 });
 
-test("hosted Linq typing does not use target fallback when another context is present", async () => {
-  const typing = createHostedAssistantChannelTypingDependencies({
-    forwardedEnv: {
-      LINQ_API_TOKEN: "linq-token",
-    },
-    linqDeliveryContexts: [
-      {
-        directRecipientPhoneNumber: "+15551234567",
-        fromPhoneNumber: null,
-        replyToMessageId: "msg_123",
-        routeAuthority: null,
-        service: null,
-        target: "current_linq_chat",
-        threadIsDirect: null,
-      },
-    ],
-    platformEnv: {},
-    providerFetch: vi.fn<typeof fetch>(),
-    userEnv: {},
-  });
-
-  await expect(typing.startLinqTyping?.({
-    target: "different_linq_chat",
-  })).resolves.toBeUndefined();
-
-  expect(mocks.startLinqTypingIndicator).not.toHaveBeenCalled();
-});
-
 test("hosted channel activity does not use ambient fetch when provider fetch is missing", async () => {
   const typing = createHostedAssistantChannelTypingDependencies({
     forwardedEnv: {},

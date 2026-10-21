@@ -94,13 +94,18 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
 
     expect(mocks.runHostedAssistantAutomationLane).toHaveBeenCalledTimes(1);
+    expect(mocks.resolveHostedOldestAssistantInputOccurredAt).not.toHaveBeenCalled();
+    const cutoff = mocks.prepareHostedSystemMailboxItemForCheckpoint.mock.calls[0]?.[0]
+      .assistantAskCompletionOccurredBefore;
+    expect(typeof cutoff).toBe("function");
+    await expect(cutoff()).resolves.toBe(occurredAt);
     expect(mocks.resolveHostedOldestAssistantInputOccurredAt).toHaveBeenCalledWith({
       assistantInputIds: ["input_fresh"],
       signal: null,
       vaultRoot: "/tmp/murph-vault",
     });
     expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).toHaveBeenCalledWith(
-      expect.objectContaining({ assistantAskCompletionOccurredBefore: occurredAt }),
+      expect.objectContaining({ assistantAskCompletionOccurredBefore: expect.any(Function) }),
     );
   });
 
@@ -208,6 +213,12 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(mocks.drainHostedPreparedAssistantDeliveries).toHaveBeenCalledWith(
       expect.objectContaining({
         assistantDeliveryEffects: [effect],
+        // Attribution only: the batch-shared barrier and phase-start reading.
+        deliveryTraceContext: expect.objectContaining({
+          foregroundDeliveryPhaseStartedAtMonotonicMs: expect.any(Number),
+          memberChannelBarrierMs: expect.any(Number),
+          runtimeAttemptId: "attempt_synthetic_phase",
+        }),
         linqDeliveryContexts: [linqDeliveryContext],
       }),
     );
@@ -694,9 +705,12 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           "runtime.pending-effects-reconcile-requested",
           "assistant.ask.completed",
         ],
-        assistantAskCompletionOccurredBefore: pendingInputAt,
+        assistantAskCompletionOccurredBefore: expect.any(Function),
       }),
     );
+    const cutoff = mocks.prepareHostedSystemMailboxItemForCheckpoint.mock.calls[0]?.[0]
+      .assistantAskCompletionOccurredBefore;
+    await expect(cutoff()).resolves.toBe(pendingInputAt);
     expect(mocks.resolveHostedOldestAssistantInputOccurredAt).toHaveBeenCalledWith({
       assistantInputIds: ["ain_00000000000000000000000000000001"],
       signal: null,
@@ -1144,7 +1158,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       expect.objectContaining({
         allowedRouteActions: ["continue-assistant-ask"],
         allowedWakeKinds: ["assistant.ask.completed"],
-        assistantAskCompletionOccurredBefore: null,
+        assistantAskCompletionOccurredBefore: expect.any(Function),
       }),
     );
     expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).not.toHaveBeenCalledWith(
@@ -1159,10 +1173,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       now: expect.any(Function),
       vaultRoot: "/tmp/murph-vault",
     });
-    expect(mocks.resolveHostedOldestPendingAssistantInputAt).toHaveBeenCalledWith({
-      signal: null,
-      vaultRoot: "/tmp/murph-vault",
-    });
+    expect(mocks.resolveHostedOldestPendingAssistantInputAt).not.toHaveBeenCalled();
     expect(mocks.resolveHostedOldestAssistantInputOccurredAt).not.toHaveBeenCalled();
     expect(result).toEqual(expect.objectContaining({
       nextWakeAt: armedWakeAt,
@@ -1724,6 +1735,43 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     },
   );
 
+  it("applies pending preferences before handing an older browser refresh to its owner", async () => {
+    const now = "2026-04-27T00:00:00.000Z";
+    const parentRoot = await mkdtemp(path.join(tmpdir(), "hosted-refresh-preferences-"));
+    const vaultRoot = path.join(parentRoot, "vault");
+    try {
+      await initializeVault({ createdAt: now, vaultRoot });
+      const systemMailbox = await loadHostedSystemMailboxRealImplementation();
+      const refresh = { ...createBrowserVaultRefreshSystemMailboxItem(), mailboxLaneSeq: "1" };
+      const preferences = { ...createMemberPreferencesSystemMailboxItem(), mailboxLaneSeq: "2" };
+      await updateHostedSystemMailboxState(vaultRoot, () => ({ pending: [refresh, preferences] }));
+      mocks.resolveHostedSystemMailboxNextWakeCandidate.mockImplementation(
+        systemMailbox.resolveHostedSystemMailboxNextWakeCandidate,
+      );
+      mocks.prepareHostedSystemMailboxItemForCheckpoint.mockImplementation(
+        systemMailbox.prepareHostedSystemMailboxItemForCheckpoint,
+      );
+      mocks.recordHostedSystemMailboxItemAfterCheckpoint.mockImplementation(
+        systemMailbox.recordHostedSystemMailboxItemAfterCheckpoint,
+      );
+      const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+        assistantInputIds: [], conversationImportedCount: 0, importedCount: 0,
+        now: () => now, vaultRoot, operatorHomeRoot: path.join(parentRoot, "home"),
+        workspace: createDueAssistantWorkspace({
+          nextWakeAt: now, nextWakeReason: "mailbox",
+          nextDefaultProcessingWakeAt: now, nextDefaultProcessingWakeReason: "assistant",
+          systemMailboxProgressGeneration: "0",
+        }),
+      }));
+      expect(result.progressed).toBe(true);
+      expect(result.nextWakeReason).toBe("mailbox");
+      expect((await readHostedSystemMailboxState(vaultRoot)).pending).toEqual([expect.objectContaining(refresh)]);
+      expect(mocks.runHostedAssistantAutomationLane).not.toHaveBeenCalled();
+    } finally {
+      await rm(parentRoot, { force: true, recursive: true });
+    }
+  });
+
   it("drains approved continuations while independent device work remains eligible", async () => {
     const now = "2026-04-27T00:00:00.000Z";
     vi.useFakeTimers();
@@ -2182,31 +2230,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(mocks.drainHostedPreparedAssistantDeliveries).not.toHaveBeenCalled();
   });
 
-  it("keeps a future causal approval wake behind foreground input at pass admission", async () => {
-    const now = "2026-04-27T00:00:00.000Z";
-    mocks.resolveHostedPendingAssistantInputWakeAt.mockResolvedValue(now);
-
-    await runHostedWorkspaceAssistantPhase(createPhaseInput({
-      importedCount: 1,
-      now: () => now,
-    }));
-
-    expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).toHaveBeenCalledWith(
-      expect.objectContaining({
-        allowedRouteActions: [
-          "apply-runtime-control-request",
-          "continue-assistant-ask",
-        ],
-        allowedWakeKinds: [
-          "runtime.pending-effects-reconcile-requested",
-          "assistant.ask.completed",
-        ],
-        vaultRoot: "/tmp/murph-vault",
-      }),
-    );
-    expect(mocks.runHostedAssistantAutomationLane).toHaveBeenCalledTimes(1);
-  });
-
   it("keeps unrelated system wakes behind foreground input at pass admission", async () => {
     const now = "2026-04-27T00:00:00.000Z";
     mocks.resolveHostedPendingAssistantInputWakeAt.mockResolvedValue(now);
@@ -2606,7 +2629,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       shouldYieldBackgroundMaintenance: expect.any(Function),
     }));
     expect(postCheckpoint).toEqual(expect.objectContaining({
-      afterDurableCheckpoint: expect.any(Function),
+      afterDurableCheckpoint: [expect.any(Function)],
       checkpointReason: "system_mailbox_receipt",
     }));
     expect(mocks.recordHostedSystemMailboxItemAfterCheckpoint).not.toHaveBeenCalled();
@@ -2615,6 +2638,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       postCheckpoint?.afterDurableCheckpoint,
     );
 
+    expect(mocks.recordHostedSystemMailboxItemAfterCheckpoint).toHaveBeenCalledTimes(1);
     expect(mocks.recordHostedSystemMailboxItemAfterCheckpoint).toHaveBeenCalledWith({
       item: memberActionItem,
       operatorHomeRoot: "/tmp/murph-operator-home",
@@ -2784,6 +2808,103 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
             wake: { kind: "member.activated" },
           },
         ],
+      });
+
+      const postCheckpoint = await result.afterCheckpoint?.();
+
+      expect(await readHostedSystemMailboxState(vaultRoot)).toEqual({ pending: [] });
+      expect(postCheckpoint).toEqual(expect.objectContaining({
+        checkpointReason: "activation_bootstrap",
+      }));
+    } finally {
+      await rm(parentRoot, { force: true, recursive: true });
+    }
+  });
+
+  it.each([
+    { due: true, label: "runs a due queued member activation" },
+    { due: false, label: "leaves a future member activation queued" },
+  ])("$label after a clean foreground pass whose input was already answered", async ({ due }) => {
+    const now = "2026-04-27T00:00:00.000Z";
+    const parentRoot = await mkdtemp(path.join(tmpdir(), "hosted-member-activation-"));
+    const operatorHomeRoot = path.join(parentRoot, "home");
+    const vaultRoot = path.join(parentRoot, "vault");
+
+    try {
+      await initializeVault({ createdAt: now, vaultRoot });
+      const systemMailbox = await loadHostedSystemMailboxRealImplementation();
+      const activationItem = createResolvedMemberActivationMailboxItem({
+        occurredAt: now,
+      });
+      await updateHostedSystemMailboxState(vaultRoot, () => ({
+        pending: [{
+          attemptCount: 0,
+          itemId: activationItem.item.id,
+          lastAttemptAt: null,
+          lastErrorCode: null,
+          lastErrorMessage: null,
+          mailboxDedupeKey: activationItem.item.dedupeKey,
+          mailboxLaneSeq: activationItem.item.laneSeq,
+          nextAttemptAt: due ? null : "2026-04-27T00:05:00.000Z",
+          occurredAt: activationItem.item.occurredAt,
+          postCheckpointRecord: null,
+          preferenceCausalSeq: null,
+          requestId: null,
+          routeAction: "apply-member-activation",
+          status: "pending",
+          wake: buildHostedExecutionMemberActivatedWake({
+            eventId: "member.activated:synthetic:instant-first-turn",
+            memberChannels: { email: false, linq: true, telegram: false },
+            memberId: "member_synthetic_phase",
+            occurredAt: now,
+          }),
+        }],
+      }));
+      mocks.prepareHostedSystemMailboxItemForCheckpoint.mockImplementation(
+        systemMailbox.prepareHostedSystemMailboxItemForCheckpoint,
+      );
+      mocks.recordHostedSystemMailboxItemAfterCheckpoint.mockImplementation(
+        systemMailbox.recordHostedSystemMailboxItemAfterCheckpoint,
+      );
+      mocks.resolveHostedSystemMailboxNextWakeCandidate.mockImplementation(
+        systemMailbox.resolveHostedSystemMailboxNextWakeCandidate,
+      );
+      // Web's instant first turn already answered the imported input, so the
+      // foreground pass completes without a reply and without progress.
+      mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
+        assistantAutomationCurrentTurnDeliveryIntentIds: [],
+        assistantAutomationProgressed: false,
+        deviceSyncProcessed: 0,
+        deviceSyncSkipped: true,
+        nextWakeAt: null,
+        parserProcessed: 0,
+        postCheckpointRecord: null,
+        progressed: false,
+        redactedLogEntries: [],
+      });
+
+      const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+        importedCount: 1,
+        now: () => now,
+        operatorHomeRoot,
+        vaultRoot,
+      }));
+
+      if (!due) {
+        expect(result.progressed).not.toBe(true);
+        expect(result.afterCheckpoint).toBeUndefined();
+        expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).not.toHaveBeenCalledWith(
+          expect.objectContaining({ allowedRouteActions: expect.arrayContaining(["apply-member-activation"]) }),
+        );
+        return;
+      }
+      expect(result).toEqual(expect.objectContaining({
+        afterCheckpointKeepsForegroundImportLoop: true,
+        checkpointReason: "system_mailbox_receipt",
+        progressed: true,
+      }));
+      expect(await readHostedSystemMailboxState(vaultRoot)).toMatchObject({
+        pending: [{ routeAction: "apply-member-activation" }],
       });
 
       const postCheckpoint = await result.afterCheckpoint?.();

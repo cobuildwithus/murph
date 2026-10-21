@@ -35,7 +35,6 @@ import {
   findCaptureByLookup,
   initializeVault,
   patchAutomation,
-  readHabitatAspect,
   readJsonlRecords,
   repairVault,
   runCanonicalWrite,
@@ -887,7 +886,9 @@ describe("hosted runtime shutdown signal", () => {
     const consoleInfo = vi.spyOn(console, "info").mockImplementation(() => undefined);
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const events: string[] = [];
-    const mailboxItems: ReturnType<typeof createMailboxItem>[] = [];
+    const mailboxItems: ReturnType<typeof createMailboxItem>[] = [
+      createMailboxItem({ id: "mailbox_item_initial_conversation" }),
+    ];
     const firstDirtyWaitStarted = createDeferred<void>();
     const retainedDirtyWaitStarted = createDeferred<void>();
     const shutdownController = new AbortController();
@@ -971,6 +972,9 @@ describe("hosted runtime shutdown signal", () => {
           },
           async importItem(item) {
             events.push(`mailbox.importItem:${item.item.id}`);
+            if (item.item.id === "mailbox_item_initial_conversation") {
+              return { status: "imported" };
+            }
             return {
               assistantInputId: "assistant_input_shutdown_stale_runtime_wake",
               status: "imported",
@@ -1027,7 +1031,7 @@ describe("hosted runtime shutdown signal", () => {
       assert.equal(assistantPhaseCalls, 1);
       assert.deepEqual(
         events.filter((event) => event.startsWith("mailbox.importItem:")),
-        [],
+        ["mailbox.importItem:mailbox_item_initial_conversation"],
       );
       assert.equal(checkpointRequests[0]?.reason, "idle_shutdown");
       assert.equal(checkpointRequests[0]?.idleCheckpointTrigger, "shutdown_signal");
@@ -1064,7 +1068,9 @@ describe("hosted runtime shutdown signal", () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const events: string[] = [];
-    const mailboxItems: ReturnType<typeof createMailboxItem>[] = [];
+    const mailboxItems: ReturnType<typeof createMailboxItem>[] = [
+      createMailboxItem({ id: "mailbox_item_initial_conversation" }),
+    ];
     const firstDirtyWaitStarted = createDeferred<void>();
     const retainedDirtyWaitStarted = createDeferred<void>();
     const shutdownController = new AbortController();
@@ -1144,7 +1150,7 @@ describe("hosted runtime shutdown signal", () => {
             if (snapshotInput.runtimeWakePendingAtCheckpoint) {
               mailboxItems.push(createMailboxItem({
                 id: "mailbox_item_shutdown_after_idle_window_trigger",
-                laneSeq: "1",
+                laneSeq: "2",
               }));
               shutdownController.abort(
                 new DOMException("Synthetic container SIGTERM.", "AbortError"),
@@ -1159,6 +1165,9 @@ describe("hosted runtime shutdown signal", () => {
           },
           async importItem(item) {
             events.push(`mailbox.importItem:${item.item.id}`);
+            if (item.item.id === "mailbox_item_initial_conversation") {
+              return { status: "imported" };
+            }
             return {
               assistantInputId: "assistant_input_shutdown_after_idle_window_trigger",
               status: "imported",
@@ -1210,7 +1219,7 @@ describe("hosted runtime shutdown signal", () => {
       assert.equal(assistantPhaseCalls, 1);
       assert.deepEqual(
         events.filter((event) => event.startsWith("mailbox.importItem:")),
-        [],
+        ["mailbox.importItem:mailbox_item_initial_conversation"],
       );
       assert.equal(checkpointRequests[0]?.reason, "idle_shutdown");
       assert.equal(checkpointRequests[0]?.idleCheckpointTrigger, "idle_window");
@@ -2003,7 +2012,9 @@ describe("hosted runtime shutdown signal", () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const events: string[] = [];
-    const mailboxItems: ReturnType<typeof createMailboxItem>[] = [];
+    const mailboxItems: ReturnType<typeof createMailboxItem>[] = [
+      createMailboxItem({ id: "mailbox_item_initial_conversation" }),
+    ];
     const firstDirtyWaitStarted = createDeferred<void>();
     const retainedDirtyWaitStarted = createDeferred<void>();
     const shutdownController = new AbortController();
@@ -2089,6 +2100,9 @@ describe("hosted runtime shutdown signal", () => {
           },
           async importItem(item) {
             events.push(`mailbox.importItem:${item.item.id}`);
+            if (item.item.id === "mailbox_item_initial_conversation") {
+              return { status: "imported" };
+            }
             shutdownController.abort(
               new DOMException("Synthetic container SIGTERM.", "AbortError"),
             );
@@ -2140,7 +2154,7 @@ describe("hosted runtime shutdown signal", () => {
       );
       mailboxItems.push(createMailboxItem({
         id: "mailbox_item_shutdown_after_pre_checkpoint_import",
-        laneSeq: "1",
+        laneSeq: "2",
       }));
 
       const result = await resultPromise;
@@ -2148,7 +2162,10 @@ describe("hosted runtime shutdown signal", () => {
       assert.equal(assistantPhaseCalls, 1);
       assert.deepEqual(
         events.filter((event) => event.startsWith("mailbox.importItem:")),
-        ["mailbox.importItem:mailbox_item_shutdown_after_pre_checkpoint_import"],
+        [
+          "mailbox.importItem:mailbox_item_initial_conversation",
+          "mailbox.importItem:mailbox_item_shutdown_after_pre_checkpoint_import",
+        ],
       );
       assert.equal(checkpointRequests[0]?.reason, "idle_shutdown");
       assert.equal(checkpointRequests[0]?.idleCheckpointTrigger, "idle_window");
@@ -2157,7 +2174,7 @@ describe("hosted runtime shutdown signal", () => {
       assert.equal(checkpointRequests[1]?.idleCheckpointTrigger, "shutdown_signal");
       assert.equal(
         checkpointRequests[1]?.redactedStatus?.hostedMailboxConversationImportedSeq,
-        "1",
+        "2",
       );
       const pendingAssistantWakeAt = checkpointRequests[1]?.nextWakeAt;
       assert.match(pendingAssistantWakeAt ?? "", /^\d{4}-\d{2}-\d{2}T/u);
@@ -2180,7 +2197,9 @@ describe("hosted runtime shutdown signal", () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const events: string[] = [];
-    const mailboxItems: ReturnType<typeof createMailboxItem>[] = [];
+    const mailboxItems: ReturnType<typeof createMailboxItem>[] = [
+      createMailboxItem({ id: "mailbox_item_initial_conversation" }),
+    ];
     const firstDirtyWaitStarted = createDeferred<void>();
     const retainedDirtyWaitStarted = createDeferred<void>();
     const shutdownController = new AbortController();
@@ -2266,6 +2285,9 @@ describe("hosted runtime shutdown signal", () => {
           },
           async importItem(item) {
             events.push(`mailbox.importItem:${item.item.id}`);
+            if (item.item.id === "mailbox_item_initial_conversation") {
+              return { status: "imported" };
+            }
             return {
               assistantInputId: await stageAssistantInputEventForMailboxItem({
                 item: item.item,
@@ -2320,7 +2342,7 @@ describe("hosted runtime shutdown signal", () => {
       );
       mailboxItems.push(createMailboxItem({
         id: "mailbox_item_shutdown_during_pre_checkpoint_pass",
-        laneSeq: "1",
+        laneSeq: "2",
       }));
 
       const result = await resultPromise;
@@ -2328,7 +2350,10 @@ describe("hosted runtime shutdown signal", () => {
       assert.equal(assistantPhaseCalls, 2);
       assert.deepEqual(
         events.filter((event) => event.startsWith("mailbox.importItem:")),
-        ["mailbox.importItem:mailbox_item_shutdown_during_pre_checkpoint_pass"],
+        [
+          "mailbox.importItem:mailbox_item_initial_conversation",
+          "mailbox.importItem:mailbox_item_shutdown_during_pre_checkpoint_pass",
+        ],
       );
       assert.equal(checkpointRequests[0]?.reason, "idle_shutdown");
       assert.equal(checkpointRequests[0]?.idleCheckpointTrigger, "idle_window");
@@ -2337,7 +2362,7 @@ describe("hosted runtime shutdown signal", () => {
       assert.equal(checkpointRequests[1]?.idleCheckpointTrigger, "shutdown_signal");
       assert.equal(
         checkpointRequests[1]?.redactedStatus?.hostedMailboxConversationImportedSeq,
-        "1",
+        "2",
       );
       const pendingAssistantWakeAt = checkpointRequests[1]?.nextWakeAt;
       assert.match(pendingAssistantWakeAt ?? "", /^\d{4}-\d{2}-\d{2}T/u);

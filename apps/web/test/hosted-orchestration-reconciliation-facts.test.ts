@@ -27,9 +27,9 @@ const mocks = vi.hoisted(() => ({
   readHostedMailboxLatestPendingConversationItem: vi.fn(),
   readHostedMailboxMaxSeqByLane: vi.fn(),
   readHostedMailboxPayload: vi.fn(),
+  readHostedMailboxProgress: vi.fn(),
   readHostedMailboxWakeByItemId: vi.fn(),
   readHostedMemberCoreState: vi.fn(),
-  readSelectedHostedInferenceConnectionOverride: vi.fn(),
   readHostedWorkspace: vi.fn(),
   requireHostedCloudflareCallbackRequest: vi.fn(),
   resolveHostedRuntimeAiUsageGate: vi.fn(),
@@ -57,6 +57,10 @@ vi.mock("next/server", async (importOriginal) => ({
 
 vi.mock("@/src/lib/hosted-execution/cloudflare-callback-auth", () => ({
   requireHostedCloudflareCallbackRequest: mocks.requireHostedCloudflareCallbackRequest,
+}));
+
+vi.mock("@/src/lib/hosted-mailbox/projection", () => ({
+  readHostedMailboxProgress: mocks.readHostedMailboxProgress,
 }));
 
 vi.mock("@/src/lib/hosted-mailbox/store", () => ({
@@ -138,10 +142,7 @@ vi.mock("@/src/lib/hosted-orchestration/runtime-usage-decision", () => ({
   resolveHostedRuntimeAiUsageGate: mocks.resolveHostedRuntimeAiUsageGate,
 }));
 
-vi.mock("@/src/lib/hosted-inference/connection-store", () => ({
-  readSelectedHostedInferenceConnectionOverride:
-    mocks.readSelectedHostedInferenceConnectionOverride,
-}));
+
 
 type ReconciliationRoute = typeof import(
   "../app/api/internal/hosted-orchestration/users/[userId]/reconciliation-facts/route"
@@ -178,6 +179,10 @@ describe("hosted orchestration reconciliation facts", () => {
       async (input: { message: string }) => input.message,
     );
     mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord());
+    mocks.readHostedMailboxProgress.mockImplementation(async () => ({
+      maxSeqByLane: await mocks.readHostedMailboxMaxSeqByLane(),
+      consumedSeqByLane: await mocks.readHostedMailboxConsumedSeqByLane(),
+    }));
     mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue(noMailboxBacklog());
     mocks.readHostedMailboxConsumedSeqByLane.mockResolvedValue([
       {
@@ -191,7 +196,6 @@ describe("hosted orchestration reconciliation facts", () => {
     mocks.readHostedMailboxWakeByItemId.mockResolvedValue(null);
     mocks.decodeHostedMailboxStoredPayload.mockResolvedValue(null);
     mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({ status: "allowed" });
-    mocks.readSelectedHostedInferenceConnectionOverride.mockResolvedValue(null);
     mocks.tryMarkHostedMailboxConversationAiUsageDenied.mockResolvedValue(false);
   });
 
@@ -410,9 +414,12 @@ describe("hosted orchestration reconciliation facts", () => {
       },
     ]);
     expect(mocks.resolveHostedRuntimeAiUsageGate).toHaveBeenCalledWith({
-      mode: "mutating",
+      mode: "read_first",
       now: new Date(FIXED_NOW),
       userId: MEMBER_ID,
+    });
+    expect(mocks.readHostedMailboxProgress).toHaveBeenCalledExactlyOnceWith({
+      now: new Date(FIXED_NOW), prisma: expect.any(Object), userId: MEMBER_ID,
     });
     expect(JSON.stringify(body)).not.toContain("redactedStatus");
     expect(JSON.stringify(body)).not.toContain(UNSAFE_SENTINEL);
@@ -674,7 +681,6 @@ describe("hosted orchestration reconciliation facts", () => {
     });
     expect(mocks.readHostedMailboxMaxSeqByLane).not.toHaveBeenCalled();
     expect(mocks.resolveHostedRuntimeAiUsageGate).not.toHaveBeenCalled();
-    expect(mocks.readSelectedHostedInferenceConnectionOverride).not.toHaveBeenCalled();
   });
 
   it("does not AI-gate a due inbox media retention wake", async () => {
@@ -766,7 +772,7 @@ describe("hosted orchestration reconciliation facts", () => {
     expect(mocks.resolveHostedRuntimeAiUsageGate).not.toHaveBeenCalled();
   });
 
-  it("preserves inactive workspace retention clocks for retention-only workflow dispatch", async () => {
+  it.each([null, FIXED_NOW, "2026-05-20T12:14:00.000Z"])("preserves inactive workspace retention clocks for retention-only workflow dispatch (%s)", async (retentionWakeAt) => {
     mocks.readHostedMemberCoreState.mockResolvedValue(buildActiveMemberRecord({
       billingStatus: "canceled",
     }));
@@ -774,7 +780,7 @@ describe("hosted orchestration reconciliation facts", () => {
       billingStatus: "canceled",
     }));
     mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
-      inboxMediaRetentionWakeAt: FIXED_NOW,
+      inboxMediaRetentionWakeAt: retentionWakeAt,
     }));
 
     const response = await reconciliationRoute.GET(
@@ -784,12 +790,13 @@ describe("hosted orchestration reconciliation facts", () => {
     const facts = parseHostedRuntimeReconciliationFacts(await response.json());
 
     expect(response.status).toBe(200);
+    expect(facts.mailboxLag).toEqual([]);
     expect(facts.blocked).toEqual({
       reason: "user_not_active",
-      retryAt: null,
+      retryAt: retentionWakeAt !== null && retentionWakeAt > FIXED_NOW ? retentionWakeAt : null,
     });
     expect(facts.workspace).toMatchObject({
-      inboxMediaRetentionWakeAt: FIXED_NOW,
+      inboxMediaRetentionWakeAt: retentionWakeAt,
       systemMailboxFrontier: null,
       version: "4",
     });
@@ -828,7 +835,7 @@ describe("hosted orchestration reconciliation facts", () => {
     expect(response.status).toBe(200);
     expect(facts.blocked).toBeNull();
     expect(mocks.resolveHostedRuntimeAiUsageGate).toHaveBeenCalledWith({
-      mode: "mutating",
+      mode: "read_first",
       now: new Date(FIXED_NOW),
       userId: MEMBER_ID,
     });
@@ -840,11 +847,6 @@ describe("hosted orchestration reconciliation facts", () => {
     [
       "health.daily-metric.reported",
       "health.daily-metric.reported:item",
-      "model_free",
-    ],
-    [
-      "environment-interview.completed",
-      "environment-interview.completed:item",
       "model_free",
     ],
     [
@@ -967,7 +969,7 @@ describe("hosted orchestration reconciliation facts", () => {
 
     expect(facts.blocked).toBeNull();
     expect(mocks.resolveHostedRuntimeAiUsageGate).toHaveBeenCalledWith({
-      mode: "mutating",
+      mode: "read_first",
       now: new Date(FIXED_NOW),
       userId: MEMBER_ID,
     });
@@ -1002,7 +1004,7 @@ describe("hosted orchestration reconciliation facts", () => {
       nextWakeReason: "assistant_due",
     });
     expect(mocks.resolveHostedRuntimeAiUsageGate).toHaveBeenCalledWith({
-      mode: "mutating",
+      mode: "read_first",
       now: new Date(FIXED_NOW),
       userId: MEMBER_ID,
     });
@@ -1097,15 +1099,12 @@ describe("hosted orchestration reconciliation facts", () => {
   });
 
   it.each(["allowed", "health_data_consent_withdrawn"] as const)(
-    "does not depend on custom inference lookup when usage admission is %s",
+    "preserves authoritative admission when usage status is %s",
     async (status) => {
       mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([
         { lane: "conversation", maxSeq: "1" },
       ]);
       mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({ status });
-      mocks.readSelectedHostedInferenceConnectionOverride.mockRejectedValue(
-        new Error("Unavailable custom inference selection."),
-      );
 
       const response = await reconciliationRoute.GET(requestForFacts(), routeContext());
       const facts = parseHostedRuntimeReconciliationFacts(await response.json());
@@ -1115,70 +1114,13 @@ describe("hosted orchestration reconciliation facts", () => {
         status === "allowed" ? null : "health_data_consent_withdrawn",
       );
       expect(mocks.resolveHostedRuntimeAiUsageGate).toHaveBeenCalledWith({
-        mode: "mutating",
+        mode: "read_first",
         now: new Date(FIXED_NOW),
         userId: MEMBER_ID,
       });
-      expect(mocks.readSelectedHostedInferenceConnectionOverride).not.toHaveBeenCalled();
       expect(mocks.tryMarkHostedMailboxConversationAiUsageDenied).not.toHaveBeenCalled();
     },
   );
-
-  it("fails closed without issuing a usage notice when a denied override lookup fails", async () => {
-    mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([
-      { lane: "conversation", maxSeq: "1" },
-    ]);
-    mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({
-      decision: buildUsageLimitExceededGateDecision(),
-      status: "denied",
-    });
-    mocks.readSelectedHostedInferenceConnectionOverride.mockRejectedValue(
-      new Error("Unavailable custom inference selection."),
-    );
-
-    const response = await reconciliationRoute.GET(requestForFacts(), routeContext());
-
-    expect(response.status).toBe(500);
-    expect(mocks.readSelectedHostedInferenceConnectionOverride).toHaveBeenCalledOnce();
-    expect(mocks.tryMarkHostedMailboxConversationAiUsageDenied).not.toHaveBeenCalled();
-    expect(mocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat).not.toHaveBeenCalled();
-    expect(mocks.sendClaimedHostedAiUsageLimitNoticeToTelegramThread).not.toHaveBeenCalled();
-  });
-
-  it("admits member-funded custom core inference when managed usage is denied", async () => {
-    mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
-      nextWakeAt: FIXED_NOW,
-      nextWakeReason: "assistant_due",
-    }));
-    mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({
-      decision: buildUsageLimitExceededGateDecision(),
-      status: "denied",
-    });
-    mocks.readSelectedHostedInferenceConnectionOverride.mockResolvedValue({
-      contextWindowTokens: 131_072,
-      modelAlias: "murph-custom-r3",
-      protocol: "responses",
-      revision: 3,
-      supportsImages: false,
-      verificationProfile:
-        "murph-codex-0.151.0-portable-responses-v1",
-    });
-
-    const response = await reconciliationRoute.GET(
-      requestForFacts(),
-      routeContext(),
-    );
-    const facts = parseHostedRuntimeReconciliationFacts(await response.json());
-
-    expect(response.status).toBe(200);
-    expect(facts.blocked).toBeNull();
-    expect(mocks.tryMarkHostedMailboxConversationAiUsageDenied)
-      .not.toHaveBeenCalled();
-    expect(mocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat)
-      .not.toHaveBeenCalled();
-    expect(mocks.sendClaimedHostedAiUsageLimitNoticeToTelegramThread)
-      .not.toHaveBeenCalled();
-  });
 
   it("retries the current capacity-epoch Linq usage-limit notice from the denied gate", async () => {
     const deniedDecision = buildUsageLimitExceededGateDecision();
@@ -1575,35 +1517,6 @@ describe("hosted orchestration reconciliation facts", () => {
     expect(mocks.sendClaimedHostedAiUsageLimitNoticeToTelegramThread).not.toHaveBeenCalled();
   });
 
-  it.each([true, false])("observes authoritative usage-limited=%s without changing admission", async (usageLimited) => {
-    const onUsageGateDecision = vi.fn();
-    mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
-      nextWakeAt: FIXED_NOW, nextWakeReason: "assistant_due",
-    }));
-    mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue(usageLimited
-      ? { status: "denied", decision: buildUsageLimitExceededGateDecision() }
-      : { status: "allowed" });
-    const { readHostedRuntimeReconciliationFacts } = await import(
-      "../src/lib/hosted-orchestration/runtime-reconciliation-facts"
-    );
-    const facts = await readHostedRuntimeReconciliationFacts({ userId: MEMBER_ID, onUsageGateDecision });
-    expect(onUsageGateDecision).toHaveBeenCalledExactlyOnceWith({ at: FIXED_NOW, usageLimited });
-    expect(facts.blocked?.reason ?? null).toBe(usageLimited ? "ai_usage_denied" : null);
-    onUsageGateDecision.mockClear();
-    await readHostedRuntimeReconciliationFacts({ userId: MEMBER_ID, usageGateMode: "read_only", onUsageGateDecision });
-    expect(onUsageGateDecision).not.toHaveBeenCalled();
-    mocks.readSelectedHostedInferenceConnectionOverride.mockResolvedValue({ kind: "synthetic_override" });
-    const overrideFacts = await readHostedRuntimeReconciliationFacts({ userId: MEMBER_ID, onUsageGateDecision });
-    expect(overrideFacts.blocked).toBeNull();
-    expect(onUsageGateDecision).toHaveBeenCalledExactlyOnceWith({ at: FIXED_NOW, usageLimited: false });
-    const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    try {
-      await expect(readHostedRuntimeReconciliationFacts({
-        userId: MEMBER_ID, onUsageGateDecision: () => { throw new Error("synthetic scheduling failure"); },
-      })).resolves.toMatchObject({ blocked: null });
-    } finally { warning.mockRestore(); }
-  });
-
   it("does not gate future model-capable workspace wakes", async () => {
     mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
       nextWakeAt: "2026-05-20T12:05:00.000Z",
@@ -1649,7 +1562,7 @@ describe("hosted orchestration reconciliation facts", () => {
       systemMailboxProgressGeneration: "7",
     });
     expect(mocks.resolveHostedRuntimeAiUsageGate).toHaveBeenCalledWith({
-      mode: "mutating",
+      mode: "read_first",
       now: new Date(FIXED_NOW),
       userId: MEMBER_ID,
     });
@@ -1719,7 +1632,7 @@ describe("hosted orchestration reconciliation facts", () => {
       expect(mocks.hasHostedLinqInboundWithinDays).not.toHaveBeenCalled();
       expect(mocks.hasHostedMailboxAutomationEngagementSince).not.toHaveBeenCalled();
       expect(mocks.resolveHostedRuntimeAiUsageGate).toHaveBeenCalledWith({
-        mode: "mutating", now: new Date(FIXED_NOW), userId: MEMBER_ID,
+        mode: "read_first", now: new Date(FIXED_NOW), userId: MEMBER_ID,
       });
     },
   );
@@ -1806,7 +1719,7 @@ describe("hosted orchestration reconciliation facts", () => {
     expect(mocks.hasHostedMemberEstablishedLinqThreadRoute).not.toHaveBeenCalled();
     expect(mocks.hasHostedLinqInboundWithinDays).not.toHaveBeenCalled();
     expect(mocks.resolveHostedRuntimeAiUsageGate).toHaveBeenCalledWith({
-      mode: "mutating",
+      mode: "read_first",
       now: new Date(FIXED_NOW),
       userId: MEMBER_ID,
     });
@@ -1979,22 +1892,6 @@ function buildTelegramConversationWake() {
         text: "hello",
         threadId: "telegram_chat_runtime_denied:business:biz-42:dm-topic:9",
       },
-    },
-    occurredAt: FIXED_NOW,
-    userId: MEMBER_ID,
-  };
-}
-
-function buildEmailConversationWake() {
-  return {
-    eventId: "email_event_runtime_denied",
-    kind: "conversation.message",
-    message: {
-      channel: "email",
-      identityId: "identity_email_runtime_denied",
-      messageId: "email_message_runtime_denied",
-      rawMessageKey: "raw_email_runtime_denied",
-      threadTarget: "thread_email_runtime_denied",
     },
     occurredAt: FIXED_NOW,
     userId: MEMBER_ID,

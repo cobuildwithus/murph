@@ -22,6 +22,13 @@ import {
   createHostedLinqDeliverySourceRefLookupKey,
 } from "../hosted-onboarding/linq-observability-identifiers";
 import {
+  LINQ_PRODUCTION_CANARY_DIAGNOSTIC_STALE_MS,
+  LINQ_PRODUCTION_CANARY_DIAGNOSTIC_TRACE_LIMIT,
+  LINQ_PRODUCTION_CANARY_DIAGNOSTIC_WINDOW_MS,
+  type LinqProductionCanaryDiagnostics,
+  type LinqProductionCanaryLatencyTrace,
+} from "../hosted-onboarding/linq-production-canary-contract";
+import {
   isHostedRuntimeLogDatabaseConfigured,
 } from "../hosted-runtime-log/database";
 import {
@@ -89,8 +96,8 @@ const HOSTED_INGRESS_LATENCY_READ_ROW_LIMIT = 20_000;
 const HOSTED_INGRESS_LATENCY_TIMING_LOG_READ_LIMIT = 100_000;
 const HOSTED_INGRESS_LATENCY_TIMING_LOG_WINDOW_PADDING_MS = 5 * 60_000;
 const HOSTED_INGRESS_CHECKPOINT_PUBLICATION_WRITE_LIMIT = 250;
-const HOSTED_ASSISTANT_TURN_TIMING_SCHEMA = "murph.assistant-turn-timing.v1";
-const HOSTED_ASSISTANT_TURN_TIMING_TYPE = "assistant.turn.timing";
+export const HOSTED_ASSISTANT_TURN_TIMING_SCHEMA = "murph.assistant-turn-timing.v1";
+export const HOSTED_ASSISTANT_TURN_TIMING_TYPE = "assistant.turn.timing";
 const HOSTED_INGRESS_LATENCY_PHASE_LEAF_RULES_JSON = JSON.stringify(
   HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_RULES,
 );
@@ -1324,6 +1331,8 @@ export async function linkHostedIngressLatencyTracesToAcceptedLinqDelivery(input
       Prisma.sql`(CAST(${randomUUID()} AS text), CAST(${mailboxItemId} AS text))`
     ),
   );
+  // The shared member lock drains trace creation before account suspension
+  // commits, preserving deletion safety without a mailbox cascade.
   const linkedRows = await prisma.$queryRaw<Array<{ mailboxItemId: string }>>(Prisma.sql`
     INSERT INTO hosted_ingress_latency_trace (
       id,
@@ -1355,9 +1364,13 @@ export async function linkHostedIngressLatencyTracesToAcceptedLinqDelivery(input
     FROM (VALUES ${candidates}) AS candidate(trace_id, mailbox_item_id)
     INNER JOIN hosted_mailbox_item AS mailbox
       ON mailbox.id = candidate.mailbox_item_id
+    INNER JOIN hosted_member AS member
+      ON member.id = mailbox.user_id
     WHERE mailbox.user_id = ${authenticatedUserId}
+      AND member.suspended_at IS NULL
       AND mailbox.lane = 'conversation'
       AND mailbox.kind = 'conversation.message'
+    FOR SHARE OF member
     ON CONFLICT (mailbox_item_id) DO UPDATE SET
       reply_runtime_attempt_id = EXCLUDED.reply_runtime_attempt_id,
       linq_delivery_id = EXCLUDED.linq_delivery_id,
@@ -1387,6 +1400,91 @@ function collectNonnegativeObservedLatency(
   if (startMs !== null && endMs !== null && endMs >= startMs) {
     durations.push(endMs - startMs);
   }
+}
+
+const CANARY_LATENCY_SELECT = {
+  webhookReceivedAt: true,
+  acceptedAt: true,
+  assistantInputStagedAt: true,
+  providerStartAt: true,
+  linqDelivery: {
+    select: { source: true, attemptedAt: true, acceptedAt: true, deliveredAt: true },
+  },
+} as const satisfies Prisma.HostedIngressLatencyTraceSelect;
+
+/** The caller owns fixed-canary authority and revalidation; no dashboard/log scan. */
+export async function readHostedLinqProductionCanaryLatencyDiagnostics(input: {
+  memberId: string;
+  prisma: { hostedIngressLatencyTrace: Pick<PrismaClient["hostedIngressLatencyTrace"], "findMany"> };
+}): Promise<LinqProductionCanaryDiagnostics> {
+  const now = Date.now();
+  const rows = await input.prisma.hostedIngressLatencyTrace.findMany({
+    where: {
+      userId: input.memberId,
+      source: "linq",
+      acceptedAt: { gte: new Date(now - LINQ_PRODUCTION_CANARY_DIAGNOSTIC_WINDOW_MS), lte: new Date(now) },
+    },
+    orderBy: { acceptedAt: "desc" },
+    take: LINQ_PRODUCTION_CANARY_DIAGNOSTIC_TRACE_LIMIT + 1,
+    select: CANARY_LATENCY_SELECT,
+  });
+  return {
+    status: rows.length === 0 ? "empty" : rows.length === 1 ? "observed" : "ambiguous",
+    failedTurnMatched: false,
+    truncated: rows.length > LINQ_PRODUCTION_CANARY_DIAGNOSTIC_TRACE_LIMIT,
+    traces: rows.slice(0, LINQ_PRODUCTION_CANARY_DIAGNOSTIC_TRACE_LIMIT)
+      .map((row) => projectCanaryLatencyTrace(row, now)),
+  };
+}
+
+function projectCanaryLatencyTrace(
+  row: Prisma.HostedIngressLatencyTraceGetPayload<{ select: typeof CANARY_LATENCY_SELECT }>,
+  now: number,
+): LinqProductionCanaryLatencyTrace {
+  const delivery = row.linqDelivery;
+  // A welcome's continuation may acquire provider milestones after its instant
+  // reply. Only delivery origin establishes that bypass; absent milestones do not.
+  const instantReply = delivery?.source === "hosted_web_instant_first_turn";
+  const intervals: Record<string, readonly [Date | null | undefined, Date | null | undefined]> = {
+    ageMs: [row.acceptedAt, new Date(now)],
+    ingressMs: [row.webhookReceivedAt, row.acceptedAt],
+    ...(instantReply ? {
+      acceptedToDeliveryAttemptMs: [row.acceptedAt, delivery.attemptedAt] as const,
+    } : {
+      preRuntimeMs: [row.acceptedAt, row.assistantInputStagedAt] as const,
+      runtimeToProviderMs: [row.assistantInputStagedAt, row.providerStartAt] as const,
+      providerToDeliveryMs: [row.providerStartAt, delivery?.attemptedAt] as const,
+    }),
+    deliveryAcceptMs: [delivery?.attemptedAt, delivery?.acceptedAt],
+    deliveryReceiptMs: [delivery?.acceptedAt, delivery?.deliveredAt],
+    deliveredAgeMs: [delivery?.deliveredAt, new Date(now)],
+  };
+  const durations = Object.fromEntries(Object.entries(intervals).flatMap(([key, [start, end]]) => {
+    const duration = boundedCanaryLatencyMs(start, end, now);
+    return duration === undefined ? [] : [[key, duration]];
+  }));
+  return {
+    stage: instantReply ? "instant_reply" : delivery ? "delivery_observation"
+      : row.providerStartAt ? "runtime_provider" : "pre_runtime",
+    stale: durations.ageMs > LINQ_PRODUCTION_CANARY_DIAGNOSTIC_STALE_MS,
+    incomplete: Object.keys(durations).length !== Object.keys(intervals).length,
+    ...durations,
+  };
+}
+
+function boundedCanaryLatencyMs(
+  start: Date | null | undefined,
+  end: Date | null | undefined,
+  now: number,
+): number | undefined {
+  const startMs = start?.getTime() ?? null;
+  const endMs = end?.getTime() ?? null;
+  if (startMs === null || endMs === null || endMs > now || hasNegativeLatencyInterval(startMs, endMs)) {
+    return undefined;
+  }
+  const duration = endMs - startMs;
+  return Number.isSafeInteger(duration) && duration <= LINQ_PRODUCTION_CANARY_DIAGNOSTIC_WINDOW_MS
+    ? duration : undefined;
 }
 
 export async function readHostedIngressLatencyDashboard(
@@ -2192,6 +2290,7 @@ async function upsertHostedIngressLatencyTraceFromMailboxItem(
     ingressTypingAcceptedAt?: Date;
   },
 ) {
+  // Share the existing account-deletion suspension fence for the whole insert.
   await prisma.$executeRaw`
     INSERT INTO hosted_ingress_latency_trace (
       id,
@@ -2206,7 +2305,7 @@ async function upsertHostedIngressLatencyTraceFromMailboxItem(
       created_at,
       updated_at
     )
-    VALUES (
+    SELECT
       ${randomUUID()},
       ${input.mailboxItem.userId},
       ${input.source},
@@ -2218,7 +2317,10 @@ async function upsertHostedIngressLatencyTraceFromMailboxItem(
       ${input.mailboxItem.acceptedAt},
       CURRENT_TIMESTAMP,
       CURRENT_TIMESTAMP
-    )
+    FROM hosted_member AS member
+    WHERE member.id = ${input.mailboxItem.userId}
+      AND member.suspended_at IS NULL
+    FOR SHARE OF member
     ON CONFLICT (mailbox_item_id) DO UPDATE
     SET ingress_typing_accepted_at = LEAST(
       hosted_ingress_latency_trace.ingress_typing_accepted_at,

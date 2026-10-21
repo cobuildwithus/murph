@@ -1,3 +1,7 @@
+import type { CompanionPresence } from "@murphai/hosted-execution/companion-presence";
+import type { WearableHapticAction, WearableHapticAuthority, WearableHapticResponse } from "@murphai/hosted-execution/wearable-haptics";
+import type { AssistantCurrentDeliveryRoute } from '@murphai/operator-config/assistant/current-delivery-route'
+import type { ConversationPollTool } from "@murphai/hosted-execution/conversation-polls";
 import type { AssistantAutomationExecutionInspection } from './cron/inspection.js'
 import {
   normalizeAssistantBackendTarget,
@@ -76,6 +80,10 @@ import type {
   HostedPhysicalNoteSendResponse,
 } from '@murphai/hosted-execution/physical-notes'
 import type {
+  HostedUsageDiagnosticsRequest,
+  HostedUsageDiagnosticsResponse,
+} from '@murphai/hosted-execution/usage-diagnostics'
+import type {
   HostedPlanUsageStatus,
   HostedPlanUsageToolRequest,
 } from '@murphai/hosted-execution/plan-usage'
@@ -118,6 +126,8 @@ export interface AssistantHostedDeviceConnectProvider {
 }
 
 export type AssistantHostedDeviceToolRequest =
+  | { action: 'companion_status' }
+  | WearableHapticAction
   | {
       action: 'list_accounts'
       provider?: string | null
@@ -158,6 +168,8 @@ export interface AssistantHostedDeviceAccountSummary {
 }
 
 export type AssistantHostedDeviceToolResponse =
+  | ({ action: 'companion_status' } & CompanionPresence)
+  | WearableHapticResponse
   | {
       accounts: readonly AssistantHostedDeviceAccountSummary[]
       action: 'list_accounts'
@@ -186,6 +198,7 @@ export interface AssistantHostedDeviceTool {
   request(
     request: AssistantHostedDeviceToolRequest,
     context?: {
+      hapticAuthority?: WearableHapticAuthority
       acceptedInputAuthority?: { assistantInputId: string }
       signal?: AbortSignal | null
     },
@@ -202,6 +215,7 @@ export interface AssistantHostedLabsTool {
 export type AssistantHostedAutomationToolRequest =
   | {
       action: 'inspect'
+      view?: 'full' | 'model_review'
       lookup: string
     }
   | {
@@ -270,14 +284,19 @@ export type AssistantAutomationOccurrenceProjection =
 export type AssistantHostedAutomationToolResponse =
   | {
       action: 'inspect'
+      view?: 'model_review'
+      instructionsOmitted?: 'managed_model_preserved'
       executionInspection?: AssistantAutomationExecutionInspection
       automationId: string
+      assistantTargetOverride?: AutomationAssistantTargetOverride | null
+      managed?: boolean
       contextReferences?: readonly AutomationContextReference[]
       instructions?: string
       title?: string
-      effectiveTimeZone: string | null
+      deliveryChannel?: string
+      effectiveTimeZone?: string | null
       lookupId: string
-      occurrenceProjection: AssistantAutomationOccurrenceProjection
+      occurrenceProjection?: AssistantAutomationOccurrenceProjection
       routeBinding: 'preserved'
       schedule: AutomationSchedule
       status: AutomationStatus
@@ -286,12 +305,15 @@ export type AssistantHostedAutomationToolResponse =
   | {
       action: 'patch' | 'save'
       automationId: string
+      assistantTargetOverride?: AutomationAssistantTargetOverride | null
+      managed?: boolean
       contextReferences?: readonly AutomationContextReference[]
       created: boolean
+      deliveryChannel?: string
       effectiveTimeZone: string | null
       lookupId: string
       occurrenceProjection: AssistantAutomationOccurrenceProjection
-      routeBinding: 'current_conversation' | 'preserved'
+      routeBinding: 'current_conversation' | 'member_notification' | 'preserved'
       schedule: AutomationSchedule
       status: AutomationStatus
       updatedAt: string
@@ -332,6 +354,8 @@ export interface AssistantHostedActionApprovalPort {
 export interface AssistantHostedProductFeedbackCandidateSink {
   acceptProductFeedbackCandidate(
     feedback: HostedRuntimeProductFeedbackRecord,
+    // Host-created only after the exact private weekly notification commits.
+    authorization?: { committedUsageOptimizerScope: { memberId: string; occurrenceAt: string } },
   ): void
   deliverProductSupportEscalation?(
     feedback: HostedRuntimeProductFeedbackRecord,
@@ -342,6 +366,10 @@ export interface AssistantHostedFamilyPlanTool {
   request(
     request: HostedRuntimeFamilyPlanToolRequest,
   ): Promise<HostedRuntimeFamilyPlanToolResponse>
+}
+
+export interface AssistantHostedUsageDiagnostics {
+  read(request: HostedUsageDiagnosticsRequest): Promise<HostedUsageDiagnosticsResponse>
 }
 
 export interface AssistantHostedPlanUsageTool {
@@ -563,6 +591,7 @@ export interface AssistantHostedExecutionContext {
     turnId: string
   }): Promise<void>
   automationTool?: AssistantHostedAutomationTool | null
+  createAutomationTool?(route: AssistantCurrentDeliveryRoute): AssistantHostedAutomationTool | null
   currentAssistantInputId?: () => string | null
   createScheduledGroupTools?(input: {
     channel: string
@@ -581,6 +610,7 @@ export interface AssistantHostedExecutionContext {
   deviceConnectProviders?: readonly AssistantHostedDeviceConnectProvider[]
   deviceTool?: AssistantHostedDeviceTool | null
   familyPlanTool?: AssistantHostedFamilyPlanTool | null
+  pollTool?: ConversationPollTool | null
   imessageContactTool?: AssistantHostedIMessageContactTool | null
   personalizationTool?: AssistantHostedPersonalizationTool | null
   groupParticipantDisplayNameReader?: AssistantHostedGroupParticipantDisplayNameReader | null
@@ -589,6 +619,7 @@ export interface AssistantHostedExecutionContext {
   groupTool?: AssistantHostedGroupTool | null
   labsTool?: AssistantHostedLabsTool | null
   planUsageTool?: AssistantHostedPlanUsageTool | null
+  usageDiagnostics?: AssistantHostedUsageDiagnostics | null
   physicalNotes?: AssistantPhysicalNotePort | null
   privateImageUrlPublisher?: AssistantHostedPrivateImageUrlPublisher | null
   subscriptionTool?: AssistantHostedSubscriptionTool | null
@@ -701,7 +732,8 @@ export function normalizeAssistantExecutionContext(
     hosted.groupSharedReader,
   )
   const labsTool = normalizeAssistantLabsTool(hosted.labsTool)
-  const planUsageTool = normalizeAssistantPlanUsageTool(hosted.planUsageTool)
+  const planUsageTool = normalizeAssistantReadTool(hosted.planUsageTool)
+  const usageDiagnostics = normalizeAssistantReadTool(hosted.usageDiagnostics)
   const subscriptionTool = normalizeAssistantSubscriptionTool(
     hosted.subscriptionTool,
   )
@@ -733,6 +765,7 @@ export function normalizeAssistantExecutionContext(
           }
         : {}),
       ...optionalHostedField('automationTool', automationTool),
+      ...optionalHostedField('createAutomationTool', hosted.createAutomationTool),
       ...(typeof hosted.currentAssistantInputId === 'function'
         ? {
             currentAssistantInputId: hosted.currentAssistantInputId,
@@ -748,6 +781,7 @@ export function normalizeAssistantExecutionContext(
         ? { imageGenerationLauncher: hosted.imageGenerationLauncher }
         : {}),
       ...optionalHostedField('familyPlanTool', familyPlanTool),
+      ...optionalHostedField('pollTool', hosted.pollTool && typeof hosted.pollTool.request === 'function' ? { request: hosted.pollTool.request.bind(hosted.pollTool) } : undefined),
       ...optionalHostedField('imessageContactTool', imessageContactTool),
       ...optionalHostedField('personalizationTool', personalizationTool),
       ...optionalHostedField('groupParticipantDisplayNameReader', groupParticipantDisplayNameReader),
@@ -756,6 +790,7 @@ export function normalizeAssistantExecutionContext(
       ...optionalHostedField('groupTool', groupTool),
       ...optionalHostedField('labsTool', labsTool),
       ...optionalHostedField('planUsageTool', planUsageTool),
+      ...optionalHostedField('usageDiagnostics', usageDiagnostics),
       ...optionalHostedField('physicalNotes', physicalNotes),
       ...optionalHostedField('privateImageUrlPublisher', privateImageUrlPublisher),
       ...optionalHostedField('subscriptionTool', subscriptionTool),
@@ -970,9 +1005,9 @@ function normalizeAssistantFamilyPlanTool(
   }
 }
 
-function normalizeAssistantPlanUsageTool(
-  input: AssistantHostedExecutionContext['planUsageTool'] | undefined,
-): AssistantHostedPlanUsageTool | undefined {
+function normalizeAssistantReadTool<Request, Response>(
+  input: { read(request: Request): Promise<Response> } | null | undefined,
+): { read(request: Request): Promise<Response> } | undefined {
   if (!input || typeof input.read !== 'function') {
     return undefined
   }
@@ -1257,5 +1292,22 @@ export function resolveAssistantExecutionOperatorDefaults(input: {
     identityId: input.defaults?.identityId ?? null,
     selfDeliveryTargets: input.defaults?.selfDeliveryTargets ?? null,
     backend: hostedDefaultTarget,
+  }
+}
+
+export function scopeAssistantAutomationToolToRoute(input: {
+  executionContext: AssistantExecutionContext
+  route: AssistantCurrentDeliveryRoute | null
+}): AssistantExecutionContext {
+  const hosted = input.executionContext.hosted
+  if (!hosted) return input.executionContext
+  const { automationTool: _previousTool, ...unscopedHosted } = hosted
+  void _previousTool
+  const automationTool = input.route ? hosted.createAutomationTool?.(input.route) : null
+  return {
+    hosted: {
+      ...unscopedHosted,
+      ...(automationTool ? { automationTool } : {}),
+    },
   }
 }

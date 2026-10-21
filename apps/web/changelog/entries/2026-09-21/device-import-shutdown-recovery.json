@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-09-21",
+  "order": 100,
+  "item": {
+    "id": "device-import-shutdown-recovery",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Device imports resume more reliably after updates",
+    "summary": "Device imports keep their saved progress when a Murph service update interrupts background work.",
+    "details": "Unfinished work remains queued for the next run, without repeating imports that were already saved.",
+    "relevanceTags": ["devices", "reliability"],
+    "sourcePullRequests": [3640]
+  }
+}

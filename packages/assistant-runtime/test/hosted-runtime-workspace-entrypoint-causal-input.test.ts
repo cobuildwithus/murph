@@ -2,6 +2,7 @@ import {
   REAL_SET_TIMEOUT,
   TEST_NOW,
   TEST_USER_ID,
+  createAssistantAskRequestedWake,
   createSnapshotFixtureRef,
   createConsentedMemberAssistantAskRequestedWake,
   createDeferred,
@@ -40,7 +41,6 @@ import {
   findCaptureByLookup,
   initializeVault,
   patchAutomation,
-  readHabitatAspect,
   readJsonlRecords,
   repairVault,
   runCanonicalWrite,
@@ -50,7 +50,6 @@ import {
 } from "@murphai/core";
 import {
   buildHostedExecutionAssistantNotificationRequestedWake,
-  buildHostedExecutionEnvironmentInterviewCompletedWake,
   buildHostedExecutionLinqConversationMessageWake,
   buildHostedExecutionMemberActionRequestedWake,
   buildHostedExecutionMemberActivatedWake,
@@ -227,12 +226,12 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps idle-window t
           };
         },
         async importItem() {
-          throw new Error("Queued wake without foreground work should not import mailbox items.");
+          return { status: "imported" };
         },
         platform: createPlatform({
           mailboxPort: createMailboxPort({
             events: [],
-            items: [],
+            items: [createMailboxItem()],
           }),
           workspacePort: createWorkspacePort({
             checkpointRequests,
@@ -292,52 +291,22 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps idle-window t
       expectedElapsedBoundaryMs: 850,
       failWakeMailboxFetch: false,
       futureWakeReason: null,
-      label: "keeps the idle window when the provider still matches",
-      providerAfterWake: "openai" as const,
-      slug: "matching_provider",
-    },
-    {
-      expectImmediateRecheck: true,
-      expectedElapsedBoundaryMs: 650,
-      failWakeMailboxFetch: false,
-      futureWakeReason: null,
-      label: "hands off immediately when the provider changed",
-      providerAfterWake: "venice" as const,
-      slug: "changed_provider",
-    },
-    {
-      expectImmediateRecheck: true,
-      expectedElapsedBoundaryMs: 650,
-      failWakeMailboxFetch: false,
-      futureWakeReason: "mailbox" as const,
-      label: "hands off immediately with a future mailbox continuation",
-      providerAfterWake: "venice" as const,
-      slug: "changed_provider_future_mailbox",
-    },
-    {
-      expectImmediateRecheck: true,
-      expectedElapsedBoundaryMs: 650,
-      failWakeMailboxFetch: false,
-      futureWakeReason: "assistant" as const,
-      label: "hands off immediately with a future assistant continuation",
-      providerAfterWake: "venice" as const,
-      slug: "changed_provider_future_assistant",
+      label: "keeps the idle window when the mailbox is unchanged",
+      slug: "unchanged_mailbox",
     },
     {
       expectImmediateRecheck: false,
       expectedElapsedBoundaryMs: 850,
       failWakeMailboxFetch: true,
       futureWakeReason: null,
-      label: "fails without a settings fallback when mailbox provider authority is unavailable",
-      providerAfterWake: "openai" as const,
-      slug: "mailbox_provider_unavailable",
+      label: "fails without a settings fallback when mailbox refresh is unavailable",
+      slug: "mailbox_unavailable",
     },
   ])("$label after an external runtime wake", async ({
     expectImmediateRecheck,
     expectedElapsedBoundaryMs,
     failWakeMailboxFetch,
     futureWakeReason,
-    providerAfterWake,
     slug,
   }) => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
@@ -345,7 +314,7 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps idle-window t
     const consoleInfo = vi.spyOn(console, "info").mockImplementation(() => undefined);
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const dirtyWaitStarted = createDeferred<void>();
-    const mailboxItems: HostedMailboxItem[] = [];
+    const mailboxItems: HostedMailboxItem[] = [createMailboxItem()];
     let assistantPhaseFinished = false;
     let assistantPhaseCount = 0;
     let activeDirtyWake: ((notification: { notifiedAtEpochMs: number }) => void) | null = null;
@@ -355,9 +324,6 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps idle-window t
     let snapshotCount = 0;
     let wakeMailboxFetchCount = 0;
     const mailboxPort = createMailboxPort({
-      get assistantProvider() {
-        return externalWakeNotified ? providerAfterWake : "openai";
-      },
       events: [],
       items: mailboxItems,
     });
@@ -436,7 +402,7 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps idle-window t
           assistantConfigurationToolPort: {
             async request() {
               providerReadCount += 1;
-              throw new Error("Provider consistency must use mailbox facts.");
+              throw new Error("Mailbox refresh must not read model settings.");
             },
           },
           mailboxPort: {
@@ -445,7 +411,7 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps idle-window t
               if (externalWakeNotified) {
                 wakeMailboxFetchCount += 1;
                 if (failWakeMailboxFetch) {
-                  throw new Error("Mailbox provider refresh unavailable.");
+                  throw new Error("Mailbox refresh unavailable.");
                 }
               }
               return await mailboxPort.fetch(request, context);
@@ -487,11 +453,11 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps idle-window t
       runtimeWakeSignal.notify();
 
       if (failWakeMailboxFetch) {
-        await assert.rejects(resultPromise, /Mailbox provider refresh unavailable\./);
+        await assert.rejects(resultPromise, /Mailbox refresh unavailable\./);
         assert.ok(wakeMailboxFetchCount > 0);
         assert.equal(providerReadCount, 0);
         assert.equal(assistantPhaseCount, 1);
-        assert.equal(importedItemCount, 0);
+        assert.equal(importedItemCount, 1);
         assert.equal(snapshotCount, 0);
         assert.equal(checkpointRequests.length, 0);
         return;
@@ -516,7 +482,7 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps idle-window t
       assert.equal(snapshotCount, 1);
       assert.equal(providerReadCount, 0);
       assert.ok(wakeMailboxFetchCount > 0);
-      assert.equal(importedItemCount, 0);
+      assert.equal(importedItemCount, 1);
       assert.equal(assistantPhaseCount, 1);
       if (expectImmediateRecheck) {
         assert.ok(elapsedAfterWakeMs < expectedElapsedBoundaryMs);
@@ -1002,13 +968,9 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps idle-window t
           if (applyResult?.kind !== "workout.live.apply") {
             throw new TypeError("Expected the canonical direct-save card result.");
           }
-          const encoded = new URL(applyResult.cardUrl).hash
-            .replace(/^#murph-card=/u, "");
-          const envelope = JSON.parse(
-            Buffer.from(encoded, "base64url").toString("utf8"),
-          );
+          assert.equal(applyResult.card?.schemaVersion, 6);
           assert.equal(
-            parseWorkoutSessionAppCardEnvelopeV4(envelope)
+            parseWorkoutSessionAppCardEnvelopeV4(applyResult.card)
               ?.workout.exercises[0]?.sets[0]?.actual,
             "9 reps",
           );
@@ -2908,6 +2870,150 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps idle-window t
       assert.equal(idleCheckpointRequests[0]?.idleCheckpointTrigger, "idle_window");
       assert.equal(result.status, "idle");
     } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("resumes a later joined-group ask when an ordinary invocation continues after checkpoint", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const mailboxItems: HostedMailboxItem[] = [];
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const shutdown = new AbortController();
+    const askPrepared = createDeferred<void>();
+    const occurredAt = new Date().toISOString();
+    const expiresAt = new Date(Date.parse(occurredAt) + 600_000).toISOString();
+    const askItem = createMailboxItem({
+      dedupeKey: "ask_event_synthetic_warm_continuation",
+      expiresAt,
+      id: "ask_event_synthetic_warm_continuation",
+      kind: "assistant.ask.requested",
+      lane: "system",
+      laneSeq: "1",
+      occurredAt,
+    });
+    const wake = createAssistantAskRequestedWake({ eventId: askItem.dedupeKey });
+    const askWake: HostedExecutionAssistantAskRequestedWake = {
+      ...wake,
+      ask: { ...wake.ask, expiresAt },
+      occurredAt,
+    };
+    let foregroundPasses = 0;
+    let prepareCalls = 0;
+    let runtimePromise: ReturnType<typeof runHostedWorkspaceRuntimeJobInProcess> | null = null;
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const workspacePort = createWorkspacePort({
+        checkpointRequests,
+        events,
+        workspace: createWorkspaceState({ version: "0" }),
+      });
+      const checkpoint = workspacePort.checkpoint.bind(workspacePort);
+      workspacePort.checkpoint = async (request) => {
+        const response = await checkpoint(request);
+        if (request.expectedWorkspaceVersion === "0") {
+          assert.equal(response.checkpointed, true);
+          events.push("checkpoint.committed");
+          // No Ask existed at startup or snapshot time. Accept it only after
+          // the first checkpoint succeeds, without starting a new invocation.
+          mailboxItems.push(askItem);
+          runtimeWakeSignal.notify();
+        }
+        return response;
+      };
+      const platform = createPlatform({
+        assistantAskPort: {
+          async request(request) {
+            assert.equal(request.action, "prepare");
+            assert.equal(request.requestId, askItem.dedupeKey);
+            assert.ok(Date.now() < Date.parse(expiresAt));
+            prepareCalls += 1;
+            events.push("ask.prepare");
+            askPrepared.resolve();
+            // Exercise the real controller through prepare without model or
+            // delivery-provider work. Terminal preparation retires this item.
+            return { action: "prepare", status: "terminal", terminalReason: "unavailable" };
+          },
+        },
+        mailboxPort: createMailboxPort({ events, items: mailboxItems }),
+        workspacePort,
+      });
+      const bridgeImporter = createHostedWorkspaceBridgeMailboxImporter({
+        decodeMailboxPayload: {
+          async decode() {
+            return { status: "decoded", wake: askWake };
+          },
+        },
+        runtime: normalizeHostedAssistantRuntimeConfig({}, platform),
+        vaultRoot,
+      });
+      runtimePromise = runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_warm_ask_continuation",
+            processingMode: "default",
+            runnerIdleTtlMs: 1,
+            leaseGeneration: "7",
+            userId: TEST_USER_ID,
+            workspaceVersion: "0",
+          },
+        }),
+        {
+          async createCheckpointSnapshot() {
+            events.push("snapshot");
+            assert.equal((await readHostedSystemMailboxState(vaultRoot)).pending.length, 0);
+            return {
+              snapshotRef: createSnapshotFixtureRef({ hash: "c".repeat(64), size: 512 }),
+            };
+          },
+          async importItem(item, context) {
+            assert.equal(item.item.id, askItem.id);
+            assert.equal(item.route.action, "run-assistant-ask");
+            assert.ok(events.includes("checkpoint.committed"));
+            assert.ok(Date.now() < Date.parse(expiresAt));
+            const outcome = await bridgeImporter(item, context);
+            assert.equal(outcome.status, "imported");
+            assert.equal(prepareCalls, 0);
+            const pending = (await readHostedSystemMailboxState(vaultRoot)).pending;
+            assert.equal(pending[0]?.itemId, askItem.id);
+            assert.equal(pending[0]?.status, "pending");
+            events.push("ask.imported");
+            return outcome;
+          },
+          platform,
+          runtimeWakeSignal,
+          shutdownSignal: shutdown.signal,
+          async runAssistantPhase() {
+            foregroundPasses += 1;
+            if (foregroundPasses === 1) {
+              return { progressed: true, checkpointReason: "assistant_runtime_commit" };
+            }
+            events.push("foreground.continued");
+            assert.ok(events.includes("ask.imported"), events.join(","));
+            // The unmodified owner leaves the import's kick parked forever.
+            // Give the real controller a bounded opportunity, not a sleep or
+            // a direct call to resume(), while this same invocation is alive.
+            await withRealTimeout(askPrepared.promise, 2_000, () =>
+              `Continued foreground work left the detached Ask paused: ${events.join(",")}`,
+            );
+            return { progressed: false };
+          },
+          vaultRoot,
+        },
+      );
+      await withRealTimeout(runtimePromise, 5_000, () => events.join(","));
+      assert.ok(foregroundPasses >= 2);
+      assert.equal(prepareCalls, 1);
+      assert.ok(requireEventIndex(events, "snapshot") < requireEventIndex(events, "checkpoint.committed"));
+      assert.ok(requireEventIndex(events, "checkpoint.committed") < requireEventIndex(events, "ask.imported"));
+      assert.ok(requireEventIndex(events, "ask.imported") < requireEventIndex(events, "foreground.continued"));
+      assert.ok(checkpointRequests.length >= 2);
+      assert.equal((await readHostedSystemMailboxState(vaultRoot)).pending.length, 0);
+    } finally {
+      shutdown.abort(new Error("Synthetic test cleanup."));
+      await runtimePromise?.catch(() => undefined);
       await removeTempRoot(vaultRoot);
     }
   });

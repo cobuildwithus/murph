@@ -1512,19 +1512,22 @@ export async function listExperimentRecords(input: {
   limit: number
 }) {
   const query = await loadExperimentJournalVaultQueryRuntime()
-  const readModel = await readExperimentJournalVault(input.vault)
-  const items = query
-    .listEntities(readModel, {
-      families: ['experiment'],
-      statuses: input.status ? [input.status] : undefined,
-    })
-    .slice(0, input.limit)
-    .map(toListItem)
+  try {
+    return await withCanonicalWriteLock(input.vault, async () => {
+      const entities = await query.readCanonicalEntityFamilySource(input.vault, 'experiment')
+      const items = entities
+        .filter((entity) => !input.status || entity.status === input.status)
+        .slice(0, input.limit)
+        .map(toListItem)
 
-  return asListEnvelope(input.vault, {
-    status: input.status ?? null,
-    limit: input.limit,
-  }, items)
+      return asListEnvelope(input.vault, {
+        status: input.status ?? null,
+        limit: input.limit,
+      }, items)
+    })
+  } catch (error) {
+    throw toVaultMetadataCliError(error)
+  }
 }
 
 /**
@@ -2220,7 +2223,7 @@ async function resolveExperimentQueryTarget(input: {
   }
 }
 
-async function resolveExperimentProgressTarget(input: {
+async function resolveExperimentAnalysisTarget(input: {
   invalidSlugMessage: string
   lookup: string
   vault: string
@@ -2243,7 +2246,7 @@ export async function showExperimentProgress(input: {
   lookup: string
   asOf?: string
 }) {
-  const { query, readModel, entity, slug, metricPoints } = await resolveExperimentProgressTarget({
+  const { query, readModel, entity, slug, metricPoints } = await resolveExperimentAnalysisTarget({
     invalidSlugMessage: 'Experiment progress requires a canonical slug.',
     lookup: input.lookup,
     vault: input.vault,
@@ -2271,7 +2274,7 @@ export async function showExperimentProgressCard(input: {
   asOf?: string
   confounders?: ReadonlyArray<{ date: string; label: string }>
 }) {
-  const { query, readModel, entity, slug, metricPoints } = await resolveExperimentProgressTarget({
+  const { query, readModel, entity, slug, metricPoints } = await resolveExperimentAnalysisTarget({
     invalidSlugMessage: 'Experiment progress cards require a canonical slug.',
     lookup: input.lookup,
     vault: input.vault,
@@ -2336,11 +2339,15 @@ export async function showExperimentFollowupDue(input: {
   kind: 'missed-log' | 'weekly-digest'
   date?: string
 }) {
+  const runtime = await loadExperimentJournalVaultQueryRuntime()
+  const source = await runtime.readExperimentQuerySource(input.vault).catch((error: unknown) => {
+    throw toVaultMetadataCliError(error)
+  })
   const { query, readModel, entity, slug } = await resolveExperimentQueryTarget({
     invalidSlugMessage: 'Experiment follow-up requires a canonical slug.',
     lookup: input.lookup,
     vault: input.vault,
-  })
+  }, source.readModel)
 
   const decision = query.decideExperimentFollowupDue(readModel, slug, {
     kind: input.kind,
@@ -2371,18 +2378,13 @@ async function analyzeExperimentOutcomeRecordWithSource(input: {
   lookup: string
   asOf?: string
 }) {
-  const { query, readModel, entity, slug } = await resolveExperimentQueryTarget({
+  const { query, readModel, entity, slug, metricPoints } = await resolveExperimentAnalysisTarget({
     invalidSlugMessage: 'Experiment outcome analysis requires a canonical slug.',
     lookup: input.lookup,
     vault: input.vault,
+    asOf: input.asOf,
   })
   const expectedFrontmatter = requireExperimentFrontmatter(entity)
-  const metricPoints = await readExperimentJournalMetricPoints({
-    asOf: input.asOf,
-    frontmatter: expectedFrontmatter,
-    query,
-    vault: input.vault,
-  })
 
   const outcome = query.analyzeExperimentOutcome(readModel, slug, {
     asOf: input.asOf,
@@ -2413,15 +2415,11 @@ export async function writeExperimentOutcomeRecord(input: {
     try {
       return await core.withCanonicalWriteLock(input.vault, async () => {
         const requestedAsOf = input.asOf ?? new Date().toISOString().slice(0, 10)
-        const target = await resolveExperimentQueryTarget({
-          invalidSlugMessage: 'Experiment outcome analysis requires a canonical slug.',
-          lookup: input.lookup,
-          vault: input.vault,
-        })
-        const expectedFrontmatter = requireExperimentFrontmatter(target.entity)
+        const entity = await requireEntityFamily(input.vault, input.lookup, 'experiment')
+        const expectedFrontmatter = requireExperimentFrontmatter(entity)
         const referenced = await core.readReferencedExperimentOutcome({
           vaultRoot: input.vault,
-          relativePath: target.entity.path,
+          relativePath: entity.path,
           expectedFrontmatter,
         })
         if (
@@ -2906,24 +2904,6 @@ async function readExperimentJournalVault(vault: string) {
 
   try {
     return await query.readVault(vault)
-  } catch (error) {
-    throw toVaultMetadataCliError(error)
-  }
-}
-
-async function readExperimentJournalMetricPoints(input: {
-  asOf?: string
-  frontmatter: ExperimentFrontmatter
-  query: QueryRuntimeModule
-  vault: string
-}) {
-  const filters = buildExperimentMetricPointFilters(input.query, input.frontmatter, input.asOf)
-  if (filters.length === 0) {
-    return []
-  }
-
-  try {
-    return await input.query.listMetricPointsBatch(input.vault, filters)
   } catch (error) {
     throw toVaultMetadataCliError(error)
   }

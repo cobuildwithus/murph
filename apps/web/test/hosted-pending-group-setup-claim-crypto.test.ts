@@ -236,6 +236,28 @@ describe("pending group setup prepared payload claim", () => {
     }]);
   });
 
+  it("keeps pending ownership and room preferences when a stored persona is retired", async () => {
+    mocks.openFromPreparedRoot.mockResolvedValue(JSON.stringify({
+      schemaVersion: HOSTED_RUNTIME_PENDING_GROUP_SETUP_SCHEMA_VERSION,
+      setup: {
+        roomContextMarkdown: "Keep this room focused.",
+        style: { persona: "scientist-with-classic", tone: "casual", voice: "warm", personality: { humor: 2 } },
+      },
+    }));
+    const { result, tx } = await claim({ prepared: buildPreparedPackage() });
+    await expect(result).resolves.toMatchObject({
+      kind: "claimed",
+      setup: {
+        ownerMemberId: row.ownerMemberId,
+        setup: {
+          roomContextMarkdown: "Keep this room focused.",
+          style: { persona: "classic", tone: "casual", voice: "warm", personality: { humor: 2 } },
+        },
+      },
+    });
+    expect(tx.$executeRaw).not.toHaveBeenCalled();
+  });
+
   it.each([
     ["malformed JSON", "{"],
     ["an unsupported schema", JSON.stringify({ schemaVersion: 999, setup: {} })],

@@ -1,7 +1,7 @@
 import { readTestMurphDynamicToolRequest } from './support/codex-app-server.ts'
 import assert from 'node:assert/strict'
 import path from 'node:path'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 
 import { afterEach, describe, expect, test, vi } from 'vitest'
@@ -21,6 +21,7 @@ import {
 } from '@murphai/operator-config/assistant-response-cards'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
+  upsertMemory,
   AVAILABILITY_CONFLICT_BLOCK_END,
   AVAILABILITY_CONFLICT_BLOCK_START,
 } from '@murphai/core'
@@ -89,10 +90,10 @@ type NotificationTurnDeliverMessageResult =
   }
 
 const CODEX_MODEL_PROVIDER_CONFIG = {
-  id: 'vercel-ai-gateway',
-  name: 'Vercel AI Gateway',
-  baseUrl: 'https://ai-gateway.vercel.sh/v1',
-  envKey: 'VERCEL_AI_API_KEY',
+  id: 'hosted-openai',
+  name: 'OpenAI',
+  baseUrl: 'https://api.openai.com/v1',
+  envKey: 'OPENAI_API_KEY',
   wireApi: 'responses' as const,
 }
 
@@ -235,13 +236,14 @@ afterEach(() => {
 
 test.each([
   { profile: 'member-memory', status: 'empty', page: 'missing', skip: true },
+  { profile: 'member-memory', status: 'empty', page: 'present', skip: false },
+  { profile: 'member-memory', status: 'empty', page: 'unavailable', skip: false },
   { profile: 'group-room-model', status: 'empty', page: 'missing', skip: true },
   { profile: 'member-memory', status: 'unavailable', page: 'missing', skip: false },
   { profile: 'member-memory', status: 'available', page: 'missing', skip: false },
   { profile: 'group-room-model', status: 'empty', page: 'present', skip: false },
   { profile: 'group-room-model', status: 'empty', page: 'unavailable', skip: false },
   { profile: 'group-room-model', status: 'available', page: 'missing', skip: false },
-  { profile: 'habitat-voice', status: 'not-applicable', page: 'missing', skip: false },
 ] as const)('empty maintenance admission: $profile/$status/$page', async ({ profile, status, page, skip }) => {
   vi.doMock('../src/assistant/maintenance-evidence.js', () => ({
     readAssistantMaintenanceConversationEvidence: vi.fn(async () => ({
@@ -261,7 +263,15 @@ test.each([
     }),
     turnId: 'turn-empty-maintenance',
   })
+  const vault = await mkdtemp(path.join(tmpdir(), 'murph-memory-admission-'))
+  if (profile === 'member-memory' && page === 'present') {
+    await upsertMemory(vault, { section: 'Preferences', text: 'Prefers concise comparisons.' })
+  } else if (profile === 'member-memory' && page === 'unavailable') {
+    await mkdir(path.join(vault, 'bank'), { recursive: true })
+    await writeFile(path.join(vault, 'bank/memory.md'), 'malformed memory')
+  }
   const onProviderRequestStarted = vi.fn()
+  try {
   const result = await sendAssistantNotificationLocal({
     executionContext: { hosted: null },
     instructions: 'Perform the authorized silent maintenance.',
@@ -271,7 +281,7 @@ test.each([
       maintenanceProfile: profile,
       privateSummary: 'Silent maintenance complete.',
     },
-    vault: '/vaults/empty-maintenance',
+    vault,
   })
   expect(result.decision).toEqual({ kind: 'skip', privateSummary: 'Silent maintenance complete.' })
   expect(result.response).toBeNull()
@@ -282,6 +292,9 @@ test.each([
     expect(mocks.recordAssistantUsageEvent).not.toHaveBeenCalled()
     expect(onProviderRequestStarted).not.toHaveBeenCalled()
     expect(result.session.turnCount).toBe(0)
+  }
+  } finally {
+    await rm(vault, { recursive: true, force: true })
   }
 })
 
@@ -629,7 +642,7 @@ test('sendAssistantNotificationLocal persists the turn before outbound delivery 
   }))
 
   const hostedDefaultTarget = createCodexTarget({
-    model: 'gpt-5.6-terra-mini',
+    model: 'gpt-6.1-sol-mini',
   })
   const { sendAssistantNotificationLocal } = await import(
     '../src/assistant/notification-turn.ts'
@@ -1138,7 +1151,7 @@ test('sendAssistantNotificationLocal sends required exact text without a provide
         notificationMode: 'deterministic-exact-text',
       },
       provider: 'codex-cli',
-      providerModel: 'gpt-5.6-terra',
+      providerModel: 'gpt-6.1-sol',
       sessionId: initialSession.sessionId,
       turnId: 'turn-exact',
     }),
@@ -4908,7 +4921,7 @@ test('sendAssistantNotificationLocal surfaces failed delivery results', async ()
   const sharedPlan = createSharedPlan()
   const primaryRoute = createRoute({
     providerOptions: {
-      model: 'gpt-5.6-terra-primary',
+      model: 'gpt-6.1-sol-primary',
     },
     routeId: 'route-primary',
   })
@@ -5036,7 +5049,7 @@ test('sendAssistantNotificationLocal surfaces failed delivery results', async ()
   expect(mocks.createAssistantRuntimeStateService.mock.results[0]?.value.turns.createReceipt)
     .toHaveBeenCalledWith(expect.objectContaining({
       provider: 'codex-cli',
-      providerModel: 'gpt-5.6-terra-primary',
+      providerModel: 'gpt-6.1-sol-primary',
     }))
   expect((deliveryError as Error & {
     details?: Record<string, unknown>
@@ -5048,7 +5061,7 @@ test('sendAssistantNotificationLocal surfaces failed delivery results', async ()
     assistantNotificationProvider: 'codex-cli',
     assistantNotificationProviderBaseUrlOrigin: null,
     assistantNotificationProviderBaseUrlPath: null,
-    assistantNotificationProviderModel: 'gpt-5.6-terra-primary',
+    assistantNotificationProviderModel: 'gpt-6.1-sol-primary',
     assistantNotificationRouteId: 'route-primary',
     assistantNotificationStage: 'delivery',
   })
@@ -5072,7 +5085,7 @@ test('sendAssistantNotificationLocal forwards provider response media to deliver
   const sharedPlan = createSharedPlan()
   const primaryRoute = createRoute({
     providerOptions: {
-      model: 'gpt-5.6-terra-primary',
+      model: 'gpt-6.1-sol-primary',
     },
     routeId: 'route-primary',
   })
@@ -5224,13 +5237,13 @@ test('sendAssistantNotificationLocal annotates terminal provider failures with r
   const primaryRoute = createRoute({
     routeId: 'route-primary',
     providerOptions: {
-      model: 'gpt-5.6-terra-primary',
+      model: 'gpt-6.1-sol-primary',
     },
   })
   const route = createRoute({
     routeId: 'route-provider-failure',
     providerOptions: {
-      model: 'gpt-5.6-terra-mini',
+      model: 'gpt-6.1-sol-mini',
     },
   })
   const mocks = {
@@ -5327,7 +5340,7 @@ test('sendAssistantNotificationLocal annotates terminal provider failures with r
     assistantNotificationProvider: 'codex-cli',
     assistantNotificationProviderBaseUrlOrigin: null,
     assistantNotificationProviderBaseUrlPath: null,
-    assistantNotificationProviderModel: 'gpt-5.6-terra-mini',
+    assistantNotificationProviderModel: 'gpt-6.1-sol-mini',
     assistantNotificationProviderNonReplayableWork: false,
     assistantNotificationRouteId: 'route-provider-failure',
     assistantNotificationStage: 'provider',
@@ -5697,8 +5710,8 @@ function createProviderOptions(
   return serializeAssistantProviderSessionOptions({
     approvalPolicy: 'never',
     provider: 'codex-cli',
-    model: 'gpt-5.6-terra',
-    modelProvider: 'vercel-ai-gateway',
+    model: 'gpt-6.1-sol',
+    modelProvider: 'hosted-openai',
     reasoningEffort: 'medium',
     sandbox: 'danger-full-access',
     ...overrides,
@@ -6101,8 +6114,8 @@ function createCodexTarget(
     approvalPolicy: 'never',
     codexCommand: null,
     codexHome: null,
-    model: 'gpt-5.6-terra',
-    modelProvider: 'vercel-ai-gateway',
+    model: 'gpt-6.1-sol',
+    modelProvider: 'hosted-openai',
     oss: false,
     profile: null,
     reasoningEffort: 'medium',

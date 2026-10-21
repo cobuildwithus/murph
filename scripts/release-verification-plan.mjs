@@ -11,16 +11,17 @@ const defaultRepoRoot = path.resolve(scriptDir, "..");
 export const PACKAGE_COVERAGE_EXCLUSIONS = Object.freeze({});
 
 export const PACKAGE_COVERAGE_PLAN = Object.freeze([
-  // Keep the measured CLI and Assistant Engine floors on isolated runners.
+  // Keep the measured CLI, Assistant Engine, and Assistant Runtime floors on
+  // isolated runners; Assistant Runtime alone took ~510s of platform-a's ~650s
+  // and set the Host Support critical path.
   // Contracts stays off the CLI checkout because its coverage rewrites dist
   // files imported by CLI built-runtime tests.
   { dir: "packages/cli", shard: "cli" },
   { dir: "packages/assistant-engine", shard: "assistant-engine" },
+  { dir: "packages/assistant-runtime", shard: "assistant-runtime" },
 
-  // Recent hosted timings are dominated by Assistant Runtime on one side and
-  // Core, Device Sync, Query, and Vault on the other. Keep exactly two bounded
-  // platform runners and place the smaller owners around those measured floors.
-  { dir: "packages/assistant-runtime", shard: "platform-a" },
+  // Core, Device Sync, Query, and Vault dominate platform-b; the smaller owners
+  // fill platform-a.
   { dir: "packages/core", shard: "platform-b" },
   { dir: "packages/setup-cli", shard: "platform-b" },
   { dir: "packages/assistant-cli", shard: "platform-b" },
@@ -31,9 +32,9 @@ export const PACKAGE_COVERAGE_PLAN = Object.freeze([
   { dir: "packages/exercise-library", shard: "platform-a" },
   { dir: "packages/gateway-core", shard: "platform-a" },
 
-  // Health Commons has no representative release telemetry. Keep it isolated
-  // rather than guessing at overlap that could crowd a two-core hosted runner.
-  { dir: "packages/health-commons", shard: "health-commons" },
+  // Health Commons coverage measured ~90s, so it shares platform-a instead of
+  // holding its own runner.
+  { dir: "packages/health-commons", shard: "platform-a" },
   { dir: "packages/health-metrics", shard: "platform-a" },
   { dir: "packages/hosted-execution", shard: "platform-a" },
   { dir: "packages/importers", shard: "platform-a" },

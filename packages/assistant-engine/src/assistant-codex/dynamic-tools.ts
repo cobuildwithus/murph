@@ -1,10 +1,17 @@
+import { types } from 'node:util'
+import { executeGetSenderContactDynamicTool, readSenderContactDynamicToolRequest, type SenderContactDynamicToolRequest } from './dynamic-tools/sender-contact.js'
+import { type ConversationPollAction } from '@murphai/hosted-execution/conversation-polls'
+import { readConversationPollDynamicToolRequest, executeConversationPollTool } from './dynamic-tools/conversation-polls.js'
 import { nutritionCardAttachmentGuidance } from '../assistant/nutrition-card-introduction.js'
 import { parseDynamicToolArguments } from './dynamic-tools/dynamic-tool-wrapper.js'
 import {
   completeDynamicToolFailureDiagnostics,
+  isAlreadyActiveVaultFileSendError,
   toolFailureDiagnostic,
   toolFailureMetadata,
   toolTextResult,
+  withProductFeedbackAuditFailureDetails,
+  withVaultFileToolFailureDetails,
   type ToolFailureDiagnostic,
   type ToolFailureReason,
 } from './tool-failure-diagnostics.js'
@@ -42,7 +49,7 @@ import {
   hostedRuntimePendingGroupSetupInputSchema,
 } from '@murphai/hosted-execution/pending-group-setup'
 import {
-  parseHostedGroupSharedFreshnessRequirements,
+  readHostedGroupSharedFreshnessRejection,
   parseHostedGroupSharedReadOptions,
   type HostedGroupSharedReadOptions,
   getHostedGroupWearableReportingGaps,
@@ -76,13 +83,17 @@ import {
 } from '@murphai/hosted-execution/runtime-control'
 import {
   HOSTED_ASSISTANT_PRODUCT_MODELS,
-  HOSTED_ASSISTANT_PROVIDERS,
   HOSTED_ASSISTANT_REASONING_EFFORTS,
 } from '@murphai/hosted-execution/assistant-model'
 import type {
   HostedPhoneCallBrief,
   HostedPhoneCallResultNotificationChannel,
 } from '@murphai/hosted-execution/phone-calls'
+import {
+  hostedUsageDiagnosticsRequestSchema,
+  parseHostedUsageDiagnosticsResponse,
+  type HostedUsageDiagnosticsRequest,
+} from '@murphai/hosted-execution/usage-diagnostics'
 import {
   HOSTED_GROUP_MEMBER_PLAN_DISPLAY_NAME,
   HOSTED_PLAN_USAGE_DIRECT_BILLING_PLAN_CODES,
@@ -129,7 +140,6 @@ import {
   type AssistantResponseCard,
   type CompactTableWorkoutResponseCardV1,
 } from '@murphai/operator-config/assistant-response-cards'
-import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { readLiveWorkoutCardEditor } from '@murphai/vault-usecases/workouts'
 import { normalizeNullableString } from '@murphai/operator-config/text/shared'
 import {
@@ -184,6 +194,7 @@ import {
 import {
   buildSafeToolCallValidationDigest,
   collectSafeJsonSchemaValidationPaths,
+  type SafeToolCallSemanticRejection,
   type SafeToolCallValidationDigest,
 } from '../assistant/tool-validation-digest.js'
 import type {
@@ -352,6 +363,7 @@ import {
   MURPH_IMESSAGE_CONTACT_TOOL,
   MURPH_PERSONALIZATION_TOOL,
   MURPH_PLAN_USAGE_TOOL,
+  MURPH_USAGE_DIAGNOSTICS_TOOL,
   MURPH_REACT_TO_MESSAGE_TOOL,
   MURPH_SELECT_REPLY_TARGET_TOOL,
   MURPH_SEND_PROGRESS_UPDATE_TOOL,
@@ -549,6 +561,62 @@ const groupDisclosureGrantIdSchema = z
     { message: 'grantId exceeds the Unicode code-point limit' },
   )
 
+const groupReadSharedArgumentsSchema = z
+  .object({
+    action: z.literal('read_shared'),
+    participantId: z.string().min(1).max(200).optional(),
+    history: z.object({ fromDate: z.string(), throughDate: z.string() }).strict().optional(),
+    audience: z.literal('group_email').optional(),
+    freshness: z.array(z.object({
+      projectionScopeKey: z.string().min(1).max(191),
+      date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u),
+    }).strict()).min(1).max(21).optional(),
+    projectionScopes: z
+      .array(groupVaultShareProjectionScopeSchema)
+      .min(1)
+      .max(HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES.length)
+      .refine(
+        (projectionScopes) =>
+          new Set(
+            projectionScopes.map(buildHostedVaultShareProjectionScopeKey),
+          ).size === projectionScopes.length,
+        { message: 'projectionScopes must contain unique exact scopes' },
+      ),
+  })
+  .strict()
+
+// The read_shared refinement's only decision. The model still receives the one
+// broad issue; private validation telemetry records this finite first reason.
+function readGroupSharedReadSemanticRejection(
+  request: z.infer<typeof groupReadSharedArgumentsSchema>,
+): SafeToolCallSemanticRejection | null {
+  try {
+    parseHostedGroupSharedReadOptions(request, request.projectionScopes)
+  } catch {
+    return 'shared_read_options'
+  }
+  if (request.audience && (request.history || request.participantId)) return 'shared_read_options'
+  if (request.freshness === undefined) return null
+  if (request.audience !== undefined) return 'shared_read_options'
+  try {
+    const rejection = readHostedGroupSharedFreshnessRejection(
+      request.freshness,
+      request.projectionScopes,
+    )
+    return rejection === null ? null : `shared_freshness_${rejection}` as const
+  } catch {
+    return 'shared_semantic_unclassified'
+  }
+}
+
+// Rejection-only: structurally invalid or non-read_shared input has no reason.
+function readGroupArgumentsSemanticRejection(
+  value: unknown,
+): SafeToolCallSemanticRejection | null {
+  const request = groupReadSharedArgumentsSchema.safeParse(value)
+  return request.success ? readGroupSharedReadSemanticRejection(request.data) : null
+}
+
 const groupArgumentsSchema = z.discriminatedUnion('action', [
   z
     .object({
@@ -745,45 +813,11 @@ const groupArgumentsSchema = z.discriminatedUnion('action', [
       policyCode: z.enum(HOSTED_USAGE_REFERRAL_POLICY_CODES),
     })
     .strict(),
-  z
-    .object({
-      action: z.literal('read_shared'),
-      participantId: z.string().min(1).max(200).optional(),
-      history: z.object({ fromDate: z.string(), throughDate: z.string() }).strict().optional(),
-      audience: z.literal('group_email').optional(),
-      freshness: z.array(z.object({
-        projectionScopeKey: z.string().min(1).max(191),
-        date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u),
-      }).strict()).min(1).max(21).optional(),
-      projectionScopes: z
-        .array(groupVaultShareProjectionScopeSchema)
-        .min(1)
-        .max(HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES.length)
-        .refine(
-          (projectionScopes) =>
-            new Set(
-              projectionScopes.map(buildHostedVaultShareProjectionScopeKey),
-            ).size === projectionScopes.length,
-          { message: 'projectionScopes must contain unique exact scopes' },
-        ),
-    })
-    .strict()
-    .refine((request) => {
-      try {
-        parseHostedGroupSharedReadOptions(request, request.projectionScopes)
-        if (request.audience && (request.history || request.participantId)) return false
-      } catch {
-        return false
-      }
-      if (request.freshness === undefined) return true
-      if (request.audience !== undefined) return false
-      try {
-        parseHostedGroupSharedFreshnessRequirements(request.freshness, request.projectionScopes)
-        return true
-      } catch {
-        return false
-      }
-    }, { message: 'history requires one participant, one existing health metric scope and at most 90 inclusive dates, without freshness or group_email; freshness requires exact requested wearable dates', path: ['freshness'] })
+  groupReadSharedArgumentsSchema
+    .refine(
+      (request) => readGroupSharedReadSemanticRejection(request) === null,
+      { message: 'history requires one participant, one existing health metric scope and at most 90 inclusive dates, without freshness or group_email; freshness requires exact requested wearable dates', path: ['freshness'] },
+    )
     .refine(
       (request) =>
         request.audience === 'group_email'
@@ -1012,12 +1046,6 @@ const assistantConfigurationArgumentsSchema = z
     z.object({
       action: z.literal('update'),
       model: z.enum(HOSTED_ASSISTANT_PRODUCT_MODELS),
-      provider: z.enum(HOSTED_ASSISTANT_PROVIDERS).optional(),
-      reasoningEffort: z.enum(HOSTED_ASSISTANT_REASONING_EFFORTS).optional(),
-    }).strict(),
-    z.object({
-      action: z.literal('update'),
-      provider: z.enum(HOSTED_ASSISTANT_PROVIDERS),
       reasoningEffort: z.enum(HOSTED_ASSISTANT_REASONING_EFFORTS).optional(),
     }).strict(),
     z.object({
@@ -1484,6 +1512,7 @@ export type MurphDynamicToolRequest =
       kind: 'computer-finish-run'
       args: HostedComputerFinishRunRequest & { runId: string }
     }
+  | SenderContactDynamicToolRequest
   | PhoneCallDynamicToolRequest
   | PhysicalNoteDynamicToolRequest
   | ClinicalRecordsConnectLinkDynamicToolRequest
@@ -1570,9 +1599,18 @@ export type MurphDynamicToolRequest =
       validationDigest: SafeToolCallValidationDigest
     }
   | {
+      kind: 'invalid-usage-diagnostics-arguments'
+      validationDigest: SafeToolCallValidationDigest
+    }
+  | {
       kind: 'invalid-plan-usage-arguments'
       validationDigest: SafeToolCallValidationDigest
     }
+  | {
+      kind: 'invalid-poll-arguments'
+      validationDigest: SafeToolCallValidationDigest
+    }
+  | { kind: 'poll'; request: ConversationPollAction }
   | {
       kind: 'invalid-imessage-contact-arguments'
       validationDigest: SafeToolCallValidationDigest
@@ -1598,6 +1636,10 @@ export type MurphDynamicToolRequest =
       messageRef?: string
       request: HostedRuntimeAssistantPersonalizationModelToolRequest
       toolCallId?: string
+    }
+  | {
+      kind: 'usage-diagnostics'
+      request: HostedUsageDiagnosticsRequest
     }
   | {
       kind: 'plan-usage'
@@ -1730,6 +1772,7 @@ export function readMurphDynamicToolRequest(
   }
 
   for (const readRequest of [
+    readConversationPollDynamicToolRequest,
     readDeviceDynamicToolRequest,
     readLabsDynamicToolRequest,
     readPendingVaultFilesDynamicToolRequest,
@@ -1737,6 +1780,7 @@ export function readMurphDynamicToolRequest(
     readMemberMemoryDynamicToolRequest,
     readConnectedAppsDynamicToolRequest,
     readAssistantStyleDynamicToolRequest,
+    readSenderContactDynamicToolRequest,
     readPhoneCallDynamicToolRequest,
     readPhysicalNoteDynamicToolRequest,
     readClinicalRecordsConnectLinkDynamicToolRequest,
@@ -1952,19 +1996,9 @@ export function readMurphDynamicToolRequest(
         request: parsed.request,
       }
     }
-    case MURPH_PLAN_USAGE_TOOL.name: {
-      const parsed = parsePlanUsageArguments(request.arguments)
-      if (!parsed.ok) {
-        return {
-          kind: 'invalid-plan-usage-arguments',
-          validationDigest: parsed.validationDigest,
-        }
-      }
-      return {
-        kind: 'plan-usage',
-        request: parsed.request,
-      }
-    }
+    case MURPH_USAGE_DIAGNOSTICS_TOOL.name:
+    case MURPH_PLAN_USAGE_TOOL.name:
+      return parsePrivateUsageToolRequest(request.tool, request.arguments)
     case MURPH_IMESSAGE_CONTACT_TOOL.name: {
       const parsed = parseIMessageContactArguments(request.arguments)
       if (!parsed.ok) {
@@ -2403,10 +2437,10 @@ async function executeSendVaultFileDynamicTool(
         )
     }
   } catch (error) {
-    if (
-      error instanceof VaultCliError
-      && error.code === 'ASSISTANT_VAULT_FILE_SEND_ALREADY_ACTIVE'
-    ) {
+    // Keep opaque errors out of both the legacy classifier and the new detail
+    // reader; even instanceof can execute a Proxy's prototype trap.
+    const diagnosticError = types.isProxy(error) ? undefined : error
+    if (isAlreadyActiveVaultFileSendError(diagnosticError)) {
       return replyRequiredResult(
         true,
         JSON.stringify({
@@ -2416,10 +2450,13 @@ async function executeSendVaultFileDynamicTool(
         }),
       )
     }
-    return replyRequiredResult(
-      false,
-      'secure vault-file approval could not be prepared',
-      'handler_exception', error,
+    return withVaultFileToolFailureDetails(
+      replyRequiredResult(
+        false,
+        'secure vault-file approval could not be prepared',
+        'handler_exception', diagnosticError,
+      ),
+      diagnosticError,
     )
   }
 }
@@ -3347,13 +3384,26 @@ async function executeResponseCardAttachmentDynamicTool(
       'conflict',
     )
   }
-  const card = await attachTrustedWorkoutCardEditor({
+  const { card, runtimeIssueInputs } = await attachTrustedWorkoutCardEditor({
     card: request.card,
     vaultRoot: input.vaultRoot ?? null,
   })
+  if (card === null) {
+    return {
+      ...toolTextResult(false, [
+        'No card was attached: a workout card requires verified editing support.',
+        'Read this exact workout once and retry attachment once using its complete current state.',
+        'Do not repeat workout writes, discard saved fields, change exercise modes, or mark it completed to make a card fit.',
+        'If attachment still fails, use a brief ordinary-text reply with the verified workout results and explain that the editable card is unavailable.',
+        'Do not claim that a card was sent or that a saved workout update failed merely because card attachment failed.',
+      ].join(' '), 'unavailable'),
+      ...(runtimeIssueInputs ? { runtimeIssueInputs } : {}),
+    }
+  }
   return {
     ...toolTextResult(true, nutritionCardAttachmentGuidance(card)),
     responseCardPatch: { card },
+    ...(runtimeIssueInputs ? { runtimeIssueInputs } : {}),
   }
 }
 
@@ -3444,6 +3494,10 @@ async function executeDeviceRequestDynamicTool(
       ? { assistantInputId: invocationScope.origin.assistantInputId }
       : null
   return await executeDeviceDynamicTool({
+    hapticAuthority: invocationScope?.conversationScope !== 'direct' ? null
+      : invocationScope.origin.kind === 'accepted_input'
+        ? { kind: 'accepted_input', assistantInputId: invocationScope.origin.assistantInputId }
+        : { kind: 'automation_occurrence', automationId: invocationScope.origin.automationId, occurrenceAt: invocationScope.origin.occurrenceAt },
     acceptedInputAuthority,
     abortSignal: input.abortSignal ?? null,
     deviceTool,
@@ -3562,6 +3616,7 @@ async function executeComputerRequestDynamicTool(
 async function dispatchMurphDynamicToolRequest(
   input: ExecuteMurphDynamicToolRequestInput,
 ): Promise<MurphDynamicToolExecutionResult> {
+  const hostedContext = input.hostedToolContext ?? null
   const hostedImageCompletionEffectScope =
     input.hostedToolContext?.currentHostedImageCompletionEffectScope?.() ?? null
   if (
@@ -3579,7 +3634,7 @@ async function dispatchMurphDynamicToolRequest(
   }
   if (
     isExecutableComputerDynamicToolRequest(input.request) &&
-    !canExecuteComputerDynamicTools(input.hostedToolContext ?? null)
+    !canExecuteComputerDynamicTools(hostedContext)
   ) {
     return toolTextResult(
       false,
@@ -3693,7 +3748,7 @@ async function dispatchMurphDynamicToolRequest(
         vaultRoot: input.vaultRoot?.trim() || null,
       })
     case 'assistant-style': {
-      const hostedToolContext = input.hostedToolContext ?? null
+      const hostedToolContext = hostedContext
       return await executeAssistantStyleDynamicTool({
         authority: resolveHostedAssistantPersonalizationToolAuthority(
           hostedToolContext,
@@ -3713,6 +3768,11 @@ async function dispatchMurphDynamicToolRequest(
       return await executeResolvePhysicalNoteDynamicTool(input, input.request)
     case 'send-physical-note':
       return await executeSendPhysicalNoteDynamicTool(input, input.request)
+    case 'get-sender-contact':
+      return await executeGetSenderContactDynamicTool({
+        userActionScope: input.hostedToolContext?.currentUserActionScope?.() ?? null,
+        vaultRoot: input.vaultRoot ?? null,
+      })
     case 'create-phone-call':
       return await executeCreatePhoneCallDynamicTool(input, input.request)
     case 'get-phone-call-status':
@@ -3724,38 +3784,34 @@ async function dispatchMurphDynamicToolRequest(
     case 'submit-product-feedback':
       return await executeSubmitProductFeedbackTool({
         feedback: input.request.feedback,
-        hostedToolContext: input.hostedToolContext ?? null,
+        hostedToolContext: hostedContext,
         productFeedbackRecorder: input.productFeedbackRecorder ?? null,
       })
     case 'family-plan':
       return await executeFamilyPlanTool({
-        hostedToolContext: input.hostedToolContext ?? null,
+        hostedToolContext: hostedContext,
         request: input.request.request,
       })
+    case 'usage-diagnostics':
     case 'plan-usage':
-      return await executePlanUsageTool({
-        hostedToolContext: input.hostedToolContext ?? null,
-        request: input.request.request,
-      })
+    case 'poll':
     case 'imessage-contact':
-      return await executeIMessageContactTool({
-        hostedToolContext: input.hostedToolContext ?? null,
-      })
+      return await executeCurrentConversationTool(input, input.request)
     case 'subscription':
       return await executeSubscriptionTool({
-        hostedToolContext: input.hostedToolContext ?? null,
+        hostedToolContext: hostedContext,
         request: input.request.request,
       })
     case 'personalization':
       return await executePersonalizationTool({
-        hostedToolContext: input.hostedToolContext ?? null,
+        hostedToolContext: hostedContext,
         messageRef: input.request.messageRef,
         request: input.request.request,
         toolCallId: input.request.toolCallId ?? null,
       })
     case 'assistant-configuration':
       return await executeAssistantConfigurationTool({
-        hostedToolContext: input.hostedToolContext ?? null,
+        hostedToolContext: hostedContext,
         request: input.request.request,
       })
     case 'group':
@@ -3766,7 +3822,7 @@ async function dispatchMurphDynamicToolRequest(
         deliveryContextOrdinal: input.deliveryContextOrdinal ?? null,
         env: input.env,
         fetchImpl: input.fetchImpl,
-        hostedToolContext: input.hostedToolContext ?? null,
+        hostedToolContext: hostedContext,
         groupSharedReadTurnState: input.groupSharedReadTurnState ?? null,
         materializeWorkspaceArtifacts:
           input.materializeWorkspaceArtifacts ?? null,
@@ -3871,7 +3927,7 @@ async function dispatchMurphDynamicToolRequest(
     case 'connected-apps-manage':
     case 'connected-apps-search':
     case 'connected-apps-execute': {
-      const connectedApps = input.hostedToolContext?.connectedApps ?? null
+      const connectedApps = hostedContext?.connectedApps
       if (!connectedApps) {
         return toolTextResult(
           false,
@@ -3903,14 +3959,18 @@ async function dispatchMurphDynamicToolRequest(
 async function attachTrustedWorkoutCardEditor(input: {
   card: AssistantResponseCard
   vaultRoot: string | null
-}): Promise<AssistantResponseCard> {
+}): Promise<{
+  card: AssistantResponseCard | null
+  runtimeIssueInputs?: readonly AssistantRuntimeIssueInput[]
+}> {
   if (
-    input.vaultRoot === null
-    || input.card.kind !== 'compact_table'
+    input.card.kind !== 'compact_table'
     || !('workout' in input.card)
-    || input.card.workout.state !== 'active'
   ) {
-    return input.card
+    return { card: input.card }
+  }
+  if (input.vaultRoot === null) {
+    return workoutCardEditorFailure('missing_vault')
   }
   try {
     const trusted = await readLiveWorkoutCardEditor({
@@ -3919,16 +3979,49 @@ async function attachTrustedWorkoutCardEditor(input: {
       workoutId: input.card.tracking.entityId,
     })
     if (trusted === null) {
-      return input.card
+      return workoutCardEditorFailure('projection_rejected')
     }
     const candidate = assistantResponseCardSchema.safeParse({
       ...input.card,
       editor: trusted.editor,
       workout: trusted.workout,
     })
-    return candidate.success ? candidate.data : input.card
-  } catch {
-    return input.card
+    return candidate.success && 'editor' in candidate.data && candidate.data.editor !== undefined
+      ? { card: candidate.data }
+      : workoutCardEditorFailure('schema_rejected')
+  } catch (error) {
+    return workoutCardEditorFailure('reader_failed', error)
+  }
+}
+
+function workoutCardEditorFailure(
+  reason: 'missing_vault' | 'projection_rejected' | 'schema_rejected' | 'reader_failed',
+  error?: unknown,
+): {
+  card: null
+  runtimeIssueInputs: readonly AssistantRuntimeIssueInput[]
+} {
+  const code = error !== null && typeof error === 'object' && 'code' in error
+    ? error.code
+    : null
+  // Error messages and arbitrary error codes may contain private vault data.
+  const errorCode = typeof code === 'string' && [
+    'ENOENT', 'EACCES', 'EPERM', 'ERR_MODULE_NOT_FOUND', 'MODULE_NOT_FOUND',
+    'ERR_PACKAGE_PATH_NOT_EXPORTED', 'not_found', 'contract_invalid',
+    'invalid_operation',
+  ].includes(code) ? code : 'unclassified'
+  return {
+    card: null,
+    runtimeIssueInputs: [{
+      component: 'assistant.workout-card-editor',
+      operation: 'attach_response_card',
+      phase: 'tool_call',
+      issueKind: 'tool_error',
+      severity: 'warning',
+      errorCode: 'WORKOUT_CARD_EDITOR_UNAVAILABLE',
+      summary: 'A workout card was rejected because its editor could not be verified.',
+      details: { reason, ...(reason === 'reader_failed' ? { errorCode } : {}) },
+    }],
   }
 }
 
@@ -4006,15 +4099,20 @@ async function resolveAttachedResponseMedia(input: {
   try {
     const media: AssistantResponseMedia[] = []
     for (const item of input.media) {
+      if (item.kind !== 'vault_image') {
+        media.push(item)
+        continue
+      }
+      const resolvedItem = await resolveAssistantVaultImageResponseMedia({
+        alt: item.alt,
+        ref: item.ref,
+        source: item.source,
+        vaultRoot,
+      })
       media.push(
-        item.kind === 'vault_image'
-          ? await resolveAssistantVaultImageResponseMedia({
-              alt: item.alt,
-              ref: item.ref,
-              source: item.source,
-              vaultRoot,
-            })
-          : item,
+        item.bubble === undefined
+          ? resolvedItem
+          : { ...resolvedItem, bubble: item.bubble },
       )
     }
     return { media }
@@ -4083,7 +4181,10 @@ async function executeSubmitProductFeedbackTool(input: {
         : 'product feedback candidate already accepted',
     )
   } catch (error) {
-    return toolTextResult(false, 'product feedback candidate unavailable', 'handler_exception', error)
+    return withProductFeedbackAuditFailureDetails(
+      toolTextResult(false, 'product feedback candidate unavailable', 'handler_exception', error),
+      error,
+    )
   }
 }
 
@@ -4112,6 +4213,26 @@ async function executeFamilyPlanTool(input: {
       'family plan request was not confirmed; check Family Settings before retrying to avoid a duplicate request',
       'handler_exception', error,
     )
+  }
+}
+
+async function executeUsageDiagnosticsTool(
+  context: AssistantHostedToolContext | null,
+  request: HostedUsageDiagnosticsRequest,
+): Promise<MurphDynamicToolExecutionResult> {
+  if (!context?.usageDiagnostics) {
+    return toolTextResult(false, 'usage diagnostics are unavailable for this turn', 'unavailable')
+  }
+  const scope = context.currentInvocationScope?.()?.conversationScope
+    ?? context.currentUserActionScope?.()?.conversationScope
+  if (scope !== 'direct') {
+    return toolTextResult(false, 'usage diagnostics require a private conversation or private scheduled automation', 'authority_rejected')
+  }
+  try {
+    const result = parseHostedUsageDiagnosticsResponse(await context.usageDiagnostics.read(request))
+    return toolTextResult(true, safeToolPayloadText(result))
+  } catch (error) {
+    return toolTextResult(false, 'usage diagnostics could not be read', 'handler_exception', error)
   }
 }
 
@@ -4188,6 +4309,19 @@ function projectHostedPlanUsageForAssistant(input: HostedPlanUsageStatus) {
 
 function projectHostedGroupPlanLabel(label: string): string {
   return label.replace(/\bGroup\b/gu, HOSTED_GROUP_MEMBER_PLAN_DISPLAY_NAME)
+}
+
+async function executeCurrentConversationTool(
+  input: ExecuteMurphDynamicToolRequestInput,
+  request: Extract<MurphDynamicToolRequest, { kind: 'poll' | 'plan-usage' | 'usage-diagnostics' | 'imessage-contact' }>,
+): Promise<MurphDynamicToolExecutionResult> {
+  const hostedToolContext = input.hostedToolContext ?? null
+  switch (request.kind) {
+    case 'usage-diagnostics': return executeUsageDiagnosticsTool(hostedToolContext, request.request)
+    case 'poll': return executeConversationPollTool({ request: request.request, context: hostedToolContext })
+    case 'plan-usage': return executePlanUsageTool({ request: request.request, hostedToolContext })
+    case 'imessage-contact': return executeIMessageContactTool({ hostedToolContext })
+  }
 }
 
 async function executeIMessageContactTool(input: {
@@ -4385,10 +4519,7 @@ async function executeAssistantConfigurationTool(input: {
   if (
     input.request.action === 'update' &&
     conversationScope === 'group' &&
-    (
-      input.request.provider !== undefined ||
-      input.request.reasoningEffort !== undefined
-    )
+    input.request.reasoningEffort !== undefined
   ) {
     return toolTextResult(
       false,
@@ -4401,7 +4532,6 @@ async function executeAssistantConfigurationTool(input: {
   try {
     const currentTurn = input.hostedToolContext?.currentAssistantTarget?.() ?? {
       model: null,
-      provider: null,
       reasoningEffort: null,
     }
     if (input.request.action === 'read') {
@@ -4600,6 +4730,7 @@ function groupSharedModelResult(
         ? {}
         : { displayName: member.displayName }),
       participantId: member.participantId,
+      ...(member.companionLastContactAt === undefined ? {} : { companionLastContactAt: member.companionLastContactAt }),
       // Keyed by scope so each projection no longer restates its own key, and
       // the scope reads as a heading rather than a field to hunt for.
       projections: Object.fromEntries(member.projections.map((projection) => [
@@ -5040,6 +5171,7 @@ async function executeGroupSharedRead(input: {
 
   try {
     const result = await groupSharedReader.request({
+      includeCompanionPresence: true,
       projectionScopes: input.request.projectionScopes,
       ...(input.request.participantId ? { participantId: input.request.participantId } : {}),
       ...(input.request.history ? { history: input.request.history } : {}),
@@ -6662,14 +6794,16 @@ async function readGroupEmailSharedData(input: {
         const existing = members.get(member.memberId)
         if (!existing) {
           members.set(member.memberId, {
-            ...member,
+            currentTurnHandles: member.currentTurnHandles,
+            displayName: member.displayName,
+            memberId: member.memberId,
+            participantId: member.participantId,
             projections: [...projections],
           })
           continue
         }
         if (
-          existing.displayName !== member.displayName
-          || existing.participantId !== member.participantId
+          existing.participantId !== member.participantId
           || !hasExactStringEntries(
             existing.currentTurnHandles,
             member.currentTurnHandles,
@@ -6677,6 +6811,8 @@ async function readGroupEmailSharedData(input: {
         ) {
           return null
         }
+        // Keep one complete host naming snapshot: optional contact labels can
+        // differ across metric batches without changing identity or authority.
         members.set(member.memberId, {
           ...existing,
           projections: [...existing.projections, ...projections],
@@ -7413,6 +7549,27 @@ function parseFamilyPlanArguments(
   }
 }
 
+function parsePrivateUsageToolRequest(
+  toolName: string,
+  value: unknown,
+): MurphDynamicToolRequest {
+  if (toolName === MURPH_USAGE_DIAGNOSTICS_TOOL.name) {
+    const parsed = parseDynamicToolArguments({
+      schema: hostedUsageDiagnosticsRequestSchema,
+      value,
+      schemaRootKeys: ['days', 'limit'],
+      toolName: 'murph.usage_diagnostics',
+    })
+    return parsed.ok
+      ? { kind: 'usage-diagnostics', request: parsed.args }
+      : { kind: 'invalid-usage-diagnostics-arguments', validationDigest: parsed.validationDigest }
+  }
+  const parsed = parsePlanUsageArguments(value)
+  return parsed.ok
+    ? { kind: 'plan-usage', request: parsed.request }
+    : { kind: 'invalid-plan-usage-arguments', validationDigest: parsed.validationDigest }
+}
+
 function parsePlanUsageArguments(
   value: unknown,
 ):
@@ -7509,8 +7666,6 @@ function parsePersonalizationArguments(
     schemaRootKeys: [
       'action',
       'message_ref',
-      'mainPersona',
-      'supportingPersona',
       'tone',
       'voice',
     ],
@@ -7579,6 +7734,7 @@ function parseGroupArguments(
     schema: parser,
     value,
     schemaRootKeys: MURPH_GROUP_TOOL_ROOT_KEYS_BY_NAME[toolName],
+    readSemanticRejection: readGroupArgumentsSemanticRejection,
     toolName: qualifiedToolName,
   });
   if (!parsed.ok) {

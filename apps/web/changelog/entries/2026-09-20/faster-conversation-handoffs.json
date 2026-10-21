@@ -1,0 +1,19 @@
+{
+  "publishedOn": "2026-09-20",
+  "order": 100,
+  "item": {
+    "id": "faster-conversation-handoffs",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Less startup work between replies",
+    "summary": "Murph skips unnecessary service initialization when saving conversation progress, reducing startup work that can delay a follow-up.",
+    "details": "Background wake scheduling still runs when needed. This reduces one source of delay; network and reply-generation time can still vary.",
+    "relevanceTags": [
+      "replies",
+      "performance"
+    ],
+    "sourcePullRequests": [
+      3602
+    ]
+  }
+}

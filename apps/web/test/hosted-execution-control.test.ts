@@ -1,12 +1,24 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { Agent, buildConnector } from "undici";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  connect: vi.fn<buildConnector.connector>(),
+  agentOptions: null as Agent.Options | null,
   createCloudflareHostedControlClient: vi.fn(),
   createHostedExecutionVercelOidcBearerTokenProvider: vi.fn(),
   readHostedExecutionControlBaseUrl: vi.fn(),
   readHostedExecutionControlEnvironment: vi.fn(),
   tokenProvider: vi.fn(),
 }));
+
+vi.mock("undici", () => ({
+  buildConnector: () => mocks.connect,
+  Agent: class {
+    constructor(options: Agent.Options) { mocks.agentOptions = options; }
+  },
+}));
+
+afterEach(() => vi.restoreAllMocks());
 
 vi.mock("@murphai/cloudflare-hosted-control/client", () => ({
   createCloudflareHostedControlClient: mocks.createCloudflareHostedControlClient,
@@ -64,4 +76,33 @@ describe("hosted execution control client", () => {
     expect(readHostedExecutionControlClientIfConfigured()).toBeNull();
     expect(mocks.createCloudflareHostedControlClient).not.toHaveBeenCalled();
   });
+  it("reports slow connection setup without logging targets or changing completion", async () => {
+    await import("@/src/lib/hosted-execution/control");
+    const connect = mocks.agentOptions?.connect;
+    if (typeof connect !== "function") throw new Error("Expected the native connector wrapper.");
+    vi.spyOn(performance, "now").mockReturnValueOnce(0).mockReturnValueOnce(700);
+    const log = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    const failure = new Error("private-host-detail");
+    mocks.connect.mockImplementationOnce((_options, callback) => callback(failure, null));
+    const callback = vi.fn();
+    connect({ hostname: "private.example.test", protocol: "https:", port: "443" }, callback);
+    expect(callback).toHaveBeenCalledWith(failure, null);
+    expect(log).toHaveBeenCalledWith("Hosted control connection timing.", {
+      event: "hosted-control.connect.timing", elapsedMs: 700, encrypted: true, completed: false,
+    });
+    expect(JSON.stringify(log.mock.calls)).not.toContain("private");
+  });
+
+  it("preserves native failure completion when the optional logger throws", async () => {
+    await import("@/src/lib/hosted-execution/control");
+    const connect = mocks.agentOptions?.connect;
+    if (typeof connect !== "function") throw new Error("Expected the native connector wrapper.");
+    vi.spyOn(console, "info").mockImplementation(() => { throw new Error("logger failure"); });
+    const failure = new Error("connection failed");
+    mocks.connect.mockImplementationOnce((_options, callback) => callback(failure, null));
+    const callback = vi.fn();
+    expect(() => connect({ hostname: "example.test", protocol: "https:", port: "443" }, callback)).not.toThrow();
+    expect(callback).toHaveBeenCalledWith(failure, null);
+  });
+
 });

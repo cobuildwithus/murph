@@ -415,6 +415,116 @@ describe("json route helper factory", () => {
     expect(errorSpy.mock.calls[0]?.[1]).not.toHaveProperty("errorDetails");
   });
 
+  it.each([
+    "durable_thread_container_mismatch",
+    "durable_target_missing",
+    "requested_target_missing",
+    "member_routing_missing",
+    "target_not_owned",
+    "route_projection_mismatch",
+    "route_projection_chat_missing",
+    "route_projection_chat_lookup_key_missing",
+    "route_projection_chat_lookup_key_mismatch",
+    "route_projection_sender_phone_missing_or_invalid",
+    "route_projection_sender_lookup_key_mismatch",
+    "pending_recipient_invalid",
+    "member_identity_missing",
+    "member_recipient_invalid",
+  ] as const)("keeps Linq reason %s private in the existing HTTP warning", async (reason) => {
+    const { hostedOnboardingError } = await import("../src/lib/hosted-onboarding/errors");
+    const { withJsonError } = await import("../src/lib/hosted-onboarding/http");
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const errorLog = vi.spyOn(console, "error").mockImplementation(() => {});
+    const code = "HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH";
+    const message = "Linq egress target does not match the runtime user's Linq route.";
+    const handler = withJsonError<[Request]>(async () => {
+      throw hostedOnboardingError({
+        code, message, httpStatus: 403, retryable: false,
+        linqRouteAuthorityMismatchReason: reason,
+      });
+    });
+
+    const response = await handler(new Request("https://internal.example.test/engagement", { method: "POST" }));
+
+    expect(response.status).toBe(403);
+    expect(Object.fromEntries(response.headers)).toEqual({
+      "cache-control": "no-store", "content-type": "application/json",
+    });
+    await expect(response.text()).resolves.toBe(JSON.stringify({ error: { code, message, retryable: false } }));
+    expect(warn).toHaveBeenCalledOnce();
+    expect(warn).toHaveBeenCalledWith("Hosted onboarding route failed.", {
+      errorType: "HostedOnboardingError", errorMessage: message, errorCode: code,
+      internalMessage: "Hosted onboarding route failed unexpectedly.", requestMethod: "POST",
+      errorResponseCode: code, errorResponseStatus: 403, errorResponseRetryable: false,
+      linqRouteAuthorityMismatchReason: reason,
+    });
+    expect(errorLog).not.toHaveBeenCalled();
+  });
+
+  it("rejects foreign, inherited, coercible and getter Linq diagnostic values", async () => {
+    const { hostedOnboardingError, getHostedLinqRouteAuthorityMismatchReasonForLog: reasonForLog } =
+      await import("../src/lib/hosted-onboarding/errors");
+    const input = {
+      code: "HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH",
+      message: "Linq egress target does not match the runtime user's Linq route.",
+      httpStatus: 403,
+      linqRouteAuthorityMismatchReason: "route_projection_chat_missing" as const,
+    };
+    const inherited = Object.create(hostedOnboardingError(input));
+    Object.defineProperties(inherited, {
+      code: { value: input.code }, message: { value: input.message },
+    });
+    for (const error of [
+      null, { ...input }, Object.assign(new Error(input.message), input), inherited,
+      hostedOnboardingError({ ...input, code: "OTHER_OWNER" }),
+      hostedOnboardingError({ ...input, message: "Linq egress route authority does not match the requested thread." }),
+    ]) expect(reasonForLog(error)).toBeUndefined();
+
+    const coerce = vi.fn(() => input.linqRouteAuthorityMismatchReason);
+    for (const value of ["foreign-reason", null, 42, { toString: coerce }]) {
+      const error = hostedOnboardingError(input);
+      Object.defineProperty(error, "linqRouteAuthorityMismatchReason", { value });
+      expect(reasonForLog(error)).toBeUndefined();
+    }
+    expect(coerce).not.toHaveBeenCalled();
+    for (const key of ["code", "message", "linqRouteAuthorityMismatchReason"] as const) {
+      const error = hostedOnboardingError(input);
+      const getter = vi.fn(() => input[key]);
+      Object.defineProperty(error, key, { get: getter });
+      expect(reasonForLog(error)).toBeUndefined();
+      expect(getter).not.toHaveBeenCalled();
+    }
+  });
+
+  it.each(["foreign-reason", "getter"] as const)("omits a %s Linq reason from HTTP logs without changing the response", async (kind) => {
+    const { hostedOnboardingError } = await import("../src/lib/hosted-onboarding/errors");
+    const { withJsonError } = await import("../src/lib/hosted-onboarding/http");
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const errorLog = vi.spyOn(console, "error").mockImplementation(() => {});
+    const code = "HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH";
+    const message = "Linq egress target does not match the runtime user's Linq route.";
+    const error = hostedOnboardingError({ code, message, httpStatus: 403, retryable: false });
+    const getter = vi.fn(() => "route_projection_chat_missing");
+    Object.defineProperty(error, "linqRouteAuthorityMismatchReason", kind === "getter"
+      ? { get: getter }
+      : { value: "foreign-reason" });
+    const handler = withJsonError<[Request]>(async () => { throw error; });
+
+    const response = await handler(new Request("https://internal.example.test/engagement", { method: "POST" }));
+
+    expect(response.status).toBe(403);
+    expect(response.headers.get("Cache-Control")).toBe("no-store");
+    await expect(response.text()).resolves.toBe(JSON.stringify({ error: { code, message, retryable: false } }));
+    expect(warn).toHaveBeenCalledOnce();
+    expect(warn).toHaveBeenCalledWith("Hosted onboarding route failed.", {
+      errorType: "HostedOnboardingError", errorMessage: message, errorCode: code,
+      internalMessage: "Hosted onboarding route failed unexpectedly.", requestMethod: "POST",
+      errorResponseCode: code, errorResponseStatus: 403, errorResponseRetryable: false,
+    });
+    expect(getter).not.toHaveBeenCalled();
+    expect(errorLog).not.toHaveBeenCalled();
+  });
+
   it("includes optional sanitized log details for unexpected errors", async () => {
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const helpers = httpModule.createJsonRouteHelpers({

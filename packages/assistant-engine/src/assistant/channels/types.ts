@@ -84,6 +84,12 @@ export interface LinqRuntimeDependencies {
 }
 
 export interface AssistantChannelDependencies {
+  /** Invocation-bound call delivery; there is no ambient provider fallback. */
+  sendVoice?: (input: {
+    callId: string
+    message: string
+    answeredMailboxItemIds: readonly string[]
+  }) => Promise<void>
   onTypingAccepted?: (event: {
     acceptedInputIds: readonly string[]
     at: string
@@ -274,7 +280,7 @@ export interface AssistantChannelAutoReplyEligibility {
 }
 
 export interface AssistantChannelAdapter {
-  channel: 'telegram' | 'linq' | 'email'
+  channel: 'telegram' | 'linq' | 'email' | 'voice'
   canAutoReply: (input: AssistantChannelAutoReplyEligibility) => string | null
   inferBindingDelivery: (input: {
     conversation: ConversationRef

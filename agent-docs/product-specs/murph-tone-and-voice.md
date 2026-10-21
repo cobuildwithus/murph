@@ -1,6 +1,6 @@
 # How Murph Talks
 
-Last verified: 2026-08-10
+Last verified: 2026-09-29
 Status: Implemented for persona-first onboarding, personal Settings, hosted mailbox handoff, prompt style, voice memo default resolution, supervisor-run preview generation, private conversational controls, room-owned hosted Linq group controls, and the conversational-only Unhinged dial
 
 ## Product Contract
@@ -40,6 +40,24 @@ The first-visit sequence is the four-step Murph personality picker:
 4. Choose a tone and save.
 
 `/home?initialVisit=true` opens the contact-card picker first when a text contact is ready, then opens this picker; members without a text contact start here. Skip or dismiss closes without writing a style preference or showing the final dialog. Continue on the final step writes persona, tone, and voice in one preference update, then opens the Welcome to Murph dialog with the current messaging action. Personality dials do not add onboarding steps or separate signup writes.
+
+## Conversational Language
+
+Private Murph matches text and voice memo language without a settings question.
+A current explicit language request wins, followed by an explicit saved language
+preference, clear current conversational language, and the remembered default
+when the current message is ambiguous. The selected voice stays unchanged, and
+language alone does not opt the member into audio replies.
+
+Murph proactively saves a clear conversational language as an observed default
+for future voice memos in canonical freeform memory, including on text-only
+turns. It updates an existing language note instead of adding duplicates and
+skips unchanged writes. Explicit ongoing changes replace that note; quotations,
+translation exercises, isolated foreign words, and one-off overrides do not.
+Memory opt-outs and explicit saved preferences take priority. This introduces
+no new settings field and no personal-memory authority in group or unverified
+conversations. Routine saves need no acknowledgement; a failed write cannot
+justify a claim that the preference was saved.
 
 ## Canonical Preferences
 
@@ -629,6 +647,34 @@ Run:
 node scripts/generate-murph-voice-previews.mjs
 ```
 
-The script loads local env files without printing secret values, requires `ELEVENLABS_API_KEY`, defaults to `eleven_v3` unless `MURPH_ELEVENLABS_MODEL_ID` overrides it, uses `MURPH_ELEVENLABS_VOICE_ID` for the `classic` ("New York") clip, and writes MP3 files to `apps/web/public/audio/murph-voices/`. Build `packages/contracts` first so the script reads the shared roster from the package export.
+Live voice memos default to `eleven_v4` through the Text to Dialogue API,
+with one text/voice input and the existing 1,000-character limit, 90-second
+request timeout, and MP3 output. Saved voice choices and explicit
+`MURPH_ELEVENLABS_MODEL_ID` overrides are preserved; older speech models retain
+the Text to Speech endpoint. Hosted egress validates the single-voice request
+and records its text character count through the existing usage owner. Web
+must admit and price `eleven_v4` before enabling the new Worker/runner path.
+The regular published v4 API rate is $0.08 per 1,000 characters, equal to
+Multilingual v2; the temporary launch discount is not an accounting dependency.
+ElevenLabs documents support for every library voice, but custom clones created
+before v4 require provider-side retraining. Confirm that the configured
+"New York" voice is a library voice or a retrained clone before enabling the
+new default in production; otherwise preserve the explicit older-model override.
+Never reset a saved voice preference to make an upgrade work. See the
+[v4 voice compatibility guidance](https://elevenlabs.io/v4),
+[models](https://elevenlabs.io/docs/overview/models), and
+[API pricing](https://elevenlabs.io/pricing/api).
+
+The voice-memo tool derives expressive guidance from the resolved speech model.
+For v4, its text schema teaches occasional inline natural-language cues such as
+`[yawning]`, `[sighs]`, `[whispering]`, and `[excited]`, placed next to the affected
+words and counted toward the same character limit. Cues should serve a requested
+performance or the moment, without gratuitous effects, laugh tracks, voice
+switching, or theatrical health guidance. They stay out of accompanying text.
+Older-model overrides retain plain-speech guidance without bracketed directions
+or SSML. This changes delivery, never saved voice identity or media admission.
+See the [Eleven v4 expression guide](https://elevenlabs.io/blog/eleven-v4).
+
+The script loads local env files without printing secret values, requires `ELEVENLABS_API_KEY`, defaults to `eleven_v4` unless `MURPH_ELEVENLABS_MODEL_ID` overrides it, uses `MURPH_ELEVENLABS_VOICE_ID` for the `classic` ("New York") clip, and writes MP3 files to `apps/web/public/audio/murph-voices/`. Build `packages/contracts` first so the script reads the shared roster from the package export.
 
 Preview clips are generated by the supervisor after review. The shared preview line must not mention a human voice name; every option is Murph with a different vibe.

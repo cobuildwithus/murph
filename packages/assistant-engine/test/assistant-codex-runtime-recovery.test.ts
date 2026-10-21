@@ -41,7 +41,6 @@ import {
   buildCodexAppServerArgs,
   compactWarmCodexThread,
   executeCodexAppServerTurn as executeCodexAppServerTurnUnchecked,
-  executeCodexManagedAccountOperation,
   preinitializeCodexAppServer,
   readCodexAppServerTurnFailureContext,
   resolveCodexDisplayOptions,
@@ -403,7 +402,7 @@ describe('assistant codex runtime', () => {it('handles current Codex v2 turn-tag
       executeCodexAppServerTurn({
         env: hostedEnv,
         model: 'gpt-thread-second',
-        modelProvider: 'venice',
+        modelProvider: 'hosted-openai',
         prompt: 'second thread launch',
         workingDirectory,
       }),
@@ -426,7 +425,7 @@ describe('assistant codex runtime', () => {it('handles current Codex v2 turn-tag
     })
     expect(asRecord(threadStarts[1]?.params)).toMatchObject({
       model: 'gpt-thread-second',
-      modelProvider: 'venice',
+      modelProvider: 'hosted-openai',
     })
   })
 
@@ -873,7 +872,7 @@ describe('assistant codex runtime', () => {it('handles current Codex v2 turn-tag
     ).toBe(false)
   })
 
-  it('poisons warm Codex when an aborted turn later completes', async () => {
+  it.each(['completed', 'interrupted'])('reuses warm Codex after native abort finishes as %s', async (status) => {
     const hostedCodexHome = await createTempDir('assistant-codex-warm-abort-home-')
     const workingDirectory = await createTempDir('assistant-codex-warm-abort-work-')
     const controller = new AbortController()
@@ -900,58 +899,60 @@ describe('assistant codex runtime', () => {it('handles current Codex v2 turn-tag
           const initialize = await waitForRpcMethod(spawnedChild, 'initialize')
           spawnedChild.stdout.write(jsonLine({ id: initialize.id, result: {} }))
 
-          const thread = await waitForRpcMethod(spawnedChild, 'thread/start')
-          const threadId = spawnedChildren.length === 1
-            ? 'thread-warm-abort-one'
-            : 'thread-warm-abort-two'
-          const turnId = spawnedChildren.length === 1
-            ? 'turn-warm-abort-one'
-            : 'turn-warm-abort-two'
-          spawnedChild.stdout.write(jsonLine({
-            id: thread.id,
-            result: {
-              thread: {
-                id: threadId,
-              },
-            },
-          }))
-
-          const turn = await waitForRpcMethod(spawnedChild, 'turn/start')
-          spawnedChild.stdout.write(jsonLine({
-            id: turn.id,
-            result: {
-              turn: {
-                id: turnId,
-              },
-            },
-          }))
-          spawnedChild.stdout.write(jsonLine({
-            method: 'turn/started',
-            params: {
-              turn: {
-                id: turnId,
-              },
-            },
-          }))
-
-          if (spawnedChildren.length === 1) {
-            controller.abort()
-            const interrupt = await waitForRpcMethod(spawnedChild, 'turn/interrupt')
+          for (let ordinal = 1; ordinal <= 2; ordinal += 1) {
+            const thread = await waitForRpcMethodCount(spawnedChild, 'thread/start', ordinal)
+            const threadId = ordinal === 1
+              ? 'thread-warm-abort-one'
+              : 'thread-warm-abort-two'
+            const turnId = ordinal === 1
+              ? 'turn-warm-abort-one'
+              : 'turn-warm-abort-two'
             spawnedChild.stdout.write(jsonLine({
-              id: interrupt.id,
-              result: {},
+              id: thread.id,
+              result: {
+                thread: {
+                  id: threadId,
+                },
+              },
+            }))
+
+            const turn = await waitForRpcMethodCount(spawnedChild, 'turn/start', ordinal)
+            spawnedChild.stdout.write(jsonLine({
+              id: turn.id,
+              result: {
+                turn: {
+                  id: turnId,
+                },
+              },
+            }))
+            spawnedChild.stdout.write(jsonLine({
+              method: 'turn/started',
+              params: {
+                turn: {
+                  id: turnId,
+                },
+              },
+            }))
+
+            if (ordinal === 1) {
+              controller.abort()
+              const interrupt = await waitForRpcMethod(spawnedChild, 'turn/interrupt')
+              spawnedChild.stdout.write(jsonLine({
+                id: interrupt.id,
+                result: {},
+              }))
+            }
+
+            spawnedChild.stdout.write(jsonLine({
+              method: 'turn/completed',
+              params: {
+                turn: {
+                  id: turnId,
+                  status: ordinal === 1 ? status : 'completed',
+                },
+              },
             }))
           }
-
-          spawnedChild.stdout.write(jsonLine({
-            method: 'turn/completed',
-            params: {
-              turn: {
-                id: turnId,
-                status: 'completed',
-              },
-            },
-          }))
         })()
       })
 
@@ -965,17 +966,20 @@ describe('assistant codex runtime', () => {it('handles current Codex v2 turn-tag
       PATH: '/usr/bin',
     }
 
-    await expect(
-      executeCodexAppServerTurn({
-        abortSignal: controller.signal,
-        env: hostedEnv,
-        prompt: 'aborted but completed',
-        workingDirectory,
-      }),
-    ).resolves.toMatchObject({
-      sessionId: 'thread-warm-abort-one',
-      turnId: 'turn-warm-abort-one',
+    const abortedTurn = executeCodexAppServerTurn({
+      abortSignal: controller.signal,
+      env: hostedEnv,
+      prompt: 'aborted turn',
+      workingDirectory,
     })
+    if (status === 'interrupted') {
+      await expect(abortedTurn).rejects.toMatchObject({ code: 'ASSISTANT_CODEX_INTERRUPTED' })
+    } else {
+      await expect(abortedTurn).resolves.toMatchObject({
+        sessionId: 'thread-warm-abort-one',
+        turnId: 'turn-warm-abort-one',
+      })
+    }
 
     const replacementTrace = vi.fn()
 
@@ -991,17 +995,15 @@ describe('assistant codex runtime', () => {it('handles current Codex v2 turn-tag
       turnId: 'turn-warm-abort-two',
     })
 
-    expect(codexMocks.spawn).toHaveBeenCalledTimes(2)
+    expect(codexMocks.spawn).toHaveBeenCalledTimes(1)
     expect(replacementTrace).toHaveBeenCalledWith(
       expect.objectContaining({
         rawEvent: expect.objectContaining({
-          codexTimingColdStartReason: 'previous-turn-abort',
-          codexTimingStage: 'initialized',
+          codexTimingStage: 'warm-reused',
         }),
       }),
     )
-    expect(process.kill).toHaveBeenCalledWith(-20_000, 'SIGINT')
-    expect(process.kill).toHaveBeenCalledWith(-20_000, 'SIGTERM')
+    expect(process.kill).not.toHaveBeenCalled()
   })
 
   it.each([
@@ -1135,9 +1137,8 @@ describe('assistant codex runtime', () => {it('handles current Codex v2 turn-tag
         if (interruptPromise) {
           await interruptPromise
           expect(process.kill).not.toHaveBeenCalledWith(-pidBase, 'SIGINT')
-        } else {
-          expect(process.kill).toHaveBeenCalledWith(-pidBase, 'SIGINT')
         }
+        expect(process.kill).not.toHaveBeenCalledWith(-pidBase, 'SIGINT')
 
         await vi.advanceTimersByTimeAsync(15_000)
         await expect(timedOutTurn).rejects.toMatchObject({
@@ -1561,264 +1562,6 @@ describe('assistant codex runtime', () => {it('handles current Codex v2 turn-tag
     })
 
     expect(codexMocks.spawn).not.toHaveBeenCalled()
-  })
-
-  it('hands managed disconnect cleanup attribution to the next assistant turn', async () => {
-    const workingDirectory = await createTempDir('assistant-codex-managed-disconnect-work-')
-    const codexHome = await createTempDir('assistant-codex-managed-disconnect-home-')
-    const spawnedChildren: MockChildProcess[] = []
-    mockProcessGroupSignalsForChildren(spawnedChildren)
-
-    codexMocks.spawn.mockImplementation(() => {
-      const child = new MockChildProcess()
-      const processNumber = spawnedChildren.length + 1
-      child.pid = 41_000 + spawnedChildren.length
-      spawnedChildren.push(child)
-
-      queueMicrotask(() => {
-        void (async () => {
-          const initialize = await waitForRpcMethod(child, 'initialize')
-          child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
-          if (processNumber === 1) {
-            const logout = await waitForRpcMethod(child, 'account/logout')
-            child.stdout.write(jsonLine({ id: logout.id, result: {} }))
-            return
-          }
-
-          await writeWarmTurnStarted({
-            child,
-            requestCount: 1,
-            threadId: 'thread-after-managed-disconnect',
-            turnId: 'turn-after-managed-disconnect',
-          })
-          child.stdout.write(jsonLine({
-            method: 'turn/completed',
-            params: {
-              turn: {
-                id: 'turn-after-managed-disconnect',
-                status: 'completed',
-              },
-            },
-          }))
-        })()
-      })
-
-      return child
-    })
-
-    await expect(
-      executeCodexManagedAccountOperation({
-        action: 'disconnect',
-        codexHome,
-        workingDirectory,
-      }),
-    ).resolves.toEqual({ kind: 'disconnected' })
-
-    const replacementTrace = vi.fn()
-    await expect(
-      executeCodexAppServerTurn({
-        codexHome,
-        onTraceEvent: replacementTrace,
-        prompt: 'assistant turn after managed disconnect',
-        workingDirectory,
-      }),
-    ).resolves.toMatchObject({
-      sessionId: 'thread-after-managed-disconnect',
-      turnId: 'turn-after-managed-disconnect',
-    })
-
-    expect(codexMocks.spawn).toHaveBeenCalledTimes(2)
-    expect(replacementTrace).toHaveBeenCalledWith(
-      expect.objectContaining({
-        rawEvent: expect.objectContaining({
-          codexTimingColdStartReason: 'previous-explicit-stop',
-          codexTimingStage: 'initialized',
-        }),
-      }),
-    )
-  })
-
-  it('waits for the Codex account update before verifying managed ChatGPT connect', async () => {
-    const workingDirectory = await createTempDir('assistant-codex-managed-auth-work-')
-    const codexHome = await createTempDir('assistant-codex-managed-auth-home-')
-    const child = new MockChildProcess()
-    const loginStarted = createDeferred<void>()
-    const onDeviceCode = vi.fn()
-
-    codexMocks.spawn.mockImplementation(() => {
-      queueMicrotask(() => {
-        void (async () => {
-          const initialize = await waitForRpcMethod(child, 'initialize')
-          child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
-          child.stdout.write(jsonLine({
-            method: 'account/updated',
-            params: {
-              authMode: 'chatgpt',
-              planType: 'pro',
-            },
-          }))
-
-          const initialRead = await waitForRpcMethodCount(child, 'account/read', 1)
-          child.stdout.write(jsonLine({
-            id: initialRead.id,
-            result: {
-              account: null,
-              requiresOpenaiAuth: true,
-            },
-          }))
-
-          const loginStart = await waitForRpcMethod(child, 'account/login/start')
-          expect(loginStart.params).toEqual({
-            type: 'chatgptDeviceCode',
-          })
-          child.stdout.write(jsonLine({
-            id: loginStart.id,
-            result: {
-              type: 'chatgptDeviceCode',
-              loginId: 'login-managed-chatgpt',
-              verificationUrl: 'https://auth.openai.com/codex/device',
-              userCode: 'ABCD-1234',
-            },
-          }))
-          loginStarted.resolve()
-        })()
-      })
-
-      return child
-    })
-
-    const operation = executeCodexManagedAccountOperation({
-      action: 'connect',
-      codexHome,
-      onDeviceCode,
-      timeoutMs: 1_000,
-      workingDirectory,
-    })
-
-    await loginStarted.promise
-    await waitForMockCall(onDeviceCode, 1)
-    expect(onDeviceCode).toHaveBeenCalledWith({
-      userCode: 'ABCD-1234',
-      verificationUrl: 'https://auth.openai.com/codex/device',
-    })
-
-    child.stdout.write(jsonLine({
-      method: 'account/login/completed',
-      params: {
-        loginId: 'login-managed-chatgpt',
-        success: true,
-      },
-    }))
-    await waitForStableMicrotask()
-    expect(readWrittenRpcMessages(child).filter(
-      (message) => message.method === 'account/read',
-    )).toHaveLength(1)
-
-    child.stdout.write(jsonLine({
-      method: 'account/updated',
-      params: {
-        authMode: 'chatgpt',
-        planType: 'pro',
-      },
-    }))
-
-    const verifiedRead = await waitForRpcMethodCount(child, 'account/read', 2)
-    child.stdout.write(jsonLine({
-      id: verifiedRead.id,
-      result: {
-        account: {
-          type: 'chatgpt',
-          email: 'user@example.com',
-          planType: 'pro',
-        },
-        requiresOpenaiAuth: true,
-      },
-    }))
-
-    await expect(operation).resolves.toEqual({
-      kind: 'connected',
-    })
-    expect(codexMocks.spawn).toHaveBeenCalledWith(
-      'codex',
-      [
-        '--config',
-        'model_provider="openai"',
-        '--config',
-        'cli_auth_credentials_store="file"',
-        ...cliTimingLaunchArgs,
-        'app-server',
-      ],
-      expect.any(Object),
-    )
-  })
-
-  it('preserves Codex managed ChatGPT login completion errors', async () => {
-    const workingDirectory = await createTempDir('assistant-codex-managed-auth-error-work-')
-    const codexHome = await createTempDir('assistant-codex-managed-auth-error-home-')
-    const child = new MockChildProcess()
-    const loginStarted = createDeferred<void>()
-    const onDeviceCode = vi.fn()
-
-    codexMocks.spawn.mockImplementation(() => {
-      queueMicrotask(() => {
-        void (async () => {
-          const initialize = await waitForRpcMethod(child, 'initialize')
-          child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
-
-          const initialRead = await waitForRpcMethodCount(child, 'account/read', 1)
-          child.stdout.write(jsonLine({
-            id: initialRead.id,
-            result: {
-              account: null,
-              requiresOpenaiAuth: true,
-            },
-          }))
-
-          const loginStart = await waitForRpcMethod(child, 'account/login/start')
-          child.stdout.write(jsonLine({
-            id: loginStart.id,
-            result: {
-              type: 'chatgptDeviceCode',
-              loginId: 'login-managed-chatgpt-error',
-              verificationUrl: 'https://auth.openai.com/codex/device',
-              userCode: 'WXYZ-9876',
-            },
-          }))
-          loginStarted.resolve()
-        })()
-      })
-
-      return child
-    })
-
-    const operation = executeCodexManagedAccountOperation({
-      action: 'connect',
-      codexHome,
-      onDeviceCode,
-      timeoutMs: 1_000,
-      workingDirectory,
-    })
-
-    await loginStarted.promise
-    await waitForMockCall(onDeviceCode, 1)
-
-    child.stdout.write(jsonLine({
-      method: 'account/login/completed',
-      params: {
-        error: 'device auth failed with status 500',
-        loginId: 'login-managed-chatgpt-error',
-        success: false,
-      },
-    }))
-
-    await expect(operation).rejects.toMatchObject({
-      code: 'ASSISTANT_CODEX_AUTH_FAILED',
-      context: {
-        codexLoginError: 'device auth failed with status 500',
-        retryable: false,
-      },
-      message: 'ChatGPT account authentication did not complete successfully.',
-    })
   })
 
   it('preserves missing Codex startup errors emitted before turn binding', async () => {
@@ -2520,7 +2263,7 @@ describe('assistant codex runtime', () => {it('handles current Codex v2 turn-tag
                 approvalPolicy: 'never',
                 cwd: staleWorkingDirectory,
                 model: 'gpt-5',
-                modelProvider: 'vercel-ai-gateway',
+                modelProvider: 'hosted-openai',
                 sandbox: codexSandboxPolicyForMode('read-only'),
                 thread: {
                   id: 'resume-thread',
@@ -2704,7 +2447,7 @@ describe('assistant codex runtime', () => {it('handles current Codex v2 turn-tag
         cwd: path.resolve(workingDirectory),
         developerInstructions: 'Stable Murph instructions.',
         model: 'gpt-5',
-        modelProvider: 'vercel-ai-gateway',
+        modelProvider: 'hosted-openai',
         sandbox: freshSandbox,
       }
       const expectedResumeThreadContext = {
@@ -2822,7 +2565,7 @@ describe('assistant codex runtime', () => {it('handles current Codex v2 turn-tag
         executeCodexAppServerTurn({
           approvalPolicy: 'never',
           model: 'gpt-5',
-          modelProvider: 'vercel-ai-gateway',
+          modelProvider: 'hosted-openai',
           developerInstructions: 'Stable Murph instructions.',
           prompt: 'fresh prompt',
           reasoningEffort: 'high',

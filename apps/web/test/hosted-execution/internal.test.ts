@@ -24,7 +24,7 @@ import { requireVercelCronRequest } from "../../src/lib/hosted-execution/vercel-
 
 const runtimeAdmission = vi.hoisted(() => ({ check: vi.fn(), transaction: vi.fn() }));
 vi.mock("../../src/lib/prisma", () => ({ getPrisma: () => ({ $transaction: runtimeAdmission.transaction }) }));
-vi.mock("../../src/lib/hosted-execution/runtime-owner", () => ({ requireHostedRuntimeCallbackTx: runtimeAdmission.check }));
+vi.mock("../../src/lib/hosted-execution/runtime-owner", () => ({ requireHostedRuntimeCallback: runtimeAdmission.check }));
 
 const FIXED_TIMESTAMP = "2026-04-05T00:00:00.000Z";
 const FIXED_NOW_MS = Date.parse(FIXED_TIMESTAMP);
@@ -219,8 +219,8 @@ describe("requireHostedCloudflareCallbackRequest", () => {
   });
 
   it("runs fresh owner admission for signed runtime callbacks and rejects late legacy callbacks", async () => {
-    const tx = { syntheticTransaction: true };
-    runtimeAdmission.transaction.mockImplementation(async operation => operation(tx));
+    const prisma = { $transaction: runtimeAdmission.transaction };
+    runtimeAdmission.transaction.mockClear();
     runtimeAdmission.check.mockResolvedValue(null);
     const url = new URL("https://join.example.test/api/internal/hosted-runtime/log");
     const authority = { attemptId: "rt_fresh_admission", generation: "4", workspaceVersion: "12" };
@@ -230,7 +230,8 @@ describe("requireHostedCloudflareCallbackRequest", () => {
       privateJwkJson: currentPrivateJwkJson, userId: "member_runtime_admission" });
     const options = { maxBodyBytes: 0, nowMs: FIXED_NOW_MS, nonceStore: new MemoryNonceStore() };
     await expect(requireHostedCloudflareCallbackRequest(signed, options)).resolves.toBe("member_runtime_admission");
-    expect(runtimeAdmission.check).toHaveBeenLastCalledWith(tx, "member_runtime_admission", { ...authority, userId: "member_runtime_admission" });
+    expect(runtimeAdmission.check).toHaveBeenLastCalledWith(prisma, "member_runtime_admission", { ...authority, userId: "member_runtime_admission" });
+    expect(runtimeAdmission.transaction).not.toHaveBeenCalled();
     runtimeAdmission.check.mockRejectedValueOnce(new Error("synthetic retired runtime"));
     const legacy = await createSignedCallbackRequest({ body: "", method: "POST",
       nonce: "legacyadmissionnonce000000000001", path: url.pathname,
@@ -238,7 +239,7 @@ describe("requireHostedCloudflareCallbackRequest", () => {
     legacy.headers.set("x-hosted-runtime-attempt-id", "legacy-attempt");
     legacy.headers.set("x-hosted-runtime-lease-generation", "1");
     await expect(requireHostedCloudflareCallbackRequest(legacy, options)).rejects.toThrow("synthetic retired runtime");
-    expect(runtimeAdmission.check).toHaveBeenLastCalledWith(tx, "member_runtime_admission", null);
+    expect(runtimeAdmission.check).toHaveBeenLastCalledWith(prisma, "member_runtime_admission", null);
   });
 
   it("rejects a signed callback as replay when reindex raises a nonce conflict", async () => {

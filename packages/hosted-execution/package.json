@@ -1,8 +1,9 @@
 {
   "name": "@murphai/hosted-execution",
-  "version": "1.3.3",
+  "version": "1.3.5",
   "private": false,
   "type": "module",
+  "sideEffects": false,
   "license": "Apache-2.0",
   "publishConfig": {
     "access": "public"
@@ -22,6 +23,10 @@
       "types": "./dist/auth.d.ts",
       "default": "./dist/auth.js"
     },
+    "./voice-control": {
+      "types": "./dist/voice-control.d.ts",
+      "default": "./dist/voice-control.js"
+    },
     "./runtime-migration": {
       "types": "./dist/runtime-migration.d.ts",
       "default": "./dist/runtime-migration.js"
@@ -30,10 +35,6 @@
       "types": "./dist/runtime-owner.d.ts",
       "default": "./dist/runtime-owner.js"
     },
-    "./assistant-inference": {
-      "types": "./dist/assistant-inference.d.ts",
-      "default": "./dist/assistant-inference.js"
-    },
     "./assistant-usage": {
       "types": "./dist/assistant-usage.d.ts",
       "default": "./dist/assistant-usage.js"
@@ -41,6 +42,10 @@
     "./assistant-identifiers": {
       "types": "./dist/assistant-identifiers.d.ts",
       "default": "./dist/assistant-identifiers.js"
+    },
+    "./codex-behavior": {
+      "types": "./dist/codex-behavior.d.ts",
+      "default": "./dist/codex-behavior.js"
     },
     "./assistant-permissions": {
       "types": "./dist/assistant-permissions.d.ts",
@@ -189,6 +194,30 @@
     "./runtime-resource-purge": {
       "types": "./dist/runtime-resource-purge.d.ts",
       "default": "./dist/runtime-resource-purge.js"
+    },
+    "./conversation-polls": {
+      "types": "./dist/conversation-polls.d.ts",
+      "default": "./dist/conversation-polls.js"
+    },
+    "./parsers/mailbox": {
+      "types": "./dist/parsers/mailbox.d.ts",
+      "default": "./dist/parsers/mailbox.js"
+    },
+    "./observability": {
+      "types": "./dist/observability.d.ts",
+      "default": "./dist/observability.js"
+    },
+    "./companion-presence": {
+      "types": "./dist/companion-presence.d.ts",
+      "default": "./dist/companion-presence.js"
+    },
+    "./wearable-haptics": {
+      "types": "./dist/wearable-haptics.d.ts",
+      "default": "./dist/wearable-haptics.js"
+    },
+    "./usage-diagnostics": {
+      "types": "./dist/usage-diagnostics.d.ts",
+      "default": "./dist/usage-diagnostics.js"
     }
   },
   "files": [
@@ -198,7 +227,7 @@
   ],
   "scripts": {
     "build": "node ../../scripts/rm-paths.mjs dist .tsbuildinfo && node ../../scripts/run-typescript.mjs package -b tsconfig.json",
-    "typecheck": "node ../../scripts/run-typescript.mjs package -p tsconfig.typecheck.json --pretty false",
+    "typecheck": "node ../../scripts/run-typescript.mjs check -p tsconfig.typecheck.json --pretty false",
     "test": "pnpm exec vitest run --config vitest.config.ts --no-coverage",
     "test:coverage": "pnpm exec vitest run --config vitest.config.ts --coverage"
   },
@@ -215,7 +244,7 @@
     "@murphai/health-metrics": "workspace:*",
     "@murphai/importers": "workspace:*",
     "@murphai/runtime-state": "workspace:*",
-    "zod": "^4.4.3"
+    "zod": "^4.5.4"
   },
   "bundleDependencies": [
     "@murphai/clinical-records",

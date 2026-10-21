@@ -20,7 +20,7 @@ export async function executeHostedRuntimeMediaCommand(input: {
     const cutover = await lockHostedRuntimeMemberCutoverTx(tx, input.userId);
     const result = (applied: boolean, reason: HostedRuntimeMediaResponse["reason"] = null, purge: HostedRuntimeMediaPurge | null = null): HostedRuntimeMediaResponse => ({ cutover, applied, reason, purge });
     if (cutover !== "postgres") return result(false);
-    if (command.operation === "register" || command.operation === "retire" || command.operation === "admit_put" || command.operation === "admit_private_put") await requireHostedRuntimeOwnerTx(tx, { ...command, userId: input.userId });
+    if (command.operation === "admit_read" || command.operation === "register" || command.operation === "retire" || command.operation === "admit_put" || command.operation === "admit_private_put") await requireHostedRuntimeOwnerTx(tx, { ...command, userId: input.userId });
     // Also serialize reads/cleanup for resource-only members whose account row
     // has already been deleted. No account FK owns this cleanup obligation.
     await lockHostedRuntimeMediaTx(tx, input.userId, mediaId);
@@ -65,6 +65,7 @@ async function executeMediaCommandTx(input: MediaTransaction, command: HostedRun
     }
     case "register":
       return registerMediaTx(input, command, row);
+    case "admit_read":
     case "read":
     case "retire":
       return readOrRetireMediaTx(input, command, row);
@@ -107,10 +108,11 @@ async function registerMediaTx(input: MediaTransaction, command: Extract<HostedR
   return mediaResult(true);
 }
 
-async function readOrRetireMediaTx(input: MediaTransaction, command: Extract<HostedRuntimeMediaCommand, { operation: "read" | "retire" }>, row: HostedRuntimeMedia | null) {
+async function readOrRetireMediaTx(input: MediaTransaction, command: Extract<HostedRuntimeMediaCommand, { operation: "read" | "admit_read" | "retire" }>, row: HostedRuntimeMedia | null) {
   const { tx, userId, mediaId, now } = input;
-  if (!row) return mediaResult(command.operation === "read", command.operation === "read" ? "unregistered" : null);
-  if (command.operation === "read") {
+  const reading = command.operation !== "retire";
+  if (!row) return mediaResult(reading, reading ? "unregistered" : null);
+  if (reading) {
     const descriptor = command.descriptor;
     if (row.byteSize !== BigInt(descriptor.byteSize) || row.mediaKind !== descriptor.mediaKind || row.sha256 !== descriptor.sha256) return mediaResult(false, "descriptor_mismatch");
     if (!row.retiredAt && (row.expiresAt === null || row.expiresAt > now)) return mediaResult(true, "active");

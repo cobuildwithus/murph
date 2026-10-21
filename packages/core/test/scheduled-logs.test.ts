@@ -254,7 +254,8 @@ test("scheduled logs reject schedules the cron runner cannot execute", async () 
         measurements: [{ metric: "body-weight", value: 181, unit: "lb" }],
       },
     }),
-    /Invalid ISO datetime/u,
+    (error: unknown) =>
+      error instanceof VaultError && error.code === "VAULT_INVALID_INPUT",
   );
 
   await assert.rejects(

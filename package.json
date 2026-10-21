@@ -5,7 +5,7 @@
   "license": "Apache-2.0",
   "packageManager": "pnpm@10.33.0+sha512.10568bb4a6afb58c9eb3630da90cc9516417abebd3fabbe6739f0ae795728da1491e9db5a544c76ad8eb7570f5c4bb3d6c637b2cb41bfdcdb47fa823c8649319",
   "engines": {
-    "node": ">=24.14.1",
+    "node": "^24.14.1",
     "pnpm": "10.33.0"
   },
   "scripts": {
@@ -81,6 +81,7 @@
     "plan:close": "bash scripts/close-exec-plan.sh",
     "task:finish": "bash scripts/finish-task",
     "review:gpt": "bash scripts/review-gpt-pr-head-preflight.sh --run",
+    "benchmark:compilers": "node scripts/run-with-host-verification-slot.mjs 'Compiler paired benchmark' -- node scripts/benchmark-compiler-pair.mjs",
     "benchmark:typescript": "node scripts/run-with-host-verification-slot.mjs 'TypeScript benchmark' -- node scripts/benchmark-typescript.mjs",
     "onboard": "bash scripts/setup-host.sh",
     "vault-cli": "tsx --tsconfig tsconfig.base.json packages/cli/src/bin.ts",
@@ -98,8 +99,8 @@
     "@babel/parser": "^7.29.3",
     "@babel/traverse": "^7.29.0",
     "@babel/types": "^7.29.0",
-    "@cobuild/repo-tools": "^0.1.17",
-    "@cobuild/review-gpt": "^0.5.147",
+    "@cobuild/repo-tools": "^0.1.18",
+    "@cobuild/review-gpt": "0.5.154",
     "@elevenlabs/elevenlabs-js": "2.62.0",
     "@murphai/health-metrics": "workspace:*",
     "@murphai/hosted-local-harness": "workspace:*",
@@ -108,6 +109,7 @@
     "@vitest/coverage-v8": "^4.1.6",
     "frog": "1.1.0",
     "pg": "8.20.0",
+    "tsrs": "0.18.0-ts7.1.0-dev.20260929",
     "tsx": "^4.20.6",
     "typescript": "^7.0.2",
     "vite": "^8.0.12",

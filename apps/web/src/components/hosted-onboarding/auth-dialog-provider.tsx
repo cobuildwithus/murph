@@ -47,7 +47,6 @@ const INTEGRATIONS_CONNECT_PATH_PATTERN =
   /^\/integrations\/connect\/cai_[A-Za-z0-9_-]{32}$/u;
 const SETTINGS_DATA_PRIVACY_PATH = "/settings/data-privacy";
 const SETTINGS_PATH = "/settings";
-const ENVIRONMENT_PATH = "/environment";
 const HOSTED_USAGE_CREDIT_PURCHASE_ID_PATTERN = /^hucp_[A-Za-z0-9_-]{16}$/u;
 
 interface AuthContextValue {
@@ -234,7 +233,6 @@ function shouldResumeCurrentAuthUrl(payload: HostedAuthenticationCompletionPaylo
   return (
     shouldResumeCurrentActionApprovalUrl(payload)
     || shouldResumeCurrentConnectIndexUrl(payload)
-    || shouldResumeCurrentEnvironmentUrl(payload)
     || shouldResumeCurrentDeviceConnectIntentUrl(payload)
     || shouldResumeCurrentClinicalRecordsIndexUrl(payload)
     || shouldResumeCurrentClinicalRecordsConnectUrl(payload)
@@ -351,16 +349,6 @@ function shouldResumeCurrentSettingsPlanChangeUrl(
   );
   return returnValues.length === 1
     && parseHostedBillingPlanChangeReturnValue(returnValues[0]) !== null;
-}
-
-function shouldResumeCurrentEnvironmentUrl(
-  payload: HostedAuthenticationCompletionPayload,
-): boolean {
-  return (
-    isHostedOnboardingAccessibleStage(payload.stage)
-    && typeof window !== "undefined"
-    && window.location.pathname === ENVIRONMENT_PATH
-  );
 }
 
 // Someone returning from Stripe's payment-method page lands on /settings with

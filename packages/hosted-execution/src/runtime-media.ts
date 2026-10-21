@@ -15,7 +15,9 @@ export interface HostedRuntimeMediaPurge {
   revision: string;
 }
 export type HostedRuntimeMediaCommand =
+  // Legacy Workers authorize separately; remove after their rollout/rollback window.
   | { operation: "read"; descriptor: HostedRuntimeMediaDescriptor }
+  | ({ operation: "admit_read"; descriptor: HostedRuntimeMediaDescriptor } & HostedRuntimeOwnerIdentity)
   | ({ operation: "admit_put"; writeId: string; uploadId: string; descriptor: HostedRuntimeMediaDescriptor } & HostedRuntimeOwnerIdentity)
   | ({ operation: "admit_private_put"; writeId: string; uploadId: string; sha256: string } & HostedRuntimeOwnerIdentity)
   | { operation: "release_put"; writeId: string; mediaId: string; scope?: "private_media" }
@@ -58,7 +60,7 @@ export function parseHostedRuntimeMediaCommand(value: unknown): HostedRuntimeMed
       : { operation, writeId, uploadId, ...identity, sha256: mediaDigest(record.sha256) };
   }
   if (operation === "read") return { operation, descriptor: parseHostedRuntimeMediaDescriptor(record.descriptor) };
-  if (operation === "register") return { operation, ...parseHostedRuntimeOwnerIdentity(record), descriptor: parseHostedRuntimeMediaDescriptor(record.descriptor) };
+  if (operation === "register" || operation === "admit_read") return { operation, ...parseHostedRuntimeOwnerIdentity(record), descriptor: parseHostedRuntimeMediaDescriptor(record.descriptor) };
   if (operation === "retire") return { operation, ...parseHostedRuntimeOwnerIdentity(record), mediaId: mediaDigest(record.mediaId) };
   if (operation === "acknowledge_purge") return { operation, purge: parsePurge(record.purge) };
   throw new TypeError("Runtime media operation is invalid.");

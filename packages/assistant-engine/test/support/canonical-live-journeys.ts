@@ -1,20 +1,23 @@
 import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { access, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 
-import { initializeVault, listAutomations, showAutomation } from '@murphai/core'
-import { buildMurphHostedPermissionProfileTomlLines } from '@murphai/hosted-execution/assistant-permissions'
+import { initializeVault, listAutomations, patchAutomation, showAutomation, upsertAutomation } from '@murphai/core'
 import { readMealNutritionTotals } from '@murphai/query'
 import { createAssistantModelTarget } from '@murphai/operator-config/assistant-backend'
 import { restoreHostedBundleRoots, snapshotHostedBundleRoots } from '@murphai/runtime-state/node'
 import { getAssistantCronJob, getAssistantCronStatus, processDueAssistantCronJobsLocal, reconcileAssistantCronDeliveryIntent } from '../../src/assistant/cron.js'
 import { listAssistantOutboxIntents, markAssistantOutboxIntentSentById } from '../../src/assistant/outbox.js'
 import { sendAssistantMessageLocal, type AssistantMessageInput } from '../../src/assistant/service.js'
+import type { AssistantHostedAutomationTool, AssistantHostedAutomationToolRequest } from '../../src/assistant/execution-context.js'
 import { stopWarmCodexAppServer, waitForWarmCodexBackgroundWork } from '../../src/assistant-codex.js'
+
+import type { RealCodexProviderConfig } from './real-codex-provider.js'
+import { canonicalCodexLauncher } from './canonical-codex-launcher.js'
 
 const execFileAsync = promisify(execFile)
 const CLI_ENTRYPOINT = fileURLToPath(new URL('../../../cli/dist/bin.js', import.meta.url))
@@ -24,6 +27,7 @@ const THREAD_ID = 'canonical-live-synthetic-thread'
 
 export interface CanonicalLiveConfig {
   codexHome: string | null
+  providerConfig?: RealCodexProviderConfig
   env: NodeJS.ProcessEnv
   model: string
   modelProvider: string
@@ -38,7 +42,7 @@ export interface CanonicalLiveFixture {
   codexCommand: string
   commandCount(): Promise<number>
   cli(args: readonly string[], vault?: string): Promise<string>
-  message(prompt: string, input?: Partial<Pick<AssistantMessageInput, 'vault' | 'sessionId' | 'threadId' | 'threadIsDirect'>>): ReturnType<typeof sendAssistantMessageLocal>
+  message(prompt: string, input?: Partial<Pick<AssistantMessageInput, 'vault' | 'sessionId' | 'threadId' | 'threadIsDirect' | 'executionContext' | 'beforeProviderAcceptedInputs'>>): ReturnType<typeof sendAssistantMessageLocal>
   close(): Promise<void>
 }
 
@@ -54,27 +58,15 @@ const CLI_WRAPPER = [
   '',
 ].join('\n')
 
-function canonicalCodexLauncher(): string {
-  let section = ''
-  let rows: string[] = []
-  const overrides: string[] = []
-  const flush = () => {
-    if (section) overrides.push(`${section}={${rows.join(',')}}`)
-    rows = []
-  }
-  for (const line of buildMurphHostedPermissionProfileTomlLines()) {
-    if (!line || line.startsWith('#')) continue
-    if (line.startsWith('[')) { flush(); section = line.slice(1, -1).replaceAll('"', '') }
-    else rows.push(line)
-  }
-  flush()
-  const args = overrides.map((value) => `-c '${value.replaceAll("'", "'\\''")}'`).join(' ')
-  // exec preserves native process ownership and stdio. The wrapper supplies
-  // only production permission definitions, never model responses or tools.
-  return `#!/bin/sh\nexec "$MURPH_CANONICAL_JOURNEY_CODEX" ${args} "$@"\n`
-}
-
 export async function createCanonicalLiveFixture(config: CanonicalLiveConfig, channel: 'telegram' | 'linq' = 'telegram'): Promise<CanonicalLiveFixture> {
+  try {
+    await access(CLI_ENTRYPOINT)
+  } catch (error) {
+    if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
+      throw new Error('Canonical live journeys require the built CLI. Run pnpm build:test-runtime:prepared first.', { cause: error })
+    }
+    throw error
+  }
   const root = await mkdtemp(path.join(tmpdir(), 'murph-canonical-live-'))
   const vault = path.join(root, 'vault')
   const bin = path.join(root, '.local', 'bin')
@@ -89,9 +81,10 @@ export async function createCanonicalLiveFixture(config: CanonicalLiveConfig, ch
     PATH: `${bin}${path.delimiter}${config.env.PATH ?? ''}`,
     VAULT: vault,
   }
+  await symlink(process.execPath, path.join(bin, 'node'))
   await writeFile(path.join(bin, 'vault-cli'), CLI_WRAPPER, { mode: 0o700 })
   const codexCommand = path.join(bin, 'codex-real')
-  await writeFile(codexCommand, canonicalCodexLauncher(), { mode: 0o700 })
+  await writeFile(codexCommand, canonicalCodexLauncher(env, undefined, config.providerConfig), { mode: 0o700 })
   await writeFile(env.MURPH_CANONICAL_JOURNEY_COMMANDS!, '')
   // Bind the original authentication home explicitly while isolating operator
   // config and the first production CLI PATH entry. Auth is never copied.
@@ -140,6 +133,32 @@ export async function createCanonicalLiveFixture(config: CanonicalLiveConfig, ch
   return fixture
 }
 
+export async function runCanonicalHostedMealJourney(config: CanonicalLiveConfig): Promise<void> {
+  const fixture = await createCanonicalLiveFixture(config)
+  try {
+    const target = createAssistantModelTarget({
+      approvalPolicy: 'never', codexCommand: fixture.codexCommand,
+      codexHome: fixture.codexHome, model: config.model,
+      modelProvider: config.modelProvider, provider: 'codex-cli',
+      reasoningEffort: 'low', sandbox: 'workspace-write',
+    })
+    assert.ok(target)
+    const result = await fixture.message(`I ate oats for lunch on ${MEAL_DATE} at 12:15 UTC. The label says exactly 321 calories, 12 g protein, 51 g carbs and 7 g fat. Please record that meal.`, {
+      executionContext: { hosted: { defaultTarget: target, memberId: 'synthetic-hosted-meal-member', userEnvKeys: [] } },
+    })
+    const saved = await readMealNutritionTotals(fixture.vault, { from: MEAL_DATE, to: MEAL_DATE })
+    assert.equal(saved.mealCount, 1)
+    assert.equal(saved.totals.calories.total, 321)
+    assert.equal(saved.totals.proteinGrams.total, 12)
+    assert.equal(saved.totals.carbsGrams.total, 51)
+    assert.equal(saved.totals.fatGrams.total, 7)
+    assert.match(result.response, /logged|saved|recorded|added/iu)
+    assert.doesNotMatch(result.response, /couldn['’]t|unable|permission denied/iu)
+    assert.equal(result.delivery, null)
+    assert.equal((await listAutomations({ vaultRoot: fixture.vault })).count, 0)
+  } finally { await fixture.close() }
+}
+
 export async function runCanonicalMealRestartJourney(config: CanonicalLiveConfig): Promise<void> {
   const fixture = await createCanonicalLiveFixture(config)
   try {
@@ -178,22 +197,48 @@ export async function runCanonicalMealRestartJourney(config: CanonicalLiveConfig
   } finally { await fixture.close() }
 }
 
+// This synthetic hosted boundary delegates all records and timing to production
+// owners. It does not reproduce the runtime host's authorization/route policy;
+// those remain covered by assistant-runtime's hosted automation entrypoint tests.
+export function createCanonicalReminderAutomationPort(vault: string, requests: AssistantHostedAutomationToolRequest[]): AssistantHostedAutomationTool {
+  return { async request(request, context) {
+    context?.signal?.throwIfAborted()
+    requests.push(request)
+    if (request.action === 'reconcile') throw new Error('Unexpected support-series action.')
+    let created = false
+    let record
+    if (request.action === 'inspect') {
+      record = await showAutomation({ automationId: request.lookup, slug: request.lookup, vaultRoot: vault })
+      assert.ok(record, 'The inspected reminder must exist in canonical storage.')
+    } else {
+      assert.equal(request.supportSeriesId, undefined, 'This journey creates an ordinary reminder.')
+      if (request.action === 'patch') assert.notEqual(request.retargetToCurrentConversation, true)
+      const storage = { vaultRoot: vault, contextReferences: request.contextReferences ? [...request.contextReferences] : undefined, tags: request.tags ? [...request.tags] : undefined }
+      const result = request.action === 'save'
+        ? await upsertAutomation({ ...request, ...storage, continuityPolicy: request.continuityPolicy ?? 'preserve', status: request.status ?? 'active', createOnly: true, route: { channel: 'linq', identityId: null, participantId: null, threadId: THREAD_ID, deliveryTarget: THREAD_ID, threadIsDirect: true } })
+        : await patchAutomation({ ...request, ...storage })
+      record = result.record
+      created = result.created
+    }
+    const job = record.status === 'archived' ? null : await getAssistantCronJob(vault, record.automationId)
+    const response = {
+      automationId: record.automationId, lookupId: record.automationId,
+      deliveryChannel: record.route.channel, effectiveTimeZone: record.schedule.kind === 'cron' || record.schedule.kind === 'dailyLocal' ? record.schedule.timeZone ?? 'UTC' : null,
+      occurrenceProjection: { status: 'resolved' as const, nextOccurrenceAt: job?.state.nextRunAt ?? null },
+      schedule: record.schedule, status: record.status, updatedAt: record.updatedAt,
+    }
+    return request.action === 'inspect'
+      ? { ...response, action: 'inspect', instructions: record.instructions, title: record.title, routeBinding: 'preserved' }
+      : { ...response, action: request.action, created, routeBinding: request.action === 'save' ? 'current_conversation' : 'preserved' }
+  } }
+}
+
 export async function runCanonicalReminderJourney(config: CanonicalLiveConfig): Promise<void> {
   const fixture = await createCanonicalLiveFixture(config, 'linq')
   try {
-    const created = await fixture.message('Remind me to stretch every minute in this chat. Please save that recurring reminder now.')
-    const records = await listAutomations({ vaultRoot: fixture.vault })
-    assert.equal(records.count, 1)
-    const reminder = records.items[0]
-    assert.ok(reminder)
-    assert.equal(reminder.status, 'active')
-    assert.match(reminder.instructions, /stretch/iu)
-    assert.equal(reminder.assistantTargetOverride, null)
-    assert.equal(reminder.route.channel, 'linq')
-    assert.equal(reminder.route.threadId ?? reminder.route.deliveryTarget, THREAD_ID)
-    assert.ok(await fixture.commandCount() > 0, 'The model must create the reminder through the shipped CLI.')
     const scheduledModels: (string | null)[] = []
-    const executionContext = { hosted: { memberId: 'canonical-live-synthetic-member', userEnvKeys: [], defaultTarget: createAssistantModelTarget({
+    const automationRequests: AssistantHostedAutomationToolRequest[] = []
+    const executionContext = { hosted: { automationTool: createCanonicalReminderAutomationPort(fixture.vault, automationRequests), memberId: 'canonical-live-synthetic-member', userEnvKeys: [], defaultTarget: createAssistantModelTarget({
       provider: 'codex-cli', model: config.model, modelProvider: config.modelProvider,
       codexCommand: fixture.codexCommand, codexHome: fixture.codexHome,
       approvalPolicy: 'never', sandbox: 'workspace-write', reasoningEffort: 'low',
@@ -206,19 +251,31 @@ export async function runCanonicalReminderJourney(config: CanonicalLiveConfig): 
       assert.equal(input.target, THREAD_ID)
       return { target: THREAD_ID, conversationThreadId: THREAD_ID, threadIsDirect: true }
     } } }
+    const created = await fixture.message('Remind me to stretch every minute in this chat. Please save that recurring reminder now.', { executionContext })
+    const records = await listAutomations({ vaultRoot: fixture.vault })
+    assert.equal(records.count, 1)
+    const reminder = records.items[0]
+    assert.ok(reminder)
+    assert.equal(reminder.status, 'active')
+    assert.match(reminder.instructions, /stretch/iu)
+    assert.ok(['gpt-6-luna', 'gpt-6-sol'].includes(reminder.assistantTargetOverride?.model ?? ''), 'The reminder must save an explicit supported reminder model.')
+    assert.equal(reminder.route.channel, 'linq')
+    assert.equal(reminder.route.threadId ?? reminder.route.deliveryTarget, THREAD_ID)
+    assert.equal(automationRequests.filter((request) => request.action === 'save').length, 1, 'The model must create exactly one reminder through the hosted tool.')
     const job = await getAssistantCronJob(fixture.vault, reminder.automationId)
     assert.ok(job.state.nextRunAt)
     const waitMs = new Date(job.state.nextRunAt).getTime() - Date.now() + 100
     assert.ok(waitMs < 70_000, 'An every-minute reminder must become due within one minute.')
     if (waitMs > 0) await new Promise((resolve) => setTimeout(resolve, waitMs))
     const turnEnvironment = { currentWorkingDirectory: fixture.vault, env: fixture.env }
+    scheduledModels.length = 0
     const fired = await processDueAssistantCronJobsLocal({
       deliveryDispatchMode: 'queue-only', executionContext, limit: 1, turnEnvironment, vault: fixture.vault,
     })
     assert.equal(fired.processed, 1)
     assert.equal(fired.failed, 0, (await getAssistantCronJob(fixture.vault, reminder.automationId)).state.lastError ?? undefined)
     assert.ok(scheduledModels.length > 0, 'The scheduler must report actual model usage.')
-    assert.ok(scheduledModels.every((model) => model === config.model))
+    assert.ok(scheduledModels.every((model) => model === reminder.assistantTargetOverride?.model))
     const intents = await listAssistantOutboxIntents(fixture.vault)
     assert.equal(intents.length, 1)
     const intent = intents[0]
@@ -245,11 +302,12 @@ export async function runCanonicalReminderJourney(config: CanonicalLiveConfig): 
     assert.equal((await getAssistantCronStatus(fixture.vault)).enabledJobs, 1)
     await stopWarmCodexAppServer('canonical-reminder-before-cancel')
     await fixture.message('Cancel the recurring stretch reminder. I do not want any more stretch reminders.', {
-      sessionId: created.session.sessionId,
+      executionContext, sessionId: created.session.sessionId,
     })
     const cancelled = await showAutomation({ automationId: reminder.automationId, vaultRoot: fixture.vault })
     assert.ok(cancelled)
     assert.equal(cancelled.status, 'archived')
+    assert.equal(automationRequests.filter((request) => request.action === 'patch' && request.status === 'archived').length, 1)
     assert.equal((await getAssistantCronStatus(fixture.vault)).enabledJobs, 0)
     assert.deepEqual(await processDueAssistantCronJobsLocal({ deliveryDispatchMode: 'queue-only', executionContext, limit: 1, turnEnvironment, vault: fixture.vault }), { processed: 0, failed: 0, succeeded: 0 })
     assert.equal((await listAssistantOutboxIntents(fixture.vault)).length, 1)
