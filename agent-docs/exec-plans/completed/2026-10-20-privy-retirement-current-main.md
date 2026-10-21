@@ -9,14 +9,14 @@ Preserve first-party sign-in, session renewal/logout, account recovery, and pass
 ## Plan
 - [x] Reconcile current main and inspect obsolete-provider references and changed owners.
 - [x] Run focused auth/deletion tests and relevant typechecks; review the resulting patch.
-- [ ] Verify migration convergence, native distribution/recovery, and provider obligations through their existing owners.
-- [ ] Push the candidate, obtain applicable ReviewGPT and CI evidence, then merge and deploy when gates permit.
+- [x] Resolve migration convergence and provider obligations through canonical owners; record the operator-approved older-native recovery risk and remaining store-publication boundary.
+- [x] Push, review, merge, deploy, verify guarded schema contraction, and remove obsolete project configuration.
 
 ## Evidence and decisions
 The historical retirement PR already contains guarded contract SQL and an explicit release hold. Current production evidence remains private and is reported only as aggregates in the task conversation. Native release qualification is requested from the operator; code review does not establish distribution or recovery evidence.
 
 ## Status
-In progress. No production mutation or vendor deletion performed.
+Completed for the authorized runtime/source retirement. Web is live; native source removals are merged. Vendor-app deletion and new native store publication remain explicitly separate, unperformed actions.
 
 ## Reconciliation and review retrospective
 Current-main conflict resolution preserves native messaging, canonical credential ownership, canary-only diagnostic retention, newer retention categories, and prior feature removals. The shared identity-conflict error keeps current diagnostic reason allowlisting while removing importer-only reasons. Removed the obsolete, unconsumed phone-auth readiness capability instead of retaining its outdated SMS configuration reader. No new state, dependency, authentication fallback, or product surface.
@@ -40,4 +40,16 @@ Restore the existing idempotent phone welcome call on active admission. Two prod
 Main advanced to `f386be0e8ffb8a09f66501b59cf7a7f4a6551e57` while round 5 reviewed `dd2b4396112c948d31ee29128f7372408a94d410`. Resolve the four conflicts by preserving main's Experiments deletion and retirement's obsolete-auth deletion. Keep one copy of three identical first-party browser invalidation tests; no assertion or behavior is lost. Other current-main changes merge through their existing owners. Frozen dependency install, full workspace typecheck, documentation drift, authored-diff whitespace and 94 focused browser-vault/companion tests pass after reconciliation. Apply the new additive game-photo migration only to the isolated synthetic test database. This base update introduces no new retirement behavior and still requires final-head CI; production holds remain unchanged.
 
 ## Release disposition
-Hold. Native distribution/recovery, terminal account migration disposition, and provider/wallet obligations remain independent live gates. No production mutation, account deletion, wallet operation, or vendor shutdown was performed.
+Shipped on 2026-10-21 under the operator-approved retirement disposition. Canonical unused-signup cleanup converged, first-party-only Web passed exact production admission and is live, guarded contraction completed after drain, and read-only catalog checks confirm the retired table/columns are absent. All 14 Privy Vercel settings were removed while preserving the shared session HMAC key. iOS #151, Android #40 and configuration #41 are merged. The current evidence and explicit native/vendor publication gaps are owned by `docs/hosted-auth-migration.md`. No wallet operation, vendor-app deletion, or new store publication is claimed.
+
+
+## Final closeout
+
+Removed the final two unconsumed synthetic Privy build inputs and their stale
+fixture assertion. The deployment admission permissions, ordering, artifact
+identity and mandatory private proof are unchanged. Nine artifact-contract tests
+pass; source inspection finds no remaining consumer of either input. This is
+internal configuration cleanup, not a new authentication or rollout path.
+Status: completed
+Updated: 2026-10-21
+Completed: 2026-10-21

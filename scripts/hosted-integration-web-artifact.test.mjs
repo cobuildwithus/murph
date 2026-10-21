@@ -29,7 +29,6 @@ test("publishes only public integration output before creating private credentia
   assert.doesNotMatch(producer, /secrets\.|vars\.|materialize\.mjs/u);
   assert.match(producer, /NEXT_DIST_DIR_MODE: smoke/u);
   assert.match(producer, /NEXT_DIST_DIR_SUFFIX: murph-cloud-integration/u);
-  assert.match(producer, /NEXT_PUBLIC_PRIVY_APP_ID: cm_app_smoke_placeholder1/u);
   assert.match(producer, /pnpm --dir packages\/hosted-execution build/u);
   assert.match(producer, /pnpm --dir apps\/web build/u);
   assert.match(producer, /retention-days: 1/u);
