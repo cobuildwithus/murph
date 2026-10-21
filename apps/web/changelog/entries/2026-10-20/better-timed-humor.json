@@ -1,0 +1,19 @@
+{
+  "publishedOn": "2026-10-20",
+  "order": 100,
+  "item": {
+    "id": "better-timed-humor",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Better-timed humor",
+    "summary": "Murph keeps most replies straightforward and saves jokes for moments that invite one.",
+    "details": "If you tell Murph its jokes aren't landing, it drops the humor and answers plainly. Rooms and members who turned Humor up still get more playful replies.",
+    "relevanceTags": [
+      "groups",
+      "personality"
+    ],
+    "sourcePullRequests": [
+      4225
+    ]
+  }
+}

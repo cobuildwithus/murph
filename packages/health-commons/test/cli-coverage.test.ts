@@ -123,7 +123,7 @@ describe("@murphai/health-commons coverage scaffolding", () => {
     };
 
     expect(packageJson.scripts?.typecheck).toBe(
-      "pnpm generate && node ../../scripts/run-typescript.mjs package -p tsconfig.typecheck.json --pretty false",
+      "pnpm generate && node ../../scripts/run-typescript.mjs check -p tsconfig.typecheck.json --pretty false",
     );
     expect(packageJson.scripts?.verify).toContain("pnpm typecheck");
   });

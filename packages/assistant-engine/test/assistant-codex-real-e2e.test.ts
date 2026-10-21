@@ -9490,6 +9490,119 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
     360_000,
   )
 
+  const recentGroupJokes = [
+    'Jordan: "Murph, settle it. Is trail mix a snack or a meal?"',
+    'Murph: "A meal if you eat it standing over the sink. That is the law."',
+    'Riley: "Murph, the chocolate is the only reason anyone buys trail mix"',
+    'Murph: "Correct. The raisins are there as a legal technicality."',
+  ]
+  it.each([
+    [
+      'introduction after recent jokes',
+      [
+        ...recentGroupJokes,
+        'Jordan: "Murph, this is Sam. She is joining us for the hike on Saturday."',
+      ],
+    ],
+    [
+      'humor critique after recent jokes',
+      [
+        ...recentGroupJokes,
+        'Jordan: "Murph your jokes have gotten pretty stale lately"',
+      ],
+    ],
+    [
+      'fresh comic setup',
+      [
+        'Jordan: "Saturday hike is locked. Trailhead at 8."',
+        'Murph: "Got it. Trailhead at 8 on Saturday."',
+        'Riley: "Murph, settle it. Jordan says a hot dog is a sandwich and has defended it for an hour."',
+      ],
+    ],
+  ] as const)(
+    'times group humor: %s',
+    async (scenario, transcript) => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-group-humor-timing-e2e-'),
+      )
+      const generations: unknown[] = []
+
+      try {
+        const skillsRoot = path.join(workingDirectory, 'skills')
+        await Promise.all(
+          (['group-chat', 'groupchat-comedy'] as const).map(async (slug) => {
+            await materializeAssistantSkill({ skillsRoot, slug })
+          }),
+        )
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions:
+            buildGroupPointOfViewDeveloperInstructions(),
+          dynamicTools: [
+            MURPH_GENERATE_VOICE_MEMO_TOOL,
+            MURPH_GENERATE_SONG_TOOL,
+          ],
+          env: {
+            ...config.env,
+            [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+          },
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt: ['Trusted group transcript:', ...transcript].join('\n'),
+          reasoningEffort: 'low',
+          sandbox: 'workspace-write',
+          voiceMemoRuntime: {
+            elevenLabs: {
+              apiKeyAvailable: true,
+              modelId: 'eleven_multilingual_v2',
+              voiceId: 'voice_murph',
+            },
+            generateAndUpload: async (input) => {
+              generations.push(input.generation)
+              return {
+                attachmentId: 'attachment_group_humor_timing',
+                filename: 'group-humor-timing.mp3',
+              }
+            },
+            kind: 'linq',
+          },
+          workingDirectory,
+        })
+        const reply = result.finalMessage.trim()
+        process.stdout.write(
+          `[group-humor-timing-e2e] ${JSON.stringify({ scenario, reply })}\n`,
+        )
+
+        expect(generations).toEqual([])
+        expect(result.responseMedia ?? []).toEqual([])
+        expect(reply).not.toBe('')
+        expect(reply.length).toBeLessThanOrEqual(240)
+        expect(reply).not.toMatch(/\blol\b|\blmao\b|😂|🤣/iu)
+        if (scenario === 'fresh comic setup') {
+          expect(reply).toMatch(/\bJordan\b|sandwich|hot dog/iu)
+          return
+        }
+        // A callback to the earlier bits is another joke, not a plain reply.
+        expect(reply).not.toMatch(/raisin|sink|legal|\blaw\b/iu)
+        if (scenario === 'introduction after recent jokes') {
+          expect(reply).toMatch(/\bSam\b/u)
+        }
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    360_000,
+  )
+
   it(
     'weighs native reply context when deciding group-floor ownership',
     async () => {
@@ -24657,6 +24770,10 @@ describeRealCodex('real Codex experiment onboarding e2e', () => {
         await materializeAssistantSkill({
           skillsRoot,
           slug: 'experiment-onboarding',
+        })
+        await materializeAssistantSkill({
+          skillsRoot,
+          slug: 'daily-activity',
         })
         await materializePrivateExperimentStartVaultCli({
           binDirectory,
