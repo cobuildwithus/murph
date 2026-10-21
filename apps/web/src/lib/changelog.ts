@@ -3507,10 +3507,6 @@ const LEGACY_CHANGELOG_EDITIONS = [
           "Murph Safe names the evidence-checking process; it never stamps a product safe or unsafe. Search terms stay out of URLs, logs, and analytics, and the same records are available through a versioned public API.",
         relevanceTags: ["supplements", "nutrition", "search"],
         sourcePullRequests: [765],
-        tryIt: {
-          href: "/search",
-          label: "Search a product",
-        },
       },
       {
         id: "scheduled-replies-keep-context",

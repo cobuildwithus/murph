@@ -14,10 +14,13 @@ const runnerPath = new URL(
   import.meta.url,
 );
 
-test("Linq production canary admits one verified serialized production journey every six hours", async () => {
+test("Linq production canary admits one verified serialized production journey nine times weekly", async () => {
   const workflow = await readFile(workflowPath, "utf8");
 
-  assert.match(workflow, /schedule:\n\s+- cron: "17 \*\/6 \* \* \*"/u);
+  assert.deepEqual(
+    [...workflow.matchAll(/cron: "([^"]+)"/gu)].map((match) => match[1]),
+    ["17 0 * * 0,3,6", "17 18 * * 0,3", "17 12 * * 1,4", "17 6 * * 2,5"],
+  );
   assert.match(workflow, /workflow_dispatch:/u);
   assert.doesNotMatch(workflow, /pull_request:|\npush:|deployment_status:/u);
   assert.match(workflow, /contents: read/u);

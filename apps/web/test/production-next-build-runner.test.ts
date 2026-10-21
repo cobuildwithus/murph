@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -46,11 +46,7 @@ async function createRunnerFixture(): Promise<{
     `#!/usr/bin/env bash
 set -euo pipefail
 if [[ "\${1:-}" == "-p" ]]; then
-  if [[ "\${2:-}" == *typescript* ]]; then
-    printf '%s\\n' "\$MURPH_FAKE_TYPESCRIPT_BIN"
-  else
-    printf '%s\\n' "\$MURPH_FAKE_NEXT_BIN"
-  fi
+  printf '%s\\n' "\$MURPH_FAKE_NEXT_BIN"
   exit 0
 fi
 if [[ "\${1:-}" == "../../scripts/rm-paths.mjs" ]]; then
@@ -61,7 +57,7 @@ if [[ "\${1:-}" == "../../scripts/rm-paths.mjs" ]]; then
   rm -rf "\${2:-}"
   exit 0
 fi
-if [[ "\${2:-}" == "\$MURPH_FAKE_TYPESCRIPT_BIN" ]]; then
+if [[ "\${2:-}" == "../../scripts/run-typescript.mjs" ]]; then
   printf 'NODE_OPTIONS=%s\\n' "\${NODE_OPTIONS:-}" > "\$MURPH_FAKE_TYPECHECK_LOG"
   printf 'GOMEMLIMIT=%s\\n' "\${GOMEMLIMIT:-}" >> "\$MURPH_FAKE_TYPECHECK_LOG"
   printf 'TYPECHECK_GATE=%s\\n' "\${MURPH_HOSTED_WEB_PREPARED_TYPECHECK:-}" >> "\$MURPH_FAKE_TYPECHECK_LOG"
@@ -110,7 +106,6 @@ function runProductionBuild(input: {
     MURPH_FAKE_REMOVE_LOG: input.removeLog,
     MURPH_FAKE_TYPECHECK_EXIT_CODE: String(input.typecheckExitCode ?? 0),
     MURPH_FAKE_TYPECHECK_LOG: input.typecheckLog,
-    MURPH_FAKE_TYPESCRIPT_BIN: "/fixture/tsc",
     MURPH_HOSTED_WEB_PREPARED_TYPECHECK: "forged",
     GOMEMLIMIT: "8GiB",
     NODE_OPTIONS: "--trace-warnings --max-old-space-size=99",
@@ -144,7 +139,7 @@ test("production Next runner owns the cache transition and fail-closed epoch", a
       `Resetting incompatible Next build cache for epoch=${buildCacheEpoch}`,
     );
     expect(coldBuild.stdout).toContain(
-      "compiler=webpack parent_old_space_mb=1024 build_worker_old_space_mb=3072 typecheck_old_space_mb=6144 webpack_cache=disabled webpack_build_worker=on",
+      "compiler=webpack parent_old_space_mb=1024 build_worker_old_space_mb=3072 webpack_cache=disabled webpack_build_worker=on",
     );
     await expect(readFile(staleCacheEntry, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
     await expect(readFile(cacheStamp, "utf8")).resolves.toBe(`${buildCacheEpoch}\n`);
@@ -166,11 +161,12 @@ test("production Next runner owns the cache transition and fail-closed epoch", a
       "",
     ].join("\n"));
     await expect(readFile(fixture.typecheckLog, "utf8")).resolves.toBe([
-      "NODE_OPTIONS=--trace-warnings --max-old-space-size=6144",
+      "NODE_OPTIONS=--trace-warnings --max-old-space-size=1024",
       "GOMEMLIMIT=8GiB",
       "TYPECHECK_GATE=",
-      "--max-old-space-size=6144",
-      "/fixture/tsc",
+      "--max-old-space-size=1024",
+      "../../scripts/run-typescript.mjs",
+      "web",
       "-p",
       "tsconfig.next.json",
       "--pretty",
@@ -247,3 +243,39 @@ test("production Next runner fails closed before compilation when the prepared t
     await fixture.cleanup();
   }
 });
+
+test("native route checking rejects invalid Next-generated contracts and accepts a repair", async () => {
+  const fixture = await createRunnerFixture();
+  try {
+    await symlink(path.join(appRoot, "node_modules"), path.join(fixture.appDir, "node_modules"), "dir");
+    await mkdir(path.join(fixture.appDir, "app"));
+    await writeFile(path.join(fixture.appDir, "package.json"), '{"private":true,"type":"module"}');
+    await writeFile(path.join(fixture.appDir, "tsconfig.json"), JSON.stringify({
+      compilerOptions: {
+        target: "es2022", module: "esnext", moduleResolution: "bundler",
+        jsx: "react-jsx", strict: true, skipLibCheck: true, noEmit: true,
+        incremental: true, types: ["react"], tsBuildInfoFile: ".next/check.tsbuildinfo",
+      },
+      include: ["app/**/*.tsx", ".next/types/**/*.ts"],
+    }));
+    const page = path.join(fixture.appDir, "app/page.tsx");
+    await writeFile(page, 'export const generateStaticParams = () => "invalid"; export default function Page() { return null; }\n');
+    const generated = spawnSync(process.execPath, [
+      path.join(appRoot, "node_modules/next/dist/bin/next"), "typegen",
+    ], { cwd: fixture.appDir, encoding: "utf8", env: { ...process.env, NEXT_TELEMETRY_DISABLED: "1" } });
+    expect(generated.status, generated.stdout + generated.stderr).toBe(0);
+    const check = () => spawnSync(process.execPath, [
+      path.resolve(appRoot, "../../scripts/run-typescript.mjs"),
+      "web", "-p", path.join(fixture.appDir, "tsconfig.json"), "--pretty", "false",
+    ], { cwd: fixture.appDir, encoding: "utf8", env: { ...process.env, MURPH_VERIFY_SHARED_HOST: "1" } });
+    const invalid = check();
+    expect(invalid.status, invalid.stderr).not.toBe(0);
+    expect(invalid.stdout).toContain(".next/types/validator.ts");
+    expect(invalid.stdout).toContain("generateStaticParams");
+    await writeFile(page, "export const generateStaticParams = () => []; export default function Page() { return null; }\n");
+    const repaired = check();
+    expect(repaired.status, repaired.stdout + repaired.stderr).toBe(0);
+  } finally {
+    await fixture.cleanup();
+  }
+}, 30_000);

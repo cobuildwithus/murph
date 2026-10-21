@@ -1,4 +1,11 @@
+Linq line lock-order repair is tracked in
+[the active lock-order plan](exec-plans/completed/2026-10-20-linq-line-lock-order.md).
+
 Documentation guard diagnostic clarification is tracked in
+
+OAuth retirement deployment compatibility is tracked in
+[the callback drain plan](exec-plans/active/2026-10-20-oauth-callback-drain.md);
+`references/hosted-runtime-protocol.md` remains the live contract owner.
 [the diagnostic plan](exec-plans/completed/2026-10-19-frog-docs-diagnostic-4205.md).
 
 Snapshot upload failure phases are owned by
@@ -81,6 +88,12 @@ Garmin history import coalescing and synthetic fetch-work evidence are recorded
 in [the import-speed plan](exec-plans/completed/2026-09-24-garmin-import-speed.md).
 
 # Murph Agent Docs Index
+
+Local idle-cleanup veto ordering and completion-preflight evidence are recorded
+in [owner request reduction](exec-plans/completed/2026-10-02-owner-cleanup-request-reduction.md);
+the current contract remains in `references/hosted-postgres-runtime.md`.
+Current lost-result recovery reconciliation is recorded in
+[the completion reconciliation plan](exec-plans/completed/2026-10-20-pr3994-completion-reconciliation.md).
 
 Exact provider-event correlation for reaction typing alerts is owned by
 `RELIABILITY.md`; implementation and synthetic PostgreSQL proof are recorded in
@@ -760,7 +773,6 @@ Package verifier worker-exit result preservation is tracked in
 | `agent-docs/product-specs/hosted-support-escalation.md` | Hosted support product spec. | Hosted support product spec | High | 2026-08-05 |
 | `agent-docs/product-specs/hosted-family-plan.md` | Hosted billing/product spec. | Hosted billing/product spec | High | 2026-08-10 |
 | `agent-docs/product-specs/health-commons.md` | Health Commons behavior. | Health Commons behavior | High | 2026-10-19 |
-| `agent-docs/product-specs/murph-safe-public-product-search.md` | Public product evidence behavior. | Public product evidence behavior | High | 2026-09-02 |
 | `agent-docs/product-specs/murph-onboarding.md` | Three-reply Web opening, model-owned identity saves, and aspiration-anchored private onboarding. | New-member onboarding behavior | High | 2026-09-24 |
 | `agent-docs/product-specs/experiment-onboarding.md` | Experiment onboarding behavior. | Experiment onboarding behavior | High | 2026-10-19 |
 | `agent-docs/product-specs/experiment-adherence-confidence.md` | Read-time assumed adherence, confidence ladder, correction semantics, category-scoped activity evidence, and typed subjective session evidence for experiments. | Experiment adherence behavior | High | 2026-07-16 |
@@ -825,11 +837,11 @@ Package verifier worker-exit result preservation is tracked in
 | `agent-docs/research/2026-06-25-imessage-line-flag-evidence.md` | Point-in-time redacted evidence note for the 2026-06-25 iMessage line flag investigation. | Investigation artifact | Medium | 2026-06-26 |
 | `agent-docs/operations/agent-workflow-routing.md` | Task scope, authority, checkout, commits, and instruction ownership. | Agent workflow routing | High | 2026-09-11 |
 | `agent-docs/operations/product-ux.md` | Product UX workflow. | Product UX workflow | High | 2026-08-31 |
-| `agent-docs/operations/live-provider-canaries.md` | Fresh native, Linq, Stripe and Garmin provider outcomes; bounded Linq observation retries, GitHub dispatch, protected execution, exact receipts and cross-repository rollout. | Live provider proof | High | 2026-09-19 |
+| `agent-docs/operations/live-provider-canaries.md` | Fresh native, Linq, Stripe and Garmin provider outcomes; bounded Linq observation retries, GitHub dispatch, protected execution, exact receipts and cross-repository rollout. UTC weekly cadence (nine Linq, five per native platform, two Garmin/Stripe) and unchanged manual/release proof. | Live provider proof | High | 2026-10-20 |
 | `agent-docs/operations/native-android-hosted-e2e.md` | Native Android verification operations. | Native Android verification operations | High | 2026-09-01 |
 | `agent-docs/operations/verification-and-runtime.md` | Verification ownership by delivery path, fresh-checkout Cloudflare generated-client prerequisites, Draft-before-push readiness, CI compiler memory and production-build proof, independent worktree build outputs, verified remote-tracking base refresh, authorized base reconciliation with bounded conflict resolution, Temporal integration build/process-shard proof, remote browser health readiness, wearable browser failure evidence captured before cleanup, and HTTP/destination validation before persisted connection assertions. Wearable production Web preparation, stage forwarding, numeric host progress, and bounded Actions notice retention, with Vercel initial typecheck budget ownership, managed build-cache refresh, and case-insensitive APT numeric-policy verification. Includes tsrs check routing and Oxlint ownership. | Verification policy | High | 2026-10-20 |
 | `agent-docs/operations/database-transaction-starvation-audit.md` | Database critical-section reliability. | Database critical-section reliability | High | 2026-08-09 |
-| `agent-docs/operations/typescript-verification-performance.md` | tsrs no-emit routing, stable TypeScript emission, host compatibility, worker budgets, incremental CI caches, watch and benchmark method. | Verification performance policy | Medium | 2026-10-20 |
+| `agent-docs/operations/typescript-verification-performance.md` | tsrs check/build routing, declaration consumer proof, TypeScript fallback, host compatibility, worker budgets, incremental CI caches, watch and paired compiler benchmarks. | Verification performance policy | Medium | 2026-10-20 |
 | `agent-docs/operations/completion-workflow.md` | Parent-owned completion evidence, final ReviewGPT eligibility and recovery before the first valid review, verified-base mergeability, and Draft-before-push ordering; specialist passes are retired. | Completion workflow | High | 2026-09-11 |
 | `agent-docs/operations/imessage-deliverability.md` | Phone-number messaging policy, iMessage-only inactivity and canonical requested-Ask exemptions, and direct duplicate handoff identity. | Phone-number messaging policy | High | 2026-09-29 |
 | `agent-docs/operations/local-storage-lifecycle.md` | Local rebuildable-storage lifecycle, guarded retirement, and dependency hook setup. | Local rebuildable-storage lifecycle | High | 2026-09-11 |

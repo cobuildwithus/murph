@@ -30,7 +30,6 @@ export * from "./memory.ts";
 export * from "./member-action.ts";
 export * from "./message-links.ts";
 export * from "./preferences.ts";
-export * from "./public-products.ts";
 export * from "./relation-links.ts";
 export * from "./shares.ts";
 export * from "./time.ts";

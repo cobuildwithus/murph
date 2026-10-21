@@ -2236,6 +2236,17 @@ export class RunnerContainer extends Container {
       return;
     }
 
+    // A completed native receipt does not prove canonical completion. Preserve
+    // owner reconciliation (and its short retry) even while the shell is warm.
+    // Otherwise local vetoes can avoid Web without suppressing that recovery.
+    const hasCompletedNativeReceipt = this.readRunnerSlotBindingOptional()?.state === "bound"
+      && this.requireInvocationReceiptStore().read()?.state === "completed";
+    if (!hasCompletedNativeReceipt && !await this.canStopWarmContainer({
+      expectedInteractionGeneration: input.expectedInteractionGeneration,
+      lifecycleStagePrefix,
+      userId: input.userId,
+    })) return;
+
     // Control-plane latency must not hold the native lifecycle lock ahead of
     // an arriving message. Only destructive evaluation needs the lock; it
     // rechecks interaction ownership after this external read.
@@ -2357,6 +2368,9 @@ export class RunnerContainer extends Container {
         error,
         input.userId,
       );
+      return false;
+    }
+    if (this.lifecycleInteractionChanged(input.expectedInteractionGeneration)) {
       return false;
     }
     if (this.isPlatformContainerDefinitelyStopped() || isRunnerContainerStopped(status)) {

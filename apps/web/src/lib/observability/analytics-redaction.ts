@@ -13,7 +13,6 @@ export const VERCEL_TELEMETRY_PATHNAMES = [
   "/device-sync/connect/complete",
   "/family/setup",
   "/farewell",
-  "/food",
   "/groups/start",
   "/growth",
   "/history",
@@ -37,7 +36,6 @@ export const VERCEL_TELEMETRY_PATHNAMES = [
   "/records",
   "/records/connect",
   "/refer",
-  "/search",
   "/security",
   "/settings",
   "/settings/data-privacy",
@@ -62,13 +60,6 @@ const VERCEL_TELEMETRY_DYNAMIC_PATHNAME_RULES = [
       "iu",
     ),
     pathname: "/measurement-methods/[method]",
-  },
-  {
-    pattern: new RegExp(
-      `^/search/products/(?:${PUBLIC_PATH_SEGMENT_PATTERN}|\\[productRef\\])$`,
-      "iu",
-    ),
-    pathname: "/search/products/[product]",
   },
 ] as const;
 const PRIVATE_COMPUTER_HANDOFF_PATH_PREFIXES = [

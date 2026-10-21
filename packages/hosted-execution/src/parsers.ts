@@ -191,6 +191,7 @@ export {
   parseHostedIngressLatencySource,
   parseHostedRuntimeIssueExportRequest,
   parseHostedRuntimeIssueExportResponse,
+  parseHostedCodexAuthUpdate,
   parseHostedRuntimeLatencyTraceBatchRequest,
   parseHostedRuntimeLatencyTraceBatchResponse,
   parseHostedRuntimeLatencyTraceEvent,

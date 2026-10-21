@@ -63,7 +63,6 @@ import {
   GroupUsageFundingStudy,
   PersonalUsageCreditOwnerStudy,
 } from "./group-usage-funding-study";
-import { FoodLabelLabStudy } from "./food-label-lab-study";
 import {
   SCREENSHOT_CATEGORIES,
   type ScreenshotCategory,
@@ -256,13 +255,6 @@ export function SectionsContent({
         <>
           <Separator />
 
-          <StudySection title="Food Label Lab">
-            <div className="-mx-5 sm:-mx-8 lg:-mx-12" inert>
-              <FoodLabelLabStudy />
-            </div>
-          </StudySection>
-
-          <Separator />
 
           <StudySection title="Private training dashboard">
             <div

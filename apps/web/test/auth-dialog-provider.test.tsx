@@ -1219,9 +1219,9 @@ test("AuthProvider keeps the default home redirect for ordinary sign-in completi
     value: {
       assign,
       hash: "",
-      href: "https://join.example.test/search",
+      href: "https://join.example.test/compare",
       origin: "https://join.example.test",
-      pathname: "/search",
+      pathname: "/compare",
       search: "",
     },
   });

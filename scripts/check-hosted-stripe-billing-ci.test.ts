@@ -50,8 +50,8 @@ describe("hosted Stripe billing workflow guard", () => {
     expect(issueCodes((await readWorkflow()).replace(marker, ""))).toContain(code);
   });
 
-  it("requires the daily live schedule", async () => {
-    expect(issueCodes((await readWorkflow()).replace('  schedule:\n    - cron: "23 8 * * *"\n', "")))
+  it("requires the twice-weekly live schedule", async () => {
+    expect(issueCodes((await readWorkflow()).replace('  schedule:\n    - cron: "23 8 * * 1,4"\n', "")))
       .toContain("missing-live-schedule");
   });
 

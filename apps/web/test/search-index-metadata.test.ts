@@ -22,13 +22,11 @@ const EXPECTED_STATIC_PUBLIC_ROUTES = [
   "/clubs",
   "/contact",
   "/consumer-health-data-privacy-policy",
-  "/food",
   "/legal",
   "/legal/health-ai-safety-disclosure",
   "/legal/privacy",
   "/legal/terms",
   "/refer",
-  "/search",
   "/security",
   "/subprocessors",
 ] as const;

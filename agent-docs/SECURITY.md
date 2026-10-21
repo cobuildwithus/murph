@@ -70,17 +70,8 @@ to apply after cutover.
 - Do not add third-party advertising pixels, retargeting SDKs, behavioral ad attribution, customer-list matching, tag-manager destinations, or analytics destinations that receive health data or health-context metadata; use `agent-docs/compliance/health-data-tracking-and-ads-rule.md` for any telemetry or marketing-tool review.
 - Hosted Web must keep the global `Referrer-Policy` at `strict-origin` or
   stricter so same-origin telemetry and script requests cannot inherit a
-  document pathname, query, or fragment. Murph Safe retains its route-specific
-  `no-referrer` override. Event-payload redaction is defense in depth and must
-  not substitute for this transport-level boundary.
-- The public `/food` page may search for a brand logo through Brandfetch when
-  the optional client identifier exists. Send only the bounded brand name plus
-  a broad food category to the fixed `api.brandfetch.io/v2/search/` endpoint.
-  Send no user search term, UPC, nutrition, test, account, or health data. Use
-  omitted credentials, `no-referrer`, fixed CSP API and image origins, strict
-  matching of the returned brand name, and a fixed Brandfetch CDN hostname.
-  Keep no server proxy, durable result cache, or logo copy. Deduplicate results
-  only in page memory and fall back to local category art.
+  document pathname, query, or fragment. Event-payload redaction is defense in depth
+  and must not substitute for this transport-level boundary.
 - Do not echo model API keys, base headers, or other provider credentials in CLI output, fixtures, or persisted artifacts.
 - For hosted Junction webhook recovery, an active provider result means every
   matching exact-source row returned by the live provider-list call has the
@@ -666,20 +657,6 @@ to apply after cutover.
 - Full Photos-library permission remains the automatic-capture opt-in boundary; manual use of Apple's system picker is an explicit per-selection boundary and must not request that permission. A successful capture automatically ensures the private 9pm closeout without another consent flag. Enrollment and either upload path require an existing active private iMessage or Telegram thread or a verified email target; this is a deliverability precondition, not another automation opt-in. Web resolves the member-bound, access-checked direct route, reads the verified email only as a chat-route fallback, and carries the private target only in the encrypted mailbox envelope and member vault where ordinary automation delivery requires it. Before a direct email occurrence reaches the provider, the runner must use its existing signed, write-fenced Web-control boundary to replace the saved target with the bound member's current access-checked verified address; a missing or revoked address fails closed. The closeout may remove only a canonical meal whose external reference proves meal-photo capture, and only after the agent has inspected the photo and persisted any supported structure. The canonical mutation verifies current image and manifest receipts before replacing the JPEG with a non-image privacy tombstone.
 - Weekly game photos are user content shared only between a game's players. Web seals each upload (JPEG or HEIC, at most 4 MiB, content-addressed under the uploader) under the uploader's control-domain root with the `hosted-member-private-field` lane, scope `weekly-game`, and AAD bound to its media key, before any network call and outside database transactions. The Worker's member-bound, Vercel-OIDC `game-media` routes store only that secure-box envelope in R2 under `hosted-game-media/objects/{storageNamespaceId}/`, refuse any body that is not a weekly-game envelope, and never see plaintext or a key; players need no hosted workspace. Reads authorize by the game's unlock rule in Web before fetching, open the envelope there, and respond `private, no-store`. Photos have no lifecycle expiry; account deletion clears the uploader's prefix. Photo bytes never enter Postgres, logs, Temporal or mailbox payloads, fixtures, or diagnostics.
 - Prefer least-privilege defaults and explicit validation at system boundaries.
-- Murph Safe and `/api/public/v1` are intentionally unauthenticated read-only
-  surfaces over a narrow product projection. Search terms are private request
-  inputs: accept them only in bounded POST JSON, never echo or log them, and
-  keep them out of URLs, metadata, referrers, persistent browser storage, and
-  analytics. Public responses may contain only normalized contract fields and
-  provenance; raw labels, database errors, credentials, internal ids beyond
-  the opaque product reference, and provider responses stay behind the server
-  boundary. Product-test evidence must use the selected record's exact foreign
-  key, never a canonical-key, name, brand, or fuzzy join. Preserve the code and
-  SQL bounds documented in the Murph Safe product spec. Do not enable
-  permissive CORS or credentialed browser requests. Production must set the
-  explicit WAF build gate and exact rule ids in server-side deployment config;
-  the verifier may inspect only the active project configuration and must not
-  log its bearer or provider response body.
 - The public reusable-referral landing is read-only. Its explicit dynamic
   `POST /r/<token>/claim` mutation must be covered by the production WAF's exact
   method plus path-prefix/path-suffix rule at 10 requests per minute per IP.
@@ -1612,7 +1589,8 @@ never adopt them or bypass a replay conflict.
   Because a newly added workflow is not yet a protected trust root, its first
   credentialed proof occurs only after that exact workflow lands on `main`.
 - Native iOS and Android public controllers are protected-main production
-  canaries only. They run on staggered six-hour schedules and admit no PR or
+  canaries only. They run in five staggered weekly UTC calendar slots and admit
+  no PR or
   deployment-status event. Manual recovery must name `refs/heads/main` at the
   exact current `main` SHA before protected environment work. The controllers
   own no database, Privy, Junction, custom-environment deployment, or
