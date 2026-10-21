@@ -88,6 +88,17 @@ describe.skipIf(!enabled)("weekly game change serialization against PostgreSQL",
       expect((await readGameChatState(room,[a,"unrelated_player"])).games).toEqual([]);
     } finally { await getPrisma().hostedLinqDelivery.delete({where:{id:deliveryId}}); }
   });
+  it("does not report a neutral chat opener as delivery of the pending proposal", async () => {
+    const {a,gameId}=await setup(); const proposalId=randomUUID();
+    await getPrisma().game.update({where:{id:gameId},data:{chatContainerMemberId:null}});
+    delivery.mockRejectedValueOnce(new Error("binding unavailable"));
+    await run(a,{type:"proposeChange",gameId,proposalId,expectedTermsVersion:1,change:{kind:"edit",lengthDays:14}});
+    const deliveryId=randomUUID();
+    await getPrisma().hostedLinqDelivery.create({data:{id:deliveryId,idempotencyKey:createHostedLinqDeliveryIdempotencyLookupKey(`game-chat:${gameId}`),source:"game_test",status:"accepted",attemptedAt:new Date()}});
+    try {
+      expect((await readGame(gameId,a))?.pendingChange).toMatchObject({deliveryStatus:"failed",deliveryRetryable:true});
+    } finally { await getPrisma().hostedLinqDelivery.delete({where:{id:deliveryId}}); }
+  });
   it("clears a stale approval without changing terms and persists retryable delivery failure", async () => {
     const {a,b,room,gameId}=await setup(); const proposalId=randomUUID();
     delivery.mockRejectedValueOnce(new Error("provider unavailable"));

@@ -1384,4 +1384,4 @@ see [the completed release-gate proof plan](exec-plans/completed/2026-10-21-rele
 Weekly-game chat hosting, mutually agreed schedule edits and the group-only
 access boundary are owned by `product-specs/weekly-game.md` and `ARCHITECTURE.md`;
 implementation proof is tracked in
-[weekly-game chat hosting](exec-plans/active/2026-10-21-weekly-game-chat-host.md).
+[weekly-game chat hosting](exec-plans/completed/2026-10-21-weekly-game-chat-host.md).

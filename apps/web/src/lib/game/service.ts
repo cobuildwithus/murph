@@ -1185,11 +1185,12 @@ async function buildViews(games: readonly LoadedGame[], viewerId: string, clock:
 }
 
 /** One indexed receipt batch; delivery truth stays with the existing outbox owner. */
-async function readPendingChangeViews(rows: readonly Pick<Game, "id" | "pendingChange" | "chatContainerMemberId">[]): Promise<Map<string, GamePendingChange>> {
+async function readPendingChangeViews(rows: readonly Pick<Game, "id" | "pendingChange">[]): Promise<Map<string, GamePendingChange>> {
   const pending = rows.flatMap((row) => {
     const proposal = parsePendingGameChange(row.pendingChange);
     if (!proposal) return [];
-    const key = row.chatContainerMemberId ? `game-change:${row.id}:${proposal.id}` : `game-chat:${row.id}`;
+    // A neutral chat opener never proves this proposal was delivered.
+    const key = `game-change:${row.id}:${proposal.id}`;
     return [{ gameId: row.id, proposal, key: createHostedLinqDeliveryIdempotencyLookupKey(key) }];
   });
   if (!pending.length) return new Map();

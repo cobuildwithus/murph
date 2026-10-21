@@ -60,7 +60,7 @@ describe("game proposal chat delivery", () => {
     expect(m.claim).toHaveBeenCalledWith(expect.objectContaining({ status: "provider_dispatch_started" }));
     expect(m.saveReceipt).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ payloadCiphertext: "encrypted" }) }));
     expect(m.ensure).toHaveBeenCalledWith(expect.objectContaining({ gameProposal: { gameId: "game", proposalId: "proposal" } }));
-    expect(m.enqueue).not.toHaveBeenCalled(); expect(m.reconcile).toHaveBeenCalledOnce();
+    expect(m.enqueue).toHaveBeenCalledOnce(); expect(m.reconcile).toHaveBeenCalledOnce();
   });
   it("never repeats a creation with an ambiguous provider receipt", async () => {
     m.receipt.mockResolvedValue({ id: "delivery", payloadCiphertext: null });
@@ -72,10 +72,35 @@ describe("game proposal chat delivery", () => {
     await expect(deliverGameChangeProposal("game", "proposal")).rejects.toThrow("timeout");
     const first = m.create.mock.calls[0]![0];
     m.receipt.mockResolvedValue({ id: "delivery", payloadCiphertext: "frozen-request", payloadOwnerMemberId: "person-a", payloadSchema: "game_chat_v1" });
-    m.decode.mockResolvedValue(JSON.stringify({ from: first.from, to: first.to, message: first.message, accountLookupKey: "line-key", proposalId: "proposal" }));
+    m.decode.mockResolvedValue(JSON.stringify({ from: first.from, to: first.to, message: first.message, accountLookupKey: "line-key" }));
     await deliverGameChangeProposal("game", "proposal");
     expect(m.create).toHaveBeenCalledTimes(2); expect(m.create.mock.calls[1]![0]).toEqual(first);
     expect(m.claim).toHaveBeenCalledOnce(); expect(m.capacity).toHaveBeenCalledOnce();
+  });
+  it.each(["cancelled", "expired"])("replays the same neutral opener after the previous proposal was %s", async () => {
+    m.create.mockRejectedValueOnce(new Error("timeout"));
+    await expect(deliverGameChangeProposal("game", "proposal")).rejects.toThrow("timeout");
+    const first = m.create.mock.calls[0]![0];
+    expect(first.message).not.toContain("Saturday"); expect(first.message).not.toContain("Alex");
+    m.receipt.mockResolvedValue({ id: "delivery", payloadCiphertext: "frozen-request", payloadOwnerMemberId: "person-a", payloadSchema: "game_chat_v1" });
+    m.decode.mockResolvedValue(JSON.stringify({ from: first.from, to: first.to, message: first.message, accountLookupKey: "line-key" }));
+    m.game.mockResolvedValue({ ...game(), pendingChange: { v: 1, ...proposal, id: "replacement", change: { kind: "edit", lengthDays: 21 } } });
+    await deliverGameChangeProposal("game", "replacement");
+    expect(m.create.mock.calls[1]![0]).toEqual(first);
+    expect(m.prepareMailbox).toHaveBeenCalledOnce();
+    const notification = m.prepareMailbox.mock.calls[0]![0].envelope.notification;
+    expect(notification.deliveryIdempotencyKey).toBe("game-change:game:replacement");
+    expect(notification.responsePolicy.text).toContain("21 calendar days");
+    expect(notification.responsePolicy.text).not.toContain("Saturday");
+  });
+  it("recovers a provider receipt left before binding and announces only the current proposal", async () => {
+    m.receipt.mockResolvedValue({ id: "delivery", payloadCiphertext: "encrypted-receipt", payloadOwnerMemberId: "person-a", payloadSchema: "game_chat_v1" });
+    m.decode.mockResolvedValue(JSON.stringify({ chatId: "chat", accountLookupKey: "line-key" }));
+    m.game.mockResolvedValue({ ...game(), pendingChange: { v: 1, ...proposal, id: "replacement", change: { kind: "edit", lengthDays: 21 } } });
+    await deliverGameChangeProposal("game", "replacement");
+    expect(m.create).not.toHaveBeenCalled();
+    expect(m.prepareMailbox.mock.calls[0]![0].envelope.notification.deliveryIdempotencyKey).toBe("game-change:game:replacement");
+    expect(m.updateGame).not.toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ pendingChange: expect.objectContaining({ deliveryStatus: "sent" }) }) }));
   });
   it("tries the next healthy line when the first has no capacity", async () => {
     m.lines.mockResolvedValue([{ phoneNumber: "+15555550109", phoneNumberLookupKey: "full" }, { phoneNumber: "+15555550100", phoneNumberLookupKey: "line-key" }]);
@@ -86,9 +111,9 @@ describe("game proposal chat delivery", () => {
   });
   it("recovers an accepted creation from its encrypted delivery receipt without sending twice", async () => {
     m.receipt.mockResolvedValue({ id: "delivery", payloadCiphertext: "encrypted", payloadOwnerMemberId: "person-a", payloadSchema: "game_chat_v1" });
-    m.decode.mockResolvedValue(JSON.stringify({ chatId: "chat", accountLookupKey: "line-key", proposalId: "proposal" }));
+    m.decode.mockResolvedValue(JSON.stringify({ chatId: "chat", accountLookupKey: "line-key" }));
     await deliverGameChangeProposal("game", "proposal");
-    expect(m.create).not.toHaveBeenCalled(); expect(m.ensure).toHaveBeenCalledOnce(); expect(m.enqueue).not.toHaveBeenCalled();
+    expect(m.create).not.toHaveBeenCalled(); expect(m.ensure).toHaveBeenCalledOnce(); expect(m.enqueue).toHaveBeenCalledOnce();
   });
   it("does not send to an expanded bound room or to unverified identities", async () => {
     m.game.mockResolvedValue(game("room")); m.chat.mockResolvedValue({ ...chat, handles: [...chat.handles, { handle: "+15555550103", isMe: false, status: "active" }] });
@@ -112,8 +137,8 @@ describe("game proposal chat delivery", () => {
   it("does not invent a check-in deadline on an unscheduled start date", async () => {
     m.game.mockResolvedValue({ ...game(), lengthDays: 7, terms: { v: 1, versions: [{ n: 1, fromDay: 0, schedule: { days: [5, 6] }, stakes: [] }] }, pendingChange: { v: 1, ...proposal, startsOn: "2030-03-04", change: { kind: "start_now" } } });
     await deliverGameChangeProposal("game", "proposal");
-    expect(m.create.mock.calls[0]![0].message).toContain("2030-03-10 at 3 AM");
-    expect(m.create.mock.calls[0]![0].message).not.toContain("2030-03-05 at 3 AM");
+    expect(m.prepareMailbox.mock.calls[0]![0].envelope.notification.responsePolicy.text).toContain("2030-03-10 at 3 AM");
+    expect(m.prepareMailbox.mock.calls[0]![0].envelope.notification.responsePolicy.text).not.toContain("2030-03-05 at 3 AM");
   });
   it("names both players and states the first deadline for starting now", () => {
     const message = gameChangeProposalMessage({ ...proposal, change: { kind: "start_now" }, effectiveFromDay: 0, startsOn: "2030-03-04" }, { proposerName: "Alex", recipientName: "Sam", effectiveOn: "2030-03-04", timeZones: ["America/New_York", "America/Los_Angeles"], deadline: { day: "2030-03-05", kind: "first_check_in" } });

@@ -1,6 +1,6 @@
 # Weekly game changes agreed in chat
 
-Status: active
+Status: completed
 Created: 2026-10-21
 
 ## Outcome
@@ -48,8 +48,9 @@ player's ordinary reply and applies the agreed change through the game service.
 
 ## Verification
 
-Implementation and focused proof complete; draft PR, external review and exact-head
-CI remain. No production rollout claimed.
+Implementation, focused proof and parent candidate review complete in PR #4288.
+External review and exact-head CI remain release gates owned by the original
+session. No production rollout claimed.
 
 - Web typecheck, assistant-engine/runtime/hosted-execution/Cloudflare typechecks,
   focused game rule/route/service/authority tests, migrated local PostgreSQL
@@ -64,3 +65,14 @@ CI remain. No production rollout claimed.
   exact current pair filtering, canonical terminal delivery recovery, feature
   gates and future-day scoring. No private-view read remains in runtime writes.
 
+
+- Final recovery proof: frozen neutral group creation can be reconciled across
+  cancelled/expired proposals with the exact original provider request; only the
+  current proposal enters the guarded outbox. An accepted opener is not projected
+  as proposal delivery. Twenty delivery tests and six PostgreSQL change tests pass.
+- Exact legacy parser proof passes: old Web rejects new game requests; old Worker
+  response parsing reports an uncertain error without retry even if new Web has
+  applied an update. Deploy schema/Web, Worker/runtime, warm-runtime convergence,
+  then native writers. Current/current transport and package typechecks pass.
+Updated: 2026-10-21
+Completed: 2026-10-21

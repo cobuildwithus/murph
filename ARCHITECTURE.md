@@ -5482,8 +5482,11 @@ exactly the two verified player identities and Murph. Existing Linq delivery
 claims and notification outbox own creation and proposal effects. Initial group
 creation stores its encrypted provider receipt in that existing delivery row;
 an unknown creation permits only the same frozen provider request and idempotency
-key, never a new creation identity. Notification delivery rechecks
-the current proposal immediately before provider dispatch. No new queue or timer
+key, never a new creation identity. Its neutral opening message contains no
+proposal terms, so a replacement proposal can safely recover the same creation.
+Both new and reused rooms announce the current proposal through the guarded
+notification path; an accepted opener never means a proposal was sent.
+Notification delivery rechecks the current proposal before provider dispatch. No new queue or timer
 is introduced. Reads expire stale proposals; applying a change appends versioned
 terms only from an unstarted day and never rewrites entries or tickets.
 
@@ -5491,5 +5494,9 @@ Canonical member access can grant a synthetic group room access through its live
 eligible two-player game. Both players must remain unsuspended and must not have
 withdrawn health-data consent; feature flag/allowlist remain authoritative. The
 room consumes the ordinary group usage allowance, without granting either player
-personal AI access. Apply the additive migration before readers, then deploy the
-signed transport consumers before enabling native proposal writers.
+personal AI access. Apply the additive migration and compatible Web first, then
+deploy Worker/runtime consumers and refresh warm runtimes before native proposal
+writers. Old Web rejects unknown game requests; old transport response parsers
+reject new responses without replay, even if new Web already applied an update.
+Do not roll back those parsers while new game tools are active. Old warm runtimes
+have no game tools until refreshed.

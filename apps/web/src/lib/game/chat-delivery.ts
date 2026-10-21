@@ -178,15 +178,16 @@ async function enqueueProposal(gameId: string, proposal: GamePendingChange, cont
   if (appended) await signalHostedMailboxAppendRuntime({ expectedUserId: containerMemberId, mailboxItemId: appended.mailboxItemId });
 }
 
-type GameChatRequest = { from: string; to: string[]; message: string; proposalId: string; accountLookupKey: string };
+type GameChatRequest = { from: string; to: string[]; message: string; accountLookupKey: string };
 const CHAT_PAYLOAD_SCHEMA = "game_chat_v1";
-type GameChatReceipt = { chatId: string; proposalId: string; accountLookupKey: string };
+const GAME_CHAT_OPENER = "This is your challenge chat with Murph. I’ll help you agree on changes together.";
+type GameChatReceipt = { chatId: string; accountLookupKey: string };
 function parseGameChatPayload(value: string | null): GameChatRequest | GameChatReceipt {
   const parsed: unknown = value ? JSON.parse(value) : null;
-  if (!parsed || typeof parsed !== "object" || !("accountLookupKey" in parsed) || typeof parsed.accountLookupKey !== "string" || !("proposalId" in parsed) || typeof parsed.proposalId !== "string") throw new Error("Game chat receipt is invalid.");
-  if ("chatId" in parsed && typeof parsed.chatId === "string") return { chatId: parsed.chatId, proposalId: parsed.proposalId, accountLookupKey: parsed.accountLookupKey };
+  if (!parsed || typeof parsed !== "object" || !("accountLookupKey" in parsed) || typeof parsed.accountLookupKey !== "string") throw new Error("Game chat receipt is invalid.");
+  if ("chatId" in parsed && typeof parsed.chatId === "string") return { chatId: parsed.chatId, accountLookupKey: parsed.accountLookupKey };
   if (!("from" in parsed) || typeof parsed.from !== "string" || !("to" in parsed) || !Array.isArray(parsed.to) || !parsed.to.every((phone): phone is string => typeof phone === "string") || !("message" in parsed) || typeof parsed.message !== "string") throw new Error("Game chat request is invalid.");
-  return { from: parsed.from, to: parsed.to, message: parsed.message, proposalId: parsed.proposalId, accountLookupKey: parsed.accountLookupKey };
+  return { from: parsed.from, to: parsed.to, message: parsed.message, accountLookupKey: parsed.accountLookupKey };
 }
 
 function chatPayloadAuthority(memberId: string, deliveryId: string) {
@@ -209,11 +210,11 @@ async function createGameChat(gameId: string, proposal: GamePendingChange, phone
     const value = await openHostedUserSecureBoxString({ ...chatPayloadAuthority(payloadOwner, receipt.id), prisma, value: receipt.payloadCiphertext });
     const parsed = parseGameChatPayload(value);
     if ("chatId" in parsed) {
-      await bindCreatedChat(gameId, proposal, phones, memberIds, parsed.chatId, parsed.accountLookupKey, parsed.proposalId === proposal.id, message);
+      await bindCreatedChat(gameId, proposal, phones, memberIds, parsed.chatId, parsed.accountLookupKey, message);
       return;
     }
-    if (parsed.proposalId !== proposal.id || parsed.to.length !== 2 || !phones.every((phone) => parsed.to.includes(phone))) throw new Error("The previous game chat creation needs reconciliation.");
-    frozen = { from: parsed.from, to: parsed.to, message: parsed.message, proposalId: parsed.proposalId, accountLookupKey: parsed.accountLookupKey };
+    if (parsed.to.length !== 2 || !phones.every((phone) => parsed.to.includes(phone))) throw new Error("The previous game chat creation needs reconciliation.");
+    frozen = { from: parsed.from, to: parsed.to, message: parsed.message, accountLookupKey: parsed.accountLookupKey };
   } else if (receipt) {
     throw new Error("Game chat creation is awaiting a confirmed provider receipt.");
   }
@@ -222,7 +223,7 @@ async function createGameChat(gameId: string, proposal: GamePendingChange, phone
     if (!lines.some((line) => line.phoneNumber === frozen!.from && line.phoneNumberLookupKey === frozen!.accountLookupKey)) throw new Error("Game chat sending line is unavailable.");
   } else {
     for (const candidate of lines) {
-      const request: GameChatRequest = { from: candidate.phoneNumber, to: phones, message, proposalId: proposal.id, accountLookupKey: candidate.phoneNumberLookupKey };
+      const request: GameChatRequest = { from: candidate.phoneNumber, to: phones, message: GAME_CHAT_OPENER, accountLookupKey: candidate.phoneNumberLookupKey };
       const ciphertext = await sealHostedUserSecureBoxString({ ...chatPayloadAuthority(payloadOwner, deliveryId), prisma, value: JSON.stringify(request) });
       if (!ciphertext) throw new Error("Game chat request encryption failed.");
       const noCapacity = new Error("Game chat line capacity is unavailable.");
@@ -232,7 +233,7 @@ async function createGameChat(gameId: string, proposal: GamePendingChange, phone
           if (current.count !== 1) return false;
           const capacity = await claimHostedLinqProactiveConversationCapacityTx({ prisma: tx, dayUtc, limit: Math.min(candidate.maxNewConversationsPerDay ?? 10, 50), phoneNumberLookupKey: candidate.phoneNumberLookupKey, requiredHealthStatus: "healthy" });
           if (!capacity) throw noCapacity;
-          const claimed = await claimHostedLinqDeliveryProviderDispatchTx({ prisma: tx, idempotencyKey: key, source: "game_chat", sourceRef: gameId, template: "game_change_proposal", targetKind: "thread", phoneNumber: candidate.phoneNumber, status: "provider_dispatch_started" });
+          const claimed = await claimHostedLinqDeliveryProviderDispatchTx({ prisma: tx, idempotencyKey: key, source: "game_chat", sourceRef: gameId, template: "game_chat_opener", targetKind: "thread", phoneNumber: candidate.phoneNumber, status: "provider_dispatch_started" });
           if (!claimed.claimed || claimed.id !== deliveryId) throw new Error("Game chat creation is already being prepared; retry the same proposal.");
           await tx.hostedLinqDelivery.update({ where: { id: deliveryId }, data: { payloadCiphertext: ciphertext, payloadOwnerMemberId: payloadOwner, payloadSchema: CHAT_PAYLOAD_SCHEMA } });
           return true;
@@ -249,13 +250,13 @@ async function createGameChat(gameId: string, proposal: GamePendingChange, phone
   // https://docs.linqapp.com/channel/imessage/guides/messaging/sending-messages/
   const sent = await createHostedLinqChat({ from: frozen.from, to: frozen.to, idempotencyKey: key, message: frozen.message });
   if (!sent.chatId) throw new Error("Game chat creation has no confirmed chat identity.");
-  const ciphertext = await sealHostedUserSecureBoxString({ ...chatPayloadAuthority(payloadOwner, deliveryId), prisma, value: JSON.stringify({ chatId: sent.chatId, accountLookupKey: frozen.accountLookupKey, proposalId: proposal.id }) });
+  const ciphertext = await sealHostedUserSecureBoxString({ ...chatPayloadAuthority(payloadOwner, deliveryId), prisma, value: JSON.stringify({ chatId: sent.chatId, accountLookupKey: frozen.accountLookupKey }) });
   await prisma.hostedLinqDelivery.update({ where: { id: deliveryId }, data: { payloadCiphertext: ciphertext, payloadOwnerMemberId: payloadOwner, payloadSchema: CHAT_PAYLOAD_SCHEMA } });
   await markHostedLinqDeliveryAcceptedTx({ prisma, idempotencyKey: key, linqChatId: sent.chatId, messageId: sent.messageId });
-  await bindCreatedChat(gameId, proposal, phones, memberIds, sent.chatId, frozen.accountLookupKey, true, message);
+  await bindCreatedChat(gameId, proposal, phones, memberIds, sent.chatId, frozen.accountLookupKey, message);
 }
 
-async function bindCreatedChat(gameId: string, proposal: GamePendingChange, phones: string[], memberIds: string[], chatId: string, accountLookupKey: string, proposalSent: boolean, message: string): Promise<void> {
+async function bindCreatedChat(gameId: string, proposal: GamePendingChange, phones: string[], memberIds: string[], chatId: string, accountLookupKey: string, message: string): Promise<void> {
   const prisma = getPrisma();
   const now = new Date();
   const chat = await getHostedLinqChatSummary({ chatId, timeoutMs: 3_000 });
@@ -265,11 +266,11 @@ async function bindCreatedChat(gameId: string, proposal: GamePendingChange, phon
     const current = await tx.game.updateMany({ where: pendingWhere(gameId, proposal.id, null), data: { updatedAt: new Date() } });
     if (current.count !== 1) return null;
     const ensured = await ensureHostedThreadContainerRouteTx({ prisma: tx, channel: "linq", accountLookupKey, threadId: chatId, ownerMemberId: proposal.proposedByMemberId, gameProposal: { gameId, proposalId: proposal.id }, preparedCreation, occurredAt: now, initialGroupDisplayName: "Challenge" });
-    await tx.game.update({ where: { id: gameId }, data: { chatContainerMemberId: ensured.containerMemberId, pendingChange: toPrismaJsonObject({ ...proposal, v: 1, deliveryStatus: proposalSent ? "sent" : "pending" }) } });
+    await tx.game.update({ where: { id: gameId }, data: { chatContainerMemberId: ensured.containerMemberId, pendingChange: toPrismaJsonObject({ ...proposal, v: 1, deliveryStatus: "pending" }) } });
     return ensured;
   });
   if (!result) return;
   await reconcileHostedThreadContainerParticipants({ prisma, chatId, containerMemberId: result.containerMemberId, handles: chat.handles, resolvedParticipants: memberIds.map((participantMemberId, index) => ({ participantMemberId, handle: phones[index]! })) });
-  if (!proposalSent) await enqueueProposal(gameId, proposal, result.containerMemberId, message);
+  await enqueueProposal(gameId, proposal, result.containerMemberId, message);
   if (result.activationMailboxItemId) await signalHostedMailboxAppendRuntime({ expectedUserId: result.containerMemberId, mailboxItemId: result.activationMailboxItemId });
 }
