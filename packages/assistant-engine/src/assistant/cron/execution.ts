@@ -42,6 +42,7 @@ import {
 } from '../../assistant-service.js'
 import { ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG } from '../automation-tags.js'
 import { buildAssistantAutomationTurnEnvelope } from '../automation/turn-envelope.js'
+import { describeAssistantAutoReplyFailure } from '../automation/failure-observability.js'
 import {
   computeAssistantAutomationRetryAt,
   type AssistantRunEvent,
@@ -543,6 +544,11 @@ interface AssistantCronRunExecutionResult {
   removedAfterRun: boolean
   run: AssistantCronRunRecord
   runErrorCode: string | null
+  runFailureContext?: {
+    codexErrorInfo?: string
+    codexErrorHttpStatusCode?: number
+    maintenanceReplayBarrier: 'provider_admitted' | 'non_replayable_provider_work'
+  }
 }
 
 type DeviceActivityParentAuthority = Awaited<
@@ -610,6 +616,10 @@ export async function executeClaimedAssistantCronJob(
   let response: string | null = null
   let errorText: string | null = null
   let errorCode: string | null = null
+  let failureDiagnostics: Pick<
+    AssistantCronRunExecutionResult,
+    'runFailureContext'
+  > = {}
   let failureConsumesOccurrence = false
   let foregroundYielded = false
   let outcome: AssistantCronRunOutcome = 'failed'
@@ -1132,6 +1142,11 @@ export async function executeClaimedAssistantCronJob(
       (maintenanceProviderStarted ||
         assistantNotificationErrorHasNonReplayableProviderWork(error))
     if (nonReplayableBackgroundMaintenanceWork) {
+      // Capture only the shared finite diagnostics before replacing the text.
+      failureDiagnostics = describeAssistantCronMaintenanceFailure(
+        error,
+        maintenanceProviderStarted,
+      )
       errorText = ASSISTANT_CRON_BACKGROUND_MAINTENANCE_NON_REPLAYABLE_WORK_ERROR
       errorCode = backgroundMaintenanceYielded
         ? ASSISTANT_CRON_BACKGROUND_MAINTENANCE_YIELDED_CODE
@@ -1403,6 +1418,27 @@ export async function executeClaimedAssistantCronJob(
     // Typed failure class (e.g. ASSISTANT_CODEX_USAGE_LIMIT) for runtime-log
     // observability; the persisted run record keeps only the error text.
     runErrorCode: errorCode,
+    ...failureDiagnostics,
+  }
+}
+
+function describeAssistantCronMaintenanceFailure(
+  error: unknown,
+  providerAdmitted: boolean,
+): Pick<AssistantCronRunExecutionResult, 'runFailureContext'> {
+  const context = describeAssistantAutoReplyFailure(error).context
+  return {
+    runFailureContext: {
+      maintenanceReplayBarrier: providerAdmitted
+        ? 'provider_admitted'
+        : 'non_replayable_provider_work',
+      ...(typeof context?.codexErrorInfo === 'string'
+        ? { codexErrorInfo: context.codexErrorInfo }
+        : {}),
+      ...(typeof context?.codexErrorHttpStatusCode === 'number'
+        ? { codexErrorHttpStatusCode: context.codexErrorHttpStatusCode }
+        : {}),
+    },
   }
 }
 

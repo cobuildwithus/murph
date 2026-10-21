@@ -5146,6 +5146,7 @@ describe('assistant cron runtime orchestration', () => {
     )
     const paths = resolveAssistantStatePaths(vaultRoot)
     addOvernightMemoryConsolidationAutomation(vaultRoot)
+    const events: AssistantRunEvent[] = []
     cronMocks.sendAssistantMessageLocal.mockResolvedValueOnce({
       decision: {
         kind: 'skip',
@@ -5164,6 +5165,7 @@ describe('assistant cron runtime orchestration', () => {
         },
       },
       limit: 1,
+      onEvent: (event) => events.push(event),
       vault: vaultRoot,
     })
 
@@ -5219,6 +5221,11 @@ describe('assistant cron runtime orchestration', () => {
         }),
       ],
     })
+    const completed = events.find((event) => event.type === 'cron.job.completed')
+    expect(completed).toBeDefined()
+    for (const key of ['maintenanceReplayBarrier', 'codexErrorInfo', 'codexErrorHttpStatusCode']) {
+      expect(completed?.failureContext).not.toHaveProperty(key)
+    }
   })
 
   it('releases overnight memory consolidation when hosted maintenance yields before the turn starts', async () => {
@@ -5552,7 +5559,44 @@ describe('assistant cron runtime orchestration', () => {
     })
   })
 
-  it('consumes overnight memory consolidation when a non-yield terminal failure follows provider admission', async () => {
+  it.each([
+    {
+      label: 'capacity rejection',
+      code: 'ASSISTANT_CODEX_CONNECTION_LOST',
+      details: { codexErrorInfo: 'serverOverloaded', codexErrorHttpStatusCode: 503 },
+      expected: { codexErrorInfo: 'serverOverloaded', codexErrorHttpStatusCode: 503 },
+    },
+    {
+      label: 'stream failure',
+      code: 'ASSISTANT_CODEX_CONNECTION_LOST',
+      details: { codexErrorInfo: 'responseStreamDisconnected', codexErrorHttpStatusCode: 502 },
+      expected: { codexErrorInfo: 'responseStreamDisconnected', codexErrorHttpStatusCode: 502 },
+    },
+    {
+      label: 'process failure without structured diagnostics',
+      code: 'ASSISTANT_PROVIDER_FAILED',
+      details: { codexExitCode: 17, codexErrorInfoPresent: false },
+      expected: {},
+    },
+    {
+      label: 'unknown kind and out-of-range status',
+      code: 'ASSISTANT_CODEX_FAILED',
+      details: { codexErrorInfo: 'synthetic-private-unknown-kind', codexErrorHttpStatusCode: 600 },
+      expected: { codexErrorInfo: 'unrecognized' },
+    },
+    {
+      label: 'malformed diagnostics',
+      code: 'ASSISTANT_CODEX_FAILED',
+      details: { codexErrorInfo: ['serverOverloaded'], codexErrorHttpStatusCode: '503' },
+      expected: {},
+    },
+    {
+      label: 'missing diagnostics',
+      code: 'ASSISTANT_CODEX_FAILED',
+      details: {},
+      expected: {},
+    },
+  ])('maintenance replay-barrier failure telemetry: $label', async ({ code, details, expected }) => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-04-09T03:10:00.000Z'))
     const { vaultRoot } = await createRuntimeContext(
@@ -5560,19 +5604,26 @@ describe('assistant cron runtime orchestration', () => {
     )
     const paths = resolveAssistantStatePaths(vaultRoot)
     addOvernightMemoryConsolidationAutomation(vaultRoot)
+    const events: AssistantRunEvent[] = []
     // Provider admitted, then the turn dies without a yield and without the
     // completed memory-command event ever reaching the buffered raw events.
     // Memory writes may have committed; the occurrence must be consumed.
     cronMocks.sendAssistantMessageLocal.mockImplementationOnce(
-      async (input: {
-        onProviderRequestStarted?: (event: { startedAt: string }) => void
-      }) => {
-        input.onProviderRequestStarted?.({
+      async (input: Pick<AssistantNotificationInput, 'onProviderRequestStarted'>) => {
+        await input.onProviderRequestStarted?.({
+          acceptedInputIds: [],
+          providerRequestOrdinal: 1,
           startedAt: '2026-04-09T03:10:00.000Z',
         })
         throw new VaultCliError(
-          'ASSISTANT_PROVIDER_FAILED',
-          'Codex app-server process exited unexpectedly.',
+          code,
+          'synthetic-private-provider-message',
+          {
+            ...details,
+            assistantProviderErrorMessage: 'synthetic-private-provider-detail',
+            syntheticErrorDetail: 'synthetic-private-diagnostic-text',
+            arbitraryDetail: { message: 'synthetic-private-nested-detail' },
+          },
         )
       },
     )
@@ -5585,6 +5636,7 @@ describe('assistant cron runtime orchestration', () => {
         },
       },
       limit: 1,
+      onEvent: (event) => events.push(event),
       shouldYieldBackgroundMaintenance: () => false,
       vault: vaultRoot,
     })
@@ -5602,16 +5654,76 @@ describe('assistant cron runtime orchestration', () => {
     expect(runtimeRecord?.state.runningAt).toBeNull()
     expect(runtimeRecord?.state.pendingOccurrenceAt).toBeNull()
     expect(runtimeRecord?.state.retryAfterAt).toBeNull()
-    await expect(listAssistantCronRuns({
+    expect(runtimeRecord?.state.consecutiveFailures).toBe(0)
+    expect(runtimeRecord?.state.lastFailedAt).toBeNull()
+    expect(runtimeRecord?.state.lastSucceededAt).toBe('2026-04-09T03:10:00.000Z')
+    const runs = await listAssistantCronRuns({
       job: MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
       vault: vaultRoot,
-    })).resolves.toMatchObject({
+    })
+    const barrierMessage =
+      'Assistant background maintenance stopped after provider work; occurrence consumed to avoid replay.'
+    expect(runs).toMatchObject({
       runs: [
         expect.objectContaining({
+          error: barrierMessage,
+          notificationDecision: null,
+          outcome: 'no_op',
+          reason: 'background_maintenance_non_replayable_work',
+          response: null,
+          responseLength: 0,
+          sessionId: null,
           status: 'skipped',
         }),
       ],
     })
+    expect(runs.runs).toHaveLength(1)
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
+      expect.objectContaining({ channel: null, deliveryTarget: null }),
+    )
+    await expect(listAssistantOutboxIntents(vaultRoot)).resolves.toEqual([])
+
+    // A later due scan must not replay this occurrence or change its run.
+    await expect(processDueAssistantCronJobsLocal({
+      executionContext: {
+        hosted: { memberId: 'member-hosted', userEnvKeys: [] },
+      },
+      limit: 1,
+      onEvent: (event) => events.push(event),
+      vault: vaultRoot,
+    })).resolves.toEqual({ failed: 0, processed: 0, succeeded: 0 })
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledOnce()
+    await expect(listAssistantCronRuns({
+      job: MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
+      vault: vaultRoot,
+    })).resolves.toEqual(runs)
+    await expect(readAssistantCronCanonicalRuntimeStore(paths)).resolves.toEqual(runtimeStore)
+    await expect(listAssistantOutboxIntents(vaultRoot)).resolves.toEqual([])
+
+    const completed = events.filter((event) => event.type === 'cron.job.completed')
+    expect(completed).toHaveLength(1)
+    expect(completed[0]).toMatchObject({
+      safeDetails: 'cron_job_no_op',
+      safeErrorMessage: barrierMessage,
+      providerKind: 'status',
+      providerState: 'completed',
+    })
+    expect(completed[0]?.failureContext).toEqual({
+      automationSlug: 'overnight-memory-consolidation',
+      errorCode: code,
+      errorPresent: true,
+      retryScheduled: false,
+      occurrenceAt: '2026-04-09T03:00:00.000Z',
+      routeConfigured: true,
+      runOutcome: 'no_op',
+      scheduleKind: 'cron',
+      sourceKind: 'automation',
+      maintenanceReplayBarrier: 'provider_admitted',
+      ...expected,
+    })
+    expect(JSON.stringify({ events, runs, runtimeStore })).not.toContain('synthetic-private')
+    expect(JSON.stringify({ runs, runtimeStore })).not.toContain('maintenanceReplayBarrier')
+    expect(JSON.stringify({ runs, runtimeStore })).not.toContain('codexError')
   })
 
   it('consumes overnight memory consolidation when hosted maintenance yields after provider work', async () => {
@@ -5685,6 +5797,7 @@ describe('assistant cron runtime orchestration', () => {
     )
     const paths = resolveAssistantStatePaths(vaultRoot)
     addOvernightMemoryConsolidationAutomation(vaultRoot)
+    const events: AssistantRunEvent[] = []
     const error = new VaultCliError(
       'ASSISTANT_NOTIFICATION_MAINTENANCE_DECISION_INVALID',
       'Assistant maintenance notification must return the exact configured skip decision.',
@@ -5702,6 +5815,7 @@ describe('assistant cron runtime orchestration', () => {
         },
       },
       limit: 1,
+      onEvent: (event) => events.push(event),
       vault: vaultRoot,
     })
 
@@ -5729,6 +5843,16 @@ describe('assistant cron runtime orchestration', () => {
         }),
       ],
     })
+    const completed = events.filter((event) => event.type === 'cron.job.completed')
+    expect(completed).toHaveLength(1)
+    expect(completed[0]?.failureContext).toMatchObject({
+      errorCode: 'ASSISTANT_NOTIFICATION_MAINTENANCE_DECISION_INVALID',
+      maintenanceReplayBarrier: 'non_replayable_provider_work',
+      retryScheduled: false,
+      runOutcome: 'no_op',
+    })
+    expect(completed[0]?.failureContext).not.toHaveProperty('codexErrorInfo')
+    expect(completed[0]?.failureContext).not.toHaveProperty('codexErrorHttpStatusCode')
   })
 
   it('retries overnight memory consolidation when read-only provider work fails', async () => {
@@ -5739,12 +5863,15 @@ describe('assistant cron runtime orchestration', () => {
     )
     const paths = resolveAssistantStatePaths(vaultRoot)
     addOvernightMemoryConsolidationAutomation(vaultRoot)
+    const events: AssistantRunEvent[] = []
     const error = new VaultCliError(
       'ASSISTANT_NOTIFICATION_MAINTENANCE_DECISION_INVALID',
       'Assistant maintenance notification must return the exact configured skip decision.',
     )
     Reflect.set(error, 'details', {
       assistantNotificationProviderNonReplayableWork: false,
+      codexErrorInfo: 'serverOverloaded',
+      codexErrorHttpStatusCode: 503,
     })
     cronMocks.sendAssistantMessageLocal.mockRejectedValueOnce(error)
 
@@ -5756,6 +5883,7 @@ describe('assistant cron runtime orchestration', () => {
         },
       },
       limit: 1,
+      onEvent: (event) => events.push(event),
       vault: vaultRoot,
     })
 
@@ -5783,6 +5911,11 @@ describe('assistant cron runtime orchestration', () => {
         }),
       ],
     })
+    const completed = events.find((event) => event.type === 'cron.job.completed')
+    expect(completed).toBeDefined()
+    for (const key of ['maintenanceReplayBarrier', 'codexErrorInfo', 'codexErrorHttpStatusCode']) {
+      expect(completed?.failureContext).not.toHaveProperty(key)
+    }
     await updateCanonicalRuntimeState(vaultRoot, MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID, (record) => ({
       ...record, state: { ...record.state, consecutiveFailures: 5 },
     }))
