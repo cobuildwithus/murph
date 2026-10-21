@@ -68,7 +68,7 @@ Entrypoint test worker build prerequisites are owned by
 in [the worker preflight plan](exec-plans/completed/2026-10-09-frog-entrypoint-build-preflight.md).
 
 Due-wake progress and operator diagnostic handoff proof are recorded in
-[the wake-progress plan](exec-plans/active/2026-10-21-operator-wake-progress.md);
+[the wake-progress plan](exec-plans/completed/2026-10-21-operator-wake-progress.md);
 `../packages/assistant-runtime/README.md` owns the runtime contract.
 
 OpenAI-only mixed-version rollout preparation is tracked in
