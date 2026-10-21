@@ -9,6 +9,6 @@
     "summary": "Murph compresses repeated workspace data more efficiently, reducing what needs to load after an inactive conversation wakes up.",
     "details": "Your saved context stays intact. The improvement depends on the workspace; photos and other already-compressed files may not become smaller.",
     "relevanceTags": ["messaging", "performance"],
-    "sourcePullRequests": []
+    "sourcePullRequests": [4253]
   }
 }
