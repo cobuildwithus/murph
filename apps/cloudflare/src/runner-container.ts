@@ -780,12 +780,14 @@ export class RunnerContainer extends Container {
   }
 
   async bindStandbySlot(input: {
+    readiness?: Omit<RunnerContainerEnsureReadyForProcessingInput, "userId">;
     claimId: string;
     releaseId: string;
     region: HostedRunnerRegion;
     slotName: string;
     userId: string;
   }): Promise<{
+    readiness?: RunnerContainerEnsureReadyForProcessingResult;
     bound: true;
     claimId: string;
     releaseId: string;
@@ -794,7 +796,10 @@ export class RunnerContainer extends Container {
     userId: string;
   }> {
     this.assertRunnerSlotAllocationIdentity(input);
-    return await this.withLifecycleLock(async () => {
+    const readinessInput = input.readiness
+      ? parseRunnerContainerEnsureReadyForProcessingInput({ ...input.readiness, userId: input.userId }) : null;
+    const readinessDeadlineAtMs = Date.now() + (readinessInput?.timeoutMs ?? 0);
+    const bound = await this.withLifecycleLock(async () => {
       const store = this.requireRunnerSlotStore();
       if (this.slotNamespace !== "runner" && store.readOptional()?.state !== "bound") {
         throw new Error("Legacy runner allocation is drain-only.");
@@ -808,7 +813,7 @@ export class RunnerContainer extends Container {
       store.initialize(input);
       const binding = store.bind(input);
       return {
-        bound: true,
+        bound: true as const,
         claimId: binding.claimId,
         releaseId: binding.releaseId,
         region: binding.region,
@@ -816,6 +821,13 @@ export class RunnerContainer extends Container {
         userId: binding.userId,
       };
     });
+    // Readiness takes the same lifecycle lock; compose only after binding releases
+    // it. Its ordinary bound-user checks also fence a racing retirement.
+    if (!readinessInput) return bound;
+    const timeoutMs = readinessDeadlineAtMs - Date.now();
+    if (timeoutMs <= 0) return { ...bound, readiness: { kind: "cleanup_unsettled" } };
+    const readiness = await this.ensureReadyForProcessing({ ...readinessInput, timeoutMs });
+    return { ...bound, readiness };
   }
 
   async readStandbySlotBinding(): Promise<HostedStandbySlotBinding> {

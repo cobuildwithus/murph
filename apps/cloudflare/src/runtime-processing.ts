@@ -9,6 +9,7 @@ import { asWorkerStringEnvironment } from "./worker-contracts.ts";
 import type { WorkerEnvironmentSource } from "./worker-routes/shared.ts";
 import { commandHostedRuntimeOwner } from "./runtime-owner-client.ts";
 import { recordHostedRuntimeOwnerCompletion } from "./runtime-owner-completion.ts";
+import type { RunnerContainerEnsureReadyForProcessingResult } from "./runner-container.ts";
 import { RuntimeInvocationPreparation } from "./runtime-invocation-preparation.ts";
 import { RunnerStoreCache } from "./user-runner/runner-store-cache.ts";
 import type { HostedRuntimeEnsureProcessingRequest } from "@murphai/hosted-execution/orchestration-control";
@@ -255,7 +256,7 @@ async function startClaimedRuntime(ctx: ProcessingContext, initialOwner: HostedR
   const container = ctx.namespace.getByName(binding.slotName);
   if (!container.ensureReadyForProcessing || !container.startSupervisedInvocation) throw new Error("Native runtime supervision is unavailable.");
   const [ready, prepared] = await Promise.all([
-    ctx.step("container_readiness", () => container.ensureReadyForProcessing!({ userId: ctx.input.userId, orchestrationAttemptId: ctx.input.orchestrationAttemptId,
+    target.readiness ?? ctx.step("container_readiness", () => container.ensureReadyForProcessing!({ userId: ctx.input.userId, orchestrationAttemptId: ctx.input.orchestrationAttemptId,
       timeoutMs: readRuntimeProcessingCommandStepTimeoutMs({ budget: ctx.budget, stepTimeoutMs: 15_000 }) }), 15_000),
     ctx.step("prepare_invocation", () => prepare(ownerToken(owner), binding)),
   ]);
@@ -277,7 +278,7 @@ async function startClaimedRuntime(ctx: ProcessingContext, initialOwner: HostedR
   return acceptedProcessing(ctx, owner, "started");
 }
 
-async function bindRuntimeTarget(ctx: ProcessingContext, owner: HostedRuntimeOwnerSnapshot): Promise<{ owner: HostedRuntimeOwnerSnapshot; binding: HostedStandbySlotBinding } | null> {
+async function bindRuntimeTarget(ctx: ProcessingContext, owner: HostedRuntimeOwnerSnapshot): Promise<{ owner: HostedRuntimeOwnerSnapshot; binding: HostedStandbySlotBinding; readiness?: RunnerContainerEnsureReadyForProcessingResult } | null> {
   const releaseId = resolveHostedRunnerReleaseId(ctx.source);
   if (owner.runnerContainerName) {
     const target = owner.runnerContainerName;
@@ -296,9 +297,12 @@ async function bindRuntimeTarget(ctx: ProcessingContext, owner: HostedRuntimeOwn
   const targetIdentity = readHostedRunnerTargetIdentity(target);
   if (!targetIdentity || targetIdentity.releaseId !== releaseId) throw new Error("Hosted runtime target release mismatch.");
   const slot = requireHostedRunnerSlotLifecycle(ctx.namespace.getByName(target));
-  const bound = await ctx.step("bind_target", () => slot.bindStandbySlot({ claimId: allocationId, releaseId,
-    region: HOSTED_RUNNER_REGION, slotName: target, userId: ctx.input.userId }));
-  return { owner: selected.owner, binding: { ...bound, state: "bound" } };
+  const { readiness, ...bound } = await ctx.step("bind_target", () => slot.bindStandbySlot({ claimId: allocationId, releaseId,
+    region: HOSTED_RUNNER_REGION, slotName: target, userId: ctx.input.userId,
+    readiness: { orchestrationAttemptId: ctx.input.orchestrationAttemptId,
+      timeoutMs: readRuntimeProcessingCommandStepTimeoutMs({ budget: ctx.budget, stepTimeoutMs: 15_000 }) },
+  }), 15_000);
+  return { owner: selected.owner, binding: { ...bound, state: "bound" }, readiness };
 }
 
 async function allocateRuntimeTarget(ctx: ProcessingContext, allocationId: string, releaseId: string): Promise<string> {

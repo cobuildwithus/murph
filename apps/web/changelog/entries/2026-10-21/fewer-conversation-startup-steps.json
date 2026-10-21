@@ -1,0 +1,16 @@
+{
+  "publishedOn": "2026-10-21",
+  "order": 100,
+  "item": {
+    "id": "fewer-conversation-startup-steps",
+    "kind": "improvement",
+    "priority": 1,
+    "title": "Fewer steps before a conversation starts",
+    "summary": "Murph combines two startup checks to reduce the setup needed before working on a new message.",
+    "relevanceTags": [
+      "messaging",
+      "performance"
+    ],
+    "sourcePullRequests": []
+  }
+}

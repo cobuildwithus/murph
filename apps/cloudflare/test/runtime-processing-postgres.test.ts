@@ -8,7 +8,7 @@ import { createHostedExecutionTestEnv } from "./hosted-execution-fixtures.ts";
 import { MemoryEncryptedR2Bucket } from "./test-helpers.ts";
 import type { HostedExecutionContainerStubLike, HostedExecutionContainerInvokeRequest } from "../src/runner-container.ts";
 import type { RunnerWriteFenceToken } from "../src/runtime-invocation-token.ts";
-import type { HostedStandbySlotBinding } from "../src/standby-runner-contract.ts";
+import type { HostedRunnerSlotLifecycle, HostedStandbySlotBinding } from "../src/standby-runner-contract.ts";
 import type { RunnerInvocationReceipt } from "../src/runner-invocation-receipt.ts";
 import type { RuntimeInvocationPreparation } from "../src/runtime-invocation-preparation.ts";
 import type { WorkerActiveRuntimeUserFenceResult } from "../src/worker-contracts.ts";
@@ -48,7 +48,7 @@ function harness() {
     ensureProcessing: vi.fn(async (): Promise<import("../src/runner-container.ts").RunnerContainerEnsureProcessingResult> => ({ kind: "accepted", action: "woken" })),
     ensureReadyForProcessing: vi.fn(async (): Promise<import("../src/runner-container.ts").RunnerContainerEnsureReadyForProcessingResult> => ({ kind: "ready", preparesSupervisedLaunch: true })),
     startSupervisedInvocation: vi.fn(async (_input: HostedExecutionContainerInvokeRequest) => ({ accepted: true as const })),
-    bindStandbySlot: vi.fn(async (input) => ({ ...input, bound: true as const })),
+    bindStandbySlot: vi.fn<HostedRunnerSlotLifecycle["bindStandbySlot"]>(async ({ readiness: _readiness, ...input }) => ({ ...input, bound: true })),
     prepareStandbySlot: vi.fn(),
     readStandbySlotBinding: vi.fn(async (): Promise<HostedStandbySlotBinding> => binding),
     readStandbySlotCoordinatorState: vi.fn(async () => ({ coordinatorOwned: false, releaseId: binding.releaseId, slotName: target, state: binding.state })),
@@ -387,6 +387,41 @@ describe("Postgres runtime orchestration", () => {
     expect(container.startSupervisedInvocation).not.toHaveBeenCalled();
     expect(container.retireStandbySlot).not.toHaveBeenCalled();
     expect(vi.mocked(commandHostedRuntimeOwner).mock.calls.map(([input]) => input.command.operation)).toEqual(["claim"]);
+  });
+
+  it.each([true, false])("fresh allocation uses composed readiness when supported: %s", async supported => {
+    const { source, container } = harness();
+    vi.mocked(commandHostedRuntimeOwner).mockImplementation(async ({ command }) =>
+      response(owner({ phase: "starting", runnerContainerName: command.operation === "claim" ? null : target }),
+        command.operation === "claim" ? "claimed" : "updated"));
+    container.bindStandbySlot.mockImplementation(async ({ readiness: _readiness, ...input }) => {
+      expect(vi.mocked(commandHostedRuntimeOwner).mock.calls.at(-1)?.[0].command.operation).toBe("select_target");
+      return { ...input, bound: true, ...(supported ? { readiness: { kind: "ready", preparesSupervisedLaunch: true } as const } : {}) };
+    });
+    expect(await ensurePostgresRuntimeProcessing(source, request)).toMatchObject({ action: "started" });
+    expect(container.ensureReadyForProcessing).toHaveBeenCalledTimes(supported ? 0 : 1);
+    expect(container.startSupervisedInvocation).toHaveBeenCalledOnce();
+    expect(container.startSupervisedInvocation.mock.calls[0]?.[0].launch).toBeDefined();
+    expect(container.bindStandbySlot).toHaveBeenCalledWith(expect.objectContaining({
+      readiness: { orchestrationAttemptId: request.orchestrationAttemptId, timeoutMs: expect.any(Number) },
+    }));
+  });
+
+  it.each(["busy", "timeout"] as const)("preserves a freshly bound target after composed readiness %s", async outcome => {
+    const { source, container } = harness();
+    vi.mocked(commandHostedRuntimeOwner).mockImplementation(async ({ command }) =>
+      response(owner({ phase: "starting", runnerContainerName: command.operation === "claim" ? null : target }),
+        command.operation === "claim" ? "claimed" : "updated"));
+    container.bindStandbySlot.mockImplementation(async ({ readiness: _readiness, ...input }) => {
+      if (outcome === "timeout") throw new DOMException("Synthetic lost bind response", "TimeoutError");
+      return { ...input, bound: true, readiness: { kind: "cleanup_unsettled" } };
+    });
+    expect(await ensurePostgresRuntimeProcessing(source, request)).toMatchObject({ kind: "retry_later" });
+    expect(container.ensureReadyForProcessing).not.toHaveBeenCalled();
+    expect(container.startSupervisedInvocation).not.toHaveBeenCalled();
+    expect(container.retireStandbySlot).not.toHaveBeenCalled();
+    expect(vi.mocked(commandHostedRuntimeOwner).mock.calls.map(([input]) => input.command.operation))
+      .toEqual(["claim", "select_target"]);
   });
 
   it.each([true, false])("starts with container launch preparation capability %s", async (supported) => {

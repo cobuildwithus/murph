@@ -125,7 +125,13 @@ processing mode, encrypted inference settings, and managed-AI allowance once.
 New invocations do not mint provider bearer credentials.
 The workspace checkpoint compare-and-swap version is independent of generation.
 
-Input preparation and native readiness overlap. The native slot submits the
+Workspace and runtime-store reads overlap native allocation and readiness. Fresh
+binding can request readiness in the same native RPC, after the binding lock is
+released, avoiding a second round trip to that controller. A returned readiness
+result is consumed directly; older controllers that omit it and retained targets
+use the existing explicit readiness call. Binding still follows canonical target
+selection, and failed or uncertain readiness never grants launch authority.
+The native slot submits the
 existing `prepare_launch` command immediately before registering its durable
 invocation receipt. That transaction binds invocation facts and verifies fresh
 Web authority together; startup does not make a second `authorize_effect` call.
