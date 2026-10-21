@@ -268,9 +268,16 @@ function collectInvalidAppleZeroSleepMetricCandidates(
       ? candidate.value > 0
       : candidate.value === 0 && INVALID_ZERO_SLEEP_METRICS.has(candidate.metric)
   );
-  if (!repairCandidates.some((candidate) => candidate.metric === "totalSleepMinutes")) {
+  const zeroTotalCandidates = repairCandidates.filter((candidate) =>
+    candidate.metric === "totalSleepMinutes"
+    && resolveSleepCandidateProvider(candidate) === APPLE_HEALTH_KIT_PROVIDER
+  );
+  if (zeroTotalCandidates.length === 0) {
     return [];
   }
+  const appleRepairCandidates = repairCandidates.filter((candidate) =>
+    resolveSleepCandidateProvider(candidate) === APPLE_HEALTH_KIT_PROVIDER
+  );
   const invalidCandidates: WearableMetricCandidate[] = [];
 
   for (const window of sleepWindows) {
@@ -278,15 +285,18 @@ function collectInvalidAppleZeroSleepMetricCandidates(
       continue;
     }
 
-    const windowCandidates = repairCandidates.filter((candidate) => sleepMetricAssociatedWithWindow(candidate, window));
-    const awakeMinutes = firstPositiveMetricValue(windowCandidates, "awakeMinutes");
-    const invalidZeroTotalCandidates = windowCandidates.filter((candidate) =>
-      candidate.metric === "totalSleepMinutes" &&
-      candidate.value === 0 &&
-      isInvalidZeroSleepSummaryOwnedCandidate(candidate, window)
+    // A window without an owned zero total cannot be repaired. Avoid scanning
+    // its entire awake/stage history until that necessary condition holds.
+    const invalidZeroTotalCandidates = zeroTotalCandidates.filter((candidate) =>
+      isInvalidZeroSleepSummaryOwnedCandidate(candidate, window) &&
+      sleepMetricAssociatedWithWindow(candidate, window)
     );
+    if (invalidZeroTotalCandidates.length === 0) {
+      continue;
+    }
+    const windowCandidates = appleRepairCandidates.filter((candidate) => sleepMetricAssociatedWithWindow(candidate, window));
+    const awakeMinutes = firstPositiveMetricValue(windowCandidates, "awakeMinutes");
     if (
-      invalidZeroTotalCandidates.length === 0 ||
       awakeMinutes === null ||
       window.durationMinutes <= awakeMinutes + 1
     ) {
