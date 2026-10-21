@@ -1281,6 +1281,62 @@ processing outcome (`retry_later:<allowlisted reason>`, a bare outcome, or
 `unknown` for missing or unrecognized values). No raw identity lookup, payload export,
 migration, or runtime control action is required.
 
+### Maintenance replay-barrier failure evidence
+
+When maintenance catches a failure that consumes its occurrence to prevent
+replay, `cron.job.completed.failureContext` carries only the following new
+fields. The existing hosted logger prefixes them with `failure` in
+`assistant.automation_detail.redacted_json`:
+
+| Event field | Meaning |
+| --- | --- |
+| `maintenanceReplayBarrier` | `provider_admitted` means the existing provider-start hook ran; `non_replayable_provider_work` means the existing raw-event fallback found work without that hook. Neither proves successful work or a committed write. |
+| `codexErrorInfo` | The shared `describeAssistantAutoReplyFailure` finite normalization: `httpConnectionFailed`, `internalServerError`, `responseStreamConnectionFailed`, `responseStreamDisconnected`, `responseTooManyFailedAttempts`, `serverOverloaded`, `usageLimitExceeded`, or `unrecognized` for another string. Missing or non-string values are omitted. |
+| `codexErrorHttpStatusCode` | Original diagnostic HTTP status, only when it is an integer from 100 through 599. Missing, nonnumeric, fractional, or out-of-range values are omitted. |
+
+The projection is captured before the catch replaces the error text, stays in
+the in-memory execution result, and excludes arbitrary details and messages.
+Existing `errorCode`, `runOutcome`, and `retryScheduled` retain their meanings.
+The occurrence remains consumed with a `skipped`/`no_op` run and no retry;
+summary counts, persisted cron schemas/state, severity, and provider policy do
+not change. These observations do not authorize replay or imply recovery.
+
+Fields are additive and optional under the existing scalar log format; no
+reader migration is needed. Older completions and other execution paths omit
+them. Absence is unknown evidence, not an inferred capacity or process failure;
+`unrecognized` means a string was present but outside the shared finite set.
+Historical rows cannot be retrospectively classified from the generic text.
+
+This query aggregates at most the newest 10,000 instrumented barrier rows in the
+24 hours preceding `$1` (a fixed UTC end timestamp), and returns at most 100
+diagnostic buckets. Omitted diagnostics remain `unknown`; older rows without a
+recognized barrier are excluded. A true `input_row_cap_hit` means counts may be
+truncated; existing best-effort logging also makes them observed-row counts.
+
+```sql
+WITH rows AS MATERIALIZED (
+  SELECT redacted_json AS d
+  FROM hosted_runtime_log
+  WHERE at >= $1::timestamptz - interval '24 hours'
+    AND at < $1::timestamptz
+    AND event_code = 'assistant.automation_detail'
+    AND redacted_json->>'type' = 'cron.job.completed'
+    AND redacted_json->>'failureMaintenanceReplayBarrier' IN
+      ('provider_admitted', 'non_replayable_provider_work')
+  ORDER BY at DESC, id DESC
+  LIMIT 10000
+)
+SELECT d->>'failureMaintenanceReplayBarrier' AS replay_barrier,
+       COALESCE(d->>'failureCodexErrorInfo', 'unknown') AS codex_error_info,
+       COALESCE(d->>'failureCodexErrorHttpStatusCode', 'unknown') AS http_status,
+       count(*) AS observed_completions,
+       (SELECT count(*) = 10000 FROM rows) AS input_row_cap_hit
+FROM rows
+GROUP BY 1, 2, 3
+ORDER BY observed_completions DESC, replay_barrier, codex_error_info, http_status
+LIMIT 100;
+```
+
 ### Scheduled automation loss alert
 
 The same five-minute cron runs the scheduled automation loss monitor. It alerts

@@ -8,7 +8,7 @@ import {
   HOSTED_RUNTIME_LOG_REQUEST_MAX_ENTRIES,
   type HostedRuntimeLogRequest,
 } from "@murphai/hosted-execution/runtime-control";
-import { parseHostedRuntimeLogRequest } from "@murphai/hosted-execution/parsers";
+import { parseHostedRuntimeLogRequest, parseHostedRuntimeRedactedJson } from "@murphai/hosted-execution/parsers";
 import { SqliteDeviceSyncStore } from "@murphai/device-syncd/service";
 import { sanitizeHostedExecutionStructuredLogDetails } from "@murphai/hosted-execution";
 import {
@@ -730,6 +730,49 @@ describe("runHostedAssistantAutomation", () => {
         }),
       ]),
     );
+  });
+
+  it("preserves maintenance failure evidence through hosted log redaction and parsing", async () => {
+    mocks.runAssistantAutomationPass.mockImplementationOnce(async (input) => {
+      input.onEvent?.({
+        type: "cron.job.completed",
+        safeDetails: "cron_job_no_op",
+        failureContext: {
+          errorCode: "ASSISTANT_CODEX_CONNECTION_LOST",
+          runOutcome: "no_op",
+          retryScheduled: false,
+          maintenanceReplayBarrier: "provider_admitted",
+          codexErrorInfo: "serverOverloaded",
+          codexErrorHttpStatusCode: 503,
+        },
+      });
+      return { nextWakeAt: null, progressed: true };
+    });
+    const result = await runHostedAssistantAutomation(
+      "/tmp/vault-root",
+      "req_maintenance_evidence",
+      { hosted: { memberId: "member_123", userEnvKeys: [] } },
+      {
+        eventId: "evt_maintenance_evidence",
+        kind: "runtime.timer",
+        occurredAt: "2026-04-08T00:00:00.000Z",
+        triggerKind: "runtime_timer",
+        userId: "member_123",
+      },
+    );
+    const completion = result.redactedLogEntries.find(
+      (entry) => entry.redacted?.type === "cron.job.completed",
+    );
+    expect(completion).toBeDefined();
+    expect(parseHostedRuntimeRedactedJson(completion?.redacted, "maintenance evidence"))
+      .toMatchObject({
+        failureErrorCode: "ASSISTANT_CODEX_CONNECTION_LOST",
+        failureRunOutcome: "no_op",
+        failureRetryScheduled: false,
+        failureMaintenanceReplayBarrier: "provider_admitted",
+        failureCodexErrorInfo: "serverOverloaded",
+        failureCodexErrorHttpStatusCode: 503,
+      });
   });
 
   it("applies the ordinary event cap to every scheduled automation slug", async () => {
