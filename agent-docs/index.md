@@ -1,3 +1,6 @@
+Hosted-local snapshot marker restart recovery is recorded in
+[the fixture correction plan](exec-plans/completed/2026-10-20-hosted-local-locator-restart.md).
+
 Query SQLite rebuild cost and sparse-zero sleep repair evidence are tracked in
 [the completed build-cost plan](exec-plans/completed/2026-10-20-sqlite-build-cost.md).
 
