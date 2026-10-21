@@ -27,7 +27,6 @@ const CODEX_CONNECTION_LOSS_ERROR_INFO_KINDS = new Set([
   'responseStreamConnectionFailed',
   'responseStreamDisconnected',
   'responseTooManyFailedAttempts',
-  'serverOverloaded',
 ])
 
 function isCodexUsageLimitErrorInfo(
@@ -173,6 +172,8 @@ export function buildCodexTurnFailedError(input: {
   if (detail) {
     parts.push(detail)
   }
+  const capacityUnavailable = input.errorInfo?.kind === 'serverOverloaded'
+    || input.errorInfo?.kind === 'flexUnavailable'
   const usageLimit = isCodexUsageLimitErrorInfo(input.errorInfo)
   const connectionLost =
     !usageLimit &&
@@ -206,7 +207,7 @@ export function buildCodexTurnFailedError(input: {
       codexThreadIdPresent: input.codexThreadId !== null,
       ...(usageLimit ? { providerUsageLimit: true } : {}),
       recoverableConnectionLoss: connectionLost,
-      retryable: connectionLost,
+      retryable: connectionLost || capacityUnavailable,
     },
   )
 }
@@ -226,6 +227,8 @@ export function buildCodexFailure(input: {
     normalizeStatusText(input.fallback ?? stderrTail) ??
     input.fallback ??
     stderrTail
+  const capacityUnavailable = input.errorInfo?.kind === 'serverOverloaded'
+    || input.errorInfo?.kind === 'flexUnavailable'
   const usageLimit = isCodexUsageLimitErrorInfo(input.errorInfo)
   // Prefer the structured protocol classification when an RPC error arrived
   // before the process died; fall back to stderr text sniffing only for true
@@ -270,7 +273,7 @@ export function buildCodexFailure(input: {
       ...(usageLimit ? { providerUsageLimit: true } : {}),
       codexThreadIdPresent: input.codexThreadId !== null,
       recoverableConnectionLoss: connectionLost,
-      retryable: connectionLost,
+      retryable: connectionLost || capacityUnavailable,
     },
   )
 }

@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
+import { computeAssistantAutoReplyRetryAt } from '../src/assistant/automation/auto-reply-retry.ts'
+
 import {
   ASSISTANT_CODEX_USAGE_LIMIT_ERROR_CODE,
   buildCodexConnectionFailureMessage,
@@ -463,7 +465,34 @@ describe('assistant Codex failure helpers', () => {
     expect(buildCodexFailure({ ...input, code: 1, signal: null, stderr: '' })).toMatchObject(expected)
   })
 
-  it.each(['flexUnavailable', 'invalidPrompt'])('preserves terminal Codex 0.158 error %s', (kind) => {
+  it.each(['serverOverloaded', 'flexUnavailable'])('retries structured capacity error %s without diagnosing connection loss', (kind) => {
+    const input = {
+      errorInfo: { kind, httpStatusCode: null },
+      fallback: 'Synthetic provider rejection.',
+      providerActionCount: 0,
+      codexThreadId: null,
+    }
+    const failures = [
+      buildCodexTurnFailedError({ ...input, status: 'failed' }),
+      buildCodexFailure({ ...input, code: 1, signal: null, stderr: '' }),
+    ]
+    for (const failure of failures) {
+      expect(failure).toMatchObject({
+        code: 'ASSISTANT_CODEX_FAILED',
+        context: {
+          codexErrorInfo: kind,
+          connectionLost: false,
+          recoverableConnectionLoss: false,
+          retryable: true,
+        },
+      })
+      expect(failure.message).not.toMatch(/lost its connection|restore connectivity/iu)
+      expect(computeAssistantAutoReplyRetryAt(failure, Date.parse('2030-01-15T10:00:00Z')))
+        .toBe('2030-01-15T10:05:00.000Z')
+    }
+  })
+
+  it.each(['invalidPrompt'])('preserves terminal Codex 0.158 error %s', (kind) => {
     expect(buildCodexTurnFailedError({
       errorInfo: { kind, httpStatusCode: null },
       fallback: 'capacity unavailable; retrying',

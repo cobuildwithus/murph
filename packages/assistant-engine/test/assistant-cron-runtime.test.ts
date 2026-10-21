@@ -5783,6 +5783,18 @@ describe('assistant cron runtime orchestration', () => {
         }),
       ],
     })
+    await updateCanonicalRuntimeState(vaultRoot, MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID, (record) => ({
+      ...record, state: { ...record.state, consecutiveFailures: 5 },
+    }))
+    vi.setSystemTime(new Date(runtimeRecord!.state.retryAfterAt!))
+    await processDueAssistantCronJobsLocal({
+      executionContext: { hosted: { memberId: 'member-hosted', userEnvKeys: [] } },
+      limit: 1,
+      vault: vaultRoot,
+    })
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenNthCalledWith(
+      2, expect.objectContaining({ serviceTier: 'flex' }),
+    )
   })
 
   it('consumes overnight memory consolidation when foreground yield appears after maintenance success', async () => {
@@ -6446,12 +6458,14 @@ describe('assistant cron runtime orchestration', () => {
       [MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID, 'Weekly research'],
       [MURPH_MONTHLY_IMPROVEMENT_COACH_AUTOMATION_ID, 'Monthly coach'],
     ].map(([automationId, name]) => ({ automationId: automationId!, name, occurrenceAt: '2026-04-08T13:00:00.000Z' })),
-  ])('keeps Flex and recovers a managed $name occurrence after a prolonged capacity shortage', async ({
+  ].flatMap(testCase => [5, 6, 7].flatMap(successAttempt => [false, true].map(delayed => ({
+    ...testCase, successAttempt, delayed,
+  })))))('recovers managed $name on attempt $successAttempt with delayed=$delayed', async ({
     automationId,
     occurrenceAt,
+    successAttempt,
+    delayed,
   }) => {
-    // Past the default hour and the former four-hour window, inside six hours.
-    const retryDelayMs = 5 * 60 * 60_000
     vi.useFakeTimers()
     vi.setSystemTime(new Date(occurrenceAt))
     const { vaultRoot } = await createRuntimeContext(
@@ -6460,8 +6474,8 @@ describe('assistant cron runtime orchestration', () => {
     await completeAssistantOnboarding({ completedAt: '2026-04-07T18:00:00.000Z',
       reason: 'user_answered', vault: vaultRoot })
     const seed = addManagedBackgroundAutomation(vaultRoot, automationId)
-    // Exercise the production recipe at a controlled due minute; only its tier
-    // policy varies here, independent of the weekly/monthly cadence fixture.
+    // Exercise the production recipe at a controlled due minute, with the same
+    // extended-window cadence as the managed production schedules.
     getVaultAutomationStore(vaultRoot).find(record => record.automationId === automationId)!.schedule = {
       kind: 'dailyLocal', localTime: occurrenceAt.slice(11, 16),
     }
@@ -6475,81 +6489,91 @@ describe('assistant cron runtime orchestration', () => {
         userEnvKeys: [],
       },
     }
-    cronMocks.sendAssistantMessageLocal
-      .mockImplementationOnce(async (input: AssistantNotificationInput) => {
+    for (let attempt = 1; attempt < successAttempt; attempt += 1) {
+      cronMocks.sendAssistantMessageLocal.mockImplementationOnce(async (input: AssistantNotificationInput) => {
         await input.onProviderRequestStarted?.({
-          acceptedInputIds: [],
-          providerRequestOrdinal: 1,
-          startedAt: occurrenceAt,
+          acceptedInputIds: [], providerRequestOrdinal: 1, startedAt: new Date().toISOString(),
         })
-        throw new Error('Synthetic Flex provider capacity failure.')
+        throw new Error('Synthetic provider capacity failure.')
       })
-      .mockResolvedValueOnce({
-        decision: {
-          kind: 'skip',
-          privateSummary: 'No new background context required attention.',
-        },
-        response: null,
-        session: { sessionId: 'session-managed-flex-retry' },
-      })
-
-    const first = await processDueAssistantCronJobsLocal({
-      executionContext,
-      limit: 1,
-      vault: vaultRoot,
+    }
+    cronMocks.sendAssistantMessageLocal.mockResolvedValueOnce(delayed ? {
+      decision: { kind: 'skip', privateSummary: 'No new background context required attention.' },
+      response: null,
+      session: { sessionId: 'session-managed-retry' },
+    } : {
+      decision: { kind: 'send_message', text: 'Your synthetic weekly update.', privateSummary: 'Prepared the scheduled update.' },
+      response: 'Your synthetic weekly update.',
+      deliveryOutcome: buildSentReminderDeliveryOutcome('outbox-managed-recovery'),
+      session: { sessionId: 'session-managed-retry' },
     })
 
-    expect(
-      await listAssistantCronRuns({ job: automationId, vault: vaultRoot }),
-    ).toMatchObject({
-      runs: [{ status: 'failed', error: 'Synthetic Flex provider capacity failure.' }],
-    })
-    expect(first).toEqual({ failed: 1, processed: 1, succeeded: 0 })
-    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledExactlyOnceWith(
-      expect.objectContaining({
-        ...(seed.assistantTargetOverride
-          ? { assistantTargetOverride: seed.assistantTargetOverride }
-          : {}),
+    // Independent expectations for the persisted retry schedule: these offsets
+    // include every prior backoff, rather than mirroring the tier selector.
+    const attemptOffsets = [0, 30_000, 90_000, 390_000, 1_290_000, 4_890_000, 8_490_000]
+    for (let attempt = 1; attempt <= successAttempt; attempt += 1) {
+      const succeeded = attempt === successAttempt
+      const offset = delayed && succeeded ? 5 * 60 * 60_000 : attemptOffsets[attempt - 1]!
+      vi.setSystemTime(new Date(Date.parse(occurrenceAt) + offset))
+      const result = await processDueAssistantCronJobsLocal({ executionContext, limit: 1, vault: vaultRoot })
+      expect(result).toEqual({ failed: succeeded ? 0 : 1, processed: 1, succeeded: succeeded ? 1 : 0 })
+      expect(cronMocks.sendAssistantMessageLocal).toHaveBeenNthCalledWith(attempt, expect.objectContaining({
+        ...(seed.assistantTargetOverride ? { assistantTargetOverride: seed.assistantTargetOverride } : {}),
         scheduledInvocationAuthority: { automationId, occurrenceAt },
-        serviceTier: 'flex',
+        serviceTier: attempt <= 5 ? 'flex' : null,
         turnTrigger: 'automation-cron',
-      }),
+      }))
+      const job = await getAssistantCronJob(vaultRoot, automationId)
+      expect(job.state.consecutiveFailures).toBe(succeeded ? 0 : attempt)
+      if (!succeeded) {
+        expect(job.state.nextRunAt).toBe(new Date(Date.parse(occurrenceAt) + attemptOffsets[attempt]!).toISOString())
+        expect((await listAssistantCronRuns({ job: automationId, vault: vaultRoot })).runs[0])
+          .toMatchObject({ status: 'failed', error: 'Synthetic provider capacity failure.' })
+      }
+    }
+    expect((await listAssistantCronRuns({ job: automationId, vault: vaultRoot })).runs[0])
+      .toMatchObject({ outcome: delayed ? 'no_op' : 'delivered' })
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledTimes(successAttempt)
+    await processDueAssistantCronJobsLocal({ executionContext, limit: 1, vault: vaultRoot })
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledTimes(successAttempt)
+    const completedJob = await getAssistantCronJob(vaultRoot, automationId)
+    expect(completedJob.state.nextRunAt).toBe(new Date(Date.parse(occurrenceAt) + 86_400_000).toISOString())
+    vi.setSystemTime(new Date(completedJob.state.nextRunAt!))
+    await processDueAssistantCronJobsLocal({ executionContext, limit: 1, vault: vaultRoot })
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenNthCalledWith(
+      successAttempt + 1, expect.objectContaining({ serviceTier: 'flex' }),
     )
+  })
+
+  it.each(['hourly', 'one-shot'])('keeps first-retry Standard fallback for a managed %s schedule', async (cadence) => {
+    vi.useFakeTimers()
+    const occurrenceAt = '2026-04-08T13:00:00.000Z'
+    vi.setSystemTime(new Date(occurrenceAt))
+    const { vaultRoot } = await createRuntimeContext('assistant-cron-runtime-managed-short-window-')
+    await completeAssistantOnboarding({ completedAt: '2026-04-07T18:00:00.000Z', reason: 'user_answered', vault: vaultRoot })
+    const automationId = MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID
+    addManagedBackgroundAutomation(vaultRoot, automationId)
+    const automation = getVaultAutomationStore(vaultRoot).find(record => record.automationId === automationId)!
+    automation.scheduleAnchorAt = '2026-04-08T12:00:00.000Z'
+    automation.schedule = cadence === 'hourly'
+      ? { kind: 'cron', expression: '0 * * * *' }
+      : { kind: 'at', at: occurrenceAt }
+    const executionContext: AssistantExecutionContext = {
+      hosted: {
+        memberId: 'member-short-window', userEnvKeys: [],
+        resolveScheduledExternalThreadRoute: async ({ target }) => ({
+          channel: 'telegram', containerMemberId: 'member-short-window', threadId: target, threadIsDirect: true,
+        }),
+      },
+    }
+    cronMocks.sendAssistantMessageLocal.mockRejectedValueOnce(new Error('Synthetic capacity failure.'))
+    await processDueAssistantCronJobsLocal({ executionContext, limit: 1, vault: vaultRoot })
     const failedJob = await getAssistantCronJob(vaultRoot, automationId)
     expect(failedJob.state.consecutiveFailures).toBe(1)
-    expect(failedJob.state.nextRunAt).toBe(
-      new Date(Date.parse(occurrenceAt) + 30_000).toISOString(),
-    )
-
-    vi.setSystemTime(new Date(Date.parse(occurrenceAt) + retryDelayMs))
-    const retried = await processDueAssistantCronJobsLocal({
-      executionContext,
-      limit: 1,
-      vault: vaultRoot,
-    })
-
-    expect(retried).toEqual({ failed: 0, processed: 1, succeeded: 1 })
-    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledTimes(2)
-    expect(
-      (cronMocks.sendAssistantMessageLocal.mock.calls[1]?.[0] as { instructions?: string } | undefined)
-        ?.instructions,
-    ).not.toContain('Member-facing wording (engine-supplied')
-    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenNthCalledWith(
-      2,
-      expect.objectContaining({
-        ...(seed.assistantTargetOverride
-          ? { assistantTargetOverride: seed.assistantTargetOverride }
-          : {}),
-        scheduledInvocationAuthority: { automationId, occurrenceAt },
-        serviceTier: 'flex',
-        turnTrigger: 'automation-cron',
-      }),
-    )
-    const completedJob = await getAssistantCronJob(vaultRoot, automationId)
-    expect(completedJob.state.consecutiveFailures).toBe(0)
-    expect(completedJob.state.nextRunAt).toBe(
-      new Date(Date.parse(occurrenceAt) + 86_400_000).toISOString(),
-    )
+    vi.setSystemTime(new Date(failedJob.state.nextRunAt!))
+    await processDueAssistantCronJobsLocal({ executionContext, limit: 1, vault: vaultRoot })
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenNthCalledWith(1, expect.objectContaining({ serviceTier: 'flex' }))
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenNthCalledWith(2, expect.objectContaining({ serviceTier: null }))
   })
 
   it.each([

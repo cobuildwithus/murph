@@ -1352,6 +1352,11 @@ Member ChatGPT linking retirement is tracked in
 the retained mailbox cleanup contract is owned by
 [`hosted runtime protocol`](references/hosted-runtime-protocol.md).
 
+Scheduled Standard-tier recovery and structured capacity failure classification
+are owned by `ARCHITECTURE.md`; implementation proof is tracked in
+[`scheduled recovery`](exec-plans/completed/2026-10-20-automation-standard-fallback.md)
+and the [five-attempt policy](exec-plans/completed/2026-10-21-scheduled-five-flex-attempts.md).
+
 Bounded long-distance workspace compression and synthetic cold-restore proof are
 recorded in [`workspace restore speed`](exec-plans/completed/2026-10-20-snapshot-restore-speed.md);
 the live storage contract remains in `../apps/cloudflare/README.md`.

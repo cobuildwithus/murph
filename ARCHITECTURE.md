@@ -374,11 +374,17 @@ the same automation tool through one execution-context factory. Cron supplies it
 verified delivery route before actual turn planning; the shared context has no
 ambient mutation tool. The canonical tool still owns version checks, route
 preservation, and readback. No per-job mutation allowlist or parallel repair API.
-Journal, weekly digest/insight/research, monthly coaching,
-and private memory/room-model maintenance retain
-Flex on failed-attempt retries. Ordinary reminders may retry at Standard after
-a failed Flex attempt. The provider boundary validates model and catalog support
+Hosted scheduled turns start on Flex. Managed Journal, weekly digest/insight/
+research and monthly coaching occurrences eligible for the six-hour recovery
+window use Flex for the first five attempts, then Standard from attempt six.
+Ordinary reminders and managed schedules without that extended window use
+Standard after the first failed attempt. Private memory/room-model maintenance
+retains Flex on all retries. The provider boundary validates model and catalog support
 before selecting Flex; existing bounded failure backoff remains controlling.
+Structured Codex overload and Flex-unavailable errors are retryable provider
+failures, not transport loss. Foreground recovery retains those inputs through
+the existing five-minute capacity retry; quota limits and permanent errors keep
+their separate policies.
 Personal managed OpenAI conversation turns request native Priority processing
 for the first 24 elapsed hours after `HostedMember.createdAt`. The existing
 member configuration query projects a derived expiry through the optional
@@ -397,7 +403,8 @@ without another Web read, including when the prefetched workspace is null.
 
 The five managed automations without a user-promised delivery minute (morning
 Journal context, weekly health digest, weekly health insight, weekly research
-scout and monthly improvement coach) keep Flex pricing on retries. Recurring
+scout and monthly improvement coach) retain their extended recovery window
+when falling back to Standard. Recurring
 daily-local or cron schedules whose next occurrence is at least six hours away
 keep a six-hour freshness window. Other identities, one-shots, more frequent
 schedules, active-until, route, consent, and duplicate checks retain their
