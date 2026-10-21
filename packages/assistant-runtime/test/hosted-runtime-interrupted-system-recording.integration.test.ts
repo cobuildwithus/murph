@@ -440,11 +440,18 @@ test.each([
         assert.equal(result.nextWakeReason, "assistant");
         assert.equal(result.nextWakeAt, (await readHostedProviderCleanupCheckpoint(vaultRoot))?.nextWakeAt);
       }
-      await new Promise<void>((resolve) => setTimeout(resolve, Math.max(0, retryAt - Date.now())));
       vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-system-recording-due-retry-"));
       roots.push(vaultRoot);
-      runtimeCompletion = runInvocation("system_mailbox");
-      result = await withRealTimeout(runtimeCompletion, 10_000, facts);
+      // Observe the exact durable retry boundary without sleeping for a minute.
+      // As above, only Date is controlled; I/O, timers and liveness stay real.
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(retryAt);
+      try {
+        runtimeCompletion = runInvocation("system_mailbox");
+        result = await withRealTimeout(runtimeCompletion, 10_000, facts);
+      } finally {
+        vi.useRealTimers();
+      }
     }
     // Cold restores record the checkpointed import; they never re-read the provider.
     assert.deepEqual(providerReads(), admittedProviderReads, facts());

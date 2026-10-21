@@ -1547,6 +1547,14 @@ test("Junction createLinkToken honors configured allowed Link hosts", async () =
 
 test("Junction refresh outlives the server wait and reports timeout without replay", async () => {
   vi.useFakeTimers();
+  // Native AbortSignal.timeout bypasses fake timers; control only its clock.
+  // The native timeout and caller-abort cases above retain real signal coverage.
+  const abortTimeout = vi.spyOn(AbortSignal, "timeout").mockImplementation((ms) => {
+    const controller = new AbortController();
+    setTimeout(() => controller.abort(new DOMException("Synthetic deadline", "TimeoutError")), ms);
+    return controller.signal;
+  });
+  const signals: AbortSignal[] = [];
   let requests = 0;
   let delayMs = 16_000;
   const client = new JunctionClient({
@@ -1557,6 +1565,7 @@ test("Junction refresh outlives the server wait and reports timeout without repl
       requests += 1;
       const signal = init?.signal;
       assert.ok(signal);
+      signals.push(signal);
       return new Promise<Response>((resolve, reject) => {
         const timer = setTimeout(() => resolve(createJsonResponse({
           success: true,
@@ -1586,10 +1595,16 @@ test("Junction refresh outlives the server wait and reports timeout without repl
         return true;
       },
     );
-    await vi.advanceTimersByTimeAsync(35_000);
+    await vi.advanceTimersByTimeAsync(34_999);
+    assert.equal(signals[1]?.aborted, false, "Refresh retains its full client deadline");
+    await vi.advanceTimersByTimeAsync(1);
+    assert.equal(signals[1]?.aborted, true);
+    assert.deepEqual(abortTimeout.mock.calls, [[35_000], [35_000]]);
     await failure;
     assert.equal(requests, 2);
   } finally {
+    abortTimeout.mockRestore();
+    vi.clearAllTimers();
     vi.useRealTimers();
   }
 });
