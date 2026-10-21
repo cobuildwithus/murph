@@ -983,8 +983,15 @@ External conversation directness is three-state authority. Explicit direct evide
 
 Assistant-authored cron schedules require a literal wildcard in either day-of-month or day-of-week. The shared automation tool argument schema rejects combined restrictions before creation or schedule replacement and returns repair guidance through the existing validation feedback. Finite recurrences keep their repeating days in the schedule and their exclusive expiration in `activeUntil`. Canonical cron retains standard OR semantics for existing records and operator workflows; inspection and patches without a replacement schedule remain compatible.
 
-A private hosted biweekly usage review is an ordinary fresh managed automation,
-pinned to GPT-6.1 Sol medium. It reads bounded current-member diagnostics from
+A private hosted biweekly usage review is a managed automation pinned to
+GPT-6.1 Sol medium. Its verified private hosted occurrence uses the existing
+isolated conversation/provider-turn profile: it neither resumes the member's
+provider thread nor replays committed chat history. Canonical context and the
+ordinary tool and delivery authorities remain available. Success and terminal
+failure preserve the foreground resume binding; all isolated notification
+profiles preserve it, except the explicit context-handoff reset. Other scheduled
+automations keep ordinary conversation continuity. The review reads bounded
+current-member diagnostics from
 the canonical hosted AI usage ledger, preserving recorded allowance costs and
 explicit missing/truncated coverage. Existing sanitized turn profiles attribute
 tool output bytes; bytes are not token counts or per-tool dollar charges. The
