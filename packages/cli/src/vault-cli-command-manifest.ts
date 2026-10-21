@@ -1740,7 +1740,7 @@ export const vaultCliCommandDescriptors = [
       {
         path: ['knowledge', 'show'],
         description:
-          'Show one derived knowledge page by slug. `--if-exists` returns `page: null` only when absence is confirmed by a fully valid knowledge graph; invalid, unreadable, duplicate, and reserved pages still fail.',
+          'Show one derived knowledge page body, metadata, and revision digest. `--raw` also includes the exact stored Markdown. `--if-exists` returns `page: null` only when absence is confirmed by a fully valid knowledge graph; invalid, unreadable, duplicate, and reserved pages still fail.',
         output: knowledgeShowResultSchema,
       },
       {

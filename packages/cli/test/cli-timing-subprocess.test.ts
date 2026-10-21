@@ -267,7 +267,9 @@ for (const exists of [false, true]) test(`real knowledge read: ${exists ? 'valid
     const output = JSON.parse(on.stdout)
     if (exists) {
       assert.equal(output.page.slug, 'synthetic-page')
-      assert.equal(output.page.markdown, markdown)
+      assert.match(output.page.body, /SYNTHETIC_KNOWLEDGE_VALUE/u)
+      assert.equal(Object.hasOwn(output.page, 'markdown'), false)
+      assert.equal(output.page.pageRevisionDigest, createHash('sha256').update(markdown).digest('hex'))
     } else {
       assert.equal(output.code, 'knowledge_page_not_found')
       assert.equal(output.stage, 'read')

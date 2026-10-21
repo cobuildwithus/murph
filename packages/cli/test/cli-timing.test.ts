@@ -573,7 +573,7 @@ test('real event and knowledge validation preserve output, effects and finite lo
       assert.equal(captured.timing.commands[0]!.failures, undefined)
       if (args[0] === 'knowledge' && args[1] === 'show') {
         assert.equal(JSON.parse(captured.result.stdout).page.slug, 'synthetic-page')
-        assert.match(JSON.parse(captured.result.stdout).page.markdown, /PRIVATE_SENTINEL/u)
+        assert.match(JSON.parse(captured.result.stdout).page.body, /PRIVATE_SENTINEL/u)
       }
       assert.ok(Buffer.byteLength(captured.wire) <= CLI_TIMING_MAX_REPORT_BYTES)
       assert.equal(captured.wire.includes('PRIVATE_SENTINEL'), false)

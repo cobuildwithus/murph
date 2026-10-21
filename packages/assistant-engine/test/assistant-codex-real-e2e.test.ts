@@ -5222,6 +5222,65 @@ describeRealCodex('real Codex missing knowledge recovery e2e', () => {
   }, 300_000)
 })
 
+describeRealCodex('real Codex compact knowledge read e2e', () => {
+  it('answers from the complete compact knowledge body with one read and no writes', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-compact-knowledge-e2e-'))
+    const vaultRoot = path.join(workingDirectory, 'vault')
+    const binDirectory = path.join(workingDirectory, 'bin')
+    const commandLogPath = path.join(workingDirectory, 'commands.log')
+    try {
+      await initializeVault({ title: 'Synthetic knowledge read', timezone: 'UTC', vaultRoot })
+      await upsertKnowledgePage({
+        vault: vaultRoot, slug: 'trail-gear-list', title: 'Trail gear list',
+        body: '# Trail gear list\n\nPack the green rain jacket and a spare headlamp. Leave the umbrella at home because this route is exposed.',
+      })
+      await materializeRealWorkoutVaultCli({ binDirectory, commandLogPath, vaultRoot })
+      const vaultBefore = await snapshotRealCodexCanonicalVault(vaultRoot)
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome,
+        developerInstructions: buildAssistantSystemPrompt({
+          assistantCliContract: null, assistantContextSnapshotPrompt: null,
+          assistantHostedDeviceConnectAvailable: false, assistantHostedDeviceConnectProviders: [],
+          assistantKnowledgeToolsAvailable: false, channel: 'linq',
+          cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+          conversationScope: 'direct', currentLocalDate: '2026-09-04', currentTimeZone: 'UTC',
+          hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false,
+          turnTrigger: null,
+        }),
+        dynamicTools: [],
+        env: { ...config.env, PATH: `${binDirectory}:${config.env.PATH ?? ''}` },
+        model: config.model, modelProvider: config.modelProvider,
+        prompt: 'What should I pack from my saved wiki page trail-gear-list, and what should I leave behind? Read that page once with vault-cli knowledge show and answer briefly. Do not change anything or look elsewhere.',
+        reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
+      })
+      const commands = (await readFile(commandLogPath, 'utf8')).split('\n').filter(Boolean)
+        .filter((command) => !isRecordedVaultHelpCommand(command))
+      expect(commands).toEqual([expect.stringMatching(/^knowledge show trail-gear-list(?:\s|$)/u)])
+      expect(commands[0]).not.toMatch(/--raw/u)
+      const reads = readCapabilityRoutingActions(result.jsonEvents)
+        .filter((action) => action.kind === 'command' && action.command.includes('knowledge show'))
+      expect(reads).toHaveLength(1)
+      expect(reads[0]?.output).toContain('green rain jacket')
+      expect(reads[0]?.output).toContain('pageRevisionDigest')
+      expect(reads[0]?.output).not.toMatch(/"markdown"\s*:/u)
+      expect(await snapshotRealCodexCanonicalVault(vaultRoot)).toEqual(vaultBefore)
+      expect(await listAssistantOutboxIntents(vaultRoot)).toEqual([])
+      expect(result.finalMessage).toMatch(/green rain jacket/iu)
+      expect(result.finalMessage).toMatch(/spare headlamp/iu)
+      expect(result.finalMessage).toMatch(/(?:leave|skip|without|don.t|do not)[\s\S]{0,60}umbrella/iu)
+      expect(result.finalMessage).not.toMatch(/updated|saved it|changed your|couldn.t find/iu)
+      expect(result.finalMessage.length).toBeLessThan(500)
+      process.stdout.write(`[compact-knowledge-e2e] ${JSON.stringify({ finalMessage: result.finalMessage })}\n`)
+    } finally {
+      await removeRealCodexTemporaryPath(workingDirectory)
+      await removeRealCodexTemporaryPaths(config.temporaryPaths)
+    }
+  }, 600_000)
+})
+
 describeRealCodex('real Codex optional knowledge show e2e', () => {
   // Direct consumer capability: the request names the opt-in mode itself.
   it('checks an absent wiki page once with the opt-in if-exists read and writes nothing', async () => {

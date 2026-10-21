@@ -13841,6 +13841,10 @@
                           "minLength": 1,
                           "maxLength": 128
                         },
+                        "raw": {
+                          "description": "Also include the exact stored Markdown, including YAML frontmatter, in page.markdown.",
+                          "type": "boolean"
+                        },
                         "ifExists": {
                           "description": "For an optional page, return `page: null` instead of failing when no derived page exists for the slug. Fails instead when any invalid page leaves absence unconfirmed, and for unreadable, duplicate, or reserved pages.",
                           "type": "boolean"
