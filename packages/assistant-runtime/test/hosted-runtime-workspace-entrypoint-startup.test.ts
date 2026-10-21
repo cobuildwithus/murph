@@ -73,6 +73,7 @@ import {
   type HostedMailboxPayloadFetchRequest,
   type HostedMailboxPayloadFetchResponse,
   type HostedRuntimeRedactedJson,
+  type HostedRuntimeAssistantAskControlRequest,
   type HostedRuntimeLatencyTraceRequest,
   type HostedRuntimeLogRequest,
   type HostedRuntimeAssistantConfigurationControlRequest,
@@ -96,6 +97,9 @@ import {
   type HostedWorkspaceRuntimeJobOptions,
   type HostedWorkspaceSnapshotCheckpointRequestBuilderInput,
 } from "../src/hosted-runtime.ts";
+import {
+  runHostedWorkspaceAssistantPhase,
+} from "../src/hosted-runtime/workspace-assistant-phase.ts";
 import {
   drainHostedRuntimeLogWritesBestEffort,
 } from "../src/hosted-runtime/runtime-logs.ts";
@@ -2355,6 +2359,164 @@ describe("hosted workspace runtime entrypoint", () => {
       await withRealTimeout(run(restoredVaultRoot, String(checkpointRequests.length)), 15_000, () => events.join(","));
       expect(mocks.executeReadOnlyAssistantAsk).toHaveBeenCalledTimes(executeCallsBefore + (arrival === "before" ? 2 : 1));
       expect(complete).toHaveBeenCalledOnce();
+      assert.ok(!(await readHostedSystemMailboxState(restoredVaultRoot)).pending.some((item) => item.itemId === lateAskItem.id));
+    } finally {
+      await removeTempRoot(root);
+    }
+  }, 45_000);
+
+  test.each([
+    { phase: "stub", successorMode: "system_mailbox" },
+    { phase: "real", successorMode: "system_mailbox" },
+    { phase: "real", successorMode: "default" },
+  ] as const)("returns a deferred operator diagnostic through a bounded durable successor with a $phase assistant phase and $successorMode owner", async ({ phase, successorMode }) => {
+    const root = await mkdtemp(path.join(tmpdir(), "murph-operator-ask-successor-"));
+    const vaultRoot = path.join(root, "first");
+    const restoredVaultRoot = path.join(root, "restored");
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const artifactBytesByHash = new Map<string, Uint8Array>();
+    const askRequests: HostedRuntimeAssistantAskControlRequest[] = [];
+    const events: string[] = [];
+    const mailboxItems = [createMailboxItem({
+      dedupeKey: "runtime_manual_before_late_ask", id: "mailbox_before_late_ask",
+      kind: "runtime.manual-requested", lane: "system", laneSeq: "1",
+    })];
+    const lateAskItem = createMailboxItem({
+      dedupeKey: "ask_event_after_checkpoint", id: "mailbox_after_checkpoint_ask",
+      kind: "assistant.ask.requested", lane: "system", laneSeq: "2",
+    });
+    let restored = false;
+    let foregroundPass = 0;
+    const durableEffect = vi.fn(async () => { events.push("durable-effect"); });
+    const executeDiagnostic = vi.fn<
+      typeof import("@murphai/assistant-engine/assistant-ask")["executeOperatorDiagnostic"]
+    >(async (askInput) => {
+      assert.equal(restored, true, "Only the restored successor invocation may execute the diagnostic.");
+      assert.equal(askInput.workspaceRoot, restoredVaultRoot);
+      askInput.abortSignal?.throwIfAborted();
+      events.push("ask.started");
+      return { answer: "Synthetic completed answer.", outcome: "answered" };
+    });
+    mocks.executeOperatorDiagnostic.mockImplementation(executeDiagnostic);
+    const run = (runVaultRoot: string, workspaceVersion: string) => {
+      const previous = checkpointRequests.at(-1);
+      const mailboxPort = createMailboxPort({ events, items: mailboxItems });
+      const fetch = mailboxPort.fetch.bind(mailboxPort);
+      mailboxPort.fetch = async (request) => {
+        if (checkpointRequests.length > 0) await setImmediate();
+        return await fetch(request);
+      };
+      return runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({ request: {
+          attemptId: `attempt_synthetic_late_ask_${workspaceVersion}`,
+          runnerIdleTtlMs: restored ? 100 : 1,
+          processingMode: restored ? successorMode : "default",
+          leaseGeneration: workspaceVersion, userId: TEST_USER_ID, workspaceVersion,
+        } }),
+        {
+          vaultRoot: runVaultRoot, runtimeWakeSignal,
+          async createCheckpointSnapshot() {
+            // Include import/effect follow-up saves, but fail a restart loop
+            // without waiting for the invocation timeout.
+            if (!restored) assert.ok(checkpointRequests.length < 4, events.join(","));
+            const snapshot = await createVaultSnapshotBundle({ vaultRoot: runVaultRoot });
+            artifactBytesByHash.set(snapshot.hash, snapshot.bytes);
+            return { snapshotRef: snapshot.snapshotRef };
+          },
+          async importItem(item) {
+            if (item.route.action === "run-assistant-ask") {
+              await ensureHostedBootstrapMetadataForSystemMailboxTest(runVaultRoot);
+              const wake = createOperatorTaskAssistantAskRequestedWake({ eventId: lateAskItem.dedupeKey });
+              wake.occurredAt = new Date().toISOString();
+              wake.ask.expiresAt = new Date(Date.parse(wake.occurredAt) + 600_000).toISOString();
+              return await enqueueHostedSystemMailboxItem({ item, vaultRoot: runVaultRoot, wake });
+            }
+            return await importRuntimeControlSystemMailboxItemForTest({ item: item.item, vaultRoot: runVaultRoot });
+          },
+          async runAssistantPhase(phaseInput) {
+            if (restored) return { progressed: false };
+            foregroundPass += 1;
+            if (foregroundPass > 1) {
+              return phase === "real"
+                ? await runHostedWorkspaceAssistantPhase(phaseInput)
+                : { progressed: false };
+            }
+            return {
+              checkpointReason: "assistant_runtime_commit", progressed: true,
+              afterCheckpoint: async () => ({
+                checkpointReason: "assistant_runtime_commit", afterDurableCheckpoint: durableEffect,
+              }),
+            };
+          },
+          platform: createPlatform({
+            artifactBytesByHash, mailboxPort,
+            assistantAskPort: { async request(request) {
+              askRequests.push(request);
+              if (request.action === "complete") {
+                return { action: "complete", status: "completed" };
+              }
+              return { action: "prepare", question: "Inspect the synthetic runtime state.", status: "ready", targetLabel: "Synthetic runtime" };
+            } },
+            workspacePort: createWorkspacePort({
+              events, checkpointRequests,
+              workspace: createWorkspaceState({
+                version: workspaceVersion, snapshotRef: previous?.snapshotRef ?? null,
+                redactedStatus: previous?.redactedStatus ?? null,
+                nextWakeAt: previous?.nextWakeAt ?? null,
+                nextWakeReason: previous?.nextWakeReason ?? null,
+                nextDefaultProcessingWakeAt: previous?.nextDefaultProcessingWakeAt ?? null,
+                nextDefaultProcessingWakeReason: previous?.nextDefaultProcessingWakeReason ?? null,
+                systemMailboxProgressGeneration: previous?.systemMailboxProgressGeneration ?? "0",
+              }),
+              checkpointWorkspace(request) {
+                if (!restored && checkpointRequests.length === 1) mailboxItems.push(lateAskItem);
+                if (!restored) runtimeWakeSignal.notify();
+                return createWorkspaceState({
+                  version: String(BigInt(request.expectedWorkspaceVersion) + 1n),
+                  snapshotRef: request.snapshotRef, redactedStatus: request.redactedStatus ?? null,
+                  nextWakeAt: request.nextWakeAt ?? null, nextWakeReason: request.nextWakeReason ?? null,
+                  nextDefaultProcessingWakeAt: request.nextDefaultProcessingWakeAt ?? null,
+                  nextDefaultProcessingWakeReason: request.nextDefaultProcessingWakeReason ?? null,
+                  systemMailboxProgressGeneration: request.systemMailboxProgressGeneration,
+                });
+              },
+            }),
+          }),
+        },
+      );
+    };
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const first = await withRealTimeout(run(vaultRoot, "0"), 15_000, () => events.join(","));
+      assert.equal(first.status, "scheduled");
+      assert.ok(first.nextWakeAt && Date.parse(first.nextWakeAt) <= Date.now());
+      assert.equal(first.nextWakeReason, "assistant");
+      assert.ok(checkpointRequests.length <= 4, events.join(","));
+      const committed = checkpointRequests.at(-1);
+      assert.ok(committed?.snapshotRef);
+      assert.ok(committed.nextWakeAt && Date.parse(committed.nextWakeAt) <= Date.now());
+      assert.equal(committed.nextWakeReason, "assistant");
+      expect(durableEffect).toHaveBeenCalledOnce();
+      expect(executeDiagnostic).not.toHaveBeenCalled();
+      assert.deepEqual(askRequests, []);
+      const retained = (await readHostedSystemMailboxState(vaultRoot)).pending.find((item) => item.itemId === lateAskItem.id);
+      assert.ok(retained);
+      assert.equal(retained.status, "pending");
+      assert.equal(retained.attemptCount, 0);
+      assert.equal(retained.nextAttemptAt, null);
+      assert.equal(retained.wake.eventId, lateAskItem.dedupeKey);
+      restored = true;
+      await withRealTimeout(run(restoredVaultRoot, String(checkpointRequests.length)), 15_000, () => events.join(","));
+      expect(executeDiagnostic).toHaveBeenCalledOnce();
+      assert.deepEqual(askRequests, [
+        { action: "prepare", requestId: lateAskItem.dedupeKey },
+        {
+          action: "complete", requestId: lateAskItem.dedupeKey,
+          result: { answer: "Synthetic completed answer.", outcome: "answered" },
+        },
+      ]);
+      expect(durableEffect).toHaveBeenCalledOnce();
       assert.ok(!(await readHostedSystemMailboxState(restoredVaultRoot)).pending.some((item) => item.itemId === lateAskItem.id));
     } finally {
       await removeTempRoot(root);

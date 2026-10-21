@@ -2493,7 +2493,7 @@ export async function runHostedWorkspaceAssistantPhase(
       const wakeStateProgressed = hostedAssistantWakeStateProgressed({
         assistantMetrics,
         input,
-        nextWakeAt,
+        nextWake: createHostedRuntimeWakeCandidate(nextWakeAt, postDelivery.nextWakeReason),
         skippedDeviceSyncWakeAt: deviceSyncFollowUpWake?.at ?? null,
       });
       const progressed = assistantMetricsProgressed({
@@ -2580,7 +2580,7 @@ export async function runHostedWorkspaceAssistantPhase(
     const wakeStateProgressed = hostedAssistantWakeStateProgressed({
       assistantMetrics,
       input,
-      nextWakeAt,
+      nextWake,
       skippedDeviceSyncWakeAt: deviceSyncFollowUpWake?.at ?? null,
     });
     const progressed = assistantMetricsProgressed({
@@ -6200,7 +6200,7 @@ async function runForegroundAssistantReplyPhase(input: {
     const wakeStateProgressed = hostedAssistantWakeStateProgressed({
       assistantMetrics: input.assistantMetrics,
       input: input.input,
-      nextWakeAt,
+      nextWake: createHostedRuntimeWakeCandidate(nextWakeAt, postDelivery.nextWakeReason),
       skippedDeviceSyncWakeAt: input.skippedDeviceSyncWake?.at ?? null,
     });
     const progressed = assistantMetricsProgressed({
@@ -6283,7 +6283,7 @@ async function runForegroundAssistantReplyPhase(input: {
   const wakeStateProgressed = hostedAssistantWakeStateProgressed({
     assistantMetrics: input.assistantMetrics,
     input: input.input,
-    nextWakeAt,
+    nextWake,
     skippedDeviceSyncWakeAt: input.skippedDeviceSyncWake?.at ?? null,
   });
   const progressed = assistantMetricsProgressed({
@@ -8628,7 +8628,7 @@ function consumedScheduledWorkspaceWake(input: HostedWorkspaceRuntimeAssistantPh
 function hostedAssistantWakeStateProgressed(input: {
   assistantMetrics: Awaited<ReturnType<typeof runHostedAssistantAutomationLane>>;
   input: HostedWorkspaceRuntimeAssistantPhaseInput;
-  nextWakeAt: string | null;
+  nextWake: HostedRuntimeWakeCandidate;
   skippedDeviceSyncWakeAt: string | null;
 }): boolean {
   if (input.skippedDeviceSyncWakeAt !== null) {
@@ -8640,17 +8640,38 @@ function hostedAssistantWakeStateProgressed(input: {
     );
   }
 
-  const existingWakeAt = input.input.workspace?.nextWakeAt ?? null;
-  if (input.nextWakeAt === existingWakeAt) {
+  const existingWake = createHostedRuntimeWakeCandidate(
+    input.input.workspace?.nextWakeAt,
+    input.input.workspace?.nextWakeReason,
+  );
+  if (
+    input.nextWake.at === existingWake.at
+    && input.nextWake.reason === existingWake.reason
+  ) {
     return false;
   }
 
   if (!consumedScheduledWorkspaceWake(input.input)) {
     return (
-      input.nextWakeAt !== null
+      input.nextWake.at !== null
       && !hasFreshHostedConversationInput(input.input)
       && input.assistantMetrics.activeTurnInputIngested !== true
     );
+  }
+
+  // A pending obligation may project a fresh "now" on every pass. That alone
+  // is not progress for the same wake reason, even with device sync configured.
+  // Canonical work, delivery, cleanup, and usage are counted by the callers.
+  if (
+    input.nextWake.reason === existingWake.reason
+    && hostedRuntimeWakeCandidateIsDue(
+      input.nextWake,
+      resolveHostedAssistantPhaseNowMs(input.input),
+    )
+    && !hasFreshHostedConversationInput(input.input)
+    && input.assistantMetrics.activeTurnInputIngested !== true
+  ) {
+    return false;
   }
 
   if (isDueHostedDeviceSyncRecoveryAlarm(input.input)) {
@@ -8658,7 +8679,7 @@ function hostedAssistantWakeStateProgressed(input: {
   }
 
   return (
-    input.nextWakeAt !== null
+    input.nextWake.at !== null
     || hasFreshHostedConversationInput(input.input)
     || input.assistantMetrics.activeTurnInputIngested === true
   );
