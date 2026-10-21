@@ -28,7 +28,7 @@ const browserRunner = readFileSync(
 describe("live Junction wearable canary workflow", () => {
   it("admits the private controller only for protected-main provider proof", () => {
     expect(workflow).toContain("permissions:\n  contents: read");
-    expect(workflow).toContain('cron: "43 5 * * *"');
+    expect(workflow).toContain('cron: "43 5 * * 1,4"');
     expect(workflow).toContain("  schedule:");
     expect(workflow).toContain("  workflow_dispatch:");
     expect(workflow).not.toMatch(/^\s*(push|pull_request|pull_request_target|repository_dispatch):/mu);

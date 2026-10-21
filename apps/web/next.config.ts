@@ -33,7 +33,6 @@ interface HostedWebWebpackContext {
 }
 
 const HOSTED_WEB_HEADER_SOURCE = "/(.*)";
-const MURPH_SAFE_HEADER_SOURCE = "/search/:path*";
 const PRIVY_CUSTOM_DOMAIN_ENV_KEYS = ["PRIVY_CUSTOM_AUTH_DOMAIN"] as const;
 const PRIVY_BASE_DOMAIN_ENV_KEYS = ["PRIVY_BASE_DOMAIN"] as const;
 const HOSTED_PUBLIC_BASE_URL_ENV_KEYS = [
@@ -73,8 +72,6 @@ const TELEGRAM_REQUIRED_FRAME_SOURCES = [
   "https://oauth.telegram.org",
 ] as const;
 const TURNSTILE_SOURCES = ["https://challenges.cloudflare.com"] as const;
-const BRANDFETCH_API_SOURCES = ["https://api.brandfetch.io"] as const;
-const BRANDFETCH_IMAGE_SOURCES = ["https://cdn.brandfetch.io"] as const;
 // Brand assets that OG and share-card route handlers read from disk at render
 // time through app/font-files.ts. They must be traced into each of those
 // serverless functions or every non-prerendered render 500s with ENOENT.
@@ -179,7 +176,6 @@ export function buildHostedWebContentSecurityPolicy(
     ...privyOrigins,
     ...KERNEL_COMPUTER_LIVE_VIEW_CONNECT_SOURCES,
     ...STATUS_PAGE_CONNECT_SOURCES,
-    ...BRANDFETCH_API_SOURCES,
     ...(isDevelopment ? ["ws:", "wss:"] : []),
   ]);
   const scriptSources = uniqueSources([
@@ -196,7 +192,7 @@ export function buildHostedWebContentSecurityPolicy(
     `script-src ${scriptSources.join(" ")}`,
     "script-src-attr 'none'",
     "style-src 'self' 'unsafe-inline'",
-    `img-src 'self' data: blob: ${BRANDFETCH_IMAGE_SOURCES.join(" ")}`,
+    "img-src 'self' data: blob:",
     "font-src 'self'",
     "manifest-src 'self'",
     "media-src 'self' blob:",
@@ -246,8 +242,7 @@ export function buildHostedWebSecurityHeaders(
     },
     {
       key: "Permissions-Policy",
-      // The Environment recorder is same-origin and still requires the
-      // browser's explicit per-site permission. Embedded origins stay blocked.
+      // Browser voice calls require same-origin microphone permission.
       value: "camera=(), geolocation=(), microphone=(self)",
     },
   ];
@@ -372,15 +367,6 @@ export function buildHostedWebNextConfig(
       webpackBuildWorker: true,
       webpackMemoryOptimizations: true,
     },
-    images: {
-      remotePatterns: [
-        {
-          protocol: "https",
-          hostname: "cdn.brandfetch.io",
-          pathname: "/**",
-        },
-      ],
-    },
     outputFileTracingIncludes: {
       "/experiments": [
         "../../packages/health-commons/generated/web/browse/experiments.json",
@@ -412,7 +398,6 @@ export function buildHostedWebNextConfig(
       "/opengraph-image": OG_SHARE_ASSET_TRACE_INCLUDES,
       "/changelog/card/v1/[items]": OG_SHARE_ASSET_TRACE_INCLUDES,
       "/experiments/[experimentId]/card": OG_SHARE_ASSET_TRACE_INCLUDES,
-      "/api/environment/share-card": OG_SHARE_ASSET_TRACE_INCLUDES,
       "/api/murph-contact-card": MURPH_CONTACT_CARD_AVATAR_TRACE_INCLUDES,
       "/imessage/card/v1/[payload]": OG_SHARE_ASSET_TRACE_INCLUDES,
     },
@@ -433,15 +418,6 @@ export function buildHostedWebNextConfig(
       {
         source: HOSTED_WEB_HEADER_SOURCE,
         headers: buildHostedWebSecurityHeaders(environment),
-      },
-      {
-        source: MURPH_SAFE_HEADER_SOURCE,
-        headers: [
-          {
-            key: "Referrer-Policy",
-            value: "no-referrer",
-          },
-        ],
       },
     ],
   };

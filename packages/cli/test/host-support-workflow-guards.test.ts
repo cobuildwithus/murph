@@ -91,7 +91,7 @@ describe('host support workflow guards', () => {
       'release-package-coverage-linux',
     )
     const cacheInputHash =
-      "${{ hashFiles('.nvmrc', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', 'package.json', 'packages/*/package.json', 'apps/*/package.json', 'tsconfig*.json', 'packages/*/tsconfig*.json', 'apps/*/tsconfig*.json') }}"
+      "${{ hashFiles('scripts/run-typescript.mjs', '.nvmrc', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', 'package.json', 'packages/*/package.json', 'apps/*/package.json', 'tsconfig*.json', 'packages/*/tsconfig*.json', 'apps/*/tsconfig*.json') }}"
 
     expect(buildTypecheckJob.match(new RegExp(actionsCacheV5, 'gu')) ?? []).toHaveLength(1)
     expect(buildTypecheckJob).toContain(`- name: Restore release typecheck build info

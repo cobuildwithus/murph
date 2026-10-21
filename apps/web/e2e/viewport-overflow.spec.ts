@@ -14,8 +14,6 @@ import {
 const ROUTES = [
   "/",
   "/clubs",
-  "/food",
-  "/search",
   "/security",
   "/changelog",
   "/compare",

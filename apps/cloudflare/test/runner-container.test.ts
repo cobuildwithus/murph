@@ -9888,7 +9888,8 @@ describe("RunnerContainer", () => {
 
     await expect(container.onActivityExpired()).resolves.toBeUndefined();
 
-    expect(containerFetch).toHaveBeenCalledOnce();
+    // Check local eligibility before Web, then recheck under the lifecycle lock.
+    expect(containerFetch).toHaveBeenCalledTimes(2);
     expect(containerFetch).toHaveBeenCalledWith(
       "http://container/health",
       expect.objectContaining({ method: "GET" }),
@@ -10217,7 +10218,7 @@ describe("RunnerContainer", () => {
     }
 
     expect(destroy).toHaveBeenCalledTimes(2);
-    expect(containerFetch).toHaveBeenCalledOnce();
+    expect(containerFetch).toHaveBeenCalledTimes(2);
     expect(containerFetch).toHaveBeenCalledWith(
       "http://container/health",
       expect.objectContaining({ method: "GET" }),
@@ -10880,7 +10881,7 @@ describe("RunnerContainer", () => {
     let statusReadCount = 0;
     const getState = vi.fn(async () => {
       statusReadCount += 1;
-      if (statusReadCount === 2) {
+      if (statusReadCount === 3) {
         finalStatusStarted.resolve();
         await releaseFinalStatus.promise;
       }
@@ -10938,7 +10939,7 @@ describe("RunnerContainer", () => {
     let statusReadCount = 0;
     const getState = vi.fn(async () => {
       statusReadCount += 1;
-      if (statusReadCount === 2) {
+      if (statusReadCount === 3) {
         finalStatusStarted.resolve(undefined);
         await releaseFinalStatus.promise;
       }

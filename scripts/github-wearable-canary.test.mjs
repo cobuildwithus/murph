@@ -180,7 +180,7 @@ test("public workflow grants only private dispatch authority and never provider 
   assert.match(workflow, /WEARABLE_CANARY_GITHUB_APP_PRIVATE_KEY: \$\{\{ secrets\.TEMPORAL_COMPATIBILITY_GITHUB_APP_PRIVATE_KEY \}\}/u);
   assert.doesNotMatch(workflow, /WEARABLE_CANARY_PRIVATE_GITHUB_TOKEN|create-github-app-token/u);
   assert.match(workflow, /cancel-in-progress: false/u);
-  assert.match(workflow, /schedule:/u);
+  assert.match(workflow, /schedule:\n    - cron: "43 5 \* \* 1,4"/u);
   assert.doesNotMatch(workflow, /\n  push:/u);
   assert.doesNotMatch(workflow, /JUNCTION_API_KEY|GARMIN_PASSWORD|KERNEL_API_KEY|pull_request|actions\/download-artifact|pnpm install|force-cancel/u);
 });

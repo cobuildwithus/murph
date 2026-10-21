@@ -12109,7 +12109,7 @@ describe("foreground device ingestion", () => {
       });
       const fetchCount = fixture.providerFetches;
       fixture.effects.splice(0);
-      await fixture.owner?.recover(["run-environment-interview"]);
+      await fixture.owner?.recover(["apply-runtime-control-request"]);
       assert.equal(fixture.effects.length, 0);
       await fixture.owner?.recover();
       assert.equal(fixture.providerFetches, fetchCount);

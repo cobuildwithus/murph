@@ -3,11 +3,9 @@ import { readFile } from "node:fs/promises";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { createFoodsQueries, createPublicFoodsQueries } from "../src/lib/foods";
+import { createFoodsQueries } from "../src/lib/foods";
 import { createProductLabelsQueries } from "../src/lib/product-labels";
-import { createPublicProductLabelsQueries } from "../src/lib/product-labels";
 import {
-  createPublicSupplementsQueries,
   createSupplementsQueries,
   type SupplementSearchItem,
 } from "../src/lib/supplements";
@@ -1248,7 +1246,7 @@ function expectBoundedFoodSortInputs(nodes: readonly ExplainPlanNode[]): void {
 }
 
 async function assertFoodSearchPageRanking(client: pg.Client): Promise<void> {
-  // Reuse the exact-record evidence tables from the public query fixture.
+  // Reuse the exact-record evidence tables from the private lookup fixture.
   await client.query("CREATE EXTENSION IF NOT EXISTS pg_trgm");
   await client.query("SET LOCAL pg_trgm.similarity_threshold = 0.3");
   await client.query(
@@ -1306,10 +1304,6 @@ async function assertFoodSearchPageRanking(client: pg.Client): Promise<void> {
     },
   };
   const privateQueries = createFoodsQueries(queryClient);
-  const publicQueries = createPublicFoodsQueries(queryClient);
-  const publicLabels = createPublicProductLabelsQueries(queryClient, "foods", {
-    excludedDataOrigins: ["usda_foundation", "usda_sr_legacy", "usda_fndds"],
-  });
   const privateInput = { includeOffMarket: false, limit: 3, q: "Pagegrain" };
   const expectedIds = ["food-page:001", "food-page:002", "food-page:003"];
   const stored = await client.query<{ id: string; label: unknown }>(
@@ -1353,82 +1347,28 @@ async function assertFoodSearchPageRanking(client: pg.Client): Promise<void> {
     "food-page:001", "food-page:064", "food-page:002",
   ]);
 
-  const relevance = await publicQueries.searchPublicFoods({ q: "Pagegrain", limit: 100 });
-  expect(relevance).toHaveLength(61);
-  expect(relevance.slice(0, 3).map((row) => row.id)).toEqual([
-    "food-page:002", "food-page:003", "food-page:004",
-  ]);
-  expect(relevance[0]?.testing.observationCount).toBe(0);
-  expect(relevance[1]?.testing.observationCount).toBe(21);
-  expect(await publicQueries.searchPublicFoods({ q: "000000000002", limit: 3 }))
-    .toEqual(relevance.slice(0, 1));
-  expect(await publicQueries.searchPublicFoods({ q: "000000000002", limit: 3, offset: 1 }))
-    .toEqual([]);
-  expect(await publicQueries.searchPublicFoods({ q: "Pagegrin", limit: 3 })).toEqual([]);
-
-  const publicInputs: Array<Parameters<typeof publicLabels.searchCompact>[0]> = [
-    { q: "pagetoken", limit: 100 },
-    { q: "Pagegrain", limit: 100 },
-    { q: "Pagegrain", limit: 100, foodSearchOrder: "evidence" },
-    { q: "Pagegrain", limit: 100, foodSearchOrder: "evidence", comparisonReadyOnly: true },
-    {
-      q: "Pagegrain", limit: 100, foodSearchOrder: "popular", comparisonReadyOnly: true,
-      popularBrandKeys: ["pagebranda", "pagebrandb"],
-    },
-  ];
-  for (const input of publicInputs) {
-    const full = await publicLabels.searchCompact(input);
-    expect(full).toHaveLength(input.comparisonReadyOnly ? 60 : 61);
-    expect(new Set(full.map((row) => row.id)).size).toBe(full.length);
-    for (const excluded of ["001", "063", "064", "065"]) {
-      expect(full.map((row) => row.id)).not.toContain(`food-page:${excluded}`);
-    }
-    if (input.foodSearchOrder === "evidence") {
-      expect(full.slice(0, 3).map((row) => row.id)).toEqual([
-        "food-page:003", "food-page:062", "food-page:002",
-      ]);
-    }
-    if (input.foodSearchOrder === "popular") {
-      expect(full.slice(0, 2).map((row) => row.brand)).toEqual([
-        "Page Brand A", "Page Brand B",
-      ]);
-    }
-    if (input.comparisonReadyOnly) {
-      expect(full.map((row) => row.id)).not.toContain("food-page:004");
-    }
-    for (const offset of [0, 1, 7, full.length - 1, full.length, full.length + 3]) {
-      const page = await publicLabels.searchCompact({ ...input, limit: 3, offset });
-      expect(JSON.stringify(page)).toBe(JSON.stringify(full.slice(offset, offset + 3)));
-    }
-  }
-
   await privateQueries.searchFoods(privateInput);
   const search = captured.current;
   if (!search) throw new Error("food ranking SQL was not captured");
-  for (const offset of [0, 7]) {
-    // Exercise the actual owner's SQL, including its internal offset binding.
-    const values = [...search.values];
-    values[4] = offset;
-    const explained = await client.query<{ "QUERY PLAN": Array<{ Plan: ExplainPlanNode }> }>(
-      `EXPLAIN (ANALYZE, TIMING OFF, FORMAT JSON) ${search.text}`, values,
-    );
-    const windows = flattenExplainPlan(explained.rows[0]?.["QUERY PLAN"][0]?.Plan ?? {})
-      .filter((node) => node["Node Type"] === "WindowAgg");
-    // Private relevance has the delivery window followed by canonical dedupe.
-    expect(windows).toHaveLength(2);
-    const delivery = windows[0] ?? {};
-    const input = delivery.Plans?.find((node) => node["Parent Relationship"] === "Outer");
-    expect(input).toBeDefined();
-    expect(explainRowsProcessed(input ?? {})).toBe(3);
-    const pageLimit = flattenExplainPlan(delivery).find((node) =>
-      node["Node Type"] === "Limit" && node["Actual Rows"] === 3
-    );
-    expect(pageLimit).toBeDefined();
-    const pageSort = pageLimit?.Plans?.find((node) => node["Parent Relationship"] === "Outer");
-    expect(pageSort?.["Sort Method"]).toBe("top-N heapsort");
-    const sortInput = pageSort?.Plans?.find((node) => node["Parent Relationship"] === "Outer");
-    expect(explainRowsProcessed(sortInput ?? {})).toBeGreaterThan(offset + 3);
-  }
+  const explained = await client.query<{ "QUERY PLAN": Array<{ Plan: ExplainPlanNode }> }>(
+    `EXPLAIN (ANALYZE, TIMING OFF, FORMAT JSON) ${search.text}`, search.values,
+  );
+  const windows = flattenExplainPlan(explained.rows[0]?.["QUERY PLAN"][0]?.Plan ?? {})
+    .filter((node) => node["Node Type"] === "WindowAgg");
+  // Private relevance has the delivery window followed by canonical dedupe.
+  expect(windows).toHaveLength(2);
+  const delivery = windows[0] ?? {};
+  const input = delivery.Plans?.find((node) => node["Parent Relationship"] === "Outer");
+  expect(input).toBeDefined();
+  expect(explainRowsProcessed(input ?? {})).toBe(3);
+  const pageLimit = flattenExplainPlan(delivery).find((node) =>
+    node["Node Type"] === "Limit" && node["Actual Rows"] === 3
+  );
+  expect(pageLimit).toBeDefined();
+  const pageSort = pageLimit?.Plans?.find((node) => node["Parent Relationship"] === "Outer");
+  expect(pageSort?.["Sort Method"]).toBe("top-N heapsort");
+  const sortInput = pageSort?.Plans?.find((node) => node["Parent Relationship"] === "Outer");
+  expect(explainRowsProcessed(sortInput ?? {})).toBeGreaterThan(3);
 }
 
 describe.runIf(Boolean(testDatabaseUrl))(
@@ -1670,9 +1610,9 @@ describe.runIf(Boolean(testDatabaseUrl))(
 );
 
 describe.runIf(Boolean(testDatabaseUrl))(
-  "public product evidence and food ranking PostgreSQL queries",
+  "food evidence and ranking PostgreSQL queries",
   () => {
-    it("preserves exact-record evidence and selects food pages before numbering", async () => {
+    it("preserves private food lookup evidence and selects results before numbering", async () => {
       const client = new pg.Client({
         connectionString: testDatabaseUrl ?? undefined,
         statement_timeout: 8_000,
@@ -1913,37 +1853,6 @@ describe.runIf(Boolean(testDatabaseUrl))(
           )
         `);
 
-        const queryClient = {
-          async query<T>(text: string, values: unknown[]) {
-            const result = await client.query(text, values);
-            return { rows: result.rows as T[] };
-          },
-        };
-        const publicQueries = createPublicSupplementsQueries(queryClient);
-        const evidence = await publicQueries.getPublicSupplementEvidence({
-          id: "brand:public-source",
-        });
-
-        expect(evidence).toMatchObject({
-          total: 21,
-          returned: 20,
-          truncated: true,
-        });
-        expect(evidence.observations).toHaveLength(20);
-        expect(evidence.observations.map((observation) => observation.id)).not.toContain(
-          "sibling-only-test",
-        );
-        expect(evidence.observations[0]).toMatchObject({
-          id: "test-1",
-          labName: "Example Lab",
-          testMethod: "Example Method",
-          screening: {
-            comparison: "exceeds",
-          },
-          alert: {
-            concernLevel: "medium",
-          },
-        });
         await assertFoodSearchPageRanking(client);
       } finally {
         await client.query("ROLLBACK");

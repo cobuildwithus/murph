@@ -22,7 +22,7 @@
   },
   "scripts": {
     "build": "node ../../scripts/rm-paths.mjs dist && node ../../scripts/run-typescript.mjs package -b tsconfig.build.json --pretty false",
-    "typecheck": "node ../../scripts/run-typescript.mjs package -p tsconfig.typecheck.json --pretty false",
+    "typecheck": "node ../../scripts/run-typescript.mjs check -p tsconfig.typecheck.json --pretty false",
     "test": "pnpm typecheck && pnpm test:node",
     "test:node": "pnpm test:node:workspace && pnpm test:node:containers-helper",
     "test:node:workspace": "pnpm --dir ../.. exec vitest run --config apps/cloudflare/vitest.node.workspace.ts --no-coverage",
@@ -78,8 +78,7 @@
     "@murphai/parsers": "workspace:*",
     "@murphai/query": "workspace:*",
     "@murphai/runtime-state": "workspace:*",
-    "jose": "^6.2.3",
-    "openai": "6.45.0"
+    "jose": "^6.2.3"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.16.3",

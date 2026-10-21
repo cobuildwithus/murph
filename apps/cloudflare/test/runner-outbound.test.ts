@@ -240,6 +240,21 @@ type HostedSystemProgressProjection = Required<Pick<
 >>;
 const ALLOWLISTED_WEB_CONTROL_CASES = [
   {
+    body: {
+      attemptId: "hca_abcdefghijklmnop",
+      phase: "device_code",
+      userCode: "SYNTHETIC-CODE",
+      verificationUrl: "https://auth.openai.com/codex/device",
+    },
+    name: "legacy member ChatGPT device-code callback",
+    path: "/api/internal/hosted-runtime/codex-auth",
+  },
+  ...["connected", "disconnected", "failed"].map((phase) => ({
+    body: { attemptId: "hca_abcdefghijklmnop", phase },
+    name: `legacy member ChatGPT ${phase} callback`,
+    path: "/api/internal/hosted-runtime/codex-auth",
+  })),
+  {
     body: { days: 7, limit: 10 },
     name: "hosted usage diagnostics",
     path: HOSTED_RUNTIME_USAGE_DIAGNOSTICS_PATH,
@@ -709,11 +724,6 @@ describe("handleRunnerOutboundRequest", () => {
       name: "hosted runtime crypto root",
       path: HOSTED_RUNTIME_CRYPTO_ROOT_PATH,
     },
-    {
-      body: { attemptId: "hca_abcdefghijklmnop", phase: "connected" },
-      name: "retired member ChatGPT auth callback",
-      path: "/api/internal/hosted-runtime/codex-auth",
-    },
   ])("rejects unavailable web-control proxy path: $name", async ({ body, path }) => {
     expect(isAllowedHostedRunnerWebControlRequest({
       method: "POST",
@@ -885,7 +895,8 @@ describe("handleRunnerOutboundRequest", () => {
       expect(headers.get("x-hosted-execution-signature")).not.toBe("child-signature");
       expect(headers.get("x-hosted-runner-bound-user-id")).toBeNull();
       if (
-        path === HOSTED_CLINICAL_RECORDS_RUNTIME_READ_RUN_PATH
+        path === "/api/internal/hosted-runtime/codex-auth"
+        || path === HOSTED_CLINICAL_RECORDS_RUNTIME_READ_RUN_PATH
         || path === HOSTED_CLINICAL_RECORDS_RUNTIME_FETCH_PAGE_PATH
         || path === HOSTED_CLINICAL_RECORDS_RUNTIME_RECORD_OUTCOME_PATH
       ) {
@@ -1108,10 +1119,11 @@ describe("handleRunnerOutboundRequest", () => {
   });
 
   it.each([
+    "/api/internal/hosted-runtime/codex-auth",
     HOSTED_CLINICAL_RECORDS_RUNTIME_READ_RUN_PATH,
     HOSTED_CLINICAL_RECORDS_RUNTIME_FETCH_PAGE_PATH,
     HOSTED_CLINICAL_RECORDS_RUNTIME_RECORD_OUTCOME_PATH,
-  ])("rejects clinical web-control requests without the active runtime fence: %s", async (path) => {
+  ])("rejects web-control requests without the active runtime fence: %s", async (path) => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
 

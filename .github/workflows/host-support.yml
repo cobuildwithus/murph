@@ -299,11 +299,13 @@ jobs:
             packages/*/*typecheck*.tsbuildinfo
             apps/cloudflare/typecheck.tsbuildinfo
             apps/web/.next/cache/tsconfig.tsbuildinfo
-          key: tsbuildinfo-release-build-typecheck-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.nvmrc', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', 'package.json', 'packages/*/package.json', 'apps/*/package.json', 'tsconfig*.json', 'packages/*/tsconfig*.json', 'apps/*/tsconfig*.json') }}-${{ github.sha }}
+          key: tsbuildinfo-release-build-typecheck-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/run-typescript.mjs', '.nvmrc', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', 'package.json', 'packages/*/package.json', 'apps/*/package.json', 'tsconfig*.json', 'packages/*/tsconfig*.json', 'apps/*/tsconfig*.json') }}-${{ github.sha }}
           restore-keys: |
-            tsbuildinfo-release-build-typecheck-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.nvmrc', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', 'package.json', 'packages/*/package.json', 'apps/*/package.json', 'tsconfig*.json', 'packages/*/tsconfig*.json', 'apps/*/tsconfig*.json') }}-
+            tsbuildinfo-release-build-typecheck-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/run-typescript.mjs', '.nvmrc', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', 'package.json', 'packages/*/package.json', 'apps/*/package.json', 'tsconfig*.json', 'packages/*/tsconfig*.json', 'apps/*/tsconfig*.json') }}-
 
       - name: Typecheck
+        env:
+          MURPH_TYPECHECK_COMPILER: tsrs
         run: pnpm typecheck
 
       - name: Verify built package boundaries

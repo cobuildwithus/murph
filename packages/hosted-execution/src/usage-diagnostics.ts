@@ -29,12 +29,12 @@ export const hostedUsageDiagnosticsResponseSchema = z.discriminatedUnion("status
   z.object({status: z.literal("unavailable"), reason: z.enum(["group_not_supported", "hosted_access_inactive"])}).strict(),
   z.object({
     status: z.literal("available"),
-    generatedAt: z.string().datetime(), windowStart: z.string().datetime(), windowEnd: z.string().datetime(),
+    generatedAt: z.isoDateTime(), windowStart: z.isoDateTime(), windowEnd: z.isoDateTime(),
     costBasis: z.literal("recorded_allowance_usd"), totals,
     byModel: z.array(totals.extend({model: label, pricingBasis: label}).strict()).max(20),
     bySource: z.array(totals.extend({source: label}).strict()).max(20),
     topTurns: z.array(totals.extend({
-      turnId: label, occurredAt: z.string().datetime(), model: label, source: label,
+      turnId: label, occurredAt: z.isoDateTime(), model: label, source: label,
       toolOutputCoverage: z.enum(["available", "partial", "unavailable"]),
       tools: z.array(tool).max(10),
     }).strict()).max(20),

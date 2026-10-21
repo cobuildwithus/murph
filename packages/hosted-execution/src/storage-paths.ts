@@ -194,21 +194,8 @@ export function requireHostedGameMediaId(value: string): string {
   return normalized;
 }
 
-export async function hostedEnvironmentVoiceObjectKey(input: {
-  audioKey: string;
-  storageNamespaceId?: string | null;
-  userId: string;
-}): Promise<string> {
-  const userSegment = resolveHostedStorageNamespaceId(input);
-  const audioKey = requireHostedEnvironmentVoiceKey(input.audioKey);
-  const audioSegment = deriveHostedStoragePathId({
-    length: 48,
-    scope: "environment-voice-path",
-    value: `environment-voice:${userSegment}:${audioKey}`,
-  });
-  return `hosted-environment-voice/audio/${userSegment}/${audioSegment}.audio.enc`;
-}
-
+// Retired capture cleanup only. Remove with its R2 lifecycle rule after both
+// production and preview buckets are verified empty under this prefix.
 export async function hostedEnvironmentVoiceUserPrefix(input: {
   storageNamespaceId?: string | null;
   userId: string;
@@ -335,13 +322,6 @@ function requireHostedMealPhotoKey(value: string): string {
     throw new TypeError("Hosted meal photo key is invalid.");
   }
   return normalized;
-}
-
-function requireHostedEnvironmentVoiceKey(value: string): string {
-  if (!/^[a-f0-9]{40}$/u.test(value)) {
-    throw new TypeError("Hosted environment voice key is invalid.");
-  }
-  return value;
 }
 
 function requireHostedMediaId(value: string): string {

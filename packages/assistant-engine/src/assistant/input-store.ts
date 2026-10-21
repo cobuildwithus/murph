@@ -1669,7 +1669,7 @@ function safeAssistantInputTimestampSchema(
     .string()
     .min(1)
     .max(64)
-    .datetime({ offset: true })
+    .pipe(z.isoDateTime({ offset: true }))
     .superRefine((value, context) => {
       if (isPathOrUrlLike(value)) {
         context.addIssue({

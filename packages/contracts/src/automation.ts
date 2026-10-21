@@ -146,7 +146,7 @@ export const automationDeviceActivityKindSchema = z
   .regex(automationDeviceActivityKindPattern, "Expected a lowercase kebab-case device activity kind.");
 
 function isoTimestampSchema() {
-  return z.string().datetime({ offset: true });
+  return z.isoDateTime({ offset: true });
 }
 export const automationActiveUntilSchema = isoTimestampSchema();
 

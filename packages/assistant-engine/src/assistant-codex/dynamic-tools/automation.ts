@@ -66,7 +66,7 @@ const automationStableRecipeKeySchema = z
 const automationTitleSchema = z.string().trim().min(1).max(160)
 const automationInstructionsSchema = z.string().trim().min(1).max(50_000)
 const automationSummarySchema = z.string().trim().min(1).max(4_000)
-const automationUpdatedAtSchema = z.string().datetime({ offset: true })
+const automationUpdatedAtSchema = z.isoDateTime({ offset: true })
 const automationTagsSchema = z
   .array(z.string().trim().min(1).max(80))
   .max(32)

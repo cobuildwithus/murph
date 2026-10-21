@@ -449,11 +449,6 @@ test("VercelTelemetry aggregates public dynamic routes without sending identifie
       pathname: "/measurement-methods/resting-heart-rate",
       route: "/measurement-methods/[measurementMethodId]",
     },
-    {
-      expected: "/search/products/[product]",
-      pathname: "/search/products/supplement_example",
-      route: "/search/products/[productRef]",
-    },
   ] as const;
 
   for (const { expected, pathname, route } of routes) {
@@ -510,10 +505,6 @@ test("redactPrivateAnalyticsUrl canonicalizes allowlisted routes", () => {
   assert.equal(
     redactPrivateAnalyticsUrl("/home?clinicalRecords=failed#clinicalRecordsIntent=not-a-claim"),
     "/home",
-  );
-  assert.equal(
-    redactPrivateAnalyticsUrl("/food?query=private-product#comparison"),
-    "/food",
   );
 });
 

@@ -2631,54 +2631,16 @@ within the admitted set rather than exhaustive across the full food catalog.
 Private food ranking favors query terms covered by the name and brand and
 scores that compact identity rather than the extended catalog search text.
 Exact-id and UPC lookups retain their direct indexed paths;
-supplement generic search and the public projection retain their pre-existing
+supplement generic search retains its pre-existing
 ranking and candidate contracts. Existing labels databases must receive the
 foods name-rank and exact-name-rank indexes before this private-food query shape
-is deployed. The public
-projection of that database is Murph Safe at `/search` and the branded-food
-comparison at `/food`, plus the
-read-only Murph Product Data API under `/api/public/v1`. Wire contracts belong
-to `@murphai/contracts`; one web-owned service maps bounded database records to
-those contracts. Browser search posts to the public route, while the
-server-rendered detail page calls the same service directly. The public catalog
-excludes generic food origins, never returns raw labels wholesale, and links
-tests only by the selected row's exact foreign key. Public search uses bounded
-SQL candidate sets. Its optional food evidence order checks indexed exact test
-links only inside the 250-row public candidate bound. The food comparison also
-has an optional category-popularity order. It matches a dated US Google Shopping
-brand snapshot against at most 10,000 indexed text candidates. Soda searches
-may add at most 900 rows through bounded probes of the existing `foods(brand)`
-index. The query then retains 250 rows, spreads early results across brands, and
-applies indexed exact test counts as a secondary signal. Comparison-ready
-search also rejects empty, zero-only, and physically impossible per-100-gram
-nutrition. Queries without a matching snapshot keep the stable relevance
-fallback. Detail reads cap stored label transfer and aggregate DTO size.
-One Vercel-aware singleton pool is shared by public and private label
-readers. Vercel custom firewall rules sit in front of public search and detail,
-and the production build verifies their exact active configuration.
-
-`/food` keeps temporary comparison state in the browser and derives six
-nutrition comparisons plus a separate exact-evidence summary from existing
-public DTOs. Its share URL contains only public product references and the
-nutrition basis; the raw search query stays out of the URL. It derives
-related-search categories from its existing local food
-taxonomy and does not persist them as product truth. A nutrition winner exists only when every compared product has the
-metric. Evidence keeps the DTO's returned, total, and truncated observation
-scope. The evidence meter and drawer statuses derive only from DTO fields
-(nutrition rows, serving mass, ingredients, returned observations and their
-screening results), and the drawer renders the DTO-owned unknown entries. Compatible browsers receive four page-scoped
-WebMCP tools through
-`document.modelContext.registerTool`. These tools call the same bounded page
-actions as manual controls. Their comparison result carries the same four
-metric values, completeness, ties, and winners as the visible table, plus the
-per-product row-win counts behind its rows-led caption. The tools disappear when the page unmounts. They do not
-create a remote MCP service, a second data owner, or an authenticated path.
+is deployed.
 
 Each product-test observation may preserve evidence and sampling context,
 sample or lot identity, result bounds and qualifiers, analytical limits, and
 the raw reported product identifier. Only checksum-valid GTINs enter the
-canonical UPC field. Private label lookup and the bounded public product-detail
-contract expose the same additive metadata so a regulatory finding or sampled
+canonical UPC field. Private label lookup exposes this additive metadata so a
+regulatory finding or sampled
 package is not presented as a timeless product claim. One-time acquisition,
 reconciliation, and remap tooling is operational research rather than deployed
 application code.
@@ -4211,46 +4173,15 @@ Admission rules, the 50-message cap, first-response closure, journaling, and
 delivery are unchanged, and a dropped stream is not evidence that provider
 generation or billing stopped.
 
-The Environment walkthrough reuses that execution plane without turning audio
-into a chat attachment. Authenticated Web validates and stages one bounded
-application-encrypted recording under the member's opaque R2 namespace, then
-appends a pointer-only `environment-voice.captured` system mailbox wake. The
-first-seen admission uses the existing AI-usage gate and the member lock limits
-each member to one unconsumed Environment recording; exact capture retries
-resolve idempotently even when they arrive later. The write-fenced runtime
-verifies the staged bytes, applies the three-minute media cap during ffmpeg
-preparation, transcribes through the existing Worker-owned transcription effect,
-and gives the transcript only to a silent Habitat-scoped maintenance turn.
-Canonical Habitat writes checkpoint through the ordinary workspace owner before
-a post-checkpoint effect deletes the recording; failed work remains retryable
-and the 24-hour R2 lifecycle is only a cleanup backstop. Neither audio nor
-transcript becomes assistant conversation history, an outbound message, or
-Browser Vault product truth. The open page captures its displayed Habitat values
-before the recording upload. After the durable voice job finishes, that page
-uses the existing Browser Vault runtime-refresh request owner in its post-request
-mode. The provider excludes already-running ordinary reads, treats the explicit
-refresh response as the request-local admission boundary, and remains pending
-until a later replica ref is published; only then may the page distinguish
-changed Habitat facts from a completed recording with no clear new facts.
-The one-minute delayed notice is presentation-only: it does not retire that
-causal fence. Environment-owned runtime-refresh observation stops after a
-bounded five-minute window while retaining the original admission boundary;
-independent session-freshness polling may continue when the server reports its
-own pending work, but it cannot replace or re-signal that boundary. Check again
-first performs an ordinary read; if that read still returns the admitted
-replica, it opens another bounded window and sends at most one idempotent refresh
-signal for the same boundary. A newer replica completes without another signal,
-and repeated checks within one window cannot create duplicate refresh pressure.
-Delayed and reload recovery reuse the same voice-processing and replica-refresh
-owners, with no second result store.
-
-Environment live weather and outdoor-air context uses the fixed OpenWeather
-geocoding, current-weather, and current-air-pollution endpoints directly from
-Web with the server-owned key. The authenticated same-origin route caches the
-public city-to-coordinate result for 30 days and the combined current
-conditions for 10 minutes; weather and air reads run in parallel on a cache
-miss. Cache keys contain normalized city or coordinates, never the provider key
-or member identity, and the results remain transient rather than Habitat facts.
+Habitat remains canonical member context in `bank/habitat`, accessed through
+ordinary assistant conversations, the vault CLI, and canonical query owners.
+Browser replicas omit Habitat records because their only consumer was Environment. The retired Environment dashboard has no dedicated interview, voice,
+report, or live-conditions execution path. The existing retired-mailbox registry
+keeps old event metadata readable and skips unimported rows without fetching
+their payload. The saved system-mailbox reader discards retired wakes before
+parsing obsolete payloads, actions or completion records, preserving active
+successors and handled-prefix progress without a pre-deploy drain. Existing staged recordings retain
+only the legacy member-prefix deletion sweep and R2 expiry safety.
 
 Hosted dynamic image generation launches as invocation-local background work so
 the current tool call returns immediately. Provider work stays detached, while

@@ -45,8 +45,8 @@ export {
 const HOSTED_MAILBOX_RETRYABLE_BLOCK_RETRY_DELAY_MS = 15 * 1000;
 const HOSTED_MAILBOX_LEGACY_VAULT_SHARE_SKIP_REASON =
   "legacy_vault_share.web_owned";
-const HOSTED_MAILBOX_RETIRED_NEWSLETTER_SKIP_REASON =
-  "legacy_group_newsletter_email_needed.retired";
+const HOSTED_MAILBOX_RETIRED_KIND_SKIP_REASON =
+  "mailbox.kind_retired";
 export const HOSTED_MAILBOX_ITEM_BUDGET_REASON_CODE = "budget.mailbox_items";
 
 export type HostedMailboxItemImportOutcome =
@@ -719,7 +719,7 @@ function resolveRetiredMailboxSkipReason(
   }
 
   if (action === "skip-retired-mailbox-item") {
-    return HOSTED_MAILBOX_RETIRED_NEWSLETTER_SKIP_REASON;
+    return HOSTED_MAILBOX_RETIRED_KIND_SKIP_REASON;
   }
 
   return null;

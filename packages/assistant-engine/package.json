@@ -111,7 +111,7 @@
   ],
   "scripts": {
     "build": "node ../../scripts/rm-paths.mjs dist .tsbuildinfo && node ../../scripts/run-typescript.mjs package -b tsconfig.json",
-    "typecheck": "node ../../scripts/run-typescript.mjs package -p tsconfig.typecheck.json --pretty false",
+    "typecheck": "node ../../scripts/run-typescript.mjs check -p tsconfig.typecheck.json --pretty false",
     "test": "pnpm exec vitest run --config vitest.config.ts --no-coverage",
     "test:coverage": "pnpm exec vitest run --config vitest.config.ts --coverage"
   },
@@ -139,6 +139,6 @@
     "ajv": "8.20.0",
     "ajv-formats": "3.0.1",
     "ws": "8.21.0",
-    "zod": "^4.4.3"
+    "zod": "^4.5.4"
   }
 }

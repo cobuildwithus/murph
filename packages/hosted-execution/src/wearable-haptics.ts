@@ -14,7 +14,7 @@ export const wearableHapticActionSchema = z.object({
 export type WearableHapticAction = z.infer<typeof wearableHapticActionSchema>;
 export const wearableHapticAuthoritySchema = z.union([
   z.object({ kind: z.literal("accepted_input"), assistantInputId: z.string().regex(/^ain_[a-f0-9]{32}$/u) }).strict(),
-  z.object({ kind: z.literal("automation_occurrence"), automationId: z.string().min(1).max(191), occurrenceAt: z.string().datetime() }).strict(),
+  z.object({ kind: z.literal("automation_occurrence"), automationId: z.string().min(1).max(191), occurrenceAt: z.isoDateTime() }).strict(),
 ]);
 export type WearableHapticAuthority = z.infer<typeof wearableHapticAuthoritySchema>;
 export const wearableHapticRequestSchema = z.object({
@@ -56,7 +56,7 @@ export const wearableCompanionResponseSchema = z.object({
   commands: z.array(z.object({
     id: z.string().regex(/^[a-f0-9]{64}$/u),
     operation: wearableOperationSchema,
-    expiresAt: z.string().datetime(),
+    expiresAt: z.isoDateTime(),
   }).strict()).max(2),
 }).strict();
 export type WearableCompanionResponse = z.infer<typeof wearableCompanionResponseSchema>;

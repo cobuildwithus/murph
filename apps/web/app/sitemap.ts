@@ -13,13 +13,11 @@ const STATIC_PUBLIC_ROUTES = [
   "/contact",
   "/consumer-health-data-privacy-policy",
   "/experiments",
-  "/food",
   "/legal",
   "/legal/health-ai-safety-disclosure",
   "/legal/privacy",
   "/legal/terms",
   "/refer",
-  "/search",
   "/security",
   "/subprocessors",
 ] as const;

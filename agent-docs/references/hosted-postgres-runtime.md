@@ -164,13 +164,19 @@ receipt and either a settled native invocation or an inactive runtime fence
 proved during reconciliation. Successful release retains the member's
 warm target. Failed or ambiguous retirement requires exact native stop proof
 before clearing its assignment. Bound slots never return to shared inventory.
-Idle cleanup of a member-bound slot also reconciles this canonical owner before
-stopping an otherwise empty child. A matching starting, active or retiring owner
+Without a completed native invocation receipt, idle cleanup first checks native
+status, active jobs, and the trusted conversation receipt deadline. Those local
+vetoes need no owner callback; a future receipt deadline schedules cleanup directly
+at that deadline. A bound completed native receipt still reconciles the canonical
+owner before applying local warmth, because native completion does not prove
+canonical acknowledgment. Otherwise only an eligible stop reconciles the owner.
+A matching starting, active or retiring owner
 protects the readiness-to-launch handoff, including after Durable Object
 reactivation. Failed reads and incomplete cutover preserve the existing scheduled
 lifecycle recheck; they do not grant a new conversation lease. Cleanup rechecks
-native interaction fencing after the bounded control read, which runs outside
-the lifecycle lock so arriving work does not wait on control-plane latency. Explicit retirement
+native status, health, and interaction fencing after the bounded control read,
+which runs outside the lifecycle lock so arriving work does not wait on
+control-plane latency. Explicit retirement
 and its exact native stop proof remain the recovery owner. When the outer result
 is lost after a completion callback, the existing container lifecycle recheck
 also replays settled completion for a matching retiring owner, exact completed
@@ -178,13 +184,18 @@ native receipt, and inactive native fence. This releases drained owners without
 requiring new mailbox work. Active or unknown native execution, stale receipts,
 and failed completion preserve the scheduled recheck. Destruction requires a
 fresh canonical observation on a later lifecycle pass.
+Without a future local receipt deadline, remote denial retains the existing
+short lifecycle recheck.
 
 The runtime completion callback and outer invocation result share the same
 native receipt and Web `complete` command. Each stage uses one HTTP request for
 conditional retirement, optional exact native-settlement release, and the
 advisory Temporal hint. The early callback still reads the owner to route its
-native receipt, and cannot release the still-running outer invocation. The
-settled outer result releases ownership before the HTTP response. Only an
+native receipt, and cannot release the still-running outer invocation. This read
+also distinguishes already-completed released owners from superseded or
+unconfirmed owners: native completion precedes canonical acknowledgment, and a
+stale Web completion response contains no owner facts. The settled outer result
+releases ownership before the HTTP response. Only an
 updated `complete` response schedules the advisory hint through Next `after`,
 so neither its dependency loading nor its network wait delays acknowledgement.
 The hint has a two-second best-effort budget; failure leaves

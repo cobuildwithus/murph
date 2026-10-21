@@ -1180,10 +1180,6 @@ const LEGACY_CHANGELOG_EDITIONS = [
           "Signed-out members return to Environment after login. On iOS, the microphone-permission handoff keeps the walkthrough mounted, and moving the page to the background safely ends an active recording.",
         relevanceTags: ["environment", "voice", "privacy", "accessibility"],
         sourcePullRequests: [1228, 1238, 1251],
-        tryIt: {
-          href: "/environment",
-          label: "Open Environment",
-        },
       },
       {
         id: "physical-notes-from-chat",
@@ -1389,10 +1385,6 @@ const LEGACY_CHANGELOG_EDITIONS = [
           "Missing or skipped facts never lower the grade, and optional equipment never counts against it. Each result explains what is known, what needs attention, and the next useful check.",
         relevanceTags: ["environment", "sleep", "workspace", "context"],
         sourcePullRequests: [573],
-        tryIt: {
-          href: "/environment",
-          label: "Open Environment",
-        },
       },
       {
         id: "environment-voice-walkthrough",
@@ -3515,10 +3507,6 @@ const LEGACY_CHANGELOG_EDITIONS = [
           "Murph Safe names the evidence-checking process; it never stamps a product safe or unsafe. Search terms stay out of URLs, logs, and analytics, and the same records are available through a versioned public API.",
         relevanceTags: ["supplements", "nutrition", "search"],
         sourcePullRequests: [765],
-        tryIt: {
-          href: "/search",
-          label: "Search a product",
-        },
       },
       {
         id: "scheduled-replies-keep-context",

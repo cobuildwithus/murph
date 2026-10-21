@@ -41,7 +41,7 @@ test("scheduled log queries list, read, filter, and show records across schedule
         "summary: Capture a morning check-in.",
         "schedule:",
         "  kind: at",
-        "  at: 2026-04-22T06:30:00.000Z",
+        "  at: 2026-04-22T06:30+00:00",
         "action:",
         "  kind: measurement.add",
         "  measurements:",
@@ -188,7 +188,7 @@ test("scheduled log queries list, read, filter, and show records across schedule
     assert.equal(readById?.body, "Morning body check-in.");
     assert.deepEqual(readById?.schedule, {
       kind: "at",
-      at: "2026-04-22T06:30:00.000Z",
+      at: "2026-04-22T06:30+00:00",
     });
     assert.equal(shownBySlug?.status, "archived");
     assert.deepEqual(shownByTitle?.schedule, {

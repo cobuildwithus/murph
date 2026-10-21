@@ -1,7 +1,7 @@
 import type { HostedLinqAlert } from "@prisma/client";
 import { parseHostedRuntimeLogRequest } from "@murphai/hosted-execution/parsers";
 import type { HostedRuntimeLogEntry } from "@murphai/hosted-execution/runtime-control";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   HostedResendPlainTextEmailError,
@@ -9,6 +9,7 @@ import {
 } from "@/src/lib/hosted-onboarding/resend-plain-text-email";
 import {
   HOSTED_RUNTIME_PROGRESS_ALERT_SAMPLE_LIMIT,
+  HOSTED_RUNTIME_PROGRESS_USAGE_READ_LIMIT,
   HOSTED_RUNTIME_PROGRESS_REMINDER_INTERVAL_MS,
   HOSTED_RUNTIME_PROGRESS_STALL_THRESHOLD_MS,
   readHostedRuntimeProgressHealth,
@@ -17,6 +18,12 @@ import {
   summarizeHostedRuntimeProgressRows,
   type HostedRuntimeProgressHealthRow,
 } from "@/src/lib/hosted-runtime-progress/alert-monitor";
+
+const usageGate = vi.hoisted(() => vi.fn());
+vi.mock("@/src/lib/hosted-execution/usage-allowance", () => ({
+  readHostedAiUsageGate: usageGate,
+}));
+beforeEach(() => { usageGate.mockReset().mockResolvedValue({ allowed: true }); });
 
 const now = instant("2026-08-10T16:00:00.000Z");
 const alertEnv = {
@@ -36,6 +43,92 @@ function createVoidDeferred(): {
   });
   return { promise, resolve };
 }
+
+describe("usage-paused system notification progress", () => {
+  const notification = (runtimeKey = "runtime_paused", overrides: Partial<HostedRuntimeProgressHealthRow> = {}) => ({
+    ...progressRow({ runtimeKey, lane: "system", headKind: "assistant.notification.requested",
+      progressOriginAt: "2026-08-10T15:00:00Z", durableHighWaterSeq: 5n,
+      workspaceSystemImportedSeq: 5n, pendingCount: 5n }),
+    headDedupeKey: "assistant.notification.requested:synthetic:notification",
+    ...overrides,
+  });
+
+  it("silently rearms an existing alert for a current usage pause and alerts again when allowance returns", async () => {
+    const fixture = createProgressMonitorFixture([notification()]);
+    const sendAlert = vi.fn().mockResolvedValue({ providerMessageId: "synthetic-alert" });
+    let checkedAt = now;
+    const run = () => runHostedRuntimeProgressAlertMonitor({ now: checkedAt, env: alertEnv,
+      prisma: fixture.prisma, sendAlert, scheduleObservation: () => {} });
+    expect((await run()).health.stalledSystemLaneCount).toBe(1);
+    expect(sendAlert).toHaveBeenCalledTimes(1);
+    checkedAt = new Date(+now + 5 * 60_000);
+    usageGate.mockResolvedValue({ allowed: false, reason: "ai_usage_limit_exceeded" });
+    expect((await run()).health).toMatchObject({ anomalous: false,
+      excludedUsageBlockedSystemLaneCount: 1, stalledSystemLaneCount: 0, pendingItemCount: 0 });
+    expect(sendAlert).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(fixture.readState())).not.toContain(notification().headDedupeKey);
+    expect(JSON.stringify(fixture.readState())).not.toContain("runtime_paused");
+    checkedAt = new Date(+now + 25 * 60_000);
+    usageGate.mockResolvedValue({ allowed: true });
+    expect((await run()).health.stalledSystemLaneCount).toBe(1);
+    expect(sendAlert).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([
+    { headKind: "device-sync.wake" },
+    { headKind: "unknown.future-kind" },
+    { headDedupeKey: "assistant.notification.requested:group-join:synthetic" },
+    { headDedupeKey: "assistant.notification.requested:device-delivery-stalled:v1:synthetic" },
+    { headDedupeKey: undefined },
+    { workspaceSystemImportedSeq: null },
+    { workspaceSystemImportedSeq: 4n },
+    { workspaceSystemImportedSeq: 6n },
+    { chronologyInvalid: true },
+  ])("retains actionable or unproven work: %#", async (overrides) => {
+    usageGate.mockResolvedValue({ allowed: false, reason: "ai_usage_limit_exceeded" });
+    const fixture = createProgressMonitorFixture([notification("runtime_paused", overrides)]);
+    expect(await readHostedRuntimeProgressHealth({ now, prisma: fixture.prisma }))
+      .toMatchObject({ anomalous: true, excludedUsageBlockedSystemLaneCount: 0 });
+    expect(usageGate).not.toHaveBeenCalled();
+  });
+
+  it("keeps a separate deterministic system head visible for an exhausted runtime", async () => {
+    usageGate.mockResolvedValue({ allowed: false, reason: "ai_usage_limit_exceeded" });
+    const fixture = createProgressMonitorFixture([notification(), notification("runtime_device", { headKind: "device-sync.wake" })]);
+    expect(await readHostedRuntimeProgressHealth({ now, prisma: fixture.prisma }))
+      .toMatchObject({ anomalous: true, excludedUsageBlockedSystemLaneCount: 1, stalledSystemLaneCount: 1 });
+  });
+
+  it.each(["unavailable", "inactive"])("does not infer usage exhaustion from %s", async (mode) => {
+    if (mode === "unavailable") usageGate.mockRejectedValue(new Error("synthetic read failure"));
+    else usageGate.mockResolvedValue({ allowed: false, reason: "inactive" });
+    const fixture = createProgressMonitorFixture([notification()]);
+    expect(await readHostedRuntimeProgressHealth({ now, prisma: fixture.prisma }))
+      .toMatchObject({ anomalous: true, excludedUsageBlockedSystemLaneCount: 0 });
+  });
+
+  it("caps serial allowance reads for a maximum-size candidate page and keeps overflow alertable", async () => {
+    let active = 0;
+    let peak = 0;
+    usageGate.mockImplementation(async () => {
+      peak = Math.max(peak, ++active);
+      await Promise.resolve();
+      active--;
+      return { allowed: false, reason: "ai_usage_limit_exceeded" };
+    });
+    const fixture = createProgressMonitorFixture([]);
+    fixture.queryRaw.mockResolvedValueOnce(Array.from({ length: 500 }, (_, i) => notification(`runtime_${i}`))).mockResolvedValueOnce([]);
+    fixture.hostedMemberFindMany.mockResolvedValueOnce(Array.from({ length: 500 }, (_, i) => ({
+      accountGroupMemberships: [], billingRef: null, billingStatus: "active", consentGrants: [],
+      id: `runtime_${i}`, suspendedAt: null, threadContainer: null,
+    })));
+    expect(await readHostedRuntimeProgressHealth({ now, prisma: fixture.prisma }))
+      .toMatchObject({ anomalous: true, excludedUsageBlockedSystemLaneCount: HOSTED_RUNTIME_PROGRESS_USAGE_READ_LIMIT,
+        stalledSystemLaneCount: 500 - HOSTED_RUNTIME_PROGRESS_USAGE_READ_LIMIT });
+    expect(usageGate).toHaveBeenCalledTimes(HOSTED_RUNTIME_PROGRESS_USAGE_READ_LIMIT);
+    expect(peak).toBe(1);
+  });
+});
 
 describe("hosted runtime progress health", () => {
   it("detects the exact 15-minute durable progress boundary across both lanes", () => {

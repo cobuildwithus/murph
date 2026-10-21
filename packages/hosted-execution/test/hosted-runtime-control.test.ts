@@ -63,6 +63,7 @@ import {
   verifyHostedAiUsageAllowDecision,
 } from "../src/runtime-control.ts";
 import {
+  parseHostedCodexAuthUpdate,
   parseHostedMailboxFetchRequest,
   parseHostedMailboxFetchResponse,
   parseHostedMailboxItem,
@@ -102,6 +103,60 @@ it("preserves configuration parser identity through the legacy export", () => {
   expect(parseHostedRuntimeAssistantConfigurationControlRequest).toBe(parseConfigurationControlRequest);
   expect(parseHostedRuntimeAssistantConfigurationToolRequest).toBe(parseConfigurationToolRequest);
   expect(parseHostedRuntimeAssistantConfigurationToolResponse).toBe(parseConfigurationToolResponse);
+});
+
+describe("retained legacy Codex auth callback contract", () => {
+  const attemptId = "hca_synthetic_attempt_01";
+  const deviceCode = {
+    attemptId,
+    phase: "device_code",
+    userCode: "SYNTHETIC-CODE",
+    verificationUrl: "https://auth.openai.com/codex/device",
+  };
+
+  it("accepts the former device-code and terminal callback shapes", () => {
+    expect(parseHostedCodexAuthUpdate(deviceCode)).toEqual(deviceCode);
+    for (const phase of ["connected", "disconnected", "failed"]) {
+      expect(parseHostedCodexAuthUpdate({ attemptId, phase })).toEqual({ attemptId, phase });
+    }
+    for (const length of [16, 64]) {
+      const boundary = { ...deviceCode, attemptId: `hca_${"a".repeat(length)}`, userCode: "a".repeat(128) };
+      expect(parseHostedCodexAuthUpdate(boundary)).toEqual(boundary);
+    }
+  });
+
+  it.each([
+    null,
+    [],
+    {},
+    { attemptId, phase: "connecting" },
+    { attemptId, phase: "connected", userCode: "SYNTHETIC-CODE" },
+    { attemptId, phase: "failed", memberId: "member_other" },
+    { ...deviceCode, accessToken: "synthetic-not-a-token" },
+    { ...deviceCode, userCode: "" },
+    { ...deviceCode, userCode: "a".repeat(129) },
+    { ...deviceCode, userCode: 123 },
+    { ...deviceCode, attemptId: `hca_${"a".repeat(15)}` },
+    { ...deviceCode, attemptId: `hca_${"a".repeat(65)}` },
+    { ...deviceCode, attemptId: "hca_synthetic.attempt.01" },
+    { ...deviceCode, attemptId: " hca_synthetic_attempt_01" },
+    { ...deviceCode, attemptId: "synthetic_attempt_01" },
+  ])("rejects malformed, over-bound, or extended callback payload %#", (payload) => {
+    expect(() => parseHostedCodexAuthUpdate(payload)).toThrow(TypeError);
+  });
+
+  it.each([
+    "",
+    "/codex/device",
+    "http://auth.openai.com/codex/device",
+    "https://example.com/codex/device",
+    "https://auth.openai.com.example.com/codex/device",
+    "https://synthetic@auth.openai.com/codex/device",
+    "https://synthetic:password@auth.openai.com/codex/device",
+    "https://auth.openai.com@other.example/codex/device",
+  ])("rejects untrusted verification URL %#", (verificationUrl) => {
+    expect(() => parseHostedCodexAuthUpdate({ ...deviceCode, verificationUrl })).toThrow(TypeError);
+  });
 });
 
 describe("hosted runtime control contracts", () => {
@@ -244,8 +299,6 @@ describe("hosted runtime control contracts", () => {
       "clinical-records.sync-requested",
       "clinical-records.enrichment-requested",
       "device-sync.wake",
-      "environment-interview.completed",
-      "environment-voice.captured",
       "journal.group-fact.recorded",
       "health.daily-metric.reported",
       "meal-photo.captured",
@@ -253,6 +306,8 @@ describe("hosted runtime control contracts", () => {
       "member.action.completed",
       "vault-share.delivery",
       "vault-share.revoke",
+      "environment-interview.completed",
+      "environment-voice.captured",
       "group-newsletter.email-needed",
       "runtime.manual-requested",
       "runtime.pending-effects-reconcile-requested",
@@ -263,6 +318,8 @@ describe("hosted runtime control contracts", () => {
       "runtime.mailbox-lag-observed",
     ]);
     expect(HOSTED_RETIRED_MAILBOX_KINDS).toEqual([
+      "environment-interview.completed",
+      "environment-voice.captured",
       "group-newsletter.email-needed",
     ]);
     expect(isHostedRetiredMailboxKind("group-newsletter.email-needed")).toBe(true);
@@ -948,6 +1005,13 @@ describe("hosted runtime control contracts", () => {
       idleShutdownCheckpointSkipped: "warm_workspace_unavailable",
       status: "idle",
     })).toThrow("Hosted workspace invocation result.idleShutdownCheckpointSkipped is no longer supported.");
+  });
+
+  it.each(HOSTED_RETIRED_MAILBOX_KINDS)("reads retained %s metadata as retired", (kind) => {
+    const item = createMailboxItem({ kind, lane: "system" });
+    expect(isHostedMailboxKind(kind)).toBe(true);
+    expect(isHostedRetiredMailboxKind(kind)).toBe(true);
+    expect(parseHostedMailboxItem(item)).toEqual(item);
   });
 
   it("parses mailbox fetch contracts without run ownership fields", () => {

@@ -77,7 +77,7 @@ test("protected-main policy owns both immutable native sources", async () => {
   }), /40-character SHA/u);
 });
 
-test("trusted iOS controller is twelve-hour, executed on every admission, and production-only", async () => {
+test("trusted iOS controller runs five times weekly, executed on every admission, and production-only", async () => {
   const workflow = await readFile(
     path.join(REPO_ROOT, ".github", "workflows", "native-ios-hosted-e2e.yml"),
     "utf8",
@@ -87,8 +87,11 @@ test("trusted iOS controller is twelve-hour, executed on every admission, and pr
     workflow.indexOf("\njobs:\n"),
   );
 
-  assert.match(workflow, /schedule:\n\s+- cron: "17 \*\/12 \* \* \*"/u);
-  assert.match(workflow, /schedule:\n\s+- cron: "17 \*\/12 \* \* \*"\n\s+workflow_dispatch:/u);
+  assert.deepEqual(
+    [...workflow.matchAll(/cron: "([^"]+)"/gu)].map((match) => match[1]),
+    ["17 0 * * 0,3,6", "17 12 * * 1,4"],
+  );
+  assert.match(workflow, /workflow_dispatch:/u);
   assert.match(workflow, /actions: read\n\s+contents: read/u);
   assert.match(workflowConcurrency, /group: native-ios-production-canary/u);
   assert.match(workflowConcurrency, /cancel-in-progress: false/u);
