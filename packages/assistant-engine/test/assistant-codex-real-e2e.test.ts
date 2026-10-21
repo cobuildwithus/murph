@@ -2404,6 +2404,89 @@ describeRealCodex('real Codex Telegram file delivery e2e', () => {
   }, 360_000)
 })
 
+describeRealCodex('real Codex common media file delivery e2e', () => {
+  it.each([
+    { filename: 'poster.jpg', supported: true },
+    { filename: 'archive.bin', supported: false },
+  ])('prepares a saved $filename with truthful approval or format recovery', async ({ filename, supported }) => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-media-file-e2e-'))
+    const refs: string[] = []
+    const approvalUrl = 'https://murph.test/approve/synthetic-media'
+    let approvals = 0
+    try {
+      await initializeVault({ vaultRoot: workingDirectory, timezone: 'UTC' })
+      await mkdir(path.join(workingDirectory, 'documents'), { recursive: true })
+      const ref = `documents/${filename}`
+      const bytes = Buffer.from('synthetic attachment bytes')
+      await writeFile(path.join(workingDirectory, ref), bytes)
+      const context: AssistantHostedToolContext = {
+        ...createRealCodexSupportHostedToolContext('direct'),
+        vaultFileSendAvailable: true,
+        sendVaultFile: async (fileRef, toolCallId) => {
+          refs.push(fileRef)
+          return await requestAssistantVaultFileSend({
+            actionApprovalPort: {
+              read: async () => { throw new Error('No existing approval expected') },
+              request: async () => {
+                approvals += 1
+                return { status: 'pending', approvalId: `haa_${'a'.repeat(32)}`,
+                  approvalUrl, expiresAt: '2030-01-01T12:00:00.000Z' }
+              },
+            },
+            bindingDelivery: { kind: 'thread', target: 'synthetic-media-chat' },
+            channel: 'linq', deliveryTransportIdempotent: true,
+            ref: fileRef, sessionId: 'session-media', threadId: 'synthetic-media-chat', threadIsDirect: true,
+            toolCallId, turnId: 'turn-media', vault: workingDirectory,
+          })
+        },
+      }
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome,
+        developerInstructions: buildAssistantSystemPrompt({
+          assistantCliContract: null, assistantContextSnapshotPrompt: null,
+          assistantHostedDeviceConnectAvailable: false, assistantHostedDeviceConnectProviders: [],
+          assistantKnowledgeToolsAvailable: false, channel: 'linq',
+          cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+          conversationScope: 'direct', currentLocalDate: '2026-10-21', currentTimeZone: 'UTC',
+          hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false, turnTrigger: null,
+        }),
+        dynamicTools: resolveMurphDynamicTools({ vaultFileSendAvailable: true }).filter(tool =>
+          ['send_vault_file', 'finish_without_reply'].includes(tool.name)),
+        env: config.env, hostedToolContext: context,
+        model: config.model, modelProvider: config.modelProvider,
+        prompt: `Send my saved ${ref} to this private iMessage chat. Keep the original file. Do not convert, rename, or package it; if this format cannot be sent, explain my options.`,
+        reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
+      })
+      const reply = result.finalMessage.trim()
+      process.stdout.write(`[media-file-approval-e2e] ${JSON.stringify({ reply, supported, fileCalls: refs.length, approvals })}\n`)
+      expect(refs).toEqual([ref])
+      expect(await readFile(path.join(workingDirectory, ref))).toEqual(bytes)
+      const intents = await listAssistantOutboxIntents(workingDirectory)
+      expect(approvals).toBe(supported ? 1 : 0)
+      expect(intents).toHaveLength(supported ? 1 : 0)
+      if (supported) {
+        expect(intents[0]).toMatchObject({ status: 'awaiting_approval', media: [expect.objectContaining({
+          kind: 'vault_file', ref, filename, contentType: 'image/jpeg',
+        })] })
+        expect(reply).toMatch(/approv/iu)
+        expect(reply.match(/https?:\/\/\S+/gu)).toEqual([approvalUrl])
+        const modelText = readCompletedAgentMessages(result.jsonEvents).map(message => message.text).join('\n')
+        expect(modelText).not.toMatch(/https?:/iu)
+      } else {
+        expect(reply).toMatch(/format|type|\.bin/iu)
+        expect(reply).toMatch(/zip|convert|supported/iu)
+        expect(reply).not.toMatch(/https?:/iu)
+      }
+      expect(reply).not.toMatch(/(?:i(?:'ve| have)?|successfully) (?:sent|attached)|documents\//iu)
+    } finally {
+      await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+    }
+  }, 360_000)
+})
+
 describeRealCodex('real Codex direct route planning e2e', () => {
   it(
     'answers once from an early detail retained across sixty committed messages',

@@ -2450,7 +2450,7 @@ async function executeSendVaultFileDynamicTool(
         }),
       )
     }
-    return withVaultFileToolFailureDetails(
+    const result = withVaultFileToolFailureDetails(
       replyRequiredResult(
         false,
         'secure vault-file approval could not be prepared',
@@ -2458,7 +2458,18 @@ async function executeSendVaultFileDynamicTool(
       ),
       diagnosticError,
     )
+    result.rpcResult.contentItems = [{
+      type: 'inputText',
+      text: vaultFilePreparationFailureText(result.failureDiagnostic?.vaultFileErrorCode),
+    }]
+    return result
   }
+}
+
+function vaultFilePreparationFailureText(errorCode: string | undefined): string {
+  return errorCode === 'ASSISTANT_VAULT_FILE_TYPE_UNSUPPORTED'
+    ? 'This file format is not supported for secure delivery. Use a supported image, audio, video, or document format, or create a ZIP containing the requested file and submit that ZIP for approval. Do not just rename its extension.'
+    : 'secure vault-file approval could not be prepared'
 }
 
 async function executeResolvePhysicalNoteDynamicTool(

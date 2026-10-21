@@ -108,7 +108,9 @@ async function expectPersistedVaultFileFailure(
   diagnostic: ToolFailureDiagnostic,
 ) {
   const rpcResult = { success: false, contentItems: [{ type: 'inputText',
-    text: 'secure vault-file approval could not be prepared' }] }
+    text: diagnostic.vaultFileErrorCode === 'ASSISTANT_VAULT_FILE_TYPE_UNSUPPORTED'
+      ? 'This file format is not supported for secure delivery. Use a supported image, audio, video, or document format, or create a ZIP containing the requested file and submit that ZIP for approval. Do not just rename its extension.'
+      : 'secure vault-file approval could not be prepared' }] }
   const details = { requestKind: 'send-vault-file', ...diagnostic, diagnosticRole: 'classification' }
   expect(result).toEqual({
     rpcResult, finalActionPatch: { kind: 'reply-required' }, failureDiagnostic: diagnostic,
@@ -628,12 +630,22 @@ describe('assistant vault-file send', () => {
     expect((await stat(filePath)).mode & 0o777).toBe(0o666)
   })
 
-  it.each(['linq', 'telegram'])('adopts the exact assistant-owned %s delivery for initial prep and persisted retries', async (channel) => {
+  it.each(['linq', 'telegram'].flatMap((channel) => [
+    { filename: 'report.pdf', contentType: 'application/pdf' },
+    { filename: 'picture.jpg', contentType: 'image/jpeg' },
+    { filename: 'picture.PNG', contentType: 'image/png' },
+    { filename: 'picture.heic', contentType: 'image/heic' },
+    { filename: 'recording.mp3', contentType: 'audio/mpeg' },
+    { filename: 'recording.m4a', contentType: 'audio/x-m4a' },
+    { filename: 'clip.mp4', contentType: 'video/mp4' },
+    { filename: 'clip.mov', contentType: 'video/quicktime' },
+    { filename: 'guide.epub', contentType: 'application/epub+zip' },
+  ].map((file) => ({ channel, ...file }))))('adopts $filename for $channel approval and persisted retries', async ({ channel, filename, contentType }) => {
     const { parentRoot, vaultRoot } = await createTempVaultContext(
       'murph-vault-file-runtime-delivery-',
     )
     tempRoots.push(parentRoot)
-    const ref = `${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/report.pdf`
+    const ref = `${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/${filename}`
     const filePath = path.join(vaultRoot, ...ref.split('/'))
     const contents = Buffer.from('generated report')
     await mkdir(path.dirname(filePath), { recursive: true })
@@ -663,7 +675,7 @@ describe('assistant vault-file send', () => {
       vault: vaultRoot,
     })
     expect(prepared).toMatchObject({
-      filename: 'report.pdf',
+      filename,
       status: 'pending',
     })
     expect(approvalRequest).toHaveBeenCalledTimes(1)
@@ -674,12 +686,13 @@ describe('assistant vault-file send', () => {
       throw new Error('Expected one persisted vault-file descriptor.')
     }
 
-    expect(persistedMedia.filename).toBe('report.pdf')
+    expect(persistedMedia.filename).toBe(filename)
+    expect(persistedMedia.contentType).toBe(contentType)
     expect(persistedMedia.ref).not.toBe(ref)
     expect(persistedMedia.ref.startsWith(
-      `${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/report-`,
+      `${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/`,
     )).toBe(true)
-    expect(persistedMedia.ref.endsWith('.pdf')).toBe(true)
+    expect(persistedMedia.ref.endsWith(path.extname(filename).toLowerCase())).toBe(true)
     const ownedPath = path.join(vaultRoot, ...persistedMedia.ref.split('/'))
     await expect(stat(filePath)).rejects.toMatchObject({ code: 'ENOENT' })
     expect((await stat(ownedPath)).mode & 0o777).toBe(0o600)
