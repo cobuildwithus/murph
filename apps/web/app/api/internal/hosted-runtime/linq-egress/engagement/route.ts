@@ -1,3 +1,5 @@
+import { readGameProposalDeliveryPlayers } from "@/src/lib/game/chat-delivery";
+import { assertGameProposalDeliveryCurrentTx } from "@/src/lib/game/chat-delivery-authority";
 import { HOSTED_EXECUTION_REVIEWED_ASSISTANT_ASK_COMPLETION_DELIVERY_KEY_PREFIX } from "@murphai/hosted-execution";
 import { parseHostedExecutionResolvedLinqDeliveryRoute } from "@murphai/hosted-execution/routes";
 import {
@@ -73,6 +75,8 @@ export const POST = withJsonError(async (request: Request) => {
   const targetKind = readOptionalBodyString(body.targetKind);
   const prisma = getPrisma();
 
+  const gameChatPlayers = await readGameProposalDeliveryPlayers(idempotencyKey, userId);
+
   const assertion = await prisma.$transaction(async (tx) => {
     const chatLockTarget = targetKind === "participant"
       ? null
@@ -110,6 +114,13 @@ export const POST = withJsonError(async (request: Request) => {
     assertResolvedLinqDeliveryAuthority({
       authorityCheckOnly, expectedResolvedRoute,
       resolvedRoute: finalAuthority.resolvedRoute, target,
+    });
+
+    await assertGameProposalDeliveryCurrentTx({
+      deliveryIdempotencyKey: idempotencyKey,
+      containerMemberId: userId,
+      playerMemberIds: gameChatPlayers,
+      tx,
     });
 
     const sourceEpisode = await isHostedSourceDeliveryStallEpisodeCurrentTx({

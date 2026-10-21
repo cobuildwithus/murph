@@ -6,6 +6,7 @@ import {
   GAME_STAKE_KINDS,
   GAME_WEEKDAYS,
   type GameCommand,
+  type GameChange,
   type GameInviteeLabel,
   type GameSchedule,
   type GameStake,
@@ -25,6 +26,19 @@ import { reject } from "./rules";
 export function parseGameCommand(value: unknown): GameCommand {
   const input = record(value, "command");
   switch (input.type) {
+    case "proposeChange":
+      return {
+        type: "proposeChange", gameId: clientId(input.gameId, "gameId"),
+        proposalId: clientId(input.proposalId, "proposalId"),
+        expectedTermsVersion: integer(input.expectedTermsVersion, "expectedTermsVersion", 1),
+        change: parseGameChange(input.change),
+      };
+    case "respondChange":
+      return {
+        type: "respondChange", gameId: clientId(input.gameId, "gameId"),
+        proposalId: clientId(input.proposalId, "proposalId"),
+        decision: oneOf(input.decision, "decision", ["approve", "decline", "cancel"] as const),
+      };
     case "setProfile":
       return profile(input);
     case "createGame":
@@ -231,4 +245,19 @@ function integer(value: unknown, field: string, min: number, max = Number.MAX_SA
 function oneOf<T extends string | number>(value: unknown, field: string, options: readonly T[]): T {
   return options.find((option) => option === value)
     ?? reject("INVALID_REQUEST", `${field} must be one of ${options.join(", ")}.`);
+}
+
+export function parseGameChange(value: unknown): GameChange {
+  const input = record(value, "change");
+  if (input.kind === "start_now") return { kind: "start_now" };
+  if (input.kind !== "edit") return reject("INVALID_REQUEST", "Choose a game change.");
+  if (input.schedule === undefined && input.lengthDays === undefined && input.startsOn === undefined) {
+    return reject("INVALID_REQUEST", "Choose a schedule, duration or start date to change.");
+  }
+  return {
+    kind: "edit",
+    ...optional(input.schedule, (value) => ({ schedule: schedule(record(value, "schedule")) })),
+    ...optional(input.lengthDays, (value) => ({ lengthDays: integer(value, "lengthDays", 1, 28) })),
+    ...optional(input.startsOn, (value) => ({ startsOn: calendarDate(value, "startsOn") })),
+  };
 }

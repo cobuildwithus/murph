@@ -1505,3 +1505,11 @@ describe("createHostedGroupToolWithCurrentTurnContext", () => {
     },
   );
 });
+
+
+it("rejects game actions from email without forwarding sender authority", async () => {
+  const request = vi.fn();
+  const tool = createHostedGroupToolWithCurrentTurnContext({ groupToolPort: { request }, linqDeliveryContexts: [], groupEmailIngress: true });
+  await expect(tool.request({ action: "read_game", origin: { kind: "accepted_input", assistantInputId: `ain_${"a".repeat(32)}` } })).resolves.toEqual({ action: "read_game", result: { status: "unavailable", error: "authenticated_sender_required" } });
+  expect(request).not.toHaveBeenCalled();
+});

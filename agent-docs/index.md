@@ -1380,3 +1380,8 @@ Profile-photo implementation is tracked in [`game profile photos`](exec-plans/co
 
 The pre-commit large-diff proof no longer depends on obsolete pipeline timing;
 see [the completed release-gate proof plan](exec-plans/completed/2026-10-21-release-gate-proof.md).
+
+Weekly-game chat hosting, mutually agreed schedule edits and the group-only
+access boundary are owned by `product-specs/weekly-game.md` and `ARCHITECTURE.md`;
+implementation proof is tracked in
+[weekly-game chat hosting](exec-plans/active/2026-10-21-weekly-game-chat-host.md).

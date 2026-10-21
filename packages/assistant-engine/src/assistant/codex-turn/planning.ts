@@ -461,6 +461,10 @@ interface AssistantRouteTurnPlanInput {
   messageTargetAuthorizerAvailable?: boolean | null
 }
 
+function areConversationGamesAvailable(input: AssistantRouteTurnPlanInput, acceptedInputIds: readonly string[], scope: string): boolean {
+  return input.hostedToolContext?.groupTool != null && scope === 'group' && acceptedInputIds.length > 0
+}
+
 function areConversationPollsAvailable(input: AssistantRouteTurnPlanInput, acceptedInputIds: readonly string[], channel: string | null): boolean {
   return acceptedInputIds.length > 0 && (channel === 'linq' || channel === 'telegram') && input.hostedToolContext?.pollTool != null
 }
@@ -1244,6 +1248,7 @@ export async function resolveAssistantRouteTurnPlan(
           ? [MURPH_MEMBER_MEMORY_TOOL]
           : []
       : resolveMurphDynamicTools({
+        gamesAvailable: areConversationGamesAvailable(input, userActionAcceptedInputIds, conversationScope),
         pollsAvailable,
         assistantStyleSettingsAvailable,
         allowFinishWithoutReply,

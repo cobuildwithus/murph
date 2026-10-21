@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-10-21",
+  "order": 200,
+  "item": {
+    "id": "challenge-changes-in-chat",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Agree on challenge changes together",
+    "summary": "Propose a new challenge schedule, duration or start date, and agree to it together in your chat with Murph.",
+    "details": "Murph reuses your shared chat or starts one with both players. The current schedule stays in place until the other player agrees. Changes affect future days, keeping the check-ins and missed days already recorded. Available for supported two-player challenges with verified phone numbers.",
+    "relevanceTags": ["challenges", "groups"],
+    "sourcePullRequests": []
+  }
+}

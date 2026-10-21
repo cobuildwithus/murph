@@ -5406,9 +5406,9 @@ query bounds, receipt semantics, foreground limit and rollout order.
 
 `apps/web` owns the weekly game (product: `agent-docs/product-specs/weekly-game.md`).
 Postgres state tables are the truth: `game_profile`, `game_contact_label`,
-`game`, `game_player`, `game_entry`, `game_ticket`, plus `game_event`, a plain
-append-only history (one row per accepted change, ids and numbers only, read by
-nothing yet). Every member link cascades from `game_profile`, which cascades
+`game`, `game_player`, `game_entry`, `game_ticket`, plus `game_event`, an append-only history (one row per accepted change, ids and
+numbers only). Change proposal identities use its nullable unique `command_key`
+for replay after resolution. Every member link cascades from `game_profile`, which cascades
 from `HostedMember`. Words (names, tasks, stakes, labels, excuse transcripts)
 are app-encrypted before any transaction; the structure that rules and
 settlement read stays plain, so neither decrypts.
@@ -5462,3 +5462,34 @@ profile key and shared game participation (including addressed rematches), then
 falls back to the existing entry visibility rule. Public preview shapes stay
 unchanged. Deploy the nullable-column migration before Web and the new native
 client; old native clients continue sending name and zone without clearing photos.
+
+### Weekly game chat changes
+
+`game.pending_change` is one versioned structural proposal serialized with the
+existing game row lock. `game.chat_container_member_id` references its shared
+room; delete clears the binding. App `POST /api/game/v1/games/:id/changes`
+records the proposing player and expected terms version. Signed group dynamic
+`read_game` / `update_game` actions share the existing group-tool transport.
+The Web bridge resolves the actor from an accepted group mailbox message, then
+revalidates runtime identity, exact route and game participation inside the game
+mutation transaction. The model interprets agreement; it cannot choose an actor.
+Approvals and declines are unavailable through public app routes. A proposer
+can cancel through `DELETE /api/game/v1/games/:id/changes/:proposalId`.
+
+The shared read projection decrypts only the agreed words and each player's own
+profile name, never the personal GameView. Fresh provider rosters must contain
+exactly the two verified player identities and Murph. Existing Linq delivery
+claims and notification outbox own creation and proposal effects. Initial group
+creation stores its encrypted provider receipt in that existing delivery row;
+an unknown creation permits only the same frozen provider request and idempotency
+key, never a new creation identity. Notification delivery rechecks
+the current proposal immediately before provider dispatch. No new queue or timer
+is introduced. Reads expire stale proposals; applying a change appends versioned
+terms only from an unstarted day and never rewrites entries or tickets.
+
+Canonical member access can grant a synthetic group room access through its live
+eligible two-player game. Both players must remain unsuspended and must not have
+withdrawn health-data consent; feature flag/allowlist remain authoritative. The
+room consumes the ordinary group usage allowance, without granting either player
+personal AI access. Apply the additive migration before readers, then deploy the
+signed transport consumers before enabling native proposal writers.

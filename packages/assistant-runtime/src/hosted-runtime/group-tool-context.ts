@@ -327,12 +327,14 @@ type HostedGroupEmailRestrictedRequest = Exclude<
   }
 >;
 
-function buildHostedGroupJournalActionUnavailable(
+function buildHostedGroupSimpleActionUnavailable(
   request: Extract<
     HostedGroupEmailRestrictedRequest,
     {
       action:
         | "prepare_email"
+        | "read_game"
+        | "update_game"
         | "record_current_sender_journal_fact"
         | "set_current_sender_journal_capture"
         | "set_journal_capture";
@@ -340,6 +342,9 @@ function buildHostedGroupJournalActionUnavailable(
   >,
   unavailableReason: "authenticated_sender_required",
 ): HostedRuntimeGroupToolResponse {
+  if (request.action === "read_game" || request.action === "update_game") {
+    return { action: request.action, result: { status: "unavailable", error: unavailableReason } };
+  }
   return {
     action: request.action,
     result: { status: "unavailable", unavailableReason },
@@ -418,7 +423,7 @@ function buildHostedGroupEmailRestrictedActionUnavailable(
         },
       };
     default:
-      return buildHostedGroupJournalActionUnavailable(
+      return buildHostedGroupSimpleActionUnavailable(
         request,
         unavailableReason,
       );

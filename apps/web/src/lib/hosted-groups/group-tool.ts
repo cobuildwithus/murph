@@ -1,3 +1,5 @@
+import { handleGameChatTool } from "../game/chat-tool";
+import type { HostedRuntimeIdentity } from "../hosted-execution/runtime-owner";
 import "server-only";
 import { sharesCompanionContact } from "@murphai/hosted-execution/vault-share";
 
@@ -273,6 +275,8 @@ export type HostedRuntimeGroupToolAccessClassification =
   | "participant_aware";
 
 export const HOSTED_RUNTIME_GROUP_TOOL_ACCESS_CLASSIFICATION = {
+  read_game: "participant_aware",
+  update_game: "participant_aware",
   ask: "personal_active",
   handoff: "personal_active",
   ask_current_sender: "participant_aware",
@@ -312,6 +316,7 @@ export const HOSTED_RUNTIME_GROUP_TOOL_ACCESS_CLASSIFICATION = {
 >;
 
 type HostedRuntimeGroupToolHandlerInput = {
+  runtimeIdentity?: HostedRuntimeIdentity | null;
   includeMembershipAvailability?: boolean;
   includeParticipantRosters?: boolean;
   logger?: Pick<Console, "warn">;
@@ -442,8 +447,22 @@ async function recordHostedRuntimeGroupJournalFact(
   };
 }
 
-export async function handleHostedRuntimeGroupTool(
+/** Shared transport; each product keeps its own authority and projection owner. */
+export async function handleHostedRuntimeConversationTool(
   input: HostedRuntimeGroupToolHandlerInput,
+): Promise<HostedRuntimeGroupToolResponse> {
+  if (input.request.action === "read_game" || input.request.action === "update_game") {
+    return handleGameChatTool({ memberId: input.memberId, runtimeIdentity: input.runtimeIdentity ?? null, request: input.request });
+  }
+  return handleHostedRuntimeGroupTool({ ...input, request: input.request });
+}
+
+type HostedRuntimeNonGameToolHandlerInput = Omit<HostedRuntimeGroupToolHandlerInput, "request"> & {
+  request: Exclude<HostedRuntimeGroupToolRequest, { action: "read_game" | "update_game" }>;
+};
+
+export async function handleHostedRuntimeGroupTool(
+  input: HostedRuntimeNonGameToolHandlerInput,
 ): Promise<HostedRuntimeGroupToolResponse> {
   if (input.request.action === "ask") {
     const admission = await requestHostedGroupAssistantAsk({

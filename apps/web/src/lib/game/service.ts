@@ -2,16 +2,20 @@ import "server-only";
 
 import { randomBytes } from "node:crypto";
 
-import type { Game, GameEntry, GamePlayer, Prisma } from "@prisma/client";
+import { Prisma, type Game, type GameEntry, type GamePlayer } from "@prisma/client";
 
 import { toPrismaJsonObject } from "../device-sync/prisma-store/prisma-json";
 import { isUniqueViolation } from "../device-sync/prisma-store/prisma-errors";
 import { generateHostedRandomPrefixedId, isRecord, sha256Hex } from "../primitives";
 import { getPrisma } from "../prisma";
-import { areGameDevToolsAllowed, isGameEnabled, mediaKeyOwner, mediaKeyPrefixFor } from "./access";
+import { createHostedLinqDeliveryIdempotencyLookupKey } from "../hosted-onboarding/linq-observability-identifiers";
+import { areGameDevToolsAllowed, isGameEnabled, isGameEnabledFor, mediaKeyOwner, mediaKeyPrefixFor } from "./access";
 import { parseGameCommand } from "./command";
 import {
   GAME_ENTRY_KINDS,
+  type GamePendingChange,
+  type GameChangeControls,
+  type GameTermsVersion,
   type GameCommand,
   type GameEntryKind,
   type GameError,
@@ -24,6 +28,7 @@ import {
 import { labelTarget, openGameTexts, sealGameText, type GameSealTarget } from "./crypto";
 import { isGameMediaStorageAvailable, statGameMedia } from "./media";
 import {
+  currentTerms,
   decideDevAdvance,
   decideJoin,
   decideNewTerms,
@@ -51,6 +56,8 @@ import {
   type TermWords,
 } from "./rules";
 import { gameLocalDate } from "./time";
+import { decideGameChange, gameChangeControls, isGameChangeExpired, parsePendingGameChange } from "./changes";
+import { deliverGameChangeProposal } from "./chat-delivery";
 import { buildGameView, gameMediaUrl, termsView, ticketView, visibleEntryIds, type GameTicketRow } from "./views";
 
 export { isGameEnabledFor, mediaKeyPrefixFor } from "./access";
@@ -89,6 +96,8 @@ const WALLET_LIMIT = 200;
 export async function runGameCommand(input: {
   actorMemberId: string;
   command: unknown;
+  chatContainerMemberId?: string;
+  beforeMutationTx?: (tx: Prisma.TransactionClient) => Promise<void>;
   now?: Date;
 }): Promise<GameCommandResult> {
   const actor = input.actorMemberId;
@@ -98,8 +107,19 @@ export async function runGameCommand(input: {
     if (command.type === "setProfile") {
       return { game: null, ok: true, profile: await setProfile(actor, command) };
     }
-    const gameId = await runCommand({ actor, now: input.now }, command);
-    return { game: gameId ? await readGame(gameId, actor) : null, ok: true };
+    const gameId = await runCommand({ actor, now: input.now, chatContainerMemberId: input.chatContainerMemberId, beforeMutationTx: input.beforeMutationTx }, command);
+    if (command.type === "proposeChange") {
+      try {
+        await deliverGameChangeProposal(command.gameId, command.proposalId);
+      } catch {
+        // The durable proposal survives unavailable routing/provider work. A retry
+        // uses the same identity; never overwrite a later proposal or queued send.
+        await getPrisma().$executeRaw`UPDATE game SET pending_change = jsonb_set(pending_change, '{deliveryStatus}', '"failed"'::jsonb)
+          WHERE id = ${command.gameId} AND pending_change->>'id' = ${command.proposalId}
+          AND pending_change->>'deliveryStatus' IN ('pending', 'failed')`;
+      }
+    }
+    return { game: gameId && !input.chatContainerMemberId ? await readGame(gameId, actor) : null, ok: true };
   } catch (error) {
     if (error instanceof GameRuleError) {
       return { error: error.error, ok: false, status: GAME_ERROR_STATUS[error.error.code] };
@@ -110,12 +130,18 @@ export async function runGameCommand(input: {
 
 interface CommandContext {
   actor: string;
+  chatContainerMemberId?: string;
+  beforeMutationTx?: (tx: Prisma.TransactionClient) => Promise<void>;
   now?: Date;
 }
 
 /** Applies one command; returns the game to show back, if any. */
 async function runCommand(context: CommandContext, command: Exclude<GameCommand, { type: "setProfile" }>): Promise<string | null> {
   switch (command.type) {
+    case "proposeChange":
+      return proposeChange(context, command);
+    case "respondChange":
+      return respondChange(context, command);
     case "createGame":
       return createGame(context, command);
     case "join":
@@ -150,9 +176,10 @@ interface LockedStep {
   clock: Date;
 }
 
-type GameEventType = "created" | "joined" | "started" | "posted" | "withdrew" | "settled" | "redeemed" | "expired" | "time_shifted";
+type GameEventType = "created" | "joined" | "started" | "posted" | "withdrew" | "settled" | "redeemed" | "expired" | "time_shifted" | "change_proposed" | "change_applied" | "change_declined" | "change_cancelled" | "change_expired";
 /** What changed, for the history: ids and numbers only, never words. */
 interface GameEventDraft {
+  commandKey?: string;
   type: GameEventType;
   payload: Prisma.InputJsonObject;
 }
@@ -160,10 +187,8 @@ interface GameEventDraft {
 async function writeEvents(tx: Tx, gameId: string, actor: string, events: readonly GameEventDraft[]): Promise<void> {
   if (events.length === 0) return;
   await tx.gameEvent.createMany({
-    data: events.map((event) => ({ actor, gameId, payload: { v: 1, ...event.payload }, type: event.type })),
+    data: events.map((event) => ({ actor, gameId, commandKey: event.commandKey, payload: { v: 1, ...event.payload }, type: event.type })),
   });
-  // Murph seam: once a game is hosted in a Murph group chat, append these
-  // moments to HostedMailbox here, in this transaction. The MVP has no chat.
 }
 
 /** Locks the game, runs one step, and records what it changed. A step that changes nothing returns no events. */
@@ -173,9 +198,15 @@ async function runLocked(
   step: (locked: LockedStep) => Promise<GameEventDraft[]>,
 ): Promise<void> {
   await getPrisma().$transaction(async (tx) => {
+    // Match account deletion's owner-before-game lock order. The callback's
+    // runtime/owner locks remain held through the following game mutation.
+    await context.beforeMutationTx?.(tx);
     const locked = await tx.$queryRaw<{ id: string }[]>`SELECT id FROM game WHERE id = ${gameId} FOR UPDATE`;
     if (locked.length === 0) reject("GAME_NOT_FOUND", "Game not found.");
     const [loaded] = await loadGames(tx, [gameId]);
+    if (context.chatContainerMemberId && loaded.row.chatContainerMemberId !== context.chatContainerMemberId) {
+      reject("NOT_A_PLAYER", "This game is not hosted in this chat.");
+    }
     const clock = context.now ?? await databaseNow(tx);
     await writeEvents(tx, gameId, context.actor, await step({ clock, loaded, now: gameNow(clock, loaded.row), tx }));
   });
@@ -491,7 +522,7 @@ async function copyPendingLabel(tx: Tx, row: GameRow, joinerId: string): Promise
 
 /** Settled or void: the roster is free to start another game together. */
 async function endGame(tx: Tx, gameId: string, data: Prisma.GameUpdateInput): Promise<void> {
-  await tx.game.update({ data: { ...data, liveRosterKey: null }, where: { id: gameId } });
+  await tx.game.update({ data: { ...data, pendingChange: Prisma.DbNull, liveRosterKey: null }, where: { id: gameId } });
 }
 
 async function post(context: CommandContext, command: Extract<GameCommand, { type: "post" }>): Promise<string> {
@@ -654,6 +685,110 @@ async function requireView(gameId: string, memberId: string): Promise<GameView> 
   return view;
 }
 
+/** A proposal's identity is retained in the ordinary history after it is resolved. */
+async function proposeChange(context: CommandContext, command: Extract<GameCommand, { type: "proposeChange" }>): Promise<string> {
+  await runLocked(command.gameId, context, async ({ tx, loaded, now }) => {
+    if (!playerFor(loaded.state, context.actor)) reject("NOT_A_PLAYER", "This game belongs to its players.");
+    const key = `game-change:${command.gameId}:${command.proposalId}`;
+    const prior = await tx.gameEvent.findUnique({ where: { commandKey: key }, select: { actor: true } });
+    // Either player can retry delivery. The original proposer and exact change
+    // remain immutable; replay never counts as the other player's agreement.
+    if (prior) return [];
+    const pending = parsePendingGameChange(loaded.row.pendingChange);
+    if (pending && !isGameChangeExpired(loaded.state, pending, now)) reject("CHANGE_PENDING", "There is already a change waiting for agreement in chat.");
+    if (currentTerms(loaded.state.game.terms).n !== command.expectedTermsVersion) reject("TERMS_CHANGED", "The game changed. Take another look.");
+    const decision = decideGameChange(loaded.state, context.actor, command.change, now);
+    const proposal: GamePendingChange = {
+      id: command.proposalId, proposedByMemberId: context.actor,
+      expectedTermsVersion: command.expectedTermsVersion, deliveryStatus: "pending", ...decision,
+    };
+    await tx.game.update({ where: { id: command.gameId }, data: { pendingChange: toPrismaJsonObject({ v: 1, ...proposal }) } });
+    return [
+      ...(pending ? [{ type: "change_expired" as const, payload: { proposalId: pending.id } }] : []),
+      { type: "change_proposed", commandKey: key, payload: { proposalId: proposal.id, expectedTermsVersion: proposal.expectedTermsVersion, effectiveFromDay: proposal.effectiveFromDay } },
+    ];
+  });
+  return command.gameId;
+}
+
+async function respondChange(context: CommandContext, command: Extract<GameCommand, { type: "respondChange" }>): Promise<string> {
+  if (command.decision !== "cancel" && (!context.chatContainerMemberId || !context.beforeMutationTx)) reject("NOT_A_PLAYER", "Agree to this change in the game's shared chat.");
+  let expired = false;
+  await runLocked(command.gameId, context, async ({ tx, loaded, now }) => {
+    if (!playerFor(loaded.state, context.actor)) reject("NOT_A_PLAYER", "This game belongs to its players.");
+    const proposal = parsePendingGameChange(loaded.row.pendingChange);
+    const resolutionKey = `game-change-resolved:${command.gameId}:${command.proposalId}`;
+    if (!proposal || proposal.id !== command.proposalId) {
+      const prior = await tx.gameEvent.findUnique({ where: { commandKey: resolutionKey }, select: { type: true, actor: true } });
+      const expectedType = command.decision === "approve" ? "change_applied" : command.decision === "decline" ? "change_declined" : "change_cancelled";
+      if (prior?.type === expectedType && prior.actor === context.actor) return [];
+      reject("CHANGE_EXPIRED", "That proposal is no longer waiting for agreement.");
+    }
+    const proposer = proposal.proposedByMemberId === context.actor;
+    if ((command.decision === "cancel") !== proposer) reject("NOT_A_PLAYER", proposer ? "The other player needs to agree." : "Only the proposer can cancel this change.");
+    const clear = () => tx.game.update({ where: { id: command.gameId }, data: { pendingChange: Prisma.DbNull } });
+    if (command.decision !== "approve") {
+      await clear();
+      return [{ commandKey: resolutionKey, type: command.decision === "cancel" ? "change_cancelled" : "change_declined", payload: { proposalId: proposal.id } }];
+    }
+    if (isGameChangeExpired(loaded.state, proposal, now)) {
+      await clear(); expired = true;
+      return [{ commandKey: resolutionKey, type: "change_expired", payload: { proposalId: proposal.id } }];
+    }
+    // Validate against the locked current game again. A start-now proposal keeps
+    // its proposed date, rather than silently changing what the players agreed to.
+    decideGameChange(loaded.state, context.actor, proposal.change, now);
+    const previous = currentTerms(loaded.state.game.terms);
+    const next = { ...previous, n: previous.n + 1, fromDay: proposal.effectiveFromDay,
+      ...(proposal.change.kind === "edit" && proposal.change.schedule ? { schedule: proposal.change.schedule } : {}) };
+    const terms = { v: 1, versions: [...loaded.state.game.terms.versions.filter((version) => version.fromDay < next.fromDay), next] };
+    const lengthDays = proposal.change.kind === "edit" ? proposal.change.lengthDays : undefined;
+    await tx.game.update({ where: { id: command.gameId }, data: {
+      pendingChange: Prisma.DbNull, terms: toPrismaJsonObject(terms),
+      ...(lengthDays === undefined ? {} : { lengthDays }),
+      ...(proposal.startsOn ? { startsOn: toDbDate(proposal.startsOn) } : {}),
+    } });
+    if (proposal.startsOn) await tx.gamePlayer.updateMany({ where: { gameId: command.gameId }, data: { dayOne: toDbDate(proposal.startsOn) } });
+    return [{ commandKey: resolutionKey, type: "change_applied", payload: { proposalId: proposal.id, termsVersion: next.n, effectiveFromDay: next.fromDay } }];
+  });
+  if (expired) reject("CHANGE_EXPIRED", "That change's first day already started. Propose it again for the remaining days.");
+  return command.gameId;
+}
+
+export interface GameChatState {
+  games: {
+    id: string; status: GameStatus; terms: GameTermsVersion; startsOn: string | null; lengthDays: number;
+    players: { memberId: string; seat: number; firstName: string; dayOne: string | null; timeZone: string }[];
+    pendingChange: GamePendingChange | null; changeControls: GameChangeControls;
+  }[];
+}
+
+/** Shared-chat projection intentionally never calls the viewer-private app view. */
+export async function readGameChatState(containerMemberId: string, playerMemberIds: readonly string[]): Promise<GameChatState> {
+  if (playerMemberIds.length !== 2 || new Set(playerMemberIds).size !== 2) return { games: [] };
+  const prisma = getPrisma();
+  const candidates = await prisma.game.findMany({ where: { chatContainerMemberId: containerMemberId, status: "live", players: { every: { memberId: { in: [...playerMemberIds] } } } },
+    orderBy: { createdAt: "desc" }, take: 5, include: { players: true } });
+  const rows = candidates.filter((row) => row.players.length === 2 && row.players.every((player) => isGameEnabledFor(player.memberId)));
+  const profiles = await prisma.gameProfile.findMany({ where: { memberId: { in: [...new Set(rows.flatMap((row) => row.players.map((player) => player.memberId)))] } },
+    select: { memberId: true, firstNameEncrypted: true } });
+  const plain = await openGameTexts([
+    ...rows.map((row) => ({ ...gameTarget(row, "terms_words"), value: row.termsWordsEncrypted })),
+    ...profiles.map((profile) => ({ field: "first_name", table: "game_profile" as const, rowId: profile.memberId, memberId: profile.memberId, value: profile.firstNameEncrypted })),
+  ]);
+  const names = new Map(profiles.map((profile, index) => [profile.memberId, plain[rows.length + index] ?? ""]));
+  const [clock, pendingViews] = await Promise.all([databaseNow(prisma), readPendingChangeViews(rows)]);
+  return { games: rows.map((row, index) => {
+    const state = toRuleState(row, []);
+    const pendingChange = pendingViews.get(row.id) ?? null;
+    return { id: row.id, status: state.game.status, terms: termsView(state, parseTermWords(plain[index] ?? "")),
+      startsOn: fromDbDate(row.players[0]?.dayOne ?? row.startsOn), lengthDays: row.lengthDays,
+      players: row.players.map((player) => ({ memberId: player.memberId, seat: player.seat, firstName: names.get(player.memberId) ?? "", dayOne: fromDbDate(player.dayOne), timeZone: player.timeZone })),
+      pendingChange, changeControls: gameChangeControls(state, gameNow(clock, row), pendingChange),
+    };
+  }) };
+}
+
 // -------------------------------------------------------------------- reads
 
 async function loadGames(db: Db, gameIds: readonly string[]): Promise<LoadedGame[]> {
@@ -732,7 +867,17 @@ async function loadCurrent(gameIds: readonly string[]): Promise<{ games: LoadedG
   const prisma = getPrisma();
   const [loaded, clock] = await Promise.all([loadGames(prisma, gameIds), databaseNow(prisma)]);
   const due = loaded.filter((game) => isGameDue(game.state, gameNow(clock, game.row)));
-  if (due.length === 0) return { clock, games: loaded };
+  const expired = loaded.filter((game) => {
+    const pending = parsePendingGameChange(game.row.pendingChange);
+    return pending && isGameChangeExpired(game.state, pending, gameNow(clock, game.row));
+  });
+  if (due.length === 0 && expired.length === 0) return { clock, games: loaded };
+  for (const game of expired) await runLocked(game.row.id, { actor: SYSTEM_ACTOR }, async ({ tx, loaded: current, now }) => {
+    const pending = parsePendingGameChange(current.row.pendingChange);
+    if (!pending || !isGameChangeExpired(current.state, pending, now)) return [];
+    await tx.game.update({ where: { id: game.row.id }, data: { pendingChange: Prisma.DbNull } });
+    return [{ type: "change_expired", payload: { proposalId: pending.id } }];
+  });
   for (const game of due) await settleGame(game.row.id);
   return { clock, games: await loadGames(prisma, gameIds) };
 }
@@ -930,12 +1075,13 @@ async function buildViews(games: readonly LoadedGame[], viewerId: string, clock:
   const memberIds = [...new Set([viewerId, ...games.flatMap((game) => game.row.players.map((player) => player.memberId))])];
   // An addressed rematch's invitee isn't a player yet, but the challenger's label for them still applies.
   const labelSubjects = [...memberIds, ...games.flatMap((game) => (game.row.inviteeMemberId ? [game.row.inviteeMemberId] : []))];
-  const [profiles, labels, tickets] = await Promise.all([
+  const [profiles, labels, tickets, pendingViews] = await Promise.all([
     prisma.gameProfile.findMany({ where: { memberId: { in: labelSubjects } } }),
     prisma.gameContactLabel.findMany({ where: { ownerMemberId: viewerId, subjectMemberId: { in: labelSubjects } } }),
     prisma.gameTicket.findMany({
       where: { gameId: { in: games.map((game) => game.row.id) }, OR: [{ owedTo: viewerId }, { owedBy: viewerId }] },
     }),
+    readPendingChangeViews(games.map((game) => game.row)),
   ]);
 
   // One decrypt batch: words, names, labels, invite bits, visible entries.
@@ -1010,6 +1156,7 @@ async function buildViews(games: readonly LoadedGame[], viewerId: string, clock:
     const tokenIndex = tokenAt[index];
     const result: StoredResult | null = game.row.result ? parseStoredResult(game.row.result) : null;
     return buildGameView({
+      pendingChange: pendingViews.get(game.row.id) ?? null,
       avatarKeys,
       profileAvatarKeys,
       entryWords,
@@ -1035,4 +1182,27 @@ async function buildViews(games: readonly LoadedGame[], viewerId: string, clock:
       words: parseTermWords(plain[wordsAt[index]] ?? ""),
     });
   });
+}
+
+/** One indexed receipt batch; delivery truth stays with the existing outbox owner. */
+async function readPendingChangeViews(rows: readonly Pick<Game, "id" | "pendingChange" | "chatContainerMemberId">[]): Promise<Map<string, GamePendingChange>> {
+  const pending = rows.flatMap((row) => {
+    const proposal = parsePendingGameChange(row.pendingChange);
+    if (!proposal) return [];
+    const key = row.chatContainerMemberId ? `game-change:${row.id}:${proposal.id}` : `game-chat:${row.id}`;
+    return [{ gameId: row.id, proposal, key: createHostedLinqDeliveryIdempotencyLookupKey(key) }];
+  });
+  if (!pending.length) return new Map();
+  const keys = pending.flatMap((item) => item.key ? [item.key] : []);
+  const receipts = await getPrisma().hostedLinqDelivery.findMany({ where: { idempotencyKey: { in: keys } },
+    select: { idempotencyKey: true, status: true } });
+  const statuses = new Map(receipts.map((receipt) => [receipt.idempotencyKey, receipt.status]));
+  return new Map(pending.map(({ gameId, proposal, key }) => {
+    const status = key ? statuses.get(key) : undefined;
+    const terminal = status === "failed" || status === "skipped";
+    return [gameId, { ...proposal,
+      deliveryStatus: terminal ? "failed" : status === "accepted" || status === "delivered" ? "sent" : proposal.deliveryStatus,
+      deliveryRetryable: !terminal,
+    }];
+  }));
 }
