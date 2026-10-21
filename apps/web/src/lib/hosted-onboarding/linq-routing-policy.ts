@@ -29,7 +29,7 @@ export function chooseHostedLinqHomeLine(input: {
 }): HostedLinqAssignableHomeLine | null {
   const preferredRecipientPhone = normalizePhoneNumber(input.preferredRecipientPhone);
   const dailyCandidates = input.lines.filter((line) =>
-    isHostedLinqHomeLineUnderDailyLimit({
+    line.assignmentWeight > 0 && isHostedLinqHomeLineUnderDailyLimit({
       ignoreDailyNewConversationLimit: input.ignoreDailyNewConversationLimit ?? false,
       line,
       newAssignmentsByRecipientPhone: input.newAssignmentsByRecipientPhone,
