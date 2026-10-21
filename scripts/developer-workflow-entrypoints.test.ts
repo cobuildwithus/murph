@@ -173,14 +173,6 @@ function runPreCommit(
   });
 }
 
-function runLegacyNameGate(repository: string) {
-  return spawnSync(
-    "bash",
-    ["-o", "pipefail", "-c", "git diff --cached --name-only | grep -q '^packages/cli/'"],
-    { cwd: repository, encoding: "utf8" },
-  );
-}
-
 afterEach(() => {
   while (roots.length > 0) rmSync(roots.pop()!, { force: true, recursive: true });
 });
@@ -294,6 +286,7 @@ describe("pre-commit fixture identity", () => {
     const result = runPreCommit(harness);
 
     expect(result.status, result.stderr).toBe(0);
+    expect(existsSync(harness.capture)).toBe(false);
     expect(runGit(harness.repository, ["config", "user.name"])).toBe(
       "Workflow Test",
     );
@@ -345,7 +338,6 @@ describe("pre-commit CLI schema generation", () => {
     const harness = createPreCommitHarness();
     runGit(harness.repository, ["mv", "packages/cli/src/input.ts", "renamed-outside.ts"]);
 
-    expect(runLegacyNameGate(harness.repository).status).not.toBe(0);
     const result = runPreCommit(harness);
 
     expect(result.status, result.stderr).toBe(0);
@@ -358,17 +350,16 @@ describe("pre-commit CLI schema generation", () => {
     writeFileSync(path.join(harness.repository, unicodePath), "quoted path\n");
     runGit(harness.repository, ["add", unicodePath]);
 
-    expect(runLegacyNameGate(harness.repository).status).not.toBe(0);
     const result = runPreCommit(harness);
 
     expect(result.status, result.stderr).toBe(0);
     expect(readFileSync(harness.capture, "utf8")).toContain("gen:config-schema");
   });
 
-  it("detects CLI changes even when a large staged diff breaks the legacy pipefail gate", () => {
+  it("regenerates all CLI artifacts for a large staged diff", () => {
     const harness = createPreCommitHarness();
-    writeFileSync(path.join(harness.repository, "packages", "cli", "src", "first.ts"), "cli\n");
-    runGit(harness.repository, ["add", "packages/cli/src/first.ts"]);
+    writeFileSync(path.join(harness.repository, "packages", "cli", "src", "input.ts"), "updated\n");
+    runGit(harness.repository, ["add", "packages/cli/src/input.ts"]);
     const blob = spawnSync("git", ["hash-object", "-w", "--stdin"], {
       cwd: harness.repository,
       encoding: "utf8",
@@ -387,11 +378,13 @@ describe("pre-commit CLI schema generation", () => {
     });
     expect(updateIndex.status, updateIndex.stderr).toBe(0);
 
-    expect(runLegacyNameGate(harness.repository).status).not.toBe(0);
-    const result = runPreCommit(harness);
+    const result = runPreCommit(harness, { MURPH_TEST_WRITE_GENERATED: "1" });
 
     expect(result.status, result.stderr).toBe(0);
     expect(readFileSync(harness.capture, "utf8")).toContain("gen:config-schema");
+    for (const output of generatedCliOutputs) {
+      expect(runGit(harness.repository, ["show", `:${output}`])).toBe("generated:updated");
+    }
   });
 
   it("surfaces generator diagnostics and the canonical recovery commands", () => {
