@@ -1,6 +1,6 @@
 # Remove redundant controller recovery from runtime wake
 
-Status: active
+Status: completed
 Created: 2026-10-21
 Updated: 2026-10-21
 
@@ -41,7 +41,7 @@ protocol is removed from the final patch because it does not address this cause.
 
 ## Product UX and safety
 
-Effort: Patch. Result: Ready for candidate review; production timing unmeasured.
+Effort: Patch. Result: Ready; production timing unmeasured.
 Warm reconstruction does not create an immediate cleanup deadline. Readiness
 still arms a missing deadline without restarting the warm container. Existing
 member deadlines survive reconstruction and expire at the original receipt time.
@@ -61,10 +61,18 @@ Individual and group provider inputs are unchanged.
   (wake, readiness, error classification) are unchanged and outside this deletion.
 - Passed changelog generation and all 10 archive rendering tests.
 - Parent reviewed the full patch, retained lifecycle owners, rolling versions,
-  privacy, and evidence limits. PR, ReviewGPT, and required CI remain.
+  privacy, and evidence limits.
+- PR #4279: ReviewGPT round 1 passed on
+  `1d56a34578a9666879c84ba7fa1703623e311e73`, with no qualifying findings.
+  The final plan closeout changes only explanatory documentation, preserving the
+  reviewed runtime patch under the review loop exemption. Exact-head CI is the
+  final external handoff gate and is recorded on the PR.
+- Parent final review confirmed no accepted findings, no production mutation,
+  no new runtime machinery, and no assertion that platform latency is eliminated.
 
 ## Production verification after a separately authorized deployment
 
 Compare bounded bind caller/receiver timing on controller replacement, verify
 warm containers are not restarted, and inspect lifecycle cleanup/error aggregates.
 Do not interpret removal of application work as elimination of platform latency.
+Completed: 2026-10-21
