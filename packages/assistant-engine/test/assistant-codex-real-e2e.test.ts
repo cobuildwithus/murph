@@ -22391,7 +22391,7 @@ describeRealCodex('real Codex generic transcript memory judgment e2e', () => {
 })
 
 describeRealCodex('real Codex morning reminder reconciliation e2e', () => {
-  it('reviews a bounded instruction inventory and repairs context timing completion and duplicates without new connections', async () => {
+  it('uses shared read guidance and repairs context timing completion and duplicates without new connections', async () => {
     const config = await resolveRealCodexE2eConfig()
     const seed = MURPH_MANAGED_AUTOMATIONS.find(candidate => candidate.slug === 'journal-connected-context-morning')
     if (!seed) throw new Error('Missing morning automation.')
@@ -22510,6 +22510,11 @@ describeRealCodex('real Codex morning reminder reconciliation e2e', () => {
         sandbox: 'workspace-write', workingDirectory,
       })
       const first = await runTurn()
+      const skillReads = readCapabilityRoutingActions(first.jsonEvents)
+        .filter(action => action.kind === 'command').map(action => action.output).join('\n')
+      expect(skillReads).toContain('# Connected-app reading and reminder location')
+      expect(skillReads).not.toContain('## Prefer connected email over webmail')
+      expect(skillReads).not.toContain('## Unsupported health and fitness sources')
       expect(parseAssistantNotificationDecision(first.finalMessage).kind).toBe('skip')
       const firstInventoryCommands = expandRecordedVaultCommands((await readFile(path.join(workingDirectory, 'commands.log'), 'utf8')).split('\n').filter(Boolean))
         .filter(line => /^automation list\b/u.test(line) && !isRecordedVaultHelpCommand(line))

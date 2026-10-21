@@ -555,6 +555,10 @@ recorded in `exec-plans/completed/2026-09-20-memory-current-context.md`.
 
 Malformed referral-path routing plan: [`2026-10-05-referral-path-routing.md`](exec-plans/completed/2026-10-05-referral-path-routing.md).
 
+Connected-account reads and outdoor-reminder location share the runtime policy in
+`packages/assistant-engine/skills/connected-apps/references/reading.md`; the
+connected-apps entrypoint owns other services, writes, and account changes.
+
 ## Purpose
 
 Deferred device hints honor their persisted retry time in wake projection and
