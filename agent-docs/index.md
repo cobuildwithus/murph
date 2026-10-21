@@ -1,6 +1,6 @@
 Held group draft failure propagation is owned by
 [`hosted-runtime-protocol.md`](references/hosted-runtime-protocol.md);
-[the cause-preservation plan](exec-plans/active/2026-10-20-group-draft-failure-cause.md)
+[the cause-preservation plan](exec-plans/completed/2026-10-20-group-draft-failure-cause.md)
 records deterministic failure and cancellation proof.
 
 Linq line lock-order repair is tracked in
