@@ -1658,6 +1658,11 @@
                           "description": "Return identifiers, current updatedAt, and basic lifecycle and schedule state; use automation show for complete details.",
                           "type": "boolean"
                         },
+                        "excludeMaintenance": {
+                          "default": false,
+                          "description": "Exclude registered built-in routine jobs by immutable id before counting or pagination; retain ordinary, clinical, and plan-support reminders.",
+                          "type": "boolean"
+                        },
                         "includeInstructions": {
                           "default": false,
                           "description": "Review instructions and metadata together in immutable-id order. At most 20 records and 48 KiB per page; follow nextCursor. Oversized instructions are null with instructionsComplete=false: read that record exactly before judging it. Incompatible with --compact.",

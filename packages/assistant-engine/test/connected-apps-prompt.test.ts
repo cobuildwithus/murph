@@ -59,7 +59,7 @@ describe('connected-apps skill and system-prompt coverage', () => {
     const skill = (await readFile(path.join(resolveAssistantSkillsRoot(), 'journal-connected-context', 'SKILL.md'), 'utf8')).replace(/\s+/gu, ' ')
     for (const text of [
       'Run this every morning, even with no new plans, no travel, or no eligible connected accounts',
-      'vault-cli automation list --status active --status paused --include-instructions --limit 20 --format json',
+      'vault-cli automation list --status active --status paused --exclude-maintenance --include-instructions --limit 20 --format json',
       'following `nextCursor` with the same filters until it is null',
       'Do not individually show or inspect unchanged records whose complete instructions are already on the page',
       'When `instructionsComplete=false`, read that exact record before assessing it',

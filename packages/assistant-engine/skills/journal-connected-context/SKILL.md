@@ -245,7 +245,9 @@ Preserve segment-local timezones and the member's saved home timezone.
 Run this every morning, even with no new plans, no travel, or no eligible connected
 accounts. Review the existing private reminder inventory, not only reminders that
 match newly captured events. Start with `vault-cli automation list --status active
---status paused --include-instructions --limit 20 --format json`. Read each page
+--status paused --exclude-maintenance --include-instructions --limit 20 --format json`.
+The host excludes built-in routine jobs by immutable identity before pagination;
+ordinary and support reminders remain eligible. Read each page
 once, following `nextCursor` with the same filters until it is null; compare the
 collected count with `totalCount`. Pages include instructions, canonical references,
 model, schedule, lifecycle, and delivery audience together. Do not individually

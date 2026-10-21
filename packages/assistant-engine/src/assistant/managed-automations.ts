@@ -849,6 +849,11 @@ const MURPH_STATIC_MANAGED_AUTOMATIONS = [
   ...MURPH_MANAGED_AUTOMATIONS,
 ] satisfies readonly MurphManagedAutomationSeed[]
 
+/** Built-in routine jobs excluded from private reminder-content reconciliation. */
+export function getMurphMaintenanceAutomationIds(): string[] {
+  return MURPH_STATIC_MANAGED_AUTOMATIONS.map(seed => seed.automationId)
+}
+
 export function resolveMurphManagedAutomationSeed(
   automationId: string | null | undefined,
 ): MurphManagedAutomationSeed | null {
