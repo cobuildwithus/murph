@@ -166,7 +166,19 @@ afterEach(() => {
 });
 
 describe("ReviewGPT repository config", () => {
-  it.each(["eragon", "hercules", "mountain", "vonneumann", "apollo"])("starts %s in the background", (lane) => {
+  it("rejects the retired Hercules lane", () => {
+    const result = runConfig(createHarness(), { REVIEW_GPT_BROWSER_LANE: "hercules" });
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("unsupported ReviewGPT browser lane 'hercules'");
+  });
+
+  it("rejects a pool larger than the four supported lanes", () => {
+    const result = runConfig(createHarness(), { REVIEW_GPT_BROWSER_LANE_COUNT: "5" });
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("must be an integer from 1 to 4");
+  });
+
+  it.each(["eragon", "mountain", "vonneumann", "apollo"])("starts %s in the background", (lane) => {
     const result = runConfig(createHarness(), { REVIEW_GPT_BROWSER_LANE: lane });
     expect(result.status, result.stderr).toBe(0);
     expect(result.stdout).toContain("launch=background\n");
@@ -180,7 +192,7 @@ describe("ReviewGPT repository config", () => {
 
   it("preserves an explicit foreground launch for interactive sign-in", () => {
     const result = runConfig(createHarness('managed_browser_launch_mode="foreground"\n'), {
-      REVIEW_GPT_BROWSER_LANE: "hercules",
+      REVIEW_GPT_BROWSER_LANE: "mountain",
     });
     expect(result.status, result.stderr).toBe(0);
     expect(result.stdout).toContain("launch=foreground\n");
@@ -193,16 +205,16 @@ describe("ReviewGPT repository config", () => {
     });
 
     expect(result.status, result.stderr).toBe(0);
-    expect(result.stdout).toContain("count=5\n");
+    expect(result.stdout).toContain("count=4\n");
     expect(result.stdout).toContain(
-      "pool=eragon hercules mountain vonneumann apollo\n",
+      "pool=eragon mountain vonneumann apollo\n",
     );
     expect(existsSync(harness.mdfindMarker)).toBe(false);
   });
 
   it("keeps an explicit per-run lane count above local preferences", () => {
     const harness = createHarness(
-      "REVIEW_GPT_BROWSER_LANE_COUNT=5\nMURPH_REVIEW_GPT_BROWSER_LANE_COUNT=4\n",
+      "REVIEW_GPT_BROWSER_LANE_COUNT=4\nMURPH_REVIEW_GPT_BROWSER_LANE_COUNT=3\n",
     );
     const result = runConfig(harness, {
       REVIEW_GPT_BROWSER_LANE: "auto",
@@ -211,12 +223,12 @@ describe("ReviewGPT repository config", () => {
 
     expect(result.status, result.stderr).toBe(0);
     expect(result.stdout).toContain("count=2\n");
-    expect(result.stdout).toContain("pool=eragon hercules\n");
+    expect(result.stdout).toContain("pool=eragon mountain\n");
     expect(existsSync(harness.mdfindMarker)).toBe(false);
   });
 
   it("keeps the direct compatibility count above a local standard preference", () => {
-    const harness = createHarness("REVIEW_GPT_BROWSER_LANE_COUNT=5\n");
+    const harness = createHarness("REVIEW_GPT_BROWSER_LANE_COUNT=4\n");
     const result = runConfig(harness, {
       MURPH_REVIEW_GPT_BROWSER_LANE_COUNT: "3",
       REVIEW_GPT_BROWSER_LANE: "auto",
@@ -224,20 +236,20 @@ describe("ReviewGPT repository config", () => {
 
     expect(result.status, result.stderr).toBe(0);
     expect(result.stdout).toContain("count=3\n");
-    expect(result.stdout).toContain("pool=eragon hercules mountain\n");
+    expect(result.stdout).toContain("pool=eragon mountain vonneumann\n");
     expect(existsSync(harness.mdfindMarker)).toBe(false);
   });
 
   it("uses the local count only when the invocation supplies no count", () => {
-    const harness = createHarness("REVIEW_GPT_BROWSER_LANE_COUNT=5\n");
+    const harness = createHarness("REVIEW_GPT_BROWSER_LANE_COUNT=4\n");
     const result = runConfig(harness, {
       REVIEW_GPT_BROWSER_LANE: "auto",
     });
 
     expect(result.status, result.stderr).toBe(0);
-    expect(result.stdout).toContain("count=5\n");
+    expect(result.stdout).toContain("count=4\n");
     expect(result.stdout).toContain(
-      "pool=eragon hercules mountain vonneumann apollo\n",
+      "pool=eragon mountain vonneumann apollo\n",
     );
     expect(existsSync(harness.mdfindMarker)).toBe(false);
   });

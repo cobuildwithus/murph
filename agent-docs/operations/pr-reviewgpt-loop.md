@@ -435,7 +435,7 @@ the current user explicitly asks for it.
 
    The repo wrapper runs the current installed Brave binary with one usable
    ReviewGPT browser lane per run: Eragon on CDP port `9448`,
-   Hercules on `9444`, Mountain on `9450`, Vonneumann on `9446`, or Apollo on
+   Mountain on `9450`, Vonneumann on `9446`, or Apollo on
    `9454`, always with profile `Default` and
    `app_connector=current` so review context comes from the guarded ZIP and
    not a ChatGPT connector. ReviewGPT attaches that snapshot as
@@ -448,7 +448,7 @@ the current user explicitly asks for it.
    Spotlight or scans unrelated filesystem roots for an app bundle.
 
    `REVIEW_GPT_BROWSER_LANE_COUNT` limits the automatic pool to the first one
-   through five lanes and defaults to all five. A value supplied on the current
+   through four lanes and defaults to all four. A value supplied on the current
    command is authoritative; the local config is only a fallback preference and
    cannot widen or replace that per-run pool cap. A host can narrow the pool by
    setting the count in its local `$XDG_CONFIG_HOME/murph/review-gpt.conf`,
@@ -480,7 +480,7 @@ the current user explicitly asks for it.
    replacement lane and conversation for subsequent same-thread work.
 
    To pin a specific lane, preserve a conversation's workspace, or debug one
-   profile, set `REVIEW_GPT_BROWSER_LANE=eragon|hercules|mountain|vonneumann|apollo` on
+   profile, set `REVIEW_GPT_BROWSER_LANE=eragon|mountain|vonneumann|apollo` on
    that command.
    `aragon` is accepted as an alias for `eragon`. A first round may leave it
    unset to select a usable lane automatically, but its handoff must record the
