@@ -2319,10 +2319,11 @@ Webpack worker. Node's V8 heap limits do not cover these services. This is a
 or container limit. Keep it on the Next compilation command: applying the same
 target to the whole package build would also constrain the much larger native
 TypeScript source check. Route type generation and the separate TypeScript
-compatibility check retain their existing environment and heap budgets.
+contract check retain their existing environment; the contract check now uses
+the root native compiler and runs outside V8.
 
 The production runner first performs route type generation and an explicit
-app-local generated-contract TypeScript check with a 6 GiB limit. It marks
+native generated-contract TypeScript check through the root `web` lane. It marks
 only that prepared check complete before starting Webpack. The Next CLI parent
 uses a 1 GiB old-space limit and the isolated Webpack worker uses 3 GiB. The
 worker exits and releases compiler memory before static-generation workers
