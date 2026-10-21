@@ -1365,3 +1365,6 @@ Stale onboarding selection rejection is tracked in
 [the onboarding compatibility plan](exec-plans/active/2026-10-20-stale-onboarding-personas.md).
 
 Profile-photo implementation is tracked in [`game profile photos`](exec-plans/completed/2026-10-20-game-profile-photos.md).
+
+The pre-commit large-diff proof no longer depends on obsolete pipeline timing;
+see [the completed release-gate proof plan](exec-plans/completed/2026-10-21-release-gate-proof.md).
