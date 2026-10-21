@@ -4,8 +4,6 @@ import path from "node:path";
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { HealthCommonsCatalogEntity } from "@murphai/contracts";
-
 const buildHealthCommonsCatalogMock = vi.hoisted(() => vi.fn());
 const generatedRootRenameControl = vi.hoisted(() => ({
   beforeReleaseDelayedTargetMove: null as (() => Promise<void>) | null,
@@ -72,10 +70,7 @@ vi.mock("node:fs/promises", async (importOriginal) => {
 });
 
 import { writeHealthCommonsGeneratedArtifacts } from "../src/build.ts";
-
 import { buildHealthCommonsWebGeneratedArtifacts } from "../src/web-artifacts.ts";
-
-const TEST_PAGE_REVISION_ID = `sha256:${"1".repeat(64)}`;
 
 function createCatalog(catalogHash: string) {
   return {
@@ -86,81 +81,6 @@ function createCatalog(catalogHash: string) {
     evidenceAppraisals: [],
     redirects: [],
     schemaVersion: "murph.commons.catalog.v1" as const,
-  };
-}
-
-function createProtocolEntity(input: {
-  expectedSignalDescriptions?: Array<{
-    biomarkerKey: string;
-    description: string;
-    displayValue?: string;
-    expected?: string;
-    protocolProminence?: "focus" | "context";
-  }>;
-  hidden?: boolean;
-  key: string;
-  slug: string;
-  status?: "draft" | "field-testing" | "reviewed" | "deprecated" | "community";
-  title: string;
-  relations?: { target: string; type: string }[];
-}) {
-  return {
-    schemaVersion: "murph.commons.page.v1" as const,
-    entityType: "protocol_variant" as const,
-    key: input.key,
-    slug: input.slug,
-    title: input.title,
-    summary: `${input.title} summary.`,
-    categories: ["recovery"],
-    hidden: input.hidden,
-    status: input.status,
-    lineage: { relationship: "root" as const },
-    attribution: { ownerType: "murph" as const },
-    protocol: {
-      doseSignature: `${input.title} dose`,
-      steps: [`Do ${input.title}.`],
-    },
-    expectedSignalDescriptions: input.expectedSignalDescriptions,
-    relations: input.relations,
-    safety: {
-      cautionLevel: "moderate" as const,
-      stopIf: ["Stop condition"],
-    },
-    testPlans: [
-      {
-        planId: "test-plan",
-        durationDays: 14,
-        baselineDays: 7,
-        interventionDays: 7,
-        primaryBiomarkerKey: "biomarker:test-signal",
-      },
-    ],
-    body: `${input.title} body.`,
-    relativePath: `${input.slug}.md`,
-    revision: {
-      pageRevisionId: TEST_PAGE_REVISION_ID,
-    },
-  };
-}
-
-function createBiomarkerEntity(input: {
-  key: string;
-  slug: string;
-  title: string;
-}) {
-  return {
-    schemaVersion: "murph.commons.page.v1" as const,
-    entityType: "biomarker" as const,
-    key: input.key,
-    slug: input.slug,
-    title: input.title,
-    summary: `${input.title} summary.`,
-    status: "reviewed" as const,
-    body: `${input.title} body.`,
-    relativePath: `${input.slug}.md`,
-    revision: {
-      pageRevisionId: TEST_PAGE_REVISION_ID,
-    },
   };
 }
 
@@ -188,7 +108,7 @@ describe("@murphai/health-commons build determinism", () => {
         generatedRoot: "health-commons-generated",
       }),
     ).rejects.toThrow(
-      "Health Commons generated artifacts are nondeterministic: catalog.hash, protocol-index.json, protocol-run-specs.json, protocol-family-graph.json, biomarker-desired-directions.json, source-index.json, source-artifact-index.json, web/routes/index.json, web/browse/experiments.json, web/browse/goals.json.",
+      "Health Commons generated artifacts are nondeterministic: catalog.hash, biomarker-desired-directions.json, source-index.json, source-artifact-index.json, web/routes/index.json, web/browse/goals.json.",
     );
 
     expect(buildHealthCommonsCatalogMock).toHaveBeenCalledTimes(2);
@@ -213,15 +133,6 @@ describe("@murphai/health-commons build determinism", () => {
     await expect(readFile(path.join(generatedRoot, "source-artifact-index.json"), "utf8")).resolves.toContain(
       '"schemaVersion": "murph.commons.source-artifact-index.v1"',
     );
-    await expect(readFile(path.join(generatedRoot, "protocol-index.json"), "utf8")).resolves.toContain(
-      '"schemaVersion": "murph.commons.protocol-index.v1"',
-    );
-    await expect(readFile(path.join(generatedRoot, "protocol-run-specs.json"), "utf8")).resolves.toContain(
-      '"schemaVersion": "murph.commons.protocol-run-specs.v1"',
-    );
-    await expect(readFile(path.join(generatedRoot, "protocol-family-graph.json"), "utf8")).resolves.toContain(
-      '"schemaVersion": "murph.commons.protocol-family-graph.v1"',
-    );
     await expect(
       readFile(
         path.join(generatedRoot, "biomarker-desired-directions.json"),
@@ -233,9 +144,6 @@ describe("@murphai/health-commons build determinism", () => {
     await expect(readFile(path.join(generatedRoot, "web/routes/index.json"), "utf8")).resolves.toContain(
       '"schemaVersion": "murph.commons.web.route-index.v1"',
     );
-    await expect(readFile(path.join(generatedRoot, "web/browse/experiments.json"), "utf8")).resolves.toContain(
-      '"schemaVersion": "murph.commons.web.experiment-index.v1"',
-    );
     await expect(readFile(path.join(generatedRoot, "web/browse/biomarkers.json"), "utf8"))
       .rejects.toMatchObject({ code: "ENOENT" });
     await expect(readFile(path.join(generatedRoot, "web/browse/goals.json"), "utf8")).resolves.toContain(
@@ -243,6 +151,26 @@ describe("@murphai/health-commons build determinism", () => {
     );
     expect(buildHealthCommonsSourceIndexMock).toHaveBeenCalledTimes(1);
     expect(buildHealthCommonsSourceArtifactIndexMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects duplicate generated web route ids before writing route indexes", () => {
+    expect(() => buildHealthCommonsWebGeneratedArtifacts({
+      ...createCatalog("sha256:first"),
+      entities: ["a", "b"].map((id) => ({
+        schemaVersion: "murph.commons.page.v1" as const,
+        entityType: "measurement_method" as const,
+        key: `measurement_method:${id}`,
+        slug: `measurement-methods/${id}`,
+        title: `Measurement method ${id}`,
+        body: "Synthetic measurement method.",
+        relativePath: `measurement-methods/${id}.md`,
+        revision: { pageRevisionId: `sha256:${"1".repeat(64)}` },
+      })),
+      redirects: [
+        { from: "measurement_method:legacy/shared", to: "measurement_method:a" },
+        { from: "measurement_method:other/shared", to: "measurement_method:b" },
+      ],
+    })).toThrow("Duplicate Health Commons web route id generated for measurement_method:shared");
   });
 
   it("replaces stale generated files with the exact current file set", async () => {
@@ -260,9 +188,8 @@ describe("@murphai/health-commons build determinism", () => {
         generatedRoot,
       });
 
-      await expect(readFile(path.join(generatedRoot, "protocol-index.json"), "utf8")).resolves.toContain(
-        '"catalogHash": "sha256:first"',
-      );
+      await expect(readFile(path.join(generatedRoot, "catalog.hash"), "utf8"))
+        .resolves.toBe("sha256:first\n");
       await expect(readFile(path.join(generatedRoot, "catalog.json"), "utf8"))
         .rejects.toMatchObject({ code: "ENOENT" });
       await expect(readFile(path.join(generatedRoot, "obsolete.json"), "utf8"))
@@ -326,7 +253,7 @@ describe("@murphai/health-commons build determinism", () => {
       generatedRootRenameControl.delayFirstTargetMove = true;
       generatedRootRenameControl.targetRoot = generatedRoot;
       generatedRootRenameControl.beforeReleaseDelayedTargetMove = async () => {
-        await writeFile(path.join(generatedRoot, "protocol-index.json"), "{\"winner\":true}\n", "utf8");
+        await writeFile(path.join(generatedRoot, "source-index.json"), "{\"winner\":true}\n", "utf8");
         await mkdir(path.join(generatedRoot, "winner-only"), { recursive: true });
         await writeFile(path.join(generatedRoot, "winner-only", "artifact.bin"), Buffer.from([0x00, 0xff]));
         winningTree = await readRawGeneratedTree(generatedRoot);
@@ -404,7 +331,7 @@ describe("@murphai/health-commons build determinism", () => {
 
     try {
       await mkdir(generatedRoot, { recursive: true });
-      await writeFile(path.join(generatedRoot, "protocol-index.json"), "{}\n", "utf8");
+      await writeFile(path.join(generatedRoot, "source-index.json"), "{}\n", "utf8");
       await writeFile(path.join(generatedRoot, "catalog.json"), "{}\n", "utf8");
       await writeFile(path.join(generatedRoot, "obsolete.json"), "{}\n", "utf8");
 
@@ -418,154 +345,6 @@ describe("@murphai/health-commons build determinism", () => {
     } finally {
       await rm(generatedRoot, { recursive: true, force: true });
     }
-  });
-
-  it("rejects duplicate generated web route ids before writing route indexes", () => {
-    expect(() =>
-      buildHealthCommonsWebGeneratedArtifacts({
-        ...createCatalog("sha256:first"),
-        entities: [
-          createProtocolEntity({
-            key: "protocol_variant:family/a",
-            slug: "protocols/family/a",
-            status: "field-testing",
-            title: "Protocol A",
-          }),
-          createProtocolEntity({
-            key: "protocol_variant:family/b",
-            slug: "protocols/other/b",
-            status: "field-testing",
-            title: "Protocol B",
-          }),
-        ],
-        redirects: [
-          {
-            from: "protocol_variant:legacy/shared",
-            to: "protocol_variant:family/a",
-          },
-          {
-            from: "protocol_variant:other/shared",
-            to: "protocol_variant:family/b",
-          },
-        ],
-      }),
-    ).toThrow("Duplicate Health Commons web route id generated for protocol_variant:shared");
-  });
-
-  it("publishes web artifacts only for explicitly public protocols", () => {
-    const webArtifacts = buildHealthCommonsWebGeneratedArtifacts({
-      ...createCatalog("sha256:first"),
-      entities: [
-        createProtocolEntity({
-          key: "protocol_variant:family/public",
-          slug: "protocols/family/public",
-          status: "field-testing",
-          title: "Public Protocol",
-        }),
-        createProtocolEntity({
-          key: "protocol_variant:family/statusless",
-          slug: "protocols/family/statusless",
-          title: "Statusless Protocol",
-        }),
-        createProtocolEntity({
-          key: "protocol_variant:family/draft",
-          slug: "protocols/family/draft",
-          status: "draft",
-          title: "Draft Protocol",
-        }),
-        createProtocolEntity({
-          hidden: true,
-          key: "protocol_variant:family/hidden",
-          slug: "protocols/family/hidden",
-          status: "reviewed",
-          title: "Hidden Protocol",
-        }),
-        createProtocolEntity({
-          key: "protocol_variant:family/deprecated",
-          slug: "protocols/family/deprecated",
-          status: "deprecated",
-          title: "Deprecated Protocol",
-        }),
-      ],
-      redirects: [
-        {
-          from: "protocol_variant:legacy/statusless-alias",
-          to: "protocol_variant:family/statusless",
-        },
-        {
-          from: "protocol_variant:legacy/draft-alias",
-          to: "protocol_variant:family/draft",
-        },
-        {
-          from: "protocol_variant:legacy/hidden-alias",
-          to: "protocol_variant:family/hidden",
-        },
-        {
-          from: "protocol_variant:legacy/deprecated-alias",
-          to: "protocol_variant:family/deprecated",
-        },
-      ],
-    });
-
-    expect([...webArtifacts.projectionArtifacts.keys()].sort()).toEqual([
-      "shell/experiments/public.json",
-      "tabs/experiments/public/protocol.json",
-      "tabs/experiments/public/research.json",
-      "tabs/experiments/public/results-public.json",
-    ]);
-    expect(webArtifacts.routeIndex.routes.find((route) =>
-      route.routeId === "public"
-    )?.projections).toEqual({
-      "experiment.protocol": "tabs/experiments/public/protocol.json",
-      "experiment.research": "tabs/experiments/public/research.json",
-      "experiment.results-public": "tabs/experiments/public/results-public.json",
-      "experiment.shell": "shell/experiments/public.json",
-    });
-    expect(webArtifacts.routeIndex.routes.map((route) => route.routeId)).toEqual([
-      "public",
-    ]);
-    expect([...webArtifacts.routeBundles.keys()]).toEqual([
-      "bundles/protocol_variant/public.json",
-    ]);
-    expect(webArtifacts.experimentIndex.experiments.map((entry) => entry.routeId)).toEqual([
-      "public",
-    ]);
-  });
-
-  it("keeps protocol signal data for revision-qualified biomarker references", () => {
-    const webArtifacts = buildHealthCommonsWebGeneratedArtifacts({
-      ...createCatalog("sha256:first"),
-      entities: [
-        createBiomarkerEntity({
-          key: "biomarker:test-signal",
-          slug: "biomarkers/test-signal",
-          title: "Test Signal",
-        }),
-        createProtocolEntity({
-          expectedSignalDescriptions: [
-            {
-              biomarkerKey: `biomarker:test-signal@${TEST_PAGE_REVISION_ID}`,
-              description: "Protocol-authored soreness signal.",
-              displayValue: "Lower next-day soreness",
-              expected: "down",
-              protocolProminence: "focus",
-            },
-          ],
-          key: "protocol_variant:family/public",
-          slug: "protocols/family/public",
-          status: "field-testing",
-          title: "Public Protocol",
-        }),
-      ],
-    });
-    const protocolTab = webArtifacts.projectionArtifacts.get("tabs/experiments/public/protocol.json");
-
-    expect(protocolTab && "expectedSignals" in protocolTab ? protocolTab.expectedSignals[0] : null).toMatchObject({
-      biomarkerRouteId: "test-signal",
-      displayValue: "Lower next-day soreness",
-      expected: "Could trend lower",
-      protocolProminence: "focus",
-    });
   });
 });
 

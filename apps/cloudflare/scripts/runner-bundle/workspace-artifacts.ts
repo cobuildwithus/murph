@@ -18,9 +18,6 @@ const HEALTH_COMMONS_RUNTIME_GENERATED_FILES = [
   "generated/biomarker-desired-directions.json",
   "generated/web/browse/goals.json",
   "generated/knowledge.sqlite",
-  "generated/protocol-index.json",
-  "generated/protocol-run-specs.json",
-  "generated/protocol-family-graph.json",
 ] as const;
 
 interface WorkspacePackageManifest {

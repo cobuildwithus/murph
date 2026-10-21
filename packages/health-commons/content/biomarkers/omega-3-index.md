@@ -20,25 +20,17 @@ categories:
   - "lab-marker"
   - "lipids"
 relations:
+  - type: cites
+    target: source_artifact:pmid-31396625
+  - type: cites
+    target: source_artifact:pmid-36742439
+  - type: cites
+    target: source_artifact:pmid-19733159
+  - type: cites
+    target: source_artifact:pmid-24079284
+  - type: cites
+    target: source_artifact:pmid-17053155
 
-  -
-    type: "related_protocol"
-    target: "protocol_variant:omega-3-supplementation/oral-epa-dha-supplementation"
-  -
-    type: "cites"
-    target: "source_artifact:pmid-31396625"
-  -
-    type: "cites"
-    target: "source_artifact:pmid-36742439"
-  -
-    type: "cites"
-    target: "source_artifact:pmid-19733159"
-  -
-    type: "cites"
-    target: "source_artifact:pmid-24079284"
-  -
-    type: "cites"
-    target: "source_artifact:pmid-17053155"
 unit: "%"
 measurementContexts:
   - "venipuncture_rbc"
@@ -99,7 +91,6 @@ claims:
 
 ## Role in this protocol
 
-Omega-3 Index is used as a primary endpoint for `protocol_variant:omega-3-supplementation/oral-epa-dha-supplementation`.
 
 ## Interpretation
 

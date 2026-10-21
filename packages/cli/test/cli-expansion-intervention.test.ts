@@ -124,8 +124,6 @@ async function createActiveExperiment(
     'experiment',
     'start',
     slug,
-    '--custom',
-    '--no-public-protocol',
     '--title',
     slug,
     '--started-on',

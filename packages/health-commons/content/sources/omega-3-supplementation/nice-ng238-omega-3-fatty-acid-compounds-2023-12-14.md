@@ -12,13 +12,8 @@ aliases:
 - NICE cardiovascular disease lipid modification NG238
 categories:
 - omega-3-supplementation
-relations:
--
-  type: related_protocol
-  target: protocol_variant:omega-3-supplementation/oral-epa-dha-supplementation
--
-  type: parent_family
-  target: experiment_family:omega-3-supplementation
+relations: []
+
 source:
   kind: guideline
   title: 'Cardiovascular disease: risk assessment and reduction, including lipid modification (NG238)'

@@ -11,14 +11,8 @@ aliases:
   - Vitamin D: Fact Sheet for Health Professionals
 categories:
   - vitamin-d-supplementation
-relations:
+relations: []
 
-  -
-    type: related_protocol
-    target: protocol_variant:vitamin-d-supplementation/daily-vitamin-d3-supplementation
-  -
-    type: parent_family
-    target: experiment_family:vitamin-d-supplementation
 sourceIdentity:
   identityKind: web_page
   canonicalIdBasis: url

@@ -36,7 +36,6 @@ import {
   JUNCTION_WEARABLE_FIXTURE_SUMMARY_RESOURCES,
   JUNCTION_WEARABLE_HOSTED_DIRECT_REPLAY_BROWSER_VAULT_METRIC_EXPECTATIONS,
   normalizeJunctionProviderSlugForComparison,
-  summarizeJunctionWearableBrowserVaultExperimentProgress,
   summarizeJunctionWearableBrowserVaultReplica,
   type JunctionWearableBrowserVaultReplicaSummary,
   type JunctionWearableHostedReplayDirtyResource,
@@ -418,26 +417,6 @@ describe("hosted local Junction wearable direct-resource replay e2e", () => {
     expect(nudgeProviderText).toMatch(/"sensedSessions"\s*:\s*1/u);
     expect(nudgeProviderText).toMatch(/"completedSessions"\s*:\s*1/u);
 
-    const replicaRef = requireReplicaRef(finalStatus.workspace?.browserVaultReplicaRef ?? null);
-    const replica = await readBrowserVaultReplica({
-      replicaRef,
-      scenario: activeScenario,
-      userId: experimentAdherenceUserId,
-    });
-    expect(summarizeJunctionWearableBrowserVaultExperimentProgress({
-      experimentSlug: experimentAdherenceSlug,
-      replica,
-    })).toEqual({
-      activityKind: "running",
-      completedSessions: 1,
-      eventKind: "activity_session",
-      expectedSessionsByNow: expect.any(Number),
-      loggedSessions: 1,
-      sensedSessions: 1,
-      status: expect.stringMatching(/^(behind|on_track|met_minimum|met_target)$/u),
-      targetSessions: 6,
-    });
-
     const drainStatus = await activeScenario.readJunctionDeviceSyncReplayDrainStatus({
       connectionId: connection.connectionId,
       memberId: experimentAdherenceUserId,
@@ -689,8 +668,6 @@ function buildExperimentAdherenceSetupResponses(
       plan.baselineStart,
       "--status",
       "active",
-      "--custom",
-      "--no-public-protocol",
       "--baseline-start",
       plan.baselineStart,
       "--baseline-end",

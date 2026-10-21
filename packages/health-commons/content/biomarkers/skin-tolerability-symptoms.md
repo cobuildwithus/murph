@@ -16,25 +16,17 @@ categories:
   - "photoaging"
   - "self-assessment"
 relations:
+  - type: cites
+    target: source_artifact:pmid-39122507
+  - type: cites
+    target: source_artifact:pmid-39335685
+  - type: cites
+    target: source_artifact:pmid-31483941
+  - type: cites
+    target: source_artifact:dermnet-drug-induced-photosensitivity-2026-04-24
+  - type: cites
+    target: source_artifact:aad-red-light-therapy-safety-2024-09-13
 
-  -
-    type: "related_protocol"
-    target: "protocol_variant:skin-photobiomodulation/red-near-infrared-skin-texture-photoaging"
-  -
-    type: "cites"
-    target: "source_artifact:pmid-39122507"
-  -
-    type: "cites"
-    target: "source_artifact:pmid-39335685"
-  -
-    type: "cites"
-    target: "source_artifact:pmid-31483941"
-  -
-    type: "cites"
-    target: "source_artifact:dermnet-drug-induced-photosensitivity-2026-04-24"
-  -
-    type: "cites"
-    target: "source_artifact:aad-red-light-therapy-safety-2024-09-13"
 measurementContexts:
   - "standardized_photo"
   - "self_rating"

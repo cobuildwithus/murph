@@ -28,14 +28,10 @@ import {
 const execFileAsync = promisify(execFile);
 const repoRoot = fileURLToPath(new URL("../../..", import.meta.url));
 const temporaryDirectories: string[] = [];
-const finnishDrySaunaProtocolKey = "protocol_variant:dry-sauna/murph-finnish-standard-3x-week";
 const healthCommonsRuntimeArtifactNames = [
   "biomarker-desired-directions.json",
   "web/browse/goals.json",
   "knowledge.sqlite",
-  "protocol-index.json",
-  "protocol-run-specs.json",
-  "protocol-family-graph.json",
 ] as const;
 
 afterEach(async () => {
@@ -460,7 +456,14 @@ describe("runner bundle runtime artifact staging", () => {
     for (const artifactName of healthCommonsRuntimeArtifactNames) {
       expect(entries).toContain(`package/generated/${artifactName}`);
     }
-    expect(entries).not.toContain("package/generated/catalog.json");
+    for (const retiredArtifactName of [
+      "catalog.json",
+      "protocol-index.json",
+      "protocol-run-specs.json",
+      "protocol-family-graph.json",
+    ]) {
+      expect(entries).not.toContain(`package/generated/${retiredArtifactName}`);
+    }
     expect(entries).toContain("package/package.json");
     expect(
       entries.filter((entry) =>
@@ -537,24 +540,9 @@ describe("runner bundle runtime artifact staging", () => {
       healthCommonsTarball,
       "-C",
       extractDir,
-      "package/generated/protocol-index.json",
-      "package/generated/protocol-run-specs.json",
-      "package/generated/protocol-family-graph.json",
       "package/generated/biomarker-desired-directions.json",
       "package/generated/web/browse/goals.json",
     ]);
-    const protocolIndexRaw = await readFile(
-      path.join(extractDir, "package", "generated", "protocol-index.json"),
-      "utf8",
-    );
-    const protocolRunSpecsRaw = await readFile(
-      path.join(extractDir, "package", "generated", "protocol-run-specs.json"),
-      "utf8",
-    );
-    const protocolFamilyGraphRaw = await readFile(
-      path.join(extractDir, "package", "generated", "protocol-family-graph.json"),
-      "utf8",
-    );
     const biomarkerDesiredDirectionsRaw = await readFile(
       path.join(
         extractDir,
@@ -575,9 +563,6 @@ describe("runner bundle runtime artifact staging", () => {
       ),
       "utf8",
     );
-    const protocolIndex: unknown = JSON.parse(protocolIndexRaw);
-    const protocolRunSpecs: unknown = JSON.parse(protocolRunSpecsRaw);
-    const protocolFamilyGraph: unknown = JSON.parse(protocolFamilyGraphRaw);
     const biomarkerDesiredDirections: unknown = JSON.parse(
       biomarkerDesiredDirectionsRaw,
     );
@@ -599,26 +584,6 @@ describe("runner bundle runtime artifact staging", () => {
         startPrompt: "Hey Murph, help me improve my deep sleep.",
       });
 
-    expect(findProtocolArtifactEntry(protocolIndex, finnishDrySaunaProtocolKey)).toMatchObject({
-      entityType: "protocol_variant",
-      key: finnishDrySaunaProtocolKey,
-      slug: "protocols/dry-sauna/murph-finnish-standard-3x-week",
-      title: "Finnish Dry Sauna",
-    });
-    expect(findProtocolArtifactEntry(protocolRunSpecs, finnishDrySaunaProtocolKey)).toMatchObject({
-      protocol: expect.objectContaining({
-        doseSignature: expect.any(String),
-      }),
-      testPlans: expect.arrayContaining([
-        expect.objectContaining({
-          planId: expect.any(String),
-        }),
-      ]),
-    });
-    expect(findProtocolFamilyGraphEdge(protocolFamilyGraph, finnishDrySaunaProtocolKey)).toMatchObject({
-      targetKey: "experiment_family:dry-sauna",
-      type: "parent_family",
-    });
     expect(
       findBiomarkerDesiredDirectionEntry(
         biomarkerDesiredDirections,
@@ -967,35 +932,6 @@ async function writeMinimalHealthCommonsRuntimeArtifacts(generatedDir: string): 
     })}\n`,
     "utf8",
   );
-  await writeFile(
-    path.join(generatedDir, "protocol-index.json"),
-    `${JSON.stringify({
-      catalogHash: "sha256:test",
-      protocols: [],
-      schemaVersion: "murph.commons.protocol-index.v1",
-    })}\n`,
-    "utf8",
-  );
-  await writeFile(
-    path.join(generatedDir, "protocol-run-specs.json"),
-    `${JSON.stringify({
-      catalogHash: "sha256:test",
-      protocols: [],
-      schemaVersion: "murph.commons.protocol-run-specs.v1",
-    })}\n`,
-    "utf8",
-  );
-  await writeFile(
-    path.join(generatedDir, "protocol-family-graph.json"),
-    `${JSON.stringify({
-      catalogHash: "sha256:test",
-      edges: [],
-      families: [],
-      protocols: [],
-      schemaVersion: "murph.commons.protocol-family-graph.v1",
-    })}\n`,
-    "utf8",
-  );
 }
 
 async function prepareRunnerBundleValidationFixture(bundleDir: string): Promise<void> {
@@ -1081,17 +1017,6 @@ async function prepareRunnerBundleValidationFixture(bundleDir: string): Promise<
   });
 }
 
-function findProtocolArtifactEntry(artifact: unknown, key: string): Record<string, unknown> | null {
-  if (!isRecord(artifact) || !Array.isArray(artifact.protocols)) {
-    return null;
-  }
-
-  return artifact.protocols.find((entity) =>
-    isRecord(entity) &&
-      entity.key === key
-  ) ?? null;
-}
-
 function findGoalArtifactEntry(artifact: unknown, key: string): Record<string, unknown> | null {
   if (!isRecord(artifact) || !Array.isArray(artifact.goals)) {
     return null;
@@ -1113,18 +1038,6 @@ function findBiomarkerDesiredDirectionEntry(
   return artifact.biomarkers.find((entity) =>
     isRecord(entity) &&
       entity.key === key
-  ) ?? null;
-}
-
-function findProtocolFamilyGraphEdge(artifact: unknown, sourceKey: string): Record<string, unknown> | null {
-  if (!isRecord(artifact) || !Array.isArray(artifact.edges)) {
-    return null;
-  }
-
-  return artifact.edges.find((edge) =>
-    isRecord(edge) &&
-      edge.sourceKey === sourceKey &&
-      edge.type === "parent_family"
   ) ?? null;
 }
 

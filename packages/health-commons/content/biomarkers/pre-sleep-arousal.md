@@ -18,12 +18,9 @@ categories:
   - manual-measurement
   - subjective-rating
 relations:
-  -
-    type: cites
+  - type: cites
     target: source_artifact:pmid-4004706
-  -
-    type: related_protocol
-    target: protocol_variant:pre-sleep-downshift-practices/pre-sleep-resonance-breathing-and-meditation
+
 measurementContexts:
   - evening_self_report
   - pre_sleep_log
