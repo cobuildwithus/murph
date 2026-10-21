@@ -39,8 +39,17 @@ When inviting, the challenger can attach a private photo and relationship for
 the invitee alongside the first name they typed. Only the challenger ever sees
 them, in every game with that person; the photo is that player's picture in
 the challenger's views. The latest invite wins: a name, photo or relationship
-typed for that person replaces what the challenger typed before. There are no
-public profile photos.
+typed for that person replaces what the challenger typed before.
+
+Each member may also upload, replace or remove their own profile photo. It syncs
+across devices and becomes their default when creating or joining a game. Inside
+the app, the viewer's private contact photo wins over the person's profile photo,
+then initials. Shared recap exports use only each person's own profile photo,
+never private contact overrides. Daily challenge photos remain separate.
+Profile media is authenticated: the owner, existing game participants and an
+addressed rematch's participants can read the current profile photo. Public
+invite previews never include profile photos. Removing a profile photo clears
+this default without deleting other people's private contact choices.
 
 ## Rules
 

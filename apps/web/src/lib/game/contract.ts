@@ -80,8 +80,17 @@ export interface GameInviteeLabel {
 
 /** PUT /me/profile */
 export interface SetProfileBody {
+  firstName?: string;
+  timeZone?: string;
+  /** Omitted keeps the current photo; null removes it. Must be your own upload. */
+  photoKey?: string | null;
+}
+
+export interface GameProfileView {
+  memberId: string;
   firstName: string;
   timeZone: string;
+  avatarUrl: string | null;
 }
 
 /** POST /games */
@@ -133,8 +142,10 @@ export interface GamePlayerView {
   seat: number;
   /** The viewer's private label name if set, else the player's own first name. */
   firstName: string;
-  /** The photo the viewer attached when they invited this person; only they see it. */
+  /** The viewer's private photo override, else this person's chosen profile photo. */
   avatarUrl: string | null;
+  /** Only the person's own chosen photo. Use this for explicitly shared exports. */
+  profileAvatarUrl: string | null;
   /**
    * The relationship the viewer typed when they invited this person ("my
    * partner"); only they see it. Null for yourself and anyone you haven't
@@ -209,7 +220,7 @@ export interface GameView {
 }
 
 export interface GameHomeView {
-  me: { memberId: string; firstName: string | null; timeZone: string | null };
+  me: { memberId: string; firstName: string | null; timeZone: string | null; avatarUrl: string | null };
   games: GameView[];
   wallet: { held: GameTicketView[]; owed: GameTicketView[]; redeemed: GameTicketView[] };
 }
