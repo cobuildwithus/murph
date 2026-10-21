@@ -1385,3 +1385,5 @@ Weekly-game chat hosting, mutually agreed schedule edits and the group-only
 access boundary are owned by `product-specs/weekly-game.md` and `ARCHITECTURE.md`;
 implementation proof is tracked in
 [weekly-game chat hosting](exec-plans/completed/2026-10-21-weekly-game-chat-host.md).
+
+Fresh mailbox arrivals during usage pauses are covered by [progress alert age proof](exec-plans/completed/2026-10-21-progress-paused-import.md); the current contract remains in the hosted runtime protocol.

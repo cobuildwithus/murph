@@ -49,6 +49,7 @@ describe("usage-paused system notification progress", () => {
     ...progressRow({ runtimeKey, lane: "system", headKind: "assistant.notification.requested",
       progressOriginAt: "2026-08-10T15:00:00Z", durableHighWaterSeq: 5n,
       workspaceSystemImportedSeq: 5n, pendingCount: 5n }),
+    agedHighWaterSeq: 5n,
     headDedupeKey: "assistant.notification.requested:synthetic:notification",
     ...overrides,
   });
@@ -80,6 +81,9 @@ describe("usage-paused system notification progress", () => {
     { headDedupeKey: "assistant.notification.requested:group-join:synthetic" },
     { headDedupeKey: "assistant.notification.requested:device-delivery-stalled:v1:synthetic" },
     { headDedupeKey: undefined },
+    { agedHighWaterSeq: null },
+    { agedHighWaterSeq: 0n },
+    { workspaceSystemImportedSeq: 0n },
     { workspaceSystemImportedSeq: null },
     { workspaceSystemImportedSeq: 4n },
     { workspaceSystemImportedSeq: 6n },
@@ -90,6 +94,25 @@ describe("usage-paused system notification progress", () => {
     expect(await readHostedRuntimeProgressHealth({ now, prisma: fixture.prisma }))
       .toMatchObject({ anomalous: true, excludedUsageBlockedSystemLaneCount: 0 });
     expect(usageGate).not.toHaveBeenCalled();
+  });
+
+  it("keeps an imported notification paused while only fresh suffix work remains unimported", async () => {
+    usageGate.mockResolvedValue({ allowed: false, reason: "ai_usage_limit_exceeded" });
+    const fixture = createProgressMonitorFixture([notification("runtime_paused", {
+      durableHighWaterSeq: 7n,
+      workspaceSystemImportedSeq: 5n,
+      agedHighWaterSeq: 5n,
+    })]);
+    expect(await readHostedRuntimeProgressHealth({ now, prisma: fixture.prisma }))
+      .toMatchObject({ anomalous: false, excludedUsageBlockedSystemLaneCount: 1 });
+    fixture.setRows([notification("runtime_paused", {
+      durableHighWaterSeq: 7n,
+      workspaceSystemImportedSeq: 5n,
+      agedHighWaterSeq: 6n,
+    })]);
+    expect(await readHostedRuntimeProgressHealth({ now, prisma: fixture.prisma }))
+      .toMatchObject({ anomalous: true, excludedUsageBlockedSystemLaneCount: 0 });
+    expect(usageGate).toHaveBeenCalledTimes(1);
   });
 
   it("keeps a separate deterministic system head visible for an exhausted runtime", async () => {
@@ -1471,6 +1494,7 @@ function progressRow(input: {
     checkpointEvidence: null,
     deliveryAcceptedAt: null,
     chronologyInvalid: input.chronologyInvalid ?? false,
+    agedHighWaterSeq: input.durableHighWaterSeq ?? 1n,
     durableHighWaterSeq: input.durableHighWaterSeq ?? 1n,
     effectiveConsumedSeq: input.effectiveConsumedSeq ?? 0n,
     headKind: input.headKind ?? "test.pending-work",

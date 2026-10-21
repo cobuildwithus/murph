@@ -85,6 +85,61 @@ describe.skipIf(!runPostgresProof)(
       expect(completed).toBe(true);
     });
 
+    it("ages an unimported suffix independently of a usage-paused notification", async () => {
+      const prisma = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const rollback = new Error("Rollback fresh-suffix proof.");
+      const userId = `progress-suffix-proof-${randomUUID()}`;
+      const now = new Date("2026-08-10T16:00:00Z");
+      const old = new Date(+now - 60 * 60_000);
+      const fresh = new Date(+now - 60_000);
+      let completed = false;
+      try {
+        await prisma.$transaction(async (tx) => {
+          await tx.hostedMember.create({ data: {
+            ...member(userId, HostedBillingStatus.active), usageCreditBalanceUsdMicros: 0n,
+          } });
+          await seedProgressLaneItems({ tx, userId, lane: "system", rows: [
+            { createdAt: old, laneSeq: 1n, kind: "assistant.notification.requested" },
+            { createdAt: old, laneSeq: 2n, kind: "device-sync.wake" },
+            { createdAt: fresh, laneSeq: 3n, kind: "device-sync.wake" },
+            { createdAt: now, laneSeq: 4n, kind: "device-sync.wake" },
+          ] });
+          await tx.hostedWorkspace.create({ data: { userId,
+            redactedStatusJson: { hostedMailboxSystemImportedSeq: "2" },
+          } });
+          const read = (at = now) => readHostedRuntimeProgressHealth({ now: at, prisma: tx });
+          await expect(read()).resolves.toMatchObject({ anomalous: false,
+            excludedUsageBlockedSystemLaneCount: 1 });
+          await expect(read(new Date(+fresh + 15 * 60_000 - 1))).resolves
+            .toMatchObject({ anomalous: false, excludedUsageBlockedSystemLaneCount: 1 });
+          // The newer fourth row cannot reset the third row's exact stall boundary.
+          await expect(read(new Date(+fresh + 15 * 60_000))).resolves
+            .toMatchObject({ anomalous: true, excludedUsageBlockedSystemLaneCount: 0 });
+          await tx.hostedWorkspace.update({ where: { userId }, data: {
+            redactedStatusJson: { hostedMailboxSystemImportedSeq: "3" },
+          } });
+          await expect(read(new Date(+fresh + 15 * 60_000))).resolves
+            .toMatchObject({ anomalous: false, excludedUsageBlockedSystemLaneCount: 1 });
+          await tx.hostedMember.update({ where: { id: userId }, data: {
+            usageCreditBalanceUsdMicros: 1_000_000n,
+          } });
+          await expect(read()).resolves.toMatchObject({ anomalous: true,
+            excludedUsageBlockedSystemLaneCount: 0 });
+          expect(await tx.hostedMailboxLaneCounter.findUnique({
+            where: { userId_lane: { userId, lane: "system" } },
+          })).toMatchObject({ consumedSeq: 0n });
+          expect(await tx.hostedAiUsagePeriod.count({ where: { memberId: userId } })).toBe(0);
+          completed = true;
+          throw rollback;
+        }, { timeout: 30_000 });
+      } catch (error) {
+        if (error !== rollback) throw error;
+      } finally {
+        await prisma.$disconnect();
+      }
+      expect(completed).toBe(true);
+    });
+
     it("binds device import checkpoint deadlines to the active owner's latest foreground trace", async () => {
       const prisma = createPrismaClient({ databaseUrl, poolMax: 1 });
       const now = new Date("2026-08-12T16:00:00Z");
