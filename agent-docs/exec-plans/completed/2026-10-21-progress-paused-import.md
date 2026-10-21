@@ -1,6 +1,6 @@
 # Respect fresh mailbox arrivals during usage pauses
 
-Status: active
+Status: completed
 Created: 2026-10-21
 
 ## Outcome and protected invariant
@@ -45,4 +45,16 @@ and exhausted bounded allowance-read budgets alertable.
   current-schema local database. Web typecheck passed.
 - Complexity guard passed: maximum changed-source complexity remains 16;
   no hotspots exceed 20. Parent diff/privacy review found no additional changes.
-- External review and exact-head CI remain pending; no production mutation.
+- Final ReviewGPT round 1 passed on `b6b75f7896a5` with no qualifying
+  findings. The Eragon lane verified GPT-6 Pro and the guarded full-snapshot
+  attachment; the exact committed turn completed after more than 180 seconds
+  (send at 22:44:57 UTC, still awaiting capture at 22:48:01 UTC).
+- Parent accepted the substantive review of the SQL window boundary, unchanged
+  usage/execution authority, bounded reads, and actual PostgreSQL proof.
+  Parent final review found no remediation necessary.
+- Implementation, focused proof, and review are complete. Exact-head CI and
+  production rollout remain separate gates; no production mutation occurred.
+- The isolated test database created by this task was removed after all tests
+  finished. No shared database or process was modified.
+Updated: 2026-10-21
+Completed: 2026-10-21
