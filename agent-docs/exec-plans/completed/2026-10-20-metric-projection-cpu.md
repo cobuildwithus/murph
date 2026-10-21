@@ -1,6 +1,6 @@
 # Attribute metric projection CPU versus wall time
 
-Status: active
+Status: completed
 Created: 2026-10-20
 Updated: 2026-10-20
 
@@ -58,6 +58,13 @@ speedup claim. Work is bounded to two process CPU reads per eligible span, at
 most twelve per complete metric projection. Existing report limits are tested
 through the real UDP sender with oversized multi-command synthetic input.
 
-Final boundary tests, parent review and docs drift pass. ReviewGPT, required
-exact-head CI and protected release remain pending. No changelog is applicable:
+Final boundary tests, parent review and docs drift pass. Final ReviewGPT passed
+on dfe40f4735f6a397f0136c5f7225a72b216e7ba6 after more than four minutes on
+Eragon GPT-6 Pro, with exact snapshot/head/hash and completion-marker validation.
+Parent accepts PASS with no findings. The review traced receiver, hosted/Web
+normalization, token accounting and the synchronous metric callers; its native
+Node checks passed. Its sandbox could not bind loopback, while the parent's real
+subprocess/UDP tests passed. Required final-head CI and protected release remain
+pending; closing implementation does not claim deployment or observation. No changelog is applicable:
 this change adds private-safe internal measurements only.
+Completed: 2026-10-20
