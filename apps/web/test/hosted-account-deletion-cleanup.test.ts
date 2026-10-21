@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  deleteHostedPrivyUser: vi.fn(),
+
   deleteHostedRuntimeLogDataForUsers: vi.fn(),
   deleteHostedRunnerUserDataBestEffort: vi.fn(),
   getHostedOnboardingStripe: vi.fn(),
@@ -20,9 +20,6 @@ vi.mock("@/src/lib/hosted-execution/user-data-delete", () => ({
     mocks.deleteHostedRunnerUserDataBestEffort,
 }));
 
-vi.mock("@/src/lib/hosted-onboarding/privy", () => ({
-  deleteHostedPrivyUser: mocks.deleteHostedPrivyUser,
-}));
 
 vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
   getHostedOnboardingStripe: mocks.getHostedOnboardingStripe,
@@ -82,7 +79,7 @@ beforeEach(() => {
     notFound: false,
     terminated: true,
   });
-  mocks.deleteHostedPrivyUser.mockResolvedValue(true);
+
   mocks.getHostedOnboardingStripe.mockReturnValue({
     customers: {
       del: vi.fn(async () => ({ deleted: true })),
@@ -108,14 +105,13 @@ describe("hosted account deletion cleanup", () => {
     });
     const cleanup = await prepareHostedAccountDeletionCleanup({
       now,
-      privyUserId: "privy_user_1",
+
       runtimeMemberIds: ["member_1", "member_group_1", "member_1"],
       stripeCustomerIds: ["cus_1", "cus_1"],
     });
 
     expect(cleanup.runtimeMemberIds).toEqual(["member_1", "member_group_1"]);
     expect(cleanup.temporalNextRuntimeIndex).toBe(0);
-    expect(cleanup.privyUserLookupKey).toMatch(/^hbidx:privy-user:/u);
     const encryptInput = mocks.kmsEncrypt.mock.calls[0]?.[0];
     expect(encryptInput?.keyName).toBe(KMS_KEY_NAME);
     expect(JSON.parse(String(encryptInput?.additionalAuthenticatedData))).toEqual({
@@ -124,13 +120,13 @@ describe("hosted account deletion cleanup", () => {
       schema: "murph.hosted-account-deletion-cleanup.v1",
     });
     expect(JSON.parse(new TextDecoder().decode(captured.plaintextSnapshot))).toEqual({
-      privyUserId: "privy_user_1",
+
       runtimeMemberIds: ["member_1", "member_group_1"],
       schema: "murph.hosted-account-deletion-cleanup.v1",
       stripeCustomerIds: ["cus_1"],
     });
     expect(encryptInput?.plaintext.every((byte: number) => byte === 0)).toBe(true);
-    expect(cleanup.payloadCiphertext).not.toContain("privy_user_1");
+    expect(cleanup.payloadCiphertext).not.toContain("cus_1");
     expect(cleanup.kmsKeyName).toBe(KMS_KEY_NAME);
   });
 
@@ -142,7 +138,7 @@ describe("hosted account deletion cleanup", () => {
       customers: { del: deleteStripeCustomer },
     });
     const prepared = await createCleanup(store, now, {
-      privyUserId: "privy_user_1",
+
       stripeCustomerIds: ["cus_1"],
     });
     if (!store.row) {
@@ -169,7 +165,7 @@ describe("hosted account deletion cleanup", () => {
     expect(
       mocks.terminateHostedUserRuntimeWorkflowBestEffort,
     ).toHaveBeenCalledTimes(1);
-    expect(mocks.deleteHostedPrivyUser).toHaveBeenCalledTimes(1);
+
     expect(deleteStripeCustomer).toHaveBeenCalledTimes(1);
     expect(captured.plaintext?.every((byte) => byte === 0)).toBe(true);
   });
@@ -178,7 +174,7 @@ describe("hosted account deletion cleanup", () => {
     const store = new CleanupStore();
     const now = new Date("2026-07-26T18:00:00.000Z");
     const prepared = await createCleanup(store, now, {
-      privyUserId: "privy_user_1",
+
       stripeCustomerIds: ["cus_1"],
     });
     if (!store.row) {
@@ -197,7 +193,7 @@ describe("hosted account deletion cleanup", () => {
 
     expect(mocks.kmsDecrypt).not.toHaveBeenCalled();
     expect(mocks.deleteHostedRunnerUserDataBestEffort).not.toHaveBeenCalled();
-    expect(mocks.deleteHostedPrivyUser).not.toHaveBeenCalled();
+
     expect(mocks.getHostedOnboardingStripe).not.toHaveBeenCalled();
     expect(store.row).toMatchObject({
       attemptCount: 1,
@@ -221,7 +217,7 @@ describe("hosted account deletion cleanup", () => {
       }))
       .mockResolvedValueOnce(makeCloudflareDeletionResult({ deleted: true }));
     const prepared = await createCleanup(store, now, {
-      privyUserId: "privy_user_1",
+
       stripeCustomerIds: ["cus_1"],
     });
 
@@ -233,13 +229,13 @@ describe("hosted account deletion cleanup", () => {
       cleanupPending: true,
       cloudflare: { configured: false, deleted: false },
       vendorAccounts: {
-        privyUser: { status: "completed" },
+        privyUser: { errorCode: null, status: "skipped_no_record" },
         stripeCustomer: { status: "completed" },
       },
     });
     expect(store.row).toMatchObject({
       cloudflareCompletedAt: null,
-      privyCompletedAt: now,
+
       runtimeLogsCompletedAt: now,
       stripeCompletedAt: now,
       temporalCompletedAt: now,
@@ -278,7 +274,7 @@ describe("hosted account deletion cleanup", () => {
       userId: "member_1",
     });
     expect(deleteStripeCustomer).toHaveBeenCalledTimes(1);
-    expect(mocks.deleteHostedPrivyUser).toHaveBeenCalledTimes(1);
+
   });
 
   it("preserves retained canary runtime logs across a failed vendor cleanup and retry", async () => {
@@ -308,7 +304,7 @@ describe("hosted account deletion cleanup", () => {
     const store = new CleanupStore();
     const now = new Date("2026-07-26T18:00:00.000Z");
     mocks.getHostedOnboardingStripe.mockReturnValue(null);
-    mocks.deleteHostedPrivyUser.mockResolvedValue(false);
+
     mocks.terminateHostedUserRuntimeWorkflowBestEffort.mockResolvedValue({
       configured: false,
       errorCode: null,
@@ -316,7 +312,7 @@ describe("hosted account deletion cleanup", () => {
       terminated: false,
     });
     const prepared = await createCleanup(store, now, {
-      privyUserId: "privy_user_1",
+
       stripeCustomerIds: ["cus_1"],
     });
 
@@ -327,7 +323,7 @@ describe("hosted account deletion cleanup", () => {
     })).resolves.toMatchObject({
       cleanupPending: true,
       vendorAccounts: {
-        privyUser: { status: "skipped_not_configured" },
+        privyUser: { errorCode: null, status: "skipped_no_record" },
         stripeCustomer: { status: "skipped_not_configured" },
       },
     });
@@ -390,7 +386,7 @@ describe("hosted account deletion cleanup", () => {
       });
     const prepared = await prepareHostedAccountDeletionCleanup({
       now,
-      privyUserId: null,
+
       runtimeMemberIds: ["member_1", "member_2", "member_1"],
       stripeCustomerIds: [],
     });
@@ -458,7 +454,7 @@ describe("hosted account deletion cleanup", () => {
     );
     const prepared = await prepareHostedAccountDeletionCleanup({
       now,
-      privyUserId: null,
+
       runtimeMemberIds: Array.from({ length: 6 }, (_, index) => `member_${index}`),
       stripeCustomerIds: [],
     });
@@ -531,9 +527,9 @@ describe("hosted account deletion cleanup", () => {
     mocks.getHostedOnboardingStripe.mockReturnValue({
       customers: { del: deleteStripeCustomer },
     });
-    mocks.deleteHostedPrivyUser.mockRejectedValue({ status: 404 });
+
     const prepared = await createCleanup(store, now, {
-      privyUserId: "privy_user_1",
+
       stripeCustomerIds: ["cus_1"],
     });
 
@@ -544,41 +540,16 @@ describe("hosted account deletion cleanup", () => {
     })).resolves.toMatchObject({
       cleanupPending: false,
       vendorAccounts: {
-        privyUser: { errorCode: null, status: "completed" },
+        privyUser: { errorCode: null, status: "skipped_no_record" },
         stripeCustomer: { errorCode: null, status: "completed" },
       },
     });
 
     expect(store.row).toBeNull();
     expect(deleteStripeCustomer).toHaveBeenCalledTimes(1);
-    expect(mocks.deleteHostedPrivyUser).toHaveBeenCalledTimes(1);
+
   });
 
-  it("keeps Privy cleanup pending when the identity is bound to a live member", async () => {
-    const store = new CleanupStore();
-    const now = new Date("2026-07-26T18:00:00.000Z");
-    store.livePrivyMemberId = "member_recreated";
-    const prepared = await createCleanup(store, now, {
-      privyUserId: "privy_user_1",
-    });
-
-    await expect(runHostedAccountDeletionCleanup({
-      cleanupId: prepared.id,
-      now,
-      prisma: store.prisma as never,
-    })).resolves.toMatchObject({
-      cleanupPending: true,
-      vendorAccounts: {
-        privyUser: {
-          errorCode: "ACCOUNT_DELETION_PRIVY_IDENTITY_REBOUND",
-          status: "failed",
-        },
-      },
-    });
-
-    expect(mocks.deleteHostedPrivyUser).not.toHaveBeenCalled();
-    expect(store.row?.privyCompletedAt).toBeNull();
-  });
 
   it("bounds runtime deletion work with fixed worker pools", async () => {
     const store = new CleanupStore();
@@ -610,7 +581,7 @@ describe("hosted account deletion cleanup", () => {
     );
     const prepared = await prepareHostedAccountDeletionCleanup({
       now,
-      privyUserId: null,
+
       runtimeMemberIds: Array.from({ length: 12 }, (_, index) => `member_${index}`),
       stripeCustomerIds: [],
     });
@@ -661,7 +632,7 @@ describe("hosted account deletion cleanup", () => {
     );
     const prepared = await prepareHostedAccountDeletionCleanup({
       now,
-      privyUserId: null,
+
       runtimeMemberIds,
       stripeCustomerIds: [],
     });
@@ -807,14 +778,7 @@ describe("hosted account deletion cleanup", () => {
         }), timeoutMs);
       }),
     );
-    mocks.deleteHostedPrivyUser.mockImplementation(
-      (_userId: string, options: { signal: AbortSignal }) =>
-        new Promise((_resolve, reject) => {
-          options.signal.addEventListener("abort", () => reject(options.signal.reason), {
-            once: true,
-          });
-        }),
-    );
+
     mocks.getHostedOnboardingStripe.mockReturnValue({
       customers: {
         del: vi.fn((
@@ -827,7 +791,7 @@ describe("hosted account deletion cleanup", () => {
       },
     });
     const prepared = await createCleanup(store, now, {
-      privyUserId: "privy_user_1",
+
       stripeCustomerIds: ["cus_1"],
     });
 
@@ -846,10 +810,7 @@ describe("hosted account deletion cleanup", () => {
         errorCode: "ACCOUNT_DELETION_CLEANUP_TARGET_TIMEOUT",
       },
       vendorAccounts: {
-        privyUser: {
-          errorCode: "ACCOUNT_DELETION_CLEANUP_TARGET_TIMEOUT",
-          status: "failed",
-        },
+        privyUser: { errorCode: null, status: "skipped_no_record" },
         stripeCustomer: {
           errorCode: "ACCOUNT_DELETION_CLEANUP_TARGET_TIMEOUT",
           status: "failed",
@@ -867,7 +828,7 @@ describe("hosted account deletion cleanup", () => {
     const store = new CleanupStore();
     const now = new Date("2026-07-26T18:00:00.000Z");
     const prepared = await createCleanup(store, now, {
-      privyUserId: "privy_user_1",
+
       stripeCustomerIds: ["cus_1"],
     });
     mocks.kmsDecrypt.mockImplementation(
@@ -892,7 +853,7 @@ describe("hosted account deletion cleanup", () => {
       signal: expect.any(AbortSignal),
     }));
     expect(mocks.deleteHostedRunnerUserDataBestEffort).not.toHaveBeenCalled();
-    expect(mocks.deleteHostedPrivyUser).not.toHaveBeenCalled();
+
     expect(store.row).toMatchObject({
       attemptCount: 1,
       leaseToken: null,
@@ -923,7 +884,7 @@ describe("hosted account deletion cleanup", () => {
     );
     const prepared = await prepareHostedAccountDeletionCleanup({
       now,
-      privyUserId: null,
+
       runtimeMemberIds: Array.from({ length: 12 }, (_, index) => `member_${index}`),
       stripeCustomerIds: [],
     });
@@ -964,7 +925,7 @@ async function createCleanup(
 ) {
   const prepared = await prepareHostedAccountDeletionCleanup({
     now,
-    privyUserId: input.privyUserId ?? null,
+
     runtimeMemberIds: ["member_1"],
     stripeCustomerIds: input.stripeCustomerIds ?? [],
   });
@@ -988,8 +949,6 @@ interface CleanupRow {
   leaseToken: string | null;
   nextAttemptAt: Date;
   payloadCiphertext: string;
-  privyCompletedAt: Date | null;
-  privyUserLookupKey: string | null;
   runtimeLogsCompletedAt: Date | null;
   stripeCompletedAt: Date | null;
   temporalCompletedAt: Date | null;

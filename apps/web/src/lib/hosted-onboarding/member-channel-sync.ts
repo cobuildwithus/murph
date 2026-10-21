@@ -19,10 +19,6 @@ import {
   type HostedMemberSnapshot,
 } from "./hosted-member-store";
 import { resolveHostedMemberChannels } from "./messaging-state";
-import {
-  extractHostedPrivyVerifiedEmailAccount,
-  type PrivyLinkedAccountLike,
-} from "./privy-shared";
 import { lockHostedMemberRow } from "./shared";
 
 type HostedMemberEmailLinkedClient = PrismaClient | Prisma.TransactionClient;
@@ -150,7 +146,6 @@ async function appendHostedMemberChannelsUpdatedForSnapshotTx(input: {
 }
 
 export async function enqueueHostedMemberChannelsUpdatedForActiveMemberTx(input: {
-  linkedAccounts?: readonly PrivyLinkedAccountLike[];
   memberId: string;
   occurredAt: string;
   prisma: Prisma.TransactionClient;
@@ -179,7 +174,6 @@ export async function enqueueHostedMemberChannelsUpdatedForActiveMemberTx(input:
   }
 
   const emailLinked = await resolveHostedMemberEmailLinked({
-    linkedAccounts: input.linkedAccounts,
     memberId: input.memberId,
     prisma: input.prisma,
   });
@@ -194,14 +188,9 @@ export async function enqueueHostedMemberChannelsUpdatedForActiveMemberTx(input:
 }
 
 export async function resolveHostedMemberEmailLinked(input: {
-  linkedAccounts?: readonly PrivyLinkedAccountLike[];
   memberId: string;
   prisma?: HostedMemberEmailLinkedClient;
 }): Promise<boolean> {
-  if (extractHostedPrivyVerifiedEmailAccount(input.linkedAccounts ?? []) !== null) {
-    return true;
-  }
-
   const emailAuthorization = await readHostedMemberEmailAuthorization({
     memberId: input.memberId,
     prisma: input.prisma ?? getPrisma(),

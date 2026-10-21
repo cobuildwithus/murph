@@ -8,7 +8,7 @@ import { requireActiveHostedMemberAuthFromBearerToken } from "@/src/lib/hosted-o
 import { assertHostedHistoricalLaunchConsentGranted } from "@/src/lib/legal/consent";
 import { getPrisma } from "@/src/lib/prisma";
 
-// Companion sync status. Bearer Privy auth keeps the route member-bound;
+// Companion sync status. First-party bearer auth keeps the route member-bound;
 // stale launch-document acceptance must not interrupt current device sync.
 // Returns backend-confirmed receipt evidence only - timestamps and resource
 // names, never health values. An optional source scope keeps Apple Health and

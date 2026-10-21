@@ -54,7 +54,7 @@ import {
   lookupHostedMemberIdentityByPhoneLookupKey,
   lookupHostedMemberIdentityByPhoneNumber,
   lookupHostedMemberIdByPhoneNumber,
-  lookupHostedMemberIdentityByPrivyUserId,
+
   type HostedMemberIdentityState,
   upsertHostedMemberIdentity,
 } from "@/src/lib/hosted-onboarding/hosted-member-identity-store";
@@ -184,15 +184,13 @@ describe("hosted-member-store", () => {
       phoneNumber: "+15551234",
       phoneLookupKey: "phone_lookup_123",
       phoneNumberVerifiedAt: new Date("2026-04-07T00:02:00.000Z"),
-      privyUserId: "did:privy:member_123",
+
       signupPhoneCodeSendAttemptId: null,
       signupPhoneCodeSendAttemptStartedAt: null,
       signupPhoneCodeSentAt: null,
       signupPhoneNumber: "+15551234",
-      walletAddress: "0x1234",
-      walletChainType: "ethereum",
-      walletCreatedAt: new Date("2026-04-07T00:03:00.000Z"),
-      walletProvider: "privy",
+
+
     };
     const routing: HostedMemberRoutingStateSnapshot = {
       linqChatId: "linq_chat_123",
@@ -517,105 +515,6 @@ describe("hosted-member-store", () => {
     });
   });
 
-  it("looks up identity by privy user id without exposing blind-index columns", async () => {
-    const member = createHostedMember();
-    const findMany = vi.fn().mockResolvedValue([
-      {
-        maskedPhoneNumberHint: "*** 4567",
-        member,
-        memberId: member.id,
-        phoneLookupKey: "hbidx:phone:v1:abc123",
-        phoneNumberVerifiedAt: null,
-        privyUserIdEncrypted: await encryptHostedWebNullableString({
-          field: "hosted-member-identity.privy-user-id",
-          memberId: member.id,
-          value: "did:privy:user_123",
-        }),
-        signupPhoneCodeSendAttemptId: null,
-        signupPhoneCodeSendAttemptStartedAt: null,
-        signupPhoneCodeSentAt: null,
-        signupPhoneNumberEncrypted: null,
-        walletAddressEncrypted: null,
-        walletChainType: null,
-        walletCreatedAt: null,
-        walletProvider: null,
-      },
-    ]);
-    const prisma = {
-      hostedMemberIdentity: {
-        findMany,
-      },
-    } as never;
-
-    await expect(
-      lookupHostedMemberIdentityByPrivyUserId({
-        prisma,
-        privyUserId: "did:privy:user_123",
-      }),
-    ).resolves.toEqual({
-      core: member,
-      identity: expect.objectContaining({
-        memberId: member.id,
-        phoneNumber: null,
-        privyUserId: "did:privy:user_123",
-      }),
-      matchedBy: "privyUserId",
-    });
-
-    expect(findMany).toHaveBeenCalledWith({
-      where: {
-        privyUserLookupKey: {
-          in: [expect.stringMatching(/^hbidx:privy-user:v1:/u)],
-        },
-      },
-      include: {
-        member: true,
-      },
-    });
-  });
-
-  it("looks up only core member state for a Privy principal without decrypting identity fields", async () => {
-    const member = createHostedMember();
-    const core = {
-      billingStatus: member.billingStatus,
-      createdAt: member.createdAt,
-      id: member.id,
-      suspendedAt: member.suspendedAt,
-      updatedAt: member.updatedAt,
-    };
-    const findMany = vi.fn().mockResolvedValue([{ memberId: member.id, member: core }]);
-    const prisma = {
-      hostedMemberIdentity: { findMany },
-    } as never;
-
-    await expect(lookupHostedMemberIdentityByPrivyUserId({
-      prisma,
-      privyUserId: "did:privy:user_123",
-      projection: "core",
-    })).resolves.toEqual({
-      core,
-      matchedBy: "privyUserId",
-    });
-    expect(findMany).toHaveBeenCalledWith({
-      where: {
-        privyUserLookupKey: {
-          in: [expect.stringMatching(/^hbidx:privy-user:v1:/u)],
-        },
-      },
-      select: {
-        memberId: true,
-        member: {
-          select: {
-            billingStatus: true,
-            createdAt: true,
-            id: true,
-            suspendedAt: true,
-            updatedAt: true,
-          },
-        },
-      },
-    });
-  });
 
   it("looks up identity by phone lookup key without returning the lookup key", async () => {
     const member = createHostedMember();
@@ -627,7 +526,7 @@ describe("hosted-member-store", () => {
           memberId: member.id,
           phoneLookupKey: "hbidx:phone:v1:abc123",
           phoneNumberVerifiedAt: null,
-          privyUserIdEncrypted: null,
+
           signupPhoneCodeSendAttemptId: null,
           signupPhoneCodeSendAttemptStartedAt: null,
           signupPhoneCodeSentAt: null,
@@ -636,10 +535,8 @@ describe("hosted-member-store", () => {
             memberId: member.id,
             value: "+15551234567",
           }),
-          walletAddressEncrypted: null,
-          walletChainType: null,
-          walletCreatedAt: null,
-          walletProvider: null,
+
+
         }),
       },
     } as never;
@@ -656,15 +553,13 @@ describe("hosted-member-store", () => {
         memberId: member.id,
         phoneNumber: null,
         phoneNumberVerifiedAt: null,
-        privyUserId: null,
+
         signupPhoneCodeSendAttemptId: null,
         signupPhoneCodeSendAttemptStartedAt: null,
         signupPhoneCodeSentAt: null,
         signupPhoneNumber: "+15551234567",
-        walletAddress: null,
-        walletChainType: null,
-        walletCreatedAt: null,
-        walletProvider: null,
+
+
       },
       matchedBy: "phoneLookupKey",
     });
@@ -679,15 +574,13 @@ describe("hosted-member-store", () => {
         memberId: member.id,
         phoneLookupKey: "hbidx:phone:v1:abc123",
         phoneNumberVerifiedAt: null,
-        privyUserIdEncrypted: null,
+
         signupPhoneCodeSendAttemptId: null,
         signupPhoneCodeSendAttemptStartedAt: null,
         signupPhoneCodeSentAt: null,
         signupPhoneNumberEncrypted: null,
-        walletAddressEncrypted: null,
-        walletChainType: null,
-        walletCreatedAt: null,
-        walletProvider: null,
+
+
       },
     ]);
     const prisma = {
@@ -750,95 +643,6 @@ describe("hosted-member-store", () => {
     });
   });
 
-  it("fails closed when rotated Privy user lookup candidates resolve to multiple members", async () => {
-    setHostedContactPrivacyKeyring({
-      currentVersion: "v2",
-      keysByVersion: {
-        v1: TEST_CONTACT_PRIVACY_KEY,
-        v2: TEST_CONTACT_PRIVACY_ROTATED_KEY,
-      },
-    });
-
-    const firstMember = createHostedMember({
-      id: "member_v1",
-    });
-    const secondMember = createHostedMember({
-      billingStatus: HostedBillingStatus.active,
-      id: "member_v2",
-    });
-    const findMany = vi.fn().mockResolvedValue([
-      {
-        maskedPhoneNumberHint: null,
-        member: firstMember,
-        memberId: firstMember.id,
-        phoneLookupKey: null,
-        phoneNumberVerifiedAt: null,
-        privyUserIdEncrypted: null,
-        privyUserLookupKey: "hbidx:privy-user:v1:abc123",
-        signupPhoneCodeSendAttemptId: null,
-        signupPhoneCodeSendAttemptStartedAt: null,
-        signupPhoneCodeSentAt: null,
-        signupPhoneNumberEncrypted: null,
-        walletAddressEncrypted: null,
-        walletAddressLookupKey: null,
-        walletChainType: null,
-        walletCreatedAt: null,
-        walletProvider: null,
-      },
-      {
-        maskedPhoneNumberHint: null,
-        member: secondMember,
-        memberId: secondMember.id,
-        phoneLookupKey: null,
-        phoneNumberVerifiedAt: null,
-        privyUserIdEncrypted: null,
-        privyUserLookupKey: "hbidx:privy-user:v2:def456",
-        signupPhoneCodeSendAttemptId: null,
-        signupPhoneCodeSendAttemptStartedAt: null,
-        signupPhoneCodeSentAt: null,
-        signupPhoneNumberEncrypted: null,
-        walletAddressEncrypted: null,
-        walletAddressLookupKey: null,
-        walletChainType: null,
-        walletCreatedAt: null,
-        walletProvider: null,
-      },
-    ]);
-    const prisma = {
-      hostedMemberIdentity: {
-        findMany,
-      },
-    } as never;
-
-    await expect(
-      lookupHostedMemberIdentityByPrivyUserId({
-        prisma,
-        privyUserId: "did:privy:user_123",
-      }),
-    ).rejects.toMatchObject({
-      code: "HOSTED_MEMBER_IDENTITY_LOOKUP_AMBIGUOUS",
-      details: {
-        matchCount: 2,
-        matchedBy: "privyUserId",
-      },
-      httpStatus: 500,
-      retryable: true,
-    });
-
-    expect(findMany).toHaveBeenCalledWith({
-      where: {
-        privyUserLookupKey: {
-          in: expect.arrayContaining([
-            expect.stringMatching(/^hbidx:privy-user:v2:/u),
-            expect.stringMatching(/^hbidx:privy-user:v1:/u),
-          ]),
-        },
-      },
-      include: {
-        member: true,
-      },
-    });
-  });
 
   it("looks up routing by Telegram lookup key without exposing the blind index", async () => {
     const prisma = {
@@ -3462,25 +3266,14 @@ describe("hosted-member-store", () => {
         value: "+15551234567",
       }),
       phoneNumberVerifiedAt: null,
-      privyUserLookupKey: "hbidx:privy-user:v1:abc123",
-      privyUserIdEncrypted: await encryptHostedWebNullableString({
-        field: "hosted-member-identity.privy-user-id",
-        memberId: "member_123",
-        value: "did:privy:user_123",
-      }),
+
+
       signupPhoneCodeSendAttemptId: null,
       signupPhoneCodeSendAttemptStartedAt: null,
       signupPhoneCodeSentAt: null,
       signupPhoneNumberEncrypted: null,
-      walletAddressLookupKey: "hbidx:wallet-address:v1:abc123",
-      walletAddressEncrypted: await encryptHostedWebNullableString({
-        field: "hosted-member-identity.wallet-address",
-        memberId: "member_123",
-        value: "0xd8da6bf26964af9d7eed9e03e53415d37aa96045",
-      }),
-      walletChainType: "ethereum",
-      walletCreatedAt: null,
-      walletProvider: "privy",
+
+
     });
     const prisma = {
       hostedMemberIdentity: {
@@ -3496,7 +3289,7 @@ describe("hosted-member-store", () => {
         phoneNumberVerifiedAt: null,
         phoneNumber: "+15551234567",
         prisma,
-        privyUserId: "did:privy:user_123",
+
         signupPhoneCodeSendAttemptId: null,
         signupPhoneCodeSendAttemptStartedAt: null,
         signupPhoneCodeSentAt: null,
@@ -3508,15 +3301,13 @@ describe("hosted-member-store", () => {
       phoneLookupKey: "hbidx:phone:v1:abc123",
       phoneNumber: "+15551234567",
       phoneNumberVerifiedAt: null,
-      privyUserId: "did:privy:user_123",
+
       signupPhoneCodeSendAttemptId: null,
       signupPhoneCodeSendAttemptStartedAt: null,
       signupPhoneCodeSentAt: null,
       signupPhoneNumber: null,
-      walletAddress: "0xd8da6bf26964af9d7eed9e03e53415d37aa96045",
-      walletChainType: "ethereum",
-      walletCreatedAt: null,
-      walletProvider: "privy",
+
+
     });
     const { provisionActiveHostedDomainRootEnvelopeForUserOnly } = await import(
       "@/src/lib/hosted-crypto/domain-root-store"
@@ -3540,8 +3331,8 @@ describe("hosted-member-store", () => {
         phoneLookupKey: "hbidx:phone:v1:abc123",
         phoneNumberEncrypted: expect.stringMatching(/^hsb-test:/u),
         phoneNumberVerifiedAt: null,
-        privyUserLookupKey: expect.stringMatching(/^hbidx:privy-user:v1:/u),
-        privyUserIdEncrypted: expect.stringMatching(/^hsb-test:/u),
+
+
         signupPhoneCodeSendAttemptId: null,
         signupPhoneCodeSendAttemptStartedAt: null,
         signupPhoneCodeSentAt: null,
@@ -3552,8 +3343,8 @@ describe("hosted-member-store", () => {
         phoneLookupKey: "hbidx:phone:v1:abc123",
         phoneNumberEncrypted: expect.stringMatching(/^hsb-test:/u),
         phoneNumberVerifiedAt: null,
-        privyUserLookupKey: expect.stringMatching(/^hbidx:privy-user:v1:/u),
-        privyUserIdEncrypted: expect.stringMatching(/^hsb-test:/u),
+
+
         signupPhoneCodeSendAttemptId: null,
         signupPhoneCodeSendAttemptStartedAt: null,
         signupPhoneCodeSentAt: null,
@@ -4526,25 +4317,14 @@ describe("hosted-member-store", () => {
             memberId: "member_123",
             phoneLookupKey: "hbidx:phone:v1:abc123",
             phoneNumberVerifiedAt: null,
-            privyUserLookupKey: "hbidx:privy-user:v1:abc123",
-            privyUserIdEncrypted: await encryptHostedWebNullableString({
-              field: "hosted-member-identity.privy-user-id",
-              memberId: "member_123",
-              value: "did:privy:user_123",
-            }),
+
+
             signupPhoneCodeSendAttemptId: null,
             signupPhoneCodeSendAttemptStartedAt: null,
             signupPhoneCodeSentAt: null,
             signupPhoneNumberEncrypted: null,
-            walletAddressLookupKey: "hbidx:wallet-address:v1:abc123",
-            walletAddressEncrypted: await encryptHostedWebNullableString({
-              field: "hosted-member-identity.wallet-address",
-              memberId: "member_123",
-              value: "0xd8da6bf26964af9d7eed9e03e53415d37aa96045",
-            }),
-            walletChainType: "ethereum",
-            walletCreatedAt: null,
-            walletProvider: "privy",
+
+
           },
           routing: {
             linqChatIdEncrypted: await encryptHostedWebNullableString({
@@ -4589,15 +4369,13 @@ describe("hosted-member-store", () => {
         phoneLookupKey: "hbidx:phone:v1:abc123",
         phoneNumber: null,
         phoneNumberVerifiedAt: null,
-        privyUserId: "did:privy:user_123",
+
         signupPhoneCodeSendAttemptId: null,
         signupPhoneCodeSendAttemptStartedAt: null,
         signupPhoneCodeSentAt: null,
         signupPhoneNumber: null,
-        walletAddress: "0xd8da6bf26964af9d7eed9e03e53415d37aa96045",
-        walletChainType: "ethereum",
-        walletCreatedAt: null,
-        walletProvider: "privy",
+
+
       },
       routing: {
         hasPendingLinqRouteState: false,
@@ -4617,7 +4395,7 @@ describe("hosted-member-store", () => {
     });
   });
 
-  it("reads only messaging setup state needed by Privy completion", async () => {
+  it("reads only messaging setup state needed by authentication completion", async () => {
     const routingPrivateColumns = await buildHostedMemberRoutingPrivateColumns({
       linqChatId: null,
       linqRecipientPhone: null,

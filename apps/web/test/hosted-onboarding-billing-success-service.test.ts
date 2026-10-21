@@ -176,11 +176,7 @@ describe("reconcileHostedBillingCheckoutSuccess", () => {
 
       await expect(reconcileHostedBillingCheckoutSuccess({
         inviteCode: "invite-code",
-        linkedAccounts: [{
-          address: "user@example.test",
-          type: "email",
-          verifiedAt: 1_714_700_800,
-        }],
+
         member: createAuthenticatedMember(),
         prisma: prisma as never,
         sessionId: `cs_${status}`,
@@ -286,11 +282,7 @@ describe("reconcileHostedBillingCheckoutSuccess", () => {
 
     await expect(reconcileHostedBillingCheckoutSuccess({
       inviteCode: "invite-code",
-      linkedAccounts: [{
-        address: "user@example.test",
-        type: "email",
-        verifiedAt: 1_714_700_800,
-      }],
+
       member: createAuthenticatedMember(),
       prisma: prisma as never,
       sessionId: "cs_123",
@@ -635,7 +627,6 @@ function createStatus(input?: {
     },
     capabilities: {
       billingReady: true,
-      phoneAuthReady: true,
     },
     invite: {
       code: "invite-code",

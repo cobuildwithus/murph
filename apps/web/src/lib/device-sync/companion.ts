@@ -147,26 +147,6 @@ const COMPANION_AUTH_DIAGNOSTIC_CODE_DESCRIPTIONS = {
   hosted_response_rejected: "Hosted authentication rejected the request.",
   hosted_credentials_unavailable: "Secure session storage is unavailable.",
   hosted_invalid_response: "Hosted authentication returned an invalid response.",
-  privy_bad_email: "Privy rejected the email address.",
-  privy_bad_request: "Privy rejected the auth request.",
-  privy_authentication_failed: "Privy authentication failed.",
-  privy_could_not_construct_request: "Privy request construction failed.",
-  privy_decoding_error: "Privy response decoding failed.",
-  privy_expired_code: "Privy OTP expired.",
-  privy_forbidden: "Privy rejected the request as forbidden.",
-  privy_invalid_code: "Privy rejected the OTP code.",
-  privy_invalid_email: "Privy rejected the email address.",
-  privy_invalid_native_app_id: "Privy rejected the native app configuration.",
-  privy_invalid_phone: "Privy rejected the phone number.",
-  privy_initialization_failed: "Privy initialization failed.",
-  privy_malformed_response: "Privy returned a malformed response.",
-  privy_network_error: "Privy request failed at the network layer.",
-  privy_not_found: "Privy resource was not found.",
-  privy_rate_limited: "Privy rate limited the auth request.",
-  privy_service_unavailable: "Privy service was unavailable.",
-  privy_timeout: "Privy request timed out.",
-  privy_unauthorized: "Privy rejected the request as unauthorized.",
-  privy_unknown: "Privy auth request failed.",
 } as const;
 type CompanionAuthDiagnosticCode = keyof typeof COMPANION_AUTH_DIAGNOSTIC_CODE_DESCRIPTIONS;
 
@@ -177,7 +157,7 @@ interface CompanionAuthDiagnosticLog {
   httpStatus: number | null;
   method: string;
   platform: CompanionPlatform;
-  provider: "privy";
+  provider: "better_auth";
   providerErrorCode: string | null;
   retryable: boolean;
   stage: string;
@@ -514,7 +494,7 @@ export function validateCompanionAuthDiagnosticRequestBody(
     httpStatus,
     method,
     platform: readOptionalCompanionPlatform(body) ?? "ios",
-    provider: "privy",
+    provider: "better_auth",
     providerErrorCode: readOptionalProviderErrorCode(body),
     retryable: readRequiredBoolean(body, "retryable"),
     stage,

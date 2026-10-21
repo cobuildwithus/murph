@@ -8,8 +8,7 @@ import {
 import { hostedOnboardingError } from "./errors";
 import { acquireHostedLinqParticipantEmailLockTx } from "./linq-participant-contact";
 import { lockHostedMemberRow } from "./shared";
-import { assertHostedLegacyCredentialWriterTx } from "../better-auth/legacy-writer";
-import type { HostedPrivyAuthMethod } from "./types";
+import type { HostedPrimaryAuthMethod } from "./types";
 
 const MAX_REPLY_ALIAS_GENERATION = 2_147_483_647;
 
@@ -41,8 +40,7 @@ type HostedLinkedAccountRoutingSnapshot =
 export async function removeHostedMemberLinkedAccountProjectionTx(input: {
   expectedIdentity: string;
   memberId: string;
-  method: HostedPrivyAuthMethod;
-  authSource?: "better-auth";
+  method: HostedPrimaryAuthMethod;
   prisma: Prisma.TransactionClient;
 }): Promise<boolean> {
   if (input.method === "email") {
@@ -52,7 +50,6 @@ export async function removeHostedMemberLinkedAccountProjectionTx(input: {
     });
   }
   await lockHostedMemberRow(input.prisma, input.memberId);
-  if (input.authSource !== "better-auth") await assertHostedLegacyCredentialWriterTx(input.prisma, input.memberId);
 
   switch (input.method) {
     case "phone":

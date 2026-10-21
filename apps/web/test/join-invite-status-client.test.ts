@@ -31,7 +31,6 @@ describe("invite status client", () => {
       },
       capabilities: {
         billingReady: true,
-        phoneAuthReady: true,
       },
       invite: null,
       session: {
@@ -223,7 +222,6 @@ function createStatusPayload(): HostedInviteStatusPayload {
     },
     capabilities: {
       billingReady: true,
-      phoneAuthReady: true,
     },
     invite: null,
     session: {

@@ -36,8 +36,7 @@ describe("hosted ops App Review member route", () => {
       consentGranted: true,
       consentScopes: ["launch.legal", "launch.health-data"],
       member: "memb...1234",
-      principal: "email:t***@privy.io",
-      privyUser: "priv...1234",
+      principal: "email:r***@example.test",
       suspended: false,
     });
   });
@@ -62,7 +61,6 @@ describe("hosted ops App Review member route", () => {
       requireMutationOrigin: true,
     });
     expect(mocks.prepareHostedOpsAppReviewMember).toHaveBeenCalledWith({
-      createPrivyUser: false,
       mode: "dry-run",
       principal: {
         kind: "email",
@@ -72,7 +70,7 @@ describe("hosted ops App Review member route", () => {
     await expect(response.json()).resolves.toMatchObject({
       action: "dry-run",
       consentGranted: true,
-      principal: "email:t***@privy.io",
+      principal: "email:r***@example.test",
     });
   });
 
@@ -84,15 +82,13 @@ describe("hosted ops App Review member route", () => {
       consentGranted: true,
       consentScopes: ["launch.legal", "launch.health-data"],
       member: "memb...1234",
-      principal: "email:t***@privy.io",
-      privyUser: "priv...1234",
+      principal: "email:r***@example.test",
       suspended: false,
     });
 
     const response = await route.POST(
       new Request("https://join.example.test/api/ops/app-review-member", {
         body: JSON.stringify({
-          createPrivyUser: true,
           email: "reviewer@example.test",
           mode: "apply",
         }),
@@ -106,7 +102,6 @@ describe("hosted ops App Review member route", () => {
 
     expect(response.status).toBe(200);
     expect(mocks.prepareHostedOpsAppReviewMember).toHaveBeenCalledWith({
-      createPrivyUser: true,
       mode: "apply",
       principal: {
         kind: "email",
@@ -165,7 +160,7 @@ describe("hosted ops App Review member route", () => {
     });
   });
 
-  it("rejects invalid createPrivyUser before provisioning", async () => {
+  it("rejects removed provider creation fields before preparing access", async () => {
     const response = await route.POST(
       new Request("https://join.example.test/api/ops/app-review-member", {
         body: JSON.stringify({
@@ -184,12 +179,12 @@ describe("hosted ops App Review member route", () => {
     expect(mocks.prepareHostedOpsAppReviewMember).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toMatchObject({
       error: {
-        code: "HOSTED_OPS_APP_REVIEW_MEMBER_CREATE_PRIVY_USER_INVALID",
+        code: "HOSTED_OPS_APP_REVIEW_MEMBER_REQUEST_INVALID",
       },
     });
   });
 
-  it("requires apply mode and email principal before creating a Privy test user", async () => {
+  it("rejects removed provider creation fields in both modes", async () => {
     const dryRun = await route.POST(
       new Request("https://join.example.test/api/ops/app-review-member", {
         body: JSON.stringify({
@@ -207,7 +202,7 @@ describe("hosted ops App Review member route", () => {
     expect(dryRun.status).toBe(400);
     await expect(dryRun.json()).resolves.toMatchObject({
       error: {
-        code: "HOSTED_OPS_APP_REVIEW_MEMBER_CREATE_PRIVY_USER_REQUIRES_APPLY",
+        code: "HOSTED_OPS_APP_REVIEW_MEMBER_REQUEST_INVALID",
       },
     });
 
@@ -230,7 +225,7 @@ describe("hosted ops App Review member route", () => {
     expect(mocks.prepareHostedOpsAppReviewMember).not.toHaveBeenCalled();
     await expect(phone.json()).resolves.toMatchObject({
       error: {
-        code: "HOSTED_OPS_APP_REVIEW_MEMBER_CREATE_PRIVY_USER_EMAIL_REQUIRED",
+        code: "HOSTED_OPS_APP_REVIEW_MEMBER_REQUEST_INVALID",
       },
     });
   });

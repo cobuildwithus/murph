@@ -1,66 +1,20 @@
 import "server-only";
 
-import { HostedBillingStatus, type PrismaClient } from "@prisma/client";
-import { APIError, PrivyClient, type User as PrivyUser } from "@privy-io/node";
-
-import {
-  recordHostedLaunchRequiredConsent,
-  readHostedConsentStatus,
-} from "../legal/consent";
+import { type HostedBillingStatus, type PrismaClient } from "@prisma/client";
+import { recordHostedLaunchRequiredConsent, readHostedConsentStatus } from "../legal/consent";
 import { getPrisma } from "../prisma";
-import {
-  runWithFreshHostedDomainRootUnwrapCache,
-  runWithHostedDomainRootProviderCallsDisabled,
-  runWithHostedDomainRootUnwrapCache,
-} from "../hosted-crypto/domain-root-unwrap-cache";
-import {
-  HostedDomainRootPreparationMismatchError,
-  prepareHostedCryptoDomainRootCandidates,
-  prepareHostedDomainRootForWeb,
-} from "../hosted-crypto/domain-root-store";
-import {
-  lookupHostedMemberIdentityByPrivyUserId,
-  readHostedMemberIdentity,
-} from "../hosted-onboarding/hosted-member-identity-store";
-import {
-  createHostedEmailLookupKey,
-  createHostedPhoneLookupKey,
-} from "../hosted-onboarding/contact-privacy";
+import { prepareHostedCryptoDomainRootCandidates } from "../hosted-crypto/domain-root-store";
 import { activateHostedMemberForPositiveSourceTx } from "../hosted-onboarding/member-activation";
-import {
-  materializePendingHostedGroupJoinConfirmationsBestEffort,
-} from "../hosted-groups/group-join-confirmation";
-import {
-  assertHostedPrivyAccountDeletionNotPending,
-  ensureHostedMemberForPrivyIdentityResolutionTx,
-  lookupHostedMemberForPrivyAuthAttempt,
-} from "../hosted-onboarding/member-identity-service";
-import {
-  assertHostedPrivyIdentityMatchesExpectedEmail,
-  assertHostedPrivyIdentityMatchesExpectedPhone,
-} from "../hosted-onboarding/member-identity-fields";
+import { materializePendingHostedGroupJoinConfirmationsBestEffort } from "../hosted-groups/group-join-confirmation";
+import { lookupHostedMemberByVerifiedEmailAddress } from "../hosted-onboarding/hosted-member-store";
+import { lookupHostedMemberIdentityByPhoneNumber } from "../hosted-onboarding/hosted-member-identity-store";
+import { assertHostedMemberNotSuspended } from "../hosted-onboarding/entitlement";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
-import { readHostedOnboardingEnvironment } from "../hosted-onboarding/env";
-import type { HostedMemberCoreState } from "../hosted-onboarding/hosted-member-store";
-import {
-  readHostedPrivyUserById,
-  resolveHostedPrivyIdentityFromVerifiedUser,
-  type HostedPrivyIdentity,
-  type HostedPrivyUser,
-} from "../hosted-onboarding/privy";
-import { resolveHostedPrivyAuthMethodFromIdentity } from "../hosted-onboarding/privy-auth-method";
-import {
-  generateHostedMemberId,
-  HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
-} from "../hosted-onboarding/shared";
 
 export type HostedOpsAppReviewMemberMode = "apply" | "dry-run";
-
 export type HostedOpsAppReviewMemberPrincipal =
   | { kind: "email"; value: string }
-  | { kind: "phone"; value: string }
-  | { kind: "privyUserId"; value: string };
-
+  | { kind: "phone"; value: string };
 export interface HostedOpsAppReviewMemberSummary {
   action: "applied" | "dry-run";
   activated?: boolean;
@@ -69,68 +23,33 @@ export interface HostedOpsAppReviewMemberSummary {
   consentScopes: readonly string[];
   member: string | null;
   principal: string;
-  privyUser: string;
   suspended?: boolean;
 }
 
 const REQUIRED_CONSENT_SCOPES = ["launch.legal", "launch.health-data"] as const;
 const OPS_SOURCE = "app-store-review-ops";
-const HOSTED_OPS_APP_REVIEW_PRIVY_AUTHORITY_TIMEOUT_MS = 5_000;
 
+/** Prepares product access only. The reviewer first signs in through ordinary authentication. */
 export async function prepareHostedOpsAppReviewMember(input: {
-  createPrivyUser?: boolean;
   mode: HostedOpsAppReviewMemberMode;
   now?: Date;
   principal: HostedOpsAppReviewMemberPrincipal;
   prisma?: PrismaClient;
 }): Promise<HostedOpsAppReviewMemberSummary> {
-  if (input.createPrivyUser === true && input.principal.kind !== "email") {
-    throw new Error("Privy test-user creation currently supports email principals only.");
-  }
-  if (input.createPrivyUser === true && input.mode !== "apply") {
-    throw new Error("Privy test-user creation requires apply mode.");
-  }
-
-  const environment = readHostedOnboardingEnvironment(process.env);
-  const privyAppId = normalizeRequiredEnv("NEXT_PUBLIC_PRIVY_APP_ID", environment.privyAppId);
-  const privyAppSecret = normalizeRequiredEnv("PRIVY_APP_SECRET", environment.privyAppSecret);
-  const privy = new PrivyClient({ appId: privyAppId, appSecret: privyAppSecret });
-
-  const user = input.createPrivyUser === true && input.principal.kind === "email"
-    ? await readOrCreatePrivyEmailUser({
-        email: input.principal.value,
-        privy,
-      })
-    : await readPrivyUser({ principal: input.principal, privy });
-  const identity = resolveHostedPrivyIdentityFromVerifiedUser(user as HostedPrivyUser);
   const prisma = input.prisma ?? getPrisma();
-
-  if (input.mode === "dry-run") {
-    const existing = await lookupHostedMemberIdentityByPrivyUserId({
-      prisma,
-      privyUserId: identity.userId,
-    });
-    const existingConsentScopes = existing
-      ? await readGrantedLaunchConsentScopes({ memberId: existing.core.id, prisma })
-      : [];
-
-    return buildSummary({
-      action: "dry-run",
-      billingStatus: existing?.core.billingStatus ?? null,
-      consentScopes: existingConsentScopes,
-      memberId: existing?.core.id ?? null,
-      principal: input.principal,
-      privyUserId: identity.userId,
-    });
-  }
-
-  const now = input.now ?? new Date();
-  const member = await resolvePreparedHostedOpsAppReviewMember({
-    identity,
-    now,
-    principal: input.principal,
-    prisma,
+  const { member, authenticated } = await readExistingReviewAccount(input.principal, prisma);
+  const consentScopes = member ? await readGrantedLaunchConsentScopes({ memberId: member.id, prisma }) : [];
+  if (input.mode === "dry-run") return buildSummary({
+    action: "dry-run", billingStatus: member?.billingStatus ?? null, consentScopes,
+    memberId: member?.id ?? null, principal: input.principal,
+    suspended: Boolean(member?.suspendedAt),
   });
+  if (!member || !authenticated) {
+    throw hostedOnboardingError({ code: "APP_REVIEW_SIGN_IN_REQUIRED", httpStatus: 409,
+      message: "Sign in to the review account normally before preparing product access." });
+  }
+  assertHostedMemberNotSuspended(member);
+  const now = input.now ?? new Date();
   const preparedCryptoDomainRoots =
     await prepareHostedCryptoDomainRootCandidates({
       prisma,
@@ -141,7 +60,7 @@ export async function prepareHostedOpsAppReviewMember(input: {
     dispatchContext: {
       eventCreatedAt: now,
       occurredAt: now.toISOString(),
-      sourceEventId: `app-store-review:${identity.userId}`,
+      sourceEventId: `app-store-review:${member.id}`,
       sourceType: "hosted.app_store_review",
     },
     memberId: member.id,
@@ -186,268 +105,20 @@ export async function prepareHostedOpsAppReviewMember(input: {
     consentScopes: consent.launchScopes.filter((scope) => scope.granted).map((scope) => scope.scope),
     memberId: currentMember.id,
     principal: input.principal,
-    privyUserId: identity.userId,
     suspended: Boolean(currentMember.suspendedAt),
   });
 }
 
-async function resolvePreparedHostedOpsAppReviewMember(input: {
-  identity: HostedPrivyIdentity;
-  now: Date;
-  principal: HostedOpsAppReviewMemberPrincipal;
-  prisma: PrismaClient;
-}): Promise<HostedMemberCoreState> {
-  const authMethod = resolveHostedPrivyAuthMethodFromIdentity({
-    authMethod: input.principal.kind === "email"
-      ? "email"
-      : input.principal.kind === "phone"
-        ? "phone"
-        : undefined,
-    identity: input.identity,
+async function readExistingReviewAccount(principal: HostedOpsAppReviewMemberPrincipal, prisma: PrismaClient) {
+  const existing = principal.kind === "email"
+    ? await lookupHostedMemberByVerifiedEmailAddress({ address: principal.value, prisma })
+    : await lookupHostedMemberIdentityByPhoneNumber({ phoneNumber: principal.value, prisma });
+  const member = existing?.core ?? null;
+  const verified = principal.kind === "email" || Boolean(existing && "identity" in existing && existing.identity.phoneNumberVerifiedAt);
+  const authenticated = member && verified && await prisma.hostedAuthRecord.findUnique({
+    select: { id: true }, where: { model_id: { model: "user", id: member.id } },
   });
-
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    const runAttempt = async (): Promise<HostedMemberCoreState> => {
-      const existing = await lookupHostedMemberForPrivyAuthAttempt({
-        authMethod,
-        identity: input.identity,
-        prisma: input.prisma,
-      });
-      if (!existing) {
-        await assertHostedPrivyAccountDeletionNotPending({
-          prisma: input.prisma,
-          privyUserId: input.identity.userId,
-        });
-      }
-      const preparedMemberId = existing?.core.id ?? generateHostedMemberId();
-      const preparedControlRoot = await prepareHostedDomainRootForWeb({
-        domain: "control",
-        prisma: input.prisma,
-        reason: "hosted-ops.app-review-member",
-        userId: preparedMemberId,
-      });
-      if (existing) {
-        await readHostedMemberIdentity({
-          memberId: existing.core.id,
-          prisma: input.prisma,
-        });
-      }
-      const preparedLiveIdentity = resolveHostedPrivyIdentityFromVerifiedUser(
-        await readHostedPrivyUserById(input.identity.userId, {
-          maxRetries: 0,
-          timeout: HOSTED_OPS_APP_REVIEW_PRIVY_AUTHORITY_TIMEOUT_MS,
-        }),
-      );
-      if (input.principal.kind === "email") {
-        assertHostedPrivyIdentityMatchesExpectedEmail({
-          expectedEmailLookupKey: createHostedEmailLookupKey(input.principal.value) ?? undefined,
-          identity: preparedLiveIdentity,
-        });
-      } else if (input.principal.kind === "phone") {
-        assertHostedPrivyIdentityMatchesExpectedPhone({
-          expectedPhoneLookupKey: createHostedPhoneLookupKey(input.principal.value) ?? undefined,
-          identity: preparedLiveIdentity,
-        });
-      }
-
-      return input.prisma.$transaction(
-        (tx) => runWithHostedDomainRootProviderCallsDisabled(() =>
-          runWithHostedDomainRootUnwrapCache(async () => (
-            await ensureHostedMemberForPrivyIdentityResolutionTx({
-              authMethod,
-              identity: preparedLiveIdentity,
-              now: input.now,
-              preparedControlRoot,
-              preparedExistingMemberId: existing?.core.id ?? null,
-              preparedLiveIdentity,
-              preparedNewMemberId: preparedMemberId,
-              prisma: tx,
-            })
-          ).member),
-        ),
-        HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
-      );
-    };
-
-    try {
-      return await (attempt === 0
-        ? runWithHostedDomainRootUnwrapCache(runAttempt)
-        : runWithFreshHostedDomainRootUnwrapCache(runAttempt));
-    } catch (error) {
-      if (error instanceof HostedDomainRootPreparationMismatchError && attempt === 0) {
-        continue;
-      }
-      throw error;
-    }
-  }
-
-  throw new HostedDomainRootPreparationMismatchError();
-}
-
-async function readPrivyUser(input: {
-  principal: HostedOpsAppReviewMemberPrincipal;
-  privy: PrivyClient;
-}): Promise<PrivyUser> {
-  try {
-    switch (input.principal.kind) {
-      case "email":
-        return await input.privy.users().getByEmailAddress({ address: input.principal.value });
-      case "phone":
-        return await input.privy.users().getByPhoneNumber({ number: input.principal.value });
-      case "privyUserId":
-        return await input.privy.users()._get(input.principal.value);
-    }
-  } catch (error) {
-    throw mapPrivyAppReviewError(error, {
-      code: "HOSTED_OPS_APP_REVIEW_PRIVY_USER_LOOKUP_FAILED",
-      httpStatus: isPrivyMissingUserError(error) ? 409 : 503,
-      message: isPrivyMissingUserError(error)
-        ? "Privy reviewer user does not exist yet."
-        : "Privy reviewer user lookup failed.",
-      operationName: "privy_user_lookup",
-      retryable: isRetryablePrivyError(error),
-    });
-  }
-}
-
-async function readOrCreatePrivyEmailUser(input: {
-  email: string;
-  privy: PrivyClient;
-}): Promise<PrivyUser> {
-  try {
-    return await input.privy.users().getByEmailAddress({ address: input.email });
-  } catch (error) {
-    if (!isPrivyMissingUserError(error)) {
-      throw mapPrivyAppReviewError(error, {
-        code: "HOSTED_OPS_APP_REVIEW_PRIVY_USER_LOOKUP_FAILED",
-        httpStatus: 503,
-        message: "Privy reviewer user lookup failed.",
-        operationName: "privy_email_lookup_before_create",
-        retryable: isRetryablePrivyError(error),
-      });
-    }
-  }
-
-  try {
-    return await input.privy.users().create({
-      linked_accounts: [
-        {
-          address: input.email,
-          type: "email",
-        },
-      ],
-    });
-  } catch (error) {
-    if (isPrivyConflictError(error)) {
-      return readPrivyUser({
-        principal: {
-          kind: "email",
-          value: input.email,
-        },
-        privy: input.privy,
-      });
-    }
-
-    throw mapPrivyAppReviewError(error, {
-      code: "HOSTED_OPS_APP_REVIEW_PRIVY_USER_CREATE_FAILED",
-      httpStatus: 503,
-      message: "Privy reviewer user creation failed.",
-      operationName: "privy_email_user_create",
-      retryable: isRetryablePrivyError(error),
-    });
-  }
-}
-
-function mapPrivyAppReviewError(error: unknown, input: {
-  code: string;
-  httpStatus: number;
-  message: string;
-  operationName: string;
-  retryable: boolean;
-}): Error {
-  return hostedOnboardingError({
-    cause: error,
-    code: input.code,
-    details: {
-      operationName: input.operationName,
-      ...readPrivyErrorDetails(error),
-    },
-    httpStatus: input.httpStatus,
-    message: input.message,
-    retryable: input.retryable,
-  });
-}
-
-function readPrivyErrorDetails(error: unknown): Record<string, string | number | boolean> {
-  return {
-    providerErrorType: error instanceof Error ? error.name : typeof error,
-    ...readPrivyStatusDetails(error),
-    ...readPrivyErrorCodeDetails(error),
-    ...readPrivyRequestDetails(error),
-  };
-}
-
-function readPrivyStatusDetails(error: unknown): Record<string, number> {
-  const statusCode = readPrivyStatusCode(error);
-  return statusCode === null ? {} : { statusCode };
-}
-
-function readPrivyErrorCodeDetails(error: unknown): Record<string, string> {
-  const providerErrorCode = readPrivyProviderErrorCode(error);
-  return providerErrorCode === null ? {} : { providerErrorCode };
-}
-
-function readPrivyRequestDetails(error: unknown): Record<string, boolean> {
-  return error instanceof APIError
-    ? { providerRequestIdPresent: hasPrivyRequestIdHeader(error.headers) }
-    : {};
-}
-
-function readPrivyProviderErrorCode(error: unknown): string | null {
-  if (!(error instanceof APIError)) {
-    return null;
-  }
-
-  const providerError = error.error;
-  if (!providerError || typeof providerError !== "object") {
-    return null;
-  }
-
-  for (const key of ["code", "error", "type"]) {
-    const value = Reflect.get(providerError, key);
-    if (typeof value === "string" && value.trim()) {
-      return value.trim();
-    }
-  }
-
-  return null;
-}
-
-function hasPrivyRequestIdHeader(headers: Headers | undefined): boolean {
-  return Boolean(
-    headers?.get("x-request-id")
-    || headers?.get("x-privy-request-id")
-    || headers?.get("request-id"),
-  );
-}
-
-function isPrivyMissingUserError(error: unknown): boolean {
-  return readPrivyStatusCode(error) === 404;
-}
-
-function isPrivyConflictError(error: unknown): boolean {
-  return readPrivyStatusCode(error) === 409;
-}
-
-function isRetryablePrivyError(error: unknown): boolean {
-  const statusCode = readPrivyStatusCode(error);
-  return statusCode === null || statusCode === 429 || statusCode >= 500;
-}
-
-function readPrivyStatusCode(error: unknown): number | null {
-  return error instanceof APIError && typeof error.status === "number"
-    ? error.status
-    : null;
+  return { member, authenticated };
 }
 
 async function readGrantedLaunchConsentScopes(input: {
@@ -466,22 +137,6 @@ async function readGrantedLaunchConsentScopes(input: {
   return grants.map((grant) => grant.scope);
 }
 
-function normalizeRequiredEnv(name: string, value: string | null | undefined): string {
-  const normalized = normalizeNullableString(value);
-  if (!normalized) {
-    throw new Error(`${name} must be present in the command environment.`);
-  }
-  return normalized;
-}
-
-function normalizeNullableString(value: string | null | undefined): string | null {
-  if (typeof value !== "string") {
-    return null;
-  }
-  const normalized = value.trim();
-  return normalized.length > 0 ? normalized : null;
-}
-
 function buildSummary(input: {
   action: "applied" | "dry-run";
   activated?: boolean;
@@ -489,7 +144,6 @@ function buildSummary(input: {
   consentScopes: readonly string[];
   memberId: string | null;
   principal: HostedOpsAppReviewMemberPrincipal;
-  privyUserId: string;
   suspended?: boolean;
 }): HostedOpsAppReviewMemberSummary {
   return {
@@ -500,7 +154,6 @@ function buildSummary(input: {
     consentScopes: input.consentScopes,
     member: input.memberId ? redactIdentifier(input.memberId) : null,
     principal: redactPrincipal(input.principal),
-    privyUser: redactIdentifier(input.privyUserId),
     suspended: input.suspended,
   };
 }
@@ -511,8 +164,6 @@ function redactPrincipal(principal: HostedOpsAppReviewMemberPrincipal): string {
       return `email:${redactEmail(principal.value)}`;
     case "phone":
       return `phone:${redactPhone(principal.value)}`;
-    case "privyUserId":
-      return `privyUserId:${redactIdentifier(principal.value)}`;
   }
 }
 

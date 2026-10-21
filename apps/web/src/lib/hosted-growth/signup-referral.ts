@@ -414,7 +414,6 @@ async function createPristineHostedSignupMemberTx(
     phoneNumber: null,
     phoneNumberVerifiedAt: null,
     prisma,
-    privyUserId: null,
     signupPhoneCodeSendAttemptId: null,
     signupPhoneCodeSendAttemptStartedAt: null,
     signupPhoneCodeSentAt: null,

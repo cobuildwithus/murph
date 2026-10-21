@@ -38,20 +38,20 @@ beforeEach(() => {
   mocks.authenticate.mockResolvedValue({ id: "synthetic-native-assertion" });
   mocks.reauthenticate.mockImplementation(async () => { stale = false; });
   mocks.request.mockImplementation(async ({ url, payload }: { url: string; payload?: Record<string, unknown> }) => {
-    if (url === "/api/settings/approval-passkeys") return { initialEnrollmentAllowed: false, legacyRepairAllowed: !configured };
+    if (url === "/api/settings/approval-passkeys") return { initialEnrollmentAllowed: !configured };
     if (url === `${base}/challenge`) {
       if (unavailable) throw new Error("This approval expired or was already decided. Request a new link.");
       challenges += 1;
       return { token: token(challenges), message: "Synthetic exact action challenge", expiresAt: "2099-01-01T00:00:00Z" };
     }
     if (url.endsWith("/authenticate")) return configured
-      ? { method: "passkey", options: { challenge: "synthetic-native-challenge" } } : { method: "legacy-repair" };
-    if (url.endsWith("/legacy-options")) {
+      ? { method: "passkey", options: { challenge: "synthetic-native-challenge" } } : { method: "initial" };
+    if (url.endsWith("/initial-options")) {
       if (stale) throw new HostedOnboardingApiError({ code: "SENSITIVE_ACTION_FRESH_LOGIN_REQUIRED", message: "Sign in again." });
       return { token: "synthetic-registration-token", options: { challenge: "synthetic-registration-challenge" } };
     }
     if (url.endsWith("/register")) {
-      expect(payload).toEqual({ legacyRepairToken: "synthetic-registration-token", response: { id: "synthetic-new-credential" } });
+      expect(payload).toEqual({ initialToken: "synthetic-registration-token", response: { id: "synthetic-new-credential" } });
       configured = true;
       if (loseRegistrationResponse) throw new Error("Passkey save could not be confirmed. Try the request again.");
       return { registered: true };
@@ -102,7 +102,7 @@ test("stale sign-in waits for an inline continuation and never submits the pre-l
     expect(mocks.register).not.toHaveBeenCalled();
     expect(callsTo("/decision")).toHaveLength(0);
     await act(async () => { login.resolve(); });
-    expect(callsTo("/legacy-options")).toHaveLength(2);
+    expect(callsTo("/initial-options")).toHaveLength(2);
     expect(callsTo("/decision")[0][0].payload.authorization.token).toBe(token(2));
   } finally { await view.cleanup(); }
 });
@@ -116,7 +116,7 @@ test.each(["registration", "sign-in", "verification"])("canceling %s does not ap
     await click(view);
     expect(callsTo("/register")).toHaveLength(0);
     expect(callsTo("/decision")).toHaveLength(0);
-    if (where === "verification") expect(callsTo("/legacy-options")).toHaveLength(0);
+    if (where === "verification") expect(callsTo("/initial-options")).toHaveLength(0);
     expect(view.container.textContent).toContain("canceled");
   } finally { await view.cleanup(); }
 });
@@ -164,7 +164,7 @@ test("ordinary native approval remains one challenge and deny never enrolls", as
   try {
     await click(native);
     expect(callsTo("/challenge")).toHaveLength(1);
-    expect(callsTo("/legacy-options")).toHaveLength(0);
+    expect(callsTo("/initial-options")).toHaveLength(0);
     expect(mocks.register).not.toHaveBeenCalled();
   } finally { await native.cleanup(); }
   mocks.request.mockClear(); configured = false;
@@ -173,7 +173,7 @@ test("ordinary native approval remains one challenge and deny never enrolls", as
     await click(denied, "Deny");
     expect(callsTo("/decision")[0][0].payload).toEqual({ decision: "denied" });
     expect(callsTo("/challenge")).toHaveLength(0);
-    expect(callsTo("/legacy-options")).toHaveLength(0);
+    expect(callsTo("/initial-options")).toHaveLength(0);
   } finally { await denied.cleanup(); }
 });
 

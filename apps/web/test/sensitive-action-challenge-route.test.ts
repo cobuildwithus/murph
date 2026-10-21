@@ -35,7 +35,7 @@ describe("settings sensitive-action challenge route", () => {
     mocks.getPrisma.mockReturnValue(mocks.prisma);
     mocks.requireHostedAppSessionFromRequest.mockResolvedValue({
       member: { id: "member_123" },
-      privyUserId: "privy-user-123",
+
       sessionId: "session_123",
     });
     mocks.createSensitiveActionChallenge.mockResolvedValue({

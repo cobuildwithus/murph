@@ -4,6 +4,7 @@ import { HostedBillingStatus } from "@prisma/client";
 import { describe, expect, it, vi } from "vitest";
 
 import { setHostedSecureBoxStringTestCodecForTests } from "@/src/lib/hosted-crypto/secure-box";
+import { runWithFreshHostedDomainRootUnwrapCache } from "@/src/lib/hosted-crypto/domain-root-unwrap-cache";
 import {
   createHostedPhoneLookupKey,
 } from "@/src/lib/hosted-onboarding/contact-privacy";
@@ -17,17 +18,34 @@ import {
 import { buildHostedStarterUsageSemanticSourceKey } from "@/src/lib/hosted-onboarding/starter-usage";
 import { parseHostedLinqWebhookEvent } from "@/src/lib/hosted-onboarding/linq";
 import { planHostedOnboardingLinqWebhook } from "@/src/lib/hosted-onboarding/webhook-provider-linq";
-import { createPrismaClient } from "@/src/lib/prisma";
+import { createPrismaClient, getPrisma } from "@/src/lib/prisma";
+import { recordHostedLaunchRequiredConsent } from "@/src/lib/legal/consent";
+import { requireHostedCompanionMemberIdFromRequest } from "@/src/lib/hosted-onboarding/companion-member-access";
+import { createHostedLinqParticipantContact } from "@/src/lib/hosted-onboarding/linq-participant-contact";
+import { prepareHostedAuthOtpMember } from "@/src/lib/better-auth/member";
+import { sendHostedAuthOtp } from "@/src/lib/better-auth/send-otp";
+import { commitHostedAuthOtp } from "@/src/lib/better-auth/otp-transaction";
+import { authLookupKey } from "@/src/lib/better-auth/record-crypto";
+import { syntheticSmsVerification } from "./support/better-auth-sms-verification";
+import { POST as sendNativePhone } from "../app/api/device-sync/companion/auth/messaging/phone/send/route";
+import { POST as verifyNativePhone } from "../app/api/device-sync/companion/auth/messaging/phone/verify/route";
+import { GET as readNativeOnboarding } from "../app/api/device-sync/companion/initial-onboarding/route";
 
 vi.mock("server-only", () => ({}));
 
 const boundaries = vi.hoisted(() => ({
+  codes: new Map<string, string>(),
   sendEmail: vi.fn(async () => ({ providerMessageId: "test-email" })),
   signalMailboxAppend: vi.fn(async () => ({
     signalAccepted: true as const,
     workflowId: "hosted-user-runtime:test",
   })),
 }));
+
+vi.mock("@/src/lib/better-auth/twilio-verify", () => ({
+  hostedAuthSmsVerification: () => sms,
+}));
+let sms = syntheticSmsVerification(boundaries.codes);
 
 vi.mock("@/src/lib/hosted-orchestration/signal-runtime", async (importOriginal) => ({
   ...(await importOriginal<
@@ -59,6 +77,105 @@ if (
 describe.skipIf(!runPostgresProof)(
   "companion Starter enrollment PostgreSQL integration",
   () => {
+    it("recovers the first phone route after email-only activation without duplicate admission state", async () => {
+      const prisma = getPrisma();
+      const restoreEnvironment = configureLocalEnrollmentEnvironmentForTest();
+      const baseURL = "https://www.withmurph.ai";
+      const secret = Buffer.alloc(32, 29).toString("base64url");
+      Object.assign(process.env, {
+        HOSTED_AUTH_STORAGE_KEY: Buffer.alloc(32, 17).toString("base64url"),
+        HOSTED_BETTER_AUTH_ENABLED: "true", HOSTED_BETTER_AUTH_SECRET: secret,
+        HOSTED_ONBOARDING_PUBLIC_BASE_URL: baseURL, VERCEL: "1",
+      });
+      const address = `companion-phone-${randomUUID()}@example.test`;
+      const contact = createHostedLinqParticipantContact({ kind: "email", value: address });
+      if (!contact) throw new Error("Expected synthetic email contact.");
+      const memberPhone = "+12025550186";
+      const linePhone = "+12025550187";
+      const lineLookupKey = requirePhoneLookupKey(linePhone);
+      const rateKeys = ["send:cooldown:phone:", "send:contact:phone:", "verify:contact:phone:"]
+        .map((prefix) => `${prefix}${memberPhone}`)
+        .concat(["send:ip:2001:db8::186", "verify:ip:2001:db8::186"])
+        .map((value) => `arl_${authLookupKey("verification", "rate-limit", value)}`);
+      let memberId: string | undefined;
+      let lineCreated = false;
+      boundaries.codes.clear();
+      sms = syntheticSmsVerification(boundaries.codes);
+      boundaries.signalMailboxAppend.mockClear();
+      try {
+        await prisma.hostedAuthRecord.deleteMany({ where: { model: "verification", id: { in: rateKeys } } });
+        const issued = await runWithFreshHostedDomainRootUnwrapCache(async () => {
+          const prepared = await prepareHostedAuthOtpMember({ prisma, contact });
+          let code = "";
+          await sendHostedAuthOtp({ baseURL, secret, prisma, contact,
+            delivery: { email: async (value) => { code = value.code; } },
+          });
+          return commitHostedAuthOtp({ baseURL, secret, prisma, ...prepared,
+            otp: { kind: "email", address, code },
+          });
+        });
+        memberId = issued.memberId;
+        const request = (body?: unknown) => new Request(`${baseURL}/api/device-sync/companion/admission`, {
+          method: body === undefined ? "GET" : "POST",
+          headers: { authorization: `Bearer murph_auth_v1.${issued.token}`,
+            "content-type": "application/json", "x-vercel-forwarded-for": "2001:db8::186" },
+          ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+        });
+        for (const scope of ["launch.legal", "launch.health-data"] as const) {
+          await recordHostedLaunchRequiredConsent({ memberId, prisma, scope, source: "test" });
+        }
+        await expect(requireHostedCompanionMemberIdFromRequest({ request: request(), prisma })).resolves.toBe(memberId);
+        expect(await prisma.hostedMailboxItem.updateMany({
+          where: { userId: memberId, kind: "member.activated" }, data: { consumedAt: new Date() },
+        })).toMatchObject({ count: 1 });
+        const inviteCount = await prisma.hostedInvite.count({ where: { memberId } });
+        const creditCount = await prisma.hostedUsageCreditEntry.count({ where: { beneficiaryMemberId: memberId } });
+        const grantCount = await prisma.hostedUsageCreditGrant.count({ where: { beneficiaryMemberId: memberId } });
+        expect(creditCount).toBe(1);
+        expect((await (await readNativeOnboarding(request())).json()).messagingSetupRequired).toBe(true);
+        await prisma.hostedLinqLine.create({ data: {
+          assignmentWeight: 1_000_000, configuredAt: new Date(), egressPolicy: "enabled",
+          healthStatus: "healthy", maxNewConversationsPerDay: 50,
+          providerInventoryConfirmedAt: new Date(), providerPhoneNumberId: "synthetic-companion-line",
+          phoneNumberEncrypted: encryptHostedLinqLinePhoneNumber(linePhone),
+          phoneNumberHint: "*** test", phoneNumberLookupKey: lineLookupKey, source: "test",
+        } });
+        lineCreated = true;
+        const change = { method: "phone", operation: "set", expectedIdentity: null, value: memberPhone };
+        expect((await sendNativePhone(request({ change }))).status).toBe(200);
+        expect((await verifyNativePhone(request({ change, code: boundaries.codes.get(memberPhone) }))).status).toBe(200);
+        expect((await prisma.hostedMemberRouting.findUnique({ where: { memberId } }))?.linqRecipientPhoneLookupKey ?? null).toBeNull();
+        for (let attempt = 0; attempt < 2; attempt++) {
+          await expect(requireHostedCompanionMemberIdFromRequest({ request: request(), prisma })).resolves.toBe(memberId);
+          expect(await prisma.hostedMemberRouting.findUnique({ where: { memberId } })).toMatchObject({
+            linqRecipientPhoneLookupKey: lineLookupKey,
+          });
+          const response = await readNativeOnboarding(request());
+          expect(response.status).toBe(200);
+          expect(await response.json()).toMatchObject({ messagingSetupRequired: false,
+            contactAction: { kind: "text", href: expect.stringContaining(linePhone) },
+          });
+          expect(await prisma.hostedMailboxItem.count({ where: { userId: memberId,
+            kind: "assistant.notification.requested", dedupeKey: { contains: ":linq:" } },
+          })).toBe(1);
+          expect(await prisma.hostedInvite.count({ where: { memberId } })).toBe(inviteCount);
+          expect(await prisma.hostedUsageCreditEntry.count({ where: { beneficiaryMemberId: memberId } })).toBe(creditCount);
+          expect(await prisma.hostedUsageCreditGrant.count({ where: { beneficiaryMemberId: memberId } })).toBe(grantCount);
+          expect(await prisma.deviceConnection.count({ where: { userId: memberId } })).toBe(0);
+        }
+      } finally {
+        if (memberId) {
+          await prisma.hostedUsageCreditGrant.deleteMany({ where: { beneficiaryMemberId: memberId } });
+          await prisma.hostedUsageCreditEntry.deleteMany({ where: { beneficiaryMemberId: memberId } });
+          await prisma.hostedMember.deleteMany({ where: { id: memberId } });
+        }
+        if (lineCreated) await prisma.hostedLinqLine.deleteMany({ where: { phoneNumberLookupKey: lineLookupKey } });
+        await prisma.hostedAuthRecord.deleteMany({ where: { model: "verification", id: { in: rateKeys } } });
+        restoreEnvironment();
+        await prisma.$disconnect();
+      }
+    });
+
     it.each([
       {
         expectedMailboxCount: 2,
@@ -148,7 +265,7 @@ describe.skipIf(!runPostgresProof)(
                 memberId,
                 phoneNumber: memberPhone,
                 prisma: tx,
-                privyUserId: null,
+
                 signupPhoneCodeSendAttemptId: null,
                 signupPhoneCodeSendAttemptStartedAt: null,
                 signupPhoneCodeSentAt: null,
@@ -448,6 +565,8 @@ function requirePhoneLookupKey(phoneNumber: string): string {
 }
 
 const LOCAL_ENROLLMENT_ENV_KEYS = [
+  "HOSTED_AUTH_STORAGE_KEY", "HOSTED_BETTER_AUTH_ENABLED", "HOSTED_BETTER_AUTH_SECRET",
+  "HOSTED_ONBOARDING_PUBLIC_BASE_URL", "VERCEL",
   "HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION",
   "HOSTED_CONTACT_PRIVACY_KEYS",
   "HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID",
