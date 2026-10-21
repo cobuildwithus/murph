@@ -1380,3 +1380,5 @@ Profile-photo implementation is tracked in [`game profile photos`](exec-plans/co
 
 The pre-commit large-diff proof no longer depends on obsolete pipeline timing;
 see [the completed release-gate proof plan](exec-plans/completed/2026-10-21-release-gate-proof.md).
+
+Fresh mailbox arrivals during usage pauses are covered by [progress alert age proof](exec-plans/active/2026-10-21-progress-paused-import.md); the current contract remains in the hosted runtime protocol.
