@@ -27,7 +27,7 @@ reminder reconciliation using only permitted member-supplied canonical context.
 Provider/category opt-outs exclude that source or category from every later step,
 including reminder repair and automatic context projection.
 
-Only when global capture is permitted, read the `connected-apps` skill, then
+Only when global capture is permitted, read `$MURPH_ASSISTANT_SKILLS_ROOT/connected-apps/references/reading.md`, then
 list active connected accounts. Its account-selection steps do not override the
 opt-out check above. Only Google Calendar, Gmail, and Outlook have automatic reads.
 Active supported accounts are eligible in this same run unless
@@ -303,7 +303,8 @@ reminder. Similar titles alone do not establish duplication.
 
 Keep changing facts in their canonical owners. Replace a permanently embedded
 incidental assumption with instructions to resolve current context at execution;
-for outdoor reminders, refer to the `connected-apps` location policy and then
+for outdoor reminders, refer to the Outdoor reminder location section in
+`$MURPH_ASSISTANT_SKILLS_ROOT/connected-apps/references/reading.md` and then
 weather. Make the smallest instruction edit, preserving the original activity and
 delivery conditions. Reuse that policy instead of copying its procedure or adding new
 weather-based suppression rules. Preserve an explicitly fixed destination or venue
