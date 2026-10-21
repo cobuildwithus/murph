@@ -1,6 +1,6 @@
 # Reduce repeated transport and Worker startup work
 
-Status: active
+Status: completed
 Created: 2026-10-20
 Updated: 2026-10-20
 
@@ -53,7 +53,11 @@ new service, global dispatcher, proactive network traffic, or production deploy.
   all six. Median non-idle local CPU: 59.13 ms to 43.60 ms (about 26% lower).
   Local CPU and loopback tests do not establish production end-to-end savings.
 - Complexity guard passes; moved validation functions preserve their complexity.
-- Remaining completion: public changelog, candidate review, PR, CI, ReviewGPT.
+- Generated schema artifacts/examples verify unchanged. Public changelog archive
+  rendering passes (10 tests); Web typecheck passes. Candidate diff, privacy,
+  affected ownership, and complexity reviewed.
+- Implementation complete in PR #4255. Exact-head CI and ReviewGPT are external
+  completion gates tracked on that PR; no production rollout is part of this plan.
 
 ## Risks
 
@@ -62,3 +66,4 @@ keep sockets open. A closed connection follows existing transport recovery.
 Worker/container/Web skew remains compatible because request, response, auth,
 fence, and persistent-state contracts are unchanged. Production latency must
 be checked after a separately authorized rollout.
+Completed: 2026-10-20
