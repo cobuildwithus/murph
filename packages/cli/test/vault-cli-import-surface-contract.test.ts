@@ -131,7 +131,11 @@ const scopedImportSurfaceProbes: readonly ScopedImportSurfaceProbe[] = [
     // adds five internal modules and ten locales; Environment removal drops
     // contracts/dist/environment-interview.js. No new package is loaded.
     // Native runner startup and emitted-byte budgets pass independently.
-    maxResolvedModules: 319,
+    // PR #4255 measured base 317 / candidate 320. The only added modules are
+    // contracts/dist/{experiment-outcome,schema-primitives,sleep-session}.js:
+    // verbatim schema moves that let the Worker skip the broad schema module.
+    // Admit the measured count only; no package or byte-budget change.
+    maxResolvedModules: 320,
   },
 ]
 
