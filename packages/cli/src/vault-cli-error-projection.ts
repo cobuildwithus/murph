@@ -14,11 +14,6 @@ export function projectVaultCliError(error: unknown): VaultCliErrorProjection {
     return projectQuerySourceError(querySourceDetails)
   }
 
-  const commonsArtifactError = readHealthCommonsProtocolArtifactError(error)
-  if (commonsArtifactError !== null) {
-    return projectHealthCommonsProtocolArtifactError(commonsArtifactError)
-  }
-
   return projectGenericVaultCliError(error)
 }
 
@@ -156,63 +151,6 @@ function isSafeRelativePath(value: string): boolean {
   return value
     .split('/')
     .every((segment) => segment.length > 0 && segment !== '.' && segment !== '..')
-}
-
-const healthCommonsProtocolArtifacts = new Set([
-  'protocol_family_graph',
-  'protocol_index',
-  'protocol_run_specs',
-] as const)
-
-type HealthCommonsProtocolArtifact =
-  | 'protocol_family_graph'
-  | 'protocol_index'
-  | 'protocol_run_specs'
-
-interface HealthCommonsProtocolArtifactDetails {
-  artifact: HealthCommonsProtocolArtifact
-  category: 'invalid' | 'unavailable'
-}
-
-function readHealthCommonsProtocolArtifactError(
-  error: unknown,
-): HealthCommonsProtocolArtifactDetails | null {
-  if (
-    !(error instanceof Error) ||
-    readErrorCode(error) !== 'HEALTH_COMMONS_PROTOCOL_ARTIFACT_FAILURE' ||
-    !('artifact' in error) ||
-    typeof error.artifact !== 'string' ||
-    !healthCommonsProtocolArtifacts.has(
-      error.artifact as HealthCommonsProtocolArtifact,
-    ) ||
-    !('category' in error) ||
-    (error.category !== 'invalid' && error.category !== 'unavailable')
-  ) {
-    return null
-  }
-
-  return {
-    artifact: error.artifact as HealthCommonsProtocolArtifact,
-    category: error.category,
-  }
-}
-
-function projectHealthCommonsProtocolArtifactError(
-  error: HealthCommonsProtocolArtifactDetails,
-): VaultCliErrorProjection {
-  const unavailable = error.category === 'unavailable'
-  return {
-    code: unavailable
-      ? 'commons_protocol_artifact_unavailable'
-      : 'commons_protocol_artifact_invalid',
-    message: unavailable
-      ? 'Health Commons protocol artifacts are unavailable.'
-      : 'Health Commons protocol artifacts are invalid.',
-    retryable: false,
-    hint:
-      'Stop protocol discovery, onboarding, planning, and starting a protocol until the packaged artifacts are restored or regenerated; then rerun the command. No protocol-backed run was created.',
-    stage: error.artifact,
-  }
 }
 
 function readErrorCode(error: unknown): string | null {

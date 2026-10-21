@@ -2,6 +2,9 @@ import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { EventEmitter } from "node:events";
 import { readFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -240,6 +243,75 @@ describe("runner base image preparation", () => {
     expect(result.status).toBe("built");
     expect(spawnSync).not.toHaveBeenCalled();
     expect(spawn).toHaveBeenCalledTimes(1);
+  });
+
+  it("publishes native source with the Dockerfile's two-job default", async () => {
+    const fs = await vi.importActual<typeof import("node:fs/promises")>("node:fs/promises");
+    const { execFileSync } = await vi.importActual<typeof import("node:child_process")>("node:child_process");
+    const repoRoot = fileURLToPath(new URL("../../../", import.meta.url));
+    const workflow = await fs.readFile(path.join(repoRoot, ".github/workflows/cloudflare-runner-base-image.yml"), "utf8");
+    const step = workflow.split("      - name: Publish runner base image\n")[1]?.split(/\n      - /u)[0] ?? "";
+    const run = step.match(/^        run: (.+)$/mu)?.[1];
+    expect(run).toBeDefined();
+    const env = { ...process.env };
+    delete env.CODEX_CARGO_JOBS;
+    for (const [, key, value] of step.matchAll(/^          (\w+): "?([^"\n]+)"?$/gmu)) {
+      env[key] = value;
+    }
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), "runner-base-publisher-"));
+    try {
+      const trace = path.join(directory, "docker.jsonl");
+      await fs.writeFile(path.join(directory, "docker"), `#!/usr/bin/env node
+const fs = require("node:fs");
+const args = process.argv.slice(2);
+fs.appendFileSync(process.env.MURPH_TEST_DOCKER_TRACE, JSON.stringify({
+  args, jobs: process.env.CODEX_CARGO_JOBS ?? null,
+}) + "\\n");
+require("node:assert/strict").deepEqual(args.slice(0, 2), ["buildx", "build"]);
+`, { mode: 0o755 });
+      // Run the checked-in workflow command through the real package script and
+      // helper CLI. Only Docker is replaced; no image is built or published.
+      execFileSync("bash", ["--noprofile", "--norc", "-eu", "-c", run!], {
+        cwd: repoRoot,
+        env: { ...env, PATH: `${directory}${path.delimiter}${env.PATH ?? ""}`, MURPH_TEST_DOCKER_TRACE: trace },
+        encoding: "utf8",
+        timeout: 30_000,
+      });
+      const builds: Array<{ args: string[]; jobs: string | null }> =
+        (await fs.readFile(trace, "utf8")).trim().split("\n").map((line) => JSON.parse(line));
+      expect(builds).toHaveLength(1);
+      const [build] = builds;
+      expect(build.args.slice(0, 3)).toEqual(["buildx", "build", "--push"]);
+      expect(build.args[build.args.indexOf("--build-arg") + 1]).toBe("CODEX_CARGO_JOBS");
+      const dockerfilePath = path.join(repoRoot, "Dockerfile.cloudflare-hosted-runner-base");
+      expect(build.args[build.args.indexOf("-f") + 1]).toBe(dockerfilePath);
+      vi.mocked(readFile).mockImplementation(fs.readFile);
+      const { computeRunnerBaseImageSourceFingerprint } = await import("../scripts/runner-base-image.ts");
+      const fingerprint = await computeRunnerBaseImageSourceFingerprint();
+      expect(build.args).toEqual(expect.arrayContaining([
+        "--platform", "linux/amd64",
+        "-t", hostedRunnerBaseImageRemoteTag,
+        "-t", hostedRunnerBaseImageFingerprintTag(fingerprint),
+        "--label", `${runnerBaseImageSourceFingerprintLabel}=${fingerprint}`,
+      ]));
+      const dockerfile = await fs.readFile(dockerfilePath, "utf8");
+      const defaultJobs = dockerfile.match(/^ARG CODEX_CARGO_JOBS=(\d+)$/mu)?.[1];
+      const cargoCommand = dockerfile.match(/^\s*&& (cargo build .+) \\$/mu)?.[1];
+      expect(defaultJobs).toBeDefined();
+      expect(cargoCommand).toBeDefined();
+      // A bare Docker build arg inherits the child environment when set and
+      // otherwise uses ARG's default. Execute the real Cargo command with a spy.
+      const cargoArgs = execFileSync("bash", ["--noprofile", "--norc", "-eu", "-c",
+        `cargo() { printf '%s\\n' "$@"; }\n${cargoCommand}`,
+      ], {
+        env: { PATH: env.PATH, CODEX_CARGO_JOBS: build.jobs ?? defaultJobs },
+        encoding: "utf8",
+        timeout: 10_000,
+      }).trim().split("\n");
+      expect(cargoArgs[cargoArgs.indexOf("--jobs") + 1]).toBe("2");
+    } finally {
+      await fs.rm(directory, { recursive: true, force: true });
+    }
   });
 });
 

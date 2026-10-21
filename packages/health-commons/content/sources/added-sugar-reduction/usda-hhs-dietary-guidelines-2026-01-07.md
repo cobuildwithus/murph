@@ -16,20 +16,8 @@ categories:
   - high-protein-intake
   - protein-floor
   - external_guideline_context
-relations:
+relations: []
 
-  -
-    type: related_protocol
-    target: protocol_variant:added-sugar-reduction/no-added-sugar-diet
-  -
-    type: parent_family
-    target: experiment_family:added-sugar-reduction
-  -
-    type: related_protocol
-    target: protocol_variant:high-protein-intake/protein-floor-high-protein-intake
-  -
-    type: parent_family
-    target: experiment_family:high-protein-intake
 sourceIdentity:
   identityKind: guideline
   canonicalIdBasis: url

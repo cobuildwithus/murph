@@ -102,13 +102,6 @@ const probeRoutes: ProbeRoute[] = [
     params: {},
     url: "http://localhost/connect/opengraph-image",
   },
-  {
-    entry: "server/app/experiments/[experimentId]/opengraph-image/route.js",
-    expectedHeight: 630,
-    expectedWidth: 1200,
-    params: { experimentId: "experiment-probe" },
-    url: "http://localhost/experiments/experiment-probe/opengraph-image",
-  },
   createIMessageCardProbe(),
 ];
 

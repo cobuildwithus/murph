@@ -27,40 +27,25 @@ categories:
   - wearable-metric
   - clinical-context
 relations:
-
-  -
-    type: related_protocol
-    target: protocol_variant:norwegian-4x4/norwegian-4x4
-  -
-    type: related_protocol
-    target: protocol_variant:dry-sauna/murph-finnish-standard-3x-week
-  -
-    type: cites
+  - type: cites
     target: source_artifact:pmid-27881567
-  -
-    type: cites
+  - type: cites
     target: source_artifact:pmid-26455884
-  -
-    type: cites
+  - type: cites
     target: source_artifact:pmid-28153947
-  -
-    type: cites
+  - type: cites
     target: source_artifact:pmid-35072942
-  -
-    type: cites
+  - type: cites
     target: source_artifact:pmid-38599681
-  -
-    type: cites
+  - type: cites
     target: source_artifact:pmid-41477023
-  -
-    type: cites
+  - type: cites
     target: source_artifact:pmid-17414804
-  -
-    type: cites
+  - type: cites
     target: source_artifact:pmid-30733142
-  -
-    type: cites
+  - type: cites
     target: source_artifact:pmid-24066036
+
 measurementContexts:
   - lab_cpet
   - graded_exercise_test

@@ -4,7 +4,7 @@ Last verified: 2026-08-31
 
 ## Purpose
 
-Murph stores durable health records in a file-native vault and pairs them with a public Health Commons of protocol, biomarker, source, and aggregate outcome pages. Markdown remains the human-reviewable source of truth, derived machine-readable ledgers stay append-only, and all canonical writes flow through one core library.
+Murph stores durable health records in a file-native vault and pairs them with a public Health Commons of biomarker, Goal guide, measurement-method, and source pages. Markdown remains the human-reviewable source of truth, derived machine-readable ledgers stay append-only, and all canonical writes flow through one core library.
 
 ## Repo Shape
 
@@ -78,7 +78,7 @@ repo/
 - `packages/health-metrics` owns neutral MetricPoint contracts, health metric definitions, source metadata, unit normalization, display formatting, and selection policy reused by query projections and browser-vault exports.
 - `packages/query` reads canonical vault state, builds derived export packs, owns the rebuildable local query projection under `.runtime/projections/query.sqlite` that powers both canonical reads and lexical search, exposes the stable health reference graph under `bank/library/**`, exposes read helpers for the non-canonical compiled knowledge wiki under `derived/knowledge/**`, and adapts canonical/wearable evidence through `@murphai/health-metrics` MetricPoints.
 - `packages/vault-usecases` owns CLI/headless vault usecase orchestration over core, importers, and query. It exposes the neutral service surface, lazy runtime loaders, command-shaped input normalization, and assistant-safe vault path helpers used by CLI and headless runtimes. It is not a canonical write owner, query-model owner, inbox/device runtime owner, assistant/session owner, or broad re-export layer.
-- `packages/health-commons` owns the public Health Commons for protocol, biomarker, source, and source-person pages, plus build-time catalog generation, scoped runtime artifacts, and aggregate outcome summaries consumed by local and hosted surfaces.
+- `packages/health-commons` owns the public Health Commons for biomarker, Goal guide, measurement-method, source, and source-person pages, plus build-time catalog generation and scoped runtime artifacts consumed by local and hosted surfaces.
 - `packages/assistant-engine` owns headless assistant execution, provider-turn runtime, assistant state/outbox/status/store surfaces, automation, the assistant input spine, and assistant-specific vault/inbox/knowledge tools.
 - `packages/operator-config` owns persisted operator defaults, hosted assistant config, assistant backend target normalization, hosted provider/config helpers, setup/runtime-env helpers, device/channel readiness helpers, and shared CLI/setup contracts.
 - `packages/assistant-cli` owns CLI-only assistant wrappers, assistant commands, foreground terminal logging.

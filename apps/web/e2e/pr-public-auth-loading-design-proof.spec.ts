@@ -27,12 +27,6 @@ for (const width of [412, 1440]) {
       expect(failures).toEqual([]);
       await page.waitForTimeout(5_000);
       expect(pageErrors).toEqual([]);
-      if (route === "/experiments" && width === 1440) {
-        await page.getByRole("button", { name: "Chat with Murph", exact: true }).click();
-        const authDialog = page.getByRole("dialog");
-        await expect(authDialog.getByRole("heading", { name: "Log in or sign up" })).toBeVisible();
-        await authDialog.getByRole("button", { name: "Close", exact: true }).click();
-      }
       expect(scripts.filter((url) => /@privy-io|@walletconnect|@reown/i.test(url))).toEqual([]);
     }
     const signup = page.getByRole("button", { name: "Signup", exact: true });

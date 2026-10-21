@@ -267,9 +267,6 @@
       "@murphai/query/browser": [
         "../../packages/query/src/browser.ts"
       ],
-      "@murphai/query/browser-experiments": [
-        "../../packages/query/src/browser-experiments.ts"
-      ],
       "@murphai/query/browser-overview": [
         "../../packages/query/src/browser-overview.ts"
       ],

@@ -12,11 +12,8 @@ aliases:
 - who-physical-activity-guidelines-2020-11-25
 categories:
 - daily-step-floor
-relations:
-- type: related_protocol
-  target: protocol_variant:daily-step-floor/daily-step-floor
-- type: parent_family
-  target: experiment_family:daily-step-floor
+relations: []
+
 source:
   kind: guideline
   title: WHO guidelines on physical activity and sedentary behaviour

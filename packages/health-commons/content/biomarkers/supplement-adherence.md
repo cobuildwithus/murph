@@ -60,18 +60,13 @@ biomarker:
     - dose change
     - coingredient change
 relations:
--
-  type: related_protocol
-  target: protocol_variant:collagen-supplementation/hydrolyzed-collagen-peptides
--
-  type: cites
-  target: source_artifact:pmid-37717022
--
-  type: cites
-  target: source_artifact:pmid-40826844
--
-  type: cites
-  target: source_artifact:pmid-30609761
+  - type: cites
+    target: source_artifact:pmid-37717022
+  - type: cites
+    target: source_artifact:pmid-40826844
+  - type: cites
+    target: source_artifact:pmid-30609761
+
 ---
 
 # Supplement Adherence

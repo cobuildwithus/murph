@@ -11,13 +11,8 @@ aliases:
 - 'Low back pain and sciatica in over 16s: assessment and management'
 categories:
 - static-stretching
-relations:
--
-  type: related_protocol
-  target: protocol_variant:static-stretching/at-home-static-stretching-for-flexibility
--
-  type: parent_family
-  target: experiment_family:static-stretching
+relations: []
+
 sourceIdentity:
   identityKind: guideline
   canonicalIdBasis: url

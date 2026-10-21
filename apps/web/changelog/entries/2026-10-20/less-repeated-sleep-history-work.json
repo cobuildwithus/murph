@@ -1,0 +1,19 @@
+{
+  "publishedOn": "2026-10-20",
+  "order": 100,
+  "item": {
+    "id": "less-repeated-sleep-history-work",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Less repeated work preparing sleep history",
+    "summary": "Murph does less repeated processing when preparing a long Apple Health sleep history.",
+    "details": "An incomplete sleep record no longer makes Murph recheck unrelated nights for the same repair. Your sleep records and summaries stay the same.",
+    "relevanceTags": [
+      "sleep",
+      "wearables"
+    ],
+    "sourcePullRequests": [
+      4251
+    ]
+  }
+}

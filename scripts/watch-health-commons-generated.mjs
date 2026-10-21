@@ -14,10 +14,6 @@ const hostedWebDevCachePaths = [
   path.join(repoRoot, "apps", "web", ".next-dev", "dev", "cache", "fetch-cache"),
 ];
 const hostedWebHealthCommonsBridgeFiles = [
-  path.join(repoRoot, "apps", "web", "src", "lib", "health-commons", "experiment-browse.ts"),
-  path.join(repoRoot, "apps", "web", "src", "lib", "health-commons", "experiment-detail.ts"),
-  path.join(repoRoot, "apps", "web", "src", "lib", "health-commons", "experiment-projections.ts"),
-  path.join(repoRoot, "apps", "web", "src", "lib", "health-commons", "generated-experiment-artifacts.ts"),
   path.join(repoRoot, "apps", "web", "src", "lib", "health-commons", "measurement-method-detail.ts"),
 ];
 const debounceMs = readPositiveIntegerEnv(process.env.MURPH_HEALTH_COMMONS_WATCH_DEBOUNCE_MS, 300);

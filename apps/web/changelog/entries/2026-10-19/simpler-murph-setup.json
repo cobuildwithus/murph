@@ -7,12 +7,15 @@
     "priority": 3,
     "title": "Fewer steps to start with Murph",
     "summary": "Website onboarding no longer asks you to choose main and supporting personalities, a voice, or a writing style.",
-    "details": "You can still add Murph to Contacts and adjust tone, voice, Humor, Push and Detail in Settings. Murph now uses its Classic defaults wherever you have not saved an explicit style preference.",
+    "details": "You can still add Murph to Contacts and adjust tone, voice, Humor, Push and Detail in Settings. Murph now uses its Classic defaults wherever you have not saved an explicit style preference. If an older setup screen rejects a retired choice, refresh the page to load the current setup. Rejected choices do not save preferences or complete onboarding.",
     "relevanceTags": [
       "onboarding",
       "settings"
     ],
-    "sourcePullRequests": [],
+    "sourcePullRequests": [
+      4221,
+      4245
+    ],
     "tryIt": {
       "href": "/settings",
       "label": "Adjust Murph\u2019s style"

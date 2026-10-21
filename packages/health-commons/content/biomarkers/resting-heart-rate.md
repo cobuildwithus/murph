@@ -70,28 +70,15 @@ biomarker:
       - medication changes
       - device changes
 relations:
-
-  -
-    type: related_protocol
-    target: protocol_variant:norwegian-4x4/norwegian-4x4
-  -
-    type: related_protocol
-    target: protocol_variant:dry-sauna/murph-finnish-standard-3x-week
-  -
-    type: related_protocol
-    target: protocol_variant:evening-light-reduction/red-light-glasses-before-bed
-  -
-    type: cites
+  - type: cites
     target: source_artifact:pmid-32814462
-  -
-    type: cites
+  - type: cites
     target: source_artifact:pmid-29269746
-  -
-    type: cites
+  - type: cites
     target: source_artifact:pmid-31331560
-  -
-    type: cites
+  - type: cites
     target: source_artifact:pmid-34622026
+
 communityOutcomeSummary:
   state: coming_soon
   minimumCohortSize: 20

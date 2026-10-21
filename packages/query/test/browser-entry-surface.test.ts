@@ -14,7 +14,6 @@ test("@murphai/query keeps browser-vault-only helpers on the browser subpath", (
     "createBrowserVaultQueryClient",
     "createBrowserVaultReplica",
     "parseBrowserVaultReplica",
-    "selectBrowserVaultExperimentResults",
   ]) {
     assert.equal(exportName in queryRoot, false);
     assert.equal(exportName in queryBrowser, true);

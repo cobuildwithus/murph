@@ -1186,3 +1186,62 @@ function makeSleepRepairWorkFixture(totalMinutes: number): CanonicalEntity[] {
       })),
   ];
 }
+
+test("one invalid zero total does not scan awake history for unrelated sleep windows", () => {
+  const days = 180;
+  const entities = makeSleepRepairWorkFixture(0);
+  for (let day = 0; day < days; day += 1) {
+    const date = new Date(Date.UTC(2025, 0, day + 1)).toISOString().slice(0, 10);
+    const endAt = `${date}T07:00:00.000Z`;
+    const recordedAt = `${date}T08:00:00.000Z`;
+    entities.push(makeJunctionSleepSession({
+      date, durationMinutes: 480, endAt, recordedAt,
+      entityId: `evt_history_window_${day}`, resourceId: `history-${day}`,
+      sourceProviderSlug: "apple-health-kit", startAt: `${date}T00:00:00.000Z`,
+    }));
+    entities.push(makeJunctionSleepMetric({
+      date, entityId: `evt_history_awake_${day}`, metric: "sleep-awake-minutes",
+      occurredAt: endAt, recordedAt, resourceId: `history-${day}`,
+      sourceProviderSlug: "apple-health-kit", value: 20,
+    }));
+  }
+  const associated = vi.spyOn(sleepAssociation, "sleepMetricAssociatedWithWindow");
+  try {
+    const dataset = collectWearableDataset(createVaultReadModel({
+      entities, vaultRoot: "browser://synthetic-sparse-sleep-repair",
+    }), {});
+    assert.deepEqual(dataset.metricSuppressionEvidence, [{
+      date: "2026-02-10", metricKey: "total-sleep-minutes",
+      recordIds: ["evt_repair_work_sleep-total-minutes"],
+    }]);
+    assert.equal(dataset.metricCandidates.length, days + 1);
+    assert.ok(dataset.metricCandidates.every((candidate) => candidate.metric === "awakeMinutes"));
+    assert.equal(dataset.sleepWindows.length, days + 1);
+    // Count actual domain associations, not elapsed time. One bad window must
+    // not force a history-sized scan for every unrelated window.
+    assert.ok(associated.mock.calls.length < days * 3,
+      `Expected bounded association work, received ${associated.mock.calls.length}`);
+  } finally {
+    associated.mockRestore();
+  }
+});
+
+test("non-Apple zero totals do not activate Apple sleep repair", () => {
+  const entities = makeSleepRepairWorkFixture(400);
+  entities.push(makeJunctionSleepMetric({
+    date: "2026-02-10", entityId: "evt_other_provider_zero", metric: "sleep-total-minutes",
+    occurredAt: "2026-02-10T07:00:00.000Z", recordedAt: "2026-02-10T08:00:00.000Z",
+    resourceId: "repair-work-window", sourceProviderSlug: "whoop", value: 0,
+  }));
+  const associated = vi.spyOn(sleepAssociation, "sleepMetricAssociatedWithWindow");
+  try {
+    const dataset = collectWearableDataset(createVaultReadModel({
+      entities, vaultRoot: "browser://synthetic-provider-sleep-repair",
+    }), {});
+    assert.deepEqual(dataset.metricSuppressionEvidence, []);
+    assert.equal(dataset.metricCandidates.length, 3);
+    assert.equal(associated.mock.calls.length, 0);
+  } finally {
+    associated.mockRestore();
+  }
+});
