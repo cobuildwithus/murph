@@ -35,6 +35,10 @@ ReviewGPT artifact identity adoption: [completed plan](exec-plans/completed/2026
 
 Canary reply observation diagnostics: [completed plan](exec-plans/completed/2026-10-18-canary-reply-observation-diagnostics.md).
 
+Metric projection CPU attribution is tracked in
+[the completed CPU timing plan](exec-plans/completed/2026-10-20-metric-projection-cpu.md);
+`../packages/runtime-state/README.md` owns the optional timing contract.
+
 Fixed-canary server timing diagnostics: [active plan](exec-plans/completed/2026-10-20-canary-turn-diagnostics.md).
 
 Hosted live-journey configuration is owned by `../packages/assistant-engine/README.md`;

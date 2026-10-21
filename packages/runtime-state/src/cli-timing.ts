@@ -25,6 +25,11 @@ export const CLI_TIMING_PHASES = [
   "query-metric-precedence", "query-metric-targets",
 ] as const;
 export type CliTimingPhase = typeof CLI_TIMING_PHASES[number];
+/** These existing phases enclose synchronous metric work, not awaited I/O. */
+export const CLI_TIMING_CPU_PHASES: readonly CliTimingPhase[] = [
+  "query-metric-projection", "query-metric-samples", "query-metric-evidence",
+  "query-metric-extract", "query-metric-precedence", "query-metric-targets",
+];
 export type CliTimingOutcome = "ok" | "error" | "unknown";
 
 // Exact, source-owned vocabularies only. Never admit arbitrary provider codes,
@@ -264,12 +269,19 @@ const commandNames = new Set([
 export function cliTimingCommand(value: unknown): string {
   return typeof value === "string" && commandNames.has(value) ? value : "other";
 }
+interface CliCpuTiming {
+  /** Measured samples only; missing CPU observations are not zero. */
+  count: number;
+  sumUs: number;
+  maxUs: number;
+}
 export interface CliPhaseTiming {
   phase: CliTimingPhase;
   count: number;
   sumUs: number;
   maxUs: number;
   buckets: number[];
+  cpu?: CliCpuTiming;
 }
 export interface CliCommandTiming {
   command: string;
@@ -321,6 +333,30 @@ function validPhaseHistogram(phase: CliPhaseTiming): boolean {
   return integer(minimum) && minimum <= phase.sumUs;
 }
 
+/** Optional CPU diagnostics cannot invalidate authoritative wall timing. */
+function normalizeCpuTiming(phase: CliTimingPhase, value: unknown, samples: number): CliCpuTiming | undefined {
+  if (!CLI_TIMING_CPU_PHASES.includes(phase)) return undefined;
+  try {
+    const cpu = readCliTimingOwnData(value, "cpu");
+    const count = readCliTimingOwnData(cpu, "count");
+    const sumUs = readCliTimingOwnData(cpu, "sumUs");
+    const maxUs = readCliTimingOwnData(cpu, "maxUs");
+    if (!integer(count) || count < 1 || count > samples || !integer(sumUs) ||
+        !integer(maxUs) || maxUs > sumUs || sumUs / count > maxUs) return undefined;
+    return { count, sumUs, maxUs };
+  } catch { return undefined; }
+}
+function mergeCpuTiming(left?: CliCpuTiming, right?: CliCpuTiming): CliCpuTiming | undefined {
+  if (!left) return right ? { ...right } : undefined;
+  if (!right) return { ...left };
+  const count = left.count + right.count;
+  const sumUs = left.sumUs + right.sumUs;
+  return integer(count) && integer(sumUs) ? { count, sumUs, maxUs: Math.max(left.maxUs, right.maxUs) } : undefined;
+}
+function copyPhaseTiming(phase: CliPhaseTiming): CliPhaseTiming {
+  return { ...phase, buckets: [...phase.buckets], ...(phase.cpu ? { cpu: { ...phase.cpu } } : {}) };
+}
+
 function normalizePhaseTiming(value: unknown): CliPhaseTiming | null {
   const phase = record(value);
   if (!phase || !phaseName(phase.phase) || !integer(phase.count) || phase.count < 1 ||
@@ -328,7 +364,9 @@ function normalizePhaseTiming(value: unknown): CliPhaseTiming | null {
       !Array.isArray(phase.buckets) || phase.buckets.length !== 8 || !phase.buckets.every(integer)) return null;
   const timing = { phase: phase.phase, count: phase.count, sumUs: phase.sumUs,
     maxUs: phase.maxUs, buckets: [...phase.buckets] };
-  return validPhaseHistogram(timing) ? timing : null;
+  if (!validPhaseHistogram(timing)) return null;
+  const cpu = normalizeCpuTiming(timing.phase, phase, timing.count);
+  return { ...timing, ...(cpu ? { cpu } : {}) };
 }
 
 type CommandFailures = Pick<CliCommandTiming, "failures" | "droppedFailures">;
@@ -420,7 +458,9 @@ function bucketIndex(us: number): number {
   const index = CLI_TIMING_BUCKET_UPPER_US.findIndex((upper) => us < upper);
   return index < 0 ? 7 : index;
 }
-export function addCliPhaseSample(phases: CliPhaseTiming[], phase: CliTimingPhase, us: number): boolean {
+export function addCliPhaseSample(
+  phases: CliPhaseTiming[], phase: CliTimingPhase, us: number, cpuUs?: number,
+): boolean {
   if (!phaseName(phase) || !integer(us)) return false;
   let target = phases.find((entry) => entry.phase === phase);
   if (!target) {
@@ -433,6 +473,11 @@ export function addCliPhaseSample(phases: CliPhaseTiming[], phase: CliTimingPhas
   target.sumUs += us;
   target.maxUs = Math.max(target.maxUs, us);
   target.buckets[bucketIndex(us)]! += 1;
+  if (CLI_TIMING_CPU_PHASES.includes(phase) && integer(cpuUs)) {
+    const cpu = mergeCpuTiming(target.cpu, { count: 1, sumUs: cpuUs, maxUs: cpuUs });
+    if (cpu) target.cpu = cpu;
+    else delete target.cpu;
+  }
   return true;
 }
 export function incrementCliTimingDrop(value: number, count = 1): number {
@@ -468,22 +513,25 @@ export function mergeCliTiming(target: CliTiming, source: CliTiming): void {
         target.droppedCalls = incrementCliTimingDrop(target.droppedCalls, entry.calls);
       } else {
         target.commands.push({ command: entry.command, outcome: entry.outcome, calls: entry.calls,
-          phases: entry.phases.map((phase) => ({ ...phase, buckets: [...phase.buckets] })),
+          phases: entry.phases.map(copyPhaseTiming),
           ...mergeCommandFailures(undefined, entry) });
       }
       continue;
     }
     const merged: CliCommandTiming = { command: current.command, outcome: current.outcome,
       calls: current.calls + entry.calls,
-      phases: current.phases.map((phase) => ({ ...phase, buckets: [...phase.buckets] })) };
+      phases: current.phases.map(copyPhaseTiming) };
     let valid = integer(merged.calls);
     for (const phase of entry.phases) {
       const old = merged.phases.find((item) => item.phase === phase.phase);
-      if (!old) { merged.phases.push({ ...phase, buckets: [...phase.buckets] }); continue; }
+      if (!old) { merged.phases.push(copyPhaseTiming(phase)); continue; }
       old.count += phase.count;
       old.sumUs += phase.sumUs;
       old.maxUs = Math.max(old.maxUs, phase.maxUs);
       old.buckets = old.buckets.map((count, index) => count + phase.buckets[index]!);
+      const cpu = mergeCpuTiming(old.cpu, phase.cpu);
+      if (cpu) old.cpu = cpu;
+      else delete old.cpu;
       valid &&= integer(old.count) && integer(old.sumUs) && old.buckets.every(integer);
     }
     if (valid) target.commands[index] = { ...merged, ...mergeCommandFailures(current, entry) };
