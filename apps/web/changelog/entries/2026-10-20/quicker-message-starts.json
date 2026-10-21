@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-10-20",
+  "order": 100,
+  "item": {
+    "id": "quicker-message-starts",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Less setup before replies",
+    "summary": "Murph reuses connections between messages and does less startup work before responding.",
+    "details": "This targets the pause before typing appears. Replies keep the same delivery and recovery checks.",
+    "relevanceTags": ["messaging", "performance"],
+    "sourcePullRequests": [4255]
+  }
+}
