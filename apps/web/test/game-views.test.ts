@@ -91,6 +91,18 @@ function noonOnDay(state: RuleState, memberId: string, dayIndex: number, hour = 
 }
 
 describe("weekly game views: tickets", () => {
+  it("hides the graph until posting and returns the whole image after unlock", () => {
+    const state = liveState();
+    state.entries.push(entry(AVA, 0, 1, { kind: "heart_rate" }));
+    const now = noonOnDay(state, LEO, 0);
+    expect(view(state, LEO, now).days[0]?.others[0]).toMatchObject({ status: "locked", entry: null });
+    expect(view(state, AVA, now).days[0]?.mine).toMatchObject({ kind: "heart_rate" });
+    state.entries.push(entry(LEO, 0, 1));
+    expect(view(state, LEO, now).days[0]?.others[0]).toMatchObject({
+      status: "posted", entry: { kind: "heart_rate", mediaUrls: expect.arrayContaining([expect.stringContaining(".jpg")]) },
+    });
+  });
+
   it("separates canonical profile photos from viewer-private overrides for shared exports", () => {
     const state = liveState();
     const profile = "game/hbm_ava/profile.jpg";

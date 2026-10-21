@@ -105,6 +105,13 @@ const hostedWebPrismaPredeployHistoricalMigrationIds = new Set([
 
 const hostedWebPrismaPredeployCompatibleMigrationReasons = new Map([
   [
+    "20261021180000_game_heart_rate_entry",
+    // Only widens photo/excuse to include heart_rate; all old rows and writers
+    // remain valid. Atomic NOT VALID replacement bounds the metadata lock;
+    // retained-row validation runs separately before new native writes.
+    new Set(["ADD CONSTRAINT CHECK", "DROP CONSTRAINT"]),
+  ],
+  [
     "20261008210000_linq_bounded_terminal_recovery",
     // Constant zero/empty-array defaults preserve existing rows and old inserts.
     // All other new fields are nullable; no recovery starts during migration.

@@ -5438,8 +5438,10 @@ free; the flag and allowlist then hide every route. The invite preview and
 `/g/<token>` page are unauthenticated and honor only the global flag. Dev
 time-travel routes return 404 in real production; they move a per-game clock
 (`game.dev_clock_offset_ms`, added to the database clock as that game's "now"
-for writes, settles and views) and never rewrite dates. Media is photos only
-(JPEG or HEIC, at most 4 MiB); keys are the uploader's prefix plus the SHA-256
+for writes, settles and views) and never rewrite dates. Versioned terms carry
+`checkInKind` (legacy omission means `photo`); the posting-day terms require
+that artifact kind before consuming an attempt. Media is images only
+(JPEG or HEIC, at most 4 MiB), including explicitly shared heart-rate graphs; keys are the uploader's prefix plus the SHA-256
 of the bytes, so a retried upload lands on the same key. Deployed, Web seals each
 photo under the uploader's control-domain key (`hosted-member-private-field`,
 scope `weekly-game`, bound to the key) and the Worker keeps only that sealed

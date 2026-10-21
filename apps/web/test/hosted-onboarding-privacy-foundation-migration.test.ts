@@ -1231,6 +1231,7 @@ describe("hosted Prisma baseline migration", () => {
       "20261008210000_linq_bounded_terminal_recovery",
       "20261016180000_weekly_game",
       "20261021050000_game_profile_photo",
+      "20261021180000_game_heart_rate_entry",
       "migration_lock.toml",
     ]);
     expect(migrationEntries).toEqual(

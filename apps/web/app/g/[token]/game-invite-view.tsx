@@ -21,6 +21,7 @@ export function GameInviteView(props: { appUrl: string; preview: GameInvitePrevi
             {preview.terms.tasks.map((task) => (
               <Row key={task.seat} label={task.seat === 0 ? preview.inviterFirstName : "You"} value={task.text} />
             ))}
+            <Row label="Check-in" value={preview.terms.checkInKind === "heart_rate" ? "Heart-rate graph · wearable required" : "Photo"} />
             <Row label="Days" value={describeSchedule(preview.terms.schedule)} />
             {preview.terms.stakes.map((stake, index) => (
               <Row key={index} label={describeStakeLabel(stake)} value={stake.item} />

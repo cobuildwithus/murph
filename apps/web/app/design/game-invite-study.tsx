@@ -41,6 +41,7 @@ const ANY_DAYS_PREVIEW: OpenPreview = {
 const STATES: ReadonlyArray<{ id: string; label: string; preview: GameInvitePreview | null }> = [
   { id: "open", label: "Open, set weekdays", preview: OPEN_PREVIEW },
   { id: "open-any-days", label: "Open, any days, per miss", preview: ANY_DAYS_PREVIEW },
+  { id: "heart-rate", label: "Open, heart-rate check-in", preview: { ...OPEN_PREVIEW, terms: { ...OPEN_PREVIEW.terms, checkInKind: "heart_rate" } } },
   { id: "used", label: "Already accepted", preview: { status: "used" } },
   { id: "expired", label: "Expired", preview: { status: "expired" } },
   { id: "missing", label: "Missing or turned off", preview: null },

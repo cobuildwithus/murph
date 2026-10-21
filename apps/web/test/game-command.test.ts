@@ -16,6 +16,25 @@ function codeOf(run: () => unknown): string {
 }
 
 describe("weekly game command validator", () => {
+  it("validates the challenge check-in requirement and defaults older clients to photos", () => {
+    const command = { type: "createGame", gameId: "game_checkin", inviteeFirstName: "Ava", terms: {
+      tasks: [{ seat: 0, text: "Pushups" }, { seat: 1, text: "Pushups" }],
+      schedule: { count: 3 }, stakes: [{ item: "Coffee", kind: "winner_gets" }],
+    } };
+    expect(parseGameCommand(command)).toMatchObject({ terms: { checkInKind: "photo" } });
+    expect(parseGameCommand({ ...command, terms: { ...command.terms, checkInKind: "heart_rate" } })).toMatchObject({ terms: { checkInKind: "heart_rate" } });
+    expect(codeOf(() => parseGameCommand({ ...command, terms: { ...command.terms, checkInKind: "video" } }))).toBe("INVALID_REQUEST");
+  });
+
+  it("accepts one rendered heart-rate graph and never admits raw sample fields", () => {
+    const command = { type: "post", entryId: "entry_graph1", gameId: "game_0001", kind: "heart_rate", mediaKeys: [PHOTO_KEY] };
+    expect(parseGameCommand({ ...command, samples: [{ bpm: 123 }], captureAgeMs: 1500 }))
+      .toEqual({ ...command, captureAgeMs: 1500 });
+    for (const mediaKeys of [[], [PHOTO_KEY, PHOTO_KEY], [PHOTO_KEY.replace(".jpg", ".heic")]]) {
+      expect(codeOf(() => parseGameCommand({ ...command, mediaKeys }))).toBe("INVALID_REQUEST");
+    }
+  });
+
   it("trims words, normalizes the time zone and drops fields it doesn't know", () => {
     expect(parseGameCommand({
       firstName: "  Leo ",

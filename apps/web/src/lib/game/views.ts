@@ -112,6 +112,7 @@ export function termsView(state: RuleState, words: TermWords): GameTermsVersion 
   const version = currentTerms(state.game.terms);
   const versionWords = [...words.versions].reverse().find((candidate) => candidate.n <= version.n) ?? words.versions[0];
   return {
+    checkInKind: version.checkInKind ?? "photo",
     fromDay: version.fromDay,
     n: version.n,
     schedule: version.schedule,

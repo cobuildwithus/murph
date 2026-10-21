@@ -6,6 +6,8 @@
 
 import {
   GAME_STAKE_KINDS,
+  GAME_CHECK_IN_KINDS,
+  type GameCheckInKind,
   GAME_WEEKDAYS,
   type GameEntryKind,
   type GameError,
@@ -32,6 +34,7 @@ export interface StoredStake {
   kind: GameStakeKind;
 }
 export interface StoredTermsVersion {
+  checkInKind?: GameCheckInKind;
   n: number;
   fromDay: number;
   schedule: GameSchedule;
@@ -275,7 +278,7 @@ export function decideNewTerms(input: GameTermsInput, options: { newKey: () => s
     startsOn,
     terms: {
       v: 1,
-      versions: [{ fromDay: 0, n: 1, schedule, stakes: stakes.map(({ key, kind }) => ({ key, kind })) }],
+      versions: [{ checkInKind: input.checkInKind ?? "photo", fromDay: 0, n: 1, schedule, stakes: stakes.map(({ key, kind }) => ({ key, kind })) }],
     },
     words: {
       v: 1,
@@ -388,11 +391,15 @@ export function decidePost(
 ): PostDecision {
   const player = requireLivePlayer(state, input.memberId);
   if (input.kind === "excuse") return { attempt: 0, dayIndex: excuseDay(state, player, input.now), graceUsed: false, withdrawEntryId: null };
-  if (input.mediaKeys.length === 0) reject("MEDIA_MISSING", "Add the photo first.");
+  if (input.mediaKeys.length === 0) reject("MEDIA_MISSING", "Add the check-in image first.");
   if (input.mediaKeys.some((key) => !key.startsWith(input.mediaKeyPrefix))) {
     reject("MEDIA_MISSING", "Upload the media before posting it.");
   }
   const dayIndex = postingDay(state, player, input.captureAgeMs, input.now);
+  const required = termsForDay(state.game.terms, dayIndex).checkInKind ?? "photo";
+  if (input.kind !== required) {
+    reject("INVALID_REQUEST", required === "heart_rate" ? "This challenge requires a heart-rate check-in." : "This challenge requires a photo check-in.");
+  }
   const graceUsed = dayIndex !== dayIndexAt(player, input.now);
   const used = attemptsUsed(state.entries, player.memberId, dayIndex);
   if (used >= GAME_POSTS_PER_DAY) reject("RETAKE_USED", "You already used today's retake.");
@@ -447,7 +454,7 @@ function postingDay(state: RuleState, player: RulePlayer, captureAgeMs: number |
   if (captureAgeMs !== null) {
     const dayStart = dayStartInstant(addDays(player.dayOne!, today), player.timeZone).getTime();
     if (now.getTime() - captureAgeMs < dayStart - GAME_CAPTURE_SLACK_MS) {
-      reject("DAY_CLOSED", "That photo is from an earlier day.");
+      reject("DAY_CLOSED", "That check-in is from an earlier day.");
     }
   }
   return today;
@@ -621,6 +628,7 @@ export function parseStoredTerms(value: unknown): StoredTerms {
   const versions = asList(root.versions, "terms").map((raw) => {
     const version = asObject(raw, "terms");
     return {
+      checkInKind: version.checkInKind === undefined ? "photo" : GAME_CHECK_IN_KINDS.find((kind) => kind === version.checkInKind) ?? malformed("check-in kind"),
       fromDay: asInt(version.fromDay, "terms"),
       n: asInt(version.n, "terms"),
       schedule: asSchedule(version.schedule),

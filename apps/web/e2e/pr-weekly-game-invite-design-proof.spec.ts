@@ -3,6 +3,7 @@ import path from "node:path";
 import { expect, test } from "@playwright/test";
 
 const STATES = {
+  "heart-rate": "Heart-rate graph · wearable required",
   expired: "This invite expired. Ask for a new link.",
   missing: "This invite isn't available",
   open: "Open in Murph",
@@ -37,6 +38,7 @@ for (const width of [390, 1280]) {
     if (!output) return;
     await mkdir(output, { recursive: true });
     const style = "nextjs-portal { visibility: hidden; }";
+    await study.locator('[data-design-state="heart-rate"]').screenshot({ path: path.join(output, `game-invite-heart-rate-${width}.png`), style });
     if (width < 768) {
       await study.locator('[data-design-state="open"]').screenshot({ path: path.join(output, `game-invite-open-${width}.png`), style });
       await study.locator('[data-design-state="link-open"]').screenshot({ path: path.join(output, `game-invite-link-open-${width}.png`), style });

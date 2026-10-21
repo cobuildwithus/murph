@@ -2,6 +2,7 @@ import { isStrictIsoDate, normalizeIanaTimeZone } from "@murphai/contracts";
 
 import {
   GAME_ENTRY_KINDS,
+  GAME_CHECK_IN_KINDS,
   GAME_STAKE_KINDS,
   GAME_WEEKDAYS,
   type GameCommand,
@@ -75,6 +76,9 @@ function post(input: Record<string, unknown>): GameCommand {
   const text = kind === "excuse"
     ? transcript(input.text)
     : input.text === undefined ? "" : string(input.text, "text", POST_TEXT_MAX).trim();
+  if (kind === "heart_rate" && (mediaKeys.length !== 1 || !mediaKeys[0]?.endsWith(".jpg"))) {
+    reject("INVALID_REQUEST", "A heart-rate check-in needs one graph image.");
+  }
   if (kind === "excuse" && mediaKeys.length > 0) reject("INVALID_REQUEST", "An excuse is words only.");
   if (mediaKeys.some((key) => !PHOTO_EXTENSIONS.some((extension) => key.endsWith(extension)))) {
     reject("INVALID_REQUEST", "A photo post takes photos.");
@@ -111,6 +115,7 @@ function inviteeLabel(input: Record<string, unknown>): GameInviteeLabel {
 
 function terms(input: Record<string, unknown>): GameTermsInput {
   return {
+    checkInKind: input.checkInKind === undefined ? "photo" : oneOf(input.checkInKind, "terms.checkInKind", GAME_CHECK_IN_KINDS),
     schedule: schedule(record(input.schedule, "terms.schedule")),
     stakes: list(input.stakes, "terms.stakes", LIST_MAX).map((value): GameStake => {
       const stake = record(value, "terms.stakes[]");
