@@ -6,7 +6,7 @@
     "kind": "improvement",
     "priority": 1,
     "title": "Fewer steps before a conversation starts",
-    "summary": "Murph combines two startup checks to reduce the setup needed before working on a new message.",
+    "summary": "Murph skips a redundant setup check when reconnecting to a warm runtime, reducing the work before it can process a new message.",
     "relevanceTags": [
       "messaging",
       "performance"

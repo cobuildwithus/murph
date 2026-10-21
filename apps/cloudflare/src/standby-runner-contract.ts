@@ -2,8 +2,6 @@ import { readHostedRunnerActiveReleaseId, readHostedRunnerBankFromName, readHost
 import type {
   HostedExecutionContainerNamespaceLike,
   HostedExecutionContainerStubLike,
-  RunnerContainerEnsureReadyForProcessingInput,
-  RunnerContainerEnsureReadyForProcessingResult,
 } from "./runner-container.js";
 
 export const HOSTED_RUNNER_REGION = "GLOBAL" as const;
@@ -65,15 +63,12 @@ export interface HostedStandbyCoordinatorNamespaceLike {
 
 export interface HostedRunnerSlotLifecycle {
   bindStandbySlot(input: {
-    /** Optional composition; older controllers return only the binding. */
-    readiness?: Omit<RunnerContainerEnsureReadyForProcessingInput, "userId">;
     claimId: string;
     releaseId: string;
     region: HostedRunnerRegion;
     slotName: string;
     userId: string;
   }): Promise<{
-    readiness?: RunnerContainerEnsureReadyForProcessingResult;
     bound: true;
     claimId: string;
     releaseId: string;

@@ -125,13 +125,7 @@ processing mode, encrypted inference settings, and managed-AI allowance once.
 New invocations do not mint provider bearer credentials.
 The workspace checkpoint compare-and-swap version is independent of generation.
 
-Workspace and runtime-store reads overlap native allocation and readiness. Fresh
-binding can request readiness in the same native RPC, after the binding lock is
-released, avoiding a second round trip to that controller. A returned readiness
-result is consumed directly; older controllers that omit it and retained targets
-use the existing explicit readiness call. Binding still follows canonical target
-selection, and failed or uncertain readiness never grants launch authority.
-The native slot submits the
+Input preparation and native readiness overlap. The native slot submits the
 existing `prepare_launch` command immediately before registering its durable
 invocation receipt. That transaction binds invocation facts and verifies fresh
 Web authority together; startup does not make a second `authorize_effect` call.
@@ -178,7 +172,11 @@ owner before applying local warmth, because native completion does not prove
 canonical acknowledgment. Otherwise only an eligible stop reconciles the owner.
 A matching starting, active or retiring owner
 protects the readiness-to-launch handoff, including after Durable Object
-reactivation. Failed reads and incomplete cutover preserve the existing scheduled
+reactivation. Readiness establishes a missing native lifecycle schedule; persisted
+schedules survive controller replacement. The controller constructor does not
+recreate that deadline: an unbound standby can legitimately have none, and the
+Containers SDK already restores its alarm and monitors a running container.
+Failed reads and incomplete cutover preserve the existing scheduled
 lifecycle recheck; they do not grant a new conversation lease. Cleanup rechecks
 native status, health, and interaction fencing after the bounded control read,
 which runs outside the lifecycle lock so arriving work does not wait on

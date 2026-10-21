@@ -10748,6 +10748,24 @@ describe("RunnerContainer", () => {
     expect(await container.listSchedules("onActivityExpired")).toHaveLength(1);
   });
 
+  it("leaves lifecycle scheduling to readiness when a warm controller is reconstructed", async () => {
+    const { container, startAndWaitForPorts } = createContainerDouble({
+      initialStatus: "running",
+      platformRunning: true,
+    });
+    // Flush constructor continuations before observing persisted schedules.
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(await container.listSchedules("onActivityExpired")).toEqual([]);
+
+    await expect(container.ensureReadyForProcessing({
+      timeoutMs: 15_000,
+      userId: "member_123",
+    })).resolves.toMatchObject({ kind: "ready" });
+    expect(startAndWaitForPorts).not.toHaveBeenCalled();
+    expect(await container.listSchedules("onActivityExpired")).toHaveLength(1);
+  });
+
   it("retains the native receipt deadline across DO reactivation of the same child", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     try {

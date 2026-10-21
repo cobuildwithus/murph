@@ -102,44 +102,6 @@ describe("hosted standby contract", () => {
 });
 
 describe("standby health observation", () => {
-  it("binds and proves warm readiness through the real lifecycle owner in one call", async () => {
-    const h = createStandbyContainerHarness();
-    const input = { slotName: h.slotName, releaseId: RELEASE_ID, region: HOSTED_RUNNER_REGION,
-      claimId: createHostedStandbyClaimId(), userId: "member_composed",
-      readiness: { timeoutMs: 1_000 } };
-    const result = await h.container.bindStandbySlot(input);
-    expect(result).toMatchObject({ bound: true, userId: input.userId,
-      readiness: { kind: "ready", action: "already_warm", preparesSupervisedLaunch: true } });
-    expect(h.containerFetch).toHaveBeenCalled();
-    expect(h.startAndWaitForPorts).not.toHaveBeenCalled();
-    expect(h.destroy).not.toHaveBeenCalled();
-    await expect(h.container.readStandbySlotBinding()).resolves.toMatchObject({ state: "bound", userId: input.userId });
-    h.containerFetch.mockClear();
-    await expect(h.container.bindStandbySlot({ ...input, userId: "member_other" }))
-      .rejects.toThrow("already bound to another claim");
-    expect(h.containerFetch).not.toHaveBeenCalled();
-  });
-
-  it("does not start readiness after binding has consumed its deadline", async () => {
-    const now = Date.now();
-    const clock = vi.spyOn(Date, "now").mockReturnValue(now);
-    const h = createStandbyContainerHarness();
-    const identity = { slotName: h.slotName, releaseId: RELEASE_ID, region: HOSTED_RUNNER_REGION };
-    const gate = createDeferred<Response>();
-    h.nativeFetch.mockImplementationOnce(() => gate.promise);
-    const preparation = h.container.prepareStandbySlot({ ...identity, timeoutMs: 5_000 });
-    await until(() => h.nativeFetch.mock.results.some(result => result.value === gate.promise));
-    const binding = h.container.bindStandbySlot({ ...identity, claimId: createHostedStandbyClaimId(),
-      userId: "member_deadline", readiness: { timeoutMs: 1_000 } });
-    h.containerFetch.mockClear();
-    clock.mockReturnValue(now + 1_001);
-    gate.resolve(new Response(JSON.stringify(createStandbyHealth())));
-    await preparation;
-    await expect(binding).resolves.toMatchObject({ bound: true, readiness: { kind: "cleanup_unsettled" } });
-    expect(h.containerFetch).not.toHaveBeenCalled();
-    await expect(h.container.readStandbySlotBinding()).resolves.toMatchObject({ state: "bound", userId: "member_deadline" });
-  });
-
   it("binds through the real lifecycle owner while a native health request is pending", async () => {
     const h = createStandbyContainerHarness();
     const identity = { slotName: h.slotName, releaseId: RELEASE_ID, region: HOSTED_RUNNER_REGION };
@@ -1993,7 +1955,7 @@ function createSlotStub(slotName: string): HostedStandbyRunnerContainerStubLike 
     userId: null,
   };
   return {
-    async bindStandbySlot({ readiness: _readiness, ...input }) {
+    async bindStandbySlot(input) {
       binding = {
         claimId: input.claimId,
         releaseId: input.releaseId,

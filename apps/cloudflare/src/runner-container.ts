@@ -705,14 +705,6 @@ export class RunnerContainer extends Container {
     this.sleepAfter = formatRunnerSleepAfter(
       readRunnerContainerLifecycleReevaluationMs(env),
     );
-    // Native schedules survive DO eviction. Recover an already-running process
-    // from the preceding Worker too, without trusting its completion-time clock.
-    this.ctx.blockConcurrencyWhile(async () => {
-      if (this.ctx.container?.running
-        && (await this.listSchedules("onActivityExpired")).length === 0) {
-        await this.scheduleLifecycleCheck(Date.now());
-      }
-    });
   }
 
   async prepareStandbySlot(input: {
@@ -780,14 +772,12 @@ export class RunnerContainer extends Container {
   }
 
   async bindStandbySlot(input: {
-    readiness?: Omit<RunnerContainerEnsureReadyForProcessingInput, "userId">;
     claimId: string;
     releaseId: string;
     region: HostedRunnerRegion;
     slotName: string;
     userId: string;
   }): Promise<{
-    readiness?: RunnerContainerEnsureReadyForProcessingResult;
     bound: true;
     claimId: string;
     releaseId: string;
@@ -796,10 +786,7 @@ export class RunnerContainer extends Container {
     userId: string;
   }> {
     this.assertRunnerSlotAllocationIdentity(input);
-    const readinessInput = input.readiness
-      ? parseRunnerContainerEnsureReadyForProcessingInput({ ...input.readiness, userId: input.userId }) : null;
-    const readinessDeadlineAtMs = Date.now() + (readinessInput?.timeoutMs ?? 0);
-    const bound = await this.withLifecycleLock(async () => {
+    return await this.withLifecycleLock(async () => {
       const store = this.requireRunnerSlotStore();
       if (this.slotNamespace !== "runner" && store.readOptional()?.state !== "bound") {
         throw new Error("Legacy runner allocation is drain-only.");
@@ -813,7 +800,7 @@ export class RunnerContainer extends Container {
       store.initialize(input);
       const binding = store.bind(input);
       return {
-        bound: true as const,
+        bound: true,
         claimId: binding.claimId,
         releaseId: binding.releaseId,
         region: binding.region,
@@ -821,13 +808,6 @@ export class RunnerContainer extends Container {
         userId: binding.userId,
       };
     });
-    // Readiness takes the same lifecycle lock; compose only after binding releases
-    // it. Its ordinary bound-user checks also fence a racing retirement.
-    if (!readinessInput) return bound;
-    const timeoutMs = readinessDeadlineAtMs - Date.now();
-    if (timeoutMs <= 0) return { ...bound, readiness: { kind: "cleanup_unsettled" } };
-    const readiness = await this.ensureReadyForProcessing({ ...readinessInput, timeoutMs });
-    return { ...bound, readiness };
   }
 
   async readStandbySlotBinding(): Promise<HostedStandbySlotBinding> {

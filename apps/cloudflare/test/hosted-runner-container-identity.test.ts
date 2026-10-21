@@ -886,7 +886,7 @@ function createStandbyNamespace(input: {
   return {
     getByName(name) {
       return {
-        async bindStandbySlot({ readiness: _readiness, ...binding }) {
+        async bindStandbySlot(binding) {
           return { bound: true, ...binding };
         },
         async destroyInstance() {},
@@ -984,7 +984,7 @@ function createRunnerContainerStub(input: {
   const bindings = new RunnerSlotBindingStore(createTestSqlStorage());
   let warm = false;
   return {
-    async bindStandbySlot({ readiness: _readiness, ...claim }) {
+    async bindStandbySlot(claim) {
       bindings.initialize(claim);
       bindings.bind(claim);
       return { bound: true, ...claim };

@@ -1,4 +1,4 @@
-# Remove a sequential runner wake round trip
+# Remove redundant controller recovery from runtime wake
 
 Status: active
 Created: 2026-10-21
@@ -6,76 +6,65 @@ Updated: 2026-10-21
 
 ## Goal
 
-Reduce fresh-start latency without changing canonical target selection, immutable
-member binding, readiness, or launch authorization.
+Explain why a warm container can encounter controller initialization and remove
+avoidable application initialization from the wake path. Open a PR and complete
+ReviewGPT and required CI. Deployment is outside this task.
 
-## Evidence and limits
+## Cause and evidence limits
 
-Historical native traces distinguish caller RPC duration from controller work.
-Binding has a substantial pre-handler platform delay; SQL and application work
-inside binding do not explain it. Standby process warmth does not prove controller
-residency. Neither local startup profiling nor deployment startup metadata proves
-the cause of the platform interval. No production timing improvement is claimed.
-The source independently proves that binding and readiness currently require two
-sequential RPCs to the same target.
+Container lifetime and Durable Object controller lifetime are independent.
+A controller can be invalidated by the platform while its container remains
+running. Pending alarms and container monitoring prevent ordinary idle eviction,
+but cannot guarantee residency through platform runtime or host changes.
+See the official Durable Object lifecycle and Container API documentation:
 
-## Success criteria
+- https://developers.cloudflare.com/durable-objects/concepts/durable-object-lifecycle/
+- https://developers.cloudflare.com/containers/api/durable-object-container/
 
-- Fresh allocation can bind and prove readiness in one RPC.
-- Older controllers and retained targets keep their existing readiness path.
-- Failed binding cannot prepare or launch another member's container.
-- Busy/ambiguous readiness preserves the selected target for reconciliation.
-- Focused tests, Cloudflare typecheck, complexity review, and scoped commit pass.
+The application constructor adds a second blocking recovery pass after the SDK
+constructor. When a running container has no member lifecycle schedule, that pass
+creates an immediate deadline. An unbound standby legitimately has no such
+deadline after expiry. Readiness already creates a missing deadline, persisted
+member schedules survive replacement, and the SDK owns its alarm and monitoring.
+The regression fails before deletion because reconstruction writes a deadline.
 
-## Scope and constraints
+Removing this pass does not prevent controller replacement or establish how much
+platform routing/activation time will be saved. No measured production speedup
+is claimed. Precise infrastructure causes require Cloudflare-side evidence.
 
-Only the optional bind/readiness composition and its caller, tests, and owner
-documentation change. No production mutation, new telemetry, pool policy, auth
-shortcut, retry-owner change, or asserted fix for opaque platform latency.
+## Implementation
 
-## Risks and mitigations
+Delete the constructor recovery block. Keep existing readiness, binding,
+authorization, lifecycle, and SDK ownership. No new RPC shape, state, keepalive,
+telemetry, dependency, or retry mechanism. The provisional combined bind/readiness
+protocol is removed from the final patch because it does not address this cause.
 
-- Rolling versions: optional request and response fields retain legacy fallback.
-- Lock recursion: release binding's lifecycle lock before ordinary readiness.
-- Lost acknowledgment: existing canonical selection and exact retry path remain.
-- Longer RPC: bound the combined operation with the ordinary readiness budget.
+## Product UX and safety
 
-## Product UX
-
-Outcome: fewer sequential steps before a fresh conversation starts.
-Reaches: fresh foreground and background allocation; retained owners unchanged.
-Proof: fresh/legacy, wrong-member binding, busy readiness, and uncertain RPC tests.
-Status: Ready for local behavior. Hold for production latency and external review.
-
-## Tasks
-
-1. Compose readiness at the existing native binding owner.
-2. Consume readiness in fresh orchestration, retaining compatibility fallback.
-3. Verify authority, recovery, rolling versions, and typecheck; review the diff.
-4. Record completion evidence and commit the scoped change.
+Effort: Patch. Result: Ready for candidate review; production timing unmeasured.
+Warm reconstruction does not create an immediate cleanup deadline. Readiness
+still arms a missing deadline without restarting the warm container. Existing
+member deadlines survive reconstruction and expire at the original receipt time.
+Stopped-container recovery, immutable member binding, active-job protection,
+failed-health retries, and native schedule persistence retain their existing proof.
+Individual and group provider inputs are unchanged.
 
 ## Verification
 
-- Passed focused orchestration, standby lifecycle, target identity, and native
-  supervised-invocation tests. Added real-owner warm health and queued-bind
-  deadline proof, legacy compatibility, and uncertain/busy recovery cases.
-- Passed `pnpm --dir apps/cloudflare typecheck`.
-- Passed `pnpm complexity:diff`; existing hotspots are unchanged.
-- Passed changelog generation and all 10 archive rendering tests. The narrow
-  entry makes no measured timing promise; add its PR provenance when opened.
-- Parent reviewed the full diff, privacy, rolling versions, lifecycle locks,
-  elapsed readiness budget, binding identity, launch authority, and uncertainty.
-- No new telemetry, production writes, or deployment.
+- New regression failed before deletion and passed after it.
+- Passed 503 focused tests across runner lifecycle, standby allocation, fresh and
+  retained orchestration, and runner identity.
+- Passed 20 tests against the installed Containers SDK, including native schedule
+  persistence, deadline execution despite generic RPC traffic, and callback retry.
+- Passed Cloudflare typecheck.
+- Passed complexity guard: constructor simplified; the three existing hotspots
+  (wake, readiness, error classification) are unchanged and outside this deletion.
+- Passed changelog generation and all 10 archive rendering tests.
+- Parent reviewed the full patch, retained lifecycle owners, rolling versions,
+  privacy, and evidence limits. PR, ReviewGPT, and required CI remain.
 
-## Remaining work
+## Production verification after a separately authorized deployment
 
-The combined RPC removes a round trip; it does not prove or eliminate the
-platform interval before the first receiver invocation. Cloudflare-internal
-routing/activation evidence is needed to attribute that interval more narrowly;
-application traces and deployment startup metadata cannot do so. Do not report
-this local optimization as a fix for the entire observed bind delay.
-
-A pushed PR, final ReviewGPT, exact-head CI, deployment, and production before/after
-measurement have not run. The task currently authorizes the local fix and scoped
-commit; the routing owner distinguishes that from a PR/publish request. Keep this
-plan active while the root-cause investigation remains unresolved.
+Compare bounded bind caller/receiver timing on controller replacement, verify
+warm containers are not restarted, and inspect lifecycle cleanup/error aggregates.
+Do not interpret removal of application work as elimination of platform latency.
