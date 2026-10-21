@@ -1,6 +1,6 @@
 # Enable twelve-hour hosted prompt caching
 
-Status: active
+Status: completed
 Created: 2026-10-20
 Updated: 2026-10-20
 
@@ -49,4 +49,18 @@ test targets compile. No production request or deployment was performed.
 Native hosted policy test and all four generated schema consistency tests passed.
 The final patch reproduces the checked source and generated exports exactly.
 
-Pending: required exact-head CI and ReviewGPT.
+ReviewGPT round 1: PASS on
+`f2346349e6212b21b2ac7a8256ad87d46b33ba55`, using the managed Eragon lane and
+verified GPT-6 Pro selection. The complete native-source attachment was confirmed;
+exact-turn capture completed after 253 seconds with `REVIEW_COMPLETE`. The review
+covered all changed files, native source provenance, auth/model/transport scope,
+usage accounting, and deployment skew. No qualifying findings. Accepted as a
+substantive completed full-snapshot review. No remediation was required.
+
+PR: https://github.com/cobuildwithus/murph/pull/4257
+
+Parent review, focused proof, and implementation are complete. This closeout is
+explanatory documentation only and does not require another substantive review.
+Required CI on the final documentation-closeout head remains a PR completion gate;
+the original session continues to own that check. No merge or deploy is included.
+Completed: 2026-10-20
