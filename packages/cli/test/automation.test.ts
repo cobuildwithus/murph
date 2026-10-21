@@ -19,6 +19,7 @@ import {
   buildAutomationSupportSeriesTag,
 } from "@murphai/contracts";
 import { advanceAutomationDeviceActivityCursor, upsertAutomation } from "@murphai/core";
+import { MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION, MURPH_MANAGED_AUTOMATIONS } from "@murphai/assistant-engine";
 import {
   listAutomations,
   showAutomation,
@@ -1685,6 +1686,76 @@ test("automation instruction inventory bounds pages and exposes omitted instruct
   records[0]!.summary = "x".repeat(50_000);
   const oversizedMetadata = await runInProcessJsonCli(cli, ["automation", "list", "--include-instructions", "--limit", "20", "--vault", "/synthetic/inventory"]);
   assert.equal(oversizedMetadata.envelope.ok, false, "oversized metadata must fail instead of silently dropping its record");
+});
+
+test("automation maintenance exclusion preserves real reminder pages and removes routine instruction payloads", async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext("murph-maintenance-inventory-");
+  try {
+    const cli = Cli.create("vault-cli", { version: "0.0.0-test" });
+    registerAutomationCommands(cli);
+    const payload = createAutomationScaffoldPayload();
+    const route = { ...payload.route, channel: "telegram", deliveryTarget: "telegram:synthetic-inventory" };
+    const seeds = [MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION, ...MURPH_MANAGED_AUTOMATIONS]
+      .filter(seed => seed.ownerScope === "member");
+    for (const seed of seeds) await upsertAutomation({ ...payload, vaultRoot, route,
+      automationId: seed.automationId, slug: seed.slug, title: "Renamed routine", tags: [],
+      instructions: seed.instructions,
+    });
+    const empty = await runInProcessJsonCli<{ count: number; totalCount: number; nextCursor: string | null; items: unknown[] }>(cli,
+      ["automation", "list", "--include-instructions", "--exclude-maintenance", "--vault", vaultRoot]);
+    assert.equal(empty.envelope.ok, true);
+    assert.equal(empty.envelope.data?.count, 0);
+    assert.equal(empty.envelope.data?.totalCount, 0);
+    assert.equal(empty.envelope.data?.nextCursor, null);
+    assert.deepEqual(empty.envelope.data?.items, []);
+    const reminders = [];
+    for (const [index, status] of (["active", "paused", "active"] as const).entries()) {
+      reminders.push((await upsertAutomation({ ...payload, vaultRoot, route,
+        slug: `retained-reminder-${index}`, title: index === 1 ? "Medication reminder" : "Weekly health digest",
+        status, instructions: index === 1 ? "Follow the saved clinician-directed reminder; preserve its pause." : "Bring shoes to the club.",
+        tags: index === 2 ? [buildAutomationSupportSeriesTag("habit:synthetic-plan")] : ["murph-managed:weekly-health-digest"],
+        supportKind: index === 2 ? "check_in" : undefined,
+      })).record);
+    }
+    type Page = { vault: string; count: number; totalCount: number; nextCursor: string | null;
+      filters: { excludeMaintenance?: boolean }; items: Array<{ automationId: string; instructions: string | null; status: string; supportKind: string | null }> };
+    const readInventory = async (exclude: boolean, limit = 20) => {
+      let cursor: string | null = null;
+      let bytes = 0;
+      let pages = 0;
+      const items: Page["items"] = [];
+      do {
+        const result: Awaited<ReturnType<typeof runInProcessJsonCli<Page>>> = await runInProcessJsonCli<Page>(cli,
+          ["automation", "list", "--include-instructions", "--status", "active", "--status", "paused", "--limit", String(limit),
+            ...(exclude ? ["--exclude-maintenance"] : []), ...(cursor ? ["--cursor", cursor] : []), "--vault", vaultRoot]);
+        assert.equal(result.envelope.ok, true);
+        const page = result.envelope.data;
+        assert.ok(page);
+        assert.equal(page.totalCount, reminders.length + (exclude ? 0 : seeds.length));
+        assert.equal(page.filters.excludeMaintenance, exclude ? true : undefined);
+        bytes += Buffer.byteLength(JSON.stringify({ ...page, vault: "<synthetic-vault>" }), "utf8");
+        items.push(...page.items);
+        cursor = page.nextCursor;
+        assert.ok(++pages < 20, "pagination must make progress");
+      } while (cursor);
+      return { items, bytes, pages };
+    };
+    const before = await readInventory(false);
+    const after = await readInventory(true);
+    assert.deepEqual(after.items.map(item => item.automationId).sort(), reminders.map(item => item.automationId).sort());
+    for (const reminder of reminders) {
+      const item = after.items.find(candidate => candidate.automationId === reminder.automationId);
+      assert.equal(item?.instructions, reminder.instructions);
+      assert.equal(item?.status, reminder.status);
+      assert.equal(item?.supportKind, reminder.supportKind);
+    }
+    assert.ok(before.bytes - after.bytes > 50_000, "exclude routine bodies, not just trim their metadata");
+    assert.ok(before.pages > after.pages);
+    assert.deepEqual((await readInventory(true, 1)).items, after.items);
+    process.stdout.write(`[maintenance-inventory-bytes] ${JSON.stringify({ baselineBytes: before.bytes, filteredBytes: after.bytes, baselinePages: before.pages, filteredPages: after.pages, eligible: after.items.length })}\n`);
+  } finally {
+    await rm(parentRoot, { recursive: true, force: true });
+  }
 });
 
 test("automation compact list retains enumeration state and materially reduces a 25-item page", async () => {

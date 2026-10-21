@@ -357,6 +357,10 @@ General correction scope and canonical-owner verification are tracked in
 Automation database load, daily scheduling, and Flex retry work:
 [`2026-09-21-automation-query-load.md`](exec-plans/completed/2026-09-21-automation-query-load.md).
 
+Maintenance exclusion from the morning reminder inventory and synthetic response
+measurement are recorded in
+[`2026-10-20-usage-reminder-inventory.md`](exec-plans/completed/2026-10-20-usage-reminder-inventory.md).
+
 Canonical device import preparation reuse is owned by `packages/core/README.md`;
 regression proof and local measurements are tracked in
 [`2026-09-21-device-import-write-cost.md`](exec-plans/completed/2026-09-21-device-import-write-cost.md).

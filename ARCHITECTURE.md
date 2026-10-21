@@ -313,7 +313,10 @@ or canceled one-offs and verified duplicates can be archived. Correct reminders
 and recurring habits are preserved, including on retries. Source opt-outs still
 apply, and uncertain context does not authorize a mutation.
 The review reads the paginated automation instruction inventory once, following
-every cursor. Each page holds at most 20 records and 48 KiB of data JSON in
+every cursor. Its `--exclude-maintenance` filter derives immutable IDs from the
+existing static managed seed registry and excludes those built-in routine jobs
+before counting or pagination. Ordinary, paused, clinical, and plan-support
+reminders remain eligible; editable titles and tags cannot establish exclusion. Each page holds at most 20 records and 48 KiB of data JSON in
 immutable-id order. Oversized instructions are explicitly incomplete and require
 an exact read before judgment. Complete unchanged records need no individual
 inspection; mutation candidates retain an exact read and version check. Ordinary

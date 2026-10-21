@@ -83,6 +83,8 @@ export interface AutomationQueryRecord {
 }
 
 export interface AutomationListOptions {
+  /** Omit exact immutable identities before counting or paginating. */
+  excludeAutomationIds?: readonly string[];
   exactTag?: string;
   status?: string | string[];
   text?: string;
@@ -642,7 +644,8 @@ function matchesAutomationOptions(
   record: AutomationQueryRecord,
   options: AutomationListOptions,
 ): boolean {
-  return matchesAutomationStatus(record.status, options.status) &&
+  return !options.excludeAutomationIds?.includes(record.automationId) &&
+    matchesAutomationStatus(record.status, options.status) &&
     matchesAutomationExactTag(record, options.exactTag) &&
     matchesAutomationText(record, options.text);
 }

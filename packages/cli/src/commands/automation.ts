@@ -1,4 +1,5 @@
 import { Cli, z } from "incur";
+import { getMurphMaintenanceAutomationIds } from "@murphai/assistant-engine";
 
 import {
   AUTOMATION_SUPPORT_SERIES_RECONCILED_ARCHIVE_TAG,
@@ -156,6 +157,7 @@ const automationListResultFields = {
     status: z.array(z.enum(automationStatusValues)).nullable(),
     text: z.string().nullable(),
     supportSeriesId: z.string().nullable(),
+    excludeMaintenance: z.boolean().optional(),
     cursor: z.string().nullable(),
     limit: z.number().int().positive().max(200),
   }),
@@ -1423,6 +1425,9 @@ export function registerAutomationCommands(
       compact: z.boolean().default(false).describe(
         "Return identifiers, current updatedAt, and basic lifecycle and schedule state; use automation show for complete details.",
       ),
+      excludeMaintenance: z.boolean().default(false).describe(
+        "Exclude registered built-in routine jobs by immutable id before counting or pagination; retain ordinary, clinical, and plan-support reminders.",
+      ),
       includeInstructions: z.boolean().default(false).describe(
         "Review instructions and metadata together in immutable-id order. At most 20 records and 48 KiB per page; follow nextCursor. Oversized instructions are null with instructionsComplete=false: read that record exactly before judging it. Incompatible with --compact.",
       ),
@@ -1445,6 +1450,7 @@ export function registerAutomationCommands(
       const page = await listAutomationPageForCommand(context.options.vault, {
         cursor: context.options.cursor,
         exactTag,
+        ...(context.options.excludeMaintenance ? { excludeAutomationIds: getMurphMaintenanceAutomationIds() } : {}),
         limit: context.options.includeInstructions
           ? Math.min(context.options.limit, AUTOMATION_INSTRUCTION_PAGE_MAX_ITEMS)
           : context.options.limit,
@@ -1459,6 +1465,7 @@ export function registerAutomationCommands(
           status: context.options.status ?? null,
           text: context.options.text ?? null,
           supportSeriesId: supportSeriesId ?? null,
+          ...(context.options.excludeMaintenance ? { excludeMaintenance: true } : {}),
           cursor: context.options.cursor ?? null,
           limit: context.options.limit,
         },
