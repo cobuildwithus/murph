@@ -1,4 +1,4 @@
-export const HOSTED_RUNNER_SMOKE_RESULT_SCHEMA = "murph.cloudflare-hosted-runner-smoke.v2";
+export const HOSTED_RUNNER_SMOKE_RESULT_SCHEMA = "murph.cloudflare-hosted-runner-smoke.v3";
 export const HOSTED_RUNNER_SMOKE_CLI_SURFACE_HOT_PATH_PROOF_COUNT = 5;
 export const HOSTED_RUNNER_SMOKE_CLI_VAULT_COMMAND_PROOF_COUNT = 12;
 export const HOSTED_RUNNER_SMOKE_CLI_VAULT_WRITE_PROOF_COUNT = 2;
@@ -46,10 +46,9 @@ export interface HostedRunnerSmokeResult {
   codexVersion: string;
   healthCommonsCatalogHash: string;
   healthCommonsCliGoalProofCount: number;
-  healthCommonsCliProtocolListBytes: number;
-  healthCommonsFinnishDrySaunaTitle: string;
-  healthCommonsRuntimeProtocolHitKeys: readonly string[];
-  healthCommonsRuntimeSearchHitKeys: readonly string[];
+  healthCommonsCliKnowledgeSearchBytes: number;
+  healthCommonsRuntimeBiomarkerDesiredDirection: string;
+  healthCommonsRuntimeKnowledgeEntityKeys: readonly string[];
   murphCommandDiscovered: boolean;
   operatorHomeRebound: boolean;
   pdfParserProviderId: string;
@@ -97,10 +96,9 @@ const HOSTED_RUNNER_SMOKE_RESULT_KEYS = new Set([
   "codexVersion",
   "healthCommonsCatalogHash",
   "healthCommonsCliGoalProofCount",
-  "healthCommonsCliProtocolListBytes",
-  "healthCommonsFinnishDrySaunaTitle",
-  "healthCommonsRuntimeProtocolHitKeys",
-  "healthCommonsRuntimeSearchHitKeys",
+  "healthCommonsCliKnowledgeSearchBytes",
+  "healthCommonsRuntimeBiomarkerDesiredDirection",
+  "healthCommonsRuntimeKnowledgeEntityKeys",
   "murphCommandDiscovered",
   "operatorHomeRebound",
   "pdfParserProviderId",
@@ -277,21 +275,17 @@ export function parseHostedRunnerSmokeResult(value: unknown): HostedRunnerSmokeR
       "Hosted runner smoke result.healthCommonsCliGoalProofCount",
       HOSTED_RUNNER_SMOKE_HEALTH_COMMONS_CLI_GOAL_PROOF_COUNT,
     ),
-    healthCommonsCliProtocolListBytes: readFiniteNumber(
-      record.healthCommonsCliProtocolListBytes,
-      "Hosted runner smoke result.healthCommonsCliProtocolListBytes",
+    healthCommonsCliKnowledgeSearchBytes: readFiniteNumber(
+      record.healthCommonsCliKnowledgeSearchBytes,
+      "Hosted runner smoke result.healthCommonsCliKnowledgeSearchBytes",
     ),
-    healthCommonsFinnishDrySaunaTitle: readNonEmptyString(
-      record.healthCommonsFinnishDrySaunaTitle,
-      "Hosted runner smoke result.healthCommonsFinnishDrySaunaTitle",
+    healthCommonsRuntimeBiomarkerDesiredDirection: readNonEmptyString(
+      record.healthCommonsRuntimeBiomarkerDesiredDirection,
+      "Hosted runner smoke result.healthCommonsRuntimeBiomarkerDesiredDirection",
     ),
-    healthCommonsRuntimeProtocolHitKeys: readNonEmptyStringArray(
-      record.healthCommonsRuntimeProtocolHitKeys,
-      "Hosted runner smoke result.healthCommonsRuntimeProtocolHitKeys",
-    ),
-    healthCommonsRuntimeSearchHitKeys: readNonEmptyStringArray(
-      record.healthCommonsRuntimeSearchHitKeys,
-      "Hosted runner smoke result.healthCommonsRuntimeSearchHitKeys",
+    healthCommonsRuntimeKnowledgeEntityKeys: readNonEmptyStringArray(
+      record.healthCommonsRuntimeKnowledgeEntityKeys,
+      "Hosted runner smoke result.healthCommonsRuntimeKnowledgeEntityKeys",
     ),
     murphCommandDiscovered: readTrue(
       record.murphCommandDiscovered,

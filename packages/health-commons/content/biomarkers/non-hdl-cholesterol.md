@@ -18,22 +18,15 @@ categories:
   - "lab-marker"
   - "lipids"
 relations:
+  - type: cites
+    target: source_artifact:pmid-37264945
+  - type: cites
+    target: source_artifact:pmid-26073395
+  - type: cites
+    target: source_artifact:pmid-26073397
+  - type: cites
+    target: source_artifact:pmid-36313109
 
-  -
-    type: "related_protocol"
-    target: "protocol_variant:omega-3-supplementation/oral-epa-dha-supplementation"
-  -
-    type: "cites"
-    target: "source_artifact:pmid-37264945"
-  -
-    type: "cites"
-    target: "source_artifact:pmid-26073395"
-  -
-    type: "cites"
-    target: "source_artifact:pmid-26073397"
-  -
-    type: "cites"
-    target: "source_artifact:pmid-36313109"
 unit: "mg/dL"
 measurementContexts:
   - "fasting_lipid_panel"
@@ -114,7 +107,6 @@ referenceGuidance:
 
 ## Role in this protocol
 
-Non-HDL Cholesterol is used as a secondary endpoint for `protocol_variant:omega-3-supplementation/oral-epa-dha-supplementation`.
 
 ## Interpretation
 

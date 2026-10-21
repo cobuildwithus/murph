@@ -1,7 +1,6 @@
 import type { MetadataRoute } from "next";
 
 import { listComparisonSitemapEntries } from "@/src/lib/comparisons/catalog";
-import { listHealthCommonsExperimentRouteParams } from "@/src/lib/health-commons/experiment-browse";
 import { listHealthCommonsMeasurementMethodRoutes } from "@/src/lib/health-commons/measurement-method-detail";
 import { MURPH_PUBLIC_SITE_URL } from "@/src/lib/site-metadata";
 
@@ -12,7 +11,6 @@ const STATIC_PUBLIC_ROUTES = [
   "/clubs",
   "/contact",
   "/consumer-health-data-privacy-policy",
-  "/experiments",
   "/legal",
   "/legal/health-ai-safety-disclosure",
   "/legal/privacy",
@@ -23,12 +21,6 @@ const STATIC_PUBLIC_ROUTES = [
 ] as const;
 
 export default function sitemap(): MetadataRoute.Sitemap {
-  const experimentRoutes = listHealthCommonsExperimentRouteParams().flatMap(
-    ({ experimentId }) => {
-      const route = `/experiments/${encodeURIComponent(experimentId)}`;
-      return [route, `${route}/research`];
-    },
-  );
   const measurementMethodRoutes = listHealthCommonsMeasurementMethodRoutes().map(
     (measurementMethodId) =>
       `/measurement-methods/${encodeURIComponent(measurementMethodId)}`,
@@ -41,7 +33,6 @@ export default function sitemap(): MetadataRoute.Sitemap {
   return [
     ...STATIC_PUBLIC_ROUTES,
     ...comparisonLastModifiedByRoute.keys(),
-    ...experimentRoutes,
     ...measurementMethodRoutes,
   ]
     .sort()

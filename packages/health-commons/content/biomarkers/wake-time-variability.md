@@ -17,19 +17,13 @@ categories:
   - "sleep-regularity"
   - "self-experiment-metric"
 relations:
+  - type: cites
+    target: source_artifact:pmid-22294820
+  - type: cites
+    target: source_artifact:pmid-33864369
+  - type: cites
+    target: source_artifact:pmid-37684151
 
-  -
-    type: "related_protocol"
-    target: "protocol_variant:consistent-wake-time/consistent-wake-time"
-  -
-    type: "cites"
-    target: "source_artifact:pmid-22294820"
-  -
-    type: "cites"
-    target: "source_artifact:pmid-33864369"
-  -
-    type: "cites"
-    target: "source_artifact:pmid-37684151"
 measurementContexts:
   - "sleep_diary"
   - "overnight_wearable"

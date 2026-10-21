@@ -14,8 +14,6 @@ import {
   BROWSER_VAULT_LABS_SHARD_SCHEMA,
   BROWSER_VAULT_METRIC_BUCKET_SHARD_SCHEMA,
   BROWSER_VAULT_METRICS_SHARD_SCHEMA,
-  buildBrowserVaultExperimentRunCards,
-  createBrowserVaultQueryClient,
   createBrowserVaultCoreQueryClient,
   createBrowserVaultInteractiveMetricsQueryClient,
   createBrowserVaultInteractiveQueryClient,
@@ -31,7 +29,6 @@ import {
   type BrowserVaultMetricSeriesCapableQueryClient,
   type BrowserVaultReplicaShardSelection,
 } from "@murphai/query/browser-replica-client";
-import { BROWSER_VAULT_REPLICA_CURRENT_GENERATION } from "@murphai/contracts/browser-vault";
 import {
   getHostedBrowserVaultReplicaStorageKeyId,
   HOSTED_BROWSER_VAULT_REPLICA_MAX_BYTES,
@@ -392,16 +389,7 @@ async function loadLegacyBrowserVaultReplica(input: {
     generation: replica.generation,
     sourceBundleHash: replica.source.sourceBundleHash,
   }, replicaRef);
-  const compatibilityReplica = (replica.generation ?? 0)
-      < BROWSER_VAULT_REPLICA_CURRENT_GENERATION
-    ? {
-        ...replica,
-        experimentRunCards: await buildBrowserVaultExperimentRunCards(
-          createBrowserVaultQueryClient(replica),
-        ),
-      }
-    : replica;
-  const allShards = await splitBrowserVaultReplica(compatibilityReplica);
+  const allShards = await splitBrowserVaultReplica(replica);
   return {
     replicaRef,
     shards: selectBrowserVaultReplicaDemand(

@@ -15,11 +15,9 @@ export {
   resolveJunctionWearableFixturePath,
   resolveJunctionWearableHostedReplayFixturePath,
   runJunctionWearableFixtureE2e,
-  summarizeJunctionWearableBrowserVaultExperimentProgress,
   summarizeJunctionWearableBrowserVaultReplica,
 } from './testing/junction-wearable-fixture.js'
 export type {
-  JunctionWearableBrowserVaultExperimentProgressSummary,
   JunctionWearableBrowserVaultReplicaSummary,
   JunctionWearableFixtureE2eInput,
   JunctionWearableFixtureE2eResult,

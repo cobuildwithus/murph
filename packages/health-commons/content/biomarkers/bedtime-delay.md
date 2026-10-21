@@ -18,12 +18,11 @@ categories:
   - behavior-timing
   - sleep-diary
 relations:
-  - type: related_protocol
-    target: protocol_variant:bedtime-transition/standard-tiny-fallback-transition
   - type: cites
     target: source_artifact:pmid-24997168
   - type: cites
     target: source_artifact:pmid-22294820
+
 measurementContexts:
   - morning_self_report
   - prospective_bedtime_plan

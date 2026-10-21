@@ -66,24 +66,15 @@ biomarker:
     - post-challenge rebound
     - travel or holidays
 relations:
--
-  type: related_protocol
-  target: protocol_variant:alcohol-abstinence/short-term-alcohol-abstinence
--
-  type: parent_family
-  target: experiment_family:alcohol-abstinence
--
-  type: cites
-  target: source_artifact:pmid-9738608
--
-  type: cites
-  target: source_artifact:pmid-3360951
--
-  type: cites
-  target: source_artifact:pmid-7334801
--
-  type: cites
-  target: source_artifact:pmid-26690637
+  - type: cites
+    target: source_artifact:pmid-9738608
+  - type: cites
+    target: source_artifact:pmid-3360951
+  - type: cites
+    target: source_artifact:pmid-7334801
+  - type: cites
+    target: source_artifact:pmid-26690637
+
 claims:
 -
   claimId: structured-consumption-context

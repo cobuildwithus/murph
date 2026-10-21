@@ -101,34 +101,19 @@ biomarker:
       - supplemental oxygen
       - device firmware changes
 relations:
-
-  -
-    type: related_protocol
-    target: protocol_variant:evening-light-reduction/red-light-glasses-before-bed
-  -
-    type: related_protocol
-    target: protocol_variant:dry-sauna/murph-finnish-standard-3x-week
-  -
-    type: related_protocol
-    target: protocol_variant:norwegian-4x4/norwegian-4x4
-  -
-    type: cites
+  - type: cites
     target: source_artifact:fda-pulse-oximeter-basics-2025
-  -
-    type: cites
+  - type: cites
     target: source_artifact:fda-pulse-oximeter-skin-tone-guidance-2025
-  -
-    type: cites
+  - type: cites
     target: source_artifact:pmid-29262014
-  -
-    type: cites
+  - type: cites
     target: source_artifact:mayo-hypoxemia-pulse-oximetry
-  -
-    type: cites
+  - type: cites
     target: source_artifact:cleveland-clinic-blood-oxygen-level
-  -
-    type: cites
+  - type: cites
     target: source_artifact:pmid-28162150
+
 claims:
 
   -
