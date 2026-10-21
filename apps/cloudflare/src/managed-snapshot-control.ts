@@ -2,7 +2,7 @@ import { workspaceSnapshotBucket } from "./workspace-snapshot-local-s3.ts";
 import type { HostedWorkspaceSnapshotUploadSession } from "@murphai/hosted-execution/workspace-snapshot-store";
 import { HOSTED_WORKSPACE_SNAPSHOT_CONTENT_TYPE } from "@murphai/hosted-execution/workspace-snapshot-store";
 import type { HostedRuntimeManagedSnapshotUpload } from "@murphai/hosted-execution/runtime-resources";
-import { completeManagedSnapshotUpload, prepareManagedSnapshotUpload } from "./managed-snapshot-upload.ts";
+import { completeManagedSnapshotUpload, prepareManagedSnapshotUpload, type ManagedSnapshotPresignDiagnostics } from "./managed-snapshot-upload.ts";
 import { commandHostedRuntimeSnapshot } from "./runtime-resource-client.ts";
 import { createHostedR2PresignedSnapshotPartUrl, readHostedR2PresignEnvironment } from "./r2-presigned-url.ts";
 import { asWorkerStringEnvironment, type WorkerEnvironmentContract } from "./worker-contracts.ts";
@@ -18,10 +18,12 @@ export class ManagedSnapshotCompletionRejectedError extends Error {
 export async function presignManagedSnapshot(input: {
   source: SnapshotSource; session: HostedWorkspaceSnapshotUploadSession;
   encryptedByteSize: number; encryptedSha256: string; encryptedMd5?: string; expiresSeconds: number;
+  diagnostics?: ManagedSnapshotPresignDiagnostics;
 }) {
   const receipt = await prepareManagedSnapshotUpload({
     bucket: workspaceSnapshotBucket(input.source), session: input.session,
     encryptedByteSize: input.encryptedByteSize, encryptedSha256: input.encryptedSha256, encryptedMd5: input.encryptedMd5,
+    diagnostics: input.diagnostics,
     admit: async proposed => {
       const result = await commandHostedRuntimeSnapshot({ source: input.source, userId: input.session.userId, command: {
         operation: "snapshot_managed_admit", expectedSession: input.session, uploadId: proposed.uploadId,
@@ -32,7 +34,9 @@ export async function presignManagedSnapshot(input: {
     },
     settle: (receipt, verified) => settle(input.source, receipt, verified),
   });
+  if (input.diagnostics) input.diagnostics.stage = "terminal_receipt";
   if (receipt.completedAt !== null) throw new Error("Managed snapshot upload is terminal; start a fresh snapshot session.");
+  if (input.diagnostics) input.diagnostics.stage = "signing";
   const signed = await createHostedR2PresignedSnapshotPartUrl({
     environment: readHostedR2PresignEnvironment(asWorkerStringEnvironment(input.source)),
     key: receipt.objectKey, uploadId: receipt.uploadId, encryptedByteSize: receipt.encryptedByteSize,

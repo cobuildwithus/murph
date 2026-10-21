@@ -1,6 +1,7 @@
 import type { RuntimeProviderCaller } from "./runtime-provider-authorization.ts";
 import { createRuntimeReplicaWriteBucket } from "./runtime-replica-upload.ts";
 import { presignManagedSnapshot, completeManagedSnapshotForSession, ManagedSnapshotCompletionRejectedError } from "./managed-snapshot-control.ts";
+import type { ManagedSnapshotPresignDiagnostics } from "./managed-snapshot-upload.ts";
 import { commandHostedRuntimeSnapshot, recordHostedRuntimeOrphan, HostedRuntimeResourceRejectedError } from "./runtime-resource-client.ts";
 import { executeRunnerMediaCommand, createRuntimeMediaWriteBucket } from "./runtime-media.ts";
 import { createHostedArtifactStore, createHostedMediaStore } from "./bundle-store.ts";
@@ -304,6 +305,7 @@ function runnerOutboundFailureResponse(
   request: Request,
   userId: string,
   error: unknown,
+  snapshotPresign?: ManagedSnapshotPresignDiagnostics & { runtimeAttemptId: string },
 ): Response {
   if (error instanceof HostedRuntimeResourceRejectedError) {
     return json({ code: error.code, error: error.message }, error.status);
@@ -323,6 +325,10 @@ function runnerOutboundFailureResponse(
       method: readHostedRunnerDiagnosticMethod(request.method),
       operation: safeUrl ? readRunnerOutboundOperation(safeUrl, request.method) : "invalid_url",
       userIdPresent: userId.length > 0,
+      ...(snapshotPresign ? {
+        runtimeAttemptId: snapshotPresign.runtimeAttemptId,
+        snapshotPresignFailureStage: snapshotPresign.stage,
+      } : {}),
     },
     level: "error",
     message: "Hosted runner outbound request failed.",
@@ -1636,10 +1642,19 @@ async function handleRunnerWorkspaceSnapshotPresignPutRequest(input: {
   }
 
   if (body.supportsManagedUpload === true) {
-    return json(await presignManagedSnapshot({
-      source: input.env, session, encryptedByteSize, encryptedSha256: encryptedObjectSha256, encryptedMd5,
-      expiresSeconds: Math.min(HOSTED_WORKSPACE_SNAPSHOT_PRESIGNED_PUT_EXPIRES_SECONDS, remainingSessionSeconds),
-    }));
+    // Correlation is diagnostic-only and comes from the fully validated session.
+    const diagnostics: ManagedSnapshotPresignDiagnostics = { stage: "prepare" };
+    try {
+      return json(await presignManagedSnapshot({
+        source: input.env, session, encryptedByteSize, encryptedSha256: encryptedObjectSha256, encryptedMd5,
+        expiresSeconds: Math.min(HOSTED_WORKSPACE_SNAPSHOT_PRESIGNED_PUT_EXPIRES_SECONDS, remainingSessionSeconds),
+        diagnostics,
+      }));
+    } catch (error) {
+      return runnerOutboundFailureResponse(input.request, input.userId, error, {
+        ...diagnostics, runtimeAttemptId: session.attemptId,
+      });
+    }
   }
   const presigned = await createHostedR2PresignedPutUrl({
     checksumSha256Base64: encodeHostedWorkspaceSnapshotSha256Base64(encryptedObjectSha256),

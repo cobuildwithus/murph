@@ -922,6 +922,44 @@ Snapshot handlers await completion inside the outbound error boundary so rejecte
 commands return structured errors. Unknown rejection codes remain failures, and
 non-conflict error response bodies are canceled without being retained.
 
+For managed snapshot presign failures, the existing `Hosted runner outbound
+request failed.` event may also carry `details.snapshotPresignFailureStage` and
+`details.runtimeAttemptId`. Correlation comes from the already-read session only
+after session, owner and namespace validation; supplied authority headers never
+supply the logged identity. Both fields use the existing structured-log sanitizer.
+The stage identifies the failed Worker boundary:
+
+| Stage | Boundary |
+| --- | --- |
+| `prepare` | Bucket resolution, multipart capability or input validation. |
+| `allocation` | Allocate a multipart upload. |
+| `admission` | Admit the allocation, parse the response or reject an absent receipt. |
+| `receipt_validation` | Check the returned receipt's byte and owner identity. |
+| `unused_allocation_abort` | Abort the unused allocation when admission returns an existing receipt. |
+| `terminal_receipt` | Reject a receipt that is already terminal. |
+| `signing` | Read signing configuration and sign the admitted part URL. |
+
+These optional fields are diagnostic only: they neither establish a provider
+cause nor prove cleanup or settlement. A secondary cleanup failure retains the
+original failed boundary. The existing error identity, response, cleanup and call
+counts remain unchanged; known resource-rejection 409s and failures before the
+validated managed path retain their existing diagnostics. No success event or
+additional failure event is added. This Worker observation supplements the
+runtime's `snapshotUploadFailurePhase` without depending on runtime completion.
+Older readers can ignore the fields; absent fields mean unattributed or older
+evidence, never success or a particular failure stage.
+
+After an authorized rollout, query natural traffic in `cloudflare-workers` with
+`dry: true`, a fixed UTC end `T`, `timeframe.from = T - 12 hours`,
+`timeframe.to = T`, and `limit = 200`. Filter `$metadata.service = murph-hosted`,
+`$metadata.message = Hosted runner outbound request failed.`, and
+`details.operation = workspace_snapshot_presign_put`. Return only counts grouped
+by `details.snapshotPresignFailureStage` and `details.errorCode`, distinct
+correlated-attempt counts, and a separate missing-context count; keep raw attempt
+IDs private. If the limit is reached, narrow the interval before claiming complete
+coverage. Do not induce failures. Missing events remain missing evidence under
+the existing log sampling and retention policy.
+
 Existing hosted fetch-failure logs may include `fetchNetworkErrorCode`: the first
 exact allowlisted code (`ECONNREFUSED`, `ECONNRESET`, `ENOTFOUND`, `EPIPE`,
 `ETIMEDOUT`, `UND_ERR_SOCKET`, `UND_ERR_CONNECT_TIMEOUT`, `UND_ERR_HEADERS_TIMEOUT`,

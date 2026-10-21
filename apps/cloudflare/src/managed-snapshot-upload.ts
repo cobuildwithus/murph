@@ -9,6 +9,12 @@ import { abortRuntimeMultipartUpload } from "./runtime-object-upload.ts";
 type UploadReceipt = HostedRuntimeManagedSnapshotUpload;
 type SettleUpload = (upload: UploadReceipt, verified: boolean) => Promise<boolean>;
 
+/** Request-local observation only; cleanup must retain the original failed boundary. */
+export type ManagedSnapshotPresignDiagnostics = {
+  stage: "prepare" | "allocation" | "admission" | "receipt_validation"
+    | "unused_allocation_abort" | "terminal_receipt" | "signing";
+};
+
 /** Allocate without bytes, then durably admit before any URL can escape. On
  * retries the owner returns the existing immutable receipt. Aborting the unused
  * allocation cannot affect that receipt or another concurrent upload. */
@@ -16,6 +22,7 @@ export async function prepareManagedSnapshotUpload(input: {
   bucket: R2BucketLike; session: HostedWorkspaceSnapshotUploadSession;
   encryptedByteSize: number; encryptedSha256: string; encryptedMd5?: string;
   admit: (upload: UploadReceipt) => Promise<UploadReceipt | null>; settle: SettleUpload;
+  diagnostics?: ManagedSnapshotPresignDiagnostics;
 }): Promise<UploadReceipt> {
   if (!input.bucket.createMultipartUpload || !input.bucket.resumeMultipartUpload) throw new Error("Managed snapshot uploads are unavailable.");
   const { session } = input;
@@ -25,6 +32,7 @@ export async function prepareManagedSnapshotUpload(input: {
     attemptId: session.attemptId, generation: session.leaseGeneration,
     uploadId: "pending-allocation", completedAt: null, verifiedAt: null,
   });
+  if (input.diagnostics) input.diagnostics.stage = "allocation";
   const allocated = await input.bucket.createMultipartUpload(session.objectKey, {
     httpMetadata: { contentType: HOSTED_WORKSPACE_SNAPSHOT_CONTENT_TYPE },
     customMetadata: { encryptedsha256: input.encryptedSha256, snapshotid: session.snapshotId,
@@ -32,10 +40,15 @@ export async function prepareManagedSnapshotUpload(input: {
   });
   const proposed = { ...identity, uploadId: allocated.uploadId };
   try {
+    if (input.diagnostics) input.diagnostics.stage = "admission";
     const receipt = await input.admit(proposed);
     if (!receipt) throw new Error("Managed snapshot upload admission was rejected.");
+    if (input.diagnostics) input.diagnostics.stage = "receipt_validation";
     requireSameSnapshotBytes(proposed, receipt);
-    if (receipt.uploadId !== allocated.uploadId) await abortRuntimeMultipartUpload(allocated);
+    if (receipt.uploadId !== allocated.uploadId) {
+      if (input.diagnostics) input.diagnostics.stage = "unused_allocation_abort";
+      await abortRuntimeMultipartUpload(allocated);
+    }
     return receipt;
   } catch (error) {
     // An admission reply can be lost after commit. Record terminal proof only
