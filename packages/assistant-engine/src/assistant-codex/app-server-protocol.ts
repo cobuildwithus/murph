@@ -38,6 +38,7 @@ export interface CodexRpcErrorResponse extends CodexRpcMessage {
 
 export interface CodexTokenUsageBreakdown {
   cacheWriteInputTokens: number
+  cacheWrite12hInputTokens?: number
   cachedInputTokens: number
   inputTokens: number
   outputTokens: number
@@ -163,6 +164,9 @@ export function readCodexTokenUsageBreakdown(
   const cacheWriteInputTokens = Object.hasOwn(usage, 'cacheWriteInputTokens')
     ? readCodexNonNegativeInteger(usage.cacheWriteInputTokens)
     : 0
+  const cacheWrite12hInputTokens = Object.hasOwn(usage, 'cacheWrite12hInputTokens')
+    ? readCodexNonNegativeInteger(usage.cacheWrite12hInputTokens)
+    : 0
   const cachedInputTokens = readCodexNonNegativeInteger(usage.cachedInputTokens)
   const inputTokens = readCodexNonNegativeInteger(usage.inputTokens)
   const outputTokens = readCodexNonNegativeInteger(usage.outputTokens)
@@ -173,6 +177,8 @@ export function readCodexTokenUsageBreakdown(
 
   if (
     cacheWriteInputTokens === null ||
+    cacheWrite12hInputTokens === null ||
+    cacheWrite12hInputTokens > cacheWriteInputTokens ||
     cachedInputTokens === null ||
     inputTokens === null ||
     outputTokens === null ||
@@ -184,6 +190,7 @@ export function readCodexTokenUsageBreakdown(
 
   return {
     cacheWriteInputTokens,
+    ...(cacheWrite12hInputTokens > 0 ? { cacheWrite12hInputTokens } : {}),
     cachedInputTokens,
     inputTokens,
     outputTokens,
