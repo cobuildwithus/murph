@@ -1322,3 +1322,6 @@ Member ChatGPT linking retirement is tracked in
 [`the removal plan`](exec-plans/completed/2026-10-19-remove-member-inference.md);
 the retained mailbox cleanup contract is owned by
 [`hosted runtime protocol`](references/hosted-runtime-protocol.md).
+
+Stale onboarding selection rejection is tracked in
+[the onboarding compatibility plan](exec-plans/active/2026-10-20-stale-onboarding-personas.md).
