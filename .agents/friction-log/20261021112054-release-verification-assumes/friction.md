@@ -21,4 +21,4 @@ Remove the obsolete negative-control helper and timing assertion; retain direct 
 
 ## Context
 
-A repository verification test blocks protected release proof despite the current hook consuming the full diff before matching.
+A repository verification test blocks protected release proof despite the current hook using a path-scoped Git tree comparison.
