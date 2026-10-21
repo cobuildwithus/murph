@@ -19,10 +19,6 @@ export type {
 
 const HEALTH_COMMONS_WEB_PROJECTION_KEYS: readonly HealthCommonsWebProjectionKey[] = [
   "goal.page",
-  "experiment.protocol",
-  "experiment.research",
-  "experiment.results-public",
-  "experiment.shell",
 ];
 
 let cachedGeneratedWebRouteIndex: HealthCommonsWebRouteIndex | null = null;

@@ -84,37 +84,21 @@ biomarker:
       - naps
       - device or algorithm changes
 relations:
-
-  -
-    type: related_protocol
-    target: protocol_variant:evening-light-reduction/red-light-glasses-before-bed
-  -
-    type: related_protocol
-    target: protocol_variant:dry-sauna/murph-finnish-standard-3x-week
-  -
-    type: related_protocol
-    target: protocol_variant:norwegian-4x4/norwegian-4x4
-  -
-    type: cites
+  - type: cites
     target: source_artifact:doi-10.1093-sleep-zsaf063
-  -
-    type: cites
+  - type: cites
     target: source_artifact:pmid-21876072
-  -
-    type: cites
+  - type: cites
     target: source_artifact:pmid-29087522
-  -
-    type: cites
+  - type: cites
     target: source_artifact:pmid-37917155-deep-sleep
-  -
-    type: cites
+  - type: cites
     target: source_artifact:pmid-39460013-deep-sleep
-  -
-    type: cites
+  - type: cites
     target: source_artifact:doi-10.1038-s41598-025-93774-z
-  -
-    type: cites
+  - type: cites
     target: source_artifact:pmid-41325105
+
 claims:
 
   -

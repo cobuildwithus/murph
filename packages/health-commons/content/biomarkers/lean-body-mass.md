@@ -10,11 +10,8 @@ quality: usable
 categories:
   - body-composition
   - fitness
-relations:
+relations: []
 
-  -
-    type: related_protocol
-    target: protocol_variant:creatine-supplementation/creatine-monohydrate
 measurementContexts:
   - creatine_self_experiment
   - manual_checkin

@@ -1,5 +1,7 @@
 import {
   buildHostedVaultShareProjectionScopeKey,
+  HOSTED_VAULT_SHARE_CONTENT_DIGEST_CAPABILITY_PARAM,
+  HOSTED_VAULT_SHARE_CONTENT_DIGEST_CAPABILITY_VERSION,
   HOSTED_VAULT_SHARE_DEFERRED_WORK_CAPABILITY_PARAM,
   HOSTED_VAULT_SHARE_DEFERRED_WORK_CAPABILITY_VERSION,
   HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE,
@@ -19,6 +21,14 @@ export function supportsHostedVaultShareDeferredProjectionWork(
   return new URL(request.url).searchParams.get(
     HOSTED_VAULT_SHARE_DEFERRED_WORK_CAPABILITY_PARAM,
   ) === HOSTED_VAULT_SHARE_DEFERRED_WORK_CAPABILITY_VERSION;
+}
+
+export function supportsHostedVaultShareProjectionContentDigests(
+  request: Request,
+): boolean {
+  return new URL(request.url).searchParams.get(
+    HOSTED_VAULT_SHARE_CONTENT_DIGEST_CAPABILITY_PARAM,
+  ) === HOSTED_VAULT_SHARE_CONTENT_DIGEST_CAPABILITY_VERSION;
 }
 
 export function readHostedVaultShareProjectionModeFromRequest(

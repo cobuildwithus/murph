@@ -16,11 +16,8 @@ categories:
   - metabolic-health
   - fasting
   - optional-home-measurement
-relations:
+relations: []
 
-  -
-    type: related_protocol
-    target: protocol_variant:prolonged-fasting/prolonged-fasting-24-72-hours
 measurementContexts:
   - fingerstick_bhb
   - clinician_directed_labs

@@ -11,14 +11,8 @@ aliases:
   - iarc-sunbeds-uv-radiation-2009-07-29
 categories:
   - whole-body-photobiomodulation
-relations:
+relations: []
 
-  -
-    type: related_protocol
-    target: protocol_variant:whole-body-photobiomodulation/whole-body-red-and-near-infrared-light-exposure
-  -
-    type: parent_family
-    target: experiment_family:whole-body-photobiomodulation
 source:
   kind: web_page
   title: Sunbeds and UV Radiation

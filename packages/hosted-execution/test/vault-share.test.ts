@@ -34,6 +34,7 @@ import {
   parseHostedVaultShareDeliverResponse,
   parseHostedVaultShareEffectDeadlineAtEpochMs,
   parseHostedVaultShareProjectionScopeKey,
+  serializeHostedVaultShareProjectionContentDigestInput,
 } from "../src/vault-share.ts";
 
 const TEST_SOURCE_WORKSPACE_VERSION = "7";
@@ -758,16 +759,18 @@ describe("vault-share contracts", () => {
     ).toThrow(/known vault-share projection kind/u);
   });
 
-  it("parses only opaque tokens for active projection scopes", () => {
+  it("parses only opaque tokens and source versions for active projection scopes", () => {
     const scopeKey = buildHostedVaultShareProjectionScopeKey(SLEEP_SCOPE);
     const generationToken = "b".repeat(43);
     expect(parseHostedVaultShareActiveProjectionKindsResponse({
       generationTokensByProjectionScopeKey: { [scopeKey]: generationToken },
+      publishedSourceWorkspaceVersionByProjectionScopeKey: { [scopeKey]: "7" },
       projectionKinds: ["sleep-times.v0"],
       projectionScopes: [SLEEP_SCOPE],
     })).toEqual({
       generationTokensByProjectionScopeKey: { [scopeKey]: generationToken },
       hasDeferredProjectionWork: false,
+      publishedSourceWorkspaceVersionByProjectionScopeKey: { [scopeKey]: "7" },
       projectionKinds: ["sleep-times.v0"],
       projectionScopes: [SLEEP_SCOPE],
     });
@@ -784,6 +787,44 @@ describe("vault-share contracts", () => {
       projectionKinds: ["sleep-times.v0"],
       projectionScopes: [SLEEP_SCOPE],
     })).toThrow(/SHA-256 base64url digest/u);
+    expect(() => parseHostedVaultShareActiveProjectionKindsResponse({
+      publishedSourceWorkspaceVersionByProjectionScopeKey: {
+        [buildHostedVaultShareProjectionScopeKey(PROFILE_SCOPE)]: "7",
+      },
+      projectionKinds: ["sleep-times.v0"],
+      projectionScopes: [SLEEP_SCOPE],
+    })).toThrow(/inactive scope key/u);
+    expect(() => parseHostedVaultShareActiveProjectionKindsResponse({
+      publishedSourceWorkspaceVersionByProjectionScopeKey: {
+        [scopeKey]: "not-a-version",
+      },
+      projectionKinds: ["sleep-times.v0"],
+      projectionScopes: [SLEEP_SCOPE],
+    })).toThrow(/canonical PostgreSQL bigint version/u);
+  });
+
+  it("serializes current-state content digests without runtime-controlled occurrence time", () => {
+    const older = serializeHostedVaultShareProjectionContentDigestInput({
+      projectionScope: PROFILE_SCOPE,
+      records: [{
+        data: { displayName: "Theo" },
+        occurredAt: "2026-07-01T00:00:00.000Z",
+        recordKey: "profile-name",
+        sourceRevision: "a".repeat(32),
+      }],
+    });
+    const newer = serializeHostedVaultShareProjectionContentDigestInput({
+      projectionScope: PROFILE_SCOPE,
+      records: [{
+        data: { displayName: "Theo" },
+        occurredAt: "2026-10-02T00:00:00.000Z",
+        recordKey: "profile-name",
+        sourceRevision: "a".repeat(32),
+      }],
+    });
+
+    expect(newer).toBe(older);
+    expect(newer).not.toContain("occurredAt");
   });
 
   it("parses the fixed-width deferred-work signal and rejects non-booleans", () => {

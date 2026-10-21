@@ -54,8 +54,6 @@ test("progress-card renders stable private vault media without a URL", async () 
       "experiment",
       "start",
       "private-progress-card",
-      "--custom",
-      "--no-public-protocol",
       "--title",
       "Private Progress Card",
       "--started-on",

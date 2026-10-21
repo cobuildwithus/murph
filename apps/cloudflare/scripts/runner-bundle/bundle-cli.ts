@@ -103,7 +103,7 @@ const VAULT_CLI_BUNDLE_PARITY_PROBES: ReadonlyArray<readonly string[]> = [
   ["meal", "totals", "--from", "2026-01-01", "--to", "2026-01-01", "--format", "json"],
   // Reads Health Commons generated artifacts through the image-pinned package
   // root; catches asset-root resolution drift inside the bundled graph.
-  ["commons", "protocol", "list", "--query", "sauna", "--limit", "3", "--format", "json"],
+  ["commons", "goal", "list", "--query", "sleep", "--limit", "3", "--format", "json"],
 ];
 
 export async function bundleInstalledVaultCliBinary(

@@ -11,13 +11,8 @@ aliases:
 - Dietary Guidelines for Americans, 2025-2030
 categories:
 - omega-3-supplementation
-relations:
--
-  type: related_protocol
-  target: protocol_variant:omega-3-supplementation/oral-epa-dha-supplementation
--
-  type: parent_family
-  target: experiment_family:omega-3-supplementation
+relations: []
+
 source:
   kind: guideline
   title: Dietary Guidelines for Americans, 2025-2030

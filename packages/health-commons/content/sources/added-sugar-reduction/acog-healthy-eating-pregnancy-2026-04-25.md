@@ -11,13 +11,8 @@ aliases:
 - candidate:safety-and-burden:024
 categories:
 - added-sugar-reduction
-relations:
--
-  type: related_protocol
-  target: protocol_variant:added-sugar-reduction/no-added-sugar-diet
--
-  type: parent_family
-  target: experiment_family:added-sugar-reduction
+relations: []
+
 sourceIdentity:
   identityKind: web_page
   canonicalIdBasis: url

@@ -9,9 +9,6 @@ import {
   DeviceSyncSetupGuideDialog,
 } from "@/app/(dashboard)/home/device-sync-completion-dialog";
 import { ComputerHandoffFloatingIsland } from "@/src/components/computer-use/computer-handoff-floating-island";
-import { HomeExperimentCard } from "@/src/components/home/home-experiment-card";
-import { ExperimentBrowseCard } from "@/src/components/experiments/experiment-browse-card";
-import { ExperimentHeroCard } from "@/src/components/experiments/experiment-hero-card";
 import {
   GroupUsageFundingActions,
   GroupUsageFundingShell,
@@ -19,11 +16,6 @@ import {
 import { GroupSponsorshipDialog } from "@/src/components/hosted-groups/group-sponsorship-dialog";
 import { GroupSponsorshipManagementCard } from "@/src/components/hosted-groups/group-sponsorship-management-card";
 import { MetricCard } from "@/src/components/ui/metric-card";
-import { TimelineEntry } from "@/src/components/ui/timeline-entry";
-import { ConclusionCard } from "@/src/components/conclusion-card";
-import { NextStepCard } from "@/src/components/next-step-card";
-import { ExpectedSignalCard } from "@/src/components/experiments/experiment-detail/expected-signal-card";
-import { StartExperimentChannelDialog } from "@/src/components/experiments/experiment-detail/start-experiment-button";
 import {
   HostedEmailMurphContactDialog,
   WebmailIcon,
@@ -42,9 +34,6 @@ import {
   ASSISTANT_MODEL_CHOICE_CARD_CLASSES,
   AssistantModelArtwork,
 } from "@/src/components/settings/assistant-model-artwork";
-import { HealthDomainCard } from "@/src/components/overview/health-domain-card";
-import { ActiveExperimentBanner } from "@/src/components/overview/active-experiment-banner";
-import { ProfileStats } from "@/src/components/overview/profile-stats";
 import {
   HostedAuthPanelAlternateMethods,
   HostedResumableAuthState,
@@ -119,8 +108,6 @@ import {
   MurphContactCardPicker,
   type MurphContactAvatarOption,
 } from "@/src/components/murph/murph-contact-card-picker";
-import type { ExperimentStartContactOption } from "@/src/lib/experiments/start-experiment-contact";
-import type { ExperimentLibraryCard } from "@/src/lib/experiments/library-cards";
 import {
   FITBIT_GOOGLE_HEALTH_LINK_FAILED_DETAIL,
   type DeviceSyncCompletionDialogModel,
@@ -174,7 +161,6 @@ import { VitalConnectionDialog } from "../(dashboard)/connect/connect-page-dialo
 import { GroupPrivateConversions } from "../(dashboard)/ops/growth/group-private-conversions";
 import { PublicComparisonTableStudy } from "./public-comparison-table-study";
 import type { HostedGrowthDashboard } from "@/src/lib/hosted-ops/growth-metrics";
-import { ExperimentResultsShareStudy } from "./experiment-results-share-study";
 import { ImessageChallengeStandingsCardStudy } from "./imessage-challenge-standings-card-study";
 import { ImessageNutritionCardStudy } from "./imessage-nutrition-card-study";
 import { ImessageCompactTableCardStudy } from "./imessage-compact-table-card-study";
@@ -272,30 +258,6 @@ function resolveDesignPhoneCountryOption(value: string) {
   return option;
 }
 
-
-const EXPERIMENT_START_CHANNEL_OPTIONS: ExperimentStartContactOption[] = [
-  {
-    connected: true,
-    description: "Preview a prepared Messages draft.",
-    href: "#experiment-start-channel-picker-study",
-    kind: "text",
-    label: "Messages",
-  },
-  {
-    connected: true,
-    description: "Preview a prepared Telegram draft.",
-    href: "#experiment-start-channel-picker-study",
-    kind: "telegram",
-    label: "Telegram",
-  },
-  {
-    connected: true,
-    description: "Preview a prepared email draft.",
-    href: "#experiment-start-channel-picker-study",
-    kind: "email",
-    label: "Email",
-  },
-];
 
 const WHOOP_COMPLETION_SETUP_GUIDE = buildWhoopAppleHealthSetupGuide(
   "/audio/whoop-sync-memos/grandpa.mp3",
@@ -465,129 +427,6 @@ const SEGMENTED_CONTROL_OPTIONS: ReadonlyArray<
   { label: "Telegram", value: "telegram" },
 ];
 
-const DESIGN_HOME_HISTORY_CARDS: ExperimentLibraryCard[] = [
-  {
-    category: "Nutrition",
-    description: "Synthetic completed run for component review.",
-    hasPrivateData: true,
-    href: "/design",
-    id: "design-earlier-evening-meals",
-    image: "/design-assets/hero-01.png",
-    privateBadgeLabel: "Private data",
-    runStatus: "finished",
-    runSummary: {
-      completionPercent: 100,
-      dateRange: "Jun 2 – Jun 22",
-      day: 21,
-      metrics: [
-        {
-          current: "54.7 bpm",
-          delta: "-2.1 bpm",
-          label: "Resting heart rate",
-          sentiment: "positive",
-        },
-        {
-          current: "93.8 percent",
-          delta: "+1.4 percent",
-          label: "Sleep efficiency",
-          sentiment: "positive",
-        },
-      ],
-    },
-    searchText: "design earlier evening meals",
-    startedOn: "2026-06-02",
-    statusLabel: "Completed",
-    statusVariant: "outline",
-    title: "Earlier Evening Meals",
-  },
-  {
-    category: "Recovery",
-    description: "Synthetic completed run for component review.",
-    hasPrivateData: true,
-    href: "/design",
-    id: "design-consistent-wake-time",
-    image: "/design-assets/hero-02.png",
-    privateBadgeLabel: "Private data",
-    runStatus: "finished",
-    runSummary: {
-      completionPercent: 100,
-      dateRange: "May 8 – May 28",
-      day: 21,
-      metrics: [
-        {
-          current: "91.3 percent",
-          delta: "+2.3 percent",
-          label: "Sleep efficiency",
-          sentiment: "positive",
-        },
-        {
-          current: "105 min",
-          delta: "+14 min",
-          label: "Deep sleep",
-          sentiment: "positive",
-        },
-        {
-          current: "57.9 ms",
-          delta: "+0.8 ms",
-          label: "HRV RMSSD",
-          sentiment: "neutral",
-        },
-        {
-          current: "57 min",
-          delta: "+9 min",
-          label: "Sleep latency",
-          sentiment: "negative",
-        },
-      ],
-    },
-    searchText: "design consistent wake time",
-    startedOn: "2026-05-08",
-    statusLabel: "Completed",
-    statusVariant: "outline",
-    title: "Consistent Wake Time",
-  },
-  {
-    category: "Movement",
-    description: "Synthetic completed run for component review.",
-    hasPrivateData: true,
-    href: "/design",
-    id: "design-easy-aerobic-base",
-    image: "/design-assets/hero-03.png",
-    privateBadgeLabel: "Private data",
-    runStatus: "finished",
-    runSummary: {
-      completionPercent: 100,
-      dateRange: "Apr 12 – May 3",
-      day: 22,
-      metrics: [
-        {
-          current: "49.8 bpm",
-          delta: "-3.2 bpm",
-          label: "Resting heart rate",
-          sentiment: "positive",
-        },
-        {
-          current: "61.4 ms",
-          delta: "+4.6 ms",
-          label: "HRV RMSSD",
-          sentiment: "positive",
-        },
-        {
-          current: "89.1 percent",
-          delta: "-0.5 percent",
-          label: "Blood oxygen saturation (SpO₂)",
-          sentiment: "negative",
-        },
-      ],
-    },
-    searchText: "design easy aerobic base",
-    startedOn: "2026-04-12",
-    statusLabel: "Completed",
-    statusVariant: "outline",
-    title: "Easy Aerobic Base",
-  },
-];
-
 const DESIGN_GROUP_PRIVATE_CONVERSIONS = {
   dailySeries: Array.from({ length: 30 }, (_, index) => ({
     conversions: index === 16 || index === 22
@@ -615,7 +454,6 @@ const callbackRecoveryNotice = createConnectCallbackNotice({
 
 export function ComponentsContent() {
   const [collapsibleOpen, setCollapsibleOpen] = useState(false);
-  const [channelPickerOpen, setChannelPickerOpen] = useState(false);
   const [contactCardPickerOpen, setContactCardPickerOpen] = useState(false);
   const [personalitySettingsOpen, setPersonalitySettingsOpen] = useState(false);
   const [vitalConnectionDialogSource, setVitalConnectionDialogSource] = useState<
@@ -667,31 +505,6 @@ export function ComponentsContent() {
 
         <Separator />
 
-        <div data-design-component="experiment-library-cards" id="experiment-library-cards" inert>
-          <Section title="Experiment library cards">
-            <div className="grid items-start gap-6 md:grid-cols-2">
-              <ExperimentHeroCard
-                id="design-featured"
-                title="Featured experiment"
-                category="Movement"
-                image="/design-assets/hero-daily-step-floor.jpeg"
-                metadata="Featured card study"
-                href={null}
-              />
-              <ExperimentBrowseCard
-                id="design-browse"
-                title="Browse experiment"
-                category="Movement"
-                image="/design-assets/hero-daily-step-floor.jpeg"
-                metadata="Browse card study"
-                href={null}
-              />
-            </div>
-          </Section>
-        </div>
-
-        <Separator />
-
         <Section title="Dashboard primary navigation">
           <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
             Production dashboard destinations in their standard visual hierarchy.
@@ -724,20 +537,6 @@ export function ComponentsContent() {
             </div>
           </Section>
         </div>
-
-        <Separator />
-
-        <Section title="Home experiment history cards">
-          <div
-            className="grid items-start gap-5 lg:grid-cols-3"
-            data-design-home-experiment-history-cards
-            inert
-          >
-            {DESIGN_HOME_HISTORY_CARDS.map((card) => (
-              <HomeExperimentCard key={card.id} card={card} variant="history" />
-            ))}
-          </div>
-        </Section>
 
         <Separator />
 
@@ -1397,12 +1196,6 @@ export function ComponentsContent() {
 
         <Separator />
 
-        <Section title="Private experiment results share">
-          <ExperimentResultsShareStudy />
-        </Section>
-
-        <Separator />
-
         <Section
           id="imessage-nutrition-card"
           title="iMessage nutrition fallback parity"
@@ -1825,35 +1618,6 @@ export function ComponentsContent() {
                 setVitalConnectionDialogSource(null);
               }
             }}
-          />
-        </Section>
-
-        <Separator />
-
-        <Section
-          id="experiment-start-channel-picker-study"
-          title="Experiment Start Channel Picker"
-        >
-          <div className="flex flex-col gap-4 rounded-xl border border-border bg-card p-5 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <p className="font-serif text-xl font-semibold tracking-normal text-foreground">
-                Continue in the app you already use
-              </p>
-              <p className="mt-1 max-w-md text-sm leading-6 text-muted-foreground">
-                The compact picker keeps the selected experiment visible and
-                prepares a short message for review.
-              </p>
-            </div>
-            <Button onClick={() => setChannelPickerOpen(true)}>
-              Preview picker
-            </Button>
-          </div>
-          <StartExperimentChannelDialog
-            onOpenChange={setChannelPickerOpen}
-            open={channelPickerOpen}
-            options={EXPERIMENT_START_CHANNEL_OPTIONS}
-            protocolDays={14}
-            protocolTitle="Example Evening Routine"
           />
         </Section>
 
@@ -2578,51 +2342,6 @@ export function ComponentsContent() {
 
         <Separator />
 
-        <Section title="Timeline">
-          <div className="max-w-sm rounded-xl border border-border bg-card p-5">
-            <span className="font-mono text-[10px] uppercase tracking-[0.1em] text-muted-foreground">Plan & Timeline</span>
-            <div className="mt-4 flex flex-col gap-4">
-              <TimelineEntry date="Apr 15" label="End" title="Experiment ends" description="Final analysis generated" variant="default" upcoming />
-              <TimelineEntry date="Apr 14" label="Checkpoint" title="Week 2 review" variant="outline" upcoming />
-              <TimelineEntry date="Apr 6" label="Upcoming" title="Session 3 of 3" upcoming />
-              <TimelineEntry date="Apr 5" label="Today" title="Session logged" description="20 min at 85°C. Deep sleep was 1h50m last night." />
-              <TimelineEntry date="Apr 4" title="HRV milestone" description="HRV crossed 50ms for the first time." />
-              <TimelineEntry date="Apr 3" title="Skipped session" description="Feeling unwell, rest day." variant="muted" />
-              <TimelineEntry date="Apr 1" label="Checkpoint" title="Baseline complete" description="Baseline captured. Active phase started." variant="outline" />
-              <TimelineEntry date="Mar 18" label="Start" title="Experiment started" description="Finnish Sauna Protocol · 28 days" variant="primary" last />
-            </div>
-          </div>
-        </Section>
-
-        <Separator />
-
-        <Section title="Next Step Card">
-          <NextStepCard title="Sauna session · 15–20 min @ 80–100°C" when="Today evening" instructions="Stay hydrated, electrolytes after" context="Session 2 of 3 this week" nextSession="Friday" />
-        </Section>
-
-        <Separator />
-
-        <Section id="expected-signal-card" title="Expected Signal Card">
-          <div className="flex flex-col gap-4 md:flex-row">
-            <ExpectedSignalCard label="HRV" expected="+10–25%" direction="up" description="Heat stress trains the autonomic nervous system, increasing parasympathetic dominance at rest." />
-            <ExpectedSignalCard label="Resting HR" expected="-3–8 bpm" direction="down" description="Repeated heat exposure improves cardiac output efficiency, lowering resting heart rate." />
-            <ExpectedSignalCard label="Deep Sleep" expected="+15–30%" direction="up" description="Core temp drop after sauna triggers deeper slow-wave sleep via thermoregulatory pathways." />
-          </div>
-        </Section>
-
-        <Separator />
-
-        <Section title="Conclusion Card">
-          <div className="flex flex-col gap-4">
-            <ConclusionCard title="What worked" variant="positive" items={[{ icon: "↑", text: "HRV +15.7% — well above ±4% normal variation." }, { icon: "↑", text: "Deep sleep +18.2% — evening timing was key." }]} />
-            <ConclusionCard title="What didn't change" variant="neutral" items={[{ icon: "→", text: "Respiratory rate -2.6% — within normal variation." }]} />
-            <ConclusionCard title="Key insights" variant="insight" items={[{ icon: "•", text: "Evening sessions drove sleep gains. Morning sessions showed no benefit." }, { icon: "•", text: "2–3x/week appears sufficient. Skipping one session had no negative impact." }]} />
-            <ConclusionCard title="Recommendations" variant="recommendation" items={[{ icon: "→", text: "Continue sauna 2x/week as maintenance." }, { icon: "→", text: "Add cold exposure post-sauna for contrast protocol." }]} />
-          </div>
-        </Section>
-
-        <Separator />
-
         <Section title="Health data consent settings row">
           <HealthDataConsentControlStudy />
         </Section>
@@ -2643,17 +2362,6 @@ export function ComponentsContent() {
 
         <Section title="Data export">
           <DataExportControlStudy />
-        </Section>
-
-        <Separator />
-
-        <Section title="Health Domain Card">
-          <div className="grid grid-cols-2 gap-4">
-            <HealthDomainCard title="Sleep & Recovery" description="Deep sleep and HRV below your potential." score={42} status="biggest-opportunity" statusLabel="Biggest opportunity" secondaryInfo="3 experiments available" />
-            <HealthDomainCard title="Cardiovascular & Fitness" description="RHR decent but flat. Zone 2 experiment running." score={64} status="experiment-active" statusLabel="Experiment active" secondaryInfo="Zone 2 RHR Reset · Day 14" />
-            <HealthDomainCard title="Supplements" description="No experiments run yet." score={null} status="not-started" statusLabel="Not started" secondaryInfo="5 experiments available" />
-            <HealthDomainCard title="Stress & Calm" description="HRV patterns suggest elevated baseline stress." score={35} status="worth-attention" statusLabel="Worth attention" secondaryInfo="4 experiments available" />
-          </div>
         </Section>
 
         <Separator />
@@ -2704,15 +2412,6 @@ export function ComponentsContent() {
               title="Edge loses · downgrade dialog"
               features={EDGE_ONLY_FEATURES}
             />
-          </div>
-        </Section>
-
-        <Separator />
-
-        <Section title="Active Experiment Banner & Profile Stats">
-          <div className="flex items-stretch gap-4">
-            <div className="flex-1"><ActiveExperimentBanner id="demo" title="Zone 2 RHR Reset" day={14} totalDays={28} /></div>
-            <ProfileStats completed={2} daysTracked={47} />
           </div>
         </Section>
 

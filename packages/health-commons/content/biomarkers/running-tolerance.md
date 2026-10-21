@@ -11,11 +11,8 @@ categories:
   - running
   - rehabilitation
   - manual-log
-relations:
+relations: []
 
-  -
-    type: related_protocol
-    target: protocol_variant:iliotibial-band-syndrome-rehabilitation/it-band-syndrome-rehab-and-return-to-run
 measurementContexts:
   - itbs_return_to_run
   - manual_checkin

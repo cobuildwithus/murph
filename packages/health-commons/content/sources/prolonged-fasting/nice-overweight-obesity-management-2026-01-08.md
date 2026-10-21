@@ -11,11 +11,8 @@ aliases:
 - nice-overweight-obesity-management-2026-01-08
 categories:
 - prolonged-fasting
-relations:
-- type: related_protocol
-  target: protocol_variant:prolonged-fasting/prolonged-fasting-24-72-hours
-- type: parent_family
-  target: experiment_family:prolonged-fasting
+relations: []
+
 source:
   kind: guideline
   title: 'Overweight and obesity management: physical activity and diet recommendations, including very-low-energy diets'

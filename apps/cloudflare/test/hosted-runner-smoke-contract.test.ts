@@ -50,13 +50,10 @@ const validHostedRunnerSmokeResult = {
   codexVersion: "codex-cli 0.125.0",
   healthCommonsCatalogHash: "sha256:catalog",
   healthCommonsCliGoalProofCount: HOSTED_RUNNER_SMOKE_HEALTH_COMMONS_CLI_GOAL_PROOF_COUNT,
-  healthCommonsCliProtocolListBytes: 768,
-  healthCommonsFinnishDrySaunaTitle: "Finnish Dry Sauna",
-  healthCommonsRuntimeProtocolHitKeys: [
-    "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
-  ],
-  healthCommonsRuntimeSearchHitKeys: [
-    "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+  healthCommonsCliKnowledgeSearchBytes: 768,
+  healthCommonsRuntimeBiomarkerDesiredDirection: "lower_or_stable",
+  healthCommonsRuntimeKnowledgeEntityKeys: [
+    "biomarker:deep-sleep-minutes",
   ],
   murphCommandDiscovered: true,
   operatorHomeRebound: true,
@@ -141,11 +138,11 @@ describe("parseHostedRunnerSmokeResult", () => {
       healthCommonsCatalogHash: "sha256:catalog",
       healthCommonsCliGoalProofCount:
         HOSTED_RUNNER_SMOKE_HEALTH_COMMONS_CLI_GOAL_PROOF_COUNT,
-      healthCommonsCliProtocolListBytes: 768,
-      healthCommonsFinnishDrySaunaTitle: "Finnish Dry Sauna",
+      healthCommonsCliKnowledgeSearchBytes: 768,
+      healthCommonsRuntimeBiomarkerDesiredDirection: "lower_or_stable",
       reportedVaultIdMatchesExpected: true,
-      healthCommonsRuntimeSearchHitKeys: [
-        "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+      healthCommonsRuntimeKnowledgeEntityKeys: [
+        "biomarker:deep-sleep-minutes",
       ],
       vaultCliCommandDiscovered: true,
       vaultRootRebound: true,
@@ -163,9 +160,9 @@ describe("parseHostedRunnerSmokeResult", () => {
 
     expect(() => parseHostedRunnerSmokeResult({
       ...validHostedRunnerSmokeResult,
-      healthCommonsRuntimeSearchHitKeys: [],
+      healthCommonsRuntimeKnowledgeEntityKeys: [],
     })).toThrow(
-      "Hosted runner smoke result.healthCommonsRuntimeSearchHitKeys must be a non-empty array.",
+      "Hosted runner smoke result.healthCommonsRuntimeKnowledgeEntityKeys must be a non-empty array.",
     );
 
     expect(() => parseHostedRunnerSmokeResult({

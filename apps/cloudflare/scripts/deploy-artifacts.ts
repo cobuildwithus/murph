@@ -42,32 +42,19 @@ const defaultRepoRoot = path.resolve(defaultAppDir, "../..");
 const expectedDeployContainerImage = "../../../Dockerfile.cloudflare-hosted-runner";
 const expectedDeployContainerBuildContext = "..";
 const healthCommonsPackageName = "@murphai/health-commons";
-const healthCommonsFinnishDrySaunaProtocol = {
-  key: "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+const healthCommonsRestingHeartRateBiomarker = {
+  desiredDirection: "lower_or_stable",
+  key: "biomarker:resting-heart-rate",
 } as const;
 const healthCommonsImproveDeepSleepGoal = {
   key: "goal_template:improve-deep-sleep",
   routeId: "improve-deep-sleep",
   startPrompt: "Hey Murph, help me improve my deep sleep.",
 } as const;
-const healthCommonsRuntimeJsonArtifacts = [
-  {
-    label: "Health Commons protocol index",
-    relativePath: path.join("generated", "protocol-index.json"),
-  },
-  {
-    label: "Health Commons protocol run specs",
-    relativePath: path.join("generated", "protocol-run-specs.json"),
-  },
-  {
-    label: "Health Commons protocol family graph",
-    relativePath: path.join("generated", "protocol-family-graph.json"),
-  },
-  {
-    label: "Health Commons biomarker desired directions",
-    relativePath: path.join("generated", "biomarker-desired-directions.json"),
-  },
-] as const;
+const healthCommonsBiomarkerDesiredDirectionsArtifact = {
+  label: "Health Commons biomarker desired directions",
+  relativePath: path.join("generated", "biomarker-desired-directions.json"),
+} as const;
 const healthCommonsGoalIndexArtifact = {
   label: "Health Commons goal index",
   relativePath: path.join("generated", "web", "browse", "goals.json"),
@@ -85,13 +72,19 @@ const healthCommonsRuntimeObsoleteGeneratedArtifacts = [
     label: "Health Commons runtime entities index",
     relativePath: path.join("generated", "entities.ndjson"),
   },
+  {
+    label: "Health Commons protocol index",
+    relativePath: path.join("generated", "protocol-index.json"),
+  },
+  {
+    label: "Health Commons protocol run specs",
+    relativePath: path.join("generated", "protocol-run-specs.json"),
+  },
+  {
+    label: "Health Commons protocol family graph",
+    relativePath: path.join("generated", "protocol-family-graph.json"),
+  },
 ] as const;
-const healthCommonsProtocolIndexSchemaVersion =
-  "murph.commons.protocol-index.v1";
-const healthCommonsProtocolRunSpecsSchemaVersion =
-  "murph.commons.protocol-run-specs.v1";
-const healthCommonsProtocolFamilyGraphSchemaVersion =
-  "murph.commons.protocol-family-graph.v1";
 const healthCommonsBiomarkerDesiredDirectionsSchemaVersion =
   "murph.commons.biomarker-desired-directions.v1";
 const healthCommonsRevisionPattern = /^sha256:[a-f0-9]{64}$/u;
@@ -663,7 +656,7 @@ async function assertRunnerBundleHealthCommonsPackageFiles(bundleDir: string): P
       rootDir: bundleDir,
     });
     for (const artifact of [
-      ...healthCommonsRuntimeJsonArtifacts,
+      healthCommonsBiomarkerDesiredDirectionsArtifact,
       healthCommonsGoalIndexArtifact,
     ]) {
       await resolveContainedRunnerDependencyFile({
@@ -707,24 +700,17 @@ async function assertRunnerBundleHealthCommonsRuntimeArtifacts(bundleDir: string
       packageName: healthCommonsPackageName,
       rootDir: bundleDir,
     });
-    const [
-      protocolIndex,
-      protocolRunSpecs,
-      protocolFamilyGraph,
-      biomarkerDesiredDirections,
-    ] = await Promise.all(
-      healthCommonsRuntimeJsonArtifacts.map(async (artifact) => {
-        const artifactPath = await resolveContainedRunnerDependencyFile({
-          filePath: path.join(packageDir, artifact.relativePath),
-          label: artifact.label,
-          packageName: healthCommonsPackageName,
-          rootDir: bundleDir,
-        });
-        return await readJsonObjectFile(
-          artifactPath,
-          `Runner ${artifact.label}`,
-        );
+    const biomarkerDesiredDirections = await readJsonObjectFile(
+      await resolveContainedRunnerDependencyFile({
+        filePath: path.join(
+          packageDir,
+          healthCommonsBiomarkerDesiredDirectionsArtifact.relativePath,
+        ),
+        label: healthCommonsBiomarkerDesiredDirectionsArtifact.label,
+        packageName: healthCommonsPackageName,
+        rootDir: bundleDir,
       }),
+      `Runner ${healthCommonsBiomarkerDesiredDirectionsArtifact.label}`,
     );
     let goalIndex: HealthCommonsWebGoalIndex;
     try {
@@ -736,9 +722,6 @@ async function assertRunnerBundleHealthCommonsRuntimeArtifacts(bundleDir: string
     }
     assertHealthCommonsRuntimeArtifacts({
       biomarkerDesiredDirections,
-      protocolFamilyGraph,
-      protocolIndex,
-      protocolRunSpecs,
       goalIndex,
     });
   }
@@ -996,57 +979,34 @@ function isRecordObject(value: unknown): value is Record<string, unknown> {
 function assertHealthCommonsRuntimeArtifacts(input: {
   biomarkerDesiredDirections: Record<string, unknown>;
   goalIndex: HealthCommonsWebGoalIndex;
-  protocolFamilyGraph: Record<string, unknown>;
-  protocolIndex: Record<string, unknown>;
-  protocolRunSpecs: Record<string, unknown>;
 }): void {
-  const indexProtocols = assertHealthCommonsProtocolIndexArtifact(input.protocolIndex);
-  const runSpecProtocols = assertHealthCommonsProtocolRunSpecsArtifact(
-    input.protocolRunSpecs,
-  );
-  const familyGraphProtocols = assertHealthCommonsProtocolFamilyGraphArtifact(
-    input.protocolFamilyGraph,
-  );
-  assertHealthCommonsBiomarkerDesiredDirectionsArtifact(
+  const biomarkers = assertHealthCommonsBiomarkerDesiredDirectionsArtifact(
     input.biomarkerDesiredDirections,
   );
 
-  if (
-    input.protocolIndex.catalogHash !== input.protocolRunSpecs.catalogHash ||
-    input.protocolIndex.catalogHash !== input.protocolFamilyGraph.catalogHash ||
-    input.protocolIndex.catalogHash !== input.biomarkerDesiredDirections.catalogHash ||
-    input.protocolIndex.catalogHash !== input.goalIndex.catalogHash
-  ) {
+  if (input.biomarkerDesiredDirections.catalogHash !== input.goalIndex.catalogHash) {
     throw new Error(
       "Runner Health Commons runtime artifacts have mismatched catalog hashes; rebuild deploy artifacts before deploying.",
     );
   }
 
   if (
-    !stringArraysEqual(protocolKeys(indexProtocols), protocolKeys(runSpecProtocols)) ||
-    !stringArraysEqual(protocolKeys(indexProtocols), protocolKeys(familyGraphProtocols))
+    !biomarkers.some((biomarker) =>
+      biomarker.key === healthCommonsRestingHeartRateBiomarker.key &&
+      biomarker.desiredDirection ===
+        healthCommonsRestingHeartRateBiomarker.desiredDirection
+    )
   ) {
     throw new Error(
-      "Runner Health Commons compact protocol artifacts disagree on protocol keys; rebuild deploy artifacts before deploying.",
+      "Runner Health Commons biomarker desired directions are stale or missing resting heart rate; rebuild deploy artifacts before deploying.",
     );
   }
-  assertProtocolSummariesMatch({
-    familyGraphProtocols,
-    indexProtocols,
-    runSpecProtocols,
-  });
-
-  assertHealthCommonsProtocolIndexIncludesFinnishDrySauna(input.protocolIndex);
-  assertHealthCommonsProtocolRunSpecsIncludeFinnishDrySauna(input.protocolRunSpecs);
-  assertHealthCommonsProtocolFamilyGraphIncludesFinnishDrySauna(
-    input.protocolFamilyGraph,
-  );
   assertHealthCommonsGoalIndexIncludesImproveDeepSleep(input.goalIndex);
 }
 
 function assertHealthCommonsBiomarkerDesiredDirectionsArtifact(
   artifact: Record<string, unknown>,
-): void {
+): Record<string, unknown>[] {
   if (
     artifact.schemaVersion !==
       healthCommonsBiomarkerDesiredDirectionsSchemaVersion ||
@@ -1076,202 +1036,8 @@ function assertHealthCommonsBiomarkerDesiredDirectionsArtifact(
     }
   }
   assertUniqueArtifactKeys(biomarkers, "biomarker desired directions");
-}
 
-function assertHealthCommonsProtocolIndexArtifact(
-  artifact: Record<string, unknown>,
-): Record<string, unknown>[] {
-  if (
-    artifact.schemaVersion !== healthCommonsProtocolIndexSchemaVersion ||
-    typeof artifact.catalogHash !== "string"
-  ) {
-    throw new Error("Runner Health Commons protocol index is invalid.");
-  }
-
-  const protocols = readRecordArrayProperty(
-    artifact,
-    "protocols",
-    "protocol index protocols",
-  );
-  for (const protocol of protocols) {
-    assertHealthCommonsProtocolSummary(protocol, "protocol index entry", {
-      requireSearchText: true,
-    });
-  }
-  assertUniqueArtifactKeys(protocols, "protocol index protocols");
-
-  return protocols;
-}
-
-function assertHealthCommonsProtocolRunSpecsArtifact(
-  artifact: Record<string, unknown>,
-): Record<string, unknown>[] {
-  if (
-    artifact.schemaVersion !== healthCommonsProtocolRunSpecsSchemaVersion ||
-    typeof artifact.catalogHash !== "string"
-  ) {
-    throw new Error("Runner Health Commons protocol run specs are invalid.");
-  }
-
-  const protocols = readRecordArrayProperty(
-    artifact,
-    "protocols",
-    "protocol run specs protocols",
-  );
-  for (const protocol of protocols) {
-    assertHealthCommonsProtocolSummary(protocol, "protocol run spec entry");
-    if (
-      !Array.isArray(protocol.expectedSignalDescriptions) ||
-      !Array.isArray(protocol.testPlans) ||
-      !Array.isArray(protocol.whyItWorks) ||
-      !protocol.whyItWorks.every((entry) => typeof entry === "string") ||
-      !isNullableRecordObject(protocol.experimentOnboarding) ||
-      !isNullableRecordObject(protocol.protocol) ||
-      !isNullableRecordObject(protocol.safety)
-    ) {
-      throw new Error("Runner Health Commons protocol run specs are invalid.");
-    }
-  }
-  assertUniqueArtifactKeys(protocols, "protocol run specs protocols");
-
-  return protocols;
-}
-
-function assertHealthCommonsProtocolFamilyGraphArtifact(
-  artifact: Record<string, unknown>,
-): Record<string, unknown>[] {
-  if (
-    artifact.schemaVersion !== healthCommonsProtocolFamilyGraphSchemaVersion ||
-    typeof artifact.catalogHash !== "string"
-  ) {
-    throw new Error("Runner Health Commons protocol family graph is invalid.");
-  }
-
-  const protocols = readRecordArrayProperty(
-    artifact,
-    "protocols",
-    "protocol family graph protocols",
-  );
-  const families = readRecordArrayProperty(
-    artifact,
-    "families",
-    "protocol family graph families",
-  );
-  const edges = readRecordArrayProperty(
-    artifact,
-    "edges",
-    "protocol family graph edges",
-  );
-  const graphKeys = new Set<string>();
-  const graphEntityTypesByKey = new Map<string, "experiment_family" | "protocol_variant">();
-
-  for (const protocol of protocols) {
-    assertHealthCommonsProtocolSummary(protocol, "protocol family graph protocol");
-    const key = protocol.key;
-    if (typeof key === "string") {
-      graphKeys.add(key);
-      graphEntityTypesByKey.set(key, "protocol_variant");
-    }
-  }
-  for (const family of families) {
-    assertHealthCommonsProtocolEntitySummary(
-      family,
-      "experiment_family",
-      "protocol family graph family",
-    );
-    const key = family.key;
-    if (typeof key === "string") {
-      graphKeys.add(key);
-      graphEntityTypesByKey.set(key, "experiment_family");
-    }
-  }
-  assertUniqueArtifactKeys(protocols, "protocol family graph protocols");
-  assertUniqueArtifactKeys(families, "protocol family graph families");
-  for (const edge of edges) {
-    const sourceKey = edge.sourceKey;
-    const targetKey = edge.targetKey;
-    const sourceType = typeof sourceKey === "string"
-      ? graphEntityTypesByKey.get(sourceKey)
-      : undefined;
-    const targetType = typeof targetKey === "string"
-      ? graphEntityTypesByKey.get(targetKey)
-      : undefined;
-    if (
-      typeof sourceKey !== "string" ||
-      typeof targetKey !== "string" ||
-      (
-        edge.type !== "child_family" &&
-        edge.type !== "parent_family" &&
-        edge.type !== "related_protocol"
-      ) ||
-      !graphKeys.has(sourceKey) ||
-      !graphKeys.has(targetKey) ||
-      !isValidHealthCommonsProtocolFamilyGraphEdgeDirection({
-        sourceType,
-        targetType,
-        type: edge.type,
-      })
-    ) {
-      throw new Error("Runner Health Commons protocol family graph is invalid.");
-    }
-  }
-
-  return protocols;
-}
-
-function assertHealthCommonsProtocolSummary(
-  value: Record<string, unknown>,
-  label: string,
-  options: {
-    requireSearchText?: boolean;
-  } = {},
-): void {
-  assertHealthCommonsProtocolEntitySummary(value, "protocol_variant", label);
-
-  const traits = value.traits;
-  if (
-    (
-      options.requireSearchText === true
-        ? typeof value.searchText !== "string"
-        : value.searchText !== undefined && typeof value.searchText !== "string"
-    ) ||
-    !isRecordObject(traits) ||
-    !isNullableString(traits.cautionLevel) ||
-    typeof traits.externalProtocol !== "boolean" ||
-    typeof traits.highCaution !== "boolean" ||
-    typeof traits.murphCanonical !== "boolean" ||
-    typeof traits.sourceAttributed !== "boolean"
-  ) {
-    throw new Error(`Runner Health Commons ${label} is invalid.`);
-  }
-}
-
-function assertHealthCommonsProtocolEntitySummary(
-  value: Record<string, unknown>,
-  entityType: "experiment_family" | "protocol_variant",
-  label: string,
-): void {
-  const revision = value.revision;
-  if (
-    !isStringArray(value.aliases) ||
-    !isStringArray(value.categories) ||
-    value.entityType !== entityType ||
-    !isNonEmptyString(value.key) ||
-    !isNonEmptyString(value.relativePath) ||
-    !isRecordObject(revision) ||
-    !isNonEmptyString(revision.pageRevisionId) ||
-    !isNullableString(revision.recipeHash) ||
-    !isNullableString(revision.runSpecRevisionId) ||
-    !isNonEmptyString(value.routeId) ||
-    !isNonEmptyStringArray(value.routeIds) ||
-    !value.routeIds.includes(value.routeId) ||
-    !isNonEmptyString(value.slug) ||
-    !isNullableString(value.status) ||
-    !isNullableString(value.summary) ||
-    !isNonEmptyString(value.title)
-  ) {
-    throw new Error(`Runner Health Commons ${label} is invalid.`);
-  }
+  return biomarkers;
 }
 
 function readRecordArrayProperty(
@@ -1285,99 +1051,6 @@ function readRecordArrayProperty(
   }
 
   return value;
-}
-
-function protocolKeys(protocols: readonly Record<string, unknown>[]): string[] {
-  return protocols
-    .map((protocol) => protocol.key)
-    .filter((key): key is string => typeof key === "string")
-    .sort();
-}
-
-function assertProtocolSummariesMatch(input: {
-  familyGraphProtocols: readonly Record<string, unknown>[];
-  indexProtocols: readonly Record<string, unknown>[];
-  runSpecProtocols: readonly Record<string, unknown>[];
-}): void {
-  const runSpecProtocolsByKey = recordArrayByKey(input.runSpecProtocols);
-  const familyGraphProtocolsByKey = recordArrayByKey(input.familyGraphProtocols);
-
-  for (const indexProtocol of input.indexProtocols) {
-    const key = indexProtocol.key;
-    if (typeof key !== "string") {
-      continue;
-    }
-
-    const expected = protocolSummarySnapshot(indexProtocol);
-    const runSpecProtocol = runSpecProtocolsByKey.get(key);
-    const familyGraphProtocol = familyGraphProtocolsByKey.get(key);
-
-    if (
-      !runSpecProtocol ||
-      !familyGraphProtocol ||
-      !stableJsonEqual(expected, protocolSummarySnapshot(runSpecProtocol)) ||
-      !stableJsonEqual(expected, protocolSummarySnapshot(familyGraphProtocol))
-    ) {
-      throw new Error(
-        "Runner Health Commons compact protocol artifacts disagree on shared protocol summaries; rebuild deploy artifacts before deploying.",
-      );
-    }
-  }
-}
-
-function recordArrayByKey(
-  entries: readonly Record<string, unknown>[],
-): ReadonlyMap<string, Record<string, unknown>> {
-  const result = new Map<string, Record<string, unknown>>();
-
-  for (const entry of entries) {
-    const key = entry.key;
-    if (typeof key === "string") {
-      result.set(key, entry);
-    }
-  }
-
-  return result;
-}
-
-function protocolSummarySnapshot(protocol: Record<string, unknown>): Record<string, unknown> {
-  return {
-    aliases: protocol.aliases,
-    categories: protocol.categories,
-    entityType: protocol.entityType,
-    key: protocol.key,
-    relativePath: protocol.relativePath,
-    revision: protocol.revision,
-    routeId: protocol.routeId,
-    routeIds: protocol.routeIds,
-    slug: protocol.slug,
-    status: protocol.status,
-    summary: protocol.summary,
-    title: protocol.title,
-    traits: protocol.traits,
-  };
-}
-
-function isValidHealthCommonsProtocolFamilyGraphEdgeDirection(input: {
-  sourceType: "experiment_family" | "protocol_variant" | undefined;
-  targetType: "experiment_family" | "protocol_variant" | undefined;
-  type: unknown;
-}): boolean {
-  if (input.type === "parent_family") {
-    return input.sourceType === "protocol_variant" &&
-      input.targetType === "experiment_family";
-  }
-
-  if (input.type === "child_family") {
-    return input.sourceType === "experiment_family" &&
-      input.targetType === "experiment_family";
-  }
-
-  if (input.type === "related_protocol") {
-    return input.targetType === "protocol_variant";
-  }
-
-  return false;
 }
 
 function assertUniqueArtifactKeys(
@@ -1396,74 +1069,6 @@ function assertUniqueArtifactKeys(
     }
 
     seen.add(key);
-  }
-}
-
-function isNullableRecordObject(value: unknown): value is Record<string, unknown> | null {
-  return value === null || isRecordObject(value);
-}
-
-function isNullableString(value: unknown): value is string | null {
-  return value === null || typeof value === "string";
-}
-
-function isNonEmptyString(value: unknown): value is string {
-  return typeof value === "string" && value.length > 0;
-}
-
-function isNonEmptyStringArray(value: unknown): value is string[] {
-  return isStringArray(value) && value.length > 0 && value.every(isNonEmptyString);
-}
-
-function assertHealthCommonsProtocolIndexIncludesFinnishDrySauna(
-  artifact: Record<string, unknown>,
-): void {
-  const protocol = findProtocolArtifactEntry(artifact, "protocols");
-
-  if (!protocol) {
-    throw new Error(
-      "Runner Health Commons protocol index is stale or missing Finnish Dry Sauna; rebuild deploy artifacts before deploying.",
-    );
-  }
-}
-
-function assertHealthCommonsProtocolRunSpecsIncludeFinnishDrySauna(
-  artifact: Record<string, unknown>,
-): void {
-  const protocol = findProtocolArtifactEntry(artifact, "protocols");
-
-  if (
-    !protocol ||
-    !isRecordObject(protocol.protocol) ||
-    !Array.isArray(protocol.testPlans) ||
-    protocol.testPlans.length === 0
-  ) {
-    throw new Error(
-      "Runner Health Commons protocol run specs are stale or missing Finnish Dry Sauna; rebuild deploy artifacts before deploying.",
-    );
-  }
-}
-
-function assertHealthCommonsProtocolFamilyGraphIncludesFinnishDrySauna(
-  artifact: Record<string, unknown>,
-): void {
-  const protocol = findProtocolArtifactEntry(artifact, "protocols");
-  const families = Array.isArray(artifact.families) ? artifact.families : [];
-  const drySaunaFamily = families.find((entry) =>
-    isRecordObject(entry) && entry.key === "experiment_family:dry-sauna"
-  );
-  const edges = Array.isArray(artifact.edges) ? artifact.edges : [];
-  const hasParentFamilyEdge = edges.some((entry) =>
-    isRecordObject(entry) &&
-    entry.sourceKey === healthCommonsFinnishDrySaunaProtocol.key &&
-    entry.targetKey === "experiment_family:dry-sauna" &&
-    entry.type === "parent_family"
-  );
-
-  if (!protocol || !drySaunaFamily || !hasParentFamilyEdge) {
-    throw new Error(
-      "Runner Health Commons protocol family graph is stale or missing Finnish Dry Sauna; rebuild deploy artifacts before deploying.",
-    );
   }
 }
 
@@ -1491,32 +1096,6 @@ function assertHealthCommonsGoalIndexIncludesImproveDeepSleep(
       "Runner Health Commons goal index is incomplete; expected at least 250 unique, valid compact goals across exactly the seven public categories; rebuild deploy artifacts before deploying.",
     );
   }
-}
-
-function findProtocolArtifactEntry(
-  artifact: Record<string, unknown>,
-  collectionKey: "protocols",
-): Record<string, unknown> | null {
-  if (
-    typeof artifact.catalogHash !== "string" ||
-    !Array.isArray(artifact[collectionKey])
-  ) {
-    return null;
-  }
-
-  const protocol = artifact[collectionKey].find((entry) =>
-    isRecordObject(entry) &&
-    entry.key === healthCommonsFinnishDrySaunaProtocol.key
-  );
-
-  if (
-    !isRecordObject(protocol) ||
-    protocol.entityType !== "protocol_variant"
-  ) {
-    return null;
-  }
-
-  return protocol;
 }
 
 async function hasPnpmVirtualPackageManifest(

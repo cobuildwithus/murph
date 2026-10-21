@@ -34,6 +34,57 @@ if (
 describe.skipIf(!runPostgresProof)(
   "hosted runtime progress alert PostgreSQL boundary",
   () => {
+    it("uses current allowance for an imported assistant notification without hiding deterministic heads", async () => {
+      const prisma = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const rollback = new Error("Rollback usage-pause proof.");
+      const userId = `progress-usage-proof-${randomUUID()}`;
+      const now = new Date("2026-08-10T16:00:00Z");
+      const createdAt = new Date(+now - 60 * 60_000);
+      let completed = false;
+      try {
+        await prisma.$transaction(async (tx) => {
+          await tx.hostedMember.create({ data: {
+            ...member(userId, HostedBillingStatus.active), usageCreditBalanceUsdMicros: 0n,
+          } });
+          await seedProgressLaneItems({ tx, userId, lane: "system", rows: [
+            { createdAt, laneSeq: 1n, kind: "assistant.notification.requested" },
+            { createdAt, laneSeq: 2n, kind: "device-sync.wake" },
+          ] });
+          await tx.hostedWorkspace.create({ data: { userId,
+            redactedStatusJson: { hostedMailboxSystemImportedSeq: "2" },
+          } });
+          const read = () => readHostedRuntimeProgressHealth({ now, prisma: tx });
+          await expect(read()).resolves.toMatchObject({ anomalous: false,
+            excludedUsageBlockedSystemLaneCount: 1, stalledSystemLaneCount: 0 });
+          // The monitor must not materialize an allowance period or acknowledge work.
+          expect(await tx.hostedAiUsagePeriod.count({ where: { memberId: userId } })).toBe(0);
+          expect(await tx.hostedMailboxLaneCounter.findUnique({
+            where: { userId_lane: { userId, lane: "system" } },
+          })).toMatchObject({ consumedSeq: 0n });
+          await tx.hostedMember.update({ where: { id: userId }, data: { usageCreditBalanceUsdMicros: 1_000_000n } });
+          await expect(read()).resolves.toMatchObject({ anomalous: true,
+            excludedUsageBlockedSystemLaneCount: 0, stalledSystemLaneCount: 1, pendingItemCount: 2 });
+          await tx.hostedMember.update({ where: { id: userId }, data: { usageCreditBalanceUsdMicros: 0n } });
+          for (const dedupeKey of [
+            "assistant.notification.requested:group-join:synthetic",
+            "assistant.notification.requested:device-delivery-stalled:v1:synthetic",
+          ]) {
+            await tx.hostedMailboxItem.update({ where: { id: `${userId}-system-item-1` }, data: { dedupeKey } });
+            await expect(read()).resolves.toMatchObject({ anomalous: true, excludedUsageBlockedSystemLaneCount: 0 });
+          }
+          await tx.hostedMailboxItem.update({ where: { id: `${userId}-system-item-1` }, data: { kind: "device-sync.wake" } });
+          await expect(read()).resolves.toMatchObject({ anomalous: true, excludedUsageBlockedSystemLaneCount: 0 });
+          completed = true;
+          throw rollback;
+        }, { timeout: 30_000 });
+      } catch (error) {
+        if (error !== rollback) throw error;
+      } finally {
+        await prisma.$disconnect();
+      }
+      expect(completed).toBe(true);
+    });
+
     it("binds device import checkpoint deadlines to the active owner's latest foreground trace", async () => {
       const prisma = createPrismaClient({ databaseUrl, poolMax: 1 });
       const now = new Date("2026-08-12T16:00:00Z");
