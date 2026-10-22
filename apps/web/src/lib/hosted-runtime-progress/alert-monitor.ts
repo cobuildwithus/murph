@@ -55,6 +55,7 @@ export interface HostedRuntimeProgressHealthRow {
   checkpointEvidence: unknown;
   deliveryAcceptedAt: Date | null;
   chronologyInvalid: boolean;
+  agedHighWaterSeq: bigint | null;
   durableHighWaterSeq: bigint;
   effectiveConsumedSeq: bigint;
   headKind: string;
@@ -402,6 +403,8 @@ async function readHostedRuntimeProgressObservation(input: {
   };
 }
 
+// Fresh suffix arrivals do not inherit the paused head's age. Import must
+// cover every live pending row already at the stall boundary.
 function isImportedAssistantNotificationHead(
   row: HostedRuntimeProgressHealthRow,
   now: Date,
@@ -414,7 +417,10 @@ function isImportedAssistantNotificationHead(
       dedupeKey: row.headDedupeKey,
     }) === "default_owned"
     && row.workspaceSystemImportedSeq !== null
-    && row.workspaceSystemImportedSeq === row.durableHighWaterSeq
+    && row.agedHighWaterSeq !== null
+    && row.agedHighWaterSeq >= row.headLaneSeq
+    && row.workspaceSystemImportedSeq >= row.agedHighWaterSeq
+    && row.workspaceSystemImportedSeq <= row.durableHighWaterSeq
     && classifyHostedRuntimeProgressRow(row, now) === "stalled";
 }
 
@@ -483,7 +489,8 @@ async function readHostedRuntimeProgressCandidatePage(input: {
         pending_head.id AS head_item_id,
         pending_head.kind AS head_kind,
         pending_head.dedupe_key AS head_dedupe_key,
-        pending_head.pending_count
+        pending_head.pending_count,
+        pending_head.aged_high_water_seq
       FROM lane_boundary
       JOIN LATERAL (
         SELECT
@@ -493,7 +500,10 @@ async function readHostedRuntimeProgressCandidatePage(input: {
           mailbox_item.kind,
           mailbox_item.dedupe_key,
           mailbox_item.lane_seq,
-          COUNT(*) OVER () AS pending_count
+          COUNT(*) OVER () AS pending_count,
+          MAX(mailbox_item.lane_seq) FILTER (
+            WHERE mailbox_item.created_at <= ${input.stalledBefore}
+          ) OVER () AS aged_high_water_seq
         FROM hosted_mailbox_item AS mailbox_item
         WHERE mailbox_item.user_id = lane_boundary.user_id
           AND mailbox_item.lane = lane_boundary.lane
@@ -634,6 +644,7 @@ async function readHostedRuntimeProgressCandidatePage(input: {
         progress_evidence.foreground_checkpoint_evidence,
         progress_evidence.delivery_accepted_at,
         progress_evidence.checkpoint_evidence,
+        progress_evidence.aged_high_water_seq,
         progress_evidence.durable_high_water_seq,
         progress_evidence.effective_consumed_seq,
         progress_evidence.head_kind,
@@ -686,6 +697,7 @@ async function readHostedRuntimeProgressCandidatePage(input: {
       progress_lane.checkpoint_evidence AS "checkpointEvidence",
       progress_lane.delivery_accepted_at AS "deliveryAcceptedAt",
       progress_lane.chronology_invalid AS "chronologyInvalid",
+      progress_lane.aged_high_water_seq AS "agedHighWaterSeq",
       progress_lane.durable_high_water_seq AS "durableHighWaterSeq",
       progress_lane.effective_consumed_seq AS "effectiveConsumedSeq",
       progress_lane.head_kind AS "headKind",

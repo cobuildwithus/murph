@@ -1952,12 +1952,16 @@ side table or lane high-water advance past gaps. The runtime-progress monitor
 uses that same terminal distinction without redefining the contiguous floor:
 conversation candidates above the effective floor must still have
 `consumed_at IS NULL`, while system-lane candidates retain their existing
-live-row semantics. A fully imported assistant-owned
+live-row semantics. An imported assistant-owned
 `assistant.notification.requested` head is an intentional pause only while the
 canonical read-only usage gate reports `ai_usage_limit_exceeded`. The monitor
 classifies notification ownership with the shared execution classifier, so
-model-free notifications and device heads remain alertable. Missing, partial,
-or impossible import evidence, invalid chronology, unavailable allowance, and
+model-free notifications and device heads remain alertable. Import must cover
+the notification head and every live pending row already at least 15 minutes old,
+with the highest aged sequence derived in the same bounded mailbox scan. Fresh
+unimported suffix rows do not inherit the paused head's age; an unimported row
+at the 15-minute boundary prevents exclusion even when newer rows also arrive.
+Missing or impossible import evidence, invalid chronology, unavailable allowance, and
 checks beyond the per-scan 25-member serial budget retain normal alerting. The
 monitor records only an aggregate excluded-system-lane count and never changes
 mailbox acknowledgements, allowance, or execution. When allowance returns, the
