@@ -29,7 +29,7 @@ one primary room remains the destination for app-originated announcements.
 - [x] Extend included group access without multiplying the game allowance.
 - [ ] Integrate canonical negotiation/terms and shared progress branches.
 - [x] Focused deterministic tests, relevant typechecks, real-Codex journeys.
-- [ ] Update owner docs/changelog and prepare a Draft PR for parent review.
+- [x] Update owner docs/changelog and prepare Draft PR #4313 for parent review.
 
 Parent owns bootstrap architecture coordination and final review/deployment.
 Related work owns negotiation/terms and shared progress/media; this branch does
@@ -74,8 +74,8 @@ hosted-execution parsers, runtime/engine handler and Web callback consumers depl
 before producers, and warm runtimes must refresh. Keep consumers and columns
 through rollback until pending/frozen work drains.
 
-Parent integrates the canonical terms branch and shared progress/photo branch
-before a final candidate. Integration must preserve encrypted pending v2 words,
+This branch integrates the canonical terms branch; parent integrates the shared
+progress/photo branch before a final candidate. Integration must preserve encrypted pending v2 words,
 hydrate them before generated proposal context, retain host-only exact-pair
 arguments for photo mutations, and preserve the new conversation delivery state.
 A chat approval that activates negotiation gives only a brief acknowledgement;
