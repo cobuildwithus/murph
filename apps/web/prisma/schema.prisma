@@ -2793,7 +2793,7 @@ model Game {
   // They see the invite on Home and accept it there, with no link to text.
   inviteeMemberId      String?      @map("invitee_member_id")
   round                Int          @default(1)
-  // invited, live, settled, or void (an invite that expired unclaimed)
+  // invited, negotiating, live, settled, or void (an invite/negotiation that expired)
   status               String
   terms                Json
   termsWordsEncrypted  String       @map("terms_words_encrypted")
@@ -2805,7 +2805,7 @@ model Game {
   // The challenger's picked Day 1; Day 1 is the day after accept, or this if later.
   startsOn             DateTime?    @map("starts_on") @db.Date
   startedAt            DateTime?    @map("started_at")
-  // The players' sorted member ids joined by ":" while the game is live, else
+  // The players' sorted member ids joined by ":" while negotiating or live, else
   // null. Unique, so the same people can't have two live games at once.
   liveRosterKey        String?      @unique @map("live_roster_key")
   // Dev time travel only: added to the database clock for this game. Null (no

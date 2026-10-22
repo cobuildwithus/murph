@@ -17,7 +17,7 @@ function pending(s = state(), now = BEFORE): GamePendingChange {
 }
 describe("weekly game mutually agreed changes", () => {
   it("exposes pre-start controls and fixes start-now to a shared calendar date", () => {
-    expect(gameChangeControls(state(), BEFORE, null)).toEqual({ canStartNow: true, canEdit: true, canEditSchedule: true, canEditStartDate: true, editableFromDay: 0 });
+    expect(gameChangeControls(state(), BEFORE, null)).toEqual({ canStartNow: true, canEdit: true, canEditSchedule: true, canEditStartDate: true, canEditTasks: true, canEditStakes: true, editableFromDay: 0 });
     expect(decideGameChange(state(), "player_a", { kind: "start_now" }, BEFORE).startsOn).toBe("2026-11-02");
     expect(gameChangeControls(state(), BEFORE, pending()).canEdit).toBe(false);
   });
@@ -79,4 +79,26 @@ describe("weekly game mutually agreed changes", () => {
     expect(() => parseGameCommand({ type: "respondChange", gameId: "game_change", proposalId: "proposal_1", decision: "yes" })).toThrow();
     expect(parsePendingGameChange({ v: 1, ...pending() })).toEqual(pending());
   });
+  it("requires explicit whole-game scope for stakes after play begins", () => {
+    const change = { kind: "edit" as const, stakes: [{ kind: "per_miss" as const, item: "Tea" }] };
+    expect(() => decideGameChange(state(), "player_a", change, DURING)).toThrow("including earlier misses");
+    expect(decideGameChange(state(), "player_a", { ...change, stakesApplyToWholeGame: true }, DURING).effectiveFromDay).toBe(2);
+    expect(decideGameChange(state(), "player_a", { kind: "edit", tasks: [{seat:0,text:"Stretch"},{seat:1,text:"Walk"}] }, DURING).effectiveFromDay).toBe(2);
+  });
+  it("keeps negotiation unstarted across days until agreement and validates complete tasks", () => {
+    const s = state(); s.game.status = "negotiating"; s.players.forEach((player) => { player.dayOne = null; });
+    const proposal = pending(s, BEFORE);
+    expect(firstUnstartedGameDay(s, DURING)).toBe(0);
+    expect(isGameChangeExpired(s, proposal, DURING)).toBe(false);
+    expect(() => parseGameCommand({type:"proposeChange",gameId:"game_changes",proposalId:"proposal_1",expectedTermsVersion:1,change:{kind:"edit",tasks:[{seat:0,text:"Read"}]}})).toThrow("each player");
+    s.game.inviteExpiresAt = DURING;
+    expect(isGameChangeExpired(s, proposal, DURING)).toBe(true);
+  });
+  it("distinguishes reset-to-default start from preserving the selected date", () => {
+    const s = state();
+    expect(decideGameChange(s, "player_a", {kind:"edit",startsOn:null}, BEFORE).startsOn).toBe("2026-11-03");
+    s.game.status = "negotiating"; s.players.forEach((player) => { player.dayOne = null; });
+    expect(decideGameChange(s, "player_a", {kind:"edit",startsOn:null}, BEFORE).startsOn).toBeNull();
+  });
+
 });

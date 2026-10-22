@@ -5418,7 +5418,7 @@ later. It validates the command (`command.ts`), checks uploads, seals words,
 then locks the game row, reads the database clock, asks a pure rule, and writes
 state plus its history rows. There is no request-id dedupe: every command is
 keyed by its own ids or state, so a repeat writes nothing. The same people
-can't have two live games at once: a live game holds `game.live_roster_key`
+can't have two negotiating/live games at once: either phase holds `game.live_roster_key`
 (its players' sorted ids), a plain unique column set at go-live and cleared at
 settle or expiry, which also fits groups later. There is
 no timer or cron: whether a game is over is computed from its state, and reads
@@ -5430,6 +5430,7 @@ until the viewer has posted that day; media reads use the same rule.
 
 `/api/game/v1` routes are thin: they fold path ids into one command. Writes:
 `PUT /me/profile`, `POST /games`, `POST /invites/:token/accept`,
+`POST /invites/:token/negotiate`,
 `POST /games/:id/entries`, `DELETE /games/:id/entries/:entryId`,
 `POST /tickets/:id/redeem`, and `POST /media`. Reads: `GET /home`,
 `GET /games/:id`, `GET /invites/:token`, `GET /media/:key`. They use a plain
@@ -5501,6 +5502,14 @@ claim or native session credential is replayed during rollback.
 
 ### Weekly game chat changes
 
+Invitees may submit a concrete counterproposal through `negotiate` instead of
+accepting the original terms. The game enters `negotiating`, reserves its pair,
+and has no player Day 1 or posting obligations. Only the other player's approval
+activates it. Default Day 1 is calculated at approval, while an explicit later
+date remains honored. Cancelling or declining a proposal does not accept the
+original challenge. The original invite expiry bounds abandoned negotiation and
+releases the pair reservation.
+
 `game.pending_change` is one versioned structural proposal serialized with the
 existing game row lock. `game.chat_container_member_id` references its shared
 room; delete clears the binding. App `POST /api/game/v1/games/:id/changes`
@@ -5533,7 +5542,22 @@ Only that validated requested proposal bypasses iMessage inactivity, allowing a
 new room with no inbound history; all route, runtime, health and dispatch fences
 remain in force. No new queue or timer
 is introduced. Reads expire stale proposals; applying a change appends versioned
-terms only from an unstarted day and never rewrites entries or tickets.
+terms only from an unstarted day and never rewrites entries or tickets. Task and
+stake proposals prepare the next encrypted `terms_words` envelope outside the
+transaction, and compare the original envelope plus terms version under the
+lock. Pending JSON retains structural stake keys and task-change metadata, never
+plaintext task or stake words. Agreement atomically publishes both structural
+terms and their prepared encrypted words. Public projections decrypt in one
+bounded batch and never expose the stored envelope. Task changes take effect on
+future days; a new stake replaces the wager for the whole game, including earlier
+misses, after explicit `stakesApplyToWholeGame` consent once play has begun.
+Settlement intentionally retains its existing latest-stake whole-game semantics.
+
+The negotiation migration widens the game status and pair-reservation CHECKs.
+Compatible runtime schema readers must deploy before Web emits negotiating or
+extended pending-change data; enable expanded assistant tools only after Web can
+apply those fields. Native uses `supportsNegotiation` on an invite and additive
+`canEditTasks` / `canEditStakes` controls, preserving old-client acceptance.
 
 Canonical member access can grant a synthetic group room access through its live
 eligible two-player game. Both players must remain unsuspended and must not have

@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-10-22",
+  "order": 200,
+  "item": {
+    "id": "negotiate-challenge-rules",
+    "kind": "feature",
+    "priority": 4,
+    "title": "Agree on challenge tasks and stakes",
+    "summary": "Players can propose different tasks and stakes, with the other player agreeing before the change takes effect.",
+    "details": "Suggesting different rules on an invite leaves the challenge unstarted until both players agree. During play, task changes preserve earlier days. A stake change replaces the whole-game wager, including earlier misses, with both players' agreement.",
+    "relevanceTags": ["challenges", "groups"],
+    "sourcePullRequests": []
+  }
+}
