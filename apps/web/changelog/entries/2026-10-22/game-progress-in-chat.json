@@ -9,6 +9,6 @@
     "summary": "Ask Murph who has checked in or how your last challenge finished.",
     "details": "In iMessage, you can also ask Murph to save your photo as today's check-in. Saving always needs your agreement, and replacing an existing check-in uses the usual retake.",
     "relevanceTags": ["challenges", "groups"],
-    "sourcePullRequests": []
+    "sourcePullRequests": [4311]
   }
 }
