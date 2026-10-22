@@ -58,7 +58,7 @@ describe("game media on a local stack (disk)", () => {
 
 describe("game media when deployed (private Cloudflare Images)", () => {
   const stored = new Map<string, number>();
-  const delivery = { url: "https://imagedelivery.net/account/image/game-photo?exp=9999999999&sig=synthetic", expiresAt: "2030-01-01T00:00:00Z" };
+  const delivery = { url: "https://imagedelivery.net/account/image/gamephoto?exp=9999999999&sig=synthetic", expiresAt: "2030-01-01T00:00:00Z" };
   beforeEach(() => {
     stored.clear();
     vi.stubEnv("VERCEL_ENV", "production");
