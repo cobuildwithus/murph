@@ -21,6 +21,7 @@ if (!LINQ_ACCOUNT_LOOKUP_KEY) {
 
 function createPrismaMock() {
   const hostedMember = {
+    findMany: vi.fn(async () => []),
     findUnique: vi.fn(),
   };
   const hostedMemberRouting = {

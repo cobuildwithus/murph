@@ -276,6 +276,11 @@ result is truthy. Private Ask replies must match their canonical mailbox
 notification, member, delivery key and resolved destination before bypassing
 inactivity. Their existing live private-authority checks still own exact reply
 content, permissions, expiry, route validation and safe group fallback.
+App-requested game proposals bypass only inactivity after the current proposal
+and its bound room are revalidated against the fresh exact two-player provider
+audience. This allows the requested proposal in a newly created chat with no
+inbound history. Cancelled, replaced or expired proposals cannot qualify;
+provider health, route, runtime access and dispatch deduplication still apply.
 Engagement never substitutes for route, consent, or AI-usage authorization.
 
 Deploy the runtime reader for `automation_engagement_paused` delivery blocks

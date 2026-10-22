@@ -4547,6 +4547,7 @@ function createPrismaClientStub() {
     },
     hostedWorkspace: { findUnique: mocks.hostedWorkspaceFindUnique },
     hostedMember: {
+      findMany: vi.fn(async () => []),
       findUnique: mocks.hostedRuntimeMailboxMemberFindUnique,
     },
     hostedThreadContainerParticipant: {

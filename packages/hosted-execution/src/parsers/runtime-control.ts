@@ -1,4 +1,4 @@
-import { hostedGameToolRequestSchema, hostedGameToolResponseSchema } from "../game-tools.js";
+import { hostedGameToolRequestSchema, hostedGameToolResponseSchema } from "../game-tools.ts";
 import { parseHostedMailboxLane, parseHostedMailboxKind } from "./mailbox.ts";
 export {
   parseHostedMailboxItem,

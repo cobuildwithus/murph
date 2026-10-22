@@ -1,6 +1,6 @@
-import type { HostedGameToolRequest, HostedGameToolResponse } from "./game-tools.js";
-export { hostedGameToolRequestSchema, hostedGameToolResponseSchema, hostedGameUpdateSchema, hostedGameChatStateSchema } from "./game-tools.js";
-export type { HostedGameToolRequest, HostedGameToolResponse, HostedGameUpdate } from "./game-tools.js";
+import type { HostedGameToolRequest, HostedGameToolResponse } from "./game-tools.ts";
+export { hostedGameToolRequestSchema, hostedGameToolResponseSchema, hostedGameUpdateSchema, hostedGameChatStateSchema } from "./game-tools.ts";
+export type { HostedGameToolRequest, HostedGameToolResponse, HostedGameUpdate } from "./game-tools.ts";
 import {
   HOSTED_MAILBOX_LANES,
   type HostedMailboxLane,

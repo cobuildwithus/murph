@@ -12,20 +12,26 @@ function setup() {
   const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: "postgresql://localhost/synthetic_unused" }) });
   const findFirst = vi.spyOn(prisma.game, "findFirst");
   findFirst.mockResolvedValue(row());
-  return { findFirst, input: { tx: prisma, containerMemberId: "room", deliveryIdempotencyKey: "game-change:game:proposal", now } };
+  return { findFirst, input: { tx: prisma, containerMemberId: "room", deliveryIdempotencyKey: "game-change:game:proposal", playerMemberIds: ["person-a", "person-b"], now } };
 }
 describe("game proposal provider dispatch authority", () => {
   it("does not interfere with unrelated runtime deliveries", async () => {
     const { input, findFirst } = setup();
-    await assertGameProposalDeliveryCurrentTx({ ...input, deliveryIdempotencyKey: "ordinary-reply" });
+    await expect(assertGameProposalDeliveryCurrentTx({ ...input, deliveryIdempotencyKey: "ordinary-reply" })).resolves.toBe(false);
     expect(findFirst).not.toHaveBeenCalled();
   });
   it("allows only the same current proposal in its bound room", async () => {
     const { input, findFirst } = setup();
-    await assertGameProposalDeliveryCurrentTx(input);
+    await expect(assertGameProposalDeliveryCurrentTx(input)).resolves.toBe(true);
     expect(findFirst).toHaveBeenCalledWith(expect.objectContaining({ where: { id: "game", chatContainerMemberId: "room", status: "live" } }));
     findFirst.mockResolvedValue(null);
     await expect(assertGameProposalDeliveryCurrentTx(input)).rejects.toMatchObject({ code: "GAME_CHANGE_SUPERSEDED" });
+  });
+  it("requires a fresh two-player audience proof before granting the exemption", async () => {
+    const { input } = setup();
+    for (const playerMemberIds of [undefined, ["person-a"], ["person-a", "person-a"]]) {
+      await expect(assertGameProposalDeliveryCurrentTx({ ...input, playerMemberIds })).rejects.toMatchObject({ code: "GAME_CHANGE_SUPERSEDED" });
+    }
   });
   it("rejects an old game whose players differ from the current provider-proven pair", async () => {
     const { input } = setup();

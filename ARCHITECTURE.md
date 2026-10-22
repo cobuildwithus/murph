@@ -5486,7 +5486,10 @@ key, never a new creation identity. Its neutral opening message contains no
 proposal terms, so a replacement proposal can safely recover the same creation.
 Both new and reused rooms announce the current proposal through the guarded
 notification path; an accepted opener never means a proposal was sent.
-Notification delivery rechecks the current proposal before provider dispatch. No new queue or timer
+Notification delivery rechecks the current proposal before provider dispatch.
+Only that validated requested proposal bypasses iMessage inactivity, allowing a
+new room with no inbound history; all route, runtime, health and dispatch fences
+remain in force. No new queue or timer
 is introduced. Reads expire stale proposals; applying a change appends versioned
 terms only from an unstarted day and never rewrites entries or tickets.
 
