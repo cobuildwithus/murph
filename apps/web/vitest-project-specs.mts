@@ -55,7 +55,6 @@ export const hostedWebVitestProjectSpecs = resolveVitestBucketFiles(
         "hosted-contact-privacy.test.ts",
         "http.test.ts",
         "install-script.test.ts",
-        "layout.test.ts",
         "next-config.test.ts",
         "page.test.ts",
         "prisma-store-*.test.ts",

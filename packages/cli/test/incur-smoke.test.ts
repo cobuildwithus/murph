@@ -2898,11 +2898,69 @@ test('knowledge commands expose the expected schema', async () => {
   assert.deepEqual(logTailSchema.options.required, ['limit'])
 })
 
-test('knowledge upsert persists assistant-authored pages through the built CLI boundary', async () => {
+for (const kind of ['provider', 'food', 'recipe'] as const) {
+  test(`${kind} lifecycle persists through fresh built CLI processes`, async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), `murph-${kind}-lifecycle-`))
+    const runFreshCli = <TData = Record<string, unknown>>(args: string[]) =>
+      runCli<TData>(args, { env: { MURPH_CLI_TEST_PERSISTENT_HARNESS: '0' } })
+    type SavedRecord = { lookupId: string; path: string; created: boolean }
+    type ShownRecord = { entity: { id: string; path: string; data: { title: string } } }
+    try {
+      requireData(await runFreshCli(['init', '--vault', vaultRoot]))
+      const created = requireData(await runFreshCli<SavedRecord>([
+        kind, 'save', 'Synthetic initial record', '--slug', 'synthetic-initial',
+        '--vault', vaultRoot,
+      ]))
+      assert.equal(created.created, true)
+      const shown = requireData(await runFreshCli<ShownRecord>([
+        kind, 'show', created.lookupId, '--vault', vaultRoot,
+      ]))
+      assert.equal(shown.entity.id, created.lookupId)
+      assert.equal(shown.entity.data.title, 'Synthetic initial record')
+
+      const updated = requireData(await runFreshCli<SavedRecord>([
+        ...(kind === 'food'
+          ? [kind, 'rename', created.lookupId, '--title', 'Synthetic updated record']
+          : [kind, 'save', 'Synthetic updated record', '--id', created.lookupId]),
+        '--slug', 'synthetic-updated', '--vault', vaultRoot,
+      ]))
+      assert.equal(updated.created, false)
+      assert.equal(updated.lookupId, created.lookupId)
+      assert.notEqual(updated.path, created.path)
+      const persisted = await readFile(path.join(vaultRoot, updated.path), 'utf8')
+      assert.match(persisted, /Synthetic updated record/u)
+      await assert.rejects(readFile(path.join(vaultRoot, created.path), 'utf8'), { code: 'ENOENT' })
+
+      const reopened = requireData(await runFreshCli<ShownRecord>([
+        kind, 'show', created.lookupId, '--vault', vaultRoot,
+      ]))
+      assert.equal(reopened.entity.path, updated.path)
+      assert.equal(reopened.entity.data.title, 'Synthetic updated record')
+      const listed = requireData(await runFreshCli<{ items: Array<{ id: string }> }>([
+        kind, 'list', '--vault', vaultRoot,
+      ]))
+      assert.deepEqual(listed.items.map((item) => item.id), [created.lookupId])
+
+      const rejected = await runFreshCli([
+        kind, 'save', 'Rejected update', '--id', created.lookupId,
+        '--slug', '../outside', '--vault', vaultRoot,
+      ])
+      assert.equal(rejected.ok, false)
+      assert.equal(await readFile(path.join(vaultRoot, updated.path), 'utf8'), persisted)
+    } finally {
+      await rm(vaultRoot, { recursive: true, force: true })
+    }
+  }, INCUR_KNOWLEDGE_BOUNDARY_TIMEOUT_MS)
+}
+
+test('knowledge lifecycle survives fresh built CLI processes and rejected source writes', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-knowledge-cli-'))
 
+  const runFreshCli = <TData = Record<string, unknown>>(args: string[]) =>
+    runCli<TData>(args, { env: { MURPH_CLI_TEST_PERSISTENT_HARNESS: '0' } })
+
   try {
-    requireData(await runCli(['init', '--vault', vaultRoot]))
+    requireData(await runFreshCli(['init', '--vault', vaultRoot]))
     await mkdir(path.join(vaultRoot, 'research', '2026', '04'), {
       recursive: true,
     })
@@ -2945,7 +3003,7 @@ test('knowledge upsert persists assistant-authored pages through the built CLI b
     )
 
     const upserted = requireData(
-      await runCli<{
+      await runFreshCli<{
         bodyLength: number
         page: {
           librarySlugs: string[]
@@ -2975,7 +3033,7 @@ test('knowledge upsert persists assistant-authored pages through the built CLI b
     assert.deepEqual(upserted.page.sourcePaths, ['research/2026/04/sleep-note.md'])
 
     const shown = requireData(
-      await runCli<{
+      await runFreshCli<{
         page: {
           body: string
           markdown: string
@@ -2998,7 +3056,7 @@ test('knowledge upsert persists assistant-authored pages through the built CLI b
     assert.match(shown.page.markdown, /relatedSlugs:/u)
 
     const log = requireData(
-      await runCli<{
+      await runFreshCli<{
         entries: Array<{
           action: string
           block: string
@@ -3022,7 +3080,7 @@ test('knowledge upsert persists assistant-authored pages through the built CLI b
     assert.match(log.entries[0]?.block ?? '', /slug: `sleep-quality`/u)
 
     requireData(
-      await runCli<{
+      await runFreshCli<{
         page: {
           librarySlugs: string[]
         }
@@ -3042,9 +3100,11 @@ test('knowledge upsert persists assistant-authored pages through the built CLI b
     )
 
     const replaced = requireData(
-      await runCli<{
+      await runFreshCli<{
         page: {
           librarySlugs: string[]
+          sourcePaths: string[]
+          markdown: string
         }
       }>([
         'knowledge',
@@ -3057,6 +3117,43 @@ test('knowledge upsert persists assistant-authored pages through the built CLI b
     )
 
     assert.deepEqual(replaced.page.librarySlugs, ['sleep-duration'])
+
+    assert.deepEqual(replaced.page.sourcePaths, ['research/2026/04/sleep-note.md'])
+    const pagePath = path.join(vaultRoot, 'derived/knowledge/pages/sleep-quality.md')
+    const persistedPage = await readFile(pagePath, 'utf8')
+    assert.equal(replaced.page.markdown, persistedPage)
+    assert.match(persistedPage, /Refreshed note/u)
+    assert.doesNotMatch(persistedPage, /Magnesium may help/u)
+
+    const searched = requireData(await runFreshCli<{
+      hits: Array<{ slug: string }>
+    }>(['knowledge', 'search', 'Refreshed', '--vault', vaultRoot]))
+    assert.deepEqual(searched.hits.map((hit) => hit.slug), ['sleep-quality'])
+
+    const listed = requireData(await runFreshCli<{
+      pages: Array<{ slug: string }>
+    }>(['knowledge', 'list', '--vault', vaultRoot]))
+    assert.deepEqual(listed.pages.map((page) => page.slug), ['sleep-quality'])
+
+    const indexPath = path.join(vaultRoot, 'derived/knowledge/index.md')
+    const logPath = path.join(vaultRoot, 'derived/knowledge/log.md')
+    const persistedIndex = await readFile(indexPath, 'utf8')
+    const persistedLog = await readFile(logPath, 'utf8')
+    const rejected = await runFreshCli([
+      'knowledge', 'upsert', '--vault', vaultRoot,
+      '--slug', 'sleep-quality', '--body', 'Must not replace the valid page.',
+      '--source-path', 'derived/knowledge/pages/sleep-quality.md',
+    ])
+    assert.equal(rejected.ok, false)
+    if (rejected.ok) throw new Error('Invalid source unexpectedly accepted')
+    assert.equal(rejected.error.code, 'knowledge_forbidden_source_path')
+    assert.equal(await readFile(pagePath, 'utf8'), persistedPage)
+    assert.equal(await readFile(indexPath, 'utf8'), persistedIndex)
+    assert.equal(await readFile(logPath, 'utf8'), persistedLog)
+    const afterRejection = requireData(await runFreshCli<{
+      page: { markdown: string }
+    }>(['knowledge', 'show', 'sleep-quality', '--raw', '--vault', vaultRoot]))
+    assert.equal(afterRejection.page.markdown, persistedPage)
   } finally {
     await rm(vaultRoot, { recursive: true, force: true })
   }

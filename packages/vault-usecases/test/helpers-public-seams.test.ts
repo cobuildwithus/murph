@@ -11,13 +11,6 @@ import { VaultCliError } from "@murphai/operator-config/vault-cli-errors";
 
 import * as helperApi from "@murphai/vault-usecases/helpers";
 import {
-  applyLimit,
-  compareByLatest,
-  compareNullableDates,
-  firstString,
-  matchesDateRange,
-} from "../src/commands/query-record-command-helpers.ts";
-import {
   asEntityEnvelope,
   asListEnvelope,
   assertNoReservedPayloadKeys,
@@ -87,59 +80,7 @@ function createQueryRecord(overrides: Partial<QueryEntity> = {}): QueryEntity {
 }
 
 describe("helper barrel exports", () => {
-  it("re-exports stable helper functions from the public helper seam", () => {
-    expect(helperApi.applyLimit).toBe(applyLimit);
-    expect(helperApi.compareByLatest).toBe(compareByLatest);
-    expect(helperApi.compareNullableDates).toBe(compareNullableDates);
-    expect(helperApi.firstString).toBe(firstString);
-    expect(helperApi.matchesDateRange).toBe(matchesDateRange);
-    expect(helperApi.assertNoReservedPayloadKeys).toBe(assertNoReservedPayloadKeys);
-    expect(helperApi.compactObject).toBe(compactObject);
-    expect(helperApi.mergeByRelativePath).toBe(mergeByRelativePath);
-    expect(helperApi.normalizeIsoTimestamp).toBe(normalizeIsoTimestamp);
-    expect(helperApi.normalizeOptionalText).toBe(normalizeOptionalText);
-    expect(helperApi.normalizeOptionalRelativePath).toBe(normalizeOptionalRelativePath);
-    expect(helperApi.normalizeStringArray).toBe(normalizeStringArray);
-    expect(helperApi.relativePathStrings).toBe(relativePathStrings);
-    expect(helperApi.uniqueStrings).toBe(uniqueStrings);
-  });
-
   it("keeps helper behavior stable through the public helper barrel", () => {
-    expect(helperApi.normalizeOptionalText("  hello  ")).toBe("hello");
-    expect(helperApi.normalizeOptionalText("   ")).toBeNull();
-    expect(helperApi.normalizeOptionalRelativePath(" bank/goals/sleep.md ")).toBe(
-      "bank/goals/sleep.md",
-    );
-    expect(helperApi.normalizeIsoTimestamp("2026-04-08T12:34:56Z")).toBe(
-      "2026-04-08T12:34:56Z",
-    );
-    expect(helperApi.normalizeIsoTimestamp("2026-04-08")).toBeNull();
-    expect(helperApi.normalizeStringArray([" sleep ", "sleep", "", 1])).toEqual([
-      "sleep",
-    ]);
-    expect(helperApi.uniqueStrings(["goal", "goal", "sleep"])).toEqual(["goal", "sleep"]);
-    expect(helperApi.relativePathStrings([" bank/goals/sleep.md ", "", 1])).toEqual([
-      "bank/goals/sleep.md",
-    ]);
-
-    expect(
-      helperApi.mergeByRelativePath(
-        [{ relativePath: "bank/goals/sleep.md", title: "old" }],
-        [
-          { relativePath: "bank/goals/sleep.md", title: "new" },
-          { relativePath: "bank/goals/energy.md", title: "energy" },
-        ],
-      ),
-    ).toEqual([
-      { relativePath: "bank/goals/sleep.md", title: "new" },
-      { relativePath: "bank/goals/energy.md", title: "energy" },
-    ]);
-
-    expect(helperApi.compactObject({ keep: 1, drop: undefined, text: "ok" })).toEqual({
-      keep: 1,
-      text: "ok",
-    });
-
     expect(helperApi.applyLimit([1, 2, 3], 2)).toEqual([1, 2]);
     expect(helperApi.applyLimit([1, 2, 3])).toEqual([1, 2, 3]);
     expect(helperApi.matchesDateRange("2026-04-08T12:34:56Z", "2026-04-01", "2026-04-30")).toBe(

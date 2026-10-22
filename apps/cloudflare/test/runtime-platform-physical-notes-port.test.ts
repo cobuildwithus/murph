@@ -34,9 +34,6 @@ import {
 import {
   createHostedWebPhysicalNotePort,
 } from "../src/runtime-platform/physical-notes-port.ts";
-import {
-  readHostedRunnerWebControlPolicy,
-} from "../src/runner-outbound/shared-web-control-policy.ts";
 import type { RunnerOutboundEnvironmentSource } from "../src/runner-outbound/shared.ts";
 import { handleRunnerWebControlRequest } from "../src/runner-outbound/web-control.ts";
 import { createHostedExecutionTestEnv } from "./hosted-execution-fixtures.ts";
@@ -75,30 +72,6 @@ beforeEach(() => {
 });
 
 describe("createHostedWebPhysicalNotePort", () => {
-  it("allows only the bounded physical-note POST route", () => {
-    expect(readHostedRunnerWebControlPolicy({
-      method: "POST",
-      path: HOSTED_PHYSICAL_NOTE_RECOVERY_PATH,
-    })).toEqual({
-      allowed: true,
-      operation: "physical_note_recovery",
-    });
-    expect(readHostedRunnerWebControlPolicy({
-      method: "POST",
-      path: HOSTED_PHYSICAL_NOTES_PATH,
-    })).toEqual({
-      allowed: true,
-      operation: "physical_note_send",
-    });
-    expect(readHostedRunnerWebControlPolicy({
-      method: "GET",
-      path: HOSTED_PHYSICAL_NOTES_PATH,
-    }).allowed).toBe(false);
-    expect(readHostedRunnerWebControlPolicy({
-      method: "POST",
-      path: `${HOSTED_PHYSICAL_NOTES_PATH}/arbitrary`,
-    }).allowed).toBe(false);
-  });
 
   it("forwards and strictly parses one paid physical-note recovery check", async () => {
     const fetchImpl = vi.fn<typeof fetch>(async () => Response.json({

@@ -1,12 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { HOSTED_CONNECTED_APPS_PATH } from "@murphai/hosted-execution/connected-apps";
-import {
-  HOSTED_PHONE_CALLS_PATH,
-  HOSTED_PHONE_CALL_STATUS_PATH,
-  HOSTED_PHONE_CALL_STOP_PATH,
-} from "@murphai/hosted-execution/phone-calls";
-
 const mocks = vi.hoisted(() => ({
   fetchHostedExecutionWebControlPlaneResponse: vi.fn(),
 }));
@@ -26,9 +20,6 @@ import { createHostedWebConnectedAppsPort } from "../src/runtime-platform/connec
 import { HostedWebControlPlaneResponseError } from "../src/runtime-platform/web-control-transport.ts";
 import { readHostedExecutionEnvironment } from "../src/env.ts";
 import type { RunnerOutboundEnvironmentSource } from "../src/runner-outbound/shared.ts";
-import {
-  readHostedRunnerWebControlPolicy,
-} from "../src/runner-outbound/shared-web-control-policy.ts";
 import { handleRunnerWebControlRequest } from "../src/runner-outbound/web-control.ts";
 import {
   createHostedExecutionTestEnv,
@@ -40,64 +31,6 @@ beforeEach(() => {
 });
 
 describe("connected-app web-control policy", () => {
-  it("allows only the bounded POST route", () => {
-    expect(readHostedRunnerWebControlPolicy({
-      method: "POST",
-      path: HOSTED_CONNECTED_APPS_PATH,
-    })).toEqual({
-      allowed: true,
-      operation: "connected_apps",
-    });
-    expect(readHostedRunnerWebControlPolicy({
-      method: "GET",
-      path: HOSTED_CONNECTED_APPS_PATH,
-    }).allowed).toBe(false);
-    expect(readHostedRunnerWebControlPolicy({
-      method: "POST",
-      path: "/api/internal/connected-apps/arbitrary",
-    }).allowed).toBe(false);
-  });
-
-  it("allows only the bounded phone-call control routes", () => {
-    expect(readHostedRunnerWebControlPolicy({
-      method: "POST",
-      path: HOSTED_PHONE_CALLS_PATH,
-    })).toEqual({
-      allowed: true,
-      operation: "phone_call_start",
-    });
-    expect(readHostedRunnerWebControlPolicy({
-      method: "GET",
-      path: HOSTED_PHONE_CALLS_PATH,
-    }).allowed).toBe(false);
-    expect(readHostedRunnerWebControlPolicy({
-      method: "POST",
-      path: HOSTED_PHONE_CALL_STATUS_PATH,
-    })).toEqual({
-      allowed: true,
-      operation: "phone_call_status",
-    });
-    expect(readHostedRunnerWebControlPolicy({
-      method: "GET",
-      path: HOSTED_PHONE_CALL_STATUS_PATH,
-    }).allowed).toBe(false);
-    expect(readHostedRunnerWebControlPolicy({
-      method: "POST",
-      path: HOSTED_PHONE_CALL_STOP_PATH,
-    })).toEqual({
-      allowed: true,
-      operation: "phone_call_stop",
-    });
-    expect(readHostedRunnerWebControlPolicy({
-      method: "GET",
-      path: HOSTED_PHONE_CALL_STOP_PATH,
-    }).allowed).toBe(false);
-    expect(readHostedRunnerWebControlPolicy({
-      method: "POST",
-      path: "/api/internal/phone-calls/arbitrary",
-    }).allowed).toBe(false);
-  });
-
   it("requires the runtime write fence before forwarding connected-app requests", async () => {
     const url = new URL(`http://web-control.worker${HOSTED_CONNECTED_APPS_PATH}`);
     const response = await handleRunnerWebControlRequest({

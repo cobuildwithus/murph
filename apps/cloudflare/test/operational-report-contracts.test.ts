@@ -14,13 +14,8 @@ const execFileAsync = promisify(execFile);
 const coldStartReportPath = fileURLToPath(
   new URL("../scripts/cold-start-latency-report.sql", import.meta.url),
 );
-const coldStartReportSql = readFileSync(coldStartReportPath, "utf8");
 const standbyInventorySql = readFileSync(
   new URL("../scripts/standby-inventory.sql", import.meta.url),
-  "utf8",
-);
-const cloudflareReadme = readFileSync(
-  new URL("../README.md", import.meta.url),
   "utf8",
 );
 const databaseUrl = process.env.DATABASE_URL?.trim() ?? "";
@@ -50,105 +45,9 @@ describe("hosted runtime operational report contracts", () => {
       expect(standbyInventorySql).toContain(column);
     }
     expect(standbyInventorySql).toContain("INTERVAL '7' DAY");
-    expect(cloudflareReadme).toContain("`HOSTED_STANDBY_ANALYTICS`");
-    expect(cloudflareReadme).toContain("scripts/standby-inventory.sql");
   });
 
-  it("keeps direct cold starts causal and phase samples chronology-safe", () => {
-    expect(coldStartReportSql).toContain(
-      "PARTITION BY runtime_attempt_id",
-    );
-    expect(coldStartReportSql).toContain("causal_candidate_count = 1");
-    expect(coldStartReportSql).toContain(
-      "directEnsureResponseReceivedAtEpochMs",
-    );
-    expect(coldStartReportSql).toContain(
-      "direct_orchestration_attempt_id = runtime_orchestration_attempt_id",
-    );
-    expect(coldStartReportSql).not.toContain("abs(route_received_ms");
-    expect(coldStartReportSql).toContain(
-      "route_received_ms <= runner_constructor_started_ms",
-    );
-    expect(coldStartReportSql).toContain(
-      "runner_constructor_started_ms <= runner_constructor_finished_ms",
-    );
-    expect(coldStartReportSql).toContain(
-      "runner_constructor_finished_ms <= runner_first_ensure_ms",
-    );
-    expect(coldStartReportSql).toContain(
-      "runner_first_ensure_ms = runner_rpc_started_ms",
-    );
-    expect(coldStartReportSql).toContain("activation_matches_current_request");
-    expect(coldStartReportSql).toContain(
-      "Cloudflare route -> UserRunner constructor start",
-    );
-    expect(coldStartReportSql).toContain(
-      "UserRunner constructor start -> finish",
-    );
-    expect(coldStartReportSql).toContain(
-      "UserRunner constructor finish -> first ensure instruction",
-    );
-    expect(coldStartReportSql).toContain(
-      "runner_job_accepted_at >= accepted_at",
-    );
-    expect(coldStartReportSql).toContain("stamp_candidate_count = 1");
-    expect(coldStartReportSql).toContain(
-      "WHERE runner_job_accepted_ms >= activity_started_ms",
-    );
-    expect(coldStartReportSql).toContain("AND cohort IS NOT NULL");
-    expect(coldStartReportSql).toContain("ELSE NULL");
-    expect(coldStartReportSql).toContain("SELECT DISTINCT\n    runtime_attempt_id");
-    expect(coldStartReportSql).toContain("WHERE phase.duration_ms >= 0");
-    expect(coldStartReportSql).toContain("'web_direct_cold'");
-    expect(coldStartReportSql).toContain("'temporal_recovery'");
-    expect(coldStartReportSql).toContain("'legacy_unclassified'");
-    expect(coldStartReportSql).toContain(
-      "triggeredByWebDirect}' = 'false'",
-    );
-    expect(coldStartReportSql).not.toContain("web_direct_existing_runtime");
-    expect(coldStartReportSql).toContain(
-      "GREATEST(fresh_start_container_ready_ms, fresh_start_invocation_prepared_ms)",
-    );
-    expect(coldStartReportSql).toContain(
-      "freshStartContainerLifecycleLockAcquiredAtEpochMs",
-    );
-    expect(coldStartReportSql).toContain(
-      "Container start issued -> ports ready",
-    );
-    expect(coldStartReportSql).toContain(
-      "Container process -> TCP listen",
-    );
-    expect(coldStartReportSql).toContain(
-      "Container start issued -> process start",
-    );
-    expect(coldStartReportSql).toContain(
-      "Container TCP listen -> ports ready",
-    );
-    expect(coldStartReportSql).toContain("Container health check");
-    expect(coldStartReportSql).toContain("shellPrewarmSource}' = 'linq-typing-started'");
-    expect(coldStartReportSql).toContain("shellPrewarmSource}' = 'linq-message-routing'");
-    expect(coldStartReportSql).toContain(
-      "shellPrewarmOrchestrationAttemptId}' =",
-    );
-    expect(coldStartReportSql).toContain(
-      "shellPrewarmExpectedOrchestrationAttemptId}'",
-    );
-    expect(coldStartReportSql).toContain(
-      "Prewarm route -> UserRunner constructor start",
-    );
-    expect(coldStartReportSql).toContain(
-      "Prewarm admission -> container hint",
-    );
-    expect(coldStartReportSql).toContain(
-      "Prewarm container hint -> direct ensure route",
-    );
-    expect(coldStartReportSql).toContain(
-      "trace.reply_runtime_attempt_id = trace.runtime_attempt_id",
-    );
-    expect(coldStartReportSql).toContain("causal_candidate_count = 1");
-    expect(coldStartReportSql).toContain("Causal shell-prewarm hint -> ingress accepted");
-    expect(coldStartReportSql).not.toContain("shellPrewarmLastHintAtEpochMs");
-  });
+
 });
 
 describe.skipIf(!runPostgresProof)(

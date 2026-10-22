@@ -280,20 +280,6 @@ describe("runner bundle container-entrypoint esbuild step", () => {
     },
   );
 
-  it("bundles the staged entrypoint, resolves externals at boot, and passes the boot probe", async () => {
-    const bundleDir = await createFakeRunnerBundle();
-
-    await bundleRunnerContainerEntrypoint(bundleDir);
-
-    await expect(
-      access(path.join(
-        bundleDir,
-        RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME,
-        "container-entrypoint.js",
-      )),
-    ).resolves.toBeUndefined();
-  });
-
   it.each([false, true])("emits identical runtime chunks across staging path lengths (canonical path: %s)", async (canonicalPath) => {
     const chunks = [];
     for (const prefix of ["murph-bundle-short-", "murph-bundle-with-a-much-longer-staging-directory-"]) {

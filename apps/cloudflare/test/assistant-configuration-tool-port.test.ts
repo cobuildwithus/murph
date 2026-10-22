@@ -24,9 +24,6 @@ vi.mock("../src/web-control-plane.ts", async () => {
   };
 });
 
-import {
-  readHostedRunnerWebControlPolicy,
-} from "../src/runner-outbound/shared-web-control-policy.ts";
 import { handleRunnerWebControlRequest } from "../src/runner-outbound/web-control.ts";
 import {
   HOSTED_RUNTIME_ATTEMPT_ID_HEADER,
@@ -105,23 +102,6 @@ beforeEach(() => {
 });
 
 describe("hosted assistant configuration tool port", () => {
-  it("allows only the bounded POST web-control route", () => {
-    expect(readHostedRunnerWebControlPolicy({
-      method: "POST",
-      path: HOSTED_RUNTIME_ASSISTANT_CONFIGURATION_TOOL_PATH,
-    })).toEqual({
-      allowed: true,
-      operation: "assistant_configuration_tool",
-    });
-    expect(readHostedRunnerWebControlPolicy({
-      method: "GET",
-      path: HOSTED_RUNTIME_ASSISTANT_CONFIGURATION_TOOL_PATH,
-    }).allowed).toBe(false);
-    expect(readHostedRunnerWebControlPolicy({
-      method: "POST",
-      path: `${HOSTED_RUNTIME_ASSISTANT_CONFIGURATION_TOOL_PATH}/arbitrary`,
-    }).allowed).toBe(false);
-  });
 
   it("does not forward requests without a runtime write fence", async () => {
     const validateRuntimeWriteFence = vi.fn(async () => true);

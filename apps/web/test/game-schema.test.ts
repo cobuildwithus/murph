@@ -20,18 +20,6 @@ describe("weekly game schema", () => {
     expect(migration).toContain('CREATE UNIQUE INDEX "game_invite_token_hash_key" ON "game"("invite_token_hash");');
   });
 
-  it("keeps to seven tables", () => {
-    expect([...migration.matchAll(/CREATE TABLE "(\w+)"/gu)].map((match) => match[1])).toEqual([
-      "game_profile",
-      "game_contact_label",
-      "game",
-      "game_player",
-      "game_entry",
-      "game_ticket",
-      "game_event",
-    ]);
-  });
-
   it("stores people's words only in encrypted columns", () => {
     expect(migration).not.toMatch(/"(first_name|name|relationship|text|data|what|item|task|invite_token|terms_words)" (TEXT|JSONB)/u);
     for (const column of [

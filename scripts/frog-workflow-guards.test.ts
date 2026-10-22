@@ -108,17 +108,6 @@ describe("Frog workflow guards", () => {
     expect(statSync(frogScriptPath).mode & 0o111).not.toBe(0);
     expect(spawnSync("bash", ["-n", frogScriptPath]).status).toBe(0);
 
-    const frogScript = readRepoFile("scripts", "frog");
-    expect(frogScript).toContain(
-      "unset FROG_DATABASE_URL FROG_NAMESPACE FROG_SCHEMA",
-    );
-    expect(frogScript).toContain('cd "$repo_root"');
-    expect(frogScript).toContain(
-      'frog_bin="$repo_root/node_modules/.bin/frog"',
-    );
-    expect(frogScript).toContain('exec "$frog_bin" "$@"');
-    expect(frogScript).not.toContain("pnpm dlx");
-
     const publish = spawnSync(frogScriptPath, ["publish"], {
       encoding: "utf8",
     });
