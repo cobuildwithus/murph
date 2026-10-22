@@ -19,7 +19,6 @@ import { fileURLToPath } from "node:url";
 import { test } from "vitest";
 
 import { runSafeBuild } from "../scripts/safe-build.ts";
-import * as importerRuntime from "../src/index.ts";
 
 const packageDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const repoRoot = path.resolve(packageDir, "..", "..");
@@ -57,43 +56,6 @@ function readMergedTsConfig(configPath: string, seen = new Set<string>()): Minim
     },
   };
 }
-
-test("package manifest exposes only focused importer subpaths", async () => {
-  const packageManifest = JSON.parse(
-    await readFile(new URL("../package.json", import.meta.url), "utf8"),
-  ) as {
-    scripts?: Record<string, string | undefined>;
-    exports?: Record<string, { default?: string; import?: string; types?: string } | undefined>;
-  };
-
-  assert.equal(packageManifest.exports?.["./sample-series-summary"], undefined);
-  assert.equal(packageManifest.exports?.["./device-providers/metric-catalog"], undefined);
-  assert.deepEqual(packageManifest.exports?.["./clinical-records"], {
-    types: "./dist/clinical-records/index.d.ts",
-    import: "./dist/clinical-records/index.js",
-    default: "./dist/clinical-records/index.js",
-  });
-  assert.deepEqual(packageManifest.exports?.["./device-providers/junction"], {
-    types: "./dist/device-providers/junction.d.ts",
-    import: "./dist/device-providers/junction.js",
-    default: "./dist/device-providers/junction.js",
-  });
-  assert.doesNotMatch(readFileSync(path.join(packageDir, "src", "index.ts"), "utf8"), /clinical-records/u);
-});
-
-test("importer root keeps neutral metric primitives on their owning package", () => {
-  for (const symbol of [
-    "summarizeSampleSeries",
-    "normalizeWearableMetricValue",
-    "resolveWearableCanonicalMetricKey",
-    "resolveWearableMetricCatalogEntry",
-    "resolveWearableMetricTolerance",
-    "wearableCanonicalMetricKeys",
-    "wearableMetricCatalog",
-  ]) {
-    assert.equal(symbol in importerRuntime, false, `${symbol} belongs to @murphai/health-metrics`);
-  }
-});
 
 test("build script preserves the last good dist until TypeScript succeeds", async () => {
   const packageManifest = JSON.parse(

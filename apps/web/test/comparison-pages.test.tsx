@@ -9,8 +9,6 @@ import {
   generateMetadata,
   generateStaticParams,
 } from "../app/compare/[competitor]/page";
-import { metadata as comparisonIndexMetadata } from "../app/compare/page";
-import { PublicComparisonTableStudy } from "../app/design/public-comparison-table-study";
 import { ComparisonArticle } from "../src/components/comparisons/comparison-page";
 import { ComparisonDirectory } from "../src/components/comparisons/comparison-directory";
 import { groupQuickComparisonRows } from "../src/components/comparisons/comparison-table";
@@ -45,72 +43,6 @@ const HUMAN_COPY_FIELDS = [
 ] as const;
 
 const QUICK_STATUS_RANK = { connected: 2, limited: 1, no: 0, yes: 3 } as const;
-
-const NEW_MESSAGING_HEALTH_GUIDES = [
-  "askpetal",
-  "bo",
-  "capy",
-  "iris",
-  "matcha",
-  "miora",
-  "mochi",
-  "nudge",
-  "sam-by-sunflower",
-  "tempo",
-] as const;
-
-const EXPANSION_GUIDES_2026_09_04 = [
-  "abbott-lingo",
-  "agelessrx",
-  "amazfit-helio-ring",
-  "amazon-one-medical",
-  "askmd",
-  "august",
-  "bevel",
-  "caresupport",
-  "chatgpt-health",
-  "claude",
-  "copilot-health",
-  "counsel-health",
-  "death-clock",
-  "dexcom-stelo",
-  "doctronic",
-  "docus",
-  "dont-die",
-  "duckbill",
-  "eugene",
-  "flo",
-  "freestyle-libre",
-  "healthspan",
-  "hilo",
-  "immortals",
-  "instinct",
-  "kardiamobile",
-  "kicker",
-  "kim",
-  "lark",
-  "lucas",
-  "marek-health",
-  "natural-cycles",
-  "omron-connect",
-  "orchid",
-  "overlord",
-  "picnichealth",
-  "poke",
-  "renpho",
-  "sidekicks",
-  "simple",
-  "sleep-number",
-  "suunto",
-  "talkspace-tee",
-  "tomo",
-  "vidaya",
-  "viome",
-  "vora",
-  "wahoo",
-  "webmd",
-  "zero-longevity",
-] as const;
 
 // Guides whose data Murph can read through a connection it actually offers
 // (direct integrations plus Apple Health relays for iPhone-paired devices).
@@ -451,22 +383,6 @@ describe("comparison catalog", () => {
     );
   });
 
-  it("publishes the ten messaging health guides", () => {
-    for (const slug of NEW_MESSAGING_HEALTH_GUIDES) {
-      expect(comparisonBySlug(slug).lastVerified).toBe("2026-09-03");
-    }
-  });
-
-  it("publishes the fifty expansion guides across every category", () => {
-    const categories = new Set<string>();
-    for (const slug of EXPANSION_GUIDES_2026_09_04) {
-      const comparison = comparisonBySlug(slug);
-      expect(comparison.lastVerified).toBe("2026-09-04");
-      categories.add(comparison.category);
-    }
-    expect(EXPANSION_GUIDES_2026_09_04).toHaveLength(50);
-    expect(categories.size).toBeGreaterThanOrEqual(5);
-  });
 
   it("keeps every guide's ten rows to ten distinct decisions", () => {
     for (const comparison of COMPARISONS) {
@@ -781,30 +697,4 @@ describe("comparison catalog", () => {
     expect(missingMetadata.robots).toEqual(MURPH_NOINDEX_PAGE_ROBOTS);
   });
 
-  it("points the comparison index metadata at its dedicated share card", () => {
-    expect(comparisonIndexMetadata.openGraph).toMatchObject({
-      images: [
-        {
-          alt: "Your health is bigger than one app. Murph comparison guides.",
-          url: "/compare/opengraph-image",
-        },
-      ],
-    });
-    expect(comparisonIndexMetadata.twitter).toMatchObject({
-      images: [
-        {
-          alt: "Your health is bigger than one app. Murph comparison guides.",
-          url: "/compare/opengraph-image",
-        },
-      ],
-    });
-  });
-
-  it("registers the real production table in the synthetic design study", () => {
-    const markup = renderToStaticMarkup(createElement(PublicComparisonTableStudy));
-
-    assert.match(markup, /Murph and Recovery wearable at-a-glance comparison/u);
-    assert.match(markup, /role="region"/u);
-    assert.match(markup, /scope="row"/u);
-  });
 });

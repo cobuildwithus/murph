@@ -17,9 +17,6 @@ import {
 } from "../scripts/runner-bundle-contract.js";
 import {
   buildHostedRunnerWorkspaceArtifacts,
-  buildHostedRunnerWorkspaceArtifactPlan,
-  buildHostedRunnerWorkspaceBuildArgs,
-  buildWorkspacePackagePackPreflightArgs,
   mapWithConcurrency,
   packWorkspacePackageArtifacts,
   stageHostedRunnerRuntimeArtifact,
@@ -44,98 +41,54 @@ afterEach(async () => {
 });
 
 describe("runner bundle runtime artifact staging", () => {
-  it("honors explicit runner bundle workspace build concurrency", () => {
-    expect(
-      buildHostedRunnerWorkspaceBuildArgs(
-        ["@murphai/contracts", "@murphai/runtime-state"],
-        { MURPH_RUNNER_BUNDLE_BUILD_CONCURRENCY: "6" },
-      ),
-    ).toEqual([
-      "--workspace-concurrency=6",
-      "--filter",
-      "@murphai/contracts",
-      "--filter",
-      "@murphai/runtime-state",
-      "run",
-      "build",
-    ]);
-  });
-
-  it("defaults runner bundle workspace builds to serial package execution", () => {
-    expect(
-      buildHostedRunnerWorkspaceBuildArgs(
-        ["@murphai/contracts", "@murphai/runtime-state"],
-        {},
-      ),
-    ).toEqual([
-      "--workspace-concurrency=1",
-      "--filter",
-      "@murphai/contracts",
-      "--filter",
-      "@murphai/runtime-state",
-      "run",
-      "build",
-    ]);
-  });
-
-  it("rejects invalid runner bundle build concurrency", () => {
-    expect(() =>
-      buildHostedRunnerWorkspaceBuildArgs(["@murphai/contracts"], {
-        MURPH_RUNNER_BUNDLE_BUILD_CONCURRENCY: "0",
-      }),
-    ).toThrow("MURPH_RUNNER_BUNDLE_BUILD_CONCURRENCY must be a positive integer.");
-  });
-
-  it("assembles the assistant CLI surface after the built workspace CLI exists", () => {
-    const plan = buildHostedRunnerWorkspaceArtifactPlan(
-      ["@murphai/assistant-engine", "@murphai/murph"],
-      {
-        env: { MURPH_RUNNER_BUNDLE_BUILD_CONCURRENCY: "4" },
-        repoRoot,
-      },
-    );
-
-    expect(plan.buildArgs).toEqual([
-      "--workspace-concurrency=4",
-      "--filter",
-      "@murphai/assistant-engine",
-      "--filter",
-      "@murphai/murph",
-      "run",
-      "build",
-    ]);
-    expect(plan.assistantCliSurfaceAssemblyArgs).toEqual([
-      path.join(
-        repoRoot,
-        "scripts",
-        "assemble-assistant-cli-surface.mjs",
-      ),
-    ]);
-  });
-
-  it("keeps unrelated workspace builds single-phase", () => {
-    const plan = buildHostedRunnerWorkspaceArtifactPlan(
-      ["@murphai/health-commons"],
-      { env: {}, repoRoot },
-    );
-
-    expect(plan.assistantCliSurfaceAssemblyArgs).toBeNull();
-  });
-
-  it("prepares runtime artifacts before scriptless runner package packing", () => {
-    expect(buildWorkspacePackagePackPreflightArgs("@murphai/contracts")).toEqual([
-      "--filter",
-      "@murphai/contracts",
-      "run",
-      "build",
-    ]);
-    expect(buildWorkspacePackagePackPreflightArgs("@murphai/health-commons")).toEqual([
-      "--filter",
-      "@murphai/health-commons",
-      "run",
-      "build",
-    ]);
-    expect(buildWorkspacePackagePackPreflightArgs("@murphai/runtime-state")).toBeNull();
+  it("builds dependencies before CLI assembly and suppresses assembly after a failed build", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "murph-runner-build-flow-"));
+    temporaryDirectories.push(root);
+    for (const directory of ["apps", "bin", "scripts", "packages/murph", "packages/assistant-engine", "packages/contracts"]) {
+      await mkdir(path.join(root, directory), { recursive: true });
+    }
+    for (const name of ["murph", "assistant-engine", "contracts"]) {
+      await writeFile(path.join(root, "packages", name, "package.json"), JSON.stringify({
+        name: `@murphai/${name}`, version: "1.0.0",
+        dependencies: name === "assistant-engine" ? { "@murphai/murph": "workspace:*" } : {},
+      }));
+    }
+    const pnpm = path.join(root, "bin", "pnpm");
+    await writeFile(pnpm, [
+      "#!/usr/bin/env node",
+      "const fs = require('node:fs');",
+      "if (fs.existsSync('fail-build')) process.exit(17);",
+      "fs.writeFileSync('build.json', JSON.stringify(process.argv.slice(2)));",
+    ].join("\n"));
+    await chmod(pnpm, 0o755);
+    await writeFile(path.join(root, "scripts", "assemble-assistant-cli-surface.mjs"), [
+      "import { readFileSync, writeFileSync } from 'node:fs';",
+      "const args = JSON.parse(readFileSync('build.json', 'utf8'));",
+      "if (!args.includes('@murphai/murph')) throw new Error('CLI was not built');",
+      "writeFileSync('assembled', 'ready');",
+    ].join("\n"));
+    vi.stubEnv("PATH", `${path.dirname(pnpm)}${path.delimiter}${process.env.PATH ?? ""}`);
+    vi.stubEnv("PNPM_STORE_DIR", path.join(root, "store"));
+    for (const concurrency of [undefined, "4"]) {
+      vi.stubEnv("MURPH_RUNNER_BUNDLE_BUILD_CONCURRENCY", concurrency);
+      await buildHostedRunnerWorkspaceArtifacts(["@murphai/assistant-engine", "@murphai/murph"], { repoRoot: root });
+      expect(JSON.parse(await readFile(path.join(root, "build.json"), "utf8"))).toEqual([
+        `--workspace-concurrency=${concurrency ?? "1"}`, "--filter", "@murphai/murph",
+        "--filter", "@murphai/assistant-engine", "run", "build",
+      ]);
+      await expect(readFile(path.join(root, "assembled"), "utf8")).resolves.toBe("ready");
+      await rm(path.join(root, "assembled"));
+    }
+    await buildHostedRunnerWorkspaceArtifacts(["@murphai/contracts"], { repoRoot: root });
+    await expect(readFile(path.join(root, "assembled"))).rejects.toMatchObject({ code: "ENOENT" });
+    vi.stubEnv("MURPH_RUNNER_BUNDLE_BUILD_CONCURRENCY", "0");
+    await expect(buildHostedRunnerWorkspaceArtifacts(["@murphai/contracts"], { repoRoot: root }))
+      .rejects.toThrow("must be a positive integer");
+    vi.stubEnv("MURPH_RUNNER_BUNDLE_BUILD_CONCURRENCY", "1");
+    await writeFile(path.join(root, "fail-build"), "fail");
+    await expect(buildHostedRunnerWorkspaceArtifacts(["@murphai/assistant-engine", "@murphai/murph"], { repoRoot: root }))
+      .rejects.toThrow("exited with code 17");
+    await expect(readFile(path.join(root, "assembled"))).rejects.toMatchObject({ code: "ENOENT" });
   });
 
   it("waits for active bounded-concurrency work before rethrowing the first failure", async () => {

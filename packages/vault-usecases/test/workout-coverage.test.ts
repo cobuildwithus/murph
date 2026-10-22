@@ -437,27 +437,6 @@ describe("workout-read", () => {
   });
 });
 
-describe("workout-core", () => {
-  test("loads the workout core runtime through the shared runtime importer", async () => {
-    const fakeRuntime = {
-      addActivitySession: vi.fn(),
-      addMeasurement: vi.fn(),
-    };
-
-    const workoutCoreModule = await importWithMocks<typeof import("../src/usecases/workout-core.ts")>(
-      "../src/usecases/workout-core.ts",
-      {
-        "../src/runtime-import.js": () => ({
-          loadRuntimeModule: vi.fn(async () => fakeRuntime),
-        }),
-      },
-    );
-
-    const runtime = await workoutCoreModule.loadWorkoutCoreRuntime();
-    assert.equal(runtime, fakeRuntime);
-  });
-});
-
 describe("workout", () => {
   test("preserves workout text while typed fields build structured drafts", async () => {
     const noteLessCapture = workoutModule.resolveWorkoutCapture({

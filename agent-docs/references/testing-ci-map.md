@@ -7,21 +7,29 @@ happy-path checks have been removed where executable proof already covers the
 contract. Critical authorization, billing, canonical-state, and recovery tests
 remain. The replacement journeys use existing runners:
 
-- Web: `test:viewport-overflow` also runs `public-content-journeys.spec.ts`
-  and `murph-safe-search.spec.ts`. They exercise homepage navigation, policy PDF
-  delivery, and product search requests/results through a real browser.
-  Biomarker filter/search interactions retain two executable component tests;
-  the design preview itself is intentionally inert. Health-claim,
-  range/provenance, consent, and export decryption tests remain.
+- Web: `test:viewport-overflow` also runs `public-content-journeys.spec.ts`,
+  exercising homepage navigation, policy PDF delivery, public-route metadata
+  and served share images, and changelog pagination through a real browser.
+  Upstream product retirement removed the old product-search and biomarker
+  preview surfaces; their obsolete tests are not restored by this cleanup.
+  Health-claim, consent, and export decryption tests remain.
 - Knowledge: `packages/cli/test/incur-smoke.test.ts` runs create, refresh,
   search, list, and readback through separate built CLI processes. A forbidden
   source must leave the persisted page, index, and log unchanged.
+- CLI records: the same built CLI suite creates, renames, reloads, and lists
+  provider, food, and recipe records through fresh processes, verifies persisted
+  files, and rejects path traversal without overwriting the saved record.
 - Runner bundles: `runner-bundle-runtime-shape.test.ts` composes real filesystem
   pruning, manifest rewriting, portable wrappers, publication, replacement, and
   failure preservation, then executes both relocated command names. Container
   publication/security checks and executable native-catalog validation remain.
+- Cloudflare transport: phone start/status/stop and personalization authority
+  use real loopback HTTP with signed requests. The shared route matrix covers
+  registered routes; sensitive response limits, cancellation, member binding,
+  and write-fence tests remain. Workspace build ordering executes subprocesses
+  and prevents CLI assembly after a failed build.
 - Assistant: the `real Codex health guidance outcomes e2e` suite covers
-  cardio/race drafts, drowsiness, stress, crisis response, and body-composition
+  ordinary walking, cardio/race drafts, drowsiness, stress, crisis response, and body-composition
   guidance through production prompts and CLI tools. These subscription-backed
   journeys stay opt-in and run one exact test title at a time through
   `pnpm test:assistant:live -- --test "<exact case title>"`; deterministic tool
@@ -30,7 +38,9 @@ remain. The replacement journeys use existing runners:
 The Starter-usage and meal-photo-authority migration contracts are proved by
 their retained `*-migration-postgres.test.ts` suites, which execute the exact
 SQL in the required PostgreSQL lane. Their removed SQL substring checks are
-not additional billing-workflow requirements.
+not additional billing-workflow requirements. Onboarding save/skip races use
+`initial-onboarding-postgres-concurrency.test.ts`; parser validation remains
+local, while fake transaction/race tests have been removed.
 
 Upcoming-context corrections are covered by the typed CLI event suite and
 `assistant-upcoming-context.test.ts`: rescheduling/re-verification with stale
@@ -767,9 +777,7 @@ malformed-detail rejection before provider entry, and synthetic-room denial.
 The route suite proves callback-bound member attribution;
 routine tests inject the sender and use a mocked email effect rather than Resend.
 Hosted support-escalation conversation coverage is Assistant Engine-owned.
-`codex-base-support-guidance.test.ts` pins opt-in contact details, explicit
-private-direct authority, immediate reserved submission without a separate
-approval turn, and truthful saved/failure copy. The opt-in support scenario in
+The opt-in support scenario in
 `assistant-codex-real-e2e.test.ts` defines the real one-turn App Server journey:
 an explicit private human-support request submits one Murph-written,
 de-identified product-only summary while excluding synthetic semantic private

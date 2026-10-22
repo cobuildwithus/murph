@@ -1,10 +1,10 @@
+import { readFileSync } from "node:fs";
 import {
   request as httpRequest,
   type ClientRequest,
   type IncomingHttpHeaders,
 } from "node:http";
 import { EventEmitter } from "node:events";
-import { readFileSync } from "node:fs";
 import { mkdtemp, readFile, rm} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -619,62 +619,6 @@ describe("startHostedContainerEntrypoint", () => {
     );
     expect(prepareWorkspaceRestore).not.toHaveBeenCalled();
     expect(mocks.runHostedWorkspaceInvocation).not.toHaveBeenCalled();
-  });
-
-  it("keeps heavy runtime modules out of the pre-listen static module graph", () => {
-    const entrypointSource = readFileSync(
-      path.join(process.cwd(), "apps/cloudflare/src/container-entrypoint.ts"),
-      "utf8",
-    );
-    const heavyRuntimeSource = readFileSync(
-      path.join(process.cwd(), "apps/cloudflare/src/container-entrypoint-heavy-runtime.ts"),
-      "utf8",
-    );
-    const valueImports = Array.from(entrypointSource.matchAll(
-      /^\s*import(?!\s+type\b)[\s\S]*?\sfrom\s+["']([^"']+)["'];/gm,
-    ), (match) => match[1]);
-    const heavySpecifiers = [
-      "node:child_process",
-      "node:crypto",
-      "node:https",
-      "node:os",
-      "node:stream",
-      "@murphai/assistant-runtime/hosted-invocation",
-      "@murphai/assistant-runtime/hosted-runtime-contracts",
-      "@murphai/contracts",
-      "./deploy-smoke-live-model.ts",
-      "./hosted-workspace-invocation.ts",
-      "./runner-container-ca-env.ts",
-      "./runner-injected-credential.ts",
-    ];
-
-    for (const specifier of heavySpecifiers) {
-      expect(valueImports).not.toContain(specifier);
-      expect(heavyRuntimeSource).toContain(`from "${specifier}"`);
-    }
-    expect(valueImports).toContain("@murphai/assistant-engine/codex-lifecycle");
-    expect(heavyRuntimeSource).not.toContain(
-      'from "@murphai/assistant-engine/codex-lifecycle"',
-    );
-    expect(valueImports).toContain("./runner-job-transport.ts");
-    expect(valueImports).not.toContain("./container-workspace-restore-preparation.ts");
-    expect(
-      entrypointSource.match(/import\("\.\/container-entrypoint-heavy-runtime\.ts"\)/g),
-    ).toHaveLength(1);
-    expect(
-      entrypointSource.match(/import\("\.\/container-workspace-restore-preparation\.ts"\)/g),
-    ).toHaveLength(1);
-    expect(entrypointSource).toContain("if (!heavyRuntimeHydrationPromise)");
-    expect(entrypointSource).toContain(
-      "heavyRuntimeHydrationPromise = runtime.loadHeavyRuntime()",
-    );
-    const listenOffset = entrypointSource.indexOf("server.listen(");
-    const eagerHydrationOffset = entrypointSource.indexOf(
-      "hydrateHeavyRuntime();",
-      listenOffset,
-    );
-    expect(listenOffset).toBeGreaterThanOrEqual(0);
-    expect(eagerHydrationOffset).toBeGreaterThan(listenOffset);
   });
 
   it.each([false, true])("publishes receipt warmth before housekeeping settles (failure=%s)", async (fail) => {

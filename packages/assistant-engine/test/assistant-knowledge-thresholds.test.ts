@@ -6,7 +6,6 @@ import type { DerivedKnowledgeGraph, DerivedKnowledgeNode } from '@murphai/query
 import { DERIVED_KNOWLEDGE_PAGES_ROOT } from '@murphai/query'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { buildKnowledgeMarkdown } from '../src/knowledge/documents.ts'
 
 const tempRoots: string[] = []
 
@@ -15,7 +14,6 @@ afterEach(async () => {
   vi.restoreAllMocks()
   vi.clearAllMocks()
   vi.doUnmock('@murphai/query')
-  vi.doUnmock('@murphai/vault-usecases/runtime')
 
   await Promise.all(
     tempRoots.splice(0).map((rootPath) =>
@@ -224,70 +222,7 @@ describe('assistant knowledge threshold coverage', () => {
     })
   })
 
-  it('uses the default file reader and integrated runtime writer when dependencies are omitted', async () => {
-    const vaultRoot = await createKnowledgeVaultRoot('assistant-knowledge-runtime-')
-    await writeKnowledgePage(
-      vaultRoot,
-      'hydration',
-      buildKnowledgeMarkdown({
-        body: 'Hydration helps recovery.',
-        compiledAt: '2026-04-08T12:00:00.000Z',
-        librarySlugs: [],
-        pageType: 'concept',
-        relatedSlugs: [],
-        slug: 'hydration',
-        sourcePaths: ['journal/hydration.md'],
-        status: 'active',
-        summary: 'Hydration helps recovery.',
-        title: 'Hydration',
-      }),
-    )
 
-    const applyCanonicalWriteBatch = vi.fn(async () => undefined)
-    const loadIntegratedRuntime = vi.fn(async () => ({
-      core: {
-        applyCanonicalWriteBatch,
-      },
-    }))
-
-    vi.doMock('@murphai/vault-usecases/runtime', () => ({
-      loadIntegratedRuntime,
-    }))
-
-    const { getKnowledgePage, rebuildKnowledgeIndex } = await import('../src/knowledge/service.ts')
-
-    const pageResult = await getKnowledgePage({
-      slug: 'hydration',
-      vault: vaultRoot,
-    })
-    expect(pageResult.page.markdown).toContain('# Hydration')
-
-    const rebuildResult = await rebuildKnowledgeIndex({
-      vault: vaultRoot,
-    })
-    expect(rebuildResult).toMatchObject({
-      pageCount: 1,
-      pageTypes: ['concept'],
-      rebuilt: true,
-    })
-    expect(loadIntegratedRuntime).toHaveBeenCalledTimes(1)
-    expect(applyCanonicalWriteBatch).toHaveBeenCalledWith({
-      audit: {
-        action: 'knowledge_write',
-        commandName: 'assistantEngine.saveKnowledgeText',
-        summary: 'Rebuilt the derived knowledge index.',
-      },
-      operationType: 'knowledge_index.rebuild',
-      summary: 'Rebuilt the derived knowledge index.',
-      textWrites: [
-        expect.objectContaining({
-          overwrite: true,
-          relativePath: 'derived/knowledge/index.md',
-        }),
-      ],
-      vaultRoot: vaultRoot,
-    })
-  })
 })
 
 async function createKnowledgeVaultRoot(prefix: string): Promise<string> {
@@ -331,18 +266,6 @@ function createKnowledgeNode(
     title: 'Example',
     ...overrides,
   }
-}
-
-async function writeKnowledgePage(
-  vaultRoot: string,
-  slug: string,
-  markdown: string,
-): Promise<void> {
-  await writeVaultFile(
-    vaultRoot,
-    path.posix.join(DERIVED_KNOWLEDGE_PAGES_ROOT, `${slug}.md`),
-    markdown,
-  )
 }
 
 async function writeVaultFile(

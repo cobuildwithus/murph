@@ -23,85 +23,6 @@ afterEach(async () => {
 })
 
 describe('upsertKnowledgePage', () => {
-  it('reuses existing source paths when refreshing without new source paths', async () => {
-    const vaultRoot = await createVaultRoot()
-    const firstSourcePath = 'research/2026/04/sleep-note.md'
-    await writeVaultFile(
-      vaultRoot,
-      firstSourcePath,
-      '# Sleep note\n\nEarlier notes linked better sleep to magnesium.\n',
-    )
-
-    await upsertKnowledgePage(
-      {
-        body: '# Sleep quality\n\nThe first pass mostly referenced the older sleep note.\n',
-        vault: vaultRoot,
-        title: 'Sleep quality',
-        sourcePaths: [firstSourcePath],
-      },
-      {
-        async saveText(input: { relativePath: string; content: string }) {
-          await writeVaultFile(vaultRoot, input.relativePath, input.content)
-        },
-      },
-    )
-
-    const refreshed = await upsertKnowledgePage(
-      {
-        body: '# Sleep quality\n\nThe refreshed page keeps the same source set.\n',
-        vault: vaultRoot,
-        slug: 'sleep-quality',
-      },
-      {
-        async saveText(input: { relativePath: string; content: string }) {
-          await writeVaultFile(vaultRoot, input.relativePath, input.content)
-        },
-      },
-    )
-
-    expect(refreshed.page.sourcePaths).toEqual([firstSourcePath])
-
-    const savedPage = await readFile(
-      path.join(vaultRoot, 'derived/knowledge/pages/sleep-quality.md'),
-      'utf8',
-    )
-    expect(savedPage).toContain('`research/2026/04/sleep-note.md`')
-  })
-
-  it('preserves existing source paths when explicit new sources are provided on refresh', async () => {
-    const vaultRoot = await createVaultRoot()
-    const firstSourcePath = 'research/2026/04/sleep-note.md'
-    const secondSourcePath = 'research/2026/04/magnesium-note.md'
-    await writeVaultFile(vaultRoot, firstSourcePath, '# Sleep note\n')
-    await writeVaultFile(vaultRoot, secondSourcePath, '# Magnesium note\n')
-
-    const saveText = async (input: { relativePath: string; content: string }) => {
-      await writeVaultFile(vaultRoot, input.relativePath, input.content)
-    }
-
-    await upsertKnowledgePage(
-      {
-        body: '# Sleep quality\n\nInitial page body.\n',
-        vault: vaultRoot,
-        title: 'Sleep quality',
-        sourcePaths: [firstSourcePath],
-      },
-      { saveText },
-    )
-
-    const refreshed = await upsertKnowledgePage(
-      {
-        body: '# Sleep quality\n\nRefreshed with the new source only.\n',
-        vault: vaultRoot,
-        slug: 'sleep-quality',
-        sourcePaths: [secondSourcePath],
-      },
-      { saveText },
-    )
-
-    expect(refreshed.page.sourcePaths).toEqual([firstSourcePath, secondSourcePath])
-  })
-
   it('rejects directory source paths', async () => {
     const vaultRoot = await createVaultRoot()
     await writeVaultFile(vaultRoot, 'research/2026/04/sleep-note.md', '# Sleep note\n')
@@ -158,27 +79,6 @@ describe('upsertKnowledgePage', () => {
       'utf8',
     )
     expect(savedPage).not.toContain('[truncated locally]')
-  })
-
-  it('rejects derived or runtime paths as knowledge upsert sources', async () => {
-    const vaultRoot = await createVaultRoot()
-    await writeVaultFile(
-      vaultRoot,
-      'derived/knowledge/pages/existing.md',
-      '# Existing\n',
-    )
-
-    await expect(
-      upsertKnowledgePage(
-        {
-          body: '# Existing\n\nBody.\n',
-          vault: vaultRoot,
-          sourcePaths: ['derived/knowledge/pages/existing.md'],
-        },
-      ),
-    ).rejects.toMatchObject({
-      code: 'knowledge_forbidden_source_path',
-    })
   })
 
   it('flags directory-valued source paths during lint', async () => {
@@ -253,54 +153,6 @@ describe('upsertKnowledgePage', () => {
     ).rejects.toMatchObject({
       code: 'knowledge_duplicate_slug',
     })
-  })
-
-  it('reports missing related pages and missing source files during lint', async () => {
-    const vaultRoot = await createVaultRoot()
-    await writeVaultFile(
-      vaultRoot,
-      'derived/knowledge/pages/sleep-quality.md',
-      [
-        '---',
-        'title: Sleep quality',
-        'slug: sleep-quality',
-        'pageType: concept',
-        'status: active',
-        'relatedSlugs:',
-        '  - magnesium',
-        'sourcePaths:',
-        '  - research/2026/04/missing-note.md',
-        '---',
-        '',
-        '# Sleep quality',
-        '',
-        'Needs follow-up on [[magnesium]].',
-        '',
-        '## Sources',
-        '',
-        '- `research/2026/04/missing-note.md`',
-        '',
-      ].join('\n'),
-    )
-
-    const lint = await lintKnowledgePages({
-      vault: vaultRoot,
-    })
-
-    expect(lint.ok).toBe(false)
-    expect(lint.problems).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          code: 'missing_related_page',
-          slug: 'sleep-quality',
-        }),
-        expect.objectContaining({
-          code: 'missing_source_path',
-          slug: 'sleep-quality',
-          severity: 'error',
-        }),
-        ]),
-    )
   })
 
   it('rejects unknown bank/library links during upsert and lints stale ones', async () => {

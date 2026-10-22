@@ -2898,6 +2898,61 @@ test('knowledge commands expose the expected schema', async () => {
   assert.deepEqual(logTailSchema.options.required, ['limit'])
 })
 
+for (const kind of ['provider', 'food', 'recipe'] as const) {
+  test(`${kind} lifecycle persists through fresh built CLI processes`, async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), `murph-${kind}-lifecycle-`))
+    const runFreshCli = <TData = Record<string, unknown>>(args: string[]) =>
+      runCli<TData>(args, { env: { MURPH_CLI_TEST_PERSISTENT_HARNESS: '0' } })
+    type SavedRecord = { lookupId: string; path: string; created: boolean }
+    type ShownRecord = { entity: { id: string; path: string; data: { title: string } } }
+    try {
+      requireData(await runFreshCli(['init', '--vault', vaultRoot]))
+      const created = requireData(await runFreshCli<SavedRecord>([
+        kind, 'save', 'Synthetic initial record', '--slug', 'synthetic-initial',
+        '--vault', vaultRoot,
+      ]))
+      assert.equal(created.created, true)
+      const shown = requireData(await runFreshCli<ShownRecord>([
+        kind, 'show', created.lookupId, '--vault', vaultRoot,
+      ]))
+      assert.equal(shown.entity.id, created.lookupId)
+      assert.equal(shown.entity.data.title, 'Synthetic initial record')
+
+      const updated = requireData(await runFreshCli<SavedRecord>([
+        ...(kind === 'food'
+          ? [kind, 'rename', created.lookupId, '--title', 'Synthetic updated record']
+          : [kind, 'save', 'Synthetic updated record', '--id', created.lookupId]),
+        '--slug', 'synthetic-updated', '--vault', vaultRoot,
+      ]))
+      assert.equal(updated.created, false)
+      assert.equal(updated.lookupId, created.lookupId)
+      assert.notEqual(updated.path, created.path)
+      const persisted = await readFile(path.join(vaultRoot, updated.path), 'utf8')
+      assert.match(persisted, /Synthetic updated record/u)
+      await assert.rejects(readFile(path.join(vaultRoot, created.path), 'utf8'), { code: 'ENOENT' })
+
+      const reopened = requireData(await runFreshCli<ShownRecord>([
+        kind, 'show', created.lookupId, '--vault', vaultRoot,
+      ]))
+      assert.equal(reopened.entity.path, updated.path)
+      assert.equal(reopened.entity.data.title, 'Synthetic updated record')
+      const listed = requireData(await runFreshCli<{ items: Array<{ id: string }> }>([
+        kind, 'list', '--vault', vaultRoot,
+      ]))
+      assert.deepEqual(listed.items.map((item) => item.id), [created.lookupId])
+
+      const rejected = await runFreshCli([
+        kind, 'save', 'Rejected update', '--id', created.lookupId,
+        '--slug', '../outside', '--vault', vaultRoot,
+      ])
+      assert.equal(rejected.ok, false)
+      assert.equal(await readFile(path.join(vaultRoot, updated.path), 'utf8'), persisted)
+    } finally {
+      await rm(vaultRoot, { recursive: true, force: true })
+    }
+  }, INCUR_KNOWLEDGE_BOUNDARY_TIMEOUT_MS)
+}
+
 test('knowledge lifecycle survives fresh built CLI processes and rejected source writes', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-knowledge-cli-'))
 
@@ -3097,7 +3152,7 @@ test('knowledge lifecycle survives fresh built CLI processes and rejected source
     assert.equal(await readFile(logPath, 'utf8'), persistedLog)
     const afterRejection = requireData(await runFreshCli<{
       page: { markdown: string }
-    }>(['knowledge', 'show', 'sleep-quality', '--vault', vaultRoot]))
+    }>(['knowledge', 'show', 'sleep-quality', '--raw', '--vault', vaultRoot]))
     assert.equal(afterRejection.page.markdown, persistedPage)
   } finally {
     await rm(vaultRoot, { recursive: true, force: true })

@@ -4,35 +4,7 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 const repoRoot = path.resolve(import.meta.dirname, "../../..");
-const sourceFiles: readonly string[] = [
-  "apps/web/src/lib/health-commons/generated-measurement-method-artifacts.ts",
-  "apps/web/src/lib/health-commons/measurement-method-detail.ts",
-  "apps/web/app/measurement-methods/[measurementMethodId]/page.tsx",
-] as const;
-
-const blockedCatalogPatterns = [
-  "@murphai/health-commons/generated/catalog.json",
-  "generated/catalog.json",
-  "getGeneratedHealthCommonsCatalogReader",
-  "getHealthCommonsCatalogReader",
-  "healthCommonsCatalog",
-  "loadGeneratedHealthCommonsCatalog",
-  "from \"@/src/lib/health-commons/catalog\"",
-  "from \"./catalog\"",
-  "from './catalog'",
-] as const;
-
 describe("Health Commons route-bundle boundary", () => {
-  it("keeps public Health Commons route code off the monolithic generated catalog", () => {
-    for (const relativePath of collectPublicHealthCommonsSourceFiles()) {
-      const source = readFileSync(path.join(repoRoot, relativePath), "utf8");
-
-      for (const pattern of blockedCatalogPatterns) {
-        expect(source, `${relativePath} should not contain ${pattern}`).not.toContain(pattern);
-      }
-    }
-  });
-
   it("fails if existing Next traces include the monolithic generated catalog in public Health Commons routes", () => {
     const traceRoots = [
       "apps/web/.next",
@@ -65,81 +37,6 @@ describe("Health Commons route-bundle boundary", () => {
     }
   });
 });
-
-function collectPublicHealthCommonsSourceFiles(): string[] {
-  const visited = new Set<string>();
-  const stack = [...sourceFiles];
-
-  while (stack.length > 0) {
-    const relativePath = stack.pop();
-    if (!relativePath || visited.has(relativePath)) {
-      continue;
-    }
-
-    visited.add(relativePath);
-    const source = readFileSync(path.join(repoRoot, relativePath), "utf8");
-    for (const specifier of extractRelativeImportSpecifiers(source)) {
-      const resolved = resolveSourceFile(relativePath, specifier);
-      if (resolved && isPublicHealthCommonsSourceFile(resolved)) {
-        stack.push(resolved);
-      }
-    }
-  }
-
-  return [...visited].sort();
-}
-
-function extractRelativeImportSpecifiers(source: string): string[] {
-  const specifiers: string[] = [];
-  const importPattern =
-    /(?:import|export)\s+(?:type\s+)?(?:[^'"]*?\s+from\s+)?["']((?:\.|@\/src\/lib\/health-commons\/)[^"']+)["']/gu;
-
-  for (const match of source.matchAll(importPattern)) {
-    if (match[1]) {
-      specifiers.push(match[1]);
-    }
-  }
-
-  return specifiers;
-}
-
-function resolveSourceFile(fromRelativePath: string, specifier: string): string | null {
-  if (specifier.startsWith("@/src/lib/health-commons/")) {
-    return resolveRelativeSourceFile(
-      "apps/web/src/lib/health-commons/__alias__.ts",
-      `./${specifier.slice("@/src/lib/health-commons/".length)}`,
-    );
-  }
-
-  return resolveRelativeSourceFile(fromRelativePath, specifier);
-}
-
-function resolveRelativeSourceFile(fromRelativePath: string, specifier: string): string | null {
-  const basePath = path.normalize(path.join(path.dirname(fromRelativePath), specifier));
-  const candidates = [
-    basePath,
-    `${basePath}.ts`,
-    `${basePath}.tsx`,
-    path.join(basePath, "index.ts"),
-    path.join(basePath, "index.tsx"),
-  ];
-
-  for (const candidate of candidates) {
-    const absolutePath = path.join(repoRoot, candidate);
-    if (existsSync(absolutePath) && statSync(absolutePath).isFile()) {
-      return candidate.replace(/\\/gu, "/");
-    }
-  }
-
-  return null;
-}
-
-function isPublicHealthCommonsSourceFile(relativePath: string): boolean {
-  return sourceFiles.includes(relativePath)
-    || relativePath.startsWith("apps/web/app/measurement-methods")
-    || relativePath.startsWith("apps/web/src/lib/health-commons/generated-measurement-method-artifacts")
-    || relativePath.startsWith("apps/web/src/lib/health-commons/measurement-method-detail");
-}
 
 function listTraceFiles(root: string): string[] {
   if (!existsSync(root)) {

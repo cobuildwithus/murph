@@ -6148,6 +6148,12 @@ describeRealCodex('real Codex coordinated workout exercise e2e', () => {
 describeRealCodex('real Codex health guidance outcomes e2e', () => {
   const scenarios = [
     {
+      name: 'keeps an ordinary walking break small without creating a training program',
+      prompt: 'I am a healthy adult with no activity restrictions. I sit at my desk all afternoon and have five minutes free after lunch today. Suggest one easy walking break I can do now. I do not want fitness training, saved plans, reminders, or follow-up messages.',
+      required: [/walk|walking/iu],
+      forbidden: [/I(?:[’\x27]ll| will) (?:remind|check in|follow up)|(?:you should|start with|follow) (?:an? )?(?:eight.week|8.week|running program|training plan)/iu],
+    },
+    {
       name: 'drafts the requested cardio horizon without activating a plan',
       prompt: 'I am a healthy adult returning to running. I comfortably walk 30 minutes and have no pain or symptoms. I have Tuesday, Thursday and Sunday free for 25 minutes. Give me an eight-week walk/run draft, not just a two-week plan. Keep the first weeks easy and explain how to adjust if it feels too hard. Plain text only; do not save anything or set reminders.',
       required: [/walk/iu, /run|jog/iu, /(?:week\s*8|weeks?\s*\d+\s*[-–—]\s*8|eight.week)/iu, /easy|talk|conversational/iu, /repeat|reduce|back off|shorten|slow/iu],

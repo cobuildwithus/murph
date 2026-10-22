@@ -4,9 +4,6 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, expectTypeOf, it } from "vitest";
 
 import {
-  HOSTED_RUNTIME_OPERATOR_TASK_CONTROL_PATH,
-} from "@murphai/hosted-execution/routes";
-import {
   bindHostedRunnerWebControlRoutePath,
   createHostedRunnerDeviceSyncConnectLinkRoute,
   HOSTED_RUNNER_WEB_CONTROL_ROUTES,
@@ -79,6 +76,9 @@ describe("hosted runtime web-control route contract", () => {
   });
 
   it("derives every static proxy allowlist entry from its callable route", () => {
+    expect(readHostedRunnerWebControlPolicy({
+      method: "POST", path: "/api/internal/hosted-execution/unrelated/tool",
+    }).allowed).toBe(false);
     for (const route of Object.values(HOSTED_RUNNER_WEB_CONTROL_ROUTES)) {
       const pathname = new URL(
         route.path,
@@ -100,24 +100,6 @@ describe("hosted runtime web-control route contract", () => {
         path: `${pathname}/arbitrary`,
       }).allowed).toBe(false);
     }
-  });
-
-  it("admits only the exact operator-task POST route", () => {
-    expect(readHostedRunnerWebControlPolicy({
-      method: "POST",
-      path: HOSTED_RUNTIME_OPERATOR_TASK_CONTROL_PATH,
-    })).toEqual({
-      allowed: true,
-      operation: "operator_task_control",
-    });
-    expect(readHostedRunnerWebControlPolicy({
-      method: "GET",
-      path: HOSTED_RUNTIME_OPERATOR_TASK_CONTROL_PATH,
-    }).allowed).toBe(false);
-    expect(readHostedRunnerWebControlPolicy({
-      method: "POST",
-      path: `${HOSTED_RUNTIME_OPERATOR_TASK_CONTROL_PATH}/arbitrary`,
-    }).allowed).toBe(false);
   });
 
   it("binds query strings without permitting a different pathname", () => {

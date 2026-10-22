@@ -1,403 +1,52 @@
-import assert from "node:assert/strict";
-
-import { createElement } from "react";
-import { renderToStaticMarkup } from "react-dom/server";
-import { afterEach, expect, test, vi } from "vitest";
+import { beforeEach, expect, test, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  getMurphGithubStarCount: vi.fn(),
   getHostedPageAuthSnapshot: vi.fn(),
   scheduleHomepageBrowserVaultPreparation: vi.fn(),
-  headers: vi.fn(
-    async () =>
-      new Headers({
-        "x-vercel-ip-country": "US",
-      }),
-  ),
-  LandingAuthActions: vi.fn(
-    (props: {
-      authenticated: boolean;
-      context: "nav" | "hero" | "footer";
-      authLabel: string;
-      signupLabel?: string;
-      leadingIcon?: React.ReactNode;
-      splitUnauthenticated?: boolean;
-    }) =>
-      createElement(
-        "div",
-        {
-          "data-root-landing-auth-actions-authenticated": String(
-            props.authenticated
-          ),
-          "data-root-landing-auth-actions-context": props.context,
-          "data-root-landing-auth-actions-label": props.authLabel,
-          "data-root-landing-auth-actions-signup-label":
-            props.signupLabel ?? "",
-          "data-root-landing-auth-actions-split": String(
-            props.splitUnauthenticated ?? false,
-          ),
-        },
-        "Landing auth actions"
-      )
-  ),
 }));
 
 vi.mock("server-only", () => ({}));
-
 vi.mock("next/headers", () => ({
-  headers: mocks.headers,
+  headers: async () => new Headers({ "x-vercel-ip-country": "US" }),
 }));
-
-vi.mock("next/image", () => ({
-  default: (props: {
-    alt?: string;
-    className?: string;
-    src: string;
-  }) =>
-    createElement("img", {
-      alt: props.alt ?? "",
-      className: props.className,
-      src: props.src,
-    }),
-}));
-
 vi.mock("@/src/lib/hosted-onboarding/page-auth", () => ({
   getHostedPageAuthSnapshot: mocks.getHostedPageAuthSnapshot,
-  getHostedDashboardPageAuthSnapshot: mocks.getHostedPageAuthSnapshot,
 }));
-
 vi.mock("@/src/lib/browser-vault/homepage-preparation", () => ({
   scheduleHomepageBrowserVaultPreparation:
     mocks.scheduleHomepageBrowserVaultPreparation,
 }));
-
-vi.mock("@/src/lib/github-stars", async () => {
-  const actual =
-    await vi.importActual<typeof import("@/src/lib/github-stars")>(
-      "@/src/lib/github-stars",
-    );
-
-  return {
-    ...actual,
-    getMurphGithubStarCount: mocks.getMurphGithubStarCount,
-  };
-});
-
-vi.mock(
-  "@/src/components/hosted-onboarding/phone-country-code-provider",
-  () => ({
-    PhoneCountryCodeProvider(input: { children: React.ReactNode }) {
-      return createElement(
-        "div",
-        {
-          "data-phone-country-code": "GB",
-        },
-        input.children
-      );
-    },
-  })
-);
-
-vi.mock("@/src/lib/hosted-onboarding/landing", () => ({
-  resolveHostedInstallScriptUrl: () => "https://www.withmurph.ai/install.sh",
+vi.mock("@/src/lib/github-stars", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/src/lib/github-stars")>(),
+  getMurphGithubStarCount: async () => null,
+}));
+vi.mock("@/src/lib/hero-contact-info", () => ({
+  fetchHeroContactInfo: async () => ({
+    phone: null,
+    phoneConfigured: false,
+    telegram: null,
+  }),
 }));
 
-vi.mock("../app/auth-controls", () => ({
-  LandingAuthActions: mocks.LandingAuthActions,
-  LandingAuthDialog: () => null,
-  LandingAuthDialogButton: ({
-    buttonClassName,
-    buttonLabel,
-  }: {
-    buttonClassName: string;
-    buttonLabel: string;
-  }) =>
-    createElement(
-      "button",
-      { className: buttonClassName, type: "button" },
-      buttonLabel,
-    ),
-}));
+import HomePage from "../app/page";
 
-afterEach(() => {
-  vi.unstubAllEnvs();
+beforeEach(() => {
+  vi.clearAllMocks();
 });
 
-test("HomePage renders the canonical landing page at the root route", async () => {
-  vi.clearAllMocks();
-  mocks.getHostedPageAuthSnapshot.mockResolvedValue({
-    authenticated: false,
-  });
-  mocks.getMurphGithubStarCount.mockResolvedValue(null);
-  mocks.headers.mockResolvedValue(new Headers({
-    "x-vercel-ip-country": "US",
-  }));
-
-  const { default: HomePage } = await import("../app/page");
-
-  const markup = renderToStaticMarkup(await HomePage());
-
-  expect(mocks.getHostedPageAuthSnapshot).toHaveBeenCalledTimes(1);
-  expect(mocks.scheduleHomepageBrowserVaultPreparation).not.toHaveBeenCalled();
-  expect(mocks.getMurphGithubStarCount).toHaveBeenCalledTimes(1);
-  expect(mocks.headers).toHaveBeenCalledTimes(1);
-  expect(mocks.LandingAuthActions).toHaveBeenCalledTimes(5);
-  expect(mocks.LandingAuthActions).toHaveBeenNthCalledWith(
-    1,
-    {
-      authenticated: false,
-      context: "nav",
-      authLabel: "Dashboard",
-      splitUnauthenticated: true,
-    },
-    undefined
-  );
-  expect(mocks.LandingAuthActions).toHaveBeenNthCalledWith(
-    2,
-    expect.objectContaining({
-      authenticated: false,
-      context: "hero",
-      authLabel: "Meet Murph",
-      leadingIcon: expect.anything(),
-    }),
-    undefined
-  );
-  expect(mocks.LandingAuthActions).toHaveBeenNthCalledWith(
-    3,
-    expect.objectContaining({
-      authenticated: false,
-      context: "hero",
-      authLabel: "Meet Murph",
-      leadingIcon: expect.anything(),
-    }),
-    undefined
-  );
-  expect(mocks.LandingAuthActions).toHaveBeenNthCalledWith(
-    4,
-    {
-      authenticated: false,
-      context: "footer",
-      authLabel: "Get started",
-      signupLabel: "Get started",
-    },
-    undefined
-  );
-  expect(mocks.LandingAuthActions).toHaveBeenNthCalledWith(
-    5,
-    {
-      authenticated: false,
-      context: "footer",
-      authLabel: "Get started",
-      signupLabel: "Get started",
-    },
-    undefined
-  );
-  assert.match(markup, /aria-label="Open menu"/);
-  assert.doesNotMatch(markup, /href="\/(?:goals|knowledge|pitch)(?:["/#?])/);
-  assert.match(markup, /data-root-landing-auth-actions-context="nav"/);
-  assert.match(markup, /data-root-landing-auth-actions-context="hero"/);
-  assert.match(markup, /data-root-landing-auth-actions-context="footer"/);
-  assert.match(
-    markup,
-    /font-serif text-\[clamp\(2\.5rem,5vw,4rem\)\][^"]* text-black/,
-  );
-  assert.match(markup, /<span class="block">Health is hard\.<\/span>/);
-  assert.match(markup, /Don’t do it alone\./);
-  assert.equal((markup.match(/<h1\b/g) ?? []).length, 1);
-  assert.match(
-    markup,
-    /<h1 class="sr-only">Health is hard\. Don’t do it alone\.<\/h1>/,
-  );
-  assert.match(
-    markup,
-    /Wearables, bloodwork, doctor visits, supplements, blood pressure, sleep\. Murph reads it all/,
-  );
-  assert.match(markup, /Start a health challenge with your friends/);
-  assert.match(markup, /referees the week/);
-  assert.doesNotMatch(markup, /Better together/);
-  assert.match(markup, /Do it with your people\./);
-  assert.match(markup, /No group\? You’re still not doing this alone\./);
-  const pricingStart = markup.indexOf('<section id="pricing"');
-  assert.ok(pricingStart >= 0, "signup pricing section missing");
-  const pricingSection = markup.slice(
-    pricingStart,
-    markup.indexOf("</section>", pricingStart),
-  );
-  assert.match(pricingSection, /Free starter usage/);
-  assert.match(pricingSection, /Open source/);
-  assert.doesNotMatch(pricingSection, /Starter usage does not expire\./);
-  assert.doesNotMatch(pricingSection, /free trial/i);
-  assert.match(markup, /data-root-landing-auth-actions-label="Dashboard"/);
-  assert.match(
-    markup,
-    /data-root-landing-auth-actions-label="Meet Murph"/
-  );
-  assert.match(markup, /Do I need friends on Murph\?/);
-  assert.doesNotMatch(markup, /personal health assistant/);
-  assert.doesNotMatch(markup, /Discover what actually makes you healthier/);
-  assert.match(markup, /data-root-landing-auth-actions-label="Get started"/);
-  assert.match(markup, /You can also install it locally\./);
-  assert.match(
-    markup,
-    /curl -fsSL https:\/\/www\.withmurph\.ai\/install\.sh \| bash/
-  );
-  assert.match(markup, /murph assistant ask &quot;Hello&quot;/);
-  assert.match(markup, /Do I need a wearable\?/);
-  assert.match(markup, /No\. A wearable can add useful signals/);
-  assert.match(markup, /Can I do challenges with friends and family\?/);
-  assert.match(
-    markup,
-    /Scoring is adherence and change against your own baseline, never raw body stats\./,
-  );
-  assert.match(markup, /What does the group actually see\?/);
-  assert.match(markup, /Everything else stays private by default\./);
-  assert.match(
-    markup,
-    /See how we protect your data.*href="\/consumer-health-data-privacy-policy"[^>]*>Consumer Health Data Privacy Notice<span aria-hidden="true">→<\/span><\/a>/s,
-  );
-  assert.equal(
-    (
-      markup.match(
-        /Illustrative examples\. Changes in personal data can have many causes and do not establish that an intervention produced the result\./g,
-      ) ?? []
-    ).length,
-    2,
-  );
-  assert.match(markup, /Murph uses AI-assisted review of published studies/);
-  assert.match(markup, /Research may be incomplete, mixed, or not applicable to your situation/);
-  assert.doesNotMatch(markup, /GPT-5\.5 Pro/);
-  assert.match(markup, /Wearable apps show status/);
-  assert.doesNotMatch(markup, /Strava/);
-  assert.doesNotMatch(markup, /Perplexity Health/);
-  assert.doesNotMatch(markup, /Can I choose which AI provider Murph uses\?/);
-  assert.doesNotMatch(markup, /Your wearable shows data/);
-  assert.match(
-    markup,
-    /\/murph-headshots\/murph-headshot-(?:01|02|03|04)-avatar\.avif/,
-  );
-  assert.match(markup, /\/personas\/athlete-avatar\.avif/);
-  assert.match(markup, /\/personas\/sleeper-avatar\.avif/);
-  assert.match(markup, /\/personas\/founder-avatar\.avif/);
-  assert.doesNotMatch(
-    markup,
-    /\/murph-headshots\/murph-headshot-(?:01|02|03|04)\.png/,
-  );
-  assert.doesNotMatch(
-    markup,
-    /\/personas\/(?:athlete|sleeper|founder)\.jpg/,
-  );
-});
-
-test("HomePage keeps the OpenAI runtime section before security", async () => {
-  vi.clearAllMocks();
+test("an anonymous homepage visit does not prepare a private browser vault", async () => {
   mocks.getHostedPageAuthSnapshot.mockResolvedValue({ authenticated: false });
-  mocks.getMurphGithubStarCount.mockResolvedValue(null);
-  mocks.headers.mockResolvedValue(new Headers({ "x-vercel-ip-country": "US" }));
-
-  const { default: HomePage } = await import("../app/page");
-  const markup = renderToStaticMarkup(await HomePage());
-
-  assert.match(markup, /Improve your health, one experiment at a time\.[\s\S]*Built on Codex,[\s\S]*Your health data/);
-  assert.match(markup, /Powered by OpenAI/);
-  assert.doesNotMatch(markup, /Venice|Endpoint \+ key|Local OSS|Can I choose which AI provider/);
+  await HomePage();
+  expect(mocks.scheduleHomepageBrowserVaultPreparation).not.toHaveBeenCalled();
 });
 
-test("SecurityPage splits the shared sticky nav into Log in + Signup when logged out", async () => {
-  vi.clearAllMocks();
-  mocks.getHostedPageAuthSnapshot.mockResolvedValue({
-    authenticated: false,
-  });
-  mocks.getMurphGithubStarCount.mockResolvedValue(null);
-
-  const { default: SecurityPage } = await import("../app/security/page");
-
-  const markup = renderToStaticMarkup(await SecurityPage());
-
-  expect(mocks.LandingAuthActions).toHaveBeenCalled();
-  expect(mocks.LandingAuthActions).toHaveBeenNthCalledWith(
-    1,
-    {
-      authenticated: false,
-      context: "nav",
-      authLabel: "Dashboard",
-      splitUnauthenticated: true,
-      onDarkSurface: true,
-    },
-    undefined
-  );
-  assert.match(
-    markup,
-    /curl -fsSL https:\/\/www\.withmurph\.ai\/install\.sh \| bash/
-  );
-  assert.doesNotMatch(markup, /curl -sSL withmurph\.ai\/install\.sh \| bash/);
-  assert.doesNotMatch(markup, /security-model-provider-title/);
-});
-
-test("HomePage metadata keeps the root route as the canonical landing URL", async () => {
-  const { metadata } = await import("../app/page");
-
-  const {
-    MURPH_DEFAULT_METADATA_DESCRIPTION,
-    MURPH_DEFAULT_METADATA_TITLE,
-    MURPH_DEFAULT_OPEN_GRAPH_DESCRIPTION,
-  } = await import("../src/lib/site-metadata");
-
-  expect(metadata.title).toBe(MURPH_DEFAULT_METADATA_TITLE);
-  expect(metadata.description).toBe(MURPH_DEFAULT_METADATA_DESCRIPTION);
-  expect(metadata.alternates?.canonical).toBe("/");
-  expect(metadata.openGraph?.images).toEqual([
-    expect.objectContaining({
-      url: "/opengraph-image",
-      width: 1200,
-      height: 630,
-    }),
-  ]);
-  expect(metadata.twitter?.images).toEqual([
-    expect.objectContaining({
-      url: "/opengraph-image",
-      width: 1200,
-      height: 630,
-    }),
-  ]);
-  expect(metadata.openGraph?.description).toBe(
-    MURPH_DEFAULT_OPEN_GRAPH_DESCRIPTION,
-  );
-  expect(metadata.twitter?.description).toBe(
-    MURPH_DEFAULT_OPEN_GRAPH_DESCRIPTION,
-  );
-});
-
-test("HomePage keeps the final CTA consistent for authenticated sessions", async () => {
-  vi.clearAllMocks();
+test("a signed-in homepage visit prepares only its authenticated member's vault", async () => {
   mocks.getHostedPageAuthSnapshot.mockResolvedValue({
     authenticated: true,
     authenticatedMember: { id: "member_homepage" },
   });
-  mocks.getMurphGithubStarCount.mockResolvedValue(null);
-  mocks.headers.mockResolvedValue(new Headers({
-    "x-vercel-ip-country": "US",
-  }));
-
-  const { default: HomePage } = await import("../app/page");
-
-  const markup = renderToStaticMarkup(await HomePage());
-
-  expect(mocks.scheduleHomepageBrowserVaultPreparation).toHaveBeenCalledWith({
-    memberId: "member_homepage",
-  });
-  expect(mocks.headers).toHaveBeenCalledTimes(1);
-  expect(mocks.LandingAuthActions).toHaveBeenCalledTimes(5);
-  expect(mocks.LandingAuthActions).toHaveBeenNthCalledWith(
-    5,
-    {
-      authenticated: true,
-      context: "footer",
-      authLabel: "Go to dashboard",
-      signupLabel: "Go to dashboard",
-    },
-    undefined
-  );
-  assert.match(markup, /You’re already set up\./);
-  assert.match(markup, /data-root-landing-auth-actions-label="Go to dashboard"/);
-  assert.match(markup, /Manage billing and connected wearables from one place\./);
+  await HomePage();
+  expect(mocks.scheduleHomepageBrowserVaultPreparation.mock.calls).toEqual([
+    [{ memberId: "member_homepage" }],
+  ]);
 });

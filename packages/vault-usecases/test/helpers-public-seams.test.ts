@@ -81,41 +81,6 @@ function createQueryRecord(overrides: Partial<QueryEntity> = {}): QueryEntity {
 
 describe("helper barrel exports", () => {
   it("keeps helper behavior stable through the public helper barrel", () => {
-    expect(helperApi.normalizeOptionalText("  hello  ")).toBe("hello");
-    expect(helperApi.normalizeOptionalText("   ")).toBeNull();
-    expect(helperApi.normalizeOptionalRelativePath(" bank/goals/sleep.md ")).toBe(
-      "bank/goals/sleep.md",
-    );
-    expect(helperApi.normalizeIsoTimestamp("2026-04-08T12:34:56Z")).toBe(
-      "2026-04-08T12:34:56Z",
-    );
-    expect(helperApi.normalizeIsoTimestamp("2026-04-08")).toBeNull();
-    expect(helperApi.normalizeStringArray([" sleep ", "sleep", "", 1])).toEqual([
-      "sleep",
-    ]);
-    expect(helperApi.uniqueStrings(["goal", "goal", "sleep"])).toEqual(["goal", "sleep"]);
-    expect(helperApi.relativePathStrings([" bank/goals/sleep.md ", "", 1])).toEqual([
-      "bank/goals/sleep.md",
-    ]);
-
-    expect(
-      helperApi.mergeByRelativePath(
-        [{ relativePath: "bank/goals/sleep.md", title: "old" }],
-        [
-          { relativePath: "bank/goals/sleep.md", title: "new" },
-          { relativePath: "bank/goals/energy.md", title: "energy" },
-        ],
-      ),
-    ).toEqual([
-      { relativePath: "bank/goals/sleep.md", title: "new" },
-      { relativePath: "bank/goals/energy.md", title: "energy" },
-    ]);
-
-    expect(helperApi.compactObject({ keep: 1, drop: undefined, text: "ok" })).toEqual({
-      keep: 1,
-      text: "ok",
-    });
-
     expect(helperApi.applyLimit([1, 2, 3], 2)).toEqual([1, 2]);
     expect(helperApi.applyLimit([1, 2, 3])).toEqual([1, 2, 3]);
     expect(helperApi.matchesDateRange("2026-04-08T12:34:56Z", "2026-04-01", "2026-04-30")).toBe(

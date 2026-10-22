@@ -122,6 +122,9 @@ in [the import-speed plan](exec-plans/completed/2026-09-24-garmin-import-speed.m
 
 # Murph Agent Docs Index
 
+Further test pruning and reviewed PR completion are tracked in
+[the four-pass plan](exec-plans/active/2026-10-21-test-pruning-four-passes.md).
+
 Test-pruning decisions and replacement browser, CLI, assistant, and bundle
 journeys are tracked in
 [`low-value test cleanup`](exec-plans/completed/2026-10-21-prune-low-value-tests.md).
