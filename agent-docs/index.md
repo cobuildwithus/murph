@@ -630,6 +630,10 @@ Manual device refresh admission during retained history retries, one-shot
 provider job creation and recovery compatibility are owned by
 `agent-docs/RELIABILITY.md` and the hosted runtime protocol reference.
 
+Native compilation reuse across Node updates is tracked in
+[`runner native cache`](exec-plans/completed/2026-10-21-runner-native-cache.md);
+its cache authority and image admission contract remain in `apps/cloudflare/README.md`.
+
 Verification inventory, composed diff routing, cold stale-invocation coverage and
 UTC PostgreSQL connection proof are indexed in
 `agent-docs/references/testing-ci-map.md`.
@@ -1417,6 +1421,7 @@ Security runtime and dependency patching is tracked in
 
 Requested game proposal inactivity handling and CI repair proof are recorded in
 [the delivery remediation](exec-plans/completed/2026-10-21-game-proposal-requested-delivery.md).
+
 
 Daily game post push limits, session-bound device enrollment and verification are
 recorded in [game post notifications](exec-plans/completed/2026-10-21-game-daily-notifications.md).

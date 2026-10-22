@@ -1305,12 +1305,25 @@ Public WebRTC sessions restrict browser commands to mute, unmute, and close.
 Instructions and delegated results stay on the native trusted connection; the
 browser receives only call state, transcripts, usage, and bounded protocol notices.
 
-`runner:docker:base` fingerprints both the Dockerfile and patch. The protected
-deployment workflow still forces a source build; its shared Docker layer cache
-can reuse unchanged compilation inputs. Application-only edits therefore do not
-require a native rebuild when that cache is available. A cache miss builds from
-source. Cache-writer protection is a prerequisite for activating the private
-workflow companion; cache timing and deployment are separate rollout evidence.
+`runner:docker:base` fingerprints both the complete Dockerfile and patch. Native
+helpers come directly from the matching checksum-pinned npm platform archive;
+neither helper extraction nor Rust compilation depends on the runtime Node image.
+A Node-only refresh changes the final image fingerprint while leaving native
+compilation inputs unchanged.
+
+The protected-main base-image publisher exports intermediate BuildKit layers to
+`ghcr.io/cobuildwithus/murph-cloudflare-runner-base:buildcache-main` in `mode=max`.
+Only that publisher writes the cache; local builds, PR checks, and the private
+protected deploy build import it read-only. Published image reuse still requires
+the complete source fingerprint. A cache miss compiles the exact pinned source
+and runs all existing image checks. The compiler output layer retains only the
+installed binaries, not Cargo targets and downloads. The publisher is serialized
+without cancelling an active build when main advances. The first publication
+seeds the cache; subsequent timing must be measured from actual build receipts.
+The native permission workflow re-solves the prepared native target with invalid
+Node pins and requires the Cargo vertex to report `CACHED`, recording elapsed time
+without rebuilding or exporting a second image. Native package updates must update
+the archive checksum alongside the version.
 
 To update the patch, regenerate it against the exact pinned release, retain its
 focused upstream tests and generated protocol schemas, and run

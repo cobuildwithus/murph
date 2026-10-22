@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  hostedRunnerBaseImageBuildCacheTag,
   hostedRunnerBaseImageFingerprintTag,
   hostedRunnerBaseImageRemoteTag,
   hostedLocalRunnerBaseImageTag,
@@ -129,6 +130,28 @@ describe("runner base image preparation", () => {
     expect(await computeRunnerBaseImageSourceFingerprint()).not.toBe(before);
   });
 
+  it("invalidates the final image when only the runtime Node pin changes", async () => {
+    const { computeRunnerBaseImageSourceFingerprint } = await import("../scripts/runner-base-image.ts");
+    const before = await computeRunnerBaseImageSourceFingerprint();
+    vi.mocked(readFile).mockImplementation(async (sourcePath) => Buffer.from(
+      String(sourcePath).endsWith("codex-public-live.patch")
+        ? codexPatchText
+        : dockerfileText.replace("24.22.1", "24.22.2"),
+    ));
+    expect(await computeRunnerBaseImageSourceFingerprint()).not.toBe(before);
+  });
+
+  it("keeps the native stage graph independent of runtime Node pins", async () => {
+    const fs = await vi.importActual<typeof import("node:fs/promises")>("node:fs/promises");
+    const dockerfile = await fs.readFile(new URL("../../../Dockerfile.cloudflare-hosted-runner-base", import.meta.url), "utf8");
+    const nativeStages = dockerfile.slice(dockerfile.indexOf("FROM "), dockerfile.indexOf(" AS typst-installer")).split("\nFROM node:")[0];
+    expect(nativeStages).toContain(" AS codex-package");
+    expect(nativeStages).toContain(" AS codex-builder");
+    expect(nativeStages).not.toMatch(/NODE_VERSION|NODE_IMAGE_DIGEST|npm install/u);
+    expect(nativeStages).toContain("ADD --checksum=sha256:30efc97738b975940d78b59a9bea115fa34040b732807d54ec35ae6b7528de94");
+    expect(nativeStages).toContain("https://registry.npmjs.org/@openai/codex/-/codex-${CODEX_CLI_VERSION}-linux-x64.tgz");
+  });
+
   it("cannot reuse an image when the pinned native patch is missing", async () => {
     const { prepareRunnerBaseImage } = await import("../scripts/runner-base-image.ts");
     vi.mocked(readFile).mockImplementation(async (sourcePath) => {
@@ -172,6 +195,11 @@ describe("runner base image preparation", () => {
     const result = await prepareRunnerBaseImage();
 
     expect(result.status).toBe("built");
+    const args = vi.mocked(spawn).mock.calls[0]?.[1];
+    expect(args).toEqual(expect.arrayContaining([
+      "--cache-from", `type=registry,ref=${hostedRunnerBaseImageBuildCacheTag}`,
+    ]));
+    expect(args).not.toContain("--cache-to");
     expect(spawn).toHaveBeenCalledWith(
       "docker",
       expect.arrayContaining([
@@ -290,6 +318,8 @@ describe("runner base image preparation", () => {
         "buildx",
         "build",
         "--push",
+        "--cache-from", `type=registry,ref=${hostedRunnerBaseImageBuildCacheTag}`,
+        "--cache-to", `type=registry,ref=${hostedRunnerBaseImageBuildCacheTag},mode=max`,
         "-t",
         hostedRunnerBaseImageRemoteTag,
         "-t",
@@ -307,6 +337,49 @@ describe("runner base image preparation", () => {
     expect(result.status).toBe("built");
     expect(spawnSync).not.toHaveBeenCalled();
     expect(spawn).toHaveBeenCalledTimes(1);
+    const args = vi.mocked(spawn).mock.calls[0]?.[1];
+    expect(args).toContain("--cache-from");
+    expect(args).not.toContain("--cache-to");
+  });
+
+  it("propagates source-build failure after a cache miss", async () => {
+    const { prepareRunnerBaseImage } = await import("../scripts/runner-base-image.ts");
+    vi.mocked(spawn).mockImplementationOnce(() => {
+      const child = new EventEmitter();
+      setImmediate(() => child.emit("exit", 1, null));
+      return child as ReturnType<typeof spawn>;
+    });
+    await expect(prepareRunnerBaseImage({ force: true })).rejects.toThrow("docker buildx build exited with code 1");
+  });
+
+  it.each([true, false])("native cache proof accepts only a cached Cargo vertex (cached=%s)", async (cached) => {
+    const fs = await vi.importActual<typeof import("node:fs/promises")>("node:fs/promises");
+    const { spawnSync: actualSpawnSync } = await vi.importActual<typeof import("node:child_process")>("node:child_process");
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), "runner-native-cache-proof-"));
+    try {
+      await fs.writeFile(path.join(directory, "docker"), `#!/usr/bin/env node
+const assert = require("node:assert/strict");
+const args = process.argv.slice(2);
+assert.equal(args[args.indexOf("--target") + 1], "codex-builder");
+assert.equal(args[args.indexOf("--output") + 1], "type=cacheonly");
+assert(args.includes("NODE_VERSION=unused-native-cache-proof"));
+assert(!args.includes("--cache-to"));
+console.log("#19 [codex-builder 8/8] RUN git apply --check patch && cargo build --locked --release");
+console.log("#19 ${cached ? "CACHED" : "DONE 2700.0s"}");
+`, { mode: 0o755 });
+      const result = actualSpawnSync("bash", ["apps/cloudflare/scripts/runner-base-image-cache-proof.sh"], {
+        cwd: fileURLToPath(new URL("../../../", import.meta.url)),
+        env: { ...process.env, PATH: `${directory}${path.delimiter}${process.env.PATH ?? ""}`, GITHUB_STEP_SUMMARY: "" },
+        encoding: "utf8",
+        timeout: 30_000,
+      });
+      expect(result.status).toBe(cached ? 0 : 1);
+      expect(result.stdout + result.stderr).toContain(cached
+        ? "Native Cargo layer reused with changed Node pins"
+        : "Native Cargo build was not reused");
+    } finally {
+      await fs.rm(directory, { recursive: true, force: true });
+    }
   });
 
   it("publishes native source with the Dockerfile's two-job default", async () => {
@@ -314,6 +387,8 @@ describe("runner base image preparation", () => {
     const { execFileSync } = await vi.importActual<typeof import("node:child_process")>("node:child_process");
     const repoRoot = fileURLToPath(new URL("../../../", import.meta.url));
     const workflow = await fs.readFile(path.join(repoRoot, ".github/workflows/cloudflare-runner-base-image.yml"), "utf8");
+    expect(workflow).toContain("cancel-in-progress: false");
+    expect(workflow).toContain("--driver docker-container --use");
     const step = workflow.split("      - name: Publish runner base image\n")[1]?.split(/\n      - /u)[0] ?? "";
     const run = step.match(/^        run: (.+)$/mu)?.[1];
     expect(run).toBeDefined();
@@ -353,6 +428,8 @@ require("node:assert/strict").deepEqual(args.slice(0, 2), ["buildx", "build"]);
       const { computeRunnerBaseImageSourceFingerprint } = await import("../scripts/runner-base-image.ts");
       const fingerprint = await computeRunnerBaseImageSourceFingerprint();
       expect(build.args).toEqual(expect.arrayContaining([
+        "--cache-from", `type=registry,ref=${hostedRunnerBaseImageBuildCacheTag}`,
+        "--cache-to", `type=registry,ref=${hostedRunnerBaseImageBuildCacheTag},mode=max`,
         "--platform", "linux/amd64",
         "-t", hostedRunnerBaseImageRemoteTag,
         "-t", hostedRunnerBaseImageFingerprintTag(fingerprint),

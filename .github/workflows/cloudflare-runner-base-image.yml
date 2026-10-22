@@ -21,7 +21,7 @@ permissions:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   publish:
@@ -47,6 +47,11 @@ jobs:
 
       - name: Login to GHCR
         run: echo "${{ github.token }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      # Registry cache export requires the container driver when the Docker
+      # daemon does not have the containerd image store enabled.
+      - name: Create isolated BuildKit builder
+        run: docker buildx create --name runner-base-publisher --driver docker-container --use
 
       - name: Publish runner base image
         run: pnpm --dir apps/cloudflare runner:docker:base -- --push

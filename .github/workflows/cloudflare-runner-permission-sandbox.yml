@@ -105,6 +105,10 @@ jobs:
       - name: Prepare runner base image
         run: pnpm --dir apps/cloudflare runner:docker:base
 
+      - name: Prove native cache survives Node runtime changes
+        timeout-minutes: 5
+        run: bash apps/cloudflare/scripts/runner-base-image-cache-proof.sh
+
       - name: Extract the deployed Codex package for compatibility proof
         run: |
           image=$(node --input-type=module -e 'import { hostedLocalRunnerBaseImageTag } from "./apps/cloudflare/scripts/runner-base-image-contract.ts"; process.stdout.write(hostedLocalRunnerBaseImageTag)')
