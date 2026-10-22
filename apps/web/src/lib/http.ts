@@ -159,7 +159,7 @@ async function readRequestBodyText(
 }
 
 export async function readRawBodyBuffer(
-  request: Request,
+  request: Pick<Request, "body" | "headers">,
   options: { limitBytes?: number } = {},
 ): Promise<Buffer> {
   const limitBytes = options.limitBytes ?? DEFAULT_RAW_BODY_LIMIT_BYTES;

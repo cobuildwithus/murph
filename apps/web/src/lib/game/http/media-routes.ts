@@ -1,5 +1,6 @@
 import {
   GAME_MEDIA_MAX_BYTES,
+  gameMediaDelivery,
   isGameMediaKey,
   isGameMediaStorageAvailable,
   matchesGameMediaContentType,
@@ -32,9 +33,15 @@ export async function uploadGameMedia(input: { memberId: string; request: Reques
  * upload, or another player's entry once the game view would show it).
  * Locked and missing media look the same.
  */
-export async function serveGameMedia(input: { key: string; memberId: string }): Promise<Response> {
+export async function serveGameMedia(input: { key: string; memberId: string; delivery?: boolean; variant?: "avatar" | "photo" }): Promise<Response> {
   if (!isGameMediaKey(input.key) || !(await authorizeMediaRead(input.memberId, input.key))) throw mediaNotFound();
   requireStorage();
+  if (input.delivery) {
+    const delivery = await gameMediaDelivery(input.key, input.variant ?? "photo");
+    if (delivery) return new Response(JSON.stringify(delivery), { headers: {
+      "Cache-Control": "private, no-store", "Content-Type": "application/json", "Referrer-Policy": "no-referrer",
+    } });
+  }
   const media = await readGameMedia(input.key);
   if (!media) throw mediaNotFound();
   return new Response(new Uint8Array(media.bytes), {

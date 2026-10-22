@@ -3,6 +3,9 @@ import path from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { syntheticHostedWebProtocolAdmission } from "./helpers/hosted-web-protocol";
 
+const gameImageMocks = vi.hoisted(() => ({ admit: vi.fn() }));
+vi.mock("../scripts/deploy-game-images.ts", () => ({ assertPrivateGameImageVariants: gameImageMocks.admit }));
+
 const webProtocolMocks = vi.hoisted(() => ({ admit: vi.fn() }));
 vi.mock("../scripts/deploy-web-protocol.ts", () => ({ assertHostedWebProtocolAdmission: webProtocolMocks.admit }));
 
@@ -68,6 +71,22 @@ const recoveryEnv = {
 };
 
 describe("runDeployWorkerVersionCli", () => {
+  it("rejects unsafe Images variants before publishing or activating a Worker", async () => {
+    gameImageMocks.admit.mockRejectedValue(new Error("Game Images admission failed"));
+    await expect(syntheticDeployment()).rejects.toThrow("Game Images admission failed");
+    expect(imageMocks.prepareHostedContainerDeployImage).not.toHaveBeenCalled();
+    expect(wranglerMocks.runWranglerLoggedCaptured).not.toHaveBeenCalled();
+    expect(wranglerMocks.runWranglerLogged).not.toHaveBeenCalled();
+    expect(releaseMocks.admitApplication).not.toHaveBeenCalled();
+  });
+
+  it("rechecks Images privacy immediately before activation", async () => {
+    gameImageMocks.admit.mockResolvedValueOnce(undefined).mockRejectedValue(new Error("Game Images admission failed"));
+    await expect(syntheticDeployment()).rejects.toThrow("Game Images admission failed");
+    expect(gameImageMocks.admit).toHaveBeenCalledTimes(2);
+    expect(wranglerMocks.runWranglerLogged.mock.calls.some(([args]) => args.includes("deploy"))).toBe(false);
+  });
+
   it.each(["old-reader", "old-audience", "unavailable", "denied", "malformed", "unknown-version"])("rejects %s before image work or native mutation", async shape => {
     await useRealWebAdmission(shape);
     await expect(syntheticDeployment()).rejects.toThrow("Hosted Web protocol admission failed");
@@ -176,6 +195,7 @@ describe("runDeployWorkerVersionCli", () => {
     fileMocks.readFile.mockReset().mockResolvedValue("{}");
     fileMocks.writeFile.mockReset().mockResolvedValue(undefined);
     webProtocolMocks.admit.mockReset().mockResolvedValue(undefined);
+    gameImageMocks.admit.mockReset().mockResolvedValue(undefined);
     releaseMocks.stageHostedRunnerRelease.mockReset();
     releaseMocks.stageHostedRunnerRelease.mockImplementation(async ({ configPath }) => ({
       retirements: [], configPath, promotionConfigPath: `${configPath}.promote`,

@@ -16,6 +16,9 @@ export const CLOUDFLARE_HOSTED_CONTROL_USER_ROUTE_SPECS = {
     method: "POST",
     suffix: "browser-vault/session",
   },
+  gameImageStage: { method: "POST", suffix: "game-images/stage" },
+  gameImageDelivery: { method: "GET", suffix: "game-images/delivery" },
+  gameImageStat: { method: "GET", suffix: "game-images/stat" },
   gameMediaDelete: {
     method: "DELETE",
     suffix: "game-media/delete",
@@ -121,7 +124,7 @@ export function buildCloudflareHostedControlMealPhotoDeletePath(userId: string):
 }
 
 export function buildCloudflareHostedControlGameMediaPath(
-  routeName: "gameMediaDelete" | "gameMediaRead" | "gameMediaStage" | "gameMediaStat",
+  routeName: "gameMediaDelete" | "gameMediaRead" | "gameMediaStage" | "gameMediaStat" | "gameImageStage" | "gameImageDelivery" | "gameImageStat",
   userId: string,
 ): string {
   return buildCloudflareHostedControlUserRoutePath(routeName, userId);

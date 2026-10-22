@@ -18,6 +18,7 @@ let directory: string;
 let configPath: string;
 const config = {
   name: "synthetic-worker",
+  images: { binding: "GAME_IMAGES" },
   main: "../src/index.ts",
   vars: { HOSTED_EXECUTION_RUNNER_BUNDLE_FINGERPRINT: "expected-bundle" },
   containers: ["RunnerContainer", "DeploySmokeRunnerContainer", "StandbyRunnerContainer"].map((className) => ({
@@ -117,6 +118,7 @@ describe("container image publication before Worker activation", () => {
     const servingClass = bank === "primary" ? "RunnerContainer" : "NextRunnerContainer";
     expect(staged.applications.map((entry) => entry.className)).toContain(servingClass);
     const stagedConfig = JSON.parse(await readFile(staged.configPath, "utf8"));
+    expect(stagedConfig.images).toEqual(config.images);
     expect(stagedConfig.containers.find((entry: { class_name: string }) => entry.class_name === servingClass).image).toMatch(/@sha256:/u);
     expect(staged.applications.every((entry) => entry.specification.configuration.image.endsWith(`@${digest}`))).toBe(true);
   });

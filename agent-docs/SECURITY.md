@@ -2,6 +2,18 @@
 
 Last verified: 2026-08-31
 
+## Private weekly game images
+
+Weekly game media is the explicitly approved exception to application-encrypted
+private content: Cloudflare Images can read and transform these image bytes.
+Web must authorize each viewer before issuing a five-minute signed URL; possession
+of that URL grants access until expiry. Already downloaded private device caches
+cannot be remotely revoked. Native caches are bounded, account/server scoped,
+protected on disk and cleared on sign-out. No Murph token reaches the CDN and no
+signed URL is persisted or logged. Other private/health data keeps its encryption
+contract. See `ARCHITECTURE.md` § Weekly Game and `apps/cloudflare/DEPLOY.md`
+§ Private weekly game images for variant isolation and deletion requirements.
+
 ## Non-Negotiable Rules
 
 The activated runtime authority and migration boundary are owned by

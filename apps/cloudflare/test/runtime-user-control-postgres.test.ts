@@ -34,6 +34,8 @@ function harness() {
       userId: null, region: "GLOBAL" as const, releaseId: "release_1" })),
   } satisfies HostedExecutionContainerStubLike;
   const source = { ...createHostedExecutionTestEnv(), BUNDLES: new CleanupBucket(),
+    CF_PUBLIC_BASE_URL: "https://runner.example.test",
+    GAME_IMAGES: { info: vi.fn(), hosted: { upload: vi.fn(), image: vi.fn(), list: vi.fn(async () => ({ images: [], listComplete: true })) } },
     RUNNER_CONTAINER: { getByName: vi.fn(() => slot) },
     USER_RUNNER: { getByName() { throw new Error("Unexpected UserRunner activation"); } } };
   vi.mocked(commandHostedRuntimeOwner).mockImplementation(async ({ command }) => ({ cutover: "postgres",

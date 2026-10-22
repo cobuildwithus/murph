@@ -200,11 +200,11 @@ accepted or rejected disposition, concrete code or path evidence, current user
 or operational harm or removable complexity, and the smallest justified
 correction with its complexity cost.
 
-A final `ROUND_OUTCOME: FINDINGS` keeps the turn-ending pause: report the result
-and dispositions, then wait for the user to resume before mutating the
-candidate, launching another review, or merging. A validated final
-`ROUND_OUTCOME: PASS` has no findings to disposition and proceeds directly to
-the remaining parent review and merge checks without a user-resume pause.
+After reporting a final `ROUND_OUTCOME: FINDINGS` and its dispositions,
+continue correcting accepted findings, verifying, and reviewing within the
+user's existing authorization. Do not end the turn or ask the user to say
+"continue" solely because a review found issues. A validated final
+`ROUND_OUTCOME: PASS` proceeds to the remaining parent review and merge checks.
 
 The parent owns disposition and may reject a finding as wrong, already handled,
 speculative, unproven, or not worth the complexity it would add. The user may
@@ -214,34 +214,11 @@ when the parent accepts zero findings and records evidence-backed rejection
 reasons. Accepted findings remain unresolved until fixed and verified; the
 final gate requires a later resolved result.
 
-Two narrow exceptions let a final `FINDINGS` result complete its disposition
-boundary without ending the turn after the parent reports every finding and
-its evidence-backed disposition:
-
-- `Complexity Collapse`: the result contains exactly one finding, classified
-  as Complexity Collapse. The parent proves that its correction preserves all
-  required behavior and invariants, stays within existing edit authority, and
-  yields net deletion or removes meaningful concepts or owners without
-  replacement machinery.
-
-- `Non-Production Remediation`: every accepted finding in the result can be
-  corrected entirely in isolated tests, fixtures, or direct-proof scaffolding;
-  authored repository docs or process text that is not consumed at runtime; or
-  PR-body, review-comment, and review-evidence updates. The parent must prove the
-  complete correction changes no production source, user-visible or runtime
-  behavior, provider/tool/API/schema contract, runtime or deployment config,
-  runtime-consumed or generated artifact, persisted data, dependency,
-  deployment, external state, or destructive action. Rejected findings may
-  coexist because their evidence-backed disposition is terminal, but every
-  accepted finding must qualify.
-
-After either exception qualifies, remediate, verify, push when applicable, and
-continue the ReviewGPT loop without asking the user for separate permission.
-Use the ordinary turn-ending pause when an accepted finding does not qualify,
-the correction expands beyond the proven boundary, requested behavior or the
-intended outcome would change, scope or authority would expand, or a destructive
-or external action needs new approval. Neither exception bypasses a required
-scope decision or the three-round hard cap.
+Ask for a decision only when a correction materially changes the requested
+outcome or scope, needs authority not already granted, or reveals a concrete
+requirement conflict. Continue independent authorized work while that decision
+is pending. Review findings do not grant new authority for destructive actions,
+production mutations, messages, or spending.
 
 `INVALID` stops for an evidence gap. Older review results may contain
 `RETROSPECTIVE_REQUIRED`; triage their concrete evidence under the current
@@ -622,11 +599,9 @@ the current user explicitly asks for it.
    reconciliation for a low-incidence temporary window.
 
    Apply the parent-owned finding-disposition boundary after completing this
-   triage. A final `FINDINGS` result pauses steps 5–7 until the user resumes,
-   except that qualifying `Complexity Collapse` or `Non-Production Remediation`
-   may proceed immediately after the report. Remediation remains limited to accepted findings and the
-   proven task or exception boundary. A validated final `ROUND_OUTCOME: PASS` continues
-   without that pause.
+   triage. Report findings and dispositions, then continue steps 5–7 for accepted
+   corrections within existing task authority. A validated final
+   `ROUND_OUTCOME: PASS` proceeds to the remaining completion checks.
 
 5. Revisit the requirement before fixing only when concrete evidence shows
    remediation is repeatedly failing at the same cause, growing compensating
@@ -702,23 +677,23 @@ or unresolved ownership or product decisions to finish a merge.
 
 - Stop when the exact current patch has a resolved result, local triage produces
   zero accepted findings, and every required finding-disposition boundary is
-  complete. A resolved result is `ROUND_OUTCOME: PASS`, which requires no
-  user-resume pause, or `ROUND_OUTCOME: FINDINGS` with every finding rejected
-  for an evidence-backed reason after its disposition boundary.
+  complete. A resolved result is `ROUND_OUTCOME: PASS` or `ROUND_OUTCOME: FINDINGS`
+  with every finding rejected for an evidence-backed reason after its disposition
+  boundary.
 - `ROUND_OUTCOME: INVALID` is an evidence/invocation failure. It does not advance
   the round counter; correct the gap and retry the same substantive round.
 - A concrete requirement or authority gap pauses dependent remediation until
   the parent resolves the scope decision under step 5. The reviewer reports
   qualifying findings or evidence gaps, not escalation by size or round number.
-- Hard cap: 3 rounds per PR. There is no automatic fourth substantive round. An
+- Default cap: 3 rounds per PR. There is no automatic fourth substantive round. An
   accepted round-three finding may still be reproduced and fixed; do not leave a
   known bug in place merely because the review counter reached three. After that
   fix, pause the ReviewGPT loop and confirm parent final review, verification,
   and PR CI are all complete. Record the cap
-  retrospective and obtain an explicit continuation decision before starting
-  round four; the answer may be delete, revert, shrink, split, redesign,
-  continue, or abandon. A green non-ReviewGPT gate does not make the PR
-  merge-ready without the required later resolved result.
+  retrospective and have the parent justify any fourth round against the
+  existing task authority before starting it. Ask the user only if the decision
+  requires a change of scope or authority. A green non-ReviewGPT gate does not
+  make the PR merge-ready without the required later resolved result.
 - Report a per-round summary at handoff: findings received, accepted, rejected
   with reasons, origin/mechanism, what landed, source-shape movement, and any
   retrospective decision. Report tooling retries separately.

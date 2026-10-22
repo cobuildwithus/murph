@@ -5442,13 +5442,34 @@ for writes, settles and views) and never rewrite dates. Versioned terms carry
 `checkInKind` (legacy omission means `photo`); the posting-day terms require
 that artifact kind before consuming an attempt. Media is images only
 (JPEG or HEIC, at most 4 MiB), including explicitly shared heart-rate graphs; keys are the uploader's prefix plus the SHA-256
-of the bytes, so a retried upload lands on the same key. Deployed, Web seals each
-photo under the uploader's control-domain key (`hosted-member-private-field`,
-scope `weekly-game`, bound to the key) and the Worker keeps only that sealed
-envelope in R2 under `hosted-game-media/objects/<namespace>/`, through the
-member-bound `game-media/{stage,read,stat,delete}` control routes; players need
-no hosted workspace. Account deletion clears that prefix. Local stacks keep
-plain files on disk.
+of the bytes, so a retried upload lands on the same key. Deployed game images
+are private Cloudflare Images objects, explicitly exempt from application-level
+content encryption so the CDN can resize them. This includes rendered game
+heart-rate graph images, never raw samples or other health records. Web still
+authorizes every viewer against the current game/profile rules before the
+Worker issues a five-minute signed capability. The `GAME_IMAGES` binding uses
+provider-assigned UUIDs with `requireSignedURLs: true`; no signing key or Murph
+bearer goes to the native client/CDN respectively. Fixed `game-avatar` (600px)
+and `game-photo` (1600px) variants strip metadata. All account variants must
+honor signed access; public-bypass variants are prohibited.
+
+Only a versioned provider UUID/size pointer lives at the existing opaque R2
+namespace (`.image.json`), conditionally created for concurrent retry election.
+The additive member-bound `game-images/{stage,delivery,stat}` control routes
+need no hosted workspace. Native clients request `?delivery=signed&variant=avatar`
+or `photo`; old clients still receive a bounded image-byte proxy. Local stacks
+keep plain files on disk. Existing encrypted game images are deliberately not
+migrated; the earlier encrypted routes remain for old-Web rollout compatibility.
+
+Game Images writes register opaque R2 upload receipts before reading a permanent
+opaque deletion guard. Account deletion writes that guard, waits for all receipts
+to drain, deletes all creator-tagged provider images (including orphans), then
+clears the ordinary R2 pointers. Guard records survive deletion, preventing late
+requests from recreating bytes. These are versioned operational metadata, never
+image content or capabilities. An ambiguous provider/write result retains its
+receipt and blocks deletion acknowledgement until operator reconciliation;
+elapsed time alone does not authorize clearing it. Deployment and recovery are
+owned by `apps/cloudflare/DEPLOY.md` § Private weekly game images.
 
 The game profile's nullable `photo_key` references an owned, completed upload.
 `PUT /me/profile` accepts partial updates: absent fields remain unchanged, and

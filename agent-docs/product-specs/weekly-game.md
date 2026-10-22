@@ -120,8 +120,10 @@ this default without deleting other people's private contact choices.
 - **Retries.** Every action is safe to repeat: creating a game with the same id,
   posting the same entry, accepting an invite already accepted, or redeeming a
   ticket already redeemed returns the current game and changes nothing.
-- **Photos.** Kept with no expiry, sealed under the uploader's key; only the
-  game's players can see them, by the unlock rule. At most 4 MiB each.
+- **Photos.** Kept with no expiry in private Cloudflare Images. The provider
+  can read/resize them; Web applies the unlock/profile rules before granting a
+  five-minute signed URL. At most 4 MiB per upload. Existing game images need
+  no migration. Downloaded app-private caches remain available offline.
 - **Account deletion.** Deleting an account deletes the games that person
   created, the tickets they owe, and every photo they uploaded. Acceptable
   while the data is disposable; revisit before real users.
@@ -140,8 +142,8 @@ boundaries. The wire contract is `apps/web/src/lib/game/contract.ts`.
 
 ## Heart-rate graph artifacts
 
-`heart_rate` entries carry exactly one rendered JPEG in the existing sealed
-media store. The native app retains raw samples only in memory and sends no
+`heart_rate` entries carry exactly one rendered JPEG in the private game
+image store. The native app retains raw samples only in memory and sends no
 sample arrays, device identity, or new health-data records. The server applies
 identical owner checks, post-to-unlock, day boundaries, idempotency, attempt caps,
 withdrawal and scoring to both check-in kinds. The challenge creator chooses Photo or Heart rate in setup for both players.

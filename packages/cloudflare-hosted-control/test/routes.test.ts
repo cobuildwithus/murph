@@ -51,6 +51,9 @@ describe("cloudflare hosted control routes", () => {
     );
     for (const [routeName, suffix] of [
       ["gameMediaDelete", "game-media/delete"],
+      ["gameImageStage", "game-images/stage"],
+      ["gameImageDelivery", "game-images/delivery"],
+      ["gameImageStat", "game-images/stat"],
       ["gameMediaRead", "game-media/read"],
       ["gameMediaStage", "game-media/stage"],
       ["gameMediaStat", "game-media/stat"],
@@ -143,6 +146,9 @@ describe("cloudflare hosted control routes", () => {
     expect(CLOUDFLARE_HOSTED_CONTROL_USER_ROUTE_SPECS).toEqual({
       browserVaultSession: { method: "POST", suffix: "browser-vault/session" },
       gameMediaDelete: { method: "DELETE", suffix: "game-media/delete" },
+      gameImageStage: { method: "POST", suffix: "game-images/stage" },
+      gameImageDelivery: { method: "GET", suffix: "game-images/delivery" },
+      gameImageStat: { method: "GET", suffix: "game-images/stat" },
       gameMediaRead: { method: "GET", suffix: "game-media/read" },
       gameMediaStage: { method: "POST", suffix: "game-media/stage" },
       gameMediaStat: { method: "GET", suffix: "game-media/stat" },

@@ -1,3 +1,4 @@
+import { deleteGameImagesForUser } from "./game-image-store.ts";
 import { deleteHostedUserR2DataBeforeStateDeletion } from "./user-runner/user-data-deletion.ts";
 import type { HostedVoiceControlRequest, HostedVoiceControlResponse } from "@murphai/hosted-execution";
 import { parseHostedRuntimeHealthDataAdmissionResponse, parseHostedRuntimeWebStatusResponse } from "@murphai/hosted-execution/parsers";
@@ -11,7 +12,7 @@ import { fetchHostedExecutionWebControlPlaneResponse } from "./web-control-plane
 import { readHostedWebControlPlaneResponseText } from "./runtime-platform/web-control-transport.ts";
 import { createHostedRunnerContainerNamespaceRouter, requireHostedRunnerSlotLifecycle } from "./standby-runner-contract.ts";
 
-type RuntimeUserControlSource = Pick<WorkerEnvironmentSource, "BUNDLES" | "RUNNER_CONTAINER" | "NEXT_RUNNER_CONTAINER" | "STANDBY_RUNNER_CONTAINER"> & Readonly<Record<string, unknown>>;
+type RuntimeUserControlSource = Pick<WorkerEnvironmentSource, "BUNDLES" | "GAME_IMAGES" | "RUNNER_CONTAINER" | "NEXT_RUNNER_CONTAINER" | "STANDBY_RUNNER_CONTAINER"> & Readonly<Record<string, unknown>>;
 
 export async function controlPostgresRuntimeVoice(
   source: RuntimeUserControlSource, userId: string, request: HostedVoiceControlRequest,
@@ -109,6 +110,8 @@ export async function deletePostgresRunnerUserData(source: RuntimeUserControlSou
   if (admission.cutover !== "postgres" || admission.status !== "authorized") {
     return { ok: false as const, reason: "r2_upload_drain_pending" as const, retryAfterSeconds: 1, userId };
   }
+  await deleteGameImagesForUser(source.GAME_IMAGES, userId, source.BUNDLES,
+    typeof source.CF_PUBLIC_BASE_URL === "string" ? source.CF_PUBLIC_BASE_URL : "");
   const r2 = await deleteHostedUserR2DataBeforeStateDeletion({ bucket: source.BUNDLES, userId });
   return { ok: true as const, userId, deletedAt: new Date().toISOString(), r2,
     stateOwner: "postgres" as const, runtimeStateCleared: true,

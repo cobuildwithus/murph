@@ -61,13 +61,16 @@ describe("createCloudflareHostedControlClient", () => {
       "deleteUserData",
       "enqueueDeviceWebhook",
       "ensureRuntimeProcessing",
+      "gameImageDelivery",
       "getRunnerStatus",
       "purgeRuntimeResource",
+      "putGameImage",
       "putGameMedia",
       "readGameMedia",
       "reconcileRuntimeHealthDataConsent",
       "sendTelegramUsageLimitNotice",
       "stageMealPhoto",
+      "statGameImage",
       "statGameMedia",
     ]);
   });
@@ -1753,6 +1756,27 @@ describe("createCloudflareHostedControlClient", () => {
       const [url, init] = vi.mocked(fetchImpl).mock.calls[0] as [string, RequestInit];
       return { headers: new Headers(init.headers), init, url };
     }
+
+    it("uploads private Images bytes and requests an owner-bound short-lived capability", async () => {
+      const bytes = new Uint8Array([255, 216, 255]);
+      const upload = gameMediaClient(() => createJsonResponse({ stored: true }));
+      await upload.client.putGameImage({ bytes, contentType: "image/jpeg", mediaId, userId: "user_123" });
+      const request = observed(upload.fetchImpl);
+      expect(request.url).toBe("https://runner.example.test/internal/users/user_123/game-images/stage");
+      expect(request.init.body).toEqual(bytes);
+      expect(request.headers.get("content-type")).toBe("image/jpeg");
+      expect(request.headers.get("x-hosted-execution-user-id")).toBe("user_123");
+      const unconfirmed = gameMediaClient(() => createJsonResponse({ stored: false }));
+      await expect(unconfirmed.client.putGameImage({ bytes, contentType: "image/jpeg", mediaId, userId: "user_123" })).rejects.toThrow("not confirmed");
+      const delivery = { url: "https://imagedelivery.net/account/id/game-avatar?sig=synthetic&exp=1", expiresAt: "2030-01-01T00:00:00Z" };
+      const signed = gameMediaClient(() => createJsonResponse(delivery));
+      await expect(signed.client.gameImageDelivery({ mediaId, userId: "user_123", variant: "avatar" })).resolves.toEqual(delivery);
+      expect(observed(signed.fetchImpl).headers.get("x-murph-image-variant")).toBe("avatar");
+      expect(observed(signed.fetchImpl).headers.get("x-hosted-execution-user-id")).toBe("user_123");
+      const missing = gameMediaClient(() => createJsonResponse({}, { status: 404 }));
+      await expect(missing.client.gameImageDelivery({ mediaId, userId: "user_123", variant: "photo" })).resolves.toBeNull();
+      await expect(missing.client.statGameImage({ mediaId, userId: "user_123" })).resolves.toBeNull();
+    });
 
     it("stages a sealed envelope bound to the owner and the photo's name", async () => {
       const { client, fetchImpl } = gameMediaClient(() => createJsonResponse({ byteLength: 10, stored: true }));

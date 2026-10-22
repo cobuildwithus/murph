@@ -15,6 +15,7 @@ import {
 import {
   telegramUsageLimitNoticeRoutes,
 } from "./route-handlers/telegram-send.ts";
+import { gameImageRoutes } from "./route-handlers/game-images.ts";
 import { gameMediaRoutes } from "./route-handlers/game-media.ts";
 import { mealPhotoRoutes } from "./route-handlers/meal-photo-stage.ts";
 import {
@@ -30,6 +31,7 @@ export const workerInternalRoutes = [
   ...telegramUsageLimitNoticeRoutes,
   ...mealPhotoRoutes,
   ...gameMediaRoutes,
+  ...gameImageRoutes,
   ...browserVaultRoutes,
   ...userStatusRoutes,
 ] as const;
