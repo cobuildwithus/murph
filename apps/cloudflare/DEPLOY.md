@@ -2918,3 +2918,57 @@ artifact cleanup, canonical write receipt recovery, and the omitted
 pointer drain does not prove those independent stores empty. After rollout,
 confirm normal managed-container smoke and supported v2 cold restore/checkpoint
 behavior; an unsupported-ref rejection means the pointer/writer gate failed.
+
+
+## Private weekly game images
+
+This owner is separate from encrypted assistant/meal media. New game uploads use
+`GAME_IMAGES.hosted`, provider-generated UUIDs and `requireSignedURLs: true`.
+The current binding signs server-side with explicit `expiresIn: 300`, so no new
+API or signing secret is needed in Web, the app or this Worker. See the official
+[hosted binding](https://developers.cloudflare.com/images/storage/binding/) and
+[private delivery](https://developers.cloudflare.com/images/optimization/hosted-images/serve-private-images/)
+contracts. A paid Images plan with storage is a deployment prerequisite. Confirm the
+account has a working default signing key by exercising the binding; keep that
+key in Cloudflare, never copy it into a local environment or app configuration.
+
+Before enabling the new Web writer, provision these account variants:
+
+| ID | Width / height | Fit | Metadata | Never require signed URLs |
+| --- | --- | --- | --- | --- |
+| `game-avatar` | 600 / 600 | scale-down | none | false |
+| `game-photo` | 1600 / 1600 | scale-down | none | false |
+
+Inspect **all** variants in the bound account: any `neverRequireSignedURLs: true`
+variant bypasses image-level privacy, even if this app never signs that variant.
+Use an account without such variants; do not silently change unrelated public
+assets. Verify a synthetic uploaded image returns 403 unsigned for every variant,
+200 with a valid capability, and rejects an expired or modified signature. Verify
+JPEG/HEIC ingestion, both rendition dimensions and absence of EXIF/location.
+Cloudflare supports HEIC input; delivery negotiates a supported output format.
+
+Deploy Worker/binding/variants first, then Web, then native. The Worker retains
+old encrypted game routes for the deployed old Web; the new native client accepts
+old-Web image bytes, and new Web proxies bytes for old native clients. New Web
+requires the new Worker. Once new images are written, reverting Web loses access
+to them; old encrypted game photos are intentionally not migrated. No new database
+schema is required. Validate profile save/remove, locked/unlocked player reads,
+concurrent duplicate upload, account deletion and airplane-mode app relaunch with
+synthetic members before release. Local mocks are not proof of live CDN privacy.
+
+Deletion uses versioned, opaque operational objects in the existing R2 bucket:
+`game-image-uploads/<creator>/<random>.json` records admitted/ambiguous uploads;
+`game-image-deletions/<creator>.json` permanently fences deleted owners. Neither
+stores user identifiers, bytes or signed URLs. Do not apply expiry policies to
+these prefixes. The ordinary `hosted-game-media/objects/` namespace holds only
+provider UUID/size pointers for new images. Creator tags derive from the existing
+opaque namespace and allow deletion to include unreferenced provider uploads.
+
+If an upload response is ambiguous, its receipt deliberately blocks account
+cleanup. Preserve the existing deletion retry obligation. Reconcile through a
+separately authorized hosted operator path: establish that the exact upload cannot
+still complete, remove that receipt, then retry account deletion, which sweeps all
+images for the opaque creator before acknowledging success. Do not infer completion
+from elapsed time or clear receipts merely to make a retry pass. A provider outage
+or missing binding must keep deletion pending. A normal successful upload removes
+its receipt, and cleanup retries then complete without operator action.

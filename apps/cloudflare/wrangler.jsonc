@@ -4,6 +4,7 @@
   "main": "src/index.ts",
   "compatibility_date": "2026-03-27",
   "compatibility_flags": ["nodejs_compat", "containers_pid_namespace", "enable_request_signal"],
+  "images": { "binding": "GAME_IMAGES" },
   "placement": {
     "mode": "smart"
   },

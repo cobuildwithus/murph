@@ -249,7 +249,10 @@ export interface CloudflareHostedControlClient {
     mealPhotoKey: string;
     userId: string;
   }): Promise<void>;
-  /** Weekly game photos: Web seals them; the Worker stores the sealed envelope. */
+  putGameImage(input: { bytes: Uint8Array; contentType: "image/jpeg" | "image/heic"; mediaId: string; userId: string }): Promise<void>;
+  gameImageDelivery(input: { mediaId: string; userId: string; variant: "avatar" | "photo" }): Promise<{ url: string; expiresAt: string } | null>;
+  statGameImage(input: { mediaId: string; userId: string }): Promise<{ byteLength: number } | null>;
+  /** Legacy weekly game photos: Web seals them; the Worker stores the sealed envelope. */
   deleteGameMedia(input: { mediaId: string; userId: string }): Promise<void>;
   putGameMedia(input: { envelope: string; mediaId: string; userId: string }): Promise<void>;
   /** The sealed envelope, or null when there's none under that name. */
@@ -567,6 +570,46 @@ export function createCloudflareHostedControlClient(
         },
         timeoutMs: options.timeoutMs,
       });
+    },
+    async putGameImage(input) {
+      const userId = requireCloudflareHostedControlUserId(input.userId);
+      await requestHostedExecutionAuthorizedJson({
+        baseUrl, boundUserId: userId, fetchImpl, getAuthorizationHeader,
+        label: "game image staging",
+        parse: (value) => {
+          if (requireRecord(value, "Game image stage").stored !== true) throw new TypeError("Game image storage was not confirmed.");
+          return true;
+        },
+        path: buildCloudflareHostedControlGameMediaPath("gameImageStage", userId),
+        request: { body: new Uint8Array(input.bytes), method: "POST",
+          headers: { ...gameMediaHeaders(input.mediaId), "content-type": input.contentType } },
+        timeoutMs: options.timeoutMs,
+      });
+    },
+    async gameImageDelivery(input) {
+      const userId = requireCloudflareHostedControlUserId(input.userId);
+      return await nullWhenNotFound(requestHostedExecutionAuthorizedJson({
+        baseUrl, boundUserId: userId, fetchImpl, getAuthorizationHeader,
+        label: "game image delivery",
+        parse: (value) => {
+          const record = requireRecord(value, "Game image delivery");
+          if (typeof record.url !== "string" || typeof record.expiresAt !== "string") throw new TypeError("Game image delivery is invalid.");
+          return { url: record.url, expiresAt: record.expiresAt };
+        },
+        path: buildCloudflareHostedControlGameMediaPath("gameImageDelivery", userId),
+        request: { method: "GET", headers: { ...gameMediaHeaders(input.mediaId), "x-murph-image-variant": input.variant } },
+        timeoutMs: options.timeoutMs,
+      }));
+    },
+    async statGameImage(input) {
+      const userId = requireCloudflareHostedControlUserId(input.userId);
+      return await nullWhenNotFound(requestHostedExecutionAuthorizedJson({
+        baseUrl, boundUserId: userId, fetchImpl, getAuthorizationHeader,
+        label: "game image stat",
+        parse: (value) => ({ byteLength: requireNumber(requireRecord(value, "Game image stat").byteLength, "Game image byteLength") }),
+        path: buildCloudflareHostedControlGameMediaPath("gameImageStat", userId),
+        request: { method: "GET", headers: gameMediaHeaders(input.mediaId) }, timeoutMs: options.timeoutMs,
+      }));
     },
     async deleteGameMedia(input) {
       const userId = requireCloudflareHostedControlUserId(input.userId);

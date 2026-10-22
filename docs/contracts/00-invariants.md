@@ -387,6 +387,12 @@ it has been explicitly elevated to a cross-cutting invariant.
   the replacement value, uses bounded compare-and-set work, and emits no private
   content or storage identifiers.
 
+- Explicit game-image exception: weekly game avatars, photos and rendered graph
+  artifacts use private Cloudflare Images so the provider can resize them.
+  `ARCHITECTURE.md` § Weekly Game owns the signed-delivery, deletion and opaque
+  index contract. This does not exempt raw health samples, meal captures,
+  assistant media, game text or other private records from encryption.
+
 ## Conversation-First Product Control
 
 - A new or materially changed member-facing setting, query, or user-initiated
