@@ -80,7 +80,7 @@ describe("game chat tool authority", () => {
   });
   it("passes the provider-proven pair to the shared projection", async () => {
     await handleGameChatTool(read);
-    expect(m.read).toHaveBeenCalledExactlyOnceWith(group, [actor, "other_synthetic"]);
+    expect(m.read).toHaveBeenCalledExactlyOnceWith(group, [actor, "other_synthetic"], actor);
   });
   it("rejects an addressed game from a different pair within the same reused container", async () => {
     await handleGameChatTool(update);

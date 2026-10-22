@@ -19,6 +19,7 @@ import {
   parseGenerateSongArguments,
 } from '../src/assistant-codex/dynamic-tools/generate-song.ts'
 import { MURPH_ATTACH_RESPONSE_CARD_TOOL, MURPH_PERSONALIZATION_TOOL } from '../src/assistant-codex/dynamic-tool-catalog.ts'
+import { GAME_PHOTO_CHAT_GUIDANCE } from '../src/assistant-codex/dynamic-tools/games.ts'
 import { MURPH_AUTOMATION_TOOL } from '../src/assistant-codex/dynamic-tools/automation.ts'
 import type { AssistantProviderDynamicTool } from '../src/assistant/providers/types.ts'
 import { MURPH_CODEX_BASE_INSTRUCTIONS } from '../src/assistant/codex-base-instructions.ts'
@@ -1277,6 +1278,72 @@ describe('game tools initial input measurement', () => {
       assert.ok(base && head)
       process.stdout.write('[game-input-proof] ' + JSON.stringify({ scope, model: 'gpt-6.1-sol', measurements,
         baseline: '35bc378f24df6b94f6ccce244c42d1ffb72195a4 exact new-game-tool availability ablation; identical production instructions, native catalog, messages and existing tools.',
+        deltaBytes: head.bytes - base.bytes, deltaPercent: (head.bytes - base.bytes) / base.bytes * 100,
+        tokens: null, tokenDelta: null, tokenPercent: null, tokenLimitation: 'No exact GPT-6.1 Sol tokenizer is configured; scripted usage is not tokenization and no estimate is substituted.',
+      }) + '\n')
+    },
+  )
+})
+
+describe('game progress and photo initial input measurement', () => {
+  it.skipIf(process.env.MURPH_MEASURE_GAME_PHOTO_INPUT !== '1').each(['direct', 'group'] as const)(
+    'game photos: complete first provider input (%s)', { timeout: 180_000 }, async (scope) => {
+      stub ??= await startScriptedResponsesStub()
+      const scenario = await prepareScriptedTurnScenario(stub, temporaryPaths, { model: 'gpt-6.1-sol', multiAgentV2: true })
+      const catalog = await writeHostedOpenAiMixedModeModelCatalogJson({ codexCommand: scenario.turnInput.codexCommand, directory: scenario.turnInput.codexHome })
+      const measurements = []
+      for (const phase of ['base', 'head'] as const) {
+        const layers = buildAssistantSystemPromptLayers({
+          assistantCliContract: null, assistantHostedAutomationAvailable: true,
+          assistantDynamicContextPrompts: phase === 'head' && scope === 'group' ? [GAME_PHOTO_CHAT_GUIDANCE] : [],
+          assistantHostedGroupToolSurface: scope === 'group' ? 'families' : 'none',
+          channel: 'linq', cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+          conversationScope: scope, currentLocalDate: '2030-04-01', currentInstant: '2030-04-01T16:00:00.000Z', currentTimeZone: 'America/New_York',
+          hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false, ordinaryInboundTurn: true,
+        })
+        const developerInstructions = [layers.staticCacheableCorePrompt, layers.stableRouteCapabilityPrompt, layers.threadContextPrompt].join('\n\n')
+        const availableTools = resolveMurphDynamicTools({
+          allowFinishWithoutReply: true, automationAvailable: true, personalizationAvailable: scope === 'direct',
+          groupAvailable: scope === 'group', groupSharedReadAvailable: scope === 'group', responseCardsAvailable: scope === 'direct',
+          imageGenerationAvailable: false, progressUpdatesAvailable: false,
+          gamesAvailable: scope === 'group', gamePhotosAvailable: phase === 'head' && scope === 'group',
+        })
+        // Exact original read descriptor from eff32234e7; other tools and layers
+        // are identical. Capture includes Codex native/deferred tool conversion.
+        const tools = availableTools.map((tool) => phase === 'base' && tool.name === 'read_game' ? {
+          namespace: 'murph', name: 'read_game',
+          description: 'Read the games linked to this group chat, their agreed tasks, stakes, schedule, start dates and pending changes. Use before answering questions or changing a game. Each day closes at 3 AM the following local date in each player’s timeZone; dayOne is their first calendar date. Starting before 3 AM may give a short first day; explain the actual cutoff. This shared view excludes private labels, photos and check-ins.',
+          inputSchema: { type: 'object', additionalProperties: false, properties: {}, required: [] },
+        } as const : tool)
+        await stopWarmCodexAppServer()
+        stub.markRequestBaseline()
+        stub.captureProviderRequestDiagnostics({ completeInput: true })
+        stub.queue({ text: CONTRACT_CAPTURE_DONE })
+        const result = await executeCodexAppServerTurn({
+          ...scenario.turnInput, baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS, developerInstructions, dynamicTools: tools,
+          prompt: [layers.dynamicTurnContextPrompt, 'What is the schedule of our reading challenge?'].join('\n\n'),
+          groupConversation: scope === 'group', env: { ...scenario.turnInput.env, [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: catalog },
+        })
+        assert.equal(result.finalMessage, CONTRACT_CAPTURE_DONE)
+        assert.equal(stub.requestCountSinceBaseline(), 1)
+        const capture = stub.requestSummariesSinceBaseline()[0]?.completeProviderInput
+        assert.ok(capture)
+        const body = readRecord(JSON.parse(capture.json))
+        assert.ok(body)
+        assert.equal(body.model, 'gpt-6.1-sol')
+        delete body.prompt_cache_key
+        const serialized = JSON.stringify(body)
+        if (scope === 'group') assert.equal(serialized.includes('game_photo'), phase === 'head')
+        else assert.equal(serialized.includes('game_photo'), false)
+        measurements.push({ phase, bytes: Buffer.byteLength(serialized), providerFields: Object.keys(body).sort(),
+          instructionsBytes: Buffer.byteLength(developerInstructions), dynamicContextBytes: Buffer.byteLength(layers.dynamicTurnContextPrompt),
+          toolCount: tools.length, registeredToolBytes: Buffer.byteLength(JSON.stringify(tools)),
+          exclusions: [...new Set([...capture.excludedTransportFields, 'prompt_cache_key'])] })
+      }
+      const [base, head] = measurements
+      assert.ok(base && head)
+      process.stdout.write('[game-photo-input-proof] ' + JSON.stringify({ scope, model: 'gpt-6.1-sol', measurements,
+        baseline: 'eff32234e77173681ae5358a9dd8083d5e6dcd85 exact old read descriptor, absent game_photo and photo guidance; identical other production instructions, native catalog, messages and tools.',
         deltaBytes: head.bytes - base.bytes, deltaPercent: (head.bytes - base.bytes) / base.bytes * 100,
         tokens: null, tokenDelta: null, tokenPercent: null, tokenLimitation: 'No exact GPT-6.1 Sol tokenizer is configured; scripted usage is not tokenization and no estimate is substituted.',
       }) + '\n')

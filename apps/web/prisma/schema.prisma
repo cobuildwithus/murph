@@ -2748,6 +2748,8 @@ model HostedConversationPollVote {
 // ids, numbers and dates stay plain.
 
 model GameProfile {
+  chatPhotoIntroducedAt DateTime? @map("chat_photo_introduced_at")
+  chatPhotoOffer Json? @map("chat_photo_offer")
   photoKey           String?            @map("photo_key")
   memberId           String             @id @map("member_id")
   firstNameEncrypted String             @map("first_name_encrypted")

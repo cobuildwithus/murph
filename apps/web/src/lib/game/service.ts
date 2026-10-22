@@ -1,5 +1,7 @@
 import "server-only";
 
+import type { HostedGameChatState } from "@murphai/hosted-execution/runtime-control";
+import { gameChatProgress } from "./chat-progress";
 import { randomBytes } from "node:crypto";
 
 import { Prisma, type Game, type GameEntry, type GamePlayer } from "@prisma/client";
@@ -14,8 +16,6 @@ import { parseGameCommand } from "./command";
 import {
   GAME_ENTRY_KINDS,
   type GamePendingChange,
-  type GameChangeControls,
-  type GameTermsVersion,
   type GameCommand,
   type GameEntryKind,
   type GameError,
@@ -29,6 +29,10 @@ import { labelTarget, openGameTexts, sealGameText, type GameSealTarget } from ".
 import { isGameMediaStorageAvailable, statGameMedia } from "./media";
 import {
   currentTerms,
+  dayIndexAt,
+  liveEntry,
+  attemptsUsed,
+  isScheduledDay,
   decideDevAdvance,
   decideJoin,
   decideNewTerms,
@@ -100,6 +104,7 @@ export async function runGameCommand(input: {
   chatContainerMemberId?: string;
   beforeMutationTx?: (tx: Prisma.TransactionClient) => Promise<void>;
   now?: Date;
+  postGuard?: { dayIndex: number; replaceEntryId: string | null };
 }): Promise<GameCommandResult> {
   const actor = input.actorMemberId;
   try {
@@ -108,7 +113,7 @@ export async function runGameCommand(input: {
     if (command.type === "setProfile") {
       return { game: null, ok: true, profile: await setProfile(actor, command) };
     }
-    const gameId = await runCommand({ actor, now: input.now, chatContainerMemberId: input.chatContainerMemberId, beforeMutationTx: input.beforeMutationTx }, command);
+    const gameId = await runCommand({ actor, now: input.now, chatContainerMemberId: input.chatContainerMemberId, beforeMutationTx: input.beforeMutationTx, postGuard: input.postGuard }, command);
     if (command.type === "proposeChange") {
       try {
         await deliverGameChangeProposal(command.gameId, command.proposalId);
@@ -130,6 +135,7 @@ export async function runGameCommand(input: {
 }
 
 interface CommandContext {
+  postGuard?: { dayIndex: number; replaceEntryId: string | null };
   actor: string;
   chatContainerMemberId?: string;
   beforeMutationTx?: (tx: Prisma.TransactionClient) => Promise<void>;
@@ -549,6 +555,9 @@ async function post(context: CommandContext, command: Extract<GameCommand, { typ
       memberId: actor,
       now,
     });
+    if (context.postGuard && (decision.dayIndex !== context.postGuard.dayIndex || decision.withdrawEntryId !== context.postGuard.replaceEntryId)) {
+      reject("INVALID_REQUEST", "The current check-in changed. Read the game before confirming a replacement.");
+    }
     if (decision.withdrawEntryId) {
       await tx.gameEntry.update({
         data: { withdrawnAt: clock, withdrawnReason: "retake" },
@@ -763,21 +772,17 @@ async function respondChange(context: CommandContext, command: Extract<GameComma
   return command.gameId;
 }
 
-export interface GameChatState {
-  games: {
-    id: string; status: GameStatus; terms: GameTermsVersion; startsOn: string | null; lengthDays: number;
-    players: { memberId: string; seat: number; firstName: string; dayOne: string | null; timeZone: string }[];
-    pendingChange: GamePendingChange | null; changeControls: GameChangeControls;
-  }[];
-}
+export type GameChatState = HostedGameChatState;
 
 /** Shared-chat projection intentionally never calls the viewer-private app view. */
-export async function readGameChatState(containerMemberId: string, playerMemberIds: readonly string[]): Promise<GameChatState> {
+export async function readGameChatState(containerMemberId: string, playerMemberIds: readonly string[], actorMemberId?: string): Promise<GameChatState> {
   if (playerMemberIds.length !== 2 || new Set(playerMemberIds).size !== 2) return { games: [] };
   const prisma = getPrisma();
-  const candidates = await prisma.game.findMany({ where: { chatContainerMemberId: containerMemberId, status: "live", players: { every: { memberId: { in: [...playerMemberIds] } } } },
+  const candidates = await prisma.game.findMany({ where: { chatContainerMemberId: containerMemberId, status: { in: ["live", "settled"] }, players: { every: { memberId: { in: [...playerMemberIds] } } } },
     orderBy: { createdAt: "desc" }, take: 5, include: { players: true } });
-  const rows = candidates.filter((row) => row.players.length === 2 && row.players.every((player) => isGameEnabledFor(player.memberId)));
+  const current = await loadCurrent(candidates.filter((row) => row.players.length === 2 && row.players.every((player) => isGameEnabledFor(player.memberId))).map((row) => row.id));
+  const loadedById = new Map(current.games.map((game) => [game.row.id, game]));
+  const rows = current.games.map((game) => game.row).filter((row) => row.players.length === 2 && row.players.every((player) => isGameEnabledFor(player.memberId)));
   const profiles = await prisma.gameProfile.findMany({ where: { memberId: { in: [...new Set(rows.flatMap((row) => row.players.map((player) => player.memberId)))] } },
     select: { memberId: true, firstNameEncrypted: true } });
   const plain = await openGameTexts([
@@ -785,16 +790,53 @@ export async function readGameChatState(containerMemberId: string, playerMemberI
     ...profiles.map((profile) => ({ field: "first_name", table: "game_profile" as const, rowId: profile.memberId, memberId: profile.memberId, value: profile.firstNameEncrypted })),
   ]);
   const names = new Map(profiles.map((profile, index) => [profile.memberId, plain[rows.length + index] ?? ""]));
-  const [clock, pendingViews] = await Promise.all([databaseNow(prisma), readPendingChangeViews(rows)]);
-  return { games: rows.map((row, index) => {
-    const state = toRuleState(row, []);
+  const [pendingViews, tickets, actorProfile] = await Promise.all([
+    readPendingChangeViews(rows),
+    prisma.gameTicket.findMany({ where: { gameId: { in: rows.filter((row) => row.status === "settled").map((row) => row.id) } }, take: 1121, orderBy: { id: "asc" } }),
+    actorMemberId ? prisma.gameProfile.findUnique({ where: { memberId: actorMemberId }, select: { chatPhotoIntroducedAt: true, chatPhotoOffer: true } }) : null,
+  ]);
+  const clock = current.clock;
+  if (tickets.length > 1120) throw new Error("Game ticket projection exceeds its rule bound.");
+  const offer = isRecord(actorProfile?.chatPhotoOffer) ? actorProfile.chatPhotoOffer : null;
+  const hasPendingOffer = offer?.containerMemberId === containerMemberId && offer.resolutionMessageRef === null
+    && typeof offer.expiresAt === "string" && Date.parse(offer.expiresAt) > clock.getTime();
+  return { ...(actorProfile ? { photoCheckIn: { introductionAvailable: actorProfile.chatPhotoIntroducedAt === null, hasPendingOffer } } : {}), games: rows.map((row, index) => {
+    const state = loadedById.get(row.id)!.state;
+    const words = parseTermWords(plain[index] ?? "");
+    const result = row.result === null ? null : parseStoredResult(row.result);
+    const ticketGroups = new Map<string, { owedByMemberId: string; owedToMemberId: string; what: string; status: "open" | "redeemed" | "expired"; count: number }>();
+    for (const ticket of tickets.filter((ticket) => ticket.gameId === row.id)) {
+      const view = ticketView({ ...ticket, status: ticket.status === "redeemed" ? "redeemed" : "open" }, words, "", gameNow(clock, row));
+      const key = JSON.stringify([view.owedByMemberId, view.owedToMemberId, view.what, view.status]);
+      const existing = ticketGroups.get(key);
+      if (existing) existing.count += 1;
+      else ticketGroups.set(key, { owedByMemberId: view.owedByMemberId, owedToMemberId: view.owedToMemberId, what: view.what, status: view.status, count: 1 });
+    }
     const pendingChange = pendingViews.get(row.id) ?? null;
-    return { id: row.id, status: state.game.status, terms: termsView(state, parseTermWords(plain[index] ?? "")),
+    return { id: row.id, status: state.game.status, terms: termsView(state, words),
+      progress: gameChatProgress(state, gameNow(clock, row)),
+      result: result ? { scores: result.scores, tickets: [...ticketGroups.values()] } : null,
       startsOn: fromDbDate(row.players[0]?.dayOne ?? row.startsOn), lengthDays: row.lengthDays,
       players: row.players.map((player) => ({ memberId: player.memberId, seat: player.seat, firstName: names.get(player.memberId) ?? "", dayOne: fromDbDate(player.dayOne), timeZone: player.timeZone })),
       pendingChange, changeControls: gameChangeControls(state, gameNow(clock, row), pendingChange),
     };
   }) };
+}
+
+/** The caller already holds member/runtime authority; locks follow member before game. */
+export async function readGamePhotoPostingStateTx(tx: Prisma.TransactionClient, gameId: string, actor: string) {
+  await tx.$queryRaw`SELECT id FROM game WHERE id = ${gameId} FOR UPDATE`;
+  const [loaded] = await loadGames(tx, [gameId]);
+  if (!loaded || loaded.state.game.status !== "live") return null;
+  const player = playerFor(loaded.state, actor);
+  if (!player) return null;
+  const now = gameNow(await databaseNow(tx), loaded.row);
+  const dayIndex = dayIndexAt(player, now);
+  if (dayIndex === null || dayIndex < 0 || dayIndex >= loaded.row.lengthDays || !player.dayOne) return null;
+  return { now, dayIndex, player, scheduled: isScheduledDay(loaded.state, dayIndex),
+    checkInKind: currentTerms(loaded.state.game.terms).checkInKind ?? "photo",
+    currentEntryId: liveEntry(loaded.state.entries, actor, dayIndex)?.id ?? null,
+    attemptsRemaining: Math.max(0, 2 - attemptsUsed(loaded.state.entries, actor, dayIndex)) };
 }
 
 // -------------------------------------------------------------------- reads

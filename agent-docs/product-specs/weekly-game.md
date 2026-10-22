@@ -186,10 +186,41 @@ without adding consent or creating another proposal. A terminal delivery failure
 is shown separately: its proposer can cancel the request in the app and propose
 again, rather than repeatedly retrying a finished delivery.
 
-The shared chat reads only agreed terms, each player's own profile name, the
-schedule and pending proposal. It never receives private contact labels, profile
-photos, check-in photos, excuses or invite tokens. A live two-player game grants
+The shared chat reads agreed terms, each player's own profile name, the
+schedule, pending proposal, daily check-in status and settled results. It never
+receives private contact labels, profile photos, check-in photos, captions,
+excuses or invite tokens. A live two-player game grants
 its bound group the normal included group usage allowance without granting the
 players personal AI access. Suspension, withdrawn health-data consent, the game
 feature flag and member allowlist still apply. Tasks and stakes remain fixed in
 this first editing version.
+
+## Progress and photos in chat
+
+The verified two-player group may read daily check-in status, totals and recent
+settled results. These are shared metadata, not a bypass of post-to-unlock:
+photos, captions, excuses and private contact labels never enter this read.
+A due current day is not a miss; the offline grace window remains open. Any-days
+blank dates are simply not posted, with the total target reported separately.
+Shared reads settle due games through the same locked path as app reads and
+return the frozen scores and owed tickets.
+
+In iMessage, a player can explicitly ask Murph to use one received JPEG or HEIC
+photo as their current-day check-in. This deliberately extends the app's
+live-camera honor rule to user-submitted chat photos. It does not verify the
+activity, read camera capture time, backdate a post or satisfy a heart-rate
+challenge. The server resolves both the current requester and original photo
+sender. Only their own photo in the same room and current game day qualifies.
+The usual two attempts, replacement, scoring and post notifications still apply.
+An existing post needs explicit replacement consent before consuming the retake.
+
+When a clear contextual photo relates to the sender's task and they have no
+current post, Murph may introduce this option once per person across games.
+Ordinary unrelated photos and conversation between people remain quiet. The
+member-owned game profile records the introduction attempt and exact pending
+photo selection; the question is model-authored, and recording the attempt does
+not claim it was delivered. Optional failed introductions are not replayed.
+A yes saves only that selected photo, not future photos. The offer expires in
+30 minutes or at the game-day boundary, whichever comes first. A no dismisses
+it. Explicit later save requests remain available. Unsupported, expired or
+unavailable media requires resending a supported photo or checking in in the app.

@@ -1,4 +1,5 @@
 import "server-only";
+import { handleGameChatPhoto } from "./chat-photo";
 import type { Prisma } from "@prisma/client";
 import { hostedGameChatStateSchema, type HostedGameToolRequest, type HostedGameToolResponse } from "@murphai/hosted-execution/runtime-control";
 import type { HostedExecutionExternalThreadRouteAuthority, HostedExecutionConversationMessageWake } from "@murphai/hosted-execution/contracts";
@@ -22,6 +23,19 @@ export async function handleGameChatTool(input: Input): Promise<HostedGameToolRe
   if (!actor) return { action: input.request.action, result: { status: "unavailable", error: "game_player_unavailable" } };
   const playerMemberIds = await requireExactGameChat(input.memberId);
   if (!playerMemberIds.includes(actor)) return { action: input.request.action, result: { status: "unavailable", error: "game_player_unavailable" } };
+  let photoResult: Awaited<ReturnType<typeof handleGameChatPhoto>> | null = null;
+  if (input.request.action === "game_photo") {
+    photoResult = await handleGameChatPhoto({ actor, containerMemberId: input.memberId,
+      messageRef: input.request.origin.assistantInputId, photo: input.request.photo,
+      authorize: async (tx, messageRef) => {
+        const scoped = { ...input, playerMemberIds, request: { ...input.request, origin: { kind: "accepted_input" as const, assistantInputId: messageRef } } };
+        const sourceActor = await authorizeGameChatActorTx(scoped, tx);
+        const wake = sourceActor ? await readHostedMailboxConversationWakeByAssistantInputId({ assistantInputId: messageRef, availableAt: new Date(), memberId: input.memberId, prisma: tx }) : null;
+        return { actor: sourceActor, wake };
+      },
+    });
+    if (photoResult.status !== "ok") return { action: input.request.action, result: photoResult };
+  }
   if (input.request.action === "update_game") {
     const update = input.request.update;
     const command = update.operation === "propose"
@@ -40,8 +54,9 @@ export async function handleGameChatTool(input: Input): Promise<HostedGameToolRe
     const latestPlayers = await requireExactGameChat(input.memberId);
     if (!sameGamePlayers(latestPlayers, playerMemberIds)) throw new TypeError("Game chat participants changed.");
   }
-  const state = hostedGameChatStateSchema.parse(await readGameChatState(input.memberId, playerMemberIds));
-  return { action: input.request.action, result: { status: "ok", state } };
+  if (input.request.action === "game_photo" && !sameGamePlayers(await requireExactGameChat(input.memberId), playerMemberIds)) throw new TypeError("Game chat participants changed.");
+  const state = hostedGameChatStateSchema.parse(await readGameChatState(input.memberId, playerMemberIds, actor));
+  return { action: input.request.action, result: { status: "ok", state, ...(photoResult?.photoOutcome ? { photoOutcome: photoResult.photoOutcome } : {}) } };
 }
 
 /** A free player may agree to their game without gaining personal AI access. */
@@ -58,7 +73,7 @@ export async function authorizeGameChatActorTx(input: Input, tx: Prisma.Transact
   const actor = await resolveHostedGroupMessageSenderMemberId({ prisma: tx, routeAuthority: route, wake });
   if (!actor || !isGameEnabledFor(actor)) return null;
   const game = await tx.game.findFirst({
-    where: { chatContainerMemberId: input.memberId, players: { some: { memberId: actor } }, ...(input.request.action === "update_game" ? { id: input.request.update.gameId } : {}) },
+    where: { chatContainerMemberId: input.memberId, players: { some: { memberId: actor } }, ...(input.request.action === "update_game" ? { id: input.request.update.gameId } : input.request.action === "game_photo" ? { id: input.request.photo.gameId } : {}) },
     select: { id: true, players: { select: { memberId: true }, take: 3 } },
   });
   if (!game || !areGamePlayersAllowed(game.players, input.playerMemberIds)) return null;

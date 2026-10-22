@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { readTestMurphDynamicToolRequest } from './support/codex-app-server.ts'
 import { executeMurphDynamicToolRequest, resolveMurphDynamicTools } from '../src/assistant-codex/dynamic-tools.js'
-import { MURPH_READ_GAME_TOOL, MURPH_UPDATE_GAME_TOOL } from '../src/assistant-codex/dynamic-tools/games.js'
+import { MURPH_READ_GAME_TOOL, MURPH_UPDATE_GAME_TOOL, MURPH_GAME_PHOTO_TOOL } from '../src/assistant-codex/dynamic-tools/games.js'
 import type { AssistantHostedToolContext } from '../src/assistant/hosted-tool-context.js'
 import { parseHostedRuntimeGroupToolRequest, parseHostedRuntimeGroupToolResponse } from '@murphai/hosted-execution/parsers'
 const inputId = 'ain_' + 'a'.repeat(32)
@@ -28,6 +28,8 @@ describe('game dynamic tools', () => {
   it('advertises only when the group game capability is available', () => {
     expect(resolveMurphDynamicTools({ gamesAvailable: true })).toEqual(expect.arrayContaining([MURPH_READ_GAME_TOOL, MURPH_UPDATE_GAME_TOOL]))
     expect(resolveMurphDynamicTools({})).not.toContain(MURPH_UPDATE_GAME_TOOL)
+    expect(resolveMurphDynamicTools({ gamesAvailable: true })).not.toContain(MURPH_GAME_PHOTO_TOOL)
+    expect(resolveMurphDynamicTools({ gamesAvailable: true, gamePhotosAvailable: true })).toContain(MURPH_GAME_PHOTO_TOOL)
     expect(MURPH_UPDATE_GAME_TOOL.description).toContain('ordinary conversational agreement')
     expect(MURPH_UPDATE_GAME_TOOL.description).toContain('do not demand special words')
   })
@@ -62,5 +64,38 @@ describe('game dynamic tools', () => {
     expect(result.rpcResult.success).toBe(false)
     expect(port).toHaveBeenCalledTimes(1)
     expect(result.rpcResult.contentItems[0]?.text).toContain('Read the game')
+  })
+})
+
+describe('game photo dynamic contract', () => {
+  it('accepts current approval with a prior same-conversation photo selector but no arbitrary identity or URL', async () => {
+    port.mockClear()
+    const args = { messageRef: inputId, operation: 'save', gameId: 'game_synthetic', sourceMessageRef: 'ain_' + 'c'.repeat(32), attachmentOrdinal: 1 }
+    const request = parse('game_photo', args)
+    expect(request?.kind).toBe('game')
+    if (!request) throw new Error('Expected photo request')
+    await executeMurphDynamicToolRequest({ request, hostedToolContext: context(), env: {}, fetchImpl: fetch, nextUsageOrdinal: () => 0, progressDelivery: null })
+    expect(port).toHaveBeenCalledExactlyOnceWith({ action: 'game_photo', origin, photo: { operation: 'save', gameId: 'game_synthetic', sourceMessageRef: args.sourceMessageRef, attachmentOrdinal: 1 } })
+    for (const extra of [{ url: 'https://example.test/a.jpg' }, { memberId: 'other' }, { captureAgeMs: 10 }, { mediaKeys: ['arbitrary'] }]) expect(parse('game_photo', { ...args, ...extra })?.kind).toBe('invalid-game-arguments')
+  })
+  it('reads introduction state for the selected sender in a compound group turn', async () => {
+    port.mockClear()
+    const request = parse('read_game', { messageRef: inputId })
+    if (!request) throw new Error('Expected game read')
+    await executeMurphDynamicToolRequest({ request, hostedToolContext: context(), env: {}, fetchImpl: fetch, nextUsageOrdinal: () => 0, progressDelivery: null })
+    expect(port).toHaveBeenCalledExactlyOnceWith({ action: 'read_game', origin })
+  })
+  it('rejects a stale consent message without forwarding', async () => {
+    port.mockClear()
+    const request = parse('game_photo', { messageRef: 'old', operation: 'save', gameId: 'game_synthetic' })
+    if (!request) throw new Error('Expected photo request')
+    const result = await executeMurphDynamicToolRequest({ request, hostedToolContext: context(), env: {}, fetchImpl: fetch, nextUsageOrdinal: () => 0, progressDelivery: null })
+    expect(result.rpcResult.success).toBe(false)
+    expect(port).not.toHaveBeenCalled()
+  })
+  it('round-trips photo outcomes through the shared transport', () => {
+    const request = { action: 'game_photo', origin, photo: { operation: 'offer', gameId: 'game_synthetic', sourceMessageRef: inputId, attachmentOrdinal: 1 } }
+    expect(parseHostedRuntimeGroupToolRequest(request)).toEqual(request)
+    expect(parseHostedRuntimeGroupToolResponse({ action: 'game_photo', result: { status: 'ok', photoOutcome: 'suppressed' } })).toEqual({ action: 'game_photo', result: { status: 'ok', photoOutcome: 'suppressed' } })
   })
 })

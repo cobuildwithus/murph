@@ -940,7 +940,7 @@ export function parseHostedRuntimeGroupToolRequest(
     record.action,
     "Hosted runtime group tool request action",
   );
-  if (action === "read_game" || action === "update_game") return hostedGameToolRequestSchema.parse(record);
+  if (action === "read_game" || action === "update_game" || action === "game_photo") return hostedGameToolRequestSchema.parse(record);
   const parsed =
     parseHostedRuntimeGroupConsultationRequest(record, action) ??
     parseHostedRuntimeGroupJournalRequest(record, action) ??
@@ -2864,7 +2864,7 @@ export function parseHostedRuntimeGroupToolResponse(
     "Hosted runtime group tool response action",
   );
 
-  if (action === "read_game" || action === "update_game") return hostedGameToolResponseSchema.parse(record);
+  if (action === "read_game" || action === "update_game" || action === "game_photo") return hostedGameToolResponseSchema.parse(record);
   if (action === "ask_current_sender") {
     const label = "Hosted runtime group tool ask_current_sender response";
     assertAllowedObjectKeys(record, new Set(["action", "result"]), label);

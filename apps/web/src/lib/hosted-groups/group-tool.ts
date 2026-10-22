@@ -277,6 +277,7 @@ export type HostedRuntimeGroupToolAccessClassification =
 export const HOSTED_RUNTIME_GROUP_TOOL_ACCESS_CLASSIFICATION = {
   read_game: "participant_aware",
   update_game: "participant_aware",
+  game_photo: "participant_aware",
   ask: "personal_active",
   handoff: "personal_active",
   ask_current_sender: "participant_aware",
@@ -451,14 +452,14 @@ async function recordHostedRuntimeGroupJournalFact(
 export async function handleHostedRuntimeConversationTool(
   input: HostedRuntimeGroupToolHandlerInput,
 ): Promise<HostedRuntimeGroupToolResponse> {
-  if (input.request.action === "read_game" || input.request.action === "update_game") {
+  if (input.request.action === "read_game" || input.request.action === "update_game" || input.request.action === "game_photo") {
     return handleGameChatTool({ memberId: input.memberId, runtimeIdentity: input.runtimeIdentity ?? null, request: input.request });
   }
   return handleHostedRuntimeGroupTool({ ...input, request: input.request });
 }
 
 type HostedRuntimeNonGameToolHandlerInput = Omit<HostedRuntimeGroupToolHandlerInput, "request"> & {
-  request: Exclude<HostedRuntimeGroupToolRequest, { action: "read_game" | "update_game" }>;
+  request: Exclude<HostedRuntimeGroupToolRequest, { action: "read_game" | "update_game" | "game_photo" }>;
 };
 
 export async function handleHostedRuntimeGroupTool(

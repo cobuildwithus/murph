@@ -1429,3 +1429,6 @@ recorded in [game post notifications](exec-plans/completed/2026-10-21-game-daily
 Game proposal wording and conversation-activity selection are tracked in
 [`game chat selection and copy`](exec-plans/completed/2026-10-22-game-chat-selection-copy.md);
 `product-specs/weekly-game.md` remains the current behavior owner.
+
+Shared game progress and chat photo check-ins are tracked in
+[`game progress and check-ins`](exec-plans/active/2026-10-22-game-progress-checkins.md).

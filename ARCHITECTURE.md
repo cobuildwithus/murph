@@ -5545,3 +5545,28 @@ writers. Old Web rejects unknown game requests; old transport response parsers
 reject new responses without replay, even if new Web already applied an update.
 Do not roll back those parsers while new game tools are active. Old warm runtimes
 have no game tools until refreshed.
+
+### Shared game progress and chat photo imports
+
+Shared game reads use canonical `loadCurrent` maintenance and frozen settlement
+results. The dedicated metadata projection reports daily status and grouped
+ticket obligations without decrypting entry words or returning media. Candidate
+games remain bounded; the existing maximum duration, attempts and stake counts
+bound entries and ticket reads. Actor-specific photo introduction state is read
+only for the host-resolved accepted sender.
+
+`game_profile.chat_photo_introduced_at` and `chat_photo_offer` own the once-per-
+member introduction and its versioned exact selection. The latter contains
+only structural source refs, room/game/day identity, expiry and resolution ref;
+no image, message text or provider URL is persisted there. Offer and dismissal
+writes revalidate accepted sender/runtime authority in the transaction. A
+consented save resolves the immutable original accepted Linq attachment, rejects
+other senders/rooms/days, downloads at most 4 MiB from the fixed Linq CDN with
+redirects disabled, then seals the bytes under the player's game key outside the
+transaction. No model-controlled URL, member ID or raw filesystem path crosses
+this tool boundary. Ordinary `runGameCommand(post)` owns the write and checks the
+expected day/replaced entry under its game lock. The source-derived entry ID
+makes retries idempotent; a historical withdrawn source is never reported as a
+new save. The current approval and stored implicit selection are checked again
+before mutation. The nullable profile migration precedes Web, then compatible
+runtime parsers/tools; no native photo UI or ongoing game-host behavior is added.

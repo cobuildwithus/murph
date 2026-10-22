@@ -45111,3 +45111,79 @@ describeRealCodex('real Codex game agreement e2e', () => {
     } finally { await rm(workingDirectory, { force: true, recursive: true }) }
   }, 720_000)
 })
+
+describeRealCodex('real Codex game progress and photo journeys', () => {
+  it.each([
+    { name: 'game chat photo first introduction asks once without saving', kind: 'offer' },
+    { name: 'game chat photo repeated unsolicited photo stays quiet', kind: 'quiet' },
+    { name: 'game chat photo introduction in another room stays quiet', kind: 'quiet-new-room' },
+    { name: 'game chat photo explicit save needs no repeated confirmation', kind: 'save' },
+    { name: 'game chat photo yes saves only pending source', kind: 'yes' },
+    { name: 'game chat photo replacement asks before consuming retake', kind: 'replace' },
+    { name: 'game chat daily progress distinguishes due and missed', kind: 'progress' },
+    { name: 'game chat settled result uses frozen scores and stakes', kind: 'result' },
+  ])('$name', async ({ kind, name }) => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-game-photo-e2e-'))
+    const { MURPH_READ_GAME_TOOL, MURPH_GAME_PHOTO_TOOL, GAME_PHOTO_CHAT_GUIDANCE } = await import('../src/assistant-codex/dynamic-tools/games.js')
+    const inputId = 'ain_' + 'd'.repeat(32)
+    const calls: Array<import('@murphai/hosted-execution/runtime-control').HostedRuntimeGroupToolRequest> = []
+    const game = {
+      id: 'game_synthetic', status: kind === 'result' ? 'settled' as const : 'live' as const, lengthDays: 7, startsOn: '2030-03-04',
+      terms: { n: 1, fromDay: 0, checkInKind: 'photo' as const, tasks: [{ seat: 0, text: 'Walk for 20 minutes' }, { seat: 1, text: 'Walk for 20 minutes' }], schedule: { days: [0,1,2,3,4] }, stakes: [{ kind: 'winner_gets' as const, item: 'Choose the next board game' }] },
+      players: [{ memberId: 'player_alex', seat: 0, firstName: 'Alex', dayOne: '2030-03-04', timeZone: 'UTC' }, { memberId: 'player_sam', seat: 1, firstName: 'Sam', dayOne: '2030-03-04', timeZone: 'UTC' }],
+      pendingChange: null, changeControls: { canStartNow: false, canEdit: true, canEditSchedule: true, canEditStartDate: false, editableFromDay: 2 },
+      progress: { checkedAt: '2030-03-05T12:00:00Z', players: [
+        { memberId: 'player_alex', score: 1, target: 5, currentDayIndex: 1, currentEntryId: kind === 'replace' ? 'entry_synthetic' : null, attemptsRemaining: kind === 'replace' ? 1 : 2, days: [{ dayIndex: 0, date: '2030-03-04', status: 'posted' as const }, { dayIndex: 1, date: '2030-03-05', status: 'due' as const }] },
+        { memberId: 'player_sam', score: 1, target: 5, currentDayIndex: 1, currentEntryId: 'entry_other', attemptsRemaining: 1, days: [{ dayIndex: 0, date: '2030-03-04', status: 'missed' as const }, { dayIndex: 1, date: '2030-03-05', status: 'posted' as const }] },
+      ] },
+      result: kind === 'result' ? { scores: [{ memberId: 'player_alex', seat: 0, score: 5, misses: 0 }, { memberId: 'player_sam', seat: 1, score: 3, misses: 2 }], tickets: [{ owedByMemberId: 'player_sam', owedToMemberId: 'player_alex', what: 'Choose the next board game', status: 'open' as const, count: 1 }] } : null,
+    }
+    const message = kind === 'offer' || kind === 'quiet-new-room' ? 'Just finished my 20-minute walk! [One attached JPEG photo, attachment ordinal 1, showing Alex outdoors after the walk.]'
+      : kind === 'quiet' ? 'Another walk done! [One attached JPEG photo, ordinal 1.]'
+      : kind === 'yes' ? 'yeah please'
+      : kind === 'progress' ? 'Murph, who checked in today and yesterday?'
+      : kind === 'result' ? 'Murph, who won our last game and what do we owe?'
+      : 'Murph, save this photo as my check-in today. [One attached JPEG photo, ordinal 1.]'
+    try {
+      const result = await executeRealCodexAppServerTurn({
+        allowFinishWithoutReply: true, approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined, codexHome: config.codexHome,
+        developerInstructions: [buildAssistantSystemPrompt({ assistantCliContract: null, assistantKnowledgeToolsAvailable: false,
+          channel: 'linq', cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' }, conversationScope: 'group',
+          currentLocalDate: '2030-03-05', currentInstant: '2030-03-05T12:00:00.000Z', currentTimeZone: 'UTC',
+          hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false, turnTrigger: null }), GAME_PHOTO_CHAT_GUIDANCE].join('\n'),
+        dynamicTools: [MURPH_READ_GAME_TOOL, MURPH_GAME_PHOTO_TOOL, MURPH_FINISH_WITHOUT_REPLY_TOOL], env: config.env,
+        hostedToolContext: { computerToolsAvailable: false, vaultFileSendAvailable: false,
+          groupTool: { request: async (request) => {
+            calls.push(request)
+            if (request.action === 'read_game') return { action: 'read_game', result: { status: 'ok', state: { games: [game], photoCheckIn: { introductionAvailable: kind === 'offer', hasPendingOffer: kind === 'yes' } } } }
+            if (request.action !== 'game_photo') throw new Error('Unexpected game mutation')
+            return { action: 'game_photo', result: { status: 'ok', photoOutcome: request.photo.operation === 'offer' ? 'offer' : 'saved' } }
+          } }, currentUserActionScope: () => ({ conversationId: 'synthetic-room', inboundMailboxItemIds: [], recipientKey: 'synthetic-recipient', acceptedInputIds: [inputId], originSessionId: 'synthetic-session', conversationScope: 'group' }),
+          currentHostedDeliveryContext: () => null, currentHostedMailboxItemIds: () => [], sendVaultFile: async () => { throw new Error('No file send.') } },
+        model: config.model, modelProvider: config.modelProvider, reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
+        prompt: `Shared history: Alex and Sam have a walking challenge here. ${kind === 'quiet' ? 'Murph already introduced saving a chat photo earlier; Alex declined. Neither person is asking Murph to speak now.' : kind === 'yes' ? 'Murph just asked Alex: Want me to use this as your check-in photo? The server has that exact pending photo selection.' : ''}\nCurrent accepted message from Alex (Message ref: ${inputId}): ${message}`,
+      })
+      process.stdout.write(JSON.stringify({ scenario: name, reply: result.finalMessage, actions: calls.map((call) => call.action), finalAction: result.finalAction }) + '\n')
+      const photos = calls.filter((call) => call.action === 'game_photo')
+      if (kind === 'offer' || kind === 'save' || kind === 'yes') {
+        expect(calls.map((call) => call.action)).toEqual(['read_game', 'game_photo'])
+        expect(photos[0]).toMatchObject({ origin: { kind: 'accepted_input', assistantInputId: inputId }, photo: { operation: kind === 'offer' ? 'offer' : 'save', gameId: game.id } })
+        if (kind === 'yes') expect(photos[0].photo.sourceMessageRef).toBeUndefined()
+        else expect(photos[0].photo).toMatchObject({ sourceMessageRef: inputId, attachmentOrdinal: 1 })
+        if (kind === 'offer') { expect(result.finalMessage).toMatch(/want|use|save/iu); expect(result.finalMessage).toContain('?'); expect(result.finalMessage).not.toMatch(/saved|logged|checked you in/iu) }
+        else { expect(result.finalMessage).toMatch(/saved|logged|checked.in|check-in/iu); expect(result.finalMessage).not.toMatch(/want me|confirm|are you sure/iu) }
+      } else {
+        expect(photos).toHaveLength(0)
+        if (kind === 'quiet' || kind === 'quiet-new-room') { expect(result.finalAction).toEqual({ kind: 'none' }); expect(result.finalMessage).toBe('') }
+        else expect(calls.map((call) => call.action)).toEqual(['read_game'])
+        if (kind === 'quiet-new-room') expect(calls.map((call) => call.action)).toEqual(['read_game'])
+        if (kind === 'replace') { expect(result.finalMessage).toMatch(/replace|retake/iu); expect(result.finalMessage).toContain('?'); expect(result.finalMessage).not.toMatch(/saved|logged/iu) }
+        if (kind === 'progress') { expect(result.finalMessage).toMatch(/Sam/iu); expect(result.finalMessage).toMatch(/yesterday/iu); expect(result.finalMessage).not.toMatch(/Alex.{0,20}missed today|Sam.{0,20}missed today/iu) }
+        if (kind === 'result') { expect(result.finalMessage).toMatch(/Alex/iu); expect(result.finalMessage).toMatch(/5|five/iu); expect(result.finalMessage).toMatch(/3|three/iu); expect(result.finalMessage).toMatch(/board game/iu) }
+      }
+      expect(result.finalMessage).not.toMatch(/automatically save|from now on|verified.{0,20}walk/iu)
+    } finally { await rm(workingDirectory, { force: true, recursive: true }) }
+  }, 720_000)
+})

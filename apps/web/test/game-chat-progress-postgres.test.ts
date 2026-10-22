@@ -1,0 +1,56 @@
+import { randomUUID } from "node:crypto";
+import { afterAll, describe, expect, it, vi } from "vitest";
+import { getPrisma } from "../src/lib/prisma";
+import { readGameChatState, runGameCommand } from "../src/lib/game/service";
+import { mediaKeyPrefixFor } from "../src/lib/game/access";
+import { addDays, gameLocalDate } from "../src/lib/game/time";
+vi.mock("../src/lib/game/chat-delivery", () => ({ deliverGameChangeProposal: async () => {} }));
+vi.mock("../src/lib/game/media", () => ({ isGameMediaStorageAvailable: () => true, statGameMedia: async () => ({ byteLength: 3, contentType: "image/jpeg" }), isGameMediaKey: (key: string) => /^[A-Za-z0-9_/-]+\/[a-f0-9]{64}\.jpg$/u.test(key) }));
+const enabled = process.env.MURPH_TEST_POSTGRES_CONCURRENCY === "1";
+if (enabled && !/^postgres(?:ql)?:\/\/[^/]*@(?:127\.0\.0\.1|localhost):\d+\/murph_test_/u.test(process.env.DATABASE_URL ?? "")) throw new Error("Game progress proof requires an isolated local test database.");
+const members: string[] = [];
+async function fixture() {
+  const a = `progress_a_${randomUUID()}`, b = `progress_b_${randomUUID()}`, room = `progress_room_${randomUUID()}`;
+  members.push(a,b,room);
+  const db = getPrisma();
+  await db.hostedMember.createMany({ data: [a,b,room].map((id) => ({ id, billingStatus: "not_started" })) });
+  for (const [memberId, firstName] of [[a,"Alex"],[b,"Sam"]]) await runGameCommand({ actorMemberId: memberId, command: { type: "setProfile", firstName, timeZone: "UTC" } });
+  const gameId = randomUUID();
+  const created = await runGameCommand({ actorMemberId: a, command: { type: "createGame", gameId, inviteeFirstName: "Private contact label", terms: { tasks: [{ seat: 0, text: "Read" }, { seat: 1, text: "Read" }], schedule: { days: [0,1,2,3,4,5,6] }, stakes: [{ kind: "winner_gets", item: "Choose a book" }] } } });
+  if (!created.ok || !created.game?.inviteToken) throw new Error("Fixture creation failed");
+  const joined = await runGameCommand({ actorMemberId: b, command: { type: "join", token: created.game.inviteToken, termsVersion: 1, timeZone: "UTC" } });
+  if (!joined.ok) throw new Error("Fixture join failed");
+  await db.game.update({ where: { id: gameId }, data: { chatContainerMemberId: room } });
+  return { a,b,room,gameId,db };
+}
+describe.skipIf(!enabled)("shared game progress canonical PostgreSQL proof", () => {
+  afterAll(async () => { await getPrisma().hostedMember.deleteMany({ where: { id: { in: members } } }); });
+  it("settles on the shared read and returns frozen scores and grouped tickets exactly once", async () => {
+    const {a,b,room,gameId,db} = await fixture();
+    const dayOne = addDays(gameLocalDate(new Date(), "UTC"), -8);
+    await db.gamePlayer.updateMany({ where: { gameId }, data: { dayOne: new Date(`${dayOne}T00:00:00Z`) } });
+    await db.gameEntry.create({ data: { id: randomUUID(), gameId, memberId: a, dayIndex: 0, attempt: 1, kind: "photo", mediaKeys: ["private-photo"], receivedAt: new Date() } });
+    const first = await readGameChatState(room, [a,b], a);
+    expect(first.games[0]).toMatchObject({ status: "settled", result: { scores: [{ memberId: a, score: 1, misses: 6 }, { memberId: b, score: 0, misses: 7 }], tickets: [{ owedByMemberId: b, owedToMemberId: a, what: "Choose a book", status: "open", count: 1 }] } });
+    expect(JSON.stringify(first)).not.toMatch(/private-photo|Private contact label|inviteToken|mediaKeys/);
+    expect((await readGameChatState(room,[a,b])).games[0].result).toEqual(first.games[0].result);
+    expect(await db.gameEvent.count({ where: { gameId, type: "settled" } })).toBe(1);
+    expect(await db.gameTicket.count({ where: { gameId } })).toBe(1);
+  });
+  it("guards replacement inside the posting transaction and deduplicates retries", async () => {
+    const {a,b,room,gameId,db} = await fixture();
+    const dayOne = gameLocalDate(new Date(), "UTC");
+    await db.gamePlayer.updateMany({ where: { gameId }, data: { dayOne: new Date(`${dayOne}T00:00:00Z`) } });
+    const mediaKeys = [`${mediaKeyPrefixFor(a)}${"a".repeat(64)}.jpg`];
+    const firstId = randomUUID(), secondId = randomUUID();
+    const post = (entryId: string, replacement: string | null) => runGameCommand({ actorMemberId: a, chatContainerMemberId: room, beforeMutationTx: async () => {}, postGuard: { dayIndex: 0, replaceEntryId: replacement }, command: { type: "post", gameId, entryId, kind: "photo", mediaKeys } });
+    expect(await post(firstId,null)).toMatchObject({ ok: true });
+    expect(await post(secondId,null)).toMatchObject({ ok: false, error: { code: "INVALID_REQUEST" } });
+    expect(await db.gameEntry.count({ where: { gameId } })).toBe(1);
+    expect(await post(secondId,firstId)).toMatchObject({ ok: true });
+    expect(await post(secondId,firstId)).toMatchObject({ ok: true });
+    expect(await db.gameEntry.count({ where: { gameId } })).toBe(2);
+    const progress = (await readGameChatState(room,[a,b],a)).games[0].progress;
+    expect(progress?.players.find((player) => player.memberId === a)).toMatchObject({ score: 1, currentEntryId: secondId, attemptsRemaining: 0 });
+  });
+});

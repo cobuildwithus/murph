@@ -1,3 +1,4 @@
+import { GAME_PHOTO_CHAT_GUIDANCE } from "../../assistant-codex/dynamic-tools/games.js"
 import { resolveUsageOptimizerFeedbackScope } from '../weekly-usage-optimizer.js'
 import { resolveAssistantFollowUpTurnContext } from '../follow-ups.js'
 import type { AssistantSession } from '@murphai/operator-config/assistant-cli-contracts'
@@ -463,6 +464,10 @@ interface AssistantRouteTurnPlanInput {
 
 function areConversationGamesAvailable(input: AssistantRouteTurnPlanInput, acceptedInputIds: readonly string[], scope: string): boolean {
   return input.hostedToolContext?.groupTool != null && scope === 'group' && acceptedInputIds.length > 0
+}
+
+function gamePhotoContextPrompts(input: AssistantRouteTurnPlanInput, acceptedInputIds: readonly string[], scope: string): string[] {
+  return input.input.channel === 'linq' && areConversationGamesAvailable(input, acceptedInputIds, scope) ? [GAME_PHOTO_CHAT_GUIDANCE] : []
 }
 
 function areConversationPollsAvailable(input: AssistantRouteTurnPlanInput, acceptedInputIds: readonly string[], channel: string | null): boolean {
@@ -1000,9 +1005,14 @@ export async function resolveAssistantRouteTurnPlan(
   ) !== null
     && input.profile.promptProfile === 'conversation'
     && (privateInteractiveAudience || authenticatedGroupChatRuntime)
+  const userActionAcceptedInputIds = resolveAssistantUserActionAcceptedInputIds({
+    acceptedInputItems: input.acceptedInputItems ?? [],
+    turnTrigger: input.input.turnTrigger ?? null,
+  })
   const assistantDynamicContextPrompts = [
     ...hostedDynamicContextPrompts,
     ...(groupRoomModelPrompt ? [groupRoomModelPrompt] : []),
+    ...gamePhotoContextPrompts(input, userActionAcceptedInputIds, conversationScope),
   ]
   const voiceMemoDeliveryChannel = outputOnlyTurn
     ? null
@@ -1065,10 +1075,6 @@ export async function resolveAssistantRouteTurnPlan(
       session: input.session,
       sharedPlan: input.sharedPlan,
     })
-  const userActionAcceptedInputIds = resolveAssistantUserActionAcceptedInputIds({
-    acceptedInputItems: input.acceptedInputItems ?? [],
-    turnTrigger: input.input.turnTrigger ?? null,
-  })
   const pollsAvailable = areConversationPollsAvailable(input, userActionAcceptedInputIds, currentAudienceDeliveryFields.channel)
   const modelBehaviorProfile = resolveAssistantModelBehaviorProfile(
     input.route.providerOptions,
@@ -1249,6 +1255,7 @@ export async function resolveAssistantRouteTurnPlan(
           : []
       : resolveMurphDynamicTools({
         gamesAvailable: areConversationGamesAvailable(input, userActionAcceptedInputIds, conversationScope),
+        gamePhotosAvailable: gamePhotoContextPrompts(input, userActionAcceptedInputIds, conversationScope).length > 0,
         pollsAvailable,
         assistantStyleSettingsAvailable,
         allowFinishWithoutReply,
