@@ -1768,7 +1768,7 @@ describe("createCloudflareHostedControlClient", () => {
       expect(request.headers.get("x-hosted-execution-user-id")).toBe("user_123");
       const unconfirmed = gameMediaClient(() => createJsonResponse({ stored: false }));
       await expect(unconfirmed.client.putGameImage({ bytes, contentType: "image/jpeg", mediaId, userId: "user_123" })).rejects.toThrow("not confirmed");
-      const delivery = { url: "https://imagedelivery.net/account/id/game-avatar?sig=synthetic&exp=1", expiresAt: "2030-01-01T00:00:00Z" };
+      const delivery = { url: "https://imagedelivery.net/account/id/gameavatar?sig=synthetic&exp=1", expiresAt: "2030-01-01T00:00:00Z" };
       const signed = gameMediaClient(() => createJsonResponse(delivery));
       await expect(signed.client.gameImageDelivery({ mediaId, userId: "user_123", variant: "avatar" })).resolves.toEqual(delivery);
       expect(observed(signed.fetchImpl).headers.get("x-murph-image-variant")).toBe("avatar");

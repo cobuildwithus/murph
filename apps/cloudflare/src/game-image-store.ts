@@ -23,7 +23,7 @@ export interface GameImagesBinding {
 
 export const GAME_IMAGE_DELIVERY_SECONDS = 300;
 export type GameImageVariant = "avatar" | "photo";
-const VARIANTS: Record<GameImageVariant, string> = { avatar: "game-avatar", photo: "game-photo" };
+const VARIANTS: Record<GameImageVariant, string> = { avatar: "gameavatar", photo: "gamephoto" };
 const POINTER_SUFFIX = ".image.json";
 type Pointer = { schema: "murph.game-image.v1"; imageId: string; byteLength: number };
 

@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import { createGameImageStore, deleteGameImagesForUser, type GameImagesBinding } from "../src/game-image-store.ts";
+import { assertPrivateGameImageVariants } from "../scripts/deploy-game-images.ts";
 import { gameImageRoutes } from "../src/worker/route-handlers/game-images.ts";
 import { readHostedExecutionEnvironment } from "../src/env.ts";
 import { createHostedExecutionTestEnv } from "./hosted-execution-fixtures.ts";
@@ -25,7 +26,7 @@ class IndexBucket extends MemoryEncryptedR2Bucket {
 function provider() {
   const stored = new Map<string, { creator: string }>();
   const info = vi.fn<GameImagesBinding["info"]>(async () => ({ format: "image/jpeg", width: 1280, height: 720 }));
-  const sign = vi.fn(async () => "https://imagedelivery.net/account/image/game-photo?exp=9999999999&sig=synthetic");
+  const sign = vi.fn<ReturnType<GameImagesBinding["hosted"]["image"]>["signedUrl"]>(async () => "https://imagedelivery.net/account/image/gamephoto?exp=9999999999&sig=synthetic");
   const deleted = vi.fn(async (id: string) => stored.delete(id));
   const upload = vi.fn(async (_bytes: ArrayBuffer, options: { creator: string; requireSignedURLs: true }) => {
     const id = randomUUID();
@@ -121,9 +122,28 @@ describe("private game Images", () => {
     expect(pointer).not.toContain("sig=");
     await expect(store.stat(mediaId)).resolves.toEqual({ byteLength: bytes.length });
     await expect(store.delivery(mediaId, "avatar")).resolves.toMatchObject({ url: expect.stringContaining("imagedelivery.net") });
-    expect(p.sign).toHaveBeenCalledWith({ variant: "game-avatar", expiresIn: 300 });
+    expect(p.sign).toHaveBeenCalledWith({ variant: "gameavatar", expiresIn: 300 });
     await store.delivery(mediaId, "photo");
-    expect(p.sign).toHaveBeenLastCalledWith({ variant: "game-photo", expiresIn: 300 });
+    expect(p.sign).toHaveBeenLastCalledWith({ variant: "gamephoto", expiresIn: 300 });
+  });
+
+  it("signs provider-valid variants accepted by deployment admission", async () => {
+    const bucket = new IndexBucket(), p = provider();
+    const store = createGameImageStore({ deploymentOrigin, bucket, images: p.images, userId: "member_leo" });
+    await store.upload(mediaId, bytes);
+    await store.delivery(mediaId, "avatar");
+    await store.delivery(mediaId, "photo");
+    const signedVariants = p.sign.mock.calls.map(([options]) => options.variant);
+    expect(signedVariants).toEqual(["gameavatar", "gamephoto"]);
+    const variants = Object.fromEntries(signedVariants.map((id, index) => {
+      expect(id).toMatch(/^[a-zA-Z0-9]+$/u);
+      const pixels = index === 0 ? 600 : 1600;
+      return [id, { id, neverRequireSignedURLs: false,
+        options: { width: pixels, height: pixels, fit: "scale-down", metadata: "none" } }];
+    }));
+    await expect(assertPrivateGameImageVariants({
+      CLOUDFLARE_ACCOUNT_ID: "synthetic-account", CLOUDFLARE_API_TOKEN: "synthetic-token",
+    }, async () => Response.json({ success: true, result: { variants } }))).resolves.toBeUndefined();
   });
 
   it("elects one provider image for concurrent upload retries and deletes the loser", async () => {
@@ -262,7 +282,7 @@ describe("private game Images", () => {
     const delivered = await call("gameImageDelivery");
     expect(delivered.headers.get("cache-control")).toBe("private, no-store");
     expect(await delivered.json()).toMatchObject({ url: expect.stringContaining("sig=") });
-    expect(p.sign).toHaveBeenCalledExactlyOnceWith({ variant: "game-avatar", expiresIn: 300 });
+    expect(p.sign).toHaveBeenCalledExactlyOnceWith({ variant: "gameavatar", expiresIn: 300 });
   });
 
   it("keeps the Images routes behind the existing owner-bound Vercel OIDC gate", () => {

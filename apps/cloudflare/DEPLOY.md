@@ -2959,12 +2959,13 @@ provision variants, change existing assets, prove a paid plan/signing key, or
 prevent later dashboard changes. Keep account configuration changes subject to
 the same private-delivery checks.
 
-Before enabling the new Web writer, provision these account variants:
+Before enabling the new Web writer, provision these account variants. Use these
+alphanumeric provider IDs exactly; hyphenated names are rejected by Images:
 
 | ID | Width / height | Fit | Metadata | Never require signed URLs |
 | --- | --- | --- | --- | --- |
-| `game-avatar` | 600 / 600 | scale-down | none | false |
-| `game-photo` | 1600 / 1600 | scale-down | none | false |
+| `gameavatar` | 600 / 600 | scale-down | none | false |
+| `gamephoto` | 1600 / 1600 | scale-down | none | false |
 
 Inspect **all** variants in the bound account: any `neverRequireSignedURLs: true`
 variant bypasses image-level privacy, even if this app never signs that variant.
