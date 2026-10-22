@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 
 import type { HostedRuntimeLogRequest } from "@murphai/hosted-execution/runtime-control";
+import { parseHostedRuntimeLogRequest } from "@murphai/hosted-execution/parsers";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { normalizeHostedLinqConversationCapture } from "@murphai/inboxd/connectors/hosted-conversation";
 
@@ -114,13 +115,16 @@ describe("normalizeHostedLinqAttachmentUrl", () => {
 
 describe("withHostedLinqAttachmentDownloadRetry", () => {
   it("retries short-lived hosted Linq CDN misses", async () => {
+    const logRequests: HostedRuntimeLogRequest[] = [];
     const fetchMock = vi.fn<typeof fetch>(async () => {
       if (fetchMock.mock.calls.length === 1) {
         return new Response("not ready", { status: 404 });
       }
       return new Response(Uint8Array.from([9, 8, 7]), { status: 200 });
     });
-    const driver = createInjectedFetchLinqDriver(fetchMock as typeof fetch);
+    const driver = createInjectedFetchLinqDriver(fetchMock as typeof fetch, {
+      platform: createLogPlatform(logRequests),
+    });
     assert.ok(driver);
     const retrying = withHostedLinqAttachmentDownloadRetry(driver, {
       retryDelaysMs: [0],
@@ -131,6 +135,11 @@ describe("withHostedLinqAttachmentDownloadRetry", () => {
       retrying.downloadUrl("https://cdn.linqapp.com/files/voice.m4a"),
     ).resolves.toEqual(Uint8Array.from([9, 8, 7]));
     expect(fetchMock).toHaveBeenCalledTimes(2);
+    await drainHostedRuntimeLogWritesBestEffort();
+    expect(logRequests).toHaveLength(1);
+    expect(() => parseHostedRuntimeLogRequest(logRequests[0])).not.toThrow();
+    expect(logRequests[0]?.entries.map((entry) => entry.redactedJson?.result))
+      .toEqual(["failed", "succeeded"]);
   });
 });
 
@@ -396,8 +405,10 @@ describe("createHostedLinqAttachmentDownloadDriver", () => {
       driver.downloadUrl("https://cdn.linqapp.com/files/ok.bin", undefined),
     ).resolves.toEqual(Uint8Array.from([7, 8, 9]));
 
+    expect(fetchMock).toHaveBeenCalledTimes(1);
     await drainHostedRuntimeLogWritesBestEffort();
     expect(logRequests).toHaveLength(1);
+    expect(() => parseHostedRuntimeLogRequest(logRequests[0])).not.toThrow();
     const entry = logRequests[0]?.entries[0];
     assert.ok(entry);
     expect(entry.eventCode).toBe("mailbox.linq_attachment_download_finished");
@@ -416,6 +427,68 @@ describe("createHostedLinqAttachmentDownloadDriver", () => {
     expect(serializedLog).not.toContain("cdn.linqapp.com");
     expect(serializedLog).not.toContain("ok.bin");
   });
+
+  it.each(["downloadUrl", "downloadPart"] as const)(
+    "preserves the original %s failure and logs sanitized diagnostics",
+    async (operation) => {
+      const logRequests: HostedRuntimeLogRequest[] = [];
+      const url = "https://cdn.linqapp.com/files/private-synthetic.m4a?token=synthetic-query-secret";
+      const failure = new TypeError(
+        `fetch failed for ${url} with Bearer synthetic-bearer-secret`,
+        { cause: new Error("Connection reset for linq-fixture@example.com at /tmp/synthetic-linq/attachment") },
+      );
+      const publicInternetFetch = vi.fn<typeof fetch>().mockRejectedValue(failure);
+      const providerFetch = vi.fn<typeof fetch>();
+      const driver = createHostedLinqAttachmentDownloadDriver({
+        env: { LINQ_API_TOKEN: "synthetic-metadata-secret" },
+        platform: {
+          ...createLogPlatform(logRequests),
+          providerFetch,
+          publicInternetFetch,
+        },
+      });
+      assert.ok(driver?.downloadPart);
+
+      await expect(operation === "downloadUrl"
+        ? driver.downloadUrl(url)
+        : driver.downloadPart({ type: "voice_memo", url })).rejects.toBe(failure);
+      expect(publicInternetFetch).toHaveBeenCalledTimes(1);
+      expect(providerFetch).not.toHaveBeenCalled();
+      await drainHostedRuntimeLogWritesBestEffort();
+      expect(logRequests).toHaveLength(1);
+      expect(() => parseHostedRuntimeLogRequest(logRequests[0])).not.toThrow();
+      const entry = logRequests[0]?.entries[0];
+      assert.ok(entry);
+      expect(entry).toMatchObject({
+        errorCode: "download_fetch_failed",
+        eventCode: "mailbox.linq_attachment_download_finished",
+        level: "info",
+        redactedJson: {
+          errorCause: "Connection reset for [redacted-email] at <REDACTED_PATH>",
+          errorDetail: "fetch failed for <REDACTED_URL> with Bearer [redacted]",
+          errorDetailPresent: true,
+          errorName: "TypeError",
+          errorRetryable: true,
+          operation,
+          result: "failed",
+          safeErrorMessage: "Hosted execution runtime failed.",
+        },
+      });
+      expect(entry.redactedJson).not.toHaveProperty("errorMessage");
+      const serializedLog = JSON.stringify(logRequests);
+      for (const privateValue of [
+        "cdn.linqapp.com",
+        "private-synthetic.m4a",
+        "synthetic-query-secret",
+        "synthetic-bearer-secret",
+        "synthetic-metadata-secret",
+        "linq-fixture@example.com",
+        "/tmp/synthetic-linq/attachment",
+      ]) {
+        expect(serializedLog).not.toContain(privateValue);
+      }
+    },
+  );
 
   it("logs local override metadata failures without raw attachment identifiers", async () => {
     process.env.LINQ_API_BASE_URL = "http://127.0.0.1:4011";
@@ -449,6 +522,7 @@ describe("createHostedLinqAttachmentDownloadDriver", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     await drainHostedRuntimeLogWritesBestEffort();
     expect(logRequests).toHaveLength(1);
+    expect(() => parseHostedRuntimeLogRequest(logRequests[0])).not.toThrow();
     const entry = logRequests[0]?.entries[0];
     assert.ok(entry);
     expect(entry.eventCode).toBe("mailbox.linq_attachment_download_finished");
@@ -476,6 +550,7 @@ describe("createHostedLinqAttachmentDownloadDriver", () => {
       operation: "downloadPart",
       partKind: "voice_memo",
       result: "failed",
+      safeErrorMessage: "Hosted execution runtime failed.",
     });
     const serializedLog = JSON.stringify(entry.redactedJson);
     expect(serializedLog).not.toContain("att_voice_private");
@@ -795,18 +870,21 @@ describe("createHostedLinqAttachmentDownloadDriver", () => {
     }, undefined)).rejects.toThrow(
       "Hosted Linq attachment download failed with 403 Forbidden.",
     );
+    expect(fetchMock).toHaveBeenCalledTimes(2);
     await drainHostedRuntimeLogWritesBestEffort();
     expect(logRequests).toHaveLength(1);
+    expect(() => parseHostedRuntimeLogRequest(logRequests[0])).not.toThrow();
     const entry = logRequests[0]?.entries[0];
     assert.ok(entry);
     expect(entry.eventCode).toBe("mailbox.linq_attachment_download_finished");
     expect(entry.errorCode).toBe("download_http_status");
+    expect(entry.level).toBe("info");
     expect(entry.redactedJson).toMatchObject({
       directFetchAttempted: true,
       directFetchSucceeded: false,
       downloadStatus: 403,
       errorDetailPresent: true,
-      errorMessage: "Hosted execution authorization failed.",
+      safeErrorMessage: "Hosted execution authorization failed.",
       errorRetryable: true,
       failureCode: "download_http_status",
       metadataLocatorAllowed: false,
@@ -815,6 +893,16 @@ describe("createHostedLinqAttachmentDownloadDriver", () => {
       metadataStatus: 200,
       result: "failed",
     });
+    const serializedLog = JSON.stringify(logRequests);
+    for (const privateValue of [
+      "stale-invalid-origin.m4a",
+      "att_invalid_origin",
+      "host.docker.internal",
+      "example.com",
+      "linq-token",
+    ]) {
+      expect(serializedLog).not.toContain(privateValue);
+    }
   });
 
   it("logs redacted direct-download diagnostics when attachment id is missing", async () => {
@@ -841,18 +929,21 @@ describe("createHostedLinqAttachmentDownloadDriver", () => {
       "Hosted Linq attachment download failed with 404 Not Found.",
     );
 
+    expect(fetchMock).toHaveBeenCalledTimes(1);
     await drainHostedRuntimeLogWritesBestEffort();
     expect(logRequests).toHaveLength(1);
+    expect(() => parseHostedRuntimeLogRequest(logRequests[0])).not.toThrow();
     const entry = logRequests[0]?.entries[0];
     assert.ok(entry);
     expect(entry.eventCode).toBe("mailbox.linq_attachment_download_finished");
     expect(entry.errorCode).toBe("download_http_status");
+    expect(entry.level).toBe("info");
     expect(entry.redactedJson).toMatchObject({
       directFetchAttempted: true,
       directFetchSucceeded: false,
       downloadStatus: 404,
       errorDetailPresent: true,
-      errorMessage: "Hosted execution rejected an invalid request.",
+      safeErrorMessage: "Hosted execution rejected an invalid request.",
       errorRetryable: true,
       failureCode: "download_http_status",
       metadataLookupAttempted: false,
