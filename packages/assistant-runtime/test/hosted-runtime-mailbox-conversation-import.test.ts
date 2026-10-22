@@ -4742,6 +4742,7 @@ describe("hosted mailbox conversation import adapter", () => {
         importedParserToolchains.push(input.runtime.parserToolchain);
         return {
           captureId: "cap_synthetic_conversation_001",
+          capturePersistMs: 37,
           metrics: {
             nextWakeAt: null,
             parserProcessed: 0,
@@ -4797,6 +4798,7 @@ describe("hosted mailbox conversation import adapter", () => {
       },
     ]);
     assert.equal(outcome.status, "imported");
+    assert.equal(outcome.conversationImportTiming?.projectionCapturePersistMs, 37);
     assert.equal(outcome.captureId, null);
     assert.deepEqual(outcome.metrics, {
       nextWakeAt: null,

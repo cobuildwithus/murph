@@ -75,6 +75,7 @@ export interface HostedMailboxConversationImportTiming {
   audioParsePreparationOverlapMs?: number;
   projectionPrepareMs?: number;
   projectionImportMs?: number;
+  projectionCapturePersistMs?: number;
   attachmentEvidenceMs?: number;
   projectionTotalMs?: number;
 }
@@ -642,6 +643,7 @@ function mergeHostedMailboxConversationImportTiming(
   const merged: HostedMailboxConversationImportTiming = { ...(current ?? {}) };
   addHostedMailboxConversationImportTimingField(merged, "projectionPrepareMs", next.projectionPrepareMs);
   addHostedMailboxConversationImportTimingField(merged, "projectionImportMs", next.projectionImportMs);
+  addHostedMailboxConversationImportTimingField(merged, "projectionCapturePersistMs", next.projectionCapturePersistMs);
   addHostedMailboxConversationImportTimingField(merged, "attachmentEvidenceMs", next.attachmentEvidenceMs);
   addHostedMailboxConversationImportTimingField(merged, "projectionTotalMs", next.projectionTotalMs);
   addHostedMailboxConversationImportTimingField(merged, "audioPairCount", next.audioPairCount);

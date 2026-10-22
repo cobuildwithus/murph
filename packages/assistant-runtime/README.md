@@ -189,6 +189,15 @@ The existing content-free import diagnostic may include `audioPairCount`,
 spans). These are not isolated transcription/download timers; summed per-input
 projection timings are not batch wall time. Reply selection and prompts are unchanged.
 
+`mailbox.imported` may also include `projectionCapturePersistMs`, the summed
+successful serial capture-persistence span inside `projectionImportMs`. It includes
+pipeline setup, dedupe lookup, image normalization, canonical writes, and local
+index updates; it excludes connector download/normalization, inbox opening,
+parser drain, evidence publication, and pending-reply admission. It is not an
+isolated encoder timer. Audio-pair preparation and failed imports omit it.
+The existing buffered log carries this optional numeric field without another
+event, callback, or reader rollout requirement.
+
 Ordinary video bytes remain warm-container-only: accepted input may
 protect them locally while active, but snapshot planning excludes their
 validated canonical paths and idle maintenance deletes them atomically as soon

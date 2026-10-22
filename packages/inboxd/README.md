@@ -22,6 +22,12 @@ Consumers that need inbox-owned normalization without the full inboxd barrel sho
 
 - every inbound source normalizes into a single `InboundCapture` envelope
 - canonical source and attachment evidence is persisted under `raw/inbox/<source>/...`; image attachment bytes are normalized to bounded static WebP before storage or left unstored, and canonical raw metadata drops size-like provider fields instead of retaining original byte sizes
+
+Static images retain orientation correction, a 3072 px maximum edge (without
+enlargement), metadata removal, and WebP quality 88. Encoding uses effort 0 to
+reduce foreground import CPU at the cost of larger files and different encoded
+pixels; it is not byte-identical to effort 4. Existing captures are immutable,
+and animated GIF storyboard encoding keeps its separate settings.
 - append-only `ledger/inbox-captures/YYYY/YYYY-MM.jsonl` records the authoritative structured inbox-capture trail; inbound message content is retired 14 days after receipt from inline and out-of-line text, provider raw fields, parser bundles, SQLite/FTS projections, and migrated legacy copies while structural capture metadata remains
 - append-only `ledger/inbox-attachment-retention/YYYY/YYYY-MM.jsonl` records raw inbox media byte expiration, preserving descriptors, hashes, and message relationships while projecting expired bytes as `retention_expired`; images use a 90-day media window, videos use 30 days, and audio keeps 14 days, encrypted hosted snapshots and receipt logs externalize image/video bytes through hosted media references for follow-up turns, explicit canonical durable raw references remain retained, and parser derivatives survive an earlier media-byte pass only until the owning message-content deadline
 - assistant admission must not depend on hidden local inbox projection rows; decoded assistant input belongs in the assistant input store, while inbox capture remains a canonical/searchable projection

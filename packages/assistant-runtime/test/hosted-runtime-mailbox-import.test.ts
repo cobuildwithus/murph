@@ -474,7 +474,10 @@ describe("hosted mailbox import loop", () => {
       expectedUserId: TEST_USER_ID,
       async importItem(input) {
         imported.push(input.item.id);
-        return { status: "imported" };
+        return {
+          status: "imported",
+          conversationImportTiming: { projectionCapturePersistMs: 13 },
+        };
       },
       limitPerLane: 10,
       mailboxPort,
@@ -499,6 +502,7 @@ describe("hosted mailbox import loop", () => {
       "mailbox_item_conversation_002",
     ]);
     assert.equal(result.importedCount, 2);
+    assert.equal(result.conversationImportTiming?.projectionCapturePersistMs, 26);
     assert.equal(result.conversationImportedCount, 2);
     assert.deepEqual(result.blocked, []);
     assert.equal(result.state.watermarks.conversation, "2");
