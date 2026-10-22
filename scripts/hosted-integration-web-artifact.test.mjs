@@ -39,7 +39,8 @@ test("publishes only public integration output before creating private credentia
 
 test("optional setup failures and timeouts leave mandatory private proof reachable", async () => {
   const workflow = await readFile(new URL("../.github/workflows/temporal-web-deployment-admission.yml", import.meta.url), "utf8");
-  const step = (name) => workflow.split(`      - name: ${name}\n`)[1]?.split("\n      - name:")[0];
+  const admission = workflow.slice(workflow.indexOf("\n  admission:"));
+  const step = (name) => admission.split(`      - name: ${name}\n`)[1]?.split("\n      - name:")[0];
   const optional = ["Setup pnpm for public integration Web build", "Cache public integration dependencies", "Build public hosted integration Web dist", "Publish public hosted integration Web dist"];
   let optionalMinutes = 0;
   for (const name of optional) {
@@ -63,6 +64,6 @@ test("optional setup failures and timeouts leave mandatory private proof reachab
   for (const name of ["Execute exact production wire projection", "Mint private compatibility token", "Prove exact public main against private Temporal and hosted runtime"]) {
     assert.doesNotMatch(step(name), /continue-on-error|\n        if:/u);
   }
-  const jobMinutes = Number(workflow.match(/    timeout-minutes: ([0-9]+)/u)?.[1]);
+  const jobMinutes = Number(admission.match(/    timeout-minutes: ([0-9]+)/u)?.[1]);
   assert.equal(requiredMinutes + optionalMinutes + 58 + 2, jobMinutes);
 });

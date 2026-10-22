@@ -1405,3 +1405,7 @@ Security runtime and dependency patching is tracked in
 
 Requested game proposal inactivity handling and CI repair proof are recorded in
 [the delivery remediation](exec-plans/completed/2026-10-21-game-proposal-requested-delivery.md).
+
+Native image publication ordering before protected integration is recorded in
+[`runner image readiness`](exec-plans/completed/2026-10-21-runner-image-readiness.md);
+the durable contract is in `apps/cloudflare/DEPLOY.md`.
