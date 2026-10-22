@@ -1435,4 +1435,4 @@ Game proposal wording and conversation-activity selection are tracked in
 [`game chat selection and copy`](exec-plans/completed/2026-10-22-game-chat-selection-copy.md);
 `product-specs/weekly-game.md` remains the current behavior owner.
 
-Private image provider variant correction: [game Images variant IDs](exec-plans/active/2026-10-22-game-images-variant-ids.md).
+Private image provider variant correction: [game Images variant IDs](exec-plans/completed/2026-10-22-game-images-variant-ids.md).
