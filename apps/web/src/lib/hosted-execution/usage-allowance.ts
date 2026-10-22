@@ -56,6 +56,7 @@ import {
   hostedMemberPersonAccessSelect,
   hasActiveHostedThreadContainerAccessWithParticipants,
   readActiveHostedMemberAccess,
+  readGameChatAllowanceBeneficiary,
 } from "../hosted-onboarding/member-access";
 import { getPrisma } from "../prisma";
 import {
@@ -1067,6 +1068,8 @@ export async function accountHostedAiUsageForAllowanceTx(input: {
 }
 
 export async function settleHostedAiUsageForAllowanceTx(input: {
+  /** Server-owned admission snapshot; never taken from the usage record. */
+  allowanceBeneficiaryMemberId?: string | null;
   memberId: string;
   now?: Date;
   record: AssistantUsageRecord;
@@ -1075,6 +1078,9 @@ export async function settleHostedAiUsageForAllowanceTx(input: {
   const now = input.now ?? new Date();
   const at = normalizeHostedAiUsageAllowanceDate(input.record.occurredAt);
   const operatorFunded = await isVerifiedOperatorTaskUsage(input);
+  const sourceMemberId = input.memberId;
+  const beneficiaryMemberId = input.allowanceBeneficiaryMemberId ?? sourceMemberId;
+  input = { ...input, memberId: beneficiaryMemberId };
   await lockHostedAiUsageAllowanceBeneficiaryTx({
     memberId: input.memberId,
     tx: input.tx,
@@ -1127,7 +1133,9 @@ export async function settleHostedAiUsageForAllowanceTx(input: {
         billingRef: memberState.billingRef,
         familyAccessActive: false,
       };
-  const threadContainerAccessActive = await hasHostedAiUsageThreadContainerAccess({
+  const threadContainerAccessActive = input.allowanceBeneficiaryMemberId && memberState.threadContainer
+    ? true // Charge already-admitted work even if its game or room changed.
+    : await hasHostedAiUsageThreadContainerAccess({
     container: memberState,
     containerMemberId: input.memberId,
     now,
@@ -1173,7 +1181,7 @@ export async function settleHostedAiUsageForAllowanceTx(input: {
     return buildHostedAiUsageAllowanceSettlementFromPeriod(period);
   }
   if (pricingDecision.kind === "unpriceable_openai_image") {
-    return accountHostedAiUsageOpenAiImageMalformedForAllowanceTx({
+    const settlement = await accountHostedAiUsageOpenAiImageMalformedForAllowanceTx({
       decision: pricingDecision,
       memberId: input.memberId,
       now,
@@ -1181,6 +1189,8 @@ export async function settleHostedAiUsageForAllowanceTx(input: {
       record: input.record,
       tx: input.tx,
     });
+    return { ...settlement, limitNoticeCandidate: settlement.limitNoticeCandidate
+      ? { ...settlement.limitNoticeCandidate, memberId: sourceMemberId } : null };
   }
   const priced = operatorFunded
     ? {
@@ -1215,7 +1225,7 @@ export async function settleHostedAiUsageForAllowanceTx(input: {
     return buildHostedAiUsageAllowanceSettlementFromPeriod(period);
   }
 
-  return accountHostedAiUsageAllowancePeriodSpendTx({
+  const settlement = await accountHostedAiUsageAllowancePeriodSpendTx({
     costUsdMicros: priced.costUsdMicros,
     memberId: input.memberId,
     now,
@@ -1224,6 +1234,8 @@ export async function settleHostedAiUsageForAllowanceTx(input: {
     sourceUsageId: input.record.usageId,
     tx: input.tx,
   });
+  return { ...settlement, limitNoticeCandidate: settlement.limitNoticeCandidate
+    ? { ...settlement.limitNoticeCandidate, memberId: sourceMemberId } : null };
 }
 
 async function markHostedAiUsageForgivenByPlanResetTx(input: {
@@ -1395,6 +1407,7 @@ export async function reconcileHostedAiUsageGateForBillingModeChangeTx(input: {
 }
 
 async function resolveHostedAiUsageGateWithPolicy(input: {
+  gameFundingResolved?: true;
   memberId: string;
   now?: Date | string;
   preserveExistingLegacyPaidPeriodLimit: boolean;
@@ -1404,10 +1417,12 @@ async function resolveHostedAiUsageGateWithPolicy(input: {
   const now = normalizeHostedAiUsageAllowanceDate(input.now ?? new Date());
 
   return runHostedAiUsageAllowanceTransaction(prisma, async (tx) => {
-    await lockHostedAiUsageAllowanceBeneficiaryTx({
-      memberId: input.memberId,
-      tx,
-    });
+    const projectedBeneficiary = input.gameFundingResolved ? null
+      : await readGameChatAllowanceBeneficiary({ memberId: input.memberId, now, prisma: tx });
+    const lockedMemberIds = [...new Set([input.memberId, projectedBeneficiary ?? input.memberId])].sort();
+    for (const memberId of lockedMemberIds) {
+      await lockHostedAiUsageAllowanceBeneficiaryTx({ memberId, tx });
+    }
     const memberState = await tx.hostedMember.findUnique({
       where: {
         id: input.memberId,
@@ -1445,6 +1460,16 @@ async function resolveHostedAiUsageGateWithPolicy(input: {
     if (!memberState) {
       throw new TypeError("Hosted AI usage allowance member does not exist.");
     }
+    if (!input.gameFundingResolved && memberState.threadContainer && memberState.suspendedAt === null) {
+      const beneficiaryMemberId = await readGameChatAllowanceBeneficiary({ memberId: input.memberId, now, prisma: tx });
+      if (beneficiaryMemberId && beneficiaryMemberId !== input.memberId) {
+        if (!lockedMemberIds.includes(beneficiaryMemberId)) {
+          throw new Error("Game room funding changed during allowance admission; retry the admission.");
+        }
+        const decision = await resolveHostedAiUsageGateWithPolicy({ ...input, memberId: beneficiaryMemberId, now, prisma: tx, gameFundingResolved: true });
+        return { ...decision, memberId: input.memberId };
+      }
+    }
     const usageCreditProjection = normalizeHostedAiUsageCreditProjection(memberState);
 
     const allowanceAccess = memberState.suspendedAt === null
@@ -1460,7 +1485,9 @@ async function resolveHostedAiUsageGateWithPolicy(input: {
         };
     const allowanceBillingRef = allowanceAccess.billingRef;
     const familyAccessActive = allowanceAccess.familyAccessActive;
-    const threadContainerAccessActive = await hasHostedAiUsageThreadContainerAccess({
+    const threadContainerAccessActive = input.gameFundingResolved && memberState.threadContainer
+      ? true
+      : await hasHostedAiUsageThreadContainerAccess({
       container: memberState,
       containerMemberId: input.memberId,
       now,
@@ -1570,12 +1597,26 @@ export type HostedAiUsageMemberState = Prisma.HostedMemberGetPayload<{
   select: typeof hostedAiUsageMemberSelect;
 }>;
 
-export async function readHostedAiUsageGate(input: {
+export async function readHostedAiUsageGate(input: Parameters<typeof readHostedAiUsageGateForMember>[0]): Promise<HostedAiUsageGateDecisionWithSource> {
+  return readHostedAiUsageGateForMember(input);
+}
+
+/** Server-only invocation check. The caller must supply the beneficiary from
+ * its locked, exact runtime owner; current game bindings must not remap it. */
+export async function readHostedAiUsageGateForFrozenBeneficiary(input: {
+  beneficiaryMemberId: string;
+  now?: Date | string;
+  prisma: HostedAiUsageAllowanceClient;
+}): Promise<HostedAiUsageGateDecisionWithSource> {
+  return readHostedAiUsageGateForMember({ memberId: input.beneficiaryMemberId, now: input.now, prisma: input.prisma }, true);
+}
+
+async function readHostedAiUsageGateForMember(input: {
   memberId: string;
   memberState?: HostedAiUsageMemberState;
   now?: Date | string;
   prisma?: HostedAiUsageAllowanceClient;
-}): Promise<HostedAiUsageGateDecisionWithSource> {
+}, gameFundingResolved = false): Promise<HostedAiUsageGateDecisionWithSource> {
   const prisma = input.prisma ?? getPrisma();
   const now = normalizeHostedAiUsageAllowanceDate(input.now ?? new Date());
 
@@ -1590,6 +1631,13 @@ export async function readHostedAiUsageGate(input: {
 
   if (!memberState) {
     throw new TypeError("Hosted AI usage allowance member does not exist.");
+  }
+  if (!gameFundingResolved && memberState.threadContainer && memberState.suspendedAt === null) {
+    const beneficiaryMemberId = await readGameChatAllowanceBeneficiary({ memberId: input.memberId, now, prisma });
+    if (beneficiaryMemberId && beneficiaryMemberId !== input.memberId) {
+      const decision = await readHostedAiUsageGateForMember({ memberId: beneficiaryMemberId, now, prisma }, true);
+      return { ...decision, memberId: input.memberId };
+    }
   }
   const usageCreditProjection = normalizeHostedAiUsageCreditProjection(memberState);
 
@@ -1606,7 +1654,9 @@ export async function readHostedAiUsageGate(input: {
       };
   const allowanceBillingRef = allowanceAccess.billingRef;
   const familyAccessActive = allowanceAccess.familyAccessActive;
-  const threadContainerAccessActive = memberState.threadContainer
+  const threadContainerAccessActive = gameFundingResolved && memberState.threadContainer
+    ? true
+    : memberState.threadContainer
     ? await hasActiveHostedThreadContainerAccessWithParticipants({
         container: memberState,
         containerMemberId: input.memberId,
@@ -1684,13 +1734,16 @@ export async function readHostedAiUsageGateSnapshots(input: {
           now,
           prisma: tx,
         });
+        const periodMemberId = decision.allowanceSource === "thread_container"
+          ? await readGameChatAllowanceBeneficiary({ memberId, now, prisma: tx }) ?? memberId
+          : memberId;
         const persisted = decision.allowed
           || decision.reason === "ai_usage_limit_exceeded"
           ? await tx.hostedAiUsagePeriod.findUnique({
               select: { updatedAt: true },
               where: {
                 memberId_periodStart: {
-                  memberId,
+                  memberId: periodMemberId,
                   periodStart: decision.periodStart,
                 },
               },

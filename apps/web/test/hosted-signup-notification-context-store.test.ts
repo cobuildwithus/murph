@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   decryptHostedWebNullableString: vi.fn(),
@@ -49,6 +49,8 @@ const CONTEXT = {
 
 describe("hosted signup notification context store", () => {
   beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-22T12:00:00.000Z"));
     vi.clearAllMocks();
     mocks.revalidatePreparedHostedDomainRootForWebTx.mockResolvedValue({
       root: Promise.resolve({
@@ -61,6 +63,8 @@ describe("hosted signup notification context store", () => {
       "encrypted-context",
     );
   });
+
+  afterEach(() => { vi.useRealTimers(); });
 
   it("encrypts the first pending context under the member control root", async () => {
     const updateMany = vi.fn().mockResolvedValue({ count: 1 });

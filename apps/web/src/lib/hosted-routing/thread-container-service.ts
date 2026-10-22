@@ -100,6 +100,79 @@ export interface PreparedHostedThreadContainerCreation
   cryptoDomainRoots: PreparedHostedCryptoDomainRootCandidates;
 }
 
+/** A real group workspace can precede its first provider message and route. */
+export async function prepareHostedThreadContainerBootstrap(input: {
+  prisma: PrismaClient;
+}): Promise<{ containerMemberId: string; cryptoDomainRoots: PreparedHostedCryptoDomainRootCandidates }> {
+  const containerMemberId = generateHostedMemberId();
+  const cryptoDomainRoots = await prepareHostedCryptoDomainRootCandidates({ prisma: input.prisma, userId: containerMemberId });
+  await prewarmPreparedHostedCryptoDomainRootForWeb({ domain: getHostedCryptoDomainForLane("mailbox-payload"), prepared: cryptoDomainRoots, userId: containerMemberId });
+  return { containerMemberId, cryptoDomainRoots };
+}
+
+/** Caller holds the game row lock. No provider coordinates exist at this point. */
+export async function createHostedGameThreadContainerTx(input: {
+  gameId: string;
+  ownerMemberId: string;
+  occurredAt: Date;
+  prepared: Awaited<ReturnType<typeof prepareHostedThreadContainerBootstrap>>;
+  prisma: Prisma.TransactionClient;
+}): Promise<{ containerMemberId: string; activationMailboxItemId: string }> {
+  const game = await input.prisma.game.findFirst({
+    where: { id: input.gameId, status: { in: ["negotiating", "live"] }, chatContainerMemberId: null },
+    select: { players: { select: { memberId: true }, take: 3 } },
+  });
+  if (game?.players.length !== 2 || !game.players.some((player) => player.memberId === input.ownerMemberId)) {
+    throw new TypeError("A new game chat requires an agreed two-player audience.");
+  }
+  const members = await input.prisma.hostedMember.findMany({
+    where: { id: { in: game.players.map((player) => player.memberId) }, suspendedAt: null, threadContainer: { is: null } },
+    select: { id: true }, take: 2,
+  });
+  if (members.length !== 2) throw new TypeError("Game chat players are unavailable.");
+  const containerMemberId = input.prepared.containerMemberId;
+  await createHostedMember({ billingStatus: HostedBillingStatus.not_started, memberId: containerMemberId, prisma: input.prisma });
+  await provisionPreparedHostedCryptoDomainRootsTx({ prepared: input.prepared.cryptoDomainRoots, reason: "hosted-thread-container.game-bootstrap", tx: input.prisma, userId: containerMemberId });
+  await input.prisma.hostedThreadContainer.create({ data: { memberId: containerMemberId, ownerMemberId: input.ownerMemberId, monthlyUsageLimitUsdMicros: HOSTED_THREAD_CONTAINER_DEFAULT_MONTHLY_USAGE_LIMIT_USD_MICROS } });
+  await ensureHostedGroupStructureForThreadContainerTx({ containerMemberId, now: input.occurredAt, tx: input.prisma });
+  const appended = await appendHostedMailboxEnvelopeTx({ tx: input.prisma, envelope: buildHostedExecutionMemberActivatedWake({
+    eventId: `game-chat-activation:${input.gameId}`, memberId: containerMemberId,
+    memberChannels: resolveHostedThreadContainerMemberChannels("linq"),
+    onboardingFollowupEnrollment: false, occurredAt: input.occurredAt.toISOString(), signupWelcome: null,
+  }) });
+  return { containerMemberId, activationMailboxItemId: appended.item.id };
+}
+
+/** Attaches the actual provider receipt to the already-isolated group runtime. */
+export async function attachHostedThreadContainerBootstrapRouteTx(input: {
+  gameId: string;
+  prepared: PreparedHostedThreadContainerDeliveryRoute;
+  prisma: Prisma.TransactionClient;
+}): Promise<void> {
+  const { containerMemberId, deliveryRoute } = input.prepared;
+  if (deliveryRoute.channel !== "linq") throw new TypeError("Game bootstrap requires an iMessage group route.");
+  assertPreparedHostedThreadDeliveryRoute({ containerMemberId, deliveryRoute, prepared: input.prepared });
+  const game = await input.prisma.game.findFirst({ where: { id: input.gameId, chatContainerMemberId: containerMemberId }, select: { id: true } });
+  if (!game) throw new TypeError("The game chat bootstrap no longer owns this container.");
+  const channel = deliveryRoute.channel;
+  const threadId = deliveryRoute.threadId;
+  const accountLookupKey = projectHostedThreadDeliveryRouteAccountLookupKey(deliveryRoute);
+  const threadIdentityLookupKey = createHostedExternalThreadIdentityLookupKey({ channel, threadId });
+  const threadLookupKey = createHostedExternalThreadLookupKey({ channel, threadId, accountLookupKey });
+  if (!threadIdentityLookupKey || !threadLookupKey) throw new TypeError("Game chat receipt has no provider route identity.");
+  await acquireHostedThreadContainerRouteWriteLockTx({ channel, threadId, prisma: input.prisma });
+  const existing = await input.prisma.hostedThreadRoute.findMany({
+    where: { OR: [{ channel, threadIdentityLookupKey: { in: createHostedExternalThreadIdentityLookupKeyReadCandidates({ channel, threadId }) } }, { containerMemberId }] },
+    select: { containerMemberId: true, threadLookupKey: true }, take: 2,
+  });
+  if (existing.length) {
+    if (existing.length !== 1 || existing[0]!.containerMemberId !== containerMemberId || existing[0]!.threadLookupKey !== threadLookupKey) throw new TypeError("The game chat provider route is already owned.");
+    return;
+  }
+  await demoteHostedMemberLinqGroupChatBindingsTx({ enforceProviderDispatchFence: true, linqChatId: threadId, prisma: input.prisma });
+  await createHostedThreadRouteRowTx({ channel, containerMemberId, accountLookupKey, threadIdentityLookupKey, threadLookupKey, deliveryRouteEncrypted: input.prepared.deliveryRouteEncrypted, prisma: input.prisma });
+}
+
 /**
  * Builds every variable crypto input for a possible synthetic container before
  * its transaction opens. Preparation is speculative and never grants route or

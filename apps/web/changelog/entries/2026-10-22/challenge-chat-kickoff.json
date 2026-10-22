@@ -1,0 +1,20 @@
+{
+  "publishedOn": "2026-10-22",
+  "order": 200,
+  "item": {
+    "id": "challenge-chat-kickoff",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Your challenge starts in chat",
+    "summary": "Murph introduces accepted two-player challenges in your shared chat and keeps proposed changes conversational.",
+    "details": "Murph reuses a matching group or creates one, then offers optional reminders. You can discuss the same challenge in another chat with the same two players. Proposals made in chat receive one conversational reply, without a separate announcement.",
+    "relevanceTags": [
+      "challenges",
+      "groups"
+    ],
+    "sourcePullRequests": [
+      4312,
+      4313
+    ]
+  }
+}

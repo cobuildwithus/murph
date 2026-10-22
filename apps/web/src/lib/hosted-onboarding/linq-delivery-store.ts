@@ -3163,7 +3163,73 @@ function readHostedLinqTelegramUsageLimitRetryAt(input: {
   return input.retryAfterAt;
 }
 
-async function claimExistingHostedLinqDeliveryProviderDispatchTx(input: {
+function isHostedLinqDeliveryDispatchIncompatible(
+  input: Parameters<typeof claimAttemptedHostedLinqDeliveryProviderDispatchTx>[0],
+): boolean {
+  return (
+    (
+      (input.delivery.groupJoinOutreachId ?? null)
+        !== input.data.groupJoinOutreachId
+      || !datesEqual(
+        input.delivery.groupJoinReplyOccurredAt ?? null,
+        input.data.groupJoinReplyOccurredAt,
+      )
+    )
+    || (
+      isHostedLinqPinnedTargetDeliveryTemplate(input.data.template)
+      && (
+        input.delivery.linqChatLookupKey !== input.data.linqChatLookupKey
+        || input.delivery.phoneNumberLookupKey !== input.data.phoneNumberLookupKey
+        || (
+          input.data.template === HOSTED_LINQ_GROUP_LINE_RECOVERY_TEMPLATE
+          && input.delivery.source !== input.source
+        )
+        || (
+          input.data.template !== HOSTED_LINQ_GROUP_SETUP_TEMPLATE
+          && input.delivery.sourceRef !== input.data.sourceRef
+        )
+        || input.delivery.targetKind !== input.data.targetKind
+        || input.delivery.template !== input.data.template
+      )
+    )
+  );
+}
+
+/** Generation reservations precede provider attempts and use their own narrow CAS. */
+async function claimExistingHostedLinqDeliveryProviderDispatchTx(
+  input: Parameters<typeof claimAttemptedHostedLinqDeliveryProviderDispatchTx>[0],
+): ReturnType<typeof claimAttemptedHostedLinqDeliveryProviderDispatchTx> {
+  if (isHostedLinqDeliveryDispatchIncompatible(input)) {
+    return { claimed: false, id: input.delivery.id, outcome: "incompatible" };
+  }
+
+  // Accepted game lifecycle work reserves this exact delivery identity before
+  // generation. Its source-current and audience guards run before dispatch;
+  // this CAS advances the same untouched reservation, never a second send.
+  if (
+    input.delivery.source === "game_lifecycle"
+    && (input.delivery.status === "awaiting_generation" || input.delivery.status === "generation_queued")
+    && input.data.status === HOSTED_LINQ_DELIVERY_PROVIDER_DISPATCH_STARTED_STATUS
+    && input.delivery.acceptedAt === null && input.delivery.deliveredAt === null
+    && input.delivery.failedAt === null && input.delivery.skippedAt === null
+    && input.delivery.lastReceiptAt === null && input.delivery.messageLookupKey === null
+  ) {
+    const advanced = await input.prisma.hostedLinqDelivery.updateMany({
+      where: {
+        id: input.delivery.id, source: "game_lifecycle", status: input.delivery.status,
+        updatedAt: input.delivery.updatedAt, acceptedAt: null, deliveredAt: null,
+        failedAt: null, skippedAt: null, lastReceiptAt: null, messageLookupKey: null,
+      },
+      data: input.data,
+    });
+    return { claimed: advanced.count === 1, id: input.delivery.id,
+      ...(advanced.count === 1 ? {} : { retryAt: input.attemptedAt }) };
+  }
+
+  return claimAttemptedHostedLinqDeliveryProviderDispatchTx(input);
+}
+
+async function claimAttemptedHostedLinqDeliveryProviderDispatchTx(input: {
   advancePreProviderAttempt?: boolean;
   attemptedAt: Date;
   data: HostedLinqDeliveryProviderDispatchData;
@@ -3196,39 +3262,6 @@ async function claimExistingHostedLinqDeliveryProviderDispatchTx(input: {
   returnExistingFailureCode?: boolean;
   source: string;
 }): Promise<HostedLinqDeliveryProviderDispatchClaim> {
-  if (
-    (
-      (input.delivery.groupJoinOutreachId ?? null)
-        !== input.data.groupJoinOutreachId
-      || !datesEqual(
-        input.delivery.groupJoinReplyOccurredAt ?? null,
-        input.data.groupJoinReplyOccurredAt,
-      )
-    )
-    || (
-      isHostedLinqPinnedTargetDeliveryTemplate(input.data.template)
-      && (
-        input.delivery.linqChatLookupKey !== input.data.linqChatLookupKey
-        || input.delivery.phoneNumberLookupKey !== input.data.phoneNumberLookupKey
-        || (
-          input.data.template === HOSTED_LINQ_GROUP_LINE_RECOVERY_TEMPLATE
-          && input.delivery.source !== input.source
-        )
-        || (
-          input.data.template !== HOSTED_LINQ_GROUP_SETUP_TEMPLATE
-          && input.delivery.sourceRef !== input.data.sourceRef
-        )
-        || input.delivery.targetKind !== input.data.targetKind
-        || input.delivery.template !== input.data.template
-      )
-    )
-  ) {
-    return {
-      claimed: false,
-      id: input.delivery.id,
-      outcome: "incompatible",
-    };
-  }
 
   const replayableUsageLimitRichLinkPartial =
     input.data.template === "ai_usage_quota"
@@ -3302,6 +3335,7 @@ async function claimExistingHostedLinqDeliveryProviderDispatchTx(input: {
         : { retryAt: input.attemptedAt }),
     };
   }
+
 
   if (
     input.advancePreProviderAttempt === true

@@ -1,9 +1,10 @@
 import type { HostedGameChatBootstrapRequest, HostedGameChatBootstrapResponse } from "./game-bootstrap-control.ts";
 export { hostedGameChatBootstrapRequestSchema, hostedGameChatBootstrapResponseSchema } from "./game-bootstrap-control.ts";
 export type { HostedGameChatBootstrapRequest, HostedGameChatBootstrapResponse, HostedGameChatBootstrapResult } from "./game-bootstrap-control.ts";
+export { buildGameProposalInstructions, buildGameKickoffInstructions } from "./game-chat-notifications.ts";
 import type { HostedGameToolRequest, HostedGameToolResponse } from "./game-tools.ts";
-export { hostedGameToolRequestSchema, hostedGameToolResponseSchema, hostedGameUpdateSchema, hostedGameChatStateSchema } from "./game-tools.ts";
-export type { HostedGameToolRequest, HostedGameToolResponse, HostedGameUpdate } from "./game-tools.ts";
+export { hostedGameToolRequestSchema, hostedGameToolResponseSchema, hostedGameUpdateSchema, hostedGameChatStateSchema, hostedGamePhotoSchema } from "./game-tools.ts";
+export type { HostedGameToolRequest, HostedGameToolResponse, HostedGameUpdate, HostedGamePhoto, HostedGameChatState } from "./game-tools.ts";
 import {
   HOSTED_MAILBOX_LANES,
   type HostedMailboxLane,

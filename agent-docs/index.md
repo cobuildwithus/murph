@@ -1,3 +1,8 @@
+Game acceptance messages, exact-pair chat discovery and shared allowance work
+are tracked in [the completed lifecycle plan](exec-plans/completed/2026-10-22-game-chat-lifecycle.md).
+The [weekly game spec](product-specs/weekly-game.md), `../ARCHITECTURE.md` and
+[Postgres runtime ownership](references/hosted-postgres-runtime.md) own the contracts.
+
 Command-gated CLI source-cause telemetry is owned by
 [`runtime-state`](../packages/runtime-state/README.md#optional-cli-source-cause);
 implementation and local verification are tracked in
@@ -1434,6 +1439,14 @@ recorded in [game post notifications](exec-plans/completed/2026-10-21-game-daily
 Game proposal wording and conversation-activity selection are tracked in
 [`game chat selection and copy`](exec-plans/completed/2026-10-22-game-chat-selection-copy.md);
 `product-specs/weekly-game.md` remains the current behavior owner.
+
+Shared game progress and chat photo check-ins are tracked in
+[`game progress and check-ins`](exec-plans/completed/2026-10-22-game-progress-checkins.md).
+That plan includes accepted attachment-ID import, consent-time URL refresh and
+canonical private Images storage; the weekly game spec and architecture own the
+URL-free mailbox contract.
+Challenge negotiation and encrypted task/stake changes are tracked in
+[`game negotiation`](exec-plans/completed/2026-10-22-game-negotiation.md).
 
 Hosted photo import CPU reduction and measurement limits are tracked in
 [the photo import plan](exec-plans/completed/2026-10-22-photo-import-latency.md);

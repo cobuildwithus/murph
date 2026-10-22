@@ -237,6 +237,7 @@ export function expectAdvertisedMurphDynamicTools(
     exerciseRoutineResponseCardAvailable?: boolean;
     groupAvailable?: boolean;
     gamesAvailable?: boolean;
+    gamePhotosAvailable?: boolean;
     groupRoomModelAvailable?: boolean;
     imessageContactAvailable?: boolean;
     messageTargetingAvailable?: boolean;

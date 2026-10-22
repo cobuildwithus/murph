@@ -4,6 +4,7 @@ import type { Prisma, PrismaClient } from "@prisma/client";
 
 import { readHostedAiUsageGate } from "../hosted-execution/usage-allowance";
 import { hasHostedRuntimeActiveAccess } from "../hosted-mailbox/runtime-access";
+import { readGameChatAllowanceBeneficiary } from "../hosted-onboarding/member-access";
 import { normalizeNullableString } from "../primitives";
 import { getPrisma } from "../prisma";
 import {
@@ -102,12 +103,14 @@ export async function readHostedGroupUsageFundingTargetByJoinCode(input: {
     return null;
   }
 
+  const beneficiaryMemberId = await readGameChatAllowanceBeneficiary({ memberId: group.runtimeMemberId, prisma });
+
   return {
     displayName: normalizeNullableString(group.displayName),
     fundingPath: buildHostedGroupUsageFundingPath(group.joinCode),
     joinCode: group.joinCode,
     kind: group.kind,
-    runtimeMemberId: group.runtimeMemberId,
+    runtimeMemberId: beneficiaryMemberId ?? group.runtimeMemberId,
   };
 }
 
@@ -133,9 +136,10 @@ export async function readHostedGroupFundingRecoveryStatus(input: {
     memberId: input.runtimeMemberId,
     prisma,
   });
+  const beneficiaryMemberId = await readGameChatAllowanceBeneficiary({ memberId: input.runtimeMemberId, prisma }) ?? input.runtimeMemberId;
   const group = await prisma.hostedGroup.findUnique({
     select: { joinCode: true },
-    where: { runtimeMemberId: input.runtimeMemberId },
+    where: { runtimeMemberId: beneficiaryMemberId },
   });
   const container = await prisma.hostedThreadContainer.findUnique({
     select: { memberId: true },
@@ -169,7 +173,7 @@ export async function readHostedGroupFundingRecoveryStatus(input: {
   // available or already pending.
   const automaticRefillAvailable = capacityState === "low"
     ? await hasHostedGroupAutomaticRefillAvailable({
-        beneficiaryMemberId: input.runtimeMemberId,
+        beneficiaryMemberId,
         prisma,
       }).catch(() => false)
     : false;
@@ -179,7 +183,7 @@ export async function readHostedGroupFundingRecoveryStatus(input: {
   // HostedGroup row at all) still gets a funding URL through the signed
   // funding-only locator.
   const locator = group?.joinCode
-    ?? buildHostedGroupUsageFundingLocatorForRuntimeMember(input.runtimeMemberId);
+    ?? buildHostedGroupUsageFundingLocatorForRuntimeMember(beneficiaryMemberId);
 
   return {
     fundingNeeded,
@@ -223,12 +227,14 @@ export async function readHostedGroupUsageFundingTargetByLocator(input: {
     return null;
   }
 
+  const beneficiaryMemberId = await readGameChatAllowanceBeneficiary({ memberId: runtimeMemberId, prisma });
+
   return {
     displayName: normalizeNullableString(group?.displayName ?? null),
     fundingPath: buildHostedGroupUsageFundingPath(input.locator),
     joinCode: input.locator,
     kind: group?.kind ?? "custom",
-    runtimeMemberId,
+    runtimeMemberId: beneficiaryMemberId ?? runtimeMemberId,
   };
 }
 

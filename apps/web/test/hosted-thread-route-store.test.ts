@@ -36,6 +36,7 @@ function createPrismaMock() {
   };
 
   return {
+    $queryRaw: vi.fn(async () => []),
     hostedMember,
     hostedMemberRouting,
     hostedThreadContainerParticipant,

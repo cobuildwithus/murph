@@ -1,3 +1,4 @@
+import { handleGameChatBootstrapControl } from "../game/chat-bootstrap";
 import { handleGameChatTool } from "../game/chat-tool";
 import type { HostedRuntimeIdentity } from "../hosted-execution/runtime-owner";
 import "server-only";
@@ -453,14 +454,10 @@ async function recordHostedRuntimeGroupJournalFact(
 export async function handleHostedRuntimeConversationTool(
   input: HostedRuntimeGroupToolHandlerInput,
 ): Promise<HostedRuntimeGroupToolResponse> {
-  // Compatible consumers deploy first; Web writers land in the feature PRs.
   if (input.request.action === "game_chat_bootstrap") {
-    return { action: "game_chat_bootstrap", result: { status: "unavailable" } };
+    return handleGameChatBootstrapControl({ memberId: input.memberId, runtimeIdentity: input.runtimeIdentity ?? null, request: input.request });
   }
-  if (input.request.action === "game_photo") {
-    return { action: "game_photo", result: { status: "unavailable", error: "game_feature_unavailable" } };
-  }
-  if (input.request.action === "read_game" || input.request.action === "update_game") {
+  if (input.request.action === "read_game" || input.request.action === "update_game" || input.request.action === "game_photo") {
     return handleGameChatTool({ memberId: input.memberId, runtimeIdentity: input.runtimeIdentity ?? null, request: input.request });
   }
   return handleHostedRuntimeGroupTool({ ...input, request: input.request });

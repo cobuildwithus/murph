@@ -28,6 +28,7 @@ import {
   type HostedRuntimeIdentity,
 } from "@/src/lib/hosted-execution/runtime-owner";
 import { executeHostedRuntimeOwnerCommand } from "@/src/lib/hosted-execution/runtime-owner-control";
+import { readHostedAiUsageGate } from "@/src/lib/hosted-execution/usage-allowance";
 import { executeHostedRuntimeReplicaPutCommand } from "@/src/lib/hosted-execution/runtime-replica-puts";
 import { hostedWorkspaceSnapshotObjectKey, hostedBrowserVaultReplicaUserPrefix, listHostedBrowserVaultReplicaSiblingObjectKeys } from "@murphai/hosted-execution/storage-paths";
 import { lockHostedMemberRow } from "@/src/lib/hosted-onboarding/shared";
@@ -77,6 +78,7 @@ describe.skipIf(!enabled)("Postgres runtime ownership", () => {
       await observer.hostedRuntimePutDrain.deleteMany({ where: { userId: { in: members } } });
       await observer.hostedRuntimeOrphan.deleteMany({ where: { userId: { in: members } } });
       await observer.hostedRuntimeOwner.deleteMany({ where: { userId: { in: members } } });
+      await observer.hostedThreadContainer.deleteMany({ where: { memberId: { in: members } } });
       await observer.hostedMember.deleteMany({ where: { id: { in: members } } });
       await observer.hostedRuntimeCutover.update({ where: { id: "runtime" }, data: { phase: previousPhase } });
     }
@@ -94,6 +96,38 @@ describe.skipIf(!enabled)("Postgres runtime ownership", () => {
     const result = await claimHostedRuntime({ prisma, userId, processingMode: "default" });
     if (result.status === "blocked") throw new Error(`Unexpected admission rejection: ${result.reason}`);
     return result;
+  }
+
+  async function gameFundingRooms(now: Date) {
+    const primary = await member();
+    const duplicate = await member();
+    const firstPlayer = await member();
+    const secondPlayer = await member();
+    const ids = [primary, duplicate, firstPlayer, secondPlayer];
+    await observer.hostedMember.updateMany({ where: { id: { in: ids } }, data: { billingStatus: "not_started" } });
+    for (const room of [primary, duplicate]) {
+      await observer.hostedThreadContainer.create({ data: { memberId: room, ownerMemberId: firstPlayer } });
+      await observer.hostedThreadRoute.create({ data: {
+        channel: "linq", containerMemberId: room, threadLookupKey: `synthetic-thread-${room}`,
+        threadIdentityLookupKey: `synthetic-identity-${room}`,
+      } });
+      await observer.hostedThreadContainerParticipant.createMany({ data: [firstPlayer, secondPlayer].map(participantMemberId => ({
+        containerMemberId: room, participantMemberId, handleLookupKey: `synthetic_${participantMemberId}`,
+        firstSeenAt: now, lastSeenAt: now,
+      })) });
+    }
+    await observer.gameProfile.createMany({ data: [firstPlayer, secondPlayer].map(memberId => ({
+      memberId, firstNameEncrypted: "synthetic-sealed-name", timeZone: "UTC",
+    })) });
+    const game = await observer.game.create({ data: {
+      id: `runtime_funding_${randomUUID()}`, createdBy: firstPlayer, status: "live",
+      liveRosterKey: [firstPlayer, secondPlayer].sort().join(":"), chatContainerMemberId: primary,
+      terms: { v: 1, versions: [] }, termsWordsEncrypted: "synthetic-sealed-terms",
+      players: { create: [firstPlayer, secondPlayer].map((memberId, seat) => ({
+        memberId, seat, timeZone: "UTC", dayOne: now,
+      })) },
+    } });
+    return { primary, duplicate, firstPlayer, secondPlayer, game };
   }
 
   it.each([false, true])("leaves admission available after failed direct transport (retained target: %s)", async retainedTarget => {
@@ -137,6 +171,7 @@ describe.skipIf(!enabled)("Postgres runtime ownership", () => {
       providerEgressTokenHash: "synthetic-provider-hash",
 
       platformAiUsageAllowed: true,
+      allowanceBeneficiaryMemberId: "synthetic-frozen-beneficiary",
       failureCount: 2,
       lastErrorCode: "SYNTHETIC_FAILURE",
     } });
@@ -154,6 +189,106 @@ describe.skipIf(!enabled)("Postgres runtime ownership", () => {
         memberRead.mockRestore();
       }
     });
+  });
+
+  it("freezes shared game funding for one invocation and recomputes only after release", async () => {
+    vi.stubEnv("MURPH_GAME_ENABLED", "true");
+    vi.stubEnv("MURPH_GAME_MEMBER_ALLOWLIST", "");
+    const now = new Date("2030-01-15T12:00:00Z");
+    try {
+      const { primary, duplicate, firstPlayer, game } = await gameFundingRooms(now);
+      const firstClaim = await claimHostedRuntime({ prisma: first, userId: duplicate!, processingMode: "default", now });
+      expect(firstClaim.status).toBe("claimed");
+      if (firstClaim.status === "blocked") throw new Error("Synthetic game room admission failed.");
+      expect(firstClaim.owner.allowanceBeneficiaryMemberId).toBe(primary);
+      const initialIdentity = identity(firstClaim.owner);
+      const launch = { prisma: first, identity: initialIdentity, runnerContainerName: "synthetic-funded-runner",
+        workspaceVersion: "1", providerEgressTokenHash: null, platformAiUsageAllowed: true };
+      await prepareHostedRuntimeLaunch(launch);
+
+      // Changing the canonical room cannot move already admitted usage.
+      await observer.game.update({ where: { id: game.id }, data: { chatContainerMemberId: duplicate! } });
+      const retry = await claimHostedRuntime({ prisma: second, userId: duplicate!, processingMode: "default", now });
+      expect(retry).toMatchObject({ status: "existing", owner: {
+        attemptId: initialIdentity.attemptId, allowanceBeneficiaryMemberId: primary,
+      } });
+      expect((await prepareHostedRuntimeLaunch(launch)).allowanceBeneficiaryMemberId).toBe(primary);
+      const wire = await executeHostedRuntimeOwnerCommand({ prisma: second, userId: duplicate!, command: { operation: "reconcile" } });
+      expect(wire.owner).not.toHaveProperty("allowanceBeneficiaryMemberId");
+      await retireHostedRuntime({ prisma: first, identity: initialIdentity });
+      expect(await releaseHostedRuntimeAfterRetirement({ prisma: first, identity: initialIdentity,
+        runnerContainerName: launch.runnerContainerName })).toBe(true);
+
+      const next = await claimHostedRuntime({ prisma: second, userId: duplicate!, processingMode: "default", now });
+      if (next.status === "blocked") throw new Error("Synthetic successor admission failed.");
+      expect(next.status).toBe("claimed");
+      expect(next.owner.generation).toBe(firstClaim.owner.generation + 1n);
+      expect(next.owner.allowanceBeneficiaryMemberId).toBe(duplicate);
+
+      // Completion accounting retains the beneficiary after game access ends.
+      await observer.game.update({ where: { id: game.id }, data: { status: "void", liveRosterKey: null } });
+      const nextIdentity = identity(next.owner);
+      const frozen = await first.$transaction(tx => requireHostedRuntimeOwnerTx(tx, nextIdentity));
+      expect(frozen.allowanceBeneficiaryMemberId).toBe(duplicate);
+      await expect(first.$transaction(tx => requireHostedRuntimeOwnerTx(tx, initialIdentity)))
+        .rejects.toMatchObject({ code: "HOSTED_RUNTIME_OWNER_STALE" });
+
+      await retireHostedRuntime({ prisma: first, identity: nextIdentity });
+      await releaseHostedRuntimeAfterRetirement({ prisma: first, identity: nextIdentity, runnerContainerName: null });
+      await observer.hostedMember.update({ where: { id: firstPlayer! }, data: { billingStatus: "active" } });
+      const ordinary = await claimHostedRuntime({ prisma: second, userId: duplicate!, processingMode: "default", now });
+      expect(ordinary).toMatchObject({ status: "claimed", owner: { allowanceBeneficiaryMemberId: null } });
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it.each([
+    { frozenSpent: 7_500_000n, sourceSpent: 0n, sourceDenied: false, allowed: false },
+    { frozenSpent: 0n, sourceSpent: 0n, sourceDenied: false, allowed: true },
+    { frozenSpent: 0n, sourceSpent: 7_500_000n, sourceDenied: false, allowed: false },
+    { frozenSpent: 0n, sourceSpent: 0n, sourceDenied: true, allowed: false },
+  ])("checks frozen funding before first launch ($frozenSpent / $sourceSpent / $sourceDenied)", async scenario => {
+    vi.stubEnv("MURPH_GAME_ENABLED", "true");
+    vi.stubEnv("MURPH_GAME_MEMBER_ALLOWLIST", "");
+    const now = new Date();
+    try {
+      const { primary, duplicate, firstPlayer, game } = await gameFundingRooms(now);
+      const claimed = await claimHostedRuntime({ prisma: first, userId: duplicate, processingMode: "default", now });
+      if (claimed.status === "blocked") throw new Error("Synthetic game room admission failed.");
+      expect(claimed.owner.allowanceBeneficiaryMemberId).toBe(primary);
+      const periodStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+      const periodEnd = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
+      await observer.hostedAiUsagePeriod.createMany({ data: [
+        { memberId: primary, spentUsdMicros: scenario.frozenSpent },
+        { memberId: duplicate, spentUsdMicros: scenario.sourceSpent },
+      ].map(row => ({ ...row, periodStart, periodEnd, billingPlanCode: "launch_monthly", limitUsdMicros: 7_500_000n })) });
+
+      // Between claim and workspace preparation, ordinary sponsorship and a
+      // different primary would otherwise select a different allowance.
+      await observer.hostedMember.update({ where: { id: firstPlayer }, data: { billingStatus: "active" } });
+      await observer.game.update({ where: { id: game.id }, data: { chatContainerMemberId: duplicate } });
+      const sourceGate = await readHostedAiUsageGate({ memberId: duplicate, now, prisma: observer });
+      expect(sourceGate.allowed).toBe(scenario.sourceSpent === 0n);
+      const launch = { prisma: first, identity: identity(claimed.owner), runnerContainerName: "synthetic-race-runner",
+        workspaceVersion: "1", providerEgressTokenHash: null,
+        platformAiUsageAllowed: sourceGate.allowed && !scenario.sourceDenied };
+      const prepared = await prepareHostedRuntimeLaunch(launch);
+      expect(prepared.platformAiUsageAllowed).toBe(scenario.allowed);
+      expect(prepared.allowanceBeneficiaryMemberId).toBe(primary);
+      const effect = await executeHostedRuntimeOwnerCommand({ prisma: second, userId: duplicate, command: {
+        operation: "authorize_effect", attemptId: launch.identity.attemptId, generation: launch.identity.generation,
+        runnerContainerName: launch.runnerContainerName, managedAi: true,
+      } });
+      expect(effect.status).toBe(scenario.allowed ? "authorized" : "blocked");
+      if (!scenario.allowed) {
+        await observer.hostedAiUsagePeriod.update({ where: { memberId_periodStart: { memberId: primary, periodStart } },
+          data: { spentUsdMicros: 0n } });
+        expect((await prepareHostedRuntimeLaunch({ ...launch, platformAiUsageAllowed: true })).platformAiUsageAllowed).toBe(false);
+      }
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
   it("authorizes both provider identities with one fresh statement and no transaction", async () => {
@@ -928,7 +1063,7 @@ describe.skipIf(!enabled)("Postgres runtime ownership", () => {
       .toBe(firstOperation === "checkpoint" ? 1n : 0n);
   });
 
-  it.each(["default", "system_mailbox", "inbox_media_retention"] as const)("preserves %s admission policy with one eligibility query", async processingMode => {
+  it.each(["default", "system_mailbox", "inbox_media_retention"] as const)("preserves %s admission policy with a bounded game fallback", async processingMode => {
     for (const policy of ["missing", "active", "paused", "suspended", "granted", "revoked"] as const) {
       const userId = await member(policy === "paused" ? "paused" : "active");
       if (policy === "missing") await observer.hostedMember.delete({ where: { id: userId } });
@@ -943,7 +1078,7 @@ describe.skipIf(!enabled)("Postgres runtime ownership", () => {
         prisma: first, userId, command: { operation: "claim", processingMode },
       }));
       expect(result, policy).toMatchObject({ cutover: "postgres", status: allowed ? "claimed" : "blocked" });
-      expect(operations, policy).toHaveLength(allowed ? 5 : 3);
+      expect(operations, policy).toHaveLength(allowed ? 5 : processingMode === "inbox_media_retention" ? 3 : 4);
       if (!allowed) {
         // The Worker spaces only admission denials; the reason never names the policy.
         expect(result, policy).toEqual({ cutover: "postgres", status: "blocked", owner: null, blockedReason: "admission" });

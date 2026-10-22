@@ -1,12 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  readGameChatAllowanceBeneficiary: vi.fn(),
   buildHostedGroupUsageFundingLocatorForRuntimeMember: vi.fn(),
   buildHostedGroupUsageFundingUrl: vi.fn(),
   resolveHostedPublicBaseUrl: vi.fn(),
 }));
 
 vi.mock("server-only", () => ({}));
+vi.mock("@/src/lib/hosted-onboarding/member-access", () => ({
+  readGameChatAllowanceBeneficiary: mocks.readGameChatAllowanceBeneficiary,
+}));
 
 vi.mock("@/src/lib/hosted-groups/group-usage-funding", () => ({
   buildHostedGroupUsageFundingLocatorForRuntimeMember:
@@ -23,6 +27,7 @@ import { projectHostedAiUsageLimitNoticeForDelivery } from "@/src/lib/hosted-exe
 describe("projectHostedAiUsageLimitNoticeForDelivery", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.readGameChatAllowanceBeneficiary.mockResolvedValue(null);
     mocks.buildHostedGroupUsageFundingLocatorForRuntimeMember.mockReturnValue(
       "gf1.member_group_runtime.signature",
     );
@@ -32,6 +37,13 @@ describe("projectHostedAiUsageLimitNoticeForDelivery", () => {
     mocks.resolveHostedPublicBaseUrl.mockReturnValue(
       "https://www.withmurph.ai",
     );
+  });
+
+  it("points a duplicate game room at its current shared allowance", async () => {
+    mocks.readGameChatAllowanceBeneficiary.mockResolvedValue("synthetic_primary_room");
+    await projectHostedAiUsageLimitNoticeForDelivery({ memberId: "synthetic_alternate_room",
+      message: "Paused", noticeCode: "thread_usage_limit_reached", prisma: {} as never });
+    expect(mocks.buildHostedGroupUsageFundingLocatorForRuntimeMember).toHaveBeenCalledWith("synthetic_primary_room");
   });
 
   it("always gives an exhausted room a neutral private recovery link", async () => {

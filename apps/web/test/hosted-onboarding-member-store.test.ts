@@ -104,6 +104,8 @@ describe("hosted-member-store", () => {
     process.env.HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION;
 
   beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-22T12:00:00.000Z"));
     setHostedContactPrivacyKeyring({
       currentVersion: "v1",
       keysByVersion: {
@@ -138,6 +140,7 @@ describe("hosted-member-store", () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     restoreEnvValue("HOSTED_CONTACT_PRIVACY_KEYS", previousHostedContactPrivacyKeys);
     restoreEnvValue(
       "HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION",

@@ -27,4 +27,21 @@ describe("game tools reuse signed group transport", () => {
     await expect(port.request(request)).rejects.toThrow();
     expect(fetchImpl).toHaveBeenCalledOnce();
   });
+  it("transports only exact photo provenance and fails closed on an uncertain save", async () => {
+    const environment = readHostedExecutionEnvironment(createHostedExecutionTestEnv({ HOSTED_WEB_BASE_URL: "https://web.example.test" }));
+    const request = { action: "game_photo" as const, origin: { kind: "accepted_input" as const, assistantInputId: "ain_" + "b".repeat(32) }, photo: { operation: "save" as const, gameId: "game_synthetic", sourceMessageRef: "ain_" + "a".repeat(32), attachmentOrdinal: 1 } };
+    const result = { action: "game_photo", result: { status: "ok", photoOutcome: "saved" } };
+    const fetchImpl = vi.fn<typeof fetch>(async (_url, init) => {
+      expect(JSON.parse(String(init?.body))).toEqual(request);
+      expect(new Headers(init?.headers).get(HOSTED_EXECUTION_SIGNATURE_HEADER)).toBeTruthy();
+      return Response.json(result);
+    });
+    const port = createHostedRuntimeGroupToolPort({ boundUserId: "container_synthetic", fetchImpl, timeoutMs: 2_000,
+      transport: { callbackSigning: environment.webCallbackSigning, mode: "direct", webControlBaseUrl: "https://web.example.test", workspaceCheckpointBridge: null } });
+    expect(await port.request(request)).toEqual(result);
+    fetchImpl.mockClear(); fetchImpl.mockRejectedValueOnce(new Error("Synthetic lost response"));
+    await expect(port.request(request)).rejects.toThrow();
+    expect(fetchImpl).toHaveBeenCalledOnce();
+  });
+
 });

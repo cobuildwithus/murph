@@ -67,8 +67,21 @@ Warm containers keep their existing media HTTP protocol unchanged.
 
 Runtime admission keeps the member lock before one composed eligibility read
 (suspension, explicit consent withdrawal, and canonical direct or sponsored
-access; retention still skips only the access requirement). Claim returns its
-locked routing result; target selection and launch preparation also reuse the
+access; retention still skips only the access requirement). Game-only group
+access uses a bounded fallback that checks the source room's consent and
+suspension before resolving its shared game's primary room. Claim freezes that
+server-owned allowance beneficiary on the exact invocation. Existing claims and
+launch retries retain it even if the game ends or its primary room changes;
+only a released successor recomputes it. First launch preparation checks that
+frozen beneficiary's allowance without resolving current sponsorship or game
+routing again, and may only narrow the caller's usage permission. This prevents
+a changed funding source from admitting against a different balance than the
+one that will be charged. A denied preparation stays denied on retry.
+Callback accounting uses the locked
+owner's frozen beneficiary and retains it on the immutable usage row. Null
+preserves ordinary source-member attribution, including historical rows. This
+field never enters the runtime protocol or grants personal assistant access.
+Claim returns its locked routing result; target selection and launch preparation also reuse the
 Postgres gate proved by their ownership transaction instead of rereading it
 after commit.
 

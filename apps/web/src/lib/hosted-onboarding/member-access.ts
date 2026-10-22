@@ -17,6 +17,7 @@ import {
 } from "../legal/consent";
 import { getPrisma } from "../prisma";
 import { isGameEnabled } from "../game/access";
+import { GAME_CHAT_SETTLED_ACCESS_MS, readGameChatFundingRooms } from "../game/chat-access";
 import { parseCommaSeparatedList } from "../primitives";
 import { renderUserFacingMessage } from "../hosted-messages/user-facing-messages";
 import {
@@ -39,9 +40,9 @@ import type { HostedOnboardingReadClient } from "./shared";
  *
  * - an active membership in an active, unsuspended account group (family), or
  * - for synthetic thread-container members, the container owner's access,
- *   an active current participant, or a bound live two-player game. Game
- *   access never activates either player's private assistant and retains the
- *   existing room usage allowance.
+ *   an active current participant, or an eligible exact-pair game. Game access
+ *   never activates either player's private assistant. Duplicate rooms share
+ *   the announcement room's existing allowance while game-sponsored.
  *
  * Owners cannot themselves be containers, so the derivation depth is at most
  * two. Boolean gates select only the matching member ID; callers that need
@@ -267,19 +268,24 @@ export async function hasActiveHostedThreadContainerAccessWithParticipants(input
 
   return (await readGameChatAccessIds({
     memberIds: [input.containerMemberId],
+    now: input.now,
     prisma: input.prisma ?? getPrisma(),
   })).has(input.containerMemberId);
 }
 
-/** A live two-player game funds only its bound room, never personal access. */
-function activeGameChatAccessWhere(): Prisma.HostedMemberWhereInput {
+/** The bound room keeps its existing allowance through negotiation and a
+ * seven-day results window. Duplicate rooms use the async funding projection. */
+function activeGameChatAccessWhere(now = new Date()): Prisma.HostedMemberWhereInput {
   const allowlist = parseCommaSeparatedList(process.env.MURPH_GAME_MEMBER_ALLOWLIST);
   return {
     suspendedAt: null,
     threadContainer: { isNot: null },
     chatHostedGames: {
       some: {
-        status: "live",
+        OR: [
+          { status: { in: ["negotiating", "live"] } },
+          { status: "settled", settledAt: { gt: new Date(now.getTime() - GAME_CHAT_SETTLED_ACCESS_MS), lte: now } },
+        ],
         AND: [
           { players: { some: { seat: 0 } } },
           { players: { some: { seat: 1 } } },
@@ -305,23 +311,20 @@ function activeGameChatAccessWhere(): Prisma.HostedMemberWhereInput {
 
 async function readGameChatAccessIds(input: {
   memberIds: readonly string[];
-  prisma: Pick<Prisma.TransactionClient, "hostedMember">;
+  now?: Date;
+  prisma: Pick<Prisma.TransactionClient, "$queryRaw">;
 }): Promise<Set<string>> {
-  if (!isGameEnabled() || input.memberIds.length === 0) return new Set();
-  const rows = await input.prisma.hostedMember.findMany({
-    select: { id: true },
-    where: { ...activeGameChatAccessWhere(), id: { in: [...input.memberIds] } },
-  });
-  return new Set(rows.map((row) => row.id));
+  return new Set((await readGameChatFundingRooms({ ...input, now: input.now ?? new Date() })).keys());
 }
 
 /**
  * Set-based projection of the pure access branch for queries that must select
  * access-holding members in the database (pagination, counts, sweeps). It
- * intentionally cannot recurse into thread-container participant rosters; use
- * `activeHostedMemberAccessWithParticipantsWhere` for single-member gates.
+ * intentionally cannot correlate a game pair with a room roster. Its bound-game
+ * branch is a candidate projection only; use `readActiveHostedMemberAccess`
+ * for authoritative single-member gates.
  */
-export function activeHostedMemberAccessWhere(): Prisma.HostedMemberWhereInput {
+export function activeHostedMemberAccessWhere(now = new Date(), includeGames = true): Prisma.HostedMemberWhereInput {
   const personAccess: Prisma.HostedMemberWhereInput["OR"] = [
     { billingStatus: HostedBillingStatus.active },
     {
@@ -339,7 +342,7 @@ export function activeHostedMemberAccessWhere(): Prisma.HostedMemberWhereInput {
 
   return {
     OR: [
-      ...(isGameEnabled() ? [activeGameChatAccessWhere()] : []),
+      ...(includeGames && isGameEnabled() ? [activeGameChatAccessWhere(now)] : []),
       {
         OR: personAccess,
         threadContainer: null,
@@ -359,19 +362,20 @@ export function activeHostedMemberAccessWhere(): Prisma.HostedMemberWhereInput {
   };
 }
 
-/** Canonical single-member access, including current participant sponsorship. */
-export function activeHostedMemberAccessWithParticipantsWhere(now = new Date()): Prisma.HostedMemberWhereInput {
+/** Candidate predicate including participant sponsorship. Authoritative game
+ * access additionally requires the exact-pair async projection. */
+export function activeHostedMemberAccessWithParticipantsWhere(now = new Date(), includeGames = true): Prisma.HostedMemberWhereInput {
   return {
     suspendedAt: null,
     OR: [
-      activeHostedMemberAccessWhere(),
+      activeHostedMemberAccessWhere(now, includeGames),
       {
         threadContainer: {
           is: {
             participants: {
               some: {
                 ...activeHostedThreadContainerParticipantWhere({ now }),
-                participant: activeHostedMemberAccessWhere(),
+                participant: activeHostedMemberAccessWhere(now, includeGames),
               },
             },
           },
@@ -387,12 +391,30 @@ export async function readActiveHostedMemberAccess(input: {
   prisma?: HostedOnboardingReadClient;
 }): Promise<boolean> {
   const prisma = input.prisma ?? getPrisma();
-  // Keep boolean gates in one SQL statement instead of hydrating related rows.
+  // Ordinary access is one statement. Game-only rooms additionally require
+  // the exact observed pair, including the bound announcement room itself.
   const member = await prisma.hostedMember.findUnique({
     select: { id: true },
-    where: { ...activeHostedMemberAccessWithParticipantsWhere(input.now), id: input.memberId },
+    where: { ...activeHostedMemberAccessWithParticipantsWhere(input.now, false), id: input.memberId },
   });
-  return member !== null;
+  return member !== null || (await readGameChatAccessIds({ memberIds: [input.memberId], now: input.now, prisma })).has(input.memberId);
+}
+
+/** Ordinary paid/participant-funded rooms retain their own balance. Only a
+ * game-sponsored room borrows its game's canonical announcement-room balance. */
+export async function readGameChatAllowanceBeneficiary(input: {
+  memberId: string;
+  now?: Date;
+  prisma: Pick<Prisma.TransactionClient, "hostedMember" | "$queryRaw">;
+}): Promise<string | null> {
+  if (!isGameEnabled()) return null;
+  const now = input.now ?? new Date();
+  const ownAccess = await input.prisma.hostedMember.findUnique({
+    select: { id: true },
+    where: { ...activeHostedMemberAccessWithParticipantsWhere(now, false), id: input.memberId },
+  });
+  if (ownAccess) return null;
+  return (await readGameChatFundingRooms({ memberIds: [input.memberId], now, prisma: input.prisma })).get(input.memberId) ?? null;
 }
 
 export async function readActiveHostedMemberAccessState(input: {
@@ -435,7 +457,7 @@ export async function readActiveHostedMemberAccessIds(input: {
   now?: Date;
   prisma?: Pick<
     Prisma.TransactionClient,
-    "hostedMember" | "hostedThreadContainerParticipant"
+    "hostedMember" | "hostedThreadContainerParticipant" | "$queryRaw"
   >;
 }): Promise<Set<string>> {
   const memberIds = [...new Set(input.memberIds)];
@@ -468,7 +490,7 @@ export async function readActiveHostedMemberAccessIds(input: {
         where: {
           ...activeHostedThreadContainerParticipantWhere({ now }),
           containerMemberId: { in: containerMemberIds },
-          participant: activeHostedMemberAccessWhere(),
+          participant: activeHostedMemberAccessWhere(now),
         },
       });
   if (
@@ -504,6 +526,7 @@ export async function readActiveHostedMemberAccessIds(input: {
 
   const gameContainers = await readGameChatAccessIds({
     memberIds: containerMemberIds.filter((id) => !activeMemberIds.has(id)),
+    now,
     prisma,
   });
   for (const id of gameContainers) activeMemberIds.add(id);
@@ -583,6 +606,7 @@ export async function readHostedRuntimeAiAccessDecision(input: {
       });
     if (participantAllowed || (await readGameChatAccessIds({
       memberIds: [input.memberId],
+      now,
       prisma,
     })).has(input.memberId)) {
       return { allowed: true };
@@ -612,7 +636,7 @@ export async function readHostedRuntimeAiAllowedMemberIds(input: {
   now?: Date;
   prisma?: Pick<
     Prisma.TransactionClient,
-    "hostedMember" | "hostedThreadContainerParticipant"
+    "hostedMember" | "hostedThreadContainerParticipant" | "$queryRaw"
   >;
 }): Promise<Set<string>> {
   const memberIds = [...new Set(input.memberIds)];
@@ -687,6 +711,7 @@ export async function readHostedRuntimeAiAllowedMemberIds(input: {
 
   const gameContainers = await readGameChatAccessIds({
     memberIds: containerMemberIds.filter((id) => !allowedMemberIds.has(id)),
+    now,
     prisma,
   });
   for (const id of gameContainers) allowedMemberIds.add(id);
@@ -856,7 +881,7 @@ export async function hasAnyActiveHostedThreadContainerParticipant(input: {
         now: input.now ?? new Date(),
       }),
       containerMemberId: input.containerMemberId,
-      participant: activeHostedMemberAccessWhere(),
+      participant: activeHostedMemberAccessWhere(input.now),
     },
   });
 

@@ -84,6 +84,17 @@ export async function readHostedLinqFailedMessage(messageId: string): Promise<Me
   });
 }
 
+/** Refresh a received attachment locator only for an authorized import. Never persist it. */
+export async function readHostedLinqAttachment(attachmentId: string) {
+  return requestHostedLinqSdkOrThrow({
+    operation: "attachment retrieve",
+    request: (client) => client.attachments.retrieve(attachmentId),
+    timeoutMessage: "Linq attachment retrieval timed out.",
+    timeoutMs: 3_000,
+    maxResponseBytes: 16 * 1024,
+  });
+}
+
 export async function resendHostedLinqMessage(input: {
   chatId: string;
   message: MessageSendParams["message"];
@@ -99,6 +110,19 @@ export async function resendHostedLinqMessage(input: {
   return { chatId: response.chat_id, messageId: response.message.id };
 }
 
+/** Pure preflight, shared by immutable first-message producers and provider entry. */
+export function validateHostedLinqChatFirstMessage(message: string): ReturnType<typeof splitTrailingHttpsLink> {
+  const split = splitTrailingHttpsLink(message);
+  if (containsHttpUrlText(split.linkUrl ? split.message : message)) {
+    throw new TypeError("A new Linq chat cannot include URL text in its first message.");
+  }
+  if (split.linkUrl && !split.message.trim()) {
+    throw new TypeError("A new Linq chat with a rich link must include caller-supplied text.");
+  }
+  normalizeRequiredString(split.message, "message");
+  return split;
+}
+
 export async function createHostedLinqChat(input: {
   from: string;
   idempotencyKey?: string | null;
@@ -106,25 +130,8 @@ export async function createHostedLinqChat(input: {
   signal?: AbortSignal;
   to: string[];
 }): Promise<HostedLinqSendResult> {
-  const split = splitTrailingHttpsLink(input.message);
-  if (!split.linkUrl) {
-    if (containsHttpUrlText(input.message)) {
-      throw new TypeError(
-        "A new Linq chat cannot include URL text in its first message.",
-      );
-    }
-    return createHostedLinqChatWithPrimaryMessage(input);
-  }
-  if (!split.message.trim()) {
-    throw new TypeError(
-      "A new Linq chat with a rich link must include caller-supplied text.",
-    );
-  }
-  if (containsHttpUrlText(split.message)) {
-    throw new TypeError(
-      "A new Linq chat cannot include URL text in its first message.",
-    );
-  }
+  const split = validateHostedLinqChatFirstMessage(input.message);
+  if (!split.linkUrl) return createHostedLinqChatWithPrimaryMessage(input);
 
   const result = await createHostedLinqChatWithPrimaryMessage({
     ...input,

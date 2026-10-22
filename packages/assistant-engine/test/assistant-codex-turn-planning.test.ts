@@ -5084,6 +5084,28 @@ describe('assistant Codex turn planning', () => {
   })
 
   it.each([
+    ['linq', false, true, false, true],
+    ['telegram', false, true, false, false],
+    ['email', false, true, false, false],
+    ['linq', true, true, false, false],
+    ['linq', false, false, false, false],
+    ['linq', false, true, true, false],
+  ] as const)('gates game photo tool and context for %s direct=%s hosted=%s scheduled=%s', async (channel, threadIsDirect, hosted, scheduled, available) => {
+    const plan = await resolveAssistantRouteTurnPlan({
+      acceptedInputItems: scheduled ? [] : [{ id: `ain_${'e'.repeat(32)}`, source: 'assistant-input' }],
+      executionContext: hosted ? { hosted: { memberId: 'synthetic-photo-member', userEnvKeys: [] } } : null,
+      hostedToolContext: hosted ? { ...createHostedToolContext(), groupTool: { request: vi.fn() } } : null,
+      input: { ...createMessageInput(), channel, threadIsDirect, turnTrigger: scheduled ? 'automation-cron' : 'automation-auto-reply' },
+      profile: { promptProfile: 'conversation', threadScope: 'session-thread', toolProfile: 'provider-turn' },
+      promptTimeContext: { currentLocalDate: '2030-04-01', currentTimeZone: 'UTC' },
+      route: createRoute(), session: createSession(),
+      sharedPlan: createSharedPlan({}, { channel, threadIsDirect, threadId: 'synthetic-photo-thread' }),
+    })
+    expect(plan.dynamicTools.some(tool => tool.name === 'game_photo')).toBe(available)
+    expect((plan.systemPrompt ?? '').includes('a clear current photo relevant to the sender')).toBe(available)
+  })
+
+  it.each([
     ['linq', true, true, false, true],
     ['linq', false, true, false, false],
     ['telegram', true, true, false, false],

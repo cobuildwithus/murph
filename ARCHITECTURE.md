@@ -5418,7 +5418,7 @@ later. It validates the command (`command.ts`), checks uploads, seals words,
 then locks the game row, reads the database clock, asks a pure rule, and writes
 state plus its history rows. There is no request-id dedupe: every command is
 keyed by its own ids or state, so a repeat writes nothing. The same people
-can't have two live games at once: a live game holds `game.live_roster_key`
+can't have two negotiating/live games at once: either phase holds `game.live_roster_key`
 (its players' sorted ids), a plain unique column set at go-live and cleared at
 settle or expiry, which also fits groups later. There is
 no timer or cron: whether a game is over is computed from its state, and reads
@@ -5430,6 +5430,7 @@ until the viewer has posted that day; media reads use the same rule.
 
 `/api/game/v1` routes are thin: they fold path ids into one command. Writes:
 `PUT /me/profile`, `POST /games`, `POST /invites/:token/accept`,
+`POST /invites/:token/negotiate`,
 `POST /games/:id/entries`, `DELETE /games/:id/entries/:entryId`,
 `POST /tickets/:id/redeem`, and `POST /media`. Reads: `GET /home`,
 `GET /games/:id`, `GET /invites/:token`, `GET /media/:key`. They use a plain
@@ -5522,9 +5523,17 @@ claim or native session credential is replayed during rollback.
 
 ### Weekly game chat changes
 
+Invitees may submit a concrete counterproposal through `negotiate` instead of
+accepting the original terms. The game enters `negotiating`, reserves its pair,
+and has no player Day 1 or posting obligations. Only the other player's approval
+activates it. Default Day 1 is calculated at approval, while an explicit later
+date remains honored. Cancelling or declining a proposal does not accept the
+original challenge. The original invite expiry bounds abandoned negotiation and
+releases the pair reservation.
+
 `game.pending_change` is one versioned structural proposal serialized with the
-existing game row lock. `game.chat_container_member_id` references its shared
-room; delete clears the binding. App `POST /api/game/v1/games/:id/changes`
+existing game row lock. `game.chat_container_member_id` references its primary outbound
+room; delete clears the binding. It is not a read or mutation permission. App `POST /api/game/v1/games/:id/changes`
 records the proposing player and expected terms version. Signed group dynamic
 `read_game` / `update_game` actions share the existing group-tool transport.
 The Web bridge resolves the actor from an accepted group mailbox message, then
@@ -5541,31 +5550,127 @@ receipt (`createdAt`), then nonblank group display name, then room creation date
 (newest first). The existing member/kind/created-at index serves the one-row
 activity projection; no message payloads or participant observation timestamps
 are read for ranking. Provider verification still decides eligibility, and a
-bound room is never silently replaced. Existing Linq delivery
-claims and notification outbox own creation and proposal effects. Initial group
-creation stores its encrypted provider receipt in that existing delivery row;
-an unknown creation permits only the same frozen provider request and idempotency
-key, never a new creation identity. Its neutral opening message contains no
-proposal terms, so a replacement proposal can safely recover the same creation.
-Both new and reused rooms announce the current proposal through the guarded
-notification path; an accepted opener never means a proposal was sent.
-Notification delivery rechecks the current proposal before provider dispatch.
-Only that validated requested proposal bypasses iMessage inactivity, allowing a
-new room with no inbound history; all route, runtime, health and dispatch fences
-remain in force. No new queue or timer
-is introduced. Reads expire stale proposals; applying a change appends versioned
-terms only from an unstarted day and never rewrites entries or tickets.
+bound room is never silently replaced. `chat-membership.ts` also admits a fresh
+exact same-pair room independently of that binding. Accepted-message actor proof,
+local pair revalidation and the canonical game lock still fence every mutation;
+the model cannot name another actor or move the primary destination. Discovery
+returns at most five negotiating, live or settled games for that exact pair.
 
-Canonical member access can grant a synthetic group room access through its live
-eligible two-player game. Both players must remain unsuspended and must not have
+Task and stake proposals prepare the next encrypted `terms_words` envelope outside the
+transaction, and compare the original envelope plus terms version under the
+lock. Pending JSON retains structural stake keys and task-change metadata, never
+plaintext task or stake words. Agreement atomically publishes both structural
+terms and their prepared encrypted words. Public projections decrypt in one
+bounded batch and never expose the stored envelope. Task changes take effect on
+future days; a new stake replaces the wager for the whole game, including earlier
+misses, after explicit `stakesApplyToWholeGame` consent once play has begun.
+Settlement intentionally retains its existing latest-stake whole-game semantics.
+
+The negotiation migration widens the game status and pair-reservation CHECKs.
+Compatible runtime schema readers must deploy before Web emits negotiating or
+extended pending-change data; enable expanded assistant tools only after Web can
+apply those fields. Native uses `supportsNegotiation` on an invite and additive
+`canEditTasks` / `canEditStakes` controls, preserving old-client acceptance.
+
+Agreement atomically reserves an `awaiting_generation` row in the existing Linq
+delivery table, keyed `game-started:<gameId>`. App `change_proposed` events,
+including initial invite negotiation, reserve the ordinary
+`game-change:<gameId>:<proposalId>` identity. There is no separate negotiation
+intro. Chat-origin proposals instead store `origin: chat` and
+`deliveryStatus: conversation`: Murph's ordinary turn asks the other player,
+without a second backend notification or any claim that its reply was delivered.
+App notifications use shared instruction builders and `require_send`, not exact
+hardcoded announcement text. Started context offers optional first-few-days
+reminders without scheduling them; later opt-in must read current rules.
+
+`chat-lifecycle.ts` drains one due intent and one frozen recovery per existing minute
+onboarding sweep. Discovery makes at most twenty serial 3-second roster reads
+plus one 3-second recheck; frozen recovery uses at most a 10-second create and
+a 3-second roster read. This caps provider waits at 76 seconds within the
+180-second route budget, leaving time for database, crypto and sibling work. Queue publication and `generation_queued` transition share one transaction;
+failed first signals are recovered by re-signalling the exact unconsumed mailbox
+pointer. Once consumed, the runtime and ordinary outbox own retry. Proposal
+recovery compares the current proposal's hashed key, and retires superseded work.
+A skipped, empty pre-generation receipt owned by that container returns terminal
+unavailable so its ordered runtime wake can complete and release successors.
+That exception requires the original lifecycle reservation template and no
+sender, payload or provider receipt evidence; frozen effects keep their existing
+reconciliation contract.
+Provider lookup and encryption stay outside database transactions. Existing-room
+delivery rechecks the primary route, exact pair and source before provider dispatch.
+Only that validated game notification bypasses iMessage inactivity; other route,
+runtime, health and dispatch fences remain authoritative.
+
+For a new room, `chat-bootstrap.ts` prepares a real group container and mailbox
+without a provider thread ID. The group runtime generates one first message.
+The engine gives this formatter the first-message URL constraints. The signed
+callback applies the same pure Linq text preflight as provider creation before
+claiming line capacity or freezing anything. Invalid output can regenerate on
+the existing event; task and stake words remain unchanged. Once a provider effect
+may have begun, corrected text can never replace its immutable frozen request.
+A signed host-only callback freezes its exact text, players and sending line in
+the same encrypted delivery receipt before provider creation. An uncertain result
+replays only that frozen request and idempotency key, never a new group identity
+or newly generated text. After acceptance, route attachment, participant ownership
+and matching proposal sent-state commit together. A second lifecycle event waits
+while an earlier frozen create owns that room. Bounded frozen-receipt recovery
+repairs provider-accepted but unattached routes independently of a model wake.
+The nullable `bootstrap_route_attached_at` marker commits with route attachment;
+a partial pending index excludes completed and skipped receipts without
+rewriting provider status. Apply this additive column/index before Web and
+retain them through rollback until new work is drained.
+The engine binds the same group session to the real provider route, preserving
+the kickoff context for the next reply. No creator personal runtime is used.
+
+Apply additive database migrations first. Deploy compatible hosted-execution
+parsers, runtime/engine notification consumers and Web callback consumers before
+enabling bootstrap producers; refresh warm runtimes before producing the new
+route kind. Old parsers reject it safely but cannot execute it. Rollback cannot
+remove these consumers while bootstrap work remains queued or frozen.
+
+Canonical member access can grant a synthetic group room access through its
+eligible two-player game, including negotiation. Both players must remain unsuspended and must not have
 withdrawn health-data consent; feature flag/allowlist remain authoritative. The
 room consumes the ordinary group usage allowance, without granting either player
-personal AI access. Apply the additive migration and compatible Web first, then
+personal AI access. An eligible alternate room uses the same primary allowance;
+its server-owned funding beneficiary is frozen with invocation admission and
+usage receipts, while the source conversation remains the reply destination.
+Changing rooms cannot create a second included budget. Paid or independently
+sponsored groups retain their existing allowance owner. Apply the additive migration and compatible Web first, then
 deploy Worker/runtime consumers and refresh warm runtimes before native proposal
 writers. Old Web rejects unknown game requests; old transport response parsers
 reject new responses without replay, even if new Web already applied an update.
 Do not roll back those parsers while new game tools are active. Old warm runtimes
 have no game tools until refreshed.
+
+### Shared game progress and chat photo imports
+
+Shared game reads use canonical `loadCurrent` maintenance and frozen settlement
+results. The dedicated metadata projection reports daily status and grouped
+ticket obligations without decrypting entry words or returning media. Candidate
+games remain bounded; the existing maximum duration, attempts and stake counts
+bound entries and ticket reads. Actor-specific photo introduction state is read
+only for the host-resolved accepted sender.
+
+`game_profile.chat_photo_introduced_at` and `chat_photo_offer` own the once-per-
+member introduction and its versioned exact selection. The latter contains
+only structural source refs, room/game/day identity, expiry and resolution ref;
+no image, message text or provider URL is persisted there. Offer and dismissal
+writes revalidate accepted sender/runtime authority in the transaction. A
+consented save selects the immutable original accepted Linq attachment ID and
+MIME type; canonical mailbox payloads deliberately omit download URLs. Offers
+perform no provider lookup. Saving refreshes the locator through the bounded
+Linq SDK boundary outside the transaction, verifies its exact ID and MIME, and
+keeps that locator request-local. It rejects other senders/rooms/days and
+downloads at most 4 MiB from the fixed Linq CDN with
+redirects disabled, then stores the bytes through the canonical member-owned
+private Cloudflare Images path outside the transaction. No model-controlled URL,
+member ID or raw filesystem path crosses this tool boundary. Ordinary `runGameCommand(post)` owns the write and checks the
+expected day/replaced entry under its game lock. The source-derived entry ID
+makes retries idempotent; a historical withdrawn source is never reported as a
+new save. The current approval and stored implicit selection are checked again
+before mutation. Compatible runtime consumers and the nullable profile migration precede Web
+producers; no native photo UI or ongoing game-host behavior is added.
 
 The next game rollout prepares runtime consumers before enabling new Web
 writers. Compatible readers accept negotiation, expanded shared progress and

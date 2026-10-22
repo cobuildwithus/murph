@@ -4484,7 +4484,7 @@ function requireHostedLinqSourceMessageLookupKey(messageId: string): string {
   return lookupKey;
 }
 
-function buildHostedLinqConversationWakeForMailbox(input: {
+export function buildHostedLinqConversationWakeForMailbox(input: {
   accountLookupKey?: string | null;
   eventId: string;
   groupParticipantAdded?: true;

@@ -23,7 +23,7 @@ describe("game proposal provider dispatch authority", () => {
   it("allows only the same current proposal in its bound room", async () => {
     const { input, findFirst } = setup();
     await expect(assertGameProposalDeliveryCurrentTx(input)).resolves.toBe(true);
-    expect(findFirst).toHaveBeenCalledWith(expect.objectContaining({ where: { id: "game", chatContainerMemberId: "room", status: "live" } }));
+    expect(findFirst).toHaveBeenCalledWith(expect.objectContaining({ where: { id: "game", chatContainerMemberId: "room", status: { in: ["live", "negotiating"] } } }));
     findFirst.mockResolvedValue(null);
     await expect(assertGameProposalDeliveryCurrentTx(input)).rejects.toMatchObject({ code: "GAME_CHANGE_SUPERSEDED" });
   });
@@ -44,4 +44,19 @@ describe("game proposal provider dispatch authority", () => {
     findFirst.mockResolvedValue(row());
     await expect(assertGameProposalDeliveryCurrentTx({ ...input, now: new Date("2030-03-06T16:00:00Z") })).rejects.toMatchObject({ code: "GAME_CHANGE_SUPERSEDED" });
   });
+  it("allows a live kickoff only in its primary room with the exact audience", async () => {
+    const { input, findFirst } = setup();
+    const kickoff = { ...input, deliveryIdempotencyKey: "game-started:game" };
+    await expect(assertGameProposalDeliveryCurrentTx(kickoff)).resolves.toBe(true);
+    expect(findFirst).toHaveBeenLastCalledWith(expect.objectContaining({ where: { id: "game", chatContainerMemberId: "room", status: "live" } }));
+    await expect(assertGameProposalDeliveryCurrentTx({ ...kickoff, playerMemberIds: ["person-a", "stranger"] })).rejects.toMatchObject({ code: "GAME_CHANGE_SUPERSEDED" });
+    findFirst.mockResolvedValue(null);
+    await expect(assertGameProposalDeliveryCurrentTx(kickoff)).rejects.toMatchObject({ code: "GAME_CHANGE_SUPERSEDED" });
+  });
+  it("allows a negotiating proposal without inventing an already-started Day 1", async () => {
+    const { input, findFirst } = setup();
+    findFirst.mockResolvedValue({ ...row(), status: "negotiating" });
+    await expect(assertGameProposalDeliveryCurrentTx({ ...input, now: new Date("2031-01-01T12:00:00Z") })).resolves.toBe(true);
+  });
+
 });

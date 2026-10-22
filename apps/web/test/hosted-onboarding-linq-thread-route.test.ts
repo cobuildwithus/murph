@@ -15,6 +15,7 @@ import {
 
 import {
   ensureHostedThreadContainerRouteTx,
+  attachHostedThreadContainerBootstrapRouteTx,
   refreshHostedThreadContainerDeliveryRouteTx,
 } from "../src/lib/hosted-routing/thread-container-service";
 import {
@@ -1614,6 +1615,7 @@ function createStatefulThreadRoutePrisma() {
     $executeRaw: executeRaw,
     $queryRaw: vi.fn().mockResolvedValue([]),
     $transaction: vi.fn(async (callback: (tx: unknown) => Promise<unknown>) => callback(prisma)),
+    game: { findFirst: vi.fn().mockResolvedValue(null) },
     hostedLinqLine,
     hostedLinqDelivery,
     hostedLinqFirstContactAdmissionDecision: {
@@ -3492,9 +3494,13 @@ describe("Linq explicit external-thread routing", () => {
     });
 
     const plan = await planHostedOnboardingLinqWebhook({
-      event: buildLinqMessageReceivedEvent({}),
+      event: buildLinqMessageReceivedEvent({ parts: [{ type: "media", attachment_id: "synthetic-photo", mime_type: "image/jpeg", url: "https://cdn.linqapp.com/expired?signature=synthetic" }] }),
       prisma: prisma as never,
     });
+
+    const accepted = vi.mocked(mailboxStore.appendHostedMailboxEnvelopeTx).mock.calls.at(-1)?.[0].envelope;
+    expect(accepted).toMatchObject({ message: { channel: "linq", linqMessage: { parts: [{ type: "media", attachmentId: "synthetic-photo", mimeType: "image/jpeg" }] } } });
+    expect(JSON.stringify(accepted)).not.toContain("signature");
 
     expect(plan.response).toMatchObject({
       ignored: false,
@@ -9730,4 +9736,38 @@ describe("Linq group chat concurrent provisioning race", () => {
       ).toBe(originalAccountLookupKey);
     },
   );
+});
+
+
+describe("game bootstrap route attachment", () => {
+  function fixture() {
+    const tx = {
+      $executeRaw: vi.fn(), $queryRaw: vi.fn(), hostedMember: {}, hostedThreadContainer: {},
+      game: { findFirst: vi.fn().mockResolvedValue({ id: "game_sample" }) },
+      hostedThreadRoute: { findMany: vi.fn().mockResolvedValue([]), create: vi.fn() },
+    };
+    const containerMemberId = "game_group_runtime";
+    const deliveryRoute = buildHostedThreadDeliveryRoute({ channel: "linq", accountLookupKey: createHostedPhoneLookupKey("+15550000000"), threadId: "provider_created_chat" });
+    const prepared = { containerMemberId, deliveryRoute, deliveryRouteEncrypted: "sealed_provider_route", observedDeliveryRouteEncrypted: null };
+    assertThreadContainerRouteTransactionClient(tx);
+    return { tx, prepared };
+  }
+  it("attaches only the actual provider receipt to the existing isolated game workspace", async () => {
+    const { tx, prepared } = fixture();
+    await attachHostedThreadContainerBootstrapRouteTx({ gameId: "game_sample", prepared, prisma: tx });
+    expect(tx.hostedThreadRoute.create).toHaveBeenCalledWith({ data: expect.objectContaining({ containerMemberId: prepared.containerMemberId, channel: "linq", deliveryRouteEncrypted: "sealed_provider_route" }) });
+    expect(memberRoutingStore.demoteHostedMemberLinqGroupChatBindingsTx).toHaveBeenCalledWith(expect.objectContaining({ linqChatId: "provider_created_chat", enforceProviderDispatchFence: true }));
+  });
+  it("rejects a provider thread already attached to another runtime instead of replacing its owner", async () => {
+    const { tx, prepared } = fixture();
+    vi.mocked(tx.hostedThreadRoute.findMany).mockResolvedValue([{ containerMemberId: "different_runtime", threadLookupKey: "different_route" }] as never);
+    await expect(attachHostedThreadContainerBootstrapRouteTx({ gameId: "game_sample", prepared, prisma: tx })).rejects.toThrow("already owned");
+    expect(tx.hostedThreadRoute.create).not.toHaveBeenCalled();
+  });
+  it("rejects attachment after the game no longer owns that workspace", async () => {
+    const { tx, prepared } = fixture();
+    vi.mocked(tx.game.findFirst).mockResolvedValue(null);
+    await expect(attachHostedThreadContainerBootstrapRouteTx({ gameId: "game_sample", prepared, prisma: tx })).rejects.toThrow("no longer owns");
+    expect(tx.hostedThreadRoute.create).not.toHaveBeenCalled();
+  });
 });
