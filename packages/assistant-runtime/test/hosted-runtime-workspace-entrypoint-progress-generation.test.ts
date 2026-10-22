@@ -222,6 +222,9 @@ test.each(["completed", "quiesced", "no-progress"] as const)(
               await writeSyntheticAssistantAutoReplyTerminalEvidence({ inputId, vaultRoot });
             }
             if (phaseCalls === 1) {
+              // A real turn reaches provider start before background work can
+              // finish under it; admission defers device-import preparation.
+              input.onProviderRequestStarted?.();
               await (scenario === "quiesced" ? controlPlaneSyncStarted.promise : backgroundCompleted.promise);
               inputs.push(createMailboxItem({ id: "mailbox_item_progress_second", laneSeq: "2" }));
               wake.notify({ requestedProcessingMode: "default" });

@@ -208,6 +208,7 @@ export async function runHostedDeviceSyncPass(
     runtimeLogPlatform?: Pick<HostedRuntimePlatform, "logPort"> | null;
     onStage?: ((stage: HostedDeviceSyncPassStage) => void) | null;
     retainFollowUpWakeUntilCheckpoint?: boolean;
+    shouldYieldImportPreparation?: (() => boolean) | null;
     shouldYield?: (() => boolean) | null;
     skipDirtyPendingFetch?: boolean;
     signal?: AbortSignal | null;
@@ -253,6 +254,7 @@ export async function runHostedDeviceSyncPass(
 
   options.onStage?.("service_initialization");
   const service = createHostedDeviceSyncRuntime({
+    shouldYieldImportPreparation: options.shouldYieldImportPreparation,
     deviceSyncConfig,
     deviceSyncPort,
     hasHostedConnections: (preloadedSnapshot?.connections.length ?? 0) > 0,
@@ -1355,6 +1357,7 @@ export async function runHostedDeviceSyncWakeLane(input: {
   retainFollowUpWakeUntilCheckpoint?: boolean;
   runtimeLogContext?: HostedRuntimeLogContext | null;
   runtimeLogPlatform?: Pick<HostedRuntimePlatform, "logPort"> | null;
+  shouldYieldImportPreparation?: (() => boolean) | null;
   shouldYieldDeviceSync?: (() => boolean) | null;
   cooperativeYieldReason?: HostedBackgroundMaintenanceYieldReason;
   signal?: AbortSignal | null;
@@ -1437,6 +1440,7 @@ export async function runHostedDeviceSyncWakeLane(input: {
             input.retainFollowUpWakeUntilCheckpoint ?? false,
           runtimeLogContext: input.runtimeLogContext ?? null,
           runtimeLogPlatform: input.runtimeLogPlatform ?? null,
+          shouldYieldImportPreparation: input.shouldYieldImportPreparation,
           shouldYield: shouldYieldDeviceSync,
           signal: cancellation.signal,
           skipDirtyPendingFetch: input.skipDirtyPendingFetch ?? false,
@@ -2004,6 +2008,9 @@ function summarizeHostedDeviceSyncJobTimings(
         ? { resource: toHostedRuntimeLogCode(diagnostic.resource) }
         : {}),
       snapshotImportCount: diagnostic.snapshotImportCount,
+      ...(diagnostic.snapshotImportDeferredCount
+        ? { snapshotImportDeferredCount: diagnostic.snapshotImportDeferredCount }
+        : {}),
       snapshotImportElapsedMs: diagnostic.snapshotImportElapsedMs,
       snapshotCanonicalCoreElapsedMs: diagnostic.snapshotCanonicalCoreElapsedMs,
       snapshotCanonicalWriteElapsedMs: diagnostic.snapshotCanonicalWriteElapsedMs,
@@ -2514,6 +2521,7 @@ function createHostedDeviceSyncRuntime(input: {
   deviceSyncPort: HostedRuntimeDeviceSyncPort | null | undefined;
   hasHostedConnections: boolean;
   platformEnv: Readonly<Record<string, string>>;
+  shouldYieldImportPreparation?: (() => boolean) | null;
   shouldYield?: (() => boolean) | null;
   vaultRoot: string;
 }) {
@@ -2539,6 +2547,7 @@ function createHostedDeviceSyncRuntime(input: {
     secret: input.deviceSyncConfig.secret,
     config: {
       publicBaseUrl: input.deviceSyncConfig.publicBaseUrl,
+      shouldYieldImportPreparation: input.shouldYieldImportPreparation,
       shouldYieldJobExecution: input.shouldYield ?? null,
       vaultRoot: input.vaultRoot,
     },

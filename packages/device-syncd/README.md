@@ -313,11 +313,15 @@ a full rescan. The session is neither persisted nor shared across drains, and
 the worker still checks the foreground-yield fence before each job.
 
 The job's abort signal also reaches snapshot normalization and canonical import
-preparation. Large identity scans yield to the event loop at bounded row
-intervals so foreground polling can interrupt them. Cancellation before
-publication releases the canonical lock, discards the session cache, and
-requeues the existing job without consuming its retry budget. Once canonical
-publication starts it finishes atomically and reports committed progress, even
+preparation. Hosted conversation admission additionally supplies an import-only
+predicate: preparation waits or aborts before publication, then retries the same
+snapshot in place without re-downloading or releasing the job. Hosted admission
+fails open after 30 seconds per new conversation row. Large identity
+scans yield to the event loop at bounded row intervals so foreground polling
+can interrupt them. Cancellation before
+publication releases the canonical lock and discards the session cache.
+Ordinary job-level cancellation still requeues work without consuming retry
+budget. Once canonical publication starts it finishes atomically and reports committed progress, even
 if the signal aborts during the write. This does not make synchronous
 normalization, archive validation, or every preparation segment interruptible.
 

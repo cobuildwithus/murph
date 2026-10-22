@@ -1153,8 +1153,16 @@ input while the import continues. The assistant execution policy still applies,
 and empty wake hints do not grant authority. Pending checkpoint effects do not
 block this admission. It does not run retention or activity-automation maintenance alongside
 the model. New conversation arrivals can proceed while provider I/O is pending.
-Ordinary replies do not cancel independent device work. Snapshot and workspace
-release boundaries stop admission and settle owned mutations.
+Ordinary replies do not cancel independent device work. Observing a real
+conversation row opens an import-preparation yield window until provider start
+or phase/pass completion, with a 30-second fail-open cap per new row;
+repeated observations of that row do not reopen it.
+Only device-import preparation receives this deferral signal. The import waits
+while admission is open and retries the same downloaded snapshot in the same
+job after admission closes. Downloads, job ownership, attempts, partial progress,
+and canonical publication already underway are unchanged. Existing job yield,
+lease, timeout, and shutdown checks still interrupt the wait.
+Snapshot and workspace release boundaries stop admission and settle owned mutations.
 Canonical commits already underway finish persistence or rollback before the
 runner checkpoints or releases ownership; cancellation never detaches a mutator.
 

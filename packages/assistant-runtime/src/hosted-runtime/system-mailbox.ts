@@ -373,6 +373,7 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
   runtimeEnv: Readonly<Record<string, string>>;
   retainProcessedItemUntilRecorded?: boolean;
   signal?: AbortSignal | null;
+  shouldYieldDeviceImportPreparation?: (() => boolean) | null;
   shouldYieldBackgroundMaintenance?: (() => boolean) | null;
   backgroundMaintenanceYieldReason?: HostedBackgroundMaintenanceYieldReason;
   vaultRoot: string;
@@ -568,6 +569,7 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
       runtimeLogContext: input.runtimeLogContext ?? null,
       runtimeEnv: input.runtimeEnv,
       signal: input.signal ?? null,
+      shouldYieldDeviceImportPreparation: input.shouldYieldDeviceImportPreparation,
       shouldYieldBackgroundMaintenance: input.shouldYieldBackgroundMaintenance ?? null,
       backgroundMaintenanceYieldReason: input.backgroundMaintenanceYieldReason,
       vaultRoot: input.vaultRoot,
@@ -1516,6 +1518,7 @@ async function executePendingHostedSystemMailboxItem(input: {
   runtimeLogContext: HostedRuntimeLogContext | null;
   runtimeEnv: Readonly<Record<string, string>>;
   signal: AbortSignal | null;
+  shouldYieldDeviceImportPreparation?: (() => boolean) | null;
   shouldYieldBackgroundMaintenance?: (() => boolean) | null;
   backgroundMaintenanceYieldReason?: HostedBackgroundMaintenanceYieldReason;
   vaultRoot: string;
@@ -1575,6 +1578,7 @@ async function executePendingHostedSystemMailboxItem(input: {
     runtimeLogContext: input.runtimeLogContext,
     runtimeEnv: input.runtimeEnv,
     signal: input.signal,
+    shouldYieldDeviceImportPreparation: input.shouldYieldDeviceImportPreparation,
     ...(input.shouldYieldBackgroundMaintenance
       ? {
           shouldYieldBackgroundMaintenance: input.shouldYieldBackgroundMaintenance,
