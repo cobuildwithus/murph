@@ -1389,3 +1389,6 @@ implementation proof is tracked in
 [weekly-game chat hosting](exec-plans/completed/2026-10-21-weekly-game-chat-host.md).
 
 Fresh mailbox arrivals during usage pauses are covered by [progress alert age proof](exec-plans/completed/2026-10-21-progress-paused-import.md); the current contract remains in the hosted runtime protocol.
+
+Requested game proposal inactivity handling and CI repair proof are recorded in
+[the delivery remediation](exec-plans/completed/2026-10-21-game-proposal-requested-delivery.md).
