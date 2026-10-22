@@ -133,7 +133,41 @@ export interface PostEntryBody {
 
 // DELETE /games/:id/entries/:entryId and POST /tickets/:id/redeem have no body.
 
+/** Proposed in the app; the other player agrees in the game's shared chat. */
+export type GameChange =
+  | { kind: "start_now" }
+  | { kind: "edit"; schedule?: GameSchedule; lengthDays?: number; startsOn?: string };
+
+export interface ProposeGameChangeBody {
+  proposalId: string;
+  expectedTermsVersion: number;
+  change: GameChange;
+}
+
+export interface GamePendingChange {
+  id: string;
+  proposedByMemberId: string;
+  expectedTermsVersion: number;
+  change: GameChange;
+  effectiveFromDay: number;
+  deliveryStatus: "pending" | "queued" | "sent" | "failed";
+  /** False for a terminal receipt: cancel the proposal before proposing again. */
+  deliveryRetryable?: boolean;
+  /** Fixed start date agreed to, including a start-now proposal. */
+  startsOn: string | null;
+}
+
+export interface GameChangeControls {
+  canStartNow: boolean;
+  canEdit: boolean;
+  canEditSchedule: boolean;
+  canEditStartDate: boolean;
+  editableFromDay: number | null;
+}
+
 export type GameCommand =
+  | ({ type: "proposeChange"; gameId: string } & ProposeGameChangeBody)
+  | { type: "respondChange"; gameId: string; proposalId: string; decision: "approve" | "decline" | "cancel" }
   | ({ type: "setProfile" } & SetProfileBody)
   | ({ type: "createGame" } & CreateGameBody)
   | ({ type: "join"; token: string } & AcceptInviteBody)
@@ -201,6 +235,8 @@ export interface GameTicketView {
 }
 
 export interface GameView {
+  changeControls: GameChangeControls;
+  pendingChange: GamePendingChange | null;
   id: string;
   status: GameStatus;
   /** 1 for the first game between these people, then 2, 3… */
@@ -271,7 +307,10 @@ export type GameErrorCode =
   | "MEDIA_MISSING"
   | "TICKET_NOT_HELD"
   | "TICKET_EXPIRED"
-  | "PROFILE_REQUIRED";
+  | "PROFILE_REQUIRED"
+  | "CHANGE_PENDING"
+  | "CHANGE_EXPIRED"
+  | "CHAT_UNAVAILABLE";
 
 export interface GameError {
   code: GameErrorCode;

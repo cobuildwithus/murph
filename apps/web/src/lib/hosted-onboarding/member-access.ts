@@ -16,6 +16,8 @@ import {
   resolveHostedHealthDataConsentState,
 } from "../legal/consent";
 import { getPrisma } from "../prisma";
+import { isGameEnabled } from "../game/access";
+import { parseCommaSeparatedList } from "../primitives";
 import { renderUserFacingMessage } from "../hosted-messages/user-facing-messages";
 import {
   assertHostedMemberNotSuspended,
@@ -36,8 +38,10 @@ import type { HostedOnboardingReadClient } from "./shared";
  * that already exist in the data model:
  *
  * - an active membership in an active, unsuspended account group (family), or
- * - for synthetic thread-container members, the container owner's access, or
- *   an active current participant through `readActiveHostedMemberAccess`.
+ * - for synthetic thread-container members, the container owner's access,
+ *   an active current participant, or a bound live two-player game. Game
+ *   access never activates either player's private assistant and retains the
+ *   existing room usage allowance.
  *
  * Owners cannot themselves be containers, so the derivation depth is at most
  * two. Boolean gates select only the matching member ID; callers that need
@@ -255,11 +259,60 @@ export async function hasActiveHostedThreadContainerAccessWithParticipants(input
     return false;
   }
 
-  return await hasAnyActiveHostedThreadContainerParticipant({
+  if (await hasAnyActiveHostedThreadContainerParticipant({
     containerMemberId: input.containerMemberId,
     now: input.now,
     prisma: input.prisma,
+  })) return true;
+
+  return (await readGameChatAccessIds({
+    memberIds: [input.containerMemberId],
+    prisma: input.prisma ?? getPrisma(),
+  })).has(input.containerMemberId);
+}
+
+/** A live two-player game funds only its bound room, never personal access. */
+function activeGameChatAccessWhere(): Prisma.HostedMemberWhereInput {
+  const allowlist = parseCommaSeparatedList(process.env.MURPH_GAME_MEMBER_ALLOWLIST);
+  return {
+    suspendedAt: null,
+    threadContainer: { isNot: null },
+    chatHostedGames: {
+      some: {
+        status: "live",
+        AND: [
+          { players: { some: { seat: 0 } } },
+          { players: { some: { seat: 1 } } },
+        ],
+        players: {
+          every: {
+            seat: { in: [0, 1] },
+            ...(allowlist.length > 0 ? { memberId: { in: allowlist } } : {}),
+            profile: {
+              member: {
+                suspendedAt: null,
+                consentGrants: {
+                  none: { scope: HOSTED_HEALTH_DATA_CONSENT_SCOPE, status: "revoked" },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  };
+}
+
+async function readGameChatAccessIds(input: {
+  memberIds: readonly string[];
+  prisma: Pick<Prisma.TransactionClient, "hostedMember">;
+}): Promise<Set<string>> {
+  if (!isGameEnabled() || input.memberIds.length === 0) return new Set();
+  const rows = await input.prisma.hostedMember.findMany({
+    select: { id: true },
+    where: { ...activeGameChatAccessWhere(), id: { in: [...input.memberIds] } },
   });
+  return new Set(rows.map((row) => row.id));
 }
 
 /**
@@ -286,6 +339,7 @@ export function activeHostedMemberAccessWhere(): Prisma.HostedMemberWhereInput {
 
   return {
     OR: [
+      ...(isGameEnabled() ? [activeGameChatAccessWhere()] : []),
       {
         OR: personAccess,
         threadContainer: null,
@@ -448,6 +502,11 @@ export async function readActiveHostedMemberAccessIds(input: {
     }
   }
 
+  const gameContainers = await readGameChatAccessIds({
+    memberIds: containerMemberIds.filter((id) => !activeMemberIds.has(id)),
+    prisma,
+  });
+  for (const id of gameContainers) activeMemberIds.add(id);
   return activeMemberIds;
 }
 
@@ -522,7 +581,10 @@ export async function readHostedRuntimeAiAccessDecision(input: {
         now,
         prisma,
       });
-    if (participantAllowed) {
+    if (participantAllowed || (await readGameChatAccessIds({
+      memberIds: [input.memberId],
+      prisma,
+    })).has(input.memberId)) {
       return { allowed: true };
     }
 
@@ -623,6 +685,11 @@ export async function readHostedRuntimeAiAllowedMemberIds(input: {
     }
   }
 
+  const gameContainers = await readGameChatAccessIds({
+    memberIds: containerMemberIds.filter((id) => !allowedMemberIds.has(id)),
+    prisma,
+  });
+  for (const id of gameContainers) allowedMemberIds.add(id);
   return allowedMemberIds;
 }
 

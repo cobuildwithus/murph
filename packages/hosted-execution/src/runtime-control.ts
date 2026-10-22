@@ -1,3 +1,6 @@
+import type { HostedGameToolRequest, HostedGameToolResponse } from "./game-tools.ts";
+export { hostedGameToolRequestSchema, hostedGameToolResponseSchema, hostedGameUpdateSchema, hostedGameChatStateSchema } from "./game-tools.ts";
+export type { HostedGameToolRequest, HostedGameToolResponse, HostedGameUpdate } from "./game-tools.ts";
 import {
   HOSTED_MAILBOX_LANES,
   type HostedMailboxLane,
@@ -1567,6 +1570,7 @@ export type HostedRuntimeGroupParticipantDisplayNamesResult =
     };
 
 export type HostedRuntimeGroupToolRequest =
+  | HostedGameToolRequest
   | {
       action: "ask";
       membershipId: string;
@@ -1766,6 +1770,7 @@ export type HostedRuntimeGroupJournalActionResult =
   | { status: "unavailable"; unavailableReason: string };
 
 export type HostedRuntimeGroupToolResponse =
+  | HostedGameToolResponse
   | {
       action: "ask";
       result: HostedRuntimeGroupAskResult;

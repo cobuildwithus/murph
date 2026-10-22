@@ -931,6 +931,7 @@ function createPrisma(input: {
     updateMany: vi.fn(),
   };
   const hostedMember = {
+    findMany: vi.fn().mockResolvedValue([]),
     findFirst: vi.fn().mockImplementation(async ({ where }: {
       where: { id?: string };
     }) =>
@@ -1584,6 +1585,7 @@ function createStatefulThreadRoutePrisma() {
   // default; thread-container members derive access from their (active) owner.
   // Tests for inactive members override this mock.
   const hostedMember = {
+    findMany: vi.fn().mockResolvedValue([]),
     findUnique: vi.fn().mockImplementation(async ({ where }: { where: { id: string } }) => ({
       accountGroupMemberships: [],
       billingStatus: HostedBillingStatus.active,

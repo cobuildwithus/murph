@@ -13,6 +13,7 @@ import type {
   GameTermsVersion,
   GameTicketView,
   GameView,
+  GamePendingChange,
 } from "./contract";
 import {
   currentTerms,
@@ -34,6 +35,7 @@ import {
   type TermWords,
 } from "./rules";
 import { addDays } from "./time";
+import { gameChangeControls } from "./changes";
 
 export function gameMediaUrl(key: string): string {
   return `/api/game/v1/media/${encodeURIComponent(key)}`;
@@ -51,6 +53,7 @@ export interface GameTicketRow {
 }
 
 export interface GameViewInput {
+  pendingChange?: GamePendingChange | null;
   state: RuleState;
   viewerId: string;
   now: Date;
@@ -153,6 +156,8 @@ export function buildGameView(input: GameViewInput): GameView {
   const playerViews = players.map((player) => playerView(input, player));
   if (input.invitee && players.length < game.seats) playerViews.push(inviteeView(input, input.invitee, players.length, viewerId));
   return {
+    changeControls: gameChangeControls(state, input.now, input.pendingChange ?? null),
+    pendingChange: input.pendingChange ?? null,
     days: dayViews(input, players),
     id: game.id,
     inviteExpiresAt: game.status === "invited" ? input.inviteExpiresAt?.toISOString() ?? null : null,

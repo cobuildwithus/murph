@@ -396,7 +396,32 @@ export async function refreshHostedThreadContainerDeliveryRouteTx(input: {
   };
 }
 
+async function hasHostedThreadContainerOwnerAuthorityTx(input: {
+  channel: HostedThreadDeliveryRouteChannel;
+  ownerMemberId: string;
+  gameProposal?: { gameId: string; proposalId: string };
+  prisma: Prisma.TransactionClient;
+}): Promise<boolean> {
+  if (input.channel === "linq" && input.gameProposal) {
+    const game = await input.prisma.game.findFirst({
+      where: {
+        id: input.gameProposal.gameId, status: "live", chatContainerMemberId: null,
+        players: { some: { memberId: input.ownerMemberId } },
+        AND: [
+          { pendingChange: { path: ["id"], equals: input.gameProposal.proposalId } },
+          { pendingChange: { path: ["proposedByMemberId"], equals: input.ownerMemberId } },
+        ],
+      },
+      select: { players: { select: { memberId: true }, take: 3 } },
+    });
+    if (game?.players.length === 2) return true;
+  }
+  return (await readHostedRuntimeAiAccessDecision({ memberId: input.ownerMemberId, prisma: input.prisma })).allowed;
+}
+
 export async function ensureHostedThreadContainerRouteTx(input: {
+  /** Narrow creation authority for an accepted two-player game, never personal AI access. */
+  gameProposal?: { gameId: string; proposalId: string };
   accountLookupKey: string | null | undefined;
   accountLookupKeys?: readonly (string | null | undefined)[];
   channel: HostedThreadDeliveryRouteChannel;
@@ -427,10 +452,7 @@ export async function ensureHostedThreadContainerRouteTx(input: {
     });
   }
   assertHostedMemberNotSuspended(owner);
-  if (!(await readHostedRuntimeAiAccessDecision({
-    memberId: input.ownerMemberId,
-    prisma: input.prisma,
-  })).allowed) {
+  if (!(await hasHostedThreadContainerOwnerAuthorityTx(input))) {
     throw hostedOnboardingError({
       code: "HOSTED_THREAD_CONTAINER_OWNER_ACTIVE_ACCESS_REQUIRED",
       httpStatus: 403,

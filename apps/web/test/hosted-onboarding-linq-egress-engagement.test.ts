@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   acquireHostedMemberHomeLinqRouteLockTx: vi.fn(),
   assertHostedAssistantAskCompletionDeliveryAuthorityTx: vi.fn(),
   getPrisma: vi.fn(),
+  readGameProposalDeliveryPlayers: vi.fn(),
   decodeHostedMailboxStoredPayload: vi.fn(),
   decryptHostedLinqLinePhoneNumber: vi.fn(),
   encryptHostedLinqLinePhoneNumber: vi.fn(),
@@ -18,6 +19,10 @@ const mocks = vi.hoisted(() => ({
   readHostedMailboxWakeByItemId: vi.fn(),
   readHostedMemberRoutingPrivateState: vi.fn(),
   runWithHostedDomainRootUnwrapCache: vi.fn(),
+}));
+
+vi.mock("@/src/lib/game/chat-delivery", () => ({
+  readGameProposalDeliveryPlayers: mocks.readGameProposalDeliveryPlayers,
 }));
 
 vi.mock("@/src/lib/hosted-groups/group-assistant-ask", () => ({
@@ -99,6 +104,7 @@ import { POST as postHostedLinqEgressEngagement } from "../app/api/internal/host
 describe("hosted Linq egress authority", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.readGameProposalDeliveryPlayers.mockReset().mockResolvedValue(undefined);
     mocks.requireHostedCloudflareCallbackRequest.mockResolvedValue("member-1");
     mocks.assertHostedAssistantAskCompletionDeliveryAuthorityTx.mockResolvedValue(
       undefined,
@@ -1982,6 +1988,59 @@ describe("hosted Linq egress authority", () => {
     },
   );
 
+  it.each(["current", "cancelled", "replaced", "expired", "other-audience", "unrelated", "line-blocked", "inactive-runtime"])(
+    "requires canonical game proposal authority before exempting an inactive group: %s",
+    async (scenario) => {
+      const prisma = createPrismaStub({ threadRouteContainerMemberId: "member-1", activeMemberAccess: scenario !== "inactive-runtime" });
+      prisma.hostedLinqDailyState.findFirst.mockResolvedValue(null);
+      prisma.hostedMailboxItem.findFirst.mockResolvedValue(null);
+      const proposal = { v: 1, id: scenario === "replaced" ? "replacement" : "proposal", proposedByMemberId: "person-a", expectedTermsVersion: 1,
+        change: { kind: "edit", lengthDays: 14 }, effectiveFromDay: 0, startsOn: null, deliveryStatus: "queued" };
+      prisma.game.findFirst.mockResolvedValue({
+        id: "game", createdBy: "person-a", status: "live", lengthDays: 7, inviteExpiresAt: null, startsOn: null,
+        pendingChange: scenario === "cancelled" ? null : proposal,
+        terms: { v: 1, versions: [{ n: 1, fromDay: 0, schedule: { days: [0, 1, 2, 3, 4] }, stakes: [] }] },
+        players: ["person-a", "person-b"].map((memberId, seat) => ({ memberId, seat, timeZone: "UTC",
+          dayOne: new Date(scenario === "expired" ? "2000-01-01T00:00:00Z" : Date.now() + 86_400_000) })),
+      });
+      mocks.readGameProposalDeliveryPlayers.mockResolvedValue(scenario === "other-audience" ? ["person-a", "person-c"] : ["person-a", "person-b"]);
+      if (scenario === "line-blocked") {
+        const line = await prisma.hostedLinqLine.findFirst();
+        prisma.hostedLinqLine.findFirst.mockResolvedValue({ ...line, providerServiceStatus: "FLAGGED" });
+      }
+      mocks.getPrisma.mockReturnValue(prisma);
+      const idempotencyKey = scenario === "unrelated" ? "assistant-outbox:scheduled" : "game-change:game:proposal";
+      const dispatch = () => postHostedLinqEgressEngagement(new Request("https://internal.example.test/engagement", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ authorityCheckOnly: false, answeredMailboxItemIds: [], idempotencyKey, target: "chat-authorized-group", targetKind: "thread" }),
+      }));
+      const response = await dispatch();
+      if (scenario === "current") {
+        expect(response.status).toBe(200);
+        await expect(response.json()).resolves.toMatchObject({ providerDispatchClaimed: true });
+        expect(prisma.hostedLinqDelivery.createMany).toHaveBeenCalledOnce();
+        expect(prisma.hostedLinqDailyState.findFirst).not.toHaveBeenCalled();
+        // The same canonical dispatch fence prevents a second provider send.
+        prisma.hostedLinqDelivery.findUnique.mockResolvedValue({ id: "delivery-1", status: "provider_dispatch_started", attemptedAt: new Date(),
+          acceptedAt: null, deliveredAt: null, failedAt: null, lastReceiptAt: null, messageLookupKey: null, phoneNumberLookupKey: null,
+          retryAfterAt: null, skippedAt: null, source: "hosted_runtime_linq_delivery" });
+        await expect((await dispatch()).json()).resolves.toMatchObject({ providerDispatchClaimed: false });
+        expect(prisma.hostedLinqDelivery.createMany).toHaveBeenCalledOnce();
+      } else {
+        expect(prisma.hostedLinqDelivery.createMany).not.toHaveBeenCalled();
+        if (scenario === "unrelated" || scenario === "line-blocked") {
+          expect(response.status).toBe(200);
+          await expect(response.json()).resolves.toMatchObject({ deliveryBlockCode: scenario === "unrelated" ? "automation_engagement_paused" : "line_flagged" });
+        } else if (scenario === "inactive-runtime") {
+          expect(response.status).toBe(403);
+        } else {
+          expect(response.status).toBe(409);
+          await expect(response.json()).resolves.toMatchObject({ error: { code: "GAME_CHANGE_SUPERSEDED" } });
+        }
+      }
+    },
+  );
+
   it.each([true, false])("pauses dormant Linq outreach at authorityCheckOnly=%s without claiming a send", async (authorityCheckOnly) => {
     const prisma = createPrismaStub({ homeChatId: "chat-home" });
     prisma.hostedLinqDailyState.findFirst.mockResolvedValue(null);
@@ -2639,6 +2698,7 @@ function createPrismaStub(input: {
   const prisma = {
     $executeRaw: vi.fn().mockResolvedValue(1),
     $queryRaw: vi.fn().mockResolvedValue([]),
+    game: { findFirst: vi.fn().mockResolvedValue(null) },
     deviceConnectionSource: {
       findUnique: vi.fn().mockResolvedValue(null),
     },

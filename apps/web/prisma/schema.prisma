@@ -631,6 +631,7 @@ model CompanionWearableCommand {
 }
 
 model HostedMember {
+  chatHostedGames Game[] @relation("GameChatContainer")
   companionLastContactAt         DateTime?                       @map("companion_last_contact_at")
   companionLastForegroundAt      DateTime?                       @map("companion_last_foreground_at")
   companionPushRoute             CompanionPushRoute?
@@ -2780,6 +2781,9 @@ model GameContactLabel {
 }
 
 model Game {
+  chatContainerMemberId String? @map("chat_container_member_id")
+  chatContainerMember HostedMember? @relation("GameChatContainer", fields: [chatContainerMemberId], references: [id], onDelete: SetNull)
+  pendingChange Json? @map("pending_change")
   id                   String       @id
   createdBy            String       @map("created_by")
   // Rematches chain through previous_game_id; round counts the chain.
@@ -2815,6 +2819,7 @@ model Game {
   tickets              GameTicket[]
   events               GameEvent[]
 
+  @@index([chatContainerMemberId])
   @@index([createdBy])
   @@index([inviteeMemberId])
   @@map("game")
@@ -2884,6 +2889,7 @@ model GameTicket {
 // transaction. Payloads hold ids and numbers only; words stay in their
 // encrypted columns. Nothing reads it yet.
 model GameEvent {
+  commandKey String? @unique @map("command_key")
   id        BigInt   @id @default(autoincrement())
   gameId    String   @map("game_id")
   // A member id, or "murph" / "system".

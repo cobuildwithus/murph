@@ -1808,3 +1808,15 @@ flag. Web validates the task against the callback-bound member and recorded
 occurrence window before excluding its cost from allowance. The original
 credential source and token evidence remain intact. Ordinary usage retains its
 existing accounting and provider access checks.
+
+## Weekly game chat authority
+
+Game proposals are structural metadata under the canonical game lock. The
+initiating signed-in player agrees by proposing; only the other identified player
+may approve or decline, and only the proposer may cancel. Chat tools resolve
+identity from a current accepted group message and revalidate the runtime fence,
+route and exact game binding inside the mutation transaction. Fresh provider
+rosters guard shared reads; private contact labels, entries, excuses, photos and
+invite tokens never enter the chat projection. Group-only game eligibility does
+not grant personal AI access and cannot override suspension, consent withdrawal
+or the game rollout gate. Existing group usage limits remain enforced.

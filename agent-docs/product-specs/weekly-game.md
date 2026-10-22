@@ -62,7 +62,7 @@ this default without deleting other people's private contact choices.
 - **Start now.** Day 1 becomes the latest "today" among the players, so
   nobody's Day 1 is already over: across the date line the player behind
   starts tomorrow. Before 3am that first day is short, since it still ends at
-  3am. Start now is a dev tool today.
+  3am. Start now is proposed in the app and takes effect when the other player agrees in the shared chat.
 - **Weekdays.** A set-weekdays game is on and off on the same dates for
   everyone, because every player's day number falls on the same date.
 - **Posting.** One check-in a day: a live-camera photo or an explicitly shared
@@ -116,8 +116,6 @@ this default without deleting other people's private contact choices.
 ## Deferred
 
 - Groups where everyone plays everyone, and a public league of matched strangers.
-- Murph as host in the group chat, with `read_game` and `update_game` tools,
-  including mid-game term changes (from the first day nobody has started).
 - Declining or cancelling an invite; for now it simply expires.
 - Server-side stripping of embedded location metadata from uploaded images.
 - Recaps, bankruptcy, and nudges.
@@ -147,3 +145,32 @@ before enabling native sends. Older native builds decode the unknown kind but
 omit graph downloads; players need the updated app to see this artifact. The
 new native reader displays both kinds in the home card, week and recap using
 the full graph image. No live release is implied by this implementation.
+
+## Changes agreed in chat
+
+Before Day 1, either player can propose Start now or a different start date.
+Players can also propose a new duration (up to 28 calendar days) or weekdays.
+Their tap records their agreement. Murph reuses an exact existing chat with the
+two players and Murph, or automatically creates one from their verified phone
+numbers. It identifies the proposer and asks the other player naturally; an
+ordinary contextual agreement is enough. The other player can decline, and the
+proposer can cancel in chat. Only one proposal waits at a time.
+
+Until agreement, the current terms stay in force. Changes apply from the first
+day neither player has started. Existing check-ins and missed days keep their
+rules; shortening cannot remove a started day. Any-days count schedules can
+change before Day 1, but their targets cannot change or convert to weekdays once
+play starts. A duration extension is still available on the last active day.
+A proposal expires when its proposed effective day begins, so a late agreement
+never changes a day already underway. Both players can retry a failed delivery
+without adding consent or creating another proposal. A terminal delivery failure
+is shown separately: its proposer can cancel the request in the app and propose
+again, rather than repeatedly retrying a finished delivery.
+
+The shared chat reads only agreed terms, each player's own profile name, the
+schedule and pending proposal. It never receives private contact labels, profile
+photos, check-in photos, excuses or invite tokens. A live two-player game grants
+its bound group the normal included group usage allowance without granting the
+players personal AI access. Suspension, withdrawn health-data consent, the game
+feature flag and member allowlist still apply. Tasks and stakes remain fixed in
+this first editing version.

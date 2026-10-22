@@ -44833,3 +44833,53 @@ describeRealCodex('production reaction routing turn journey', () => {
     }
   }, 240_000)
 })
+
+describeRealCodex('real Codex game agreement e2e', () => {
+  it('game agreement ordinary yes applies the pending weekend change once', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-game-e2e-'))
+    const { MURPH_READ_GAME_TOOL, MURPH_UPDATE_GAME_TOOL } = await import('../src/assistant-codex/dynamic-tools/games.js')
+    const inputId = 'ain_' + 'a'.repeat(32)
+    const calls: Array<import('@murphai/hosted-execution/runtime-control').HostedRuntimeGroupToolRequest> = []
+    const game = {
+      id: 'game_synthetic', status: 'live' as const, lengthDays: 7, startsOn: '2026-10-24',
+      terms: { n: 1, fromDay: 0, tasks: [{ seat: 0, text: 'Read a chapter' }, { seat: 1, text: 'Read a chapter' }], schedule: { days: [0, 1, 2, 3, 4] }, stakes: [{ kind: 'winner_gets' as const, item: 'Pick movie night' }] },
+      players: [{ memberId: 'player_alex', seat: 0, firstName: 'Alex', dayOne: '2026-10-24', timeZone: 'America/New_York' }, { memberId: 'player_sam', seat: 1, firstName: 'Sam', dayOne: '2026-10-24', timeZone: 'America/New_York' }],
+      pendingChange: { id: 'proposal_synthetic', proposedByMemberId: 'player_alex', expectedTermsVersion: 1, change: { kind: 'edit' as const, schedule: { days: [5, 6] } }, effectiveFromDay: 0, deliveryStatus: 'sent' as const, startsOn: null },
+      changeControls: { canStartNow: true, canEdit: true, canEditSchedule: true, canEditStartDate: true, editableFromDay: 0 },
+    }
+    try {
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome,
+        developerInstructions: buildAssistantSystemPrompt({
+          assistantCliContract: null, assistantKnowledgeToolsAvailable: false,
+          channel: 'linq', cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+          conversationScope: 'group', currentLocalDate: '2026-10-23', currentInstant: '2026-10-23T16:00:00.000Z', currentTimeZone: 'America/New_York',
+          hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false, turnTrigger: null,
+        }),
+        dynamicTools: [MURPH_READ_GAME_TOOL, MURPH_UPDATE_GAME_TOOL], env: config.env,
+        hostedToolContext: {
+          computerToolsAvailable: false, vaultFileSendAvailable: false,
+          groupTool: { request: async (request) => {
+            calls.push(request)
+            if (request.action === 'read_game') return { action: 'read_game', result: { status: 'ok', state: { games: [game] } } }
+            if (request.action !== 'update_game') throw new Error('Unexpected game action')
+            return { action: 'update_game', result: { status: 'ok', state: { games: [{ ...game, terms: { ...game.terms, n: 2, schedule: { days: [5, 6] } }, pendingChange: null }] } } }
+          } },
+          currentUserActionScope: () => ({ conversationId: 'synthetic-game-chat', inboundMailboxItemIds: [], recipientKey: 'synthetic-game-recipient', acceptedInputIds: [inputId], originSessionId: 'synthetic-game-session', conversationScope: 'group' }),
+          currentHostedDeliveryContext: () => null, currentHostedMailboxItemIds: () => [], sendVaultFile: async () => { throw new Error('No file send authorized.') },
+        },
+        model: config.model, modelProvider: config.modelProvider,
+        prompt: `Earlier in this game group: Murph: Alex proposed switching the reading challenge from weekdays to weekends. Sam, does that work for you?\nCurrent accepted message from Sam (Message ref: ${inputId}): yeah sounds good`,
+        reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
+      })
+      process.stdout.write(JSON.stringify({ scenario: 'game agreement ordinary yes', reply: result.finalMessage, actions: calls.map((call) => call.action) }) + '\n')
+      expect(calls.map((call) => call.action)).toEqual(['read_game', 'update_game'])
+      expect(calls[1]).toEqual({ action: 'update_game', origin: { kind: 'accepted_input', assistantInputId: inputId }, update: { operation: 'approve', gameId: game.id, proposalId: 'proposal_synthetic' } })
+      expect(result.finalMessage).toMatch(/weekend|Saturday.*Sunday/iu)
+      expect(result.finalMessage).not.toMatch(/confirm|are you sure|reply yes|waiting|still need|pending/iu)
+    } finally { await rm(workingDirectory, { force: true, recursive: true }) }
+  }, 720_000)
+})

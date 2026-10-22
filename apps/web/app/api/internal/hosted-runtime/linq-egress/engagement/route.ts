@@ -1,3 +1,5 @@
+import { readGameProposalDeliveryPlayers } from "@/src/lib/game/chat-delivery";
+import { assertGameProposalDeliveryCurrentTx } from "@/src/lib/game/chat-delivery-authority";
 import { HOSTED_EXECUTION_REVIEWED_ASSISTANT_ASK_COMPLETION_DELIVERY_KEY_PREFIX } from "@murphai/hosted-execution";
 import { parseHostedExecutionResolvedLinqDeliveryRoute } from "@murphai/hosted-execution/routes";
 import {
@@ -38,6 +40,14 @@ import type {
   HostedExecutionResolvedLinqDeliveryRoute,
 } from "@murphai/hosted-execution/contracts";
 
+async function isRequestedAskReply(
+  input: Parameters<typeof isHostedGroupCurrentSenderPrivateLinqCompletionTx>[0],
+): Promise<boolean> {
+  return input.idempotencyKey?.startsWith(
+    HOSTED_EXECUTION_REVIEWED_ASSISTANT_ASK_COMPLETION_DELIVERY_KEY_PREFIX,
+  ) || await isHostedGroupCurrentSenderPrivateLinqCompletionTx(input);
+}
+
 const HOSTED_LINQ_EGRESS_ENGAGEMENT_BODY_LIMIT_BYTES = 8 * 1024;
 const HOSTED_LINQ_ENGAGEMENT_ANSWERED_MAILBOX_ITEM_ID_LIMIT = 100;
 
@@ -72,6 +82,8 @@ export const POST = withJsonError(async (request: Request) => {
   const target = readOptionalBodyString(body.target);
   const targetKind = readOptionalBodyString(body.targetKind);
   const prisma = getPrisma();
+
+  const gameChatPlayers = await readGameProposalDeliveryPlayers(idempotencyKey, userId);
 
   const assertion = await prisma.$transaction(async (tx) => {
     const chatLockTarget = targetKind === "participant"
@@ -110,6 +122,13 @@ export const POST = withJsonError(async (request: Request) => {
     assertResolvedLinqDeliveryAuthority({
       authorityCheckOnly, expectedResolvedRoute,
       resolvedRoute: finalAuthority.resolvedRoute, target,
+    });
+
+    const requestedGameProposal = await assertGameProposalDeliveryCurrentTx({
+      deliveryIdempotencyKey: idempotencyKey,
+      containerMemberId: userId,
+      playerMemberIds: gameChatPlayers,
+      tx,
     });
 
     const sourceEpisode = await isHostedSourceDeliveryStallEpisodeCurrentTx({
@@ -182,9 +201,7 @@ export const POST = withJsonError(async (request: Request) => {
 
     // The reviewed validator returns void on success, so its return value is
     // not an authorization discriminator. It has already validated this key.
-    const requestedAskReply = idempotencyKey?.startsWith(
-      HOSTED_EXECUTION_REVIEWED_ASSISTANT_ASK_COMPLETION_DELIVERY_KEY_PREFIX,
-    ) || await isHostedGroupCurrentSenderPrivateLinqCompletionTx({
+    const requestedAskReply = await isRequestedAskReply({
       answeredMailboxItemIds,
       boundRuntimeMemberId: userId,
       idempotencyKey,
@@ -192,7 +209,9 @@ export const POST = withJsonError(async (request: Request) => {
       targetKind: finalAuthority.resolvedRoute.targetKind,
       tx,
     });
-    if (!requestedAskReply && await isHostedLinqProactivityPaused({
+    // App-requested proposals may start a new room with no inbound history.
+    // Only the current proposal and freshly proven exact audience qualify.
+    if (!requestedGameProposal && !requestedAskReply && await isHostedLinqProactivityPaused({
       answeredMailboxItemIds,
       replyToMessageId,
       service: health.service,
