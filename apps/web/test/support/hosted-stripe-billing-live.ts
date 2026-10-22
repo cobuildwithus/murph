@@ -17,6 +17,7 @@ export const HOSTED_STRIPE_BILLING_SCENARIO_METADATA_KEY =
 const STRIPE_POLL_INTERVAL_MS = 1_000;
 const STRIPE_POLL_TIMEOUT_MS = 120_000;
 const STRIPE_FIXTURE_TIMEOUT_MS = 120_000;
+const STRIPE_FIXTURE_OUTPUT_LIMIT_BYTES = 8_192;
 const CLEANUP_PAGE_LIMIT = 100;
 const CHECKOUT_FIXTURE_PATH = fileURLToPath(new URL(
   "../fixtures/stripe/complete-checkout-session.json",
@@ -769,11 +770,21 @@ async function runOfficialStripeCheckoutFixture(input: {
   sourceEnv: NodeJS.ProcessEnv;
 }): Promise<void> {
   await new Promise<void>((resolve, reject) => {
-    const child = spawn("stripe", ["fixtures", CHECKOUT_FIXTURE_PATH], {
-      env: buildStripeFixtureChildEnvironmentForTest(input),
-      shell: false,
-      stdio: "ignore",
-    });
+    let child;
+    try {
+      child = spawn("stripe", ["fixtures", CHECKOUT_FIXTURE_PATH], {
+        env: buildStripeFixtureChildEnvironmentForTest(input),
+        shell: false,
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+    } catch {
+      reject(new HostedStripeBillingLiveError(
+        "Official Stripe Checkout fixture could not start (process=startup_error).",
+      ));
+      return;
+    }
+    const readStdout = collectStripeFixtureOutput(child.stdout);
+    const readStderr = collectStripeFixtureOutput(child.stderr);
     let timedOut = false;
     const timeout = globalThis.setTimeout(() => {
       timedOut = true;
@@ -782,21 +793,60 @@ async function runOfficialStripeCheckoutFixture(input: {
     child.once("error", () => {
       globalThis.clearTimeout(timeout);
       reject(new HostedStripeBillingLiveError(
-        "Official Stripe Checkout fixture could not start.",
+        "Official Stripe Checkout fixture could not start (process=startup_error).",
       ));
     });
-    child.once("exit", (code, signal) => {
+    child.once("exit", () => {
       globalThis.clearTimeout(timeout);
+    });
+    child.once("close", (code, signal) => {
       if (!timedOut && signal === null && code === 0) {
         resolve();
         return;
       }
+      // CLI 1.45.1 writes progress to stdout and RequestError to stderr.
+      // Read them after close; never infer ordering across the two pipes or
+      // search the private error body for status/progress lookalikes.
+      const stdout = readStdout();
+      const stderr = readStderr();
+      const lastRun = [...stdout.text.matchAll(
+        /^Running fixture for:[^\n]*(?:\n|$)/gmu,
+      )].at(-1)?.[0] ?? "";
+      const step = stdout.state === "complete"
+        ? /^Running fixture for: (payment_page|payment_method|payment_page_confirm)\r?\n$/u
+          .exec(lastRun)?.[1] ?? "unknown"
+        : "unknown";
+      const status = /^Request failed, status=([3-5][0-9]{2}), body=/u
+        .exec(stderr.text)?.[1] ?? "unknown";
+      const response = status === "unknown" ? "not_observed" : "http_rejection";
+      const processState = signal !== null ? "signal" : code === null ? "unknown" : "exit";
+      const exitCode = code !== null && Number.isInteger(code) && code >= 0 && code <= 255
+        ? code : "unknown";
       reject(new HostedStripeBillingLiveError(
-        timedOut
-          ? "Official Stripe Checkout fixture timed out."
-          : "Official Stripe Checkout fixture failed.",
+        `Official Stripe Checkout fixture ${timedOut ? "timed out" : "failed"} `
+        + `(step=${step}, response=${response}, http_status=${status}, `
+        + `process=${processState}, exit_code=${exitCode}, `
+        + `stdout=${stdout.state}, stderr=${stderr.state}).`,
       ));
     });
+  });
+}
+
+function collectStripeFixtureOutput(stream: NodeJS.ReadableStream) {
+  const bytes = Buffer.alloc(STRIPE_FIXTURE_OUTPUT_LIMIT_BYTES);
+  let length = 0;
+  let truncated = false;
+  stream.on("data", (chunk: Buffer) => {
+    // Copy only the prefix; retaining a subarray could retain the whole chunk.
+    // Keep draining after the cap so a full pipe cannot block the child.
+    const copied = chunk.copy(bytes, length);
+    length += copied;
+    truncated ||= copied < chunk.length;
+  });
+  return () => ({
+    text: bytes.toString("utf8", 0, length),
+    state: truncated ? "truncated" : length === 0 ? "empty"
+      : bytes[length - 1] === 10 ? "complete" : "partial",
   });
 }
 

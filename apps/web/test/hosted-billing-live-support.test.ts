@@ -1,7 +1,9 @@
+import { ChildProcess, spawn } from "node:child_process";
 import { readFile } from "node:fs/promises";
+import { PassThrough } from "node:stream";
 
 import type Stripe from "stripe";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   buildSanitizedBrowserEnvironmentForTest,
@@ -21,6 +23,11 @@ import {
   metadataCorrelatesHostedStripeRun,
   sanitizeHostedStripeBillingLiveFailure,
 } from "./support/hosted-stripe-billing-live";
+
+vi.mock("node:child_process", async (importOriginal) => ({
+  ...await importOriginal<typeof import("node:child_process")>(),
+  spawn: vi.fn(),
+}));
 
 describe("hosted billing live browser support", () => {
   it("passes only browser process allowlisted environment values", () => {
@@ -310,6 +317,238 @@ describe("hosted billing live browser support", () => {
       userId: "member_paid_seed",
     });
   });
+});
+
+describe("official Stripe Checkout fixture diagnostics", () => {
+  const privateOutput = "sk_test_private https://example.invalid/private cs_test_private private@example.invalid";
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.mocked(spawn).mockReset();
+    vi.useRealTimers();
+  });
+
+  it.each(["payment_page", "payment_method", "payment_page_confirm"])(
+    "preserves split rejection evidence for %s through the sanitizer",
+    async (step) => {
+      vi.useFakeTimers();
+      const run = await startFixture();
+      run.child.stdout.write("Running fixture for: payment_page\n");
+      run.child.stderr.write("Request fai");
+      run.child.stderr.write("led, status=4");
+      run.child.stderr.write(`02, body=${privateOutput}\n`);
+      // Body text must not replace either the real status or stdout progress.
+      run.child.stderr.write("Request failed, status=599, body=private\n");
+      run.child.stderr.write("Running fixture for: payment_page_confirm\n");
+      run.child.emit("exit", 17, null);
+      await vi.advanceTimersByTimeAsync(120_000);
+      expect(run.child.kill).not.toHaveBeenCalled();
+      // Pipes can deliver their final chunks after exit, in either stream order.
+      run.child.stdout.write("Running fix");
+      run.child.stdout.write(`ture for: ${step}\n`);
+      run.close(17);
+
+      const failure = await run.result;
+      expect(String(failure)).toBe(
+        `HostedStripeBillingLiveError: Official Stripe Checkout fixture failed (step=${step}, response=http_rejection, http_status=402, process=exit, exit_code=17, stdout=complete, stderr=complete).`,
+      );
+      expect(failure).not.toHaveProperty("cause");
+      expect(run.retrieve).toHaveBeenCalledOnce();
+    },
+  );
+
+  it("keeps zero-exit success and verifies completion through the sandbox", async () => {
+    const run = await startFixture();
+    run.child.stdout.write(`${privateOutput}\n`);
+    run.child.stderr.write(`Request failed, status=402, body=${privateOutput}\n`);
+    run.finish(0);
+
+    await expect(run.result).resolves.toMatchObject({ status: "complete" });
+    expect(run.retrieve).toHaveBeenCalledTimes(3);
+    expect(run.update).toHaveBeenCalledTimes(2);
+    expect(spawn).toHaveBeenCalledExactlyOnceWith(
+      "stripe",
+      ["fixtures", expect.stringMatching(/complete-checkout-session\.json$/u)],
+      {
+        env: buildStripeFixtureChildEnvironmentForTest({
+          expectedAmount: 800,
+          runId: "billing_clock_fixture",
+          scenario: "checkout",
+          secretKey: "sk_test_clock_fixture",
+          sessionId: "cs_test_fixture",
+          sourceEnv: process.env,
+        }),
+        shell: false,
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    );
+  });
+
+  it.each([
+    ["empty", "", "", "unknown", "empty", "empty"],
+    ["unknown step", "Running fixture for: payment_page\nRunning fixture for: private\n", "private\n", "unknown", "complete", "complete"],
+    ["malformed step", "Running fixture for: payment_page\nRunning fixture for:payment_method\n", "private\n", "unknown", "complete", "complete"],
+    ["partial", "Running fixture for: payment_page", "Request failed, status=40", "unknown", "partial", "partial"],
+    ["body lookalikes", "Running fixture for: payment_method\n", `private\nRequest failed, status=402, body=${privateOutput}\n`, "payment_method", "complete", "complete"],
+  ])("reports missing evidence for %s output", async (
+    _label, stdout, stderr, step, stdoutState, stderrState,
+  ) => {
+    const run = await startFixture();
+    run.child.stdout.write(stdout);
+    run.child.stderr.write(stderr);
+    run.finish(1);
+
+    await expect(run.result).resolves.toMatchObject({
+      message: `Official Stripe Checkout fixture failed (step=${step}, response=not_observed, http_status=unknown, process=exit, exit_code=1, stdout=${stdoutState}, stderr=${stderrState}).`,
+    });
+  });
+
+  it.each(["200", "299", "600", "4020", "0402", "private"])(
+    "does not accept malformed or out-of-range rejection status %s",
+    async (status) => {
+      const run = await startFixture();
+      run.child.stderr.write(`Request failed, status=${status}, body=${privateOutput}\n`);
+      run.finish(1);
+      await expect(run.result).resolves.toMatchObject({
+        message: "Official Stripe Checkout fixture failed (step=unknown, response=not_observed, http_status=unknown, process=exit, exit_code=1, stdout=empty, stderr=complete).",
+      });
+    },
+  );
+
+  it.each([300, 599])("retains bounded rejection status %i", async (status) => {
+    const run = await startFixture();
+    run.child.stderr.write(`Request failed, status=${status}, body=private\n`);
+    run.finish(1);
+    await expect(run.result).resolves.toMatchObject({
+      message: `Official Stripe Checkout fixture failed (step=unknown, response=http_rejection, http_status=${status}, process=exit, exit_code=1, stdout=empty, stderr=complete).`,
+    });
+  });
+
+  it.each(["stdout", "stderr"] as const)("bounds and drains oversized %s", async (stream) => {
+    const run = await startFixture();
+    run.child.stdout.write("Running fixture for: payment_method\n");
+    run.child.stderr.write(`Request failed, status=429, body=${privateOutput}\n`);
+    run.child[stream].write(Buffer.alloc(64 * 1_024, "x"));
+    run.child[stream].write("\nRunning fixture for: payment_page_confirm\n");
+    run.child[stream].write("Request failed, status=599, body=private\n");
+    expect(run.child.stdout.readableLength).toBe(0);
+    expect(run.child.stderr.readableLength).toBe(0);
+    run.finish(1);
+
+    await expect(run.result).resolves.toMatchObject({
+      message: `Official Stripe Checkout fixture failed (step=${stream === "stdout" ? "unknown" : "payment_method"}, response=http_rejection, http_status=429, process=exit, exit_code=1, stdout=${stream === "stdout" ? "truncated" : "complete"}, stderr=${stream === "stderr" ? "truncated" : "complete"}).`,
+    });
+  });
+
+  it("does not infer a response from a discarded suffix", async () => {
+    const run = await startFixture();
+    run.child.stderr.write(Buffer.alloc(64 * 1_024, "x"));
+    run.child.stderr.write("\nRequest failed, status=402, body=private\n");
+    run.finish(1);
+    await expect(run.result).resolves.toMatchObject({
+      message: "Official Stripe Checkout fixture failed (step=unknown, response=not_observed, http_status=unknown, process=exit, exit_code=1, stdout=empty, stderr=truncated).",
+    });
+  });
+
+  it.each([false, true])("sanitizes startup failure (synchronous=%s)", async (synchronous) => {
+    vi.useFakeTimers();
+    const run = await startFixture(synchronous);
+    if (!synchronous) {
+      run.child.emit("error", Object.assign(new Error(privateOutput), { code: privateOutput }));
+      run.close(-2);
+    }
+    const failure = await run.result;
+    expect(failure).toMatchObject({
+      message: "Official Stripe Checkout fixture could not start (process=startup_error).",
+    });
+    expect(failure).not.toHaveProperty("cause");
+    expect(vi.getTimerCount()).toBe(0);
+    expect(run.retrieve).toHaveBeenCalledOnce();
+  });
+
+  it("retains only the signal category and bounded exit codes", async () => {
+    for (const [code, signal, processState] of [
+      [null, "SIGKILL", "signal"],
+      [null, null, "unknown"],
+      [256, null, "exit"],
+    ] as const) {
+      const run = await startFixture();
+      run.finish(code, signal);
+      await expect(run.result).resolves.toMatchObject({
+        message: `Official Stripe Checkout fixture failed (step=unknown, response=not_observed, http_status=unknown, process=${processState}, exit_code=unknown, stdout=empty, stderr=empty).`,
+      });
+    }
+  });
+
+  it("keeps the 120-second SIGTERM timeout even if the child then exits zero", async () => {
+    vi.useFakeTimers();
+    const run = await startFixture();
+    run.child.stdout.write("Running fixture for: payment_method\n");
+    await vi.advanceTimersByTimeAsync(119_999);
+    expect(run.child.kill).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(run.child.kill).toHaveBeenCalledExactlyOnceWith("SIGTERM");
+    run.finish(0);
+
+    await expect(run.result).resolves.toMatchObject({
+      message: "Official Stripe Checkout fixture timed out (step=payment_method, response=not_observed, http_status=unknown, process=exit, exit_code=0, stdout=complete, stderr=empty).",
+    });
+    expect(run.retrieve).toHaveBeenCalledOnce();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  async function startFixture(throwOnSpawn = false) {
+    const sandbox = createClockSandbox();
+    const metadata: Stripe.Metadata = { memberId: "member_fixture" };
+    const session = {
+      id: "cs_test_fixture",
+      amount_total: 800,
+      customer: null,
+      livemode: false,
+      metadata,
+      mode: "subscription",
+      status: "open",
+      subscription: null,
+    } as Stripe.Response<Stripe.Checkout.Session>;
+    const retrieve = vi.spyOn(sandbox.stripe.checkout.sessions, "retrieve")
+      .mockResolvedValueOnce(session)
+      .mockResolvedValue({ ...session, status: "complete" });
+    const update = vi.spyOn(sandbox.stripe.checkout.sessions, "update")
+      .mockResolvedValue(session);
+    const child = Object.assign(new ChildProcess(), {
+      stdout: new PassThrough(), stderr: new PassThrough(),
+    });
+    vi.spyOn(child, "kill").mockReturnValue(true);
+    let markSpawned!: () => void;
+    const spawned = new Promise<void>((resolve) => { markSpawned = resolve; });
+    vi.mocked(spawn).mockImplementationOnce(() => {
+      markSpawned();
+      if (throwOnSpawn) throw new Error(privateOutput);
+      return child;
+    });
+    const result = sandbox.completeCheckoutSessionWithOfficialFixture({
+      expectedAmount: 800,
+      ownership: { memberId: "member_fixture", scenario: "checkout" },
+      sessionId: session.id,
+    }).catch((error: unknown) => {
+      const sanitized = sanitizeHostedStripeBillingLiveFailure(error, "checkout");
+      expect(sanitized).toBe(error);
+      return sanitized;
+    });
+    await spawned;
+    const close = (code: number | null, signal: NodeJS.Signals | null = null) => {
+      child.stdout.end();
+      child.stderr.end();
+      child.emit("close", code, signal);
+    };
+    return {
+      child, close, result, retrieve, update,
+      finish(code: number | null, signal: NodeJS.Signals | null = null) {
+        child.emit("exit", code, signal);
+        close(code, signal);
+      },
+    };
+  }
 });
 
 describe("hosted Stripe billing test clocks", () => {

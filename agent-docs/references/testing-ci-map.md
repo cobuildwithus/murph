@@ -1988,6 +1988,14 @@ Sessions, Schedules, Subscriptions, Customers, and PaymentMethods are cleaned
 up, while Stripe's immutable paid invoices, events, and terminal records remain
 as bounded provider audit history.
 
+The official Checkout fixture helper drains both CLI streams and retains at most
+8 KiB per stream in memory. Sanitized failures expose only a fixed fixture step,
+HTTP rejection status (300–599), process category, bounded exit code, and capture
+state. Partial or truncated progress remains unknown; `response=not_observed`
+does not prove that no response arrived. `hosted-billing-live-support.test.ts`
+exercises the sandbox, child-process boundary, and sanitizer with synthetic
+streams and fake timers; no raw CLI output becomes an error or artifact.
+
 ## Verification selection integrity
 
 `workspace-verify.test.ts` composes the real diff classifier and shell dispatcher.
