@@ -5450,8 +5450,8 @@ heart-rate graph images, never raw samples or other health records. Web still
 authorizes every viewer against the current game/profile rules before the
 Worker issues a five-minute signed capability. The `GAME_IMAGES` binding uses
 provider-assigned UUIDs with `requireSignedURLs: true`; no signing key or Murph
-bearer goes to the native client/CDN respectively. Fixed `game-avatar` (600px)
-and `game-photo` (1600px) variants strip metadata. All account variants must
+bearer goes to the native client/CDN respectively. Fixed `gameavatar` (600px)
+and `gamephoto` (1600px) variants strip metadata. All account variants must
 honor signed access; public-bypass variants are prohibited.
 
 Only a versioned provider UUID/size pointer lives at the existing opaque R2

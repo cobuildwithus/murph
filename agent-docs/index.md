@@ -1447,3 +1447,5 @@ canonical private Images storage; the weekly game spec and architecture own the
 URL-free mailbox contract.
 Challenge negotiation and encrypted task/stake changes are tracked in
 [`game negotiation`](exec-plans/completed/2026-10-22-game-negotiation.md).
+
+Private image provider variant correction: [game Images variant IDs](exec-plans/completed/2026-10-22-game-images-variant-ids.md).
