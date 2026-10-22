@@ -135,6 +135,12 @@ serialized maintenance window.
 
 ## Assistant response media
 
+Public previews require direct public HTTPS image URLs without credentials,
+query strings, or fragments. Rejected optimizer URLs return fixed recovery
+instructions: retry the original public source when it meets those rules, or
+save the requested image and use available secure file delivery with approval.
+Validation never echoes the rejected URL or automatically removes parameters.
+
 The Linq adapter preserves idempotency keys up to the provider's 255-character
 limit. Longer internal keys are SHA-256 compacted only in the serialized provider
 body, after any rich-link or fallback suffix is added. Persisted outbox keys keep

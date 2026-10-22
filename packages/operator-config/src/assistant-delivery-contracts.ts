@@ -52,7 +52,7 @@ const assistantImageResponseMediaSchema = z
           context.addIssue({
             code: 'custom',
             message:
-              'Assistant response media URLs must be valid public HTTPS image URLs.',
+              'Use a direct public HTTPS image URL without credentials, query strings, or fragments. For an image-optimization URL, retry with its original public image URL if it meets these rules. Otherwise save the requested image as a supported file and use send_vault_file when available; secure file delivery requires approval.',
             params: { murphExpectedShape: 'public_https_image_url' },
           })
           return z.NEVER

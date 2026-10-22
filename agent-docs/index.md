@@ -1,3 +1,6 @@
+Public image attachment recovery is tracked in
+[the recovery plan](exec-plans/completed/2026-10-21-public-image-recovery.md).
+
 Secure file reader compatibility is tracked in
 [the reader plan](exec-plans/completed/2026-10-21-secure-media-readers.md).
 
@@ -118,6 +121,10 @@ Garmin history import coalescing and synthetic fetch-work evidence are recorded
 in [the import-speed plan](exec-plans/completed/2026-09-24-garmin-import-speed.md).
 
 # Murph Agent Docs Index
+
+Common media file approval and delivery remain owned by `ARCHITECTURE.md`.
+Extension coverage, approval/recovery journeys, and rollout constraints are
+recorded in [secure media files](exec-plans/completed/2026-10-21-secure-media-files.md).
 
 Local idle-cleanup veto ordering and completion-preflight evidence are recorded
 in [owner request reduction](exec-plans/completed/2026-10-02-owner-cleanup-request-reduction.md);
