@@ -814,7 +814,7 @@ async function applyApprovedChange(locked: LockedStep, gameId: string, proposal:
   const { tx, loaded, now, clock } = locked;
   // Validate against the locked current game again. A start-now proposal keeps
   // its proposed date, rather than silently changing what the players agreed to.
-  decideGameChange(loaded.state, actor, proposal.change, now);
+  decideGameChange(loaded.state, actor, proposal.change, now, proposal);
   const previous = currentTerms(loaded.state.game.terms);
   const next = { ...previous, n: previous.n + 1, fromDay: proposal.effectiveFromDay,
     ...(proposal.change.kind === "edit" && proposal.change.schedule ? { schedule: proposal.change.schedule } : {}),

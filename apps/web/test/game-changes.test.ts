@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { decideGameChange, firstUnstartedGameDay, gameChangeControls, isGameChangeExpired, parsePendingGameChange } from "@/src/lib/game/changes";
 import { parseGameCommand } from "@/src/lib/game/command";
-import { scorePlayer, type RuleState } from "@/src/lib/game/rules";
+import { scorePlayer, settleDueAt, type RuleState } from "@/src/lib/game/rules";
+import { addDays } from "@/src/lib/game/time";
 import type { GamePendingChange } from "@/src/lib/game/contract";
 
 const BEFORE = new Date("2026-11-02T17:00:00Z");
@@ -72,6 +73,28 @@ describe("weekly game mutually agreed changes", () => {
     expect(decideGameChange(s, "player_a", { kind: "edit", lengthDays: 14 }, lastDay).effectiveFromDay).toBe(7);
     expect(() => decideGameChange(s, "player_a", { kind: "edit", schedule: { days: [5,6] } }, lastDay)).toThrow();
     expect(gameChangeControls(s, new Date("2026-11-10T17:00:00Z"), null).canEdit).toBe(false);
+  });
+  it.each([7, 28])("allows stakes alone on the final day and closing grace of a %s-day game", (lengthDays) => {
+    const s = state(); s.game.lengthDays = lengthDays;
+    s.players.forEach((player) => { player.dayOne = addDays("2026-11-09", 1 - lengthDays); });
+    const lastDay = new Date("2026-11-09T17:00:00Z");
+    const due = settleDueAt(s.players, lengthDays), grace = new Date(due.getTime() - 1);
+    const change = { kind: "edit" as const, stakes: [{ kind: "per_miss" as const, item: "Tea" }], stakesApplyToWholeGame: true as const };
+    expect(gameChangeControls(s, lastDay, null)).toMatchObject({ canEdit: true, canEditStakes: true, canEditTasks: false, canEditSchedule: false, editableFromDay: lengthDays });
+    const proposal = { ...pending(), ...decideGameChange(s, "player_a", change, lastDay) };
+    expect(proposal.effectiveFromDay).toBe(lengthDays);
+    expect(isGameChangeExpired(s, proposal, grace)).toBe(false);
+    expect(decideGameChange(s, "player_a", change, grace).effectiveFromDay).toBe(lengthDays);
+    expect(() => decideGameChange(s, "player_a", { ...change, tasks: [{seat:0,text:"Read"},{seat:1,text:"Walk"}] }, lastDay)).toThrow("at least one future day");
+    expect(() => decideGameChange(s, "player_a", { ...change, schedule: {days:[0]} }, lastDay)).toThrow("at least one future day");
+    // Stored pending words are sealed: approval must still distinguish tasks from stakes alone.
+    expect(decideGameChange(s, "player_a", {kind:"edit",stakesApplyToWholeGame:true}, grace, {stakes:[{kind:"per_miss",key:"stake_2"}]}).effectiveFromDay).toBe(lengthDays);
+    expect(() => decideGameChange(s, "player_a", {kind:"edit",stakesApplyToWholeGame:true}, grace, {tasksChanged:true,stakes:[{kind:"per_miss",key:"stake_2"}]})).toThrow("at least one future day");
+    expect(isGameChangeExpired(s, proposal, due)).toBe(true);
+    expect(gameChangeControls(s, due, null).canEditStakes).toBe(false);
+    expect(() => decideGameChange(s, "player_a", change, due)).toThrow("no longer open");
+    s.game.status = "settled";
+    expect(gameChangeControls(s, lastDay, null).canEditStakes).toBe(false);
   });
   it("validates app and runtime commands at the same boundary", () => {
     expect(parseGameCommand({ type: "proposeChange", gameId: "game_change", proposalId: "proposal_1", expectedTermsVersion: 1, change: { kind: "edit", lengthDays: 14, actor: "ignored" } })).toMatchObject({ change: { kind: "edit", lengthDays: 14 } });

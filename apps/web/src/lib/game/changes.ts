@@ -1,7 +1,7 @@
 import type { GameChange, GameChangeControls, GamePendingChange } from "./contract";
 import { parseGameChange } from "./command";
 import { isRecord } from "../primitives";
-import { currentTerms, dayIndexAt, decideStartNow, GAME_MAX_LENGTH_DAYS, GAME_MAX_START_DAYS_OUT, playerFor, reject, validSchedule, type StoredStake, type RuleState } from "./rules";
+import { currentTerms, dayIndexAt, decideStartNow, GAME_MAX_LENGTH_DAYS, GAME_MAX_START_DAYS_OUT, isGameDue, playerFor, reject, validSchedule, type StoredStake, type RuleState } from "./rules";
 import { addDays, gameLocalDate } from "./time";
 
 /** First day that neither player has begun. The previous days retain their terms. */
@@ -12,15 +12,16 @@ export function firstUnstartedGameDay(state: RuleState, now: Date): number {
 export function gameChangeControls(state: RuleState, now: Date, pending: GamePendingChange | null): GameChangeControls {
   const day = firstUnstartedGameDay(state, now);
   const live = ["live", "negotiating"].includes(state.game.status) && state.players.length === 2;
-  const enabled = live && !pending && day < GAME_MAX_LENGTH_DAYS && day <= state.game.lengthDays;
+  const editable = live && !pending && !isGameDue(state, now);
+  const enabled = editable && day < GAME_MAX_LENGTH_DAYS && day <= state.game.lengthDays;
   return {
     canStartNow: enabled && day === 0,
-    canEdit: enabled,
+    canEdit: editable,
     canEditSchedule: enabled && day < state.game.lengthDays && (day === 0 || "days" in currentTerms(state.game.terms).schedule),
     canEditStartDate: enabled && day === 0,
     canEditTasks: enabled && day < state.game.lengthDays,
-    canEditStakes: enabled && day < state.game.lengthDays,
-    editableFromDay: enabled ? day : null,
+    canEditStakes: editable,
+    editableFromDay: editable ? Math.min(day, state.game.lengthDays) : null,
   };
 }
 
@@ -51,28 +52,28 @@ export function parsePendingGameChange(value: unknown): StoredGamePendingChange 
   };
 }
 
-export function isGameChangeExpired(state: RuleState, pending: GamePendingChange, now: Date): boolean {
+export function isGameChangeExpired(state: RuleState, pending: StoredGamePendingChange, now: Date): boolean {
   return !["live", "negotiating"].includes(state.game.status) ||
-    (state.game.status === "negotiating" && state.game.inviteExpiresAt !== null && state.game.inviteExpiresAt <= now) || currentTerms(state.game.terms).n !== pending.expectedTermsVersion
-    || firstUnstartedGameDay(state, now) > pending.effectiveFromDay
+    isGameDue(state, now) || currentTerms(state.game.terms).n !== pending.expectedTermsVersion
+    || (!isStakesOnlyChange(pending.change, pending) && firstUnstartedGameDay(state, now) > pending.effectiveFromDay)
     || (pending.startsOn !== null && state.players.some((player) => gameLocalDate(now, player.timeZone) > pending.startsOn!));
 }
 
-export function decideGameChange(state: RuleState, actor: string, change: GameChange, now: Date): { change: GameChange; effectiveFromDay: number; startsOn: string | null } {
+export function decideGameChange(state: RuleState, actor: string, change: GameChange, now: Date, sealedWords?: SealedWordChanges): { change: GameChange; effectiveFromDay: number; startsOn: string | null } {
   if (!playerFor(state, actor)) reject("NOT_A_PLAYER", "This game belongs to its players.");
   const controls = gameChangeControls(state, now, null);
-  if (!controls.canEdit) reject("GAME_NOT_LIVE", "This game has no unstarted days to change.");
-  const effectiveFromDay = firstUnstartedGameDay(state, now);
+  if (!controls.canEdit) reject("GAME_NOT_LIVE", "This game is no longer open for changes.");
+  const firstUnstarted = firstUnstartedGameDay(state, now);
+  const stakesOnly = isStakesOnlyChange(change, sealedWords);
+  const effectiveFromDay = stakesOnly ? Math.min(firstUnstarted, state.game.lengthDays) : firstUnstarted;
   if (change.kind === "start_now") {
     if (!controls.canStartNow) reject("DAY_CLOSED", "This game has already started.");
     const start = decideStartNow(state.game.status === "negotiating" ? { ...state, game: { ...state.game, status: "live" } } : state, now);
     return { change, effectiveFromDay: 0, startsOn: start.players[0].dayOne };
   }
-  if (change.stakes && effectiveFromDay > 0 && change.stakesApplyToWholeGame !== true) {
-    reject("INVALID_REQUEST", "Changing the stakes affects the whole game, including earlier misses. Confirm this with both players.");
-  }
+  assertWholeGameStakeConsent(change, sealedWords, effectiveFromDay);
   const lengthDays = change.lengthDays ?? state.game.lengthDays;
-  if (lengthDays <= effectiveFromDay || lengthDays > GAME_MAX_LENGTH_DAYS) reject("INVALID_REQUEST", "Keep the days already started and at least one future day, up to 28 days.");
+  if ((!stakesOnly && lengthDays <= effectiveFromDay) || lengthDays > GAME_MAX_LENGTH_DAYS) reject("INVALID_REQUEST", "Keep the days already started and at least one future day, up to 28 days.");
   const oldSchedule = currentTerms(state.game.terms).schedule;
   const schedule = validSchedule(change.schedule ?? oldSchedule, lengthDays);
   if (change.schedule && effectiveFromDay > 0 && ("count" in oldSchedule || "count" in schedule)) {
@@ -95,4 +96,19 @@ function changedStartDate(state: RuleState, change: Extract<GameChange, { kind: 
 function parseStoredStake(value: unknown): StoredStake {
   if (!isRecord(value) || typeof value.key !== "string" || (value.kind !== "winner_gets" && value.kind !== "per_miss")) throw new Error("Stored game stake change is malformed.");
   return { key: value.key, kind: value.kind };
+}
+
+type SealedWordChanges = Pick<StoredGamePendingChange, "tasksChanged" | "stakes">;
+
+/** Whole-game stakes have no future-day obligation; all other edits do. */
+function isStakesOnlyChange(change: GameChange, sealedWords?: SealedWordChanges): boolean {
+  return change.kind === "edit" && Boolean(change.stakes || sealedWords?.stakes)
+    && !change.tasks && !sealedWords?.tasksChanged && change.lengthDays === undefined
+    && change.schedule === undefined && change.startsOn === undefined;
+}
+
+function assertWholeGameStakeConsent(change: Extract<GameChange, {kind: "edit"}>, sealedWords: SealedWordChanges | undefined, effectiveFromDay: number): void {
+  if ((change.stakes || sealedWords?.stakes) && effectiveFromDay > 0 && change.stakesApplyToWholeGame !== true) {
+    reject("INVALID_REQUEST", "Changing the stakes affects the whole game, including earlier misses. Confirm this with both players.");
+  }
 }

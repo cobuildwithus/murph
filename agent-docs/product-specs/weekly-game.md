@@ -194,6 +194,9 @@ players personal AI access. Suspension, withdrawn health-data consent, the game
 feature flag and member allowlist still apply. Tasks and stakes can be negotiated through the same pending proposal. Task edits
 apply to future unstarted days. Stake edits replace the entire game wager,
 including earlier misses; both players must understand and agree to that scope.
+Stakes alone can change through the final playing day and closing grace period,
+until settlement is due. They do not require extending the game. Task, schedule,
+and duration edits still require at least one future unstarted day.
 They never rewrite check-ins or existing tickets.
 
 An invitee can choose Suggest changes and submit concrete alternative rules
