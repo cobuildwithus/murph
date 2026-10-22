@@ -76,16 +76,23 @@ when the extracted production code is identical; rerun if integration changes it
 
 ## Progress
 
-- Collected package-only consumers; no Web callback, producer, model-tool
-  advertisement, or schema migration is included in this preparatory PR.
+- Collected runtime consumers plus explicit unavailable Web dispatcher cases
+  for future actions. No Web effect, producer, model-tool advertisement, or
+  schema migration is included in this preparatory PR.
 - Parent reviewed protocol compatibility, trusted callback admission, provider
   receipt replay, same-session binding, and source separation.
 - 181 focused cases passed: 69 hosted-execution compatibility/parser cases,
   107 engine notification/session cases, and 5 runtime boundary cases.
 - All three affected package typechecks passed. Complexity and documentation
   drift checks passed; existing notification runner complexity decreased.
+- Full Web typecheck exposed exhaustive dispatcher cases required by the wider
+  request union. Explicit unavailable responses preserve consumer-only rollout;
+  192 Web dispatcher/route tests and Web typecheck now pass.
 - The identical extracted consumer code passed the producer branch's synthetic
   real-model kickoff and immediate-reply journey: one create, exact canonical
   dates, same session on replay, and no reminder writes after bare agreement.
 - Remaining: draft PR, external review and CI, then the coordinated consumer
   deployment and warm-runtime refresh before feature writers activate.
+- PR #4312 is open. Its first external-review launch failed during managed
+  browser startup before submission; no substantive review exists. The next
+  attempt will review the corrected consumer floor on a fresh browser lane.
