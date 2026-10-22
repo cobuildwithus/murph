@@ -1,6 +1,6 @@
 # Reduce hosted photo import latency
 
-Status: active
+Status: completed
 Created: 2026-10-22
 Updated: 2026-10-22
 
@@ -84,3 +84,29 @@ encoder attribution remain open. Avoid more machinery until those are measured.
   hotspots (41, 33, 25, 70). The timing field does not justify refactoring them.
 - Parent review: no new effects, dependencies, queues, locks or format migration;
   temporary profiling changes removed, private evidence excluded from artifacts.
+
+## Review and handoff
+
+- PR: https://github.com/cobuildwithus/murph/pull/4316 (do not merge).
+- Final ReviewGPT round 1: PASS, zero qualifying findings, all 15 changed files
+  reviewed at `9e9fccf568de32fe2502988379ca257f1d4d5a71`.
+  GPT-6 Pro identity, full snapshot attachment and completion marker verified;
+  the managed wait enforced its three-minute minimum. Source/test inspection
+  explicitly covered canonical replay, evidence, hashes, GIF preservation and
+  diagnostic propagation. Parent accepts the substantive review.
+  Review: https://chatgpt.com/c/6ada5d25-ab50-83ea-9b96-e661b2d49570
+- An initial browser lane hit the already-recorded GPT-6/Power picker issue;
+  retrying another managed lane succeeded. No model downgrade or tool change.
+- Additional scripted complete-first-request measurement passed (3 fixtures):
+  individual 166443 → 166443 bytes, group 144861 → 144861 bytes, and group with
+  eager capabilities 153875 → 153875 bytes. Same base/head fixture and workspace;
+  base assistant source versus candidate source, candidate shared dependencies,
+  installed Codex/model catalog. Excludes prompt_cache_key. No exact GPT-6.1 Sol
+  tokenizer is configured, so token counts are unavailable. These text/tool
+  fixtures do not measure changed compressed image payloads or prove equality
+  of image pixels. No token-savings claim.
+- Final parent review found no further source changes required. This closeout is
+  explanatory evidence only; required exact-head CI and latest-base mergeability
+  remain tracked on the PR before handoff. No deployment or production speedup
+  has been verified, and the remaining attribution questions above stay open.
+Completed: 2026-10-22
