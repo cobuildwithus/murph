@@ -7,7 +7,7 @@ import { signalHostedMailboxAppendRuntime } from "../hosted-orchestration/signal
 import { readHostedMemberIdentity } from "../hosted-onboarding/hosted-member-identity-store";
 import { assertHostedAssistantNotificationRouteAuthority, bindHostedAssistantNotificationDestination, resolveHostedAssistantNotificationDestination } from "../hosted-routing/assistant-notification-destination";
 import { getPrisma } from "../prisma";
-import { parsePendingGameChange } from "./changes";
+import { readPendingGameChange } from "./change-words";
 import { isGameEnabledFor } from "./access";
 import type { GamePendingChange } from "./contract";
 import { buildGameProposalInstructions } from "@murphai/hosted-execution/runtime-control";
@@ -23,7 +23,7 @@ import { markGameChatGenerationQueuedTx } from "./chat-lifecycle-receipt";
 export async function deliverGameChangeProposal(gameId: string, proposalId: string): Promise<boolean> {
   const prisma = getPrisma();
   const game = await prisma.game.findUnique({ where: { id: gameId }, include: { players: { orderBy: { seat: "asc" }, take: 3 } } });
-  const proposal = parsePendingGameChange(game?.pendingChange);
+  const proposal = game ? await readPendingGameChange(game) : null;
   if (!game || !["live", "negotiating"].includes(game.status) || !proposal || proposal.id !== proposalId || game.players.length !== 2) return false;
   if (!game.players.every((player) => isGameEnabledFor(player.memberId))) return false;
   if (proposal.deliveryStatus === "sent") return true;

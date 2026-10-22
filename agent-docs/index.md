@@ -3,6 +3,11 @@ are tracked in [the active lifecycle plan](exec-plans/active/2026-10-22-game-cha
 The [weekly game spec](product-specs/weekly-game.md), `../ARCHITECTURE.md` and
 [Postgres runtime ownership](references/hosted-postgres-runtime.md) own the contracts.
 
+Command-gated CLI source-cause telemetry is owned by
+[`runtime-state`](../packages/runtime-state/README.md#optional-cli-source-cause);
+implementation and local verification are tracked in
+[the active plan](exec-plans/active/2026-10-22-cli-source-cause.md).
+
 Public image attachment recovery is tracked in
 [the recovery plan](exec-plans/completed/2026-10-21-public-image-recovery.md).
 
@@ -1434,3 +1439,6 @@ recorded in [game post notifications](exec-plans/completed/2026-10-21-game-daily
 Game proposal wording and conversation-activity selection are tracked in
 [`game chat selection and copy`](exec-plans/completed/2026-10-22-game-chat-selection-copy.md);
 `product-specs/weekly-game.md` remains the current behavior owner.
+
+Challenge negotiation and encrypted task/stake changes are tracked in
+[`game negotiation`](exec-plans/completed/2026-10-22-game-negotiation.md).

@@ -50,6 +50,13 @@ export function parseGameCommand(value: unknown): GameCommand {
         ...optional(input.inviteeLabel, (label) => ({ inviteeLabel: inviteeLabel(record(label, "inviteeLabel")) })),
         ...optional(input.previousGameId, (id) => ({ previousGameId: clientId(id, "previousGameId") })),
       };
+    case "negotiate":
+      return {
+        type: "negotiate", token: opaque(input.token, "token"),
+        termsVersion: integer(input.termsVersion, "termsVersion", 1),
+        timeZone: timeZone(input.timeZone), proposalId: clientId(input.proposalId, "proposalId"),
+        change: parseGameChange(input.change),
+      };
     case "join":
       return {
         termsVersion: integer(input.termsVersion, "termsVersion", 1),
@@ -247,17 +254,38 @@ function oneOf<T extends string | number>(value: unknown, field: string, options
     ?? reject("INVALID_REQUEST", `${field} must be one of ${options.join(", ")}.`);
 }
 
-export function parseGameChange(value: unknown): GameChange {
+export function parseGameChange(value: unknown, allowSealedWords = false): GameChange {
   const input = record(value, "change");
   if (input.kind === "start_now") return { kind: "start_now" };
   if (input.kind !== "edit") return reject("INVALID_REQUEST", "Choose a game change.");
-  if (input.schedule === undefined && input.lengthDays === undefined && input.startsOn === undefined) {
-    return reject("INVALID_REQUEST", "Choose a schedule, duration or start date to change.");
+  if (input.schedule === undefined && input.lengthDays === undefined && input.startsOn === undefined && input.tasks === undefined && input.stakes === undefined && !allowSealedWords) {
+    return reject("INVALID_REQUEST", "Choose a task, stake, schedule, duration or start date to change.");
   }
+  if (input.stakesApplyToWholeGame !== undefined && input.stakesApplyToWholeGame !== true) reject("INVALID_REQUEST", "Confirm that new stakes apply to the whole game.");
   return {
     kind: "edit",
+    ...optional(input.tasks, parseChangedTasks),
+    ...optional(input.stakes, parseChangedStakes),
+    ...(input.stakesApplyToWholeGame === true ? { stakesApplyToWholeGame: true as const } : {}),
     ...optional(input.schedule, (value) => ({ schedule: schedule(record(value, "schedule")) })),
     ...optional(input.lengthDays, (value) => ({ lengthDays: integer(value, "lengthDays", 1, 28) })),
-    ...optional(input.startsOn, (value) => ({ startsOn: calendarDate(value, "startsOn") })),
+    ...optional(input.startsOn, (value) => ({ startsOn: nullable(value, (date) => calendarDate(date, "startsOn")) })),
   };
+}
+
+function parseChangedTasks(value: unknown): { tasks: GameTask[] } {
+  const tasks = list(value, "tasks", 2).map((item) => {
+    const task = record(item, "task");
+    return { seat: integer(task.seat, "task.seat", 0, 1), text: words(task.text, "task.text") };
+  }).sort((a, b) => a.seat - b.seat);
+  if (tasks.length !== 2 || tasks.some((task, seat) => task.seat !== seat)) reject("INVALID_REQUEST", "Include one task for each player.");
+  return { tasks };
+}
+function parseChangedStakes(value: unknown): { stakes: GameStake[] } {
+  const stakes = list(value, "stakes", 3).map((item) => {
+    const stake = record(item, "stake");
+    return { kind: oneOf(stake.kind, "stake.kind", GAME_STAKE_KINDS), item: words(stake.item, "stake.item") };
+  });
+  if (!stakes.length) reject("INVALID_REQUEST", "Choose at least one stake.");
+  return { stakes };
 }

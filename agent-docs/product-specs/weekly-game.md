@@ -204,5 +204,19 @@ photos, check-in photos, excuses or invite tokens. A live two-player game grants
 its eligible groups the normal included group usage allowance without granting
 the players personal AI access. Duplicate rooms share the primary game allowance;
 they do not create more included credit. Suspension, withdrawn health-data consent, the game
-feature flag and member allowlist still apply. Tasks and stakes remain fixed in
-this first editing version.
+feature flag and member allowlist still apply. Tasks and stakes can be negotiated through the same pending proposal. Task edits
+apply to future unstarted days. Stake edits replace the entire game wager,
+including earlier misses; both players must understand and agree to that scope.
+Stakes alone can change through the final playing day and closing grace period,
+until settlement is due. They do not require extending the game. Task, schedule,
+and duration edits still require at least one future unstarted day.
+They never rewrite check-ins or existing tickets.
+
+An invitee can choose Suggest changes and submit concrete alternative rules
+without accepting the original challenge. Both players see a negotiating game
+with no countdown, posting duties or scores until the other player approves the
+proposal. Decline or cancellation leaves it unstarted. Approval determines the
+default Day 1 from that moment, or keeps an explicitly selected later date.
+Resetting a proposed date to the default is explicit (`startsOn: null`), distinct
+from omitting a date change. The original seven-day invite expiry also bounds
+unfinished negotiation. A pair cannot reserve another game while negotiating.

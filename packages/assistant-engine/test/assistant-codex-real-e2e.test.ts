@@ -45057,9 +45057,10 @@ describeRealCodex('production reaction routing turn journey', () => {
 
 describeRealCodex('real Codex game agreement e2e', () => {
   it.each([
-    { name: 'game agreement ordinary yes applies the pending weekend change once', duration: false },
-    { name: 'game agreement duration extension preserves weekday schedule and original start', duration: true },
-  ])('$name', async ({ duration }) => {
+    { name: 'game agreement ordinary yes applies the pending weekend change once', duration: false, negotiation: false },
+    { name: 'game agreement duration extension preserves weekday schedule and original start', duration: true, negotiation: false },
+    { name: 'game agreement negotiated tasks and stakes activates only after opponent agrees', duration: false, negotiation: true },
+  ])('$name', async ({ duration, negotiation }) => {
     const config = await resolveRealCodexE2eConfig()
     const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-game-e2e-'))
     const { MURPH_READ_GAME_TOOL, MURPH_UPDATE_GAME_TOOL } = await import('../src/assistant-codex/dynamic-tools/games.js')
@@ -45067,10 +45068,10 @@ describeRealCodex('real Codex game agreement e2e', () => {
     const calls: Array<import('@murphai/hosted-execution/runtime-control').HostedRuntimeGroupToolRequest> = []
     const dayOne = duration ? '2030-03-04' : '2030-03-07'
     const game = {
-      id: 'game_synthetic', status: 'live' as const, lengthDays: 7, startsOn: dayOne,
+      id: 'game_synthetic', status: negotiation ? 'negotiating' as const : 'live' as const, lengthDays: 7, startsOn: dayOne,
       terms: { n: 1, fromDay: 0, tasks: [{ seat: 0, text: 'Read a chapter' }, { seat: 1, text: 'Read a chapter' }], schedule: { days: [0, 1, 2, 3, 4] }, stakes: [{ kind: 'winner_gets' as const, item: 'Pick movie night' }] },
       players: [{ memberId: 'player_alex', seat: 0, firstName: 'Alex', dayOne, timeZone: 'America/New_York' }, { memberId: 'player_sam', seat: 1, firstName: 'Sam', dayOne, timeZone: 'America/New_York' }],
-      pendingChange: { id: 'proposal_synthetic', proposedByMemberId: 'player_alex', expectedTermsVersion: 1, change: duration ? { kind: 'edit' as const, lengthDays: 10 } : { kind: 'edit' as const, schedule: { days: [5, 6] } }, effectiveFromDay: duration ? 2 : 0, deliveryStatus: 'sent' as const, startsOn: null },
+      pendingChange: { id: 'proposal_synthetic', proposedByMemberId: 'player_alex', expectedTermsVersion: 1, change: negotiation ? { kind: 'edit' as const, tasks: [{seat:0,text:'Read a chapter'},{seat:1,text:'Stretch for ten minutes'}], stakes:[{kind:'winner_gets' as const,item:'Choose the film'}] } : duration ? { kind: 'edit' as const, lengthDays: 10 } : { kind: 'edit' as const, schedule: { days: [5, 6] } }, effectiveFromDay: duration ? 2 : 0, deliveryStatus: 'sent' as const, startsOn: null },
       changeControls: { canStartNow: !duration, canEdit: true, canEditSchedule: true, canEditStartDate: !duration, editableFromDay: duration ? 2 : 0 },
     }
     try {
@@ -45091,19 +45092,22 @@ describeRealCodex('real Codex game agreement e2e', () => {
             calls.push(request)
             if (request.action === 'read_game') return { action: 'read_game', result: { status: 'ok', state: { games: [game] } } }
             if (request.action !== 'update_game') throw new Error('Unexpected game action')
-            return { action: 'update_game', result: { status: 'ok', state: { games: [{ ...game, lengthDays: duration ? 10 : game.lengthDays, terms: { ...game.terms, n: 2, fromDay: duration ? 2 : 0, schedule: duration ? game.terms.schedule : { days: [5, 6] } }, pendingChange: null }] } } }
+            return { action: 'update_game', result: { status: 'ok', state: { games: [{ ...game, status: 'live' as const, lengthDays: duration ? 10 : game.lengthDays, terms: { ...game.terms, n: 2, fromDay: duration ? 2 : 0, schedule: duration || negotiation ? game.terms.schedule : { days: [5, 6] }, ...(negotiation && 'tasks' in game.pendingChange.change ? {tasks:game.pendingChange.change.tasks,stakes:game.pendingChange.change.stakes} : {}) }, pendingChange: null }] } } }
           } },
           currentUserActionScope: () => ({ conversationId: 'synthetic-game-chat', inboundMailboxItemIds: [], recipientKey: 'synthetic-game-recipient', acceptedInputIds: [inputId], originSessionId: 'synthetic-game-session', conversationScope: 'group' }),
           currentHostedDeliveryContext: () => null, currentHostedMailboxItemIds: () => [], sendVaultFile: async () => { throw new Error('No file send authorized.') },
         },
         model: config.model, modelProvider: config.modelProvider,
-        prompt: `Earlier in this game group: Murph: ${duration ? 'Alex wants to extend the game to 10 days total. Sam, good with that?' : 'Alex wants to switch to weekend check-ins. Sam, good with that?'}\nCurrent accepted message from Sam (Message ref: ${inputId}): yeah sounds good`,
+        prompt: `Earlier in this game group: Murph: ${negotiation ? 'Alex suggested that Sam stretch for ten minutes, with the winner choosing the film. The game is waiting for agreement. Sam, does that work?' : duration ? 'Alex wants to extend the game to 10 days total. Sam, good with that?' : 'Alex wants to switch to weekend check-ins. Sam, good with that?'}\nCurrent accepted message from Sam (Message ref: ${inputId}): yeah sounds good`,
         reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
       })
-      process.stdout.write(JSON.stringify({ scenario: duration ? 'game duration extension' : 'game weekend agreement', reply: result.finalMessage, actions: calls.map((call) => call.action) }) + '\n')
+      process.stdout.write(JSON.stringify({ scenario: negotiation ? 'game negotiated rules agreement' : duration ? 'game duration extension' : 'game weekend agreement', reply: result.finalMessage, actions: calls.map((call) => call.action) }) + '\n')
       expect(calls.map((call) => call.action)).toEqual(['read_game', 'update_game'])
       expect(calls[1]).toEqual({ action: 'update_game', origin: { kind: 'accepted_input', assistantInputId: inputId }, update: { operation: 'approve', gameId: game.id, proposalId: 'proposal_synthetic' } })
-      if (duration) {
+      if (negotiation) {
+        expect(result.finalMessage).toMatch(/stretch|film|agreed|set|ready|start/iu)
+        expect(result.finalMessage).not.toMatch(/weekend|Saturday.*Sunday/iu)
+      } else if (duration) {
         expect(result.finalMessage).toMatch(/10|ten/iu)
         expect(result.finalMessage).not.toMatch(/restart|start(?:s|ing)? tomorrow|switch(?:ed)? to weekends/iu)
       } else expect(result.finalMessage).toMatch(/weekend|Saturday.*Sunday/iu)
@@ -45214,6 +45218,59 @@ describeRealCodex('real Codex game lifecycle messaging e2e', () => {
       expect(result.finalMessage).toContain('?')
       expect(result.finalMessage).not.toMatch(/sent.*(?:another|other) chat|relink|linked to|starting tomorrow|now extended|has been extended|already extended/iu)
       expect(result.finalMessage.length).toBeLessThan(400)
+    } finally {
+      await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+    }
+  }, 360_000)
+
+  it('game lifecycle negotiation agreement leaves the introduction to the durable kickoff', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-game-chat-agreement-e2e-'))
+    const { MURPH_READ_GAME_TOOL, MURPH_UPDATE_GAME_TOOL } = await import('../src/assistant-codex/dynamic-tools/games.js')
+    const inputId = 'ain_' + 'b'.repeat(32)
+    const calls: Array<import('@murphai/hosted-execution/runtime-control').HostedRuntimeGroupToolRequest> = []
+    const game = {
+      id: 'game_synthetic', status: 'negotiating' as const, lengthDays: 7, startsOn: null,
+      terms: { n: 1, fromDay: 0, tasks: [{ seat: 0, text: 'Read a chapter' }, { seat: 1, text: 'Read a chapter' }], schedule: { days: [0, 1, 2, 3, 4] }, stakes: [] },
+      players: [{ memberId: 'player_alex', seat: 0, firstName: 'Alex', dayOne: null, timeZone: 'UTC' }, { memberId: 'player_sam', seat: 1, firstName: 'Sam', dayOne: null, timeZone: 'UTC' }],
+      pendingChange: { id: 'proposal_synthetic', proposedByMemberId: 'player_alex', expectedTermsVersion: 1, change: { kind: 'edit' as const, lengthDays: 10 }, effectiveFromDay: 0, startsOn: null, origin: 'app' as const, deliveryStatus: 'sent' as const },
+      changeControls: { canStartNow: false, canEdit: true, canEditSchedule: true, canEditStartDate: false, editableFromDay: 2 },
+    }
+    try {
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome,
+        developerInstructions: buildAssistantSystemPrompt({
+          assistantCliContract: null, assistantKnowledgeToolsAvailable: false,
+          channel: 'linq', cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+          conversationScope: 'group', currentLocalDate: '2030-03-06', currentInstant: '2030-03-06T16:00:00.000Z', currentTimeZone: 'UTC',
+          hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false, turnTrigger: null,
+        }),
+        dynamicTools: [MURPH_READ_GAME_TOOL, MURPH_UPDATE_GAME_TOOL], env: config.env,
+        hostedToolContext: {
+          computerToolsAvailable: false, vaultFileSendAvailable: false,
+          groupTool: { request: async (request) => {
+            calls.push(request)
+            if (request.action === 'read_game') return { action: 'read_game', result: { status: 'ok', state: { games: [game] } } }
+            if (request.action !== 'update_game' || request.update.operation !== 'approve') throw new Error('Only agreement to the current proposal is authorized.')
+            return { action: 'update_game', result: { status: 'ok', state: { games: [{ ...game, status: 'live', lengthDays: 10, pendingChange: null,
+              terms: { ...game.terms, n: 2 }, players: game.players.map((player) => ({ ...player, dayOne: '2030-03-07' })),
+            }] } } }
+          } },
+          currentUserActionScope: () => ({ conversationId: 'synthetic-second-room', inboundMailboxItemIds: [], recipientKey: 'synthetic-recipient', acceptedInputIds: [inputId], originSessionId: 'synthetic-session', conversationScope: 'group' }),
+          currentHostedDeliveryContext: () => null, currentHostedMailboxItemIds: () => [], sendVaultFile: async () => { throw new Error('No file send authorized.') },
+        },
+        model: config.model, modelProvider: config.modelProvider,
+        prompt: `Earlier in this group, Alex proposed a 10-day reading challenge instead of 7 days. Sam has joined to negotiate and has not accepted the rules yet. Current accepted message from Sam (Message ref: ${inputId}): Yes, I agree to Alex's 10-day proposal.`,
+        reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
+      })
+      process.stdout.write(`[game-lifecycle chat-proposal] ${JSON.stringify({ reply: result.finalMessage, actions: calls.map((call) => call.action) })}\n`)
+      expect(calls.map((call) => call.action)).toEqual(['read_game', 'update_game'])
+      expect(calls[1]).toEqual({ action: 'update_game', origin: { kind: 'accepted_input', assistantInputId: inputId }, update: { operation: 'approve', gameId: game.id, proposalId: 'proposal_synthetic' } })
+      expect(result.finalMessage).toMatch(/agreed|agreement|accepted|set|locked|confirmed|active/iu)
+      expect(result.finalMessage).not.toMatch(/read a chapter|Monday|Friday|remind|brunch|announcement.*sent|sent.*(?:intro|kickoff)|waiting.*agree|reply yes/iu)
+      expect(result.finalMessage.length).toBeLessThan(220)
     } finally {
       await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
     }

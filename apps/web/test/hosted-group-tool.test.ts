@@ -330,6 +330,7 @@ import {
   buildHostedGroupJoinOfferProviderIdempotencyKey,
   HOSTED_RUNTIME_GROUP_TOOL_ACCESS_CLASSIFICATION,
   handleHostedRuntimeGroupTool,
+  handleHostedRuntimeConversationTool,
 } from "@/src/lib/hosted-groups/group-tool";
 import {
   HOSTED_THREAD_CONTAINER_PARTICIPANT_RECONCILE_MAX,
@@ -711,11 +712,22 @@ describe("handleHostedRuntimeGroupTool", () => {
     });
   });
 
+  it("keeps game photo writes unavailable until their feature lands", async () => {
+    expect(await handleHostedRuntimeConversationTool({
+      memberId: "synthetic-group",
+      request: { action: "game_photo", origin: { kind: "accepted_input", assistantInputId: "synthetic-input" }, photo: { operation: "save", gameId: "synthetic-game" } },
+    })).toEqual({ action: "game_photo", result: { status: "unavailable", error: "game_feature_unavailable" } });
+    expect(mocks.getHostedLinqChatSummary).not.toHaveBeenCalled();
+    expect(mocks.readHostedGroupSharedDataByRuntimeMemberId).not.toHaveBeenCalled();
+    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+  });
+
   it("classifies group-tool actions by access authority", () => {
     expect(HOSTED_RUNTIME_GROUP_TOOL_ACCESS_CLASSIFICATION).toEqual({
-      game_chat_bootstrap: "participant_aware",
       read_game: "participant_aware",
       update_game: "participant_aware",
+      game_photo: "participant_aware",
+      game_chat_bootstrap: "participant_aware",
       ask: "personal_active",
       handoff: "personal_active",
       ask_current_sender: "participant_aware",

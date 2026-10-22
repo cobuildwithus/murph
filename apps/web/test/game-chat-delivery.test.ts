@@ -165,6 +165,24 @@ describe("game proposal chat delivery", () => {
     expect(data).toEqual({ proposer: "Alex", recipient: "Sam", currentLengthDays: 7, change: proposal.change, proposedStartDate: null });
     expect(data).not.toHaveProperty("effectiveFromDay");
   });
+  it("hydrates sealed task and stake proposals without rewriting their stored words", async () => {
+    const words = JSON.stringify({ v: 1, versions: [{ n: 2,
+      tasks: [{ seat: 0, text: "Read ten pages" }, { seat: 1, text: "Read twenty pages" }],
+      stakes: [{ key: "stake-next", item: "Choose the next book" }],
+    }] });
+    m.game.mockResolvedValue({ ...game("room"), createdBy: "person-a", status: "negotiating", pendingChange: {
+      ...proposal, v: 2, origin: "app", change: { kind: "edit" }, tasksChanged: true,
+      stakes: [{ key: "stake-next", kind: "winner_gets" }], termsWordsEncrypted: words,
+    } });
+    await deliverGameChangeProposal("game", "proposal");
+    const instructions = m.prepareMailbox.mock.calls[0]![0].envelope.notification.instructions;
+    const data = JSON.parse(instructions.split("\n").at(-1));
+    expect(data.change.tasks).toEqual([{ seat: 0, text: "Read ten pages" }, { seat: 1, text: "Read twenty pages" }]);
+    expect(data.change.stakes).toEqual([{ kind: "winner_gets", item: "Choose the next book" }]);
+    expect(instructions).not.toContain("termsWordsEncrypted");
+    expect(m.updateGame).not.toHaveBeenCalled();
+    expect(m.updateStatus.mock.calls[0]![0].join("")).toContain("jsonb_set(pending_change, '{deliveryStatus}'");
+  });
   it("does not queue a second announcement for a chat-originated proposal", async () => {
     m.game.mockResolvedValue({ ...game("room"), pendingChange: { v: 1, ...proposal, origin: "chat", deliveryStatus: "conversation" } });
     await deliverGameChangeProposal("game", "proposal");

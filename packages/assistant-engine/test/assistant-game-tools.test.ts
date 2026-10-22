@@ -63,4 +63,14 @@ describe('game dynamic tools', () => {
     expect(port).toHaveBeenCalledTimes(1)
     expect(result.rpcResult.contentItems[0]?.text).toContain('Read the game')
   })
+  it('round-trips negotiated task and whole-game stake scope without identity selectors', () => {
+    const change = { kind: 'edit', tasks: [{seat:0,text:'Read'},{seat:1,text:'Stretch'}], stakes:[{kind:'per_miss',item:'Make tea'}], stakesApplyToWholeGame:true, startsOn:null }
+    const request = {action:'update_game',origin,update:{operation:'propose',gameId:approval.gameId,proposalId:approval.proposalId,expectedTermsVersion:1,change}}
+    expect(parseHostedRuntimeGroupToolRequest(request)).toEqual(request)
+    expect(MURPH_UPDATE_GAME_TOOL.description).toContain('including earlier misses')
+    expect(MURPH_UPDATE_GAME_TOOL.description).toContain('Negotiating games have no active obligations')
+    expect(parse('update_game',{...approval,operation:'propose',expectedTermsVersion:1,change})?.kind).toBe('game')
+    expect(parse('update_game',{...approval,operation:'propose',expectedTermsVersion:1,change:{...change,stakesApplyToWholeGame:false}})?.kind).toBe('invalid-game-arguments')
+  })
+
 })

@@ -27,7 +27,8 @@ one primary room remains the destination for app-originated announcements.
 - [x] Establish durable acceptance notification and generated first-message
   group creation through existing mailbox/outbox and provider receipt owners.
 - [x] Extend included group access without multiplying the game allowance.
-- [ ] Integrate canonical negotiation/terms and shared progress branches.
+- [x] Integrate canonical negotiation/terms and compatible runtime readers.
+- [ ] Parent integrates shared progress/photo branch.
 - [x] Focused deterministic tests, relevant typechecks, real-Codex journeys.
 - [x] Update owner docs/changelog and prepare Draft PR #4313 for parent review.
 
@@ -83,3 +84,24 @@ the durable started kickoff owns the recap and reminder offer. Integration
 proof must exercise this with the negotiating wire contract.
 The shared allowance collaborator owns server-frozen funding attribution; no
 alternate room creates a new included budget or personal AI access.
+
+## Combined negotiation proof
+
+The branch merges the canonical negotiation head and compatible runtime-reader
+floor. Proposal context now hydrates encrypted v2 words through the canonical
+reader. Queued and sent updates change only delivery metadata, preserving sealed
+terms. The stored parser preserves app/chat origin and conversation delivery
+state. Initial invite negotiation reserves only the ordinary proposal; approval
+reserves exactly one started kickoff, including concurrent approval retries.
+
+Combined verification passed: 47 PostgreSQL service/change/negotiation tests;
+88 focused lifecycle, bootstrap, proposal and contract tests; Web and engine
+typechecks. The sealed task/stake notification regression proves generated
+context receives public proposed words, while its update leaves encrypted
+storage intact. The real negotiation-approval journey is Ready: read once,
+approve the exact pending ID once, and briefly acknowledge active agreement
+without a repeated task/stake introduction, reminder offer or false delivery
+claim. Its first assertion omitted the valid wording “agreement is recorded”;
+the assertion now recognizes that acknowledgement without relaxing effect or
+privacy checks. No production prompt change was needed for that evidence.
+The source metadata parser was factored to preserve the complexity ceiling.

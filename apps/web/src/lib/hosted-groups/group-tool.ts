@@ -276,9 +276,10 @@ export type HostedRuntimeGroupToolAccessClassification =
   | "participant_aware";
 
 export const HOSTED_RUNTIME_GROUP_TOOL_ACCESS_CLASSIFICATION = {
-  game_chat_bootstrap: "participant_aware",
   read_game: "participant_aware",
   update_game: "participant_aware",
+  game_photo: "participant_aware",
+  game_chat_bootstrap: "participant_aware",
   ask: "personal_active",
   handoff: "personal_active",
   ask_current_sender: "participant_aware",
@@ -456,6 +457,9 @@ export async function handleHostedRuntimeConversationTool(
   if (input.request.action === "game_chat_bootstrap") {
     return handleGameChatBootstrapControl({ memberId: input.memberId, runtimeIdentity: input.runtimeIdentity ?? null, request: input.request });
   }
+  if (input.request.action === "game_photo") {
+    return { action: "game_photo", result: { status: "unavailable", error: "game_feature_unavailable" } };
+  }
   if (input.request.action === "read_game" || input.request.action === "update_game") {
     return handleGameChatTool({ memberId: input.memberId, runtimeIdentity: input.runtimeIdentity ?? null, request: input.request });
   }
@@ -463,7 +467,7 @@ export async function handleHostedRuntimeConversationTool(
 }
 
 type HostedRuntimeNonGameToolHandlerInput = Omit<HostedRuntimeGroupToolHandlerInput, "request"> & {
-  request: Exclude<HostedRuntimeGroupToolRequest, { action: "read_game" | "update_game" | "game_chat_bootstrap" }>;
+  request: Exclude<HostedRuntimeGroupToolRequest, { action: "read_game" | "update_game" | "game_photo" | "game_chat_bootstrap" }>;
 };
 
 export async function handleHostedRuntimeGroupTool(

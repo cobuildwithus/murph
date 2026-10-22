@@ -158,7 +158,7 @@ export function buildGameView(input: GameViewInput): GameView {
   return {
     changeControls: gameChangeControls(state, input.now, input.pendingChange ?? null),
     pendingChange: input.pendingChange ?? null,
-    days: dayViews(input, players),
+    days: game.status === "negotiating" ? [] : dayViews(input, players),
     id: game.id,
     inviteExpiresAt: game.status === "invited" ? input.inviteExpiresAt?.toISOString() ?? null : null,
     // The service hands over the token only to the people it belongs to.

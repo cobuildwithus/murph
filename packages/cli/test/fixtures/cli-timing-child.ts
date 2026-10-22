@@ -3,6 +3,8 @@ import { mock } from 'node:test'
 import { foodLabelResponse, syntheticOats } from './food-label-response.ts'
 
 const [expectedRequests, ...argv] = process.argv.slice(2)
+const foodResponse = process.env.MURPH_TEST_FOOD_RESPONSE
+assert.ok(foodResponse === undefined || ['http', 'schema', 'mixed'].includes(foodResponse))
 let requests = 0
 // Test-only provider seam, shared response helper with the existing client
 // tests. Never delegate to a live fetch, even for unexpected requests.
@@ -11,11 +13,24 @@ globalThis.fetch = async (input, init) => {
   const url = new URL(String(input))
   assert.equal(url.origin, 'http://murph-data-api.worker')
   assert.equal(url.pathname, '/api/foods')
+  assert.equal(new Headers(init?.headers).get('authorization'), 'Bearer SYNTHETIC_SECRET_TOKEN')
+  if (foodResponse) {
+    assert.equal(init?.method, 'POST')
+    assert.equal(url.search, '')
+    assert.deepEqual(JSON.parse(String(init?.body)), {
+      queries: ['synthetic oats'], limit: 1, includeOffMarket: false, nutritionOnly: true,
+    })
+    if (foodResponse === 'http' || (foodResponse === 'mixed' && requests === 1)) {
+      return new Response('PRIVATE_SENTINEL provider body', { status: 400 })
+    }
+    // The existing single-query response is deliberately invalid for the real
+    // batch client's results schema; do not replace the client or its errors.
+    return foodLabelResponse([syntheticOats])
+  }
   assert.equal(url.searchParams.get('q'), 'synthetic oats')
   assert.equal(url.searchParams.get('limit'), '1')
   assert.equal(url.searchParams.get('nutritionOnly'), 'true')
   assert.equal(init?.method, 'GET')
-  assert.equal(new Headers(init?.headers).get('authorization'), 'Bearer SYNTHETIC_SECRET_TOKEN')
   return foodLabelResponse([syntheticOats])
 }
 process.on('exit', () => { assert.equal(requests, Number(expectedRequests)) })
@@ -24,6 +39,7 @@ process.loadEnvFile = () => { assert.fail('Child must not load .env') }
 // Freeze Date.now AND new Date(), not timing's monotonic clock, so telemetry-on/off
 // stdout can be compared byte for byte through the real source graph.
 mock.timers.enable({ apis: ['Date'], now: 1_900_000_000_000 })
+if (foodResponse) mock.method(performance, 'now', () => 0)
 
 // Same source entry as production batch actions. Unlike old tests, do NOT
 // inject exit/stdout: Incur's failure path really terminates this process.
