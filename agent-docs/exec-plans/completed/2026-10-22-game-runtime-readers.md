@@ -1,6 +1,6 @@
 # Compatible runtime readers for game negotiation and chat
 
-Status: active
+Status: completed
 Created: 2026-10-22
 Updated: 2026-10-22
 
@@ -96,3 +96,19 @@ when the extracted production code is identical; rerun if integration changes it
 - PR #4312 is open. Its first external-review launch failed during managed
   browser startup before submission; no substantive review exists. The next
   attempt will review the corrected consumer floor on a fresh browser lane.
+
+## Completion evidence
+
+- Compatible readers include optional app/chat proposal source while preserving
+  legacy absent fields. All 69 package compatibility/parser cases and package
+  typecheck pass after integration; total focused coverage remains 373 cases.
+- Final independent review at `f610e9712e0520d016f7c583c3e15eb03dc328ff`
+  returned PASS with no qualifying findings. The exact sent GPT-6 Pro request,
+  full snapshot, completion marker and capture were verified. The valid Eragon
+  attempt took approximately 246 seconds from accepted send to captured result.
+  The earlier Apollo startup failure produced no review and did not count.
+- Parent candidate review found no remaining implementation issue. This plan
+  closes the preparatory implementation; exact-head CI and merge remain PR
+  gates. Deployment and warm-runtime convergence remain mandatory release
+  operations before feature writers activate, and are not claimed complete.
+Completed: 2026-10-22

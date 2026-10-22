@@ -11,7 +11,7 @@ import { appendHostedMailboxEnvelopeTx, appendPreparedHostedMailboxEnvelopeTx, p
 import { requireHostedRuntimeActiveAccessForUpdateTx } from "../hosted-mailbox/runtime-access";
 import { signalHostedMailboxAppendRuntime } from "../hosted-orchestration/signal-runtime";
 import { readHostedMemberIdentity } from "../hosted-onboarding/hosted-member-identity-store";
-import { createHostedLinqChat, getHostedLinqChatSummary } from "../hosted-onboarding/linq-client";
+import { createHostedLinqChat, getHostedLinqChatSummary, validateHostedLinqChatFirstMessage } from "../hosted-onboarding/linq-client";
 import { buildHostedLinqDeliveryId, claimHostedLinqDeliveryProviderDispatchTx, markHostedLinqDeliveryAcceptedTx } from "../hosted-onboarding/linq-delivery-store";
 import { claimHostedLinqProactiveConversationCapacityTx, listHostedLinqHealthyProactiveLines } from "../hosted-onboarding/linq-line-store";
 import { createHostedLinqDeliveryIdempotencyLookupKey } from "../hosted-onboarding/linq-observability-identifiers";
@@ -31,6 +31,7 @@ const frozenBootstrapSchema = z.object({
 }).strict();
 type FrozenBootstrap = z.infer<typeof frozenBootstrapSchema>;
 type FrozenReceipt = { id: string; payload: FrozenBootstrap; skipped?: boolean };
+type BootstrapReceipt = FrozenReceipt | { id: string; skipped: true };
 type ControlInput = { memberId: string; runtimeIdentity: HostedRuntimeIdentity | null; request: HostedGameChatBootstrapRequest };
 
 /** Shared workspace and accepted work commit together, before any model/provider call. */
@@ -168,19 +169,34 @@ function payloadAuthority(memberId: string, deliveryId: string) { return { lane:
 function parseFrozenBootstrap(value: string | null): FrozenBootstrap {
   return frozenBootstrapSchema.parse(value ? JSON.parse(value) : null);
 }
-async function readFrozenBootstrap(eventId: string, memberId: string): Promise<FrozenReceipt | null> {
+async function readFrozenBootstrap(eventId: string, memberId: string): Promise<BootstrapReceipt | null> {
   const prisma = getPrisma();
   const idempotencyKey = createHostedLinqDeliveryIdempotencyLookupKey(eventId);
   if (!idempotencyKey) throw new TypeError("Game chat delivery identity is unavailable.");
-  const receipt = await prisma.hostedLinqDelivery.findUnique({ where: { idempotencyKey }, select: { id: true, payloadSchema: true, payloadCiphertext: true, payloadOwnerMemberId: true, source: true, status: true, skippedAt: true } });
+  const receipt = await prisma.hostedLinqDelivery.findUnique({ where: { idempotencyKey }, select: { id: true, payloadSchema: true, payloadCiphertext: true, payloadOwnerMemberId: true, source: true, status: true, skippedAt: true, template: true, acceptedAt: true, lastReceiptAt: true, messageLookupKey: true, phoneNumberLookupKey: true } });
+  // A cancelled reservation has no provider effect to reconcile. Returning a
+  // terminal result lets the ordered system mailbox consume its stale wake.
+  if (receipt && isSkippedBootstrapReservation(receipt, memberId)) return { id: receipt.id, skipped: true };
   if (!receipt || receipt.source === "game_lifecycle" && ["awaiting_generation", "generation_queued"].includes(receipt.status) && receipt.payloadCiphertext === null) return null;
   if (receipt.payloadSchema !== PAYLOAD_SCHEMA || !receipt.payloadCiphertext || receipt.payloadOwnerMemberId !== memberId) throw new Error("Previous game chat creation requires reconciliation.");
   const text = await openHostedUserSecureBoxString({ ...payloadAuthority(memberId, receipt.id), prisma, value: receipt.payloadCiphertext });
   return { id: receipt.id, payload: parseFrozenBootstrap(text), skipped: receipt.skippedAt != null };
 }
 
+function isSkippedBootstrapReservation(row: {
+  source: string; template: string | null; status: string; skippedAt: Date | null;
+  payloadOwnerMemberId: string | null; payloadSchema: string | null; payloadCiphertext: string | null;
+  acceptedAt: Date | null; lastReceiptAt: Date | null; messageLookupKey: string | null; phoneNumberLookupKey: string | null;
+}, memberId: string): boolean {
+  return row.source === "game_lifecycle" && row.payloadOwnerMemberId === memberId
+    && ["game_started", "game_proposal"].includes(row.template ?? "")
+    && row.status === "skipped" && row.skippedAt !== null
+    && [row.payloadSchema, row.payloadCiphertext, row.acceptedAt, row.lastReceiptAt, row.messageLookupKey, row.phoneNumberLookupKey].every((value) => value === null);
+}
+
 async function freezeBootstrapMessage(input: ControlInput, phones: string[]): Promise<FrozenReceipt | null> {
   if (input.request.operation !== "send" || !input.request.text?.trim()) throw new TypeError("Game chat bootstrap requires its generated message.");
+  validateHostedLinqChatFirstMessage(input.request.text);
   const prisma = getPrisma();
   const key = input.request.eventId;
   const lookupKey = createHostedLinqDeliveryIdempotencyLookupKey(key);
@@ -211,7 +227,10 @@ async function freezeBootstrapMessage(input: ControlInput, phones: string[]): Pr
       return "claimed";
     });
     if (result === "stale") return null;
-    if (result === "existing") return readFrozenBootstrap(input.request.eventId, input.memberId);
+    if (result === "existing") {
+      const existing = await readFrozenBootstrap(input.request.eventId, input.memberId);
+      return existing?.skipped ? null : existing;
+    }
     if (result === "claimed") return { id, payload };
   }
   throw new Error("No healthy game chat line has capacity.");

@@ -6235,6 +6235,46 @@ describe("hosted system mailbox notification execution context", () => {
     }
   });
 
+  it("unblocks a replacement bootstrap when the cancelled wake returns terminal no-send", async () => {
+    const workspace = await createHostedRuntimeWorkspace("murph-bootstrap-mailbox-");
+    const wakeFor = (proposal: string) => {
+      const eventId = `game-change:synthetic-game:${proposal}`;
+      return buildHostedExecutionAssistantNotificationRequestedWake({
+        eventId, memberId: "member_123", occurredAt: FIXED_NOW,
+        notification: { instructions: "Ask about this proposal.", responsePolicy: { kind: "require_send" },
+          gameChatBootstrap: { gameId: "synthetic-game", eventId },
+          route: { channel: "linq", actorId: null, identityId: "member_123", threadId: null,
+            threadIsDirect: false, delivery: { kind: "bootstrap", target: "member_123" } } },
+      });
+    };
+    const oldWake = wakeFor("cancelled-proposal"), nextWake = wakeFor("replacement-proposal");
+    const prepare = (now: string) => prepareHostedSystemMailboxItemForCheckpoint({
+      allowedRouteActions: ["dispatch-assistant-notification"], executionContext: null,
+      now: () => now, runtime: createRuntime({}), runtimeEnv: {}, vaultRoot: workspace.vaultRoot,
+    });
+    try {
+      await enqueueHostedSystemMailboxItem({ vaultRoot: workspace.vaultRoot, wake: oldWake,
+        item: createResolvedNotificationItem({ id: "bootstrap-old", dedupeKey: oldWake.eventId, laneSeq: "1" }) });
+      mocks.executeHostedMailboxEvent.mockRejectedValueOnce(new Error("Temporary model failure before freezing"));
+      expect(await prepare(FIXED_NOW)).toMatchObject({ status: "retryable_failed", itemId: "bootstrap-old" });
+      await enqueueHostedSystemMailboxItem({ vaultRoot: workspace.vaultRoot, wake: nextWake,
+        item: createResolvedNotificationItem({ id: "bootstrap-next", dedupeKey: nextWake.eventId, laneSeq: "2" }) });
+      expect(await prepare(FIXED_NOW)).toBeNull();
+      // Web's skipped empty reservation yields unavailable. The real engine's
+      // recovery maps it to skip; the notification owner returns these no-send
+      // metrics (covered separately at both boundaries), not a retryable error.
+      mocks.executeHostedMailboxEvent.mockResolvedValue({ bootstrapResult: null, conversationMetrics: null,
+        mailboxLane: "assistant-notification", nextWakeAt: null, postCheckpointRecord: null, redactedLogEntries: [] });
+      const retryAt = "2026-04-27T00:01:00.000Z";
+      expect(await prepare(retryAt)).toMatchObject({ status: "processed", itemId: "bootstrap-old" });
+      expect(await prepare(retryAt)).toMatchObject({ status: "processed", itemId: "bootstrap-next" });
+      expect((await readHostedSystemMailboxState(workspace.vaultRoot)).pending).toEqual([]);
+      expect(mocks.executeHostedMailboxEvent.mock.calls.map(([input]) => input.wake.eventId)).toEqual([
+        oldWake.eventId, oldWake.eventId, nextWake.eventId,
+      ]);
+    } finally { await workspace.cleanup(); }
+  });
+
   it("retries an older preference delta before applying a newer delta", async () => {
     const workspace = await createHostedRuntimeWorkspace("murph-hosted-system-mailbox-");
     const olderWake = buildHostedExecutionMemberPreferencesUpdatedWake({

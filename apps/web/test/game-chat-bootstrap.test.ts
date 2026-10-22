@@ -15,7 +15,10 @@ vi.mock("../src/lib/hosted-mailbox/runtime-access", () => ({ requireHostedRuntim
 vi.mock("../src/lib/hosted-mailbox/store", () => ({ readHostedMailboxWakeByDedupeKey: m.wake, appendHostedMailboxEnvelopeTx: m.append, readHostedMailboxItemByDedupeKey: m.mailbox, prepareHostedMailboxEnvelopeAppend: m.prepareMailbox, appendPreparedHostedMailboxEnvelopeTx: m.enqueue }));
 vi.mock("../src/lib/hosted-orchestration/signal-runtime", () => ({ signalHostedMailboxAppendRuntime: m.signal }));
 vi.mock("../src/lib/hosted-onboarding/hosted-member-identity-store", () => ({ readHostedMemberIdentity: m.identities }));
-vi.mock("../src/lib/hosted-onboarding/linq-client", () => ({ createHostedLinqChat: m.create, getHostedLinqChatSummary: m.chat }));
+vi.mock("../src/lib/hosted-onboarding/linq-client", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../src/lib/hosted-onboarding/linq-client")>(),
+  createHostedLinqChat: m.create, getHostedLinqChatSummary: m.chat,
+}));
 vi.mock("../src/lib/hosted-onboarding/linq-line-store", () => ({ listHostedLinqHealthyProactiveLines: m.lines, claimHostedLinqProactiveConversationCapacityTx: m.capacity }));
 vi.mock("../src/lib/hosted-onboarding/linq-delivery-store", () => ({ buildHostedLinqDeliveryId: () => "delivery", claimHostedLinqDeliveryProviderDispatchTx: m.claim, markHostedLinqDeliveryAcceptedTx: m.accepted }));
 vi.mock("../src/lib/hosted-onboarding/linq-observability-identifiers", () => ({ createHostedLinqDeliveryIdempotencyLookupKey: (key: string) => `hash:${key}` }));
@@ -90,6 +93,33 @@ describe("generated game chat bootstrap", () => {
   it("asks for model text only when no message has been frozen", async () => {
     expect(await call("recover")).toMatchObject({ result: { status: "needs_message" } });
     expect(m.create).not.toHaveBeenCalled(); expect(m.saveReceipt).not.toHaveBeenCalled();
+  });
+  it("terminalizes only a skipped empty reservation owned by this group", async () => {
+    const receipt = { id: "delivery", source: "game_lifecycle", template: "game_proposal", status: "skipped", skippedAt: new Date(),
+      payloadOwnerMemberId: "room", payloadSchema: null, payloadCiphertext: null,
+      acceptedAt: null, lastReceiptAt: null, messageLookupKey: null, phoneNumberLookupKey: null };
+    m.receipt.mockResolvedValue(receipt);
+    await expect(call("recover")).resolves.toMatchObject({ result: { status: "unavailable" } });
+    await expect(call("send", "Must not generate a replacement for the cancelled event")).resolves.toMatchObject({ result: { status: "unavailable" } });
+    expect(m.create).not.toHaveBeenCalled(); expect(m.capacity).not.toHaveBeenCalled();
+    for (const changed of [{ source: "other" }, { payloadOwnerMemberId: "another-room" }, { template: "game_chat_bootstrap" }, { acceptedAt: new Date() }, { phoneNumberLookupKey: "line" }]) {
+      m.receipt.mockResolvedValue({ ...receipt, ...changed });
+      await expect(call("recover")).rejects.toThrow("requires reconciliation");
+    }
+  });
+  it.each([
+    "Follow https://example.org/workout daily. Want reminders?",
+    "Follow http://example.org/workout",
+    "https://example.org/workout",
+    "Read https://example.org/one then https://example.org/two",
+  ])("rejects unsendable first text before freezing or consuming capacity: %s", async (text) => {
+    await expect(call("send", text)).rejects.toThrow();
+    expect(m.capacity).not.toHaveBeenCalled(); expect(m.claim).not.toHaveBeenCalled();
+    expect(m.saveReceipt).not.toHaveBeenCalled(); expect(m.create).not.toHaveBeenCalled();
+    expect(m.frozen).toBeNull();
+    await expect(call("recover")).resolves.toMatchObject({ result: { status: "needs_message" } });
+    await expect(call("send", "Follow the agreed workout daily. Want reminders?")).resolves.toMatchObject({ result: { status: "sent" } });
+    expect(m.create).toHaveBeenCalledOnce(); expect(m.capacity).toHaveBeenCalledOnce(); expect(m.attachRoute).toHaveBeenCalledOnce();
   });
   it("persists the generated first message before provider entry and attaches its exact runtime", async () => {
     const result = await call("send", "You are both in for daily reading. Want reminders for the first few days?");

@@ -249,6 +249,16 @@ const hostedWebPrismaPredeployCompatibleMigrationReasons = new Map([
   ],
 ]);
 
+// Negotiation adds a status and reserves its pair without changing any old
+// status/roster combination. Exempt only these exact constraint replacements;
+// another check or drop in the same migration must still fail closed.
+const gameNegotiationCompatibleStatements = new Set([
+  'ALTER TABLE "game" DROP CONSTRAINT IF EXISTS "game_status_check"',
+  `ALTER TABLE "game" ADD CONSTRAINT "game_status_check" CHECK ("status" IN ('invited', 'negotiating', 'live', 'settled', 'void')) NOT VALID`,
+  'ALTER TABLE "game" DROP CONSTRAINT IF EXISTS "game_live_roster_check"',
+  `ALTER TABLE "game" ADD CONSTRAINT "game_live_roster_check" CHECK (("live_roster_key" IS NULL) = ("status" NOT IN ('negotiating', 'live'))) NOT VALID`,
+]);
+
 const incompatiblePredeploySqlPatterns = [
   {
     label: "ADD CONSTRAINT CHECK",
@@ -447,7 +457,9 @@ export async function findHostedWebPrismaPredeployDestructiveMigrations(
     }
 
     const sqlPath = path.join(migrationsDir, entry.name, "migration.sql");
-    const sqlStatements = splitSqlStatements(await readFile(sqlPath, "utf8"));
+    const sqlStatements = splitSqlStatements(await readFile(sqlPath, "utf8"))
+      .filter((statement) => entry.name !== "20261022071000_game_negotiation"
+        || !gameNegotiationCompatibleStatements.has(statement.replace(/\s+/gu, " ").trim()));
     const compatibleReasons =
       hostedWebPrismaPredeployCompatibleMigrationReasons.get(entry.name);
     const destructivePattern = incompatiblePredeploySqlPatterns.find(

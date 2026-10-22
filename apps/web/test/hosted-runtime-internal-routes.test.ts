@@ -4542,6 +4542,7 @@ function buildActiveHostedMemberRecord(overrides: Partial<{
 
 function createPrismaClientStub() {
   return {
+    $queryRaw: vi.fn(async () => []),
     async $transaction<T>(this: unknown, run: (tx: unknown) => Promise<T>): Promise<T> {
       return run(this);
     },
