@@ -1409,3 +1409,7 @@ Requested game proposal inactivity handling and CI repair proof are recorded in
 Native image publication ordering before protected integration is recorded in
 [`runner image readiness`](exec-plans/completed/2026-10-21-runner-image-readiness.md);
 the durable contract is in `apps/cloudflare/DEPLOY.md`.
+
+Game proposal wording and conversation-activity selection are tracked in
+[`game chat selection and copy`](exec-plans/completed/2026-10-22-game-chat-selection-copy.md);
+`product-specs/weekly-game.md` remains the current behavior owner.
