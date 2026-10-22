@@ -9,7 +9,7 @@ import type { CloudflareHostedControlClient } from "@murphai/cloudflare-hosted-c
 
 import { readHostedExecutionControlClientIfConfigured } from "../hosted-execution/control";
 import { mediaKeyOwner } from "./access";
-import { openGameMedia, sealGameMedia } from "./crypto";
+import { readRawBodyBuffer } from "../http";
 
 /**
  * Game photos, content-addressed: a key is
@@ -17,9 +17,9 @@ import { openGameMedia, sealGameMedia } from "./crypto";
  * same file twice lands on the same key and a key can never change contents.
  * The extension carries the type.
  *
- * Deployed (Vercel production and preview), photos are sealed here under the
- * uploader's key and kept by the Cloudflare Worker in R2; that store is the
- * only option there, and without its control client storage is off. Anywhere
+ * Deployed photos live in private Cloudflare Images. The Worker keeps only
+ * an opaque provider pointer in R2 and signs short-lived delivery URLs after
+ * Web authorizes the viewer. Without its control client storage is off. Anywhere
  * else they're plain files in a local directory (default `.tmp/game-media`,
  * override with `MURPH_GAME_MEDIA_DIR`), for local stacks.
  */
@@ -84,14 +84,13 @@ export async function putGameMedia(input: {
 }): Promise<string> {
   const hash = createHash("sha256").update(input.bytes).digest("hex");
   const key = `${input.prefix}${hash}.${EXTENSIONS[input.contentType]}`;
-  if (await statGameMedia(key)) return key;
   const store = requireStore();
   if (store.kind === "hosted") {
     const { mediaId, owner } = hostedName(key);
-    const envelope = await sealGameMedia({ bytes: input.bytes, key, ownerMemberId: owner });
-    await store.control.putGameMedia({ envelope, mediaId, userId: owner });
+    await store.control.putGameImage({ bytes: input.bytes, contentType: input.contentType, mediaId, userId: owner });
     return key;
   }
+  if (await statGameMedia(key)) return key;
   const file = requireFile(store.root, key);
   await mkdir(path.dirname(file), { recursive: true });
   const temporary = `${file}.${randomUUID()}.tmp`;
@@ -100,13 +99,13 @@ export async function putGameMedia(input: {
   return key;
 }
 
-/** Whether a key is stored; `byteLength` is what the store holds (sealed size when hosted). */
+/** Whether a key is stored; `byteLength` is what the store holds (original upload size when hosted). */
 export async function statGameMedia(key: string): Promise<{ byteLength: number; contentType: GameMediaContentType } | null> {
   const store = requireStore();
   const contentType = contentTypeOf(key);
   if (store.kind === "hosted") {
     const { mediaId, owner } = hostedName(key);
-    const stored = await store.control.statGameMedia({ mediaId, userId: owner });
+    const stored = await store.control.statGameImage({ mediaId, userId: owner });
     return stored ? { byteLength: stored.byteLength, contentType } : null;
   }
   try {
@@ -122,8 +121,19 @@ export async function readGameMedia(key: string): Promise<{ bytes: Uint8Array; c
   const contentType = contentTypeOf(key);
   if (store.kind === "hosted") {
     const { mediaId, owner } = hostedName(key);
-    const envelope = await store.control.readGameMedia({ mediaId, userId: owner });
-    return envelope === null ? null : { bytes: await openGameMedia({ envelope, key, ownerMemberId: owner }), contentType };
+    const delivery = await store.control.gameImageDelivery({ mediaId, userId: owner, variant: "photo" });
+    if (!delivery) return null;
+    assertImageDeliveryURL(delivery.url);
+    try {
+      // Compatibility for released clients which request image bytes. New
+      // clients fetch the signed URL directly with no Murph credentials.
+      const response = await fetch(delivery.url, { redirect: "error", signal: AbortSignal.timeout(15_000),
+        headers: { accept: "image/jpeg" }, cache: "no-store" });
+      if (!response.ok) throw new Error("Image unavailable.");
+      const type = parseGameMediaContentType(response.headers.get("content-type"));
+      if (!type) throw new Error("Image type is invalid.");
+      return { bytes: await readRawBodyBuffer(response, { limitBytes: GAME_MEDIA_MAX_BYTES }), contentType: type };
+    } catch { throw new Error("Game image download failed."); }
   }
   try {
     return { bytes: await readFile(requireFile(store.root, key)), contentType };
@@ -131,6 +141,24 @@ export async function readGameMedia(key: string): Promise<{ bytes: Uint8Array; c
     if (isMissingFile(error)) return null;
     throw error;
   }
+}
+
+/** Null on local stacks; callers then serve local bytes. This function
+ * never grants access: the route must authorize the viewer first. */
+export async function gameMediaDelivery(key: string, variant: "avatar" | "photo") {
+  const store = requireStore();
+  if (store.kind === "disk") return null;
+  const { mediaId, owner } = hostedName(key);
+  const delivery = await store.control.gameImageDelivery({ mediaId, userId: owner, variant });
+  if (delivery) assertImageDeliveryURL(delivery.url);
+  return delivery;
+}
+
+function assertImageDeliveryURL(value: string): void {
+  let url: URL;
+  try { url = new URL(value); } catch { throw new Error("Game image delivery URL is invalid."); }
+  if (url.protocol !== "https:" || url.hostname !== "imagedelivery.net" || url.port || url.username || url.password
+    || !url.searchParams.get("sig") || !url.searchParams.get("exp")) throw new Error("Game image delivery URL is invalid.");
 }
 
 function requireStore(): Store {

@@ -8,7 +8,7 @@ import {
   HOSTED_RUNTIME_LOG_REQUEST_MAX_ENTRIES,
   type HostedRuntimeLogRequest,
 } from "@murphai/hosted-execution/runtime-control";
-import { parseHostedRuntimeLogRequest, parseHostedRuntimeRedactedJson } from "@murphai/hosted-execution/parsers";
+import { parseHostedRuntimeLogRequest } from "@murphai/hosted-execution/parsers";
 import { SqliteDeviceSyncStore } from "@murphai/device-syncd/service";
 import { sanitizeHostedExecutionStructuredLogDetails } from "@murphai/hosted-execution";
 import {
@@ -732,6 +732,66 @@ describe("runHostedAssistantAutomation", () => {
     );
   });
 
+  it("preserves ordinary cron provider classification through hosted log redaction and parsing", async () => {
+    mocks.runAssistantAutomationPass.mockImplementationOnce(async (input) => {
+      input.onEvent?.({
+        type: "cron.job.completed",
+        details: "synthetic private provider detail",
+        safeDetails: "cron_job_enqueue_failed",
+        failureContext: {
+          errorCode: "ASSISTANT_CODEX_FAILED",
+          runOutcome: "failed",
+          retryScheduled: true,
+          codexErrorInfoPresent: true,
+          codexErrorInfo: "serverOverloaded",
+          codexErrorHttpStatusCode: 503,
+        },
+      });
+      return { nextWakeAt: null, progressed: true };
+    });
+    const result = await runHostedAssistantAutomation(
+      "/tmp/vault-root",
+      "req_cron_provider_evidence",
+      { hosted: { memberId: "member_123", userEnvKeys: [] } },
+      {
+        eventId: "evt_cron_provider_evidence",
+        kind: "runtime.timer",
+        occurredAt: "2026-04-08T00:00:00.000Z",
+        triggerKind: "runtime_timer",
+        userId: "member_123",
+      },
+    );
+    const completion = result.redactedLogEntries.find(
+      (entry) => entry.redacted?.type === "cron.job.completed",
+    );
+    assert.ok(completion);
+    const parsed = parseHostedRuntimeLogRequest({
+      entries: [{
+        at: "2026-04-08T00:00:00.000Z",
+        component: "assistant",
+        eventCode: "assistant.automation_detail",
+        level: completion.level,
+        phase: "invoke",
+        redactedJson: completion.redacted,
+      }],
+    });
+    const diagnostic = sanitizeHostedExecutionStructuredLogDetails(
+      parsed.entries[0]?.redactedJson,
+    );
+    expect(diagnostic).toMatchObject({
+      failureErrorCode: "ASSISTANT_CODEX_FAILED",
+      failureRunOutcome: "failed",
+      failureRetryScheduled: true,
+      failureCodexErrorInfoPresent: true,
+      failureCodexErrorInfo: "serverOverloaded",
+      failureCodexErrorHttpStatusCode: 503,
+    });
+    expect(diagnostic).not.toHaveProperty("failureMaintenanceReplayBarrier");
+    expect(JSON.stringify(result.redactedLogEntries)).not.toContain(
+      "synthetic private provider detail",
+    );
+  });
+
   it("preserves maintenance failure evidence through hosted log redaction and parsing", async () => {
     mocks.runAssistantAutomationPass.mockImplementationOnce(async (input) => {
       input.onEvent?.({
@@ -763,16 +823,25 @@ describe("runHostedAssistantAutomation", () => {
     const completion = result.redactedLogEntries.find(
       (entry) => entry.redacted?.type === "cron.job.completed",
     );
-    expect(completion).toBeDefined();
-    expect(parseHostedRuntimeRedactedJson(completion?.redacted, "maintenance evidence"))
-      .toMatchObject({
-        failureErrorCode: "ASSISTANT_CODEX_CONNECTION_LOST",
-        failureRunOutcome: "no_op",
-        failureRetryScheduled: false,
-        failureMaintenanceReplayBarrier: "provider_admitted",
-        failureCodexErrorInfo: "serverOverloaded",
-        failureCodexErrorHttpStatusCode: 503,
-      });
+    assert.ok(completion);
+    const parsed = parseHostedRuntimeLogRequest({
+      entries: [{
+        at: "2026-04-08T00:00:00.000Z",
+        component: "assistant",
+        eventCode: "assistant.automation_detail",
+        level: completion.level,
+        phase: "invoke",
+        redactedJson: completion.redacted,
+      }],
+    });
+    expect(parsed.entries[0]?.redactedJson).toMatchObject({
+      failureErrorCode: "ASSISTANT_CODEX_CONNECTION_LOST",
+      failureRunOutcome: "no_op",
+      failureRetryScheduled: false,
+      failureMaintenanceReplayBarrier: "provider_admitted",
+      failureCodexErrorInfo: "serverOverloaded",
+      failureCodexErrorHttpStatusCode: 503,
+    });
   });
 
   it("applies the ordinary event cap to every scheduled automation slug", async () => {

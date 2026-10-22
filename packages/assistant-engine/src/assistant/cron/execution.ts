@@ -545,9 +545,10 @@ interface AssistantCronRunExecutionResult {
   run: AssistantCronRunRecord
   runErrorCode: string | null
   runFailureContext?: {
+    codexErrorInfoPresent?: boolean
     codexErrorInfo?: string
     codexErrorHttpStatusCode?: number
-    maintenanceReplayBarrier: 'provider_admitted' | 'non_replayable_provider_work'
+    maintenanceReplayBarrier?: 'provider_admitted' | 'non_replayable_provider_work'
   }
 }
 
@@ -1143,7 +1144,7 @@ export async function executeClaimedAssistantCronJob(
         assistantNotificationErrorHasNonReplayableProviderWork(error))
     if (nonReplayableBackgroundMaintenanceWork) {
       // Capture only the shared finite diagnostics before replacing the text.
-      failureDiagnostics = describeAssistantCronMaintenanceFailure(
+      failureDiagnostics = describeAssistantCronFailure(
         error,
         maintenanceProviderStarted,
       )
@@ -1202,6 +1203,7 @@ export async function executeClaimedAssistantCronJob(
       } else {
         errorText = errorMessage(error)
         errorCode = readAssistantCronErrorCode(error)
+        failureDiagnostics = describeAssistantCronFailure(error)
         failureConsumesOccurrence = assistantCronDeliveryFailureConsumesOccurrence(
           error,
           input.job,
@@ -1422,16 +1424,21 @@ export async function executeClaimedAssistantCronJob(
   }
 }
 
-function describeAssistantCronMaintenanceFailure(
+function describeAssistantCronFailure(
   error: unknown,
-  providerAdmitted: boolean,
+  providerAdmitted?: boolean,
 ): Pick<AssistantCronRunExecutionResult, 'runFailureContext'> {
   const context = describeAssistantAutoReplyFailure(error).context
   return {
     runFailureContext: {
-      maintenanceReplayBarrier: providerAdmitted
-        ? 'provider_admitted'
-        : 'non_replayable_provider_work',
+      ...(providerAdmitted === undefined ? {} : {
+        maintenanceReplayBarrier: providerAdmitted
+          ? 'provider_admitted'
+          : 'non_replayable_provider_work',
+      }),
+      ...(typeof context?.codexErrorInfoPresent === 'boolean'
+        ? { codexErrorInfoPresent: context.codexErrorInfoPresent }
+        : {}),
       ...(typeof context?.codexErrorInfo === 'string'
         ? { codexErrorInfo: context.codexErrorInfo }
         : {}),

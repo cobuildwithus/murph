@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getPrisma } from "../src/lib/prisma";
 import { handleGameChatPhoto } from "../src/lib/game/chat-photo";
 import { buildHostedLinqConversationWakeForMailbox } from "../src/lib/hosted-onboarding/webhook-provider-linq";
@@ -7,7 +7,8 @@ import { readGameChatState, runGameCommand } from "../src/lib/game/service";
 import { mediaKeyPrefixFor } from "../src/lib/game/access";
 import { addDays, gameLocalDate } from "../src/lib/game/time";
 vi.mock("../src/lib/game/chat-delivery", () => ({ deliverGameChangeProposal: async () => {} }));
-vi.mock("../src/lib/game/media", async (original) => ({ ...await original<typeof import("../src/lib/game/media")>(), isGameMediaStorageAvailable: () => true, putGameMedia: async ({ prefix }: { prefix: string }) => `${prefix}${"b".repeat(64)}.jpg`, statGameMedia: async () => ({ byteLength: 3, contentType: "image/jpeg" }), isGameMediaKey: (key: string) => /^[A-Za-z0-9_/-]+\/[a-f0-9]{64}\.jpg$/u.test(key) }));
+const imageControl = vi.hoisted(() => ({ putGameImage: vi.fn(async () => {}), statGameImage: vi.fn(async () => ({ byteLength: 3 })) }));
+vi.mock("../src/lib/hosted-execution/control", () => ({ readHostedExecutionControlClientIfConfigured: () => imageControl }));
 const photoProvider = vi.hoisted(() => ({ metadata: vi.fn() }));
 vi.mock("../src/lib/hosted-onboarding/linq-client", async (original) => ({ ...await original<typeof import("../src/lib/hosted-onboarding/linq-client")>(), readHostedLinqAttachment: photoProvider.metadata }));
 const enabled = process.env.MURPH_TEST_POSTGRES_CONCURRENCY === "1";
@@ -28,7 +29,8 @@ async function fixture() {
   return { a,b,room,gameId,db };
 }
 describe.skipIf(!enabled)("shared game progress canonical PostgreSQL proof", () => {
-  afterEach(() => vi.unstubAllGlobals());
+  beforeEach(() => { vi.stubEnv("VERCEL_ENV", "preview"); imageControl.putGameImage.mockClear(); });
+  afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
   afterAll(async () => { await getPrisma().hostedMember.deleteMany({ where: { id: { in: members } } }); });
   it("settles on the shared read and returns frozen scores and grouped tickets exactly once", async () => {
     const {a,b,room,gameId,db} = await fixture();
@@ -89,11 +91,13 @@ describe.skipIf(!enabled)("shared game progress canonical PostgreSQL proof", () 
     expect(await db.gameEntry.count({ where: { gameId } })).toBe(0);
     expect(photoProvider.metadata).not.toHaveBeenCalled();
     expect(download).not.toHaveBeenCalled();
+    expect(imageControl.putGameImage).not.toHaveBeenCalled();
     const yes = { ...common, messageRef: yesRef, photo: { operation: "save" as const, gameId } };
     expect(await handleGameChatPhoto({ ...yes, containerMemberId: room })).toMatchObject({ error: "photo_offer_expired" });
     expect(await handleGameChatPhoto(yes)).toEqual({ status: "ok", photoOutcome: "saved" });
     expect(await handleGameChatPhoto(yes)).toEqual({ status: "ok", photoOutcome: "saved" });
     expect(photoProvider.metadata).toHaveBeenCalledExactlyOnceWith("synthetic-attachment");
+    expect(imageControl.putGameImage).toHaveBeenCalledExactlyOnceWith({ bytes: new Uint8Array([255,216,255]), contentType: "image/jpeg", mediaId: expect.stringMatching(/^[a-f0-9]{64}\.jpg$/u), userId: a });
     expect(download).toHaveBeenCalledExactlyOnceWith("https://cdn.linqapp.com/refreshed?signature=synthetic", expect.objectContaining({ redirect: "error" }));
     expect(await db.gameEntry.count({ where: { gameId } })).toBe(1);
     expect((await db.gameEntry.findFirstOrThrow({ where: { gameId } })).memberId).toBe(a);

@@ -13,6 +13,7 @@ import {
   requireConfiguredString,
 } from "./deploy-automation/shared.ts";
 import { assertHostedDeployEnvironmentAsync } from "./deploy-preflight.js";
+import { assertPrivateGameImageVariants } from "./deploy-game-images.ts";
 import { assertHostedWebProtocolAdmission } from "./deploy-web-protocol.ts";
 import { resolveDeployWorkerCliPaths } from "./deploy-worker-version-paths.js";
 import { stageHostedRunnerRelease } from "./stage-runner-release.ts";
@@ -72,10 +73,12 @@ export async function runDeployWorkerVersionCli(
         const admitWeb = () => assertHostedWebProtocolAdmission(env);
         const assertActivationAllowed = async (expectedLiveVersion: string): Promise<void> => {
           await admitWeb();
+          await assertPrivateGameImageVariants(env);
           // Recheck Worker identity after the bounded Web I/O, not before it.
           await assertLiveVersion(input.workerName, input.configPath, expectedLiveVersion);
         };
         await admitWeb();
+        await assertPrivateGameImageVariants(env);
         const containerProvider = createCloudflareContainerProvider({
           accountId: requireConfiguredString(env.CLOUDFLARE_ACCOUNT_ID, "CLOUDFLARE_ACCOUNT_ID"),
           apiToken: requireConfiguredString(env.CLOUDFLARE_API_TOKEN, "CLOUDFLARE_API_TOKEN"),

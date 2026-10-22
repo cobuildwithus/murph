@@ -140,6 +140,7 @@ export interface WorkerOpenAiAuthorizationAlertNamespaceLike<
 export interface WorkerEnvironmentContract extends Readonly<Record<string, unknown>> {
   AI?: WorkerAiBindingLike;
   BUNDLES: R2BucketLike;
+  GAME_IMAGES?: import("./game-image-store.ts").GameImagesBinding;
   CF_VERSION_METADATA?: {
     id?: string;
     tag?: string;

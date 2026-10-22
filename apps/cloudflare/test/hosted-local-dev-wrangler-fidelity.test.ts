@@ -40,6 +40,7 @@ describe("hosted-local dev wrangler config fidelity", () => {
     expect(dev.compatibility_date).toEqual(production.compatibility_date);
     expect(dev.compatibility_flags).toEqual(production.compatibility_flags);
     expect(dev.ai).toEqual(production.ai);
+    expect(dev.images).toEqual(production.images);
     expect(dev.analytics_engine_datasets).toEqual(
       production.analytics_engine_datasets,
     );

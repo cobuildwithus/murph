@@ -234,6 +234,7 @@ describe("hosted deploy automation helpers", () => {
       TELEGRAM_BOT_USERNAME: "hosted_bot",
     });
     const config = buildHostedWranglerDeployConfig(environment) as {
+      images: { binding: string };
       ai?: {
         binding: string;
       };
@@ -538,6 +539,7 @@ describe("hosted deploy automation helpers", () => {
       },
     ]);
     expect(config.ai).toEqual({ binding: "AI" });
+    expect(config.images).toEqual({ binding: "GAME_IMAGES" });
     expect(config.vars.HOSTED_WEB_BASE_URL).toBe("https://web.example.test");
     expect(config.vars.TELEGRAM_BOT_USERNAME).toBe("hosted_bot");
     expect(config.vars.HOSTED_EXECUTION_RUNNER_BASE_URL).toBeUndefined();

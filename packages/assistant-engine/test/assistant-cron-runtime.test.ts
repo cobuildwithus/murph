@@ -5223,7 +5223,7 @@ describe('assistant cron runtime orchestration', () => {
     })
     const completed = events.find((event) => event.type === 'cron.job.completed')
     expect(completed).toBeDefined()
-    for (const key of ['maintenanceReplayBarrier', 'codexErrorInfo', 'codexErrorHttpStatusCode']) {
+    for (const key of ['maintenanceReplayBarrier', 'codexErrorInfoPresent', 'codexErrorInfo', 'codexErrorHttpStatusCode']) {
       expect(completed?.failureContext).not.toHaveProperty(key)
     }
   })
@@ -5576,7 +5576,7 @@ describe('assistant cron runtime orchestration', () => {
       label: 'process failure without structured diagnostics',
       code: 'ASSISTANT_PROVIDER_FAILED',
       details: { codexExitCode: 17, codexErrorInfoPresent: false },
-      expected: {},
+      expected: { codexErrorInfoPresent: false },
     },
     {
       label: 'unknown kind and out-of-range status',
@@ -5913,9 +5913,13 @@ describe('assistant cron runtime orchestration', () => {
     })
     const completed = events.find((event) => event.type === 'cron.job.completed')
     expect(completed).toBeDefined()
-    for (const key of ['maintenanceReplayBarrier', 'codexErrorInfo', 'codexErrorHttpStatusCode']) {
-      expect(completed?.failureContext).not.toHaveProperty(key)
-    }
+    expect(completed?.failureContext).toMatchObject({
+      codexErrorInfo: 'serverOverloaded',
+      codexErrorHttpStatusCode: 503,
+      retryScheduled: true,
+      runOutcome: 'failed',
+    })
+    expect(completed?.failureContext).not.toHaveProperty('maintenanceReplayBarrier')
     await updateCanonicalRuntimeState(vaultRoot, MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID, (record) => ({
       ...record, state: { ...record.state, consecutiveFailures: 5 },
     }))
@@ -8499,6 +8503,119 @@ describe('assistant cron runtime orchestration', () => {
     )
   })
 
+  it.each([
+    {
+      label: 'typed context',
+      field: 'context',
+      diagnostics: {
+        codexErrorInfoPresent: true,
+        codexErrorInfo: 'serverOverloaded',
+        codexErrorHttpStatusCode: 503,
+        assistantProviderErrorMessage: 'synthetic-private-provider-text',
+        syntheticErrorDetail: 'synthetic-private-detail',
+        arbitraryDetail: { input: 'synthetic-private-input' },
+      },
+      expected: {
+        codexErrorInfoPresent: true,
+        codexErrorInfo: 'serverOverloaded',
+        codexErrorHttpStatusCode: 503,
+      },
+    },
+    {
+      label: 'typed details',
+      field: 'details',
+      diagnostics: { codexErrorInfo: 'responseStreamDisconnected', codexErrorHttpStatusCode: 502 },
+      expected: { codexErrorInfo: 'responseStreamDisconnected', codexErrorHttpStatusCode: 502 },
+    },
+    {
+      label: 'generic failure without context',
+      field: 'context',
+      diagnostics: undefined,
+      expected: {},
+    },
+    {
+      label: 'explicitly absent classification',
+      field: 'context',
+      diagnostics: { codexErrorInfoPresent: false },
+      expected: { codexErrorInfoPresent: false },
+    },
+    {
+      label: 'unknown kind and out-of-range status',
+      field: 'context',
+      diagnostics: { codexErrorInfo: 'synthetic-private-unknown-kind', codexErrorHttpStatusCode: 600 },
+      expected: { codexErrorInfo: 'unrecognized' },
+    },
+    {
+      label: 'malformed diagnostics',
+      field: 'context',
+      diagnostics: { codexErrorInfoPresent: 'true', codexErrorInfo: ['serverOverloaded'], codexErrorHttpStatusCode: '503' },
+      expected: {},
+    },
+  ])('ordinary cron failure telemetry: $label', async ({ field, diagnostics, expected }) => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T10:00:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext('assistant-cron-runtime-failure-diagnostics-')
+    const paths = resolveAssistantStatePaths(vaultRoot)
+    const job = await createCanonicalJob(vaultRoot, 'ordinary failure diagnostics')
+    const events: AssistantRunEvent[] = []
+    const error = new VaultCliError(
+      'ASSISTANT_CODEX_FAILED',
+      'Synthetic cron failure.',
+      field === 'context' ? diagnostics : undefined,
+    )
+    if (field === 'details') {
+      Object.assign(error, { details: diagnostics })
+    }
+    cronMocks.sendAssistantMessageLocal.mockImplementationOnce(async (input: AssistantNotificationInput) => {
+      await input.onProviderRequestStarted?.({
+        acceptedInputIds: [],
+        providerRequestOrdinal: 1,
+        startedAt: '2026-04-08T10:00:00.000Z',
+      })
+      throw error
+    })
+
+    await expect(processDueAssistantCronJobsLocal({
+      limit: 1,
+      onEvent: (event) => events.push(event),
+      vault: vaultRoot,
+    })).resolves.toEqual({ failed: 1, processed: 1, succeeded: 0 })
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledOnce()
+    const runtimeStore = await readAssistantCronCanonicalRuntimeStore(paths)
+    expect(runtimeStore.jobs.find((record) => record.jobId === job.jobId)?.state).toMatchObject({
+      runningAt: null,
+      pendingOccurrenceAt: '2026-04-08T10:00:00.000Z',
+      retryAfterAt: '2026-04-08T10:00:30.000Z',
+      consecutiveFailures: 1,
+      lastFailedAt: '2026-04-08T10:00:00.000Z',
+      lastSucceededAt: null,
+    })
+    const runs = await listAssistantCronRuns({ job: job.jobId, vault: vaultRoot })
+    expect(runs.runs).toHaveLength(1)
+    expect(runs.runs[0]).toMatchObject({
+      error: 'Synthetic cron failure.',
+      outcome: 'failed',
+      status: 'failed',
+      scheduledOccurrenceAt: '2026-04-08T10:00:00.000Z',
+    })
+    const completed = events.filter((event) => event.type === 'cron.job.completed')
+    expect(completed).toHaveLength(1)
+    expect(completed[0]?.failureContext).toEqual({
+      automationSlug: 'ordinary-failure-diagnostics',
+      errorCode: 'ASSISTANT_CODEX_FAILED',
+      errorPresent: true,
+      retryScheduled: true,
+      occurrenceAt: '2026-04-08T10:00:00.000Z',
+      routeConfigured: true,
+      runOutcome: 'failed',
+      scheduleKind: 'dailyLocal',
+      sourceKind: 'automation',
+      ...expected,
+    })
+    expect(JSON.stringify(events)).not.toContain('synthetic-private')
+    expect(JSON.stringify({ runs, runtimeStore })).not.toMatch(/codexError|maintenanceReplayBarrier/)
+  })
+
   it('consumes non-retryable delivery failures for scheduled canonical reminders', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-04-08T10:00:00.000Z'))
@@ -8807,6 +8924,7 @@ describe('assistant cron runtime orchestration', () => {
       'assistant-cron-runtime-provider-resume-retry-',
     )
     const paths = resolveAssistantStatePaths(vaultRoot)
+    const events: AssistantRunEvent[] = []
     const canonicalJob = await createCanonicalJob(
       vaultRoot,
       'provider resume retry reminder',
@@ -8839,6 +8957,7 @@ describe('assistant cron runtime orchestration', () => {
     await expect(
       processDueAssistantCronJobsLocal({
         limit: 1,
+        onEvent: (event) => events.push(event),
         vault: vaultRoot,
       }),
     ).resolves.toEqual({
@@ -8861,6 +8980,7 @@ describe('assistant cron runtime orchestration', () => {
     await expect(
       processDueAssistantCronJobsLocal({
         limit: 1,
+        onEvent: (event) => events.push(event),
         vault: vaultRoot,
       }),
     ).resolves.toEqual({
@@ -8881,6 +9001,19 @@ describe('assistant cron runtime orchestration', () => {
       expect(notificationInput.sessionId).toBe(
         'session-provider-resume-retry',
       )
+    }
+    const completed = events.filter((event) => event.type === 'cron.job.completed')
+    expect(completed).toHaveLength(2)
+    expect(completed[1]?.failureContext).toMatchObject({
+      errorCode: null,
+      errorPresent: false,
+      retryScheduled: false,
+      runOutcome: 'no_op',
+    })
+    for (const event of completed) {
+      for (const key of ['maintenanceReplayBarrier', 'codexErrorInfoPresent', 'codexErrorInfo', 'codexErrorHttpStatusCode']) {
+        expect(event.failureContext).not.toHaveProperty(key)
+      }
     }
   })
 

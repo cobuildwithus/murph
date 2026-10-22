@@ -1248,6 +1248,7 @@ export function buildWranglerLocalDevConfig(
     // hosted transcription failing closed at use time instead of `wrangler
     // dev` failing at startup.
     ...(includesWranglerLocalDevAiBinding(source) ? { ai: { binding: "AI" } } : {}),
+    images: { binding: "GAME_IMAGES" },
     send_email: [
       {
         name: "HOSTED_EMAIL",

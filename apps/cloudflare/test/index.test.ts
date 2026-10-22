@@ -366,6 +366,9 @@ describe("cloudflare worker routes", () => {
       "game-media-read",
       "game-media-stat",
       "game-media-delete",
+      "gameImageStage",
+      "gameImageDelivery",
+      "gameImageStat",
       "browser-vault-session",
       "user-status",
     ]);
@@ -402,6 +405,9 @@ describe("cloudflare worker routes", () => {
       "game-media-read",
       "game-media-stat",
       "game-media-delete",
+      "gameImageStage",
+      "gameImageDelivery",
+      "gameImageStat",
       "browser-vault-session",
       "user-status",
     ]);

@@ -9,7 +9,7 @@ offer never enables automatic saving of future photos.
 
 ## Boundaries and design
 
-Use canonical game settlement, encrypted media, accepted sender identity and
+Use canonical game settlement, private game media, accepted sender identity and
 current exact-pair chat authority. Shared progress contains metadata only; no
 private labels, captions, excuses or locked images. Fetch only the selected
 accepted provider attachment, never a model-selected URL. A pending offer binds
@@ -86,7 +86,7 @@ and MIME. Selection now uses that durable identity, so offers require no network
 Consented saves refresh metadata through the existing Linq SDK boundary (3-second
 budget, 16 KiB metadata bound, no SDK retries) outside the database transaction.
 Exact returned ID, supported MIME, declared size and the fixed CDN origin are
-checked before the existing bounded download, encryption and guarded normal post.
+checked before the existing bounded download, private media storage and guarded normal post.
 No signed URL is stored in the mailbox, pending offer or game state.
 
 Proof now exercises the actual group webhook planner's URL-free mailbox append,
@@ -122,3 +122,21 @@ and ten migration-inventory tests pass. Docs drift, whitespace and privacy
 checks pass. The original source remains URL-free through offer and yes; retry
 performs no second metadata lookup, download or post. Parent owns aggregate
 review, CI, plan closure and release.
+
+
+## Main integration: private game Images
+
+Merged current main, including private Cloudflare Images delivery. Chat imports
+still call canonical `putGameMedia`; that owner now sends validated bytes to the
+member-bound Worker Images operation and retains the same content-addressed game
+key. No chat-specific storage or delivery path is added. Post-to-unlock and viewer
+authorization remain in the ordinary game media route; capability URLs never
+enter the shared game state. Updated the composed PostgreSQL photo proof to use
+real media selection/upload orchestration with only the hosted control boundary
+stubbed. It verifies no upload before consent and one owner-bound Images upload
+across save/retry. Provider download and hosted upload remain outside transactions.
+
+After this merge, all 48 focused photo/media/tool tests, three PostgreSQL
+progress/photo proofs and the Web typecheck pass. Docs drift passes. The Images
+provider itself remains a synthetic control boundary in local proof; production
+variant admission/deployment is separately owned by the parent release lane.
