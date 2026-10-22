@@ -20,3 +20,14 @@ Run the existing Host Support production runner bundle budget job for the review
 ## Context
 
 These failures blocked exact-head upgrade verification and consumed a fresh native build on each retry; the bounded mitigation now has a passing candidate receipt. Preserve the failed attempts and distinguish the bounded compilation mitigation from an established root cause. Never increase the benchmark limits to accommodate a build failure.
+
+## Native build reuse follow-up
+
+A later Node-only security refresh exposed two deterministic reuse gaps: the
+public image publisher did not export intermediate BuildKit cache, and native
+helper extraction inherited the runtime Node base. The follow-up separates the
+checksum-pinned helper archive from Node and exports a protected-main registry
+cache for read-only reuse. The existing permission workflow now requires the
+Cargo build vertex to remain cached after changing runtime-only Node pins. This
+addresses repeated compilation without changing Cargo concurrency, sandbox
+assertions, or benchmark limits; cache-hit timing remains an actual CI receipt.

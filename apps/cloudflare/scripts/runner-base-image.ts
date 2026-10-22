@@ -6,6 +6,7 @@ import process from "node:process";
 import { fileURLToPath } from "node:url";
 
 import {
+  hostedRunnerBaseImageBuildCacheTag,
   hostedRunnerBaseImageFingerprintTag,
   hostedRunnerBaseImageRemoteTag,
   hostedLocalRunnerBaseImageTag,
@@ -111,6 +112,12 @@ async function buildRunnerBaseImage(input: {
       "buildx",
       "build",
       input.push ? "--push" : "--load",
+      "--cache-from",
+      `type=registry,ref=${hostedRunnerBaseImageBuildCacheTag}`,
+      ...(input.push ? [
+        "--cache-to",
+        `type=registry,ref=${hostedRunnerBaseImageBuildCacheTag},mode=max`,
+      ] : []),
       "--platform",
       runnerBaseImagePlatform,
       "-f",

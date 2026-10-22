@@ -1405,3 +1405,7 @@ Security runtime and dependency patching is tracked in
 
 Requested game proposal inactivity handling and CI repair proof are recorded in
 [the delivery remediation](exec-plans/completed/2026-10-21-game-proposal-requested-delivery.md).
+
+Native compilation reuse across Node updates is tracked in
+[`runner native cache`](exec-plans/completed/2026-10-21-runner-native-cache.md);
+its cache authority and image admission contract remain in `apps/cloudflare/README.md`.
