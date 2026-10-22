@@ -1452,7 +1452,7 @@ test.skipIf(!researchFailureCompatibilityBase)("actual pre-research reader colla
 });
 
 
-test("phase admission is exactly twenty-nine fixed names without raising invocation caps", async () => {
+test("phase admission is exactly thirty-one fixed names without raising invocation caps", async () => {
   assert.deepEqual(CLI_TIMING_PHASES, [
     "total", "setup", "dispatch", "post-dispatch", "teardown", "unattributed",
     "query-freshness", "query-manifest", "query-status", "query-rebuild", "query-wait",
@@ -1462,6 +1462,7 @@ test("phase admission is exactly twenty-nine fixed names without raising invocat
     "service-runtime-load", "query-runtime-load", "query-projection-load",
     "query-metric-samples", "query-metric-evidence", "query-metric-extract",
     "query-metric-precedence", "query-metric-targets",
+    "canonical-write-wait", "importers-runtime-load",
   ]);
   assert.equal(CLI_TIMING_MAX_COMMANDS, 32);
   assert.equal(CLI_TIMING_MAX_SPANS, 64);
@@ -1469,7 +1470,7 @@ test("phase admission is exactly twenty-nine fixed names without raising invocat
   for (const phase of CLI_TIMING_PHASES.slice(1)) {
     assert.equal(addCliPhaseSample(report.commands[0]!.phases, phase, 37_000_000), true);
   }
-  assert.equal(report.commands[0]!.phases.length, 29);
+  assert.equal(report.commands[0]!.phases.length, 31);
   assert.deepEqual(normalizeCliTiming(report), report);
   // Unknown labels are rejected, not pattern-admitted or serialized as paths.
   for (const phase of ["query-publication/PRIVATE_SENTINEL", "QUERY-SOURCE-READ", "query-source-read "]) {
@@ -1518,6 +1519,7 @@ test("synchronous query stage timing preserves values, immediate execution and t
 for (const [admission, compatibilityBase, admitted] of [
   ["load", process.env.MURPH_CLI_LOAD_PHASE_COMPAT_BASE, 21],
   ["metric-subphase", process.env.MURPH_CLI_METRIC_PHASE_COMPAT_BASE, 24],
+  ["wait-load", process.env.MURPH_CLI_WAIT_LOAD_PHASE_COMPAT_BASE, 29],
 ] as const) test.skipIf(!compatibilityBase)(`actual pre-${admission} reader drops the whole optional object; new reader keeps old reports`, async () => {
   assert.match(compatibilityBase ?? "", /^[a-f0-9]{40}$/u);
   const source = execFileSync("git", ["show", `${compatibilityBase}:packages/runtime-state/src/cli-timing.ts`],

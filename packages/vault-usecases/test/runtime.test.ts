@@ -439,6 +439,49 @@ test("query-runtime-load times only cold shared loads, excludes the shape check 
   assert.equal(loadRuntimeModuleMock.mock.calls.length, 3);
 });
 
+test("importers-runtime-load times each importer import call and preserves its value and error", async () => {
+  const importersModule = { createImporters: vi.fn() };
+  const importFailure = new Error("synthetic importer import failure");
+  const original = process.hrtime.bigint;
+  let clock = 0n;
+  let attempt = 0;
+  const loadRuntimeModuleMock = vi.fn(async (specifier: string) => {
+    assert.equal(specifier, "@murphai/importers");
+    attempt += 1;
+    clock += BigInt(attempt) * 1_000_000n; // 1 ms, then 2 ms, then 3 ms.
+    if (attempt === 1) throw importFailure;
+    return importersModule;
+  });
+  const runtimeModule = await importWithMocks<typeof import("../src/usecases/runtime.ts")>(
+    "../src/usecases/runtime.ts",
+    { "../src/runtime-import.ts": () => ({ loadRuntimeModule: loadRuntimeModuleMock }) },
+  );
+  // Same post-reset module instance (and AsyncLocalStorage) as runtime.ts.
+  const { timeCliDispatch, withCliTiming } = await import("@murphai/runtime-state/node/cli-timing");
+  let report: CliTiming | undefined;
+
+  process.hrtime.bigint = () => clock;
+  try {
+    await withCliTiming(() => timeCliDispatch("meal add", async () => {
+      await assert.rejects(runtimeModule.loadImportersRuntimeModule(), (error: unknown) => error === importFailure);
+      assert.equal(await runtimeModule.loadImportersRuntimeModule(), importersModule);
+      assert.equal(await runtimeModule.loadImportersRuntimeModule(), importersModule);
+    }), (value) => { report = value; });
+  } finally {
+    process.hrtime.bigint = original;
+  }
+
+  assert.ok(report);
+  assert.deepEqual(normalizeCliTiming(report), report);
+  // No shared promise or retry owner: one sample per existing loader call.
+  assert.deepEqual(report.commands[0]!.phases.filter((phase) => phase.phase.endsWith("-load"))
+    .map((phase) => [phase.phase, phase.count, phase.sumUs]), [["importers-runtime-load", 3, 6_000]]);
+  assert.equal(loadRuntimeModuleMock.mock.calls.length, 3);
+  assert.equal(importersModule.createImporters.mock.calls.length, 0);
+  // Outside a CLI scope the loader is unchanged and records nothing.
+  assert.equal(await runtimeModule.loadImportersRuntimeModule(), importersModule);
+});
+
 test("loadIntegratedRuntime composes cached owner loaders and retries only the failed owner", async () => {
   const coreRuntime = createCoreRuntimeStub();
   const queryRuntime = createQueryRuntimeStub();
