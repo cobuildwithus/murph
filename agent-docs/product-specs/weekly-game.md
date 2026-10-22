@@ -165,7 +165,13 @@ Before Day 1, either player can propose Start now or a different start date.
 Players can also propose a new duration (up to 28 calendar days) or weekdays.
 Their tap records their agreement. Murph reuses an exact existing chat with the
 two players and Murph, or automatically creates one from their verified phone
-numbers. It identifies the proposer and asks the other player naturally; an
+numbers. When several eligible rooms exist, it prefers the most recently active
+conversation, then a nonblank group name, then the newest room. Activity means
+the latest accepted conversation-message receipt, not a roster refresh or system
+notification. An already-bound game stays in its verified room. Proposal copy
+names only the requested changes and asks the other player naturally. It mentions
+a date only for an explicit start-date change, omitting cutoff times and routine
+check-in preservation text. An
 ordinary contextual agreement is enough. The other player can decline, and the
 proposer can cancel in chat. Only one proposal waits at a time.
 

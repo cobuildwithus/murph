@@ -1408,3 +1408,7 @@ Requested game proposal inactivity handling and CI repair proof are recorded in
 
 Daily game post push limits, session-bound device enrollment and verification are
 recorded in [game post notifications](exec-plans/completed/2026-10-21-game-daily-notifications.md).
+
+Game proposal wording and conversation-activity selection are tracked in
+[`game chat selection and copy`](exec-plans/completed/2026-10-22-game-chat-selection-copy.md);
+`product-specs/weekly-game.md` remains the current behavior owner.
