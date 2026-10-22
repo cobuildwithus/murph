@@ -32,13 +32,16 @@ export async function assertPrivateGameImageVariants(
     }
   }
   for (const [id, pixels] of [["game-avatar", 600], ["game-photo", 1600]] as const) {
-    const variant = variants[id];
-    if (!isRecord(variant) || variant.id !== id || !isRecord(variant.options)
-      || variant.options.width !== pixels || variant.options.height !== pixels
-      || variant.options.fit !== "scale-down" || variant.options.metadata !== "none") {
+    if (!isRequiredRendition(variants[id], id, pixels)) {
       throw new Error("Game Images admission failed: required private renditions are missing or misconfigured.");
     }
   }
+}
+
+function isRequiredRendition(variant: unknown, id: string, pixels: number): boolean {
+  return isRecord(variant) && variant.id === id && isRecord(variant.options)
+    && variant.options.width === pixels && variant.options.height === pixels
+    && variant.options.fit === "scale-down" && variant.options.metadata === "none";
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
