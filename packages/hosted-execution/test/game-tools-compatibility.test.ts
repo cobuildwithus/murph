@@ -25,6 +25,10 @@ describe("additive game reader compatibility", () => {
     const change = { kind: "edit", startsOn: null, tasks: [{ seat: 0, text: "Walk outside" }, { seat: 1, text: "Read a chapter" }], stakes: [{ kind: "per_miss", item: "Pick a song" }], stakesApplyToWholeGame: true };
     const payload = response({ ...game, status: "negotiating", changeControls: { ...game.changeControls, canEditTasks: true, canEditStakes: true }, pendingChange: { id: "proposal_synthetic", proposedByMemberId: "player_first", expectedTermsVersion: 1, change, effectiveFromDay: 0, deliveryStatus, startsOn: null } });
     expect(hostedGameToolResponseSchema.parse(payload)).toEqual(payload);
+    for (const proposalOrigin of ["app", "chat"]) {
+      const withOrigin = response({ ...payload.result.state.games[0], pendingChange: { ...payload.result.state.games[0].pendingChange, origin: proposalOrigin } });
+      expect(hostedGameToolResponseSchema.parse(withOrigin)).toEqual(withOrigin);
+    }
     const request = { action: "update_game", origin, update: { operation: "propose", gameId: game.id, proposalId: "proposal_synthetic", expectedTermsVersion: 1, change } };
     expect(hostedGameToolRequestSchema.parse(request)).toEqual(request);
   });
