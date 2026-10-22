@@ -1529,8 +1529,14 @@ function parseHostedExecutionAssistantNotificationRequestedPayload(
   label: string,
 ): HostedExecutionAssistantNotificationRequestedPayload {
   const record = requireObject(value, label);
+  const gameChatBootstrap = record.gameChatBootstrap === undefined ? undefined
+    : requireObject(record.gameChatBootstrap, `${label}.gameChatBootstrap`);
 
   return {
+    ...(gameChatBootstrap ? { gameChatBootstrap: {
+      gameId: requireString(gameChatBootstrap.gameId, `${label}.gameChatBootstrap.gameId`),
+      eventId: requireString(gameChatBootstrap.eventId, `${label}.gameChatBootstrap.eventId`),
+    } } : {}),
     ...(record.deliveryDedupeToken === undefined
       ? {}
       : {
@@ -1917,7 +1923,7 @@ function parseHostedExecutionAssistantNotificationDelivery(
   const record = requireObject(value, label);
   const kind = requireString(record.kind, `${label}.kind`);
 
-  if (kind !== "explicit" && kind !== "participant" && kind !== "thread") {
+  if (kind !== "explicit" && kind !== "participant" && kind !== "thread" && kind !== "bootstrap") {
     throw new TypeError(`${label}.kind is invalid.`);
   }
 
