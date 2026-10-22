@@ -39,3 +39,14 @@ visibility remains authoritative and account deletion removes uploaded images.
 Provision private variants, deploy additive Worker, then Web, then native. Preserve
 old-Web control routes and old-native byte responses during skew. No migration;
 rollback Web cannot read new Images pointers. Detailed procedure: Cloudflare DEPLOY.
+
+## Local evidence
+
+- Cloudflare: 26 tests, control client: 90 tests, Web: 22 tests passed.
+- Cloudflare, control package and Web typechecks passed; complexity guard passed
+  with only two unchanged transport/parser hotspots above 20.
+- Parent traced OIDC owner binding, viewer authorization before signing, content
+  identity, concurrent upload election, deletion receipt ordering and error privacy.
+- Native counterpart: cobuildwithus/murph-ios#211; backend review: #4298.
+- Release note covers resized delivery only, without claiming measured latency.
+- Live setup and smoke remain pending; no production mutation performed.
