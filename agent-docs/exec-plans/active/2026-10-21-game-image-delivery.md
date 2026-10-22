@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-10-21
-Updated: 2026-10-21
+Updated: 2026-10-22
 
 ## Goal
 
@@ -50,3 +50,37 @@ rollback Web cannot read new Images pointers. Detailed procedure: Cloudflare DEP
 - Native counterpart: cobuildwithus/murph-ios#211; backend review: #4298.
 - Release note covers resized delivery only, without claiming measured latency.
 - Live setup and smoke remain pending; no production mutation performed.
+
+## Security review and remediation
+
+- User requested removal of the automatic ReviewGPT finding/resume pause. The
+  workflow now continues accepted corrections within existing authority; genuine
+  scope and external-action authority boundaries remain.
+- Round 1 accepted one high-severity deployment finding at `8008416`: the scaffold
+  binding was omitted by production/local config generators. Both generators now
+  include it; regression checks cover preparation/staging and local fidelity.
+- Three user-requested independent subagents reviewed native, Web/control, and
+  Worker/storage security. Follow-up corrects native sign-out teardown and bounded
+  response streaming, validates image metadata before upload admission, and scopes
+  provider creator tags by stable deployment origin to isolate preview cleanup.
+- Deployment admission now rejects any account-wide signature bypass and checks
+  required private rendition dimensions/metadata before upload and activation.
+- Read-only Cloudflare inspection found a signature-bypass variant and missing
+  game renditions. No live configuration or billing was changed. Production rollout
+  remains blocked until private configuration and synthetic live smoke are proven.
+- No evidence-backed cross-member authorization, credential-forwarding, or SSRF
+  bypass was found. Provider creator-list consistency and live image privacy are
+  external proof gaps; metadata inspection is not exhaustive decoding, and
+  ambiguous provider outcomes intentionally keep account deletion pending.
+
+## Follow-up verification
+
+- Generator/preparation/local-fidelity checks passed: 74 tests across four files.
+- New deployment privacy admission and deploy entrypoint checks passed: 92 tests.
+- Image inspection, environment isolation, deletion races and composed account
+  cleanup passed: 37 tests. Hosted-local environment checks passed: 98 tests.
+- Cloudflare and hosted-local-harness typechecks passed. Documentation drift and
+  whitespace checks passed. Independent security review found no further proven
+  authorization, credential, SSRF or activation-order issue after these fixes.
+- Final exact-head review and CI will be recorded in PR evidence. Live private
+  configuration and deployment smoke remain an explicit rollout hold.

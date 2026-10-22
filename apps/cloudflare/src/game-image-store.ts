@@ -4,6 +4,9 @@ import { hostedGameMediaObjectKey, hostedGameMediaUserPrefix, requireHostedGameM
 
 /** The hosted Images binding, narrowed to this owner's public operations. */
 export interface GameImagesBinding {
+  info(stream: ReadableStream<Uint8Array>): Promise<
+    { format: string; width?: number; height?: number }
+  >;
   hosted: {
     upload(bytes: ArrayBuffer, options: { requireSignedURLs: true; creator: string; filename: string }): Promise<{
       id: string; requireSignedURLs: boolean;
@@ -28,7 +31,8 @@ type Pointer = { schema: "murph.game-image.v1"; imageId: string; byteLength: num
  * The existing opaque owner/content path keeps upload retries idempotent.
  * Cloudflare Images is the sole durable owner of new game image bytes.
  */
-export function createGameImageStore(input: { bucket: R2BucketLike; images: GameImagesBinding; userId: string }) {
+export function createGameImageStore(input: { bucket: R2BucketLike; images: GameImagesBinding; userId: string; deploymentOrigin: string }) {
+  const origin = requireDeploymentOrigin(input.deploymentOrigin);
   const pointerKey = async (mediaId: string) =>
     (await hostedGameMediaObjectKey({ mediaId, userId: input.userId })).replace(/\.json\.enc$/u, POINTER_SUFFIX);
   const read = async (mediaId: string): Promise<Pointer | null> => {
@@ -47,8 +51,12 @@ export function createGameImageStore(input: { bucket: R2BucketLike; images: Game
         (byte) => byte.toString(16).padStart(2, "0")).join("");
       if (hash !== mediaId.split(".")[0]) throw new TypeError("Game image content key does not match.");
       if (await read(mediaId)) return;
+      // Inspect before durable upload admission: invalid input and inspection
+      // outages cannot leave a receipt that blocks account cleanup. No image
+      // is stored by this operation. Hosted upload failures remain ambiguous.
+      await requireValidImage(input.images, bytes, mediaId);
       const { delete: remove } = requireR2DeletionCapabilities(input.bucket);
-      const paths = await uploadPaths(input.userId);
+      const paths = await uploadPaths(input.userId, origin);
       const receipt = `${paths.pending}${crypto.randomUUID()}.json`;
       // Register before reading the permanent deletion fence. Strongly
       // consistent R2 reads/listing let deletion drain all admitted uploads.
@@ -60,7 +68,7 @@ export function createGameImageStore(input: { bucket: R2BucketLike; images: Game
       // Keep the receipt on an ambiguous provider/write failure. Never let
       // account deletion claim success while an upload may still complete.
       const uploaded = await input.images.hosted.upload(new Uint8Array(bytes).buffer, {
-        creator: await gameImageCreator(input.userId), filename: `game.${mediaId.endsWith(".heic") ? "heic" : "jpg"}`,
+        creator: await gameImageCreator(input.userId, origin), filename: `game.${mediaId.endsWith(".heic") ? "heic" : "jpg"}`,
         requireSignedURLs: true,
       });
       if (!uploaded.requireSignedURLs || !isImageId(uploaded.id)) {
@@ -98,6 +106,24 @@ export function createGameImageStore(input: { bucket: R2BucketLike; images: Game
   };
 }
 
+async function requireValidImage(images: GameImagesBinding, bytes: Uint8Array, mediaId: string): Promise<void> {
+  let info: Awaited<ReturnType<GameImagesBinding["info"]>>;
+  try { info = await images.info(new Blob([new Uint8Array(bytes)]).stream()); }
+  catch (error) {
+    if (typeof error === "object" && error !== null && "code" in error && error.code === 9412) {
+      throw new TypeError("Game image content is invalid.");
+    }
+    throw new Error("Game image inspection failed.");
+  }
+  const formats = mediaId.endsWith(".jpg") ? ["image/jpeg"] : ["image/heic", "image/heif"];
+  // Match the hosted provider's documented raster limits before storage.
+  // Its metadata API does not expose animation/frame counts.
+  if (!formats.includes(info.format) || typeof info.width !== "number" || typeof info.height !== "number"
+    || !Number.isSafeInteger(info.width) || !Number.isSafeInteger(info.height)
+    || info.width <= 0 || info.height <= 0 || info.width > 12_000 || info.height > 12_000
+    || info.width * info.height > 100_000_000) throw new TypeError("Game image content is invalid.");
+}
+
 function isImageId(value: string): boolean {
   return /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/iu.test(value);
 }
@@ -111,12 +137,24 @@ function parsePointer(value: unknown): Pointer {
 }
 
 /** Reuse the opaque storage namespace; never send a member identifier to Images. */
-async function gameImageCreator(userId: string): Promise<string> {
-  return (await hostedGameMediaUserPrefix({ userId })).replaceAll("/", "_");
+async function gameImageCreator(userId: string, deploymentOrigin: string): Promise<string> {
+  const origin = requireDeploymentOrigin(deploymentOrigin);
+  const scope = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(origin))),
+    byte => byte.toString(16).padStart(2, "0")).join("");
+  return `${scope}_${(await hostedGameMediaUserPrefix({ userId })).replaceAll("/", "_")}`;
 }
 
-async function uploadPaths(userId: string) {
-  const creator = await gameImageCreator(userId);
+function requireDeploymentOrigin(value: string): string {
+  let url: URL;
+  try { url = new URL(value); } catch { throw new Error("Game image deployment origin is invalid."); }
+  if ((url.protocol !== "https:" && url.protocol !== "http:") || url.username || url.password) {
+    throw new Error("Game image deployment origin is invalid.");
+  }
+  return url.origin;
+}
+
+async function uploadPaths(userId: string, deploymentOrigin: string) {
+  const creator = await gameImageCreator(userId, deploymentOrigin);
   // Separate from the deleted data prefix: this minimal opaque guard must
   // survive deletion so a request delayed before admission cannot recreate data.
   return { deleted: `game-image-deletions/${creator}.json`, pending: `game-image-uploads/${creator}/` };
@@ -126,14 +164,14 @@ async function uploadPaths(userId: string) {
  * deletion. Includes failed-upload orphans, not just referenced images.
  * Bounded batches fail retryably; successful earlier deletions remain gone.
  */
-export async function deleteGameImagesForUser(images: GameImagesBinding | undefined, userId: string, bucket: R2BucketLike): Promise<void> {
+export async function deleteGameImagesForUser(images: GameImagesBinding | undefined, userId: string, bucket: R2BucketLike, deploymentOrigin: string): Promise<void> {
   if (!images) throw new Error("Game image deletion binding is unavailable.");
   const { list } = requireR2DeletionCapabilities(bucket);
-  const paths = await uploadPaths(userId);
+  const paths = await uploadPaths(userId, deploymentOrigin);
   await bucket.put(paths.deleted, JSON.stringify({ schema: "murph.game-image-deletion.v1" }));
   const pending = await list({ prefix: paths.pending, limit: 1 });
   if (pending.objects.length || pending.truncated) throw new Error("Game image uploads have not drained.");
-  const creator = await gameImageCreator(userId);
+  const creator = await gameImageCreator(userId, deploymentOrigin);
   for (let batch = 0; batch < 10; batch += 1) {
     const page = await images.hosted.list({ creator, limit: 100 });
     if (page.images.some((image) => image.creator !== creator || !isImageId(image.id))) {

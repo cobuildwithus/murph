@@ -46,8 +46,8 @@ alone does not authorize a narrower product or another state owner.
 6. Triage findings against real evidence. Fix accepted issues at the smallest
    correct boundary, rerun affected checks, mark Draft, and push. For a final
    ReviewGPT `FINDINGS` result, follow its Finding Disposition Boundary before mutation;
-   `PASS` proceeds without a user-resume pause. Re-establish readiness after
-   any new push. Never rerun a review only to obtain agreement on a rejected finding.
+   continue in-scope remediation without requesting user resumption. Re-establish
+   readiness after any new push. Never rerun a review only to obtain agreement on a rejected finding.
 7. Perform the parent's final review after remediation. Close the active plan
    and commit through `scripts/finish-task`; mark Draft before pushing and verify
    the resulting head.
@@ -233,8 +233,8 @@ sufficient. If fixes repeatedly grow the same mechanism, use the review loop's
 retrospective before adding another layer.
 
 The final ReviewGPT Finding Disposition Boundary remains authoritative:
-`FINDINGS` pauses candidate mutation until user resumption except for its proven
-Complexity Collapse or Non-Production Remediation cases; `PASS` continues.
+`FINDINGS` requires evidence-backed disposition, then authorized remediation
+continues without a user-resume pause; `PASS` continues to completion checks.
 Rerun affected proof after remediation. The review loop determines whether a
 new substantive round is required; isolated tests, explanatory docs, rejected
 findings, and base-only movement do not by themselves require one.

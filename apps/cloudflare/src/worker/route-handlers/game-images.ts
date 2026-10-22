@@ -29,7 +29,8 @@ async function handle(context: WorkerRouteContext, userId: string, operation: ty
   try { mediaId = requireHostedGameMediaId(context.request.headers.get(CLOUDFLARE_HOSTED_CONTROL_GAME_MEDIA_ID_HEADER) ?? ""); }
   catch { return jsonError("Game image id is invalid.", 400); }
   if (!context.env.GAME_IMAGES) return jsonError("Game image storage is unavailable.", 503);
-  const store = createGameImageStore({ bucket: context.env.BUNDLES, images: context.env.GAME_IMAGES, userId });
+  const store = createGameImageStore({ bucket: context.env.BUNDLES, images: context.env.GAME_IMAGES, userId,
+    deploymentOrigin: context.env.CF_PUBLIC_BASE_URL ?? "" });
   if (operation === "gameImageStage") {
     const type = context.request.headers.get("content-type");
     if (type !== "image/jpeg" && type !== "image/heic") return jsonError("Game image type is invalid.", 400);

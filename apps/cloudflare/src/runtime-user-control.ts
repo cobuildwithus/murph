@@ -110,7 +110,8 @@ export async function deletePostgresRunnerUserData(source: RuntimeUserControlSou
   if (admission.cutover !== "postgres" || admission.status !== "authorized") {
     return { ok: false as const, reason: "r2_upload_drain_pending" as const, retryAfterSeconds: 1, userId };
   }
-  await deleteGameImagesForUser(source.GAME_IMAGES, userId, source.BUNDLES);
+  await deleteGameImagesForUser(source.GAME_IMAGES, userId, source.BUNDLES,
+    typeof source.CF_PUBLIC_BASE_URL === "string" ? source.CF_PUBLIC_BASE_URL : "");
   const r2 = await deleteHostedUserR2DataBeforeStateDeletion({ bucket: source.BUNDLES, userId });
   return { ok: true as const, userId, deletedAt: new Date().toISOString(), r2,
     stateOwner: "postgres" as const, runtimeStateCleared: true,

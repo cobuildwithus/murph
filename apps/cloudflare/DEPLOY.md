@@ -2932,6 +2932,15 @@ contracts. A paid Images plan with storage is a deployment prerequisite. Confirm
 account has a working default signing key by exercising the binding; keep that
 key in Cloudflare, never copy it into a local environment or app configuration.
 
+The generated production and local configs both bind `GAME_IMAGES`. The hosted
+deploy entrypoint reads account variants before Worker upload and again before
+activation; it fails closed if any variant bypasses signatures or either required
+rendition is missing or unsafe. Its existing hosted Cloudflare token needs
+**Images Read** permission. This preflight only reads configuration; it does not
+provision variants, change existing assets, prove a paid plan/signing key, or
+prevent later dashboard changes. Keep account configuration changes subject to
+the same private-delivery checks.
+
 Before enabling the new Web writer, provision these account variants:
 
 | ID | Width / height | Fit | Metadata | Never require signed URLs |
@@ -2962,7 +2971,17 @@ Deletion uses versioned, opaque operational objects in the existing R2 bucket:
 stores user identifiers, bytes or signed URLs. Do not apply expiry policies to
 these prefixes. The ordinary `hosted-game-media/objects/` namespace holds only
 provider UUID/size pointers for new images. Creator tags derive from the existing
-opaque namespace and allow deletion to include unreferenced provider uploads.
+opaque namespace plus the canonical `CF_PUBLIC_BASE_URL` origin and allow deletion
+to include unreferenced provider uploads. Distinct preview origins isolate creator
+sweeps even when Workers share one Cloudflare account. Keep this origin stable
+for the lifetime of stored images; changing it requires an explicit migration or
+cleanup of the old namespace. Never point an isolated preview bucket at the
+production origin.
+
+Uploads inspect raster metadata through the Images binding before creating a
+receipt, so invalid/unsupported image headers and invalid dimensions do not leave
+pending uploads. Metadata inspection is not proof that every later provider
+operation will succeed; uncertain upload outcomes still require reconciliation.
 
 If an upload response is ambiguous, its receipt deliberately blocks account
 cleanup. Preserve the existing deletion retry obligation. Reconcile through a
