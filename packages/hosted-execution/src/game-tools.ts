@@ -42,8 +42,8 @@ const terms = z.object({
 }).strict();
 const pending = z.object({
   id: ref, proposedByMemberId: ref, expectedTermsVersion: z.number().int().min(1),
-  change: hostedGameChangeSchema, effectiveFromDay: z.number().int().min(0),
   origin: z.enum(["app", "chat"]).optional(),
+  change: hostedGameChangeSchema, effectiveFromDay: z.number().int().min(0),
   deliveryStatus: z.enum(["pending", "queued", "sent", "failed", "conversation"]), deliveryRetryable: z.boolean().optional(), startsOn: date.nullable(),
 }).strict();
 const progress = z.object({

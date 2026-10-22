@@ -49,7 +49,7 @@ day. No qualifying developer-friction entry was created.
 
 ## Integrated candidate
 
-Integrated lifecycle head `08ee3bbfc8`, including the negotiated-terms and reader
+Integrated lifecycle head `e850940a74`, including the negotiated-terms and reader
 floor changes. Shared discovery uses the same-pair candidate owner. Photo saves
 carry its provider-verified pair through the normal post transaction; no save
 rebinds the announcement room. The current requester and original source sender
