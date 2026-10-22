@@ -19,7 +19,12 @@ import {
   buildAutomationSupportSeriesTag,
 } from "@murphai/contracts";
 import { advanceAutomationDeviceActivityCursor, upsertAutomation } from "@murphai/core";
-import { MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION, MURPH_MANAGED_AUTOMATIONS } from "@murphai/assistant-engine";
+import {
+  getMurphMaintenanceAutomationIds as rootMaintenanceAutomationIds,
+  MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION,
+  MURPH_MANAGED_AUTOMATIONS,
+} from "@murphai/assistant-engine";
+import { getMurphMaintenanceAutomationIds } from "@murphai/assistant-engine/managed-automations";
 import {
   listAutomations,
   showAutomation,
@@ -1688,6 +1693,12 @@ test("automation instruction inventory bounds pages and exposes omitted instruct
   assert.equal(oversizedMetadata.envelope.ok, false, "oversized metadata must fail instead of silently dropping its record");
 });
 
+test("automation maintenance ids share the canonical public owner", () => {
+  assert.strictEqual(getMurphMaintenanceAutomationIds, rootMaintenanceAutomationIds);
+  assert.deepEqual(getMurphMaintenanceAutomationIds(),
+    [MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION, ...MURPH_MANAGED_AUTOMATIONS].map(seed => seed.automationId));
+});
+
 test("automation maintenance exclusion preserves real reminder pages and removes routine instruction payloads", async () => {
   const { parentRoot, vaultRoot } = await createTempVaultContext("murph-maintenance-inventory-");
   try {
@@ -1719,6 +1730,23 @@ test("automation maintenance exclusion preserves real reminder pages and removes
     }
     type Page = { vault: string; count: number; totalCount: number; nextCursor: string | null;
       filters: { excludeMaintenance?: boolean }; items: Array<{ automationId: string; instructions: string | null; status: string; supportKind: string | null }> };
+    for (const options of [[], ["--compact"]]) {
+      const result = await runInProcessJsonCli<Omit<Page, "items"> & { compact?: true; items: Array<{ automationId: string }> }>(cli,
+        ["automation", "list", ...options, "--exclude-maintenance", "--limit", "200", "--vault", vaultRoot]);
+      assert.equal(result.envelope.ok, true);
+      const page = result.envelope.data;
+      assert.ok(page);
+      assert.equal(page.count, reminders.length);
+      assert.equal(page.totalCount, reminders.length);
+      assert.equal(page.nextCursor, null);
+      assert.equal(page.filters.excludeMaintenance, true);
+      assert.equal(page.compact, options.length ? true : undefined);
+      assert.deepEqual(page.items.map(item => item.automationId).sort(), reminders.map(item => item.automationId).sort());
+      for (const item of page.items) {
+        assert.equal("instructions" in item, false);
+        assert.equal("markdown" in item, false);
+      }
+    }
     const readInventory = async (exclude: boolean, limit = 20) => {
       let cursor: string | null = null;
       let bytes = 0;
