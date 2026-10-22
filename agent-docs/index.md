@@ -1408,6 +1408,10 @@ implementation proof is tracked in
 
 Fresh mailbox arrivals during usage pauses are covered by [progress alert age proof](exec-plans/completed/2026-10-21-progress-paused-import.md); the current contract remains in the hosted runtime protocol.
 
+Native image publication ordering before protected integration is recorded in
+[`runner image readiness`](exec-plans/completed/2026-10-21-runner-image-readiness.md);
+the durable contract is in `apps/cloudflare/DEPLOY.md`.
+
 Security runtime and dependency patching is tracked in
 [`October security updates`](exec-plans/completed/2026-10-21-security-oct21.md).
 

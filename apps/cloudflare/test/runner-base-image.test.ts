@@ -6,7 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   hostedRunnerBaseImageFingerprintTag,
@@ -18,6 +18,10 @@ import {
 vi.mock("node:child_process", () => ({
   spawn: vi.fn(),
   spawnSync: vi.fn(),
+}));
+
+vi.mock("node:timers/promises", () => ({
+  setTimeout: (ms: number) => new Promise((resolve) => setTimeout(resolve, ms)),
 }));
 
 vi.mock("node:fs/promises", () => ({
@@ -32,6 +36,7 @@ const dockerfileText = [
 const codexPatchText = "synthetic native compatibility patch\n";
 
 describe("runner base image preparation", () => {
+  afterEach(() => vi.useRealTimers());
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(readFile).mockImplementation(async (sourcePath, options) => {
@@ -52,6 +57,65 @@ describe("runner base image preparation", () => {
       setImmediate(() => child.emit("exit", 0, null));
       return child as ReturnType<typeof spawn>;
     });
+  });
+
+  it.each([false, true])("waits for matching published Linux/AMD64 config metadata (platformMap=%s)", async (platformMap) => {
+    vi.useFakeTimers();
+    const { waitForPublishedRunnerBaseImage } = await import("../scripts/runner-base-image.ts");
+    const fingerprint = expectedFingerprint();
+    const config = { os: "linux", architecture: "amd64", config: { Labels: { [runnerBaseImageSourceFingerprintLabel]: fingerprint } } };
+    mockDockerSyncResults([
+      { status: 1, stderr: "manifest unknown" },
+      { stdout: JSON.stringify(platformMap ? { "linux/amd64": config } : config) },
+    ]);
+    const pending = waitForPublishedRunnerBaseImage({ timeoutMs: 60_000 });
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(await pending).toEqual({ fingerprint, imageTag: hostedRunnerBaseImageFingerprintTag(fingerprint) });
+    expect(spawnSync).toHaveBeenCalledTimes(2);
+    expect(spawnSync).toHaveBeenCalledWith("docker", [
+      "buildx", "imagetools", "inspect", hostedRunnerBaseImageFingerprintTag(fingerprint), "--format", "{{json .Image}}",
+    ], expect.objectContaining({ timeout: 30_000 }));
+    expect(spawn).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    "not JSON", "null", "[]",
+    JSON.stringify({ os: "linux", architecture: "arm64", config: { Labels: {} } }),
+    JSON.stringify({ os: "linux", architecture: "amd64", config: { Labels: { [runnerBaseImageSourceFingerprintLabel]: "stale" } } }),
+  ])("does not admit missing, malformed, or mismatched publication: %s", async (stdout) => {
+    vi.useFakeTimers();
+    const { waitForPublishedRunnerBaseImage } = await import("../scripts/runner-base-image.ts");
+    mockDockerSyncResults([{ stdout }]);
+    const pending = expect(waitForPublishedRunnerBaseImage({ timeoutMs: 10 })).rejects.toThrow("Timed out waiting");
+    await vi.advanceTimersByTimeAsync(10);
+    await pending;
+    expect(spawnSync).toHaveBeenCalledTimes(1);
+    expect(spawnSync).toHaveBeenCalledWith("docker", expect.any(Array), expect.objectContaining({ timeout: 10 }));
+    expect(spawn).not.toHaveBeenCalled();
+  });
+
+  it.each(["arm64", "windows"])("rejects matching source labels on the wrong platform: %s", async (platform) => {
+    vi.useFakeTimers();
+    const { waitForPublishedRunnerBaseImage } = await import("../scripts/runner-base-image.ts");
+    mockDockerSyncResults([{ stdout: JSON.stringify({
+      os: platform === "windows" ? "windows" : "linux",
+      architecture: platform === "arm64" ? "arm64" : "amd64",
+      config: { Labels: { [runnerBaseImageSourceFingerprintLabel]: expectedFingerprint() } },
+    }) }]);
+    const pending = expect(waitForPublishedRunnerBaseImage({ timeoutMs: 10 })).rejects.toThrow("Timed out waiting");
+    await vi.advanceTimersByTimeAsync(10);
+    await pending;
+  });
+
+  it("bounds registry failures without compiling or pulling image layers", async () => {
+    vi.useFakeTimers();
+    const { waitForPublishedRunnerBaseImage } = await import("../scripts/runner-base-image.ts");
+    mockDockerSyncResults([{ status: 1 }, { status: 1 }]);
+    const pending = expect(waitForPublishedRunnerBaseImage({ timeoutMs: 30_010 })).rejects.toThrow("Timed out waiting");
+    await vi.advanceTimersByTimeAsync(30_010);
+    await pending;
+    expect(spawnSync).toHaveBeenNthCalledWith(2, "docker", expect.any(Array), expect.objectContaining({ timeout: 10 }));
+    expect(spawn).not.toHaveBeenCalled();
   });
 
   it("invalidates a prepared image when only the native patch changes", async () => {

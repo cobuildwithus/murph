@@ -1681,7 +1681,7 @@ test("Web production admission runs only for exact public main", async () => {
     ),
     "utf8",
   );
-  const admissionJob = workflow.slice(workflow.indexOf("jobs:\n  admission:"), workflow.indexOf("\n  publish-status:"));
+  const admissionJob = workflow.slice(workflow.indexOf("\n  admission:"), workflow.indexOf("\n  publish-status:"));
   const checkoutIndex = admissionJob.indexOf("name: Check out exact public main revision");
   const setupIndex = admissionJob.indexOf("name: Setup Node");
   const fixtureIndex = admissionJob.indexOf("name: Execute exact production wire projection");
@@ -1709,7 +1709,12 @@ test("Web production admission runs only for exact public main", async () => {
       > 15 * 60_000 + TEMPORAL_COMPATIBILITY_TOKEN_BUDGET_MS,
   );
   assert.doesNotMatch(workflow, /pull_request:/u);
-  assert.doesNotMatch(admissionJob, /\n    needs:/u);
+  assert.match(admissionJob, /needs: runner-base-ready/u);
+  const readiness = workflow.slice(workflow.indexOf("  runner-base-ready:"), workflow.indexOf("\n  admission:"));
+  assert.match(readiness, /ref: \$\{\{ github\.sha \}\}/u);
+  assert.match(readiness, /runner:docker:base -- --wait-published/u);
+  assert.doesNotMatch(readiness, /secrets\.|environment:|create-github-app-token|continue-on-error/u);
+  assert.match(readiness, /timeout-minutes: 100/u);
   assert.doesNotMatch(workflow, /\n  producer:|download-artifact/u);
   assert.ok(admissionJob.indexOf("name: Publish public hosted integration Web dist") < tokenIndex);
   assert.ok(checkoutIndex >= 0);

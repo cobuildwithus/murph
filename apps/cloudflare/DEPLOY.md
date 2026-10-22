@@ -2476,6 +2476,24 @@ boundary instead of applying a recursive permission change after the final
 bundle copy: a post-copy `chmod` creates another application-content layer while
 the runtime still needs only one immutable `/app` tree.
 `runner:docker:base` first reuses a GHCR-published base image when its source-fingerprint label matches the checked-out `Dockerfile.cloudflare-hosted-runner-base` and native patch; otherwise it rebuilds locally. Pass `-- --force` to rebuild from the checked-out Dockerfile without adopting a GHCR base image; deploy-capable production paths use that forced path so GHCR stays a CI/local cache instead of production image authority. Pull-request hosted-local E2E does not authenticate to GHCR before running PR-controlled code, so the GHCR runner base package must be public for fast anonymous PR cache pulls. The protected-main `.github/workflows/cloudflare-runner-base-image.yml` workflow publishes the base image with `GITHUB_TOKEN`.
+`runner:docker:base -- --wait-published` waits up to 90 minutes for the exact
+Dockerfile/patch fingerprint's published Linux/AMD64 image config. It inspects
+bounded registry metadata, checks the source label, and never pulls layers or
+compiles a missing image. Application-only commits may reuse an earlier matching
+publication; an unrelated successful publisher run is not readiness evidence.
+Registry errors, stale labels, wrong platforms, and deadline exhaustion fail
+closed without weakening normal image admission or native sandbox proof.
+
+The public Web admission workflow runs this wait in a separate prerequisite job
+before entering the credentialed admission job or minting its one-hour private
+App token. The existing 80-minute admission job, 58-minute controller credential
+budget, and E2E timeouts remain unchanged. The private integration companion gates
+`worker_release` and `full_integration` fan-out on the resolved public revision;
+land this public CLI before that private consumer. Unpublished PR/candidate proof
+continues to build its own source, and pure Temporal compatibility does not wait
+for a native image. A missing publication is an explicit release blocker, not
+permission to bypass integration or consume its test budget compiling Rust.
+
 The base image build runs `python3 --version`, `python --version`, `jq --version`, `rg --version`, `zstd --version`, `codex --version`, `codex app-server --help`, and `codex doctor --help` under the runner user, and the Docker smoke repeats the Python and ripgrep checks inside the final image before deploy while also proving `file`, `pdfinfo`, `pdftotext`, `pdftoppm`, and `qpdf` against the restored smoke PDF fixture.
 Run `pnpm --dir apps/cloudflare test:e2e:runner-python:local` when you specifically want the actual final hosted-runner app image `PATH` proof for Python. It assembles the runner bundle, builds the same `linux/amd64` app-layer Dockerfile used by the Cloudflare container, starts the image with its normal entrypoint, waits for `/health`, then checks Python as the non-root `runner` user from immutable `/app` with the baked runner env. Run `pnpm --dir apps/cloudflare runner:docker:smoke` when you want the broader final-image native smoke. In addition to the existing command surface, that smoke restores a canonical synthetic memory document and invokes bundled `vault-cli memory show --format json` through Codex App Server from the restored vault working directory under the member-workspace permission profile. The disposable, networkless smoke relaxes the outer Docker seccomp profile so Codex can create its inner user namespace, matching the namespace capability available in Cloudflare's dedicated Linux VM. The nested Codex seccomp proof requires a native `linux/amd64` Docker host; AMD64 emulation on an ARM64 Docker daemon does not support that inner seccomp layer.
 
