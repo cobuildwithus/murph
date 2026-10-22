@@ -473,6 +473,7 @@ export interface HostedWorkspaceRunnerInput {
   kickSystemWork?: (() => void) | null;
   runtimePassDiagnostics?: HostedWorkspaceRunnerRuntimePassDiagnostics | null;
   runtimeWakeSignal?: RuntimeWakeSignal | null;
+  shouldYieldDeviceImportPreparation?: (() => boolean) | null;
   shouldYieldBackgroundMaintenance?: (() => boolean) | null;
   backgroundMaintenanceYieldReason?: HostedBackgroundMaintenanceYieldReason;
   signal?: AbortSignal | null;

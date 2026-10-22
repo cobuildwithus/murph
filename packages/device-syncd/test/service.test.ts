@@ -32,6 +32,7 @@ import { DEVICE_SYNC_DB_RELATIVE_PATH } from "@murphai/runtime-state/node/runtim
 import { createWhoopDeviceSyncProvider } from "../src/providers/whoop.ts";
 import { DEVICE_SYNC_SOURCE_USER_DISCONNECTED_ERROR_CODE } from "../src/public-account.ts";
 import { buildDeviceSyncTokenCipherOptions, createSecretCodec } from "../src/local-secret-codec.ts";
+import { JunctionTimeseriesProgressError } from "../src/junction-timeseries-progress.ts";
 import { DeviceSyncError, deviceSyncError } from "../src/errors.ts";
 import {
   addJunctionExtendedTimeseriesHistoryBackfillCoverage,
@@ -15997,3 +15998,153 @@ test.each([
     close();
   }
 });
+
+test.each(["preparation", "wrapped", "publication", "download", "gate", "job-yield", "deferral-job-yield", "cancellation", "failure"] as const)(
+  "import-only admission defers in place during %s",
+  async (scenario) => {
+    const vaultRoot = await makeTempDirectory("murph-import-admission-");
+    let admissionPending = false;
+    let jobYield = false;
+    let imports = 0;
+    let executions = 0;
+    let providerSignal: AbortSignal | undefined;
+    let accountId = "";
+    let windowObserved!: () => void;
+    const observed = new Promise<void>((resolve) => { windowObserved = resolve; });
+    let resume!: () => void;
+    const resumed = new Promise<void>((resolve) => { resume = resolve; });
+    const snapshot = { synthetic: true };
+    const { service, store, close } = createServiceFixture({
+      secret: "synthetic-secret",
+      config: {
+        vaultRoot,
+        publicBaseUrl: "https://sync.example.test/device-sync",
+        stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+        shouldYieldImportPreparation: () => admissionPending,
+        shouldYieldJobExecution: () => jobYield,
+      },
+      providers: [createFakeProvider({
+        async executeJob(context) {
+          executions += 1;
+          providerSignal = context.signal;
+          accountId = context.account.id;
+          if (["download", "gate", "job-yield", "cancellation"].includes(scenario)) {
+            admissionPending = true;
+            windowObserved();
+            if (scenario === "download") await resumed;
+          }
+          await context.importSnapshot(snapshot);
+          assert.equal(context.signal?.aborted, false);
+          return {};
+        },
+      })],
+      importer: {
+        async importDeviceProviderSnapshot(input, options) {
+          imports += 1;
+          assert.equal(input.snapshot, snapshot);
+          const signal = options?.signal;
+          assert.ok(signal);
+          if (imports === 1 && ["preparation", "wrapped", "publication", "failure", "deferral-job-yield"].includes(scenario)) {
+            admissionPending = true;
+            await new Promise<void>((resolve) => {
+              if (signal.aborted) resolve();
+              else signal.addEventListener("abort", () => resolve(), { once: true });
+            });
+            windowObserved();
+            if (scenario === "deferral-job-yield") {
+              await resumed;
+              assert.equal(providerSignal?.aborted, true);
+              assert.notEqual(signal.reason, providerSignal?.reason);
+            }
+            if (scenario === "publication") await resumed;
+            else if (scenario === "failure") throw new Error("Synthetic unrelated import failure");
+            else if (scenario === "wrapped") throw new JunctionTimeseriesProgressError(
+              deviceSyncError({ cause: signal.reason, code: "SYNTHETIC_WRAPPER", message: "Synthetic wrapper", retryable: true }),
+              "2026-01-01T00:00:00.000Z", null,
+            );
+            else throw signal.reason;
+          }
+          return { applied: true, events: [] };
+        },
+      },
+    });
+    let running: ReturnType<typeof service.runWorkerOnce> | undefined;
+    try {
+      const begin = await service.startConnection({ provider: "demo" });
+      await service.handleOAuthCallback({ provider: "demo", state: begin.state, code: "synthetic-admission" });
+      running = service.runWorkerOnce();
+      await observed;
+      // Hold admission across multiple polls: no new importer call or download.
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      assert.equal(providerSignal?.aborted, false);
+      assert.equal(executions, 1);
+      const gated = ["download", "gate", "job-yield", "cancellation"].includes(scenario);
+      assert.equal(imports, gated ? 0 : 1);
+      if (scenario === "job-yield" || scenario === "deferral-job-yield") {
+        jobYield = true;
+        if (scenario === "deferral-job-yield") {
+          const signal = providerSignal;
+          assert.ok(signal);
+          await new Promise<void>((resolve) => {
+            if (signal.aborted) resolve();
+            else signal.addEventListener("abort", () => resolve(), { once: true });
+          });
+          resume();
+        }
+      }
+      else if (scenario === "cancellation") {
+        const account = store.getAccountById(accountId)!;
+        assert.equal(account.credential.kind, "oauth_tokens");
+        store.upsertAccount({
+          provider: account.provider, externalAccountId: account.externalAccountId,
+          connectedAt: new Date().toISOString(),
+          tokens: { ...account.credential, accessToken: "synthetic-token" },
+        });
+        assert.ok(store.getAccountById(accountId)!.localConnectionRevision > account.localConnectionRevision);
+      } else {
+        admissionPending = false;
+        resume();
+      }
+      const job = await running;
+      assert.ok(job);
+      const stored = store.getJobById(job.id)!;
+      assert.equal(executions, 1);
+      if (scenario === "failure") {
+        assert.equal(imports, 1);
+        assert.equal(stored.attempts, 1);
+        assert.equal(service.listJobFailureDiagnostics().length, 1);
+      } else if (scenario === "job-yield" || scenario === "deferral-job-yield" || scenario === "cancellation") {
+        assert.equal(stored.status, "queued");
+        assert.equal(stored.attempts, 0);
+        assert.equal(stored.leaseOwner, null);
+        assert.equal(service.listJobTimingDiagnostics()[0]?.outcome,
+          scenario === "cancellation" ? "cancelled" : "yielded");
+        const timing = service.listJobTimingDiagnostics()[0]!;
+        assert.equal(timing.snapshotImportDeferredCount, undefined);
+        assert.equal(timing.snapshotImportCount, 0);
+        assert.deepEqual(timing.snapshotImportOutcomes, { applied: 0, noop: 0, failed: 0, unknown: 0 });
+        assert.deepEqual(service.listJobFailureDiagnostics(), []);
+      } else {
+        assert.equal(stored.status, "succeeded");
+        assert.equal(stored.attempts, 1);
+        assert.equal(imports, scenario === "preparation" || scenario === "wrapped" ? 2 : 1);
+        assert.deepEqual(service.listJobFailureDiagnostics(), []);
+        const timing = service.listJobTimingDiagnostics()[0]!;
+        assert.equal(timing.outcome, "completed");
+        assert.equal(timing.snapshotImportCount, 1);
+        assert.deepEqual(timing.snapshotImportOutcomes, { applied: 1, noop: 0, failed: 0, unknown: 0 });
+        assert.equal(timing.snapshotImportDeferredCount,
+          scenario === "preparation" || scenario === "wrapped" ? 1 : undefined);
+        // The 250ms admission wait is outside the importer elapsed metric.
+        if (scenario !== "publication") assert.ok(timing.snapshotImportElapsedMs < timing.elapsedMs - 150);
+      }
+    } finally {
+      admissionPending = false;
+      jobYield = true;
+      resume();
+      await running;
+      close();
+      await rm(vaultRoot, { recursive: true, force: true });
+    }
+  },
+);
