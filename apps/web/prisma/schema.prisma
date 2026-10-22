@@ -595,6 +595,7 @@ model CompanionPushRoute {
   environment    String
   topic          String
   alertsAllowed  Boolean      @map("alerts_allowed")
+  gameSessionId  String?      @map("game_session_id")
   updatedAt      DateTime     @map("updated_at")
   member         HostedMember @relation(fields: [userId], references: [id], onDelete: Cascade)
 

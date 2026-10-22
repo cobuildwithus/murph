@@ -5463,6 +5463,42 @@ falls back to the existing entry visibility rule. Public preview shapes stay
 unchanged. Deploy the nullable-column migration before Web and the new native
 client; old native clients continue sending name and zone without clearing photos.
 
+### Weekly game post notifications
+
+The posting transaction claims one `game_event` receipt of type
+`post_notification`, using the existing unique `command_key` over game,
+recipient and recipient-local 3am day. First photo/heart-rate attempts qualify;
+retakes and excuses do not. The current 1v1 roster admits one recipient. A
+successful post adds at most one narrow route read and one claim insert under
+its existing game lock, with no external work. After commit, one route read
+revalidates permission, token, suspension and the live unexpired registering
+session, then at most one 2.5-second APNs
+attempt and one receipt update record sent, failed, unregistered or superseded.
+An unregistered token adds one exact-token deletion. Peak added database and
+provider concurrency is one. A crash or ambiguous provider result leaves the
+claim consumed; this optional best-effort alert is never replayed.
+Copy derives from `hasUnlockedDay` over the entries already loaded under the
+game lock for the new post's day index. A recipient who posted still receives
+the alert, with an invitation to look; a locked recipient is prompted to share.
+This reuses permanent post-to-unlock authority without another query or state.
+
+`POST /api/game/v1/push-route` uses game bearer admission, allowing free players
+to register the existing `companion_push_route` address and explicit alert
+permission. The nullable `game_session_id` binds game enrollment to the
+registering native session; registration rechecks that session under the auth
+owner lock. Revocation makes a late registration inert even if it arrives after
+installation deletion. Legacy wearable-only registrations remain unenrolled. A companion registration
+keeps game enrollment only when its installation and complete push target are
+unchanged; replacing the address clears the old session binding under the same
+member lock.
+Companion installation-scoped deletion still owns sign-out. Native
+uses the existing notification delegate; the alert's structural game id selects
+an authenticated game after refresh. No entry content leaves the game reader.
+Apply the additive nullable game-session migration, then deploy Web before
+the updated app. Old route writers leave enrollment absent; old readers tolerate
+the extra column. Rolling back Web leaves inert enrollment metadata. No game
+claim or native session credential is replayed during rollback.
+
 ### Weekly game chat changes
 
 `game.pending_change` is one versioned structural proposal serialized with the
@@ -5478,7 +5514,13 @@ can cancel through `DELETE /api/game/v1/games/:id/changes/:proposalId`.
 
 The shared read projection decrypts only the agreed words and each player's own
 profile name, never the personal GameView. Fresh provider rosters must contain
-exactly the two verified player identities and Murph. Existing Linq delivery
+exactly the two verified player identities and Murph. Unbound discovery ranks
+at most 20 exact-pair local candidates by latest `conversation.message` mailbox
+receipt (`createdAt`), then nonblank group display name, then room creation date
+(newest first). The existing member/kind/created-at index serves the one-row
+activity projection; no message payloads or participant observation timestamps
+are read for ranking. Provider verification still decides eligibility, and a
+bound room is never silently replaced. Existing Linq delivery
 claims and notification outbox own creation and proposal effects. Initial group
 creation stores its encrypted provider receipt in that existing delivery row;
 an unknown creation permits only the same frozen provider request and idempotency

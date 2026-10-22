@@ -70,6 +70,19 @@ this default without deleting other people's private contact choices.
   and recording or photographing again is allowed once per day (two attempts
   total, across both kinds, including withdrawn entries). A graph records
   heart rate, not verified repetitions or automatic task completion.
+- **Post notifications.** With iPhone notification permission, another player's
+  first photo or heart-rate check-in can send one push per recipient per game
+  per recipient-local game day (3am to 3am in the zone frozen at go-live).
+  Retakes, withdrawals and excuses do not send alerts. Offline-grace posts use
+  the recipient's day at receipt for the cap. Notifications reveal only that a
+  check-in was posted; names, tasks, words and images remain out of the payload.
+  Players who already posted still receive the alert. Its body invites them to
+  look when they have unlocked the new entry's day, or to share their own post
+  when that day remains locked. Copy uses the same permanent unlock rule as
+  the game reader, including after a withdrawal; an excuse does not unlock.
+  Tapping opens the game with its normal post-to-unlock rules. Delivery is best
+  effort: retries and uncertain provider failures never trigger another attempt
+  for the same game day. Players may decline or revoke iOS alert permission.
 - **Excuses.** An excuse explains a missed day in a few words: the phone
   transcribes the voice note on-device and sends only the transcript (1-500
   characters); no audio is uploaded or stored, and it's never replayed. It
@@ -152,7 +165,13 @@ Before Day 1, either player can propose Start now or a different start date.
 Players can also propose a new duration (up to 28 calendar days) or weekdays.
 Their tap records their agreement. Murph reuses an exact existing chat with the
 two players and Murph, or automatically creates one from their verified phone
-numbers. It identifies the proposer and asks the other player naturally; an
+numbers. When several eligible rooms exist, it prefers the most recently active
+conversation, then a nonblank group name, then the newest room. Activity means
+the latest accepted conversation-message receipt, not a roster refresh or system
+notification. An already-bound game stays in its verified room. Proposal copy
+names only the requested changes and asks the other player naturally. It mentions
+a date only for an explicit start-date change, omitting cutoff times and routine
+check-in preservation text. An
 ordinary contextual agreement is enough. The other player can decline, and the
 proposer can cancel in chat. Only one proposal waits at a time.
 

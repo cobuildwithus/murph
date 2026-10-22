@@ -10,17 +10,21 @@ import { gameHttpError } from "./errors";
  * paid-member check. Members outside the game flag see the routes as missing.
  */
 export async function requireGameMember(request: Request): Promise<string> {
-  let memberId: string;
+  return (await requireGameMemberAuth(request)).member.id;
+}
+
+export async function requireGameMemberAuth(request: Request) {
+  let auth: Awaited<ReturnType<typeof requireHostedMemberAuthFromBearerToken>>;
   try {
-    memberId = (await requireHostedMemberAuthFromBearerToken(request, getPrisma())).member.id;
+    auth = await requireHostedMemberAuthFromBearerToken(request, getPrisma());
   } catch (error) {
     if (isHostedOnboardingError(error) && error.httpStatus === 401) {
       throw gameHttpError("UNAUTHENTICATED", 401, "Sign in to continue.");
     }
     throw error;
   }
-  if (!(await isGameEnabledFor(memberId))) throw gameDisabled();
-  return memberId;
+  if (!(await isGameEnabledFor(auth.member.id))) throw gameDisabled();
+  return auth;
 }
 
 export function assertGameDevRoutesAllowed(): void {
