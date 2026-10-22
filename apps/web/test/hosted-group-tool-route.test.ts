@@ -23,7 +23,7 @@ vi.mock("@/src/lib/hosted-execution/cloudflare-callback-auth", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-groups/group-tool", () => ({
-  handleHostedRuntimeGroupTool: mocks.handleTool,
+  handleHostedRuntimeConversationTool: mocks.handleTool,
 }));
 vi.mock("@/src/lib/hosted-orchestration/mailbox-wake", () => ({
   handoffHostedMailboxWake: mocks.handoffHostedMailboxWake,
@@ -69,6 +69,19 @@ describe("hosted group tool route", () => {
         status: "ok",
       },
     });
+  });
+
+  it("forwards the signed game runtime identity for the mutation transaction fence", async () => {
+    const body = { action: "read_game", origin: { kind: "accepted_input", assistantInputId: `ain_${"a".repeat(32)}` } };
+    mocks.handleTool.mockResolvedValue({ action: "read_game", result: { status: "ok", state: { games: [] } } });
+    const response = await route.POST(new Request(`https://web.example.test${HOSTED_RUNTIME_GROUP_TOOL_PATH}?runtimeAuthority=1&runtimeAttempt=attempt-synthetic&runtimeGeneration=7&runtimeWorkspaceVersion=3`, {
+      method: "POST", body: JSON.stringify(body), headers: { "content-type": "application/json" },
+    }));
+    expect(response.status).toBe(200);
+    expect(mocks.handleTool).toHaveBeenCalledWith(expect.objectContaining({
+      memberId: "member_group_runtime", request: body,
+      runtimeIdentity: { userId: "member_group_runtime", attemptId: "attempt-synthetic", generation: "7", workspaceVersion: "3" },
+    }));
   });
 
   it("accepts a valid read_shared callback larger than the former 8 KiB limit", async () => {

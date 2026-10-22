@@ -1,5 +1,5 @@
 import { Cli, z } from "incur";
-import { getMurphMaintenanceAutomationIds } from "@murphai/assistant-engine";
+import { getMurphMaintenanceAutomationIds } from "@murphai/assistant-engine/managed-automations";
 
 import {
   AUTOMATION_SUPPORT_SERIES_RECONCILED_ARCHIVE_TAG,

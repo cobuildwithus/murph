@@ -47,6 +47,8 @@ vi.mock("@/src/lib/hosted-onboarding/request-auth", () => ({
 vi.mock("@/src/lib/prisma", () => ({ getPrisma: mocks.getPrisma }));
 
 type Routes = {
+  cancelChange: typeof import("../app/api/game/v1/games/[id]/changes/[proposalId]/route");
+  changes: typeof import("../app/api/game/v1/games/[id]/changes/route");
   accept: typeof import("../app/api/game/v1/invites/[token]/accept/route");
   advanceDay: typeof import("../app/api/game/v1/dev/games/[id]/advance-day/route");
   create: typeof import("../app/api/game/v1/games/route");
@@ -72,6 +74,8 @@ const GAME_ID = "game_1";
 const BASE = "http://localhost/api/game/v1";
 const JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0xff, 0xd9]);
 const VIEW: GameView = {
+  changeControls: { canStartNow: false, canEdit: false, canEditStartDate: false, canEditSchedule: false, editableFromDay: null },
+  pendingChange: null,
   days: [],
   id: GAME_ID,
   inviteExpiresAt: null,
@@ -93,6 +97,8 @@ let signedInAs = LEO;
 describe("weekly game routes", () => {
   beforeAll(async () => {
     routes = {
+      cancelChange: await import("../app/api/game/v1/games/[id]/changes/[proposalId]/route"),
+      changes: await import("../app/api/game/v1/games/[id]/changes/route"),
       accept: await import("../app/api/game/v1/invites/[token]/accept/route"),
       advanceDay: await import("../app/api/game/v1/dev/games/[id]/advance-day/route"),
       create: await import("../app/api/game/v1/games/route"),
@@ -200,6 +206,12 @@ describe("weekly game routes", () => {
 
   describe("write routes", () => {
     it.each([
+      ["DELETE /games/:id/changes/:proposalId", () => routes.cancelChange.DELETE(
+        writeRequest("DELETE", `/games/${GAME_ID}/changes/proposal_1`, { decision: "approve" }), params({ id: GAME_ID, proposalId: "proposal_1" })),
+        { type: "respondChange", gameId: GAME_ID, proposalId: "proposal_1", decision: "cancel" }],
+      ["POST /games/:id/changes", () => routes.changes.POST(
+        writeRequest("POST", `/games/${GAME_ID}/changes`, { gameId: "wrong_game", type: "respondChange", proposalId: "proposal_1", expectedTermsVersion: 1, change: { kind: "start_now" } }), params({ id: GAME_ID })),
+        { type: "proposeChange", gameId: GAME_ID, proposalId: "proposal_1", expectedTermsVersion: 1, change: { kind: "start_now" } }],
       ["PUT /me/profile", () => routes.profile.PUT(writeRequest("PUT", "/me/profile", { firstName: "Leo", timeZone: "UTC" })),
         { firstName: "Leo", timeZone: "UTC", type: "setProfile" }],
       ["POST /games", () => routes.create.POST(writeRequest("POST", "/games", { gameId: GAME_ID, inviteeFirstName: "Ava" })),

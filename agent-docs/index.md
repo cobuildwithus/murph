@@ -1384,7 +1384,17 @@ Profile-photo implementation is tracked in [`game profile photos`](exec-plans/co
 The pre-commit large-diff proof no longer depends on obsolete pipeline timing;
 see [the completed release-gate proof plan](exec-plans/completed/2026-10-21-release-gate-proof.md).
 
+Weekly-game chat hosting, mutually agreed schedule edits and the group-only
+access boundary are owned by `product-specs/weekly-game.md` and `ARCHITECTURE.md`.
+The current-proposal inactivity exemption is documented in
+[the iMessage delivery owner](operations/imessage-deliverability.md);
+implementation proof is tracked in
+[weekly-game chat hosting](exec-plans/completed/2026-10-21-weekly-game-chat-host.md).
+
 Fresh mailbox arrivals during usage pauses are covered by [progress alert age proof](exec-plans/completed/2026-10-21-progress-paused-import.md); the current contract remains in the hosted runtime protocol.
 
 Security runtime and dependency patching is tracked in
 [`October security updates`](exec-plans/completed/2026-10-21-security-oct21.md).
+
+Requested game proposal inactivity handling and CI repair proof are recorded in
+[the delivery remediation](exec-plans/completed/2026-10-21-game-proposal-requested-delivery.md).

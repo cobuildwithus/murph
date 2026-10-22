@@ -953,6 +953,8 @@ describe("expectAdvertisedMurphDynamicTools", () => {
       && !name.startsWith("murph.connected_apps_")
       && !hostedGroupFamilyToolNames.includes(name)
       && name !== "murph.group_room_model"
+      && name !== "murph.read_game"
+      && name !== "murph.update_game"
       && name !== "murph.imessage_contact"
       && name !== "murph.usage_diagnostics"
       && name !== "murph.react_to_message"
@@ -979,6 +981,7 @@ describe("expectAdvertisedMurphDynamicTools", () => {
       computerToolsAvailable: true,
       exerciseRoutineResponseCardAvailable: true,
       groupAvailable: true,
+      gamesAvailable: true,
       groupRoomModelAvailable: true,
       imessageContactAvailable: true,
       messageTargetingAvailable: true,
@@ -1005,6 +1008,8 @@ describe("expectAdvertisedMurphDynamicTools", () => {
     expect(allToolNames)
       .toEqual(expect.arrayContaining(hostedGroupFamilyToolNames));
     expect(allToolNames).toContain("murph.group_room_model");
+    expect(allToolNames).toContain("murph.read_game");
+    expect(allToolNames).toContain("murph.update_game");
     expect(allToolNames).toContain("murph.imessage_contact");
     expect(allToolNames).toContain("murph.usage_diagnostics");
     expect(allToolNames).toContain("murph.resolve_physical_note");

@@ -1,3 +1,4 @@
+import { readGameDynamicToolRequest, executeGameTool, type GameDynamicRequest } from './dynamic-tools/games.js'
 import { types } from 'node:util'
 import { executeGetSenderContactDynamicTool, readSenderContactDynamicToolRequest, type SenderContactDynamicToolRequest } from './dynamic-tools/sender-contact.js'
 import { type ConversationPollAction } from '@murphai/hosted-execution/conversation-polls'
@@ -1611,6 +1612,8 @@ export type MurphDynamicToolRequest =
       validationDigest: SafeToolCallValidationDigest
     }
   | { kind: 'poll'; request: ConversationPollAction }
+  | { kind: 'game'; request: GameDynamicRequest }
+  | { kind: 'invalid-game-arguments'; validationDigest: SafeToolCallValidationDigest }
   | {
       kind: 'invalid-imessage-contact-arguments'
       validationDigest: SafeToolCallValidationDigest
@@ -1773,6 +1776,7 @@ export function readMurphDynamicToolRequest(
 
   for (const readRequest of [
     readConversationPollDynamicToolRequest,
+    readGameDynamicToolRequest,
     readDeviceDynamicToolRequest,
     readLabsDynamicToolRequest,
     readPendingVaultFilesDynamicToolRequest,
@@ -3613,6 +3617,10 @@ async function executeComputerRequestDynamicTool(
   }
 }
 
+function isUnavailableComputerTool(request: MurphDynamicToolRequest, context: AssistantHostedToolContext | null): boolean {
+  return isExecutableComputerDynamicToolRequest(request) && !canExecuteComputerDynamicTools(context)
+}
+
 async function dispatchMurphDynamicToolRequest(
   input: ExecuteMurphDynamicToolRequestInput,
 ): Promise<MurphDynamicToolExecutionResult> {
@@ -3632,10 +3640,7 @@ async function dispatchMurphDynamicToolRequest(
       'authority_rejected',
     )
   }
-  if (
-    isExecutableComputerDynamicToolRequest(input.request) &&
-    !canExecuteComputerDynamicTools(hostedContext)
-  ) {
+  if (isUnavailableComputerTool(input.request, hostedContext)) {
     return toolTextResult(
       false,
       'computer tools are unavailable without hosted computer-use transport',
@@ -3795,6 +3800,7 @@ async function dispatchMurphDynamicToolRequest(
     case 'usage-diagnostics':
     case 'plan-usage':
     case 'poll':
+    case 'game':
     case 'imessage-contact':
       return await executeCurrentConversationTool(input, input.request)
     case 'subscription':
@@ -4313,11 +4319,12 @@ function projectHostedGroupPlanLabel(label: string): string {
 
 async function executeCurrentConversationTool(
   input: ExecuteMurphDynamicToolRequestInput,
-  request: Extract<MurphDynamicToolRequest, { kind: 'poll' | 'plan-usage' | 'usage-diagnostics' | 'imessage-contact' }>,
+  request: Extract<MurphDynamicToolRequest, { kind: 'game' | 'poll' | 'plan-usage' | 'usage-diagnostics' | 'imessage-contact' }>,
 ): Promise<MurphDynamicToolExecutionResult> {
   const hostedToolContext = input.hostedToolContext ?? null
   switch (request.kind) {
     case 'usage-diagnostics': return executeUsageDiagnosticsTool(hostedToolContext, request.request)
+    case 'game': return executeGameTool({ request: request.request, context: hostedToolContext })
     case 'poll': return executeConversationPollTool({ request: request.request, context: hostedToolContext })
     case 'plan-usage': return executePlanUsageTool({ request: request.request, hostedToolContext })
     case 'imessage-contact': return executeIMessageContactTool({ hostedToolContext })

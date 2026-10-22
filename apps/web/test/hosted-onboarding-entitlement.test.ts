@@ -304,7 +304,7 @@ describe("hosted member access (single resolver)", () => {
 
   it("resolves owner and current-participant access for a member set without per-member reads", async () => {
     const now = new Date("2026-07-26T12:00:00.000Z");
-    const findManyMembers = vi.fn(async () => [
+    const findManyMembers = vi.fn().mockResolvedValue([]).mockResolvedValueOnce([
       {
         ...person({ billingStatus: HostedBillingStatus.not_started }),
         id: "container_owner_backed",
@@ -356,7 +356,10 @@ describe("hosted member access (single resolver)", () => {
       "container_owner_backed",
       "container_participant_backed",
     ]));
-    expect(findManyMembers).toHaveBeenCalledTimes(1);
+    expect(findManyMembers).toHaveBeenCalledTimes(2);
+    expect(findManyMembers).toHaveBeenLastCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ id: { in: ["container_inactive"] } }),
+    }));
     expect(findManyParticipants).toHaveBeenCalledTimes(1);
     expect(findManyParticipants).toHaveBeenCalledWith(expect.objectContaining({
       select: { containerMemberId: true },
@@ -716,6 +719,7 @@ function buildRuntimeAiAccessPrisma(
 ) {
   return {
     hostedMember: {
+      findMany: vi.fn(async () => []),
       findUnique: vi.fn(async () => ({
         accountGroupMemberships: member.accountGroupMemberships ?? [],
         billingRef: member.billingRef,

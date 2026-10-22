@@ -1,0 +1,89 @@
+import "server-only";
+import type { Prisma } from "@prisma/client";
+import { hostedGameChatStateSchema, type HostedGameToolRequest, type HostedGameToolResponse } from "@murphai/hosted-execution/runtime-control";
+import type { HostedExecutionExternalThreadRouteAuthority, HostedExecutionConversationMessageWake } from "@murphai/hosted-execution/contracts";
+import { requireHostedRuntimeCallbackTx, type HostedRuntimeIdentity } from "../hosted-execution/runtime-owner";
+import { readHostedMailboxConversationWakeByAssistantInputId } from "../hosted-mailbox/store";
+import { requireHostedRuntimeActiveAccessForUpdateTx } from "../hosted-mailbox/runtime-access";
+import { resolveHostedGroupMessageSenderMemberId } from "../hosted-groups/group-message-sender";
+import { assertHostedThreadRouteEgressAuthority } from "../hosted-routing/thread-route-store";
+import { getPrisma } from "../prisma";
+import { readGameChatState, runGameCommand } from "./service";
+import { requireExactGameChat } from "./chat-delivery";
+import { isGameEnabled, isGameEnabledFor } from "./access";
+
+type Input = { memberId: string; runtimeIdentity: HostedRuntimeIdentity | null; request: HostedGameToolRequest; playerMemberIds?: readonly string[] };
+
+/** The signed runtime selects only a game and accepted Message ref, never an actor. */
+export async function handleGameChatTool(input: Input): Promise<HostedGameToolResponse> {
+  if (!isGameEnabled()) return { action: input.request.action, result: { status: "unavailable", error: "game_unavailable" } };
+  const prisma = getPrisma();
+  const actor = await prisma.$transaction((tx) => authorizeGameChatActorTx(input, tx));
+  if (!actor) return { action: input.request.action, result: { status: "unavailable", error: "game_player_unavailable" } };
+  const playerMemberIds = await requireExactGameChat(input.memberId);
+  if (!playerMemberIds.includes(actor)) return { action: input.request.action, result: { status: "unavailable", error: "game_player_unavailable" } };
+  if (input.request.action === "update_game") {
+    const update = input.request.update;
+    const command = update.operation === "propose"
+      ? { type: "proposeChange", gameId: update.gameId, proposalId: update.proposalId, expectedTermsVersion: update.expectedTermsVersion, change: update.change }
+      : { type: "respondChange", gameId: update.gameId, proposalId: update.proposalId, decision: update.operation };
+    const result = await runGameCommand({
+      actorMemberId: actor,
+      chatContainerMemberId: input.memberId,
+      command,
+      beforeMutationTx: async (tx) => {
+        if (await authorizeGameChatActorTx({ ...input, playerMemberIds }, tx) !== actor) throw new TypeError("Game player authority changed.");
+      },
+    });
+    // GameView is a personal app view. Never pass it into the shared runtime.
+    if (!result.ok) return { action: input.request.action, result: { status: "rejected", error: result.error.code } };
+    const latestPlayers = await requireExactGameChat(input.memberId);
+    if (!sameGamePlayers(latestPlayers, playerMemberIds)) throw new TypeError("Game chat participants changed.");
+  }
+  const state = hostedGameChatStateSchema.parse(await readGameChatState(input.memberId, playerMemberIds));
+  return { action: input.request.action, result: { status: "ok", state } };
+}
+
+/** A free player may agree to their game without gaining personal AI access. */
+export async function authorizeGameChatActorTx(input: Input, tx: Prisma.TransactionClient): Promise<string | null> {
+  await requireHostedRuntimeCallbackTx(tx, input.memberId, input.runtimeIdentity);
+  await requireHostedRuntimeActiveAccessForUpdateTx(input.memberId, { prisma: tx });
+  const wake = await readHostedMailboxConversationWakeByAssistantInputId({
+    assistantInputId: input.request.origin.assistantInputId, availableAt: new Date(), memberId: input.memberId, prisma: tx,
+  });
+  if (!wake || wake.userId !== input.memberId) return null;
+  const route = readGameIncomingRoute(wake, input.memberId);
+  if (!route) return null;
+  await assertHostedThreadRouteEgressAuthority({ authority: route, prisma: tx });
+  const actor = await resolveHostedGroupMessageSenderMemberId({ prisma: tx, routeAuthority: route, wake });
+  if (!actor || !isGameEnabledFor(actor)) return null;
+  const game = await tx.game.findFirst({
+    where: { chatContainerMemberId: input.memberId, players: { some: { memberId: actor } }, ...(input.request.action === "update_game" ? { id: input.request.update.gameId } : {}) },
+    select: { id: true, players: { select: { memberId: true }, take: 3 } },
+  });
+  if (!game || !areGamePlayersAllowed(game.players, input.playerMemberIds)) return null;
+  return actor;
+}
+
+function readGameIncomingRoute(wake: HostedExecutionConversationMessageWake, containerMemberId: string): HostedExecutionExternalThreadRouteAuthority | null {
+  const message = wake.message;
+  if (message.channel !== "linq" && message.channel !== "telegram") return null;
+  const route = message.routeAuthority;
+  if (!route || route.containerMemberId !== containerMemberId) return null;
+  if (message.channel === "linq") {
+    return message.linqMessage.isFromMe === false && message.linqMessage.threadIsDirect === false && route.channel === "linq" && route.threadId === message.linqMessage.chatId ? route : null;
+  }
+  if (message.channel === "telegram") {
+    return message.telegramMessage.threadIsDirect === false && route.channel === "telegram" && route.threadId === message.telegramMessage.threadId ? route : null;
+  }
+  return null;
+}
+
+function sameGamePlayers(actual: readonly string[], expected: readonly string[]): boolean {
+  return actual.length === 2 && expected.length === 2 && actual.every((memberId) => expected.includes(memberId));
+}
+
+function areGamePlayersAllowed(players: readonly { memberId: string }[], expected?: readonly string[]): boolean {
+  if (players.length !== 2 || !players.every((player) => isGameEnabledFor(player.memberId))) return false;
+  return expected === undefined || sameGamePlayers(players.map((player) => player.memberId), expected);
+}

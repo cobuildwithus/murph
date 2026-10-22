@@ -26,6 +26,7 @@ const mocks = vi.hoisted(() => {
         await callback({ kind: "tx" })
       ),
       hostedMember: {
+        findMany: vi.fn(async () => []),
         findUnique: hostedMemberFindUnique,
       },
       hostedThreadContainerParticipant: {
@@ -850,6 +851,7 @@ describe("hosted runtime Temporal signaling", () => {
         findFirst: vi.fn(async () => null),
       },
       hostedMember: {
+        findMany: vi.fn(async () => []),
         findUnique: explicitHostedMemberFindUnique,
       },
       kind: "explicit-prisma",

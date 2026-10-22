@@ -99,6 +99,10 @@
       "types": "./dist/knowledge.d.ts",
       "default": "./dist/knowledge.js"
     },
+    "./managed-automations": {
+      "types": "./dist/managed-automations.d.ts",
+      "default": "./dist/managed-automations.js"
+    },
     "./outbound-channel": {
       "types": "./dist/outbound-channel.d.ts",
       "default": "./dist/outbound-channel.js"

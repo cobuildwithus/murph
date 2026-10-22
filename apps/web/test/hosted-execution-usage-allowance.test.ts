@@ -5313,6 +5313,7 @@ function createGatePrisma(input: {
         : null),
     },
     hostedMember: {
+      findMany: vi.fn(async () => []),
       findUnique: vi.fn(async () => ({
         billingRef: {
           currentBillingPhase: input.billingPhase ?? null,

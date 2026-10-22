@@ -114,6 +114,9 @@ const MAX_STAKES = 3;
 
 export const GAME_ERROR_STATUS: Record<GameErrorCode, number> = {
   ALREADY_IN_A_GAME: 409,
+  CHANGE_PENDING: 409,
+  CHANGE_EXPIRED: 409,
+  CHAT_UNAVAILABLE: 503,
   DAY_CLOSED: 409,
   GAME_DISABLED: 404,
   GAME_NOT_FOUND: 404,
@@ -287,7 +290,7 @@ export function decideNewTerms(input: GameTermsInput, options: { newKey: () => s
   };
 }
 
-function validSchedule(schedule: GameSchedule, lengthDays: number): GameSchedule {
+export function validSchedule(schedule: GameSchedule, lengthDays: number): GameSchedule {
   if ("count" in schedule) {
     if (schedule.count < 1 || schedule.count > lengthDays) reject("INVALID_REQUEST", `Count must be 1 to ${lengthDays}.`);
     return { count: schedule.count };

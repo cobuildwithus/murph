@@ -44,6 +44,7 @@ function buildRuntimeAccessTx(
       return [];
     }),
     hostedMember: {
+      findMany: vi.fn(async () => []),
       findUnique: vi.fn(async () => ({
         accountGroupMemberships: [],
         billingStatus: "active",
