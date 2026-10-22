@@ -1436,6 +1436,6 @@ Game proposal wording and conversation-activity selection are tracked in
 `product-specs/weekly-game.md` remains the current behavior owner.
 
 Hosted photo import CPU reduction and measurement limits are tracked in
-[the photo import plan](exec-plans/active/2026-10-22-photo-import-latency.md);
+[the photo import plan](exec-plans/completed/2026-10-22-photo-import-latency.md);
 `../packages/inboxd/README.md` owns image settings and
 `../packages/assistant-runtime/README.md` owns the optional timing field.
