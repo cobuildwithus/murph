@@ -9,7 +9,11 @@ export const hostedGameScheduleSchema = z.union([
 ]);
 export const hostedGameChangeSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("start_now") }).strict(),
-  z.object({ kind: z.literal("edit"), schedule: hostedGameScheduleSchema.optional(), lengthDays: z.number().int().min(1).max(28).optional(), startsOn: date.optional() }).strict(),
+  z.object({ kind: z.literal("edit"), schedule: hostedGameScheduleSchema.optional(), lengthDays: z.number().int().min(1).max(28).optional(), startsOn: date.nullable().optional(),
+    tasks: z.array(z.object({ seat: z.number().int().min(0).max(1), text: z.string().min(1).max(200) }).strict()).length(2).optional(),
+    stakes: z.array(z.object({ kind: z.enum(["winner_gets", "per_miss"]), item: z.string().min(1).max(200) }).strict()).min(1).max(3).optional(),
+    stakesApplyToWholeGame: z.literal(true).optional(),
+  }).strict(),
 ]);
 export const hostedGameUpdateSchema = z.discriminatedUnion("operation", [
   z.object({ operation: z.literal("propose"), gameId, proposalId: gameId, expectedTermsVersion: z.number().int().min(1), change: hostedGameChangeSchema }).strict(),
@@ -35,11 +39,11 @@ const pending = z.object({
   deliveryStatus: z.enum(["pending", "queued", "sent", "failed"]), deliveryRetryable: z.boolean().optional(), startsOn: date.nullable(),
 }).strict();
 export const hostedGameChatStateSchema = z.object({ games: z.array(z.object({
-  id: ref, status: z.enum(["invited", "live", "settled", "void"]), terms,
+  id: ref, status: z.enum(["invited", "negotiating", "live", "settled", "void"]), terms,
   startsOn: date.nullable(), lengthDays: z.number().int().min(1).max(28),
   players: z.array(z.object({ memberId: ref, seat: z.number().int(), firstName: z.string().max(200), dayOne: date.nullable(), timeZone: z.string().max(100) }).strict()).max(2),
   pendingChange: pending.nullable(),
-  changeControls: z.object({ canStartNow: z.boolean(), canEdit: z.boolean(), canEditSchedule: z.boolean(), canEditStartDate: z.boolean(), editableFromDay: z.number().int().nullable() }).strict(),
+  changeControls: z.object({ canStartNow: z.boolean(), canEdit: z.boolean(), canEditSchedule: z.boolean(), canEditStartDate: z.boolean(), canEditTasks: z.boolean().optional(), canEditStakes: z.boolean().optional(), editableFromDay: z.number().int().nullable() }).strict(),
 }).strict()).max(10) }).strict();
 export type HostedGameChatState = z.infer<typeof hostedGameChatStateSchema>;
 export const hostedGameToolResponseSchema = z.object({
