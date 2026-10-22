@@ -9,6 +9,6 @@
     "summary": "Murph spends less processing time preparing still photos for a reply.",
     "details": "Photo preparation keeps the same resolution limit while using faster image compression. Download and reply times still depend on the connection and the request.",
     "relevanceTags": ["photos", "messaging"],
-    "sourcePullRequests": []
+    "sourcePullRequests": [4316]
   }
 }
