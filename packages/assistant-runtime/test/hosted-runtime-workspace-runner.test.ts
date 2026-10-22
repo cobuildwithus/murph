@@ -5356,7 +5356,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
       const { mailboxPort } = createMailboxPort({ items: [createMailboxItem()] });
       const bytes = image
-        ? Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+cGfoAAAAASUVORK5CYII=", "base64")
+        ? Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAADUlEQVQImWP4////fwAJ+wP9CNHoHgAAAABJRU5ErkJggg==", "base64")
         : Buffer.from("Synthetic attachment contents\n");
       let preparedBytes: Buffer | null = null;
       let mediaUploadCount = 0;

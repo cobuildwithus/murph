@@ -1400,5 +1400,8 @@ implementation proof is tracked in
 
 Fresh mailbox arrivals during usage pauses are covered by [progress alert age proof](exec-plans/completed/2026-10-21-progress-paused-import.md); the current contract remains in the hosted runtime protocol.
 
+Security runtime and dependency patching is tracked in
+[`October security updates`](exec-plans/completed/2026-10-21-security-oct21.md).
+
 Requested game proposal inactivity handling and CI repair proof are recorded in
 [the delivery remediation](exec-plans/completed/2026-10-21-game-proposal-requested-delivery.md).

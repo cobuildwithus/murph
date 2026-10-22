@@ -35,6 +35,6 @@
     "verify:package-boundary:prepared": "MURPH_MESSAGING_INGRESS_TEST_BUILT_DIST=1 pnpm exec vitest run --config vitest.config.ts test/package-boundary.test.ts --no-coverage"
   },
   "engines": {
-    "node": ">=24.14.1"
+    "node": ">=24.22.1"
   }
 }

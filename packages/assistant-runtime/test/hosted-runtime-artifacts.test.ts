@@ -718,7 +718,7 @@ test.each([
   const receipts: HostedCanonicalWritePersistenceInput[] = [];
   const videoBytes = Buffer.from("synthetic video receipt payload");
   const imageBytes = Buffer.from(
-    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+cGfoAAAAASUVORK5CYII=",
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAADUlEQVQImWP4////fwAJ+wP9CNHoHgAAAABJRU5ErkJggg==",
     "base64",
   );
   try {
@@ -841,7 +841,7 @@ test.each([
   const now = new Date().toISOString();
   const lifetimeDays = scenario.kind === "image" ? 14 : 3;
   const capturedAt = new Date(Date.parse(now) - lifetimeDays * 86_400_000 + 60_000).toISOString();
-  const imageBytes = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+cGfoAAAAASUVORK5CYII=", "base64");
+  const imageBytes = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAADUlEQVQImWP4////fwAJ+wP9CNHoHgAAAABJRU5ErkJggg==", "base64");
   let status: ReturnType<typeof hostedCanonicalWriteReceiptLogStatusFields> = {};
   const receipts: HostedCanonicalWritePersistenceInput[] = [];
   try {

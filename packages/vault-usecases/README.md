@@ -104,7 +104,7 @@ The report declares `scenarioIsolation: "process"`; earlier single-process
 scenario timings are not comparable acceptance evidence. Synthetic wall/CPU
 measurements do not establish production speedup.
 
-Use Node >=24.14.1 and the repository's frozen install in parent-prepared
+Use Node >=24.22.1 and the repository's frozen install in parent-prepared
 base/head checkouts. Base is the unchanged production runtime; head includes the
 candidate. Copy the **same current** `packages/vault-usecases/bench/event-list.ts`
 and its `tsconfig.json` into base without copying runtime changes. Build public

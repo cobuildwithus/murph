@@ -38,7 +38,7 @@ const ALLOWED_STATIC_RASTER_INPUT_FORMATS = new Set([
   "png",
   "webp",
 ]);
-type SharpFactory = typeof import("sharp");
+type SharpFactory = typeof import("sharp").default;
 
 export async function normalizeAttachmentForStorage(
   input: NormalizeAttachmentForStorageInput,

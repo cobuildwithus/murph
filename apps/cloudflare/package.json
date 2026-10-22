@@ -18,7 +18,7 @@
     "DEPLOY.md"
   ],
   "engines": {
-    "node": ">=24.14.1"
+    "node": ">=24.22.1"
   },
   "scripts": {
     "build": "node ../../scripts/rm-paths.mjs dist && node ../../scripts/run-typescript.mjs package -b tsconfig.build.json --pretty false",
@@ -79,7 +79,7 @@
     "@murphai/query": "workspace:*",
     "@murphai/runtime-state": "workspace:*",
     "jose": "^6.2.3",
-    "undici": "7.28.0"
+    "undici": "7.29.1"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.16.3",
