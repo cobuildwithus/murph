@@ -43,6 +43,22 @@ describe("weekly game mutually agreed changes", () => {
     expect(() => decideGameChange(s, "player_a", { kind: "edit", schedule: { days: [5,6] } }, DURING)).toThrow();
     expect(decideGameChange(s, "player_a", { kind: "edit", lengthDays: 10 }, DURING).change).toEqual({ kind: "edit", lengthDays: 10 });
   });
+  it.each([BEFORE, DURING])("keeps an any-days target valid when changing duration at %s", (now) => {
+    const s = state();
+    s.game.terms.versions[0].schedule = { count: 4 };
+    expect(() => decideGameChange(s, "player_a", { kind: "edit", lengthDays: 3 }, now)).toThrow("Count must be 1 to 3.");
+    for (const lengthDays of [4, 14]) {
+      expect(decideGameChange(s, "player_a", { kind: "edit", lengthDays }, now).change).toEqual({ kind: "edit", lengthDays });
+    }
+    expect(s.game.terms.versions[0].schedule).toEqual({ count: 4 });
+  });
+  it("allows an explicitly lowered any-days target only before play starts", () => {
+    const s = state();
+    s.game.terms.versions[0].schedule = { count: 4 };
+    const change = { kind: "edit" as const, lengthDays: 3, schedule: { count: 3 } };
+    expect(decideGameChange(s, "player_a", change, BEFORE).change).toEqual(change);
+    expect(() => decideGameChange(s, "player_a", change, DURING)).toThrow("keep an any-days target unchanged");
+  });
   it("expires an approval when its first day has started or its terms changed", () => {
     const s = state(); const p = pending(s, DURING);
     expect(isGameChangeExpired(s, p, DURING)).toBe(false);

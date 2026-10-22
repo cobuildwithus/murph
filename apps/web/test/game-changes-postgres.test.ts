@@ -3,8 +3,9 @@ import { afterAll, describe, expect, it, vi } from "vitest";
 import { createHostedLinqDeliveryIdempotencyLookupKey } from "@/src/lib/hosted-onboarding/linq-observability-identifiers";
 import { getPrisma } from "@/src/lib/prisma";
 import { readGame, readGameChatState, runGameCommand } from "@/src/lib/game/service";
-import { gameLocalDate } from "@/src/lib/game/time";
-import type { GameCommand } from "@/src/lib/game/contract";
+import { addDays, gameLocalDate, weekdayOf } from "@/src/lib/game/time";
+import { parseStoredTerms, scorePlayer, settleDueAt, type RuleState } from "@/src/lib/game/rules";
+import type { GameCommand, GameSchedule } from "@/src/lib/game/contract";
 const delivery = vi.hoisted(() => vi.fn(async () => {}));
 vi.mock("@/src/lib/game/chat-delivery", () => ({ deliverGameChangeProposal: delivery }));
 const enabled = process.env.MURPH_TEST_POSTGRES_CONCURRENCY === "1";
@@ -13,14 +14,14 @@ const members: string[] = [];
 async function run(actorMemberId: string, command: GameCommand, options: { chatContainerMemberId?: string; now?: Date; beforeMutationTx?: () => Promise<void> } = {}) {
   return runGameCommand({ actorMemberId, command, ...options });
 }
-async function setup() {
+async function setup(schedule: GameSchedule = { days: [0,1,2,3,4] }) {
   const a = `game_a_${randomUUID()}`, b = `game_b_${randomUUID()}`, room = `game_room_${randomUUID()}`;
   members.push(a,b,room);
   await getPrisma().hostedMember.createMany({ data: [a,b,room].map((id) => ({ id, billingStatus: "not_started" })) });
   await run(a,{type:"setProfile", firstName:"Riley", timeZone:"America/New_York"});
   await run(b,{type:"setProfile", firstName:"Jordan", timeZone:"America/New_York"});
   const gameId = randomUUID();
-  const created = await run(a,{type:"createGame",gameId,inviteeFirstName:"Private nickname",terms:{tasks:[{seat:0,text:"Read"},{seat:1,text:"Walk"}],schedule:{days:[0,1,2,3,4]},stakes:[{kind:"winner_gets",item:"Breakfast"}]}});
+  const created = await run(a,{type:"createGame",gameId,inviteeFirstName:"Private nickname",terms:{tasks:[{seat:0,text:"Read"},{seat:1,text:"Walk"}],schedule,stakes:[{kind:"winner_gets",item:"Breakfast"}]}});
   if (!created.ok || !created.game?.inviteToken) throw new Error("Fixture create failed");
   const joined = await run(b,{type:"join",token:created.game.inviteToken,termsVersion:1,timeZone:"America/New_York"});
   if (!joined.ok) throw new Error("Fixture join failed");
@@ -51,6 +52,49 @@ describe.skipIf(!enabled)("weekly game change serialization against PostgreSQL",
     expect(shared.games[0].players.map((p)=>p.firstName).sort()).toEqual(["Jordan","Riley"]);
     expect(JSON.stringify(shared)).not.toContain("inviteToken"); expect(JSON.stringify(shared)).not.toContain("avatarUrl");
   });
+  it.each([
+    { name: "weekdays", schedule: { days: [0,1,2,3,4] } as GameSchedule },
+    { name: "custom days", schedule: { days: [0,3,6] } as GameSchedule },
+  ].flatMap((schedule) => [false, true].flatMap((started) => [4,14].map((lengthDays) => ({ ...schedule, started, lengthDays })))))
+  ("preserves $name when duration becomes $lengthDays days (started: $started)", async ({ schedule, started, lengthDays }) => {
+    const { a,b,room,gameId } = await setup(schedule);
+    const now = new Date();
+    const dayOne = addDays(gameLocalDate(now, "America/New_York"), started ? -2 : 1);
+    await getPrisma().gamePlayer.updateMany({ where: { gameId }, data: { dayOne: new Date(`${dayOne}T00:00:00Z`) } });
+    if (started) await getPrisma().gameEntry.create({ data: {
+      id: randomUUID(), gameId, memberId: a, dayIndex: 0, attempt: 1, kind: "photo", receivedAt: now,
+    } });
+    const before = (await readGame(gameId, a))!;
+    const entries = await getPrisma().gameEntry.findMany({ where: { gameId } });
+    const proposalId = randomUUID();
+    expect(await run(a, { type: "proposeChange", gameId, proposalId, expectedTermsVersion: 1, change: { kind: "edit", lengthDays } }))
+      .toMatchObject({ ok: true, game: { lengthDays: 7, terms: { schedule } } });
+    expect(await run(b, { type: "respondChange", gameId, proposalId, decision: "approve" }, { chatContainerMemberId: room, beforeMutationTx: fence }))
+      .toMatchObject({ ok: true });
+    const view = (await readGame(gameId, a))!;
+    expect(view.lengthDays).toBe(lengthDays);
+    expect(view.terms.schedule).toEqual(schedule);
+    expect(view.days).toHaveLength(lengthDays);
+    expect(view.days.at(-1)?.localDate).toBe(addDays(dayOne, lengthDays - 1));
+    if (!("days" in schedule)) throw new Error("Fixture requires weekdays");
+    expect(view.days.map((day) => day.off)).toEqual(Array.from({ length: lengthDays }, (_, day) => !schedule.days.includes(weekdayOf(addDays(dayOne, day)))));
+    expect(view.days.slice(0, started ? 3 : 0)).toEqual(before.days.slice(0, started ? 3 : 0));
+    expect(await getPrisma().gameEntry.findMany({ where: { gameId } })).toEqual(entries);
+    const row = (await getPrisma().game.findUnique({ where: { id: gameId } }))!;
+    const terms = parseStoredTerms(row.terms);
+    expect(terms.versions.map(({ n, fromDay, schedule }) => ({ n, fromDay, schedule }))).toEqual(started
+      ? [{ n: 1, fromDay: 0, schedule }, { n: 2, fromDay: 3, schedule }]
+      : [{ n: 2, fromDay: 0, schedule }]);
+    const players = [a,b].map((memberId, seat) => ({ memberId, seat, dayOne, timeZone: "America/New_York" }));
+    const state: RuleState = { game: { ...row, terms, seats: 2, status: "live", startsOn: null }, players,
+      entries: entries.map((entry) => ({ ...entry, kind: "photo" })) };
+    const requiredDays = view.days.filter((day) => !day.off).length;
+    expect(scorePlayer(state, players[0])).toMatchObject({ score: started && !view.days[0].off ? 1 : 0,
+      misses: requiredDays - (started && !view.days[0].off ? 1 : 0) });
+    expect(scorePlayer(state, players[1])).toMatchObject({ score: 0, misses: requiredDays });
+    expect(gameLocalDate(settleDueAt(players, lengthDays), "America/New_York")).toBe(addDays(dayOne, lengthDays));
+  });
+
   it("starts both players on the agreed date only after the other approves", async () => {
     const {a,b,room,gameId}=await setup(); const proposalId=randomUUID();
     await run(a,{type:"proposeChange",gameId,proposalId,expectedTermsVersion:1,change:{kind:"start_now"}});
