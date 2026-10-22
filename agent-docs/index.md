@@ -1387,4 +1387,4 @@ see [the completed release-gate proof plan](exec-plans/completed/2026-10-21-rele
 Fresh mailbox arrivals during usage pauses are covered by [progress alert age proof](exec-plans/completed/2026-10-21-progress-paused-import.md); the current contract remains in the hosted runtime protocol.
 
 Security runtime and dependency patching is tracked in
-[`October security updates`](exec-plans/active/2026-10-21-security-oct21.md).
+[`October security updates`](exec-plans/completed/2026-10-21-security-oct21.md).

@@ -1,6 +1,6 @@
 # Patch Node runtime and vulnerable dependencies
 
-Status: active
+Status: completed
 Created: 2026-10-21
 Updated: 2026-10-21
 
@@ -43,8 +43,11 @@ Use the normal reviewed PR and protected release workflows. Web and runner have 
 - All 28 package/app typecheck owners passed after adapting Sharp's ESM factory and named test types. Root verification prerequisite guards passed; initial typecheck attempts exposed and guided those compatibility fixes.
 - Complexity guard passed: no new hotspots or complexity debt. Source changes are one runtime type alias and a base-image tag; no application logic change.
 - Private Temporal Render runtime pins are handled in a separate owned patch; public runtime protocols remain unchanged.
-- Required exact-head CI, ReviewGPT, merge and production rollout remain pending.
+- ReviewGPT round 1 passed at de798a088a0ce82bfa95acd982cd2f96991ff83c: no qualifying findings. The subsequent changes are isolated host-setup test expectations and this evidence record.
+- CI identified old escaped Node-version assertions in host setup dry-run tests. Updated only their expected version; all 63 setup tests pass locally.
+- Implementation is complete. Exact-head CI, merge and production rollout are operational follow-through tracked by PR #4289 and its private runtime companion; this record does not claim deployment.
 
 ## Changelog
 
 Internal security maintenance; no intended member-visible workflow change.
+Completed: 2026-10-21
