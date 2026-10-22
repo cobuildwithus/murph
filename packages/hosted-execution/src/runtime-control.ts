@@ -1,3 +1,6 @@
+import type { HostedGameChatBootstrapRequest, HostedGameChatBootstrapResponse } from "./game-bootstrap-control.ts";
+export { hostedGameChatBootstrapRequestSchema, hostedGameChatBootstrapResponseSchema } from "./game-bootstrap-control.ts";
+export type { HostedGameChatBootstrapRequest, HostedGameChatBootstrapResponse, HostedGameChatBootstrapResult } from "./game-bootstrap-control.ts";
 import type { HostedGameToolRequest, HostedGameToolResponse } from "./game-tools.ts";
 export { hostedGameToolRequestSchema, hostedGameToolResponseSchema, hostedGameUpdateSchema, hostedGameChatStateSchema } from "./game-tools.ts";
 export type { HostedGameToolRequest, HostedGameToolResponse, HostedGameUpdate } from "./game-tools.ts";
@@ -1570,6 +1573,7 @@ export type HostedRuntimeGroupParticipantDisplayNamesResult =
     };
 
 export type HostedRuntimeGroupToolRequest =
+  | HostedGameChatBootstrapRequest
   | HostedGameToolRequest
   | {
       action: "ask";
@@ -1770,6 +1774,7 @@ export type HostedRuntimeGroupJournalActionResult =
   | { status: "unavailable"; unavailableReason: string };
 
 export type HostedRuntimeGroupToolResponse =
+  | HostedGameChatBootstrapResponse
   | HostedGameToolResponse
   | {
       action: "ask";

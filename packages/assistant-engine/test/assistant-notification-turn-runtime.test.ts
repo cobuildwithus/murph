@@ -218,6 +218,7 @@ afterEach(() => {
   vi.doUnmock('../src/assistant/runtime-state-service.js')
   vi.doUnmock('../src/assistant/execution-context.js')
   vi.doUnmock('../src/assistant/outbox.js')
+  vi.doUnmock('../src/assistant/store.js')
   vi.doUnmock('../src/assistant/session-resolution.js')
   vi.doUnmock('../src/assistant/turn-plan.js')
   vi.doUnmock('../src/assistant/codex-turn-runner.js')
@@ -4754,6 +4755,8 @@ test('sendAssistantNotificationLocal keeps a queued model reply when the termina
     throw new Error('diagnostic sink unavailable')
   })
   mocks.createAssistantRuntimeStateService.mockImplementation(() => ({
+    transcripts: { append: vi.fn(async () => undefined) },
+    sessions: { save: vi.fn(async (session: AssistantSession) => session), resolve: vi.fn(async () => ({ session: providerSession })) },
     outbox: {
       deliverMessage,
     },
@@ -6276,6 +6279,8 @@ async function loadNotificationTurnHarness(input: {
         : 'clear' as const
     }),
     createAssistantRuntimeStateService: vi.fn(() => ({
+      transcripts: { append: vi.fn(async () => undefined) },
+      sessions: { save: vi.fn(async (session: AssistantSession) => session), resolve: vi.fn(async () => ({ session: input.providerResult.session })) },
       outbox: {
         deliverMessage,
       },
@@ -6515,3 +6520,71 @@ function createCodexCommandCompletedEvent(command: string): unknown {
     },
   }
 }
+
+
+describe('game bootstrap notification delivery', () => {
+  const message = 'Your daily walk challenge is on. Want reminders here for the first few days?'
+  const receipt = { status: 'sent' as const, message, deliveryId: 'bootstrap-delivery', chatId: 'provider-chat', accountLookupKey: 'synthetic-account', providerMessageId: 'provider-message', acceptedAt: '2026-04-08T00:00:00.000Z' }
+  const groupSession = () => createAssistantSession({ binding: { actorId: null, channel: 'linq', conversationKey: null, delivery: null, identityId: 'synthetic-group', threadId: null, threadIsDirect: false } })
+  const groupPlan = () => {
+    const plan = createSharedPlan()
+    plan.conversationPolicy.audience.threadIsDirect = false
+    return plan
+  }
+  const base = { executionContext: { hosted: { memberId: 'synthetic-group', userEnvKeys: [] } }, channel: 'linq', threadIsDirect: false, threadId: null, identityId: 'synthetic-group', instructions: 'Announce the accepted walking challenge once.', responsePolicy: { kind: 'require_send' as const }, deferCommitUntilDeliveryAccepted: true, vault: '/vaults/game-bootstrap' }
+
+  test('generates one first message and sends only through its trusted create receipt owner', async () => {
+    const session = groupSession()
+    const harness = await loadNotificationTurnHarness({ providerResult: createProviderResult({ response: JSON.stringify({ kind: 'send_message', privateSummary: 'Challenge kickoff.', text: message }), session }), sharedPlan: groupPlan(), turnId: 'turn-bootstrap' })
+    const recover = vi.fn(async () => ({ status: 'needs_message' as const }))
+    const send = vi.fn(async (text: string) => {
+      expect(text).toBe(message)
+      expect(harness.mocks.persistAssistantTurnAndSession).not.toHaveBeenCalled()
+      return receipt
+    })
+    const result = await harness.sendAssistantNotificationLocal({ ...base, gameChatBootstrap: { recover, send } })
+    expect(recover).toHaveBeenCalledOnce()
+    expect(send).toHaveBeenCalledOnce()
+    expect(harness.mocks.executeCodexTurnWithRecovery).toHaveBeenCalledOnce()
+    expect(harness.deliverMessage).not.toHaveBeenCalled()
+    expect(result.deliveryOutcome).toMatchObject({ kind: 'sent', intentId: null, delivery: { target: 'provider-chat', providerThreadId: 'provider-chat', sentAt: receipt.acceptedAt } })
+    expect(harness.mocks.persistAssistantTurnAndSession).toHaveBeenCalledOnce()
+  })
+
+  test('recovers the original accepted message without generation or a second create', async () => {
+    vi.doMock('../src/assistant/store.js', async (importOriginal) => ({
+      ...await importOriginal<typeof import('../src/assistant/store.js')>(),
+      listAssistantTranscriptTailEntries: vi.fn(async () => []),
+    }))
+    const session = groupSession()
+    const harness = await loadNotificationTurnHarness({ providerResult: createProviderResult({ response: 'must not generate', session }), sharedPlan: groupPlan(), turnId: 'turn-bootstrap-replay' })
+    const send = vi.fn(async () => receipt)
+    const result = await harness.sendAssistantNotificationLocal({ ...base, gameChatBootstrap: { recover: async () => receipt, send } })
+    expect(result.response).toBe(message)
+    expect(harness.mocks.executeCodexTurnWithRecovery).not.toHaveBeenCalled()
+    expect(send).not.toHaveBeenCalled()
+    expect(harness.deliverMessage).not.toHaveBeenCalled()
+  })
+
+  test('does not fall back to ordinary delivery if source authority expires after generation', async () => {
+    const session = groupSession()
+    const harness = await loadNotificationTurnHarness({ providerResult: createProviderResult({ response: JSON.stringify({ kind: 'send_message', privateSummary: 'Challenge kickoff.', text: message }), session }), sharedPlan: groupPlan(), turnId: 'turn-bootstrap-expired' })
+    const send = vi.fn(async () => ({ status: 'unavailable' as const }))
+    await expect(harness.sendAssistantNotificationLocal({ ...base, gameChatBootstrap: { recover: async () => ({ status: 'needs_message' }), send } })).rejects.toMatchObject({ code: 'GAME_CHAT_BOOTSTRAP_UNAVAILABLE' })
+    expect(send).toHaveBeenCalledOnce()
+    expect(harness.deliverMessage).not.toHaveBeenCalled()
+    expect(harness.mocks.persistAssistantTurnAndSession).not.toHaveBeenCalled()
+  })
+
+  test('consumes unavailable source without generation or delivery', async () => {
+    const session = groupSession()
+    const harness = await loadNotificationTurnHarness({ providerResult: createProviderResult({ response: 'must not generate', session }), sharedPlan: groupPlan(), turnId: 'turn-bootstrap-stale' })
+    const send = vi.fn(async () => receipt)
+    const result = await harness.sendAssistantNotificationLocal({ ...base, gameChatBootstrap: { recover: async () => ({ status: 'unavailable' }), send } })
+    expect(result.decision.kind).toBe('skip')
+    expect(result.response).toBeNull()
+    expect(harness.mocks.executeCodexTurnWithRecovery).not.toHaveBeenCalled()
+    expect(send).not.toHaveBeenCalled()
+    expect(harness.deliverMessage).not.toHaveBeenCalled()
+  })
+})
