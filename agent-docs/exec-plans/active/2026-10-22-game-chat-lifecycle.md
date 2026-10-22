@@ -105,3 +105,38 @@ claim. Its first assertion omitted the valid wording “agreement is recorded”
 the assertion now recognizes that acknowledgement without relaxing effect or
 privacy checks. No production prompt change was needed for that evidence.
 The source metadata parser was factored to preserve the complexity ceiling.
+
+## Round 1 remediation
+
+Both accepted findings are corrected. A skipped pre-generation reservation now
+returns terminal unavailable only when its lifecycle source, original template,
+container owner and lack of provider evidence prove that no message froze. A
+real PostgreSQL journey uses canonical negotiation/cancellation, actual mailbox
+publication and the lifecycle sweep, then successfully queues and sends one
+replacement in the same route-less container. The engine's unavailable-to-skip
+proof and an actual serialized runtime mailbox test show that the old wake
+finishes and its successor runs. Existing session-continuity coverage remains.
+
+New generated text runs the transport-owned first-message validator before line
+capacity or frozen dispatch claims. The provider entry reuses that exact helper.
+Inline links, plain HTTP links, URL-only and multiple-link outputs leave no
+frozen payload or capacity claim; retry with valid generated text creates and
+attaches one room. Uncertain provider effects still replay identical frozen text
+and identity. The formatter receives the actual opening-message link constraints;
+canonical game words are never rewritten. Test KMS and provider ports remain
+synthetic; the database/mailbox/receipt/route owners are real in the PostgreSQL
+journey. Runtime queue ordering is verified separately through its production
+state owner, with existing engine terminal-result coverage at the boundary.
+
+Remediation verification: 113 Web bootstrap/lifecycle/transport tests, one
+composed PostgreSQL recovery journey, one serialized runtime queue regression,
+and four engine bootstrap boundary tests passed. Web, engine and runtime
+typechecks, scoped lint, docs drift and complexity passed. The real local-Codex
+linked-task kickoff and contextual yes journey is Ready: one create, one model
+turn, no ordinary duplicate send, no inline URL, unchanged canonical task link,
+and a follow-up asking for reminder time/duration. The existing date assertion
+was corrected to accept the actual first date plus seven calendar days as well
+as an explicit date range; no start-date, link, delivery or consent guarantee was
+relaxed. The separate CI remediation adds exact migration admission and fixes
+existing game-access fixtures; its owner reports 414 passing focused tests and
+local PostgreSQL old-writer compatibility proof.

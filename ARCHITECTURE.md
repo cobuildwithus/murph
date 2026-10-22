@@ -5570,6 +5570,11 @@ a 3-second roster read. This caps provider waits at 76 seconds within the
 failed first signals are recovered by re-signalling the exact unconsumed mailbox
 pointer. Once consumed, the runtime and ordinary outbox own retry. Proposal
 recovery compares the current proposal's hashed key, and retires superseded work.
+A skipped, empty pre-generation receipt owned by that container returns terminal
+unavailable so its ordered runtime wake can complete and release successors.
+That exception requires the original lifecycle reservation template and no
+sender, payload or provider receipt evidence; frozen effects keep their existing
+reconciliation contract.
 Provider lookup and encryption stay outside database transactions. Existing-room
 delivery rechecks the primary route, exact pair and source before provider dispatch.
 Only that validated game notification bypasses iMessage inactivity; other route,
@@ -5577,6 +5582,11 @@ runtime, health and dispatch fences remain authoritative.
 
 For a new room, `chat-bootstrap.ts` prepares a real group container and mailbox
 without a provider thread ID. The group runtime generates one first message.
+The engine gives this formatter the first-message URL constraints. The signed
+callback applies the same pure Linq text preflight as provider creation before
+claiming line capacity or freezing anything. Invalid output can regenerate on
+the existing event; task and stake words remain unchanged. Once a provider effect
+may have begun, corrected text can never replace its immutable frozen request.
 A signed host-only callback freezes its exact text, players and sending line in
 the same encrypted delivery receipt before provider creation. An uncertain result
 replays only that frozen request and idempotency key, never a new group identity

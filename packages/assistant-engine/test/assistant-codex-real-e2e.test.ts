@@ -45305,7 +45305,7 @@ describeRealCodex('real Codex game bootstrap e2e', () => {
       if (!modelTarget) throw new Error('Expected real Codex target.')
       const game = {
         id: 'synthetic-game', status: 'live' as const, lengthDays: 7, startsOn: null,
-        terms: { n: 1, fromDay: 0, checkInKind: 'photo' as const, tasks: [{ seat: 0, text: 'Walk for 20 minutes' }, { seat: 1, text: 'Walk for 20 minutes' }], schedule: { days: [0, 1, 2, 3, 4] }, stakes: [{ kind: 'winner_gets' as const, item: 'Winner picks brunch' }] },
+        terms: { n: 1, fromDay: 0, checkInKind: 'photo' as const, tasks: [{ seat: 0, text: 'Walk for 20 minutes using https://example.org/walking-plan' }, { seat: 1, text: 'Walk for 20 minutes using https://example.org/walking-plan' }], schedule: { days: [0, 1, 2, 3, 4] }, stakes: [{ kind: 'winner_gets' as const, item: 'Winner picks brunch' }] },
         players: [{ memberId: 'synthetic-player-a', seat: 0, firstName: 'Ava', dayOne: dayOne, timeZone: 'America/New_York' }, { memberId: 'synthetic-player-b', seat: 1, firstName: 'Leo', dayOne: dayOne, timeZone: 'America/New_York' }],
         pendingChange: null, changeControls: { canStartNow: false, canEdit: true, canEditSchedule: true, canEditStartDate: false, editableFromDay: 1 },
       }
@@ -45346,12 +45346,17 @@ describeRealCodex('real Codex game bootstrap e2e', () => {
       expect((await listAutomations({ vaultRoot: workingDirectory })).items).toEqual([])
       const reply = first.response ?? ''
       expect(reply).toContain(startLabel)
-      expect(reply).toMatch(new RegExp(`(?:through|to|until|[–—-])\\s*(?:${endMonth}\\s+)?${endDay}\\b`, 'iu'))
+      // Both an explicit range and the actual first date plus total calendar
+      // duration express the agreed dates without requiring one copy format.
+      const exactRange = new RegExp(`(?:through|to|until|[–—-])\\s*(?:${endMonth}\\s+)?${endDay}\\b`, 'iu')
+      expect(exactRange.test(reply) || /(?:7|seven)[ -](?:calendar[ -])?day/iu.test(reply)).toBe(true)
       expect(reply).not.toMatch(/start(?:ing|s)? (?:today|tomorrow)/iu)
       expect(reply).toMatch(/what time|which time|time works/iu)
       expect(reply).toMatch(/how many days/iu)
       expect(reply).toMatch(/walk/iu)
       expect(reply).toMatch(/20|twenty/iu)
+      expect(reply).not.toMatch(/https?:\/\//iu)
+      expect(game.terms.tasks[0]!.text).toContain('https://example.org/walking-plan')
       expect(reply).toMatch(/weekday|mon(?:day)?.*fri/iu)
       expect(reply).toMatch(/brunch/iu)
       expect(reply).toMatch(/remind/iu)

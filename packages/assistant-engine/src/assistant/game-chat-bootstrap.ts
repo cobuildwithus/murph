@@ -54,7 +54,9 @@ export async function prepareAssistantGameBootstrap(input: NotificationInput): P
     throw new TypeError('Game bootstrap requires a route-less group notification.')
   }
   const recovery = await bootstrap.recover()
-  const prepared = { ...input, deferCommitUntilDeliveryAccepted: true }
+  const prepared = { ...input, deferCommitUntilDeliveryAccepted: true,
+    instructions: `${input.instructions}\nThis is the first message in a new iMessage group. The transport cannot send HTTP(S) URLs inside its opening text. Prefer describing the task without copying links; the original challenge details remain unchanged. If a link is essential, use exactly one complete HTTPS URL at the very end, after all other text, with no other URL anywhere. Never send a URL alone.`,
+  }
   if (recovery.status !== 'sent') return { input: prepared, recovery }
   return { recovery, input: {
     ...prepared,
