@@ -11,8 +11,9 @@ vi.mock("@/src/lib/game/chat-delivery", () => ({ deliverGameChangeProposal: deli
 const enabled = process.env.MURPH_TEST_POSTGRES_CONCURRENCY === "1";
 if (enabled && !/^postgres(?:ql)?:\/\/[^/]*@(?:127\.0\.0\.1|localhost):\d+\/murph_test_/u.test(process.env.DATABASE_URL ?? "")) throw new Error("Game changes proof needs an isolated local test database.");
 const members: string[] = [];
-async function run(actorMemberId: string, command: GameCommand, options: { chatContainerMemberId?: string; now?: Date; beforeMutationTx?: () => Promise<void> } = {}) {
-  return runGameCommand({ actorMemberId, command, ...options });
+const roomPlayers = new Map<string, readonly string[]>();
+async function run(actorMemberId: string, command: GameCommand, options: { chatContainerMemberId?: string; chatPlayerMemberIds?: readonly string[]; now?: Date; beforeMutationTx?: () => Promise<void> } = {}) {
+  return runGameCommand({ actorMemberId, command, chatPlayerMemberIds: options.chatContainerMemberId ? roomPlayers.get(options.chatContainerMemberId) : undefined, ...options });
 }
 async function setup(schedule: GameSchedule = { days: [0,1,2,3,4] }) {
   const a = `game_a_${randomUUID()}`, b = `game_b_${randomUUID()}`, room = `game_room_${randomUUID()}`;
@@ -26,12 +27,43 @@ async function setup(schedule: GameSchedule = { days: [0,1,2,3,4] }) {
   const joined = await run(b,{type:"join",token:created.game.inviteToken,termsVersion:1,timeZone:"America/New_York"});
   if (!joined.ok) throw new Error("Fixture join failed");
   await getPrisma().game.update({where:{id:gameId},data:{chatContainerMemberId:room}});
+  roomPlayers.set(room, [a,b]);
   return {a,b,room,gameId};
 }
 const fence = async () => {};
 
 describe.skipIf(!enabled)("weekly game change serialization against PostgreSQL", () => {
   afterAll(async () => { await getPrisma().hostedMember.deleteMany({where:{id:{in:members}}}); });
+  it("reserves acceptance and app proposals once, but never a second chat announcement", async () => {
+    const { a,b,room,gameId } = await setup();
+    const db = getPrisma();
+    const kickoffKey = createHostedLinqDeliveryIdempotencyLookupKey(`game-started:${gameId}`)!;
+    const kickoff = await db.hostedLinqDelivery.findUniqueOrThrow({ where: { idempotencyKey: kickoffKey } });
+    expect(kickoff).toMatchObject({ source: "game_lifecycle", sourceRef: gameId, template: "game_started", status: "awaiting_generation", payloadCiphertext: null, acceptedAt: null });
+    const proposalId = randomUUID();
+    const command = { type: "proposeChange" as const, gameId, proposalId, expectedTermsVersion: 1, change: { kind: "edit" as const, lengthDays: 10 } };
+    expect((await run(a, command)).ok).toBe(true);
+    expect((await run(a, command)).ok).toBe(true);
+    const key = createHostedLinqDeliveryIdempotencyLookupKey(`game-change:${gameId}:${proposalId}`)!;
+    expect(await db.hostedLinqDelivery.count({ where: { idempotencyKey: key } })).toBe(1);
+    expect(await db.hostedLinqDelivery.findUnique({ where: { idempotencyKey: key } })).toMatchObject({ template: "game_proposal", status: "awaiting_generation", payloadCiphertext: null });
+    expect((await run(a, { type: "respondChange", gameId, proposalId, decision: "cancel" })).ok).toBe(true);
+    delivery.mockClear();
+    const chatProposalId = randomUUID();
+    const chat = await run(b, { ...command, proposalId: chatProposalId }, { chatContainerMemberId: room, beforeMutationTx: fence });
+    expect(chat).toEqual({ ok: true, game: null });
+    expect((await readGame(gameId,b))?.pendingChange).toMatchObject({ origin: "chat", deliveryStatus: "conversation", deliveryRetryable: false });
+    expect(delivery).not.toHaveBeenCalled();
+    expect(await db.hostedLinqDelivery.count({ where: { idempotencyKey: createHostedLinqDeliveryIdempotencyLookupKey(`game-change:${gameId}:${chatProposalId}`)! } })).toBe(0);
+  });
+  it("allows a host-proven same-pair alternate room without moving the primary destination", async () => {
+    const { a,b,room,gameId } = await setup(); const proposalId = randomUUID();
+    expect((await run(a, { type: "proposeChange", gameId, proposalId, expectedTermsVersion: 1, change: { kind: "edit", lengthDays: 10 } })).ok).toBe(true);
+    expect(await run(b, { type: "respondChange", gameId, proposalId, decision: "approve" }, { chatContainerMemberId: "alternate-room", chatPlayerMemberIds: [a,b], beforeMutationTx: fence })).toMatchObject({ ok: true });
+    expect((await readGame(gameId,b))?.lengthDays).toBe(10);
+    expect(await getPrisma().game.findUnique({ where: { id: gameId }, select: { chatContainerMemberId: true } })).toEqual({ chatContainerMemberId: room });
+    expect((await readGameChatState("alternate-room", [a,b])).games.map((game) => game.id)).toContain(gameId);
+  });
   it("needs the other player in the bound chat and applies once across retries", async () => {
     const {a,b,room,gameId}=await setup(); const proposalId=randomUUID();
     const proposed=await run(a,{type:"proposeChange",gameId,proposalId,expectedTermsVersion:1,change:{kind:"edit",schedule:{days:[5,6]},lengthDays:14}});
@@ -119,8 +151,8 @@ describe.skipIf(!enabled)("weekly game change serialization against PostgreSQL",
   it("projects terminal delivery honestly and lets only the proposer cancel from the app", async () => {
     const {a,b,room,gameId}=await setup(); const proposalId=randomUUID();
     await run(a,{type:"proposeChange",gameId,proposalId,expectedTermsVersion:1,change:{kind:"edit",lengthDays:14}});
-    const deliveryId=randomUUID();
-    await getPrisma().hostedLinqDelivery.create({data:{id:deliveryId,idempotencyKey:createHostedLinqDeliveryIdempotencyLookupKey(`game-change:${gameId}:${proposalId}`),source:"game_test",status:"failed",attemptedAt:new Date()}});
+    const receipt = await getPrisma().hostedLinqDelivery.update({where:{idempotencyKey:createHostedLinqDeliveryIdempotencyLookupKey(`game-change:${gameId}:${proposalId}`)!},data:{source:"game_test",status:"failed",attemptedAt:new Date()}});
+    const deliveryId=receipt.id;
     try {
       expect((await readGame(gameId,a))?.pendingChange).toMatchObject({deliveryStatus:"failed",deliveryRetryable:false});
       const command={type:"respondChange" as const,gameId,proposalId,decision:"cancel" as const};
@@ -132,7 +164,7 @@ describe.skipIf(!enabled)("weekly game change serialization against PostgreSQL",
       expect((await readGameChatState(room,[a,"unrelated_player"])).games).toEqual([]);
     } finally { await getPrisma().hostedLinqDelivery.delete({where:{id:deliveryId}}); }
   });
-  it("does not report a neutral chat opener as delivery of the pending proposal", async () => {
+  it("does not report an unrelated legacy chat receipt as delivery of the pending proposal", async () => {
     const {a,gameId}=await setup(); const proposalId=randomUUID();
     await getPrisma().game.update({where:{id:gameId},data:{chatContainerMemberId:null}});
     delivery.mockRejectedValueOnce(new Error("binding unavailable"));

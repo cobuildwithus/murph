@@ -84,6 +84,20 @@ describe("hosted group tool route", () => {
     }));
   });
 
+  it("forwards the signed game bootstrap runtime identity without accepting a recipient", async () => {
+    const body = { action: "game_chat_bootstrap", gameId: "synthetic-game", eventId: "synthetic-event", operation: "recover" };
+    mocks.handleTool.mockResolvedValue({ action: "game_chat_bootstrap", result: { status: "needs_message" } });
+    const response = await route.POST(new Request(`https://web.example.test${HOSTED_RUNTIME_GROUP_TOOL_PATH}?runtimeAuthority=1&runtimeAttempt=attempt-synthetic&runtimeGeneration=7&runtimeWorkspaceVersion=3`, {
+      method: "POST", body: JSON.stringify(body), headers: { "content-type": "application/json" },
+    }));
+    expect(response.status).toBe(200);
+    expect(mocks.handleTool).toHaveBeenCalledWith(expect.objectContaining({
+      memberId: "member_group_runtime", request: body,
+      runtimeIdentity: { userId: "member_group_runtime", attemptId: "attempt-synthetic", generation: "7", workspaceVersion: "3" },
+    }));
+    expect(await response.json()).toMatchObject({ action: "game_chat_bootstrap", result: { status: "needs_message" } });
+  });
+
   it("accepts a valid read_shared callback larger than the former 8 KiB limit", async () => {
     const body = {
       action: "read_shared",

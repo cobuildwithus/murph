@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   dispatchHostedGroupSponsorshipRefills: vi.fn(),
   drainHostedGroupJoinOutreachSweep: vi.fn(),
   getPrisma: vi.fn(),
+  drainGameChatLifecycle: vi.fn(),
   reconcileDueHostedStripeEvents: vi.fn(),
   requireVercelCronRequest: vi.fn(),
 }));
@@ -33,6 +34,8 @@ vi.mock("@/src/lib/hosted-onboarding/stripe-event-reconciliation", () => ({
   reconcileDueHostedStripeEvents: mocks.reconcileDueHostedStripeEvents,
 }));
 
+vi.mock("@/src/lib/game/chat-lifecycle", () => ({ drainGameChatLifecycle: mocks.drainGameChatLifecycle }));
+
 vi.mock("@/src/lib/prisma", () => ({
   getPrisma: mocks.getPrisma,
 }));
@@ -51,6 +54,7 @@ describe("device-sync root route", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.drainGameChatLifecycle.mockResolvedValue({ attempted: 0, queued: 0, deferred: 0 });
     vi.stubEnv(
       "HOSTED_DEVICE_ROUTING_INDEX_KEY",
       "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -161,6 +165,7 @@ describe("hosted onboarding Stripe cron route", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.drainGameChatLifecycle.mockResolvedValue({ attempted: 0, queued: 0, deferred: 0 });
     mocks.getPrisma.mockReturnValue({ label: "test-prisma" });
     mocks.dispatchHostedGroupSponsorshipRefills.mockResolvedValue({
       attempted: 0,
@@ -207,6 +212,7 @@ describe("hosted onboarding Stripe cron route", () => {
         Number.POSITIVE_INFINITY,
     );
     await expect(response.json()).resolves.toEqual({
+      gameChatLifecycle: { attempted: 0, queued: 0, deferred: 0 },
       groupJoinOutreach: { attempted: 0, results: [], sent: 0 },
       groupSponsorshipRefills: {
         attempted: 0,
@@ -234,6 +240,7 @@ describe("hosted onboarding Stripe cron route", () => {
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
+      gameChatLifecycle: { attempted: 0, queued: 0, deferred: 0 },
       groupJoinOutreach: { kind: "failed" },
       groupSponsorshipRefills: {
         attempted: 0,

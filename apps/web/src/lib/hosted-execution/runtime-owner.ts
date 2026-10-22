@@ -4,7 +4,8 @@ import { randomUUID } from "node:crypto";
 import { Prisma, type HostedRuntimeOwner, type PrismaClient } from "@prisma/client";
 import type { HostedWorkspaceInvocationProcessingMode } from "@murphai/hosted-execution/runtime-control";
 
-import { activeHostedMemberAccessWithParticipantsWhere } from "../hosted-onboarding/member-access";
+import { activeHostedMemberAccessWithParticipantsWhere, readGameChatAllowanceBeneficiary } from "../hosted-onboarding/member-access";
+import { isGameEnabled } from "../game/access";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import { lockHostedMemberRow } from "../hosted-onboarding/shared";
 import { hostedHealthDataConsentNotRevokedWhere } from "../legal/consent";
@@ -33,7 +34,9 @@ export async function claimHostedRuntime(input: {
     const cutover = await lockHostedRuntimeMemberCutoverTx(tx, input.userId);
     if (cutover !== "postgres") return { cutover, status: "blocked", reason: "cutover" };
     await lockHostedMemberRow(tx, input.userId);
-    if (!await runtimeAdmissionAllowedTx(tx, input.userId, input.processingMode)) {
+    const now = input.now ?? new Date();
+    const admission = await readRuntimeAdmissionTx(tx, input.userId, input.processingMode, now);
+    if (!admission) {
       return { cutover, status: "blocked", reason: "admission" };
     }
     const existing = await lockHostedRuntimeOwnerRowTx(tx, input.userId);
@@ -52,7 +55,8 @@ export async function claimHostedRuntime(input: {
       }
       return { cutover, status: "existing", owner: existing };
     }
-    const now = input.now ?? new Date();
+    // Attribution belongs to the admitted invocation, not later game/room state.
+    // Existing owners above retain their frozen beneficiary on every retry.
     const attemptId = `rt_${randomUUID()}`;
     const data = {
       generation: (existing?.generation ?? 0n) + 1n,
@@ -67,6 +71,7 @@ export async function claimHostedRuntime(input: {
       acceptedAt: null,
       lastErrorCode: null,
       platformAiUsageAllowed: false,
+      allowanceBeneficiaryMemberId: admission.allowanceBeneficiaryMemberId,
       workspaceVersion: null,
       providerEgressTokenHash: null,
     };
@@ -108,13 +113,23 @@ export async function prepareHostedRuntimeLaunch(input: {
     if (owner.phase !== "starting" || !input.runnerContainerName || workspaceVersion < 0n) {
       throw staleRuntimeError();
     }
+    let platformAiUsageAllowed = input.platformAiUsageAllowed;
+    if (platformAiUsageAllowed && owner.allowanceBeneficiaryMemberId !== null) {
+      const { readHostedAiUsageGateForFrozenBeneficiary } = await import("./usage-allowance");
+      // Workspace preparation may have observed newer sponsorship or routing.
+      // Charge and admit against the same frozen beneficiary, without granting
+      // permission when the caller already denied source access or consent.
+      platformAiUsageAllowed = (await readHostedAiUsageGateForFrozenBeneficiary({
+        beneficiaryMemberId: owner.allowanceBeneficiaryMemberId, prisma: tx,
+      })).allowed;
+    }
     return tx.hostedRuntimeOwner.update({
       where: { userId: input.identity.userId },
       data: {
         runnerContainerName: input.runnerContainerName,
         workspaceVersion,
         providerEgressTokenHash: input.providerEgressTokenHash,
-        platformAiUsageAllowed: input.platformAiUsageAllowed,
+        platformAiUsageAllowed,
         processingMode: input.processingMode ?? owner.processingMode,
       },
     });
@@ -305,11 +320,12 @@ export async function revokeHostedRuntimeAiUsageTx(
   });
 }
 
-async function runtimeAdmissionAllowedTx(
+async function readRuntimeAdmissionTx(
   tx: OwnerTransaction,
   userId: string,
   processingMode: string | null,
-): Promise<boolean> {
+  now: Date,
+): Promise<{ allowanceBeneficiaryMemberId: string | null } | null> {
   // Keep this statement after the member lock: a waiting claim must observe
   // consent withdrawal committed by the previous lock holder.
   const member = await tx.hostedMember.findUnique({
@@ -319,11 +335,21 @@ async function runtimeAdmissionAllowedTx(
       suspendedAt: null,
       AND: [
         hostedHealthDataConsentNotRevokedWhere(),
-        ...(processingMode === "inbox_media_retention" ? [] : [activeHostedMemberAccessWithParticipantsWhere()]),
+        ...(processingMode === "inbox_media_retention" ? [] : [activeHostedMemberAccessWithParticipantsWhere(now, false)]),
       ],
     },
   });
-  return member !== null;
+  if (member) return { allowanceBeneficiaryMemberId: null };
+  if (processingMode === "inbox_media_retention" || !isGameEnabled()) return null;
+  // Exact-pair game access is a correlated read rather than a Prisma predicate.
+  // Preserve the ordinary fast path and the source member's consent boundary.
+  const eligibleMember = await tx.hostedMember.findUnique({
+    select: { id: true },
+    where: { id: userId, suspendedAt: null, threadContainer: { isNot: null }, AND: [hostedHealthDataConsentNotRevokedWhere()] },
+  });
+  if (!eligibleMember) return null;
+  const allowanceBeneficiaryMemberId = await readGameChatAllowanceBeneficiary({ memberId: userId, now, prisma: tx });
+  return allowanceBeneficiaryMemberId === null ? null : { allowanceBeneficiaryMemberId };
 }
 
 const runtimeOwnerColumns = Prisma.sql`
@@ -333,6 +359,7 @@ const runtimeOwnerColumns = Prisma.sql`
   owner.runner_container_name AS "runnerContainerName", owner.workspace_version AS "workspaceVersion",
   owner.provider_egress_token_hash AS "providerEgressTokenHash",
   owner.platform_ai_usage_allowed AS "platformAiUsageAllowed", owner.started_at AS "startedAt",
+  owner.allowance_beneficiary_member_id AS "allowanceBeneficiaryMemberId",
   owner.accepted_at AS "acceptedAt", owner.completed_at AS "completedAt",
   owner.failure_count AS "failureCount", owner.last_error_code AS "lastErrorCode", owner.updated_at AS "updatedAt"
 `;

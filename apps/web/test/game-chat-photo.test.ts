@@ -17,7 +17,7 @@ function wake(): HostedExecutionConversationMessageWake {
 }
 const authorize = vi.fn<(tx: object, messageRef: string) => Promise<{ actor: string; wake: HostedExecutionConversationMessageWake }>>().mockResolvedValue({ actor: "player_synthetic", wake: wake() });
 function input(operation: "offer" | "save" | "dismiss" = "offer", explicit = true) {
-  return { actor: "player_synthetic", containerMemberId: "room_synthetic", messageRef: explicit ? ref : yesRef, authorize,
+  return { actor: "player_synthetic", containerMemberId: "room_synthetic", playerMemberIds: ["player_synthetic", "other_player"], messageRef: explicit ? ref : yesRef, authorize,
     photo: { operation, gameId: "game_synthetic", ...(explicit ? { sourceMessageRef: ref, attachmentOrdinal: 1 } : {}) } };
 }
 describe("game photo accepted-source bridge", () => {
@@ -49,7 +49,7 @@ describe("game photo accepted-source bridge", () => {
     m.profile.mockResolvedValue({ chatPhotoIntroducedAt: now, chatPhotoOffer: offer });
     expect(await handleGameChatPhoto(input("save", false))).toEqual({ status: "ok", photoOutcome: "saved" });
     expect(authorize).toHaveBeenCalledWith(tx, ref); expect(authorize).toHaveBeenCalledWith(tx, yesRef);
-    expect(m.run).toHaveBeenCalledWith(expect.objectContaining({ actorMemberId: "player_synthetic", command: expect.objectContaining({ type: "post", kind: "photo", mediaKeys: ["owned/key.jpg"] }), postGuard: { dayIndex: 0, replaceEntryId: null } }));
+    expect(m.run).toHaveBeenCalledWith(expect.objectContaining({ actorMemberId: "player_synthetic", chatPlayerMemberIds: ["player_synthetic", "other_player"], command: expect.objectContaining({ type: "post", kind: "photo", mediaKeys: ["owned/key.jpg"] }), postGuard: { dayIndex: 0, replaceEntryId: null } }));
   });
   it.each([
     { expiresAt: "2030-03-04T11:59:00Z" }, { containerMemberId: "other_room" }, { gameId: "other_game" }, { dayIndex: 1 }, { resolutionMessageRef: "another_yes" },

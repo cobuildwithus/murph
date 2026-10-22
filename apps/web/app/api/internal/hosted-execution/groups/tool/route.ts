@@ -72,7 +72,7 @@ export const POST = withJsonError(async (request: Request) => {
         || membershipInventoryProtocol
           === HOSTED_RUNTIME_GROUP_MEMBERSHIP_INVENTORY_PROTOCOL_LEGACY_VALUE,
       memberId,
-      ...(body.action === "read_game" || body.action === "update_game" || body.action === "game_photo"
+      ...(body.action === "read_game" || body.action === "update_game" || body.action === "game_photo" || body.action === "game_chat_bootstrap"
         ? { runtimeIdentity: runtimeAuthority ? { ...runtimeAuthority, userId: memberId } : null }
         : {}),
       request: body,

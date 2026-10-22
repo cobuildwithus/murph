@@ -664,6 +664,8 @@ function cloneAssistantNotificationPayload(
     ...(value.firstContact === undefined
       ? {}
       : { firstContact: value.firstContact ? { ...value.firstContact } : null }),
+    ...(value.gameChatBootstrap === undefined
+      ? {} : { gameChatBootstrap: { ...value.gameChatBootstrap } }),
     ...(value.groupContextHandoff === undefined
       ? {}
       : { groupContextHandoff: { ...value.groupContextHandoff } }),

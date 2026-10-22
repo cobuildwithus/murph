@@ -15,11 +15,18 @@ import {
 import {
   parseHostedRuntimeUsageRecordRequest,
 } from "@murphai/hosted-execution/parsers";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const usageCreditMocks = vi.hoisted(() => ({
   admitHostedGroupSponsorshipRefillTx: vi.fn(),
   settleHostedUsageCreditForUsageTx: vi.fn(),
+}));
+
+// These cases exercise ordinary billing; game-funded rooms have PostgreSQL
+// proofs over the exact pair and primary-room ledger.
+vi.mock("@/src/lib/game/chat-access", () => ({
+  GAME_CHAT_SETTLED_ACCESS_MS: 7 * 86_400_000,
+  readGameChatFundingRooms: vi.fn(async () => new Map()),
 }));
 
 // An allowance read must not initialize Family billing, email or signaling workflows.
@@ -58,6 +65,7 @@ const FAMILY_EDGE_ALLOWANCE_USD_MICROS = 15_200_000n;
 const FAMILY_MAX_ALLOWANCE_USD_MICROS = 39_200_000n;
 
 beforeEach(() => {
+  vi.stubEnv("MURPH_GAME_ENABLED", "false");
   usageCreditMocks.admitHostedGroupSponsorshipRefillTx.mockReset();
   usageCreditMocks.admitHostedGroupSponsorshipRefillTx.mockResolvedValue(null);
   usageCreditMocks.settleHostedUsageCreditForUsageTx.mockReset();
@@ -70,6 +78,8 @@ beforeEach(() => {
     }),
   );
 });
+
+afterEach(() => vi.unstubAllEnvs());
 
 const BASE_USAGE_RECORD = {
   apiKeyEnv: "OPENAI_API_KEY",

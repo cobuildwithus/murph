@@ -58,6 +58,7 @@ export interface CliFailureTiming {
   count: number;
   validation?: CliValidationDiagnostic;
   rejection?: CliTimingRejection | CliTimingParseRejection | CliTimingFilterRejection;
+  sourceCause?: CliTimingSourceCause;
 }
 export function cliTimingFailureCode(value: unknown, command?: unknown): CliFailureTiming["code"] {
   // Only the registered meal-photo removal owner is qualified for this code.
@@ -189,10 +190,60 @@ export function cliTimingRejectionFailure(
   return rejection ? { rejection } : {};
 }
 
+// Existing typed causes hidden by the legacy "unknown" code. Only the reached
+// meal mutation and food/research response owners belong here, not all provider
+// errors. Keep these optional so older readers preserve failures and timing.
+const sourceCauseOwners = [
+  ["meal edit", ["contract_invalid", "invalid_timestamp", "vault_error"]],
+  ["meal remove-photo", ["vault_error"]],
+  ["food search-labels-batch", [
+    "food_labels_api_auth_failed", "food_labels_api_rate_limited", "food_labels_api_request_timed_out",
+    "food_labels_api_service_unavailable", "food_labels_api_response_failed",
+    "food_labels_api_response_body_timed_out", "food_labels_api_response_body_failed", "food_labels_api_invalid_response",
+  ]],
+  ["research scout-batch", [
+    "research_exa_auth_failed", "research_exa_rate_limited", "research_exa_unavailable",
+    "research_exa_invalid_response", "research_exa_request_rejected", "research_exa_timeout",
+  ]],
+] as const;
+const mealPhotoVaultCodes = [
+  "MEAL_PHOTO_RETENTION_PRECONDITION_FAILED", "MEAL_PHOTO_RETENTION_MANIFEST_INVALID",
+] as const;
+export interface CliTimingSourceCause {
+  code: typeof sourceCauseOwners[number][1][number];
+  vaultCode?: typeof mealPhotoVaultCodes[number];
+}
+
+/** Select fresh finite detail from an original error's context or a wire failure.
+ * Wire detail requires an own outer code of exactly "unknown", before fallback.
+ * Unknown/malformed optional data never invalidates the existing observation.
+ */
+export function cliTimingSourceCauseFailure(
+  command: unknown, code: unknown, source: unknown, property: "context" | "sourceCause",
+): Pick<CliFailureTiming, "sourceCause"> {
+  const allowed = sourceCauseOwners.find(([name]) => name === command)?.[1];
+  if (!allowed || (property === "sourceCause" && code !== "unknown")) return {};
+  try {
+    const detail = property === "sourceCause" ? readCliTimingOwnData(source, property) : undefined;
+    if (property === "sourceCause" && !record(detail)) return {};
+    const rawCode = property === "context" ? code : readCliTimingOwnData(detail, "code");
+    const selected = allowed.find((candidate) => candidate === rawCode);
+    if (!selected) return {};
+    let vaultCode: CliTimingSourceCause["vaultCode"];
+    if (command === "meal remove-photo" && selected === "vault_error") {
+      const context = property === "context" ? readCliTimingOwnData(source, "context") : detail;
+      const rawVaultCode = record(context) ? readCliTimingOwnData(context, "vaultCode") : undefined;
+      vaultCode = mealPhotoVaultCodes.find((candidate) => candidate === rawVaultCode);
+    }
+    return { sourceCause: { code: selected, ...(vaultCode ? { vaultCode } : {}) } };
+  } catch { return {}; }
+}
+
 function sameFailureVariant(left: CliFailureTiming, right: CliFailureTiming): boolean {
   return left.code === right.code && left.stage === right.stage &&
     left.validation?.field === right.validation?.field && left.validation?.code === right.validation?.code &&
-    left.validation?.missing === right.validation?.missing && left.rejection === right.rejection;
+    left.validation?.missing === right.validation?.missing && left.rejection === right.rejection &&
+    left.sourceCause?.code === right.sourceCause?.code && left.sourceCause?.vaultCode === right.sourceCause?.vaultCode;
 }
 
 
@@ -397,11 +448,13 @@ function normalizeCommandFailures(command: {
       observations += count;
       // Nonnegative integer counts stay safe while bounded by the safe call count.
       if (observations > calls) return {};
-      const code = cliTimingFailureCode(readCliTimingOwnData(entry, "code"), name);
+      const rawCode = readCliTimingOwnData(entry, "code");
+      const code = cliTimingFailureCode(rawCode, name);
       const stage = cliTimingFailureStage(readCliTimingOwnData(entry, "stage"));
       const failure: CliFailureTiming = { code, stage, count,
         ...cliTimingValidationFailure(name, code, entry, "validation"),
-        ...cliTimingRejectionFailure(name, code, entry, "rejection") };
+        ...cliTimingRejectionFailure(name, code, entry, "rejection"),
+        ...cliTimingSourceCauseFailure(name, rawCode, entry, "sourceCause") };
       const current = failures.find((item) => sameFailureVariant(item, failure));
       if (current) current.count += count;
       else failures.push(failure);

@@ -1,3 +1,5 @@
+import { deliverAssistantGameBootstrapMessage, prepareAssistantGameBootstrap, recoverAssistantGameBootstrapResult } from './game-chat-bootstrap.js'
+import type { HostedGameChatBootstrapResult } from '@murphai/hosted-execution/runtime-control'
 import { resolveUsageOptimizerFeedbackScope, type UsageOptimizerFeedbackScope } from './weekly-usage-optimizer.js'
 import { prepareAssistantFollowUpEvaluationInput } from './follow-ups.js'
 import * as z from '@murphai/contracts/zod-runtime'
@@ -288,6 +290,11 @@ export interface AssistantNotificationInput
       | 'turnTrigger'
       | 'workingDirectory'
     > {
+  /** Host-injected source-specific delivery; never accepted from model/wire input. */
+  gameChatBootstrap?: {
+    recover(): Promise<HostedGameChatBootstrapResult>
+    send(text: string): Promise<HostedGameChatBootstrapResult>
+  }
   deliveryDedupeToken?: string | null
   beforeToolExecution?: (() => Promise<void> | void) | null
   beforeDelivery?: ((context: AssistantNotificationCommitContext) => Promise<void> | void) | null
@@ -343,6 +350,8 @@ export async function sendAssistantNotificationLocal(
     abortSignal: input.abortSignal,
     vault: input.vault,
     run: async () => {
+      const bootstrap = await prepareAssistantGameBootstrap(input)
+      input = bootstrap.input
       const welcome = await prepareAssistantChannelWelcome(input)
       if (welcome.recovered) return welcome.recovered
       input = welcome.input
@@ -371,6 +380,8 @@ export async function sendAssistantNotificationLocal(
               defaults,
               message: resolutionMessageInput,
             })
+      const bootstrapRecovery = await recoverAssistantGameBootstrapResult({ notification: input, recovery: bootstrap.recovery, session: resolved.session })
+      if (bootstrapRecovery) return bootstrapRecovery
       const preparedInput = await prepareAssistantCronNotificationInput(input, {
         sessionId: resolved.session.sessionId,
       })
@@ -486,17 +497,7 @@ export async function sendAssistantNotificationLocal(
       const turnCreatedAt = new Date().toISOString()
       const progressDelivery = null
       let committedDeliveryOutcomeKind: AssistantDeliveryOutcome['kind'] | null = null
-      const typingIndicator =
-        isAssistantNotificationMaintenanceExactSkip(input)
-          ? null
-          : startAssistantChannelTypingIndicator({
-              channelDependencies:
-                executionContext?.hosted?.channelTypingDependencies ?? null,
-              input: messageInput,
-              precedence: 'audience-first',
-              session: resolved.session,
-              sharedPlan,
-            })
+      const typingIndicator = startAssistantNotificationTyping({ input, messageInput, executionContext, resolved, sharedPlan })
 
       try {
         const notificationProviderRequestStarted =
@@ -794,6 +795,7 @@ export async function sendAssistantNotificationLocal(
             turnId,
           })
           const deliveryOutcome = await deliverAssistantNotificationMessage({
+            gameChatBootstrap: input.gameChatBootstrap,
             dedupeToken: input.deliveryDedupeToken ?? null,
             decisionSubject: decision.subject ?? null,
             input: messageInput,
@@ -861,6 +863,7 @@ export async function sendAssistantNotificationLocal(
         }
 
         const deliveryOutcome = await deliverAssistantNotificationMessage({
+          gameChatBootstrap: input.gameChatBootstrap,
           dedupeToken: input.deliveryDedupeToken ?? null,
           decisionSubject: decision.subject ?? null,
           input: messageInput,
@@ -1145,6 +1148,7 @@ async function sendAssistantExactTextNotificationLocal(input: {
   }
 
   const deliveryOutcome = await deliverAssistantNotificationMessage({
+    gameChatBootstrap: input.input.gameChatBootstrap,
     dedupeToken: input.input.deliveryDedupeToken ?? null,
     decisionSubject: null,
     input: input.messageInput,
@@ -1636,6 +1640,7 @@ function buildAssistantNotificationMessageInput(
 }
 
 async function deliverAssistantNotificationMessage(input: {
+  gameChatBootstrap?: AssistantNotificationInput['gameChatBootstrap']
   followUpRequest?: import("@murphai/contracts").AutomationFollowUpRequest | null
   card?: AssistantResponseCard | null
   dedupeToken: string | null
@@ -1648,6 +1653,14 @@ async function deliverAssistantNotificationMessage(input: {
   sharedPlan: Awaited<ReturnType<typeof resolveAssistantTurnSharedPlan>>
   turnId: string
 }): Promise<AssistantDeliveryOutcome> {
+  if (input.gameChatBootstrap) {
+    return deliverAssistantGameBootstrapMessage({
+      bootstrap: input.gameChatBootstrap, card: input.card, media: input.media,
+      followUpRequest: input.followUpRequest, message: input.message,
+      memberId: input.input.executionContext?.hosted?.memberId,
+      session: input.session, vault: input.input.vault,
+    })
+  }
   const state = createAssistantRuntimeStateService(input.input.vault)
   const deliveryFieldsBase = resolveAssistantCurrentAudienceDeliveryFields({
     input: input.input,
@@ -2222,4 +2235,20 @@ function tryExtractAssistantNotificationDecisionObject(
   }
 
   return value.slice(firstBrace, lastBrace + 1).trim()
+}
+
+
+function startAssistantNotificationTyping(input: {
+  input: AssistantNotificationInput
+  messageInput: AssistantMessageInput
+  executionContext: AssistantExecutionContext | null | undefined
+  resolved: ResolvedAssistantSession
+  sharedPlan: Awaited<ReturnType<typeof resolveAssistantTurnSharedPlan>>
+}) {
+  if (input.input.gameChatBootstrap || isAssistantNotificationMaintenanceExactSkip(input.input)) return null
+  return startAssistantChannelTypingIndicator({
+    channelDependencies: input.executionContext?.hosted?.channelTypingDependencies ?? null,
+    input: input.messageInput, precedence: 'audience-first',
+    session: input.resolved.session, sharedPlan: input.sharedPlan,
+  })
 }

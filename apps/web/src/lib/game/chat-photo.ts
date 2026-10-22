@@ -19,7 +19,7 @@ const offerSchema = z.object({
 type Offer = z.infer<typeof offerSchema>;
 type PhotoResult = HostedGameToolResponse["result"];
 type Input = {
-  actor: string; containerMemberId: string; messageRef: string; photo: HostedGamePhoto;
+  actor: string; containerMemberId: string; playerMemberIds: readonly string[]; messageRef: string; photo: HostedGamePhoto;
   authorize: (tx: Prisma.TransactionClient, messageRef: string) => Promise<{ actor: string | null; wake: HostedExecutionConversationMessageWake | null }>;
 };
 const rejected = (error: string): PhotoResult => ({ status: "rejected", error });
@@ -35,7 +35,7 @@ export async function handleGameChatPhoto(input: Input): Promise<PhotoResult> {
   } catch { return rejected("photo_unavailable_resend_or_use_app"); }
   const entryId = photoEntryId(input, prepared.offer);
   const result = await runGameCommand({
-    actorMemberId: input.actor, chatContainerMemberId: input.containerMemberId,
+    actorMemberId: input.actor, chatContainerMemberId: input.containerMemberId, chatPlayerMemberIds: input.playerMemberIds,
     command: { type: "post", gameId: input.photo.gameId, entryId, kind: "photo", mediaKeys: [stored] },
     postGuard: { dayIndex: prepared.offer.dayIndex, replaceEntryId: input.photo.replaceEntryId ?? null },
     beforeMutationTx: async (tx) => {

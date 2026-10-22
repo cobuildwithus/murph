@@ -110,6 +110,11 @@ export interface CreateGameBody {
 }
 
 /** POST /invites/:token/accept */
+export interface NegotiateInviteBody extends AcceptInviteBody {
+  proposalId: string;
+  change: GameChange;
+}
+
 export interface AcceptInviteBody {
   /** The terms version the invitee saw (`terms.n`). */
   termsVersion: number;
@@ -136,7 +141,8 @@ export interface PostEntryBody {
 /** Proposed in the app; the other player agrees in the game's shared chat. */
 export type GameChange =
   | { kind: "start_now" }
-  | { kind: "edit"; schedule?: GameSchedule; lengthDays?: number; startsOn?: string };
+  | { kind: "edit"; schedule?: GameSchedule; lengthDays?: number; startsOn?: string | null;
+      tasks?: GameTask[]; stakes?: GameStake[]; stakesApplyToWholeGame?: true };
 
 export interface ProposeGameChangeBody {
   proposalId: string;
@@ -150,7 +156,9 @@ export interface GamePendingChange {
   expectedTermsVersion: number;
   change: GameChange;
   effectiveFromDay: number;
-  deliveryStatus: "pending" | "queued" | "sent" | "failed";
+  /** Conversational proposals use the ordinary assistant reply, not a second announcement. */
+  origin?: "app" | "chat";
+  deliveryStatus: "pending" | "queued" | "sent" | "failed" | "conversation";
   /** False for a terminal receipt: cancel the proposal before proposing again. */
   deliveryRetryable?: boolean;
   /** Fixed start date agreed to, including a start-now proposal. */
@@ -162,6 +170,8 @@ export interface GameChangeControls {
   canEdit: boolean;
   canEditSchedule: boolean;
   canEditStartDate: boolean;
+  canEditTasks?: boolean;
+  canEditStakes?: boolean;
   editableFromDay: number | null;
 }
 
@@ -171,12 +181,13 @@ export type GameCommand =
   | ({ type: "setProfile" } & SetProfileBody)
   | ({ type: "createGame" } & CreateGameBody)
   | ({ type: "join"; token: string } & AcceptInviteBody)
+  | ({ type: "negotiate"; token: string } & NegotiateInviteBody)
   | ({ type: "post"; gameId: string } & PostEntryBody)
   /** Take back your own post for your current day (a retake follows, if one's left). */
   | { type: "withdraw"; gameId: string; entryId: string }
   | { type: "redeem"; ticketId: string };
 
-export type GameStatus = "invited" | "live" | "settled" | "void";
+export type GameStatus = "invited" | "negotiating" | "live" | "settled" | "void";
 
 export interface GamePlayerView {
   memberId: string | null;
@@ -272,6 +283,8 @@ export interface GameHomeView {
 export type GameInvitePreview =
   | {
       status: "open";
+      supportsNegotiation?: boolean;
+      lengthDays?: number;
       inviterFirstName: string;
       /**
        * Never sent. The name a challenger types for the invitee is their own

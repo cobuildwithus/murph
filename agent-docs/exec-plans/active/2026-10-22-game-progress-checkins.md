@@ -47,12 +47,32 @@ The introduction records a conservative once-only attempt, not a delivered
 question. Pending approval lasts at most 30 minutes and never beyond the game
 day. No qualifying developer-friction entry was created.
 
-Parent owns candidate integration and final review. Integrate the lifecycle
-branch's exact-pair candidate resolver and pass its host-only player pair through
-the photo command. Consumer-first runtime parser rollout and refresh are required
-before emitting the expanded read state. Full first-provider-input byte capture
-against base eff32234e7 is unchanged for direct turns (155,921 bytes) and increases
-Linq group input from 136,129 to 141,507 bytes (+5,378; 3.95%). The exact model
-tokenizer is unavailable; no token estimate is substituted. Six planning cases
-prove photo tool and guidance are limited to current hosted Linq group input. Final CI, final review, deployment and
-production replay remain outside this draft candidate's completed proof.
+## Integrated candidate
+
+Integrated lifecycle head `08ee3bbfc8`, including the negotiated-terms and reader
+floor changes. Shared discovery uses the same-pair candidate owner. Photo saves
+carry its provider-verified pair through the normal post transaction; no save
+rebinds the announcement room. The current requester and original source sender
+are revalidated in that room, and the stored offer remains room/day scoped.
+Negotiation, encrypted v2 pending words, proposal origin and bootstrap metadata
+are preserved. The reader-floor photo-unavailable stub is replaced by the
+participant-aware handler now that its feature is present.
+
+All eight live journeys were rerun with read/update/photo tools jointly present
+and remain Ready. Combined deterministic proof includes same-pair secondary-room
+posting and settlement, wrong-pair rejection, PostgreSQL offer/yes/retry through
+the normal post owner, and a stored offer rejected from a different room. The
+local PostgreSQL database was initialized with the standard runtime-cutover seed
+needed by the existing allowance proof; no production database was touched.
+
+Full first-provider-input capture uses identical fixtures across the rollout
+stages. Direct turns remain 155,921 bytes. Group input is 136,129 bytes at base,
+138,595 after negotiated terms (+2,466), 138,977 after lifecycle (+382), and
+144,355 after progress/photos (+5,378). The combined increase is 6.043%; the
+photo slice increases lifecycle input by 3.870%. Exact model tokenization is
+unavailable, so no token estimate is substituted. Exact historical tool
+snapshots live with the optional measurement fixture.
+
+Parent owns final review, CI, plan closure and deployment. Compatible runtime
+consumers and the nullable profile migration must precede the new Web producers;
+refresh active runtimes. No native app release or production replay has occurred.

@@ -8,6 +8,7 @@ import {
 const deadlineAnchors = vi.hoisted(() => [] as number[]);
 
 const mocks = vi.hoisted(() => ({
+  handleGameChatTool: vi.fn(),
   admitHostedGroupDisclosurePermissionAppendTx: vi.fn(),
   requireHostedCloudflareCallbackJsonRequest: vi.fn(),
   assertHostedLinqRecentInboundEngagementForRuntime: vi.fn(),
@@ -83,6 +84,8 @@ afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllEnvs();
 });
+
+vi.mock("@/src/lib/game/chat-tool", () => ({ handleGameChatTool: mocks.handleGameChatTool }));
 
 vi.mock("@/src/lib/hosted-growth/signup-referral", () => ({
   issueHostedSignupReferralLink: mocks.issueHostedSignupReferralLink,
@@ -330,6 +333,7 @@ import {
   buildHostedGroupJoinOfferProviderIdempotencyKey,
   HOSTED_RUNTIME_GROUP_TOOL_ACCESS_CLASSIFICATION,
   handleHostedRuntimeGroupTool,
+  handleHostedRuntimeConversationTool,
 } from "@/src/lib/hosted-groups/group-tool";
 import {
   HOSTED_THREAD_CONTAINER_PARTICIPANT_RECONCILE_MAX,
@@ -711,11 +715,22 @@ describe("handleHostedRuntimeGroupTool", () => {
     });
   });
 
+  it("routes photo writes through the authenticated game handler", async () => {
+    const request = { action: "game_photo" as const, origin: { kind: "accepted_input" as const, assistantInputId: "synthetic-input" }, photo: { operation: "save" as const, gameId: "synthetic-game" } };
+    const result = { action: "game_photo", result: { status: "ok", photoOutcome: "saved" } };
+    mocks.handleGameChatTool.mockResolvedValue(result);
+    expect(await handleHostedRuntimeConversationTool({ memberId: "synthetic-group", request })).toEqual(result);
+    expect(mocks.handleGameChatTool).toHaveBeenCalledExactlyOnceWith({ memberId: "synthetic-group", runtimeIdentity: null, request });
+    expect(mocks.readHostedGroupSharedDataByRuntimeMemberId).not.toHaveBeenCalled();
+    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+  });
+
   it("classifies group-tool actions by access authority", () => {
     expect(HOSTED_RUNTIME_GROUP_TOOL_ACCESS_CLASSIFICATION).toEqual({
       read_game: "participant_aware",
       update_game: "participant_aware",
       game_photo: "participant_aware",
+      game_chat_bootstrap: "participant_aware",
       ask: "personal_active",
       handoff: "personal_active",
       ask_current_sender: "participant_aware",

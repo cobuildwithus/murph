@@ -1649,6 +1649,45 @@ describe("hosted Linq observability stores", () => {
     ).resolves.toBe("available");
   });
 
+  it.each(["awaiting_generation", "generation_queued"])("advances a reserved %s game intent through the same provider receipt", async (status) => {
+    const fixture = createObservabilityPrismaFixture();
+    const delivery = buildGroupSetupDeliveryFixture({ source: "game_lifecycle", sourceRef: "game", template: "game_started", status });
+    fixture.hostedLinqDeliveryFindUnique.mockResolvedValueOnce(delivery);
+    await expect(claimHostedLinqDeliveryProviderDispatchTx({
+      attemptedAt: new Date("2030-03-04T12:00:00Z"), idempotencyKey: "game-started:game",
+      linqChatId: "chat_game", prisma: fixture.prisma as never, source: "hosted_runtime_linq_delivery",
+      sourceRef: "notification", status: "provider_dispatch_started", targetKind: "thread", template: "assistant_notification",
+    })).resolves.toEqual({ claimed: true, id: delivery.id });
+    expect(fixture.hostedLinqDeliveryUpdateMany).toHaveBeenCalledExactlyOnceWith({
+      where: { id: delivery.id, source: "game_lifecycle", status, updatedAt: delivery.updatedAt,
+        acceptedAt: null, deliveredAt: null, failedAt: null, skippedAt: null, lastReceiptAt: null, messageLookupKey: null },
+      data: expect.objectContaining({ source: "hosted_runtime_linq_delivery", status: "provider_dispatch_started" }),
+    });
+    expect(fixture.hostedLinqDeliveryCreateMany).not.toHaveBeenCalled();
+  });
+
+  it("does not advance a game generation reservation after another claimant wins", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    const delivery = buildGroupSetupDeliveryFixture({ source: "game_lifecycle", template: "game_started", status: "generation_queued" });
+    fixture.hostedLinqDeliveryFindUnique.mockResolvedValueOnce(delivery);
+    fixture.hostedLinqDeliveryUpdateMany.mockResolvedValueOnce({ count: 0 });
+    await expect(claimHostedLinqDeliveryProviderDispatchTx({
+      idempotencyKey: "game-started:game", prisma: fixture.prisma as never,
+      source: "hosted_runtime_linq_delivery", status: "provider_dispatch_started", targetKind: "thread",
+    })).resolves.toMatchObject({ claimed: false, id: delivery.id, retryAt: expect.any(Date) });
+  });
+
+  it("keeps provider evidence terminal instead of reclaiming a game generation reservation", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    const delivery = buildGroupSetupDeliveryFixture({ source: "game_lifecycle", template: "game_started", status: "generation_queued", acceptedAt: new Date("2030-03-04T12:00:00Z"), messageLookupKey: "accepted-message" });
+    fixture.hostedLinqDeliveryFindUnique.mockResolvedValueOnce(delivery);
+    await expect(claimHostedLinqDeliveryProviderDispatchTx({
+      idempotencyKey: "game-started:game", prisma: fixture.prisma as never,
+      source: "hosted_runtime_linq_delivery", status: "provider_dispatch_started", targetKind: "thread",
+    })).resolves.toMatchObject({ claimed: false, id: delivery.id });
+    expect(fixture.hostedLinqDeliveryUpdateMany).not.toHaveBeenCalled();
+  });
+
   it("advances only the exact owned pre-provider attempt before sending", async () => {
     const fixture = createObservabilityPrismaFixture();
     const attemptedAt = new Date("2026-03-26T12:00:00.000Z");

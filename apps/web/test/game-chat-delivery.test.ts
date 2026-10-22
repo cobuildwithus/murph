@@ -1,18 +1,20 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { GameChange, GamePendingChange } from "../src/lib/game/contract";
 const m = vi.hoisted(() => ({
-  game: vi.fn(), updateGame: vi.fn(), candidates: vi.fn(), identities: vi.fn(), routes: vi.fn(), chat: vi.fn(), create: vi.fn(), claim: vi.fn(), receipt: vi.fn(), saveReceipt: vi.fn(), accepted: vi.fn(), prepare: vi.fn(), ensure: vi.fn(), reconcile: vi.fn(), enqueue: vi.fn(), mailbox: vi.fn(), wake: vi.fn(), prepareMailbox: vi.fn(), routeCheck: vi.fn(), lines: vi.fn(), line: vi.fn(), capacity: vi.fn(), decode: vi.fn(), encode: vi.fn(),
+  bootstrap: vi.fn(), updateStatus: vi.fn(), game: vi.fn(), updateGame: vi.fn(), candidates: vi.fn(), identities: vi.fn(), routes: vi.fn(), chat: vi.fn(), create: vi.fn(), claim: vi.fn(), receipt: vi.fn(), saveReceipt: vi.fn(), accepted: vi.fn(), prepare: vi.fn(), ensure: vi.fn(), reconcile: vi.fn(), enqueue: vi.fn(), mailbox: vi.fn(), wake: vi.fn(), prepareMailbox: vi.fn(), routeCheck: vi.fn(), lines: vi.fn(), line: vi.fn(), capacity: vi.fn(), decode: vi.fn(), encode: vi.fn(),
 }));
 vi.mock("../src/lib/prisma", () => {
   const db = {
+    $executeRaw: m.updateStatus,
     game: { findFirst: m.game, findUnique: m.game, updateMany: m.updateGame, update: m.updateGame },
     hostedMember: { count: async () => 2 },
     gameProfile: { findMany: async () => [{ memberId: "person-a", firstNameEncrypted: "Alex" }, { memberId: "person-b", firstNameEncrypted: "Sam" }] },
-    hostedThreadContainer: { findMany: m.candidates },
-    hostedLinqDelivery: { findUnique: m.receipt, update: m.saveReceipt },
+    hostedThreadContainer: { findMany: m.candidates, findUnique: async () => ({ participants: [{ participantMemberId: "person-a" }, { participantMemberId: "person-b" }] }) },
+    hostedLinqDelivery: { findUnique: m.receipt, update: m.saveReceipt, updateMany: m.saveReceipt },
   };
   return { getPrisma: () => ({ ...db, $transaction: async (fn: (tx: typeof db) => unknown) => fn(db) }) };
 });
+vi.mock("../src/lib/game/chat-bootstrap", () => ({ prepareGameChatBootstrap: m.bootstrap }));
 vi.mock("../src/lib/game/crypto", () => ({ openGameTexts: async (items: Array<{ value: string }>) => items.map((item) => item.value) }));
 vi.mock("../src/lib/hosted-crypto/secure-box", () => ({ openHostedUserSecureBoxString: m.decode, sealHostedUserSecureBoxString: m.encode }));
 vi.mock("../src/lib/hosted-onboarding/hosted-member-identity-store", () => ({ readHostedMemberIdentity: m.identities }));
@@ -26,7 +28,7 @@ vi.mock("../src/lib/hosted-groups/thread-container-participants", () => ({ recon
 vi.mock("../src/lib/hosted-mailbox/store", () => ({ appendPreparedHostedMailboxEnvelopeTx: m.enqueue, prepareHostedMailboxEnvelopeAppend: m.prepareMailbox, readHostedMailboxItemByDedupeKey: m.mailbox }));
 vi.mock("../src/lib/hosted-orchestration/signal-runtime", () => ({ signalHostedMailboxAppendRuntime: m.wake }));
 vi.mock("../src/lib/hosted-routing/assistant-notification-destination", () => ({ readHostedThreadContainerLinqRouteAuthorities: m.routes, assertHostedAssistantNotificationRouteAuthority: m.routeCheck, resolveHostedAssistantNotificationDestination: async () => ({ conversationShape: "thread-container", route: { channel: "linq" } }), bindHostedAssistantNotificationDestination: () => ({ route: { channel: "linq", delivery: { kind: "thread", target: "chat" }, accountId: "line" }, externalThreadRouteAuthority: { channel: "linq", containerMemberId: "room", threadId: "chat", accountLookupKey: "line-key" } }) }));
-import { deliverGameChangeProposal, isExactGameChat, gameChangeProposalMessage, requireExactGameChat } from "../src/lib/game/chat-delivery";
+import { deliverGameChangeProposal, isExactGameChat, buildGameProposalInstructions, requireExactGameChat } from "../src/lib/game/chat-delivery";
 const phones = ["+15555550101", "+15555550102"];
 const proposal: GamePendingChange = { id: "proposal", proposedByMemberId: "person-a", expectedTermsVersion: 1, change: { kind: "edit", schedule: { days: [5, 6] }, lengthDays: 14 }, effectiveFromDay: 2, deliveryStatus: "pending", startsOn: null };
 const chat = { isGroup: true, handlesComplete: true, handles: [...phones.map((handle) => ({ handle, isMe: false, status: "active" })), { handle: "+15555550100", isMe: true, status: "active" }] };
@@ -40,7 +42,7 @@ const candidate = (memberId: string, name: string | null = null, activity: strin
 });
 describe("game proposal chat delivery", () => {
   beforeEach(() => {
-    vi.resetAllMocks();
+    vi.resetAllMocks(); m.bootstrap.mockResolvedValue("room"); m.updateStatus.mockResolvedValue(1);
     m.game.mockResolvedValue(game()); m.updateGame.mockResolvedValue({ count: 1 }); m.candidates.mockResolvedValue([]);
     m.identities.mockImplementation(async ({ memberId }: { memberId: string }) => ({ phoneNumber: phones[memberId === "person-a" ? 0 : 1], phoneNumberVerifiedAt: new Date() }));
     m.routes.mockImplementation(async ({ containerMemberIds }: { containerMemberIds: string[] }) => ({ authorities: new Map(containerMemberIds.map((id) => [id, { threadId: id === "room" ? "chat" : `${id}-chat`, channel: "linq" }])) })); m.chat.mockResolvedValue(chat); m.line.mockResolvedValue({ kind: "assignable" });
@@ -59,7 +61,7 @@ describe("game proposal chat delivery", () => {
     m.candidates.mockResolvedValue([candidate("room")]);
     await deliverGameChangeProposal("game", "proposal");
     expect(m.create).not.toHaveBeenCalled(); expect(m.enqueue).toHaveBeenCalledOnce(); expect(m.routeCheck).toHaveBeenCalledOnce();
-    expect(m.updateGame).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ pendingChange: expect.objectContaining({ deliveryStatus: "queued" }) }) }));
+    expect(m.updateStatus).toHaveBeenCalledOnce();
   });
   it("prefers the most recently active room before its name or creation date", async () => {
     m.candidates.mockResolvedValue([
@@ -129,66 +131,10 @@ describe("game proposal chat delivery", () => {
     expect(m.candidates).not.toHaveBeenCalled();
     expect(m.enqueue).toHaveBeenCalledOnce();
   });
-  it("creates and binds a group automatically after reserving one provider identity", async () => {
+  it("hands a new room to the generated first-message bootstrap without sending an opener", async () => {
     await deliverGameChangeProposal("game", "proposal");
-    expect(m.create).toHaveBeenCalledWith(expect.objectContaining({ to: phones, idempotencyKey: "game-chat:game" }));
-    expect(m.claim).toHaveBeenCalledWith(expect.objectContaining({ status: "provider_dispatch_started" }));
-    expect(m.saveReceipt).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ payloadCiphertext: "encrypted" }) }));
-    expect(m.ensure).toHaveBeenCalledWith(expect.objectContaining({ gameProposal: { gameId: "game", proposalId: "proposal" } }));
-    expect(m.enqueue).toHaveBeenCalledOnce(); expect(m.reconcile).toHaveBeenCalledOnce();
-  });
-  it("never repeats a creation with an ambiguous provider receipt", async () => {
-    m.receipt.mockResolvedValue({ id: "delivery", payloadCiphertext: null });
-    await expect(deliverGameChangeProposal("game", "proposal")).rejects.toThrow("awaiting a confirmed");
-    expect(m.create).not.toHaveBeenCalled();
-  });
-  it("safely replays a timed-out creation with the frozen key, audience and text", async () => {
-    m.create.mockRejectedValueOnce(new Error("timeout"));
-    await expect(deliverGameChangeProposal("game", "proposal")).rejects.toThrow("timeout");
-    const first = m.create.mock.calls[0]![0];
-    m.receipt.mockResolvedValue({ id: "delivery", payloadCiphertext: "frozen-request", payloadOwnerMemberId: "person-a", payloadSchema: "game_chat_v1" });
-    m.decode.mockResolvedValue(JSON.stringify({ from: first.from, to: first.to, message: first.message, accountLookupKey: "line-key" }));
-    await deliverGameChangeProposal("game", "proposal");
-    expect(m.create).toHaveBeenCalledTimes(2); expect(m.create.mock.calls[1]![0]).toEqual(first);
-    expect(m.claim).toHaveBeenCalledOnce(); expect(m.capacity).toHaveBeenCalledOnce();
-  });
-  it.each(["cancelled", "expired"])("replays the same neutral opener after the previous proposal was %s", async () => {
-    m.create.mockRejectedValueOnce(new Error("timeout"));
-    await expect(deliverGameChangeProposal("game", "proposal")).rejects.toThrow("timeout");
-    const first = m.create.mock.calls[0]![0];
-    expect(first.message).not.toContain("Saturday"); expect(first.message).not.toContain("Alex");
-    m.receipt.mockResolvedValue({ id: "delivery", payloadCiphertext: "frozen-request", payloadOwnerMemberId: "person-a", payloadSchema: "game_chat_v1" });
-    m.decode.mockResolvedValue(JSON.stringify({ from: first.from, to: first.to, message: first.message, accountLookupKey: "line-key" }));
-    m.game.mockResolvedValue({ ...game(), pendingChange: { v: 1, ...proposal, id: "replacement", change: { kind: "edit", lengthDays: 21 } } });
-    await deliverGameChangeProposal("game", "replacement");
-    expect(m.create.mock.calls[1]![0]).toEqual(first);
-    expect(m.prepareMailbox).toHaveBeenCalledOnce();
-    const notification = m.prepareMailbox.mock.calls[0]![0].envelope.notification;
-    expect(notification.deliveryIdempotencyKey).toBe("game-change:game:replacement");
-    expect(notification.responsePolicy.text).toContain("21 days total");
-    expect(notification.responsePolicy.text).not.toContain("Saturday");
-  });
-  it("recovers a provider receipt left before binding and announces only the current proposal", async () => {
-    m.receipt.mockResolvedValue({ id: "delivery", payloadCiphertext: "encrypted-receipt", payloadOwnerMemberId: "person-a", payloadSchema: "game_chat_v1" });
-    m.decode.mockResolvedValue(JSON.stringify({ chatId: "chat", accountLookupKey: "line-key" }));
-    m.game.mockResolvedValue({ ...game(), pendingChange: { v: 1, ...proposal, id: "replacement", change: { kind: "edit", lengthDays: 21 } } });
-    await deliverGameChangeProposal("game", "replacement");
-    expect(m.create).not.toHaveBeenCalled();
-    expect(m.prepareMailbox.mock.calls[0]![0].envelope.notification.deliveryIdempotencyKey).toBe("game-change:game:replacement");
-    expect(m.updateGame).not.toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ pendingChange: expect.objectContaining({ deliveryStatus: "sent" }) }) }));
-  });
-  it("tries the next healthy line when the first has no capacity", async () => {
-    m.lines.mockResolvedValue([{ phoneNumber: "+15555550109", phoneNumberLookupKey: "full" }, { phoneNumber: "+15555550100", phoneNumberLookupKey: "line-key" }]);
-    m.capacity.mockResolvedValueOnce(false).mockResolvedValueOnce(true);
-    await deliverGameChangeProposal("game", "proposal");
-    expect(m.create).toHaveBeenCalledWith(expect.objectContaining({ from: "+15555550100" }));
-    expect(m.claim).toHaveBeenCalledOnce();
-  });
-  it("recovers an accepted creation from its encrypted delivery receipt without sending twice", async () => {
-    m.receipt.mockResolvedValue({ id: "delivery", payloadCiphertext: "encrypted", payloadOwnerMemberId: "person-a", payloadSchema: "game_chat_v1" });
-    m.decode.mockResolvedValue(JSON.stringify({ chatId: "chat", accountLookupKey: "line-key" }));
-    await deliverGameChangeProposal("game", "proposal");
-    expect(m.create).not.toHaveBeenCalled(); expect(m.ensure).toHaveBeenCalledOnce(); expect(m.enqueue).toHaveBeenCalledOnce();
+    expect(m.bootstrap).toHaveBeenCalledExactlyOnceWith("game", "game-change:game:proposal", expect.stringContaining("one concise conversational message"));
+    expect(m.create).not.toHaveBeenCalled(); expect(m.enqueue).not.toHaveBeenCalled();
   });
   it("does not send to an expanded bound room or to unverified identities", async () => {
     m.game.mockResolvedValue(game("room")); m.chat.mockResolvedValue({ ...chat, handles: [...chat.handles, { handle: "+15555550103", isMe: false, status: "active" }] });
@@ -209,34 +155,51 @@ describe("game proposal chat delivery", () => {
     m.chat.mockResolvedValue({ ...chat, handlesComplete: false });
     await expect(requireExactGameChat("room")).rejects.toThrow("participants have changed");
   });
-  it("keeps a start-now proposal short without announcing the daily cutoff", async () => {
-    m.game.mockResolvedValue({ ...game("room"), pendingChange: { v: 1, ...proposal, effectiveFromDay: 0, startsOn: "2030-03-04", change: { kind: "start_now" } } });
+  it("queues model-authored instructions rather than exact announcement text", async () => {
+    m.game.mockResolvedValue(game("room"));
     await deliverGameChangeProposal("game", "proposal");
-    expect(m.prepareMailbox.mock.calls[0]![0].envelope.notification.responsePolicy.text).toBe("Alex wants to start the game now. Sam, good with that?");
+    const notification = m.prepareMailbox.mock.calls[0]![0].envelope.notification;
+    expect(notification.responsePolicy).toEqual({ kind: "require_send" });
+    expect(notification.instructions).toContain("one concise conversational message");
+    const data = JSON.parse(notification.instructions.split("\n").at(-1));
+    expect(data).toEqual({ proposer: "Alex", recipient: "Sam", currentLengthDays: 7, change: proposal.change, proposedStartDate: null });
+    expect(data).not.toHaveProperty("effectiveFromDay");
   });
-  it("describes a duration edit without presenting the next terms day as a new game start", async () => {
-    m.game.mockResolvedValue({ ...game("room"), pendingChange: { v: 1, ...proposal, change: { kind: "edit", lengthDays: 10 } } });
+  it("hydrates sealed task and stake proposals without rewriting their stored words", async () => {
+    const words = JSON.stringify({ v: 1, versions: [{ n: 2,
+      tasks: [{ seat: 0, text: "Read ten pages" }, { seat: 1, text: "Read twenty pages" }],
+      stakes: [{ key: "stake-next", item: "Choose the next book" }],
+    }] });
+    m.game.mockResolvedValue({ ...game("room"), createdBy: "person-a", status: "negotiating", pendingChange: {
+      ...proposal, v: 2, origin: "app", change: { kind: "edit" }, tasksChanged: true,
+      stakes: [{ key: "stake-next", kind: "winner_gets" }], termsWordsEncrypted: words,
+    } });
     await deliverGameChangeProposal("game", "proposal");
-    const message = m.prepareMailbox.mock.calls[0]![0].envelope.notification.responsePolicy.text;
-    expect(message).toContain("extend the game to 10 days total");
-    expect(message).not.toMatch(/Mar 6|2030-03-06|starting|new check-in schedule/i);
-    expect(message).toContain("Sam, good with that?");
+    const instructions = m.prepareMailbox.mock.calls[0]![0].envelope.notification.instructions;
+    const data = JSON.parse(instructions.split("\n").at(-1));
+    expect(data.change.tasks).toEqual([{ seat: 0, text: "Read ten pages" }, { seat: 1, text: "Read twenty pages" }]);
+    expect(data.change.stakes).toEqual([{ kind: "winner_gets", item: "Choose the next book" }]);
+    expect(instructions).not.toContain("termsWordsEncrypted");
+    expect(m.updateGame).not.toHaveBeenCalled();
+    expect(m.updateStatus.mock.calls[0]![0].join("")).toContain("jsonb_set(pending_change, '{deliveryStatus}'");
+  });
+  it("does not queue a second announcement for a chat-originated proposal", async () => {
+    m.game.mockResolvedValue({ ...game("room"), pendingChange: { v: 1, ...proposal, origin: "chat", deliveryStatus: "conversation" } });
+    await deliverGameChangeProposal("game", "proposal");
+    expect(m.enqueue).not.toHaveBeenCalled(); expect(m.create).not.toHaveBeenCalled(); expect(m.identities).not.toHaveBeenCalled();
   });
   it.each([
-    { change: { kind: "edit" as const, lengthDays: 5 }, startsOn: null, expected: "shorten the game to 5 days total" },
-    { change: { kind: "edit" as const, schedule: { days: [0, 1, 2, 3, 4] } }, startsOn: null, expected: "switch to weekday check-ins" },
-    { change: { kind: "edit" as const, schedule: { days: [0, 2, 4] } }, startsOn: null, expected: "switch to Monday, Wednesday, and Friday check-ins" },
-    { change: { kind: "edit" as const, schedule: { days: [0, 1, 2, 3, 4, 5, 6] } }, startsOn: null, expected: "switch to daily check-ins" },
-    { change: { kind: "edit" as const, schedule: { count: 4 } }, startsOn: null, expected: "do 4 check-ins total, on any days" },
-    { change: { kind: "edit" as const, startsOn: "2030-03-08" }, startsOn: "2030-03-08", expected: "move the start to Mar 8" },
-  ] satisfies Array<{ change: GameChange; startsOn: string | null; expected: string }>)("keeps proposal wording concise: $expected", ({ change, startsOn, expected }) => {
-    const message = gameChangeProposalMessage({ ...proposal, change, startsOn, effectiveFromDay: 0 }, { proposerName: "Alex", recipientName: "Sam", lengthDays: 7 });
-    expect(message).toBe(`Alex wants to ${expected}. Sam, good with that?`);
-    expect(message).not.toMatch(/3 AM|keeping previous|2030-/);
-  });
-  it("describes future schedule changes without private labels or exact-phrase demands", () => {
-    expect(gameChangeProposalMessage(proposal, { proposerName: "Alex", recipientName: "Sam", lengthDays: 7 })).toContain("switch to weekend check-ins");
-    expect(gameChangeProposalMessage(proposal, { proposerName: "Alex", recipientName: "Sam", lengthDays: 7 })).not.toMatch(/Mar 6|2030-03-06|starting|3 AM/i);
-    expect(gameChangeProposalMessage(proposal, { proposerName: "Alex", recipientName: "Sam", lengthDays: 7 })).toContain("extend the game to 14 days total");
+    { kind: "start_now" },
+    { kind: "edit", lengthDays: 5 },
+    { kind: "edit", schedule: { days: [0, 1, 2, 3, 4] } },
+    { kind: "edit", schedule: { days: [0, 2, 4] } },
+    { kind: "edit", schedule: { count: 4 } },
+    { kind: "edit", startsOn: "2030-03-08" },
+  ] satisfies GameChange[])("preserves requested change data without deriving a false start date: %j", (change) => {
+    const instructions = buildGameProposalInstructions({ ...proposal, change, startsOn: change.kind === "edit" ? change.startsOn ?? null : "2030-03-04" }, { proposerName: "Alex", recipientName: "Sam", lengthDays: 7 });
+    expect(JSON.parse(instructions.split("\n").at(-1)!).change).toEqual(change);
+    expect(instructions).toContain("pending, not applied");
+    expect(instructions).toContain("total calendar days, never additional days");
+    expect(instructions).not.toContain("2030-03-06");
   });
 });

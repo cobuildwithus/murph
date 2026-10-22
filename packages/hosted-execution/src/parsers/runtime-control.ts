@@ -1,3 +1,4 @@
+import { hostedGameChatBootstrapRequestSchema, hostedGameChatBootstrapResponseSchema } from "../game-bootstrap-control.ts";
 import { hostedGameToolRequestSchema, hostedGameToolResponseSchema } from "../game-tools.ts";
 import { parseHostedMailboxLane, parseHostedMailboxKind } from "./mailbox.ts";
 export {
@@ -940,7 +941,8 @@ export function parseHostedRuntimeGroupToolRequest(
     record.action,
     "Hosted runtime group tool request action",
   );
-  if (action === "read_game" || action === "update_game" || action === "game_photo") return hostedGameToolRequestSchema.parse(record);
+  if (action === "game_chat_bootstrap") return hostedGameChatBootstrapRequestSchema.parse(record);
+  if (["read_game", "update_game", "game_photo"].includes(action)) return hostedGameToolRequestSchema.parse(record);
   const parsed =
     parseHostedRuntimeGroupConsultationRequest(record, action) ??
     parseHostedRuntimeGroupJournalRequest(record, action) ??
@@ -2864,7 +2866,8 @@ export function parseHostedRuntimeGroupToolResponse(
     "Hosted runtime group tool response action",
   );
 
-  if (action === "read_game" || action === "update_game" || action === "game_photo") return hostedGameToolResponseSchema.parse(record);
+  if (action === "game_chat_bootstrap") return hostedGameChatBootstrapResponseSchema.parse(record);
+  if (["read_game", "update_game", "game_photo"].includes(action)) return hostedGameToolResponseSchema.parse(record);
   if (action === "ask_current_sender") {
     const label = "Hosted runtime group tool ask_current_sender response";
     assertAllowedObjectKeys(record, new Set(["action", "result"]), label);

@@ -1,3 +1,4 @@
+import { GAME_INPUT_BASELINES } from './support/game-input-baselines.ts'
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { rm } from 'node:fs/promises'
@@ -1291,8 +1292,8 @@ describe('game progress and photo initial input measurement', () => {
       stub ??= await startScriptedResponsesStub()
       const scenario = await prepareScriptedTurnScenario(stub, temporaryPaths, { model: 'gpt-6.1-sol', multiAgentV2: true })
       const catalog = await writeHostedOpenAiMixedModeModelCatalogJson({ codexCommand: scenario.turnInput.codexCommand, directory: scenario.turnInput.codexHome })
-      const measurements = []
-      for (const phase of ['base', 'head'] as const) {
+      const measurements: Array<{ phase: string; bytes: number; providerFields: string[]; instructionsBytes: number; dynamicContextBytes: number; toolCount: number; registeredToolBytes: number; exclusions: string[] }> = []
+      for (const phase of ['base', 'terms', 'lifecycle', 'head'] as const) {
         const layers = buildAssistantSystemPromptLayers({
           assistantCliContract: null, assistantHostedAutomationAvailable: true,
           assistantDynamicContextPrompts: phase === 'head' && scope === 'group' ? [GAME_PHOTO_CHAT_GUIDANCE] : [],
@@ -1308,13 +1309,10 @@ describe('game progress and photo initial input measurement', () => {
           imageGenerationAvailable: false, progressUpdatesAvailable: false,
           gamesAvailable: scope === 'group', gamePhotosAvailable: phase === 'head' && scope === 'group',
         })
-        // Exact original read descriptor from eff32234e7; other tools and layers
-        // are identical. Capture includes Codex native/deferred tool conversion.
-        const tools = availableTools.map((tool) => phase === 'base' && tool.name === 'read_game' ? {
-          namespace: 'murph', name: 'read_game',
-          description: 'Read the games linked to this group chat, their agreed tasks, stakes, schedule, start dates and pending changes. Use before answering questions or changing a game. Each day closes at 3 AM the following local date in each player’s timeZone; dayOne is their first calendar date. Starting before 3 AM may give a short first day; explain the actual cutoff. This shared view excludes private labels, photos and check-ins.',
-          inputSchema: { type: 'object', additionalProperties: false, properties: {}, required: [] },
-        } as const : tool)
+        const tools = availableTools.map((tool) => {
+          if (phase === 'head') return tool
+          return GAME_INPUT_BASELINES[phase].find((baseline) => baseline.name === tool.name) ?? tool
+        })
         await stopWarmCodexAppServer()
         stub.markRequestBaseline()
         stub.captureProviderRequestDiagnostics({ completeInput: true })
@@ -1340,10 +1338,11 @@ describe('game progress and photo initial input measurement', () => {
           toolCount: tools.length, registeredToolBytes: Buffer.byteLength(JSON.stringify(tools)),
           exclusions: [...new Set([...capture.excludedTransportFields, 'prompt_cache_key'])] })
       }
-      const [base, head] = measurements
+      const base = measurements[0], head = measurements.at(-1)
       assert.ok(base && head)
       process.stdout.write('[game-photo-input-proof] ' + JSON.stringify({ scope, model: 'gpt-6.1-sol', measurements,
-        baseline: 'eff32234e77173681ae5358a9dd8083d5e6dcd85 exact old read descriptor, absent game_photo and photo guidance; identical other production instructions, native catalog, messages and tools.',
+        baseline: 'Exact tool descriptor snapshots: base eff32234e7, terms f5fc26ca21, lifecycle 08ee3bbfc8; final head adds photo tool/guidance and progress reads. All other production instructions, native catalog, messages and tools remain identical.',
+        incrementalBytes: measurements.slice(1).map((next, index) => ({ from: measurements[index]!.phase, to: next.phase, delta: next.bytes - measurements[index]!.bytes, percent: (next.bytes - measurements[index]!.bytes) / measurements[index]!.bytes * 100 })),
         deltaBytes: head.bytes - base.bytes, deltaPercent: (head.bytes - base.bytes) / base.bytes * 100,
         tokens: null, tokenDelta: null, tokenPercent: null, tokenLimitation: 'No exact GPT-6.1 Sol tokenizer is configured; scripted usage is not tokenization and no estimate is substituted.',
       }) + '\n')

@@ -1,13 +1,18 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-const m = vi.hoisted(() => ({ exact: vi.fn(), runtime: vi.fn(), access: vi.fn(), wake: vi.fn(), route: vi.fn(), sender: vi.fn(), game: vi.fn(), run: vi.fn(), read: vi.fn() }));
+const m = vi.hoisted(() => ({ exact: vi.fn(), runtime: vi.fn(), access: vi.fn(), wake: vi.fn(), route: vi.fn(), sender: vi.fn(), game: vi.fn(), run: vi.fn(), read: vi.fn(), players: vi.fn(), photo: vi.fn() }));
 vi.mock("../src/lib/prisma", () => ({ getPrisma: () => ({ $transaction: (fn: (tx: object) => unknown) => fn({ game: { findFirst: m.game } }) }) }));
 vi.mock("../src/lib/hosted-execution/runtime-owner", () => ({ requireHostedRuntimeCallbackTx: m.runtime }));
 vi.mock("../src/lib/hosted-mailbox/runtime-access", () => ({ requireHostedRuntimeActiveAccessForUpdateTx: m.access }));
 vi.mock("../src/lib/hosted-mailbox/store", () => ({ readHostedMailboxConversationWakeByAssistantInputId: m.wake }));
 vi.mock("../src/lib/hosted-groups/group-message-sender", () => ({ resolveHostedGroupMessageSenderMemberId: m.sender }));
 vi.mock("../src/lib/hosted-routing/thread-route-store", () => ({ assertHostedThreadRouteEgressAuthority: m.route }));
-vi.mock("../src/lib/game/chat-delivery", () => ({ requireExactGameChat: m.exact }));
+vi.mock("../src/lib/game/chat-membership", () => ({
+  requireExactGameChat: m.exact, readGameChatPlayerIds: m.players,
+  sameGamePlayers: (a: string[], b: string[]) => a.length === 2 && b.length === 2 && a.every((id) => b.includes(id)),
+  gamePairWhere: (ids: string[]) => ({ AND: ids.map((memberId) => ({ players: { some: { memberId } } })), players: { none: { memberId: { notIn: ids } } } }),
+}));
 vi.mock("../src/lib/game/service", () => ({ runGameCommand: m.run, readGameChatState: m.read }));
+vi.mock("../src/lib/game/chat-photo", () => ({ handleGameChatPhoto: m.photo }));
 import { handleGameChatTool } from "../src/lib/game/chat-tool";
 const group = "container_synthetic";
 const actor = "player_synthetic";
@@ -20,7 +25,7 @@ function wake(overrides: object = {}) {
 describe("game chat tool authority", () => {
   afterEach(() => vi.unstubAllEnvs());
   beforeEach(() => {
-    vi.resetAllMocks(); m.exact.mockResolvedValue([actor, "other_synthetic"]); m.wake.mockResolvedValue(wake()); m.sender.mockResolvedValue(actor); m.game.mockResolvedValue({ id: "game_synthetic", players: [{ memberId: actor }, { memberId: "other_synthetic" }] }); m.read.mockResolvedValue({ games: [] });
+    vi.resetAllMocks(); m.players.mockResolvedValue([actor, "other_synthetic"]); m.exact.mockResolvedValue([actor, "other_synthetic"]); m.wake.mockResolvedValue(wake()); m.sender.mockResolvedValue(actor); m.game.mockResolvedValue({ id: "game_synthetic", players: [{ memberId: actor }, { memberId: "other_synthetic" }] }); m.read.mockResolvedValue({ games: [] });
     m.run.mockResolvedValue({ ok: true, game: { privateRelationship: "synthetic-private", entries: ["private-image"] } });
   });
   it("disables paid-group reads and mutations when the game flag is off", async () => {
@@ -35,11 +40,16 @@ describe("game chat tool authority", () => {
     expect((await handleGameChatTool(update)).result.status).toBe("unavailable");
     expect(m.run).not.toHaveBeenCalled(); expect(m.read).not.toHaveBeenCalled();
   });
-  it("uses the authenticated sender and game binding; never forwards the private app view", async () => {
+  it("uses the authenticated sender and exact pair in any room; never forwards the private app view", async () => {
     const result = await handleGameChatTool(update);
     expect(result).toEqual({ action: "update_game", result: { status: "ok", state: { games: [] } } });
     expect(m.run).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ actorMemberId: actor, chatContainerMemberId: group, command: { type: "respondChange", gameId: "game_synthetic", proposalId: "proposal_synthetic", decision: "approve" } }));
-    expect(m.game).toHaveBeenCalledWith({ where: { chatContainerMemberId: group, players: { some: { memberId: actor } }, id: "game_synthetic" }, select: { id: true, players: { select: { memberId: true }, take: 3 } } });
+    expect(m.game).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({
+      AND: [{ players: { some: { memberId: actor } } }, { players: { some: { memberId: "other_synthetic" } } }],
+      id: "game_synthetic",
+    }) }));
+    expect(m.game.mock.calls[0][0].where).not.toHaveProperty("chatContainerMemberId");
+    expect(m.run.mock.calls[0][0].chatPlayerMemberIds).toEqual([actor, "other_synthetic"]);
     expect(m.access).toHaveBeenCalledWith(group, expect.anything());
     expect(m.access).not.toHaveBeenCalledWith(actor, expect.anything());
     expect(JSON.stringify(result)).not.toContain("private");
@@ -77,6 +87,19 @@ describe("game chat tool authority", () => {
     m.exact.mockResolvedValueOnce([actor, "other_synthetic"]).mockRejectedValueOnce(new Error("Game roster changed"));
     await expect(handleGameChatTool(update)).rejects.toThrow("Game roster changed");
     expect(m.run).toHaveBeenCalledOnce(); expect(m.read).not.toHaveBeenCalled();
+  });
+  it("passes only the provider-proven pair and rechecks accepted source actors for a photo save", async () => {
+    m.photo.mockResolvedValue({ status: "ok", photoOutcome: "saved" });
+    const request = { action: "game_photo" as const, origin, photo: { operation: "save" as const, gameId: "game_synthetic", sourceMessageRef: origin.assistantInputId, attachmentOrdinal: 1 } };
+    expect((await handleGameChatTool({ ...read, request })).result).toMatchObject({ status: "ok", photoOutcome: "saved" });
+    const bridge = m.photo.mock.calls[0][0];
+    expect(bridge).toMatchObject({ actor, containerMemberId: group, playerMemberIds: [actor, "other_synthetic"] });
+    expect(m.game.mock.calls[0][0].where).toMatchObject({ id: "game_synthetic" });
+    expect(m.game.mock.calls[0][0].where).not.toHaveProperty("chatContainerMemberId");
+    const tx = { game: { findFirst: m.game } };
+    expect((await bridge.authorize(tx, origin.assistantInputId)).actor).toBe(actor);
+    m.players.mockResolvedValue([actor, "new_person"]);
+    expect((await bridge.authorize(tx, origin.assistantInputId)).actor).toBeNull();
   });
   it("passes the provider-proven pair to the shared projection", async () => {
     await handleGameChatTool(read);

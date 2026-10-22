@@ -163,16 +163,28 @@ the full graph image. No live release is implied by this implementation.
 
 Before Day 1, either player can propose Start now or a different start date.
 Players can also propose a new duration (up to 28 calendar days) or weekdays.
-Their tap records their agreement. Murph reuses an exact existing chat with the
+Their tap records their agreement. When the invitation is accepted, Murph
+introduces the agreed challenge in one natural message and offers optional
+reminders for the first few days. Acceptance never schedules reminders.
+Murph reuses an exact existing chat with the
 two players and Murph, or automatically creates one from their verified phone
 numbers. When several eligible rooms exist, it prefers the most recently active
 conversation, then a nonblank group name, then the newest room. Activity means
 the latest accepted conversation-message receipt, not a roster refresh or system
-notification. An already-bound game stays in its verified room. Proposal copy
+notification. An already-bound game keeps that room for app announcements.
+Either exact same-pair room can read and discuss the same canonical game; Murph
+replies where the players are talking without asking them to relink it. Extra
+participants make that room ineligible. Proposal copy
 names only the requested changes and asks the other player naturally. It mentions
 a date only for an explicit start-date change, omitting cutoff times and routine
 check-in preservation text. An
-ordinary contextual agreement is enough. The other player can decline, and the
+ordinary contextual agreement is enough. App proposals get one model-written
+request. A proposal made in chat is explained by Murph in its normal reply,
+without a duplicate announcement. The app shows it waiting for agreement, not
+as a separately delivered notification. New group creation uses that same first
+message, rather than a generic opener followed by another message. Initial
+invite negotiation likewise introduces the actual proposal once; the challenge
+kickoff follows only after agreement. The other player can decline, and the
 proposer can cancel in chat. Only one proposal waits at a time.
 
 Until agreement, the current terms stay in force. Changes apply from the first
@@ -187,13 +199,27 @@ is shown separately: its proposer can cancel the request in the app and propose
 again, rather than repeatedly retrying a finished delivery.
 
 The shared chat reads agreed terms, each player's own profile name, the
-schedule, pending proposal, daily check-in status and settled results. It never
-receives private contact labels, profile photos, check-in photos, captions,
-excuses or invite tokens. A live two-player game grants
-its bound group the normal included group usage allowance without granting the
-players personal AI access. Suspension, withdrawn health-data consent, the game
-feature flag and member allowlist still apply. Tasks and stakes remain fixed in
-this first editing version.
+schedule, pending proposal, daily check-in status and settled results. It never receives private contact labels, profile
+photos, check-in photos, excuses or invite tokens. A live two-player game grants
+its eligible groups the normal included group usage allowance without granting
+the players personal AI access. Duplicate rooms share the primary game allowance;
+they do not create more included credit. Suspension, withdrawn health-data consent, the game
+feature flag and member allowlist still apply. Tasks and stakes can be negotiated through the same pending proposal. Task edits
+apply to future unstarted days. Stake edits replace the entire game wager,
+including earlier misses; both players must understand and agree to that scope.
+Stakes alone can change through the final playing day and closing grace period,
+until settlement is due. They do not require extending the game. Task, schedule,
+and duration edits still require at least one future unstarted day.
+They never rewrite check-ins or existing tickets.
+
+An invitee can choose Suggest changes and submit concrete alternative rules
+without accepting the original challenge. Both players see a negotiating game
+with no countdown, posting duties or scores until the other player approves the
+proposal. Decline or cancellation leaves it unstarted. Approval determines the
+default Day 1 from that moment, or keeps an explicitly selected later date.
+Resetting a proposed date to the default is explicit (`startsOn: null`), distinct
+from omitting a date change. The original seven-day invite expiry also bounds
+unfinished negotiation. A pair cannot reserve another game while negotiating.
 
 ## Progress and photos in chat
 

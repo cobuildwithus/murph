@@ -11,6 +11,7 @@ import type {
 } from "@murphai/hosted-execution/runtime-control";
 
 import { getPrisma } from "../prisma";
+import { lockHostedMemberRow } from "../hosted-onboarding/shared";
 import {
   requireHostedRuntimeCallbackTx,
   revokeHostedRuntimeAiUsageTx,
@@ -60,6 +61,7 @@ const HOSTED_AI_USAGE_STRIPE_EXPORT_DISABLED_MESSAGE =
   "Hosted AI usage is recorded locally; Stripe usage metering is not configured.";
 
 const HOSTED_AI_USAGE_IMMUTABLE_SELECT = {
+  allowanceBeneficiaryMemberId: true,
   operatorTaskId: true,
   apiKeyEnv: true,
   attemptCount: true,
@@ -178,13 +180,33 @@ async function recordHostedAiUsageRecordsForAccounting(input: {
   for (const record of records) {
     const memberId = requireHostedAiUsageMemberId(record, input.trustedUserId ?? null);
     const settlement = await runHostedAiUsageRecordTransaction(prisma, async (tx) => {
+      let allowanceBeneficiaryMemberId: string | null = null;
       if (input.runtimeIdentity !== undefined) {
         if (input.runtimeIdentity !== null && input.runtimeIdentity.userId !== memberId) {
           throw new TypeError("Hosted runtime usage member does not match its authority.");
         }
-        await requireHostedRuntimeCallbackTx(tx, memberId, input.runtimeIdentity);
+        if (input.runtimeIdentity) {
+          await tx.$queryRaw`SELECT phase FROM hosted_runtime_cutover WHERE id = 'runtime' FOR SHARE`;
+          const [funding, recordedFunding] = await Promise.all([
+            tx.hostedRuntimeOwner.findUnique({
+              where: { userId: memberId }, select: { allowanceBeneficiaryMemberId: true },
+            }),
+            tx.hostedAiUsage.findUnique({
+              where: { id: record.usageId, memberId }, select: { allowanceBeneficiaryMemberId: true },
+            }),
+          ]);
+          // The exact callback check below still owns authority. This preliminary
+          // projection only establishes one lock order for source and funder.
+          for (const id of [...new Set([memberId, funding?.allowanceBeneficiaryMemberId ?? memberId,
+            recordedFunding?.allowanceBeneficiaryMemberId ?? memberId])].sort()) {
+            await lockHostedMemberRow(tx, id);
+          }
+        }
+        const owner = await requireHostedRuntimeCallbackTx(tx, memberId, input.runtimeIdentity);
+        allowanceBeneficiaryMemberId = owner?.allowanceBeneficiaryMemberId ?? null;
       }
-      await persistHostedAiUsageRecordTx({
+      const recordedBeneficiary = await persistHostedAiUsageRecordTx({
+        allowanceBeneficiaryMemberId,
         memberId,
         record,
         tx,
@@ -192,6 +214,7 @@ async function recordHostedAiUsageRecordsForAccounting(input: {
 
       if (input.accountAllowance === true) {
         const settlement = await settleHostedAiUsageForAllowanceTx({
+          ...(recordedBeneficiary ? { allowanceBeneficiaryMemberId: recordedBeneficiary } : {}),
           memberId,
           record,
           tx,
@@ -403,15 +426,16 @@ function logHostedAiUsageLimitNoticeDelivery(
 }
 
 async function persistHostedAiUsageRecordTx(input: {
+  allowanceBeneficiaryMemberId?: string | null;
   memberId: string;
   record: AssistantUsageRecord;
   tx: Prisma.TransactionClient;
-}): Promise<void> {
+}): Promise<string | null> {
   const storedRecord = await input.tx.hostedAiUsage.upsert({
     where: {
       id: input.record.usageId,
     },
-    create: buildHostedAiUsageCreateData(input.record, input.memberId),
+    create: { ...buildHostedAiUsageCreateData(input.record, input.memberId), allowanceBeneficiaryMemberId: input.allowanceBeneficiaryMemberId ?? null },
     // Keep this identity-only branch non-empty so Prisma delegates the upsert
     // to PostgreSQL. Exact concurrent replays then serialize on the usage id
     // without changing any immutable usage data.
@@ -430,6 +454,7 @@ async function persistHostedAiUsageRecordTx(input: {
     id: storedRecord.id,
     tx: input.tx,
   });
+  return storedRecord.allowanceBeneficiaryMemberId;
 }
 
 async function runHostedAiUsageRecordTransaction<T>(

@@ -266,7 +266,7 @@ export interface HostedExecutionAssistantNotificationDeliverySource {
 }
 
 export interface HostedExecutionAssistantNotificationDelivery {
-  kind: "explicit" | "participant" | "thread";
+  kind: "explicit" | "participant" | "thread" | "bootstrap";
   source?: HostedExecutionAssistantNotificationDeliverySource | null;
   target: string;
 }
@@ -301,6 +301,8 @@ export interface HostedExecutionOperatorTaskNotification {
 }
 
 export interface HostedExecutionAssistantNotificationRequestedPayload {
+  /** Only a server-admitted game event may bootstrap its route-less group. */
+  gameChatBootstrap?: { gameId: string; eventId: string };
   deliveryDedupeToken?: string | null;
   deliveryDispatchMode?: HostedExecutionAssistantNotificationDeliveryDispatchMode | null;
   deliveryIdempotencyKey?: string | null;

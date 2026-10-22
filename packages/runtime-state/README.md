@@ -128,6 +128,50 @@ unrecognized codes to `unknown`, retaining timing, outcome and failure counts.
 Unknown strings/extra fields are never forwarded. Assistant shell diagnostics
 reuse these catalogs; they do not establish another timing or error vocabulary.
 
+### Optional CLI source cause
+
+The original-error timing observer can add `sourceCause: { code, vaultCode? }`
+to an existing `unknown` failure. It preserves the established failure code,
+stage, count and command/outcome identity; it does not widen the global code
+catalog or change an error, output, exit, tool contract or prompt. Only four
+registered commands admit this detail:
+
+| Command | Existing source decisions retained |
+| --- | --- |
+| `meal edit` | `contract_invalid`, `invalid_timestamp`, or `vault_error` from the event mutation/usecase owners. |
+| `meal remove-photo` | `vault_error`; optionally its own `context.vaultCode` equal to `MEAL_PHOTO_RETENTION_PRECONDITION_FAILED` or `MEAL_PHOTO_RETENTION_MANIFEST_INVALID`, distinguishing retained-byte integrity from manifest failure. The already classified `invalid_operation` is unchanged. |
+| `food search-labels-batch` | The labels client's existing auth, rate limit, HTTP timeout, service availability, other HTTP rejection, body timeout, body-read failure and invalid-response codes. |
+| `research scout-batch` | The scout client's existing auth, rate limit, availability, invalid-response, request-rejection and timeout codes reached by response handling. |
+
+The timing allowlists live in `src/cli-timing.ts`. Provider configuration,
+transport-only errors and other commands gain no new admission. Existing codes
+shared by request and response failures remain subject to their unchanged
+recorded stage. A source code may still combine multiple failures, such as JSON
+and schema rejection; it is evidence of the typed cause, not a diagnosis of an
+earlier production failure.
+
+Wire detail requires an own outer `code` of exactly `unknown`; an unrecognized
+outer code that normalizes to `unknown` cannot authorize it. Capture and wire
+admission read only own data descriptors. They never coerce,
+enumerate, invoke accessors, follow causes/prototypes, or inspect messages,
+arguments, results, status values or arbitrary nested error codes. Unknown or
+malformed detail is omitted independently of the failure. A proxy's descriptor
+trap may execute, but only admitted literals are copied; a throwing trap cannot
+replace the original failure. The two source-cause
+fields participate in variant equality under the existing eight-variant cap;
+`droppedFailures` records omitted observations without changing invocation
+call counts. Existing command, span, report, UDP and usage-body limits remain
+unchanged.
+
+The actual base reader drops only `sourceCause` and coalesces equal legacy
+variants, retaining failures, timing, profiles and token accounting. New readers
+accept absent detail without inventing a cause. Run the history-backed portable
+and hosted checks with `MURPH_CLI_SOURCE_CAUSE_COMPAT_BASE` set to the reviewed
+base. Reader-first deployment preserves measurement coverage; old readers remain
+safe during skew. Natural observations are useful only after authorized
+reader/writer convergence, with repeated profiles deduplicated by turn and
+native command completions kept separate from CLI counts.
+
 `test/cli-timing-process.test.ts` uses actual terminating subprocesses, the
 production source module and a live loopback receiver, including immediate and
 already-bound failures, nested termination and failed/dead transports. CLI
