@@ -72,6 +72,13 @@ export type HostedWebControlTransport = HostedWebControlTransportConfig & {
   ) => Promise<void>;
 };
 
+export interface HostedThreadRouteAuthorityResponseMetadata {
+  responseBodyBytes: number;
+  responseBodyShape: "empty" | "null" | "array" | "scalar" | "object";
+  responseMimeCategory: ReturnType<typeof readHostedWebControlResponseMimeCategory>;
+  responseStatus: number;
+}
+
 interface HostedWebControlPlaneJsonRequest {
   acceptedStatuses?: readonly number[];
   body?: unknown;
@@ -82,6 +89,7 @@ interface HostedWebControlPlaneJsonRequest {
   preserveInitialFailureOnReplayFailure?: boolean;
   replayOnceOnRetryableFailure?: boolean;
   route: HostedRunnerWebControlRoute;
+  routeAuthorityResponseMetadata?: Partial<HostedThreadRouteAuthorityResponseMetadata>;
   sensitiveResponseBody?: {
     maxBytes: number;
   };
@@ -437,8 +445,12 @@ async function fetchHostedWebControlPlaneJsonAttempt(
   const snapshotBodyMetrics = input.route.operation === "device_sync_runtime_snapshot"
     ? { bytesRead: 0 }
     : undefined;
+  const responseBodyMetrics = selectHostedWebControlResponseBodyMetrics(
+    snapshotBodyMetrics,
+    input,
+  );
   const readResponseText = () => readHostedWebControlPlaneResponseText({
-    bodyMetrics: snapshotBodyMetrics,
+    bodyMetrics: responseBodyMetrics,
     description: input.description,
     maxBytes: input.sensitiveResponseBody?.maxBytes,
     response,
@@ -494,6 +506,7 @@ async function fetchHostedWebControlPlaneJsonAttempt(
     requestLogDetails,
     requestStartedAt,
     response,
+    responseBodyMetrics,
     snapshotBodyMetrics,
     text,
   });
@@ -504,6 +517,7 @@ function decodeHostedWebControlPlaneResponseJson({
   requestLogDetails,
   requestStartedAt,
   response,
+  responseBodyMetrics,
   snapshotBodyMetrics,
   text,
 }: {
@@ -511,6 +525,7 @@ function decodeHostedWebControlPlaneResponseJson({
   requestLogDetails: HostedExecutionStructuredLogDetails;
   requestStartedAt: number;
   response: Response;
+  responseBodyMetrics: { bytesRead: number } | undefined;
   snapshotBodyMetrics: { bytesRead: number } | undefined;
   text: string;
 }): unknown {
@@ -558,6 +573,14 @@ function decodeHostedWebControlPlaneResponseJson({
     }
   }
 
+  populateHostedThreadRouteAuthorityResponseMetadata({
+    empty,
+    payload,
+    response,
+    responseBodyMetrics,
+    responseMetadata: input.routeAuthorityResponseMetadata,
+  });
+
   if (snapshotBodyMetrics && !readHostedWebControlPlaneRecord(payload)) {
     const snapshotDetails = describeHostedSnapshotResponseBody(
       response,
@@ -588,6 +611,38 @@ function decodeHostedWebControlPlaneResponseJson({
     }
   }
   return payload;
+}
+
+function selectHostedWebControlResponseBodyMetrics(
+  snapshotBodyMetrics: { bytesRead: number } | undefined,
+  input: HostedWebControlPlaneJsonRequest,
+): { bytesRead: number } | undefined {
+  return snapshotBodyMetrics ?? (input.routeAuthorityResponseMetadata ? { bytesRead: 0 } : undefined);
+}
+
+function populateHostedThreadRouteAuthorityResponseMetadata({
+  empty,
+  payload,
+  response,
+  responseBodyMetrics,
+  responseMetadata,
+}: {
+  empty: boolean;
+  payload: unknown;
+  response: Response;
+  responseBodyMetrics: { bytesRead: number } | undefined;
+  responseMetadata: Partial<HostedThreadRouteAuthorityResponseMetadata> | undefined;
+}): void {
+  if (responseMetadata && responseBodyMetrics) {
+    // Only the external-route effect opts in; its existing parser-failure warning owns emission.
+    responseMetadata.responseBodyBytes = responseBodyMetrics.bytesRead;
+    responseMetadata.responseBodyShape = empty ? "empty"
+      : payload === null ? "null"
+      : Array.isArray(payload) ? "array"
+      : typeof payload === "object" ? "object" : "scalar";
+    responseMetadata.responseMimeCategory = readHostedWebControlResponseMimeCategory(response.headers);
+    responseMetadata.responseStatus = response.status;
+  }
 }
 
 function readHostedWebControlResponseMimeCategory(
