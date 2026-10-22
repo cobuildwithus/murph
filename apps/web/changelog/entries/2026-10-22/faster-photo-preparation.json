@@ -7,7 +7,7 @@
     "priority": 2,
     "title": "Faster photo preparation",
     "summary": "Murph spends less processing time preparing still photos for a reply.",
-    "details": "Photo preparation keeps the same resolution limit while using faster image compression. Download and reply times still depend on the connection and the request.",
+    "details": "Photos keep the same resolution, and Murph spends less time processing them before replying.",
     "relevanceTags": ["photos", "messaging"],
     "sourcePullRequests": [4316]
   }
