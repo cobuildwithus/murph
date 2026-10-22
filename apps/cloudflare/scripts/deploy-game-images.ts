@@ -31,7 +31,7 @@ export async function assertPrivateGameImageVariants(
       throw new Error("Game Images admission failed: account variant bypasses private delivery.");
     }
   }
-  for (const [id, pixels] of [["game-avatar", 600], ["game-photo", 1600]] as const) {
+  for (const [id, pixels] of [["gameavatar", 600], ["gamephoto", 1600]] as const) {
     if (!isRequiredRendition(variants[id], id, pixels)) {
       throw new Error("Game Images admission failed: required private renditions are missing or misconfigured.");
     }
