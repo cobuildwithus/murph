@@ -9,7 +9,7 @@ const game = {
   pendingChange: null,
   changeControls: { canStartNow: false, canEdit: true, canEditSchedule: true, canEditStartDate: false, editableFromDay: 1 },
 };
-const response = (value: object) => ({ action: "read_game", result: { status: "ok", state: { games: [value] } } });
+const response = <T extends object>(value: T) => ({ action: "read_game", result: { status: "ok", state: { games: [value] } } });
 
 describe("additive game reader compatibility", () => {
   it("preserves legacy requests and responses without new optional fields", () => {
