@@ -2373,7 +2373,7 @@ Do not backfill, infer labels for older rows, or reinterpret prior fingerprints.
 ### Finite CLI failure counts (optional, same timing identity)
 
 Each non-successful invocation from a new producer contributes at most one
-`failures: [{ code, stage, count, validation? }]` observation inside its existing
+`failures: [{ code, stage, count, validation?, rejection?, sourceCause? }]` observation inside its existing
 command/outcome entry. For example, a synthetic `experiment session log` throw
 with code `invalid_payload` and context stage `validation` produces that exact
 pair with count 1. A successful invocation has no failure fields. An observed
@@ -2394,6 +2394,14 @@ errors or contexts. The optional schema detail below reads only bounded own
 projection for a typed parser exception as described below. Code-only observations are
 diagnostic hints, not authorization or a claim that a reported stage is independently verified. Existing dynamic-tool
 finite stage/reason/category diagnostics remain separate.
+
+The optional command-gated `sourceCause` for meal edit/photo removal and food/
+research batch response failures is owned by
+[`runtime-state`'s source-cause contract](../packages/runtime-state/README.md#optional-cli-source-cause).
+It preserves the existing `unknown` code and stage rather than widening their
+catalogs. Older readers drop this detail and coalesce the legacy variants while
+retaining failure counts, profiles and token accounting. Absence cannot identify
+an original cause; code-only matches are not proof of a historical failure.
 
 Memory read diagnostics admit exactly `memory_not_found` and
 `memory_document_invalid`, both emitted by the existing CLI owner at `read`.
