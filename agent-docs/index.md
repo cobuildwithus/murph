@@ -1405,3 +1405,7 @@ Security runtime and dependency patching is tracked in
 
 Requested game proposal inactivity handling and CI repair proof are recorded in
 [the delivery remediation](exec-plans/completed/2026-10-21-game-proposal-requested-delivery.md).
+
+Game proposal wording and conversation-activity selection are tracked in
+[`game chat selection and copy`](exec-plans/completed/2026-10-22-game-chat-selection-copy.md);
+`product-specs/weekly-game.md` remains the current behavior owner.
