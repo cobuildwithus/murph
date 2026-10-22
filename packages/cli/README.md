@@ -10,7 +10,7 @@ The repo implementation happens to live in `packages/cli`, but that is a maintai
 
 If you want a local, inspectable assistant that keeps durable truth in normal files you can read, this is the package you install.
 
-Runtime: Node `>= 24.14.1`.
+Runtime: Node `>= 24.22.1`.
 
 Supported host setup path: macOS and Linux.
 

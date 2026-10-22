@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import sharp from "sharp";
+import sharp, { type PngOptions, type Sharp } from "sharp";
 import { describe, test, vi } from "vitest";
 
 import { normalizeAttachmentForStorage } from "../src/indexing/attachment-storage-normalizer.ts";
@@ -44,13 +44,13 @@ describe.sequential("attachment storage intermediate encoding", () => {
     test(`skips temporary PNG compression for ${frameCount} ${transparent ? "transparent" : "opaque"} GIF frames without changing evidence`, async () => {
       const bytes = await createSyntheticGif(frameCount, transparent);
       assert.equal((await sharp(bytes).metadata()).pages, frameCount);
-      const prototype: Pick<sharp.Sharp, "png"> = sharp.prototype;
+      const prototype: Pick<Sharp, "png"> = sharp.prototype;
       const originalPng = prototype.png;
       let useOriginalCompression = true;
       const compressionLevels: Array<number | undefined> = [];
       const pngSpy = vi.spyOn(prototype, "png").mockImplementation(function (
-        this: sharp.Sharp,
-        options?: sharp.PngOptions,
+        this: Sharp,
+        options?: PngOptions,
       ) {
         compressionLevels.push(options?.compressionLevel);
         return useOriginalCompression

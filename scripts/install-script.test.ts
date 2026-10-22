@@ -35,7 +35,7 @@ describe("public install script", () => {
         `#!/usr/bin/env bash
 set -euo pipefail
 if [[ "\${1:-}" == "-p" && "\${2:-}" == "process.versions.node" ]]; then
-  printf '24.14.1\\n'
+  printf '24.22.1\\n'
   exit 0
 fi
 printf 'unexpected node args: %s\\n' "$*" >&2

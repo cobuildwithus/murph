@@ -346,7 +346,7 @@ describe("hosted runner container image contract", () => {
     const runtimePackageJson = buildHostedRunnerRuntimeArtifactPackageJson({
       dependencies: runtimeDependencies,
       engines: {
-        node: ">=24.14.1",
+        node: ">=24.22.1",
       },
       exports: {
         ".": "./dist/index.js",
@@ -409,7 +409,7 @@ describe("hosted runner container image contract", () => {
         ".": "./dist/index.js",
       },
       engines: {
-        node: ">=24.14.1",
+        node: ">=24.22.1",
       },
       dependencies: runtimeDependencies,
     });
@@ -456,9 +456,9 @@ describe("hosted runner container image contract", () => {
 
     expect(baseDockerfile).toContain("ARG CODEX_UPSTREAM_REVISION=83086188ae0614bd882818ff1aa23f3194962012");
     expect(baseDockerfile).toContain("ARG CODEX_CLI_VERSION=0.163.0");
-    expect(baseDockerfile).toContain("ARG NODE_VERSION=24.14.1");
+    expect(baseDockerfile).toContain("ARG NODE_VERSION=24.22.1");
     expect(baseDockerfile).toContain(
-      "ARG NODE_IMAGE_DIGEST=sha256:b506e7321f176aae77317f99d67a24b272c1f09f1d10f1761f2773447d8da26c",
+      "ARG NODE_IMAGE_DIGEST=sha256:55fb5f5a527ea2c5c4a95f963e48ef90aa38c7b346054fdc8ee9957a2b55d205",
     );
     expect(baseDockerfile).toContain(
       "FROM node:${NODE_VERSION}-bookworm-slim@${NODE_IMAGE_DIGEST}\n\nARG NODE_VERSION",

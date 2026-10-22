@@ -186,7 +186,7 @@ describe("runner bundle runtime artifact staging", () => {
             jose: "^6.2.2",
           },
           engines: {
-            node: ">=24.14.1",
+            node: ">=24.22.1",
           },
           exports: {
             ".": {

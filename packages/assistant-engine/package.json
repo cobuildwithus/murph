@@ -131,7 +131,7 @@
     "openai": "6.45.0"
   },
   "engines": {
-    "node": ">=24.14.1"
+    "node": ">=24.22.1"
   },
   "devDependencies": {
     "@openai/codex": "0.163.0",

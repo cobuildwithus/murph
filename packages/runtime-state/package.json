@@ -83,6 +83,6 @@
     "test:coverage": "pnpm exec vitest run --config vitest.config.ts --coverage"
   },
   "engines": {
-    "node": ">=24.14.1"
+    "node": ">=24.22.1"
   }
 }
