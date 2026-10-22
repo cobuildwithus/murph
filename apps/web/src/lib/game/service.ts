@@ -58,6 +58,7 @@ import {
 import { gameLocalDate } from "./time";
 import { decideGameChange, gameChangeControls, isGameChangeExpired, parsePendingGameChange } from "./changes";
 import { deliverGameChangeProposal } from "./chat-delivery";
+import { claimGamePostNotification, deliverGamePostNotification } from "./post-notification";
 import { buildGameView, gameMediaUrl, termsView, ticketView, visibleEntryIds, type GameTicketRow } from "./views";
 
 export { isGameEnabledFor, mediaKeyPrefixFor } from "./access";
@@ -532,6 +533,7 @@ async function post(context: CommandContext, command: Extract<GameCommand, { typ
     ? await seal({ field: "text", memberId: actor, rowId: entryId, table: "game_entry" }, command.text)
     : null;
   const captureAgeMs = command.captureAgeMs ?? null;
+  let notification: Awaited<ReturnType<typeof claimGamePostNotification>> = null;
   await runLocked(gameId, context, async ({ clock, loaded, now, tx }) => {
     // A repeat of a post that already landed (a retry, or the same tap twice) changes nothing.
     const existing = await tx.gameEntry.findUnique({ select: { memberId: true }, where: { id: entryId } });
@@ -568,8 +570,12 @@ async function post(context: CommandContext, command: Extract<GameCommand, { typ
       },
     });
     const { attempt, dayIndex, graceUsed } = decision;
+    if (kind !== "excuse" && attempt === 1) {
+      notification = await claimGamePostNotification(tx, { gameId, actor, players: loaded.row.players, clock });
+    }
     return [{ payload: { attempt, dayIndex, entryId, graceUsed, kind }, type: "posted" }];
   });
+  await deliverGamePostNotification(notification);
   return gameId;
 }
 

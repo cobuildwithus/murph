@@ -3,7 +3,12 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+
+const push = vi.hoisted(() => vi.fn().mockResolvedValue("sent"));
+vi.mock("@/src/lib/apple-push/send", async (original) => ({
+  ...await original<typeof import("@/src/lib/apple-push/send")>(), sendApplePush: push,
+}));
 
 import type { GameCommand, GameTermsInput } from "@/src/lib/game/contract";
 import { putGameMedia } from "@/src/lib/game/media";
@@ -43,6 +48,21 @@ async function member(firstName: string, timeZone: string): Promise<string> {
   memberIds.push(id);
   await ok(id, { firstName, timeZone, type: "setProfile" });
   return id;
+}
+
+async function pushRoute(memberId: string, alertsAllowed = true): Promise<string> {
+  const sessionId = randomUUID();
+  const now = new Date();
+  await getPrisma().hostedAuthRecord.create({ data: {
+    model: "session", id: sessionId, memberId, payloadEncrypted: "synthetic-unused-by-delivery",
+    expiresAt: new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000), createdAt: now, updatedAt: now,
+  } });
+  await getPrisma().companionPushRoute.create({ data: {
+    userId: memberId, installationId: randomUUID(), token: "ab".repeat(32),
+    topic: "ai.withmurph.app.dev", environment: "development",
+    alertsAllowed, gameSessionId: sessionId, updatedAt: now,
+  } });
+  return sessionId;
 }
 
 async function run(actor: string, command: GameCommand) {
@@ -102,16 +122,88 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     await rm(mediaDir, { force: true, recursive: true });
   });
 
+  it("caps concurrent retries and retakes per recipient and game, then allows the next recipient day", async () => {
+    const poster = await member("Poster", "America/New_York");
+    const recipient = await member("Recipient", "America/New_York");
+    for (const id of [poster, recipient]) {
+      await pushRoute(id);
+    }
+    const { gameId } = await startGame(poster, recipient);
+    await devStartNow(gameId, poster);
+    const command = await photo(poster, gameId, "notification-first");
+    push.mockClear();
+    const results = await Promise.all([ok(poster, command), ok(poster, command)]);
+    expect(results.every((result) => result?.id === gameId)).toBe(true);
+    expect(push).toHaveBeenCalledTimes(1);
+    expect(push.mock.calls[0]?.[0].data).toEqual({ gameId, notification: "game_post" });
+    expect(await authorizeMediaRead(recipient, command.mediaKeys[0]!)).toBe(false);
+    await ok(poster, await photo(poster, gameId, "notification-retake"));
+    expect(push).toHaveBeenCalledTimes(1);
+    await ok(recipient, await photo(recipient, gameId, "notification-other-direction"));
+    expect(push).toHaveBeenCalledTimes(2);
+    const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000);
+    expect((await runGameCommand({
+      actorMemberId: poster, command: await photo(poster, gameId, "notification-next-day"), now: tomorrow,
+    })).ok).toBe(true);
+    expect(push).toHaveBeenCalledTimes(3);
+    const receipts = await getPrisma().gameEvent.findMany({ where: { gameId, type: "post_notification" } });
+    expect(receipts).toHaveLength(3);
+    expect(new Set(receipts.map((receipt) => receipt.commandKey)).size).toBe(3);
+
+    const third = await member("Third", "America/New_York");
+    const another = await startGame(third, recipient);
+    await devStartNow(another.gameId, third);
+    await ok(third, await photo(third, another.gameId, "notification-another-game"));
+    expect(push).toHaveBeenCalledTimes(4);
+  });
+
+  it("never notifies for excuses, denied alerts or a rejected post, and preserves accepted posts after push failure", async () => {
+    const poster = await member("Sender", "America/New_York");
+    const recipient = await member("Receiver", "America/New_York");
+    const sessionId = await pushRoute(recipient, false);
+    const { gameId } = await startGame(poster, recipient);
+    await devStartNow(gameId, poster);
+    push.mockClear();
+    await ok(poster, await photo(poster, gameId, "notification-denied"));
+    expect(push).not.toHaveBeenCalled();
+    await getPrisma().companionPushRoute.update({ where: { userId: recipient }, data: { alertsAllowed: true } });
+    push.mockRejectedValueOnce(new Error("synthetic uncertain push"));
+    const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000);
+    const next = await photo(poster, gameId, "notification-provider-failure");
+    expect((await runGameCommand({ actorMemberId: poster, command: next, now: tomorrow })).ok).toBe(true);
+    expect((await runGameCommand({ actorMemberId: poster, command: next, now: tomorrow })).ok).toBe(true);
+    expect(push).toHaveBeenCalledTimes(1);
+    expect(await getPrisma().gameEntry.findUnique({ where: { id: next.entryId } })).not.toBeNull();
+    expect(await getPrisma().gameEvent.findFirst({ where: { gameId, type: "post_notification" } })).toMatchObject({
+      payload: { outcome: "failed" },
+    });
+    const later = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000);
+    expect((await runGameCommand({
+      actorMemberId: poster, now: later,
+      command: { type: "post", gameId, entryId: randomUUID(), kind: "excuse", mediaKeys: [], text: "Travel day" },
+    })).ok).toBe(true);
+    expect(push).toHaveBeenCalledTimes(1);
+    // Even a late address write after DELETE is inert once logout revokes its session.
+    await getPrisma().hostedAuthRecord.delete({ where: { model_id: { model: "session", id: sessionId } } });
+    expect((await runGameCommand({
+      actorMemberId: poster, now: later, command: await photo(poster, gameId, "notification-after-signout"),
+    })).ok).toBe(true);
+    expect(push).toHaveBeenCalledTimes(1);
+  });
+
   it("stores the agreed graph, rejects photos, and preserves private media and retries", async () => {
     const leo = await member("Leo", "America/New_York");
     const ava = await member("Ava", "America/New_York");
     const stranger = await member("Sam", "UTC");
     const { gameId } = await startGame(leo, ava, { terms: { ...TERMS, checkInKind: "heart_rate" } });
+    await pushRoute(leo);
+    push.mockClear();
     await devStartNow(gameId, leo);
     expect((await readGame(gameId, leo))?.terms.checkInKind).toBe("heart_rate");
     const key = await upload(ava, "synthetic-graph");
     const graph: GameCommand = { type: "post", entryId: randomUUID(), gameId, kind: "heart_rate", mediaKeys: [key] };
     const accepted = await ok(ava, graph);
+    expect(push).toHaveBeenCalledTimes(1);
     expect(accepted?.days[0]?.mine).toMatchObject({ kind: "heart_rate" });
     await ok(ava, graph);
     expect(await getPrisma().gameEntry.count({ where: { gameId, memberId: ava } })).toBe(1);

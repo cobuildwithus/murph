@@ -5463,6 +5463,38 @@ falls back to the existing entry visibility rule. Public preview shapes stay
 unchanged. Deploy the nullable-column migration before Web and the new native
 client; old native clients continue sending name and zone without clearing photos.
 
+### Weekly game post notifications
+
+The posting transaction claims one `game_event` receipt of type
+`post_notification`, using the existing unique `command_key` over game,
+recipient and recipient-local 3am day. First photo/heart-rate attempts qualify;
+retakes and excuses do not. The current 1v1 roster admits one recipient. A
+successful post adds at most one narrow route read and one claim insert under
+its existing game lock, with no external work. After commit, one route read
+revalidates permission, token, suspension and the live unexpired registering
+session, then at most one 2.5-second APNs
+attempt and one receipt update record sent, failed, unregistered or superseded.
+An unregistered token adds one exact-token deletion. Peak added database and
+provider concurrency is one. A crash or ambiguous provider result leaves the
+claim consumed; this optional best-effort alert is never replayed.
+
+`POST /api/game/v1/push-route` uses game bearer admission, allowing free players
+to register the existing `companion_push_route` address and explicit alert
+permission. The nullable `game_session_id` binds game enrollment to the
+registering native session; registration rechecks that session under the auth
+owner lock. Revocation makes a late registration inert even if it arrives after
+installation deletion. Legacy wearable-only registrations remain unenrolled. A companion registration
+keeps game enrollment only when its installation and complete push target are
+unchanged; replacing the address clears the old session binding under the same
+member lock.
+Companion installation-scoped deletion still owns sign-out. Native
+uses the existing notification delegate; the alert's structural game id selects
+an authenticated game after refresh. No entry content leaves the game reader.
+Apply the additive nullable game-session migration, then deploy Web before
+the updated app. Old route writers leave enrollment absent; old readers tolerate
+the extra column. Rolling back Web leaves inert enrollment metadata. No game
+claim or native session credential is replayed during rollback.
+
 ### Weekly game chat changes
 
 `game.pending_change` is one versioned structural proposal serialized with the

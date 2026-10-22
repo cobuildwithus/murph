@@ -822,7 +822,7 @@ Package verifier worker-exit result preservation is tracked in
 | `agent-docs/product-specs/hosted-usage-topups.md` | Hosted billing/product spec, including 80% top-up usage grants, preserved historical purchase terms, and migration-first sponsorship compatibility. | Hosted billing/product spec | High | 2026-09-22 |
 | `agent-docs/product-specs/hosted-usage-referrals.md` | Hosted growth/product spec. | Hosted growth/product spec | High | 2026-08-10 |
 | `agent-docs/product-specs/physical-notes.md` | Hosted physical-note product spec. | Hosted physical-note product spec | High | 2026-08-21 |
-| `agent-docs/product-specs/weekly-game.md` | Private 1v1 weekly habit game in the Murph app, shipped dark: invite link previews, live games per opponent, one shared Day 1 date across time zones, picked start dates, Start now, photo and heart-rate graph post-to-unlock, sealed hosted image storage, synced self profile photos with private overrides and export separation, retakes, transcript-only excuses, offline grace and refused stale captures, settle on read, tickets with use-by dates, addressed rematches and rounds, retries, and deferred scope. | Weekly game product spec | High | 2026-10-18 |
+| `agent-docs/product-specs/weekly-game.md` | Private 1v1 weekly habit game in the Murph app, shipped dark: invite link previews, live games per opponent, one shared Day 1 date across time zones, picked start dates, Start now, photo and heart-rate graph post-to-unlock, sealed hosted image storage, synced self profile photos with private overrides and export separation, retakes, daily-capped iPhone post alerts, transcript-only excuses, offline grace and refused stale captures, settle on read, tickets with use-by dates, addressed rematches and rounds, retries, and deferred scope. | Weekly game product spec | High | 2026-10-18 |
 | `agent-docs/product-specs/hosted-support-escalation.md` | Hosted support product spec. | Hosted support product spec | High | 2026-08-05 |
 | `agent-docs/product-specs/hosted-family-plan.md` | Hosted billing/product spec. | Hosted billing/product spec | High | 2026-08-10 |
 | `agent-docs/product-specs/health-commons.md` | Health Commons behavior. | Health Commons behavior | High | 2026-10-19 |
@@ -1405,3 +1405,6 @@ Security runtime and dependency patching is tracked in
 
 Requested game proposal inactivity handling and CI repair proof are recorded in
 [the delivery remediation](exec-plans/completed/2026-10-21-game-proposal-requested-delivery.md).
+
+Daily game post push limits, session-bound device enrollment and verification are
+recorded in [game post notifications](exec-plans/completed/2026-10-21-game-daily-notifications.md).
