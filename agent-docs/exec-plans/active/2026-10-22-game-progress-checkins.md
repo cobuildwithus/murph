@@ -76,3 +76,35 @@ snapshots live with the optional measurement fixture.
 Parent owns final review, CI, plan closure and deployment. Compatible runtime
 consumers and the nullable profile migration must precede the new Web producers;
 refresh active runtimes. No native app release or production replay has occurred.
+
+
+## Review remediation: accepted attachment identity
+
+The first importer incorrectly expected a URL in an accepted Linq wake. Real
+webhook normalization intentionally strips signed URLs and retains attachment ID
+and MIME. Selection now uses that durable identity, so offers require no network.
+Consented saves refresh metadata through the existing Linq SDK boundary (3-second
+budget, 16 KiB metadata bound, no SDK retries) outside the database transaction.
+Exact returned ID, supported MIME, declared size and the fixed CDN origin are
+checked before the existing bounded download, encryption and guarded normal post.
+No signed URL is stored in the mailbox, pending offer or game state.
+
+Proof now exercises the actual group webhook planner's URL-free mailbox append,
+and the production mailbox normalizer feeds the PostgreSQL offer/yes/save/retry
+journey. The latter uses the real importer, a synthetic provider metadata/byte
+boundary and the canonical post: offer performs no metadata or byte fetch, yes
+fetches once, retry creates no second fetch or entry. Previous forged URL-bearing
+wake fixtures have been removed. Provider-boundary tests exercise real SDK
+retrieval, no retry on failure and the metadata byte cap; media tests preserve
+unsafe locator, changed identity/MIME, size, magic and redirect safeguards.
+
+The Cloudflare local expectation helper also now represents the independently
+gated photo tool, fixing its stale all-tools/base-tools expectation. Production
+tool advertisement and prompts are unchanged by this remediation; the existing
+eight live-model journeys and complete-input measurements remain applicable.
+
+Remediation checks: 193 focused Web media/provider/group-ingress tests, three
+isolated PostgreSQL game proofs and 40 Cloudflare local advertisement tests pass.
+Web and Cloudflare typechecks, Web lint (existing warnings), docs drift, diff
+whitespace and changed-source complexity checks pass. No new model instructions,
+schema fields, migration or production mutation are part of this correction.

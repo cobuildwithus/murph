@@ -1,4 +1,5 @@
 import "server-only";
+import { readHostedLinqAttachment } from "../hosted-onboarding/linq-client";
 import type { HostedExecutionConversationMessageWake } from "@murphai/hosted-execution/contracts";
 import { GAME_MEDIA_MAX_BYTES, matchesGameMediaContentType, parseGameMediaContentType, type GameMediaContentType } from "./media";
 
@@ -6,19 +7,20 @@ import { GAME_MEDIA_MAX_BYTES, matchesGameMediaContentType, parseGameMediaConten
 export function gamePhotoAttachment(wake: HostedExecutionConversationMessageWake, ordinal: number) {
   if (wake.message.channel !== "linq") return null;
   const part = wake.message.linqMessage.parts.filter((item) => item.type === "media" || item.type === "voice_memo")[ordinal - 1];
-  if (!part || part.type !== "media" || !part.url) return null;
-  const type = parseGameMediaContentType(part.mimeType ?? null);
-  if (!type) return null;
-  try {
-    const url = new URL(part.url);
-    if (url.origin !== "https://cdn.linqapp.com" || url.username || url.password) return null;
-    return { url: url.toString(), contentType: type };
-  } catch { return null; }
+  if (!part || part.type !== "media" || !part.attachmentId?.trim()) return null;
+  const contentType = parseGameMediaContentType(part.mimeType ?? null);
+  return contentType ? { attachmentId: part.attachmentId, contentType } : null;
 }
 
-/** No redirects, credential forwarding, arbitrary hosts or unbounded bodies. */
-export async function downloadGameChatPhoto(source: { url: string; contentType: GameMediaContentType }) {
-  const response = await fetch(source.url, { redirect: "error", signal: AbortSignal.timeout(8_000), cache: "no-store" });
+/** Resolve only after consent, outside transactions. Locators stay request-local. */
+export async function downloadGameChatPhoto(source: { attachmentId: string; contentType: GameMediaContentType }) {
+  const attachment = await readHostedLinqAttachment(source.attachmentId);
+  if (attachment.id !== source.attachmentId || parseGameMediaContentType(attachment.content_type) !== source.contentType || !attachment.download_url) throw new Error("Game photo is unavailable.");
+  if (!Number.isFinite(attachment.size_bytes) || attachment.size_bytes < 0 || attachment.size_bytes > GAME_MEDIA_MAX_BYTES) throw new Error("Game photo is too large.");
+  const url = new URL(attachment.download_url);
+  if (url.origin !== "https://cdn.linqapp.com" || url.username || url.password) throw new Error("Game photo is unavailable.");
+  // No redirects, credential forwarding, arbitrary hosts or unbounded bodies.
+  const response = await fetch(url.toString(), { redirect: "error", signal: AbortSignal.timeout(8_000), cache: "no-store" });
   if (!response.ok || !response.body) throw new Error("Game photo is unavailable.");
   const length = Number(response.headers.get("content-length") ?? 0);
   if (!Number.isFinite(length) || length > GAME_MEDIA_MAX_BYTES) { await response.body.cancel(); throw new Error("Game photo is too large."); }

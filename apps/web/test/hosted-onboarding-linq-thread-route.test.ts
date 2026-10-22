@@ -3494,9 +3494,13 @@ describe("Linq explicit external-thread routing", () => {
     });
 
     const plan = await planHostedOnboardingLinqWebhook({
-      event: buildLinqMessageReceivedEvent({}),
+      event: buildLinqMessageReceivedEvent({ parts: [{ type: "media", attachment_id: "synthetic-photo", mime_type: "image/jpeg", url: "https://cdn.linqapp.com/expired?signature=synthetic" }] }),
       prisma: prisma as never,
     });
+
+    const accepted = vi.mocked(mailboxStore.appendHostedMailboxEnvelopeTx).mock.calls.at(-1)?.[0].envelope;
+    expect(accepted).toMatchObject({ message: { channel: "linq", linqMessage: { parts: [{ type: "media", attachmentId: "synthetic-photo", mimeType: "image/jpeg" }] } } });
+    expect(JSON.stringify(accepted)).not.toContain("signature");
 
     expect(plan.response).toMatchObject({
       ignored: false,

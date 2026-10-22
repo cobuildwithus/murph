@@ -1442,5 +1442,7 @@ Game proposal wording and conversation-activity selection are tracked in
 
 Shared game progress and chat photo check-ins are tracked in
 [`game progress and check-ins`](exec-plans/active/2026-10-22-game-progress-checkins.md).
+That plan includes accepted attachment-ID import and consent-time URL refresh;
+the weekly game spec and architecture own the URL-free mailbox contract.
 Challenge negotiation and encrypted task/stake changes are tracked in
 [`game negotiation`](exec-plans/completed/2026-10-22-game-negotiation.md).

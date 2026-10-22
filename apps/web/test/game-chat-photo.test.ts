@@ -12,7 +12,7 @@ const ref = "ain_" + "a".repeat(32), yesRef = "ain_" + "b".repeat(32);
 const offer = { v: 1, gameId: "game_synthetic", containerMemberId: "room_synthetic", sourceMessageRef: ref, attachmentOrdinal: 1, dayIndex: 0, expiresAt: "2030-03-04T12:30:00.000Z", resolutionMessageRef: null };
 function wake(): HostedExecutionConversationMessageWake {
   return { eventId: "event_synthetic", kind: "conversation.message", occurredAt: now.toISOString(), userId: "room_synthetic", message: {
-    channel: "linq", phoneLookupKey: "synthetic-phone-key", linqMessage: { chatId: "chat_synthetic", from: "+15555550101", isFromMe: false, messageId: "message_synthetic", threadIsDirect: false, parts: [{ type: "media", mimeType: "image/jpeg", url: "https://cdn.linqapp.com/synthetic.jpg" }] },
+    channel: "linq", phoneLookupKey: "synthetic-phone-key", linqMessage: { chatId: "chat_synthetic", from: "+15555550101", isFromMe: false, messageId: "message_synthetic", threadIsDirect: false, parts: [{ type: "media", mimeType: "image/jpeg", attachmentId: "synthetic-attachment" }] },
   } };
 }
 const authorize = vi.fn<(tx: object, messageRef: string) => Promise<{ actor: string; wake: HostedExecutionConversationMessageWake }>>().mockResolvedValue({ actor: "player_synthetic", wake: wake() });

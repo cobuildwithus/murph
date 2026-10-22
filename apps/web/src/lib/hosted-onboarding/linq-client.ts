@@ -84,6 +84,17 @@ export async function readHostedLinqFailedMessage(messageId: string): Promise<Me
   });
 }
 
+/** Refresh a received attachment locator only for an authorized import. Never persist it. */
+export async function readHostedLinqAttachment(attachmentId: string) {
+  return requestHostedLinqSdkOrThrow({
+    operation: "attachment retrieve",
+    request: (client) => client.attachments.retrieve(attachmentId),
+    timeoutMessage: "Linq attachment retrieval timed out.",
+    timeoutMs: 3_000,
+    maxResponseBytes: 16 * 1024,
+  });
+}
+
 export async function resendHostedLinqMessage(input: {
   chatId: string;
   message: MessageSendParams["message"];

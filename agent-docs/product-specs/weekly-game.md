@@ -237,6 +237,8 @@ live-camera honor rule to user-submitted chat photos. It does not verify the
 activity, read camera capture time, backdate a post or satisfy a heart-rate
 challenge. The server resolves both the current requester and original photo
 sender. Only their own photo in the same room and current game day qualifies.
+An offer remembers the accepted attachment identity without fetching it. Only
+a consented save refreshes its temporary provider download URL and imports bytes.
 The usual two attempts, replacement, scoring and post notifications still apply.
 An existing post needs explicit replacement consent before consuming the retake.
 

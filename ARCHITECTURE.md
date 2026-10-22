@@ -5626,8 +5626,12 @@ member introduction and its versioned exact selection. The latter contains
 only structural source refs, room/game/day identity, expiry and resolution ref;
 no image, message text or provider URL is persisted there. Offer and dismissal
 writes revalidate accepted sender/runtime authority in the transaction. A
-consented save resolves the immutable original accepted Linq attachment, rejects
-other senders/rooms/days, downloads at most 4 MiB from the fixed Linq CDN with
+consented save selects the immutable original accepted Linq attachment ID and
+MIME type; canonical mailbox payloads deliberately omit download URLs. Offers
+perform no provider lookup. Saving refreshes the locator through the bounded
+Linq SDK boundary outside the transaction, verifies its exact ID and MIME, and
+keeps that locator request-local. It rejects other senders/rooms/days and
+downloads at most 4 MiB from the fixed Linq CDN with
 redirects disabled, then seals the bytes under the player's game key outside the
 transaction. No model-controlled URL, member ID or raw filesystem path crosses
 this tool boundary. Ordinary `runGameCommand(post)` owns the write and checks the

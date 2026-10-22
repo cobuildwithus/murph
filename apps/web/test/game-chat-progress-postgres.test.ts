@@ -1,14 +1,15 @@
 import { randomUUID } from "node:crypto";
-import { afterAll, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { getPrisma } from "../src/lib/prisma";
 import { handleGameChatPhoto } from "../src/lib/game/chat-photo";
-import type { HostedExecutionConversationMessageWake } from "@murphai/hosted-execution/contracts";
+import { buildHostedLinqConversationWakeForMailbox } from "../src/lib/hosted-onboarding/webhook-provider-linq";
 import { readGameChatState, runGameCommand } from "../src/lib/game/service";
 import { mediaKeyPrefixFor } from "../src/lib/game/access";
 import { addDays, gameLocalDate } from "../src/lib/game/time";
 vi.mock("../src/lib/game/chat-delivery", () => ({ deliverGameChangeProposal: async () => {} }));
 vi.mock("../src/lib/game/media", async (original) => ({ ...await original<typeof import("../src/lib/game/media")>(), isGameMediaStorageAvailable: () => true, putGameMedia: async ({ prefix }: { prefix: string }) => `${prefix}${"b".repeat(64)}.jpg`, statGameMedia: async () => ({ byteLength: 3, contentType: "image/jpeg" }), isGameMediaKey: (key: string) => /^[A-Za-z0-9_/-]+\/[a-f0-9]{64}\.jpg$/u.test(key) }));
-vi.mock("../src/lib/game/chat-photo-media", async (original) => ({ ...await original<typeof import("../src/lib/game/chat-photo-media")>(), downloadGameChatPhoto: async () => ({ bytes: new Uint8Array([255,216,255]), contentType: "image/jpeg" }) }));
+const photoProvider = vi.hoisted(() => ({ metadata: vi.fn() }));
+vi.mock("../src/lib/hosted-onboarding/linq-client", async (original) => ({ ...await original<typeof import("../src/lib/hosted-onboarding/linq-client")>(), readHostedLinqAttachment: photoProvider.metadata }));
 const enabled = process.env.MURPH_TEST_POSTGRES_CONCURRENCY === "1";
 if (enabled && !/^postgres(?:ql)?:\/\/[^/]*@(?:127\.0\.0\.1|localhost):\d+\/murph_test_/u.test(process.env.DATABASE_URL ?? "")) throw new Error("Game progress proof requires an isolated local test database.");
 const members: string[] = [];
@@ -27,6 +28,7 @@ async function fixture() {
   return { a,b,room,gameId,db };
 }
 describe.skipIf(!enabled)("shared game progress canonical PostgreSQL proof", () => {
+  afterEach(() => vi.unstubAllGlobals());
   afterAll(async () => { await getPrisma().hostedMember.deleteMany({ where: { id: { in: members } } }); });
   it("settles on the shared read and returns frozen scores and grouped tickets exactly once", async () => {
     const {a,b,room,gameId,db} = await fixture();
@@ -66,16 +68,33 @@ describe.skipIf(!enabled)("shared game progress canonical PostgreSQL proof", () 
     await db.gamePlayer.updateMany({ where: { gameId }, data: { dayOne: new Date(`${dayOne}T00:00:00Z`) } });
     const sourceRef = `ain_${randomUUID()}`, yesRef = `ain_${randomUUID()}`;
     const alternateRoom = `secondary_${randomUUID()}`;
-    const wake: HostedExecutionConversationMessageWake = { eventId: "synthetic-photo-event", kind: "conversation.message", occurredAt: now.toISOString(), userId: alternateRoom,
-      message: { channel: "linq", phoneLookupKey: "synthetic-phone-key", linqMessage: { chatId: "synthetic-chat", from: "+15555550101", isFromMe: false, messageId: "synthetic-message", threadIsDirect: false, parts: [{ type: "media", mimeType: "image/jpeg", url: "https://cdn.linqapp.com/synthetic.jpg" }] } } };
-    const common = { actor: a, containerMemberId: alternateRoom, playerMemberIds: [a,b], authorize: async () => ({ actor: a, wake }) };
+    const wake = buildHostedLinqConversationWakeForMailbox({ eventId: "synthetic-photo-event", occurredAt: now.toISOString(), userId: alternateRoom,
+      routeAuthority: { channel: "linq", accountLookupKey: "synthetic-line-key", containerMemberId: alternateRoom, threadId: "synthetic-chat" },
+      senderMemberId: a, participantContact: { kind: "phone", lookupKey: "synthetic-phone-key" },
+      linqMessage: { chatId: "synthetic-chat", from: "+15555550101", isFromMe: false, messageId: "synthetic-message", threadIsDirect: false },
+      rawParts: [{ type: "media", attachment_id: "synthetic-attachment", mime_type: "image/jpeg", url: "https://cdn.linqapp.com/expired?signature=synthetic" }] });
+    const yesWake = buildHostedLinqConversationWakeForMailbox({ eventId: "synthetic-yes-event", occurredAt: now.toISOString(), userId: alternateRoom,
+      routeAuthority: { channel: "linq", accountLookupKey: "synthetic-line-key", containerMemberId: alternateRoom, threadId: "synthetic-chat" },
+      senderMemberId: a, participantContact: { kind: "phone", lookupKey: "synthetic-phone-key" },
+      linqMessage: { chatId: "synthetic-chat", from: "+15555550101", isFromMe: false, messageId: "synthetic-yes", threadIsDirect: false }, rawParts: [{ type: "text", value: "Yes" }] });
+    // Exercise the production webhook-to-mailbox normalizer: signed URLs never survive acceptance.
+    expect(wake.message.linqMessage.parts).toEqual([{ type: "media", attachmentId: "synthetic-attachment", mimeType: "image/jpeg" }]);
+    expect(JSON.stringify(wake)).not.toContain("signature");
+    const common = { actor: a, containerMemberId: alternateRoom, playerMemberIds: [a,b], authorize: async (_tx: unknown, ref: string) => ({ actor: a, wake: ref === sourceRef ? wake : yesWake }) };
+    photoProvider.metadata.mockReset().mockResolvedValue({ id: "synthetic-attachment", content_type: "image/jpeg", size_bytes: 3, download_url: "https://cdn.linqapp.com/refreshed?signature=synthetic" });
+    const download = vi.fn(async () => new Response(new Uint8Array([255,216,255])));
+    vi.stubGlobal("fetch", download);
     const offered = await handleGameChatPhoto({ ...common, messageRef: sourceRef, photo: { operation: "offer", gameId, sourceMessageRef: sourceRef, attachmentOrdinal: 1 } });
     expect(offered).toEqual({ status: "ok", photoOutcome: "offer" });
     expect(await db.gameEntry.count({ where: { gameId } })).toBe(0);
+    expect(photoProvider.metadata).not.toHaveBeenCalled();
+    expect(download).not.toHaveBeenCalled();
     const yes = { ...common, messageRef: yesRef, photo: { operation: "save" as const, gameId } };
     expect(await handleGameChatPhoto({ ...yes, containerMemberId: room })).toMatchObject({ error: "photo_offer_expired" });
     expect(await handleGameChatPhoto(yes)).toEqual({ status: "ok", photoOutcome: "saved" });
     expect(await handleGameChatPhoto(yes)).toEqual({ status: "ok", photoOutcome: "saved" });
+    expect(photoProvider.metadata).toHaveBeenCalledExactlyOnceWith("synthetic-attachment");
+    expect(download).toHaveBeenCalledExactlyOnceWith("https://cdn.linqapp.com/refreshed?signature=synthetic", expect.objectContaining({ redirect: "error" }));
     expect(await db.gameEntry.count({ where: { gameId } })).toBe(1);
     expect((await db.gameEntry.findFirstOrThrow({ where: { gameId } })).memberId).toBe(a);
     expect((await db.game.findUniqueOrThrow({ where: { id: gameId } })).chatContainerMemberId).toBe(room);
