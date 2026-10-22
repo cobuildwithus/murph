@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "@prisma/client";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   HOSTED_THREAD_CONTAINER_PARTICIPANT_ACCESS_LEASE_MS,
@@ -28,6 +28,8 @@ if (runPostgresProof) {
 
 describe.skipIf(!runPostgresProof)("hosted member-access PostgreSQL projection", () => {
   it("matches live direct, Family, owner and leased participant access in one SQL statement", async () => {
+    // The separate game-room proof covers its optional fallback discovery.
+    vi.stubEnv("MURPH_GAME_ENABLED", "false");
     const prisma = new PrismaClient({
       adapter: new PrismaPg({ connectionString: databaseUrl }),
       log: [{ emit: "event", level: "query" }],
@@ -128,6 +130,7 @@ describe.skipIf(!runPostgresProof)("hosted member-access PostgreSQL projection",
       await prisma.hostedAccountGroup.deleteMany({ where: { id: groupId } });
       await prisma.hostedMember.deleteMany({ where: { id: { in: memberIds } } });
       await prisma.$disconnect();
+      vi.unstubAllEnvs();
     }
   });
 });

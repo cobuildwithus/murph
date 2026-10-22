@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  readGameChatAllowanceBeneficiary: vi.fn(),
   hasHostedGroupAutomaticRefillAvailable: vi.fn(),
   hasHostedRuntimeActiveAccess: vi.fn(),
   readHostedAiUsageGate: vi.fn(),
@@ -9,6 +10,9 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("server-only", () => ({}));
+vi.mock("@/src/lib/hosted-onboarding/member-access", () => ({
+  readGameChatAllowanceBeneficiary: mocks.readGameChatAllowanceBeneficiary,
+}));
 
 vi.mock("@/src/lib/hosted-execution/usage-allowance", () => ({
   readHostedAiUsageGate: mocks.readHostedAiUsageGate,
@@ -50,6 +54,7 @@ const TEST_HMAC_KEY = Buffer.alloc(32, 7).toString("base64url");
 describe("hosted group usage funding", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.readGameChatAllowanceBeneficiary.mockResolvedValue(null);
     process.env.HOSTED_APP_SESSION_HMAC_KEY = TEST_HMAC_KEY;
     mocks.hasHostedGroupAutomaticRefillAvailable.mockResolvedValue(false);
     mocks.hasHostedRuntimeActiveAccess.mockResolvedValue(true);
@@ -57,6 +62,19 @@ describe("hosted group usage funding", () => {
       "not_sponsored",
     );
     mocks.resolveHostedPublicBaseUrl.mockReturnValue("https://www.withmurph.ai");
+  });
+
+  it("resolves an old duplicate-room funding link to its current shared beneficiary only while eligible", async () => {
+    const locator = buildHostedGroupUsageFundingLocatorForRuntimeMember("synthetic_alternate_room") ?? "";
+    const prisma = { hostedGroup: { findUnique: vi.fn(async () => null) },
+      hostedThreadContainer: { findUnique: vi.fn(async () => ({ memberId: "synthetic_alternate_room" })) } };
+    mocks.readGameChatAllowanceBeneficiary.mockResolvedValue("synthetic_primary_room");
+    await expect(readHostedGroupUsageFundingTargetByLocator({ locator, prisma: prisma as never }))
+      .resolves.toMatchObject({ runtimeMemberId: "synthetic_primary_room" });
+    // A paid room or a changed roster no longer aliases its purchases.
+    mocks.readGameChatAllowanceBeneficiary.mockResolvedValue(null);
+    await expect(readHostedGroupUsageFundingTargetByLocator({ locator, prisma: prisma as never }))
+      .resolves.toMatchObject({ runtimeMemberId: "synthetic_alternate_room" });
   });
 
   it.each([
@@ -155,6 +173,17 @@ describe("hosted group usage funding", () => {
     });
     expect(mocks.readHostedAiUsageGate).not.toHaveBeenCalled();
     expect(mocks.hasHostedGroupAutomaticRefillAvailable).not.toHaveBeenCalled();
+  });
+
+  it("checks refill and generates recovery links against the shared game allowance", async () => {
+    const prisma = { hostedGroup: { findUnique: vi.fn(async () => null) },
+      hostedThreadContainer: { findUnique: vi.fn(async () => ({ memberId: "synthetic_alternate_room" })) } };
+    mocks.readGameChatAllowanceBeneficiary.mockResolvedValue("synthetic_primary_room");
+    mocks.readHostedAiUsageGate.mockResolvedValue({ allowanceSource: "thread_container", allowed: true,
+      limitUsdMicros: 7_500_000n, spentUsdMicros: 7_400_000n, remainingUsdMicros: 100_000n });
+    const result = await readHostedGroupFundingRecoveryStatus({ runtimeMemberId: "synthetic_alternate_room", prisma: prisma as never });
+    expect(result?.fundingUrl).toContain("gf1.synthetic_primary_room.");
+    expect(mocks.hasHostedGroupAutomaticRefillAvailable).toHaveBeenCalledWith({ beneficiaryMemberId: "synthetic_primary_room", prisma });
   });
 
   it.each([

@@ -1,12 +1,17 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const claimMocks = vi.hoisted(() => ({
+  readGameChatAllowanceBeneficiary: vi.fn(),
   assertHostedLinqRouteAuthorityMatchesTarget: vi.fn(),
   assertHostedThreadRouteEgressAuthority: vi.fn(),
   lockHostedMemberRoutingStateTx: vi.fn(),
   lockHostedThreadRouteByThreadIdentityTx: vi.fn(),
   readHostedMemberRoutingState: vi.fn(),
   startHostedAiUsageLimitNoticeDispatchTx: vi.fn(),
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/member-access", () => ({
+  readGameChatAllowanceBeneficiary: claimMocks.readGameChatAllowanceBeneficiary,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-store", () => ({
@@ -42,6 +47,7 @@ const attemptedAt = new Date("2026-07-12T15:00:00.000Z");
 const periodStart = new Date("2026-07-01T00:00:00.000Z");
 const transaction = {
   $queryRaw: vi.fn(),
+  hostedAiUsage: { findFirst: vi.fn() },
 };
 const prisma = {
   $transaction: vi.fn(async (
@@ -52,6 +58,8 @@ const prisma = {
 describe("hosted usage-limit notice claim authority", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    transaction.hostedAiUsage.findFirst.mockResolvedValue(null);
+    claimMocks.readGameChatAllowanceBeneficiary.mockResolvedValue(null);
     claimMocks.lockHostedMemberRoutingStateTx.mockResolvedValue(undefined);
     claimMocks.lockHostedThreadRouteByThreadIdentityTx.mockResolvedValue(undefined);
     claimMocks.assertHostedThreadRouteEgressAuthority.mockResolvedValue({});
@@ -69,6 +77,35 @@ describe("hosted usage-limit notice claim authority", () => {
         };
       },
     );
+  });
+
+  it("checks a frozen game budget while keeping the notice in the actual source room", async () => {
+    transaction.hostedAiUsage.findFirst.mockResolvedValue({ allowanceBeneficiaryMemberId: "primary_game_room" });
+    claimMocks.readGameChatAllowanceBeneficiary.mockResolvedValue("primary_game_room");
+    claimMocks.readHostedMemberRoutingState.mockResolvedValue({ linqChatId: "source_room_chat" });
+    await expect(startAuthorizedHostedAiUsageLimitNoticeDispatchTx({
+      attemptedAt, memberId: "alternate_game_room", noticeDeliveryTarget: {
+        channel: "linq", target: "source_room_chat", routeAuthority: null, replyToMessageId: "source_message",
+      }, periodStart, prisma: prisma as never, source: "hosted_runtime_ai_usage_limit_notice",
+      sourceRef: "stored_game_usage", targetKind: "thread", usageCreditLedgerVersion: 4n,
+    })).resolves.toMatchObject({ status: "claimed" });
+    expect(claimMocks.readGameChatAllowanceBeneficiary).toHaveBeenCalledOnce();
+    expect(claimMocks.readHostedMemberRoutingState).toHaveBeenCalledWith({ memberId: "alternate_game_room", prisma: transaction });
+    expect(transaction.$queryRaw.mock.calls.every(call => call.slice(1).includes("primary_game_room"))).toBe(true);
+    expect(claimMocks.startHostedAiUsageLimitNoticeDispatchTx).toHaveBeenCalledWith(expect.objectContaining({
+      memberId: "alternate_game_room", linqChatId: "source_room_chat",
+    }));
+  });
+
+  it("does not interrupt a newly paid room with its previous game allowance's limit", async () => {
+    transaction.hostedAiUsage.findFirst.mockResolvedValue({ allowanceBeneficiaryMemberId: "primary_game_room" });
+    await expect(startAuthorizedHostedAiUsageLimitNoticeDispatchTx({
+      attemptedAt, memberId: "alternate_game_room", noticeDeliveryTarget: {
+        channel: "linq", target: "source_room_chat", routeAuthority: null, replyToMessageId: "source_message",
+      }, periodStart, prisma: prisma as never, source: "hosted_runtime_ai_usage_limit_notice",
+      sourceRef: "stored_game_usage", targetKind: "thread", usageCreditLedgerVersion: 4n,
+    })).resolves.toMatchObject({ status: "already_notified" });
+    expect(transaction.$queryRaw).not.toHaveBeenCalled();
   });
 
   it("locks and claims an exact personal Linq target in one transaction", async () => {

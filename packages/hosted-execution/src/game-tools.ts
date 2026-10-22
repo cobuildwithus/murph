@@ -32,7 +32,8 @@ const terms = z.object({
 const pending = z.object({
   id: ref, proposedByMemberId: ref, expectedTermsVersion: z.number().int().min(1),
   change: hostedGameChangeSchema, effectiveFromDay: z.number().int().min(0),
-  deliveryStatus: z.enum(["pending", "queued", "sent", "failed"]), deliveryRetryable: z.boolean().optional(), startsOn: date.nullable(),
+  origin: z.enum(["app", "chat"]).optional(),
+  deliveryStatus: z.enum(["pending", "queued", "sent", "failed", "conversation"]), deliveryRetryable: z.boolean().optional(), startsOn: date.nullable(),
 }).strict();
 export const hostedGameChatStateSchema = z.object({ games: z.array(z.object({
   id: ref, status: z.enum(["invited", "live", "settled", "void"]), terms,

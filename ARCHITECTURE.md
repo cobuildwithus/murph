@@ -5502,8 +5502,8 @@ claim or native session credential is replayed during rollback.
 ### Weekly game chat changes
 
 `game.pending_change` is one versioned structural proposal serialized with the
-existing game row lock. `game.chat_container_member_id` references its shared
-room; delete clears the binding. App `POST /api/game/v1/games/:id/changes`
+existing game row lock. `game.chat_container_member_id` references its primary outbound
+room; delete clears the binding. It is not a read or mutation permission. App `POST /api/game/v1/games/:id/changes`
 records the proposing player and expected terms version. Signed group dynamic
 `read_game` / `update_game` actions share the existing group-tool transport.
 The Web bridge resolves the actor from an accepted group mailbox message, then
@@ -5520,26 +5520,67 @@ receipt (`createdAt`), then nonblank group display name, then room creation date
 (newest first). The existing member/kind/created-at index serves the one-row
 activity projection; no message payloads or participant observation timestamps
 are read for ranking. Provider verification still decides eligibility, and a
-bound room is never silently replaced. Existing Linq delivery
-claims and notification outbox own creation and proposal effects. Initial group
-creation stores its encrypted provider receipt in that existing delivery row;
-an unknown creation permits only the same frozen provider request and idempotency
-key, never a new creation identity. Its neutral opening message contains no
-proposal terms, so a replacement proposal can safely recover the same creation.
-Both new and reused rooms announce the current proposal through the guarded
-notification path; an accepted opener never means a proposal was sent.
-Notification delivery rechecks the current proposal before provider dispatch.
-Only that validated requested proposal bypasses iMessage inactivity, allowing a
-new room with no inbound history; all route, runtime, health and dispatch fences
-remain in force. No new queue or timer
-is introduced. Reads expire stale proposals; applying a change appends versioned
-terms only from an unstarted day and never rewrites entries or tickets.
+bound room is never silently replaced. `chat-membership.ts` also admits a fresh
+exact same-pair room independently of that binding. Accepted-message actor proof,
+local pair revalidation and the canonical game lock still fence every mutation;
+the model cannot name another actor or move the primary destination. Discovery
+returns at most five negotiating, live or settled games for that exact pair.
 
-Canonical member access can grant a synthetic group room access through its live
-eligible two-player game. Both players must remain unsuspended and must not have
+Agreement atomically reserves an `awaiting_generation` row in the existing Linq
+delivery table, keyed `game-started:<gameId>`. App `change_proposed` events,
+including initial invite negotiation, reserve the ordinary
+`game-change:<gameId>:<proposalId>` identity. There is no separate negotiation
+intro. Chat-origin proposals instead store `origin: chat` and
+`deliveryStatus: conversation`: Murph's ordinary turn asks the other player,
+without a second backend notification or any claim that its reply was delivered.
+App notifications use shared instruction builders and `require_send`, not exact
+hardcoded announcement text. Started context offers optional first-few-days
+reminders without scheduling them; later opt-in must read current rules.
+
+`chat-lifecycle.ts` drains one due intent and one frozen recovery per existing minute
+onboarding sweep. Discovery makes at most twenty serial 3-second roster reads
+plus one 3-second recheck; frozen recovery uses at most a 10-second create and
+a 3-second roster read. This caps provider waits at 76 seconds within the
+180-second route budget, leaving time for database, crypto and sibling work. Queue publication and `generation_queued` transition share one transaction;
+failed first signals are recovered by re-signalling the exact unconsumed mailbox
+pointer. Once consumed, the runtime and ordinary outbox own retry. Proposal
+recovery compares the current proposal's hashed key, and retires superseded work.
+Provider lookup and encryption stay outside database transactions. Existing-room
+delivery rechecks the primary route, exact pair and source before provider dispatch.
+Only that validated game notification bypasses iMessage inactivity; other route,
+runtime, health and dispatch fences remain authoritative.
+
+For a new room, `chat-bootstrap.ts` prepares a real group container and mailbox
+without a provider thread ID. The group runtime generates one first message.
+A signed host-only callback freezes its exact text, players and sending line in
+the same encrypted delivery receipt before provider creation. An uncertain result
+replays only that frozen request and idempotency key, never a new group identity
+or newly generated text. After acceptance, route attachment, participant ownership
+and matching proposal sent-state commit together. A second lifecycle event waits
+while an earlier frozen create owns that room. Bounded frozen-receipt recovery
+repairs provider-accepted but unattached routes independently of a model wake.
+The nullable `bootstrap_route_attached_at` marker commits with route attachment;
+a partial pending index excludes completed and skipped receipts without
+rewriting provider status. Apply this additive column/index before Web and
+retain them through rollback until new work is drained.
+The engine binds the same group session to the real provider route, preserving
+the kickoff context for the next reply. No creator personal runtime is used.
+
+Apply additive database migrations first. Deploy compatible hosted-execution
+parsers, runtime/engine notification consumers and Web callback consumers before
+enabling bootstrap producers; refresh warm runtimes before producing the new
+route kind. Old parsers reject it safely but cannot execute it. Rollback cannot
+remove these consumers while bootstrap work remains queued or frozen.
+
+Canonical member access can grant a synthetic group room access through its
+eligible two-player game, including negotiation. Both players must remain unsuspended and must not have
 withdrawn health-data consent; feature flag/allowlist remain authoritative. The
 room consumes the ordinary group usage allowance, without granting either player
-personal AI access. Apply the additive migration and compatible Web first, then
+personal AI access. An eligible alternate room uses the same primary allowance;
+its server-owned funding beneficiary is frozen with invocation admission and
+usage receipts, while the source conversation remains the reply destination.
+Changing rooms cannot create a second included budget. Paid or independently
+sponsored groups retain their existing allowance owner. Apply the additive migration and compatible Web first, then
 deploy Worker/runtime consumers and refresh warm runtimes before native proposal
 writers. Old Web rejects unknown game requests; old transport response parsers
 reject new responses without replay, even if new Web already applied an update.

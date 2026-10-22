@@ -1,3 +1,4 @@
+import { handleGameChatBootstrapControl } from "../game/chat-bootstrap";
 import { handleGameChatTool } from "../game/chat-tool";
 import type { HostedRuntimeIdentity } from "../hosted-execution/runtime-owner";
 import "server-only";
@@ -275,6 +276,7 @@ export type HostedRuntimeGroupToolAccessClassification =
   | "participant_aware";
 
 export const HOSTED_RUNTIME_GROUP_TOOL_ACCESS_CLASSIFICATION = {
+  game_chat_bootstrap: "participant_aware",
   read_game: "participant_aware",
   update_game: "participant_aware",
   ask: "personal_active",
@@ -451,6 +453,9 @@ async function recordHostedRuntimeGroupJournalFact(
 export async function handleHostedRuntimeConversationTool(
   input: HostedRuntimeGroupToolHandlerInput,
 ): Promise<HostedRuntimeGroupToolResponse> {
+  if (input.request.action === "game_chat_bootstrap") {
+    return handleGameChatBootstrapControl({ memberId: input.memberId, runtimeIdentity: input.runtimeIdentity ?? null, request: input.request });
+  }
   if (input.request.action === "read_game" || input.request.action === "update_game") {
     return handleGameChatTool({ memberId: input.memberId, runtimeIdentity: input.runtimeIdentity ?? null, request: input.request });
   }
@@ -458,7 +463,7 @@ export async function handleHostedRuntimeConversationTool(
 }
 
 type HostedRuntimeNonGameToolHandlerInput = Omit<HostedRuntimeGroupToolHandlerInput, "request"> & {
-  request: Exclude<HostedRuntimeGroupToolRequest, { action: "read_game" | "update_game" }>;
+  request: Exclude<HostedRuntimeGroupToolRequest, { action: "read_game" | "update_game" | "game_chat_bootstrap" }>;
 };
 
 export async function handleHostedRuntimeGroupTool(

@@ -1,3 +1,4 @@
+import { assertHostedConversationalControlAction } from "./events/game-chat-bootstrap.ts";
 import {
   HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX,
   HOSTED_RUNTIME_GROUP_SENDER_HANDLE_MAX_CODE_POINTS,
@@ -55,6 +56,7 @@ export function createHostedGroupToolWithCurrentTurnContext(input: {
       };
     },
     async request(request, context) {
+      assertHostedConversationalControlAction(request.action);
       const forwardRequest = (forwardedRequest: HostedRuntimeGroupToolRequest) =>
         context
           ? input.groupToolPort.request(forwardedRequest, context)
@@ -333,6 +335,7 @@ function buildHostedGroupSimpleActionUnavailable(
     {
       action:
         | "prepare_email"
+        | "game_chat_bootstrap"
         | "read_game"
         | "update_game"
         | "record_current_sender_journal_fact"
@@ -342,6 +345,7 @@ function buildHostedGroupSimpleActionUnavailable(
   >,
   unavailableReason: "authenticated_sender_required",
 ): HostedRuntimeGroupToolResponse {
+  if (request.action === "game_chat_bootstrap") return { action: request.action, result: { status: "unavailable" } };
   if (request.action === "read_game" || request.action === "update_game") {
     return { action: request.action, result: { status: "unavailable", error: unavailableReason } };
   }

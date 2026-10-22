@@ -6,6 +6,7 @@ import {
   buildHostedGroupUsageFundingUrl,
 } from "../hosted-groups/group-usage-funding";
 import { resolveHostedPublicBaseUrl } from "../hosted-web/public-url";
+import { readGameChatAllowanceBeneficiary } from "../hosted-onboarding/member-access";
 import type { HostedAiUsageLimitNoticeCode } from "./usage-allowance";
 
 const HOSTED_GROUP_USAGE_LIMIT_RECOVERY_MESSAGE =
@@ -30,7 +31,7 @@ export async function projectHostedAiUsageLimitNoticeForDelivery(input: {
         );
       }
       const locator = buildHostedGroupUsageFundingLocatorForRuntimeMember(
-        input.memberId,
+        await readGameChatAllowanceBeneficiary({ memberId: input.memberId, prisma: input.prisma }) ?? input.memberId,
       );
       const projectedUrl = locator
         ? buildHostedGroupUsageFundingUrl({

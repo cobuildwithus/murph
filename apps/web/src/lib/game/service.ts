@@ -58,6 +58,8 @@ import {
 import { gameLocalDate } from "./time";
 import { decideGameChange, gameChangeControls, isGameChangeExpired, parsePendingGameChange } from "./changes";
 import { deliverGameChangeProposal } from "./chat-delivery";
+import { readGameChatCandidateIds, sameGamePlayers } from "./chat-membership";
+import { reserveGameChatLifecycleTx, reserveGameChatProposalTx } from "./chat-lifecycle-receipt";
 import { claimGamePostNotification, deliverGamePostNotification } from "./post-notification";
 import { buildGameView, gameMediaUrl, termsView, ticketView, visibleEntryIds, type GameTicketRow } from "./views";
 
@@ -98,6 +100,7 @@ export async function runGameCommand(input: {
   actorMemberId: string;
   command: unknown;
   chatContainerMemberId?: string;
+  chatPlayerMemberIds?: readonly string[];
   beforeMutationTx?: (tx: Prisma.TransactionClient) => Promise<void>;
   now?: Date;
 }): Promise<GameCommandResult> {
@@ -108,8 +111,8 @@ export async function runGameCommand(input: {
     if (command.type === "setProfile") {
       return { game: null, ok: true, profile: await setProfile(actor, command) };
     }
-    const gameId = await runCommand({ actor, now: input.now, chatContainerMemberId: input.chatContainerMemberId, beforeMutationTx: input.beforeMutationTx }, command);
-    if (command.type === "proposeChange") {
+    const gameId = await runCommand({ actor, now: input.now, chatContainerMemberId: input.chatContainerMemberId, chatPlayerMemberIds: input.chatPlayerMemberIds, beforeMutationTx: input.beforeMutationTx }, command);
+    if (command.type === "proposeChange" && !input.chatContainerMemberId) {
       try {
         await deliverGameChangeProposal(command.gameId, command.proposalId);
       } catch {
@@ -132,6 +135,7 @@ export async function runGameCommand(input: {
 interface CommandContext {
   actor: string;
   chatContainerMemberId?: string;
+  chatPlayerMemberIds?: readonly string[];
   beforeMutationTx?: (tx: Prisma.TransactionClient) => Promise<void>;
   now?: Date;
 }
@@ -185,11 +189,19 @@ interface GameEventDraft {
   payload: Prisma.InputJsonObject;
 }
 
-async function writeEvents(tx: Tx, gameId: string, actor: string, events: readonly GameEventDraft[]): Promise<void> {
+async function writeEvents(tx: Tx, gameId: string, actor: string, events: readonly GameEventDraft[], chatOrigin = false): Promise<void> {
   if (events.length === 0) return;
   await tx.gameEvent.createMany({
     data: events.map((event) => ({ actor, gameId, commandKey: event.commandKey, payload: { v: 1, ...event.payload }, type: event.type })),
   });
+  if (events.some((event) => event.type === "started")) {
+    await reserveGameChatLifecycleTx({ gameId, kind: "started", now: new Date(), tx });
+  }
+  for (const event of events) {
+    if (!chatOrigin && event.type === "change_proposed" && typeof event.payload.proposalId === "string") {
+      await reserveGameChatProposalTx({ gameId, proposalId: event.payload.proposalId, now: new Date(), tx });
+    }
+  }
 }
 
 /** Locks the game, runs one step, and records what it changed. A step that changes nothing returns no events. */
@@ -205,11 +217,11 @@ async function runLocked(
     const locked = await tx.$queryRaw<{ id: string }[]>`SELECT id FROM game WHERE id = ${gameId} FOR UPDATE`;
     if (locked.length === 0) reject("GAME_NOT_FOUND", "Game not found.");
     const [loaded] = await loadGames(tx, [gameId]);
-    if (context.chatContainerMemberId && loaded.row.chatContainerMemberId !== context.chatContainerMemberId) {
-      reject("NOT_A_PLAYER", "This game is not hosted in this chat.");
+    if (context.chatContainerMemberId && !sameGamePlayers(loaded.row.players.map((player) => player.memberId), context.chatPlayerMemberIds ?? [])) {
+      reject("NOT_A_PLAYER", "This game belongs to the two players in this chat.");
     }
     const clock = context.now ?? await databaseNow(tx);
-    await writeEvents(tx, gameId, context.actor, await step({ clock, loaded, now: gameNow(clock, loaded.row), tx }));
+    await writeEvents(tx, gameId, context.actor, await step({ clock, loaded, now: gameNow(clock, loaded.row), tx }), Boolean(context.chatContainerMemberId));
   });
 }
 
@@ -708,7 +720,9 @@ async function proposeChange(context: CommandContext, command: Extract<GameComma
     const decision = decideGameChange(loaded.state, context.actor, command.change, now);
     const proposal: GamePendingChange = {
       id: command.proposalId, proposedByMemberId: context.actor,
-      expectedTermsVersion: command.expectedTermsVersion, deliveryStatus: "pending", ...decision,
+      expectedTermsVersion: command.expectedTermsVersion,
+      origin: context.chatContainerMemberId ? "chat" : "app",
+      deliveryStatus: context.chatContainerMemberId ? "conversation" : "pending", ...decision,
     };
     await tx.game.update({ where: { id: command.gameId }, data: { pendingChange: toPrismaJsonObject({ v: 1, ...proposal }) } });
     return [
@@ -772,10 +786,11 @@ export interface GameChatState {
 }
 
 /** Shared-chat projection intentionally never calls the viewer-private app view. */
-export async function readGameChatState(containerMemberId: string, playerMemberIds: readonly string[]): Promise<GameChatState> {
+export async function readGameChatState(_containerMemberId: string, playerMemberIds: readonly string[]): Promise<GameChatState> {
   if (playerMemberIds.length !== 2 || new Set(playerMemberIds).size !== 2) return { games: [] };
   const prisma = getPrisma();
-  const candidates = await prisma.game.findMany({ where: { chatContainerMemberId: containerMemberId, status: "live", players: { every: { memberId: { in: [...playerMemberIds] } } } },
+  const candidateIds = await readGameChatCandidateIds(playerMemberIds);
+  const candidates = await prisma.game.findMany({ where: { id: { in: candidateIds } },
     orderBy: { createdAt: "desc" }, take: 5, include: { players: true } });
   const rows = candidates.filter((row) => row.players.length === 2 && row.players.every((player) => isGameEnabledFor(player.memberId)));
   const profiles = await prisma.gameProfile.findMany({ where: { memberId: { in: [...new Set(rows.flatMap((row) => row.players.map((player) => player.memberId)))] } },
@@ -1207,6 +1222,7 @@ async function readPendingChangeViews(rows: readonly Pick<Game, "id" | "pendingC
     select: { idempotencyKey: true, status: true } });
   const statuses = new Map(receipts.map((receipt) => [receipt.idempotencyKey, receipt.status]));
   return new Map(pending.map(({ gameId, proposal, key }) => {
+    if (proposal.origin === "chat") return [gameId, { ...proposal, deliveryStatus: "conversation", deliveryRetryable: false }];
     const status = key ? statuses.get(key) : undefined;
     const terminal = status === "failed" || status === "skipped";
     return [gameId, { ...proposal,

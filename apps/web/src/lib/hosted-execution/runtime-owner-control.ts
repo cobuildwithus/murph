@@ -94,9 +94,15 @@ function authorized(allowed: boolean): CommandResult {
   return { status: allowed ? "authorized" : "blocked", owner: null };
 }
 function projectOwner(owner: HostedRuntimeOwner | null) {
-  return owner ? { ...owner, generation: owner.generation.toString(),
+  if (!owner) return null;
+  // Accounting authority stays on Web; the runtime cannot select a beneficiary.
+  return { userId: owner.userId, generation: owner.generation.toString(),
+    attemptId: owner.attemptId, phase: owner.phase, processingMode: owner.processingMode,
+    allocationId: owner.allocationId, runnerContainerName: owner.runnerContainerName,
+    platformAiUsageAllowed: owner.platformAiUsageAllowed,
+    failureCount: owner.failureCount, lastErrorCode: owner.lastErrorCode,
     workspaceVersion: owner.workspaceVersion?.toString() ?? null,
     startedAt: owner.startedAt?.toISOString() ?? null,
     acceptedAt: owner.acceptedAt?.toISOString() ?? null,
-    completedAt: owner.completedAt?.toISOString() ?? null } : null;
+    completedAt: owner.completedAt?.toISOString() ?? null };
 }

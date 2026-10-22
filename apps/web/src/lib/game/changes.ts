@@ -28,7 +28,9 @@ export function parsePendingGameChange(value: unknown): GamePendingChange | null
   if (!isRecord(value) || value.v !== 1 || typeof value.id !== "string"
     || typeof value.proposedByMemberId !== "string" || !Number.isInteger(value.expectedTermsVersion)
     || !Number.isInteger(value.effectiveFromDay)
-    || !["pending", "queued", "sent", "failed"].includes(String(value.deliveryStatus))
+    || !["pending", "queued", "sent", "failed", "conversation"].includes(String(value.deliveryStatus))
+    || (value.origin !== undefined && value.origin !== "app" && value.origin !== "chat")
+    || (value.deliveryStatus === "conversation" && value.origin !== "chat")
     || (value.startsOn !== null && typeof value.startsOn !== "string")) {
     throw new Error("Stored game change is malformed.");
   }
@@ -36,6 +38,7 @@ export function parsePendingGameChange(value: unknown): GamePendingChange | null
     id: value.id, proposedByMemberId: value.proposedByMemberId,
     expectedTermsVersion: Number(value.expectedTermsVersion), effectiveFromDay: Number(value.effectiveFromDay),
     change: parseGameChange(value.change), startsOn: value.startsOn,
+    ...(value.origin === undefined ? {} : { origin: value.origin }),
     deliveryStatus: value.deliveryStatus as GamePendingChange["deliveryStatus"],
   };
 }

@@ -28,6 +28,7 @@ import {
   assertHostedThreadRouteEgressAuthority,
   lockHostedThreadRouteByThreadIdentityTx,
 } from "../hosted-routing/thread-route-store";
+import { readGameChatAllowanceBeneficiary } from "../hosted-onboarding/member-access";
 
 export type HostedAiUsageLimitNoticeAuthorizedDeliveryClaim =
   | HostedAiUsageLimitNoticeDeliveryClaim
@@ -61,8 +62,23 @@ export async function startAuthorizedHostedAiUsageLimitNoticeDispatchTx(input: {
   const claim = () => input.prisma.$transaction(async (prisma) => {
     return await startHostedAiUsageLimitNoticeDispatchTx({
       assertDispatchAuthority: async (claimPrisma) => {
+        // The route remains this actual conversation. Only capacity belongs to
+        // the frozen usage beneficiary (or the current admission beneficiary).
+        const usage = await claimPrisma.hostedAiUsage.findFirst({
+          where: { id: input.sourceRef, memberId: input.memberId },
+          select: { allowanceBeneficiaryMemberId: true },
+        });
+        const beneficiaryMemberId = usage
+          ? usage.allowanceBeneficiaryMemberId ?? input.memberId
+          : await readGameChatAllowanceBeneficiary({ memberId: input.memberId, now: input.attemptedAt, prisma: claimPrisma }) ?? input.memberId;
+        if (usage?.allowanceBeneficiaryMemberId && beneficiaryMemberId !==
+          (await readGameChatAllowanceBeneficiary({ memberId: input.memberId, now: input.attemptedAt, prisma: claimPrisma }) ?? input.memberId)) {
+          // The incurred spend still belongs to the frozen owner, but an old
+          // owner's limit must not interrupt this room's new allowance.
+          throw noticeNotEligible;
+        }
         if (!await lockHostedAiUsageLimitNoticeCapacityEpochTx({
-          memberId: input.memberId,
+          memberId: beneficiaryMemberId,
           tx: claimPrisma,
           usageCreditLedgerVersion: input.usageCreditLedgerVersion,
         })) {
@@ -78,7 +94,7 @@ export async function startAuthorizedHostedAiUsageLimitNoticeDispatchTx(input: {
         await input.assertDispatchAuthority?.(claimPrisma);
         if (!await lockHostedAiUsageLimitNoticeEligibilityTx({
           attemptedAt: input.attemptedAt,
-          memberId: input.memberId,
+          memberId: beneficiaryMemberId,
           periodStart: input.periodStart,
           planResetAt: input.planResetAt ?? null,
           tx: claimPrisma,

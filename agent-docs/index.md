@@ -1,3 +1,8 @@
+Game acceptance messages, exact-pair chat discovery and shared allowance work
+are tracked in [the active lifecycle plan](exec-plans/active/2026-10-22-game-chat-lifecycle.md).
+The [weekly game spec](product-specs/weekly-game.md), `../ARCHITECTURE.md` and
+[Postgres runtime ownership](references/hosted-postgres-runtime.md) own the contracts.
+
 Public image attachment recovery is tracked in
 [the recovery plan](exec-plans/completed/2026-10-21-public-image-recovery.md).
 

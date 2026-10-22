@@ -1,6 +1,7 @@
 import "server-only";
 
 import type { Prisma } from "@prisma/client";
+import { hostedOnboardingError } from "../hosted-onboarding/errors";
 
 import {
   bindArmedHostedUsageReferralToNewContainerTx,
@@ -72,6 +73,7 @@ export async function ensureHostedPreparedLinqThreadContainerRouteTx(input: {
   threadId: string;
   tx: Prisma.TransactionClient;
 }): Promise<HostedPreparedLinqThreadContainerResult> {
+  await assertNoPendingGameChatBootstrapTx(input);
   const pendingSetupClaim = await claimHostedPendingGroupSetupForParticipantsTx({
     incomingRecipientPhoneLookupKeys: input.incomingRecipientPhoneLookupKeys,
     occurredAt: input.occurredAt,
@@ -197,6 +199,32 @@ export async function ensureHostedPreparedLinqThreadContainerRouteTx(input: {
     pendingSetupApplied,
     pendingSetupResolution: pendingSetupClaim.reason,
   };
+}
+
+/** A reply may race the first create-chat response. Retry ingress, never fork its workspace. */
+export async function assertNoPendingGameChatBootstrapTx(input: {
+  participantMemberIds: readonly string[];
+  incomingRecipientPhoneLookupKeys: readonly string[];
+  tx: Prisma.TransactionClient;
+}): Promise<void> {
+  const participants = [...new Set(input.participantMemberIds)];
+  if (participants.length !== 2) return;
+  const game = await input.tx.game.findFirst({
+    where: {
+      liveRosterKey: participants.sort().join(":"),
+      chatContainerMember: { is: { threadContainer: { is: { routes: { none: {} } } } } },
+    },
+    select: { chatContainerMemberId: true },
+  });
+  if (!game?.chatContainerMemberId) return;
+  const receipt = await input.tx.hostedLinqDelivery.findFirst({
+    where: { payloadOwnerMemberId: game.chatContainerMemberId, source: "game_lifecycle", payloadSchema: "game_chat_bootstrap_v1", bootstrapRouteAttachedAt: null, skippedAt: null, phoneNumberLookupKey: { in: [...input.incomingRecipientPhoneLookupKeys] } },
+    select: { id: true },
+  });
+  if (receipt) throw hostedOnboardingError({
+    code: "HOSTED_GAME_CHAT_BOOTSTRAP_PENDING", httpStatus: 503, retryable: true,
+    message: "The initial game chat route is being confirmed. Retry this message.",
+  });
 }
 
 function buildInitialHostedGroupRoomModelMarkdown(

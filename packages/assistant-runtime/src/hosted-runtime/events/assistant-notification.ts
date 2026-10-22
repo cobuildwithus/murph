@@ -1,3 +1,5 @@
+import { buildHostedGameChatBootstrapPolicy, isHostedGameBootstrapUnavailable } from "./game-chat-bootstrap.ts";
+import type { HostedRuntimeGroupToolPort } from "../platform.ts";
 import { resolveHostedOperatorModelProvider } from "../codex-runtime-env.ts";
 import { HOSTED_ASSISTANT_SOL_MODEL } from "@murphai/hosted-execution/assistant-model";
 import { createHash } from "node:crypto";
@@ -387,6 +389,7 @@ export async function executeHostedManualMealPhotoWake(input: {
 }
 
 export async function executeHostedAssistantNotificationWake(input: {
+  groupToolPort?: HostedRuntimeGroupToolPort | null;
   effectsPort?: Pick<HostedRuntimeEffectsPort, "controlOperatorTask">;
   wake: HostedExecutionAssistantNotificationRequestedWake;
   executionContext: AssistantExecutionContext;
@@ -429,6 +432,7 @@ export async function executeHostedAssistantNotificationWake(input: {
   try {
     const notificationResult = await sendAssistantNotification({
       manualMealEstimation: input.manualMealEstimation,
+      ...buildHostedGameChatBootstrapPolicy(input),
       ...buildAssistantNotificationInput(
         input.wake,
         input.executionContext,
@@ -476,25 +480,12 @@ export async function executeHostedAssistantNotificationWake(input: {
       }
     }
   } catch (error) {
-    if (isHostedOperatorTaskTerminalNoSendError(error)) {
-      redactedLogEntries.push(
-        emitHostedAssistantNotificationLifecycleLog({
-          extraDetails: {
-            eventCode: "assistant.notification.operator_task_terminal_no_send",
-            terminalDisposition: deriveHostedExecutionErrorCode(error),
-          },
-          level: "info",
-          message: "Hosted operator message ended without a new delivery intent.",
-          phase: "wake.running",
-          wake: input.wake,
-        }),
-      );
-      return createNoopMailboxEffect({
-        conversationMetrics: null,
-        deliveryIntentIds: [],
-        mailboxLane: "assistant-notification",
-        redactedLogEntries,
-      });
+    const terminalNoSend = resolveHostedNotificationTerminalNoSend(error);
+    if (terminalNoSend) {
+      redactedLogEntries.push(emitHostedAssistantNotificationLifecycleLog({
+        ...terminalNoSend, level: "info", phase: "wake.running", wake: input.wake,
+      }));
+      return createNoopMailboxEffect({ conversationMetrics: null, deliveryIntentIds: [], mailboxLane: "assistant-notification", redactedLogEntries });
     }
     if (operatorTask && readHostedNotificationErrorRetryable(error) === false) {
       await controlHostedOperatorTask({
@@ -989,7 +980,7 @@ function buildAssistantNotificationInputFromRoute(input: {
         route.threadId,
       ]),
     },
-    deliveryKind: delivery.kind === "explicit" ? null : delivery.kind,
+    deliveryKind: delivery.kind === "explicit" || delivery.kind === "bootstrap" ? null : delivery.kind,
     deliverySource: delivery.source ?? null,
     deliveryTarget: delivery.kind === "explicit" ? delivery.target : null,
     executionContext: input.executionContext,
@@ -1223,6 +1214,7 @@ function resolveAssistantNotificationBindingDeliveryTarget(input: {
   wake: HostedRuntimeEvent;
 }): string | null {
   const delivery = input.route.delivery;
+  if (delivery.kind === "bootstrap") return null;
   if (delivery.kind !== "explicit") {
     return delivery.target;
   }
@@ -1408,4 +1400,20 @@ function hashHostedAssistantNotificationDeliveryKeyParts(
     .update("\0")
     .update(JSON.stringify(parts.map((part) => part ?? null)))
     .digest("hex")}`;
+}
+
+
+function resolveHostedNotificationTerminalNoSend(error: unknown): {
+  message: string;
+  extraDetails: HostedExecutionStructuredLogDetails;
+} | null {
+  if (isHostedGameBootstrapUnavailable(error)) return {
+    message: "Stale game announcement ended without delivery.",
+    extraDetails: { eventCode: "assistant.notification.game_bootstrap_unavailable", terminalDisposition: "game_bootstrap_unavailable" },
+  };
+  if (isHostedOperatorTaskTerminalNoSendError(error)) return {
+    message: "Hosted operator message ended without a new delivery intent.",
+    extraDetails: { eventCode: "assistant.notification.operator_task_terminal_no_send", terminalDisposition: deriveHostedExecutionErrorCode(error) },
+  };
+  return null;
 }

@@ -1,3 +1,4 @@
+import { drainGameChatLifecycle } from "@/src/lib/game/chat-lifecycle";
 import { requireVercelCronRequest } from "@/src/lib/hosted-execution/vercel-cron";
 import { drainHostedGroupJoinOutreachSweep } from "@/src/lib/hosted-groups/group-join-outreach-drain";
 import { dispatchHostedGroupSponsorshipRefills } from "@/src/lib/hosted-groups/group-sponsorship-refill-dispatch";
@@ -7,13 +8,15 @@ import { logHostedOnboardingDiagnostic } from "@/src/lib/hosted-onboarding/loggi
 import { reconcileDueHostedStripeEvents } from "@/src/lib/hosted-onboarding/stripe-event-reconciliation";
 import { getPrisma } from "@/src/lib/prisma";
 
+export const maxDuration = 180;
+
 export const GET = withJsonError(async (request: Request) => {
   requireVercelCronRequest(request);
   const prisma = getPrisma();
   // This is the existing minute-level hosted-onboarding sweep. Pre-member
   // outreach cannot belong to a member runtime/system mailbox, and the hourly
   // contact-card sweep is too coarse for paced backlog drainage.
-  const [groupJoinOutreach, groupSponsorshipRefills, reconciledEventIds] = await Promise.all([
+  const [groupJoinOutreach, groupSponsorshipRefills, reconciledEventIds, gameChatLifecycle] = await Promise.all([
     // Outreach shares this sweep, so its failure must not fail a
     // billing-critical cron. The drain owns durable deferral/retry state, so
     // the next invocation retries the same row; swallowing here only keeps
@@ -38,11 +41,13 @@ export const GET = withJsonError(async (request: Request) => {
     reconcileDueHostedStripeEvents({
       prisma,
     }),
+    drainGameChatLifecycle({ prisma, signal: request.signal }).catch(() => ({ kind: "failed" as const })),
   ]);
 
   return jsonOk({
     groupJoinOutreach,
     groupSponsorshipRefills,
     reconciledEventIds,
+    gameChatLifecycle,
   });
 });

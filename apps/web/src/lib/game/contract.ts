@@ -150,7 +150,9 @@ export interface GamePendingChange {
   expectedTermsVersion: number;
   change: GameChange;
   effectiveFromDay: number;
-  deliveryStatus: "pending" | "queued" | "sent" | "failed";
+  /** Conversational proposals use the ordinary assistant reply, not a second announcement. */
+  origin?: "app" | "chat";
+  deliveryStatus: "pending" | "queued" | "sent" | "failed" | "conversation";
   /** False for a terminal receipt: cancel the proposal before proposing again. */
   deliveryRetryable?: boolean;
   /** Fixed start date agreed to, including a start-now proposal. */

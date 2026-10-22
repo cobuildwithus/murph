@@ -1354,6 +1354,8 @@ model HostedRuntimeOwner {
   workspaceVersion          BigInt?  @map("workspace_version")
   providerEgressTokenHash    String?  @map("provider_egress_token_hash")
   platformAiUsageAllowed    Boolean  @default(false) @map("platform_ai_usage_allowed")
+  // Server-owned allowance attribution, frozen for this exact invocation.
+  allowanceBeneficiaryMemberId String? @map("allowance_beneficiary_member_id")
   startedAt                 DateTime? @map("started_at")
   acceptedAt                DateTime? @map("accepted_at")
   completedAt               DateTime? @map("completed_at")
@@ -2425,6 +2427,8 @@ model HostedLinqDelivery {
   payloadOwnerMemberId     String?  @map("payload_owner_member_id")
   payloadCiphertext        String?  @map("payload_ciphertext")
   payloadSchema            String?  @map("payload_schema")
+  // Completion evidence for generated game chat creation, separate from provider delivery status.
+  bootstrapRouteAttachedAt DateTime? @map("bootstrap_route_attached_at")
   createdAt                DateTime @default(now()) @map("created_at")
   updatedAt                DateTime @updatedAt @map("updated_at")
   groupJoinOutreach        HostedGroupJoinOutreach? @relation(fields: [groupJoinOutreachId], references: [id], onDelete: Cascade)
@@ -2547,6 +2551,8 @@ model HostedAiUsage {
   totalTokens                Int?         @map("total_tokens")
   providerRequestOutcome     String       @default("succeeded") @map("provider_request_outcome")
   allowanceAccountedAt       DateTime?    @map("allowance_accounted_at")
+  // Null preserves historical attribution to memberId.
+  allowanceBeneficiaryMemberId String?    @map("allowance_beneficiary_member_id")
   allowancePeriodStart       DateTime?    @map("allowance_period_start")
   allowancePeriodEnd         DateTime?    @map("allowance_period_end")
   allowanceCostUsdMicros     BigInt       @default(0) @map("allowance_cost_usd_micros")
