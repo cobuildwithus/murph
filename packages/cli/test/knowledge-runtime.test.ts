@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -7,9 +6,6 @@ import { afterEach, describe, expect, it } from 'vitest'
 import {
   getKnowledgePage,
   lintKnowledgePages,
-  listKnowledgePages,
-  searchKnowledgePages,
-  tailKnowledgeLog,
   upsertKnowledgePage,
 } from '@murphai/assistant-engine/knowledge'
 
@@ -27,133 +23,6 @@ afterEach(async () => {
 })
 
 describe('upsertKnowledgePage', () => {
-  it('writes a derived knowledge page and rebuilds the markdown index', async () => {
-    const vaultRoot = await createVaultRoot()
-    const sourcePath = 'research/2026/04/sleep-note.md'
-    await writeVaultFile(
-      vaultRoot,
-      'bank/library/sleep-architecture.md',
-      [
-        '---',
-        'title: Sleep architecture',
-        'slug: sleep-architecture',
-        'entityType: biomarker',
-        '---',
-        '',
-        '# Sleep architecture',
-        '',
-        'Stable reference page.',
-        '',
-      ].join('\n'),
-    )
-    await writeVaultFile(
-      vaultRoot,
-      sourcePath,
-      '# Sleep note\n\nMagnesium seemed helpful on several recent nights.\n',
-    )
-
-    const result = await upsertKnowledgePage(
-      {
-        body: [
-          '# Temporary heading',
-          '',
-          'Magnesium looked helpful in the recent notes.',
-          '',
-          '## Sources',
-          '',
-          '- `research/2026/04/stale-note.md`',
-          '',
-          '## Related',
-          '',
-          '- [[magnesium]]',
-          '',
-        ].join('\n'),
-        librarySlugs: ['sleep-architecture'],
-        vault: vaultRoot,
-        title: 'Sleep quality',
-        sourcePaths: [sourcePath],
-      },
-      {
-        async saveText(input: { relativePath: string; content: string }) {
-          await writeVaultFile(vaultRoot, input.relativePath, input.content)
-        },
-      },
-    )
-
-    expect(result.page).toMatchObject({
-      librarySlugs: ['sleep-architecture'],
-      pagePath: 'derived/knowledge/pages/sleep-quality.md',
-      pageType: 'concept',
-      relatedSlugs: ['magnesium'],
-      slug: 'sleep-quality',
-      sourcePaths: [sourcePath],
-      status: 'active',
-      title: 'Sleep quality',
-    })
-    expect(result.indexPath).toBe('derived/knowledge/index.md')
-
-    const savedPage = await readFile(
-      path.join(vaultRoot, 'derived/knowledge/pages/sleep-quality.md'),
-      'utf8',
-    )
-    expect(savedPage).toContain('slug: sleep-quality')
-    expect(savedPage).toContain('sourcePaths:')
-    expect(savedPage).toContain('relatedSlugs:')
-    expect(savedPage).toContain('# Sleep quality')
-    expect(savedPage).not.toContain('stale-note.md')
-    expect(savedPage).toContain('## Sources')
-    expect(savedPage).toContain('## Related')
-    expect(savedPage).toContain('`research/2026/04/sleep-note.md`')
-
-    const savedIndex = await readFile(
-      path.join(vaultRoot, 'derived/knowledge/index.md'),
-      'utf8',
-    )
-    expect(savedIndex).toContain('# Derived knowledge index')
-    expect(savedIndex).toContain('Sleep quality')
-
-    const savedLog = await readFile(
-      path.join(vaultRoot, 'derived/knowledge/log.md'),
-      'utf8',
-    )
-    expect(savedLog).toContain('# Derived knowledge log')
-    expect(savedLog).toContain('upsert | Sleep quality')
-    expect(savedLog).toContain('librarySlugs: `sleep-architecture`')
-
-    const shown = await getKnowledgePage({
-      vault: vaultRoot,
-      slug: 'sleep-quality',
-    })
-    expect(shown.page.markdown).toContain('# Sleep quality')
-    expect(shown.page.pageRevisionDigest).toBe(
-      createHash('sha256').update(shown.page.markdown).digest('hex'),
-    )
-    expect(shown.page.librarySlugs).toEqual(['sleep-architecture'])
-    expect(shown.page.relatedSlugs).toEqual(['magnesium'])
-
-    const listed = await listKnowledgePages({
-      vault: vaultRoot,
-    })
-    expect(listed.pages).toHaveLength(1)
-    expect(listed.pages[0]).toMatchObject({
-      slug: 'sleep-quality',
-      title: 'Sleep quality',
-    })
-    expect(listed.pages[0]?.summary).toBeTruthy()
-    expect(listed.pages[0]).not.toHaveProperty('markdown')
-
-    const tailed = await tailKnowledgeLog({
-      vault: vaultRoot,
-      limit: 5,
-    })
-    expect(tailed.entries[0]).toMatchObject({
-      action: 'upsert',
-      title: 'Sleep quality',
-    })
-    expect(tailed.entries[0]?.block).toContain('librarySlugs: `sleep-architecture`')
-    expect(tailed.entries[0]?.block).toContain('slug: `sleep-quality`')
-  })
-
   it('reuses existing source paths when refreshing without new source paths', async () => {
     const vaultRoot = await createVaultRoot()
     const firstSourcePath = 'research/2026/04/sleep-note.md'
@@ -350,46 +219,6 @@ describe('upsertKnowledgePage', () => {
         }),
       ]),
     )
-  })
-
-  it('searches the derived knowledge wiki without recompiling pages', async () => {
-    const vaultRoot = await createVaultRoot()
-    await writeVaultFile(
-      vaultRoot,
-      'derived/knowledge/pages/sleep-quality.md',
-      [
-        '---',
-        'title: Sleep quality',
-        'slug: sleep-quality',
-        'pageType: concept',
-        'status: active',
-        'summary: Magnesium seemed to help recent sleep continuity.',
-        '---',
-        '',
-        '# Sleep quality',
-        '',
-        'Magnesium looked helpful for fewer wakeups.',
-        '',
-        '## Sources',
-        '',
-        '- `research/2026/04/sleep-note.md`',
-        '',
-      ].join('\n'),
-    )
-
-    const result = await searchKnowledgePages({
-      vault: vaultRoot,
-      query: 'sleep magnesium',
-    })
-
-    expect(result.format).toBe('murph.knowledge-search.v1')
-    expect(result.vault).toBe(vaultRoot)
-    expect(result.hits[0]).toMatchObject({
-      slug: 'sleep-quality',
-      matchedTerms: ['magnesium', 'sleep'],
-      pageType: 'concept',
-      status: 'active',
-    })
   })
 
   it('fails closed when duplicate slugs exist in derived knowledge pages', async () => {

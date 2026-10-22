@@ -333,6 +333,11 @@ Exact-head CI owns the broad app and package suites.
 
 ## Hosted Stripe Billing Verification
 
+The required PostgreSQL lane owns the legacy Starter migration proof through
+`hosted-starter-usage-migration-postgres.test.ts`, which executes the exact SQL
+and checks balances, eligibility, and rollback. The hermetic billing workflow
+does not duplicate that proof with source-substring assertions.
+
 Billing changes retain two distinct lanes. Run the focused hermetic owner proof
 first; it must not need Stripe credentials:
 
@@ -343,7 +348,6 @@ pnpm --dir packages/hosted-local-harness exec vitest run \
   test/dev-hosted-local/stack.test.ts
 pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage \
   apps/web/test/hosted-onboarding-billing-checkout-route.test.ts \
-  apps/web/test/hosted-starter-usage-migration.test.ts \
   apps/web/test/hosted-billing-live-support.test.ts
 pnpm hosted-billing:ci-guard
 ```

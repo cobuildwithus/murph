@@ -122,6 +122,11 @@ in [the import-speed plan](exec-plans/completed/2026-09-24-garmin-import-speed.m
 
 # Murph Agent Docs Index
 
+Test-pruning decisions and replacement browser, CLI, assistant, and bundle
+journeys are tracked in
+[`low-value test cleanup`](exec-plans/completed/2026-10-21-prune-low-value-tests.md).
+The current proof owners remain the testing CI map and verification guide.
+
 Common media file approval and delivery remain owned by `ARCHITECTURE.md`.
 Extension coverage, approval/recovery journeys, and rollout constraints are
 recorded in [secure media files](exec-plans/completed/2026-10-21-secure-media-files.md).

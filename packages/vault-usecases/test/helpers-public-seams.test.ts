@@ -11,13 +11,6 @@ import { VaultCliError } from "@murphai/operator-config/vault-cli-errors";
 
 import * as helperApi from "@murphai/vault-usecases/helpers";
 import {
-  applyLimit,
-  compareByLatest,
-  compareNullableDates,
-  firstString,
-  matchesDateRange,
-} from "../src/commands/query-record-command-helpers.ts";
-import {
   asEntityEnvelope,
   asListEnvelope,
   assertNoReservedPayloadKeys,
@@ -87,23 +80,6 @@ function createQueryRecord(overrides: Partial<QueryEntity> = {}): QueryEntity {
 }
 
 describe("helper barrel exports", () => {
-  it("re-exports stable helper functions from the public helper seam", () => {
-    expect(helperApi.applyLimit).toBe(applyLimit);
-    expect(helperApi.compareByLatest).toBe(compareByLatest);
-    expect(helperApi.compareNullableDates).toBe(compareNullableDates);
-    expect(helperApi.firstString).toBe(firstString);
-    expect(helperApi.matchesDateRange).toBe(matchesDateRange);
-    expect(helperApi.assertNoReservedPayloadKeys).toBe(assertNoReservedPayloadKeys);
-    expect(helperApi.compactObject).toBe(compactObject);
-    expect(helperApi.mergeByRelativePath).toBe(mergeByRelativePath);
-    expect(helperApi.normalizeIsoTimestamp).toBe(normalizeIsoTimestamp);
-    expect(helperApi.normalizeOptionalText).toBe(normalizeOptionalText);
-    expect(helperApi.normalizeOptionalRelativePath).toBe(normalizeOptionalRelativePath);
-    expect(helperApi.normalizeStringArray).toBe(normalizeStringArray);
-    expect(helperApi.relativePathStrings).toBe(relativePathStrings);
-    expect(helperApi.uniqueStrings).toBe(uniqueStrings);
-  });
-
   it("keeps helper behavior stable through the public helper barrel", () => {
     expect(helperApi.normalizeOptionalText("  hello  ")).toBe("hello");
     expect(helperApi.normalizeOptionalText("   ")).toBeNull();

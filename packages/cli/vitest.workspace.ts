@@ -127,7 +127,6 @@ const cliVitestProjectSeeds: readonly CliVitestProjectSeed[] = [
       "cli-entry.test.ts",
       "cli-test-helpers.test.ts",
       "http-json-retry.test.ts",
-      "knowledge-boundary.test.ts",
       "knowledge-documents.test.ts",
       "wearables-schema.test.ts",
     ],

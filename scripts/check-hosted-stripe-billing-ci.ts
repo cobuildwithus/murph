@@ -67,11 +67,6 @@ export function inspectHostedStripeBillingWorkflow(
     "Hermetic proof must retain Starter-to-paid Checkout coverage.",
   );
   requireText(
-    "missing-starter-migration-proof",
-    "apps/web/test/hosted-starter-usage-migration.test.ts",
-    "Hermetic proof must retain the legacy trial-to-Starter migration contract.",
-  );
-  requireText(
     "missing-config-proof",
     "test/stripe-billing-live-config.test.ts",
     "Hermetic proof must retain sandbox authority partition tests.",

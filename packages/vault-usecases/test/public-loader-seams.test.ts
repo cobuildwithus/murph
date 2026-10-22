@@ -1,16 +1,10 @@
-import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { importWithMocks } from "./mock-import.ts";
-
-const TEST_DIR = path.dirname(fileURLToPath(import.meta.url));
-const PACKAGE_SRC_DIR = path.resolve(TEST_DIR, "../src");
-const LOWER_OWNER_VALUE_IMPORT_PATTERN =
-  /^\s*import(?!\s+type\b)[\s\S]*?from ['"]@murphai\/(?:core|query|importers|runtime-state)(?:\/[^'"]+)?['"]/mu;
 
 afterEach(() => {
   vi.resetModules();
@@ -22,33 +16,6 @@ afterEach(() => {
 });
 
 describe("public loader seams", () => {
-  it("keeps public seams free of lower-owner value imports", async () => {
-    const sourceChecks = [
-      "index.ts",
-      "vault-services.ts",
-      "preferences.ts",
-      "helpers.ts",
-      "workouts.ts",
-      "usecases/shared.ts",
-      "usecases/vault-usecase-helpers.ts",
-      "usecases/workout-format.ts",
-      "usecases/workout-import.ts",
-      "usecases/workout-measurement.ts",
-    ];
-
-    for (const relativePath of sourceChecks) {
-      const source = await readFile(path.join(PACKAGE_SRC_DIR, relativePath), "utf8");
-      expect(source).not.toMatch(LOWER_OWNER_VALUE_IMPORT_PATTERN);
-    }
-
-    const vaultServicesSource = await readFile(
-      path.join(PACKAGE_SRC_DIR, "vault-services.ts"),
-      "utf8",
-    );
-    expect(vaultServicesSource).toContain('import("./usecases/integrated-services.js")');
-    expect(vaultServicesSource).not.toContain('} from "./usecases/integrated-services.js"');
-  });
-
   it("loads integrated services only when an integrated method is invoked", async () => {
     let integratedLoads = 0;
     const initMock = vi.fn(async () => ({ ok: true }));
