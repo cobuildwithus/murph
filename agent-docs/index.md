@@ -1435,4 +1435,9 @@ Game proposal wording and conversation-activity selection are tracked in
 [`game chat selection and copy`](exec-plans/completed/2026-10-22-game-chat-selection-copy.md);
 `product-specs/weekly-game.md` remains the current behavior owner.
 
+Hosted photo import CPU reduction and measurement limits are tracked in
+[the photo import plan](exec-plans/completed/2026-10-22-photo-import-latency.md);
+`../packages/inboxd/README.md` owns image settings and
+`../packages/assistant-runtime/README.md` owns the optional timing field.
+
 Private image provider variant correction: [game Images variant IDs](exec-plans/completed/2026-10-22-game-images-variant-ids.md).

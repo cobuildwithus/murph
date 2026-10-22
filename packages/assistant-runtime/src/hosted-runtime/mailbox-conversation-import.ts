@@ -175,6 +175,7 @@ export interface HostedConversationMailboxPayloadDecodeInput {
 export interface HostedConversationMailboxLocalImportResult {
   captureId: string | null;
   metrics: HostedConversationWakeMetrics;
+  capturePersistMs?: number;
 }
 
 type HostedConversationMailboxRuntime = Pick<
@@ -1066,6 +1067,9 @@ async function projectHostedConversationAssistantInputBestEffort(input: {
       assertHostedConversationMailboxImportLive(input.signal ?? null);
       timing.projectionImportMs = elapsedHostedConversationImportMs(importStartedAt);
     }
+    if (imported.capturePersistMs !== undefined) {
+      timing.projectionCapturePersistMs = imported.capturePersistMs;
+    }
   } catch (error) {
     if (shouldRecordHostedConversationAttachmentEvidence(input.stagedInput)) {
       assertHostedConversationMailboxImportLive(input.signal ?? null);
@@ -1313,6 +1317,7 @@ async function importHostedConversationWakeWithLocalInbox(input: {
   return {
     captureId: result.capture?.captureId ?? null,
     metrics: result.metrics,
+    capturePersistMs: result.capturePersistMs,
   };
 }
 

@@ -2255,11 +2255,12 @@ describeRealCodex('real Codex canonical availability e2e', () => {
 })
 
 describeRealCodex('real Codex retained image e2e', () => {
-  it('finds and views an earlier image through the conversation media index', async () => {
+  it('reads a normalized photo label through the conversation media index', async () => {
     const config = await resolveRealCodexE2eConfig()
     const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-retained-image-e2e-'))
-    const rawPath = 'raw/inbox/synthetic/attachments/01__picture.png'
-    const bytes = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAIAAAAlC+aJAAAAcElEQVR4nO3PAQkAAAyEwO8fatkWQwThAuh2c+MLGpDjCxqQ4wsakOMLGpDjCxqQ4wsakOMLGpDjCxqQ4wsakOMLGpDjCxqQ4wsakOMLGpDjCxqQ4wsakOMLGpDjCxqQ4wsakOMLGpDjCxqQ4wsacHv6dOCmA4JHiwAAAABJRU5ErkJggg==', 'base64')
+    const rawPath = 'raw/inbox/synthetic/attachments/01__label.webp'
+    // Synthetic SVG -> JPEG -> production inbox normalizer (3072px, WebP q88 effort 0).
+    const bytes = await readFile(new URL('./fixtures/photo-import/label.webp', import.meta.url))
     const materializedPaths: string[] = []
     try {
       const receivedAt = new Date(Date.now() - 86_400_000).toISOString()
@@ -2273,14 +2274,14 @@ describeRealCodex('real Codex retained image e2e', () => {
       await updateAssistantInputAttachmentEvidence({ vault: workingDirectory, inputId: imageEvent.inputId,
         attachmentEvidence: {
           attachments: [{ byteSize: bytes.length, derived: null, descriptorAttachmentId: 'synthetic-image',
-            fileName: 'picture.png', inlineFragments: [], kind: 'image', mime: 'image/png', ordinal: 1,
+            fileName: 'label.webp', inlineFragments: [], kind: 'image', mime: 'image/webp', ordinal: 1,
             parseState: 'succeeded', sourceAttachmentId: 'synthetic-image',
             raw: { kind: 'vault-relative-file', path: rawPath, byteSize: bytes.length,
-              mediaType: 'image/png', sha256: createHash('sha256').update(bytes).digest('hex') } }],
+              mediaType: 'image/webp', sha256: createHash('sha256').update(bytes).digest('hex') } }],
           optionalInboxCaptureId: 'cap_retained_image', reasonCode: null,
           source: 'hosted-inbox-projection', status: 'available', updatedAt: receivedAt,
         } })
-      const prompt = 'What color is the image I sent earlier in this conversation?'
+      const prompt = 'What background color and portion amount are on the label photo I sent earlier in this conversation?'
       const followup = await upsertAssistantInputEvent({ vault: workingDirectory, event: {
         content: { text: prompt }, conversation, occurredAt: new Date().toISOString(),
         sourceRef: { kind: 'inbox-capture', captureId: 'cap_image_followup', source: 'telegram', version: null },
@@ -2329,6 +2330,7 @@ describeRealCodex('real Codex retained image e2e', () => {
         params: expect.objectContaining({ item: expect.objectContaining({ type: 'imageView' }) }),
       }))
       expect(result.finalMessage).toMatch(/green/iu)
+      expect(result.finalMessage).toMatch(/42\s*(?:g|grams)\b/iu)
       expect(result.finalMessage).not.toMatch(/resend|re-upload|cannot see|can't see|raw\/|sha256/iu)
     } finally {
       await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
