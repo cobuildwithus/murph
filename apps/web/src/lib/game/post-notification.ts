@@ -6,6 +6,7 @@ import { companionPushRouteRegistrationSchema, forgetCompanionPushRoute } from "
 import { sha256Hex } from "../primitives";
 import { getPrisma } from "../prisma";
 import { isGameEnabledFor } from "./access";
+import { hasUnlockedDay, type RuleEntry } from "./rules";
 import { addDays, dayStartInstant, gameLocalDate } from "./time";
 
 interface ClaimedPostNotification {
@@ -26,7 +27,10 @@ export async function claimGamePostNotification(
     companionPushRoute: Pick<Prisma.TransactionClient["companionPushRoute"], "findFirst">;
     gameEvent: Pick<Prisma.TransactionClient["gameEvent"], "createMany">;
   },
-  input: { gameId: string; actor: string; players: readonly GamePlayer[]; clock: Date },
+  input: {
+    gameId: string; actor: string; players: readonly GamePlayer[]; clock: Date;
+    entries: readonly RuleEntry[]; dayIndex: number;
+  },
 ): Promise<ClaimedPostNotification | null> {
   if (input.players.length !== 2 || !isGameEnabledFor(input.actor)) return null;
   const recipient = input.players.find((player) => player.memberId !== input.actor);
@@ -57,7 +61,12 @@ export async function claimGamePostNotification(
       collapseId: sha256Hex(commandKey),
       data: { gameId: input.gameId, notification: "game_post" },
       expiresAt: dayStartInstant(addDays(day, 1), recipient.timeZone),
-      message: { kind: "alert", title: "New game check-in", body: "Someone in your game just posted. Open Murph to check it out." },
+      message: {
+        kind: "alert", title: "New game check-in",
+        body: hasUnlockedDay(input.entries, recipient.memberId, input.dayIndex)
+          ? "There's a new post in your game. Take a look."
+          : "Someone posted. Share yours to see it.",
+      },
       target: target.data,
     },
   };

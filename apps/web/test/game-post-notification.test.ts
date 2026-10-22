@@ -15,6 +15,7 @@ vi.mock("@/src/lib/prisma", () => ({
 }));
 
 import { claimGamePostNotification, deliverGamePostNotification } from "@/src/lib/game/post-notification";
+import type { RuleEntry } from "@/src/lib/game/rules";
 
 const target = { token: "ab".repeat(32), environment: "development", topic: "ai.withmurph.app.dev" };
 const route = { ...target, gameSessionId: "session-one" };
@@ -26,7 +27,7 @@ const players: GamePlayer[] = ["poster", "recipient"].map((memberId, seat) => ({
 // real lock, unique-key and commit behavior through runGameCommand.
 const tx = { companionPushRoute: { findFirst: m.route }, gameEvent: { createMany: m.claim } };
 const claim = (overrides: Partial<Parameters<typeof claimGamePostNotification>[1]> = {}) =>
-  claimGamePostNotification(tx, { gameId: "game-a", actor: "poster", players, clock, ...overrides });
+  claimGamePostNotification(tx, { gameId: "game-a", actor: "poster", players, clock, entries: [], dayIndex: 0, ...overrides });
 
 describe("game daily post notifications", () => {
   afterEach(() => { vi.useRealTimers(); vi.unstubAllEnvs(); });
@@ -72,6 +73,26 @@ describe("game daily post notifications", () => {
     await deliverGamePostNotification(await claim());
     expect(m.send).not.toHaveBeenCalled();
   });
+
+  it.each([
+    { kind: "photo", attempt: 1, dayIndex: 0, memberId: "recipient", withdrawnAt: null, unlocked: true },
+    { kind: "heart_rate", attempt: 1, dayIndex: 0, memberId: "recipient", withdrawnAt: null, unlocked: true },
+    { kind: "photo", attempt: 1, dayIndex: 0, memberId: "recipient", withdrawnAt: clock, unlocked: true },
+    { kind: "excuse", attempt: 0, dayIndex: 0, memberId: "recipient", withdrawnAt: null, unlocked: false },
+    { kind: "photo", attempt: 1, dayIndex: 1, memberId: "recipient", withdrawnAt: null, unlocked: false },
+    { kind: "photo", attempt: 1, dayIndex: 0, memberId: "poster", withdrawnAt: null, unlocked: false },
+  ] satisfies (Omit<RuleEntry, "id" | "mediaKeys"> & { unlocked: boolean })[])(
+    "matches the post-to-unlock state for the new entry's day: %j", async ({ unlocked, ...entry }) => {
+      const notification = await claim({ entries: [{ ...entry, id: "entry-one", mediaKeys: [] }] });
+      await deliverGamePostNotification(notification);
+      expect(m.send).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+        message: {
+          kind: "alert", title: "New game check-in",
+          body: unlocked ? "There's a new post in your game. Take a look." : "Someone posted. Share yours to see it.",
+        },
+      }));
+    },
+  );
 
   it("uses the recipient's frozen zone through daylight saving time", async () => {
     const notification = await claim({ clock: new Date("2026-11-01T07:30:00Z") });

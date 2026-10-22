@@ -5477,6 +5477,10 @@ attempt and one receipt update record sent, failed, unregistered or superseded.
 An unregistered token adds one exact-token deletion. Peak added database and
 provider concurrency is one. A crash or ambiguous provider result leaves the
 claim consumed; this optional best-effort alert is never replayed.
+Copy derives from `hasUnlockedDay` over the entries already loaded under the
+game lock for the new post's day index. A recipient who posted still receives
+the alert, with an invitation to look; a locked recipient is prompted to share.
+This reuses permanent post-to-unlock authority without another query or state.
 
 `POST /api/game/v1/push-route` uses game bearer admission, allowing free players
 to register the existing `companion_push_route` address and explicit alert

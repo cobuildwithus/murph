@@ -76,6 +76,10 @@ this default without deleting other people's private contact choices.
   Retakes, withdrawals and excuses do not send alerts. Offline-grace posts use
   the recipient's day at receipt for the cap. Notifications reveal only that a
   check-in was posted; names, tasks, words and images remain out of the payload.
+  Players who already posted still receive the alert. Its body invites them to
+  look when they have unlocked the new entry's day, or to share their own post
+  when that day remains locked. Copy uses the same permanent unlock rule as
+  the game reader, including after a withdrawal; an excuse does not unlock.
   Tapping opens the game with its normal post-to-unlock rules. Delivery is best
   effort: retries and uncertain provider failures never trigger another attempt
   for the same game day. Players may decline or revoke iOS alert permission.

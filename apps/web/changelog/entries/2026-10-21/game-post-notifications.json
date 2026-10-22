@@ -7,7 +7,7 @@
     "priority": 2,
     "title": "Know when your opponent checks in",
     "summary": "Get an iPhone notification when another player posts, limited to one notification per game each day.",
-    "details": "Available with the updated Murph app and notification permission. Tap to open the game; photos and post text stay behind the usual post-to-unlock rule. The limit resets at your game's 3 a.m. day boundary. Retakes and excuses stay quiet, and delivery depends on Apple notification availability.",
+    "details": "Available with the updated Murph app and notification permission. If you've posted, the alert invites you to look; otherwise it prompts you to share yours. Tap to open that game; photos and post text stay behind the usual post-to-unlock rule. The limit resets at your game's 3 a.m. day boundary. Retakes and excuses stay quiet, and delivery depends on Apple notification availability.",
     "relevanceTags": ["challenges", "notifications"],
     "sourcePullRequests": []
   }

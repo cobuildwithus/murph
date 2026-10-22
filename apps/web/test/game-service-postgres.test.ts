@@ -136,16 +136,19 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     expect(results.every((result) => result?.id === gameId)).toBe(true);
     expect(push).toHaveBeenCalledTimes(1);
     expect(push.mock.calls[0]?.[0].data).toEqual({ gameId, notification: "game_post" });
+    expect(push.mock.calls[0]?.[0].message.body).toBe("Someone posted. Share yours to see it.");
     expect(await authorizeMediaRead(recipient, command.mediaKeys[0]!)).toBe(false);
     await ok(poster, await photo(poster, gameId, "notification-retake"));
     expect(push).toHaveBeenCalledTimes(1);
     await ok(recipient, await photo(recipient, gameId, "notification-other-direction"));
     expect(push).toHaveBeenCalledTimes(2);
+    expect(push.mock.calls[1]?.[0].message.body).toBe("There's a new post in your game. Take a look.");
     const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000);
     expect((await runGameCommand({
       actorMemberId: poster, command: await photo(poster, gameId, "notification-next-day"), now: tomorrow,
     })).ok).toBe(true);
     expect(push).toHaveBeenCalledTimes(3);
+    expect(push.mock.calls[2]?.[0].message.body).toBe("Someone posted. Share yours to see it.");
     const receipts = await getPrisma().gameEvent.findMany({ where: { gameId, type: "post_notification" } });
     expect(receipts).toHaveLength(3);
     expect(new Set(receipts.map((receipt) => receipt.commandKey)).size).toBe(3);

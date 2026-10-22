@@ -571,7 +571,9 @@ async function post(context: CommandContext, command: Extract<GameCommand, { typ
     });
     const { attempt, dayIndex, graceUsed } = decision;
     if (kind !== "excuse" && attempt === 1) {
-      notification = await claimGamePostNotification(tx, { gameId, actor, players: loaded.row.players, clock });
+      notification = await claimGamePostNotification(tx, {
+        gameId, actor, players: loaded.row.players, clock, entries: loaded.state.entries, dayIndex,
+      });
     }
     return [{ payload: { attempt, dayIndex, entryId, graceUsed, kind }, type: "posted" }];
   });
