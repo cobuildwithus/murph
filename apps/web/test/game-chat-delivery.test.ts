@@ -71,7 +71,7 @@ describe("game proposal chat delivery", () => {
     expect(m.routes).toHaveBeenCalledWith(expect.objectContaining({ containerMemberIds: ["room"] }));
     expect(m.updateGame).toHaveBeenCalledWith(expect.objectContaining({ data: { chatContainerMemberId: "room" } }));
     expect(m.create).not.toHaveBeenCalled();
-    expect(m.candidates).toHaveBeenCalledWith(expect.objectContaining({ select: expect.objectContaining({
+    expect(m.candidates).toHaveBeenCalledWith(expect.objectContaining({ relationLoadStrategy: "join", select: expect.objectContaining({
       member: { select: expect.objectContaining({ hostedMailboxItems: {
         where: { kind: "conversation.message" }, orderBy: { createdAt: "desc" }, select: { createdAt: true }, take: 1,
       } }) },

@@ -76,6 +76,7 @@ export async function deliverGameChangeProposal(gameId: string, proposalId: stri
     await requireExactChat(containerMemberId, phones);
   } else {
     const candidates = await prisma.hostedThreadContainer.findMany({
+      relationLoadStrategy: "join",
       where: { AND: game.players.map((player) => ({ participants: { some: { participantMemberId: player.memberId, removedAt: null } } })), participants: { none: { removedAt: null, participantMemberId: { notIn: game.players.map((player) => player.memberId) } } } },
       select: {
         memberId: true, createdAt: true,

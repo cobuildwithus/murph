@@ -65,3 +65,11 @@ audience rejection, and the discovery bound.
   was blocked before provider action; the documented alternate-home lane passed.
 - Proposal text is delivered by the existing exact-text notification branch;
   no model-generated proposal, new provider input, or additional delivery owner.
+
+The candidate query explicitly uses Prisma's join relation strategy. Local
+PostgreSQL generated-SQL and EXPLAIN ANALYZE proof used two synthetic rooms with
+500 message rows each inside a rolled-back transaction: the existing mailbox
+index returned one row per room (rows=1, loops=2) beneath LIMIT 1. Ranking does
+not load conversation histories into application memory.
+
+Implementation candidate and remaining review/release evidence: PR #4293.
