@@ -140,3 +140,32 @@ After this merge, all 48 focused photo/media/tool tests, three PostgreSQL
 progress/photo proofs and the Web typecheck pass. Docs drift passes. The Images
 provider itself remains a synthetic control boundary in local proof; production
 variant admission/deployment is separately owned by the parent release lane.
+
+
+## Round-two phone allowance finding: rejected with composed proof
+
+The review treated phone-call reservation as if it used the asynchronous game
+access gate. Its default store instead calls the existing pure active-access
+assertion, which requires an ordinary active owner for thread containers. That
+same owner access makes allowance attribution remain with the source room.
+Game-only access therefore cannot reserve a call; historical requester activation
+alone is insufficient. No phone capability, accounting behavior or schema changes
+are needed.
+
+The new isolated PostgreSQL proof exercises the default reservation, real current
+membership and historical activation, with synthetic accepted-message decoding and
+provider boundaries. It proves that a game-funded alternate room passes AI usage
+admission but fails phone reservation before a call, provider effect, usage row or
+period is created. Activating ordinary owner access admits the same request. Both
+terminal webhook and reconciliation paths then charge the source room once across
+replay, leave the game primary balance untouched, and retain source accounting
+when the game binding changes. Provider metadata cannot redirect attribution.
+This is a proof-only addition; production behavior and migration inventory remain
+unchanged. Parent owns final finding disposition and release.
+
+Validation: 25 tests pass across the new PostgreSQL phone-allowance proof,
+`phone-calls-usage.test.ts` and `phone-calls-group-requester.test.ts`. The local
+PostgreSQL lane uses the final committed schema, with no draft phone funding
+column. Web typecheck, focused Oxlint, docs drift and whitespace checks pass;
+the aggregate complexity guard passes without new production source. No new
+member-facing behavior means no additional changelog or live-model journey.
