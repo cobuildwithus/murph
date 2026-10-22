@@ -104,7 +104,8 @@ export async function normalizeAttachmentForStorage(
       })
       .webp({
         quality: IMAGE_NORMALIZATION_WEBP_QUALITY,
-        effort: 4,
+        // Keep resolution and quality settings; reduce foreground encoding CPU.
+        effort: 0,
       })
       .toBuffer();
 

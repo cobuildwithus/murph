@@ -111,6 +111,7 @@ export function createHostedWorkspaceSystemWork(input: {
               pendingOnly: true,
               runtimeLogContext: input.runnerInput.runtimeLogContext,
               retainProcessedItemUntilRecorded: true,
+              shouldYieldDeviceImportPreparation: input.runnerInput.shouldYieldDeviceImportPreparation,
               shouldYieldBackgroundMaintenance: input.runnerInput.shouldYieldBackgroundMaintenance,
               backgroundMaintenanceYieldReason: input.runnerInput.backgroundMaintenanceYieldReason,
               signal,

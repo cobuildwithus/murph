@@ -322,6 +322,7 @@ class DeviceSyncServiceController {
   private readonly workerPollMs: number;
   private readonly workerBatchSize: number;
   private readonly schedulerPollMs: number;
+  private readonly shouldYieldImportPreparation: (() => boolean) | null;
   private readonly shouldYieldJobExecution: (() => boolean) | null;
   private readonly workerId: string;
   private readonly ownsStore: boolean;
@@ -352,6 +353,7 @@ class DeviceSyncServiceController {
     this.workerPollMs = Math.max(1_000, input.config.workerPollMs ?? 5_000);
     this.workerBatchSize = Math.max(1, input.config.workerBatchSize ?? 4);
     this.schedulerPollMs = Math.max(5_000, input.config.schedulerPollMs ?? 60_000);
+    this.shouldYieldImportPreparation = input.config.shouldYieldImportPreparation ?? null;
     this.shouldYieldJobExecution = input.config.shouldYieldJobExecution ?? null;
     this.workerId = generatePrefixedId("worker");
     this.store =
@@ -967,6 +969,7 @@ class DeviceSyncServiceController {
     let providerResourceRequestCount = 0;
     let providerResourceRequestElapsedMs = 0;
     let snapshotImportCount = 0;
+    let snapshotImportDeferredCount = 0;
     const snapshotImportOutcomes = { applied: 0, noop: 0, failed: 0, unknown: 0 };
     const completeSourceDayImportOutcomes = { applied: 0, noop: 0, failed: 0, unknown: 0 };
     let snapshotImportElapsedMs = 0;
@@ -1021,6 +1024,7 @@ class DeviceSyncServiceController {
             ),
         ...(resource ? { resource } : {}),
         snapshotImportCount,
+        ...(snapshotImportDeferredCount > 0 ? { snapshotImportDeferredCount } : {}),
         snapshotImportOutcomes,
         completeSourceDayImportOutcomes,
         snapshotImportElapsedMs,
@@ -1331,33 +1335,55 @@ class DeviceSyncServiceController {
           }
         },
         importSnapshot: async (snapshot: unknown, options) => {
-          ensureExecutionActive();
-          const importStartedAt = currentNow();
-          snapshotImportCount += 1;
-          let importOutcome: keyof typeof snapshotImportOutcomes = "failed";
-          let importResult: Awaited<ReturnType<DeviceSyncImporterPort["importDeviceProviderSnapshot"]>>;
-          try {
-            importResult = await this.importer.importDeviceProviderSnapshot(
-              {
-                provider: provider.provider,
-                snapshot,
-                vaultRoot: this.vaultRoot,
-                ...options,
-              },
-              { importSession: input.importSession, signal: jobAbortController.signal },
-            );
-            const applied = toPlainRecord(importResult)?.applied;
-            importOutcome = applied === true ? "applied" : applied === false ? "noop" : "unknown";
-          } finally {
-            snapshotImportOutcomes[importOutcome] += 1;
-            if (options?.completeSourceDay) {
-              completeSourceDayImportOutcomes[importOutcome] += 1;
+          const importWithAdmissionDeferral = async () => {
+            for (;;) {
+              ensureExecutionActive();
+              while (this.shouldYieldImportPreparation?.()) {
+                await new Promise((resolve) => setTimeout(resolve, DEVICE_SYNC_JOB_YIELD_POLL_MS));
+                ensureExecutionActive();
+              }
+              const importDeferral = new AbortController();
+              const importSignal = AbortSignal.any([jobAbortController.signal, importDeferral.signal]);
+              const stopImportYieldPolling = startDeviceSyncJobYieldPolling({
+                abort: () => importDeferral.abort(new Error("Device import preparation deferred for conversation admission.")),
+                shouldYield: this.shouldYieldImportPreparation,
+                signal: importSignal,
+              });
+              const importStartedAt = currentNow();
+              let importOutcome: keyof typeof snapshotImportOutcomes | null = "failed";
+              try {
+                const importResult = await this.importer.importDeviceProviderSnapshot(
+                  { provider: provider.provider, snapshot, vaultRoot: this.vaultRoot, ...options },
+                  { importSession: input.importSession, signal: importSignal },
+                );
+                const applied = toPlainRecord(importResult)?.applied;
+                importOutcome = applied === true ? "applied" : applied === false ? "noop" : "unknown";
+                return importResult;
+              } catch (error) {
+                if (importDeferral.signal.aborted
+                  && isDeviceSyncJobAbortError(error, importDeferral.signal)) {
+                  // A deferred preparation is neither a failed job nor a new
+                  // provider execution. The loop's execution check propagates
+                  // any job-level abort that raced with this deferral.
+                  if (!jobAbortController.signal.aborted) snapshotImportDeferredCount += 1;
+                  importOutcome = null;
+                  continue;
+                }
+                throw error;
+              } finally {
+                stopImportYieldPolling();
+                if (importOutcome !== null) {
+                  snapshotImportCount += 1;
+                  snapshotImportOutcomes[importOutcome] += 1;
+                  if (options?.completeSourceDay) {
+                    completeSourceDayImportOutcomes[importOutcome] += 1;
+                  }
+                }
+                snapshotImportElapsedMs += nonnegativeDeviceSyncDurationMs(importStartedAt, currentNow());
+              }
             }
-            snapshotImportElapsedMs += nonnegativeDeviceSyncDurationMs(
-              importStartedAt,
-              currentNow(),
-            );
-          }
+          };
+          const importResult = await importWithAdmissionDeferral();
           if (toPlainRecord(importResult)?.applied === true) {
             canonicalProgressCommitted = true;
           }

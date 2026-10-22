@@ -323,6 +323,47 @@ afterEach(() => {
 });
 
 describe("importHostedConversationMessageWakeIntoLocalInbox", () => {
+  it("measures capture persistence separately from download and inbox opening", async () => {
+    let now = 0;
+    const clock = vi.spyOn(performance, "now").mockImplementation(() => now);
+    mocks.normalizeHostedLinqConversationCapture.mockImplementationOnce(async () => {
+      now += 11;
+      return { source: "linq" };
+    });
+    const inboxRuntime = { close: vi.fn(), listAttachmentParseJobs: vi.fn(() => []) };
+    mocks.openInboxRuntime.mockImplementationOnce(async () => {
+      now += 7;
+      return inboxRuntime;
+    });
+    const close = vi.fn();
+    mocks.createInboxPipeline.mockImplementationOnce(async () => ({
+      close,
+      processCapture: async () => {
+        now += 19;
+        return { captureId: "capture_synthetic" };
+      },
+    }));
+    try {
+      const result = await importHostedConversationMessageWakeIntoLocalInbox({
+        runtime: createRuntime(),
+        vaultRoot: "/tmp/synthetic-projection-timing",
+        wake: buildHostedExecutionLinqConversationMessageWake({
+          eventId: "evt_synthetic_timing",
+          linqMessage: {
+            chatId: "chat_synthetic", from: "+15551234567", isFromMe: false,
+            messageId: "msg_synthetic", parts: [],
+          },
+          occurredAt: "2026-04-08T00:00:00.000Z",
+          phoneLookupKey: "15551234567", userId: "member_synthetic",
+        }),
+      });
+      expect(close).toHaveBeenCalledOnce();
+      expect(result.capturePersistMs).toBe(19);
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
   it("normalizes each hosted conversation wake directly before parsed inbox persistence", async () => {
     const baseRuntime = createRuntime();
     const providerFetch = vi.fn<typeof fetch>();

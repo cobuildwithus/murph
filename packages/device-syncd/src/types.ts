@@ -63,6 +63,8 @@ export interface DeviceSyncServiceConfig {
   schedulerPollMs?: number;
   log?: DeviceSyncLogger;
   shouldYieldJobExecution?: (() => boolean) | null;
+  // Admission priority only: provider I/O and atomic publication keep running.
+  shouldYieldImportPreparation?: (() => boolean) | null;
 }
 
 export type DeviceSyncJobFailureDisposition = "queued" | "dead";
@@ -266,6 +268,7 @@ export interface DeviceSyncJobTimingDiagnostic {
   providerUnattributedElapsedMs: number | null;
   resource?: string;
   snapshotImportCount: number;
+  snapshotImportDeferredCount?: number;
   snapshotImportOutcomes: DeviceSyncImportOutcomeCounts;
   completeSourceDayImportOutcomes: DeviceSyncImportOutcomeCounts;
   snapshotImportElapsedMs: number;

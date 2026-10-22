@@ -62,6 +62,7 @@ const HOSTED_CONVERSATION_PARSER_RETRY_DELAY_MS = 60_000;
 export interface HostedConversationWakeLocalImportResult {
   capture: PersistedCapture | null;
   metrics: HostedConversationWakeMetrics;
+  capturePersistMs?: number;
 }
 
 export class HostedConversationInboxProjectionError extends Error {
@@ -89,6 +90,7 @@ export async function importHostedConversationMessageWakeIntoLocalInbox(input: {
   const runtime = await openInboxRuntime({
     vaultRoot: input.vaultRoot,
   });
+  const openedAt = performance.now();
   let pipeline: Awaited<ReturnType<typeof createInboxPipeline>> | null = null;
 
   try {
@@ -110,6 +112,7 @@ export async function importHostedConversationMessageWakeIntoLocalInbox(input: {
         { cause: error },
       );
     }
+    const capturePersistMs = Math.round(performance.now() - openedAt);
     assertHostedConversationProjectionLive(input.signal ?? null);
     const metrics = await drainHostedConversationParsers({
       captureId: persistedCapture.captureId,
@@ -123,6 +126,7 @@ export async function importHostedConversationMessageWakeIntoLocalInbox(input: {
     return {
       capture: persistedCapture,
       metrics,
+      capturePersistMs,
     };
   } finally {
     if (pipeline) {

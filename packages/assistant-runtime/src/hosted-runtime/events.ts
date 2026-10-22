@@ -56,6 +56,7 @@ export async function executeHostedMailboxEvent(input: {
   operatorHomeRoot?: string | null;
   preferenceAppliedAt?: string;
   preferenceCausalSeq?: string;
+  shouldYieldDeviceImportPreparation?: (() => boolean) | null;
   shouldYieldBackgroundMaintenance?: (() => boolean) | null;
   backgroundMaintenanceYieldReason?: HostedBackgroundMaintenanceYieldReason;
   sourceMailboxItemId?: string | null;
@@ -119,6 +120,7 @@ export async function executeHostedMailboxEvent(input: {
     runtimeLogContext: input.runtimeLogContext ?? null,
     runtimeEnv: input.runtimeEnv,
     signal: input.signal ?? null,
+    shouldYieldDeviceImportPreparation: input.shouldYieldDeviceImportPreparation,
     ...(input.shouldYieldBackgroundMaintenance
       ? {
           shouldYieldBackgroundMaintenance: input.shouldYieldBackgroundMaintenance,
@@ -164,6 +166,7 @@ async function handleHostedMailboxEvent(input: {
   > & Partial<Pick<NormalizedHostedAssistantRuntimeConfig, "parserToolchain">>;
   runtimeEnv: Readonly<Record<string, string>>;
   signal: AbortSignal | null;
+  shouldYieldDeviceImportPreparation?: (() => boolean) | null;
   shouldYieldBackgroundMaintenance?: (() => boolean) | null;
   backgroundMaintenanceYieldReason?: HostedBackgroundMaintenanceYieldReason;
   sourceMailboxItemId: string | null;
@@ -185,6 +188,7 @@ async function handleHostedMailboxEvent(input: {
     runtimeLogContext: input.runtimeLogContext,
     runtimeEnv: input.runtimeEnv,
     signal: input.signal,
+    shouldYieldDeviceImportPreparation: input.shouldYieldDeviceImportPreparation,
     ...(input.shouldYieldBackgroundMaintenance
       ? {
           shouldYieldBackgroundMaintenance: input.shouldYieldBackgroundMaintenance,
@@ -209,6 +213,7 @@ async function executeHostedSystemWake(input: {
   > & Partial<Pick<NormalizedHostedAssistantRuntimeConfig, "parserToolchain">>;
   runtimeEnv: Readonly<Record<string, string>>;
   signal: AbortSignal | null;
+  shouldYieldDeviceImportPreparation?: (() => boolean) | null;
   shouldYieldBackgroundMaintenance?: (() => boolean) | null;
   backgroundMaintenanceYieldReason?: HostedBackgroundMaintenanceYieldReason;
   sourceMailboxItemId: string | null;
@@ -343,6 +348,7 @@ async function executeHostedSystemWake(input: {
         runtimeLogContext: input.runtimeLogContext,
         runtimeLogPlatform: input.runtime.platform,
         resolvedConfig: input.runtime.resolvedConfig,
+        shouldYieldImportPreparation: input.shouldYieldDeviceImportPreparation,
         shouldYieldDeviceSync: input.shouldYieldBackgroundMaintenance,
         cooperativeYieldReason: input.backgroundMaintenanceYieldReason,
         signal: input.signal,

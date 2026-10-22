@@ -59,6 +59,10 @@ without a second conversation fetch. The workspace-runner suite covers concurren
 completion/wake acceptance, empty-hint qualification, and retained wakes on failed
 completion. The concurrent-device-import integration suite proves reply delivery
 while downloads remain held and subsequent canonical import/acknowledgment.
+The `hosted-runtime-device-import-admission.test.ts` suite covers warm and
+model-free promotion, import deferral in place, unchanged canonical evidence,
+partial-progress retention without re-downloads, and admission closure across
+provider start, no-provider, failure, shutdown, and back-to-back messages.
 The `hosted-runtime-promoted-foreground-priority.test.ts` suite applies the same
 foreground contract to default owners, device-completion promotion, and
 system-checkpoint promotion. Each history exercises repeated default wakes and

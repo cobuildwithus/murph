@@ -1448,4 +1448,9 @@ URL-free mailbox contract.
 Challenge negotiation and encrypted task/stake changes are tracked in
 [`game negotiation`](exec-plans/completed/2026-10-22-game-negotiation.md).
 
+Hosted photo import CPU reduction and measurement limits are tracked in
+[the photo import plan](exec-plans/completed/2026-10-22-photo-import-latency.md);
+`../packages/inboxd/README.md` owns image settings and
+`../packages/assistant-runtime/README.md` owns the optional timing field.
+
 Private image provider variant correction: [game Images variant IDs](exec-plans/completed/2026-10-22-game-images-variant-ids.md).

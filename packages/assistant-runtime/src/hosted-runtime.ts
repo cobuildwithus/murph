@@ -460,6 +460,8 @@ const HOSTED_SYSTEM_MAILBOX_MODEL_FREE_ROUTE_ACTIONS = [
 ] as const;
 const HOSTED_INITIAL_BOOTSTRAP_PENDING_REASON_CODE = "bootstrap.pending";
 const HOSTED_RUNTIME_ISSUE_POST_CHECKPOINT_EXPORT_TIMEOUT_MS = 2_500;
+// Admission normally takes seconds; fail open if no provider/pass close follows.
+const HOSTED_DEVICE_IMPORT_ADMISSION_MAX_MS = 30_000;
 const HOSTED_VAULT_FORMAT_MIGRATION_MAX_BUNDLES = 500;
 
 interface HostedInitialMailboxImportPlan {
@@ -1693,6 +1695,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
   const guardedMailboxPort = guardedRuntime.platform.mailboxPort ?? mailboxPort;
   const guardedWorkspacePort = guardedRuntime.platform.workspacePort ?? workspacePort;
   let systemWork: ReturnType<typeof createHostedWorkspaceSystemWork> | null = null;
+  let deviceImportAdmissionOpenedAt: number | null = null;
   let detachedAssistantAskController: HostedDetachedAssistantAskController | null = null;
   let clinicalEnrichmentController: HostedClinicalEnrichmentController | null = null;
   let exactDetachedAssistantAskCompletion: Promise<void> | null = null;
@@ -1961,11 +1964,24 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       }
     };
     let runtimeOwnerHandoffRequested = false;
+    let latestDeviceImportAdmissionConversationSeq = 0n;
+    // Lane order makes repeated prefetch/staging observations idempotent after
+    // provider start. A later message can open a fresh admission window.
+    const observeDeviceImportAdmissionConversation = (item: { lane: string; laneSeq: string }): void => {
+      if (item.lane !== "conversation"
+        || BigInt(item.laneSeq) <= latestDeviceImportAdmissionConversationSeq) return;
+      latestDeviceImportAdmissionConversationSeq = BigInt(item.laneSeq);
+      deviceImportAdmissionOpenedAt = Date.now();
+    };
+    const closeDeviceImportAdmission = (): void => {
+      deviceImportAdmissionOpenedAt = null;
+    };
     const importMailboxItem: HostedWorkspaceRunnerInput["importItem"] = (item, context) =>
       mailboxBudget.importItem(
         item,
         async (importItem, context) => {
           assertRuntimeNotAborted();
+          observeDeviceImportAdmissionConversation(importItem.item);
           const outcome = await options.importItem(importItem, context);
           assertRuntimeNotAborted();
           await kickDetachedAssistantAskAfterImport(importItem, outcome);
@@ -1978,6 +1994,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       context,
     ) => {
       assertRuntimeNotAborted();
+      observeDeviceImportAdmissionConversation(item.item);
       const outcome = await options.importItem(item, createMailboxImportContext(context));
       assertRuntimeNotAborted();
       await kickDetachedAssistantAskAfterImport(item, outcome);
@@ -1987,6 +2004,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       prepareAudioPair: options.importItem.importAudioPair,
       assertRuntimeNotAborted, createMailboxImportContext, mailboxBudget,
       importForegroundMailboxItem, importMailboxItem,
+      observeConversation: observeDeviceImportAdmissionConversation,
     });
     const {
       initialMailboxPrefetch,
@@ -2395,6 +2413,10 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       runtimeWakeSignal: options.runtimeWakeSignal ?? null,
       signal: runtimeAbortController.signal,
       runtimeLogContext,
+      shouldYieldDeviceImportPreparation: () => deviceImportAdmissionOpenedAt !== null
+        && Date.now() - deviceImportAdmissionOpenedAt < HOSTED_DEVICE_IMPORT_ADMISSION_MAX_MS
+        && !runtimeAbortController.signal.aborted
+        && options.shutdownSignal?.aborted !== true,
       shouldYieldBackgroundMaintenance:
         canonicalWriteReceiptLogBlocksBackgroundMaintenance,
       backgroundMaintenanceYieldReason: "canonical_receipt_capacity",
@@ -3343,9 +3365,9 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           runnerInput: baseRunnerInput,
           signal: backgroundWorkSignal,
         });
-        const conversationReady = (await prefetch.response).items.some(
-          (item) => item.lane === "conversation",
-        );
+        const prefetchedItems = (await prefetch.response).items;
+        for (const item of prefetchedItems) observeDeviceImportAdmissionConversation(item);
+        const conversationReady = prefetchedItems.some((item) => item.lane === "conversation");
         if (!conversationReady && !hostedRuntimeDefaultProcessingWakeIsDue(
           await resolveCurrentSystemMailboxModeWake(),
         )) return false;
@@ -4428,6 +4450,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
                 options.runAssistantPhase ?? runHostedWorkspaceAssistantPhase
               )({
                 ...phaseInput,
+                onProviderRequestStarted: closeDeviceImportAdmission,
                 ...(providerStartAtAssistantPhaseCallback
                   ? {
                       providerStartCriticalPath:
@@ -4521,6 +4544,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
                 signal: passSignal,
               });
             } finally {
+              closeDeviceImportAdmission();
               currentAssistantInputId = null;
               // A reply can acquire terminal evidence before a later phase error.
               // Release invocation-local image status from that durable truth in
@@ -4589,6 +4613,8 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           status: "fail",
         });
         throw attachHostedRuntimeFailurePhase(error, "foreground.pass");
+      } finally {
+        closeDeviceImportAdmission();
       }
     };
     const runBrowserVaultRefreshMaintenance = async (maintenanceInput: {
@@ -7706,6 +7732,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       failedRuntimePhases[0] ?? "runtime",
     );
   } finally {
+    deviceImportAdmissionOpenedAt = null;
     runtimeAbortController.signal.removeEventListener(
       "abort",
       pauseDetachedAssistantAskOnRuntimeAbort,
@@ -9136,6 +9163,7 @@ function createAbortGuardedHostedRuntimeMediaStore(
 /** Preserve the same context and abort boundary for ordinary and paired imports. */
 function bindHostedWorkspaceMailboxAudioPairImports(input: {
   prepareAudioPair: HostedWorkspaceRuntimeJobOptions["importItem"]["importAudioPair"];
+  observeConversation(item: { lane: string; laneSeq: string }): void;
   assertRuntimeNotAborted(): void;
   createMailboxImportContext(context: HostedWorkspaceRunnerMailboxImportContext | undefined): HostedWorkspaceRuntimeJobImportContext;
   mailboxBudget: ReturnType<typeof createHostedWorkspaceMailboxImportBudget>;
@@ -9147,6 +9175,7 @@ function bindHostedWorkspaceMailboxAudioPairImports(input: {
   const importAudioPair: HostedMailboxAudioPairImport<HostedWorkspaceRunnerMailboxImportContext> =
     async (items, context) => {
       input.assertRuntimeNotAborted();
+      for (const item of items) input.observeConversation(item.item);
       const outcomes = await prepareAudioPair(items, input.createMailboxImportContext(context));
       input.assertRuntimeNotAborted();
       return outcomes;
