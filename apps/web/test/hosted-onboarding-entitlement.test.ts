@@ -281,6 +281,7 @@ describe("hosted member access (single resolver)", () => {
   it.each([true, false])("returns the database-filtered access decision: %s", async (allowed) => {
     const now = new Date("2026-07-26T12:00:00.000Z");
     const prisma = {
+      $queryRaw: vi.fn(async () => []),
       hostedMember: {
         findUnique: vi.fn(async () => allowed ? { id: "member_container" } : null),
       },
@@ -300,6 +301,7 @@ describe("hosted member access (single resolver)", () => {
       where: expect.objectContaining({ id: "member_container" }),
     });
     expect(prisma.hostedThreadContainerParticipant.findFirst).not.toHaveBeenCalled();
+    expect(prisma.$queryRaw).toHaveBeenCalledTimes(allowed ? 0 : 1);
   });
 
   it("resolves owner and current-participant access for a member set without per-member reads", async () => {
@@ -338,6 +340,7 @@ describe("hosted member access (single resolver)", () => {
       containerMemberId: "container_participant_backed",
     }]);
     const prisma = {
+      $queryRaw: vi.fn(async () => []),
       hostedMember: { findMany: findManyMembers },
       hostedThreadContainerParticipant: { findMany: findManyParticipants },
     };
@@ -356,9 +359,10 @@ describe("hosted member access (single resolver)", () => {
       "container_owner_backed",
       "container_participant_backed",
     ]));
-    expect(findManyMembers).toHaveBeenCalledTimes(2);
-    expect(findManyMembers).toHaveBeenLastCalledWith(expect.objectContaining({
-      where: expect.objectContaining({ id: { in: ["container_inactive"] } }),
+    expect(findManyMembers).toHaveBeenCalledTimes(1);
+    expect(prisma.$queryRaw).toHaveBeenCalledTimes(1);
+    expect(prisma.$queryRaw).toHaveBeenCalledWith(expect.objectContaining({
+      values: expect.arrayContaining(["container_inactive"]),
     }));
     expect(findManyParticipants).toHaveBeenCalledTimes(1);
     expect(findManyParticipants).toHaveBeenCalledWith(expect.objectContaining({
@@ -718,6 +722,7 @@ function buildRuntimeAiAccessPrisma(
   }> = [],
 ) {
   return {
+    $queryRaw: vi.fn(async () => []),
     hostedMember: {
       findMany: vi.fn(async () => []),
       findUnique: vi.fn(async () => ({

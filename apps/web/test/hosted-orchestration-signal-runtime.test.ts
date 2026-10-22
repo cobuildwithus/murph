@@ -22,6 +22,7 @@ const mocks = vi.hoisted(() => {
     hostedMemberFindUnique,
     hostedThreadContainerParticipantFindFirst,
     prisma: {
+      $queryRaw: vi.fn(async () => []),
       $transaction: vi.fn(async (callback: (tx: unknown) => unknown) =>
         await callback({ kind: "tx" })
       ),
