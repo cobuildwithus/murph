@@ -1,6 +1,6 @@
 # Defer device-import preparation during conversation admission
 
-Status: active
+Status: completed
 Created: 2026-10-22
 Updated: 2026-10-22
 
@@ -56,3 +56,19 @@ persisted field.
   system-preemption, promoted-foreground-priority and system-mailbox suites.
 - Core's existing device-import preemption suite for the publication boundary.
 - Package typechecks, complexity guard, diff-scoped lane.
+
+## Status
+
+Implemented at the existing device-syncd import wrapper and hosted runtime
+admission sites; core is unchanged. Device-syncd service suite (201), the
+focused assistant-runtime suites (884), core preemption (4), both package
+typechecks and `pnpm complexity:diff --base origin/main` pass. The diff-scoped
+lane passed every affected package's tests except two observations. First, the
+progress-generation suite's mocked turn awaited background completion without
+ever reaching provider start, which no real turn does, so it now signals
+provider start first; that suite and the full assistant-runtime package pass.
+Second, one CLI subprocess test hit a local `EADDRINUSE` port collision and
+passes in isolation. The runtime log parser accepts the new optional job-timing
+field within its key limit. No production latency was measured; exact-head CI
+and any final review remain with the completion owner.
+Completed: 2026-10-22
