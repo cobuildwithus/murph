@@ -3,7 +3,7 @@ import { createSocket, type Socket } from "node:dgram";
 import {
   CLI_TIMING_CPU_PHASES, CLI_TIMING_ENDPOINT_ENV, addCliPhaseSample, cliTimingCommand, CLI_TIMING_MAX_REPORT_BYTES, CLI_TIMING_MAX_SPANS,
   emptyCliTiming, incrementCliTimingDrop, mergeCliTiming, normalizeCliTiming,
-  cliTimingFailureCode, cliTimingFailureStage, cliTimingRejectionFailure, cliTimingValidationFailure,
+  cliTimingFailureCode, cliTimingFailureStage, cliTimingRejectionFailure, cliTimingValidationFailure, cliTimingSourceCauseFailure,
   readCliTimingOwnData as ownData, type CliFailureTiming,
   type CliPhaseTiming, type CliTiming, type CliTimingOutcome, type CliTimingPhase,
 } from "../cli-timing.ts";
@@ -144,7 +144,8 @@ export function noteCliTimingFailure(error: unknown): void {
   invocation.failure = { code: cliTimingFailureCode(code, invocation.command), stage: cliTimingFailureStage(stage), count: 1,
     ...cliTimingValidationFailure(invocation.command, code, error, "fieldErrors"),
     ...cliTimingValidationFailure(invocation.command, code, error, "publicIssues"),
-    ...cliTimingRejectionFailure(invocation.command, code, error, "cliTimingRejection") };
+    ...cliTimingRejectionFailure(invocation.command, code, error, "cliTimingRejection"),
+    ...cliTimingSourceCauseFailure(invocation.command, code, error, "context") };
 }
 
 // Incur may call process.exit before an outer finally executes. Observe the

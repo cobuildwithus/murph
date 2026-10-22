@@ -705,14 +705,6 @@ export class RunnerContainer extends Container {
     this.sleepAfter = formatRunnerSleepAfter(
       readRunnerContainerLifecycleReevaluationMs(env),
     );
-    // Native schedules survive DO eviction. Recover an already-running process
-    // from the preceding Worker too, without trusting its completion-time clock.
-    this.ctx.blockConcurrencyWhile(async () => {
-      if (this.ctx.container?.running
-        && (await this.listSchedules("onActivityExpired")).length === 0) {
-        await this.scheduleLifecycleCheck(Date.now());
-      }
-    });
   }
 
   async prepareStandbySlot(input: {

@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { execFileSync } from 'node:child_process'
 import { randomInt } from 'node:crypto'
 import { createSocket } from 'node:dgram'
 import { once } from 'node:events'
@@ -15,6 +16,7 @@ const roots: string[] = []
 const initialEndpoint = process.env.MURPH_CLI_TIMING_ENDPOINT
 
 afterEach(async () => {
+  vi.useRealTimers()
   vi.restoreAllMocks()
   vi.unstubAllEnvs()
   vi.doUnmock('../src/vault-cli-command-routing.js')
@@ -928,4 +930,332 @@ test('real meal validation preserves output and mutation boundaries while admitt
     }
     assert.equal(fetchImpl.mock.calls.length, 0)
   } finally { vi.useRealTimers() }
+})
+
+// Parent can apply just this test-file hunk to the declared base. This mode
+// must run the actual old timing owners, never patched code with stripped fields.
+async function sourceCauseBaseline(): Promise<boolean> {
+  const base = process.env.MURPH_CLI_SOURCE_CAUSE_BASELINE
+  if (base === undefined) return false
+  assert.equal(base, '704630e3fda169456458db4c7a0f50121be120ee')
+  for (const owner of ['src/cli-timing.ts', 'src/node/cli-timing.ts']) {
+    const current = await readFile(new URL(`../../runtime-state/${owner}`, import.meta.url))
+    const original: Buffer = execFileSync('git', ['show', `${base}:packages/runtime-state/${owner}`], { maxBuffer: 1_000_000 })
+    assert.equal(current.equals(original), true, `BASE reproduction requires the unchanged ${owner} owner.`)
+  }
+  return true
+}
+
+test('real source-cause meal errors preserve output, original bridge errors and canonical mutation boundaries', async () => {
+  const baseTiming = await sourceCauseBaseline()
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'cli-source-cause-PRIVATE_SENTINEL-'))
+  roots.push(directory)
+  vi.stubEnv('HOME', directory)
+  vi.spyOn(process, 'loadEnvFile').mockImplementation(() => {})
+  const fetchImpl = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
+    throw new Error('PRIVATE_SENTINEL unexpected provider request')
+  })
+  const root = await vault()
+  const core = await import('@murphai/core')
+  const records = await import('@murphai/vault-usecases/records')
+  const timingOwner = await import('@murphai/runtime-state/node/cli-timing')
+  const { VaultCliError } = await import('@murphai/operator-config/vault-cli-errors')
+  const observed = vi.spyOn(timingOwner, 'noteCliTimingFailure')
+  const edit = vi.spyOn(records, 'editMealRecord')
+  const remove = vi.spyOn(records, 'removeAutomaticMealPhotoRecord')
+  const upsert = vi.spyOn(core, 'upsertEvent')
+  vi.spyOn(performance, 'now').mockReturnValue(0)
+  vi.useFakeTimers({ toFake: ['Date'] })
+  vi.setSystemTime(new Date('2030-01-15T12:00:00.000Z'))
+  try {
+    const meal = await core.addMeal({ vaultRoot: root, note: 'PRIVATE_SENTINEL',
+      occurredAt: '2030-01-15T10:00:00.000Z' })
+    const photoPath = path.join(directory, 'PRIVATE_SENTINEL.jpg')
+    await writeFile(photoPath, 'synthetic original photo bytes')
+    const photos: Array<Awaited<ReturnType<typeof core.addMeal>>> = []
+    for (const index of [0, 1]) {
+      photos.push(await core.addMeal({ vaultRoot: root, photoPath, source: 'device',
+        occurredAt: '2030-01-15T09:00:00.000Z', externalRef: { system: 'meal-photo-capture',
+          resourceType: 'photo', resourceId: `synthetic-${index}`, version: 'b'.repeat(64) } }))
+    }
+    const integrity = photos[0]!, manifest = photos[1]!
+    assert.ok(integrity.photo)
+    assert.ok(manifest.photo)
+    const retainedPath = path.join(root, integrity.photo.relativePath)
+    await writeFile(retainedPath, 'PRIVATE_SENTINEL changed synthetic photo bytes')
+    const manifestPath = path.join(root, manifest.manifestPath)
+    const manifestBytes = await readFile(manifestPath, 'utf8')
+    const changedManifest = JSON.parse(manifestBytes)
+    const artifact = changedManifest.artifacts.find((entry: { relativePath: string }) =>
+      entry.relativePath === manifest.photo!.relativePath)
+    assert.ok(artifact)
+    artifact.sha256 = '0'.repeat(64)
+    await writeFile(manifestPath, JSON.stringify(changedManifest))
+
+    const cases = [
+      // The CLI accepts confidence, but a newly created provenance object must
+      // also have source. The real core contract, not a stubbed handler, rejects.
+      { args: ['meal', 'edit', meal.mealId, '--nutrition-confidence', 'medium'],
+        code: 'contract_invalid', stage: 'validation', vaultCode: undefined, handler: edit },
+      { args: ['meal', 'remove-photo', integrity.mealId], code: 'vault_error', stage: 'unknown',
+        vaultCode: 'MEAL_PHOTO_RETENTION_PRECONDITION_FAILED', handler: remove },
+      { args: ['meal', 'remove-photo', manifest.mealId], code: 'vault_error', stage: 'unknown',
+        vaultCode: 'MEAL_PHOTO_RETENTION_MANIFEST_INVALID', handler: remove },
+    ] as const
+    const canonical = await vaultFiles(root, true)
+    for (const fixture of cases) {
+      const argv = [...fixture.args, '--vault', root, '--format', 'json']
+      const before = fixture.handler.mock.calls.length
+      const baseline = await invoke(argv)
+      const captured = await collect(() => invoke(argv))
+      assert.deepEqual(captured.result, baseline)
+      assert.equal(captured.result.thrown, null)
+      assert.deepEqual(captured.result.exits, [1])
+      assert.equal(JSON.parse(captured.result.stdout).code, fixture.code)
+      assert.equal(fixture.handler.mock.calls.length, before + 2)
+      const originResult = fixture.handler.mock.results.at(-1)
+      assert.ok(originResult?.type === 'return')
+      await assert.rejects(originResult.value, original => {
+        assert.ok(original instanceof VaultCliError)
+        assert.equal(original.code, fixture.code)
+        if (fixture.vaultCode) assert.equal(original.context?.vaultCode, fixture.vaultCode)
+        assert.ok(observed.mock.calls.some(([error]) => error === original),
+          'The bridge must observe the exact real record error before projection.')
+        assert.equal(Object.hasOwn(original, 'sourceCause'), false)
+        return true
+      })
+      assert.equal(captured.timing.commands.length, 1)
+      assert.equal(captured.timing.commands[0]!.command, fixture.args.slice(0, 2).join(' '))
+      assert.equal(captured.timing.commands[0]!.outcome, 'error')
+      assert.equal(captured.timing.commands[0]!.calls, 1)
+      assert.deepEqual(captured.timing.commands[0]!.failures,
+        [{ code: 'unknown', stage: fixture.stage, count: 1,
+          ...(baseTiming ? {} : { sourceCause: {
+            code: fixture.code, ...(fixture.vaultCode ? { vaultCode: fixture.vaultCode } : {}),
+          } }) }])
+      assert.ok(Buffer.byteLength(captured.wire) <= CLI_TIMING_MAX_REPORT_BYTES)
+      assert.equal(captured.wire.includes('PRIVATE_SENTINEL'), false)
+      assert.equal(captured.result.stdout.includes('sourceCause'), false)
+      assert.deepEqual(await vaultFiles(root, true), canonical)
+    }
+    const batchArgs = ['batch', '--vault', root, '--format', 'json',
+      ...[cases[0], cases[1], cases[2], cases[0]].flatMap(row => ['--command', JSON.stringify(row.args)])]
+    const baseline = await invoke(batchArgs)
+    const batch = await collect(() => invoke(batchArgs))
+    assert.deepEqual(batch.result, baseline)
+    assert.deepEqual(batch.result.exits, [])
+    assert.equal(JSON.parse(batch.result.stdout).failed, 4)
+    assert.equal(batch.timing.batchContainers, 1)
+    assert.equal(batch.timing.commands.reduce((count, command) => count + command.calls, 0), 4)
+    assert.deepEqual(batch.timing.commands.map(command => command.failures), [
+      [{ code: 'unknown', stage: 'validation', count: 2,
+        ...(baseTiming ? {} : { sourceCause: { code: 'contract_invalid' } }) }],
+      baseTiming ? [{ code: 'unknown', stage: 'unknown', count: 2 }] : [
+        { code: 'unknown', stage: 'unknown', count: 1,
+          sourceCause: { code: 'vault_error', vaultCode: 'MEAL_PHOTO_RETENTION_PRECONDITION_FAILED' } },
+        { code: 'unknown', stage: 'unknown', count: 1,
+          sourceCause: { code: 'vault_error', vaultCode: 'MEAL_PHOTO_RETENTION_MANIFEST_INVALID' } },
+      ],
+    ])
+    assert.equal(batch.timing.droppedCalls, 0)
+    assert.equal(batch.timing.droppedSpans, 0)
+    assert.equal(batch.wire.includes('PRIVATE_SENTINEL'), false)
+    assert.deepEqual(await vaultFiles(root, true), canonical)
+    assert.equal(upsert.mock.calls.length, 6, 'One real writer attempt for each rejected edit, without retries.')
+
+    // Valid adjacent edit performs one intended write. A quiet read and an
+    // idempotent removal then prove on/off output parity without extra revisions.
+    const saved = await collect(() => invoke(['meal', 'edit', meal.mealId,
+      '--nutrition-confidence', 'medium', '--nutrition-source', 'estimated',
+      '--vault', root, '--format', 'json']))
+    assert.deepEqual(saved.result.exits, [])
+    assert.equal(JSON.parse(saved.result.stdout).entity.data.nutrition.provenance.source, 'estimated')
+    assert.equal(upsert.mock.calls.length, 7)
+    assert.equal(saved.timing.commands[0]!.failures, undefined)
+    await writeFile(retainedPath, 'synthetic original photo bytes')
+    const removeArgs = ['meal', 'remove-photo', integrity.mealId, '--vault', root, '--format', 'json']
+    const removed = await collect(() => invoke(removeArgs))
+    assert.deepEqual(removed.result.exits, [])
+    assert.deepEqual(JSON.parse(removed.result.stdout).entity.data.attachments ?? [], [])
+    for (const argv of [removeArgs, ['meal', 'show', meal.mealId, '--vault', root, '--format', 'json']]) {
+      const before = await vaultFiles(root, true)
+      const quietBaseline = await invoke(argv)
+      const quiet = await collect(() => invoke(argv))
+      assert.deepEqual(quiet.result, quietBaseline)
+      assert.deepEqual(quiet.result.exits, [])
+      assert.equal(quiet.timing.commands[0]!.failures, undefined)
+      assert.equal(quiet.wire.includes('PRIVATE_SENTINEL'), false)
+      assert.deepEqual(await vaultFiles(root, true), before)
+    }
+    assert.equal(fetchImpl.mock.calls.length, 0)
+  } finally { vi.useRealTimers() }
+})
+
+test('real source-cause food and research responses preserve CLI output and distinguish source-owned failures', async () => {
+  const baseTiming = await sourceCauseBaseline()
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'cli-response-PRIVATE_SENTINEL-'))
+  roots.push(directory)
+  vi.stubEnv('HOME', directory)
+  vi.stubEnv('MURPH_HOSTED_RUNTIME_PROCESS', '1')
+  vi.stubEnv('MURPH_DATA_API_KEY', 'PRIVATE_SENTINEL')
+  vi.stubEnv('EXA_API_KEY', 'PRIVATE_SENTINEL')
+  vi.spyOn(process, 'loadEnvFile').mockImplementation(() => {})
+  vi.spyOn(performance, 'now').mockReturnValue(0)
+  // Date-only until clamps to new Date(), not Date.now(). Freeze both while
+  // leaving monotonic timing, socket delivery and timeout handling unchanged.
+  const researchNow = '2030-01-15T12:00:00.000Z'
+  vi.useFakeTimers({ toFake: ['Date'] })
+  vi.setSystemTime(new Date(researchNow))
+  const { syntheticOats } = await import('./fixtures/food-label-response.ts')
+  const labels = await import('../src/food-labels.ts')
+  const research = await import('../src/research-scout-client.ts')
+  const contracts = await import('@murphai/contracts')
+  const { VaultCliError } = await import('@murphai/operator-config/vault-cli-errors')
+  const timingOwner = await import('@murphai/runtime-state/node/cli-timing')
+  const observed = vi.spyOn(timingOwner, 'noteCliTimingFailure')
+  const foodHandler = vi.spyOn(labels, 'searchFoodLabelsBatch')
+  const researchHandler = vi.spyOn(research, 'fetchExaResearchScoutBatchCandidates')
+  const file = path.join(directory, 'PRIVATE_SENTINEL.json')
+  const lanes = [{ label: 'sleep', profile: { topics: ['sleep'] } }]
+  await writeFile(file, JSON.stringify({ lanes }))
+  const researchInput = contracts.researchScoutBatchInputSchema.parse({ lanes,
+    since: '2030-01-01T00:00:00.000Z', until: researchNow, maxCandidatesPerLane: 1 })
+  const expectedResearchBody = contracts.buildExaResearchScoutBatchLaneRequest({
+    profile: researchInput.lanes[0]!.profile, since: researchInput.since, until: researchInput.until, maxCandidates: 1,
+  })
+  const timeout = AbortSignal.timeout.bind(AbortSignal)
+  let researchDeadline: AbortController | undefined
+  vi.spyOn(AbortSignal, 'timeout').mockImplementation(milliseconds => {
+    if (milliseconds !== 60_000) return timeout(milliseconds)
+    researchDeadline = new AbortController()
+    return researchDeadline.signal
+  })
+  const bodyFailure = (name = 'TypeError') => new Response(new ReadableStream<Uint8Array>({
+    start(controller) { controller.error(Object.assign(new Error('PRIVATE_SENTINEL'), { name })) },
+  }))
+  const http = (status: number) => () => new Response('PRIVATE_SENTINEL', { status })
+  const invalidJson = () => new Response('PRIVATE_SENTINEL not JSON')
+  const invalidShape = () => Response.json({ PRIVATE_SENTINEL: true })
+  const owners = [
+    { command: 'food search-labels-batch', handler: foodHandler,
+      args: ['food', 'search-labels-batch', '--query', 'PRIVATE_SENTINEL oats', '--generic'],
+      target: 'http://murph-data-api.worker/api/foods',
+      body: { queries: ['PRIVATE_SENTINEL oats'], limit: 1, includeOffMarket: false, genericOnly: true, nutritionOnly: true },
+      success: { results: [{ query: 'PRIVATE_SENTINEL oats', items: [syntheticOats] }] },
+      failures: [
+        { code: 'food_labels_api_auth_failed', response: http(401) },
+        { code: 'food_labels_api_rate_limited', response: http(429) },
+        { code: 'food_labels_api_request_timed_out', response: http(408) },
+        { code: 'food_labels_api_service_unavailable', response: http(503) },
+        { code: 'food_labels_api_response_failed', response: http(422) },
+        { code: 'food_labels_api_response_body_failed', response: () => bodyFailure() },
+        { code: 'food_labels_api_response_body_timed_out', response: () => bodyFailure('TimeoutError') },
+        { code: 'food_labels_api_invalid_response', response: invalidJson },
+        { code: 'food_labels_api_invalid_response', response: invalidShape },
+      ] },
+    { command: 'research scout-batch', handler: researchHandler,
+      args: ['research', 'scout-batch', '--input', `@${file}`, '--since', '2030-01-01', '--until', '2030-01-15', '--max-candidates-per-lane', '1'],
+      target: 'https://api.exa.ai/search', body: expectedResearchBody,
+      success: { results: [{ title: 'Synthetic paper', url: 'https://example.test/paper' }],
+        output: { content: { candidates: [{ resultIndex: 0 }] } }, extraProviderField: 'PRIVATE_SENTINEL' },
+      failures: [
+        { code: 'research_exa_auth_failed', response: http(401) },
+        { code: 'research_exa_rate_limited', response: http(429) },
+        { code: 'research_exa_unavailable', response: http(503) },
+        { code: 'research_exa_request_rejected', response: http(422) },
+        { code: 'research_exa_unavailable', response: () => bodyFailure() },
+        { code: 'research_exa_invalid_response', response: invalidJson },
+        { code: 'research_exa_invalid_response', response: invalidShape },
+        { code: 'research_exa_timeout', response: () => {
+          assert.ok(researchDeadline)
+          researchDeadline.abort(new Error('PRIVATE_SENTINEL'))
+          return bodyFailure()
+        } },
+      ] },
+  ]
+  let active = owners[0]!
+  let respond: () => Response = invalidJson
+  const fetchImpl = vi.spyOn(globalThis, 'fetch').mockImplementation(async (target, init) => {
+    assert.equal(String(target), active.target)
+    assert.equal(init?.method, 'POST')
+    assert.deepEqual(JSON.parse(String(init?.body)), active.body,
+      'Use the real command contract and research prompt builder, without altered inputs.')
+    return respond()
+  })
+  const files = await vaultFiles(directory)
+  for (const owner of owners) {
+    active = owner
+    const argv = [...owner.args, '--vault', directory, '--format', 'json']
+    for (const failure of owner.failures) {
+      respond = failure.response
+      const before = fetchImpl.mock.calls.length
+      const baseline = await invoke(argv)
+      const captured = await collect(() => invoke(argv))
+      assert.deepEqual(captured.result, baseline)
+      assert.equal(captured.result.thrown, null)
+      assert.deepEqual(captured.result.exits, [1])
+      assert.equal(JSON.parse(captured.result.stdout).code, failure.code)
+      const originResult = owner.handler.mock.results.at(-1)
+      assert.ok(originResult?.type === 'return')
+      await assert.rejects(originResult.value, original => {
+        assert.ok(original instanceof VaultCliError)
+        assert.equal(original.code, failure.code)
+        assert.ok(observed.mock.calls.some(([error]) => error === original))
+        assert.equal(Object.hasOwn(original, 'sourceCause'), false)
+        return true
+      })
+      assert.equal(fetchImpl.mock.calls.length, before + 2, 'Exactly one fake provider request per invocation.')
+      assert.equal(captured.timing.commands.length, 1)
+      assert.equal(captured.timing.commands[0]!.command, owner.command)
+      assert.equal(captured.timing.commands[0]!.outcome, 'error')
+      assert.equal(captured.timing.commands[0]!.calls, 1)
+      assert.deepEqual(captured.timing.commands[0]!.failures, [{ code: 'unknown', stage: 'response', count: 1,
+        ...(baseTiming ? {} : { sourceCause: { code: failure.code } }) }])
+      assert.ok(Buffer.byteLength(captured.wire) <= CLI_TIMING_MAX_REPORT_BYTES)
+      assert.equal(captured.wire.includes('PRIVATE_SENTINEL'), false)
+      assert.equal(captured.result.stdout.includes('sourceCause'), false)
+      assert.deepEqual(await vaultFiles(directory), files)
+    }
+    let index = 0
+    // Repeated cause and a distinct cause share the same legacy code/stage.
+    const sequence = [owner.failures[0]!, owner.failures[1]!, owner.failures[0]!]
+    respond = () => sequence[index++]!.response()
+    const batchArgs = ['batch', '--vault', directory, '--format', 'json',
+      ...sequence.flatMap(() => ['--command', JSON.stringify(owner.args)])]
+    const before = fetchImpl.mock.calls.length
+    const baseline = await invoke(batchArgs)
+    index = 0
+    const batch = await collect(() => invoke(batchArgs))
+    assert.deepEqual(batch.result, baseline)
+    assert.deepEqual(batch.result.exits, [])
+    assert.equal(JSON.parse(batch.result.stdout).failed, 3)
+    assert.equal(batch.timing.batchContainers, 1)
+    assert.equal(batch.timing.commands[0]!.calls, 3)
+    assert.deepEqual(batch.timing.commands[0]!.failures, baseTiming
+      ? [{ code: 'unknown', stage: 'response', count: 3 }] : [
+      { code: 'unknown', stage: 'response', count: 2, sourceCause: { code: sequence[0]!.code } },
+      { code: 'unknown', stage: 'response', count: 1, sourceCause: { code: sequence[1]!.code } },
+    ])
+    assert.equal(fetchImpl.mock.calls.length, before + 6)
+    assert.equal(batch.wire.includes('PRIVATE_SENTINEL'), false)
+    assert.equal(batch.timing.droppedCalls, 0)
+    assert.equal(batch.timing.commands[0]!.droppedFailures, undefined)
+
+    respond = () => Response.json(owner.success)
+    const successBefore = fetchImpl.mock.calls.length
+    const successBaseline = await invoke(argv)
+    const success = await collect(() => invoke(argv))
+    assert.deepEqual(success.result, successBaseline)
+    assert.deepEqual(success.result.exits, [])
+    assert.equal(success.timing.commands[0]!.outcome, 'ok')
+    assert.equal(success.timing.commands[0]!.failures, undefined)
+    assert.equal(fetchImpl.mock.calls.length, successBefore + 2)
+    const quietBaseline = await invoke(['--version'])
+    const quiet = await collect(() => invoke(['--version']))
+    assert.deepEqual(quiet.result, quietBaseline)
+    assert.equal(quiet.timing.commands[0]!.failures, undefined)
+    assert.equal(fetchImpl.mock.calls.length, successBefore + 2)
+    assert.equal(success.wire.includes('PRIVATE_SENTINEL'), false)
+    assert.deepEqual(await vaultFiles(directory), files)
+  }
 })

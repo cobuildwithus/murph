@@ -9,6 +9,7 @@ import {
   normalizeCliTiming, cliTimingValidationFailure, CLI_TIMING_MAX_VALIDATION_ISSUES, type CliTiming, type CliValidationDiagnostic,
   CLI_TIMING_REJECTIONS, CLI_TIMING_PARSE_REJECTIONS, CLI_TIMING_FILTER_REJECTIONS, cliTimingRejectionFailure,
   type CliCommandTiming, type CliFailureTiming, type CliTimingFilterRejection, type CliTimingParseRejection,
+  cliTimingSourceCauseFailure, CLI_TIMING_MAX_FAILURES, type CliTimingSourceCause,
 } from "../src/cli-timing.ts";
 import {
   finishCliTimingAction, isCliTimingActive, noteCliTimingExit,
@@ -1631,4 +1632,244 @@ test.skipIf(!mealFailureCompatibilityBase)("actual pre-meal-attribution reader l
   const oldMerged = emptyCliTiming(); mergeCliTiming(oldMerged, legacy); mergeCliTiming(oldMerged, legacy);
   assert.deepEqual(old.normalizeCliTiming(merged), oldMerged);
   assert.equal(normalizeCliTiming(legacy)?.commands[0]!.failures?.[0]!.code, "unknown", "Never backfill old evidence.");
+});
+
+const sourceCauseCases = [
+  ["meal edit", ["contract_invalid", "invalid_timestamp", "vault_error"]],
+  ["meal remove-photo", ["vault_error"]],
+  ["food search-labels-batch", [
+    "food_labels_api_auth_failed", "food_labels_api_rate_limited", "food_labels_api_request_timed_out",
+    "food_labels_api_service_unavailable", "food_labels_api_response_failed",
+    "food_labels_api_response_body_timed_out", "food_labels_api_response_body_failed", "food_labels_api_invalid_response",
+  ]],
+  ["research scout-batch", [
+    "research_exa_auth_failed", "research_exa_rate_limited", "research_exa_unavailable",
+    "research_exa_invalid_response", "research_exa_request_rejected", "research_exa_timeout",
+  ]],
+] as const;
+
+test("source causes preserve original errors, legacy code/stage and first-observation accounting", async () => {
+  const { noteCliTimingFailure } = await import("../src/node/cli-timing.ts");
+  for (const [command, codes] of sourceCauseCases) for (const code of codes) {
+    const stage = command.startsWith("meal ") ? "unknown" : "response";
+    const context = { stage, vaultCode: "MEAL_PHOTO_RETENTION_PRECONDITION_FAILED", value: "PRIVATE_SENTINEL" };
+    const original = Object.assign(new Error("PRIVATE_SENTINEL"), { code, context,
+      cause: { code: "PRIVATE_SENTINEL" }, sourceCause: { code: "PRIVATE_SENTINEL" } });
+    const visible = JSON.stringify(original);
+    const sourceCause: CliTimingSourceCause = { code, ...(command === "meal remove-photo"
+      ? { vaultCode: "MEAL_PHOTO_RETENTION_PRECONDITION_FAILED" as const } : {}) };
+    let report!: CliTiming;
+    await assert.rejects(withCliTiming(() => timeCliDispatch(command, async () => {
+      noteCliTimingFailure(original);
+      noteCliTimingFailure({ code: "PRIVATE_SENTINEL" });
+      throw original;
+    }), value => { report = value; }), caught => caught === original);
+    assert.equal(JSON.stringify(original), visible, "Observation never mutates the original error.");
+    assert.equal(cliTimingFailureCode(code, command), "unknown", "Global code admission is unchanged.");
+    assert.equal(report.reportCount, 1);
+    assert.equal(report.commands[0]!.calls, 1);
+    assert.deepEqual(report.commands[0]!.failures, [{ code: "unknown", stage, count: 1, sourceCause }]);
+    assert.deepEqual(normalizeCliTiming(report), report);
+    assert.equal(JSON.stringify(report).includes("PRIVATE_SENTINEL"), false);
+    context.vaultCode = "PRIVATE_SENTINEL";
+    assert.deepEqual(report.commands[0]!.failures![0]!.sourceCause, sourceCause, "No source object is retained.");
+    await withCliTiming(() => timeCliDispatch(command, async () => {
+      noteCliTimingFailure(original);
+      noteCliTimingExit(0, false);
+    }), value => { report = value; });
+    assert.equal(report.commands[0]!.outcome, "ok");
+    assert.equal(report.commands[0]!.failures, undefined);
+  }
+});
+
+test("source cause admission is exact, command gated and independent of arbitrary provider strings", () => {
+  let reads = 0;
+  const uninspected = new Proxy({}, { getOwnPropertyDescriptor() { reads += 1; throw Error("PRIVATE_SENTINEL"); } });
+  for (const command of [undefined, "other", "meal add", "meal show", "food search-labels", "research scout",
+    "MEAL EDIT", "meal edit ", "meal edit PRIVATE_SENTINEL"]) {
+    for (const [, codes] of sourceCauseCases) for (const code of codes) {
+      assert.deepEqual(cliTimingSourceCauseFailure(command, code, uninspected, "context"), {});
+      assert.deepEqual(cliTimingSourceCauseFailure(command, "unknown", uninspected, "sourceCause"), {});
+    }
+  }
+  for (const [command, codes] of sourceCauseCases) {
+    for (const code of [undefined, "unknown", "PRIVATE_SENTINEL", "food_labels_api_credential_missing",
+      "food_labels_api_request_failed", "research_exa_aborted", "research_exa_request_failed", "research_exa_request_invalid",
+      ...codes.flatMap(value => [value.toUpperCase(), ` ${value}`, `${value} `, `${value}_PRIVATE_SENTINEL`]),
+      [codes[0]], new String(codes[0]), { toString() { throw Error("PRIVATE_SENTINEL"); } }]) {
+      assert.deepEqual(cliTimingSourceCauseFailure(command, code, uninspected, "context"), {});
+    }
+    for (const code of [undefined, "not_found", "invalid_payload", "PRIVATE_SENTINEL"]) {
+      assert.deepEqual(cliTimingSourceCauseFailure(command, code, uninspected, "sourceCause"), {});
+    }
+    for (const [otherCommand, otherCodes] of sourceCauseCases) for (const code of otherCodes) {
+      if (codes.some(allowed => allowed === code)) continue;
+      assert.notEqual(command, otherCommand);
+      assert.deepEqual(cliTimingSourceCauseFailure(command, code, uninspected, "context"), {});
+    }
+  }
+  assert.equal(reads, 0, "Gates run before descriptor inspection.");
+  for (const command of ["meal edit", "meal remove-photo"]) {
+    const context = { vaultCode: "MEAL_PHOTO_RETENTION_MANIFEST_INVALID" };
+    const expected = { sourceCause: { code: "vault_error", ...(command === "meal remove-photo" ? context : {}) } };
+    assert.deepEqual(cliTimingSourceCauseFailure(command, "vault_error", { context }, "context"), expected);
+    assert.deepEqual(cliTimingSourceCauseFailure(command, "unknown", { sourceCause: { code: "vault_error", ...context } }, "sourceCause"), expected);
+  }
+});
+
+test("source cause own descriptors cannot invoke getters, coercion, prototypes or cause chains", async () => {
+  const { noteCliTimingFailure } = await import("../src/node/cli-timing.ts");
+  let reads = 0;
+  const getter = { get() { reads += 1; throw Error("PRIVATE_SENTINEL"); } };
+  const revoked = Proxy.revocable({}, {}); revoked.revoke();
+  const hostile = new Proxy({}, { getOwnPropertyDescriptor() { throw Error("PRIVATE_SENTINEL"); },
+    get: getter.get, getPrototypeOf: getter.get, ownKeys: getter.get });
+  const cases: Array<[unknown, CliTimingSourceCause | undefined]> = [
+    [Object.defineProperty({}, "code", getter), undefined],
+    [Object.create({ code: "vault_error", context: { vaultCode: "MEAL_PHOTO_RETENTION_MANIFEST_INVALID" } }), undefined],
+    [{ cause: { code: "vault_error" } }, undefined],
+    [hostile, undefined], [revoked.proxy, undefined],
+    [{ code: "vault_error", context: hostile }, { code: "vault_error" }],
+    [Object.defineProperty({ code: "vault_error" }, "context", getter), { code: "vault_error" }],
+    [{ code: "vault_error", context: Object.create({ vaultCode: "MEAL_PHOTO_RETENTION_MANIFEST_INVALID" }) }, { code: "vault_error" }],
+    [{ code: "vault_error", context: Object.defineProperty({}, "vaultCode", getter) }, { code: "vault_error" }],
+    [{ code: "vault_error", context: { vaultCode: "PRIVATE_SENTINEL" } }, { code: "vault_error" }],
+    [{ code: "vault_error", context: { vaultCode: new String("MEAL_PHOTO_RETENTION_MANIFEST_INVALID") } }, { code: "vault_error" }],
+  ];
+  const good = { code: "vault_error", context: { vaultCode: "MEAL_PHOTO_RETENTION_MANIFEST_INVALID" } };
+  for (const key of ["name", "message", "cause", "args", "result", "path"]) Object.defineProperty(good, key, getter);
+  cases.push([good, { code: "vault_error", vaultCode: "MEAL_PHOTO_RETENTION_MANIFEST_INVALID" }]);
+  for (const [error, sourceCause] of cases) {
+    let report!: CliTiming;
+    // Capture without asking the unchanged application/EPIPE error path to
+    // inspect deliberately hostile metadata; this pins the diagnostic boundary.
+    await withCliTiming(() => timeCliDispatch("meal remove-photo", async () => {
+      noteCliTimingFailure(error); noteCliTimingExit(1, false);
+    }), value => { report = value; });
+    assert.deepEqual(report.commands[0]!.failures, [{ code: "unknown", stage: "unknown", count: 1,
+      ...(sourceCause ? { sourceCause } : {}) }]);
+    assert.deepEqual(normalizeCliTiming(report), report);
+    assert.equal(JSON.stringify(report).includes("PRIVATE_SENTINEL"), false);
+  }
+  // A proxy can manufacture a descriptor, but only an exact finite primitive
+  // can escape it. No getter, enumeration or prototype trap is needed.
+  for (const value of ["MEAL_PHOTO_RETENTION_MANIFEST_INVALID", "PRIVATE_SENTINEL", {}, ["MEAL_PHOTO_RETENTION_MANIFEST_INVALID"]]) {
+    const context = new Proxy({}, { getOwnPropertyDescriptor: () => ({ value, configurable: true }),
+      get: getter.get, ownKeys: getter.get, getPrototypeOf: getter.get });
+    assert.deepEqual(cliTimingSourceCauseFailure("meal remove-photo", "vault_error", { context }, "context"),
+      { sourceCause: { code: "vault_error", ...(value === "MEAL_PHOTO_RETENTION_MANIFEST_INVALID" ? { vaultCode: value } : {}) } });
+  }
+  noteCliTimingFailure(hostile); // Inactive observation does no work.
+  assert.equal(reads, 0);
+});
+
+test("malformed source cause wire detail drops independently of valid failures and legacy timing", () => {
+  const report = sample("meal edit");
+  const command = report.commands[0]!;
+  command.outcome = "error";
+  command.failures = [{ code: "unknown", stage: "validation", count: 1 }];
+  let reads = 0;
+  const getter = { get() { reads += 1; throw Error("PRIVATE_SENTINEL"); } };
+  const revoked = Proxy.revocable({}, {}); revoked.revoke();
+  for (const sourceCause of [undefined, null, [], Object.assign([], { code: "contract_invalid" }),
+    "contract_invalid", { code: "PRIVATE_SENTINEL" }, { code: "food_labels_api_invalid_response" },
+    Object.create({ code: "contract_invalid" }), Object.defineProperty({}, "code", getter),
+    { code: { toString: getter.get } }, new Proxy({}, { getOwnPropertyDescriptor() { throw Error("PRIVATE_SENTINEL"); } }), revoked.proxy]) {
+    assert.deepEqual(normalizeCliTiming({ ...report, commands: [{ ...command,
+      failures: [{ ...command.failures[0], sourceCause }] }] }), report);
+  }
+  for (const failure of [Object.defineProperty({ ...command.failures[0] }, "sourceCause", getter),
+    Object.assign(Object.create({ sourceCause: { code: "contract_invalid" } }), command.failures[0])]) {
+    assert.deepEqual(normalizeCliTiming({ ...report, commands: [{ ...command, failures: [failure] }] }), report);
+  }
+  assert.equal(reads, 0);
+  const withDetail = { ...report, commands: [{ ...command, failures: [{ ...command.failures[0],
+    sourceCause: { code: "contract_invalid", vaultCode: "PRIVATE_SENTINEL", message: "PRIVATE_SENTINEL" } }] }] };
+  assert.deepEqual(normalizeCliTiming(withDetail)?.commands[0]!.failures,
+    [{ ...command.failures[0], sourceCause: { code: "contract_invalid" } }]);
+  assert.equal(JSON.stringify(normalizeCliTiming(withDetail)).includes("PRIVATE_SENTINEL"), false);
+  for (const code of [undefined, "PRIVATE_SENTINEL", "contract_invalid", "invalid_payload"]) {
+    const input = { ...report, commands: [{ ...command, failures: [{ code, stage: "validation", count: 1,
+      sourceCause: { code: "contract_invalid" },
+    }] }] };
+    assert.deepEqual(normalizeCliTiming(input)?.commands[0]!.failures,
+      [{ code: code === "invalid_payload" ? code : "unknown", stage: "validation", count: 1 }],
+      "Only an own wire code of unknown admits detail; mapping a future code to unknown cannot authorize it.");
+  }
+  assert.equal(normalizeCliTiming({ ...withDetail, commands: [{ ...withDetail.commands[0], outcome: "ok" }] })
+    ?.commands[0]!.failures, undefined);
+  for (const vaultCode of [undefined, null, "PRIVATE_SENTINEL", "MEAL_PHOTO_RETENTION_SOURCE_INVALID",
+    "MEAL_PHOTO_RETENTION_MANIFEST_INVALID ", { toString: getter.get }]) {
+    const input = { ...report, commands: [{ ...command, command: "meal remove-photo", failures: [{
+      code: "unknown", stage: "unknown", count: 1, sourceCause: { code: "vault_error", vaultCode },
+    }] }] };
+    assert.deepEqual(normalizeCliTiming(input)?.commands[0]!.failures,
+      [{ code: "unknown", stage: "unknown", count: 1, sourceCause: { code: "vault_error" } }]);
+  }
+  assert.equal(reads, 0);
+});
+
+test("source cause variants share cap eight, preserve drops and copy finite detail independently", () => {
+  const aggregate = emptyCliTiming();
+  const codes = sourceCauseCases[2][1];
+  for (const code of [...codes, undefined, codes[0]]) {
+    const incoming = sample("food search-labels-batch");
+    Object.assign(incoming.commands[0]!, { outcome: "error", failures: [{ code: "unknown", stage: "response", count: 1,
+      ...(code ? { sourceCause: { code } } : {}) }] });
+    const before = structuredClone(incoming);
+    mergeCliTiming(aggregate, incoming);
+    assert.deepEqual(incoming, before);
+    const cause = incoming.commands[0]!.failures![0]!.sourceCause;
+    if (cause) cause.code = "food_labels_api_invalid_response";
+  }
+  const legacy = sample("food search-labels-batch"); legacy.commands[0]!.outcome = "error";
+  mergeCliTiming(aggregate, legacy);
+  const command = aggregate.commands[0]!;
+  assert.equal(command.calls, 11);
+  assert.equal(command.failures!.length, CLI_TIMING_MAX_FAILURES);
+  assert.deepEqual(command.failures!.map(failure => failure.sourceCause?.code), codes);
+  assert.equal(command.failures![0]!.count, 2);
+  assert.equal(command.droppedFailures, 1);
+  assert.equal(command.failures!.reduce((sum, failure) => sum + failure.count, 0) + command.droppedFailures!, 10);
+  assert.equal(aggregate.droppedCalls, 0);
+  assert.equal(aggregate.droppedSpans, 0);
+  assert.deepEqual(normalizeCliTiming(aggregate), aggregate);
+  const repeated = { ...command, calls: 2, droppedFailures: 0, failures: [command.failures![1], command.failures![1]] };
+  assert.deepEqual(normalizeCliTiming({ ...aggregate, commands: [repeated] })?.commands[0]!.failures,
+    [{ ...command.failures![1], count: 2 }]);
+  const overflow = structuredClone(aggregate);
+  overflow.commands[0]!.calls = Number.MAX_SAFE_INTEGER;
+  const unchanged = structuredClone(overflow.commands);
+  mergeCliTiming(overflow, legacy);
+  assert.deepEqual(overflow.commands, unchanged);
+  assert.equal(overflow.droppedCalls, 1);
+});
+
+const sourceCauseCompatibilityBase = process.env.MURPH_CLI_SOURCE_CAUSE_COMPAT_BASE;
+test.skipIf(!sourceCauseCompatibilityBase)("actual base reader drops only source cause, including capped and mixed reports", async () => {
+  assert.equal(sourceCauseCompatibilityBase, "704630e3fda169456458db4c7a0f50121be120ee");
+  const source = execFileSync("git", ["show", `${sourceCauseCompatibilityBase}:packages/runtime-state/src/cli-timing.ts`],
+    { encoding: "utf8", maxBuffer: 1_000_000 });
+  const old: { normalizeCliTiming: typeof normalizeCliTiming; mergeCliTiming: typeof mergeCliTiming } = await import(
+    `data:text/javascript;base64,${Buffer.from(stripTypeScriptTypes(source)).toString("base64")}`);
+  const report = sample("meal remove-photo");
+  Object.assign(report.commands[0]!, { outcome: "error", calls: 5, droppedFailures: 1, failures: [
+    { code: "unknown", stage: "unknown", count: 1, sourceCause: { code: "vault_error", vaultCode: "MEAL_PHOTO_RETENTION_PRECONDITION_FAILED" } },
+    { code: "unknown", stage: "unknown", count: 1, sourceCause: { code: "vault_error", vaultCode: "MEAL_PHOTO_RETENTION_MANIFEST_INVALID" } },
+    { code: "unknown", stage: "unknown", count: 1, sourceCause: { code: "vault_error" } },
+    { code: "unknown", stage: "unknown", count: 1 },
+  ] });
+  const expected = structuredClone(report);
+  expected.commands[0]!.failures = [{ code: "unknown", stage: "unknown", count: 4 }];
+  assert.deepEqual(normalizeCliTiming(report), report);
+  assert.deepEqual(old.normalizeCliTiming(report), expected);
+  assert.deepEqual(normalizeCliTiming(expected), expected, "Never invent missing historical causes.");
+  const mixed = emptyCliTiming(); mergeCliTiming(mixed, report); mergeCliTiming(mixed, expected);
+  const oldMixed = emptyCliTiming(); old.mergeCliTiming(oldMixed, report); old.mergeCliTiming(oldMixed, expected);
+  assert.deepEqual(old.normalizeCliTiming(mixed), oldMixed);
+  assert.equal(oldMixed.commands[0]!.calls, 10);
+  assert.equal(oldMixed.commands[0]!.droppedFailures, 2);
+  delete expected.commands[0]!.failures; delete expected.commands[0]!.droppedFailures;
+  assert.deepEqual(old.normalizeCliTiming(expected), expected);
+  assert.deepEqual(normalizeCliTiming(expected), expected);
 });

@@ -172,7 +172,11 @@ owner before applying local warmth, because native completion does not prove
 canonical acknowledgment. Otherwise only an eligible stop reconciles the owner.
 A matching starting, active or retiring owner
 protects the readiness-to-launch handoff, including after Durable Object
-reactivation. Failed reads and incomplete cutover preserve the existing scheduled
+reactivation. Readiness establishes a missing native lifecycle schedule; persisted
+schedules survive controller replacement. The controller constructor does not
+recreate that deadline: an unbound standby can legitimately have none, and the
+Containers SDK already restores its alarm and monitors a running container.
+Failed reads and incomplete cutover preserve the existing scheduled
 lifecycle recheck; they do not grant a new conversation lease. Cleanup rechecks
 native status, health, and interaction fencing after the bounded control read,
 which runs outside the lifecycle lock so arriving work does not wait on

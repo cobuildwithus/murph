@@ -268,6 +268,7 @@ async function executeHostedSystemWake(input: {
         "./events/assistant-notification.ts"
       );
       return executeHostedAssistantNotificationWake({
+        groupToolPort: input.runtime.platform.groupToolPort,
         effectsPort: input.runtime.platform.effectsPort,
         wake: input.wake,
         executionContext: input.executionContext,

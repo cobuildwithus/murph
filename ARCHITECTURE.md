@@ -5569,3 +5569,19 @@ writers. Old Web rejects unknown game requests; old transport response parsers
 reject new responses without replay, even if new Web already applied an update.
 Do not roll back those parsers while new game tools are active. Old warm runtimes
 have no game tools until refreshed.
+
+The next game rollout prepares runtime consumers before enabling new Web
+writers. Compatible readers accept negotiation, expanded shared progress and
+results, photo outcomes, and conversation-owned proposal delivery while
+preserving existing payloads. This does not advertise the new model tools.
+An admitted route-less group notification may carry `gameChatBootstrap` and a
+`bootstrap` delivery destination. The runtime validates the exact game event
+and group identity, then injects a host-only signed callback through the
+existing group control transport; conversational tools cannot invoke it.
+The Web delivery receipt remains the provider-effect owner. Its accepted real
+route rebinds the generated notification's existing assistant session, using
+the same blinded identities as ordinary Linq ingress, so the first reply sees
+the kickoff. Recovery reuses accepted text without another generation or
+ordinary outbox send. Deploy these consumers and refresh warm runtimes before
+Web emits bootstrap notifications or expanded game responses. Do not roll
+back the compatible consumers while those writers remain active.

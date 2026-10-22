@@ -1,11 +1,16 @@
 import assert from 'node:assert/strict'
-import { execFileSync } from 'node:child_process'
+import { execFileSync, spawn } from 'node:child_process'
+import { once } from 'node:events'
+import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { stripTypeScriptTypes } from 'node:module'
-import { setTimeout as delay } from 'node:timers/promises'
+import { tmpdir } from 'node:os'
+import path from 'node:path'
+import { setImmediate, setTimeout as delay } from 'node:timers/promises'
+import { fileURLToPath } from 'node:url'
 import { test } from 'vitest'
 
 import { ASSISTANT_USAGE_SCHEMA, parseAssistantUsageRecord } from '@murphai/hosted-execution/assistant-usage'
-import { emptyCliTiming, normalizeCliTiming, type CliTiming } from '@murphai/runtime-state/cli-timing'
+import { emptyCliTiming, mergeCliTiming, normalizeCliTiming, type CliFailureTiming, type CliTiming } from '@murphai/runtime-state/cli-timing'
 import { timeCliDispatch, timeCliPhaseSync, withCliTiming } from '@murphai/runtime-state/node/cli-timing'
 import { VAULT_CLI_BATCH_RESULT_SCHEMA } from '@murphai/operator-config/vault-cli-contracts'
 import { createCodexCliTimingReceiver } from '../src/assistant-codex/cli-timing.ts'
@@ -560,5 +565,304 @@ test.skipIf(!mealAttributionCompatibilityBase)('actual pre-meal-attribution host
     for (const command of absent.turnProfileJson.cliTiming.commands) delete command.failures
     assert.deepEqual(old.parseAssistantUsageRecord(absent), absent)
     assert.deepEqual(parseAssistantUsageRecord(absent), absent)
+  }
+})
+
+const sourceCauseCases: Array<{ command: string; stage: CliFailureTiming['stage'];
+  sourceCause: NonNullable<CliFailureTiming['sourceCause']> }> = [
+  { command: 'meal edit', stage: 'unknown', sourceCause: { code: 'contract_invalid' } },
+  { command: 'meal edit', stage: 'unknown', sourceCause: { code: 'vault_error' } },
+  { command: 'meal remove-photo', stage: 'unknown', sourceCause: {
+    code: 'vault_error', vaultCode: 'MEAL_PHOTO_RETENTION_PRECONDITION_FAILED',
+  } },
+  { command: 'meal remove-photo', stage: 'unknown', sourceCause: {
+    code: 'vault_error', vaultCode: 'MEAL_PHOTO_RETENTION_MANIFEST_INVALID',
+  } },
+  { command: 'food search-labels-batch', stage: 'response', sourceCause: { code: 'food_labels_api_response_failed' } },
+  { command: 'food search-labels-batch', stage: 'response', sourceCause: { code: 'food_labels_api_invalid_response' } },
+  { command: 'research scout-batch', stage: 'response', sourceCause: { code: 'research_exa_request_rejected' } },
+  { command: 'research scout-batch', stage: 'response', sourceCause: { code: 'research_exa_invalid_response' } },
+]
+
+// Real CLI origin/bridge coverage lives in the CLI owner. Here original typed
+// error shapes exercise the production timing scope and its actual UDP peer.
+async function exerciseSourceCauseFailures(batch: boolean, publish?: (report: CliTiming) => void) {
+  const run = async () => {
+    for (const { command, stage, sourceCause } of [...sourceCauseCases, sourceCauseCases[0]!]) {
+      const original = Object.assign(new Error('PRIVATE_SENTINEL'), {
+        code: sourceCause.code,
+        context: { stage, ...(sourceCause.vaultCode ? { vaultCode: sourceCause.vaultCode } : {}),
+          value: 'PRIVATE_SENTINEL' },
+        cause: { code: 'PRIVATE_SENTINEL' },
+      })
+      const visible = JSON.stringify(original)
+      await assert.rejects(withCliTiming(() => timeCliDispatch(command, async () => { throw original }), publish),
+        caught => caught === original)
+      assert.equal(JSON.stringify(original), visible)
+      assert.equal(Object.hasOwn(original, 'sourceCause'), false)
+      await delay(10)
+    }
+    const unknown = new Error('PRIVATE_SENTINEL')
+    await assert.rejects(withCliTiming(() => timeCliDispatch('meal edit', async () => { throw unknown }), publish),
+      caught => caught === unknown)
+    await delay(10)
+    await withCliTiming(() => timeCliDispatch('meal edit', async () => {}), publish)
+    await delay(10)
+  }
+  if (batch) await withCliTiming(() => timeCliDispatch('batch', run), publish)
+  else await run()
+}
+
+test('source causes cross real UDP, receiver, profile and hosted admission for direct and batch calls', async () => {
+  const previous = process.env.MURPH_CLI_TIMING_ENDPOINT
+  for (const batch of [false, true]) {
+    const receiver = createCodexCliTimingReceiver()
+    try {
+      const setting = receiver.launchArgs[1]!
+      assert.ok(setting)
+      process.env.MURPH_CLI_TIMING_ENDPOINT = JSON.parse(setting.slice(setting.indexOf('=') + 1))
+      await delay(10)
+      const finish = receiver.begin()
+      await exerciseSourceCauseFailures(batch)
+      await delay(10)
+      const event = finish(turnId) as { method: string; params: { timing: unknown } }
+      assert.ok(event)
+      assert.equal(event.method, 'murph/cliTiming')
+      const report = normalizeCliTiming(event.params.timing)
+      assert.ok(report)
+      assert.equal(report.reportCount, batch ? 1 : 11)
+      assert.equal(report.batchContainers, batch ? 1 : 0)
+      assert.deepEqual(report.commands.map(({ command, outcome, calls }) => ({ command, outcome, calls })), [
+        { command: 'meal edit', outcome: 'error', calls: 4 },
+        { command: 'meal remove-photo', outcome: 'error', calls: 2 },
+        { command: 'food search-labels-batch', outcome: 'error', calls: 2 },
+        { command: 'research scout-batch', outcome: 'error', calls: 2 },
+        { command: 'meal edit', outcome: 'ok', calls: 1 },
+      ])
+      for (const command of report.commands.filter(command => command.outcome === 'error')) {
+        const failures: CliFailureTiming[] = sourceCauseCases.filter(row => row.command === command.command).map(row => ({
+          code: 'unknown', stage: row.stage, count: row.sourceCause.code === 'contract_invalid' ? 2 : 1,
+          sourceCause: row.sourceCause,
+        }))
+        if (command.command === 'meal edit') failures.push({ code: 'unknown', stage: 'unknown', count: 1 })
+        assert.deepEqual(command.failures, failures)
+        assert.equal(command.droppedFailures, undefined)
+      }
+      assert.equal(report.commands.at(-1)!.failures, undefined)
+      assert.equal(report.droppedCalls, 0)
+      assert.equal(report.droppedSpans, 0)
+      assert.equal(report.outOfWindowReports, 0)
+      assert.equal(report.transportTruncated, false)
+      const rawEvents = [...baseEvents, native('vault-cli batch', 'PRIVATE_SENTINEL')]
+      const untouched = structuredClone(rawEvents)
+      const baseline = buildAssistantCodexTurnProfileJson({ rawEvents, turnId })!
+      const profile = buildAssistantCodexTurnProfileJson({ rawEvents: [...rawEvents, event], turnId })!
+      const { cliTiming, ...legacy } = profile
+      assert.deepEqual(legacy, baseline, 'Native command accounting is not additive with CLI observations.')
+      assert.deepEqual(rawEvents, untouched)
+      assert.deepEqual(cliTiming, report)
+      const parsed = usage(JSON.parse(JSON.stringify(profile)))
+      assert.deepEqual(parsed.turnProfileJson, profile)
+      assert.equal(parsed.inputTokens, 17)
+      assert.equal(parsed.outputTokens, 11)
+      assert.equal(JSON.stringify(parsed).includes('PRIVATE_SENTINEL'), false)
+    } finally {
+      receiver.close()
+      if (previous === undefined) delete process.env.MURPH_CLI_TIMING_ENDPOINT
+      else process.env.MURPH_CLI_TIMING_ENDPOINT = previous
+    }
+  }
+})
+
+test('real food CLI failures cross the bridge, production UDP receiver, profile and hosted admission', async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'cli-source-cause-PRIVATE_SENTINEL-'))
+  const sentinel = path.join(directory, 'PRIVATE_SENTINEL.txt')
+  await writeFile(sentinel, 'PRIVATE_SENTINEL canonical bytes')
+  const root = fileURLToPath(new URL('../../..', import.meta.url))
+  const childFile = fileURLToPath(new URL('../../cli/test/fixtures/cli-timing-child.ts', import.meta.url))
+  const tsx = import.meta.resolve('tsx')
+  const args = ['food', 'search-labels-batch', '--query', 'synthetic oats']
+  const codes = ['food_labels_api_response_failed', 'food_labels_api_invalid_response'] as const
+  // Reuse the real terminating CLI child, including its exact provider-call
+  // assertion. No source imports across packages and no live fetch fallback.
+  const invoke = async (argv: string[], response: string, requests: number, endpoint?: string) => {
+    const child = spawn(process.execPath, ['--no-warnings', '--import', tsx, childFile, String(requests), ...argv], {
+      cwd: directory,
+      env: {
+        HOME: directory, USERPROFILE: directory, XDG_CONFIG_HOME: directory,
+        TMPDIR: directory, TMP: directory, TEMP: directory,
+        TSX_TSCONFIG_PATH: path.join(root, 'tsconfig.base.json'), TSX_DISABLE_CACHE: '1',
+        MURPH_HOSTED_RUNTIME_PROCESS: '1', MURPH_DATA_API_KEY: 'SYNTHETIC_SECRET_TOKEN',
+        MURPH_TEST_FOOD_RESPONSE: response,
+        ...(endpoint ? { MURPH_CLI_TIMING_ENDPOINT: endpoint } : {}),
+      },
+      stdio: ['ignore', 'pipe', 'pipe'], timeout: 30_000,
+    })
+    let stdout = '', stderr = ''
+    child.stdout.on('data', chunk => { stdout += chunk })
+    child.stderr.on('data', chunk => { stderr += chunk })
+    const [code, signal] = await once(child, 'close') as [number | null, NodeJS.Signals | null]
+    await setImmediate()
+    assert.equal(signal, null)
+    assert.equal(stderr, '', 'Includes the child assertion of exactly the expected fake provider calls.')
+    assert.deepEqual(await readdir(directory), [path.basename(sentinel)], 'No vault, cwd or config writes.')
+    assert.equal(await readFile(sentinel, 'utf8'), 'PRIVATE_SENTINEL canonical bytes')
+    return { stdout, stderr, code, signal }
+  }
+  try {
+    for (const batch of [false, true]) {
+      const receiver = createCodexCliTimingReceiver()
+      try {
+        const setting = receiver.launchArgs[1]!
+        assert.ok(setting)
+        const endpoint: string = JSON.parse(setting.slice(setting.indexOf('=') + 1))
+        const scenarios = batch ? [{ response: 'mixed', requests: 2,
+          argv: ['batch', '--command', JSON.stringify(args), '--command', JSON.stringify(args)] }]
+          : ['http', 'schema'].map(response => ({ response, requests: 1, argv: args }))
+        const baseline = []
+        for (const scenario of scenarios) {
+          baseline.push(await invoke([...scenario.argv, '--vault', directory, '--format', 'json'],
+            scenario.response, scenario.requests))
+        }
+        // The untimed subprocesses also yield while the real receiver binds.
+        const finish = receiver.begin()
+        const completions = []
+        for (const [index, scenario] of scenarios.entries()) {
+          const result = await invoke([...scenario.argv, '--vault', directory, '--format', 'json'],
+            scenario.response, scenario.requests, endpoint)
+          assert.deepEqual(result, baseline[index], 'Timing preserves complete stdout, stderr and actual process exits.')
+          assert.equal(result.code, batch ? 0 : 1)
+          const output = JSON.parse(result.stdout)
+          if (batch) {
+            assert.equal(output.executed, 2)
+            assert.equal(output.failed, 2)
+            assert.deepEqual(output.commands.map((command: { error: { code: string } }) => command.error.code), codes)
+          } else assert.equal(output.code, codes[index])
+          assert.equal(result.stdout.includes('sourceCause'), false)
+          completions.push(native(batch ? 'vault-cli batch' : 'vault-cli food search-labels-batch', result.stdout,
+            { id: `item-synthetic-food-${index}`, exitCode: result.code }))
+        }
+        const event = finish(turnId) as { method: string; params: { timing: unknown } }
+        assert.ok(event)
+        const report = normalizeCliTiming(event.params.timing)
+        assert.ok(report)
+        assert.equal(report.reportCount, batch ? 1 : 2)
+        assert.equal(report.batchContainers, batch ? 1 : 0)
+        assert.equal(report.commands.length, 1)
+        assert.equal(report.commands[0]!.command, 'food search-labels-batch')
+        assert.equal(report.commands[0]!.outcome, 'error')
+        assert.equal(report.commands[0]!.calls, 2)
+        assert.deepEqual(report.commands[0]!.failures, codes.map(code => ({
+          code: 'unknown', stage: 'response', count: 1, sourceCause: { code },
+        })))
+        assert.equal(report.commands[0]!.droppedFailures, undefined)
+        assert.equal(report.droppedCalls, 0)
+        assert.equal(report.droppedSpans, 0)
+        assert.equal(report.outOfWindowReports, 0)
+        assert.equal(report.transportTruncated, false)
+        const rawEvents = [...baseEvents, ...completions]
+        const nativeProfile = buildAssistantCodexTurnProfileJson({ rawEvents, turnId })!
+        const profile = buildAssistantCodexTurnProfileJson({ rawEvents: [...rawEvents, event], turnId })!
+        const { cliTiming, ...legacy } = profile
+        assert.deepEqual(legacy, nativeProfile)
+        assert.deepEqual(cliTiming, report)
+        const admitted = usage(JSON.parse(JSON.stringify(profile)))
+        assert.deepEqual(admitted.turnProfileJson, profile)
+        assert.equal(admitted.inputTokens, 17)
+        assert.equal(admitted.outputTokens, 11)
+        for (const privateValue of ['PRIVATE_SENTINEL', 'SYNTHETIC_SECRET_TOKEN', 'synthetic oats', 'synthetic-oats']) {
+          assert.equal(JSON.stringify(admitted).includes(privateValue), false)
+        }
+      } finally { receiver.close() }
+    }
+  } finally { await rm(directory, { recursive: true, force: true }) }
+}, 180_000)
+
+test('malformed source causes and legacy reports preserve failure, timing and usage accounting', async () => {
+  let report!: CliTiming
+  await exerciseSourceCauseFailures(true, value => { report = value })
+  const rawEvents = [...baseEvents, native('vault-cli batch')]
+  const baseline = buildAssistantCodexTurnProfileJson({ rawEvents, turnId })!
+  const profile = { ...baseline, cliTiming: report }
+  const expected = structuredClone(report)
+  expected.commands[0]!.failures = [
+    { code: 'unknown', stage: 'unknown', count: 3 },
+    { code: 'unknown', stage: 'unknown', count: 1, sourceCause: { code: 'vault_error' } },
+  ]
+  let reads = 0
+  const malformed: unknown[] = [null, ['contract_invalid'], { code: 'PRIVATE_SENTINEL' },
+    Object.create({ code: 'contract_invalid' }),
+    { get code() { reads += 1; return 'contract_invalid' } },
+    new Proxy({}, { getOwnPropertyDescriptor() { throw new Error('PRIVATE_SENTINEL') } }),
+  ]
+  for (const sourceCause of malformed) {
+    const timing = { ...report, commands: report.commands.map((command, index) => index === 0 ? {
+      ...command, failures: command.failures!.map((failure, variant) => variant === 0 ? { ...failure, sourceCause } : failure),
+    } : command) }
+    const produced = buildAssistantCodexTurnProfileJson({ rawEvents: [...rawEvents,
+      { method: 'murph/cliTiming', params: { turnId, timing } }], turnId })!
+    assert.deepEqual(produced, { ...baseline, cliTiming: expected })
+    const parsed = usage({ ...profile, cliTiming: timing })
+    assert.deepEqual(parsed.turnProfileJson, produced)
+    assert.equal(parsed.inputTokens, 17)
+    assert.equal(parsed.outputTokens, 11)
+    assert.equal(JSON.stringify(parsed).includes('PRIVATE_SENTINEL'), false)
+  }
+  assert.equal(reads, 0)
+  const mixed = structuredClone(report)
+  // One old failure-aware call and one call without failure coverage. Neither
+  // can acquire a source cause from a newer neighboring observation.
+  mergeCliTiming(mixed, { ...emptyCliTiming(), reportCount: 1, commands: [{
+    command: 'meal edit', outcome: 'error', calls: 2, phases: [],
+    failures: [{ code: 'unknown', stage: 'unknown', count: 1 }],
+  }] })
+  assert.equal(mixed.reportCount, 2)
+  assert.equal(mixed.commands[0]!.calls, 6)
+  assert.deepEqual(mixed.commands[0]!.failures, [
+    { code: 'unknown', stage: 'unknown', count: 2, sourceCause: { code: 'contract_invalid' } },
+    { code: 'unknown', stage: 'unknown', count: 1, sourceCause: { code: 'vault_error' } },
+    { code: 'unknown', stage: 'unknown', count: 2 },
+  ])
+  assert.deepEqual(usage({ ...profile, cliTiming: mixed }).turnProfileJson, { ...profile, cliTiming: mixed })
+})
+
+// Bind both actual base readers; a current-reader roundtrip is not compatibility proof.
+const sourceCauseCompatibilityBase = process.env.MURPH_CLI_SOURCE_CAUSE_COMPAT_BASE
+test.skipIf(!sourceCauseCompatibilityBase)('actual base hosted reader drops only source cause and retains legacy failures', async () => {
+  assert.equal(sourceCauseCompatibilityBase, '704630e3fda169456458db4c7a0f50121be120ee')
+  const source = (file: string) => execFileSync('git', ['show', `${sourceCauseCompatibilityBase}:${file}`],
+    { encoding: 'utf8', maxBuffer: 1_000_000 })
+  const moduleUrl = (text: string) => `data:text/javascript;base64,${Buffer.from(stripTypeScriptTypes(text)).toString('base64')}`
+  const oldTimingUrl = moduleUrl(source('packages/runtime-state/src/cli-timing.ts'))
+  const oldTiming: { normalizeCliTiming: typeof normalizeCliTiming; mergeCliTiming: typeof mergeCliTiming } = await import(oldTimingUrl)
+  const oldUsageSource = source('packages/hosted-execution/src/assistant-usage.ts')
+  assert.ok(oldUsageSource.includes('"@murphai/runtime-state/cli-timing"'))
+  const old: { parseAssistantUsageRecord: typeof parseAssistantUsageRecord } = await import(moduleUrl(
+    oldUsageSource.replace('"@murphai/runtime-state/cli-timing"', JSON.stringify(oldTimingUrl))))
+  let report!: CliTiming
+  await exerciseSourceCauseFailures(true, value => { report = value })
+  const oldReport = structuredClone(report)
+  for (const command of oldReport.commands.filter(command => command.outcome === 'error')) {
+    command.failures = [{ code: 'unknown', stage: command.failures![0]!.stage, count: command.calls }]
+  }
+  assert.deepEqual(oldTiming.normalizeCliTiming(report), oldReport)
+  assert.deepEqual(normalizeCliTiming(oldReport), oldReport, 'New readers never backfill an old cause.')
+  const mixed = structuredClone(report)
+  mergeCliTiming(mixed, oldReport)
+  const oldMixed = structuredClone(oldReport)
+  oldTiming.mergeCliTiming(oldMixed, oldReport)
+  assert.deepEqual(oldTiming.normalizeCliTiming(mixed), oldMixed)
+  const baseline = buildAssistantCodexTurnProfileJson({ rawEvents: baseEvents, turnId })!
+  for (const schema of ['murph.assistant-turn-profile.v1', 'murph.assistant-turn-profile.v2']) {
+    for (const [timing, expectedTiming] of [[report, oldReport], [mixed, oldMixed]]) {
+      const profile = { ...baseline, schema, tools: [], cliTiming: timing }
+      const input = usage(profile)
+      const expected = { ...input, turnProfileJson: { ...profile, cliTiming: expectedTiming } }
+      assert.deepEqual(old.parseAssistantUsageRecord(JSON.parse(JSON.stringify(input))), expected)
+      assert.deepEqual(parseAssistantUsageRecord(expected), expected)
+      assert.equal(expected.inputTokens, 17)
+      assert.equal(expected.outputTokens, 11)
+      assert.equal(JSON.stringify(expected).includes('PRIVATE_SENTINEL'), false)
+    }
   }
 })
