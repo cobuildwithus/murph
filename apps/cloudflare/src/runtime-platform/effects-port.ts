@@ -42,6 +42,7 @@ import {
 import {
   fetchHostedWebControlPlaneJson,
   HOSTED_RUNNER_WEB_CONTROL_ROUTES,
+  type HostedThreadRouteAuthorityResponseMetadata,
   type HostedWebControlTransport,
 } from "./web-control-transport.ts";
 
@@ -226,6 +227,7 @@ export function createCloudflareEffectsPort(input: {
             }
           },
           async assertExternalThreadRouteAuthority(authority, context) {
+            const responseMetadata: Partial<HostedThreadRouteAuthorityResponseMetadata> = {};
             const headers = await requireHostedEffectsRuntimeWriteFenceHeaders({
               description: "Hosted external thread route authority assertion",
               workspaceCheckpointBridge: input.workspaceCheckpointBridge ?? null,
@@ -242,6 +244,7 @@ export function createCloudflareEffectsPort(input: {
               fetchImpl: input.fetchImpl,
               headers,
               route: HOSTED_RUNNER_WEB_CONTROL_ROUTES.threadRouteAuthority,
+              routeAuthorityResponseMetadata: responseMetadata,
               signal: context?.signal ?? null,
               timeoutMs: input.timeoutMs,
               transport: webControlTransport,
@@ -259,6 +262,7 @@ export function createCloudflareEffectsPort(input: {
                   component: "hosted.runtime.control-plane",
                   details: {
                     operation: HOSTED_RUNNER_WEB_CONTROL_ROUTES.threadRouteAuthority.operation,
+                    ...responseMetadata,
                     responseIsObject: record !== null,
                     authorizedValid: record !== null && record.authorized === true,
                     assistantAskFallbackRequiredValid: record !== null && (

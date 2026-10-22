@@ -23,7 +23,15 @@ const transactionOptions = { maxWait: 5_000, timeout: 5_000 };
 export async function registerCompanionPushRoute(memberId: string, registration: CompanionPushRouteRegistration): Promise<void> {
   await getPrisma().$transaction(async (tx) => {
     await requirePersonalMember(tx, memberId);
-    const data = { ...registration, updatedAt: new Date() };
+    const current = await tx.companionPushRoute.findUnique({ where: { userId: memberId } });
+    const sameAddress = current
+      && current.installationId === registration.installationId
+      && current.token === registration.token
+      && current.environment === registration.environment
+      && current.topic === registration.topic;
+    // A wearable-only registration cannot move another installation's game
+    // enrollment. Same-address permission refreshes keep its session binding.
+    const data = { ...registration, gameSessionId: sameAddress ? current.gameSessionId : null, updatedAt: new Date() };
     await tx.companionPushRoute.upsert({ where: { userId: memberId }, create: { userId: memberId, ...data }, update: data });
   }, transactionOptions);
 }

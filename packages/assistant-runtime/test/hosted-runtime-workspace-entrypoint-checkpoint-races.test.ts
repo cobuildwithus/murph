@@ -2652,12 +2652,17 @@ describe("hosted workspace runtime entrypoint", () => {test("retained post-check
             }),
           }),
           runtimeWakeSignal,
-          async runAssistantPhase() {
+          async runAssistantPhase(input) {
             assistantPhaseCalls += 1;
             events.push(`assistant.phase:${assistantPhaseCalls}`);
             if (assistantPhaseCalls === 1) {
-              setTimeout(() => runtimeWakeSignal.notify(), 10);
               return {
+                async afterCheckpoint() {
+                  // The foreground watcher has stopped; the outer loop consumes
+                  // this wake after absorbing the first pass's projection.
+                  events.push("assistant.wake");
+                  runtimeWakeSignal.notify();
+                },
                 checkpointReason: "assistant_runtime_commit",
                 nextWakeAt: assistantWakeAt,
                 progressed: true,
@@ -2668,7 +2673,13 @@ describe("hosted workspace runtime entrypoint", () => {test("retained post-check
               };
             }
 
+            assert.equal(checkpointRequests.length, 0);
+            assert.equal(
+              input.workspace?.redactedStatus?.hostedAssistantNextWakeAt,
+              assistantWakeAt,
+            );
             await new Promise((resolve) => setTimeout(resolve, 150));
+            events.push("assistant.phase:2:done");
             return {
               checkpointReason: "assistant_runtime_commit",
               nextWakeAt: null,
@@ -2684,9 +2695,17 @@ describe("hosted workspace runtime entrypoint", () => {test("retained post-check
       );
 
       assert.equal(assistantPhaseCalls, 2);
-      assert.deepEqual(events.filter((event) => event.startsWith("assistant.phase:")), [
+      assert.deepEqual(events.filter((event) =>
+        event.startsWith("assistant.")
+        || event.startsWith("snapshot:")
+        || event === "workspace.checkpoint"
+      ), [
         "assistant.phase:1",
+        "assistant.wake",
         "assistant.phase:2",
+        "assistant.phase:2:done",
+        "snapshot:idle_shutdown",
+        "workspace.checkpoint",
       ]);
       assert.equal(checkpointRequests.length, 1);
       assert.equal(checkpointRequests[0]?.nextWakeAt, null);

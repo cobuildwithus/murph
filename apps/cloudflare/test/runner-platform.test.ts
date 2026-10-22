@@ -7325,6 +7325,8 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       const effect = createAuthorityEffect(() => Response.json(payload));
       await expect(effect.assertAuthority(authority)).resolves.toEqual(expected);
       expect(readValidationDiagnostics()).toEqual([]);
+      expect(mocks.emitHostedExecutionStructuredLog.mock.calls
+        .filter(([entry]) => entry.level === "warn")).toEqual([]);
       await expectOnlyAuthorityRequest(effect);
     });
 
@@ -7335,19 +7337,23 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       threadIsDirectValid: false,
     };
     it.each([
-      { name: "null body", payload: null, invalid: nonObjectShape },
-      { name: "array body", payload: [], invalid: nonObjectShape },
-      { name: "scalar body", payload: "synthetic-private-value", invalid: nonObjectShape },
-      { name: "missing authorized", payload: {}, invalid: { authorizedValid: false } },
-      { name: "false authorized", payload: { authorized: false }, invalid: { authorizedValid: false } },
-      { name: "non-boolean authorized", payload: { authorized: "invalid" }, invalid: { authorizedValid: false } },
-      { name: "invalid audience", payload: { authorized: true, threadIsDirect: "invalid" }, invalid: { threadIsDirectValid: false } },
-      { name: "null audience", payload: { authorized: true, threadIsDirect: null }, invalid: { threadIsDirectValid: false } },
-      { name: "invalid fallback", payload: { authorized: true, assistantAskFallbackRequired: "invalid" }, invalid: { assistantAskFallbackRequiredValid: false } },
-      { name: "null fallback", payload: { authorized: true, assistantAskFallbackRequired: null }, invalid: { assistantAskFallbackRequiredValid: false } },
+      { name: "empty body", body: "", shape: "empty", invalid: nonObjectShape },
+      { name: "whitespace body", body: " \t\r\n", shape: "empty", invalid: nonObjectShape },
+      { name: "null body", body: "null", shape: "null", invalid: nonObjectShape },
+      { name: "array body", body: "[]", shape: "array", invalid: nonObjectShape },
+      { name: "string scalar body", body: '"synthetic-private-value-é🙂"', shape: "scalar", invalid: nonObjectShape },
+      { name: "number scalar body", body: "42", shape: "scalar", invalid: nonObjectShape },
+      { name: "boolean scalar body", body: "false", shape: "scalar", invalid: nonObjectShape },
+      { name: "missing authorized", body: "{}", shape: "object", invalid: { authorizedValid: false } },
+      { name: "false authorized", body: '{"authorized":false}', shape: "object", invalid: { authorizedValid: false } },
+      { name: "non-boolean authorized", body: '{"authorized":"invalid"}', shape: "object", invalid: { authorizedValid: false } },
+      { name: "invalid audience", body: '{"authorized":true,"threadIsDirect":"invalid"}', shape: "object", invalid: { threadIsDirectValid: false } },
+      { name: "null audience", body: '{"authorized":true,"threadIsDirect":null}', shape: "object", invalid: { threadIsDirectValid: false } },
+      { name: "invalid fallback", body: '{"authorized":true,"assistantAskFallbackRequired":"invalid"}', shape: "object", invalid: { assistantAskFallbackRequiredValid: false } },
+      { name: "null fallback", body: '{"authorized":true,"assistantAskFallbackRequired":null}', shape: "object", invalid: { assistantAskFallbackRequiredValid: false } },
       {
         name: "multiple invalid fields and private extras",
-        payload: {
+        body: JSON.stringify({
           authorized: false,
           assistantAskFallbackRequired: "synthetic-private-value",
           threadIsDirect: "synthetic-private-value",
@@ -7355,13 +7361,23 @@ describe("buildHostedExecutionRuntimePlatform", () => {
           body: "synthetic-private-value",
           url: "https://synthetic-private.example.test",
           headers: { authorization: "synthetic-private-value" },
-        },
+        }),
+        shape: "object",
         invalid: { authorizedValid: false, assistantAskFallbackRequiredValid: false, threadIsDirectValid: false },
       },
-    ])("observes $name once and preserves the parser error", async ({ payload, invalid }) => {
+    ])("observes $name once and preserves the parser error", async ({ body, shape, invalid }) => {
       const parser = vi.spyOn(hostedExecutionParsers, "parseHostedExternalThreadRouteAuthorityResponse");
       try {
-        const effect = createAuthorityEffect(() => Response.json(payload));
+        const response = new Response(body, {
+          headers: {
+            "content-type": "application/json; synthetic-private-parameter=value",
+            "content-length": "synthetic-private-content-length",
+            "x-synthetic-private-header": "synthetic-private-header-value",
+          },
+        });
+        const clone = vi.spyOn(response, "clone");
+        const getReader = vi.spyOn(response.body!, "getReader");
+        const effect = createAuthorityEffect(() => response);
         const result = effect.assertAuthority(authority);
         await expect(result).rejects.toBeInstanceOf(TypeError);
         expect(parser).toHaveBeenCalledTimes(1);
@@ -7369,6 +7385,10 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         await expect(result).rejects.toBe(parser.mock.results[0]?.value);
         const details = {
           operation: "thread_route_authority",
+          responseBodyShape: shape,
+          responseBodyBytes: Buffer.byteLength(body, "utf8"),
+          responseMimeCategory: "json",
+          responseStatus: 200,
           responseIsObject: true,
           authorizedValid: true,
           assistantAskFallbackRequiredValid: true,
@@ -7382,6 +7402,8 @@ describe("buildHostedExecutionRuntimePlatform", () => {
           : "Hosted external thread route authority response must be an object.");
         const diagnostics = readValidationDiagnostics();
         expect(diagnostics).toHaveLength(1);
+        expect(mocks.emitHostedExecutionStructuredLog.mock.calls
+          .filter(([entry]) => entry.level === "warn")).toHaveLength(1);
         expect(diagnostics[0]).toEqual({
           component: "hosted.runtime.control-plane",
           details,
@@ -7399,10 +7421,94 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         ]) {
           expect(serialized).not.toContain(excluded);
         }
+        expect(getReader).toHaveBeenCalledTimes(1);
+        expect(clone).not.toHaveBeenCalled();
         await expectOnlyAuthorityRequest(effect);
       } finally {
         parser.mockRestore();
       }
+    });
+
+    it("observes a successful no-content response without changing its parser failure", async () => {
+      const parser = vi.spyOn(hostedExecutionParsers, "parseHostedExternalThreadRouteAuthorityResponse");
+      try {
+        const effect = createAuthorityEffect(() => new Response(null, {
+          status: 204,
+          headers: { "content-length": "4096" },
+        }));
+        const result = effect.assertAuthority(authority);
+        await expect(result).rejects.toBeInstanceOf(TypeError);
+        expect(parser).toHaveBeenCalledTimes(1);
+        expect(parser).toHaveBeenCalledWith(null);
+        await expect(result).rejects.toBe(parser.mock.results[0]?.value);
+        const diagnostics = readValidationDiagnostics();
+        expect(diagnostics).toHaveLength(1);
+        expect(diagnostics[0].details).toMatchObject({
+          responseBodyShape: "empty",
+          responseBodyBytes: 0,
+          responseMimeCategory: "missing",
+          responseStatus: 204,
+        });
+        expect(mocks.emitHostedExecutionStructuredLog.mock.calls
+          .filter(([entry]) => entry.level === "warn")).toHaveLength(1);
+        await expectOnlyAuthorityRequest(effect);
+      } finally {
+        parser.mockRestore();
+      }
+    });
+
+    it("counts the original response chunks even when decoding removes a UTF-8 BOM", async () => {
+      const response = new Response(new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new Uint8Array([0xef]));
+          controller.enqueue(new Uint8Array([0xbb, 0xbf, 0x6e, 0x75]));
+          controller.enqueue(new Uint8Array([0x6c, 0x6c]));
+          controller.close();
+        },
+      }), { headers: { "content-type": "application/json" } });
+      const getReader = vi.spyOn(response.body!, "getReader");
+      const clone = vi.spyOn(response, "clone");
+      const effect = createAuthorityEffect(() => response);
+      await expect(effect.assertAuthority(authority)).rejects.toThrow(
+        "Hosted external thread route authority response must be an object.",
+      );
+      const diagnostics = readValidationDiagnostics();
+      expect(diagnostics).toHaveLength(1);
+      expect(diagnostics[0].details).toMatchObject({
+        responseBodyShape: "null",
+        responseBodyBytes: 7,
+        responseMimeCategory: "json",
+        responseStatus: 200,
+      });
+      expect(getReader).toHaveBeenCalledTimes(1);
+      expect(clone).not.toHaveBeenCalled();
+      await expectOnlyAuthorityRequest(effect);
+    });
+
+    it.each([
+      { contentType: null, category: "missing" },
+      { contentType: "application/problem+json; synthetic-private-parameter=value", category: "json" },
+      { contentType: "text/html; synthetic-private-parameter=value", category: "html" },
+      { contentType: "text/plain; synthetic-private-parameter=value", category: "text" },
+      { contentType: "application/x-synthetic-private-mime", category: "other" },
+    ])("reduces response MIME to $category without exposing headers", async ({ contentType, category }) => {
+      const headers = new Headers({ "x-synthetic-private-header": "synthetic-private-value" });
+      if (contentType !== null) headers.set("content-type", contentType);
+      const effect = createAuthorityEffect(() => new Response(new Uint8Array([0x7b, 0x7d]), { headers }));
+      await expect(effect.assertAuthority(authority)).rejects.toThrow(
+        "Hosted external thread route authority response is invalid.",
+      );
+      const diagnostics = readValidationDiagnostics();
+      expect(diagnostics).toHaveLength(1);
+      expect(diagnostics[0].details).toMatchObject({
+        responseBodyShape: "object",
+        responseBodyBytes: 2,
+        responseMimeCategory: category,
+        responseStatus: 200,
+      });
+      const sanitized = buildHostedExecutionStructuredLogRecord(diagnostics[0]);
+      expect(JSON.stringify([diagnostics, sanitized])).not.toContain("synthetic-private");
+      await expectOnlyAuthorityRequest(effect);
     });
 
     it.each(["http", "network", "invalid-json", "body-read"] as const)(
@@ -7448,6 +7554,12 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         expect(parser.mock.results[0]?.type).toBe("throw");
         await expect(result).rejects.toBe(parser.mock.results[0]?.value);
         expect(readValidationDiagnostics()).toHaveLength(1);
+        expect(readValidationDiagnostics()[0].details).toMatchObject({
+          responseBodyShape: "object",
+          responseBodyBytes: 20,
+          responseMimeCategory: "json",
+          responseStatus: 200,
+        });
         expect(warn).toHaveBeenCalledTimes(1);
         await expectOnlyAuthorityRequest(effect);
       } finally {

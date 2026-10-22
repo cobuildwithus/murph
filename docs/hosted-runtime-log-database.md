@@ -889,20 +889,35 @@ for a decoded HTTP-success response rejected by its existing parser, through
 `emitHostedExecutionStructuredLog`, not the runtime-log database callback.
 `responseIsObject`, `authorizedValid`, `assistantAskFallbackRequiredValid`, and
 `threadIsDirectValid` are validation booleans: absent optional fields are valid;
-all four are false for a non-object body. No response values, arbitrary keys,
-request authority, body, URL, headers, error text, or stack are included.
+all four are false for a non-object body. The same warning includes:
+
+| Field | Meaning |
+| --- | --- |
+| `responseBodyShape` | `empty` for empty or whitespace-only decoded text; otherwise `null`, `array`, `scalar`, or `object` for the decoded JSON's top-level shape. `null` specifically means explicit JSON null. |
+| `responseBodyBytes` | Total bytes observed by the existing response stream reader before text decoding. Whitespace-only text can therefore have a nonzero count. These are transport-visible body bytes, not necessarily wire or compressed bytes. |
+| `responseMimeCategory` | Existing bounded MIME category: `missing`, `json`, `html`, `text`, or `other`; no raw content type or parameters. |
+| `responseStatus` | Received HTTP response status, including bodyless successful statuses such as 204. |
+
+Shape and byte count distinguish an empty decoded body from valid JSON rejected
+by the parser; they do not establish truncation or an underlying transport cause.
+No payload values, arbitrary keys, request authority, body, URL, raw headers,
+error text, or stack are included. No content-length or expected-byte claim is
+made; device-sync snapshot metadata and its validation remain separately owned.
 `workspaceAttemptId` reuses the resolved write-fence attempt header through the
 existing sanitizer; `transport` is `direct` or `proxy`. The parser's return and
 exact thrown error remain unchanged, including legacy authorized-only success.
 There is no added request, authority read, retry, success log, or transport-failure
-log; only the failure path derives these fixed fields. For a fixed natural-traffic
-window, query existing structured logs with `schema = murph.hosted-execution.log.v1`,
+log; response metadata is reported only with this existing parser-failure warning.
+JSON decoding, network, and body-read failures retain their existing paths.
+For a fixed natural-traffic window, query existing structured logs with
+`schema = murph.hosted-execution.log.v1`,
 `component = hosted.runtime.control-plane`, `phase = runtime.starting`,
 `details.operation = thread_route_authority`, and
 `message = Hosted external thread route authority response validation failed.`;
-group counts by transport and the four booleans, using sanitized attempt correlation
-only when needed. These are observed validation failures, not an authorization or
-success-rate denominator; do not generate failures or replay traffic to collect them.
+group counts by transport, body shape, and the four booleans, using sanitized
+attempt correlation only when needed. These are observed validation failures,
+not an authorization or success-rate denominator; do not generate failures or
+replay traffic to collect them.
 
 ### Assistant-notification validation attribution
 
