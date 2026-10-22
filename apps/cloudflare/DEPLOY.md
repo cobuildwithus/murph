@@ -244,6 +244,26 @@ does not stop an already accepted automatic rollout. Native manual progression
 needs separate hosted hold/retry proof before it can provide that additional
 control. No manual scheduler or automatic rollback is introduced here.
 
+### Common-media secure file reader floor
+
+The common-media reader release broadens secure-file MIME validation and generated
+file cleanup, while a temporary legacy-extension gate in
+`requestAssistantVaultFileSend` keeps new approvals on the existing document/ZIP
+formats. Deploy that reader-only release and prove native runner convergence
+before deploying the separate writer release that removes the gate. Old and
+reader-only runners can coexist because neither produces new-format intents.
+Web and Worker persisted `vault_file` schemas already accept the MIME strings;
+there is no schema migration or Web-first dependency.
+
+After the first common-media approval intent or checkpoint, the reader release
+is the rollback floor: pre-compatibility runners can reject retry reads and
+prune active generated media. Roll back the writer to the reader-only release
+if needed, retaining its expanded read/cleanup map. Do not treat immediate
+rollout alone as proof that old readers cannot see new state. Confirm the exact
+reader bundle has converged, then exercise image/audio/video approval and retry
+and check bounded unsupported-type and missing-file diagnostics after enabling
+writes. Existing attachment limits and approval authority remain in force.
+
 ### Identity, recovery, and capacity
 
 `HOSTED_EXECUTION_RUNNER_DEPLOYMENT` retains active, candidate, and previous

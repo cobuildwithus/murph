@@ -67,6 +67,22 @@ export type AssistantVaultFileSendRequestResult =
   }
   & HostedActionApprovalResult
 
+const LEGACY_VAULT_FILE_SEND_EXTENSIONS = new Set([
+  '.csv', '.doc', '.docx', '.ics', '.json', '.md', '.pdf', '.ppt', '.pptx',
+  '.rtf', '.txt', '.vcf', '.xls', '.xlsx', '.zip',
+])
+
+function requireLegacyVaultFileSendFormat(ref: string): void {
+  // Reader-first release: enable new sends only after all runners can retain
+  // and retry the expanded formats. Remove this temporary gate in the writer release.
+  if (!LEGACY_VAULT_FILE_SEND_EXTENSIONS.has(path.posix.extname(ref).toLowerCase())) {
+    throw new VaultCliError(
+      'ASSISTANT_VAULT_FILE_TYPE_UNSUPPORTED',
+      'This vault file type is not supported for secure delivery.',
+    )
+  }
+}
+
 export async function requestAssistantVaultFileSend(input: {
   actionApprovalPort: AssistantActionApprovalPort
   actorId?: string | null
@@ -90,6 +106,7 @@ export async function requestAssistantVaultFileSend(input: {
 }): Promise<AssistantVaultFileSendRequestResult> {
   const targetFingerprint = requireAssistantVaultFileSendTargetFingerprint(input)
   const normalizedRef = normalizeVaultFileRef(input.ref)
+  requireLegacyVaultFileSendFormat(normalizedRef)
   const generatedDelivery = isAssistantGeneratedDeliveryRef(normalizedRef)
     ? buildAssistantGeneratedDeliveryIdentity({
         ref: normalizedRef,
