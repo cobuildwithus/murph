@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-10-22",
+  "order": 100,
+  "item": {
+    "id": "clearer-challenge-proposals",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Clearer challenge changes in your active chat",
+    "summary": "Challenge proposals are shorter and only mention a start date when you change it.",
+    "details": "When choosing between shared chats with the same two players, Murph now prefers the most recently active conversation, then a named group, then the newest chat. Games already linked to a chat stay there.",
+    "relevanceTags": ["challenges", "groups"],
+    "sourcePullRequests": []
+  }
+}

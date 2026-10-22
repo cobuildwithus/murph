@@ -20,8 +20,6 @@ import { getPrisma } from "../prisma";
 import { parsePendingGameChange } from "./changes";
 import type { GamePendingChange } from "./contract";
 import { openGameTexts } from "./crypto";
-import { addDays, weekdayOf } from "./time";
-import { currentTerms, parseStoredTerms } from "./rules";
 
 const CANDIDATE_LIMIT = 20;
 const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
@@ -36,19 +34,32 @@ export function isExactGameChat(chat: HostedLinqChatSummary, phones: readonly st
     && phones.every((phone) => people.includes(phone));
 }
 
-export function gameChangeProposalMessage(proposal: GamePendingChange, context: { proposerName: string; recipientName: string; effectiveOn: string | null; timeZones: string[]; deadline?: { day: string; kind: "first_check_in" | "game" } | null }): string {
+function proposalDate(day: string): string {
+  return new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", timeZone: "UTC" }).format(new Date(`${day}T00:00:00Z`));
+}
+
+export function gameChangeProposalMessage(proposal: GamePendingChange, context: { proposerName: string; recipientName: string; lengthDays: number }): string {
   const change = proposal.change;
   const edits: string[] = [];
-  if (proposal.startsOn) edits.push(`start on ${proposal.startsOn}`);
+  if (change.kind === "start_now") edits.push("start the game now");
+  else if (proposal.startsOn) edits.push(`move the start to ${proposalDate(proposal.startsOn)}`);
   if (change.kind === "edit") {
-    if (change.schedule) edits.push("days" in change.schedule
-      ? `check in on ${change.schedule.days.map((day) => DAYS[day]).join(", ")}`
-      : `${change.schedule.count} check-ins across the game`);
-    if (change.lengthDays !== undefined) edits.push(`${change.lengthDays} calendar days total`);
+    if (change.lengthDays !== undefined) {
+      const action = change.lengthDays === context.lengthDays ? "keep the game at" : change.lengthDays < context.lengthDays ? "shorten the game to" : "extend the game to";
+      edits.push(`${action} ${change.lengthDays} days total`);
+    }
+    if (change.schedule) {
+      const schedule = change.schedule;
+      let checkIns: string;
+      if ("count" in schedule) checkIns = `do ${schedule.count} check-ins total, on any days`;
+      else if (schedule.days.length === 7) checkIns = "switch to daily check-ins";
+      else if (schedule.days.length === 5 && schedule.days.every((day) => day < 5)) checkIns = "switch to weekday check-ins";
+      else if (schedule.days.length === 2 && schedule.days.every((day) => day >= 5)) checkIns = "switch to weekend check-ins";
+      else checkIns = `switch to ${new Intl.ListFormat("en-US").format(schedule.days.map((day) => DAYS[day]!))} check-ins`;
+      edits.push(checkIns);
+    }
   }
-  const effective = proposal.effectiveFromDay > 0 ? `Starting ${context.effectiveOn ?? `day ${proposal.effectiveFromDay + 1}`}, keeping previous check-ins. ` : "";
-  const deadline = context.deadline ? `${context.deadline.kind === "game" ? "The game would finish" : "First check-ins would be due"} ${context.deadline.day} at 3 AM in each player's local time (${[...new Set(context.timeZones)].join("; ")}). ` : "";
-  return `${context.proposerName} proposed: ${edits.join("; ")}. ${effective}${deadline}${context.recipientName}, does that work for you?`;
+  return `${context.proposerName} wants to ${edits.join(" and ")}. ${context.recipientName}, good with that?`;
 }
 
 /** Called after the game transaction. All provider and crypto work stays outside game locks. */
@@ -66,10 +77,25 @@ export async function deliverGameChangeProposal(gameId: string, proposalId: stri
   } else {
     const candidates = await prisma.hostedThreadContainer.findMany({
       where: { AND: game.players.map((player) => ({ participants: { some: { participantMemberId: player.memberId, removedAt: null } } })), participants: { none: { removedAt: null, participantMemberId: { notIn: game.players.map((player) => player.memberId) } } } },
-      select: { memberId: true, participants: { where: { removedAt: null }, select: { participantMemberId: true }, take: 3 } },
+      select: {
+        memberId: true, createdAt: true,
+        member: { select: {
+          hostedGroupRuntime: { select: { displayName: true } },
+          hostedMailboxItems: { where: { kind: "conversation.message" }, orderBy: { createdAt: "desc" }, select: { createdAt: true }, take: 1 },
+        } },
+        participants: { where: { removedAt: null }, select: { participantMemberId: true }, take: 3 },
+      },
       orderBy: [{ createdAt: "desc" }, { memberId: "asc" }], take: CANDIDATE_LIMIT + 1,
     });
     if (candidates.length > CANDIDATE_LIMIT) throw new Error("Game chat discovery needs a narrower existing conversation.");
+    // Message receipts are conversation activity; roster refreshes and system
+    // notifications are not. Read one indexed receipt per bounded candidate.
+    candidates.sort((a, b) => {
+      const activity = (candidate: typeof a) => candidate.member.hostedMailboxItems[0]?.createdAt.getTime() ?? 0;
+      const named = (candidate: typeof a) => Number(Boolean(candidate.member.hostedGroupRuntime?.displayName?.trim()));
+      return activity(b) - activity(a) || named(b) - named(a)
+        || b.createdAt.getTime() - a.createdAt.getTime() || a.memberId.localeCompare(b.memberId);
+    });
     for (const candidate of candidates) {
       if (candidate.participants.length !== 2 || !game.players.every((player) => candidate.participants.some((participant) => participant.participantMemberId === player.memberId))) continue;
       if (await exactChat(candidate.memberId, phones)) { containerMemberId = candidate.memberId; break; }
@@ -97,21 +123,8 @@ async function prepareGameChatPlayers(game: Game & { players: GamePlayer[] }, pr
   const names = await openGameTexts(profiles.map((profile) => ({ table: "game_profile" as const, field: "first_name", rowId: profile.memberId, memberId: profile.memberId, value: profile.firstNameEncrypted })));
   const nameFor = (memberId: string) => names[profiles.findIndex((profile) => profile.memberId === memberId)] ?? "Your opponent";
   const other = players.find((player) => player.memberId !== proposal.proposedByMemberId)!;
-  const dayOne = players[0]!.dayOne?.toISOString().slice(0, 10);
-  const message = gameChangeProposalMessage(proposal, { proposerName: nameFor(proposal.proposedByMemberId), recipientName: nameFor(other.memberId), effectiveOn: proposal.startsOn ?? (dayOne ? addDays(dayOne, proposal.effectiveFromDay) : null), timeZones: players.map((player) => player.timeZone), deadline: firstProposedDeadline(game, proposal) });
+  const message = gameChangeProposalMessage(proposal, { proposerName: nameFor(proposal.proposedByMemberId), recipientName: nameFor(other.memberId), lengthDays: game.lengthDays });
   return { phones, message };
-}
-
-function firstProposedDeadline(game: Game, proposal: GamePendingChange): { day: string; kind: "first_check_in" | "game" } | null {
-  if (!proposal.startsOn) return null;
-  const change = proposal.change;
-  const schedule = (change.kind === "edit" ? change.schedule : undefined) ?? currentTerms(parseStoredTerms(game.terms)).schedule;
-  const length = (change.kind === "edit" ? change.lengthDays : undefined) ?? game.lengthDays;
-  if ("count" in schedule) return { day: addDays(proposal.startsOn, length), kind: "game" };
-  for (let day = 0; day < length; day++) {
-    if (schedule.days.includes(weekdayOf(addDays(proposal.startsOn, day)))) return { day: addDays(proposal.startsOn, day + 1), kind: "first_check_in" };
-  }
-  return null;
 }
 
 function pendingWhere(gameId: string, proposalId: string, containerMemberId?: string | null): Prisma.GameWhereInput {

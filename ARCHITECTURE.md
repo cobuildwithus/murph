@@ -5478,7 +5478,13 @@ can cancel through `DELETE /api/game/v1/games/:id/changes/:proposalId`.
 
 The shared read projection decrypts only the agreed words and each player's own
 profile name, never the personal GameView. Fresh provider rosters must contain
-exactly the two verified player identities and Murph. Existing Linq delivery
+exactly the two verified player identities and Murph. Unbound discovery ranks
+at most 20 exact-pair local candidates by latest `conversation.message` mailbox
+receipt (`createdAt`), then nonblank group display name, then room creation date
+(newest first). The existing member/kind/created-at index serves the one-row
+activity projection; no message payloads or participant observation timestamps
+are read for ranking. Provider verification still decides eligibility, and a
+bound room is never silently replaced. Existing Linq delivery
 claims and notification outbox own creation and proposal effects. Initial group
 creation stores its encrypted provider receipt in that existing delivery row;
 an unknown creation permits only the same frozen provider request and idempotency
