@@ -1331,27 +1331,32 @@ migration, or runtime control action is required.
 
 ### Maintenance replay-barrier failure evidence
 
-When maintenance catches a failure that consumes its occurrence to prevent
-replay, `cron.job.completed.failureContext` carries only the following new
-fields. The existing hosted logger prefixes them with `failure` in
+Ordinary non-yield cron failures and maintenance failures that consume an
+occurrence to prevent replay project only the following diagnostic fields into
+`cron.job.completed.failureContext`. The existing hosted logger prefixes them with `failure` in
 `assistant.automation_detail.redacted_json`:
 
 | Event field | Meaning |
 | --- | --- |
-| `maintenanceReplayBarrier` | `provider_admitted` means the existing provider-start hook ran; `non_replayable_provider_work` means the existing raw-event fallback found work without that hook. Neither proves successful work or a committed write. |
-| `codexErrorInfo` | The shared `describeAssistantAutoReplyFailure` finite normalization: `httpConnectionFailed`, `internalServerError`, `responseStreamConnectionFailed`, `responseStreamDisconnected`, `responseTooManyFailedAttempts`, `serverOverloaded`, `usageLimitExceeded`, or `unrecognized` for another string. Missing or non-string values are omitted. |
+| `maintenanceReplayBarrier` | Present only for maintenance failures that consume the occurrence: `provider_admitted` means the existing provider-start hook ran; `non_replayable_provider_work` means the existing raw-event fallback found work without that hook. Neither proves successful work or a committed write. Ordinary failures omit this field, even after provider admission. |
+| `codexErrorInfoPresent` | Original boolean classification-presence flag, when supplied. Missing or non-boolean values are omitted; presence does not imply a recognized kind. |
+| `codexErrorInfo` | The shared `describeAssistantAutoReplyFailure` finite normalization: `flexUnavailable`, `httpConnectionFailed`, `internalServerError`, `responseStreamConnectionFailed`, `responseStreamDisconnected`, `responseTooManyFailedAttempts`, `serverOverloaded`, `usageLimitExceeded`, or `unrecognized` for another string. Missing or non-string values are omitted. |
 | `codexErrorHttpStatusCode` | Original diagnostic HTTP status, only when it is an integer from 100 through 599. Missing, nonnumeric, fractional, or out-of-range values are omitted. |
 
-The projection is captured before the catch replaces the error text, stays in
-the in-memory execution result, and excludes arbitrary details and messages.
+The projection reads the original error's `details`/`context` through the shared
+normalizer, stays in the in-memory execution result, and excludes arbitrary
+details and messages. Maintenance captures it before replacing the error text.
 Existing `errorCode`, `runOutcome`, and `retryScheduled` retain their meanings.
-The occurrence remains consumed with a `skipped`/`no_op` run and no retry;
+Ordinary retry and failure-consumption behavior is unchanged. A maintenance
+barrier still consumes the occurrence with a `skipped`/`no_op` run and no retry;
 summary counts, persisted cron schemas/state, severity, and provider policy do
 not change. These observations do not authorize replay or imply recovery.
 
 Fields are additive and optional under the existing scalar log format; no
-reader migration is needed. Older completions and other execution paths omit
-them. Absence is unknown evidence, not an inferred capacity or process failure;
+reader migration is needed. Successful runs and yield paths without a maintenance
+barrier omit these fields; older ordinary completions also omit the provider
+diagnostics. Absent diagnostics remain unknown evidence, not an inferred
+capacity or process failure;
 `unrecognized` means a string was present but outside the shared finite set.
 Historical rows cannot be retrospectively classified from the generic text.
 
