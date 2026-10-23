@@ -29,6 +29,7 @@ const mocks = vi.hoisted(() => ({
   readHostedActiveUsageCreditPurchaseForPayer: vi.fn(),
   readHostedGroupChatName: vi.fn(),
   readHostedGroupFundingSupporters: vi.fn(),
+  readHostedGroupSponsorshipAuthorizationByPurchase: vi.fn(),
   readHostedGroupSponsorshipDraftForCreator: vi.fn(),
   readHostedGroupSponsorshipManagementProjection: vi.fn(),
   readHostedGroupUsageFundingManagementTargetByLocator: vi.fn(),
@@ -91,6 +92,8 @@ vi.mock("@/src/lib/hosted-groups/group-usage-funding", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-groups/group-sponsorship-authorization", () => ({
+  readHostedGroupSponsorshipAuthorizationByPurchase:
+    mocks.readHostedGroupSponsorshipAuthorizationByPurchase,
   readHostedGroupSponsorshipManagementProjection:
     mocks.readHostedGroupSponsorshipManagementProjection,
 }));
@@ -520,6 +523,49 @@ describe("hosted group funding page", () => {
     assert.match(participantMarkup, /<span[^>]*>Your group chat<\/span><\/h1>/u);
     assert.doesNotMatch(participantMarkup, /Saturday long run/u);
     expect(mocks.readHostedGroupChatName).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { authorizationId: "hgsa_abcdefghijklmnop", expected: true },
+    { authorizationId: "hgsa_othersponsorship", expected: false },
+  ])("confirms a sponsor's Checkout return only for its own sponsorship ($expected)", async ({
+    authorizationId,
+    expected,
+  }) => {
+    mocks.readHostedGroupSponsorshipManagementProjection.mockResolvedValueOnce({
+      authorizationId: "hgsa_abcdefghijklmnop",
+      chargedThisPeriodMinor: 500,
+      monthlyCapMinor: 2_000,
+      pendingThisPeriodMinor: 0,
+      pendingMonthlyCapMinor: null,
+      periodEnd: "2026-08-30T12:00:00.000Z",
+      status: "active",
+    });
+    mocks.readHostedGroupSponsorshipAuthorizationByPurchase.mockResolvedValueOnce({
+      authorizationId,
+      chargeOrdinal: 1,
+      monthlyCapMinor: 2_000,
+      payerMemberId: "member_payer",
+      periodStartedAt: new Date("2026-08-01T12:00:00.000Z"),
+    });
+
+    renderToStaticMarkup(await GroupFundingPage({
+      params: Promise.resolve({ joinCode: "group_join_code_1234" }),
+      searchParams: Promise.resolve({
+        usageCheckout: "success",
+        usagePurchase: PURCHASE_ID,
+      }),
+    }));
+
+    expect(mocks.readHostedGroupSponsorshipAuthorizationByPurchase)
+      .toHaveBeenCalledWith({
+        prisma: { label: "test-prisma" },
+        purchaseId: PURCHASE_ID,
+      });
+    expect(mocks.GroupSponsorshipManagementCard).toHaveBeenCalledWith(
+      expect.objectContaining({ checkoutReturned: expected }),
+      undefined,
+    );
   });
 
   it("keeps cancellation available after the payer and beneficiary become inactive", async () => {

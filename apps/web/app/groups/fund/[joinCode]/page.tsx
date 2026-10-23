@@ -36,6 +36,7 @@ import {
   readHostedGroupUsageStatus,
 } from "@/src/lib/hosted-groups/group-usage-funding";
 import {
+  readHostedGroupSponsorshipAuthorizationByPurchase,
   readHostedGroupSponsorshipManagementProjection,
 } from "@/src/lib/hosted-groups/group-sponsorship-authorization";
 import {
@@ -202,6 +203,11 @@ export default async function GroupFundingPage({
   const purchaseReturn = purchaseReturnMatchesTarget
     ? requestedPurchaseReturn
     : null;
+  const sponsorshipCheckoutReturned = await isSponsorshipCheckoutReturn({
+    management: sponsorshipManagement,
+    prisma,
+    purchaseReturn,
+  });
   const openOneTimeContribution =
     sponsorshipManagement === null &&
     usageStatus.sponsorshipStatus === "sponsored";
@@ -261,6 +267,7 @@ export default async function GroupFundingPage({
                 <div className="space-y-8">
                   <GroupSponsorshipManagementCard
                     cancelOnly={managementOnly || Boolean(member.suspendedAt)}
+                    checkoutReturned={sponsorshipCheckoutReturned}
                     endpoint={`/api/groups/fund/${encodeURIComponent(target.joinCode)}/sponsorship`}
                     management={sponsorshipManagement}
                   />
@@ -422,6 +429,24 @@ function projectHostedGroupActivePurchaseForClient(
     status: purchase.status,
     url: purchase.url,
   };
+}
+
+// A validated Checkout return confirms payment on the sponsorship card only when
+// the returned purchase belongs to this payer's sponsorship; one-time purchases
+// keep their own receipt dialog.
+async function isSponsorshipCheckoutReturn(input: {
+  management: { authorizationId: string } | null;
+  prisma: ReturnType<typeof getPrisma>;
+  purchaseReturn: HostedUsageTopUpReturn | null;
+}): Promise<boolean> {
+  if (input.purchaseReturn?.kind !== "success" || !input.management) {
+    return false;
+  }
+  const sponsorship = await readHostedGroupSponsorshipAuthorizationByPurchase({
+    prisma: input.prisma,
+    purchaseId: input.purchaseReturn.purchaseId,
+  }).catch(() => null);
+  return sponsorship?.authorizationId === input.management.authorizationId;
 }
 
 // Only the sponsor paying for this chat may see its provider title when the
