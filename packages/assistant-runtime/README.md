@@ -203,11 +203,14 @@ protect them locally while active, but snapshot planning excludes their
 validated canonical paths and idle maintenance deletes them atomically as soon
 as protection ends. Explicit canonical durable raw references remain outside
 this transient policy. Normal foreground work may defer intermediate hosted workspace
-checkpoints before Codex admission or reply delivery. While dirty, the exact
-assistant wake projected by the current foreground phase may run once when due
-before the idle floor without publishing a snapshot. Otherwise the invocation
+checkpoints before Codex admission or reply delivery. While dirty, a projected
+wake of any reason may run once when due before the idle floor or active
+background-work deadline without publishing a snapshot. Assistant wakes require
+the exact projection from the current invocation. A no-progress attempt retains
+its due key without repeating local service; a successful attempt can clear it
+or project a distinct successor. Otherwise the invocation
 remains dirty until the runtime-owned idle-floor—or last-chance shutdown—
-`idle_shutdown` checkpoint succeeds; inherited or committed wakes and
+`idle_shutdown` checkpoint succeeds; inherited or committed assistant wakes and
 durability barriers remain checkpoint-first. Only newly admitted foreground
 priority work restarts the quiet window. Empty probes and generic maintenance
 do not restart it; cleanup that dirties state after a checkpoint uses the spent
