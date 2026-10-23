@@ -649,7 +649,11 @@ function DesignSponsorshipState(props: {
   state: string;
 }) {
   return (
-    <section className="space-y-3" data-design-state={props.state}>
+    <section
+      className="scroll-mt-6 space-y-3"
+      data-design-state={props.state}
+      id={`group-funding-${props.state}`}
+    >
       <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
         {props.label}
       </p>

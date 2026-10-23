@@ -7,7 +7,7 @@ for (const width of [390, 1280]) {
     test.setTimeout(180_000);
     await page.setViewportSize({ width, height: 900 });
     await page.route("**/*", (route) => ["localhost", "127.0.0.1"].includes(new URL(route.request().url()).hostname) ? route.continue() : route.abort());
-    await page.goto("/screenshots/groups", { waitUntil: "load" });
+    await page.goto("/screenshots/groups#group-funding-monthly-recovery", { waitUntil: "load" });
     await page.evaluate(async () => { await document.fonts.ready; await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))); });
     const study = page.locator('[data-design-study="group-usage-funding"]');
     const recovery = study.locator('[data-design-state="monthly-recovery"]');
