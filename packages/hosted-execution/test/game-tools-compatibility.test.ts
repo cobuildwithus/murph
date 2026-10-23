@@ -1,3 +1,7 @@
+import { execFileSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
+import { writeFile, rm } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { hostedGameToolRequestSchema, hostedGameToolResponseSchema } from "../src/game-tools.ts";
 
@@ -85,4 +89,32 @@ describe("additive game reader compatibility", () => {
     const progress = { checkedAt: "2030-04-01T12:00:00Z", players: [{ memberId: "player_first", score: 0, target: 5, currentDayIndex: 0, currentEntryId: null, attemptsRemaining: 2, days: Array.from({ length: 366 }, (_, dayIndex) => ({ dayIndex, date: "2030-04-01", status: "upcoming" })) }] };
     expect(hostedGameToolResponseSchema.safeParse(response({ ...game, progress })).success).toBe(false);
   });
+});
+
+
+it.each(["mark_incomplete", "restore_day"])("accepts %s only with a date and no player selector", (operation) => {
+  const request = { action: "update_game", origin, update: { operation, gameId: game.id, date: "2030-04-01" } };
+  expect(hostedGameToolRequestSchema.parse(request)).toEqual(request);
+  for (const extra of [{ memberId: "another" }, { proposalId: "proposal_synthetic" }, { date: "yesterday" }]) {
+    expect(hostedGameToolRequestSchema.safeParse({ ...request, update: { ...request.update, ...extra } }).success).toBe(false);
+  }
+  const payload = { action: "update_game", result: { status: "ok", state: { games: [game] }, dayOutcome: { date: "2030-04-01", status: "marked_incomplete" } } };
+  expect(hostedGameToolResponseSchema.parse(payload)).toEqual(payload);
+});
+
+it.skipIf(process.env.MURPH_VERIFY_GAME_INCOMPLETE_SKEW !== "1")("keeps old-runtime responses compatible while Web accepts the next runtime's corrections", async () => {
+  const target = new URL(`../src/.game-incomplete-skew-${randomUUID()}.ts`, import.meta.url);
+  const root = fileURLToPath(new URL("../../../", import.meta.url));
+  const source = execFileSync("git", ["show", "b64002efb9:packages/hosted-execution/src/game-tools.ts"], { cwd: root, encoding: "utf8" });
+  await writeFile(target, source, { flag: "wx" });
+  try {
+    const legacy = await import(target.href) as typeof import("../src/game-tools.ts");
+    const payload = response({ ...game, progress: { checkedAt: "2030-04-02T12:00:00Z", players: [{ memberId: "player_first", score: 0, target: 5, currentDayIndex: 1, currentEntryId: null, attemptsRemaining: 2, days: [{ dayIndex: 0, date: "2030-04-01", status: "missed" }] }] } });
+    expect(legacy.hostedGameToolResponseSchema.parse(payload)).toEqual(payload);
+    expect(hostedGameToolResponseSchema.parse(payload)).toEqual(payload);
+    const request = { action: "update_game", origin, update: { operation: "mark_incomplete", gameId: game.id, date: "2030-04-01" } };
+    expect(hostedGameToolRequestSchema.parse(request)).toEqual(request);
+    expect(legacy.hostedGameToolRequestSchema.safeParse(request).success).toBe(false);
+    expect(legacy.hostedGameToolResponseSchema.safeParse({ ...payload, result: { ...payload.result, dayOutcome: { date: "2030-04-01", status: "marked_incomplete" } } }).success).toBe(false);
+  } finally { await rm(target, { force: true }); }
 });

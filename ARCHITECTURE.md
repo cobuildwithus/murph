@@ -5427,6 +5427,24 @@ uses one bounded latest-entry read on the member index alongside Home's existing
 queries. Chat day statuses are capped at fourteen per player with whole-game totals.
 Deploy and converge the compatible runtime reader before publishing these values.
 
+Self-reported incomplete days use nullable `game_entry.incomplete`; null is
+ordinary credit. `completedEntry` excludes flagged posts for score and shared
+progress; streak and settlement use the same flag. Artifact visibility still
+uses posted attempts. `update_game` accepts `mark_incomplete` / `restore_day`
+with an explicit date, resolves only the accepted speaker, and requires the
+bound live chat under the game lock. At most two day attempts are updated,
+with one metadata-only `day_marked_incomplete` / `day_restored` event. Retakes
+preserve the flag. No artifact and repeated actions write nothing. The app
+entry view adds only optional `incomplete: true`; the new tool receipt appears
+only in responses to the new operations. Deploy the additive migration and
+Web consumer before the runtime producer; legacy requests keep their response
+shape and existing closed status enums. No new provider call or crypto work
+is added to the mutation transaction. Relative dates use the acting message’s
+occurrence time, not a later read/processing time; an ambiguous timestamp
+requires clarification. Once corrections exist, flag-aware Web is the rollback
+floor: older scoring could freeze incorrect settlement. Use compatible forward
+fixes; runtime rollback alone cannot make old Web safe.
+
 `runGameCommand` is the single write path, for the routes now and Murph's tools
 later. It validates the command (`command.ts`), checks uploads, seals words,
 then locks the game row, reads the database clock, asks a pure rule, and writes

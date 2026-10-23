@@ -84,6 +84,17 @@ this default without deleting other people's private contact choices.
   graph, a route map or a rep tape each day. Legacy photo/heart-rate games
   retain their required kind. Two attempts total are allowed per day across
   kinds, including withdrawn entries. Artifacts do not verify task completion.
+- **Self-reported incomplete days.** In the bound live game chat, a player can
+  mark their own reached day incomplete by date. The artifact stays under the
+  ordinary post-to-unlock rules, with optional `GameEntryView.incomplete: true`.
+  It earns no score or streak credit and counts as unposted for settlement.
+  Retakes preserve the correction. Murph can restore only an existing post
+  self-marked by that speaker; no artifact means no change. Both operations
+  are idempotent. Murph asks once for an ambiguous day and confirms a date or
+  weekday in one plain line, without score announcements or partner claims.
+  Relative dates use the acting message’s occurrence time in that player’s
+  game timezone, including its 3am boundary; delayed processing cannot shift
+  the chosen day. Missing or ambiguous occurrence timestamps need clarification.
 - **Post notifications.** With iPhone notification permission, another player's
   first non-excuse check-in can send one push per recipient per game
   per recipient-local game day (3am to 3am in the zone frozen at go-live).

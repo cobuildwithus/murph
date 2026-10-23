@@ -19,6 +19,7 @@ import {
   type GamePendingChange,
   type GameChange,
   type GameCommand,
+  type GameDayOutcome,
   type GameEntryKind,
   type GameError,
   type GameHomeView,
@@ -36,6 +37,7 @@ import {
   attemptsUsed,
   isScheduledDay,
   decideCancelInvite,
+  decideDayCompletion,
   decideDevAdvance,
   decideJoin,
   decideNegotiationStart,
@@ -84,7 +86,7 @@ interface LoadedGame {
   state: RuleState;
 }
 export type GameCommandResult =
-  | { ok: true; game: GameView | null; profile?: GameProfileView }
+  | { ok: true; game: GameView | null; profile?: GameProfileView; dayOutcome?: GameDayOutcome }
   | { ok: false; error: GameError; status: number };
 
 const SYSTEM_ACTOR = "system";
@@ -124,7 +126,9 @@ export async function runGameCommand(input: {
     if (command.type === "setProfile") {
       return { game: null, ok: true, profile: await setProfile(actor, command) };
     }
-    const gameId = await runCommand({ actor, now: input.now, chatContainerMemberId: input.chatContainerMemberId, chatPlayerMemberIds: input.chatPlayerMemberIds, beforeMutationTx: input.beforeMutationTx, postGuard: input.postGuard }, command);
+    const applied = await runCommand({ actor, now: input.now, chatContainerMemberId: input.chatContainerMemberId, chatPlayerMemberIds: input.chatPlayerMemberIds, beforeMutationTx: input.beforeMutationTx, postGuard: input.postGuard }, command);
+    const gameId = typeof applied === "object" && applied !== null ? applied.gameId : applied;
+    const dayOutcome = typeof applied === "object" && applied !== null ? applied.dayOutcome : undefined;
     if (command.type === "proposeChange" && !input.chatContainerMemberId) {
       try {
         await deliverGameChangeProposal(command.gameId, command.proposalId);
@@ -136,7 +140,7 @@ export async function runGameCommand(input: {
           AND pending_change->>'deliveryStatus' IN ('pending', 'failed')`;
       }
     }
-    return { game: gameId && !input.chatContainerMemberId ? await readGame(gameId, actor) : null, ok: true };
+    return { game: gameId && !input.chatContainerMemberId ? await readGame(gameId, actor) : null, ok: true, ...(dayOutcome ? { dayOutcome } : {}) };
   } catch (error) {
     if (error instanceof GameRuleError) {
       return { error: error.error, ok: false, status: GAME_ERROR_STATUS[error.error.code] };
@@ -155,8 +159,10 @@ interface CommandContext {
 }
 
 /** Applies one command; returns the game to show back, if any. */
-async function runCommand(context: CommandContext, command: Exclude<GameCommand, { type: "setProfile" }>): Promise<string | null> {
+async function runCommand(context: CommandContext, command: Exclude<GameCommand, { type: "setProfile" }>): Promise<string | null | { gameId: string; dayOutcome: GameDayOutcome }> {
   switch (command.type) {
+    case "setDayCompletion":
+      return setDayCompletion(context, command);
     case "cancelInvite":
       return cancelInvite(context, command.gameId);
     case "proposeChange":
@@ -199,7 +205,7 @@ interface LockedStep {
   clock: Date;
 }
 
-type GameEventType = "cancelled" | "negotiation_joined" | "created" | "joined" | "started" | "posted" | "withdrew" | "settled" | "redeemed" | "expired" | "time_shifted" | "change_proposed" | "change_applied" | "change_declined" | "change_cancelled" | "change_expired";
+type GameEventType = "day_marked_incomplete" | "day_restored" | "cancelled" | "negotiation_joined" | "created" | "joined" | "started" | "posted" | "withdrew" | "settled" | "redeemed" | "expired" | "time_shifted" | "change_proposed" | "change_applied" | "change_declined" | "change_cancelled" | "change_expired";
 /** What changed, for the history: ids and numbers only, never words. */
 interface GameEventDraft {
   commandKey?: string;
@@ -619,6 +625,7 @@ async function post(context: CommandContext, command: Extract<GameCommand, { typ
         textEncrypted,
         payloadEncrypted,
         blurHash: command.blurHash ?? null,
+        incomplete: kind !== "excuse" && loaded.state.entries.some((entry) => entry.memberId === actor && entry.dayIndex === decision.dayIndex && entry.incomplete) ? true : null,
       },
     });
     const { attempt, dayIndex, graceUsed } = decision;
@@ -631,6 +638,20 @@ async function post(context: CommandContext, command: Extract<GameCommand, { typ
   });
   await deliverGamePostNotification(notification);
   return gameId;
+}
+
+async function setDayCompletion(context: CommandContext, command: Extract<GameCommand, { type: "setDayCompletion" }>): Promise<{ gameId: string; dayOutcome: GameDayOutcome }> {
+  let dayOutcome: GameDayOutcome | undefined;
+  await runLocked(command.gameId, context, async ({ loaded, now, tx }) => {
+    if (!context.chatContainerMemberId || loaded.row.chatContainerMemberId !== context.chatContainerMemberId) reject("NOT_A_PLAYER", "Use the group chat bound to this game.");
+    const decision = decideDayCompletion(loaded.state, { memberId: context.actor, date: command.date, incomplete: command.incomplete, now });
+    dayOutcome = decision.outcome;
+    if (!decision.changed) return [];
+    await tx.gameEntry.updateMany({ where: { gameId: command.gameId, memberId: context.actor, dayIndex: decision.dayIndex, attempt: { gt: 0 } }, data: { incomplete: command.incomplete ? true : null } });
+    return [{ type: command.incomplete ? "day_marked_incomplete" : "day_restored", payload: { dayIndex: decision.dayIndex } }];
+  });
+  if (!dayOutcome) throw new Error("Game day correction produced no outcome.");
+  return { gameId: command.gameId, dayOutcome };
 }
 
 async function withdraw(context: CommandContext, command: Extract<GameCommand, { type: "withdraw" }>): Promise<string> {
@@ -995,6 +1016,7 @@ function toRuleState(row: GameRow, entries: readonly GameEntry[]): RuleState {
       withdrawnAt: entry.withdrawnAt,
       receivedAt: entry.receivedAt,
       blurHash: entry.blurHash,
+      incomplete: entry.incomplete === true,
     })),
     game: toRuleStateGame(row, parseStoredTerms(row.terms)),
     players: row.players.map((player) => ({

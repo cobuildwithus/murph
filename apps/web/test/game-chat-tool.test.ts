@@ -122,3 +122,15 @@ describe("game chat tool authority", () => {
     expect(m.read).not.toHaveBeenCalled();
   });
 });
+
+
+it("uses accepted speaker authority for day corrections and returns only the shared receipt", async () => {
+  m.sender.mockResolvedValue(actor); m.wake.mockResolvedValue(wake()); m.players.mockResolvedValue([actor, "other_synthetic"]);
+  m.exact.mockResolvedValue([actor, "other_synthetic"]); m.game.mockResolvedValue({ id: "game_synthetic", players: [{ memberId: actor }, { memberId: "other_synthetic" }] });
+  m.read.mockResolvedValue({ games: [] }); m.run.mockClear();
+  const dayOutcome = { date: "2030-04-01", status: "marked_incomplete" };
+  m.run.mockResolvedValue({ ok: true, game: { private: "never shared" }, dayOutcome });
+  const result = await handleGameChatTool({ ...read, request: { action: "update_game", origin, update: { gameId: "game_synthetic", operation: "mark_incomplete", date: "2030-04-01" } } });
+  expect(m.run).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ actorMemberId: actor, chatContainerMemberId: group, command: { type: "setDayCompletion", gameId: "game_synthetic", date: "2030-04-01", incomplete: true } }));
+  expect(result).toEqual({ action: "update_game", result: { status: "ok", state: { games: [] }, dayOutcome } });
+});

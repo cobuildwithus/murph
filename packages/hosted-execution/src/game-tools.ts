@@ -16,6 +16,7 @@ export const hostedGameChangeSchema = z.discriminatedUnion("kind", [
   }).strict(),
 ]);
 export const hostedGameUpdateSchema = z.discriminatedUnion("operation", [
+  z.object({ operation: z.enum(["mark_incomplete", "restore_day"]), gameId, date }).strict(),
   z.object({ operation: z.literal("propose"), gameId, proposalId: gameId, expectedTermsVersion: z.number().int().min(1), change: hostedGameChangeSchema }).strict(),
   z.object({ operation: z.enum(["approve", "decline", "cancel"]), gameId, proposalId: gameId }).strict(),
 ]);
@@ -73,6 +74,7 @@ export const hostedGameToolResponseSchema = z.object({
     status: z.enum(["ok", "unavailable", "rejected"]),
     state: hostedGameChatStateSchema.optional(),
     error: z.string().max(128).optional(),
+    dayOutcome: z.object({ date, status: z.enum(["marked_incomplete", "restored", "already_incomplete", "already_complete", "no_artifact"]) }).strict().optional(),
     photoOutcome: z.enum(["offer", "suppressed", "saved", "dismissed"]).optional(),
   }).strict(),
 }).strict();

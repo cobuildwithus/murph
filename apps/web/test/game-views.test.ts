@@ -284,3 +284,19 @@ it.each(["prize","dare","winner_gets","per_miss"] as const)("returns ticket kind
   const row={id:"ticket_kind",gameId:state.game.id,stakeKey:"gsk_breakfast",owedBy:AVA,owedTo:LEO,status:"open" as const,createdAt:JOIN_AT,redeemedAt:null};
   expect(ticketView(row,WORDS,LEO,JOIN_AT,state.game.terms)).toMatchObject({kind,youHold:true});
 });
+
+
+it("flags visible incomplete artifacts without changing post-to-unlock", () => {
+  const state = liveState();
+  state.entries.push(entry(AVA, 0, 1, { incomplete: true }));
+  const now = noonOnDay(state, LEO, 1);
+  expect(view(state, AVA, now).days[0].mine?.incomplete).toBe(true);
+  expect(view(state, LEO, now).days[0].others[0]).toMatchObject({ status: "locked", entry: null });
+  state.entries.push(entry(LEO, 0, 1, { incomplete: true }));
+  const visible = view(state, LEO, now);
+  expect(visible.days[0].others[0]).toMatchObject({ status: "posted", entry: { incomplete: true } });
+  expect(visible.days[0].mine?.mediaUrls).not.toHaveLength(0);
+  expect(visible.players.find((player) => player.isMe)).toMatchObject({ score: 0, streak: 0 });
+  state.entries[0].incomplete = false;
+  expect(view(state, LEO, now).days[0].others[0].entry).not.toHaveProperty("incomplete");
+});

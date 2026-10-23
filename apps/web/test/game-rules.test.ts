@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
 
+import { gameChatProgress } from "@/src/lib/game/chat-progress";
 import type { GameEntryKind, GameSchedule } from "@/src/lib/game/contract";
 import { areGameDevToolsAllowed, isGameEnabled, isGameEnabledFor, mediaKeyOwner, mediaKeyPrefixFor } from "@/src/lib/game/access";
 import {
   decideCancelInvite,
+  decideDayCompletion,
+  playerStreak,
   decideDevAdvance,
   decideJoin,
   decideNegotiationStart,
@@ -675,5 +678,38 @@ describe("invite cancellation", () => {
     seated.game.status = "void";
     expect(decideCancelInvite(seated, AVA)).toBe("already-void");
     expect(() => decideCancelInvite(seated, "outsider")).toThrowError(expect.objectContaining({ error: expect.objectContaining({ code: "NOT_A_PLAYER" }) }));
+  });
+});
+
+
+describe("self-reported incomplete days", () => {
+  it.each([{ days: [0, 1, 2, 3, 4, 5, 6] } as GameSchedule, { count: 3 } as GameSchedule])("excludes marked days from score, streak and settlement", (schedule) => {
+    let state = live(invited(schedule), NYC);
+    for (const day of [0, 1, 2]) {
+      state = post(state, LEO, at(state, LEO, day, 12));
+      state = post(state, AVA, at(state, AVA, day, 12));
+    }
+    const player = playerFor(state, LEO)!;
+    expect(playerStreak(state, player, at(state, LEO, 3, 12))).toBe(3);
+    const marked = state.entries.find((entry) => entry.memberId === LEO && entry.dayIndex === 1)!;
+    marked.incomplete = true;
+    expect(scorePlayer(state, player).score).toBe(2);
+    const progress = gameChatProgress(state, at(state, LEO, 3, 12)).players.find((p) => p.memberId === LEO)!;
+    expect(progress.score).toBe(2);
+    expect(progress.days.find((day) => day.dayIndex === 1)?.status).toBe("count" in schedule ? "not_posted" : "missed");
+    expect(playerStreak(state, player, at(state, LEO, 3, 12))).toBe(1);
+    expect(decideSettle(state).tickets).toEqual([{ owedBy: LEO, owedTo: AVA, stakeKey: WINNER_GETS.key }]);
+    marked.incomplete = false;
+    expect(scorePlayer(state, player).score).toBe(3);
+    expect(playerStreak(state, player, at(state, LEO, 3, 12))).toBe(3);
+    expect(decideSettle(state).tickets).toEqual([]);
+  });
+
+  it("uses the actor's 3 AM boundary and refuses dates beyond it", () => {
+    const state = live(invited(), NYC);
+    const player = playerFor(state, LEO)!;
+    const input = { memberId: LEO, date: addDays(player.dayOne!, 1), incomplete: true, now: at(state, LEO, 1, 2) };
+    expect(() => decideDayCompletion(state, input)).toThrow("already started");
+    expect(decideDayCompletion(state, { ...input, now: at(state, LEO, 1, 3) }).outcome.status).toBe("no_artifact");
   });
 });

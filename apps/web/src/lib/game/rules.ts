@@ -10,6 +10,7 @@ import {
   type GameCheckInKind,
   GAME_WEEKDAYS,
   type GameEntryKind,
+  type GameDayOutcome,
   type GameError,
   type GameErrorCode,
   type GameSchedule,
@@ -66,6 +67,7 @@ export interface RulePlayer {
 }
 
 export interface RuleEntry {
+  incomplete?: boolean | null;
   id: string;
   memberId: string;
   dayIndex: number;
@@ -195,6 +197,25 @@ export function liveEntry(entries: readonly RuleEntry[], memberId: string, dayIn
     && entry.dayIndex === dayIndex
     && entry.attempt > 0
     && entry.withdrawnAt === null) ?? null;
+}
+
+/** Credit is separate from artifact existence and permanent post-to-unlock. */
+export function completedEntry(entries: readonly RuleEntry[], memberId: string, dayIndex: number): RuleEntry | null {
+  const entry = liveEntry(entries, memberId, dayIndex);
+  return entry && !entry.incomplete ? entry : null;
+}
+
+export function decideDayCompletion(state: RuleState, input: { memberId: string; date: string; incomplete: boolean; now: Date }): { dayIndex: number; changed: boolean; outcome: GameDayOutcome } {
+  const player = requireLivePlayer(state, input.memberId);
+  if (isGameDue(state, input.now)) reject("GAME_NOT_LIVE", "This game has ended.");
+  const dayIndex = daysBetween(player.dayOne!, input.date);
+  const today = dayIndexAt(player, input.now)!;
+  if (dayIndex < 0 || dayIndex >= state.game.lengthDays || dayIndex > today) reject("INVALID_REQUEST", "Choose a game day that has already started.");
+  const entry = liveEntry(state.entries, input.memberId, dayIndex);
+  const status = !entry ? "no_artifact" : input.incomplete
+    ? entry.incomplete ? "already_incomplete" : "marked_incomplete"
+    : entry.incomplete ? "restored" : "already_complete";
+  return { dayIndex, changed: status === "marked_incomplete" || status === "restored", outcome: { date: input.date, status } };
 }
 
 /** Posts made for a day, withdrawn ones included. Excuses don't count. */
@@ -565,7 +586,7 @@ export function scorePlayer(state: RuleState, player: RulePlayer, throughDay = s
   let scheduledMissed = 0;
   for (let day = 0; day <= Math.min(throughDay, state.game.lengthDays - 1); day += 1) {
     const scheduled = isScheduledDay(state, day);
-    const posted = liveEntry(state.entries, player.memberId, day) !== null;
+    const posted = completedEntry(state.entries, player.memberId, day) !== null;
     if (scheduled && posted) credited += 1;
     if (scheduled && !posted) scheduledMissed += 1;
   }
@@ -575,6 +596,20 @@ export function scorePlayer(state: RuleState, player: RulePlayer, throughDay = s
     return { memberId: player.memberId, misses: Math.max(0, schedule.count - credited), score, seat: player.seat };
   }
   return { memberId: player.memberId, misses: scheduledMissed, score: credited, seat: player.seat };
+}
+
+/** Consecutive scheduled posts, ignoring an unposted current day and off days. */
+export function playerStreak(state: RuleState, player: RulePlayer, now: Date): number {
+  const today = dayIndexAt(player, now);
+  if (today === null) return 0;
+  const posted = new Set(state.entries.filter((entry) => entry.memberId === player.memberId && entry.attempt > 0 && entry.withdrawnAt === null && !entry.incomplete).map((entry) => entry.dayIndex));
+  let streak = 0;
+  for (let day = Math.min(today, state.game.lengthDays - 1); day >= 0; day -= 1) {
+    if (!isScheduledDay(state, day)) continue;
+    if (posted.has(day)) streak += 1;
+    else if (day !== today) break;
+  }
+  return streak;
 }
 
 export interface SettleDecision {
