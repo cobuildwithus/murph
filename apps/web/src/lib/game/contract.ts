@@ -300,6 +300,10 @@ export interface GameView {
    * players, so the app can recognize its own link. A used token can't be
    * accepted again. Everyone else gets null.
    */
+  /**
+   * Also accepts current terms for the claimed seat-1 viewer when status is
+   * negotiating and pendingChange is null, within the original invite expiry.
+   */
   inviteToken: string | null;
   inviteExpiresAt: string | null;
   result: { scores: { seat: number; score: number }[]; outcome: "won" | "lost" | "tie" | "perfect" } | null;

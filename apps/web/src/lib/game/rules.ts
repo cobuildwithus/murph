@@ -347,22 +347,25 @@ export type JoinDecision =
  */
 export function decideJoin(
   state: RuleState,
-  input: { memberId: string; termsVersion: number; timeZone: string; now: Date },
+  input: { memberId: string; termsVersion: number; timeZone: string; now: Date; acceptNegotiation?: boolean },
 ): JoinDecision {
   const { game } = state;
   if (playerFor(state, input.memberId)) {
     if (game.status === "invited" || game.status === "live") return { kind: "already-joined" };
   }
-  const expired = game.inviteExpiresAt !== null && input.now.getTime() > game.inviteExpiresAt.getTime();
-  if (game.status === "void" || (game.status === "invited" && expired)) reject("INVITE_EXPIRED", "This invite isn't open anymore.");
-  if (game.status !== "invited" || state.players.length >= game.seats) reject("INVITE_USED", "This invite was already used.");
+  const claimed = playerFor(state, input.memberId);
+  const acceptingNegotiation = input.acceptNegotiation && game.status === "negotiating"
+    && claimed && input.memberId !== game.createdBy && state.players.length === game.seats;
+  const expired = game.inviteExpiresAt !== null && input.now.getTime() >= game.inviteExpiresAt.getTime();
+  if (game.status === "void" || (["invited", "negotiating"].includes(game.status) && expired)) reject("INVITE_EXPIRED", "This invite isn't open anymore.");
+  if (!acceptingNegotiation && (game.status !== "invited" || state.players.length >= game.seats)) reject("INVITE_USED", "This invite was already used.");
   if (input.termsVersion !== currentTerms(game.terms).n) {
     reject("TERMS_CHANGED", "The terms changed. Take another look.");
   }
   const joiner: RulePlayer = {
     dayOne: null,
     memberId: input.memberId,
-    seat: state.players.length,
+    seat: claimed?.seat ?? state.players.length,
     timeZone: input.timeZone,
   };
   // The accepter's cutoff and both local dates determine the shared Day 1.
@@ -371,7 +374,7 @@ export function decideJoin(
     seat: joiner.seat,
     startedAt: input.now,
     ...scheduleFor(
-      [...state.players, joiner],
+      [...state.players.filter((player) => player.memberId !== input.memberId), joiner],
       (player) => player.memberId === input.memberId ? acceptanceStartDate(input.now, player.timeZone) : gameLocalDate(input.now, player.timeZone),
       game.startsOn,
     ),

@@ -536,6 +536,35 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     expect(await errorCode(kat, { termsVersion: 1, timeZone: "America/New_York", token, type: "join" })).toBe("INVITE_USED");
   });
 
+  it.each(["prize", "dare"] as const)("issues a long-game %s ticket for fourteen days on the dev clock", async (kind) => {
+    const holder = await member("Sam", "America/New_York");
+    const debtor = await member("Maya", "America/New_York");
+    const {gameId} = await startGame(holder, debtor, {terms:{...TERMS,lengthDays:75,stakes:[{kind,item:"Pick a film"}]}});
+    await devStartNow(gameId,holder);
+    await ok(holder,{type:"post",gameId,entryId:randomUUID(),kind:"words",mediaKeys:[],text:"Done today"});
+    await devAdvanceDays(gameId,holder,44);
+    const [ticket] = (await devSettleNow(gameId,holder)).tickets;
+    const row = await getPrisma().game.findUniqueOrThrow({where:{id:gameId}});
+    const offset = Number(row.devClockOffsetMs);
+    expect(offset).toBeGreaterThan(44 * 86_400_000);
+    expect(ticket).toMatchObject({kind,status:"open",youHold:true});
+    expect(Math.abs(Date.parse(ticket.createdAt) - (Date.now() + offset))).toBeLessThan(10_000);
+    expect(Date.parse(ticket.useBy) - Date.parse(ticket.createdAt)).toBe(14 * 86_400_000);
+    expect((await readHome(holder)).wallet.held).toContainEqual(expect.objectContaining({id:ticket.id,status:"open"}));
+    expect((await readHome(debtor)).wallet.owed).toContainEqual(expect.objectContaining({id:ticket.id,status:"open"}));
+    expect((await readGameChatState("synthetic-room",[holder,debtor])).games.find((game) => game.id === gameId)?.result?.tickets).toContainEqual(expect.objectContaining({status:"open",count:1}));
+    if (kind === "dare") {
+      await ok(holder,{type:"redeem",ticketId:ticket.id});
+      expect((await readHome(holder)).wallet.redeemed).toContainEqual(expect.objectContaining({id:ticket.id,status:"redeemed"}));
+    } else {
+      await getPrisma().game.update({where:{id:gameId},data:{devClockOffsetMs:BigInt(offset + 13 * 86_400_000)}});
+      expect((await readHome(holder)).wallet.held).toContainEqual(expect.objectContaining({id:ticket.id,status:"open"}));
+      await getPrisma().game.update({where:{id:gameId},data:{devClockOffsetMs:BigInt(offset + 14 * 86_400_000)}});
+      expect((await readHome(holder)).wallet.held).toContainEqual(expect.objectContaining({id:ticket.id,status:"expired"}));
+      expect(await errorCode(holder,{type:"redeem",ticketId:ticket.id})).toBe("TICKET_EXPIRED");
+    }
+  });
+
   it("lets a ticket expire 14 days after it's issued, refusing to redeem it then", async () => {
     const leo = await member("Leo", "America/New_York");
     const ava = await member("Ava", "Australia/Sydney");

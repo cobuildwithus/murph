@@ -15,14 +15,14 @@ const roomPlayers = new Map<string, readonly string[]>();
 async function run(actorMemberId: string, command: GameCommand, options: { chatContainerMemberId?: string; chatPlayerMemberIds?: readonly string[]; now?: Date; beforeMutationTx?: () => Promise<void> } = {}) {
   return runGameCommand({ actorMemberId, command, chatPlayerMemberIds: options.chatContainerMemberId ? roomPlayers.get(options.chatContainerMemberId) : undefined, ...options });
 }
-async function setup(schedule: GameSchedule = { days: [0,1,2,3,4] }) {
+async function setup(schedule: GameSchedule = { days: [0,1,2,3,4] }, startsOn?: string) {
   const a = `game_a_${randomUUID()}`, b = `game_b_${randomUUID()}`, room = `game_room_${randomUUID()}`;
   members.push(a,b,room);
   await getPrisma().hostedMember.createMany({ data: [a,b,room].map((id) => ({ id, billingStatus: "not_started" })) });
   await run(a,{type:"setProfile", firstName:"Riley", timeZone:"America/New_York"});
   await run(b,{type:"setProfile", firstName:"Jordan", timeZone:"America/New_York"});
   const gameId = randomUUID();
-  const created = await run(a,{type:"createGame",gameId,inviteeFirstName:"Private nickname",terms:{tasks:[{seat:0,text:"Read"},{seat:1,text:"Walk"}],schedule,stakes:[{kind:"prize",item:"Breakfast"}]}});
+  const created = await run(a,{type:"createGame",gameId,inviteeFirstName:"Private nickname",terms:{startsOn,tasks:[{seat:0,text:"Read"},{seat:1,text:"Walk"}],schedule,stakes:[{kind:"prize",item:"Breakfast"}]}});
   if (!created.ok || !created.game?.inviteToken) throw new Error("Fixture create failed");
   const joined = await run(b,{type:"join",token:created.game.inviteToken,termsVersion:1,timeZone:"America/New_York"});
   if (!joined.ok) throw new Error("Fixture join failed");
@@ -128,8 +128,8 @@ describe.skipIf(!enabled)("weekly game change serialization against PostgreSQL",
   });
 
   it("starts both players on the agreed date only after the other approves", async () => {
-    const {a,b,room,gameId}=await setup(); const proposalId=randomUUID();
-    await run(a,{type:"proposeChange",gameId,proposalId,expectedTermsVersion:1,change:{kind:"start_now"}});
+    const {a,b,room,gameId}=await setup(undefined,addDays(gameLocalDate(new Date(),"America/New_York"),2)); const proposalId=randomUUID();
+    expect(await run(a,{type:"proposeChange",gameId,proposalId,expectedTermsVersion:1,change:{kind:"start_now"}})).toMatchObject({ok:true});
     const pending=(await readGame(gameId,a))!.pendingChange!;
     expect(pending.startsOn).toBe(gameLocalDate(new Date(),"America/New_York"));
     expect((await getPrisma().gamePlayer.findMany({where:{gameId}})).every((p)=>p.dayOne!.toISOString().slice(0,10)!==pending.startsOn)).toBe(true);

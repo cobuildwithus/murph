@@ -75,6 +75,51 @@ describe.skipIf(!enabled)("game negotiation persistence", () => {
     expect(await run(b,{type:"respondChange",gameId,proposalId:next,decision:"approve"},room)).toMatchObject({ok:true});
     expect(await readGame(gameId,a)).toMatchObject({status:"live",lengthDays:12,terms:{tasks}});
   });
+  it.each(["cancel", "decline"] as const)("accepts current terms after %s without reclaiming the seat", async (decision) => {
+    const {a,b,c,room,gameId,token} = await setup();
+    const proposal = negotiate(token);
+    expect(await run(b,proposal)).toMatchObject({ok:true});
+    expect(await run(decision === "cancel" ? b : a,{type:"respondChange",gameId,proposalId:proposal.proposalId,decision},decision === "decline" ? room : undefined)).toMatchObject({ok:true});
+    const accept = {type:"join" as const,token,termsVersion:1,timeZone:"America/New_York"};
+    expect(await readGame(gameId,b)).toMatchObject({status:"negotiating",pendingChange:null,inviteToken:token,players:expect.arrayContaining([expect.objectContaining({seat:1,isMe:true})])});
+    for (const actor of [a,c]) expect(await run(actor,accept)).toMatchObject({ok:false,error:{code:"INVITE_USED"}});
+    expect(await run(b,{...accept,termsVersion:2})).toMatchObject({ok:false,error:{code:"TERMS_CHANGED"}});
+    const later = new Date(Date.now() + 86_400_000);
+    const results = await Promise.all([run(b,accept,undefined,later),run(b,accept,undefined,later)]);
+    expect(results.every((result) => result.ok)).toBe(true);
+    expect(await readGame(gameId,b)).toMatchObject({status:"live",pendingChange:null,lengthDays:10,terms:{n:1,tasks,stakes:[{kind:"dare",item:"Sing karaoke"}]}});
+    const players = await getPrisma().gamePlayer.findMany({where:{gameId}});
+    expect(players).toHaveLength(2);
+    expect(players.every((player) => player.dayOne?.toISOString().slice(0,10) === acceptanceStartDate(later,"America/New_York"))).toBe(true);
+    expect(await getPrisma().gameEvent.count({where:{gameId,type:"started"}})).toBe(1);
+    expect(await getPrisma().hostedLinqDelivery.count({where:{source:"game_lifecycle",sourceRef:gameId,template:"game_started"}})).toBe(1);
+  });
+  it("keeps challenger proposals and waiting available after cancellation", async () => {
+    const {a,b,room,gameId,token} = await setup();
+    const proposal = negotiate(token);
+    await run(b,proposal);
+    expect(await run(b,{type:"respondChange",gameId,proposalId:proposal.proposalId,decision:"cancel"})).toMatchObject({ok:true});
+    expect(await readGame(gameId,a)).toMatchObject({status:"negotiating",startedAt:null,pendingChange:null,changeControls:{canEdit:true}});
+    const next = randomUUID();
+    expect(await run(a,{type:"proposeChange",gameId,proposalId:next,expectedTermsVersion:1,change:{kind:"edit",lengthDays:12}})).toMatchObject({ok:true});
+    expect(await run(b,{type:"join",token,termsVersion:1,timeZone:"America/New_York"})).toMatchObject({ok:false,error:{code:"INVITE_USED"}});
+    expect(await run(a,{type:"respondChange",gameId,proposalId:next,decision:"cancel"})).toMatchObject({ok:true});
+    const final = randomUUID();
+    expect(await run(b,{type:"proposeChange",gameId,proposalId:final,expectedTermsVersion:1,change:{kind:"edit",lengthDays:14}})).toMatchObject({ok:true});
+    expect(await run(a,{type:"respondChange",gameId,proposalId:final,decision:"decline"},room)).toMatchObject({ok:true});
+    expect(await readGame(gameId,a)).toMatchObject({status:"negotiating",startedAt:null,pendingChange:null,lengthDays:10});
+  });
+  it("keeps the original invite deadline after cancellation and releases the pair on expiry", async () => {
+    const {b,gameId,token} = await setup();
+    const proposal = negotiate(token);
+    await run(b,proposal);
+    await run(b,{type:"respondChange",gameId,proposalId:proposal.proposalId,decision:"cancel"});
+    const {inviteExpiresAt} = await getPrisma().game.findUniqueOrThrow({where:{id:gameId}});
+    expect(await run(b,{type:"join",token,termsVersion:1,timeZone:"America/New_York"},undefined,inviteExpiresAt!)).toMatchObject({ok:false,error:{code:"INVITE_EXPIRED"}});
+    await getPrisma().game.update({where:{id:gameId},data:{inviteExpiresAt:new Date(Date.now()-1000)}});
+    expect(await readGame(gameId,b)).toMatchObject({status:"void",pendingChange:null});
+    expect(await getPrisma().game.findUniqueOrThrow({where:{id:gameId},select:{liveRosterKey:true}})).toEqual({liveRosterKey:null});
+  });
   it("serializes competing invite claims without accepting either original wager", async () => {
     const {b,c,gameId,token} = await setup();
     const results = await Promise.all([run(b,negotiate(token)),run(c,negotiate(token))]);

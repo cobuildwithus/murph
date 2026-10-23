@@ -470,6 +470,7 @@ async function accept(context: CommandContext, command: Extract<GameCommand, { t
   await runLocked(gameId, context, async ({ loaded, now, tx }) => {
     const { row } = loaded;
     const decision = decideJoin(await withCurrentTimeZones(tx, loaded.state), {
+      acceptNegotiation: row.pendingChange === null,
       memberId: actor,
       now,
       termsVersion: command.termsVersion,
@@ -478,10 +479,11 @@ async function accept(context: CommandContext, command: Extract<GameCommand, { t
     if (decision.kind === "already-joined") return [];
     // The unique live_roster_key is the real guard; this gives the friendly error.
     const roster = liveRosterKey(decision.players.map((player) => player.memberId));
-    if (await tx.game.findFirst({ select: { id: true }, where: { liveRosterKey: roster } })) {
+    if (await tx.game.findFirst({ select: { id: true }, where: { liveRosterKey: roster, id: { not: gameId } } })) {
       reject("ALREADY_IN_A_GAME", "These players already have a game going.");
     }
-    await tx.gamePlayer.create({ data: { gameId: row.id, memberId: actor, seat: decision.seat, timeZone: command.timeZone } });
+    const claimed = playerFor(loaded.state, actor);
+    if (!claimed) await tx.gamePlayer.create({ data: { gameId: row.id, memberId: actor, seat: decision.seat, timeZone: command.timeZone } });
     await writeSchedule(tx, row.id, decision);
     await tx.game.update({
       data: { liveRosterKey: roster, round: await roundAtGoLive(tx, row, actor), startedAt: decision.startedAt, status: "live" },
@@ -489,7 +491,7 @@ async function accept(context: CommandContext, command: Extract<GameCommand, { t
     });
     await copyPendingLabel(tx, row, actor);
     return [
-      { payload: { seat: decision.seat }, type: "joined" },
+      ...(!claimed ? [{ payload: { seat: decision.seat }, type: "joined" as const }] : []),
       { payload: { startNow: false }, type: "started" },
     ];
   });
@@ -666,7 +668,8 @@ async function settleGame(gameId: string, actor = SYSTEM_ACTOR): Promise<void> {
     }
     if (state.game.status !== "live") return;
     const decision = decideSettle(state);
-    const tickets = decision.tickets.map((ticket) => ({ ...ticket, gameId, id: generateHostedRandomPrefixedId("gtk") }));
+    const tickets = decision.tickets.map((ticket) => ({ ...ticket, gameId, id: generateHostedRandomPrefixedId("gtk"),
+      ...(row.devClockOffsetMs === null ? {} : { createdAt: gameNow(clock, row) }) }));
     await tx.gameTicket.createMany({ data: tickets });
     await endGame(tx, gameId, { result: toPrismaJsonObject(decision.result), settledAt: clock, status: "settled" });
     const scores = decision.result.scores.map(({ score, seat }) => ({ score, seat }));
