@@ -5587,6 +5587,16 @@ extended pending-change data; enable expanded assistant tools only after Web can
 apply those fields. Native uses `supportsNegotiation` on an invite and additive
 `canEditTasks` / `canEditStakes` controls, preserving old-client acceptance.
 
+Whole-invite cancellation records `cancelled` under the game lock and uses
+`endGame` to clear pending changes and release the pair. Home derives its
+exclusion from that event; ordinary expiry remains visible. An already bound
+chat gets a `game_cancelled` receipt keyed `game-cancelled:<gameId>` without
+bootstrap or discovery. The existing funding query admits only that bound room
+while its receipt awaits generation/dispatch, capped by the existing seven-day
+post-game window and existing room allowance. No personal or alternate-room
+access is added. The provider-dispatch authority requires the void game,
+cancellation event, bound room and original two-player audience.
+
 Agreement atomically reserves an `awaiting_generation` row in the existing Linq
 delivery table, keyed `game-started:<gameId>`. App `change_proposed` events,
 including initial invite negotiation, reserve the ordinary

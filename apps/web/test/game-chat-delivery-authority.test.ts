@@ -59,6 +59,22 @@ describe("game proposal provider dispatch authority", () => {
     await expect(assertGameProposalDeliveryCurrentTx({ ...input, now: new Date("2031-01-01T12:00:00Z") })).resolves.toBe(true);
   });
 
+  it("authorizes only the cancelled invite and original pair in its bound room", async () => {
+    const { input, findFirst } = setup();
+    findFirst.mockResolvedValue({ ...row(), status: "void", pendingChange: null });
+    const cancelled = { ...input, deliveryIdempotencyKey: "game-cancelled:game" };
+    await expect(assertGameProposalDeliveryCurrentTx(cancelled)).resolves.toBe(true);
+    expect(findFirst).toHaveBeenLastCalledWith(expect.objectContaining({ where: {
+      id: "game", chatContainerMemberId: "room", status: "void", events: { some: { type: "cancelled" } },
+    } }));
+    for (const playerMemberIds of [undefined, ["person-a", "stranger"], ["person-a"]]) {
+      await expect(assertGameProposalDeliveryCurrentTx({ ...cancelled, playerMemberIds })).rejects.toMatchObject({ code: "GAME_CHANGE_SUPERSEDED" });
+    }
+    findFirst.mockResolvedValue(null);
+    await expect(assertGameProposalDeliveryCurrentTx(cancelled)).rejects.toMatchObject({ code: "GAME_CHANGE_SUPERSEDED" });
+    await expect(assertGameProposalDeliveryCurrentTx({ ...cancelled, deliveryIdempotencyKey: "game-cancelled:game:extra" })).rejects.toMatchObject({ code: "GAME_CHANGE_SUPERSEDED" });
+  });
+
   it.each(["live", "negotiating"])("checks cancellation history and the exact audience for %s games", async (status) => {
     const { input, findFirst } = setup();
     findFirst.mockResolvedValue({ ...row(), status, pendingChange: null });

@@ -37,7 +37,10 @@ clearing its pending change and roster key plus recording one `cancelled` event
 with its actor. The pair can immediately start another invite. Home excludes
 cancelled events, retaining ordinary expired invites; GameView adds no field.
 If a game chat is already attached, the existing durable lifecycle sends one
-brief cancellation notice there. Cancellation never creates a chat.
+brief cancellation notice there. Cancellation never creates a chat. Its pending
+notice retains the bound room's existing game allowance until provider dispatch,
+for at most the existing seven-day post-game access window; it grants no personal
+access or extra budget. Dispatch checks the cancelled event and original pair.
 
 An invite nobody accepts expires, and stays on the challenger's Home for a week
 marked expired. The invitee opens it, signs in, and shakes on the terms they saw; a

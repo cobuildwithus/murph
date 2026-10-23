@@ -1486,3 +1486,6 @@ owners are `product-specs/weekly-game.md` and `SECURITY.md`.
 Invite cancellation and its verification are tracked in
 [the cancellation plan](exec-plans/active/2026-10-23-game-cancel-invite.md).
 The current contract is owned by [Weekly Game](product-specs/weekly-game.md).
+
+Cancellation notice authority remediation is tracked in
+[the delivery plan](exec-plans/active/2026-10-23-game-cancel-delivery.md).
