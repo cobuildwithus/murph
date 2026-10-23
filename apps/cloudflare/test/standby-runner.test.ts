@@ -102,6 +102,61 @@ describe("hosted standby contract", () => {
 });
 
 describe("standby health observation", () => {
+  it.each(["onStop", "onError"] as const)("%s reports pristine standby loss without waiting for the coordinator", async (hook) => {
+    const gate = createDeferred<void>();
+    const reportStandbySlotStopped = vi.fn(async () => {
+      await gate.promise;
+      throw new Error("synthetic report rejection");
+    });
+    const getByName = vi.fn(() => ({ reportStandbySlotStopped }));
+    const h = createStandbyContainerHarness({
+      environment: { STANDBY_COORDINATOR: { getByName } },
+    });
+    const identity = { slotName: h.slotName, releaseId: RELEASE_ID, region: HOSTED_RUNNER_REGION };
+    await h.container.prepareStandbySlot({ ...identity, timeoutMs: 1_000 });
+    h.setNativeStatus("stopped");
+    const error = new Error("synthetic container loss");
+    if (hook === "onError") expect(() => h.container.onError(error)).toThrow(error);
+    else expect(() => h.container.onStop({ exitCode: 137, reason: "runtime_signal" })).not.toThrow();
+    expect(getByName).toHaveBeenCalledExactlyOnceWith(resolveHostedStandbyCoordinatorName(identity));
+    expect(reportStandbySlotStopped).toHaveBeenCalledExactlyOnceWith(identity);
+    gate.resolve(undefined);
+    await expect(h.flushWaitUntil()).resolves.toBeUndefined();
+  });
+
+  it.each(["bound", "retiring", "retired", "small", "uninitialized", "no namespace"] as const)(
+    "does not report container loss for %s slots", async (kind) => {
+      const reportStandbySlotStopped = vi.fn(async () => {});
+      const getByName = vi.fn(() => ({ reportStandbySlotStopped }));
+      const h = createStandbyContainerHarness({
+        ...(kind === "small" ? {
+          containerClass: SmallRunnerContainer,
+          slotName: `runner-small--v-${RELEASE_ID}--${"a".repeat(32)}`,
+          unbound: true,
+        } : {}),
+        environment: kind === "no namespace" ? {} : { STANDBY_COORDINATOR: { getByName } },
+      });
+      const identity = { slotName: h.slotName, releaseId: RELEASE_ID, region: HOSTED_RUNNER_REGION };
+      if (kind !== "uninitialized" && kind !== "small") {
+        await h.container.prepareStandbySlot({ ...identity, timeoutMs: 1_000 });
+        if (kind === "bound") {
+          await h.container.bindStandbySlot({ ...identity, claimId: createHostedStandbyClaimId(), userId: "member_bound" });
+        } else if (kind === "retiring") {
+          h.destroy.mockRejectedValueOnce(new Error("synthetic pending retirement"));
+          await expect(h.container.retireStandbySlot({})).rejects.toThrow("failed to destroy cleanly");
+        } else if (kind === "retired") {
+          await h.container.retireStandbySlot({});
+        }
+      }
+      h.container.onStop({ exitCode: 0, reason: "exit" });
+      const error = new Error("synthetic container loss");
+      expect(() => h.container.onError(error)).toThrow(error);
+      await h.flushWaitUntil();
+      expect(getByName).not.toHaveBeenCalled();
+      expect(reportStandbySlotStopped).not.toHaveBeenCalled();
+    },
+  );
+
   it("binds through the real lifecycle owner while a native health request is pending", async () => {
     const h = createStandbyContainerHarness();
     const identity = { slotName: h.slotName, releaseId: RELEASE_ID, region: HOSTED_RUNNER_REGION };
@@ -1312,6 +1367,122 @@ describe("StandbyRunnerCoordinatorDurableObject", () => {
       assert.deepEqual(h.coordinator.readStandbyCoordinatorState().provisioningSlotNames, []);
     });
   }
+  it("refills reported loss while reproof is pending and ignores its late result", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(CLAIMED_AT_MS);
+    const gate = createDeferred<void>();
+    const h = createCoordinatorHarness({ target: "1", async prepare(input) {
+      if (input.recheck) await gate.promise;
+    } });
+    h.ensure();
+    await h.flush();
+    const slotName = h.coordinator.readStandbyCoordinatorState().readySlotNames[0]!;
+    vi.setSystemTime(CLAIMED_AT_MS + 60_000);
+    const alarm = h.coordinator.alarm();
+    await until(() => prepareCount(h) === 2);
+    h.coordinator.reportStandbySlotStopped({ slotName, releaseId: RELEASE_ID, region: HOSTED_RUNNER_REGION });
+    await until(() => h.coordinator.readStandbyCoordinatorState().readySlotNames.length === 1);
+    const replacement = h.coordinator.readStandbyCoordinatorState().readySlotNames[0]!;
+    assert.notEqual(replacement, slotName);
+    gate.resolve(undefined);
+    await alarm;
+    await h.flush();
+    assert.deepEqual(h.coordinator.readStandbyCoordinatorState().readySlotNames, [replacement]);
+    assert.equal((await h.slots.get(slotName)!.readStandbySlotBinding()).state, "retired");
+    assert.equal(prepareCount(h), 3);
+    assert.equal(standbyPoints(h, "loss").length, 1);
+  });
+
+  it("immediately refills and retires a reported ready loss, recording it only once", async () => {
+    const h = createCoordinatorHarness({ target: "1" });
+    h.ensure();
+    await h.flush();
+    const slotName = h.coordinator.readStandbyCoordinatorState().readySlotNames[0]!;
+    const report = { slotName, releaseId: RELEASE_ID, region: HOSTED_RUNNER_REGION };
+    h.coordinator.reportStandbySlotStopped(report);
+    assert.deepEqual(h.coordinator.readStandbyCoordinatorState().readySlotNames, []);
+    h.coordinator.reportStandbySlotStopped(report);
+    assert.deepEqual(standbyPoints(h, "loss"), [
+      { detail: "stopped", outcome: "", ready: 0, provisioning: 0, target: 1 },
+    ]);
+    await h.flush();
+    expect(h.slots.get(slotName)!.retireStandbySlot).toHaveBeenCalledExactlyOnceWith({});
+    assert.equal((await h.slots.get(slotName)!.readStandbySlotBinding()).state, "retired");
+    const replacement = h.coordinator.readStandbyCoordinatorState().readySlotNames[0]!;
+    assert.notEqual(replacement, slotName);
+    assert.deepEqual(h.claim(), { outcome: "claimed", slotName: replacement });
+    await h.flush();
+  });
+
+  it("ignores provisioning and unknown loss reports without triggering work", async () => {
+    const gate = createDeferred<void>();
+    const h = createCoordinatorHarness({ target: "1", prepare: () => gate.promise });
+    h.ensure();
+    await until(() => prepareCount(h) === 1);
+    const before = h.coordinator.readStandbyCoordinatorState();
+    const pending = h.pending.length;
+    for (const slotName of [before.provisioningSlotNames[0]!, createHostedRunnerSlotName(RELEASE_ID)]) {
+      h.coordinator.reportStandbySlotStopped({ slotName, releaseId: RELEASE_ID, region: HOSTED_RUNNER_REGION });
+    }
+    assert.deepEqual(h.coordinator.readStandbyCoordinatorState(), before);
+    assert.equal(h.pending.length, pending);
+    assert.deepEqual(standbyPoints(h, "loss"), []);
+    gate.resolve(undefined);
+    await h.flush();
+    assert.equal(prepareCount(h), 1);
+    expect(h.slots.get(before.provisioningSlotNames[0]!)!.retireStandbySlot).not.toHaveBeenCalled();
+  });
+
+  it.each(["claim first", "report first"] as const)("fences racing loss and claim: %s", async (order) => {
+    const h = createCoordinatorHarness({ target: "1" });
+    h.ensure();
+    await h.flush();
+    const slotName = h.coordinator.readStandbyCoordinatorState().readySlotNames[0]!;
+    const identity = { slotName, releaseId: RELEASE_ID, region: HOSTED_RUNNER_REGION };
+    const claimId = createHostedStandbyClaimId();
+    if (order === "claim first") {
+      assert.deepEqual(h.claim(claimId), { outcome: "claimed", slotName });
+      const pending = h.pending.length;
+      h.coordinator.reportStandbySlotStopped(identity);
+      assert.equal(h.pending.length, pending);
+      assert.deepEqual(standbyPoints(h, "loss"), []);
+    } else {
+      h.coordinator.reportStandbySlotStopped(identity);
+      assert.equal(h.claim(claimId).outcome, "no_ready_slot");
+    }
+    await h.flush();
+    const slot = h.slots.get(slotName)!;
+    if (order === "claim first") {
+      expect(slot.retireStandbySlot).not.toHaveBeenCalled();
+      await slot.bindStandbySlot({ ...identity, claimId, userId: "member_claimed" });
+      h.coordinator.reportStandbySlotStopped(identity);
+      await h.flush();
+      assert.equal((await slot.readStandbySlotBinding()).state, "bound");
+      assert.deepEqual(h.claim(claimId), { outcome: "claimed", slotName });
+      await h.flush();
+      expect(slot.retireStandbySlot).not.toHaveBeenCalled();
+    } else {
+      assert.equal((await slot.readStandbySlotBinding()).state, "retired");
+    }
+  });
+
+  it("rejects loss reports with a different coordinator identity", async () => {
+    const h = createCoordinatorHarness({ target: "1" });
+    h.ensure();
+    await h.flush();
+    const before = h.coordinator.readStandbyCoordinatorState();
+    const slotName = before.readySlotNames[0]!;
+    for (const identity of [
+      { releaseId: "release_2", region: HOSTED_RUNNER_REGION },
+      { releaseId: RELEASE_ID, region: HOSTED_STANDBY_REGION },
+    ]) {
+      expect(() => h.coordinator.reportStandbySlotStopped({ ...identity, slotName }))
+        .toThrow("identity is immutable");
+    }
+    assert.deepEqual(h.coordinator.readStandbyCoordinatorState(), before);
+    assert.deepEqual(standbyPoints(h, "loss"), []);
+    expect(h.slots.get(slotName)!.retireStandbySlot).not.toHaveBeenCalled();
+  });
 
   it("keeps rechecking inventory claimable across coordinator reset", async () => {
     vi.useFakeTimers();
@@ -1652,6 +1823,7 @@ describe("standby scheduled bootstrap", () => {
     const getByName = vi.fn(() => ({
       claimReadyStandby: vi.fn(),
       ensureReadyStandby,
+      reportStandbySlotStopped: vi.fn(),
     }));
     const pending: Promise<unknown>[] = [];
 
@@ -1848,7 +2020,7 @@ function createCoordinatorSlot(
   };
 }
 
-function standbyPoints(h: ReturnType<typeof createCoordinatorHarness>, event: "claim" | "prepare") {
+function standbyPoints(h: ReturnType<typeof createCoordinatorHarness>, event: "claim" | "prepare" | "loss") {
   return h.analytics.writeDataPoint.mock.calls.map(([point]) => point)
     .filter((point) => point.indexes?.[0] === event)
     .map((point) => {
@@ -1910,6 +2082,7 @@ function seedLegacyCoordinator(db: DatabaseSync, ready: string, pending: string,
 function createStandbyContainerHarness(input: {
   containerClass?: typeof RunnerContainer;
   bound?: { claimId: string; userId: string };
+  unbound?: boolean;
   destroy?: () => Promise<void>;
   nativeStatus?: string;
   environment?: Record<string, unknown>;
@@ -1929,11 +2102,11 @@ function createStandbyContainerHarness(input: {
     HOSTED_EXECUTION_RUNNER_SOURCE_FINGERPRINT: SOURCE_FINGERPRINT,
     ...input.environment,
   };
-  if (input.bound) {
+  if (input.bound || input.unbound) {
     const store = new RunnerSlotBindingStore(state.storage.sql!);
     const identity = { slotName, releaseId: RELEASE_ID, region: HOSTED_RUNNER_REGION };
     store.initialize(identity);
-    store.bind({ ...identity, ...input.bound });
+    if (input.bound) store.bind({ ...identity, ...input.bound });
   }
   const containerFetch = vi.fn(async (url: string) => {
     if (url.endsWith("/health")) {

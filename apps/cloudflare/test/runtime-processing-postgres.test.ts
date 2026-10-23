@@ -77,7 +77,7 @@ describe("Postgres runtime orchestration", () => {
       return response({ ...starting, runnerContainerName: target }, "updated");
     });
     expect(await ensurePostgresRuntimeProcessing({ ...source, HOSTED_EXECUTION_STANDBY_MODE: mode,
-      STANDBY_COORDINATOR: { getByName: () => ({ claimReadyStandby, ensureReadyStandby: vi.fn() }) },
+      STANDBY_COORDINATOR: { getByName: () => ({ claimReadyStandby, ensureReadyStandby: vi.fn(), reportStandbySlotStopped: vi.fn() }) },
     }, { ...request, processingMode: "system_mailbox", orchestration: { triggeredByWebDirect: true } })).toMatchObject({ kind: "runtime_processing_accepted", action: "started" });
     expect(claimReadyStandby).not.toHaveBeenCalled();
     expect(container.ensureReadyForProcessing).toHaveBeenCalledOnce();
@@ -106,7 +106,7 @@ describe("Postgres runtime orchestration", () => {
       return response(retiring, "updated");
     });
     const result = ensurePostgresRuntimeProcessing({ ...source, HOSTED_EXECUTION_STANDBY_MODE: "allocate",
-      STANDBY_COORDINATOR: { getByName: () => ({ claimReadyStandby, ensureReadyStandby: vi.fn() }) },
+      STANDBY_COORDINATOR: { getByName: () => ({ claimReadyStandby, ensureReadyStandby: vi.fn(), reportStandbySlotStopped: vi.fn() }) },
     }, { ...request, conversationWorkPending: true, admission: response(starting) });
     await vi.waitFor(() => expect(container.retireStandbySlot).toHaveBeenCalledOnce());
     expect(released).toBe(false);
@@ -583,6 +583,31 @@ describe("Postgres runtime orchestration", () => {
       { operation: "retire", attemptId: "attempt-a", generation: "1", completed: false },
       { operation: "claim", processingMode: "default" },
     ]);
+    expect(container.retireStandbySlot).not.toHaveBeenCalled();
+    expect(container.startSupervisedInvocation).not.toHaveBeenCalled();
+  });
+
+  it("re-claims after a stale supplied snapshot and wakes the canonical successor", async () => {
+    const { source, container } = harness();
+    container.ensureProcessing.mockResolvedValueOnce({ kind: "start-required", reason: "no-active-child" });
+    const successor = owner({ generation: "2", attemptId: "attempt-b" });
+    vi.mocked(commandHostedRuntimeOwner).mockImplementation(async ({ command }) => {
+      if (command.operation === "retire") return response(null, "stale");
+      if (command.operation === "claim") return response(successor);
+      throw new Error("Unexpected owner command.");
+    });
+    expect(await ensurePostgresRuntimeProcessing(source, { ...request, admission: response(owner()) }))
+      .toMatchObject({ kind: "runtime_processing_accepted", action: "woken", runtimeAttemptId: "attempt-b" });
+    expect(vi.mocked(commandHostedRuntimeOwner).mock.calls.map(([value]) => value.command)).toEqual([
+      { operation: "retire", attemptId: "attempt-a", generation: "1", completed: false },
+      { operation: "claim", processingMode: "default" },
+    ]);
+    expect(container.ensureProcessing).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      activeRuntime: expect.objectContaining({ attemptId: "attempt-a", leaseGeneration: "1" }),
+    }));
+    expect(container.ensureProcessing).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      activeRuntime: expect.objectContaining({ attemptId: "attempt-b", leaseGeneration: "2" }),
+    }));
     expect(container.retireStandbySlot).not.toHaveBeenCalled();
     expect(container.startSupervisedInvocation).not.toHaveBeenCalled();
   });

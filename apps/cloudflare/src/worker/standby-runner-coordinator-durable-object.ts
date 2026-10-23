@@ -168,6 +168,27 @@ export class StandbyRunnerCoordinatorDurableObject extends DurableObject {
     return this.store.readState();
   }
 
+  reportStandbySlotStopped(input: { releaseId: string; region: Region; slotName: string }): void {
+    requireReleaseAndRegion(input);
+    const accepted = this.transactionSync(() => {
+      this.store.initialize(input);
+      // A claim removes inventory atomically; its handoff is never ours to drain.
+      if (!this.store.isInventoryPhase(input.slotName, "ready")) return false;
+      this.store.rememberDrain(input.slotName, Date.now());
+      return true;
+    });
+    if (!accepted) return;
+    this.recordInventoryEvent({
+      detail: "stopped",
+      durationMs: 0,
+      event: "loss",
+      inventory: () => this.store.countInventory(),
+      outcome: "",
+    });
+    this.startFill();
+    this.startCleanup();
+  }
+
   async alarm(): Promise<void> {
     await Promise.all([this.startFill(), this.startCleanup()]);
   }
@@ -347,12 +368,12 @@ export class StandbyRunnerCoordinatorDurableObject extends DurableObject {
     });
   }
 
-  // One identifier-free point per claim answer or finished preparation. Claim
-  // inventory is read before selection; preparation inventory after its result.
+  // One identifier-free point per claim, preparation or accepted loss. Claim
+  // inventory is read before selection; other inventory after the transition.
   private recordInventoryEvent(input: {
     detail: string;
     durationMs: number;
-    event: "claim" | "prepare";
+    event: "claim" | "prepare" | "loss";
     inventory: () => { provisioning: number; ready: number };
     outcome: string;
   }): void {

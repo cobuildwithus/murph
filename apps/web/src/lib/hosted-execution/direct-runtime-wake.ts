@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { parseHostedRuntimeOwnerResponse } from "@murphai/hosted-execution/runtime-owner";
 
 import type {
   CloudflareHostedControlRuntimeEnsureProcessingTiming,
@@ -7,6 +8,10 @@ import {
   HOSTED_RUNTIME_PROCESSING_COMMAND_RESPONSE_MARGIN_MS,
   MIN_HOSTED_RUNTIME_PROCESSING_TIMEOUT_MS,
 } from "@murphai/hosted-execution/contracts";
+
+import { getPrisma } from "../prisma";
+import { readHostedRuntimeDirectWakeOwner } from "./runtime-owner";
+import { projectHostedRuntimeOwner } from "./runtime-owner-snapshot";
 
 import { readHostedExecutionControlClientIfConfigured } from "./control";
 import { describeHostedExecutionSafeLogErrorCode } from "./logging";
@@ -26,13 +31,15 @@ export type HostedDirectRuntimeWakeSource =
 const HOSTED_DIRECT_RUNTIME_WAKE_DEADLINE_MS = 29_000;
 const HOSTED_DIRECT_RUNTIME_WAKE_COMMAND_TIMEOUT_MS = 25_000;
 const HOSTED_DIRECT_RUNTIME_WAKE_MAX_ATTEMPTS = 2;
+// Optional owner reads must not stall dispatch behind database or pool delays.
+const HOSTED_DIRECT_RUNTIME_WAKE_OWNER_READ_TIMEOUT_MS = 250;
 
 /**
  * Starts the control-only Cloudflare latency hint and always settles. Temporal
  * must own the durable mailbox signal. A caller may overlap its acknowledgement
  * only after the signal owner has validated access and started the request.
- * The Worker claims through Web after dispatch; a failed hint must not leave a
- * starting reservation that delays Temporal's durable wake.
+ * Web may supply a read-only live-owner snapshot; otherwise the Worker claims
+ * after dispatch. A failed hint must never leave a starting reservation.
  */
 export function startHostedDirectRuntimeWakeBestEffort(input: {
   onTiming?: (
@@ -101,6 +108,16 @@ async function runHostedDirectRuntimeWakeBestEffort(input: {
       attemptNumber += 1
     ) {
       signal.throwIfAborted();
+      // A failed optional read must preserve the ordinary Worker admission path.
+      let ownerReadTimeout: ReturnType<typeof setTimeout> | undefined;
+      const owner = await Promise.race([
+        readHostedRuntimeDirectWakeOwner({ prisma: getPrisma(), userId }).catch(() => null),
+        new Promise<null>((resolve) => {
+          ownerReadTimeout = setTimeout(() => resolve(null), HOSTED_DIRECT_RUNTIME_WAKE_OWNER_READ_TIMEOUT_MS);
+        }),
+      ]);
+      clearTimeout(ownerReadTimeout);
+      signal.throwIfAborted();
       const commandTimeoutMs = Math.min(
         HOSTED_DIRECT_RUNTIME_WAKE_COMMAND_TIMEOUT_MS,
         deadlineAtEpochMs - Date.now()
@@ -121,6 +138,7 @@ async function runHostedDirectRuntimeWakeBestEffort(input: {
       timing.latest = null;
       directWakeAttemptCount = attemptNumber;
       const ensureResult = await client.ensureRuntimeProcessing({
+        ...(owner ? { admission: parseHostedRuntimeOwnerResponse({ cutover: "postgres", status: "existing", owner: projectHostedRuntimeOwner(owner) }) } : {}),
         commandTimeoutMs,
         onTiming: (value) => {
           timing.latest = value;

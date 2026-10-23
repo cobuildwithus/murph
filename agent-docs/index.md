@@ -1500,6 +1500,11 @@ The weekly game spec owns correction authority and occurrence-time date resoluti
 
 Delayed game proposal approval and refusal notices are tracked in [the proposal plan](exec-plans/completed/2026-10-23-game-proposals-open.md); the weekly game spec owns the timing contract.
 
+Read-only admission and its optional-read cap for warm direct wakes are owned by
+[`Postgres runtime ownership`](references/hosted-postgres-runtime.md).
+Implementation and verification are recorded in
+[the direct-wake plan](exec-plans/completed/2026-10-23-direct-wake-live-admission.md).
+
 Mailbox handoff recovery's age eligibility before per-user selection and
 same-sweep duplicate suppression are owned by `references/hosted-temporal-orchestration.md`; implementation proof
 is recorded in [aged mailbox recovery](exec-plans/completed/2026-10-23-sweeper-dup-signal.md).

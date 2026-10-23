@@ -11,6 +11,10 @@ vi.mock("next/server", async () => {
   const actual = await vi.importActual<typeof import("next/server")>("next/server");
   return { ...actual, after: mocks.after };
 });
+vi.mock("@/src/lib/hosted-execution/runtime-owner", () => ({
+  readHostedRuntimeDirectWakeOwner: async () => null,
+}));
+vi.mock("@/src/lib/prisma", () => ({ getPrisma: () => ({}) }));
 vi.mock("@/src/lib/hosted-execution/control", () => ({
   readHostedExecutionControlClientIfConfigured:
     mocks.readHostedExecutionControlClientIfConfigured,
