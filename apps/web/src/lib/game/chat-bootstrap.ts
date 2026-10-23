@@ -86,8 +86,10 @@ function readOtherFrozenBootstrap(memberId: string, eventId: string, prisma: Pri
 }
 function readOtherPendingBootstrap(game: { id: string; status: string; pendingChange: unknown }, memberId: string, eventId: string, prisma: Prisma.TransactionClient) {
   const proposal = parsePendingGameChange(game.pendingChange);
-  const keys = [...(game.status === "live" ? [`game-started:${game.id}`] : []), ...(proposal ? [`game-change:${game.id}:${proposal.id}`] : [])].filter((key) => key !== eventId);
-  return prisma.hostedMailboxItem.findFirst({ where: { userId: memberId, kind: "assistant.notification.requested", consumedAt: null, dedupeKey: { in: keys } }, select: { id: true } });
+  const keys = [...(game.status === "live" ? [`game-started:${game.id}`] : []), ...(proposal ? [`game-change:${game.id}:${proposal.id}`] : [])];
+  return prisma.hostedMailboxItem.findFirst({ where: { userId: memberId, kind: "assistant.notification.requested", consumedAt: null,
+    dedupeKey: { not: eventId }, OR: [{ dedupeKey: { in: keys } }, { dedupeKey: { startsWith: `game-change-cancelled:${game.id}:` } }],
+  }, select: { id: true } });
 }
 async function queueExistingBootstrap(gameId: string, eventId: string, instructions: string, containerMemberId: string): Promise<string | null> {
   const prisma = getPrisma();

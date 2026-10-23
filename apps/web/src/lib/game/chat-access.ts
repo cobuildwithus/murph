@@ -60,7 +60,8 @@ export async function readGameChatFundingRooms(input: {
             AND NOT EXISTS (SELECT 1 FROM hosted_thread_route route WHERE route.container_member_id = room.id)
             AND EXISTS (SELECT 1 FROM hosted_linq_delivery receipt
               WHERE receipt.payload_owner_member_id = room.id AND receipt.source = 'game_lifecycle'
-                AND ((receipt.status = 'generation_queued' AND receipt.source_ref = game.id)
+                AND ((receipt.status = 'generation_queued' AND (receipt.source_ref = game.id
+                    OR (receipt.template = 'game_change_cancelled' AND starts_with(receipt.source_ref, game.id || ':'))))
                   OR receipt.payload_schema = 'game_chat_bootstrap_v1')
                 AND receipt.bootstrap_route_attached_at IS NULL AND receipt.skipped_at IS NULL)
             AND NOT EXISTS (SELECT 1 FROM hosted_linq_delivery receipt

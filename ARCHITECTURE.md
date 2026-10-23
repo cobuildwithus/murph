@@ -5596,7 +5596,10 @@ App notifications use shared instruction builders and `require_send`, not exact
 hardcoded announcement text. Cancelling an app-origin request whose delivery
 was queued or sent reserves `game_change_cancelled` in the same locked game
 transaction. Its lifecycle source reference contains the game and proposal ids;
-its per-proposal delivery key prevents duplicate announcements. The existing
+its per-proposal delivery key prevents duplicate announcements. Unfrozen cancellation
+receipts retain the bound room's game-funded access. An unconsumed cancellation
+blocks another bootstrap wake until the room attaches; the waiting proposal then
+uses the ordinary routed delivery. The existing
 drain and bootstrap support live and negotiating games, and dispatch revalidates
 the exact room, two-player audience and immutable cancellation history. Pending,
 failed and chat-origin requests do not reserve a cancellation notice. Cancellation
