@@ -1478,3 +1478,61 @@ describe('game incomplete initial input measurement', () => {
     },
   )
 })
+
+
+describe('Bluetooth help initial input measurement', () => {
+  it.skipIf(process.env.MURPH_MEASURE_BLUETOOTH_INPUT !== '1').each(['direct', 'group'] as const)(
+    'Bluetooth help complete first provider input (%s)', { timeout: 180_000 }, async (scope) => {
+      stub ??= await startScriptedResponsesStub()
+      const scenario = await prepareScriptedTurnScenario(stub, temporaryPaths, { model: 'gpt-6.1-sol', multiAgentV2: true })
+      const catalog = await writeHostedOpenAiMixedModeModelCatalogJson({ codexCommand: scenario.turnInput.codexCommand, directory: scenario.turnInput.codexHome })
+      const tools = resolveMurphDynamicTools({
+        allowFinishWithoutReply: true, automationAvailable: true, personalizationAvailable: scope === 'direct',
+        groupAvailable: scope === 'group', groupSharedReadAvailable: scope === 'group', responseCardsAvailable: scope === 'direct',
+        imageGenerationAvailable: false, progressUpdatesAvailable: false,
+      })
+      const measurements = []
+      for (const phase of ['base', 'head'] as const) {
+        const layers = buildAssistantSystemPromptLayers({
+          assistantCliContract: null, assistantHostedAutomationAvailable: true,
+          assistantHostedGroupToolSurface: scope === 'group' ? 'families' : 'none',
+          channel: 'linq', cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+          conversationScope: scope, currentLocalDate: '2030-04-01', currentInstant: '2030-04-01T16:00:00.000Z', currentTimeZone: 'America/New_York',
+          hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false, ordinaryInboundTurn: true,
+        })
+        const head = [layers.staticCacheableCorePrompt, layers.stableRouteCapabilityPrompt, layers.threadContextPrompt].join('\n\n')
+        // Exact prompt-only inverse of this PR against bc5a1ead20; no tools changed.
+        const developerInstructions = phase === 'head' ? head : head
+          .replace(/^- Bluetooth wearable help, WHOOP not connecting to Murph[^\n]*\n/mu, '')
+          .replace('Apple Health relay (saved health data, not live Bluetooth heart rate):', 'Apple Health relay:')
+        assert.notEqual(developerInstructions.includes('bluetooth-device-help before setup'), phase === 'base')
+        await stopWarmCodexAppServer()
+        stub.markRequestBaseline()
+        stub.captureProviderRequestDiagnostics({ completeInput: true })
+        stub.queue({ text: CONTRACT_CAPTURE_DONE })
+        const result = await executeCodexAppServerTurn({
+          ...scenario.turnInput, baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS, developerInstructions, dynamicTools: tools,
+          prompt: [layers.dynamicTurnContextPrompt, 'Help me connect my WHOOP to the app by Bluetooth'].join('\n\n'),
+          groupConversation: scope === 'group', env: { ...scenario.turnInput.env, [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: catalog },
+        })
+        assert.equal(result.finalMessage, CONTRACT_CAPTURE_DONE)
+        assert.equal(stub.requestCountSinceBaseline(), 1)
+        const capture = stub.requestSummariesSinceBaseline()[0]?.completeProviderInput
+        assert.ok(capture)
+        const body = readRecord(JSON.parse(capture.json))
+        assert.ok(body)
+        delete body.prompt_cache_key
+        measurements.push({ phase, bytes: Buffer.byteLength(JSON.stringify(body)), instructionsBytes: Buffer.byteLength(developerInstructions),
+          toolCount: tools.length, registeredToolBytes: Buffer.byteLength(JSON.stringify(tools)),
+          exclusions: [...new Set([...capture.excludedTransportFields, 'prompt_cache_key'])] })
+      }
+      const [base, head] = measurements
+      assert.ok(base && head)
+      process.stdout.write('[bluetooth-input-proof] ' + JSON.stringify({ scope, model: 'gpt-6.1-sol', measurements,
+        deltaBytes: head.bytes - base.bytes, deltaPercent: (head.bytes - base.bytes) / base.bytes * 100,
+        tokens: null, tokenDelta: null, tokenPercent: null,
+        tokenLimitation: 'Exact target tokenizer unavailable; scripted usage is not tokenization.',
+      }) + '\n')
+    },
+  )
+})

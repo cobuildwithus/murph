@@ -2,6 +2,10 @@
 
 Most Murph assistant skills are bundled from this public directory.
 
+`bluetooth-device-help/SKILL.md` owns local wearable connection guidance for
+the Murph iPhone app, starting with WHOOP live heart rate. It uses member reports,
+not device logs, and keeps cloud sync and Apple Health with their existing owners.
+
 The following stable paths are different:
 
 - `group-chat/SKILL.md`

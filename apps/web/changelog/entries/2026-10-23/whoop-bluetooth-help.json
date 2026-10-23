@@ -1,0 +1,18 @@
+{
+  "publishedOn": "2026-10-23",
+  "order": 100,
+  "item": {
+    "id": "whoop-bluetooth-help",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Help connecting your WHOOP",
+    "summary": "Ask Murph for help getting live WHOOP heart rate into the iPhone app.",
+    "details": "Murph walks through the next checks based on what you see, knows which bands are supported, and helps you reach support when you are stuck. It cannot inspect your phone's Bluetooth connection.",
+    "relevanceTags": ["wearables", "games"],
+    "sourcePullRequests": [4334],
+    "tryIt": {
+      "label": "Get connection help",
+      "prompt": "Help me connect my WHOOP to the app by Bluetooth"
+    }
+  }
+}
