@@ -69,9 +69,12 @@ export type CloudflareContainerFetch = (
 ) => Promise<{
   json(): Promise<unknown>;
   ok: boolean;
+  status?: number;
 }>;
 
 export type ContainerApplicationReadPhase = "before" | "after";
+
+type ProviderReadStage = "transport" | "http" | "json" | "validation";
 
 const APPLICATION_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/u;
 const CLOUDFLARE_API_BASE_URL = "https://api.cloudflare.com/client/v4";
@@ -231,8 +234,8 @@ export async function readCloudflareContainerApplicationIdentities(
     let response: unknown;
     try {
       response = await listApplications(container.applicationName);
-    } catch {
-      throw invalidProviderState();
+    } catch (error) {
+      throw error instanceof ProviderReadError ? error : invalidProviderState();
     }
 
     if (!Array.isArray(response)) {
@@ -252,8 +255,8 @@ export async function readCloudflareContainerApplicationIdentities(
       let rollout: unknown;
       try {
         rollout = await readRollout(identity.applicationId, activeRolloutId);
-      } catch {
-        throw invalidProviderState();
+      } catch (error) {
+        throw error instanceof ProviderReadError ? error : invalidProviderState();
       }
       return {
         ...identity,
@@ -305,14 +308,19 @@ export function createCloudflareContainerProvider(input: {
     );
     url.searchParams.set("name", applicationName);
 
+    let stage: ProviderReadStage = "transport";
+    let status: number | undefined;
     try {
       const response = await fetchImpl(url, createRequestInit());
+      stage = "http";
+      status = response.status;
       if (!response.ok) {
         throw invalidProviderState();
       }
-      const listedApplications = readExhaustiveCloudflareResult(
-        await response.json(),
-      );
+      stage = "json";
+      const payload = await response.json();
+      stage = "validation";
+      const listedApplications = readExhaustiveCloudflareResult(payload);
 
       return await Promise.all(listedApplications.map(async (listedApplication) => {
         const reference = parseProviderApplicationReference(listedApplication);
@@ -320,22 +328,39 @@ export function createCloudflareContainerProvider(input: {
           `${CLOUDFLARE_API_BASE_URL}/accounts/${encodeURIComponent(input.accountId)}`
             + `/containers/applications/${encodeURIComponent(reference.applicationId)}`,
         );
-        const detailResponse = await fetchImpl(detailUrl, createRequestInit());
-        if (!detailResponse.ok) {
-          throw invalidProviderState();
+        let detailStage: ProviderReadStage = "transport";
+        let detailStatus: number | undefined;
+        try {
+          const detailResponse = await fetchImpl(detailUrl, createRequestInit());
+          detailStage = "http";
+          detailStatus = detailResponse.status;
+          if (!detailResponse.ok) {
+            throw invalidProviderState();
+          }
+          detailStage = "json";
+          const detailPayload = await detailResponse.json();
+          detailStage = "validation";
+          const detail = readCloudflareResultObject(detailPayload);
+          const identity = parseProviderIdentity(detail);
+          if (
+            identity.applicationId !== reference.applicationId
+            || identity.applicationName !== reference.applicationName
+          ) {
+            throw invalidProviderState();
+          }
+          return detail;
+        } catch {
+          throw invalidProviderState({
+            operation: "detail",
+            stage: detailStage,
+            status: detailStatus,
+          });
         }
-        const detail = readCloudflareResultObject(await detailResponse.json());
-        const identity = parseProviderIdentity(detail);
-        if (
-          identity.applicationId !== reference.applicationId
-          || identity.applicationName !== reference.applicationName
-        ) {
-          throw invalidProviderState();
-        }
-        return detail;
       }));
-    } catch {
-      throw invalidProviderState();
+    } catch (error) {
+      throw error instanceof ProviderReadError
+        ? error
+        : invalidProviderState({ operation: "list", stage, status });
     }
   };
 
@@ -349,14 +374,21 @@ export function createCloudflareContainerProvider(input: {
         + `/rollouts/${encodeURIComponent(rolloutId)}`,
     );
 
+    let stage: ProviderReadStage = "transport";
+    let status: number | undefined;
     try {
       const response = await fetchImpl(rolloutUrl, createRequestInit());
+      stage = "http";
+      status = response.status;
       if (!response.ok) {
         throw invalidProviderState();
       }
-      return readCloudflareResultObject(await response.json());
+      stage = "json";
+      const payload = await response.json();
+      stage = "validation";
+      return readCloudflareResultObject(payload);
     } catch {
-      throw invalidProviderState();
+      throw invalidProviderState({ operation: "rollout", stage, status });
     }
   };
 
@@ -793,8 +825,26 @@ function invalidWranglerActions(): TypeError {
   );
 }
 
-function invalidProviderState(): TypeError {
-  return new TypeError("Cloudflare container application state was incomplete or malformed.");
+// Only diagnostics created here may survive the enclosing read catches.
+class ProviderReadError extends TypeError {}
+
+function invalidProviderState(diagnostic?: {
+  operation: "list" | "detail" | "rollout";
+  stage: ProviderReadStage;
+  status?: unknown;
+}): TypeError {
+  const message = "Cloudflare container application state was incomplete or malformed.";
+  if (!diagnostic) {
+    return new TypeError(message);
+  }
+  const { operation, stage, status } = diagnostic;
+  const httpStatus = typeof status === "number"
+    && Number.isInteger(status) && status >= 100 && status <= 599
+    ? `; status=${status}`
+    : "";
+  return new ProviderReadError(
+    `${message} operation=${operation}; stage=${stage}${httpStatus}.`,
+  );
 }
 
 function invalidReleaseTransition(): TypeError {

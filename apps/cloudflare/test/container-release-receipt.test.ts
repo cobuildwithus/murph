@@ -9,6 +9,7 @@ import {
   readRenderedContainerIdentities,
   waitForCloudflareContainerReleaseEntries,
   type CloudflareContainerApplicationIdentity,
+  type CloudflareContainerFetch,
   type WranglerContainerAction,
 } from "../scripts/container-release-receipt.js";
 
@@ -325,7 +326,7 @@ describe("container release receipt", () => {
       });
 
       await expect(listApplications("exact-app")).rejects.toThrow(
-        /^Cloudflare container application state was incomplete or malformed\.$/u,
+        /^Cloudflare container application state was incomplete or malformed\. operation=list; stage=validation\.$/u,
       );
     });
 
@@ -347,9 +348,9 @@ describe("container release receipt", () => {
           throw error;
         }
         expect(error.message).toBe(
-          "Cloudflare container application state was incomplete or malformed.",
+          "Cloudflare container application state was incomplete or malformed. operation=list; stage=transport.",
         );
-        expect(error.message).not.toMatch(/sensitive|transport|URL/iu);
+        expect(error.message).not.toMatch(/sensitive|raw transport failure|private URL/iu);
       }
     });
 
@@ -374,7 +375,7 @@ describe("container release receipt", () => {
       });
 
       await expect(listApplications("exact-app")).rejects.toThrow(
-        "Cloudflare container application state was incomplete or malformed.",
+        /^Cloudflare container application state was incomplete or malformed\. operation=detail; stage=validation\.$/u,
       );
     });
 
@@ -400,6 +401,202 @@ describe("container release receipt", () => {
       await expect(listApplications("exact-app")).rejects.toThrow(
         "Cloudflare container application state was incomplete or malformed.",
       );
+    });
+  });
+
+  describe("provider read diagnostics", () => {
+    const baseMessage = "Cloudflare container application state was incomplete or malformed.";
+    const expected = [
+      { applicationName: "private-fixture-app", className: "FixtureContainer" },
+    ] as const;
+    const application = providerIdentity(
+      expected[0].applicationName,
+      "private-fixture-id",
+      1,
+      "private-fixture-image",
+      "private-fixture-rollout",
+    );
+    const payloads = [
+      { result: [application], success: true },
+      { result: application, success: true },
+    ];
+    const applicationsUrl = "https://api.cloudflare.com/client/v4/accounts/"
+      + "private-fixture-account/containers/applications";
+    const requestUrls = [
+      `${applicationsUrl}?name=private-fixture-app`,
+      `${applicationsUrl}/private-fixture-id`,
+      `${applicationsUrl}/private-fixture-id/rollouts/private-fixture-rollout`,
+    ];
+
+    it.each(
+      (["list", "detail", "rollout"] as const).flatMap((operation, failedRequest) =>
+        (["transport", "http", "json", "validation"] as const).map((stage) => ({
+          operation, failedRequest, stage,
+        }))
+      ),
+    )("attributes $operation/$stage through the composed read", async ({
+      operation, failedRequest, stage,
+    }) => {
+      const privateText = "private-fixture-response https://private.invalid/"
+        + " private-fixture-account private-fixture-token private-fixture-app"
+        + " private-fixture-id private-fixture-rollout private-fixture-image";
+      const privateError = Object.assign(new TypeError(
+        `${baseMessage} operation=rollout; stage=http; status=599. ${privateText}`,
+      ), {
+        name: "ProviderReadError",
+        cause: privateText,
+        stack: privateText,
+      });
+      const failedJson = vi.fn(async () => {
+        if (stage === "json") throw privateError;
+        return { errors: [{ message: privateText }], result: privateText, success: false };
+      });
+      const fetchImpl = vi.fn<CloudflareContainerFetch>();
+      for (const payload of payloads.slice(0, failedRequest)) {
+        fetchImpl.mockResolvedValueOnce({
+          json: async () => payload,
+          ok: true,
+          status: 200,
+        });
+      }
+      const status = stage === "http" ? 503 : 200;
+      if (stage === "transport") {
+        fetchImpl.mockRejectedValueOnce(privateError);
+      } else {
+        fetchImpl.mockResolvedValueOnce({
+          json: failedJson,
+          ok: stage !== "http",
+          status,
+        });
+      }
+      const provider = createCloudflareContainerProvider({
+        accountId: "private-fixture-account",
+        apiToken: "private-fixture-token",
+        fetchImpl,
+      });
+
+      const error: unknown = await readCloudflareContainerApplicationIdentities(
+        expected, provider.listApplications, "after", provider.readRollout,
+      ).catch((error: unknown) => error);
+      expect(error).toBeInstanceOf(TypeError);
+      if (!(error instanceof Error)) throw new Error("Expected a provider read failure.");
+      const statusText = stage === "transport" ? "" : `; status=${status}`;
+      expect(error.message).toBe(
+        `${baseMessage} operation=${operation}; stage=${stage}${statusText}.`,
+      );
+      expect(error).not.toBe(privateError);
+      expect(error).not.toHaveProperty("cause");
+      expect([String(error), error.stack, JSON.stringify(error)].join("\n"))
+        .not.toMatch(/private-fixture|private\.invalid/u);
+      expect(fetchImpl).toHaveBeenCalledTimes(failedRequest + 1);
+      expect(fetchImpl.mock.calls.map(([url]) => url.toString()))
+        .toEqual(requestUrls.slice(0, failedRequest + 1));
+      expect(failedJson).toHaveBeenCalledTimes(
+        stage === "json" || stage === "validation" ? 1 : 0,
+      );
+    });
+
+    const objectStatus = { toString: vi.fn(() => "private-fixture-status") };
+    it.each([
+      { label: "minimum", status: 100, suffix: "; status=100" },
+      { label: "maximum", status: 599, suffix: "; status=599" },
+      { label: "missing", status: undefined, suffix: "" },
+      { label: "null", status: null, suffix: "" },
+      { label: "zero", status: 0, suffix: "" },
+      { label: "below range", status: 99, suffix: "" },
+      { label: "above range", status: 600, suffix: "" },
+      { label: "fraction", status: 503.5, suffix: "" },
+      { label: "NaN", status: Number.NaN, suffix: "" },
+      { label: "infinity", status: Number.POSITIVE_INFINITY, suffix: "" },
+      { label: "numeric string", status: "503", suffix: "" },
+      { label: "object", status: objectStatus, suffix: "" },
+    ])("validates HTTP status without coercion: $label", async ({ status, suffix }) => {
+      const json = vi.fn(async () => ({ errors: ["private-fixture-response"] }));
+      const response = { json, ok: false };
+      Object.defineProperty(response, "status", { value: status });
+      const fetchImpl = vi.fn<CloudflareContainerFetch>().mockResolvedValue(response);
+      const provider = createCloudflareContainerProvider({
+        accountId: "private-fixture-account",
+        apiToken: "private-fixture-token",
+        fetchImpl,
+      });
+
+      await expect(provider.listApplications(expected[0].applicationName)).rejects.toMatchObject({
+        message: `${baseMessage} operation=list; stage=http${suffix}.`,
+      });
+      expect(fetchImpl).toHaveBeenCalledOnce();
+      expect(json).not.toHaveBeenCalled();
+      expect(objectStatus.toString).not.toHaveBeenCalled();
+    });
+
+    it.each(["list", "rollout"] as const)(
+      "does not trust diagnostic-looking errors from the %s callback",
+      async (operation) => {
+        const forged = Object.assign(new TypeError(
+          `${baseMessage} operation=rollout; stage=http; status=503. private-fixture-message`,
+        ), {
+          name: "ProviderReadError",
+          operation: "rollout",
+          stage: "http",
+          status: 503,
+          cause: "private-fixture-cause",
+          stack: "private-fixture-stack",
+        });
+        const listApplications = vi.fn(async () => {
+          if (operation === "list") throw forged;
+          return [application];
+        });
+        const readRollout = vi.fn(async () => { throw forged; });
+
+        const error: unknown = await readCloudflareContainerApplicationIdentities(
+          expected, listApplications, "after", readRollout,
+        ).catch((error: unknown) => error);
+        expect(error).toBeInstanceOf(TypeError);
+        if (!(error instanceof Error)) throw new Error("Expected a provider read failure.");
+        expect(error).not.toBe(forged);
+        expect(error.message).toBe(baseMessage);
+        expect(error).not.toHaveProperty("cause");
+        expect([String(error), error.stack, JSON.stringify(error)].join("\n"))
+          .not.toContain("private-fixture");
+        expect(listApplications).toHaveBeenCalledOnce();
+        expect(readRollout).toHaveBeenCalledTimes(operation === "rollout" ? 1 : 0);
+      },
+    );
+
+    it("keeps overlapping detail stages and statuses independent", async () => {
+      let failFirst!: (reason: Error) => void;
+      const firstDetail = new Promise<never>((_resolve, reject) => { failFirst = reject; });
+      const secondApplication = providerIdentity(
+        expected[0].applicationName, "private-fixture-second-id", 1, "private-fixture-image",
+      );
+      const fetchImpl = vi.fn<CloudflareContainerFetch>()
+        .mockResolvedValueOnce({
+          json: async () => ({ result: [application, secondApplication], success: true }),
+          ok: true,
+          status: 200,
+        })
+        .mockReturnValueOnce(firstDetail)
+        .mockResolvedValueOnce({
+          json: async () => {
+            failFirst(new Error("private-fixture-first-detail"));
+            return { result: secondApplication, success: true };
+          },
+          ok: true,
+          status: 202,
+        });
+      const provider = createCloudflareContainerProvider({
+        accountId: "private-fixture-account",
+        apiToken: "private-fixture-token",
+        fetchImpl,
+      });
+
+      await expect(provider.listApplications(expected[0].applicationName)).rejects.toMatchObject({
+        message: `${baseMessage} operation=detail; stage=transport.`,
+      });
+      expect(fetchImpl).toHaveBeenCalledTimes(3);
+      expect(fetchImpl.mock.calls.map(([url]) => url.toString())).toEqual([
+        requestUrls[0], requestUrls[1], `${applicationsUrl}/private-fixture-second-id`,
+      ]);
     });
   });
 

@@ -333,6 +333,14 @@ raw application IDs, image references, account identifiers, tokens, and provider
 errors out of the receipt. Exact-name application discovery uses the provider
 list only to resolve one application identifier; both the pre-deploy and
 post-deploy receipt snapshots come from that application's detail endpoint.
+Native provider read failures retain the existing fail-closed error and append
+only a closed operation (`list`, `detail`, or `rollout`), read stage (`transport`,
+`http`, `json`, or `validation`), and an integer HTTP status from 100 through 599
+when available. The diagnostic survives the enclosing receipt-reader catch;
+arbitrary callback errors remain redacted. Response bodies, URLs, identifiers,
+credentials, and upstream error causes or stacks are never included. This adds
+no calls, retries, or timeout changes; later release-contract validation keeps
+its existing errors.
 The receipt is assembled after native distribution completes and records the exact
 resulting application version and image digest. A resumed deployment may record
 completion of its existing pending rollout when the original target version and
