@@ -1696,7 +1696,8 @@ and children rejected before entering the CLI have no invented command timing.
 Legacy batch output, counts, lengths, durations and failure handling are unchanged.
 
 Bounds are source-owned: 32 distinct command/outcome entries per report/active
-window; 24 fixed phase names (the original 11, six rebuild names, four Patterns names and three load names); 64 started
+window; 31 fixed phase names (the original 11, six rebuild names, four Patterns names, three load names, five
+metric subphases, and the canonical-write wait and importer load names); 64 started
 scoped spans per invocation (plus fixed lifecycle samples); at most 8,192 bytes
 per complete UDP envelope (including the ephemeral key/ticks) and 256 received packets per window. The 8 KiB cap is below
 the supported macOS 9 KiB UDP datagram limit; no host setting or permission is
@@ -1932,6 +1933,69 @@ retryable), and the existing opt-in rotated measurement. Runtime-state
 pre-admission reader runs with `MURPH_CLI_METRIC_PHASE_COMPAT_BASE=<reviewed base sha>`.
 Mechanism overhead on a dense synthetic fixture is documented in
 `packages/query/bench/README.md`. It is a local observation, not a latency bound.
+
+### Canonical write wait and importer load (reader-before-producer)
+
+Two more fixed names attribute existing CLI-process waits that `dispatch`
+otherwise leaves as unattributed handler work. They follow every rule above:
+same schema, buckets, caps, drop counters, trimming and disabled no-op. They add
+no free-form labels, workload counts, IDs, paths, arguments, content or error text.
+
+| Phase | Existing operation measured |
+| --- | --- |
+| `canonical-write-wait` | Each `acquireCanonicalWriteLock` call (`packages/core/src/operations/canonical-write-lock.ts`), from entry until the handle returns or acquisition throws: the in-process queue slot for unscoped callers, cross-owner directory-lock polling and backoff, and stale or timeout rejection. The guarded work, lock hold and `release()` are outside it. |
+| `importers-runtime-load` | Each `loadImportersRuntimeModule` call's existing native `import("@murphai/importers")` (`packages/vault-usecases/src/usecases/runtime.ts`), including first-call module evaluation and later module-cache hits. `createImporters` and importer work are outside it. |
+
+Both wrap the existing owner call in `timeCliPhase`, which returns the original
+value or rethrows the original error object. Lock ordering, queueing,
+re-entry, polling, timeout, stale handling, release and queue-slot cleanup are
+unchanged, and the importer loader gains no cache, retry or eager import.
+Outside a CLI timing scope (for example canonical writes made by the hosted
+runtime process itself) both are no-ops.
+
+**Interpretation.** `canonical-write-wait` counts acquisition calls, not
+distinct holds. `withCanonicalWriteLock` acquires, then `WriteBatch.commit` or
+`rollback` re-enters the same owner, so one write commonly contributes two
+samples. The re-entrant sample is a same-process depth check, not a wait. Use
+`maxUs` and the histogram to find real waiting; `sumUs` includes those small
+re-entry costs. A slow sample shows contention or slow lock-directory I/O; it
+does not identify the holder. Failed acquisitions are still samples, and the
+command outcome attributes them. `importers-runtime-load` has no shared
+promise, so warm calls are present near-zero samples, unlike the cold-only
+`query-runtime-load`. Inside `loadImporterRuntime` it overlaps the core load.
+Both are nested inside their caller's `setup`, `dispatch` or `unattributed`
+interval and are not additive with it. Each sample uses one of the existing 64
+spans per invocation; a command making many canonical writes can reach that
+budget sooner, which `droppedSpans` records. Canonical resource locks and the
+query projection lock (`query-wait`) are separate.
+
+These spans make **no historical causal claim**. Previously unattributed
+dispatch cannot be attributed retroactively; later samples describe later
+traffic. To inspect `meal add`, run the bounded inspection below with `('meal add')`
+added to `wanted`, and compare these phases with `dispatch` per retained call.
+
+**Rollout.** An older `normalizeCliTiming` does not strip an unknown phase: it
+rejects that phase, then its command, then the whole optional `cliTiming`
+object. Legacy usage, token and request accounting survive, but that report's
+timing is lost. Deploy every reader first, each verified before the next: Web
+(`parseAssistantUsageRecord`), then the Cloudflare worker's usage forwarding
+(`usage-record-body.ts`). Then deploy the runner image. It carries the core,
+vault-usecases and CLI producers together with the in-container receiver
+(`assistant-engine`), so producer and receiver cannot skew against each other.
+Rolling back the runner is safe because new readers accept old names. Rolling a
+reader back below this change while new runners emit loses the timing for
+affected reports, not accounting. Release follows the normal reviewed route
+above; nothing is deployed or observed by this change.
+
+**Proof.** Core `canonical-write-lock.test.ts` uses a real on-disk lock and a
+controlled clock. It shows that in-process queue and independent-owner waits
+are measured exactly while hold time stays in `dispatch`, that timeout errors
+keep their identity, and that each re-entrant acquisition is one sample.
+Vault-usecases `runtime.test.ts` shows one sample per importer loader call,
+original value and error identity, and no effect outside a CLI scope.
+Runtime-state `cli-timing.test.ts` pins the 31-name catalog. The history-backed
+pre-admission reader check runs with
+`MURPH_CLI_WAIT_LOAD_PHASE_COMPAT_BASE=<reviewed base sha>`.
 
 ### Private weekly usage audit rejection
 
@@ -3096,7 +3160,8 @@ rows AS MATERIALIZED (
     'query-wearable-compose', 'query-metric-read', 'query-pattern-report',
     'service-runtime-load', 'query-runtime-load', 'query-projection-load',
     'query-metric-samples', 'query-metric-evidence', 'query-metric-extract',
-    'query-metric-precedence', 'query-metric-targets')
+    'query-metric-precedence', 'query-metric-targets',
+    'canonical-write-wait', 'importers-runtime-load')
 ), totals AS (
   SELECT period, command, outcome, p ->> 'phase' AS phase,
          sum((p ->> 'count')::numeric) AS phase_samples,

@@ -8,6 +8,11 @@ Command-gated CLI source-cause telemetry is owned by
 implementation and local verification are tracked in
 [the active plan](exec-plans/active/2026-10-22-cli-source-cause.md).
 
+CLI canonical-write lock wait and importer load phases are owned by
+[`hosted-runtime-log-database.md`](../docs/hosted-runtime-log-database.md#canonical-write-wait-and-importer-load-reader-before-producer);
+the reader-first rollout and proof are tracked in
+[the implementation record](exec-plans/completed/2026-10-22-cli-wait-load-timing.md).
+
 Public image attachment recovery is tracked in
 [the recovery plan](exec-plans/completed/2026-10-21-public-image-recovery.md).
 

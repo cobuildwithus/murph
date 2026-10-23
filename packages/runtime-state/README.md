@@ -128,6 +128,15 @@ unrecognized codes to `unknown`, retaining timing, outcome and failure counts.
 Unknown strings/extra fields are never forwarded. Assistant shell diagnostics
 reuse these catalogs; they do not establish another timing or error vocabulary.
 
+Phase names skew differently: an older `normalizeCliTiming` rejects the whole
+timing object when any command carries an unknown phase, rather than collapsing
+it. New names are appended to the catalog and need readers deployed before
+producers. `canonical-write-wait` (core lock acquisition, never the hold) and
+`importers-runtime-load` (each vault-usecases importer import) follow that
+rule. Their semantics, rollout and proof live in
+`docs/hosted-runtime-log-database.md` under "Canonical write wait and importer
+load".
+
 ### Optional CLI source cause
 
 The original-error timing observer can add `sourceCause: { code, vaultCode? }`

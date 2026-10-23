@@ -135,7 +135,9 @@ function isImportersRuntimeModule(value: unknown): value is ImportersFactoryRunt
 }
 
 export async function loadImportersRuntimeModule(): Promise<ImportersFactoryRuntimeModule> {
-  return loadRuntimeModule<ImportersFactoryRuntimeModule>("@murphai/importers")
+  // Every call's native import, including module-cache hits; there is no shared promise.
+  return timeCliPhase("importers-runtime-load", () =>
+    loadRuntimeModule<ImportersFactoryRuntimeModule>("@murphai/importers"))
 }
 
 export async function loadCoreRuntime(): Promise<CoreRuntimeModule> {

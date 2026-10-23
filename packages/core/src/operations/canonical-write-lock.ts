@@ -10,6 +10,7 @@ import {
   inspectDirectoryLock,
   isProcessRunning,
 } from "@murphai/runtime-state/node";
+import { timeCliPhase } from "@murphai/runtime-state/node/cli-timing";
 
 import { VaultError, type CanonicalWriteLockErrorDetails } from "../errors.ts";
 import { normalizeVaultRoot, resolveVaultPath } from "../path-safety.ts";
@@ -241,6 +242,18 @@ export async function acquireCanonicalWriteLock(
   options: {
     timeoutMs?: number;
   } = {},
+): Promise<CanonicalWriteLockHandle> {
+  // Diagnostic span: queue slot, cross-owner polling and timeout until the
+  // handle returns or acquisition throws. Hold and release stay outside it;
+  // outside a CLI timing scope this is a no-op.
+  return await timeCliPhase("canonical-write-wait", () => acquireCanonicalWriteLockUntimed(vaultRoot, options));
+}
+
+async function acquireCanonicalWriteLockUntimed(
+  vaultRoot: string,
+  options: {
+    timeoutMs?: number;
+  },
 ): Promise<CanonicalWriteLockHandle> {
   const absoluteRoot = normalizeVaultRoot(vaultRoot);
   const context = canonicalWriteLockContextStorage.getStore();

@@ -23,6 +23,9 @@ export const CLI_TIMING_PHASES = [
   // Nested inside query-metric-projection; never additive with it.
   "query-metric-samples", "query-metric-evidence", "query-metric-extract",
   "query-metric-precedence", "query-metric-targets",
+  // Canonical-write lock acquisition (not hold) and the importers module import.
+  // Appended last: older readers reject the whole object, so readers deploy first.
+  "canonical-write-wait", "importers-runtime-load",
 ] as const;
 export type CliTimingPhase = typeof CLI_TIMING_PHASES[number];
 /** These existing phases enclose synchronous metric work, not awaited I/O. */
