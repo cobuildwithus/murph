@@ -37,8 +37,11 @@ Updated: 2026-10-23
 
 - Technical constraints: reuse the existing bounded loop, SQLite reservations,
   fenced retirement and recovery alarm; no new retry owner.
-- Product/process constraints: synthetic fixtures only; no production replay,
-  deployment or capacity change in this task.
+- Product/process constraints: synthetic fixtures only; no production replay or
+  capacity change. The initial candidate phase performs no dispatch, release
+  reservation or deployment; coordinated merge and protected deployment may
+  follow only after the required review and CI gates and a fresh coordinator
+  release preflight.
 
 ## Risks and mitigations
 
