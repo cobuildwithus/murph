@@ -4,6 +4,7 @@ import { parseGameCommand } from "@/src/lib/game/command";
 import { GameRuleError } from "@/src/lib/game/rules";
 
 const PHOTO_KEY = `game/hbm_leo/${"a".repeat(64)}.jpg`;
+const SUMMARY = { durationSec: 60, avgBpm: 120, lowBpm: 100, peakBpm: 140 };
 
 function codeOf(run: () => unknown): string {
   try {
@@ -16,18 +17,61 @@ function codeOf(run: () => unknown): string {
 }
 
 describe("weekly game command validator", () => {
-  it("validates the challenge check-in requirement and defaults older clients to photos", () => {
+  it("accepts trimmed one-line words without an upload and bounds the locked preview", () => {
+    const command = { type: "post", gameId: "game_words", entryId: "entry_words", kind: "words", text: "  Walked outside  ", blurHash: "x".repeat(64) };
+    expect(parseGameCommand(command)).toMatchObject({ text: "Walked outside", mediaKeys: [], blurHash: "x".repeat(64) });
+    for (const text of ["", "   ", "x".repeat(141), "first\nsecond", "first\rsecond", "first\u2028second"]) {
+      expect(codeOf(() => parseGameCommand({ ...command, text }))).toBe("INVALID_REQUEST");
+    }
+    for (const extra of [{ mediaKeys: [PHOTO_KEY] }, { data: {} }, { blurHash: "x".repeat(65) }, { blurHash: 1 }]) {
+      expect(codeOf(() => parseGameCommand({ ...command, ...extra }))).toBe("INVALID_REQUEST");
+    }
+  });
+
+  it.each([
+    { kind: "heart_rate", data: SUMMARY },
+    { kind: "route", data: { activity: "walk", distanceM: 1250.5, durationSec: 600.5 } },
+    { kind: "reps", data: { exercise: "pushups", count: 2, countLow: 1, countHigh: 3,
+      reps: [{ tMs: 100, depth: 0.4 }, { tMs: 900, depth: 1 }], fastestMs: 800, slowestMs: 800, heartRate: SUMMARY } },
+  ])("requires a rendered JPEG and closed summary for $kind", ({ kind, data }) => {
+    const command = { type: "post", gameId: "game_artifact", entryId: "entry_artifact", kind, mediaKeys: [PHOTO_KEY], data };
+    expect(parseGameCommand(command)).toMatchObject(command);
+    for (const extra of [{ data: undefined }, { data: null }, { data: { ...data, bpm: [123] } },
+      { data: { ...data, coordinates: [[1, 2]] } }, { mediaKeys: [] }, { mediaKeys: [PHOTO_KEY, PHOTO_KEY] },
+      { mediaKeys: [PHOTO_KEY.replace(".jpg", ".heic")] }]) {
+      expect(codeOf(() => parseGameCommand({ ...command, ...extra }))).toBe("INVALID_REQUEST");
+    }
+  });
+
+  it("rejects invalid numeric summaries and raw nested samples", () => {
+    const command = { type: "post", gameId: "game_numeric", entryId: "entry_numeric", mediaKeys: [PHOTO_KEY] };
+    for (const data of [{ ...SUMMARY, avgBpm: 120.5 }, { ...SUMMARY, durationSec: -1 }, { ...SUMMARY, peakBpm: Infinity }]) {
+      expect(codeOf(() => parseGameCommand({ ...command, kind: "heart_rate", data }))).toBe("INVALID_REQUEST");
+    }
+    for (const data of [{ activity: "bike", distanceM: 1, durationSec: 1 }, { activity: "run", distanceM: NaN, durationSec: 1 }]) {
+      expect(codeOf(() => parseGameCommand({ ...command, kind: "route", data }))).toBe("INVALID_REQUEST");
+    }
+    const tape = { exercise: "pushups", count: 1, reps: [{ tMs: 100, depth: 0.5 }] };
+    for (const extra of [{ count: 1.5 }, { exercise: "squats" }, { reps: Array(301).fill(tape.reps[0]) },
+      { reps: [{ tMs: -1, depth: 0.5 }] }, { reps: [{ tMs: 1, depth: 1.1 }] },
+      { heartRate: { ...SUMMARY, samples: [120] } }]) {
+      expect(codeOf(() => parseGameCommand({ ...command, kind: "reps", data: { ...tape, ...extra } }))).toBe("INVALID_REQUEST");
+    }
+    expect(codeOf(() => parseGameCommand({ ...command, kind: "reps", data: { ...tape, reps: Array(300).fill(tape.reps[0]) } }))).toBe("OK");
+  });
+
+  it("validates legacy kind requests and defaults new games to free artifact choice", () => {
     const command = { type: "createGame", gameId: "game_checkin", inviteeFirstName: "Ava", terms: {
       tasks: [{ seat: 0, text: "Pushups" }, { seat: 1, text: "Pushups" }],
       schedule: { count: 3 }, stakes: [{ item: "Coffee", kind: "prize" }],
     } };
-    expect(parseGameCommand(command)).toMatchObject({ terms: { checkInKind: "photo" } });
+    expect(parseGameCommand(command)).toMatchObject({ terms: { checkInKind: "any" } });
     expect(parseGameCommand({ ...command, terms: { ...command.terms, checkInKind: "heart_rate" } })).toMatchObject({ terms: { checkInKind: "heart_rate" } });
     expect(codeOf(() => parseGameCommand({ ...command, terms: { ...command.terms, checkInKind: "video" } }))).toBe("INVALID_REQUEST");
   });
 
   it("accepts one rendered heart-rate graph and never admits raw sample fields", () => {
-    const command = { type: "post", entryId: "entry_graph1", gameId: "game_0001", kind: "heart_rate", mediaKeys: [PHOTO_KEY] };
+    const command = { type: "post", entryId: "entry_graph1", gameId: "game_0001", kind: "heart_rate", mediaKeys: [PHOTO_KEY], data: { durationSec: 60, avgBpm: 120, lowBpm: 100, peakBpm: 140 } };
     expect(parseGameCommand({ ...command, samples: [{ bpm: 123 }], captureAgeMs: 1500 }))
       .toEqual({ ...command, captureAgeMs: 1500 });
     for (const mediaKeys of [[], [PHOTO_KEY, PHOTO_KEY], [PHOTO_KEY.replace(".jpg", ".heic")]]) {
@@ -79,7 +123,7 @@ describe("weekly game command validator", () => {
     expect(codeOf(() => parseGameCommand({ ...post, kind: "video" }))).toBe("INVALID_REQUEST");
     expect(codeOf(() => parseGameCommand({ ...post, mediaKeys: ["../../etc/passwd"] }))).toBe("MEDIA_MISSING");
     expect(codeOf(() => parseGameCommand({ ...post, mediaKeys: Array(5).fill(PHOTO_KEY) }))).toBe("INVALID_REQUEST");
-    expect(parseGameCommand({ ...post, data: { route: [1, 2] } })).not.toHaveProperty("data");
+    expect(codeOf(() => parseGameCommand({ ...post, data: { route: [1, 2] } }))).toBe("INVALID_REQUEST");
     expect(codeOf(() => parseGameCommand({ ...post, captureAgeMs: -1 }))).toBe("INVALID_REQUEST");
   });
 

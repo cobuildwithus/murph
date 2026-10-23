@@ -678,7 +678,7 @@ export function SectionsContent({
           <Separator />
 
           <StudySection title="Weekly game challenge invite link">
-            {/* Prize, dare, variable-duration and legacy invite states. */}
+            {/* Prize, dare, variable-duration, free daily artifact and legacy invite states. */}
             <GameInviteStudy />
           </StudySection>
         </>

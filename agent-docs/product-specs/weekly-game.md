@@ -66,13 +66,12 @@ this default without deleting other people's private contact choices.
   3am. Start now is proposed in the app and takes effect when the other player agrees in the shared chat.
 - **Weekdays.** A set-weekdays game is on and off on the same dates for
   everyone, because every player's day number falls on the same date.
-- **Posting.** One check-in a day: a live-camera photo or an explicitly shared
-  heart-rate graph recorded over Bluetooth from Start to Stop. Taking it back
-  and recording or photographing again is allowed once per day (two attempts
-  total, across both kinds, including withdrawn entries). A graph records
-  heart rate, not verified repetitions or automatic task completion.
+- **Posting.** New games allow a photo, a short line of words, a heart-rate
+  graph, a route map or a rep tape each day. Legacy photo/heart-rate games
+  retain their required kind. Two attempts total are allowed per day across
+  kinds, including withdrawn entries. Artifacts do not verify task completion.
 - **Post notifications.** With iPhone notification permission, another player's
-  first photo or heart-rate check-in can send one push per recipient per game
+  first non-excuse check-in can send one push per recipient per game
   per recipient-local game day (3am to 3am in the zone frozen at go-live).
   Retakes, withdrawals and excuses do not send alerts. Offline-grace posts use
   the recipient's day at receipt for the cap. Notifications reveal only that a
@@ -89,10 +88,11 @@ this default without deleting other people's private contact choices.
   characters); no audio is uploaded or stored, and it's never replayed. It
   applies to the player's most recent past scheduled day with no photo and no
   excuse yet, never today. It neither scores nor unlocks.
-- **Post to unlock.** You see nothing of another player's day (photo or words)
-  until you have posted that day. Unlocking is permanent, so a withdrawn photo
-  can't hide what was already seen. After settle, every live photo is visible to
-  the game's players. Excuses stay private to their owner.
+- **Post to unlock.** A posted partner day exposes only its posting time and
+  optional device-rendered blur preview until you post that day. No media,
+  words or summary data is exposed while locked. Unlocking is permanent after
+  a non-excuse attempt, including withdrawal. Recap reveals every live artifact
+  to the game's players. Excuses remain private to their owner.
 - **Offline grace.** In the hour after a player's 3am boundary, a photo the
   phone says it captured before the boundary (monotonic capture age, with 30
   seconds of slack) counts for the day that just ended, if that was a scheduled
@@ -143,26 +143,29 @@ this default without deleting other people's private contact choices.
 `ARCHITECTURE.md` § Weekly Game owns the storage, write path, and route
 boundaries. The wire contract is `apps/web/src/lib/game/contract.ts`.
 
-## Heart-rate graph artifacts
+## Daily artifacts
 
-`heart_rate` entries carry exactly one rendered JPEG in the private game
-image store. The native app retains raw samples only in memory and sends no
-sample arrays, device identity, or new health-data records. The server applies
-identical owner checks, post-to-unlock, day boundaries, idempotency, attempt caps,
-withdrawal and scoring to both check-in kinds. The challenge creator chooses Photo or Heart rate in setup for both players.
-The versioned `terms.checkInKind` defaults to `photo` when absent; unknown
-values are rejected. The posting day’s terms enforce the required kind before
-an attempt is consumed. Excuses retain their existing rules.
+New games store `terms.checkInKind: "any"`; retained missing values mean photo.
+Only legacy photo/heart-rate terms enforce a single kind. Photo uploads remain
+1–4 JPEG/HEIC images with optional text. Words are a trimmed single line of
+1–140 characters, without media or summary data.
 
-On native Home, Start opens the wearable drawer. Stop & share ends recording
-and uploads the graph; interrupted capture needs an explicit partial-share
-action. Media authorization remains participant-scoped.
+Heart-rate, route and rep entries each carry exactly one device-rendered JPEG.
+Heart-rate data contains only integer duration, average, low and peak bpm.
+Routes contain walk/run, distance in meters and duration in seconds, without
+coordinates. Rep tapes contain pushup count, optional count bounds and timings,
+at most 300 timestamp/depth pairs, and an optional heart-rate summary. Unknown
+summary fields are rejected, including nested samples and coordinates.
 
-Apply the additive entry-constraint migration and deploy the reader/writer
-before enabling native sends. Older native builds decode the unknown kind but
-omit graph downloads; players need the updated app to see this artifact. The
-new native reader displays both kinds in the home card, week and recap using
-the full graph image. No live release is implied by this implementation.
+Summary data is sealed per poster in `game_entry.payload_encrypted` before the
+write transaction and decrypted only for entries visible to the viewer. Views
+return it as `GameEntryView.data`; words remain in `text`. Optional device blur
+strings (at most 64 characters) are stored separately, so locked previews never
+require payload decryption. Chat and push receive no artifact data or blur.
+
+The additive v1 migration and compatible runtime readers must precede these
+writers. Existing entries with no payload remain readable with null data.
+Native clients render and capture artifacts; there is no server map or dare bank.
 
 ## Changes agreed in chat
 

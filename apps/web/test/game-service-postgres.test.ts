@@ -20,9 +20,12 @@ import {
   authorizeMediaRead,
   readGame,
   readHome,
+  readGameChatState,
   readInvitePreview,
   runGameCommand,
 } from "@/src/lib/game/service";
+import { parseStoredTerms } from "@/src/lib/game/rules";
+import { toPrismaJsonObject } from "@/src/lib/device-sync/prisma-store/prisma-json";
 import { addDays, gameLocalDate, weekdayOf } from "@/src/lib/game/time";
 import { getPrisma } from "@/src/lib/prisma";
 
@@ -123,6 +126,41 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     await rm(mediaDir, { force: true, recursive: true });
   });
 
+  it("never opens locked payloads, keeps previews separate, and reveals data on recap", async () => {
+    const poster = await member("Poster", "UTC");
+    const viewer = await member("Viewer", "UTC");
+    const { gameId } = await startGame(poster, viewer, { terms: { ...TERMS,
+      startsOn: new Date(Date.now() + 2 * 86_400_000).toISOString().slice(0, 10) } });
+    await devStartNow(gameId, poster);
+    const data = { activity: "run" as const, distanceM: 2345, durationSec: 900 };
+    const command = { ...await photo(poster, gameId, "private-route"), kind: "route" as const, data, blurHash: "synthetic-blur" };
+    const posted = await ok(poster, command);
+    expect(posted?.terms.checkInKind).toBe("any");
+    expect(posted?.days[0].mine?.data).toEqual(data);
+    const stored = await getPrisma().gameEntry.findUniqueOrThrow({ where: { id: command.entryId } });
+    expect(stored.payloadEncrypted).toBeTruthy();
+    expect(stored.payloadEncrypted).not.toContain("distanceM");
+    expect(stored.blurHash).toBe("synthetic-blur");
+    const locked = await readGame(gameId, viewer);
+    expect(locked?.days[0].others[0]).toEqual({ seat: 0, status: "locked", entry: null,
+      postedAt: stored.receivedAt.toISOString(), blurHash: "synthetic-blur" });
+    expect(await authorizeMediaRead(viewer, command.mediaKeys[0])).toBe(false);
+    expect(JSON.stringify(await readHome(viewer))).not.toMatch(/distanceM|private-route/);
+    const chat = await readGameChatState("synthetic-room", [poster, viewer]);
+    expect(chat.games[0].terms).not.toHaveProperty("checkInKind");
+    expect(JSON.stringify(chat)).not.toMatch(/distanceM|blurHash|synthetic-blur|payloadEncrypted/);
+
+    // A poisoned envelope proves the locked viewer never asks crypto to open it.
+    await getPrisma().gameEntry.update({ where: { id: command.entryId }, data: { payloadEncrypted: "cannot-open" } });
+    expect((await readGame(gameId, viewer))?.days[0].others[0].status).toBe("locked");
+    await expect(readGame(gameId, poster)).rejects.toThrow();
+    await getPrisma().gameEntry.update({ where: { id: command.entryId }, data: { payloadEncrypted: stored.payloadEncrypted } });
+    const recap = await devSettleNow(gameId, viewer);
+    expect(recap.days[0].others[0].entry?.data).toEqual(data);
+    expect(recap.days[0].others[0]).not.toHaveProperty("blurHash");
+    expect(await authorizeMediaRead(viewer, command.mediaKeys[0])).toBe(true);
+  });
+
   it("caps concurrent retries and retakes per recipient and game, then allows the next recipient day", async () => {
     const poster = await member("Poster", "America/New_York");
     const recipient = await member("Recipient", "America/New_York");
@@ -200,24 +238,29 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     const ava = await member("Ava", "America/New_York");
     const stranger = await member("Sam", "UTC");
     const { gameId } = await startGame(leo, ava, { terms: { ...TERMS, checkInKind: "heart_rate" } });
+    // A retained heart-rate-only game still enforces its stored requirement.
+    const stored = await getPrisma().game.findUniqueOrThrow({ where: { id: gameId } });
+    const terms = parseStoredTerms(stored.terms);
+    terms.versions[0].checkInKind = "heart_rate";
+    await getPrisma().game.update({ where: { id: gameId }, data: { terms: toPrismaJsonObject(terms) } });
     await pushRoute(leo);
     push.mockClear();
     await devStartNow(gameId, leo);
     expect((await readGame(gameId, leo))?.terms.checkInKind).toBe("heart_rate");
     const key = await upload(ava, "synthetic-graph");
-    const graph: GameCommand = { type: "post", entryId: randomUUID(), gameId, kind: "heart_rate", mediaKeys: [key] };
+    const graph: GameCommand = { type: "post", entryId: randomUUID(), gameId, kind: "heart_rate", mediaKeys: [key], data: { durationSec: 60, avgBpm: 120, lowBpm: 100, peakBpm: 140 } };
     const accepted = await ok(ava, graph);
     expect(push).toHaveBeenCalledTimes(1);
-    expect(accepted?.days[0]?.mine).toMatchObject({ kind: "heart_rate" });
+    expect(accepted?.days[0]?.mine).toMatchObject({ kind: "heart_rate", data: graph.data });
     await ok(ava, graph);
     expect(await getPrisma().gameEntry.count({ where: { gameId, memberId: ava } })).toBe(1);
     expect(await authorizeMediaRead(leo, key)).toBe(false);
     expect(await authorizeMediaRead(stranger, key)).toBe(false);
     expect(await errorCode(leo, await photo(leo, gameId, "synthetic-photo"))).toBe("INVALID_REQUEST");
-    await ok(leo, { ...await photo(leo, gameId, "synthetic-own-graph"), kind: "heart_rate" });
+    await ok(leo, { ...await photo(leo, gameId, "synthetic-own-graph"), kind: "heart_rate", data: graph.data });
     expect(await authorizeMediaRead(leo, key)).toBe(true);
-    expect((await readGame(gameId, leo))?.days[0]?.others[0]?.entry).toMatchObject({ kind: "heart_rate" });
-    await ok(ava, { ...await photo(ava, gameId, "synthetic-retake"), kind: "heart_rate" });
+    expect((await readGame(gameId, leo))?.days[0]?.others[0]?.entry).toMatchObject({ kind: "heart_rate", data: graph.data });
+    await ok(ava, { ...await photo(ava, gameId, "synthetic-retake"), kind: "heart_rate", data: graph.data });
     expect(await errorCode(ava, { ...graph, entryId: randomUUID() })).toBe("RETAKE_USED");
     expect(await authorizeMediaRead(leo, key)).toBe(false);
   });
@@ -330,7 +373,7 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     await ok(ava, avaPost);
     const avaKey = avaPost.type === "post" ? avaPost.mediaKeys[0] : "";
     let leoView = await readGame(gameId, leo);
-    expect(leoView!.days[0].others[0]).toEqual({ entry: null, seat: 1, status: "locked" });
+    expect(leoView!.days[0].others[0]).toEqual({ blurHash: null, entry: null, postedAt: expect.any(String), seat: 1, status: "locked" });
     expect(await authorizeMediaRead(leo, avaKey)).toBe(false);
     expect(await authorizeMediaRead(kat, avaKey)).toBe(false);
     // Nobody can post someone else's upload, or one that was never stored.

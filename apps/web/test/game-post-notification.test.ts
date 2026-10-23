@@ -81,9 +81,9 @@ describe("game daily post notifications", () => {
     { kind: "excuse", attempt: 0, dayIndex: 0, memberId: "recipient", withdrawnAt: null, unlocked: false },
     { kind: "photo", attempt: 1, dayIndex: 1, memberId: "recipient", withdrawnAt: null, unlocked: false },
     { kind: "photo", attempt: 1, dayIndex: 0, memberId: "poster", withdrawnAt: null, unlocked: false },
-  ] satisfies (Omit<RuleEntry, "id" | "mediaKeys"> & { unlocked: boolean })[])(
+  ] satisfies (Omit<RuleEntry, "id" | "mediaKeys" | "receivedAt" | "blurHash"> & { unlocked: boolean })[])(
     "matches the post-to-unlock state for the new entry's day: %j", async ({ unlocked, ...entry }) => {
-      const notification = await claim({ entries: [{ ...entry, id: "entry-one", mediaKeys: [] }] });
+      const notification = await claim({ entries: [{ ...entry, id: "entry-one", mediaKeys: [], receivedAt: clock, blurHash: null }] });
       await deliverGamePostNotification(notification);
       expect(m.send).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
         message: {

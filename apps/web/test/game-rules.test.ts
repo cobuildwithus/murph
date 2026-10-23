@@ -109,7 +109,7 @@ function post(
         kind,
         mediaKeys: [],
         memberId,
-        withdrawnAt: null,
+        receivedAt: new Date("2030-03-05T12:00:00Z"), blurHash: null, withdrawnAt: null,
       },
     ],
   };
@@ -156,7 +156,7 @@ describe("weekly game: terms", () => {
     );
     expect(made.lengthDays).toBe(7);
     expect(made.terms.versions[0]).toEqual({
-      checkInKind: "photo",
+      checkInKind: "any",
       fromDay: 0,
       n: 1,
       schedule: { days: [0, 2, 4] },
@@ -293,6 +293,18 @@ describe("weekly game: joining", () => {
 });
 
 describe("weekly game: posting", () => {
+  it.each(["photo", "heart_rate", "words", "route", "reps"] as const)("allows %s in new any-kind games and keeps legacy requirements", (kind) => {
+    const state = live();
+    const now = at(state, LEO, 0, 12);
+    const input = { memberId: LEO, now, kind, captureAgeMs: null, mediaKeyPrefix: mediaKeyPrefixFor(LEO),
+      mediaKeys: kind === "words" ? [] : [`${mediaKeyPrefixFor(LEO)}artifact.jpg`] };
+    state.game.terms.versions[0].checkInKind = "any";
+    expect(decidePost(state, input).attempt).toBe(1);
+    state.game.terms.versions[0].checkInKind = "photo";
+    expect(codeOf(() => decidePost(state, input))).toBe(kind === "photo" ? "OK" : "INVALID_REQUEST");
+    state.game.terms.versions[0].checkInKind = "heart_rate";
+    expect(codeOf(() => decidePost(state, input))).toBe(kind === "heart_rate" ? "OK" : "INVALID_REQUEST");
+  });
   it("allows one retake per day, counting withdrawn posts", () => {
     let state = live();
     const morning = at(state, LEO, 0, 9);

@@ -34,7 +34,7 @@ export interface GameTask {
   text: string;
 }
 
-export const GAME_CHECK_IN_KINDS = ["photo", "heart_rate"] as const;
+export const GAME_CHECK_IN_KINDS = ["photo", "heart_rate", "any"] as const;
 export type GameCheckInKind = (typeof GAME_CHECK_IN_KINDS)[number];
 
 /** One version of what everyone agreed to, applying from `fromDay`. */
@@ -49,7 +49,7 @@ export interface GameTermsVersion {
 
 /** What a new game starts with (version 1, from day 0). */
 export interface GameTermsInput {
-  /** Shared by all players. Omission preserves the original photo requirement. */
+  /** New games use any; retained photo/heart_rate terms keep their requirement. */
   checkInKind?: GameCheckInKind;
   tasks: GameTask[];
   schedule: GameSchedule;
@@ -64,11 +64,34 @@ export interface GameTermsInput {
 }
 
 /**
- * A photo, an explicitly shared heart-rate graph image, or an excuse for a missed day: only its words (the transcript the
- * phone made on-device). No audio is uploaded or stored.
+ * A daily artifact, or an excuse for a missed day (on-device transcript only).
+ * No audio, raw heart-rate samples, or route coordinates are stored.
  */
-export const GAME_ENTRY_KINDS = ["photo", "heart_rate", "excuse"] as const;
+export const GAME_ENTRY_KINDS = ["photo", "heart_rate", "words", "route", "reps", "excuse"] as const;
 export type GameEntryKind = (typeof GAME_ENTRY_KINDS)[number];
+
+export interface GameHeartRateData {
+  durationSec: number;
+  avgBpm: number;
+  lowBpm: number;
+  peakBpm: number;
+}
+export interface GameRouteData {
+  activity: "walk" | "run";
+  distanceM: number;
+  durationSec: number;
+}
+export interface GameRepsData {
+  exercise: "pushups";
+  count: number;
+  countLow?: number;
+  countHigh?: number;
+  reps: { tMs: number; depth: number }[];
+  fastestMs?: number;
+  slowestMs?: number;
+  heartRate?: GameHeartRateData;
+}
+export type GameEntryData = GameHeartRateData | GameRouteData | GameRepsData;
 
 /** The words a challenger attaches to whoever they invite; only they ever see them. */
 export interface GameInviteeLabel {
@@ -123,7 +146,8 @@ export interface AcceptInviteBody {
 
 /**
  * POST /games/:id/entries. A photo needs 1-4 `mediaKeys` (.jpg/.heic); a
- * heart_rate check-in needs exactly one rendered JPEG graph, with no raw samples. An
+ * heart_rate, route and reps need exactly one rendered JPEG and summary data.
+ * Words need one trimmed line (1-140 characters), with no media or data. An
  * excuse needs `text` (1-500 characters) and no media, and applies to your most
  * recent missed scheduled day, never today.
  */
@@ -132,6 +156,9 @@ export interface PostEntryBody {
   kind: GameEntryKind;
   mediaKeys: string[];
   text?: string;
+  data?: GameEntryData;
+  /** Optional device-rendered locked preview, at most 64 characters. */
+  blurHash?: string;
   /** Milliseconds since capture, from a monotonic clock on the phone. */
   captureAgeMs?: number;
 }
@@ -219,6 +246,7 @@ export interface GameEntryView {
   kind: GameEntryKind;
   mediaUrls: string[];
   text: string | null;
+  data?: GameEntryData | null;
 }
 
 export interface GameDayView {
@@ -229,7 +257,9 @@ export interface GameDayView {
   off: boolean;
   mine: GameEntryView | null;
   /** Per other player, in seat order. */
-  others: { seat: number; status: GameDayOtherStatus; entry: GameEntryView | null }[];
+  others: { seat: number; status: GameDayOtherStatus; entry: GameEntryView | null;
+    /** Present only for a posted day still locked to this viewer. */
+    postedAt?: string; blurHash?: string | null }[];
 }
 
 export interface GameTicketView {

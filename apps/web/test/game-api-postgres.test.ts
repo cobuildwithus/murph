@@ -12,6 +12,7 @@ import { POST as advance } from "../app/api/game/v1/dev/games/[id]/advance-day/r
 import { POST as settle } from "../app/api/game/v1/dev/games/[id]/settle/route";
 import { POST as upload } from "../app/api/game/v1/media/route";
 import { POST as post } from "../app/api/game/v1/games/[id]/entries/route";
+import { GET as read } from "../app/api/game/v1/games/[id]/route";
 import { GET as home } from "../app/api/game/v1/home/route";
 import { hostedAuthAdapter } from "../src/lib/better-auth/adapter";
 import { serializeHostedNativeSessionToken } from "../src/lib/better-auth/transport";
@@ -55,13 +56,17 @@ async function member(firstName: string) {
   expect(response.status).toBe(200);
   return token;
 }
-async function photo(token: string, id: string, suffix: number) {
+async function imageKey(token: string, suffix: number): Promise<string> {
   const uploaded = await upload(new Request("http://localhost/api/game/v1/media", {
     method: "POST", headers: { authorization: `Bearer ${serializeHostedNativeSessionToken(token)}`, "content-type": "image/jpeg" },
     body: new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0, 0x10, 0xff, 0xd9, suffix]),
   }));
   expect(uploaded.status).toBe(200);
   const { mediaKey } = await uploaded.json();
+  return mediaKey;
+}
+async function photo(token: string, id: string, suffix: number) {
+  const mediaKey = await imageKey(token, suffix);
   return game(post(request(token, { entryId: randomUUID(), kind: "photo", mediaKeys: [mediaKey] }), { params: Promise.resolve({ id }) }));
 }
 
@@ -118,5 +123,47 @@ describe.skipIf(!enabled)("game v1 local API smoke", () => {
     expect(recap.tickets).toHaveLength(1);
     expect(recap.tickets[0]).toMatchObject({ kind: "dare", youHold: true, what: "Sing at karaoke" });
     expect(recap.days[0]?.others[0]?.entry?.kind).toBe("photo");
+  }, 30_000);
+
+  it("posts every summary kind through dev days and reveals the untouched partner days only in recap", async () => {
+    const poster = await member("Poster");
+    const viewer = await member("Viewer");
+    const id = randomUUID();
+    const context = { params: Promise.resolve({ id }) };
+    const created = await game(create(request(poster, { gameId: id, inviteeFirstName: "Viewer", terms: {
+      startsOn: new Date(Date.now() + 2 * 86_400_000).toISOString().slice(0, 10),
+      schedule: { count: 4 }, stakes: [{ kind: "prize", item: "Choose a book" }],
+      tasks: [{ seat: 0, text: "Move" }, { seat: 1, text: "Move" }],
+    } })));
+    await game(accept(request(viewer, { termsVersion: 1, timeZone: "UTC" }), { params: Promise.resolve({ token: created.inviteToken! }) }));
+    await game(start(request(poster), context));
+    const artifacts = [
+      { kind: "words", text: "A walk outside" },
+      { kind: "heart_rate", data: { durationSec: 60, avgBpm: 120, lowBpm: 100, peakBpm: 140 } },
+      { kind: "route", data: { activity: "walk", distanceM: 1200.5, durationSec: 600 } },
+      { kind: "reps", data: { exercise: "pushups", count: 1, reps: [{ tMs: 100, depth: 0.9 }] } },
+    ];
+    for (const [day, artifact] of artifacts.entries()) {
+      if (day > 0) await game(advance(request(poster, { days: 1 }), context));
+      const mediaKeys = artifact.kind === "words" ? [] : [await imageKey(poster, day + 10)];
+      const posted = await game(post(request(poster, { ...artifact, entryId: randomUUID(), mediaKeys, blurHash: "synthetic-blur" }), context));
+      expect(posted.days[day].mine).toMatchObject({ kind: artifact.kind, data: artifact.data ?? null });
+      const locked = await game(read(request(viewer, undefined, "GET"), context));
+      expect(locked.days[day].others[0]).toEqual({ seat: 0, status: "locked", entry: null,
+        postedAt: expect.any(String), blurHash: "synthetic-blur" });
+    }
+    await game(advance(request(poster, { days: 1 }), context));
+    await game(post(request(poster, { entryId: randomUUID(), kind: "words", text: "First" }), context));
+    // The shared cap still counts attempts across different artifact kinds.
+    await game(post(request(poster, { entryId: randomUUID(), kind: "words", text: "Retake" }), context));
+    const third = await post(request(poster, { entryId: randomUUID(), kind: "route",
+      mediaKeys: [await imageKey(poster, 30)], data: { activity: "run", distanceM: 10, durationSec: 10 } }), context);
+    expect(third.status).toBe(409);
+    expect(await third.json()).toMatchObject({ error: { code: "RETAKE_USED" } });
+    const recap = await game(settle(request(viewer), context));
+    for (const [day, artifact] of artifacts.entries()) {
+      expect(recap.days[day].others[0].entry).toMatchObject({ kind: artifact.kind, data: artifact.data ?? null });
+      expect(recap.days[day].others[0]).not.toHaveProperty("blurHash");
+    }
   }, 30_000);
 });

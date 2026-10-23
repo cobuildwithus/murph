@@ -73,6 +73,8 @@ export interface RuleEntry {
   attempt: number;
   kind: GameEntryKind;
   mediaKeys: string[];
+  receivedAt: Date;
+  blurHash: string | null;
   withdrawnAt: Date | null;
 }
 
@@ -280,7 +282,7 @@ export function decideNewTerms(input: GameTermsInput, options: { newKey: () => s
     startsOn,
     terms: {
       v: 1,
-      versions: [{ checkInKind: input.checkInKind ?? "photo", fromDay: 0, n: 1, schedule, stakes: stakes.map(({ key, kind }) => ({ key, kind })) }],
+      versions: [{ checkInKind: "any", fromDay: 0, n: 1, schedule, stakes: stakes.map(({ key, kind }) => ({ key, kind })) }],
     },
     words: {
       v: 1,
@@ -408,13 +410,13 @@ export function decidePost(
 ): PostDecision {
   const player = requireLivePlayer(state, input.memberId);
   if (input.kind === "excuse") return { attempt: 0, dayIndex: excuseDay(state, player, input.now), graceUsed: false, withdrawEntryId: null };
-  if (input.mediaKeys.length === 0) reject("MEDIA_MISSING", "Add the check-in image first.");
+  if (input.kind !== "words" && input.mediaKeys.length === 0) reject("MEDIA_MISSING", "Add the check-in image first.");
   if (input.mediaKeys.some((key) => !key.startsWith(input.mediaKeyPrefix))) {
     reject("MEDIA_MISSING", "Upload the media before posting it.");
   }
   const dayIndex = postingDay(state, player, input.captureAgeMs, input.now);
   const required = termsForDay(state.game.terms, dayIndex).checkInKind ?? "photo";
-  if (input.kind !== required) {
+  if (required !== "any" && input.kind !== required) {
     reject("INVALID_REQUEST", required === "heart_rate" ? "This challenge requires a heart-rate check-in." : "This challenge requires a photo check-in.");
   }
   const graceUsed = dayIndex !== dayIndexAt(player, input.now);
