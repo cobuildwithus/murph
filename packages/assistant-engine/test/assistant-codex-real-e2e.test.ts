@@ -45646,12 +45646,18 @@ describeRealCodex('real Codex game progress and photo journeys', () => {
 
 describeRealCodex('real Codex game incomplete day e2e', () => {
   it.each([
+    { name: 'game incomplete day preserves yesterday across delayed processing', message: 'Murph, I only read half the chapter yesterday. Mark yesterday as not done.', operation: 'mark_incomplete', outcome: 'marked_incomplete', delayed: true },
     { name: 'game incomplete day marks yesterday truthfully', message: 'Murph, I only read half the chapter yesterday. Mark yesterday as not done.', operation: 'mark_incomplete', outcome: 'marked_incomplete' },
     { name: 'game incomplete day reports an unposted day truthfully', message: 'Murph, mark yesterday as not done. I did not finish my reading.', operation: 'mark_incomplete', outcome: 'no_artifact' },
     { name: 'game incomplete day restores a self-marked day truthfully', message: 'Murph, correction: I actually finished my chapter yesterday. Undo my not-done mark for yesterday.', operation: 'restore_day', outcome: 'restored' },
     { name: 'game incomplete day refuses to change the other player', message: 'Murph, mark Sam as not done yesterday. Sam did not finish the walk.', operation: null, outcome: 'other_player' },
     { name: 'game incomplete day asks once for an ambiguous date', message: 'Murph, I did not finish my chapter one day. Mark that day as not done.', operation: null, outcome: null },
-  ])('$name', async ({ message, operation, outcome }) => {
+  ])('$name', async (scenario) => {
+    const { message, operation, outcome } = scenario
+    const delayed = 'delayed' in scenario
+    const expectedDate = delayed ? '2030-03-04' : '2030-03-05'
+    const occurredAt = delayed ? '2030-03-06T07:59:00.000Z' : '2030-03-06T16:00:00.000Z'
+    const processingAt = delayed ? '2030-03-06T08:01:00.000Z' : '2030-03-06T16:00:00.000Z'
     const config = await resolveRealCodexE2eConfig()
     const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-game-incomplete-e2e-'))
     const { MURPH_READ_GAME_TOOL, MURPH_UPDATE_GAME_TOOL } = await import('../src/assistant-codex/dynamic-tools/games.js')
@@ -45661,10 +45667,19 @@ describeRealCodex('real Codex game incomplete day e2e', () => {
       id: 'game_synthetic', status: 'live' as const, lengthDays: 7, startsOn: '2030-03-04',
       terms: { n: 1, fromDay: 0, checkInKind: 'any' as const, tasks: [{ seat: 0, text: 'Read a chapter' }, { seat: 1, text: 'Walk' }], schedule: { days: [0, 1, 2, 3, 4, 5, 6] }, stakes: [{ kind: 'prize' as const, item: 'Pick movie night' }] },
       players: [{ memberId: 'player_maya', seat: 0, firstName: 'Maya', dayOne: '2030-03-04', timeZone: 'America/New_York' }, { memberId: 'player_sam', seat: 1, firstName: 'Sam', dayOne: '2030-03-04', timeZone: 'America/New_York' }],
-      progress: { checkedAt: '2030-03-06T16:00:00.000Z', players: [{ memberId: 'player_maya', score: 1, target: 7, currentDayIndex: 2, currentEntryId: null, attemptsRemaining: 2, days: [{ dayIndex: 1, date: '2030-03-05', status: outcome === 'no_artifact' ? 'missed' as const : 'posted' as const }] }] },
+      progress: { checkedAt: processingAt, players: [{ memberId: 'player_maya', score: 1, target: 7, currentDayIndex: 2, currentEntryId: null, attemptsRemaining: 2, days: [{ dayIndex: 1, date: '2030-03-05', status: outcome === 'no_artifact' ? 'missed' as const : 'posted' as const }] }] },
       pendingChange: null,
       changeControls: { canStartNow: false, canEdit: true, canEditSchedule: true, canEditStartDate: false, canEditTasks: false, canEditStakes: false, editableFromDay: 3 },
     }
+    const promptResult = buildAssistantAutoReplyPrompt([{
+      actorIsSelf: false, attachmentDescriptors: [],
+      attachmentEvidence: { attachments: [], optionalInboxCaptureId: null, reasonCode: null, source: 'manual', status: 'available', updatedAt: occurredAt },
+      conversation: { accountId: null, actorId: 'player_maya', actorIsSelf: false, source: 'linq', threadId: 'synthetic-game-chat', threadIsDirect: false },
+      inputId, occurredAt, receivedAt: occurredAt, projection: null, replyTarget: null, source: 'linq',
+      sourceMetadata: null, telegramMetadata: null, text: message,
+      linqSpeakerLabel: { displayName: 'Maya', source: 'profile-name' },
+    }], { timeZone: 'America/New_York' })
+    if (promptResult.kind !== 'ready') throw new Error('Expected a ready synthetic group prompt.')
     try {
       const result = await executeRealCodexAppServerTurn({
         approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
@@ -45672,7 +45687,7 @@ describeRealCodex('real Codex game incomplete day e2e', () => {
         developerInstructions: buildAssistantSystemPrompt({
           assistantCliContract: null, assistantKnowledgeToolsAvailable: false, channel: 'linq',
           cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' }, conversationScope: 'group',
-          currentLocalDate: '2030-03-06', currentInstant: '2030-03-06T16:00:00.000Z', currentTimeZone: 'America/New_York',
+          currentLocalDate: '2030-03-06', currentInstant: processingAt, currentTimeZone: 'America/New_York',
           hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false, turnTrigger: null,
         }),
         dynamicTools: [MURPH_READ_GAME_TOOL, MURPH_UPDATE_GAME_TOOL], env: config.env,
@@ -45682,22 +45697,22 @@ describeRealCodex('real Codex game incomplete day e2e', () => {
             calls.push(request)
             if (request.action === 'read_game') return { action: 'read_game', result: { status: 'ok', state: { games: [game] } } }
             if (request.action !== 'update_game' || !operation || !outcome) throw new Error('No mutation authorized for this journey.')
-            expect(request.update).toEqual({ operation, gameId: game.id, date: '2030-03-05' })
+            expect(request.update).toEqual({ operation, gameId: game.id, date: expectedDate })
             expect(request.origin.assistantInputId).toBe(inputId)
-            return { action: 'update_game', result: { status: 'ok', state: { games: [game] }, dayOutcome: { date: '2030-03-05', status: outcome as 'marked_incomplete' | 'no_artifact' | 'restored' } } }
+            return { action: 'update_game', result: { status: 'ok', state: { games: [game] }, dayOutcome: { date: expectedDate, status: outcome as 'marked_incomplete' | 'no_artifact' | 'restored' } } }
           } },
           currentUserActionScope: () => ({ conversationId: 'synthetic-game-chat', inboundMailboxItemIds: [], recipientKey: 'synthetic-game-recipient', acceptedInputIds: [inputId], originSessionId: 'synthetic-game-session', conversationScope: 'group' }),
           currentHostedDeliveryContext: () => null, currentHostedMailboxItemIds: () => [], sendVaultFile: async () => { throw new Error('No file send authorized.') },
         },
         model: config.model, modelProvider: config.modelProvider,
-        prompt: `Current accepted message from Maya (Message ref: ${inputId}): ${message}`,
+        prompt: promptResult.prompt,
         reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
       })
       const reply = result.finalMessage ?? ''
       process.stdout.write(`[game-incomplete] ${JSON.stringify({ outcome, reply, actions: calls.map((call) => call.action) })}\n`)
       if (operation) {
         expect(calls.map((call) => call.action)).toEqual(['read_game', 'update_game'])
-        expect(reply).toMatch(/March 5|Mar(?:ch)?\.? 5|5 March|Tuesday|2030-03-05/iu)
+        expect(reply).toMatch(delayed ? /March 4|Mar(?:ch)?\.? 4|4 March|Monday|2030-03-04/iu : /March 5|Mar(?:ch)?\.? 5|5 March|Tuesday|2030-03-05/iu)
         if (outcome === 'no_artifact') expect(reply).toMatch(/already|no (?:post|artifact|check.in)|nothing|wasn[’']?t posted|not posted/iu)
         else if (outcome === 'restored') expect(reply).toMatch(/restored|undid|undone|cleared|removed|done|complete/iu)
         else expect(reply).toMatch(/not done|incomplete|missed/iu)

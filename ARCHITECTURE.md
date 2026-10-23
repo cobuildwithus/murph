@@ -5439,7 +5439,11 @@ entry view adds only optional `incomplete: true`; the new tool receipt appears
 only in responses to the new operations. Deploy the additive migration and
 Web consumer before the runtime producer; legacy requests keep their response
 shape and existing closed status enums. No new provider call or crypto work
-is added to the mutation transaction.
+is added to the mutation transaction. Relative dates use the acting message’s
+occurrence time, not a later read/processing time; an ambiguous timestamp
+requires clarification. Once corrections exist, flag-aware Web is the rollback
+floor: older scoring could freeze incorrect settlement. Use compatible forward
+fixes; runtime rollback alone cannot make old Web safe.
 
 `runGameCommand` is the single write path, for the routes now and Murph's tools
 later. It validates the command (`command.ts`), checks uploads, seals words,

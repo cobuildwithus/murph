@@ -125,6 +125,7 @@ it.each(['mark_incomplete', 'restore_day'])('binds %s to the current speaker wit
   expect((await execute(args)).rpcResult.success).toBe(true)
   expect(port).toHaveBeenCalledExactlyOnceWith({ action: 'update_game', origin, update: { operation, gameId: 'game_synthetic', date: '2030-04-01' } })
   expect(parse('update_game', { ...args, memberId: 'another-player' })?.kind).toBe('invalid-game-arguments')
-  expect(MURPH_UPDATE_GAME_TOOL.description).toContain('ask once when the day is ambiguous')
+  expect(MURPH_UPDATE_GAME_TOOL.description).toContain('ask once for the date')
   expect(MURPH_UPDATE_GAME_TOOL.description).toContain('one plain line naming the date or weekday')
+  expect(MURPH_UPDATE_GAME_TOOL.description).toContain('never from progress.checkedAt or processing time')
 })
