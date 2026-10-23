@@ -45400,6 +45400,7 @@ describeRealCodex('real Codex game progress and photo journeys', () => {
     { name: 'game chat photo repeated unsolicited photo stays quiet', kind: 'quiet' },
     { name: 'game chat photo introduction in another room stays quiet', kind: 'quiet-new-room' },
     { name: 'game chat photo explicit save needs no repeated confirmation', kind: 'save' },
+    { name: 'game v1 any artifact chat photo save uses one write', kind: 'save-any' },
     { name: 'game chat photo yes saves only pending source', kind: 'yes' },
     { name: 'game chat photo replacement asks before consuming retake', kind: 'replace' },
     { name: 'game chat daily progress distinguishes due and missed', kind: 'progress' },
@@ -45422,6 +45423,7 @@ describeRealCodex('real Codex game progress and photo journeys', () => {
       ] },
       result: kind === 'result' ? { scores: [{ memberId: 'player_alex', seat: 0, score: 5, misses: 0 }, { memberId: 'player_sam', seat: 1, score: 3, misses: 2 }], tickets: [{ owedByMemberId: 'player_sam', owedToMemberId: 'player_alex', what: 'Choose the next board game', status: 'open' as const, count: 1 }] } : null,
     }
+    if (kind === 'save-any') delete game.terms.checkInKind
     if (kind === 'window') {
       game.lengthDays = 365
       game.startsOn = '2030-01-01'
@@ -45465,7 +45467,7 @@ describeRealCodex('real Codex game progress and photo journeys', () => {
       })
       process.stdout.write(JSON.stringify({ scenario: name, reply: result.finalMessage, actions: calls.map((call) => call.action), finalAction: result.finalAction }) + '\n')
       const photos = calls.filter((call) => call.action === 'game_photo')
-      if (kind === 'offer' || kind === 'save' || kind === 'yes') {
+      if (kind === 'offer' || kind === 'save' || kind === 'save-any' || kind === 'yes') {
         expect(calls.map((call) => call.action)).toEqual(['read_game', 'game_photo'])
         expect(photos[0]).toMatchObject({ origin: { kind: 'accepted_input', assistantInputId: inputId }, photo: { operation: kind === 'offer' ? 'offer' : 'save', gameId: game.id } })
         if (kind === 'yes') expect(photos[0].photo.sourceMessageRef).toBeUndefined()

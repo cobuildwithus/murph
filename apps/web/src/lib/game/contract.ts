@@ -154,7 +154,7 @@ export interface AcceptInviteBody {
 export interface PostEntryBody {
   entryId: string;
   kind: GameEntryKind;
-  mediaKeys: string[];
+  mediaKeys?: string[];
   text?: string;
   data?: GameEntryData;
   /** Optional device-rendered locked preview, at most 64 characters. */
@@ -209,7 +209,7 @@ export type GameCommand =
   | ({ type: "createGame" } & CreateGameBody)
   | ({ type: "join"; token: string } & AcceptInviteBody)
   | ({ type: "negotiate"; token: string } & NegotiateInviteBody)
-  | ({ type: "post"; gameId: string } & PostEntryBody)
+  | ({ type: "post"; gameId: string; mediaKeys: string[] } & PostEntryBody)
   /** Take back your own post for your current day (a retake follows, if one's left). */
   | { type: "withdraw"; gameId: string; entryId: string }
   | { type: "redeem"; ticketId: string };
