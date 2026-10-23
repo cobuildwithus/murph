@@ -3,7 +3,7 @@ import type { Prisma } from "@prisma/client";
 import { buildHostedLinqDeliveryId } from "../hosted-onboarding/linq-delivery-store";
 import { createHostedLinqDeliveryIdempotencyLookupKey } from "../hosted-onboarding/linq-observability-identifiers";
 
-export type GameChatLifecycleKind = "started" | "change_cancelled";
+export type GameChatLifecycleKind = "started" | "change_cancelled" | "cancelled";
 
 export function gameChatLifecycleEventId(gameId: string, kind: GameChatLifecycleKind, proposalId?: string): string {
   if (kind === "change_cancelled") {

@@ -46,3 +46,12 @@ export function buildGameChangeCancelledInstructions(): string {
     "This is a notice about the earlier request only. Do not describe any later request as cancelled or make claims about current progress, whether play has started, or what changes have happened since.",
   ].join("\n");
 }
+
+/** A notice about the cancelled invite, never a claim about later games. */
+export function buildGameInviteCancelledInstructions(): string {
+  return [
+    "A player cancelled the earlier challenge invite from the app before it started. Tell both players in one brief, plain line that the invite was called off.",
+    "Do not repeat tasks or stakes, ask a question, offer reminders, assign blame, or claim a live game was stopped. Never mention internal IDs or delivery details.",
+    "This notice concerns only that earlier invite. Do not say that any later invite or game was cancelled or make claims about current progress.",
+  ].join("\n");
+}

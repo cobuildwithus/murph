@@ -72,7 +72,7 @@ function pendingWhere(gameId: string, proposalId: string, containerMemberId?: st
 
 /** Revalidate the audience outside the existing provider dispatch transaction. */
 export async function readGameProposalDeliveryPlayers(key: string | null, containerMemberId: string): Promise<readonly string[] | undefined> {
-  return /^(game-change|game-started|game-change-cancelled):/.test(key ?? "") ? requireExactGameChat(containerMemberId) : undefined;
+  return /^(game-change|game-started|game-change-cancelled|game-cancelled):/.test(key ?? "") ? requireExactGameChat(containerMemberId) : undefined;
 }
 
 

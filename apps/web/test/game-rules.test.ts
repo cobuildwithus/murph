@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { GameEntryKind, GameSchedule } from "@/src/lib/game/contract";
 import { areGameDevToolsAllowed, isGameEnabled, isGameEnabledFor, mediaKeyOwner, mediaKeyPrefixFor } from "@/src/lib/game/access";
 import {
+  decideCancelInvite,
   decideDevAdvance,
   decideJoin,
   decideNegotiationStart,
@@ -656,5 +657,23 @@ describe("v1 rule boundaries", () => {
     expect(decideSettle(state).tickets).toEqual([]);
     state.game.terms.versions[0].schedule = {count:1};
     expect(decideSettle(state).tickets).toEqual([]);
+  });
+});
+
+describe("invite cancellation", () => {
+  it("permits only seated players before kickoff and treats void as a no-op", () => {
+    const state = invited();
+    expect(decideCancelInvite(state, LEO)).toBe("cancel");
+    expect(() => decideCancelInvite(state, AVA)).toThrowError(expect.objectContaining({ error: expect.objectContaining({ code: "NOT_A_PLAYER" }) }));
+    const seated = live();
+    seated.game.status = "negotiating";
+    expect(decideCancelInvite(seated, AVA)).toBe("cancel");
+    for (const status of ["live", "settled"] as const) {
+      seated.game.status = status;
+      expect(() => decideCancelInvite(seated, LEO)).toThrowError(expect.objectContaining({ error: expect.objectContaining({ code: "INVITE_USED" }) }));
+    }
+    seated.game.status = "void";
+    expect(decideCancelInvite(seated, AVA)).toBe("already-void");
+    expect(() => decideCancelInvite(seated, "outsider")).toThrowError(expect.objectContaining({ error: expect.objectContaining({ code: "NOT_A_PLAYER" }) }));
   });
 });

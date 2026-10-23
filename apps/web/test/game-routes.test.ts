@@ -206,6 +206,9 @@ describe("weekly game routes", () => {
 
   describe("write routes", () => {
     it.each([
+      ["DELETE /games/:id", () => routes.game.DELETE(
+        writeRequest("DELETE", `/games/${GAME_ID}`), params({ id: GAME_ID })),
+        { gameId: GAME_ID, type: "cancelInvite" }],
       ["DELETE /games/:id/changes/:proposalId", () => routes.cancelChange.DELETE(
         writeRequest("DELETE", `/games/${GAME_ID}/changes/proposal_1`, { decision: "approve" }), params({ id: GAME_ID, proposalId: "proposal_1" })),
         { type: "respondChange", gameId: GAME_ID, proposalId: "proposal_1", decision: "cancel" }],

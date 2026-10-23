@@ -1,7 +1,7 @@
 import "server-only";
-import type { HostedLinqDelivery, Prisma, PrismaClient } from "@prisma/client";
+import type { Game, HostedLinqDelivery, Prisma, PrismaClient } from "@prisma/client";
 import { buildHostedExecutionAssistantNotificationRequestedWake } from "@murphai/hosted-execution";
-import { buildGameKickoffInstructions, buildGameChangeCancelledInstructions } from "@murphai/hosted-execution/runtime-control";
+import { buildGameKickoffInstructions, buildGameChangeCancelledInstructions, buildGameInviteCancelledInstructions } from "@murphai/hosted-execution/runtime-control";
 import { getPrisma } from "../prisma";
 import { appendPreparedHostedMailboxEnvelopeTx, prepareHostedMailboxEnvelopeAppend, readHostedMailboxItemByDedupeKey } from "../hosted-mailbox/store";
 import { assertHostedAssistantNotificationRouteAuthority, bindHostedAssistantNotificationDestination, resolveHostedAssistantNotificationDestination } from "../hosted-routing/assistant-notification-destination";
@@ -36,7 +36,7 @@ export async function drainGameChatLifecycle(input: { prisma?: PrismaClient; now
   let attempted = 0;
   for (const receipt of pending) {
     if (input.signal?.aborted) break;
-    if (!["game_started", "game_proposal", "game_change_cancelled"].includes(receipt.template ?? "") || !receipt.sourceRef) continue;
+    if (!["game_started", "game_proposal", "game_change_cancelled", "game_cancelled"].includes(receipt.template ?? "") || !receipt.sourceRef) continue;
     const claimed = await prisma.hostedLinqDelivery.updateMany({
       where: { id: receipt.id, source: "game_lifecycle", status: receipt.status, attemptedAt: receipt.attemptedAt,
         OR: [{ retryAfterAt: null }, { retryAfterAt: { lte: now } }] },
@@ -91,9 +91,10 @@ async function processGameChatIntent(receipt: GameChatIntent, now: Date, prisma:
   const gameId = receipt.sourceRef;
   if (!gameId) return false;
   if (receipt.template !== "game_proposal") {
+    const kind = receipt.template === "game_cancelled" ? "cancelled" : "started";
     return receipt.status === "generation_queued"
-      ? recoverGameNotificationWake(receipt.id, gameId, gameChatLifecycleEventId(gameId, "started"), now)
-      : deliverGameChatLifecycle(gameId, "started");
+      ? recoverGameNotificationWake(receipt.id, gameId, gameChatLifecycleEventId(gameId, kind), now)
+      : deliverGameChatLifecycle(gameId, kind);
   }
   const game = await prisma.game.findUnique({ where: { id: gameId }, select: { pendingChange: true, status: true } });
   const pending = parsePendingGameChange(game?.pendingChange);
@@ -112,7 +113,8 @@ async function processGameChatIntent(receipt: GameChatIntent, now: Date, prisma:
 async function recoverGameNotificationWake(receiptId: string, gameId: string, eventId: string, now: Date): Promise<boolean> {
   const prisma = getPrisma();
   const game = await prisma.game.findUnique({ where: { id: gameId }, select: { chatContainerMemberId: true, status: true } });
-  if (!game || !["live", "negotiating"].includes(game.status) || eventId.startsWith("game-started:") && game.status !== "live") {
+  const kind = eventId.startsWith("game-cancelled:") ? "cancelled" : eventId.startsWith("game-started:") ? "started" : "change_cancelled";
+  if (!game || !lifecycleStatuses(kind).includes(game.status)) {
     await prisma.hostedLinqDelivery.updateMany({ where: { id: receiptId, status: "generation_queued" }, data: { status: "skipped", skippedAt: now, skipReason: "game_lifecycle_superseded", retryAfterAt: null } });
     return false;
   }
@@ -129,25 +131,26 @@ async function recoverGameNotificationWake(receiptId: string, gameId: string, ev
   return true;
 }
 
+function lifecycleStatuses(kind: GameChatLifecycleKind): string[] {
+  return kind === "cancelled" ? ["void"] : kind === "started" ? ["live"] : ["live", "negotiating"];
+}
+
 export async function deliverGameChatLifecycle(gameId: string, kind: GameChatLifecycleKind, proposalId?: string): Promise<boolean> {
   const prisma = getPrisma();
   const eventId = gameChatLifecycleEventId(gameId, kind, proposalId);
   const game = await prisma.game.findUnique({ where: { id: gameId }, include: { players: { select: { memberId: true }, take: 3 } } });
-  const statuses = kind === "started" ? ["live"] : ["live", "negotiating"];
+  const statuses = lifecycleStatuses(kind);
   if (!game || !statuses.includes(game.status) || game.players.length !== 2) {
     await prisma.hostedLinqDelivery.updateMany({ where: { source: "game_lifecycle", sourceRef: kind === "change_cancelled" ? `${gameId}:${proposalId}` : gameId, template: `game_${kind}`, status: "awaiting_generation" }, data: { status: "skipped", skippedAt: new Date(), skipReason: "game_lifecycle_superseded" } });
     return false;
   }
   if (!game.players.every((player) => isGameEnabledFor(player.memberId))) return false;
   const players = game.players.map((player) => player.memberId);
-  // Shared projection owns which facts may enter the group. It never returns
-  // the personal app view, contact labels or invite credentials.
-  const { readGameChatState } = await import("./service");
-  const state = await readGameChatState(game.chatContainerMemberId ?? "", players);
-  const shared = state.games.find((candidate) => candidate.id === gameId);
-  if (!shared || !statuses.includes(shared.status)) return false;
-  const instructions = kind === "started" ? buildGameKickoffInstructions({ kind, game: shared })
-    : buildGameChangeCancelledInstructions();
+  // Cancellation needs no private words or shared projection (void games are
+  // absent there), and must never discover or create a new chat.
+  if (kind === "cancelled" && !game.chatContainerMemberId) return false;
+  const instructions = await lifecycleInstructions(game, kind, players);
+  if (!instructions) return false;
   const identities = await Promise.all(players.map((memberId) => readHostedMemberIdentity({ memberId, prisma })));
   const phones = identities.flatMap((identity) => identity?.phoneNumberVerifiedAt && identity.phoneNumber ? [identity.phoneNumber] : []);
   if (phones.length !== 2 || new Set(phones).size !== 2) throw new Error("Game chat requires verified players.");
@@ -160,10 +163,20 @@ export async function deliverGameChatLifecycle(gameId: string, kind: GameChatLif
     }
   }
   const destination = containerMemberId ? await resolveHostedAssistantNotificationDestination({ memberId: containerMemberId, prisma }) : null;
-  if (!destination) return (await prepareGameChatBootstrap(gameId, eventId, instructions)) !== null;
+  if (!destination) return kind === "cancelled" ? false : (await prepareGameChatBootstrap(gameId, eventId, instructions)) !== null;
   if (destination.conversationShape !== "thread-container" || destination.route.channel !== "linq") throw new Error("Game chat route is unavailable.");
   await requireExactChat(containerMemberId!, phones);
   return enqueueGameLifecycle({ containerMemberId: containerMemberId!, gameId, kind, eventId, instructions, destination });
+}
+
+/** Read shared context only for notices that actually describe game terms. */
+async function lifecycleInstructions(game: Pick<Game, "id" | "chatContainerMemberId">, kind: GameChatLifecycleKind, players: readonly string[]): Promise<string | null> {
+  if (kind === "cancelled") return buildGameInviteCancelledInstructions();
+  const { readGameChatState } = await import("./service");
+  const state = await readGameChatState(game.chatContainerMemberId ?? "", players);
+  const shared = state.games.find((candidate) => candidate.id === game.id);
+  if (!shared || !lifecycleStatuses(kind).includes(shared.status)) return null;
+  return kind === "started" ? buildGameKickoffInstructions({ kind, game: shared }) : buildGameChangeCancelledInstructions();
 }
 
 async function enqueueGameLifecycle(input: {
@@ -184,7 +197,7 @@ async function enqueueGameLifecycle(input: {
   }) });
   const appended = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
     if (bound.externalThreadRouteAuthority) await assertHostedAssistantNotificationRouteAuthority({ authority: bound.externalThreadRouteAuthority, prisma: tx });
-    const current = await tx.game.findFirst({ where: { id: input.gameId, status: { in: input.kind === "started" ? ["live"] : ["live", "negotiating"] }, chatContainerMemberId: input.containerMemberId }, select: { id: true } });
+    const current = await tx.game.findFirst({ where: { id: input.gameId, status: { in: lifecycleStatuses(input.kind) }, chatContainerMemberId: input.containerMemberId }, select: { id: true } });
     if (!current) return null;
     const result = await appendPreparedHostedMailboxEnvelopeTx({ prepared, tx });
     await markGameChatGenerationQueuedTx(input.eventId, tx);

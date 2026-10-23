@@ -337,6 +337,14 @@ function scheduleFor(
   };
 }
 
+/** Only seated players can call off an unstarted game; void is a no-op. */
+export function decideCancelInvite(state: RuleState, memberId: string): "cancel" | "already-void" {
+  if (!playerFor(state, memberId)) reject("NOT_A_PLAYER", "Only a player can cancel this invite.");
+  if (state.game.status === "void") return "already-void";
+  if (state.game.status !== "invited" && state.game.status !== "negotiating") reject("INVITE_USED", "This game has already started.");
+  return "cancel";
+}
+
 export type JoinDecision =
   | { kind: "already-joined" }
   | ({ kind: "join"; seat: number; startedAt: Date } & Schedule);

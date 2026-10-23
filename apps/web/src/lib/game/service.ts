@@ -35,6 +35,7 @@ import {
   liveEntry,
   attemptsUsed,
   isScheduledDay,
+  decideCancelInvite,
   decideDevAdvance,
   decideJoin,
   decideNegotiationStart,
@@ -156,6 +157,8 @@ interface CommandContext {
 /** Applies one command; returns the game to show back, if any. */
 async function runCommand(context: CommandContext, command: Exclude<GameCommand, { type: "setProfile" }>): Promise<string | null> {
   switch (command.type) {
+    case "cancelInvite":
+      return cancelInvite(context, command.gameId);
     case "proposeChange":
       return proposeChange(context, command);
     case "respondChange":
@@ -196,7 +199,7 @@ interface LockedStep {
   clock: Date;
 }
 
-type GameEventType = "negotiation_joined" | "created" | "joined" | "started" | "posted" | "withdrew" | "settled" | "redeemed" | "expired" | "time_shifted" | "change_proposed" | "change_applied" | "change_declined" | "change_cancelled" | "change_expired";
+type GameEventType = "cancelled" | "negotiation_joined" | "created" | "joined" | "started" | "posted" | "withdrew" | "settled" | "redeemed" | "expired" | "time_shifted" | "change_proposed" | "change_applied" | "change_declined" | "change_cancelled" | "change_expired";
 /** What changed, for the history: ids and numbers only, never words. */
 interface GameEventDraft {
   commandKey?: string;
@@ -548,6 +551,18 @@ async function copyPendingLabel(tx: Tx, row: GameRow, joinerId: string): Promise
       relationship_encrypted = COALESCE(EXCLUDED.relationship_encrypted, game_contact_label.relationship_encrypted),
       photo_key = COALESCE(EXCLUDED.photo_key, game_contact_label.photo_key),
       updated_at = EXCLUDED.updated_at`;
+}
+
+async function cancelInvite(context: CommandContext, gameId: string): Promise<string> {
+  await runLocked(gameId, context, async ({ tx, loaded, clock }) => {
+    if (decideCancelInvite(loaded.state, context.actor) === "already-void") return [];
+    await endGame(tx, gameId, { status: "void" });
+    if (loaded.row.chatContainerMemberId) {
+      await reserveGameChatLifecycleTx({ gameId, kind: "cancelled", now: clock, tx });
+    }
+    return [{ type: "cancelled", payload: {} }];
+  });
+  return gameId;
 }
 
 /** Settled or void: the roster is free to start another game together. */
@@ -1102,7 +1117,7 @@ export async function readHome(memberId: string): Promise<GameHomeView> {
       orderBy: { joinedAt: "desc" },
       select: { gameId: true },
       take: HOME_CANDIDATE_LIMIT,
-      where: { game: { status: { in: ["invited", "negotiating", "live", "settled", "void"] } }, memberId },
+      where: { game: { status: { in: ["invited", "negotiating", "live", "settled", "void"] }, events: { none: { type: "cancelled" } } }, memberId },
     }),
     prisma.game.findMany({ select: { id: true }, take: HOME_CANDIDATE_LIMIT, where: { inviteeMemberId: memberId, status: "invited" } }),
     prisma.gameTicket.findMany({

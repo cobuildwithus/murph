@@ -33,6 +33,55 @@ function negotiate(token: string, proposalId = randomUUID()): Extract<GameComman
 
 describe.skipIf(!enabled)("game negotiation persistence", () => {
   afterAll(async () => { await getPrisma().hostedMember.deleteMany({where:{id:{in:members}}}); });
+  it("lets the challenger cancel an invited game once without creating a chat", async () => {
+    const {a,b,c,gameId,token} = await setup();
+    const db = getPrisma();
+    await db.game.update({where:{id:gameId},data:{chatContainerMemberId:null}});
+    const command = {type:"cancelInvite" as const,gameId};
+    expect(await run(c,command)).toMatchObject({ok:false,error:{code:"NOT_A_PLAYER"}});
+    expect(await run(b,command)).toMatchObject({ok:false,error:{code:"NOT_A_PLAYER"}});
+    const results = await Promise.all([run(a,command),run(a,command)]);
+    expect(results).toEqual(results.map(() => expect.objectContaining({ok:true,game:expect.objectContaining({status:"void",pendingChange:null})})));
+    expect(await db.gameEvent.findMany({where:{gameId,type:"cancelled"},select:{actor:true}})).toEqual([{actor:a}]);
+    expect(await db.hostedLinqDelivery.count({where:{source:"game_lifecycle",sourceRef:gameId,template:"game_cancelled"}})).toBe(0);
+    expect(await readInvitePreview(token)).toMatchObject({status:"expired"});
+    for (const actor of [a,b]) expect((await readHome(actor)).games.some((game) => game.id === gameId)).toBe(false);
+    expect(await run(c,command)).toMatchObject({ok:false,error:{code:"NOT_A_PLAYER"}});
+  });
+  it("lets the invitee cancel negotiation, clears the pending change and frees the pair immediately", async () => {
+    const {a,b,gameId,token} = await setup();
+    const db = getPrisma();
+    await run(b,negotiate(token));
+    expect(await db.game.findUniqueOrThrow({where:{id:gameId}})).toMatchObject({liveRosterKey:expect.any(String),pendingChange:expect.any(Object)});
+    expect(await run(b,{type:"cancelInvite",gameId})).toMatchObject({ok:true,game:{status:"void",pendingChange:null}});
+    expect(await run(a,{type:"cancelInvite",gameId})).toMatchObject({ok:true,game:{status:"void",pendingChange:null}});
+    expect(await db.game.findUniqueOrThrow({where:{id:gameId},select:{liveRosterKey:true,pendingChange:true}})).toEqual({liveRosterKey:null,pendingChange:null});
+    expect(await db.gameEvent.findMany({where:{gameId,type:"cancelled"},select:{actor:true}})).toEqual([{actor:b}]);
+    expect(await db.hostedLinqDelivery.findMany({where:{source:"game_lifecycle",sourceRef:gameId,template:"game_cancelled"},select:{status:true}})).toEqual([{status:"awaiting_generation"}]);
+    for (const actor of [a,b]) expect((await readHome(actor)).games.some((game) => game.id === gameId)).toBe(false);
+    // Even after the old deadline passes, cancellation must never reappear as expiry.
+    await db.game.update({where:{id:gameId},data:{inviteExpiresAt:new Date(Date.now()-1000)}});
+    for (const actor of [a,b]) expect((await readHome(actor)).games.some((game) => game.id === gameId)).toBe(false);
+    const nextId = randomUUID();
+    const created = await run(a,{type:"createGame",gameId:nextId,previousGameId:gameId,inviteeFirstName:"Sam",terms:{tasks,schedule:{days:[0,1,2,3,4,5,6]},stakes:[{kind:"prize",item:"Pick a film"}],lengthDays:7}});
+    expect(created).toMatchObject({ok:true,game:{status:"invited"}});
+    if (!created.ok || !created.game?.inviteToken) throw new Error("Replacement invite failed");
+    expect(await run(b,negotiate(created.game.inviteToken))).toMatchObject({ok:true,game:{status:"negotiating"}});
+  });
+  it("refuses cancellation after kickoff or settlement and leaves ordinary expiry visible", async () => {
+    const {a,b,gameId,token} = await setup();
+    await run(b,{type:"join",token,termsVersion:1,timeZone:"America/New_York"});
+    expect(await run(a,{type:"cancelInvite",gameId})).toMatchObject({ok:false,error:{code:"INVITE_USED"}});
+    await getPrisma().game.update({where:{id:gameId},data:{status:"settled",liveRosterKey:null}});
+    expect(await run(b,{type:"cancelInvite",gameId})).toMatchObject({ok:false,error:{code:"INVITE_USED"}});
+    const expired = await setup();
+    await run(expired.b,negotiate(expired.token));
+    await getPrisma().game.update({where:{id:expired.gameId},data:{inviteExpiresAt:new Date(Date.now()-1000)}});
+    expect(await readGame(expired.gameId,expired.a)).toMatchObject({status:"void"});
+    expect(await run(expired.b,{type:"cancelInvite",gameId:expired.gameId})).toMatchObject({ok:true,game:{status:"void"}});
+    for (const actor of [expired.a,expired.b]) expect((await readHome(actor)).games).toContainEqual(expect.objectContaining({id:expired.gameId,status:"void"}));
+    expect(await getPrisma().gameEvent.count({where:{gameId:expired.gameId,type:"cancelled"}})).toBe(0);
+  });
   it("claims a seat without agreement, seals pending words, and activates exactly once on later approval", async () => {
     const {a,b,room,gameId,token} = await setup();
     expect(await readInvitePreview(token)).toMatchObject({status:"open",supportsNegotiation:true,lengthDays:10});

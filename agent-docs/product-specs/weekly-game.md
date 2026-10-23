@@ -28,6 +28,17 @@ invite preview (`GET /api/game/v1/invites/<token>`). A used, expired, or missing
 invite previews as "This invite isn't available" and names nobody. A game's
 players keep its invite token after it goes live (a spent token can't be
 accepted again), so reopening your own link is recognized as yours.
+Either seated player can cancel an invited or negotiating game with
+`DELETE /api/game/v1/games/:id` (no body). It returns `200 { ok: true, game }`
+with the existing `GameView` in `void` status. Live or settled games refuse with
+`INVITE_USED`; outsiders receive `NOT_A_PLAYER` (or `GAME_NOT_FOUND` for a
+missing game). An already void game returns unchanged. The game lock covers
+clearing its pending change and roster key plus recording one `cancelled` event
+with its actor. The pair can immediately start another invite. Home excludes
+cancelled events, retaining ordinary expired invites; GameView adds no field.
+If a game chat is already attached, the existing durable lifecycle sends one
+brief cancellation notice there. Cancellation never creates a chat.
+
 An invite nobody accepts expires, and stays on the challenger's Home for a week
 marked expired. The invitee opens it, signs in, and shakes on the terms they saw; a
 changed version is refused with `TERMS_CHANGED`. Accepting makes the game live.
@@ -135,7 +146,6 @@ this default without deleting other people's private contact choices.
 ## Deferred
 
 - Groups where everyone plays everyone, and a public league of matched strangers.
-- Declining or cancelling an invite; for now it simply expires.
 - Server-side stripping of embedded location metadata from uploaded images.
 - Recaps, bankruptcy, and nudges.
 
