@@ -28,5 +28,11 @@ for (const width of [390, 1280]) {
     for (const state of ["monthly-recovery", "ordinary-sponsored-one-time", "monthly-active"]) {
       await study.locator(`[data-design-state="${state}"]`).screenshot({ path: path.join(output, `group-fund-${state}-${width}.png`), style });
     }
+    const confirmedManagement = { authorizationId: "hgsa_design_recovery", chargedThisPeriodMinor: 500, monthlyCapMinor: 2_000, pendingMonthlyCapMinor: null, pendingThisPeriodMinor: 0, periodEnd: "2026-08-30T16:00:00.000Z", status: "active" };
+    await page.route("**/api/design/group-sponsorship-management", (route) => route.fulfill({ body: JSON.stringify({ checkout: { purchaseId: "hucp_design_recovery", status: "fulfilled" }, management: confirmedManagement }), contentType: "application/json", status: 200 }));
+    await page.locator('[data-screenshot-category="groups"]').evaluate((element) => element.removeAttribute("inert"));
+    await recovery.getByRole("button", { name: "Review payment" }).click();
+    await expect(recovery.getByRole("status")).toContainText("Payment confirmedAutomatic refills are on.");
+    await recovery.screenshot({ path: path.join(output, `group-fund-payment-confirmed-${width}.png`), style });
   });
 }

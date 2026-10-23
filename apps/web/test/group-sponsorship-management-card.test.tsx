@@ -332,6 +332,68 @@ test("carries one no-navigation recovery from pending to an explicit focused com
   }
 });
 
+test.each([
+  {
+    expectedReads: 0,
+    initialStatus: "active" as const,
+    label: "already confirmed",
+  },
+  {
+    expectedReads: 1,
+    initialStatus: "recovery_required" as const,
+    label: "still settling",
+  },
+])("confirms a returned sponsorship checkout that is $label", async ({
+  expectedReads,
+  initialStatus,
+}) => {
+  const fetchMock = vi.fn(async () => ({
+    json: async () => ({
+      management: { ...baseManagement, status: "active" },
+    }),
+    ok: true,
+  }));
+  vi.stubGlobal("fetch", fetchMock);
+
+  const { GroupSponsorshipManagementCard } = await import(
+    "@/src/components/hosted-groups/group-sponsorship-management-card"
+  );
+  vi.useFakeTimers();
+  const rendered = await renderClientComponent(createElement(
+    GroupSponsorshipManagementCard,
+    {
+      checkoutReturned: true,
+      endpoint: "/api/groups/fund/example/sponsorship",
+      management: { ...baseManagement, status: initialStatus },
+    },
+  ), {
+    location: {
+      href: "https://www.withmurph.ai/groups/fund/example?usageCheckout=success&usagePurchase=hucp_abcdefghijklmnop",
+    },
+  });
+  try {
+    const recoveryStatus = rendered.container.querySelector<HTMLElement>(
+      "[role='status']",
+    );
+    assert.ok(recoveryStatus);
+    expect(rendered.container.textContent).not.toContain("Payment needs attention");
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_000);
+    });
+
+    expect(recoveryStatus.textContent).toContain("Payment confirmed");
+    expect(rendered.replaceState).toHaveBeenCalledWith(
+      {},
+      "",
+      "/groups/fund/example",
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(expectedReads);
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
 test("offers a read-only recheck after bounded pending polls without starting another payment", async () => {
   let managementReadCount = 0;
   const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {

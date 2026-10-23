@@ -15,6 +15,7 @@ import {
 } from "@/src/components/ui/field";
 import { SegmentedControl } from "@/src/components/ui/segmented-control";
 import { Spinner } from "@/src/components/ui/spinner";
+import { stripSettingsQueryParams } from "@/src/components/settings/hosted-settings-utils";
 import {
   HOSTED_GROUP_SPONSORSHIP_MONTHLY_CAPS_MINOR,
   parseHostedGroupSponsorshipMonthlyCapMinor,
@@ -55,6 +56,7 @@ export type GroupSponsorshipManagementConfirmation =
 
 export function GroupSponsorshipManagementCard({
   cancelOnly = false,
+  checkoutReturned,
   endpoint,
   inert = false,
   initialSelectedMonthlyCapMinor,
@@ -62,6 +64,8 @@ export function GroupSponsorshipManagementCard({
   periodEndTimeZone,
 }: {
   cancelOnly?: boolean;
+  /** The payer just returned from a successful Checkout for this sponsorship. */
+  checkoutReturned?: boolean;
   endpoint: string;
   inert?: boolean;
   initialSelectedMonthlyCapMinor?: MonthlyCapMinor;
@@ -79,7 +83,7 @@ export function GroupSponsorshipManagementCard({
   const [error, setError] = useState<GroupSponsorshipManagementError | null>(null);
   const [recoveryProgress, setRecoveryProgress] = useState<
     GroupSponsorshipRecoveryProgress | null
-  >(null);
+  >(readCheckoutReturnProgress(checkoutReturned, initialManagement.status));
   const [confirmation, setConfirmation] = useState<
     GroupSponsorshipManagementConfirmation | null
   >(null);
@@ -102,6 +106,12 @@ export function GroupSponsorshipManagementCard({
       recoveryStatusRef.current?.focus();
     }
   }, [recoveryProgress]);
+
+  useEffect(() => {
+    if (checkoutReturned) {
+      stripSettingsQueryParams(["usageCheckout", "usagePurchase"]);
+    }
+  }, [checkoutReturned]);
 
   useEffect(() => {
     if (recoveryProgress !== "payment_pending") {
@@ -340,7 +350,7 @@ export function GroupSponsorshipManagementCard({
             {recoveryProgress === "payment_pending"
               ? "We’ll check this payment automatically. Automatic refills will resume after it is confirmed."
               : recoveryProgress === "fulfilled"
-                ? "Automatic refills are ready to resume."
+                ? "Automatic refills are on."
                 : "No new payment is needed. Recheck the existing payment before trying anything else."}
           </p>
           {recoveryProgress === "recheck_required" ? (
@@ -639,6 +649,18 @@ export function GroupSponsorshipCanceledReceipt() {
       </AlertDescription>
     </Alert>
   );
+}
+
+// A Checkout return is confirmed once the sponsorship is active again;
+// otherwise the existing bounded poll waits for the payment to settle.
+function readCheckoutReturnProgress(
+  checkoutReturned: boolean | undefined,
+  status: GroupSponsorshipManagementProjection["status"],
+): GroupSponsorshipRecoveryProgress | null {
+  if (!checkoutReturned) {
+    return null;
+  }
+  return status === "active" ? "fulfilled" : "payment_pending";
 }
 
 function readManagementProjection(
