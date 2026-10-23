@@ -21,6 +21,10 @@ const mocks = vi.hoisted(() => ({
   signalHostedMailboxAppendRuntime: vi.fn(),
 }));
 
+vi.mock("@/src/lib/hosted-execution/runtime-owner", () => ({
+  readHostedRuntimeDirectWakeOwner: async () => null,
+}));
+vi.mock("@/src/lib/prisma", () => ({ getPrisma: () => ({}) }));
 vi.mock("@/src/lib/hosted-execution/control", () => ({
   readHostedExecutionControlClientIfConfigured:
     mocks.readHostedExecutionControlClientIfConfigured,
@@ -234,7 +238,7 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
       expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledTimes(1);
     });
     expect(mocks.readHostedExecutionControlClientIfConfigured).toHaveBeenCalledTimes(1);
-    expect(mocks.ensureRuntimeProcessing).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => expect(mocks.ensureRuntimeProcessing).toHaveBeenCalledTimes(1));
     expect(afterResponseTasks).toHaveLength(0);
     expect(handoffSettled).toBe(false);
 

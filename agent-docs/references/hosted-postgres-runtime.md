@@ -85,12 +85,26 @@ Claim returns its locked routing result; target selection and launch preparation
 Postgres gate proved by their ownership transaction instead of rereading it
 after commit.
 
-Best-effort Web direct wakes send no admission snapshot. The Worker claims
-through Web's canonical Postgres command after receiving the request, just as
-it does for Temporal. A failed Web dispatch therefore cannot leave a starting
-reservation that blocks the durable wake. Each explicit retry reads current
-admission through that same Worker callback. No compensating release is safe
-or necessary at the Web transport boundary.
+Best-effort Web direct wakes read a live-owner snapshot before each attempt.
+They supply existing admission only for a Postgres member that passes the same
+default-mode eligibility predicate as claim and has a starting or active owner
+with a container target and workspace version. Retention-only owners are not
+wakeable by default-mode requests. This lookup reuses the coherent cutover/owner
+reader and canonical wire projection; it takes no locks and performs no writes.
+An ordinary eligible member needs two sequential reads; the existing game-only
+access fallback raises the maximum to five. At most two direct attempts each
+use one connection at a time, without an interactive transaction or external I/O
+inside database work. Existing database read retries remain bounded separately.
+
+A live accepted wake skips the Worker-to-Web claim round trip. Otherwise Web
+omits admission, including when the optional read fails, and the Worker claims
+through Web after receipt as it does for Temporal. Cold and idle owners therefore
+keep canonical admission after dispatch. Failed transport still leaves no
+starting reservation, including when an idle owner retains a container target.
+No compensating release is safe or necessary at the Web transport boundary.
+Supplied stale generations follow the Worker's existing fenced recovery and
+bounded claim loop; an uncertain wake or protected startup can still defer to
+Temporal rather than immediately re-claiming.
 
 The optional canonical admission response (`claimed` or `existing`) remains
 supported for deployed Web callers. Only authenticated Web OIDC

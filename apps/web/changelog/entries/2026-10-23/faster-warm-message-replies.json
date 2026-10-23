@@ -1,0 +1,16 @@
+{
+  "publishedOn": "2026-10-23",
+  "order": 100,
+  "item": {
+    "id": "faster-warm-message-replies",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Replies to messages start faster",
+    "summary": "Murph can start replying sooner when you send another message during an ongoing conversation.",
+    "details": "This reduces the wait in active text conversations. Starting a new conversation after a break keeps the usual recovery checks.",
+    "relevanceTags": [
+      "messages"
+    ],
+    "sourcePullRequests": []
+  }
+}

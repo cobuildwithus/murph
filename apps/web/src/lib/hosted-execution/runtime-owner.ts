@@ -82,6 +82,17 @@ export async function claimHostedRuntime(input: {
   }, OWNER_TRANSACTION_OPTIONS);
 }
 
+/** Advisory snapshot only. Never claim, lock or write before direct dispatch.
+ * A stale read still has to pass the native attempt/generation wake fence. */
+export async function readHostedRuntimeDirectWakeOwner(input: {
+  prisma: PrismaClient; userId: string;
+}): Promise<HostedRuntimeOwner | null> {
+  const { cutover, owner } = await readRuntimeEffectOwner(input.prisma, input.userId);
+  if (cutover !== "postgres" || !owner?.runnerContainerName || owner.workspaceVersion === null
+    || owner.processingMode === "inbox_media_retention") return null;
+  return await readRuntimeAdmissionTx(input.prisma, input.userId, "default", new Date()) ? owner : null;
+}
+
 /** Persist the immutable target and invocation facts before any launch effect.
  * A retry may repeat these facts; it cannot change an admitted invocation.
  */
