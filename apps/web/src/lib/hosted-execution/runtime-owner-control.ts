@@ -1,3 +1,4 @@
+import { projectHostedRuntimeOwner } from "./runtime-owner-snapshot";
 import { readHostedRuntimeMemberBackend } from "./runtime-cutover";
 import type { HostedRuntimeOwner, PrismaClient } from "@prisma/client";
 import { parseHostedRuntimeOwnerResponse, type HostedRuntimeOwnerCommand, type HostedRuntimeOwnerResponse } from "@murphai/hosted-execution/runtime-owner";
@@ -18,18 +19,18 @@ export async function executeHostedRuntimeOwnerCommand(input: CommandInput): Pro
   if (input.command.operation === "resolve_legacy") {
     const { resolveHostedLegacyMaterialization } = await import("./runtime-materialization");
     const result = await resolveHostedLegacyMaterialization({ ...input.command, prisma: input.prisma, userId: input.userId });
-    return parseHostedRuntimeOwnerResponse({ cutover: result.cutover, status: "observed", owner: projectOwner(result.owner) });
+    return parseHostedRuntimeOwnerResponse({ cutover: result.cutover, status: "observed", owner: projectHostedRuntimeOwner(result.owner) });
   }
   if (input.command.operation === "authorize_provider" || input.command.operation === "authorize_effect") {
     const result = input.command.operation === "authorize_provider"
       ? await authorizeHostedRuntimeProvider({ ...input.command, prisma: input.prisma, userId: input.userId })
       : await authorizeHostedRuntimeEffect({ ...input.command, prisma: input.prisma, userId: input.userId });
     return parseHostedRuntimeOwnerResponse({ cutover: result.cutover,
-      status: result.owner ? "authorized" : "blocked", owner: projectOwner(result.owner) });
+      status: result.owner ? "authorized" : "blocked", owner: projectHostedRuntimeOwner(result.owner) });
   }
   const result = await executeCommand({ ...input, command: input.command });
   const cutover = result.cutover ?? await readHostedRuntimeMemberBackend(input.prisma, input.userId);
-  return parseHostedRuntimeOwnerResponse({ cutover, status: result.status, owner: projectOwner(result.owner),
+  return parseHostedRuntimeOwnerResponse({ cutover, status: result.status, owner: projectHostedRuntimeOwner(result.owner),
     blockedReason: result.blockedReason });
 }
 
@@ -92,17 +93,4 @@ function mutated(applied: boolean): CommandResult {
 }
 function authorized(allowed: boolean): CommandResult {
   return { status: allowed ? "authorized" : "blocked", owner: null };
-}
-function projectOwner(owner: HostedRuntimeOwner | null) {
-  if (!owner) return null;
-  // Accounting authority stays on Web; the runtime cannot select a beneficiary.
-  return { userId: owner.userId, generation: owner.generation.toString(),
-    attemptId: owner.attemptId, phase: owner.phase, processingMode: owner.processingMode,
-    allocationId: owner.allocationId, runnerContainerName: owner.runnerContainerName,
-    platformAiUsageAllowed: owner.platformAiUsageAllowed,
-    failureCount: owner.failureCount, lastErrorCode: owner.lastErrorCode,
-    workspaceVersion: owner.workspaceVersion?.toString() ?? null,
-    startedAt: owner.startedAt?.toISOString() ?? null,
-    acceptedAt: owner.acceptedAt?.toISOString() ?? null,
-    completedAt: owner.completedAt?.toISOString() ?? null };
 }

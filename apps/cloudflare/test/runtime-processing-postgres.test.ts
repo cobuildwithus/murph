@@ -587,6 +587,31 @@ describe("Postgres runtime orchestration", () => {
     expect(container.startSupervisedInvocation).not.toHaveBeenCalled();
   });
 
+  it("re-claims after a stale supplied snapshot and wakes the canonical successor", async () => {
+    const { source, container } = harness();
+    container.ensureProcessing.mockResolvedValueOnce({ kind: "start-required", reason: "no-active-child" });
+    const successor = owner({ generation: "2", attemptId: "attempt-b" });
+    vi.mocked(commandHostedRuntimeOwner).mockImplementation(async ({ command }) => {
+      if (command.operation === "retire") return response(null, "stale");
+      if (command.operation === "claim") return response(successor);
+      throw new Error("Unexpected owner command.");
+    });
+    expect(await ensurePostgresRuntimeProcessing(source, { ...request, admission: response(owner()) }))
+      .toMatchObject({ kind: "runtime_processing_accepted", action: "woken", runtimeAttemptId: "attempt-b" });
+    expect(vi.mocked(commandHostedRuntimeOwner).mock.calls.map(([value]) => value.command)).toEqual([
+      { operation: "retire", attemptId: "attempt-a", generation: "1", completed: false },
+      { operation: "claim", processingMode: "default" },
+    ]);
+    expect(container.ensureProcessing).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      activeRuntime: expect.objectContaining({ attemptId: "attempt-a", leaseGeneration: "1" }),
+    }));
+    expect(container.ensureProcessing).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      activeRuntime: expect.objectContaining({ attemptId: "attempt-b", leaseGeneration: "2" }),
+    }));
+    expect(container.retireStandbySlot).not.toHaveBeenCalled();
+    expect(container.startSupervisedInvocation).not.toHaveBeenCalled();
+  });
+
   it("does not reconcile a completed receipt while liveness is unknown", async () => {
     const { source, container } = harness();
     container.ensureProcessing.mockResolvedValue({ kind: "wake-unconfirmed", reason: "active-child-rejected" });

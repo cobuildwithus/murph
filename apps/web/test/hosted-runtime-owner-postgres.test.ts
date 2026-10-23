@@ -17,6 +17,7 @@ import {
   authorizeHostedRuntimeProvider,
   recordHostedRuntimeTargetRetired,
   claimHostedRuntime,
+  readHostedRuntimeDirectWakeOwner,
   prepareHostedRuntimeLaunch,
   recordHostedRuntimeAccepted,
   releaseHostedRuntimeAfterRetirement,
@@ -161,6 +162,47 @@ describe.skipIf(!enabled)("Postgres runtime ownership", () => {
     }
   });
 
+  it("reads eligible live admission on a read-only connection without changing the owner", async () => {
+    const userId = await member();
+    const claimed = (await claim(userId)).owner;
+    const expected = await prepareHostedRuntimeLaunch({ prisma: first, identity: identity(claimed),
+      runnerContainerName: "synthetic-live-runner", workspaceVersion: "0", providerEgressTokenHash: null,
+      platformAiUsageAllowed: true,
+    });
+    await first.$executeRawUnsafe("SET default_transaction_read_only = on");
+    try {
+      const operations: PrismaOperationTiming[] = [];
+      expect(await runWithPrismaOperationTimings(operations,
+        () => readHostedRuntimeDirectWakeOwner({ prisma: first, userId }))).toEqual(expected);
+      expect(operations).toHaveLength(2);
+    } finally {
+      await first.$executeRawUnsafe("SET default_transaction_read_only = off");
+    }
+    expect(await observer.hostedRuntimeOwner.findUnique({ where: { userId } })).toEqual(expected);
+  });
+
+  it.each(["paused", "suspended", "consent_revoked"] as const)("does not supply live admission for a %s member", async restriction => {
+    const userId = await member();
+    const claimed = (await claim(userId)).owner;
+    await prepareHostedRuntimeLaunch({ prisma: first, identity: identity(claimed),
+      runnerContainerName: "synthetic-live-runner", workspaceVersion: "0", providerEgressTokenHash: null,
+      platformAiUsageAllowed: true,
+    });
+    if (restriction === "consent_revoked") {
+      await observer.hostedConsentGrant.create({ data: {
+        memberId: userId, scope: HOSTED_HEALTH_DATA_CONSENT_SCOPE, status: "granted",
+        documentVersionsJson: {}, source: "runtime_owner_proof", grantedAt: new Date(),
+      } });
+      await revokeHostedConsentScope({ prisma: observer, memberId: userId, scope: HOSTED_HEALTH_DATA_CONSENT_SCOPE });
+    } else {
+      await observer.hostedMember.update({ where: { id: userId }, data: restriction === "paused"
+        ? { billingStatus: "paused" } : { suspendedAt: new Date() } });
+    }
+    expect(await readHostedRuntimeDirectWakeOwner({ prisma: first, userId })).toBeNull();
+    expect(await claimHostedRuntime({ prisma: second, userId, processingMode: "default" }))
+      .toMatchObject({ status: "blocked", reason: "admission" });
+  });
+
   it("reads callback authority in the three lock queries without fetching either row twice", async () => {
     const userId = await member();
     const claimed = (await claim(userId)).owner;
@@ -205,6 +247,11 @@ describe.skipIf(!enabled)("Postgres runtime ownership", () => {
       const launch = { prisma: first, identity: initialIdentity, runnerContainerName: "synthetic-funded-runner",
         workspaceVersion: "1", providerEgressTokenHash: null, platformAiUsageAllowed: true };
       await prepareHostedRuntimeLaunch(launch);
+      const reads: PrismaOperationTiming[] = [];
+      expect(await runWithPrismaOperationTimings(reads,
+        () => readHostedRuntimeDirectWakeOwner({ prisma: first, userId: duplicate! })))
+        .toMatchObject({ attemptId: initialIdentity.attemptId, allowanceBeneficiaryMemberId: primary });
+      expect(reads).toHaveLength(5);
 
       // Changing the canonical room cannot move already admitted usage.
       await observer.game.update({ where: { id: game.id }, data: { chatContainerMemberId: duplicate! } });

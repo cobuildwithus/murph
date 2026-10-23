@@ -1,0 +1,19 @@
+{
+  "publishedOn": "2026-10-23",
+  "order": 100,
+  "item": {
+    "id": "faster-warm-message-replies",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Faster replies during a conversation",
+    "summary": "When you send another message while Murph is already active in your conversation, it starts replying sooner.",
+    "details": "The first message after a break works the same as before.",
+    "relevanceTags": [
+      "messaging",
+      "performance"
+    ],
+    "sourcePullRequests": [
+      4339
+    ]
+  }
+}
