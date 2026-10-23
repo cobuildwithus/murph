@@ -11993,6 +11993,36 @@ describe("foreground device ingestion", () => {
     }
   });
 
+  test("services a newly due projected device wake through the existing claim and receipt owner", async () => {
+    const fixture = await createForegroundDeviceFixture();
+    try {
+      await fixture.run(async () => {
+        assert.ok(fixture.owner);
+        const projectedWorkspace = createWorkspaceState({ nextWakeAt: TEST_NOW, nextWakeReason: "device-sync.reconcile" });
+        // No external mailbox item or new invocation is needed. Repeated alarm
+        // presentation still has one claim and checkpoint-gated receipt.
+        await fixture.owner.recoverProjectedWake(projectedWorkspace);
+        await fixture.owner.recoverProjectedWake(projectedWorkspace);
+        fixture.owner.kick();
+        await waitForCondition(() => fixture.effects.length > 0, 5_000);
+        return { progressed: false };
+      });
+      const pending = (await readHostedSystemMailboxState(fixture.vaultRoot)).pending;
+      assert.equal(pending.length, 1);
+      assert.equal(pending[0]?.itemId, `device-sync.wake:workspace:${TEST_NOW}`);
+      assert.equal(pending[0]?.status, "recording");
+      assert.equal(pending[0]?.lastErrorCode, null);
+      assert.equal(fixture.effects.length, 1);
+      assert.equal(fixture.acks.length, 0);
+      for (const effect of fixture.effects) await effect();
+      // No local device jobs are due in this fixture. Even that empty timer
+      // attempt completes through the ordinary durable receipt owner.
+      assert.equal((await readHostedSystemMailboxState(fixture.vaultRoot)).pending.length, 0);
+    } finally {
+      await fixture.cleanup();
+    }
+  });
+
   test("retains an independent device receipt when vault-share publication fails", async () => {
     const fixture = await createForegroundDeviceFixture();
     try {

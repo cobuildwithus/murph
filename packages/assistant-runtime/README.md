@@ -50,7 +50,7 @@ Current responsibilities:
 - own the canonical hosted runtime launch spec: semantic env split,
   forwarded env profiles, platform-only runtime config, typed resolved config,
   typed parser toolchain validation, commit timeout, and child-env projection helpers
-- keep hosted execution local-runtime-first: normal hosted turns write mailbox and assistant input state into the warm container, may defer intermediate foreground checkpoints, may hot-service only the exact assistant wake projected by the current foreground phase before the idle floor, and otherwise keep dirty state dirty until the runtime-owned idle-floor—or last-chance shutdown—`idle_shutdown` checkpoint succeeds
+- keep hosted execution local-runtime-first: normal hosted turns write mailbox and assistant input state into the warm container, may defer intermediate foreground checkpoints, services its projected wakes of every reason through the existing wakeable wait before the idle floor or retained-work deadline, including clean voice retention; device timers enter the existing mailbox claim owner and repeated no-progress wake keys stay bounded, and otherwise keep dirty state dirty until the runtime-owned idle-floor—or last-chance shutdown—`idle_shutdown` checkpoint succeeds
 - prune assistant-generated delivery staging before snapshot construction when
   the outbox inventory is trusted: existing active files remain protected, a
   missing active reference is counted without blocking safe cleanup of other
@@ -203,11 +203,14 @@ protect them locally while active, but snapshot planning excludes their
 validated canonical paths and idle maintenance deletes them atomically as soon
 as protection ends. Explicit canonical durable raw references remain outside
 this transient policy. Normal foreground work may defer intermediate hosted workspace
-checkpoints before Codex admission or reply delivery. While dirty, the exact
-assistant wake projected by the current foreground phase may run once when due
-before the idle floor without publishing a snapshot. Otherwise the invocation
+checkpoints before Codex admission or reply delivery. While dirty, a projected
+wake of any reason may run once when due before the idle floor or active
+background-work deadline without publishing a snapshot. Assistant wakes require
+the exact projection from the current invocation. A no-progress attempt retains
+its due key without repeating local service; a successful attempt can clear it
+or project a distinct successor. Otherwise the invocation
 remains dirty until the runtime-owned idle-floor—or last-chance shutdown—
-`idle_shutdown` checkpoint succeeds; inherited or committed wakes and
+`idle_shutdown` checkpoint succeeds; inherited or committed assistant wakes and
 durability barriers remain checkpoint-first. Only newly admitted foreground
 priority work restarts the quiet window. Empty probes and generic maintenance
 do not restart it; cleanup that dirties state after a checkpoint uses the spent

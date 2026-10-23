@@ -1537,7 +1537,7 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   }, 45_000);
 
-  test("lets an operator diagnostic finish beyond the idle checkpoint window while foreground proceeds", async () => {
+  test.each(["assistant", "device-sync.reconcile"])("services projected %s wakes beyond the idle floor while an operator diagnostic retains the invocation", async (wakeReason) => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const askStarted = createDeferred<void>();
     const childExitRelease = createDeferred<void>();
@@ -1548,7 +1548,11 @@ describe("hosted workspace runtime entrypoint", () => {
     const events: string[] = [];
     let resultPromise: ReturnType<typeof runHostedWorkspaceRuntimeJobInProcess> | null = null;
     let snapshotStarted = false;
+    let phaseCalls = 0;
+    let projectedWakeAt: string | null = null;
+    const projectedWakeServiced = createDeferred<void>();
 
+    mocks.executeOperatorDiagnostic.mockClear();
     mocks.executeOperatorDiagnostic.mockImplementationOnce(async (askInput) => {
       events.push("ask.started");
       askStarted.resolve();
@@ -1632,13 +1636,26 @@ describe("hosted workspace runtime entrypoint", () => {
               },
             },
           },
-          async runAssistantPhase() {
+          async runAssistantPhase(input) {
+            phaseCalls += 1;
+            if (phaseCalls === 2) {
+              assert.equal(input.workspace?.nextWakeAt, projectedWakeAt);
+              assert.equal(input.workspace?.nextWakeReason, wakeReason);
+              assert.equal(snapshotStarted, false);
+              assert.equal(events.includes("ask.aborted"), false);
+              projectedWakeServiced.resolve();
+              return { checkpointReason: "assistant_runtime_commit", progressed: true, nextWakeAt: null, nextWakeReason: null };
+            }
             events.push("foreground.started");
             foregroundStarted.resolve();
             await foregroundRelease.promise;
             events.push("foreground.finished");
 
+            projectedWakeAt = new Date(Date.now() + 100).toISOString();
             return {
+              nextWakeAt: projectedWakeAt,
+              nextWakeReason: wakeReason,
+              ...(wakeReason === "assistant" ? { invocationLocalAssistantWakeAt: projectedWakeAt } : {}),
               checkpointReason: "assistant_runtime_commit",
               progressed: true,
             };
@@ -1657,6 +1674,8 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.equal(events.includes("ask.aborted"), false);
       assert.equal(snapshotStarted, false);
 
+      await withRealTimeout(projectedWakeServiced.promise, 5_000, () => events.join(","));
+      assert.equal(phaseCalls, 2);
       childExitRelease.resolve();
       const result = await withRealTimeout(resultPromise, 30_000, () => events.join(","));
       assert.equal(mocks.executeOperatorDiagnostic.mock.calls.length, 1);

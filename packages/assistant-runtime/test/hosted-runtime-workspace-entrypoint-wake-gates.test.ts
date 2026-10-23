@@ -883,7 +883,7 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps one projectio
     const runtimeAbortController = new AbortController();
     const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
     const initialWakeAt = "2026-04-26T23:59:59.000Z";
-    const continuationWakeAt = "2026-04-27T00:00:30.000Z";
+    const continuationWakeAt = new Date(Date.now() + 30_000).toISOString();
     const mailboxItems: HostedMailboxItem[] = [];
     let assistantPhaseCalls = 0;
     let lateConversationInputId: string | null = null;
@@ -1727,7 +1727,10 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps one projectio
     }
   });
 
-  test("future projected assistant wake runs when due without shortening the idle checkpoint floor", async () => {
+  test.each([
+    ...["assistant", "device-sync.reconcile", "mailbox", "synthetic.other-wake"].map(wakeReason => ({ wakeReason, successor: false })),
+    ...["assistant", "device-sync.reconcile"].map(wakeReason => ({ wakeReason, successor: true })),
+  ])("future projected $wakeReason wake runs before the idle floor (successor: $successor)", async ({ wakeReason, successor }) => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-idle-checkpoint-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
@@ -1735,6 +1738,10 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps one projectio
     const projectedWakeAt = new Date(Date.parse(TEST_NOW) + 60_000).toISOString();
     const assistantOneObserved = createDeferred<void>();
     const assistantTwoObserved = createDeferred<void>();
+    const assistantThreeObserved = createDeferred<void>();
+    const successorWakeAt = new Date(Date.parse(TEST_NOW) + 120_000).toISOString();
+    const finalWakeAt = successor ? successorWakeAt : projectedWakeAt;
+    const expectedCalls = successor ? 3 : 2;
     let assistantPhaseCalls = 0;
     let firstCheckpointStartedAtMs: number | null = null;
 
@@ -1787,7 +1794,8 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps one projectio
                 assistantOneObserved.resolve();
                 return {
                   checkpointReason: "assistant_runtime_commit",
-                  invocationLocalAssistantWakeAt: projectedWakeAt,
+                  ...(wakeReason === "assistant" ? { invocationLocalAssistantWakeAt: projectedWakeAt } : {}),
+                  nextWakeReason: wakeReason,
                   nextWakeAt: projectedWakeAt,
                   progressed: true,
                   redactedStatus: {
@@ -1797,7 +1805,16 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps one projectio
                 };
               }
 
-              assistantTwoObserved.resolve();
+              assert.equal(input.workspace?.nextWakeAt, assistantPhaseCalls === 2 ? projectedWakeAt : successorWakeAt);
+              assert.equal(input.workspace?.nextWakeReason, wakeReason);
+              if (assistantPhaseCalls === 2) {
+                assistantTwoObserved.resolve();
+                if (successor) return {
+                  checkpointReason: "assistant_runtime_commit", progressed: true,
+                  nextWakeAt: successorWakeAt, nextWakeReason: wakeReason,
+                  ...(wakeReason === "assistant" ? { invocationLocalAssistantWakeAt: successorWakeAt } : {}),
+                };
+              } else assistantThreeObserved.resolve();
               const redactedStatus: HostedRuntimeRedactedJson = {
                 hostedAssistantProgressed: false,
               };
@@ -1822,25 +1839,30 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps one projectio
       assert.equal(checkpointRequests.length, 0);
       await withRealTimeout(assistantTwoObserved.promise, 15_000, () => events.join(","));
       assert.equal(assistantPhaseCalls, 2);
-      await vi.advanceTimersByTimeAsync(119_000);
+      if (successor) {
+        await vi.advanceTimersByTimeAsync(60_000);
+        await withRealTimeout(assistantThreeObserved.promise, 15_000, () => events.join(","));
+        assert.equal(checkpointRequests.length, 0);
+      }
+      await vi.advanceTimersByTimeAsync(successor ? 59_000 : 119_000);
       assert.equal(checkpointRequests.length, 0);
-      assert.equal(assistantPhaseCalls, 2);
+      assert.equal(assistantPhaseCalls, expectedCalls);
       await vi.advanceTimersByTimeAsync(1_000);
       const result = await resultPromise;
 
       assert.equal(firstCheckpointStartedAtMs, Date.parse(TEST_NOW) + runnerIdleTtlMs);
-      assert.equal(assistantPhaseCalls, 2);
+      assert.equal(assistantPhaseCalls, expectedCalls);
       assert.deepEqual(checkpointRequests.map((request) => request.reason), [
         "idle_shutdown",
       ]);
-      assert.equal(checkpointRequests[0]?.nextWakeAt, projectedWakeAt);
-      assert.equal(checkpointRequests[0]?.nextWakeReason, "assistant");
+      assert.equal(checkpointRequests[0]?.nextWakeAt, finalWakeAt);
+      assert.equal(checkpointRequests[0]?.nextWakeReason, wakeReason);
       assert.ok(
         requireEventIndex(events, `assistant.phase:2:${projectedWakeAt}`)
           < requireEventIndex(events, "snapshot:idle_shutdown"),
       );
       assert.equal(result.status, "scheduled");
-      assert.equal(result.nextWakeAt, projectedWakeAt);
+      assert.equal(result.nextWakeAt, finalWakeAt);
     } finally {
       vi.useRealTimers();
       await removeTempRoot(vaultRoot);
