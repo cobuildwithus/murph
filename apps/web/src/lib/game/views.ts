@@ -28,6 +28,7 @@ import {
   GAME_POSTS_PER_DAY,
   playerFor,
   scorePlayer,
+  playerStreak,
   ticketUseBy,
   type RuleEntry,
   type RulePlayer,
@@ -145,6 +146,7 @@ export function ticketView(row: GameTicketRow, words: TermWords | null, viewerId
 function entryView(entry: RuleEntry, input: GameViewInput): GameEntryView {
   const words = input.entryWords.get(entry.id);
   return {
+    ...(entry.incomplete ? { incomplete: true as const } : {}),
     entryId: entry.id,
     kind: entry.kind,
     mediaUrls: entry.mediaKeys.map(gameMediaUrl),
@@ -207,20 +209,6 @@ function playerView(input: GameViewInput, player: RulePlayer): GamePlayerView {
     seat: player.seat,
     streak: playerStreak(input.state, player, input.now),
   };
-}
-
-/** Consecutive scheduled posts, ignoring an unposted current day and off days. */
-function playerStreak(state: RuleState, player: RulePlayer, now: Date): number {
-  const today = dayIndexAt(player, now);
-  if (today === null) return 0;
-  const posted = new Set(state.entries.filter((entry) => entry.memberId === player.memberId && entry.attempt > 0 && entry.withdrawnAt === null).map((entry) => entry.dayIndex));
-  let streak = 0;
-  for (let day = Math.min(today, state.game.lengthDays - 1); day >= 0; day -= 1) {
-    if (!isScheduledDay(state, day)) continue;
-    if (posted.has(day)) streak += 1;
-    else if (day !== today) break;
-  }
-  return streak;
 }
 
 /** The challenger's own name for whoever they invited, until that person joins. */

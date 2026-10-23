@@ -202,8 +202,12 @@ export interface GameChangeControls {
   editableFromDay: number | null;
 }
 
-/** DELETE /games/:id cancels an unstarted invite; returns the existing GameView as void. */
+/** Receipt for a speaker-owned day correction in the bound game chat. */
+export type GameDayOutcome = { date: string; status: "marked_incomplete" | "restored" | "already_incomplete" | "already_complete" | "no_artifact" };
+
 export type GameCommand =
+  | { type: "setDayCompletion"; gameId: string; date: string; incomplete: boolean }
+  /** DELETE /games/:id cancels an unstarted invite. */
   | { type: "cancelInvite"; gameId: string }
   | ({ type: "proposeChange"; gameId: string } & ProposeGameChangeBody)
   | { type: "respondChange"; gameId: string; proposalId: string; decision: "approve" | "decline" | "cancel" }
@@ -244,6 +248,8 @@ export interface GamePlayerView {
 export type GameDayOtherStatus = "posted" | "locked" | "missed" | "none" | "off";
 
 export interface GameEntryView {
+  /** Self-reported incomplete day; omitted after restore. Does not hide the artifact. */
+  incomplete?: true;
   entryId: string;
   kind: GameEntryKind;
   mediaUrls: string[];

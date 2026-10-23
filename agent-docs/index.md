@@ -1489,3 +1489,5 @@ The current contract is owned by [Weekly Game](product-specs/weekly-game.md).
 
 Cancellation notice authority remediation is tracked in
 [the delivery plan](exec-plans/active/2026-10-23-game-cancel-delivery.md).
+
+Self-reported game day completion is tracked in [the implementation plan](exec-plans/active/2026-10-23-game-day-incomplete.md).

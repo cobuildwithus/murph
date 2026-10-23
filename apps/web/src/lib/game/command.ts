@@ -27,6 +27,9 @@ import { GAME_MIN_LENGTH_DAYS, GAME_MAX_LENGTH_DAYS, reject, validNewStakes } fr
 export function parseGameCommand(value: unknown): GameCommand {
   const input = record(value, "command");
   switch (input.type) {
+    case "setDayCompletion":
+      if (typeof input.date !== "string" || !isStrictIsoDate(input.date) || typeof input.incomplete !== "boolean" || "memberId" in input || "entryId" in input) reject("INVALID_REQUEST", "Choose your own game day by date.");
+      return { type: "setDayCompletion", gameId: clientId(input.gameId, "gameId"), date: input.date, incomplete: input.incomplete };
     case "cancelInvite":
       return { type: "cancelInvite", gameId: clientId(input.gameId, "gameId") };
     case "proposeChange":

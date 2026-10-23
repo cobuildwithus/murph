@@ -1,5 +1,5 @@
 import type { HostedGameChatState } from "@murphai/hosted-execution/runtime-control";
-import { attemptsUsed, currentTerms, dayIndexAt, isScheduledDay, liveEntry, scorePlayer, type RuleState } from "./rules";
+import { attemptsUsed, currentTerms, dayIndexAt, isScheduledDay, liveEntry, completedEntry, scorePlayer, type RuleState } from "./rules";
 import { addDays, dayStartInstant, GAME_GRACE_MS } from "./time";
 
 const CHAT_DAY_WINDOW = 14;
@@ -17,7 +17,7 @@ export function gameChatProgress(state: RuleState, now: Date): Progress {
     const days: Progress["players"][number]["days"] = player.dayOne ? Array.from({ length: endDay - firstDay }, (_, offset) => {
       const dayIndex = firstDay + offset;
       const date = addDays(player.dayOne!, dayIndex);
-      const posted = liveEntry(state.entries, player.memberId, dayIndex);
+      const posted = completedEntry(state.entries, player.memberId, dayIndex);
       const closed = state.game.status === "settled" || now.getTime() >= dayStartInstant(addDays(date, 1), player.timeZone).getTime() + GAME_GRACE_MS;
       const status = posted ? "posted" : !isScheduledDay(state, dayIndex) ? "off"
         : today === null || dayIndex > today ? "upcoming"

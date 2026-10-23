@@ -1,0 +1,16 @@
+{
+  "publishedOn": "2026-10-23",
+  "order": 200,
+  "item": {
+    "id": "game-day-incomplete",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Correct an unfinished game day",
+    "summary": "Tell Murph in your game group when you did not finish a day, even after posting.",
+    "details": "Your artifact stays visible under the usual unlock rules. You can correct only your own days in a live game, and undo the mark if you actually finished.",
+    "relevanceTags": [
+      "games"
+    ],
+    "sourcePullRequests": []
+  }
+}

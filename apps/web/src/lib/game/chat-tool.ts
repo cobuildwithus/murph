@@ -23,6 +23,7 @@ export async function handleGameChatTool(input: Input): Promise<HostedGameToolRe
   if (!actor) return { action: input.request.action, result: { status: "unavailable", error: "game_player_unavailable" } };
   const playerMemberIds = await requireExactGameChat(input.memberId);
   if (!playerMemberIds.includes(actor)) return { action: input.request.action, result: { status: "unavailable", error: "game_player_unavailable" } };
+  let dayOutcome: Extract<Awaited<ReturnType<typeof runGameCommand>>, { ok: true }>["dayOutcome"];
   let photoResult: Awaited<ReturnType<typeof handleGameChatPhoto>> | null = null;
   if (input.request.action === "game_photo") {
     photoResult = await handleGameChatPhoto({ actor, containerMemberId: input.memberId, playerMemberIds,
@@ -38,7 +39,9 @@ export async function handleGameChatTool(input: Input): Promise<HostedGameToolRe
   }
   if (input.request.action === "update_game") {
     const update = input.request.update;
-    const command = update.operation === "propose"
+    const command = "date" in update
+      ? { type: "setDayCompletion", gameId: update.gameId, date: update.date, incomplete: update.operation === "mark_incomplete" }
+      : update.operation === "propose"
       ? { type: "proposeChange", gameId: update.gameId, proposalId: update.proposalId, expectedTermsVersion: update.expectedTermsVersion, change: update.change }
       : { type: "respondChange", gameId: update.gameId, proposalId: update.proposalId, decision: update.operation };
     const result = await runGameCommand({
@@ -52,12 +55,13 @@ export async function handleGameChatTool(input: Input): Promise<HostedGameToolRe
     });
     // GameView is a personal app view. Never pass it into the shared runtime.
     if (!result.ok) return { action: input.request.action, result: { status: "rejected", error: result.error.code } };
+    dayOutcome = result.dayOutcome;
     const latestPlayers = await requireExactGameChat(input.memberId);
     if (!sameGamePlayers(latestPlayers, playerMemberIds)) throw new TypeError("Game chat participants changed.");
   }
   if (input.request.action === "game_photo" && !sameGamePlayers(await requireExactGameChat(input.memberId), playerMemberIds)) throw new TypeError("Game chat participants changed.");
   const state = hostedGameChatStateSchema.parse(await readGameChatState(input.memberId, playerMemberIds, actor));
-  return { action: input.request.action, result: { status: "ok", state, ...(photoResult?.photoOutcome ? { photoOutcome: photoResult.photoOutcome } : {}) } };
+  return { action: input.request.action, result: { status: "ok", state, ...(dayOutcome ? { dayOutcome } : {}), ...(photoResult?.photoOutcome ? { photoOutcome: photoResult.photoOutcome } : {}) } };
 }
 
 /** A free player may agree to their game without gaining personal AI access. */

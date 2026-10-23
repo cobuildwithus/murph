@@ -116,3 +116,22 @@ export const V1_BASE_GAME_PHOTO_TOOL = {
 } as const
 
 export const GAME_INPUT_BASELINES = { v1: [V1_BASE_READ_GAME_TOOL, V1_BASE_UPDATE_GAME_TOOL, V1_BASE_GAME_PHOTO_TOOL], base: [BASE_READ_GAME_TOOL, BASE_UPDATE_GAME_TOOL], terms: [TERMS_READ_GAME_TOOL, TERMS_UPDATE_GAME_TOOL], lifecycle: [LIFECYCLE_READ_GAME_TOOL, LIFECYCLE_UPDATE_GAME_TOOL] } as const
+
+// Exact production descriptor at b64002efb9 before self-reported incomplete days.
+export const INCOMPLETE_BASE_UPDATE_GAME_TOOL = {
+  namespace: 'murph', name: 'update_game',
+  description: 'Propose or respond to a change to a game in this group. Read_game first for current terms and pending proposal. Propose counts as the requesting player’s agreement; the other player approves or declines. Understand ordinary conversational agreement such as “yeah” in context; do not demand special words or repeat consent already given. Apply an approval when the reply agrees to the pending change. Cancel is for its proposer. Use messageRef of the current accepted message whose sender is acting; identity is resolved by the server. A proposal is not an applied change: only report it applied after the result confirms it. Schedule and length edits affect future unstarted days and preserve existing check-ins. Stakes and tasks are locked once the game has started; do not propose changing them on a live game. Tasks is a full replacement for both seats: preserve an unchanged task from read_game. Before kickoff, stakes is a full replacement with one prize for the winner or dare for the loser. The other player still approves the exact proposal. Negotiating games have no active obligations; approving their proposal starts the game. When you propose from this conversation, ask the other player naturally in your reply; the backend does not send a second announcement. Reply here even if app-originated announcements use another chat. If approval starts a previously negotiating challenge, acknowledge briefly without repeating its tasks, stakes or reminder offer: the separate kickoff owns that introduction. Do not say the kickoff was sent merely because the game started.',
+  inputSchema: { type: 'object', additionalProperties: false, properties: {
+    messageRef: { type: 'string', description: 'Message ref of the current accepted message from the player requesting or agreeing to this change.' },
+    operation: { type: 'string', enum: ['propose', 'approve', 'decline', 'cancel'] },
+    gameId: { type: 'string', minLength: 8, maxLength: 64 }, proposalId: { type: 'string', minLength: 8, maxLength: 64, pattern: '^[A-Za-z0-9_-]+$', description: 'Exact pending proposal ID for responses; a new unique ID when proposing.' },
+    expectedTermsVersion: { type: 'integer', minimum: 1, description: 'Propose only; current terms.n from read_game.' },
+    change: { type: 'object', additionalProperties: false, properties: {
+      kind: { type: 'string', enum: ['start_now', 'edit'] },
+      tasks: { type: 'array', minItems: 2, maxItems: 2, items: { type: 'object', additionalProperties: false, properties: { seat: { type: 'integer', minimum: 0, maximum: 1 }, text: { type: 'string', minLength: 1, maxLength: 200 } }, required: ['seat', 'text'] } },
+      stakes: { type: 'array', minItems: 1, maxItems: 1, items: { type: 'object', additionalProperties: false, properties: { kind: { type: 'string', enum: ['prize', 'dare'] }, item: { type: 'string', minLength: 1, maxLength: 200 } }, required: ['kind', 'item'] } },
+      lengthDays: { type: 'integer', minimum: 3, maximum: 365 }, startsOn: { type: ['string', 'null'], description: 'YYYY-MM-DD, or null to reset the default start before play begins.' },
+      schedule: { type: 'object', additionalProperties: false, properties: { days: { type: 'array', minItems: 1, maxItems: 7, items: { type: 'integer', minimum: 0, maximum: 6 }, description: 'Monday 0 through Sunday 6.' }, count: { type: 'integer', minimum: 1, maximum: 365, description: 'Any N days across the whole game.' } } },
+    }, required: ['kind'] },
+  }, required: ['messageRef', 'operation', 'gameId', 'proposalId'] },
+} as const
