@@ -212,8 +212,10 @@ a result only while the exact slot remains ready inventory: a racing claim wins,
 and late success, failure or timeout cannot restore or retire its handoff. Failed
 unclaimed checks use existing fenced retirement, and the same bounded preparation
 lane then reserves their refill; a failed fresh preparation keeps its retry
-backoff. Rechecks preserve activity renewal; initial preparation still owns
-startup and full pristine proof.
+backoff. A pristine slot also reports its own container stop or error, and a slot
+that is still ready inventory is retired and refilled the same way. Reports are
+best effort; periodic rechecks remain the backstop. Rechecks preserve activity
+renewal; initial preparation still owns startup and full pristine proof.
 Existing persisted provisioning rows continue through ordinary preparation after
 a reset or Worker upgrade. This Worker-only correction uses the existing container
 health response and needs no Web or container-image protocol change.
@@ -1002,9 +1004,9 @@ to detect affected runtimes and their later mailbox outcomes without returning
 subject keys or raw JSON.
 
 The `HOSTED_STANDBY_ANALYTICS` Analytics Engine binding records one
-identifier-free data point per standby coordinator claim answer and per finished
-slot preparation in `murph_hosted_standby_inventory`. `index1` and `blob2` are
-the event (`claim` or `prepare`), `blob1` is the schema
+identifier-free data point per standby coordinator claim answer, finished
+slot preparation or accepted loss report in `murph_hosted_standby_inventory`.
+`index1` and `blob2` are the event (`claim`, `prepare` or `loss`), `blob1` is the schema
 `murph.hosted-standby-inventory.v1`, `double1` is the event count, `double2` and
 `double3` are the ready and provisioning inventory, `double4` is the configured
 target, and `double5` is the duration in milliseconds. A claim's `blob3` is its
@@ -1013,8 +1015,9 @@ outcome (`claimed`, `no_ready_slot`, `replayed`, `disabled`, `stale_release` or
 point with target two and one ready slot shows overlapping demand, and
 `no_ready_slot` shows a foreground cold fallback. A preparation's `blob3` is
 `refill`, `resume` or `reproof`, `blob4` is `ready` or `failed`, and its
-inventory is read after the result. Query daily claims and preparation latency
-with [`scripts/standby-inventory.sql`](scripts/standby-inventory.sql).
+inventory is read after the result. A loss has `blob3 = stopped`, empty `blob4`,
+zero duration and inventory after draining. Query daily claims, losses and
+preparation latency with [`scripts/standby-inventory.sql`](scripts/standby-inventory.sql).
 
 For the primary production control database, run the identifier-free cold-start
 report through the read-only helper:

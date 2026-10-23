@@ -77,7 +77,7 @@ describe("Postgres runtime orchestration", () => {
       return response({ ...starting, runnerContainerName: target }, "updated");
     });
     expect(await ensurePostgresRuntimeProcessing({ ...source, HOSTED_EXECUTION_STANDBY_MODE: mode,
-      STANDBY_COORDINATOR: { getByName: () => ({ claimReadyStandby, ensureReadyStandby: vi.fn() }) },
+      STANDBY_COORDINATOR: { getByName: () => ({ claimReadyStandby, ensureReadyStandby: vi.fn(), reportStandbySlotStopped: vi.fn() }) },
     }, { ...request, processingMode: "system_mailbox", orchestration: { triggeredByWebDirect: true } })).toMatchObject({ kind: "runtime_processing_accepted", action: "started" });
     expect(claimReadyStandby).not.toHaveBeenCalled();
     expect(container.ensureReadyForProcessing).toHaveBeenCalledOnce();
@@ -106,7 +106,7 @@ describe("Postgres runtime orchestration", () => {
       return response(retiring, "updated");
     });
     const result = ensurePostgresRuntimeProcessing({ ...source, HOSTED_EXECUTION_STANDBY_MODE: "allocate",
-      STANDBY_COORDINATOR: { getByName: () => ({ claimReadyStandby, ensureReadyStandby: vi.fn() }) },
+      STANDBY_COORDINATOR: { getByName: () => ({ claimReadyStandby, ensureReadyStandby: vi.fn(), reportStandbySlotStopped: vi.fn() }) },
     }, { ...request, conversationWorkPending: true, admission: response(starting) });
     await vi.waitFor(() => expect(container.retireStandbySlot).toHaveBeenCalledOnce());
     expect(released).toBe(false);

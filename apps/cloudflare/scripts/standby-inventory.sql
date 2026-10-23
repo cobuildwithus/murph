@@ -6,6 +6,8 @@
 -- row with target = 2 and ready = 1 arrived while another claim was still refilling; `no_ready_slot` fell back to a cold allocation.
 -- Prepare rows: `ready` is the ready inventory after the preparation result,
 -- and the duration columns measure refill, resume and reproof latency.
+-- Loss rows: `stopped` records an accepted ready-slot loss after draining,
+-- with zero duration; subsequent prepare rows measure replacement boot latency.
 SELECT
   toStartOfInterval(timestamp, INTERVAL '1' DAY) AS day,
   blob2 AS event,
