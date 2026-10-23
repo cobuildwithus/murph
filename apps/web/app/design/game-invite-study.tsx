@@ -51,6 +51,7 @@ const STATES: ReadonlyArray<{ id: string; label: string; preview: GameInvitePrev
   { id: "open-any-days", label: "Open, any days, per miss", preview: ANY_DAYS_PREVIEW },
   { id: "heart-rate", label: "Open, heart-rate check-in", preview: { ...OPEN_PREVIEW, terms: { ...OPEN_PREVIEW.terms, checkInKind: "heart_rate" } } },
   { id: "used", label: "Already accepted", preview: { status: "used" } },
+  { id: "cancelled", label: "Cancelled", preview: { status: "expired", reason: "cancelled", inviterFirstName: "Player" } },
   { id: "expired", label: "Expired", preview: { status: "expired" } },
   { id: "missing", label: "Missing or turned off", preview: null },
 ];

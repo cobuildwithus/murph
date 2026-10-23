@@ -671,7 +671,7 @@ test.each(["legacy", "passkey", "outage"])("Data privacy preserves deletion with
   }
 });
 
-test("SettingsPage redirects signed-out visitors before reading member settings", async () => {
+test("SettingsPage offers sign-in without reading member settings", async () => {
   mocks.getHostedPageAuthSnapshot.mockResolvedValue({
     authenticated: false,
     authenticatedMember: null,
@@ -680,7 +680,11 @@ test("SettingsPage redirects signed-out visitors before reading member settings"
 
   const { default: SettingsPage } = await import("../app/(dashboard)/settings/page");
 
-  await expect(SettingsPage({ searchParams: Promise.resolve({}) })).rejects.toThrow("NEXT_REDIRECT:/");
+  const markup = renderToStaticMarkup(await SettingsPage({ searchParams: Promise.resolve({}) }));
+  expect(markup).toContain("Continue to Settings");
+  expect(markup).toContain("health data consent");
+  expect(markup).toContain("Log in");
+  expect(redirectMock).not.toHaveBeenCalled();
 
   expect(mocks.getPrisma).not.toHaveBeenCalled();
   expect(mocks.readHostedAccountSettingsPageSnapshot).not.toHaveBeenCalled();
@@ -747,12 +751,15 @@ test("SettingsPage rejects an augmented signed-out Family recovery handoff", asy
   const { default: SettingsPage } = await import(
     "../app/(dashboard)/settings/page"
   );
-  await expect(SettingsPage({
+  const markup = renderToStaticMarkup(await SettingsPage({
     searchParams: Promise.resolve({
       familyRecovery: "true",
       usageRecovery: "true",
     }),
-  })).rejects.toThrow("NEXT_REDIRECT:/");
+  }));
+  expect(markup).toContain("Continue to Settings");
+  expect(markup).not.toContain("One more step");
+  expect(redirectMock).not.toHaveBeenCalled();
   expect(mocks.getPrisma).not.toHaveBeenCalled();
 });
 
@@ -812,9 +819,12 @@ test.each([
 
   const { default: SettingsPage } = await import("../app/(dashboard)/settings/page");
 
-  await expect(SettingsPage({
+  const markup = renderToStaticMarkup(await SettingsPage({
     searchParams: Promise.resolve({ familyInviteReturn }),
-  })).rejects.toThrow("NEXT_REDIRECT:/");
+  }));
+  expect(markup).toContain("Continue to Settings");
+  expect(markup).not.toContain("One more step");
+  expect(redirectMock).not.toHaveBeenCalled();
   expect(mocks.getPrisma).not.toHaveBeenCalled();
 });
 
@@ -875,9 +885,12 @@ test.each([
 
   const { default: SettingsPage } = await import("../app/(dashboard)/settings/page");
 
-  await expect(SettingsPage({
+  const markup = renderToStaticMarkup(await SettingsPage({
     searchParams: Promise.resolve({ planUpdate }),
-  })).rejects.toThrow("NEXT_REDIRECT:/");
+  }));
+  expect(markup).toContain("Continue to Settings");
+  expect(markup).not.toContain("One more step");
+  expect(redirectMock).not.toHaveBeenCalled();
   expect(mocks.getPrisma).not.toHaveBeenCalled();
 });
 
@@ -3061,4 +3074,21 @@ describe("settings subscription composition", () => {
     assert.doesNotMatch(source, /StartPaidPulseButton/);
     assert.doesNotMatch(source, /trial end|days left|expires/i);
   });
+});
+
+test("SettingsPage reaches health-data consent after a free member signs in", async () => {
+  mocks.getPrisma.mockReturnValue(mocks.prisma);
+  mocks.getHostedPageAuthSnapshot.mockResolvedValue({
+    authenticated: true,
+    authenticatedMember: { id: "synthetic-member", billingStatus: "not_started", suspendedAt: null },
+    session: {},
+  });
+  const { default: SettingsPage } = await import("../app/(dashboard)/settings/page");
+  const markup = renderToStaticMarkup(await SettingsPage({ searchParams: Promise.resolve({}) }));
+  expect(markup).toContain('id="data-privacy"');
+  expect(markup).toContain("Hosted health data consent true");
+  expect(mocks.HostedHealthDataConsentSettings).toHaveBeenCalledWith(expect.objectContaining({
+    authenticated: true, initialStatus: GRANTED_HEALTH_DATA_CONSENT_STATUS,
+  }), undefined);
+  expect(redirectMock).not.toHaveBeenCalled();
 });

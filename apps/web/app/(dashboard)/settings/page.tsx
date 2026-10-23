@@ -124,18 +124,12 @@ export default async function SettingsPage({
   const { authenticated, authenticatedMember, session } =
     await getHostedDashboardPageAuthSnapshot();
   if (!authenticated) {
-    if (
-      request.familyInviteReturnPath === null
-      && !request.groupPaymentMethodSaved
-      && request.planChangeReturn === null
-      && request.usageTopUpPurchaseReturn === null
-      && !request.familyRecoveryRequested
-      && !request.usageRecoveryInitialOpen
-    ) {
-      redirect("/");
-    }
     return (
       <SettingsAuthRequired
+        billingReturn={request.familyInviteReturnPath !== null
+          || request.groupPaymentMethodSaved
+          || request.planChangeReturn !== null
+          || request.usageTopUpPurchaseReturn !== null}
         familyRecovery={request.familyRecoveryRequested}
         usageRecovery={request.usageRecoveryInitialOpen}
       />

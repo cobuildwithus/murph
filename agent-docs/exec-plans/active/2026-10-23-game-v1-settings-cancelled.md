@@ -1,0 +1,34 @@
+# Settings sign-in and cancelled invite recovery
+
+Status: active
+Created: 2026-10-23
+Updated: 2026-10-23
+
+## Goal
+
+Restore the Settings consent-control entry and distinguish cancelled invites without changing closed status enums.
+
+## Scope and owners
+
+Settings uses its existing auth-required component, auth completion owner and health consent control. Invite preview derives cancellation from the canonical game event. No schema, dependency, runtime or shared QA stack changes.
+
+## Evidence and decisions
+
+The signed-out Settings branch redirected ordinary visitors to the homepage. The invite preview mapped every void to expired without checking the cancellation event. Remove that redirect and derive an optional reason from one bounded event read. Only cancellation discloses the inviter first name; terms and private invitee labels remain absent. Old clients retain expired status. Plain native Settings entry must resume even for members at checkout stage.
+
+## Product UX
+
+- Outcome: sign in and reach Health data; understand an invite was called off.
+- Reaches: signed-out and signed-in free/paid members, cancelled/expired/open/used invite holders, old clients.
+- Proof: page rendering, auth completion return, consent-control tests, PostgreSQL lifecycle tests and production signed-out entry. Existing section URL is `/settings#data-privacy`.
+
+## Tasks
+
+1. Implement additive contract and Settings recovery; publish the contract to the shared handoff.
+2. Run focused tests, PostgreSQL game suites, web typecheck and guards; inspect rendered states.
+3. Commit with repository wrappers, open and ready PR, run requested deep review and ReviewGPT eragon concurrently with CI.
+4. Merge when gates pass; verify exact-SHA production admission, health and signed-out Settings. Record evidence in the external status file.
+
+## Verification
+
+Pending local tests, typecheck, complexity/log/docs guards, rendered proof, deep review, ReviewGPT and CI. Production is fix-forward only. No rollback authorized.

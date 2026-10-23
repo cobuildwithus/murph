@@ -239,6 +239,8 @@ function shouldResumeCurrentAuthUrl(payload: HostedAuthenticationCompletionPaylo
     || shouldResumeCurrentComputerHandoffUrl(payload)
     || shouldResumeCurrentIntegrationsConnectUrl(payload)
     || shouldResumeCurrentSettingsDataPrivacyUrl()
+    // Native health-data links must also work before paid onboarding finishes.
+    || (typeof window !== "undefined" && window.location.pathname === SETTINGS_PATH && window.location.search === "")
     || (typeof window !== "undefined" && window.location.pathname === "/settings/accounts")
     || shouldResumeCurrentSettingsFamilyInviteReturnUrl(payload)
     || shouldResumeCurrentSettingsFamilyRecoveryUrl(payload)

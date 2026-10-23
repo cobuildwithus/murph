@@ -39,17 +39,20 @@ export function GameInviteView(props: { appUrl: string; preview: GameInvitePrevi
           <h1 className="font-serif text-4xl font-semibold leading-[1.05] tracking-[-0.03em]">
             {CLOSED_INVITE_TITLE}
           </h1>
-          <p className="mt-4 text-base leading-7 text-muted-foreground">{closedInviteCopy(preview?.status)}</p>
+          <p className="mt-4 text-base leading-7 text-muted-foreground">{closedInviteCopy(preview)}</p>
         </section>
       )}
     </div>
   );
 }
 
-/** A used or expired invite shows only its status: no names or terms. */
-function closedInviteCopy(status: "used" | "expired" | undefined): string {
-  if (status === "used") return "This challenge was already accepted.";
-  if (status === "expired") return "This invite expired. Ask for a new link.";
+/** Closed previews omit terms; cancellation can name the inviter. */
+function closedInviteCopy(preview: GameInvitePreview | null): string {
+  if (preview?.status === "used") return "This challenge was already accepted.";
+  if (preview?.status === "expired") {
+    if (preview.reason === "cancelled") return `${preview.inviterFirstName?.trim() || "The inviter"} called this one off. Ask for a new link.`;
+    return "This invite expired. Ask for a new link.";
+  }
   return "Ask for a new link.";
 }
 

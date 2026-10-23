@@ -1,0 +1,17 @@
+{
+  "publishedOn": "2026-10-23",
+  "order": 100,
+  "item": {
+    "id": "settings-health-consent-sign-in",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Reach health data controls after sign-in",
+    "summary": "Opening Settings without a web session now offers sign-in and returns you to your account controls.",
+    "details": "Health data consent remains available in Data & privacy, including for accounts without a paid subscription.",
+    "relevanceTags": [
+      "settings",
+      "privacy"
+    ],
+    "sourcePullRequests": []
+  }
+}
