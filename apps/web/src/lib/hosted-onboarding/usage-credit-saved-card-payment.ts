@@ -785,7 +785,6 @@ async function createOrRecoverHostedUsageCreditPaymentIntent(input: {
       ),
       payment_method: input.paymentMethodId,
       payment_method_types: ["card"],
-      setup_future_usage: "off_session",
     }, { idempotencyKey });
   } catch (error) {
     const paymentIntentId = readHostedStripeErrorPaymentIntentId(error);

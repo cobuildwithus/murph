@@ -3716,10 +3716,12 @@ I/O and, together with the single purchase-status lifecycle and stable
 purchase-derived idempotency key, permits identical creation retries for a
 derived 30-minute window, and fences ambiguity through its frozen 90-minute
 expiry. Current-policy personal, Family, and group funding may bind one
-unconfirmed saved-card PaymentIntent to that row before confirmation. The payer-row lock is the
-linearization boundary: it rechecks active payer and still-created purchase
-state. Personal and Family attempts also revalidate the selected exact billing
-Customer and Subscription together with canonical status, suspension state,
+unconfirmed saved-card PaymentIntent to that row before confirmation. Direct
+saved-card intents omit `setup_future_usage` because the card is already saved;
+confirmation uses `off_session: true`. Checkout retains its card-saving setup.
+The payer-row lock is the linearization boundary: it rechecks active payer and
+still-created purchase state. Personal and Family attempts also revalidate the
+selected exact billing Customer and Subscription together with canonical status, suspension state,
 and last accepted Stripe-event time; a deletion, authority change, or terminal
 transition that wins first cancels the unbound intent without confirmation.
 Ambiguous confirmation remains
