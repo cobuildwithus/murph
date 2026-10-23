@@ -1,6 +1,6 @@
 # Keep game change proposals open
 
-Status: active
+Status: completed
 Created: 2026-10-23
 Updated: 2026-10-23
 
@@ -40,4 +40,7 @@ Resolution and notice reservation share the existing short transaction. Existing
 - Web, hosted-execution and assistant-engine typechecks pass; Web lint passes with pre-existing warnings. Complexity guard passes with no new debt; its existing unrelated runtime-control hotspot is unchanged. Logs guard and docs drift pass.
 - Two production-builder real-Codex journeys (gpt-6.1-sol, local subscription) each queue one concise refusal line and no tool actions. Parent reply review: Ready.
 - Reset-to-default start date remains calculated at acceptance, unlike a fixed proposed date.
-- Requested read-only gpt-6-astra deep review completed: one accepted fixed-date negotiation cutoff finding, corrected by retaining the validated explicit date; composed PostgreSQL regression added. PR/ReviewGPT/CI/release pending; external status file owns release evidence.
+- Requested read-only gpt-6-astra deep review completed: one accepted fixed-date negotiation cutoff finding, corrected by retaining the validated explicit date; composed PostgreSQL regression added. ReviewGPT round 1 passed on `c2428bd52eed54cabee8546d64325749a6ecbf48` with no qualifying findings. The third real-Codex journey also confirms failed approval explains the reason without claiming success. Final rules/changes/negotiation lane passed 97 tests; final Web typecheck passed. Parent final review: Ready. Final-head CI and release remain completion gates; the external status file owns release evidence.
+
+- PR: https://github.com/cobuildwithus/murph/pull/4332. Review: https://chatgpt.com/c/6adb9ad0-ea70-83ea-b9db-2e9211067d18. Implementation and review complete; this plan closure changes documentation only.
+Completed: 2026-10-23
