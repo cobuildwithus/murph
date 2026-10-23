@@ -1,6 +1,6 @@
 # Game v1 artifacts and locked previews
 
-Status: active
+Status: completed
 Created: 2026-10-22
 Updated: 2026-10-22
 
@@ -54,9 +54,16 @@ inspected. The source preview is published.
 
 The focused real-Codex any-artifact chat photo journey passes on gpt-6.1-sol via
 local subscription with exactly one read and one write. Reply review: Ready.
-No production prompt changes. Requested read-only Astra deep review is running.
+No production prompt changes. Requested read-only Astra deep review found one reachable legacy-heart-rate
+compatibility regression. Accepted and fixed: missing summaries remain valid
+for retained heart-rate terms, while new any-kind games require them. Supplied
+summaries always receive strict validation. Idempotent retries use the existing
+entry lookup. The correction passes 85 unit/view tests and 25 PostgreSQL/API
+tests; Web and Assistant Engine typechecks pass. Parent review found no further
+required correction.
 ReviewGPT and exact-head CI remain release gates.
 
 ## Status
 
-Implementation and focused proof complete; finishing candidate review, plan closure and release gates.
+Implementation, parent review and focused proof complete. ReviewGPT, exact-head CI, merge and production verification continue through the PR completion owner. No production release is claimed by this plan closure.
+Completed: 2026-10-22

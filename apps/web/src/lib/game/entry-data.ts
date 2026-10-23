@@ -4,7 +4,8 @@ import { reject } from "./rules";
 
 /** Closed summary shapes exclude samples/coordinates, including nested extras. */
 export function parseGameEntryData(kind: GameEntryKind, value: unknown): GameEntryData | undefined {
-  if (kind === "heart_rate") return heartRate(value);
+  // Retained heart-rate games accepted image-only posts; the rule knows the terms.
+  if (kind === "heart_rate") return value === undefined ? undefined : heartRate(value);
   if (kind === "route") return route(value);
   if (kind === "reps") return reps(value);
   if (value !== undefined) invalid();

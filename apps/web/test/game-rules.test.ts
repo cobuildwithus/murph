@@ -296,7 +296,7 @@ describe("weekly game: posting", () => {
   it.each(["photo", "heart_rate", "words", "route", "reps"] as const)("allows %s in new any-kind games and keeps legacy requirements", (kind) => {
     const state = live();
     const now = at(state, LEO, 0, 12);
-    const input = { memberId: LEO, now, kind, captureAgeMs: null, mediaKeyPrefix: mediaKeyPrefixFor(LEO),
+    const input = { memberId: LEO, now, kind, hasData: true, captureAgeMs: null, mediaKeyPrefix: mediaKeyPrefixFor(LEO),
       mediaKeys: kind === "words" ? [] : [`${mediaKeyPrefixFor(LEO)}artifact.jpg`] };
     state.game.terms.versions[0].checkInKind = "any";
     expect(decidePost(state, input).attempt).toBe(1);
@@ -304,6 +304,16 @@ describe("weekly game: posting", () => {
     expect(codeOf(() => decidePost(state, input))).toBe(kind === "photo" ? "OK" : "INVALID_REQUEST");
     state.game.terms.versions[0].checkInKind = "heart_rate";
     expect(codeOf(() => decidePost(state, input))).toBe(kind === "heart_rate" ? "OK" : "INVALID_REQUEST");
+  });
+  it("requires a summary for new heart-rate posts while retaining image-only legacy posts", () => {
+    const state = live();
+    const input = { memberId: LEO, now: at(state, LEO, 0, 12), kind: "heart_rate" as const,
+      captureAgeMs: null, mediaKeyPrefix: mediaKeyPrefixFor(LEO), mediaKeys: [`${mediaKeyPrefixFor(LEO)}graph.jpg`] };
+    state.game.terms.versions[0].checkInKind = "any";
+    expect(codeOf(() => decidePost(state, input))).toBe("INVALID_REQUEST");
+    expect(decidePost(state, { ...input, hasData: true }).attempt).toBe(1);
+    state.game.terms.versions[0].checkInKind = "heart_rate";
+    expect(decidePost(state, input).attempt).toBe(1);
   });
   it("allows one retake per day, counting withdrawn posts", () => {
     let state = live();

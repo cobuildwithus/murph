@@ -146,6 +146,11 @@ describe.skipIf(!enabled)("game v1 local API smoke", () => {
     for (const [day, artifact] of artifacts.entries()) {
       if (day > 0) await game(advance(request(poster, { days: 1 }), context));
       const mediaKeys = artifact.kind === "words" ? [] : [await imageKey(poster, day + 10)];
+      if (artifact.kind === "heart_rate") {
+        const invalid = await post(request(poster, { entryId: randomUUID(), kind: "heart_rate", mediaKeys }), context);
+        expect(invalid.status).toBe(400);
+        expect(await invalid.json()).toMatchObject({ error: { code: "INVALID_REQUEST" } });
+      }
       const posted = await game(post(request(poster, { ...artifact, entryId: randomUUID(), mediaKeys, blurHash: "synthetic-blur" }), context));
       expect(posted.days[day].mine).toMatchObject({ kind: artifact.kind, data: artifact.data ?? null });
       const locked = await game(read(request(viewer, undefined, "GET"), context));

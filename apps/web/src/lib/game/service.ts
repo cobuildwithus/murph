@@ -573,6 +573,7 @@ async function post(context: CommandContext, command: Extract<GameCommand, { typ
     const decision = decidePost(loaded.state, {
       captureAgeMs,
       kind,
+      hasData: command.data !== undefined,
       mediaKeyPrefix: mediaKeyPrefixFor(actor),
       mediaKeys,
       memberId: actor,

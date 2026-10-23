@@ -402,6 +402,7 @@ export function decidePost(
   input: {
     memberId: string;
     kind: GameEntryKind;
+    hasData?: boolean;
     mediaKeys: readonly string[];
     mediaKeyPrefix: string;
     captureAgeMs: number | null;
@@ -418,6 +419,9 @@ export function decidePost(
   const required = termsForDay(state.game.terms, dayIndex).checkInKind ?? "photo";
   if (required !== "any" && input.kind !== required) {
     reject("INVALID_REQUEST", required === "heart_rate" ? "This challenge requires a heart-rate check-in." : "This challenge requires a photo check-in.");
+  }
+  if (required === "any" && input.kind === "heart_rate" && !input.hasData) {
+    reject("INVALID_REQUEST", "Include the heart-rate summary with the graph.");
   }
   const graceUsed = dayIndex !== dayIndexAt(player, input.now);
   const used = attemptsUsed(state.entries, player.memberId, dayIndex);

@@ -164,7 +164,9 @@ strings (at most 64 characters) are stored separately, so locked previews never
 require payload decryption. Chat and push receive no artifact data or blur.
 
 The additive v1 migration and compatible runtime readers must precede these
-writers. Existing entries with no payload remain readable with null data.
+writers. Existing entries with no payload remain readable with null data. Retained
+heart-rate-only games also accept image-only posts and retries from older clients;
+new any-kind games require the heart-rate summary.
 Native clients render and capture artifacts; there is no server map or dare bank.
 
 ## Changes agreed in chat

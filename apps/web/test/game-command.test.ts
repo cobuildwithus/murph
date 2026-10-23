@@ -36,7 +36,8 @@ describe("weekly game command validator", () => {
   ])("requires a rendered JPEG and closed summary for $kind", ({ kind, data }) => {
     const command = { type: "post", gameId: "game_artifact", entryId: "entry_artifact", kind, mediaKeys: [PHOTO_KEY], data };
     expect(parseGameCommand(command)).toMatchObject(command);
-    for (const extra of [{ data: undefined }, { data: null }, { data: { ...data, bpm: [123] } },
+    expect(codeOf(() => parseGameCommand({ ...command, data: undefined }))).toBe(kind === "heart_rate" ? "OK" : "INVALID_REQUEST");
+    for (const extra of [{ data: null }, { data: { ...data, bpm: [123] } },
       { data: { ...data, coordinates: [[1, 2]] } }, { mediaKeys: [] }, { mediaKeys: [PHOTO_KEY, PHOTO_KEY] },
       { mediaKeys: [PHOTO_KEY.replace(".jpg", ".heic")] }]) {
       expect(codeOf(() => parseGameCommand({ ...command, ...extra }))).toBe("INVALID_REQUEST");
