@@ -113,7 +113,8 @@ per hint, zero interactive transactions and zero external work in DB scopes.
 The existing client has at most two attempts for retryable database reads.
 The direct command budget is recalculated after reading, within the existing
 29-second hint deadline; reads use existing database connection/retry controls.
-No independent database cancellation or new timeout is introduced.
+A 250 ms local timer caps each optional owner read; timeout or error omits
+admission and dispatches through the ordinary Worker path without cancelling the read.
 
 Old and current Workers already accept this optional existing-admission wire
 shape. No coordinated Worker rollout, migration, config or container change is

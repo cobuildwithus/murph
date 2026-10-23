@@ -96,16 +96,16 @@ describe("Web direct runtime wake", () => {
     expect(mocks.ensure.mock.calls.map(([value]) => value.admission.owner.generation)).toEqual(["7", "8"]);
   });
 
-  it("counts snapshot reads against the existing dispatch deadline", async () => {
+  it("dispatches without admission after the optional read cap when the read never resolves", async () => {
     vi.useFakeTimers();
-    mocks.snapshot.mockImplementation(async () => {
-      await new Promise(resolve => setTimeout(resolve, 28_000));
-      return [snapshot()];
-    });
+    mocks.snapshot.mockImplementation(() => new Promise(() => {}));
     const wake = startHostedDirectRuntimeWakeBestEffort(input);
-    await vi.advanceTimersByTimeAsync(28_000);
-    await wake;
+    await vi.advanceTimersByTimeAsync(249);
     expect(mocks.ensure).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    await wake;
+    expect(mocks.ensure).toHaveBeenCalledOnce();
+    expect(mocks.ensure.mock.calls[0]?.[0]).not.toHaveProperty("admission");
   });
 
   it("leaves admission to the Worker when the optional read fails", async () => {

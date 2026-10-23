@@ -31,6 +31,8 @@ export type HostedDirectRuntimeWakeSource =
 const HOSTED_DIRECT_RUNTIME_WAKE_DEADLINE_MS = 29_000;
 const HOSTED_DIRECT_RUNTIME_WAKE_COMMAND_TIMEOUT_MS = 25_000;
 const HOSTED_DIRECT_RUNTIME_WAKE_MAX_ATTEMPTS = 2;
+// Optional owner reads must not stall dispatch behind database or pool delays.
+const HOSTED_DIRECT_RUNTIME_WAKE_OWNER_READ_TIMEOUT_MS = 250;
 
 /**
  * Starts the control-only Cloudflare latency hint and always settles. Temporal
@@ -107,7 +109,14 @@ async function runHostedDirectRuntimeWakeBestEffort(input: {
     ) {
       signal.throwIfAborted();
       // A failed optional read must preserve the ordinary Worker admission path.
-      const owner = await readHostedRuntimeDirectWakeOwner({ prisma: getPrisma(), userId }).catch(() => null);
+      let ownerReadTimeout: ReturnType<typeof setTimeout> | undefined;
+      const owner = await Promise.race([
+        readHostedRuntimeDirectWakeOwner({ prisma: getPrisma(), userId }).catch(() => null),
+        new Promise<null>((resolve) => {
+          ownerReadTimeout = setTimeout(() => resolve(null), HOSTED_DIRECT_RUNTIME_WAKE_OWNER_READ_TIMEOUT_MS);
+        }),
+      ]);
+      clearTimeout(ownerReadTimeout);
       signal.throwIfAborted();
       const commandTimeoutMs = Math.min(
         HOSTED_DIRECT_RUNTIME_WAKE_COMMAND_TIMEOUT_MS,

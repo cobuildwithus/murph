@@ -86,6 +86,7 @@ Postgres gate proved by their ownership transaction instead of rereading it
 after commit.
 
 Best-effort Web direct wakes read a live-owner snapshot before each attempt.
+The optional read is capped at 250 ms; hitting the cap omits admission and dispatches through the ordinary Worker path.
 They supply existing admission only for a Postgres member that passes the same
 default-mode eligibility predicate as claim and has a starting or active owner
 with a container target and workspace version. Retention-only owners are not
