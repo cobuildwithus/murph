@@ -15,7 +15,7 @@ import {
 } from "./contract";
 import { isGameMediaKey } from "./media";
 import { isRecord } from "../primitives";
-import { reject } from "./rules";
+import { GAME_MIN_LENGTH_DAYS, GAME_MAX_LENGTH_DAYS, reject, validNewStakes } from "./rules";
 
 /**
  * The one validator for game commands, shared by the app's routes and
@@ -138,20 +138,20 @@ function terms(input: Record<string, unknown>): GameTermsInput {
   return {
     checkInKind: input.checkInKind === undefined ? "photo" : oneOf(input.checkInKind, "terms.checkInKind", GAME_CHECK_IN_KINDS),
     schedule: schedule(record(input.schedule, "terms.schedule")),
-    stakes: list(input.stakes, "terms.stakes", LIST_MAX).map((value): GameStake => {
-      const stake = record(value, "terms.stakes[]");
-      return {
-        item: words(stake.item, "terms.stakes[].item"),
-        kind: oneOf(stake.kind, "terms.stakes[].kind", GAME_STAKE_KINDS),
-      };
-    }),
+    stakes: newStakes(input.stakes),
     tasks: list(input.tasks, "terms.tasks", LIST_MAX).map((value): GameTask => {
       const task = record(value, "terms.tasks[]");
       return { seat: integer(task.seat, "terms.tasks[].seat", 0), text: words(task.text, "terms.tasks[].text") };
     }),
-    ...optional(input.lengthDays, (value) => ({ lengthDays: integer(value, "terms.lengthDays", 1) })),
+    ...optional(input.lengthDays, (value) => ({ lengthDays: integer(value, "terms.lengthDays", GAME_MIN_LENGTH_DAYS, GAME_MAX_LENGTH_DAYS) })),
     ...optional(input.startsOn, (value) => ({ startsOn: calendarDate(value, "terms.startsOn") })),
   };
+}
+
+function newStakes(value: unknown): GameStake[] {
+  const { stakes } = parseChangedStakes(value);
+  validNewStakes(stakes);
+  return stakes;
 }
 
 function calendarDate(value: unknown, field: string): string {
@@ -268,7 +268,7 @@ export function parseGameChange(value: unknown, allowSealedWords = false): GameC
     ...optional(input.stakes, parseChangedStakes),
     ...(input.stakesApplyToWholeGame === true ? { stakesApplyToWholeGame: true as const } : {}),
     ...optional(input.schedule, (value) => ({ schedule: schedule(record(value, "schedule")) })),
-    ...optional(input.lengthDays, (value) => ({ lengthDays: integer(value, "lengthDays", 1, 28) })),
+    ...optional(input.lengthDays, (value) => ({ lengthDays: integer(value, "lengthDays", 1, GAME_MAX_LENGTH_DAYS) })),
     ...optional(input.startsOn, (value) => ({ startsOn: nullable(value, (date) => calendarDate(date, "startsOn")) })),
   };
 }

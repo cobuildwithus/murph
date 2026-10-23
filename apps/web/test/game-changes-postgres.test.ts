@@ -22,7 +22,7 @@ async function setup(schedule: GameSchedule = { days: [0,1,2,3,4] }) {
   await run(a,{type:"setProfile", firstName:"Riley", timeZone:"America/New_York"});
   await run(b,{type:"setProfile", firstName:"Jordan", timeZone:"America/New_York"});
   const gameId = randomUUID();
-  const created = await run(a,{type:"createGame",gameId,inviteeFirstName:"Private nickname",terms:{tasks:[{seat:0,text:"Read"},{seat:1,text:"Walk"}],schedule,stakes:[{kind:"winner_gets",item:"Breakfast"}]}});
+  const created = await run(a,{type:"createGame",gameId,inviteeFirstName:"Private nickname",terms:{tasks:[{seat:0,text:"Read"},{seat:1,text:"Walk"}],schedule,stakes:[{kind:"prize",item:"Breakfast"}]}});
   if (!created.ok || !created.game?.inviteToken) throw new Error("Fixture create failed");
   const joined = await run(b,{type:"join",token:created.game.inviteToken,termsVersion:1,timeZone:"America/New_York"});
   if (!joined.ok) throw new Error("Fixture join failed");

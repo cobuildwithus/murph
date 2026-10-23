@@ -151,7 +151,7 @@ describe("weekly game views: post to unlock", () => {
     const leoView = view(state, LEO, noonOnDay(state, LEO, 0));
     const avaView = view(state, AVA, noonOnDay(state, AVA, 0));
     expect(leoView.days.map((day) => day.localDate)).toEqual(avaView.days.map((day) => day.localDate));
-    expect(leoView.days.map((day) => day.off)).toEqual([true, true, false, false, false, false, false]);
+    expect(leoView.days.map((day) => day.off)).toEqual([false, true, true, false, false, false, false]);
     expect(avaView.days.map((day) => day.off)).toEqual(leoView.days.map((day) => day.off));
     expect(leoView.days[0].others[0].status).toBe("posted");
     expect(avaView.days[0].others[0].status).toBe("posted");
@@ -237,4 +237,25 @@ describe("weekly game views: post to unlock", () => {
     expect(view(liveState(), LEO, JOIN_AT, { relationships }).players.map((player) => player.relationship)).toEqual([null, "my partner"]);
     expect(view(liveState(), AVA, JOIN_AT).players.map((player) => player.relationship)).toEqual([null, null]);
   });
+});
+
+
+it("derives streaks from scheduled live posts, ignoring off days and unposted today", () => {
+  const state = liveState({days:[0,1,2,3,4]});
+  state.players.forEach((player) => {player.dayOne="2026-10-19";});
+  state.game.lengthDays = 14;
+  state.entries = [0,1,2,3,4].map((day) => entry(LEO,day,1));
+  expect(view(state,LEO,noonOnDay(state,LEO,7)).players[0].streak).toBe(5);
+  expect(view(state,AVA,noonOnDay(state,LEO,7)).players[0].streak).toBe(5);
+  expect(view(state,LEO,noonOnDay(state,LEO,8)).players[0].streak).toBe(0);
+  state.entries.push(entry(LEO,7,1),entry(LEO,8,0));
+  expect(view(state,LEO,noonOnDay(state,LEO,8)).players[0].streak).toBe(6);
+  state.entries[4].withdrawnAt = new Date();
+  expect(view(state,LEO,noonOnDay(state,LEO,8)).players[0].streak).toBe(1);
+});
+
+it.each(["prize","dare","winner_gets","per_miss"] as const)("returns ticket kind %s from its canonical stake key", (kind) => {
+  const state=liveState();state.game.terms.versions[0].stakes[0].kind=kind;
+  const row={id:"ticket_kind",gameId:state.game.id,stakeKey:"gsk_breakfast",owedBy:AVA,owedTo:LEO,status:"open" as const,createdAt:JOIN_AT,redeemedAt:null};
+  expect(ticketView(row,WORDS,LEO,JOIN_AT,state.game.terms)).toMatchObject({kind,youHold:true});
 });

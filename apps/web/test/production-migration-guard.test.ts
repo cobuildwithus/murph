@@ -671,6 +671,38 @@ describe("hosted web production migration guard", () => {
     }
   });
 
+  test("limits v1 compatibility to the exact reviewed game constraint expansion", async () => {
+    const migrationsDir = await mkdtemp(path.join(tmpdir(), "hosted-web-prisma-migrations-"));
+    const migrationId = "20261022220000_game_v1";
+    try {
+      const sql = await readFile(path.join(appRoot, "prisma", "migrations", migrationId, "migration.sql"), "utf8");
+      await writeMigrationSql(migrationsDir, migrationId, sql);
+      assert.deepEqual(await findHostedWebPrismaPredeployDestructiveMigrations(migrationsDir), []);
+      for (const [extra, reason] of [
+        ['ALTER TABLE "game" ADD CONSTRAINT "unreviewed_check" CHECK ("length_days" > 7);', "ADD CONSTRAINT CHECK"],
+        ['ALTER TABLE "game" DROP CONSTRAINT "game_status_check";', "DROP CONSTRAINT"],
+        ['DROP TABLE "game_entry";', "DROP TABLE"],
+      ]) {
+        await writeMigrationSql(migrationsDir, migrationId, `${sql}\n${extra}`);
+        assert.deepEqual(
+          (await findHostedWebPrismaPredeployDestructiveMigrations(migrationsDir)).map(({ reason }) => reason),
+          [reason],
+        );
+      }
+      // Reusing a reviewed constraint name cannot authorize a tighter check.
+      await writeMigrationSql(migrationsDir, migrationId, sql.replace("BETWEEN 1 AND 365", "BETWEEN 3 AND 365"));
+      assert.equal((await findHostedWebPrismaPredeployDestructiveMigrations(migrationsDir))[0]?.reason, "ADD CONSTRAINT CHECK");
+      await writeMigrationSql(migrationsDir, migrationId, sql);
+      await writeMigrationSql(migrationsDir, "20261022220001_unreviewed_game_change", sql);
+      assert.deepEqual(
+        (await findHostedWebPrismaPredeployDestructiveMigrations(migrationsDir)).map(({ migrationId }) => migrationId),
+        ["20261022220001_unreviewed_game_change"],
+      );
+    } finally {
+      await rm(migrationsDir, { force: true, recursive: true });
+    }
+  });
+
   test("limits the detached direct-proof predeploy exception to its proved DDL", async () => {
     const migrationsDir = await mkdtemp(
       path.join(tmpdir(), "hosted-web-prisma-migrations-"),

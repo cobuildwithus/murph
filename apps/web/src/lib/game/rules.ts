@@ -19,6 +19,7 @@ import {
 } from "./contract";
 import { isRecord } from "../primitives";
 import {
+  acceptanceStartDate,
   addDays,
   dayStartInstant,
   daysBetween,
@@ -95,7 +96,8 @@ export interface RuleState {
 
 export const GAME_SEATS_1V1 = 2;
 export const GAME_DEFAULT_LENGTH_DAYS = 7;
-export const GAME_MAX_LENGTH_DAYS = 28;
+export const GAME_MIN_LENGTH_DAYS = 3;
+export const GAME_MAX_LENGTH_DAYS = 365;
 export const GAME_MAX_START_DAYS_OUT = 60;
 export const GAME_TICKET_USE_DAYS = 14;
 
@@ -110,7 +112,6 @@ export function isTicketExpired(ticket: { status: string; createdAt: Date }, now
 }
 export const GAME_POSTS_PER_DAY = 2;
 export const GAME_INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
-const MAX_STAKES = 3;
 
 export const GAME_ERROR_STATUS: Record<GameErrorCode, number> = {
   ALREADY_IN_A_GAME: 409,
@@ -264,17 +265,15 @@ export function decideNewTerms(input: GameTermsInput, options: { newKey: () => s
     reject("INVALID_REQUEST", `Pick a start date from tomorrow to ${GAME_MAX_START_DAYS_OUT} days out.`);
   }
   const lengthDays = input.lengthDays ?? GAME_DEFAULT_LENGTH_DAYS;
-  if (lengthDays < 1 || lengthDays > GAME_MAX_LENGTH_DAYS) {
-    reject("INVALID_REQUEST", `A game runs 1 to ${GAME_MAX_LENGTH_DAYS} days.`);
+  if (!Number.isInteger(lengthDays) || lengthDays < GAME_MIN_LENGTH_DAYS || lengthDays > GAME_MAX_LENGTH_DAYS) {
+    reject("INVALID_REQUEST", `A game runs ${GAME_MIN_LENGTH_DAYS} to ${GAME_MAX_LENGTH_DAYS} days.`);
   }
   const tasks = [...input.tasks].sort((a, b) => a.seat - b.seat);
   if (tasks.length !== GAME_SEATS_1V1 || tasks.some((task, seat) => task.seat !== seat)) {
     reject("INVALID_REQUEST", "Each player needs one task: seats 0 and 1.");
   }
   const schedule = validSchedule(input.schedule, lengthDays);
-  if (input.stakes.length < 1 || input.stakes.length > MAX_STAKES) {
-    reject("INVALID_REQUEST", `A game has 1 to ${MAX_STAKES} stakes.`);
-  }
+  validNewStakes(input.stakes);
   const stakes = input.stakes.map((stake) => ({ item: stake.item, key: options.newKey(), kind: stake.kind }));
   return {
     lengthDays,
@@ -288,6 +287,12 @@ export function decideNewTerms(input: GameTermsInput, options: { newKey: () => s
       versions: [{ n: 1, stakes: stakes.map(({ item, key }) => ({ item, key })), tasks }],
     },
   };
+}
+
+export function validNewStakes(stakes: readonly { kind: GameStakeKind }[]): void {
+  if (stakes.length !== 1 || !["prize", "dare"].includes(stakes[0].kind)) {
+    reject("INVALID_REQUEST", "Choose one prize or dare.");
+  }
 }
 
 export function validSchedule(schedule: GameSchedule, lengthDays: number): GameSchedule {
@@ -358,28 +363,27 @@ export function decideJoin(
     seat: state.players.length,
     timeZone: input.timeZone,
   };
-  // Day 1 is the next local day after the last one shakes on it for whoever
-  // gets there last, or the picked date if that's later.
+  // The accepter's cutoff and both local dates determine the shared Day 1.
   return {
     kind: "join",
     seat: joiner.seat,
     startedAt: input.now,
     ...scheduleFor(
       [...state.players, joiner],
-      (player) => addDays(gameLocalDate(input.now, player.timeZone), 1),
+      (player) => player.memberId === input.memberId ? acceptanceStartDate(input.now, player.timeZone) : gameLocalDate(input.now, player.timeZone),
       game.startsOn,
     ),
   };
 }
 
 /** Agreement starts a negotiation at approval time, never at the invitee's arrival. */
-export function decideNegotiationStart(state: RuleState, now: Date, startsOn: string | null, startNow = false): Schedule {
+export function decideNegotiationStart(state: RuleState, actor: string, now: Date, startsOn: string | null, startNow = false): Schedule {
   if (state.game.status !== "negotiating" || state.players.length !== GAME_SEATS_1V1) reject("GAME_NOT_LIVE", "Both players must join before agreeing.");
   if (startNow) {
     if (startsOn === null) reject("INVALID_REQUEST", "The start-now proposal needs its agreed date.");
     return scheduleFor(state.players, () => startsOn);
   }
-  return scheduleFor(state.players, (player) => addDays(gameLocalDate(now, player.timeZone), 1), startsOn ?? state.game.startsOn);
+  return scheduleFor(state.players, (player) => player.memberId === actor ? acceptanceStartDate(now, player.timeZone) : gameLocalDate(now, player.timeZone), startsOn ?? state.game.startsOn);
 }
 
 export interface PostDecision {
@@ -571,7 +575,7 @@ export function decideSettle(state: RuleState): SettleDecision {
   // Same test as outcomeFor: when nobody missed a day, the outcome is perfect.
   const perfect = scores.every((score) => score.misses === 0);
   for (const stake of version.stakes) {
-    if (stake.kind === "winner_gets") {
+    if (stake.kind !== "per_miss") {
       // A tie or a perfect game means nobody owes anything.
       if (perfect || winners.length !== 1) continue;
       for (const loser of scores) {

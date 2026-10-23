@@ -45403,6 +45403,7 @@ describeRealCodex('real Codex game progress and photo journeys', () => {
     { name: 'game chat photo yes saves only pending source', kind: 'yes' },
     { name: 'game chat photo replacement asks before consuming retake', kind: 'replace' },
     { name: 'game chat daily progress distinguishes due and missed', kind: 'progress' },
+    { name: 'game chat windowed progress retains whole-game scores', kind: 'window' },
     { name: 'game chat settled result uses frozen scores and stakes', kind: 'result' },
   ])('$name', async ({ kind, name }) => {
     const config = await resolveRealCodexE2eConfig()
@@ -45410,7 +45411,7 @@ describeRealCodex('real Codex game progress and photo journeys', () => {
     const { MURPH_READ_GAME_TOOL, MURPH_UPDATE_GAME_TOOL, MURPH_GAME_PHOTO_TOOL, GAME_PHOTO_CHAT_GUIDANCE } = await import('../src/assistant-codex/dynamic-tools/games.js')
     const inputId = 'ain_' + 'd'.repeat(32)
     const calls: Array<import('@murphai/hosted-execution/runtime-control').HostedRuntimeGroupToolRequest> = []
-    const game = {
+    const game: import('@murphai/hosted-execution/runtime-control').HostedGameChatState['games'][number] = {
       id: 'game_synthetic', status: kind === 'result' ? 'settled' as const : 'live' as const, lengthDays: 7, startsOn: '2030-03-04',
       terms: { n: 1, fromDay: 0, checkInKind: 'photo' as const, tasks: [{ seat: 0, text: 'Walk for 20 minutes' }, { seat: 1, text: 'Walk for 20 minutes' }], schedule: { days: [0,1,2,3,4] }, stakes: [{ kind: 'winner_gets' as const, item: 'Choose the next board game' }] },
       players: [{ memberId: 'player_alex', seat: 0, firstName: 'Alex', dayOne: '2030-03-04', timeZone: 'UTC' }, { memberId: 'player_sam', seat: 1, firstName: 'Sam', dayOne: '2030-03-04', timeZone: 'UTC' }],
@@ -45421,10 +45422,25 @@ describeRealCodex('real Codex game progress and photo journeys', () => {
       ] },
       result: kind === 'result' ? { scores: [{ memberId: 'player_alex', seat: 0, score: 5, misses: 0 }, { memberId: 'player_sam', seat: 1, score: 3, misses: 2 }], tickets: [{ owedByMemberId: 'player_sam', owedToMemberId: 'player_alex', what: 'Choose the next board game', status: 'open' as const, count: 1 }] } : null,
     }
+    if (kind === 'window') {
+      game.lengthDays = 365
+      game.startsOn = '2030-01-01'
+      game.terms.schedule = { days: [0, 1, 2, 3, 4, 5, 6] }
+      for (const player of game.players) player.dayOne = '2030-01-01'
+      for (const player of game.progress!.players) {
+        player.score = player.memberId === 'player_alex' ? 40 : 30
+        player.target = 365
+        player.currentDayIndex = 63
+        player.days = Array.from({ length: 14 }, (_, offset) => ({ dayIndex: 50 + offset,
+          date: new Date(Date.UTC(2030, 0, 51 + offset)).toISOString().slice(0, 10),
+          status: player.memberId === 'player_sam' ? 'posted' as const : offset === 13 ? 'due' as const : 'missed' as const }))
+      }
+    }
     const message = kind === 'offer' || kind === 'quiet-new-room' ? 'Just finished my 20-minute walk! [One attached JPEG photo, attachment ordinal 1, showing Alex outdoors after the walk.]'
       : kind === 'quiet' ? 'Another walk done! [One attached JPEG photo, ordinal 1.]'
       : kind === 'yes' ? 'yeah please'
       : kind === 'progress' ? 'Murph, who checked in today and yesterday?'
+      : kind === 'window' ? 'Murph, who is ahead in our game overall, and what are our scores?'
       : kind === 'result' ? 'Murph, who won our last game and what do we owe?'
       : 'Murph, save this photo as my check-in today. [One attached JPEG photo, ordinal 1.]'
     try {
@@ -45463,6 +45479,12 @@ describeRealCodex('real Codex game progress and photo journeys', () => {
         if (kind === 'quiet-new-room') expect(calls.map((call) => call.action)).toEqual(['read_game'])
         if (kind === 'replace') { expect(result.finalMessage).toMatch(/replace|retake/iu); expect(result.finalMessage).toContain('?'); expect(result.finalMessage).not.toMatch(/saved|logged/iu) }
         if (kind === 'progress') { expect(result.finalMessage).toMatch(/Sam/iu); expect(result.finalMessage).toMatch(/yesterday/iu); expect(result.finalMessage).not.toMatch(/Alex.{0,20}missed today|Sam.{0,20}missed today/iu) }
+        if (kind === 'window') {
+          expect(result.finalMessage).toMatch(/Alex/iu)
+          expect(result.finalMessage).toMatch(/40|forty/iu)
+          expect(result.finalMessage).toMatch(/30|thirty/iu)
+          expect(result.finalMessage).not.toMatch(/Sam (?:leads|wins|is ahead)|14[–-]0|14 to 0/iu)
+        }
         if (kind === 'result') { expect(result.finalMessage).toMatch(/Alex/iu); expect(result.finalMessage).toMatch(/5|five/iu); expect(result.finalMessage).toMatch(/3|three/iu); expect(result.finalMessage).toMatch(/board game/iu) }
       }
       expect(result.finalMessage).not.toMatch(/automatically save|from now on|verified.{0,20}walk/iu)

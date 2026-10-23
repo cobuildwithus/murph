@@ -6,6 +6,7 @@ import { buildHostedLinqConversationWakeForMailbox } from "../src/lib/hosted-onb
 import { readGameChatState, runGameCommand } from "../src/lib/game/service";
 import { mediaKeyPrefixFor } from "../src/lib/game/access";
 import { addDays, gameLocalDate } from "../src/lib/game/time";
+import { sealGameText } from "../src/lib/game/crypto";
 vi.mock("../src/lib/game/chat-delivery", () => ({ deliverGameChangeProposal: async () => {} }));
 const imageControl = vi.hoisted(() => ({ putGameImage: vi.fn(async () => {}), statGameImage: vi.fn(async () => ({ byteLength: 3 })) }));
 vi.mock("../src/lib/hosted-execution/control", () => ({ readHostedExecutionControlClientIfConfigured: () => imageControl }));
@@ -21,7 +22,7 @@ async function fixture() {
   await db.hostedMember.createMany({ data: [a,b,room].map((id) => ({ id, billingStatus: "not_started" })) });
   for (const [memberId, firstName] of [[a,"Alex"],[b,"Sam"]]) await runGameCommand({ actorMemberId: memberId, command: { type: "setProfile", firstName, timeZone: "UTC" } });
   const gameId = randomUUID();
-  const created = await runGameCommand({ actorMemberId: a, command: { type: "createGame", gameId, inviteeFirstName: "Private contact label", terms: { tasks: [{ seat: 0, text: "Read" }, { seat: 1, text: "Read" }], schedule: { days: [0,1,2,3,4,5,6] }, stakes: [{ kind: "winner_gets", item: "Choose a book" }] } } });
+  const created = await runGameCommand({ actorMemberId: a, command: { type: "createGame", gameId, inviteeFirstName: "Private contact label", terms: { tasks: [{ seat: 0, text: "Read" }, { seat: 1, text: "Read" }], schedule: { days: [0,1,2,3,4,5,6] }, stakes: [{ kind: "prize", item: "Choose a book" }] } } });
   if (!created.ok || !created.game?.inviteToken) throw new Error("Fixture creation failed");
   const joined = await runGameCommand({ actorMemberId: b, command: { type: "join", token: created.game.inviteToken, termsVersion: 1, timeZone: "UTC" } });
   if (!joined.ok) throw new Error("Fixture join failed");
@@ -32,6 +33,36 @@ describe.skipIf(!enabled)("shared game progress canonical PostgreSQL proof", () 
   beforeEach(() => { vi.stubEnv("VERCEL_ENV", "preview"); imageControl.putGameImage.mockClear(); });
   afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
   afterAll(async () => { await getPrisma().hostedMember.deleteMany({ where: { id: { in: members } } }); });
+  it("projects five extended legacy games without truncating their per-miss tickets", async () => {
+    const { a, b, room, gameId: initialId, db } = await fixture();
+    await db.game.delete({ where: { id: initialId } });
+    const dayOne = new Date(`${addDays(gameLocalDate(new Date(), "UTC"), -366)}T00:00:00Z`);
+    const stakes = [0, 1, 2].map((index) => ({ key: `legacy-${index}`, kind: "per_miss" }));
+    for (let round = 0; round < 5; round += 1) {
+      const gameId = randomUUID();
+      const termsWordsEncrypted = await sealGameText({ table: "game", field: "terms_words", rowId: gameId, memberId: a }, JSON.stringify({
+        v: 1, versions: [{ n: 1, tasks: [{ seat: 0, text: "Read" }, { seat: 1, text: "Read" }],
+          stakes: stakes.map((stake, index) => ({ key: stake.key, item: `Synthetic favor ${index}` })) }],
+      }));
+      await db.game.create({ data: {
+        id: gameId, createdBy: a, status: "live", liveRosterKey: [a, b].sort().join(":"), lengthDays: 365,
+        terms: { v: 1, versions: [{ n: 1, fromDay: 0, schedule: { days: [0, 1, 2, 3, 4, 5, 6] }, stakes }] },
+        termsWordsEncrypted: termsWordsEncrypted!,
+        players: { create: [{ memberId: a, seat: 0, timeZone: "UTC", dayOne }, { memberId: b, seat: 1, timeZone: "UTC", dayOne }] },
+      } });
+      await db.gameEntry.createMany({ data: Array.from({ length: 365 }, (_, dayIndex) => ({
+        id: randomUUID(), gameId, memberId: a, dayIndex, attempt: 1, kind: "photo", receivedAt: new Date(),
+      })) });
+      // The ordinary shared reader settles each due game and releases the pair.
+      await readGameChatState(room, [a, b]);
+    }
+    const state = await readGameChatState(room, [a, b]);
+    expect(state.games).toHaveLength(5);
+    expect(state.games.every((game) => game.result?.tickets.length === 3
+      && game.result.tickets.every((ticket) => ticket.count === 365))).toBe(true);
+    expect(await db.gameTicket.count({ where: { gameId: { in: state.games.map((game) => game.id) } } })).toBe(5_475);
+    expect(state.games.every((game) => game.progress?.players.every((player) => player.days.length === 14))).toBe(true);
+  });
   it("settles on the shared read and returns frozen scores and grouped tickets exactly once", async () => {
     const {a,b,room,gameId,db} = await fixture();
     const dayOne = addDays(gameLocalDate(new Date(), "UTC"), -8);

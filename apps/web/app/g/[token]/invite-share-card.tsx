@@ -1,8 +1,8 @@
 import type { GameInvitePreview } from "@/src/lib/game/contract";
 
-import { CLOSED_INVITE_TITLE, describeSchedule, describeStartDate } from "./invite-copy";
+import { CLOSED_INVITE_TITLE, describeSchedule, describeStakeLabel, describeStartDate } from "./invite-copy";
 
-export const GAME_INVITE_OG_ALT = "A Murph weekly game challenge.";
+export const GAME_INVITE_OG_ALT = "A Murph game challenge.";
 
 // The event-ticket look from the game's invite design: a sienna ground, a
 // cream ticket with both players, and a gold stub with the stake.
@@ -50,7 +50,7 @@ export function GameInviteShareCard({ preview }: { preview: GameInvitePreview | 
 function OpenTicket({ preview }: { preview: Extract<GameInvitePreview, { status: "open" }> }) {
   const tasks = preview.terms.tasks;
   const stake = preview.terms.stakes[0];
-  const when = describeSchedule(preview.terms.schedule).toUpperCase()
+  const when = `${describeSchedule(preview.terms.schedule).toUpperCase()} · ${preview.lengthDays ?? 7} DAYS`
     + (preview.startsOn ? ` · STARTS ${describeStartDate(preview.startsOn).toUpperCase()}` : "");
   const nameSize = nameFontSize(Math.max(preview.inviterFirstName.length, INVITEE_NAME.length));
   return (
@@ -100,7 +100,7 @@ function OpenTicket({ preview }: { preview: Extract<GameInvitePreview, { status:
           }}
         >
           <Label color="rgba(59, 42, 18, 0.7)" size={18} spacing={4.3}>
-            {stake.kind === "winner_gets" ? "WINNER GETS" : "EVERY DAY YOU MISS"}
+            {describeStakeLabel(stake).toUpperCase()}
           </Label>
           <div
             style={{

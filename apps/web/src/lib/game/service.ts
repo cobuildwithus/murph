@@ -44,6 +44,7 @@ import {
   decideWithdraw,
   GAME_ERROR_STATUS,
   GAME_INVITE_TTL_MS,
+  GAME_MAX_LENGTH_DAYS,
   GAME_SEATS_1V1,
   GameRuleError,
   isGameDue,
@@ -91,6 +92,8 @@ const HOME_SETTLED_SHOWN = 3;
 const HOME_EXPIRED_SHOWN = 3;
 const HOME_EXPIRED_FOR_MS = 7 * 24 * 60 * 60 * 1000;
 const WALLET_LIMIT = 200;
+// Five games, each with at most three legacy per-miss stakes owed by one loser.
+const CHAT_TICKET_LIMIT = 5 * 3 * GAME_MAX_LENGTH_DAYS;
 
 // ------------------------------------------------------------------- writes
 
@@ -837,7 +840,8 @@ async function applyApprovedChange(locked: LockedStep, gameId: string, proposal:
   const { tx, loaded, now, clock } = locked;
   // Validate against the locked current game again. A start-now proposal keeps
   // its proposed date, rather than silently changing what the players agreed to.
-  decideGameChange(loaded.state, actor, proposal.change, now, proposal);
+  const decision = decideGameChange(loaded.state, actor, proposal.change, now, proposal);
+  const startsOn = proposal.change.kind === "edit" && proposal.change.startsOn === null ? decision.startsOn : proposal.startsOn;
   const previous = currentTerms(loaded.state.game.terms);
   const next = { ...previous, n: previous.n + 1, fromDay: proposal.effectiveFromDay,
     ...(proposal.change.kind === "edit" && proposal.change.schedule ? { schedule: proposal.change.schedule } : {}),
@@ -848,13 +852,13 @@ async function applyApprovedChange(locked: LockedStep, gameId: string, proposal:
     pendingChange: Prisma.DbNull, terms: toPrismaJsonObject(terms),
     ...(proposal.termsWordsEncrypted ? { termsWordsEncrypted: proposal.termsWordsEncrypted } : {}),
     ...(lengthDays === undefined ? {} : { lengthDays }),
-    ...(proposal.startsOn ? { startsOn: toDbDate(proposal.startsOn) } : proposal.change.kind === "edit" && proposal.change.startsOn === null ? { startsOn: null } : {}),
+    ...(startsOn ? { startsOn: toDbDate(startsOn) } : proposal.change.kind === "edit" && proposal.change.startsOn === null ? { startsOn: null } : {}),
   } });
   if (loaded.state.game.status === "negotiating") {
     const agreedState = await withCurrentTimeZones(tx, { ...loaded.state, game: { ...loaded.state.game, terms, lengthDays: lengthDays ?? loaded.state.game.lengthDays,
       ...(proposal.change.kind === "edit" && proposal.change.startsOn === null ? { startsOn: null } : {}) } });
     if (proposal.startsOn && agreedState.players.some((player) => gameLocalDate(now, player.timeZone) > proposal.startsOn!)) reject("CHANGE_EXPIRED", "The proposed start date has passed. Propose a new date.");
-    const schedule = decideNegotiationStart(agreedState, now, proposal.startsOn, proposal.change.kind === "start_now");
+    const schedule = decideNegotiationStart(agreedState, actor, now, proposal.startsOn, proposal.change.kind === "start_now");
     await writeSchedule(tx, gameId, schedule);
     await tx.game.update({ where: { id: gameId }, data: { status: "live", startedAt: clock } });
     return [
@@ -862,7 +866,7 @@ async function applyApprovedChange(locked: LockedStep, gameId: string, proposal:
       { type: "started", payload: { startNow: proposal.change.kind === "start_now" } },
     ];
   }
-  if (proposal.startsOn) await tx.gamePlayer.updateMany({ where: { gameId: gameId }, data: { dayOne: toDbDate(proposal.startsOn) } });
+  if (startsOn) await tx.gamePlayer.updateMany({ where: { gameId }, data: { dayOne: toDbDate(startsOn) } });
   return [{ commandKey: resolutionKey, type: "change_applied", payload: { proposalId: proposal.id, termsVersion: next.n, effectiveFromDay: next.fromDay } }];
 }
 
@@ -887,11 +891,11 @@ export async function readGameChatState(containerMemberId: string, playerMemberI
   const names = new Map(profiles.map((profile, index) => [profile.memberId, plain[rows.length + index] ?? ""]));
   const [pendingViews, tickets, actorProfile] = await Promise.all([
     readPendingChangeViews(rows),
-    prisma.gameTicket.findMany({ where: { gameId: { in: rows.filter((row) => row.status === "settled").map((row) => row.id) } }, take: 1121, orderBy: { id: "asc" } }),
+    prisma.gameTicket.findMany({ where: { gameId: { in: rows.filter((row) => row.status === "settled").map((row) => row.id) } }, take: CHAT_TICKET_LIMIT + 1, orderBy: { id: "asc" } }),
     actorMemberId ? prisma.gameProfile.findUnique({ where: { memberId: actorMemberId }, select: { chatPhotoIntroducedAt: true, chatPhotoOffer: true } }) : null,
   ]);
   const clock = current.clock;
-  if (tickets.length > 1120) throw new Error("Game ticket projection exceeds its rule bound.");
+  if (tickets.length > CHAT_TICKET_LIMIT) throw new Error("Game ticket projection exceeds its rule bound.");
   const offer = isRecord(actorProfile?.chatPhotoOffer) ? actorProfile.chatPhotoOffer : null;
   const hasPendingOffer = offer?.containerMemberId === containerMemberId && offer.resolutionMessageRef === null
     && typeof offer.expiresAt === "string" && Date.parse(offer.expiresAt) > clock.getTime();
@@ -1077,7 +1081,7 @@ function sortForHome(games: readonly LoadedGame[], memberId: string, clock: Date
 
 export async function readHome(memberId: string): Promise<GameHomeView> {
   const prisma = getPrisma();
-  const [profile, seats, addressed, tickets] = await Promise.all([
+  const [profile, seats, addressed, tickets, usualEntry] = await Promise.all([
     prisma.gameProfile.findUnique({ where: { memberId } }),
     prisma.gamePlayer.findMany({
       orderBy: { joinedAt: "desc" },
@@ -1087,11 +1091,13 @@ export async function readHome(memberId: string): Promise<GameHomeView> {
     }),
     prisma.game.findMany({ select: { id: true }, take: HOME_CANDIDATE_LIMIT, where: { inviteeMemberId: memberId, status: "invited" } }),
     prisma.gameTicket.findMany({
-      include: { game: { select: { createdBy: true, devClockOffsetMs: true, id: true, termsWordsEncrypted: true } } },
+      include: { game: { select: { createdBy: true, devClockOffsetMs: true, id: true, terms: true, termsWordsEncrypted: true } } },
       orderBy: { createdAt: "desc" },
       take: WALLET_LIMIT,
       where: { OR: [{ owedTo: memberId }, { owedBy: memberId }] },
     }),
+    prisma.gameEntry.findFirst({ where: { memberId, attempt: { gt: 0 }, withdrawnAt: null },
+      orderBy: [{ receivedAt: "desc" }, { id: "desc" }], select: { kind: true } }),
   ]);
   const current = await loadCurrent([...new Set([...seats.map((seat) => seat.gameId), ...addressed.map((game) => game.id)])]);
   const visible = current.games.filter((game) => canView(game, memberId));
@@ -1102,10 +1108,10 @@ export async function readHome(memberId: string): Promise<GameHomeView> {
     ? [{ field: "first_name", memberId, rowId: memberId, table: "game_profile", value: profile.firstNameEncrypted }]
     : []);
   const wallet = tickets.map((ticket) =>
-    ticketView(toTicketRow(ticket), words.get(ticket.gameId) ?? null, memberId, gameNow(current.clock, ticket.game)));
+    ticketView(toTicketRow(ticket), words.get(ticket.gameId) ?? null, memberId, gameNow(current.clock, ticket.game), parseStoredTerms(ticket.game.terms)));
   return {
     games: views,
-    me: { avatarUrl: profile?.photoKey ? gameMediaUrl(profile.photoKey) : null, firstName: firstName ?? null, memberId, timeZone: profile?.timeZone ?? null },
+    me: { usualKind: usualEntry ? toEntryKind(usualEntry.kind) : null, avatarUrl: profile?.photoKey ? gameMediaUrl(profile.photoKey) : null, firstName: firstName ?? null, memberId, timeZone: profile?.timeZone ?? null },
     wallet: {
       // Expired tickets stay where they were, marked expired.
       held: wallet.filter((ticket) => ticket.status !== "redeemed" && ticket.youHold),

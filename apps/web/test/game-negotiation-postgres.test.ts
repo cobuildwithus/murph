@@ -2,9 +2,8 @@ import { randomUUID } from "node:crypto";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import { getPrisma } from "@/src/lib/prisma";
 import { readGame, readHome, readInvitePreview, runGameCommand } from "@/src/lib/game/service";
-import { decideSettle, settleDueAt, parseStoredTerms, parseTermWords, type RuleState } from "@/src/lib/game/rules";
-import { openGameTexts } from "@/src/lib/game/crypto";
-import { addDays, gameLocalDate } from "@/src/lib/game/time";
+import { parseStoredTerms } from "@/src/lib/game/rules";
+import { acceptanceStartDate, addDays, gameLocalDate } from "@/src/lib/game/time";
 import type { GameCommand } from "@/src/lib/game/contract";
 vi.mock("@/src/lib/game/chat-delivery", () => ({ deliverGameChangeProposal: vi.fn(async () => {}) }));
 const enabled = process.env.MURPH_TEST_POSTGRES_CONCURRENCY === "1";
@@ -22,14 +21,14 @@ async function setup() {
   await getPrisma().hostedMember.createMany({ data: [a, b, c, room].map((id) => ({ id, billingStatus: "not_started" })) });
   for (const [id, firstName] of [[a,"Ava"],[b,"Sam"],[c,"Maya"]]) await run(id, { type:"setProfile", firstName, timeZone:"America/New_York" });
   const gameId = randomUUID();
-  const created = await run(a, { type:"createGame", gameId, inviteeFirstName:"Sam", terms:{ tasks, schedule:{days:[0,1,2,3,4,5,6]}, stakes:[{kind:"per_miss",item:"Make tea"}], lengthDays:10 } });
+  const created = await run(a, { type:"createGame", gameId, inviteeFirstName:"Sam", terms:{ tasks, schedule:{days:[0,1,2,3,4,5,6]}, stakes:[{kind:"dare",item:"Sing karaoke"}], lengthDays:10 } });
   if (!created.ok || !created.game?.inviteToken) throw new Error("Create fixture failed");
   await getPrisma().game.update({ where:{id:gameId}, data:{chatContainerMemberId:room} });
   roomPlayers.set(room, [a,b]);
   return {a,b,c,room,gameId,token:created.game.inviteToken};
 }
 function negotiate(token: string, proposalId = randomUUID()): Extract<GameCommand,{type:"negotiate"}> {
-  return { type:"negotiate",token,proposalId,termsVersion:1,timeZone:"America/New_York",change:{kind:"edit",tasks:[tasks[0],{seat:1,text:"Practice guitar"}],schedule:{days:[4,0]},stakes:[{kind:"winner_gets",item:"Choose the film"}]} };
+  return { type:"negotiate",token,proposalId,termsVersion:1,timeZone:"America/New_York",change:{kind:"edit",tasks:[tasks[0],{seat:1,text:"Practice guitar"}],schedule:{days:[4,0]},stakes:[{kind:"prize",item:"Choose the film"}]} };
 }
 
 describe.skipIf(!enabled)("game negotiation persistence", () => {
@@ -57,9 +56,9 @@ describe.skipIf(!enabled)("game negotiation persistence", () => {
     const results = await Promise.all([run(a,approve,room,later),run(a,approve,room,later)]);
     expect(results.every((result) => result.ok)).toBe(true);
     const view = (await readGame(gameId,a))!;
-    expect(view).toMatchObject({status:"live",pendingChange:null,terms:{n:2,tasks:command.change.kind === "edit" ? command.change.tasks : [],stakes:[{kind:"winner_gets",item:"Choose the film"}]}});
+    expect(view).toMatchObject({status:"live",pendingChange:null,terms:{n:2,tasks:command.change.kind === "edit" ? command.change.tasks : [],stakes:[{kind:"prize",item:"Choose the film"}]}});
     const players = await getPrisma().gamePlayer.findMany({where:{gameId}});
-    expect(players.map((player) => player.dayOne?.toISOString().slice(0,10))).toEqual([1,2].map(() => addDays(gameLocalDate(later,"America/New_York"),1)));
+    expect(players.map((player) => player.dayOne?.toISOString().slice(0,10))).toEqual([1,2].map(() => acceptanceStartDate(later,"America/New_York")));
     expect(await getPrisma().gameEvent.count({where:{gameId,type:"started"}})).toBe(1);
     expect(await getPrisma().hostedLinqDelivery.count({ where: { source: "game_lifecycle", sourceRef: gameId, template: "game_started" } })).toBe(1);
     expect(await getPrisma().gameEvent.count({where:{gameId,type:"change_applied"}})).toBe(1);
@@ -102,61 +101,23 @@ describe.skipIf(!enabled)("game negotiation persistence", () => {
     const row = (await getPrisma().game.findUnique({where:{id:gameId},include:{players:true}}))!;
     expect(row.startsOn?.toISOString().slice(0,10) ?? null).toBe(reset ? null : selected);
     if (!reset) expect(parseStoredTerms(row.terms).versions[0].schedule).toEqual({days:[0,4]});
-    expect(row.players[0].dayOne?.toISOString().slice(0,10)).toBe(reset ? addDays(gameLocalDate(later,"America/New_York"),1) : selected);
+    expect(row.players[0].dayOne?.toISOString().slice(0,10)).toBe(reset ? acceptanceStartDate(later,"America/New_York") : selected);
   });
-  it.each([10,28])("agrees whole-game stakes on the final day or closing grace without extending a %s-day game", async (lengthDays) => {
+  it.each([1, 3, 10])("refuses live task/stake edits without changing agreed terms on day %s", async (day) => {
     const {a,b,room,gameId,token} = await setup();
-    await run(b,{type:"join",token,termsVersion:1,timeZone:"America/New_York"});
-    const now = new Date(), dayOne = addDays(gameLocalDate(now,"America/New_York"),1-lengthDays);
-    await getPrisma().game.update({where:{id:gameId},data:{lengthDays}});
+    expect(await run(b,{type:"join",token,termsVersion:1,timeZone:"America/New_York"})).toMatchObject({ok:true});
+    const dayOne = addDays(gameLocalDate(new Date(),"America/New_York"),1-day);
     await getPrisma().gamePlayer.updateMany({where:{gameId},data:{dayOne:new Date(`${dayOne}T00:00:00Z`)}});
-    const entry = {id:randomUUID(),gameId,memberId:a,dayIndex:0,attempt:1,kind:"photo",receivedAt:now};
-    await getPrisma().gameEntry.create({data:entry});
-    const proposalId = randomUUID();
-    const change = {kind:"edit" as const,stakes:[{kind:"per_miss" as const,item:"Wash dishes"}],stakesApplyToWholeGame:true as const};
-    expect(await run(a,{type:"proposeChange",gameId,proposalId,expectedTermsVersion:1,change:{...change,tasks}},room,now)).toMatchObject({ok:false,error:{code:"INVALID_REQUEST"}});
-    expect(await run(a,{type:"proposeChange",gameId,proposalId,expectedTermsVersion:1,change},room,now)).toMatchObject({ok:true});
-    expect(await run(a,{type:"respondChange",gameId,proposalId,decision:"approve"},room,now)).toMatchObject({ok:false,error:{code:"NOT_A_PLAYER"}});
-    const grace = new Date(settleDueAt([{memberId:a,seat:0,dayOne,timeZone:"America/New_York"}],lengthDays).getTime()-1);
-    expect(await run(b,{type:"respondChange",gameId,proposalId,decision:"approve"},room,grace)).toMatchObject({ok:true});
-    const row = (await getPrisma().game.findUnique({where:{id:gameId},include:{players:true}}))!;
-    const terms = parseStoredTerms(row.terms);
-    expect(row.lengthDays).toBe(lengthDays);
-    expect(terms.versions.map((version) => version.fromDay)).toEqual([0,lengthDays]);
-    const [plain] = await openGameTexts([{table:"game",field:"terms_words",rowId:gameId,memberId:a,value:row.termsWordsEncrypted}]);
-    const words = parseTermWords(plain!);
-    expect(words.versions.map((version) => version.tasks)).toEqual([tasks,tasks]);
-    const entries = await getPrisma().gameEntry.findMany({where:{gameId}});
-    expect(entries).toHaveLength(1); expect(entries[0]).toMatchObject(entry);
-    const state: RuleState = {game:{...row,status:"live",terms,seats:2,startsOn:null},players:row.players.map((player) => ({...player,dayOne})),entries:entries.map((item) => ({...item,kind:"photo"}))};
-    expect(decideSettle(state).tickets).toEqual([{owedBy:b,owedTo:a,stakeKey:terms.versions[1].stakes[0].key}]);
-    const due = new Date(grace.getTime()+1);
-    expect(await run(a,{type:"proposeChange",gameId,proposalId:randomUUID(),expectedTermsVersion:2,change},room,due)).toMatchObject({ok:false,error:{code:"GAME_NOT_LIVE"}});
-  });
-  it("changes future tasks and explicitly replaces stakes over earlier misses without rewriting entries", async () => {
-    const {a,b,room,gameId,token} = await setup();
-    await run(b,{type:"join",token,termsVersion:1,timeZone:"America/New_York"});
-    const now = new Date(), dayOne = addDays(gameLocalDate(now,"America/New_York"),-2);
-    await getPrisma().gamePlayer.updateMany({where:{gameId},data:{dayOne:new Date(`${dayOne}T00:00:00Z`)}});
-    const entry = {id:randomUUID(),gameId,memberId:a,dayIndex:0,attempt:1,kind:"photo",receivedAt:now};
-    await getPrisma().gameEntry.create({data:entry});
-    const proposalId = randomUUID();
-    const change = {kind:"edit" as const,tasks:[{seat:0,text:"Read poetry"},tasks[1]],stakes:[{kind:"per_miss" as const,item:"Wash dishes"}]};
-    expect(await run(a,{type:"proposeChange",gameId,proposalId,expectedTermsVersion:1,change})).toMatchObject({ok:false,error:{code:"INVALID_REQUEST"}});
-    expect(await run(a,{type:"proposeChange",gameId,proposalId,expectedTermsVersion:1,change:{...change,stakesApplyToWholeGame:true}})).toMatchObject({ok:true});
-    expect(await run(b,{type:"respondChange",gameId,proposalId,decision:"approve"},room)).toMatchObject({ok:true});
-    const row = (await getPrisma().game.findUnique({where:{id:gameId},include:{players:true}}))!;
-    const terms = parseStoredTerms(row.terms);
-    expect(terms.versions.map((version) => version.fromDay)).toEqual([0,3]);
-    const [plain] = await openGameTexts([{table:"game",field:"terms_words",rowId:gameId,memberId:a,value:row.termsWordsEncrypted}]);
-    const words = parseTermWords(plain!);
-    expect(words.versions[0].tasks).toEqual(tasks);
-    expect(words.versions[1].tasks).toEqual(change.tasks);
-    const entries = await getPrisma().gameEntry.findMany({where:{gameId}});
-    expect(entries).toHaveLength(1); expect(entries[0]).toMatchObject(entry);
-    const state: RuleState = {game:{...row,status:"live",terms,seats:2,startsOn:null},players:row.players.map((player) => ({...player,dayOne})),entries:entries.map((item) => ({...item,kind:"photo"}))};
-    const settled = decideSettle(state);
-    expect(settled.tickets).toEqual([{owedBy:b,owedTo:a,stakeKey:terms.versions[1].stakes[0].key}]);
-    expect(terms.versions[1].stakes[0].key).not.toBe(terms.versions[0].stakes[0].key);
+    const before = await getPrisma().game.findUniqueOrThrow({where:{id:gameId}});
+    for (const change of [
+      {kind:"edit" as const, tasks:[{seat:0,text:"Read poetry"},tasks[1]]},
+      {kind:"edit" as const, stakes:[{kind:"prize" as const,item:"Breakfast"}],stakesApplyToWholeGame:true as const},
+    ]) {
+      expect(await run(a,{type:"proposeChange",gameId,proposalId:randomUUID(),expectedTermsVersion:1,change},room)).toMatchObject({ok:false,error:{code:"INVALID_REQUEST"}});
+    }
+    const after = await getPrisma().game.findUniqueOrThrow({where:{id:gameId}});
+    expect(after.terms).toEqual(before.terms);
+    expect(after.termsWordsEncrypted).toBe(before.termsWordsEncrypted);
+    expect(after.pendingChange).toBeNull();
   });
 });

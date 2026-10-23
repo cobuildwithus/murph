@@ -31,6 +31,7 @@ import {
   type RuleEntry,
   type RulePlayer,
   type RuleState,
+  type StoredTerms,
   type StoredResult,
   type TermWords,
 } from "./rules";
@@ -125,10 +126,11 @@ export function termsView(state: RuleState, words: TermWords): GameTermsVersion 
 }
 
 /** `now` is the ticket's game clock: it decides whether an open ticket has expired. */
-export function ticketView(row: GameTicketRow, words: TermWords | null, viewerId: string, now: Date): GameTicketView {
+export function ticketView(row: GameTicketRow, words: TermWords | null, viewerId: string, now: Date, terms?: StoredTerms): GameTicketView {
   return {
     createdAt: row.createdAt.toISOString(),
     id: row.id,
+    kind: terms?.versions.flatMap((version) => version.stakes).find((stake) => stake.key === row.stakeKey)?.kind,
     owedByMemberId: row.owedBy,
     owedToMemberId: row.owedTo,
     redeemedAt: row.redeemedAt?.toISOString() ?? null,
@@ -179,7 +181,7 @@ export function buildGameView(input: GameViewInput): GameView {
     terms: termsView(state, input.words),
     tickets: input.tickets
       .filter((ticket) => ticket.owedBy === viewerId || ticket.owedTo === viewerId)
-      .map((ticket) => ticketView(ticket, input.words, viewerId, input.now)),
+      .map((ticket) => ticketView(ticket, input.words, viewerId, input.now, state.game.terms)),
   };
 }
 
@@ -201,7 +203,22 @@ function playerView(input: GameViewInput, player: RulePlayer): GamePlayerView {
     relationship: isMe ? null : input.relationships.get(player.memberId) ?? null,
     score: resultScore ?? (started ? scorePlayer(input.state, player, today).score : 0),
     seat: player.seat,
+    streak: playerStreak(input.state, player, input.now),
   };
+}
+
+/** Consecutive scheduled posts, ignoring an unposted current day and off days. */
+function playerStreak(state: RuleState, player: RulePlayer, now: Date): number {
+  const today = dayIndexAt(player, now);
+  if (today === null) return 0;
+  const posted = new Set(state.entries.filter((entry) => entry.memberId === player.memberId && entry.attempt > 0 && entry.withdrawnAt === null).map((entry) => entry.dayIndex));
+  let streak = 0;
+  for (let day = Math.min(today, state.game.lengthDays - 1); day >= 0; day -= 1) {
+    if (!isScheduledDay(state, day)) continue;
+    if (posted.has(day)) streak += 1;
+    else if (day !== today) break;
+  }
+  return streak;
 }
 
 /** The challenger's own name for whoever they invited, until that person joins. */
@@ -217,6 +234,7 @@ function inviteeView(input: GameViewInput, invitee: NonNullable<GameViewInput["i
     memberId: invitee.memberId,
     relationship: invitee.memberId === viewerId ? null : invitee.relationship,
     score: 0,
+    streak: 0,
     seat,
   };
 }

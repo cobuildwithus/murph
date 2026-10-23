@@ -19,7 +19,7 @@ describe("weekly game command validator", () => {
   it("validates the challenge check-in requirement and defaults older clients to photos", () => {
     const command = { type: "createGame", gameId: "game_checkin", inviteeFirstName: "Ava", terms: {
       tasks: [{ seat: 0, text: "Pushups" }, { seat: 1, text: "Pushups" }],
-      schedule: { count: 3 }, stakes: [{ item: "Coffee", kind: "winner_gets" }],
+      schedule: { count: 3 }, stakes: [{ item: "Coffee", kind: "prize" }],
     } };
     expect(parseGameCommand(command)).toMatchObject({ terms: { checkInKind: "photo" } });
     expect(parseGameCommand({ ...command, terms: { ...command.terms, checkInKind: "heart_rate" } })).toMatchObject({ terms: { checkInKind: "heart_rate" } });
@@ -59,7 +59,7 @@ describe("weekly game command validator", () => {
       inviteeLabel: { photoKey: PHOTO_KEY, relationship: " girlfriend " },
       terms: {
         schedule: { days: [0, 2, 4] },
-        stakes: [{ item: "Breakfast in bed", key: "gsk_mine", kind: "winner_gets" }],
+        stakes: [{ item: "Breakfast in bed", key: "gsk_mine", kind: "prize" }],
         startsOn: "2026-10-19",
         tasks: [{ seat: 0, text: "100 pushups" }, { seat: 1, text: "10 min abs" }],
       },
@@ -69,7 +69,7 @@ describe("weekly game command validator", () => {
       inviteeLabel: { photoKey: PHOTO_KEY, relationship: "girlfriend" },
       terms: { schedule: { days: [0, 2, 4] }, startsOn: "2026-10-19" },
     });
-    expect(created.type === "createGame" && created.terms.stakes).toEqual([{ item: "Breakfast in bed", kind: "winner_gets" }]);
+    expect(created.type === "createGame" && created.terms.stakes).toEqual([{ item: "Breakfast in bed", kind: "prize" }]);
   });
 
   it("keeps post text only when there is some, and bounds what a post can carry", () => {

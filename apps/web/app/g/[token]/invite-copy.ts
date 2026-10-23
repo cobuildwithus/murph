@@ -7,20 +7,19 @@ const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Se
 export const CLOSED_INVITE_TITLE = "This invite isn't available";
 
 export function describeSchedule(schedule: GameSchedule): string {
-  if ("count" in schedule) return `Any ${schedule.count} ${schedule.count === 1 ? "day" : "days"} a week`;
+  if ("count" in schedule) return `Any ${schedule.count} ${schedule.count === 1 ? "day" : "days"} total`;
   if (schedule.days.length === 7) return "Every day";
   return [...schedule.days].sort((left, right) => left - right).map((day) => WEEKDAY_NAMES[day]).join(", ");
 }
 
 export function describeStakeLabel(stake: GameStake): string {
-  return stake.kind === "winner_gets" ? "Winner gets" : "Each missed day";
+  return stake.kind === "per_miss" ? "Each missed day" : stake.kind === "dare" ? "Loser has to" : "FOR THE WINNER";
 }
 
-/** The stake as a sentence: "Winner of the week gets Breakfast in bed." */
+/** Prize and dare copy describes the whole-game outcome. */
 export function describeStakeSentence(stake: GameStake): string {
-  return stake.kind === "winner_gets"
-    ? `Winner of the week gets ${stake.item}.`
-    : `Every day you miss, you owe ${stake.item}.`;
+  if (stake.kind === "per_miss") return `Every day you miss, you owe ${stake.item}.`;
+  return stake.kind === "dare" ? `Loser has to ${stake.item}.` : `FOR THE WINNER: ${stake.item}.`;
 }
 
 /** "Oct 19" for a picked start date (YYYY-MM-DD), read as a calendar date. */

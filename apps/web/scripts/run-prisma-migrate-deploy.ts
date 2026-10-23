@@ -259,6 +259,14 @@ const gameNegotiationCompatibleStatements = new Set([
   `ALTER TABLE "game" ADD CONSTRAINT "game_live_roster_check" CHECK (("live_roster_key" IS NULL) = ("status" NOT IN ('negotiating', 'live'))) NOT VALID`,
 ]);
 
+// V1 only widens existing checks. No other constraint changes are exempt.
+const gameV1CompatibleStatements = new Set([
+  'ALTER TABLE "game" DROP CONSTRAINT "game_length_days_check"',
+  'ALTER TABLE "game" ADD CONSTRAINT "game_length_days_check" CHECK ("length_days" BETWEEN 1 AND 365) NOT VALID',
+  'ALTER TABLE "game_entry" DROP CONSTRAINT "game_entry_attempt_check"',
+  `ALTER TABLE "game_entry" ADD CONSTRAINT "game_entry_attempt_check" CHECK ("kind" IN ('photo', 'heart_rate', 'words', 'route', 'reps', 'excuse') AND "attempt" BETWEEN 0 AND 2 AND ("attempt" = 0) = ("kind" = 'excuse')) NOT VALID`,
+]);
+
 const incompatiblePredeploySqlPatterns = [
   {
     label: "ADD CONSTRAINT CHECK",
@@ -459,7 +467,9 @@ export async function findHostedWebPrismaPredeployDestructiveMigrations(
     const sqlPath = path.join(migrationsDir, entry.name, "migration.sql");
     const sqlStatements = splitSqlStatements(await readFile(sqlPath, "utf8"))
       .filter((statement) => entry.name !== "20261022071000_game_negotiation"
-        || !gameNegotiationCompatibleStatements.has(statement.replace(/\s+/gu, " ").trim()));
+        || !gameNegotiationCompatibleStatements.has(statement.replace(/\s+/gu, " ").trim()))
+      .filter((statement) => entry.name !== "20261022220000_game_v1"
+        || !gameV1CompatibleStatements.has(statement.replace(/\s+/gu, " ").trim()));
     const compatibleReasons =
       hostedWebPrismaPredeployCompatibleMigrationReasons.get(entry.name);
     const destructivePattern = incompatiblePredeploySqlPatterns.find(
