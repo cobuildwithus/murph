@@ -12,9 +12,9 @@ iOS client is the Murph app.
 
 A weekly game is a run of days between close people. Each player picks a habit
 task in their own words ("100 pushups"), everyone shares a schedule (set weekdays
-or any N days) and one to three stakes ("winner gets breakfast in bed", or "for
-every day you miss, you owe the other one"). Games run 7 days by default and at
-most 28.
+or any N days) and one prize for the winner or dare for the loser. New games
+run 3–365 days, defaulting to seven. Legacy one- and two-day games and their
+winner/per-miss stakes remain readable and retain their settlement.
 
 The MVP is private 1v1. The challenger creates a game and texts a single-use
 link (`/g/<token>`, valid 7 days) from their own phone. The page's Open in Murph
@@ -53,12 +53,13 @@ this default without deleting other people's private contact choices.
 
 ## Rules
 
-- **Days.** Everyone shares one Day 1 calendar date: the next local day after
-  the game goes live for whichever player is furthest ahead (Sydney before New
-  York), or the challenger's picked start date (tomorrow to 60 days out in
-  their zone) if that's later. A day runs 3am to 3am in each player's own time
-  zone, frozen at go-live from their profile, so day number N is the same date
-  and weekday for everyone, each in their own zone.
+- **Days.** On acceptance or negotiation approval, the accepting player's
+  earliest Day 1 is their game-local today between 03:00 inclusive and 20:00
+  exclusive, otherwise their next game date. The other player's earliest is
+  their own game-local today. Everyone shares the later date, or an explicitly
+  selected later date. A day runs 3am to 3am in each player's own time zone,
+  frozen at go-live from their profile, so day number N is the same date and
+  weekday for everyone. Explicit dates remain tomorrow to 60 days out.
 - **Start now.** Day 1 becomes the latest "today" among the players, so
   nobody's Day 1 is already over: across the date line the player behind
   starts tomorrow. Before 3am that first day is short, since it still ends at
@@ -105,8 +106,10 @@ this default without deleting other people's private contact choices.
   N counts across the whole game, not per week). The result is frozen on the
   game. There is no timer: the first read of a finished game settles it, and so
   does either player accepting their next invite.
-- **Tickets.** "Winner gets" makes each loser owe the winner one ticket; a tie or
-  an all-perfect week owes nothing. "Per miss" makes each player owe every
+- **Tickets.** A prize or dare makes the loser owe the winner one ticket; a tie
+  or all-perfect game owes nothing. Each ticket carries its stake kind. The
+  winner marks a dare done with the same redeem action, without proof. Legacy
+  "winner gets" retains winner/loser settlement. "Per miss" makes each player owe every
   better player the difference in misses. A ticket is good for 14 days: the
   holder redeems it after sending it through Messages, and after its use-by
   date it shows as expired and can't be redeemed.
@@ -164,7 +167,7 @@ the full graph image. No live release is implied by this implementation.
 ## Changes agreed in chat
 
 Before Day 1, either player can propose Start now or a different start date.
-Players can also propose a new duration (up to 28 calendar days) or weekdays.
+Players can also propose a new duration (3–365 days) or weekdays.
 Their tap records their agreement. When the invitation is accepted, Murph
 introduces the agreed challenge in one natural message and offers optional
 reminders for the first few days. Acceptance never schedules reminders.
@@ -206,13 +209,11 @@ photos, check-in photos, excuses or invite tokens. A live two-player game grants
 its eligible groups the normal included group usage allowance without granting
 the players personal AI access. Duplicate rooms share the primary game allowance;
 they do not create more included credit. Suspension, withdrawn health-data consent, the game
-feature flag and member allowlist still apply. Tasks and stakes can be negotiated through the same pending proposal. Task edits
-apply to future unstarted days. Stake edits replace the entire game wager,
-including earlier misses; both players must understand and agree to that scope.
-Stakes alone can change through the final playing day and closing grace period,
-until settlement is due. They do not require extending the game. Task, schedule,
-and duration edits still require at least one future unstarted day.
-They never rewrite check-ins or existing tickets.
+feature flag and member allowlist still apply. Tasks and stakes can be negotiated only while the game is negotiating. Both
+lock at kickoff (`live`), even before Day 1. Schedule and duration remain
+editable from the first unstarted day, with at least one future unstarted day.
+Start dates lock as soon as either player starts Day 1. These edits never
+rewrite check-ins or existing tickets.
 
 An invitee can choose Suggest changes and submit concrete alternative rules
 without accepting the original challenge. Both players see a negotiating game
@@ -254,3 +255,13 @@ A yes saves only that selected photo, not future photos. The offer expires in
 30 minutes or at the game-day boundary, whichever comes first. A no dismisses
 it. Explicit later save requests remain available. Unsupported, expired or
 unavailable media requires resending a supported photo or checking in in the app.
+
+
+## Derived app fields
+
+Each player view includes their current streak of consecutive scheduled days
+with a live non-excuse entry. Off days are skipped; an unposted current day does
+not break the streak. Home exposes the member's most recent live non-excuse
+entry kind across games as `me.usualKind`, or null before their first post.
+Chat progress includes at most fourteen recent day statuses per player and
+retains whole-game score and target totals.

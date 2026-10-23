@@ -21,7 +21,7 @@ const OPEN_PREVIEW: OpenPreview = {
     fromDay: 0,
     n: 1,
     schedule: { days: [0, 2, 4] },
-    stakes: [{ item: "Breakfast in bed", key: "stake_design", kind: "winner_gets" }],
+    stakes: [{ item: "Breakfast in bed", key: "stake_design", kind: "prize" }],
     tasks: [
       { seat: 0, text: "100 pushups" },
       { seat: 1, text: "10 min abs" },
@@ -38,7 +38,14 @@ const ANY_DAYS_PREVIEW: OpenPreview = {
   },
 };
 
+const DARE_PREVIEW: OpenPreview = {
+  ...OPEN_PREVIEW,
+  lengthDays: 75,
+  terms: { ...OPEN_PREVIEW.terms, schedule: { count: 50 }, stakes: [{ kind: "dare", item: "sing at karaoke", key: "stake_dare" }] },
+};
+
 const STATES: ReadonlyArray<{ id: string; label: string; preview: GameInvitePreview | null }> = [
+  { id: "dare", label: "Open, 75 days, dare", preview: DARE_PREVIEW },
   { id: "open", label: "Open, set weekdays", preview: OPEN_PREVIEW },
   { id: "open-any-days", label: "Open, any days, per miss", preview: ANY_DAYS_PREVIEW },
   { id: "heart-rate", label: "Open, heart-rate check-in", preview: { ...OPEN_PREVIEW, terms: { ...OPEN_PREVIEW.terms, checkInKind: "heart_rate" } } },
@@ -49,6 +56,7 @@ const STATES: ReadonlyArray<{ id: string; label: string; preview: GameInvitePrev
 
 // The link preview Messages shows for the same invite: the production card.
 const LINK_PREVIEWS: ReadonlyArray<{ id: string; label: string; preview: GameInvitePreview | null }> = [
+  { id: "link-dare", label: "Link preview, 75 days, dare", preview: DARE_PREVIEW },
   { id: "link-open", label: "Link preview, open", preview: OPEN_PREVIEW },
   { id: "link-open-any-days", label: "Link preview, any days, picked start", preview: { ...ANY_DAYS_PREVIEW, startsOn: "2026-10-19" } },
   { id: "link-closed", label: "Link preview, used, expired, or missing", preview: { status: "used" } },

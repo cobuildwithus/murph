@@ -5413,6 +5413,19 @@ from `HostedMember`. Words (names, tasks, stakes, labels, excuse transcripts)
 are app-encrypted before any transaction; the structure that rules and
 settlement read stays plain, so neither decrypts.
 
+The v1 schema widens retained game lengths to 1–365 and entry kinds to include
+words, route and reps, and reserves nullable `game_entry.payload_encrypted` for
+sealed artifacts. New writes require 3–365 days (default seven) and one prize
+or dare; legacy lengths and stakes keep their read/settlement semantics. Both
+new stake kinds issue one loser-to-winner ticket, none for a tie or perfect game.
+Ticket views derive kind from the existing stake key; no duplicate kind is stored.
+Tasks and stakes lock at `live`. Acceptance/approval uses the actor's local
+03:00–20:00 same-day window and the other player's current game date, preserving
+any selected later start. Streak derives from scheduled live entries; usual kind
+uses one bounded latest-entry read on the member index alongside Home's existing
+queries. Chat day statuses are capped at fourteen per player with whole-game totals.
+Deploy and converge the compatible runtime reader before publishing these values.
+
 `runGameCommand` is the single write path, for the routes now and Murph's tools
 later. It validates the command (`command.ts`), checks uploads, seals words,
 then locks the game row, reads the database clock, asks a pure rule, and writes
@@ -5646,7 +5659,7 @@ have no game tools until refreshed.
 ### Shared game progress and chat photo imports
 
 Shared game reads use canonical `loadCurrent` maintenance and frozen settlement
-results. The dedicated metadata projection reports daily status and grouped
+results. The dedicated metadata projection reports a fourteen-day status window and grouped
 ticket obligations without decrypting entry words or returning media. Candidate
 games remain bounded; the existing maximum duration, attempts and stake counts
 bound entries and ticket reads. Actor-specific photo introduction state is read

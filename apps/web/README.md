@@ -1944,6 +1944,14 @@ contract migration
 `20260728031000_resynchronize_hosted_usage_credit_purchase_grants` now performs
 only the idempotent purchase-projection resynchronization.
 
+The `20261022220000_game_v1` predeploy exception admits only the exact reviewed
+length (1–365) and entry-kind constraint widenings. Both replacements use
+`NOT VALID` in the metadata transaction and validate in a separate transaction;
+the nullable `game_entry.payload_encrypted` and `blur_hash` columns permit old inserts. The blur
+preview stays separate so locked entries never require opening the sealed payload. Deploy
+the compatible hosted game reader and converge warm runtimes before enabling
+new prize/dare or long-game writers. Artifact payload writes follow separately.
+
 The `20261021180000_game_heart_rate_entry` predeploy exception only widens the
 existing game-entry kind check with `heart_rate`. It preserves photo/excuse
 writes and attempt limits. The five-second lock bound and atomic `NOT VALID`

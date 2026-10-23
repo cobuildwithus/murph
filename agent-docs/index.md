@@ -1467,3 +1467,7 @@ Private image provider variant correction: [game Images variant IDs](exec-plans/
 
 Game v1 additive runtime reader compatibility and rollout floor are recorded in
 [`runtime reader floor`](exec-plans/completed/2026-10-22-game-v1-runtime-reader.md).
+
+Game v1 rules, additive schema and derived app fields are tracked in
+[`game v1 rules`](exec-plans/completed/2026-10-22-game-v1-rules.md); the durable owners
+are `product-specs/weekly-game.md` and `../ARCHITECTURE.md` § Weekly Game.

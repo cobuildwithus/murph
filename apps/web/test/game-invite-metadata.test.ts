@@ -37,9 +37,9 @@ describe("weekly game invite link preview", () => {
     const metadata = await metadataFor(OPEN);
     const image = { alt: "Leo challenged you", height: 630, type: "image/png", url: "/g/tok_1/opengraph-image", width: 1200 };
     expect(metadata.title).toBe("Leo challenged you");
-    expect(metadata.description).toBe("Winner of the week gets Breakfast in bed.");
+    expect(metadata.description).toBe("FOR THE WINNER: Breakfast in bed.");
     expect(metadata.openGraph).toMatchObject({
-      description: "Winner of the week gets Breakfast in bed.",
+      description: "FOR THE WINNER: Breakfast in bed.",
       images: [image],
       title: "Leo challenged you",
     });
@@ -78,4 +78,16 @@ describe("weekly game invite link preview", () => {
     // Nothing from any invite reaches a closed link's preview.
     expect(JSON.stringify(metadata)).not.toMatch(/Leo|Babe|pushups|abs|Breakfast/u);
   });
+});
+
+
+it.each(["prize", "dare"] as const)("describes a %s over a variable game length without weekly wording", async (kind) => {
+  if (OPEN.status !== "open") throw new Error("Expected open fixture");
+  const preview = {...OPEN,lengthDays:75,terms:{...OPEN.terms,schedule:{count:50},stakes:[{kind,item:"sing at karaoke"}]}};
+  const metadata = await metadataFor(preview);
+  expect(metadata.description).toBe(kind === "dare" ? "Loser has to sing at karaoke." : "FOR THE WINNER: sing at karaoke.");
+  const html=renderToStaticMarkup(createElement(GameInviteShareCard,{preview}));
+  expect(html).toContain("75 DAYS");
+  expect(html).toContain("ANY 50 DAYS TOTAL");
+  expect(html).not.toMatch(/of the week|gets|a week/iu);
 });

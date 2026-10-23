@@ -16,7 +16,7 @@ export type Weekday = (typeof GAME_WEEKDAYS)[number];
  */
 export type GameSchedule = { days: Weekday[] } | { count: number };
 
-export const GAME_STAKE_KINDS = ["winner_gets", "per_miss"] as const;
+export const GAME_STAKE_KINDS = ["winner_gets", "per_miss", "prize", "dare"] as const;
 export type GameStakeKind = (typeof GAME_STAKE_KINDS)[number];
 
 export interface GameStake {
@@ -57,8 +57,8 @@ export interface GameTermsInput {
   lengthDays?: number;
   /**
    * The challenger's picked Day 1 (YYYY-MM-DD, a calendar date): from tomorrow
-   * to 60 days out in their zone. Day 1 is the day after the invitee accepts,
-   * or this date if it's later.
+   * to 60 days out in their zone. Acceptance before 20:00 can start today;
+   * this date wins when later.
    */
   startsOn?: string;
 }
@@ -208,6 +208,8 @@ export interface GamePlayerView {
   /** This player's current 0-based day, or null before Day 1 / after the end. */
   dayIndex: number | null;
   score: number;
+  /** Consecutive scheduled days posted; an unposted today does not break it. */
+  streak?: number;
 }
 
 export type GameDayOtherStatus = "posted" | "locked" | "missed" | "none" | "off";
@@ -232,6 +234,7 @@ export interface GameDayView {
 
 export interface GameTicketView {
   id: string;
+  kind?: GameStakeKind;
   what: string;
   /** "expired" once it's past `useBy` unredeemed; expired tickets stay in the wallet. */
   status: "open" | "redeemed" | "expired";
@@ -274,7 +277,7 @@ export interface GameView {
 }
 
 export interface GameHomeView {
-  me: { memberId: string; firstName: string | null; timeZone: string | null; avatarUrl: string | null };
+  me: { memberId: string; firstName: string | null; timeZone: string | null; avatarUrl: string | null; usualKind?: GameEntryKind | null };
   games: GameView[];
   wallet: { held: GameTicketView[]; owed: GameTicketView[]; redeemed: GameTicketView[] };
 }

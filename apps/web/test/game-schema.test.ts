@@ -34,3 +34,17 @@ describe("weekly game schema", () => {
     }
   });
 });
+
+
+it("prepares all v1 artifact storage and preserves legacy lengths and attempt caps", () => {
+  const sql = readFileSync(new URL("../prisma/migrations/20261022220000_game_v1/migration.sql", import.meta.url), "utf8");
+  expect(sql).toContain('CHECK ("length_days" BETWEEN 1 AND 365) NOT VALID');
+  expect(sql).toContain("'photo', 'heart_rate', 'words', 'route', 'reps', 'excuse'");
+  expect(sql).toContain('AND "attempt" BETWEEN 0 AND 2');
+  expect(sql).toContain('ADD COLUMN "payload_encrypted" TEXT;');
+  expect(sql).toContain('ADD COLUMN "blur_hash" TEXT;');
+  const transactions = sql.split("COMMIT;");
+  expect(transactions[0]).not.toContain("VALIDATE CONSTRAINT");
+  expect(transactions[1]).toContain('VALIDATE CONSTRAINT "game_length_days_check"');
+  expect(transactions[1]).toContain('VALIDATE CONSTRAINT "game_entry_attempt_check"');
+});

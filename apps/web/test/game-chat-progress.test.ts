@@ -49,3 +49,22 @@ describe("shared game progress", () => {
     expect(result.players[1].days.every((day) => day.status === "not_posted")).toBe(true);
   });
 });
+
+
+it("windows long-game history at 14 days while retaining whole-game totals", () => {
+  const input = state(); input.game.lengthDays = 365;
+  input.game.terms.versions[0].schedule = { count: 300 };
+  input.entries = Array.from({length:20},(_,dayIndex) => ({ id:`entry_${dayIndex}`,memberId:"player_a",dayIndex,kind:"photo",attempt:1,withdrawnAt:null,mediaKeys:[] }));
+  const live = gameChatProgress(input,new Date("2030-04-04T12:00:00Z")).players[0];
+  expect(live.days).toHaveLength(14);
+  expect(live.days[0].dayIndex).toBe(18);
+  expect(live.days.at(-1)?.dayIndex).toBe(31);
+  expect(live).toMatchObject({score:20,target:300});
+  input.game.status = "settled";
+  const recap = gameChatProgress(input,new Date("2031-04-04T12:00:00Z")).players[0];
+  expect(recap.days).toHaveLength(14);
+  expect(recap.days.at(-1)?.dayIndex).toBe(364);
+  expect(recap).toMatchObject({score:20,target:300});
+  input.game.terms.versions[0].schedule = {days:[0,1,2,3,4,5,6]};
+  expect(gameChatProgress(input,new Date("2031-04-04T12:00:00Z")).players[0].target).toBe(365);
+});

@@ -13,6 +13,7 @@ import {
 import type { Weekday } from "./contract";
 
 const DAY_START_HOUR = 3;
+export const GAME_SAME_DAY_CUTOFF_HOUR = 20;
 const HOUR_MS = 60 * 60 * 1000;
 const DAY_MS = 24 * HOUR_MS;
 const MONDAY_FIRST: readonly Weekday[] = [6, 0, 1, 2, 3, 4, 5];
@@ -36,6 +37,13 @@ export function weekdayOf(date: string): Weekday {
 export function gameLocalDate(instant: Date, timeZone: string): string {
   const local = formatTimeZoneDateTimeParts(instant, timeZone);
   return local.hour < DAY_START_HOUR ? addDays(local.dayKey, -1) : local.dayKey;
+}
+
+/** The accepter can start today only during the daytime part of their game day. */
+export function acceptanceStartDate(instant: Date, timeZone: string): string {
+  const { hour } = formatTimeZoneDateTimeParts(instant, timeZone);
+  const today = gameLocalDate(instant, timeZone);
+  return hour >= DAY_START_HOUR && hour < GAME_SAME_DAY_CUTOFF_HOUR ? today : addDays(today, 1);
 }
 
 /**

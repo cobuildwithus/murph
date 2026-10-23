@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-10-22",
+  "order": 300,
+  "item": {
+    "id": "challenge-prizes-and-dares",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "A prize or a dare for your challenge",
+    "summary": "New challenges have one prize for the winner or one dare for the loser, with a duration from 3 to 365 days.",
+    "details": "Tasks and stakes lock when both players agree. Accept before 8pm in your game time zone to start that day, unless a later start was chosen. Invite links show the stake and duration, and the winner's ticket keeps whether it was a prize or a dare. Ties and perfect games create no ticket.",
+    "relevanceTags": ["challenges"],
+    "sourcePullRequests": []
+  }
+}

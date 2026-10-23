@@ -47,7 +47,7 @@ describe.skipIf(!enabled)("game bootstrap lifecycle recovery against PostgreSQL"
     await db.hostedLinqLine.create({ data: { phoneNumberLookupKey: m.lineKey, phoneNumberHint: "0100", healthStatus: "healthy" } });
     for (const actorMemberId of [a,b]) await runGameCommand({ actorMemberId, command: { type: "setProfile", firstName: actorMemberId === a ? "Ava" : "Sam", timeZone: "UTC" } });
     const created = await runGameCommand({ actorMemberId: a, command: { type: "createGame", gameId, inviteeFirstName: "Sam", terms: {
-      tasks: [{ seat: 0, text: "Read" }, { seat: 1, text: "Walk" }], schedule: { days: [0,1,2,3,4] }, stakes: [{ kind: "winner_gets", item: "Choose brunch" }],
+      tasks: [{ seat: 0, text: "Read" }, { seat: 1, text: "Walk" }], schedule: { days: [0,1,2,3,4] }, stakes: [{ kind: "prize", item: "Choose brunch" }],
     } } });
     expect(created).toMatchObject({ ok: true });
     if (!created.ok || !created.game?.inviteToken) throw new Error("Expected synthetic invite.");
