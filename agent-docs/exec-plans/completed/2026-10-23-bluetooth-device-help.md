@@ -1,6 +1,6 @@
 # Bluetooth wearable connection help
 
-Status: active
+Status: completed
 Created: 2026-10-23
 Updated: 2026-10-23
 
@@ -63,5 +63,8 @@ Updated: 2026-10-23
 - Implemented the bundled skill and compact route, retaining separate cloud-sync ownership. No dependency, tool, schema or persisted-state changes.
 - Passed 9 skill/asset tests, 57 existing model-behavior tests, 4 changelog rendering tests, assistant-engine typecheck, and complexity/log/docs guards.
 - Complete first-provider-request capture on identical direct/group fixtures passed: direct 155923 to 156238 bytes (+315, +0.2020%); group 130696 to 130960 (+264, +0.2020%). Tool schemas unchanged. Exact target tokenizer unavailable; no estimated token claim.
-- Requested read-only GPT-6 Astra review found no production bugs or meaningful simplifications. Its noted successful-support proof gap is being closed with the existing synthetic recorder; no runtime changes were needed.
-- Real GPT-6.1 Sol local-subscription selection, permission and missing-heart-rate replies are concise and truthful. Remaining journeys, final parent review and external gates are pending.
+- Requested read-only GPT-6 Astra review found no production bugs or meaningful simplifications. Its noted successful-support proof gap is closed with the existing synthetic recorder; no runtime changes were needed.
+- All seven real GPT-6.1 Sol local-subscription journeys passed and were reviewed as Ready: app handoff, natural request, permission denied, missing heart rate, older band, available support and unavailable support.
+- Parent final review found no remaining defects or scope gaps. Eragon GPT-6 Pro ReviewGPT passed on `b55da83cfa78c706b0677088ca6bdea11b65525e`, with the exact attachment, model and response marker verified under the 180-second minimum guard. Review: https://chatgpt.com/c/6adb9ce3-19c0-83ea-ae07-324997326f0f.
+- PR #4334 contains the reviewed implementation. Final plan closure and changelog provenance do not change behavior; final-head CI remains required. Merge, exact-SHA Web admission and protected runtime convergence remain release actions tracked in the external Bluetooth skill status file.
+Completed: 2026-10-23
