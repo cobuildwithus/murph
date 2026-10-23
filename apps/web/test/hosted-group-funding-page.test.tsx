@@ -27,6 +27,7 @@ const mocks = vi.hoisted(() => ({
     React.createElement("div", null, `top-up:${String(props.scope)}`)
   ),
   readHostedActiveUsageCreditPurchaseForPayer: vi.fn(),
+  readHostedGroupChatName: vi.fn(),
   readHostedGroupFundingSupporters: vi.fn(),
   readHostedGroupSponsorshipDraftForCreator: vi.fn(),
   readHostedGroupSponsorshipManagementProjection: vi.fn(),
@@ -75,6 +76,10 @@ vi.mock("@/src/components/ui/card", () => ({
     React.createElement("header", null, props.children),
   CardTitle: (props: { children?: React.ReactNode }) =>
     React.createElement("div", null, props.children),
+}));
+
+vi.mock("@/src/lib/hosted-groups/group-chat-name", () => ({
+  readHostedGroupChatName: mocks.readHostedGroupChatName,
 }));
 
 vi.mock("@/src/lib/hosted-groups/group-usage-funding", () => ({
@@ -197,7 +202,7 @@ describe("hosted group funding page", () => {
     assert.match(markup, /Sunday sleep crew/u);
     assert.match(
       markup,
-      /<h1[^>]*>Support Murph in (?:<!-- -->)?Sunday sleep crew<\/h1>/u,
+      /<h1[^>]*><span[^>]*>Support Murph in<\/span><span[^>]*>Sunday sleep crew<\/span><\/h1>/u,
     );
     assert.doesNotMatch(markup, /Keep Murph going/u);
     assert.doesNotMatch(markup, /Support Murph for everyone in this chat\./u);
@@ -473,6 +478,48 @@ describe("hosted group funding page", () => {
     }
     expect(JSON.stringify(mocks.GroupSponsorshipManagementCard.mock.calls))
       .not.toContain("group_join_code_1234");
+  });
+
+  it("names an unnamed group by its chat title only for its sponsor", async () => {
+    mocks.readHostedGroupUsageFundingTargetByJoinCode.mockResolvedValue({
+      displayName: null,
+      joinCode: "group_join_code_1234",
+      kind: "custom",
+      runtimeMemberId: "member_group_runtime",
+    });
+    mocks.readHostedGroupChatName.mockResolvedValue({
+      displayName: "Saturday long run",
+      status: "ok",
+    });
+    mocks.readHostedGroupSponsorshipManagementProjection.mockResolvedValueOnce({
+      authorizationId: "hgsa_abcdefghijklmnop",
+      chargedThisPeriodMinor: 0,
+      monthlyCapMinor: 2_000,
+      pendingThisPeriodMinor: 0,
+      pendingMonthlyCapMinor: null,
+      periodEnd: "2026-08-30T12:00:00.000Z",
+      status: "recovery_required",
+    });
+
+    const sponsorMarkup = renderToStaticMarkup(await GroupFundingPage({
+      params: Promise.resolve({ joinCode: "group_join_code_1234" }),
+    }));
+
+    assert.match(sponsorMarkup, /<span[^>]*>Saturday long run<\/span><\/h1>/u);
+    // A monthly sponsor raises the limit instead of starting a one-time payment.
+    assert.doesNotMatch(sponsorMarkup, /top-up:group/u);
+    expect(mocks.readHostedGroupChatName).toHaveBeenCalledWith({
+      memberId: "member_group_runtime",
+    });
+
+    mocks.readHostedGroupChatName.mockClear();
+    const participantMarkup = renderToStaticMarkup(await GroupFundingPage({
+      params: Promise.resolve({ joinCode: "group_join_code_1234" }),
+    }));
+
+    assert.match(participantMarkup, /<span[^>]*>Your group chat<\/span><\/h1>/u);
+    assert.doesNotMatch(participantMarkup, /Saturday long run/u);
+    expect(mocks.readHostedGroupChatName).not.toHaveBeenCalled();
   });
 
   it("keeps cancellation available after the payer and beneficiary become inactive", async () => {

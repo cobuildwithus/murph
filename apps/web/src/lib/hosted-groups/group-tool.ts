@@ -4,6 +4,10 @@ import type { HostedRuntimeIdentity } from "../hosted-execution/runtime-owner";
 import "server-only";
 import { sharesCompanionContact } from "@murphai/hosted-execution/vault-share";
 
+import {
+  normalizeHostedGroupDisplayName,
+  readHostedGroupChatName,
+} from "./group-chat-name";
 import { readHostedGroupSharedDataWithFreshness } from "./shared-freshness";
 import {
   type HostedThreadContainerResolvedParticipant,
@@ -17,7 +21,6 @@ import type {
 } from "@murphai/hosted-execution/contracts";
 import {
   HOSTED_RUNTIME_GROUP_CHAT_ICON_URL_MAX_LENGTH,
-  HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH,
   HOSTED_RUNTIME_GROUP_JOIN_OFFER_LEGACY_MESSAGE_TEMPLATE,
   hostedRuntimeLinqProviderErrorMessageForCode,
   isHostedRuntimePrivateImageDeliveryUrl,
@@ -57,8 +60,6 @@ import {
 import { readActiveHostedMemberAccess } from "../hosted-onboarding/member-access";
 import {
   getHostedLinqChatHandles,
-  getHostedLinqChatSummary,
-  readHostedLinqExplicitGroupDisplayName,
   sendHostedLinqChatMessage,
   sendHostedLinqReactionBoundChatMessage,
   updateHostedLinqChatAvatar,
@@ -80,7 +81,6 @@ import {
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
   type HostedOnboardingReadClient,
 } from "../hosted-onboarding/shared";
-import { getHostedTelegramGroupTitle } from "../hosted-onboarding/telegram-client";
 import {
   HOSTED_ADDRESS_BOOK_LOOKUP_MAX_HANDLES,
   HOSTED_ADDRESS_BOOK_LOOKUP_TIMEOUT_MS,
@@ -88,9 +88,6 @@ import {
   type HostedAddressBookAdvisoryNamesResult,
 } from "../hosted-address-book/projection";
 import { signalHostedRuntimeMaintenanceRuntime } from "../hosted-orchestration/signal-runtime";
-import {
-  resolveHostedAssistantNotificationDestination,
-} from "../hosted-routing/assistant-notification-destination";
 import { assertHostedLinqRouteEgressAuthority } from "../hosted-routing/thread-route-store";
 import {
   assertHostedLinqRecentInboundEngagementForRuntime,
@@ -1999,76 +1996,13 @@ function normalizeHostedGroupChatIconUrl(value: string): string | null {
   return parsed.toString();
 }
 
-function normalizeHostedGroupDisplayName(value: string): string | null {
-  const normalized = value.trim().replace(/\s+/gu, " ");
-  if (
-    !normalized
-    || normalized.length > HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH
-  ) {
-    return null;
-  }
-  return normalized;
-}
-
 async function handleHostedRuntimeGroupReadChatName(input: {
   memberId: string;
 }): Promise<HostedRuntimeGroupToolResponse> {
-  const unavailable = (unavailableReason: string): HostedRuntimeGroupToolResponse => ({
+  return {
     action: "read_chat_name",
-    result: { displayName: null, status: "unavailable", unavailableReason },
-  });
-
-  if (!await hasHostedRuntimeActiveAccess(input.memberId)) {
-    return unavailable("runtime_inactive");
-  }
-
-  let destination: Awaited<
-    ReturnType<typeof resolveHostedAssistantNotificationDestination>
-  >;
-  try {
-    destination = await resolveHostedAssistantNotificationDestination({
-      memberId: input.memberId,
-    });
-  } catch {
-    return unavailable("route_unavailable");
-  }
-
-  const authority = destination?.conversationShape === "thread-container"
-    ? destination.externalThreadRouteAuthority
-    : null;
-  if (!authority) {
-    return unavailable("group_chat_unavailable");
-  }
-
-  let providerDisplayName: string | null;
-  try {
-    if (authority.channel === "linq") {
-      providerDisplayName = readHostedLinqExplicitGroupDisplayName(
-        await getHostedLinqChatSummary({ chatId: authority.threadId }),
-      );
-    } else if (authority.channel === "telegram") {
-      providerDisplayName = await getHostedTelegramGroupTitle({
-        threadId: authority.threadId,
-      });
-    } else {
-      return unavailable("group_chat_unavailable");
-    }
-  } catch {
-    return unavailable("provider_unavailable");
-  }
-
-  const displayName = providerDisplayName
-    ? normalizeHostedGroupDisplayName(providerDisplayName)
-    : null;
-  return displayName
-    ? {
-        action: "read_chat_name",
-        result: { displayName, status: "ok" },
-      }
-    : {
-        action: "read_chat_name",
-        result: { displayName: null, status: "none" },
-      };
+    result: await readHostedGroupChatName({ memberId: input.memberId }),
+  };
 }
 
 function renderHostedGroupJoinOfferScopeSentence(

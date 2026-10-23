@@ -29,6 +29,7 @@ import {
   CardFooter,
   CardHeader,
 } from "@/src/components/ui/card";
+import { readHostedGroupChatName } from "@/src/lib/hosted-groups/group-chat-name";
 import {
   readHostedGroupUsageFundingTargetByJoinCode,
   readHostedGroupUsageFundingManagementTargetByLocator,
@@ -69,6 +70,7 @@ export const revalidate = 0;
 
 const HOSTED_USAGE_CREDIT_PURCHASE_ID_PATTERN = /^hucp_[A-Za-z0-9_-]{16}$/u;
 const HOSTED_GROUP_FUNDING_SUPPORTERS_TIMEOUT_MS = 2_000;
+const HOSTED_GROUP_FUNDING_CHAT_NAME_TIMEOUT_MS = 2_000;
 
 type GroupFundingSearchParams = {
   usageCheckout?: string | string[] | undefined;
@@ -163,7 +165,10 @@ export default async function GroupFundingPage({
   if (!usageStatus || (managementOnly && !sponsorshipManagement)) {
     return <GroupFundingUnavailable />;
   }
-  const groupName = target.displayName?.trim() || describeGroupKind(target.kind);
+  const groupName = await resolveGroupFundingName({
+    target,
+    viewerSponsors: sponsorshipManagement !== null,
+  });
   const activePurchaseMatchesTarget =
     activePurchase?.target.kind === "group" &&
     activePurchase.target.beneficiaryMemberId === target.runtimeMemberId;
@@ -200,19 +205,21 @@ export default async function GroupFundingPage({
   const openOneTimeContribution =
     sponsorshipManagement === null &&
     usageStatus.sponsorshipStatus === "sponsored";
-  const oneTimeContributionDialog = member && oneTimeOffers.length > 0 ? (
-    <GroupSponsorshipDialog
-      checkoutUrl={`/api/groups/fund/${encodeURIComponent(target.joinCode)}/usage-credit/checkout`}
-      customizationAllowed={customizationAllowed}
-      initialOpen={openOneTimeContribution}
-      mode="one_time"
-      offers={oneTimeOffers}
-      payerMemberId={member.id}
-      purchaseReturn={purchaseReturn}
-      triggerSize="default"
-      triggerVariant="link"
-    />
-  ) : null;
+  const renderOneTimeContributionDialog = (trigger: "link" | "outline") =>
+    member && oneTimeOffers.length > 0 ? (
+      <GroupSponsorshipDialog
+        checkoutUrl={`/api/groups/fund/${encodeURIComponent(target.joinCode)}/usage-credit/checkout`}
+        customizationAllowed={customizationAllowed}
+        initialOpen={openOneTimeContribution}
+        mode="one_time"
+        offers={oneTimeOffers}
+        payerMemberId={member.id}
+        purchaseReturn={purchaseReturn}
+        triggerSize={trigger === "link" ? "default" : "lg"}
+        triggerVariant={trigger}
+      />
+    ) : null;
+  const oneTimeContributionDialog = renderOneTimeContributionDialog("outline");
   const oneTimeContributionAction = member && visibleActivePurchase ? (
     <GroupSponsorshipDialog
       activePurchase={visibleActivePurchase}
@@ -251,17 +258,19 @@ export default async function GroupFundingPage({
                   purchaseReturn={purchaseReturn}
                 />
               ) : sponsorshipManagement ? (
-                <div className="space-y-4">
+                <div className="space-y-8">
                   <GroupSponsorshipManagementCard
                     cancelOnly={managementOnly || Boolean(member.suspendedAt)}
                     endpoint={`/api/groups/fund/${encodeURIComponent(target.joinCode)}/sponsorship`}
                     management={sponsorshipManagement}
                   />
-                  {oneTimeContributionAction}
+                  {/* Monthly sponsors raise their limit instead; only an open
+                      one-time payment stays reachable here. */}
+                  {visibleActivePurchase ? oneTimeContributionAction : null}
                 </div>
               ) : usageStatus.sponsorshipStatus === "sponsored" ? (
                 <div className="space-y-4">
-                  <p className="py-2 text-center text-sm text-muted-foreground">
+                  <p className="text-sm text-muted-foreground">
                     Murph is sponsored in this chat.
                   </p>
                   {oneTimeContributionAction}
@@ -282,10 +291,10 @@ export default async function GroupFundingPage({
                       purchaseReturn={purchaseReturn}
                     />
                   )}
-                  oneTimeAction={oneTimeContributionDialog}
+                  oneTimeAction={renderOneTimeContributionDialog("link")}
                 />
               ) : (
-                <p className="py-2 text-center text-sm text-muted-foreground">
+                <p className="text-sm text-muted-foreground">
                   Sponsorship isn&apos;t available from this account right now.
                 </p>
               )
@@ -415,13 +424,52 @@ function projectHostedGroupActivePurchaseForClient(
   };
 }
 
-function describeGroupKind(kind: string): string {
+// Only the sponsor paying for this chat may see its provider title when the
+// group never stored a name; everyone else sees the stored name or a label.
+async function resolveGroupFundingName(input: {
+  target: { displayName: string | null; kind: string; runtimeMemberId: string };
+  viewerSponsors: boolean;
+}): Promise<string> {
+  const storedName = input.target.displayName?.trim();
+  if (storedName) {
+    return storedName;
+  }
+  const chatName = input.viewerSponsors
+    ? await readGroupChatNameWithin(input.target.runtimeMemberId)
+    : null;
+  return chatName ?? describeUnnamedGroup(input.target.kind);
+}
+
+async function readGroupChatNameWithin(
+  runtimeMemberId: string,
+): Promise<string | null> {
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
+  const timeout = new Promise<null>((resolve) => {
+    timeoutId = setTimeout(
+      () => resolve(null),
+      HOSTED_GROUP_FUNDING_CHAT_NAME_TIMEOUT_MS,
+    );
+  });
+  try {
+    const result = await Promise.race([
+      readHostedGroupChatName({ memberId: runtimeMemberId }).catch(() => null),
+      timeout,
+    ]);
+    return result?.status === "ok" ? result.displayName : null;
+  } finally {
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+    }
+  }
+}
+
+function describeUnnamedGroup(kind: string): string {
   switch (kind) {
-    case "couple": return "this couple";
-    case "family": return "this family";
-    case "friends": return "this circle";
-    case "household": return "this household";
-    case "team": return "this team";
-    default: return "this group";
+    case "couple": return "Your couple chat";
+    case "family": return "Your family chat";
+    case "friends": return "Your friends chat";
+    case "household": return "Your household chat";
+    case "team": return "Your team chat";
+    default: return "Your group chat";
   }
 }

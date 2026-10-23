@@ -80,6 +80,8 @@ const DESIGN_GROUP_FUNDING_SUPPORTERS = {
   oneTimeContributions: [
     { id: "hucp_design_one_time_1", name: "Night Shift" },
     { id: "hucp_design_one_time_2", name: "Anonymous" },
+    { id: "hucp_design_one_time_3", name: "Anonymous" },
+    { id: "hucp_design_one_time_4", name: "Anonymous" },
   ],
 };
 
@@ -315,7 +317,7 @@ function GroupUsageFundingStudy() {
 
   const oneTimeContribution = (
     <div className="space-y-4">
-      <p className="text-center text-sm text-muted-foreground">
+      <p className="text-sm text-muted-foreground">
         Murph is sponsored in this chat.
       </p>
       <GroupUsageFundingActions
@@ -329,8 +331,8 @@ function GroupUsageFundingStudy() {
             mode="one_time"
             offers={DESIGN_GROUP_SPONSORSHIP_OFFERS}
             payerMemberId={DESIGN_PAYER_MEMBER_ID}
-            triggerSize="default"
-            triggerVariant="link"
+            triggerSize="lg"
+            triggerVariant="outline"
           />
         )}
       />
@@ -339,7 +341,7 @@ function GroupUsageFundingStudy() {
   );
   const oneTimeRecovery = () => (
     <div className="space-y-4">
-      <p className="text-center text-sm text-muted-foreground">
+      <p className="text-sm text-muted-foreground">
         Murph is sponsored in this chat.
       </p>
       <GroupSponsorshipDialog
@@ -515,21 +517,31 @@ function GroupUsageFundingStudy() {
         </DesignSponsorshipState>
 
         <DesignSponsorshipState
-          label="Payment recovery"
+          label="Sponsor page with payment recovery"
           state="monthly-recovery"
         >
-          <GroupSponsorshipManagementCard
-            periodEndTimeZone="UTC"
-            endpoint={endpoint}
-            management={{
-              authorizationId: "hgsa_design_recovery",
-              chargedThisPeriodMinor: 500,
-              monthlyCapMinor: 1_000,
-              pendingMonthlyCapMinor: null,
-              pendingThisPeriodMinor: 0,
-              periodEnd: "2026-08-30T16:00:00.000Z",
-              status: "recovery_required",
-            }}
+          <GroupUsageFundingShell
+            action={(
+              <div>
+                <GroupSponsorshipManagementCard
+                  periodEndTimeZone="UTC"
+                  endpoint={endpoint}
+                  management={{
+                    authorizationId: "hgsa_design_recovery",
+                    chargedThisPeriodMinor: 0,
+                    monthlyCapMinor: 2_000,
+                    pendingMonthlyCapMinor: null,
+                    pendingThisPeriodMinor: 0,
+                    periodEnd: "2026-08-30T16:00:00.000Z",
+                    status: "recovery_required",
+                  }}
+                />
+                <GroupFundingSupporters
+                  supporters={DESIGN_GROUP_FUNDING_SUPPORTERS}
+                />
+              </div>
+            )}
+            groupName="Sunday sleep crew"
           />
         </DesignSponsorshipState>
 
@@ -637,7 +649,11 @@ function DesignSponsorshipState(props: {
   state: string;
 }) {
   return (
-    <section className="space-y-3" data-design-state={props.state}>
+    <section
+      className="scroll-mt-6 space-y-3"
+      data-design-state={props.state}
+      id={`group-funding-${props.state}`}
+    >
       <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
         {props.label}
       </p>
