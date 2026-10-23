@@ -1,0 +1,18 @@
+{
+  "publishedOn": "2026-10-23",
+  "order": 100,
+  "item": {
+    "id": "game-current-terms-acceptance",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Keep a game moving after a change",
+    "summary": "An invited player can accept the current game terms after a suggested change is cancelled or declined.",
+    "details": "The original invite deadline still applies, and a pending suggestion still needs a response first. Invite links also use clearer artifact and weekday wording.",
+    "relevanceTags": [
+      "games"
+    ],
+    "sourcePullRequests": [
+      4327
+    ]
+  }
+}

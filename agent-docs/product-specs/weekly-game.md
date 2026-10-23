@@ -112,7 +112,8 @@ this default without deleting other people's private contact choices.
   "winner gets" retains winner/loser settlement. "Per miss" makes each player owe every
   better player the difference in misses. A ticket is good for 14 days: the
   holder redeems it after sending it through Messages, and after its use-by
-  date it shows as expired and can't be redeemed.
+  date it shows as expired and can't be redeemed. In dev time travel, issuance
+  and expiry both use the game's shifted clock, including long games.
 - **Rematch.** A new game can name the previous one. After a settled game with
   the same two people, its round is the previous round plus one; otherwise 1.
   A rematch of a settled 1v1 is addressed to the other player: it appears on
@@ -226,7 +227,10 @@ rewrite check-ins or existing tickets.
 An invitee can choose Suggest changes and submit concrete alternative rules
 without accepting the original challenge. Both players see a negotiating game
 with no countdown, posting duties or scores until the other player approves the
-proposal. Decline or cancellation leaves it unstarted. Approval determines the
+proposal. Decline or cancellation leaves it unstarted. Once no proposal is
+pending, the claimed invitee can accept the unchanged current terms using the
+normal invite accept endpoint. The challenger can keep proposing or wait; the
+claimed seat and original invite deadline remain unchanged. Approval determines the
 default Day 1 from that moment, or keeps an explicitly selected later date.
 Resetting a proposed date to the default is explicit (`startsOn: null`), distinct
 from omitting a date change. The original seven-day invite expiry also bounds
