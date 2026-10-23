@@ -1,6 +1,6 @@
 # Settings sign-in and cancelled invite recovery
 
-Status: active
+Status: completed
 Created: 2026-10-23
 Updated: 2026-10-23
 
@@ -33,4 +33,5 @@ The signed-out Settings branch redirected ordinary visitors to the homepage. The
 
 Local page/auth/consent/preview tests: 172 pass. Game PostgreSQL service/API/negotiation: 45 pass. Changelog rendering: 4 pass. Web typecheck, complexity and log guards pass. Six existing Settings complexity hotspots are unchanged; no broader refactor is justified.
 
-Requested Astra read-only deep review completed. Accepted and fixed all three findings: Settings now uses authentication-only page access; its sign-in does not demand renewed health consent; cancellation attribution follows the event actor. Targeted tests cover each fix. Phone and desktop presentation inspected at 390/1280px. Final browser replay and docs guard pending. ReviewGPT eragon and exact-head CI will run on the pushed candidate; deployment evidence belongs in the external status handoff. Production is fix-forward only.
+Requested Astra read-only deep review completed. Accepted and fixed all three findings: Settings now uses authentication-only page access; its sign-in does not demand renewed health consent; cancellation attribution follows the event actor. Targeted tests cover each fix. Phone and desktop presentation inspected at 390/1280px. Final browser replay: 2 pass, signed-out Settings returns HTTP 200 and shows its sign-in prompt at both widths. Docs guard passes. PR #4343 owns CI, ReviewGPT and deployment completion. ReviewGPT eragon and exact-head CI will run on the pushed candidate; deployment evidence belongs in the external status handoff. Production is fix-forward only.
+Completed: 2026-10-23
