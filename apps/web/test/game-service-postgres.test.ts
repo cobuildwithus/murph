@@ -35,6 +35,7 @@ if (runPostgresProof && (!databaseUrl || !isClearlyLocalPostgresUrl(databaseUrl)
 
 const JPEG = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0xff, 0xd9]);
 const TERMS: GameTermsInput = {
+  startsOn: new Date(Date.now() + 2 * 86_400_000).toISOString().slice(0, 10),
   schedule: { days: [0, 1, 2, 3, 4, 5, 6] },
   stakes: [{ item: "Breakfast in bed", kind: "prize" }],
   tasks: [{ seat: 0, text: "100 pushups" }, { seat: 1, text: "10 min abs" }],

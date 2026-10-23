@@ -91,6 +91,7 @@ describe.skipIf(!enabled)("game v1 local API smoke", () => {
     const context = { params: Promise.resolve({ id }) };
     const created = await game(create(request(challenger, {
       gameId: id, inviteeFirstName: "Invitee", terms: {
+        startsOn: new Date(Date.now() + 2 * 86_400_000).toISOString().slice(0, 10),
         lengthDays: 75, schedule: { count: 50 }, stakes: [{ kind: "dare", item: "Sing at karaoke" }],
         tasks: [{ seat: 0, text: "Take a walk" }, { seat: 1, text: "Take a walk" }],
       },
