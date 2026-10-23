@@ -1242,6 +1242,77 @@ describe("StandbyRunnerCoordinatorDurableObject", () => {
     assert(!h.coordinator.readStandbyCoordinatorState().readySlotNames.includes(name));
   });
 
+  it("replaces a failed sole recheck in the same alarm pass without another trigger", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(CLAIMED_AT_MS);
+    const h = createCoordinatorHarness({ target: "1", async prepare(input) {
+      if (input.recheck) throw new Error("synthetic unhealthy standby");
+    } });
+    h.ensure();
+    await h.flush();
+    const name = h.coordinator.readStandbyCoordinatorState().readySlotNames[0]!;
+    vi.setSystemTime(CLAIMED_AT_MS + 60_000);
+    await h.coordinator.alarm();
+    await h.flush();
+    const state = h.coordinator.readStandbyCoordinatorState();
+    assert.equal((await h.slots.get(name)!.readStandbySlotBinding()).state, "retired");
+    assert.deepEqual(state.provisioningSlotNames, []);
+    assert.equal(state.readySlotNames.length, 1);
+    assert.notEqual(state.readySlotNames[0], name);
+    assert.equal(prepareCount(h), 3);
+    assert.deepEqual(standbyPoints(h, "prepare").map(({ detail, outcome }) => [detail, outcome]),
+      [["refill", "ready"], ["reproof", "failed"], ["refill", "ready"]]);
+  });
+
+  it("keeps a failed replacement after a failed recheck within the lane's existing bound", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(CLAIMED_AT_MS);
+    let first: string | null = null;
+    const h = createCoordinatorHarness({ target: "1", async prepare(input) {
+      first ??= input.slotName;
+      if (input.recheck || input.slotName !== first) throw new Error("synthetic unhealthy standby");
+    } });
+    h.ensure();
+    await h.flush();
+    vi.setSystemTime(CLAIMED_AT_MS + 60_000);
+    h.setAlarm.mockClear();
+    await h.coordinator.alarm();
+    await h.flush();
+    assert.equal(prepareCount(h), 3);
+    assert.deepEqual(h.coordinator.readStandbyCoordinatorState().readySlotNames, []);
+    assert.deepEqual(standbyPoints(h, "prepare").map(({ detail, outcome }) => [detail, outcome]),
+      [["refill", "ready"], ["reproof", "failed"], ["refill", "failed"]]);
+    // The failed refill keeps its existing backoff: the next attempt belongs to the recovery alarm.
+    assert(h.setAlarm.mock.calls.some(([at]) => Number(at) === Date.now() + HOSTED_STANDBY_RETRY_MS));
+  });
+
+  for (const fence of ["off", "release"] as const) {
+    it(`does not replace a failed recheck after ${fence === "off" ? "standby is turned off" : "the release changes"}`, async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(CLAIMED_AT_MS);
+      const gate = createDeferred<void>();
+      const h = createCoordinatorHarness({ target: "1", async prepare(input) {
+        if (input.recheck) {
+          await gate.promise;
+          throw new Error("synthetic unhealthy standby");
+        }
+      } });
+      h.ensure();
+      await h.flush();
+      vi.setSystemTime(CLAIMED_AT_MS + 60_000);
+      const alarm = h.coordinator.alarm();
+      await until(() => prepareCount(h) === 2);
+      if (fence === "off") h.environment.HOSTED_EXECUTION_STANDBY_MODE = "off";
+      else h.environment.CF_VERSION_METADATA = { id: "release_2" };
+      gate.resolve(undefined);
+      await alarm;
+      await h.flush();
+      assert.equal(prepareCount(h), 2);
+      assert.deepEqual(h.coordinator.readStandbyCoordinatorState().readySlotNames, []);
+      assert.deepEqual(h.coordinator.readStandbyCoordinatorState().provisioningSlotNames, []);
+    });
+  }
+
   it("keeps rechecking inventory claimable across coordinator reset", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(CLAIMED_AT_MS);

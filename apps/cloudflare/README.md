@@ -210,8 +210,10 @@ They observe the existing process directly without the binding lifecycle lock or
 SDK auto-start. The coordinator advances the existing check deadline and applies
 a result only while the exact slot remains ready inventory: a racing claim wins,
 and late success, failure or timeout cannot restore or retire its handoff. Failed
-unclaimed checks use existing fenced retirement and refill. Rechecks preserve
-activity renewal; initial preparation still owns startup and full pristine proof.
+unclaimed checks use existing fenced retirement, and the same bounded preparation
+lane then reserves their refill; a failed fresh preparation keeps its retry
+backoff. Rechecks preserve activity renewal; initial preparation still owns
+startup and full pristine proof.
 Existing persisted provisioning rows continue through ordinary preparation after
 a reset or Worker upgrade. This Worker-only correction uses the existing container
 health response and needs no Web or container-image protocol change.
