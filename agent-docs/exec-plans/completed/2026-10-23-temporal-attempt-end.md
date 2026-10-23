@@ -1,6 +1,6 @@
 # Service live runtime wakes and signal Temporal at final release
 
-Status: active
+Status: completed
 Created: 2026-10-23
 Updated: 2026-10-23
 
@@ -31,10 +31,10 @@ read-only. The parent owns pushes, PRs, ReviewGPT, CI, merges, and deployment.
 
 ## Tasks
 
-1. Prove and generalize the existing projected-wake timer.
-2. Remove checkpoint signaling and dead receipt machinery; bind end hints to final release.
-3. Update contract owners, run focused proof and typechecks, review and commit.
-4. Write the delegated handoff with rollout and net action estimates.
+1. Completed: prove and generalize the existing projected-wake timer.
+2. Completed: remove checkpoint signaling and dead receipt machinery; bind end hints to final release.
+3. Completed: update contract owners, run focused proof and typechecks, and review. Runtime is isolated in commit `613894377a99`; Web follows in the final commit.
+4. Final delegated handoff records rollout, net action estimates, exact commands, and commits.
 
 ## Decisions
 
@@ -77,3 +77,4 @@ a stale-date test fixture, obsolete signal expectations, and the migration-seede
 local cutover singleton missing after schema-only setup. An intermediate Web
 typecheck caught the deleted receipt import before test cleanup; the final check
 passes. Full commands and deployment accounting belong in the delegated handoff.
+Completed: 2026-10-23

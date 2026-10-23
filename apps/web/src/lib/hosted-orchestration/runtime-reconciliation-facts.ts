@@ -18,7 +18,6 @@ import {
   type HostedRuntimeSystemMailboxFrontierClass,
 } from "@murphai/hosted-execution/orchestration-control";
 import {
-  isHostedRuntimeFutureMailboxContinuation,
   type HostedMailboxLaneConsumed,
   type HostedMailboxLaneLag,
 } from "@murphai/hosted-execution/runtime-control";
@@ -78,50 +77,6 @@ export type HostedRuntimeReconciliationFactsStage =
 
 const HOSTED_RUNTIME_RECONCILIATION_FACTS_LOG_SCHEMA =
   "murph.hosted-runtime.reconciliation-facts.v1";
-
-export async function readHostedRuntimeOwnerReleaseActionable(input: {
-  now?: Date | string;
-  userId: string;
-}): Promise<boolean> {
-  const prisma = getPrisma();
-  const now = normalizeHostedRuntimeReconciliationDate(input.now);
-  const [workspace, maxSeqByLane] = await Promise.all([
-    readHostedWorkspace({ prisma, userId: input.userId }),
-    readHostedMailboxMaxSeqByLane({ prisma, userId: input.userId }),
-  ]);
-  if (!workspace) {
-    return false;
-  }
-
-  const redactedStatus = readHostedMailboxRedactedStatusRecord(
-    workspace.redactedStatusJson,
-  );
-  const mailboxLag = maxSeqByLane.map((highWater) =>
-    computeHostedMailboxLaneLag({
-      highWater,
-      redactedStatusJson: redactedStatus,
-    })
-  );
-  const deferredMailboxContinuation =
-    isHostedRuntimeFutureMailboxContinuation({
-      nextWakeAt: workspace.nextWakeAt,
-      nextWakeReason: workspace.nextWakeReason,
-      redactedStatus,
-    }, now.getTime());
-  if (hasHostedMailboxLag(mailboxLag) && !deferredMailboxContinuation) {
-    return true;
-  }
-
-  return await readHostedRuntimeSystemMailboxFrontier({
-    at: now,
-    handledThroughSeq:
-      readHostedRuntimeSystemHandledThroughSeq(workspace.redactedStatusJson)
-        ?? "0",
-    maxSeqByLane,
-    prisma,
-    userId: input.userId,
-  }) !== null;
-}
 
 export async function readHostedRuntimeReconciliationFacts(
   input: HostedRuntimeReconciliationFactsRequest & {

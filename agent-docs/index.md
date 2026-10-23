@@ -428,6 +428,11 @@ Direct meal execution and official nutrition-source inspection are owned by
 `packages/assistant-engine/skills/food-journal/SKILL.md`; focused proof is tracked in
 [`2026-09-20-meal-tool-efficiency.md`](exec-plans/completed/2026-09-20-meal-tool-efficiency.md).
 
+Attempt-ended Temporal reconciliation and live projected-wake service are owned by
+[`hosted-temporal-orchestration.md`](references/hosted-temporal-orchestration.md#attempt-ended-reconciliation);
+implementation and proof are tracked in
+[`2026-10-23-temporal-attempt-end.md`](exec-plans/completed/2026-10-23-temporal-attempt-end.md).
+
 Active delegated-request protection during background checkpointing is owned by
 `ARCHITECTURE.md`; review remediation and proof are recorded in
 [`2026-09-20-background-ask-lifetime.md`](exec-plans/completed/2026-09-20-background-ask-lifetime.md).

@@ -1,15 +1,12 @@
-import { readHostedRuntimeOwnerReleaseActionable } from "./runtime-reconciliation-facts";
 import { signalHostedRuntimeOwnerReleasedRuntime, signalHostedRuntimeRecheckRuntime } from "./signal-runtime";
 
-/** Advisory scheduling only; the caller must commit ownership first. */
+/** An attempt ended: Temporal must reread facts even when no work is due now.
+ * The caller must commit ownership first. */
 export async function signalHostedRuntimeOwnerRelease(input: {
   userId: string;
   runtimeAttemptId: string | null;
-  immediateRecheckRequested: boolean;
   abortSignal?: AbortSignal;
 }): Promise<boolean> {
-  if (!input.immediateRecheckRequested
-    && !(await readHostedRuntimeOwnerReleaseActionable({ userId: input.userId }))) return false;
   input.abortSignal?.throwIfAborted();
   if (input.runtimeAttemptId === null) {
     await signalHostedRuntimeRecheckRuntime({ userId: input.userId, abortSignal: input.abortSignal });
@@ -25,7 +22,6 @@ export async function signalHostedRuntimeOwnerRelease(input: {
 export async function notifyHostedRuntimeOwnerCompletion(input: {
   userId: string;
   runtimeAttemptId: string;
-  immediateRecheckRequested: boolean;
 }): Promise<void> {
   const controller = new AbortController();
   let timer: ReturnType<typeof setTimeout> | undefined;

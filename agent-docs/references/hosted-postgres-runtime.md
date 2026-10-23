@@ -206,16 +206,20 @@ short lifecycle recheck.
 
 The runtime completion callback and outer invocation result share the same
 native receipt and Web `complete` command. Each stage uses one HTTP request for
-conditional retirement, optional exact native-settlement release, and the
-advisory Temporal hint. The early callback still reads the owner to route its
+conditional retirement and optional exact native-settlement release. Only the
+successful final release schedules the advisory Temporal hint. The early callback
+still reads the owner to route its
 native receipt, and cannot release the still-running outer invocation. This read
 also distinguishes already-completed released owners from superseded or
 unconfirmed owners: native completion precedes canonical acknowledgment, and a
 stale Web completion response contains no owner facts. The settled outer result
-releases ownership before the HTTP response. Only an
-updated `complete` response schedules the advisory hint through Next `after`,
+releases ownership before the HTTP response. Only an updated settled `complete`,
+`release_completed`, or `release` schedules the advisory hint through Next `after`,
 so neither its dependency loading nor its network wait delays acknowledgement.
-The hint has a two-second best-effort budget; failure leaves
+Early completion and stale retries send no hint. No actionability read precedes
+the hint: every ended attempt invalidates the workflow wait, while only a matching
+attempt clears its accepted ownership. The hint has a two-second best-effort
+budget; failure leaves
 durable completion for native lifecycle or processing reconciliation. Lost
 responses replay the same exact
 identity and cannot retire or release a successor. Pending upload drains remain
