@@ -1,3 +1,8 @@
+Native container provider read diagnostics are owned by
+[`Cloudflare deployment`](../apps/cloudflare/DEPLOY.md); implementation and
+regression evidence are tracked in
+[the diagnostic plan](exec-plans/completed/2026-10-23-native-provider-read-diagnostics.md).
+
 Game acceptance messages, exact-pair chat discovery and shared allowance work
 are tracked in [the completed lifecycle plan](exec-plans/completed/2026-10-22-game-chat-lifecycle.md).
 The [weekly game spec](product-specs/weekly-game.md), `../ARCHITECTURE.md` and
