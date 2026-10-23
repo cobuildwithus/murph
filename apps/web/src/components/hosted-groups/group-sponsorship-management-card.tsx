@@ -385,7 +385,9 @@ export function GroupSponsorshipManagementCard({
             ? ` (+${formatMoney(management.pendingThisPeriodMinor)} processing)`
             : null}
           {" · "}
-          Resets {formatPeriodEnd(management.periodEnd, periodEndTimeZone)}
+          <span className="whitespace-nowrap">
+            Resets {formatPeriodEnd(management.periodEnd, periodEndTimeZone)}
+          </span>
         </p>
       </div>
 
