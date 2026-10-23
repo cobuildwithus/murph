@@ -33,6 +33,30 @@ describe("additive game reader compatibility", () => {
     expect(hostedGameToolRequestSchema.parse(request)).toEqual(request);
   });
 
+  it.each(["prize", "dare"])("reads %s stakes and year-long games before writers emit them", (kind) => {
+    const change = { kind: "edit", lengthDays: 365, schedule: { count: 365 }, stakes: [{ kind, item: "Choose the next game" }] };
+    const request = { action: "update_game", origin, update: { operation: "propose", gameId: game.id, proposalId: "proposal_synthetic", expectedTermsVersion: 1, change } };
+    expect(hostedGameToolRequestSchema.parse(request)).toEqual(request);
+    const payload = response({ ...game, lengthDays: 365,
+      terms: { ...game.terms, checkInKind: "any", schedule: { count: 365 }, stakes: change.stakes },
+      pendingChange: { id: "proposal_synthetic", proposedByMemberId: "player_first", expectedTermsVersion: 1, origin: "app", change, effectiveFromDay: 0, deliveryStatus: "queued", startsOn: null },
+      progress: { checkedAt: "2030-04-01T12:00:00Z", players: [{ memberId: "player_first", score: 0, target: 365, currentDayIndex: 0, currentEntryId: null, attemptsRemaining: 2,
+        days: Array.from({ length: 365 }, (_, dayIndex) => ({ dayIndex, date: new Date(Date.UTC(2030, 3, dayIndex + 1)).toISOString().slice(0, 10), status: "upcoming" })),
+      }] },
+    });
+    expect(hostedGameToolResponseSchema.parse(payload)).toEqual(payload);
+    for (const invalid of [{ lengthDays: 366 }, { schedule: { count: 366 } }, { stakes: [{ kind: "unknown", item: "Invalid" }] }]) {
+      expect(hostedGameToolRequestSchema.safeParse({ ...request, update: { ...request.update, change: { ...change, ...invalid } } }).success).toBe(false);
+    }
+    expect(hostedGameToolResponseSchema.safeParse(response({ ...game, lengthDays: 366 })).success).toBe(false);
+    expect(hostedGameToolResponseSchema.safeParse(response({ ...game, terms: { ...game.terms, checkInKind: "unknown" } })).success).toBe(false);
+  });
+
+  it.each(["photo", "heart_rate"])("preserves legacy %s terms and one-day lengths", (checkInKind) => {
+    const payload = response({ ...game, lengthDays: 1, terms: { ...game.terms, checkInKind, schedule: { count: 1 }, stakes: [{ kind: "per_miss", item: "Choose a song" }] } });
+    expect(hostedGameToolResponseSchema.parse(payload)).toEqual(payload);
+  });
+
   it("reads shared progress, frozen results and actor introduction state without stripping them", () => {
     const payload = { action: "read_game", result: { status: "ok", state: {
       photoCheckIn: { introductionAvailable: false, hasPendingOffer: true },
@@ -58,7 +82,7 @@ describe("additive game reader compatibility", () => {
 
   it("keeps strict shared-state privacy and projection bounds", () => {
     expect(hostedGameToolResponseSchema.safeParse(response({ ...game, privateLabels: ["private"] })).success).toBe(false);
-    const progress = { checkedAt: "2030-04-01T12:00:00Z", players: [{ memberId: "player_first", score: 0, target: 5, currentDayIndex: 0, currentEntryId: null, attemptsRemaining: 2, days: Array.from({ length: 29 }, (_, dayIndex) => ({ dayIndex, date: "2030-04-01", status: "upcoming" })) }] };
+    const progress = { checkedAt: "2030-04-01T12:00:00Z", players: [{ memberId: "player_first", score: 0, target: 5, currentDayIndex: 0, currentEntryId: null, attemptsRemaining: 2, days: Array.from({ length: 366 }, (_, dayIndex) => ({ dayIndex, date: "2030-04-01", status: "upcoming" })) }] };
     expect(hostedGameToolResponseSchema.safeParse(response({ ...game, progress })).success).toBe(false);
   });
 });
