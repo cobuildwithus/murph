@@ -72,6 +72,7 @@ describe.skipIf(!enabled)("game negotiation persistence", () => {
     expect(await run(a,{type:"cancelInvite",gameId})).toMatchObject({ok:true,game:{status:"void",pendingChange:null}});
     expect(await db.game.findUniqueOrThrow({where:{id:gameId},select:{liveRosterKey:true,pendingChange:true}})).toEqual({liveRosterKey:null,pendingChange:null});
     expect(await db.gameEvent.findMany({where:{gameId,type:"cancelled"},select:{actor:true}})).toEqual([{actor:b}]);
+    expect(await readInvitePreview(token)).toEqual({status:"expired",reason:"cancelled"});
     expect(await db.hostedLinqDelivery.findMany({where:{source:"game_lifecycle",sourceRef:gameId,template:"game_cancelled"},select:{status:true}})).toEqual([{status:"awaiting_generation"}]);
     for (const actor of [a,b]) expect((await readHome(actor)).games.some((game) => game.id === gameId)).toBe(false);
     // Even after the old deadline passes, cancellation must never reappear as expiry.

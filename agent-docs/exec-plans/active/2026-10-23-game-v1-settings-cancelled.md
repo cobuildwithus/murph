@@ -31,4 +31,6 @@ The signed-out Settings branch redirected ordinary visitors to the homepage. The
 
 ## Verification
 
-Pending local tests, typecheck, complexity/log/docs guards, rendered proof, deep review, ReviewGPT and CI. Production is fix-forward only. No rollback authorized.
+Local page/auth/consent/preview tests: 172 pass. Game PostgreSQL service/API/negotiation: 45 pass. Changelog rendering: 4 pass. Web typecheck, complexity and log guards pass. Six existing Settings complexity hotspots are unchanged; no broader refactor is justified.
+
+Requested Astra read-only deep review completed. Accepted and fixed all three findings: Settings now uses authentication-only page access; its sign-in does not demand renewed health consent; cancellation attribution follows the event actor. Targeted tests cover each fix. Phone and desktop presentation inspected at 390/1280px. Final browser replay and docs guard pending. ReviewGPT eragon and exact-head CI will run on the pushed candidate; deployment evidence belongs in the external status handoff. Production is fix-forward only.

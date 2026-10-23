@@ -23,7 +23,7 @@ for (const width of [390, 1280]) {
       }
     }
     await page.goto("/settings#data-privacy", { waitUntil: "load" });
-    await expect(page.getByRole("heading", { name: "Continue to Settings" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Continue to Settings", includeHidden: true })).toBeVisible();
     expect(new URL(page.url()).pathname).toBe("/settings");
   });
 }

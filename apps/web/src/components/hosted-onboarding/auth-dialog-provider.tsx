@@ -222,7 +222,7 @@ export function AuthProvider({
         onCompleted={handleAuthCompleted}
         onOpenChange={handleOpenChange}
         requireLaunchConsentOnCompletion={
-          !authenticated && authIntent !== "data-privacy"
+          !authenticated && authIntent !== "data-privacy" && pathname !== SETTINGS_PATH
         }
       />
     </AuthContext.Provider>

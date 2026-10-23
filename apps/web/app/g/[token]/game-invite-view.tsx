@@ -50,7 +50,10 @@ export function GameInviteView(props: { appUrl: string; preview: GameInvitePrevi
 function closedInviteCopy(preview: GameInvitePreview | null): string {
   if (preview?.status === "used") return "This challenge was already accepted.";
   if (preview?.status === "expired") {
-    if (preview.reason === "cancelled") return `${preview.inviterFirstName?.trim() || "The inviter"} called this one off. Ask for a new link.`;
+    if (preview.reason === "cancelled") {
+      const name = preview.inviterFirstName?.trim();
+      return name ? `${name} called this one off. Ask for a new link.` : "This invite was called off. Ask for a new link.";
+    }
     return "This invite expired. Ask for a new link.";
   }
   return "Ask for a new link.";

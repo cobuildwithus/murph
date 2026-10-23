@@ -64,7 +64,7 @@ import {
   HOSTED_FAMILY_INVITE_RETURN_PARAM,
   parseHostedFamilyInviteReturnPath,
 } from "@/src/lib/hosted-onboarding/app-routes";
-import { getHostedDashboardPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
+import { getHostedPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
 import {
   readHostedConfiguredUsageCreditOfferCodes,
   readHostedPersonalUsageCreditOfferCodes,
@@ -122,7 +122,7 @@ export default async function SettingsPage({
   const resolvedSearchParams = await searchParams;
   const request = resolveSettingsPageRequest(resolvedSearchParams);
   const { authenticated, authenticatedMember, session } =
-    await getHostedDashboardPageAuthSnapshot();
+    await getHostedPageAuthSnapshot();
   if (!authenticated) {
     return (
       <SettingsAuthRequired
@@ -162,7 +162,7 @@ export default async function SettingsPage({
 }
 
 type HostedDashboardPageAuthSnapshot = Awaited<
-  ReturnType<typeof getHostedDashboardPageAuthSnapshot>
+  ReturnType<typeof getHostedPageAuthSnapshot>
 >;
 
 function renderAuthenticatedSettingsPage(input: {

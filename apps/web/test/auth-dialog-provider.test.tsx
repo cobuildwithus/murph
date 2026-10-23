@@ -1319,10 +1319,12 @@ test.each(["active", "checkout"])("AuthProvider resumes the native account-setti
 });
 
 test.each(["active", "checkout"])("AuthProvider resumes the health-data Settings entry after %s login", async (stage) => {
+  mocks.pathname = "/settings";
   const { AuthProvider } = await import("@/src/components/hosted-onboarding/auth-dialog-provider");
   const reload = vi.fn();
   const assign = vi.fn();
   const rendered = await renderClientComponent(createElement(AuthProvider, { authenticated: false }), { requireButton: false });
+  expect(mocks.authDialogProps?.requireLaunchConsentOnCompletion).toBe(false);
   Object.defineProperty(rendered.window, "location", {
     configurable: true,
     value: {

@@ -28,7 +28,9 @@ invite preview (`GET /api/game/v1/invites/<token>`). A used, expired, or missing
 invite share-card previews as "This invite isn't available" and names nobody.
 The API keeps cancellation compatible with older clients: a void game with a
 `cancelled` event returns `{ status: "expired", reason: "cancelled", inviterFirstName }`.
-The optional reason and inviter name are absent for real expiry. The opened web
+The optional reason and inviter name are absent for real expiry. The inviter name
+is included only when the cancellation actor is the inviter; other cancellations
+use neutral wording. The opened web
 page names the inviter for cancellation, with a neutral empty-name fallback;
 terms and private invitee labels stay absent. A game's
 players keep its invite token after it goes live (a spent token can't be

@@ -187,7 +187,7 @@ vi.mock("next/navigation", () => ({
 
 vi.mock("@/src/lib/hosted-onboarding/page-auth", () => ({
   getHostedPageAuthSnapshot: mocks.getHostedPageAuthSnapshot,
-  getHostedDashboardPageAuthSnapshot: mocks.getHostedPageAuthSnapshot,
+  getHostedDashboardPageAuthSnapshot: () => { throw new Error("Settings must not require paid dashboard access"); },
 }));
 
 vi.mock("@/src/lib/prisma", () => ({

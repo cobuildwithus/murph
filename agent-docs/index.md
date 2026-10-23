@@ -1505,4 +1505,4 @@ Read-only admission and its optional-read cap for warm direct wakes are owned by
 Implementation and verification are recorded in
 [the direct-wake plan](exec-plans/completed/2026-10-23-direct-wake-live-admission.md).
 
-Settings consent entry and additive invite cancellation proof: [`game recovery`](exec-plans/active/2026-10-23-game-v1-settings-cancelled.md).
+Settings authentication without paid access or consent re-grant, and actor-aware additive invite cancellation proof: [`game recovery`](exec-plans/active/2026-10-23-game-v1-settings-cancelled.md).
