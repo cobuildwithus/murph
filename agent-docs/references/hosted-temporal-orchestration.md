@@ -280,8 +280,17 @@ freshness is separate: web persists dirty state and appends one deterministic
 `device-sync.wake` handoff on clean-to-dirty transitions, but dirty rows are not
 selected by a global scheduled sweep beyond releasing bounded routine Junction
 wake deadlines (see `docs/device-sync-hosted-control-plane.md`). The existing shared mailbox-handoff sweep
-may re-signal one exact unconsumed `device-sync.wake` pointer per user; it reads
-mailbox and lane-watermark truth, not dirty rows. Historical `runtime.mailbox-lag-observed`
+may re-signal one exact unimported pointer per user only after the mailbox item
+is at least one minute old at recovery-command start. This fixed grace applies
+to device-sync, preference, runtime-control, and queued Clinical Records
+candidates before each per-user selection and the bounded page; transaction-start
+creation timestamps need not follow lane-sequence order. The grace period is
+independent of Schedule cadence.
+Scheduled and deferred-wake producers own their first post-commit signal, so
+items created during the command cannot enter its recovery pass even when the
+producer stages run slowly. Failed first signals stay durable for a later
+eligible sweep. Recovery reads mailbox and lane-watermark truth, not dirty rows.
+Historical `runtime.mailbox-lag-observed`
 and `runtime.device-sync-recovery-requested` rows remain valid runtime-control
 rows for drain compatibility, but web no longer produces them.
 
