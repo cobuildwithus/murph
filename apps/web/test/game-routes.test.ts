@@ -299,7 +299,7 @@ describe("weekly game routes", () => {
       const beforeText = await before.text();
       const beforeBody = JSON.parse(beforeText);
 
-      expect(beforeBody.game.days[0].others).toEqual([{ entry: null, seat: 0, status: "locked" }]);
+      expect(beforeBody.game.days[0].others).toEqual([{ entry: null, seat: 0, status: "locked", postedAt: "2030-03-05T12:00:00.000Z", blurHash: null }]);
       for (const secret of ["entry_leo", leoKey, encodeURIComponent(leoKey)]) {
         expect(beforeText).not.toContain(secret);
       }
@@ -313,6 +313,7 @@ describe("weekly game routes", () => {
           kind: "photo",
           mediaUrls: [`/api/game/v1/media/${encodeURIComponent(leoKey)}`],
           text: "caption of entry_leo",
+          data: null,
         },
         seat: 0,
         status: "posted",
@@ -465,7 +466,7 @@ describe("weekly game routes", () => {
 const NOW = new Date("2026-10-16T18:00:00.000Z");
 
 function entry(input: Partial<RuleEntry> & Pick<RuleEntry, "id" | "kind" | "mediaKeys" | "memberId">): RuleEntry {
-  return { attempt: 1, dayIndex: 0, withdrawnAt: null, ...input };
+  return { attempt: 1, dayIndex: 0, receivedAt: new Date("2030-03-05T12:00:00Z"), blurHash: null, withdrawnAt: null, ...input };
 }
 
 // The real view builder; the caller hands it every entry's words, as a buggy

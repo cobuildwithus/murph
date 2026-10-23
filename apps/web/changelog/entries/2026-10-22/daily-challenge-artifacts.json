@@ -1,0 +1,16 @@
+{
+  "publishedOn": "2026-10-22",
+  "order": 400,
+  "item": {
+    "id": "daily-challenge-artifacts",
+    "kind": "feature",
+    "priority": 3,
+    "title": "Choose how to share your daily check-in",
+    "summary": "New challenges let you share a photo, a short line of words, a heart-rate graph, a route map or a pushup tape.",
+    "details": "Each day can use a different kind. Your partner sees only a posting time and blurred preview until they post too; the recap reveals the shared entries. Heart-rate and route uploads contain summaries and rendered images, without raw heart-rate samples or route coordinates. Existing photo-only and heart-rate challenges keep their rules.",
+    "relevanceTags": [
+      "challenges"
+    ],
+    "sourcePullRequests": []
+  }
+}

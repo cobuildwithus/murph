@@ -45,6 +45,7 @@ const DARE_PREVIEW: OpenPreview = {
 };
 
 const STATES: ReadonlyArray<{ id: string; label: string; preview: GameInvitePreview | null }> = [
+  { id: "any-artifact", label: "Open, free artifact choice", preview: { ...OPEN_PREVIEW, terms: { ...OPEN_PREVIEW.terms, checkInKind: "any" } } },
   { id: "dare", label: "Open, 75 days, dare", preview: DARE_PREVIEW },
   { id: "open", label: "Open, set weekdays", preview: OPEN_PREVIEW },
   { id: "open-any-days", label: "Open, any days, per miss", preview: ANY_DAYS_PREVIEW },

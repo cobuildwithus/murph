@@ -3,6 +3,7 @@ import path from "node:path";
 import { expect, test } from "@playwright/test";
 
 const STATES = {
+  "any-artifact": "Your choice each day",
   dare: "Loser has to",
   "link-dare": "LOSER HAS TO",
   "heart-rate": "Heart-rate graph · wearable required",
@@ -45,7 +46,7 @@ for (const width of [390, 1280]) {
     await mkdir(output, { recursive: true });
     const style = "nextjs-portal { visibility: hidden; }";
     await study.locator('[data-design-state="heart-rate"]').screenshot({ path: path.join(output, `game-invite-heart-rate-${width}.png`), style });
-    for (const state of ["dare", "link-dare"]) {
+    for (const state of ["any-artifact", "dare", "link-dare"]) {
       await study.locator(`[data-design-state="${state}"]`).screenshot({ path: path.join(output, `game-invite-${state}-${width}.png`), style });
     }
     if (width < 768) {
