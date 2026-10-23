@@ -127,4 +127,29 @@ describe("durable game chat lifecycle", () => {
     await drainGameChatLifecycle({ now });
     expect(m.proposal).not.toHaveBeenCalled(); expect(m.receiptUpdate).toHaveBeenLastCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: "skipped", skipReason: "game_proposal_superseded" }) }));
   });
+  it.each(["live", "negotiating"])("announces cancellation once for a %s game through the existing lifecycle", async (status) => {
+    m.receipts.mockResolvedValue([{ ...receipt, sourceRef: "game:proposal", template: "game_change_cancelled", idempotencyKey: "hash:game-change-cancelled:game:proposal" }]);
+    m.game.mockResolvedValue({ ...game, status });
+    const state = await m.state();
+    m.state.mockResolvedValue({ games: [{ ...state.games[0], status }] });
+    await expect(drainGameChatLifecycle({ now })).resolves.toEqual({ attempted: 1, queued: 1, deferred: 0 });
+    expect(m.exact).toHaveBeenCalledExactlyOnceWith("room", ["+15555550101", "+15555550102"]);
+    expect(m.append).toHaveBeenCalledOnce();
+    expect(m.prepare.mock.calls[0][0].envelope.notification).toMatchObject({
+      deliveryIdempotencyKey: "game-change-cancelled:game:proposal", responsePolicy: { kind: "require_send" },
+      instructions: expect.stringContaining("did not alter the game"),
+    });
+    expect(m.current).toHaveBeenCalledWith(expect.objectContaining({ where: { id: "game", status: { in: ["live", "negotiating"] }, chatContainerMemberId: "room" } }));
+    expect(m.receiptUpdate).toHaveBeenLastCalledWith(expect.objectContaining({ where: { idempotencyKey: "hash:game-change-cancelled:game:proposal", source: "game_lifecycle", status: "awaiting_generation" } }));
+  });
+  it("recovers the same cancellation mailbox after the first signal fails", async () => {
+    m.receipts.mockResolvedValue([{ ...receipt, status: "generation_queued", sourceRef: "game:proposal", template: "game_change_cancelled" }]);
+    m.game.mockResolvedValue({ ...game, status: "negotiating" });
+    m.mailbox.mockResolvedValue({ id: "cancel-notice", consumedAt: null });
+    await expect(drainGameChatLifecycle({ now })).resolves.toEqual({ attempted: 1, queued: 1, deferred: 0 });
+    expect(m.mailbox).toHaveBeenCalledWith(expect.objectContaining({ dedupeKey: "game-change-cancelled:game:proposal", userId: "room" }));
+    expect(m.signal).toHaveBeenCalledExactlyOnceWith({ expectedUserId: "room", mailboxItemId: "cancel-notice" });
+    expect(m.prepare).not.toHaveBeenCalled();
+  });
+
 });

@@ -33,6 +33,13 @@ describe('game dynamic tools', () => {
     expect(MURPH_UPDATE_GAME_TOOL.description).toContain('ordinary conversational agreement')
     expect(MURPH_UPDATE_GAME_TOOL.description).toContain('do not demand special words')
   })
+  it('advertises v1 limits and stakes without suggesting a legacy graph for every game', () => {
+    const change = MURPH_UPDATE_GAME_TOOL.inputSchema.properties.change.properties
+    expect(change.lengthDays).toMatchObject({ minimum: 3, maximum: 365 })
+    expect(change.schedule.properties.count.maximum).toBe(365)
+    expect(change.stakes.items.properties.kind.enum).toEqual(['prize', 'dare'])
+    expect(MURPH_GAME_PHOTO_TOOL.description).not.toContain('Heart-rate games still require the app graph')
+  })
   it('binds the selected accepted message instead of using a model actor or last speaker', async () => {
     port.mockClear()
     expect((await execute(approval)).rpcResult.success).toBe(true)
@@ -69,7 +76,8 @@ describe('game dynamic tools', () => {
     const change = { kind: 'edit', tasks: [{seat:0,text:'Read'},{seat:1,text:'Stretch'}], stakes:[{kind:'per_miss',item:'Make tea'}], stakesApplyToWholeGame:true, startsOn:null }
     const request = {action:'update_game',origin,update:{operation:'propose',gameId:approval.gameId,proposalId:approval.proposalId,expectedTermsVersion:1,change}}
     expect(parseHostedRuntimeGroupToolRequest(request)).toEqual(request)
-    expect(MURPH_UPDATE_GAME_TOOL.description).toContain('including earlier misses')
+    expect(MURPH_UPDATE_GAME_TOOL.description).toContain('Stakes and tasks are locked once the game has started')
+    expect(MURPH_UPDATE_GAME_TOOL.description).not.toContain('including earlier misses')
     expect(MURPH_UPDATE_GAME_TOOL.description).toContain('Negotiating games have no active obligations')
     expect(parse('update_game',{...approval,operation:'propose',expectedTermsVersion:1,change})?.kind).toBe('game')
     expect(parse('update_game',{...approval,operation:'propose',expectedTermsVersion:1,change:{...change,stakesApplyToWholeGame:false}})?.kind).toBe('invalid-game-arguments')

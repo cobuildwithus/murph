@@ -58,6 +58,7 @@ export async function prepareGameChatBootstrap(gameId: string, eventId: string, 
       await tx.game.update({ where: { id: gameId }, data: { chatContainerMemberId: created.containerMemberId } });
       const appended = await appendHostedMailboxEnvelopeTx({ tx, envelope: buildBootstrapWake(gameId, eventId, instructions, created.containerMemberId, now) });
       await markGameChatGenerationQueuedTx(eventId, tx, created.containerMemberId);
+      await markBootstrapProposalQueuedTx(gameId, eventId, tx);
       return { containerMemberId: created.containerMemberId, mailboxIds: [created.activationMailboxItemId, appended.item.id] };
     }));
     if (!result) return null;
@@ -85,8 +86,10 @@ function readOtherFrozenBootstrap(memberId: string, eventId: string, prisma: Pri
 }
 function readOtherPendingBootstrap(game: { id: string; status: string; pendingChange: unknown }, memberId: string, eventId: string, prisma: Prisma.TransactionClient) {
   const proposal = parsePendingGameChange(game.pendingChange);
-  const keys = [...(game.status === "live" ? [`game-started:${game.id}`] : []), ...(proposal ? [`game-change:${game.id}:${proposal.id}`] : [])].filter((key) => key !== eventId);
-  return prisma.hostedMailboxItem.findFirst({ where: { userId: memberId, kind: "assistant.notification.requested", consumedAt: null, dedupeKey: { in: keys } }, select: { id: true } });
+  const keys = [...(game.status === "live" ? [`game-started:${game.id}`] : []), ...(proposal ? [`game-change:${game.id}:${proposal.id}`] : [])];
+  return prisma.hostedMailboxItem.findFirst({ where: { userId: memberId, kind: "assistant.notification.requested", consumedAt: null,
+    dedupeKey: { not: eventId }, OR: [{ dedupeKey: { in: keys } }, { dedupeKey: { startsWith: `game-change-cancelled:${game.id}:` } }],
+  }, select: { id: true } });
 }
 async function queueExistingBootstrap(gameId: string, eventId: string, instructions: string, containerMemberId: string): Promise<string | null> {
   const prisma = getPrisma();
@@ -105,11 +108,23 @@ async function queueExistingBootstrap(gameId: string, eventId: string, instructi
     if (route) return null;
     const result = await appendPreparedHostedMailboxEnvelopeTx({ prepared, tx });
     await markGameChatGenerationQueuedTx(eventId, tx, containerMemberId);
+    await markBootstrapProposalQueuedTx(gameId, eventId, tx);
     return result;
   });
   if (!appended) return null;
   await signalHostedMailboxAppendRuntime({ expectedUserId: containerMemberId, mailboxItemId: appended.mailboxItemId });
   return containerMemberId;
+}
+
+/** Match existing-room publication: cancellation sees queued before provider work. */
+async function markBootstrapProposalQueuedTx(gameId: string, eventId: string, tx: Prisma.TransactionClient): Promise<void> {
+  const prefix = `game-change:${gameId}:`;
+  if (!eventId.startsWith(prefix)) return;
+  const proposalId = eventId.slice(prefix.length);
+  const changed = await tx.$executeRaw`UPDATE game
+    SET pending_change = jsonb_set(pending_change, '{deliveryStatus}', '"queued"'::jsonb)
+    WHERE id = ${gameId} AND pending_change->>'id' = ${proposalId}`;
+  if (changed !== 1) throw new Error("Game bootstrap proposal is no longer current.");
 }
 
 /** Signed host callback; not a model tool and never accepts recipients or a sender. */
@@ -152,6 +167,7 @@ function samePlayers(a: readonly { memberId: string }[], b: readonly { memberId:
 function samePhones(a: readonly string[], b: readonly string[]) { return a.length === 2 && b.length === 2 && new Set(b).size === 2 && a.every((phone) => b.includes(phone)); }
 function bootstrapEventCurrent(game: { id: string; status: string; pendingChange: unknown; players: readonly { memberId: string }[] }, eventId: string): boolean {
   if (game.players.length !== 2 || !game.players.every((player) => isGameEnabledFor(player.memberId))) return false;
+  if (eventId.startsWith(`game-change-cancelled:${game.id}:`)) return ["live", "negotiating"].includes(game.status);
   if (eventId === `game-started:${game.id}`) return game.status === "live";
   const proposal = parsePendingGameChange(game.pendingChange);
   return (game.status === "live" || game.status === "negotiating") && proposal !== null && eventId === `game-change:${game.id}:${proposal.id}`;
@@ -189,7 +205,7 @@ function isSkippedBootstrapReservation(row: {
   acceptedAt: Date | null; lastReceiptAt: Date | null; messageLookupKey: string | null; phoneNumberLookupKey: string | null;
 }, memberId: string): boolean {
   return row.source === "game_lifecycle" && row.payloadOwnerMemberId === memberId
-    && ["game_started", "game_proposal"].includes(row.template ?? "")
+    && ["game_started", "game_proposal", "game_change_cancelled"].includes(row.template ?? "")
     && row.status === "skipped" && row.skippedAt !== null
     && [row.payloadSchema, row.payloadCiphertext, row.acceptedAt, row.lastReceiptAt, row.messageLookupKey, row.phoneNumberLookupKey].every((value) => value === null);
 }

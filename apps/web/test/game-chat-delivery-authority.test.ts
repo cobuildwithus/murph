@@ -59,4 +59,19 @@ describe("game proposal provider dispatch authority", () => {
     await expect(assertGameProposalDeliveryCurrentTx({ ...input, now: new Date("2031-01-01T12:00:00Z") })).resolves.toBe(true);
   });
 
+  it.each(["live", "negotiating"])("checks cancellation history and the exact audience for %s games", async (status) => {
+    const { input, findFirst } = setup();
+    findFirst.mockResolvedValue({ ...row(), status, pendingChange: null });
+    const cancelled = { ...input, deliveryIdempotencyKey: "game-change-cancelled:game:proposal" };
+    await expect(assertGameProposalDeliveryCurrentTx(cancelled)).resolves.toBe(true);
+    expect(findFirst).toHaveBeenLastCalledWith(expect.objectContaining({ where: {
+      id: "game", chatContainerMemberId: "room", status: { in: ["live", "negotiating"] },
+      events: { some: { type: "change_cancelled", commandKey: "game-change-resolved:game:proposal" } },
+    } }));
+    await expect(assertGameProposalDeliveryCurrentTx({ ...cancelled, playerMemberIds: ["person-a", "stranger"] })).rejects.toMatchObject({ code: "GAME_CHANGE_SUPERSEDED" });
+    findFirst.mockResolvedValue(null);
+    await expect(assertGameProposalDeliveryCurrentTx(cancelled)).rejects.toMatchObject({ code: "GAME_CHANGE_SUPERSEDED" });
+    await expect(assertGameProposalDeliveryCurrentTx({ ...cancelled, deliveryIdempotencyKey: "game-change-cancelled:game:" })).rejects.toMatchObject({ code: "GAME_CHANGE_SUPERSEDED" });
+  });
+
 });

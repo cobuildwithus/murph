@@ -195,7 +195,10 @@ as a separately delivered notification. New group creation uses that same first
 message, rather than a generic opener followed by another message. Initial
 invite negotiation likewise introduces the actual proposal once; the challenge
 kickoff follows only after agreement. The other player can decline, and the
-proposer can cancel in chat. Only one proposal waits at a time.
+proposer can cancel in chat. Only one proposal waits at a time. Cancelling an
+app-origin change after it was queued or sent also tells the group that the
+request is off, without cancelling the challenge or changing its agreed rules.
+Unsent requests and chat-origin requests do not generate a second announcement.
 
 Until agreement, the current terms stay in force. Changes apply from the first
 day neither player has started. Existing check-ins and missed days keep their

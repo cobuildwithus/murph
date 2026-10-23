@@ -199,7 +199,7 @@ describe("game proposal chat delivery", () => {
     const instructions = buildGameProposalInstructions({ ...proposal, change, startsOn: change.kind === "edit" ? change.startsOn ?? null : "2030-03-04" }, { proposerName: "Alex", recipientName: "Sam", lengthDays: 7 });
     expect(JSON.parse(instructions.split("\n").at(-1)!).change).toEqual(change);
     expect(instructions).toContain("pending, not applied");
-    expect(instructions).toContain("total calendar days, never additional days");
+    expect(instructions).toContain("total days, never additional days");
     expect(instructions).not.toContain("2030-03-06");
   });
 });
