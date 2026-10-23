@@ -81,31 +81,8 @@ vi.mock("@base-ui/react/alert-dialog", async () => {
   };
 });
 
-vi.mock("@/src/components/ui/choice-card", () => ({
-  ChoiceCard: ({ title }: { title: ReactNode }) => createElement("span", null, title),
-}));
-
 vi.mock("@/src/components/ui/spinner", () => ({
   Spinner: () => createElement("span", null, "Loading"),
-}));
-
-vi.mock("@/src/components/ui/radio-group", () => ({
-  RadioGroup: ({ children, onValueChange }: {
-    children?: ReactNode;
-    onValueChange?: (value: string) => void;
-  }) => createElement(
-    "div",
-    null,
-    children,
-    createElement("button", {
-      onClick: () => onValueChange?.("2000"),
-      type: "button",
-    }, "Choose $20"),
-    createElement("button", {
-      onClick: () => onValueChange?.("5000"),
-      type: "button",
-    }, "Choose $50"),
-  ),
 }));
 
 const AUTHORIZATION_ID = "hgsa_abcdefghijklmnop";
@@ -450,7 +427,7 @@ test("binds a confirmed cap increase to the displayed authorization", async () =
   ));
   try {
     const capButton = [...rendered.container.querySelectorAll("button")].find(
-      (candidate) => candidate.textContent === "Choose $50",
+      (candidate) => candidate.textContent === "$50",
     );
     assert.ok(capButton);
     await act(async () => {
@@ -534,7 +511,7 @@ test.each([
   ));
   try {
     const capButton = [...rendered.container.querySelectorAll("button")]
-      .find((candidate) => candidate.textContent === "Choose $20");
+      .find((candidate) => candidate.textContent === "$20");
     assert.ok(capButton);
     await act(async () => {
       capButton.click();
@@ -592,7 +569,7 @@ test("keeps an uncertain cap increase actionable and reloads on dismissal", asyn
   ));
   try {
     const capButton = [...rendered.container.querySelectorAll("button")]
-      .find((candidate) => candidate.textContent === "Choose $20");
+      .find((candidate) => candidate.textContent === "$20");
     assert.ok(capButton);
     await act(async () => {
       capButton.click();
@@ -657,7 +634,7 @@ test("offers only cancellation when billing changes are unavailable", async () =
     expect(labels).not.toContain("Pause automatic refills");
     expect(labels).not.toContain("Resume automatic refills");
     expect(labels).not.toContain("Review payment");
-    expect(labels).not.toContain("Choose $20");
+    expect(labels).not.toContain("$20");
     expect(rendered.container.textContent).toContain(
       "you can still stop future automatic refills",
     );
@@ -884,9 +861,7 @@ test.each([
     },
   ));
   try {
-    const resetLabel = [...rendered.container.querySelectorAll("dt")]
-      .find((element) => element.textContent === "Resets");
-    assert.equal(resetLabel?.nextElementSibling?.textContent, expected);
+    expect(rendered.container.textContent).toContain(`Resets ${expected}`);
   } finally {
     await rendered.cleanup();
   }

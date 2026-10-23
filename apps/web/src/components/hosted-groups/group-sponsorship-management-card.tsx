@@ -9,12 +9,11 @@ import {
   AlertDescription,
   AlertTitle,
 } from "@/src/components/ui/alert";
-import { ChoiceCard } from "@/src/components/ui/choice-card";
 import {
   FieldLegend,
   FieldSet,
 } from "@/src/components/ui/field";
-import { RadioGroup } from "@/src/components/ui/radio-group";
+import { SegmentedControl } from "@/src/components/ui/segmented-control";
 import { Spinner } from "@/src/components/ui/spinner";
 import {
   HOSTED_GROUP_SPONSORSHIP_MONTHLY_CAPS_MINOR,
@@ -320,57 +319,12 @@ export function GroupSponsorshipManagementCard({
 
   return (
     <section
-      className="space-y-7"
+      className="space-y-6"
       data-component="group-sponsorship-management"
     >
-      <div className="space-y-2">
-        <h2 className="font-serif text-xl font-semibold tracking-normal">
-          Monthly sponsorship
-        </h2>
-        <p className="font-mono text-[10px] font-medium uppercase tracking-[0.11em] text-muted-foreground">
-          Private to you
-        </p>
-      </div>
-
-      <dl className="grid grid-cols-2 gap-x-8 gap-y-5 border-y border-border py-5 sm:grid-cols-3">
-        <div>
-          <dt className="font-mono text-[10px] font-medium uppercase tracking-[0.11em] text-muted-foreground">
-            This month
-          </dt>
-          <dd className="mt-1 font-serif text-2xl font-semibold tabular-nums">
-            {formatMoney(management.chargedThisPeriodMinor)}
-          </dd>
-          {management.pendingThisPeriodMinor > 0 ? (
-            <p className="mt-1 text-xs text-muted-foreground">
-              +{formatMoney(management.pendingThisPeriodMinor)} processing
-            </p>
-          ) : null}
-        </div>
-        <div>
-          <dt className="font-mono text-[10px] font-medium uppercase tracking-[0.11em] text-muted-foreground">
-            Monthly limit
-          </dt>
-          <dd className="mt-1 font-serif text-2xl font-semibold tabular-nums">
-            {formatMoney(management.monthlyCapMinor)}
-          </dd>
-        </div>
-        <div>
-          <dt className="font-mono text-[10px] font-medium uppercase tracking-[0.11em] text-muted-foreground">
-            Resets
-          </dt>
-          <dd className="mt-2 text-sm font-medium">
-            {formatPeriodEnd(management.periodEnd, periodEndTimeZone)}
-          </dd>
-        </div>
-      </dl>
-
-      {cancelOnly ? (
-        <p className="text-sm leading-6 text-muted-foreground">
-          Billing changes are unavailable, but you can still stop future automatic refills.
-        </p>
-      ) : recoveryProgress ? (
+      {cancelOnly ? null : recoveryProgress ? (
         <div
-          className="rounded-2xl border border-border bg-muted/40 p-4"
+          className="rounded-2xl border border-border bg-muted/40 p-5"
           role="status"
           ref={recoveryStatusRef}
           tabIndex={-1}
@@ -392,27 +346,28 @@ export function GroupSponsorshipManagementCard({
           {recoveryProgress === "recheck_required" ? (
             <Button
               type="button"
-              className="mt-3"
+              className="mt-4"
               disabled={busy || inert}
               onClick={() => void recheckRecoveryStatus()}
-              size="sm"
             >
               Check payment status
             </Button>
           ) : null}
         </div>
       ) : management.status === "recovery_required" ? (
-        <div className="rounded-2xl border border-destructive/30 bg-destructive/5 p-4">
-          <p className="font-medium">Payment needs attention</p>
-          <p className="mt-1 text-sm leading-6 text-muted-foreground">
-            Automatic refills are paused until payment is fixed.
-          </p>
+        <div className="flex flex-col gap-4 rounded-2xl border border-destructive/30 bg-destructive/5 p-5 sm:flex-row sm:items-center sm:justify-between">
+          <div className="min-w-0">
+            <p className="font-medium">Payment needs attention</p>
+            <p className="mt-1 text-sm leading-6 text-pretty text-muted-foreground">
+              Automatic refills are paused until payment is fixed.
+            </p>
+          </div>
           <Button
             type="button"
-            className="mt-3"
+            className="w-full shrink-0 sm:w-auto"
             disabled={busy || inert}
             ref={recoveryButtonRef}
-            size="sm"
+            size="lg"
             onClick={() => void submit({ action: "recover" })}
           >
             Review payment
@@ -420,11 +375,31 @@ export function GroupSponsorshipManagementCard({
         </div>
       ) : null}
 
-      {!cancelOnly && management.status !== "pending_activation" ? (
+      <div>
+        <h2 className="font-serif text-xl font-semibold tracking-normal">
+          Monthly sponsorship
+        </h2>
+        <p className="mt-1 text-sm text-muted-foreground">
+          {formatMoney(management.chargedThisPeriodMinor)} charged this month
+          {management.pendingThisPeriodMinor > 0
+            ? ` (+${formatMoney(management.pendingThisPeriodMinor)} processing)`
+            : null}
+          {" · "}
+          Resets {formatPeriodEnd(management.periodEnd, periodEndTimeZone)}
+        </p>
+      </div>
+
+      {cancelOnly ? (
+        <p className="text-sm leading-6 text-muted-foreground">
+          Billing changes are unavailable, but you can still stop future automatic refills.
+        </p>
+      ) : management.status !== "pending_activation" ? (
         <FieldSet className="space-y-3" disabled={busy || inert}>
           <FieldLegend>Monthly limit</FieldLegend>
-          <RadioGroup
-            value={String(selectedMonthlyCapMinor)}
+          <SegmentedControl
+            aria-label="Monthly limit"
+            className="h-11"
+            itemClassName="h-9 tabular-nums"
             onValueChange={(value) => {
               const parsed = parseHostedGroupSponsorshipMonthlyCapMinor(
                 Number(value),
@@ -433,30 +408,14 @@ export function GroupSponsorshipManagementCard({
                 setSelectedMonthlyCapMinor(parsed);
               }
             }}
-            className="grid grid-cols-4 gap-2"
-          >
-            {HOSTED_GROUP_SPONSORSHIP_MONTHLY_CAPS_MINOR.map(
-              (monthlyCapMinor) => (
-                <ChoiceCard
-                  className="[&>[data-slot=field]]:gap-1 [&>[data-slot=field]]:p-2 [&_[data-slot=field-content]]:gap-1 min-[360px]:[&>[data-slot=field]]:gap-1.5 min-[360px]:[&>[data-slot=field]]:p-3"
-                  key={monthlyCapMinor}
-                  id={`managed-group-sponsorship-cap-${monthlyCapMinor}`}
-                  value={String(monthlyCapMinor)}
-                  disabled={busy || inert}
-                  title={(
-                    <span className="font-serif text-lg font-semibold leading-none tabular-nums min-[360px]:text-xl sm:text-2xl">
-                      {formatMoney(monthlyCapMinor)}
-                    </span>
-                  )}
-                  description={(
-                    <span className="hidden text-xs font-medium text-muted-foreground min-[360px]:inline">
-                      per month
-                    </span>
-                  )}
-                />
-              ),
+            options={HOSTED_GROUP_SPONSORSHIP_MONTHLY_CAPS_MINOR.map(
+              (monthlyCapMinor) => ({
+                label: formatMoney(monthlyCapMinor),
+                value: String(monthlyCapMinor),
+              }),
             )}
-          </RadioGroup>
+            value={String(selectedMonthlyCapMinor)}
+          />
           {capChanged || management.pendingMonthlyCapMinor !== null ? (
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
               {capChanged ? (
@@ -481,11 +440,11 @@ export function GroupSponsorshipManagementCard({
             </div>
           ) : null}
         </FieldSet>
-      ) : !cancelOnly ? (
+      ) : (
         <p className="text-sm leading-6 text-muted-foreground">
           The $5 activation is being confirmed.
         </p>
-      ) : null}
+      )}
 
       {error && confirmation === null ? (
         <p role="alert" className="text-sm text-destructive">
@@ -493,12 +452,12 @@ export function GroupSponsorshipManagementCard({
         </p>
       ) : null}
 
-      <div className="flex flex-wrap items-center gap-1">
+      <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
         {!cancelOnly && management.status === "active" ? (
           <Button
             type="button"
-            size="sm"
-            variant="ghost"
+            className="h-auto px-0 text-muted-foreground hover:text-foreground"
+            variant="link"
             disabled={busy || inert}
             onClick={() => void submit({ action: "pause" })}
           >
@@ -507,8 +466,8 @@ export function GroupSponsorshipManagementCard({
         ) : !cancelOnly && management.status === "paused" ? (
           <Button
             type="button"
-            size="sm"
-            variant="ghost"
+            className="h-auto px-0 text-muted-foreground hover:text-foreground"
+            variant="link"
             disabled={busy || inert}
             onClick={() => void submit({ action: "resume" })}
           >
@@ -517,8 +476,8 @@ export function GroupSponsorshipManagementCard({
         ) : null}
         <Button
           type="button"
-          size="sm"
-          variant="ghost"
+          className="h-auto px-0 text-muted-foreground hover:text-destructive"
+          variant="link"
           disabled={busy || inert}
           onClick={() => {
             setError(null);

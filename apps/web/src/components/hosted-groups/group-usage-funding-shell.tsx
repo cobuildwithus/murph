@@ -31,7 +31,14 @@ function GroupUsageFundingShell({
 }: GroupUsageFundingShellProps) {
   return (
     <section className="mx-auto w-full">
-      <h1 className="sr-only">Support Murph in {groupName}</h1>
+      <h1 className="mb-8 space-y-2">
+        <span className="block font-mono text-[10px] font-medium uppercase tracking-[0.11em] text-muted-foreground">
+          Support Murph in
+        </span>
+        <span className="block break-words font-serif text-3xl font-semibold leading-[1.15] tracking-[-0.02em] text-balance">
+          {groupName}
+        </span>
+      </h1>
       {action}
       <div className="mt-3 text-center">
         <Link
