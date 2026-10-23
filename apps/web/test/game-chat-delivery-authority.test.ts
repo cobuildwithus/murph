@@ -15,6 +15,17 @@ function setup() {
   return { findFirst, input: { tx: prisma, containerMemberId: "room", deliveryIdempotencyKey: "game-change:game:proposal", playerMemberIds: ["person-a", "person-b"], now } };
 }
 describe("game proposal provider dispatch authority", () => {
+  it("requires the resolved refusal event and exact bound audience", async () => {
+    const {input,findFirst}=setup();
+    const refusal={...input,deliveryIdempotencyKey:"game-change-expired:game:proposal"};
+    expect(await assertGameProposalDeliveryCurrentTx(refusal)).toBe(true);
+    expect(findFirst).toHaveBeenCalledWith(expect.objectContaining({where:expect.objectContaining({
+      id:"game",chatContainerMemberId:"room",events:{some:{type:"change_expired",commandKey:"game-change-resolved:game:proposal"}},
+    })}));
+    await expect(assertGameProposalDeliveryCurrentTx({...refusal,playerMemberIds:["person-a","outsider"]})).rejects.toMatchObject({code:"GAME_CHANGE_SUPERSEDED"});
+    findFirst.mockResolvedValue(null);
+    await expect(assertGameProposalDeliveryCurrentTx(refusal)).rejects.toMatchObject({code:"GAME_CHANGE_SUPERSEDED"});
+  });
   it("does not interfere with unrelated runtime deliveries", async () => {
     const { input, findFirst } = setup();
     await expect(assertGameProposalDeliveryCurrentTx({ ...input, deliveryIdempotencyKey: "ordinary-reply" })).resolves.toBe(false);
@@ -42,7 +53,8 @@ describe("game proposal provider dispatch authority", () => {
     findFirst.mockResolvedValue({ ...row(), pendingChange: { ...row().pendingChange, id: "replacement" } });
     await expect(assertGameProposalDeliveryCurrentTx(input)).rejects.toMatchObject({ code: "GAME_CHANGE_SUPERSEDED" });
     findFirst.mockResolvedValue(row());
-    await expect(assertGameProposalDeliveryCurrentTx({ ...input, now: new Date("2030-03-06T16:00:00Z") })).rejects.toMatchObject({ code: "GAME_CHANGE_SUPERSEDED" });
+    await expect(assertGameProposalDeliveryCurrentTx({ ...input, now: new Date("2030-03-06T16:00:00Z") })).resolves.toBe(true);
+    await expect(assertGameProposalDeliveryCurrentTx({ ...input, now: new Date("2030-03-13T16:00:00Z") })).rejects.toMatchObject({ code: "GAME_CHANGE_SUPERSEDED" });
   });
   it("allows a live kickoff only in its primary room with the exact audience", async () => {
     const { input, findFirst } = setup();

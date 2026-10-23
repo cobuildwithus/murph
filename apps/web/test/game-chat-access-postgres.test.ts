@@ -31,14 +31,14 @@ if (enabled) {
 }
 
 describe.skipIf(!enabled)("game chat access PostgreSQL", () => {
-  it("funds only a cancelled game's bound room while its notice awaits dispatch", async () => {
+  it.each(["cancelled", "change_expired"] as const)("funds only an ended game's bound room while its %s notice awaits dispatch", async (kind) => {
     vi.stubEnv("MURPH_GAME_ENABLED", "true"); vi.stubEnv("MURPH_GAME_MEMBER_ALLOWLIST", "");
     const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: databaseUrl }) });
     const ids = Array.from({length: 5}, () => randomUUID());
     const [room, alternate, first, second, stranger] = ids;
     const gameId = randomUUID();
     const now = new Date();
-    const eventId = `game-cancelled:${gameId}`;
+    const eventId = kind === "cancelled" ? `game-cancelled:${gameId}` : `game-change-expired:${gameId}:proposal`;
     const key = createHostedLinqDeliveryIdempotencyLookupKey(eventId)!;
     const input = { memberId: room, now, prisma };
     try {
@@ -50,9 +50,9 @@ describe.skipIf(!enabled)("game chat access PostgreSQL", () => {
       await prisma.gameProfile.createMany({data:[first,second].map(memberId => ({memberId,firstNameEncrypted:"synthetic",timeZone:"UTC"}))});
       await prisma.game.create({data:{id:gameId,createdBy:first,status:"void",chatContainerMemberId:room,terms:{v:1,versions:[]},termsWordsEncrypted:"synthetic",players:{create:[first,second].map((memberId,seat)=>({memberId,seat,timeZone:"UTC"}))}}});
       expect(await readActiveHostedMemberAccess(input)).toBe(false);
-      await reserveGameChatLifecycleTx({gameId,kind:"cancelled",now,tx:prisma});
+      await reserveGameChatLifecycleTx({gameId,kind,proposalId:"proposal",now,tx:prisma});
       expect(await readActiveHostedMemberAccess(input)).toBe(false);
-      await prisma.gameEvent.create({data:{gameId,actor:first,type:"cancelled",payload:{v:1},createdAt:now}});
+      await prisma.gameEvent.create({data:{gameId,actor:first,type:kind,payload:{v:1},createdAt:now}});
       for (const status of ["awaiting_generation","generation_queued"]) {
         await prisma.hostedLinqDelivery.updateMany({where:{idempotencyKey:key},data:{status}});
         expect(await readActiveHostedMemberAccess(input)).toBe(true);

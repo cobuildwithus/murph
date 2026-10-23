@@ -182,6 +182,7 @@ export interface GamePendingChange {
   proposedByMemberId: string;
   expectedTermsVersion: number;
   change: GameChange;
+  /** Zero-based preview at read time; recomputed under the lock on acceptance. */
   effectiveFromDay: number;
   /** Conversational proposals use the ordinary assistant reply, not a second announcement. */
   origin?: "app" | "chat";

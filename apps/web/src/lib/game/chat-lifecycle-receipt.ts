@@ -3,12 +3,12 @@ import type { Prisma } from "@prisma/client";
 import { buildHostedLinqDeliveryId } from "../hosted-onboarding/linq-delivery-store";
 import { createHostedLinqDeliveryIdempotencyLookupKey } from "../hosted-onboarding/linq-observability-identifiers";
 
-export type GameChatLifecycleKind = "started" | "change_cancelled" | "cancelled";
+export type GameChatLifecycleKind = "started" | "change_cancelled" | "change_expired" | "cancelled";
 
 export function gameChatLifecycleEventId(gameId: string, kind: GameChatLifecycleKind, proposalId?: string): string {
-  if (kind === "change_cancelled") {
-    if (!proposalId) throw new Error("Game cancellation requires its proposal identity.");
-    return `game-change-cancelled:${gameId}:${proposalId}`;
+  if (kind === "change_cancelled" || kind === "change_expired") {
+    if (!proposalId) throw new Error("Game change resolution requires its proposal identity.");
+    return `game-${kind.replace("_", "-")}:${gameId}:${proposalId}`;
   }
   return `game-${kind}:${gameId}`;
 }
@@ -25,7 +25,7 @@ export async function reserveGameChatLifecycleTx(input: {
   if (!key) throw new Error("Game lifecycle delivery identity is unavailable.");
   await input.tx.hostedLinqDelivery.createMany({
     data: [{ id: buildHostedLinqDeliveryId(key), idempotencyKey: key,
-      source: "game_lifecycle", sourceRef: input.kind === "change_cancelled" ? `${input.gameId}:${input.proposalId}` : input.gameId, template: `game_${input.kind}`,
+      source: "game_lifecycle", sourceRef: (input.kind === "change_cancelled" || input.kind === "change_expired") ? `${input.gameId}:${input.proposalId}` : input.gameId, template: `game_${input.kind}`,
       status: "awaiting_generation", targetKind: "thread", attemptedAt: input.now }],
     skipDuplicates: true,
   });

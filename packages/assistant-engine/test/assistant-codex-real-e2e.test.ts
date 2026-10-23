@@ -45118,10 +45118,11 @@ describeRealCodex('real Codex game v1 rules e2e', () => {
 
 describeRealCodex('real Codex game agreement e2e', () => {
   it.each([
-    { name: 'game agreement ordinary yes applies the pending weekend change once', duration: false, negotiation: false },
-    { name: 'game agreement duration extension preserves weekday schedule and original start', duration: true, negotiation: false },
-    { name: 'game agreement negotiated tasks and stakes activates only after opponent agrees', duration: false, negotiation: true },
-  ])('$name', async ({ duration, negotiation }) => {
+    { name: 'game agreement ordinary yes applies the pending weekend change once', duration: false, negotiation: false, refusal: false },
+    { name: 'game agreement duration extension preserves weekday schedule and original start', duration: true, negotiation: false, refusal: false },
+    { name: 'game agreement negotiated tasks and stakes activates only after opponent agrees', duration: false, negotiation: true, refusal: false },
+    { name: 'game delayed approval refusal preserves a plain reason without claiming agreement applied', duration: true, negotiation: false, refusal: true },
+  ])('$name', async ({ duration, negotiation, refusal }) => {
     const config = await resolveRealCodexE2eConfig()
     const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-game-e2e-'))
     const { MURPH_READ_GAME_TOOL, MURPH_UPDATE_GAME_TOOL } = await import('../src/assistant-codex/dynamic-tools/games.js')
@@ -45132,7 +45133,7 @@ describeRealCodex('real Codex game agreement e2e', () => {
       id: 'game_synthetic', status: negotiation ? 'negotiating' as const : 'live' as const, lengthDays: 7, startsOn: dayOne,
       terms: { n: 1, fromDay: 0, tasks: [{ seat: 0, text: 'Read a chapter' }, { seat: 1, text: 'Read a chapter' }], schedule: { days: [0, 1, 2, 3, 4] }, stakes: [{ kind: 'winner_gets' as const, item: 'Pick movie night' }] },
       players: [{ memberId: 'player_alex', seat: 0, firstName: 'Alex', dayOne, timeZone: 'America/New_York' }, { memberId: 'player_sam', seat: 1, firstName: 'Sam', dayOne, timeZone: 'America/New_York' }],
-      pendingChange: { id: 'proposal_synthetic', proposedByMemberId: 'player_alex', expectedTermsVersion: 1, change: negotiation ? { kind: 'edit' as const, tasks: [{seat:0,text:'Read a chapter'},{seat:1,text:'Stretch for ten minutes'}], stakes:[{kind:'winner_gets' as const,item:'Choose the film'}] } : duration ? { kind: 'edit' as const, lengthDays: 10 } : { kind: 'edit' as const, schedule: { days: [5, 6] } }, effectiveFromDay: duration ? 2 : 0, deliveryStatus: 'sent' as const, startsOn: null },
+      pendingChange: { id: 'proposal_synthetic', proposedByMemberId: 'player_alex', expectedTermsVersion: 1, change: negotiation ? { kind: 'edit' as const, tasks: [{seat:0,text:'Read a chapter'},{seat:1,text:'Stretch for ten minutes'}], stakes:[{kind:'winner_gets' as const,item:'Choose the film'}] } : duration ? { kind: 'edit' as const, lengthDays: refusal ? 3 : 10 } : { kind: 'edit' as const, schedule: { days: [5, 6] } }, effectiveFromDay: duration ? 2 : 0, deliveryStatus: 'sent' as const, startsOn: null },
       changeControls: { canStartNow: !duration, canEdit: true, canEditSchedule: true, canEditStartDate: !duration, editableFromDay: duration ? 2 : 0 },
     }
     try {
@@ -45151,21 +45152,27 @@ describeRealCodex('real Codex game agreement e2e', () => {
           computerToolsAvailable: false, vaultFileSendAvailable: false,
           groupTool: { request: async (request) => {
             calls.push(request)
-            if (request.action === 'read_game') return { action: 'read_game', result: { status: 'ok', state: { games: [game] } } }
+            if (request.action === 'read_game') return { action: 'read_game', result: { status: 'ok', state: { games: [refusal && calls.some(call => call.action === 'update_game') ? {...game,pendingChange:null} : game] } } }
             if (request.action !== 'update_game') throw new Error('Unexpected game action')
+            if (refusal) return {action:'update_game',result:{status:'rejected',error:'The proposed game length ends on a day already started. Propose a longer game.'}}
             return { action: 'update_game', result: { status: 'ok', state: { games: [{ ...game, status: 'live' as const, lengthDays: duration ? 10 : game.lengthDays, terms: { ...game.terms, n: 2, fromDay: duration ? 2 : 0, schedule: duration || negotiation ? game.terms.schedule : { days: [5, 6] }, ...(negotiation && 'tasks' in game.pendingChange.change ? {tasks:game.pendingChange.change.tasks,stakes:game.pendingChange.change.stakes} : {}) }, pendingChange: null }] } } }
           } },
           currentUserActionScope: () => ({ conversationId: 'synthetic-game-chat', inboundMailboxItemIds: [], recipientKey: 'synthetic-game-recipient', acceptedInputIds: [inputId], originSessionId: 'synthetic-game-session', conversationScope: 'group' }),
           currentHostedDeliveryContext: () => null, currentHostedMailboxItemIds: () => [], sendVaultFile: async () => { throw new Error('No file send authorized.') },
         },
         model: config.model, modelProvider: config.modelProvider,
-        prompt: `Earlier in this game group: Murph: ${negotiation ? 'Alex suggested that Sam stretch for ten minutes, with the winner choosing the film. The game is waiting for agreement. Sam, does that work?' : duration ? 'Alex wants to extend the game to 10 days total. Sam, good with that?' : 'Alex wants to switch to weekend check-ins. Sam, good with that?'}\nCurrent accepted message from Sam (Message ref: ${inputId}): yeah sounds good`,
+        prompt: `Earlier in this game group: Murph: ${negotiation ? 'Alex suggested that Sam stretch for ten minutes, with the winner choosing the film. The game is waiting for agreement. Sam, does that work?' : duration ? (refusal ? 'Alex wants to shorten the game to 3 days total. Sam, good with that?' : 'Alex wants to extend the game to 10 days total. Sam, good with that?') : 'Alex wants to switch to weekend check-ins. Sam, good with that?'}\nCurrent accepted message from Sam (Message ref: ${inputId}): yeah sounds good`,
         reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
       })
       process.stdout.write(JSON.stringify({ scenario: negotiation ? 'game negotiated rules agreement' : duration ? 'game duration extension' : 'game weekend agreement', reply: result.finalMessage, actions: calls.map((call) => call.action) }) + '\n')
-      expect(calls.map((call) => call.action)).toEqual(['read_game', 'update_game'])
+      expect(calls.filter(call => call.action === 'update_game')).toHaveLength(1)
+      expect(calls.slice(0,2).map((call) => call.action)).toEqual(['read_game', 'update_game'])
       expect(calls[1]).toEqual({ action: 'update_game', origin: { kind: 'accepted_input', assistantInputId: inputId }, update: { operation: 'approve', gameId: game.id, proposalId: 'proposal_synthetic' } })
-      if (negotiation) {
+      if (refusal) {
+        expect(result.finalMessage).toMatch(/already|started/iu)
+        expect(result.finalMessage).toMatch(/can[’']?t|cannot|couldn[’']?t|could not|didn[’']?t|did not|would|won[’']?t/iu)
+        expect(result.finalMessage).not.toMatch(/changed it|all set|successfully|now (?:three|3) days/iu)
+      } else if (negotiation) {
         expect(result.finalMessage).toMatch(/stretch|film|agreed|set|ready|start/iu)
         expect(result.finalMessage).not.toMatch(/weekend|Saturday.*Sunday/iu)
       } else if (duration) {
@@ -45266,6 +45273,52 @@ describeRealCodex('real Codex game lifecycle messaging e2e', () => {
       expect(reply).toMatch(/change|request/iu)
       expect(reply).toMatch(/cancel|off|withdraw|scrap|drop/iu)
       expect(reply).toMatch(/unchanged|same|as (?:it|they) (?:was|were)|as before|still|stays|carry on|didn[’']t alter|did not alter/iu)
+      expect(reply).not.toMatch(/(?:challenge|game) (?:is |was |has been )?cancelled|restart|calendar days|remind|do you agree/iu)
+      expect(reply).not.toContain('?')
+      expect(reply.length).toBeLessThan(350)
+    } finally {
+      await removeRealCodexTemporaryPaths([workingDirectory, ...permissionHome.temporaryPaths, ...config.temporaryPaths])
+    }
+  }, 360_000)
+
+  it.each(['The proposed start date has passed. Propose a new date.', 'The proposed game length ends on a day already started. Propose a longer game.'])('game delayed proposal refusal explains one failed change: %s', async (reason) => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-game-notice-e2e-'))
+    const permissionHome = await materializeRealCodexHostedPermissionHome(config)
+    const { buildGameChangeExpiredInstructions } = await import('@murphai/hosted-execution/runtime-control')
+    try {
+      await initializeVault({ timezone: 'America/New_York', vaultRoot: workingDirectory })
+      const modelTarget = createAssistantModelTarget({
+        approvalPolicy: 'never', codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND),
+        codexHome: permissionHome.codexHome, model: config.model, modelProvider: config.modelProvider,
+        provider: 'codex-cli', reasoningEffort: 'low', sandbox: 'workspace-write',
+      })
+      if (!modelTarget) throw new Error('Expected real Codex target.')
+      const events: unknown[] = []
+      const result = await sendAssistantNotificationLocal({
+        actorId: null, bindingDeliveryTarget: 'synthetic-game-thread', channel: 'linq',
+        deliveryDispatchMode: 'queue-only', deliveryTarget: 'synthetic-game-thread',
+        deliveryIdempotencyKey: 'game-change-expired:game_synthetic:proposal_synthetic',
+        deliveryDedupeToken: 'game-change-expired:game_synthetic:proposal_synthetic',
+        responsePolicy: { kind: 'require_send' },
+        executionContext: { hosted: { defaultTarget: modelTarget, memberId: 'synthetic-group', userEnvKeys: [] } },
+        identityId: null, instructions: buildGameChangeExpiredInstructions(reason),
+        threadId: 'synthetic-game-thread', threadIsDirect: false,
+        onTraceEvent: (event) => events.push(event.rawEvent),
+        turnEnvironment: { currentWorkingDirectory: workingDirectory, env: config.env },
+        turnTrigger: 'manual-deliver', vault: workingDirectory, workingDirectory,
+      })
+      const intents = await listAssistantOutboxIntents(workingDirectory)
+      const reply = result.response ?? ''
+      process.stdout.write(`[game-proposal refusal] ${JSON.stringify({ reply, intents: intents.length, decision: result.decision.kind })}\n`)
+      expect(readCapabilityRoutingActions(events)).toEqual([])
+      expect(result.decision.kind).toBe('send_message')
+      expect(result.deliveryOutcome?.kind).toBe('queued')
+      expect(intents).toHaveLength(1)
+      expect(intents[0]).toMatchObject({ channel: 'linq', threadIsDirect: false, status: 'pending' })
+      expect(reply).toMatch(/change|request/iu)
+      expect(reply).toMatch(/couldn[’']t|could not|can[’']t|cannot|wasn[’']t|was not|didn[’']t|did not/iu)
+      expect(reply).toMatch(reason.includes('start date') ? /date|past|passed/iu : /length|short|day.*start/iu)
       expect(reply).not.toMatch(/(?:challenge|game) (?:is |was |has been )?cancelled|restart|calendar days|remind|do you agree/iu)
       expect(reply).not.toContain('?')
       expect(reply.length).toBeLessThan(350)

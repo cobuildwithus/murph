@@ -230,8 +230,18 @@ day neither player has started. Existing check-ins and missed days keep their
 rules; shortening cannot remove a started day. Any-days count schedules can
 change before Day 1, but their targets cannot change or convert to weekdays once
 play starts. A duration extension is still available on the last active day.
-A proposal expires when its proposed effective day begins, so a late agreement
-never changes a day already underway. Both players can retry a failed delivery
+A proposal stays open across day boundaries until approval, decline, proposer
+cancellation, a terms-version move, or the game ending. Approval recomputes the
+first day neither player has started; earlier schedules, entries and scoring
+remain unchanged. Pending `effectiveFromDay` is a zero-based preview if accepted
+now, not a fixed promise. Native waiting/detail copy should say changes apply to
+days that have not started when accepted, or qualify a day number with “if
+accepted now”. A passed proposed start date or a length that removes a started
+day is refused at approval, clears the proposal with a `change_expired` event,
+and reserves one plain explanation through the existing lifecycle notice path
+when a primary group chat is bound. Other newly invalid proposals use the same
+refusal handling. The notice concerns only that request and creates no new chat.
+Both players can retry a failed delivery
 without adding consent or creating another proposal. A terminal delivery failure
 is shown separately: its proposer can cancel the request in the app and propose
 again, rather than repeatedly retrying a finished delivery.

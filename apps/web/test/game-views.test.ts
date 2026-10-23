@@ -91,6 +91,16 @@ function noonOnDay(state: RuleState, memberId: string, dayIndex: number, hour = 
 }
 
 describe("weekly game views: tickets", () => {
+  it("projects a pending day as accepted now for both time zones without changing stored metadata", () => {
+    const state = liveState();
+    const pending = { id:"proposal", proposedByMemberId:LEO, expectedTermsVersion:1, change:{kind:"edit" as const,lengthDays:14},
+      effectiveFromDay:0, startsOn:null, deliveryStatus:"sent" as const };
+    const now = noonOnDay(state, AVA, 2);
+    for (const viewer of [LEO, AVA]) {
+      expect(view(state, viewer, now, {pendingChange:pending}).pendingChange?.effectiveFromDay).toBe(3);
+    }
+    expect(pending.effectiveFromDay).toBe(0);
+  });
   it("exposes only time and blur while locked, then reveals data on posting and recap", () => {
     const state = liveState();
     const posted = entry(AVA, 0, 1, { kind: "route", blurHash: "synthetic-blur" });

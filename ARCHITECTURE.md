@@ -5409,7 +5409,7 @@ query bounds, receipt semantics, foreground limit and rollout order.
 `apps/web` owns the weekly game (product: `agent-docs/product-specs/weekly-game.md`).
 Postgres state tables are the truth: `game_profile`, `game_contact_label`,
 `game`, `game_player`, `game_entry`, `game_ticket`, plus `game_event`, an append-only history (one row per accepted change, ids and
-numbers only). Change proposal identities use its nullable unique `command_key`
+numbers and fixed server-authored refusal reasons only). Change proposal identities use its nullable unique `command_key`
 for replay after resolution. Every member link cascades from `game_profile`, which cascades
 from `HostedMember`. Words (names, tasks, stakes, labels, excuse transcripts)
 are app-encrypted before any transaction; the structure that rules and
@@ -5567,7 +5567,16 @@ original challenge. The original invite expiry bounds abandoned negotiation and
 releases the pair reservation.
 
 `game.pending_change` is one versioned structural proposal serialized with the
-existing game row lock. `game.chat_container_member_id` references its primary outbound
+existing game row lock. Day boundaries never expire it. Acceptance derives
+`fromDay` from the furthest-ahead player under that lock, retaining earlier terms
+versions. App/shared pending views derive `effectiveFromDay` at read time.
+Impossible approvals clear the proposal and record `change_expired` with a
+plain reason before returning the error; an existing bound room receives one
+`game_change_expired` lifecycle receipt keyed by game and proposal. Generation
+uses the immutable reason and dispatch verifies the resolution event, room and
+exact pair. This path never discovers or bootstraps a room and remains eligible
+if the game ends before its notice drains, under existing post-game funding limits.
+ `game.chat_container_member_id` references its primary outbound
 room; delete clears the binding. It is not a read or mutation permission. App `POST /api/game/v1/games/:id/changes`
 records the proposing player and expected terms version. Signed group dynamic
 `read_game` / `update_game` actions share the existing group-tool transport.

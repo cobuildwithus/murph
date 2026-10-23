@@ -54,7 +54,7 @@ export async function handleGameChatTool(input: Input): Promise<HostedGameToolRe
       },
     });
     // GameView is a personal app view. Never pass it into the shared runtime.
-    if (!result.ok) return { action: input.request.action, result: { status: "rejected", error: result.error.code } };
+    if (!result.ok) return { action: input.request.action, result: { status: "rejected", error: result.error.code === "CHANGE_EXPIRED" ? result.error.message.slice(0, 128) : result.error.code } };
     dayOutcome = result.dayOutcome;
     const latestPlayers = await requireExactGameChat(input.memberId);
     if (!sameGamePlayers(latestPlayers, playerMemberIds)) throw new TypeError("Game chat participants changed.");

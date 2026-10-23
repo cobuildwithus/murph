@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import { createHostedLinqDeliveryIdempotencyLookupKey } from "@/src/lib/hosted-onboarding/linq-observability-identifiers";
+import { toPrismaJsonObject } from "@/src/lib/device-sync/prisma-store/prisma-json";
 import { getPrisma } from "@/src/lib/prisma";
 import { readGame, readGameChatState, runGameCommand } from "@/src/lib/game/service";
 import { addDays, gameLocalDate, weekdayOf } from "@/src/lib/game/time";
@@ -175,16 +176,93 @@ describe.skipIf(!enabled)("weekly game change serialization against PostgreSQL",
       expect((await readGame(gameId,a))?.pendingChange).toMatchObject({deliveryStatus:"failed",deliveryRetryable:true});
     } finally { await getPrisma().hostedLinqDelivery.delete({where:{id:deliveryId}}); }
   });
-  it("clears a stale approval without changing terms and persists retryable delivery failure", async () => {
+  it("keeps delayed approval open across reads and applies from the next unstarted day", async () => {
     const {a,b,room,gameId}=await setup(); const proposalId=randomUUID();
+    const dayOne = addDays(gameLocalDate(new Date(), "America/New_York"), -1);
+    await getPrisma().gamePlayer.updateMany({where:{gameId},data:{dayOne:new Date(`${dayOne}T00:00:00Z`)}});
+    await getPrisma().gameEntry.create({data:{id:randomUUID(),gameId,memberId:a,dayIndex:0,attempt:1,kind:"photo",receivedAt:new Date()}});
+    const entries = await getPrisma().gameEntry.findMany({where:{gameId}});
     delivery.mockRejectedValueOnce(new Error("provider unavailable"));
-    const proposed=await run(a,{type:"proposeChange",gameId,proposalId,expectedTermsVersion:1,change:{kind:"edit",lengthDays:14}});
+    const proposed=await run(a,{type:"proposeChange",gameId,proposalId,expectedTermsVersion:1,change:{kind:"edit",lengthDays:14,schedule:{days:[5,6]}}});
     expect(proposed).toMatchObject({ok:true,game:{pendingChange:{deliveryStatus:"failed"}}});
     // Either player can retry, without replacing the proposal or approving it.
     await run(b,{type:"proposeChange",gameId,proposalId,expectedTermsVersion:1,change:{kind:"edit",lengthDays:20}});
     expect((await readGame(gameId,a))?.pendingChange).toMatchObject({proposedByMemberId:a,change:{kind:"edit",lengthDays:14}});
-    const result=await run(b,{type:"respondChange",gameId,proposalId,decision:"approve"},{chatContainerMemberId:room,beforeMutationTx:fence,now:new Date(Date.now()+3*86400000)});
-    expect(result).toMatchObject({ok:false,error:{code:"CHANGE_EXPIRED"}});
-    const view=await readGame(gameId,a); expect(view?.terms.n).toBe(1); expect(view?.lengthDays).toBe(7); expect(view?.pendingChange).toBeNull();
+    const before = (await readGame(gameId,a))!;
+    const original = before.pendingChange!.effectiveFromDay;
+    await getPrisma().game.update({ where: { id: gameId }, data: { devClockOffsetMs: BigInt(3*86400000) } });
+    const delayed = (await readGame(gameId,a))!;
+    expect(delayed.pendingChange?.id).toBe(proposalId);
+    expect(delayed.pendingChange!.effectiveFromDay).toBeGreaterThan(original);
+    expect((await readGameChatState(room,[a,b])).games[0].pendingChange?.effectiveFromDay).toBe(delayed.pendingChange!.effectiveFromDay);
+    const result=await run(b,{type:"respondChange",gameId,proposalId,decision:"approve"},{chatContainerMemberId:room,beforeMutationTx:fence});
+    expect(result).toMatchObject({ok:true});
+    const view=(await readGame(gameId,a))!;
+    expect(view.terms.n).toBe(2); expect(view.lengthDays).toBe(14); expect(view.pendingChange).toBeNull();
+    expect(view.terms.fromDay).toBe(delayed.pendingChange!.effectiveFromDay);
+    expect(view.days.slice(0,view.terms.fromDay)).toEqual(delayed.days.slice(0,view.terms.fromDay));
+    expect(await getPrisma().gameEntry.findMany({where:{gameId}})).toEqual(entries);
+    const row = await getPrisma().game.findUniqueOrThrow({where:{id:gameId}});
+    const terms = parseStoredTerms(row.terms);
+    expect(terms.versions.map(({fromDay})=>fromDay)).toEqual([0,view.terms.fromDay]);
+    const players = [a,b].map((memberId,seat)=>({memberId,seat,dayOne,timeZone:"America/New_York"}));
+    const state: RuleState = {game:{...row,terms,seats:2,status:"live",startsOn:null},players,entries:entries.map(entry=>({...entry,kind:"photo"}))};
+    const scheduled = view.days.filter(day=>!day.off).length;
+    expect(scorePlayer(state,players[0])).toMatchObject({score:view.days[0].off ? 0 : 1,misses:scheduled-(view.days[0].off ? 0 : 1)});
+    expect(scorePlayer(state,players[1])).toMatchObject({score:0,misses:scheduled});
+    expect((await readGameChatState(room,[a,b])).games[0].pendingChange).toBeNull();
+    const event = await getPrisma().gameEvent.findFirstOrThrow({where:{gameId,type:"change_applied"}});
+    expect(event.payload).toMatchObject({effectiveFromDay:view.terms.fromDay});
   });
+  it("resets the default start date using the acceptance clock after a delay", async () => {
+    const today=gameLocalDate(new Date(),"America/New_York");
+    const {a,b,room,gameId}=await setup({days:[0,1,2,3,4]},addDays(today,5)); const proposalId=randomUUID();
+    await run(a,{type:"proposeChange",gameId,proposalId,expectedTermsVersion:1,change:{kind:"edit",startsOn:null}});
+    await getPrisma().game.update({where:{id:gameId},data:{devClockOffsetMs:BigInt(2*86400000)}});
+    expect(await run(b,{type:"respondChange",gameId,proposalId,decision:"approve"},{chatContainerMemberId:room,beforeMutationTx:fence})).toMatchObject({ok:true});
+    const view=(await readGame(gameId,a))!;
+    expect(view.pendingChange).toBeNull();
+    expect(view.days[0].localDate >= addDays(today,2)).toBe(true);
+    expect(view.days[0].localDate < addDays(today,5)).toBe(true);
+  });
+  it.each(["date", "length", "unbound"] as const)("clears an impossible %s only on acceptance and reserves one notice if bound", async (kind) => {
+    const today = gameLocalDate(new Date(), "America/New_York");
+    const {a,b,room,gameId} = await setup({days:[0,1,2,3,4]}, addDays(today, 5));
+    const db = getPrisma(); const proposalId = randomUUID();
+    const change = kind === "date" ? {kind:"edit" as const, startsOn:addDays(today,1)} : {kind:"edit" as const,lengthDays:3};
+    expect(await run(a,{type:"proposeChange",gameId,proposalId,expectedTermsVersion:1,change})).toMatchObject({ok:true});
+    await db.game.update({where:{id:gameId},data:{devClockOffsetMs:BigInt((kind === "date" ? 2 : 8)*86400000)}});
+    expect((await readGame(gameId,a))?.pendingChange?.id).toBe(proposalId);
+    if (kind === "unbound") await db.game.update({where:{id:gameId},data:{chatContainerMemberId:null}});
+    const approve = {type:"respondChange" as const,gameId,proposalId,decision:"approve" as const};
+    const result = await run(b,approve,{chatContainerMemberId:room,beforeMutationTx:fence});
+    expect(result).toMatchObject({ok:false,error:{code:"CHANGE_EXPIRED",message:expect.stringContaining(kind === "date" ? "start date has passed" : "day already started")}});
+    expect(await readGame(gameId,a)).toMatchObject({pendingChange:null,lengthDays:7,terms:{n:1}});
+    const event = await db.gameEvent.findUniqueOrThrow({where:{commandKey:`game-change-resolved:${gameId}:${proposalId}`}});
+    expect(event).toMatchObject({type:"change_expired",payload:{proposalId,reason:expect.any(String)}});
+    await run(b,approve,{chatContainerMemberId:room,beforeMutationTx:fence});
+    expect(await db.hostedLinqDelivery.findMany({where:{sourceRef:`${gameId}:${proposalId}`},select:{template:true,status:true}}))
+      .toEqual(kind === "unbound" ? [] : [{template:"game_change_expired",status:"awaiting_generation"}]);
+  });
+  it.each(["decline", "cancel"] as const)("keeps delayed %s behavior unchanged", async (decision) => {
+    const {a,b,room,gameId} = await setup(); const proposalId = randomUUID();
+    await run(a,{type:"proposeChange",gameId,proposalId,expectedTermsVersion:1,change:{kind:"edit",lengthDays:14}});
+    await getPrisma().game.update({where:{id:gameId},data:{devClockOffsetMs:BigInt(2*86400000)}});
+    expect((await readGame(gameId,a))?.pendingChange?.id).toBe(proposalId);
+    const actor = decision === "cancel" ? a : b;
+    const command = {type:"respondChange" as const,gameId,proposalId,decision};
+    for (let i=0;i<2;i++) expect(await run(actor,command,{chatContainerMemberId:room,beforeMutationTx:fence})).toMatchObject({ok:true});
+    expect(await readGame(gameId,a)).toMatchObject({pendingChange:null,lengthDays:7,terms:{n:1}});
+    expect(await getPrisma().gameEvent.count({where:{gameId,type:decision === "cancel" ? "change_cancelled" : "change_declined"}})).toBe(1);
+  });
+  it("clears a proposal on a terms-version move", async () => {
+    const {a,gameId} = await setup(); const proposalId = randomUUID(); const db=getPrisma();
+    await run(a,{type:"proposeChange",gameId,proposalId,expectedTermsVersion:1,change:{kind:"edit",lengthDays:14}});
+    const row=await db.game.findUniqueOrThrow({where:{id:gameId}}); const terms=parseStoredTerms(row.terms);
+    terms.versions[0].n=2;
+    await db.game.update({where:{id:gameId},data:{terms:toPrismaJsonObject(terms)}});
+    expect((await readGame(gameId,a))?.pendingChange).toBeNull();
+    expect(await db.gameEvent.count({where:{gameId,type:"change_expired"}})).toBe(1);
+  });
+
 });

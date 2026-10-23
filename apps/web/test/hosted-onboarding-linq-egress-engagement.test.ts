@@ -1988,7 +1988,7 @@ describe("hosted Linq egress authority", () => {
     },
   );
 
-  it.each(["current", "cancelled", "replaced", "expired", "other-audience", "unrelated", "line-blocked", "inactive-runtime"])(
+  it.each(["current", "refusal", "cancelled", "replaced", "expired", "other-audience", "unrelated", "line-blocked", "inactive-runtime"])(
     "requires canonical game proposal authority before exempting an inactive group: %s",
     async (scenario) => {
       const prisma = createPrismaStub({ threadRouteContainerMemberId: "member-1", activeMemberAccess: scenario !== "inactive-runtime" });
@@ -1998,7 +1998,7 @@ describe("hosted Linq egress authority", () => {
         change: { kind: "edit", lengthDays: 14 }, effectiveFromDay: 0, startsOn: null, deliveryStatus: "queued" };
       prisma.game.findFirst.mockResolvedValue({
         id: "game", createdBy: "person-a", status: "live", lengthDays: 7, inviteExpiresAt: null, startsOn: null,
-        pendingChange: scenario === "cancelled" ? null : proposal,
+        pendingChange: ["cancelled", "refusal"].includes(scenario) ? null : proposal,
         terms: { v: 1, versions: [{ n: 1, fromDay: 0, schedule: { days: [0, 1, 2, 3, 4] }, stakes: [] }] },
         players: ["person-a", "person-b"].map((memberId, seat) => ({ memberId, seat, timeZone: "UTC",
           dayOne: new Date(scenario === "expired" ? "2000-01-01T00:00:00Z" : Date.now() + 86_400_000) })),
@@ -2009,13 +2009,13 @@ describe("hosted Linq egress authority", () => {
         prisma.hostedLinqLine.findFirst.mockResolvedValue({ ...line, providerServiceStatus: "FLAGGED" });
       }
       mocks.getPrisma.mockReturnValue(prisma);
-      const idempotencyKey = scenario === "unrelated" ? "assistant-outbox:scheduled" : "game-change:game:proposal";
+      const idempotencyKey = scenario === "unrelated" ? "assistant-outbox:scheduled" : scenario === "refusal" ? "game-change-expired:game:proposal" : "game-change:game:proposal";
       const dispatch = () => postHostedLinqEgressEngagement(new Request("https://internal.example.test/engagement", {
         method: "POST", headers: { "content-type": "application/json" },
         body: JSON.stringify({ authorityCheckOnly: false, answeredMailboxItemIds: [], idempotencyKey, target: "chat-authorized-group", targetKind: "thread" }),
       }));
       const response = await dispatch();
-      if (scenario === "current") {
+      if (scenario === "current" || scenario === "refusal") {
         expect(response.status).toBe(200);
         await expect(response.json()).resolves.toMatchObject({ providerDispatchClaimed: true });
         expect(prisma.hostedLinqDelivery.createMany).toHaveBeenCalledOnce();
