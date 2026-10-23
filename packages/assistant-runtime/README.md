@@ -50,7 +50,7 @@ Current responsibilities:
 - own the canonical hosted runtime launch spec: semantic env split,
   forwarded env profiles, platform-only runtime config, typed resolved config,
   typed parser toolchain validation, commit timeout, and child-env projection helpers
-- keep hosted execution local-runtime-first: normal hosted turns write mailbox and assistant input state into the warm container, may defer intermediate foreground checkpoints, may hot-service only the exact assistant wake projected by the current foreground phase before the idle floor, and otherwise keep dirty state dirty until the runtime-owned idle-floor—or last-chance shutdown—`idle_shutdown` checkpoint succeeds
+- keep hosted execution local-runtime-first: normal hosted turns write mailbox and assistant input state into the warm container, may defer intermediate foreground checkpoints, services its projected wakes of every reason through the existing wakeable wait before the idle floor or retained-work deadline, including clean voice retention; device timers enter the existing mailbox claim owner and repeated no-progress wake keys stay bounded, and otherwise keep dirty state dirty until the runtime-owned idle-floor—or last-chance shutdown—`idle_shutdown` checkpoint succeeds
 - prune assistant-generated delivery staging before snapshot construction when
   the outbox inventory is trusted: existing active files remain protected, a
   missing active reference is counted without blocking safe cleanup of other
