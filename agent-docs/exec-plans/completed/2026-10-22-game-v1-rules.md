@@ -1,6 +1,6 @@
 # Game v1 rules and additive schema
 
-Status: active
+Status: completed
 Created: 2026-10-22
 Updated: 2026-10-22
 
@@ -61,8 +61,8 @@ while score and target retain whole-game totals.
   maximum legacy ticket proof passed at five games and 5,475 tickets.
 - Design proof passed at 390px and 1280px; dare/prize captures inspected.
 - Complexity guard: no hotspots; logs guard, docs drift and Web lint passed.
-- Web typecheck currently has only two expected runtime-reader enum mismatches;
-  rerun after reader-floor PR lands. No reader edits duplicated in this lane.
+- Web and Assistant Engine typechecks pass after rebasing onto the merged
+  reader floor. No runtime reader edits are duplicated in this lane.
 - Real-Codex windowed progress journey passed on the local subscription using
   gpt-6.1-sol: one read, no writes, correct 40/30 full-game scores. Reply Ready.
 - Requested deep review identified the old ticket query ceiling. Accepted and
@@ -71,4 +71,7 @@ while score and target retain whole-game totals.
 
 ## Status
 
-Implementation and focused proof complete except the reader-floor typecheck dependency. No PR or deployment yet.
+Implementation and local proof are complete. The reader floor is merged; its
+runtime deployment and convergence still gate this writer. ReviewGPT, exact-head
+CI and production verification continue through the PR completion workflow.
+Completed: 2026-10-22
