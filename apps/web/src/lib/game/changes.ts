@@ -64,9 +64,7 @@ function readPendingDeliveryState(value: Record<string, unknown>): Pick<GamePend
 
 export function isGameChangeExpired(state: RuleState, pending: StoredGamePendingChange, now: Date): boolean {
   return !["live", "negotiating"].includes(state.game.status) ||
-    isGameDue(state, now) || currentTerms(state.game.terms).n !== pending.expectedTermsVersion
-    || (firstUnstartedGameDay(state, now) > pending.effectiveFromDay)
-    || (pending.startsOn !== null && state.players.some((player) => gameLocalDate(now, player.timeZone) > pending.startsOn!));
+    isGameDue(state, now) || currentTerms(state.game.terms).n !== pending.expectedTermsVersion;
 }
 
 export function decideGameChange(state: RuleState, actor: string, change: GameChange, now: Date, sealedWords?: SealedWordChanges): { change: GameChange; effectiveFromDay: number; startsOn: string | null } {
@@ -89,6 +87,35 @@ export function decideGameChange(state: RuleState, actor: string, change: GameCh
   }
   const startsOn = changedStartDate(state, actor, change, now, controls.canEditStartDate);
   return { change: { ...change, ...(change.schedule ? { schedule } : {}) }, effectiveFromDay, startsOn };
+}
+
+/** Only an app request already queued or sent needs a separate cancellation notice. */
+export function gameChangeCancellationNeedsNotice(pending: GamePendingChange, decision: "approve" | "decline" | "cancel"): boolean {
+  return decision === "cancel" && pending.origin === "app" && ["queued", "sent"].includes(pending.deliveryStatus);
+}
+
+/** Rejudge the proposal under the acceptance clock, retaining its requested date. */
+export function decideApprovedGameChange(state: RuleState, actor: string, pending: StoredGamePendingChange, now: Date): ReturnType<typeof decideGameChange> {
+  const fixedStart = pending.change.kind === "start_now" || typeof pending.change.startsOn === "string";
+  if (fixedStart && pending.startsOn !== null && state.players.some((player) => gameLocalDate(now, player.timeZone) > pending.startsOn!)) {
+    reject("CHANGE_EXPIRED", "The proposed start date has passed. Propose a new date.");
+  }
+  if (pending.change.kind === "edit" && pending.change.lengthDays !== undefined && pending.change.lengthDays <= firstUnstartedGameDay(state, now)) {
+    reject("CHANGE_EXPIRED", "The proposed game length ends on a day already started. Propose a longer game.");
+  }
+  // A date that was tomorrow at proposal time may be today at agreement.
+  // Keep that date, but never move Day 1 after either player has begun.
+  const change = pending.change.kind === "edit" && typeof pending.change.startsOn === "string"
+    ? { ...pending.change, startsOn: undefined } : pending.change;
+  if (pending.change.kind === "edit" && pending.change.startsOn !== undefined && !gameChangeControls(state, now, null).canEditStartDate) {
+    reject("DAY_CLOSED", "The start date cannot change after play begins.");
+  }
+  return decideGameChange(state, actor, change, now, pending);
+}
+
+/** Pending days are a current preview, never a promise fixed at proposal time. */
+export function pendingGameChangeView(state: RuleState, pending: GamePendingChange | null, now: Date): GamePendingChange | null {
+  return pending ? { ...pending, effectiveFromDay: firstUnstartedGameDay(state, now) } : null;
 }
 
 function assertEditableWords(state: RuleState, change: Extract<GameChange, { kind: "edit" }>, controls: GameChangeControls, sealedWords?: SealedWordChanges): void {

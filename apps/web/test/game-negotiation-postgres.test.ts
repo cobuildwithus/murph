@@ -33,6 +33,21 @@ function negotiate(token: string, proposalId = randomUUID()): Extract<GameComman
 
 describe.skipIf(!enabled)("game negotiation persistence", () => {
   afterAll(async () => { await getPrisma().hostedMember.deleteMany({where:{id:{in:members}}}); });
+  it("keeps a delayed fixed start date when negotiation approval arrives after the default cutoff", async () => {
+    const {a,b,room,gameId,token}=await setup();
+    const db=getPrisma();
+    await db.gameProfile.updateMany({where:{memberId:{in:[a,b]}},data:{timeZone:"UTC"}});
+    const proposedDate=addDays(gameLocalDate(new Date(),"UTC"),1);
+    const proposal={...negotiate(token),timeZone:"UTC",change:{kind:"edit" as const,startsOn:proposedDate}};
+    expect(await run(b,proposal)).toMatchObject({ok:true});
+    const approvedAt=new Date(`${proposedDate}T21:00:00Z`);
+    expect(await run(a,{type:"respondChange",gameId,proposalId:proposal.proposalId,decision:"approve"},room,approvedAt)).toMatchObject({ok:true});
+    const row=await db.game.findUniqueOrThrow({where:{id:gameId},include:{players:true}});
+    expect(row.players.map(player=>player.dayOne?.toISOString().slice(0,10))).toEqual([proposedDate,proposedDate]);
+    expect(row.startsOn?.toISOString().slice(0,10)).toBe(proposedDate);
+    expect(parseStoredTerms(row.terms).versions).toMatchObject([{n:2,fromDay:0}]);
+    expect(await db.gameEvent.count({where:{gameId,type:"change_applied"}})).toBe(1);
+  });
   it("lets the challenger cancel an invited game once without creating a chat", async () => {
     const {a,b,c,gameId,token} = await setup();
     const db = getPrisma();

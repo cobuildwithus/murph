@@ -411,10 +411,9 @@ export function decideJoin(
 }
 
 /** Agreement starts a negotiation at approval time, never at the invitee's arrival. */
-export function decideNegotiationStart(state: RuleState, actor: string, now: Date, startsOn: string | null, startNow = false): Schedule {
+export function decideNegotiationStart(state: RuleState, actor: string, now: Date, startsOn: string | null): Schedule {
   if (state.game.status !== "negotiating" || state.players.length !== GAME_SEATS_1V1) reject("GAME_NOT_LIVE", "Both players must join before agreeing.");
-  if (startNow) {
-    if (startsOn === null) reject("INVALID_REQUEST", "The start-now proposal needs its agreed date.");
+  if (startsOn !== null) {
     return scheduleFor(state.players, () => startsOn);
   }
   return scheduleFor(state.players, (player) => player.memberId === actor ? acceptanceStartDate(now, player.timeZone) : gameLocalDate(now, player.timeZone), startsOn ?? state.game.startsOn);

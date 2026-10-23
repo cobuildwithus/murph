@@ -117,8 +117,8 @@ describe("game chat tool authority", () => {
     expect(m.read).not.toHaveBeenCalled(); expect(m.run).not.toHaveBeenCalled();
   });
   it("returns a bounded command rejection rather than claiming an edit applied", async () => {
-    m.run.mockResolvedValue({ ok: false, error: { code: "CHANGE_EXPIRED", message: "Old proposal" }, status: 409 });
-    expect((await handleGameChatTool(update)).result).toEqual({ status: "rejected", error: "CHANGE_EXPIRED" });
+    m.run.mockResolvedValue({ ok: false, error: { code: "CHANGE_EXPIRED", message: "The proposed start date has passed. Propose a new date." }, status: 409 });
+    expect((await handleGameChatTool(update)).result).toEqual({ status: "rejected", error: "The proposed start date has passed. Propose a new date." });
     expect(m.read).not.toHaveBeenCalled();
   });
 });

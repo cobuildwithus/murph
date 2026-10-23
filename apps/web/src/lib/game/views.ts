@@ -38,7 +38,7 @@ import {
   type TermWords,
 } from "./rules";
 import { addDays } from "./time";
-import { gameChangeControls } from "./changes";
+import { pendingGameChangeView, gameChangeControls } from "./changes";
 
 export function gameMediaUrl(key: string): string {
   return `/api/game/v1/media/${encodeURIComponent(key)}`;
@@ -163,7 +163,7 @@ export function buildGameView(input: GameViewInput): GameView {
   if (input.invitee && players.length < game.seats) playerViews.push(inviteeView(input, input.invitee, players.length, viewerId));
   return {
     changeControls: gameChangeControls(state, input.now, input.pendingChange ?? null),
-    pendingChange: input.pendingChange ?? null,
+    pendingChange: pendingGameChangeView(state, input.pendingChange ?? null, input.now),
     days: game.status === "negotiating" ? [] : dayViews(input, players),
     id: game.id,
     inviteExpiresAt: game.status === "invited" ? input.inviteExpiresAt?.toISOString() ?? null : null,

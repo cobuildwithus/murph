@@ -15,7 +15,7 @@ export async function assertGameProposalDeliveryCurrentTx(input: {
 }): Promise<boolean> {
   const key = input.deliveryIdempotencyKey ?? "";
   if (key.startsWith("game-cancelled:")) return assertGameCancelledDeliveryCurrentTx(input);
-  if (key.startsWith("game-change-cancelled:")) return assertGameChangeCancelledDeliveryCurrentTx(input);
+  if (key.startsWith("game-change-cancelled:") || key.startsWith("game-change-expired:")) return assertGameChangeResolvedDeliveryCurrentTx(input);
   const lifecycle = /^game-started:([^:]+)$/.exec(key);
   if (lifecycle) return assertGameStartedDeliveryCurrentTx(input, lifecycle[1]);
   if (!key.startsWith("game-change:")) return false;
@@ -47,12 +47,12 @@ async function assertGameCancelledDeliveryCurrentTx(input: Parameters<typeof ass
   if (!game || !sameGamePlayers(game.players.map((player) => player.memberId), input.playerMemberIds ?? [])) return stale();
   return true;
 }
-async function assertGameChangeCancelledDeliveryCurrentTx(input: Parameters<typeof assertGameProposalDeliveryCurrentTx>[0]): Promise<true> {
-  const cancelled = /^game-change-cancelled:([^:]+):([^:]+)$/.exec(input.deliveryIdempotencyKey ?? "");
+async function assertGameChangeResolvedDeliveryCurrentTx(input: Parameters<typeof assertGameProposalDeliveryCurrentTx>[0]): Promise<true> {
+  const cancelled = /^game-change-(cancelled|expired):([^:]+):([^:]+)$/.exec(input.deliveryIdempotencyKey ?? "");
   if (!cancelled) return stale();
   const game = await input.tx.game.findFirst({
-    where: { id: cancelled[1], chatContainerMemberId: input.containerMemberId, status: { in: ["live", "negotiating"] },
-      events: { some: { type: "change_cancelled", commandKey: `game-change-resolved:${cancelled[1]}:${cancelled[2]}` } } },
+    where: { id: cancelled[2], chatContainerMemberId: input.containerMemberId, status: { in: cancelled[1] === "expired" ? ["live", "negotiating", "settled", "void"] : ["live", "negotiating"] },
+      events: { some: { type: `change_${cancelled[1]}`, commandKey: `game-change-resolved:${cancelled[2]}:${cancelled[3]}` } } },
     include: { players: { take: 3 } },
   });
   if (!game || !sameGamePlayers(game.players.map((player) => player.memberId), input.playerMemberIds ?? [])) return stale();

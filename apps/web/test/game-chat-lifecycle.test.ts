@@ -1,11 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 const m = vi.hoisted(() => ({
-  receipts: vi.fn(), frozen: vi.fn(), recover: vi.fn(), receiptUpdate: vi.fn(), game: vi.fn(), current: vi.fn(), bind: vi.fn(),
+  event: vi.fn(), receipts: vi.fn(), frozen: vi.fn(), recover: vi.fn(), receiptUpdate: vi.fn(), game: vi.fn(), current: vi.fn(), bind: vi.fn(),
   state: vi.fn(), identity: vi.fn(), discover: vi.fn(), exact: vi.fn(), bootstrap: vi.fn(), proposal: vi.fn(),
   destination: vi.fn(), mailbox: vi.fn(), prepare: vi.fn(), append: vi.fn(), signal: vi.fn(), route: vi.fn(),
 }));
 vi.mock("../src/lib/prisma", () => {
-  const db = { hostedLinqDelivery: { findMany: (input: { where: { payloadSchema?: string } }) => input.where.payloadSchema ? m.frozen(input) : m.receipts(input), updateMany: m.receiptUpdate }, game: { findUnique: m.game, findFirst: m.current, updateMany: m.bind } };
+  const db = { gameEvent: { findUnique: m.event }, hostedLinqDelivery: { findMany: (input: { where: { payloadSchema?: string } }) => input.where.payloadSchema ? m.frozen(input) : m.receipts(input), updateMany: m.receiptUpdate }, game: { findUnique: m.game, findFirst: m.current, updateMany: m.bind } };
   return { getPrisma: () => ({ ...db, $transaction: async (fn: (tx: typeof db) => unknown) => fn(db) }) };
 });
 vi.mock("../src/lib/game/service", () => ({ readGameChatState: m.state }));
@@ -39,6 +39,30 @@ describe("durable game chat lifecycle", () => {
     m.discover.mockResolvedValue(null); m.bootstrap.mockResolvedValue("room"); m.proposal.mockResolvedValue(true);
     m.destination.mockResolvedValue({ conversationShape: "thread-container", route: { channel: "linq" } });
     m.mailbox.mockResolvedValue(null); m.prepare.mockResolvedValue({}); m.append.mockResolvedValue({ mailboxItemId: "notice" });
+  });
+  it.each(["The proposed start date has passed. Propose a new date.", "The proposed game length ends on a day already started. Propose a longer game."])("queues one existing-room refusal with the immutable reason: %s", async (reason) => {
+    m.event.mockResolvedValue({ type:"change_expired", payload:{reason} });
+    m.receipts.mockResolvedValue([{...receipt, template:"game_change_expired", sourceRef:"game:proposal"}]);
+    await expect(drainGameChatLifecycle({now})).resolves.toEqual({attempted:1,queued:1,deferred:0});
+    const notification = m.prepare.mock.calls[0][0].envelope.notification;
+    expect(notification.instructions).toContain(reason);
+    expect(notification.instructions).toContain("one brief, plain line");
+    expect(notification.deliveryIdempotencyKey).toBe("game-change-expired:game:proposal");
+    expect(notification.responsePolicy).toEqual({kind:"require_send"});
+    expect(m.append).toHaveBeenCalledOnce();
+    expect(m.state).not.toHaveBeenCalled(); expect(m.discover).not.toHaveBeenCalled(); expect(m.bootstrap).not.toHaveBeenCalled();
+    m.mailbox.mockResolvedValue({id:"refusal",consumedAt:null});
+    m.receipts.mockResolvedValue([{...receipt, template:"game_change_expired", sourceRef:"game:proposal",status:"generation_queued"}]);
+    await drainGameChatLifecycle({now});
+    expect(m.append).toHaveBeenCalledOnce();
+    expect(m.signal).toHaveBeenLastCalledWith({expectedUserId:"room",mailboxItemId:"refusal"});
+  });
+  it("does not bootstrap a refusal or publish it without recorded refusal evidence", async () => {
+    m.game.mockResolvedValue({...game,chatContainerMemberId:null});
+    expect(await deliverGameChatLifecycle("game","change_expired","proposal")).toBe(false);
+    m.game.mockResolvedValue(game); m.event.mockResolvedValue({type:"change_expired",payload:{proposalId:"proposal"}});
+    expect(await deliverGameChatLifecycle("game","change_expired","proposal")).toBe(false);
+    expect(m.prepare).not.toHaveBeenCalled(); expect(m.discover).not.toHaveBeenCalled(); expect(m.bootstrap).not.toHaveBeenCalled();
   });
   it("announces a cancelled invite only in its existing chat without reading private game words", async () => {
     m.game.mockResolvedValue({ ...game, status: "void" });

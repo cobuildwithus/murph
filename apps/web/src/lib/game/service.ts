@@ -67,7 +67,7 @@ import {
   type TermWords,
 } from "./rules";
 import { gameLocalDate } from "./time";
-import { decideGameChange, gameChangeControls, isGameChangeExpired, parsePendingGameChange, type StoredGamePendingChange } from "./changes";
+import { gameChangeCancellationNeedsNotice, decideApprovedGameChange, pendingGameChangeView, decideGameChange, gameChangeControls, isGameChangeExpired, parsePendingGameChange, type StoredGamePendingChange } from "./changes";
 import { prepareGameChangeWords, readPendingGameChanges, type PreparedGameChangeWords } from "./change-words";
 import { deliverGameChangeProposal } from "./chat-delivery";
 import { readGameChatCandidateIds, sameGamePlayers } from "./chat-membership";
@@ -853,7 +853,7 @@ async function proposeChange(context: CommandContext, command: Extract<GameComma
 
 async function respondChange(context: CommandContext, command: Extract<GameCommand, { type: "respondChange" }>): Promise<string> {
   if (command.decision !== "cancel" && (!context.chatContainerMemberId || !context.beforeMutationTx)) reject("NOT_A_PLAYER", "Agree to this change in the game's shared chat.");
-  let expired = false;
+  let refusal: string | null = null;
   await runLocked(command.gameId, context, async ({ tx, loaded, now, clock }) => {
     if (!playerFor(loaded.state, context.actor)) reject("NOT_A_PLAYER", "This game belongs to its players.");
     const proposal = parsePendingGameChange(loaded.row.pendingChange);
@@ -868,30 +868,39 @@ async function respondChange(context: CommandContext, command: Extract<GameComma
     if ((command.decision === "cancel") !== proposer) reject("NOT_A_PLAYER", proposer ? "The other player needs to agree." : "Only the proposer can cancel this change.");
     const clear = () => tx.game.update({ where: { id: command.gameId }, data: { pendingChange: Prisma.DbNull } });
     if (command.decision !== "approve") {
-      if (command.decision === "cancel" && proposal.origin === "app" && ["queued", "sent"].includes(proposal.deliveryStatus)) {
+      if (gameChangeCancellationNeedsNotice(proposal, command.decision)) {
         await reserveGameChatLifecycleTx({ gameId: command.gameId, kind: "change_cancelled", proposalId: proposal.id, now: clock, tx });
       }
       await clear();
       return [{ commandKey: resolutionKey, type: command.decision === "cancel" ? "change_cancelled" : "change_declined", payload: { proposalId: proposal.id } }];
     }
     if (isGameChangeExpired(loaded.state, proposal, now)) {
-      await clear(); expired = true;
+      await clear(); refusal = "That proposal is no longer waiting for agreement.";
       return [{ commandKey: resolutionKey, type: "change_expired", payload: { proposalId: proposal.id } }];
     }
-    return applyApprovedChange({ tx, loaded, now, clock }, command.gameId, proposal, resolutionKey, context.actor);
+    if (loaded.state.game.status === "negotiating") loaded.state = await withCurrentTimeZones(tx, loaded.state);
+    let decision: ReturnType<typeof decideGameChange>;
+    try {
+      decision = decideApprovedGameChange(loaded.state, context.actor, proposal, now);
+    } catch (error) {
+      if (!(error instanceof GameRuleError)) throw error;
+      refusal = error.message;
+      await clear();
+      if (loaded.row.chatContainerMemberId) await reserveGameChatLifecycleTx({ gameId: command.gameId, kind: "change_expired", proposalId: proposal.id, now: clock, tx });
+      return [{ commandKey: resolutionKey, type: "change_expired", payload: { proposalId: proposal.id, reason: refusal } }];
+    }
+    return applyApprovedChange({ tx, loaded, now, clock }, command.gameId, proposal, resolutionKey, context.actor, decision);
   });
-  if (expired) reject("CHANGE_EXPIRED", "That change's first day already started. Propose it again for the remaining days.");
+  if (refusal) reject("CHANGE_EXPIRED", refusal);
   return command.gameId;
 }
 
-async function applyApprovedChange(locked: LockedStep, gameId: string, proposal: StoredGamePendingChange, resolutionKey: string, actor: string): Promise<GameEventDraft[]> {
+async function applyApprovedChange(locked: LockedStep, gameId: string, proposal: StoredGamePendingChange, resolutionKey: string, actor: string, decision: ReturnType<typeof decideGameChange>): Promise<GameEventDraft[]> {
   const { tx, loaded, now, clock } = locked;
-  // Validate against the locked current game again. A start-now proposal keeps
-  // its proposed date, rather than silently changing what the players agreed to.
-  const decision = decideGameChange(loaded.state, actor, proposal.change, now, proposal);
+  // The locked acceptance decision owns the boundary; old days retain their terms.
   const startsOn = proposal.change.kind === "edit" && proposal.change.startsOn === null ? decision.startsOn : proposal.startsOn;
   const previous = currentTerms(loaded.state.game.terms);
-  const next = { ...previous, n: previous.n + 1, fromDay: proposal.effectiveFromDay,
+  const next = { ...previous, n: previous.n + 1, fromDay: decision.effectiveFromDay,
     ...(proposal.change.kind === "edit" && proposal.change.schedule ? { schedule: proposal.change.schedule } : {}),
     ...(proposal.stakes ? { stakes: proposal.stakes } : {}) };
   const terms = { v: 1 as const, versions: [...loaded.state.game.terms.versions.filter((version) => version.fromDay < next.fromDay), next] };
@@ -903,10 +912,9 @@ async function applyApprovedChange(locked: LockedStep, gameId: string, proposal:
     ...(startsOn ? { startsOn: toDbDate(startsOn) } : proposal.change.kind === "edit" && proposal.change.startsOn === null ? { startsOn: null } : {}),
   } });
   if (loaded.state.game.status === "negotiating") {
-    const agreedState = await withCurrentTimeZones(tx, { ...loaded.state, game: { ...loaded.state.game, terms, lengthDays: lengthDays ?? loaded.state.game.lengthDays,
-      ...(proposal.change.kind === "edit" && proposal.change.startsOn === null ? { startsOn: null } : {}) } });
-    if (proposal.startsOn && agreedState.players.some((player) => gameLocalDate(now, player.timeZone) > proposal.startsOn!)) reject("CHANGE_EXPIRED", "The proposed start date has passed. Propose a new date.");
-    const schedule = decideNegotiationStart(agreedState, actor, now, proposal.startsOn, proposal.change.kind === "start_now");
+    const agreedState: RuleState = { ...loaded.state, game: { ...loaded.state.game, terms, lengthDays: lengthDays ?? loaded.state.game.lengthDays,
+      ...(proposal.change.kind === "edit" && proposal.change.startsOn === null ? { startsOn: null } : {}) } };
+    const schedule = decideNegotiationStart(agreedState, actor, now, proposal.startsOn);
     await writeSchedule(tx, gameId, schedule);
     await tx.game.update({ where: { id: gameId }, data: { status: "live", startedAt: clock } });
     return [
@@ -959,7 +967,7 @@ export async function readGameChatState(containerMemberId: string, playerMemberI
       if (existing) existing.count += 1;
       else ticketGroups.set(key, { owedByMemberId: view.owedByMemberId, owedToMemberId: view.owedToMemberId, what: view.what, status: view.status, count: 1 });
     }
-    const pendingChange = pendingViews.get(row.id) ?? null;
+    const pendingChange = pendingGameChangeView(state, pendingViews.get(row.id) ?? null, gameNow(clock, row));
     const { checkInKind, ...terms } = termsView(state, words);
     return { id: row.id, status: state.game.status, terms: { ...terms, ...(checkInKind === "any" ? {} : { checkInKind }) },
       progress: gameChatProgress(state, gameNow(clock, row)),

@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-10-23",
+  "order": 300,
+  "item": {
+    "id": "game-proposals-open",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Game changes can wait for an answer",
+    "summary": "A requested game change stays open when a new day begins.",
+    "details": "When your partner agrees, the change applies to days neither player has started. If its start date or shorter length can no longer work, Murph explains why in your existing game chat.",
+    "relevanceTags": ["games"],
+    "sourcePullRequests": []
+  }
+}

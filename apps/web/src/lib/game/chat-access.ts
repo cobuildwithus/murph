@@ -51,11 +51,12 @@ export async function readGameChatFundingRooms(input: {
         (SELECT cancelled.id FROM game cancelled
           WHERE cancelled.chat_container_member_id = room.id AND cancelled.status = 'void'
             AND EXISTS (SELECT 1 FROM game_event event
-              WHERE event.game_id = cancelled.id AND event.type = 'cancelled'
+              WHERE event.game_id = cancelled.id AND event.type IN ('cancelled', 'change_expired')
                 AND event.created_at > ${settledCutoff} AND event.created_at <= ${input.now})
             AND EXISTS (SELECT 1 FROM hosted_linq_delivery receipt
-              WHERE receipt.source = 'game_lifecycle' AND receipt.source_ref = cancelled.id
-                AND receipt.template = 'game_cancelled'
+              WHERE receipt.source = 'game_lifecycle'
+                AND ((receipt.source_ref = cancelled.id AND receipt.template = 'game_cancelled')
+                  OR (starts_with(receipt.source_ref, cancelled.id || ':') AND receipt.template = 'game_change_expired'))
                 AND receipt.status IN ('awaiting_generation', 'generation_queued')
                 AND receipt.skipped_at IS NULL)
           ORDER BY cancelled.created_at DESC, cancelled.id LIMIT 1)
@@ -74,7 +75,7 @@ export async function readGameChatFundingRooms(input: {
             AND EXISTS (SELECT 1 FROM hosted_linq_delivery receipt
               WHERE receipt.payload_owner_member_id = room.id AND receipt.source = 'game_lifecycle'
                 AND ((receipt.status = 'generation_queued' AND (receipt.source_ref = game.id
-                    OR (receipt.template = 'game_change_cancelled' AND starts_with(receipt.source_ref, game.id || ':'))))
+                    OR (receipt.template IN ('game_change_cancelled', 'game_change_expired') AND starts_with(receipt.source_ref, game.id || ':'))))
                   OR receipt.payload_schema = 'game_chat_bootstrap_v1')
                 AND receipt.bootstrap_route_attached_at IS NULL AND receipt.skipped_at IS NULL)
             AND NOT EXISTS (SELECT 1 FROM hosted_linq_delivery receipt

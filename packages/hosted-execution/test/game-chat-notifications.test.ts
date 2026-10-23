@@ -1,7 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { buildGameChangeCancelledInstructions, buildGameProposalInstructions } from "../src/game-chat-notifications.ts";
+import { buildGameChangeExpiredInstructions, buildGameChangeCancelledInstructions, buildGameProposalInstructions } from "../src/game-chat-notifications.ts";
 
 describe("game v1 notification instructions", () => {
+  it("explains a refused approval once without claiming the game ended", () => {
+    const reason = "The proposed start date has passed. Propose a new date.";
+    const instructions = buildGameChangeExpiredInstructions(reason);
+    expect(instructions).toContain("one brief, plain line");
+    expect(instructions).toContain("could not apply and why");
+    expect(instructions).toContain("Do not say the game was cancelled or changed");
+    expect(JSON.parse(instructions.split("\n").at(-1)!)).toEqual({reason});
+  });
   it("distinguishes a cancelled request from the challenge and a later request", () => {
     const instructions = buildGameChangeCancelledInstructions();
     expect(instructions).toContain("one brief, natural group message");
