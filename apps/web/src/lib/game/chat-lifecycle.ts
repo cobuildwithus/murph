@@ -147,7 +147,7 @@ export async function deliverGameChatLifecycle(gameId: string, kind: GameChatLif
   const shared = state.games.find((candidate) => candidate.id === gameId);
   if (!shared || !statuses.includes(shared.status)) return false;
   const instructions = kind === "started" ? buildGameKickoffInstructions({ kind, game: shared })
-    : buildGameChangeCancelledInstructions({ hasNewPendingChange: shared.pendingChange !== null, negotiating: shared.status === "negotiating" });
+    : buildGameChangeCancelledInstructions();
   const identities = await Promise.all(players.map((memberId) => readHostedMemberIdentity({ memberId, prisma })));
   const phones = identities.flatMap((identity) => identity?.phoneNumberVerifiedAt && identity.phoneNumber ? [identity.phoneNumber] : []);
   if (phones.length !== 2 || new Set(phones).size !== 2) throw new Error("Game chat requires verified players.");

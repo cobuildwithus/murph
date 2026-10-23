@@ -75,6 +75,37 @@ describe("generated game chat bootstrap", () => {
     expect(m.markReceipt).toHaveBeenCalledWith(expect.objectContaining({ data: { status: "generation_queued", retryAfterAt: expect.any(Date), payloadOwnerMemberId: "room" } }));
     expect(m.create).not.toHaveBeenCalled();
   });
+  it.each([null, "room"])("marks bootstrap proposal queued before provider acceptance even if attachment fails: %s", async (container) => {
+    const proposal = { v: 1, id: "proposal_sample", proposedByMemberId: "person_a", expectedTermsVersion: 1,
+      change: { kind: "edit", lengthDays: 10 }, effectiveFromDay: 1, startsOn: null, origin: "app", deliveryStatus: "pending" };
+    const proposalEventId = `game-change:${gameId}:${proposal.id}`;
+    m.game.mockResolvedValue({ ...game(container), pendingChange: proposal });
+    m.writeMetadata.mockImplementation(async (parts: TemplateStringsArray, ...values: unknown[]) => {
+      const sql = parts.join("?");
+      expect(sql).toContain(`jsonb_set(pending_change, '{deliveryStatus}', '"queued"'::jsonb)`);
+      expect(values).toEqual([gameId, proposal.id]);
+      proposal.deliveryStatus = "queued";
+      return 1;
+    });
+    m.signal.mockImplementation(async () => { expect(proposal.deliveryStatus).toBe("queued"); });
+    await expect(prepareGameChatBootstrap(gameId, proposalEventId, "Ask about the requested change.")).resolves.toBe("room");
+    expect(m.writeMetadata).toHaveBeenCalledOnce();
+    m.game.mockResolvedValue({ ...game(), pendingChange: proposal });
+    m.wake.mockResolvedValue({ kind: "assistant.notification.requested", notification: { gameChatBootstrap: { gameId, eventId: proposalEventId }, route: { delivery: { kind: "bootstrap", target: "room" } } } });
+    m.attachRoute.mockRejectedValueOnce(new Error("Retry attachment"));
+    await expect(handleGameChatBootstrapControl({ memberId: "room", runtimeIdentity: null,
+      request: { action: "game_chat_bootstrap", gameId, eventId: proposalEventId, operation: "send", text: "A change was requested." },
+    })).rejects.toThrow("Retry attachment");
+    expect(m.accepted).toHaveBeenCalledOnce();
+    expect(proposal.deliveryStatus).toBe("queued");
+  });
+  it("does not signal a bootstrap proposal if its queued metadata cannot commit", async () => {
+    const proposal = { v: 1, id: "proposal_sample", proposedByMemberId: "person_a", expectedTermsVersion: 1,
+      change: { kind: "edit", lengthDays: 10 }, effectiveFromDay: 1, startsOn: null, origin: "app", deliveryStatus: "pending" };
+    m.game.mockResolvedValue({ ...game(), pendingChange: proposal }); m.writeMetadata.mockResolvedValue(0);
+    await expect(prepareGameChatBootstrap(gameId, `game-change:${gameId}:${proposal.id}`, "Ask about the change.")).rejects.toThrow("no longer current");
+    expect(m.signal).not.toHaveBeenCalled(); expect(m.create).not.toHaveBeenCalled();
+  });
   it("queues a cancellation for a negotiating game after its original request is cleared", async () => {
     m.game.mockResolvedValue({ ...game(), status: "negotiating", pendingChange: null });
     const cancellation = `game-change-cancelled:${gameId}:proposal_sample`;

@@ -25,6 +25,20 @@ async function setup() {
 
 describe.skipIf(!enabled)("game cancellation lifecycle transaction", () => {
   afterAll(async () => { await getPrisma().hostedMember.deleteMany({ where: { id: { in: members } } }); });
+  it("rolls back cancellation and its announcement when history cannot commit", async () => {
+    const { a, gameId } = await setup();
+    const db = getPrisma(), proposalId = randomUUID();
+    const pendingChange = { v: 1, id: proposalId, proposedByMemberId: a, expectedTermsVersion: 1,
+      change: { kind: "edit", lengthDays: 10 }, effectiveFromDay: 1, startsOn: null, origin: "app", deliveryStatus: "queued" };
+    await db.game.update({ where: { id: gameId }, data: { status: "live", pendingChange } });
+    // Force the final history insert to fail after reservation and clearing.
+    await db.gameEvent.create({ data: { gameId, actor: a, type: "change_declined",
+      commandKey: `game-change-resolved:${gameId}:${proposalId}`, payload: { v: 1, proposalId } } });
+    await expect(runGameCommand({ actorMemberId: a, command: { type: "respondChange", gameId, proposalId, decision: "cancel" } })).rejects.toMatchObject({ code: "P2002" });
+    expect((await db.game.findUniqueOrThrow({ where: { id: gameId }, select: { pendingChange: true } })).pendingChange).toEqual(pendingChange);
+    expect(await db.gameEvent.count({ where: { gameId, type: "change_cancelled" } })).toBe(0);
+    expect(await db.hostedLinqDelivery.count({ where: { idempotencyKey: createHostedLinqDeliveryIdempotencyLookupKey(`game-change-cancelled:${gameId}:${proposalId}`)! } })).toBe(0);
+  });
   it.each([
     { origin: "app", deliveryStatus: "queued", eligible: true },
     { origin: "app", deliveryStatus: "sent", eligible: true },

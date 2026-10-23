@@ -20,7 +20,7 @@ The canonical cancel transaction clears the proposal and writes its history but 
 
 Reuse lifecycle reservations in the cancel transaction, with a cancellation-specific template and per-proposal identity. Drain and dispatch through existing generated notifications. Preserve exact-player authorization. Update shared instruction builders and model-facing tools only after the reader floor and rules release.
 
-Develop on main in an isolated checkout; rebase onto the merged rules before verification. Merge only after PR 2 and runtime floor convergence. Deploy the new runtime consumer/tool text before Web emits cancellation work where old dispatch could miss its audience guard. Required CI and ReviewGPT plus requested Codex review gate landing. Production Vercel admission and runtime convergence are separate proof.
+Develop on main in an isolated checkout; rebase onto the merged rules before verification. Merge only after PR 2 and runtime floor convergence. Cancellation uses the existing generic notification and bootstrap wire shapes; the deployed runtime passes through its event ID and instructions without a new parser. Web owns both reservation and dispatch authority. After PR 2 Web is verified, deploy this Web change and refresh the runtime tool text; no new wire consumer floor is introduced. Required CI and ReviewGPT plus requested Codex review gate landing. Production Vercel admission and runtime convergence are separate proof.
 
 ## Verification
 
@@ -33,3 +33,5 @@ Focused game lifecycle/delivery/authority/notification tests, cancellation Postg
 - Full provider input: individual 155921 -> 155921 bytes; group 144355 -> 143888 bytes (-467, -0.3235%). Exact GPT-6.1 Sol tokenizer unavailable; no token estimate claimed.
 - Real Codex cancellation passed through local subscription: exactly one queued intent, truthful short reply, no other capability calls. Default and first alternate homes failed before model action with routing 401; second alternate worked. Live wording assertion corrected to accept a semantically valid negation.
 - Real Codex live-stake refusal and 75-day challenge read also pass through production tools, with no mutation calls. Transactional tests await the PR 2 rules base. PR 2 merge and runtime-floor convergence still block landing.
+
+- Requested Astra deep review found two concrete issues, both accepted: bootstrap publication now persists queued proposal metadata before provider work, and cancellation copy describes only the earlier request without assertions about current pending requests or whether play started. Bootstrap failure regression passes for both new and existing route-less workspaces (28 bootstrap tests total). Revised real-Codex cancellation journey passes. Transaction rollback fixture added; PostgreSQL execution still awaits PR 2. Refreshed Web typecheck and complexity/log/doc guards pass.

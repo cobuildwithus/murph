@@ -39,11 +39,10 @@ export function buildGameKickoffInstructions(input: { kind: "started"; game: Hos
 }
 
 /** A cancellation changes only the pending request, never the agreed challenge. */
-export function buildGameChangeCancelledInstructions(input: { hasNewPendingChange: boolean; negotiating: boolean }): string {
+export function buildGameChangeCancelledInstructions(): string {
   return [
     "A player cancelled a change they requested from the app. Tell both players in one brief, natural group message that the requested change is off and did not alter the game.",
     "Do not say the challenge was cancelled, restarted, approved or completed. Do not repeat tasks or stakes, ask for agreement, or offer reminders. Never mention internal IDs or delivery details.",
-    input.hasNewPendingChange ? "Another change is now pending. Make clear that this notice concerns the earlier request, not the current pending change." : "There is no replacement request to discuss.",
-    input.negotiating ? "The challenge is still waiting for agreement and has not started." : "Do not claim you just checked progress or that no other changes have happened since this cancellation.",
+    "This is a notice about the earlier request only. Do not describe any later request as cancelled or make claims about current progress, whether play has started, or what changes have happened since.",
   ].join("\n");
 }

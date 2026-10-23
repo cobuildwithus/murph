@@ -45249,7 +45249,7 @@ describeRealCodex('real Codex game lifecycle messaging e2e', () => {
         deliveryDedupeToken: 'game-change-cancelled:game_synthetic:proposal_synthetic',
         responsePolicy: { kind: 'require_send' },
         executionContext: { hosted: { defaultTarget: modelTarget, memberId: 'synthetic-group', userEnvKeys: [] } },
-        identityId: null, instructions: buildGameChangeCancelledInstructions({ hasNewPendingChange: false, negotiating: false }),
+        identityId: null, instructions: buildGameChangeCancelledInstructions(),
         threadId: 'synthetic-game-thread', threadIsDirect: false,
         onTraceEvent: (event) => events.push(event.rawEvent),
         turnEnvironment: { currentWorkingDirectory: workingDirectory, env: config.env },

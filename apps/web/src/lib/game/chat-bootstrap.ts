@@ -58,6 +58,7 @@ export async function prepareGameChatBootstrap(gameId: string, eventId: string, 
       await tx.game.update({ where: { id: gameId }, data: { chatContainerMemberId: created.containerMemberId } });
       const appended = await appendHostedMailboxEnvelopeTx({ tx, envelope: buildBootstrapWake(gameId, eventId, instructions, created.containerMemberId, now) });
       await markGameChatGenerationQueuedTx(eventId, tx, created.containerMemberId);
+      await markBootstrapProposalQueuedTx(gameId, eventId, tx);
       return { containerMemberId: created.containerMemberId, mailboxIds: [created.activationMailboxItemId, appended.item.id] };
     }));
     if (!result) return null;
@@ -105,11 +106,23 @@ async function queueExistingBootstrap(gameId: string, eventId: string, instructi
     if (route) return null;
     const result = await appendPreparedHostedMailboxEnvelopeTx({ prepared, tx });
     await markGameChatGenerationQueuedTx(eventId, tx, containerMemberId);
+    await markBootstrapProposalQueuedTx(gameId, eventId, tx);
     return result;
   });
   if (!appended) return null;
   await signalHostedMailboxAppendRuntime({ expectedUserId: containerMemberId, mailboxItemId: appended.mailboxItemId });
   return containerMemberId;
+}
+
+/** Match existing-room publication: cancellation sees queued before provider work. */
+async function markBootstrapProposalQueuedTx(gameId: string, eventId: string, tx: Prisma.TransactionClient): Promise<void> {
+  const prefix = `game-change:${gameId}:`;
+  if (!eventId.startsWith(prefix)) return;
+  const proposalId = eventId.slice(prefix.length);
+  const changed = await tx.$executeRaw`UPDATE game
+    SET pending_change = jsonb_set(pending_change, '{deliveryStatus}', '"queued"'::jsonb)
+    WHERE id = ${gameId} AND pending_change->>'id' = ${proposalId}`;
+  if (changed !== 1) throw new Error("Game bootstrap proposal is no longer current.");
 }
 
 /** Signed host callback; not a model tool and never accepts recipients or a sender. */

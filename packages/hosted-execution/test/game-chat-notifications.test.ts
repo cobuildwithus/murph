@@ -3,11 +3,12 @@ import { buildGameChangeCancelledInstructions, buildGameProposalInstructions } f
 
 describe("game v1 notification instructions", () => {
   it("distinguishes a cancelled request from the challenge and a later request", () => {
-    const instructions = buildGameChangeCancelledInstructions({ hasNewPendingChange: true, negotiating: true });
+    const instructions = buildGameChangeCancelledInstructions();
     expect(instructions).toContain("one brief, natural group message");
     expect(instructions).toContain("did not alter the game");
-    expect(instructions).toContain("earlier request, not the current pending change");
-    expect(instructions).toContain("has not started");
+    expect(instructions).toContain("earlier request only");
+    expect(instructions).toContain("Do not describe any later request as cancelled");
+    expect(instructions).not.toMatch(/is now pending|has not started|still waiting for agreement/);
     expect(instructions).not.toContain("calendar days");
   });
   it("keeps total duration clear without player-facing jargon", () => {
