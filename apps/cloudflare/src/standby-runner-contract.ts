@@ -47,6 +47,11 @@ export interface HostedStandbyCoordinatorStubLike {
     releaseId: string;
     region: HostedRunnerRegion;
   }): Promise<{ accepted: true }>;
+  reportStandbySlotStopped(input: {
+    releaseId: string;
+    region: HostedRunnerRegion;
+    slotName: string;
+  }): Promise<void>;
   readStandbyCoordinatorState?(): Promise<HostedStandbyCoordinatorState>;
 }
 

@@ -42,11 +42,13 @@ import {
   readHostedStandbyReleaseId,
   readHostedRunnerTargetIdentity,
   resolveHostedRunnerReleaseId,
+  resolveHostedStandbyCoordinatorName,
   isSupportedHostedRunnerRelease,
   type HostedRunnerRegion,
   type HostedRunnerSlotLifecycle,
   type HostedStandbySlotBinding,
   type HostedStandbySlotCoordinatorState,
+  type HostedStandbyCoordinatorNamespaceLike,
 } from "./standby-runner-contract.js";
 import {
   RunnerSlotBindingStore,
@@ -353,7 +355,9 @@ export interface HostedExecutionContainerNamespaceLike {
   idFromString?(id: string): unknown;
 }
 
-type RunnerContainerEnvironmentSource = Readonly<Record<string, unknown>>;
+type RunnerContainerEnvironmentSource = Readonly<Record<string, unknown>> & {
+  STANDBY_COORDINATOR?: HostedStandbyCoordinatorNamespaceLike;
+};
 type RunnerContainerNameSource = HostedRunnerContainerIdentitySource;
 
 interface RunnerContainerLogContext {
@@ -2466,6 +2470,7 @@ export class RunnerContainer extends Container {
   }
 
   override onStop(params: StopParams): void {
+    this.reportStandbySlotStopped();
     const context = this.currentLogContext;
     const cleanExit = params.exitCode === 0;
     const lifecycleDetails = this.buildLifecycleDiagnosticDetails();
@@ -2505,6 +2510,7 @@ export class RunnerContainer extends Container {
   }
 
   override onError(error: unknown): never {
+    this.reportStandbySlotStopped();
     const context = this.currentLogContext;
     this.clearRecentReadinessProof();
     emitHostedExecutionStructuredLog({
@@ -2520,6 +2526,23 @@ export class RunnerContainer extends Container {
       userId: context?.userId,
     });
     throw error;
+  }
+
+  private reportStandbySlotStopped(): void {
+    this.ctx.waitUntil((async () => {
+      if (this.slotNamespace !== "runner") return;
+      const binding = this.readRunnerSlotBindingOptional();
+      const namespace = this.environment.STANDBY_COORDINATOR;
+      if (!namespace || binding?.state !== "unbound" || binding.userId !== null) return;
+      await namespace.getByName(resolveHostedStandbyCoordinatorName(binding))
+        .reportStandbySlotStopped({
+          releaseId: binding.releaseId,
+          region: binding.region,
+          slotName: binding.slotName,
+        });
+    })().catch(() => {
+      // Best effort; periodic reproof remains the backstop for silent loss.
+    }));
   }
 
   override async fetch(_request: Request): Promise<Response> {

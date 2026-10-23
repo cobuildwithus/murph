@@ -508,6 +508,7 @@ describe("cloudflare worker routes", () => {
     const getByName = vi.fn(() => ({
       claimReadyStandby,
       ensureReadyStandby,
+      reportStandbySlotStopped: vi.fn(),
       async readStandbyCoordinatorState() {
         return { readySlotNames: ready, provisioningSlotNames: provisioning, releaseId, region: HOSTED_RUNNER_REGION };
       },
@@ -579,6 +580,7 @@ describe("cloudflare worker routes", () => {
       STANDBY_COORDINATOR: { getByName: () => ({
         claimReadyStandby,
         async ensureReadyStandby() { return { accepted: true }; },
+        reportStandbySlotStopped: vi.fn(),
         async readStandbyCoordinatorState() {
           return { readySlotNames: [], provisioningSlotNames: [], releaseId: release.id, region: HOSTED_RUNNER_REGION };
         },
@@ -5181,6 +5183,7 @@ function createSmokeHarness(bank: "primary" | "next", failure?: "prepare" | "ret
   const claimReadyStandby = vi.fn(async () => { throw new Error("Smoke must not consume ready inventory."); });
   const coordinatorGet = vi.fn(() => ({
     ensureReadyStandby, claimReadyStandby,
+    reportStandbySlotStopped: vi.fn(),
     async readStandbyCoordinatorState() {
       // These records can all have been proved on the old image before native rollout.
       return { readySlotNames, provisioningSlotNames: [], releaseId: active.id, region: HOSTED_RUNNER_REGION };
