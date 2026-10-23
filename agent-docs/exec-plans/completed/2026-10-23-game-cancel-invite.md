@@ -1,6 +1,6 @@
 # Cancel unstarted game invites
 
-Status: active
+Status: completed
 Created: 2026-10-23
 
 ## Outcome and invariants
@@ -40,5 +40,16 @@ health and deployment identity are verified. Fix forward only.
 
 ## Verification
 
-Pending: game unit and Postgres suites, Web/package typechecks, focused assistant
-journey, complexity:diff, logs:guard, docs:drift, deep review, ReviewGPT and CI.
+Passed: 147 focused unit/route tests; all ten game Postgres suites (81 tests);
+45 final lifecycle tests; Web and assistant-engine typechecks; hosted-execution
+package build; complexity:diff, logs:guard and docs:drift; four changelog rendering
+tests. The GPT-6.1 Sol local-subscription journey queued one concise, truthful
+notice and no capability actions: Product UX Ready. The default subscription
+failed before generation; the authorized alternate succeeded.
+
+PR: https://github.com/cobuildwithus/murph/pull/4329.
+Remaining release gates are recorded in the PR and external task status: requested
+Astra deep review, eragon ReviewGPT, exact-head CI, merge and production admission,
+health and deployment identity. No migration or runtime rollout is required.
+Updated: 2026-10-23
+Completed: 2026-10-23
