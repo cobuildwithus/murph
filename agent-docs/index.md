@@ -143,7 +143,8 @@ in [the import-speed plan](exec-plans/completed/2026-09-24-garmin-import-speed.m
 # Murph Agent Docs Index
 
 Negotiation acceptance after a removed proposal and dev-clock ticket validity
-are owned by `product-specs/weekly-game.md`.
+are owned by `product-specs/weekly-game.md`. Public invite wording proof is
+tracked in the game invite QA copy execution plan.
 
 Further test pruning and reviewed PR completion are tracked in
 [the four-pass plan](exec-plans/completed/2026-10-21-test-pruning-four-passes.md).

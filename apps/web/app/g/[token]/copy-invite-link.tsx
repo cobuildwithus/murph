@@ -4,7 +4,7 @@ import { useState } from "react";
 
 import { Button } from "@/src/components/ui/button";
 
-/** Fallback when the app link doesn't open: copy this page's link to paste in Murph. */
+/** Copy the shareable invite URL. App opening belongs to the primary link. */
 export function CopyInviteLink() {
   const [copied, setCopied] = useState(false);
 
@@ -20,7 +20,6 @@ export function CopyInviteLink() {
 
   return (
     <p className="text-center text-sm leading-6 text-muted-foreground">
-      Murph not opening? Copy this link and paste it in Murph.{" "}
       <Button className="h-auto px-0" onClick={copy} size="unstyled" variant="link">
         {copied ? "Copied" : "Copy link"}
       </Button>

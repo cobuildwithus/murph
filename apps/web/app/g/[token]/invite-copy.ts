@@ -9,6 +9,7 @@ export const CLOSED_INVITE_TITLE = "This invite isn't available";
 export function describeSchedule(schedule: GameSchedule): string {
   if ("count" in schedule) return `Any ${schedule.count} ${schedule.count === 1 ? "day" : "days"} total`;
   if (schedule.days.length === 7) return "Every day";
+  if (schedule.days.length === 5 && schedule.days.every((day) => day < 5)) return "Weekdays";
   return [...schedule.days].sort((left, right) => left - right).map((day) => WEEKDAY_NAMES[day]).join(", ");
 }
 

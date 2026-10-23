@@ -3,7 +3,7 @@ import path from "node:path";
 import { expect, test } from "@playwright/test";
 
 const STATES = {
-  "any-artifact": "Your choice each day",
+  "any-artifact": "Choose each day",
   dare: "Loser has to",
   "link-dare": "LOSER HAS TO",
   "heart-rate": "Heart-rate graph · wearable required",
@@ -41,6 +41,9 @@ for (const width of [390, 1280]) {
     await expect(study.locator('[data-design-state="dare"]')).toContainText("75 days");
     await expect(study.locator('[data-design-state="link-dare"]')).toContainText("75 DAYS");
     await expect(study).not.toContainText("of the week");
+    await expect(study.locator('[data-design-state="any-artifact"]')).toContainText("Weekdays");
+    await expect(study.locator('[data-design-state="any-artifact"]')).toContainText("Artifact");
+    await expect(study).not.toContainText("paste it in Murph");
     const output = process.env.DESIGN_PROOF_OUTPUT_DIR;
     if (!output) return;
     await mkdir(output, { recursive: true });

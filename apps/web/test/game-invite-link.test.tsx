@@ -44,6 +44,9 @@ describe("weekly game invite link", () => {
     if (OPEN.status !== "open") throw new Error("Expected open fixture");
     const render = (preview: GameInvitePreview) => renderToStaticMarkup(createElement(GameInviteView, { appUrl: "ai.withmurph.app://invite/synthetic", preview }));
     expect(render(OPEN)).toContain("Photo");
+    expect(render(OPEN)).toContain("Weekdays");
+    expect(render(OPEN)).not.toContain("paste it in Murph");
+    expect(render({ ...OPEN, terms: { ...OPEN.terms, checkInKind: "any" } })).toContain("Choose each day");
     expect(render({ ...OPEN, terms: { ...OPEN.terms, checkInKind: "heart_rate" } })).toContain("Heart-rate graph · wearable required");
   });
 
