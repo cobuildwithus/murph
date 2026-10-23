@@ -1,11 +1,14 @@
 import { FamilySetupAuthRequiredView } from "@/src/components/family/family-setup-auth-required";
 import { BillingPortalButton } from "@/src/components/settings/billing-portal-button";
 import { SettingsDataPrivacyAuthRequiredView } from "../settings/data-privacy/settings-data-privacy-auth-required";
-import { SettingsAuthRequiredView } from "../(dashboard)/settings/settings-auth-required";
+import { SettingsAccountAuthRequiredView, SettingsAuthRequiredView } from "../(dashboard)/settings/settings-auth-required";
 
 export function SettingsAuthRequiredStudy() {
   return (
     <div className="grid gap-6 lg:grid-cols-2">
+      <div id="settings-account-auth-required-section" className="overflow-hidden rounded-2xl border border-border bg-background" inert>
+        <SettingsAccountAuthRequiredView />
+      </div>
       <div
         className="overflow-hidden rounded-2xl border border-border bg-background"
         data-design-section="settings-auth-required-payment-return"
