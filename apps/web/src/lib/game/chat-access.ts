@@ -45,7 +45,20 @@ export async function readGameChatFundingRooms(input: {
             AND recent.status = 'settled' AND recent.settled_at > ${settledCutoff} AND recent.settled_at <= ${input.now}
             AND EXISTS (SELECT 1 FROM game_player second_player
               WHERE second_player.game_id = recent.id AND second_player.member_id = pair.player_ids[2])
-          ORDER BY recent.settled_at DESC, recent.id LIMIT 1)
+          ORDER BY recent.settled_at DESC, recent.id LIMIT 1),
+        -- Cancellation releases the pair but keeps its already-bound room
+        -- available until the reserved notice reaches provider dispatch.
+        (SELECT cancelled.id FROM game cancelled
+          WHERE cancelled.chat_container_member_id = room.id AND cancelled.status = 'void'
+            AND EXISTS (SELECT 1 FROM game_event event
+              WHERE event.game_id = cancelled.id AND event.type = 'cancelled'
+                AND event.created_at > ${settledCutoff} AND event.created_at <= ${input.now})
+            AND EXISTS (SELECT 1 FROM hosted_linq_delivery receipt
+              WHERE receipt.source = 'game_lifecycle' AND receipt.source_ref = cancelled.id
+                AND receipt.template = 'game_cancelled'
+                AND receipt.status IN ('awaiting_generation', 'generation_queued')
+                AND receipt.skipped_at IS NULL)
+          ORDER BY cancelled.created_at DESC, cancelled.id LIMIT 1)
       ) AS game_id
     ) matched ON TRUE
     JOIN LATERAL (
@@ -68,7 +81,8 @@ export async function readGameChatFundingRooms(input: {
               WHERE receipt.payload_owner_member_id = room.id AND receipt.source = 'game_lifecycle'
                 AND receipt.payload_schema = 'game_chat_bootstrap_v1' AND receipt.bootstrap_route_attached_at IS NOT NULL)))
         AND (game.status IN ('negotiating', 'live') OR
-          (game.status = 'settled' AND game.settled_at > ${settledCutoff} AND game.settled_at <= ${input.now}))
+          (game.status = 'settled' AND game.settled_at > ${settledCutoff} AND game.settled_at <= ${input.now}) OR
+          (game.status = 'void' AND game.chat_container_member_id = room.id))
         AND EXISTS (SELECT 1 FROM game_player p WHERE p.game_id = game.id AND p.seat = 0)
         AND EXISTS (SELECT 1 FROM game_player p WHERE p.game_id = game.id AND p.seat = 1)
         AND NOT EXISTS (

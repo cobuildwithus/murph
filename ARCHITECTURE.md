@@ -5434,7 +5434,7 @@ state plus its history rows. There is no request-id dedupe: every command is
 keyed by its own ids or state, so a repeat writes nothing. The same people
 can't have two negotiating/live games at once: either phase holds `game.live_roster_key`
 (its players' sorted ids), a plain unique column set at go-live and cleared at
-settle or expiry, which also fits groups later. There is
+settle, expiry or invite cancellation, which also fits groups later. There is
 no timer or cron: whether a game is over is computed from its state, and reads
 (and a player's next accept) settle it under the lock. A rematch of a settled
 1v1 records its addressed invitee (`game.invitee_member_id`), who alone besides
@@ -5445,6 +5445,7 @@ until the viewer has posted that day; media reads use the same rule.
 `/api/game/v1` routes are thin: they fold path ids into one command. Writes:
 `PUT /me/profile`, `POST /games`, `POST /invites/:token/accept`,
 `POST /invites/:token/negotiate`,
+`DELETE /games/:id` (unstarted invite cancellation),
 `POST /games/:id/entries`, `DELETE /games/:id/entries/:entryId`,
 `POST /tickets/:id/redeem`, and `POST /media`. Reads: `GET /home`,
 `GET /games/:id`, `GET /invites/:token`, `GET /media/:key`. They use a plain
@@ -5585,6 +5586,16 @@ Compatible runtime schema readers must deploy before Web emits negotiating or
 extended pending-change data; enable expanded assistant tools only after Web can
 apply those fields. Native uses `supportsNegotiation` on an invite and additive
 `canEditTasks` / `canEditStakes` controls, preserving old-client acceptance.
+
+Whole-invite cancellation records `cancelled` under the game lock and uses
+`endGame` to clear pending changes and release the pair. Home derives its
+exclusion from that event; ordinary expiry remains visible. An already bound
+chat gets a `game_cancelled` receipt keyed `game-cancelled:<gameId>` without
+bootstrap or discovery. The existing funding query admits only that bound room
+while its receipt awaits generation/dispatch, capped by the existing seven-day
+post-game window and existing room allowance. No personal or alternate-room
+access is added. The provider-dispatch authority requires the void game,
+cancellation event, bound room and original two-player audience.
 
 Agreement atomically reserves an `awaiting_generation` row in the existing Linq
 delivery table, keyed `game-started:<gameId>`. App `change_proposed` events,

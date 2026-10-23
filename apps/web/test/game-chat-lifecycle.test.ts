@@ -40,6 +40,44 @@ describe("durable game chat lifecycle", () => {
     m.destination.mockResolvedValue({ conversationShape: "thread-container", route: { channel: "linq" } });
     m.mailbox.mockResolvedValue(null); m.prepare.mockResolvedValue({}); m.append.mockResolvedValue({ mailboxItemId: "notice" });
   });
+  it("announces a cancelled invite only in its existing chat without reading private game words", async () => {
+    m.game.mockResolvedValue({ ...game, status: "void" });
+    m.receipts.mockResolvedValue([{ ...receipt, template: "game_cancelled" }]);
+    await expect(drainGameChatLifecycle({ now })).resolves.toEqual({ attempted: 1, queued: 1, deferred: 0 });
+    const notification = m.prepare.mock.calls[0][0].envelope.notification;
+    expect(notification.instructions).toContain("earlier challenge invite");
+    expect(notification.instructions).toContain("one brief, plain line");
+    expect(notification.deliveryIdempotencyKey).toBe("game-cancelled:game");
+    expect(m.exact).toHaveBeenCalledExactlyOnceWith("room", ["+15555550101", "+15555550102"]);
+    expect(m.current).toHaveBeenCalledWith(expect.objectContaining({ where: { id: "game", status: { in: ["void"] }, chatContainerMemberId: "room" } }));
+    expect(m.state).not.toHaveBeenCalled(); expect(m.discover).not.toHaveBeenCalled(); expect(m.bootstrap).not.toHaveBeenCalled();
+    expect(m.append).toHaveBeenCalledOnce();
+  });
+  it("recovers a cancelled invite wake without a second notice", async () => {
+    m.game.mockResolvedValue({ ...game, status: "void" });
+    m.receipts.mockResolvedValue([{ ...receipt, template: "game_cancelled", status: "generation_queued" }]);
+    m.mailbox.mockResolvedValue({ id: "cancel-notice", consumedAt: null });
+    await expect(drainGameChatLifecycle({ now })).resolves.toEqual({ attempted: 1, queued: 1, deferred: 0 });
+    expect(m.mailbox).toHaveBeenCalledWith(expect.objectContaining({ dedupeKey: "game-cancelled:game" }));
+    expect(m.signal).toHaveBeenCalledExactlyOnceWith({ expectedUserId: "room", mailboxItemId: "cancel-notice" });
+    expect(m.prepare).not.toHaveBeenCalled(); expect(m.bootstrap).not.toHaveBeenCalled();
+  });
+  it("does not create or discover a chat for a cancelled invite", async () => {
+    m.game.mockResolvedValue({ ...game, status: "void", chatContainerMemberId: null });
+    await expect(deliverGameChatLifecycle("game", "cancelled")).resolves.toBe(false);
+    expect(m.discover).not.toHaveBeenCalled(); expect(m.bootstrap).not.toHaveBeenCalled(); expect(m.prepare).not.toHaveBeenCalled();
+    m.game.mockResolvedValue({ ...game, status: "void" }); m.destination.mockResolvedValue(null);
+    await expect(deliverGameChatLifecycle("game", "cancelled")).resolves.toBe(false);
+    expect(m.bootstrap).not.toHaveBeenCalled();
+  });
+  it("keeps exact-chat and current game authority on cancellation notices", async () => {
+    m.game.mockResolvedValue({ ...game, status: "void" }); m.current.mockResolvedValue(null);
+    await expect(deliverGameChatLifecycle("game", "cancelled")).resolves.toBe(false);
+    expect(m.append).not.toHaveBeenCalled();
+    m.exact.mockRejectedValue(new Error("Changed roster"));
+    await expect(deliverGameChatLifecycle("game", "cancelled")).rejects.toThrow("Changed roster");
+    expect(m.append).not.toHaveBeenCalled();
+  });
   it("recovers only bounded unattached frozen receipts without model generation", async () => {
     m.receipts.mockResolvedValue([]); m.frozen.mockResolvedValue([{ id: "frozen", attemptedAt: now }]);
     await expect(drainGameChatLifecycle({ now })).resolves.toEqual({ attempted: 1, queued: 1, deferred: 0 });

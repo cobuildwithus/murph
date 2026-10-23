@@ -1,0 +1,18 @@
+{
+  "publishedOn": "2026-10-23",
+  "order": 110,
+  "item": {
+    "id": "game-invite-cancellation",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Call off a game invite",
+    "summary": "Either player can call off an unstarted game invite and start a new one without waiting for it to expire.",
+    "details": "Cancelled invites leave both players\u2019 home screens. An existing game chat gets a brief notice; games already underway keep going.",
+    "relevanceTags": [
+      "games"
+    ],
+    "sourcePullRequests": [
+      4329
+    ]
+  }
+}

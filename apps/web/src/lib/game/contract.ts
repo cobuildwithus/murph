@@ -202,7 +202,9 @@ export interface GameChangeControls {
   editableFromDay: number | null;
 }
 
+/** DELETE /games/:id cancels an unstarted invite; returns the existing GameView as void. */
 export type GameCommand =
+  | { type: "cancelInvite"; gameId: string }
   | ({ type: "proposeChange"; gameId: string } & ProposeGameChangeBody)
   | { type: "respondChange"; gameId: string; proposalId: string; decision: "approve" | "decline" | "cancel" }
   | ({ type: "setProfile" } & SetProfileBody)

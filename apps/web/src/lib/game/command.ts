@@ -27,6 +27,8 @@ import { GAME_MIN_LENGTH_DAYS, GAME_MAX_LENGTH_DAYS, reject, validNewStakes } fr
 export function parseGameCommand(value: unknown): GameCommand {
   const input = record(value, "command");
   switch (input.type) {
+    case "cancelInvite":
+      return { type: "cancelInvite", gameId: clientId(input.gameId, "gameId") };
     case "proposeChange":
       return {
         type: "proposeChange", gameId: clientId(input.gameId, "gameId"),

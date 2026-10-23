@@ -14,7 +14,7 @@ import {
 } from "@/src/lib/hosted-onboarding/member-access";
 import { HOSTED_HEALTH_DATA_CONSENT_SCOPE } from "@/src/lib/legal/consent";
 import { readGameChatFundingRooms } from "@/src/lib/game/chat-access";
-import { markGameChatGenerationQueuedTx, reserveGameChatProposalTx } from "@/src/lib/game/chat-lifecycle-receipt";
+import { markGameChatGenerationQueuedTx, reserveGameChatProposalTx, reserveGameChatLifecycleTx } from "@/src/lib/game/chat-lifecycle-receipt";
 import { buildHostedLinqDeliveryId } from "@/src/lib/hosted-onboarding/linq-delivery-store";
 import { createHostedLinqDeliveryIdempotencyLookupKey, createHostedLinqDeliverySourceRefLookupKey } from "@/src/lib/hosted-onboarding/linq-observability-identifiers";
 
@@ -31,6 +31,55 @@ if (enabled) {
 }
 
 describe.skipIf(!enabled)("game chat access PostgreSQL", () => {
+  it("funds only a cancelled game's bound room while its notice awaits dispatch", async () => {
+    vi.stubEnv("MURPH_GAME_ENABLED", "true"); vi.stubEnv("MURPH_GAME_MEMBER_ALLOWLIST", "");
+    const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: databaseUrl }) });
+    const ids = Array.from({length: 5}, () => randomUUID());
+    const [room, alternate, first, second, stranger] = ids;
+    const gameId = randomUUID();
+    const now = new Date();
+    const eventId = `game-cancelled:${gameId}`;
+    const key = createHostedLinqDeliveryIdempotencyLookupKey(eventId)!;
+    const input = { memberId: room, now, prisma };
+    try {
+      await prisma.hostedMember.createMany({data: ids.map(id => ({id,billingStatus:"not_started"}))});
+      for (const memberId of [room,alternate]) {
+        await prisma.hostedThreadContainer.create({data:{memberId,ownerMemberId:first,participants:{create:[first,second].map(participantMemberId => ({participantMemberId,handleLookupKey:`synthetic_${participantMemberId}`,firstSeenAt:now,lastSeenAt:now}))}}});
+        await prisma.hostedThreadRoute.create({data:{channel:"linq",containerMemberId:memberId,threadLookupKey:`synthetic_${memberId}`,threadIdentityLookupKey:`synthetic_${memberId}`}});
+      }
+      await prisma.gameProfile.createMany({data:[first,second].map(memberId => ({memberId,firstNameEncrypted:"synthetic",timeZone:"UTC"}))});
+      await prisma.game.create({data:{id:gameId,createdBy:first,status:"void",chatContainerMemberId:room,terms:{v:1,versions:[]},termsWordsEncrypted:"synthetic",players:{create:[first,second].map((memberId,seat)=>({memberId,seat,timeZone:"UTC"}))}}});
+      expect(await readActiveHostedMemberAccess(input)).toBe(false);
+      await reserveGameChatLifecycleTx({gameId,kind:"cancelled",now,tx:prisma});
+      expect(await readActiveHostedMemberAccess(input)).toBe(false);
+      await prisma.gameEvent.create({data:{gameId,actor:first,type:"cancelled",payload:{v:1},createdAt:now}});
+      for (const status of ["awaiting_generation","generation_queued"]) {
+        await prisma.hostedLinqDelivery.updateMany({where:{idempotencyKey:key},data:{status}});
+        expect(await readActiveHostedMemberAccess(input)).toBe(true);
+        expect((await readHostedRuntimeAiAccessDecision(input)).allowed).toBe(true);
+        expect(await readHostedAiUsageGate(input)).toMatchObject({allowed:true,limitUsdMicros:7_500_000n});
+      }
+      expect(await readActiveHostedMemberAccess({...input,memberId:alternate})).toBe(false);
+      expect(await readActiveHostedMemberAccess({...input,memberId:first})).toBe(false);
+      expect(await readActiveHostedMemberAccess({...input,now:new Date(now.getTime()+7*86_400_000)})).toBe(false);
+      await prisma.hostedMember.update({where:{id:second},data:{suspendedAt:now}});
+      expect(await readActiveHostedMemberAccess(input)).toBe(false);
+      await prisma.hostedMember.update({where:{id:second},data:{suspendedAt:null}});
+      await prisma.hostedThreadContainerParticipant.create({data:{containerMemberId:room,participantMemberId:stranger,handleLookupKey:"synthetic_extra",firstSeenAt:now,lastSeenAt:now}});
+      expect(await readActiveHostedMemberAccess(input)).toBe(false);
+      await prisma.hostedThreadContainerParticipant.delete({where:{containerMemberId_participantMemberId:{containerMemberId:room,participantMemberId:stranger}}});
+      for (const status of ["provider_dispatch_started","accepted","failed","skipped"]) {
+        await prisma.hostedLinqDelivery.updateMany({where:{idempotencyKey:key},data:{status}});
+        expect(await readActiveHostedMemberAccess(input)).toBe(false);
+      }
+    } finally {
+      await prisma.hostedLinqDelivery.deleteMany({where:{idempotencyKey:key}});
+      await prisma.game.deleteMany({where:{id:gameId}});
+      await prisma.hostedThreadContainer.deleteMany({where:{memberId:{in:[room,alternate]}}});
+      await prisma.hostedMember.deleteMany({where:{id:{in:ids}}});
+      await prisma.$disconnect(); vi.unstubAllEnvs();
+    }
+  });
   it("funds the bound negotiating or live room without personal access or an extra allowance", async () => {
     vi.stubEnv("MURPH_GAME_ENABLED", "true");
     vi.stubEnv("MURPH_GAME_MEMBER_ALLOWLIST", "");
