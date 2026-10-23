@@ -1499,3 +1499,7 @@ Self-reported game day completion is tracked in [the implementation plan](exec-p
 The weekly game spec owns correction authority and occurrence-time date resolution.
 
 Delayed game proposal approval and refusal notices are tracked in [the proposal plan](exec-plans/completed/2026-10-23-game-proposals-open.md); the weekly game spec owns the timing contract.
+
+Mailbox handoff recovery's age eligibility before per-user selection and
+same-sweep duplicate suppression are owned by `references/hosted-temporal-orchestration.md`; implementation proof
+is recorded in [aged mailbox recovery](exec-plans/completed/2026-10-23-sweeper-dup-signal.md).

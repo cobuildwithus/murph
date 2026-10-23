@@ -36,6 +36,8 @@ export async function runHostedDeviceSyncRecoverySweep(input: {
   runDueReconcileSweeper?: HostedDeviceSyncDueReconcileSweepRunner;
   runPreferenceHandoffSweeper?: HostedPreferenceHandoffSweepRunner;
 } = {}): Promise<HostedDeviceSyncRecoverySweepResult> {
+  // Keep this cutoff ahead of every producer stage, even if a sweep is slow.
+  const sweepStartedAt = new Date();
   const logger = input.logger ?? console;
   const runDueReconcileSweeper = input.runDueReconcileSweeper
     ?? runHostedDeviceSyncDueReconcileSweeper;
@@ -44,8 +46,8 @@ export async function runHostedDeviceSyncRecoverySweep(input: {
   const runDeferredWakeSweeper = input.runDeferredWakeSweeper
     ?? runHostedDeviceSyncDeferredWakeSweeper;
 
-  // Release due routine batches first; their appended wakes are then visible
-  // to the scheduled sweep's idle-mailbox recovery check.
+  // Release due routine batches first. Both producer stages signal their own
+  // new wakes; the final handoff stage recovers only older unimported items.
   const {
     error: deferredWakeError,
     result: deferredWakeSweep,
@@ -89,7 +91,7 @@ export async function runHostedDeviceSyncRecoverySweep(input: {
   let preferenceHandoffSweep: HostedPreferenceHandoffSweepResult | null = null;
   let preferenceHandoffError: unknown = null;
   try {
-    preferenceHandoffSweep = await runPreferenceHandoffSweeper();
+    preferenceHandoffSweep = await runPreferenceHandoffSweeper({ now: sweepStartedAt });
   } catch (error) {
     preferenceHandoffError = error;
   }

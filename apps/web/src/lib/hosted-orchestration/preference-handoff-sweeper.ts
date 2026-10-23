@@ -21,6 +21,9 @@ import { signalHostedMailboxAppendRuntime } from "./signal-runtime";
 
 const DEFAULT_HANDOFF_LIMIT = 25;
 const MAX_HANDOFF_LIMIT = 250;
+// Producers own the first signal. Recovery waits for import independently of
+// the Schedule cadence, using only the existing durable mailbox timestamp.
+const HANDOFF_RECOVERY_MIN_AGE_MS = 60_000;
 
 export interface HostedPreferenceHandoffSweepResult {
   candidateUsers: number;
@@ -173,6 +176,11 @@ function createHostedPreferenceHandoffCandidateStore(
   return {
     async listCandidates(input) {
       const retainedAt = new Date(input.now.getTime() - HOSTED_MAILBOX_RETENTION_MS);
+      // Transaction-start timestamps can disagree with lane order. Filter age
+      // before choosing a user's first candidate, not after DISTINCT ON.
+      const recoveryAgeEligibility = Prisma.sql`
+        "item"."created_at" <= ${new Date(input.now.getTime() - HANDOFF_RECOVERY_MIN_AGE_MS)}
+      `;
       const participantAccessCutoff =
         hostedThreadContainerParticipantAccessCutoff(input.now);
       // Preference writes can target a person member or a synthetic thread
@@ -196,6 +204,7 @@ function createHostedPreferenceHandoffCandidateStore(
             -- Import transfers retry ownership from this handoff sweep to the
             -- runtime. Handled-through can remain behind while runtime-owned
             -- work waits for its persisted retry timestamp.
+            AND ${recoveryAgeEligibility}
             AND "item"."lane_seq" > ${systemMailboxImportedSeq}
             AND ("item"."expires_at" IS NULL OR "item"."expires_at" > ${input.now})
             AND "item"."created_at" >= ${retainedAt}
@@ -216,6 +225,7 @@ function createHostedPreferenceHandoffCandidateStore(
               'runtime.browser-vault-refresh-requested',
               'runtime.maintenance-requested'
             )
+            AND ${recoveryAgeEligibility}
             AND "item"."lane_seq" > ${systemMailboxImportedSeq}
             AND ("item"."expires_at" IS NULL OR "item"."expires_at" > ${input.now})
             AND "item"."created_at" >= ${retainedAt}
@@ -243,6 +253,7 @@ function createHostedPreferenceHandoffCandidateStore(
             ON "workspace"."user_id" = "item"."user_id"
           WHERE "run"."status" = 'queued'
             AND "run"."completed_at" IS NULL
+            AND ${recoveryAgeEligibility}
             AND "item"."lane_seq" > ${systemMailboxImportedSeq}
             AND ("item"."expires_at" IS NULL OR "item"."expires_at" > ${input.now})
             AND "item"."created_at" > ${retainedAt}

@@ -307,6 +307,8 @@ describe("hosted preference handoff sweeper", () => {
     } | undefined;
     const sql = query?.strings?.join("?") ?? "";
     expect(sql).toContain('"pending_handoff_candidates"');
+    expect(sql.match(/"item"\."created_at" <= \?/gu)).toHaveLength(3);
+    expect(query?.values).toContainEqual(new Date(now.getTime() - 60_000));
     expect(sql).toContain('SELECT DISTINCT ON ("userId")');
     expect(sql).toContain('"connection"."retrieval_generation" = "run"."generation"');
     expect(sql).toContain('"connection"."status" = \'active\'');
