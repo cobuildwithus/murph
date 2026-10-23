@@ -2384,7 +2384,6 @@ describe("createHostedUsageCreditCheckout", () => {
         currency: "usd",
         customer: "cus_group_payer",
         payment_method: "pm_saved_card_123",
-        setup_future_usage: "off_session",
       }),
       {
         idempotencyKey: expect.stringMatching(
@@ -2412,6 +2411,47 @@ describe("createHostedUsageCreditCheckout", () => {
       stripePaymentIntentIdEncrypted: "encrypted:pi_saved_card_123",
       stripePaymentIntentLookupKey: "billing:pi_saved_card_123",
     });
+  });
+
+  it("confirms a saved card off-session without setting up future usage", async () => {
+    const fake = createFakePrisma();
+    mockCanonicalSavedCard();
+    mocks.stripePaymentIntentCreate.mockImplementationOnce(
+      async () => buildSavedCardPaymentIntent({
+        amountReceived: 0,
+        latestCharge: null,
+        purchaseId: String(onlyPurchase(fake.purchases).id),
+        status: "requires_confirmation",
+      }),
+    );
+    mocks.stripePaymentIntentConfirm.mockImplementationOnce(async () =>
+      buildSavedCardPaymentIntent({
+        amountReceived: 1_000,
+        latestCharge: "ch_saved_card_123",
+        purchaseId: String(onlyPurchase(fake.purchases).id),
+        status: "succeeded",
+      })
+    );
+
+    await expect(createHostedGroupUsageCreditCheckout({
+      clientRequestKey: CLIENT_REQUEST_KEY,
+      joinCode: "group_join_code_1234",
+      now: NOW,
+      offerCode: "usage_10_usd",
+      payerMemberId: MEMBER_ID,
+      prisma: fake.prisma as never,
+    })).resolves.toMatchObject({ status: "payment_pending" });
+
+    expect(mocks.stripePaymentIntentCreate).toHaveBeenCalledOnce();
+    expect(mocks.stripePaymentIntentCreate.mock.calls[0]?.[0])
+      .not.toHaveProperty("setup_future_usage");
+    expect(mocks.stripePaymentIntentConfirm).toHaveBeenCalledOnce();
+    expect(mocks.stripePaymentIntentConfirm).toHaveBeenCalledWith(
+      "pi_saved_card_123",
+      expect.objectContaining({ off_session: true }),
+      expect.any(Object),
+    );
+    expect(mocks.stripeCheckoutCreate).not.toHaveBeenCalled();
   });
 
   it("uses the customer default even when another card is redisplayable", async () => {

@@ -2868,7 +2868,9 @@ to apply after cutover.
   before Customer preparation and revalidates afterward so an already-full
   beneficiary does not create provider state.
 - Current-policy personal, Family, and group funding may create one unconfirmed
-  saved-card PaymentIntent with a purchase-derived idempotency key. Frozen v2
+  saved-card PaymentIntent with a purchase-derived idempotency key, omitting
+  `setup_future_usage` for the already-saved card so confirmation can use
+  `off_session: true`. Checkout retains its card-saving setup. Frozen v2
   purchases retain the legacy selection behavior for groups only, frozen v3
   purchases retain it for all targets, and v1 remains Checkout-only. Current
   policy binds personal and Family selection to the exact Murph billing
