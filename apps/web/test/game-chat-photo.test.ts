@@ -45,7 +45,8 @@ describe("game photo accepted-source bridge", () => {
     expect(await handleGameChatPhoto({ ...input("save"), photo: { ...input("save").photo, replaceEntryId: "existing_entry" } })).toMatchObject({ photoOutcome: "saved" });
     expect(m.run.mock.calls[0][0].postGuard).toEqual({ dayIndex: 0, replaceEntryId: "existing_entry" });
   });
-  it("a contextual yes saves only the offered sender's photo through the canonical command", async () => {
+  it.each(["photo", "any"])("a contextual yes saves the offered photo in a %s game", async (checkInKind) => {
+    m.posting.mockResolvedValue({ ...(await m.posting()), checkInKind });
     m.profile.mockResolvedValue({ chatPhotoIntroducedAt: now, chatPhotoOffer: offer });
     expect(await handleGameChatPhoto(input("save", false))).toEqual({ status: "ok", photoOutcome: "saved" });
     expect(authorize).toHaveBeenCalledWith(tx, ref); expect(authorize).toHaveBeenCalledWith(tx, yesRef);

@@ -13,6 +13,7 @@ import { getPrisma } from "../prisma";
 import { createHostedLinqDeliveryIdempotencyLookupKey } from "../hosted-onboarding/linq-observability-identifiers";
 import { areGameDevToolsAllowed, isGameEnabled, isGameEnabledFor, mediaKeyOwner, mediaKeyPrefixFor } from "./access";
 import { parseGameCommand } from "./command";
+import { parseStoredGameEntryData } from "./entry-data";
 import {
   GAME_ENTRY_KINDS,
   type GamePendingChange,
@@ -555,9 +556,11 @@ async function endGame(tx: Tx, gameId: string, data: Prisma.GameUpdateInput): Pr
 async function post(context: CommandContext, command: Extract<GameCommand, { type: "post" }>): Promise<string> {
   const { actor } = context;
   const { entryId, gameId, kind, mediaKeys } = command;
-  const textEncrypted = command.text
-    ? await seal({ field: "text", memberId: actor, rowId: entryId, table: "game_entry" }, command.text)
-    : null;
+  const target = { memberId: actor, rowId: entryId, table: "game_entry" as const };
+  const [textEncrypted, payloadEncrypted] = await Promise.all([
+    command.text ? seal({ ...target, field: "text" }, command.text) : null,
+    command.data ? seal({ ...target, field: "payload" }, JSON.stringify(command.data)) : null,
+  ]);
   const captureAgeMs = command.captureAgeMs ?? null;
   let notification: Awaited<ReturnType<typeof claimGamePostNotification>> = null;
   await runLocked(gameId, context, async ({ clock, loaded, now, tx }) => {
@@ -570,6 +573,7 @@ async function post(context: CommandContext, command: Extract<GameCommand, { typ
     const decision = decidePost(loaded.state, {
       captureAgeMs,
       kind,
+      hasData: command.data !== undefined,
       mediaKeyPrefix: mediaKeyPrefixFor(actor),
       mediaKeys,
       memberId: actor,
@@ -596,6 +600,8 @@ async function post(context: CommandContext, command: Extract<GameCommand, { typ
         memberId: actor,
         receivedAt: clock,
         textEncrypted,
+        payloadEncrypted,
+        blurHash: command.blurHash ?? null,
       },
     });
     const { attempt, dayIndex, graceUsed } = decision;
@@ -912,7 +918,8 @@ export async function readGameChatState(containerMemberId: string, playerMemberI
       else ticketGroups.set(key, { owedByMemberId: view.owedByMemberId, owedToMemberId: view.owedToMemberId, what: view.what, status: view.status, count: 1 });
     }
     const pendingChange = pendingViews.get(row.id) ?? null;
-    return { id: row.id, status: state.game.status, terms: termsView(state, words),
+    const { checkInKind, ...terms } = termsView(state, words);
+    return { id: row.id, status: state.game.status, terms: { ...terms, ...(checkInKind === "any" ? {} : { checkInKind }) },
       progress: gameChatProgress(state, gameNow(clock, row)),
       result: result ? { scores: result.scores, tickets: [...ticketGroups.values()] } : null,
       startsOn: fromDbDate(row.players[0]?.dayOne ?? row.startsOn), lengthDays: row.lengthDays,
@@ -965,6 +972,8 @@ function toRuleState(row: GameRow, entries: readonly GameEntry[]): RuleState {
       mediaKeys: entry.mediaKeys,
       memberId: entry.memberId,
       withdrawnAt: entry.withdrawnAt,
+      receivedAt: entry.receivedAt,
+      blurHash: entry.blurHash,
     })),
     game: toRuleStateGame(row, parseStoredTerms(row.terms)),
     players: row.players.map((player) => ({
@@ -1278,12 +1287,17 @@ async function buildViews(games: readonly LoadedGame[], viewerId: string, clock:
     if (row.inviteeMemberId === viewerId) return { memberId: viewerId, name: null, photoKey: null, relationship: null };
     return null;
   });
-  const textAt = new Map<string, number>();
+  const entryAt = new Map<string, { text: number; payload: number; kind: GameEntryKind }>();
   for (const game of games) {
     const visible = visibleEntryIds(game.state, viewerId);
     for (const entry of game.entries) {
       if (!visible.has(entry.id)) continue;
-      textAt.set(entry.id, ask({ field: "text", memberId: entry.memberId, rowId: entry.id, table: "game_entry" }, entry.textEncrypted));
+      const target = { memberId: entry.memberId, rowId: entry.id, table: "game_entry" as const };
+      entryAt.set(entry.id, {
+        text: ask({ ...target, field: "text" }, entry.textEncrypted),
+        payload: ask({ ...target, field: "payload" }, entry.payloadEncrypted),
+        kind: toEntryKind(entry.kind),
+      });
     }
   }
   const plain = await openGameTexts(requests);
@@ -1303,7 +1317,9 @@ async function buildViews(games: readonly LoadedGame[], viewerId: string, clock:
     const typed = invite.relationship === null ? null : plain[invite.relationship];
     return typed ?? (invite.memberId ? relationships.get(invite.memberId) ?? null : null);
   };
-  const entryWords = new Map([...textAt].map(([entryId, at]) => [entryId, { text: plain[at] }]));
+  const entryWords = new Map([...entryAt].map(([entryId, at]) => [entryId, {
+    text: plain[at.text], data: parseStoredGameEntryData(at.kind, plain[at.payload]),
+  }]));
   return games.map((game, index) => {
     const invite = inviteAt[index];
     const tokenIndex = tokenAt[index];

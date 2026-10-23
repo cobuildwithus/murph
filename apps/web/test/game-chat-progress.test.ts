@@ -23,9 +23,9 @@ describe("shared game progress", () => {
   it("counts live posts only and exposes no image, caption, or excuse", () => {
     const input = state();
     input.entries = [
-      { id: "entry_original", memberId: "player_a", dayIndex: 1, kind: "photo", attempt: 1, withdrawnAt: new Date(), mediaKeys: ["private-photo"] },
-      { id: "entry_retake", memberId: "player_a", dayIndex: 1, kind: "photo", attempt: 2, withdrawnAt: null, mediaKeys: ["private-retake"] },
-      { id: "entry_excuse", memberId: "player_b", dayIndex: 0, kind: "excuse", attempt: 0, withdrawnAt: null, mediaKeys: [] },
+      { id: "entry_original", memberId: "player_a", dayIndex: 1, kind: "photo", attempt: 1, receivedAt: new Date("2030-03-05T12:00:00Z"), blurHash: null, withdrawnAt: new Date(), mediaKeys: ["private-photo"] },
+      { id: "entry_retake", memberId: "player_a", dayIndex: 1, kind: "photo", attempt: 2, receivedAt: new Date("2030-03-05T12:00:00Z"), blurHash: null, withdrawnAt: null, mediaKeys: ["private-retake"] },
+      { id: "entry_excuse", memberId: "player_b", dayIndex: 0, kind: "excuse", attempt: 0, receivedAt: new Date("2030-03-05T12:00:00Z"), blurHash: null, withdrawnAt: null, mediaKeys: [] },
     ];
     const result = gameChatProgress(input, new Date("2030-03-05T12:00:00Z"));
     expect(result.players[0]).toMatchObject({ score: 1, currentEntryId: "entry_retake", attemptsRemaining: 0 });
@@ -35,14 +35,14 @@ describe("shared game progress", () => {
   it("uses historical terms for earlier dates and the updated schedule only from its effective day", () => {
     const input = state();
     input.game.terms.versions.push({ n: 2, fromDay: 2, schedule: { days: [5,6] }, stakes: [] });
-    input.entries = [0,2].map((dayIndex) => ({ id: `entry_${dayIndex}`, memberId: "player_a", dayIndex, kind: "photo", attempt: 1, withdrawnAt: null, mediaKeys: [] }));
+    input.entries = [0,2].map((dayIndex) => ({ id: `entry_${dayIndex}`, memberId: "player_a", dayIndex, kind: "photo", attempt: 1, receivedAt: new Date("2030-03-05T12:00:00Z"), blurHash: null, withdrawnAt: null, mediaKeys: [] }));
     const result = gameChatProgress(input, new Date("2030-03-06T12:00:00Z"));
     expect(result.players[0]).toMatchObject({ score: 1, target: 4 });
     expect(result.players[1].days.map((day) => day.status)).toEqual(["missed", "missed", "off", "off", "off", "upcoming", "upcoming"]);
   });
   it("does not label individual any-days blanks misses and caps credit at target", () => {
     const input = state(); input.game.terms.versions[0].schedule = { count: 2 };
-    input.entries = [0,1,2].map((dayIndex) => ({ id: `entry_${dayIndex}`, memberId: "player_a", dayIndex, kind: "photo", attempt: 1, withdrawnAt: null, mediaKeys: [] }));
+    input.entries = [0,1,2].map((dayIndex) => ({ id: `entry_${dayIndex}`, memberId: "player_a", dayIndex, kind: "photo", attempt: 1, receivedAt: new Date("2030-03-05T12:00:00Z"), blurHash: null, withdrawnAt: null, mediaKeys: [] }));
     input.game.status = "settled";
     const result = gameChatProgress(input, new Date("2030-03-12T12:00:00Z"));
     expect(result.players[0]).toMatchObject({ score: 2, target: 2, currentDayIndex: null, attemptsRemaining: 0 });
@@ -54,7 +54,7 @@ describe("shared game progress", () => {
 it("windows long-game history at 14 days while retaining whole-game totals", () => {
   const input = state(); input.game.lengthDays = 365;
   input.game.terms.versions[0].schedule = { count: 300 };
-  input.entries = Array.from({length:20},(_,dayIndex) => ({ id:`entry_${dayIndex}`,memberId:"player_a",dayIndex,kind:"photo",attempt:1,withdrawnAt:null,mediaKeys:[] }));
+  input.entries = Array.from({length:20},(_,dayIndex) => ({ id:`entry_${dayIndex}`,memberId:"player_a",dayIndex,kind:"photo",attempt:1,receivedAt: new Date("2030-03-05T12:00:00Z"), blurHash: null, withdrawnAt:null,mediaKeys:[] }));
   const live = gameChatProgress(input,new Date("2030-04-04T12:00:00Z")).players[0];
   expect(live.days).toHaveLength(14);
   expect(live.days[0].dayIndex).toBe(18);

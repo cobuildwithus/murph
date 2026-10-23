@@ -58,7 +58,7 @@ function entry(memberId: string, dayIndex: number, attempt: number, overrides: P
     kind: attempt === 0 ? "excuse" : "photo",
     mediaKeys: [`game/${memberId}/d${dayIndex}-a${attempt}.jpg`],
     memberId,
-    withdrawnAt: null,
+    receivedAt: new Date("2030-03-05T12:00:00Z"), blurHash: null, withdrawnAt: null,
     ...overrides,
   };
 }
@@ -91,6 +91,31 @@ function noonOnDay(state: RuleState, memberId: string, dayIndex: number, hour = 
 }
 
 describe("weekly game views: tickets", () => {
+  it("exposes only time and blur while locked, then reveals data on posting and recap", () => {
+    const state = liveState();
+    const posted = entry(AVA, 0, 1, { kind: "route", blurHash: "synthetic-blur" });
+    state.entries.push(posted);
+    const now = noonOnDay(state, LEO, 0);
+    const data = { activity: "walk" as const, distanceM: 1200, durationSec: 600 };
+    // Even accidentally supplied plaintext must never enter a locked projection.
+    const overrides = { entryWords: new Map([[posted.id, { text: "private caption", data }]]) };
+    expect(view(state, LEO, now, overrides).days[0].others[0]).toEqual({
+      seat: 1, status: "locked", entry: null, postedAt: posted.receivedAt.toISOString(), blurHash: "synthetic-blur",
+    });
+    const own = entry(LEO, 0, 1, { kind: "words", mediaKeys: [] });
+    state.entries.push(own);
+    const unlocked = view(state, LEO, now, overrides).days[0].others[0];
+    expect(unlocked.entry).toMatchObject({ data, text: "private caption" });
+    expect(unlocked).not.toHaveProperty("postedAt");
+    expect(unlocked).not.toHaveProperty("blurHash");
+    own.withdrawnAt = now;
+    expect(view(state, LEO, now, overrides).days[0].others[0].entry?.data).toEqual(data);
+    state.entries = [posted];
+    state.game.status = "settled";
+    expect(view(state, LEO, now, overrides).days[0].others[0].entry?.data).toEqual(data);
+    posted.withdrawnAt = now;
+    expect(view(state, LEO, now, overrides).days[0].others[0]).not.toHaveProperty("postedAt");
+  });
   it("hides the graph until posting and returns the whole image after unlock", () => {
     const state = liveState();
     state.entries.push(entry(AVA, 0, 1, { kind: "heart_rate" }));
@@ -162,7 +187,7 @@ describe("weekly game views: post to unlock", () => {
     const state = { ...liveState(), entries: [entry(LEO, 0, 1)] };
     const avaNow = noonOnDay(state, AVA, 0);
     const avaView = view(state, AVA, avaNow);
-    expect(avaView.days[0].others).toEqual([{ entry: null, seat: 0, status: "locked" }]);
+    expect(avaView.days[0].others).toEqual([{ entry: null, seat: 0, status: "locked", postedAt: "2030-03-05T12:00:00.000Z", blurHash: null }]);
     expect(JSON.stringify(avaView)).not.toContain("caption");
     expect(JSON.stringify(avaView)).not.toContain("game/hbm_leo/");
     expect(visibleEntryIds(state, AVA).size).toBe(0);
@@ -179,7 +204,7 @@ describe("weekly game views: post to unlock", () => {
   it("keeps a day unlocked after you withdraw, but never shows withdrawn posts to others", () => {
     const state = {
       ...liveState(),
-      entries: [entry(LEO, 0, 1), entry(AVA, 0, 1, { withdrawnAt: JOIN_AT })],
+      entries: [entry(LEO, 0, 1), entry(AVA, 0, 1, { receivedAt: new Date("2030-03-05T12:00:00Z"), blurHash: null, withdrawnAt: JOIN_AT })],
     };
     const avaView = view(state, AVA, noonOnDay(state, AVA, 0));
     expect(avaView.days[0].others[0].status).toBe("posted");
@@ -216,7 +241,7 @@ describe("weekly game views: post to unlock", () => {
       tasks: [{ seat: 0, text: "100 pushups" }, { seat: 1, text: "10 min abs" }],
     });
     const retaken = { ...state, entries: [...state.entries, entry(LEO, 1, 2)] };
-    retaken.entries[1] = { ...retaken.entries[1], withdrawnAt: leoNow };
+    retaken.entries[1] = { ...retaken.entries[1], receivedAt: new Date("2030-03-05T12:00:00Z"), blurHash: null, withdrawnAt: leoNow };
     expect(view(retaken, LEO, leoNow).retakeAvailable).toBe(false);
   });
 

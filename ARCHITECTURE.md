@@ -5414,8 +5414,9 @@ are app-encrypted before any transaction; the structure that rules and
 settlement read stays plain, so neither decrypts.
 
 The v1 schema widens retained game lengths to 1–365 and entry kinds to include
-words, route and reps, and reserves nullable `game_entry.payload_encrypted` for
-sealed artifacts. New writes require 3–365 days (default seven) and one prize
+words, route and reps, and stores per-poster sealed summaries in nullable
+`game_entry.payload_encrypted`. A separate nullable blur preview needs no
+decryption. New writes require 3–365 days (default seven) and one prize
 or dare; legacy lengths and stakes keep their read/settlement semantics. Both
 new stake kinds issue one loser-to-winner ticket, none for a tie or perfect game.
 Ticket views derive kind from the existing stake key; no duplicate kind is stored.

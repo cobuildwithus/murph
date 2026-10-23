@@ -9,6 +9,7 @@ import type {
   GameDayOtherStatus,
   GameDayView,
   GameEntryView,
+  GameEntryData,
   GamePlayerView,
   GameTermsVersion,
   GameTicketView,
@@ -76,8 +77,8 @@ export interface GameViewInput {
   invitee: { memberId: string | null; name: string; photoKey: string | null; relationship: string | null } | null;
   inviteToken: string | null;
   inviteExpiresAt: Date | null;
-  /** Decrypted words for the entries `visibleEntryIds` allowed. */
-  entryWords: ReadonlyMap<string, { text: string | null }>;
+  /** Decrypted text and summary data only for entries `visibleEntryIds` allowed. */
+  entryWords: ReadonlyMap<string, { text: string | null; data?: GameEntryData | null }>;
   result: StoredResult | null;
   tickets: readonly GameTicketRow[];
 }
@@ -148,6 +149,7 @@ function entryView(entry: RuleEntry, input: GameViewInput): GameEntryView {
     kind: entry.kind,
     mediaUrls: entry.mediaKeys.map(gameMediaUrl),
     text: words?.text ?? null,
+    data: words?.data ?? null,
   };
 }
 
@@ -267,7 +269,8 @@ function otherDayView(input: GameViewInput, visible: ReadonlySet<string>, other:
   const posted = liveEntry(input.state.entries, other.memberId, index);
   if (posted) {
     const open = visible.has(posted.id);
-    return { entry: open ? entryView(posted, input) : null, seat: other.seat, status: open ? "posted" : "locked" };
+    return { entry: open ? entryView(posted, input) : null, seat: other.seat, status: open ? "posted" : "locked",
+      ...(!open ? { postedAt: posted.receivedAt.toISOString(), blurHash: posted.blurHash } : {}) };
   }
   return { entry: null, seat: other.seat, status: unpostedStatus(input, other, index) };
 }

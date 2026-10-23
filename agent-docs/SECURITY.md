@@ -14,6 +14,14 @@ signed URL is persisted or logged. Other private/health data keeps its encryptio
 contract. See `ARCHITECTURE.md` § Weekly Game and `apps/cloudflare/DEPLOY.md`
 § Private weekly game images for variant isolation and deletion requirements.
 
+Game summary payloads use per-poster secure-box encryption bound to the entry
+row and payload field. Seal before opening a database transaction; decrypt only
+entries in the existing viewer-visible set. Strict closed shapes exclude raw
+heart-rate samples and route coordinates. The separate optional blur string is
+public to the other game participant only alongside a posted, locked day's
+receipt timestamp. It grants no media authorization and never accompanies
+private payload data while locked. Neither summary nor blur reaches chat or push.
+
 ## Non-Negotiable Rules
 
 The activated runtime authority and migration boundary are owned by

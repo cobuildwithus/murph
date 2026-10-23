@@ -14,6 +14,7 @@ import {
   type GameTermsInput,
 } from "./contract";
 import { isGameMediaKey } from "./media";
+import { parseGameEntryData } from "./entry-data";
 import { isRecord } from "../primitives";
 import { GAME_MIN_LENGTH_DAYS, GAME_MAX_LENGTH_DAYS, reject, validNewStakes } from "./rules";
 
@@ -94,16 +95,17 @@ const TRANSCRIPT_MAX = 500;
 function post(input: Record<string, unknown>): GameCommand {
   const kind = oneOf(input.kind, "kind", GAME_ENTRY_KINDS);
   const mediaKeys = list(input.mediaKeys ?? [], "mediaKeys", MEDIA_KEYS_MAX).map(mediaKey);
-  const text = kind === "excuse"
+  const text = kind === "words" ? oneLineWords(input.text) : kind === "excuse"
     ? transcript(input.text)
     : input.text === undefined ? "" : string(input.text, "text", POST_TEXT_MAX).trim();
-  if (kind === "heart_rate" && (mediaKeys.length !== 1 || !mediaKeys[0]?.endsWith(".jpg"))) {
-    reject("INVALID_REQUEST", "A heart-rate check-in needs one graph image.");
+  if (["heart_rate", "route", "reps"].includes(kind) && (mediaKeys.length !== 1 || !mediaKeys[0]?.endsWith(".jpg"))) {
+    reject("INVALID_REQUEST", "This artifact needs one rendered JPEG image.");
   }
-  if (kind === "excuse" && mediaKeys.length > 0) reject("INVALID_REQUEST", "An excuse is words only.");
+  if (["excuse", "words"].includes(kind) && mediaKeys.length > 0) reject("INVALID_REQUEST", "This artifact is words only.");
   if (mediaKeys.some((key) => !PHOTO_EXTENSIONS.some((extension) => key.endsWith(extension)))) {
     reject("INVALID_REQUEST", "A photo post takes photos.");
   }
+  const data = parseGameEntryData(kind, input.data);
   return {
     entryId: clientId(input.entryId, "entryId"),
     gameId: clientId(input.gameId, "gameId"),
@@ -111,8 +113,17 @@ function post(input: Record<string, unknown>): GameCommand {
     mediaKeys,
     type: "post",
     ...(text ? { text } : {}),
+    ...(data ? { data } : {}),
+    ...optional(input.blurHash, (value) => ({ blurHash: string(value, "blurHash", 64) })),
     ...optional(input.captureAgeMs, (value) => ({ captureAgeMs: integer(value, "captureAgeMs", 0, CAPTURE_AGE_MAX_MS) })),
   };
+}
+
+function oneLineWords(value: unknown): string {
+  const raw = string(value, "text", 64 * 1024);
+  const text = raw.trim();
+  if (!text || text.length > 140 || /[\r\n\u2028\u2029]/u.test(raw)) reject("INVALID_REQUEST", "Write one line of 1–140 characters.");
+  return text;
 }
 
 function profile(input: Record<string, unknown>): Extract<GameCommand, { type: "setProfile" }> {
@@ -136,7 +147,7 @@ function inviteeLabel(input: Record<string, unknown>): GameInviteeLabel {
 
 function terms(input: Record<string, unknown>): GameTermsInput {
   return {
-    checkInKind: input.checkInKind === undefined ? "photo" : oneOf(input.checkInKind, "terms.checkInKind", GAME_CHECK_IN_KINDS),
+    checkInKind: input.checkInKind === undefined ? "any" : oneOf(input.checkInKind, "terms.checkInKind", GAME_CHECK_IN_KINDS),
     schedule: schedule(record(input.schedule, "terms.schedule")),
     stakes: newStakes(input.stakes),
     tasks: list(input.tasks, "terms.tasks", LIST_MAX).map((value): GameTask => {
