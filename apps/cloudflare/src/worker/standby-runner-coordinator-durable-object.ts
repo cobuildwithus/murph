@@ -292,6 +292,8 @@ export class StandbyRunnerCoordinatorDurableObject extends DurableObject {
           if (reservation.fresh) this.store.forgetSlot(reservation.slotName);
           continue;
         }
+        // A failed recheck has already drained its slot; let this bounded lane
+        // reserve the replacement. Failed fresh preparations keep their backoff.
         if (!await this.prepareSlot(reservation.slotName, reservation.kind)
           && reservation.kind !== "reproof") break;
       } finally {

@@ -1290,37 +1290,83 @@ describe("StandbyRunnerCoordinatorDurableObject", () => {
     vi.setSystemTime(CLAIMED_AT_MS + 60_000);
     await h.coordinator.alarm();
     await h.flush();
+    h.ensure();
+    await h.flush();
     assert.equal((await h.slots.get(name)!.readStandbySlotBinding()).state, "retired");
     assert.equal(h.coordinator.readStandbyCoordinatorState().readySlotNames.length, 1);
     assert(!h.coordinator.readStandbyCoordinatorState().readySlotNames.includes(name));
   });
 
-  it.each(["initial", "after reproof"] as const)("backs off a failed refill (%s) to the retry alarm without a hot loop", async (kind) => {
+  it("replaces a failed sole recheck in the same alarm pass without another trigger", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(CLAIMED_AT_MS);
-    let attempts = 0;
-    const h = createCoordinatorHarness({ target: "1", async prepare() {
-      if (++attempts === 1 && kind === "after reproof") return;
-      throw new Error("synthetic provisioning failure");
+    const h = createCoordinatorHarness({ target: "1", async prepare(input) {
+      if (input.recheck) throw new Error("synthetic unhealthy standby");
     } });
     h.ensure();
     await h.flush();
-    if (kind === "after reproof") {
-      vi.setSystemTime(CLAIMED_AT_MS + 60_000);
-      await h.coordinator.alarm();
-      await h.flush();
-    }
-    const expected = kind === "initial" ? 1 : 3;
-    assert.equal(prepareCount(h), expected);
-    assert.deepEqual(h.coordinator.readStandbyCoordinatorState().readySlotNames, []);
-    assert.equal(h.setAlarm.mock.lastCall?.[0], Date.now() + HOSTED_STANDBY_RETRY_MS);
-    vi.setSystemTime(Date.now() + HOSTED_STANDBY_RETRY_MS);
+    const name = h.coordinator.readStandbyCoordinatorState().readySlotNames[0]!;
+    vi.setSystemTime(CLAIMED_AT_MS + 60_000);
     await h.coordinator.alarm();
     await h.flush();
-    assert.equal(prepareCount(h), expected + 1);
-    assert.equal(h.setAlarm.mock.lastCall?.[0], Date.now() + HOSTED_STANDBY_RETRY_MS);
+    const state = h.coordinator.readStandbyCoordinatorState();
+    assert.equal((await h.slots.get(name)!.readStandbySlotBinding()).state, "retired");
+    assert.deepEqual(state.provisioningSlotNames, []);
+    assert.equal(state.readySlotNames.length, 1);
+    assert.notEqual(state.readySlotNames[0], name);
+    assert.equal(prepareCount(h), 3);
+    assert.deepEqual(standbyPoints(h, "prepare").map(({ detail, outcome }) => [detail, outcome]),
+      [["refill", "ready"], ["reproof", "failed"], ["refill", "ready"]]);
   });
 
+  it("keeps a failed replacement after a failed recheck within the lane's existing bound", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(CLAIMED_AT_MS);
+    let first: string | null = null;
+    const h = createCoordinatorHarness({ target: "1", async prepare(input) {
+      first ??= input.slotName;
+      if (input.recheck || input.slotName !== first) throw new Error("synthetic unhealthy standby");
+    } });
+    h.ensure();
+    await h.flush();
+    vi.setSystemTime(CLAIMED_AT_MS + 60_000);
+    h.setAlarm.mockClear();
+    await h.coordinator.alarm();
+    await h.flush();
+    assert.equal(prepareCount(h), 3);
+    assert.deepEqual(h.coordinator.readStandbyCoordinatorState().readySlotNames, []);
+    assert.deepEqual(standbyPoints(h, "prepare").map(({ detail, outcome }) => [detail, outcome]),
+      [["refill", "ready"], ["reproof", "failed"], ["refill", "failed"]]);
+    // The failed refill keeps its existing backoff: the next attempt belongs to the recovery alarm.
+    assert(h.setAlarm.mock.calls.some(([at]) => Number(at) === Date.now() + HOSTED_STANDBY_RETRY_MS));
+  });
+
+  for (const fence of ["off", "release"] as const) {
+    it(`does not replace a failed recheck after ${fence === "off" ? "standby is turned off" : "the release changes"}`, async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(CLAIMED_AT_MS);
+      const gate = createDeferred<void>();
+      const h = createCoordinatorHarness({ target: "1", async prepare(input) {
+        if (input.recheck) {
+          await gate.promise;
+          throw new Error("synthetic unhealthy standby");
+        }
+      } });
+      h.ensure();
+      await h.flush();
+      vi.setSystemTime(CLAIMED_AT_MS + 60_000);
+      const alarm = h.coordinator.alarm();
+      await until(() => prepareCount(h) === 2);
+      if (fence === "off") h.environment.HOSTED_EXECUTION_STANDBY_MODE = "off";
+      else h.environment.CF_VERSION_METADATA = { id: "release_2" };
+      gate.resolve(undefined);
+      await alarm;
+      await h.flush();
+      assert.equal(prepareCount(h), 2);
+      assert.deepEqual(h.coordinator.readStandbyCoordinatorState().readySlotNames, []);
+      assert.deepEqual(h.coordinator.readStandbyCoordinatorState().provisioningSlotNames, []);
+    });
+  }
   it("refills reported loss while reproof is pending and ignores its late result", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(CLAIMED_AT_MS);
