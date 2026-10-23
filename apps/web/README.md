@@ -1452,22 +1452,17 @@ Callback auth contract:
   authority and seals only from that scoped cache entry, with one full retry on
   typed root drift. Legacy transaction append surfaces remain for separately
   migrated callers and are not the transaction-safe generic entrypoint.
-- `POST /api/internal/hosted-runtime/owner-released` is the pointer-only
-  completion handoff. Web accepts a zero-byte body and a signed query containing
-  the opaque released `runtimeAttemptId`, plus the optional exact
-  `immediateRecheckRequested=1` positive edge. It binds the user through the
-  signed request plus normal nonce protection. Without the positive edge, Web
-  emits a signal only when current runnable mailbox lag or a live system mailbox
-  item beyond the handled-through frontier remains. Exact callbacks use
-  `runtime_owner_released`, which Temporal matches before releasing an
-  accepted-owner horizon; legacy pointerless callbacks use the facts-only
-  `runtime_recheck_requested` signal during rollout. A persisted default or
-  retention wake alone is not signal authority. The positive edge means the
-  completed invocation newly committed an unserviced schedule and carries no
-  wake data. Known future mailbox retry continuations remain deferred.
-  Cloudflare calls the route at most once, with a timeout capped at two seconds,
-  only after exact write-fence completion; failure is non-fatal and has no
-  callback retry.
+- `POST /api/internal/hosted-runtime/owner-released` remains the legacy signed,
+  zero-body completion handoff. Exact callbacks send `runtime_owner_released`;
+  pointerless callbacks use `runtime_recheck_requested`. The optional legacy
+  positive-edge query is accepted but no longer gates signaling. Web performs
+  no actionability pre-read. The modern owner route emits the exact attempt hint
+  only after a successful final-release CAS, through Next `after` with the
+  existing two-second budget. Early completion and stale retries do not signal.
+  Every attempt-ended hint invalidates the workflow wait; only matching identity
+  clears accepted ownership. Checkpoints only persist facts and never signal.
+  Deploy workflow support, then runtime wake servicing and warm-invocation drain,
+  then Web. See the [orchestration contract](../../agent-docs/references/hosted-temporal-orchestration.md#attempt-ended-reconciliation).
 
 When you set `DEVICE_SYNC_PUBLIC_BASE_URL`, use the same stable production
 hostname as every first-party hosted app-session URL that can serve the OAuth

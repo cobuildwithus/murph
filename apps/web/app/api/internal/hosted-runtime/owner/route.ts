@@ -13,14 +13,16 @@ export const POST = withJsonError((request: Request) => runWithTiming(request, a
   timing.authenticated();
   const command = parseHostedRuntimeOwnerCommand(payload);
   const result = await executeHostedRuntimeOwnerCommand({ prisma: getPrisma(), userId, command });
-  if (command.operation === "complete" && result.status === "updated") {
-    // Durable completion is sufficient for the response; accepted-attempt
-    // rechecks recover a lost advisory hint.
+  const released = command.operation === "release" || command.operation === "release_completed"
+    || (command.operation === "complete" && command.settledRunnerContainerName !== null);
+  if (released && result.status === "updated") {
+    // Only the successful final-release CAS emits an attempt-ended hint. Early
+    // completion still owns the native invocation; retries are stale after release.
+    // Accepted-attempt rechecks recover a lost advisory hint.
     after(async () => {
       const { notifyHostedRuntimeOwnerCompletion } = await import("@/src/lib/hosted-orchestration/runtime-owner-release");
       await notifyHostedRuntimeOwnerCompletion({
         userId, runtimeAttemptId: command.attemptId,
-        immediateRecheckRequested: command.immediateRecheckRequested,
       });
     });
   }

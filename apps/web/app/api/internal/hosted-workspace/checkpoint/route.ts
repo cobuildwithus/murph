@@ -2,16 +2,12 @@ import {
   parseHostedWorkspaceCheckpointRequest,
   parseHostedWorkspaceCheckpointResponse,
 } from "@murphai/hosted-execution/parsers";
-import { after } from "next/server";
 
 import {
   requireHostedCloudflareCallbackRequest,
 } from "@/src/lib/hosted-execution/cloudflare-callback-auth";
 import { readOptionalJsonObject } from "@/src/lib/http";
 import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
-import {
-  acknowledgeHostedWorkspaceRuntimeRecheck,
-} from "@/src/lib/hosted-workspace/store";
 import { checkpointHostedRuntimeWorkspace } from "@/src/lib/hosted-workspace/runtime-publication";
 import { readHostedRuntimeCallbackAuthority } from "@/src/lib/hosted-execution/runtime-write-fence";
 import { createHostedRuntimeCallbackTiming } from "@/src/lib/hosted-execution/runtime-callback-timing";
@@ -76,23 +72,6 @@ export const POST = withJsonError((request: Request) => runWithTiming(request, a
       throw new TypeError("Hosted workspace checkpoint requires an existing workspace row.");
     }
 
-    if (
-      result.status === "updated"
-      && !result.canSkipRuntimeRecheck
-      && (
-        result.workspace.nextWakeAt !== null
-        || result.workspace.inboxMediaRetentionWakeAt !== null
-      )
-    ) {
-      const version = result.workspace.version;
-      const signalWake = () => signalWorkspaceWakeBestEffort(userId, version);
-      try {
-        after(signalWake);
-      } catch {
-        void signalWake();
-      }
-    }
-
     failureStage = "response";
     return jsonOk(parseHostedWorkspaceCheckpointResponse({
       checkpointed: result.status === "updated",
@@ -148,23 +127,5 @@ function reportCheckpointFailure(stage: CheckpointFailureStage, error: unknown):
     });
   } catch {
     // Failure telemetry must never replace the original checkpoint failure.
-  }
-}
-
-async function signalWorkspaceWakeBestEffort(userId: string, version: string): Promise<void> {
-  try {
-    // Loading the signal owner also initializes Temporal and KMS dependencies.
-    // Checkpoints only need that graph when the post-response wake runs.
-    const { signalHostedRuntimeRecheckRuntime } = await import(
-      "@/src/lib/hosted-orchestration/signal-runtime"
-    );
-    await signalHostedRuntimeRecheckRuntime({
-      userId,
-    });
-    await acknowledgeHostedWorkspaceRuntimeRecheck({ userId, version });
-  } catch (error) {
-    console.warn("Hosted workspace wake recheck signal failed after checkpoint.", {
-      errorName: error instanceof Error ? error.name : typeof error,
-    });
   }
 }
