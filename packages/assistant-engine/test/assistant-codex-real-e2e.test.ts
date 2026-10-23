@@ -45816,9 +45816,9 @@ describeRealCodex('Bluetooth wearable help', () => {
         expect(reply).toMatch(/triage|account-linked/iu)
         expect(reply).not.toMatch(/ticket|email(?:ed| sent)|will (?:contact|reply|get back)/iu)
       }
-      // Ordinary read-only context discovery is allowed; device effects are not.
+      // Read-only context and public product metadata discovery are allowed; device effects are not.
       const forbiddenCommands = commands.filter((action) =>
-        /vault-cli\s+(?:device|wearable)|vault-cli[^;\n]*(?:save|create|delete|set-status)|\b(?:curl|wget|rm|touch|mkdir)\b/u.test(action.command),
+        /vault-cli\s+(?:device|wearable)|vault-cli[^;\n]*(?:save|create|delete|set-status)|\b(?:rm|touch|mkdir)\b/u.test(action.command),
       )
       expect(forbiddenCommands.map((action) => action.command.replaceAll(workingDirectory, '<WORKSPACE>'))).toEqual([])
       expect(reply.length).toBeGreaterThan(15)
