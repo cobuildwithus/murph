@@ -152,6 +152,7 @@ function samePlayers(a: readonly { memberId: string }[], b: readonly { memberId:
 function samePhones(a: readonly string[], b: readonly string[]) { return a.length === 2 && b.length === 2 && new Set(b).size === 2 && a.every((phone) => b.includes(phone)); }
 function bootstrapEventCurrent(game: { id: string; status: string; pendingChange: unknown; players: readonly { memberId: string }[] }, eventId: string): boolean {
   if (game.players.length !== 2 || !game.players.every((player) => isGameEnabledFor(player.memberId))) return false;
+  if (eventId.startsWith(`game-change-cancelled:${game.id}:`)) return ["live", "negotiating"].includes(game.status);
   if (eventId === `game-started:${game.id}`) return game.status === "live";
   const proposal = parsePendingGameChange(game.pendingChange);
   return (game.status === "live" || game.status === "negotiating") && proposal !== null && eventId === `game-change:${game.id}:${proposal.id}`;
@@ -189,7 +190,7 @@ function isSkippedBootstrapReservation(row: {
   acceptedAt: Date | null; lastReceiptAt: Date | null; messageLookupKey: string | null; phoneNumberLookupKey: string | null;
 }, memberId: string): boolean {
   return row.source === "game_lifecycle" && row.payloadOwnerMemberId === memberId
-    && ["game_started", "game_proposal"].includes(row.template ?? "")
+    && ["game_started", "game_proposal", "game_change_cancelled"].includes(row.template ?? "")
     && row.status === "skipped" && row.skippedAt !== null
     && [row.payloadSchema, row.payloadCiphertext, row.acceptedAt, row.lastReceiptAt, row.messageLookupKey, row.phoneNumberLookupKey].every((value) => value === null);
 }

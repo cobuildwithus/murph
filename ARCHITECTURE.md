@@ -5593,7 +5593,14 @@ intro. Chat-origin proposals instead store `origin: chat` and
 `deliveryStatus: conversation`: Murph's ordinary turn asks the other player,
 without a second backend notification or any claim that its reply was delivered.
 App notifications use shared instruction builders and `require_send`, not exact
-hardcoded announcement text. Started context offers optional first-few-days
+hardcoded announcement text. Cancelling an app-origin request whose delivery
+was queued or sent reserves `game_change_cancelled` in the same locked game
+transaction. Its lifecycle source reference contains the game and proposal ids;
+its per-proposal delivery key prevents duplicate announcements. The existing
+drain and bootstrap support live and negotiating games, and dispatch revalidates
+the exact room, two-player audience and immutable cancellation history. Pending,
+failed and chat-origin requests do not reserve a cancellation notice. Cancellation
+never changes the agreed rules or starts a negotiating challenge. Started context offers optional first-few-days
 reminders without scheduling them; later opt-in must read current rules.
 
 `chat-lifecycle.ts` drains one due intent and one frozen recovery per existing minute

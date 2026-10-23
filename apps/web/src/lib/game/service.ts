@@ -823,6 +823,9 @@ async function respondChange(context: CommandContext, command: Extract<GameComma
     if ((command.decision === "cancel") !== proposer) reject("NOT_A_PLAYER", proposer ? "The other player needs to agree." : "Only the proposer can cancel this change.");
     const clear = () => tx.game.update({ where: { id: command.gameId }, data: { pendingChange: Prisma.DbNull } });
     if (command.decision !== "approve") {
+      if (command.decision === "cancel" && proposal.origin === "app" && ["queued", "sent"].includes(proposal.deliveryStatus)) {
+        await reserveGameChatLifecycleTx({ gameId: command.gameId, kind: "change_cancelled", proposalId: proposal.id, now: clock, tx });
+      }
       await clear();
       return [{ commandKey: resolutionKey, type: command.decision === "cancel" ? "change_cancelled" : "change_declined", payload: { proposalId: proposal.id } }];
     }

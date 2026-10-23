@@ -75,6 +75,13 @@ describe("generated game chat bootstrap", () => {
     expect(m.markReceipt).toHaveBeenCalledWith(expect.objectContaining({ data: { status: "generation_queued", retryAfterAt: expect.any(Date), payloadOwnerMemberId: "room" } }));
     expect(m.create).not.toHaveBeenCalled();
   });
+  it("queues a cancellation for a negotiating game after its original request is cleared", async () => {
+    m.game.mockResolvedValue({ ...game(), status: "negotiating", pendingChange: null });
+    const cancellation = `game-change-cancelled:${gameId}:proposal_sample`;
+    await expect(prepareGameChatBootstrap(gameId, cancellation, "The earlier change is off.")).resolves.toBe("room");
+    expect(m.enqueue).toHaveBeenCalledOnce();
+    expect(m.markReceipt).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ idempotencyKey: expect.any(String) }) }));
+  });
   it("leaves later lifecycle work reserved while a different first message is already frozen", async () => {
     m.otherReceipt.mockResolvedValue({ id: "original_first_message" });
     await expect(prepareGameChatBootstrap(gameId, eventId, "Later announcement")).resolves.toBeNull();

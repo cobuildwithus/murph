@@ -1471,3 +1471,6 @@ Game v1 additive runtime reader compatibility and rollout floor are recorded in
 Game v1 rules, additive schema and derived app fields are tracked in
 [`game v1 rules`](exec-plans/completed/2026-10-22-game-v1-rules.md); the durable owners
 are `product-specs/weekly-game.md` and `../ARCHITECTURE.md` § Weekly Game.
+
+Game v1 cancellation delivery and tool guidance are tracked in
+[`group chat completion`](exec-plans/active/2026-10-22-game-v1-group-chat.md).

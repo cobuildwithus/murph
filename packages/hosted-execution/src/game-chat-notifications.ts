@@ -8,7 +8,7 @@ export function buildGameProposalInstructions(proposal: { change: HostedGameChan
   return [
     "A player proposed a challenge change from the app. Tell both players what they requested and ask the other player naturally whether they agree.",
     "Write one concise conversational message in your own words. The change is pending, not applied. Do not send a separate acknowledgement.",
-    "Describe only the requested changes. A duration is total calendar days, never additional days. Mention a date only when the player explicitly changed the start date.",
+    "Describe only the requested changes. A duration is total days, never additional days. Mention a date only when the player explicitly changed the start date.",
     "Schedule day numbers mean weekdays: 0 Monday, 1 Tuesday, 2 Wednesday, 3 Thursday, 4 Friday, 5 Saturday, 6 Sunday. They are not game-day indexes. A count schedule means that many check-ins across the entire challenge, not per week.",
     "Do not call a future rules-effective day the game's start. Omit cutoff times and routine explanations about preserved check-ins. Do not imply either player agreed beyond the proposal itself.",
     ...("stakesApplyToWholeGame" in proposal.change && proposal.change.stakesApplyToWholeGame === true
@@ -24,8 +24,8 @@ export function buildGameKickoffInstructions(input: { kind: "started"; game: Hos
   const { game } = input;
   return [
     "Both players have agreed to this challenge. Introduce it in one concise, natural group message in your own words.",
-    "Explain the agreed tasks, stakes, check-in schedule, duration and start where relevant. Duration means total calendar days, not extra days.",
-    "Each player's dayOne is the actual agreed first calendar date in their timeZone. startsOn is only the optional requested start date; never infer tomorrow from a null startsOn. If the players have different dates, distinguish them rather than inventing one date.",
+    "Explain the agreed tasks, stakes, check-in schedule, duration and start where relevant. Duration means total days, not extra days.",
+    "Each player's dayOne is the actual agreed first date in their timeZone. startsOn is only the optional requested start date; never infer tomorrow from a null startsOn. If the players have different dates, distinguish them rather than inventing one date.",
     "Schedule day numbers mean weekdays: 0 Monday, 1 Tuesday, 2 Wednesday, 3 Thursday, 4 Friday, 5 Saturday, 6 Sunday. They are not game-day indexes. A count schedule means that many check-ins across the entire challenge, not per week.",
     "Describe what they agreed to naturally, for example 'You agreed to ...'. Never claim you have checked current progress or that rules cannot have changed since this agreement. Do not mention snapshots, announcements, notifications or recorded setup. Later questions and any reminder setup must read the current game first.",
     "Use earlier conversation only if you actually have it. Never invent a prior discussion. Do not include a separate greeting or generic chat opener, internal IDs, cutoff times or implementation details.",
@@ -35,5 +35,15 @@ export function buildGameKickoffInstructions(input: { kind: "started"; game: Hos
       players: game.players.map(({ seat, firstName, dayOne, timeZone }) => ({ seat, name: firstName, dayOne, timeZone })),
       terms: game.terms, lengthDays: game.lengthDays, startsOn: game.startsOn,
     }),
+  ].join("\n");
+}
+
+/** A cancellation changes only the pending request, never the agreed challenge. */
+export function buildGameChangeCancelledInstructions(input: { hasNewPendingChange: boolean; negotiating: boolean }): string {
+  return [
+    "A player cancelled a change they requested from the app. Tell both players in one brief, natural group message that the requested change is off and did not alter the game.",
+    "Do not say the challenge was cancelled, restarted, approved or completed. Do not repeat tasks or stakes, ask for agreement, or offer reminders. Never mention internal IDs or delivery details.",
+    input.hasNewPendingChange ? "Another change is now pending. Make clear that this notice concerns the earlier request, not the current pending change." : "There is no replacement request to discuss.",
+    input.negotiating ? "The challenge is still waiting for agreement and has not started." : "Do not claim you just checked progress or that no other changes have happened since this cancellation.",
   ].join("\n");
 }

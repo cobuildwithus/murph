@@ -13,6 +13,7 @@ export async function assertGameProposalDeliveryCurrentTx(input: {
   tx: { game: Pick<Prisma.TransactionClient["game"], "findFirst"> };
   now?: Date;
 }): Promise<boolean> {
+  if (input.deliveryIdempotencyKey?.startsWith("game-change-cancelled:")) return assertGameChangeCancelledDeliveryCurrentTx(input);
   const lifecycle = /^game-started:([^:]+)$/.exec(input.deliveryIdempotencyKey ?? "");
   if (lifecycle) return assertGameStartedDeliveryCurrentTx(input, lifecycle[1]);
   if (!input.deliveryIdempotencyKey?.startsWith("game-change:")) return false;
@@ -31,6 +32,17 @@ export async function assertGameProposalDeliveryCurrentTx(input: {
     players: game.players.map((player) => ({ memberId: player.memberId, seat: player.seat, timeZone: player.timeZone, dayOne: player.dayOne?.toISOString().slice(0, 10) ?? null })),
   }, pending, input.now ?? new Date());
   if (expired) stale();
+  return true;
+}
+async function assertGameChangeCancelledDeliveryCurrentTx(input: Parameters<typeof assertGameProposalDeliveryCurrentTx>[0]): Promise<true> {
+  const cancelled = /^game-change-cancelled:([^:]+):([^:]+)$/.exec(input.deliveryIdempotencyKey ?? "");
+  if (!cancelled) return stale();
+  const game = await input.tx.game.findFirst({
+    where: { id: cancelled[1], chatContainerMemberId: input.containerMemberId, status: { in: ["live", "negotiating"] },
+      events: { some: { type: "change_cancelled", commandKey: `game-change-resolved:${cancelled[1]}:${cancelled[2]}` } } },
+    include: { players: { take: 3 } },
+  });
+  if (!game || !sameGamePlayers(game.players.map((player) => player.memberId), input.playerMemberIds ?? [])) return stale();
   return true;
 }
 async function assertGameStartedDeliveryCurrentTx(

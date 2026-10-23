@@ -45057,6 +45057,65 @@ describeRealCodex('production reaction routing turn journey', () => {
   }, 240_000)
 })
 
+describeRealCodex('real Codex game v1 rules e2e', () => {
+  it.each([
+    { name: 'game v1 refuses live stake changes without proposing', request: 'Change the prize to breakfast in bed.', refusal: true },
+    { name: 'game v1 reads a 75 day challenge without truncation or restart', request: 'How long is our challenge and what is the prize?', refusal: false },
+  ])('$name', async ({ request: message, refusal }) => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-game-v1-e2e-'))
+    const { MURPH_READ_GAME_TOOL, MURPH_UPDATE_GAME_TOOL } = await import('../src/assistant-codex/dynamic-tools/games.js')
+    const inputId = 'ain_' + 'a'.repeat(32)
+    const calls: Array<import('@murphai/hosted-execution/runtime-control').HostedRuntimeGroupToolRequest> = []
+    const game = {
+      id: 'game_synthetic', status: 'live' as const, lengthDays: 75, startsOn: '2030-03-04',
+      terms: { n: 1, fromDay: 0, checkInKind: 'any' as const, tasks: [{ seat: 0, text: 'Read a chapter' }, { seat: 1, text: 'Walk' }], schedule: { count: 60 }, stakes: [{ kind: 'prize' as const, item: 'Pick movie night' }] },
+      players: [{ memberId: 'player_maya', seat: 0, firstName: 'Maya', dayOne: '2030-03-04', timeZone: 'America/New_York' }, { memberId: 'player_sam', seat: 1, firstName: 'Sam', dayOne: '2030-03-04', timeZone: 'America/New_York' }],
+      pendingChange: null,
+      changeControls: { canStartNow: false, canEdit: true, canEditSchedule: true, canEditStartDate: false, canEditTasks: false, canEditStakes: false, editableFromDay: 3 },
+    }
+    try {
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined, codexHome: config.codexHome,
+        developerInstructions: buildAssistantSystemPrompt({
+          assistantCliContract: null, assistantKnowledgeToolsAvailable: false, channel: 'linq',
+          cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' }, conversationScope: 'group',
+          currentLocalDate: '2030-03-06', currentInstant: '2030-03-06T16:00:00.000Z', currentTimeZone: 'America/New_York',
+          hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false, turnTrigger: null,
+        }),
+        dynamicTools: [MURPH_READ_GAME_TOOL, MURPH_UPDATE_GAME_TOOL], env: config.env,
+        hostedToolContext: {
+          computerToolsAvailable: false, vaultFileSendAvailable: false,
+          groupTool: { request: async (request) => {
+            calls.push(request)
+            if (request.action !== 'read_game') throw new Error('This journey authorizes no mutation.')
+            return { action: 'read_game', result: { status: 'ok', state: { games: [game] } } }
+          } },
+          currentUserActionScope: () => ({ conversationId: 'synthetic-game-chat', inboundMailboxItemIds: [], recipientKey: 'synthetic-game-recipient', acceptedInputIds: [inputId], originSessionId: 'synthetic-game-session', conversationScope: 'group' }),
+          currentHostedDeliveryContext: () => null, currentHostedMailboxItemIds: () => [], sendVaultFile: async () => { throw new Error('No file send authorized.') },
+        },
+        model: config.model, modelProvider: config.modelProvider,
+        prompt: `Current accepted message from Maya (Message ref: ${inputId}): ${message}`,
+        reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
+      })
+      process.stdout.write(`[game-v1 rules] ${JSON.stringify({ refusal, reply: result.finalMessage, actions: calls.map((call) => call.action) })}\n`)
+      expect(calls.map((call) => call.action)).toEqual(['read_game'])
+      if (refusal) {
+        expect(result.finalMessage).toMatch(/locked|can[’']?t|cannot|can no longer|stay|fixed/iu)
+        expect(result.finalMessage).toMatch(/start|live|underway|begun/iu)
+        expect(result.finalMessage).not.toMatch(/proposed|changed.*breakfast|ask Sam|Sam.*agree/iu)
+      } else {
+        expect(result.finalMessage).toMatch(/75|seventy.five/iu)
+        expect(result.finalMessage).toMatch(/movie/iu)
+      }
+      expect(result.finalMessage).not.toMatch(/calendar days|restart|28.day/iu)
+    } finally {
+      await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+    }
+  }, 360_000)
+})
+
 describeRealCodex('real Codex game agreement e2e', () => {
   it.each([
     { name: 'game agreement ordinary yes applies the pending weekend change once', duration: false, negotiation: false },
@@ -45163,6 +45222,52 @@ describeRealCodex('real Codex game lifecycle messaging e2e', () => {
       expect(reply).toMatch(/total/iu)
       expect(reply).toContain('?')
       expect(reply).not.toMatch(/starting|restart|tomorrow|3\s*a\.?m|already extended|now extended|has been extended|more days|additional days/iu)
+      expect(reply.length).toBeLessThan(350)
+    } finally {
+      await removeRealCodexTemporaryPaths([workingDirectory, ...permissionHome.temporaryPaths, ...config.temporaryPaths])
+    }
+  }, 360_000)
+
+  it('game v1 cancellation announces one withdrawn request without cancelling the challenge', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-game-notice-e2e-'))
+    const permissionHome = await materializeRealCodexHostedPermissionHome(config)
+    const { buildGameChangeCancelledInstructions } = await import('@murphai/hosted-execution/runtime-control')
+    try {
+      await initializeVault({ timezone: 'America/New_York', vaultRoot: workingDirectory })
+      const modelTarget = createAssistantModelTarget({
+        approvalPolicy: 'never', codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND),
+        codexHome: permissionHome.codexHome, model: config.model, modelProvider: config.modelProvider,
+        provider: 'codex-cli', reasoningEffort: 'low', sandbox: 'workspace-write',
+      })
+      if (!modelTarget) throw new Error('Expected real Codex target.')
+      const events: unknown[] = []
+      const result = await sendAssistantNotificationLocal({
+        actorId: null, bindingDeliveryTarget: 'synthetic-game-thread', channel: 'linq',
+        deliveryDispatchMode: 'queue-only', deliveryTarget: 'synthetic-game-thread',
+        deliveryIdempotencyKey: 'game-change-cancelled:game_synthetic:proposal_synthetic',
+        deliveryDedupeToken: 'game-change-cancelled:game_synthetic:proposal_synthetic',
+        responsePolicy: { kind: 'require_send' },
+        executionContext: { hosted: { defaultTarget: modelTarget, memberId: 'synthetic-group', userEnvKeys: [] } },
+        identityId: null, instructions: buildGameChangeCancelledInstructions({ hasNewPendingChange: false, negotiating: false }),
+        threadId: 'synthetic-game-thread', threadIsDirect: false,
+        onTraceEvent: (event) => events.push(event.rawEvent),
+        turnEnvironment: { currentWorkingDirectory: workingDirectory, env: config.env },
+        turnTrigger: 'manual-deliver', vault: workingDirectory, workingDirectory,
+      })
+      const intents = await listAssistantOutboxIntents(workingDirectory)
+      const reply = result.response ?? ''
+      process.stdout.write(`[game-v1 cancellation] ${JSON.stringify({ reply, intents: intents.length, decision: result.decision.kind })}\n`)
+      expect(readCapabilityRoutingActions(events)).toEqual([])
+      expect(result.decision.kind).toBe('send_message')
+      expect(result.deliveryOutcome?.kind).toBe('queued')
+      expect(intents).toHaveLength(1)
+      expect(intents[0]).toMatchObject({ channel: 'linq', threadIsDirect: false, status: 'pending' })
+      expect(reply).toMatch(/change|request/iu)
+      expect(reply).toMatch(/cancel|off|withdraw|scrap|drop/iu)
+      expect(reply).toMatch(/unchanged|same|as (?:it|they) (?:was|were)|as before|still|stays|carry on|didn[’']t alter|did not alter/iu)
+      expect(reply).not.toMatch(/(?:challenge|game) (?:is |was |has been )?cancelled|restart|calendar days|remind|do you agree/iu)
+      expect(reply).not.toContain('?')
       expect(reply.length).toBeLessThan(350)
     } finally {
       await removeRealCodexTemporaryPaths([workingDirectory, ...permissionHome.temporaryPaths, ...config.temporaryPaths])
