@@ -14,6 +14,12 @@ export const MURPH_ASSISTANT_SKILLS_ROOT_REF =
 
 export const ASSISTANT_SKILLS = [
   {
+    slug: 'bluetooth-device-help',
+    name: 'bluetooth-device-help',
+    triggerHint:
+      'Use for Bluetooth wearable connection help in the Murph iPhone app, starting with WHOOP: the Ask Murph handoff, a WHOOP that will not connect to Murph, pairing, discovery, permissions, or missing live heart rate. Clarify live Bluetooth versus saved-data sync when ambiguous; cloud sync and Apple Health imports keep their existing owners.',
+  },
+  {
     slug: 'murph-onboarding',
     name: 'murph-onboarding',
     triggerHint:

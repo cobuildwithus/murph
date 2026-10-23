@@ -1,3 +1,4 @@
+import { buildBluetoothHelpInstructions } from './support/bluetooth-help.js'
 import { readHostedDelegationHintOverrides } from './support/hosted-delegation-hints.js'
 import { materializeRegimenLabelFixture, REGIMEN_FUZZY_FOOD_NAMES, REGIMEN_LABEL_SCENARIOS, REGIMEN_SHAKE_TOTALS } from './support/supplement-regimen-label-fixture.js'
 import { seedImportedRecallMeal, seedImportedRecallPhoto, SYNTHETIC_IMPORTED_MEAL } from './support/imported-record-recall-fixture.js'
@@ -45727,6 +45728,107 @@ describeRealCodex('real Codex game incomplete day e2e', () => {
       expect(reply.trim().split('\n')).toHaveLength(1)
       expect(reply).not.toMatch(/score|streak|point|day [0-9]|dayIndex|game_synthetic/iu)
       if (outcome !== 'other_player') expect(reply).not.toMatch(/Sam/iu)
+    } finally {
+      await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+    }
+  }, 360_000)
+})
+
+
+describeRealCodex('Bluetooth wearable help', () => {
+  it.each([
+    {
+      scenario: 'app handoff selects the skill and asks a short first question',
+      prompt: 'Help me connect my WHOOP to the app by Bluetooth',
+      expected: /(?:which|what).*(?:WHOOP|model|phone)|(?:what|which).*(?:show|say|screen)/iu,
+    },
+    {
+      scenario: 'natural connection request selects the skill and clarifies the purpose',
+      prompt: "my whoop won't connect to murph",
+      expected: /Bluetooth|live heart rate/iu,
+    },
+    {
+      scenario: 'known permission state gets the real iOS path',
+      prompt: 'WHOOP 5.0, iPhone. Murph says Bluetooth is not allowed. Bluetooth is on. How do I allow it?',
+      expected: /Privacy.*Security.*Bluetooth/isu,
+    },
+    {
+      scenario: 'missing first heart rate gets a sensor check',
+      prompt: 'WHOOP MG on iPhone. Murph finds it but says No heart rate yet. Bluetooth and permission are on.',
+      expected: /wrist|skin|wear|worn|WHOOP app/iu,
+    },
+    {
+      scenario: 'older band stops pairing advice',
+      prompt: 'I have a WHOOP 3.0 and an iPhone. Can I connect it to the game for live heart rate by Bluetooth?',
+      expected: /(?:not|isn[’']t|doesn[’']t|can[’']t|won[’']t|unsupported).*(?:support|connect|work)|(?:only|requires).*(?:4\.0|5\.0|MG)/isu,
+    },
+    {
+      scenario: 'available support records one private Bluetooth escalation',
+      prompt: 'WHOOP 4.0, iPhone. Bluetooth and Murph permission are on, band charged and worn nearby. I finished WHOOP sync, disconnected my tablet, retried, toggled Bluetooth and restarted my phone. Still cannot find it. Please get human support involved.',
+      expected: /(?:saved|recorded).*support|support.*(?:saved|recorded)/isu,
+    },
+    {
+      scenario: 'exhausted recovery hands off without inventing a forget screen',
+      prompt: 'WHOOP 4.0, iPhone. Bluetooth and Murph permission are on, band charged and worn nearby. I finished WHOOP sync, disconnected my tablet, retried, toggled Bluetooth and restarted my phone. Still cannot find it. There is no Forget button. Please get human support involved.',
+      expected: /support|human|triage/iu,
+    },
+  ])('$scenario', async ({ scenario, prompt, expected }) => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-bluetooth-help-e2e-'))
+    const skillsRoot = path.join(workingDirectory, 'skills')
+    const supportAvailable = scenario.startsWith('available support')
+    const feedbackRecords: Array<{ kind: string; summary: string }> = []
+    try {
+      // Keep competing skill owners available so selection is real.
+      await cp(resolveAssistantSkillsRoot(), skillsRoot, { recursive: true })
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome,
+        developerInstructions: buildBluetoothHelpInstructions(),
+        dynamicTools: [MURPH_DEVICE_TOOL, ...(supportAvailable ? [MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL] : [])],
+        hostedToolContext: supportAvailable ? createRealCodexSupportHostedToolContext('direct') : undefined,
+        productFeedbackRecorder: supportAvailable ? {
+          async recordProductFeedback(feedback) {
+            feedbackRecords.push(feedback)
+            return { recorded: true }
+          },
+          discardProductFeedback() {},
+          readProductFeedback() { return null },
+        } : undefined,
+        env: { ...config.env, [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot },
+        model: config.model, modelProvider: config.modelProvider,
+        prompt, reasoningEffort: 'medium', sandbox: 'workspace-write', workingDirectory,
+      })
+      const actions = readCapabilityRoutingActions(result.jsonEvents)
+      const commands = actions.filter((action) => action.kind === 'command')
+      const reply = result.finalMessage.trim()
+      process.stdout.write(`[bluetooth-help-e2e] ${JSON.stringify({ scenario, reply })}\n`)
+      expect(commands.some((action) => action.ok && action.command.includes('bluetooth-device-help/SKILL.md'))).toBe(true)
+      const calls = actions.filter((action) => action.kind === 'dynamic')
+      expect(calls).toHaveLength(supportAvailable ? 1 : 0)
+      expect(feedbackRecords).toHaveLength(supportAvailable ? 1 : 0)
+      if (supportAvailable) {
+        expect(calls[0]?.tool).toBe(MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL.name)
+        expect(calls[0]?.argumentsValue.kind).toBe('frustration')
+        expect(calls[0]?.argumentsValue.relatedChangelogItemIds ?? []).toEqual([])
+        expect(feedbackRecords[0]?.summary).toMatch(/^Support escalation: \S/u)
+        expect(reply).toMatch(/triage|account-linked/iu)
+        expect(reply).not.toMatch(/ticket|email(?:ed| sent)|will (?:contact|reply|get back)/iu)
+      }
+      // Ordinary read-only context discovery is allowed; device effects are not.
+      const forbiddenCommands = commands.filter((action) =>
+        /vault-cli\s+(?:device|wearable)|vault-cli[^;\n]*(?:save|create|delete|set-status)|\b(?:curl|wget|rm|touch|mkdir)\b/u.test(action.command),
+      )
+      expect(forbiddenCommands.map((action) => action.command.replaceAll(workingDirectory, '<WORKSPACE>'))).toEqual([])
+      expect(reply.length).toBeGreaterThan(15)
+      expect(reply.length).toBeLessThan(650)
+      expect(reply).toMatch(expected)
+      expect(reply).not.toMatch(/(?:I|we)(?:[’']ve| have)? (?:can see|checked|detected|reset|connected|fixed|opened a ticket|notified|emailed)|your Bluetooth is (?:off|disabled)|your (?:band|WHOOP) is (?:uncharged|connected to another)/iu)
+      expect(reply).not.toMatch(/(?:enable|turn on) (?:the )?(?:Heart Rate Broadcast|HR Broadcast)|Settings\s*>\s*Devices|factory reset|reinstall|sign out|https?:/iu)
+      if (scenario.startsWith('app handoff')) expect(reply).toContain('?')
+      if (scenario.startsWith('older band')) expect(reply).not.toMatch(/try again|restart|toggle|open Settings/iu)
+      if (scenario.startsWith('exhausted')) expect(reply).not.toMatch(/tap.*Forget|I(?:[’']ve| have) (?:sent|saved|recorded|escalated)|will (?:contact|reply|get back)/iu)
     } finally {
       await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
     }

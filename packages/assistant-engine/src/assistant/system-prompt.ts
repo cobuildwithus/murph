@@ -1607,6 +1607,7 @@ function buildAssistantSkillRouteHintText(
     "- When chronic illness, persistent pain, disability, a flare, or self-management is central, read the matching chronic-illness, chronic-pain, stress, physical-therapy, or self-management skill before answering.",
     "- Skills live at `$MURPH_ASSISTANT_SKILLS_ROOT/<slug>/SKILL.md`. Read the primary owner for the user's visible outcome. If ambiguous, inspect at most two for discovery; then follow handoffs and load each safety/execution owner. Do not preload or use a discovery CLI.",
     '- Meal capture and saved-day reviews: run `cat "$MURPH_ASSISTANT_SKILLS_ROOT/food-journal/SKILL.md"` first unless already loaded this turn. When a new meal needs label lookups, run them in that same tool step: `vault-cli food search-labels-batch` with one `--query` per food, `--generic` for ordinary ingredients in USDA order (`bananas raw`), a separate branded/menu batch, and one official web search for a named restaurant or packaged item. The loaded skill supplies the command contract: execute its typed CLI commands without preflight help/schema, repository searches, or CLI-source inspection.',
+    "- Bluetooth wearable help, WHOOP not connecting to Murph, or missing live heart rate -> bluetooth-device-help before setup or data-sync guidance. Clarify Bluetooth versus saved-data sync when unclear; local Bluetooth has no device logs or remote diagnostic tool.",
     "- Setup: explicit achievable-outcome help (`help me ...`/Goals CTA) -> goal-setup before domain/Commons knowledge; facts -> domain. For a new proposal, run `cat \"$MURPH_ASSISTANT_SKILLS_ROOT/goal-setup/SKILL.md\"` alone first; do not write yet. On acceptance, execute its persist section using the loaded instructions and completed research; do not restart setup. Also: murph-onboarding, hosted-low-usage, signup-link, experiment-onboarding, behavior-followthrough.",
     "- Automatic meal capture: automatic-meal-capture for the iPhone app, Photos permission, background timing, Meals review, import verification, and photo-only meal enrichment.",
     "- Sleep/readiness: sleep-improvement, circadian-rhythm, sleep-recovery-readiness, hrv-resting-heart-rate, energy-fatigue.",
@@ -1672,7 +1673,7 @@ function buildAssistantIosAppDownloadGuidanceText(
 function buildAssistantHealthRelayGuidanceText(
   androidAppAvailable: boolean,
 ): string {
-  const appleHealthRelayGuidance = `Apple Health relay:
+  const appleHealthRelayGuidance = `Apple Health relay (saved health data, not live Bluetooth heart rate):
 - Apple Health works now in the Murph iPhone app. For Apple Watch, WHOOP, Zepp/Amazfit, Xiaomi/Mi Fitness, RingConn, COROS, Suunto, or supported Huawei Health relay setup, open Murph, sign in, and connect Apple Health.
 - If connected Apple Health data is stale or missing, ask the member to open Murph on their iPhone so its app-mediated import can run, then re-check the metric and date. Opening Apple's Health app does not refresh Murph. Do not promise immediate sync or suggest reconnecting unless authentication or permission failed.
 - WHOOP limits third-party access. Direct sync omits steps; Apple Health may relay them. Do not infer/request missing steps.

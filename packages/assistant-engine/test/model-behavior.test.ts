@@ -946,7 +946,7 @@ describe('assistant local PDF evidence guidance', () => {
     expect(prompt).toContain(
       'Apple Health works now in the Murph iPhone app. For Apple Watch, WHOOP, Zepp/Amazfit, Xiaomi/Mi Fitness, RingConn, COROS, Suunto, or supported Huawei Health relay setup, open Murph, sign in, and connect Apple Health.',
     )
-    expect(prompt).toContain('Apple Health relay:')
+    expect(prompt).toContain('Apple Health relay (saved health data, not live Bluetooth heart rate):')
     expect(prompt).toContain('Android Health Connect relay:')
     expect(prompt).toContain('WHOOP limits third-party access')
     expect(prompt).toContain(
@@ -1073,7 +1073,7 @@ describe('assistant local PDF evidence guidance', () => {
     expect(readHostedWearableProviderList(prompt)).toBeNull()
     expect(prompt).not.toContain('Hosted wearable connection links are available')
     expect(prompt).toContain('Murph iOS app:')
-    expect(prompt).toContain('Apple Health relay:')
+    expect(prompt).toContain('Apple Health relay (saved health data, not live Bluetooth heart rate):')
     expect(prompt).not.toContain('Android Health Connect relay:')
     expect(prompt).toContain(
       'Apple Health works now in the Murph iPhone app. For Apple Watch, WHOOP, Zepp/Amazfit, Xiaomi/Mi Fitness, RingConn, COROS, Suunto, or supported Huawei Health relay setup, open Murph, sign in, and connect Apple Health.',
@@ -1987,7 +1987,7 @@ describe('assistant conversation scope', () => {
     expect(prompt).toContain(
       'is the requested canonical public Murph iOS App Store listing',
     )
-    expect(prompt).not.toContain('Apple Health relay:')
+    expect(prompt).not.toContain('Apple Health relay (saved health data, not live Bluetooth heart rate):')
     expect(prompt).not.toContain('Android Health Connect relay:')
     expect(prompt).not.toContain('Mobvoi/TicWatch:')
     expect(prompt).not.toContain('https://play.google.com/store/apps/details?id=ai.withmurph.app')
