@@ -1459,3 +1459,6 @@ Hosted photo import CPU reduction and measurement limits are tracked in
 `../packages/assistant-runtime/README.md` owns the optional timing field.
 
 Private image provider variant correction: [game Images variant IDs](exec-plans/completed/2026-10-22-game-images-variant-ids.md).
+
+Game v1 additive runtime reader compatibility and rollout floor are recorded in
+[`runtime reader floor`](exec-plans/completed/2026-10-22-game-v1-runtime-reader.md).
