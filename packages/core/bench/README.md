@@ -1,4 +1,83 @@
-# Device import CPU reproduction
+# Core diagnostic benchmarks
+
+## Meal owner read baseline
+
+`meal-read.ts` is an opt-in, synthetic diagnostic of the actual `readOwnedEvent`
+and canonical event-shard storage path. It makes no provider/production calls
+and accepts no existing vault path. Each run creates its own `.artifacts` child
+and removes that fixture on completion or handled failure. Output is JSON timing samples,
+counts, byte totals, and parity results; no events, identifiers, or local paths.
+
+From the repository root, after the normal frozen dependency install on the
+repository-supported Node/pnpm versions:
+
+```sh
+node scripts/run-typescript.mjs package --project packages/core/bench/tsconfig.json --pretty false
+
+apps/cloudflare/node_modules/.bin/esbuild packages/core/bench/meal-read.ts \
+  --bundle --splitting --platform=node --format=esm --target=node24 \
+  --tsconfig=tsconfig.base.json --outdir=.artifacts/meal-read-bench \
+  --out-extension:.js=.mjs \
+  --banner:js='import { createRequire } from "node:module"; const require = createRequire(import.meta.url);'
+
+node .artifacts/meal-read-bench/meal-read.mjs
+```
+
+| Environment variable | Default | Inclusive range |
+| --- | ---: | ---: |
+| `MURPH_MEAL_READ_ROWS` (unrelated rows) | 24,000 | 30–240,000 |
+| `MURPH_MEAL_READ_MONTHS` | 24 | 3–120 |
+| `MURPH_MEAL_READ_NOTE_BYTES` | 512 | 64–4,000 |
+| `MURPH_MEAL_READ_ITERATIONS` (measured pairs) | 10 | 3–40 |
+| `MURPH_MEAL_READ_WARMUPS` (unmeasured pairs) | 2 | 1–10 |
+
+Rows must cover every month. For example:
+
+```sh
+MURPH_MEAL_READ_ROWS=120000 MURPH_MEAL_READ_MONTHS=48 \
+  node .artifacts/meal-read-bench/meal-read.mjs
+```
+
+Setup validates every generated row, then writes each monthly shard once.
+The fixed synthetic history ends in January 2026: older shards alternate gzip
+and Brotli using core's compressor settings, and the newest shard remains plain.
+Every eighth unrelated row is a note; the rest are observations with varying
+metrics, values, timestamps, and external references. Three meal revisions span
+both archive formats and plain storage, including an old owner and deliberately
+out-of-order revisions. Byte totals cover ledger data, excluding vault metadata.
+
+Every read must equal an independently constructed expected result, including
+the complete event, canonical event ID, and logical ledger path. A separate,
+untimed append proves both readers observe a new revision. These checks do not
+replace the existing owner-conflict, reassignment, tombstone, corruption,
+unrelated-record, archive, and path-safety tests; the benchmark changes none of
+those owners or validation rules.
+
+Warm pairs alternate reader order. `warm-reads` reports wall and process CPU
+min/median/max, the paired **owned minus control** differences, ratios of medians,
+and all numeric samples. Positive differences mean the control used less time
+on this fixture. `readEvent` is a diagnostic one-scan control with a known event
+ID; it does not discover owner candidates or detect duplicate live owners and
+is **not a contract-equivalent replacement**. The difference includes owner
+matching, grouping, and validation as well as the extra shard read/decode.
+
+The split bundle keeps the first core import separately measurable. `core-import`
+is one sample of loading/evaluating that bundled source graph; process-to-module
+ready additionally includes Node/entry startup. Neither measures the production
+CLI setup or its complete dispatch path. Fixture setup, validation, compression,
+warmups, parity checks, and cleanup are excluded from read timings. Reads are
+warm in-process measurements, not cold filesystem measurements; process CPU
+includes GC and worker threads, and wall minus CPU is not a disk-wait estimate.
+
+Next experiment: rerun fixed pairs at several row counts, then vary month count
+at a fixed row count, on the same runtime and resource allocation. Compare effect
+sizes and variability in both wall and CPU. If the owned/control gap grows with
+ledger bytes, profile this synthetic workload to separate JSON/decompression CPU
+from filesystem/path-check work before proposing an owner-preserving change.
+This baseline does not establish the cause of production seconds or a production
+speedup. No cache, index, telemetry patch, or production optimization is included.
+
+## Device import CPU reproduction
 
 Run this synthetic benchmark only in a disposable Docker container. It exercises
 the real core import and canonical-write owners without provider credentials,

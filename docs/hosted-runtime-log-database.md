@@ -1696,8 +1696,8 @@ and children rejected before entering the CLI have no invented command timing.
 Legacy batch output, counts, lengths, durations and failure handling are unchanged.
 
 Bounds are source-owned: 32 distinct command/outcome entries per report/active
-window; 31 fixed phase names (the original 11, six rebuild names, four Patterns names, three load names, five
-metric subphases, and the canonical-write wait and importer load names); 64 started
+window; 34 fixed phase names (the original 11, six rebuild names, four Patterns names, three load names, five
+metric subphases, canonical-write wait, importer load, and three event-read names); 64 started
 scoped spans per invocation (plus fixed lifecycle samples); at most 8,192 bytes
 per complete UDP envelope (including the ephemeral key/ticks) and 256 received packets per window. The 8 KiB cap is below
 the supported macOS 9 KiB UDP datagram limit; no host setting or permission is
@@ -1759,8 +1759,8 @@ microseconds, eight histogram buckets, command/outcome identity, failure fields,
 32-command / 64-scoped-span caps, UDP 8,192-byte and HTTP 16,384-byte ceilings,
 whole-command trimming and disabled-scope no-op behavior are unchanged. No entity
 counts, IDs, paths, arguments, content, result values or error text are added.
-The enum length itself owns the current 29-entry per-command shape bound (including the Patterns, load and metric
-subphases); no transport limit is widened to accommodate the extra phases.
+The enum length itself owns the per-command shape bound; no transport limit is
+widened to accommodate additional phases.
 
 | New phase | Existing operation measured |
 | --- | --- |
@@ -1993,9 +1993,126 @@ are measured exactly while hold time stays in `dispatch`, that timeout errors
 keep their identity, and that each re-entrant acquisition is one sample.
 Vault-usecases `runtime.test.ts` shows one sample per importer loader call,
 original value and error identity, and no effect outside a CLI scope.
-Runtime-state `cli-timing.test.ts` pins the 31-name catalog. The history-backed
-pre-admission reader check runs with
+Runtime-state `cli-timing.test.ts` pins the current finite phase catalog. The
+history-backed pre-admission reader check runs with
 `MURPH_CLI_WAIT_LOAD_PHASE_COMPAT_BASE=<reviewed base sha>`.
+
+### Exact event read phases (reader-before-producer)
+
+Three fixed names expose the existing canonical read path inside CLI dispatch:
+
+| Phase | Exact boundary |
+| --- | --- |
+| `event-core-load` | Each existing `loadRuntimeModule('@murphai/core')` call in `exact-event-record.ts`, for exact-event and meal/document-owner reads. Includes first module evaluation, cached imports and rejected imports; excludes the subsequent reader and record conversion. Invalid exact lookups rejected before import have no sample. |
+| `event-owner-candidates` | In `readOwnedEvent`, listing all logical event shards and the entire first scan, including physical-source resolution, path checks, reading, gzip/Brotli decoding, JSON parsing and validation of matching owner records. Includes listing/read/validation failures and the no-candidate rejection. Unrelated records retain their existing lack of contract validation. |
+| `event-owner-revisions` | The entire second scan for candidate IDs, validation of their revisions across owner changes, latest-revision selection, deleted/reassigned-owner filtering, ambiguity/missing rejection and result construction. Absent if candidate discovery fails. |
+
+Timers end in `finally`; existing returns, error objects and usecase error
+mapping remain unchanged. There is no extra scan, I/O, lock, cache or retry.
+These are inclusive wall times, including awaited I/O and synchronous decoding;
+no process CPU is sampled across awaited work that could overlap batch siblings.
+No per-shard span, row/byte count, argument, ID, path, content or error text is
+added. Each reached boundary consumes one existing scoped span, independent of
+shard count; the 64-span budget, outcomes, trimming and drop behavior are unchanged.
+Outside an active timing scope the timers are no-ops. Exact event-ID reads get
+the load span but do not acquire invented owner-scan spans.
+
+**Interpretation.** These spans are nested inside the existing caller timing;
+do not add them to `dispatch`, subtract maxima, or subtract sums from unequal
+sample populations. Repeated reads increase phase counts, not command calls.
+Missing phases are unknown, never zero. These measurements distinguish module
+loading from the two scans on future traffic; synthetic decode costs do not
+establish the cause of earlier slow production reads. No production vault size
+or content inspection is needed. Read paths acquire no canonical write lock;
+existing mutation-lock timing remains separate.
+
+**Rollout and observation.** Verify the Web usage reader first, then the Worker
+forwarding/body reader, then the runner containing both producers and its
+in-container receiver. An older reader drops the whole optional timing object
+when it encounters a new phase while preserving legacy profile, token and usage
+accounting; new readers accept old producers. A reader rollback under new
+producers loses optional timing coverage. This change makes no deployment claim.
+Start the 24-hour preliminary and 72-hour baseline natural-traffic windows at
+the recorded, verified runner deployment, after both readers are verified.
+These windows share a start and overlap; they are not independent comparisons.
+Wait for each full window, and do not generate production calls to fill it.
+
+For bounded aggregate inspection on the primary usage database, set `$1` to that
+UTC deployment instant and `$2` to `24` or `72`. The query retains at most 50,000
+initial-provider (`provider_request_ordinal = 0`), first-attempt usage rows,
+including all provider outcomes. It reads only validated optional timing;
+no identifiers or raw fields are returned. Coverage columns repeat beside each
+phase and must not be summed again. `profiles_with_phase` counts retained usage
+profiles, while `phase_samples` may include repeated reads within one command.
+
+```sql
+WITH bounds AS (
+  SELECT $1::timestamptz AT TIME ZONE 'UTC' AS start_at,
+         ($1::timestamptz AT TIME ZONE 'UTC') + make_interval(hours => $2::int) AS end_at
+  WHERE $2::int IN (24, 72)
+), rows AS MATERIALIZED (
+  SELECT turn_profile_json -> 'cliTiming' AS t
+  FROM hosted_ai_usage CROSS JOIN bounds
+  WHERE provider = 'codex-cli' AND attempt_count = 1 AND provider_request_ordinal = 0
+    AND occurred_at >= start_at AND occurred_at < end_at
+  ORDER BY occurred_at DESC
+  LIMIT 50000
+), valid AS MATERIALIZED (
+  SELECT t FROM rows WHERE t ->> 'schema' = 'murph.cli-timing.v1'
+), coverage AS (
+  SELECT (SELECT count(*) FROM rows) AS usage_rows,
+         (SELECT count(*) = 50000 FROM rows) AS row_cap_hit,
+         count(*) AS rows_with_timing,
+         sum((t ->> 'reportCount')::numeric) AS accepted_root_reports,
+         sum((t ->> 'droppedCalls')::numeric) AS dropped_calls,
+         sum((t ->> 'droppedSpans')::numeric) AS dropped_spans,
+         sum((t ->> 'outOfWindowReports')::numeric) AS cross_window_reports,
+         bool_or((t ->> 'transportTruncated')::boolean) AS packet_cap_hit
+  FROM valid
+), commands AS (
+  SELECT c ->> 'command' AS command, c ->> 'outcome' AS outcome, c
+  FROM valid CROSS JOIN LATERAL jsonb_array_elements(t -> 'commands') c
+  WHERE c ->> 'command' IN ('meal show', 'meal edit', 'meal remove-photo')
+    AND c ->> 'outcome' IN ('ok', 'error', 'unknown')
+), calls AS (
+  SELECT command, outcome, count(*) AS profiles_with_command,
+         sum((c ->> 'calls')::numeric) AS retained_calls
+  FROM commands GROUP BY command, outcome
+), phases AS (
+  SELECT command, outcome, p ->> 'phase' AS phase,
+         count(*) AS profiles_with_phase,
+         sum((p ->> 'count')::numeric) AS phase_samples,
+         sum((p ->> 'sumUs')::numeric) / 1000 AS sum_ms,
+         max((p ->> 'maxUs')::numeric) / 1000 AS max_ms
+  FROM commands CROSS JOIN LATERAL jsonb_array_elements(c -> 'phases') p
+  WHERE p ->> 'phase' IN ('total', 'setup', 'dispatch',
+    'event-core-load', 'event-owner-candidates', 'event-owner-revisions')
+  GROUP BY command, outcome, p ->> 'phase'
+)
+SELECT p.*, p.sum_ms / nullif(p.phase_samples, 0) AS mean_ms,
+       c.profiles_with_command, c.retained_calls, coverage.*
+FROM coverage LEFT JOIN phases p ON true
+LEFT JOIN calls c USING (command, outcome)
+ORDER BY command, outcome, phase
+LIMIT 100;
+```
+
+A row-cap hit means incomplete window coverage; inspect narrower fixed windows.
+No timing/phase does not establish no work: older producers, report/body trimming,
+span/packet caps, late/lost transport and unfinished or killed calls leave gaps.
+Drop counters describe only known loss and cannot quantify unreceived reports.
+Even zero drops do not establish full coverage or independent user/turn samples.
+Histograms retain only the documented bucket intervals; profile averages do not
+recover per-call percentiles. No timing can be attributed retroactively.
+
+Focused proof is in core `event-owner-timing.test.ts`, vault-usecases
+`runtime.test.ts`, and runtime-state `cli-timing.test.ts`. Run the existing
+history-backed runtime-state and assistant-engine `cli-timing-profile.test.ts`
+checks with
+`MURPH_CLI_EVENT_READ_PHASE_COMPAT_BASE=4ec40920fca1872c8324d9325c23a9e50ba39754`.
+They load the actual earlier readers; the hosted check also preserves the full
+legacy usage/profile when the new optional timing is dropped. A skipped history
+check is not compatibility evidence.
 
 ### Private weekly usage audit rejection
 
