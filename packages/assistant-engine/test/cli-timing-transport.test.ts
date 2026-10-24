@@ -150,9 +150,10 @@ test('unavailable receiver is non-blocking and existing restrictive environment 
 
 
 test.each([
-  ['meal edit', [{ code: 'VALIDATION_ERROR', stage: 'validation', count: 1,
-    validation: { field: 'nutritionProteinGrams', code: 'invalid_type', missing: true } }]],
-  ['meal remove-photo', [{ code: 'invalid_operation', stage: 'unknown', count: 1 }]],
+  ['meal edit', [{ code: 'unknown', stage: 'unknown', count: 1,
+    sourceCause: { code: 'vault_error', vaultCode: 'EVENT_LEDGER_SHARD_AMBIGUOUS' } }]],
+  ['meal remove-photo', [{ code: 'unknown', stage: 'unknown', count: 1,
+    sourceCause: { code: 'vault_error', vaultCode: 'MEAL_PHOTO_RETENTION_REFERENCE_INVALID' } }]],
 ] as const)('natural sender bounds the datagram and accounts for trimmed command summaries (%s first)', async (firstCommand, expectedFailures) => {
   const receiver = createCodexCliTimingReceiver()
   const { value } = endpoint(receiver)
@@ -176,8 +177,9 @@ test.each([
           for (const phase of CLI_TIMING_PHASES) await timeCliPhase(phase, async () => {
             clock += 1_000_000_000_000n
           })
-          if (failed && command === 'meal remove-photo') {
-            throw Object.assign(Error('PRIVATE_SENTINEL'), { code: 'invalid_operation' })
+          if (failed && command === firstCommand) {
+            throw Object.assign(Error('PRIVATE_SENTINEL é🍲'), { code: 'vault_error',
+              context: { vaultCode: expectedFailures[0].sourceCause.vaultCode } })
           }
           if (failed) throw Object.assign(Error('PRIVATE_SENTINEL'), { name: 'Incur.ValidationError',
             publicIssues: [{ path: command === 'meal edit' ? 'nutritionProteinGrams' : 'body', code: 'invalid_type', missing: true }],

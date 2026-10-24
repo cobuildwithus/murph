@@ -800,10 +800,11 @@ test("allowlisted commands preserve original errors and round-trip only finite v
       let otherReport!: CliTiming;
       await assert.rejects(withCliTiming(() => timeCliDispatch(command, async () => { throw other; }),
         (value) => { otherReport = value; }), (caught) => caught === other);
-      assert.deepEqual(otherReport.commands[0]!.failures, [{ code: otherCode, stage: "unknown", count: 1 }]);
+      assert.deepEqual(otherReport.commands[0]!.failures, [{ code: otherCode, stage: "unknown", count: 1,
+        ...(command === "meal edit" && otherCode === "unknown" ? { sourceCause: { code: "unrecognized_code" } } : {}) }]);
       assert.deepEqual(normalizeCliTiming({ ...legacy, commands: [{ ...legacy.commands[0],
         failures: [{ code: otherCode, stage: "unknown", count: 1, validation }] }] })?.commands[0]!.failures,
-        otherReport.commands[0]!.failures);
+        [{ code: otherCode, stage: "unknown", count: 1 }], "Wire absence is never backfilled.");
     }
     for (const invalid of [{ ...validation, field: "vault" }, { ...validation, field: `${field}.0` },
       { ...validation, code: "PRIVATE_SENTINEL" }, { ...validation, missing: "false" }]) {
@@ -1067,10 +1068,11 @@ test("research batch rejection is private own data, finite, gated and inert to h
     new Proxy({}, { getOwnPropertyDescriptor: () => { throw new Error("PRIVATE_TRAP"); } }), "cliTimingRejection"), {});
 });
 
-test("a source proxy's descriptor trap can supply only an allowlisted literal, never arbitrary data", async () => {
-  // Not proxy detection: the descriptor trap may run. Only a fixed primitive leaves.
+test("an original error proxy cannot manufacture typed evidence or execute a descriptor trap", async () => {
+  let reads = 0;
   const proxied = (rejection: unknown) => new Proxy(new Error("PRIVATE_ERROR_MESSAGE"), {
     getOwnPropertyDescriptor: (target, key) => {
+      reads += 1;
       if (key === "code") return { value: "research_scout_invalid_batch_payload", configurable: true, enumerable: true, writable: true };
       if (key === "cliTimingRejection") return { value: rejection, configurable: true, enumerable: false, writable: false };
       if (key === "context" || key === "stage") return { value: { stage: "PRIVATE_STAGE" }, configurable: true, enumerable: true, writable: true };
@@ -1084,13 +1086,13 @@ test("a source proxy's descriptor trap can supply only an allowlisted literal, n
     assert.ok(!JSON.stringify(report).includes("PRIVATE"));
     return report.commands[0]!.failures;
   };
-  const base = { code: "research_scout_invalid_batch_payload", stage: "unknown", count: 1 } as const;
-  assert.deepEqual(await capture(proxied("public_concept")), [{ ...base, rejection: "public_concept" }]);
+  const base = { code: "unknown", stage: "unknown", count: 1 } as const;
+  assert.deepEqual(await capture(proxied("public_concept")), [{ ...base }]);
   for (const value of ["PRIVATE_REASON", { PRIVATE: "PRIVATE_VALUE" }, ["envelope"], new String("envelope")]) {
     const failures = await capture(proxied(value));
     assert.deepEqual(failures, [{ ...base }]);
-    assert.deepEqual(cliTimingRejectionFailure("research scout-batch", base.code, proxied(value), "cliTimingRejection"), {});
   }
+  assert.equal(reads, 0);
 });
 
 test("rejection variants share failure caps, coalesce exactly and drop only detail when malformed on the wire", () => {
@@ -1627,11 +1629,14 @@ test("invalid_operation is exact meal remove-photo evidence, never a global fail
     let report!: CliTiming;
     await assert.rejects(withCliTiming(() => timeCliDispatch(command, async () => { throw original; }),
       value => { report = value; }), caught => caught === original);
-    assert.deepEqual(report.commands[0]!.failures, [{ code: expected, stage: "unknown", count: 1 }]);
+    assert.deepEqual(report.commands[0]!.failures, [{ code: expected, stage: "unknown", count: 1,
+      ...(command === "meal edit" ? { sourceCause: { code: "unrecognized_code" } } : {}) }]);
     assert.deepEqual(normalizeCliTiming(report), report);
     const incoming = { ...report, commands: [{ ...report.commands[0],
       failures: [{ code: "invalid_operation", stage: "unknown", count: 1 }] }] };
-    assert.deepEqual(normalizeCliTiming(incoming), report);
+    assert.deepEqual(normalizeCliTiming(incoming), { ...report, commands: [{ ...report.commands[0],
+      failures: [{ code: expected, stage: "unknown", count: 1 }],
+    }] });
     assert.equal(JSON.stringify(report).includes("PRIVATE_SENTINEL"), false);
     assert.equal(normalizeCliTiming({ ...incoming, commands: [{ ...incoming.commands[0], outcome: "ok" }] })
       ?.commands[0]!.failures, undefined);
@@ -1654,7 +1659,8 @@ test("invalid_operation is exact meal remove-photo evidence, never a global fail
     await withCliTiming(() => timeCliDispatch("meal remove-photo", async () => {
       noteCliTimingFailure(error); noteCliTimingExit(1, false);
     }), value => { report = value; });
-    assert.deepEqual(report.commands[0]!.failures, [{ code: "unknown", stage: "unknown", count: 1 }]);
+    assert.deepEqual(report.commands[0]!.failures, [{ code: "unknown", stage: "unknown", count: 1,
+      sourceCause: { code: "missing_code" } }]);
     assert.equal(JSON.stringify(report).includes("PRIVATE_SENTINEL"), false);
   }
   assert.equal(reads, 0);
@@ -1706,7 +1712,7 @@ test.skipIf(!mealFailureCompatibilityBase)("actual pre-meal-attribution reader l
 
 const sourceCauseCases = [
   ["meal edit", ["contract_invalid", "invalid_timestamp", "vault_error"]],
-  ["meal remove-photo", ["vault_error"]],
+  ["meal remove-photo", ["contract_invalid", "vault_error"]],
   ["food search-labels-batch", [
     "food_labels_api_auth_failed", "food_labels_api_rate_limited", "food_labels_api_request_timed_out",
     "food_labels_api_service_unavailable", "food_labels_api_response_failed",
@@ -1726,7 +1732,7 @@ test("source causes preserve original errors, legacy code/stage and first-observ
     const original = Object.assign(new Error("PRIVATE_SENTINEL"), { code, context,
       cause: { code: "PRIVATE_SENTINEL" }, sourceCause: { code: "PRIVATE_SENTINEL" } });
     const visible = JSON.stringify(original);
-    const sourceCause: CliTimingSourceCause = { code, ...(command === "meal remove-photo"
+    const sourceCause: CliTimingSourceCause = { code, ...(command === "meal remove-photo" && code === "vault_error"
       ? { vaultCode: "MEAL_PHOTO_RETENTION_PRECONDITION_FAILED" as const } : {}) };
     let report!: CliTiming;
     await assert.rejects(withCliTiming(() => timeCliDispatch(command, async () => {
@@ -1787,18 +1793,18 @@ test("source cause admission is exact, command gated and independent of arbitrar
   }
 });
 
-test("source cause own descriptors cannot invoke getters, coercion, prototypes or cause chains", async () => {
+test("original source cause rejects proxies, getters, coercion, prototypes and cause chains", async () => {
   const { noteCliTimingFailure } = await import("../src/node/cli-timing.ts");
   let reads = 0;
   const getter = { get() { reads += 1; throw Error("PRIVATE_SENTINEL"); } };
   const revoked = Proxy.revocable({}, {}); revoked.revoke();
-  const hostile = new Proxy({}, { getOwnPropertyDescriptor() { throw Error("PRIVATE_SENTINEL"); },
+  const hostile = new Proxy({}, { getOwnPropertyDescriptor: getter.get,
     get: getter.get, getPrototypeOf: getter.get, ownKeys: getter.get });
   const cases: Array<[unknown, CliTimingSourceCause | undefined]> = [
-    [Object.defineProperty({}, "code", getter), undefined],
-    [Object.create({ code: "vault_error", context: { vaultCode: "MEAL_PHOTO_RETENTION_MANIFEST_INVALID" } }), undefined],
-    [{ cause: { code: "vault_error" } }, undefined],
-    [hostile, undefined], [revoked.proxy, undefined],
+    [Object.defineProperty({}, "code", getter), { code: "missing_code" }],
+    [Object.create({ code: "vault_error", context: { vaultCode: "MEAL_PHOTO_RETENTION_MANIFEST_INVALID" } }), { code: "missing_code" }],
+    [{ cause: { code: "vault_error" } }, { code: "missing_code" }],
+    [hostile, { code: "missing_code" }], [revoked.proxy, { code: "missing_code" }],
     [{ code: "vault_error", context: hostile }, { code: "vault_error" }],
     [Object.defineProperty({ code: "vault_error" }, "context", getter), { code: "vault_error" }],
     [{ code: "vault_error", context: Object.create({ vaultCode: "MEAL_PHOTO_RETENTION_MANIFEST_INVALID" }) }, { code: "vault_error" }],
@@ -1811,23 +1817,28 @@ test("source cause own descriptors cannot invoke getters, coercion, prototypes o
   cases.push([good, { code: "vault_error", vaultCode: "MEAL_PHOTO_RETENTION_MANIFEST_INVALID" }]);
   for (const [error, sourceCause] of cases) {
     let report!: CliTiming;
-    // Capture without asking the unchanged application/EPIPE error path to
-    // inspect deliberately hostile metadata; this pins the diagnostic boundary.
-    await withCliTiming(() => timeCliDispatch("meal remove-photo", async () => {
-      noteCliTimingFailure(error); noteCliTimingExit(1, false);
-    }), value => { report = value; });
+    let caught: unknown;
+    // assert.rejects itself inspects hostile errors; compare identity directly.
+    try {
+      await withCliTiming(() => timeCliDispatch("meal remove-photo", async () => {
+        noteCliTimingFailure(error); throw error;
+      }), value => { report = value; });
+    } catch (value) { caught = value; }
+    assert.equal(caught, error);
     assert.deepEqual(report.commands[0]!.failures, [{ code: "unknown", stage: "unknown", count: 1,
       ...(sourceCause ? { sourceCause } : {}) }]);
     assert.deepEqual(normalizeCliTiming(report), report);
     assert.equal(JSON.stringify(report).includes("PRIVATE_SENTINEL"), false);
   }
-  // A proxy can manufacture a descriptor, but only an exact finite primitive
-  // can escape it. No getter, enumeration or prototype trap is needed.
+  // Even an admitted literal manufactured by a proxy is not observed evidence.
   for (const value of ["MEAL_PHOTO_RETENTION_MANIFEST_INVALID", "PRIVATE_SENTINEL", {}, ["MEAL_PHOTO_RETENTION_MANIFEST_INVALID"]]) {
-    const context = new Proxy({}, { getOwnPropertyDescriptor: () => ({ value, configurable: true }),
+    const context = new Proxy({}, { getOwnPropertyDescriptor: () => { reads += 1; return { value, configurable: true }; },
       get: getter.get, ownKeys: getter.get, getPrototypeOf: getter.get });
-    assert.deepEqual(cliTimingSourceCauseFailure("meal remove-photo", "vault_error", { context }, "context"),
-      { sourceCause: { code: "vault_error", ...(value === "MEAL_PHOTO_RETENTION_MANIFEST_INVALID" ? { vaultCode: value } : {}) } });
+    let report!: CliTiming;
+    await withCliTiming(() => timeCliDispatch("meal remove-photo", async () => {
+      noteCliTimingFailure({ code: "vault_error", context }); noteCliTimingExit(1, false);
+    }), result => { report = result; });
+    assert.deepEqual(report.commands[0]!.failures![0]!.sourceCause, { code: "vault_error" });
   }
   noteCliTimingFailure(hostile); // Inactive observation does no work.
   assert.equal(reads, 0);
@@ -1942,4 +1953,88 @@ test.skipIf(!sourceCauseCompatibilityBase)("actual base reader drops only source
   delete expected.commands[0]!.failures; delete expected.commands[0]!.droppedFailures;
   assert.deepEqual(old.normalizeCliTiming(expected), expected);
   assert.deepEqual(normalizeCliTiming(expected), expected);
+});
+
+const mealVaultCauseCases = [
+  ["meal edit", "contract_invalid", ["EVENT_CONTRACT_INVALID", "VAULT_INVALID_JSONL"]],
+  ["meal edit", "vault_error", ["CANONICAL_WRITE_LOCKED", "EVENT_LEDGER_SHARD_AMBIGUOUS"]],
+  ["meal remove-photo", "contract_invalid", ["EVENT_CONTRACT_INVALID", "VAULT_INVALID_JSONL"]],
+  ["meal remove-photo", "vault_error", ["CANONICAL_WRITE_LOCKED", "EVENT_LEDGER_SHARD_AMBIGUOUS",
+    "EVENT_CONTRACT_INVALID", "VAULT_INVALID_JSONL", "MEAL_PHOTO_RETENTION_PRECONDITION_FAILED",
+    "MEAL_PHOTO_RETENTION_MANIFEST_INVALID", "MEAL_PHOTO_RETENTION_REFERENCE_INVALID"]],
+] as const;
+
+test("meal nested causes retain only the reached command and source-code pairs", async () => {
+  for (const [command, code, vaultCodes] of mealVaultCauseCases) for (const vaultCode of vaultCodes) {
+    const original = Object.assign(new Error("PRIVATE_SENTINEL é🍲"), { code,
+      context: { vaultCode, path: "PRIVATE_SENTINEL", payload: "PRIVATE_SENTINEL" } });
+    let report!: CliTiming;
+    await assert.rejects(withCliTiming(() => timeCliDispatch(command, async () => { throw original; }),
+      value => { report = value; }), caught => caught === original);
+    assert.deepEqual(report.commands[0]!.failures, [{ code: "unknown", stage: "unknown", count: 1,
+      sourceCause: { code, vaultCode } }]);
+    assert.deepEqual(normalizeCliTiming(report), report);
+    assert.equal(JSON.stringify(report).includes("PRIVATE_SENTINEL"), false);
+    for (const [otherCommand, otherCode, allowed] of mealVaultCauseCases) {
+      if (allowed.some(candidate => candidate === vaultCode)) continue;
+      assert.deepEqual(cliTimingSourceCauseFailure(otherCommand, "unknown",
+        { sourceCause: { code: otherCode, vaultCode } }, "sourceCause"), { sourceCause: { code: otherCode } });
+    }
+  }
+});
+
+test("missing and unrecognized meal codes are first observations, never inferred from old wire absence", async () => {
+  const { noteCliTimingFailure } = await import("../src/node/cli-timing.ts");
+  for (const command of ["meal edit", "meal remove-photo"]) {
+    for (const code of [undefined, null, "PRIVATE_SENTINEL é🍲", "missing_code", "unrecognized_code",
+      new String("vault_error"), new Proxy({}, { get() { throw Error("PRIVATE_SENTINEL"); } })]) {
+      const original = Object.assign(new Error("PRIVATE_SENTINEL"), { code });
+      const sourceCause = { code: code === undefined ? "missing_code" : "unrecognized_code" } as const;
+      for (let reuse = 0; reuse < 2; reuse += 1) {
+        let report!: CliTiming;
+        await assert.rejects(withCliTiming(() => timeCliDispatch(command, async () => {
+          noteCliTimingFailure(original);
+          noteCliTimingFailure({ code: "vault_error", context: { vaultCode: "CANONICAL_WRITE_LOCKED" } });
+          throw original;
+        }), value => { report = value; }), caught => caught === original);
+        assert.deepEqual(report.commands[0]!.failures, [{ code: "unknown", stage: "unknown", count: 1, sourceCause }]);
+        assert.deepEqual(normalizeCliTiming(report), report);
+        assert.equal(Object.hasOwn(original, "sourceCause"), false);
+        assert.equal(JSON.stringify(report).includes("PRIVATE_SENTINEL"), false);
+        const legacy: CliTiming = structuredClone(report);
+        legacy.commands[0]!.failures = [{ code: "unknown", stage: "unknown", count: 1 }];
+        assert.deepEqual(normalizeCliTiming(legacy), legacy);
+      }
+      for (const other of ["meal add", "event edit", "food search-labels-batch", "research scout-batch"]) {
+        assert.deepEqual(cliTimingSourceCauseFailure(other, "unknown", { sourceCause }, "sourceCause"), {});
+      }
+      assert.deepEqual(cliTimingSourceCauseFailure(command, sourceCause.code, original, "context"), {},
+        "A diagnostic state on an original error is an unrecognized literal, never evidence of missing metadata.");
+      assert.deepEqual(cliTimingSourceCauseFailure(command, "unknown",
+        { sourceCause: { ...sourceCause, vaultCode: "CANONICAL_WRITE_LOCKED" } }, "sourceCause"), { sourceCause });
+    }
+  }
+});
+
+test("new meal cause variants share the existing eight-variant budget without inventing legacy evidence", () => {
+  const variants: CliTimingSourceCause[] = mealVaultCauseCases.filter(([command]) => command === "meal remove-photo")
+    .flatMap(([, code, vaultCodes]) => vaultCodes.map(vaultCode => ({ code, vaultCode })));
+  variants.push({ code: "missing_code" }, { code: "unrecognized_code" });
+  const report = emptyCliTiming();
+  for (const sourceCause of [...variants, variants[0]!]) {
+    const incoming = sample("meal remove-photo");
+    Object.assign(incoming.commands[0]!, { outcome: "error", failures: [
+      { code: "unknown", stage: "unknown", count: 1, sourceCause },
+    ] });
+    mergeCliTiming(report, incoming);
+  }
+  const legacy = sample("meal remove-photo"); legacy.commands[0]!.outcome = "error";
+  mergeCliTiming(report, legacy);
+  const command = report.commands[0]!;
+  assert.equal(command.calls, variants.length + 2);
+  assert.equal(command.failures!.length, CLI_TIMING_MAX_FAILURES);
+  assert.equal(command.failures![0]!.count, 2);
+  assert.equal(command.droppedFailures, variants.length - CLI_TIMING_MAX_FAILURES);
+  assert.equal(command.failures!.reduce((sum, failure) => sum + failure.count, 0) + command.droppedFailures!, command.calls - 1);
+  assert.deepEqual(normalizeCliTiming(report), report);
 });

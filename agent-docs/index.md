@@ -12,6 +12,8 @@ Command-gated CLI source-cause telemetry is owned by
 [`runtime-state`](../packages/runtime-state/README.md#optional-cli-source-cause);
 implementation and local verification are tracked in
 [the active plan](exec-plans/active/2026-10-22-cli-source-cause.md).
+The remaining meal original-code and nested-cause correction is tracked in
+[meal failure origin telemetry](exec-plans/completed/2026-10-24-meal-failure-origin-telemetry.md).
 
 CLI canonical-write lock wait and importer load phases are owned by
 [`hosted-runtime-log-database.md`](../docs/hosted-runtime-log-database.md#canonical-write-wait-and-importer-load-reader-before-producer);
