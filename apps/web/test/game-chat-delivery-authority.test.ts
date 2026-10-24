@@ -5,7 +5,7 @@ import { assertGameProposalDeliveryCurrentTx } from "../src/lib/game/chat-delive
 const now = new Date("2030-03-04T16:00:00Z");
 const row = () => ({
   id: "game", createdBy: "person-a", chatContainerMemberId: "room", pendingChange: { v: 1, id: "proposal", proposedByMemberId: "person-a", expectedTermsVersion: 1, change: { kind: "edit", schedule: { days: [5, 6] } }, effectiveFromDay: 0, startsOn: null, deliveryStatus: "queued" },
-  previousGameId: null, inviteeMemberId: null, round: 1, status: "live", terms: { v: 1, versions: [{ n: 1, fromDay: 0, schedule: { days: [0, 1, 2, 3, 4] }, stakes: [] }] }, termsWordsEncrypted: "synthetic", inviteTokenHash: null, inviteTokenEncrypted: null, inviteExpiresAt: null, pendingLabel: null, lengthDays: 7, startsOn: null, startedAt: now, liveRosterKey: "synthetic", devClockOffsetMs: null, result: null, settledAt: null, createdAt: now, updatedAt: now,
+  previousGameId: null, inviteeMemberId: null, round: 1, status: "live", terms: { v: 1, versions: [{ n: 1, fromDay: 0, schedule: { days: [0, 1, 2, 3, 4] }, stakes: [] }] }, termsWordsEncrypted: "synthetic", inviteTokenHash: null, inviteTokenEncrypted: null, inviteExpiresAt: null, pendingLabel: null, lengthDays: 7, startsOn: null, startedAt: now, liveRosterKey: "synthetic", devClockOffsetMs: null, result: null, departedPlayer: null, settledAt: null, createdAt: now, updatedAt: now,
   players: ["person-a", "person-b"].map((memberId, seat) => ({ memberId, seat, timeZone: "UTC", dayOne: new Date("2030-03-05T00:00:00Z") })),
 } satisfies Game & { players: Array<{ memberId: string; seat: number; timeZone: string; dayOne: Date }> });
 function setup() {

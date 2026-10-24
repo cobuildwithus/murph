@@ -83,7 +83,8 @@ export interface RuleEntry {
 export interface RuleGame {
   id: string;
   status: GameStatus;
-  createdBy: string;
+  /** Null once the creator deleted their account. */
+  createdBy: string | null;
   lengthDays: number;
   seats: number;
   terms: StoredTerms;

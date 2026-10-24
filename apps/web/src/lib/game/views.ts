@@ -50,8 +50,9 @@ export interface GameTicketRow {
   id: string;
   gameId: string;
   stakeKey: string;
-  owedBy: string;
-  owedTo: string;
+  /** Null once that member deleted their account. */
+  owedBy: string | null;
+  owedTo: string | null;
   status: "open" | "redeemed";
   createdAt: Date;
   redeemedAt: Date | null;
@@ -73,6 +74,8 @@ export interface GameViewInput {
   profileAvatarKeys?: ReadonlyMap<string, string | null>;
   /** Per member: the relationship the viewer typed for them, if any. */
   relationships: ReadonlyMap<string, string | null>;
+  /** A player who deleted their account: their seat and the name the viewer knew them by. */
+  departed?: { seat: number; name: string } | null;
   /**
    * The invitee while nobody has joined: the challenger's own words for them,
    * or, for an addressed rematch's invitee, their own name.
@@ -135,8 +138,9 @@ export function ticketView(row: GameTicketRow, words: TermWords | null, viewerId
     createdAt: row.createdAt.toISOString(),
     id: row.id,
     kind: terms?.versions.flatMap((version) => version.stakes).find((stake) => stake.key === row.stakeKey)?.kind,
-    owedByMemberId: row.owedBy,
-    owedToMemberId: row.owedTo,
+    ...(row.owedBy === null || row.owedTo === null ? { left: true as const } : {}),
+    owedByMemberId: row.owedBy ?? "",
+    owedToMemberId: row.owedTo ?? "",
     redeemedAt: row.redeemedAt?.toISOString() ?? null,
     status: isTicketExpired(row, now) ? "expired" : row.status,
     useBy: ticketUseBy(row.createdAt).toISOString(),
@@ -162,7 +166,9 @@ export function buildGameView(input: GameViewInput): GameView {
   const { game } = state;
   const players = [...state.players].sort((a, b) => a.seat - b.seat);
   const playerViews = players.map((player) => playerView(input, player));
-  if (input.invitee && players.length < game.seats) playerViews.push(inviteeView(input, input.invitee, players.length, viewerId));
+  if (input.departed) playerViews.push(departedView(input, input.departed));
+  if (input.invitee && playerViews.length < game.seats) playerViews.push(inviteeView(input, input.invitee, firstOpenSeat(playerViews), viewerId));
+  playerViews.sort((a, b) => a.seat - b.seat);
   return {
     changeControls: gameChangeControls(state, input.now, input.pendingChange ?? null),
     pendingChange: pendingGameChangeView(state, input.pendingChange ?? null, input.now),
@@ -211,6 +217,29 @@ function playerView(input: GameViewInput, player: RulePlayer): GamePlayerView {
     score: resultScore ?? (started ? scorePlayer(input.state, player, today).score : 0),
     seat: player.seat,
     streak: playerStreak(input.state, player, input.now),
+  };
+}
+
+function firstOpenSeat(views: readonly GamePlayerView[]): number {
+  let seat = 0;
+  while (views.some((view) => view.seat === seat)) seat += 1;
+  return seat;
+}
+
+/** A player who deleted their account: only their seat, final score and the viewer's name for them remain. */
+function departedView(input: GameViewInput, departed: NonNullable<GameViewInput["departed"]>): GamePlayerView {
+  return {
+    avatarUrl: null,
+    dayIndex: null,
+    firstName: departed.name,
+    isMe: false,
+    left: true,
+    memberId: null,
+    profileAvatarUrl: null,
+    relationship: null,
+    score: input.result?.scores.find((score) => score.seat === departed.seat)?.score ?? 0,
+    seat: departed.seat,
+    streak: 0,
   };
 }
 
