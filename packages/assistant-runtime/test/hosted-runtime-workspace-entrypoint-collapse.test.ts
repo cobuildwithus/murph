@@ -1210,12 +1210,13 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
-  test("collapse invariant 3b: due device-sync wake committed by checkpoint is returned without assistant service", async () => {
+  test.each([false, true])("collapse invariant 3b: due device-sync wake receives one local service attempt before checkpoint (cleared: %s)", async (cleared) => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-collapse-invariant-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const runnerIdleTtlMs = 180_000;
     const assistantObserved = createDeferred<void>();
+    const deviceWakeServiced = createDeferred<void>();
     let assistantPhaseCalls = 0;
 
     vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
@@ -1255,9 +1256,29 @@ describe("hosted workspace runtime entrypoint", () => {
                 workspace: createWorkspaceState({ version: "4" }),
               }),
             }),
-            async runAssistantPhase() {
+            async runAssistantPhase(input) {
               assistantPhaseCalls += 1;
               events.push(`assistant.phase:${assistantPhaseCalls}`);
+              if (assistantPhaseCalls > 1) {
+                // The live invocation owns the due projection before its floor.
+                // A retained no-progress key must not create another attempt.
+                assert.equal(assistantPhaseCalls, 2);
+                assert.equal(input.workspace?.nextWakeAt, TEST_NOW);
+                assert.equal(input.workspace?.nextWakeReason, "device-sync.reconcile");
+                assert.equal(checkpointRequests.length, 0);
+                deviceWakeServiced.resolve();
+                if (cleared) return {
+                  checkpointReason: "system_mailbox_receipt",
+                  progressed: true,
+                  nextWakeAt: null,
+                  nextWakeReason: null,
+                };
+                return {
+                  progressed: false,
+                  nextWakeAt: TEST_NOW,
+                  nextWakeReason: "device-sync.reconcile",
+                };
+              }
               assistantObserved.resolve();
               return {
                 checkpointReason: "system_mailbox_receipt",
@@ -1277,36 +1298,39 @@ describe("hosted workspace runtime entrypoint", () => {
       );
 
       await withRealTimeout(assistantObserved.promise, 15_000, () => events.join(","));
+      await withRealTimeout(deviceWakeServiced.promise, 15_000, () => events.join(","));
       await waitForFakeTimerScheduled(() => events.join(","));
       await vi.advanceTimersByTimeAsync(runnerIdleTtlMs);
       const result = await resultPromise;
 
       assert.deepEqual(events.filter((event) => event.startsWith("assistant.phase:")), [
         "assistant.phase:1",
+        "assistant.phase:2",
       ]);
       assert.deepEqual(checkpointRequests.map((request) => [
         request.reason,
         request.nextWakeAt,
         request.nextWakeReason,
       ]), [
-        ["idle_shutdown", TEST_NOW, "device-sync.reconcile"],
+        ["idle_shutdown", cleared ? null : TEST_NOW, cleared ? null : "device-sync.reconcile"],
       ]);
-      assert.equal(result.immediateRecheckRequested, true);
-      assert.equal(result.status, "scheduled");
-      assert.equal(result.nextWakeAt, TEST_NOW);
+      assert.ok(requireEventIndex(events, "assistant.phase:2") < requireEventIndex(events, "snapshot:idle_shutdown"));
+      assert.equal(result.immediateRecheckRequested ?? false, false);
+      assert.equal(result.status, cleared ? "idle" : "scheduled");
+      assert.equal(result.nextWakeAt, cleared ? null : TEST_NOW);
     } finally {
       vi.useRealTimers();
       await removeTempRoot(vaultRoot);
     }
   });
 
-  test("round4: foreground drain loop terminates with device-sync maintenance and assistant input churn", async () => {
+  test.each(["due", "future"] as const)("round4: foreground drain loop terminates with %s device-sync maintenance and assistant input churn", async (timing) => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-round4-drain-loop-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const runtimeAbortController = new AbortController();
     const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
-    const continuationWakeAt = "2026-04-27T00:00:30.000Z";
+    const continuationWakeAt = new Date(Date.parse(TEST_NOW) + (timing === "due" ? -1_000 : 30_000)).toISOString();
     const mailboxItems: HostedMailboxItem[] = [
       createMailboxItem({
         id: "mailbox_item_round4_drain_loop_001",
@@ -1316,6 +1340,9 @@ describe("hosted workspace runtime entrypoint", () => {
     let assistantPhaseCalls = 0;
     let resultPromise: ReturnType<typeof runHostedWorkspaceRuntimeJobInProcess> | null = null;
 
+    // Freeze eligibility without stalling the live foreground import watcher.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(TEST_NOW));
     try {
       await initializeVault({ createdAt: TEST_NOW, vaultRoot });
       resultPromise = runHostedWorkspaceRuntimeJobInProcess(
@@ -1368,11 +1395,20 @@ describe("hosted workspace runtime entrypoint", () => {
             }),
           }),
           runtimeWakeSignal,
-          async runAssistantPhase() {
+          async runAssistantPhase(input) {
             assistantPhaseCalls += 1;
             events.push(`assistant.phase:${assistantPhaseCalls}`);
             if (assistantPhaseCalls > 6) {
               throw new Error("Foreground drain loop did not terminate.");
+            }
+
+            if (assistantPhaseCalls > 3) {
+              assert.equal(timing, "due");
+              assert.equal(assistantPhaseCalls, 4);
+              assert.equal(input.workspace?.nextWakeAt, continuationWakeAt);
+              assert.equal(input.workspace?.nextWakeReason, "device-sync.reconcile");
+              assert.equal(checkpointRequests.length, 0);
+              events.push("device.wake.serviced");
             }
 
             if (assistantPhaseCalls <= 2) {
@@ -1411,7 +1447,8 @@ describe("hosted workspace runtime entrypoint", () => {
         () => `Foreground drain loop did not return. Events: ${events.join(",")}`,
       );
 
-      assert.equal(assistantPhaseCalls, 3);
+      assert.equal(assistantPhaseCalls, timing === "due" ? 4 : 3);
+      assert.equal(events.filter((event) => event === "device.wake.serviced").length, timing === "due" ? 1 : 0);
       assert.deepEqual(events.filter((event) => event.startsWith("mailbox.importItem:")), [
         "mailbox.importItem:mailbox_item_round4_drain_loop_001",
         "mailbox.importItem:mailbox_item_round4_drain_loop_002",
@@ -1429,6 +1466,7 @@ describe("hosted workspace runtime entrypoint", () => {
     } finally {
       runtimeAbortController.abort();
       await resultPromise?.catch(() => undefined);
+      vi.useRealTimers();
       await removeTempRoot(vaultRoot);
     }
   });

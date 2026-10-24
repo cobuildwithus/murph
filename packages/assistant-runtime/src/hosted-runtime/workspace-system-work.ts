@@ -126,8 +126,50 @@ export function createHostedWorkspaceSystemWork(input: {
       input.runnerInput.trackLocalWorkspaceMutationCompletion?.(completion);
     }
   };
+  const recoverProjectedWake = async (workspace: HostedWorkspaceRunnerInput["workspace"]): Promise<void> => {
+    const occurredAt = input.preparation.now?.() ?? new Date().toISOString();
+    const now = Date.parse(occurredAt);
+    if (input.preparation.runtime.resolvedConfig.deviceSync !== null
+      && workspace?.nextWakeReason === "device-sync.reconcile"
+      && Date.parse(workspace.nextWakeAt ?? "") <= now) {
+      // A due mailbox item already owns this alarm. Otherwise, materialize the
+      // legacy timer through the same claim/retry path as incoming hints.
+      const itemId = `device-sync.wake:workspace:${workspace.nextWakeAt}`;
+      await updateHostedSystemMailboxState(input.preparation.vaultRoot, (state) => {
+        if (state.pending.some((item) => item.routeAction === "run-device-sync-wake"
+          && item.wake.kind === "device-sync.wake"
+          && (!item.wake.connectionId
+            || Date.parse(item.nextAttemptAt ?? item.occurredAt) <= now))) {
+          return { result: undefined, write: false };
+        }
+        return { pending: [...state.pending, {
+          attemptCount: 0,
+          itemId,
+          lastAttemptAt: null,
+          lastErrorCode: null,
+          lastErrorMessage: null,
+          mailboxDedupeKey: itemId,
+          mailboxLaneSeq: null,
+          nextAttemptAt: null,
+          occurredAt,
+          postCheckpointRecord: null,
+          requestId: null,
+          routeAction: "run-device-sync-wake",
+          status: "pending",
+          wake: {
+            eventId: itemId,
+            kind: "device-sync.wake",
+            occurredAt,
+            reason: "reconcile_due",
+            userId: input.runnerInput.expectedUserId,
+          },
+        }] };
+      });
+    }
+  };
   return {
     kick,
+    recoverProjectedWake,
     async waitForCompletion(
       wakeSignal: RuntimeWakeSignal | null,
       onWake: (notification: RuntimeWakeNotification | null) => Promise<boolean>,
@@ -187,47 +229,10 @@ export function createHostedWorkspaceSystemWork(input: {
       allowedRouteActions: readonly HostedSystemMailboxRouteAction[] =
         HOSTED_WORKSPACE_SYSTEM_WORK_ACTIONS,
     ) {
-      const workspace = input.runnerInput.workspace;
-      const occurredAt = input.preparation.now?.() ?? new Date().toISOString();
-      const now = Date.parse(occurredAt);
-      if (allowedRouteActions.includes("run-device-sync-wake")
-        && input.preparation.runtime.resolvedConfig.deviceSync !== null
-        && workspace?.nextWakeReason === "device-sync.reconcile"
-        && Date.parse(workspace.nextWakeAt ?? "") <= now) {
-        // A due mailbox item already owns this alarm. Otherwise, materialize the
-        // legacy timer through the same claim/retry path as incoming hints.
-        const itemId = `device-sync.wake:workspace:${workspace.nextWakeAt}`;
-        await updateHostedSystemMailboxState(input.preparation.vaultRoot, (state) => {
-          if (state.pending.some((item) => item.routeAction === "run-device-sync-wake"
-            && item.wake.kind === "device-sync.wake"
-            && (!item.wake.connectionId
-              || Date.parse(item.nextAttemptAt ?? item.occurredAt) <= now))) {
-            return { result: undefined, write: false };
-          }
-          return { pending: [...state.pending, {
-            attemptCount: 0,
-            itemId,
-            lastAttemptAt: null,
-            lastErrorCode: null,
-            lastErrorMessage: null,
-            mailboxDedupeKey: itemId,
-            mailboxLaneSeq: null,
-            nextAttemptAt: null,
-            occurredAt,
-            postCheckpointRecord: null,
-            requestId: null,
-            routeAction: "run-device-sync-wake",
-            status: "pending",
-            wake: {
-              eventId: itemId,
-              kind: "device-sync.wake",
-              occurredAt,
-              reason: "reconcile_due",
-              userId: input.runnerInput.expectedUserId,
-            },
-          }] };
-        });
+      if (allowedRouteActions.includes("run-device-sync-wake")) {
+        await recoverProjectedWake(input.runnerInput.workspace);
       }
+      const now = Date.parse(input.preparation.now?.() ?? new Date().toISOString());
       const state = await readHostedSystemMailboxState(input.preparation.vaultRoot);
       for (const item of state.pending) {
         if (item.status === "recording"
