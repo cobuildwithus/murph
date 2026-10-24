@@ -3,7 +3,7 @@ import { execFileSync } from 'node:child_process'
 import { randomInt } from 'node:crypto'
 import { createSocket } from 'node:dgram'
 import { once } from 'node:events'
-import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { Cli, Errors, z } from 'incur'
@@ -932,12 +932,126 @@ test('real meal validation preserves output and mutation boundaries while admitt
   } finally { vi.useRealTimers() }
 })
 
+test('real meal lock, ledger and reference errors separate previously identical original observations', async () => {
+  const baseTiming = await sourceCauseBaseline('5a7bebcdafafbf7e8d204d881eeca9a8b114b552', 'MURPH_CLI_MEAL_ORIGIN_BASELINE')
+  const home = await mkdtemp(path.join(os.tmpdir(), 'cli-meal-origin-PRIVATE_SENTINEL-'))
+  roots.push(home)
+  vi.stubEnv('HOME', home)
+  vi.spyOn(process, 'loadEnvFile').mockImplementation(() => {})
+  const fetchImpl = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
+    throw new Error('PRIVATE_SENTINEL unexpected provider request')
+  })
+  const root = await vault()
+  const core = await import('@murphai/core')
+  const records = await import('@murphai/vault-usecases/records')
+  const { VaultCliError } = await import('@murphai/operator-config/vault-cli-errors')
+  const observed = vi.spyOn(await import('@murphai/runtime-state/node/cli-timing'), 'noteCliTimingFailure')
+  const handlers = { edit: vi.spyOn(records, 'editMealRecord'), 'remove-photo': vi.spyOn(records, 'removeAutomaticMealPhotoRecord') }
+  const writers = { edit: vi.spyOn(core, 'upsertEvent'), 'remove-photo': vi.spyOn(core, 'removeAutomaticMealPhoto') }
+  vi.spyOn(performance, 'now').mockReturnValue(0)
+  vi.useFakeTimers({ toFake: ['Date'] })
+  vi.setSystemTime(new Date('2030-01-15T12:00:00.000Z'))
+  const photoPath = path.join(home, 'PRIVATE_SENTINEL.jpg')
+  await writeFile(photoPath, 'synthetic photo bytes')
+  const meal = await core.addMeal({ vaultRoot: root, photoPath, source: 'device', occurredAt: '2030-01-15T09:00:00.000Z',
+    externalRef: { system: 'meal-photo-capture', resourceType: 'photo', resourceId: 'synthetic', version: 'b'.repeat(64) } })
+  assert.ok(meal.photo)
+  const ledger = path.join(root, meal.eventPath)
+  const original = await readFile(ledger, 'utf8')
+  const rewrite = (patch: object) => writeFile(ledger, original.trimEnd().split('\n')
+    .map(line => JSON.stringify({ ...JSON.parse(line), ...patch })).join('\n') + '\n')
+  const restoreLedger = () => writeFile(ledger, original)
+  const lock = path.join(root, core.CANONICAL_WRITE_LOCK_DIRECTORY)
+  let restoreClock = () => {}
+  const both = ['edit', 'remove-photo'] as const
+  const cases = [
+    { label: 'lock', actions: both, code: 'vault_error', stage: 'unknown', vaultCode: 'CANONICAL_WRITE_LOCKED', writes: 1,
+      prepare: async () => {
+        await mkdir(lock, { recursive: true })
+        await writeFile(path.join(root, core.CANONICAL_WRITE_LOCK_METADATA_PATH), JSON.stringify({
+          pid: 4242, command: 'PRIVATE_SENTINEL', startedAt: '2030-01-15T12:00:00.000Z', host: 'synthetic-foreign-host',
+        }))
+        // Reuse the lock suite's expired-deadline seam. An empty/stale lock is
+        // auto-cleared by the real owner and would not exercise this failure.
+        let now = Date.now()
+        const clock = vi.spyOn(Date, 'now').mockImplementation(() => { now += 31_000; return now })
+        restoreClock = () => clock.mockRestore()
+      },
+      restore: async () => { restoreClock(); await rm(lock, { recursive: true, force: true }) } },
+    { label: 'ambiguous', actions: both, code: 'vault_error', stage: 'unknown', vaultCode: 'EVENT_LEDGER_SHARD_AMBIGUOUS', writes: 0,
+      prepare: () => writeFile(`${ledger}.gz`, 'PRIVATE_SENTINEL'), restore: () => rm(`${ledger}.gz`) },
+    { label: 'json', actions: both, code: 'contract_invalid', stage: 'read', vaultCode: 'VAULT_INVALID_JSONL', writes: 0,
+      prepare: () => writeFile(ledger, 'PRIVATE_SENTINEL invalid JSON\n'), restore: restoreLedger },
+    { label: 'contract', actions: both, code: 'contract_invalid', stage: 'read', vaultCode: 'EVENT_CONTRACT_INVALID', writes: 0,
+      prepare: () => rewrite({ title: null }), restore: restoreLedger },
+    { label: 'reference', actions: ['remove-photo'] as const, code: 'vault_error', stage: 'unknown',
+      vaultCode: 'MEAL_PHOTO_RETENTION_REFERENCE_INVALID', writes: 1,
+      prepare: () => rewrite({ evidence: [{ rawRef: meal.photo!.relativePath }] }), restore: restoreLedger },
+  ] as const
+  const initialFiles = await vaultFiles(root, true)
+  const observations = new Map<string, unknown>()
+  for (const fixture of cases) {
+    await fixture.prepare()
+    try {
+      const files = await vaultFiles(root, true)
+      for (const action of fixture.actions) {
+        const argv = ['meal', action, meal.mealId, ...(action === 'edit' ? ['--note', 'PRIVATE_SENTINEL é🍲'] : []),
+          '--vault', root, '--format', 'json']
+        const handler = handlers[action], writer = writers[action]
+        const beforeCalls = handler.mock.calls.length, beforeWrites = writer.mock.calls.length
+        const baseline = await invoke(argv)
+        const captured = await collect(() => invoke(argv))
+        assert.deepEqual(captured.result, baseline, 'Full output, exit and thrown result parity with timing disabled/enabled.')
+        assert.equal(captured.result.thrown, null)
+        assert.deepEqual(captured.result.exits, [1])
+        assert.equal(JSON.parse(captured.result.stdout).code, fixture.code)
+        assert.equal(handler.mock.calls.length, beforeCalls + 2)
+        assert.equal(writer.mock.calls.length, beforeWrites + 2 * fixture.writes, 'No retries or additional writer attempts.')
+        const originResult = handler.mock.results.at(-1)
+        assert.ok(originResult?.type === 'return')
+        await assert.rejects(originResult.value, error => {
+          assert.ok(error instanceof VaultCliError)
+          assert.equal(error.code, fixture.code)
+          assert.equal(error.context?.vaultCode, fixture.vaultCode)
+          assert.ok(observed.mock.calls.some(([originalError]) => originalError === error))
+          assert.equal(Object.hasOwn(error, 'sourceCause'), false)
+          return true
+        })
+        const sourceCause = baseTiming
+          ? (action === 'remove-photo' && fixture.code === 'contract_invalid' ? undefined : { code: fixture.code })
+          : { code: fixture.code, vaultCode: fixture.vaultCode }
+        const failure = { code: 'unknown', stage: fixture.stage, count: 1, ...(sourceCause ? { sourceCause } : {}) }
+        assert.deepEqual(captured.timing.commands.map(({ command, outcome, calls, failures }) =>
+          ({ command, outcome, calls, failures })), [{ command: `meal ${action}`, outcome: 'error', calls: 1, failures: [failure] }])
+        observations.set(`${action}:${fixture.label}`, captured.timing.commands[0]!.failures)
+        assert.equal(captured.timing.droppedCalls, 0)
+        assert.ok(Buffer.byteLength(captured.wire) <= CLI_TIMING_MAX_REPORT_BYTES)
+        assert.equal(captured.wire.includes('PRIVATE_SENTINEL'), false)
+        assert.equal(captured.result.stdout.includes('sourceCause'), false)
+        assert.deepEqual(await vaultFiles(root, true), files, 'Rejected real operations preserve canonical bytes.')
+      }
+    } finally { await fixture.restore() }
+    assert.deepEqual(await vaultFiles(root, true), initialFiles)
+  }
+  for (const action of both) for (const [left, right] of [['lock', 'ambiguous'], ['json', 'contract']]) {
+    if (baseTiming) {
+      assert.deepEqual(observations.get(`${action}:${left}`), observations.get(`${action}:${right}`),
+        'Different real source failures collide on the declared base.')
+    } else {
+      assert.notDeepEqual(observations.get(`${action}:${left}`), observations.get(`${action}:${right}`),
+        'Different real source failures separate after this telemetry correction.')
+    }
+  }
+  assert.equal(fetchImpl.mock.calls.length, 0)
+})
+
 // Parent can apply just this test-file hunk to the declared base. This mode
 // must run the actual old timing owners, never patched code with stripped fields.
-async function sourceCauseBaseline(): Promise<boolean> {
-  const base = process.env.MURPH_CLI_SOURCE_CAUSE_BASELINE
+async function sourceCauseBaseline(expectedBase = '704630e3fda169456458db4c7a0f50121be120ee',
+  environment = 'MURPH_CLI_SOURCE_CAUSE_BASELINE'): Promise<boolean> {
+  const base = process.env[environment]
   if (base === undefined) return false
-  assert.equal(base, '704630e3fda169456458db4c7a0f50121be120ee')
+  assert.equal(base, expectedBase)
   for (const owner of ['src/cli-timing.ts', 'src/node/cli-timing.ts']) {
     const current = await readFile(new URL(`../../runtime-state/${owner}`, import.meta.url))
     const original: Buffer = execFileSync('git', ['show', `${base}:packages/runtime-state/${owner}`], { maxBuffer: 1_000_000 })
@@ -996,7 +1110,7 @@ test('real source-cause meal errors preserve output, original bridge errors and 
       // The CLI accepts confidence, but a newly created provenance object must
       // also have source. The real core contract, not a stubbed handler, rejects.
       { args: ['meal', 'edit', meal.mealId, '--nutrition-confidence', 'medium'],
-        code: 'contract_invalid', stage: 'validation', vaultCode: undefined, handler: edit },
+        code: 'contract_invalid', stage: 'validation', vaultCode: 'EVENT_CONTRACT_INVALID', handler: edit },
       { args: ['meal', 'remove-photo', integrity.mealId], code: 'vault_error', stage: 'unknown',
         vaultCode: 'MEAL_PHOTO_RETENTION_PRECONDITION_FAILED', handler: remove },
       { args: ['meal', 'remove-photo', manifest.mealId], code: 'vault_error', stage: 'unknown',
@@ -1049,7 +1163,7 @@ test('real source-cause meal errors preserve output, original bridge errors and 
     assert.equal(batch.timing.commands.reduce((count, command) => count + command.calls, 0), 4)
     assert.deepEqual(batch.timing.commands.map(command => command.failures), [
       [{ code: 'unknown', stage: 'validation', count: 2,
-        ...(baseTiming ? {} : { sourceCause: { code: 'contract_invalid' } }) }],
+        ...(baseTiming ? {} : { sourceCause: { code: 'contract_invalid', vaultCode: 'EVENT_CONTRACT_INVALID' } }) }],
       baseTiming ? [{ code: 'unknown', stage: 'unknown', count: 2 }] : [
         { code: 'unknown', stage: 'unknown', count: 1,
           sourceCause: { code: 'vault_error', vaultCode: 'MEAL_PHOTO_RETENTION_PRECONDITION_FAILED' } },

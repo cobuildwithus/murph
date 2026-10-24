@@ -1,10 +1,11 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { createSocket, type Socket } from "node:dgram";
+import { isProxy } from "node:util/types";
 import {
   CLI_TIMING_CPU_PHASES, CLI_TIMING_ENDPOINT_ENV, addCliPhaseSample, cliTimingCommand, CLI_TIMING_MAX_REPORT_BYTES, CLI_TIMING_MAX_SPANS,
   emptyCliTiming, incrementCliTimingDrop, mergeCliTiming, normalizeCliTiming,
   cliTimingFailureCode, cliTimingFailureStage, cliTimingRejectionFailure, cliTimingValidationFailure, cliTimingSourceCauseFailure,
-  readCliTimingOwnData as ownData, type CliFailureTiming,
+  readCliTimingOwnData, type CliFailureTiming,
   type CliPhaseTiming, type CliTiming, type CliTimingOutcome, type CliTimingPhase,
 } from "../cli-timing.ts";
 
@@ -31,6 +32,11 @@ interface Invocation {
 }
 const invocations = new AsyncLocalStorage<Invocation>();
 const noop = () => {};
+// Original errors are live objects, unlike JSON transport input. Native proxy
+// detection rejects even revoked proxies without invoking their descriptor traps.
+function ownData(value: unknown, key: string): unknown {
+  return isProxy(value) ? undefined : readCliTimingOwnData(value, key);
+}
 const elapsedUs = (start: bigint) => Number((process.hrtime.bigint() - start) / 1_000n);
 function readProcessCpu(previous?: NodeJS.CpuUsage): NodeJS.CpuUsage | undefined {
   try { return process.cpuUsage(previous); } catch { return undefined; }
@@ -138,14 +144,24 @@ export function noteCliTimingFailure(error: unknown): void {
   // code (incur-smoke.test.ts), unlike unpatched upstream ParseError handling.
   const code = rawCode ?? (incurValidation ? "VALIDATION_ERROR" :
     name === "ZodError" ? "invalid_payload" : undefined);
-  const stage = ownData(ownData(error, "context"), "stage") ?? ownData(error, "stage") ??
+  const context = ownData(error, "context");
+  const stage = ownData(context, "stage") ?? ownData(error, "stage") ??
     (validation ? "validation" : undefined);
+  const failureCode = cliTimingFailureCode(code, invocation.command);
+  // Pass only a detached own-data value to the portable finite selector. No
+  // original object or nested proxy reaches its descriptor reads.
+  const sourceCause = cliTimingSourceCauseFailure(invocation.command, code,
+    { context: { vaultCode: ownData(context, "vaultCode") } }, "context");
+  if (failureCode === "unknown" && !sourceCause.sourceCause &&
+      (invocation.command === "meal edit" || invocation.command === "meal remove-photo")) {
+    sourceCause.sourceCause = { code: rawCode === undefined ? "missing_code" : "unrecognized_code" };
+  }
   // Domain validation uses fieldErrors; schema-owned publicIssues take precedence.
-  invocation.failure = { code: cliTimingFailureCode(code, invocation.command), stage: cliTimingFailureStage(stage), count: 1,
+  invocation.failure = { code: failureCode, stage: cliTimingFailureStage(stage), count: 1,
     ...cliTimingValidationFailure(invocation.command, code, error, "fieldErrors"),
     ...cliTimingValidationFailure(invocation.command, code, error, "publicIssues"),
     ...cliTimingRejectionFailure(invocation.command, code, error, "cliTimingRejection"),
-    ...cliTimingSourceCauseFailure(invocation.command, code, error, "context") };
+    ...sourceCause };
 }
 
 // Incur may call process.exit before an outer finally executes. Observe the
@@ -185,8 +201,7 @@ function finishAction(invocation: Invocation): void {
   }
 }
 function isBrokenPipe(error: unknown): boolean {
-  try { return typeof error === "object" && error !== null && "code" in error && error.code === "EPIPE"; }
-  catch { return false; }
+  return ownData(error, "code") === "EPIPE";
 }
 function finishInvocation(invocation: Invocation): void {
   if (invocation.closed) return;
