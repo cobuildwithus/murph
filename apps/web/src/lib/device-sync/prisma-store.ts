@@ -544,10 +544,10 @@ export class PrismaDeviceSyncControlPlaneStore
     return this.dirtyConnections.deferDirtyConnectionWakeTx(input);
   }
 
-  async advanceDeferredDirtyConnectionWakeTx(
-    input: Parameters<PrismaHostedDirtyConnectionStore["advanceDeferredDirtyConnectionWakeTx"]>[0],
-  ): Promise<void> {
-    return this.dirtyConnections.advanceDeferredDirtyConnectionWakeTx(input);
+  async claimDeferredDirtyConnectionWakeTx(
+    input: Parameters<PrismaHostedDirtyConnectionStore["claimDeferredDirtyConnectionWakeTx"]>[0],
+  ): Promise<boolean> {
+    return this.dirtyConnections.claimDeferredDirtyConnectionWakeTx(input);
   }
 
   async listDueDeferredDirtyConnectionWakes(

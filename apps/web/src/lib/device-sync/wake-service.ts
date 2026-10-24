@@ -2988,6 +2988,34 @@ interface HostedDeviceSyncWebhookAdmissionInput {
   userId: string;
 }
 
+function shouldPrepareHostedWebhookMailbox(
+  input: HostedDeviceSyncWebhookAdmissionInput,
+  preparation: {
+    attempt: number;
+    hasPayloadResources: boolean;
+    hasPendingDirtySnapshot: boolean;
+    migrationPending: boolean;
+    dirtyNeedsWake: boolean;
+    admissionNeedsWake: boolean;
+  },
+): boolean {
+  // A deferred batch discovered in the final transaction rolls back and
+  // uses the existing bounded replan to prepare crypto outside the lock.
+  const retryingUrgentBatch = preparation.attempt > 0
+    && !preparation.migrationPending
+    && input.provider === "junction"
+    && !isHostedJunctionRoutineDailyTotalWebhook(input);
+  return input.sourceObservation !== null
+    || retryingUrgentBatch
+    || preparation.dirtyNeedsWake
+    || preparation.admissionNeedsWake
+    || (
+      input.preparationAuthorityProven
+      && !preparation.hasPayloadResources
+      && !preparation.hasPendingDirtySnapshot
+    );
+}
+
 async function persistHostedDeviceSyncWebhookAccepted(
   input: HostedDeviceSyncWebhookAdmissionInput,
 ): Promise<void> {
@@ -3117,14 +3145,14 @@ async function persistHostedDeviceSyncWebhookAccepted(
             ownerId: input.userId,
           })
         : null;
-      const shouldPrepareMailbox = input.sourceObservation !== null
-        || preparedDirty?.shouldRequestWake === true
-        || initialAdmission?.shouldPrepareWake === true
-        || (
-          input.preparationAuthorityProven
-          && !hasPayloadResources
-          && pendingDirtySnapshot === null
-        );
+      const shouldPrepareMailbox = shouldPrepareHostedWebhookMailbox(input, {
+        attempt,
+        hasPayloadResources,
+        hasPendingDirtySnapshot: pendingDirtySnapshot !== null,
+        migrationPending: initialAdmission?.status.kind === "migration_pending",
+        dirtyNeedsWake: preparedDirty?.shouldRequestWake === true,
+        admissionNeedsWake: initialAdmission?.shouldPrepareWake === true,
+      });
       const preparedMailbox = shouldPrepareMailbox
         ? await prepareHostedMailboxItemAppendCrypto({
             prisma: input.store.prisma,
@@ -3270,7 +3298,7 @@ async function persistHostedDeviceSyncWebhookAccepted(
             }
 
             // Every accepted hint merges into dirty state so coalesced timing remains
-            // representative. Only the clean-to-dirty transition appends a wake.
+            // representative. Clean transitions and claimed deferred batches append a wake.
             const dirtyUpdate = preparedDirty
               ? await input.store.upsertDirtyConnectionWithPreparedPlanTx({
                   prepared: preparedDirty,
@@ -3752,10 +3780,10 @@ async function settleHostedDeviceSyncWebhookWakeDeferralTx(input: {
     return false;
   }
   if (!input.shouldRequestWake && !routine && input.provider === "junction") {
-    // An urgent hint never waits behind a pending routine batch.
-    await input.store.advanceDeferredDirtyConnectionWakeTx({
+    // Clearing the batch and appending its ordinary wake share this transaction.
+    // A concurrent hint or sweep can no longer release the same pending batch.
+    return input.store.claimDeferredDirtyConnectionWakeTx({
       connectionId: input.connectionId,
-      dueAt: new Date(input.acceptedAt),
       tx: input.tx,
       userId: input.userId,
     });
