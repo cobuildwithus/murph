@@ -954,14 +954,17 @@ export async function readHostedRuntimeCryptoContextForWorker(input: {
   userId: string;
 }> {
   const prisma = input.prisma ?? getPrisma();
-  const ingress = await readActiveHostedDomainRootEnvelopeRecordOrThrow({
-    domain: "ingress",
+  const rows = await readActiveHostedDomainRootRows({
+    domains: ["ingress", "runtime"],
     prisma,
     userId: input.userId,
   });
-  const runtime = await readActiveHostedDomainRootEnvelopeRecordOrThrow({
+  const ingress = await verifyHostedDomainRootEnvelopeRecord(rows.get("ingress") ?? null, {
+    domain: "ingress",
+    userId: input.userId,
+  });
+  const runtime = await verifyHostedDomainRootEnvelopeRecord(rows.get("runtime") ?? null, {
     domain: "runtime",
-    prisma,
     userId: input.userId,
   });
   return {

@@ -156,10 +156,15 @@ test("web runtime crypto context reads already-provisioned signed ingress and ru
   expect(ingressOnly.cryptoContextVersion).toMatch(/^hccv_[0-9a-f]{32}$/u);
   ingressOnlyQuery.mockRestore();
 
+  // The batch must select by domain, independent of database row order.
+  tx.persistedEnvelopes.reverse();
+  const contextQuery = vi.spyOn(tx.prisma, "$queryRaw");
   const context = await readHostedRuntimeCryptoContextForWorker({
     prisma: tx.prisma,
     userId: "member-test-1",
   });
+  expect(contextQuery).toHaveBeenCalledTimes(1);
+  contextQuery.mockRestore();
 
   assert.equal(context.schema, "murph.hosted-runtime-crypto-context.v1");
   assert.equal(context.userId, "member-test-1");
@@ -167,6 +172,10 @@ test("web runtime crypto context reads already-provisioned signed ingress and ru
   assert.match(context.cryptoContextVersion, /^hccv_[0-9a-f]{32}$/u);
   assert.equal(context.envelopes.ingress.domain, "ingress");
   assert.equal(context.envelopes.runtime.domain, "runtime");
+  assert.deepEqual(context.envelopes, {
+    ingress: tx.persistedEnvelopes.find((envelope) => envelope.domain === "ingress"),
+    runtime: tx.persistedEnvelopes.find((envelope) => envelope.domain === "runtime"),
+  });
   assert.equal(tx.persistedEnvelopes.length, persistedBeforeRead);
   assert.deepEqual(
     tx.persistedEnvelopes.map((envelope) => envelope.domain).sort(),
@@ -940,6 +949,54 @@ test("web runtime crypto context fails closed instead of provisioning missing wo
   assert.equal(encryptCalls.length, 0);
   assert.equal(signCalls.length, 0);
 });
+
+test.each(["ingress", "runtime"] as const)(
+  "web runtime crypto context rechecks active %s roots without provider calls",
+  async (domain) => {
+    const { tx, encryptCalls, signCalls, decryptMetrics } = await createHostedWebCryptoTransactionFixture();
+    const { provisionActiveHostedDomainRootEnvelopeForUserOnly, readHostedRuntimeCryptoContextForWorker } =
+      await import("../src/lib/hosted-crypto/domain-root-store");
+    const userId = "member-context-active";
+    for (const rootDomain of ["ingress", "runtime"] as const) {
+      await provisionActiveHostedDomainRootEnvelopeForUserOnly({
+        domain: rootDomain, prisma: tx.prisma, reason: "test.context", userId,
+      });
+    }
+    encryptCalls.length = 0;
+    signCalls.length = 0;
+    const first = await readHostedRuntimeCryptoContextForWorker({ prisma: tx.prisma, userId });
+    expect(await readHostedRuntimeCryptoContextForWorker({ prisma: tx.prisma, userId })).toEqual(first);
+    tx.markEnvelopeInactive({ domain, userId });
+    await expect(readHostedRuntimeCryptoContextForWorker({ prisma: tx.prisma, userId }))
+      .rejects.toThrow(`${domain} domain root envelope is not available`);
+    tx.markEnvelopeActive({ domain, userId });
+    expect(await readHostedRuntimeCryptoContextForWorker({ prisma: tx.prisma, userId })).toEqual(first);
+    await expect(readHostedRuntimeCryptoContextForWorker({ prisma: tx.prisma, userId: "member-context-other" }))
+      .rejects.toThrow("ingress domain root envelope is not available");
+    expect(encryptCalls).toHaveLength(0);
+    expect(signCalls).toHaveLength(0);
+    expect(decryptMetrics.calls).toHaveLength(0);
+  },
+);
+
+test.each(["ingress", "runtime"] as const)(
+  "web runtime crypto context rejects an invalid %s signature",
+  async (domain) => {
+    const { tx } = await createHostedWebCryptoTransactionFixture();
+    const { provisionActiveHostedDomainRootEnvelopeForUserOnly, readHostedRuntimeCryptoContextForWorker } =
+      await import("../src/lib/hosted-crypto/domain-root-store");
+    const userId = "member-context-signature";
+    for (const rootDomain of ["ingress", "runtime"] as const) {
+      await provisionActiveHostedDomainRootEnvelopeForUserOnly({
+        domain: rootDomain, prisma: tx.prisma, reason: "test.context", userId,
+      });
+    }
+    const root = tx.persistedEnvelopes.find((envelope) => envelope.domain === domain)!;
+    root.authoritySignature.signature = "AA==";
+    await expect(readHostedRuntimeCryptoContextForWorker({ prisma: tx.prisma, userId }))
+      .rejects.toThrow(/signature/iu);
+  },
+);
 
 test("hosted web private-field encryption fails closed when control roots are missing", async () => {
   const { encryptCalls, signCalls, tx } = await createHostedWebCryptoTransactionFixture();
