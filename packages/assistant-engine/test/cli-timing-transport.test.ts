@@ -149,17 +149,21 @@ test('unavailable receiver is non-blocking and existing restrictive environment 
 })
 
 
-test('natural sender bounds the datagram and accounts for trimmed command summaries', async () => {
+test.each([
+  ['meal edit', [{ code: 'VALIDATION_ERROR', stage: 'validation', count: 1,
+    validation: { field: 'nutritionProteinGrams', code: 'invalid_type', missing: true } }]],
+  ['meal remove-photo', [{ code: 'invalid_operation', stage: 'unknown', count: 1 }]],
+] as const)('natural sender bounds the datagram and accounts for trimmed command summaries (%s first)', async (firstCommand, expectedFailures) => {
   const receiver = createCodexCliTimingReceiver()
   const { value } = endpoint(receiver)
   const old = process.env.MURPH_CLI_TIMING_ENDPOINT
   const originalClock = process.hrtime.bigint
   let clock = originalClock()
   process.hrtime.bigint = () => clock
-  const commands = ['meal edit', 'meal remove-photo', 'knowledge append-section', 'provider list',
+  const commands = [firstCommand, ...['meal edit', 'meal remove-photo', 'knowledge append-section', 'provider list',
     'capture show', 'event list', 'allergy list', 'allergy show', 'audit list',
     'audit show', 'audit tail', 'automation list', 'condition list', 'capture list',
-    'food list', 'meal list']
+    'food list', 'meal list'].filter(command => command !== firstCommand)]
   try {
     await delay(10)
     const finish = receiver.begin()
@@ -194,10 +198,8 @@ test('natural sender bounds the datagram and accounts for trimmed command summar
     assert.ok(report.commands.length > 0)
     assert.ok(report.commands.every(command => command.phases.length === CLI_TIMING_PHASES.length))
     assert.ok(report.droppedCalls > 0)
-    assert.deepEqual(report.commands.find((command) => command.command === 'meal edit' && command.outcome === 'error')?.failures,
-      [{ code: 'VALIDATION_ERROR', stage: 'validation', count: 1, validation: { field: 'nutritionProteinGrams', code: 'invalid_type', missing: true } }])
-    assert.deepEqual(report.commands.find((command) => command.command === 'meal remove-photo' && command.outcome === 'error')?.failures,
-      [{ code: 'invalid_operation', stage: 'unknown', count: 1 }])
+    assert.deepEqual(report.commands.find((command) => command.command === firstCommand && command.outcome === 'error')?.failures,
+      expectedFailures)
     assert.ok(!JSON.stringify(report).includes('PRIVATE_SENTINEL'))
     assert.equal(report.commands.reduce((sum, c) => sum + c.calls, 0) + report.droppedCalls, 32)
     assert.ok(Buffer.byteLength(JSON.stringify(report)) < CLI_TIMING_MAX_REPORT_BYTES)
