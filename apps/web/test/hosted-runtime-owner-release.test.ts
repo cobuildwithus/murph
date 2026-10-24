@@ -1,33 +1,26 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const edges = vi.hoisted(() => ({ actionable: vi.fn(), released: vi.fn(), recheck: vi.fn() }));
-vi.mock("@/src/lib/hosted-orchestration/runtime-reconciliation-facts", () => ({ readHostedRuntimeOwnerReleaseActionable: edges.actionable }));
+const edges = vi.hoisted(() => ({ released: vi.fn(), recheck: vi.fn() }));
+vi.mock("@/src/lib/hosted-orchestration/runtime-reconciliation-facts", () => {
+  throw new Error("Attempt-ended hints must not load or preread reconciliation facts.");
+});
 vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
   signalHostedRuntimeOwnerReleasedRuntime: edges.released,
   signalHostedRuntimeRecheckRuntime: edges.recheck,
 }));
 import { notifyHostedRuntimeOwnerCompletion, signalHostedRuntimeOwnerRelease } from "@/src/lib/hosted-orchestration/runtime-owner-release";
 
-const input = { userId: "synthetic-member", runtimeAttemptId: "attempt-a", immediateRecheckRequested: false };
-beforeEach(() => { vi.clearAllMocks(); edges.actionable.mockResolvedValue(true); edges.released.mockResolvedValue({ signalAccepted: true }); });
+const input = { userId: "synthetic-member", runtimeAttemptId: "attempt-a" };
+beforeEach(() => { vi.clearAllMocks(); edges.released.mockResolvedValue({ signalAccepted: true }); });
 afterEach(() => { vi.useRealTimers(); });
 
 describe("completion scheduling hint", () => {
-  it("keeps the exact attempt and skips known future mailbox continuation", async () => {
+  it("always sends the exact attempt without a facts pre-read", async () => {
     await notifyHostedRuntimeOwnerCompletion(input);
     expect(edges.released).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
       userId: input.userId, runtimeAttemptId: input.runtimeAttemptId,
     }));
-    edges.released.mockClear();
-    edges.actionable.mockResolvedValue(false);
-    await notifyHostedRuntimeOwnerCompletion(input);
-    expect(edges.released).not.toHaveBeenCalled();
-  });
-
-  it("preserves the positive immediate edge without a facts read", async () => {
-    await notifyHostedRuntimeOwnerCompletion({ ...input, immediateRecheckRequested: true });
-    expect(edges.actionable).not.toHaveBeenCalled();
-    expect(edges.released).toHaveBeenCalledOnce();
+    expect(edges.recheck).not.toHaveBeenCalled();
   });
 
   it("keeps legacy pointerless callbacks on the facts-only signal", async () => {
@@ -50,15 +43,10 @@ describe("completion scheduling hint", () => {
     expect(edges.released.mock.calls[0]![0].abortSignal.aborted).toBe(true);
   });
 
-  it("does not start a delayed signal after the hint budget expires during the facts read", async () => {
-    vi.useFakeTimers();
-    let resolveFacts: ((value: boolean) => void) | undefined;
-    edges.actionable.mockImplementationOnce(() => new Promise<boolean>(resolve => { resolveFacts = resolve; }));
-    const completed = notifyHostedRuntimeOwnerCompletion(input);
-    await vi.advanceTimersByTimeAsync(2_000);
-    await completed;
-    resolveFacts!(true);
-    await Promise.resolve();
+  it("does not signal with an already aborted transport", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    await expect(signalHostedRuntimeOwnerRelease({ ...input, abortSignal: controller.signal })).rejects.toThrow();
     expect(edges.released).not.toHaveBeenCalled();
   });
 });

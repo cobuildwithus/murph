@@ -856,8 +856,14 @@ describe.skipIf(!enabled)("Postgres runtime ownership", () => {
     const command = { operation: "complete" as const, ...runtime, settledRunnerContainerName: runnerContainerName,
       immediateRecheckRequested: true };
 
-    expect(await executeHostedRuntimeOwnerCommand({ prisma: first, userId, command }))
-      .toMatchObject({ cutover: "postgres", status: "updated" });
+    // The native result and recovery callback can race after early completion.
+    expect(await executeHostedRuntimeOwnerCommand({ prisma: first, userId, command: {
+      ...command, settledRunnerContainerName: null,
+    } })).toMatchObject({ status: "updated" });
+    const releases = await Promise.all([first, second].map(prisma =>
+      executeHostedRuntimeOwnerCommand({ prisma, userId, command }),
+    ));
+    expect(releases.map(result => result.status).sort()).toEqual(["stale", "updated"]);
     const completedOwner = await observer.hostedRuntimeOwner.findUniqueOrThrow({ where: { userId } });
     expect(completedOwner).toMatchObject({
       phase: "idle", attemptId: null, allocationId: originalOwner.allocationId, runnerContainerName,

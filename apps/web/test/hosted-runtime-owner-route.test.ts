@@ -18,6 +18,7 @@ vi.mock("@/src/lib/hosted-execution/runtime-cutover", () => ({
 vi.mock("@/src/lib/hosted-execution/runtime-owner", () => ({
   retireHostedRuntime: edges.retire,
   releaseHostedRuntimeAfterCompletion: edges.release,
+  releaseHostedRuntimeAfterRetirement: edges.release,
   authorizeHostedRuntimeProvider: edges.authorize,
   claimHostedRuntime: edges.claim,
 }));
@@ -84,21 +85,47 @@ describe("runtime ownership response", () => {
     edges.notify.mockReturnValueOnce(notification.promise);
     const deferred = edges.after.mock.calls[0]![0]();
     await vi.waitFor(() => expect(edges.notify).toHaveBeenCalledExactlyOnceWith({
-      userId: identity.userId, runtimeAttemptId: command.attemptId, immediateRecheckRequested: true,
+      userId: identity.userId, runtimeAttemptId: command.attemptId,
     }));
     notification.resolve();
     await deferred;
   });
 
-  it("preserves early completion without native release and retains its recheck flag", async () => {
+  it("notifies only the final release across early completion and a repeated completion", async () => {
     edges.authenticate.mockResolvedValueOnce({ userId: identity.userId, payload: {
-      ...command, settledRunnerContainerName: null, immediateRecheckRequested: false,
+      ...command, settledRunnerContainerName: null, immediateRecheckRequested: true,
     } });
     expect((await post()).status).toBe(200);
+    expect(edges.retire).toHaveBeenCalledOnce();
     expect(edges.release).not.toHaveBeenCalled();
+    expect(edges.after).not.toHaveBeenCalled();
+    expect(edges.loaded).not.toHaveBeenCalled();
+    // The settled callback does not need an immediate-work flag.
+    edges.authenticate.mockResolvedValue({ userId: identity.userId, payload: {
+      ...command, immediateRecheckRequested: false,
+    } });
+    await expect((await post()).json()).resolves.toMatchObject({ status: "updated" });
+    edges.retire.mockResolvedValueOnce(false);
+    await expect((await post()).json()).resolves.toMatchObject({ status: "stale" });
+    expect(edges.after).toHaveBeenCalledOnce();
     await edges.after.mock.calls[0]![0]();
     expect(edges.notify).toHaveBeenCalledExactlyOnceWith({
-      userId: identity.userId, runtimeAttemptId: command.attemptId, immediateRecheckRequested: false,
+      userId: identity.userId, runtimeAttemptId: command.attemptId,
+    });
+  });
+
+  it.each(["release", "release_completed"])("notifies the successful %s transition once", async (operation) => {
+    edges.authenticate.mockResolvedValue({ userId: identity.userId, payload: {
+      operation, attemptId: command.attemptId, generation: command.generation,
+      runnerContainerName: "synthetic-slot",
+    } });
+    await expect((await post()).json()).resolves.toMatchObject({ status: "updated" });
+    edges.release.mockResolvedValueOnce(false);
+    await expect((await post()).json()).resolves.toMatchObject({ status: "stale" });
+    expect(edges.after).toHaveBeenCalledOnce();
+    await edges.after.mock.calls[0]![0]();
+    expect(edges.notify).toHaveBeenCalledExactlyOnceWith({
+      userId: identity.userId, runtimeAttemptId: command.attemptId,
     });
   });
 

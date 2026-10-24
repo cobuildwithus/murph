@@ -26,7 +26,6 @@ const mocks = vi.hoisted(() => ({
   reportHostedRuntimeTypingAlerts: vi.fn(),
   after: vi.fn<(task: () => Promise<void> | void) => void>(),
   checkpointHostedWorkspace: vi.fn(),
-  acknowledgeHostedWorkspaceRuntimeRecheck: vi.fn(),
   fetchHostedMailboxItemsAfterLaneCursors: vi.fn(),
   fetchHostedMailboxPayload: vi.fn(),
   fetchHostedRuntimeMailboxProjection: vi.fn(),
@@ -44,7 +43,6 @@ const mocks = vi.hoisted(() => ({
   readHostedMemberAssistantModelPreference: vi.fn(),
   readHostedMemberCoreState: vi.fn(),
   readHostedActiveGroupRunningBit: vi.fn(),
-  readHostedRuntimeOwnerReleaseActionable: vi.fn(),
   readHostedWorkspace: vi.fn(),
   recordHostedIngressAssistantInputStaged: vi.fn(),
   recordHostedIngressAssistantMilestone: vi.fn(),
@@ -124,7 +122,6 @@ vi.mock("@/src/lib/hosted-orchestration/runtime-usage-decision", async (importOr
 
 vi.mock("@/src/lib/hosted-workspace/store", () => ({
   checkpointHostedWorkspace: mocks.checkpointHostedWorkspace,
-  acknowledgeHostedWorkspaceRuntimeRecheck: mocks.acknowledgeHostedWorkspaceRuntimeRecheck,
   publishLatestBrowserVaultReplicaRef: mocks.publishLatestBrowserVaultReplicaRef,
   claimHostedAcceptedAttemptFailureRecheck:
     mocks.claimHostedAcceptedAttemptFailureRecheck,
@@ -169,11 +166,6 @@ vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
   signalHostedRuntimeOwnerReleasedRuntime:
     mocks.signalHostedRuntimeOwnerReleasedRuntime,
   signalHostedRuntimeRecheckRuntime: mocks.signalHostedRuntimeRecheckRuntime,
-}));
-
-vi.mock("@/src/lib/hosted-orchestration/runtime-reconciliation-facts", () => ({
-  readHostedRuntimeOwnerReleaseActionable:
-    mocks.readHostedRuntimeOwnerReleaseActionable,
 }));
 
 type MailboxFetchRoute = typeof import("../app/api/internal/hosted-mailbox/fetch/route");
@@ -378,7 +370,6 @@ describe("hosted runtime internal web routes", () => {
     });
     mocks.readHostedActiveGroupRunningBit.mockResolvedValue(null);
     mocks.readHostedMemberCoreState.mockResolvedValue(buildActiveHostedMemberRecord());
-    mocks.readHostedRuntimeOwnerReleaseActionable.mockResolvedValue(true);
     mocks.claimHostedAcceptedAttemptFailureRecheck.mockResolvedValue(false);
     mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({
       status: "allowed",
@@ -397,7 +388,6 @@ describe("hosted runtime internal web routes", () => {
   });
 
   it("signals an exact authenticated runtime owner release", async () => {
-    mocks.readHostedRuntimeOwnerReleaseActionable.mockResolvedValue(true);
     const request = new Request(
       "https://join.example.test/api/internal/hosted-runtime/owner-released"
         + "?runtimeAttemptId=runtime_attempt_routes_1",
@@ -412,9 +402,6 @@ describe("hosted runtime internal web routes", () => {
       request,
       { maxBodyBytes: 0 },
     );
-    expect(mocks.readHostedRuntimeOwnerReleaseActionable).toHaveBeenCalledWith({
-      userId: "member_routes_1",
-    });
     expect(mocks.signalHostedRuntimeOwnerReleasedRuntime).toHaveBeenCalledWith({
       runtimeAttemptId: "runtime_attempt_routes_1",
       userId: "member_routes_1",
@@ -422,7 +409,6 @@ describe("hosted runtime internal web routes", () => {
   });
 
   it("signals an authenticated explicit immediate recheck without a mailbox read", async () => {
-    mocks.readHostedRuntimeOwnerReleaseActionable.mockResolvedValue(false);
     const request = new Request(
       "https://join.example.test/api/internal/hosted-runtime/owner-released"
         + "?immediateRecheckRequested=1",
@@ -437,7 +423,6 @@ describe("hosted runtime internal web routes", () => {
       request,
       { maxBodyBytes: 0 },
     );
-    expect(mocks.readHostedRuntimeOwnerReleaseActionable).not.toHaveBeenCalled();
     expect(mocks.signalHostedRuntimeRecheckRuntime).toHaveBeenCalledWith({
       userId: "member_routes_1",
     });
@@ -474,29 +459,6 @@ describe("hosted runtime internal web routes", () => {
       request,
       { maxBodyBytes: 0 },
     );
-    expect(mocks.signalHostedRuntimeRecheckRuntime).not.toHaveBeenCalled();
-    expect(mocks.signalHostedRuntimeOwnerReleasedRuntime).not.toHaveBeenCalled();
-  });
-
-  it.each([
-    ["exact", "?runtimeAttemptId=runtime_attempt_routes_1"],
-    ["legacy", ""],
-  ])("preserves the %s owner horizon when no durable work is visible", async (
-    _kind,
-    search,
-  ) => {
-    mocks.readHostedRuntimeOwnerReleaseActionable.mockResolvedValue(false);
-
-    const response = await runtimeOwnerReleasedRoute.POST(new Request(
-      `https://join.example.test/api/internal/hosted-runtime/owner-released${search}`,
-      { method: "POST" },
-    ));
-
-    expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({ signaled: false });
-    expect(mocks.readHostedRuntimeOwnerReleaseActionable).toHaveBeenCalledWith({
-      userId: "member_routes_1",
-    });
     expect(mocks.signalHostedRuntimeRecheckRuntime).not.toHaveBeenCalled();
     expect(mocks.signalHostedRuntimeOwnerReleasedRuntime).not.toHaveBeenCalled();
   });
@@ -2388,8 +2350,7 @@ describe("hosted runtime internal web routes", () => {
       expect(mocks.checkpointHostedWorkspace).toHaveBeenCalledTimes(
         stage === "publication" || stage === "response" ? 1 : 0,
       );
-      // Response construction still follows post-commit signal scheduling.
-      expect(mocks.after).toHaveBeenCalledTimes(stage === "response" ? 1 : 0);
+      expect(mocks.after).not.toHaveBeenCalled();
       expect(mocks.signalHostedRuntimeRecheckRuntime).not.toHaveBeenCalled();
     });
 
@@ -2442,8 +2403,7 @@ describe("hosted runtime internal web routes", () => {
         ...(status === "conflict" ? { checkpointConflictReason: "workspace_version" } : {}),
         workspace: { version: "4", nextWakeAt: FIXED_NOW },
       });
-      expect(mocks.after).toHaveBeenCalledTimes(status === "updated" ? 1 : 0);
-      await mocks.after.mock.calls[0]?.[0]();
+      expect(mocks.after).not.toHaveBeenCalled();
       expect(diagnostics()).toEqual([]);
     });
 
@@ -2741,249 +2701,34 @@ describe("hosted runtime internal web routes", () => {
     expect(mocks.signalHostedRuntimeRecheckRuntime).not.toHaveBeenCalled();
   });
 
-  it("does not signal a redundant checkpoint even when a future wake remains", async () => {
-    const nextWakeAt = "2026-04-26T00:05:00.000Z";
+  it.each([
+    ["future assistant", "2099-01-01T00:00:00.000Z", "assistant", null, "canonical_runtime_commit"],
+    ["due device", FIXED_NOW, "device-sync.reconcile", null, "canonical_runtime_commit"],
+    ["shutdown", FIXED_NOW, "mailbox", null, "idle_shutdown"],
+    ["cleared", null, null, null, "canonical_runtime_commit"],
+    ["retention", null, null, FIXED_NOW, "canonical_runtime_commit"],
+  ])("persists %s checkpoint facts without scheduling Temporal work", async (_kind, nextWakeAt, nextWakeReason, inboxMediaRetentionWakeAt, reason) => {
     mocks.checkpointHostedWorkspace.mockResolvedValue({
       status: "updated",
-      canSkipRuntimeRecheck: true,
-      workspace: buildWorkspaceRecord({ nextWakeAt, version: "5" }),
+      workspace: buildWorkspaceRecord({ nextWakeAt, nextWakeReason, inboxMediaRetentionWakeAt, version: "5" }),
     });
     const response = await workspaceCheckpointRoute.POST(jsonRequest(
-      "/api/internal/hosted-workspace/checkpoint",
-      {
-        attemptId: "attempt_unchanged_future",
-        expectedWorkspaceVersion: "4",
-        leaseGeneration: "2",
-        nextWakeAt,
-        reason: "canonical_runtime_commit",
-        snapshotRef: createBundleRef("snapshot_unchanged_future"),
+      "/api/internal/hosted-workspace/checkpoint", {
+        attemptId: "attempt_synthetic_checkpoint", expectedWorkspaceVersion: "4", leaseGeneration: "2",
+        nextWakeAt, nextWakeReason, inboxMediaRetentionWakeAt, reason,
+        snapshotRef: createBundleRef("snapshot_synthetic_checkpoint"),
       },
     ));
     expect(response.status).toBe(200);
-    expect(parseHostedWorkspaceCheckpointResponse(await response.json()))
-      .toMatchObject({ checkpointed: true, workspace: { version: "5", nextWakeAt } });
+    expect(parseHostedWorkspaceCheckpointResponse(await response.json())).toMatchObject({
+      checkpointed: true, workspace: { version: "5", nextWakeAt, nextWakeReason, inboxMediaRetentionWakeAt },
+    });
+    expect(mocks.checkpointHostedWorkspace).toHaveBeenCalledWith(expect.objectContaining({
+      nextWakeAt, nextWakeReason, inboxMediaRetentionWakeAt, reason,
+    }));
     expect(mocks.after).not.toHaveBeenCalled();
     expect(mocks.signalHostedRuntimeRecheckRuntime).not.toHaveBeenCalled();
-  });
-
-  it("signals a runtime recheck after checkpointing a future workspace wake", async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date(FIXED_NOW));
-    try {
-      const nextWakeAt = "2026-04-26T00:05:00.000Z";
-      mocks.checkpointHostedWorkspace.mockResolvedValue({
-        status: "updated",
-        workspace: buildWorkspaceRecord({
-          checkpointedAt: "2026-04-26T00:01:00.000Z",
-          nextWakeAt,
-          nextWakeReason: "assistant",
-          version: "5",
-        }),
-      });
-
-      const response = await workspaceCheckpointRoute.POST(jsonRequest(
-        "/api/internal/hosted-workspace/checkpoint",
-        {
-          attemptId: "attempt_future_wake_1",
-          expectedWorkspaceVersion: "4",
-          leaseGeneration: "2",
-          nextWakeAt,
-          nextWakeReason: "assistant",
-          reason: "canonical_runtime_commit",
-          snapshotRef: createBundleRef("snapshot_future_wake"),
-        },
-      ));
-
-      expect(response.status).toBe(200);
-      expect(parseHostedWorkspaceCheckpointResponse(await response.json()))
-        .toMatchObject({
-          checkpointed: true,
-          workspace: {
-            nextWakeAt,
-            nextWakeReason: "assistant",
-            version: "5",
-          },
-        });
-      expect(mocks.after).toHaveBeenCalledTimes(1);
-      await mocks.after.mock.calls[0]?.[0]();
-      expect(mocks.signalHostedRuntimeRecheckRuntime).toHaveBeenCalledWith({
-        userId: "member_routes_1",
-      });
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it("returns a due workspace checkpoint before running its recheck signal", async () => {
-    const nextWakeAt = "2026-04-25T23:59:00.000Z";
-    let resolveSignal!: () => void;
-    let markSignalStarted!: () => void;
-    const signalStarted = new Promise<void>((resolve) => {
-      markSignalStarted = resolve;
-    });
-    mocks.signalHostedRuntimeRecheckRuntime.mockImplementationOnce(
-      async () =>
-        await new Promise<void>((resolve) => {
-          resolveSignal = resolve;
-          markSignalStarted();
-        }),
-    );
-    mocks.checkpointHostedWorkspace.mockResolvedValue({
-      status: "updated",
-      workspace: buildWorkspaceRecord({
-        checkpointedAt: "2026-04-26T00:01:00.000Z",
-        nextWakeAt,
-        nextWakeReason: "assistant",
-        version: "5",
-      }),
-    });
-
-    const response = await workspaceCheckpointRoute.POST(jsonRequest(
-      "/api/internal/hosted-workspace/checkpoint",
-      {
-        attemptId: "attempt_due_wake_1",
-        expectedWorkspaceVersion: "4",
-        leaseGeneration: "2",
-        nextWakeAt,
-        nextWakeReason: "assistant",
-        reason: "idle_shutdown",
-        snapshotRef: createBundleRef("snapshot_due_wake"),
-      },
-    ));
-
-    expect(response.status).toBe(200);
-    expect(parseHostedWorkspaceCheckpointResponse(await response.json()))
-      .toMatchObject({
-        checkpointed: true,
-        workspace: {
-          nextWakeAt,
-          nextWakeReason: "assistant",
-          version: "5",
-        },
-      });
-    expect(mocks.after).toHaveBeenCalledTimes(1);
-    expect(mocks.signalHostedRuntimeRecheckRuntime).not.toHaveBeenCalled();
-
-    const signalTask = mocks.after.mock.calls[0]?.[0]();
-    await signalStarted;
-    expect(mocks.signalHostedRuntimeRecheckRuntime).toHaveBeenCalledWith({
-      userId: "member_routes_1",
-    });
-    resolveSignal();
-    await signalTask;
-  });
-
-  it("keeps a successful checkpoint when recording the signal acknowledgment fails", async () => {
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    try {
-      mocks.checkpointHostedWorkspace.mockResolvedValue({
-        status: "updated",
-        workspace: buildWorkspaceRecord({ nextWakeAt: FIXED_NOW, version: "5" }),
-      });
-      mocks.acknowledgeHostedWorkspaceRuntimeRecheck.mockRejectedValueOnce(new Error("receipt unavailable"));
-      const response = await workspaceCheckpointRoute.POST(jsonRequest(
-        "/api/internal/hosted-workspace/checkpoint",
-        {
-          attemptId: "attempt_ack_failure", expectedWorkspaceVersion: "4", leaseGeneration: "2",
-          nextWakeAt: FIXED_NOW, reason: "canonical_runtime_commit",
-          snapshotRef: createBundleRef("snapshot_ack_failure"),
-        },
-      ));
-      expect(response.status).toBe(200);
-      await expect(mocks.after.mock.calls[0]?.[0]()).resolves.toBeUndefined();
-      expect(mocks.signalHostedRuntimeRecheckRuntime).toHaveBeenCalledTimes(1);
-      expect(mocks.acknowledgeHostedWorkspaceRuntimeRecheck).toHaveBeenCalledExactlyOnceWith({
-        userId: "member_routes_1", version: "5",
-      });
-      expect(warnSpy).toHaveBeenCalledTimes(1);
-    } finally {
-      warnSpy.mockRestore();
-    }
-  });
-
-  it("retries an unchanged checkpoint wake after its first recheck signal fails", async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date(FIXED_NOW));
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    try {
-      const nextWakeAt = "2026-04-26T00:05:00.000Z";
-      mocks.signalHostedRuntimeRecheckRuntime.mockRejectedValueOnce(
-        new Error("Temporal unavailable"),
-      );
-      mocks.checkpointHostedWorkspace.mockResolvedValue({
-        status: "updated",
-        workspace: buildWorkspaceRecord({
-          checkpointedAt: "2026-04-26T00:01:00.000Z",
-          nextWakeAt,
-          nextWakeReason: "assistant",
-          version: "5",
-        }),
-      });
-
-      const response = await workspaceCheckpointRoute.POST(jsonRequest(
-        "/api/internal/hosted-workspace/checkpoint",
-        {
-          attemptId: "attempt_future_wake_signal_failure_1",
-          expectedWorkspaceVersion: "4",
-          leaseGeneration: "2",
-          nextWakeAt,
-          nextWakeReason: "assistant",
-          reason: "canonical_runtime_commit",
-          snapshotRef: createBundleRef("snapshot_future_wake_signal_failure"),
-        },
-      ));
-
-      expect(response.status).toBe(200);
-      expect(parseHostedWorkspaceCheckpointResponse(await response.json()))
-        .toMatchObject({
-          checkpointed: true,
-          workspace: {
-            nextWakeAt,
-            version: "5",
-          },
-        });
-      expect(mocks.after).toHaveBeenCalledTimes(1);
-      await mocks.after.mock.calls[0]?.[0]();
-      expect(mocks.acknowledgeHostedWorkspaceRuntimeRecheck).not.toHaveBeenCalled();
-      expect(warnSpy).toHaveBeenCalledWith(
-        "Hosted workspace wake recheck signal failed after checkpoint.",
-        {
-          errorName: "Error",
-        },
-      );
-      mocks.checkpointHostedWorkspace.mockResolvedValue({
-        status: "updated",
-        workspace: buildWorkspaceRecord({
-          checkpointedAt: "2026-04-26T00:01:30.000Z",
-          nextWakeAt,
-          nextWakeReason: "assistant",
-          version: "6",
-        }),
-      });
-      const retryResponse = await workspaceCheckpointRoute.POST(jsonRequest(
-        "/api/internal/hosted-workspace/checkpoint",
-        {
-          attemptId: "attempt_future_wake_signal_failure_1",
-          expectedWorkspaceVersion: "5",
-          leaseGeneration: "2",
-          nextWakeAt,
-          nextWakeReason: "assistant",
-          reason: "canonical_runtime_commit",
-          snapshotRef: createBundleRef("snapshot_future_wake_signal_failure"),
-        },
-      ));
-      expect(retryResponse.status).toBe(200);
-      expect(mocks.after).toHaveBeenCalledTimes(2);
-      await mocks.after.mock.calls[1]?.[0]();
-      expect(mocks.signalHostedRuntimeRecheckRuntime).toHaveBeenCalledTimes(2);
-      expect(mocks.acknowledgeHostedWorkspaceRuntimeRecheck).toHaveBeenCalledExactlyOnceWith({
-        userId: "member_routes_1", version: "6",
-      });
-      expect(warnSpy).toHaveBeenCalledTimes(1);
-    } finally {
-      warnSpy.mockRestore();
-      vi.useRealTimers();
-    }
+    expect(mocks.signalHostedRuntimeOwnerReleasedRuntime).not.toHaveBeenCalled();
   });
 
   it.each(["P1001", "P2022"] as const)(

@@ -208,7 +208,7 @@ write fence is the active ownership truth while a run is in flight.
 | `apps/web` | Webhook verification, provider minimization, mailbox append and dedupe, device-sync dirty state, hosted member/billing/usage/product policy, hosted workspace metadata, mailbox lag, redacted runtime logs/status, reconciliation-facts endpoint. | Codex invocation, assistant automation semantics, outbox truth, internal runtime timers, container routing, Temporal workflow state. |
 | Temporal | Per-user workflow identity, pointer-only signals, coalesced wake hints, durable timers from web-owned reconciliation facts, retry policy for web facts reads and Cloudflare processing adapter calls, continue-as-new history bounds, and global device-sync scheduled-wake cadence/retry through a short-lived reconciler workflow. | Raw payloads, decrypted mailbox contents, provider headers, prompts, transcripts, vault data, full workspace state, full runtime invocation results, signed usage decisions, assistant automation logic, device provider semantics, usage policy decisions, Cloudflare state, provider tokens, dirty resource bodies, or canonical dirty/reconcile facts. |
 | `apps/cloudflare` | Durable Object routing, write-fence generation and validation, container invoke/wake, runtime callback authorization, direct R2/snapshot transport, execution cleanup, alarm cleanup for active write fences. | Reconciliation-facts derivation, mailbox backlog decisions, assistant wake calculation, browser-vault scheduling policy, device-sync dirty semantics, retry caps as orchestration, queue history, product facts. |
-| Murph runtime | Mailbox import watermarks, `AssistantInputEvent` staging, active-turn admission, Codex invocation, assistant automation and timers, device-sync runtime execution, outbox/provider cleanup, idle-floor/shutdown checkpointing plus invocation-local pre-floor assistant wake service, assistant `nextWakeAt`/`nextWakeReason` projection including model-free `assistant_delivery` retries, and inbox media retention wake projection. | Temporal workflow state, web product policy, hosted member/billing facts, Durable Object routing, Cloudflare execution lease ownership. |
+| Murph runtime | Mailbox import watermarks, `AssistantInputEvent` staging, active-turn admission, Codex invocation, assistant automation and timers, device-sync runtime execution, outbox/provider cleanup, idle-floor/shutdown checkpointing plus invocation-local projected wake service for every reason before the live wait deadline, assistant `nextWakeAt`/`nextWakeReason` projection including model-free `assistant_delivery` retries, and inbox media retention wake projection. | Temporal workflow state, web product policy, hosted member/billing facts, Durable Object routing, Cloudflare execution lease ownership. |
 
 ## Temporal State
 
@@ -535,24 +535,36 @@ synthetic pre-patch replay fixture were removed. The workflow must keep the
 deprecatePatch-window histories have drained. Private replay and package
 coverage gates require that marker to remain present.
 
-## Checkpoint recheck suppression
+## Attempt-ended reconciliation
 
-Web signals after a successful checkpoint with a workspace or retention wake.
-Intermediate checkpoints may suppress that signal only when a successful prior
-signal is acknowledged for the same scheduling facts, every persisted wake is
-future, and no mailbox progress changed. The existing workspace row holds a
-nullable `runtime_recheck_signaled_version` receipt. A callback records it only
-after Temporal accepts the signal and only if the exact checkpoint version still
-matches. The checkpoint CAS carries the receipt across equal wake timestamps,
-reasons, progress generation and complete redacted status; mailbox counter or
-consumption changes invalidate it in the same transaction. Missing receipts,
-legacy projections, due work and `idle_shutdown` retain rechecks. Signal or
-receipt failure leaves the next checkpoint eligible to retry. This receipt is
-operational acknowledgment, not scheduling authority, and never enters runtime
-responses or Temporal facts. It adds one bounded database write after an actual
-successful signal, no read and no extra round trip for a suppressed checkpoint.
-Apply the nullable-column migration before deploying Web; old Web ignores the
-receipt and its version movement conservatively invalidates suppression.
+Web checkpoints persist workspace and mailbox facts without signaling Temporal.
+While an invocation is alive, the runtime services its projected wakes for every
+reason through the existing wakeable timer, before the idle floor or a retained
+background-work deadline. Clean voice retention uses that same timer. Due device
+projections enter the existing system mailbox claim/retry owner. Checkpoint-gated
+effects still require durable publication; a no-progress wake key is not retried
+by the timer unless a distinct projection supersedes it.
+
+The owner route emits one advisory `runtime_owner_released {runtimeAttemptId}`
+for the successful final-release CAS: a settled `complete`, `release_completed`,
+or `release`. Early completion keeps the invocation owned and emits no hint;
+stale retries cannot emit another. The hint runs after the response with the
+existing two-second budget and no actionability pre-read. Accepted-owner timeout
+reconciliation remains recovery for a lost hint. This is one emission per durable
+transition, not exactly-once transport delivery.
+
+The workflow contract treats every attempt-ended hint as wait invalidation and
+rereads facts, including future wakes. Only a matching attempt clears accepted
+ownership; a stale release never revokes a successor. Release-before-activity-
+response handling remains required. The private workflow owner version-gates and
+replay-tests that contract.
+
+Deploy the verified workflow first. Then deploy the runtime while old Web still
+signals checkpoints, and drain old warm invocations. Only then deploy Web without
+checkpoint signals. Roll back in reverse order, restoring Web checkpoint signals
+first. Keep `runtime_recheck_signaled_version` and its Prisma field until old Web
+instances drain; no new code reads, carries, invalidates, or writes that receipt.
+Dropping it is a later migration. Rare out-of-attempt rechecks remain unchanged.
 
 ## Final Minimal Contract
 
@@ -591,9 +603,11 @@ checkpoint.
 A completed background preparation carries its existing progress evidence into
 the workspace checkpoint. A system-mailbox invocation that advances the durable
 progress generation and retains the same due device wake requests an immediate
-owner-release recheck, even without mailbox lag. Failed or unchanged passes and
-future retry wakes do not request this continuation. This recheck stays model-free
-unless independent foreground authority also requests a handoff.
+owner-release recheck, even without mailbox lag. The legacy positive-edge field
+still describes that progress, but Web now signals every final release, including
+failed, unchanged, and future-wake outcomes. Temporal chooses immediate work or
+a future timer from durable facts; the continuation stays model-free unless
+independent foreground authority also requests a handoff.
 If a default invocation's live checks disprove its overdue projection and the
 next due frontier belongs to a model-free owner, the runtime first checkpoints
 the corrected projections without advancing handled-through or the system

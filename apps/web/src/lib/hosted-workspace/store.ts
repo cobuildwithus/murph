@@ -78,8 +78,6 @@ export interface HostedWorkspaceRecord {
 }
 
 export interface HostedWorkspaceCheckpointResult {
-  /** Internal optimization only; absence preserves the callback recovery signal. */
-  canSkipRuntimeRecheck?: true;
   conversationInputAhead?: boolean;
   replacedSnapshotRef: HostedExecutionSnapshotRefState;
   status: "updated" | "conflict";
@@ -166,29 +164,11 @@ export async function checkpointHostedWorkspace(input: {
   }));
 }
 
-/** Acknowledge only the exact checkpoint whose post-commit signal succeeded. */
-export async function acknowledgeHostedWorkspaceRuntimeRecheck(input: {
-  prisma?: HostedWorkspaceStoreClient;
-  userId: string;
-  version: string;
-}): Promise<void> {
-  const prisma = input.prisma ?? getPrisma();
-  const version = normalizeBigInt(input.version, "Hosted workspace signaled version");
-  await prisma.$executeRaw(Prisma.sql`
-    UPDATE hosted_workspace
-    SET runtime_recheck_signaled_version = ${version}
-    WHERE user_id = ${requireNonEmptyString(input.userId, "Hosted workspace userId")}
-      AND version = ${version}
-  `);
-}
-
 interface CheckpointHostedWorkspaceMutationRow extends HostedWorkspaceRow {
-  runtimeRecheckSignaled: boolean;
   replacedSnapshotRef: Prisma.JsonValue | null;
 }
 
 interface CheckpointHostedWorkspaceMailboxMutationRow {
-  mailboxProgressed: boolean;
   conversationInputAhead: boolean;
 }
 
@@ -280,34 +260,32 @@ export async function checkpointHostedWorkspaceTx(input: {
     Prisma.sql`updated_at = NOW()`,
   ];
 
-  // Use the same normalized values for mutation and equality: omitted fields
-  // remain unchanged, and JSONB equality ignores object key order.
-  const checkpointFacts: Array<readonly [Prisma.Sql, Prisma.Sql]> = [];
+  // Omitted projection fields retain their current values.
   if ("nextWakeAt" in input) {
-    checkpointFacts.push([Prisma.sql`next_wake_at`, Prisma.sql`${
+    workspaceAssignments.push(Prisma.sql`next_wake_at = ${
       input.nextWakeAt === undefined || input.nextWakeAt === null
         ? null
         : requireDate(input.nextWakeAt, "Hosted workspace nextWakeAt")
-    }::timestamp`]);
+    }::timestamp`);
   }
   if ("nextWakeReason" in input) {
-    checkpointFacts.push([
-      Prisma.sql`next_wake_reason`, Prisma.sql`${normalizeNullableString(input.nextWakeReason)}::text`,
-    ]);
+    workspaceAssignments.push(
+      Prisma.sql`next_wake_reason = ${normalizeNullableString(input.nextWakeReason)}::text`,
+    );
   }
   if (progressProjectionKeyCount > 0) {
-    checkpointFacts.push(
-      [Prisma.sql`next_default_processing_wake_at`, Prisma.sql`${requestedNextDefaultProcessingWakeAt}::timestamp`],
-      [Prisma.sql`next_default_processing_wake_reason`, Prisma.sql`${requestedNextDefaultProcessingWakeReason}::text`],
-      [Prisma.sql`system_mailbox_progress_generation`, Prisma.sql`${requestedSystemMailboxProgressGeneration}::bigint`],
+    workspaceAssignments.push(
+      Prisma.sql`next_default_processing_wake_at = ${requestedNextDefaultProcessingWakeAt}::timestamp`,
+      Prisma.sql`next_default_processing_wake_reason = ${requestedNextDefaultProcessingWakeReason}::text`,
+      Prisma.sql`system_mailbox_progress_generation = ${requestedSystemMailboxProgressGeneration}::bigint`,
     );
   }
   if ("inboxMediaRetentionWakeAt" in input) {
-    checkpointFacts.push([Prisma.sql`inbox_media_retention_wake_at`, Prisma.sql`${
+    workspaceAssignments.push(Prisma.sql`inbox_media_retention_wake_at = ${
       input.inboxMediaRetentionWakeAt === undefined || input.inboxMediaRetentionWakeAt === null
         ? null
         : requireDate(input.inboxMediaRetentionWakeAt, "Hosted workspace inboxMediaRetentionWakeAt")
-    }::timestamp`]);
+    }::timestamp`);
   }
   if ("redactedStatusJson" in input) {
     const redactedStatusJson = input.redactedStatusJson === undefined
@@ -317,25 +295,10 @@ export async function checkpointHostedWorkspaceTx(input: {
         "Hosted workspace redactedStatusJson",
         HOSTED_CANONICAL_WRITE_RECEIPT_REDACTED_STATUS_KEY_SET,
       );
-    checkpointFacts.push([Prisma.sql`redacted_status_json`, Prisma.sql`${
+    workspaceAssignments.push(Prisma.sql`redacted_status_json = ${
       redactedStatusJson === null ? null : JSON.stringify(redactedStatusJson)
-    }::jsonb`]);
+    }::jsonb`);
   }
-  const factsUnchanged = Prisma.join([
-    Prisma.sql`TRUE`,
-    ...checkpointFacts.map(([column, value]) =>
-      Prisma.sql`workspace.${column} IS NOT DISTINCT FROM ${value}`
-    ),
-  ], " AND ");
-  workspaceAssignments.push(
-    ...checkpointFacts.map(([column, value]) => Prisma.sql`${column} = ${value}`),
-    // Carry a successful signal only across an equivalent checkpoint. A failed
-    // or racing callback cannot authorize suppression of a newer schedule.
-    Prisma.sql`runtime_recheck_signaled_version = CASE
-      WHEN workspace.runtime_recheck_signaled_version = workspace.version
-        AND (${factsUnchanged})
-      THEN workspace.version + 1 ELSE NULL END`,
-  );
 
   const conversationImportedSeq = readCheckpointConversationImportedSeq(input.redactedStatusJson);
   const handledConversationMailboxItemIds =
@@ -397,9 +360,7 @@ export async function checkpointHostedWorkspaceTx(input: {
       workspace.checkpointed_at AS "checkpointedAt",
       workspace.created_at AS "createdAt",
       workspace.updated_at AS "updatedAt",
-      current_workspace.replaced_snapshot_ref AS "replacedSnapshotRef",
-      COALESCE(workspace.runtime_recheck_signaled_version = workspace.version, FALSE)
-        AS "runtimeRecheckSignaled"
+      current_workspace.replaced_snapshot_ref AS "replacedSnapshotRef"
   `);
 
   if (updatedRows.length === 0) {
@@ -430,7 +391,6 @@ export async function checkpointHostedWorkspaceTx(input: {
   }
 
   let conversationInputAhead: true | undefined;
-  let mailboxProgressed = false;
   if (systemHandledThroughSeq !== null || shouldHandleConversation) {
     const observedAt = new Date();
     const handledConversationItemIdsSql = handledConversationMailboxItemIds.length > 0
@@ -518,16 +478,6 @@ export async function checkpointHostedWorkspaceTx(input: {
           AND counter.consumed_seq < LEAST(${systemHandledBound}, counter.next_seq - 1)
         RETURNING counter.consumed_seq
       ),
-      invalidated_recheck AS (
-        UPDATE hosted_workspace
-        SET runtime_recheck_signaled_version = NULL
-        WHERE user_id = ${userId}
-          AND runtime_recheck_signaled_version IS NOT NULL
-          AND (EXISTS (SELECT 1 FROM stamped_conversation)
-            OR EXISTS (SELECT 1 FROM advanced_conversation)
-            OR EXISTS (SELECT 1 FROM advanced_system))
-        RETURNING user_id
-      ),
       conversation_ahead AS (
         SELECT ${shouldObserveConversationAhead}
           AND EXISTS (
@@ -541,33 +491,20 @@ export async function checkpointHostedWorkspaceTx(input: {
           ) AS value
       )
       SELECT
-        conversation_ahead.value AS "conversationInputAhead",
-        (stamped_count.count > 0 OR conversation_count.count > 0
-          OR system_count.count > 0) AS "mailboxProgressed"
+        conversation_ahead.value AS "conversationInputAhead"
       FROM conversation_ahead
-      CROSS JOIN (
-        SELECT COUNT(*) FROM stamped_conversation
-      ) AS stamped_count
-      CROSS JOIN (
-        SELECT COUNT(*) FROM advanced_conversation
-      ) AS conversation_count
-      CROSS JOIN (
-        SELECT COUNT(*) FROM advanced_system
-      ) AS system_count
     `);
     if (mailboxRows.length !== 1 || !mailboxRows[0]) {
       throw new Error(
         "Hosted workspace checkpoint mailbox mutation returned an invalid row count.",
       );
     }
-    mailboxProgressed = mailboxRows[0].mailboxProgressed;
     if (mailboxRows[0].conversationInputAhead) {
       conversationInputAhead = true;
     }
   }
 
   const {
-    runtimeRecheckSignaled,
     replacedSnapshotRef: replacedSnapshotRefValue,
     ...updatedWorkspace
   } = updatedRows[0];
@@ -577,39 +514,11 @@ export async function checkpointHostedWorkspaceTx(input: {
   );
 
   return {
-    ...projectCheckpointRuntimeRecheck({
-      workspace: updatedWorkspace, runtimeRecheckSignaled, reason,
-      mailboxProgressed, conversationInputAhead,
-    }),
     ...(conversationInputAhead === true ? { conversationInputAhead } : {}),
     replacedSnapshotRef,
     status: "updated",
     workspace: projectHostedWorkspace(updatedWorkspace),
   };
-}
-
-function projectCheckpointRuntimeRecheck(input: {
-  workspace: HostedWorkspaceRow;
-  runtimeRecheckSignaled: boolean;
-  reason: string;
-  mailboxProgressed: boolean;
-  conversationInputAhead: true | undefined;
-}): Pick<HostedWorkspaceCheckpointResult, "canSkipRuntimeRecheck"> {
-  // A version/snapshot change alone cannot change a future timer. Keep the full
-  // status comparison conservative as new facts consumers evolve. Due work,
-  // legacy projections and shutdown retain their existing recovery signals.
-  const nowMs = Date.now();
-  const canSkip = input.runtimeRecheckSignaled === true
-    && input.reason !== "idle_shutdown"
-    && !input.mailboxProgressed
-    && !input.conversationInputAhead
-    && input.workspace.systemMailboxProgressGeneration !== null
-    && [
-      input.workspace.nextWakeAt,
-      input.workspace.nextDefaultProcessingWakeAt,
-      input.workspace.inboxMediaRetentionWakeAt,
-    ].every((wakeAt) => wakeAt === null || wakeAt.getTime() > nowMs);
-  return canSkip ? { canSkipRuntimeRecheck: true } : {};
 }
 
 function readCheckpointSystemHandledThroughSeq(
