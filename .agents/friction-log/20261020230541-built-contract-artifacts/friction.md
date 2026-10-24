@@ -1,6 +1,7 @@
 ---
 title: 'Built contract artifacts mask missing hosted Web source entrypoint mappings'
 severity: 'minor'
+issue: 'cobuildwithus/murph#4272'
 ---
 
 ## Expected Behavior

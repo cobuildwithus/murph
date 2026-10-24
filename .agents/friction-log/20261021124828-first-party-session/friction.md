@@ -1,6 +1,7 @@
 ---
 title: 'First-party session fixture omits its crypto preparation scope'
 severity: 'minor'
+issue: 'cobuildwithus/murph#4281'
 ---
 
 ## Expected Behavior
