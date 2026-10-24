@@ -52,5 +52,5 @@ Keep imported conversation work eligible for durable acknowledgement when AI usa
 - Green: all 145 internal-route tests pass, including denial in default and imported-sequence modes; existing runtime mixed-channel terminal compaction test passes.
 - Web typecheck passes on pinned Node 24.22.1. Complexity guard passes (maximum 9, zero hotspots); docs drift and gardening pass.
 - Candidate review: one existing response field now derives from its canonical owner. Empty items, maximum cursor clamp, denial bookkeeping, auth and provider-input surfaces are unchanged.
-- Changelog: narrow reliability improvement warrants a content-only entry once the PR number is available.
-- Final independent review and exact-head CI remain outstanding. No production action performed.
+- Changelog: `conversation-usage-pause-progress` records the narrow reliability outcome for PR #4348. Generation and all four archive-rendering tests pass; presentation is unchanged.
+- PR #4348 contains the tested candidate. Final independent review and exact-head CI remain outstanding. ReviewGPT would invoke an external model, so it remains pending under the current instruction; no attempt was made. Release coordination requested from the existing typing release owner. No production action performed.
