@@ -67,7 +67,7 @@ function ownerSnapshotPrisma() {
       findUnique: vi.fn().mockResolvedValue(GROUP),
     },
     hostedAccountGroupBillingRef: {
-      findUnique: vi.fn().mockResolvedValue({ billedSeatCount: 4 }),
+      findUnique: vi.fn(),
     },
     hostedAccountGroupPlanCapacity: {
       findMany: vi.fn().mockResolvedValue([{ billedQuantity: 4, planCode: "pulse" }]),
@@ -296,7 +296,7 @@ test("owner snapshot exposes a Telegram link only for a Telegram-bound invite", 
     $queryRaw: vi.fn().mockResolvedValue([]),
     hostedAccountGroup: { findUnique: vi.fn().mockResolvedValue(GROUP) },
     hostedAccountGroupBillingRef: {
-      findUnique: vi.fn().mockResolvedValue({ billedSeatCount: 4 }),
+      findUnique: vi.fn(),
     },
     hostedAccountGroupPlanCapacity: {
       findMany: vi.fn().mockResolvedValue([{ billedQuantity: 4, planCode: "pulse" }]),
@@ -363,7 +363,7 @@ test("active member identity falls back to the invited email when there is no la
     ]),
     hostedAccountGroup: { findUnique: vi.fn().mockResolvedValue(GROUP) },
     hostedAccountGroupBillingRef: {
-      findUnique: vi.fn().mockResolvedValue({ billedSeatCount: 4 }),
+      findUnique: vi.fn(),
     },
     hostedAccountGroupPlanCapacity: {
       findMany: vi.fn().mockResolvedValue([{ billedQuantity: 4, planCode: "pulse" }]),
@@ -634,7 +634,7 @@ function acceptanceViewPrisma(input: {
       count: vi.fn().mockResolvedValue(input.activeMemberships),
     },
     hostedAccountGroupBillingRef: {
-      findUnique: vi.fn().mockResolvedValue({ billedSeatCount: 4 }),
+      findUnique: vi.fn(),
     },
     hostedAccountGroupPlanCapacity: {
       findMany: vi.fn().mockResolvedValue([{ billedQuantity: 4, planCode: "pulse" }]),

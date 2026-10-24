@@ -624,7 +624,6 @@ describe.skipIf(!runPostgresProof)(
           data: {
             billingRef: {
               create: {
-                billedSeatCount: 2,
                 currentBillingPhase: "paid",
                 currentBillingPlanCode: "launch_family_monthly",
                 currentPeriodEnd: periodEnd,
