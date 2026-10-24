@@ -66,7 +66,9 @@ function participantOf(memberIds: readonly string[]): Prisma.GameWhereInput {
   return { OR: [
     { players: { some: { memberId: { in: [...memberIds] } } } },
     { createdBy: { in: [...memberIds] } },
-    { inviteeMemberId: { in: [...memberIds] }, status: { in: ["invited", "void"] } },
+    // Only an open addressed invite, or one kept after its creator left: cancelled
+    // or expired ones they never joined need no plan (their reference is cleared below).
+    { inviteeMemberId: { in: [...memberIds] }, OR: [{ status: "invited" }, { status: "void", departedPlayer: { not: Prisma.DbNull } }] },
   ] };
 }
 

@@ -165,6 +165,23 @@ describe.skipIf(!runPostgresProof)("weekly game when a player deletes their acco
     expect(await getPrisma().gameTicket.count({ where: { gameId } })).toBe(0);
   });
 
+  it("isn't stranded by more cancelled addressed rematches than the game bound", async () => {
+    const leo = await member("Leo");
+    const ava = await member("Ava");
+    const settled = await live(leo, ava);
+    await devSettleNow(settled, leo);
+    // Rematches Leo addressed to Ava and cancelled: only Leo's seat, void, no departure.
+    const ids = Array.from({ length: 1_001 }, () => randomUUID());
+    const template = await getPrisma().game.findUniqueOrThrow({ where: { id: settled } });
+    await getPrisma().game.createMany({ data: ids.map((id) => ({ createdBy: leo, id, inviteeMemberId: ava, lengthDays: 7, previousGameId: settled, round: 2,
+      status: "void", terms: template.terms ?? {}, termsWordsEncrypted: template.termsWordsEncrypted })) });
+    await getPrisma().gamePlayer.createMany({ data: ids.map((gameId) => ({ gameId, memberId: leo, seat: 0, timeZone: "America/New_York" })) });
+
+    expect(await deleteAccount(ava)).toEqual({ calledOff: 0, deleted: 0, kept: 1 });
+    expect(await getPrisma().game.count({ where: { id: { in: ids }, inviteeMemberId: { not: null } } })).toBe(0);
+    expect((await readGame(settled, leo))!.players.find((player) => player.left)).toMatchObject({ seat: 1 });
+  });
+
   it("fails closed when a game changes between sealing and the deletion transaction", async () => {
     const leo = await member("Leo");
     const ava = await member("Ava");
