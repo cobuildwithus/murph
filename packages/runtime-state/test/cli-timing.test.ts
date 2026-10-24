@@ -1452,7 +1452,9 @@ test.skipIf(!researchFailureCompatibilityBase)("actual pre-research reader colla
 });
 
 
-test("phase admission is exactly thirty-one fixed names without raising invocation caps", async () => {
+const eventReadPhases = ["event-core-load", "event-owner-candidates", "event-owner-revisions"] as const;
+
+test("phase admission is exactly thirty-four fixed names without raising invocation caps", async () => {
   assert.deepEqual(CLI_TIMING_PHASES, [
     "total", "setup", "dispatch", "post-dispatch", "teardown", "unattributed",
     "query-freshness", "query-manifest", "query-status", "query-rebuild", "query-wait",
@@ -1463,6 +1465,7 @@ test("phase admission is exactly thirty-one fixed names without raising invocati
     "query-metric-samples", "query-metric-evidence", "query-metric-extract",
     "query-metric-precedence", "query-metric-targets",
     "canonical-write-wait", "importers-runtime-load",
+    "event-core-load", "event-owner-candidates", "event-owner-revisions",
   ]);
   assert.equal(CLI_TIMING_MAX_COMMANDS, 32);
   assert.equal(CLI_TIMING_MAX_SPANS, 64);
@@ -1470,7 +1473,7 @@ test("phase admission is exactly thirty-one fixed names without raising invocati
   for (const phase of CLI_TIMING_PHASES.slice(1)) {
     assert.equal(addCliPhaseSample(report.commands[0]!.phases, phase, 37_000_000), true);
   }
-  assert.equal(report.commands[0]!.phases.length, 31);
+  assert.equal(report.commands[0]!.phases.length, 34);
   assert.deepEqual(normalizeCliTiming(report), report);
   // Unknown labels are rejected, not pattern-admitted or serialized as paths.
   for (const phase of ["query-publication/PRIVATE_SENTINEL", "QUERY-SOURCE-READ", "query-source-read "]) {
@@ -1485,7 +1488,7 @@ test("phase admission is exactly thirty-one fixed names without raising invocati
     let bounded!: CliTiming;
     await withCliTiming(() => timeCliDispatch("search query", async () => {
       for (let index = 0; index < CLI_TIMING_MAX_SPANS + 2; index += 1) {
-        const end = startCliPhase(CLI_TIMING_PHASES[11 + index % 6]!);
+        const end = startCliPhase(eventReadPhases[index % eventReadPhases.length]!);
         advance(1);
         end();
       }
@@ -1495,6 +1498,69 @@ test("phase admission is exactly thirty-one fixed names without raising invocati
       .reduce((count, phase) => count + phase.count, 0), 63);
     assert.deepEqual(normalizeCliTiming(bounded), bounded);
   });
+});
+
+test("event read phases emit wall time on success and throw without retaining payloads or sampling CPU", async () => {
+  await clocked(async advance => {
+    const originalCpuUsage = process.cpuUsage;
+    let cpuReads = 0;
+    process.cpuUsage = previous => { cpuReads += 1; return originalCpuUsage(previous); };
+    try {
+      for (const phase of eventReadPhases) {
+        const result = { id: "PRIVATE_SENTINEL", note: "PRIVATE_SENTINEL" };
+        const failure = Object.assign(new Error("PRIVATE_SENTINEL"), {
+          code: "EVENT_CONTRACT_INVALID", path: "PRIVATE_SENTINEL", record: result,
+        });
+        for (const fail of [false, true]) {
+          let report!: CliTiming;
+          const run = () => withCliTiming(async () => {
+            await timeCliDispatch("meal show", async () => {
+              assert.equal(await timeCliPhase(phase, async () => {
+                advance(37);
+                if (fail) throw failure;
+                return result;
+              }), result);
+            });
+            return result;
+          }, value => { report = value; });
+          if (fail) await assert.rejects(run(), error => error === failure);
+          else assert.equal(await run(), result);
+          const command = report.commands[0]!;
+          assert.equal(command.outcome, fail ? "error" : "ok");
+          assert.equal(command.calls, 1);
+          assert.deepEqual(command.phases.find(sample => sample.phase === phase), {
+            phase, count: 1, sumUs: 37, maxUs: 37, buckets: [1, 0, 0, 0, 0, 0, 0, 0],
+          });
+          assert.equal(report.droppedSpans, 0);
+          assert.equal(JSON.stringify(report).includes("PRIVATE_SENTINEL"), false);
+          assert.deepEqual(normalizeCliTiming(report), report);
+        }
+      }
+      assert.equal(cpuReads, 0);
+    } finally { process.cpuUsage = originalCpuUsage; }
+  });
+});
+
+test("event read phases remain inactive without a timing sink and preserve results and thrown identity", async () => {
+  const previous = process.env.MURPH_CLI_TIMING_ENDPOINT;
+  delete process.env.MURPH_CLI_TIMING_ENDPOINT;
+  try {
+    for (const phase of eventReadPhases) {
+      const result = { synthetic: true };
+      assert.equal(await withCliTiming(() => timeCliPhase(phase, async () => {
+        assert.equal(isCliTimingActive(), false);
+        return result;
+      })), result);
+      const failure = new Error("PRIVATE_SENTINEL");
+      await assert.rejects(withCliTiming(() => timeCliPhase(phase, async () => {
+        assert.equal(isCliTimingActive(), false);
+        throw failure;
+      })), error => error === failure);
+    }
+  } finally {
+    if (previous === undefined) delete process.env.MURPH_CLI_TIMING_ENDPOINT;
+    else process.env.MURPH_CLI_TIMING_ENDPOINT = previous;
+  }
 });
 
 
@@ -1520,15 +1586,17 @@ for (const [admission, compatibilityBase, admitted] of [
   ["load", process.env.MURPH_CLI_LOAD_PHASE_COMPAT_BASE, 21],
   ["metric-subphase", process.env.MURPH_CLI_METRIC_PHASE_COMPAT_BASE, 24],
   ["wait-load", process.env.MURPH_CLI_WAIT_LOAD_PHASE_COMPAT_BASE, 29],
+  ["event-read", process.env.MURPH_CLI_EVENT_READ_PHASE_COMPAT_BASE, 31],
 ] as const) test.skipIf(!compatibilityBase)(`actual pre-${admission} reader drops the whole optional object; new reader keeps old reports`, async () => {
   assert.match(compatibilityBase ?? "", /^[a-f0-9]{40}$/u);
+  if (admission === "event-read") assert.equal(compatibilityBase, "4ec40920fca1872c8324d9325c23a9e50ba39754");
   const source = execFileSync("git", ["show", `${compatibilityBase}:packages/runtime-state/src/cli-timing.ts`],
     { encoding: "utf8", maxBuffer: 1_000_000 });
   const old: { CLI_TIMING_PHASES: readonly string[]; normalizeCliTiming: typeof normalizeCliTiming } = await import(
     `data:text/javascript;base64,${Buffer.from(stripTypeScriptTypes(source)).toString("base64")}`,
   );
   assert.deepEqual(old.CLI_TIMING_PHASES, CLI_TIMING_PHASES.slice(0, admitted), "compatibility base must precede admission");
-  const legacy = sample("wearables latest", 1_000);
+  const legacy = sample(admission === "event-read" ? "meal show" : "wearables latest", 1_000);
   assert.deepEqual(old.normalizeCliTiming(legacy), legacy);
   assert.deepEqual(normalizeCliTiming(legacy), legacy);
   for (const phase of CLI_TIMING_PHASES.slice(admitted)) {

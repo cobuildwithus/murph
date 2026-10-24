@@ -482,6 +482,81 @@ test("importers-runtime-load times each importer import call and preserves its v
   assert.equal(await runtimeModule.loadImportersRuntimeModule(), importersModule);
 });
 
+for (const lookupKind of ["exact", "owner"] as const) {
+  test(`event-core-load times ${lookupKind} imports without timing reads or changing results/errors`, async () => {
+    const originalClock = process.hrtime.bigint;
+    let clock = 0n;
+    const advance = (ms: number) => { clock += BigInt(ms) * 1_000_000n; };
+    const event: import("@murphai/contracts").MealEventRecord = {
+      schemaVersion: "murph.event.v1", id: "evt_00000000000000000000000001",
+      kind: "meal", mealId: "meal_00000000000000000000000002", source: "manual",
+      occurredAt: "2026-01-01T12:00:00.000Z", recordedAt: "2026-01-01T12:00:00.000Z",
+      dayKey: "2026-01-01",
+      // Conversion/structuredClone touches this after the import has ended.
+      get title() { advance(11); return "PRIVATE_SENTINEL"; },
+    };
+    const ledgerFile = "ledger/events/2026/2026-01.jsonl";
+    const read = vi.fn(async () => { advance(7); return { eventId: event.id, ledgerFile, event }; });
+    const importFailure = Object.assign(new Error("PRIVATE_SENTINEL"), { details: { payload: "PRIVATE_SENTINEL" } });
+    let rejectImport = false;
+    const load = vi.fn(async (specifier: string) => {
+      assert.equal(specifier, "@murphai/core");
+      advance(5);
+      if (rejectImport) throw importFailure;
+      return { readEvent: read, readOwnedEvent: read };
+    });
+    const module = await importWithMocks<typeof import("../src/usecases/exact-event-record.ts")>(
+      "../src/usecases/exact-event-record.ts",
+      { "../src/runtime-import.ts": () => ({ loadRuntimeModule: load }) },
+    );
+    const { timeCliDispatch, withCliTiming } = await import("@murphai/runtime-state/node/cli-timing");
+    const run = () => lookupKind === "exact"
+      ? module.readExactEventRecord({ vault: "./PRIVATE_SENTINEL", lookup: ` ${event.id} `, entityLabel: "meal" })
+      : module.readOwnedEventRecord({ vault: "./PRIVATE_SENTINEL", lookup: ` ${event.mealId} `, kind: "meal" });
+    const reports: CliTiming[] = [];
+    const timed = async (action: () => Promise<void>) =>
+      withCliTiming(() => timeCliDispatch("meal show", action), (report) => { reports.push(report); });
+
+    process.hrtime.bigint = () => clock;
+    try {
+      const untimed = await run();
+      const values: Awaited<ReturnType<typeof run>>[] = [];
+      await timed(async () => { values.push(await run(), await run()); });
+      for (const value of values) {
+        assert.deepEqual(value, untimed);
+        assert.equal(value.event, event);
+      }
+      assert.equal(read.mock.calls.length, 3);
+      assert.equal(load.mock.calls.length, 3);
+      rejectImport = true;
+      await assert.rejects(timed(async () => { await run(); }), (error: unknown) => error === importFailure);
+      // Disabled instrumentation preserves the identical loader rejection too.
+      await assert.rejects(run(), (error: unknown) => error === importFailure);
+      assert.equal(read.mock.calls.length, 3);
+      assert.equal(load.mock.calls.length, 5);
+    } finally {
+      process.hrtime.bigint = originalClock;
+    }
+
+    assert.equal(reports.length, 2);
+    for (const [index, report] of reports.entries()) {
+      assert.deepEqual(normalizeCliTiming(report), report);
+      const command = report.commands[0]!;
+      assert.equal(command.outcome, index === 0 ? "ok" : "error");
+      const count = index === 0 ? 2 : 1;
+      assert.deepEqual(command.phases.filter((phase) => phase.phase.startsWith("event-")), [{
+        phase: "event-core-load", count, sumUs: count * 5_000, maxUs: 5_000,
+        buckets: [count, 0, 0, 0, 0, 0, 0, 0],
+      }]);
+      assert.equal(report.droppedSpans, 0);
+      assert.equal(report.droppedCalls, 0);
+      assert.equal(/PRIVATE_SENTINEL|evt_|meal_|ledger\//u.test(JSON.stringify(report)), false);
+    }
+    // Successful dispatch includes read and conversion work; the load phase does not.
+    assert.ok(reports[0]!.commands[0]!.phases.find((phase) => phase.phase === "dispatch")!.sumUs > 24_000);
+  });
+}
+
 test("loadIntegratedRuntime composes cached owner loaders and retries only the failed owner", async () => {
   const coreRuntime = createCoreRuntimeStub();
   const queryRuntime = createQueryRuntimeStub();
