@@ -1,3 +1,6 @@
+Terminal cron delivery observation is tracked in
+[the active plan](exec-plans/completed/2026-10-24-cron-terminal-observation.md).
+
 Native container provider read diagnostics are owned by
 [`Cloudflare deployment`](../apps/cloudflare/DEPLOY.md); implementation and
 regression evidence are tracked in
@@ -1508,3 +1511,5 @@ Implementation and verification are recorded in
 Mailbox handoff recovery's age eligibility before per-user selection and
 same-sweep duplicate suppression are owned by `references/hosted-temporal-orchestration.md`; implementation proof
 is recorded in [aged mailbox recovery](exec-plans/completed/2026-10-23-sweeper-dup-signal.md).
+
+Settings authentication without paid access or consent re-grant, and actor-aware additive invite cancellation proof: [`game recovery`](exec-plans/active/2026-10-23-game-v1-settings-cancelled.md).

@@ -1,6 +1,7 @@
 import type { EventRecord } from '@murphai/contracts'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { isDefaultProjectedEventRecord } from '@murphai/query/query-visibility'
+import { timeCliPhase } from '@murphai/runtime-state/node/cli-timing'
 
 import { toExactEventQueryRecord } from '../commands/query-record-command-helpers.js'
 import type { QueryCanonicalEntity } from '../query-runtime.js'
@@ -71,7 +72,7 @@ export async function readExactEventRecord(input: {
     throw notFound(input.entityLabel, input.lookup)
   }
 
-  const core = await loadRuntimeModule<ExactEventCoreRuntime>('@murphai/core')
+  const core = await timeCliPhase('event-core-load', () => loadRuntimeModule<ExactEventCoreRuntime>('@murphai/core'))
   try {
     const exact = await core.readEvent({ vaultRoot: input.vault, eventId })
     if (
@@ -109,7 +110,7 @@ export async function readOwnedEventRecord(input: {
   kind: 'document' | 'meal'
 }): Promise<ExactEventRecord> {
   const ownerId = input.lookup.trim()
-  const core = await loadRuntimeModule<ExactEventCoreRuntime>('@murphai/core')
+  const core = await timeCliPhase('event-core-load', () => loadRuntimeModule<ExactEventCoreRuntime>('@murphai/core'))
   try {
     const exact = await core.readOwnedEvent({
       vaultRoot: input.vault,

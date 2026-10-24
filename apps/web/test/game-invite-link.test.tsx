@@ -60,3 +60,13 @@ describe("weekly game invite link", () => {
     expect(renderToStaticMarkup(createElement(GameInviteView, { appUrl, preview: { status: "used" } }))).not.toContain(appUrl);
   });
 });
+
+it.each([
+  [{ status: "expired", reason: "cancelled", inviterFirstName: "Player" }, "Player called this one off. Ask for a new link."],
+  [{ status: "expired", reason: "cancelled" }, "This invite was called off. Ask for a new link."],
+  [{ status: "expired" }, "This invite expired. Ask for a new link."],
+] satisfies Array<[GameInvitePreview, string]>)("explains the closed invite cause", (preview, copy) => {
+  const html = renderToStaticMarkup(createElement(GameInviteView, { appUrl: "ai.withmurph.app://invite/synthetic", preview }));
+  expect(html).toContain(copy);
+  expect(html).not.toContain("Open in Murph");
+});

@@ -325,7 +325,7 @@ export interface GameHomeView {
   wallet: { held: GameTicketView[]; owed: GameTicketView[]; redeemed: GameTicketView[] };
 }
 
-/** What an invite link shows. Only an open invite carries its details. */
+/** What an invite link shows. Only an open invite carries terms; cancellation may name the inviter. */
 export type GameInvitePreview =
   | {
       status: "open";
@@ -344,7 +344,8 @@ export type GameInvitePreview =
       startsOn: string | null;
       expiresAt: string;
     }
-  | { status: "used" | "expired" };
+  | { status: "used" }
+  | { status: "expired"; reason?: "cancelled"; inviterFirstName?: string };
 
 export type GameErrorCode =
   | "UNAUTHENTICATED"

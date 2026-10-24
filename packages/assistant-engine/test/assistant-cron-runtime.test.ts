@@ -21,6 +21,7 @@ import {
 } from '@murphai/core'
 import {
   assistantCronJobSchema,
+  assistantCronRunRecordSchema,
   assistantOutboxIntentSchema,
   type AssistantOutboxIntent,
   type AssistantCronJob,
@@ -218,10 +219,12 @@ import {
   buildAssistantCronTargetSnapshot,
 } from '../src/assistant/cron/targets.ts'
 import {
+  appendAssistantCronRun,
   readAssistantCronStore,
   resolveAssistantCronJobIndex,
   writeAssistantCronStore,
 } from '../src/assistant/cron/store.ts'
+import * as assistantCronStore from '../src/assistant/cron/store.ts'
 import {
   appendAssistantDeviceActivityCronJobMetadata,
   buildAssistantDeviceActivityAuthorityKey,
@@ -270,6 +273,7 @@ import {
 import type { AssistantRunEvent } from '../src/assistant/automation/shared.ts'
 import { resolveAssistantStatePaths } from '../src/assistant/store/paths.ts'
 import {
+  beginAssistantOutboxIntentMirrorPreparedDispatch,
   dispatchAssistantOutboxIntent,
   listAssistantOutboxIntents,
   markAssistantOutboxIntentMirrorTerminalById,
@@ -277,6 +281,7 @@ import {
   readAssistantOutboxIntent,
   saveAssistantOutboxIntent,
 } from '../src/assistant/outbox.ts'
+import { ASSISTANT_OUTBOX_MAX_RETRY_ATTEMPTS } from '../src/assistant/outbox/retry-policy.ts'
 import { createTempVaultContext } from './test-helpers.ts'
 
 const LEGACY_ROUTE_CHANNEL_ENV_NAME = [
@@ -14434,6 +14439,251 @@ describe('assistant cron runtime orchestration', () => {
     expect(runtimeRecord?.state.retryAfterAt).toBeNull()
   })
 })
+
+describe('cron delivery reconciliation telemetry', () => {
+  it('correlates queued completion with a persisted sent transition and one-shot archive', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T10:00:12.000Z'))
+    vi.stubEnv('HOSTED_LOG_FINGERPRINT_SECRET', 'synthetic-cron-observation-secret')
+    const { vaultRoot } = await createRuntimeContext('cron-observation-sent-')
+    const job = await addAssistantCronJob({
+      channel: 'telegram', deliveryTarget: 'room-synthetic',
+      name: 'Synthetic observation reminder', prompt: 'Synthetic reminder content.',
+      now: new Date('2026-04-08T08:00:00.000Z'), resolveTargetDefaults: false,
+      schedule: { kind: 'at', at: '2026-04-08T10:00:00.000Z' },
+      vault: vaultRoot,
+    })
+    const intent = buildTestLinqOutboxIntent({
+      createdAt: '2026-04-08T10:00:12.000Z',
+      intentId: 'outbox_synthetic_observation_sent', message: 'Synthetic reminder content.',
+    })
+    await saveAssistantOutboxIntent(vaultRoot, intent)
+    cronMocks.sendAssistantMessageLocal.mockResolvedValueOnce({
+      decision: { kind: 'send_message', privateSummary: 'Synthetic summary.', text: intent.message },
+      deliveryOutcome: { kind: 'queued', error: null, intentId: intent.intentId, session: { sessionId: intent.sessionId } },
+      response: intent.message, session: { sessionId: intent.sessionId },
+    })
+    const events: AssistantRunEvent[] = []
+    const onEvent = (event: AssistantRunEvent) => { events.push(event) }
+    await processDueAssistantCronJobsLocal({ deliveryDispatchMode: 'queue-only', onEvent, vault: vaultRoot })
+    const fingerprint = events.find((event) => event.type === 'cron.job.completed')
+      ?.failureContext?.deliveryFingerprint
+    expect(fingerprint).toMatch(/^h1_[a-f0-9]{24}$/u)
+    expect(events.filter((event) => event.type === 'cron.delivery.reconciled')).toEqual([])
+
+    await expect(markAssistantOutboxIntentSentById({
+      intentId: intent.intentId, onEvent, vault: vaultRoot,
+      delivery: {
+        channel: 'linq', idempotencyKey: null, messageLength: intent.message.length,
+        providerMessageId: 'provider-synthetic', providerThreadId: 'thread-synthetic',
+        sentAt: '2026-04-08T10:00:20.000Z', target: 'thread-synthetic', targetKind: 'thread',
+      },
+    })).resolves.toMatchObject({ status: 'sent' })
+    const reconciled = events.filter((event) => event.type === 'cron.delivery.reconciled')
+    expect(reconciled).toEqual([expect.objectContaining({
+      type: 'cron.delivery.reconciled', safeDetails: 'cron_delivery_reconciled',
+      providerKind: 'status', providerState: 'completed',
+      failureContext: { deliveryStatus: 'sent', runOutcome: 'delivered', deliveryFingerprint: fingerprint },
+    })])
+    expect(findCanonicalAutomation(vaultRoot, job.jobId)?.status).toBe('archived')
+    expect((await listAssistantCronRuns({ job: job.jobId, vault: vaultRoot })).runs[0])
+      .toMatchObject({ outcome: 'delivered', reason: 'delivery_sent' })
+    for (const privateValue of [job.jobId, job.name, job.prompt, intent.intentId, intent.sessionId, intent.turnId, intent.message, 'thread-synthetic', 'provider-synthetic']) {
+      expect(JSON.stringify(reconciled)).not.toContain(privateValue)
+    }
+    const terminal = await readAssistantOutboxIntent(vaultRoot, intent.intentId)
+    expect(terminal).not.toBeNull()
+    await expect(reconcileAssistantCronDeliveryIntent({ intent: terminal!, onEvent, vault: vaultRoot }))
+      .resolves.toEqual({ reconciled: 0 })
+    expect(events.filter((event) => event.type === 'cron.delivery.reconciled')).toHaveLength(1)
+  })
+
+  it.each([
+    { owner: 'canonical' as const, status: 'failed' as const },
+    { owner: 'local' as const, status: 'abandoned' as const },
+  ])('observes $owner $status reconciliation without changing its journal meaning', async ({ owner, status }) => {
+    vi.stubEnv('HOSTED_LOG_FINGERPRINT_SECRET', '')
+    vi.stubEnv('HOSTED_AI_USAGE_REPORTING_SECRET', '')
+    const { vaultRoot, job, intent } = await createPendingCronObservationFixture(owner)
+    await saveAssistantOutboxIntent(vaultRoot, intent)
+    const onEvent = vi.fn()
+    await expect(markAssistantOutboxIntentMirrorTerminalById({
+      intentId: intent.intentId, status, onEvent, vault: vaultRoot,
+      error: new Error('Synthetic private failure detail.'),
+      failedAt: new Date('2026-04-08T10:00:20.000Z'),
+    })).resolves.toMatchObject({ status })
+    expect(onEvent).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+      type: 'cron.delivery.reconciled',
+      failureContext: { deliveryStatus: status, runOutcome: 'failed', deliveryFingerprint: null },
+    }))
+    expect(JSON.stringify(onEvent.mock.calls)).not.toContain('Synthetic private failure detail.')
+    expect(JSON.stringify(onEvent.mock.calls)).not.toContain(intent.intentId)
+    expect((await getAssistantCronJob(vaultRoot, job.jobId)).state.pendingDeliveryIntentId).toBeUndefined()
+    expect((await listAssistantCronRuns({ job: job.jobId, vault: vaultRoot })).runs[0])
+      .toMatchObject({ outcome: 'failed', reason: `delivery_${status}`, error: 'Synthetic private failure detail.' })
+  })
+
+  it.each(['dispatch', 'prepare'] as const)('forwards the %s observer through real outbox reconciliation', async (entry) => {
+    const { vaultRoot, job, intent } = await createPendingCronObservationFixture('canonical')
+    await saveAssistantOutboxIntent(vaultRoot, {
+      ...intent, status: 'retryable', attemptCount: ASSISTANT_OUTBOX_MAX_RETRY_ATTEMPTS,
+      deliveryTransportIdempotent: true,
+    })
+    const onEvent = vi.fn()
+    const sendLinq = vi.fn(async () => { throw new Error('Unexpected synthetic provider entry.') })
+    const now = new Date('2026-04-08T10:00:20.000Z')
+    const status = entry === 'dispatch' ? 'sent' : 'failed'
+    const run = () => entry === 'dispatch'
+      ? dispatchAssistantOutboxIntent({
+          dependencies: { sendLinq }, intentId: intent.intentId, now, vault: vaultRoot,
+          dispatchHooks: {
+            onEvent,
+            resolveDeliveredIntent: async () => ({
+              channel: 'linq', idempotencyKey: null, messageLength: intent.message.length,
+              providerMessageId: 'synthetic-recovered', providerThreadId: 'thread-synthetic',
+              sentAt: now.toISOString(), target: 'thread-synthetic', targetKind: 'thread',
+            }),
+          },
+        })
+      : beginAssistantOutboxIntentMirrorPreparedDispatch({
+          deliveryTransportIdempotent: true, intentId: intent.intentId,
+          onEvent, startedAt: now.toISOString(), vault: vaultRoot,
+        })
+    await expect(run()).resolves.toMatchObject({ intent: { status } })
+    expect(onEvent).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+      type: 'cron.delivery.reconciled',
+      failureContext: expect.objectContaining({ deliveryStatus: status, runOutcome: status === 'sent' ? 'delivered' : 'failed' }),
+    }))
+    expect((await getAssistantCronJob(vaultRoot, job.jobId)).state.pendingDeliveryIntentId).toBeUndefined()
+    await expect(run()).resolves.toMatchObject({ intent: { status } })
+    expect(onEvent).toHaveBeenCalledTimes(1)
+    expect(sendLinq).not.toHaveBeenCalled()
+  })
+
+  it.each(['sent', 'missing'] as const)('observes later %s repair once and leaves genuinely pending work silent', async (status) => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T10:00:20.000Z'))
+    const { vaultRoot, job, intent, terminal } = await createPendingCronObservationFixture('canonical')
+    const events: AssistantRunEvent[] = []
+    const onEvent = (event: AssistantRunEvent) => { events.push(event) }
+    // Both a fresh missing intent and a still-pending intent are nonterminal.
+    await expect(repairPendingAssistantCronDeliveries({ now: new Date(), onEvent, vault: vaultRoot }))
+      .resolves.toEqual({ checked: 1, reconciled: 0 })
+    for (const pendingStatus of ['pending', 'sending', 'retryable', 'sent'] as const) {
+      await expect(reconcileAssistantCronDeliveryIntent({ intent: { ...intent, status: pendingStatus }, onEvent, vault: vaultRoot }))
+        .resolves.toEqual({ reconciled: 0 })
+    }
+    expect(events).toEqual([])
+    if (status === 'sent') {
+      await saveAssistantOutboxIntent(vaultRoot, terminal)
+      await expect(processDueAssistantCronJobsLocal({ onEvent, vault: vaultRoot }))
+        .resolves.toEqual({ failed: 0, processed: 0, succeeded: 0 })
+    } else {
+      await expect(repairPendingAssistantCronDeliveries({
+        now: new Date('2026-04-09T10:00:00.000Z'), onEvent, vault: vaultRoot,
+      })).resolves.toEqual({ checked: 1, reconciled: 1 })
+    }
+    const reconciled = events.filter((event) => event.type === 'cron.delivery.reconciled')
+    expect(reconciled).toEqual([expect.objectContaining({
+      failureContext: expect.objectContaining({ deliveryStatus: status, runOutcome: status === 'sent' ? 'delivered' : 'failed' }),
+    })])
+    expect((await listAssistantCronRuns({ job: job.jobId, vault: vaultRoot })).runs[0])
+      .toMatchObject({ outcome: status === 'sent' ? 'delivered' : 'failed', reason: `delivery_${status}` })
+    await expect(repairPendingAssistantCronDeliveries({ onEvent, vault: vaultRoot }))
+      .resolves.toEqual({ checked: 0, reconciled: 0 })
+    expect(events.filter((event) => event.type === 'cron.delivery.reconciled')).toHaveLength(1)
+  })
+
+  it.each(['journal', 'local-store', 'canonical-store', 'archive'] as const)(
+    'emits no reconciliation success on %s persistence failure and observes successful repair',
+    async (stage) => {
+      const owner = stage === 'local-store' ? 'local' : 'canonical'
+      const { vaultRoot, job, terminal } = await createPendingCronObservationFixture(owner, stage === 'archive')
+      await saveAssistantOutboxIntent(vaultRoot, terminal)
+      const onEvent = vi.fn()
+      const failure = new Error('Synthetic owner persistence failure.')
+      const spy = stage === 'journal'
+        ? vi.spyOn(assistantCronStore, 'finalizeAssistantCronPendingRunDelivery')
+        : stage === 'local-store'
+          ? vi.spyOn(assistantCronStore, 'writeAssistantCronStore')
+          : stage === 'canonical-store'
+            ? vi.spyOn(assistantCronRuntimeState, 'writeAssistantCronCanonicalRuntimeStore')
+            : null
+      if (spy) spy.mockRejectedValueOnce(failure)
+      else cronMocks.upsertAutomation.mockRejectedValueOnce(failure)
+      try {
+        await expect(reconcileAssistantCronDeliveryIntent({ intent: terminal, onEvent, vault: vaultRoot }))
+          .rejects.toThrow(failure)
+        expect(onEvent).not.toHaveBeenCalled()
+        expect((await getAssistantCronJob(vaultRoot, job.jobId)).state.pendingDeliveryIntentId)
+          .toBe(terminal.intentId)
+        expect((await listAssistantCronRuns({ job: job.jobId, vault: vaultRoot })).runs[0]?.outcome)
+          .toBe(stage === 'journal' ? 'delivery_pending' : 'delivered')
+      } finally {
+        spy?.mockRestore()
+      }
+      // The journal may already be terminal; owner persistence still needs repair.
+      await expect(repairPendingAssistantCronDeliveries({ onEvent, vault: vaultRoot }))
+        .resolves.toEqual({ checked: 1, reconciled: 1 })
+      expect(onEvent).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ type: 'cron.delivery.reconciled' }))
+      await expect(repairPendingAssistantCronDeliveries({ onEvent, vault: vaultRoot }))
+        .resolves.toEqual({ checked: 0, reconciled: 0 })
+      expect(onEvent).toHaveBeenCalledTimes(1)
+    },
+  )
+
+  it.each(['throws', 'rejects', 'never settles'] as const)(
+    'preserves durable reconciliation when its observer %s', async (behavior) => {
+      const { vaultRoot, job, terminal } = await createPendingCronObservationFixture('local')
+      const onEvent = vi.fn(() => {
+        if (behavior === 'throws') throw new Error('Synthetic observer failure.')
+        if (behavior === 'rejects') return Promise.reject(new Error('Synthetic observer failure.'))
+        return new Promise<void>(() => {})
+      })
+      await expect(reconcileAssistantCronDeliveryIntent({ intent: terminal, onEvent, vault: vaultRoot }))
+        .resolves.toEqual({ reconciled: 1 })
+      await Promise.resolve()
+      expect(onEvent).toHaveBeenCalledTimes(1)
+      expect((await getAssistantCronJob(vaultRoot, job.jobId)).state.pendingDeliveryIntentId).toBeUndefined()
+      expect((await listAssistantCronRuns({ job: job.jobId, vault: vaultRoot })).runs[0])
+        .toMatchObject({ outcome: 'delivered', reason: 'delivery_sent' })
+      await expect(reconcileAssistantCronDeliveryIntent({ intent: terminal, onEvent, vault: vaultRoot }))
+        .resolves.toEqual({ reconciled: 0 })
+      expect(onEvent).toHaveBeenCalledTimes(1)
+    },
+  )
+})
+
+async function createPendingCronObservationFixture(owner: 'canonical' | 'local', oneShot = false) {
+  const { vaultRoot } = await createRuntimeContext('cron-observation-pending-')
+  const job = owner === 'local'
+    ? await createLocalJob(vaultRoot, 'synthetic-observation')
+    : await createCanonicalJob(vaultRoot, 'synthetic-observation')
+  const at = '2026-04-08T10:00:00.000Z'
+  const intent = buildTestLinqOutboxIntent({ createdAt: at, intentId: `outbox_observation_${owner}` })
+  if (owner === 'local') {
+    await updateLocalJob(vaultRoot, job.jobId, (current) => ({
+      ...current, updatedAt: at,
+      state: { ...current.state, lastRunAt: at, nextRunAt: null, pendingDeliveryIntentId: intent.intentId },
+    }))
+  } else {
+    if (oneShot) findCanonicalAutomation(vaultRoot, job.jobId)!.schedule = { kind: 'at', at }
+    await updateCanonicalRuntimeState(vaultRoot, job.jobId, (current) => ({
+      ...current, updatedAt: at,
+      state: { ...current.state, lastRunAt: at, pendingOccurrenceAt: at, pendingDeliveryIntentId: intent.intentId },
+    }))
+  }
+  await appendAssistantCronRun(resolveAssistantStatePaths(vaultRoot), assistantCronRunRecordSchema.parse({
+    schema: 'murph.assistant-cron-run.v1', runId: 'run_synthetic_observation', jobId: job.jobId,
+    trigger: 'scheduled', outcome: 'delivery_pending', reason: 'delivery_queued', status: 'skipped',
+    startedAt: at, finishedAt: at, scheduledOccurrenceAt: at,
+    sessionId: intent.sessionId, response: null, responseLength: 0, error: null,
+  }))
+  const terminal = assistantOutboxIntentSchema.parse({
+    ...intent, status: 'sent', sentAt: '2026-04-08T10:00:20.000Z', updatedAt: '2026-04-08T10:00:20.000Z',
+  })
+  return { vaultRoot, job, intent, terminal }
+}
 
 function getVaultAutomationStore(vault: string): MockAutomationRecord[] {
   const existing = cronMocks.automationsByVault.get(vault)

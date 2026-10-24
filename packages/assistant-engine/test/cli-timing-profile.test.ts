@@ -427,8 +427,11 @@ for (const [label, compatibilityBase, command, phases] of [
     ['query-entity-read', 'query-wearable-compose', 'query-metric-read', 'query-pattern-report']],
   ['write/load', process.env.MURPH_CLI_WAIT_LOAD_PHASE_COMPAT_BASE, 'meal add',
     ['canonical-write-wait', 'importers-runtime-load']],
+  ['event-read', process.env.MURPH_CLI_EVENT_READ_PHASE_COMPAT_BASE, 'meal show',
+    ['event-core-load', 'event-owner-candidates', 'event-owner-revisions']],
 ] as const) test.skipIf(!compatibilityBase)(`${label} stages survive new consumers while old consumers preserve legacy usage`, async () => {
   assert.match(compatibilityBase ?? '', /^[a-f0-9]{40}$/u)
+  if (label === 'event-read') assert.equal(compatibilityBase, '4ec40920fca1872c8324d9325c23a9e50ba39754')
   const source = (file: string) => execFileSync('git', ['show', `${compatibilityBase}:${file}`],
     { encoding: 'utf8', maxBuffer: 1_000_000 })
   const moduleUrl = (text: string) => `data:text/javascript;base64,${Buffer.from(stripTypeScriptTypes(text)).toString('base64')}`

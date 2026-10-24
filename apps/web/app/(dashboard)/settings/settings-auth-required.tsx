@@ -1,11 +1,19 @@
 "use client";
 
-import { CreditCard, Gauge } from "lucide-react";
+import { CreditCard, Gauge, Settings } from "lucide-react";
 
 import {
   HostedAuthRequiredScreen,
   HostedAuthRequiredScreenView,
 } from "@/src/components/hosted-onboarding/hosted-auth-required-screen";
+
+const ACCOUNT_AUTH_REQUIRED_PROPS = {
+  description: "Sign in to manage your account and health data consent.",
+  eyebrow: "Settings",
+  eyebrowIcon: Settings,
+  title: "Continue to Settings",
+  loginLabel: "Log in",
+};
 
 const SETTINGS_AUTH_REQUIRED_PROPS = {
   description: "Sign in to verify and finish your billing update.",
@@ -38,6 +46,7 @@ const FAMILY_RECOVERY_AUTH_REQUIRED_PROPS = {
 // bound to a member id absent from the URL, so anyone could put these
 // parameters in a link. Murph must not vouch for an unchecked payment.
 export function SettingsAuthRequired(props: {
+  billingReturn?: boolean;
   familyRecovery?: boolean;
   usageRecovery?: boolean;
 }) {
@@ -48,7 +57,9 @@ export function SettingsAuthRequired(props: {
           ? FAMILY_RECOVERY_AUTH_REQUIRED_PROPS
           : props.usageRecovery
             ? USAGE_RECOVERY_AUTH_REQUIRED_PROPS
-            : SETTINGS_AUTH_REQUIRED_PROPS
+            : props.billingReturn
+              ? SETTINGS_AUTH_REQUIRED_PROPS
+              : ACCOUNT_AUTH_REQUIRED_PROPS
       )}
     />
   );
@@ -62,4 +73,8 @@ export function SettingsAuthRequiredView() {
 
 export function SettingsFamilyRecoveryAuthRequiredView() {
   return <HostedAuthRequiredScreenView {...FAMILY_RECOVERY_AUTH_REQUIRED_PROPS} />;
+}
+
+export function SettingsAccountAuthRequiredView() {
+  return <HostedAuthRequiredScreenView {...ACCOUNT_AUTH_REQUIRED_PROPS} />;
 }

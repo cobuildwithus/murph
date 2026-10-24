@@ -76,6 +76,7 @@ import {
   type AssistantOutboxDispatchPreflightResult,
   type AssistantOutboxPreparedDispatchState,
   type AssistantOutboxTerminalOutcome,
+  type AssistantRunEvent,
 } from "@murphai/assistant-engine";
 import {
   parseHostedEmailThreadTarget,
@@ -119,6 +120,7 @@ import type {
   HostedRuntimeProviderTargetKind,
 } from "./platform.ts";
 import {
+  buildHostedAssistantAutomationEventLogDetails,
   toHostedRuntimeLogCode,
   writeHostedRuntimeLogBestEffort,
 } from "./runtime-logs.ts";
@@ -186,6 +188,7 @@ interface HostedAssistantDeliveryBoundaryFields {
 }
 
 export interface CollectHostedAssistantDeliverySideEffectsInput {
+  platform?: Pick<HostedRuntimePlatform, "logPort"> | null;
   actionApprovalPort?: HostedRuntimeActionApprovalPort | null;
   includeBackgroundDueIntents: boolean;
   messageVolumeReceiptPort?: Pick<
@@ -200,6 +203,7 @@ export interface CollectHostedAssistantDeliverySideEffectsInput {
 export async function collectHostedAssistantDeliverySideEffects(
   input: CollectHostedAssistantDeliverySideEffectsInput,
 ): Promise<HostedAssistantDeliveryEffect[]> {
+  const onEvent = createHostedCronDeliveryReconciliationObserver(input.platform);
   const request = {
     includeBackgroundDueIntents: input.includeBackgroundDueIntents,
     preferredEffectIds: input.preferredEffectIds ?? [],
@@ -231,6 +235,7 @@ export async function collectHostedAssistantDeliverySideEffects(
       continue;
     }
     const reconciliation = await reconcileHostedAssistantVaultFileApproval({
+      onEvent,
       actionApprovalPort: input.actionApprovalPort ?? null,
       expectedApprovalCycle: reconcileTargets.get(intent.intentId) ?? null,
       intent,
@@ -247,6 +252,7 @@ export async function collectHostedAssistantDeliverySideEffects(
   const blockedGroupEmailRecipientIntentIds = causalOnly
     ? new Set<string>()
     : await reconcileHostedGroupEmailRecipientParents({
+        onEvent,
         intents: approvalReconciledIntents,
         vaultRoot: request.vaultRoot,
       });
@@ -352,6 +358,7 @@ export async function collectHostedAssistantDeliverySideEffects(
     : [];
   const filteredBackgroundCandidates =
     await abandonStaleSignupWelcomeCandidatesAfterReplyEvidence({
+      onEvent,
       backgroundCandidates,
       causalOnly,
       foregroundCandidates,
@@ -497,6 +504,7 @@ function selectHostedAssistantApprovalReconcileTargets(input: {
 }
 
 async function reconcileHostedAssistantVaultFileApproval(input: {
+  onEvent?: (event: AssistantRunEvent) => void;
   actionApprovalPort: HostedRuntimeActionApprovalPort | null;
   expectedApprovalCycle: HostedAssistantApprovalCycleIdentity | null;
   intent: AssistantOutboxIntent;
@@ -509,6 +517,7 @@ async function reconcileHostedAssistantVaultFileApproval(input: {
     file = readAssistantVaultFileMedia(input.intent);
   } catch (error) {
     const failed = await markAssistantOutboxIntentMirrorTerminalById({
+      onEvent: input.onEvent,
       error,
       intentId: input.intent.intentId,
       status: "failed",
@@ -602,6 +611,7 @@ async function reconcileHostedAssistantVaultFileApproval(input: {
     approvalRequest = buildAssistantVaultFileSendApprovalRequest(input.intent);
   } catch (error) {
     const failed = await markAssistantOutboxIntentMirrorTerminalById({
+      onEvent: input.onEvent,
       error: createAssistantDeliveryTerminalError(
         "ASSISTANT_VAULT_FILE_APPROVAL_TARGET_INVALID",
         "Secure vault-file approval could not be requested because the delivery target is invalid.",
@@ -693,12 +703,14 @@ async function reconcileHostedAssistantVaultFileApproval(input: {
 }
 
 async function preflightHostedAssistantVaultFileDispatch(input: {
+  onEvent?: (event: AssistantRunEvent) => void;
   actionApprovalPort: HostedRuntimeActionApprovalPort | null;
   intent: AssistantOutboxIntent;
   now: Date;
   vaultRoot: string;
 }): Promise<AssistantOutboxDispatchPreflightResult> {
   const reconciled = await reconcileHostedAssistantVaultFileApproval({
+    onEvent: input.onEvent,
     actionApprovalPort: input.actionApprovalPort,
     expectedApprovalCycle: readHostedAssistantApprovalCycleIdentity(input.intent),
     intent: input.intent,
@@ -717,6 +729,7 @@ async function preflightHostedAssistantVaultFileDispatch(input: {
 }
 
 async function preflightHostedAssistantDispatch(input: {
+  onEvent?: (event: AssistantRunEvent) => void;
   actionApprovalPort: HostedRuntimeActionApprovalPort | null;
   effectsPort: Pick<HostedRuntimeEffectsPort, "assertLinqRecentInboundEngagement">;
   intent: AssistantOutboxIntent;
@@ -727,6 +740,7 @@ async function preflightHostedAssistantDispatch(input: {
   vaultRoot: string;
 }): Promise<AssistantOutboxDispatchPreflightResult> {
   const vaultFile = await preflightHostedAssistantVaultFileDispatch({
+    onEvent: input.onEvent,
     actionApprovalPort: input.actionApprovalPort,
     intent: input.intent,
     now: input.now,
@@ -748,6 +762,7 @@ async function preflightHostedAssistantDispatch(input: {
       return { action: "continue" };
     } catch (error) {
       const failed = await markAssistantOutboxIntentMirrorTerminalById({
+        onEvent: input.onEvent,
         error,
         intentId: input.intent.intentId,
         onlyCurrentStatuses: ["pending", "retryable"],
@@ -1115,6 +1130,7 @@ async function persistHostedAssistantVaultFileApprovalState(input: {
 }
 
 async function abandonStaleSignupWelcomeCandidatesAfterReplyEvidence(input: {
+  onEvent?: (event: AssistantRunEvent) => void;
   backgroundCandidates: readonly AssistantOutboxIntent[];
   causalOnly: boolean;
   foregroundCandidates: readonly AssistantOutboxIntent[];
@@ -1164,6 +1180,7 @@ async function abandonStaleSignupWelcomeCandidatesAfterReplyEvidence(input: {
       )
     ) {
       const terminalIntent = await markAssistantOutboxIntentMirrorTerminalById({
+        onEvent: input.onEvent,
         error: new VaultCliError(
           "ASSISTANT_STALE_SIGNUP_WELCOME_SUPPRESSED",
           "Stale signup welcome suppressed after first contact was already accepted.",
@@ -1538,6 +1555,7 @@ function isHostedGroupEmailDeliveryIdempotencyKey(value: string): boolean {
 }
 
 async function reconcileHostedGroupEmailRecipientParents(input: {
+  onEvent?: (event: AssistantRunEvent) => void;
   intents: readonly AssistantOutboxIntent[];
   vaultRoot: string;
 }): Promise<Set<string>> {
@@ -1583,6 +1601,7 @@ async function reconcileHostedGroupEmailRecipientParents(input: {
     }
 
     await markAssistantOutboxIntentMirrorTerminalById({
+      onEvent: input.onEvent,
       error: new VaultCliError(
         "ASSISTANT_GROUP_EMAIL_PARENT_UNAVAILABLE",
         "Group email recipient delivery was abandoned because its parent manifest was not sent.",
@@ -1910,6 +1929,7 @@ function hasHostedAssistantOutboxConfirmationRetryPath(
 }
 
 export async function prepareHostedAssistantDeliveryEffectsForDispatch(input: {
+  platform?: Pick<HostedRuntimePlatform, "logPort"> | null;
   assistantDeliveryEffects: HostedAssistantDeliveryEffect[];
   selectedNonIdempotentEffectIds?: readonly string[];
   linqDeliveryContext?: HostedAssistantLinqDeliveryContext | null;
@@ -1917,6 +1937,7 @@ export async function prepareHostedAssistantDeliveryEffectsForDispatch(input: {
   now?: () => string;
   vaultRoot: string;
 }): Promise<HostedAssistantDeliveryPreparation> {
+  const onEvent = createHostedCronDeliveryReconciliationObserver(input.platform);
   const startedAt = (input.now ?? (() => new Date().toISOString()))();
   const preparedDispatches: HostedAssistantDeliveryPreparedDispatch[] = [];
   const selectedNonIdempotentEffectIds = new Set(
@@ -1938,6 +1959,7 @@ export async function prepareHostedAssistantDeliveryEffectsForDispatch(input: {
       effect,
     });
     const prepared = await beginAssistantOutboxIntentMirrorPreparedDispatch({
+      onEvent,
       deliveryIdempotencyKey: effect.payload.idempotencyKey,
       deliveryTransportIdempotent: effect.payload.transportIdempotent,
       ...(linqDeliveryContext?.routeAuthority
@@ -3382,6 +3404,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
     outcome: HostedAssistantDeliveryOutcome,
   ) => void;
 }): Promise<HostedAssistantDeliveryOutcome> {
+  const onEvent = createHostedCronDeliveryReconciliationObserver(input.platform);
   const now = new Date();
   const mirrorState = await readAssistantOutboxIntentMirrorState({
     intentId: input.assistantDeliveryEffect.effectId,
@@ -3412,6 +3435,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
     assertHostedDeliveryLiveness(input.signal);
     assertSupportedHostedAssistantDeliveryPayload(input.assistantDeliveryEffect.payload);
     const disabledAutoReplyOutcome = await maybeFailHostedDisabledAutoReplyDelivery({
+      onEvent,
       assistantDeliveryEffect: input.assistantDeliveryEffect,
       mirrorState,
       userId: input.userId,
@@ -3431,6 +3455,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
         : null;
     const dispatched = await dispatchAssistantOutboxIntent({
       dispatchHooks: {
+        onEvent,
         confirmTerminalIntent: async ({ intent, outcome }) => {
           await recordHostedPhoneCallResultTerminalConfirmationRequired({
             effectsPort: input.effectsPort,
@@ -3457,6 +3482,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
             return { action: "continue" };
           }
           return preflightHostedAssistantDispatch({
+            onEvent,
             actionApprovalPort: input.actionApprovalPort,
             effectsPort: input.effectsPort,
             intent,
@@ -6647,6 +6673,7 @@ async function maybeResolveHostedAssistantDeliveryFromMirror(input: {
 }
 
 async function maybeFailHostedDisabledAutoReplyDelivery(input: {
+  onEvent?: (event: AssistantRunEvent) => void;
   assistantDeliveryEffect: HostedAssistantDeliveryEffect;
   mirrorState: Awaited<ReturnType<typeof readAssistantOutboxIntentMirrorState>>;
   userId: string;
@@ -6685,6 +6712,7 @@ async function maybeFailHostedDisabledAutoReplyDelivery(input: {
     { retryable: false },
   );
   const failedIntent = await markAssistantOutboxIntentMirrorTerminalById({
+    onEvent: input.onEvent,
     error,
     intentId: intent.intentId,
     status: "failed",
@@ -7403,6 +7431,27 @@ function readHostedAssistantDeliveryRetryableFlag(error: unknown): boolean | nul
   }
 
   return null;
+}
+
+function createHostedCronDeliveryReconciliationObserver(
+  platform: Pick<HostedRuntimePlatform, "logPort"> | null | undefined,
+): ((event: AssistantRunEvent) => void) | undefined {
+  if (!platform) return undefined;
+  return (event) => {
+    if (event.type !== "cron.delivery.reconciled") return;
+    void writeHostedRuntimeLogBestEffort({
+      entry: {
+        component: "assistant",
+        eventCode: "assistant.automation_detail",
+        level: "info",
+        phase: "outbox",
+        redactedJson: buildHostedAssistantAutomationEventLogDetails(event),
+      },
+      platform,
+    }).catch(() => {
+      // An observation cannot change the persisted cron or outbox result.
+    });
+  };
 }
 
 function buildHostedAssistantDeliveryDetails(input: {

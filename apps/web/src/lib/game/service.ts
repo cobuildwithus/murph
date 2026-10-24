@@ -1185,7 +1185,7 @@ export async function readHome(memberId: string): Promise<GameHomeView> {
 export async function readInvitePreview(token: string): Promise<GameInvitePreview | null> {
   if (!isGameEnabled() || typeof token !== "string" || !token) return null;
   const row = await getPrisma().game.findUnique({
-    include: { creator: true },
+    include: { creator: true, events: { where: { type: "cancelled" }, select: { actor: true }, take: 1 } },
     where: { inviteTokenHash: sha256Hex(token) },
   });
   if (!row) return null;
@@ -1194,6 +1194,13 @@ export async function readInvitePreview(token: string): Promise<GameInvitePrevie
   // expiry. A taken one stays "used" however long ago that was.
   const expired = row.status === "void"
     || (row.status === "invited" && row.inviteExpiresAt !== null && row.inviteExpiresAt.getTime() < now.getTime());
+  if (row.status === "void" && row.events.length > 0) {
+    if (row.events[0].actor !== row.createdBy) return { status: "expired", reason: "cancelled" };
+    const [inviterFirstName] = await openGameTexts([
+      { field: "first_name", memberId: row.createdBy, rowId: row.createdBy, table: "game_profile", value: row.creator.firstNameEncrypted },
+    ]);
+    return { status: "expired", reason: "cancelled", inviterFirstName: inviterFirstName ?? "" };
+  }
   if (row.status !== "invited" || expired) return { status: expired ? "expired" : "used" };
   // The invitee's name stays out: the challenger typed it as their own private
   // label, and this preview is public to anyone holding the link.
