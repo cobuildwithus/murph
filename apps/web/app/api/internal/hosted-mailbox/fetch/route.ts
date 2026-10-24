@@ -104,10 +104,8 @@ export async function POST(request: Request): Promise<Response> {
         timing.start("projection");
         if (!usage.allowed) {
           return { includeGroupRunningBit: false, mailbox: parseHostedMailboxFetchResponse({
-            consumedSeqByLane: body.lanes.map(({ importedSeq, lane }) => ({
-              consumedSeq: importedSeq,
-              lane,
-            })),
+            // Import progress is not durable acknowledgement, even when usage is denied.
+            consumedSeqByLane: projection.consumedSeqByLane,
             fetchedAt: fetchedAt.toISOString(),
             items: [],
             maxSeqByLane: body.lanes.map(({ importedSeq, lane }) => ({

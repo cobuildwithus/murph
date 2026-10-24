@@ -1952,8 +1952,11 @@ exact-item checkpoint acknowledgement remains an idempotent fallback, and its
 terminal ids remain retained until a later mailbox fetch confirms the durable
 conversation floor.
 The mailbox fetch response returns both `consumedSeqByLane` and each item's
-`consumedAt`; replayed conversation items at or below the checkpoint replay
-floor, or with `consumedAt != null`, are re-staged as conversation context with
+`consumedAt`. A usage-denied response still returns the server projection's
+committed `consumedSeqByLane`; the request's imported cursor is never an
+acknowledgement. Denial returns no items and clamps `maxSeqByLane` to the
+requested import cursors without promoting the consumed floor. Replayed
+conversation items at or below the checkpoint replay floor, or with `consumedAt != null`, are re-staged as conversation context with
 a null reply target, never as fresh reply candidates. This keeps a workspace
 restore or restart from re-replying to an already-handled message without a
 side table or lane high-water advance past gaps. The runtime-progress monitor

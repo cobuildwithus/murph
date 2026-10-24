@@ -27,6 +27,10 @@ Public image attachment recovery is tracked in
 Secure file reader compatibility is tracked in
 [the reader plan](exec-plans/completed/2026-10-21-secure-media-readers.md).
 
+Usage-denied mailbox fetches preserve the server-owned acknowledgement floor;
+see [`hosted-runtime-protocol.md`](references/hosted-runtime-protocol.md) and
+[the implementation record](exec-plans/completed/2026-10-24-mailbox-denial-consumption.md).
+
 Held group draft failure propagation is owned by
 [`hosted-runtime-protocol.md`](references/hosted-runtime-protocol.md);
 [the cause-preservation plan](exec-plans/completed/2026-10-20-group-draft-failure-cause.md)

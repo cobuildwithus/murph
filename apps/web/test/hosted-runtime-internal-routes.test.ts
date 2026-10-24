@@ -1567,7 +1567,12 @@ describe("hosted runtime internal web routes", () => {
     ).not.toHaveBeenCalled();
   });
 
-  it("returns the unchanged cursor when AI usage denies mailbox consumption", async () => {
+  it.each([
+    { cursorMode: undefined, importedSeq: "11" },
+    { cursorMode: undefined, importedSeq: "12" },
+    { cursorMode: "imported_seq", importedSeq: "11" },
+    { cursorMode: "imported_seq", importedSeq: "12" },
+  ])("preserves durable consumption on denial with $cursorMode and imported cursor $importedSeq", async ({ cursorMode, importedSeq }) => {
     mocks.hostedRuntimeMailboxMemberFindUnique.mockResolvedValueOnce(
       buildRuntimeMailboxAccessRecord(),
     );
@@ -1586,7 +1591,7 @@ describe("hosted runtime internal web routes", () => {
           id: "mailbox_item_denied",
           kind: "conversation.message",
           lane: "conversation",
-          laneSeq: "12",
+          laneSeq: "13",
           occurredAt: FIXED_NOW,
           payloadBytes: 64,
           payloadInlineCiphertext: "cipher_inline_denied",
@@ -1600,7 +1605,7 @@ describe("hosted runtime internal web routes", () => {
     mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([
       {
         lane: "conversation",
-        maxSeq: "12",
+        maxSeq: "13",
       },
     ]);
     mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValueOnce({
@@ -1610,9 +1615,10 @@ describe("hosted runtime internal web routes", () => {
     const response = await mailboxFetchRoute.POST(jsonRequest(
       "/api/internal/hosted-mailbox/fetch",
       {
+        cursorMode,
         lanes: [
           {
-            importedSeq: "11",
+            importedSeq,
             lane: "conversation",
           },
         ],
@@ -1625,7 +1631,7 @@ describe("hosted runtime internal web routes", () => {
     expect(parseHostedMailboxFetchResponse(await response.json())).toMatchObject({
       consumedSeqByLane: [{ lane: "conversation", consumedSeq: "11" }],
       items: [],
-      maxSeqByLane: [{ lane: "conversation", maxSeq: "11" }],
+      maxSeqByLane: [{ lane: "conversation", maxSeq: importedSeq }],
       userId: "member_routes_1",
     });
     expect(mocks.readHostedActiveGroupRunningBit).not.toHaveBeenCalled();
@@ -1638,9 +1644,9 @@ describe("hosted runtime internal web routes", () => {
     expect(
       mocks.tryMarkHostedMailboxConversationAiUsageDenied,
     ).toHaveBeenCalledWith({
-      afterConversationLaneSeq: 11n,
+      afterConversationLaneSeq: BigInt(importedSeq),
       prisma: expect.objectContaining({ kind: "prisma" }),
-      throughConversationLaneSeq: 12n,
+      throughConversationLaneSeq: 13n,
       userId: "member_routes_1",
     });
   });
