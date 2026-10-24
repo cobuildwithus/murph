@@ -1,6 +1,7 @@
 ---
 title: 'Local browser session seeding loads production origin restrictions'
 severity: 'minor'
+issue: 'cobuildwithus/murph#4278'
 ---
 
 ## Expected Behavior
