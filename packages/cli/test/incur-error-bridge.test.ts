@@ -209,16 +209,28 @@ test('parser-set reason reaches only its gated commands; hostile metadata cannot
     assert.deepEqual((await observe(getter, true, 'knowledge upsert')).failures, [codeOnly])
   }
   assert.equal(reads, 0)
-  // A throwing descriptor trap falls back to the original code/stage only.
+  // Projection still hits the throwing reason trap; native timing rejects the
+  // live proxy as unknown without invoking its descriptor traps.
+  let descriptorTraps = 0
+  let observerTraps = -1
+  const nativeTiming = await vi.importActual<typeof timing>('@murphai/runtime-state/node/cli-timing')
+  vi.mocked(timing.noteCliTimingFailure).mockImplementationOnce((error) => {
+    const before = descriptorTraps
+    try { nativeTiming.noteCliTimingFailure(error) }
+    finally { observerTraps = descriptorTraps - before }
+  })
   const trapped = new Proxy(new Errors.ParseError({ message: 'PRIVATE_SENTINEL', reason: 'unknown_flag' }), {
     getOwnPropertyDescriptor: (target, key) => {
+      descriptorTraps += 1
       if (key === 'reason') throw new Error('PRIVATE_SENTINEL')
       return Reflect.getOwnPropertyDescriptor(target, key)
     },
   })
   const trappedResult = await observe(trapped, true, 'knowledge upsert')
   assert.equal(trappedResult.caught, trapped)
-  assert.deepEqual(trappedResult.failures, [codeOnly])
+  assert.deepEqual(trappedResult.failures, [{ code: 'unknown', stage: 'unknown', count: 1 }])
+  assert.ok(descriptorTraps > 0, 'The bridge still exercises the projection trap.')
+  assert.equal(observerTraps, 0, 'The native timing observer invokes no proxy descriptor traps.')
   // Name and reason alone are not a typed ParseError.
   const spoof = Object.defineProperty(Object.assign(new Error('PRIVATE_SENTINEL'), { name: 'Incur.ParseError' }),
     'reason', { value: 'unknown_flag' })

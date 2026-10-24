@@ -1,6 +1,6 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { createSocket, type Socket } from "node:dgram";
-import { isProxy } from "node:util/types";
+import { types } from "node:util";
 import {
   CLI_TIMING_CPU_PHASES, CLI_TIMING_ENDPOINT_ENV, addCliPhaseSample, cliTimingCommand, CLI_TIMING_MAX_REPORT_BYTES, CLI_TIMING_MAX_SPANS,
   emptyCliTiming, incrementCliTimingDrop, mergeCliTiming, normalizeCliTiming,
@@ -35,7 +35,7 @@ const noop = () => {};
 // Original errors are live objects, unlike JSON transport input. Native proxy
 // detection rejects even revoked proxies without invoking their descriptor traps.
 function ownData(value: unknown, key: string): unknown {
-  return isProxy(value) ? undefined : readCliTimingOwnData(value, key);
+  return types.isProxy(value) ? undefined : readCliTimingOwnData(value, key);
 }
 const elapsedUs = (start: bigint) => Number((process.hrtime.bigint() - start) / 1_000n);
 function readProcessCpu(previous?: NodeJS.CpuUsage): NodeJS.CpuUsage | undefined {
