@@ -41,6 +41,7 @@ export interface AssistantRunEvent {
     | 'capture.skipped'
     | 'daemon.failed'
     | 'cron.job.completed'
+    | 'cron.delivery.reconciled'
     | 'cron.occurrence.expired'
     | 'onboarding.followup.completed'
     | 'cron.scan.job'

@@ -4973,6 +4973,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
       progressed: true,
     }));
     expect(mocks.collectHostedAssistantDeliverySideEffects).toHaveBeenCalledWith({
+      platform: expect.any(Object),
       actionApprovalPort: null,
       includeBackgroundDueIntents: true,
       messageVolumeReceiptPort: expect.any(Object),
@@ -5120,6 +5121,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
     expect(mocks.runHostedDeviceSyncWakeLane).not.toHaveBeenCalled();
     expect(mocks.drainHostedProviderCleanupAfterCommit).not.toHaveBeenCalled();
     expect(mocks.collectHostedAssistantDeliverySideEffects).toHaveBeenCalledWith({
+      platform: expect.any(Object),
       actionApprovalPort: null,
       includeBackgroundDueIntents: false,
       messageVolumeReceiptPort: expect.any(Object),
@@ -5208,6 +5210,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
       freshAssistantInputIds: ["ain_00000000000000000000000000000001"],
     });
     expect(mocks.collectHostedAssistantDeliverySideEffects).toHaveBeenCalledWith({
+      platform: expect.any(Object),
       actionApprovalPort: null,
       includeBackgroundDueIntents: false,
       messageVolumeReceiptPort: expect.any(Object),

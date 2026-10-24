@@ -94,6 +94,7 @@ import {
   validateAssistantCronDeliveryTarget,
 } from './cron/targets.ts'
 import {
+  fingerprintAssistantCronDelivery,
   reconcileAssistantCronDeliveryIntent,
   repairPendingAssistantCronDeliveries,
 } from './cron/delivery-reconciliation.ts'
@@ -676,6 +677,7 @@ export async function processDueAssistantCronJobsLocal(
   }
 
   await repairPendingAssistantCronDeliveries({
+    onEvent: input.onEvent,
     paths,
     vault: input.vault,
   })
@@ -926,6 +928,12 @@ function emitAssistantCronJobCompletedEvent(input: {
         input.routeValidationProfile,
       ),
       runOutcome: input.runOutcome,
+      ...(input.runOutcome === 'delivery_pending'
+        ? { deliveryFingerprint: fingerprintAssistantCronDelivery(
+            input.job.jobId,
+            input.job.state.pendingDeliveryIntentId,
+          ) }
+        : {}),
       scheduleKind: input.job.schedule.kind,
       sourceKind: input.sourceKind,
     },

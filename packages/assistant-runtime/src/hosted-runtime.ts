@@ -3658,6 +3658,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
               const preferredIntentIdSet = new Set(preferredIntentIds);
               const exactDeliveryEffects =
                 (await collectHostedAssistantDeliverySideEffects({
+                  platform: foregroundRuntime.platform,
                   actionApprovalPort:
                     foregroundRuntime.platform.actionApprovalPort ?? null,
                   includeBackgroundDueIntents: false,
@@ -3669,6 +3670,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
                 );
               const exactDeliveryPreparation = exactDeliveryEffects.length > 0
                 ? await prepareHostedAssistantDeliveryEffectsForDispatch({
+                    platform: foregroundRuntime.platform,
                     assistantDeliveryEffects: exactDeliveryEffects,
                     selectedNonIdempotentEffectIds: exactDeliveryEffects
                       .filter((effect) =>

@@ -59,6 +59,7 @@ import {
 } from "./environment.ts";
 import { emitHostedAssistantProviderTraceLog } from "./events/provider-trace-log.ts";
 import {
+  buildHostedAssistantAutomationEventLogDetails,
   summarizeHostedRuntimeStatusCounts,
   toHostedRuntimeLogCode,
 } from "./runtime-logs.ts";
@@ -1198,42 +1199,6 @@ function emitHostedRuntimeRedactedLog(
   };
 }
 
-function buildHostedAssistantAutomationEventLogDetails(
-  event: AssistantRunEvent,
-  requestId: string,
-): Record<string, boolean | number | string | null> {
-  return {
-    errorCode: event.errorCode ?? null,
-    failureFieldsPresent: event.failureContext !== undefined,
-    ...prefixHostedAssistantAutomationFailureContext(event.failureContext),
-    inputIdPresent: "inputId" in event ? event.inputId != null : false,
-    providerKind: event.providerKind ?? null,
-    providerState: event.providerState ?? null,
-    requestId,
-    safeDetails: event.safeDetails ?? null,
-    safeErrorLength: event.safeErrorMessage?.length ?? null,
-    safeErrorMessage: event.safeErrorMessage ?? null,
-    safeErrorPresent: event.safeErrorMessage !== undefined,
-    toolCount: event.tools?.length ?? null,
-    type: event.type,
-  };
-}
-
-function prefixHostedAssistantAutomationFailureContext(
-  context: AssistantRunEvent["failureContext"] | undefined,
-): Record<string, boolean | number | string | null> {
-  if (!context) {
-    return {};
-  }
-
-  return Object.fromEntries(
-    Object.entries(context).map(([key, value]) => [
-      `failure${key.charAt(0).toUpperCase()}${key.slice(1)}`,
-      value,
-    ]),
-  );
-}
-
 function shouldPersistHostedAssistantAutomationEvent(type: string): boolean {
   return new Set([
     "capture.failed",
@@ -1241,6 +1206,7 @@ function shouldPersistHostedAssistantAutomationEvent(type: string): boolean {
     "assistant.delivery.foreground_started",
     "assistant.delivery.sent",
     "cron.job.completed",
+    "cron.delivery.reconciled",
     "cron.occurrence.expired",
     "cron.scan.job",
     "cron.scan.started",
@@ -1257,7 +1223,8 @@ function shouldPersistHostedAssistantAutomationEvent(type: string): boolean {
 function shouldAlwaysPersistHostedAssistantAutomationEvent(
   event: AssistantRunEvent,
 ): boolean {
-  return event.type === "input.reply-failed"
+  return event.type === "cron.delivery.reconciled"
+    || event.type === "input.reply-failed"
     || event.type === "onboarding.followup.completed";
 }
 

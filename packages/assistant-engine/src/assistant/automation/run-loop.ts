@@ -1043,6 +1043,7 @@ export async function runAssistantAutomationPass(
   }
   const outboxResult = input.drainOutbox ?? true
     ? await drainAssistantOutbox({
+        dispatchHooks: { onEvent: input.onEvent },
         vault: input.vault,
         limit: input.maxPerScan,
         ...(input.signal ? { signal: input.signal } : {}),
@@ -1144,6 +1145,7 @@ export async function runAssistantAutomationPass(
     && scanResult.replies.replied > 0
   const postScanOutboxResult = shouldDrainOutboxAfterScan
     ? await drainAssistantOutbox({
+        dispatchHooks: { onEvent: input.onEvent },
         vault: input.vault,
         limit: input.maxPerScan,
         ...(input.signal ? { signal: input.signal } : {}),

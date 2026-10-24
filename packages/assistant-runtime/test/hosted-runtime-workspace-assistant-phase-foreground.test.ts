@@ -340,6 +340,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       }),
     );
     expect(mocks.collectHostedAssistantDeliverySideEffects).toHaveBeenCalledWith({
+      platform: expect.any(Object),
       actionApprovalPort: null,
       includeBackgroundDueIntents: true,
       messageVolumeReceiptPort: expect.any(Object),
@@ -515,6 +516,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
 
     expect(mocks.collectHostedAssistantDeliverySideEffects).toHaveBeenCalledWith({
+      platform: expect.any(Object),
       actionApprovalPort: null,
       includeBackgroundDueIntents: true,
       messageVolumeReceiptPort: expect.any(Object),
@@ -572,6 +574,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
 
     expect(mocks.collectHostedAssistantDeliverySideEffects).toHaveBeenCalledTimes(1);
     expect(mocks.collectHostedAssistantDeliverySideEffects).toHaveBeenCalledWith({
+      platform: expect.any(Object),
       actionApprovalPort: null,
       includeBackgroundDueIntents: true,
       messageVolumeReceiptPort: expect.any(Object),
@@ -640,6 +643,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       }),
     );
     expect(mocks.collectHostedAssistantDeliverySideEffects).toHaveBeenCalledWith({
+      platform: expect.any(Object),
       actionApprovalPort: null,
       includeBackgroundDueIntents: true,
       messageVolumeReceiptPort: expect.any(Object),
@@ -890,6 +894,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         }),
       );
     expect(mocks.collectHostedAssistantDeliverySideEffects).toHaveBeenCalledWith({
+      platform: expect.any(Object),
       actionApprovalPort: null,
       includeBackgroundDueIntents: false,
       messageVolumeReceiptPort: expect.any(Object),
@@ -1036,6 +1041,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
 
     expect(mocks.collectHostedAssistantDeliverySideEffects).toHaveBeenCalledWith({
+      platform: expect.any(Object),
       actionApprovalPort: null,
       includeBackgroundDueIntents: false,
       messageVolumeReceiptPort: expect.any(Object),
@@ -1105,6 +1111,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
 
     expect(mocks.collectHostedAssistantDeliverySideEffects).toHaveBeenCalledWith(
       {
+        platform: expect.any(Object),
         actionApprovalPort: null,
         includeBackgroundDueIntents: false,
         messageVolumeReceiptPort: expect.any(Object),
@@ -1259,6 +1266,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
 
     expect(mocks.collectHostedAssistantDeliverySideEffects).toHaveBeenCalledWith({
+      platform: expect.any(Object),
       actionApprovalPort: null,
       includeBackgroundDueIntents: false,
       messageVolumeReceiptPort: expect.any(Object),
@@ -1397,6 +1405,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         }),
       );
       expect(mocks.collectHostedAssistantDeliverySideEffects).toHaveBeenCalledWith({
+        platform: expect.any(Object),
         actionApprovalPort: null,
         includeBackgroundDueIntents: false,
         messageVolumeReceiptPort: expect.any(Object),
@@ -1522,6 +1531,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       expect(mocks.prepareHostedSystemMailboxItemForCheckpoint.mock.calls[0]?.[0])
         .not.toHaveProperty("allowedRouteActions");
       expect(mocks.collectHostedAssistantDeliverySideEffects).toHaveBeenCalledWith({
+        platform: expect.any(Object),
         actionApprovalPort: null,
         includeBackgroundDueIntents: true,
         messageVolumeReceiptPort: expect.any(Object),
@@ -2205,6 +2215,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
 
     expect(mocks.collectHostedAssistantDeliverySideEffects).toHaveBeenCalledWith({
+      platform: expect.any(Object),
       actionApprovalPort: null,
       includeBackgroundDueIntents: false,
       messageVolumeReceiptPort: expect.any(Object),
@@ -2278,6 +2289,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         vault: scenario.vaultRoot,
       });
       expect(mocks.collectHostedAssistantDeliverySideEffects).toHaveBeenCalledWith({
+        platform: expect.any(Object),
         actionApprovalPort: null,
         includeBackgroundDueIntents: false,
         messageVolumeReceiptPort: expect.any(Object),
@@ -2541,6 +2553,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
 
     expect(mocks.collectHostedAssistantDeliverySideEffects).toHaveBeenCalledWith({
+      platform: expect.any(Object),
       actionApprovalPort: null,
       includeBackgroundDueIntents: false,
       messageVolumeReceiptPort: expect.any(Object),
@@ -3038,6 +3051,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       }),
     );
     expect(mocks.collectHostedAssistantDeliverySideEffects).toHaveBeenCalledWith({
+      platform: expect.any(Object),
       actionApprovalPort: null,
       includeBackgroundDueIntents: false,
       messageVolumeReceiptPort: expect.any(Object),
@@ -3080,6 +3094,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
 
     expect(mocks.collectHostedAssistantDeliverySideEffects).toHaveBeenCalledWith({
+      platform: expect.any(Object),
       actionApprovalPort: null,
       includeBackgroundDueIntents: false,
       messageVolumeReceiptPort: expect.any(Object),
@@ -3370,6 +3385,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
 
     expect(mocks.collectHostedAssistantDeliverySideEffects).toHaveBeenCalledWith({
+      platform: expect.any(Object),
       actionApprovalPort: null,
       includeBackgroundDueIntents: false,
       messageVolumeReceiptPort: expect.any(Object),

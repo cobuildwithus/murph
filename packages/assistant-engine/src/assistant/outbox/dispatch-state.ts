@@ -21,6 +21,7 @@ import {
 } from '../redaction.js'
 import { readDeliveredProviderMessageEffects } from '../channels/helpers.js'
 import { reconcileAssistantCronDeliveryIntent } from '../cron/delivery-reconciliation.js'
+import type { AssistantRunEvent } from '../automation/shared.js'
 import { repairAssistantOutboxReceiptForIntent } from './receipt-repair.js'
 import {
   createAssistantDeliveryAmbiguousError,
@@ -256,6 +257,7 @@ export async function persistAssistantOutboxIntentLinqAppCardTextFallback(input:
 }
 
 export async function markAssistantOutboxIntentSent(input: {
+  onEvent?: (event: AssistantRunEvent) => void
   completedAt?: string
   delivery: AssistantChannelDelivery
   intent: AssistantOutboxIntent
@@ -365,6 +367,7 @@ export async function markAssistantOutboxIntentSent(input: {
   await retireSentExportPacks(input.vault, sentIntent)
   await attemptAssistantCronDeliveryReconciliation({
     intent: sentIntent,
+    onEvent: input.onEvent,
     vault: input.vault,
   })
   return sentIntent
@@ -390,6 +393,7 @@ async function retireSentExportPacks(
 }
 
 export async function updateAssistantOutboxAfterDispatchFailure(input: {
+  onEvent?: (event: AssistantRunEvent) => void
   deliveryMayHaveSucceeded: boolean
   deliveryTransportIdempotent: boolean
   error: unknown
@@ -590,6 +594,7 @@ export async function updateAssistantOutboxAfterDispatchFailure(input: {
   })
   await attemptAssistantCronDeliveryReconciliation({
     intent: failedIntent,
+    onEvent: input.onEvent,
     vault: input.vault,
   })
   return failedIntent
@@ -1300,6 +1305,7 @@ function readAssistantDeliveryCleanupMessagesValue(
 }
 
 export async function markAssistantOutboxIntentMirrorSending(input: {
+  onEvent?: (event: AssistantRunEvent) => void
   deliveryIdempotencyKey?: string | null
   deliveryTransportIdempotent: boolean
   intent: AssistantOutboxIntent
@@ -1314,6 +1320,7 @@ export async function markAssistantOutboxIntentMirrorSending(input: {
 }
 
 export async function markAssistantOutboxIntentMirrorSendingPrepared(input: {
+  onEvent?: (event: AssistantRunEvent) => void
   deliveryIdempotencyKey?: string | null
   deliveryTransportIdempotent: boolean
   externalThreadRouteAuthority?: AssistantOutboxIntent['externalThreadRouteAuthority']
@@ -1496,6 +1503,7 @@ export async function markAssistantOutboxIntentMirrorSendingPrepared(input: {
     })
     await attemptAssistantCronDeliveryReconciliation({
       intent: result.intent,
+      onEvent: input.onEvent,
       vault: input.vault,
     })
   }
@@ -1680,6 +1688,7 @@ export function assistantOutboxIntentMatchesDispatchOwner(
 }
 
 export async function markAssistantOutboxIntentMirrorRetryable(input: {
+  onEvent?: (event: AssistantRunEvent) => void
   error: unknown
   failedAt: Date
   intent: AssistantOutboxIntent
@@ -1694,6 +1703,7 @@ export async function markAssistantOutboxIntentMirrorRetryable(input: {
 }
 
 export async function markAssistantOutboxIntentMirrorTerminal(input: {
+  onEvent?: (event: AssistantRunEvent) => void
   error: unknown
   failedAt: Date
   intent: AssistantOutboxIntent
@@ -1710,6 +1720,7 @@ export async function markAssistantOutboxIntentMirrorTerminal(input: {
 }
 
 async function persistAssistantOutboxIntentMirrorFailure(input: {
+  onEvent?: (event: AssistantRunEvent) => void
   error: unknown
   failedAt: Date
   intent: AssistantOutboxIntent
@@ -1834,6 +1845,7 @@ async function persistAssistantOutboxIntentMirrorFailure(input: {
   })
   await attemptAssistantCronDeliveryReconciliation({
     intent: updatedIntent,
+    onEvent: input.onEvent,
     vault: input.vault,
   })
   return updatedIntent
@@ -1841,6 +1853,7 @@ async function persistAssistantOutboxIntentMirrorFailure(input: {
 
 async function attemptAssistantCronDeliveryReconciliation(input: {
   intent: AssistantOutboxIntent
+  onEvent?: (event: AssistantRunEvent) => void
   vault: string
 }): Promise<void> {
   try {
