@@ -39,6 +39,7 @@ describe("hosted device-sync scheduled wake sweeper", () => {
 
     expect(dueReconcileSweeper).toHaveBeenCalledTimes(1);
     expect(preferenceHandoffSweeper).toHaveBeenCalledTimes(1);
+    expect(preferenceHandoffSweeper).toHaveBeenCalledWith({ now: expect.any(Date) });
   });
 
   it("releases deferred routine wakes before the scheduled sweep", async () => {

@@ -1512,4 +1512,8 @@ Read-only admission and its optional-read cap for warm direct wakes are owned by
 Implementation and verification are recorded in
 [the direct-wake plan](exec-plans/completed/2026-10-23-direct-wake-live-admission.md).
 
+Mailbox handoff recovery's age eligibility before per-user selection and
+same-sweep duplicate suppression are owned by `references/hosted-temporal-orchestration.md`; implementation proof
+is recorded in [aged mailbox recovery](exec-plans/completed/2026-10-23-sweeper-dup-signal.md).
+
 Settings authentication without paid access or consent re-grant, and actor-aware additive invite cancellation proof: [`game recovery`](exec-plans/active/2026-10-23-game-v1-settings-cancelled.md).
