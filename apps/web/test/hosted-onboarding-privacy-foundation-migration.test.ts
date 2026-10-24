@@ -1241,6 +1241,7 @@ describe("hosted Prisma baseline migration", () => {
       "20261022160000_game_chat_bootstrap_receipt",
       "20261022220000_game_v1",
       "20261023180000_game_day_incomplete",
+      "20261024200000_game_departed_player",
       "migration_lock.toml",
     ]);
     expect(migrationEntries).toEqual(

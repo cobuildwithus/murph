@@ -10,6 +10,7 @@ import type Stripe from "stripe";
 import { describe, expect, it, vi } from "vitest";
 
 import { setHostedSecureBoxStringTestCodecForTests } from "@/src/lib/hosted-crypto/secure-box";
+import { readGame, runGameCommand } from "@/src/lib/game/service";
 import {
 
 
@@ -542,6 +543,40 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         stripeProvider.customersDelete.mockReset();
         await observer.hostedMember.deleteMany({ where: { id: memberId } });
         await disconnectClients([deletion, observer, writer]);
+      }
+    });
+
+    it("calls off a deleted member's live game and keeps it for the other player", async () => {
+      const deletion = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const fixtureId = randomUUID();
+      const leaver = `hbm_game_leaver_${fixtureId}`;
+      const stayer = `hbm_game_stayer_${fixtureId}`;
+      installPassthroughHostedSecureBoxTestCodec();
+      try {
+        await deletion.hostedMember.createMany({ data: [leaver, stayer].map((id) => ({ billingStatus: HostedBillingStatus.not_started, id })) });
+        for (const [id, firstName] of [[leaver, "Leo"], [stayer, "Ava"]] as const) {
+          expect(await runGameCommand({ actorMemberId: id, command: { firstName, timeZone: "UTC", type: "setProfile" } })).toMatchObject({ ok: true });
+        }
+        const gameId = randomUUID();
+        const created = await runGameCommand({ actorMemberId: leaver, command: { gameId, inviteeFirstName: "Ava", type: "createGame",
+          terms: { schedule: { days: [0, 1, 2, 3, 4, 5, 6] }, stakes: [{ item: "Breakfast", kind: "prize" }], tasks: [{ seat: 0, text: "Run" }, { seat: 1, text: "Swim" }] } } });
+        if (!created.ok) throw new Error("game fixture create failed");
+        expect(await runGameCommand({ actorMemberId: stayer, command: { termsVersion: 1, timeZone: "UTC", token: created.game!.inviteToken!, type: "join" } })).toMatchObject({ ok: true });
+
+        await expect(deleteHostedAccountData({
+          memberId: leaver,
+          prisma: deletion,
+          request: new Request("https://app.example.test/settings"),
+        })).resolves.toMatchObject({ memberId: leaver });
+
+        const view = await readGame(gameId, stayer);
+        expect(view).toMatchObject({ status: "void", result: null, tickets: [] });
+        expect(view!.players.map((player) => [player.seat, player.firstName, player.left ?? false, player.isMe])).toEqual([[0, "Leo", true, false], [1, "Ava", false, true]]);
+        expect(await deletion.gamePlayer.count({ where: { gameId, memberId: leaver } })).toBe(0);
+      } finally {
+        setHostedSecureBoxStringTestCodecForTests(null);
+        await deletion.hostedMember.deleteMany({ where: { id: { in: [leaver, stayer] } } });
+        await disconnectClients([deletion]);
       }
     });
 

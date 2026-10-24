@@ -169,9 +169,17 @@ this default without deleting other people's private contact choices.
   can read/resize them; Web applies the unlock/profile rules before granting a
   five-minute signed URL. At most 4 MiB per upload. Existing game images need
   no migration. Downloaded app-private caches remain available offline.
-- **Account deletion.** Deleting an account deletes the games that person
-  created, the tickets they owe, and every photo they uploaded. Acceptable
-  while the data is disposable; revisit before real users.
+- **Account deletion.** A member who deletes their account leaves every game
+  they're in. An open invite, negotiation or live game is called off: it
+  becomes `void` with no winner, result or tickets. A finished game keeps its
+  result. The other player keeps the game, their own posts and any tickets,
+  and sees the leaver as a player with `left: true`, named the way they knew
+  them (their own label, else the leaver's first name), with no photo or days.
+  A ticket with the leaver stays visible with `left: true` and can't be marked
+  done. The leaver's seat, check-ins, labels, profile and photos are deleted;
+  so is any game nobody else is in (including an unjoined plain invite). An
+  addressed rematch whose challenger left stays on its invitee's Home, called
+  off.
 
 ## Deferred
 

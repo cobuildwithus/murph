@@ -102,6 +102,7 @@ import {
   type PreparedHostedAccountDeletionCleanup,
 } from "./account-deletion-cleanup";
 import { sha256Hex } from "../primitives";
+import { applyGameAccountDeletionTx, prepareGameAccountDeletion } from "../game/account-deletion";
 
 export type {
   HostedAccountVendorDeletionResult,
@@ -638,6 +639,12 @@ export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
     note: "Cancels the Stripe subscription before local deletion (fail-closed), then deletes the Stripe customer after local rows are removed; results are reported in the deletion result.",
   },
   {
+    slug: "prisma.weekly_game",
+    label: "Weekly game profile, games, check-ins, labels and tickets",
+    deletion: "live-delete",
+    note: "Calls off the member's open and live games and keeps finished ones for the other player, who sees the name they knew them by; the member's seats, check-ins, labels and profile are deleted, and games nobody else is in are deleted. Tickets with the other player remain as history that can't be marked done. Game images are deleted with the member's other provider images.",
+  },
+  {
     slug: "backups",
     label: "Backups and restore media",
     deletion: "documented-retention",
@@ -1027,6 +1034,12 @@ async function deleteHostedAccountDataInternal(input: {
     memberIds: deletionMemberIds,
     prisma: input.prisma,
   });
+  // Name snapshots and game words are sealed for the remaining players before
+  // the transaction, while the leaving members' keys still exist.
+  const preparedGames = await prepareGameAccountDeletion({
+    memberIds: deletionMemberIds,
+    prisma: input.prisma,
+  });
   const deleteHostedAccountDataCallback = async (
     tx: Prisma.TransactionClient,
   ): Promise<HostedAccountDeletionDatabaseResult> => {
@@ -1168,6 +1181,12 @@ async function deleteHostedAccountDataInternal(input: {
     await persistHostedAccountDeletionCleanupTx({
       cleanup: preparedCleanup,
       prisma: tx,
+    });
+    await applyGameAccountDeletionTx({
+      memberIds: transactionDeletionMemberIds,
+      now: deletionStartedAt,
+      prepared: preparedGames,
+      tx,
     });
     const deletedCounts = await deleteHostedAccountPrismaRows({
       connectionIdentities: deviceConnectionIdentities,

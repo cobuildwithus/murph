@@ -6,9 +6,10 @@ import type { GameChange, GamePendingChange } from "./contract";
 import { parsePendingGameChange, type StoredGamePendingChange } from "./changes";
 import { openGameTexts, sealGameText } from "./crypto";
 import { parseTermWords } from "./rules";
+import { gameWordsMemberId } from "./account-deletion";
 
-type WordsOwner = Pick<Game, "id" | "createdBy" | "termsWordsEncrypted">;
-const target = (row: Pick<Game, "id" | "createdBy">) => ({ table: "game" as const, field: "terms_words", memberId: row.createdBy, rowId: row.id });
+type WordsOwner = Pick<Game, "id" | "createdBy" | "departedPlayer" | "termsWordsEncrypted">;
+const target = (row: Pick<Game, "id" | "createdBy" | "departedPlayer">) => ({ table: "game" as const, field: "terms_words", memberId: gameWordsMemberId(row), rowId: row.id });
 
 export interface PreparedGameChangeWords {
   /** Compared under the game lock before publishing the prepared version. */
@@ -36,7 +37,7 @@ export async function prepareGameChangeWords(row: WordsOwner, change: GameChange
 }
 
 /** Public views contain proposed words, never their stored envelopes or keys. */
-export async function readPendingGameChanges(rows: readonly Pick<Game, "id" | "createdBy" | "pendingChange">[]): Promise<Map<string, GamePendingChange>> {
+export async function readPendingGameChanges(rows: readonly Pick<Game, "id" | "createdBy" | "departedPlayer" | "pendingChange">[]): Promise<Map<string, GamePendingChange>> {
   const pending = rows.flatMap((row) => {
     const proposal = parsePendingGameChange(row.pendingChange);
     return proposal ? [{ row, proposal }] : [];
@@ -59,6 +60,6 @@ export async function readPendingGameChanges(rows: readonly Pick<Game, "id" | "c
   }));
 }
 
-export async function readPendingGameChange(row: Pick<Game, "id" | "createdBy" | "pendingChange">): Promise<GamePendingChange | null> {
+export async function readPendingGameChange(row: Pick<Game, "id" | "createdBy" | "departedPlayer" | "pendingChange">): Promise<GamePendingChange | null> {
   return (await readPendingGameChanges([row])).get(row.id) ?? null;
 }

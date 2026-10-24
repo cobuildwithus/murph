@@ -5411,7 +5411,13 @@ Postgres state tables are the truth: `game_profile`, `game_contact_label`,
 `game`, `game_player`, `game_entry`, `game_ticket`, plus `game_event`, an append-only history (one row per accepted change, ids and
 numbers and fixed server-authored refusal reasons only). Change proposal identities use its nullable unique `command_key`
 for replay after resolution. Every member link cascades from `game_profile`, which cascades
-from `HostedMember`. Words (names, tasks, stakes, labels, excuse transcripts)
+from `HostedMember`. Account deletion's game step (`game/account-deletion.ts`) runs first,
+so the cascade only removes the leaver's own rows and games nobody else kept: before the
+deletion transaction it seals, under the remaining member's key, the name they knew the
+leaver by and (when the creator leaves) the game's terms words, since the leaver's key
+goes with them. Inside it, under the game locks, it revalidates each game, calls off open
+and live ones (`void`), records `game.departed_player` (seat, time, sealed name, remaining
+member), clears `created_by` and the leaver's ticket side, and deletes games with nobody left. Words (names, tasks, stakes, labels, excuse transcripts)
 are app-encrypted before any transaction; the structure that rules and
 settlement read stays plain, so neither decrypts.
 

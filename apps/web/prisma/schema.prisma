@@ -2794,7 +2794,9 @@ model Game {
   chatContainerMember HostedMember? @relation("GameChatContainer", fields: [chatContainerMemberId], references: [id], onDelete: SetNull)
   pendingChange Json? @map("pending_change")
   id                   String       @id
-  createdBy            String       @map("created_by")
+  // Null once the creator deleted their account and the other player kept the game.
+  // Account deletion clears it first; the cascade only removes games nobody kept.
+  createdBy            String?      @map("created_by")
   // Rematches chain through previous_game_id; round counts the chain.
   previousGameId       String?      @map("previous_game_id")
   // A rematch's invitee: the one other player of the settled previous game.
@@ -2820,10 +2822,13 @@ model Game {
   // shift) everywhere else; production never writes it.
   devClockOffsetMs     BigInt?      @map("dev_clock_offset_ms")
   result               Json?
+  // Set when a player deleted their account: their seat, when, and the name the
+  // remaining member knew them by, sealed under that member's key.
+  departedPlayer       Json?        @map("departed_player")
   settledAt            DateTime?    @map("settled_at")
   createdAt            DateTime     @default(now()) @map("created_at")
   updatedAt            DateTime     @updatedAt @map("updated_at")
-  creator              GameProfile  @relation(fields: [createdBy], references: [memberId], onDelete: Cascade)
+  creator              GameProfile? @relation(fields: [createdBy], references: [memberId], onDelete: Cascade)
   players              GamePlayer[]
   tickets              GameTicket[]
   events               GameEvent[]
@@ -2884,14 +2889,15 @@ model GameTicket {
   id         String      @id
   gameId     String      @map("game_id")
   stakeKey   String      @map("stake_key")
-  owedBy     String      @map("owed_by")
-  owedTo     String      @map("owed_to")
+  // Null once that member deleted their account; the ticket stays as history.
+  owedBy     String?     @map("owed_by")
+  owedTo     String?     @map("owed_to")
   status     String      @default("open")
   redeemedAt DateTime?   @map("redeemed_at")
   createdAt  DateTime    @default(now()) @map("created_at")
   game       Game        @relation(fields: [gameId], references: [id], onDelete: Cascade)
-  debtor     GameProfile @relation("GameTicketOwedBy", fields: [owedBy], references: [memberId], onDelete: Cascade)
-  holder     GameProfile @relation("GameTicketOwedTo", fields: [owedTo], references: [memberId], onDelete: Cascade)
+  debtor     GameProfile? @relation("GameTicketOwedBy", fields: [owedBy], references: [memberId], onDelete: Cascade)
+  holder     GameProfile? @relation("GameTicketOwedTo", fields: [owedTo], references: [memberId], onDelete: Cascade)
 
   @@index([owedTo, status])
   @@index([owedBy, status])

@@ -56,6 +56,8 @@ const serviceMocks = vi.hoisted(() => ({
   closeHostedUsageCreditPurchasesForAccountDeletion: vi.fn(),
   assertHostedPhoneCallsReadyForAccountDeletionTx: vi.fn(),
   deleteHostedPhoneCallsForAccountDeletion: vi.fn(),
+  prepareGameAccountDeletion: vi.fn(),
+  applyGameAccountDeletionTx: vi.fn(),
   terminateHostedUserRuntimeWorkflowBestEffort: vi.fn(),
 
 
@@ -193,6 +195,11 @@ vi.mock("@/src/lib/phone-calls/account-deletion", () => ({
     serviceMocks.assertHostedPhoneCallsReadyForAccountDeletionTx,
   deleteHostedPhoneCallsForAccountDeletion:
     serviceMocks.deleteHostedPhoneCallsForAccountDeletion,
+}));
+
+vi.mock("@/src/lib/game/account-deletion", () => ({
+  applyGameAccountDeletionTx: serviceMocks.applyGameAccountDeletionTx,
+  prepareGameAccountDeletion: serviceMocks.prepareGameAccountDeletion,
 }));
 
 import { HostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
@@ -543,6 +550,10 @@ beforeEach(() => {
   serviceMocks.assertHostedPhoneCallsReadyForAccountDeletionTx.mockResolvedValue(undefined);
   serviceMocks.deleteHostedPhoneCallsForAccountDeletion.mockReset();
   serviceMocks.deleteHostedPhoneCallsForAccountDeletion.mockResolvedValue(undefined);
+  serviceMocks.prepareGameAccountDeletion.mockReset();
+  serviceMocks.prepareGameAccountDeletion.mockResolvedValue({ games: [] });
+  serviceMocks.applyGameAccountDeletionTx.mockReset();
+  serviceMocks.applyGameAccountDeletionTx.mockResolvedValue({ calledOff: 0, deleted: 0, kept: 0 });
   serviceMocks.terminateHostedUserRuntimeWorkflowBestEffort.mockReset();
   serviceMocks.terminateHostedUserRuntimeWorkflowBestEffort.mockResolvedValue({
     configured: true,
@@ -1048,6 +1059,35 @@ describe("deleteHostedAccountData", () => {
     expect(order.indexOf("persist:cleanup")).toBeLessThan(
       order.indexOf("delete:hostedMember"),
     );
+  });
+
+  it("seals game departures before the transaction and applies them before member removal", async () => {
+    const order: string[] = [];
+    const prepared = { games: [{ id: "game_1", fingerprint: "f", departure: null }] };
+    serviceMocks.prepareGameAccountDeletion.mockImplementation(async () => {
+      order.push("prepare:games");
+      return prepared;
+    });
+    serviceMocks.applyGameAccountDeletionTx.mockImplementation(async () => {
+      order.push("apply:games");
+      return { calledOff: 0, deleted: 1, kept: 0 };
+    });
+    const prisma = createHostedAccountDeletionPrismaForTest({
+      onTransaction: () => { order.push("transaction"); },
+      operationOrder: order,
+    });
+
+    await deleteHostedAccountData({
+      memberId: "member_123",
+      prisma,
+      request: new Request("https://join.example.test/settings"),
+    });
+
+    expect(serviceMocks.prepareGameAccountDeletion).toHaveBeenCalledWith(expect.objectContaining({ memberIds: expect.arrayContaining(["member_123"]) }));
+    expect(serviceMocks.applyGameAccountDeletionTx).toHaveBeenCalledWith(expect.objectContaining({ prepared }));
+    expect(order.indexOf("prepare:games")).toBeLessThan(order.lastIndexOf("transaction"));
+    expect(order.indexOf("apply:games")).toBeGreaterThan(order.lastIndexOf("transaction"));
+    expect(order.indexOf("apply:games")).toBeLessThan(order.indexOf("delete:hostedMember"));
   });
 
   it("returns every exact deletion count from the fixed dependency owners", async () => {

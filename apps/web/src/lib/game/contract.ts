@@ -244,6 +244,12 @@ export interface GamePlayerView {
   score: number;
   /** Consecutive scheduled days posted; an unposted today does not break it. */
   streak?: number;
+  /**
+   * This player deleted their account and left the game: `memberId` is null,
+   * `firstName` is the name the viewer knew them by, and they have no photo or
+   * days. A `void` game with a player who left was called off.
+   */
+  left?: true;
 }
 
 export type GameDayOtherStatus = "posted" | "locked" | "missed" | "none" | "off";
@@ -283,6 +289,11 @@ export interface GameTicketView {
   owedToMemberId: string;
   /** True when the viewer holds it (is owed). */
   youHold: boolean;
+  /**
+   * The other member deleted their account: their member id is "" and the
+   * ticket stays as history; it can't be marked done.
+   */
+  left?: true;
   createdAt: string;
   redeemedAt: string | null;
 }
