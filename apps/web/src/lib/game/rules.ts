@@ -88,6 +88,8 @@ export interface RuleGame {
   seats: number;
   terms: StoredTerms;
   inviteExpiresAt: Date | null;
+  /** A rematch's addressed opponent: the only member who may take its seat. */
+  inviteeMemberId?: string | null;
   /** The challenger's picked Day 1 (YYYY-MM-DD), if any. */
   startsOn: string | null;
 }
@@ -237,7 +239,12 @@ export function hasUnlockedDay(entries: readonly RuleEntry[], memberId: string, 
 export function isGameDue(state: RuleState, now: Date): boolean {
   const { game } = state;
   if (game.status === "invited" || game.status === "negotiating") return game.inviteExpiresAt !== null && game.inviteExpiresAt <= now;
-  return game.status === "live" && settleDueAt(state.players, game.lengthDays) <= now;
+  return game.status === "live" && settleDueAt(state) <= now;
+}
+
+/** This player's last day is over: the game is done for them, whatever the other player's clock says. */
+export function hasFinishedGame(state: RuleState, player: RulePlayer, now: Date): boolean {
+  return (dayIndexAt(player, now) ?? -1) >= state.game.lengthDays;
 }
 
 /**
@@ -256,15 +263,36 @@ export function needsPostToday(state: RuleState, memberId: string, now: Date): b
   return isScheduledDay(state, today) && !liveEntry(state.entries, memberId, today);
 }
 
-/** When the last player's last day ends, plus grace: the settle time. */
-export function settleDueAt(players: readonly RulePlayer[], lengthDays: number): Date {
+/**
+ * The settle time: when the last player's last day ends. The grace hour is
+ * added only for a player whose last day can still take a late post.
+ */
+export function settleDueAt(state: RuleState): Date {
+  const { lengthDays } = state.game;
   let due = 0;
-  for (const player of players) {
+  for (const player of state.players) {
     if (!player.dayOne) continue;
     const end = dayStartInstant(addDays(player.dayOne, lengthDays), player.timeZone).getTime();
-    due = Math.max(due, end + GAME_GRACE_MS);
+    due = Math.max(due, end + (graceOpen(state, player, lengthDays - 1) ? GAME_GRACE_MS : 0));
   }
   return new Date(due);
+}
+
+/** A scheduled day that ended without a live post and still has an attempt left. */
+function graceOpen(state: RuleState, player: RulePlayer, dayIndex: number): boolean {
+  return isScheduledDay(state, dayIndex)
+    && !liveEntry(state.entries, player.memberId, dayIndex)
+    && attemptsUsed(state.entries, player.memberId, dayIndex) < GAME_POSTS_PER_DAY;
+}
+
+/** Day 1 is always a scheduled day: the first date on or after `date` that the schedule counts. */
+export function firstScheduledDate(date: string, schedule: GameSchedule): string {
+  if ("count" in schedule) return date;
+  for (let offset = 0; offset < 7; offset += 1) {
+    const candidate = addDays(date, offset);
+    if (schedule.days.includes(weekdayOf(candidate))) return candidate;
+  }
+  return date;
 }
 
 // ------------------------------------------------------------------- terms
@@ -343,16 +371,19 @@ export interface Schedule {
 }
 
 /**
- * One Day 1 date for everyone: the latest of each player's earliest allowed
- * date (and `atLeast`, a picked start), so nobody's Day 1 is already behind
- * them and every day index is the same calendar date in each time zone.
+ * One Day 1 date for everyone: the first scheduled date on or after the
+ * latest of each player's earliest allowed date (and `atLeast`, a picked
+ * start), so nobody's Day 1 is already behind them, every day index is the
+ * same calendar date in each time zone, and the game has a scheduled day.
  */
 function scheduleFor(
+  state: RuleState,
   players: readonly RulePlayer[],
   earliestFor: (player: RulePlayer) => string,
   atLeast: string | null = null,
 ): Schedule {
-  const dayOne = players.map(earliestFor).reduce((latest, date) => (date > latest ? date : latest), atLeast ?? "");
+  const earliest = players.map(earliestFor).reduce((latest, date) => (date > latest ? date : latest), atLeast ?? "");
+  const dayOne = firstScheduledDate(earliest, currentTerms(state.game.terms).schedule);
   return {
     players: players.map((player) => ({ dayOne, memberId: player.memberId, timeZone: player.timeZone })),
   };
@@ -388,6 +419,7 @@ export function decideJoin(
   const expired = game.inviteExpiresAt !== null && input.now.getTime() >= game.inviteExpiresAt.getTime();
   if (game.status === "void" || (["invited", "negotiating"].includes(game.status) && expired)) reject("INVITE_EXPIRED", "This invite isn't open anymore.");
   if (!acceptingNegotiation && (game.status !== "invited" || state.players.length >= game.seats)) reject("INVITE_USED", "This invite was already used.");
+  if (!claimed) assertAddressee(game, input.memberId);
   if (input.termsVersion !== currentTerms(game.terms).n) {
     reject("TERMS_CHANGED", "The terms changed. Take another look.");
   }
@@ -403,6 +435,7 @@ export function decideJoin(
     seat: joiner.seat,
     startedAt: input.now,
     ...scheduleFor(
+      state,
       [...state.players.filter((player) => player.memberId !== input.memberId), joiner],
       (player) => player.memberId === input.memberId ? acceptanceStartDate(input.now, player.timeZone) : gameLocalDate(input.now, player.timeZone),
       game.startsOn,
@@ -410,13 +443,18 @@ export function decideJoin(
   };
 }
 
+/** An addressed rematch seats only its addressee. */
+function assertAddressee(game: RuleGame, memberId: string): void {
+  if (game.inviteeMemberId && game.inviteeMemberId !== memberId) reject("NOT_A_PLAYER", "This rematch is for someone else.");
+}
+
 /** Agreement starts a negotiation at approval time, never at the invitee's arrival. */
 export function decideNegotiationStart(state: RuleState, actor: string, now: Date, startsOn: string | null): Schedule {
   if (state.game.status !== "negotiating" || state.players.length !== GAME_SEATS_1V1) reject("GAME_NOT_LIVE", "Both players must join before agreeing.");
   if (startsOn !== null) {
-    return scheduleFor(state.players, () => startsOn);
+    return scheduleFor(state, state.players, () => startsOn);
   }
-  return scheduleFor(state.players, (player) => player.memberId === actor ? acceptanceStartDate(now, player.timeZone) : gameLocalDate(now, player.timeZone), startsOn ?? state.game.startsOn);
+  return scheduleFor(state, state.players, (player) => player.memberId === actor ? acceptanceStartDate(now, player.timeZone) : gameLocalDate(now, player.timeZone), startsOn ?? state.game.startsOn);
 }
 
 export interface PostDecision {
@@ -495,10 +533,7 @@ function postingDay(state: RuleState, player: RulePlayer, captureAgeMs: number |
   if (captureAgeMs !== null && yesterday >= 0 && yesterday < lengthDays) {
     const boundary = dayStartInstant(addDays(player.dayOne!, today), player.timeZone).getTime();
     const capturedAt = now.getTime() - captureAgeMs;
-    const open = isScheduledDay(state, yesterday)
-      && !liveEntry(state.entries, player.memberId, yesterday)
-      && attemptsUsed(state.entries, player.memberId, yesterday) < GAME_POSTS_PER_DAY;
-    if (open && now.getTime() - boundary < GAME_GRACE_MS && capturedAt <= boundary + GAME_CAPTURE_SLACK_MS) {
+    if (graceOpen(state, player, yesterday) && now.getTime() - boundary < GAME_GRACE_MS && capturedAt <= boundary + GAME_CAPTURE_SLACK_MS) {
       return yesterday;
     }
   }
@@ -541,7 +576,7 @@ export function decideStartNow(state: RuleState, now: Date): Schedule {
   if (state.players.some((player) => (dayIndexAt(player, now) ?? -1) >= 0)) {
     reject("INVALID_REQUEST", "This game already started.");
   }
-  return scheduleFor(state.players, (player) => gameLocalDate(now, player.timeZone));
+  return scheduleFor(state, state.players, (player) => gameLocalDate(now, player.timeZone));
 }
 
 export const GAME_DEV_ADVANCE_MAX_DAYS = GAME_MAX_LENGTH_DAYS;

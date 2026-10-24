@@ -76,6 +76,7 @@ const JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0xff, 0xd9]);
 const VIEW: GameView = {
   changeControls: { canStartNow: false, canEdit: false, canEditStartDate: false, canEditSchedule: false, editableFromDay: null },
   pendingChange: null,
+  settlesAt: null,
   days: [],
   id: GAME_ID,
   inviteExpiresAt: null,

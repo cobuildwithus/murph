@@ -303,6 +303,14 @@ export interface GameView {
   days: GameDayView[];
   retakeAvailable: boolean;
   /**
+   * Results soon: set while the game is live but the viewer's own last day is
+   * over (their part is done; the other player may still be on theirs). The
+   * expected settle time, ISO 8601: when the last player's last day ends, plus
+   * an hour only while a late post can still count. Null otherwise. Clients
+   * that predate it ignore it.
+   */
+  settlesAt: string | null;
+  /**
    * The game's own invite token, for the people it belongs to: while invited,
    * the challenger (to build the link) and a rematch's addressed invitee (to
    * accept with POST /invites/:token/accept); once it's live or over, both

@@ -100,6 +100,14 @@ describe.skipIf(!enabled)("weekly game change serialization against PostgreSQL",
     const before = (await readGame(gameId, a))!;
     const entries = await getPrisma().gameEntry.findMany({ where: { gameId } });
     const proposalId = randomUUID();
+    // Mid-game, a length that leaves no scheduled day after today is refused (which days those are depends on today).
+    if (!("days" in schedule)) throw new Error("Fixture requires weekdays");
+    const rest = Array.from({ length: Math.max(0, lengthDays - 3) }, (_, offset) => weekdayOf(addDays(dayOne, 3 + offset)));
+    if (started && !rest.some((weekday) => schedule.days.includes(weekday))) {
+      expect(await run(a, { type: "proposeChange", gameId, proposalId, expectedTermsVersion: 1, change: { kind: "edit", lengthDays } }))
+        .toMatchObject({ ok: false, error: { code: "INVALID_REQUEST", message: expect.stringContaining("at least one scheduled day") } });
+      return;
+    }
     expect(await run(a, { type: "proposeChange", gameId, proposalId, expectedTermsVersion: 1, change: { kind: "edit", lengthDays } }))
       .toMatchObject({ ok: true, game: { lengthDays: 7, terms: { schedule } } });
     expect(await run(b, { type: "respondChange", gameId, proposalId, decision: "approve" }, { chatContainerMemberId: room, beforeMutationTx: fence }))
@@ -125,11 +133,11 @@ describe.skipIf(!enabled)("weekly game change serialization against PostgreSQL",
     expect(scorePlayer(state, players[0])).toMatchObject({ score: started && !view.days[0].off ? 1 : 0,
       misses: requiredDays - (started && !view.days[0].off ? 1 : 0) });
     expect(scorePlayer(state, players[1])).toMatchObject({ score: 0, misses: requiredDays });
-    expect(gameLocalDate(settleDueAt(players, lengthDays), "America/New_York")).toBe(addDays(dayOne, lengthDays));
+    expect(gameLocalDate(settleDueAt(state), "America/New_York")).toBe(addDays(dayOne, lengthDays));
   });
 
   it("starts both players on the agreed date only after the other approves", async () => {
-    const {a,b,room,gameId}=await setup(undefined,addDays(gameLocalDate(new Date(),"America/New_York"),2)); const proposalId=randomUUID();
+    const {a,b,room,gameId}=await setup({days:[0,1,2,3,4,5,6]},addDays(gameLocalDate(new Date(),"America/New_York"),2)); const proposalId=randomUUID();
     expect(await run(a,{type:"proposeChange",gameId,proposalId,expectedTermsVersion:1,change:{kind:"start_now"}})).toMatchObject({ok:true});
     const pending=(await readGame(gameId,a))!.pendingChange!;
     expect(pending.startsOn).toBe(gameLocalDate(new Date(),"America/New_York"));
@@ -225,21 +233,21 @@ describe.skipIf(!enabled)("weekly game change serialization against PostgreSQL",
     expect(view.days[0].localDate >= addDays(today,2)).toBe(true);
     expect(view.days[0].localDate < addDays(today,5)).toBe(true);
   });
-  it.each(["date", "length", "unbound"] as const)("clears an impossible %s only on acceptance and reserves one notice if bound", async (kind) => {
+  it.each(["date", "length", "unbound"] as const)("clears an impossible %s at read time and reserves one notice if bound", async (kind) => {
     const today = gameLocalDate(new Date(), "America/New_York");
     const {a,b,room,gameId} = await setup({days:[0,1,2,3,4]}, addDays(today, 5));
     const db = getPrisma(); const proposalId = randomUUID();
     const change = kind === "date" ? {kind:"edit" as const, startsOn:addDays(today,1)} : {kind:"edit" as const,lengthDays:3};
     expect(await run(a,{type:"proposeChange",gameId,proposalId,expectedTermsVersion:1,change})).toMatchObject({ok:true});
-    await db.game.update({where:{id:gameId},data:{devClockOffsetMs:BigInt((kind === "date" ? 2 : 8)*86400000)}});
-    expect((await readGame(gameId,a))?.pendingChange?.id).toBe(proposalId);
     if (kind === "unbound") await db.game.update({where:{id:gameId},data:{chatContainerMemberId:null}});
-    const approve = {type:"respondChange" as const,gameId,proposalId,decision:"approve" as const};
-    const result = await run(b,approve,{chatContainerMemberId:room,beforeMutationTx:fence});
-    expect(result).toMatchObject({ok:false,error:{code:"CHANGE_EXPIRED",message:expect.stringContaining(kind === "date" ? "start date has passed" : "day already started")}});
-    expect(await readGame(gameId,a)).toMatchObject({pendingChange:null,lengthDays:7,terms:{n:1}});
+    // Eight days on, the proposed date (snapped onto a weekday) has passed and Day 1 has begun.
+    await db.game.update({where:{id:gameId},data:{devClockOffsetMs:BigInt(8*86400000)}});
+    // The first read expires it: both players see it gone and can edit again.
+    for (const viewer of [a, b]) expect(await readGame(gameId,viewer)).toMatchObject({pendingChange:null,lengthDays:7,terms:{n:1},changeControls:{canEdit:true}});
     const event = await db.gameEvent.findUniqueOrThrow({where:{commandKey:`game-change-resolved:${gameId}:${proposalId}`}});
-    expect(event).toMatchObject({type:"change_expired",payload:{proposalId,reason:expect.any(String)}});
+    expect(event).toMatchObject({type:"change_expired",payload:{proposalId,reason:expect.stringContaining(kind === "date" ? "start date has passed" : "day already started")}});
+    const approve = {type:"respondChange" as const,gameId,proposalId,decision:"approve" as const};
+    expect(await run(b,approve,{chatContainerMemberId:room,beforeMutationTx:fence})).toMatchObject({ok:false,error:{code:"CHANGE_EXPIRED"}});
     await run(b,approve,{chatContainerMemberId:room,beforeMutationTx:fence});
     expect(await db.hostedLinqDelivery.findMany({where:{sourceRef:`${gameId}:${proposalId}`},select:{template:true,status:true}}))
       .toEqual(kind === "unbound" ? [] : [{template:"game_change_expired",status:"awaiting_generation"}]);
