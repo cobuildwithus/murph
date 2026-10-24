@@ -78,12 +78,16 @@ this default without deleting other people's private contact choices.
   earliest Day 1 is their game-local today between 03:00 inclusive and 20:00
   exclusive, otherwise their next game date. The other player's earliest is
   their own game-local today. Everyone shares the later date, or an explicitly
-  selected later date. A day runs 3am to 3am in each player's own time zone,
+  selected later date, moved forward to the first date the schedule counts, so
+  Day 1 is always a scheduled day and every game has at least one. Length
+  still counts calendar days from that Day 1. Empty schedules are refused at
+  create. A day runs 3am to 3am in each player's own time zone,
   frozen at go-live from their profile, so day number N is the same date and
   weekday for everyone. Explicit dates remain tomorrow to 60 days out.
-- **Start now.** Day 1 becomes the latest "today" among the players, so
-  nobody's Day 1 is already over: across the date line the player behind
-  starts tomorrow. Before 3am that first day is short, since it still ends at
+- **Start now.** Day 1 becomes the latest "today" among the players (or the
+  first scheduled date after it), so nobody's Day 1 is already over: across
+  the date line the player behind starts tomorrow. It is offered only when it
+  moves Day 1 earlier. Before 3am that first day is short, since it still ends at
   3am. Start now is proposed in the app and takes effect when the other player agrees in the shared chat.
 - **Weekdays.** A set-weekdays game is on and off on the same dates for
   everyone, because every player's day number falls on the same date.
@@ -132,8 +136,10 @@ this default without deleting other people's private contact choices.
   current day began (one the phone kept and sent later) counts for no day and
   is refused with `DAY_CLOSED`; a post without a capture age counts for today.
   This is an honor rule for friends, not league evidence.
-- **Settle.** When the last player's last day ends plus one hour, the game is
-  over: score is scheduled days with a live photo (capped at N in any-N games),
+- **Settle.** When the last player's last day ends, the game is over; it waits
+  one more hour only while a player's last day can still take an offline-grace
+  post. Once a player's own last day is over, their view carries `settlesAt`
+  (results soon, at that expected time) and editing is off for both players: score is scheduled days with a live photo (capped at N in any-N games),
   misses are scheduled days without one (the shortfall from N in any-N games;
   N counts across the whole game, not per week). The result is frozen on the
   game. There is no timer: the first read of a finished game settles it, and so
@@ -149,8 +155,11 @@ this default without deleting other people's private contact choices.
 - **Rematch.** A new game can name the previous one. After a settled game with
   the same two people, its round is the previous round plus one; otherwise 1.
   A rematch of a settled 1v1 is addressed to the other player: it appears on
-  their Home ready to accept, so nobody texts a second link. It must follow
-  the pair's newest game: it's refused while they have a game going or an open
+  their Home ready to accept, so nobody texts a second link. Only that player
+  can accept or negotiate it; anyone else holding the link is refused with
+  `NOT_A_PLAYER`. When both players ask for a rematch of the same game, the
+  second ask accepts the first on its terms. Otherwise it must follow the
+  pair's newest game: it's refused while they have a game going or an open
   rematch between them (`ALREADY_IN_A_GAME`), and when a later game between
   them has already settled (`REMATCH_OUTDATED`).
 - **Retries.** Every action is safe to repeat: creating a game with the same id,
@@ -236,16 +245,21 @@ Until agreement, the current terms stay in force. Changes apply from the first
 day neither player has started. Existing check-ins and missed days keep their
 rules; shortening cannot remove a started day. Any-days count schedules can
 change before Day 1, but their targets cannot change or convert to weekdays once
-play starts. A duration extension is still available on the last active day.
+play starts. A duration extension is still available on the last active day,
+but not once either player's last day is over. After play starts, a change
+must leave at least one scheduled day in the rest of the game; before play, a
+new schedule moves Day 1 onto its first scheduled day.
 A proposal stays open across day boundaries until approval, decline, proposer
-cancellation, a terms-version move, or the game ending. Approval recomputes the
+cancellation, a terms-version move, the game ending, or the moment approval
+would refuse it. Approval recomputes the
 first day neither player has started; earlier schedules, entries and scoring
 remain unchanged. Pending `effectiveFromDay` is a zero-based preview if accepted
 now, not a fixed promise. Native waiting/detail copy should say changes apply to
 days that have not started when accepted, or qualify a day number with “if
-accepted now”. A passed proposed start date or a length that removes a started
-day is refused at approval, clears the proposal with a `change_expired` event,
-and reserves one plain explanation through the existing lifecycle notice path
+accepted now”. A passed proposed start date, a length that removes a started
+day, or any other change approval would now refuse expires at the next read
+(or at approval), so it never blocks editing. It clears the proposal with a
+`change_expired` event carrying the reason, and reserves one plain explanation through the existing lifecycle notice path
 when a primary group chat is bound. Other newly invalid proposals use the same
 refusal handling. The notice concerns only that request and creates no new chat.
 Both players can retry a failed delivery

@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import { getPrisma } from "@/src/lib/prisma";
 import { readGame, readHome, readInvitePreview, runGameCommand } from "@/src/lib/game/service";
-import { parseStoredTerms } from "@/src/lib/game/rules";
+import { firstScheduledDate, parseStoredTerms } from "@/src/lib/game/rules";
 import { acceptanceStartDate, addDays, gameLocalDate } from "@/src/lib/game/time";
 import type { GameCommand } from "@/src/lib/game/contract";
 vi.mock("@/src/lib/game/chat-delivery", () => ({ deliverGameChangeProposal: vi.fn(async () => {}) }));
@@ -220,7 +220,10 @@ describe.skipIf(!enabled)("game negotiation persistence", () => {
     const row = (await getPrisma().game.findUnique({where:{id:gameId},include:{players:true}}))!;
     expect(row.startsOn?.toISOString().slice(0,10) ?? null).toBe(reset ? null : selected);
     if (!reset) expect(parseStoredTerms(row.terms).versions[0].schedule).toEqual({days:[0,4]});
-    expect(row.players[0].dayOne?.toISOString().slice(0,10)).toBe(reset ? acceptanceStartDate(later,"America/New_York") : selected);
+    // Day 1 lands on the first scheduled day from the agreed date.
+    expect(row.players[0].dayOne?.toISOString().slice(0,10)).toBe(reset
+      ? firstScheduledDate(acceptanceStartDate(later,"America/New_York"), parseStoredTerms(row.terms).versions[0].schedule)
+      : firstScheduledDate(selected, {days:[0,4]}));
   });
   it.each([1, 3, 10])("refuses live task/stake edits without changing agreed terms on day %s", async (day) => {
     const {a,b,room,gameId,token} = await setup();

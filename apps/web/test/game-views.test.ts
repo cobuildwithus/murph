@@ -310,3 +310,55 @@ it("flags visible incomplete artifacts without changing post-to-unlock", () => {
   state.entries[0].incomplete = false;
   expect(view(state, LEO, now).days[0].others[0].entry).not.toHaveProperty("incomplete");
 });
+
+describe("weekly game view: results soon", () => {
+  function pair(leoZone: string, avaZone: string, lengthDays = 3): RuleState {
+    const base = liveState();
+    const invited: RuleState = { ...base, game: { ...base.game, lengthDays, status: "invited" }, players: [{ dayOne: null, memberId: LEO, seat: 0, timeZone: leoZone }] };
+    const join = decideJoin(invited, { memberId: AVA, now: new Date("2026-10-14T20:00:00Z"), termsVersion: 1, timeZone: avaZone });
+    if (join.kind !== "join") throw new Error("expected a join");
+    return { ...invited, game: { ...invited.game, status: "live" },
+      players: [{ ...invited.players[0], dayOne: join.players[0].dayOne }, { dayOne: join.players[1].dayOne, memberId: AVA, seat: 1, timeZone: avaZone }] };
+  }
+  const endOf = (state: RuleState, memberId: string) => {
+    const player = state.players.find((candidate) => candidate.memberId === memberId)!;
+    return dayStartInstant(addDays(player.dayOne!, state.game.lengthDays), player.timeZone).getTime();
+  };
+  const HOUR = 60 * 60 * 1000;
+
+  it("tells the player who finished first when results come, and leaves the other player's last day alone (Auckland vs Honolulu)", () => {
+    for (const [leoZone, avaZone] of [["Pacific/Auckland", "Pacific/Honolulu"], ["Pacific/Honolulu", "Pacific/Auckland"]]) {
+      const state = pair(leoZone, avaZone);
+      const [first, last] = endOf(state, LEO) < endOf(state, AVA) ? [LEO, AVA] : [AVA, LEO];
+      const between = new Date(endOf(state, first) + HOUR);
+      const done = view(state, first, between);
+      const playing = view(state, last, between);
+      // The last player's open last day keeps the grace hour.
+      expect(done.settlesAt).toBe(new Date(endOf(state, last) + HOUR).toISOString());
+      expect(done.players.find((player) => player.isMe)!.dayIndex).toBeNull();
+      expect(done.retakeAvailable).toBe(false);
+      expect(done.changeControls.canEdit).toBe(false);
+      expect(playing.settlesAt).toBeNull();
+      expect(playing.players.find((player) => player.isMe)!.dayIndex).toBe(2);
+      // Once the last player has posted their last day, results come at the deadline itself.
+      const posted = { ...state, entries: [entry(last, 2, 1)] };
+      expect(view(posted, first, between).settlesAt).toBe(new Date(endOf(state, last)).toISOString());
+    }
+  });
+
+  it("shows results soon to both players in the same zone while a missed last day is in its grace hour", () => {
+    const state = { ...pair("Asia/Kolkata", "Asia/Kolkata"), entries: [0, 1, 2].map((day) => entry(LEO, day, 1)) };
+    const justAfter = new Date(endOf(state, LEO) + 15 * 60 * 1000);
+    for (const viewer of [LEO, AVA]) {
+      expect(view(state, viewer, justAfter).settlesAt).toBe(new Date(endOf(state, LEO) + HOUR).toISOString());
+    }
+    expect(view(state, LEO, new Date(endOf(state, LEO) - 1)).settlesAt).toBeNull();
+  });
+
+  it("is null before Day 1 and once settled", () => {
+    const state = pair("America/New_York", "Australia/Sydney");
+    expect(view(state, LEO, new Date("2026-10-14T20:00:00Z")).settlesAt).toBeNull();
+    const settled = { ...state, game: { ...state.game, status: "settled" as const } };
+    expect(view(settled, LEO, new Date(endOf(state, LEO) + 10 * HOUR)).settlesAt).toBeNull();
+  });
+});

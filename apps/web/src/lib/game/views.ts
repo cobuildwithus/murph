@@ -19,6 +19,7 @@ import type {
 import {
   currentTerms,
   dayIndexAt,
+  hasFinishedGame,
   hasUnlockedDay,
   isScheduledDay,
   isTicketExpired,
@@ -29,6 +30,7 @@ import {
   playerFor,
   scorePlayer,
   playerStreak,
+  settleDueAt,
   ticketUseBy,
   type RuleEntry,
   type RulePlayer,
@@ -179,6 +181,7 @@ export function buildGameView(input: GameViewInput): GameView {
       : null,
     retakeAvailable: retakeAvailable(state, viewerId, input.now),
     round: input.round,
+    settlesAt: settlesAt(state, viewerId, input.now),
     startedAt: input.startedAt?.toISOString() ?? null,
     status: game.status,
     startsOn: game.startsOn,
@@ -271,6 +274,12 @@ function unpostedStatus(input: GameViewInput, other: RulePlayer, index: number):
   const otherToday = dayIndexAt(other, input.now);
   const over = game.status === "settled" || game.status === "void" || (otherToday !== null && otherToday > index);
   return over ? "missed" : "none";
+}
+
+/** Results soon: the viewer's last day is over while the game waits to settle. */
+function settlesAt(state: RuleState, viewerId: string, now: Date): string | null {
+  const viewer = playerFor(state, viewerId);
+  return viewer && state.game.status === "live" && hasFinishedGame(state, viewer, now) ? settleDueAt(state).toISOString() : null;
 }
 
 /** A retake is open once today's post is up and the day's two posts aren't used. */
