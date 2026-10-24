@@ -39,6 +39,11 @@ import { assistantDeliveryErrorPreventsFreshIntentRetry } from '../outbox/retry-
 import { recordAssistantDiagnosticEvent } from '../diagnostics.js'
 import { isRecognizedMurphOnboardingFollowupAutomation } from '../managed-automations.js'
 import { isCurrentMurphOnboardingFollowupAutomation } from '../onboarding-followup-automation.js'
+import type { AssistantRunEvent } from '../automation/shared.js'
+import {
+  fingerprintHostedAssistantContextValue,
+  resolveHostedAssistantContextFingerprintSecret,
+} from '../hosted-context-diagnostics.js'
 
 const ASSISTANT_CRON_MISSING_PENDING_DELIVERY_STALE_AFTER_MS = 24 * 60 * 60 * 1000
 
@@ -65,6 +70,7 @@ type TerminalAssistantCronDeliveryOutcome =
 
 export async function reconcileAssistantCronDeliveryIntent(input: {
   intent: AssistantOutboxIntent
+  onEvent?: (event: AssistantRunEvent) => void
   paths?: AssistantStatePaths
   vault: string
 }): Promise<AssistantCronDeliveryReconciliationResult> {
@@ -75,6 +81,7 @@ export async function reconcileAssistantCronDeliveryIntent(input: {
 
   return reconcileAssistantCronTerminalDelivery({
     intentId: input.intent.intentId,
+    onEvent: input.onEvent,
     paths: input.paths,
     terminal,
     vault: input.vault,
@@ -83,6 +90,7 @@ export async function reconcileAssistantCronDeliveryIntent(input: {
 
 async function reconcileAssistantCronTerminalDelivery(input: {
   intentId: string
+  onEvent?: (event: AssistantRunEvent) => void
   paths?: AssistantStatePaths
   terminal: TerminalAssistantCronDeliveryOutcome
   vault: string
@@ -112,7 +120,7 @@ async function reconcileAssistantCronTerminalDelivery(input: {
           reason: `delivery_${input.terminal.failureStatus}`,
         }
     let reconciled = 0
-    let localChanged = false
+    const localJobIds: string[] = []
 
     for (let index = localStore.jobs.length - 1; index >= 0; index -= 1) {
       const job = localStore.jobs[index] as AssistantCronJob
@@ -121,7 +129,7 @@ async function reconcileAssistantCronTerminalDelivery(input: {
       }
 
       reconciled += 1
-      localChanged = true
+      localJobIds.push(job.jobId)
       await finalizeAssistantCronPendingRunDelivery({
         jobId: job.jobId,
         paths,
@@ -142,11 +150,12 @@ async function reconcileAssistantCronTerminalDelivery(input: {
       })
     }
 
-    if (localChanged) {
+    if (localJobIds.length > 0) {
       await writeAssistantCronStore(paths, localStore)
+      emitAssistantCronDeliveryReconciledEvents({ ...input, jobIds: localJobIds })
     }
 
-    let canonicalChanged = false
+    const canonicalJobIds: string[] = []
     for (const runtimeState of [...runtimeStore.jobs]) {
       if (runtimeState.state.pendingDeliveryIntentId !== input.intentId) {
         continue
@@ -156,7 +165,7 @@ async function reconcileAssistantCronTerminalDelivery(input: {
         (record) => resolveCanonicalAssistantCronJobId(record) === runtimeState.jobId,
       ) ?? null
       reconciled += 1
-      canonicalChanged = true
+      canonicalJobIds.push(runtimeState.jobId)
       await finalizeAssistantCronPendingRunDelivery({
         jobId: runtimeState.jobId,
         paths,
@@ -193,12 +202,58 @@ async function reconcileAssistantCronTerminalDelivery(input: {
       )
     }
 
-    if (canonicalChanged) {
+    if (canonicalJobIds.length > 0) {
       await writeAssistantCronCanonicalRuntimeStore(paths, runtimeStore)
+      emitAssistantCronDeliveryReconciledEvents({ ...input, jobIds: canonicalJobIds })
     }
 
     return { reconciled }
   })
+}
+
+export function fingerprintAssistantCronDelivery(
+  jobId: string,
+  intentId: string | null | undefined,
+): string | null {
+  const secret = resolveHostedAssistantContextFingerprintSecret()
+  return secret && intentId
+    ? fingerprintHostedAssistantContextValue(
+        secret,
+        'cron-delivery',
+        JSON.stringify([jobId, intentId]),
+      )
+    : null
+}
+
+function emitAssistantCronDeliveryReconciledEvents(input: {
+  intentId: string
+  jobIds: readonly string[]
+  onEvent?: (event: AssistantRunEvent) => void
+  terminal: TerminalAssistantCronDeliveryOutcome
+}): void {
+  if (!input.onEvent) return
+  for (const jobId of input.jobIds) {
+    try {
+      // Called only after the pending reference is durably cleared, including
+      // repair after a journal write succeeded but the owner write failed.
+      void Promise.resolve(input.onEvent({
+        type: 'cron.delivery.reconciled',
+        details: 'scheduled delivery reconciled at outbox terminal boundary',
+        safeDetails: 'cron_delivery_reconciled',
+        failureContext: {
+          deliveryStatus: input.terminal.kind === 'sent'
+            ? 'sent'
+            : input.terminal.failureStatus,
+          runOutcome: input.terminal.kind === 'sent' ? 'delivered' : 'failed',
+          deliveryFingerprint: fingerprintAssistantCronDelivery(jobId, input.intentId),
+        },
+        providerKind: 'status',
+        providerState: 'completed',
+      })).catch(() => undefined)
+    } catch {
+      // Observers cannot change a persisted reconciliation or request a retry.
+    }
+  }
 }
 
 /**
@@ -233,6 +288,7 @@ export async function listAssistantCronPendingDeliveryIntentIds(
 export async function repairPendingAssistantCronDeliveries(input: {
   missingIntentStaleAfterMs?: number
   now?: Date
+  onEvent?: (event: AssistantRunEvent) => void
   paths?: AssistantStatePaths
   vault: string
 }): Promise<AssistantCronPendingDeliveryRepairResult> {
@@ -285,6 +341,7 @@ export async function repairPendingAssistantCronDeliveries(input: {
 
       const result = await reconcileAssistantCronTerminalDelivery({
         intentId,
+        onEvent: input.onEvent,
         paths,
         terminal: {
           at: now.toISOString(),
@@ -314,6 +371,7 @@ export async function repairPendingAssistantCronDeliveries(input: {
     }
     const result = await reconcileAssistantCronDeliveryIntent({
       intent,
+      onEvent: input.onEvent,
       paths,
       vault: input.vault,
     })

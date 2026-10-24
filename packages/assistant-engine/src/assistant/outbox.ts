@@ -109,6 +109,7 @@ import {
 } from './response-media.js'
 import { stripAssistantResponseMediaPlacement } from './reply-bubbles.js'
 import { writeAssistantAutoReplyIntentProvenance } from './automation/intent-provenance.js'
+import type { AssistantRunEvent } from './automation/shared.js'
 import {
   assistantDeviceActivityAuthorityKeyMatches,
   readAssistantDeviceActivityDeliveryIdempotencyMetadata,
@@ -201,6 +202,8 @@ export type AssistantOutboxDispatchPreflightResult =
   | { action: 'stop'; intent: AssistantOutboxIntent }
 
 export interface AssistantOutboxDispatchHooks {
+  /** Best-effort observation after cron delivery reconciliation persists. */
+  onEvent?: (event: AssistantRunEvent) => void
   clearPreparedIntent?: (input: {
     intent: AssistantOutboxIntent
     vault: string
@@ -769,11 +772,13 @@ export async function dispatchAssistantOutboxIntent(
 ): Promise<DispatchAssistantOutboxIntentResult> {
   return dispatchAssistantOutboxIntentInternal({
     ...input,
+    onEvent: input.dispatchHooks?.onEvent,
     preflightCompleted: false,
   })
 }
 
 async function dispatchAssistantOutboxIntentInternal(input: DispatchAssistantOutboxIntentInput & {
+  onEvent?: (event: AssistantRunEvent) => void
   preflightCompleted: boolean
 }): Promise<DispatchAssistantOutboxIntentResult> {
   const now = input.now ?? new Date()
@@ -961,6 +966,7 @@ async function dispatchAssistantOutboxIntentInternal(input: DispatchAssistantOut
       resolvePersistedAssistantOutboxDelivery(prepared.intent)
     if (recoveredDelivery) {
       const sentIntent = await markAssistantOutboxIntentSent({
+        onEvent: input.onEvent,
         completedAt: resolveRecoveredAssistantOutboxDeliveryCompletedAt({
           delivery: recoveredDelivery,
           intent: prepared.intent,
@@ -996,6 +1002,7 @@ async function dispatchAssistantOutboxIntentInternal(input: DispatchAssistantOut
           vault: input.vault,
         })
       : await markAssistantOutboxIntentMirrorTerminal({
+          onEvent: input.onEvent,
           error: retryExhaustionDisposition.error,
           failedAt: now,
           intent: prepared.intent,
@@ -1063,6 +1070,7 @@ async function dispatchAssistantOutboxIntentInternal(input: DispatchAssistantOut
             vault: input.vault,
           })
         : await markAssistantOutboxIntentSent({
+            onEvent: input.onEvent,
             completedAt,
             delivery: recoveredDelivery,
             intent: prepared.intent,
@@ -1105,6 +1113,7 @@ async function dispatchAssistantOutboxIntentInternal(input: DispatchAssistantOut
           vault: input.vault,
         })
       : await markAssistantOutboxIntentMirrorTerminal({
+          onEvent: input.onEvent,
           error: ambiguousError,
           failedAt: now,
           intent: prepared.intent,
@@ -1143,6 +1152,7 @@ async function dispatchAssistantOutboxIntentInternal(input: DispatchAssistantOut
       resolvePersistedAssistantOutboxDelivery(dispatchIntent)
     if (reconciledDelivery) {
       const sentIntent = await markAssistantOutboxIntentSent({
+        onEvent: input.onEvent,
         completedAt: resolveRecoveredAssistantOutboxDeliveryCompletedAt({
           delivery: reconciledDelivery,
           intent: dispatchIntent,
@@ -1197,6 +1207,7 @@ async function dispatchAssistantOutboxIntentInternal(input: DispatchAssistantOut
         throw authorityError
       }
       const failedIntent = await markAssistantOutboxIntentMirrorTerminal({
+        onEvent: input.onEvent,
         error: authorityError,
         // `now` may be the earlier drain-selection timestamp. Authority is
         // evaluated at provider entry, so persist that wall-clock failure time.
@@ -1327,6 +1338,7 @@ async function dispatchAssistantOutboxIntentInternal(input: DispatchAssistantOut
           vault: input.vault,
         })
       : await markAssistantOutboxIntentSent({
+          onEvent: input.onEvent,
           completedAt,
           delivery,
           intent: deliveredOwnerIntent,
@@ -1376,6 +1388,7 @@ async function dispatchAssistantOutboxIntentInternal(input: DispatchAssistantOut
     }
 
     const failedIntent = await updateAssistantOutboxAfterDispatchFailure({
+      onEvent: input.onEvent,
       deliveryMayHaveSucceeded: effectiveDeliveryMayHaveSucceeded,
       deliveryTransportIdempotent,
       error: failure,
@@ -1494,6 +1507,7 @@ async function confirmAssistantOutboxTerminalIntent(input: {
 
   if (input.outcome.status === 'sent') {
     return markAssistantOutboxIntentSent({
+      onEvent: input.dispatchHooks?.onEvent,
       completedAt: input.intent.updatedAt,
       delivery: input.outcome.delivery,
       intent: input.intent,
@@ -1503,6 +1517,7 @@ async function confirmAssistantOutboxTerminalIntent(input: {
   }
 
   return markAssistantOutboxIntentMirrorTerminal({
+    onEvent: input.dispatchHooks?.onEvent,
     error: input.outcome.deliveryError,
     failedAt: new Date(),
     intent: input.intent,
@@ -1527,6 +1542,7 @@ async function finalizeAssistantOutboxTerminalFailure(input: {
   vault: string
 }): Promise<AssistantOutboxIntent> {
   const pendingIntent = await updateAssistantOutboxAfterDispatchFailure({
+    onEvent: input.dispatchHooks?.onEvent,
     deliveryMayHaveSucceeded: input.deliveryMayHaveSucceeded,
     deliveryTransportIdempotent: input.deliveryTransportIdempotent,
     error: input.error,
@@ -2286,6 +2302,7 @@ export async function buildAssistantOutboxSummary(
 }
 
 export async function beginAssistantOutboxIntentMirrorDispatch(input: {
+  onEvent?: (event: AssistantRunEvent) => void
   deliveryIdempotencyKey?: string | null
   deliveryTransportIdempotent: boolean
   intentId: string
@@ -2303,6 +2320,7 @@ export async function beginAssistantOutboxIntentMirrorDispatch(input: {
   }
 
   return markAssistantOutboxIntentMirrorSending({
+    onEvent: input.onEvent,
     deliveryIdempotencyKey: input.deliveryIdempotencyKey,
     deliveryTransportIdempotent: input.deliveryTransportIdempotent,
     intent,
@@ -2313,6 +2331,7 @@ export async function beginAssistantOutboxIntentMirrorDispatch(input: {
 }
 
 export async function beginAssistantOutboxIntentMirrorPreparedDispatch(input: {
+  onEvent?: (event: AssistantRunEvent) => void
   deliveryIdempotencyKey?: string | null
   deliveryTransportIdempotent: boolean
   externalThreadRouteAuthority?: AssistantOutboxIntent['externalThreadRouteAuthority']
@@ -2332,6 +2351,7 @@ export async function beginAssistantOutboxIntentMirrorPreparedDispatch(input: {
   }
 
   return markAssistantOutboxIntentMirrorSendingPrepared({
+    onEvent: input.onEvent,
     deliveryIdempotencyKey: input.deliveryIdempotencyKey,
     deliveryTransportIdempotent: input.deliveryTransportIdempotent,
     ...(input.externalThreadRouteAuthority === undefined
@@ -2349,6 +2369,7 @@ export async function beginAssistantOutboxIntentMirrorPreparedDispatch(input: {
 }
 
 export async function markAssistantOutboxIntentMirrorRetryableById(input: {
+  onEvent?: (event: AssistantRunEvent) => void
   error: unknown
   failedAt?: Date
   intentId: string
@@ -2365,6 +2386,7 @@ export async function markAssistantOutboxIntentMirrorRetryableById(input: {
   }
 
   return markAssistantOutboxIntentMirrorRetryable({
+    onEvent: input.onEvent,
     error: input.error,
     failedAt: input.failedAt ?? new Date(),
     intent,
@@ -2405,6 +2427,7 @@ export async function resetAssistantOutboxPreparedDispatchById(input: {
 }
 
 export async function markAssistantOutboxIntentMirrorTerminalById(input: {
+  onEvent?: (event: AssistantRunEvent) => void
   error: unknown
   failedAt?: Date
   intentId: string
@@ -2423,6 +2446,7 @@ export async function markAssistantOutboxIntentMirrorTerminalById(input: {
   }
 
   return markAssistantOutboxIntentMirrorTerminal({
+    onEvent: input.onEvent,
     error: input.error,
     failedAt: input.failedAt ?? new Date(),
     intent,
@@ -2436,6 +2460,7 @@ export async function markAssistantOutboxIntentMirrorTerminalById(input: {
 }
 
 export async function markAssistantOutboxIntentSentById(input: {
+  onEvent?: (event: AssistantRunEvent) => void
   delivery: AssistantChannelDelivery
   intentId: string
   preserveCurrentDispatchMetadata?: boolean
@@ -2452,6 +2477,7 @@ export async function markAssistantOutboxIntentSentById(input: {
   }
 
   return markAssistantOutboxIntentSent({
+    onEvent: input.onEvent,
     delivery: input.delivery,
     intent,
     intentPath,

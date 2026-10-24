@@ -663,6 +663,66 @@ describe("runHostedAssistantAutomation", () => {
     ]));
   });
 
+  it("persists cron delivery reconciliations after the ordinary automation log cap", async () => {
+    const statuses = ["sent", "failed", "abandoned", "missing"] as const;
+    const fingerprint = `h1_${"a".repeat(24)}`;
+    mocks.runAssistantAutomationPass.mockImplementationOnce(async (input) => {
+      for (let index = 0; index < 13; index += 1) {
+        input.onEvent?.({ type: "cron.scan.job" });
+      }
+      for (const deliveryStatus of statuses) {
+        input.onEvent?.({
+          type: "cron.delivery.reconciled",
+          details: "Synthetic private job and recipient details",
+          safeDetails: "cron_delivery_reconciled",
+          providerKind: "status",
+          providerState: "completed",
+          failureContext: {
+            deliveryStatus,
+            deliveryFingerprint: fingerprint,
+            runOutcome: deliveryStatus === "sent" ? "delivered" : "failed",
+          },
+        });
+      }
+      return { nextWakeAt: null, progressed: true };
+    });
+    const result = await runHostedAssistantAutomation(
+      "/tmp/vault-root",
+      "req_synthetic_reconciliation",
+      { hosted: { memberId: "member_123", userEnvKeys: [] } },
+      {
+        eventId: "evt_synthetic_reconciliation",
+        kind: "runtime.timer",
+        occurredAt: "2026-04-08T00:00:00.000Z",
+        triggerKind: "runtime_timer",
+        userId: "member_123",
+      },
+    );
+    const rows = result.redactedLogEntries.filter(
+      (entry) => entry.redacted?.type === "cron.delivery.reconciled",
+    );
+    expect(rows).toHaveLength(statuses.length);
+    const parsed = parseHostedRuntimeLogRequest({
+      entries: rows.map((entry) => ({
+        at: "2026-04-08T00:00:00.000Z",
+        component: "assistant",
+        eventCode: "assistant.automation_detail",
+        level: entry.level,
+        phase: "invoke",
+        redactedJson: entry.redacted,
+      })),
+    });
+    expect(parsed.entries.map((entry) =>
+      sanitizeHostedExecutionStructuredLogDetails(entry.redactedJson)
+    )).toEqual(statuses.map((deliveryStatus) => expect.objectContaining({
+      type: "cron.delivery.reconciled",
+      failureDeliveryStatus: deliveryStatus,
+      failureDeliveryFingerprint: fingerprint,
+      failureRunOutcome: deliveryStatus === "sent" ? "delivered" : "failed",
+    })));
+    expect(JSON.stringify(rows)).not.toContain("Synthetic private");
+  });
+
   it("persists the typed cron failure code from cron.job.completed events", async () => {
     // June 2026 quota incident: provider quota failures on scheduled
     // reminders must land queryable in hosted_runtime_log.

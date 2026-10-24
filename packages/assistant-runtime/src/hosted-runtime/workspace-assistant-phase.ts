@@ -2442,6 +2442,7 @@ export async function runHostedWorkspaceAssistantPhase(
       ? false
       : providerCleanupPlan.stateQueued;
     const deliveryEffects = await collectHostedAssistantDeliverySideEffects({
+      platform: input.runtime.platform,
       actionApprovalPort: input.runtime.platform.actionApprovalPort ?? null,
       includeBackgroundDueIntents:
         input.shouldYieldBackgroundMaintenance?.() !== true,
@@ -2450,6 +2451,7 @@ export async function runHostedWorkspaceAssistantPhase(
       vaultRoot: input.restored.vaultRoot,
     });
     const deliveryEffectsPreparation = await prepareHostedAssistantDeliveryEffectsForDispatch({
+      platform: input.runtime.platform,
       assistantDeliveryEffects: deliveryEffects,
       linqDeliveryContexts: currentLinqDeliveryContexts,
       vaultRoot: input.restored.vaultRoot,
@@ -5177,6 +5179,7 @@ async function prepareSystemMailboxDelivery(input: {
       shouldYieldAfterSystemMailboxPreparation,
     })
       ? await collectHostedAssistantDeliverySideEffects({
+        platform: phaseInput.runtime.platform,
         actionApprovalPort: phaseInput.runtime.platform.actionApprovalPort ?? null,
         includeBackgroundDueIntents: phaseInput.foregroundCausalOnly !== true,
         messageVolumeReceiptPort: phaseInput.runtime.platform.effectsPort,
@@ -5211,6 +5214,7 @@ async function prepareSystemMailboxDelivery(input: {
   let systemMailboxDeliveryPreparation: HostedAssistantDeliveryPreparation | null = null;
   if (systemMailboxDeliveryEffectsForDispatch.length > 0) {
     systemMailboxDeliveryPreparation = await prepareHostedAssistantDeliveryEffectsForDispatch({
+      platform: phaseInput.runtime.platform,
       assistantDeliveryEffects: systemMailboxDeliveryEffectsForDispatch,
       ...(nonIdempotentPhoneCallResultEffectIds.length > 0
         ? {
@@ -6100,6 +6104,7 @@ function resolveHostedSystemMailboxMetricsWakeAt(input: {
 }
 
 async function collectForegroundDeliveryEffects(input: {
+  platform: Pick<HostedRuntimePlatform, "logPort">;
   actionApprovalPort: HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["actionApprovalPort"];
   linqDeliveryContexts?: readonly HostedAssistantLinqDeliveryContext[] | null;
   messageVolumeReceiptPort: HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["effectsPort"];
@@ -6107,6 +6112,7 @@ async function collectForegroundDeliveryEffects(input: {
   vaultRoot: string;
 }): Promise<HostedPreparedAssistantDeliveryEffects> {
   const deliveryEffects = await collectHostedAssistantDeliverySideEffects({
+    platform: input.platform,
     actionApprovalPort: input.actionApprovalPort ?? null,
     includeBackgroundDueIntents: false,
     messageVolumeReceiptPort: input.messageVolumeReceiptPort,
@@ -6114,6 +6120,7 @@ async function collectForegroundDeliveryEffects(input: {
     vaultRoot: input.vaultRoot,
   });
   const preparation = await prepareHostedAssistantDeliveryEffectsForDispatch({
+    platform: input.platform,
     assistantDeliveryEffects: deliveryEffects,
     linqDeliveryContexts: input.linqDeliveryContexts ?? null,
     vaultRoot: input.vaultRoot,
@@ -6140,6 +6147,7 @@ async function runForegroundAssistantReplyPhase(input: {
 }): Promise<HostedWorkspaceRunnerAssistantPhaseResult> {
   const foregroundReplyFailed = input.assistantMetrics.assistantAutomationReplyFailed ?? 0;
   const preparedDeliveryEffects = await collectForegroundDeliveryEffects({
+    platform: input.input.runtime.platform,
     actionApprovalPort: input.input.runtime.platform.actionApprovalPort ?? null,
     linqDeliveryContexts: input.linqDeliveryContexts,
     messageVolumeReceiptPort: input.input.runtime.platform.effectsPort,

@@ -42,6 +42,56 @@ and `errorCode IN ('ASSISTANT_CODEX_FAILED', 'ASSISTANT_CODEX_CONNECTION_LOST',
 Keep missing values separate from `false`, select metadata only, and do not
 induce failures. An empty window is not evidence that the path works.
 
+## Cron delivery reconciliation telemetry
+
+`cron.job.completed` describes execution; `runOutcome=delivery_pending` means
+the outbox still owns delivery. It is not a delivery failure. When
+`cron/delivery-reconciliation.ts` successfully persists clearing a job's pending
+delivery reference, its optional `onEvent` emits `cron.delivery.reconciled`.
+This covers immediate outbox terminal transitions and later pending-delivery
+repair, including stale missing intents. Journal finalization and any required
+one-shot archival precede the corresponding local or canonical runtime store
+write; a failed write emits no reconciliation for that owner. A later repair
+can emit even when an earlier attempt already finalized the journal. Repeats
+with no matching pending reference emit nothing.
+
+The event carries only `deliveryStatus` (`sent`, `failed`, `abandoned`, or
+`missing`), the existing `runOutcome` (`delivered` or `failed`), and
+`deliveryFingerprint`. `sent` names the persisted outbox terminal boundary;
+it does not assert handset delivery. `abandoned` retains delivery uncertainty,
+and `missing` records the existing stale-intent repair decision. Reconciliation
+does not change reasons, occurrence consumption, or eligibility for a fresh
+intent under the existing retry policy.
+
+Pending completion and reconciliation share a fingerprint of the job/intent
+pair, using the existing keyed `h1_` helper with the `cron-delivery` domain.
+Join within the same hosted subject on this fingerprint. It identifies an
+occurrence's delivery attempt; a fresh intent for the same occurrence has a new
+fingerprint. No job, intent, route, title, instruction, response, or provider
+error text is added to these fields. An unavailable existing fingerprint secret
+produces `null`, and secret rotation breaks joins across that rotation; neither
+case falls back to raw identifiers.
+
+Outbox dispatch hooks and direct terminal/preparation APIs forward the optional
+observer. Hosted maintenance and delivery callbacks reuse
+`assistant.automation_detail` and the existing `failure*` field prefix, yielding
+`failureDeliveryStatus`, `failureRunOutcome`, and `failureDeliveryFingerprint`.
+Terminal reconciliation bypasses maintenance's ordinary 12-detail scan cap.
+There is at most one new event per successfully persisted matching job/intent
+reference, with no new owner-state reads or writes, retries, timers, or awaited telemetry.
+Throwing or rejecting observers cannot change the durable result. Hosted info
+records use the existing bounded best-effort log transport and may be lost.
+
+The engine and hosted observer ship together in the runner bundle. Existing
+Web/Worker runtime-log readers already accept these additive scalar details
+under the unchanged event code; no schema migration or coordinated state
+cutover is needed. Older producers/callers omit the observation, and an older
+hosted maintenance projection ignores the new event type. Rollback preserves
+durable behavior but removes this evidence. Historical pending rows cannot be
+reclassified from absence of a reconciliation: older code, missing correlation,
+log loss, and retention can all leave the terminal outcome unknown. This is
+prospective best-effort evidence, with no historical backfill or new alert.
+
 ## Prompt time context
 
 Inbound auto-reply prompts render occurrence instants before provider execution.

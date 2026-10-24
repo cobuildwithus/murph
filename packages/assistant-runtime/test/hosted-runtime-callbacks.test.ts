@@ -13,6 +13,7 @@ import {
 } from "@murphai/hosted-execution";
 import type {
   AssistantOutboxPreparedDispatchState,
+  AssistantRunEvent,
 } from "@murphai/assistant-engine";
 import {
   getAssistantChannelAdapter,
@@ -5272,6 +5273,93 @@ describe("hosted runtime callbacks", () => {
     expect(wakeAt).toBe("2026-04-08T00:11:00.000Z");
     vi.useRealTimers();
   });
+
+  it.each(["dispatch", "prepare", "approval"] as const)(
+    "queues cron reconciliation from %s through the existing hosted log projection",
+    async (stage) => {
+      const effect = createEffect({ transportIdempotent: true });
+      const event: AssistantRunEvent = {
+        type: "cron.delivery.reconciled",
+        details: "Synthetic private job and recipient details",
+        safeDetails: "cron_delivery_reconciled",
+        providerKind: "status",
+        providerState: "completed",
+        failureContext: {
+          deliveryStatus: stage === "dispatch" ? "sent" : "abandoned",
+          runOutcome: stage === "dispatch" ? "delivered" : "failed",
+          deliveryFingerprint: `h1_${"b".repeat(24)}`,
+        },
+      };
+      const write = vi.fn<HostedRuntimeLogPort["write"]>(async ({ entries }) => ({
+        loggedCount: entries.length,
+      }));
+      const platform = { logPort: { write } };
+      if (stage === "dispatch") {
+        mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dispatchHooks }) => {
+          dispatchHooks.onEvent?.(event);
+          // An ordinary outbox event is not a cron reconciliation.
+          dispatchHooks.onEvent?.({ type: "assistant.delivery.sent" });
+          return createDispatchResult({ delivery: createDelivery(), status: "sent" });
+        });
+        await expect(drainHostedPreparedAssistantDeliveries({
+          ...HOSTED_WAKE,
+          assistantDeliveryEffects: [effect],
+          effectsPort: createHostedRuntimeEffectsPortStub(),
+          platform,
+        })).resolves.toEqual([expect.objectContaining({ deliveryStatus: "sent" })]);
+      } else if (stage === "prepare") {
+        mocks.beginAssistantOutboxIntentMirrorPreparedDispatch.mockImplementationOnce(async (input) => {
+          input.onEvent?.(event);
+          return null;
+        });
+        await prepareHostedAssistantDeliveryEffectsForDispatch({
+          assistantDeliveryEffects: [effect],
+          platform,
+          vaultRoot: HOSTED_WAKE.vaultRoot,
+        });
+      } else {
+        const intent = createPendingHostedDeliveryIntent({
+          intentId: effect.effectId,
+          status: "awaiting_approval",
+        });
+        mocks.listAssistantOutboxIntents.mockResolvedValueOnce([intent]);
+        mocks.readAssistantVaultFileMedia.mockImplementationOnce(() => {
+          throw new Error("Synthetic invalid file approval");
+        });
+        mocks.markAssistantOutboxIntentMirrorTerminalById.mockImplementationOnce(async (input) => {
+          input.onEvent?.(event);
+          return { ...intent, status: "failed" };
+        });
+        await collectHostedAssistantDeliverySideEffects({
+          includeBackgroundDueIntents: true,
+          platform,
+          vaultRoot: HOSTED_WAKE.vaultRoot,
+        });
+      }
+      expect(write).not.toHaveBeenCalled();
+      await drainHostedRuntimeLogWritesBestEffort();
+      const rows = write.mock.calls.flatMap(([request]) => request.entries);
+      expect(rows).toHaveLength(1);
+      expect(parseHostedRuntimeLogRequest({ entries: rows })).toEqual({ entries: rows });
+      expect(rows[0]).toMatchObject({
+        component: "assistant",
+        eventCode: "assistant.automation_detail",
+        level: "info",
+        phase: "outbox",
+        redactedJson: {
+          type: "cron.delivery.reconciled",
+          safeDetails: "cron_delivery_reconciled",
+          failureDeliveryStatus: event.failureContext?.deliveryStatus,
+          failureRunOutcome: event.failureContext?.runOutcome,
+          failureDeliveryFingerprint: event.failureContext?.deliveryFingerprint,
+        },
+      });
+      const serialized = JSON.stringify(rows);
+      for (const excluded of ["Synthetic private", effect.effectId, effect.payload.message]) {
+        expect(serialized).not.toContain(excluded);
+      }
+    },
+  );
 
   it("forwards selected voice delivery through the invocation port and liveness fence", async () => {
     const effect = createEffect({
