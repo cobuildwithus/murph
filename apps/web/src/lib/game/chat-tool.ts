@@ -41,6 +41,8 @@ export async function handleGameChatTool(input: Input): Promise<HostedGameToolRe
     const update = input.request.update;
     const command = "date" in update
       ? { type: "setDayCompletion", gameId: update.gameId, date: update.date, incomplete: update.operation === "mark_incomplete" }
+      : update.operation === "cancel_game"
+      ? { type: "cancelInvite", gameId: update.gameId }
       : update.operation === "propose"
       ? { type: "proposeChange", gameId: update.gameId, proposalId: update.proposalId, expectedTermsVersion: update.expectedTermsVersion, change: update.change }
       : { type: "respondChange", gameId: update.gameId, proposalId: update.proposalId, decision: update.operation };
@@ -54,7 +56,8 @@ export async function handleGameChatTool(input: Input): Promise<HostedGameToolRe
       },
     });
     // GameView is a personal app view. Never pass it into the shared runtime.
-    if (!result.ok) return { action: input.request.action, result: { status: "rejected", error: result.error.code === "CHANGE_EXPIRED" ? result.error.message.slice(0, 128) : result.error.code } };
+    // Rule messages name only the rule and next step, so Murph can explain a refusal.
+    if (!result.ok) return { action: input.request.action, result: { status: "rejected", error: `${result.error.code}: ${result.error.message}`.slice(0, 128) } };
     dayOutcome = result.dayOutcome;
     const latestPlayers = await requireExactGameChat(input.memberId);
     if (!sameGamePlayers(latestPlayers, playerMemberIds)) throw new TypeError("Game chat participants changed.");

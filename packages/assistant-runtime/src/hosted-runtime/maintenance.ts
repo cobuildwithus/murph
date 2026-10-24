@@ -459,6 +459,7 @@ export async function runHostedAssistantAutomation(
       requestId,
       selectedAssistantInputCount: selectedInputIds.inputIds.length,
       selectedAssistantInputMode: selectedInputIds.mode,
+      ...readHostedStaleRetryDropLogDetails(selectedInputIds),
     },
     wake,
     message: "Hosted assistant automation pass starting.",
@@ -1166,6 +1167,20 @@ function normalizeHostedRuntimeLogSourceId(value: string | null | undefined): st
 
 function elapsedSince(startedAt: number): number {
   return Math.max(0, Date.now() - startedAt);
+}
+
+/** Reason codes and counts only: the dropped retries were never answered. */
+function readHostedStaleRetryDropLogDetails(
+  selection: Awaited<ReturnType<typeof selectHostedAssistantInputIds>>,
+): Record<string, number> {
+  const dropped = selection.mode === "background" ? selection.staleRetryDropped ?? [] : [];
+  if (dropped.length === 0) {
+    return {};
+  }
+  return {
+    staleRetryDroppedNewerAnsweredCount: dropped.filter((entry) => entry.reason === "newer_message_answered").length,
+    staleRetryDroppedTooOldCount: dropped.filter((entry) => entry.reason === "too_old").length,
+  };
 }
 
 function emitHostedRuntimeRedactedLog(

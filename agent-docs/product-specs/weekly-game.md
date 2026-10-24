@@ -44,7 +44,7 @@ clearing its pending change and roster key plus recording one `cancelled` event
 with its actor. The pair can immediately start another invite. Home excludes
 cancelled events, retaining ordinary expired invites; GameView adds no field.
 If a game chat is already attached, the existing durable lifecycle sends one
-brief cancellation notice there. Cancellation never creates a chat. Its pending
+brief cancellation notice there, unless the cancellation came from that chat. Cancellation never creates a chat. Its pending
 notice retains the bound room's existing game allowance until provider dispatch,
 for at most the existing seven-day post-game access window; it grants no personal
 access or extra budget. Dispatch checks the cancelled event and original pair.
@@ -244,10 +244,20 @@ as a separately delivered notification. New group creation uses that same first
 message, rather than a generic opener followed by another message. Initial
 invite negotiation likewise introduces the actual proposal once; the challenge
 kickoff follows only after agreement. The other player can decline, and the
-proposer can cancel in chat. Only one proposal waits at a time. Cancelling an
+proposer can cancel in chat. Only one proposal waits at a time: a player who
+answers a pending proposal with a different one declines it and proposes theirs,
+and Murph says in that reply that the new ask replaces the earlier one. A chat
+proposal carries only what the acting message asks for, never an earlier
+deferred request. Cancelling an
 app-origin change after it was queued or sent also tells the group that the
 request is off, without cancelling the challenge or changing its agreed rules.
-Unsent requests and chat-origin requests do not generate a second announcement.
+Unsent requests and chat-origin requests do not generate a second announcement,
+and neither does a cancellation, refused approval or game cancellation made from
+the bound chat, where Murph's reply is the one explanation. In chat, either
+player can cancel a negotiating game; a live game cannot be called off, so Murph
+says its stakes are locked and offers shortening, rescheduling or marking days
+incomplete. Chat refusals carry the server's plain rule (for example the 60-day
+start limit) so Murph can give the reason and the nearest valid option.
 
 Until agreement, the current terms stay in force. Changes apply from the first
 day neither player has started. Existing check-ins and missed days keep their

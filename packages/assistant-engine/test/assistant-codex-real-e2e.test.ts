@@ -45155,7 +45155,7 @@ describeRealCodex('real Codex game agreement e2e', () => {
             calls.push(request)
             if (request.action === 'read_game') return { action: 'read_game', result: { status: 'ok', state: { games: [refusal && calls.some(call => call.action === 'update_game') ? {...game,pendingChange:null} : game] } } }
             if (request.action !== 'update_game') throw new Error('Unexpected game action')
-            if (refusal) return {action:'update_game',result:{status:'rejected',error:'The proposed game length ends on a day already started. Propose a longer game.'}}
+            if (refusal) return {action:'update_game',result:{status:'rejected',error:'CHANGE_EXPIRED: The proposed game length ends on a day already started. Propose a longer game.'}}
             return { action: 'update_game', result: { status: 'ok', state: { games: [{ ...game, status: 'live' as const, lengthDays: duration ? 10 : game.lengthDays, terms: { ...game.terms, n: 2, fromDay: duration ? 2 : 0, schedule: duration || negotiation ? game.terms.schedule : { days: [5, 6] }, ...(negotiation && 'tasks' in game.pendingChange.change ? {tasks:game.pendingChange.change.tasks,stakes:game.pendingChange.change.stakes} : {}) }, pendingChange: null }] } } }
           } },
           currentUserActionScope: () => ({ conversationId: 'synthetic-game-chat', inboundMailboxItemIds: [], recipientKey: 'synthetic-game-recipient', acceptedInputIds: [inputId], originSessionId: 'synthetic-game-session', conversationScope: 'group' }),
@@ -45183,6 +45183,92 @@ describeRealCodex('real Codex game agreement e2e', () => {
       expect(result.finalMessage).not.toMatch(/confirm|are you sure|reply yes|waiting|still need|pending/iu)
     } finally { await rm(workingDirectory, { force: true, recursive: true }) }
   }, 720_000)
+})
+
+describeRealCodex('real Codex game chat adjustment e2e', () => {
+  it.each([
+    { name: 'game chat counter-proposal says it replaces the partner ask', scenario: 'counter' as const },
+    { name: 'game chat proposal carries only the current ask, not an earlier deferred one', scenario: 'only_current' as const },
+    { name: 'game chat open day with no post is not called missed', scenario: 'open_day' as const },
+  ])('$name', async ({ scenario }) => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-game-adjust-e2e-'))
+    const { MURPH_READ_GAME_TOOL, MURPH_UPDATE_GAME_TOOL } = await import('../src/assistant-codex/dynamic-tools/games.js')
+    const inputId = 'ain_' + 'b'.repeat(32)
+    const calls: Array<import('@murphai/hosted-execution/runtime-control').HostedRuntimeGroupToolRequest> = []
+    const dayOne = scenario === 'only_current' ? '2030-03-11' : '2030-03-04'
+    const pendingWeekdays = { id: 'proposal_weekdays', proposedByMemberId: 'player_leo', expectedTermsVersion: 1, origin: 'chat' as const, change: { kind: 'edit' as const, schedule: { days: [0, 1, 2, 3, 4] } }, effectiveFromDay: 3, deliveryStatus: 'conversation' as const, startsOn: null }
+    let game = {
+      id: 'game_synthetic', status: 'live' as const, lengthDays: 7, startsOn: dayOne,
+      terms: { n: 1, fromDay: 0, tasks: [{ seat: 0, text: 'Walk' }, { seat: 1, text: 'Walk' }], schedule: { days: scenario === 'only_current' ? [0, 1, 2, 3, 4] : [0, 1, 2, 3, 4, 5, 6] }, stakes: [{ kind: 'prize' as const, item: 'Breakfast in bed' }] },
+      players: [{ memberId: 'player_leo', seat: 0, firstName: 'Leo', dayOne, timeZone: 'America/New_York' }, { memberId: 'player_ava', seat: 1, firstName: 'Ava', dayOne, timeZone: 'America/New_York' }],
+      pendingChange: scenario === 'counter' ? pendingWeekdays as typeof pendingWeekdays | null : null,
+      ...(scenario === 'only_current' ? {} : { progress: { checkedAt: '2030-03-06T21:00:00.000Z', players: ['player_leo', 'player_ava'].map((memberId) => ({ memberId, score: 2, target: 7, currentDayIndex: 2, attemptsRemaining: 2, currentEntryId: null,
+        days: [{ dayIndex: 0, date: '2030-03-04', status: 'posted' as const }, { dayIndex: 1, date: '2030-03-05', status: 'posted' as const }, { dayIndex: 2, date: '2030-03-06', status: 'due' as const }] })) } }),
+      changeControls: { canStartNow: false, canEdit: scenario !== 'counter', canEditSchedule: scenario !== 'counter', canEditStartDate: false, canEditTasks: false, canEditStakes: false, editableFromDay: scenario === 'counter' ? null : 3 },
+    }
+    const speaker = scenario === 'only_current' ? 'Leo' : 'Ava'
+    const history = scenario === 'counter'
+      ? 'Leo: can we switch to weekdays only?\nMurph: Leo wants to switch to weekdays only, Monday to Friday. Ava, does that work for you?'
+      : scenario === 'only_current'
+      ? 'Leo: lets make it 10 days\nAva: can we do every day including weekends?\nMurph: Ava proposed every day, including weekends. Leo, does that work? Leo’s 10 days can follow once that is settled.\nAva: actually never mind, keep weekdays.'
+      : 'Leo: walked this morning'
+    const message = scenario === 'counter' ? 'how about we keep every day but cut it to 10 days instead'
+      : scenario === 'only_current' ? 'ok instead lets do any 4 days whenever we want' : 'I didn\'t do my walk today either fyi'
+    try {
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined, codexHome: config.codexHome,
+        developerInstructions: buildAssistantSystemPrompt({
+          assistantCliContract: null, assistantKnowledgeToolsAvailable: false, channel: 'linq',
+          cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' }, conversationScope: 'group',
+          currentLocalDate: '2030-03-06', currentInstant: '2030-03-06T22:00:00.000Z', currentTimeZone: 'America/New_York',
+          hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false, turnTrigger: null,
+        }),
+        dynamicTools: [MURPH_READ_GAME_TOOL, MURPH_UPDATE_GAME_TOOL], env: config.env,
+        hostedToolContext: {
+          computerToolsAvailable: false, vaultFileSendAvailable: false,
+          groupTool: { request: async (request) => {
+            calls.push(request)
+            if (request.action === 'update_game') {
+              const update = request.update
+              if (update.operation === 'decline' || update.operation === 'cancel') game = { ...game, pendingChange: null, changeControls: { ...game.changeControls, canEdit: true, canEditSchedule: true, editableFromDay: 3 } }
+              else if (update.operation === 'propose') game = { ...game, pendingChange: { ...pendingWeekdays, id: update.proposalId, proposedByMemberId: speaker === 'Ava' ? 'player_ava' : 'player_leo', change: update.change as typeof pendingWeekdays.change } }
+              else if (update.operation === 'mark_incomplete') return { action: 'update_game', result: { status: 'ok', state: { games: [game] }, dayOutcome: { date: update.date, status: 'no_artifact' } } }
+              else throw new Error('Unexpected game operation')
+            }
+            return { action: request.action === 'update_game' ? 'update_game' : 'read_game', result: { status: 'ok', state: { games: [game] } } }
+          } },
+          currentUserActionScope: () => ({ conversationId: 'synthetic-game-chat', inboundMailboxItemIds: [], recipientKey: 'synthetic-game-recipient', acceptedInputIds: [inputId], originSessionId: 'synthetic-game-session', conversationScope: 'group' }),
+          currentHostedDeliveryContext: () => null, currentHostedMailboxItemIds: () => [], sendVaultFile: async () => { throw new Error('No file send authorized.') },
+        },
+        model: config.model, modelProvider: config.modelProvider,
+        prompt: `Earlier in this game group:\n${history}\nCurrent accepted message from ${speaker} (Message ref: ${inputId}, Occurred at 2030-03-06T22:00:00.000Z): ${message}`,
+        reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
+      })
+      const updates = calls.flatMap((call) => call.action === 'update_game' ? [call.update] : [])
+      process.stdout.write(`[game chat adjust] ${JSON.stringify({ scenario, reply: result.finalMessage, updates })}\n`)
+      if (scenario === 'counter') {
+        expect(updates.map((update) => update.operation)).toEqual(['decline', 'propose'])
+        const proposal = updates[1]
+        expect(proposal?.operation === 'propose' && proposal.change).toEqual({ kind: 'edit', lengthDays: 10 })
+        expect(result.finalMessage).toMatch(/replac|instead of|turn(?:s|ed)? down|declin|off the table|drop/iu)
+        expect(result.finalMessage).toMatch(/Leo/u)
+        expect(result.finalMessage).toMatch(/weekday/iu)
+      } else if (scenario === 'only_current') {
+        expect(updates.map((update) => update.operation)).toEqual(['propose'])
+        const proposal = updates[0]
+        expect(proposal?.operation === 'propose' && proposal.change).toEqual({ kind: 'edit', schedule: { count: 4 } })
+        expect(result.finalMessage).not.toMatch(/10.day|ten.day|10 days|ten days/iu)
+      } else {
+        expect(updates.filter((update) => update.operation !== 'mark_incomplete')).toEqual([])
+        expect(result.finalMessage).toMatch(/3 ?AM|3:00|tonight|still (?:time|open)/iu)
+        expect(result.finalMessage).not.toMatch(/unposted|missed|already (?:marked|counted)/iu)
+      }
+    } finally {
+      await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+    }
+  }, 360_000)
 })
 
 describeRealCodex('real Codex game lifecycle messaging e2e', () => {

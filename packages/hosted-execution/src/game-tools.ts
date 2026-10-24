@@ -19,6 +19,7 @@ export const hostedGameUpdateSchema = z.discriminatedUnion("operation", [
   z.object({ operation: z.enum(["mark_incomplete", "restore_day"]), gameId, date }).strict(),
   z.object({ operation: z.literal("propose"), gameId, proposalId: gameId, expectedTermsVersion: z.number().int().min(1), change: hostedGameChangeSchema }).strict(),
   z.object({ operation: z.enum(["approve", "decline", "cancel"]), gameId, proposalId: gameId }).strict(),
+  z.object({ operation: z.literal("cancel_game"), gameId }).strict(),
 ]);
 export type HostedGameUpdate = z.infer<typeof hostedGameUpdateSchema>;
 const origin = z.object({ kind: z.literal("accepted_input"), assistantInputId: ref }).strict();
