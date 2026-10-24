@@ -14191,10 +14191,18 @@ describe('assistant automation run loop', () => {
       '../src/assistant/automation/run-loop.ts',
     )
 
+    const onEvent = vi.fn()
+    const reconciliationEvent = { type: 'cron.delivery.reconciled' as const }
+    runLoopMocks.drainAssistantOutbox.mockImplementationOnce(async ({ dispatchHooks }) => {
+      dispatchHooks.onEvent(reconciliationEvent)
+      return { attempted: 0, failed: 0, queued: 0, sent: 0 }
+    })
+
     const result = await runLoop.runAssistantAutomation({
       deliveryDispatchMode: 'queue-only',
       drainOutbox: true,
       inboxServices,
+      onEvent,
       once: true,
       startDaemon: false,
       vault: '/tmp/assistant-automation-vault',
@@ -14208,7 +14216,9 @@ describe('assistant automation run loop', () => {
     expect(result.replyConsidered).toBe(1)
     expect(result.replied).toBe(1)
     expect(result.vault).toBe('/redacted/assistant-automation-vault')
+    expect(onEvent).toHaveBeenCalledWith(reconciliationEvent)
     expect(runLoopMocks.drainAssistantOutbox).toHaveBeenCalledWith({
+      dispatchHooks: { onEvent: expect.any(Function) },
       vault: '/tmp/assistant-automation-vault',
       limit: undefined,
       signal: expect.any(AbortSignal),
