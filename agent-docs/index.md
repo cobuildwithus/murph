@@ -1,5 +1,5 @@
 Terminal cron delivery observation is tracked in
-[the active plan](exec-plans/active/2026-10-24-cron-terminal-observation.md).
+[the active plan](exec-plans/completed/2026-10-24-cron-terminal-observation.md).
 
 Native container provider read diagnostics are owned by
 [`Cloudflare deployment`](../apps/cloudflare/DEPLOY.md); implementation and
