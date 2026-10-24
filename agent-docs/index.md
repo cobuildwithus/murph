@@ -1517,3 +1517,5 @@ same-sweep duplicate suppression are owned by `references/hosted-temporal-orches
 is recorded in [aged mailbox recovery](exec-plans/completed/2026-10-23-sweeper-dup-signal.md).
 
 Settings authentication without paid access or consent re-grant, and actor-aware additive invite cancellation proof: [`game recovery`](exec-plans/active/2026-10-23-game-v1-settings-cancelled.md).
+
+Urgent Junction hints release pending routine batches through the immediate mailbox owner; proof is tracked in [urgent wearable handoff](exec-plans/active/2026-10-24-temporal-urgent-handoff.md).

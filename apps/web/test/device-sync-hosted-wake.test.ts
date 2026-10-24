@@ -68,7 +68,7 @@ const mocks = vi.hoisted(() => {
     syncDurableConnectionMetadata: vi.fn(),
     syncDurableConnectionState: vi.fn(),
     getDirtyConnection: vi.fn(),
-    advanceDeferredDirtyConnectionWakeTx: vi.fn(),
+    claimDeferredDirtyConnectionWakeTx: vi.fn(),
     clearDeferredDirtyConnectionWake: vi.fn(),
     deferDirtyConnectionWakeTx: vi.fn(),
     readDueDeferredDirtyConnectionWake: vi.fn(),
@@ -627,7 +627,7 @@ vi.mock("@/src/lib/device-sync/prisma-store", () => ({
     syncDurableConnectionState = mocks.syncDurableConnectionState;
     syncDurableConnectionMetadata = mocks.syncDurableConnectionMetadata;
     prepareDirtyConnectionUpsert = mocks.prepareDirtyConnectionUpsert;
-    advanceDeferredDirtyConnectionWakeTx = mocks.advanceDeferredDirtyConnectionWakeTx;
+    claimDeferredDirtyConnectionWakeTx = mocks.claimDeferredDirtyConnectionWakeTx;
     clearDeferredDirtyConnectionWake = mocks.clearDeferredDirtyConnectionWake;
     deferDirtyConnectionWakeTx = mocks.deferDirtyConnectionWakeTx;
     readDueDeferredDirtyConnectionWake = mocks.readDueDeferredDirtyConnectionWake;
@@ -2731,7 +2731,7 @@ describe("hosted device-sync wakes", () => {
       });
       expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
       expect(mocks.signalHostedDeviceSyncMailboxRuntime).not.toHaveBeenCalled();
-      expect(mocks.advanceDeferredDirtyConnectionWakeTx).not.toHaveBeenCalled();
+      expect(mocks.claimDeferredDirtyConnectionWakeTx).not.toHaveBeenCalled();
       expect(mocks.createSignal).toHaveBeenCalledWith(expect.objectContaining({
         eventType: "daily.data.steps.updated",
         kind: "webhook_hint",
@@ -2754,18 +2754,32 @@ describe("hosted device-sync wakes", () => {
       }));
     });
 
-    it("makes a pending routine batch due when an urgent hint arrives", async () => {
+    it("immediately wakes a pending routine batch when an urgent hint arrives", async () => {
       markConnectionAlreadyDirty();
+      // The first claim rolls back when mailbox crypto needs preparation.
+      mocks.claimDeferredDirtyConnectionWakeTx
+        .mockResolvedValueOnce(true)
+        .mockResolvedValueOnce(true);
       await admitJunctionDailyWebhook("daily.data.workouts.created");
 
-      expect(mocks.advanceDeferredDirtyConnectionWakeTx).toHaveBeenCalledWith({
+      expect(mocks.claimDeferredDirtyConnectionWakeTx).toHaveBeenCalledWith({
         connectionId: "dsc_123",
-        dueAt: new Date("2026-03-26T12:00:00.000Z"),
         tx: mocks.prismaTx,
         userId: "user-123",
       });
+      expect(mocks.claimDeferredDirtyConnectionWakeTx).toHaveBeenCalledTimes(2);
       expect(mocks.deferDirtyConnectionWakeTx).not.toHaveBeenCalled();
+      expect(mocks.appendHostedMailboxEnvelope).toHaveBeenCalledOnce();
+      expect(mocks.signalHostedDeviceSyncMailboxRuntime).toHaveBeenCalledOnce();
+    });
+
+    it("does not append another wake when an urgent hint finds no pending batch", async () => {
+      markConnectionAlreadyDirty();
+      mocks.claimDeferredDirtyConnectionWakeTx.mockResolvedValueOnce(false);
+      await admitJunctionDailyWebhook("daily.data.sleep.created");
+
       expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
+      expect(mocks.signalHostedDeviceSyncMailboxRuntime).not.toHaveBeenCalled();
     });
 
     it("leaves an already-dirty routine batch unchanged", async () => {
@@ -2773,7 +2787,7 @@ describe("hosted device-sync wakes", () => {
       await admitJunctionDailyWebhook("daily.data.heartrate.updated");
 
       expect(mocks.deferDirtyConnectionWakeTx).not.toHaveBeenCalled();
-      expect(mocks.advanceDeferredDirtyConnectionWakeTx).not.toHaveBeenCalled();
+      expect(mocks.claimDeferredDirtyConnectionWakeTx).not.toHaveBeenCalled();
       expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
     });
 

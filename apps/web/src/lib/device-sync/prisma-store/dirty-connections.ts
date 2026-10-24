@@ -813,19 +813,20 @@ export class PrismaHostedDirtyConnectionStore {
     `);
   }
 
-  async advanceDeferredDirtyConnectionWakeTx(input: {
+  /** Claim the pending batch in the same transaction that appends its wake. */
+  async claimDeferredDirtyConnectionWakeTx(input: {
     connectionId: string;
-    dueAt: Date;
     tx: HostedPrismaTransactionClient;
     userId: string;
-  }): Promise<void> {
-    await input.tx.$executeRaw(Prisma.sql`
+  }): Promise<boolean> {
+    const claimed = await input.tx.$executeRaw(Prisma.sql`
       UPDATE "device_sync_dirty_connection"
-      SET "wake_deferred_until" = ${input.dueAt}
+      SET "wake_deferred_until" = NULL
       WHERE "connection_id" = ${input.connectionId}
         AND "user_id" = ${input.userId}
-        AND "wake_deferred_until" > ${input.dueAt}
+        AND "wake_deferred_until" IS NOT NULL
     `);
+    return claimed > 0;
   }
 
   async listDueDeferredDirtyConnectionWakes(input: {

@@ -50,7 +50,7 @@ describe.skipIf(!runPostgresProof)(
 
     beforeAll(() => {
       restoreCrypto = configureLocalCryptoForTest();
-      prisma = createPrismaClient({ databaseUrl, poolMax: 1 });
+      prisma = createPrismaClient({ databaseUrl, poolMax: 2 });
     });
 
     afterEach(async () => {
@@ -355,13 +355,26 @@ describe.skipIf(!runPostgresProof)(
         dueAt: new Date("2026-09-04T12:14:59.000Z"), limit: 10,
       })).not.toContainEqual({ connectionId, userId: memberId });
 
-      // An urgent hint only ever moves a pending deadline earlier.
-      for (const dueAt of ["2026-09-04T12:05:00.000Z", "2026-09-04T12:10:00.000Z"]) {
-        await client.$transaction((tx) => store.advanceDeferredDirtyConnectionWakeTx({
-          connectionId, dueAt: new Date(dueAt), tx, userId: memberId,
-        }));
-      }
-      expect((await readDirty()).wakeDeferredUntil).toEqual(new Date("2026-09-04T12:05:00.000Z"));
+      // Claim rollback preserves recovery, and the wrong member cannot claim it.
+      await expect(client.$transaction(async (tx) => {
+        expect(await store.claimDeferredDirtyConnectionWakeTx({ connectionId, tx, userId: memberId })).toBe(true);
+        throw new Error("synthetic mailbox append failure");
+      })).rejects.toThrow("synthetic mailbox append failure");
+      expect((await readDirty()).wakeDeferredUntil).toEqual(deferred.wakeDeferredUntil);
+      expect(await client.$transaction((tx) => store.claimDeferredDirtyConnectionWakeTx({
+        connectionId, tx, userId: `${memberId}-other`,
+      }))).toBe(false);
+      const claims = await Promise.all([0, 1].map(() => client.$transaction((tx) =>
+        store.claimDeferredDirtyConnectionWakeTx({ connectionId, tx, userId: memberId }),
+      )));
+      expect(claims.sort()).toEqual([false, true]);
+      expect((await readDirty()).wakeDeferredUntil).toBeNull();
+      expect((await readDirty()).updatedAt).toEqual(before.updatedAt);
+
+      // A later routine batch still uses the ordinary sweep release owner.
+      await client.$transaction((tx) => store.deferDirtyConnectionWakeTx({
+        connectionId, deferredUntil: new Date("2026-09-04T12:05:00.000Z"), tx, userId: memberId,
+      }));
 
       vi.spyOn(prismaModule, "getPrisma").mockReturnValue(client);
       const signal = vi.spyOn(runtimeSignal, "signalHostedDeviceSyncMailboxRuntime")
