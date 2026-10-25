@@ -114,6 +114,10 @@ function mapHostedOnboardingError(error: unknown) {
   }
 
   const mapping = mapDomainJsonError(error);
+  // Result-size attribution is log-only; preserve the existing response body.
+  if (error.code === "CONNECTED_APPS_RESULT_TOO_LARGE") {
+    delete mapping.error.details;
+  }
   const logDetails = describeHostedOnboardingDomainErrorDetailsForLog(error.details);
   const reconciliationReason = getHostedAuthIdentityConflictReasonForLog(error);
   const linqRouteAuthorityMismatchReason = getHostedLinqRouteAuthorityMismatchReasonForLog(error);

@@ -1145,54 +1145,314 @@ describe("connected-app service", () => {
     expect(result.messages[0]!.messageText).not.toMatch(/<\/?(html|body|table|style|p|a)\b/iu);
   });
 
-  it("asks for a narrower request when a result stays oversized after compaction", async () => {
-    installPrismaHarness();
-    const fetchImpl = vi.fn(async (url: string | URL | Request): Promise<Response> => {
-      const parsed = new URL(String(url));
-      if (parsed.pathname === "/api/v3.1/tool_router/session") {
-        return jsonResponse({ session_id: "trs_member" });
-      }
-      if (parsed.pathname === "/api/v3.1/tool_router/session/trs_member/search") {
-        return jsonResponse({ note: "x".repeat(200_000) });
-      }
-      throw new Error(`Unexpected Composio request ${String(url)}`);
-    });
-
-    await expect(executeHostedConnectedAppsRequest({
-      fetchImpl,
-      memberId: "hbm_member",
-      request: { input: { query: "everything" }, operation: "search" },
-    })).rejects.toMatchObject({
+  describe("oversized connected-app result telemetry", () => {
+    const publicError = {
       code: "CONNECTED_APPS_RESULT_TOO_LARGE",
-      httpStatus: 413,
-    });
-  });
+      message: "That request returned more than Murph can read at once. Ask for fewer results, a narrower time range, or one item at a time.",
+      retryable: false,
+    };
+    const writes = [
+      {
+        argumentsValue: {
+          event_duration_hour: 0,
+          event_duration_minutes: 30,
+          start_datetime: "2026-11-01T10:00:00-05:00",
+          summary: "private-synthetic-summary",
+          timezone: "America/New_York",
+        },
+        operationName: "calendar_write_attempt",
+        toolkit: "googlecalendar",
+        toolSlug: "GOOGLECALENDAR_CREATE_EVENT",
+      },
+      {
+        argumentsValue: {
+          end_datetime: "2026-11-01T10:30:00-05:00",
+          start_datetime: "2026-11-01T10:00:00-05:00",
+          subject: "private-synthetic-subject",
+          time_zone: "Eastern Standard Time",
+        },
+        operationName: "calendar_write_attempt",
+        toolkit: "outlook",
+        toolSlug: "OUTLOOK_CALENDAR_CREATE_EVENT",
+      },
+      {
+        argumentsValue: {
+          body: "private-synthetic-body",
+          recipient_email: "private-recipient@example.test",
+          subject: "private-synthetic-subject",
+        },
+        operationName: "email_write_attempt",
+        toolkit: "gmail",
+        toolSlug: "GMAIL_SEND_EMAIL",
+      },
+      {
+        argumentsValue: {
+          body: "private-synthetic-body",
+          subject: "private-synthetic-subject",
+          to_email: "private-recipient@example.test",
+        },
+        operationName: "email_write_attempt",
+        toolkit: "outlook",
+        toolSlug: "OUTLOOK_SEND_EMAIL",
+      },
+    ] as const;
+    const limits = ["provider-body", "compacted-result"] as const;
 
-  it("classifies a provider body too large to read as a narrowable request", async () => {
-    // The provider answers 200 and the body is simply beyond what the tier can
-    // buffer. Reporting that as an outage is what produced the false diagnosis.
-    installPrismaHarness();
-    const fetchImpl = vi.fn(async (url: string | URL | Request): Promise<Response> => {
-      const parsed = new URL(String(url));
-      if (parsed.pathname === "/api/v3.1/tool_router/session") {
-        return jsonResponse({ session_id: "trs_member" });
-      }
-      if (parsed.pathname === "/api/v3.1/tool_router/session/trs_member/search") {
-        return new Response(`{"data":"${"x".repeat(5 * 1024 * 1024)}"}`, {
-          headers: { "content-type": "application/json" },
-          status: 200,
+    beforeEach(() => {
+      vi.stubEnv("NODE_ENV", "production");
+      vi.stubEnv("COMPOSIO_CONNECTED_APP_TOOLKITS", "gmail,googlecalendar,outlook");
+      installPrismaHarness();
+      vi.spyOn(console, "warn").mockImplementation(() => undefined);
+      vi.spyOn(console, "error").mockImplementation(() => undefined);
+    });
+
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    it.each(writes.flatMap((write) => limits.map((limit) => ({ ...write, limit }))))(
+      "attributes $toolSlug after the $limit is oversized without changing its error contract",
+      async ({ argumentsValue, limit, operationName, toolkit, toolSlug }) => {
+        const fetchImpl = vi.fn(async (url: string | URL | Request): Promise<Response> => {
+          const pathname = new URL(String(url)).pathname;
+          if (pathname === "/api/v3.1/connected_accounts") {
+            return jsonResponse({ items: [{
+              alias: "private-synthetic-account", id: "ca_private_synthetic", is_disabled: false,
+              status: "ACTIVE", toolkit: { slug: toolkit },
+            }] });
+          }
+          expect(pathname).toBe(`/api/v3.1/tools/execute/${toolSlug}`);
+          return jsonResponse({
+            data: {
+              id: "private-synthetic-result",
+              note: "private-synthetic-provider-data".repeat(limit === "provider-body" ? 200_000 : 10_000),
+            },
+            successful: true,
+          });
         });
-      }
-      throw new Error(`Unexpected Composio request ${String(url)}`);
-    });
+        const error: unknown = await executeHostedConnectedAppsRequest({
+          fetchImpl, memberId: "hbm_member",
+          request: { operation: "execute", input: {
+            account: "private-synthetic-account", agentApproved: true,
+            arguments: argumentsValue,
+            toolSlug,
+          } },
+        }).catch((value: unknown) => value);
+        // The first call verifies account ownership; the sole remaining call
+        // is the authorized write, even though its provider response was 200.
+        expect(fetchImpl.mock.calls.map(([url]) => new URL(String(url)).pathname)).toEqual([
+          "/api/v3.1/connected_accounts",
+          `/api/v3.1/tools/execute/${toolSlug}`,
+        ]);
+        if (!isHostedOnboardingError(error)) throw new Error("Expected bounded result failure.");
+        const details = {
+          operationName,
+          type: limit === "provider-body"
+            ? "composio_response_too_large"
+            : "connected_apps_compacted_result_too_large",
+        };
+        expect(error).toMatchObject({ ...publicError, httpStatus: 413 });
+        expect(error.details).toEqual(details);
+        const cause = error.cause;
+        if (limit === "provider-body") {
+          if (!(cause instanceof ComposioConnectedAppsRequestError)
+            || !(cause.cause instanceof ComposioConnectedAppsRequestError)) {
+            throw new Error("Expected the original direct-write wrapper and provider failure.");
+          }
+          expect(cause).toMatchObject({
+            message: `${operationName === "email_write_attempt"
+              ? "Composio email sending returned an ambiguous result."
+              : "Composio calendar event creation returned an ambiguous result."} Composio response was too large.`,
+            operationName: toolSlug, retryable: false, status: 200, type: "composio_response_too_large",
+          });
+          expect(cause.cause).toMatchObject({
+            message: "Composio response was too large.", operationName: null,
+            retryable: null, status: 200, type: "composio_response_too_large",
+          });
+          expect(cause.cause.cause).toBeUndefined();
+        } else {
+          expect(cause).toBeUndefined();
+        }
+        const response = jsonError(error);
+        expect(response.status).toBe(413);
+        const payload = await response.text();
+        expect(payload).toBe(JSON.stringify({ error: publicError }));
+        expect(error.cause).toBe(cause);
+        expect(console.warn).toHaveBeenCalledTimes(1);
+        expect(console.error).not.toHaveBeenCalled();
+        expect(console.warn).toHaveBeenCalledWith("Hosted onboarding route failed.", expect.objectContaining({
+          errorDetails: details, errorResponseRetryable: false, errorResponseStatus: 413,
+        }));
+        const serialized = JSON.stringify([payload, vi.mocked(console.warn).mock.calls]);
+        expect(serialized).not.toContain(toolSlug);
+        expect(serialized).not.toMatch(/private-|ca_private|secret-test-key|hbm_member|toolSlug|arguments|successful/iu);
+      },
+    );
 
-    await expect(executeHostedConnectedAppsRequest({
-      fetchImpl,
-      memberId: "hbm_member",
-      request: { input: { query: "everything" }, operation: "search" },
-    })).rejects.toMatchObject({
-      code: "CONNECTED_APPS_RESULT_TOO_LARGE",
-      httpStatus: 413,
+    it.each(limits.flatMap((limit) => ["search", "execute"].map((operation) => ({ limit, operation }))))(
+      "keeps $operation recovery narrowable when the $limit is oversized",
+      async ({ limit, operation }) => {
+        const fetchImpl = vi.fn(async (url: string | URL | Request): Promise<Response> => {
+          const pathname = new URL(String(url)).pathname;
+          if (pathname === "/api/v3.1/connected_accounts") {
+            return jsonResponse({ items: [{
+              id: "ca_private_synthetic", is_disabled: false, status: "ACTIVE", toolkit: { slug: "gmail" },
+            }] });
+          }
+          if (pathname === "/api/v3.1/tool_router/session") return jsonResponse({ session_id: "trs_member" });
+          expect(pathname).toBe(`/api/v3.1/tool_router/session/trs_member/${operation}`);
+          return jsonResponse({ data: {
+            note: "private-synthetic-provider-data".repeat(limit === "provider-body" ? 200_000 : 10_000),
+          }, successful: true });
+        });
+        const error: unknown = await executeHostedConnectedAppsRequest({
+          fetchImpl, memberId: "hbm_member",
+          request: operation === "search"
+            ? { operation, input: { query: "private-synthetic-query" } }
+            : { operation: "execute", input: {
+                account: "ca_private_synthetic", arguments: { q: "private-synthetic-query" },
+                toolSlug: "GMAIL_PRIVATE_SYNTHETIC_READ",
+              } },
+        }).catch((value: unknown) => value);
+        expect(fetchImpl.mock.calls.map(([url]) => new URL(String(url)).pathname)).toEqual([
+          ...(operation === "execute" ? ["/api/v3.1/connected_accounts"] : []),
+          "/api/v3.1/tool_router/session",
+          `/api/v3.1/tool_router/session/trs_member/${operation}`,
+        ]);
+        if (!isHostedOnboardingError(error)) throw new Error("Expected bounded result failure.");
+        const details = {
+          operationName: "non_write",
+          type: limit === "provider-body"
+            ? "composio_response_too_large"
+            : "connected_apps_compacted_result_too_large",
+        };
+        expect(error).toMatchObject({ ...publicError, httpStatus: 413 });
+        expect(error.details).toEqual(details);
+        const cause = error.cause;
+        if (limit === "provider-body") {
+          expect(cause).toBeInstanceOf(ComposioConnectedAppsRequestError);
+          expect(cause).toMatchObject({
+            message: "Composio response was too large.", operationName: null,
+            retryable: null, status: 200, type: "composio_response_too_large",
+          });
+        } else {
+          expect(cause).toBeUndefined();
+        }
+        const response = jsonError(error);
+        expect(response.status).toBe(413);
+        const payload = await response.text();
+        expect(payload).toBe(JSON.stringify({ error: publicError }));
+        expect(error.cause).toBe(cause);
+        expect(console.warn).toHaveBeenCalledTimes(1);
+        expect(console.error).not.toHaveBeenCalled();
+        expect(console.warn).toHaveBeenCalledWith("Hosted onboarding route failed.", expect.objectContaining({
+          errorDetails: details, errorResponseRetryable: false, errorResponseStatus: 413,
+        }));
+        expect(JSON.stringify([payload, vi.mocked(console.warn).mock.calls]))
+          .not.toMatch(/private-|ca_private|secret-test-key|hbm_member|GMAIL_PRIVATE|toolSlug|arguments|successful/iu);
+      },
+    );
+
+    it.each(["account rename", "read account verification"] as const)(
+      "attributes oversized %s as non-write without implying a read attempt",
+      async (operation) => {
+        const rename = operation === "account rename";
+        const fetchImpl = vi.fn(async (url: string | URL | Request): Promise<Response> => {
+          const pathname = new URL(String(url)).pathname;
+          if (rename && pathname === "/api/v3.1/connected_accounts") {
+            return jsonResponse({ items: [{
+              id: "ca_private_synthetic", is_disabled: false, status: "ACTIVE", toolkit: { slug: "gmail" },
+            }] });
+          }
+          expect(pathname).toBe(rename
+            ? "/api/v3.1/connected_accounts/ca_private_synthetic"
+            : "/api/v3.1/connected_accounts");
+          return jsonResponse({ note: "private-synthetic-account-data".repeat(200_000) });
+        });
+        const error: unknown = await executeHostedConnectedAppsRequest({
+          fetchImpl, memberId: "hbm_member",
+          request: rename
+            ? { operation: "manage", input: {
+                action: "rename", account: "ca_private_synthetic", alias: "private-synthetic-alias",
+              } }
+            : { operation: "execute", input: {
+                account: "ca_private_synthetic", arguments: { q: "private-synthetic-query" },
+                toolSlug: "GMAIL_PRIVATE_SYNTHETIC_READ",
+              } },
+        }).catch((value: unknown) => value);
+        expect(fetchImpl.mock.calls.map(([url]) => new URL(String(url)).pathname)).toEqual([
+          "/api/v3.1/connected_accounts",
+          ...(rename ? ["/api/v3.1/connected_accounts/ca_private_synthetic"] : []),
+        ]);
+        if (!isHostedOnboardingError(error)) throw new Error("Expected bounded result failure.");
+        const details = { operationName: "non_write", type: "composio_response_too_large" };
+        expect(error).toMatchObject({ ...publicError, httpStatus: 413 });
+        expect(error.details).toEqual(details);
+        const cause = error.cause;
+        expect(cause).toBeInstanceOf(ComposioConnectedAppsRequestError);
+        expect(cause).toMatchObject({
+          message: "Composio response was too large.", operationName: null,
+          retryable: null, status: 200, type: "composio_response_too_large",
+        });
+        const response = jsonError(error);
+        expect(response.status).toBe(413);
+        const payload = await response.text();
+        expect(payload).toBe(JSON.stringify({ error: publicError }));
+        expect(error.cause).toBe(cause);
+        expect(console.warn).toHaveBeenCalledTimes(1);
+        expect(console.error).not.toHaveBeenCalled();
+        expect(console.warn).toHaveBeenCalledWith("Hosted onboarding route failed.", expect.objectContaining({
+          errorDetails: details, errorResponseRetryable: false, errorResponseStatus: 413,
+        }));
+        expect(JSON.stringify([payload, vi.mocked(console.warn).mock.calls]))
+          .not.toMatch(/private-|ca_private|secret-test-key|hbm_member|GMAIL_PRIVATE|toolSlug|arguments/iu);
+      },
+    );
+
+    it.each(writes)("keeps an oversized account verification before $toolSlug dispatch", async ({
+      argumentsValue, toolSlug,
+    }) => {
+      const fetchImpl = vi.fn(async (url: string | URL | Request): Promise<Response> => {
+        expect(new URL(String(url)).pathname).toBe("/api/v3.1/connected_accounts");
+        return jsonResponse({ note: "private-synthetic-account-data".repeat(200_000) });
+      });
+      const error: unknown = await executeHostedConnectedAppsRequest({
+        fetchImpl, memberId: "hbm_member",
+        request: { operation: "execute", input: {
+          account: "ca_private_synthetic", agentApproved: true, arguments: argumentsValue, toolSlug,
+        } },
+      }).catch((value: unknown) => value);
+      expect(fetchImpl).toHaveBeenCalledTimes(1);
+      if (!isHostedOnboardingError(error)) throw new Error("Expected account verification failure.");
+      const expected = {
+        code: "CONNECTED_APPS_WRITE_PREFLIGHT_UNAVAILABLE",
+        details: { statusCode: 200, type: "composio_response_too_large" },
+        message: "The connected account could not be verified.",
+        retryable: false,
+      };
+      expect(error).toMatchObject({ ...expected, httpStatus: 400 });
+      expect(error.details).toEqual(expected.details);
+      expect(error.message).not.toMatch(/may (?:have|already)|unknown|could not confirm|repeat/iu);
+      const cause = error.cause;
+      expect(cause).toBeInstanceOf(ComposioConnectedAppsRequestError);
+      expect(cause).toMatchObject({
+        message: "Composio response was too large.", operationName: null,
+        retryable: null, status: 200, type: "composio_response_too_large",
+      });
+      const response = jsonError(error);
+      expect(response.status).toBe(400);
+      const payload = await response.text();
+      expect(payload).toBe(JSON.stringify({ error: {
+        code: expected.code, message: expected.message, retryable: expected.retryable, details: expected.details,
+      } }));
+      expect(error.cause).toBe(cause);
+      expect(console.warn).toHaveBeenCalledTimes(1);
+      expect(console.error).not.toHaveBeenCalled();
+      expect(console.warn).toHaveBeenCalledWith("Hosted onboarding route failed.", expect.objectContaining({
+        errorDetails: expected.details, errorResponseRetryable: false, errorResponseStatus: 400,
+      }));
+      expect(JSON.stringify([payload, vi.mocked(console.warn).mock.calls]))
+        .not.toMatch(/private-|ca_private|secret-test-key|hbm_member|operationName|toolSlug|arguments/iu);
     });
   });
 
