@@ -50,6 +50,30 @@ describe("hosted operational alert email config", () => {
     });
   });
 
+  it("removes a shared recipient without changing the transport or feature-specific list", () => {
+    const before = {
+      ...alertEmailEnv,
+      HOSTED_PRODUCT_FEEDBACK_DIGEST_EMAILS: "product@example.test",
+    };
+    const after = { ...before, HOSTED_LINQ_ALERT_EMAILS: "first@example.test" };
+
+    expect(readHostedOperationalAlertEmailConfig(before)?.recipients).toEqual([
+      "first@example.test",
+      "second@example.test",
+    ]);
+    expect(readHostedOperationalAlertEmailConfig(after)).toEqual({
+      ...readHostedOperationalAlertEmailConfig(before),
+      recipients: ["first@example.test"],
+    });
+    expect(readHostedOperationalAlertEmailConfig(
+      after,
+      "HOSTED_PRODUCT_FEEDBACK_DIGEST_EMAILS",
+    )).toEqual(readHostedOperationalAlertEmailConfig(
+      before,
+      "HOSTED_PRODUCT_FEEDBACK_DIGEST_EMAILS",
+    ));
+  });
+
   it.each([
     ["API key", { ...alertEmailEnv, RESEND_API_KEY: "" }],
     ["sender", { ...alertEmailEnv, HOSTED_LINQ_ALERT_EMAIL_FROM: "" }],

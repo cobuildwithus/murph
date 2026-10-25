@@ -1076,7 +1076,24 @@ describe("hosted runtime latency alert monitor", () => {
     expect(fixture.readState()?.status).toBe("latency_alerting");
   });
 
-  it("keeps one incident identity when email configuration changes before retry", async () => {
+  it.each([
+    {
+      change: "sender and recipient replacement",
+      initialRecipients: "operator@example.test",
+      retryRecipients: "replacement-operator@example.test",
+      retryFrom: "Replacement Alerts <replacement-alerts@example.test>",
+    },
+    {
+      change: "one recipient removal",
+      initialRecipients: "operator@example.test,removed-operator@example.test",
+      retryRecipients: "operator@example.test",
+      retryFrom: alertEnv.HOSTED_LINQ_ALERT_EMAIL_FROM,
+    },
+  ])("keeps one incident identity after $change before retry", async ({
+    initialRecipients,
+    retryRecipients,
+    retryFrom,
+  }) => {
     const fixture = createMonitorPrismaFixture([
       latencyRow({
         acceptedAt: "2026-07-26T15:58:00.000Z",
@@ -1104,7 +1121,7 @@ describe("hosted runtime latency alert monitor", () => {
       ));
 
     await expect(runHostedRuntimeLatencyAlertMonitor({
-      env: alertEnv,
+      env: { ...alertEnv, HOSTED_LINQ_ALERT_EMAILS: initialRecipients },
       now,
       prisma: fixture.prisma,
       sendAlert,
@@ -1116,9 +1133,8 @@ describe("hosted runtime latency alert monitor", () => {
     await expect(runHostedRuntimeLatencyAlertMonitor({
       env: {
         ...alertEnv,
-        HOSTED_LINQ_ALERT_EMAIL_FROM:
-          "Replacement Alerts <replacement-alerts@example.test>",
-        HOSTED_LINQ_ALERT_EMAILS: "replacement-operator@example.test",
+        HOSTED_LINQ_ALERT_EMAIL_FROM: retryFrom,
+        HOSTED_LINQ_ALERT_EMAILS: retryRecipients,
       },
       now: instant("2026-07-26T16:20:00.000Z"),
       prisma: fixture.prisma,
@@ -1132,13 +1148,9 @@ describe("hosted runtime latency alert monitor", () => {
     expect(firstAttempt?.config.from).toBe(
       "Murph Alerts <alerts@example.test>",
     );
-    expect(firstAttempt?.to).toEqual(["operator@example.test"]);
-    expect(retriedAttempt?.config.from).toBe(
-      "Replacement Alerts <replacement-alerts@example.test>",
-    );
-    expect(retriedAttempt?.to).toEqual([
-      "replacement-operator@example.test",
-    ]);
+    expect(firstAttempt?.to).toEqual(initialRecipients.split(","));
+    expect(retriedAttempt?.config.from).toBe(retryFrom);
+    expect(retriedAttempt?.to).toEqual([retryRecipients]);
     expect(retriedAttempt?.idempotencyKey).toBe(firstAttempt?.idempotencyKey);
     expect(retriedAttempt?.text).toBe(firstAttempt?.text);
     expect(fixture.readState()).toMatchObject({
