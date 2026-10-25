@@ -210,6 +210,7 @@ import {
 import {
   prepareAssistantCronNotificationInput,
 } from '../src/assistant/cron/output-history.ts'
+import { fingerprintAssistantCronDelivery } from '../src/assistant/cron/delivery-reconciliation.ts'
 import {
   readAssistantCronCanonicalRuntimeStore,
   writeAssistantCronCanonicalRuntimeStore,
@@ -274,6 +275,7 @@ import type { AssistantRunEvent } from '../src/assistant/automation/shared.ts'
 import { resolveAssistantStatePaths } from '../src/assistant/store/paths.ts'
 import {
   beginAssistantOutboxIntentMirrorPreparedDispatch,
+  createAssistantOutboxIntent,
   dispatchAssistantOutboxIntent,
   listAssistantOutboxIntents,
   markAssistantOutboxIntentMirrorTerminalById,
@@ -14441,10 +14443,15 @@ describe('assistant cron runtime orchestration', () => {
 })
 
 describe('cron delivery reconciliation telemetry', () => {
-  it('correlates queued completion with a persisted sent transition and one-shot archive', async () => {
+  beforeEach(() => {
+    // Platform fingerprint keys are intentionally absent from hosted runners.
+    vi.stubEnv('HOSTED_LOG_FINGERPRINT_SECRET', undefined)
+    vi.stubEnv('HOSTED_AI_USAGE_REPORTING_SECRET', undefined)
+  })
+
+  it('correlates queued completion with sent reconciliation after module reload and one-shot archive', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-04-08T10:00:12.000Z'))
-    vi.stubEnv('HOSTED_LOG_FINGERPRINT_SECRET', 'synthetic-cron-observation-secret')
     const { vaultRoot } = await createRuntimeContext('cron-observation-sent-')
     const job = await addAssistantCronJob({
       channel: 'telegram', deliveryTarget: 'room-synthetic',
@@ -14453,11 +14460,13 @@ describe('cron delivery reconciliation telemetry', () => {
       schedule: { kind: 'at', at: '2026-04-08T10:00:00.000Z' },
       vault: vaultRoot,
     })
-    const intent = buildTestLinqOutboxIntent({
+    const intent = await createAssistantOutboxIntent({
+      actorId: 'member-synthetic', channel: 'linq',
       createdAt: '2026-04-08T10:00:12.000Z',
-      intentId: 'outbox_synthetic_observation_sent', message: 'Synthetic reminder content.',
+      message: 'Synthetic reminder content.', sessionId: 'session-synthetic',
+      threadId: 'thread-synthetic', threadIsDirect: true,
+      turnId: 'turn-synthetic', vault: vaultRoot,
     })
-    await saveAssistantOutboxIntent(vaultRoot, intent)
     cronMocks.sendAssistantMessageLocal.mockResolvedValueOnce({
       decision: { kind: 'send_message', privateSummary: 'Synthetic summary.', text: intent.message },
       deliveryOutcome: { kind: 'queued', error: null, intentId: intent.intentId, session: { sessionId: intent.sessionId } },
@@ -14468,17 +14477,29 @@ describe('cron delivery reconciliation telemetry', () => {
     await processDueAssistantCronJobsLocal({ deliveryDispatchMode: 'queue-only', onEvent, vault: vaultRoot })
     const fingerprint = events.find((event) => event.type === 'cron.job.completed')
       ?.failureContext?.deliveryFingerprint
-    expect(fingerprint).toMatch(/^h1_[a-f0-9]{24}$/u)
+    expect(fingerprint).toMatch(/^cd1_[a-f0-9]{24}$/u)
     expect(events.filter((event) => event.type === 'cron.delivery.reconciled')).toEqual([])
 
-    await expect(markAssistantOutboxIntentSentById({
-      intentId: intent.intentId, onEvent, vault: vaultRoot,
-      delivery: {
-        channel: 'linq', idempotencyKey: null, messageLength: intent.message.length,
-        providerMessageId: 'provider-synthetic', providerThreadId: 'thread-synthetic',
-        sentAt: '2026-04-08T10:00:20.000Z', target: 'thread-synthetic', targetKind: 'thread',
-      },
-    })).resolves.toMatchObject({ status: 'sent' })
+    const persisted = await readAssistantCronCanonicalRuntimeStore(resolveAssistantStatePaths(vaultRoot))
+    const pendingIntentId = persisted.jobs.find((record) => record.jobId === job.jobId)
+      ?.state.pendingDeliveryIntentId
+    expect(pendingIntentId).toBe(intent.intentId)
+    vi.resetModules()
+    try {
+      const restartedOutbox = await import('../src/assistant/outbox.ts')
+      const restored = await restartedOutbox.readAssistantOutboxIntent(vaultRoot, pendingIntentId!)
+      expect(restored?.intentId).toBe(intent.intentId)
+      await expect(restartedOutbox.markAssistantOutboxIntentSentById({
+        intentId: restored!.intentId, onEvent, vault: vaultRoot,
+        delivery: {
+          channel: 'linq', idempotencyKey: null, messageLength: restored!.message.length,
+          providerMessageId: 'provider-synthetic', providerThreadId: 'thread-synthetic',
+          sentAt: '2026-04-08T10:00:20.000Z', target: 'thread-synthetic', targetKind: 'thread',
+        },
+      })).resolves.toMatchObject({ status: 'sent' })
+    } finally {
+      vi.resetModules()
+    }
     const reconciled = events.filter((event) => event.type === 'cron.delivery.reconciled')
     expect(reconciled).toEqual([expect.objectContaining({
       type: 'cron.delivery.reconciled', safeDetails: 'cron_delivery_reconciled',
@@ -14488,8 +14509,8 @@ describe('cron delivery reconciliation telemetry', () => {
     expect(findCanonicalAutomation(vaultRoot, job.jobId)?.status).toBe('archived')
     expect((await listAssistantCronRuns({ job: job.jobId, vault: vaultRoot })).runs[0])
       .toMatchObject({ outcome: 'delivered', reason: 'delivery_sent' })
-    for (const privateValue of [job.jobId, job.name, job.prompt, intent.intentId, intent.sessionId, intent.turnId, intent.message, 'thread-synthetic', 'provider-synthetic']) {
-      expect(JSON.stringify(reconciled)).not.toContain(privateValue)
+    for (const privateValue of [job.jobId, job.name, job.prompt, intent.intentId, intent.sessionId, intent.turnId, intent.message, 'member-synthetic', 'thread-synthetic', 'provider-synthetic']) {
+      expect(JSON.stringify({ deliveryFingerprint: fingerprint, reconciled })).not.toContain(privateValue)
     }
     const terminal = await readAssistantOutboxIntent(vaultRoot, intent.intentId)
     expect(terminal).not.toBeNull()
@@ -14498,12 +14519,60 @@ describe('cron delivery reconciliation telemetry', () => {
     expect(events.filter((event) => event.type === 'cron.delivery.reconciled')).toHaveLength(1)
   })
 
+  it('keeps the versioned join stable and distinguishes jobs sharing an intent and fresh intents', async () => {
+    // This vector pins the scheme: incompatible hash changes need a new prefix.
+    expect(fingerprintAssistantCronDelivery('job-synthetic', 'outbox_00112233445546778899aabbccddeeff'))
+      .toBe('cd1_6c56e025316448f5ef3d21d2')
+    const { vaultRoot } = await createRuntimeContext('cron-observation-identity-')
+    const input = {
+      channel: 'linq', message: 'Synthetic private reminder.',
+      sessionId: 'session-synthetic', threadId: 'thread-synthetic', threadIsDirect: true,
+      turnId: 'turn-synthetic', vault: vaultRoot,
+    }
+    const intent = await createAssistantOutboxIntent(input)
+    const reused = await createAssistantOutboxIntent(input)
+    expect(reused.intentId).toBe(intent.intentId)
+    const fresh = await createAssistantOutboxIntent({ ...input, turnId: 'turn-fresh-synthetic' })
+    expect(fresh.intentId).not.toBe(intent.intentId)
+    const fingerprint = fingerprintAssistantCronDelivery('job-synthetic', intent.intentId)
+    expect(fingerprintAssistantCronDelivery('job-synthetic', reused.intentId)).toBe(fingerprint)
+    const fingerprints = [
+      fingerprint,
+      fingerprintAssistantCronDelivery('job-other-synthetic', intent.intentId),
+      fingerprintAssistantCronDelivery('job-synthetic', fresh.intentId),
+    ]
+    for (const value of fingerprints) expect(value).toMatch(/^cd1_[a-f0-9]{24}$/u)
+    expect(new Set(fingerprints).size).toBe(3)
+    for (const privateValue of ['job-synthetic', 'job-other-synthetic', intent.intentId, fresh.intentId, input.message, input.sessionId, input.threadId, input.turnId]) {
+      expect(JSON.stringify(fingerprints)).not.toContain(privateValue)
+    }
+  })
+
+  it.each([undefined, null, ''])('omits correlation for missing intent identity %s', (intentId) => {
+    expect(fingerprintAssistantCronDelivery('job-synthetic', intentId)).toBeNull()
+  })
+
+  it.each([
+    'outbox_legacy_1',
+    `outbox_${'a'.repeat(32)}`,
+    'outbox_00112233445516778899aabbccddeeff', // UUIDv1 is not random UUIDv4.
+    'outbox_00112233445556778899aabbccddeeff', // UUIDv5 may be deterministic.
+    'outbox_00112233445546770899aabbccddeeff', // Wrong UUID variant.
+    'outbox_00112233-4455-4677-8899-aabbccddeeff',
+    'outbox_00112233445546778899AABBCCDDEEFF',
+    'intent_00112233445546778899aabbccddeeff',
+    'outbox_00112233445546778899aabbccddeef',
+    'outbox_00112233445546778899aabbccddeeff0',
+  ])('omits correlation for accepted legacy identity %s', (intentId) => {
+    const legacy = buildTestLinqOutboxIntent({ createdAt: '2026-04-08T10:00:00.000Z', intentId })
+    expect(legacy.intentId).toBe(intentId)
+    expect(fingerprintAssistantCronDelivery('job-synthetic', legacy.intentId)).toBeNull()
+  })
+
   it.each([
     { owner: 'canonical' as const, status: 'failed' as const },
     { owner: 'local' as const, status: 'abandoned' as const },
   ])('observes $owner $status reconciliation without changing its journal meaning', async ({ owner, status }) => {
-    vi.stubEnv('HOSTED_LOG_FINGERPRINT_SECRET', '')
-    vi.stubEnv('HOSTED_AI_USAGE_REPORTING_SECRET', '')
     const { vaultRoot, job, intent } = await createPendingCronObservationFixture(owner)
     await saveAssistantOutboxIntent(vaultRoot, intent)
     const onEvent = vi.fn()

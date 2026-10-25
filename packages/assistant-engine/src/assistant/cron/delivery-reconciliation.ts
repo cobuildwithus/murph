@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { assistantFollowUpContextChangedCanRetry } from '../follow-ups.js'
 import { setScheduledLogStatus, upsertAutomation } from '@murphai/core'
 import {
@@ -40,10 +41,6 @@ import { recordAssistantDiagnosticEvent } from '../diagnostics.js'
 import { isRecognizedMurphOnboardingFollowupAutomation } from '../managed-automations.js'
 import { isCurrentMurphOnboardingFollowupAutomation } from '../onboarding-followup-automation.js'
 import type { AssistantRunEvent } from '../automation/shared.js'
-import {
-  fingerprintHostedAssistantContextValue,
-  resolveHostedAssistantContextFingerprintSecret,
-} from '../hosted-context-diagnostics.js'
 
 const ASSISTANT_CRON_MISSING_PENDING_DELIVERY_STALE_AFTER_MS = 24 * 60 * 60 * 1000
 
@@ -215,14 +212,15 @@ export function fingerprintAssistantCronDelivery(
   jobId: string,
   intentId: string | null | undefined,
 ): string | null {
-  const secret = resolveHostedAssistantContextFingerprintSecret()
-  return secret && intentId
-    ? fingerprintHostedAssistantContextValue(
-        secret,
-        'cron-delivery',
-        JSON.stringify([jobId, intentId]),
-      )
-    : null
+  // The outbox creator uses random UUIDv4 IDs; accepted legacy IDs can be
+  // predictable. Never hash a private job without the generated intent shape.
+  if (!intentId || !/^outbox_[0-9a-f]{12}4[0-9a-f]{3}[89ab][0-9a-f]{15}$/u.test(intentId)) {
+    return null
+  }
+  return `cd1_${createHash('sha256')
+    .update(JSON.stringify(['murph.cron-delivery.v1', jobId, intentId]), 'utf8')
+    .digest('hex')
+    .slice(0, 24)}`
 }
 
 function emitAssistantCronDeliveryReconciledEvents(input: {

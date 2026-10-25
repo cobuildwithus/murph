@@ -663,9 +663,9 @@ describe("runHostedAssistantAutomation", () => {
     ]));
   });
 
-  it("persists cron delivery reconciliations after the ordinary automation log cap", async () => {
+  it.each(["h1", "cd1"])("persists %s cron delivery reconciliations after the ordinary automation log cap", async (scheme) => {
     const statuses = ["sent", "failed", "abandoned", "missing"] as const;
-    const fingerprint = `h1_${"a".repeat(24)}`;
+    const fingerprint = `${scheme}_${"a".repeat(24)}`;
     mocks.runAssistantAutomationPass.mockImplementationOnce(async (input) => {
       for (let index = 0; index < 13; index += 1) {
         input.onEvent?.({ type: "cron.scan.job" });
