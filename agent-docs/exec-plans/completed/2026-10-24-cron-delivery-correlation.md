@@ -1,6 +1,6 @@
 # Restore hosted cron delivery correlation
 
-Status: active
+Status: completed
 Created: 2026-10-24
 Updated: 2026-10-24
 
@@ -20,5 +20,6 @@ Apply regression tests against unchanged source first. Cover valid hosted env, s
 - [x] Source contract and ownership inspected.
 - [x] ReviewGPT implementation and pre-change proof. Two composed tests fail on the unchanged helper; the corrected engine suites pass 322 tests and engine typecheck on Node 24.22.1. The helper validates the owner-generated UUIDv4 format and hashes the domain-separated pair; unsupported legacy identities stay null.
 - [x] Focused validation and parent candidate review: 322 engine and 158 hosted maintenance tests pass, along with both package typechecks, complexity, docs drift, gardening and whitespace checks on Node 24.22.1. Hosted projection proof covers both old h1 and new cd1 schemes. No source hotspot exceeds 20. Internal telemetry only, so no public changelog or real-Codex provider-input journey is applicable.
-- [ ] Final ReviewGPT and exact-head CI.
-- [ ] Merge, serving-release proof and observation disposition.
+- [x] Final ReviewGPT round 1 PASS at `6c82a1d756c5185f77ca829c836d4e399993ccfc`; Mountain submitted to `gpt-6-pro`, the waiter enforced at least 180 seconds, and exact response hash/turn checks pass. No findings. Parent final review accepts the narrow implementation and its focused proof.
+- Release follow-through remains with the production-sweep automation: final documentation closeout receives exact-head CI before merge, then canonical deployment and serving-release proof. Native same-chat scheduling is confirmed disabled, so the four-hour cadence is a reported capability blocker, not completed observation. No production outcome is claimed by this implementation record.
+Completed: 2026-10-24

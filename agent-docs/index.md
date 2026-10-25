@@ -1,4 +1,4 @@
-Hosted cron correlation under the restricted runner environment: [implementation plan](exec-plans/active/2026-10-24-cron-delivery-correlation.md). The durable format contract stays in `packages/assistant-engine/README.md`.
+Hosted cron correlation under the restricted runner environment: [implementation plan](exec-plans/completed/2026-10-24-cron-delivery-correlation.md). The durable format contract stays in `packages/assistant-engine/README.md`.
 
 Terminal cron delivery observation is tracked in
 [the active plan](exec-plans/completed/2026-10-24-cron-terminal-observation.md).
