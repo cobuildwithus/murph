@@ -64,13 +64,25 @@ does not change reasons, occurrence consumption, or eligibility for a fresh
 intent under the existing retry policy.
 
 Pending completion and reconciliation share a fingerprint of the job/intent
-pair, using the existing keyed `h1_` helper with the `cron-delivery` domain.
-Join within the same hosted subject on this fingerprint. It identifies an
-occurrence's delivery attempt; a fresh intent for the same occurrence has a new
-fingerprint. No job, intent, route, title, instruction, response, or provider
-error text is added to these fields. An unavailable existing fingerprint secret
-produces `null`, and secret rotation breaks joins across that rotation; neither
-case falls back to raw identifiers.
+pair: `cd1_` plus the first 24 hex characters of SHA-256 over the UTF-8 JSON
+array `["murph.cron-delivery.v1", jobId, intentId]`. Only the current outbox
+creator's `outbox_` plus lowercase, hyphenless UUIDv4 format is eligible.
+`createAssistantOutboxIntent` generates that identity with `randomUUID()`;
+dedupe and persistence retain it, as does the cron pending reference used by
+later repair, even if the outbox record has disappeared. Job IDs can be
+predictable, so they are never hashed without an eligible intent. The general
+opaque-ID schema is not an entropy guarantee: missing or other legacy intent
+shapes produce `null` without changing their delivery handling. Format cannot
+prove randomness for a hand-authored UUIDv4-shaped value; privacy relies on
+owner-generated random intent IDs that have not been independently disclosed.
+
+Join within the same hosted subject on this fingerprint. The same pair remains
+stable across restart; different jobs sharing an intent and fresh intents for
+the same occurrence have different fingerprints. This bounded correlation is
+not an authentication proof. No job, intent, member, route, title, instruction,
+response, or provider error text is added to these fields. Neither excluded
+platform fingerprint secret is needed or forwarded. Non-cron context
+fingerprints retain their existing keyed behavior.
 
 Outbox dispatch hooks and direct terminal/preparation APIs forward the optional
 observer. Hosted maintenance and delivery callbacks reuse
@@ -85,10 +97,15 @@ records use the existing bounded best-effort log transport and may be lost.
 The engine and hosted observer ship together in the runner bundle. Existing
 Web/Worker runtime-log readers already accept these additive scalar details
 under the unchanged event code; no schema migration or coordinated state
-cutover is needed. Older producers/callers omit the observation, and an older
-hosted maintenance projection ignores the new event type. Rollback preserves
-durable behavior but removes this evidence. Historical pending rows cannot be
-reclassified from absence of a reconciliation: older code, missing correlation,
+cutover is needed. Older producers/callers may omit the observation or emit
+`null` (the normal hosted environment) or the incompatible keyed `h1_` scheme;
+an older hosted maintenance projection ignores the new event type. `cd1_`
+values join only to the same scheme, so a pending event from an older runner
+can remain unmatched after reconciliation by a corrected runner. Historical
+nulls and `h1_` values cannot be converted or backfilled by this correction.
+Rollback preserves durable behavior but loses the new correlation. Historical
+pending rows cannot be reclassified from absence of a reconciliation: older code,
+missing correlation,
 log loss, and retention can all leave the terminal outcome unknown. This is
 prospective best-effort evidence, with no historical backfill or new alert.
 
