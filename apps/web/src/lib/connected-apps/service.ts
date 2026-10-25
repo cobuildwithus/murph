@@ -28,6 +28,7 @@ import {
   isHostedConnectedAppsServiceTool,
   readHostedConnectedAppsConfig,
   readHostedOpenWeatherApiKey,
+  type HostedConnectedAppsWriteKind,
 } from "./config";
 import {
   executeOpenWeatherNationalAlerts,
@@ -68,24 +69,47 @@ export async function executeHostedConnectedAppsRequest(input: {
 }): Promise<unknown> {
   return boundHostedConnectedAppsResult(
     await runHostedConnectedAppsRequest(input),
+    input.request,
   );
 }
 
 // Provider output reaches the assistant verbatim, so markup is stripped here
 // rather than at the runtime edge: the budget that matters is the serialized
 // size the model reads, not the wire size the provider sent.
-function boundHostedConnectedAppsResult(result: unknown): unknown {
+function boundHostedConnectedAppsResult(
+  result: unknown,
+  request: HostedConnectedAppsRequest,
+): unknown {
   const compacted = compactHostedConnectedAppsResult(result);
   if (serializeHostedConnectedAppsResult(compacted) === null) {
-    throw connectedAppsResultTooLargeError();
+    // A returned result means any allowed write has already reached execution.
+    const writePolicy = request.operation === "execute"
+      ? getHostedConnectedAppsWritePolicy(request.input.toolSlug)
+      : null;
+    throw connectedAppsResultTooLargeError({
+      type: "connected_apps_compacted_result_too_large",
+      writeKind: writePolicy?.kind,
+    });
   }
   return compacted;
 }
 
-function connectedAppsResultTooLargeError(cause?: unknown) {
+function connectedAppsResultTooLargeError(input: {
+  cause?: unknown;
+  type: "composio_response_too_large" | "connected_apps_compacted_result_too_large";
+  writeKind?: HostedConnectedAppsWriteKind;
+}) {
   return hostedOnboardingError({
-    ...(cause === undefined ? {} : { cause }),
+    ...(input.cause === undefined ? {} : { cause: input.cause }),
     code: "CONNECTED_APPS_RESULT_TOO_LARGE",
+    details: {
+      operationName: input.writeKind === "email"
+        ? "email_write_attempt"
+        : input.writeKind === "calendar-event"
+          ? "calendar_write_attempt"
+          : "non_write",
+      type: input.type,
+    },
     httpStatus: 413,
     message: CONNECTED_APPS_RESULT_TOO_LARGE_MESSAGE,
   });
@@ -914,11 +938,14 @@ function mapConnectedAppsError(error: unknown): unknown {
   if (!(error instanceof ComposioConnectedAppsRequestError)) {
     return error;
   }
-  // A provider body too large to read is a narrowable request, not an outage.
-  // Reporting it as one is what left the assistant offering a retry that could
-  // only fail again.
+  // Only the direct-write catch attaches a fixed write operation after egress;
+  // account-verification failures retain their separate preflight error above.
   if (error.type === "composio_response_too_large") {
-    return connectedAppsResultTooLargeError(error);
+    return connectedAppsResultTooLargeError({
+      cause: error,
+      type: error.type,
+      writeKind: getHostedConnectedAppsWritePolicy(error.operationName ?? "")?.kind,
+    });
   }
   const retryable = error.retryable ?? isRetryableComposioFailure(error);
   return hostedOnboardingError({

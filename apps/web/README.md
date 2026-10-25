@@ -141,6 +141,21 @@ is `composio_transport_error`, grouping only the fixed category from
 missing evidence. No new event is emitted on success, and historical causes
 cannot be reconstructed from this observation.
 
+Connected-app result-size failures add bounded attribution to existing route
+failure logs only. `errorDetails.operationName` is `calendar_write_attempt`,
+`email_write_attempt`, or `non_write`; the last label covers all other paths,
+including account management and failures before execution, not just reads.
+`errorDetails.type` is `composio_response_too_large` for the provider wire limit
+or `connected_apps_compacted_result_too_large` for the compacted result limit.
+Wire-limit write attribution requires the existing fixed-write execution error
+wrapper; compacted-result attribution classifies a fixed write only after the
+service returns. Fixed-write account-verification failures retain their separate
+preflight error and details. Size attribution is omitted from response JSON;
+error code, message, status, retryability, cause, success outputs, byte limits,
+and compaction are unchanged. These labels do not prove completion or identify
+historical writes. No arbitrary tool slugs, arguments, provider payloads, or
+identities are retained in these fields.
+
 ## Reconciliation-facts failure observability
 
 The success record's diagnostic `status` is `blocked` when access is blocked,
