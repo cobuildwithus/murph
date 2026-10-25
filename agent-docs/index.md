@@ -1,4 +1,4 @@
-Connected-app response-limit attribution is tracked in [the diagnostic plan](exec-plans/active/2026-10-25-connected-result-outcomes.md). The durable telemetry contract stays in `apps/web/README.md`.
+Connected-app response-limit attribution is tracked in [the diagnostic plan](exec-plans/completed/2026-10-25-connected-result-outcomes.md). The durable telemetry contract stays in `apps/web/README.md`.
 
 Hosted cron correlation under the restricted runner environment: [implementation plan](exec-plans/completed/2026-10-24-cron-delivery-correlation.md). The durable format contract stays in `packages/assistant-engine/README.md`.
 
