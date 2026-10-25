@@ -50,27 +50,31 @@ describe("hosted operational alert email config", () => {
     });
   });
 
-  it("removes a shared recipient without changing the transport or feature-specific list", () => {
+  it.each([
+    ["HOSTED_LINQ_ALERT_EMAILS", "HOSTED_PRODUCT_FEEDBACK_DIGEST_EMAILS"],
+    ["HOSTED_PRODUCT_FEEDBACK_DIGEST_EMAILS", "HOSTED_LINQ_ALERT_EMAILS"],
+  ] as const)("removes a recipient from %s without changing the transport or other list", (key, otherKey) => {
     const before = {
       ...alertEmailEnv,
-      HOSTED_PRODUCT_FEEDBACK_DIGEST_EMAILS: "product@example.test",
+      [key]: "first@example.test, second@example.test",
+      [otherKey]: "other-operator@example.test",
     };
-    const after = { ...before, HOSTED_LINQ_ALERT_EMAILS: "first@example.test" };
+    const after = { ...before, [key]: "first@example.test" };
 
-    expect(readHostedOperationalAlertEmailConfig(before)?.recipients).toEqual([
+    expect(readHostedOperationalAlertEmailConfig(before, key)?.recipients).toEqual([
       "first@example.test",
       "second@example.test",
     ]);
-    expect(readHostedOperationalAlertEmailConfig(after)).toEqual({
-      ...readHostedOperationalAlertEmailConfig(before),
+    expect(readHostedOperationalAlertEmailConfig(after, key)).toEqual({
+      ...readHostedOperationalAlertEmailConfig(before, key),
       recipients: ["first@example.test"],
     });
     expect(readHostedOperationalAlertEmailConfig(
       after,
-      "HOSTED_PRODUCT_FEEDBACK_DIGEST_EMAILS",
+      otherKey,
     )).toEqual(readHostedOperationalAlertEmailConfig(
       before,
-      "HOSTED_PRODUCT_FEEDBACK_DIGEST_EMAILS",
+      otherKey,
     ));
   });
 
