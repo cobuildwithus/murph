@@ -51,6 +51,34 @@ describe("hosted operational alert email config", () => {
   });
 
   it.each([
+    ["HOSTED_LINQ_ALERT_EMAILS", "HOSTED_PRODUCT_FEEDBACK_DIGEST_EMAILS"],
+    ["HOSTED_PRODUCT_FEEDBACK_DIGEST_EMAILS", "HOSTED_LINQ_ALERT_EMAILS"],
+  ] as const)("removes a recipient from %s without changing the transport or other list", (key, otherKey) => {
+    const before = {
+      ...alertEmailEnv,
+      [key]: "first@example.test, second@example.test",
+      [otherKey]: "other-operator@example.test",
+    };
+    const after = { ...before, [key]: "first@example.test" };
+
+    expect(readHostedOperationalAlertEmailConfig(before, key)?.recipients).toEqual([
+      "first@example.test",
+      "second@example.test",
+    ]);
+    expect(readHostedOperationalAlertEmailConfig(after, key)).toEqual({
+      ...readHostedOperationalAlertEmailConfig(before, key),
+      recipients: ["first@example.test"],
+    });
+    expect(readHostedOperationalAlertEmailConfig(
+      after,
+      otherKey,
+    )).toEqual(readHostedOperationalAlertEmailConfig(
+      before,
+      otherKey,
+    ));
+  });
+
+  it.each([
     ["API key", { ...alertEmailEnv, RESEND_API_KEY: "" }],
     ["sender", { ...alertEmailEnv, HOSTED_LINQ_ALERT_EMAIL_FROM: "" }],
     ["recipient", { ...alertEmailEnv, HOSTED_LINQ_ALERT_EMAILS: "" }],
