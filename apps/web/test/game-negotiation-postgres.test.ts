@@ -132,7 +132,7 @@ describe.skipIf(!enabled)("game negotiation persistence", () => {
     const view = (await readGame(gameId,a))!;
     expect(view).toMatchObject({status:"live",pendingChange:null,terms:{n:2,tasks:command.change.kind === "edit" ? command.change.tasks : [],stakes:[{kind:"prize",item:"Choose the film"}]}});
     const players = await getPrisma().gamePlayer.findMany({where:{gameId}});
-    expect(players.map((player) => player.dayOne?.toISOString().slice(0,10))).toEqual([1,2].map(() => acceptanceStartDate(later,"America/New_York")));
+    expect(players.map((player) => player.dayOne?.toISOString().slice(0,10))).toEqual([1,2].map(() => firstScheduledDate(acceptanceStartDate(later,"America/New_York"), {days:[0,4]})));
     expect(await getPrisma().gameEvent.count({where:{gameId,type:"started"}})).toBe(1);
     expect(await getPrisma().hostedLinqDelivery.count({ where: { source: "game_lifecycle", sourceRef: gameId, template: "game_started" } })).toBe(1);
     expect(await getPrisma().gameEvent.count({where:{gameId,type:"change_applied"}})).toBe(1);
