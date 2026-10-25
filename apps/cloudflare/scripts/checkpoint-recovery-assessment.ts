@@ -11,7 +11,7 @@ import {
   fetchHostedWorkerRuntimeRootByRootKeyId, type HostedWorkerCryptoEnv,
 } from "../src/hosted-crypto/runtime-crypto-context.ts";
 import {
-  authenticateUnindexedArtifact, openRecoveryAssessmentRequest, recoveryPublicJwk,
+  authenticateUnindexedArtifact, openRecoveryAssessmentRequest, recoveryPublicJwk, type RecoveryAssessmentRequest,
 } from "./checkpoint-recovery-envelope.ts";
 
 const MAX_OBJECT_BYTES = 32 * 1024 * 1024;
@@ -217,6 +217,16 @@ export async function assessCheckpointRecovery(
   if (env.RECOVERY_MODE === "describe-key") return { schema: "murph.recovery-public-key.v1", publicJwk: recoveryPublicJwk(privateJwk) };
   if (!["assess", "validate"].includes(String(env.RECOVERY_MODE))) throw new Error("invalid_recovery_mode");
   const request = openRecoveryAssessmentRequest(required(env, "RECOVERY_SEALED_REQUEST"), privateJwk);
+  if (request.mailboxInspection) {
+    if (env.RECOVERY_MODE !== "assess") throw new Error("invalid_recovery_mode");
+    return (await import("./checkpoint-mailbox-inspection.ts")).inspectCheckpointMailbox(env, request, fetchImpl);
+  }
+  return assessRecoveryArtifacts(env, request, fetchImpl, reportProgress);
+}
+
+async function assessRecoveryArtifacts(env: Env, request: RecoveryAssessmentRequest, fetchImpl: typeof fetch,
+  reportProgress?: (progress: RecoveryAssessmentProgress) => void) {
+  const privateJwk = required(env, "HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK");
   const account = required(env, "CLOUDFLARE_ACCOUNT_ID");
   const bucket = required(env, "CF_BUNDLES_ENAM_BUCKET");
   if (!/^[a-f0-9]{32}$/.test(account) || !/^[a-z0-9][a-z0-9-]{1,62}$/.test(bucket)) throw new Error("invalid_recovery_storage");

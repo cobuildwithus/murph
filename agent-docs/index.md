@@ -1528,3 +1528,5 @@ is recorded in [aged mailbox recovery](exec-plans/completed/2026-10-23-sweeper-d
 Settings authentication without paid access or consent re-grant, and actor-aware additive invite cancellation proof: [`game recovery`](exec-plans/active/2026-10-23-game-v1-settings-cancelled.md).
 
 Urgent Junction hints release pending routine batches through the immediate mailbox owner; proof is tracked in [urgent wearable handoff](exec-plans/active/2026-10-24-temporal-urgent-handoff.md).
+
+Protected read-only mailbox checkpoint inspection is owned by `agent-docs/SECURITY.md`; it reuses the protected assessment job and never repairs historical state.

@@ -16,6 +16,7 @@ export interface RecoveryAssessmentRequest {
   before: string;
   expiresAt: string;
   partialRecovery?: { timezone: string; completedOnboarding: boolean };
+  mailboxInspection?: { snapshotFingerprint: string; items: { mailboxItemId: string; laneSeq: string; inputId: string | null }[] };
 }
 
 export function recoveryPublicJwk(privateJwkJson: string): JsonWebKey {
@@ -76,6 +77,7 @@ function validateRequest(request: RecoveryAssessmentRequest, now: number): Recov
       throw new Error("invalid_recovery_request");
     }
     validatePartialRecoveryInstruction(request.partialRecovery);
+    validateMailboxInspection(request);
     return request;
 }
 
@@ -118,4 +120,35 @@ export async function authenticateUnindexedArtifact(input: {
     aad: buildHostedStorageAad({ key: input.objectKey, purpose: "artifact", sha256, userId: input.userId }),
   });
   return { sha256, plaintext };
+}
+
+function validateMailboxInspection(request: RecoveryAssessmentRequest): void {
+  const inspection = request.mailboxInspection;
+  if (inspection === undefined) return;
+  if (request.partialRecovery || !inspection || typeof inspection !== "object"
+    || Object.keys(inspection).some(key => !["snapshotFingerprint", "items"].includes(key))
+    || !/^[a-f0-9]{64}$/.test(inspection.snapshotFingerprint)
+    || !Array.isArray(inspection.items) || inspection.items.length < 1 || inspection.items.length > 12) {
+    throw new Error("invalid_recovery_request");
+  }
+  const ids = new Set<string>();
+  const seqs = new Set<string>();
+  const inputs = new Set<string>();
+  for (const item of inspection.items) {
+    validateInspectionItem(item);
+    if (ids.has(item.mailboxItemId) || seqs.has(item.laneSeq) || item.inputId !== null && inputs.has(item.inputId)) {
+      throw new Error("invalid_recovery_request");
+    }
+    ids.add(item.mailboxItemId); seqs.add(item.laneSeq);
+    if (item.inputId !== null) inputs.add(item.inputId);
+  }
+}
+
+function validateInspectionItem(item: NonNullable<RecoveryAssessmentRequest["mailboxInspection"]>["items"][number]): void {
+  if (!item || typeof item !== "object" || Object.keys(item).some(key => !["mailboxItemId", "laneSeq", "inputId"].includes(key))
+    || typeof item.mailboxItemId !== "string" || !/^[A-Za-z0-9][A-Za-z0-9_.:+-]{0,191}$/.test(item.mailboxItemId)
+    || typeof item.laneSeq !== "string" || !/^[1-9][0-9]{0,19}$/.test(item.laneSeq)
+    || item.inputId !== null && (typeof item.inputId !== "string" || !/^ain_[a-f0-9]{32}$/.test(item.inputId))) {
+    throw new Error("invalid_recovery_request");
+  }
 }
