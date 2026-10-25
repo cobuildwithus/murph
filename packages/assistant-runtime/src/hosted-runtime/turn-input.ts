@@ -32,9 +32,11 @@ import {
 
 import {
   compactHostedPendingAssistantInputIds,
+  dropHostedStalePendingAssistantInputRetries,
   isHostedPendingAssistantInputStillReplyable,
   readHostedPendingAssistantImageCompletionRecoveryInputIds,
   runHostedPendingAssistantInputContentRetention,
+  type HostedStaleRetryDropReason,
 } from "./pending-input-index.ts";
 
 const DEFAULT_HOSTED_ASSISTANT_INPUT_QUERY_LIMIT = 100;
@@ -54,6 +56,7 @@ type HostedAssistantInputSelection =
       mode: "background";
       pendingInputIds: string[];
       preserveInputOrder?: true;
+      staleRetryDropped?: Array<{ inputId: string; reason: HostedStaleRetryDropReason }>;
     };
 
 export interface HostedAssistantInputSource extends AssistantInputSource {
@@ -444,13 +447,16 @@ export async function selectHostedAssistantInputIds(
     const pendingInputIds = await compactHostedPendingAssistantInputIds({
       vaultRoot: input.vaultRoot,
     });
-    const pendingEvents = await readHostedReplyablePendingAssistantInputEvents({
-      inputIds: pendingInputIds,
+    const stale = await dropHostedStalePendingAssistantInputRetries({
+      events: await readHostedReplyablePendingAssistantInputEvents({
+        inputIds: pendingInputIds,
+        vaultRoot: input.vaultRoot,
+      }),
       vaultRoot: input.vaultRoot,
     });
     const limit = normalizeHostedAssistantInputBatchLimit(input.limit);
     const selected = await selectHostedAssistantInputEventBatchWithImageCompletion({
-      events: pendingEvents,
+      events: stale.kept,
       limit,
       vaultRoot: input.vaultRoot,
     });
@@ -461,6 +467,7 @@ export async function selectHostedAssistantInputIds(
       ...(selected.preserveInputOrder
         ? { preserveInputOrder: true as const }
         : {}),
+      ...(stale.dropped.length > 0 ? { staleRetryDropped: stale.dropped } : {}),
     };
   }
 

@@ -115,9 +115,9 @@ export function decideGameChange(state: RuleState, actor: string, change: GameCh
   return { change: { ...change, ...(change.schedule ? { schedule } : {}) }, effectiveFromDay, startsOn: startsOn && firstScheduledDate(startsOn, schedule) };
 }
 
-/** Only an app request already queued or sent needs a separate cancellation notice. */
-export function gameChangeCancellationNeedsNotice(pending: GamePendingChange, decision: "approve" | "decline" | "cancel"): boolean {
-  return decision === "cancel" && pending.origin === "app" && ["queued", "sent"].includes(pending.deliveryStatus);
+/** Only an app request already queued or sent needs a separate cancellation notice, unless Murph's reply in the bound chat already gave it. */
+export function gameChangeCancellationNeedsNotice(pending: GamePendingChange, decision: "approve" | "decline" | "cancel", answeredInBoundChat = false): boolean {
+  return !answeredInBoundChat && decision === "cancel" && pending.origin === "app" && ["queued", "sent"].includes(pending.deliveryStatus);
 }
 
 /** Rejudge the proposal under the acceptance clock, retaining its requested date. */

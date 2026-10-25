@@ -129,3 +129,26 @@ it.each(['mark_incomplete', 'restore_day'])('binds %s to the current speaker wit
   expect(MURPH_UPDATE_GAME_TOOL.description).toContain('one plain line naming the date or weekday')
   expect(MURPH_UPDATE_GAME_TOOL.description).toContain('never from progress.checkedAt or processing time')
 })
+
+it('cancels a not-yet-started game for the current speaker with no proposal or extra selector', async () => {
+  port.mockClear()
+  const args = { messageRef: inputId, operation: 'cancel_game', gameId: 'game_synthetic' }
+  expect((await execute(args)).rpcResult.success).toBe(true)
+  expect(port).toHaveBeenCalledExactlyOnceWith({ action: 'update_game', origin, update: { operation: 'cancel_game', gameId: 'game_synthetic' } })
+  expect(parse('update_game', { ...args, proposalId: 'proposal_synthetic' })?.kind).toBe('invalid-game-arguments')
+  expect(MURPH_UPDATE_GAME_TOOL.inputSchema.properties.operation.enum).toContain('cancel_game')
+  expect(MURPH_UPDATE_GAME_TOOL.description).toContain('A live game cannot be called off: its stakes are locked')
+  expect(MURPH_UPDATE_GAME_TOOL.description).toContain('the backend posts the one cancellation notice in this chat: do not announce it yourself')
+})
+
+it('teaches one pending change, current-ask-only proposals, plain refusals and open days', () => {
+  const description = MURPH_UPDATE_GAME_TOOL.description
+  expect(description).toContain('One change waits at a time.')
+  expect(description).toContain('say plainly in that reply that it replaces the earlier ask')
+  expect(description).toContain('never imply a declined, cancelled or replaced proposal is still waiting')
+  expect(description).toContain('never fold in an earlier, deferred or other player’s request')
+  expect(MURPH_UPDATE_GAME_TOOL.inputSchema.properties.change.description).toContain('Only the fields the acting message asks to change now')
+  expect(description).toContain('error gives a code, then the rule or next step')
+  expect(description).toContain('is still open, not missed')
+  expect(description).not.toMatch(/unposted/u)
+})

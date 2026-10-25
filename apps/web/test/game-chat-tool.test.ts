@@ -118,8 +118,19 @@ describe("game chat tool authority", () => {
   });
   it("returns a bounded command rejection rather than claiming an edit applied", async () => {
     m.run.mockResolvedValue({ ok: false, error: { code: "CHANGE_EXPIRED", message: "The proposed start date has passed. Propose a new date." }, status: 409 });
-    expect((await handleGameChatTool(update)).result).toEqual({ status: "rejected", error: "The proposed start date has passed. Propose a new date." });
+    expect((await handleGameChatTool(update)).result).toEqual({ status: "rejected", error: "CHANGE_EXPIRED: The proposed start date has passed. Propose a new date." });
     expect(m.read).not.toHaveBeenCalled();
+  });
+  it("returns each refusal's plain rule with its code so Murph can explain it", async () => {
+    m.run.mockResolvedValue({ ok: false, error: { code: "INVALID_REQUEST", message: "Choose a start date from tomorrow to 60 days out, or use Start now." }, status: 400 });
+    expect((await handleGameChatTool(update)).result).toEqual({ status: "rejected", error: "INVALID_REQUEST: Choose a start date from tomorrow to 60 days out, or use Start now." });
+    m.run.mockResolvedValue({ ok: false, error: { code: "INVALID_REQUEST", message: "x".repeat(300) }, status: 400 });
+    expect((await handleGameChatTool(update)).result.error).toHaveLength(128);
+  });
+  it("cancels a not-yet-started game through the app's cancel command", async () => {
+    m.run.mockClear();
+    await handleGameChatTool({ ...update, request: { action: "update_game", origin, update: { operation: "cancel_game", gameId: "game_synthetic" } } });
+    expect(m.run).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ actorMemberId: actor, chatContainerMemberId: group, command: { type: "cancelInvite", gameId: "game_synthetic" } }));
   });
 });
 

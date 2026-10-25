@@ -263,6 +263,51 @@ describe.skipIf(!enabled)("weekly game change serialization against PostgreSQL",
     expect(await readGame(gameId,a)).toMatchObject({pendingChange:null,lengthDays:7,terms:{n:1}});
     expect(await getPrisma().gameEvent.count({where:{gameId,type:decision === "cancel" ? "change_cancelled" : "change_declined"}})).toBe(1);
   });
+  it("shows an app proposal posted to a group chat as sent", async () => {
+    const {a,b,gameId} = await setup(); const proposalId = randomUUID(); const db = getPrisma();
+    await run(a,{type:"proposeChange",gameId,proposalId,expectedTermsVersion:1,change:{kind:"edit",lengthDays:21}});
+    // Runtime group sends carry no provider receipt; acceptance is the final status.
+    await db.hostedLinqDelivery.update({where:{idempotencyKey:createHostedLinqDeliveryIdempotencyLookupKey(`game-change:${gameId}:${proposalId}`)!},data:{status:"sent_no_receipt_expected"}});
+    for (const viewer of [a,b]) expect((await readGame(gameId,viewer))?.pendingChange).toMatchObject({id:proposalId,deliveryStatus:"sent",deliveryRetryable:true});
+  });
+  it("announces an approval refusal once: Murph's reply in the bound chat, else a notice", async () => {
+    const today = gameLocalDate(new Date(), "America/New_York");
+    for (const answeredIn of ["bound", "alternate"] as const) {
+      const {a,b,room,gameId} = await setup({days:[0,1,2,3,4]}, addDays(today, 5));
+      const db = getPrisma(); const proposalId = randomUUID();
+      expect(await run(a,{type:"proposeChange",gameId,proposalId,expectedTermsVersion:1,change:{kind:"edit",lengthDays:3}})).toMatchObject({ok:true});
+      await db.game.update({where:{id:gameId},data:{devClockOffsetMs:BigInt(8*86400000)}});
+      const alternate = `game_room_${randomUUID()}`; members.push(alternate);
+      await db.hostedMember.create({data:{id:alternate,billingStatus:"not_started"}}); roomPlayers.set(alternate,[a,b]);
+      expect(await run(b,{type:"respondChange",gameId,proposalId,decision:"approve"},{chatContainerMemberId:answeredIn === "bound" ? room : alternate,beforeMutationTx:fence}))
+        .toMatchObject({ok:false,error:{code:"CHANGE_EXPIRED",message:expect.stringContaining("day already started")}});
+      expect(await db.gameEvent.count({where:{gameId,type:"change_expired"}})).toBe(1);
+      expect(await db.hostedLinqDelivery.findMany({where:{sourceRef:`${gameId}:${proposalId}`},select:{template:true}}))
+        .toEqual(answeredIn === "bound" ? [] : [{template:"game_change_expired"}]);
+    }
+  });
+  it("lets the bound chat's reply be the only word when an app request is cancelled there", async () => {
+    for (const cancelledIn of ["chat", "app"] as const) {
+      const {a,room,gameId} = await setup(); const proposalId = randomUUID(); const db = getPrisma();
+      await run(a,{type:"proposeChange",gameId,proposalId,expectedTermsVersion:1,change:{kind:"edit",lengthDays:18}});
+      await db.$executeRaw`UPDATE game SET pending_change = jsonb_set(pending_change, '{deliveryStatus}', '"sent"'::jsonb) WHERE id = ${gameId}`;
+      const command = {type:"respondChange" as const,gameId,proposalId,decision:"cancel" as const};
+      expect(await run(a,command,cancelledIn === "chat" ? {chatContainerMemberId:room,beforeMutationTx:fence} : {})).toMatchObject({ok:true});
+      expect(await db.hostedLinqDelivery.count({where:{template:"game_change_cancelled",sourceRef:`${gameId}:${proposalId}`}})).toBe(cancelledIn === "chat" ? 0 : 1);
+    }
+  });
+  it("cancels a negotiating game from chat with the one lifecycle notice that keeps the room deliverable, and refuses a live one", async () => {
+    for (const cancelledIn of ["chat", "app"] as const) {
+      const {a,b,room,gameId} = await setup(); const db = getPrisma();
+      await db.game.update({where:{id:gameId},data:{status:"negotiating"}});
+      expect(await run(b,{type:"cancelInvite",gameId},cancelledIn === "chat" ? {chatContainerMemberId:room,beforeMutationTx:fence} : {})).toMatchObject({ok:true});
+      expect((await readGame(gameId,a))?.status).toBe("void");
+      expect(await db.hostedLinqDelivery.count({where:{template:"game_cancelled",sourceRef:gameId,status:"awaiting_generation"}})).toBe(1);
+    }
+    const {b,room,gameId} = await setup();
+    expect(await run(b,{type:"cancelInvite",gameId},{chatContainerMemberId:room,beforeMutationTx:fence}))
+      .toMatchObject({ok:false,error:{code:"INVITE_USED",message:"This game has already started."}});
+  });
   it("clears a proposal on a terms-version move", async () => {
     const {a,gameId} = await setup(); const proposalId = randomUUID(); const db=getPrisma();
     await run(a,{type:"proposeChange",gameId,proposalId,expectedTermsVersion:1,change:{kind:"edit",lengthDays:14}});

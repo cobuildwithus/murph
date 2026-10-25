@@ -1547,6 +1547,117 @@ async function createLegacyHostedPendingAssistantTerminalRecoveryState(input: {
   });
 }
 
+/** A background retry this much later than its message would answer out of turn. */
+export const HOSTED_STALE_RETRY_MAX_AGE_MS = 15 * 60 * 1000;
+export const HOSTED_STALE_RETRY_SUPPRESSION_REASON =
+  "stale retry dropped before a late reply";
+
+export type HostedStaleRetryDropReason = "too_old" | "newer_message_answered";
+
+/**
+ * A pending member message reaching the background pass is a retry of a turn
+ * that did not finish. Drop it without replying once its message is too old,
+ * or once a newer member message in the same chat was answered, so a late
+ * reply never lands out of order.
+ */
+export async function dropHostedStalePendingAssistantInputRetries(input: {
+  events: readonly AssistantInputEventRecord[];
+  now?: Date;
+  vaultRoot: string;
+}): Promise<{
+  dropped: Array<{ inputId: string; reason: HostedStaleRetryDropReason }>;
+  kept: AssistantInputEventRecord[];
+}> {
+  const nowMs = (input.now ?? new Date()).getTime();
+  const candidates = input.events.filter(isHostedMemberConversationInput);
+  if (candidates.length === 0) {
+    return { dropped: [], kept: [...input.events] };
+  }
+  const reasons = new Map<string, HostedStaleRetryDropReason>();
+  const recent: AssistantInputEventRecord[] = [];
+  for (const event of candidates) {
+    const receivedAtMs = resolveHostedPendingInputReceivedAtMs(event);
+    if (!Number.isFinite(receivedAtMs) || nowMs - receivedAtMs > HOSTED_STALE_RETRY_MAX_AGE_MS) {
+      reasons.set(event.inputId, "too_old");
+    } else {
+      recent.push(event);
+    }
+  }
+  if (recent.length > 0) {
+    const pendingInputIds = new Set(input.events.map((event) => event.inputId));
+    const oldest = recent.reduce((first, event) =>
+      compareAssistantInputCursors(event.cursor, first.cursor) < 0 ? event : first);
+    const later = (await listAssistantInputEvents({
+      afterCursor: oldest.cursor,
+      limit: Number.MAX_SAFE_INTEGER,
+      vault: input.vaultRoot,
+    })).events.filter((event) =>
+      !pendingInputIds.has(event.inputId) && isHostedMemberConversationInput(event));
+    const answered = new Map<string, boolean>();
+    const isAnswered = async (event: AssistantInputEventRecord) => {
+      const known = answered.get(event.inputId);
+      if (known !== undefined) return known;
+      const evidence = await readAssistantAutoReplyTerminalEvidenceByEvidenceId(input.vaultRoot, event.inputId)
+        ?? (event.projection.captureId
+          ? await readAssistantAutoReplyTerminalEvidenceByEvidenceId(input.vaultRoot, event.projection.captureId)
+          : null);
+      const terminal = evidence?.terminal.kind;
+      const result = terminal === "replied" || terminal === "reply_intent_committed";
+      answered.set(event.inputId, result);
+      return result;
+    };
+    for (const event of recent) {
+      for (const newer of later) {
+        if (
+          compareAssistantInputCursors(newer.cursor, event.cursor) > 0
+          && isSameHostedPendingInputChat(newer, event)
+          && await isAnswered(newer)
+        ) {
+          reasons.set(event.inputId, "newer_message_answered");
+          break;
+        }
+      }
+    }
+  }
+  const dropped = input.events.filter((event) => reasons.has(event.inputId));
+  if (dropped.length > 0) {
+    await writeAssistantAutoReplySuppressionEvidence({
+      captureIds: dropped.flatMap((event) => event.projection.captureId ? [event.projection.captureId] : []),
+      inputIds: dropped.map((event) => event.inputId),
+      reason: HOSTED_STALE_RETRY_SUPPRESSION_REASON,
+      vault: input.vaultRoot,
+    });
+  }
+  return {
+    dropped: dropped.map((event) => ({ inputId: event.inputId, reason: reasons.get(event.inputId)! })),
+    kept: input.events.filter((event) => !reasons.has(event.inputId)),
+  };
+}
+
+/**
+ * Only a member's own chat message is a retry that can go stale or be
+ * superseded. System inputs (delivery failures, image completions) keep their
+ * own recovery and never count as a newer answered message.
+ */
+function isHostedMemberConversationInput(event: AssistantInputEventRecord): boolean {
+  return event.sourceRef.kind === "hosted-mailbox"
+    && event.sourceRef.lane === "conversation"
+    && event.conversation?.actorIsSelf !== true
+    && !isAssistantHostedImageCompletionEvent(event);
+}
+
+function isSameHostedPendingInputChat(
+  left: AssistantInputEventRecord,
+  right: AssistantInputEventRecord,
+): boolean {
+  const a = left.conversation;
+  const b = right.conversation;
+  return Boolean(a?.source && a.threadId)
+    && a?.source === b?.source
+    && a?.accountId === b?.accountId
+    && a?.threadId === b?.threadId;
+}
+
 export function isHostedPendingAssistantInputStillReplyable(input: {
   enabledAutoReplyChannels: ReadonlySet<string>;
   event: HostedPendingAssistantInputReplyabilityEvent;

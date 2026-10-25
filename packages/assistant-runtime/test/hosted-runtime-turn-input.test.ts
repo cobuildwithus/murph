@@ -15,6 +15,7 @@ import {
 } from "@murphai/assistant-engine/assistant-state";
 import {
   readAssistantAutoReplyTerminalEvidenceByEvidenceId,
+  writeAssistantAutoReplyReplyTerminalEvidence,
 } from "@murphai/assistant-engine/assistant-automation";
 
 import {
@@ -1594,7 +1595,7 @@ describe("selectHostedAssistantInputIds", () => {
     { mode: "background" as const, threadIsDirect: false },
   ])("hands conversation neighbors across system events to one batch: $mode/direct=$threadIsDirect", async ({ mode, threadIsDirect }) => {
     vi.useFakeTimers({ toFake: ["Date"] });
-    vi.setSystemTime(new Date("2026-04-24T00:00:00.000Z"));
+    vi.setSystemTime(new Date("2026-04-23T00:05:00.000Z"));
     const vaultRoot = await createTempVault();
     await enableLinqAutoReply(vaultRoot);
     const first = await upsertAssistantInputEvent({
@@ -2227,9 +2228,77 @@ describe("selectHostedAssistantInputIds", () => {
       .resolves.toEqual([overdue.inputId]);
   });
 
+  it("drops a background retry of a message older than the stale window without replying", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-04-23T01:00:00.000Z"));
+    const vaultRoot = await createTempVault();
+    await enableLinqAutoReply(vaultRoot);
+    const failed = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({ dedupeKey: "dedupe_stale", eventId: "evt_stale", itemId: "item_stale", laneSeq: "10", causalSeq: "10", messageId: "msg_stale" }),
+    });
+    await enqueueHostedPendingAssistantInputId({ inputId: failed.inputId, vaultRoot });
+
+    const selection = await selectHostedAssistantInputIds({ mode: "background", vaultRoot });
+
+    expect(selection.inputIds).toEqual([]);
+    expect(selection).toMatchObject({ staleRetryDropped: [{ inputId: failed.inputId, reason: "too_old" }] });
+    expect((await readAssistantAutoReplyTerminalEvidenceByEvidenceId(vaultRoot, failed.inputId))?.terminal)
+      .toMatchObject({ kind: "suppressed" });
+    expect((await selectHostedAssistantInputIds({ mode: "background", vaultRoot })).inputIds).toEqual([]);
+
+    // A system input (for example a delivery failure) keeps its own recovery even when its timestamp is old.
+    const systemNote = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({ dedupeKey: "dedupe_system_old", eventId: "evt_system_old", itemId: "item_system_old", lane: "system", laneSeq: "11", causalSeq: "11", messageId: "msg_system_old" }),
+    });
+    await enqueueHostedPendingAssistantInputId({ inputId: systemNote.inputId, vaultRoot });
+    expect((await selectHostedAssistantInputIds({ mode: "background", vaultRoot })).inputIds).toEqual([systemNote.inputId]);
+  });
+
+  it("drops a background retry once a newer message in the same chat was answered", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-04-23T00:05:00.000Z"));
+    const vaultRoot = await createTempVault();
+    await enableLinqAutoReply(vaultRoot);
+    const failed = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({ dedupeKey: "dedupe_failed", eventId: "evt_failed", itemId: "item_failed", laneSeq: "10", causalSeq: "10", messageId: "msg_failed",
+        occurredAt: "2026-04-23T00:00:01.000Z", receivedAt: "2026-04-23T00:00:02.000Z" }),
+    });
+    const otherChat = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({ dedupeKey: "dedupe_other_chat", eventId: "evt_other_chat", itemId: "item_other_chat", laneSeq: "11", causalSeq: "11", messageId: "msg_other_chat",
+        occurredAt: "2026-04-23T00:00:03.000Z", receivedAt: "2026-04-23T00:00:04.000Z", threadId: "thread_other" }),
+    });
+    await writeAssistantAutoReplyReplyTerminalEvidence({ captureIds: [], inputIds: [otherChat.inputId], deliveryIntentId: null, outcome: "result", recordedAt: "2026-04-23T00:00:05.000Z", sessionId: "session_other", vault: vaultRoot });
+    await enqueueHostedPendingAssistantInputId({ inputId: failed.inputId, vaultRoot });
+
+    const answeredSystemNote = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({ dedupeKey: "dedupe_system_note", eventId: "evt_system_note", itemId: "item_system_note", lane: "system", laneSeq: "11b", causalSeq: "11", messageId: "msg_system_note",
+        occurredAt: "2026-04-23T00:00:30.000Z", receivedAt: "2026-04-23T00:00:31.000Z" }),
+    });
+    await writeAssistantAutoReplyReplyTerminalEvidence({ captureIds: [], inputIds: [answeredSystemNote.inputId], deliveryIntentId: null, outcome: "result", recordedAt: "2026-04-23T00:00:40.000Z", sessionId: "session_system", vault: vaultRoot });
+
+    // An answer in another chat, or to a system input in this chat, does not make this one stale.
+    expect((await selectHostedAssistantInputIds({ mode: "background", vaultRoot })).inputIds).toEqual([failed.inputId]);
+
+    const newer = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({ dedupeKey: "dedupe_newer", eventId: "evt_newer", itemId: "item_newer", laneSeq: "12", causalSeq: "12", messageId: "msg_newer",
+        occurredAt: "2026-04-23T00:01:01.000Z", receivedAt: "2026-04-23T00:01:02.000Z" }),
+    });
+    await writeAssistantAutoReplyReplyTerminalEvidence({ captureIds: [], inputIds: [newer.inputId], deliveryIntentId: null, outcome: "result", recordedAt: "2026-04-23T00:02:00.000Z", sessionId: "session_newer", vault: vaultRoot });
+
+    const selection = await selectHostedAssistantInputIds({ mode: "background", vaultRoot });
+    expect(selection.inputIds).toEqual([]);
+    expect(selection).toMatchObject({ staleRetryDropped: [{ inputId: failed.inputId, reason: "newer_message_answered" }] });
+  });
+
   it("background mode selects bounded oldest non-terminal pending ids", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
-    vi.setSystemTime(new Date("2026-04-24T00:00:00.000Z"));
+    vi.setSystemTime(new Date("2026-04-23T00:05:00.000Z"));
     const vaultRoot = await createTempVault();
     await enableLinqAutoReply(vaultRoot);
     const oldest = await upsertAssistantInputEvent({

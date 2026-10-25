@@ -20,7 +20,9 @@ describe("additive game reader compatibility", () => {
     for (const request of [
       { action: "read_game", origin },
       { action: "update_game", origin, update: { operation: "approve", gameId: game.id, proposalId: "proposal_synthetic" } },
+      { action: "update_game", origin, update: { operation: "cancel_game", gameId: game.id } },
     ]) expect(hostedGameToolRequestSchema.parse(request)).toEqual(request);
+    expect(hostedGameToolRequestSchema.safeParse({ action: "update_game", origin, update: { operation: "cancel_game", gameId: game.id, proposalId: "proposal_synthetic" } }).success).toBe(false);
     const payload = response(game);
     expect(hostedGameToolResponseSchema.parse(payload)).toEqual(payload);
   });

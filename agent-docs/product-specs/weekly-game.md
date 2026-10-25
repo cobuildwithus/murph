@@ -244,10 +244,23 @@ as a separately delivered notification. New group creation uses that same first
 message, rather than a generic opener followed by another message. Initial
 invite negotiation likewise introduces the actual proposal once; the challenge
 kickoff follows only after agreement. The other player can decline, and the
-proposer can cancel in chat. Only one proposal waits at a time. Cancelling an
+proposer can cancel in chat. Only one proposal waits at a time: a player who
+answers a pending proposal with a different one declines it and proposes theirs,
+and Murph says in that reply that the new ask replaces the earlier one. A chat
+proposal carries only what the acting message asks for, never an earlier
+deferred request. Cancelling an
 app-origin change after it was queued or sent also tells the group that the
 request is off, without cancelling the challenge or changing its agreed rules.
-Unsent requests and chat-origin requests do not generate a second announcement.
+Unsent requests and chat-origin requests do not generate a second announcement,
+and neither does a change cancellation or refused approval made from the bound
+chat, where Murph's reply is the one explanation. In chat, either player can
+cancel a negotiating game; the lifecycle cancellation notice is then the one
+announcement (Murph does not also reply), because that reserved notice is what
+keeps a game-funded room deliverable once the game is void. A live game cannot
+be called off, so Murph
+says its stakes are locked and offers shortening, rescheduling or marking days
+incomplete. Chat refusals carry the server's plain rule (for example the 60-day
+start limit) so Murph can give the reason and the nearest valid option.
 
 Until agreement, the current terms stay in force. Changes apply from the first
 day neither player has started. Existing check-ins and missed days keep their

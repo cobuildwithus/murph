@@ -570,12 +570,23 @@ async function cancelInvite(context: CommandContext, gameId: string): Promise<st
   await runLocked(gameId, context, async ({ tx, loaded, clock }) => {
     if (decideCancelInvite(loaded.state, context.actor) === "already-void") return [];
     await endGame(tx, gameId, { status: "void" });
+    // Always reserve: the pending notice is also what keeps a game-funded room
+    // able to deliver the one cancellation message after the game is void.
     if (loaded.row.chatContainerMemberId) {
       await reserveGameChatLifecycleTx({ gameId, kind: "cancelled", now: clock, tx });
     }
     return [{ type: "cancelled", payload: {} }];
   });
   return gameId;
+}
+
+/** Murph's reply in the bound chat already explains this outcome; a lifecycle notice there would repeat it. */
+function answeredInBoundChat(context: CommandContext, loaded: LoadedGame): boolean {
+  return context.chatContainerMemberId !== undefined && context.chatContainerMemberId === loaded.row.chatContainerMemberId;
+}
+
+function needsChatLifecycleNotice(context: CommandContext, loaded: LoadedGame): boolean {
+  return Boolean(loaded.row.chatContainerMemberId) && !answeredInBoundChat(context, loaded);
 }
 
 /** Settled or void: the roster is free to start another game together. */
@@ -878,7 +889,7 @@ async function respondChange(context: CommandContext, command: Extract<GameComma
     if ((command.decision === "cancel") !== proposer) reject("NOT_A_PLAYER", proposer ? "The other player needs to agree." : "Only the proposer can cancel this change.");
     const clear = () => tx.game.update({ where: { id: command.gameId }, data: { pendingChange: Prisma.DbNull } });
     if (command.decision !== "approve") {
-      if (gameChangeCancellationNeedsNotice(proposal, command.decision)) {
+      if (gameChangeCancellationNeedsNotice(proposal, command.decision, answeredInBoundChat(context, loaded))) {
         await reserveGameChatLifecycleTx({ gameId: command.gameId, kind: "change_cancelled", proposalId: proposal.id, now: clock, tx });
       }
       await clear();
@@ -896,7 +907,7 @@ async function respondChange(context: CommandContext, command: Extract<GameComma
       if (!(error instanceof GameRuleError)) throw error;
       refusal = error.message;
       await clear();
-      if (loaded.row.chatContainerMemberId) await reserveGameChatLifecycleTx({ gameId: command.gameId, kind: "change_expired", proposalId: proposal.id, now: clock, tx });
+      if (needsChatLifecycleNotice(context, loaded)) await reserveGameChatLifecycleTx({ gameId: command.gameId, kind: "change_expired", proposalId: proposal.id, now: clock, tx });
       return [{ commandKey: resolutionKey, type: "change_expired", payload: { proposalId: proposal.id, reason: refusal } }];
     }
     return applyApprovedChange({ tx, loaded, now, clock }, command.gameId, proposal, resolutionKey, context.actor, decision);
@@ -1465,7 +1476,7 @@ async function readPendingChangeViews(rows: readonly Pick<Game, "id" | "createdB
     const status = key ? statuses.get(key) : undefined;
     const terminal = status === "failed" || status === "skipped";
     return [gameId, { ...proposal,
-      deliveryStatus: terminal ? "failed" : status === "accepted" || status === "delivered" ? "sent" : proposal.deliveryStatus,
+      deliveryStatus: terminal ? "failed" : status === "accepted" || status === "delivered" || status === "sent_no_receipt_expected" ? "sent" : proposal.deliveryStatus,
       deliveryRetryable: !terminal,
     }];
   }));
