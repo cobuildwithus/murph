@@ -90,8 +90,8 @@ member owns. Shared, family, team, and subscribed calendars commonly hold other
 people's events. When category or ownership is unclear, exclude the event
 silently; never ask the member whether they attend or own a calendar item.
 When the member says an event or calendar is not theirs, delete any plan
-captured from it and record a calendar-level
-correction in `optOuts.calendars` so later passes skip that calendar.
+captured from it. Add a calendar to `optOuts.calendars` only when the member
+says the whole calendar is not theirs; later passes skip it.
 Include clear all-day travel or a race when relevant; retain local dates and
 timezone without inventing a clock time. Keep other all-day events excluded
 unless prior evidence establishes their usefulness.
