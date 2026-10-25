@@ -9,8 +9,10 @@ import {
 import { hostedArtifactObjectKey } from "@murphai/hosted-execution/storage-paths";
 
 const REQUEST_CONTEXT = Buffer.from("murph.checkpoint-recovery-assessment.v1");
+const INSPECTION_SCHEMA = "murph.checkpoint-mailbox-inspection.v1";
+function isRequestSchema(value: unknown): boolean { return value === REQUEST_CONTEXT.toString() || value === INSPECTION_SCHEMA; }
 export interface RecoveryAssessmentRequest {
-  schema: "murph.checkpoint-recovery-assessment.v1";
+  schema: "murph.checkpoint-recovery-assessment.v1" | "murph.checkpoint-mailbox-inspection.v1";
   userId: string;
   expectedWorkspaceVersion: string;
   before: string;
@@ -47,7 +49,7 @@ export function sealRecoveryAssessmentRequest(request: RecoveryAssessmentRequest
 export function openRecoveryAssessmentRequest(sealed: string, privateJwkJson: string, now = Date.now()): RecoveryAssessmentRequest {
   if (!/^[A-Za-z0-9_-]{1,8192}$/.test(sealed)) throw new Error("invalid_recovery_request");
   const envelope = JSON.parse(Buffer.from(sealed, "base64url").toString("utf8"));
-  if (envelope.schema !== REQUEST_CONTEXT.toString()) throw new Error("invalid_recovery_request");
+  if (!isRequestSchema(envelope.schema)) throw new Error("invalid_recovery_request");
   const ephemeral = createPublicKey({ key: envelope.ephemeral, format: "jwk" });
   if (ephemeral.asymmetricKeyDetails?.namedCurve !== "prime256v1") throw new Error("invalid_recovery_request");
   const shared = diffieHellman({ privateKey: createPrivateKey({ key: JSON.parse(privateJwkJson), format: "jwk" }), publicKey: ephemeral });
@@ -63,12 +65,14 @@ export function openRecoveryAssessmentRequest(sealed: string, privateJwkJson: st
     decipher.setAuthTag(ciphertext.subarray(-16));
     plaintext = decipher.update(ciphertext.subarray(0, -16));
     decipher.final();
-    return validateRequest(JSON.parse(plaintext.toString("utf8")), now);
+    const request = validateRequest(JSON.parse(plaintext.toString("utf8")), now);
+    if (request.schema !== envelope.schema) throw new Error("invalid_recovery_request");
+    return request;
   } finally { key.fill(0); plaintext?.fill(0); }
 }
 
 function validateRequest(request: RecoveryAssessmentRequest, now: number): RecoveryAssessmentRequest {
-    if (request.schema !== REQUEST_CONTEXT.toString() || typeof request.userId !== "string"
+    if (!isRequestSchema(request.schema) || typeof request.userId !== "string"
       || request.userId.length < 1 || request.userId.length > 256
       || typeof request.expectedWorkspaceVersion !== "string" || !/^[0-9]{1,20}$/.test(request.expectedWorkspaceVersion)
       || typeof request.before !== "string" || !Number.isFinite(Date.parse(request.before)) || Date.parse(request.before) > now
@@ -124,8 +128,11 @@ export async function authenticateUnindexedArtifact(input: {
 
 function validateMailboxInspection(request: RecoveryAssessmentRequest): void {
   const inspection = request.mailboxInspection;
-  if (inspection === undefined) return;
-  if (request.partialRecovery || !inspection || typeof inspection !== "object"
+  if (inspection === undefined) {
+    if (request.schema === INSPECTION_SCHEMA) throw new Error("invalid_recovery_request");
+    return;
+  }
+  if (request.schema !== INSPECTION_SCHEMA || request.partialRecovery || !inspection || typeof inspection !== "object"
     || Object.keys(inspection).some(key => !["snapshotFingerprint", "items"].includes(key))
     || !/^[a-f0-9]{64}$/.test(inspection.snapshotFingerprint)
     || !Array.isArray(inspection.items) || inspection.items.length < 1 || inspection.items.length > 12) {
