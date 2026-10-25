@@ -1840,3 +1840,18 @@ rosters guard shared reads; private contact labels, entries, excuses, photos and
 invite tokens never enter the chat projection. Group-only game eligibility does
 not grant personal AI access and cannot override suspension, consent withdrawal
 or the game rollout gate. Existing group usage limits remain enforced.
+
+The protected checkpoint assessment also accepts an optional sealed
+`mailboxInspection` request in `assess` mode, with a distinct sealed request
+schema rejected by older readers before any artifact scan, mutually exclusive with partial
+recovery. It binds the exact current workspace version and authenticated snapshot
+fingerprint plus at most twelve exact mailbox/input selectors. Only that snapshot
+is restored in private temporary scratch; no artifact census or conversation
+history scan occurs. Exact input, pending-index, mapping and terminal-group
+metadata use existing readers. Missing input selectors remain explicitly
+uninspectable. File/group budgets and the existing archive limits fail closed.
+The job rechecks workspace identity and request expiry before emitting fixed
+booleans, terminal-kind enums and counts; identifiers, content and raw errors stay
+private. Scratch and keys are discarded on every exit. This mode does not call a
+model, wake a runtime, replay work, publish a checkpoint, acknowledge mailboxes,
+write billing state or send messages. Historical repair needs separate authority.

@@ -9580,3 +9580,9 @@ function readHostedWorkspaceCurrentSnapshotRef(
 ): HostedWorkspaceState["snapshotRef"] {
   return workspace?.snapshotRef ?? null;
 }
+
+// Read-only protected checkpoint diagnostics reuse the pending-index schema owner.
+export {
+  parseHostedPendingAssistantInputState,
+  HOSTED_PENDING_ASSISTANT_INPUT_STATE_RELATIVE_PATH,
+} from "./hosted-runtime/pending-input-index.ts";
