@@ -10486,14 +10486,17 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
   });
 
-  it("blocks classifier-denied unknown Linq first contacts before member or invite side effects", async () => {
+  it.each([
+    `Hello! ${"x".repeat(2_050)}`,
+    "Automatic response from OrbitBot: this inbox serves enrolled accounts only. Please register to use this assistant.",
+    "Auto-reply: our office is closed until Monday. Your message has not been read.",
+  ])("blocks classifier-denied unknown Linq first contacts before member or invite side effects (%#)", async (rejectedMessageText) => {
     mocks.hostedOnboardingEnvironment.linqFirstContactAdmissionMode = "enforce";
     mocks.classifyHostedLinqFirstContactAdmission.mockResolvedValueOnce({
       confidence: 0.94,
       kind: "block",
       source: "model",
     });
-    const rejectedMessageText = `Hey Gail! ${"x".repeat(2_050)}`;
     const boundedRejectedMessageText = rejectedMessageText.slice(0, 2_000);
 
     const prismaMocks = {
@@ -10565,7 +10568,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         partTypes: ["text"],
         service: "imessage",
         text: boundedRejectedMessageText,
-        textWasTruncated: true,
+        textWasTruncated: rejectedMessageText.length > 2_000,
       }),
       signal: undefined,
     });
@@ -14918,11 +14921,15 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
   });
 
-  it("suppresses repeat signup links after the first send that day", async () => {
-    mocks.readHostedLinqDailyState.mockResolvedValueOnce(makeHostedLinqDailyState({
+  it.each(["before-bind", "after-bind"] as const)("suppresses repeat signup links after the first send that day (%s)", async (stage) => {
+    const dailyState = makeHostedLinqDailyState({
       inboundCount: 1,
       onboardingLinkSentAt: new Date("2026-03-26T12:00:01.000Z"),
-    }));
+    });
+    mocks.readHostedLinqDailyState.mockResolvedValueOnce(stage === "before-bind" ? dailyState : null);
+    if (stage === "after-bind") {
+      mocks.incrementHostedLinqInboundDailyState.mockResolvedValueOnce(dailyState);
+    }
     const prisma = asPrismaTransactionClient({
       hostedWebhookReceipt: {
         create: vi.fn().mockResolvedValue({}),
@@ -14967,7 +14974,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       reason: "signup-link-already-sent",
     });
     expect(mocks.claimHostedLinqOnboardingLinkNotice).not.toHaveBeenCalled();
-    expect(mocks.incrementHostedLinqInboundDailyState).not.toHaveBeenCalled();
+    expect(mocks.incrementHostedLinqInboundDailyState).toHaveBeenCalledTimes(stage === "before-bind" ? 0 : 1);
     expect(mocks.drainHostedExecutionOutboxBestEffort).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
   });
@@ -16880,6 +16887,7 @@ function makeHostedLinqDailyState(input: {
     lastSeenAt: new Date("2026-03-26T12:00:00.000Z"),
     memberId: "member_123",
     onboardingLinkSentAt: input.onboardingLinkSentAt ?? null,
+    signupLinkReminderSentAt: null,
     outboundCount: input.outboundCount ?? 0,
     quotaReplySentAt: input.quotaReplySentAt ?? null,
     updatedAt: new Date("2026-03-26T12:00:00.000Z"),

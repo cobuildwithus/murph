@@ -175,6 +175,43 @@ export async function releaseHostedLinqOnboardingLinkNoticeClaim(input: {
   });
 }
 
+export async function claimHostedLinqSignupLinkReminderNotice(input: {
+  memberId: string;
+  occurredAt: Date | string;
+  prisma: HostedLinqDailyStateClient;
+  sentAt?: Date;
+}): Promise<boolean> {
+  const claimed = await input.prisma.hostedLinqDailyState.updateMany({
+    where: {
+      dayUtc: resolveHostedLinqDayUtc(input.occurredAt),
+      memberId: input.memberId,
+      signupLinkReminderSentAt: null,
+    },
+    data: {
+      signupLinkReminderSentAt: input.sentAt ?? new Date(),
+    },
+  });
+
+  return claimed.count === 1;
+}
+
+export async function releaseHostedLinqSignupLinkReminderNoticeClaim(input: {
+  memberId: string;
+  occurredAt: Date | string;
+  prisma: HostedLinqDailyStateClient;
+}): Promise<void> {
+  await input.prisma.hostedLinqDailyState.updateMany({
+    where: {
+      dayUtc: resolveHostedLinqDayUtc(input.occurredAt),
+      memberId: input.memberId,
+      signupLinkReminderSentAt: { not: null },
+    },
+    data: {
+      signupLinkReminderSentAt: null,
+    },
+  });
+}
+
 export async function claimHostedLinqQuotaReplyNotice(input: {
   memberId: string;
   occurredAt: Date | string;

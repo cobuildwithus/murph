@@ -22,6 +22,61 @@ import {
 } from "@/src/lib/hosted-onboarding/visible-secondary-webhooks";
 
 describe("visible secondary webhook outcomes", () => {
+  it("sends one setup reminder per member per UTC day, including concurrent inbounds and webhook retries", async () => {
+    const fixture = buildSignupReminderFixture();
+    const first = await fixture.receive("evt_reminder_first", "2026-07-25T23:59:00.000Z");
+    expect(first).toMatchObject({ ignored: false, reason: "visible-secondary-reply:signup-link-already-sent" });
+    const repeats = await Promise.all([
+      fixture.receive("evt_reminder_first", "2026-07-25T23:59:00.000Z"),
+      fixture.receive("evt_reminder_second", "2026-07-25T23:59:01.000Z"),
+      fixture.receive("evt_reminder_third", "2026-07-25T23:59:02.000Z"),
+    ]);
+    for (const response of repeats) {
+      expect(response).toMatchObject({ ignored: true, reason: "signup-link-reminder-already-sent" });
+    }
+    expect(fixture.send).toHaveBeenCalledTimes(1);
+
+    // The planner still yields the reminder only after a link was sent that day.
+    const nextDay = await Promise.all([
+      fixture.receive("evt_reminder_next_day", "2026-07-26T00:00:00.000Z"),
+      fixture.receive("evt_reminder_next_day_race", "2026-07-26T00:00:00.000Z"),
+    ]);
+    expect(nextDay.filter((response) => !response.ignored)).toHaveLength(1);
+    expect(fixture.send).toHaveBeenCalledTimes(2);
+    expect(fixture.send.mock.calls.map(([input]) => input.idempotencyKey)).toEqual([
+      "signup-link-reminder:member_reminder:2026-07-25",
+      "signup-link-reminder:member_reminder:2026-07-26",
+    ]);
+    expect(fixture.send).toHaveBeenCalledWith(expect.objectContaining({
+      chatId: "chat_visible_operational",
+      message: "I already sent your setup link in your Murph messages. Open it to finish setting up Murph.",
+    }));
+  });
+
+  it("releases a failed setup reminder claim and retries with the same daily provider key", async () => {
+    const fixture = buildSignupReminderFixture();
+    fixture.send.mockRejectedValueOnce(new Error("synthetic send failure"));
+    await expect(fixture.receive("evt_failed", "2026-07-25T12:00:00.000Z"))
+      .rejects.toThrow("synthetic send failure");
+    await expect(fixture.receive("evt_retry", "2026-07-25T12:01:00.000Z"))
+      .resolves.toMatchObject({ ignored: false });
+    expect(fixture.send).toHaveBeenCalledTimes(2);
+    expect(fixture.send.mock.calls[0][0].idempotencyKey)
+      .toBe(fixture.send.mock.calls[1][0].idempotencyKey);
+    expect(fixture.send.mock.calls[0][0]).toEqual(fixture.send.mock.calls[1][0]);
+    await fixture.receive("evt_after_retry", "2026-07-25T12:02:00.000Z");
+    expect(fixture.send).toHaveBeenCalledTimes(2);
+  });
+
+  it("stays quiet when the reminder member or daily row disappeared", async () => {
+    for (const missing of ["member", "day"] as const) {
+      const fixture = buildSignupReminderFixture(missing);
+      await expect(fixture.receive("evt_missing", "2026-07-25T12:00:00.000Z"))
+        .resolves.toMatchObject({ ignored: true });
+      expect(fixture.send).not.toHaveBeenCalled();
+    }
+  });
+
   it.each([
     ["stripe-effect-pending", "Billing is already changing"],
     ["family-invite-not-accepted", "Family invite"],
@@ -369,9 +424,13 @@ describe("visible secondary webhook outcomes", () => {
       reason: "signup-link-already-sent",
     }));
     const dependencies: HostedVisibleSecondaryLinqDependencies = {
-      getPrisma: vi.fn(() => ({}) as never),
+      getPrisma: vi.fn(() => ({
+        hostedLinqDailyState: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
+      }) as never),
       lookupHostedMemberByVerifiedEmailAddress: vi.fn(async () => null),
-      lookupHostedMemberIdentityByPhoneNumber: vi.fn(async () => null),
+      lookupHostedMemberIdentityByPhoneNumber: vi.fn(async () => ({
+        core: { id: "member_reminder", suspendedAt: null },
+      }) as never),
       parseHostedLinqWebhookEvent: vi.fn(() => event),
       sendHostedLinqChatMessage,
     };
@@ -391,9 +450,9 @@ describe("visible secondary webhook outcomes", () => {
     });
     expect(sendHostedLinqChatMessage).toHaveBeenCalledWith(expect.objectContaining({
       chatId: "chat_visible_signup",
-      idempotencyKey: "visible-secondary:evt_visible_signup",
+      idempotencyKey: "signup-link-reminder:member_reminder:2026-07-25",
       message: "I already sent your setup link in your Murph messages. Open it to finish setting up Murph.",
-      replyToMessageId: "msg_visible_signup",
+      replyToMessageId: null,
     }));
     expect(sendHostedLinqChatMessage).not.toHaveBeenCalledWith(expect.objectContaining({
       message: expect.stringContaining("above"),
@@ -735,16 +794,68 @@ describe("visible secondary webhook outcomes", () => {
   });
 });
 
+function buildSignupReminderFixture(missing?: "member" | "day") {
+  const claimedDays = new Set<string>();
+  const prisma = {
+    hostedLinqDailyState: {
+      updateMany: vi.fn(async (input: {
+        where: { dayUtc: Date; memberId: string; signupLinkReminderSentAt: null | { not: null } };
+        data: { signupLinkReminderSentAt: Date | null };
+      }) => {
+        const key = `${input.where.memberId}:${input.where.dayUtc.toISOString()}`;
+        if (missing === "day") return { count: 0 };
+        if (input.data.signupLinkReminderSentAt === null) {
+          return { count: claimedDays.delete(key) ? 1 : 0 };
+        }
+        if (claimedDays.has(key)) return { count: 0 };
+        claimedDays.add(key);
+        return { count: 1 };
+      }),
+    },
+  };
+  const send = vi.fn<HostedVisibleSecondaryLinqDependencies["sendHostedLinqChatMessage"]>()
+    .mockResolvedValue({ chatId: "chat_visible_operational", messageId: "msg_reminder" });
+  const handler: HostedOnboardingLinqWebhookHandler = vi.fn(async () => ({
+    ignored: true,
+    ok: true as const,
+    reason: "signup-link-already-sent",
+  }));
+  const wrapped = withHostedVisibleSecondaryLinqOutcomes(handler, {
+    getPrisma: () => prisma as never,
+    lookupHostedMemberByVerifiedEmailAddress: vi.fn(async () => null),
+    lookupHostedMemberIdentityByPhoneNumber: vi.fn(async () => missing === "member" ? null : ({
+      core: { id: "member_reminder", suspendedAt: null },
+    }) as never),
+    parseHostedLinqWebhookEvent,
+    sendHostedLinqChatMessage: send,
+  });
+  return {
+    send,
+    receive: (eventId: string, occurredAt: string) => wrapped({
+      rawBody: JSON.stringify(buildOperationalLinqEvent({
+        eventId,
+        messageId: `msg_${eventId}`,
+        occurredAt,
+        senderHandle: "+12025550101",
+        senderService: "sms",
+      })),
+      signature: "signature",
+      timestamp: "timestamp",
+    }),
+  };
+}
+
 function buildOperationalLinqEvent(input: {
   eventId: string;
   isFromMe?: boolean;
   messageId: string;
+  occurredAt?: string;
   senderHandle: string;
   senderService: "email" | "sms";
 }): ReturnType<typeof requireHostedLinqMessageReceivedEvent> {
   return requireHostedLinqMessageReceivedEvent({
     api_version: "v3",
-    created_at: "2026-07-25T12:00:00.000Z",
+    created_at: input.occurredAt ?? "2026-07-25T12:00:00.000Z",
     data: {
       chat: {
         id: "chat_visible_operational",
@@ -772,7 +883,7 @@ function buildOperationalLinqEvent(input: {
         id: "handle_sender",
         service: input.senderService,
       },
-      sent_at: "2026-07-25T12:00:00.000Z",
+      sent_at: input.occurredAt ?? "2026-07-25T12:00:00.000Z",
       service: "sms",
     },
     event_id: input.eventId,

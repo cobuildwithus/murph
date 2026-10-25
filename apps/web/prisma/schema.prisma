@@ -2660,6 +2660,7 @@ model HostedLinqDailyState {
   inboundCount         Int          @default(0) @map("inbound_count")
   outboundCount        Int          @default(0) @map("outbound_count")
   onboardingLinkSentAt DateTime?    @map("onboarding_link_sent_at")
+  signupLinkReminderSentAt DateTime? @map("signup_link_reminder_sent_at")
   quotaReplySentAt     DateTime?    @map("quota_reply_sent_at")
   firstSeenAt          DateTime     @map("first_seen_at")
   lastSeenAt           DateTime     @map("last_seen_at")

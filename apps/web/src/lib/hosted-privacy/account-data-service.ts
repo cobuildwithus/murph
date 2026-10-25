@@ -2288,6 +2288,7 @@ async function deleteHostedGroupJoinOutreachRowsForMembers(
         memberId: identity.memberId,
       }));
       await prisma.hostedLinqDailyState.updateMany({
+        // Preserve the independent daily reminder allowance when reopening signup.
         data: { onboardingLinkSentAt: null },
         where: {
           ...(identityWhere.length === 1 ? identityWhere[0] : { OR: identityWhere }),

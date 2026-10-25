@@ -1530,3 +1530,7 @@ Settings authentication without paid access or consent re-grant, and actor-aware
 Urgent Junction hints release pending routine batches through the immediate mailbox owner; proof is tracked in [urgent wearable handoff](exec-plans/active/2026-10-24-temporal-urgent-handoff.md).
 
 Protected read-only mailbox checkpoint inspection is owned by `agent-docs/SECURITY.md`; its distinct sealed schema reuses the protected assessment job, fails closed on older readers and never repairs historical state.
+
+Quiet Linq setup reminders and automated first-contact admission are owned by
+`../ARCHITECTURE.md`; local implementation and proof are recorded in
+[the bounded fix](exec-plans/completed/2026-10-25-linq-quiet-signup-reminder.md).
