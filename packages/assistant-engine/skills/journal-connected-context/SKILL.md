@@ -41,7 +41,7 @@ not delay reading until another run. Continue directly to the applicable passes.
 Normalize the existing ledger with a compact JSON control object on its first
 body line (the Knowledge service adds a heading):
 
-    {"version":1,"optOuts":{"global":false,"accounts":[],"providers":[],"categories":[]},"activeAccounts":[{"id":"<account-id>","provider":"googlecalendar"}]}
+    {"version":1,"optOuts":{"global":false,"accounts":[],"providers":[],"categories":[],"calendars":[]},"activeAccounts":[{"id":"<account-id>","provider":"googlecalendar"}]}
 
 Put the source mappings as a JSON array below a `## Sources` heading in that same
 page. Keep the control line below 32 KiB; do not embed mappings inside it. Move
@@ -52,7 +52,7 @@ Keep existing source mappings and explicit opt-outs when normalizing legacy text
 never interpret a missing field as permission to undo a saved opt-out. Preserve
 other legacy metadata if necessary. `providers` uses `googlecalendar`, `gmail`, or
 `outlook`; account/category opt-outs use exact account ids or normalized category
-slugs. Each source mapping records `accountId`, `sourceId`, `eventId`, and the
+slugs; calendar opt-outs use `<account-id>:<calendar-id>`. Each source mapping records `accountId`, `sourceId`, `eventId`, and the
 canonical `revision` last written by this capture. Several aliases can share one
 canonical event. Save through `knowledge upsert --slug journal-connected-context
 --body '<JSON>'`; read it back. Keep this active control ledger compact. Account baselines, source ids, and
@@ -74,7 +74,7 @@ disconnect accounts or delete historical Journal records.
 Use only active `googlecalendar` or `outlook` accounts that are not opted out.
 Read the next 14 days, including events already in progress. Reconcile previously saved ongoing and future plans even when they now sit outside that discovery window; query their exact provider ids separately as needed. When the engine supplies `timeMin` and `timeMax`,
 copy those UTC instants exactly instead of calculating offsets or dates.
-Search each exact account and calendar separately.
+Search each exact account and calendar separately, skipping `optOuts.calendars`.
 Do not combine identities or infer that a calendar belongs to another account.
 
 Include training, matches, races, sauna, recovery sessions, long travel,
@@ -84,9 +84,15 @@ relocation, non-routine availability changes, and travel-related commitments.
 Read the relevant active automations and experiment plans when needed to assess
 impact; do not manufacture a goal or log a planned event as completed. Exclude medical care, dental care, therapy,
 tests, procedures, ordinary work meetings, and private social events. Treat an unclear event as
-excluded when it could be medical or private. For a plausible non-sensitive
-activity whose category or ownership is unclear, ask one narrow private
-question before capture. Include clear all-day travel or a race when relevant; retain local dates and
+excluded when it could be medical or private. Capture only the member's own
+plans: events the member organizes or attends, or that sit on a calendar the
+member owns. Shared, family, team, and subscribed calendars commonly hold other
+people's events. When category or ownership is unclear, exclude the event
+silently; never ask the member whether they attend or own a calendar item.
+When the member says an event or calendar is not theirs, delete any plan
+captured from it. Add a calendar to `optOuts.calendars` only when the member
+says the whole calendar is not theirs; later passes skip it.
+Include clear all-day travel or a race when relevant; retain local dates and
 timezone without inventing a clock time. Keep other all-day events excluded
 unless prior evidence establishes their usefulness.
 
