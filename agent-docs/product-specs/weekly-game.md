@@ -44,7 +44,7 @@ clearing its pending change and roster key plus recording one `cancelled` event
 with its actor. The pair can immediately start another invite. Home excludes
 cancelled events, retaining ordinary expired invites; GameView adds no field.
 If a game chat is already attached, the existing durable lifecycle sends one
-brief cancellation notice there, unless the cancellation came from that chat. Cancellation never creates a chat. Its pending
+brief cancellation notice there. Cancellation never creates a chat. Its pending
 notice retains the bound room's existing game allowance until provider dispatch,
 for at most the existing seven-day post-game access window; it grants no personal
 access or extra budget. Dispatch checks the cancelled event and original pair.
@@ -252,9 +252,12 @@ deferred request. Cancelling an
 app-origin change after it was queued or sent also tells the group that the
 request is off, without cancelling the challenge or changing its agreed rules.
 Unsent requests and chat-origin requests do not generate a second announcement,
-and neither does a cancellation, refused approval or game cancellation made from
-the bound chat, where Murph's reply is the one explanation. In chat, either
-player can cancel a negotiating game; a live game cannot be called off, so Murph
+and neither does a change cancellation or refused approval made from the bound
+chat, where Murph's reply is the one explanation. In chat, either player can
+cancel a negotiating game; the lifecycle cancellation notice is then the one
+announcement (Murph does not also reply), because that reserved notice is what
+keeps a game-funded room deliverable once the game is void. A live game cannot
+be called off, so Murph
 says its stakes are locked and offers shortening, rescheduling or marking days
 incomplete. Chat refusals carry the server's plain rule (for example the 60-day
 start limit) so Murph can give the reason and the nearest valid option.

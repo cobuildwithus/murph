@@ -138,6 +138,7 @@ it('cancels a not-yet-started game for the current speaker with no proposal or e
   expect(parse('update_game', { ...args, proposalId: 'proposal_synthetic' })?.kind).toBe('invalid-game-arguments')
   expect(MURPH_UPDATE_GAME_TOOL.inputSchema.properties.operation.enum).toContain('cancel_game')
   expect(MURPH_UPDATE_GAME_TOOL.description).toContain('A live game cannot be called off: its stakes are locked')
+  expect(MURPH_UPDATE_GAME_TOOL.description).toContain('the backend posts the one cancellation notice in this chat: do not announce it yourself')
 })
 
 it('teaches one pending change, current-ask-only proposals, plain refusals and open days', () => {

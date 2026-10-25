@@ -570,7 +570,9 @@ async function cancelInvite(context: CommandContext, gameId: string): Promise<st
   await runLocked(gameId, context, async ({ tx, loaded, clock }) => {
     if (decideCancelInvite(loaded.state, context.actor) === "already-void") return [];
     await endGame(tx, gameId, { status: "void" });
-    if (needsChatLifecycleNotice(context, loaded)) {
+    // Always reserve: the pending notice is also what keeps a game-funded room
+    // able to deliver the one cancellation message after the game is void.
+    if (loaded.row.chatContainerMemberId) {
       await reserveGameChatLifecycleTx({ gameId, kind: "cancelled", now: clock, tx });
     }
     return [{ type: "cancelled", payload: {} }];

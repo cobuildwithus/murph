@@ -296,13 +296,13 @@ describe.skipIf(!enabled)("weekly game change serialization against PostgreSQL",
       expect(await db.hostedLinqDelivery.count({where:{template:"game_change_cancelled",sourceRef:`${gameId}:${proposalId}`}})).toBe(cancelledIn === "chat" ? 0 : 1);
     }
   });
-  it("cancels a negotiating game from its bound chat without a second notice, and refuses a live one", async () => {
+  it("cancels a negotiating game from chat with the one lifecycle notice that keeps the room deliverable, and refuses a live one", async () => {
     for (const cancelledIn of ["chat", "app"] as const) {
       const {a,b,room,gameId} = await setup(); const db = getPrisma();
       await db.game.update({where:{id:gameId},data:{status:"negotiating"}});
       expect(await run(b,{type:"cancelInvite",gameId},cancelledIn === "chat" ? {chatContainerMemberId:room,beforeMutationTx:fence} : {})).toMatchObject({ok:true});
       expect((await readGame(gameId,a))?.status).toBe("void");
-      expect(await db.hostedLinqDelivery.count({where:{template:"game_cancelled",sourceRef:gameId}})).toBe(cancelledIn === "chat" ? 0 : 1);
+      expect(await db.hostedLinqDelivery.count({where:{template:"game_cancelled",sourceRef:gameId,status:"awaiting_generation"}})).toBe(1);
     }
     const {b,room,gameId} = await setup();
     expect(await run(b,{type:"cancelInvite",gameId},{chatContainerMemberId:room,beforeMutationTx:fence}))

@@ -1555,10 +1555,10 @@ export const HOSTED_STALE_RETRY_SUPPRESSION_REASON =
 export type HostedStaleRetryDropReason = "too_old" | "newer_message_answered";
 
 /**
- * A pending input reaching the background pass is a retry of a turn that did
- * not finish. Drop it without replying once its message is too old, or once a
- * newer message in the same chat was answered, so a late reply never lands
- * out of order. Image completions keep their own slower recovery.
+ * A pending member message reaching the background pass is a retry of a turn
+ * that did not finish. Drop it without replying once its message is too old,
+ * or once a newer member message in the same chat was answered, so a late
+ * reply never lands out of order.
  */
 export async function dropHostedStalePendingAssistantInputRetries(input: {
   events: readonly AssistantInputEventRecord[];
@@ -1569,7 +1569,7 @@ export async function dropHostedStalePendingAssistantInputRetries(input: {
   kept: AssistantInputEventRecord[];
 }> {
   const nowMs = (input.now ?? new Date()).getTime();
-  const candidates = input.events.filter((event) => !isAssistantHostedImageCompletionEvent(event));
+  const candidates = input.events.filter(isHostedMemberConversationInput);
   if (candidates.length === 0) {
     return { dropped: [], kept: [...input.events] };
   }
@@ -1592,7 +1592,7 @@ export async function dropHostedStalePendingAssistantInputRetries(input: {
       limit: Number.MAX_SAFE_INTEGER,
       vault: input.vaultRoot,
     })).events.filter((event) =>
-      !pendingInputIds.has(event.inputId) && event.conversation?.actorIsSelf !== true);
+      !pendingInputIds.has(event.inputId) && isHostedMemberConversationInput(event));
     const answered = new Map<string, boolean>();
     const isAnswered = async (event: AssistantInputEventRecord) => {
       const known = answered.get(event.inputId);
@@ -1632,6 +1632,18 @@ export async function dropHostedStalePendingAssistantInputRetries(input: {
     dropped: dropped.map((event) => ({ inputId: event.inputId, reason: reasons.get(event.inputId)! })),
     kept: input.events.filter((event) => !reasons.has(event.inputId)),
   };
+}
+
+/**
+ * Only a member's own chat message is a retry that can go stale or be
+ * superseded. System inputs (delivery failures, image completions) keep their
+ * own recovery and never count as a newer answered message.
+ */
+function isHostedMemberConversationInput(event: AssistantInputEventRecord): boolean {
+  return event.sourceRef.kind === "hosted-mailbox"
+    && event.sourceRef.lane === "conversation"
+    && event.conversation?.actorIsSelf !== true
+    && !isAssistantHostedImageCompletionEvent(event);
 }
 
 function isSameHostedPendingInputChat(

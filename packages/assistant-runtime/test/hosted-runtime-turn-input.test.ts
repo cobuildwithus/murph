@@ -2246,6 +2246,14 @@ describe("selectHostedAssistantInputIds", () => {
     expect((await readAssistantAutoReplyTerminalEvidenceByEvidenceId(vaultRoot, failed.inputId))?.terminal)
       .toMatchObject({ kind: "suppressed" });
     expect((await selectHostedAssistantInputIds({ mode: "background", vaultRoot })).inputIds).toEqual([]);
+
+    // A system input (for example a delivery failure) keeps its own recovery even when its timestamp is old.
+    const systemNote = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({ dedupeKey: "dedupe_system_old", eventId: "evt_system_old", itemId: "item_system_old", lane: "system", laneSeq: "11", causalSeq: "11", messageId: "msg_system_old" }),
+    });
+    await enqueueHostedPendingAssistantInputId({ inputId: systemNote.inputId, vaultRoot });
+    expect((await selectHostedAssistantInputIds({ mode: "background", vaultRoot })).inputIds).toEqual([systemNote.inputId]);
   });
 
   it("drops a background retry once a newer message in the same chat was answered", async () => {
@@ -2266,7 +2274,14 @@ describe("selectHostedAssistantInputIds", () => {
     await writeAssistantAutoReplyReplyTerminalEvidence({ captureIds: [], inputIds: [otherChat.inputId], deliveryIntentId: null, outcome: "result", recordedAt: "2026-04-23T00:00:05.000Z", sessionId: "session_other", vault: vaultRoot });
     await enqueueHostedPendingAssistantInputId({ inputId: failed.inputId, vaultRoot });
 
-    // An answer in another chat does not make this one stale.
+    const answeredSystemNote = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({ dedupeKey: "dedupe_system_note", eventId: "evt_system_note", itemId: "item_system_note", lane: "system", laneSeq: "11b", causalSeq: "11", messageId: "msg_system_note",
+        occurredAt: "2026-04-23T00:00:30.000Z", receivedAt: "2026-04-23T00:00:31.000Z" }),
+    });
+    await writeAssistantAutoReplyReplyTerminalEvidence({ captureIds: [], inputIds: [answeredSystemNote.inputId], deliveryIntentId: null, outcome: "result", recordedAt: "2026-04-23T00:00:40.000Z", sessionId: "session_system", vault: vaultRoot });
+
+    // An answer in another chat, or to a system input in this chat, does not make this one stale.
     expect((await selectHostedAssistantInputIds({ mode: "background", vaultRoot })).inputIds).toEqual([failed.inputId]);
 
     const newer = await upsertAssistantInputEvent({
