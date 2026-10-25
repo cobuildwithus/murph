@@ -511,11 +511,11 @@ describe("hosted product feedback digest", () => {
     try {
       await expect(runDigest({
         env,
-        now: new Date("2026-07-30T22:00:30.000Z"),
+        now: new Date("2026-10-24T22:00:30.000Z"),
       })).rejects.toMatchObject({ code: "RESEND_SEND_FAILED" });
       await expect(runDigest({
         env,
-        now: new Date("2026-07-30T22:10:30.000Z"),
+        now: new Date("2026-10-24T22:10:30.000Z"),
       })).resolves.toMatchObject({ feedbackCount: 1, outcome: "sent" });
     } finally {
       await closeTestServer(server);
@@ -524,16 +524,16 @@ describe("hosted product feedback digest", () => {
     expect(captured[0]).toEqual(captured[2]);
     expect(captured[1]).toEqual(captured[3]);
     expect([...deliveredKeys]).toEqual([
-      "hosted-product-feedback-digest/2026-07-30",
-      "hosted-usage-report-digest/2026-07-30",
+      "hosted-product-feedback-digest/2026-10-24",
+      "hosted-usage-report-digest/2026-10-24",
     ]);
     const feedback = JSON.parse(captured[0]!.body);
     const usage = JSON.parse(captured[1]!.body);
-    expect(feedback.subject).toBe("Murph feedback — 2026-07-30");
+    expect(feedback.subject).toBe("Murph feedback — 2026-10-24");
     expect(feedback.text).toContain("Requested a calendar export.");
     expect(feedback.text).not.toContain(reportSummary);
     expect(usage).toMatchObject({
-      subject: "Biweekly usage reports — 2026-07-30",
+      subject: "Biweekly usage reports — 2026-10-24",
       to: feedback.to,
     });
     expect(usage.text).toContain(reportSummary);
@@ -551,11 +551,56 @@ describe("hosted product feedback digest", () => {
       ...feedbackQuery,
       where: {
         ...feedbackQuery.where,
+        createdAt: {
+          gte: new Date("2026-10-10T22:00:00.000Z"),
+          lt: new Date("2026-10-24T22:00:00.000Z"),
+        },
         NOT: feedbackQuery.where.NOT.slice(0, -1),
         summary: { not: null, startsWith: "Usage optimization audit:" },
       },
     });
     expect(mocks.groupBy.mock.calls[1]![0].where).toEqual(usageQuery.where);
+  });
+
+  it("collects usage reports only on the fixed 14-day cadence", async () => {
+    const readUsageReports = vi.fn(async () => createFeedbackDigestBatch());
+    const sendEmail = vi.fn(async () => ({ providerMessageId: "email_1" }));
+    for (const now of [
+      "2026-10-31T22:00:30.000Z",
+      "2026-11-06T23:00:30.000Z",
+      "2026-11-08T23:00:30.000Z",
+    ]) {
+      await runDigest({
+        env: feedbackDigestEnv,
+        now: new Date(now),
+        readFeedback: async () => createFeedbackDigestBatch(),
+        readUsageReports,
+        sendEmail,
+      });
+    }
+    expect(readUsageReports).not.toHaveBeenCalled();
+
+    for (const now of ["2026-11-07T23:00:30.000Z", "2026-11-21T23:00:30.000Z"]) {
+      await runDigest({
+        env: feedbackDigestEnv,
+        now: new Date(now),
+        readFeedback: async () => createFeedbackDigestBatch(),
+        readUsageReports,
+        sendEmail,
+      });
+    }
+    expect(readUsageReports.mock.calls).toEqual([
+      [{
+        endAt: new Date("2026-11-07T23:00:00.000Z"),
+        startAt: new Date("2026-10-24T22:00:00.000Z"),
+        usageReportsOnly: true,
+      }],
+      [{
+        endAt: new Date("2026-11-21T23:00:00.000Z"),
+        startAt: new Date("2026-11-07T23:00:00.000Z"),
+        usageReportsOnly: true,
+      }],
+    ]);
   });
 
   it("does not send a separate email when the usage report window is empty", async () => {
@@ -564,12 +609,12 @@ describe("hosted product feedback digest", () => {
     const sendEmail = vi.fn(async () => ({ providerMessageId: "email_1" }));
     await runDigest({
       env: feedbackDigestEnv,
-      now: new Date("2026-07-30T22:00:30.000Z"),
+      now: new Date("2026-10-24T22:00:30.000Z"),
       sendEmail,
     });
     expect(sendEmail).toHaveBeenCalledTimes(1);
     expect(sendEmail).toHaveBeenCalledWith(expect.objectContaining({
-      subject: "Murph feedback — 2026-07-30",
+      subject: "Murph feedback — 2026-10-24",
       text: "- No feedback logged.",
     }));
   });

@@ -19,6 +19,10 @@ import { getPrisma } from "../prisma";
 export const HOSTED_PRODUCT_FEEDBACK_DIGEST_TIME_ZONE = "America/New_York";
 export const HOSTED_PRODUCT_FEEDBACK_DIGEST_SEND_HOUR = 18;
 export const HOSTED_PRODUCT_FEEDBACK_DIGEST_MAX_ROWS = 200;
+// Per-member usage optimizers run on staggered 14-day cycles, so their
+// reports are collected into one email on this fixed 14-day cadence.
+export const HOSTED_USAGE_REPORT_DIGEST_ANCHOR_DAY = "2026-11-07";
+export const HOSTED_USAGE_REPORT_DIGEST_CYCLE_DAYS = 14;
 
 const HOSTED_PRODUCT_FEEDBACK_DIGEST_RECIPIENTS_ENV =
   "HOSTED_PRODUCT_FEEDBACK_DIGEST_EMAILS";
@@ -102,15 +106,18 @@ export async function runHostedProductFeedbackDigest(input: {
     to: emailConfig.recipients,
   });
 
-  const usageReports = await (
-    input.readUsageReports ?? readHostedProductFeedbackDigestBatch
-  )({
-    endAt: window.endAt,
-    startAt: window.startAt,
-    usageReportsOnly: true,
-  });
-  const usageReportCount = countHostedProductFeedbackDigestBatch(usageReports);
-  if (usageReportCount > 0) {
+  const usageWindow = resolveHostedUsageReportDigestWindow(window.dayKey);
+  const usageReports = usageWindow
+    ? await (input.readUsageReports ?? readHostedProductFeedbackDigestBatch)({
+        endAt: usageWindow.endAt,
+        startAt: usageWindow.startAt,
+        usageReportsOnly: true,
+      })
+    : null;
+  const usageReportCount = usageReports
+    ? countHostedProductFeedbackDigestBatch(usageReports)
+    : 0;
+  if (usageReports && usageReportCount > 0) {
     const omittedCount = usageReportCount - usageReports.rows.length;
     await (input.sendEmail ?? sendHostedResendPlainTextEmail)({
       config: emailConfig.resend,
@@ -153,6 +160,26 @@ export function resolveHostedProductFeedbackDigestWindow(now: Date): {
     endAt: resolveHostedProductFeedbackDigestBoundary(dayKey),
     startAt: resolveHostedProductFeedbackDigestBoundary(
       addDaysToIsoDate(dayKey, -1),
+    ),
+  };
+}
+
+export function resolveHostedUsageReportDigestWindow(dayKey: string): {
+  endAt: Date;
+  startAt: Date;
+} | null {
+  const daysFromAnchor = Math.round(
+    (Date.parse(dayKey) - Date.parse(HOSTED_USAGE_REPORT_DIGEST_ANCHOR_DAY)) /
+      86_400_000,
+  );
+  if (daysFromAnchor % HOSTED_USAGE_REPORT_DIGEST_CYCLE_DAYS !== 0) {
+    return null;
+  }
+
+  return {
+    endAt: resolveHostedProductFeedbackDigestBoundary(dayKey),
+    startAt: resolveHostedProductFeedbackDigestBoundary(
+      addDaysToIsoDate(dayKey, -HOSTED_USAGE_REPORT_DIGEST_CYCLE_DAYS),
     ),
   };
 }

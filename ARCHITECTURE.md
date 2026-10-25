@@ -2210,8 +2210,10 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   `Biweekly usage reports — <day>` email with report totals and overflow counts,
   without feature-request labels or member identifiers. The managed usage
   optimizer runs every 14 days and requests 14 days of usage diagnostics,
-  preserving its existing automation identity. The daily
-  email sweep delivers newly produced reports and skips empty usage windows.
+  preserving its existing automation identity. Member cycles are staggered,
+  so the daily email sweep sends the usage email only on a fixed 14-day
+  cadence anchored on 2026-11-07, covering the full 14 days since the previous
+  cadence day, and skips empty usage windows.
   Usage delivery has its own `hosted-usage-report-digest/<day>` Resend key,
   so retries after a partial send reuse each email's original key.
 
