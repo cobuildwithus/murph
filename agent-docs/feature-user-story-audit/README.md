@@ -7,9 +7,9 @@ This folder holds the canonical hosted-web feature tracker for the broad user-st
 - `feature-status.csv` is the current spreadsheet-compatible source of truth.
 - Each row is one feature/user story derived from current code and test evidence.
 - The tracker includes inventory columns and testing-loop columns so testing can proceed in the same artifact.
-- Current rollup: 209 feature rows; 205 inventoried and 4 dead/unreachable; 185 testing-loop rows passed and 24 are blocked by missing automated story tests.
+- Current rollup: 202 feature rows; 198 inventoried and 4 dead/unreachable; 180 testing-loop rows passed and 21 are blocked by missing automated story tests.
 - `testing-errors.md` summarizes all non-passing story rows and verification-level notes, derived from the tracker.
-- `gap-triage.md` explains why the 24 missing-test rows and 4 dead/unreachable rows are missing, blocked, or unreachable.
+- `gap-triage.md` explains why the 21 missing-test rows and 4 dead/unreachable rows are missing, blocked, or unreachable.
 
 ## Columns
 

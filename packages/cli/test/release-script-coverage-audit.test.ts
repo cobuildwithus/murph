@@ -1715,18 +1715,17 @@ describe('monorepo release flow coverage audit', () => {
     expect(reviewGptConfig).toContain(
       '&& ! -d "$review_gpt_selected_browser_app" ]]; then',
     )
-    expect(reviewGptConfig).toContain('hercules) printf \'%s\\n\' "Hercules" ;;')
-    expect(reviewGptConfig).toContain('hercules) printf \'%s\\n\' "9444" ;;')
+    expect(reviewGptConfig).not.toContain('hercules)')
     expect(reviewGptConfig).toContain('vonneumann) printf \'%s\\n\' "Vonneumann" ;;')
     expect(reviewGptConfig).toContain('vonneumann) printf \'%s\\n\' "9446" ;;')
     expect(reviewGptConfig).toContain('apollo) printf \'%s\\n\' "Apollo" ;;')
     expect(reviewGptConfig).toContain('apollo) printf \'%s\\n\' "9454" ;;')
     expect(reviewGptConfig).toContain(
-      'review_gpt_all_browser_lanes=(eragon hercules mountain vonneumann apollo)',
+      'review_gpt_all_browser_lanes=(eragon mountain vonneumann apollo)',
     )
     expect(reviewGptConfig).toContain('MURPH_REVIEW_GPT_PROFILE_SLUG:-auto')
     expect(reviewGptConfig).toContain('REVIEW_GPT_BROWSER_LANE_COUNT')
-    expect(reviewGptConfig).toContain('MURPH_REVIEW_GPT_BROWSER_LANE_COUNT:-5')
+    expect(reviewGptConfig).toContain('MURPH_REVIEW_GPT_BROWSER_LANE_COUNT:-4')
     expect(reviewGptConfig).toContain('REVIEW_GPT_THREAD_URL')
     expect(reviewGptConfig).toContain('review_gpt_reuses_existing_thread=1')
     expect(reviewGptConfig).toContain(
@@ -2251,7 +2250,7 @@ printf '%s|%s|%s|%s|%s\n' \
       )
 
       rmSync(path.join(localConfigRoot, 'murph', 'review-gpt.conf'))
-      for (const lane of ['Eragon', 'Hercules', 'Mountain']) {
+      for (const lane of ['Eragon', 'Mountain']) {
         writeHarnessFile(
           harnessRoot,
           `Library/Application Support/MurphReviewGPT/${lane}/SingletonLock`,
@@ -2277,7 +2276,7 @@ printf '%s|%s|%s|%s|%s\n' \
         defaultDisplayMode,
       ] = defaultResult.stdout.trim().split('|')
       expect(['vonneumann', 'apollo']).toContain(defaultLane)
-      expect(defaultLaneCount).toBe('5')
+      expect(defaultLaneCount).toBe('4')
       expect(defaultBrowser).toBe(
         '/Applications/Brave Browser.app/Contents/MacOS/Brave Browser',
       )
@@ -2297,13 +2296,13 @@ printf '%s|%s|%s|%s|%s\n' \
       })
       expect(mainResult.status, mainResult.stderr).toBe(0)
       expect(mainResult.stdout.trim()).toBe(
-        'main|5|/Applications/Brave Browser.app/Contents/MacOS/Brave Browser|balanced|headful',
+        'main|4|/Applications/Brave Browser.app/Contents/MacOS/Brave Browser|balanced|headful',
       )
 
       writeHarnessFile(
         localConfigRoot,
         'murph/review-gpt.conf',
-        'REVIEW_GPT_BROWSER_LANE_COUNT=4\n',
+        'REVIEW_GPT_BROWSER_LANE_COUNT=3\n',
       )
       const optedInResult = spawnSync('bash', ['-c', configHarness], {
         cwd: repoRoot,
@@ -2317,7 +2316,7 @@ printf '%s|%s|%s|%s|%s\n' \
       })
       expect(optedInResult.status, optedInResult.stderr).toBe(0)
       expect(optedInResult.stdout.trim()).toBe(
-        'vonneumann|4|/Applications/Brave Browser.app/Contents/MacOS/Brave Browser|balanced|headful',
+        'vonneumann|3|/Applications/Brave Browser.app/Contents/MacOS/Brave Browser|balanced|headful',
       )
 
       writeHarnessFile(
@@ -2328,9 +2327,9 @@ printf '%s|%s|%s|%s|%s\n' \
       writeHarnessFile(
         localConfigRoot,
         'murph/review-gpt.conf',
-        'REVIEW_GPT_BROWSER_LANE_COUNT=5\n',
+        'REVIEW_GPT_BROWSER_LANE_COUNT=4\n',
       )
-      const fiveLaneResult = spawnSync('bash', ['-c', configHarness], {
+      const fourLaneResult = spawnSync('bash', ['-c', configHarness], {
         cwd: repoRoot,
         encoding: 'utf8',
         env: {
@@ -2340,15 +2339,15 @@ printf '%s|%s|%s|%s|%s\n' \
           XDG_CONFIG_HOME: localConfigRoot,
         },
       })
-      expect(fiveLaneResult.status, fiveLaneResult.stderr).toBe(0)
-      expect(fiveLaneResult.stdout.trim()).toBe(
-        'apollo|5|/Applications/Brave Browser.app/Contents/MacOS/Brave Browser|balanced|headful',
+      expect(fourLaneResult.status, fourLaneResult.stderr).toBe(0)
+      expect(fourLaneResult.stdout.trim()).toBe(
+        'apollo|4|/Applications/Brave Browser.app/Contents/MacOS/Brave Browser|balanced|headful',
       )
 
       writeHarnessFile(
         localConfigRoot,
         'murph/review-gpt.conf',
-        'REVIEW_GPT_BROWSER_LANE_COUNT=6\n',
+        'REVIEW_GPT_BROWSER_LANE_COUNT=5\n',
       )
       const invalidLaneCountResult = spawnSync('bash', ['-c', configHarness], {
         cwd: repoRoot,
@@ -2362,12 +2361,12 @@ printf '%s|%s|%s|%s|%s\n' \
       })
       expect(invalidLaneCountResult.status).not.toBe(0)
       expect(invalidLaneCountResult.stderr).toContain(
-        'REVIEW_GPT_BROWSER_LANE_COUNT must be an integer from 1 to 5',
+        'REVIEW_GPT_BROWSER_LANE_COUNT must be an integer from 1 to 4',
       )
       writeHarnessFile(
         localConfigRoot,
         'murph/review-gpt.conf',
-        'REVIEW_GPT_BROWSER_LANE_COUNT=5\n',
+        'REVIEW_GPT_BROWSER_LANE_COUNT=4\n',
       )
 
       const missingThreadResult = spawnSync('bash', ['-c', configHarness], {
@@ -2411,7 +2410,7 @@ printf '%s|%s|%s|%s|%s\n' \
         env: {
           ...cleanBrowserPreferenceEnv(),
           HOME: harnessRoot,
-          MURPH_REVIEW_GPT_BROWSER_LANE: 'hercules',
+          MURPH_REVIEW_GPT_BROWSER_LANE: 'eragon',
           REPO_ROOT: repoRoot,
           REVIEW_GPT_REVIEW_PHASE: 'final',
           REVIEW_GPT_ROUND_NUMBER: '3',
@@ -2460,7 +2459,7 @@ printf '%s|%s|%s|%s|%s\n' \
             ...cleanBrowserPreferenceEnv(),
             HOME: harnessRoot,
             REPO_ROOT: repoRoot,
-            REVIEW_GPT_BROWSER_LANE: 'hercules',
+            REVIEW_GPT_BROWSER_LANE: 'eragon',
             REVIEW_GPT_REVIEW_PHASE: 'final',
             REVIEW_GPT_ROUND_NUMBER: '3',
             REVIEW_GPT_THREAD_URL: 'https://chatgpt.com/c/fallback-thread',
@@ -2470,7 +2469,7 @@ printf '%s|%s|%s|%s|%s\n' \
       )
       expect(existingThreadResult.status, existingThreadResult.stderr).toBe(0)
       expect(existingThreadResult.stdout.trim().split('\n').at(-2)).toMatch(
-        /^hercules\|/u,
+        /^eragon\|/u,
       )
       expect(existingThreadResult.stdout.trim().split('\n').at(-1)).toBe(
         'https://chatgpt.com/c/fallback-thread',
@@ -2479,7 +2478,7 @@ printf '%s|%s|%s|%s|%s\n' \
       const correctionPresetHarness = `${configHarness}
 printf '%s|%s|%s|%s|%s\n' "$review_gpt_selected_browser_lane" "$review_gpt_selected_browser_display" "$review_gpt_selected_browser_port" "$managed_browser_user_data_dir" "$review_gpt_pr_review_prompt_file"
 review_gpt_managed_ports=()
-for review_gpt_lane in main eragon hercules mountain vonneumann apollo; do
+for review_gpt_lane in main eragon mountain vonneumann apollo; do
   review_gpt_managed_ports+=("$(review_gpt_browser_lane_port "$review_gpt_lane")")
 done
 printf '%s\n' "\${review_gpt_managed_ports[*]}"
@@ -2522,7 +2521,6 @@ printf '%s\n' "\${review_gpt_managed_ports[*]}"
       expect(managedPorts).toEqual([
         '9452',
         '9448',
-        '9444',
         '9450',
         '9446',
         '9454',
