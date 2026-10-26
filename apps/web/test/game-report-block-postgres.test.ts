@@ -8,6 +8,7 @@ vi.mock("@/src/lib/game/chat-delivery", () => ({ deliverGameChangeProposal: vi.f
 vi.mock("@/src/lib/hosted-onboarding/resend-plain-text-email", () => ({ sendHostedResendPlainTextEmail: mocks.sendEmail }));
 
 import type { GameCommand, GameTermsInput } from "@/src/lib/game/contract";
+import { applyGameAccountDeletionTx, prepareGameAccountDeletion } from "@/src/lib/game/account-deletion";
 import { reserveGameChatLifecycleTx } from "@/src/lib/game/chat-lifecycle-receipt";
 import { openGameTexts } from "@/src/lib/game/crypto";
 import { readGameReportQueue, reviewGameReport } from "@/src/lib/game/report-review";
@@ -294,6 +295,25 @@ describe.skipIf(!runPostgresProof)("weekly game report and block", () => {
       .toMatchObject({ about: "player", reportedMemberId: sam, snapshotMediaKeys: [photoKey] });
     expect(await getPrisma().gameBlock.count({ where: { blockedMemberId: sam, blockerMemberId: leo } })).toBe(1);
     expect(mocks.sendEmail.mock.calls.at(-1)![0]).toMatchObject({ text: expect.stringContaining("They blocked the other player too: yes") });
+  });
+
+  it("keeps a report when the reported member deletes their account, and drops their blocks", async () => {
+    const leo = await member("Leo");
+    const ava = await member("Ava");
+    const gameId = await live(leo, ava);
+    const rude = await words(ava, gameId, "Rude words");
+    await words(leo, gameId, "Leo day one");
+    const command = report(gameId, { about: "post", entryId: rude, block: true });
+    await ok(leo, command);
+    const prepared = await prepareGameAccountDeletion({ memberIds: [ava], prisma: getPrisma() });
+    await getPrisma().$transaction(async (tx) => {
+      await applyGameAccountDeletionTx({ memberIds: [ava], now: new Date(), prepared, tx });
+      await tx.hostedMember.delete({ where: { id: ava } });
+    });
+    const kept = await getPrisma().gameReport.findUniqueOrThrow({ where: { id: command.reportId } });
+    expect(kept).toMatchObject({ entryId: null, reportedMemberId: null, reporterMemberId: leo });
+    expect((await openGameTexts([{ field: "snapshot", memberId: leo, rowId: kept.id, table: "game_report", value: kept.snapshotTextEncrypted }]))[0]).toBe("Rude words");
+    expect(await getPrisma().gameBlock.count({ where: { blockerMemberId: leo } })).toBe(0);
   });
 
   it("refuses money in a stake before anything is stored", async () => {
