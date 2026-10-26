@@ -16,7 +16,7 @@ describe('Bluetooth wearable help contract', () => {
     expect(skill).toMatch(/^---\nname: bluetooth-device-help\ndescription: .+\n---/u)
     // Murph's game is invite only, so the skill never presents it as every member's app feature.
     expect(skill).not.toMatch(/iPhone game|game connection flow/u)
-    expect(skill).toContain("Murph's game is invite only, so do not bring it up unless the member does.")
+    expect(skill).toContain('Name the game or that screen\nonly after the member mentions the game')
   })
 
   it.each(['direct', 'group'] as const)('routes local Bluetooth before setup without suppressing cloud sync (%s)', (scope) => {

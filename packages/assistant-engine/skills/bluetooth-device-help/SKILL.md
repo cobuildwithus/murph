@@ -25,7 +25,11 @@ Murph's iPhone app reads WHOOP's own realtime stream. WHOOP 4.0, 5.0 and MG
 are supported; older bands are not supported yet. Say that plainly for an older
 band instead of continuing pairing steps. Do not promise another band's or
 Android app's live-heart-rate support without a verified product contract.
-Murph's game is invite only, so do not bring it up unless the member does.
+
+Live heart rate is part of Murph's game, which is invite only. Its Connect
+WHOOP button is on the game's heart rate screen. Name the game or that screen
+only after the member mentions the game; otherwise ask what Murph shows them,
+and never point them to a Settings or devices screen.
 
 This connection does not require WHOOP's generic Heart Rate Broadcast switch,
 an Apple Health import, or a cloud account reconnect. Do not offer those as
