@@ -26,7 +26,7 @@ engineStrict: true
 managePackageManagerVersions: true
 minimumReleaseAge: 1440
 overrides:
-  '@cobuild/review-gpt@0.5.155>incur': 0.4.5
+  '@cobuild/review-gpt@0.5.156>incur': 0.4.5
   '@cloudflare/vitest-pool-workers@0.16.3>esbuild': 0.28.1
   '@coinbase/cdp-sdk@1.48.3>axios': 1.20.0
   '@lob/lob-typescript-sdk@1.4.0>axios': 1.20.0
@@ -104,7 +104,7 @@ overrides:
   "hono@4.12.25": 4.13.11
 minimumReleaseAgeExclude:
   - '@cobuild/repo-tools@0.1.18'
-  - '@cobuild/review-gpt@0.5.155'
+  - '@cobuild/review-gpt@0.5.156'
   - '@onkernel/sdk@0.76.0'
   - '@openai/codex@0.163.0||0.163.0-darwin-arm64||0.163.0-darwin-x64||0.163.0-linux-arm64||0.163.0-linux-x64||0.163.0-win32-arm64||0.163.0-win32-x64'
   - '@temporalio/activity@1.16.3'
@@ -122,7 +122,7 @@ packageManagerStrictVersion: true
 patchedDependencies:
   '@cloudflare/containers@0.3.7': patches/@cloudflare__containers@0.3.7.patch
   '@cobuild/repo-tools@0.1.18': patches/@cobuild__repo-tools@0.1.18.patch
-  '@cobuild/review-gpt@0.5.155': patches/@cobuild__review-gpt@0.5.155.patch
+  '@cobuild/review-gpt@0.5.156': patches/@cobuild__review-gpt@0.5.156.patch
   frog@1.1.0: patches/frog@1.1.0.patch
   incur@0.4.5: patches/incur@0.4.5.patch
   incur@0.5.1: patches/incur@0.5.1.patch
