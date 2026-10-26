@@ -24,7 +24,7 @@ vi.mock("../src/lib/hosted-onboarding/linq-delivery-store", () => ({ buildHosted
 vi.mock("../src/lib/hosted-onboarding/linq-observability-identifiers", () => ({ createHostedLinqDeliveryIdempotencyLookupKey: (key: string) => `hash:${key}` }));
 vi.mock("../src/lib/hosted-onboarding/linq-participant-contact", () => ({ createHostedLinqParticipantContactLookupKey: () => "phone-key" }));
 vi.mock("../src/lib/hosted-routing/thread-container-service", () => ({ prepareHostedThreadContainerBootstrap: m.prepareContainer, createHostedGameThreadContainerTx: m.createContainer, prepareHostedThreadContainerDeliveryRoute: m.prepareRoute, attachHostedThreadContainerBootstrapRouteTx: m.attachRoute }));
-vi.mock("../src/lib/game/access", () => ({ isGameEnabledFor: () => true }));
+vi.mock("../src/lib/game/access", () => ({ isGameOn: () => true }));
 vi.mock("../src/lib/game/chat-membership", () => ({ isExactGameChat: (chat: { exact: boolean }) => chat.exact }));
 import { handleGameChatBootstrapControl, prepareGameChatBootstrap, reconcileFrozenGameChatBootstrap, reconcileFrozenGameChatBootstrapReceipt } from "../src/lib/game/chat-bootstrap";
 const gameId = "game_sample";

@@ -11,7 +11,7 @@ import { readHostedMemberIdentity } from "../hosted-onboarding/hosted-member-ide
 import { findExistingGameChat, requireExactChat } from "./chat-membership";
 import { prepareGameChatBootstrap, reconcileFrozenGameChatBootstrapReceipt } from "./chat-bootstrap";
 import { gameChatLifecycleEventId, markGameChatGenerationQueuedTx, type GameChatLifecycleKind } from "./chat-lifecycle-receipt";
-import { isGameEnabledFor } from "./access";
+import { isGameOn } from "./access";
 import { parsePendingGameChange } from "./changes";
 import { deliverGameChangeProposal } from "./chat-delivery";
 import { createHostedLinqDeliveryIdempotencyLookupKey } from "../hosted-onboarding/linq-observability-identifiers";
@@ -147,7 +147,7 @@ export async function deliverGameChatLifecycle(gameId: string, kind: GameChatLif
     await prisma.hostedLinqDelivery.updateMany({ where: { source: "game_lifecycle", sourceRef: kind.startsWith("change_") ? `${gameId}:${proposalId}` : gameId, template: `game_${kind}`, status: "awaiting_generation" }, data: { status: "skipped", skippedAt: new Date(), skipReason: "game_lifecycle_superseded" } });
     return false;
   }
-  if (!game.players.every((player) => isGameEnabledFor(player.memberId))) return false;
+  if (!isGameOn(game)) return false;
   const players = game.players.map((player) => player.memberId);
   // Cancellation needs no private words or shared projection (void games are
   // absent there), and must never discover or create a new chat.
