@@ -5,13 +5,14 @@ import { sendApplePush, type ApplePushRequest } from "../apple-push/send";
 import { companionPushRouteRegistrationSchema, forgetCompanionPushRoute } from "../companion/push-route";
 import { sha256Hex } from "../primitives";
 import { getPrisma } from "../prisma";
-import { isGameEnabledFor } from "./access";
+import { isGameOn } from "./access";
 import { hasUnlockedDay, type RuleEntry } from "./rules";
 import { addDays, dayStartInstant, gameLocalDate } from "./time";
 
 interface ClaimedPostNotification {
   commandKey: string;
   memberId: string;
+  players: readonly { memberId: string }[];
   sessionId: string;
   day: string;
   request: ApplePushRequest;
@@ -32,9 +33,9 @@ export async function claimGamePostNotification(
     entries: readonly RuleEntry[]; dayIndex: number;
   },
 ): Promise<ClaimedPostNotification | null> {
-  if (input.players.length !== 2 || !isGameEnabledFor(input.actor)) return null;
+  if (input.players.length !== 2 || !isGameOn(input)) return null;
   const recipient = input.players.find((player) => player.memberId !== input.actor);
-  if (!recipient || !isGameEnabledFor(recipient.memberId)) return null;
+  if (!recipient) return null;
   const route = await tx.companionPushRoute.findFirst({
     where: { userId: recipient.memberId, alertsAllowed: true, gameSessionId: { not: null }, member: { suspendedAt: null } },
     select: { environment: true, token: true, topic: true, gameSessionId: true },
@@ -56,7 +57,7 @@ export async function claimGamePostNotification(
   });
   if (claimed.count !== 1) return null;
   return {
-    commandKey, memberId: recipient.memberId, sessionId: route.gameSessionId, day,
+    commandKey, memberId: recipient.memberId, players: input.players, sessionId: route.gameSessionId, day,
     request: {
       collapseId: sha256Hex(commandKey),
       data: { gameId: input.gameId, notification: "game_post" },
@@ -90,7 +91,7 @@ export async function deliverGamePostNotification(notification: ClaimedPostNotif
       },
       select: { userId: true },
     });
-    if (!current || !isGameEnabledFor(notification.memberId) || notification.request.expiresAt.getTime() <= Date.now()) {
+    if (!current || !isGameOn(notification) || notification.request.expiresAt.getTime() <= Date.now()) {
       outcome = "superseded";
     } else {
       outcome = await sendApplePush(notification.request);

@@ -14,9 +14,9 @@ const BODY_LIMIT_BYTES = 64 * 1024;
 export async function respondToGameCommand(
   request: Request,
   command: (body: Record<string, unknown>) => Record<string, unknown>,
-  options: { body: boolean } = { body: true },
+  options: { body: boolean; inviteToken?: string } = { body: true },
 ): Promise<Response> {
-  const memberId = await requireGameMember(request);
+  const memberId = await requireGameMember(request, options.inviteToken);
   const body = options.body ? await readJsonObject(request, { limitBytes: BODY_LIMIT_BYTES }) : {};
   const result = await runGameCommand({ actorMemberId: memberId, command: command(body) });
   if (!result.ok) throw gameCommandError(result.error, result.status);

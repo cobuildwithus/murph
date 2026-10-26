@@ -382,6 +382,8 @@ export interface GameView {
 
 export interface GameHomeView {
   me: { memberId: string; firstName: string | null; timeZone: string | null; avatarUrl: string | null; usualKind?: GameEntryKind | null };
+  /** Invite-only: whether this member may start a fresh game. Anyone may rematch. Older apps ignore it. */
+  canStartGames: boolean;
   /**
    * Games and tickets with people you blocked are left out. Everyone you
    * blocked, newest first, by your name for them, to unblock in Settings.

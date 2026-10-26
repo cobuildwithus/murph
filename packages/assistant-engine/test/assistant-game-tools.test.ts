@@ -32,6 +32,8 @@ describe('game dynamic tools', () => {
     expect(resolveMurphDynamicTools({ gamesAvailable: true, gamePhotosAvailable: true })).toContain(MURPH_GAME_PHOTO_TOOL)
     expect(MURPH_UPDATE_GAME_TOOL.description).toContain('ordinary conversational agreement')
     expect(MURPH_UPDATE_GAME_TOOL.description).toContain('do not demand special words')
+    expect(MURPH_READ_GAME_TOOL.description).toContain('call what the loser owes a prize')
+    expect(MURPH_READ_GAME_TOOL.description).toContain('Never call it a ticket, bet, wager, stake or winnings')
   })
   it('advertises v1 limits and stakes without suggesting a legacy graph for every game', () => {
     const change = MURPH_UPDATE_GAME_TOOL.inputSchema.properties.change.properties

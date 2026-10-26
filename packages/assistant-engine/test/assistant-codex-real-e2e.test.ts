@@ -45173,6 +45173,8 @@ describeRealCodex('real Codex game v1 rules e2e', () => {
         expect(result.finalMessage).toMatch(/movie/iu)
       }
       expect(result.finalMessage).not.toMatch(/calendar days|restart|28.day/iu)
+      // What the loser owes is a prize, never betting words.
+      expect(result.finalMessage).not.toMatch(/\b(?:bets?|betting|wager\w*|tickets?|winnings|stakes?|cash(?:ed|ing)? (?:it )?in)\b/iu)
     } finally {
       await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
     }
@@ -45713,6 +45715,8 @@ describeRealCodex('real Codex game bootstrap e2e', () => {
       expect(game.terms.tasks[0]!.text).toContain('https://example.org/walking-plan')
       expect(reply).toMatch(/weekday|mon(?:day)?.*fri/iu)
       expect(reply).toMatch(/brunch/iu)
+      // What the loser owes is a prize, never betting words.
+      expect(reply).not.toMatch(/\b(?:bets?|betting|wager\w*|tickets?|winnings|stakes?|cash(?:ed|ing)? (?:it )?in)\b/iu)
       expect(reply).toMatch(/remind/iu)
       expect(reply).toMatch(/want|like|let me know|if/iu)
       expect(reply).not.toMatch(/as (?:we|I) discussed|like (?:we|I) talked|I(?:'ll| will) remind|reminders? (?:are |is )?(?:set|scheduled)|3\s*a\.?m|synthetic|notification|bootstrap|provider/iu)

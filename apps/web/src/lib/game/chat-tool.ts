@@ -11,7 +11,7 @@ import { assertHostedThreadRouteEgressAuthority } from "../hosted-routing/thread
 import { getPrisma } from "../prisma";
 import { readGameChatState, runGameCommand } from "./service";
 import { gamePairWhere, readGameChatPlayerIds, requireExactGameChat, sameGamePlayers } from "./chat-membership";
-import { isGameEnabled, isGameEnabledFor } from "./access";
+import { isGameEnabled, isGameOn } from "./access";
 
 type Input = { memberId: string; runtimeIdentity: HostedRuntimeIdentity | null; request: HostedGameToolRequest; playerMemberIds?: readonly string[] };
 
@@ -79,14 +79,14 @@ export async function authorizeGameChatActorTx(input: Input, tx: Prisma.Transact
   if (!route) return null;
   await assertHostedThreadRouteEgressAuthority({ authority: route, prisma: tx });
   const actor = await resolveHostedGroupMessageSenderMemberId({ prisma: tx, routeAuthority: route, wake });
-  if (!actor || !isGameEnabledFor(actor)) return null;
+  if (!actor) return null;
   const players = await readGameChatPlayerIds(input.memberId, tx);
   if (!players.includes(actor) || (input.playerMemberIds && !sameGamePlayers(players, input.playerMemberIds))) return null;
   const game = await tx.game.findFirst({
     where: { ...gamePairWhere(players), status: { in: ["negotiating", "live", "settled"] }, ...(input.request.action === "update_game" ? { id: input.request.update.gameId } : input.request.action === "game_photo" ? { id: input.request.photo.gameId } : {}) },
     select: { id: true, players: { select: { memberId: true }, take: 3 } },
   });
-  if (!game || !areGamePlayersAllowed(game.players, input.playerMemberIds)) return null;
+  if (!game || !areGamePlayersAllowed(game, input.playerMemberIds)) return null;
   return actor;
 }
 
@@ -105,7 +105,7 @@ function readGameIncomingRoute(wake: HostedExecutionConversationMessageWake, con
 }
 
 
-function areGamePlayersAllowed(players: readonly { memberId: string }[], expected?: readonly string[]): boolean {
-  if (players.length !== 2 || !players.every((player) => isGameEnabledFor(player.memberId))) return false;
-  return expected === undefined || sameGamePlayers(players.map((player) => player.memberId), expected);
+function areGamePlayersAllowed(game: { players: readonly { memberId: string }[] }, expected?: readonly string[]): boolean {
+  if (game.players.length !== 2 || !isGameOn(game)) return false;
+  return expected === undefined || sameGamePlayers(game.players.map((player) => player.memberId), expected);
 }

@@ -17,6 +17,9 @@ import { GET as home } from "../app/api/game/v1/home/route";
 import { DELETE as unblockRoute, PUT as blockRoute } from "../app/api/game/v1/blocks/[memberId]/route";
 import { POST as reportRoute } from "../app/api/game/v1/games/[id]/reports/route";
 import { GET as media } from "../app/api/game/v1/media/[...key]/route";
+import { POST as redeem } from "../app/api/game/v1/tickets/[id]/redeem/route";
+import { POST as proposeChange } from "../app/api/game/v1/games/[id]/changes/route";
+import { DELETE as cancelChange } from "../app/api/game/v1/games/[id]/changes/[proposalId]/route";
 import { hostedAuthAdapter } from "../src/lib/better-auth/adapter";
 import { serializeHostedNativeSessionToken } from "../src/lib/better-auth/transport";
 import type { GameHomeView, GameView } from "../src/lib/game/contract";
@@ -33,8 +36,9 @@ if (enabled) {
 const memberIds: string[] = [];
 const tokenMember = new Map<string, string>();
 let mediaDir: string;
-const request = (token: string, body?: unknown, method = "POST") => new Request("http://localhost/api/game/v1", {
-  method, headers: { authorization: `Bearer ${serializeHostedNativeSessionToken(token)}`, "content-type": "application/json" },
+const request = (token: string, body?: unknown, method = "POST", heldInvite?: string) => new Request("http://localhost/api/game/v1", {
+  method, headers: { authorization: `Bearer ${serializeHostedNativeSessionToken(token)}`, "content-type": "application/json",
+    ...(heldInvite ? { "x-murph-game-invite": heldInvite } : {}) },
   ...(body === undefined ? {} : { body: JSON.stringify(body) }),
 });
 async function game(response: Promise<Response>): Promise<GameView> {
@@ -45,6 +49,14 @@ async function game(response: Promise<Response>): Promise<GameView> {
   return body.game;
 }
 async function member(firstName: string) {
+  const { id, token } = await account();
+  const response = await profile(request(token, { firstName, timeZone: "UTC" }, "PUT"));
+  expect(response.status).toBe(200);
+  tokenMember.set(token, id);
+  return token;
+}
+/** A signed-in member with no game profile yet, like someone who just signed up from a link. */
+async function account() {
   const id = `game-api-${randomUUID()}`;
   const token = randomUUID().replaceAll("-", "");
   memberIds.push(id);
@@ -56,10 +68,12 @@ async function member(firstName: string) {
   await adapter.create({ model: "session", forceAllowId: true, data: {
     id: `session-${id}`, userId: id, token, expiresAt: new Date(Date.now() + 3_600_000), ...dates,
   } });
-  const response = await profile(request(token, { firstName, timeZone: "UTC" }, "PUT"));
-  expect(response.status).toBe(200);
-  tokenMember.set(token, id);
-  return token;
+  return { id, token };
+}
+async function refused(response: Promise<Response>, code = "GAME_DISABLED") {
+  const result = await response;
+  expect(result.status).toBe(404);
+  expect((await result.json()).error.code).toBe(code);
 }
 async function imageKey(token: string, suffix: number): Promise<string> {
   const uploaded = await upload(new Request("http://localhost/api/game/v1/media", {
@@ -74,6 +88,7 @@ async function photo(token: string, id: string, suffix: number) {
   const mediaKey = await imageKey(token, suffix);
   return game(post(request(token, { entryId: randomUUID(), kind: "photo", mediaKeys: [mediaKey] }), { params: Promise.resolve({ id }) }));
 }
+
 async function mediaStatus(token: string, key: string): Promise<number> {
   const response = await media(new Request(`http://localhost/api/game/v1/media/${encodeURIComponent(key)}`, {
     headers: { authorization: `Bearer ${serializeHostedNativeSessionToken(token)}` } }), { params: Promise.resolve({ key: key.split("/") }) });
@@ -221,4 +236,110 @@ describe.skipIf(!enabled)("game v1 local API smoke", () => {
       expect(recap.days[day].others[0]).not.toHaveProperty("blurHash");
     }
   }, 30_000);
+  describe("invite-only allowlist", () => {
+    const terms = { schedule: { count: 7 }, stakes: [{ kind: "dare", item: "Sing at karaoke" }],
+      tasks: [{ seat: 0, text: "Take a walk" }, { seat: 1, text: "Take a walk" }] };
+    afterAll(() => vi.stubEnv("MURPH_GAME_MEMBER_ALLOWLIST", ""));
+
+    it("lets a new unlisted invitee in through a listed member's invite to play, settle, cash in and rematch, but never start fresh", async () => {
+      const listed = await account();
+      const invitee = await account();
+      const stranger = await account();
+      vi.stubEnv("MURPH_GAME_MEMBER_ALLOWLIST", listed.id);
+      expect((await profile(request(listed.token, { firstName: "Listed", timeZone: "UTC" }, "PUT"))).status).toBe(200);
+      const id = randomUUID();
+      const context = { params: Promise.resolve({ id }) };
+      const created = await game(create(request(listed.token, { gameId: id, inviteeFirstName: "Invitee", terms })));
+      const token = created.inviteToken!;
+
+      // Before the invite, the routes are missing for the unlisted, as for everyone else.
+      await refused(home(request(invitee.token, undefined, "GET")));
+      await refused(profile(request(invitee.token, { firstName: "Invitee", timeZone: "UTC" }, "PUT")));
+      // Holding the open invite lets them look and set up; Home says they can't start one.
+      const held = await home(request(invitee.token, undefined, "GET", token));
+      expect(held.status).toBe(200);
+      expect(await held.json()).toMatchObject({ canStartGames: false });
+      expect((await profile(request(invitee.token, { firstName: "Invitee", timeZone: "UTC" }, "PUT", token))).status).toBe(200);
+      // The accept route vouches with its own token; no header needed.
+      expect((await game(accept(request(invitee.token, { termsVersion: 1, timeZone: "UTC" }), { params: Promise.resolve({ token }) }))).status).toBe("live");
+
+      const homeView: GameHomeView = await (await home(request(invitee.token, undefined, "GET"))).json();
+      expect(homeView.games.map((shown) => shown.id)).toEqual([id]);
+      expect(homeView.canStartGames).toBe(false);
+      const listedHome: GameHomeView = await (await home(request(listed.token, undefined, "GET"))).json();
+      expect(listedHome.canStartGames).toBe(true);
+
+      await photo(invitee.token, id, 41);
+      await photo(listed.token, id, 42);
+      expect((await game(read(request(invitee.token, undefined, "GET"), context))).days[0].others[0].entry?.kind).toBe("photo");
+      const proposalId = randomUUID();
+      const proposed = await game(proposeChange(request(invitee.token, { proposalId, expectedTermsVersion: 1, change: { kind: "edit", lengthDays: 10 } }), context));
+      expect(proposed.pendingChange?.id).toBe(proposalId);
+      expect((await game(cancelChange(request(invitee.token, undefined, "DELETE"), { params: Promise.resolve({ id, proposalId }) }))).pendingChange).toBeNull();
+      for (let day = 1; day < 7; day += 1) {
+        await game(advance(request(invitee.token, { days: 1 }), context));
+        await photo(invitee.token, id, 42 + day);
+      }
+      const recap = await game(settle(request(invitee.token), context));
+      expect(recap.status).toBe("settled");
+      const won = recap.tickets.find((ticket) => ticket.youHold);
+      expect(won).toBeDefined();
+      expect((await redeem(request(invitee.token), { params: Promise.resolve({ id: won!.id }) })).status).toBe(200);
+
+      // A settled game stays on: Home still answers with it and its IOUs.
+      const afterwards: GameHomeView = await (await home(request(invitee.token, undefined, "GET"))).json();
+      expect(afterwards.games.map((shown) => shown.id)).toContain(id);
+      expect(afterwards.wallet.redeemed.map((ticket) => ticket.id)).toContain(won!.id);
+
+      // No fresh game, with anyone.
+      await refused(create(request(invitee.token, { gameId: randomUUID(), inviteeFirstName: "Anyone", terms })));
+      // A rematch goes to the listed player, who answers it by accepting.
+      const rematch = await game(create(request(invitee.token, { gameId: randomUUID(), inviteeFirstName: "Listed", previousGameId: id, terms })));
+      expect(rematch).toMatchObject({ status: "invited", round: 2 });
+      const theirs: GameHomeView = await (await home(request(listed.token, undefined, "GET"))).json();
+      const addressed = theirs.games.find((shown) => shown.id === rematch.id);
+      expect(addressed?.inviteToken).toBeTruthy();
+      expect((await game(accept(request(listed.token, { termsVersion: 1, timeZone: "UTC" }), { params: Promise.resolve({ token: addressed!.inviteToken! }) }))).status).toBe("live");
+
+      // A stranger holding a used link, or nothing, still sees no game.
+      await refused(home(request(stranger.token, undefined, "GET", token)));
+      await refused(home(request(stranger.token, undefined, "GET")));
+      await refused(accept(request(stranger.token, { termsVersion: 1, timeZone: "UTC" }), { params: Promise.resolve({ token }) }));
+    }, 60_000);
+
+    it("keeps two unlisted members, a listed member's invite to them when the switch is off, and the other direction of a rematch in step", async () => {
+      const listed = await account();
+      const unlisted = await account();
+      const other = await account();
+      vi.stubEnv("MURPH_GAME_MEMBER_ALLOWLIST", listed.id);
+      expect((await profile(request(listed.token, { firstName: "Listed", timeZone: "UTC" }, "PUT"))).status).toBe(200);
+      const id = randomUUID();
+      const context = { params: Promise.resolve({ id }) };
+      const created = await game(create(request(listed.token, { gameId: id, inviteeFirstName: "Unlisted", terms })));
+      expect((await profile(request(unlisted.token, { firstName: "Unlisted", timeZone: "UTC" }, "PUT", created.inviteToken!))).status).toBe(200);
+      await game(accept(request(unlisted.token, { termsVersion: 1, timeZone: "UTC" }), { params: Promise.resolve({ token: created.inviteToken! }) }));
+      await game(settle(request(listed.token), context));
+
+      // The listed player rematches the unlisted one; the unlisted one answers.
+      const rematch = await game(create(request(listed.token, { gameId: randomUUID(), inviteeFirstName: "Unlisted", previousGameId: id, terms })));
+      const shown: GameHomeView = await (await home(request(unlisted.token, undefined, "GET"))).json();
+      expect(shown.games.find((candidate) => candidate.id === rematch.id)?.status).toBe("invited");
+
+      // Two unlisted members: the other one never gets in, even with a profile request.
+      await refused(home(request(other.token, undefined, "GET")));
+      await refused(create(request(other.token, { gameId: randomUUID(), inviteeFirstName: "Unlisted", terms })));
+
+      // Off the list entirely (the listed member removed), their games go dark.
+      vi.stubEnv("MURPH_GAME_MEMBER_ALLOWLIST", other.id);
+      await refused(home(request(unlisted.token, undefined, "GET")));
+      await refused(home(request(listed.token, undefined, "GET")));
+      // The global switch off hides it from everyone, the listed included.
+      vi.stubEnv("MURPH_GAME_MEMBER_ALLOWLIST", listed.id);
+      vi.stubEnv("MURPH_GAME_ENABLED", "false");
+      await refused(home(request(listed.token, undefined, "GET")));
+      await refused(home(request(unlisted.token, undefined, "GET")));
+      vi.stubEnv("MURPH_GAME_ENABLED", "true");
+      expect((await home(request(unlisted.token, undefined, "GET"))).status).toBe(200);
+    }, 60_000);
+  });
 });

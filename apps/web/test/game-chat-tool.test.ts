@@ -34,11 +34,16 @@ describe("game chat tool authority", () => {
     expect((await handleGameChatTool(update)).result.status).toBe("unavailable");
     expect(m.run).not.toHaveBeenCalled(); expect(m.read).not.toHaveBeenCalled(); expect(m.exact).not.toHaveBeenCalled();
   });
-  it.each([actor, "other_synthetic"])("requires both players in the restricted game allowlist (%s only)", async (allowed) => {
-    vi.stubEnv("MURPH_GAME_ENABLED", "true"); vi.stubEnv("MURPH_GAME_MEMBER_ALLOWLIST", allowed);
+  it("is unavailable when neither player is on the game list", async () => {
+    vi.stubEnv("MURPH_GAME_ENABLED", "true"); vi.stubEnv("MURPH_GAME_MEMBER_ALLOWLIST", "third_synthetic");
     expect((await handleGameChatTool(read)).result.status).toBe("unavailable");
     expect((await handleGameChatTool(update)).result.status).toBe("unavailable");
     expect(m.run).not.toHaveBeenCalled(); expect(m.read).not.toHaveBeenCalled();
+  });
+  it.each([actor, "other_synthetic"])("lets either player act when one of them is listed (%s only)", async (allowed) => {
+    vi.stubEnv("MURPH_GAME_ENABLED", "true"); vi.stubEnv("MURPH_GAME_MEMBER_ALLOWLIST", allowed);
+    expect((await handleGameChatTool(update)).result.status).toBe("ok");
+    expect(m.run).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ actorMemberId: actor }));
   });
   it("uses the authenticated sender and exact pair in any room; never forwards the private app view", async () => {
     const result = await handleGameChatTool(update);

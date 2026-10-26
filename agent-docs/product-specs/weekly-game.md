@@ -3,10 +3,22 @@
 ## Status
 
 MVP backend implemented and dark: off in production unless
-`MURPH_GAME_ENABLED=true`, and limited to the member ids in
-`MURPH_GAME_MEMBER_ALLOWLIST` when that list is non-empty. Unset means on outside
-production only. Members outside the gate see every game route as missing. The
-iOS client is the Murph app.
+`MURPH_GAME_ENABLED=true`. Unset means on outside production only. A non-empty
+`MURPH_GAME_MEMBER_ALLOWLIST` makes it invite only (`isGameOn` in
+`apps/web/src/lib/game/access.ts`): a game is on when at least one of its people
+is listed, its players or a rematch's addressee, so an open invite is on when its
+creator is listed. Listed members can do everything. Anyone else can accept an
+invite to a game that is on, play it fully (posts, changes, settle, tickets,
+Murph's chat and pushes), see it on Home, and rematch its other player in either
+direction, but can't start a fresh game (`GAME_DISABLED`); Home's
+`canStartGames` says which. A game that is off is invisible to everyone. The
+HTTP door admits an unlisted member only when they're in a game that is on
+(settled included) or hold an open invite to one: the accept and negotiate routes
+vouch with their path token, and other routes may carry the held token in the
+`X-Murph-Game-Invite` header so a new invitee can load Home and set a name before
+accepting. Everyone else sees every game route as missing. Removing a listed
+member turns their unlisted opponents' games off, mid-game included. The iOS
+client is the Murph app.
 
 ## Product
 
@@ -152,6 +164,10 @@ this default without deleting other people's private contact choices.
   holder redeems it after sending it through Messages, and after its use-by
   date it shows as expired and can't be redeemed. In dev time travel, issuance
   and expiry both use the game's shifted clock, including long games.
+  Players read a ticket as a prize: the app and Murph's game texts say who
+  owes whom ("Ava owes you breakfast in bed") and never ticket, bet, wager,
+  winnings or cash in, and Murph's texts also avoid stake. `ticket` stays the
+  model and wire name.
 - **Rematch.** A new game can name the previous one. After a settled game with
   the same two people, its round is the previous round plus one; otherwise 1.
   A rematch of a settled 1v1 is addressed to the other player: it appears on
@@ -264,7 +280,11 @@ invite negotiation likewise introduces the actual proposal once; the challenge
 kickoff follows only after agreement. The other player can decline, and the
 proposer can cancel in chat. Only one proposal waits at a time: a player who
 answers a pending proposal with a different one declines it and proposes theirs,
-and Murph says in that reply that the new ask replaces the earlier one. A chat
+and Murph says in that reply that the new ask replaces the earlier one. A player
+who declines and later proposes exactly the declined change in chat agrees to it:
+its proposer already asked for it, so it applies at once instead of asking them
+again. That holds until the next change event or until approval would refuse it;
+proposals that change task or stake words always need a fresh yes. A chat
 proposal carries only what the acting message asks for, never an earlier
 deferred request. Cancelling an
 app-origin change after it was queued or sent also tells the group that the

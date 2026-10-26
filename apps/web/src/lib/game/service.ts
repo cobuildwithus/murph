@@ -11,7 +11,7 @@ import { isUniqueViolation } from "../device-sync/prisma-store/prisma-errors";
 import { generateHostedRandomPrefixedId, isRecord, sha256Hex } from "../primitives";
 import { getPrisma } from "../prisma";
 import { createHostedLinqDeliveryIdempotencyLookupKey } from "../hosted-onboarding/linq-observability-identifiers";
-import { areGameDevToolsAllowed, isGameEnabled, isGameEnabledFor, mediaKeyOwner, mediaKeyPrefixFor } from "./access";
+import { areGameDevToolsAllowed, gameOnWhere, isGameEnabled, isGameEnabledFor, isGameOn, mediaKeyOwner, mediaKeyPrefixFor } from "./access";
 import { parseGameCommand } from "./command";
 import { moderateGameCommand } from "./moderation";
 import { parseStoredGameEntryData } from "./entry-data";
@@ -69,7 +69,7 @@ import {
   type TermWords,
 } from "./rules";
 import { gameLocalDate } from "./time";
-import { agreedDayOne, gameChangeCancellationNeedsNotice, decideApprovedGameChange, pendingGameChangeView, decideGameChange, gameChangeControls, gameChangeRefusal, isGameChangeExpired, isGameChangeOutdated, parsePendingGameChange, type StoredGamePendingChange } from "./changes";
+import { agreedDayOne, gameChangeCancellationNeedsNotice, decideApprovedGameChange, pendingGameChangeView, decideGameChange, gameChangeControls, gameChangeRefusal, isGameChangeExpired, isGameChangeOutdated, isSameGameChange, parsePendingGameChange, type StoredGamePendingChange } from "./changes";
 import { prepareGameChangeWords, readPendingGameChanges, type PreparedGameChangeWords } from "./change-words";
 import { deliverGameChangeProposal } from "./chat-delivery";
 import { readGameChatCandidateIds, sameGamePlayers } from "./chat-membership";
@@ -80,7 +80,7 @@ import { gameWordsMemberId, parseGameDepartedPlayer } from "./account-deletion";
 import { areGamePlayersBlocked, GAME_BLOCK_LIMIT, isHiddenBy, lockGamePair, readGameBlocks, type GameBlocks } from "./blocks";
 import { GAME_REPORT_ALERTS_PER_REPORTER_DAY, sendGameReportAlert } from "./report-alert";
 
-export { isGameEnabledFor, mediaKeyPrefixFor } from "./access";
+export { mediaKeyPrefixFor } from "./access";
 
 type Tx = Prisma.TransactionClient;
 type Db = Tx | ReturnType<typeof getPrisma>;
@@ -256,6 +256,8 @@ async function runLocked(
     const locked = await tx.$queryRaw<{ id: string }[]>`SELECT id FROM game WHERE id = ${gameId} FOR UPDATE`;
     if (locked.length === 0) reject("GAME_NOT_FOUND", "Game not found.");
     const [loaded] = await loadGames(tx, [gameId]);
+    // Nobody acts on a game that is off, whatever they hold.
+    if (context.actor !== SYSTEM_ACTOR && !isGameOn(loaded.row)) reject("GAME_NOT_FOUND", "Game not found.");
     if (context.chatContainerMemberId && !sameGamePlayers(loaded.row.players.map((player) => player.memberId), context.chatPlayerMemberIds ?? [])) {
       reject("NOT_A_PLAYER", "This game belongs to the two players in this chat.");
     }
@@ -343,6 +345,10 @@ async function createGame(context: CommandContext, command: Extract<GameCommand,
     return gameId;
   }
   const rematch = command.previousGameId ? await readRematch(actor, command.previousGameId, context.now ?? new Date()) : null;
+  // Only a listed member starts a fresh game; anyone may rematch the one other player of a game that is on.
+  if (!isGameOn({ players: [{ memberId: actor }], inviteeMemberId: rematch?.inviteeMemberId })) {
+    reject("GAME_DISABLED", "Starting a game is invite only for now.");
+  }
   if (rematch?.answer?.createdBy) {
     const termsVersion = currentTerms(parseStoredTerms(rematch.answer.terms)).n;
     return joinGame(context, { id: rematch.answer.id, createdBy: rematch.answer.createdBy }, { termsVersion, timeZone: profile.timeZone });
@@ -721,13 +727,13 @@ async function redeem(context: CommandContext, command: Extract<GameCommand, { t
   const { actor } = context;
   const { ticketId } = command;
   const ticket = await getPrisma().gameTicket.findUnique({ select: { gameId: true, owedTo: true }, where: { id: ticketId } });
-  if (!ticket || ticket.owedTo !== actor) reject("TICKET_NOT_HELD", "That ticket isn't yours to cash in.");
+  if (!ticket || ticket.owedTo !== actor) reject("TICKET_NOT_HELD", "That prize isn't yours to mark done.");
   await runLocked(ticket.gameId, context, async ({ clock, now, tx }) => {
     const current = await tx.gameTicket.findUniqueOrThrow({ select: { createdAt: true, owedBy: true, status: true }, where: { id: ticketId } });
-    if (isTicketExpired(current, now)) reject("TICKET_EXPIRED", "This ticket expired before it was used.");
+    if (isTicketExpired(current, now)) reject("TICKET_EXPIRED", "This prize expired before it was used.");
     // Blocked either way reads the same as having left.
     if (current.status === "open" && (current.owedBy === null || await areGamePlayersBlocked(tx, actor, current.owedBy))) {
-      reject("INVALID_REQUEST", "They left Murph, so this ticket can't be marked done.");
+      reject("INVALID_REQUEST", "They left Murph, so this prize can't be marked done.");
     }
     // Already redeemed matches no row: a repeat, not an error.
     const changed = await tx.gameTicket.updateMany({
@@ -1096,7 +1102,7 @@ async function proposeChange(context: CommandContext, command: Extract<GameComma
   const owner = await getPrisma().game.findFirst({ where: { id: command.gameId, players: { some: { memberId: context.actor } } } });
   if (!owner) reject("NOT_A_PLAYER", "This game belongs to its players.");
   const prepared = await prepareGameChangeWords(owner, command.change, command.expectedTermsVersion);
-  await runLocked(command.gameId, context, async ({ tx, loaded, now }) => {
+  await runLocked(command.gameId, context, async ({ tx, loaded, now, clock }) => {
     if (!playerFor(loaded.state, context.actor)) reject("NOT_A_PLAYER", "This game belongs to its players.");
     const key = `game-change:${command.gameId}:${command.proposalId}`;
     const prior = await tx.gameEvent.findUnique({ where: { commandKey: key }, select: { actor: true } });
@@ -1106,6 +1112,8 @@ async function proposeChange(context: CommandContext, command: Extract<GameComma
     const pending = parsePendingGameChange(loaded.row.pendingChange);
     if (pending && !isGameChangeExpired(loaded.state, pending, now)) reject("CHANGE_PENDING", "There is already a change waiting for agreement in chat.");
     if (currentTerms(loaded.state.game.terms).n !== command.expectedTermsVersion) reject("TERMS_CHANGED", "The game changed. Take another look.");
+    const agreement = await agreeToDeclinedChange({ tx, loaded, now, clock }, context, command, key);
+    if (agreement) return agreement;
     const decision = decideGameChange(loaded.state, context.actor, command.change, now);
     assertPreparedWords(loaded.row, prepared);
     const proposal = {
@@ -1121,6 +1129,28 @@ async function proposeChange(context: CommandContext, command: Extract<GameComma
     ];
   });
   return command.gameId;
+}
+
+/**
+ * The other player's word-free proposal that this actor declined keeps its
+ * proposer's agreement until the next change event or until approval would refuse it.
+ * Proposing exactly that change in chat is the missing agreement, judged as an approval.
+ */
+async function agreeToDeclinedChange(locked: LockedStep, context: CommandContext, command: Extract<GameCommand, { type: "proposeChange" }>, key: string): Promise<GameEventDraft[] | null> {
+  const { tx, loaded, now } = locked;
+  if (!context.chatContainerMemberId || !context.beforeMutationTx) return null;
+  const last = await tx.gameEvent.findFirst({ where: { gameId: command.gameId, type: { startsWith: "change_" } },
+    orderBy: { id: "desc" }, select: { type: true, actor: true, payload: true } });
+  if (last?.type !== "change_declined" || last.actor !== context.actor || !isRecord(last.payload) || !last.payload.declined) return null;
+  const offer = parsePendingGameChange(last.payload.declined);
+  if (!offer || offer.proposedByMemberId === context.actor || isGameChangeExpired(loaded.state, offer, now) || !isSameGameChange(offer.change, command.change)) return null;
+  if (loaded.state.game.status === "negotiating") loaded.state = await withCurrentTimeZones(tx, loaded.state);
+  const agreed = { ...offer, id: command.proposalId };
+  const approved = decideApprovedGameChange(loaded.state, context.actor, agreed, now);
+  return [
+    { type: "change_proposed", commandKey: key, payload: { proposalId: agreed.id, expectedTermsVersion: agreed.expectedTermsVersion, effectiveFromDay: approved.effectiveFromDay, agreesWith: offer.id } },
+    ...await applyApprovedChange(locked, command.gameId, agreed, `game-change-resolved:${command.gameId}:${agreed.id}`, context.actor, approved),
+  ];
 }
 
 async function respondChange(context: CommandContext, command: Extract<GameCommand, { type: "respondChange" }>): Promise<string> {
@@ -1144,7 +1174,7 @@ async function respondChange(context: CommandContext, command: Extract<GameComma
         await reserveGameChatLifecycleTx({ gameId: command.gameId, kind: "change_cancelled", proposalId: proposal.id, now: clock, tx });
       }
       await clear();
-      return [{ commandKey: resolutionKey, type: command.decision === "cancel" ? "change_cancelled" : "change_declined", payload: { proposalId: proposal.id } }];
+      return [{ commandKey: resolutionKey, type: command.decision === "cancel" ? "change_cancelled" : "change_declined", payload: closedChangePayload(proposal, command.decision) }];
     }
     if (isGameChangeOutdated(loaded.state, proposal, now)) {
       await clear(); refusal = "That proposal is no longer waiting for agreement.";
@@ -1165,6 +1195,12 @@ async function respondChange(context: CommandContext, command: Extract<GameComma
   });
   if (refusal) reject("CHANGE_EXPIRED", refusal);
   return command.gameId;
+}
+
+/** A word-free declined proposal is kept so the decliner can still take it (agreeToDeclinedChange). */
+function closedChangePayload(proposal: StoredGamePendingChange, decision: "decline" | "cancel"): Prisma.InputJsonObject {
+  return decision === "decline" && !proposal.termsWordsEncrypted
+    ? { proposalId: proposal.id, declined: toPrismaJsonObject({ v: 1, ...proposal }) } : { proposalId: proposal.id };
 }
 
 async function applyApprovedChange(locked: LockedStep, gameId: string, proposal: StoredGamePendingChange, resolutionKey: string, actor: string, decision: ReturnType<typeof decideGameChange>): Promise<GameEventDraft[]> {
@@ -1210,9 +1246,9 @@ export async function readGameChatState(containerMemberId: string, playerMemberI
   const candidateIds = await readGameChatCandidateIds(playerMemberIds);
   const candidates = await prisma.game.findMany({ where: { id: { in: candidateIds } },
     orderBy: { createdAt: "desc" }, take: 5, include: { players: true } });
-  const current = await loadCurrent(candidates.filter((row) => row.players.length === 2 && row.players.every((player) => isGameEnabledFor(player.memberId))).map((row) => row.id));
+  const current = await loadCurrent(candidates.filter((row) => row.players.length === 2 && isGameOn(row)).map((row) => row.id));
   const loadedById = new Map(current.games.map((game) => [game.row.id, game]));
-  const rows = current.games.map((game) => game.row).filter((row) => row.players.length === 2 && row.players.every((player) => isGameEnabledFor(player.memberId)));
+  const rows = current.games.map((game) => game.row).filter((row) => row.players.length === 2 && isGameOn(row));
   const profiles = await prisma.gameProfile.findMany({ where: { memberId: { in: [...new Set(rows.flatMap((row) => row.players.map((player) => player.memberId)))] } },
     select: { memberId: true, firstNameEncrypted: true } });
   const plain = await openGameTexts([
@@ -1381,13 +1417,37 @@ export async function readGame(gameId: string, memberId: string): Promise<GameVi
 }
 
 /**
- * Players see their games; a rematch's addressed invitee sees it while it's
- * still an invite (only they can accept it).
+ * Players see their games that are on; a rematch's addressed invitee sees it
+ * while it's still an invite (only they can accept it).
  */
 function canView(game: LoadedGame, memberId: string): boolean {
+  if (!isGameOn(game.row)) return false;
   if (playerFor(game.state, memberId)) return true;
   // Also after its challenger left: the invitee sees it called off.
   return game.row.inviteeMemberId === memberId && (game.row.status === "invited" || game.row.departedPlayer !== null);
+}
+
+/**
+ * The HTTP door. A listed member may use every route. Anyone else enters only
+ * for a game that is on: one they play or are the addressed rematch invitee
+ * of, or the open invite they're holding, so a new invitee can set up and
+ * accept. Everyone else sees no game. Each command still checks its own game.
+ */
+export async function canEnterGame(memberId: string, inviteToken: string | null): Promise<boolean> {
+  if (isGameEnabledFor(memberId)) return true;
+  if (!isGameEnabled()) return false;
+  const prisma = getPrisma();
+  const yours = await prisma.game.findFirst({ select: { id: true }, where: { AND: [
+    { OR: [{ players: { some: { memberId } } }, { inviteeMemberId: memberId }] },
+    { status: { in: ["invited", "negotiating", "live", "settled"] } },
+    gameOnWhere(),
+  ] } });
+  if (yours) return true;
+  if (!inviteToken) return false;
+  const invite = await prisma.game.findUnique({ include: { players: true }, where: { inviteTokenHash: sha256Hex(inviteToken) } });
+  if (!invite || invite.status !== "invited" || !isGameOn(invite)) return false;
+  if (invite.inviteeMemberId !== null && invite.inviteeMemberId !== memberId) return false;
+  return invite.inviteExpiresAt === null || invite.inviteExpiresAt.getTime() > gameNow(await databaseNow(prisma), invite).getTime();
 }
 
 /**
@@ -1445,7 +1505,7 @@ export async function readHome(memberId: string): Promise<GameHomeView> {
       include: { game: { select: { createdBy: true, departedPlayer: true, devClockOffsetMs: true, id: true, terms: true, termsWordsEncrypted: true } } },
       orderBy: { createdAt: "desc" },
       take: WALLET_LIMIT,
-      where: { OR: [{ owedTo: memberId }, { owedBy: memberId }] },
+      where: { OR: [{ owedTo: memberId }, { owedBy: memberId }], game: gameOnWhere() },
     }),
     prisma.gameEntry.findFirst({ where: { memberId, attempt: { gt: 0 }, withdrawnAt: null },
       orderBy: [{ receivedAt: "desc" }, { id: "desc" }], select: { kind: true } }),
@@ -1470,6 +1530,7 @@ export async function readHome(memberId: string): Promise<GameHomeView> {
   return {
     blocked,
     games: views,
+    canStartGames: isGameEnabledFor(memberId),
     me: { usualKind: usualEntry ? toEntryKind(usualEntry.kind) : null, avatarUrl: profile?.photoKey ? gameMediaUrl(profile.photoKey) : null, firstName: firstName ?? null, memberId, timeZone: profile?.timeZone ?? null },
     wallet: {
       // Expired tickets stay where they were, marked expired.
@@ -1514,12 +1575,13 @@ async function readBlockedPeople(memberId: string): Promise<{ memberId: string; 
 export async function readInvitePreview(token: string): Promise<GameInvitePreview | null> {
   if (!isGameEnabled() || typeof token !== "string" || !token) return null;
   const row = await getPrisma().game.findUnique({
-    include: { creator: true, events: { where: { type: "cancelled" }, select: { actor: true }, take: 1 } },
+    include: { creator: true, events: { where: { type: "cancelled" }, select: { actor: true }, take: 1 }, players: { select: { memberId: true } } },
     where: { inviteTokenHash: sha256Hex(token) },
   });
   if (!row) return null;
   // Its challenger deleted their account: never open again.
   if (!row.creator) return { status: "expired" };
+  if (!isGameOn(row)) return null;
   const now = gameNow(await databaseNow(getPrisma()), row);
   // Expired means nobody took it: a void game, or an open invite past its
   // expiry. A taken one stays "used" however long ago that was.
@@ -1573,7 +1635,7 @@ export async function authorizeMediaRead(memberId: string, mediaKey: string): Pr
     ] });
     const sharedGame = await prisma.game.findFirst({
       select: { id: true },
-      where: { AND: [participant(memberId), participant(ownerId)] },
+      where: { AND: [participant(memberId), participant(ownerId), gameOnWhere()] },
     });
     if (sharedGame) return true;
   }
@@ -1590,7 +1652,7 @@ export async function authorizeMediaRead(memberId: string, mediaKey: string): Pr
   ]);
   return entries.some((entry) => {
     const game = games.find((candidate) => candidate.row.id === entry.gameId);
-    return game !== undefined && visibleEntryIds(game.state, memberId, reported.entries).has(entry.id);
+    return game !== undefined && isGameOn(game.row) && visibleEntryIds(game.state, memberId, reported.entries).has(entry.id);
   });
 }
 
