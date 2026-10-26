@@ -28,6 +28,12 @@ export const CLI_TIMING_PHASES = [
   "canonical-write-wait", "importers-runtime-load",
   // Exact-event core import and the two owner scans; awaited wall time only.
   "event-core-load", "event-owner-candidates", "event-owner-revisions",
+  // Meal-owner scans emit six operation totals per reached pass, including zero.
+  // Append-only admission: deploy readers before these producers.
+  "event-owner-candidates-source", "event-owner-candidates-path", "event-owner-candidates-read",
+  "event-owner-candidates-decode", "event-owner-candidates-parse", "event-owner-candidates-select",
+  "event-owner-revisions-source", "event-owner-revisions-path", "event-owner-revisions-read",
+  "event-owner-revisions-decode", "event-owner-revisions-parse", "event-owner-revisions-select",
 ] as const;
 export type CliTimingPhase = typeof CLI_TIMING_PHASES[number];
 /** These existing phases enclose synchronous metric work, not awaited I/O. */

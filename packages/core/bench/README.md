@@ -75,7 +75,34 @@ sizes and variability in both wall and CPU. If the owned/control gap grows with
 ledger bytes, profile this synthetic workload to separate JSON/decompression CPU
 from filesystem/path-check work before proposing an owner-preserving change.
 This baseline does not establish the cause of production seconds or a production
-speedup. No cache, index, telemetry patch, or production optimization is included.
+speedup. The baseline itself adds no cache, index or scan optimization.
+
+### Synthetic constrained-runtime profile
+
+Parent supplied a separate network-isolated Linux amd64 emulation run using
+240,003 mixed-format rows. The container requested 2 CPU / 6 GiB, but the Docker
+VM had 1.9 GiB; this is not a verified 6 GiB resource allocation. Ten warm pairs
+returned owner wall median 10,410.756 ms (range 10,188.039–10,673.209) and
+process CPU median 12,517.598 ms. The known-event control median was
+5,382.796 ms; it cannot substitute for owner lookup's stronger contract.
+
+A separate profile used three pairs and one warmup and covered the whole run,
+including fixture setup: 123,834 ms of samples. These are profile sample
+attributions, not timings isolated to one owner scan:
+
+| Profile attribution | Sample ms | Share |
+| --- | ---: | ---: |
+| JSON `parseJsonlRow` | 54,881 | 44.3% |
+| `parseJsonlRows` | 4,652 | 3.8% |
+| GC | 9,661 | 7.8% |
+| Decode `processChunkSync` | 7,462 | 6.0% |
+
+Fixture compression accounted for a separate 4,457 ms and is not read work.
+Do not pair these profile samples with the ten-pair timing run or infer hosted
+CPU attribution from emulation and constrained memory. The result supports
+CPU/JSON parsing as a realistic hypothesis; it does not establish the cause of
+the production tail or justify a scanner rewrite. The bounded production-path
+instrumentation remains the next observation boundary.
 
 ## Cold CLI event-read import experiment
 
@@ -148,8 +175,45 @@ and the receipt write. All raw numeric pairs, min/median/max, paired deltas and
 ratios are retained. Filesystem caches may be warm; this is cold Node module
 state, not cold storage. Wall minus CPU is not disk wait. Neither source byte
 counts nor the existing aggregate production phase maxima establish CPU cost.
-The isolated child environment supplies no CLI UDP telemetry endpoint; existing
-deterministic owner tests retain the phase-count and timing-wrapper proof.
+By default, `MURPH_EVENT_READ_TELEMETRY=off` strips any inherited CLI timing
+endpoint and creates no receiver or extra timing-module import. To measure the same
+production telemetry on both artifacts, use `on`. To measure the candidate's
+telemetry overhead directly, use `compare` with `control` and that single
+candidate artifact; its `base` label is disabled and `candidate` label enabled.
+`compare` is invalid with `pairs` or `check`. Paired runs retain the same fixture,
+two warmup pairs, alternating cold processes and full output/status parity.
+
+```sh
+MURPH_EVENT_READ_TELEMETRY=on node scripts/benchmark-event-read-import.mjs control "$BASE_BUNDLE"
+MURPH_EVENT_READ_TELEMETRY=on node scripts/benchmark-event-read-import.mjs pairs "$BASE_BUNDLE" "$CANDIDATE_BUNDLE"
+MURPH_EVENT_READ_TELEMETRY=compare node scripts/benchmark-event-read-import.mjs control "$CANDIDATE_BUNDLE"
+```
+
+`on` also supports the small `check` run. The parent loads the candidate
+artifact's public `@murphai/runtime-state/cli-timing` normalizer once outside
+measurement and reuses the existing runtime-state UDP test pattern. A fresh
+loopback socket/key is bound before each enabled child's spawn timer. Receipt
+validation waits at most one second after child close; that wait and receiver
+setup are excluded from parent wall time. Child CPU/wall includes its actual
+sender and scan instrumentation. Parent receiver CPU is excluded; scheduling
+contention between parent and child is not isolated by this benchmark.
+
+Every enabled success must supply exactly one authenticated, normalized report
+with one successful `meal show` call, one sample of each existing coarse event
+phase and zero drop/window/batch/truncation indicators. Enabled candidate runs
+in `pairs`, `check` and `compare` must also supply all twelve fixed scan phases,
+each with count one. `on control` accepts a coarse-only old baseline; if new
+phases are present, all twelve are required. Missing or incomplete receipts
+fail the run. `cliTiming` summaries retain only fixed phase names, counts and
+numeric durations, and `timingReports` includes warmup receipts. Endpoints,
+keys, ticks and raw packets never enter output.
+
+Traced import probes use the selected telemetry mode but remain outside timing
+samples. The adversarial correctness battery still runs with telemetry off;
+enabled successful reads are compared byte-for-byte with the expected result
+and checked for canonical-input preservation. `compare` directly checks
+disabled/enabled output parity on the identical candidate. Enabled-telemetry
+numbers and final native validation remain pending until the parent runs them.
 
 Reports contain fixture stored/decoded bytes, a canonical-input content digest,
 assembled CLI output bytes/digests, and complete stdout/stderr bytes/digests.
@@ -164,8 +228,62 @@ core root or does not reduce both whole-process loaded module count and file
 bytes. Reject the runtime/export candidate in that case and retain only this
 diagnostic harness. A passing import gate alone is not a speedup: compare paired
 CPU/wall effects with base/base variation, repeat under the intended resource
-allocation, and retain any regressions. No production speedup or changelog is
-justified until the parent independently confirms a material benefit.
+allocation, and retain any regressions. A production speedup must not be
+inferred from this local measurement.
+
+### Accepted local measurement, 2026-10-25
+
+The parent independently measured the initial narrow-import candidate using the
+native assembled CLI on Node 24.22.1,
+darwin arm64, with the same synthetic 24,003-row / 24-shard mixed-format
+fixture: two warmup pairs, ten alternating cold-process pairs, load hooks off
+during timing. Baseline loaded 380 modules / 5,827,629 bytes; candidate loaded
+301 / 4,571,152, removing 79 modules / 1,256,477 bytes. CLI bundle size was
+9,663,371 → 9,663,393 bytes; the work was not moved into preloading.
+
+| Paired candidate minus baseline, ms | Median | Range | Median paired ratio |
+| --- | ---: | ---: | ---: |
+| Wall | -32.410 | -141.764 to +6.970 | 0.93528 |
+| Process CPU | -40.174 | -119.198 to -12.210 | 0.93933 |
+| Base/base control wall | -2.006 | -13.890 to +22.748 | — |
+| Base/base control CPU | -1.846 | -65.405 to +57.516 | — |
+
+Separate wall medians were 499.826 → 461.881 ms; CPU medians were
+663.519 → 624.182 ms. Paired deltas are not differences of separate medians.
+Every stdout/stderr byte and exit status matched, adversarial cases passed,
+canonical input stayed unchanged, and fixture cleanup passed. The parent also
+reports 3 driver, 11 core, 20 usecase and 11 source-resolution tests passing;
+both initial assemblies passed eight parity probes and budgets. These numbers
+precede the additive scan instrumentation and the enabled-telemetry benchmark.
+
+Parent subsequently reports 27 core surface/owner/storage, 75 runtime-state
+timing/process/CPU, 21 assistant-engine timing profile/transport and 6 Cloudflare
+usage-port tests passing. The 20 runtime-state and 9 assistant-engine historical
+compatibility skips were unrelated; the new mixed-version tests ran against
+`7bcd0ffe430c8cba53da74dbb6d5c10a3560bdd8`. Runtime-state, core and assistant-engine
+typechecks passed; complexity reported ten source files and zero hotspots.
+Draft PR #4364 still needs final assembled regression/pairs, enabled-telemetry
+measurements, the real-model exact-read journey and remaining CLI/Web gates.
+No enabled-telemetry or final performance result is claimed yet.
+
+These results accept the narrow import mechanism and support the restrained
+saved-meal lookup changelog. They are local native evidence, not a precise hosted
+speedup or an explanation of multi-second owner scans. Keep the recorded
+variation; the wall range includes a slower candidate pair. Scan-tail
+evidence and the bounded observation plan belong to
+`agent-docs/exec-plans/active/2026-10-25-event-read-import.md`.
+
+The follow-up meal-owner telemetry uses the existing pipeline and fixed
+`event-owner-{candidates,revisions}-{source,path,read,decode,parse,select}`
+categories: six aggregate samples per reached scan, including zero for
+unreached categories, independent of shard count. Existing parent spans and the
+64-span limit remain.
+The split measures awaited source/path/read work and synchronous
+decode/parse/selection wall time; it is not CPU attribution. No content, IDs,
+paths or cardinalities are emitted. See `docs/hosted-runtime-log-database.md`
+for the exact boundaries and consumer-first compatibility contract. Start the
+plan's 72-hour natural-traffic window only after verified deployment; check
+health, coverage and dropped/trimmed timing during the first four hours.
 
 Focused source proof, in addition to the native `check` command:
 
@@ -174,15 +292,40 @@ pnpm --dir packages/core exec vitest run --config vitest.config.ts --no-coverage
 pnpm --dir packages/vault-usecases exec vitest run --config vitest.config.ts --no-coverage test/runtime.test.ts test/narrow-query-readers-real.test.ts
 pnpm exec vitest run --config packages/cli/vitest.workspace.ts --no-coverage packages/cli/test/cli-expansion-document-meal.test.ts packages/cli/test/error-recovery-events-documents.test.ts
 pnpm exec vitest run --config scripts/vitest.config.ts --no-coverage scripts/workspace-source-resolution.test.ts
+MURPH_CLI_EVENT_OWNER_WORK_COMPAT_BASE=7bcd0ffe430c8cba53da74dbb6d5c10a3560bdd8 \
+  pnpm --dir packages/runtime-state exec vitest run --config vitest.config.ts --no-coverage test/cli-timing.test.ts
+MURPH_CLI_EVENT_OWNER_WORK_COMPAT_BASE=7bcd0ffe430c8cba53da74dbb6d5c10a3560bdd8 \
+  pnpm --dir packages/assistant-engine exec vitest run --config vitest.config.ts --no-coverage test/cli-timing-profile.test.ts test/cli-timing-transport.test.ts
+pnpm --dir apps/cloudflare exec vitest run --config vitest.node.workspace.ts --no-coverage test/usage-record-port.test.ts
+pnpm --dir apps/web changelog:generate
+pnpm exec vitest run --config apps/web/vitest.config.ts --no-coverage apps/web/test/changelog-page.test.tsx
 pnpm --filter @murphai/core typecheck
 pnpm --filter @murphai/vault-usecases typecheck
+pnpm --filter @murphai/runtime-state typecheck
+pnpm --filter @murphai/assistant-engine typecheck
+pnpm --dir apps/web typecheck
 node scripts/run-typescript.mjs package --project packages/core/bench/tsconfig.json --pretty false
 node scripts/verify-workspace-boundaries.mjs
 ```
 
-The existing real-model journey, when needed, is
-`real model canonical hosted meal uses local installed CLI under member permissions`.
-No assistant behavior, protocol, prompt, discoverability or recovery changes are
+The save-only canonical hosted meal journey does not prove this read path.
+`asks-for-essential-missing-information-on-manual-app-photo` asserts `meal show`
+but its fixture runs `packages/cli/src/bin.ts` through `tsx`, so it does not
+prove shipped package-export resolution. After the normal prepared CLI build,
+run the focused real-model journey:
+
+```sh
+pnpm test:assistant:live -- --test "canonical saved meal exact read"
+```
+
+`real model canonical saved meal exact read uses the shipped CLI without mutation`
+uses the existing installed fixture and `packages/cli/dist/bin.js` with native
+package resolution. It requires a successful exact read, a truthful reply from
+saved synthetic facts absent from the request, and unchanged canonical bytes
+and write metadata, with no outbox item or external delivery. This built CLI
+journey complements the split native assembled-CLI benchmark above; it does not
+substitute for it.
+No assistant behavior, protocol, prompt, discoverability or recovery change is
 part of this experiment.
 
 ## Device import CPU reproduction

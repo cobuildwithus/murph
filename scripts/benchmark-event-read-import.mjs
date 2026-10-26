@@ -1,16 +1,21 @@
 import { spawn } from "node:child_process";
-import { createHash } from "node:crypto";
+import { createHash, randomBytes, randomInt } from "node:crypto";
+import { createSocket } from "node:dgram";
+import { once } from "node:events";
 import { appendFile, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { performance } from "node:perf_hooks";
+import { setImmediate } from "node:timers/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { isDeepStrictEqual } from "node:util";
 
 const probe = fileURLToPath(new URL("./event-read-import-probe.mjs", import.meta.url));
 const ROOT = "@murphai/core/dist/index.js";
 const READ = "@murphai/core/dist/event-read.js";
+const OWNER_TIMING_PHASES = ["candidates", "revisions"].flatMap((pass) =>
+  ["source", "path", "read", "decode", "parse", "select"].map((operation) => `event-owner-${pass}-${operation}`));
 let phase = "configuration";
 class BenchmarkError extends Error {}
 function check(condition, reason) { if (!condition) throw new BenchmarkError(reason); }
@@ -36,6 +41,77 @@ export function distribution(values) {
 export function assertOutputParity(actual, expected) {
   check(actual.status === expected.status && actual.stdout.equals(expected.stdout)
     && actual.stderr.equals(expected.stderr), "complete-cli-output-parity-failed");
+}
+
+export function telemetrySides(mode, setting = "off") {
+  check(["off", "on", "compare"].includes(setting), "invalid-telemetry-mode");
+  check(setting !== "compare" || mode === "control", "telemetry-compare-requires-control");
+  return { base: setting === "on", candidate: setting !== "off" };
+}
+
+// Input has passed the installed public normalizer. Project only fixed phase
+// names and numbers; never retain transport keys/ticks or raw envelope extras.
+export function assertMealTiming(timing, requireBreakdown = false) {
+  check(timing?.reportCount === 1 && timing.batchContainers === 0
+    && timing.droppedCalls === 0 && timing.droppedSpans === 0
+    && timing.outOfWindowReports === 0 && timing.transportTruncated === false
+    && timing.commands?.length === 1, "unexpected-cli-timing-summary");
+  const command = timing.commands[0];
+  check(command.command === "meal show" && command.outcome === "ok" && command.calls === 1,
+    "unexpected-cli-timing-command");
+  const hasBreakdown = command.phases.some((sample) => OWNER_TIMING_PHASES.includes(sample.phase));
+  const names = ["event-core-load", "event-owner-candidates", "event-owner-revisions",
+    ...(requireBreakdown || hasBreakdown ? OWNER_TIMING_PHASES : [])];
+  const phases = names.map((name) => {
+    const sample = command.phases.find((entry) => entry.phase === name);
+    check(sample?.count === 1, "expected-cli-timing-phase-missing");
+    return { phase: name, count: sample.count, sumUs: sample.sumUs, maxUs: sample.maxUs };
+  });
+  return { reportCount: timing.reportCount, command: command.command, outcome: command.outcome,
+    calls: command.calls, droppedSpans: timing.droppedSpans, phases };
+}
+
+// The production engine receiver deliberately has no awaitable bind/receipt
+// API. Use the existing native UDP test pattern, with the artifact's normalizer.
+// Bind before invoke starts its spawn timer; receipt wait is after child close.
+export async function withCliTimingReceipt(protocol, invoke, requireBreakdown = false) {
+  const socket = createSocket("udp4");
+  const port = randomInt(49_152, 65_536);
+  const key = randomBytes(16).toString("hex");
+  const startedUs = Number(process.hrtime.bigint() / 1_000n);
+  let packets = 0; let invalid = false; let timing; let settle;
+  const received = new Promise((resolve) => { settle = resolve; });
+  socket.on("error", () => { invalid = true; settle(); });
+  socket.on("message", (bytes, remote) => {
+    packets++;
+    try {
+      check(remote.address === "127.0.0.1" && bytes.length <= protocol.CLI_TIMING_MAX_REPORT_BYTES,
+        "invalid-cli-timing-receipt");
+      const envelope = JSON.parse(bytes.toString("utf8"));
+      check(envelope?.key === key && Number.isSafeInteger(envelope.startedUs)
+        && Number.isSafeInteger(envelope.endedUs) && envelope.startedUs >= startedUs
+        && envelope.endedUs >= envelope.startedUs
+        && envelope.endedUs <= Number(process.hrtime.bigint() / 1_000n), "invalid-cli-timing-receipt");
+      const normalized = protocol.normalizeCliTiming(envelope.timing);
+      check(normalized, "invalid-cli-timing-receipt");
+      timing ??= normalized;
+    } catch { invalid = true; }
+    settle();
+  });
+  try {
+    const listening = once(socket, "listening");
+    socket.bind(port, "127.0.0.1");
+    await listening;
+    const result = await invoke(`${port}:${key}`);
+    const deadline = setTimeout(settle, 1_000);
+    try {
+      await received;
+      await setImmediate(); // Dispatch already-queued duplicate datagrams too.
+    } finally { clearTimeout(deadline); }
+    check(!invalid, "invalid-cli-timing-receipt");
+    check(packets === 1 && timing, "cli-timing-receipt-missing-or-duplicate");
+    return { ...result, cliTiming: assertMealTiming(timing, requireBreakdown) };
+  } finally { try { socket.close(); } catch { /* Also closes on bind/spawn failure. */ } }
 }
 
 export function narrowImports(inventory) {
@@ -85,7 +161,7 @@ async function installedBundle(argument) {
     output: await treeReceipt(path.join(cli, ".bundle")) };
 }
 
-async function runCli(bundle, scratch, vault, args, trace = false) {
+export async function runCli(bundle, scratch, vault, args, trace = false, endpoint) {
   const receipt = path.join(scratch, "probe.json");
   await rm(receipt, { force: true });
   const started = performance.now();
@@ -99,6 +175,7 @@ async function runCli(bundle, scratch, vault, args, trace = false) {
         MURPH_EVENT_READ_BENCH_RECEIPT: receipt,
         MURPH_EVENT_READ_BENCH_BUNDLE: bundle.root,
         MURPH_EVENT_READ_BENCH_TRACE: trace ? "1" : "0",
+        ...(endpoint === undefined ? {} : { MURPH_CLI_TIMING_ENDPOINT: endpoint }),
       },
       stdio: ["ignore", "pipe", "pipe"], timeout: 60_000, killSignal: "SIGKILL",
     });
@@ -157,6 +234,7 @@ export async function coldPairs(invoke, pairs = 10) {
   check(Number.isInteger(pairs) && pairs >= 8 && pairs <= 40, "invalid-pair-count");
   let expected;
   const samples = [];
+  const timingReports = { base: 0, candidate: 0 };
   for (let pair = 0; pair < pairs + 2; pair++) {
     const order = pair % 2 ? ["candidate", "base"] : ["base", "candidate"];
     const row = { first: order[0] };
@@ -165,6 +243,10 @@ export async function coldPairs(invoke, pairs = 10) {
       expected ??= result;
       assertOutputParity(result, expected);
       row[label] = { wallMs: result.wallMs, childWallMs: result.childWallMs, cpuMs: result.cpuMs };
+      if (result.cliTiming) {
+        timingReports[label] += result.cliTiming.reportCount;
+        row[label].cliTiming = result.cliTiming;
+      }
     }
     if (pair >= 2) samples.push(row);
   }
@@ -174,7 +256,8 @@ export async function coldPairs(invoke, pairs = 10) {
     candidateMinusBase: distribution(samples.map((item) => item.candidate[metric] - item.base[metric])),
     candidateOverBase: distribution(samples.map((item) => item.candidate[metric] / item.base[metric])),
   }]));
-  return { warmupPairs: 2, measuredPairs: pairs, samples, summary, output: {
+  return { warmupPairs: 2, measuredPairs: pairs, samples, summary,
+    ...(timingReports.base || timingReports.candidate ? { timingReports } : {}), output: {
     stdoutBytes: expected.stdout.length, stdoutSha256: sha256(expected.stdout),
     stderrBytes: expected.stderr.length, stderrSha256: sha256(expected.stderr), status: expected.status,
   } };
@@ -220,9 +303,13 @@ async function main() {
   const [mode, baseArg, candidateArg] = process.argv.slice(2);
   check(["check", "control", "pairs"].includes(mode) && baseArg
     && (mode === "pairs" ? Boolean(candidateArg) : !candidateArg), "usage-check-or-control-BUNDLE-or-pairs-BASE-CANDIDATE");
+  const telemetry = process.env.MURPH_EVENT_READ_TELEMETRY ?? "off";
+  const enabled = telemetrySides(mode, telemetry);
   phase = "bundle-load";
   const base = await installedBundle(baseArg);
   const candidate = mode === "pairs" ? await installedBundle(candidateArg) : base;
+  const timingProtocol = telemetry === "off" ? null
+    : await import(pathToFileURL(candidate.require.resolve("@murphai/runtime-state/cli-timing")).href);
   const core = await import(pathToFileURL(base.require.resolve("@murphai/core")).href);
   const { seedFixture } = await import("../packages/core/bench/meal-read.ts");
   const config = mode === "check" ? { rows: 48, months: 3, noteBytes: 128 } : {
@@ -239,18 +326,25 @@ async function main() {
     const fixture = await seedFixture(core, vault, config.rows, config.months, config.noteBytes);
     const input = await treeReceipt(vault, true);
     emit({ scenario: "configuration", mode, node: process.version, platform: process.platform,
+      ...(telemetry === "off" ? {} : { telemetry }),
       arch: process.arch, fixtureVersion: 1, ...config, counts: fixture.counts,
       byEncoding: fixture.sizes, input, bundleOutputs: { base: base.output, candidate: candidate.output } });
     const args = ["meal", "show", fixture.ownerId];
+    const invoke = (label, trace = false) => {
+      const run = (endpoint) => runCli(label === "base" ? base : candidate, scratch, vault, args, trace, endpoint);
+      return enabled[label] ? withCliTimingReceipt(timingProtocol, run,
+        mode === "check" || (label === "candidate" && (mode === "pairs" || telemetry === "compare"))) : run();
+    };
     phase = "import-probe";
-    const baseline = await runCli(base, scratch, vault, args, true);
-    const narrowed = mode === "check" ? baseline : await runCli(candidate, scratch, vault, args, true);
+    const baseline = await invoke("base", true);
+    const narrowed = mode === "check" ? baseline : await invoke("candidate", true);
     validateSuccess(baseline, vault, fixture.expected);
     validateSuccess(narrowed, vault, fixture.expected);
     assertOutputParity(narrowed, baseline);
     check(baseline.inventory.outsideBundle === 0 && narrowed.inventory.outsideBundle === 0,
       "bundle-resolves-outside-artifact");
     emit({ scenario: "loaded-work", performanceTimings: false,
+      ...(telemetry === "off" ? {} : { cliTiming: { base: baseline.cliTiming ?? null, candidate: narrowed.cliTiming ?? null } }),
       base: baseline.inventory, candidate: narrowed.inventory,
       removedCoreModules: baseline.inventory.core.map((item) => item.module)
         .filter((name) => !narrowed.inventory.core.some((item) => item.module === name)),
@@ -258,12 +352,13 @@ async function main() {
     if (mode !== "check") {
       phase = "cold-pairs";
       const timings = await coldPairs(async (label) => {
-        const result = await runCli(label === "base" ? base : candidate, scratch, vault, args);
+        const result = await invoke(label);
         validateSuccess(result, vault, fixture.expected);
         assertOutputParity(result, baseline);
         return result;
       }, integer("MURPH_EVENT_READ_PAIRS", 10, 8, 40));
-      emit({ scenario: "cold-process-pairs", loadHooks: false, ...timings });
+      emit({ scenario: "cold-process-pairs", loadHooks: false,
+        ...(telemetry === "off" ? {} : { telemetry }), ...timings });
     }
     phase = "correctness";
     await correctness(mode === "check" ? [candidate] : [base, candidate], scratch, vault, fixture, core);

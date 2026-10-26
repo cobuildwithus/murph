@@ -1900,6 +1900,51 @@ describeRealCodex('real model canonical production journeys', () => {
     try { await runCanonicalHostedMealJourney({ ...config, onProviderRequestStarted: recordCanonicalProviderRequest }) }
     finally { await removeRealCodexTemporaryPaths(config.temporaryPaths) }
   }, 600_000)
+  it('real model canonical saved meal exact read uses the shipped CLI without mutation', async () => {
+    const config = await resolveRealCodexE2eConfig({ productionTransport: true })
+    const fixture = await createCanonicalLiveFixture({ ...config, onProviderRequestStarted: recordCanonicalProviderRequest })
+    // Observe the real provider call through; the fixture runs dist/bin.js with
+    // native package resolution, and never substitutes a meal command response.
+    const provider = vi.spyOn(clinicalExtractionCodex, 'executeCodexAppServerTurn')
+    try {
+      const meal = await addMeal({
+        vaultRoot: fixture.vault, occurredAt: '2026-08-29T12:15:00.000Z',
+        ingredients: ['roasted carrots', 'lentils'],
+        nutrition: {
+          provenance: { source: 'label', confidence: 'high', sourceDetail: 'Synthetic label for the saved portion.' },
+          totals: { calories: 347, proteinGrams: 19, carbsGrams: 48, fatGrams: 9, fiberGrams: 8 },
+        },
+      })
+      const before = await snapshotRealCodexCanonicalVault(fixture.vault)
+      const writesBefore = await listWriteOperationMetadataPaths(fixture.vault)
+      // These requested facts occur only in the saved meal, never in the prompt.
+      const result = await fixture.message(`Read my saved meal ${meal.mealId} once with meal show. Tell me what it was, its recorded calories, and grams of protein. Only read; do not save or change anything.`)
+      const turns = await Promise.all(provider.mock.results.map((item) => item.value))
+      const reads = turns.flatMap((turn) => readCapabilityRoutingActions(turn.jsonEvents)).filter((action) =>
+        action.kind === 'command' && action.ok
+        && /\b(?:vault-cli|bin\.js)\b/u.test(action.command)
+        && new RegExp(`\\bmeal\\s+show\\s+['"]?${meal.mealId}\\b`, 'u').test(action.command)
+        && !/--(?:help|schema)\b/u.test(action.command)
+        && action.output.includes(meal.mealId)
+        && action.output.includes('roasted carrots')
+        && action.output.includes('lentils'))
+      expect(reads).toHaveLength(1)
+      expect(await snapshotRealCodexCanonicalVault(fixture.vault)).toEqual(before)
+      expect(await listWriteOperationMetadataPaths(fixture.vault)).toEqual(writesBefore)
+      expect(await listAssistantOutboxIntents(fixture.vault)).toEqual([])
+      expect(result.delivery).toBeNull()
+      expect(result.response).toMatch(/carrots/iu)
+      expect(result.response).toMatch(/lentils/iu)
+      expect(result.response).toMatch(/\b347\b/u)
+      expect(result.response).toMatch(/\b19\b/u)
+      expect(result.response).not.toMatch(/(?:I|we)(?:['’]ve| have)?\s+(?:saved|logged|added|changed|updated)|couldn['’]t|unable|permission denied/iu)
+      process.stdout.write(`[canonical-exact-meal-read] ${JSON.stringify({ reads: reads.length, canonicalUnchanged: true })}\n`)
+    } finally {
+      provider.mockRestore()
+      await fixture.close()
+      await removeRealCodexTemporaryPaths(config.temporaryPaths)
+    }
+  }, 600_000)
   it('real model canonical meal persists across assistant restart', async () => {
     const config = await resolveRealCodexE2eConfig({ productionTransport: true })
     try { await runCanonicalMealRestartJourney({ ...config, onProviderRequestStarted: recordCanonicalProviderRequest }) }

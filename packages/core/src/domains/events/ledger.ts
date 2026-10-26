@@ -15,6 +15,7 @@ import {
   normalizeCanonicalEventLinks,
 } from "../../event-links.ts";
 import { VaultError } from "../../errors.ts";
+import { startEventOwnerOperation, withEventOwnerScanTiming } from "../../event-owner-timing.ts";
 import {
   listEventLedgerShardPaths,
   readEventLedgerShardRecords,
@@ -616,75 +617,95 @@ export async function readOwnedEvent(
 
   const endCandidates = startCliPhase("event-owner-candidates");
   try {
-    relativePaths = await listEventLedgerShardPaths(input.vaultRoot);
-    candidateIds = new Set<string>();
-    const ownerField = input.kind === "document" ? "documentId" : "mealId";
-    for (const relativePath of relativePaths) {
-      const records = await readEventLedgerShardRecords({ vaultRoot: input.vaultRoot, relativePath });
-      for (const rawRecord of records) {
-        const candidate = rawRecord as JsonObject;
-        if (
-          candidate.kind === input.kind
-          && candidate[ownerField] === input.ownerId
-        ) {
-          candidateIds.add(validateStoredEventRecord(candidate).id);
-        }
+    ({ relativePaths, candidateIds } = await withEventOwnerScanTiming(input.kind, "candidates", async () => {
+      let relativePaths: string[];
+      const endSource = startEventOwnerOperation("source");
+      try { relativePaths = await listEventLedgerShardPaths(input.vaultRoot); }
+      finally { endSource(); }
+      const candidateIds = new Set<string>();
+      const ownerField = input.kind === "document" ? "documentId" : "mealId";
+      for (const relativePath of relativePaths) {
+        const records = await readEventLedgerShardRecords({ vaultRoot: input.vaultRoot, relativePath });
+        const endSelect = startEventOwnerOperation("select");
+        try {
+          for (const rawRecord of records) {
+            const candidate = rawRecord as JsonObject;
+            if (
+              candidate.kind === input.kind
+              && candidate[ownerField] === input.ownerId
+            ) {
+              candidateIds.add(validateStoredEventRecord(candidate).id);
+            }
+          }
+        } finally { endSelect(); }
       }
-    }
-    if (candidateIds.size === 0) {
-      throw new VaultError(
-        "EVENT_MISSING",
-        `${input.kind} event owner "${input.ownerId}" was not found.`,
-      );
-    }
+      const endSelect = startEventOwnerOperation("select");
+      try {
+        if (candidateIds.size === 0) {
+          throw new VaultError(
+            "EVENT_MISSING",
+            `${input.kind} event owner "${input.ownerId}" was not found.`,
+          );
+        }
+        return { relativePaths, candidateIds };
+      } finally { endSelect(); }
+    }));
   } finally {
     endCandidates();
   }
 
   const endRevisions = startCliPhase("event-owner-revisions");
   try {
-    const matchesById = new Map<string, MatchedEventRecord[]>();
-    for (const relativePath of relativePaths) {
-      const records = await readEventLedgerShardRecords({ vaultRoot: input.vaultRoot, relativePath });
-      for (const rawRecord of records) {
-        const rawId = (rawRecord as JsonObject).id;
-        if (typeof rawId !== "string" || !candidateIds.has(rawId)) {
-          continue;
-        }
-        const record = validateStoredEventRecord(rawRecord as JsonObject);
-        const matches = matchesById.get(record.id) ?? [];
-        matches.push({ relativePath, record });
-        matchesById.set(record.id, matches);
+    return await withEventOwnerScanTiming(input.kind, "revisions", async () => {
+      const matchesById = new Map<string, MatchedEventRecord[]>();
+      for (const relativePath of relativePaths) {
+        const records = await readEventLedgerShardRecords({ vaultRoot: input.vaultRoot, relativePath });
+        const endSelect = startEventOwnerOperation("select");
+        try {
+          for (const rawRecord of records) {
+            const rawId = (rawRecord as JsonObject).id;
+            if (typeof rawId !== "string" || !candidateIds.has(rawId)) {
+              continue;
+            }
+            const record = validateStoredEventRecord(rawRecord as JsonObject);
+            const matches = matchesById.get(record.id) ?? [];
+            matches.push({ relativePath, record });
+            matchesById.set(record.id, matches);
+          }
+        } finally { endSelect(); }
       }
-    }
 
-    const liveMatches = [...matchesById.values()].flatMap((matches) => {
-      const latest = selectLatestEventSpineEntry(matches);
-      return latest
-        && !isDeletedEventSpineRecord(latest.record)
-        && ownedEventId(latest.record, input.kind) === input.ownerId
-        ? [latest]
-        : [];
+      const endSelect = startEventOwnerOperation("select");
+      try {
+        const liveMatches = [...matchesById.values()].flatMap((matches) => {
+          const latest = selectLatestEventSpineEntry(matches);
+          return latest
+            && !isDeletedEventSpineRecord(latest.record)
+            && ownedEventId(latest.record, input.kind) === input.ownerId
+            ? [latest]
+            : [];
+        });
+        if (liveMatches.length === 0) {
+          throw new VaultError(
+            "EVENT_MISSING",
+            `${input.kind} event owner "${input.ownerId}" was not found.`,
+          );
+        }
+        if (liveMatches.length > 1) {
+          throw new VaultError(
+            "EVENT_OWNER_AMBIGUOUS",
+            `${input.kind} event owner "${input.ownerId}" resolves to multiple events.`,
+          );
+        }
+
+        const match = liveMatches[0]!;
+        return {
+          eventId: match.record.id,
+          ledgerFile: match.relativePath,
+          event: match.record,
+        };
+      } finally { endSelect(); }
     });
-    if (liveMatches.length === 0) {
-      throw new VaultError(
-        "EVENT_MISSING",
-        `${input.kind} event owner "${input.ownerId}" was not found.`,
-      );
-    }
-    if (liveMatches.length > 1) {
-      throw new VaultError(
-        "EVENT_OWNER_AMBIGUOUS",
-        `${input.kind} event owner "${input.ownerId}" resolves to multiple events.`,
-      );
-    }
-
-    const match = liveMatches[0]!;
-    return {
-      eventId: match.record.id,
-      ledgerFile: match.relativePath,
-      event: match.record,
-    };
   } finally {
     endRevisions();
   }
