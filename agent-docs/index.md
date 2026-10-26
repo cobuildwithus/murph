@@ -153,6 +153,11 @@ in [the import-speed plan](exec-plans/completed/2026-09-24-garmin-import-speed.m
 
 # Murph Agent Docs Index
 
+Weekly game report, block and the write-time content check are owned by
+`ARCHITECTURE.md` § Weekly game report, block, and content check; the player
+rules are in [the weekly game spec](product-specs/weekly-game.md), and the
+real-PostgreSQL proof is listed in [the testing map](references/testing-ci-map.md).
+
 The canonical event-read import experiment is tracked in
 [the completed plan](exec-plans/completed/2026-10-25-event-read-import.md).
 `packages/core/README.md` owns the semantic surface and

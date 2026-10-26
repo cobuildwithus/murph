@@ -5483,7 +5483,9 @@ until the viewer has posted that day; media reads use the same rule.
 `POST /invites/:token/negotiate`,
 `DELETE /games/:id` (unstarted invite cancellation),
 `POST /games/:id/entries`, `DELETE /games/:id/entries/:entryId`,
-`POST /tickets/:id/redeem`, and `POST /media`. Reads: `GET /home`,
+`POST /tickets/:id/redeem`, `POST /games/:id/reports`,
+`POST /invites/:token/reports`, `PUT /invites/:token/block`,
+`PUT /blocks/:memberId`, `DELETE /blocks/:memberId`, and `POST /media`. Reads: `GET /home`,
 `GET /games/:id`, `GET /invites/:token`, `GET /media/:key`. They use a plain
 Better Auth bearer session, not the paid-member check, because invitees play
 free; the flag and allowlist then hide every route. The invite preview and
@@ -5535,6 +5537,54 @@ profile key and shared game participation (including addressed rematches), then
 falls back to the existing entry visibility rule. Public preview shapes stay
 unchanged. Deploy the nullable-column migration before Web and the new native
 client; old native clients continue sending name and zone without clearing photos.
+
+### Weekly game report, block, and content check
+
+App Store guideline 1.2. `runGameCommand` first runs `game/moderation.ts`, a
+small local whole-word check on what players share (first names, tasks,
+prizes, dares, words, captions and excuses; never private labels or report
+notes): no money in a stake, nothing clearly dangerous in a task or stake, and
+no slurs, explicit sexual words or self-harm taunts anywhere. A refusal is
+`CONTENT_NOT_ALLOWED` ("This can't be posted.") before anything is stored. It
+calls no provider and checks no image; a provider would plug in at
+`moderateGameCommand` (photos at post time, before the other player unlocks).
+
+`game_block` (blocker, blocked) hides two people from each other until the
+blocker deletes it. Block takes the pair's transaction advisory lock
+(`blocks.ts` `lockGamePair`), then every game between them in id order: open
+and live games end `void` (no result, no tickets; an unshaken invite records
+`cancelled`, otherwise `blocked`), every game between them loses
+`chat_container_member_id`, and their waiting `game_lifecycle` receipts are
+skipped (`game_blocked`), so the chat funding gate finds no game and Murph sends
+nothing more there; `readGameChatState` returns no games for a blocked pair.
+Joins, negotiations and addressed rematches take the same pair lock before the
+game lock and refuse a blocked pair with `PLAYER_UNAVAILABLE` (only the blocker
+hears it was a block). Views treat a player blocked either way exactly like a
+player who left (`left: true`, the viewer's name for them, no photo, posts or
+days; tickets `left`); the blocker's Home drops those games and tickets and
+lists everyone they blocked in `GameHomeView.blocked`. Media reads refuse a
+blocked pair. Unblocking changes no game.
+
+`game_report` holds one report: reporter, reported member, game, entry,
+`about` (post, player, terms), reason, a note and a snapshot of the reported
+words sealed under the reporter's key (`game_report`/`note`, `snapshot`), and
+the snapshot's media keys. Reported member, game and entry are `SET NULL`, so
+the snapshot outlives the post, the game and the reported account; the reporter
+cascades. Reports come from a game (finished too) or, before accepting, from an
+invite token. A reported post is hidden from its reporter (`hidden: true`, still
+posted and counted) and a reported player's profile photo too, in views and
+media reads. After the row commits, `report-alert.ts` emails the reason, the
+content kind, the report id and the game id (never words, photos, health
+values or who reported) through the operational alert path, to
+`HOSTED_GAME_REPORT_ALERT_EMAILS` (else `HOSTED_LINQ_ALERT_EMAILS`), once per
+report by idempotency key and at most ten per reporter per UTC day; a failed
+send returns retryable `GAME_REPORT_ALERT_FAILED` and the app retries the same
+id. `/ops/game-reports` (ops members only) lists unreviewed reports with their
+snapshots, and `POST /api/ops/game-reports` takes down the post (a `removed`
+tombstone with its words, summary, blur and media keys cleared, so no one but
+its poster can read the upload; hosted image bytes stay until a per-image
+delete route exists), ends the pair's games through a block by the reporter,
+suspends the reported member (`suspended_at`), and marks the report reviewed.
 
 ### Weekly game post notifications
 

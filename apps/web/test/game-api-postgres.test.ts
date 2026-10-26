@@ -14,6 +14,9 @@ import { POST as upload } from "../app/api/game/v1/media/route";
 import { POST as post } from "../app/api/game/v1/games/[id]/entries/route";
 import { GET as read } from "../app/api/game/v1/games/[id]/route";
 import { GET as home } from "../app/api/game/v1/home/route";
+import { DELETE as unblockRoute, PUT as blockRoute } from "../app/api/game/v1/blocks/[memberId]/route";
+import { POST as reportRoute } from "../app/api/game/v1/games/[id]/reports/route";
+import { GET as media } from "../app/api/game/v1/media/[...key]/route";
 import { POST as redeem } from "../app/api/game/v1/tickets/[id]/redeem/route";
 import { POST as proposeChange } from "../app/api/game/v1/games/[id]/changes/route";
 import { DELETE as cancelChange } from "../app/api/game/v1/games/[id]/changes/[proposalId]/route";
@@ -31,6 +34,7 @@ if (enabled) {
   }
 }
 const memberIds: string[] = [];
+const tokenMember = new Map<string, string>();
 let mediaDir: string;
 const request = (token: string, body?: unknown, method = "POST", heldInvite?: string) => new Request("http://localhost/api/game/v1", {
   method, headers: { authorization: `Bearer ${serializeHostedNativeSessionToken(token)}`, "content-type": "application/json",
@@ -45,9 +49,10 @@ async function game(response: Promise<Response>): Promise<GameView> {
   return body.game;
 }
 async function member(firstName: string) {
-  const { token } = await account();
+  const { id, token } = await account();
   const response = await profile(request(token, { firstName, timeZone: "UTC" }, "PUT"));
   expect(response.status).toBe(200);
+  tokenMember.set(token, id);
   return token;
 }
 /** A signed-in member with no game profile yet, like someone who just signed up from a link. */
@@ -82,6 +87,12 @@ async function imageKey(token: string, suffix: number): Promise<string> {
 async function photo(token: string, id: string, suffix: number) {
   const mediaKey = await imageKey(token, suffix);
   return game(post(request(token, { entryId: randomUUID(), kind: "photo", mediaKeys: [mediaKey] }), { params: Promise.resolve({ id }) }));
+}
+
+async function mediaStatus(token: string, key: string): Promise<number> {
+  const response = await media(new Request(`http://localhost/api/game/v1/media/${encodeURIComponent(key)}`, {
+    headers: { authorization: `Bearer ${serializeHostedNativeSessionToken(token)}` } }), { params: Promise.resolve({ key: key.split("/") }) });
+  return response.status;
 }
 
 // Exercise the actual Request/Response handlers, authentication adapter, command
@@ -137,6 +148,46 @@ describe.skipIf(!enabled)("game v1 local API smoke", () => {
     expect(recap.tickets).toHaveLength(1);
     expect(recap.tickets[0]).toMatchObject({ kind: "dare", youHold: true, what: "Sing at karaoke" });
     expect(recap.days[0]?.others[0]?.entry?.kind).toBe("photo");
+  }, 30_000);
+
+  it("reports a photo, hides it and its upload from the reporter, then blocks and unblocks over HTTP", async () => {
+    const leo = await member("Leo");
+    const ava = await member("Ava");
+    const id = randomUUID();
+    const context = { params: Promise.resolve({ id }) };
+    const created = await game(create(request(leo, { gameId: id, inviteeFirstName: "Ava", terms: {
+      startsOn: new Date(Date.now() + 2 * 86_400_000).toISOString().slice(0, 10),
+      schedule: { count: 3 }, stakes: [{ kind: "prize", item: "Choose a book" }],
+      tasks: [{ seat: 0, text: "Move" }, { seat: 1, text: "Move" }],
+    } })));
+    await game(accept(request(ava, { termsVersion: 1, timeZone: "UTC" }), { params: Promise.resolve({ token: created.inviteToken! }) }));
+    await game(start(request(leo), context));
+    const avaPosted = await photo(ava, id, 41);
+    const key = decodeURIComponent(avaPosted.days[0].mine!.mediaUrls[0].split("/media/")[1]!);
+    await photo(leo, id, 42);
+    expect(await mediaStatus(leo, key)).toBe(200);
+    const entryId = avaPosted.days[0].mine!.entryId;
+
+    const reported = await game(reportRoute(request(leo, { reportId: randomUUID(), entryId, reason: "sexual", note: "Not okay" }), context));
+    expect(reported.days[0].others[0]).toEqual({ entry: null, hidden: true, seat: 1, status: "posted" });
+    expect(await mediaStatus(leo, key)).toBe(404);
+    expect(await mediaStatus(ava, key)).toBe(200);
+    const bad = await reportRoute(request(leo, { reportId: randomUUID(), reason: "rude" }), context);
+    expect(bad.status).toBe(400);
+
+    const avaId = tokenMember.get(ava)!;
+    const blocked = await blockRoute(request(leo, undefined, "PUT"), { params: Promise.resolve({ memberId: avaId }) });
+    expect(blocked.status).toBe(200);
+    expect(await blocked.json()).toEqual({ ok: true, game: null });
+    const leoHome: GameHomeView = await (await home(request(leo, undefined, "GET"))).json();
+    expect(leoHome.blocked).toEqual([{ firstName: "Ava", memberId: avaId }]);
+    expect(leoHome.games.map((view) => view.id)).not.toContain(id);
+    const avaView = await game(read(request(ava, undefined, "GET"), context));
+    expect(avaView).toMatchObject({ status: "void" });
+    expect(avaView.players.find((player) => !player.isMe)).toMatchObject({ left: true, memberId: null });
+    const unblocked = await unblockRoute(request(leo, undefined, "DELETE"), { params: Promise.resolve({ memberId: avaId }) });
+    expect(unblocked.status).toBe(200);
+    expect((await (await home(request(leo, undefined, "GET"))).json()).blocked).toEqual([]);
   }, 30_000);
 
   it("posts every summary kind through dev days and reveals the untouched partner days only in recap", async () => {

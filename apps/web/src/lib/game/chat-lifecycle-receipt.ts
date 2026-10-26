@@ -56,3 +56,16 @@ export async function markGameChatGenerationQueuedTx(eventId: string, tx: Pick<P
   });
   if (containerMemberId && changed.count !== 1) throw new Error("Game chat bootstrap requires its pending lifecycle receipt.");
 }
+
+/**
+ * A block ends the pair's game chat: nothing still waiting to be sent there
+ * about these games goes out, including a new chat not yet set up.
+ */
+export async function skipGameChatLifecycleTx(tx: Pick<Prisma.TransactionClient, "hostedLinqDelivery">, gameIds: readonly string[], now: Date): Promise<void> {
+  if (gameIds.length === 0) return;
+  await tx.hostedLinqDelivery.updateMany({
+    data: { retryAfterAt: null, skipReason: "game_blocked", skippedAt: now, status: "skipped" },
+    where: { source: "game_lifecycle", skippedAt: null, status: { in: ["awaiting_generation", "generation_queued"] },
+      OR: [{ sourceRef: { in: [...gameIds] } }, ...gameIds.map((gameId) => ({ sourceRef: { startsWith: `${gameId}:` } }))] },
+  });
+}

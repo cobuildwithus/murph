@@ -8,14 +8,14 @@ import {
 } from "../hosted-crypto/secure-box";
 
 /**
- * Game words (names, tasks, stakes, labels, captions, workout data) are
+ * Game words (names, tasks, stakes, labels, captions, workout data, report notes) are
  * sealed under one member's key and bound to where they're stored. Seal
  * before a transaction starts; the key unwrap can call KMS.
  */
 export interface GameSealTarget {
   /** Whose key: the profile owner, the game's creator, the poster, the label owner. */
   memberId: string;
-  table: "game" | "game_contact_label" | "game_entry" | "game_profile";
+  table: "game" | "game_contact_label" | "game_entry" | "game_profile" | "game_report";
   /** Labels bind to their owner, so an invite's label can move to its row as-is. */
   rowId: string;
   field: string;

@@ -45,6 +45,11 @@ const OPS_TOOLS = [
     label: "Runtime latency",
   },
   {
+    description: "Review weekly game reports within 24 hours: remove a post, end the games, or suspend the member.",
+    href: "/ops/game-reports",
+    label: "Game reports",
+  },
+  {
     description:
       "Preview recipients and send one plain-text email to an explicit list of member IDs.",
     href: "/ops/email",

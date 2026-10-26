@@ -27,6 +27,7 @@ export const VERCEL_TELEMETRY_PATHNAMES = [
   "/legal/terms",
   "/ops",
   "/ops/email",
+  "/ops/game-reports",
   "/ops/growth",
   "/ops/runtime-latency",
   "/ops/runtime-maintenance",
