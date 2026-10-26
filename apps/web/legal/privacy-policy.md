@@ -141,7 +141,7 @@ If you play Murph's game, we collect:
 - **photos** you take with your iPhone's camera in the game as your daily proof;
 - **words** you type as your daily proof;
 - **rep counts:** the game reads your iPhone's front camera to find your body's position and counts pushups on your iPhone. Camera frames are dropped right away and are never saved, shown, or sent. We receive only the rep card: the count, each rep's time and depth, and a heart rate summary if you add one;
-- **heart rate,** read over Bluetooth from a WHOOP you connect, only while you record. We receive only the heart rate card with its duration and average, low, and peak beats per minute, not each reading;
+- **heart rate,** read over Bluetooth from a WHOOP you connect. Your iPhone shows your live heart rate while you get ready and while you record. We receive only the heart rate card for a recording, with its duration and average, low, and peak beats per minute, not each reading;
 - **routes** for a walk or run (see Location below);
 - **missed-day excuses:** the words you give for a missed day. If you explain by voice, your iPhone turns your speech into words and deletes the recording. Only the words are sent to us;
 - **invite details:** if you pick someone from your contacts, their phone number stays on your iPhone and is used only to open a Messages draft that you send. The name, relationship, and photo you give them are kept as a private label that only you see;
@@ -150,11 +150,11 @@ If you play Murph's game, we collect:
 
 Before a photo you take in the game leaves your iPhone, the app removes its location and camera details. We encrypt game words and numbers at rest, and we show game photos only through short-lived links to people allowed to see them.
 
-**Location.** The route feature uses your iPhone's precise location only after you tap Start and allow location while using the app. Murph never asks for location all the time. Between Start and Stop, it keeps recording while your phone is locked, and iOS shows its location indicator. Your location points stay in memory on your iPhone and are never sent or saved. When you tap Send, we receive one map image of your route, plus its distance, its time, and whether it was a walk or a run. The map leaves out the start and end of your route, so it doesn't show exactly where you started and finished.
+**Location.** The route feature uses your iPhone's precise location only while you use the app, and only after you allow it. iOS asks the first time you tap Start, and Murph never asks for location all the time. Once you have allowed it, opening the route screen finds where you are so the map can show it before you start. Between Start and Stop, it keeps recording while your phone is locked, and iOS shows its location indicator. Your location points stay in memory on your iPhone and are never sent or saved. When you tap Send, we receive one map image of your route, plus its distance, its time, and whether it was a walk or a run. The map leaves out the start and end of your route. If your route passes the same place again in the middle, such as a second lap past where you started, the map can still show that place, and for a very short route the part that is left is still close to where you started.
 
 **Group chat.** When a game starts, Murph may text both players about it in an iMessage group. Murph writes those messages with help from its AI providers, using shared game details such as names, tasks, the prize or dare, the schedule, and who has posted. Messages and photos you send in that chat are handled like any other message to Murph (see Section 6), and a photo you send there can be saved as your game photo for the day.
 
-**Word check.** Before words are posted in a game, we check them on our own servers and refuse words that mention money in a prize or dare, describe clearly dangerous challenges, tell someone to hurt themselves, or contain slurs or explicit sexual words. No outside company does this check.
+**Word check.** Before words are posted in a game, our own servers check them against a short list of words and phrases and refuse ones that match, such as money in a prize or dare, clearly dangerous challenges, telling someone to hurt themselves, slurs, and explicit sexual words. The check is limited and does not catch everything. No outside company does this check.
 
 ## 4. Sources of information
 

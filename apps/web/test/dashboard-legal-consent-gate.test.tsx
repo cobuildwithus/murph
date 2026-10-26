@@ -8,6 +8,7 @@ import {
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import { DashboardLegalConsentGate } from "@/src/components/legal/dashboard-legal-consent-gate";
+import { HostedOnboardingApiError } from "@/src/components/hosted-onboarding/client-api";
 import type { HostedConsentStatus } from "@/src/lib/legal/consent";
 
 import { renderClientComponent } from "./render-client-component";
@@ -615,6 +616,73 @@ test("a member who agreed to earlier Terms gets one Agree step that says what ch
   expect(rendered.reload).toHaveBeenCalledTimes(1);
 });
 
+test("an Agree on documents that changed under an open dialog reloads them and agrees to the current ones", async () => {
+  const openedBeforeDeploy = createLaunchConsentStatus({
+    launchHealthDataGranted: true,
+  });
+  mocks.requestHostedOnboardingJson
+    .mockRejectedValueOnce(new HostedOnboardingApiError({
+      code: "CONSENT_DOCUMENT_VERSIONS_STALE",
+      message: "Refresh the current Murph legal documents before accepting consent.",
+    }))
+    .mockResolvedValueOnce(withDocumentVersion(openedBeforeDeploy, "2026-10-26"))
+    .mockResolvedValueOnce(createLaunchConsentStatus({
+      launchHealthDataGranted: true,
+      launchLegalGranted: true,
+    }));
+
+  const rendered = await renderClientComponent(
+    createElement(DashboardLegalConsentGate, {
+      initialStatus: openedBeforeDeploy,
+      variant: "update",
+    }),
+    {
+      location: {
+        hash: "",
+        href: "https://app.example.test/home",
+        origin: "https://app.example.test",
+        pathname: "/home",
+        search: "",
+      },
+      requireButton: false,
+    },
+  );
+  cleanupRender = rendered.cleanup;
+
+  await act(async () => {
+    findButton(rendered.container, "Agree").dispatchEvent(
+      new rendered.window.Event("click", { bubbles: true }),
+    );
+    await flushPromises();
+    await flushPromises();
+  });
+
+  expect(rendered.container.textContent).toContain(
+    "Murph's legal documents just changed. Review them, then agree again.",
+  );
+  expect(rendered.reload).not.toHaveBeenCalled();
+
+  await act(async () => {
+    findButton(rendered.container, "Agree").dispatchEvent(
+      new rendered.window.Event("click", { bubbles: true }),
+    );
+    await flushPromises();
+    await vi.advanceTimersByTimeAsync(100);
+  });
+
+  const requests = mocks.requestHostedOnboardingJson.mock.calls.map(([request]) => request);
+  expect(requests[0]?.payload?.acceptedDocumentVersions?.["terms-of-service"]).toBe("2026-07-23");
+  expect(requests[1]?.url).toBe("/api/legal/consent/status");
+  expect(requests[2]?.payload).toMatchObject({
+    acceptedDocumentVersions: {
+      "privacy-policy": "2026-10-26",
+      "terms-of-service": "2026-10-26",
+    },
+    scope: "launch.legal",
+  });
+  expect(rendered.reload).toHaveBeenCalledTimes(1);
+});
+
 test("a stale Terms grant leaves device connect open", async () => {
   const rendered = await renderClientComponent(
     createElement(DashboardLegalConsentGate, {
@@ -729,6 +797,27 @@ function createLaunchConsentStatus(input: {
         input.launchHealthDataRevoked ?? false,
       ),
     ],
+  };
+}
+
+function withDocumentVersion(
+  status: HostedConsentStatus,
+  version: string,
+): HostedConsentStatus {
+  const bump = (documents: HostedConsentStatus["documents"]) =>
+    documents.map((document) => ({ ...document, version }));
+  return {
+    ...status,
+    documents: bump(status.documents),
+    launchScopes: status.launchScopes.map((scope) => ({
+      ...scope,
+      missingDocuments: bump(scope.missingDocuments),
+    })),
+    scopes: status.scopes.map((scope) => ({
+      ...scope,
+      documents: bump(scope.documents),
+      missingDocuments: bump(scope.missingDocuments),
+    })),
   };
 }
 
