@@ -90,11 +90,10 @@ diff --git a/dist/thread-cli.mjs b/dist/thread-cli.mjs
                      logPath: wakeLogPath,
                  });
                  return {
-@@ -439,6 +448,16 @@
-                     wakePid,
+@@ -440,6 +449,16 @@
                      exportPath: formatPathForDisplay(path.join(outputDir, 'thread.json'), repoDir),
                  };
-+            }
+             }
 +            const detachedWake = process.env[DETACHED_WAKE_ENV] === '1';
 +            delete process.env[DETACHED_WAKE_ENV];
 +            const returnToCallingSession = shouldReturnWakeToCallingSession({
@@ -104,9 +103,10 @@ diff --git a/dist/thread-cli.mjs b/dist/thread-cli.mjs
 +            });
 +            if (returnToCallingSession) {
 +                process.stderr.write('Exact calling Codex session will receive the recovered wake result; nested child launch skipped.\n');
-             }
++            }
              const captureIdentity = loadCaptureMetadata(c.options.captureMetadata);
              const result = await runWakeFlow({
+                 browserEndpoint: c.options.browserEndpoint,
 @@ -460,7 +479,7 @@
                  repoDir,
                  resumePrompt: c.options.resumePrompt,
@@ -173,7 +173,7 @@ diff --git a/src/chatgpt-thread-snapshot-lib.mts b/src/chatgpt-thread-snapshot-l
 diff --git a/src/prepare-chatgpt-draft.js b/src/prepare-chatgpt-draft.js
 --- a/src/prepare-chatgpt-draft.js
 +++ b/src/prepare-chatgpt-draft.js
-@@ -1357,9 +1357,8 @@
+@@ -1365,9 +1365,8 @@
    responseMarker: requiredMarker,
    responseElapsedMs,
    minimumResponseMs = 5 * 60 * 1000,
@@ -184,7 +184,7 @@ diff --git a/src/prepare-chatgpt-draft.js b/src/prepare-chatgpt-draft.js
      return '';
    }
  
-@@ -1380,7 +1379,7 @@
+@@ -1388,7 +1387,7 @@
    const minimumLabel = Number.isSafeInteger(requiredMinimumMs) && requiredMinimumMs > 0
      ? formatDurationMs(requiredMinimumMs)
      : 'invalid configured duration';
@@ -193,7 +193,7 @@ diff --git a/src/prepare-chatgpt-draft.js b/src/prepare-chatgpt-draft.js
  }
  
  function formatDurationMs(durationMs) {
-@@ -5900,7 +5899,6 @@
+@@ -5921,7 +5920,6 @@
            responseMarker,
            responseElapsedMs: Date.now() - responseWaitStartedAt,
            minimumResponseMs: minimumMarkedResponseMs,
@@ -253,12 +253,10 @@ diff --git a/src/thread-cli.mts b/src/thread-cli.mts
            logPath: wakeLogPath,
          });
          return {
-@@ -504,6 +518,19 @@
-           wakePid,
-           exportPath: formatPathForDisplay(path.join(outputDir, 'thread.json'), repoDir),
+@@ -506,6 +520,19 @@
          };
-+      }
-+
+       }
+ 
 +      const detachedWake = process.env[DETACHED_WAKE_ENV] === '1';
 +      delete process.env[DETACHED_WAKE_ENV];
 +      const returnToCallingSession = shouldReturnWakeToCallingSession({
@@ -270,9 +268,11 @@ diff --git a/src/thread-cli.mts b/src/thread-cli.mts
 +        process.stderr.write(
 +          'Exact calling Codex session will receive the recovered wake result; nested child launch skipped.\n',
 +        );
-       }
- 
++      }
++
        const captureIdentity = loadCaptureMetadata(c.options.captureMetadata);
+       const result = await runWakeFlow({
+         browserEndpoint: c.options.browserEndpoint,
 @@ -526,7 +553,7 @@
          repoDir,
          resumePrompt: c.options.resumePrompt,
