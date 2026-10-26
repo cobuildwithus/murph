@@ -108,9 +108,12 @@ const LIVE_GAME: SeedGame = {
   lengthDays: 30,
   round: 2,
   settled: false,
-  stake: { item: "Dinner, loser pays", kind: "prize" },
+  stake: { item: "Loser cooks dinner", kind: "prize" },
   tasks: { partner: "30 minute run", reviewer: "20 pushups or a short walk" },
 };
+
+/** Both seeded games, for checks on the words an App Reviewer reads. */
+export const APP_REVIEW_GAME_SEEDS: readonly SeedGame[] = [SETTLED_GAME, LIVE_GAME];
 
 export interface HostedOpsAppReviewGameSummary {
   action: "applied" | "dry-run";
