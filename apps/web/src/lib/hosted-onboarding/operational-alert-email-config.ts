@@ -22,6 +22,7 @@ export function readHostedOperationalAlertEmailConfig(
   source: Readonly<Record<string, string | undefined>>,
   recipientsEnvironmentVariable:
     | "HOSTED_LINQ_ALERT_EMAILS"
+    | "HOSTED_GAME_REPORT_ALERT_EMAILS"
     | "HOSTED_PRODUCT_FEEDBACK_DIGEST_EMAILS"
     = "HOSTED_LINQ_ALERT_EMAILS",
 ): HostedOperationalAlertEmailConfig | null {

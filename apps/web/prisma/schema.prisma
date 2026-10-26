@@ -2770,6 +2770,10 @@ model GameProfile {
   labelsAbout        GameContactLabel[] @relation("GameContactLabelSubject")
   ticketsOwed        GameTicket[]       @relation("GameTicketOwedBy")
   ticketsHeld        GameTicket[]       @relation("GameTicketOwedTo")
+  blocksMade         GameBlock[]        @relation("GameBlockBlocker")
+  blocksReceived     GameBlock[]        @relation("GameBlockBlocked")
+  reportsMade        GameReport[]       @relation("GameReportReporter")
+  reportsReceived    GameReport[]       @relation("GameReportReported")
 
   @@map("game_profile")
 }
@@ -2833,6 +2837,7 @@ model Game {
   players              GamePlayer[]
   tickets              GameTicket[]
   events               GameEvent[]
+  reports              GameReport[]
 
   @@index([chatContainerMemberId])
   @@index([createdBy])
@@ -2879,6 +2884,7 @@ model GameEntry {
   // "retake" (replaced by attempt 2) or "withdrawn" (taken back by its poster).
   withdrawnReason String?    @map("withdrawn_reason")
   player          GamePlayer @relation(fields: [gameId, memberId], references: [gameId, memberId], onDelete: Cascade)
+  reports         GameReport[]
 
   @@unique([gameId, memberId, dayIndex, attempt])
   @@index([memberId])
@@ -2904,6 +2910,55 @@ model GameTicket {
   @@index([owedBy, status])
   @@index([gameId])
   @@map("game_ticket")
+}
+
+// One member blocked another: every game they had going was called off, and
+// each sees the other as having left until the blocker unblocks.
+model GameBlock {
+  blockerMemberId String      @map("blocker_member_id")
+  blockedMemberId String      @map("blocked_member_id")
+  createdAt       DateTime    @default(now()) @map("created_at")
+  blocker         GameProfile @relation("GameBlockBlocker", fields: [blockerMemberId], references: [memberId], onDelete: Cascade)
+  blocked         GameProfile @relation("GameBlockBlocked", fields: [blockedMemberId], references: [memberId], onDelete: Cascade)
+
+  @@id([blockerMemberId, blockedMemberId])
+  @@index([blockedMemberId])
+  @@map("game_block")
+}
+
+// A report on the other player's post, their name and photo, or the task and
+// stake they wrote, for the team to review within a day. The snapshot (the
+// reported words and media keys, sealed under the reporter's key) outlives the
+// post, the game and the reported account. A reported post stays hidden from
+// its reporter; a reported player's photo too.
+model GameReport {
+  id                    String       @id
+  reporterMemberId      String       @map("reporter_member_id")
+  reportedMemberId      String?      @map("reported_member_id")
+  gameId                String?      @map("game_id")
+  entryId               String?      @map("entry_id")
+  // post, player, or terms
+  about                 String
+  // sexual, harassment, hate, violence, self_harm, money, or other
+  reason                String
+  noteEncrypted         String?      @map("note_encrypted")
+  snapshotTextEncrypted String?      @map("snapshot_text_encrypted")
+  snapshotMediaKeys     String[]     @default([]) @map("snapshot_media_keys")
+  // Set by the ops review action.
+  reviewedAt            DateTime?    @map("reviewed_at")
+  createdAt             DateTime     @default(now()) @map("created_at")
+  reporter              GameProfile  @relation("GameReportReporter", fields: [reporterMemberId], references: [memberId], onDelete: Cascade)
+  reported              GameProfile? @relation("GameReportReported", fields: [reportedMemberId], references: [memberId], onDelete: SetNull)
+  game                  Game?        @relation(fields: [gameId], references: [id], onDelete: SetNull)
+  entry                 GameEntry?   @relation(fields: [entryId], references: [id], onDelete: SetNull)
+
+  @@unique([reporterMemberId, entryId])
+  @@index([reporterMemberId, createdAt])
+  @@index([reportedMemberId])
+  @@index([gameId])
+  @@index([entryId])
+  @@index([reviewedAt, createdAt])
+  @@map("game_report")
 }
 
 // Append-only history of accepted changes, one row each, in the same

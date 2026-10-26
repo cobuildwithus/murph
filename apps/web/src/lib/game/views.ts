@@ -2,7 +2,8 @@
  * Viewer-scoped views of a game. Pure: the service loads and decrypts, these
  * functions decide what this viewer may see. Post-to-unlock lives here: an
  * entry from another player reaches a view only once the viewer has posted
- * for that day (or the game has settled). Excuses stay with their owner.
+ * for that day (or the game has settled). Excuses stay with their owner. A
+ * post the viewer reported stays posted but is never shown to them again.
  */
 
 import type {
@@ -85,6 +86,8 @@ export interface GameViewInput {
   inviteExpiresAt: Date | null;
   /** Decrypted text and summary data only for entries `visibleEntryIds` allowed. */
   entryWords: ReadonlyMap<string, { text: string | null; data?: GameEntryData | null }>;
+  /** Posts the viewer reported. */
+  hiddenEntryIds?: ReadonlySet<string>;
   result: StoredResult | null;
   tickets: readonly GameTicketRow[];
 }
@@ -93,8 +96,10 @@ function unlocked(state: RuleState, viewerId: string, dayIndex: number): boolean
   return state.game.status === "settled" || hasUnlockedDay(state.entries, viewerId, dayIndex);
 }
 
-/** Every entry this viewer may see. Callers decrypt only these. */
-export function visibleEntryIds(state: RuleState, viewerId: string): Set<string> {
+const NO_ENTRIES: ReadonlySet<string> = new Set();
+
+/** Every entry this viewer may see, less the ones they reported. Callers decrypt only these. */
+export function visibleEntryIds(state: RuleState, viewerId: string, hidden: ReadonlySet<string> = NO_ENTRIES): Set<string> {
   const visible = new Set<string>();
   if (!playerFor(state, viewerId)) return visible;
   for (const entry of state.entries) {
@@ -103,6 +108,7 @@ export function visibleEntryIds(state: RuleState, viewerId: string): Set<string>
     } else if (
       entry.attempt > 0
       && entry.withdrawnAt === null
+      && !hidden.has(entry.id)
       && unlocked(state, viewerId, entry.dayIndex)
     ) {
       visible.add(entry.id);
@@ -265,7 +271,7 @@ function dayViews(input: GameViewInput, players: readonly RulePlayer[]): GameDay
   const { state, viewerId } = input;
   const viewer = playerFor(state, viewerId);
   if (!viewer?.dayOne) return [];
-  const visible = visibleEntryIds(state, viewerId);
+  const visible = visibleEntryIds(state, viewerId, input.hiddenEntryIds);
   const others = players.filter((player) => player.memberId !== viewerId);
   return Array.from({ length: state.game.lengthDays }, (_, index) => {
     const mine = liveEntry(state.entries, viewerId, index) ?? ownExcuse(state, viewerId, index);
@@ -287,6 +293,8 @@ function ownExcuse(state: RuleState, viewerId: string, index: number): RuleEntry
 /** Another player's day as this viewer may see it: locked until the viewer posts that day. */
 function otherDayView(input: GameViewInput, visible: ReadonlySet<string>, other: RulePlayer, index: number): GameDayView["others"][number] {
   const posted = liveEntry(input.state.entries, other.memberId, index);
+  // Reported: still their post for the day, with nothing of it to show.
+  if (posted && input.hiddenEntryIds?.has(posted.id)) return { entry: null, hidden: true, seat: other.seat, status: "posted" };
   if (posted) {
     const open = visible.has(posted.id);
     return { entry: open ? entryView(posted, input) : null, seat: other.seat, status: open ? "posted" : "locked",

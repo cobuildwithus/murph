@@ -181,6 +181,24 @@ this default without deleting other people's private contact choices.
   addressed rematch whose challenger left stays on its invitee's Home, called
   off.
 
+- **Report.** A player can report any of the other player's posts they can
+  see, their name and photo, or the task and prize or dare they wrote, during
+  or after a game, and an invite before accepting it. Reasons: sexual content,
+  harassment or bullying, hate, threats or violence, self-harm or a dangerous
+  dare, money or a scam, something else, with an optional note. The reported
+  post (or player's photo) is hidden from the reporter at once; it still
+  counts. The reported player is never told. A person reviews every report
+  within 24 hours and can take the post down, end the games, or suspend the
+  account. The reporter can block in the same step.
+- **Block.** Blocking someone ends every open or live game with them (no
+  winner, nothing owed), stops Murph texting their shared chat about the game,
+  and refuses invites and rematches between them either way. Each sees the
+  other the way they'd see a player who left; the blocker no longer sees them
+  or their past posts at all, and unblocks from Settings. Games that ended stay
+  ended.
+- **What can't be posted.** Money stakes, clearly dangerous tasks or dares,
+  slurs and explicit sexual words are refused with "This can't be posted."
+
 ## Deferred
 
 - Groups where everyone plays everyone, and a public league of matched strangers.

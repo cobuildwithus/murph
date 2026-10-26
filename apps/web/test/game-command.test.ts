@@ -184,4 +184,34 @@ describe("weekly game command validator", () => {
     expect(codeOf(() => parseGameCommand({ firstName: "Leo", timeZone: "Mars/Olympus", type: "setProfile" }))).toBe("INVALID_REQUEST");
     expect(codeOf(() => parseGameCommand("setProfile"))).toBe("INVALID_REQUEST");
   });
+
+  it("names a report's target exactly once: one post, the player, or the terms, in a game or on an invite", () => {
+    const base = { type: "report", reportId: "report_0001", reason: "harassment" };
+    expect(parseGameCommand({ ...base, gameId: "game_0001", entryId: "entry_0001", note: "  mean  ", block: true }))
+      .toEqual({ ...base, about: "post", block: true, entryId: "entry_0001", gameId: "game_0001", note: "mean" });
+    expect(parseGameCommand({ ...base, gameId: "game_0001" })).toEqual({ ...base, about: "player", gameId: "game_0001" });
+    expect(parseGameCommand({ ...base, token: "tok_1", about: "terms", note: "   " })).toEqual({ ...base, about: "terms", token: "tok_1" });
+    for (const bad of [
+      { ...base },
+      { ...base, gameId: "game_0001", token: "tok_1" },
+      { ...base, gameId: "game_0001", about: "post" },
+      { ...base, gameId: "game_0001", about: "terms", entryId: "entry_0001" },
+      { ...base, token: "tok_1", entryId: "entry_0001" },
+      { ...base, gameId: "game_0001", reason: "rude" },
+      { ...base, gameId: "game_0001", note: "x".repeat(501) },
+      { ...base, gameId: "game_0001", block: "yes" },
+      { ...base, gameId: "game_0001", reportId: "x" },
+    ]) {
+      expect(codeOf(() => parseGameCommand(bad))).toBe("INVALID_REQUEST");
+    }
+  });
+
+  it("blocks by member or by invite, and unblocks by member", () => {
+    expect(parseGameCommand({ type: "block", memberId: "hbm_ava" })).toEqual({ type: "block", memberId: "hbm_ava" });
+    expect(parseGameCommand({ type: "block", token: "tok_1" })).toEqual({ type: "block", token: "tok_1" });
+    expect(parseGameCommand({ type: "unblock", memberId: "hbm_ava", token: "ignored" })).toEqual({ type: "unblock", memberId: "hbm_ava" });
+    for (const bad of [{ type: "block" }, { type: "block", memberId: "hbm_ava", token: "tok_1" }, { type: "unblock" }, { type: "block", memberId: "" }]) {
+      expect(codeOf(() => parseGameCommand(bad))).toBe("INVALID_REQUEST");
+    }
+  });
 });

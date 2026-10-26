@@ -47,6 +47,10 @@ vi.mock("@/src/lib/hosted-onboarding/request-auth", () => ({
 vi.mock("@/src/lib/prisma", () => ({ getPrisma: mocks.getPrisma }));
 
 type Routes = {
+  block: typeof import("../app/api/game/v1/blocks/[memberId]/route");
+  inviteBlock: typeof import("../app/api/game/v1/invites/[token]/block/route");
+  inviteReports: typeof import("../app/api/game/v1/invites/[token]/reports/route");
+  reports: typeof import("../app/api/game/v1/games/[id]/reports/route");
   cancelChange: typeof import("../app/api/game/v1/games/[id]/changes/[proposalId]/route");
   changes: typeof import("../app/api/game/v1/games/[id]/changes/route");
   accept: typeof import("../app/api/game/v1/invites/[token]/accept/route");
@@ -98,6 +102,10 @@ let signedInAs = LEO;
 describe("weekly game routes", () => {
   beforeAll(async () => {
     routes = {
+      block: await import("../app/api/game/v1/blocks/[memberId]/route"),
+      inviteBlock: await import("../app/api/game/v1/invites/[token]/block/route"),
+      inviteReports: await import("../app/api/game/v1/invites/[token]/reports/route"),
+      reports: await import("../app/api/game/v1/games/[id]/reports/route"),
       cancelChange: await import("../app/api/game/v1/games/[id]/changes/[proposalId]/route"),
       changes: await import("../app/api/game/v1/games/[id]/changes/route"),
       accept: await import("../app/api/game/v1/invites/[token]/accept/route"),
@@ -234,6 +242,20 @@ describe("weekly game routes", () => {
       ), { entryId: "entry_1", gameId: GAME_ID, type: "withdraw" }],
       ["POST /tickets/:id/redeem", () => routes.redeem.POST(writeRequest("POST", "/tickets/t_1/redeem"), params({ id: "t_1" })),
         { ticketId: "t_1", type: "redeem" }],
+      ["POST /games/:id/reports", () => routes.reports.POST(
+        writeRequest("POST", `/games/${GAME_ID}/reports`, { gameId: "other_game", reportId: "report_1", entryId: "entry_1", reason: "harassment", block: true }),
+        params({ id: GAME_ID }),
+      ), { block: true, entryId: "entry_1", gameId: GAME_ID, reason: "harassment", reportId: "report_1", type: "report" }],
+      ["PUT /blocks/:memberId", () => routes.block.PUT(writeRequest("PUT", `/blocks/${AVA}`, { memberId: LEO }), params({ memberId: AVA })),
+        { memberId: AVA, type: "block" }],
+      ["DELETE /blocks/:memberId", () => routes.block.DELETE(writeRequest("DELETE", `/blocks/${AVA}`), params({ memberId: AVA })),
+        { memberId: AVA, type: "unblock" }],
+      ["POST /invites/:token/reports", () => routes.inviteReports.POST(
+        writeRequest("POST", "/invites/tok_1/reports", { gameId: GAME_ID, reportId: "report_1", reason: "money", about: "terms" }),
+        params({ token: "tok_1" }),
+      ), { about: "terms", reason: "money", reportId: "report_1", token: "tok_1", type: "report" }],
+      ["PUT /invites/:token/block", () => routes.inviteBlock.PUT(writeRequest("PUT", "/invites/tok_1/block", { memberId: AVA }), params({ token: "tok_1" })),
+        { token: "tok_1", type: "block" }],
     ])("%s becomes one command for the signed-in member", async (_route, call, command) => {
       const response = await call();
 

@@ -211,6 +211,21 @@ describe("weekly game views: post to unlock", () => {
     });
   });
 
+  it("never shows a post its viewer reported, while it still counts for its poster", () => {
+    const state = { ...liveState(), entries: [entry(LEO, 0, 1, { blurHash: "blur" }), entry(AVA, 0, 1)] };
+    const avaNow = noonOnDay(state, AVA, 0);
+    const hidden = new Set([`${LEO}-d0-a1`]);
+    const avaView = view(state, AVA, avaNow, { hiddenEntryIds: hidden });
+    expect(avaView.days[0].others).toEqual([{ entry: null, hidden: true, seat: 0, status: "posted" }]);
+    expect(JSON.stringify(avaView)).not.toContain("game/hbm_leo/");
+    expect(JSON.stringify(avaView)).not.toContain("blur");
+    expect(visibleEntryIds(state, AVA, hidden).has(`${LEO}-d0-a1`)).toBe(false);
+    expect(avaView.players.find((player) => player.memberId === LEO)?.score)
+      .toBe(view(state, AVA, avaNow).players.find((player) => player.memberId === LEO)?.score);
+    // Leo's own view is unchanged: nothing tells him.
+    expect(view(state, LEO, noonOnDay(state, LEO, 0), { hiddenEntryIds: hidden }).days[0].mine).toMatchObject({ text: `caption ${LEO}-d0-a1` });
+  });
+
   it("keeps a day unlocked after you withdraw, but never shows withdrawn posts to others", () => {
     const state = {
       ...liveState(),

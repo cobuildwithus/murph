@@ -165,6 +165,41 @@ export interface PostEntryBody {
 
 // DELETE /games/:id/entries/:entryId and POST /tickets/:id/redeem have no body.
 
+/** Why a player reports the other player's content. */
+export const GAME_REPORT_REASONS = ["sexual", "harassment", "hate", "violence", "self_harm", "money", "other"] as const;
+export type GameReportReason = (typeof GAME_REPORT_REASONS)[number];
+
+/** What a report is about: one post, their name and photo, or the task and stake they wrote. */
+export const GAME_REPORT_ABOUT = ["post", "player", "terms"] as const;
+export type GameReportAbout = (typeof GAME_REPORT_ABOUT)[number];
+
+/**
+ * POST /games/:id/reports, and POST /invites/:token/reports before accepting.
+ * `entryId` reports one of the other player's posts you can see (`about`
+ * defaults to "post"); without it, "player" (the default) or "terms". It works
+ * after a game ends. The reported member is never told who reported them.
+ * From then on a reported post is hidden from you (it still counts for
+ * them), and so is a reported player's photo. `block` blocks them in the same
+ * step. Retrying with the same `reportId` is safe.
+ */
+export interface ReportGameBody {
+  reportId: string;
+  reason: GameReportReason;
+  about?: GameReportAbout;
+  entryId?: string;
+  /** Optional, at most 500 characters; only the team reads it. */
+  note?: string;
+  block?: boolean;
+}
+
+// PUT /blocks/:memberId blocks someone you play or played with, and PUT
+// /invites/:token/block blocks whoever sent that invite. Every game the two
+// have open or going is called off (no winner, no tickets), Murph stops
+// texting their shared chat about it, and each sees the other as a player who
+// left, so the blocked player isn't told. Invites and rematches between them
+// fail with PLAYER_UNAVAILABLE. DELETE /blocks/:memberId unblocks; games that
+// ended stay ended. No bodies.
+
 /** Proposed in the app; the other player agrees in the game's shared chat. */
 export type GameChange =
   | { kind: "start_now" }
@@ -219,7 +254,11 @@ export type GameCommand =
   | ({ type: "post"; gameId: string; mediaKeys: string[] } & PostEntryBody)
   /** Take back your own post for your current day (a retake follows, if one's left). */
   | { type: "withdraw"; gameId: string; entryId: string }
-  | { type: "redeem"; ticketId: string };
+  | { type: "redeem"; ticketId: string }
+  /** By game (a player) or by invite token (before accepting). */
+  | ({ type: "report"; gameId?: string; token?: string } & ReportGameBody & { about: GameReportAbout })
+  | { type: "block"; memberId?: string; token?: string }
+  | { type: "unblock"; memberId: string };
 
 export type GameStatus = "invited" | "negotiating" | "live" | "settled" | "void";
 
@@ -247,7 +286,8 @@ export interface GamePlayerView {
   /**
    * This player deleted their account and left the game: `memberId` is null,
    * `firstName` is the name the viewer knew them by, and they have no photo or
-   * days. A `void` game with a player who left was called off.
+   * days. A `void` game with a player who left was called off. A player
+   * blocked either way looks exactly the same.
    */
   left?: true;
 }
@@ -274,7 +314,9 @@ export interface GameDayView {
   /** Per other player, in seat order. */
   others: { seat: number; status: GameDayOtherStatus; entry: GameEntryView | null;
     /** Present only for a posted day still locked to this viewer. */
-    postedAt?: string; blurHash?: string | null }[];
+    postedAt?: string; blurHash?: string | null;
+    /** The viewer reported this post: it's posted and counts, but never shown to them. */
+    hidden?: true }[];
 }
 
 export interface GameTicketView {
@@ -290,8 +332,8 @@ export interface GameTicketView {
   /** True when the viewer holds it (is owed). */
   youHold: boolean;
   /**
-   * The other member deleted their account: their member id is "" and the
-   * ticket stays as history; it can't be marked done.
+   * The other member deleted their account (or one of you blocked the other):
+   * their member id is "" and the ticket stays as history; it can't be marked done.
    */
   left?: true;
   createdAt: string;
@@ -340,8 +382,18 @@ export interface GameView {
 
 export interface GameHomeView {
   me: { memberId: string; firstName: string | null; timeZone: string | null; avatarUrl: string | null; usualKind?: GameEntryKind | null };
+  /**
+   * Games and tickets with people you blocked are left out. Everyone you
+   * blocked, newest first, by your name for them, to unblock in Settings.
+   */
+  blocked?: GameBlockedPerson[];
   games: GameView[];
   wallet: { held: GameTicketView[]; owed: GameTicketView[]; redeemed: GameTicketView[] };
+}
+
+export interface GameBlockedPerson {
+  memberId: string;
+  firstName: string;
 }
 
 /** What an invite link shows. Only an open invite carries terms; cancellation may name the inviter. */
@@ -389,7 +441,11 @@ export type GameErrorCode =
   | "PROFILE_REQUIRED"
   | "CHANGE_PENDING"
   | "CHANGE_EXPIRED"
-  | "CHAT_UNAVAILABLE";
+  | "CHAT_UNAVAILABLE"
+  /** One of you blocked the other: no invite or rematch between you. */
+  | "PLAYER_UNAVAILABLE"
+  /** The write-time content check refused these words. */
+  | "CONTENT_NOT_ALLOWED";
 
 export interface GameError {
   code: GameErrorCode;

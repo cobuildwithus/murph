@@ -4,7 +4,7 @@ import type { HostedGameChatState } from "@murphai/hosted-execution/runtime-cont
 import { gameChatProgress } from "./chat-progress";
 import { randomBytes } from "node:crypto";
 
-import { Prisma, type Game, type GameEntry, type GamePlayer } from "@prisma/client";
+import { Prisma, type Game, type GameEntry, type GamePlayer, type GameReport } from "@prisma/client";
 
 import { toPrismaJsonObject } from "../device-sync/prisma-store/prisma-json";
 import { isUniqueViolation } from "../device-sync/prisma-store/prisma-errors";
@@ -13,6 +13,7 @@ import { getPrisma } from "../prisma";
 import { createHostedLinqDeliveryIdempotencyLookupKey } from "../hosted-onboarding/linq-observability-identifiers";
 import { areGameDevToolsAllowed, isGameEnabled, isGameEnabledFor, mediaKeyOwner, mediaKeyPrefixFor } from "./access";
 import { parseGameCommand } from "./command";
+import { moderateGameCommand } from "./moderation";
 import { parseStoredGameEntryData } from "./entry-data";
 import {
   GAME_ENTRY_KINDS,
@@ -72,10 +73,12 @@ import { agreedDayOne, gameChangeCancellationNeedsNotice, decideApprovedGameChan
 import { prepareGameChangeWords, readPendingGameChanges, type PreparedGameChangeWords } from "./change-words";
 import { deliverGameChangeProposal } from "./chat-delivery";
 import { readGameChatCandidateIds, sameGamePlayers } from "./chat-membership";
-import { reserveGameChatLifecycleTx, reserveGameChatProposalTx } from "./chat-lifecycle-receipt";
+import { reserveGameChatLifecycleTx, reserveGameChatProposalTx, skipGameChatLifecycleTx } from "./chat-lifecycle-receipt";
 import { claimGamePostNotification, deliverGamePostNotification } from "./post-notification";
 import { buildGameView, gameMediaUrl, termsView, ticketView, visibleEntryIds, type GameTicketRow } from "./views";
 import { gameWordsMemberId, parseGameDepartedPlayer } from "./account-deletion";
+import { areGamePlayersBlocked, GAME_BLOCK_LIMIT, isHiddenBy, lockGamePair, readGameBlocks, type GameBlocks } from "./blocks";
+import { GAME_REPORT_ALERTS_PER_REPORTER_DAY, sendGameReportAlert } from "./report-alert";
 
 export { isGameEnabledFor, mediaKeyPrefixFor } from "./access";
 
@@ -100,6 +103,9 @@ const HOME_EXPIRED_FOR_MS = 7 * 24 * 60 * 60 * 1000;
 const WALLET_LIMIT = 200;
 // Five games, each with at most three legacy per-miss stakes owed by one loser.
 const CHAT_TICKET_LIMIT = 5 * 3 * GAME_MAX_LENGTH_DAYS;
+const ACTIVE_STATUSES = ["invited", "negotiating", "live"];
+// Every game two people ever played together, a wide margin over a year of weekly rounds.
+const BLOCK_GAME_LIMIT = 200;
 
 // ------------------------------------------------------------------- writes
 
@@ -124,6 +130,7 @@ export async function runGameCommand(input: {
   const actor = input.actorMemberId;
   try {
     const command = parseGameCommand(input.command);
+    moderateGameCommand(command);
     await requireUploadedMedia(actor, command);
     if (command.type === "setProfile") {
       return { game: null, ok: true, profile: await setProfile(actor, command) };
@@ -183,6 +190,12 @@ async function runCommand(context: CommandContext, command: Exclude<GameCommand,
       return withdraw(context, command);
     case "redeem":
       return redeem(context, command);
+    case "report":
+      return report(context, command);
+    case "block":
+      return block(context, command);
+    case "unblock":
+      return unblock(context, command.memberId);
   }
 }
 
@@ -207,7 +220,7 @@ interface LockedStep {
   clock: Date;
 }
 
-type GameEventType = "day_marked_incomplete" | "day_restored" | "cancelled" | "negotiation_joined" | "created" | "joined" | "started" | "posted" | "withdrew" | "settled" | "redeemed" | "expired" | "time_shifted" | "change_proposed" | "change_applied" | "change_declined" | "change_cancelled" | "change_expired";
+type GameEventType = "day_marked_incomplete" | "day_restored" | "cancelled" | "blocked" | "removed" | "negotiation_joined" | "created" | "joined" | "started" | "posted" | "withdrew" | "settled" | "redeemed" | "expired" | "time_shifted" | "change_proposed" | "change_applied" | "change_declined" | "change_cancelled" | "change_expired";
 /** What changed, for the history: ids and numbers only, never words. */
 interface GameEventDraft {
   commandKey?: string;
@@ -349,6 +362,12 @@ async function createGame(context: CommandContext, command: Extract<GameCommand,
   try {
     await prisma.$transaction(async (tx) => {
       const now = context.now ?? await databaseNow(tx);
+      // A block since the rematch was read, under the lock a block takes.
+      const inviteeMemberId = rematch?.inviteeMemberId ?? null;
+      if (inviteeMemberId) {
+        await lockGamePair(tx, actor, inviteeMemberId);
+        await rejectBlockedPair(tx, actor, inviteeMemberId, "You can't rematch this game.");
+      }
       await tx.game.create({
         data: {
           createdBy: actor,
@@ -362,7 +381,7 @@ async function createGame(context: CommandContext, command: Extract<GameCommand,
           // The time zone here is a placeholder; it freezes when the game goes live.
           players: { create: { memberId: actor, seat: 0, timeZone: profile.timeZone } },
           previousGameId: command.previousGameId ?? null,
-          inviteeMemberId: rematch?.inviteeMemberId ?? null,
+          inviteeMemberId,
           round: rematch?.round ?? 1,
           status: "invited",
           terms: toPrismaJsonObject(newTerms.terms),
@@ -402,6 +421,7 @@ async function readRematch(
   if (previous.status !== "settled") return { inviteeMemberId: null, round: 1 };
   const others = previous.players.filter((player) => player.memberId !== actor);
   if (others.length !== 1) return { inviteeMemberId: null, round: previous.round + 1 };
+  await rejectBlockedPair(getPrisma(), actor, others[0].memberId, "You can't rematch this game.");
   const answer = await assertLatestBetween(actor, others[0].memberId, previous.id, now);
   return { inviteeMemberId: others[0].memberId, round: previous.round + 1, ...(answer ? { answer } : {}) };
 }
@@ -466,7 +486,7 @@ async function joinGame(context: CommandContext, target: { id: string; createdBy
   });
   await loadCurrent(sameRoster.map((game) => game.id));
   try {
-    await accept(context, body, target.id);
+    await accept(context, body, target.id, target.createdBy);
   } catch (error) {
     // Either the friendly check below or, when two of their games go live at once, the unique key.
     const together = isUniqueViolation(error) || (error instanceof GameRuleError && error.error.code === "ALREADY_IN_A_GAME");
@@ -491,9 +511,23 @@ async function firstNameOf(memberId: string): Promise<string | null> {
   return name ?? null;
 }
 
-async function accept(context: CommandContext, command: AcceptInviteBody, gameId: string): Promise<void> {
+/** A join or negotiation takes the pair's lock before the game's, as a block does. */
+function withPairLock(context: CommandContext, other: string): CommandContext {
+  return { ...context, beforeMutationTx: async (tx) => {
+    await context.beforeMutationTx?.(tx);
+    await lockGamePair(tx, context.actor, other);
+  } };
+}
+
+/** Blocked either way: to the one who was blocked, the invite just closed. */
+async function rejectBlockedJoin(tx: Tx, creator: string, actor: string): Promise<void> {
+  await rejectBlockedPair(tx, actor, creator, "This invite isn't open anymore.");
+}
+
+async function accept(context: CommandContext, command: AcceptInviteBody, gameId: string, creator: string): Promise<void> {
   const { actor } = context;
-  await runLocked(gameId, context, async ({ loaded, now, tx }) => {
+  await runLocked(gameId, withPairLock(context, creator), async ({ loaded, now, tx }) => {
+    await rejectBlockedJoin(tx, creator, actor);
     const { row } = loaded;
     const decision = decideJoin(await withCurrentTimeZones(tx, loaded.state), {
       acceptNegotiation: row.pendingChange === null,
@@ -691,7 +725,10 @@ async function redeem(context: CommandContext, command: Extract<GameCommand, { t
   await runLocked(ticket.gameId, context, async ({ clock, now, tx }) => {
     const current = await tx.gameTicket.findUniqueOrThrow({ select: { createdAt: true, owedBy: true, status: true }, where: { id: ticketId } });
     if (isTicketExpired(current, now)) reject("TICKET_EXPIRED", "This ticket expired before it was used.");
-    if (current.owedBy === null && current.status === "open") reject("INVALID_REQUEST", "They left Murph, so this ticket can't be marked done.");
+    // Blocked either way reads the same as having left.
+    if (current.status === "open" && (current.owedBy === null || await areGamePlayersBlocked(tx, actor, current.owedBy))) {
+      reject("INVALID_REQUEST", "They left Murph, so this ticket can't be marked done.");
+    }
     // Already redeemed matches no row: a repeat, not an error.
     const changed = await tx.gameTicket.updateMany({
       data: { redeemedAt: clock, status: "redeemed" },
@@ -700,6 +737,205 @@ async function redeem(context: CommandContext, command: Extract<GameCommand, { t
     return changed.count === 1 ? [{ payload: { ticketId }, type: "redeemed" }] : [];
   });
   return ticket.gameId;
+}
+
+// ------------------------------------------------------------ report, block
+
+/** Every game two people both joined, and an addressed rematch between them. */
+function gamesBetween(a: string, b: string): Prisma.GameWhereInput {
+  return { OR: [
+    { AND: [{ players: { some: { memberId: a } } }, { players: { some: { memberId: b } } }] },
+    { createdBy: a, inviteeMemberId: b },
+    { createdBy: b, inviteeMemberId: a },
+  ] };
+}
+
+/** The game behind an invite link and who sent it, for someone else holding the link. */
+async function inviteFor(token: string, actor: string): Promise<{ gameId: string; creator: string; open: boolean }> {
+  const row = await getPrisma().game.findUnique({ select: { createdBy: true, id: true, inviteExpiresAt: true, status: true },
+    where: { inviteTokenHash: sha256Hex(token) } });
+  if (!row) reject("INVITE_NOT_FOUND", "Invite not found.");
+  if (!row.createdBy) reject("INVITE_EXPIRED", "This invite isn't open anymore.");
+  if (row.createdBy === actor) reject("NOT_A_PLAYER", "That's your own invite.");
+  return { creator: row.createdBy, gameId: row.id, open: row.status === "invited" };
+}
+
+/** Why the two can't play, said to whoever asked: only the blocker hears it was a block. */
+async function rejectBlockedPair(db: Pick<Prisma.TransactionClient, "gameBlock">, actor: string, other: string, message: string): Promise<void> {
+  const blocks = await readGameBlocks(db, actor, [other]);
+  if (blocks.blocked.has(other)) reject("PLAYER_UNAVAILABLE", "You blocked them. Unblock them in Settings to play.");
+  if (blocks.blockedBy.has(other)) reject("PLAYER_UNAVAILABLE", message);
+}
+
+/**
+ * Blocks someone the actor plays or played with, or whoever sent the invite
+ * they hold. Under the pair's lock, so no join slips in: every game the two
+ * have open or going is called off (void: no winner, no tickets), an invite
+ * nobody shook on ends as if cancelled, and their games leave the shared chat
+ * with nothing still waiting to be sent there, so Murph stops texting it about
+ * them (posts can't happen, so no pushes either). The views then show each to
+ * the other as a player who left.
+ */
+async function block(context: CommandContext, command: { memberId?: string; token?: string }): Promise<null> {
+  const { actor } = context;
+  const prisma = getPrisma();
+  const memberId = command.token === undefined ? command.memberId ?? "" : (await inviteFor(command.token, actor)).creator;
+  if (memberId === actor) reject("INVALID_REQUEST", "You can't block yourself.");
+  if (command.token === undefined && !await prisma.game.findFirst({ select: { id: true }, where: gamesBetween(actor, memberId) })) {
+    reject("NOT_A_PLAYER", "You can only block someone you play with.");
+  }
+  await prisma.$transaction(async (tx) => {
+    await lockGamePair(tx, actor, memberId);
+    const existing = await tx.gameBlock.findUnique({ select: { createdAt: true },
+      where: { blockerMemberId_blockedMemberId: { blockedMemberId: memberId, blockerMemberId: actor } } });
+    if (!existing && await tx.gameBlock.count({ where: { blockerMemberId: actor } }) >= GAME_BLOCK_LIMIT) {
+      reject("INVALID_REQUEST", "You've blocked too many people.");
+    }
+    const between = await tx.game.findMany({ orderBy: { id: "asc" }, select: { id: true }, take: BLOCK_GAME_LIMIT + 1,
+      where: gamesBetween(actor, memberId) });
+    if (between.length > BLOCK_GAME_LIMIT) throw new Error("A blocked pair's games exceed their bound.");
+    const ids = between.map((game) => game.id);
+    if (ids.length > 0) await tx.$queryRaw`SELECT id FROM game WHERE id = ANY(${ids}::text[]) ORDER BY id FOR UPDATE`;
+    const games = await tx.game.findMany({ select: { chatContainerMemberId: true, id: true, status: true }, where: { id: { in: ids } } });
+    for (const game of games.filter((candidate) => ACTIVE_STATUSES.includes(candidate.status))) {
+      await endGame(tx, game.id, { status: "void" });
+      await writeEvents(tx, game.id, actor, [{ payload: {}, type: game.status === "invited" ? "cancelled" : "blocked" }]);
+    }
+    const chatted = games.filter((game) => game.chatContainerMemberId !== null || ACTIVE_STATUSES.includes(game.status)).map((game) => game.id);
+    if (chatted.length > 0) {
+      await tx.game.updateMany({ data: { chatContainerMemberId: null }, where: { id: { in: chatted } } });
+      await skipGameChatLifecycleTx(tx, chatted, await databaseNow(tx));
+    }
+    if (!existing) await tx.gameBlock.create({ data: { blockedMemberId: memberId, blockerMemberId: actor } });
+  });
+  return null;
+}
+
+/** Changes no game: what a block called off stays called off. */
+async function unblock(context: CommandContext, memberId: string): Promise<null> {
+  await getPrisma().gameBlock.deleteMany({ where: { blockedMemberId: memberId, blockerMemberId: context.actor } });
+  return null;
+}
+
+type ReportCommand = Extract<GameCommand, { type: "report" }>;
+
+interface ReportSubject {
+  gameId: string;
+  fromInvite: boolean;
+  reportedMemberId: string;
+  entry: GameEntry | null;
+  snapshotText: string | null;
+  snapshotMediaKeys: string[];
+}
+
+/**
+ * What a report is about, read before the game lock: who it's about and a
+ * snapshot of what they shared (the post's words and media, their name and
+ * photo, or the task and stake words), so the review outlives the post.
+ */
+async function readReportSubject(actor: string, command: ReportCommand): Promise<ReportSubject> {
+  const invite = command.token === undefined ? null : await inviteFor(command.token, actor);
+  if (invite && !invite.open) reject("INVITE_EXPIRED", "This invite isn't open anymore.");
+  const gameId = invite?.gameId ?? command.gameId ?? "";
+  const [loaded] = await loadGames(getPrisma(), [gameId]);
+  if (!loaded || (!invite && !playerFor(loaded.state, actor))) reject("NOT_A_PLAYER", "You're not in this game.");
+  const entry = command.entryId === undefined ? null : loaded.entries.find((candidate) => candidate.id === command.entryId) ?? null;
+  if (command.entryId !== undefined && (!entry || !visibleEntryIds(loaded.state, actor).has(entry.id))) {
+    reject("INVALID_REQUEST", "You can only report a post you can see.");
+  }
+  const reported = entry?.memberId ?? invite?.creator ?? loaded.state.players.find((player) => player.memberId !== actor)?.memberId;
+  if (!reported || reported === actor) reject("NOT_A_PLAYER", "There's no one to report in this game.");
+  if (entry) {
+    const [text] = await openGameTexts([{ field: "text", memberId: entry.memberId, rowId: entry.id, table: "game_entry", value: entry.textEncrypted }]);
+    return { entry, fromInvite: false, gameId, reportedMemberId: reported, snapshotMediaKeys: entry.mediaKeys, snapshotText: text || null };
+  }
+  if (command.about === "terms") {
+    const [words] = await openGameTexts([{ ...gameTarget(loaded.row, "terms_words"), value: loaded.row.termsWordsEncrypted }]);
+    const terms = termsView(loaded.state, parseTermWords(words ?? ""));
+    const text = [...terms.tasks.map((task) => `Task: ${task.text}`), ...terms.stakes.map((stake) => `${stake.kind === "dare" ? "Dare" : "Prize"}: ${stake.item}`)].join("\n");
+    return { entry: null, fromInvite: invite !== null, gameId, reportedMemberId: reported, snapshotMediaKeys: [], snapshotText: text || null };
+  }
+  const profile = await getPrisma().gameProfile.findUnique({ select: { firstNameEncrypted: true, photoKey: true }, where: { memberId: reported } });
+  const [name] = await openGameTexts(profile ? [{ field: "first_name", memberId: reported, rowId: reported, table: "game_profile", value: profile.firstNameEncrypted }] : []);
+  return { entry: null, fromInvite: invite !== null, gameId, reportedMemberId: reported,
+    snapshotMediaKeys: profile?.photoKey ? [profile.photoKey] : [], snapshotText: name || null };
+}
+
+/**
+ * A report on the other player's post, their name and photo, or the task and
+ * stake they wrote; from inside a game (finished too) or from an invite before
+ * accepting it. The row is the record, with a sealed snapshot; the views hide
+ * a reported post, and a reported player's photo, from the reporter from then
+ * on. Then a person is told. The same id, or the same post again, is the same
+ * report and retries its alert. The reported player is never told who.
+ */
+async function report(context: CommandContext, command: ReportCommand): Promise<string | null> {
+  const { actor } = context;
+  const subject = await readReportSubject(actor, command);
+  const target = (field: string): GameSealTarget => ({ field, memberId: actor, rowId: command.reportId, table: "game_report" });
+  const [noteEncrypted, snapshotTextEncrypted] = await Promise.all([
+    command.note ? seal(target("note"), command.note) : null,
+    subject.snapshotText ? seal(target("snapshot"), subject.snapshotText) : null,
+  ]);
+  let stored: GameReport | null = null;
+  await runLocked(subject.gameId, context, async ({ clock, loaded, tx }) => {
+    const sameId = await tx.gameReport.findUnique({ where: { id: command.reportId } });
+    if (sameId && sameId.reporterMemberId !== actor) reject("INVALID_REQUEST", "That report id is taken.");
+    const prior = sameId ?? (subject.entry ? await tx.gameReport.findUnique({
+      where: { reporterMemberId_entryId: { entryId: subject.entry.id, reporterMemberId: actor } } }) : null);
+    if (prior) {
+      stored = prior;
+      return [];
+    }
+    // Under the lock: still theirs to see, still someone to report, still not blocked.
+    const visible = subject.entry === null || visibleEntryIds(loaded.state, actor).has(subject.entry.id);
+    const present = subject.fromInvite ? loaded.row.createdBy === subject.reportedMemberId && loaded.row.status === "invited"
+      : playerFor(loaded.state, actor) !== undefined && playerFor(loaded.state, subject.reportedMemberId) !== undefined;
+    if (!visible || !present) reject("INVALID_REQUEST", "This changed. Take another look.");
+    if (await areGamePlayersBlocked(tx, actor, subject.reportedMemberId)) reject("NOT_A_PLAYER", "There's no one to report in this game.");
+    stored = await tx.gameReport.create({ data: {
+      about: command.about, createdAt: clock, entryId: subject.entry?.id ?? null, gameId: subject.gameId, id: command.reportId,
+      noteEncrypted, reason: command.reason, reportedMemberId: subject.reportedMemberId, reporterMemberId: actor,
+      snapshotMediaKeys: subject.snapshotMediaKeys, snapshotTextEncrypted,
+    } });
+    return [];
+  });
+  const row = stored as GameReport | null;
+  if (!row) throw new Error("Game report produced no row.");
+  if (command.block) await block(context, subject.fromInvite ? { token: command.token } : { memberId: subject.reportedMemberId });
+  if (await isReportAlertDue(row)) {
+    await sendGameReportAlert({
+      about: command.about, blocked: command.block === true, createdAt: row.createdAt, entryKind: subject.entry ? toEntryKind(subject.entry.kind) : null,
+      fromInvite: subject.fromInvite, gameId: subject.gameId, reason: command.reason, reportId: row.id,
+    });
+  }
+  // From an invite there's no game of theirs to show back.
+  return subject.fromInvite ? null : subject.gameId;
+}
+
+/** Within the reporter's daily alert budget, counting reports up to this one. */
+async function isReportAlertDue(row: Pick<GameReport, "createdAt" | "reporterMemberId">): Promise<boolean> {
+  const day = new Date(Date.UTC(row.createdAt.getUTCFullYear(), row.createdAt.getUTCMonth(), row.createdAt.getUTCDate()));
+  const ordinal = await getPrisma().gameReport.count({ where: { createdAt: { gte: day, lte: row.createdAt }, reporterMemberId: row.reporterMemberId } });
+  return ordinal <= GAME_REPORT_ALERTS_PER_REPORTER_DAY;
+}
+
+/**
+ * Ops review: take down a reported post. Its row stays as a withdrawn
+ * tombstone with its words, summary, blur and media cleared, so it counts for
+ * no one and nobody but its poster can read its upload again.
+ */
+export async function removeGamePostForReview(entryId: string): Promise<boolean> {
+  const entry = await getPrisma().gameEntry.findUnique({ select: { gameId: true }, where: { id: entryId } });
+  if (!entry) return false;
+  let removed = false;
+  await runLocked(entry.gameId, { actor: "ops" }, async ({ clock, tx }) => {
+    const changed = await tx.gameEntry.updateMany({ where: { id: entryId, OR: [{ withdrawnReason: null }, { withdrawnReason: { not: "removed" } }] },
+      data: { blurHash: null, mediaKeys: [], payloadEncrypted: null, textEncrypted: null, withdrawnAt: clock, withdrawnReason: "removed" } });
+    removed = changed.count === 1;
+    return removed ? [{ payload: { entryId }, type: "removed" }] : [];
+  });
+  return removed;
 }
 
 // ------------------------------------------------------------------- settle
@@ -811,7 +1047,8 @@ async function negotiate(context: CommandContext, command: Extract<GameCommand, 
   const existing = await prisma.game.findMany({ where: { liveRosterKey: roster }, select: { id: true } });
   await loadCurrent(existing.map((game) => game.id));
   try {
-    await runLocked(owner.id, context, async ({ tx, loaded, now }) => {
+    await runLocked(owner.id, withPairLock(context, creator), async ({ tx, loaded, now }) => {
+      await rejectBlockedJoin(tx, creator, context.actor);
       const key = `game-change:${owner.id}:${command.proposalId}`;
       const prior = await tx.gameEvent.findUnique({ where: { commandKey: key }, select: { actor: true } });
       if (prior?.actor === context.actor && playerFor(loaded.state, context.actor)) return [];
@@ -954,6 +1191,8 @@ export type GameChatState = HostedGameChatState;
 export async function readGameChatState(containerMemberId: string, playerMemberIds: readonly string[], actorMemberId?: string): Promise<GameChatState> {
   if (playerMemberIds.length !== 2 || new Set(playerMemberIds).size !== 2) return { games: [] };
   const prisma = getPrisma();
+  // A block ends the pair's game chat: Murph has no game to talk about there.
+  if (await areGamePlayersBlocked(prisma, playerMemberIds[0], playerMemberIds[1])) return { games: [] };
   const candidateIds = await readGameChatCandidateIds(playerMemberIds);
   const candidates = await prisma.game.findMany({ where: { id: { in: candidateIds } },
     orderBy: { createdAt: "desc" }, take: 5, include: { players: true } });
@@ -1142,16 +1381,18 @@ function canView(game: LoadedGame, memberId: string): boolean {
  * games, and up to three invites that expired in the last week, so the
  * challenger sees "invite expired" rather than the game vanishing.
  */
-function homeGames(games: readonly LoadedGame[], now: Date): LoadedGame[] {
+function homeGames(games: readonly LoadedGame[], now: Date, blocks: GameBlocks): LoadedGame[] {
   const latest = (status: "settled" | "void", at: (game: LoadedGame) => Date | null, count: number) => games
     .filter((game) => game.row.status === status && at(game) !== null)
     .sort((a, b) => at(b)!.getTime() - at(a)!.getTime())
     .slice(0, count);
   const settled = latest("settled", (game) => game.row.settledAt, HOME_SETTLED_SHOWN);
-  // A game called off because a player left counts from when they left.
+  // A game called off because a player left counts from when they left; one
+  // a block called off, from that last change (nothing changes a void game).
   const endedAt = (game: LoadedGame) => {
     const departed = parseGameDepartedPlayer(game.row.departedPlayer);
-    return departed ? new Date(departed.at) : game.row.inviteExpiresAt;
+    if (departed) return new Date(departed.at);
+    return game.row.players.some((player) => isHiddenBy(blocks, player.memberId)) ? game.row.updatedAt : game.row.inviteExpiresAt;
   };
   const expired = latest("void", endedAt, HOME_EXPIRED_SHOWN)
     .filter((game) => now.getTime() - endedAt(game)!.getTime() <= HOME_EXPIRED_FOR_MS);
@@ -1197,15 +1438,23 @@ export async function readHome(memberId: string): Promise<GameHomeView> {
   ]);
   const current = await loadCurrent([...new Set([...seats.map((seat) => seat.gameId), ...addressed.map((game) => game.id)])]);
   const visible = current.games.filter((game) => canView(game, memberId));
-  const games = sortForHome(homeGames(visible, current.clock), memberId, current.clock);
-  const views = await buildViews(games, memberId, current.clock);
-  const words = await readTermWords([...new Map(tickets.map((ticket) => [ticket.gameId, ticket.game])).values()]);
+  const counterpartyOf = (ticket: { owedBy: string | null; owedTo: string | null }) => (ticket.owedTo === memberId ? ticket.owedBy : ticket.owedTo);
+  const blocks = await readGameBlocks(prisma, memberId, [
+    ...visible.flatMap(participantsOf), ...tickets.flatMap((ticket) => counterpartyOf(ticket) ?? []),
+  ]);
+  // Someone you blocked is gone from your Home: their games and tickets too.
+  const shown = visible.filter((game) => !participantsOf(game).some((id) => blocks.blocked.has(id)));
+  const games = sortForHome(homeGames(shown, current.clock, blocks), memberId, current.clock);
+  const kept = tickets.filter((ticket) => !blocks.blocked.has(counterpartyOf(ticket) ?? ""));
+  const [views, blocked] = await Promise.all([buildViews(games, memberId, current.clock, blocks), readBlockedPeople(memberId)]);
+  const words = await readTermWords([...new Map(kept.map((ticket) => [ticket.gameId, ticket.game])).values()]);
   const [firstName] = await openGameTexts(profile
     ? [{ field: "first_name", memberId, rowId: memberId, table: "game_profile", value: profile.firstNameEncrypted }]
     : []);
-  const wallet = tickets.map((ticket) =>
-    ticketView(toTicketRow(ticket), words.get(ticket.gameId) ?? null, memberId, gameNow(current.clock, ticket.game), parseStoredTerms(ticket.game.terms)));
+  const wallet = kept.map((ticket) => ticketView(withoutHidden(toTicketRow(ticket), blocks), words.get(ticket.gameId) ?? null,
+    memberId, gameNow(current.clock, ticket.game), parseStoredTerms(ticket.game.terms)));
   return {
+    blocked,
     games: views,
     me: { usualKind: usualEntry ? toEntryKind(usualEntry.kind) : null, avatarUrl: profile?.photoKey ? gameMediaUrl(profile.photoKey) : null, firstName: firstName ?? null, memberId, timeZone: profile?.timeZone ?? null },
     wallet: {
@@ -1215,6 +1464,36 @@ export async function readHome(memberId: string): Promise<GameHomeView> {
       redeemed: wallet.filter((ticket) => ticket.status === "redeemed"),
     },
   };
+}
+
+/** The members in a game: its players and an addressed rematch's invitee. */
+function participantsOf(game: LoadedGame): string[] {
+  return [...game.row.players.map((player) => player.memberId), ...(game.row.inviteeMemberId ? [game.row.inviteeMemberId] : [])];
+}
+
+/** A ticket with someone blocked either way shows them as having left. */
+function withoutHidden(ticket: GameTicketRow, blocks: GameBlocks): GameTicketRow {
+  return { ...ticket, owedBy: isHiddenBy(blocks, ticket.owedBy) ? null : ticket.owedBy, owedTo: isHiddenBy(blocks, ticket.owedTo) ? null : ticket.owedTo };
+}
+
+/** Everyone the member blocked, newest first, by the member's own name for them. */
+async function readBlockedPeople(memberId: string): Promise<{ memberId: string; firstName: string }[]> {
+  const prisma = getPrisma();
+  const rows = await prisma.gameBlock.findMany({ orderBy: [{ createdAt: "desc" }, { blockedMemberId: "asc" }],
+    select: { blockedMemberId: true }, take: GAME_BLOCK_LIMIT, where: { blockerMemberId: memberId } });
+  if (rows.length === 0) return [];
+  const ids = rows.map((row) => row.blockedMemberId);
+  const [profiles, labels] = await Promise.all([
+    prisma.gameProfile.findMany({ select: { firstNameEncrypted: true, memberId: true }, where: { memberId: { in: ids } } }),
+    prisma.gameContactLabel.findMany({ select: { nameEncrypted: true, subjectMemberId: true }, where: { ownerMemberId: memberId, subjectMemberId: { in: ids } } }),
+  ]);
+  const plain = await openGameTexts([
+    ...labels.map((label) => ({ ...labelTarget(memberId, "name"), value: label.nameEncrypted })),
+    ...profiles.map((profile) => ({ field: "first_name", memberId: profile.memberId, rowId: profile.memberId, table: "game_profile" as const, value: profile.firstNameEncrypted })),
+  ]);
+  const labelName = new Map(labels.map((label, index) => [label.subjectMemberId, plain[index]]));
+  const ownName = new Map(profiles.map((profile, index) => [profile.memberId, plain[labels.length + index]]));
+  return ids.map((id) => ({ firstName: labelName.get(id) || ownName.get(id) || "", memberId: id }));
 }
 
 /** Anyone with the link sees an open invite's details; a used or expired one shows only its status. */
@@ -1269,8 +1548,11 @@ export async function authorizeMediaRead(memberId: string, mediaKey: string): Pr
   if (!ownerId) return false;
   if (ownerId === memberId) return true;
   const prisma = getPrisma();
+  // Blocked either way: nothing of theirs, as if they'd left.
+  if (await areGamePlayersBlocked(prisma, memberId, ownerId)) return false;
   const profile = await prisma.gameProfile.findUnique({ select: { photoKey: true }, where: { memberId: ownerId } });
-  if (profile?.photoKey === mediaKey) {
+  // A player you reported keeps their photo from you.
+  if (profile?.photoKey === mediaKey && !(await readReportedBy(memberId, { players: [ownerId] })).players.has(ownerId)) {
     const participant = (id: string) => ({ OR: [
       { players: { some: { memberId: id } } },
       { inviteeMemberId: id, status: "invited" },
@@ -1288,14 +1570,35 @@ export async function authorizeMediaRead(memberId: string, mediaKey: string): Pr
     take: 5,
     where: { mediaKeys: { has: mediaKey }, memberId: ownerId },
   });
-  const games = await loadGames(getPrisma(), [...new Set(entries.map((entry) => entry.gameId))]);
+  const [games, reported] = await Promise.all([
+    loadGames(getPrisma(), [...new Set(entries.map((entry) => entry.gameId))]),
+    readReportedBy(memberId, { entryIds: entries.map((entry) => entry.id) }),
+  ]);
   return entries.some((entry) => {
     const game = games.find((candidate) => candidate.row.id === entry.gameId);
-    return game !== undefined && visibleEntryIds(game.state, memberId).has(entry.id);
+    return game !== undefined && visibleEntryIds(game.state, memberId, reported.entries).has(entry.id);
   });
 }
 
 // ------------------------------------------------------------ view assembly
+
+/** What this member reported among these: posts, and players whose photo, they won't see again. */
+async function readReportedBy(memberId: string, among: { entryIds?: string[]; gameIds?: string[]; players?: string[] }): Promise<{ entries: Set<string>; players: Set<string> }> {
+  const rows = await getPrisma().gameReport.findMany({ select: { about: true, entryId: true, reportedMemberId: true }, where: { reporterMemberId: memberId, OR: [
+    ...(among.entryIds ? [{ entryId: { in: among.entryIds } }] : []),
+    ...(among.gameIds ? [{ entryId: { not: null }, gameId: { in: among.gameIds } }] : []),
+    ...(among.players ? [{ about: "player", reportedMemberId: { in: among.players } }] : []),
+  ] } });
+  return {
+    entries: new Set(rows.flatMap((row) => (row.entryId ? [row.entryId] : []))),
+    players: new Set(rows.flatMap((row) => (row.about === "player" && row.reportedMemberId ? [row.reportedMemberId] : []))),
+  };
+}
+
+/** This viewer's game without a player blocked either way: to them, that player left. */
+function withoutPlayer(state: RuleState, memberId: string): RuleState {
+  return { ...state, entries: state.entries.filter((entry) => entry.memberId !== memberId), players: state.players.filter((player) => player.memberId !== memberId) };
+}
 
 function toTicketRow(ticket: {
   id: string;
@@ -1326,21 +1629,34 @@ async function readTermWords(
   return new Map(games.map((game, index) => [game.id, parseTermWords(texts[index] ?? "")]));
 }
 
-/** Decrypts exactly what each game's viewer may see (one batch), then builds the views at each game's own now. */
-async function buildViews(games: readonly LoadedGame[], viewerId: string, clock: Date): Promise<GameView[]> {
+/**
+ * Decrypts exactly what each game's viewer may see (one batch), then builds
+ * the views at each game's own now. A player blocked either way is shown the
+ * way a player who left is: their seat and the viewer's name for them, no
+ * photo, posts or days. Posts the viewer reported stay hidden.
+ */
+async function buildViews(games: readonly LoadedGame[], viewerId: string, clock: Date, knownBlocks?: GameBlocks): Promise<GameView[]> {
   if (games.length === 0) return [];
   const prisma = getPrisma();
   const memberIds = [...new Set([viewerId, ...games.flatMap((game) => game.row.players.map((player) => player.memberId))])];
   // An addressed rematch's invitee isn't a player yet, but the challenger's label for them still applies.
   const labelSubjects = [...memberIds, ...games.flatMap((game) => (game.row.inviteeMemberId ? [game.row.inviteeMemberId] : []))];
-  const [profiles, labels, tickets, pendingViews] = await Promise.all([
+  const [profiles, labels, tickets, pendingViews, blocks, reported] = await Promise.all([
     prisma.gameProfile.findMany({ where: { memberId: { in: labelSubjects } } }),
     prisma.gameContactLabel.findMany({ where: { ownerMemberId: viewerId, subjectMemberId: { in: labelSubjects } } }),
     prisma.gameTicket.findMany({
       where: { gameId: { in: games.map((game) => game.row.id) }, OR: [{ owedTo: viewerId }, { owedBy: viewerId }] },
     }),
     readPendingChangeViews(games.map((game) => game.row)),
+    knownBlocks ?? readGameBlocks(prisma, viewerId, labelSubjects),
+    readReportedBy(viewerId, { gameIds: games.map((game) => game.row.id), players: labelSubjects }),
   ]);
+  const hiddenEntryIds = reported.entries;
+  const hiddenPlayers = games.map((game) => game.state.players.find((player) => player.memberId !== viewerId && isHiddenBy(blocks, player.memberId)) ?? null);
+  const states = games.map((game, index) => {
+    const hidden = hiddenPlayers[index];
+    return hidden ? withoutPlayer(game.state, hidden.memberId) : game.state;
+  });
 
   // One decrypt batch: words, names, labels, invite bits, visible entries.
   const requests: Array<GameSealTarget & { value: string | null }> = [];
@@ -1390,8 +1706,8 @@ async function buildViews(games: readonly LoadedGame[], viewerId: string, clock:
     return null;
   });
   const entryAt = new Map<string, { text: number; payload: number; kind: GameEntryKind }>();
-  for (const game of games) {
-    const visible = visibleEntryIds(game.state, viewerId);
+  for (const [index, game] of games.entries()) {
+    const visible = visibleEntryIds(states[index], viewerId, hiddenEntryIds);
     for (const entry of game.entries) {
       if (!visible.has(entry.id)) continue;
       const target = { memberId: entry.memberId, rowId: entry.id, table: "game_entry" as const };
@@ -1412,7 +1728,7 @@ async function buildViews(games: readonly LoadedGame[], viewerId: string, clock:
   }
   // Only the viewer's own invite photos and relationships: nobody else ever sees them.
   const avatarKeys = new Map(labels.map((label) => [label.subjectMemberId, label.photoKey]));
-  const profileAvatarKeys = new Map(profiles.map((profile) => [profile.memberId, profile.photoKey]));
+  const profileAvatarKeys = new Map(profiles.map((profile) => [profile.memberId, reported.players.has(profile.memberId) ? null : profile.photoKey]));
   const relationships = new Map([...labelRelationshipAt].map(([memberId, at]) => [memberId, plain[at]]));
   /** The invite's own typed relationship, else the viewer's existing label for an addressed rematch. */
   const inviteeRelationship = (invite: NonNullable<(typeof inviteAt)[number]>) => {
@@ -1443,13 +1759,15 @@ async function buildViews(games: readonly LoadedGame[], viewerId: string, clock:
         : null,
       names,
       relationships,
-      departed: departedAt[index] && { seat: departedAt[index].seat, name: plain[departedAt[index].name] ?? "" },
+      departed: departedAt[index] ? { seat: departedAt[index].seat, name: plain[departedAt[index].name] ?? "" }
+        : hiddenPlayers[index] && { seat: hiddenPlayers[index].seat, name: names.get(hiddenPlayers[index].memberId) ?? "" },
+      hiddenEntryIds,
       now: gameNow(clock, game.row),
       result,
       round: game.row.round,
       startedAt: game.row.startedAt,
-      state: game.state,
-      tickets: tickets.filter((ticket) => ticket.gameId === game.row.id).map(toTicketRow),
+      state: states[index],
+      tickets: tickets.filter((ticket) => ticket.gameId === game.row.id).map((ticket) => withoutHidden(toTicketRow(ticket), blocks)),
       viewerId,
       words: parseTermWords(plain[wordsAt[index]] ?? ""),
     });

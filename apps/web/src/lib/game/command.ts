@@ -3,6 +3,8 @@ import { isStrictIsoDate, normalizeIanaTimeZone } from "@murphai/contracts";
 import {
   GAME_ENTRY_KINDS,
   GAME_CHECK_IN_KINDS,
+  GAME_REPORT_ABOUT,
+  GAME_REPORT_REASONS,
   GAME_STAKE_KINDS,
   GAME_WEEKDAYS,
   type GameCommand,
@@ -76,6 +78,23 @@ export function parseGameCommand(value: unknown): GameCommand {
       return { entryId: clientId(input.entryId, "entryId"), gameId: clientId(input.gameId, "gameId"), type: "withdraw" };
     case "redeem":
       return { ticketId: opaque(input.ticketId, "ticketId"), type: "redeem" };
+    case "report":
+      return {
+        type: "report", reportId: clientId(input.reportId, "reportId"),
+        reason: oneOf(input.reason, "reason", GAME_REPORT_REASONS),
+        ...reportTarget(input),
+        ...optional(input.note, (note) => {
+          const text = reportNote(note);
+          return text ? { note: text } : {};
+        }),
+        ...optional(input.block, (block) => ({ block: flag(block, "block") })),
+      };
+    case "block": {
+      const target = idOrToken(input, "memberId");
+      return "token" in target ? { type: "block", token: target.token } : { type: "block", memberId: target.id };
+    }
+    case "unblock":
+      return { type: "unblock", memberId: opaque(input.memberId, "memberId") };
     default:
       return reject("INVALID_REQUEST", "Unknown command.");
   }
@@ -231,6 +250,37 @@ function transcript(value: unknown): string {
     reject("INVALID_REQUEST", `An excuse needs its words: 1 to ${TRANSCRIPT_MAX} characters.`);
   }
   return text;
+}
+
+/** Exactly one of an id or an invite token. */
+function idOrToken(input: Record<string, unknown>, field: "gameId" | "memberId"): { id: string } | { token: string } {
+  if ((input[field] === undefined) === (input.token === undefined)) reject("INVALID_REQUEST", `Send ${field} or token.`);
+  if (input.token !== undefined) return { token: opaque(input.token, "token") };
+  return { id: field === "gameId" ? clientId(input[field], field) : opaque(input[field], field) };
+}
+
+/** One post (`entryId`), the player, or the terms; an invite's report is never about a post. */
+function reportTarget(input: Record<string, unknown>) {
+  const target = idOrToken(input, "gameId");
+  const where = "token" in target ? { token: target.token } : { gameId: target.id };
+  const entryId = input.entryId === undefined ? undefined : clientId(input.entryId, "entryId");
+  const about = input.about === undefined ? (entryId ? "post" : "player") : oneOf(input.about, "about", GAME_REPORT_ABOUT);
+  if ((about === "post") !== (entryId !== undefined) || ("token" in where && about === "post")) {
+    reject("INVALID_REQUEST", "A post report names its entryId; other reports don't.");
+  }
+  return { ...where, about, ...(entryId ? { entryId } : {}) };
+}
+
+/** A report's optional note: cleaned like other words, at most 500 characters; blank is none. */
+function reportNote(value: unknown): string | null {
+  const text = string(value, "note", TRANSCRIPT_MAX * 2).replace(INVISIBLE, (char) => (char === ZWJ ? char : "")).trim();
+  if (text.length > TRANSCRIPT_MAX) reject("INVALID_REQUEST", `A note is at most ${TRANSCRIPT_MAX} characters.`);
+  return text.replaceAll(ZWJ, "").trim() ? text : null;
+}
+
+function flag(value: unknown, field: string): boolean {
+  if (typeof value !== "boolean") reject("INVALID_REQUEST", `${field} must be true or false.`);
+  return value;
 }
 
 /** Ids the client mints (UUIDs): retries reuse them. */
