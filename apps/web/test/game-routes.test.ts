@@ -9,6 +9,7 @@ import type { GameView } from "../src/lib/game/contract";
 import type { RuleEntry, RuleState } from "../src/lib/game/rules";
 import { buildGameView } from "../src/lib/game/views";
 import { hostedOnboardingError } from "../src/lib/hosted-onboarding/errors";
+import { buildCurrentHostedConsentDocumentVersions } from "../src/lib/legal/consent";
 
 vi.mock("server-only", () => ({}));
 
@@ -334,6 +335,89 @@ describe("weekly game routes", () => {
       expect(await response.json()).toEqual({
         error: { code: "ALREADY_IN_A_GAME", message: "You and Ava already have a game going.", retryable: false },
       });
+    });
+  });
+
+  describe("Murph's Terms", () => {
+    const termsGrant = (versions: Record<string, string>, revokedAt: Date | null = null) => ({
+      createdAt: new Date(0), documentVersionsJson: versions, grantedAt: new Date(0), lastEventId: null,
+      memberId: LEO, revokedAt, scope: "launch.legal", source: "test", status: revokedAt ? "revoked" : "granted",
+      updatedAt: new Date(0),
+    });
+    const current = buildCurrentHostedConsentDocumentVersions("launch.legal");
+    const stale = Object.fromEntries(Object.keys(current).map((id) => [id, "2020-01-01"]));
+    let grants: ReturnType<typeof termsGrant>[];
+    const findMany = vi.fn(async () => grants);
+    const gated = {
+      "POST /games": () => routes.create.POST(writeRequest("POST", "/games", { gameId: GAME_ID })),
+      "POST /invites/:token/accept": () => routes.accept.POST(
+        writeRequest("POST", "/invites/tok_1/accept", { termsVersion: 1, timeZone: "UTC" }), params({ token: "tok_1" })),
+      "POST /invites/:token/negotiate": () => routes.negotiate.POST(
+        writeRequest("POST", "/invites/tok_1/negotiate", { termsVersion: 1 }), params({ token: "tok_1" })),
+      "POST /games/:id/entries": () => routes.entries.POST(
+        writeRequest("POST", `/games/${GAME_ID}/entries`, { entryId: "entry_1", kind: "photo", mediaKeys: [] }), params({ id: GAME_ID })),
+      "POST /games/:id/changes": () => routes.changes.POST(
+        writeRequest("POST", `/games/${GAME_ID}/changes`, { proposalId: "proposal_1" }), params({ id: GAME_ID })),
+      "POST /tickets/:id/redeem": () => routes.redeem.POST(writeRequest("POST", "/tickets/t_1/redeem"), params({ id: "t_1" })),
+    };
+    const open = {
+      "GET /home": () => routes.home.GET(new Request(`${BASE}/home`)),
+      "GET /games/:id": () => routes.game.GET(new Request(`${BASE}/games/${GAME_ID}`), params({ id: GAME_ID })),
+      "PUT /me/profile": () => routes.profile.PUT(writeRequest("PUT", "/me/profile", { firstName: "Leo", timeZone: "UTC" })),
+      "DELETE /games/:id": () => routes.game.DELETE(writeRequest("DELETE", `/games/${GAME_ID}`), params({ id: GAME_ID })),
+      "DELETE /games/:id/changes/:proposalId": () => routes.cancelChange.DELETE(
+        writeRequest("DELETE", `/games/${GAME_ID}/changes/proposal_1`), params({ id: GAME_ID, proposalId: "proposal_1" })),
+      "DELETE /games/:id/entries/:entryId": () => routes.entry.DELETE(
+        writeRequest("DELETE", `/games/${GAME_ID}/entries/entry_1`), params({ entryId: "entry_1", id: GAME_ID })),
+      "POST /games/:id/reports": () => routes.reports.POST(
+        writeRequest("POST", `/games/${GAME_ID}/reports`, { reportId: "report_1", reason: "harassment" }), params({ id: GAME_ID })),
+      "PUT /blocks/:memberId": () => routes.block.PUT(writeRequest("PUT", `/blocks/${AVA}`), params({ memberId: AVA })),
+      "DELETE /blocks/:memberId": () => routes.block.DELETE(writeRequest("DELETE", `/blocks/${AVA}`), params({ memberId: AVA })),
+      "POST /invites/:token/reports": () => routes.inviteReports.POST(
+        writeRequest("POST", "/invites/tok_1/reports", { reportId: "report_1", reason: "money", about: "terms" }), params({ token: "tok_1" })),
+      "PUT /invites/:token/block": () => routes.inviteBlock.PUT(writeRequest("PUT", "/invites/tok_1/block"), params({ token: "tok_1" })),
+    };
+
+    beforeEach(() => {
+      grants = [termsGrant(stale)];
+      mocks.getPrisma.mockReturnValue({ hostedConsentGrant: { findMany } });
+      mocks.readHome.mockResolvedValue({ games: [], me: { memberId: LEO }, wallet: { held: [], owed: [], redeemed: [] } });
+    });
+
+    it("changes nothing while MURPH_GAME_REQUIRE_CURRENT_TERMS is off", async () => {
+      for (const flag of [undefined, "", "1", "false", "TRUE"]) {
+        if (flag !== undefined) vi.stubEnv("MURPH_GAME_REQUIRE_CURRENT_TERMS", flag);
+        for (const call of Object.values(gated)) expect((await call()).status).toBe(200);
+      }
+      expect(findMany).not.toHaveBeenCalled();
+      expect(mocks.runGameCommand).toHaveBeenCalledTimes(5 * Object.keys(gated).length);
+    });
+
+    it.each(Object.entries(gated))("on, %s waits for the current Terms and says which", async (_route, call) => {
+      vi.stubEnv("MURPH_GAME_REQUIRE_CURRENT_TERMS", "true");
+      for (const missing of [[termsGrant(stale)], [], [termsGrant(current, new Date(0))]]) {
+        grants = missing;
+        const response = await call();
+        expect(response.status).toBe(403);
+        expect(response.headers.get("cache-control")).toBe("no-store");
+        const { error } = await response.json();
+        expect(error).toMatchObject({ code: "TERMS_REQUIRED", retryable: false, details: { scope: "launch.legal" } });
+        expect(Object.fromEntries(error.details.documents.map((document: { id: string; version: string }) =>
+          [document.id, document.version]))).toEqual(current);
+      }
+      expect(findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { memberId: LEO } }));
+      expect(mocks.runGameCommand).not.toHaveBeenCalled();
+
+      grants = [termsGrant(current)];
+      expect((await call()).status).toBe(200);
+      expect(mocks.runGameCommand).toHaveBeenCalledTimes(1);
+    });
+
+    it("on, keeps reading, reporting, blocking, a profile and taking things back open", async () => {
+      vi.stubEnv("MURPH_GAME_REQUIRE_CURRENT_TERMS", "true");
+      grants = [];
+      for (const [route, call] of Object.entries(open)) expect((await call()).status, route).toBe(200);
+      expect(findMany).not.toHaveBeenCalled();
     });
   });
 

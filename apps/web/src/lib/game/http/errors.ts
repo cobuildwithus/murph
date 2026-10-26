@@ -9,8 +9,9 @@ export function gameHttpError(
   httpStatus: number,
   message: string,
   retryable = false,
+  details?: Record<string, unknown>,
 ) {
-  return hostedOnboardingError({ code, httpStatus, message, retryable });
+  return hostedOnboardingError({ code, details, httpStatus, message, retryable });
 }
 
 export function gameCommandError(error: GameError, httpStatus: number) {

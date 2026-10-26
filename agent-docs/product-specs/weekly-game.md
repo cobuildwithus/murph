@@ -20,6 +20,19 @@ accepting. Everyone else sees every game route as missing. Removing a listed
 member turns their unlisted opponents' games off, mid-game included. The iOS
 client is the Murph app.
 
+With `MURPH_GAME_REQUIRE_CURRENT_TERMS=true` (unset or anything else is off, and
+off changes nothing), the HTTP door also refuses creating, accepting,
+negotiating, posting, proposing a change and marking a prize done until the
+member's `launch.legal` grant matches today's document versions
+(`requireCurrentTermsFor` in `http/auth.ts`). The refusal is `403 TERMS_REQUIRED`
+with `details: { scope: "launch.legal", documents }`, each document carrying its
+id, title, link and current version, which is what the companion consent route
+(`POST /api/device-sync/companion/legal-consent`) takes. Reads, reports, blocks,
+the profile, and withdrawing your own post, invite or change stay open. The app
+shows Murph's Terms step, records the grant, and sends the write again. Clients
+that predate the code see an ordinary refusal, so turn it on only once a build
+that handles it is out. Game moves made in Murph's chat don't pass this door.
+
 ## Product
 
 A weekly game is a run of days between close people. Each player picks a habit

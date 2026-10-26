@@ -1,6 +1,6 @@
 import { jsonOk, readJsonObject } from "../../hosted-onboarding/http";
 import { runGameCommand } from "../service";
-import { requireGameMember } from "./auth";
+import { requireCurrentTermsFor, requireGameMember } from "./auth";
 import { gameCommandError } from "./errors";
 
 const BODY_LIMIT_BYTES = 64 * 1024;
@@ -18,7 +18,9 @@ export async function respondToGameCommand(
 ): Promise<Response> {
   const memberId = await requireGameMember(request, options.inviteToken);
   const body = options.body ? await readJsonObject(request, { limitBytes: BODY_LIMIT_BYTES }) : {};
-  const result = await runGameCommand({ actorMemberId: memberId, command: command(body) });
+  const built = command(body);
+  await requireCurrentTermsFor(memberId, built);
+  const result = await runGameCommand({ actorMemberId: memberId, command: built });
   if (!result.ok) throw gameCommandError(result.error, result.status);
   return jsonOk({ ok: true, game: result.game, ...(result.profile ? { profile: result.profile } : {}) });
 }

@@ -20,6 +20,7 @@ import { GET as media } from "../app/api/game/v1/media/[...key]/route";
 import { POST as redeem } from "../app/api/game/v1/tickets/[id]/redeem/route";
 import { POST as proposeChange } from "../app/api/game/v1/games/[id]/changes/route";
 import { DELETE as cancelChange } from "../app/api/game/v1/games/[id]/changes/[proposalId]/route";
+import { POST as agree } from "../app/api/device-sync/companion/legal-consent/route";
 import { hostedAuthAdapter } from "../src/lib/better-auth/adapter";
 import { serializeHostedNativeSessionToken } from "../src/lib/better-auth/transport";
 import type { GameHomeView, GameView } from "../src/lib/game/contract";
@@ -188,6 +189,62 @@ describe.skipIf(!enabled)("game v1 local API smoke", () => {
     const unblocked = await unblockRoute(request(leo, undefined, "DELETE"), { params: Promise.resolve({ memberId: avaId }) });
     expect(unblocked.status).toBe(200);
     expect((await (await home(request(leo, undefined, "GET"))).json()).blocked).toEqual([]);
+  }, 30_000);
+
+  it("asks for Murph's current Terms before create, accept and post only while the switch is on, then plays on", async () => {
+    const leo = await member("Leo");
+    const ava = await member("Ava");
+    // Both agreed to an older Terms; the flag alone decides whether that still plays.
+    for (const token of [leo, ava]) {
+      await getPrisma().hostedConsentGrant.create({ data: { memberId: tokenMember.get(token)!, scope: "launch.legal",
+        documentVersionsJson: { "terms-of-service": "2020-01-01", "privacy-policy": "2020-01-01", "health-ai-safety-disclosure": "2020-01-01" },
+        grantedAt: new Date(), source: "test" } });
+    }
+    const terms = { schedule: { count: 3 }, stakes: [{ kind: "prize", item: "Choose a book" }],
+      tasks: [{ seat: 0, text: "Move" }, { seat: 1, text: "Move" }] };
+    const off = await game(create(request(leo, { gameId: randomUUID(), inviteeFirstName: "Ava", terms })));
+    expect(off.status).toBe("invited");
+
+    vi.stubEnv("MURPH_GAME_REQUIRE_CURRENT_TERMS", "true");
+    try {
+      const id = randomUUID();
+      const context = { params: Promise.resolve({ id }) };
+      const refusal = async (response: Promise<Response>) => {
+        const result = await response;
+        const body = await result.json();
+        expect(result.status, JSON.stringify(body)).toBe(403);
+        expect(body.error).toMatchObject({ code: "TERMS_REQUIRED", details: { scope: "launch.legal" } });
+        return Object.fromEntries((body.error.details.documents as { id: string; version: string }[])
+          .map((document) => [document.id, document.version]));
+      };
+      const agreeTo = async (token: string, acceptedDocumentVersions: Record<string, string>) => {
+        const agreed = await agree(request(token, { scope: "launch.legal", acceptedDocumentVersions }));
+        expect(agreed.status).toBe(200);
+      };
+      // The versions the refusal names are the ones that unblock it.
+      await agreeTo(leo, await refusal(create(request(leo, { gameId: id, inviteeFirstName: "Ava", terms }))));
+      const created = await game(create(request(leo, { gameId: id, inviteeFirstName: "Ava", terms })));
+      const invite = { params: Promise.resolve({ token: created.inviteToken! }) };
+      const versions = await refusal(accept(request(ava, { termsVersion: 1, timeZone: "UTC" }), invite));
+      // Reading, reporting and taking things back stay open meanwhile.
+      expect((await home(request(ava, undefined, "GET"))).status).toBe(200);
+      expect((await game(read(request(leo, undefined, "GET"), context))).status).toBe("invited");
+      await agreeTo(ava, versions);
+      expect((await game(accept(request(ava, { termsVersion: 1, timeZone: "UTC" }), invite))).status).toBe("live");
+      await game(start(request(leo), context));
+      await photo(ava, id, 61);
+
+      // Leo's grant goes stale mid-game: his post waits, Ava's game reads on.
+      await getPrisma().hostedConsentGrant.update({ where: { memberId_scope: { memberId: tokenMember.get(leo)!, scope: "launch.legal" } },
+        data: { documentVersionsJson: { "terms-of-service": "2020-01-01" } } });
+      const mediaKey = await imageKey(leo, 62);
+      const entry = { entryId: randomUUID(), kind: "photo", mediaKeys: [mediaKey] };
+      await agreeTo(leo, await refusal(post(request(leo, entry), context)));
+      const posted = await game(post(request(leo, entry), context));
+      expect(posted.days[0].mine?.entryId).toBe(entry.entryId);
+    } finally {
+      vi.stubEnv("MURPH_GAME_REQUIRE_CURRENT_TERMS", "");
+    }
   }, 30_000);
 
   it("posts every summary kind through dev days and reveals the untouched partner days only in recap", async () => {
