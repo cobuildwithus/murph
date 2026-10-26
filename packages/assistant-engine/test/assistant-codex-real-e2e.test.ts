@@ -46030,10 +46030,12 @@ describeRealCodex('Bluetooth wearable help', () => {
       expect(reply.length).toBeLessThan(650)
       expect(reply).toMatch(expected)
       expect(reply).not.toMatch(/(?:I|we)(?:[’']ve| have)? (?:can see|checked|detected|reset|connected|fixed|opened a ticket|notified|emailed)|your Bluetooth is (?:off|disabled)|your (?:band|WHOOP) is (?:uncharged|connected to another)/iu)
-      expect(reply).not.toMatch(/(?:enable|turn on) (?:the )?(?:Heart Rate Broadcast|HR Broadcast)|Settings\s*>\s*(?:Devices|Connect)|factory reset|reinstall|sign out|https?:/iu)
+      expect(reply).not.toMatch(/(?:enable|turn on) (?:the )?(?:Heart Rate Broadcast|HR Broadcast)|Settings\s*>\s*Devices|factory reset|reinstall|sign out|https?:/iu)
       if (scenario.startsWith('app handoff')) expect(reply).toContain('?')
+      // Wrist-reminder pairing is not where live heart rate connects.
+      expect(reply).not.toMatch(/Settings\s*(?:>|→)\s*Connect device[^.]*Connect WHOOP/iu)
       // The game is invite only: Murph names it only after the member does.
-      if (!/game/iu.test(prompt)) expect(reply).not.toMatch(/\bgames?\b/iu)
+      if (!/\bgames?\b/iu.test(prompt)) expect(reply).not.toMatch(/\bgames?\b/iu)
       if (scenario.startsWith('older band')) expect(reply).not.toMatch(/try again|restart|toggle|open Settings/iu)
       if (scenario.startsWith('exhausted')) expect(reply).not.toMatch(/tap.*Forget|I(?:[’']ve| have) (?:sent|saved|recorded|escalated)|will (?:contact|reply|get back)/iu)
     } finally {

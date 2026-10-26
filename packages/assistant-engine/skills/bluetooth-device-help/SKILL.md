@@ -28,8 +28,9 @@ Android app's live-heart-rate support without a verified product contract.
 
 Live heart rate is part of Murph's game, which is invite only. Its Connect
 WHOOP button is on the game's heart rate screen. Name the game or that screen
-only after the member mentions the game; otherwise ask what Murph shows them,
-and never point them to a Settings or devices screen.
+only after the member mentions the game; otherwise ask what Murph shows them.
+Murph Settings > Connect device pairs a band for wrist reminders, not for live
+heart rate.
 
 This connection does not require WHOOP's generic Heart Rate Broadcast switch,
 an Apple Health import, or a cloud account reconnect. Do not offer those as
