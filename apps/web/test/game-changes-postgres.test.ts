@@ -6,7 +6,7 @@ import { getPrisma } from "@/src/lib/prisma";
 import { readGame, readGameChatState, runGameCommand } from "@/src/lib/game/service";
 import { addDays, gameLocalDate, weekdayOf } from "@/src/lib/game/time";
 import { parseStoredTerms, scorePlayer, settleDueAt, type RuleState } from "@/src/lib/game/rules";
-import type { GameCommand, GameSchedule } from "@/src/lib/game/contract";
+import type { GameCommand, GameSchedule, Weekday } from "@/src/lib/game/contract";
 const delivery = vi.hoisted(() => vi.fn(async () => {}));
 vi.mock("@/src/lib/game/chat-delivery", () => ({ deliverGameChangeProposal: delivery }));
 const enabled = process.env.MURPH_TEST_POSTGRES_CONCURRENCY === "1";
@@ -263,6 +263,46 @@ describe.skipIf(!enabled)("weekly game change serialization against PostgreSQL",
     for (let i=0;i<2;i++) expect(await run(actor,command,{chatContainerMemberId:room,beforeMutationTx:fence})).toMatchObject({ok:true});
     expect(await readGame(gameId,a)).toMatchObject({pendingChange:null,lengthDays:7,terms:{n:1}});
     expect(await getPrisma().gameEvent.count({where:{gameId,type:decision === "cancel" ? "change_cancelled" : "change_declined"}})).toBe(1);
+  });
+  it("applies at once when the decliner proposes the other player's declined change in chat", async () => {
+    const {a,b,room,gameId} = await setup(); const db = getPrisma(); const chat = {chatContainerMemberId:room,beforeMutationTx:fence};
+    const asked = randomUUID(); const change = {kind:"edit" as const,lengthDays:10};
+    await run(a,{type:"proposeChange",gameId,proposalId:asked,expectedTermsVersion:1,change},chat);
+    expect(await run(b,{type:"respondChange",gameId,proposalId:asked,decision:"decline"},chat)).toMatchObject({ok:true});
+    const agreed = {type:"proposeChange" as const,gameId,proposalId:randomUUID(),expectedTermsVersion:1,change:{lengthDays:10,kind:"edit" as const}};
+    for (let i=0;i<2;i++) expect(await run(b,agreed,chat)).toMatchObject({ok:true});
+    expect(await readGame(gameId,a)).toMatchObject({pendingChange:null,lengthDays:10,terms:{n:2}});
+    expect(await db.gameEvent.findUniqueOrThrow({where:{commandKey:`game-change-resolved:${gameId}:${agreed.proposalId}`}})).toMatchObject({type:"change_applied",actor:b});
+    expect(await db.gameEvent.count({where:{gameId,type:"change_applied"}})).toBe(1);
+  });
+  it("judges the decliner's matching proposal as an approval, so a proposed start date can arrive", async () => {
+    const today = gameLocalDate(new Date(), "America/New_York"); const every: Weekday[] = [0,1,2,3,4,5,6];
+    const {a,b,room,gameId} = await setup({days:every}, addDays(today, 5)); const chat = {chatContainerMemberId:room,beforeMutationTx:fence};
+    const asked = randomUUID(); const startsOn = addDays(today, 2);
+    await run(a,{type:"proposeChange",gameId,proposalId:asked,expectedTermsVersion:1,change:{kind:"edit",startsOn,schedule:{days:every}}},chat);
+    await run(b,{type:"respondChange",gameId,proposalId:asked,decision:"decline"},chat);
+    // On the proposed date itself a fresh proposal would need tomorrow or later; approval keeps the date.
+    await getPrisma().game.update({where:{id:gameId},data:{devClockOffsetMs:BigInt(2*86400000)}});
+    expect(await run(b,{type:"proposeChange",gameId,proposalId:randomUUID(),expectedTermsVersion:1,change:{kind:"edit",schedule:{days:[...every].reverse()},startsOn}},chat)).toMatchObject({ok:true});
+    expect(await readGame(gameId,a)).toMatchObject({pendingChange:null,terms:{n:2}});
+    const players = await getPrisma().gamePlayer.findMany({where:{gameId},select:{dayOne:true}});
+    expect(players.map((player) => player.dayOne?.toISOString().slice(0,10))).toEqual([startsOn, startsOn]);
+  });
+  it.each(["app", "different", "superseded", "proposer"] as const)("still asks the other player when the re-proposal is %s", async (variant) => {
+    const {a,b,room,gameId} = await setup(); const chat = {chatContainerMemberId:room,beforeMutationTx:fence};
+    const asked = randomUUID(); const change = {kind:"edit" as const,lengthDays:10};
+    await run(a,{type:"proposeChange",gameId,proposalId:asked,expectedTermsVersion:1,change},chat);
+    await run(b,{type:"respondChange",gameId,proposalId:asked,decision:"decline"},chat);
+    if (variant === "superseded") {
+      const other = randomUUID();
+      await run(a,{type:"proposeChange",gameId,proposalId:other,expectedTermsVersion:1,change:{kind:"edit",lengthDays:12}},chat);
+      await run(a,{type:"respondChange",gameId,proposalId:other,decision:"cancel"},chat);
+    }
+    const proposalId = randomUUID();
+    const result = await run(variant === "proposer" ? a : b,{type:"proposeChange",gameId,proposalId,expectedTermsVersion:1,
+      change:variant === "different" ? {kind:"edit",lengthDays:9} : change},variant === "app" ? {} : chat);
+    expect(result).toMatchObject({ok:true});
+    expect(await readGame(gameId,a)).toMatchObject({pendingChange:{id:proposalId},lengthDays:7,terms:{n:1}});
   });
   it("shows an app proposal posted to a group chat as sent", async () => {
     const {a,b,gameId} = await setup(); const proposalId = randomUUID(); const db = getPrisma();

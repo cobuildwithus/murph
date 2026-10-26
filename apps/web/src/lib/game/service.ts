@@ -68,7 +68,7 @@ import {
   type TermWords,
 } from "./rules";
 import { gameLocalDate } from "./time";
-import { agreedDayOne, gameChangeCancellationNeedsNotice, decideApprovedGameChange, pendingGameChangeView, decideGameChange, gameChangeControls, gameChangeRefusal, isGameChangeExpired, isGameChangeOutdated, parsePendingGameChange, type StoredGamePendingChange } from "./changes";
+import { agreedDayOne, gameChangeCancellationNeedsNotice, decideApprovedGameChange, pendingGameChangeView, decideGameChange, gameChangeControls, gameChangeRefusal, isGameChangeExpired, isGameChangeOutdated, isSameGameChange, parsePendingGameChange, type StoredGamePendingChange } from "./changes";
 import { prepareGameChangeWords, readPendingGameChanges, type PreparedGameChangeWords } from "./change-words";
 import { deliverGameChangeProposal } from "./chat-delivery";
 import { readGameChatCandidateIds, sameGamePlayers } from "./chat-membership";
@@ -845,7 +845,7 @@ async function proposeChange(context: CommandContext, command: Extract<GameComma
   const owner = await getPrisma().game.findFirst({ where: { id: command.gameId, players: { some: { memberId: context.actor } } } });
   if (!owner) reject("NOT_A_PLAYER", "This game belongs to its players.");
   const prepared = await prepareGameChangeWords(owner, command.change, command.expectedTermsVersion);
-  await runLocked(command.gameId, context, async ({ tx, loaded, now }) => {
+  await runLocked(command.gameId, context, async ({ tx, loaded, now, clock }) => {
     if (!playerFor(loaded.state, context.actor)) reject("NOT_A_PLAYER", "This game belongs to its players.");
     const key = `game-change:${command.gameId}:${command.proposalId}`;
     const prior = await tx.gameEvent.findUnique({ where: { commandKey: key }, select: { actor: true } });
@@ -855,6 +855,8 @@ async function proposeChange(context: CommandContext, command: Extract<GameComma
     const pending = parsePendingGameChange(loaded.row.pendingChange);
     if (pending && !isGameChangeExpired(loaded.state, pending, now)) reject("CHANGE_PENDING", "There is already a change waiting for agreement in chat.");
     if (currentTerms(loaded.state.game.terms).n !== command.expectedTermsVersion) reject("TERMS_CHANGED", "The game changed. Take another look.");
+    const agreement = await agreeToDeclinedChange({ tx, loaded, now, clock }, context, command, key);
+    if (agreement) return agreement;
     const decision = decideGameChange(loaded.state, context.actor, command.change, now);
     assertPreparedWords(loaded.row, prepared);
     const proposal = {
@@ -870,6 +872,28 @@ async function proposeChange(context: CommandContext, command: Extract<GameComma
     ];
   });
   return command.gameId;
+}
+
+/**
+ * The other player's word-free proposal that this actor declined keeps its
+ * proposer's agreement until the next change event or until approval would refuse it.
+ * Proposing exactly that change in chat is the missing agreement, judged as an approval.
+ */
+async function agreeToDeclinedChange(locked: LockedStep, context: CommandContext, command: Extract<GameCommand, { type: "proposeChange" }>, key: string): Promise<GameEventDraft[] | null> {
+  const { tx, loaded, now } = locked;
+  if (!context.chatContainerMemberId || !context.beforeMutationTx) return null;
+  const last = await tx.gameEvent.findFirst({ where: { gameId: command.gameId, type: { startsWith: "change_" } },
+    orderBy: { id: "desc" }, select: { type: true, actor: true, payload: true } });
+  if (last?.type !== "change_declined" || last.actor !== context.actor || !isRecord(last.payload) || !last.payload.declined) return null;
+  const offer = parsePendingGameChange(last.payload.declined);
+  if (!offer || offer.proposedByMemberId === context.actor || isGameChangeExpired(loaded.state, offer, now) || !isSameGameChange(offer.change, command.change)) return null;
+  if (loaded.state.game.status === "negotiating") loaded.state = await withCurrentTimeZones(tx, loaded.state);
+  const agreed = { ...offer, id: command.proposalId };
+  const approved = decideApprovedGameChange(loaded.state, context.actor, agreed, now);
+  return [
+    { type: "change_proposed", commandKey: key, payload: { proposalId: agreed.id, expectedTermsVersion: agreed.expectedTermsVersion, effectiveFromDay: approved.effectiveFromDay, agreesWith: offer.id } },
+    ...await applyApprovedChange(locked, command.gameId, agreed, `game-change-resolved:${command.gameId}:${agreed.id}`, context.actor, approved),
+  ];
 }
 
 async function respondChange(context: CommandContext, command: Extract<GameCommand, { type: "respondChange" }>): Promise<string> {
@@ -893,7 +917,7 @@ async function respondChange(context: CommandContext, command: Extract<GameComma
         await reserveGameChatLifecycleTx({ gameId: command.gameId, kind: "change_cancelled", proposalId: proposal.id, now: clock, tx });
       }
       await clear();
-      return [{ commandKey: resolutionKey, type: command.decision === "cancel" ? "change_cancelled" : "change_declined", payload: { proposalId: proposal.id } }];
+      return [{ commandKey: resolutionKey, type: command.decision === "cancel" ? "change_cancelled" : "change_declined", payload: closedChangePayload(proposal, command.decision) }];
     }
     if (isGameChangeOutdated(loaded.state, proposal, now)) {
       await clear(); refusal = "That proposal is no longer waiting for agreement.";
@@ -914,6 +938,12 @@ async function respondChange(context: CommandContext, command: Extract<GameComma
   });
   if (refusal) reject("CHANGE_EXPIRED", refusal);
   return command.gameId;
+}
+
+/** A word-free declined proposal is kept so the decliner can still take it (agreeToDeclinedChange). */
+function closedChangePayload(proposal: StoredGamePendingChange, decision: "decline" | "cancel"): Prisma.InputJsonObject {
+  return decision === "decline" && !proposal.termsWordsEncrypted
+    ? { proposalId: proposal.id, declined: toPrismaJsonObject({ v: 1, ...proposal }) } : { proposalId: proposal.id };
 }
 
 async function applyApprovedChange(locked: LockedStep, gameId: string, proposal: StoredGamePendingChange, resolutionKey: string, actor: string, decision: ReturnType<typeof decideGameChange>): Promise<GameEventDraft[]> {
