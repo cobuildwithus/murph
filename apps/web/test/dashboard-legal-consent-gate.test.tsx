@@ -683,6 +683,49 @@ test("an Agree on documents that changed under an open dialog reloads them and a
   expect(rendered.reload).toHaveBeenCalledTimes(1);
 });
 
+test("an Agree on changed documents that another tab already accepted continues to the dashboard", async () => {
+  mocks.requestHostedOnboardingJson
+    .mockRejectedValueOnce(new HostedOnboardingApiError({
+      code: "CONSENT_DOCUMENT_VERSIONS_STALE",
+      message: "Refresh the current Murph legal documents before accepting consent.",
+    }))
+    .mockResolvedValueOnce(withDocumentVersion(createLaunchConsentStatus({
+      launchHealthDataGranted: true,
+      launchLegalGranted: true,
+    }), "2026-10-26"));
+
+  const rendered = await renderClientComponent(
+    createElement(DashboardLegalConsentGate, {
+      initialStatus: createLaunchConsentStatus({ launchHealthDataGranted: true }),
+      variant: "update",
+    }),
+    {
+      location: {
+        hash: "",
+        href: "https://app.example.test/home",
+        origin: "https://app.example.test",
+        pathname: "/home",
+        search: "",
+      },
+      requireButton: false,
+    },
+  );
+  cleanupRender = rendered.cleanup;
+
+  await act(async () => {
+    findButton(rendered.container, "Agree").dispatchEvent(
+      new rendered.window.Event("click", { bubbles: true }),
+    );
+    await flushPromises();
+    await flushPromises();
+    await vi.advanceTimersByTimeAsync(100);
+  });
+
+  expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledTimes(2);
+  expect(rendered.container.textContent).not.toContain("just changed");
+  expect(rendered.reload).toHaveBeenCalledTimes(1);
+});
+
 test("a stale Terms grant leaves device connect open", async () => {
   const rendered = await renderClientComponent(
     createElement(DashboardLegalConsentGate, {

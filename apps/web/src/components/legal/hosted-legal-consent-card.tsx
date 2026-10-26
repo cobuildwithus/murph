@@ -206,14 +206,28 @@ function HostedLegalConsentCardState({
         for (const scope of pendingScopes) {
           const scopeStatus = findConsentScope(latestStatus, scope);
           if (scopeStatus && !scopeStatus.granted) {
-            latestStatus = await acceptScope({
-              acceptedDocumentVersions: Object.fromEntries(
-                scopeStatus.documents.map((document) => [document.id, document.version]),
-              ),
-              currentStatus: latestStatus,
-              scope,
-              source,
-            });
+            try {
+              latestStatus = await acceptScope({
+                acceptedDocumentVersions: Object.fromEntries(
+                  scopeStatus.documents.map((document) => [document.id, document.version]),
+                ),
+                currentStatus: latestStatus,
+                scope,
+                source,
+              });
+            } catch (error) {
+              if (!isStaleConsentDocumentsError(error)) throw error;
+              // The documents changed while this card was open, for example
+              // across a deploy. Show the current ones; another tab may
+              // already have agreed to them.
+              const currentStatus = await requestHostedLegalConsentStatus();
+              setStatusOverride(null);
+              setLoadedStatus(currentStatus);
+              if (!findConsentScope(currentStatus, scope)?.granted) {
+                throw new ConsentDocumentsChangedError();
+              }
+              latestStatus = currentStatus;
+            }
           }
         }
         setHandoffStatus(latestStatus);
@@ -224,12 +238,9 @@ function HostedLegalConsentCardState({
         await onAccepted(latestStatus);
       }
     } catch (error) {
-      if (isStaleConsentDocumentsError(error)) {
-        // The documents changed while this card was open, for example across
-        // a deploy. Show the current versions so the next Agree submits them.
-        await loadStatus();
+      if (error instanceof ConsentDocumentsChangedError) {
         setAcceptedHandoffPending(false);
-        setErrorMessage(CONSENT_DOCUMENTS_CHANGED_MESSAGE);
+        setErrorMessage(error.message);
         return;
       }
       const hasRemainingScope = pendingScopes.some(
@@ -760,8 +771,13 @@ async function requestHostedLegalConsentStatus(): Promise<HostedConsentStatus> {
   });
 }
 
-const CONSENT_DOCUMENTS_CHANGED_MESSAGE =
-  "Murph's legal documents just changed. Review them, then agree again.";
+/** The current documents are loaded and still need an Agree; not a failed attempt. */
+class ConsentDocumentsChangedError extends Error {
+  constructor() {
+    super("Murph's legal documents just changed. Review them, then agree again.");
+    this.name = "ConsentDocumentsChangedError";
+  }
+}
 
 function isStaleConsentDocumentsError(error: unknown): boolean {
   return error instanceof HostedOnboardingApiError
