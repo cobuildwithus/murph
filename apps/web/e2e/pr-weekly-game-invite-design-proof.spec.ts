@@ -31,6 +31,7 @@ for (const width of [390, 1280]) {
       expect(await surface.evaluate((element) => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
     }
     await expect(study.locator('[data-design-state="open"]')).toContainText("Leo challenged you");
+    await expect(study.locator('[data-design-state="open"]')).toContainText("No Murph yet? Get it on the App Store");
     await expect(study.locator('[data-design-state="open"]')).toContainText("Mon, Wed, Fri");
     // The link preview names the challenger against "You" (never the invitee's private name), and nobody when closed.
     await expect(study.locator('[data-design-state="link-open"]')).toContainText("Leo");

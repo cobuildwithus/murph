@@ -14,6 +14,9 @@ describe('Bluetooth wearable help contract', () => {
     )
     const skill = await readFile(path.join(resolveAssistantSkillsRoot(), 'bluetooth-device-help/SKILL.md'), 'utf8')
     expect(skill).toMatch(/^---\nname: bluetooth-device-help\ndescription: .+\n---/u)
+    // Murph's game is invite only, so the skill never presents it as every member's app feature.
+    expect(skill).not.toMatch(/iPhone game|game connection flow/u)
+    expect(skill).toContain("Murph's game is invite only, so do not bring it up unless the member does.")
   })
 
   it.each(['direct', 'group'] as const)('routes local Bluetooth before setup without suppressing cloud sync (%s)', (scope) => {

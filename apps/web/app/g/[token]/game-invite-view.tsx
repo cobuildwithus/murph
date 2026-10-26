@@ -6,6 +6,9 @@ import type { GameInvitePreview } from "@/src/lib/game/contract";
 import { CopyInviteLink } from "./copy-invite-link";
 import { CLOSED_INVITE_TITLE, describeSchedule, describeStakeLabel } from "./invite-copy";
 
+/** Without the app installed, Open in Murph goes nowhere; this gets it. */
+const MURPH_IOS_APP_STORE_URL = "https://apps.apple.com/us/app/murph-ai/id6786145859";
+
 /** What a texted challenge link shows, from the invite preview. The page supplies `<main>` and the app link. */
 export function GameInviteView(props: { appUrl: string; preview: GameInvitePreview | null }) {
   const { preview } = props;
@@ -31,6 +34,12 @@ export function GameInviteView(props: { appUrl: string; preview: GameInvitePrevi
             <a className={buttonVariants({ className: "w-full", size: "xl" })} href={props.appUrl}>
               Open in Murph
             </a>
+            <p className="text-center text-sm leading-6 text-muted-foreground">
+              No Murph yet?{" "}
+              <a className={buttonVariants({ className: "h-auto px-0", size: "unstyled", variant: "link" })} href={MURPH_IOS_APP_STORE_URL}>
+                Get it on the App Store
+              </a>
+            </p>
             <CopyInviteLink />
           </div>
         </section>
