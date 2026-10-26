@@ -14,8 +14,8 @@ and independent Astra eligibility. Explicit selections after migration persist.
 
 ## Evidence and owners
 
-The shared hosted-execution catalog defaults to Sol. Web owns nullable model
-preferences and currently gates only legacy Sol. Settings already mounts its
+At the task base, the shared hosted-execution catalog defaults to Sol. Web owns
+nullable model preferences and gates only legacy Sol. Settings mounts its
 picker but lacks Terra. The pinned native catalog lacks Terra; the official
 refreshed Codex catalog provides its entry. Extend these existing owners.
 
@@ -84,7 +84,7 @@ retained across bounded process restarts; interrupted cases are recorded and
 excluded until rerun. Some journeys intentionally pin another model and are
 shared regression coverage, not a controlled Terra/Sol comparison. The source
 baseline is the initial feature commit, with later remediation evaluated
-separately. The comparison is still running; rollout verdict remains **Hold**.
+separately. The comparison is complete; rollout verdict remains **Hold**.
 
 Initial failures exposed ambiguous incoming-message framing and video evidence
 that directed local playback instead of the hosted analysis tool. The prompt
@@ -109,9 +109,9 @@ The candidate follows that split. Explicit group selections stay distinct from
 the derived Sol default. No group-owner billing relation is needed or read.
 The quality verdict remains Hold.
 
-The complete comparison must finish before the final quality verdict. Do not
-merge or deploy based on passing deterministic checks alone. Production model
-preferences have not been reset.
+Do not merge or deploy based on passing deterministic checks alone. The completed
+comparison does not establish Terra parity. Production model preferences have
+not been reset.
 
 The meal-intake benchmark's 21 cases cannot reach the model: their uncommitted
 image corpus is absent. A local food-label service was started for diagnosis,
@@ -136,3 +136,49 @@ Personal/group resolution checks include free, paid, inactive, and explicit mode
 preferences. All five final selection/default journeys pass on both Terra and Sol, including
 Sol defaults in free and subscribed groups. Each required change makes exactly
 one update and reports its next-turn effect; no unrelated command executes.
+
+## Completed baseline and final handoff
+
+Both complete local baseline runs finished on 2026-10-26 using the same initial
+feature snapshot, production-patched native Codex, and local subscription auth.
+All 540 unique inventory cases have a terminal result for each configuration.
+The 21 benchmark setup failures never reached the provider and are split out:
+
+| Configured model | Passed | Assertion/runtime failures | Setup blocked | Total |
+| --- | ---: | ---: | ---: | ---: |
+| GPT-6.1 Terra | 432 | 87 | 21 | 540 |
+| GPT-6.1 Sol | 460 | 59 | 21 | 540 |
+
+Paired first results: 411 pass on both, 49 pass only on Sol, 21 pass only on
+Terra, and 59 fail on both (including the 21 shared environment blocks).
+These are suite outcomes, not a clean model ranking: fixtures include pinned
+other-model journeys, stale assertions, and setup failures. Initial attempts
+that could not start the patched native provider are excluded. Interrupted
+cases were rerun; completed failures were retained. Follow-up fixes and passing
+reruns are separate evidence, not replacements for the original results.
+
+Reply/action review found real Terra misses: redundant group permission offers,
+a missed requested exercise illustration, inconsistent batched preferences,
+and missing or inefficient follow-through in private research/nutrition paths.
+Some failures merely reject equivalent wording or incidental reads. In the
+food-label recovery case, Sol completed the lookup but exposed implementation
+wording; Terra failed to complete the lookup. Sol also has genuine misses: one
+wrist-alert journey issued two buzz calls for a request for one. Neither full
+suite is clean. No claim of model equivalence or complete safety is justified.
+
+The final candidate retains Sol for every group, defaults personal chats to
+Terra, and gates personal Sol behind a subscription. The five final configuration
+journeys pass on each model; focused clinical/video/default restorations pass.
+Local deterministic checks, typechecks, and complexity pass. The temporary
+baseline test copy was removed after every comparison process finished.
+The complete initial-input measurement is recorded above; no target tokenizer
+was available. No production secret was retrieved or production state changed.
+
+Draft PR: https://github.com/cobuildwithus/murph/pull/4383
+Current-base mergeability was proved against the verified remote base.
+Required CI intentionally rejects a draft; frontend evidence also needs a
+reviewer-openable preview. Final ReviewGPT has not been started because this is
+not a Ready candidate. Keep the plan active and the PR draft until the remaining
+quality issues and fixture prerequisites are resolved, then finish exact-head
+CI/review and the documented consumer-first rollout. The global preference reset
+remains unapplied.

@@ -32,3 +32,10 @@ blocks distinct from model failures in the full-suite report.
 
 A requested Terra versus Sol comparison must not attribute missing benchmark
 fixtures to either model's behavior.
+
+The same full run also exposed stale model names and clinical-date fixtures,
+plus wording assertions that reject valid equivalent responses or negated
+claims. Corrected fixtures are covered by focused reruns; original outcomes stay
+in the comparison record. A follow-up should audit the remaining assertions
+against their intended product invariant before using raw suite pass rate as a
+model-ranking metric. Do not relax exact writes, authorization, or safety checks.
