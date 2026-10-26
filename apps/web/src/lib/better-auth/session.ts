@@ -1,13 +1,14 @@
 import "server-only";
 import { createHash, timingSafeEqual } from "node:crypto";
-import type { HostedAuthRecord, Prisma, PrismaClient } from "@prisma/client";
+import { isNativeError } from "node:util/types";
+import { Prisma, type HostedAuthRecord, type PrismaClient } from "@prisma/client";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import { assertHostedMemberNotSuspended } from "../hosted-onboarding/entitlement";
 import { readHostedMemberCoreState } from "../hosted-onboarding/hosted-member-store";
 import { lockHostedMemberRow } from "../hosted-onboarding/shared";
 import { betterAuth } from "better-auth";
 import { createAuthEndpoint } from "better-auth/api";
-import { createHostedBetterAuth, hostedBetterAuthOptions } from "./auth";
+import { hostedBetterAuthOptions } from "./auth";
 import { AuthRecordChangedError } from "./adapter";
 import { openAuthRecord } from "./record-crypto";
 import type { HostedAuthTransport } from "./admission";
@@ -106,7 +107,53 @@ export function buildHostedAuthSessionClearCookie(): string {
 }
 
 function createSessionAuth(input: { baseURL: string; secret: string; prisma: PrismaClient }) {
-  return createHostedBetterAuth({ ...input, delivery: sessionOnlyDelivery });
+  return betterAuth({
+    ...hostedBetterAuthOptions({ ...input, delivery: sessionOnlyDelivery }),
+    logger: {
+      level: "error",
+      log(level, message, ...args) {
+        // The pinned getSession catch logs this exact call before masking it.
+        // All other library logging remains suppressed, including on this instance.
+        if (level !== "error" || message !== "INTERNAL_SERVER_ERROR" || args.length !== 1) return;
+        try {
+          console.error("Hosted auth session read failed.", {
+            observedErrorCategory: observedSessionErrorCategory(args[0]),
+          });
+        } catch {
+          // Observation must not interrupt the library's original failure handling.
+        }
+      },
+    },
+  });
+}
+
+function observedSessionErrorCategory(error: unknown) {
+  // Native branding rejects plain objects and proxies without invoking getters.
+  // Compare only the immediate prototype; do not traverse an untrusted chain.
+  if (!isNativeError(error)) return "unknown";
+  const prototype = Object.getPrototypeOf(error);
+  const codeField = prototype === Prisma.PrismaClientKnownRequestError.prototype ? "code"
+    : prototype === Prisma.PrismaClientInitializationError.prototype ? "errorCode" : null;
+  if (codeField) {
+    const descriptor = Object.getOwnPropertyDescriptor(error, codeField);
+    const code = descriptor && Object.hasOwn(descriptor, "value") ? descriptor.value : undefined;
+    switch (code) {
+      case "P1001": return "database_unreachable";
+      case "P1002":
+      case "P1008": return "database_timeout";
+      case "P2024": return "database_pool_timeout";
+      case "P2034": return "database_transaction_conflict";
+      default: return "database_unknown";
+    }
+  }
+  switch (prototype) {
+    case AuthRecordChangedError.prototype: return "auth_record_changed";
+    case TypeError.prototype: return "native_type";
+    case RangeError.prototype: return "native_range";
+    case SyntaxError.prototype: return "native_syntax";
+    case Error.prototype: return "native_error";
+    default: return "unknown";
+  }
 }
 
 const sessionOnlyDelivery = {
