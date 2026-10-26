@@ -189,6 +189,15 @@ Account export is the withdrawal exception described above. Strava remains
 disabled for new connections and reconnect offers as a separate provider
 product gate.
 
+The weekly game's app routes can require the current Terms. With
+`MURPH_GAME_REQUIRE_CURRENT_TERMS=true`, creating, accepting, negotiating,
+posting, proposing a change and marking a prize done return `403
+TERMS_REQUIRED` until `launch.legal` is current, naming the scope's documents
+and versions; reads, reports, blocks, the profile, and withdrawing a member's own
+post, invite or change stay available. The app answers with the Terms step
+alone, records `launch.legal` through the companion consent route, and retries.
+Health-data consent and the historical boundaries above are unchanged.
+
 If a companion health-data action encounters zero or partial historical launch
 consent, the native app keeps the Privy member session, closes Junction and
 automatic meal-photo authority, and presents the server-provided launch

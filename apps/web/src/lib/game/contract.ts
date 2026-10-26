@@ -447,7 +447,13 @@ export type GameErrorCode =
   /** One of you blocked the other: no invite or rematch between you. */
   | "PLAYER_UNAVAILABLE"
   /** The write-time content check refused these words. */
-  | "CONTENT_NOT_ALLOWED";
+  | "CONTENT_NOT_ALLOWED"
+  /**
+   * Murph's own Terms (the `launch.legal` consent), not a game's: this write
+   * waits until the member agrees to their current versions. `details` names
+   * the scope and its documents with those versions.
+   */
+  | "TERMS_REQUIRED";
 
 export interface GameError {
   code: GameErrorCode;
