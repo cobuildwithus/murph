@@ -240,13 +240,19 @@ describe.skipIf(!enabled)("game v1 local API smoke", () => {
     const terms = { schedule: { count: 7 }, stakes: [{ kind: "dare", item: "Sing at karaoke" }],
       tasks: [{ seat: 0, text: "Take a walk" }, { seat: 1, text: "Take a walk" }] };
     afterAll(() => vi.stubEnv("MURPH_GAME_MEMBER_ALLOWLIST", ""));
+    // Accepting from 8pm local starts day 1 tomorrow, so play where it is midday now.
+    const middayZone = () => {
+      const offset = ((12 - new Date().getUTCHours() + 36) % 24) - 12;
+      return offset === 0 ? "UTC" : `Etc/GMT${offset > 0 ? "-" : "+"}${Math.abs(offset)}`;
+    };
 
     it("lets a new unlisted invitee in through a listed member's invite to play, settle, cash in and rematch, but never start fresh", async () => {
       const listed = await account();
       const invitee = await account();
       const stranger = await account();
       vi.stubEnv("MURPH_GAME_MEMBER_ALLOWLIST", listed.id);
-      expect((await profile(request(listed.token, { firstName: "Listed", timeZone: "UTC" }, "PUT"))).status).toBe(200);
+      const timeZone = middayZone();
+      expect((await profile(request(listed.token, { firstName: "Listed", timeZone }, "PUT"))).status).toBe(200);
       const id = randomUUID();
       const context = { params: Promise.resolve({ id }) };
       const created = await game(create(request(listed.token, { gameId: id, inviteeFirstName: "Invitee", terms })));
@@ -259,9 +265,9 @@ describe.skipIf(!enabled)("game v1 local API smoke", () => {
       const held = await home(request(invitee.token, undefined, "GET", token));
       expect(held.status).toBe(200);
       expect(await held.json()).toMatchObject({ canStartGames: false });
-      expect((await profile(request(invitee.token, { firstName: "Invitee", timeZone: "UTC" }, "PUT", token))).status).toBe(200);
+      expect((await profile(request(invitee.token, { firstName: "Invitee", timeZone }, "PUT", token))).status).toBe(200);
       // The accept route vouches with its own token; no header needed.
-      expect((await game(accept(request(invitee.token, { termsVersion: 1, timeZone: "UTC" }), { params: Promise.resolve({ token }) }))).status).toBe("live");
+      expect((await game(accept(request(invitee.token, { termsVersion: 1, timeZone }), { params: Promise.resolve({ token }) }))).status).toBe("live");
 
       const homeView: GameHomeView = await (await home(request(invitee.token, undefined, "GET"))).json();
       expect(homeView.games.map((shown) => shown.id)).toEqual([id]);
