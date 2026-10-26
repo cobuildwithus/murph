@@ -1,0 +1,20 @@
+{
+  "publishedOn": "2026-10-26",
+  "order": 100,
+  "item": {
+    "id": "dense-wearable-history-recovery",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "More reliable dense wearable history",
+    "summary": "Heart-rate and activity-calorie history can keep syncing when a day contains too much data to process at once.",
+    "details": "Sync work continues in complete hours, preserving progress already saved. An individual hour must finish successfully before that work advances.",
+    "relevanceTags": [
+      "wearables",
+      "device-sync",
+      "reliability"
+    ],
+    "sourcePullRequests": [
+      4377
+    ]
+  }
+}

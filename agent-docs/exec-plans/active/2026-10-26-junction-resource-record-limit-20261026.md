@@ -34,3 +34,9 @@ Unchanged-source proof: the synthetic 25,001-record resource day throws JUNCTION
 ## Product UX
 
 Effort: Patch. Outcome: newly executed oversized hourly-feature history can progress through complete hours. Reaches: existing connected-source resource jobs only. Proof: unchanged-source failure, cold scalar continuation, previously committed days, daily/hourly overflow rejection, foreground yield, and post-fetch source revocation. Walkthrough: Ready for candidate review; no claim that historical production failures were repaired.
+
+## Candidate review
+
+The full source/test diff was reviewed for exact source scope, complete-hour identity, capped in-memory collection, scalar restoration, retained retry budgets, foreground yielding and post-fetch consent. Existing full-job reduction now shares its policy with resource jobs; no new durable field, queue or scheduler was introduced. The single-hour import owner keeps each resource suffix bounded. Earlier complete days are preserved; daily aggregates and oversized hours remain fail-closed.
+
+78 focused provider tests and package typecheck pass. Four production changelog rendering tests pass. Complexity debt stays 314 and maximum 95. PR4377 is the only candidate for this fix; private incident receipts remain outside tracked files and review packages. Implementation and local proof are complete; external review, exact-head CI, coordinated merge/deploy and natural verification remain delivery gates, not completed claims.

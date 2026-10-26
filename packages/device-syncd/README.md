@@ -134,7 +134,12 @@ Current providers:
   batching interval, generic 15-second request default, page/attempt limits,
   job retries, and foreground cancellation are unchanged.
   An hourly/session feature exceeding either the page or record cap retries as one complete
-  hour; daily aggregates remain day-atomic. Historical and webhook resource jobs
+  hour; daily aggregates remain day-atomic. Resource-only hourly-feature jobs use
+  the same reduction policy when a complete day exceeds the collection cap.
+  Their existing scalar window coordinate retains one complete hour per durable
+  suffix, preserving committed days, source admission and foreground yielding.
+  An oversized individual hour still fails without partial import; this does
+  not replay or reset earlier terminal jobs. Historical and webhook resource jobs
   for uncapped dense daily-aggregate and hourly/session resources still fetch one
   closed UTC day per request. A job's first nonempty day commits alone, as the
   one-day owner did; later consecutive closed days share one canonical import
