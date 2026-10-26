@@ -213,7 +213,7 @@ samples. The adversarial correctness battery still runs with telemetry off;
 enabled successful reads are compared byte-for-byte with the expected result
 and checked for canonical-input preservation. `compare` directly checks
 disabled/enabled output parity on the identical candidate. Enabled-telemetry
-numbers and final native validation remain pending until the parent runs them.
+measurements and native validation results are recorded below.
 
 Reports contain fixture stored/decoded bytes, a canonical-input content digest,
 assembled CLI output bytes/digests, and complete stdout/stderr bytes/digests.
@@ -256,20 +256,66 @@ reports 3 driver, 11 core, 20 usecase and 11 source-resolution tests passing;
 both initial assemblies passed eight parity probes and budgets. These numbers
 precede the additive scan instrumentation and the enabled-telemetry benchmark.
 
+### Rebuilt candidate and telemetry measurements
+
+The parent rebuilt after instrumentation and measured the same Node 24.22.1,
+darwin arm64, 24,003-row / 24-shard fixture with two warmup pairs and ten
+alternating cold-process pairs per comparison. The final inventory was
+380 → 302 modules and 5,827,629 → 4,577,010 loaded-file bytes, removing
+78 modules / 1,250,619 bytes. CLI bundle bytes were
+9,663,371 → 9,666,876 (+3,505), with no displaced preload.
+
+All durations below are milliseconds, rounded to three decimals. Ranges retain
+the observed variation; paired medians are not differences of separate medians.
+For candidate off/on, `base` means the same candidate with telemetry disabled.
+
+| Comparison / metric | Base median [range] | Candidate median [range] | Paired delta median [range] | Median paired ratio |
+| --- | ---: | ---: | ---: | ---: |
+| Both off / wall | 480.114 [472.042, 485.208] | 446.908 [438.840, 475.015] | -35.008 [-44.375, -5.526] | 0.927724 |
+| Both off / CPU | 656.084 [646.995, 663.747] | 612.922 [603.720, 640.650] | -45.484 [-52.155, -13.250] | 0.930774 |
+| Both on / wall | 483.029 [477.137, 490.866] | 447.079 [444.135, 452.341] | -34.889 [-46.730, -29.219] | 0.927833 |
+| Both on / child wall | 454.754 [449.132, 464.212] | 419.092 [417.179, 424.741] | -35.831 [-46.511, -28.232] | 0.921155 |
+| Both on / CPU | 660.477 [651.233, 719.740] | 617.927 [604.874, 624.365] | -42.028 [-103.715, -35.152] | 0.936590 |
+| Candidate off/on / wall | 444.604 [437.200, 453.378] | 449.063 [443.586, 455.320] | +5.106 [-9.793, +18.120] | 1.011474 |
+| Candidate off/on / child wall | 417.139 [410.217, 422.374] | 419.007 [415.802, 427.315] | +4.900 [-5.400, +17.098] | 1.011770 |
+| Candidate off/on / CPU | 615.156 [608.449, 624.463] | 621.764 [614.239, 655.035] | +5.306 [-7.364, +46.586] | 1.008597 |
+
+The final endpoint-free run passed complete output/status parity, adversarial
+cases, canonical-input hash and cleanup checks. Both rebuilt readers passed
+eight parity probes and bundle budgets. Telemetry `check`, both-on `pairs` and
+candidate off/on `control` passed every receipt gate, all twelve candidate
+phases, zero dropped spans, complete output/canonical parity and cleanup.
+The parent also reran all eight driver tests on Node 24.22.1 successfully.
+
+Both-on paired median wall improved by 34.889 ms (about 7.2%) in this local
+experiment. The same-candidate off/on comparison observed median wall overhead
+of 5.106 ms and CPU overhead of 5.306 ms, with the variation shown above.
+Enabling telemetry includes existing transport and coarse timing as well as the
+new spans; this does not isolate the cost of the twelve new phases. No hosted
+speedup or production scan-tail cause is established by these measurements.
+
 Parent subsequently reports 27 core surface/owner/storage, 75 runtime-state
 timing/process/CPU, 21 assistant-engine timing profile/transport and 6 Cloudflare
 usage-port tests passing. The 20 runtime-state and 9 assistant-engine historical
 compatibility skips were unrelated; the new mixed-version tests ran against
 `7bcd0ffe430c8cba53da74dbb6d5c10a3560bdd8`. Runtime-state, core and assistant-engine
-typechecks passed; complexity reported ten source files and zero hotspots.
-Draft PR #4364 still needs final assembled regression/pairs, enabled-telemetry
-measurements, the real-model exact-read journey and remaining CLI/Web gates.
-No enabled-telemetry or final performance result is claimed yet.
+typechecks passed. Additional parent checks passed 40 compressed-ledger and
+interruptible-reader tests, 46 Web changelog tests, Web typecheck, workspace
+boundaries, privacy diff scan and diff check. Complexity remains ten changed
+source files with zero hotspots; benchmark `main` is at most 20.
+These are supplied parent results, not new author executions.
+
+Implementation and focused parent proof are complete. Draft PR #4364 still
+requires final ReviewGPT, exact-head CI, merge, deployment and the
+post-deployment observation below. There has been no production deployment.
+Heartbeat scheduling remains a concrete completion blocker: no scheduler is
+currently exposed. Record and verify that follow-up before treating observation
+as arranged; do not mark the 72-hour window started from these local results.
 
 These results accept the narrow import mechanism and support the restrained
 saved-meal lookup changelog. They are local native evidence, not a precise hosted
 speedup or an explanation of multi-second owner scans. Keep the recorded
-variation; the wall range includes a slower candidate pair. Scan-tail
+variation, including the initial run's slower candidate pair. Scan-tail
 evidence and the bounded observation plan belong to
 `agent-docs/exec-plans/active/2026-10-25-event-read-import.md`.
 
@@ -284,6 +330,8 @@ paths or cardinalities are emitted. See `docs/hosted-runtime-log-database.md`
 for the exact boundaries and consumer-first compatibility contract. Start the
 plan's 72-hour natural-traffic window only after verified deployment; check
 health, coverage and dropped/trimmed timing during the first four hours.
+The bounded observation SQL passed `EXPLAIN` against the current control-plane
+schema with no row data returned; this validates query shape, not observations.
 
 Focused source proof, in addition to the native `check` command:
 
@@ -311,20 +359,36 @@ node scripts/verify-workspace-boundaries.mjs
 The save-only canonical hosted meal journey does not prove this read path.
 `asks-for-essential-missing-information-on-manual-app-photo` asserts `meal show`
 but its fixture runs `packages/cli/src/bin.ts` through `tsx`, so it does not
-prove shipped package-export resolution. After the normal prepared CLI build,
-run the focused real-model journey:
+prove shipped package-export resolution. Parent reran that journey on the
+current candidate: 40.2 seconds, `gpt-6.1-sol`, local subscription auth, reply
+review Ready. It saved one meal, acknowledged the photo and asked for essential
+food/portion information, with no invented nutrition, card or extra save.
+
+The additional canonical-launcher exact-read attempt exited 64 before any
+provider request: both available Codex binaries lack `--ignore-user-config`,
+and no compatible built binary was available in the known sibling targets.
+Keep the canonical launcher's prerequisite and permission profiles unchanged.
+The new exact-read test instead reuses the existing ordinary-provider fixture
+and native built-CLI subprocess helper. After the normal prepared CLI build,
+run it with:
 
 ```sh
-pnpm test:assistant:live -- --test "canonical saved meal exact read"
+pnpm test:assistant:live -- --test "saved meal exact read uses the built CLI"
 ```
 
-`real model canonical saved meal exact read uses the shipped CLI without mutation`
-uses the existing installed fixture and `packages/cli/dist/bin.js` with native
-package resolution. It requires a successful exact read, a truthful reply from
-saved synthetic facts absent from the request, and unchanged canonical bytes
-and write metadata, with no outbox item or external delivery. This built CLI
-journey complements the split native assembled-CLI benchmark above; it does not
-substitute for it.
+`real model saved meal exact read uses the built CLI without mutation` executes
+`packages/cli/dist/bin.js` with native package resolution. It requires an actual
+successful exact read, a truthful reply from saved synthetic facts absent from
+the request, and unchanged canonical bytes and write metadata, with no outbox
+item or external delivery. Parent passed this journey on Node 24.22.1 with
+`gpt-6.1-sol` and local subscription auth in 17.184 seconds: exactly one provider
+request and one successful actual `meal show`, truthful saved food, calorie and
+protein details, unchanged canonical snapshot/write metadata, and no outbox, card,
+media or runtime issues. The actual reply review was Ready.
+It covers the ordinary local provider plus built CLI, not the canonical hosted
+permission profile. The already-passed assembled-native benchmark independently
+proves production imports and byte parity; neither proof substitutes for the
+other or for deployment observation.
 No assistant behavior, protocol, prompt, discoverability or recovery change is
 part of this experiment.
 
