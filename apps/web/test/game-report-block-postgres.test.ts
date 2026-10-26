@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 interface SentEmail { idempotencyKey: string; subject: string; text: string; to: string[] }
-const mocks = vi.hoisted(() => ({ sendEmail: vi.fn(async (_email: SentEmail) => ({ providerMessageId: "email_1" })) }));
+const mocks = vi.hoisted(() => ({ sendEmail: vi.fn<(email: SentEmail) => Promise<{ providerMessageId: string }>>(async () => ({ providerMessageId: "email_1" })) }));
 vi.mock("@/src/lib/game/chat-delivery", () => ({ deliverGameChangeProposal: vi.fn(async () => {}) }));
 vi.mock("@/src/lib/hosted-onboarding/resend-plain-text-email", () => ({ sendHostedResendPlainTextEmail: mocks.sendEmail }));
 
