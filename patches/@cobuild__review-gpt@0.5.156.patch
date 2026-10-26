@@ -173,7 +173,7 @@ diff --git a/src/chatgpt-thread-snapshot-lib.mts b/src/chatgpt-thread-snapshot-l
 diff --git a/src/prepare-chatgpt-draft.js b/src/prepare-chatgpt-draft.js
 --- a/src/prepare-chatgpt-draft.js
 +++ b/src/prepare-chatgpt-draft.js
-@@ -1365,9 +1365,8 @@
+@@ -1392,9 +1392,8 @@
    responseMarker: requiredMarker,
    responseElapsedMs,
    minimumResponseMs = 5 * 60 * 1000,
@@ -184,7 +184,7 @@ diff --git a/src/prepare-chatgpt-draft.js b/src/prepare-chatgpt-draft.js
      return '';
    }
  
-@@ -1388,7 +1387,7 @@
+@@ -1415,7 +1414,7 @@
    const minimumLabel = Number.isSafeInteger(requiredMinimumMs) && requiredMinimumMs > 0
      ? formatDurationMs(requiredMinimumMs)
      : 'invalid configured duration';
@@ -193,7 +193,7 @@ diff --git a/src/prepare-chatgpt-draft.js b/src/prepare-chatgpt-draft.js
  }
  
  function formatDurationMs(durationMs) {
-@@ -5921,7 +5920,6 @@
+@@ -5985,7 +5984,6 @@
            responseMarker,
            responseElapsedMs: Date.now() - responseWaitStartedAt,
            minimumResponseMs: minimumMarkedResponseMs,
