@@ -13,7 +13,7 @@ import {
 } from "../src/cli-timing.ts";
 import {
   finishCliTimingAction, isCliTimingActive, noteCliTimingExit,
-  startCliPhase, timeCliDispatch, timeCliPhase, timeCliPhaseSync, withCliTiming,
+  recordCliPhase, startCliPhase, timeCliDispatch, timeCliPhase, timeCliPhaseSync, withCliTiming,
 } from "../src/node/cli-timing.ts";
 
 async function clocked(run: (advance: (us: number) => void) => Promise<void>) {
@@ -1453,8 +1453,14 @@ test.skipIf(!researchFailureCompatibilityBase)("actual pre-research reader colla
 
 
 const eventReadPhases = ["event-core-load", "event-owner-candidates", "event-owner-revisions"] as const;
+const eventOwnerWorkPhases = [
+  "event-owner-candidates-source", "event-owner-candidates-path", "event-owner-candidates-read",
+  "event-owner-candidates-decode", "event-owner-candidates-parse", "event-owner-candidates-select",
+  "event-owner-revisions-source", "event-owner-revisions-path", "event-owner-revisions-read",
+  "event-owner-revisions-decode", "event-owner-revisions-parse", "event-owner-revisions-select",
+] as const;
 
-test("phase admission is exactly thirty-four fixed names without raising invocation caps", async () => {
+test("phase admission is exactly forty-six fixed names without raising invocation caps", async () => {
   assert.deepEqual(CLI_TIMING_PHASES, [
     "total", "setup", "dispatch", "post-dispatch", "teardown", "unattributed",
     "query-freshness", "query-manifest", "query-status", "query-rebuild", "query-wait",
@@ -1466,6 +1472,7 @@ test("phase admission is exactly thirty-four fixed names without raising invocat
     "query-metric-precedence", "query-metric-targets",
     "canonical-write-wait", "importers-runtime-load",
     "event-core-load", "event-owner-candidates", "event-owner-revisions",
+    ...eventOwnerWorkPhases,
   ]);
   assert.equal(CLI_TIMING_MAX_COMMANDS, 32);
   assert.equal(CLI_TIMING_MAX_SPANS, 64);
@@ -1473,7 +1480,7 @@ test("phase admission is exactly thirty-four fixed names without raising invocat
   for (const phase of CLI_TIMING_PHASES.slice(1)) {
     assert.equal(addCliPhaseSample(report.commands[0]!.phases, phase, 37_000_000), true);
   }
-  assert.equal(report.commands[0]!.phases.length, 34);
+  assert.equal(report.commands[0]!.phases.length, 46);
   assert.deepEqual(normalizeCliTiming(report), report);
   // Unknown labels are rejected, not pattern-admitted or serialized as paths.
   for (const phase of ["query-publication/PRIVATE_SENTINEL", "QUERY-SOURCE-READ", "query-source-read "]) {
@@ -1563,6 +1570,73 @@ test("event read phases remain inactive without a timing sink and preserve resul
   }
 });
 
+test("accumulated phase samples use supplied wall totals without sampling CPU", async () => {
+  await clocked(async advance => {
+    const originalCpu = process.cpuUsage;
+    let cpuReads = 0;
+    process.cpuUsage = previous => { cpuReads += 1; return originalCpu(previous); };
+    try {
+      let report!: CliTiming;
+      await withCliTiming(() => timeCliDispatch("meal show", async () => {
+        advance(1_000);
+        for (const phase of eventOwnerWorkPhases) recordCliPhase(phase, 37);
+      }), value => { report = value; });
+      assert.deepEqual(report.commands[0]!.phases.filter(phase => eventOwnerWorkPhases.some(name => name === phase.phase)),
+        eventOwnerWorkPhases.map(phase => ({ phase, count: 1, sumUs: 37, maxUs: 37,
+          buckets: [1, 0, 0, 0, 0, 0, 0, 0] })));
+      assert.equal(cpuReads, 0);
+      assert.equal(report.droppedSpans, 0);
+      assert.deepEqual(normalizeCliTiming(report), report);
+    } finally { process.cpuUsage = originalCpu; }
+  });
+});
+
+test("accumulated phase samples obey the existing cap and reject invalid durations", async () => {
+  let report!: CliTiming;
+  await withCliTiming(() => timeCliDispatch("meal show", async () => {
+    for (let index = 0; index < CLI_TIMING_MAX_SPANS + 2; index += 1) {
+      recordCliPhase("event-owner-candidates-read", 5);
+    }
+  }), value => { report = value; });
+  assert.equal(report.droppedSpans, 3); // Dispatch already owns one of 64.
+  assert.equal(report.commands[0]!.phases.find(phase => phase.phase === "event-owner-candidates-read")!.count, 63);
+  assert.deepEqual(normalizeCliTiming(report), report);
+  const invalid = [-1, 0.5, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1];
+  await withCliTiming(() => timeCliDispatch("meal show", async () => {
+    for (const duration of invalid) recordCliPhase("event-owner-candidates-read", duration);
+    recordCliPhase("event-owner-candidates-parse", 0);
+  }), value => { report = value; });
+  assert.equal(report.droppedSpans, invalid.length);
+  assert.equal(report.commands[0]!.phases.some(phase => phase.phase === "event-owner-candidates-read"), false);
+  assert.equal(report.commands[0]!.phases.find(phase => phase.phase === "event-owner-candidates-parse")!.sumUs, 0);
+  assert.deepEqual(normalizeCliTiming(report), report);
+});
+
+test("accumulated phase samples are inert without a sink or after their invocation closes", async () => {
+  const previous = process.env.MURPH_CLI_TIMING_ENDPOINT;
+  delete process.env.MURPH_CLI_TIMING_ENDPOINT;
+  try {
+    await withCliTiming(async () => {
+      assert.equal(isCliTimingActive(), false);
+      recordCliPhase("event-owner-candidates-read", 37);
+    });
+    const gate = deferred();
+    let late!: Promise<void>;
+    let report!: CliTiming;
+    await withCliTiming(async () => {
+      late = gate.promise.then(() => recordCliPhase("event-owner-candidates-read", 37));
+    }, value => { report = value; });
+    const before = structuredClone(report);
+    gate.resolve();
+    await late;
+    assert.deepEqual(report, before);
+    assert.equal(report.commands[0]!.phases.some(phase => phase.phase === "event-owner-candidates-read"), false);
+  } finally {
+    if (previous === undefined) delete process.env.MURPH_CLI_TIMING_ENDPOINT;
+    else process.env.MURPH_CLI_TIMING_ENDPOINT = previous;
+  }
+});
+
 
 test("synchronous query stage timing preserves values, immediate execution and thrown identity", async () => {
   const value = { synthetic: true };
@@ -1587,16 +1661,18 @@ for (const [admission, compatibilityBase, admitted] of [
   ["metric-subphase", process.env.MURPH_CLI_METRIC_PHASE_COMPAT_BASE, 24],
   ["wait-load", process.env.MURPH_CLI_WAIT_LOAD_PHASE_COMPAT_BASE, 29],
   ["event-read", process.env.MURPH_CLI_EVENT_READ_PHASE_COMPAT_BASE, 31],
+  ["event-owner-work", process.env.MURPH_CLI_EVENT_OWNER_WORK_COMPAT_BASE, 34],
 ] as const) test.skipIf(!compatibilityBase)(`actual pre-${admission} reader drops the whole optional object; new reader keeps old reports`, async () => {
   assert.match(compatibilityBase ?? "", /^[a-f0-9]{40}$/u);
   if (admission === "event-read") assert.equal(compatibilityBase, "4ec40920fca1872c8324d9325c23a9e50ba39754");
+  if (admission === "event-owner-work") assert.equal(compatibilityBase, "7bcd0ffe430c8cba53da74dbb6d5c10a3560bdd8");
   const source = execFileSync("git", ["show", `${compatibilityBase}:packages/runtime-state/src/cli-timing.ts`],
     { encoding: "utf8", maxBuffer: 1_000_000 });
   const old: { CLI_TIMING_PHASES: readonly string[]; normalizeCliTiming: typeof normalizeCliTiming } = await import(
     `data:text/javascript;base64,${Buffer.from(stripTypeScriptTypes(source)).toString("base64")}`,
   );
   assert.deepEqual(old.CLI_TIMING_PHASES, CLI_TIMING_PHASES.slice(0, admitted), "compatibility base must precede admission");
-  const legacy = sample(admission === "event-read" ? "meal show" : "wearables latest", 1_000);
+  const legacy = sample(admission === "event-read" || admission === "event-owner-work" ? "meal show" : "wearables latest", 1_000);
   assert.deepEqual(old.normalizeCliTiming(legacy), legacy);
   assert.deepEqual(normalizeCliTiming(legacy), legacy);
   for (const phase of CLI_TIMING_PHASES.slice(admitted)) {

@@ -63,6 +63,23 @@ export function startCliPhase(phase: CliTimingPhase): () => void {
     }
   };
 }
+
+/** Publish one accumulated wall sample for work already awaited in this scope.
+ * The caller owns its fixed operation boundary; no work count or CPU is inferred.
+ */
+export function recordCliPhase(phase: CliTimingPhase, durationUs: number): void {
+  const invocation = invocations.getStore();
+  if (!invocation || invocation.closed || invocation.collection.closed) return;
+  if (invocation.spans >= CLI_TIMING_MAX_SPANS) {
+    invocation.collection.report.droppedSpans = incrementCliTimingDrop(invocation.collection.report.droppedSpans);
+    return;
+  }
+  invocation.spans += 1;
+  if (!addCliPhaseSample(invocation.phases, phase, durationUs)) {
+    invocation.collection.report.droppedSpans = incrementCliTimingDrop(invocation.collection.report.droppedSpans);
+  }
+}
+
 export async function timeCliPhase<T>(phase: CliTimingPhase, run: () => Promise<T>): Promise<T> {
   const end = startCliPhase(phase);
   try { return await run(); } finally { end(); }

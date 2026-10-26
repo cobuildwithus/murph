@@ -153,6 +153,11 @@ in [the import-speed plan](exec-plans/completed/2026-09-24-garmin-import-speed.m
 
 # Murph Agent Docs Index
 
+The canonical event-read import experiment is tracked in
+[the completed plan](exec-plans/completed/2026-10-25-event-read-import.md).
+`packages/core/README.md` owns the semantic surface and
+`packages/core/bench/README.md` owns the assembled CLI measurement boundary.
+
 Bluetooth wearable connection help is owned by
 `packages/assistant-engine/skills/bluetooth-device-help/SKILL.md`. Its registry
 and compact prompt router are in assistant-engine; selection and reply proof

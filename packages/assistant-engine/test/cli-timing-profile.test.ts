@@ -429,9 +429,16 @@ for (const [label, compatibilityBase, command, phases] of [
     ['canonical-write-wait', 'importers-runtime-load']],
   ['event-read', process.env.MURPH_CLI_EVENT_READ_PHASE_COMPAT_BASE, 'meal show',
     ['event-core-load', 'event-owner-candidates', 'event-owner-revisions']],
+  ['event-owner-work', process.env.MURPH_CLI_EVENT_OWNER_WORK_COMPAT_BASE, 'meal show', [
+    'event-owner-candidates-source', 'event-owner-candidates-path', 'event-owner-candidates-read',
+    'event-owner-candidates-decode', 'event-owner-candidates-parse', 'event-owner-candidates-select',
+    'event-owner-revisions-source', 'event-owner-revisions-path', 'event-owner-revisions-read',
+    'event-owner-revisions-decode', 'event-owner-revisions-parse', 'event-owner-revisions-select',
+  ]],
 ] as const) test.skipIf(!compatibilityBase)(`${label} stages survive new consumers while old consumers preserve legacy usage`, async () => {
   assert.match(compatibilityBase ?? '', /^[a-f0-9]{40}$/u)
   if (label === 'event-read') assert.equal(compatibilityBase, '4ec40920fca1872c8324d9325c23a9e50ba39754')
+  if (label === 'event-owner-work') assert.equal(compatibilityBase, '7bcd0ffe430c8cba53da74dbb6d5c10a3560bdd8')
   const source = (file: string) => execFileSync('git', ['show', `${compatibilityBase}:${file}`],
     { encoding: 'utf8', maxBuffer: 1_000_000 })
   const moduleUrl = (text: string) => `data:text/javascript;base64,${Buffer.from(stripTypeScriptTypes(text)).toString('base64')}`
@@ -447,19 +454,28 @@ for (const [label, compatibilityBase, command, phases] of [
       timeCliPhaseSync(phase, () => undefined)
     }
   }), value => { report = value })
-  const legacy = buildAssistantCodexTurnProfileJson({ rawEvents: [...baseEvents, native(`vault-cli ${command}`)], turnId })!
-  const profile = { ...legacy, cliTiming: report }
-  const input = usage(profile)
-  assert.deepEqual(input.turnProfileJson, profile)
-  assert.equal(oldTiming.normalizeCliTiming(report), null)
-  assert.deepEqual(old.parseAssistantUsageRecord(input), { ...input, turnProfileJson: legacy })
-  const oldReport = structuredClone(report)
-  oldReport.commands[0]!.phases = oldReport.commands[0]!.phases.filter(phase => !phases.some(name => name === phase.phase))
-  assert.deepEqual(oldTiming.normalizeCliTiming(oldReport), oldReport)
-  assert.deepEqual(normalizeCliTiming(oldReport), oldReport)
-  const oldInput = usage({ ...legacy, cliTiming: oldReport })
-  assert.deepEqual(old.parseAssistantUsageRecord(oldInput), oldInput)
-  assert.deepEqual(parseAssistantUsageRecord(oldInput), oldInput)
+  const profiles = [buildAssistantCodexTurnProfileJson({ rawEvents: [...baseEvents, native(`vault-cli ${command}`)], turnId })!,
+    ...(label === 'event-owner-work' ? [{
+      schema: 'murph.assistant-turn-profile.v1', modelContextWindow: null,
+      requestCount: 1, requests: [{ cachedInput: 2, input: 17, output: 11 }],
+      requestsTruncated: false, toolsTruncated: false,
+      tools: [{ calls: 1, durationMs: 20, label: 'vault-cli meal show', outputChars: 4 }],
+    }] : []),
+  ]
+  for (const legacy of profiles) {
+    const profile = { ...legacy, cliTiming: report }
+    const input = usage(profile)
+    assert.deepEqual(input.turnProfileJson, profile)
+    assert.equal(oldTiming.normalizeCliTiming(report), null)
+    assert.deepEqual(old.parseAssistantUsageRecord(input), { ...input, turnProfileJson: legacy })
+    const oldReport = structuredClone(report)
+    oldReport.commands[0]!.phases = oldReport.commands[0]!.phases.filter(phase => !phases.some(name => name === phase.phase))
+    assert.deepEqual(oldTiming.normalizeCliTiming(oldReport), oldReport)
+    assert.deepEqual(normalizeCliTiming(oldReport), oldReport)
+    const oldInput = usage({ ...legacy, cliTiming: oldReport })
+    assert.deepEqual(old.parseAssistantUsageRecord(oldInput), oldInput)
+    assert.deepEqual(parseAssistantUsageRecord(oldInput), oldInput)
+  }
 })
 
 async function exerciseMealFailures(batch: boolean, publish?: (report: CliTiming) => void) {

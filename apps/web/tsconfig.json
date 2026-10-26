@@ -288,6 +288,9 @@
       "@murphai/core": [
         "../../packages/core/src/index.ts"
       ],
+      "@murphai/core/event-read": [
+        "../../packages/core/src/event-read.ts"
+      ],
       "@murphai/importers": [
         "../../packages/importers/src/index.ts"
       ],

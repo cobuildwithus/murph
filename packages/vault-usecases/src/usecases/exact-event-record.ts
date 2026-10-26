@@ -72,7 +72,7 @@ export async function readExactEventRecord(input: {
     throw notFound(input.entityLabel, input.lookup)
   }
 
-  const core = await timeCliPhase('event-core-load', () => loadRuntimeModule<ExactEventCoreRuntime>('@murphai/core'))
+  const core = await timeCliPhase('event-core-load', () => loadRuntimeModule<ExactEventCoreRuntime>('@murphai/core/event-read'))
   try {
     const exact = await core.readEvent({ vaultRoot: input.vault, eventId })
     if (
@@ -110,7 +110,7 @@ export async function readOwnedEventRecord(input: {
   kind: 'document' | 'meal'
 }): Promise<ExactEventRecord> {
   const ownerId = input.lookup.trim()
-  const core = await timeCliPhase('event-core-load', () => loadRuntimeModule<ExactEventCoreRuntime>('@murphai/core'))
+  const core = await timeCliPhase('event-core-load', () => loadRuntimeModule<ExactEventCoreRuntime>('@murphai/core/event-read'))
   try {
     const exact = await core.readOwnedEvent({
       vaultRoot: input.vault,

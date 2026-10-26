@@ -13,6 +13,7 @@ import {
   type ShardCompression,
 } from "./shard-compression.ts";
 import { VaultError } from "./errors.ts";
+import { startEventOwnerOperation } from "./event-owner-timing.ts";
 import { pathExists, walkVaultFiles, walkVaultFilesInterruptible } from "./fs.ts";
 import { withCanonicalWriteLock } from "./operations/canonical-write-lock.ts";
 import {
@@ -175,41 +176,51 @@ export function createJsonlShardStorage(relativeDirectory: string, errorPrefix: 
     signal: AbortSignal | null = null,
   ): Promise<Buffer> {
     signal?.throwIfAborted();
-    const resolved = resolveVaultPath(vaultRoot, source.sourcePath);
-    await assertPathWithinVaultOnDisk(resolved.vaultRoot, resolved.absolutePath);
-    const stats = await fs.stat(resolved.absolutePath);
-    if (!stats.isFile()) {
-      throw new VaultError(
-        `${errorPrefix}_SHARD_INVALID`,
-        "Ledger shard source must be a file.",
-        { relativePath: source.sourcePath },
+    const endPath = startEventOwnerOperation("path");
+    let resolved: ReturnType<typeof resolveVaultPath>;
+    let maxStoredBytes: number;
+    try {
+      resolved = resolveVaultPath(vaultRoot, source.sourcePath);
+      await assertPathWithinVaultOnDisk(resolved.vaultRoot, resolved.absolutePath);
+      const stats = await fs.stat(resolved.absolutePath);
+      if (!stats.isFile()) {
+        throw new VaultError(
+          `${errorPrefix}_SHARD_INVALID`,
+          "Ledger shard source must be a file.",
+          { relativePath: source.sourcePath },
+        );
+      }
+      maxStoredBytes = source.kind !== "jsonl"
+        ? MAX_JSONL_ARCHIVE_BYTES
+        : MAX_JSONL_SHARD_BYTES;
+      if (stats.size > maxStoredBytes) {
+        throw new VaultError(
+          `${errorPrefix}_SHARD_TOO_LARGE`,
+          `Ledger shard "${source.sourcePath}" exceeds its storage limit.`,
+          { byteSize: stats.size, relativePath: source.sourcePath },
+        );
+      }
+    } finally { endPath(); }
+    const endRead = startEventOwnerOperation("read");
+    let storedBytes: Buffer;
+    try {
+      storedBytes = await fs.readFile(
+        resolved.absolutePath,
+        signal ? { signal } : undefined,
       );
-    }
-    const maxStoredBytes = source.kind !== "jsonl"
-      ? MAX_JSONL_ARCHIVE_BYTES
-      : MAX_JSONL_SHARD_BYTES;
-    if (stats.size > maxStoredBytes) {
-      throw new VaultError(
-        `${errorPrefix}_SHARD_TOO_LARGE`,
-        `Ledger shard "${source.sourcePath}" exceeds its storage limit.`,
-        { byteSize: stats.size, relativePath: source.sourcePath },
-      );
-    }
-    const storedBytes = await fs.readFile(
-      resolved.absolutePath,
-      signal ? { signal } : undefined,
-    );
-    signal?.throwIfAborted();
-    if (storedBytes.byteLength > maxStoredBytes) {
-      throw new VaultError(
-        `${errorPrefix}_SHARD_TOO_LARGE`,
-        `Ledger shard "${source.sourcePath}" exceeds its storage limit.`,
-        { byteSize: storedBytes.byteLength, relativePath: source.sourcePath },
-      );
-    }
+      signal?.throwIfAborted();
+      if (storedBytes.byteLength > maxStoredBytes) {
+        throw new VaultError(
+          `${errorPrefix}_SHARD_TOO_LARGE`,
+          `Ledger shard "${source.sourcePath}" exceeds its storage limit.`,
+          { byteSize: storedBytes.byteLength, relativePath: source.sourcePath },
+        );
+      }
+    } finally { endRead(); }
     if (source.kind === "jsonl") {
       return storedBytes;
     }
+    const endDecode = startEventOwnerOperation("decode");
     try {
       const bytes = decompressShard(storedBytes, source.kind, MAX_JSONL_SHARD_BYTES);
       signal?.throwIfAborted();
@@ -223,7 +234,7 @@ export function createJsonlShardStorage(relativeDirectory: string, errorPrefix: 
           relativePath: source.sourcePath,
         },
       );
-    }
+    } finally { endDecode(); }
   }
 
   function parseJsonlRows(
@@ -268,19 +279,25 @@ export function createJsonlShardStorage(relativeDirectory: string, errorPrefix: 
     vaultRoot: string;
     relativePath: string;
   }): Promise<Array<{ lineNumber: number; value: UnknownRecord }>> {
-    const logicalPath = requireJsonlLogicalPath(input.relativePath);
-    const source = await resolveJsonlShardSource(input.vaultRoot, logicalPath);
-    if (!source) {
-      throw new VaultError(
-        "VAULT_FILE_MISSING",
-        `Ledger shard "${logicalPath}" does not exist.`,
-        { relativePath: logicalPath },
-      );
-    }
-    return parseJsonlRows(
-      await readBoundedJsonlSourceBytes(input.vaultRoot, source),
-      logicalPath,
-    );
+    const endSource = startEventOwnerOperation("source");
+    let logicalPath: string;
+    let source: JsonlShardSource;
+    try {
+      logicalPath = requireJsonlLogicalPath(input.relativePath);
+      const resolvedSource = await resolveJsonlShardSource(input.vaultRoot, logicalPath);
+      if (!resolvedSource) {
+        throw new VaultError(
+          "VAULT_FILE_MISSING",
+          `Ledger shard "${logicalPath}" does not exist.`,
+          { relativePath: logicalPath },
+        );
+      }
+      source = resolvedSource;
+    } finally { endSource(); }
+    const bytes = await readBoundedJsonlSourceBytes(input.vaultRoot, source);
+    const endParse = startEventOwnerOperation("parse");
+    try { return parseJsonlRows(bytes, logicalPath); }
+    finally { endParse(); }
   }
 
   async function readJsonlShardText(input: {
@@ -310,7 +327,10 @@ export function createJsonlShardStorage(relativeDirectory: string, errorPrefix: 
     vaultRoot: string;
     relativePath: string;
   }): Promise<UnknownRecord[]> {
-    return (await readJsonlShardRows(input)).map((row) => row.value);
+    const rows = await readJsonlShardRows(input);
+    const endParse = startEventOwnerOperation("parse");
+    try { return rows.map((row) => row.value); }
+    finally { endParse(); }
   }
 
   async function visitJsonlShardRecordsInterruptible(input: {

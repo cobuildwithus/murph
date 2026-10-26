@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-10-25",
+  "order": 100,
+  "item": {
+    "id": "meal-lookup-startup",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Quicker saved meal lookups",
+    "summary": "Murph can look up a saved meal more quickly, with the same saved facts.",
+    "details": "Reading a larger history can still take time.",
+    "relevanceTags": ["nutrition", "food-journal"],
+    "sourcePullRequests": [4364]
+  }
+}

@@ -1696,8 +1696,9 @@ and children rejected before entering the CLI have no invented command timing.
 Legacy batch output, counts, lengths, durations and failure handling are unchanged.
 
 Bounds are source-owned: 32 distinct command/outcome entries per report/active
-window; 34 fixed phase names (the original 11, six rebuild names, four Patterns names, three load names, five
-metric subphases, canonical-write wait, importer load, and three event-read names); 64 started
+window; 46 fixed phase names (the original 11, six rebuild names, four Patterns names, three load names, five
+metric subphases, canonical-write wait, importer load, three event-read names and twelve
+meal-owner operation totals); 64 started
 scoped spans per invocation (plus fixed lifecycle samples); at most 8,192 bytes
 per complete UDP envelope (including the ephemeral key/ticks) and 256 received packets per window. The 8 KiB cap is below
 the supported macOS 9 KiB UDP datagram limit; no host setting or permission is
@@ -2003,7 +2004,7 @@ Three fixed names expose the existing canonical read path inside CLI dispatch:
 
 | Phase | Exact boundary |
 | --- | --- |
-| `event-core-load` | Each existing `loadRuntimeModule('@murphai/core')` call in `exact-event-record.ts`, for exact-event and meal/document-owner reads. Includes first module evaluation, cached imports and rejected imports; excludes the subsequent reader and record conversion. Invalid exact lookups rejected before import have no sample. |
+| `event-core-load` | Each existing `loadRuntimeModule('@murphai/core/event-read')` call in `exact-event-record.ts`, for exact-event and meal/document-owner reads. Includes first module evaluation, cached imports and rejected imports; excludes the subsequent reader and record conversion. Invalid exact lookups rejected before import have no sample. |
 | `event-owner-candidates` | In `readOwnedEvent`, listing all logical event shards and the entire first scan, including physical-source resolution, path checks, reading, gzip/Brotli decoding, JSON parsing and validation of matching owner records. Includes listing/read/validation failures and the no-candidate rejection. Unrelated records retain their existing lack of contract validation. |
 | `event-owner-revisions` | The entire second scan for candidate IDs, validation of their revisions across owner changes, latest-revision selection, deleted/reassigned-owner filtering, ambiguity/missing rejection and result construction. Absent if candidate discovery fails. |
 
@@ -2016,6 +2017,40 @@ added. Each reached boundary consumes one existing scoped span, independent of
 shard count; the 64-span budget, outcomes, trimming and drop behavior are unchanged.
 Outside an active timing scope the timers are no-ops. Exact event-ID reads get
 the load span but do not acquire invented owner-scan spans.
+
+**Meal-owner operation totals.** Only the same `readOwnedEvent(kind: "meal")`
+path adds `event-owner-{candidates,revisions}-{source,path,read,decode,parse,select}`.
+The private scan scope sums monotonic elapsed intervals at existing operation
+boundaries, then calls the existing timing owner once per fixed category in
+`finally`. Shared storage APIs and the public event readers are unchanged.
+
+| Suffix | Disjoint operation boundary within that scan |
+| --- | --- |
+| `source` | Candidate-pass logical listing (including its existing walk/path checks), plus each pass's logical-path validation, three-format physical-source lookup and ambiguity/missing rejection. |
+| `path` | Each selected source's path resolution, on-disk containment checks, stat, regular-file and stored-size validation before reading. |
+| `read` | The existing awaited file read, its following abort check and stored-byte size validation. |
+| `decode` | Synchronous gzip/Brotli decompression, its existing following abort check and archive-error conversion. |
+| `parse` | UTF-8 conversion, line splitting, JSON parsing and projection of parsed rows to records. |
+| `select` | Existing matching, contract validation, candidate/revision collection, latest selection, tombstone/owner/ambiguity checks and result construction. |
+
+Every reached scan emits six totals, including zero when a category was not
+reached, had no work or rounded below one microsecond. The revisions scan is
+entered only after successful candidate discovery. Missing samples can also
+reflect existing span/transport loss. Totals are rounded once after summing;
+there is no per-row clock or per-shard sample, count, path, size or format label.
+The two passes add at most twelve spans per read, independent of shard count,
+within the unchanged 64-span budget. Repeated reads can still exhaust it;
+observe `droppedSpans`. Their histograms and maxima describe whole-scan category
+totals, never an individual shard. Existing parent spans/counts remain intact.
+A disabled scope adds no clocks, and completed scopes ignore late callbacks.
+Document-owner and exact event-ID reads receive no operation breakdown.
+
+These are all wall durations. The first three contain awaited operations;
+synchronous decode/parse/select can include GC and descheduling and are not
+CPU attribution. No process CPU is sampled. Categories exclude small loop and
+instrumentation overhead and must not be forced to sum exactly to their parent.
+Do not subtract unmatched aggregates or phase maxima. The accepted local import
+improvement does not explain the remaining owner-scan tail.
 
 **Interpretation.** These spans are nested inside the existing caller timing;
 do not add them to `dispatch`, subtract maxima, or subtract sums from unequal
@@ -2032,13 +2067,17 @@ in-container receiver. An older reader drops the whole optional timing object
 when it encounters a new phase while preserving legacy profile, token and usage
 accounting; new readers accept old producers. A reader rollback under new
 producers loses optional timing coverage. This change makes no deployment claim.
-Start the 24-hour preliminary and 72-hour baseline natural-traffic windows at
+For the meal-owner breakdown, start a 72-hour natural-traffic observation at
 the recorded, verified runner deployment, after both readers are verified.
-These windows share a start and overlap; they are not independent comparisons.
-Wait for each full window, and do not generate production calls to fill it.
+Check health during the first four hours: timing coverage, drops/body trimming,
+read error outcomes and existing correctness signals. The 4-hour and 72-hour
+windows share a start and overlap; they are not independent comparisons.
+Wait for each full window and do not generate production calls to fill it.
+Keep producer versions/windows separate; insufficient coverage is a measurement
+gap, not evidence that the tail is resolved.
 
 For bounded aggregate inspection on the primary usage database, set `$1` to that
-UTC deployment instant and `$2` to `24` or `72`. The query retains at most 50,000
+UTC deployment instant and `$2` to `4` or `72`. The query retains at most 50,000
 initial-provider (`provider_request_ordinal = 0`), first-attempt usage rows,
 including all provider outcomes. It reads only validated optional timing;
 no identifiers or raw fields are returned. Coverage columns repeat beside each
@@ -2049,7 +2088,7 @@ profiles, while `phase_samples` may include repeated reads within one command.
 WITH bounds AS (
   SELECT $1::timestamptz AT TIME ZONE 'UTC' AS start_at,
          ($1::timestamptz AT TIME ZONE 'UTC') + make_interval(hours => $2::int) AS end_at
-  WHERE $2::int IN (24, 72)
+  WHERE $2::int IN (4, 72)
 ), rows AS MATERIALIZED (
   SELECT turn_profile_json -> 'cliTiming' AS t
   FROM hosted_ai_usage CROSS JOIN bounds
@@ -2072,7 +2111,7 @@ WITH bounds AS (
 ), commands AS (
   SELECT c ->> 'command' AS command, c ->> 'outcome' AS outcome, c
   FROM valid CROSS JOIN LATERAL jsonb_array_elements(t -> 'commands') c
-  WHERE c ->> 'command' IN ('meal show', 'meal edit', 'meal remove-photo')
+  WHERE c ->> 'command' = 'meal show'
     AND c ->> 'outcome' IN ('ok', 'error', 'unknown')
 ), calls AS (
   SELECT command, outcome, count(*) AS profiles_with_command,
@@ -2086,7 +2125,11 @@ WITH bounds AS (
          max((p ->> 'maxUs')::numeric) / 1000 AS max_ms
   FROM commands CROSS JOIN LATERAL jsonb_array_elements(c -> 'phases') p
   WHERE p ->> 'phase' IN ('total', 'setup', 'dispatch',
-    'event-core-load', 'event-owner-candidates', 'event-owner-revisions')
+    'event-core-load', 'event-owner-candidates', 'event-owner-revisions',
+    'event-owner-candidates-source', 'event-owner-candidates-path', 'event-owner-candidates-read',
+    'event-owner-candidates-decode', 'event-owner-candidates-parse', 'event-owner-candidates-select',
+    'event-owner-revisions-source', 'event-owner-revisions-path', 'event-owner-revisions-read',
+    'event-owner-revisions-decode', 'event-owner-revisions-parse', 'event-owner-revisions-select')
   GROUP BY command, outcome, p ->> 'phase'
 )
 SELECT p.*, p.sum_ms / nullif(p.phase_samples, 0) AS mean_ms,
@@ -2112,7 +2155,12 @@ checks with
 `MURPH_CLI_EVENT_READ_PHASE_COMPAT_BASE=4ec40920fca1872c8324d9325c23a9e50ba39754`.
 They load the actual earlier readers; the hosted check also preserves the full
 legacy usage/profile when the new optional timing is dropped. A skipped history
-check is not compatibility evidence.
+check is not compatibility evidence. For the twelve operation totals, also set
+`MURPH_CLI_EVENT_OWNER_WORK_COMPAT_BASE=7bcd0ffe430c8cba53da74dbb6d5c10a3560bdd8`.
+The same actual-history checks cover old/new readers and both hosted profile
+versions. Rerun `cli-timing-transport.test.ts` and Cloudflare
+`usage-record-port.test.ts`: they enumerate the finite catalog through the real
+UDP and body-budget paths. No database migration or new telemetry sink is needed.
 
 ### Private weekly usage audit rejection
 

@@ -16,6 +16,7 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."
 
 describe("workspace source resolution", () => {
   it.each([
+    { packageName: "core", entry: "event-read.ts", specifier: "@murphai/core/event-read", symbol: "readEvent" },
     { packageName: "device-syncd", entry: "service.ts", specifier: "@murphai/device-syncd/service", symbol: "SqliteDeviceSyncStore" },
     { packageName: "hosted-execution", entry: "usage-diagnostics.ts", specifier: "@murphai/hosted-execution/usage-diagnostics", symbol: "parseHostedUsageDiagnosticsRequest" },
     { packageName: "importers", entry: "clinical-records/index.ts", specifier: "@murphai/importers/clinical-records", symbol: "readClinicalAttachmentText" },
