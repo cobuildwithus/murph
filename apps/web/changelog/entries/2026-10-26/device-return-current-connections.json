@@ -1,0 +1,16 @@
+{
+  "publishedOn": "2026-10-26",
+  "order": 100,
+  "item": {
+    "id": "device-return-current-connections",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Review your connections after reopening a return link",
+    "summary": "A device return link that can no longer finish setup now directs you to your current connections without claiming that setup failed.",
+    "details": "Connected devices keep their saved status. If a device still needs setup, start from its card on Connect. Reopening a return link never reconnects a device automatically.",
+    "relevanceTags": [
+      "device-sync"
+    ],
+    "sourcePullRequests": []
+  }
+}

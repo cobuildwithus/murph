@@ -107,10 +107,10 @@ export async function reportHostedDeviceConnectFailure(
   }
 }
 
-// The category describes only the browser proof. Missing proof may mean an
-// expired cookie, another browser, or a revisit; it cannot prove a failed link.
+// These categories describe callback admission, never the connection outcome.
+// Missing proof or retired state can be an expired return or a successful revisit.
 export function reportHostedDeviceCallbackRejection(input: {
-  errorCode: HostedDeviceSyncCallbackProofError;
+  errorCode: HostedDeviceSyncCallbackProofError | "OAUTH_STATE_INVALID";
   memberId: string;
   provider: string;
 }): void {

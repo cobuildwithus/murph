@@ -6036,7 +6036,7 @@ test("ConnectPage ignores connected callback status when callback source metadat
   assert.doesNotMatch(markup, /Junction/u);
 });
 
-test("ConnectPage shows callback errors with the original source label", async () => {
+test("ConnectPage keeps unavailable callback state neutral without asserting connection", async () => {
   const { default: ConnectPage } = await import(
     "../app/(dashboard)/connect/connect-page-content"
   );
@@ -6051,11 +6051,10 @@ test("ConnectPage shows callback errors with the original source label", async (
     }),
   );
 
-  assert.match(markup, /Unable to finish connection/);
-  assert.match(
-    markup,
-    /Oura gave us an expired or invalid return from the last attempt\./,
-  );
+  assert.match(markup, /Check your connections/);
+  assert.match(markup, /Your current connections are shown below/);
+  assert.doesNotMatch(markup, /Unable to finish connection/);
+  assert.doesNotMatch(markup, /Connected Oura\./);
 });
 
 test("ConnectPage shows rejected callback errors with the original source label", async () => {
@@ -6150,7 +6149,10 @@ test("ConnectPage keeps unverified callback query text out of the support draft"
   assert.match(body, /Reference: unknown$/);
 });
 
-test.each([false, true])("ConnectPage shows neutral review guidance without changing connected=%s", async (connected) => {
+test.each([
+  [false, "CALLBACK_PROOF_INVALID"], [true, "CALLBACK_PROOF_INVALID"],
+  [false, "OAUTH_STATE_INVALID"], [true, "OAUTH_STATE_INVALID"],
+] as const)("ConnectPage preserves connected=%s for neutral %s recovery", async (connected, errorCode) => {
   vi.stubEnv("OURA_CLIENT_ID", "oura-client-id");
   vi.stubEnv("OURA_CLIENT_SECRET", "oura-client-secret");
   if (connected) {
@@ -6171,7 +6173,7 @@ test.each([false, true])("ConnectPage shows neutral review guidance without chan
     await ConnectPage({
       searchParams: Promise.resolve({
         connectSource: "oura",
-        deviceSyncError: "CALLBACK_PROOF_INVALID",
+        deviceSyncError: errorCode,
         deviceSyncProvider: "oura",
         deviceSyncStatus: "error",
       }),
