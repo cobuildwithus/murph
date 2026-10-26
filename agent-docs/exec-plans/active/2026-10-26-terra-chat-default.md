@@ -6,8 +6,9 @@ Updated: 2026-10-26
 
 ## Goal and protected invariants
 
-Use GPT-6.1 Terra by default in private and group chats, reset existing chat
-model preferences once, expose Terra in Settings, and reserve Sol for paid
+Use GPT-6.1 Terra by default in private chats, retain Sol for all
+groups, reset existing chat model preferences once, expose
+Terra in Settings, and reserve personal-chat Sol for paid
 subscribers. Preserve chat isolation, reasoning preferences, pricing integrity,
 and independent Astra eligibility. Explicit selections after migration persist.
 
@@ -20,11 +21,12 @@ refreshed Codex catalog provides its entry. Extend these existing owners.
 
 ## Product UX
 
-Outcome: existing and new chats use Terra; eligible subscribers can select Sol.
+Outcome: personal chats use Terra and every group uses Sol. Eligible subscribers
+can select Sol in personal chats.
 Entry: Settings or explicit chat model change. Changes affect the next turn.
 People: free/trial, paid direct, sponsored family, group owners, and cancelled
-subscriptions. Astra retains its premium rule. Group eligibility derives from
-its owner's subscription, without exposing private account facts in the room.
+subscriptions. Astra retains its premium rule. Group Sol is available to everyone
+without reading or exposing private account facts in the room.
 Proof: default resolution, saved readback, denied Sol writes, eligibility loss,
 room isolation, migration, pricing, responsive picker and focused real Terra turns.
 Done when these paths pass and production rollout status is reported truthfully.
@@ -68,9 +70,9 @@ Production execution is not yet performed.
 Complete native first requests captured through the scripted Responses boundary,
 with identical synthetic fixtures and production prompt builders. Base restores
 original tool descriptions/enums and inbound framing and uses Sol; head uses
-Terra. Both use the production inbound-message builder with identical inputs. Individual
-160,600 → 160,868 UTF-8 bytes (+268, +0.167%); group 138,746 → 139,142 bytes
-(+396, +0.285%). Includes instructions, input, tool declarations and all
+Terra for the individual fixture and Sol for the group fixture. Both use the production inbound-message builder with identical inputs. Individual
+160,600 → 161,011 UTF-8 bytes (+411, +0.256%); group 138,746 → 139,082 bytes
+(+336, +0.242%). Includes instructions, input, tool declarations and all
 provider-visible fields; excludes the nondeterministic prompt cache key.
 Exact target tokenizers are unavailable, so token counts/deltas are unmeasured.
 
@@ -101,6 +103,12 @@ Read-only health-guidance fixtures now begin with an already-known language,
 while retaining their exact no-write assertions. The onboarding email fixture
 now supplies the prior conversation needed to establish its stage.
 
+The user explicitly chose Sol for every group without a subscription, while
+keeping personal-chat Sol subscriber-only and personal defaults on Terra.
+The candidate follows that split. Explicit group selections stay distinct from
+the derived Sol default. No group-owner billing relation is needed or read.
+The quality verdict remains Hold.
+
 The complete comparison must finish before the final quality verdict. Do not
 merge or deploy based on passing deterministic checks alone. Production model
 preferences have not been reset.
@@ -117,3 +125,14 @@ Follow-up checks: 104 prompt/clinical unit tests, Assistant Engine typecheck,
 and the 17-file complexity guard pass with unchanged complexity debt. Corrected
 clinical-date recovery passes on both models and verifies that documentation
 timestamps remain unchanged while the clinical date is repaired.
+
+The split-default follow-up adds real-model restore-default journeys for personal
+chats and groups. The initial candidate treated a free group differently; the
+user clarified that every group can use Sol. Update the fixtures to that final
+contract. Terra initially asked redundant confirmation when restoring a default;
+the configuration tool now explicitly treats that request as authorization to
+apply the known default. Exact writes and next-turn replies remain asserted.
+Personal/group resolution checks include free, paid, inactive, and explicit model
+preferences. All five final selection/default journeys pass on both Terra and Sol, including
+Sol defaults in free and subscribed groups. Each required change makes exactly
+one update and reports its next-turn effect; no unrelated command executes.

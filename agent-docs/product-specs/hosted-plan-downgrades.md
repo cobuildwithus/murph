@@ -47,11 +47,11 @@ turn:
   [abuse-monitoring, prompt-cache, and endpoint retention
   controls](https://developers.openai.com/api/docs/guides/your-data#v1responses),
   and third-party tools remain subject to their own retention policies.
-- Personal and synthetic thread-container runtimes default to GPT-6.1 Terra.
+- Personal runtimes default to GPT-6.1 Terra. Synthetic thread-container
+  runtimes default to GPT-6.1 Sol without a subscription requirement.
   The shared product catalog also includes GPT-6.1 Sol, GPT-6 Sol and Luna,
-  GPT-5.6 Luna and Sol, and GPT-6 Astra. All Sol versions require an active paid
-  personal or Family subscription. A group uses its owner's subscription for
-  eligibility. Astra remains private-only and requires paid Edge or Max access.
+  GPT-5.6 Luna and Sol, and GPT-6 Astra. In personal chats, all Sol versions
+  require an active paid personal or Family subscription. Groups are exempt. Astra remains private-only and requires paid Edge or Max access.
 - Settings shows eligible choices and the existing upgrade action where the
   member can upgrade. An explicit accepted group request may choose a supported
   room model through `murph.assistant_configuration`; group reasoning remains
@@ -61,7 +61,7 @@ turn:
 - Postgres stores nullable model and reasoning intent on the existing
   `HostedMember` row. It remains the only durable owner; the vault, hosted
   workspace snapshot, and assistant runtime do not keep a second preference.
-  A null model follows the GPT-6.1 Terra default. The Terra rollout clears all
+  A null model follows the scope-specific default. The Terra rollout clears all
   existing model overrides once after compatible runtime readers are deployed,
   preserving reasoning preferences. Later explicit supported choices remain saved.
 - A scheduled plan change preserves current premium eligibility until billing

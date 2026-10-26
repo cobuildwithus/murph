@@ -2979,19 +2979,24 @@ describeRealCodex('real Codex GPT-6 configuration e2e', () => {
     }
   }, 180_000)
 
-  it.each(['individual', 'group'] as const)('Terra model selection saves once in %s chat', async (audience) => {
-    const selectedModel = 'gpt-6.1-terra' as const
+  it.each([
+    { label: 'Terra model selection saves once in individual chat', audience: 'individual', selectedModel: 'gpt-6.1-terra', paid: true, restoreDefault: false },
+    { label: 'Terra model selection saves once in group chat', audience: 'group', selectedModel: 'gpt-6.1-terra', paid: true, restoreDefault: false },
+    { label: 'split model default restores Terra in individual chat', audience: 'individual', selectedModel: 'gpt-6.1-terra', paid: true, restoreDefault: true },
+    { label: 'split model default restores Sol in subscribed group chat', audience: 'group', selectedModel: 'gpt-6.1-sol', paid: true, restoreDefault: true },
+    { label: 'split model default restores Sol in free group chat', audience: 'group', selectedModel: 'gpt-6.1-sol', paid: false, restoreDefault: true },
+  ] as const)('$label', async ({ audience, selectedModel, paid, restoreDefault }) => {
     const config = await resolveRealCodexE2eConfig()
     const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-terra-selection-'))
     const updates: unknown[] = []
     const snapshot: import('@murphai/hosted-execution/runtime-control').HostedRuntimeAssistantConfigurationSnapshot = {
-      availableModels: ['gpt-6.1-terra', 'gpt-6.1-sol', 'gpt-6-sol', 'gpt-6-luna', 'gpt-5.6-luna', 'gpt-5.6-sol', ...(audience === 'individual' ? ['gpt-6-astra' as const] : [])],
+      availableModels: ['gpt-6.1-terra', 'gpt-6-luna', ...(paid || audience === 'group' ? ['gpt-6.1-sol' as const] : [])],
       availableReasoningEfforts: ['low', 'medium', 'high', 'xhigh'] as const,
       configurationAvailable: true,
       dormantSolPreference: false,
       model: 'gpt-5.6-luna' as const,
       reasoningEffort: 'low' as const,
-      solAvailable: true,
+      solAvailable: paid || audience === 'group',
     }
     try {
       await initializeVault({ timezone: 'America/New_York', vaultRoot: workingDirectory })
@@ -3023,7 +3028,7 @@ describeRealCodex('real Codex GPT-6 configuration e2e', () => {
         },
         model: config.model,
         modelProvider: config.modelProvider,
-        prompt: audience === 'group' ? 'Switch this group chat to GPT-6.1 Terra for future messages. Leave everyone’s private chats alone.' : 'Switch my chat to GPT-6.1 Terra for future messages. Keep my reasoning setting as it is.',
+        prompt: restoreDefault ? `Restore the default model for this ${audience === 'group' ? 'group' : 'individual'} chat for future messages.` : audience === 'group' ? 'Switch this group chat to GPT-6.1 Terra for future messages. Leave everyone’s private chats alone.' : 'Switch my chat to GPT-6.1 Terra for future messages. Keep my reasoning setting as it is.',
         reasoningEffort: 'low',
         sandbox: 'workspace-write',
         vaultRoot: workingDirectory,
@@ -3031,7 +3036,7 @@ describeRealCodex('real Codex GPT-6 configuration e2e', () => {
       })
       process.stdout.write(`[terra-selection-e2e] ${JSON.stringify({ model: selectedModel, reply: result.finalMessage, updates: updates.length })}\n`)
       expect(updates).toEqual([{ action: 'update', assistantInputId: 'ain_00000000000000000000000000000061', model: selectedModel }])
-      expect(result.finalMessage).toMatch(/terra/iu)
+      expect(result.finalMessage).toMatch(restoreDefault ? /default|terra|sol/iu : /terra/iu)
       expect(result.finalMessage).toMatch(/next|future|going forward/iu)
       expect(result.finalMessage).not.toMatch(/upgrade|payment|cannot|unable/iu)
       expect(readCapabilityRoutingActions(result.jsonEvents).filter((action) => action.kind === 'command')).toEqual([])

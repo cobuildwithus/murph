@@ -1699,11 +1699,11 @@ Only the authoritative
 web response updates an ephemeral invocation-local projection; web remains the
 sole durable owner, and a later invocation rereads the preference there.
 For a synthetic thread-container member, the same input-bound path accepts
-model changes only. Null selects GPT-6.1 Terra,
+model changes only. Null selects GPT-6.1 Sol,
 while explicit older-model or GPT-6 Luna choices use the member's existing nullable model
 field. Provider and reasoning stay fixed to OpenAI and `low`; no participant
-identity, raw plan state, or private preference enters the room prompt. Web
-derives Sol availability from the room owner's current paid access.
+identity, raw plan state, or private preference enters the room prompt. Group Sol is available without a subscription; the personal Sol entitlement
+does not apply to rooms.
 Idle maintenance attributes compaction usage to the model actually bound to the
 warm thread, not a future preference, and skips provider work when that model
 cannot be priced. On fresh threads, pinned Codex raw completion notifications
@@ -1918,14 +1918,16 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   image origins.
 
   Nullable hosted-member model and reasoning preferences are web-owned,
-  billing-gated control facts. Managed OpenAI personal and group chats default
-  to GPT-6.1 Terra. Terra and Luna are available without a paid model entitlement.
-  All supported Sol versions require an active paid direct or family subscription;
-  rooms derive that eligibility from their owner. Astra remains personal-only
+  billing-gated control facts. Managed OpenAI personal chats default to GPT-6.1
+  Terra. Every group defaults to GPT-6.1 Sol without a subscription requirement.
+  Terra and Luna are available without a paid model entitlement.
+  All supported Sol versions require an active paid direct or family subscription
+  in personal chats; group rooms are exempt. Astra remains personal-only
   and requires paid Edge or Max. Settings shows the same availability as chat
   configuration. The Terra rollout clears all existing personal and synthetic
   group model overrides once; subsequent explicit choices remain saved, while
-  a null preference follows the default. Ineligible Sol choices fall back to
+  a null preference follows the scope-specific default. An explicit Terra choice
+  in a group is stored so it remains distinct from the derived room default. Ineligible Sol choices fall back to
   Terra without erasing later saved intent. New managed recipes and
   automation guidance use GPT-6 Luna for fixed cues and bounded low-risk workflows
   with a few targeted reads; ambiguous, research-heavy, sensitive, or demanding

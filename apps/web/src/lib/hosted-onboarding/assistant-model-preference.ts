@@ -38,7 +38,10 @@ import {
   lockHostedMemberSponsoredAccessRows,
 } from "./shared";
 
-const ASSISTANT_BILLING_SELECT = {
+export const HOSTED_MEMBER_ASSISTANT_MODEL_SELECT = {
+  assistantModelPreference: true,
+  assistantReasoningEffortPreference: true,
+  createdAt: true,
   accountGroupMemberships: {
     select: {
       group: {
@@ -59,17 +62,9 @@ const ASSISTANT_BILLING_SELECT = {
   },
   billingStatus: true,
   suspendedAt: true,
-} as const satisfies Prisma.HostedMemberSelect;
-
-export const HOSTED_MEMBER_ASSISTANT_MODEL_SELECT = {
-  ...ASSISTANT_BILLING_SELECT,
-  assistantModelPreference: true,
-  assistantReasoningEffortPreference: true,
-  createdAt: true,
   threadContainer: {
     select: {
       memberId: true,
-      owner: { select: ASSISTANT_BILLING_SELECT },
     },
   },
 } as const satisfies Prisma.HostedMemberSelect;
@@ -238,7 +233,7 @@ export async function updateHostedMemberAssistantConfigurationTx(input: {
 
   const nextModelPreference = input.model === undefined
     ? member.assistantModelPreference
-    : input.model === HOSTED_ASSISTANT_DEFAULT_MODEL
+    : !isThreadContainerMember && input.model === HOSTED_ASSISTANT_DEFAULT_MODEL
       ? null
       : input.model;
   const nextReasoningEffortPreference = input.reasoningEffort === undefined
@@ -319,18 +314,25 @@ function assertHostedAssistantModelSelection(input: {
   }
 }
 
+function resolveDefaultHostedAssistantModel(isThreadContainerMember: boolean): HostedAssistantProductModel {
+  return isThreadContainerMember
+    ? HOSTED_ASSISTANT_GPT_61_SOL_MODEL
+    : HOSTED_ASSISTANT_DEFAULT_MODEL;
+}
+
 function resolveEffectiveHostedAssistantModel(input: {
   astraAvailable: boolean;
+  defaultModel: HostedAssistantProductModel;
   solAvailable: boolean;
   storedModel: HostedAssistantProductModel | null;
 }): HostedAssistantProductModel {
   if (input.storedModel === HOSTED_ASSISTANT_ASTRA_MODEL && !input.astraAvailable) {
-    return HOSTED_ASSISTANT_DEFAULT_MODEL;
+    return input.defaultModel;
   }
   if (isSolModel(input.storedModel) && !input.solAvailable) {
-    return HOSTED_ASSISTANT_DEFAULT_MODEL;
+    return input.defaultModel;
   }
-  return input.storedModel ?? HOSTED_ASSISTANT_DEFAULT_MODEL;
+  return input.storedModel ?? input.defaultModel;
 }
 
 export function resolveHostedMemberAssistantModel(
@@ -352,17 +354,16 @@ export function resolveHostedMemberAssistantModel(
   const configurationAvailable = isThreadContainerMember
     ? member.suspendedAt === null
     : isHostedPersonalAssistantConfigurationAvailable(member);
-  const billingMember = member.threadContainer ? member.threadContainer.owner : member;
-  const eligibility = billingMember ? {
-    accountGroupMemberships: billingMember.accountGroupMemberships,
-    billingStatus: billingMember.billingStatus,
-    currentBillingPhase: billingMember.billingRef?.currentBillingPhase ?? null,
-    currentBillingPlanCode: billingMember.billingRef?.currentBillingPlanCode ?? null,
-    isThreadContainerMember: false,
-    suspendedAt: billingMember.suspendedAt,
-  } : null;
-  const solAvailable = eligibility !== null && isHostedMemberSolModelEligible(eligibility);
-  const astraAvailable = !isThreadContainerMember && eligibility !== null
+  const eligibility = {
+    accountGroupMemberships: member.accountGroupMemberships,
+    billingStatus: member.billingStatus,
+    currentBillingPhase: member.billingRef?.currentBillingPhase ?? null,
+    currentBillingPlanCode: member.billingRef?.currentBillingPlanCode ?? null,
+    isThreadContainerMember,
+    suspendedAt: member.suspendedAt,
+  };
+  const solAvailable = isThreadContainerMember || isHostedMemberSolModelEligible(eligibility);
+  const astraAvailable = !isThreadContainerMember
     && isHostedMemberSolModelEligible({ ...eligibility, premiumOnly: true });
   const storedModelPreference = configurationAvailable
     ? parseHostedAssistantModelOverride(member.assistantModelPreference)
@@ -372,6 +373,7 @@ export function resolveHostedMemberAssistantModel(
     && !solAvailable;
   const model = resolveEffectiveHostedAssistantModel({
     astraAvailable,
+    defaultModel: resolveDefaultHostedAssistantModel(isThreadContainerMember),
     solAvailable,
     storedModel: storedModelPreference,
   });
