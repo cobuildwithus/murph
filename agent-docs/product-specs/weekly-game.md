@@ -11,7 +11,7 @@ creator is listed. Listed members can do everything. Anyone else can accept an
 invite to a game that is on, play it fully (posts, changes, settle, tickets,
 Murph's chat and pushes), see it on Home, and rematch its other player in either
 direction, but can't start a fresh game (`GAME_DISABLED`); Home's
-`me.canStartGames` says which. A game that is off is invisible to everyone. The
+`canStartGames` says which. A game that is off is invisible to everyone. The
 HTTP door admits an unlisted member only when they're in a game that is on
 (settled included) or hold an open invite to one: the accept and negotiate routes
 vouch with their path token, and other routes may carry the held token in the

@@ -339,11 +339,9 @@ export interface GameView {
 }
 
 export interface GameHomeView {
-  me: {
-    memberId: string; firstName: string | null; timeZone: string | null; avatarUrl: string | null; usualKind?: GameEntryKind | null;
-    /** Invite-only: only a listed member starts a fresh game; anyone may rematch. Older apps ignore it. */
-    canStartGames?: boolean;
-  };
+  me: { memberId: string; firstName: string | null; timeZone: string | null; avatarUrl: string | null; usualKind?: GameEntryKind | null };
+  /** Invite-only: whether this member may start a fresh game. Anyone may rematch. Older apps ignore it. */
+  canStartGames: boolean;
   games: GameView[];
   wallet: { held: GameTicketView[]; owed: GameTicketView[]; redeemed: GameTicketView[] };
 }

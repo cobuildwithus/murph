@@ -207,16 +207,16 @@ describe.skipIf(!enabled)("game v1 local API smoke", () => {
       // Holding the open invite lets them look and set up; Home says they can't start one.
       const held = await home(request(invitee.token, undefined, "GET", token));
       expect(held.status).toBe(200);
-      expect((await held.json()).me).toMatchObject({ canStartGames: false });
+      expect(await held.json()).toMatchObject({ canStartGames: false });
       expect((await profile(request(invitee.token, { firstName: "Invitee", timeZone: "UTC" }, "PUT", token))).status).toBe(200);
       // The accept route vouches with its own token; no header needed.
       expect((await game(accept(request(invitee.token, { termsVersion: 1, timeZone: "UTC" }), { params: Promise.resolve({ token }) }))).status).toBe("live");
 
       const homeView: GameHomeView = await (await home(request(invitee.token, undefined, "GET"))).json();
       expect(homeView.games.map((shown) => shown.id)).toEqual([id]);
-      expect(homeView.me.canStartGames).toBe(false);
+      expect(homeView.canStartGames).toBe(false);
       const listedHome: GameHomeView = await (await home(request(listed.token, undefined, "GET"))).json();
-      expect(listedHome.me.canStartGames).toBe(true);
+      expect(listedHome.canStartGames).toBe(true);
 
       await photo(invitee.token, id, 41);
       await photo(listed.token, id, 42);

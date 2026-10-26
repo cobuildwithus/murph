@@ -222,10 +222,10 @@ describe("weekly game routes", () => {
 
     it("reads the invite an app is holding from its header on any other route", async () => {
       mocks.canEnterGame.mockImplementation(async (_memberId: string, token: string | null) => token === "tok_open");
-      mocks.readHome.mockResolvedValue({ games: [], me: { memberId: LEO, canStartGames: false }, wallet: { held: [], owed: [], redeemed: [] } });
+      mocks.readHome.mockResolvedValue({ canStartGames: false, games: [], me: { memberId: LEO }, wallet: { held: [], owed: [], redeemed: [] } });
       const held = await routes.home.GET(new Request(`${BASE}/home`, { headers: { authorization: "Bearer token", "x-murph-game-invite": "tok_open" } }));
       expect(held.status).toBe(200);
-      expect(await held.json()).toMatchObject({ ok: true, me: { canStartGames: false } });
+      expect(await held.json()).toMatchObject({ ok: true, canStartGames: false });
       expect(mocks.canEnterGame).toHaveBeenLastCalledWith(LEO, "tok_open");
       const bare = await routes.home.GET(new Request(`${BASE}/home`));
       expect(bare.status).toBe(404);
