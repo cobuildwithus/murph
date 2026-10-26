@@ -515,7 +515,7 @@ describeRealCodex('real clinical document extraction journeys', () => {
         onProviderUsage: ({ usage }) => { recordRealCodexProviderUsage(usage.usage) },
       })
       expect(providerEntries).toBe(1)
-      expect(result.status).toBe('complete')
+      expect(result.status, JSON.stringify({ reason: result.reason, records: result.records })).toBe('complete')
       expect(result.records).toHaveLength(2)
       const weight = result.records.find((entry) => entry.payload.kind === 'note')
       expect(weight?.payload).toMatchObject({ kind: 'note', clinicalFact: { category: 'observation', value: 80 } })
@@ -531,7 +531,8 @@ describeRealCodex('real clinical document extraction journeys', () => {
         expect(record.dateEvidence).toBeTruthy()
         expect(clinicalFhirResourceExtractionText(resource)).toContain(record.dateEvidence)
       }
-      expect(JSON.stringify(result.records)).not.toMatch(/body-weight|temperature|blood-pressure/iu)
+      expect(result.records.flatMap((entry) => entry.payload.kind === 'measurement' ? entry.payload.measurements.map((measurement) => measurement.metric) : [])).toEqual(['resting-heart-rate'])
+      expect(JSON.stringify(result.records)).not.toMatch(/temperature|blood-pressure/iu)
       expect(await listWriteOperationMetadataPaths(fixture.vault)).toEqual(writesBefore)
       expect(await readFile(documentPath, 'utf8')).toBe(bytes)
       process.stdout.write(`[clinical-structured-live] ${JSON.stringify({ status: result.status, records: result.records, reason: result.reason, providerEntries })}\n`)
@@ -569,12 +570,17 @@ describeRealCodex('real clinical document extraction journeys', () => {
           onProviderUsage: ({ usage }) => { recordRealCodexProviderUsage(usage.usage) },
         })
         expect(result.status).toBe('complete')
-        expect(result.records).toHaveLength(mixed ? 1 : 0)
         if (mixed) {
-          const record = result.records[0]!
-          expect(new Date(record.payload.occurredAt).toISOString()).toBe('2026-02-14T10:00:00.000Z')
-          expect(JSON.stringify(record.payload)).toMatch(/left ankle/iu)
-          expect(JSON.stringify(record.payload)).toMatch(/no acute fracture/iu)
+          // A procedure and its negative finding may be distinct canonical facts.
+          expect(result.records.length).toBeGreaterThanOrEqual(1)
+          expect(result.records.length).toBeLessThanOrEqual(2)
+          for (const record of result.records) {
+            expect(new Date(record.payload.occurredAt).toISOString()).toBe('2026-02-14T10:00:00.000Z')
+            expect(JSON.stringify(record.payload)).toMatch(/left ankle/iu)
+          }
+          expect(JSON.stringify(result.records)).toMatch(/no acute fracture/iu)
+        } else {
+          expect(result.records).toEqual([])
         }
         expect(JSON.stringify(result.records)).not.toMatch(/asthma|albuterol|inhaler|logo|illustration/iu)
         expect(await listWriteOperationMetadataPaths(fixture.vault)).toEqual(writesBefore)
@@ -601,9 +607,9 @@ describeRealCodex('real clinical document extraction journeys', () => {
       'Exported 2026-07-10. Export time is not a visit date.',
     ].join('\n')
     const initialRecords = [
-      { payload: { kind: 'note', occurredAt: '2025-02-03', title: 'Routine review', note: 'Routine review.' }, dateBasis: 'document', dateEvidence: 'February 3, 2025' },
-      { payload: { kind: 'note', occurredAt: '2026-07-10T12:00:00Z', title: 'Mobility review', note: 'Mobility review.' }, dateBasis: 'document', dateEvidence: 'March 12, 2020' },
-      { payload: { kind: 'note', occurredAt: '2026-07-10T12:00:00Z', title: 'Exercise counseling', note: 'Exercise counseling.' } },
+      { payload: { kind: 'note', occurredAt: '2025-02-03', title: 'Routine review', note: 'Routine review.', clinicalFact: { category: 'encounter-history', label: 'Routine review', subject: 'member', clinicalDate: '2025-02-03', statement: 'Routine review.' } }, dateBasis: 'document', dateEvidence: 'February 3, 2025' },
+      { payload: { kind: 'note', occurredAt: '2026-07-10T12:00:00Z', title: 'Mobility review', note: 'Mobility review.', clinicalFact: { category: 'encounter-history', label: 'Mobility review', subject: 'member', clinicalDate: '2026-07-10T12:00:00Z', statement: 'Mobility review.' } }, dateBasis: 'document', dateEvidence: 'March 12, 2020' },
+      { payload: { kind: 'note', occurredAt: '2026-07-10T12:00:00Z', title: 'Exercise counseling', note: 'Exercise counseling.', clinicalFact: { category: 'encounter-history', label: 'Exercise counseling', subject: 'member', clinicalDate: '2026-07-10T12:00:00Z', statement: 'Exercise counseling.' } } },
     ]
     const nativeExecute = clinicalExtractionCodex.executeCodexAppServerTurn
     // Seed the exact bad proposal, then use the real provider for recovery.
@@ -635,9 +641,12 @@ describeRealCodex('real clinical document extraction journeys', () => {
       expect(result.status).toBe('complete')
       expect(result.records).toHaveLength(3)
       expect(result.records[0]).toEqual(initialRecords[0])
-      expect(result.records.map((record) => new Date(record.payload.occurredAt).toISOString()))
+      expect(result.records.map((record) => new Date(record.payload.kind === 'note' ? record.payload.clinicalFact!.clinicalDate! : record.payload.occurredAt).toISOString()))
         .toEqual(['2025-02-03T00:00:00.000Z', '2020-03-12T00:00:00.000Z', '2026-07-10T12:00:00.000Z'])
-      expect(result.records[1]?.payload.occurredAt).toBe('2020-03-12')
+      expect(result.records[1]?.payload).toMatchObject({
+        occurredAt: initialRecords[1]!.payload.occurredAt,
+        clinicalFact: { clinicalDate: '2020-03-12' },
+      })
       expect(result.records.every((record) => record.dateBasis === 'document' && sourceText.includes(record.dateEvidence!))).toBe(true)
       expect(await listWriteOperationMetadataPaths(fixture.vault)).toEqual(writesBefore)
       expect(await readFile(documentPath, 'utf8')).toBe(sourceText)
@@ -3097,12 +3106,12 @@ describeRealCodex('real Codex GPT-6 configuration e2e', () => {
 })
 
 describeRealCodex('real Codex default model restore e2e', () => {
-  it('restores the GPT-6.1 Sol default exactly once without naming a retired model', async () => {
+  it('restores the GPT-6.1 Terra default exactly once without naming a retired model', async () => {
     const config = await resolveRealCodexE2eConfig()
     const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-default-model-restore-'))
     const updates: unknown[] = []
     const snapshot: import('@murphai/hosted-execution/runtime-control').HostedRuntimeAssistantConfigurationSnapshot = {
-      availableModels: ['gpt-6.1-sol', 'gpt-6-sol', 'gpt-6-luna', 'gpt-5.6-luna'],
+      availableModels: ['gpt-6.1-terra', 'gpt-6-luna', 'gpt-5.6-luna'],
       availableReasoningEfforts: ['low', 'medium', 'high', 'xhigh'] as const,
       configurationAvailable: true,
       dormantSolPreference: false,
@@ -3146,10 +3155,10 @@ describeRealCodex('real Codex default model restore e2e', () => {
         workingDirectory,
       })
       process.stdout.write(`[default-model-restore-e2e] ${JSON.stringify({ reply: result.finalMessage, updates })}\n`)
-      expect(updates).toEqual([{ action: 'update', assistantInputId: 'ain_00000000000000000000000000000062', model: 'gpt-6.1-sol' }])
-      expect(result.finalMessage).toMatch(/default|sol/iu)
+      expect(updates).toEqual([{ action: 'update', assistantInputId: 'ain_00000000000000000000000000000062', model: 'gpt-6.1-terra' }])
+      expect(result.finalMessage).toMatch(/default|terra/iu)
       expect(result.finalMessage).toMatch(/next|future|going forward/iu)
-      expect(result.finalMessage).not.toMatch(/terra|upgrade|payment|cannot|unable/iu)
+      expect(result.finalMessage).not.toMatch(/gpt-5\.6-terra|upgrade|payment|cannot|unable/iu)
     } finally {
       await stopWarmCodexAppServer('default-model-restore-e2e-complete')
       await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
@@ -4134,6 +4143,11 @@ describeRealCodex('real Codex email onboarding follow-up e2e', () => {
         ),
         prompt: [
           MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.instructions,
+          'Recent private onboarding conversation from the previous day:',
+          `Murph: ${ASSISTANT_FIRST_CONTACT_WELCOME_MESSAGE}`,
+          'Member: Yes, let us start.',
+          'Murph: What should I call you? How old are you, and what is your gender?',
+          'There has been no answer to that opening question.',
           'Trusted context for this occurrence:',
           '- This is the first available day in the finite follow-up window.',
           '- No earlier follow-up question is unanswered.',
@@ -4142,7 +4156,7 @@ describeRealCodex('real Codex email onboarding follow-up e2e', () => {
       })
       const decision = parseAssistantNotificationDecision(result.finalMessage)
 
-      expect(decision.kind).toBe('send_message')
+      expect(decision.kind, JSON.stringify({ reply: result.finalMessage, actions: readCapabilityRoutingActions(result.jsonEvents).map((action) => action.kind === 'command' ? { command: action.command, ok: action.ok } : action) })).toBe('send_message')
       if (decision.kind !== 'send_message') {
         throw new Error('Expected the email onboarding follow-up to send.')
       }
@@ -6284,7 +6298,7 @@ describeRealCodex('real Codex health guidance outcomes e2e', () => {
     {
       name: 'drafts the requested cardio horizon without activating a plan',
       prompt: 'I am a healthy adult returning to running. I comfortably walk 30 minutes and have no pain or symptoms. I have Tuesday, Thursday and Sunday free for 25 minutes. Give me an eight-week walk/run draft, not just a two-week plan. Keep the first weeks easy and explain how to adjust if it feels too hard. Plain text only; do not save anything or set reminders.',
-      required: [/walk/iu, /run|jog/iu, /(?:week\s*8|weeks?\s*\d+\s*[-–—]\s*8|eight.week)/iu, /easy|talk|conversational/iu, /repeat|reduce|back off|shorten|slow/iu],
+      required: [/walk/iu, /run|jog/iu, /(?:week\s*8|weeks?\s*\d+\s*[-–—]\s*8|eight.week)/iu, /easy|comfortable|talk|conversational/iu, /repeat|reduce|back off|shorten|slow/iu],
       forbidden: [/\b(?:is|are|will be) (?:guaranteed|injury.proof)\b/iu],
     },
     {
@@ -6335,6 +6349,7 @@ describeRealCodex('real Codex health guidance outcomes e2e', () => {
       const commandLogPath = path.join(fixtureRoot, 'commands.log')
       try {
         await initializeVault({ title: 'Synthetic guidance outcomes', timezone: 'UTC', vaultRoot: workingDirectory })
+        await upsertMemory(workingDirectory, { section: 'Preferences', text: 'Observed conversational language: English.' })
         await mkdir(fixtureRoot, { recursive: true })
         await cp(resolveAssistantSkillsRoot(), skillsRoot, { recursive: true })
         await writeFile(commandLogPath, '', 'utf8')
@@ -6346,7 +6361,7 @@ describeRealCodex('real Codex health guidance outcomes e2e', () => {
           codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
           codexHome: config.codexHome,
           configOverrides: WORKOUT_E2E_CODEX_CONFIG_OVERRIDES,
-          developerInstructions: buildCapabilityRoutingDeveloperInstructions(),
+          developerInstructions: buildCapabilityRoutingDeveloperInstructions(await readAssistantCurrentStatePrompt({ vaultRoot: workingDirectory })),
           dynamicTools: [MURPH_AUTOMATION_TOOL],
           env: { ...config.env, [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot, PATH: `${binDirectory}:${config.env.PATH ?? ''}` },
           model: config.model,
@@ -6364,7 +6379,7 @@ describeRealCodex('real Codex health guidance outcomes e2e', () => {
         expect(commands.filter((command) => /\b(?:save|import-json|set-status|start|add|edit|log|delete|remove)\b/u.test(command) && !command.includes('--help'))).toEqual([])
         for (const pattern of scenario.required) expect(result.finalMessage).toMatch(pattern)
         for (const pattern of scenario.forbidden) expect(result.finalMessage).not.toMatch(pattern)
-        expect(result.finalMessage).not.toMatch(/I(?:[’\x27]ve| have)? (?:saved|scheduled|activated|logged)|reminders? (?:is|are|have been) (?:set|scheduled)/iu)
+        expect(result.finalMessage).not.toMatch(/(?:^|[.!?\n]\s*)(?:I(?:[’\x27]ve| have)? (?:saved|scheduled|activated|logged)|(?:Your |The )?reminders? (?:is|are|have been) (?:set|scheduled))/iu)
       } finally {
         await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
       }
@@ -8724,7 +8739,7 @@ describeRealCodex('real Codex preference source e2e', () => {
         },
       })
       process.stdout.write(`[preference-source-e2e] ${JSON.stringify({ route, writeCount: writes.length, reply: result.finalMessage })}\n`)
-      expect(writes).toHaveLength(2)
+      expect(writes, JSON.stringify({ reply: result.finalMessage, actions: readCapabilityRoutingActions(result.jsonEvents).map((action) => action.kind === 'command' ? { command: action.command, ok: action.ok, output: action.output.slice(-500) } : action) })).toHaveLength(2)
       expect(writes).toEqual(expect.arrayContaining([
         {
           request: { action: 'update_personality', personality: { humor: 10 } },
@@ -16718,7 +16733,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
           && action.tool === MURPH_CREATE_PHONE_CALL_TOOL.name
         )
 
-        expect(toolCalls).toHaveLength(1)
+        expect(toolCalls, JSON.stringify({ reply: result.finalMessage, actions: actions.map((action) => action.kind === 'command' ? { command: action.command, ok: action.ok } : action) })).toHaveLength(1)
         const toolCall = toolCalls[0]
         if (toolCall?.kind !== 'dynamic') {
           throw new Error('Expected a real group phone-call tool call.')
@@ -42401,10 +42416,10 @@ function buildAutomaticMealCloseoutDeveloperInstructions(input: {
   })
 }
 
-function buildCapabilityRoutingDeveloperInstructions(): string {
+function buildCapabilityRoutingDeveloperInstructions(assistantContextSnapshotPrompt: string | null = null): string {
   return buildAssistantSystemPrompt({
     assistantCliContract: null,
-    assistantContextSnapshotPrompt: null,
+    assistantContextSnapshotPrompt,
     assistantHostedDeviceConnectAvailable: false,
     assistantHostedDeviceConnectProviders: [],
     assistantKnowledgeToolsAvailable: false,

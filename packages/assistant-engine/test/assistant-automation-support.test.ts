@@ -1347,6 +1347,32 @@ describe('assistant auto-reply prompt builder support', () => {
     })
   })
 
+  it('routes available video evidence through hosted analysis without requiring local playback', async () => {
+    const input = createPromptInput({
+      attachments: [createAttachment({ kind: 'video', mime: 'video/mp4', fileName: 'movement.mp4' })],
+      captureOverrides: { text: 'Count the push-ups in this video.', eventId: `ain_${'a'.repeat(32)}` },
+    })
+    input.attachmentEvidence.attachments[0]!.raw = {
+      kind: 'vault-relative-file', path: 'raw/inbox/movement.mp4',
+      byteSize: 128, mediaType: 'video/mp4', sha256: 'a'.repeat(64),
+    }
+    promptBuilderMocks.buildAssistantInputAttachmentPromptBundles.mockResolvedValue([{
+      attachmentId: 'video-1', ordinal: 1, kind: 'video', mime: 'video/mp4',
+      fileName: 'movement.mp4', storedPath: 'raw/inbox/movement.mp4',
+      parseState: null, routingImage: null, fragments: [], combinedText: '',
+    }])
+    const results = [buildAssistantAutoReplyPrompt([input]), await prepareAssistantAutoReplyInput([input], '/tmp/automation-support-vault')]
+    for (const result of results) {
+      expect(result.kind).toBe('ready')
+      if (result.kind !== 'ready') throw new Error('Expected a ready video prompt.')
+      expect(result.prompt).toContain('Current inbound messages (in received order):')
+      expect(result.prompt).toContain(`Message ref: ain_${'a'.repeat(32)}`)
+      expect(result.prompt).toContain('murph.analyze_video')
+      expect(result.prompt).toContain('local playback is not a prerequisite')
+      expect(result.prompt).not.toContain('Inspect the local file with tools when needed')
+    }
+  })
+
   it('builds a single-capture prompt without grouped capture prefixes', () => {
     const result = buildAssistantAutoReplyPrompt([
       createPromptInput({
@@ -1427,6 +1453,7 @@ describe('assistant auto-reply prompt builder support', () => {
     if (result.kind !== 'ready') {
       throw new Error('Expected a ready prompt.')
     }
+    expect(result.prompt).toMatch(/^Current inbound messages \(in received order\):/u)
     expect(result.prompt).toContain('Source: telegram')
     expect(result.prompt).toContain(
       'Occurred at (America/New_York local; UTC in brackets): 2026-04-07 20:00:00 [UTC 2026-04-08T00:00:00.000Z] -> 2026-04-07 20:00:05 [UTC 2026-04-08T00:00:05.000Z]',

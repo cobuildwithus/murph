@@ -258,7 +258,7 @@ export async function runCanonicalReminderJourney(config: CanonicalLiveConfig): 
     assert.ok(reminder)
     assert.equal(reminder.status, 'active')
     assert.match(reminder.instructions, /stretch/iu)
-    assert.ok(['gpt-6-luna', 'gpt-6-sol'].includes(reminder.assistantTargetOverride?.model ?? ''), 'The reminder must save an explicit supported reminder model.')
+    assert.ok(['gpt-6-luna', 'gpt-6-sol', 'gpt-6.1-sol'].includes(reminder.assistantTargetOverride?.model ?? ''), `The reminder must save an explicit supported reminder model; received ${reminder.assistantTargetOverride?.model ?? 'none'}.`)
     assert.equal(reminder.route.channel, 'linq')
     assert.equal(reminder.route.threadId ?? reminder.route.deliveryTarget, THREAD_ID)
     assert.equal(automationRequests.filter((request) => request.action === 'save').length, 1, 'The model must create exactly one reminder through the hosted tool.')

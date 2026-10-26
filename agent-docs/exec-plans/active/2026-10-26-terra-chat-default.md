@@ -67,8 +67,53 @@ Production execution is not yet performed.
 
 Complete native first requests captured through the scripted Responses boundary,
 with identical synthetic fixtures and production prompt builders. Base restores
-original tool descriptions/enums and uses Sol; head uses Terra. Individual
-160,377 → 160,598 UTF-8 bytes (+221, +0.138%); group 138,561 → 138,910 bytes
-(+349, +0.252%). Includes instructions, input, tool declarations and all
+original tool descriptions/enums and inbound framing and uses Sol; head uses
+Terra. Both use the production inbound-message builder with identical inputs. Individual
+160,600 → 160,868 UTF-8 bytes (+268, +0.167%); group 138,746 → 139,142 bytes
+(+396, +0.285%). Includes instructions, input, tool declarations and all
 provider-visible fields; excludes the nondeterministic prompt cache key.
 Exact target tokenizers are unavailable, so token counts/deltas are unmeasured.
+
+## Full live comparison follow-up
+
+The production-patched native binary built successfully. Both models run the
+same 540-case local-subscription inventory. Completed first-run results are
+retained across bounded process restarts; interrupted cases are recorded and
+excluded until rerun. Some journeys intentionally pin another model and are
+shared regression coverage, not a controlled Terra/Sol comparison. The source
+baseline is the initial feature commit, with later remediation evaluated
+separately. The comparison is still running; rollout verdict remains **Hold**.
+
+Initial failures exposed ambiguous incoming-message framing and video evidence
+that directed local playback instead of the hosted analysis tool. The prompt
+builder now labels current inbound messages and routes available video evidence
+to its analysis owner. Deterministic prompt proof passes; the affected group
+video live journey passes. Batched preference updates need further assessment
+because outcomes remained inconsistent across samples.
+
+Both models also exposed clinical extraction ambiguity for known values with
+undocumented units. Preserve these as typed observations with no inferred unit,
+rather than dropping the fact or blocking an otherwise complete extraction.
+The updated clinical deterministic suite and both structured live variants pass
+on both models. Correct stale live fixtures for the Terra default, structured
+clinical dates, separate procedure/finding facts, and current reminder models.
+Read-only health-guidance fixtures now begin with an already-known language,
+while retaining their exact no-write assertions. The onboarding email fixture
+now supplies the prior conversation needed to establish its stage.
+
+The complete comparison must finish before the final quality verdict. Do not
+merge or deploy based on passing deterministic checks alone. Production model
+preferences have not been reset.
+
+The meal-intake benchmark's 21 cases cannot reach the model: their uncommitted
+image corpus is absent. A local food-label service was started for diagnosis,
+but the populated labels database denied reads (`42501`); the alternate local
+fixture database contains only one food. No permissions were changed and the
+session-owned service was stopped. Treat these as environment blocks, not
+model-quality failures. The separate API-key cache replay is also blocked by
+its missing development credential.
+
+Follow-up checks: 104 prompt/clinical unit tests, Assistant Engine typecheck,
+and the 17-file complexity guard pass with unchanged complexity debt. Corrected
+clinical-date recovery passes on both models and verifies that documentation
+timestamps remain unchanged while the clinical date is repaired.
