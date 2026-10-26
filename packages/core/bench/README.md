@@ -77,6 +77,114 @@ from filesystem/path-check work before proposing an owner-preserving change.
 This baseline does not establish the cause of production seconds or a production
 speedup. No cache, index, telemetry patch, or production optimization is included.
 
+## Cold CLI event-read import experiment
+
+`scripts/benchmark-event-read-import.mjs` measures the actual assembled runner's
+`node_modules/@murphai/murph/.bundle/bin.js` and installed native dependencies.
+It does not measure a toy reader, an unbundled source CLI, or a replacement
+resolver. Assembly bundles static imports with ESM splitting, but the variable
+`loadRuntimeModule(specifier)` resolves core through its installed export map.
+The existing assembler preserves that map and core's emitted files automatically.
+Its shared external CLI timing owner stays unchanged. The root tsconfig already
+maps `@murphai/core/*`; Web's independent source map names the semantic entry.
+
+The candidate re-exports the two unchanged readers directly from the ledger.
+Its closure still includes shared validation, event-spine and write helpers;
+this experiment does not split those owners. Source-closure counts do not prove
+that work disappears from the production graph. The native probe must show it.
+
+Use Node 24.22.1 and pnpm 10.33.0. Independently assemble the unchanged base and
+candidate with the normal frozen install and `pnpm --dir apps/cloudflare runner:bundle`.
+Do not substitute a source-path loader or hand-built package shim. From the
+candidate checkout, with checkout variables naming those two local checkouts:
+
+```sh
+BASE_BUNDLE="$BASE_CHECKOUT/apps/cloudflare/.deploy/runner-bundle"
+CANDIDATE_BUNDLE="$CANDIDATE_CHECKOUT/apps/cloudflare/.deploy/runner-bundle"
+node --test scripts/benchmark-event-read-import.test.mjs
+node scripts/benchmark-event-read-import.mjs check "$CANDIDATE_BUNDLE"
+node scripts/benchmark-event-read-import.mjs control "$BASE_BUNDLE"
+node scripts/benchmark-event-read-import.mjs pairs "$BASE_BUNDLE" "$CANDIDATE_BUNDLE"
+```
+
+`check` is a deterministic regression over the real assembled CLI and a small
+48-row, three-month version of the existing fixture. Successful `meal show`
+must load the installed semantic entry, omit the native core root and unrelated
+automation/memory/scheduled-log modules, and return the entire expected payload.
+It fails the root-import baseline without a wall-time threshold. Both `check`
+and paired runs exercise exact-event show, old-owner absence, appended revision
+freshness, duplicate-owner conflict, tombstone visibility and invalid JSONL.
+Paired runs compare every byte of stdout and stderr and exit status for each
+success/error case. Exact `event show` retains its independent static core
+dependencies; it is a correctness control, not another import-saving claim.
+Running `check` against the base must specifically reach
+`meal-read-still-loads-core-barrel`; a setup or correctness failure is not the
+expected baseline failure.
+
+`control` compares the base artifact with itself. `pairs` uses the same generated
+vault at the same path for both artifacts. The existing `meal-read.ts` fixture
+is seeded once outside child processes: 24,000 unrelated observations/notes,
+24 months, gzip/Brotli/plain shards and three out-of-order meal revisions with
+an old owner. `MURPH_MEAL_READ_ROWS`, `MURPH_MEAL_READ_MONTHS` and
+`MURPH_MEAL_READ_NOTE_BYTES` keep the ranges documented above.
+`MURPH_EVENT_READ_PAIRS` defaults to 10 measured pairs (range 8–40), after two
+discarded warmup pairs. Every invocation is a new native process; execution is
+sequential and base/candidate order alternates. No command runs a provider.
+
+Separate traced invocations use Node's successful `load` hook, deduplicated by
+module URL, to report actual file-module counts, on-disk loaded-file bytes,
+returned-source bytes, unavailable-source counts, loaded CLI chunk bytes, and
+the public core module labels removed. These are load-input measures, not a
+claim about exact parser/evaluator work. Unknown-source CJS/native files still
+contribute their file bytes. The probe observes the whole process, including
+normal CLI teardown, and rejects dependencies outside the supplied artifact.
+The builtin-only observer loads before observation; fixture and report code are
+outside the CLI inventory.
+
+Timing children disable load hooks. A common builtin-only preload records
+whole-process CPU and process-start-to-exit-callback wall time, before its
+receipt write. Parent spawn-to-close wall also includes scheduling, output drain
+and the receipt write. All raw numeric pairs, min/median/max, paired deltas and
+ratios are retained. Filesystem caches may be warm; this is cold Node module
+state, not cold storage. Wall minus CPU is not disk wait. Neither source byte
+counts nor the existing aggregate production phase maxima establish CPU cost.
+The isolated child environment supplies no CLI UDP telemetry endpoint; existing
+deterministic owner tests retain the phase-count and timing-wrapper proof.
+
+Reports contain fixture stored/decoded bytes, a canonical-input content digest,
+assembled CLI output bytes/digests, and complete stdout/stderr bytes/digests.
+Raw output stays in memory; no rows, identifiers, local paths or provider content
+are published. Ordinary `--format json` is compared unchanged; `--full-output`
+adds duration metadata and is deliberately not requested. Canonical bytes must
+remain unchanged by reads. The correctness battery's synthetic edits are restored,
+and the owned temporary fixture is removed on completion or handled failure.
+
+`pairs` fails after reporting evidence if the candidate still loads the native
+core root or does not reduce both whole-process loaded module count and file
+bytes. Reject the runtime/export candidate in that case and retain only this
+diagnostic harness. A passing import gate alone is not a speedup: compare paired
+CPU/wall effects with base/base variation, repeat under the intended resource
+allocation, and retain any regressions. No production speedup or changelog is
+justified until the parent independently confirms a material benefit.
+
+Focused source proof, in addition to the native `check` command:
+
+```sh
+pnpm --dir packages/core exec vitest run --config vitest.config.ts --no-coverage test/event-read-surface.test.ts test/event-owner-timing.test.ts
+pnpm --dir packages/vault-usecases exec vitest run --config vitest.config.ts --no-coverage test/runtime.test.ts test/narrow-query-readers-real.test.ts
+pnpm exec vitest run --config packages/cli/vitest.workspace.ts --no-coverage packages/cli/test/cli-expansion-document-meal.test.ts packages/cli/test/error-recovery-events-documents.test.ts
+pnpm exec vitest run --config scripts/vitest.config.ts --no-coverage scripts/workspace-source-resolution.test.ts
+pnpm --filter @murphai/core typecheck
+pnpm --filter @murphai/vault-usecases typecheck
+node scripts/run-typescript.mjs package --project packages/core/bench/tsconfig.json --pretty false
+node scripts/verify-workspace-boundaries.mjs
+```
+
+The existing real-model journey, when needed, is
+`real model canonical hosted meal uses local installed CLI under member permissions`.
+No assistant behavior, protocol, prompt, discoverability or recovery changes are
+part of this experiment.
+
 ## Device import CPU reproduction
 
 Run this synthetic benchmark only in a disposable Docker container. It exercises

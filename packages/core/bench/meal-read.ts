@@ -2,6 +2,7 @@ import { appendFile, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { performance } from "node:perf_hooks";
 import { isDeepStrictEqual } from "node:util";
+import { pathToFileURL } from "node:url";
 
 import type { EventRecord, MealEventRecord } from "@murphai/contracts";
 
@@ -56,7 +57,7 @@ function parity(actual: ReadResult, expected: ReadResult): void {
   check(isDeepStrictEqual(actual, expected), "full-read-result-parity-failed");
 }
 
-async function seedFixture(core: Core, vaultRoot: string, rows: number, months: number, noteBytes: number) {
+export async function seedFixture(core: Core, vaultRoot: string, rows: number, months: number, noteBytes: number) {
   // These runtime imports must follow the measured core import.
   const { CONTRACT_SCHEMA_VERSION, eventRecordSchema } = await import("@murphai/contracts");
   const { compressShard } = await import("../src/shard-compression.ts");
@@ -149,7 +150,7 @@ async function seedFixture(core: Core, vaultRoot: string, rows: number, months: 
     sizes[encoding].storedBytes += stored.byteLength;
   }
   return {
-    ownerId,
+    ownerId, oldOwnerId,
     expected: { eventId, ledgerFile: shard(1), event: target } satisfies ReadResult,
     freshExpected: { eventId, ledgerFile: shard(months - 1), event: fresh } satisfies ReadResult,
     freshLine: serialize(fresh),
@@ -237,8 +238,10 @@ async function main(): Promise<void> {
   console.log(JSON.stringify({ scenario: "complete", fixtureRemoved: true }));
 }
 
-void main().catch((error: unknown) => {
-  console.error(JSON.stringify({ scenario: "failed", phase,
-    reason: error instanceof BenchmarkError ? error.message : "setup-or-reader-error" }));
-  process.exitCode = 1;
-});
+if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
+  void main().catch((error: unknown) => {
+    console.error(JSON.stringify({ scenario: "failed", phase,
+      reason: error instanceof BenchmarkError ? error.message : "setup-or-reader-error" }));
+    process.exitCode = 1;
+  });
+}

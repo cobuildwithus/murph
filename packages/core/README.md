@@ -2,6 +2,15 @@
 
 Workspace-private canonical mutation owner for vault initialization, filesystem primitives, audit emission, domain mutation APIs, and current-format vault validation. No other package may mutate canonical vault data directly.
 
+`@murphai/core/event-read` is the semantic canonical event-read surface. It
+exports only the existing `readEvent` and `readOwnedEvent` functions and their
+input/result types. Both are the same implementations exported by the root;
+ledger scanning, validation, ownership, lifecycle and freshness stay at their
+existing owner. The entry deliberately bypasses the root and events barrels,
+without splitting the ledger or introducing another reader. See
+[the assembled CLI experiment](bench/README.md#cold-cli-event-read-import-experiment)
+for the measured-work acceptance boundary.
+
 Device imports reuse their prepared persistence plan under the canonical lock
 when delivery history inspection is unchanged. Expanding a bounded
 inspection to full history still rebuilds the plan before publication, preserving

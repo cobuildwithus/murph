@@ -31,6 +31,14 @@ When an exact read feeds a mutation, carry the observed lifecycle revision or
 source revision into the canonical core writer rather than treating projection
 state as write authority.
 
+Exact-event and meal/document owner lookups lazily load
+`@murphai/core/event-read` inside the existing `event-core-load` span. They retain
+the same readers, visibility checks, error mappings and owner-scan spans. Other
+runtime loaders continue to use their current surfaces. The native package
+export is required because `loadRuntimeModule` uses a variable import; the
+production CLI bundle cannot replace that lookup with a statically bundled
+module. Core's manifest and emitted entry ship together in the runner artifact.
+
 Experiment progress and outcome analysis share one canonical evidence snapshot
 through `readExperimentQuerySource()`, deriving the selected metrics without
 rebuilding the global query/search database. Outcome persistence keeps evidence

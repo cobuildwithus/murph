@@ -500,7 +500,7 @@ for (const lookupKind of ["exact", "owner"] as const) {
     const importFailure = Object.assign(new Error("PRIVATE_SENTINEL"), { details: { payload: "PRIVATE_SENTINEL" } });
     let rejectImport = false;
     const load = vi.fn(async (specifier: string) => {
-      assert.equal(specifier, "@murphai/core");
+      assert.equal(specifier, "@murphai/core/event-read");
       advance(5);
       if (rejectImport) throw importFailure;
       return { readEvent: read, readOwnedEvent: read };

@@ -7,7 +7,7 @@ import { test, vi } from "vitest";
 import { CONTRACT_SCHEMA_VERSION, eventRecordSchema, type MealEventRecord } from "@murphai/contracts";
 import { normalizeCliTiming, type CliTiming } from "@murphai/runtime-state/cli-timing";
 import { timeCliDispatch, withCliTiming } from "@murphai/runtime-state/node/cli-timing";
-import { readEvent, readOwnedEvent } from "../src/domains/events/ledger.ts";
+import { readEvent, readOwnedEvent } from "../src/event-read.ts";
 import * as storage from "../src/event-ledger-storage.ts";
 import { deterministicContractId } from "../src/ids.ts";
 import { compressShard } from "../src/shard-compression.ts";
