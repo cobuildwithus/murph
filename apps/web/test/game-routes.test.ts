@@ -226,6 +226,13 @@ describe("weekly game routes", () => {
       expect(other.status).toBe(404);
       expect((await other.json()).error.code).toBe("GAME_DISABLED");
       expect(mocks.runGameCommand).toHaveBeenCalledTimes(2);
+      // Before accepting, the invite's own token also lets its holder report it or block who sent it.
+      const reported = await routes.inviteReports.POST(writeRequest("POST", "/invites/tok_open/reports", { reportId: "report_1", reason: "money", about: "terms" }), params({ token: "tok_open" }));
+      expect(reported.status).toBe(200);
+      expect(mocks.canEnterGame).toHaveBeenLastCalledWith(LEO, "tok_open");
+      const blocked = await routes.inviteBlock.PUT(writeRequest("PUT", "/invites/tok_open/block"), params({ token: "tok_open" }));
+      expect(blocked.status).toBe(200);
+      expect(mocks.canEnterGame).toHaveBeenLastCalledWith(LEO, "tok_open");
     });
 
     it("reads the invite an app is holding from its header on any other route", async () => {

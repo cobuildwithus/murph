@@ -5,5 +5,5 @@ import { resolveDecodedRouteParam } from "@/src/lib/http";
 /** Block whoever sent this invite. */
 export const PUT = withJsonError(async (request: Request, context: { params: Promise<{ token: string }> }) => {
   const token = await resolveDecodedRouteParam(context.params, "token");
-  return respondToGameCommand(request, () => ({ token, type: "block" }), { body: false });
+  return respondToGameCommand(request, () => ({ token, type: "block" }), { body: false, inviteToken: token });
 });

@@ -949,7 +949,8 @@ export async function removeGamePostForReview(entryId: string): Promise<boolean>
   const entry = await getPrisma().gameEntry.findUnique({ select: { gameId: true }, where: { id: entryId } });
   if (!entry) return false;
   let removed = false;
-  await runLocked(entry.gameId, { actor: "ops" }, async ({ clock, tx }) => {
+  // As the system: ops takes a post down whether or not its game is still on.
+  await runLocked(entry.gameId, { actor: SYSTEM_ACTOR }, async ({ clock, tx }) => {
     const changed = await tx.gameEntry.updateMany({ where: { id: entryId, OR: [{ withdrawnReason: null }, { withdrawnReason: { not: "removed" } }] },
       data: { blurHash: null, mediaKeys: [], payloadEncrypted: null, textEncrypted: null, withdrawnAt: clock, withdrawnReason: "removed" } });
     removed = changed.count === 1;
