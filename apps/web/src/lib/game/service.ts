@@ -104,8 +104,7 @@ const WALLET_LIMIT = 200;
 // Five games, each with at most three legacy per-miss stakes owed by one loser.
 const CHAT_TICKET_LIMIT = 5 * 3 * GAME_MAX_LENGTH_DAYS;
 const ACTIVE_STATUSES = ["invited", "negotiating", "live"];
-// Open games between two people: one going and one rematch waiting, plus any
-// expired invite nobody has read since. A wide margin.
+// Open games a block ends per batch; it repeats until none is left.
 const BLOCK_GAME_LIMIT = 50;
 
 // ------------------------------------------------------------------- writes
@@ -792,15 +791,20 @@ async function block(context: CommandContext, command: { memberId?: string; toke
     if (!existing && await tx.gameBlock.count({ where: { blockerMemberId: actor } }) >= GAME_BLOCK_LIMIT) {
       reject("INVALID_REQUEST", "You've blocked too many people.");
     }
-    // Only open games change. Past games (however many) stay as they are and
-    // are hidden by the block row, so no history can stop a block.
-    const open = await tx.game.findMany({ orderBy: { id: "asc" }, select: { id: true }, take: BLOCK_GAME_LIMIT,
-      where: { AND: [gamesBetween(actor, memberId), { status: { in: ACTIVE_STATUSES } }] } });
-    const ids = open.map((game) => game.id);
-    if (ids.length > 0) await tx.$queryRaw`SELECT id FROM game WHERE id = ANY(${ids}::text[]) ORDER BY id FOR UPDATE`;
-    for (const game of await tx.game.findMany({ select: { id: true, status: true }, where: { id: { in: ids }, status: { in: ACTIVE_STATUSES } } })) {
-      await endGame(tx, game.id, { status: "void" });
-      await writeEvents(tx, game.id, actor, [{ payload: {}, type: game.status === "invited" ? "cancelled" : "blocked" }]);
+    // Every open game ends, a batch at a time until none is left; past games
+    // (however many) stay as they are, hidden by the block row, so no history
+    // can stop a block.
+    const ids: string[] = [];
+    for (;;) {
+      const batch = (await tx.game.findMany({ orderBy: { id: "asc" }, select: { id: true }, take: BLOCK_GAME_LIMIT,
+        where: { AND: [gamesBetween(actor, memberId), { status: { in: ACTIVE_STATUSES } }] } })).map((game) => game.id);
+      if (batch.length === 0) break;
+      await tx.$queryRaw`SELECT id FROM game WHERE id = ANY(${batch}::text[]) ORDER BY id FOR UPDATE`;
+      for (const game of await tx.game.findMany({ select: { id: true, status: true }, where: { id: { in: batch }, status: { in: ACTIVE_STATUSES } } })) {
+        await endGame(tx, game.id, { status: "void" });
+        await writeEvents(tx, game.id, actor, [{ payload: {}, type: game.status === "invited" ? "cancelled" : "blocked" }]);
+      }
+      ids.push(...batch);
     }
     // Every game of theirs still bound to a chat lets go of it, in one statement.
     const unbound = await tx.game.updateManyAndReturn({ data: { chatContainerMemberId: null }, select: { id: true },

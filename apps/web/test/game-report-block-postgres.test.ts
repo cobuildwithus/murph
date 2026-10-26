@@ -173,6 +173,24 @@ describe.skipIf(!runPostgresProof)("weekly game report and block", () => {
       .toMatchObject({ ok: false, error: { code: "PLAYER_UNAVAILABLE" } });
   });
 
+  it("ends every open game between them, however many there are, before it reports success", async () => {
+    const leo = await member("Leo");
+    const ava = await member("Ava");
+    const gameId = await live(leo, ava);
+    // More open addressed invites than one batch, as overlapping rematch requests could leave.
+    const template = await getPrisma().game.findUniqueOrThrow({ where: { id: gameId } });
+    const invites = Array.from({ length: 55 }, () => randomUUID());
+    await getPrisma().game.createMany({ data: invites.map((id) => ({ createdBy: leo, id, inviteeMemberId: ava, lengthDays: 7, round: 2,
+      inviteExpiresAt: new Date(Date.now() + 86_400_000), status: "invited", terms: template.terms ?? {}, termsWordsEncrypted: template.termsWordsEncrypted })) });
+    await getPrisma().gamePlayer.createMany({ data: invites.map((id) => ({ gameId: id, memberId: leo, seat: 0, timeZone: "America/New_York" })) });
+
+    await ok(ava, { memberId: leo, type: "block" });
+
+    expect(await getPrisma().game.count({ where: { id: { in: [gameId, ...invites] }, status: { not: "void" } } })).toBe(0);
+    expect(await run(leo, { entryId: randomUUID(), gameId, kind: "words", mediaKeys: [], text: "still here", type: "post" }))
+      .toMatchObject({ ok: false, error: { code: "GAME_NOT_LIVE" } });
+  });
+
   it("ends the pair's game chat: their games leave it, nothing waiting goes out, and Murph sees no game there", async () => {
     const leo = await member("Leo");
     const ava = await member("Ava");
