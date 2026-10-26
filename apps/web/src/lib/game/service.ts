@@ -687,11 +687,11 @@ async function redeem(context: CommandContext, command: Extract<GameCommand, { t
   const { actor } = context;
   const { ticketId } = command;
   const ticket = await getPrisma().gameTicket.findUnique({ select: { gameId: true, owedTo: true }, where: { id: ticketId } });
-  if (!ticket || ticket.owedTo !== actor) reject("TICKET_NOT_HELD", "That ticket isn't yours to cash in.");
+  if (!ticket || ticket.owedTo !== actor) reject("TICKET_NOT_HELD", "That prize isn't yours to mark done.");
   await runLocked(ticket.gameId, context, async ({ clock, now, tx }) => {
     const current = await tx.gameTicket.findUniqueOrThrow({ select: { createdAt: true, owedBy: true, status: true }, where: { id: ticketId } });
-    if (isTicketExpired(current, now)) reject("TICKET_EXPIRED", "This ticket expired before it was used.");
-    if (current.owedBy === null && current.status === "open") reject("INVALID_REQUEST", "They left Murph, so this ticket can't be marked done.");
+    if (isTicketExpired(current, now)) reject("TICKET_EXPIRED", "This prize expired before it was used.");
+    if (current.owedBy === null && current.status === "open") reject("INVALID_REQUEST", "They left Murph, so this prize can't be marked done.");
     // Already redeemed matches no row: a repeat, not an error.
     const changed = await tx.gameTicket.updateMany({
       data: { redeemedAt: clock, status: "redeemed" },

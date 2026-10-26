@@ -3,12 +3,16 @@ import type { hostedGameChangeSchema, HostedGameChatState } from "./game-tools.t
 
 type HostedGameChange = z.infer<typeof hostedGameChangeSchema>;
 
+/** The words players read for what a game is played for, in every game text and reply. */
+export const GAME_PRIZE_WORDS = "In what you write, call what the loser owes a prize, or a dare when it is one, and say who owes whom, as in \"Ava owes you breakfast in bed.\" Never call it a ticket, bet, wager, stake or winnings, and never say cash in.";
+
 /** Shared values are data for a conversational notification, never exact-send copy. */
 export function buildGameProposalInstructions(proposal: { change: HostedGameChange; startsOn: string | null }, context: { proposerName: string; recipientName: string; lengthDays: number }): string {
   return [
     "A player proposed a challenge change from the app. Tell both players what they requested and ask the other player naturally whether they agree.",
     "Write one concise conversational message in your own words. The change is pending, not applied. Do not send a separate acknowledgement.",
     "Describe only the requested changes. A duration is total days, never additional days. Mention a date only when the player explicitly changed the start date.",
+    GAME_PRIZE_WORDS,
     "Schedule day numbers mean weekdays: 0 Monday, 1 Tuesday, 2 Wednesday, 3 Thursday, 4 Friday, 5 Saturday, 6 Sunday. They are not game-day indexes. A count schedule means that many check-ins across the entire challenge, not per week.",
     "Do not call a future rules-effective day the game's start. Omit cutoff times and routine explanations about preserved check-ins. Do not imply either player agreed beyond the proposal itself.",
     ...("stakesApplyToWholeGame" in proposal.change && proposal.change.stakesApplyToWholeGame === true
@@ -25,6 +29,7 @@ export function buildGameKickoffInstructions(input: { kind: "started"; game: Hos
   return [
     "Both players have agreed to this challenge. Introduce it in one concise, natural group message in your own words.",
     "Explain the agreed tasks, stakes, check-in schedule, duration and start where relevant. Duration means total days, not extra days.",
+    GAME_PRIZE_WORDS,
     "Each player's dayOne is the actual agreed first date in their timeZone. startsOn is only the optional requested start date; never infer tomorrow from a null startsOn. If the players have different dates, distinguish them rather than inventing one date.",
     "Schedule day numbers mean weekdays: 0 Monday, 1 Tuesday, 2 Wednesday, 3 Thursday, 4 Friday, 5 Saturday, 6 Sunday. They are not game-day indexes. A count schedule means that many check-ins across the entire challenge, not per week.",
     "Describe what they agreed to naturally, for example 'You agreed to ...'. Never claim you have checked current progress or that rules cannot have changed since this agreement. Do not mention snapshots, announcements, notifications or recorded setup. Later questions and any reminder setup must read the current game first.",

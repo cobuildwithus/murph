@@ -1,12 +1,12 @@
 import * as z from '@murphai/contracts/zod-runtime'
-import { hostedGameUpdateSchema, hostedGamePhotoSchema, type HostedGameUpdate, type HostedGamePhoto } from '@murphai/hosted-execution/runtime-control'
+import { GAME_PRIZE_WORDS, hostedGameUpdateSchema, hostedGamePhotoSchema, type HostedGameUpdate, type HostedGamePhoto } from '@murphai/hosted-execution/runtime-control'
 import type { AssistantHostedToolContext } from '../../assistant/hosted-tool-context.js'
 import { parseDynamicToolArguments } from './dynamic-tool-wrapper.js'
 import { toolTextResult } from '../tool-failure-diagnostics.js'
 
 export const MURPH_READ_GAME_TOOL = {
   namespace: 'murph', name: 'read_game',
-  description: 'Read the games shared by the two players in this group chat, their agreed tasks, stakes, schedule, start dates and pending changes. Use before answering questions or changing a game. Each day closes at 3 AM the following local date in each player’s timeZone; dayOne is their first calendar date. Starting before 3 AM may give a short first day; explain the actual cutoff. The shared view includes daily check-in status and frozen settled results, but excludes private labels, photos, captions and excuses. Answer from returned progress and result; a missing post today is not a miss, and any-days targets are a total rather than daily obligations. Never infer why someone did not post.',
+  description: `Read the games shared by the two players in this group chat, their agreed tasks, stakes, schedule, start dates and pending changes. Use before answering questions or changing a game. Each day closes at 3 AM the following local date in each player’s timeZone; dayOne is their first calendar date. Starting before 3 AM may give a short first day; explain the actual cutoff. The shared view includes daily check-in status and frozen settled results, but excludes private labels, photos, captions and excuses. Answer from returned progress and result; a missing post today is not a miss, and any-days targets are a total rather than daily obligations. Never infer why someone did not post. ${GAME_PRIZE_WORDS}`,
   inputSchema: { type: 'object', additionalProperties: false, properties: { messageRef: { type: 'string', description: 'For a photo offer or save, select the current accepted message from that player so photoCheckIn reflects their introduction status.' } }, required: [] },
 } as const
 export const MURPH_UPDATE_GAME_TOOL = {
