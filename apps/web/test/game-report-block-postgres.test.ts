@@ -150,6 +150,29 @@ describe.skipIf(!runPostgresProof)("weekly game report and block", () => {
     expect((await readGame(first, leo))!.players.some((player) => player.left)).toBe(false);
   });
 
+  it("blocks whatever history the pair has: hundreds of cancelled rematches can't stop it", async () => {
+    const leo = await member("Leo");
+    const ava = await member("Ava");
+    const settled = await live(leo, ava);
+    await devSettleNow(settled, leo);
+    // Leo addressed rematches to Ava and cancelled each one, far past any bound.
+    const template = await getPrisma().game.findUniqueOrThrow({ where: { id: settled } });
+    const cancelled = Array.from({ length: 201 }, () => randomUUID());
+    await getPrisma().game.createMany({ data: cancelled.map((id) => ({ createdBy: leo, id, inviteeMemberId: ava, lengthDays: 7, previousGameId: settled,
+      round: 2, status: "void", terms: template.terms ?? {}, termsWordsEncrypted: template.termsWordsEncrypted })) });
+    await getPrisma().gamePlayer.createMany({ data: cancelled.map((gameId) => ({ gameId, memberId: leo, seat: 0, timeZone: "America/New_York" })) });
+    // And one more rematch, still open on Ava's Home.
+    const open = (await ok(leo, { gameId: randomUUID(), inviteeFirstName: "Ava", previousGameId: settled, terms: TERMS, type: "createGame" }))!;
+
+    expect(await ok(ava, { memberId: leo, type: "block" })).toBeNull();
+
+    expect(await getPrisma().gameBlock.count({ where: { blockedMemberId: leo, blockerMemberId: ava } })).toBe(1);
+    expect(await getPrisma().game.findUniqueOrThrow({ where: { id: open.id } })).toMatchObject({ status: "void" });
+    expect((await readHome(ava)).games.map((game) => game.id)).not.toContain(open.id);
+    expect(await run(leo, { gameId: randomUUID(), inviteeFirstName: "Ava", previousGameId: settled, terms: TERMS, type: "createGame" }))
+      .toMatchObject({ ok: false, error: { code: "PLAYER_UNAVAILABLE" } });
+  });
+
   it("ends the pair's game chat: their games leave it, nothing waiting goes out, and Murph sees no game there", async () => {
     const leo = await member("Leo");
     const ava = await member("Ava");

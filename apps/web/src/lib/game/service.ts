@@ -104,8 +104,9 @@ const WALLET_LIMIT = 200;
 // Five games, each with at most three legacy per-miss stakes owed by one loser.
 const CHAT_TICKET_LIMIT = 5 * 3 * GAME_MAX_LENGTH_DAYS;
 const ACTIVE_STATUSES = ["invited", "negotiating", "live"];
-// Every game two people ever played together, a wide margin over a year of weekly rounds.
-const BLOCK_GAME_LIMIT = 200;
+// Open games between two people: one going and one rematch waiting, plus any
+// expired invite nobody has read since. A wide margin.
+const BLOCK_GAME_LIMIT = 50;
 
 // ------------------------------------------------------------------- writes
 
@@ -791,21 +792,20 @@ async function block(context: CommandContext, command: { memberId?: string; toke
     if (!existing && await tx.gameBlock.count({ where: { blockerMemberId: actor } }) >= GAME_BLOCK_LIMIT) {
       reject("INVALID_REQUEST", "You've blocked too many people.");
     }
-    const between = await tx.game.findMany({ orderBy: { id: "asc" }, select: { id: true }, take: BLOCK_GAME_LIMIT + 1,
-      where: gamesBetween(actor, memberId) });
-    if (between.length > BLOCK_GAME_LIMIT) throw new Error("A blocked pair's games exceed their bound.");
-    const ids = between.map((game) => game.id);
+    // Only open games change. Past games (however many) stay as they are and
+    // are hidden by the block row, so no history can stop a block.
+    const open = await tx.game.findMany({ orderBy: { id: "asc" }, select: { id: true }, take: BLOCK_GAME_LIMIT,
+      where: { AND: [gamesBetween(actor, memberId), { status: { in: ACTIVE_STATUSES } }] } });
+    const ids = open.map((game) => game.id);
     if (ids.length > 0) await tx.$queryRaw`SELECT id FROM game WHERE id = ANY(${ids}::text[]) ORDER BY id FOR UPDATE`;
-    const games = await tx.game.findMany({ select: { chatContainerMemberId: true, id: true, status: true }, where: { id: { in: ids } } });
-    for (const game of games.filter((candidate) => ACTIVE_STATUSES.includes(candidate.status))) {
+    for (const game of await tx.game.findMany({ select: { id: true, status: true }, where: { id: { in: ids }, status: { in: ACTIVE_STATUSES } } })) {
       await endGame(tx, game.id, { status: "void" });
       await writeEvents(tx, game.id, actor, [{ payload: {}, type: game.status === "invited" ? "cancelled" : "blocked" }]);
     }
-    const chatted = games.filter((game) => game.chatContainerMemberId !== null || ACTIVE_STATUSES.includes(game.status)).map((game) => game.id);
-    if (chatted.length > 0) {
-      await tx.game.updateMany({ data: { chatContainerMemberId: null }, where: { id: { in: chatted } } });
-      await skipGameChatLifecycleTx(tx, chatted, await databaseNow(tx));
-    }
+    // Every game of theirs still bound to a chat lets go of it, in one statement.
+    const unbound = await tx.game.updateManyAndReturn({ data: { chatContainerMemberId: null }, select: { id: true },
+      where: { AND: [gamesBetween(actor, memberId), { chatContainerMemberId: { not: null } }] } });
+    await skipGameChatLifecycleTx(tx, [...new Set([...ids, ...unbound.map((game) => game.id)])], await databaseNow(tx));
     if (!existing) await tx.gameBlock.create({ data: { blockedMemberId: memberId, blockerMemberId: actor } });
   });
   return null;
