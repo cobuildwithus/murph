@@ -53,6 +53,7 @@ import { HomeLoadStateStudy } from "./home-load-state-study";
 import { HomeOnboardingStepsStudy } from "./home-onboarding-steps-study";
 import { JoinFamilyBillingRecoveryStudy } from "./join-family-billing-recovery-study";
 import { OpsUsageStudy } from "./ops-usage-study";
+import { OpsGameReportsStudy } from "./ops-game-reports-study";
 import { OpsOperatorTaskStudy } from "./ops-operator-task-study";
 import { JunctionRecoveryStudy, RuntimeMaintenanceStudy } from "./runtime-maintenance-study";
 import { SettingsAuthRequiredStudy } from "./settings-auth-required-study";
@@ -736,6 +737,12 @@ export function SectionsContent({
             title="Private Murph diagnostic and direct member message"
           >
             <OpsOperatorTaskStudy />
+          </StudySection>
+
+          <Separator />
+
+          <StudySection id="game-reports" title="Weekly game reports to review within 24 hours">
+            <OpsGameReportsStudy />
           </StudySection>
         </>
       ) : null}
