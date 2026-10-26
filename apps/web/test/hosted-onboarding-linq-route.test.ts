@@ -7,7 +7,9 @@ const mocks = vi.hoisted(() => ({
   deriveHostedOnboardingTimingErrorName: vi.fn(() => "Error"),
   finishHostedOnboardingTiming: vi.fn(),
   handleHostedOnboardingLinqWebhook: vi.fn(),
+  hostedLinqDailyStateUpdateMany: vi.fn(),
   logHostedOnboardingDiagnostic: vi.fn(),
+  lookupHostedMemberIdentityByPhoneNumber: vi.fn(),
   sendHostedLinqChatMessage: vi.fn(),
   startHostedOnboardingTiming: vi.fn((step: string, baseDetails: Record<string, unknown> = {}) => ({
     baseDetails,
@@ -28,6 +30,23 @@ vi.mock("next/server", async () => {
 vi.mock("@/src/lib/hosted-onboarding/webhook-service", () => ({
   handleHostedOnboardingLinqWebhook: mocks.handleHostedOnboardingLinqWebhook,
 }));
+
+vi.mock("@/src/lib/prisma", () => ({
+  getPrisma: () => ({
+    hostedLinqDailyState: { updateMany: mocks.hostedLinqDailyStateUpdateMany },
+  }),
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/hosted-member-identity-store", async () => {
+  const actual = await vi.importActual<
+    typeof import("@/src/lib/hosted-onboarding/hosted-member-identity-store")
+  >("@/src/lib/hosted-onboarding/hosted-member-identity-store");
+
+  return {
+    ...actual,
+    lookupHostedMemberIdentityByPhoneNumber: mocks.lookupHostedMemberIdentityByPhoneNumber,
+  };
+});
 
 vi.mock("@/src/lib/hosted-onboarding/linq", async () => {
   const actual = await vi.importActual<typeof import("@/src/lib/hosted-onboarding/linq")>(
@@ -72,6 +91,10 @@ describe("hosted onboarding Linq webhook route", () => {
     mocks.sendHostedLinqChatMessage.mockResolvedValue({
       chatId: "chat_visible_route",
       messageId: "msg_visible_reply",
+    });
+    mocks.hostedLinqDailyStateUpdateMany.mockResolvedValue({ count: 1 });
+    mocks.lookupHostedMemberIdentityByPhoneNumber.mockResolvedValue({
+      core: { id: "hbm_visible_route", suspendedAt: null },
     });
   });
 
@@ -229,9 +252,9 @@ describe("hosted onboarding Linq webhook route", () => {
     });
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith({
       chatId: "chat_visible_route",
-      idempotencyKey: "visible-secondary:evt_visible_route",
+      idempotencyKey: "signup-link-reminder:hbm_visible_route:2026-07-25",
       message: "I already sent your setup link in your Murph messages. Open it to finish setting up Murph.",
-      replyToMessageId: "msg_visible_route",
+      replyToMessageId: null,
     });
   });
 
