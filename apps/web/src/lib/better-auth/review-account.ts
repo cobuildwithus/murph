@@ -25,14 +25,21 @@ export async function isHostedAuthReviewMember(input: {
   memberId: string;
   prisma: HostedOnboardingReadClient;
 }): Promise<boolean> {
+  return (await readHostedAuthReviewMemberId(input)) === input.memberId;
+}
+
+/** The configured review member, or null while the fixed code is off or nobody verified that email. */
+export async function readHostedAuthReviewMemberId(input: {
+  prisma: HostedOnboardingReadClient;
+}): Promise<string | null> {
   const review = readHostedAuthReviewAccount();
-  if (!review) return false;
+  if (!review) return null;
   const match = await lookupHostedMemberByVerifiedEmailAddress({
     address: review.email,
     prisma: input.prisma,
     projection: "core",
   });
-  return match?.core.id === input.memberId;
+  return match?.core.id ?? null;
 }
 
 function readHostedAuthReviewAccount(): { code: string; email: string } | null {

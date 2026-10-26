@@ -63,6 +63,12 @@ const OG_SHARE_ASSET_TRACE_INCLUDES = [
   "app/fonts/*.ttf",
   "public/logo.svg",
 ];
+// The App Review game seed posts these synthetic site images as its opponent's photos.
+const APP_REVIEW_GAME_PHOTO_TRACE_INCLUDES = [
+  "public/design-assets/hero-morning-outdoor-light-exposure.jpeg",
+  "public/design-assets/hero-at-home-static-stretching-latest.jpeg",
+  "public/design-assets/hero-walking-after-every-meal.jpeg",
+];
 const MURPH_CONTACT_CARD_AVATAR_TRACE_INCLUDES = [
   "public/brand-logos/murph-logo-avatar-*.png",
   "public/murph-headshots/*-sm.png",
@@ -300,6 +306,7 @@ export function buildHostedWebNextConfig(
       "/opengraph-image": OG_SHARE_ASSET_TRACE_INCLUDES,
       "/changelog/card/v1/[items]": OG_SHARE_ASSET_TRACE_INCLUDES,
       "/api/murph-contact-card": MURPH_CONTACT_CARD_AVATAR_TRACE_INCLUDES,
+      "/api/ops/app-review-game": APP_REVIEW_GAME_PHOTO_TRACE_INCLUDES,
       "/imessage/card/v1/[payload]": OG_SHARE_ASSET_TRACE_INCLUDES,
     },
     outputFileTracingRoot: path.resolve(appDir, "../.."),
