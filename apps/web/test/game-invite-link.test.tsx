@@ -59,6 +59,15 @@ describe("weekly game invite link", () => {
     // A closed invite offers no app link.
     expect(renderToStaticMarkup(createElement(GameInviteView, { appUrl, preview: { status: "used" } }))).not.toContain(appUrl);
   });
+
+  it("offers the App Store under Open in Murph for a phone without the app", () => {
+    const appStore = 'href="https://apps.apple.com/us/app/murph-ai/id6786145859"';
+    const html = renderToStaticMarkup(createElement(GameInviteView, { appUrl: "ai.withmurph.app://invite/synthetic", preview: OPEN }));
+    expect(html).toContain(appStore);
+    expect(html).toContain("Get it on the App Store");
+    expect(html.indexOf(appStore)).toBeGreaterThan(html.indexOf("Open in Murph"));
+    expect(renderToStaticMarkup(createElement(GameInviteView, { appUrl: "ai.withmurph.app://invite/synthetic", preview: { status: "used" } }))).not.toContain(appStore);
+  });
 });
 
 it.each([

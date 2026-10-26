@@ -21,10 +21,16 @@ repeat checks they have already completed.
 
 ## WHOOP live heart rate
 
-Murph's iPhone game reads WHOOP's own realtime stream. WHOOP 4.0, 5.0 and MG
+Murph's iPhone app reads WHOOP's own realtime stream. WHOOP 4.0, 5.0 and MG
 are supported; older bands are not supported yet. Say that plainly for an older
 band instead of continuing pairing steps. Do not promise another band's or
 Android app's live-heart-rate support without a verified product contract.
+
+Live heart rate is part of Murph's game, which is invite only. Its Connect
+WHOOP button is on the game's heart rate screen. Name the game or that screen
+only after the member mentions the game; otherwise ask what Murph shows them.
+Murph Settings > Connect device pairs a band for wrist reminders, not for live
+heart rate.
 
 This connection does not require WHOOP's generic Heart Rate Broadcast switch,
 an Apple Health import, or a cloud account reconnect. Do not offer those as
@@ -60,7 +66,7 @@ a phone restart is a later option. Do not promise that opening WHOOP will wake
 every band or fix the connection.
 
 Forgetting and re-pairing in Murph is a last recovery option only if that
-member's app actually exposes it. The current game connection flow has Connect
+member's app actually exposes it. The current connection flow has Connect
 WHOOP, band selection, Try again and Not now; it has no member-facing Forget
 control. Do not invent a Devices menu, reset button, or re-pair path. If no
 such control is visible, stop and hand off rather than sending them through
