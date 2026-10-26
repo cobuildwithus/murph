@@ -218,12 +218,12 @@ function HostedLegalConsentCardState({
             } catch (error) {
               if (!isStaleConsentDocumentsError(error)) throw error;
               // The documents changed while this card was open, for example
-              // across a deploy. Show the current ones; another tab may
-              // already have agreed to them.
+              // across a deploy. If another tab already agreed to the new ones,
+              // hand off as usual; otherwise show them for another Agree.
               const currentStatus = await requestHostedLegalConsentStatus();
-              setStatusOverride(null);
-              setLoadedStatus(currentStatus);
               if (!findConsentScope(currentStatus, scope)?.granted) {
+                setStatusOverride(null);
+                setLoadedStatus(currentStatus);
                 throw new ConsentDocumentsChangedError();
               }
               latestStatus = currentStatus;
