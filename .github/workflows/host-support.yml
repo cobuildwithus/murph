@@ -280,6 +280,7 @@ jobs:
           node --test scripts/release-artifact-secret-guard.test.mjs
           node --test scripts/check-runner-bundle-budget-ci.test.mjs
           node --test scripts/benchmark-event-list.test.mjs
+          node --test scripts/benchmark-event-read-import.test.mjs
           node scripts/check-runner-bundle-budget-ci.mjs
           node scripts/verify-release-target.mjs
 
