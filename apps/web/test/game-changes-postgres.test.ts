@@ -224,7 +224,7 @@ describe.skipIf(!enabled)("weekly game change serialization against PostgreSQL",
   });
   it("resets the default start date using the acceptance clock after a delay", async () => {
     const today=gameLocalDate(new Date(),"America/New_York");
-    const {a,b,room,gameId}=await setup({days:[0,1,2,3,4]},addDays(today,5)); const proposalId=randomUUID();
+    const {a,b,room,gameId}=await setup({days:[0,1,2,3,4,5,6]},addDays(today,5)); const proposalId=randomUUID();
     await run(a,{type:"proposeChange",gameId,proposalId,expectedTermsVersion:1,change:{kind:"edit",startsOn:null}});
     await getPrisma().game.update({where:{id:gameId},data:{devClockOffsetMs:BigInt(2*86400000)}});
     expect(await run(b,{type:"respondChange",gameId,proposalId,decision:"approve"},{chatContainerMemberId:room,beforeMutationTx:fence})).toMatchObject({ok:true});
