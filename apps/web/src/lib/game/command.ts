@@ -79,20 +79,9 @@ export function parseGameCommand(value: unknown): GameCommand {
     case "redeem":
       return { ticketId: opaque(input.ticketId, "ticketId"), type: "redeem" };
     case "report":
-      return {
-        type: "report", reportId: clientId(input.reportId, "reportId"),
-        reason: oneOf(input.reason, "reason", GAME_REPORT_REASONS),
-        ...reportTarget(input),
-        ...optional(input.note, (note) => {
-          const text = reportNote(note);
-          return text ? { note: text } : {};
-        }),
-        ...optional(input.block, (block) => ({ block: flag(block, "block") })),
-      };
-    case "block": {
-      const target = idOrToken(input, "memberId");
-      return "token" in target ? { type: "block", token: target.token } : { type: "block", memberId: target.id };
-    }
+      return report(input);
+    case "block":
+      return block(input);
     case "unblock":
       return { type: "unblock", memberId: opaque(input.memberId, "memberId") };
     default:
@@ -257,6 +246,22 @@ function idOrToken(input: Record<string, unknown>, field: "gameId" | "memberId")
   if ((input[field] === undefined) === (input.token === undefined)) reject("INVALID_REQUEST", `Send ${field} or token.`);
   if (input.token !== undefined) return { token: opaque(input.token, "token") };
   return { id: field === "gameId" ? clientId(input[field], field) : opaque(input[field], field) };
+}
+
+function block(input: Record<string, unknown>): GameCommand {
+  const target = idOrToken(input, "memberId");
+  return "token" in target ? { type: "block", token: target.token } : { type: "block", memberId: target.id };
+}
+
+function report(input: Record<string, unknown>): GameCommand {
+  const note = input.note === undefined ? null : reportNote(input.note);
+  return {
+    type: "report", reportId: clientId(input.reportId, "reportId"),
+    reason: oneOf(input.reason, "reason", GAME_REPORT_REASONS),
+    ...reportTarget(input),
+    ...(note ? { note } : {}),
+    ...optional(input.block, (block) => ({ block: flag(block, "block") })),
+  };
 }
 
 /** One post (`entryId`), the player, or the terms; an invite's report is never about a post. */

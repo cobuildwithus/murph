@@ -834,31 +834,41 @@ interface ReportSubject {
  * photo, or the task and stake words), so the review outlives the post.
  */
 async function readReportSubject(actor: string, command: ReportCommand): Promise<ReportSubject> {
-  const invite = command.token === undefined ? null : await inviteFor(command.token, actor);
-  if (invite && !invite.open) reject("INVITE_EXPIRED", "This invite isn't open anymore.");
-  const gameId = invite?.gameId ?? command.gameId ?? "";
-  const [loaded] = await loadGames(getPrisma(), [gameId]);
-  if (!loaded || (!invite && !playerFor(loaded.state, actor))) reject("NOT_A_PLAYER", "You're not in this game.");
+  const { gameId, invite, loaded } = await readReportedGame(actor, command);
   const entry = command.entryId === undefined ? null : loaded.entries.find((candidate) => candidate.id === command.entryId) ?? null;
   if (command.entryId !== undefined && (!entry || !visibleEntryIds(loaded.state, actor).has(entry.id))) {
     reject("INVALID_REQUEST", "You can only report a post you can see.");
   }
   const reported = entry?.memberId ?? invite?.creator ?? loaded.state.players.find((player) => player.memberId !== actor)?.memberId;
   if (!reported || reported === actor) reject("NOT_A_PLAYER", "There's no one to report in this game.");
+  return { entry, fromInvite: invite !== null, gameId, reportedMemberId: reported, ...await reportSnapshot(loaded, command.about, entry, reported) };
+}
+
+/** The game a report is in: one the actor plays, or the open invite they hold. */
+async function readReportedGame(actor: string, command: ReportCommand) {
+  const invite = command.token === undefined ? null : await inviteFor(command.token, actor);
+  if (invite && !invite.open) reject("INVITE_EXPIRED", "This invite isn't open anymore.");
+  const gameId = invite?.gameId ?? command.gameId ?? "";
+  const [loaded] = await loadGames(getPrisma(), [gameId]);
+  if (!loaded || (!invite && !playerFor(loaded.state, actor))) reject("NOT_A_PLAYER", "You're not in this game.");
+  return { gameId, invite, loaded };
+}
+
+/** The reported words and media as they are now, opened from their owners' keys. */
+async function reportSnapshot(loaded: LoadedGame, about: ReportCommand["about"], entry: GameEntry | null, reported: string): Promise<Pick<ReportSubject, "snapshotText" | "snapshotMediaKeys">> {
   if (entry) {
     const [text] = await openGameTexts([{ field: "text", memberId: entry.memberId, rowId: entry.id, table: "game_entry", value: entry.textEncrypted }]);
-    return { entry, fromInvite: false, gameId, reportedMemberId: reported, snapshotMediaKeys: entry.mediaKeys, snapshotText: text || null };
+    return { snapshotMediaKeys: entry.mediaKeys, snapshotText: text || null };
   }
-  if (command.about === "terms") {
+  if (about === "terms") {
     const [words] = await openGameTexts([{ ...gameTarget(loaded.row, "terms_words"), value: loaded.row.termsWordsEncrypted }]);
     const terms = termsView(loaded.state, parseTermWords(words ?? ""));
-    const text = [...terms.tasks.map((task) => `Task: ${task.text}`), ...terms.stakes.map((stake) => `${stake.kind === "dare" ? "Dare" : "Prize"}: ${stake.item}`)].join("\n");
-    return { entry: null, fromInvite: invite !== null, gameId, reportedMemberId: reported, snapshotMediaKeys: [], snapshotText: text || null };
+    const lines = [...terms.tasks.map((task) => `Task: ${task.text}`), ...terms.stakes.map((stake) => `${stake.kind === "dare" ? "Dare" : "Prize"}: ${stake.item}`)];
+    return { snapshotMediaKeys: [], snapshotText: lines.join("\n") || null };
   }
   const profile = await getPrisma().gameProfile.findUnique({ select: { firstNameEncrypted: true, photoKey: true }, where: { memberId: reported } });
   const [name] = await openGameTexts(profile ? [{ field: "first_name", memberId: reported, rowId: reported, table: "game_profile", value: profile.firstNameEncrypted }] : []);
-  return { entry: null, fromInvite: invite !== null, gameId, reportedMemberId: reported,
-    snapshotMediaKeys: profile?.photoKey ? [profile.photoKey] : [], snapshotText: name || null };
+  return { snapshotMediaKeys: profile?.photoKey ? [profile.photoKey] : [], snapshotText: name || null };
 }
 
 /**

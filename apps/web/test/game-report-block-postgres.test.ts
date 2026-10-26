@@ -2,7 +2,8 @@ import { randomUUID } from "node:crypto";
 
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 
-const mocks = vi.hoisted(() => ({ sendEmail: vi.fn(async () => ({ providerMessageId: "email_1" })) }));
+interface SentEmail { idempotencyKey: string; subject: string; text: string; to: string[] }
+const mocks = vi.hoisted(() => ({ sendEmail: vi.fn(async (_email: SentEmail) => ({ providerMessageId: "email_1" })) }));
 vi.mock("@/src/lib/game/chat-delivery", () => ({ deliverGameChangeProposal: vi.fn(async () => {}) }));
 vi.mock("@/src/lib/hosted-onboarding/resend-plain-text-email", () => ({ sendHostedResendPlainTextEmail: mocks.sendEmail }));
 
@@ -62,7 +63,8 @@ async function words(actor: string, gameId: string, text: string) {
   return entryId;
 }
 
-const report = (gameId: string, extra: Partial<Extract<GameCommand, { type: "report" }>> = {}): GameCommand =>
+type ReportCommand = Extract<GameCommand, { type: "report" }>;
+const report = (gameId: string, extra: Partial<ReportCommand> = {}): ReportCommand =>
   ({ about: "player", gameId, reason: "harassment", reportId: randomUUID(), type: "report", ...extra });
 
 describe.skipIf(!runPostgresProof)("weekly game report and block", () => {
@@ -185,14 +187,14 @@ describe.skipIf(!runPostgresProof)("weekly game report and block", () => {
     // Ava sees nothing different.
     expect((await readGame(gameId, ava))!.days[0].mine).toMatchObject({ text: "Some rude words" });
 
-    const row = await getPrisma().gameReport.findUniqueOrThrow({ where: { id: (command as { reportId: string }).reportId } });
+    const row = await getPrisma().gameReport.findUniqueOrThrow({ where: { id: command.reportId } });
     expect(row).toMatchObject({ about: "post", entryId: rude, gameId, reason: "harassment", reportedMemberId: ava, reporterMemberId: leo, snapshotMediaKeys: [], reviewedAt: null });
     expect(await openGameTexts([
       { field: "snapshot", memberId: leo, rowId: row.id, table: "game_report", value: row.snapshotTextEncrypted },
       { field: "note", memberId: leo, rowId: row.id, table: "game_report", value: row.noteEncrypted },
     ])).toEqual(["Some rude words", "This was mean"]);
     expect(mocks.sendEmail).toHaveBeenCalledTimes(1);
-    const email = mocks.sendEmail.mock.calls[0]![0] as unknown as { idempotencyKey: string; subject: string; text: string; to: string[] };
+    const email = mocks.sendEmail.mock.calls[0]![0];
     expect(email).toMatchObject({ idempotencyKey: `murph/game-report/${row.id}`, subject: "Murph game report: Harassment or bullying", to: ["safety@example.test"] });
     expect(email.text).toContain(`Report ID: ${row.id}`);
     expect(email.text).toContain(`Game ID: ${gameId}`);
@@ -203,10 +205,10 @@ describe.skipIf(!runPostgresProof)("weekly game report and block", () => {
     await ok(leo, command);
     await ok(leo, report(gameId, { about: "post", entryId: rude, reason: "hate" }));
     expect(await getPrisma().gameReport.count({ where: { reporterMemberId: leo } })).toBe(1);
-    expect(mocks.sendEmail.mock.calls.map((call) => (call[0] as unknown as { idempotencyKey: string }).idempotencyKey))
+    expect(mocks.sendEmail.mock.calls.map((call) => call[0].idempotencyKey))
       .toEqual(Array(3).fill(`murph/game-report/${row.id}`));
     // Nobody else can take its id, and you can't report yourself.
-    expect(await run(ava, report(gameId, { reportId: (command as { reportId: string }).reportId })))
+    expect(await run(ava, report(gameId, { reportId: command.reportId })))
       .toMatchObject({ ok: false, error: { code: "INVALID_REQUEST", message: "That report id is taken." } });
     const mine = await words(leo, gameId, "Leo retake");
     expect(await run(leo, report(gameId, { about: "post", entryId: mine }))).toMatchObject({ ok: false, error: { code: "NOT_A_PLAYER" } });
@@ -219,7 +221,7 @@ describe.skipIf(!runPostgresProof)("weekly game report and block", () => {
     const command = report(gameId, { reason: "self_harm" });
     mocks.sendEmail.mockRejectedValueOnce(new Error("provider down"));
     await expect(run(leo, command)).rejects.toMatchObject({ code: "GAME_REPORT_ALERT_FAILED", retryable: true });
-    expect(await getPrisma().gameReport.count({ where: { id: (command as { reportId: string }).reportId } })).toBe(1);
+    expect(await getPrisma().gameReport.count({ where: { id: command.reportId } })).toBe(1);
     await ok(leo, command);
     expect(mocks.sendEmail).toHaveBeenCalledTimes(2);
   });
@@ -247,7 +249,7 @@ describe.skipIf(!runPostgresProof)("weekly game report and block", () => {
     expect((await readGame(gameWithSam, leo))!.players.find((player) => !player.isMe)!.profileAvatarUrl).not.toBeNull();
     const reportSam = report(gameWithSam, { block: true, reason: "sexual" });
     expect(await ok(leo, reportSam)).toMatchObject({ status: "void" });
-    expect(await getPrisma().gameReport.findUniqueOrThrow({ where: { id: (reportSam as { reportId: string }).reportId } }))
+    expect(await getPrisma().gameReport.findUniqueOrThrow({ where: { id: reportSam.reportId } }))
       .toMatchObject({ about: "player", reportedMemberId: sam, snapshotMediaKeys: [photoKey] });
     expect(await getPrisma().gameBlock.count({ where: { blockedMemberId: sam, blockerMemberId: leo } })).toBe(1);
     expect(mocks.sendEmail.mock.calls.at(-1)![0]).toMatchObject({ text: expect.stringContaining("They blocked the other player too: yes") });
@@ -269,7 +271,7 @@ describe.skipIf(!runPostgresProof)("weekly game report and block", () => {
     await words(leo, gameId, "Leo day one");
     const command = report(gameId, { about: "post", entryId: rude, reason: "hate" });
     await ok(leo, command);
-    const reportId = (command as { reportId: string }).reportId;
+    const reportId = command.reportId;
     const queued = (await readGameReportQueue()).find((item) => item.reportId === reportId);
     expect(queued).toMatchObject({ content: "words", gameId, postRemoved: false, reason: "Hate", reportedSuspended: false, snapshotText: "Rude again" });
 
