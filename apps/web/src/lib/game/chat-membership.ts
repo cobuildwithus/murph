@@ -1,7 +1,7 @@
 import "server-only";
 import type { Prisma } from "@prisma/client";
 import { getPrisma } from "../prisma";
-import { isGameEnabledFor } from "./access";
+import { isGameOn } from "./access";
 import { normalizePhoneNumber } from "../hosted-onboarding/phone";
 import { createHostedPhoneLookupKeyReadCandidates } from "../hosted-onboarding/contact-privacy";
 import { readHostedMemberIdentity } from "../hosted-onboarding/hosted-member-identity-store";
@@ -21,7 +21,12 @@ export async function readGameChatPlayerIds(containerMemberId: string, prisma: P
     select: { participants: { where: { removedAt: null }, select: { participantMemberId: true }, take: 3 } },
   });
   const players = container?.participants.map((participant) => participant.participantMemberId) ?? [];
-  return players.length === 2 && new Set(players).size === 2 && players.every((memberId) => isGameEnabledFor(memberId)) ? players : [];
+  return players.length === 2 && new Set(players).size === 2 && isGamePairOn(players) ? players : [];
+}
+
+/** Every game of a pair has exactly these people, so the pair decides whether its games are on. */
+function isGamePairOn(playerMemberIds: readonly string[]): boolean {
+  return isGameOn({ players: playerMemberIds.map((memberId) => ({ memberId })) });
 }
 
 export function gamePairWhere(playerMemberIds: readonly string[]): Prisma.GameWhereInput {
@@ -34,7 +39,7 @@ export function gamePairWhere(playerMemberIds: readonly string[]): Prisma.GameWh
 
 /** Bounded canonical games for the pair, independent of their announcement room. */
 export async function readGameChatCandidateIds(playerMemberIds: readonly string[]): Promise<string[]> {
-  if (!sameGamePlayers(playerMemberIds, playerMemberIds) || !playerMemberIds.every((memberId) => isGameEnabledFor(memberId))) return [];
+  if (!sameGamePlayers(playerMemberIds, playerMemberIds) || !isGamePairOn(playerMemberIds)) return [];
   const rows = await getPrisma().game.findMany({
     where: { ...gamePairWhere(playerMemberIds), status: { in: ["negotiating", "live", "settled"] } },
     orderBy: [{ createdAt: "desc" }, { id: "asc" }], take: 5, select: { id: true },

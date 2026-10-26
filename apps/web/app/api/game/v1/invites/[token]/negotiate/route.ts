@@ -4,5 +4,5 @@ import { resolveDecodedRouteParam } from "@/src/lib/http";
 
 export const POST = withJsonError(async (request: Request, context: { params: Promise<{ token: string }> }) => {
   const token = await resolveDecodedRouteParam(context.params, "token");
-  return respondToGameCommand(request, (body) => ({ ...body, token, type: "negotiate" }));
+  return respondToGameCommand(request, (body) => ({ ...body, token, type: "negotiate" }), { body: true, inviteToken: token });
 });

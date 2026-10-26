@@ -107,11 +107,16 @@ describe("game daily post notifications", () => {
   });
 
   it("honors the feature gate and bounds the current 1v1 audience", async () => {
-    vi.stubEnv("MURPH_GAME_MEMBER_ALLOWLIST", "poster");
+    vi.stubEnv("MURPH_GAME_MEMBER_ALLOWLIST", "third");
     expect(await claim()).toBeNull();
     vi.stubEnv("MURPH_GAME_MEMBER_ALLOWLIST", "");
     expect(await claim({ players: [...players, { ...players[0]!, memberId: "third" }] })).toBeNull();
     expect(m.route).not.toHaveBeenCalled();
+  });
+
+  it.each(["poster", "recipient"])("notifies in a game that is on, whichever player is listed (%s)", async (listed) => {
+    vi.stubEnv("MURPH_GAME_MEMBER_ALLOWLIST", listed);
+    expect(await claim()).toMatchObject({ memberId: "recipient" });
   });
 
   it("revalidates route permission before sending and expires undelivered alerts", async () => {

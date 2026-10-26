@@ -225,8 +225,13 @@ describe.skipIf(!enabled)("game chat access PostgreSQL", () => {
       await prisma.hostedConsentGrant.delete({ where: {
         memberId_scope: { memberId: second, scope: HOSTED_HEALTH_DATA_CONSENT_SCOPE },
       } });
-      vi.stubEnv("MURPH_GAME_MEMBER_ALLOWLIST", first);
+      // Invite-only: one listed player turns the pair's game on; neither listed turns it off.
+      vi.stubEnv("MURPH_GAME_MEMBER_ALLOWLIST", "game_access_unlisted_synthetic");
       await assertRoom(false);
+      vi.stubEnv("MURPH_GAME_MEMBER_ALLOWLIST", first);
+      await assertRoom(true);
+      vi.stubEnv("MURPH_GAME_MEMBER_ALLOWLIST", second);
+      await assertRoom(true);
       vi.stubEnv("MURPH_GAME_MEMBER_ALLOWLIST", `${first},${second}`);
       await assertRoom(true);
       vi.stubEnv("MURPH_GAME_ENABLED", "false");

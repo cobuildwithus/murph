@@ -902,7 +902,7 @@ function activeCheckpointedWorkspaceWhere() {
                 lte: new Date("2026-10-22T12:00:00.000Z"),
               } },
             ],
-            AND: [{ players: { some: { seat: 0 } } }, { players: { some: { seat: 1 } } }],
+            AND: [{ players: { some: { seat: 0 } } }, { players: { some: { seat: 1 } } }, {}],
             players: { every: {
               seat: { in: [0, 1] },
               profile: { member: { suspendedAt: null, consentGrants: { none: { scope: "launch.health-data", status: "revoked" } } } },

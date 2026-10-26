@@ -20,7 +20,7 @@ import { attachHostedThreadContainerBootstrapRouteTx, createHostedGameThreadCont
 import { getPrisma } from "../prisma";
 import { isExactGameChat } from "./chat-membership";
 import { parsePendingGameChange } from "./changes";
-import { isGameEnabledFor } from "./access";
+import { isGameOn } from "./access";
 import { markGameChatGenerationQueuedTx } from "./chat-lifecycle-receipt";
 
 const PAYLOAD_SCHEMA = "game_chat_bootstrap_v1";
@@ -166,7 +166,7 @@ function readBootstrapGame(gameId: string) { return getPrisma().game.findUnique(
 function samePlayers(a: readonly { memberId: string }[], b: readonly { memberId: string }[]) { return a.length === 2 && b.length === 2 && a.every((player) => b.some((other) => other.memberId === player.memberId)); }
 function samePhones(a: readonly string[], b: readonly string[]) { return a.length === 2 && b.length === 2 && new Set(b).size === 2 && a.every((phone) => b.includes(phone)); }
 function bootstrapEventCurrent(game: { id: string; status: string; pendingChange: unknown; players: readonly { memberId: string }[] }, eventId: string): boolean {
-  if (game.players.length !== 2 || !game.players.every((player) => isGameEnabledFor(player.memberId))) return false;
+  if (game.players.length !== 2 || !isGameOn(game)) return false;
   if (eventId.startsWith(`game-change-cancelled:${game.id}:`)) return ["live", "negotiating"].includes(game.status);
   if (eventId === `game-started:${game.id}`) return game.status === "live";
   const proposal = parsePendingGameChange(game.pendingChange);
@@ -264,7 +264,7 @@ async function finishBootstrap(input: ControlInput, receipt: FrozenReceipt, trus
       await authorizeBootstrapEffectTx(input, tx, trustedRecovery);
       await requireHostedRuntimeActiveAccessForUpdateTx(input.memberId, { prisma: tx });
       const current = await tx.game.findUnique({ where: { id: input.request.gameId }, include: { players: { select: { memberId: true }, take: 3 } } });
-      if (!current || current.players.length !== 2 || !current.players.every((player) => isGameEnabledFor(player.memberId))) throw new Error("Game chat delivery is unavailable.");
+      if (!current || current.players.length !== 2 || !isGameOn(current)) throw new Error("Game chat delivery is unavailable.");
       return current.status === "live" || current.status === "negotiating";
     });
     if (!active) { await skipBootstrapRecovery(receipt.id); return unavailable(); }

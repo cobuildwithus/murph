@@ -3,10 +3,22 @@
 ## Status
 
 MVP backend implemented and dark: off in production unless
-`MURPH_GAME_ENABLED=true`, and limited to the member ids in
-`MURPH_GAME_MEMBER_ALLOWLIST` when that list is non-empty. Unset means on outside
-production only. Members outside the gate see every game route as missing. The
-iOS client is the Murph app.
+`MURPH_GAME_ENABLED=true`. Unset means on outside production only. A non-empty
+`MURPH_GAME_MEMBER_ALLOWLIST` makes it invite only (`isGameOn` in
+`apps/web/src/lib/game/access.ts`): a game is on when at least one of its people
+is listed, its players or a rematch's addressee, so an open invite is on when its
+creator is listed. Listed members can do everything. Anyone else can accept an
+invite to a game that is on, play it fully (posts, changes, settle, tickets,
+Murph's chat and pushes), see it on Home, and rematch its other player in either
+direction, but can't start a fresh game (`GAME_DISABLED`); Home's
+`me.canStartGames` says which. A game that is off is invisible to everyone. The
+HTTP door admits an unlisted member only when they're in a game that is on
+(settled included) or hold an open invite to one: the accept and negotiate routes
+vouch with their path token, and other routes may carry the held token in the
+`X-Murph-Game-Invite` header so a new invitee can load Home and set a name before
+accepting. Everyone else sees every game route as missing. Removing a listed
+member turns their unlisted opponents' games off, mid-game included. The iOS
+client is the Murph app.
 
 ## Product
 

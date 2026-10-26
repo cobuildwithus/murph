@@ -16,9 +16,8 @@ import {
   resolveHostedHealthDataConsentState,
 } from "../legal/consent";
 import { getPrisma } from "../prisma";
-import { isGameEnabled } from "../game/access";
+import { gameOnWhere, isGameEnabled } from "../game/access";
 import { GAME_CHAT_SETTLED_ACCESS_MS, readGameChatFundingRooms } from "../game/chat-access";
-import { parseCommaSeparatedList } from "../primitives";
 import { renderUserFacingMessage } from "../hosted-messages/user-facing-messages";
 import {
   assertHostedMemberNotSuspended,
@@ -276,7 +275,6 @@ export async function hasActiveHostedThreadContainerAccessWithParticipants(input
 /** The bound room keeps its existing allowance through negotiation and a
  * seven-day results window. Duplicate rooms use the async funding projection. */
 function activeGameChatAccessWhere(now = new Date()): Prisma.HostedMemberWhereInput {
-  const allowlist = parseCommaSeparatedList(process.env.MURPH_GAME_MEMBER_ALLOWLIST);
   return {
     suspendedAt: null,
     threadContainer: { isNot: null },
@@ -289,11 +287,11 @@ function activeGameChatAccessWhere(now = new Date()): Prisma.HostedMemberWhereIn
         AND: [
           { players: { some: { seat: 0 } } },
           { players: { some: { seat: 1 } } },
+          gameOnWhere(),
         ],
         players: {
           every: {
             seat: { in: [0, 1] },
-            ...(allowlist.length > 0 ? { memberId: { in: allowlist } } : {}),
             profile: {
               member: {
                 suspendedAt: null,

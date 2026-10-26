@@ -3,8 +3,7 @@ import "server-only";
 import { Prisma } from "@prisma/client";
 import { hostedThreadContainerParticipantAccessCutoff } from "../hosted-groups/thread-container-participant-access";
 import { HOSTED_HEALTH_DATA_CONSENT_SCOPE } from "../legal/consent";
-import { parseCommaSeparatedList } from "../primitives";
-import { isGameEnabled } from "./access";
+import { gameOnSql, isGameEnabled } from "./access";
 
 export const GAME_CHAT_SETTLED_ACCESS_MS = 7 * 86_400_000;
 
@@ -17,7 +16,6 @@ export async function readGameChatFundingRooms(input: {
 }): Promise<Map<string, string>> {
   const memberIds = [...new Set(input.memberIds)];
   if (!isGameEnabled() || memberIds.length === 0) return new Map();
-  const allowlist = parseCommaSeparatedList(process.env.MURPH_GAME_MEMBER_ALLOWLIST);
   const cutoff = hostedThreadContainerParticipantAccessCutoff(input.now);
   const settledCutoff = new Date(input.now.getTime() - GAME_CHAT_SETTLED_ACCESS_MS);
   const rows = await input.prisma.$queryRaw<Array<{ memberId: string; beneficiaryMemberId: string }>>(Prisma.sql`
@@ -86,12 +84,12 @@ export async function readGameChatFundingRooms(input: {
           (game.status = 'void' AND game.chat_container_member_id = room.id))
         AND EXISTS (SELECT 1 FROM game_player p WHERE p.game_id = game.id AND p.seat = 0)
         AND EXISTS (SELECT 1 FROM game_player p WHERE p.game_id = game.id AND p.seat = 1)
+        AND ${gameOnSql("game")}
         AND NOT EXISTS (
           SELECT 1 FROM game_player p
           JOIN hosted_member person ON person.id = p.member_id
           WHERE p.game_id = game.id AND (
             p.seat NOT IN (0, 1) OR NOT (p.member_id = ANY(pair.player_ids)) OR person.suspended_at IS NOT NULL
-            ${allowlist.length ? Prisma.sql`OR p.member_id NOT IN (${Prisma.join(allowlist)})` : Prisma.empty}
             OR EXISTS (SELECT 1 FROM hosted_consent_grant consent
               WHERE consent.member_id = person.id AND consent.scope = ${HOSTED_HEALTH_DATA_CONSENT_SCOPE}
                 AND consent.status = 'revoked')

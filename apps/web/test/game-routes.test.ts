@@ -18,7 +18,7 @@ const mocks = vi.hoisted(() => ({
   devSettleNow: vi.fn(),
   devStartNow: vi.fn(),
   getPrisma: vi.fn(),
-  isGameEnabledFor: vi.fn(),
+  canEnterGame: vi.fn(),
   mediaKeyPrefixFor: vi.fn(),
   readGame: vi.fn(),
   readHome: vi.fn(),
@@ -32,7 +32,7 @@ vi.mock("@/src/lib/game/service", () => ({
   devAdvanceDays: mocks.devAdvanceDays,
   devSettleNow: mocks.devSettleNow,
   devStartNow: mocks.devStartNow,
-  isGameEnabledFor: mocks.isGameEnabledFor,
+  canEnterGame: mocks.canEnterGame,
   mediaKeyPrefixFor: mocks.mediaKeyPrefixFor,
   readGame: mocks.readGame,
   readHome: mocks.readHome,
@@ -50,6 +50,7 @@ type Routes = {
   cancelChange: typeof import("../app/api/game/v1/games/[id]/changes/[proposalId]/route");
   changes: typeof import("../app/api/game/v1/games/[id]/changes/route");
   accept: typeof import("../app/api/game/v1/invites/[token]/accept/route");
+  negotiate: typeof import("../app/api/game/v1/invites/[token]/negotiate/route");
   advanceDay: typeof import("../app/api/game/v1/dev/games/[id]/advance-day/route");
   create: typeof import("../app/api/game/v1/games/route");
   entries: typeof import("../app/api/game/v1/games/[id]/entries/route");
@@ -101,6 +102,7 @@ describe("weekly game routes", () => {
       cancelChange: await import("../app/api/game/v1/games/[id]/changes/[proposalId]/route"),
       changes: await import("../app/api/game/v1/games/[id]/changes/route"),
       accept: await import("../app/api/game/v1/invites/[token]/accept/route"),
+      negotiate: await import("../app/api/game/v1/invites/[token]/negotiate/route"),
       advanceDay: await import("../app/api/game/v1/dev/games/[id]/advance-day/route"),
       create: await import("../app/api/game/v1/games/route"),
       entries: await import("../app/api/game/v1/games/[id]/entries/route"),
@@ -125,7 +127,7 @@ describe("weekly game routes", () => {
     signedInAs = LEO;
     mocks.getPrisma.mockReturnValue({});
     mocks.requireHostedMemberAuthFromBearerToken.mockImplementation(async () => ({ member: { id: signedInAs } }));
-    mocks.isGameEnabledFor.mockResolvedValue(true);
+    mocks.canEnterGame.mockResolvedValue(true);
     mocks.mediaKeyPrefixFor.mockImplementation((memberId: string) => `game/${memberId}/`);
     mocks.readGame.mockResolvedValue(VIEW);
     mocks.runGameCommand.mockResolvedValue({ game: VIEW, ok: true });
@@ -183,7 +185,7 @@ describe("weekly game routes", () => {
 
   describe("flag", () => {
     it("hides every signed-in route as 404 when the game is off for the member", async () => {
-      mocks.isGameEnabledFor.mockResolvedValue(false);
+      mocks.canEnterGame.mockResolvedValue(false);
 
       const responses = await Promise.all([
         routes.home.GET(new Request(`${BASE}/home`)),
@@ -198,10 +200,37 @@ describe("weekly game routes", () => {
         expect(response.status).toBe(404);
         expect((await response.json()).error.code).toBe("GAME_DISABLED");
       }
-      expect(mocks.isGameEnabledFor).toHaveBeenCalledWith(LEO);
+      expect(mocks.canEnterGame).toHaveBeenCalledWith(LEO, null);
       expect(mocks.readHome).not.toHaveBeenCalled();
       expect(mocks.runGameCommand).not.toHaveBeenCalled();
       expect(mocks.devStartNow).not.toHaveBeenCalled();
+    });
+
+    it("lets an invite route vouch with its own token", async () => {
+      mocks.canEnterGame.mockImplementation(async (_memberId: string, token: string | null) => token === "tok_open");
+      const accepted = await routes.accept.POST(writeRequest("POST", "/invites/tok_open/accept", { termsVersion: 1, timeZone: "UTC" }), params({ token: "tok_open" }));
+      expect(accepted.status).toBe(200);
+      expect(mocks.canEnterGame).toHaveBeenLastCalledWith(LEO, "tok_open");
+      const negotiated = await routes.negotiate.POST(writeRequest("POST", "/invites/tok_open/negotiate", { termsVersion: 1 }), params({ token: "tok_open" }));
+      expect(negotiated.status).toBe(200);
+      expect(mocks.canEnterGame).toHaveBeenLastCalledWith(LEO, "tok_open");
+      const other = await routes.accept.POST(writeRequest("POST", "/invites/tok_other/accept", { termsVersion: 1, timeZone: "UTC" }), params({ token: "tok_other" }));
+      expect(other.status).toBe(404);
+      expect((await other.json()).error.code).toBe("GAME_DISABLED");
+      expect(mocks.runGameCommand).toHaveBeenCalledTimes(2);
+    });
+
+    it("reads the invite an app is holding from its header on any other route", async () => {
+      mocks.canEnterGame.mockImplementation(async (_memberId: string, token: string | null) => token === "tok_open");
+      mocks.readHome.mockResolvedValue({ games: [], me: { memberId: LEO, canStartGames: false }, wallet: { held: [], owed: [], redeemed: [] } });
+      const held = await routes.home.GET(new Request(`${BASE}/home`, { headers: { authorization: "Bearer token", "x-murph-game-invite": "tok_open" } }));
+      expect(held.status).toBe(200);
+      expect(await held.json()).toMatchObject({ ok: true, me: { canStartGames: false } });
+      expect(mocks.canEnterGame).toHaveBeenLastCalledWith(LEO, "tok_open");
+      const bare = await routes.home.GET(new Request(`${BASE}/home`));
+      expect(bare.status).toBe(404);
+      expect(mocks.canEnterGame).toHaveBeenLastCalledWith(LEO, null);
+      expect(mocks.readHome).toHaveBeenCalledTimes(1);
     });
   });
 
