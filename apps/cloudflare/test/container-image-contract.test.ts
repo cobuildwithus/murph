@@ -7,6 +7,7 @@ import {
   buildHostedWranglerDeployConfig,
 } from "../scripts/deploy-automation/wrangler-config.ts";
 const hostedRunnerProductModelSlugs = [
+  "gpt-6.1-terra",
   "gpt-6.1-sol",
   "gpt-6-sol",
   "gpt-6-luna",
@@ -116,12 +117,12 @@ describe("hosted runner container image contract", () => {
 
     const standardCatalog = parseCodexModelCatalogJson(runJqFilter(standardFilter, patchedCatalog));
     expect(readCodexModelSlugs(standardCatalog)).toEqual([
-      "gpt-6.1-sol", "gpt-6-sol", "gpt-6-luna", "gpt-5.6-sol", "gpt-5.6-luna",
+      "gpt-6.1-sol", "gpt-6-sol", "gpt-6-luna", "gpt-5.6-sol", "gpt-5.6-luna", "gpt-6.1-terra",
     ]);
     expect(standardCatalog.models).toEqual(patchedCatalog.models.filter((model) => model.slug !== "gpt-6-astra"));
     expect(finalDockerfile).toContain('"${MURPH_HOSTED_CODEX_MODEL_CATALOG_JSON}.astra"');
 
-    expect(readCodexModelSlugs(patchedCatalog)).toEqual(hostedRunnerProductModelSlugs);
+    expect(readCodexModelSlugs(patchedCatalog).sort()).toEqual([...hostedRunnerProductModelSlugs].sort());
     for (const slug of hostedRunnerProductModelSlugs) {
       expect(readCodexModelServiceTierIds(patchedCatalog, slug)).toEqual(["priority", "flex"]);
       expect(readCodexModel(patchedCatalog, slug).tool_mode).toBe("code_mode");
@@ -184,7 +185,7 @@ describe("hosted runner container image contract", () => {
     }, { slurp: true }).trim()).toBe("false");
   });
 
-  it("validates product entries directly from the native Codex catalog", async () => {
+  it("validates native product entries and the official Terra launch supplement", async () => {
     const finalDockerfile = await readFile(
       new URL("../../../Dockerfile.cloudflare-hosted-runner", import.meta.url),
       "utf8",
@@ -196,17 +197,18 @@ describe("hosted runner container image contract", () => {
       { encoding: "utf8", maxBuffer: 10 * 1024 * 1024, timeout: 30_000 },
     );
     const nativeCatalog = parseCodexModelCatalogJson(nativeCatalogJson);
+    const terraCatalog = parseCodexModelCatalogJson(await readFile(new URL("../codex-model-catalog.terra.json", import.meta.url), "utf8"));
     const productCatalog = parseCodexModelCatalogJson(runJqFilter(patchFilter, nativeCatalog));
     expect(runJqFilter(validationFilter, productCatalog, { slurp: true }).trim()).toBe("true");
     for (const slug of hostedRunnerProductModelSlugs) {
       expect(readCodexModel(productCatalog, slug)).toMatchObject({
-        ...readCodexModel(nativeCatalog, slug),
+        ...readCodexModel(slug === "gpt-6.1-terra" ? terraCatalog : nativeCatalog, slug),
         service_tiers: expect.any(Array),
         tool_mode: "code_mode",
       });
     }
     expect(readCodexModelSlugs(parseCodexModelCatalogJson(runJqFilter(standardFilter, productCatalog))).sort())
-      .toEqual(["gpt-5.6-luna", "gpt-5.6-sol", "gpt-6-luna", "gpt-6-sol", "gpt-6.1-sol"]);
+      .toEqual(["gpt-5.6-luna", "gpt-5.6-sol", "gpt-6-luna", "gpt-6-sol", "gpt-6.1-sol", "gpt-6.1-terra"]);
   });
 
   it("keeps rendered container builds app-local with SSH disabled", () => {
@@ -228,6 +230,7 @@ describe("hosted runner container image contract", () => {
     const dockerignore = await readFile(new URL("../.dockerignore", import.meta.url), "utf8");
 
     expect(dockerignore).toContain("**");
+    expect(dockerignore).toContain("!codex-model-catalog.terra.json");
     expect(dockerignore).toContain("!.deploy/");
     expect(dockerignore).toContain("!.deploy/runner-bundle/");
     expect(dockerignore).toContain("!.deploy/runner-bundle/**");
@@ -269,7 +272,7 @@ function readFinalImageCodexModelCatalogJqFilters(dockerfile: string): {
   }
 
   return {
-    patchFilter: patchMatch[1],
+    patchFilter: `${/jq --slurpfile terra \/tmp\/codex-model-catalog\.terra\.json '([^']+)'/u.exec(dockerfile)?.[1] ?? "."} | ${patchMatch[1]}`,
     standardFilter: standardMatch[1],
     validationFilter: validationMatch[1],
   };
@@ -282,6 +285,7 @@ function runJqFilter(
 ): string {
   return execFileSync("jq", [
     ...(options.slurp === true ? ["-s"] : []),
+    "--slurpfile", "terra", fileURLToPath(new URL("../codex-model-catalog.terra.json", import.meta.url)),
     filter,
   ], {
     encoding: "utf8",

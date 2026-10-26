@@ -19,11 +19,13 @@ export const HOSTED_ASSISTANT_SOL_MODEL = "gpt-5.6-sol" as const;
 export const HOSTED_ASSISTANT_GPT_6_SOL_MODEL = "gpt-6-sol" as const;
 export const HOSTED_ASSISTANT_GPT_6_LUNA_MODEL = "gpt-6-luna" as const;
 export const HOSTED_ASSISTANT_GPT_61_SOL_MODEL = "gpt-6.1-sol" as const;
-export const HOSTED_ASSISTANT_DEFAULT_MODEL = HOSTED_ASSISTANT_GPT_61_SOL_MODEL;
+export const HOSTED_ASSISTANT_TERRA_MODEL = "gpt-6.1-terra" as const;
+export const HOSTED_ASSISTANT_DEFAULT_MODEL = HOSTED_ASSISTANT_TERRA_MODEL;
 
 export const HOSTED_ASSISTANT_ASTRA_MODEL = "gpt-6-astra" as const;
 
 export const HOSTED_ASSISTANT_PRODUCT_MODELS = [
+  HOSTED_ASSISTANT_TERRA_MODEL,
   HOSTED_ASSISTANT_GPT_61_SOL_MODEL,
   HOSTED_ASSISTANT_GPT_6_SOL_MODEL,
   HOSTED_ASSISTANT_GPT_6_LUNA_MODEL,
@@ -264,7 +266,7 @@ export function parseHostedRuntimeAssistantConfigurationToolResponse(
           result.requiredPlan,
           "Hosted runtime assistant configuration tool requiredPlan",
         );
-  if (requiredPlan !== null && requiredPlan !== "edge" && requiredPlan !== "max") {
+  if (requiredPlan !== null && requiredPlan !== "pulse" && requiredPlan !== "edge" && requiredPlan !== "max") {
     throw new TypeError(
       "Hosted runtime assistant configuration tool requiredPlan is not supported.",
     );

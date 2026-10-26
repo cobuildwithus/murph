@@ -4,6 +4,7 @@ import path from "node:path";
 
 import {
   HOSTED_ASSISTANT_ASTRA_MODEL,
+  HOSTED_ASSISTANT_GPT_61_SOL_MODEL,
   HOSTED_ASSISTANT_GPT_6_LUNA_MODEL,
   HOSTED_ASSISTANT_SOL_MODEL,
   HOSTED_ASSISTANT_DEFAULT_MODEL,
@@ -61,12 +62,12 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-test("GPT-6 models are available on Pulse and identify the active fallback accurately", () => {
+test("Terra is the active fallback and Sol is disabled without a subscription", () => {
   const markup = renderToStaticMarkup(createElement(HostedAssistantModelSettings, {
     canUpgradeToEdge: true,
     configurationAvailable: true,
     initialDormantSolPreference: true,
-    initialModel: "gpt-6.1-sol",
+    initialModel: "gpt-6.1-terra",
     solAvailable: false,
   }));
   const { document } = parseHTML(markup);
@@ -74,12 +75,12 @@ test("GPT-6 models are available on Pulse and identify the active fallback accur
   const luna = document.querySelector('input[id="assistant-model-gpt-6-luna"]');
   assert.deepEqual(
     [...document.querySelectorAll("input")].map((input) => input.getAttribute("value")),
-    ["gpt-6-luna", "gpt-6.1-sol", "gpt-6-astra"],
+    ["gpt-6-luna", "gpt-6.1-terra", "gpt-6.1-sol", "gpt-6-astra"],
   );
-  assert.ok(sol?.hasAttribute("checked"));
-  assert.equal(sol?.hasAttribute("disabled"), false);
+  assert.ok(document.querySelector('input[id="assistant-model-gpt-6.1-terra"]')?.hasAttribute("checked"));
+  assert.equal(sol?.hasAttribute("disabled"), true);
   assert.equal(luna?.hasAttribute("disabled"), false);
-  assert.match(document.textContent ?? markup, /Sol is active while Edge is paused/);
+  assert.match(document.textContent ?? markup, /Terra is active while your subscription is inactive/);
   assert.match(markup, /Your previous model is still saved/);
 });
 
@@ -344,7 +345,7 @@ test("model radios stay labeled and the form becomes busy while saving", async (
       artwork: "sol",
       backgroundAccent: "#d9ad35",
       description: "Deep health intelligence",
-      model: HOSTED_ASSISTANT_DEFAULT_MODEL,
+      model: HOSTED_ASSISTANT_GPT_61_SOL_MODEL,
       name: "Sol",
       usage: "Balanced usage",
     },
@@ -483,7 +484,7 @@ test("refreshed eligibility resets the client state after an Edge upgrade", asyn
   view.cleanup();
 });
 
-test("a dormant Sol preference is explained and can be replaced with GPT-6 Sol", async () => {
+test("a dormant Sol preference is explained and can be replaced with Terra", async () => {
   mocks.requestHostedOnboardingJson.mockResolvedValue({
     dormantSolPreference: false,
     model: HOSTED_ASSISTANT_DEFAULT_MODEL,
@@ -503,7 +504,7 @@ test("a dormant Sol preference is explained and can be replaced with GPT-6 Sol",
 
   assert.match(
     view.container.textContent ?? "",
-    /Sol is active while Edge is paused\. Your previous model is still saved and will return with Edge\./,
+    /Terra is active while your subscription is inactive\. Your previous model is still saved and will return with a paid subscription\./,
   );
   assert.equal(findButton(view.container, "Save change").disabled, false);
 

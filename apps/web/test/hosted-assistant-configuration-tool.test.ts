@@ -160,9 +160,9 @@ describe("hosted runtime assistant configuration tool", () => {
   });
 
   it.each([
-    ["gpt-5.6-sol", "ASSISTANT_MODEL_SOL_REQUIRES_EDGE"],
+    ["gpt-5.6-sol", "ASSISTANT_MODEL_SOL_REQUIRES_SUBSCRIPTION"],
     ["gpt-6-astra", "ASSISTANT_MODEL_ASTRA_REQUIRES_EDGE"],
-  ] as const)("returns an Edge upgrade requirement for %s without changing the saved target", async (model, code) => {
+  ] as const)("returns the appropriate subscription requirement for %s without changing the saved target", async (model, code) => {
     mocks.updateConfiguration.mockRejectedValue(hostedOnboardingError({
       code,
       httpStatus: 403,
@@ -182,7 +182,7 @@ describe("hosted runtime assistant configuration tool", () => {
       result: {
         ...buildSnapshot(),
         appliesAt: "next_turn",
-        requiredPlan: "edge",
+        requiredPlan: model === "gpt-6-astra" ? "edge" : "pulse",
         status: "upgrade_required",
       },
     });

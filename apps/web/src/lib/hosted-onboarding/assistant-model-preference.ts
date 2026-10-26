@@ -11,7 +11,8 @@ import {
   HOSTED_ASSISTANT_PRODUCT_MODELS,
   HOSTED_ASSISTANT_REASONING_EFFORTS,
   HOSTED_ASSISTANT_SOL_MODEL,
-  isHostedAssistantProductModel,
+  HOSTED_ASSISTANT_GPT_6_SOL_MODEL,
+  HOSTED_ASSISTANT_GPT_61_SOL_MODEL,
   isHostedAssistantReasoningEffort,
   parseHostedAssistantModelOverride,
   parseHostedAssistantReasoningEffortOverride,
@@ -37,7 +38,7 @@ import {
   lockHostedMemberSponsoredAccessRows,
 } from "./shared";
 
-export const HOSTED_MEMBER_ASSISTANT_MODEL_SELECT = {
+const ASSISTANT_BILLING_SELECT = {
   accountGroupMemberships: {
     select: {
       group: {
@@ -53,20 +54,22 @@ export const HOSTED_MEMBER_ASSISTANT_MODEL_SELECT = {
       status: "active",
     },
   },
-  assistantModelPreference: true,
-  assistantReasoningEffortPreference: true,
   billingRef: {
-    select: {
-      currentBillingPhase: true,
-      currentBillingPlanCode: true,
-    },
+    select: { currentBillingPhase: true, currentBillingPlanCode: true },
   },
   billingStatus: true,
-  createdAt: true,
   suspendedAt: true,
+} as const satisfies Prisma.HostedMemberSelect;
+
+export const HOSTED_MEMBER_ASSISTANT_MODEL_SELECT = {
+  ...ASSISTANT_BILLING_SELECT,
+  assistantModelPreference: true,
+  assistantReasoningEffortPreference: true,
+  createdAt: true,
   threadContainer: {
     select: {
       memberId: true,
+      owner: { select: ASSISTANT_BILLING_SELECT },
     },
   },
 } as const satisfies Prisma.HostedMemberSelect;
@@ -124,6 +127,7 @@ export function isHostedMemberSolModelEligible(input: {
   currentBillingPhase: string | null;
   currentBillingPlanCode: string | null;
   isThreadContainerMember: boolean;
+  premiumOnly?: boolean;
   suspendedAt: Date | null;
 }): boolean {
   if (input.suspendedAt !== null || input.isThreadContainerMember) {
@@ -133,23 +137,24 @@ export function isHostedMemberSolModelEligible(input: {
   const directBillingPlanCode = parseHostedBillingPlanCode(
     input.currentBillingPlanCode,
   );
-  const hasDirectPaidPremiumAccess =
+  const hasDirectPaidAccess =
     input.billingStatus === HostedBillingStatus.active
     && parseHostedBillingPhase(input.currentBillingPhase) === "paid"
     && (
-      directBillingPlanCode === "launch_edge_monthly"
+      (!input.premiumOnly && directBillingPlanCode !== null)
+      || directBillingPlanCode === "launch_edge_monthly"
       || directBillingPlanCode === "launch_max_monthly"
     );
-  const hasFamilyPremiumAccess = input.accountGroupMemberships.some((membership) => {
+  const hasFamilyPaidAccess = input.accountGroupMemberships.some((membership) => {
     const familyPlanCode = parseHostedFamilyPlanCode(membership.planCode);
     return membership.status === "active"
       && familyPlanCode !== null
-      && getHostedFamilyRuntimePlanCode(familyPlanCode) === "edge"
+      && (!input.premiumOnly || getHostedFamilyRuntimePlanCode(familyPlanCode) === "edge")
       && membership.group.billingStatus === HostedBillingStatus.active
       && membership.group.suspendedAt === null;
   });
 
-  return hasDirectPaidPremiumAccess || hasFamilyPremiumAccess;
+  return hasDirectPaidAccess || hasFamilyPaidAccess;
 }
 
 export async function readHostedMemberAssistantModelPreference(input: {
@@ -297,11 +302,11 @@ function assertHostedAssistantModelSelection(input: {
   current: HostedMemberAssistantModelResolution;
   model: HostedAssistantProductModel | undefined;
 }): void {
-  if (input.model === HOSTED_ASSISTANT_SOL_MODEL && !input.current.solAvailable) {
+  if (isSolModel(input.model) && !input.current.solAvailable) {
     throw hostedOnboardingError({
-      code: "ASSISTANT_MODEL_SOL_REQUIRES_EDGE",
+      code: "ASSISTANT_MODEL_SOL_REQUIRES_SUBSCRIPTION",
       httpStatus: 403,
-      message: "GPT-5.6 Sol requires an active paid Edge or Max plan.",
+      message: "Sol requires an active paid subscription.",
     });
   }
   if (input.model === HOSTED_ASSISTANT_ASTRA_MODEL
@@ -322,7 +327,7 @@ function resolveEffectiveHostedAssistantModel(input: {
   if (input.storedModel === HOSTED_ASSISTANT_ASTRA_MODEL && !input.astraAvailable) {
     return HOSTED_ASSISTANT_DEFAULT_MODEL;
   }
-  if (input.storedModel === HOSTED_ASSISTANT_SOL_MODEL && !input.solAvailable) {
+  if (isSolModel(input.storedModel) && !input.solAvailable) {
     return HOSTED_ASSISTANT_DEFAULT_MODEL;
   }
   return input.storedModel ?? HOSTED_ASSISTANT_DEFAULT_MODEL;
@@ -347,25 +352,23 @@ export function resolveHostedMemberAssistantModel(
   const configurationAvailable = isThreadContainerMember
     ? member.suspendedAt === null
     : isHostedPersonalAssistantConfigurationAvailable(member);
-  const solAvailable = isThreadContainerMember || isHostedMemberSolModelEligible({
-    accountGroupMemberships: member.accountGroupMemberships,
-    billingStatus: member.billingStatus,
-    currentBillingPhase: member.billingRef?.currentBillingPhase ?? null,
-    currentBillingPlanCode: member.billingRef?.currentBillingPlanCode ?? null,
-    isThreadContainerMember,
-    suspendedAt: member.suspendedAt,
-  });
-  const astraAvailable = !isThreadContainerMember && solAvailable;
+  const billingMember = member.threadContainer ? member.threadContainer.owner : member;
+  const eligibility = billingMember ? {
+    accountGroupMemberships: billingMember.accountGroupMemberships,
+    billingStatus: billingMember.billingStatus,
+    currentBillingPhase: billingMember.billingRef?.currentBillingPhase ?? null,
+    currentBillingPlanCode: billingMember.billingRef?.currentBillingPlanCode ?? null,
+    isThreadContainerMember: false,
+    suspendedAt: billingMember.suspendedAt,
+  } : null;
+  const solAvailable = eligibility !== null && isHostedMemberSolModelEligible(eligibility);
+  const astraAvailable = !isThreadContainerMember && eligibility !== null
+    && isHostedMemberSolModelEligible({ ...eligibility, premiumOnly: true });
   const storedModelPreference = configurationAvailable
-    ? isThreadContainerMember
-      ? isHostedAssistantProductModel(member.assistantModelPreference)
-        ? member.assistantModelPreference
-        : null
-      : parseHostedAssistantModelOverride(member.assistantModelPreference)
+    ? parseHostedAssistantModelOverride(member.assistantModelPreference)
     : null;
   const dormantSolPreference =
-    !isThreadContainerMember
-    && storedModelPreference === HOSTED_ASSISTANT_SOL_MODEL
+    isSolModel(storedModelPreference)
     && !solAvailable;
   const model = resolveEffectiveHostedAssistantModel({
     astraAvailable,
@@ -384,7 +387,7 @@ export function resolveHostedMemberAssistantModel(
   return {
     availableModels: configurationAvailable
       ? HOSTED_ASSISTANT_PRODUCT_MODELS.filter(
-          (candidate) => (candidate !== HOSTED_ASSISTANT_SOL_MODEL || solAvailable)
+          (candidate) => (!isSolModel(candidate) || solAvailable)
             && (candidate !== HOSTED_ASSISTANT_ASTRA_MODEL || astraAvailable),
         )
       : [],
@@ -418,4 +421,10 @@ function isHostedPersonalAssistantConfigurationAvailable(
     suspendedAt: member.suspendedAt,
     threadContainer: null,
   });
+}
+
+function isSolModel(model: HostedAssistantProductModel | null | undefined): boolean {
+  return model === HOSTED_ASSISTANT_SOL_MODEL
+    || model === HOSTED_ASSISTANT_GPT_6_SOL_MODEL
+    || model === HOSTED_ASSISTANT_GPT_61_SOL_MODEL;
 }
