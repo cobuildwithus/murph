@@ -1,6 +1,6 @@
 # Game writes wait for Murph's current Terms behind a flag
 
-Status: active
+Status: completed
 Created: 2026-10-26
 Updated: 2026-10-26
 
@@ -68,3 +68,12 @@ Updated: 2026-10-26
   `murph_test_*` database and `MURPH_TEST_POSTGRES_CONCURRENCY=1`;
   `pnpm --dir apps/web typecheck`; `pnpm complexity:diff`; `pnpm docs:drift`.
 - Expected outcomes: all pass.
+- Outcomes: 41 game/legal files, 626 tests passed (6 skipped); typecheck,
+  oxlint, complexity and docs drift clean. Local self-play on a lane-owned
+  hosted-local stack (fixtures +1 555 555 0901/0902): flag on, new members are
+  asked before create and accept, agree with the refusal's versions, then play;
+  after a local Terms version bump a post is refused while home, the game, a
+  report and the profile stay open, agreeing lets the same entry post, and the
+  other player is asked at their next post; flag off, both stale members post
+  and create as before. ReviewGPT round 1 (vonneumann, GPT-6 Pro): PASS.
+Completed: 2026-10-26
