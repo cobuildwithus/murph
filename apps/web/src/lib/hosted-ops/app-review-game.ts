@@ -6,6 +6,8 @@ import { Prisma, type PrismaClient } from "@prisma/client";
 
 import { readHostedAuthReviewMemberId } from "../better-auth/review-account";
 import { toPrismaJsonObject } from "../device-sync/prisma-store/prisma-json";
+import { prepareHostedDomainRootForWeb, revalidatePreparedHostedDomainRootForWebTx } from "../hosted-crypto/domain-root-store";
+import { runWithHostedDomainRootUnwrapCache } from "../hosted-crypto/domain-root-unwrap-cache";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import { generateHostedRandomPrefixedId } from "../primitives";
 import { getPrisma } from "../prisma";
@@ -167,7 +169,24 @@ export async function seedHostedOpsAppReviewGame(input: {
   }
   const readPhoto = input.readPhoto;
   if (!readPhoto) throw new Error("The App Review game needs its photos.");
-  const prepared = await prepare(members, now, readPhoto);
+  return runWithHostedDomainRootUnwrapCache(() => apply({ inspected, members, now, prisma, readPhoto }));
+}
+
+async function apply(input: {
+  inspected: Inspected;
+  members: Members;
+  now: Date;
+  prisma: PrismaClient;
+  readPhoto: HostedOpsAppReviewGamePhotoReader;
+}): Promise<HostedOpsAppReviewGameSummary> {
+  const { members, now, prisma } = input;
+  // Game words seal under each member's control root. The partner's first
+  // apply signs one; the reviewer's must already exist. Both are pinned below.
+  const [partnerRoot, reviewerRoot] = await Promise.all([
+    prepareHostedDomainRootForWeb({ domain: "control", prisma, reason: "hosted-ops.app-review-game", userId: members.partner }),
+    prepareHostedDomainRootForWeb({ domain: "control", prepareMissing: false, prisma, reason: "hosted-ops.app-review-game", userId: members.reviewer }),
+  ]);
+  const prepared = await prepare(members, now, input.readPhoto);
   await prisma.$transaction(async (tx) => {
     await tx.hostedMember.createMany({ data: [{ id: members.partner }], skipDuplicates: true });
     // Owner-before-game lock order, as in account deletion and game commands.
@@ -183,6 +202,9 @@ export async function seedHostedOpsAppReviewGame(input: {
       throw hostedOnboardingError({ code: "APP_REVIEW_GAME_BLOCKED", httpStatus: 409, retryable: false,
         message: `The review partner became reachable (${surfaces.join(", ")}).` });
     }
+    // Inserts the partner's prepared root, or fails if a racing apply's root won.
+    await revalidatePreparedHostedDomainRootForWebTx({ prepared: partnerRoot, tx });
+    await revalidatePreparedHostedDomainRootForWebTx({ prepared: reviewerRoot, tx });
     const stale = await tx.$queryRaw<{ id: string }[]>`
       SELECT g.id FROM game g
       WHERE g.invitee_member_id = ${members.partner}
@@ -194,7 +216,8 @@ export async function seedHostedOpsAppReviewGame(input: {
       update: { firstNameEncrypted: prepared.partnerName, photoKey: null, timeZone: APP_REVIEW_GAME_TIME_ZONE },
       where: { memberId: members.partner },
     });
-    // The reviewer keeps a profile they already have.
+    // The reviewer keeps a profile they already have, but not a private rename of Sam.
+    await tx.gameContactLabel.deleteMany({ where: { ownerMemberId: members.reviewer, subjectMemberId: members.partner } });
     await tx.gameProfile.createMany({
       data: [{ firstNameEncrypted: prepared.reviewerName, memberId: members.reviewer, timeZone: APP_REVIEW_GAME_TIME_ZONE }],
       skipDuplicates: true,
@@ -203,7 +226,7 @@ export async function seedHostedOpsAppReviewGame(input: {
     await writeGame(tx, settled, members, prepared, null);
     await writeGame(tx, live, members, prepared, settled.id);
   });
-  return { ...summarize("applied", await inspect(prisma, reviewer), prepared.games, now, inspected.replacedGames),
+  return { ...summarize("applied", await inspect(prisma, members.reviewer), prepared.games, now, input.inspected.replacedGames),
     created: prepared.games.map((game) => ({ id: game.id, round: game.seed.round, status: game.seed.settled ? "settled" : "live" })) };
 }
 

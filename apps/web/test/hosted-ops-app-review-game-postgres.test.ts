@@ -12,12 +12,36 @@ vi.mock("@/src/lib/apple-push/send", async (original) => ({
 vi.mock("@/src/lib/better-auth/review-account", async (original) => ({
   ...await original<typeof import("@/src/lib/better-auth/review-account")>(), readHostedAuthReviewMemberId: mocks.reviewer,
 }));
+// Real roots and sealing for the crypto case; only KMS is the local provider.
+vi.mock("@/src/lib/hosted-crypto/env", async () => {
+  const { generateKeyPairSync } = await import("node:crypto");
+  const { createHostedAuthorityVerifyKeyring } = await vi.importActual<typeof import("@murphai/runtime-state")>("@murphai/runtime-state");
+  const { createHostedGcpKmsClientFromEnv } = await vi.importActual<typeof import("@/src/lib/hosted-crypto/gcp-kms")>("@/src/lib/hosted-crypto/gcp-kms");
+  const authoritySignKeyVersionName = "projects/example/locations/global/keyRings/hosted/cryptoKeys/authority/cryptoKeyVersions/1";
+  const authorityKey = generateKeyPairSync("ec", { namedCurve: "prime256v1", privateKeyEncoding: { format: "jwk" }, publicKeyEncoding: { format: "pem", type: "spki" } });
+  const gcpKms = createHostedGcpKmsClientFromEnv({
+    HOSTED_CRYPTO_ENV: "test", HOSTED_CRYPTO_GCP_KMS_API_ROOT: "local://murph-hosted-kms",
+    HOSTED_CRYPTO_LOCAL_AUTHORITY_SIGN_PRIVATE_JWK: JSON.stringify(authorityKey.privateKey),
+    HOSTED_CRYPTO_LOCAL_KMS_WRAP_KEY: Buffer.alloc(32, 7).toString("base64"), NODE_ENV: "test",
+  });
+  return {
+    getHostedWebCryptoConfig: () => ({
+      authoritySignKeyVersionName, authoritySignPublicKeyPem: authorityKey.publicKey,
+      authorityVerifyKeyring: createHostedAuthorityVerifyKeyring({ activeKeyVersionName: authoritySignKeyVersionName, activePublicKeyPem: authorityKey.publicKey }),
+      env: "test", gcpKms, webWrapKmsKeyName: "projects/example/locations/global/keyRings/hosted/cryptoKeys/app-review-game",
+    }),
+  };
+});
 
 import {
   APP_REVIEW_PARTNER_MEMBER_ID,
   seedHostedOpsAppReviewGame,
 } from "@/src/lib/hosted-ops/app-review-game";
+import { labelTarget, sealGameText } from "@/src/lib/game/crypto";
 import { readHome, runGameCommand } from "@/src/lib/game/service";
+import { prepareHostedDomainRootForWeb, revalidatePreparedHostedDomainRootForWebTx } from "@/src/lib/hosted-crypto/domain-root-store";
+import { runWithHostedDomainRootUnwrapCache } from "@/src/lib/hosted-crypto/domain-root-unwrap-cache";
+import { setHostedSecureBoxStringTestCodecForTests } from "@/src/lib/hosted-crypto/secure-box";
 import { getPrisma } from "@/src/lib/prisma";
 
 const enabled = process.env.MURPH_TEST_POSTGRES_CONCURRENCY === "1";
@@ -32,6 +56,14 @@ const readPhoto = async (file: string) => new Uint8Array([...JPEG, ...new TextEn
 const partner = APP_REVIEW_PARTNER_MEMBER_ID;
 let mediaDir = "";
 let reviewer = "";
+
+/** Every real member has a control root; the seed reuses the reviewer's. */
+async function provisionControlRoot(userId: string) {
+  await runWithHostedDomainRootUnwrapCache(async () => {
+    const prepared = await prepareHostedDomainRootForWeb({ domain: "control", reason: "test", userId });
+    await getPrisma().$transaction((tx) => revalidatePreparedHostedDomainRootForWebTx({ prepared, tx }));
+  });
+}
 
 async function sideEffects() {
   const prisma = getPrisma();
@@ -61,6 +93,7 @@ describe.skipIf(!enabled)("App Review game seed against PostgreSQL", () => {
     mocks.push.mockClear();
     reviewer = `hbm_reviewtest_${randomUUID().slice(0, 8)}`;
     await getPrisma().hostedMember.create({ data: { billingStatus: "active", id: reviewer } });
+    await provisionControlRoot(reviewer);
     mocks.reviewer.mockResolvedValue(reviewer);
     vi.stubEnv("MURPH_GAME_ENABLED", "true");
     vi.stubEnv("MURPH_GAME_MEMBER_ALLOWLIST", reviewer);
@@ -131,6 +164,8 @@ describe.skipIf(!enabled)("App Review game seed against PostgreSQL", () => {
   it("replaces the partner's games on every run and keeps the reviewer's own name", async () => {
     await seedHostedOpsAppReviewGame({ mode: "apply", readPhoto });
     await runGameCommand({ actorMemberId: reviewer, command: { firstName: "Robin", type: "setProfile" } });
+    await getPrisma().gameContactLabel.create({ data: { nameEncrypted: await sealGameText(labelTarget(reviewer, "name"), "Bestie"),
+      ownerMemberId: reviewer, subjectMemberId: partner } });
     const first = await getPrisma().game.findMany({ where: { players: { some: { memberId: partner } } }, select: { id: true } });
 
     const again = await seedHostedOpsAppReviewGame({ mode: "apply", readPhoto });
@@ -142,6 +177,33 @@ describe.skipIf(!enabled)("App Review game seed against PostgreSQL", () => {
     const home = await readHome(reviewer);
     expect(home.me.firstName).toBe("Robin");
     expect(home.games).toHaveLength(2);
+    expect(home.games[0].players.find((player) => !player.isMe)?.firstName).toBe("Sam");
+  });
+
+  it("provisions the partner's own encryption root on the first apply and reuses it after", async () => {
+    const holder = globalThis as typeof globalThis & { __murphHostedSecureBoxStringTestCodec?: Parameters<typeof setHostedSecureBoxStringTestCodecForTests>[0] };
+    const codec = holder.__murphHostedSecureBoxStringTestCodec ?? null;
+    setHostedSecureBoxStringTestCodecForTests(null);
+    try {
+      const roots = () => getPrisma().hostedUserCryptoEnvelope.findMany({ where: { userId: partner, domain: "control" }, select: { rootKeyId: true } });
+      expect(await roots()).toEqual([]);
+
+      await seedHostedOpsAppReviewGame({ mode: "apply", readPhoto });
+      const [root] = await roots();
+      expect(root?.rootKeyId).toBeTruthy();
+      const home = await readHome(reviewer);
+      expect(home.me.firstName).toBe("Alex");
+      expect(home.games[0].players.map((player) => player.firstName)).toEqual(["Sam", "Alex"]);
+      expect(home.games[0].terms.tasks[1].text).toBe("20 pushups or a short walk");
+      expect(home.games[0].days[1].others[0].entry?.text).toBe("30 minutes in the rain. Still counts.");
+      expect(home.wallet.held[0].what).toBe("Coffee of your choice");
+
+      await seedHostedOpsAppReviewGame({ mode: "apply", readPhoto });
+      expect(await roots()).toEqual([root]);
+      expect((await readHome(reviewer)).games[0].players[0].firstName).toBe("Sam");
+    } finally {
+      setHostedSecureBoxStringTestCodecForTests(codec);
+    }
   });
 
   it("refuses when the partner could reach or be reached by a person", async () => {

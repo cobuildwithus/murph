@@ -240,8 +240,9 @@ describe.skipIf(!enabled)("weekly game change serialization against PostgreSQL",
     const change = kind === "date" ? {kind:"edit" as const, startsOn:addDays(today,1)} : {kind:"edit" as const,lengthDays:3};
     expect(await run(a,{type:"proposeChange",gameId,proposalId,expectedTermsVersion:1,change})).toMatchObject({ok:true});
     if (kind === "unbound") await db.game.update({where:{id:gameId},data:{chatContainerMemberId:null}});
-    // Eight days on, the proposed date (snapped onto a weekday) has passed and Day 1 has begun.
-    await db.game.update({where:{id:gameId},data:{devClockOffsetMs:BigInt(8*86400000)}});
+    // Day 1 is at most seven days out (a Saturday start snaps to Monday), so nine days on
+    // the proposed date has passed and Day 3 has begun on every weekday the suite runs.
+    await db.game.update({where:{id:gameId},data:{devClockOffsetMs:BigInt(9*86400000)}});
     // The first read expires it: both players see it gone and can edit again.
     for (const viewer of [a, b]) expect(await readGame(gameId,viewer)).toMatchObject({pendingChange:null,lengthDays:7,terms:{n:1},changeControls:{canEdit:true}});
     const event = await db.gameEvent.findUniqueOrThrow({where:{commandKey:`game-change-resolved:${gameId}:${proposalId}`}});
@@ -276,7 +277,7 @@ describe.skipIf(!enabled)("weekly game change serialization against PostgreSQL",
       const {a,b,room,gameId} = await setup({days:[0,1,2,3,4]}, addDays(today, 5));
       const db = getPrisma(); const proposalId = randomUUID();
       expect(await run(a,{type:"proposeChange",gameId,proposalId,expectedTermsVersion:1,change:{kind:"edit",lengthDays:3}})).toMatchObject({ok:true});
-      await db.game.update({where:{id:gameId},data:{devClockOffsetMs:BigInt(8*86400000)}});
+      await db.game.update({where:{id:gameId},data:{devClockOffsetMs:BigInt(9*86400000)}});
       const alternate = `game_room_${randomUUID()}`; members.push(alternate);
       await db.hostedMember.create({data:{id:alternate,billingStatus:"not_started"}}); roomPlayers.set(alternate,[a,b]);
       expect(await run(b,{type:"respondChange",gameId,proposalId,decision:"approve"},{chatContainerMemberId:answeredIn === "bound" ? room : alternate,beforeMutationTx:fence}))
