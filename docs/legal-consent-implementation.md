@@ -1,6 +1,6 @@
 # Legal Consent Implementation
 
-Last verified: 2026-07-30
+Last verified: 2026-10-26
 
 ## Purpose
 
@@ -137,6 +137,17 @@ flow so the member can review or reconnect them.
 ## Document updates and existing members
 
 A grant is current only when its recorded document-version snapshot exactly matches every document required by that scope. Publishing a new required version therefore preserves the old append-only acceptance event as historical evidence but makes the corresponding current grant stale. Members do not lose their account, subscription, data, device connection, or container when that happens.
+
+Each document has its own version in `consent.ts`:
+`HOSTED_TERMS_OF_SERVICE_VERSION`, `HOSTED_PRIVACY_POLICY_VERSION`, and
+`HOSTED_HEALTH_NOTICE_DOCUMENT_VERSION` for the Consumer Health Data Notice and
+the Health AI Safety Disclosure. Bump only the documents that changed, so a
+Terms or Privacy Policy update leaves `launch.health-data` current and asks
+members again only for `launch.legal`. The PDF registry in
+`apps/web/scripts/generate-legal-pdfs.ts`, `apps/web/legal/legal-documents.md`,
+and `apps/web/test/legal-manifest.test.ts` carry the same versions.
+`apps/web/test/legal-terms-bump-stale-grant.test.ts` replays a pre-bump grant
+through the real registry and the companion routes.
 
 The authenticated dashboard layout reads consent status before starting the
 browser-vault provider. While launch consent is absent or stale, the requested

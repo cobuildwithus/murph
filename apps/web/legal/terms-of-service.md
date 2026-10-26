@@ -1,7 +1,7 @@
 # Murph Terms of Service
 
-**Effective Date:** July 23, 2026
-**Last Updated:** July 23, 2026
+**Effective Date:** October 26, 2026
+**Last Updated:** October 26, 2026
 **Company:** Just Cobuild, Co. ("**Murph**," "**we**," "**us**," or "**our**")
 
 These Terms of Service ("**Terms**") govern your access to and use of Murph's hosted websites, hosted applications, hosted onboarding flows, hosted settings pages, hosted APIs, hosted messaging features, hosted integrations, and related managed services that link to these Terms (collectively, the "**Hosted Service**").
@@ -242,6 +242,28 @@ Revoking a sharing permission stops future disclosures by Murph to the extent su
 
 **Health Commons contributions.** Murph may allow you to contribute outcome cards, protocol notes, aggregate results, or similar materials to public Health Commons surfaces. Public contribution is opt-in and separate from private experiment tracking. You are responsible for reviewing what will be contributed before submission, removing information you do not want published, and confirming that you have the right to contribute any third-party information included in the contribution. Murph may reject, moderate, de-identify, aggregate, remove, or decline to publish contributions for safety, privacy, quality, legal, product, or operational reasons. Health Commons contributions are for education and protocol learning; they are not clinical research, medical advice, professional care, or proof that a protocol caused an outcome.
 
+### Games
+
+Murph may offer a game for two people. Each player picks a daily task and posts one proof a day, and the players agree on a prize the loser gives the winner, or a dare the loser does. Games are invite only and free to play. These rules apply to every game, together with the rest of these Terms.
+
+**No tolerance for objectionable content or abusive users.** In a game, you may not post, send, or share anything sexual, hateful, harassing, threatening, or violent, or anything that encourages someone to hurt themselves, and you may not abuse, bully, or threaten another player. We check the words players type before they are posted and refuse words that clearly break these rules, such as slurs and explicit sexual words. The check does not catch everything, so please report anything it misses. We remove content, end games, and suspend or close the accounts of people who break these rules.
+
+**Reporting and blocking.** You can report anything another player shares with you in a game, including their posts, name, profile photo, task, and prize or dare, and you can report an invite before you accept it. Reports go to the Murph team. We review reports promptly, usually within 24 hours. We never tell the other player who reported them. You can also block a player. Blocking ends any open game between you, stops new invites and rematches between you, and hides you from each other in the game. You can unblock someone in Settings. You can also reach us at support@withmurph.ai.
+
+**Prizes and dares are promises between players.** A prize or dare is a personal promise from one player to the other. Murph does not supply, pay for, hold, or enforce any prize or dare, and is not responsible if a player does not follow through. Murph's list of who owes whom is a reminder only.
+
+**No money.** You may not play a game for money or for anything with a cash value, such as cash, gift cards, payment app transfers, or crypto, and you may not use a game to bet or wager. Our word check refuses prizes and dares that mention money, though it may not catch every case, and we may end any game that breaks this rule.
+
+**Pick safe tasks and dares.** You choose your task and the prize or dare, and you decide whether to do it. Pick something that is safe for you and legal where you are, and don't pressure anyone to do something unsafe. Stop if anything hurts, makes you dizzy, or feels wrong. Sections 3 and 4 apply to every task and dare. Murph does not supervise games and, to the extent the law allows, is not responsible for any injury, loss, or damage caused by a task or dare.
+
+**What other players see.** What you post in a game is shown to the other player. Murph may also text both players about the game in a group chat, and everyone in that chat can see what is sent there. Our Privacy Policy explains what we collect for games and who sees it.
+
+**Apple.** Apple is not a sponsor of, and is not involved in, any game.
+
+**Age.** Each player must be at least 18 years old, as Section 1 requires. Only invite people who are.
+
+We may change, pause, or end a game, remove game content, or limit who can play at any time, including for safety or to enforce these Terms.
+
 ## 12. Privacy, Sensitive Information, Consumer Health Data, and HIPAA
 
 Our Privacy Policy, available at https://withmurph.ai/legal/privacy, explains how we collect, use, disclose, and process personal information through the Hosted Service and is incorporated into these Terms by reference. Where required or appropriate, we may also provide a Consumer Health Data Notice, Health AI Safety Disclosure, platform-specific notices, app-store notices, or consent flows that supplement our Privacy Policy.
@@ -347,18 +369,24 @@ You may not use the Hosted Service to, or help others to:
 6. introduce malware, malicious code, denial-of-service traffic, phishing content, or abusive automation;
 7. bypass rate limits, access controls, invite limits, payment controls, or security restrictions;
 8. send spam, scams, or unsolicited commercial communications through Murph channels or integrations;
-9. provide or automate diagnosis, treatment, medical decision-making, medication or supplement dosing, clinical triage, emergency response, remote patient monitoring, or other regulated healthcare services without a separate written agreement with Murph and any required professional oversight;
-10. use Murph outputs as the sole basis for decisions affecting a person's health, safety, legal rights, financial rights, insurance, employment, housing, education, benefits, credit, or access to essential services;
-11. submit or process PHI on behalf of a covered entity or business associate without a signed BAA with Murph;
-12. submit data about minors or other people without required authorization;
-13. use Murph to encourage self-harm, disordered eating, unsafe exercise, unsafe supplement use, substance misuse, or other harmful health behavior;
-14. use Murph to infer sensitive traits about another person, including health status, pregnancy status, disability, biometric identity, race, religion, sexual orientation, or political views, except where you have lawful authorization and the use is permitted by these Terms;
-15. use outputs, prompts, system behavior, or service interactions to train, distill, copy, or build competing AI models or services without our prior written permission;
-16. remove, obscure, or misrepresent AI disclosures, health disclaimers, research limitations, citations, warnings, or source information;
-17. misuse invite links or imported content to exfiltrate or expose another person's information; or
-18. use the Hosted Service in a way that damages, disables, overburdens, or impairs Murph or other users.
+9. harass, bully, threaten, intimidate, stalk, or abuse anyone, including another player in a game;
+10. share sexual content or nudity with another person through Murph, including in a game or group chat, or share any sexual content involving a minor;
+11. share hate speech or content that attacks people for who they are;
+12. dare or pressure anyone to do something dangerous or illegal;
+13. play a game for money or anything with a cash value, or use Murph to bet or wager;
+14. make false or bad-faith reports, or use reports or blocks to harass someone;
+15. provide or automate diagnosis, treatment, medical decision-making, medication or supplement dosing, clinical triage, emergency response, remote patient monitoring, or other regulated healthcare services without a separate written agreement with Murph and any required professional oversight;
+16. use Murph outputs as the sole basis for decisions affecting a person's health, safety, legal rights, financial rights, insurance, employment, housing, education, benefits, credit, or access to essential services;
+17. submit or process PHI on behalf of a covered entity or business associate without a signed BAA with Murph;
+18. submit data about minors or other people without required authorization;
+19. use Murph to encourage self-harm, disordered eating, unsafe exercise, unsafe supplement use, substance misuse, or other harmful health behavior;
+20. use Murph to infer sensitive traits about another person, including health status, pregnancy status, disability, biometric identity, race, religion, sexual orientation, or political views, except where you have lawful authorization and the use is permitted by these Terms;
+21. use outputs, prompts, system behavior, or service interactions to train, distill, copy, or build competing AI models or services without our prior written permission;
+22. remove, obscure, or misrepresent AI disclosures, health disclaimers, research limitations, citations, warnings, or source information;
+23. misuse invite links or imported content to exfiltrate or expose another person's information; or
+24. use the Hosted Service in a way that damages, disables, overburdens, or impairs Murph or other users.
 
-We may investigate suspected violations and take any action we reasonably believe is appropriate, including suspending accounts, revoking sessions, blocking integrations, removing content where permitted, and cooperating with law enforcement or affected third parties.
+We may investigate suspected violations and take any action we reasonably believe is appropriate, including removing content, ending games, suspending or closing accounts, revoking sessions, blocking integrations, and cooperating with law enforcement or affected third parties.
 
 ## 19. Local Software and Open-Source Licenses
 
@@ -443,7 +471,7 @@ TO THE MAXIMUM EXTENT PERMITTED BY LAW:
 
 These limitations apply regardless of the legal theory and even if a remedy fails of its essential purpose.
 
-The limitations above apply to claims arising from or relating to health, wellness, fitness, nutrition, supplement, sauna, cold-exposure, breathwork, experiment, wearable, lab, AI Output, Action, message-delivery, integration, data-loss, privacy, or third-party-provider issues, except to the extent liability cannot be limited under applicable law.
+The limitations above apply to claims arising from or relating to health, wellness, fitness, nutrition, supplement, sauna, cold-exposure, breathwork, experiment, game, task, prize, dare, wearable, lab, AI Output, Action, message-delivery, integration, data-loss, privacy, or third-party-provider issues, except to the extent liability cannot be limited under applicable law.
 
 Nothing in these Terms excludes or limits liability that cannot be excluded under applicable law, including liability for fraud, willful misconduct, gross negligence, or, where required by law, death or personal injury.
 

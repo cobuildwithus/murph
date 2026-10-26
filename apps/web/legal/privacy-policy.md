@@ -1,7 +1,7 @@
 # Murph Privacy Policy
 
 **Effective Date:** April 9, 2026  
-**Last Updated:** July 23, 2026
+**Last Updated:** October 26, 2026
 
 Murph (“**Murph**,” “**we**,” “**us**,” or “**our**”) provides software and services designed to help people understand their bodies and lives better through tools such as health journaling, meal tracking, wearable and device sync, messaging-based interactions, hosted onboarding, invite, import, export, and related local or hosted experiences.
 
@@ -132,6 +132,30 @@ If you ask Murph to call, message, browse, book, purchase, cancel, submit inform
 
 Murph does not need to store full payment-card numbers or account passwords to perform ordinary browser actions. Sensitive credentials may be processed by the applicable website, browser provider, identity provider, payment processor, or other third party under its own terms and privacy notice.
 
+### I. Games
+
+If you play Murph's game, we collect:
+
+- **your game profile:** the first name and profile photo you choose, and your time zone, so each game day ends at 3am where you are;
+- **the game you agree to:** each player's daily task, the schedule and length, the prize or dare, any changes you both agree to, daily results, scores, and who owes whom;
+- **photos** you take with your iPhone's camera in the game as your daily proof;
+- **words** you type as your daily proof;
+- **rep counts:** the game reads your iPhone's front camera to find your body's position and counts pushups on your iPhone. Camera frames are dropped right away and are never saved, shown, or sent. We receive only the rep card: the count, each rep's time and depth, and a heart rate summary if you add one;
+- **heart rate,** read over Bluetooth from a WHOOP you connect, only while you record. We receive only the heart rate card with its duration and average, low, and peak beats per minute, not each reading;
+- **routes** for a walk or run (see Location below);
+- **missed-day excuses:** the words you give for a missed day. If you explain by voice, your iPhone turns your speech into words and deletes the recording. Only the words are sent to us;
+- **invite details:** if you pick someone from your contacts, their phone number stays on your iPhone and is used only to open a Messages draft that you send. The name, relationship, and photo you give them are kept as a private label that only you see;
+- **reports and blocks:** who you report or block, the reason and any note you add, and a copy of what you reported as it was at that moment; and
+- **notifications:** if you turn them on, a device address so we can tell you about new posts. These notifications don't include names, photos, tasks, or words.
+
+Before a photo you take in the game leaves your iPhone, the app removes its location and camera details. We encrypt game words and numbers at rest, and we show game photos only through short-lived links to people allowed to see them.
+
+**Location.** The route feature uses your iPhone's precise location only after you tap Start and allow location while using the app. Murph never asks for location all the time. Between Start and Stop, it keeps recording while your phone is locked, and iOS shows its location indicator. Your location points stay in memory on your iPhone and are never sent or saved. When you tap Send, we receive one map image of your route, plus its distance, its time, and whether it was a walk or a run. The map leaves out the start and end of your route, so it doesn't show exactly where you started and finished.
+
+**Group chat.** When a game starts, Murph may text both players about it in an iMessage group. Murph writes those messages with help from its AI providers, using shared game details such as names, tasks, the prize or dare, the schedule, and who has posted. Messages and photos you send in that chat are handled like any other message to Murph (see Section 6), and a photo you send there can be saved as your game photo for the day.
+
+**Word check.** Before words are posted in a game, we check them on our own servers and refuse words that mention money in a prize or dare, describe clearly dangerous challenges, tell someone to hurt themselves, or contain slurs or explicit sexual words. No outside company does this check.
+
 ## 4. Sources of information
 
 We collect information from several sources:
@@ -141,7 +165,7 @@ We collect information from several sources:
 - **From connected providers or integrations**, when you choose to link them to Murph.
 - **From identity and authentication providers**, when you sign in, verify an account, or complete an onboarding flow through them.
 - **From payment processors**, when you purchase or subscribe to hosted services.
-- **From other Murph users**, such as when someone sends you an invite link.
+- **From other Murph users**, such as when someone sends you an invite link, plays a game with you, or reports something you shared.
 - **From recipients, websites, portals, providers, and merchants you ask Murph to contact or use**, when they return status, confirmation, transaction, or result information.
 - **From service providers and security tools**, where needed to operate, support, analyze, or secure Murph.
 
@@ -161,6 +185,7 @@ We use information to:
 - deliver hosted onboarding, invite, import, and export flows;
 - perform user-directed calls, messages, browser actions, bookings, purchases, cancellations, submissions, and other tasks;
 - verify and present resulting confirmations, statuses, summaries, receipts, and outcomes;
+- run games you join, including checking the words you type before they are posted, showing your posts to the other player, sending game messages and notifications, and reviewing reports;
 - enable billing, entitlement, and subscription management; and
 - provide customer support and respond to requests.
 
@@ -292,6 +317,8 @@ If you choose to share information in a group, challenge, or newsletter, the sel
 
 Information you intentionally make available to other users or recipients may become visible to them under the settings or permissions you choose. Murph cannot recall or delete copies already delivered to another person, an email inbox, a messaging service, or an independent third party.
 
+**Games.** What you post in a game is shown to the other player in that game, once they have posted their own proof that day, or once the game ends. The other player also sees your first name and profile photo, your task, the prize or dare, your score, and the result. Other Murph members do not see your game posts. Your missed-day excuses are kept for you and are not shown to the other player. If you make a share card, it shows your own posts unless you choose to include the other player's, and anyone you send it to can keep it. Murph staff may see game content when they review a report. Like other shared content, Murph cannot recall what the other player has already saved or forwarded.
+
 **Recipient responsibility.** If you direct Murph to share health data with another person, organization, workspace, coach, clinician, researcher, merchant, provider, or third-party app, that recipient may become an independent controller or separately responsible party for the data it receives. Their privacy policy, security practices, retention periods, and deletion practices may apply. Murph is not responsible for data that a recipient independently extracts, stores, or further discloses outside Murph, except where applicable law says otherwise.
 
 ### D. Legal, compliance, and protection purposes
@@ -380,6 +407,8 @@ Murph retains personal information only for as long as reasonably necessary for 
 | Integration tokens and credentials | Until disconnect/account deletion, then targeted for revocation or deletion promptly, normally within 7-30 days |
 | Webhook receipts, routing metadata, and sync logs | Typically 30-90 days unless needed for security, debugging, replay protection, fraud prevention, reconciliation, or legal preservation |
 | User-visible assistant history containing health data | Until you delete it or your account is deleted; targeted for removal from active hosted systems within 30 days and backups within 90 days unless legally preserved |
+| Game profile, games, and posts | While your account is active. Finished games stay as history for both players. A photo you retake or delete, or a post we remove, is hidden right away, but the image file may stay in our storage until your account is deleted |
+| Game reports | Kept for review and safety. Reports you made are deleted when you delete your account. A report about you stays, with its copy of the reported words, but is no longer linked to your account |
 | Operational prompt/tool traces containing health data | Not retained by default outside user-visible history; where retained for support, security, abuse prevention, or debugging, targeted for deletion within 30 days unless legal, security, or dispute needs require longer |
 | Support communications | Typically up to 3 years, with health content redacted or deleted sooner where feasible |
 | Billing/tax records | As required for accounting, tax, audit, and legal obligations |
@@ -387,6 +416,8 @@ Murph retains personal information only for as long as reasonably necessary for 
 | Backups | Deleted or overwritten on a rolling basis, typically within 90 days for hosted systems Murph controls |
 
 We do not retain health data "just in case." We retain it only for the purposes described in this Privacy Policy, for the periods described above, or as required to comply with legal, security, fraud-prevention, accounting, dispute-resolution, or user-request obligations.
+
+**Games after you delete your account.** Deleting your account calls off any open or live game you are in: nobody wins and nobody owes. The other player sees that you left the game, by the name they knew you by. Your game profile, posts, photos, private labels, and blocks are deleted, along with reports you made. Finished games stay for the other player with the final scores, the tasks and the prize or dare, and their own posts. A prize owed between you stays in their history but can no longer be marked done. A game nobody else is in is deleted. Deletion follows the timing in the table above.
 
 Murph may retain aggregated, de-identified, or otherwise non-identifying information that does not reasonably identify you, provided we maintain and use it in de-identified form as required by law.
 
@@ -443,6 +474,7 @@ Depending on how you use Murph, you may also be able to:
 - change device, browser, or app permissions;
 - manage account settings and preferences;
 - delete or revoke certain invite flows or invitations;
+- in a game, report anything the other player shares, block a player, or unblock them in Settings;
 - export or copy data directly from local or self-hosted environments you control; or
 - request account deletion.
 

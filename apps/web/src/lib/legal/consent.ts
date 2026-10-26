@@ -14,14 +14,19 @@ import {
   lockHostedMemberRow,
 } from "../hosted-onboarding/shared";
 
-export const HOSTED_LEGAL_DOCUMENT_VERSION = "2026-07-23";
-export const HOSTED_PRIVACY_POLICY_VERSION = "2026-07-23";
+// Each document carries its own version, and a grant stays current only while
+// every version it recorded matches. Bumping one document therefore asks again
+// only for the scopes that cover it.
+export const HOSTED_TERMS_OF_SERVICE_VERSION = "2026-10-26";
+export const HOSTED_PRIVACY_POLICY_VERSION = "2026-10-26";
+/** Shared by the Consumer Health Data Notice and the Health AI Safety Disclosure. */
+export const HOSTED_HEALTH_NOTICE_DOCUMENT_VERSION = "2026-07-23";
 
 export const HOSTED_CONSENT_DOCUMENTS = [
   {
     id: "terms-of-service",
     title: "Murph Terms of Service",
-    version: HOSTED_LEGAL_DOCUMENT_VERSION,
+    version: HOSTED_TERMS_OF_SERVICE_VERSION,
     href: "/legal/terms",
     pdfHref: "/legal/terms.pdf",
   },
@@ -35,14 +40,14 @@ export const HOSTED_CONSENT_DOCUMENTS = [
   {
     id: "consumer-health-data-notice",
     title: "Murph Consumer Health Data Notice",
-    version: HOSTED_LEGAL_DOCUMENT_VERSION,
+    version: HOSTED_HEALTH_NOTICE_DOCUMENT_VERSION,
     href: "/consumer-health-data-privacy-policy",
     pdfHref: "/legal/consumer-health-data-notice.pdf",
   },
   {
     id: "health-ai-safety-disclosure",
     title: "Murph Health AI Safety Disclosure",
-    version: HOSTED_LEGAL_DOCUMENT_VERSION,
+    version: HOSTED_HEALTH_NOTICE_DOCUMENT_VERSION,
     href: "/legal/health-ai-safety-disclosure",
     pdfHref: "/legal/health-ai-safety-disclosure.pdf",
   },

@@ -565,6 +565,107 @@ test("settings remains available after explicit health-data withdrawal", async (
   )).toBeNull();
 });
 
+test("a member who agreed to earlier Terms gets one Agree step that says what changed", async () => {
+  // The production state after a Terms and Privacy bump: launch.legal is
+  // stale while the unchanged health-data notice stays current.
+  const staleTermsStatus = createLaunchConsentStatus({
+    launchHealthDataGranted: true,
+  });
+  mocks.requestHostedOnboardingJson.mockResolvedValueOnce(
+    createLaunchConsentStatus({
+      launchHealthDataGranted: true,
+      launchLegalGranted: true,
+    }),
+  );
+
+  const rendered = await renderClientComponent(
+    createElement(DashboardLegalConsentGate, {
+      initialStatus: staleTermsStatus,
+      variant: "update",
+    }),
+    {
+      location: {
+        hash: "",
+        href: "https://app.example.test/home",
+        origin: "https://app.example.test",
+        pathname: "/home",
+        search: "",
+      },
+      requireButton: false,
+    },
+  );
+  cleanupRender = rendered.cleanup;
+
+  expect(rendered.container.textContent).toContain("Review what changed");
+  expect(rendered.container.textContent).toContain(
+    "We updated Murph's legal documents. We added rules for games. Accept the current versions to get your full dashboard back.",
+  );
+  expectNoLaunchCheckboxes(rendered.container);
+
+  const agreeButton = findButton(rendered.container, "Agree");
+  await act(async () => {
+    agreeButton.dispatchEvent(
+      new rendered.window.Event("click", { bubbles: true }),
+    );
+    await flushPromises();
+    await vi.advanceTimersByTimeAsync(100);
+  });
+
+  expect(readRequestedConsentScopes()).toEqual(["launch.legal"]);
+  expect(rendered.reload).toHaveBeenCalledTimes(1);
+});
+
+test("a stale Terms grant leaves device connect open", async () => {
+  const rendered = await renderClientComponent(
+    createElement(DashboardLegalConsentGate, {
+      initialStatus: createLaunchConsentStatus({
+        launchHealthDataGranted: true,
+      }),
+      variant: "update",
+    }),
+    {
+      location: {
+        hash: "",
+        href: "https://app.example.test/records/connect",
+        origin: "https://app.example.test",
+        pathname: "/records/connect",
+        search: "",
+      },
+      requireButton: false,
+    },
+  );
+  cleanupRender = rendered.cleanup;
+
+  expect(rendered.container.querySelector(
+    '[data-dashboard-legal-consent-gate="true"]',
+  )).toBeNull();
+});
+
+test("the games line shows only when the Terms step is pending", async () => {
+  const rendered = await renderClientComponent(
+    createElement(DashboardLegalConsentGate, {
+      initialStatus: createLaunchConsentStatus({
+        launchLegalGranted: true,
+      }),
+      variant: "update",
+    }),
+    {
+      location: {
+        hash: "",
+        href: "https://app.example.test/home",
+        origin: "https://app.example.test",
+        pathname: "/home",
+        search: "",
+      },
+      requireButton: false,
+    },
+  );
+  cleanupRender = rendered.cleanup;
+
+  expect(rendered.container.textContent).toContain("Review what changed");
+  expect(rendered.container.textContent).not.toContain("We added rules for games.");
+});
+
 function expectNoLaunchCheckboxes(container: HTMLElement) {
   expect(container.querySelectorAll('input[type="checkbox"]')).toHaveLength(0);
 }
