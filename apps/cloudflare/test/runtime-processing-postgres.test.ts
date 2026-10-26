@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { RuntimeProcessingDiagnostics } from "../src/user-runner/diagnostics.ts";
+import { buildRuntimeProcessingSummaryEntry, type RuntimeProcessingDiagnostics } from "../src/user-runner/diagnostics.ts";
+import type { HostedRuntimeEnsureProcessingResponse } from "@murphai/hosted-execution/orchestration-control";
 import type { HostedRuntimeOwnerResponse, HostedRuntimeOwnerSnapshot } from "@murphai/hosted-execution/runtime-owner";
 import { ensurePostgresRuntimeProcessing, HOSTED_RUNTIME_ADMISSION_BLOCKED_RETRY_MS } from "../src/runtime-processing.ts";
 import { commandHostedRuntimeOwner } from "../src/runtime-owner-client.ts";
@@ -10,7 +11,7 @@ import type { HostedExecutionContainerStubLike, HostedExecutionContainerInvokeRe
 import type { RunnerWriteFenceToken } from "../src/runtime-invocation-token.ts";
 import type { HostedStandbySlotBinding } from "../src/standby-runner-contract.ts";
 import type { RunnerInvocationReceipt } from "../src/runner-invocation-receipt.ts";
-import type { RuntimeInvocationPreparation } from "../src/runtime-invocation-preparation.ts";
+import { RuntimeInvocationPreparation } from "../src/runtime-invocation-preparation.ts";
 import type { WorkerActiveRuntimeUserFenceResult } from "../src/worker-contracts.ts";
 
 vi.mock("../src/runtime-owner-client.ts", () => ({ commandHostedRuntimeOwner: vi.fn() }));
@@ -66,6 +67,152 @@ describe("Postgres runtime orchestration", () => {
   afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  it.each([
+    "resolve_retained_target", "container_readiness", "prepare_invocation",
+    "start_invocation", "owner_prepare_launch", "owner_accepted",
+  ] as const)("summarizes the observed %s rejection without changing the thrown object", async operation => {
+    const { source, container } = harness();
+    const starting = owner({ phase: "starting", workspaceVersion: null });
+    const diagnostics: RuntimeProcessingDiagnostics = { stage: "admission", details: {} };
+    const privateDetails = {
+      name: "SyntheticPrivateName", code: "synthetic-private-code",
+      message: "Synthetic failure at https://synthetic.invalid/private",
+      payload: "synthetic-private-payload",
+    };
+    // Cover both frozen Errors and a frozen non-Error rejection.
+    const failure = Object.freeze(operation === "prepare_invocation"
+      ? privateDetails : Object.assign(new Error(privateDetails.message), privateDetails));
+    vi.mocked(commandHostedRuntimeOwner).mockResolvedValue(response(starting, "updated"));
+    if (operation === "resolve_retained_target") container.resolveRetainedStandbySlot.mockRejectedValueOnce(failure);
+    else if (operation === "container_readiness") container.ensureReadyForProcessing.mockRejectedValueOnce(failure);
+    else if (operation === "prepare_invocation") {
+      vi.spyOn(RuntimeInvocationPreparation.prototype, "prepareForFreshStart")
+        .mockReturnValueOnce(async () => { throw failure; });
+    } else if (operation === "start_invocation") container.startSupervisedInvocation.mockRejectedValueOnce(failure);
+    else {
+      if (operation === "owner_prepare_launch") container.ensureReadyForProcessing.mockResolvedValue({ kind: "ready" });
+      vi.mocked(commandHostedRuntimeOwner).mockRejectedValueOnce(failure);
+    }
+
+    const enteredAt = Date.now();
+    await expect(ensurePostgresRuntimeProcessing(source, {
+      ...request, admission: response(starting, "claimed"),
+    }, diagnostics)).rejects.toBe(failure);
+    const entry = buildRuntimeProcessingSummaryEntry(diagnostics, undefined, enteredAt);
+    // Exact metadata also excludes the error's name, code, message, payload and stack.
+    expect(entry.redactedJson).toEqual({
+      runtimeProcessingActiveMode: "default",
+      runtimeProcessingLastObservedFailedOperation: operation,
+      runtimeProcessingStage: "fresh_start",
+      runtimeProcessingOutcome: "threw",
+      runtimeProcessingElapsedMs: expect.any(Number),
+    });
+  });
+
+  it.each([false, true])("retains standby recovery and observes a later launch failure (%s)", async failLaunch => {
+    const { source, container } = harness();
+    const starting = owner({ phase: "starting", runnerContainerName: null, workspaceVersion: null });
+    const diagnostics: RuntimeProcessingDiagnostics = { stage: "admission", details: {} };
+    const standbyFailure = Object.freeze(new Error("Synthetic standby failure"));
+    const launchFailure = Object.freeze(new Error("Synthetic launch failure"));
+    const claimReadyStandby = vi.fn(async () => { throw standbyFailure; });
+    vi.mocked(commandHostedRuntimeOwner).mockImplementation(async ({ command }) => response(
+      command.operation === "select_target" ? { ...starting, runnerContainerName: command.runnerContainerName } : starting,
+      "updated",
+    ));
+    if (failLaunch) container.startSupervisedInvocation.mockRejectedValueOnce(launchFailure);
+    const enteredAt = Date.now();
+    const processing = ensurePostgresRuntimeProcessing({
+      ...source, HOSTED_EXECUTION_STANDBY_MODE: "allocate",
+      STANDBY_COORDINATOR: { getByName: () => ({
+        claimReadyStandby, ensureReadyStandby: vi.fn(), reportStandbySlotStopped: vi.fn(),
+      }) },
+    }, { ...request, conversationWorkPending: true, admission: response(starting, "claimed") }, diagnostics);
+    let result: HostedRuntimeEnsureProcessingResponse | undefined;
+    if (failLaunch) await expect(processing).rejects.toBe(launchFailure);
+    else {
+      result = await processing;
+      expect(result).toMatchObject({ kind: "runtime_processing_accepted", action: "started" });
+    }
+    expect(claimReadyStandby).toHaveBeenCalledOnce();
+    expect(container.bindStandbySlot).toHaveBeenCalledOnce();
+    expect(container.startSupervisedInvocation).toHaveBeenCalledOnce();
+    expect(container.retireStandbySlot).not.toHaveBeenCalled();
+    expect(buildRuntimeProcessingSummaryEntry(diagnostics, result, enteredAt).redactedJson).toMatchObject({
+      runtimeProcessingLastObservedFailedOperation: failLaunch ? "start_invocation" : "claim_standby",
+      runtimeProcessingOutcome: failLaunch ? "threw" : "runtime_processing_accepted",
+    });
+  });
+
+  it.each([
+    ["container_readiness", "together"], ["prepare_invocation", "together"],
+    ["container_readiness", "after_snapshot"], ["prepare_invocation", "after_snapshot"],
+  ] as const)("snapshots parallel rejections (%s first, sibling %s)", async (firstOperation, siblingTiming) => {
+    vi.useFakeTimers();
+    const { source, container } = harness();
+    const diagnostics: RuntimeProcessingDiagnostics = { stage: "admission", details: {} };
+    let rejectReady!: (error: unknown) => void;
+    let rejectPreparation!: (error: unknown) => void;
+    const readiness = new Promise<never>((_resolve, reject) => { rejectReady = reject; });
+    const preparation = new Promise<never>((_resolve, reject) => { rejectPreparation = reject; });
+    const readyEntered = new Promise<void>(resolve => {
+      container.ensureReadyForProcessing.mockImplementationOnce(() => { resolve(); return readiness; });
+    });
+    const preparationEntered = new Promise<void>(resolve => {
+      vi.spyOn(RuntimeInvocationPreparation.prototype, "prepareForFreshStart")
+        .mockReturnValueOnce(() => { resolve(); return preparation; });
+    });
+    const firstFailure = Object.freeze(new Error("Synthetic first failure"));
+    const secondFailure = Object.freeze(new Error("Synthetic second failure"));
+    const enteredAt = Date.now();
+    // Capture at command settlement, as the route's finally does.
+    const finished = ensurePostgresRuntimeProcessing(source, {
+      ...request, admission: response(owner({ phase: "starting" }), "claimed"),
+    }, diagnostics).then(
+      () => { throw new Error("Expected synthetic processing rejection."); },
+      error => ({ error, entry: buildRuntimeProcessingSummaryEntry(diagnostics, undefined, enteredAt) }),
+    );
+    await Promise.all([readyEntered, preparationEntered]);
+    const rejectFirst = firstOperation === "container_readiness" ? rejectReady : rejectPreparation;
+    const rejectSecond = firstOperation === "container_readiness" ? rejectPreparation : rejectReady;
+    const secondOperation = firstOperation === "container_readiness" ? "prepare_invocation" : "container_readiness";
+    rejectFirst(firstFailure);
+    if (siblingTiming === "together") rejectSecond(secondFailure);
+    const { error, entry } = await finished;
+    expect(error).toBe(firstFailure);
+    const snapshotOperation = siblingTiming === "together" ? secondOperation : firstOperation;
+    expect(entry.redactedJson?.runtimeProcessingLastObservedFailedOperation).toBe(snapshotOperation);
+    const snapshot = JSON.stringify(entry);
+    if (siblingTiming === "after_snapshot") rejectSecond(secondFailure);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(diagnostics.details.runtimeProcessingLastObservedFailedOperation).toBe(secondOperation);
+    expect(JSON.stringify(entry)).toBe(snapshot);
+    expect(container.startSupervisedInvocation).not.toHaveBeenCalled();
+    expect(container.retireStandbySlot).not.toHaveBeenCalled();
+  });
+
+  it("keeps observed failures local to concurrent invocations for the same member", async () => {
+    const left = harness();
+    const right = harness();
+    const leftDiagnostics: RuntimeProcessingDiagnostics = { stage: "admission", details: {} };
+    const rightDiagnostics: RuntimeProcessingDiagnostics = { stage: "admission", details: {} };
+    const leftFailure = Object.freeze(new Error("Synthetic retained-target failure"));
+    const rightFailure = Object.freeze(new Error("Synthetic launch failure"));
+    left.container.resolveRetainedStandbySlot.mockRejectedValueOnce(leftFailure);
+    right.container.startSupervisedInvocation.mockRejectedValueOnce(rightFailure);
+    const input = { ...request, admission: response(owner({ phase: "starting" }), "claimed") };
+    const results = await Promise.allSettled([
+      ensurePostgresRuntimeProcessing(left.source, input, leftDiagnostics),
+      ensurePostgresRuntimeProcessing(right.source, input, rightDiagnostics),
+    ]);
+    expect(results).toEqual([
+      { status: "rejected", reason: leftFailure }, { status: "rejected", reason: rightFailure },
+    ]);
+    expect(leftDiagnostics.details.runtimeProcessingLastObservedFailedOperation).toBe("resolve_retained_target");
+    expect(rightDiagnostics.details.runtimeProcessingLastObservedFailedOperation).toBe("start_invocation");
+    expect(commandHostedRuntimeOwner).not.toHaveBeenCalled();
   });
 
   it.each(["off", "allocate"])("cold-starts background without claiming pristine standby capacity (pool %s)", async mode => {
@@ -173,10 +320,15 @@ describe("Postgres runtime orchestration", () => {
   it("bounds a Web callback independently of the longer command budget", async () => {
     vi.useFakeTimers();
     const { source, container } = harness();
+    const diagnostics: RuntimeProcessingDiagnostics = { stage: "admission", details: {} };
     vi.mocked(commandHostedRuntimeOwner).mockImplementation(() => new Promise(() => {}));
-    const result = ensurePostgresRuntimeProcessing({ ...source, HOSTED_EXECUTION_WEB_CONTROL_TIMEOUT_MS: "10000" }, request);
+    const result = ensurePostgresRuntimeProcessing({ ...source, HOSTED_EXECUTION_WEB_CONTROL_TIMEOUT_MS: "10000" }, request, diagnostics);
     await vi.advanceTimersByTimeAsync(10_000);
-    expect(await result).toMatchObject({ kind: "retry_later" });
+    const retry = await result;
+    expect(retry).toMatchObject({ kind: "retry_later" });
+    expect(buildRuntimeProcessingSummaryEntry(diagnostics, retry, Date.now()).redactedJson).toMatchObject({
+      runtimeProcessingOutcome: "retry_later", runtimeProcessingLastObservedFailedOperation: "owner_claim",
+    });
     expect(commandHostedRuntimeOwner).toHaveBeenCalledWith(expect.objectContaining({ timeoutMs: 10_000 }));
     expect(container.startSupervisedInvocation).not.toHaveBeenCalled();
   });
@@ -321,6 +473,7 @@ describe("Postgres runtime orchestration", () => {
     await vi.advanceTimersByTimeAsync(1_000);
     expect(await result).toMatchObject({ kind: "retry_later" });
     expect(diagnostics.details.runtimeProcessingRetryReason).toBe("command_budget_exhausted");
+    expect(diagnostics.details.runtimeProcessingLastObservedFailedOperation).toBe("complete_invocation");
     complete(true);
     await vi.advanceTimersByTimeAsync(0);
     expect(commandHostedRuntimeOwner).toHaveBeenCalledOnce();
@@ -339,8 +492,10 @@ describe("Postgres runtime orchestration", () => {
     await vi.advanceTimersByTimeAsync(1_000);
     expect(await result).toMatchObject({ kind: "retry_later" });
     expect(diagnostics.details.runtimeProcessingRetryReason).toBe("command_budget_exhausted");
+    expect(diagnostics.details.runtimeProcessingLastObservedFailedOperation).toBe("container_readiness");
     ready({ kind: "ready" });
     await vi.advanceTimersByTimeAsync(0);
+    expect(diagnostics.details.runtimeProcessingLastObservedFailedOperation).toBe("container_readiness");
     expect(container.startSupervisedInvocation).not.toHaveBeenCalled();
     expect(container.retireStandbySlot).not.toHaveBeenCalled();
     expect(vi.mocked(commandHostedRuntimeOwner).mock.calls.map(([input]) => input.command.operation))
@@ -367,13 +522,16 @@ describe("Postgres runtime orchestration", () => {
     const diagnostics: RuntimeProcessingDiagnostics = { stage: "admission", details: {} };
     expect(await ensurePostgresRuntimeProcessing(source, request, diagnostics)).toMatchObject({ kind: "retry_later" });
     expect(diagnostics.details.runtimeProcessingRetryReason).toBe("container_rpc_timeout");
+    expect(diagnostics.details.runtimeProcessingLastObservedFailedOperation).toBe("start_invocation");
     expect(container.startSupervisedInvocation).toHaveBeenCalledOnce();
     expect(container.retireStandbySlot).not.toHaveBeenCalled();
     expect(vi.mocked(commandHostedRuntimeOwner).mock.calls.map(([input]) => input.command.operation))
       .toEqual(supported ? ["claim"] : ["claim", "prepare_launch"]);
     // The next command observes that exact live owner rather than launching again.
     vi.mocked(commandHostedRuntimeOwner).mockResolvedValue(response(owner()));
-    expect(await ensurePostgresRuntimeProcessing(source, request)).toMatchObject({ kind: "runtime_processing_accepted", action: "woken" });
+    const wakeDiagnostics: RuntimeProcessingDiagnostics = { stage: "admission", details: {} };
+    expect(await ensurePostgresRuntimeProcessing(source, request, wakeDiagnostics)).toMatchObject({ kind: "runtime_processing_accepted", action: "woken" });
+    expect(wakeDiagnostics.details).not.toHaveProperty("runtimeProcessingLastObservedFailedOperation");
     expect(container.startSupervisedInvocation).toHaveBeenCalledOnce();
   });
 
@@ -384,6 +542,7 @@ describe("Postgres runtime orchestration", () => {
     const diagnostics: RuntimeProcessingDiagnostics = { stage: "admission", details: {} };
     await expect(ensurePostgresRuntimeProcessing(source, request, diagnostics)).resolves.toMatchObject({ kind: "retry_later" });
     expect(diagnostics.details.runtimeProcessingRetryReason).toBe("container_not_ready");
+    expect(diagnostics.details).not.toHaveProperty("runtimeProcessingLastObservedFailedOperation");
     expect(container.startSupervisedInvocation).not.toHaveBeenCalled();
     expect(container.retireStandbySlot).not.toHaveBeenCalled();
     expect(vi.mocked(commandHostedRuntimeOwner).mock.calls.map(([input]) => input.command.operation)).toEqual(["claim"]);
@@ -394,7 +553,9 @@ describe("Postgres runtime orchestration", () => {
     container.ensureReadyForProcessing.mockResolvedValue({ kind: "ready", ...(supported ? { preparesSupervisedLaunch: true } : {}) });
     vi.mocked(commandHostedRuntimeOwner).mockImplementation(async ({ command }) =>
       response(owner({ phase: "starting" }), command.operation === "claim" ? "claimed" : "updated"));
-    expect(await ensurePostgresRuntimeProcessing(source, request)).toMatchObject({ action: "started" });
+    const diagnostics: RuntimeProcessingDiagnostics = { stage: "admission", details: {} };
+    expect(await ensurePostgresRuntimeProcessing(source, request, diagnostics)).toMatchObject({ action: "started" });
+    expect(diagnostics.details).not.toHaveProperty("runtimeProcessingLastObservedFailedOperation");
     expect(vi.mocked(commandHostedRuntimeOwner).mock.calls.map(([input]) => input.command.operation))
       .toEqual(supported ? ["claim", "accepted"] : ["claim", "prepare_launch", "accepted"]);
     const payload = container.startSupervisedInvocation.mock.calls[0]?.[0];
