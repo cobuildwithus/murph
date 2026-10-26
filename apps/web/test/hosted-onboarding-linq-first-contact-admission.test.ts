@@ -265,7 +265,14 @@ describe("Linq first-contact admission", () => {
     const prompt = body.input[0].content;
     expect(prompt).toContain("Goal: decide whether");
     expect(prompt).toContain("Default to allow");
-    expect(prompt).toContain("Only block if the message is clearly automated marketing");
+    expect(prompt).toContain("Block clear automated messages from other AI assistants, chatbots, or autoresponders");
+    expect(prompt).toContain("templated introductions, registered-user-only responses, out-of-office notices, auto-replies, or bot signup pitches");
+    expect(prompt).toContain("A mention of Murph does not make an automated reply human.");
+    expect(prompt).toContain("Also block clearly automated marketing");
+    expect(prompt).toContain('bare greetings like "hi", "hey", "yo", "sup", emoji-only, single-word pings');
+    expect(prompt).toContain("any health/wellness/life question");
+    expect(prompt).toContain("When uncertain whether a message is a real human reaching out or an automated message, return allow.");
+    expect(prompt).not.toContain("Only block if");
   });
 
   it("blocks when the model returns decision=block regardless of confidence", async () => {

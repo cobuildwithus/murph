@@ -24,6 +24,11 @@ import {
   sendHostedLinqChatMessage,
 } from "./linq";
 import { getHostedLinqChatSummary } from "./linq-client";
+import {
+  claimHostedLinqSignupLinkReminderNotice,
+  releaseHostedLinqSignupLinkReminderNoticeClaim,
+  resolveHostedLinqDayUtc,
+} from "./linq-daily-state";
 import { buildHostedLinqGroupSetupEffectId } from "./linq-group-setup";
 import {
   createHostedLinqParticipantContactLookupKeyReadCandidates,
@@ -118,6 +123,7 @@ const HOSTED_LINQ_VISIBLE_SECONDARY_REASONS = new Set([
 ]);
 
 const HOSTED_LINQ_REASONS_REQUIRING_RECOGNIZED_SENDER = new Set([
+  "signup-link-already-sent",
   "group-chat",
   "home-line-capacity-exhausted",
   "thread-container-inactive",
@@ -254,24 +260,66 @@ export function withHostedVisibleSecondaryLinqOutcomes(
       return response;
     }
 
-    const message = resolveHostedLinqVisibleSecondaryReply({
+    return sendHostedLinqVisibleSecondaryReply({
+      context,
+      dependencies,
+      eventId: event.event_id,
+      prisma,
       reason,
-      recognizedSender: Boolean(recognizedSender),
+      recognizedSender,
+      response,
+      signal: input.signal,
     });
-    if (!message) {
-      return response;
-    }
+  };
+}
 
+async function sendHostedLinqVisibleSecondaryReply(input: {
+  context: ReturnType<typeof resolveHostedOnboardingLinqMessageContext>;
+  dependencies: HostedVisibleSecondaryLinqDependencies;
+  eventId: string;
+  prisma: PrismaClient;
+  reason: string;
+  recognizedSender: HostedVisibleSecondaryLinqSender | null;
+  response: Awaited<ReturnType<HostedOnboardingLinqWebhookHandler>>;
+  signal: AbortSignal | undefined;
+}): Promise<Awaited<ReturnType<HostedOnboardingLinqWebhookHandler>>> {
+  const { context, dependencies, prisma, reason, recognizedSender, response } = input;
+  const message = resolveHostedLinqVisibleSecondaryReply({
+    reason,
+    recognizedSender: Boolean(recognizedSender),
+  });
+  if (!message) {
+    return response;
+  }
+
+  const reminderClaim = reason === "signup-link-already-sent" && recognizedSender
+    ? { memberId: recognizedSender.id, occurredAt: context.occurredAt, prisma }
+    : null;
+  if (reason === "signup-link-already-sent") {
+    if (!reminderClaim || !await claimHostedLinqSignupLinkReminderNotice(reminderClaim)) {
+      return { ...response, reason: "signup-link-reminder-already-sent" };
+    }
+  }
+
+  try {
     await dependencies.sendHostedLinqChatMessage({
       chatId: context.summary.chatId,
-      idempotencyKey: `visible-secondary:${event.event_id}`,
+      idempotencyKey: reminderClaim
+        ? `signup-link-reminder:${reminderClaim.memberId}:${resolveHostedLinqDayUtc(reminderClaim.occurredAt).toISOString().slice(0, 10)}`
+        : `visible-secondary:${input.eventId}`,
       message,
-      replyToMessageId: context.summary.messageId,
+      // Keep the daily reminder payload stable if a later inbound retries it.
+      replyToMessageId: reminderClaim ? null : context.summary.messageId,
       ...(input.signal ? { signal: input.signal } : {}),
     });
+  } catch (error) {
+    if (reminderClaim) {
+      await releaseHostedLinqSignupLinkReminderNoticeClaim(reminderClaim);
+    }
+    throw error;
+  }
 
-    return buildVisibleSecondaryResponse(response, reason);
-  };
+  return buildVisibleSecondaryResponse(response, reason);
 }
 
 export function withHostedVisibleSecondaryTelegramOutcomes(

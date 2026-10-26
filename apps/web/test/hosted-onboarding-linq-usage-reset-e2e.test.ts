@@ -1053,6 +1053,7 @@ function makeHostedLinqDailyState(input: {
     lastSeenAt: new Date("2026-04-30T12:00:00.000Z"),
     memberId: MEMBER_ID,
     onboardingLinkSentAt: input.onboardingLinkSentAt ?? null,
+    signupLinkReminderSentAt: null,
     outboundCount: input.outboundCount ?? 0,
     quotaReplySentAt: input.quotaReplySentAt ?? null,
     updatedAt: new Date("2026-04-30T12:00:00.000Z"),
