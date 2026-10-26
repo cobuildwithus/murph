@@ -115,6 +115,14 @@ export function decideGameChange(state: RuleState, actor: string, change: GameCh
   return { change: { ...change, ...(change.schedule ? { schedule } : {}) }, effectiveFromDay, startsOn: startsOn && firstScheduledDate(startsOn, schedule) };
 }
 
+/** Key order, absent fields and weekday order do not matter. */
+export function isSameGameChange(left: GameChange, right: GameChange): boolean {
+  const canonical = (change: GameChange) => JSON.stringify(change, (_, value: unknown) =>
+    isRecord(value) ? Object.fromEntries(Object.entries(value).sort(([a], [b]) => a.localeCompare(b)))
+    : Array.isArray(value) && value.every((item) => typeof item === "number") ? [...value].sort((a, b) => a - b) : value);
+  return canonical(left) === canonical(right);
+}
+
 /** Only an app request already queued or sent needs a separate cancellation notice, unless Murph's reply in the bound chat already gave it. */
 export function gameChangeCancellationNeedsNotice(pending: GamePendingChange, decision: "approve" | "decline" | "cancel", answeredInBoundChat = false): boolean {
   return !answeredInBoundChat && decision === "cancel" && pending.origin === "app" && ["queued", "sent"].includes(pending.deliveryStatus);

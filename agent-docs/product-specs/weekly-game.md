@@ -246,7 +246,11 @@ invite negotiation likewise introduces the actual proposal once; the challenge
 kickoff follows only after agreement. The other player can decline, and the
 proposer can cancel in chat. Only one proposal waits at a time: a player who
 answers a pending proposal with a different one declines it and proposes theirs,
-and Murph says in that reply that the new ask replaces the earlier one. A chat
+and Murph says in that reply that the new ask replaces the earlier one. A player
+who declines and later proposes exactly the declined change in chat agrees to it:
+its proposer already asked for it, so it applies at once instead of asking them
+again. That holds until the next change event or until approval would refuse it;
+proposals that change task or stake words always need a fresh yes. A chat
 proposal carries only what the acting message asks for, never an earlier
 deferred request. Cancelling an
 app-origin change after it was queued or sent also tells the group that the
