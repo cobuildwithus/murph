@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { HostedRuntimeEnsureProcessingResponse } from "@murphai/hosted-execution/orchestration-control";
+import { parseHostedRuntimeLogRequest } from "@murphai/hosted-execution/parsers";
 import { ensurePostgresRuntimeProcessing } from "../src/runtime-processing.ts";
-import { recordRuntimeProcessingSummary } from "../src/user-runner/diagnostics.ts";
+import { buildRuntimeProcessingSummaryEntry, recordRuntimeProcessingSummary, type RuntimeProcessingDiagnostics } from "../src/user-runner/diagnostics.ts";
 import { handleRuntimeEnsureProcessingRoute } from "../src/worker/route-handlers/runtime-control.ts";
 import { readHostedExecutionEnvironment } from "../src/env.ts";
 import type { WorkerRouteContext } from "../src/worker-routes/shared.ts";
@@ -30,6 +31,52 @@ function harness() {
 
 describe("Postgres processing summaries", () => {
   beforeEach(() => { vi.clearAllMocks(); });
+
+  it("keeps one detached operation summary stable while telemetry is pending", async () => {
+    const { context, pending } = harness();
+    let diagnostics!: RuntimeProcessingDiagnostics;
+    let release!: () => void;
+    vi.mocked(recordRuntimeProcessingSummary).mockImplementationOnce(() => new Promise(resolve => { release = resolve; }));
+    vi.mocked(ensurePostgresRuntimeProcessing).mockImplementationOnce(async (_source, _input, observed) => {
+      if (!observed) throw new Error("Missing request diagnostics");
+      diagnostics = observed;
+      diagnostics.stage = "fresh_start";
+      diagnostics.details.runtimeProcessingLastObservedFailedOperation = "container_readiness";
+      throw new Error("Synthetic processing failure");
+    });
+    try {
+      const response = await handleRuntimeEnsureProcessingRoute(context, "member-a");
+      expect(response.status).toBe(500);
+      expect(await response.json()).toMatchObject({ code: "runtime_ensure_processing_failed" });
+      expect(pending).toHaveLength(1);
+      expect(recordRuntimeProcessingSummary).toHaveBeenCalledOnce();
+      const entry = vi.mocked(recordRuntimeProcessingSummary).mock.calls[0]![0].entry;
+      expect(entry.redactedJson).toMatchObject({
+        runtimeProcessingStage: "fresh_start",
+        runtimeProcessingOutcome: "threw",
+        runtimeProcessingLastObservedFailedOperation: "container_readiness",
+      });
+      const snapshot = JSON.stringify(entry);
+      diagnostics.details.runtimeProcessingLastObservedFailedOperation = "prepare_invocation";
+      expect(JSON.stringify(entry)).toBe(snapshot);
+      expect(parseHostedRuntimeLogRequest({ entries: [entry] }).entries[0]).toEqual(entry);
+    } finally { release?.(); await Promise.all(pending); }
+    expect(recordRuntimeProcessingSummary).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    ["runtimeProcessingLastObservedFailedOperation", "https://synthetic.invalid/private"],
+    ["runtimeProcessingLastObservedFailedOperation", "synthetic@example.invalid"],
+    ["runtimeProcessingLastObservedFailedOperation", "/tmp/synthetic-runtime-failure"],
+    ["runtimeProcessingLastObservedFailedOperation", "member_synthetic_123"],
+    ["runtimeProcessingLastObservedFailedOperation", "Bearer synthetic-credential"],
+    ["rawError", "Synthetic failure"],
+  ] as const)("keeps the existing redaction gate for %s = %s", (key, value) => {
+    const entry = buildRuntimeProcessingSummaryEntry({
+      stage: "fresh_start", details: { [key]: value },
+    }, undefined, Date.now());
+    expect(() => parseHostedRuntimeLogRequest({ entries: [entry] })).toThrow(TypeError);
+  });
 
   it("does not schedule a summary callback for a successful warm wake", async () => {
     const { context, pending } = harness();

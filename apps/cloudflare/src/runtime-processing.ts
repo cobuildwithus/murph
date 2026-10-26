@@ -43,6 +43,12 @@ type ProcessingContext = ReturnType<typeof createProcessingContext> & {
   namespace: NonNullable<ReturnType<typeof createHostedRunnerContainerNamespaceRouter>>;
 };
 
+type RuntimeProcessingOperation =
+  | `owner_${HostedRuntimeOwnerCommand["operation"]}`
+  | "retire_target" | "read_retired_binding" | "read_invocation" | "complete_invocation"
+  | "container_readiness" | "prepare_invocation" | "start_invocation"
+  | "resolve_retained_target" | "bind_target" | "claim_standby";
+
 /** Postgres owns admission; the immutable native target owns execution evidence. */
 export async function ensurePostgresRuntimeProcessing(source: RuntimeProcessingSource, input: RuntimeProcessingInput, diagnostics: RuntimeProcessingDiagnostics = { stage: "admission", details: {} }): Promise<HostedRuntimeEnsureProcessingResponse> {
   const context = createProcessingContext(source, input, diagnostics);
@@ -116,11 +122,14 @@ function createProcessingContext(source: RuntimeProcessingSource, input: Runtime
   const env = readHostedExecutionEnvironment(asWorkerStringEnvironment(source));
   const budget = createRuntimeProcessingCommandBudget({ commandTimeoutMs: input.commandTimeoutMs ?? null,
     startedAtMs: input.commandStartedAtEpochMs ?? Date.now() });
-  const step = async <T>(operationName: string, operation: () => Promise<T>, timeoutMs = budget.deadlineAtMs - Date.now()): Promise<T> => {
+  const step = async <T>(operationName: RuntimeProcessingOperation, operation: () => Promise<T>, timeoutMs = budget.deadlineAtMs - Date.now()): Promise<T> => {
     const startedAt = Date.now();
     try {
       return await runRuntimeProcessingCommandStep({ budget, operation, stepTimeoutMs: timeoutMs });
     } catch (error) {
+      // Last observed step rejection, including recovered failures. Concurrent
+      // siblings may overwrite it; the summary snapshots this scalar.
+      diagnostics.details.runtimeProcessingLastObservedFailedOperation = operationName;
       emitHostedExecutionStructuredLog({
         component: "worker", phase: "runtime.starting", level: "warn", error,
         message: "Hosted runtime processing step failed.",

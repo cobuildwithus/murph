@@ -877,6 +877,12 @@ only when they complete within one second. Slower successes retain the existing
 native wake entry, dispatch, response, and handler timing fields, so platform
 dispatch delay can be distinguished from work inside the runner. Logging remains
 detached and cannot extend the command budget or change admission.
+The same summary carries `runtimeProcessingLastObservedFailedOperation` when an
+awaited processing step rejects. Its value comes only from source-owned operation
+names. It is the last rejection observed before the summary snapshot, including
+recovered failures; it does not identify root cause or necessarily the exception
+that escaped parallel work. Late sibling failures cannot change the captured
+scalar. No error text or additional log request is added.
 
 OpenAI Responses upgrades return the upstream `Response` and unaccepted
 `webSocket` unchanged. Cloudflare forwards the connection; native Codex owns
