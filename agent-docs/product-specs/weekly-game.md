@@ -152,6 +152,10 @@ this default without deleting other people's private contact choices.
   holder redeems it after sending it through Messages, and after its use-by
   date it shows as expired and can't be redeemed. In dev time travel, issuance
   and expiry both use the game's shifted clock, including long games.
+  Players read a ticket as a prize: the app and Murph's game texts say who
+  owes whom ("Ava owes you breakfast in bed") and never ticket, bet, wager,
+  winnings or cash in, and Murph's texts also avoid stake. `ticket` stays the
+  model and wire name.
 - **Rematch.** A new game can name the previous one. After a settled game with
   the same two people, its round is the previous round plus one; otherwise 1.
   A rematch of a settled 1v1 is addressed to the other player: it appears on
