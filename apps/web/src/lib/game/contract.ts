@@ -302,6 +302,12 @@ export interface GameEntryView {
   mediaUrls: string[];
   text: string | null;
   data?: GameEntryData | null;
+  /**
+   * Only in a post's answer asked for with `?delivery=signed`: the first
+   * media URL's short-lived signed photo URL, for another player's picture
+   * that post unlocked. Missing means ask for it as usual.
+   */
+  delivery?: { url: string; expiresAt: string };
 }
 
 export interface GameDayView {
@@ -313,7 +319,7 @@ export interface GameDayView {
   mine: GameEntryView | null;
   /** Per other player, in seat order. */
   others: { seat: number; status: GameDayOtherStatus; entry: GameEntryView | null;
-    /** Present only for a posted day still locked to this viewer. */
+    /** `postedAt` only while it's still locked to this viewer; `blurHash` while it's locked and after, for while it loads. */
     postedAt?: string; blurHash?: string | null;
     /** The viewer reported this post: it's posted and counts, but never shown to them. */
     hidden?: true }[];

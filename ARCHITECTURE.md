@@ -5519,7 +5519,12 @@ Only a versioned provider UUID/size pointer lives at the existing opaque R2
 namespace (`.image.json`), conditionally created for concurrent retry election.
 The additive member-bound `game-images/{stage,delivery,stat}` control routes
 need no hosted workspace. Native clients request `?delivery=signed&variant=avatar`
-or `photo`; old clients still receive a bounded image-byte proxy. Local stacks
+or `photo`; old clients still receive a bounded image-byte proxy. A post sent
+with `?delivery=signed` answers with the same signed `photo` capability on each
+other player's entry that post unlocked (`GameEntryView.delivery`), after the
+same `authorizeMediaRead` check, so the reveal needs no second request; one
+that can't be signed is left for the client to request. A missing hosted image
+is a 404 after one Worker lookup. Local stacks
 keep plain files on disk. Existing encrypted game images are deliberately not
 migrated; the earlier encrypted routes remain for old-Web rollout compatibility.
 
@@ -5601,7 +5606,8 @@ The posting transaction claims one `game_event` receipt of type
 recipient and recipient-local 3am day. First photo/heart-rate attempts qualify;
 retakes and excuses do not. The current 1v1 roster admits one recipient. A
 successful post adds at most one narrow route read and one claim insert under
-its existing game lock, with no external work. After commit, one route read
+its existing game lock, with no external work. After commit and once the
+post's response is on its way (Next.js `after`), one route read
 revalidates permission, token, suspension and the live unexpired registering
 session, then at most one 2.5-second APNs
 attempt and one receipt update record sent, failed, unregistered or superseded.

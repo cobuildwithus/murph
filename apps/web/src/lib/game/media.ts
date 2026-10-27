@@ -76,6 +76,11 @@ export function isGameMediaStorageAvailable(): boolean {
   return readStore() !== null;
 }
 
+/** Deployed photos go out as signed CDN URLs; local stacks serve bytes. */
+export function servesSignedGameMedia(): boolean {
+  return readStore()?.kind === "hosted";
+}
+
 /** Stores the bytes (once) under their content key and returns the key. */
 export async function putGameMedia(input: {
   bytes: Uint8Array;

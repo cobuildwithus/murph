@@ -117,7 +117,8 @@ describe("weekly game views: tickets", () => {
     const unlocked = view(state, LEO, now, overrides).days[0].others[0];
     expect(unlocked.entry).toMatchObject({ data, text: "private caption" });
     expect(unlocked).not.toHaveProperty("postedAt");
-    expect(unlocked).not.toHaveProperty("blurHash");
+    // Its blur stays for the app to show while the picture loads.
+    expect(unlocked.blurHash).toBe("synthetic-blur");
     own.withdrawnAt = now;
     expect(view(state, LEO, now, overrides).days[0].others[0].entry?.data).toEqual(data);
     state.entries = [posted];

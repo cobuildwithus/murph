@@ -74,7 +74,7 @@ import { prepareGameChangeWords, readPendingGameChanges, type PreparedGameChange
 import { deliverGameChangeProposal } from "./chat-delivery";
 import { readGameChatCandidateIds, sameGamePlayers } from "./chat-membership";
 import { reserveGameChatLifecycleTx, reserveGameChatProposalTx, skipGameChatLifecycleTx } from "./chat-lifecycle-receipt";
-import { claimGamePostNotification, deliverGamePostNotification } from "./post-notification";
+import { claimGamePostNotification, sendGamePostNotificationAfterResponse } from "./post-notification";
 import { buildGameView, gameMediaUrl, termsView, ticketView, visibleEntryIds, type GameTicketRow } from "./views";
 import { gameWordsMemberId, parseGameDepartedPlayer } from "./account-deletion";
 import { areGamePlayersBlocked, GAME_BLOCK_LIMIT, isHiddenBy, lockGamePair, readGameBlocks, type GameBlocks } from "./blocks";
@@ -694,7 +694,7 @@ async function post(context: CommandContext, command: Extract<GameCommand, { typ
     }
     return [{ payload: { attempt, dayIndex, entryId, graceUsed, kind }, type: "posted" }];
   });
-  await deliverGamePostNotification(notification);
+  sendGamePostNotificationAfterResponse(notification);
   return gameId;
 }
 

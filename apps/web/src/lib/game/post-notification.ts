@@ -1,6 +1,7 @@
 import "server-only";
 
 import type { GamePlayer, Prisma } from "@prisma/client";
+import { after } from "next/server";
 import { sendApplePush, type ApplePushRequest } from "../apple-push/send";
 import { companionPushRouteRegistrationSchema, forgetCompanionPushRoute } from "../companion/push-route";
 import { sha256Hex } from "../primitives";
@@ -71,6 +72,21 @@ export async function claimGamePostNotification(
       target: target.data,
     },
   };
+}
+
+/**
+ * Sent once the check-in's answer is on its way: a push never holds up the
+ * post it's about (the poster is waiting to see the other picture).
+ */
+export function sendGamePostNotificationAfterResponse(notification: ClaimedPostNotification | null): void {
+  if (!notification) return;
+  const task = () => deliverGamePostNotification(notification);
+  try {
+    after(task);
+  } catch {
+    // Outside a request (a script or test): send now, still never awaited.
+    void task();
+  }
 }
 
 /** Best effort, at most one attempt: an ambiguous APNs failure never frees the daily claim. */
