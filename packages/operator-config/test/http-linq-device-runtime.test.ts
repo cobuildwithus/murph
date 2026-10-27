@@ -3386,6 +3386,41 @@ test('linq runtime records safe request and response diagnostics for provider ht
   )
 })
 
+test.each([
+  { message: 'Invalid url in parts: https://private.example.test/member-image.png', hints: 'url,parts' },
+  { message: 'Invalid reply_to.message_id for private-recipient@example.test', hints: 'reply_to,message_id' },
+  { message: 'Invalid parameter value', hints: 'none' },
+  { message: 'private_recipient private_url attachment_identity', hints: 'none' },
+  { message: '', hints: 'none' },
+  { message: null, hints: undefined },
+])('linq error field hints retain only closed schema vocabulary: $hints', async ({ message, hints }) => {
+  await assert.rejects(
+    () => sendLinqChatMessage(
+      { chatId: 'synthetic-chat', message: 'synthetic reply' },
+      {
+        env: { LINQ_API_TOKEN: '<REDACTED_TOKEN>' },
+        fetchImplementation: async () => createJsonResponse(
+          { error: { code: 1005, message }, trace_id: 'synthetic-trace' },
+          { status: 400 },
+        ),
+      },
+    ),
+    (error) => {
+      assert.ok(error instanceof VaultCliError)
+      assert.equal(error.context?.providerErrorCode, '1005')
+      assert.equal(error.context?.providerErrorFieldHints, hints)
+      assert.equal(error.context?.providerErrorMessageLength, message?.length)
+      assert.equal(error.context?.retryable, false)
+      const diagnostic = JSON.stringify(error.context)
+      assert.ok(!diagnostic.includes('private.example.test'))
+      assert.ok(!diagnostic.includes('private-recipient'))
+      assert.ok(!diagnostic.includes('member-image'))
+      assert.ok(!diagnostic.includes('private_recipient'))
+      return true
+    },
+  )
+})
+
 test('linq runtime retains hashed text diagnostics from bounded response streams', async () => {
   const providerText = 'Plain Linq failure'
 

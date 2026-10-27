@@ -8480,12 +8480,15 @@ function buildHostedOutboxDeliveryErrorDetailSummary(
       ["publicUrlMediaPartCount", "requestPublicUrlMediaPartCount"],
       ["attachmentMediaPartCount", "requestAttachmentMediaPartCount"],
       ["bodyShape", "requestBodyShape"],
+      ["hasReplyToMessageId", "hasReplyToMessageId"],
     ]),
   );
   appendHostedOutboxDeliveryErrorDetail(
     output,
     "ResponseSummary",
     buildHostedOutboxDeliveryDiagnosticSummary(sanitizedDetails, [
+      ["fieldHints", "providerErrorFieldHints"],
+      ["messageLength", "providerErrorMessageLength"],
       ["kind", "responseBodyKind"],
       ["textLength", "responseBodyTextLength"],
       ["keyCount", "responseBodyKeyCount"],

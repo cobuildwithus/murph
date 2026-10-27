@@ -93,7 +93,7 @@ describe("sendPendingHostedLinqAlertsBestEffort", () => {
     expect(body).not.toContain("Silence measured from");
   });
 
-  it("renders final reply delivery alerts with both named measurements", async () => {
+  it.each([undefined, 3_000])("renders final reply delivery alerts with pacing %s", async (intentionalPacingMs) => {
     const fixture = createAlertEmailPrismaFixture();
     fixture.hostedLinqAlertFindMany.mockResolvedValue([{
       id: "synthetic-final-reply-alert", kind: "runtime_final_reply_delivery_slow",
@@ -105,7 +105,8 @@ describe("sendPendingHostedLinqAlertsBestEffort", () => {
         finalResponseCompletedToAccepted: { status: "unavailable" },
         components: { attemptToAcceptedMs: 100, providerResultToAttemptMs: 4901, providerResultToIntentMs: 4501 },
         deliveryAttemptRelation: "same",
-        dispatchAttribution: { routeAuthorityCheckMs: 20, status: "observed" },
+        intentionalPacingMs,
+        dispatchAttribution: { routeAuthorityCheckMs: 20, replyBubblePacingMs: intentionalPacingMs, status: "observed" },
       },
     }]);
     const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(
@@ -122,6 +123,10 @@ describe("sendPendingHostedLinqAlertsBestEffort", () => {
     expect(body).toContain("Provider result to Linq send attempt: 4901 ms");
     expect(body).toContain("strictly greater than 5000 ms");
     expect(body).not.toContain("Linq operational alert");
+    expect(body).toContain("Durations below include intentional pacing and earlier reply bubbles.");
+    expect(body).toContain(intentionalPacingMs === undefined
+      ? "Intentional reply-bubble pacing: unknown; no time excluded"
+      : "Intentional reply-bubble pacing excluded from threshold evaluation: 3000 ms");
   });
 
   it("marks alerts failed without throwing when Resend rejects the send", async () => {

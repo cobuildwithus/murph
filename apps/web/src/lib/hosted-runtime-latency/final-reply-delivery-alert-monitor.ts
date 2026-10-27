@@ -90,6 +90,8 @@ export interface HostedFinalReplyDeliveryAlertCandidate {
   deliveryAttemptRelation: "different" | "same" | "unknown";
   deliveryId: string;
   dispatchAttribution: Record<string, number | string>;
+  /** Null means pacing was not attributable; the full duration is evaluated. */
+  intentionalPacingMs: number | null;
   finalResponseCompletedToAccepted: HostedFinalReplyDeliveryMeasurement;
   providerResultToAccepted: HostedFinalReplyDeliveryMeasurement;
   scope: "direct" | "group";
@@ -121,7 +123,10 @@ type ReplyTiming = {
   sinceProviderResultMs: number | null;
 };
 
-type DispatchTiming = Record<string, number>;
+type DispatchTiming = {
+  attemptId: string | null;
+  durations: Record<string, number>;
+};
 
 /**
  * Pure classification of accepted final-reply deliveries. Two measurements stay
@@ -159,7 +164,15 @@ export function evaluateHostedFinalReplyDeliveryLatency(input: {
     const measured = measureDelivery(delivery, classification.reply);
     counts.providerResult[measured.providerResultToAccepted.status] += 1;
     counts.finalResponseCompleted[measured.finalResponseCompletedToAccepted.status] += 1;
-    const triggerOrigins = resolveTriggerOrigins(measured);
+    const dispatchRows = timing.dispatches.get(delivery.sourceRef) ?? [];
+    const deliveryAttemptRelation = resolveDeliveryAttemptRelation(delivery, classification.reply);
+    const intentionalPacingMs = readIntentionalPacingMs({
+      deliveryAttemptRelation,
+      measured,
+      reply: classification.reply,
+      rows: dispatchRows,
+    });
+    const triggerOrigins = resolveTriggerOrigins(measured, intentionalPacingMs ?? 0);
     for (const origin of triggerOrigins) {
       counts[origin === "provider_result" ? "providerResult" : "finalResponseCompleted"].slow += 1;
     }
@@ -175,9 +188,10 @@ export function evaluateHostedFinalReplyDeliveryLatency(input: {
       ...measured,
       acceptedAt: delivery.acceptedAt,
       components: measured.components,
-      deliveryAttemptRelation: resolveDeliveryAttemptRelation(delivery, classification.reply),
+      deliveryAttemptRelation,
       deliveryId: delivery.id,
-      dispatchAttribution: readDispatchAttribution(timing.dispatches.get(delivery.sourceRef) ?? []),
+      dispatchAttribution: readDispatchAttribution(dispatchRows),
+      intentionalPacingMs,
       triggerOrigins,
     });
   }
@@ -297,13 +311,15 @@ function measureFinalResponseCompletion(input: {
 
 function resolveTriggerOrigins(
   measured: DeliveryMeasurement,
+  intentionalPacingMs: number,
 ): HostedFinalReplyDeliveryTriggerOrigin[] {
   return ([
     ["provider_result", measured.providerResultToAccepted],
     ["final_response_completed", measured.finalResponseCompletedToAccepted],
   ] as const)
     .filter(([, measurement]) =>
-      measurement.status === "observed" && measurement.elapsedMs > measured.thresholdMs)
+      measurement.status === "observed"
+      && measurement.elapsedMs - intentionalPacingMs > measured.thresholdMs)
     .map(([origin]) => origin);
 }
 
@@ -324,9 +340,33 @@ function readDispatchAttribution(
   // A primary plus a fallback boundary yields two rows; neither alone describes
   // the accepted delivery, so more than one is ambiguous.
   if (rows.length === 1) {
-    return { status: "observed", ...rows[0] };
+    return { status: "observed", ...rows[0]?.durations };
   }
   return { status: rows.length === 0 ? "missing" : "ambiguous" };
+}
+
+function readIntentionalPacingMs(input: {
+  deliveryAttemptRelation: HostedFinalReplyDeliveryAlertCandidate["deliveryAttemptRelation"];
+  measured: DeliveryMeasurement;
+  reply: ReplyTiming;
+  rows: readonly DispatchTiming[];
+}): number | null {
+  const row = input.rows.length === 1 ? input.rows[0] : null;
+  if (
+    !row || input.deliveryAttemptRelation !== "same"
+    || row.attemptId !== input.reply.attemptId || !input.measured.components
+  ) {
+    return null;
+  }
+  const pacingMs = row.durations.replyBubblePacingMs;
+  const phaseMs = row.durations.sinceForegroundPhaseStartedMs;
+  // Do not infer a discount from absent, ambiguous, or cross-attempt evidence.
+  // The configured waits must fit inside this result's pre-dispatch interval.
+  return pacingMs !== undefined && phaseMs !== undefined
+    && pacingMs <= phaseMs
+    && phaseMs <= input.measured.components.providerResultToAttemptMs
+    ? pacingMs
+    : null;
 }
 
 function countDeliveriesBySourceRef(
@@ -480,6 +520,7 @@ export function buildHostedFinalReplyDeliveryAlertDetails(
     components: candidate.components,
     deliveryAttemptRelation: candidate.deliveryAttemptRelation,
     dispatchAttribution: candidate.dispatchAttribution,
+    intentionalPacingMs: candidate.intentionalPacingMs,
     finalResponseCompletedToAccepted: candidate.finalResponseCompletedToAccepted,
     providerResultToAccepted: candidate.providerResultToAccepted,
     scope: candidate.scope,
@@ -546,8 +587,9 @@ function readTimingRow(
     return;
   }
   if (json.turnTimingStage === "linq-dispatch-entered") {
-    const timing: DispatchTiming = {};
+    const durations: Record<string, number> = {};
     for (const [key, label] of [
+      ["deliveryReplyBubblePacingMs", "replyBubblePacingMs"],
       ["deliveryMemberChannelBarrierMs", "memberChannelBarrierMs"],
       ["deliveryProviderEntryFenceMs", "providerEntryFenceMs"],
       ["deliveryRouteAuthorityCheckMs", "routeAuthorityCheckMs"],
@@ -556,10 +598,10 @@ function readTimingRow(
     ] as const) {
       const value = readSafeNonnegativeInteger(json[key]);
       if (value !== null) {
-        timing[label] = value;
+        durations[label] = value;
       }
     }
-    appendToMap(dispatches, sourceRef, timing);
+    appendToMap(dispatches, sourceRef, { attemptId: row.attemptId, durations });
     return;
   }
   if (

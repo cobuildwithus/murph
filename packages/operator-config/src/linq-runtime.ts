@@ -228,6 +228,8 @@ type LinqSafeRequestDetails = {
   requestPublicUrlMediaPartCount?: number
   requestTextPartCount?: number
   providerErrorCode?: string
+  providerErrorFieldHints?: string
+  providerErrorMessageLength?: number
   providerRequestId?: string
   responseBodyKeyCount?: number
   responseBodyKind?: string
@@ -2246,6 +2248,7 @@ function buildLinqErrorResponseDiagnostics(
     )
     const providerRequestId = readSafeLinqDiagnosticToken(record, ['request_id', 'trace_id'])
     return {
+      ...buildLinqProviderErrorFieldDiagnostics(providerError ?? record),
       ...(providerErrorCode ? { providerErrorCode } : {}),
       ...(providerRequestId ? { providerRequestId } : {}),
       responseBodyKind: 'json_object',
@@ -2267,6 +2270,26 @@ function buildLinqErrorResponseDiagnostics(
     responseBodyKind: `json_${typeof payload}`,
     responseBodySha256: hashLinqDiagnosticBody(serialized),
     responseBodyTextLength: serialized.length,
+  }
+}
+
+// These are lexical hints, not a claim that the provider identified the failing
+// field. Emit only fixed schema names, never provider prose or request values.
+function buildLinqProviderErrorFieldDiagnostics(
+  error: Record<string, unknown>,
+): Partial<LinqSafeRequestDetails> {
+  const message = readStringField(error, 'message')
+  if (message === null) {
+    return {}
+  }
+  const words = new Set(message.toLowerCase().match(/[a-z_]+/gu))
+  const fields = [
+    'url', 'attachment_id', 'parts', 'reply_to', 'message_id', 'part_index',
+    'idempotency_key',
+  ].filter((field) => words.has(field))
+  return {
+    providerErrorFieldHints: fields.join(',') || 'none',
+    providerErrorMessageLength: message.length,
   }
 }
 

@@ -20,3 +20,9 @@ Assistant models run through OpenAI using Codex App Server. Hosted configuration
 accepts only the `openai` provider and `OPENAI_API_KEY`; local setup uses Codex
 authentication. Third-party inference providers and local model execution are
 unsupported.
+
+Linq HTTP error diagnostics retain provider codes and trace IDs without raw error
+prose. `providerErrorFieldHints` contains only fixed send-schema names found as
+words in the provider message (`none` when no names match); these are lexical
+hints, not proof of the rejected field. `providerErrorMessageLength` distinguishes
+missing prose from an empty or populated message without retaining its contents.
