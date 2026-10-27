@@ -53,7 +53,7 @@ describe('weekly usage optimizer', () => {
     const composed = [prompt, seed.instructions, MURPH_AUTOMATION_TOOL.description].join('\n')
     expect(composed).toContain('bounded low-risk workflows')
     expect(composed).toContain('Preserve explicit member model preferences')
-    expect(composed).toContain('scheduled usage audit instead reports available evidence')
+    expect(composed).toContain('Scheduled audits report evidence and coverage limits without questions')
     expect(composed).not.toContain('A Luna reminder must need no reads')
     expect(composed).not.toContain('Use Sol for all reminders that do not meet that Luna exception')
   })

@@ -302,7 +302,8 @@ describe('automation model input schema', () => {
       ],
       description: expect.stringContaining('most recent readback'),
     })
-    expect(MURPH_AUTOMATION_TOOL.description).toMatch(/^To edit an existing automation: inspect it, then patch/u)
+    expect(MURPH_AUTOMATION_TOOL.description).toContain('resolve its exact automationId')
+    expect(MURPH_AUTOMATION_TOOL.description).toContain('Inspect that id, then patch using lookup=automationId and expectedUpdatedAt=updatedAt')
     expect(MURPH_AUTOMATION_TOOL.description).toContain('for a wording edit, include the new wording')
   })
 
