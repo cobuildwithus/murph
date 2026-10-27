@@ -1,4 +1,5 @@
-Intentional reply-bubble pacing attribution is tracked in [the delivery alert plan](exec-plans/active/2026-10-27-reply-delivery-pacing.md); the current contract remains in `references/hosted-runtime-protocol.md`.
+Linq validation telemetry and release verification are tracked in [the active release plan](exec-plans/active/2026-10-27-linq-validation-telemetry.md).
+Intentional reply-bubble pacing attribution is tracked in [the delivery alert plan](exec-plans/completed/2026-10-27-reply-delivery-pacing.md); the current contract remains in `references/hosted-runtime-protocol.md`.
 
 Terra chat defaults, subscriber Sol eligibility, and the once-only preference reset are tracked in [the completed implementation plan](exec-plans/completed/2026-10-26-terra-chat-default.md). `ARCHITECTURE.md` owns selection; `apps/cloudflare/DEPLOY.md` owns rollout order.
 

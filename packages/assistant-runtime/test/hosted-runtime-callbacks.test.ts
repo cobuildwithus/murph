@@ -8217,6 +8217,53 @@ describe("hosted runtime callbacks", () => {
     expect(mocks.resetAssistantOutboxPreparedDispatchById).not.toHaveBeenCalled();
   });
 
+  it("retains safe Linq validation context in Worker failure logs", async () => {
+    const effect = createEffect({ channel: "linq", transportIdempotent: true });
+    mocks.dispatchAssistantOutboxIntent.mockResolvedValueOnce(createDispatchResult(
+      { status: "failed", lastError: { code: "LINQ_API_REQUEST_FAILED", message: "HTTP 400" } },
+      {
+        code: "LINQ_API_REQUEST_FAILED",
+        message: "HTTP 400",
+        diagnosticContext: {
+          status: 400,
+          providerErrorCode: "1005",
+          providerRequestId: "synthetic-trace",
+          providerErrorFieldHints: "url,parts",
+          providerErrorMessageLength: 55,
+          requestBodyShape: "object:message|message:idempotency_key,parts",
+          requestMessagePartCount: 2,
+          requestPublicUrlMediaPartCount: 1,
+          requestAttachmentMediaPartCount: 0,
+          hasReplyToMessageId: false,
+          providerErrorMessage: "private provider prose",
+        },
+      },
+    ));
+    const outcomes = await drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub(),
+      providerFetch: vi.fn<typeof fetch>(),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    });
+    expect(outcomes[0]?.deliveryStatus).toBe("failed");
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(expect.objectContaining({
+      details: expect.objectContaining({
+        deliveryErrorDetailStatus: 400,
+        deliveryErrorDetailProviderCode: "1005",
+        deliveryErrorDetailProviderRequestId: "synthetic-trace",
+        deliveryErrorDetailProviderFieldHints: "url,parts",
+        deliveryErrorDetailProviderMessageLength: 55,
+        deliveryErrorDetailRequestBodyShape: "object:message|message:idempotency_key,parts",
+        deliveryErrorDetailRequestMessagePartCount: 2,
+        deliveryErrorDetailRequestPublicUrlMediaPartCount: 1,
+        deliveryErrorDetailRequestAttachmentMediaPartCount: 0,
+        deliveryErrorDetailHasReplyToMessageId: false,
+      }),
+    }));
+    expect(JSON.stringify(mocks.emitHostedExecutionStructuredLog.mock.calls)).not.toContain("private provider prose");
+  });
+
   it.each([
     { channel: "linq", transportIdempotent: false },
     { channel: "telegram", transportIdempotent: true },

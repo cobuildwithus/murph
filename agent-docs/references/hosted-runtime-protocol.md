@@ -5149,3 +5149,10 @@ live code. Do not reintroduce:
 Historical completed execution plans may still mention those terms as past
 state. Live architecture docs and production code should not treat them as
 current primitives.
+
+Linq dispatch-failure Worker logs retain the provider trace ID, request shape,
+media-part counts and native-reply presence from existing safe error context.
+The existing durable outbox response summary also retains closed-vocabulary
+provider field hints and message length. Field hints are lexical schema-name
+matches, not an authoritative validation path; raw provider prose remains
+excluded. These fields add no log write or awaited provider operation.

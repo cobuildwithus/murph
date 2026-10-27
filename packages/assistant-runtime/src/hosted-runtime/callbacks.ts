@@ -7194,6 +7194,18 @@ function buildHostedAssistantDeliveryErrorDetailLogFields(
     details,
     ["errorCause", "cause"],
   ));
+  for (const [suffix, key] of [
+    ["ProviderRequestId", "providerRequestId"],
+    ["ProviderFieldHints", "providerErrorFieldHints"],
+    ["ProviderMessageLength", "providerErrorMessageLength"],
+    ["RequestBodyShape", "requestBodyShape"],
+    ["RequestMessagePartCount", "requestMessagePartCount"],
+    ["RequestPublicUrlMediaPartCount", "requestPublicUrlMediaPartCount"],
+    ["RequestAttachmentMediaPartCount", "requestAttachmentMediaPartCount"],
+    ["HasReplyToMessageId", "hasReplyToMessageId"],
+  ] as const) {
+    appendHostedAssistantDeliveryErrorLogValue(output, suffix, details[key]);
+  }
   output.deliveryErrorDetailFieldCount = Object.keys(details).length;
   return output;
 }
