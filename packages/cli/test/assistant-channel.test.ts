@@ -981,6 +981,7 @@ test('sendLinqMessage keeps raw Linq error text out of user-facing errors', asyn
         requestMessageLength: 'Queued the Linq reply.'.length,
         requestMessagePartCount: 1,
         requestPublicUrlMediaPartCount: 0,
+        requestPublicUrlMediaFormatSummary: 'none',
         requestTextPartCount: 1,
         responseBodyKind: 'text',
         responseBodySha256:
