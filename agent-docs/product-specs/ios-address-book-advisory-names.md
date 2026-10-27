@@ -47,7 +47,8 @@ policy that this member-scoped design intentionally avoids.
 ## Hosted storage and lookup
 
 `apps/web` authenticates the companion with its ordinary Privy identity
-bearer, requires active member access and current launch consent for
+bearer, requires active member access and a `launch.legal` grant meeting the
+minimum accepted versions (`docs/legal-consent-implementation.md`) for
 replacement, and accepts a closed schema with a 192 KiB body and 1,000-row cap.
 
 For every readable token-key version, Web asks a dedicated non-exportable GCP
@@ -118,8 +119,8 @@ There are four route-authorized consumers. The primary consumer is the existing
    optional overlay; never degrade the truthful roster.
 
 Before KMS or token lookup, the advisory read must confirm that the owner still
-exists, is unsuspended, holds current launch consent, and has an enabled
-projection. It does not rerun the active member access check that gates
+exists, is unsuspended, holds a `launch.legal` grant meeting the minimum
+accepted versions, and has an enabled projection. It does not rerun the active member access check that gates
 replacement: the route-authorized live group read is the access boundary for an
 already-enabled projection, regardless of the owner's current personal or
 sponsored billing access.

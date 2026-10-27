@@ -23,8 +23,9 @@ client is the Murph app.
 With `MURPH_GAME_REQUIRE_CURRENT_TERMS=true` (unset or anything else is off, and
 off changes nothing), the HTTP door also refuses creating, accepting,
 negotiating, posting, proposing a change and marking a prize done until the
-member's `launch.legal` grant matches today's document versions
-(`requireCurrentTermsFor` in `http/auth.ts`). The refusal is `403 TERMS_REQUIRED`
+member's `launch.legal` grant recorded the published document versions, not
+just the minimum the rest of Murph accepts (`requireCurrentTermsFor` in
+`http/auth.ts`, `hasHostedConsentAtPublishedVersions` in `legal/consent.ts`). The refusal is `403 TERMS_REQUIRED`
 with `details: { scope: "launch.legal", documents }`, each document carrying its
 id, title, link and current version, which is what the companion consent route
 (`POST /api/device-sync/companion/legal-consent`) takes. Reads, reports, blocks,

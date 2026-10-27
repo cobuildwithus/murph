@@ -136,18 +136,29 @@ flow so the member can review or reconnect them.
 
 ## Document updates and existing members
 
-A grant is current only when its recorded document-version snapshot exactly matches every document required by that scope. Publishing a new required version therefore preserves the old append-only acceptance event as historical evidence but makes the corresponding current grant stale. Members do not lose their account, subscription, data, device connection, or container when that happens.
+Each document has a published version and a minimum accepted version in
+`consent.ts`. The published versions (`HOSTED_TERMS_OF_SERVICE_VERSION`,
+`HOSTED_PRIVACY_POLICY_VERSION`, and `HOSTED_HEALTH_NOTICE_DOCUMENT_VERSION` for
+the Consumer Health Data Notice and the Health AI Safety Disclosure) are what
+the consent UI shows and what every new acceptance records; acceptance must
+submit exactly those versions. `HOSTED_CONSENT_MINIMUM_ACCEPTED_VERSIONS` is the
+oldest recorded version of each document that a grant still satisfies. A grant
+is current, and its scope granted, when it recorded every document of the scope
+at or after that minimum. "Current launch consent" throughout these docs means
+exactly that.
 
-Each document has its own version in `consent.ts`:
-`HOSTED_TERMS_OF_SERVICE_VERSION`, `HOSTED_PRIVACY_POLICY_VERSION`, and
-`HOSTED_HEALTH_NOTICE_DOCUMENT_VERSION` for the Consumer Health Data Notice and
-the Health AI Safety Disclosure. Bump only the documents that changed, so a
-Terms or Privacy Policy update leaves `launch.health-data` current and asks
-members again only for `launch.legal`. The PDF registry in
+Publishing a new version without raising the minimum therefore asks nobody
+again: existing grants stay current everywhere, the old append-only acceptance
+event stays as evidence, and members who agree from then on record the new
+version. Raise a minimum only when every member must agree again; that makes
+older grants stale at read time with no migration, and members keep their
+account, subscription, data, device connection, and container. The only surface
+that needs the published versions themselves is the game's Terms gate below,
+through `hasHostedConsentAtPublishedVersions`. The PDF registry in
 `apps/web/scripts/generate-legal-pdfs.ts`, `apps/web/legal/legal-documents.md`,
-and `apps/web/test/legal-manifest.test.ts` carry the same versions.
-`apps/web/test/legal-terms-bump-stale-grant.test.ts` replays a pre-bump grant
-through the real registry and the companion routes.
+and `apps/web/test/legal-manifest.test.ts` carry the published versions.
+`apps/web/test/legal-july-grant-no-break.test.ts` replays a grant at the
+minimum through the real registry, the companion routes and the game gate.
 
 The authenticated dashboard layout reads consent status before starting the
 browser-vault provider. While launch consent is absent or stale, the requested
@@ -200,11 +211,11 @@ Account export is the withdrawal exception described above. Strava remains
 disabled for new connections and reconnect offers as a separate provider
 product gate.
 
-The weekly game's app routes can require the current Terms. With
+The weekly game's app routes can require the published Terms. With
 `MURPH_GAME_REQUIRE_CURRENT_TERMS=true`, creating, accepting, negotiating,
 posting, proposing a change and marking a prize done return `403
-TERMS_REQUIRED` until `launch.legal` is current, naming the scope's documents
-and versions; reads, reports, blocks, the profile, and withdrawing a member's own
+TERMS_REQUIRED` until `launch.legal` recorded the published versions, not just
+the minimum, naming the scope's documents and versions; reads, reports, blocks, the profile, and withdrawing a member's own
 post, invite or change stay available. The app answers with the Terms step
 alone, records `launch.legal` through the companion consent route, and retries.
 Health-data consent and the historical boundaries above are unchanged.

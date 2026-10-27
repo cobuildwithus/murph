@@ -566,9 +566,9 @@ test("settings remains available after explicit health-data withdrawal", async (
   )).toBeNull();
 });
 
-test("a member who agreed to earlier Terms gets one Agree step that says what changed", async () => {
-  // The production state after a Terms and Privacy bump: launch.legal is
-  // stale while the unchanged health-data notice stays current.
+test("a member asked for the Terms again gets one Agree step that says what changed", async () => {
+  // launch.legal below the minimum accepted versions while the health-data
+  // notice stays current.
   const staleTermsStatus = createLaunchConsentStatus({
     launchHealthDataGranted: true,
   });

@@ -3,17 +3,24 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("server-only", () => ({}));
 
 // A member who agreed before the games Terms: the exact launch grants most
-// production members hold, recorded against the previous document versions.
-// Everything here runs the real consent registry against those rows; only the
-// database, sign-in and downstream work are stubbed.
+// production members hold, recorded against the July documents. Publishing the
+// October Terms and Privacy Policy must leave them working everywhere except
+// the game's own Terms gate. Everything here runs the real consent registry
+// against those rows; only the database, sign-in and downstream work are
+// stubbed.
 const MEMBER_ID = "member_pre_bump";
-const PRE_BUMP_LEGAL_VERSIONS = {
+const JULY_LEGAL_VERSIONS = {
   "health-ai-safety-disclosure": "2026-07-23",
   "privacy-policy": "2026-07-23",
   "terms-of-service": "2026-07-23",
 };
-const PRE_BUMP_HEALTH_DATA_VERSIONS = {
+const JULY_HEALTH_DATA_VERSIONS = {
   "consumer-health-data-notice": "2026-07-23",
+};
+const APRIL_LEGAL_VERSIONS = {
+  "health-ai-safety-disclosure": "2026-04-29",
+  "privacy-policy": "2026-06-24",
+  "terms-of-service": "2026-04-29",
 };
 
 function grantRow(scope: string, documentVersionsJson: Record<string, string>) {
@@ -49,7 +56,7 @@ const mocks = vi.hoisted(() => {
     prisma,
     readCompanionDeviceSyncStatus: vi.fn(async () => ({ ok: true, sources: [] })),
     readHostedWorkspace: vi.fn(async () => null),
-    replaceHostedAddressBookProjection: vi.fn(),
+    replaceHostedAddressBookProjection: vi.fn(async () => ({ ok: true })),
   };
 });
 
@@ -98,11 +105,12 @@ vi.mock("@/src/lib/hosted-address-book/projection", async (importOriginal) => ({
   replaceHostedAddressBookProjection: mocks.replaceHostedAddressBookProjection,
 }));
 
+import { requireCurrentTermsFor } from "@/src/lib/game/http/auth";
 import {
   assertHostedHistoricalLaunchConsentGranted,
   assertHostedLaunchRequiredConsentGranted,
   buildCurrentHostedConsentDocumentVersions,
-  hasHostedHistoricalLaunchConsent,
+  hasHostedConsentAtPublishedVersions,
   parseHostedConsentAcceptRequest,
   readHostedConsentStatus,
   readHostedHealthDataConsentState,
@@ -115,50 +123,65 @@ function bearerRequest(path: string, init: RequestInit = {}): Request {
   });
 }
 
-beforeEach(() => {
-  vi.clearAllMocks();
+function holdGrants(legal: Record<string, string>, healthData = JULY_HEALTH_DATA_VERSIONS) {
   mocks.grants.splice(
     0,
     mocks.grants.length,
-    grantRow("launch.legal", PRE_BUMP_LEGAL_VERSIONS),
-    grantRow("launch.health-data", PRE_BUMP_HEALTH_DATA_VERSIONS),
+    grantRow("launch.legal", legal),
+    grantRow("launch.health-data", healthData),
   );
+}
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  holdGrants(JULY_LEGAL_VERSIONS);
 });
 
-describe("a pre-bump launch.legal grant after the games Terms", () => {
-  it("is stale only for the Terms and Privacy Policy, and health-data consent stays current", async () => {
+describe("a July launch.legal grant after the games Terms are published", () => {
+  it("stays current for every scope, so nothing asks the member again", async () => {
     const status = await readHostedConsentStatus({
       memberId: MEMBER_ID,
       prisma: mocks.prisma as never,
     });
 
-    const legal = status.scopes.find((scope) => scope.scope === "launch.legal");
-    expect(legal?.granted).toBe(false);
-    expect(legal?.missingDocuments.map((document) => document.id)).toEqual([
-      "terms-of-service",
-      "privacy-policy",
-    ]);
-    expect(status.scopes.find((scope) => scope.scope === "launch.health-data")).toMatchObject({
-      current: true,
-      granted: true,
-    });
+    // The dashboard layout, auth responses, join pages and the iOS app all
+    // read `launchGranted`; it stays true, so no dialog or Agree step opens.
+    expect(status.launchGranted).toBe(true);
     expect(status.launchScopes.map((scope) => [scope.scope, scope.granted])).toEqual([
-      ["launch.legal", false],
+      ["launch.legal", true],
       ["launch.health-data", true],
     ]);
-    expect(hasHostedHistoricalLaunchConsent(status)).toBe(true);
+    const legal = status.scopes.find((scope) => scope.scope === "launch.legal");
+    expect(legal).toMatchObject({ current: true, granted: true, missingDocuments: [] });
+    // The documents shown and recorded from now on are the published ones.
+    expect(legal?.documents.map((document) => [document.id, document.version])).toEqual([
+      ["terms-of-service", "2026-10-26"],
+      ["privacy-policy", "2026-10-26"],
+      ["health-ai-safety-disclosure", "2026-07-23"],
+    ]);
+    expect(legal && hasHostedConsentAtPublishedVersions(legal)).toBe(false);
     await expect(readHostedHealthDataConsentState({
       memberId: MEMBER_ID,
       prisma: mocks.prisma as never,
     })).resolves.toBe("granted");
   });
 
-  it("passes the historical gate and asks the current-version gate for launch.legal alone", async () => {
+  it("passes both the historical and the current-version gates", async () => {
     await expect(assertHostedHistoricalLaunchConsentGranted({
       memberId: MEMBER_ID,
       prisma: mocks.prisma as never,
     })).resolves.toBeUndefined();
+    // Journal, Friendly Names uploads and label reads, Messages mini-app
+    // enrollment, clinical records, checkout, vault export and web group joins
+    // all use this gate.
+    await expect(assertHostedLaunchRequiredConsentGranted({
+      memberId: MEMBER_ID,
+      prisma: mocks.prisma as never,
+    })).resolves.toBeUndefined();
+  });
 
+  it("still asks a member whose grant predates the minimum", async () => {
+    holdGrants(APRIL_LEGAL_VERSIONS);
     await expect(assertHostedLaunchRequiredConsentGranted({
       memberId: MEMBER_ID,
       prisma: mocks.prisma as never,
@@ -169,35 +192,28 @@ describe("a pre-bump launch.legal grant after the games Terms", () => {
     });
   });
 
-  it("refuses a client that still holds the old versions, then accepts the current ones", () => {
-    expect(() => parseHostedConsentAcceptRequest({
-      acceptedDocumentVersions: PRE_BUMP_LEGAL_VERSIONS,
-      scope: "launch.legal",
-    })).toThrow(expect.objectContaining({
-      code: "CONSENT_DOCUMENT_VERSIONS_STALE",
-      details: {
-        missingOrStaleDocumentIds: ["terms-of-service", "privacy-policy"],
-        scope: "launch.legal",
-      },
-      httpStatus: 409,
-    }));
-
+  it("records the published versions for anyone agreeing from now on", () => {
     const current = buildCurrentHostedConsentDocumentVersions("launch.legal");
     expect(current).toEqual({
       "health-ai-safety-disclosure": "2026-07-23",
       "privacy-policy": "2026-10-26",
       "terms-of-service": "2026-10-26",
     });
-    expect(buildCurrentHostedConsentDocumentVersions("launch.health-data"))
-      .toEqual(PRE_BUMP_HEALTH_DATA_VERSIONS);
     expect(parseHostedConsentAcceptRequest({
       acceptedDocumentVersions: current,
       scope: "launch.legal",
     }).acceptedDocumentVersions).toEqual(current);
+    expect(() => parseHostedConsentAcceptRequest({
+      acceptedDocumentVersions: JULY_LEGAL_VERSIONS,
+      scope: "launch.legal",
+    })).toThrow(expect.objectContaining({
+      code: "CONSENT_DOCUMENT_VERSIONS_STALE",
+      httpStatus: 409,
+    }));
   });
 });
 
-describe("companion routes with a pre-bump launch.legal grant", () => {
+describe("companion routes with a July launch.legal grant", () => {
   it("keeps device sync status working", async () => {
     const route = await import("../app/api/device-sync/companion/status/route");
     const response = await route.GET(bearerRequest("/api/device-sync/companion/status"));
@@ -226,28 +242,62 @@ describe("companion routes with a pre-bump launch.legal grant", () => {
     expect(mocks.ingestCompanionMealPhoto).toHaveBeenCalledOnce();
   });
 
-  it("answers the Journal with the existing consent error the app turns into its Agree step", async () => {
+  it("serves the Journal, so the app opens no consent recovery and pauses nothing", async () => {
     const route = await import("../app/api/device-sync/companion/journal/route");
     const response = await route.GET(bearerRequest("/api/device-sync/companion/journal"));
 
-    expect(response.status).toBe(403);
-    await expect(response.json()).resolves.toMatchObject({
-      error: { code: "HOSTED_CONSENT_REQUIRED" },
-    });
-    expect(mocks.readHostedWorkspace).not.toHaveBeenCalled();
+    expect(response.status).toBe(200);
+    expect(mocks.readHostedWorkspace).toHaveBeenCalledOnce();
   });
 
-  it("answers a Friendly Names upload with the same consent error before reading the body", async () => {
+  it("accepts a Friendly Names upload", async () => {
     const route = await import("../app/api/device-sync/companion/address-book/route");
     const response = await route.PUT(bearerRequest("/api/device-sync/companion/address-book", {
-      body: "{}",
+      body: JSON.stringify({
+        baseRevision: 0,
+        contacts: [{ advisoryName: "Alex R.", phoneNumber: "+12125550100" }],
+        mutationId: "4f5150c8-a9bc-42d3-b975-a289481a3140",
+        schemaVersion: 1,
+      }),
+      headers: { "content-type": "application/json" },
       method: "PUT",
     }));
 
-    expect(response.status).toBe(403);
-    await expect(response.json()).resolves.toMatchObject({
-      error: { code: "HOSTED_CONSENT_REQUIRED" },
+    expect(response.status).toBe(200);
+    expect(mocks.replaceHostedAddressBookProjection).toHaveBeenCalledOnce();
+  });
+
+  it("reports launch consent as granted to the app's consent route", async () => {
+    const route = await import("../app/api/device-sync/companion/legal-consent/route");
+    const response = await route.GET(bearerRequest("/api/device-sync/companion/legal-consent"));
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({ launchGranted: true });
+  });
+});
+
+describe("the game's Terms gate with a July launch.legal grant", () => {
+  it("changes nothing while the flag is off", async () => {
+    await expect(requireCurrentTermsFor(MEMBER_ID, { type: "post" }, {})).resolves.toBeUndefined();
+    expect(mocks.prisma.hostedConsentGrant.findMany).not.toHaveBeenCalled();
+  });
+
+  it("asks for the published Terms when the flag is on, and passes once they are recorded", async () => {
+    const env = { MURPH_GAME_REQUIRE_CURRENT_TERMS: "true" };
+    await expect(requireCurrentTermsFor(MEMBER_ID, { type: "post" }, env)).rejects.toMatchObject({
+      code: "TERMS_REQUIRED",
+      details: {
+        documents: [
+          expect.objectContaining({ id: "terms-of-service", version: "2026-10-26" }),
+          expect.objectContaining({ id: "privacy-policy", version: "2026-10-26" }),
+          expect.objectContaining({ id: "health-ai-safety-disclosure", version: "2026-07-23" }),
+        ],
+        scope: "launch.legal",
+      },
+      httpStatus: 403,
     });
-    expect(mocks.replaceHostedAddressBookProjection).not.toHaveBeenCalled();
+
+    holdGrants(buildCurrentHostedConsentDocumentVersions("launch.legal"));
+    await expect(requireCurrentTermsFor(MEMBER_ID, { type: "post" }, env)).resolves.toBeUndefined();
   });
 });

@@ -14,13 +14,25 @@ import {
   lockHostedMemberRow,
 } from "../hosted-onboarding/shared";
 
-// Each document carries its own version, and a grant stays current only while
-// every version it recorded matches. Bumping one document therefore asks again
-// only for the scopes that cover it.
+// Published versions: what every new acceptance records.
 export const HOSTED_TERMS_OF_SERVICE_VERSION = "2026-10-26";
 export const HOSTED_PRIVACY_POLICY_VERSION = "2026-10-26";
 /** Shared by the Consumer Health Data Notice and the Health AI Safety Disclosure. */
 export const HOSTED_HEALTH_NOTICE_DOCUMENT_VERSION = "2026-07-23";
+
+/**
+ * The oldest recorded version of each document that a grant still satisfies.
+ * Publishing a new version leaves every grant at or after these minimums
+ * current, so nobody is asked again; raise a minimum only when every member
+ * must agree again. A surface that needs the published versions themselves
+ * (the game's Terms gate) checks `hasHostedConsentAtPublishedVersions`.
+ */
+export const HOSTED_CONSENT_MINIMUM_ACCEPTED_VERSIONS = {
+  "consumer-health-data-notice": "2026-07-23",
+  "health-ai-safety-disclosure": "2026-07-23",
+  "privacy-policy": "2026-07-23",
+  "terms-of-service": "2026-07-23",
+} as const satisfies Record<HostedConsentDocumentId, string>;
 
 export const HOSTED_CONSENT_DOCUMENTS = [
   {
@@ -820,8 +832,27 @@ function getMissingConsentDocuments(input: {
   }
 
   return input.documents.filter(
-    (document) => input.grant?.documentVersions[document.id] !== document.version,
+    (document) => !meetsMinimumAcceptedVersion(
+      input.grant?.documentVersions[document.id],
+      HOSTED_CONSENT_MINIMUM_ACCEPTED_VERSIONS[document.id],
+    ),
   );
+}
+
+const DATE_VERSION_PATTERN = /^\d{4}-\d{2}-\d{2}$/u;
+
+/** Versions are publication dates, so later dates compare as later versions. */
+function meetsMinimumAcceptedVersion(recorded: string | undefined, minimum: string): boolean {
+  return recorded !== undefined && DATE_VERSION_PATTERN.test(recorded) && recorded >= minimum;
+}
+
+/** True only when the scope's grant recorded every document's published version. */
+export function hasHostedConsentAtPublishedVersions(
+  scopeStatus: Pick<HostedConsentScopeStatus, "documents" | "grant">,
+): boolean {
+  const grant = scopeStatus.grant;
+  return grant?.status === "granted"
+    && scopeStatus.documents.every((document) => grant.documentVersions[document.id] === document.version);
 }
 
 function normalizeConsentSource(value: unknown): string {
