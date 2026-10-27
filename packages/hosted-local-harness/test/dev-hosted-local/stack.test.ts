@@ -3621,15 +3621,21 @@ describe("hosted local dev stack", () => {
     await expect(stack.ready).rejects.toThrow(/\[docker-events:stdout\][\s\S]*"signal":"9"/u);
   });
 
-  it("fails fast and cleans up when a dev child exits before readiness", async () => {
+  it("preserves the failed child's diagnostic tail and cleans up despite noisy siblings", async () => {
     const cloudflareChild = createBufferedChild({
       exitCode: 1,
       name: "cloudflare",
       pid: 501,
+      stderrText: "Worker image build failed: missing catalog fixture",
     });
     spawnChildProcess
       .mockReturnValueOnce(cloudflareChild)
-      .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "web", pid: 502 }));
+      .mockReturnValueOnce(createBufferedChild({
+        exitCode: null,
+        name: "web",
+        pid: 502,
+        stdoutText: "Unrelated healthy startup output\n".repeat(100),
+      }));
     waitForHealthyHttpEndpoint.mockImplementationOnce((input) => new Promise((_, reject) => {
       input.signal?.addEventListener("abort", () => reject(new DOMException("Cancelled", "AbortError")), { once: true });
     }));
@@ -3642,7 +3648,7 @@ describe("hosted local dev stack", () => {
     });
 
     await expect(stack.ready).rejects.toThrow(
-      "cloudflare dev process exited before the hosted local stack became healthy.",
+      /cloudflare dev process exited[\s\S]*Worker image build failed: missing catalog fixture/u,
     );
     expect(terminateChildProcessAndWait).toHaveBeenCalledTimes(2);
     expect(cleanupHostedRunnerContainers).toHaveBeenCalledWith(
