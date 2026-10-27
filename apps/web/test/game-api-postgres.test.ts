@@ -200,7 +200,8 @@ describe.skipIf(!enabled)("game v1 local API smoke", () => {
         documentVersionsJson: { "terms-of-service": "2020-01-01", "privacy-policy": "2020-01-01", "health-ai-safety-disclosure": "2020-01-01" },
         grantedAt: new Date(), source: "test" } });
     }
-    const terms = { schedule: { count: 3 }, stakes: [{ kind: "prize", item: "Choose a book" }],
+    const terms = { startsOn: new Date(Date.now() + 2 * 86_400_000).toISOString().slice(0, 10),
+      schedule: { count: 3 }, stakes: [{ kind: "prize", item: "Choose a book" }],
       tasks: [{ seat: 0, text: "Move" }, { seat: 1, text: "Move" }] };
     const off = await game(create(request(leo, { gameId: randomUUID(), inviteeFirstName: "Ava", terms })));
     expect(off.status).toBe("invited");
