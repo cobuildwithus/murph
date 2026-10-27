@@ -66,7 +66,7 @@ describe('murph.generate_image dynamic tool schema', () => {
       'Treat those values as plotting data, not visible labels',
       'omit numeric labels on individual points and bars unless the user requests them',
       'sparse, rounded axis ticks and a compact legend',
-      'Default chart prompts to Murph',
+      'Include these exact palette and font specifications in chart prompts',
       'cream paper (#f5f0e8)',
       'slate text (#2d3436)',
       'solid sage data lines (#7a8c6e)',

@@ -182,3 +182,90 @@ not a Ready candidate. Keep the plan active and the PR draft until the remaining
 quality issues and fixture prerequisites are resolved, then finish exact-head
 CI/review and the documented consumer-first rollout. The global preference reset
 remains unapplied.
+
+## Behavioral remediation and shipping authorization
+
+The user explicitly requested repairing real behavioral misses, rerunning them,
+removing stale or unnecessary tests, and shipping once behavior is satisfactory.
+The earlier Hold is the baseline verdict, not a request to stop. The product
+contract remains Terra for personal defaults, Sol for every group, and a paid
+subscription for personal Sol only.
+
+The first affected-case audit covered 106 previously failing scenarios per
+model. Terra completed 74 passes and 32 failures. Subsequent fixes and reruns
+remain separate artifacts; original results are retained. Do not treat a later
+pass as deletion of an earlier failure.
+
+Production fixes under verification now include bounded wrist-effect retries,
+checking existing group grants before offering permission, ordinary reminder
+model selection at the save boundary, food-query repair without repeated rejected
+queries or internal-error prose, plain welcomes after group jokes, chart palette
+instructions, onboarding first-reply ordering, game dates across the 3 AM cutoff,
+and research persistence before sending. Nutrition target revisions must load
+their owner and read back the complete saved target; device-photo edits preserve
+the source in the same mutation.
+
+Fixture repairs distinguish harmless reads from writes, seed already-known
+language where unrelated bookkeeping contaminated effect counts, provide calendar
+event ownership, align fixture clocks, accept equivalent truthful prose, and
+allow exact bounded historical reads. Removed a duplicate journey that prescribed
+schema-discovery internals instead of exercising an ordinary reminder request.
+Required mutation counts, authorization, final canonical values, privacy, and
+forbidden claims remain asserted. Stochastic research suppression is legitimate;
+an actual send still requires its successful dedupe-ledger write.
+
+A source preview for the unchanged Settings UI is building from the current
+pushed feature head. The PR remains draft while remaining behavior diagnostics
+and final verification are in progress. No production preferences have changed.
+
+
+## Stable remediation candidate
+
+The affected-case union has 106 scenarios per configuration. Initial remediation
+audit results were Terra 74/106 and Sol 84/106; these and the original full-suite
+results remain retained. Subsequent runs repair production prompts or invalid
+fixtures before rerunning the affected cases. Scheduled reminder execution now
+asserts the actual provider receives the delivery contract and uses its JSON
+object after tools. The final complete create/fire/cancel journey passes for both
+chat models, including its independently pinned Luna scheduled turn.
+
+Final deterministic evidence: 453 affected tests passed; the later base-prompt
+change passed 203 prompt/planning tests, and the final live-fixture contracts
+passed 72 tests with 541 live cases correctly opt-in. Assistant Engine typecheck
+passes after the final fixture edits. Earlier Web/shared/Cloudflare typechecks,
+model entitlement tests, catalog/image checks, and PostgreSQL reset proof remain
+applicable. Complexity passes across 22 source files; all 16 existing hotspots
+retain their complexity and the model resolver reduces its debt.
+
+Complete first native provider input, compared with the retained identical base
+fixtures: individual 160600 to 161338 bytes (+738, +0.460%); group 138746 to
+139586 (+840, +0.605%). Registered tool bytes are 67159 and 76454 respectively.
+The target tokenizer is unavailable, so token counts remain unmeasured. Captures
+include assembled instructions, wrappers, and native-generated guidance, excluding
+the nondeterministic cache key.
+
+The Settings source preview is Ready and anonymously reachable at
+https://murph-9bo503kud-cobuildwithus.vercel.app/screenshots/settings#settings-model-save-controls.
+Paid/free production components were inspected at 390px and 1280px. Safe images
+are attached to PR comment https://github.com/cobuildwithus/murph/pull/4383#issuecomment-6430868252.
+Terra is the selected default; personal Sol is locked for free accounts and
+available for subscribers. All groups retain Sol without billing eligibility.
+
+Parent candidate review covered runtime/catalog skew, reset scope, individual
+versus group defaults, preserved later group selections, entitlement failures,
+fixture effect assertions, prompt conflicts, and privacy. No production mutation
+has occurred. Before merge, preserve and temporarily hold the Vercel ignored-build
+setting. Deploy protected main runtime first through the existing private workflow
+with normal predeploy/smoke gates and immediate container rollout. Restore the
+prior build setting only after verified convergence, then build/promote main Web
+and verify the one-time reset and effective model counts. Exact-head CI and Final
+ReviewGPT are the remaining candidate gates; keep this plan active through them.
+
+The latest completed behavioral result is passing for all 106 affected cases on
+each configuration. The final five-case Terra sweep passed; Sol passed canonical
+create/fire/cancel and feedback, then the final pending-edit and two restaurant
+cases passed after fixture corrections. Both restaurant variants also passed on
+Terra after the final fixture wording change. Replies and actual effects were
+reviewed. This closes the baseline Hold for the scoped release, while the 21
+missing-corpus cases and development-credential cache replay remain unavailable.
+No broad equivalence or universal reliability claim is made.

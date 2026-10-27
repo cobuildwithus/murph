@@ -759,7 +759,7 @@ export const MURPH_MANAGED_AUTOMATIONS = [
       '- Explain any technical term in ordinary language before using it.',
       '- No action or follow-up question is required; an informative note can stand on its own. If useful, put at most one optional practical next move in the prose. Prefer keep one variable stable, measure one thing, ignore a metric their own data shows is noisy for them, ask a clinician a better question, or avoid changing the plan based on weak/noisy evidence. Suggest adding behavior only when it passes the burden check.',
       '- Keep the message practical, calm, and non-alarmist.',
-      '- Append one dated section to `weekly-health-research-scout` with the source URLs and study details, synthesis notes, candidate ranking notes, why the final insight was chosen, and why close alternatives were suppressed.',
+      '- Before returning a send decision, append one dated section to `weekly-health-research-scout` and verify its successful write receipt; if persistence fails, skip the send so an unrecorded insight cannot be repeated. Include the source URLs and study details, synthesis notes, candidate ranking notes, why the final insight was chosen, and why close alternatives were suppressed.',
     ].join('\n'),
   },
   {

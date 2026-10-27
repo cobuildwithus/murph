@@ -364,7 +364,7 @@ describe('assistant Codex turn planning', () => {
     for (const plan of [plans.direct, plans.group, plans.scheduledEmail]) {
       for (const instructions of [plan.systemPrompt, plan.developerInstructions]) {
         expect(instructions).toContain(
-          'A scheduled usage audit instead reports available evidence and coverage limits without asking a question.',
+          'Scheduled audits report evidence and coverage limits without questions.',
         )
       }
     }
@@ -447,11 +447,11 @@ describe('assistant Codex turn planning', () => {
       Object.entries(plans).map(([name, plan]) => [name, digestPlan(plan)]),
     )).toMatchInlineSnapshot(`
       {
-        "direct": "8da4e4aa115655b3daffa9a306a41925d5a8340be15542c6bb2710bbc0ae0384",
-        "group": "db6638959384cca90c640d4d7c6c3d2f618c7d12447a2d38a0aaf2adbebf7759",
-        "maintenance": "4def8e201c9fe004f9f60f5ac3ec5ecf084f63f7bc5c70e1a6409107487300be",
-        "outputOnly": "7f13d7195b8e231e1fba2e5bd5e91437b30756cd8fcf763edd47fe27de6f7d6e",
-        "scheduledEmail": "20747d7a7aa6cbc6eb3effd554655dfbcd5207f30c66c1c8dd09ebc1b6df6bbe",
+        "direct": "71cac2966944e001d99d69d75a85646dcbeeb36489942725139134ee02205017",
+        "group": "a9bea22008b1911d455928df8a26d167d0ac14bc80a0db1fb87e55a855b9b751",
+        "maintenance": "52f122f38125b96ccf960ea62ada87ef983f3e1060cdafef33eae3309b970038",
+        "outputOnly": "b87c76c464b664e3d9dcbf947b1cd7a3c823dad67b72a8597c8a462e1bd3dd54",
+        "scheduledEmail": "0df4a46db00ed54376516331f1820364d28f776107d66d634d1c4e7a6fa5c8c5",
       }
     `)
   })
@@ -2098,8 +2098,9 @@ describe('assistant Codex turn planning', () => {
     expect(plan.developerInstructions).toContain(
       'When the canonical Murph welcome is visible in this direct conversation, treat it as authoritative evidence that onboarding just began.',
     )
+    expect(plan.developerInstructions).toContain('no commands, tool calls, memory writes, delegation, or progress update')
     expect(plan.developerInstructions).toContain(
-      'For that first-reply fast path, do not read the onboarding skill and do not run `vault-cli assistant onboarding resume-context --format json`.',
+      'Do not read the onboarding skill and do not run `vault-cli assistant onboarding resume-context --format json`.',
     )
     expect(plan.developerInstructions).toContain(
       `Outside these visible opening exchanges—missing or ambiguous history, established later stages, an immediate request, or an overall pause or decline—read and follow \`${skillRef}\` before interpreting or acting on an onboarding answer or decision to advance, pause, defer, skip, decline, or complete onboarding`,
@@ -4664,7 +4665,7 @@ describe('assistant Codex turn planning', () => {
       'synthetic Murph instance for this room',
     )
     expect(groupAssistantConfigurationTool?.description).toContain(
-      'Luna or Sol may be selected',
+      'Terra and Luna may also be selected for the room',
     )
     const groupAssistantConfigurationSchema = JSON.stringify(
       groupAssistantConfigurationTool?.inputSchema,

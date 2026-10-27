@@ -39,3 +39,11 @@ claims. Corrected fixtures are covered by focused reruns; original outcomes stay
 in the comparison record. A follow-up should audit the remaining assertions
 against their intended product invariant before using raw suite pass rate as a
 model-ranking metric. Do not relax exact writes, authorization, or safety checks.
+
+The follow-up audit corrected stale calendar ownership, clock and model fixtures,
+missing hosted automation availability, instructions that were not persisted by
+the edit mock, and outdated requirements for extra Goal readbacks. Assertions now
+permit bounded harmless discovery and equivalent truthful wording while retaining
+exact writes, state, authorization, and privacy. The duplicate prescribed schema
+discovery journey and its rollout-parsing helper were removed; the ordinary
+production-derived reminder journey remains.

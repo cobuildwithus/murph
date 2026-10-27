@@ -22,3 +22,12 @@ Document and provide a reproducible local build of the production native patch, 
 ## Context
 
 A full local model comparison needs the production-compatible binary to distinguish model behavior from startup failures.
+
+The remediation run also reproduced a pre-provider `thread/start` stall when
+operator config was inherited. The same patched binary initialized and started
+threads promptly with `app-server --ignore-user-config`, using the same existing
+authentication home. That switch belongs after the app-server subcommand. The
+comparison uses a temporary launcher that adds only that flag; it does not copy
+authentication or modify operator configuration. Pre-provider failures are kept
+separate from behavioral results. A future runner preflight should identify this
+configuration dependency before launching a long suite.

@@ -3021,8 +3021,15 @@ its receipt, and cleanup retries then complete without operator action.
 
 ### Terra chat-model rollout
 
-Deploy the Terra-capable Worker and container image before promoting the Web
-build that selects Terra. The launch catalog supplement is pinned from the
+Deploy the Terra-capable Worker and container image before building or promoting
+the Web release that selects Terra. Before merging the release, preserve the
+Vercel project's current ignored-build command and temporarily set it to
+`exit 0`; confirm the setting so an automatic main build cannot run the reset
+early. Deploy protected main through the private workflow with immediate
+container rollout and the normal predeploy and smoke gates. After runtime
+convergence, restore the prior ignored-build command and start the matching
+main Web deployment. Holding only domain promotion is insufficient because the
+migration runs during the Web build. The launch catalog supplement is pinned from the
 OpenAI Codex catalog refreshed on 2026-10-26; it retains the native 500K context
 window and uses the existing mixed Code Mode/Flex transformation. Existing
 model entries remain native to the pinned CLI. The app-local Docker context

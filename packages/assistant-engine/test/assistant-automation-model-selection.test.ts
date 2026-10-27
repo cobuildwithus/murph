@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import {
   readAutomationDynamicToolRequest,
+  MURPH_AUTOMATION_TOOL,
 } from '../src/assistant-codex/dynamic-tools/automation.ts'
 
 const AUTOMATION_SCHEDULE = {
@@ -39,6 +40,13 @@ function readPatchRequest(assistantTargetOverride?: unknown) {
 }
 
 describe('hosted automation model selection', () => {
+  it('places ordinary reminder model selection beside the save field', () => {
+    expect(MURPH_AUTOMATION_TOOL.description).toContain('For every ordinary reminder save, explicitly set assistantTargetOverride.model')
+    expect(MURPH_AUTOMATION_TOOL.description).not.toContain('omit it to inherit or pass')
+    expect(MURPH_AUTOMATION_TOOL.description).toContain('never inspect a title or guessed slug')
+    expect(JSON.stringify(MURPH_AUTOMATION_TOOL.inputSchema)).toContain('Do not omit it or inherit the conversation model for reminders')
+    expect(JSON.stringify(MURPH_AUTOMATION_TOOL.inputSchema)).toContain('Omit only for non-reminder work that should inherit')
+  })
   it.each([
     'gpt-6.1-sol',
     'gpt-6-sol',

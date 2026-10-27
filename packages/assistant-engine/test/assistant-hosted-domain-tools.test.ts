@@ -52,7 +52,7 @@ describe('hosted domain dynamic tools', () => {
       'occurrenceProjection.status=pending',
     )
     expect(MURPH_AUTOMATION_TOOL.description).toContain(
-      'briefly confirm the saved change and that the recurring reminder remains active',
+      'a wording-only edit needs only its saved wording',
     )
     expect(MURPH_AUTOMATION_TOOL.description).toContain(
       'Its exact next delivery time is not yet available; do not promise one',
