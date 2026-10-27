@@ -1,6 +1,6 @@
 import { isHostedOnboardingError } from "../../hosted-onboarding/errors";
 import { requireHostedMemberAuthFromBearerToken } from "../../hosted-onboarding/request-auth";
-import { readHostedConsentStatus } from "../../legal/consent";
+import { hasHostedConsentAtPublishedVersions, readHostedConsentStatus } from "../../legal/consent";
 import { getPrisma } from "../../prisma";
 import { areGameDevToolsAllowed } from "../access";
 import type { GameCommand } from "../contract";
@@ -45,8 +45,9 @@ const NEEDS_CURRENT_TERMS: ReadonlySet<unknown> = new Set<GameCommand["type"]>([
 
 /**
  * With `MURPH_GAME_REQUIRE_CURRENT_TERMS=true`, those writes need the
- * `launch.legal` grant at today's document versions, so a version bump asks
- * players once before they play on. Anything else, or unset, changes nothing.
+ * `launch.legal` grant at the published document versions, not just the
+ * minimum the rest of Murph accepts, so players agree once to the Terms that
+ * cover games before they play on. Anything else, or unset, changes nothing.
  * The refusal names the documents to agree to, with their versions.
  */
 export async function requireCurrentTermsFor(
@@ -57,7 +58,7 @@ export async function requireCurrentTermsFor(
   if (env.MURPH_GAME_REQUIRE_CURRENT_TERMS !== "true" || !NEEDS_CURRENT_TERMS.has(command.type)) return;
   const status = await readHostedConsentStatus({ memberId, prisma: getPrisma() });
   const terms = status.scopes.find((scope) => scope.scope === "launch.legal");
-  if (terms?.granted) return;
+  if (terms && hasHostedConsentAtPublishedVersions(terms)) return;
   throw gameHttpError("TERMS_REQUIRED", 403, "Agree to Murph's Terms to keep playing.", false, {
     documents: terms?.documents ?? [],
     scope: "launch.legal",

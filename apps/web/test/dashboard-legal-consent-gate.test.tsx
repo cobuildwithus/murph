@@ -8,6 +8,7 @@ import {
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import { DashboardLegalConsentGate } from "@/src/components/legal/dashboard-legal-consent-gate";
+import { HostedOnboardingApiError } from "@/src/components/hosted-onboarding/client-api";
 import type { HostedConsentStatus } from "@/src/lib/legal/consent";
 
 import { renderClientComponent } from "./render-client-component";
@@ -565,6 +566,217 @@ test("settings remains available after explicit health-data withdrawal", async (
   )).toBeNull();
 });
 
+test("a member asked for the Terms again gets one Agree step that says what changed", async () => {
+  // launch.legal below the minimum accepted versions while the health-data
+  // notice stays current.
+  const staleTermsStatus = createLaunchConsentStatus({
+    launchHealthDataGranted: true,
+  });
+  mocks.requestHostedOnboardingJson.mockResolvedValueOnce(
+    createLaunchConsentStatus({
+      launchHealthDataGranted: true,
+      launchLegalGranted: true,
+    }),
+  );
+
+  const rendered = await renderClientComponent(
+    createElement(DashboardLegalConsentGate, {
+      initialStatus: staleTermsStatus,
+      variant: "update",
+    }),
+    {
+      location: {
+        hash: "",
+        href: "https://app.example.test/home",
+        origin: "https://app.example.test",
+        pathname: "/home",
+        search: "",
+      },
+      requireButton: false,
+    },
+  );
+  cleanupRender = rendered.cleanup;
+
+  expect(rendered.container.textContent).toContain("Review what changed");
+  expect(rendered.container.textContent).toContain(
+    "We updated Murph's legal documents. We added rules for games. Accept the current versions to get your full dashboard back.",
+  );
+  expectNoLaunchCheckboxes(rendered.container);
+
+  const agreeButton = findButton(rendered.container, "Agree");
+  await act(async () => {
+    agreeButton.dispatchEvent(
+      new rendered.window.Event("click", { bubbles: true }),
+    );
+    await flushPromises();
+    await vi.advanceTimersByTimeAsync(100);
+  });
+
+  expect(readRequestedConsentScopes()).toEqual(["launch.legal"]);
+  expect(rendered.reload).toHaveBeenCalledTimes(1);
+});
+
+test("an Agree on documents that changed under an open dialog reloads them and agrees to the current ones", async () => {
+  const openedBeforeDeploy = createLaunchConsentStatus({
+    launchHealthDataGranted: true,
+  });
+  mocks.requestHostedOnboardingJson
+    .mockRejectedValueOnce(new HostedOnboardingApiError({
+      code: "CONSENT_DOCUMENT_VERSIONS_STALE",
+      message: "Refresh the current Murph legal documents before accepting consent.",
+    }))
+    .mockResolvedValueOnce(withDocumentVersion(openedBeforeDeploy, "2026-10-26"))
+    .mockResolvedValueOnce(createLaunchConsentStatus({
+      launchHealthDataGranted: true,
+      launchLegalGranted: true,
+    }));
+
+  const rendered = await renderClientComponent(
+    createElement(DashboardLegalConsentGate, {
+      initialStatus: openedBeforeDeploy,
+      variant: "update",
+    }),
+    {
+      location: {
+        hash: "",
+        href: "https://app.example.test/home",
+        origin: "https://app.example.test",
+        pathname: "/home",
+        search: "",
+      },
+      requireButton: false,
+    },
+  );
+  cleanupRender = rendered.cleanup;
+
+  await act(async () => {
+    findButton(rendered.container, "Agree").dispatchEvent(
+      new rendered.window.Event("click", { bubbles: true }),
+    );
+    await flushPromises();
+    await flushPromises();
+  });
+
+  expect(rendered.container.textContent).toContain(
+    "Murph's legal documents just changed. Review them, then agree again.",
+  );
+  expect(rendered.reload).not.toHaveBeenCalled();
+
+  await act(async () => {
+    findButton(rendered.container, "Agree").dispatchEvent(
+      new rendered.window.Event("click", { bubbles: true }),
+    );
+    await flushPromises();
+    await vi.advanceTimersByTimeAsync(100);
+  });
+
+  const requests = mocks.requestHostedOnboardingJson.mock.calls.map(([request]) => request);
+  expect(requests[0]?.payload?.acceptedDocumentVersions?.["terms-of-service"]).toBe("2026-07-23");
+  expect(requests[1]?.url).toBe("/api/legal/consent/status");
+  expect(requests[2]?.payload).toMatchObject({
+    acceptedDocumentVersions: {
+      "privacy-policy": "2026-10-26",
+      "terms-of-service": "2026-10-26",
+    },
+    scope: "launch.legal",
+  });
+  expect(rendered.reload).toHaveBeenCalledTimes(1);
+});
+
+test("an Agree on changed documents that another tab already accepted continues to the dashboard", async () => {
+  mocks.requestHostedOnboardingJson
+    .mockRejectedValueOnce(new HostedOnboardingApiError({
+      code: "CONSENT_DOCUMENT_VERSIONS_STALE",
+      message: "Refresh the current Murph legal documents before accepting consent.",
+    }))
+    .mockResolvedValueOnce(withDocumentVersion(createLaunchConsentStatus({
+      launchHealthDataGranted: true,
+      launchLegalGranted: true,
+    }), "2026-10-26"));
+
+  const rendered = await renderClientComponent(
+    createElement(DashboardLegalConsentGate, {
+      initialStatus: createLaunchConsentStatus({ launchHealthDataGranted: true }),
+      variant: "update",
+    }),
+    {
+      location: {
+        hash: "",
+        href: "https://app.example.test/home",
+        origin: "https://app.example.test",
+        pathname: "/home",
+        search: "",
+      },
+      requireButton: false,
+    },
+  );
+  cleanupRender = rendered.cleanup;
+
+  await act(async () => {
+    findButton(rendered.container, "Agree").dispatchEvent(
+      new rendered.window.Event("click", { bubbles: true }),
+    );
+    await flushPromises();
+    await flushPromises();
+    await vi.advanceTimersByTimeAsync(100);
+  });
+
+  expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledTimes(2);
+  expect(rendered.container.textContent).not.toContain("just changed");
+  expect(rendered.reload).toHaveBeenCalledTimes(1);
+});
+
+test("a stale Terms grant leaves device connect open", async () => {
+  const rendered = await renderClientComponent(
+    createElement(DashboardLegalConsentGate, {
+      initialStatus: createLaunchConsentStatus({
+        launchHealthDataGranted: true,
+      }),
+      variant: "update",
+    }),
+    {
+      location: {
+        hash: "",
+        href: "https://app.example.test/records/connect",
+        origin: "https://app.example.test",
+        pathname: "/records/connect",
+        search: "",
+      },
+      requireButton: false,
+    },
+  );
+  cleanupRender = rendered.cleanup;
+
+  expect(rendered.container.querySelector(
+    '[data-dashboard-legal-consent-gate="true"]',
+  )).toBeNull();
+});
+
+test("the games line shows only when the Terms step is pending", async () => {
+  const rendered = await renderClientComponent(
+    createElement(DashboardLegalConsentGate, {
+      initialStatus: createLaunchConsentStatus({
+        launchLegalGranted: true,
+      }),
+      variant: "update",
+    }),
+    {
+      location: {
+        hash: "",
+        href: "https://app.example.test/home",
+        origin: "https://app.example.test",
+        pathname: "/home",
+        search: "",
+      },
+      requireButton: false,
+    },
+  );
+  cleanupRender = rendered.cleanup;
+
+  expect(rendered.container.textContent).toContain("Review what changed");
+  expect(rendered.container.textContent).not.toContain("We added rules for games.");
+});
+
 function expectNoLaunchCheckboxes(container: HTMLElement) {
   expect(container.querySelectorAll('input[type="checkbox"]')).toHaveLength(0);
 }
@@ -628,6 +840,27 @@ function createLaunchConsentStatus(input: {
         input.launchHealthDataRevoked ?? false,
       ),
     ],
+  };
+}
+
+function withDocumentVersion(
+  status: HostedConsentStatus,
+  version: string,
+): HostedConsentStatus {
+  const bump = (documents: HostedConsentStatus["documents"]) =>
+    documents.map((document) => ({ ...document, version }));
+  return {
+    ...status,
+    documents: bump(status.documents),
+    launchScopes: status.launchScopes.map((scope) => ({
+      ...scope,
+      missingDocuments: bump(scope.missingDocuments),
+    })),
+    scopes: status.scopes.map((scope) => ({
+      ...scope,
+      documents: bump(scope.documents),
+      missingDocuments: bump(scope.missingDocuments),
+    })),
   };
 }
 

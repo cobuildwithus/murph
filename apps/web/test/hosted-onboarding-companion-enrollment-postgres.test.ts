@@ -19,7 +19,10 @@ import { buildHostedStarterUsageSemanticSourceKey } from "@/src/lib/hosted-onboa
 import { parseHostedLinqWebhookEvent } from "@/src/lib/hosted-onboarding/linq";
 import { planHostedOnboardingLinqWebhook } from "@/src/lib/hosted-onboarding/webhook-provider-linq";
 import { createPrismaClient, getPrisma } from "@/src/lib/prisma";
-import { recordHostedLaunchRequiredConsent } from "@/src/lib/legal/consent";
+import {
+  buildCurrentHostedConsentDocumentVersions,
+  recordHostedLaunchRequiredConsent,
+} from "@/src/lib/legal/consent";
 import { requireHostedCompanionMemberIdFromRequest } from "@/src/lib/hosted-onboarding/companion-member-access";
 import { createHostedLinqParticipantContact } from "@/src/lib/hosted-onboarding/linq-participant-contact";
 import { prepareHostedAuthOtpMember } from "@/src/lib/better-auth/member";
@@ -289,20 +292,14 @@ describe.skipIf(!runPostgresProof)(
           await tx.hostedConsentGrant.createMany({
             data: [
               {
-                documentVersionsJson: {
-                  "health-ai-safety-disclosure": "2026-07-23",
-                  "privacy-policy": "2026-07-23",
-                  "terms-of-service": "2026-07-23",
-                },
+                documentVersionsJson: buildCurrentHostedConsentDocumentVersions("launch.legal"),
                 grantedAt: now,
                 memberId,
                 scope: "launch.legal",
                 source: "test",
               },
               {
-                documentVersionsJson: {
-                  "consumer-health-data-notice": "2026-07-23",
-                },
+                documentVersionsJson: buildCurrentHostedConsentDocumentVersions("launch.health-data"),
                 grantedAt: now,
                 memberId,
                 scope: "launch.health-data",

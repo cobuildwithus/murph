@@ -29,6 +29,7 @@ import {
   HostedLegalConsentCard,
   type HostedLegalConsentAcceptanceInput,
 } from "@/src/components/legal/hosted-legal-consent-card";
+import { dashboardLegalUpdateDescription } from "@/src/components/legal/dashboard-legal-consent-gate";
 import { HOSTED_PHONE_COUNTRY_OPTIONS } from "@/src/components/hosted-onboarding/hosted-phone-country-options";
 import { ContactSupportAction } from "@/src/components/support/contact-support-action";
 import { PublicTrustPageContent } from "@/src/components/public/public-trust-page";
@@ -480,7 +481,7 @@ export function ComponentsContent() {
 
         <Separator />
 
-        <Section title="Dashboard legal update">
+        <Section id="dashboard-legal-update" title="Dashboard legal update">
           <div
             className="rounded-2xl border border-border bg-background px-5 py-6 sm:px-8"
             data-design-dashboard-legal-composition="true"
@@ -489,7 +490,7 @@ export function ComponentsContent() {
               acceptedPendingLabel="Refreshing..."
               acceptScope={acceptDesignDashboardConsentScope}
               initialStatus={DESIGN_DASHBOARD_CONSENT_STATUS}
-              launchDescription="We updated Murph's legal documents. Accept the current versions to get your full dashboard back."
+              launchDescription={dashboardLegalUpdateDescription(DESIGN_DASHBOARD_CONSENT_STATUS)}
               launchTitle="Review what changed"
               mode="compact"
               onAccepted={completeDesignDashboardConsentPreview}
