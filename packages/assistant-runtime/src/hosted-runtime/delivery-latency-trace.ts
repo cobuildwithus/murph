@@ -35,6 +35,8 @@ export interface HostedDeliveryTraceContext {
    * drain. Shared by every delivery in the batch, not per delivery.
    */
   memberChannelBarrierMs?: number | null;
+  /** Configured waits already completed within this reply's bubble sequence. */
+  replyBubblePacingMs?: number | null;
 }
 
 /**
@@ -58,6 +60,7 @@ export function writeHostedLinqDispatchEnteredTiming(input: {
   }
   const phaseStartedAt = context.foregroundDeliveryPhaseStartedAtMonotonicMs ?? null;
   const fields = {
+    deliveryReplyBubblePacingMs: readDurationMs(context.replyBubblePacingMs ?? null),
     deliveryMemberChannelBarrierMs: readDurationMs(context.memberChannelBarrierMs ?? null),
     deliveryProviderEntryFenceMs: readDurationMs(
       input.dispatchEnteredAtMonotonicMs - input.providerEntryFenceStartedAtMonotonicMs,

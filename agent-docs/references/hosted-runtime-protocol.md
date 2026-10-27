@@ -4808,8 +4808,15 @@ no observation. No state ever falls back to the provider-result origin.
 The budgets are strict initial engineering budgets, not an SLO: greater than
 5000 ms for direct or unknown-directness threads, and greater than 9000 ms for
 group threads, which adds the intentional four-second draft hold that follows
-the first provider result. The origin is not moved past that hold. When a group
-reconsideration runs, the selected result and its completion come from the
+the first provider result. The origin is not moved past that hold.
+The comparison excludes only configured
+reply-bubble pauses observed in a unique dispatch row from the same runtime
+attempt as the final reply and acceptance. Those pauses must fit inside the
+observed foreground phase and provider-result-to-attempt interval. Missing,
+invalid, ambiguous, or cross-attempt observations get no exclusion. Both raw
+elapsed measurements remain unchanged in the alert; the email names the
+excluded duration. Provider time, earlier bubble sends, and timer overshoot
+remain in the budget. When a group reconsideration runs, the selected result and its completion come from the
 second request. A delivery raises at most one immutable alert. That alert names
 each measurement with its status, plus the bounded trigger-origin set.
 `createMany` with `skipDuplicates` on the delivery-scoped identity owns dedupe,
@@ -4835,7 +4842,10 @@ The runtime also writes one queued `linq-dispatch-entered` row per Linq
 provider-dispatch boundary, from each boundary's existing cached entry. Each row
 holds monotonic durations since the foreground delivery phase started, send
 preparation, the route-authority check, and the provider-entry fence. It also
-carries the member-channel pre-dispatch barrier duration, which is shared by
+carries an optional cumulative configured reply-bubble pause duration, reset
+between unrelated sequences and incremented only after each wait completes.
+It adds no persisted state and does not change pacing. The row also carries
+the member-channel pre-dispatch barrier duration, which is shared by
 every delivery in that drain rather than measured per delivery. These durations
 nest and overlap, so they are not additive. A rejected app card followed by its
 text fallback writes two rows, and the accepted outcome carries the fallback's

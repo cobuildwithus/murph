@@ -243,6 +243,9 @@ function buildHostedFinalReplyDeliveryAlertEmailText(
     ? details.dispatchAttribution as Record<string, unknown>
     : {};
   const formatOptionalMs = (value: unknown) => typeof value === "number" ? `${value} ms` : "unknown";
+  const intentionalPacingMs = typeof details.intentionalPacingMs === "number"
+    ? details.intentionalPacingMs
+    : null;
   return [
     "Murph final reply delivery latency alert.",
     "",
@@ -250,6 +253,10 @@ function buildHostedFinalReplyDeliveryAlertEmailText(
     `Scope: ${details.scope}`,
     `Triggered by: ${Array.isArray(details.triggerOrigins) ? details.triggerOrigins.join(", ") : "unknown"}`,
     `Threshold: strictly greater than ${details.thresholdMs} ms`,
+    intentionalPacingMs === null
+      ? "Intentional reply-bubble pacing: unknown; no time excluded from threshold evaluation."
+      : `Intentional reply-bubble pacing excluded from threshold evaluation: ${intentionalPacingMs} ms`,
+    "Durations below include intentional pacing and earlier reply bubbles.",
     `Whole-delivery Linq acceptance observed at: ${details.acceptedAt}`,
     describe("Final response completion observed to Linq acceptance", details.finalResponseCompletedToAccepted),
     describe("Provider result to Linq acceptance", details.providerResultToAccepted),
@@ -260,6 +267,7 @@ function buildHostedFinalReplyDeliveryAlertEmailText(
     ...(dispatch.status === "observed"
       ? [
         `  Since foreground delivery phase start: ${formatOptionalMs(dispatch.sinceForegroundPhaseStartedMs)}`,
+        `  Configured reply-bubble pauses completed: ${formatOptionalMs(dispatch.replyBubblePacingMs)}`,
         `  Member-channel barrier (shared by the batch): ${formatOptionalMs(dispatch.memberChannelBarrierMs)}`,
         `  Send preparation: ${formatOptionalMs(dispatch.sendPreparationMs)}`,
         `  Route authority check: ${formatOptionalMs(dispatch.routeAuthorityCheckMs)}`,
