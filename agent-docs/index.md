@@ -1,4 +1,4 @@
-Terra chat defaults, subscriber Sol eligibility, and the once-only preference reset are tracked in [the active plan](exec-plans/active/2026-10-26-terra-chat-default.md). `ARCHITECTURE.md` owns selection; `apps/cloudflare/DEPLOY.md` owns rollout order.
+Terra chat defaults, subscriber Sol eligibility, and the once-only preference reset are tracked in [the completed implementation plan](exec-plans/completed/2026-10-26-terra-chat-default.md). `ARCHITECTURE.md` owns selection; `apps/cloudflare/DEPLOY.md` owns rollout order.
 
 Connected-app response-limit attribution is tracked in [the diagnostic plan](exec-plans/completed/2026-10-25-connected-result-outcomes.md). The durable telemetry contract stays in `apps/web/README.md`.
 

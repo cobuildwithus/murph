@@ -1,6 +1,6 @@
 # Terra chat defaults and subscriber model selection
 
-Status: active
+Status: completed
 Created: 2026-10-26
 Updated: 2026-10-26
 
@@ -269,3 +269,37 @@ Terra after the final fixture wording change. Replies and actual effects were
 reviewed. This closes the baseline Hold for the scoped release, while the 21
 missing-corpus cases and development-credential cache replay remain unavailable.
 No broad equivalence or universal reliability claim is made.
+
+
+## Final candidate review and CI corrections
+
+Final ReviewGPT round 1 returned PASS on
+`fe9c250aedcdc4538891dfdf6bd1f4f93c6e20b8`, with zero accepted findings. The managed
+lane selected and verified GPT-6 Pro, confirmed the full snapshot attachment and
+exact committed turn, enforced its 180-second minimum marked-response threshold,
+and captured `REVIEW_COMPLETE`. The review verified all 64 changed blob hashes
+and inspected the billing/default/reset/runtime, pricing, and behavioral changes;
+its catalog filters also executed successfully. The artifact is a concrete
+full-patch review, not a generic approval. A later optional thread export timed
+out; the original successful exact-turn response and capture receipt remain the
+review evidence.
+
+First-head required billing, Linux, macOS, and Temporal checks passed. Broader CI
+exposed stale model exports, migration inventory, priced-model error text, and
+Pulse subagent eligibility assertions. Pulse now legitimately permits Sol model
+selection while the separate Astra restriction remains false. Corrected those
+tests without changing production code. The latency comparator had built with a
+bundle-only Docker context that omitted the new catalog; it now uses the same
+app-local context and default bundle path as production. No budget or failure
+gate changed. This is isolated verification repair, with no production behavior,
+runtime configuration, schema, or entitlement change after the reviewed head.
+
+Focused correction proof: 10 shared export tests, 153 Web route/migration tests,
+91 deploy-preflight tests, five container catalog/context tests, and seven latency
+comparator tests pass. Shared, Web and Cloudflare typechecks pass. Complexity
+passes over 23 source files with unchanged hotspot dispositions. Parent review
+accepts the verification-only delta under the review loop's proof exemption;
+there are no unresolved product findings. Final exact-head CI must still pass
+before merging. The implementation plan is closed; the authorized release
+continues with the documented runtime-first rollout and post-deploy verification.
+Completed: 2026-10-26
