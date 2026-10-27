@@ -1432,7 +1432,8 @@ function canView(game: LoadedGame, memberId: string): boolean {
  * The HTTP door. A listed member may use every route. Anyone else enters only
  * for a game that is on: one they play or are the addressed rematch invitee
  * of, or the open invite they're holding, so a new invitee can set up and
- * accept. Everyone else sees no game. Each command still checks its own game.
+ * accept. Owners of outgoing blocks may also enter to reach their unblock
+ * controls after their last game ends. Each command still checks its own game.
  */
 export async function canEnterGame(memberId: string, inviteToken: string | null): Promise<boolean> {
   if (isGameEnabledFor(memberId)) return true;
@@ -1444,6 +1445,7 @@ export async function canEnterGame(memberId: string, inviteToken: string | null)
     gameOnWhere(),
   ] } });
   if (yours) return true;
+  if (await prisma.gameBlock.findFirst({ select: { blockedMemberId: true }, where: { blockerMemberId: memberId } })) return true;
   if (!inviteToken) return false;
   const invite = await prisma.game.findUnique({ include: { players: true }, where: { inviteTokenHash: sha256Hex(inviteToken) } });
   if (!invite || invite.status !== "invited" || !isGameOn(invite)) return false;

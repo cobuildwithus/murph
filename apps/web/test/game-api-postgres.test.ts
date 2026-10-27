@@ -15,6 +15,7 @@ import { POST as post } from "../app/api/game/v1/games/[id]/entries/route";
 import { GET as read } from "../app/api/game/v1/games/[id]/route";
 import { GET as home } from "../app/api/game/v1/home/route";
 import { DELETE as unblockRoute, PUT as blockRoute } from "../app/api/game/v1/blocks/[memberId]/route";
+import { PUT as blockInviteRoute } from "../app/api/game/v1/invites/[token]/block/route";
 import { POST as reportRoute } from "../app/api/game/v1/games/[id]/reports/route";
 import { GET as media } from "../app/api/game/v1/media/[...key]/route";
 import { POST as redeem } from "../app/api/game/v1/tickets/[id]/redeem/route";
@@ -305,6 +306,39 @@ describe.skipIf(!enabled)("game v1 local API smoke", () => {
       const offset = ((12 - new Date().getUTCHours() + 36) % 24) - 12;
       return offset === 0 ? "UTC" : `Etc/GMT${offset > 0 ? "-" : "+"}${Math.abs(offset)}`;
     };
+
+    it.each([false, true])("keeps unblocking reachable after the only opponent is blocked (joined: %s)", async (joined) => {
+      const listed = await account();
+      const invitee = await account();
+      const stranger = await account();
+      vi.stubEnv("MURPH_GAME_MEMBER_ALLOWLIST", listed.id);
+      expect((await profile(request(listed.token, { firstName: "Ava", timeZone: "UTC" }, "PUT"))).status).toBe(200);
+      const created = await game(create(request(listed.token, { gameId: randomUUID(), inviteeFirstName: "Leo", terms })));
+      const token = created.inviteToken!;
+      expect((await profile(request(invitee.token, { firstName: "Leo", timeZone: "UTC" }, "PUT", token))).status).toBe(200);
+      if (joined) {
+        await game(accept(request(invitee.token, { termsVersion: 1, timeZone: "UTC" }), { params: Promise.resolve({ token }) }));
+        expect((await blockRoute(request(invitee.token, undefined, "PUT"), { params: Promise.resolve({ memberId: listed.id }) })).status).toBe(200);
+      } else {
+        expect((await blockInviteRoute(request(invitee.token, undefined, "PUT"), { params: Promise.resolve({ token }) })).status).toBe(200);
+      }
+      // No held link is needed to reach You > Blocked people after blocking.
+      const response = await home(request(invitee.token, undefined, "GET"));
+      expect(response.status).toBe(200);
+      expect((await response.json()).blocked).toEqual([{ firstName: "Ava", memberId: listed.id }]);
+      await refused(create(request(invitee.token, { gameId: randomUUID(), inviteeFirstName: "Sam", terms })));
+      await refused(home(request(stranger.token, undefined, "GET")));
+      vi.stubEnv("MURPH_GAME_ENABLED", "false");
+      try {
+        await refused(home(request(invitee.token, undefined, "GET")));
+        await refused(unblockRoute(request(invitee.token, undefined, "DELETE"), { params: Promise.resolve({ memberId: listed.id }) }));
+      } finally {
+        vi.stubEnv("MURPH_GAME_ENABLED", "true");
+      }
+      expect((await unblockRoute(request(invitee.token, undefined, "DELETE"), { params: Promise.resolve({ memberId: listed.id }) })).status).toBe(200);
+      expect(await getPrisma().gameBlock.count({ where: { blockerMemberId: invitee.id } })).toBe(0);
+      await refused(create(request(invitee.token, { gameId: randomUUID(), inviteeFirstName: "Sam", terms })));
+    });
 
     it("lets a new unlisted invitee in through a listed member's invite to play, settle, cash in and rematch, but never start fresh", async () => {
       const listed = await account();

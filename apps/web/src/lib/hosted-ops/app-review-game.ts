@@ -12,6 +12,7 @@ import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import { generateHostedRandomPrefixedId } from "../primitives";
 import { getPrisma } from "../prisma";
 import { isGameEnabledFor, mediaKeyPrefixFor } from "../game/access";
+import { areGamePlayersBlocked, lockGamePair } from "../game/blocks";
 import { sealGameText, type GameSealTarget } from "../game/crypto";
 import { isGameMediaStorageAvailable, putGameMedia } from "../game/media";
 import {
@@ -191,6 +192,7 @@ async function apply(input: {
   ]);
   const prepared = await prepare(members, now, input.readPhoto);
   await prisma.$transaction(async (tx) => {
+    await lockGamePair(tx, members.reviewer, members.partner);
     await tx.hostedMember.createMany({ data: [{ id: members.partner }], skipDuplicates: true });
     // Owner-before-game lock order, as in account deletion and game commands.
     const locked = await tx.$queryRaw<{ id: string; suspended_at: Date | null }[]>`
@@ -199,6 +201,10 @@ async function apply(input: {
     if (!review || review.suspended_at) {
       throw hostedOnboardingError({ code: "APP_REVIEW_GAME_BLOCKED", httpStatus: 409, retryable: false,
         message: "The review account is missing or suspended." });
+    }
+    if (await areGamePlayersBlocked(tx, members.reviewer, members.partner)) {
+      throw hostedOnboardingError({ code: "APP_REVIEW_GAME_BLOCKED", httpStatus: 409, retryable: false,
+        message: "The review account and partner must be unblocked before preparing the games." });
     }
     const surfaces = await readContactSurfaces(tx, members.partner);
     if (surfaces.length > 0) {
@@ -236,6 +242,7 @@ async function apply(input: {
 // ------------------------------------------------------------------ inspect
 
 interface Inspected {
+  pairBlocked: boolean;
   reviewer: string | null;
   reviewerSuspended: boolean | null;
   reviewerPhoneVerified: boolean;
@@ -247,7 +254,7 @@ interface Inspected {
 
 async function inspect(prisma: PrismaClient, reviewer: string | null): Promise<Inspected> {
   const partner = APP_REVIEW_PARTNER_MEMBER_ID;
-  const [reviewerRow, identity, profile, partnerRow, surfaces, games] = await Promise.all([
+  const [reviewerRow, identity, profile, partnerRow, surfaces, games, blocked] = await Promise.all([
     reviewer ? prisma.hostedMember.findUnique({ select: { suspendedAt: true }, where: { id: reviewer } }) : null,
     reviewer ? prisma.hostedMemberIdentity.findUnique({ select: { phoneNumberVerifiedAt: true }, where: { memberId: reviewer } }) : null,
     reviewer ? prisma.gameProfile.findUnique({ select: { memberId: true }, where: { memberId: reviewer } }) : null,
@@ -258,8 +265,10 @@ async function inspect(prisma: PrismaClient, reviewer: string | null): Promise<I
       select: { id: true, round: true, status: true },
       where: { OR: [{ players: { some: { memberId: partner } } }, { inviteeMemberId: partner }] },
     }),
+    reviewer ? areGamePlayersBlocked(prisma, reviewer, partner) : false,
   ]);
   return {
+    pairBlocked: blocked,
     partnerExists: partnerRow !== null,
     partnerSurfaces: surfaces,
     replacedGames: games,
@@ -307,6 +316,7 @@ function summarize(
     blockers: [
       ...(inspected.reviewer ? [] : ["review_account_not_found"]),
       ...(inspected.reviewerSuspended ? ["review_account_suspended"] : []),
+      ...(inspected.pairBlocked ? ["review_partner_blocked"] : []),
       ...inspected.partnerSurfaces.map((surface) => `partner_reachable_${surface}`),
       ...(isGameMediaStorageAvailable() ? [] : ["media_storage_unavailable"]),
     ],
