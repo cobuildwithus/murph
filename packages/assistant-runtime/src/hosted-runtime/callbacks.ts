@@ -7197,10 +7197,13 @@ function buildHostedAssistantDeliveryErrorDetailLogFields(
   for (const [suffix, key] of [
     ["ProviderRequestId", "providerRequestId"],
     ["ProviderFieldHints", "providerErrorFieldHints"],
+    ["ProviderReasonHints", "providerErrorReasonHints"],
+    ["ProviderMediaTypeHints", "providerErrorMediaTypeHints"],
     ["ProviderMessageLength", "providerErrorMessageLength"],
     ["RequestBodyShape", "requestBodyShape"],
     ["RequestMessagePartCount", "requestMessagePartCount"],
     ["RequestPublicUrlMediaPartCount", "requestPublicUrlMediaPartCount"],
+    ["RequestPublicUrlMediaFormatSummary", "requestPublicUrlMediaFormatSummary"],
     ["RequestAttachmentMediaPartCount", "requestAttachmentMediaPartCount"],
     ["HasReplyToMessageId", "hasReplyToMessageId"],
   ] as const) {

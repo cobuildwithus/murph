@@ -1,4 +1,4 @@
-# Linq validation diagnostics and delivery alert release
+# Explain Linq validation failures safely
 
 Status: completed
 Created: 2026-10-27
@@ -6,61 +6,30 @@ Updated: 2026-10-27
 
 ## Goal
 
-Improve safe Linq validation diagnostics and ship the delivery pacing alert fix.
+Outcome: distinguish provider validation hints and request media formats after a failed send.
+Reaches: operator-config error context, immediate hosted failure logs, durable delivery summaries.
+Proof: synthetic provider errors survive both logging owners without private values.
 
-## Evidence and decisions
+## Scope and decisions
 
-The durable delivery log already retains provider codes, request shapes and trace
-IDs in nested error summaries. Worker dispatch logs omit useful request context.
-Provider error prose is intentionally excluded. Add closed-vocabulary field hints
-from that prose; hints are lexical observations, not validated root causes.
-No historical payloads or provider messages belong in this plan or test fixtures.
+- Add finite reason and image-format hints, plus bounded request URL-suffix counts.
+- Reuse existing error context and logs; no raw provider prose, URLs, new storage, provider calls, or retry changes.
+- Hints describe lexical matches, not confirmed root causes or actual media content types.
+- Telemetry only: no member-visible behavior, prompt, or model input changes. Changelog and real-model journeys are not applicable.
+- Preserve unknown classifications when prose does not match. Existing codes, trace IDs, hashes and message lengths remain available.
 
-## Scope and constraints
+## Verification and completion
 
-Reuse parsed error context and existing Worker/durable log writes. No new I/O,
-state owner, provider retry, send policy, or recipient-visible content changes.
-Preserve parser object bounds by nesting new hints in the existing response
-summary. Preserve the previous completed pacing plan as historical evidence.
+- Focused operator-config Linq HTTP tests and hosted callback/durable logging tests.
+- Relevant package typechecks, complexity review, parent privacy and diff review.
+- Required ReviewGPT and exact-head CI, then merge and hosted deployment under the existing user authorization.
 
-## Tasks
+## Progress
 
-1. Add safe field hints and retain request context at existing logging seams.
-2. Verify parser privacy, Worker logs, durable logs, typechecks and complexity.
-3. Commit, obtain required candidate review and exact-head CI, merge and deploy
-   through protected hosted release workflows under current user authorization.
-4. Verify deployed Web/runtime revision and record the release evidence.
-
-## Verification
-
-Focused operator-config HTTP, runtime dispatch and workspace delivery tests;
-relevant package typechecks; prior Web alert tests; complexity and diff guards.
-Use synthetic fixtures for privacy and malformed-provider cases. Live model
-journeys are unnecessary because prompts, tools and reply semantics do not change.
-
-## Candidate evidence
-
-- Operator-config HTTP suite: 90 passed. Runtime callbacks and workspace delivery:
-  410 passed. Operator-config and assistant-runtime typechecks passed.
-- Prior Web alert/email suite: 57 passed; Web typecheck passed.
-- Complexity guard passed: 25 existing hotspots inspected; only the drain's
-  complexity changes, decreasing by one. The telemetry helpers remain below
-  the threshold; no unrelated orchestration refactor is justified.
-- Candidate review: closed vocabulary only, existing nine-detail durable object
-  bound preserved, no new awaited calls, no retry or message-content changes.
-- Historical provider validation prose cannot be reconstructed from retained
-  fingerprints; improved hints apply to future failures and are not root-cause
-  assertions. PR review, CI and production verification remain pending.
-
-## Final candidate review
-
-ReviewGPT round 1 passed on `776484ba6b6a401e846710c94ba2c2f63f153368`,
-with the full guarded snapshot and confirmed requested model. No qualifying
-findings required remediation. Parent final review agrees with the privacy,
-parser-bound, pacing, skew and unchanged-delivery conclusions.
-
-Implementation and focused verification are complete. This plan closes the code
-work; PR #4392 owns final-head CI, merge and authorized production rollout.
-Production deployment is not claimed by this candidate record. The only
-post-review edits are this completion record and its index link.
+- Implemented finite reason/media hints and URL-suffix counts at the existing diagnostic owner; forwarded through both hosted log paths.
+- Operator-config Linq HTTP suite: 100 tests passed.
+- Focused immediate/durable hosted logging scenarios: 2 passed (408 unrelated tests skipped).
+- Operator-config and assistant-runtime typechecks passed.
+- Complexity guard passed with unchanged existing hotspot debt; new helpers are below the threshold. Parent review found no reason to expand unrelated dispatch logic.
+- Parent diff/privacy review passed. Implementation is complete; PR owns pending independent review, exact-head CI, merge and deployment. No claim of production validation yet.
 Completed: 2026-10-27

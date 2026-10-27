@@ -226,9 +226,12 @@ type LinqSafeRequestDetails = {
   requestMessageLength?: number
   requestMessagePartCount?: number
   requestPublicUrlMediaPartCount?: number
+  requestPublicUrlMediaFormatSummary?: string
   requestTextPartCount?: number
   providerErrorCode?: string
   providerErrorFieldHints?: string
+  providerErrorReasonHints?: string
+  providerErrorMediaTypeHints?: string
   providerErrorMessageLength?: number
   providerRequestId?: string
   responseBodyKeyCount?: number
@@ -2204,8 +2207,33 @@ function buildLinqRequestBodyDiagnostics(
     requestMessagePartCount: parts.length,
     requestPublicUrlMediaPartCount:
       mediaParts.filter((part) => typeof part.url === 'string').length,
+    requestPublicUrlMediaFormatSummary: summarizeLinqPublicMediaFormats(mediaParts),
     requestTextPartCount: partRecords.filter((part) => part.type === 'text').length,
   }
+}
+
+// URL suffixes describe the request, not the downloaded content type. Unknown
+// suffixes collapse to one label; paths, hosts, queries and fragments never leave.
+const LINQ_DIAGNOSTIC_MEDIA_FORMATS = [
+  'avif', 'bmp', 'gif', 'heic', 'heif', 'jpeg', 'jpg', 'png', 'svg', 'tif',
+  'tiff', 'webp',
+] as const
+
+function summarizeLinqPublicMediaFormats(parts: Record<string, unknown>[]): string {
+  const counts = new Map<string, number>()
+  for (const part of parts) {
+    if (typeof part.url !== 'string') continue
+    let format = 'unknown'
+    try {
+      const suffix = new URL(part.url).pathname.split('.').at(-1)?.toLowerCase()
+      format = LINQ_DIAGNOSTIC_MEDIA_FORMATS.find((value) => value === suffix) ?? 'unknown'
+    } catch {
+      // Invalid URLs are diagnostics only; request validation owns their rejection.
+    }
+    counts.set(format, (counts.get(format) ?? 0) + 1)
+  }
+  return [...counts].sort(([left], [right]) => left.localeCompare(right))
+    .map(([format, count]) => `${format}:${count}`).join(',') || 'none'
 }
 
 function buildLinqErrorResponseDiagnostics(
@@ -2285,12 +2313,39 @@ function buildLinqProviderErrorFieldDiagnostics(
   const words = new Set(message.toLowerCase().match(/[a-z_]+/gu))
   const fields = [
     'url', 'attachment_id', 'parts', 'reply_to', 'message_id', 'part_index',
-    'idempotency_key',
+    'idempotency_key', 'content_type', 'size_bytes', 'filename', 'preferred_service',
+    'from', 'to', 'text_decorations', 'effect', 'app_id',
   ].filter((field) => words.has(field))
   return {
     providerErrorFieldHints: fields.join(',') || 'none',
+    providerErrorReasonHints: buildLinqProviderErrorReasonHints(message),
+    providerErrorMediaTypeHints: LINQ_DIAGNOSTIC_MEDIA_FORMATS
+      .filter((format) => words.has(format)).join(',') || 'none',
     providerErrorMessageLength: message.length,
   }
+}
+
+// Deliberately lexical hints, never a retry decision or a claimed root cause.
+// Unknown prose stays unknown instead of entering logs through redaction guesses.
+function buildLinqProviderErrorReasonHints(message: string): string {
+  const patterns: ReadonlyArray<readonly [string, RegExp]> = [
+    ['invalid', /\binvalid\b/iu],
+    ['unsupported', /\b(?:unsupported|not supported)\b/iu],
+    ['not_allowed', /\b(?:not allowed|not permitted|disallowed)\b/iu],
+    ['missing_required', /\b(?:missing|required)\b/iu],
+    ['not_found', /\b(?:not found|does not exist)\b/iu],
+    ['expired', /\bexpired\b/iu],
+    ['too_large', /\b(?:too large|too long|exceeds?|maximum)\b/iu],
+    ['too_small', /\b(?:too small|too short|minimum)\b/iu],
+    ['download', /\b(?:download|fetch)(?:ing|ed)?\b/iu],
+    ['timeout', /\b(?:timeout|timed out)\b/iu],
+    ['type_mismatch', /\b(?:mismatch|does not match)\b/iu],
+    ['uuid', /\buuid\b/iu],
+    ['https', /\bhttps\b/iu],
+    ['empty', /\bempty\b/iu],
+  ]
+  return patterns.filter(([, pattern]) => pattern.test(message))
+    .map(([hint]) => hint).join(',') || 'unknown'
 }
 
 function hashLinqDiagnosticBody(value: string): string {
