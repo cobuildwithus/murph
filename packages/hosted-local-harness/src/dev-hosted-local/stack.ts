@@ -2759,7 +2759,7 @@ function appendStartupDiagnostics(
   return new Error(
     [
       message,
-      output ? `process output tail:\n${tail(output)}` : null,
+      output ? `process output tails:\n${output}` : null,
       redactHostedLocalDiagnosticText(diagnostics),
     ].filter((value): value is string => value !== null).join("\n"),
   );
