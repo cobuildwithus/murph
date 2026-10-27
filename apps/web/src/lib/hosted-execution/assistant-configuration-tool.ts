@@ -80,7 +80,7 @@ export async function handleHostedRuntimeAssistantConfigurationTool(input: {
     if (
       !isHostedOnboardingError(error) ||
       (
-        error.code !== "ASSISTANT_MODEL_SOL_REQUIRES_EDGE" &&
+        error.code !== "ASSISTANT_MODEL_SOL_REQUIRES_SUBSCRIPTION" &&
         error.code !== "ASSISTANT_MODEL_ASTRA_REQUIRES_EDGE" &&
         error.code !== "ASSISTANT_CONFIGURATION_PERSONAL_CHAT_REQUIRED" &&
         error.code !== "HOSTED_ACCESS_REQUIRED"
@@ -96,7 +96,8 @@ export async function handleHostedRuntimeAssistantConfigurationTool(input: {
       }),
     );
     const requiredPlan = error.code === "ASSISTANT_MODEL_ASTRA_REQUIRES_EDGE"
-      || error.code === "ASSISTANT_MODEL_SOL_REQUIRES_EDGE" ? "edge" : null;
+      ? "edge"
+      : error.code === "ASSISTANT_MODEL_SOL_REQUIRES_SUBSCRIPTION" ? "pulse" : null;
     return {
       action: "update",
       result: {

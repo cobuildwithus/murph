@@ -898,6 +898,7 @@ describe("hosted execution coverage gaps", () => {
       false,
     );
     expect(assistantModelModule.HOSTED_ASSISTANT_PRODUCT_MODELS).toEqual([
+      "gpt-6.1-terra",
       "gpt-6.1-sol",
       "gpt-6-sol",
       "gpt-6-luna",

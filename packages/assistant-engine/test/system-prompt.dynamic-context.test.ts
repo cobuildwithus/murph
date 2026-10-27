@@ -30,6 +30,13 @@ const baseConversationInput: AssistantSystemPromptInput = {
 }
 
 describe('assistant dynamic context prompt blocks', () => {
+  it.each(['direct', 'group'] as const)('separates reminder model selection from route inheritance in %s chats', conversationScope => {
+    const { prompt } = buildAssistantSystemPromptLayers({ ...baseConversationInput, conversationScope, channel: 'linq', hostedRuntime: true, assistantHostedAutomationAvailable: true })
+    expect(prompt).toContain('Always include this override')
+    expect(prompt).toContain('`gpt-6-luna` for fixed cues, `gpt-6.1-sol` for judgment, or the member’s explicit choice')
+    expect(prompt).toContain('A new automation inherits the delivery route of')
+  })
+
   it.each(['direct', 'group'] as const)('routes lasting corrections to their canonical owner in %s conversations', (conversationScope) => {
     const { prompt, stableRouteCapabilityPrompt } = buildAssistantSystemPromptLayers({
       ...baseConversationInput, conversationScope,
@@ -145,7 +152,9 @@ describe('assistant dynamic context prompt blocks', () => {
       ...baseConversationInput, channel: 'linq', conversationScope: 'group',
       hostedRuntime: true, assistantHostedGroupToolSurface: 'families',
     })
-    expect(prompt).toContain('read_current, then offer_access once with only those exact projectionScopes and the current accepted message_ref')
+    expect(prompt).toContain('read_current and check their exact grants first')
+    expect(prompt).toContain('If that scope is missing, offer_access once')
+    expect(prompt).not.toContain('read_current, then offer_access once')
     expect(prompt).toContain('Do not ask permission to show the consent prompt')
     expect(prompt).toContain('Sleep timing, sleep duration, and device connection status are separate permissions')
     expect(prompt).toContain('do not add a companion reply or link')

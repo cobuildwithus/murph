@@ -246,8 +246,13 @@ Before calculating a meal total:
   default output; add `--format json` only when a script parses the result. When independent label
   lookups and a needed compact memory read are known, run them in the same
   tool round; save only after their results are available.
-  For a syntax failure, correct the returned field using these examples;
-  if still unclear, read the command's `--help` once. Do not fetch the full
+  For a syntax failure, correct the returned field using these examples.
+  If a package description exceeds the query length limit, retry once with
+  its brand, product name, and distinguishing variant within the returned limit;
+  preserve product identity rather than abandoning the lookup or searching the web.
+  Do not repeat the rejected description under another lookup command.
+  A successful repair needs no internal error explanation in the reply.
+  If still unclear, read the command's `--help` once. Do not fetch the full
   output schema to discover a query flag or positional argument.
   The default returns one compact nutrition match
   per component with serving, calories, protein, carbohydrate, fat, fiber, and

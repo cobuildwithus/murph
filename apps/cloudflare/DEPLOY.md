@@ -2050,7 +2050,7 @@ or `decrypt_only` envelope references before retirement.
 Hosted assistant config:
 
 - `HOSTED_ASSISTANT_PROVIDER`; only `openai` is supported.
-- `HOSTED_ASSISTANT_MODEL`; worker deploy preflight requires an explicit allowance-priced direct OpenAI model slug. Supported slugs include `gpt-6.1-sol`, `gpt-6-sol`, `gpt-6-luna`, `gpt-6-astra`, `gpt-5.6-sol`, and `gpt-5.6-luna`. GPT-6.1 Sol is the managed OpenAI default. Production deploys require `HOSTED_ASSISTANT_REASONING_EFFORT=low`.
+- `HOSTED_ASSISTANT_MODEL`; worker deploy preflight requires an explicit allowance-priced direct OpenAI model slug. Supported slugs include `gpt-6.1-terra`, `gpt-6.1-sol`, `gpt-6-sol`, `gpt-6-luna`, `gpt-6-astra`, `gpt-5.6-sol`, and `gpt-5.6-luna`. GPT-6.1 Terra is the managed OpenAI personal-chat default; Web selects GPT-6.1 Sol for all groups. Production deploys require `HOSTED_ASSISTANT_REASONING_EFFORT=low`.
 - `HOSTED_ASSISTANT_APPROVAL_POLICY`
 - `HOSTED_ASSISTANT_REASONING_EFFORT`
 - `HOSTED_ASSISTANT_SANDBOX`
@@ -2377,7 +2377,7 @@ export HOSTED_R2_PRESIGN_BUCKET_NAME=hosted-execution-bundles-staging
 export HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID=cloudflare-automation:v1
 export HOSTED_CRYPTO_ENV=preview
 export HOSTED_ASSISTANT_PROVIDER=openai
-export HOSTED_ASSISTANT_MODEL=gpt-6.1-sol
+export HOSTED_ASSISTANT_MODEL=gpt-6.1-terra
 export HOSTED_ASSISTANT_REASONING_EFFORT=low
 
 # Set required secret-valued variables outside this snippet before running:
@@ -3018,3 +3018,30 @@ images for the opaque creator before acknowledging success. Do not infer complet
 from elapsed time or clear receipts merely to make a retry pass. A provider outage
 or missing binding must keep deletion pending. A normal successful upload removes
 its receipt, and cleanup retries then complete without operator action.
+
+### Terra chat-model rollout
+
+Deploy the Terra-capable Worker and container image before building or promoting
+the Web release that selects Terra. Before merging the release, preserve the
+Vercel project's current ignored-build command and temporarily set it to
+`exit 0`; confirm the setting so an automatic main build cannot run the reset
+early. Deploy protected main through the private workflow with immediate
+container rollout and the normal predeploy and smoke gates. After runtime
+convergence, restore the prior ignored-build command and start the matching
+main Web deployment. Holding only domain promotion is insufficient because the
+migration runs during the Web build. The launch catalog supplement is pinned from the
+OpenAI Codex catalog refreshed on 2026-10-26; it retains the native 500K context
+window and uses the existing mixed Code Mode/Flex transformation. Existing
+model entries remain native to the pinned CLI. The app-local Docker context
+explicitly includes this catalog file.
+
+The normal Web migration `20261026120000_reset_chat_models_to_terra` clears
+existing private and synthetic group model overrides once. Null is readable by
+old Web builds (their previous default applies until promotion), and the new
+build resolves it to Terra for personal chats and Sol for all groups. Reasoning and other member state remain intact.
+Finish compatible runtime rollout first; old runtime readers do not understand
+Terra overrides. Verify current runtime image versions and aggregate requested
+model counts after Web promotion. Reverting runtime support while Web selects
+Terra is unsafe. Reverting Web changes the null default and cannot reconstruct
+the deliberately reset preferences. New explicit model selections after the
+migration remain governed by the ordinary subscription checks.

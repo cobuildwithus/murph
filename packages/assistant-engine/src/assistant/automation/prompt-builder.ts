@@ -45,8 +45,14 @@ const ATTACHMENT_CONTENT_UNAVAILABLE_INSTRUCTION = [
 ].join(' ')
 const RAW_ATTACHMENT_FILE_INSTRUCTION =
   'Raw attachment file is available at the storedPath above. Inspect the local file with tools when needed; do not claim file contents unless you have inspected the file or the contents are otherwise present in this turn.'
+const VIDEO_ATTACHMENT_FILE_INSTRUCTION =
+  'For requested video analysis, discover and use murph.analyze_video when available with this video message\'s exact Message ref. The tool reads the stored video for you; local playback is not a prerequisite. Ground the answer in its returned observations.'
 const PDF_ATTACHMENT_FILE_INSTRUCTION =
   'For PDFs, inspect the storedPath with local PDF tools when needed.'
+
+function renderRawAttachmentFileInstruction(kind: string): string {
+  return kind === 'video' ? VIDEO_ATTACHMENT_FILE_INSTRUCTION : RAW_ATTACHMENT_FILE_INSTRUCTION
+}
 
 export interface TelegramAutoReplyMetadata {
   mediaGroupId: string | null
@@ -673,7 +679,7 @@ function renderAttachmentEvidencePromptSection(
       chunks.push(status)
     }
     if (storedPathLine !== null) {
-      chunks.push(RAW_ATTACHMENT_FILE_INSTRUCTION)
+      chunks.push(renderRawAttachmentFileInstruction(attachment.kind))
       if (hasPdfAttachmentEvidencePath(attachment)) {
         chunks.push(PDF_ATTACHMENT_FILE_INSTRUCTION)
       }
@@ -766,6 +772,7 @@ function buildAssistantAutoReplyContextLines(
           : `${formatAssistantPromptUtcInstant(firstInput.occurredAt)} -> ${formatAssistantPromptUtcInstant(lastInput.occurredAt)}`
       }`
   return [
+    'Current inbound messages (in received order):',
     `Source: ${firstInput.source}`,
     occurredAt,
     `Thread: ${firstInput.conversation.threadId ?? 'unknown'}`,
@@ -847,7 +854,7 @@ function renderPreparedAttachmentPromptSection(
     sections.push(ATTACHMENT_CONTENT_UNAVAILABLE_INSTRUCTION)
   }
   if (hasRawStoredPath && !hasTextFragments) {
-    sections.push(RAW_ATTACHMENT_FILE_INSTRUCTION)
+    sections.push(renderRawAttachmentFileInstruction(attachment.kind))
   }
   if (richEvidenceCandidate && !hasTextFragments) {
     sections.push(

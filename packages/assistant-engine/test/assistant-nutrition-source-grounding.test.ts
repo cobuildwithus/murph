@@ -12,19 +12,27 @@ function compact(value: string): string {
 describe('assistant nutrition source grounding', () => {
   it('uses USDA and label facts for nutrient density before visual estimation', async () => {
     const skillsRoot = resolveAssistantSkillsRoot()
-    const [foodJournal, contaminants, automaticMealCapture] = await Promise.all([
+    const [foodJournal, contaminants, automaticMealCapture, nutritionStrategy] = await Promise.all([
       readFile(path.join(skillsRoot, 'food-journal', 'SKILL.md'), 'utf8'),
       readFile(path.join(skillsRoot, 'food-journal', 'references', 'contaminants.md'), 'utf8'),
       readFile(
         path.join(skillsRoot, 'automatic-meal-capture', 'SKILL.md'),
         'utf8',
       ),
+      readFile(path.join(skillsRoot, 'nutrition-strategy', 'SKILL.md'), 'utf8'),
     ])
     const food = compact(foodJournal)
+    expect(food).toContain('retry once with its brand, product name, and distinguishing variant within the returned limit')
+    expect(food).toContain('Do not repeat the rejected description under another lookup command')
+    expect(food).toContain('A successful repair needs no internal error explanation in the reply')
     // Contaminant interpretation is read only before discussing a summary.
     expect(food).toContain('read `$MURPH_ASSISTANT_SKILLS_ROOT/food-journal/references/contaminants.md` before discussing one.')
     const contaminantGuidance = compact(contaminants)
     const automatic = compact(automaticMealCapture)
+    expect(automatic).toContain('For a device meal, include `--source device` in that same edit')
+    expect(automatic).toContain('`--with-daily-totals` belongs to add/import, not edit')
+    expect(compact(nutritionStrategy)).toContain('Before creating or changing any saved numeric nutrition target')
+    expect(compact(nutritionStrategy)).toContain('After the write, run `vault-cli goal show <goal-id>`')
 
     expect(food).toContain(
       'Treat every calorie or macro estimate as two separate questions:',

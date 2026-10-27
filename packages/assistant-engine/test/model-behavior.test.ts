@@ -63,6 +63,9 @@ describe('assistant execution prompt contract', () => {
     expect(prompt).toContain('This is an output-only turn')
     expect(prompt).toContain('externally controlled text')
     expect(prompt).toContain('Delivery adapter contract:')
+    expect(prompt).toContain('including after tool or image attachment calls')
+    expect(prompt).toContain('Saved wording does not override this format')
+    expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain('When the engine supplies a JSON delivery contract, obey it after tools too')
     expect(prompt).not.toContain('Treat the user prompt as the execution instructions for this scheduled run')
   })
 
@@ -121,6 +124,7 @@ describe('assistant execution prompt contract', () => {
     expect(groupPrompt).not.toContain('replaces the earlier answer')
     expect(groupPrompt).not.toContain('carry forward anything still worth saying')
     expect(groupPrompt).not.toContain('answer only that new ask')
+    expect(groupPrompt).toContain('welcome a newly introduced participant plainly rather than carrying the previous joke into their introduction')
     expect(groupPrompt).not.toContain('Use light humor when it fits')
     expect(groupPrompt).not.toContain('plainspoken, and casual')
     expect(groupPrompt).toContain(

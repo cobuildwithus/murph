@@ -1,6 +1,7 @@
 import { execFile, execFileSync } from 'node:child_process'
 import { readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 
 const execFileAsync = promisify(execFile)
@@ -19,8 +20,11 @@ export async function writeHostedOpenAiMixedModeModelCatalogJson(input: {
   const patchFilter = /\| jq '([^']+)'/u.exec(dockerfile)?.[1]
   const standardFilter = /&& jq '([^']+)' \/tmp\/murph-codex-model-catalog\.openai-flex\.json/u.exec(dockerfile)?.[1]
   if (!patchFilter || !standardFilter) throw new Error('Image catalog filters are missing.')
+  const mergeFilter = /jq --slurpfile terra \/tmp\/codex-model-catalog\.terra\.json '([^']+)'/u.exec(dockerfile)?.[1] ?? '.'
   const catalogJson = execFileSync('jq', [
+    '--slurpfile', 'terra', fileURLToPath(new URL('../../../../apps/cloudflare/codex-model-catalog.terra.json', import.meta.url)),
     [
+      mergeFilter,
       input.astraAllowed ? patchFilter : `${patchFilter} | ${standardFilter}`,
       ...(input.toolMode ? ['.models |= map(.tool_mode = "code_mode_only")'] : []),
     ].join(' | '),
