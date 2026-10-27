@@ -9,6 +9,12 @@ const push = vi.hoisted(() => vi.fn().mockResolvedValue("sent"));
 vi.mock("@/src/lib/apple-push/send", async (original) => ({
   ...await original<typeof import("@/src/lib/apple-push/send")>(), sendApplePush: push,
 }));
+// A post's push goes after its response; these runs wait for it like the platform does.
+const afterResponse = vi.hoisted(() => [] as Promise<unknown>[]);
+vi.mock("next/server", async (original) => ({
+  ...await original<typeof import("next/server")>(),
+  after: (task: () => Promise<unknown>) => { afterResponse.push(task()); },
+}));
 
 import type { GameCommand, GameTermsInput } from "@/src/lib/game/contract";
 import { putGameMedia } from "@/src/lib/game/media";
@@ -70,7 +76,14 @@ async function pushRoute(memberId: string, alertsAllowed = true): Promise<string
 }
 
 async function run(actor: string, command: GameCommand) {
-  return runGameCommand({ actorMemberId: actor, command });
+  return runAndRespond({ actorMemberId: actor, command });
+}
+
+/** One command as a route runs it: its answer, then what the route does after responding. */
+async function runAndRespond(input: Parameters<typeof runGameCommand>[0]) {
+  const result = await runGameCommand(input);
+  await Promise.all(afterResponse.splice(0));
+  return result;
 }
 
 async function ok(actor: string, command: GameCommand) {
@@ -157,7 +170,9 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     await getPrisma().gameEntry.update({ where: { id: command.entryId }, data: { payloadEncrypted: stored.payloadEncrypted } });
     const recap = await devSettleNow(gameId, viewer);
     expect(recap.days[0].others[0].entry?.data).toEqual(data);
-    expect(recap.days[0].others[0]).not.toHaveProperty("blurHash");
+    // Open now: its blur stays, for while the picture loads.
+    expect(recap.days[0].others[0]).toMatchObject({ status: "posted", blurHash: "synthetic-blur" });
+    expect(recap.days[0].others[0]).not.toHaveProperty("postedAt");
     expect(await authorizeMediaRead(viewer, command.mediaKeys[0])).toBe(true);
   });
 
@@ -183,7 +198,7 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     expect(push).toHaveBeenCalledTimes(2);
     expect(push.mock.calls[1]?.[0].message.body).toBe("There's a new post in your game. Take a look.");
     const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000);
-    expect((await runGameCommand({
+    expect((await runAndRespond({
       actorMemberId: poster, command: await photo(poster, gameId, "notification-next-day"), now: tomorrow,
     })).ok).toBe(true);
     expect(push).toHaveBeenCalledTimes(3);
@@ -212,22 +227,22 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     push.mockRejectedValueOnce(new Error("synthetic uncertain push"));
     const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000);
     const next = await photo(poster, gameId, "notification-provider-failure");
-    expect((await runGameCommand({ actorMemberId: poster, command: next, now: tomorrow })).ok).toBe(true);
-    expect((await runGameCommand({ actorMemberId: poster, command: next, now: tomorrow })).ok).toBe(true);
+    expect((await runAndRespond({ actorMemberId: poster, command: next, now: tomorrow })).ok).toBe(true);
+    expect((await runAndRespond({ actorMemberId: poster, command: next, now: tomorrow })).ok).toBe(true);
     expect(push).toHaveBeenCalledTimes(1);
     expect(await getPrisma().gameEntry.findUnique({ where: { id: next.entryId } })).not.toBeNull();
     expect(await getPrisma().gameEvent.findFirst({ where: { gameId, type: "post_notification" } })).toMatchObject({
       payload: { outcome: "failed" },
     });
     const later = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000);
-    expect((await runGameCommand({
+    expect((await runAndRespond({
       actorMemberId: poster, now: later,
       command: { type: "post", gameId, entryId: randomUUID(), kind: "excuse", mediaKeys: [], text: "Travel day" },
     })).ok).toBe(true);
     expect(push).toHaveBeenCalledTimes(1);
     // Even a late address write after DELETE is inert once logout revokes its session.
     await getPrisma().hostedAuthRecord.delete({ where: { model_id: { model: "session", id: sessionId } } });
-    expect((await runGameCommand({
+    expect((await runAndRespond({
       actorMemberId: poster, now: later, command: await photo(poster, gameId, "notification-after-signout"),
     })).ok).toBe(true);
     expect(push).toHaveBeenCalledTimes(1);

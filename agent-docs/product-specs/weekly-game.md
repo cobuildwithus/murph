@@ -152,9 +152,11 @@ this default without deleting other people's private contact choices.
   excuse yet, never today. It neither scores nor unlocks.
 - **Post to unlock.** A posted partner day exposes only its posting time and
   optional device-rendered blur preview until you post that day. No media,
-  words or summary data is exposed while locked. Unlocking is permanent after
-  a non-excuse attempt, including withdrawal. Recap reveals every live artifact
-  to the game's players. Excuses remain private to their owner.
+  words or summary data is exposed while locked. The blur stays with the
+  unlocked post, for the app to show while its picture loads. Unlocking is
+  permanent after a non-excuse attempt, including withdrawal. Recap reveals
+  every live artifact to the game's players. Excuses remain private to their
+  owner.
 - **Offline grace.** In the hour after a player's 3am boundary, a photo the
   phone says it captured before the boundary (monotonic capture age, with 30
   seconds of slack) counts for the day that just ended, if that was a scheduled

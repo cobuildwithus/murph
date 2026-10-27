@@ -1,3 +1,4 @@
+import type { GameView } from "../contract";
 import {
   GAME_MEDIA_MAX_BYTES,
   gameMediaDelivery,
@@ -7,8 +8,10 @@ import {
   parseGameMediaContentType,
   putGameMedia,
   readGameMedia,
+  servesSignedGameMedia,
 } from "../media";
 import { authorizeMediaRead, mediaKeyPrefixFor } from "../service";
+import { gameMediaKeyOf } from "../views";
 import { readRawBodyBuffer } from "../../http";
 import { gameHttpError, invalidGameRequest } from "./errors";
 
@@ -34,11 +37,13 @@ export async function uploadGameMedia(input: { memberId: string; request: Reques
  * Locked and missing media look the same.
  */
 export async function serveGameMedia(input: { key: string; memberId: string; delivery?: boolean; variant?: "avatar" | "photo" }): Promise<Response> {
-  if (!isGameMediaKey(input.key) || !(await authorizeMediaRead(input.memberId, input.key))) throw mediaNotFound();
+  if (!(await isViewable(input.memberId, input.key))) throw mediaNotFound();
   requireStorage();
-  if (input.delivery) {
+  if (input.delivery && servesSignedGameMedia()) {
+    // Missing from the hosted store is final: no second look through the byte proxy.
     const delivery = await gameMediaDelivery(input.key, input.variant ?? "photo");
-    if (delivery) return new Response(JSON.stringify(delivery), { headers: {
+    if (!delivery) throw mediaNotFound();
+    return new Response(JSON.stringify(delivery), { headers: {
       "Cache-Control": "private, no-store", "Content-Type": "application/json", "Referrer-Policy": "no-referrer",
     } });
   }
@@ -52,6 +57,31 @@ export async function serveGameMedia(input: { key: string; memberId: string; del
       "X-Content-Type-Options": "nosniff",
     },
   });
+}
+
+/**
+ * A post's answer with the other players' pictures it just unlocked signed
+ * in, so the app downloads them at once instead of asking for each. Each is
+ * authorized exactly as `serveGameMedia` would; one that can't be signed is
+ * left for the app to ask for as usual.
+ */
+export async function withUnlockedPhotoDeliveries(game: GameView, input: { entryId: string; memberId: string }): Promise<GameView> {
+  if (!servesSignedGameMedia()) return game;
+  const day = game.days.find((candidate) => candidate.mine?.entryId === input.entryId);
+  if (!day) return game;
+  const others = await Promise.all(day.others.map(async (other) => {
+    const key = other.entry?.mediaUrls[0] ? gameMediaKeyOf(other.entry.mediaUrls[0]) : null;
+    if (!other.entry || !key) return other;
+    const delivery = await isViewable(input.memberId, key)
+      .then((viewable) => (viewable ? gameMediaDelivery(key, "photo") : null))
+      .catch(() => null);
+    return delivery ? { ...other, entry: { ...other.entry, delivery } } : other;
+  }));
+  return { ...game, days: game.days.map((candidate) => (candidate === day ? { ...candidate, others } : candidate)) };
+}
+
+async function isViewable(memberId: string, key: string): Promise<boolean> {
+  return isGameMediaKey(key) && authorizeMediaRead(memberId, key);
 }
 
 function requireStorage(): void {

@@ -115,6 +115,15 @@ describe("game media when deployed (private Cloudflare Images)", () => {
     expect(mocks.authorize).toHaveBeenLastCalledWith("hbm_ava", key);
   });
 
+  it("answers a photo missing from the hosted store after one lookup, not a second through the byte proxy", async () => {
+    mocks.authorize.mockResolvedValue(true);
+    const fetcher = vi.fn(); vi.stubGlobal("fetch", fetcher);
+    await expect(serveGameMedia({ key: `${PREFIX}${"0".repeat(64)}.jpg`, memberId: LEO, delivery: true }))
+      .rejects.toMatchObject({ httpStatus: 404 });
+    expect(mocks.control!.gameImageDelivery).toHaveBeenCalledTimes(1);
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
   it("is off without the Worker's control client", () => {
     mocks.control = null;
     expect(isGameMediaStorageAvailable()).toBe(false);

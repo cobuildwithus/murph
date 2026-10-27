@@ -20,6 +20,7 @@ const mocks = vi.hoisted(() => ({
   devStartNow: vi.fn(),
   getPrisma: vi.fn(),
   canEnterGame: vi.fn(),
+  control: null as null | { gameImageDelivery: ReturnType<typeof vi.fn> },
   mediaKeyPrefixFor: vi.fn(),
   readGame: vi.fn(),
   readHome: vi.fn(),
@@ -46,6 +47,10 @@ vi.mock("@/src/lib/hosted-onboarding/request-auth", () => ({
 }));
 
 vi.mock("@/src/lib/prisma", () => ({ getPrisma: mocks.getPrisma }));
+
+vi.mock("@/src/lib/hosted-execution/control", () => ({
+  readHostedExecutionControlClientIfConfigured: () => mocks.control,
+}));
 
 type Routes = {
   block: typeof import("../app/api/game/v1/blocks/[memberId]/route");
@@ -134,6 +139,7 @@ describe("weekly game routes", () => {
     vi.stubEnv("MURPH_GAME_MEDIA_DIR", mediaDir);
     vi.stubEnv("VERCEL_ENV", "development");
     signedInAs = LEO;
+    mocks.control = null;
     mocks.getPrisma.mockReturnValue({});
     mocks.requireHostedMemberAuthFromBearerToken.mockImplementation(async () => ({ member: { id: signedInAs } }));
     mocks.canEnterGame.mockResolvedValue(true);
@@ -464,6 +470,44 @@ describe("weekly game routes", () => {
         seat: 0,
         status: "posted",
       });
+    });
+
+    it("signs the pictures a post unlocked into its answer, only when the app asks", async () => {
+      const leoKey = `game/${LEO}/${"c".repeat(64)}.jpg`;
+      const avaKey = `game/${AVA}/${"d".repeat(64)}.jpg`;
+      const posted = viewFor(AVA, [
+        entry({ id: "entry_leo", kind: "photo", mediaKeys: [leoKey], memberId: LEO }),
+        entry({ id: "entry_ava", kind: "photo", mediaKeys: [avaKey], memberId: AVA }),
+      ]);
+      const delivery = { url: "https://imagedelivery.net/account/image/gamephoto?exp=9999999999&sig=synthetic", expiresAt: "2030-01-01T00:00:00.000Z" };
+      signedInAs = AVA;
+      vi.stubEnv("VERCEL_ENV", "production");
+      mocks.control = { gameImageDelivery: vi.fn(async () => delivery) };
+      mocks.runGameCommand.mockResolvedValue({ game: posted, ok: true });
+      mocks.authorizeMediaRead.mockResolvedValue(true);
+      const body = { entryId: "entry_ava", kind: "photo", mediaKeys: [avaKey] };
+      const post = async (query: string) => (await routes.entries.POST(
+        writeRequest("POST", `/games/${GAME_ID}/entries${query}`, body), params({ id: GAME_ID }))).json();
+
+      // Released apps don't ask, and their post waits on no signing.
+      expect((await post("")).game).toEqual(posted);
+      expect(mocks.control.gameImageDelivery).not.toHaveBeenCalled();
+
+      const signed = (await post("?delivery=signed")).game as GameView;
+      expect(signed.days[0].others[0].entry).toEqual({ ...posted.days[0].others[0].entry, delivery });
+      expect(signed.days[0].mine).toEqual(posted.days[0].mine);
+      expect(mocks.authorizeMediaRead).toHaveBeenCalledExactlyOnceWith(AVA, leoKey);
+      expect(mocks.control.gameImageDelivery).toHaveBeenCalledExactlyOnceWith({
+        mediaId: leoKey.slice(leoKey.lastIndexOf("/") + 1), userId: LEO, variant: "photo",
+      });
+
+      // Not authorized, or not signable: the app asks for it as before.
+      mocks.authorizeMediaRead.mockResolvedValue(false);
+      expect((await post("?delivery=signed")).game).toEqual(posted);
+      mocks.authorizeMediaRead.mockResolvedValue(true);
+      mocks.control.gameImageDelivery.mockRejectedValueOnce(new Error("synthetic signing outage"));
+      expect((await post("?delivery=signed")).game).toEqual(posted);
+      expect(mocks.control.gameImageDelivery).toHaveBeenCalledTimes(2);
     });
 
     it("never shows another player's excuse, even after the viewer posts", async () => {
