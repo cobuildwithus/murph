@@ -8478,6 +8478,7 @@ function buildHostedOutboxDeliveryErrorDetailSummary(
       ["textPartCount", "requestTextPartCount"],
       ["mediaPartCount", "requestMediaPartCount"],
       ["publicUrlMediaPartCount", "requestPublicUrlMediaPartCount"],
+      ["publicUrlMediaFormats", "requestPublicUrlMediaFormatSummary"],
       ["attachmentMediaPartCount", "requestAttachmentMediaPartCount"],
       ["bodyShape", "requestBodyShape"],
       ["hasReplyToMessageId", "hasReplyToMessageId"],
@@ -8488,6 +8489,8 @@ function buildHostedOutboxDeliveryErrorDetailSummary(
     "ResponseSummary",
     buildHostedOutboxDeliveryDiagnosticSummary(sanitizedDetails, [
       ["fieldHints", "providerErrorFieldHints"],
+      ["reasonHints", "providerErrorReasonHints"],
+      ["mediaTypeHints", "providerErrorMediaTypeHints"],
       ["messageLength", "providerErrorMessageLength"],
       ["kind", "responseBodyKind"],
       ["textLength", "responseBodyTextLength"],
