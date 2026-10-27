@@ -206,6 +206,35 @@ describe.skipIf(!enabled)("App Review game seed against PostgreSQL", () => {
     }
   });
 
+  it.each(["reviewer", "partner"])("refuses to reseed across a block owned by the %s", async (owner) => {
+    await seedHostedOpsAppReviewGame({ mode: "apply", readPhoto });
+    const prisma = getPrisma();
+    const before = await prisma.game.findMany({ where: { players: { some: { memberId: partner } } }, select: { id: true }, orderBy: { id: "asc" } });
+    await prisma.gameBlock.create({ data: {
+      blockerMemberId: owner === "reviewer" ? reviewer : partner,
+      blockedMemberId: owner === "reviewer" ? partner : reviewer,
+    } });
+    expect((await seedHostedOpsAppReviewGame({ mode: "dry-run" })).blockers).toEqual(["review_partner_blocked"]);
+    await expect(seedHostedOpsAppReviewGame({ mode: "apply", readPhoto })).rejects.toMatchObject({ code: "APP_REVIEW_GAME_BLOCKED" });
+    expect(await prisma.game.findMany({ where: { players: { some: { memberId: partner } } }, select: { id: true }, orderBy: { id: "asc" } })).toEqual(before);
+    expect(await prisma.gameBlock.count({ where: { OR: [{ blockerMemberId: reviewer }, { blockerMemberId: partner }] } })).toBe(1);
+  });
+
+  it("rechecks a block created while photos are being prepared", async () => {
+    await seedHostedOpsAppReviewGame({ mode: "apply", readPhoto });
+    const prisma = getPrisma();
+    const before = await prisma.game.findMany({ where: { players: { some: { memberId: partner } } }, select: { id: true }, orderBy: { id: "asc" } });
+    let blocked = false;
+    await expect(seedHostedOpsAppReviewGame({ mode: "apply", readPhoto: async (publicPath) => {
+      if (!blocked) {
+        blocked = true;
+        await prisma.gameBlock.create({ data: { blockerMemberId: reviewer, blockedMemberId: partner } });
+      }
+      return readPhoto(publicPath);
+    } })).rejects.toMatchObject({ code: "APP_REVIEW_GAME_BLOCKED" });
+    expect(await prisma.game.findMany({ where: { players: { some: { memberId: partner } } }, select: { id: true }, orderBy: { id: "asc" } })).toEqual(before);
+  });
+
   it("refuses when the partner could reach or be reached by a person", async () => {
     await seedHostedOpsAppReviewGame({ mode: "apply", readPhoto });
     const before = await getPrisma().game.findMany({ where: { players: { some: { memberId: partner } } }, select: { id: true } });
