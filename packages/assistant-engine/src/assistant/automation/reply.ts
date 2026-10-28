@@ -1,3 +1,4 @@
+import { emitHostedAssistantTurnTimingTrace } from '../hosted-turn-timing.js'
 import { resolveAssistantReactionRoutingInput } from '../reaction-routing.js'
 import type { AutomationContextReference } from '@murphai/contracts'
 import type { InboxServices } from '@murphai/inbox-services'
@@ -534,6 +535,8 @@ export async function processAssistantAutoReplyGroup(input: {
       },
     })
     return commitAssistantAutoReplyGroupOutcome({
+      executionContext: input.executionContext,
+      onTraceEvent: input.onTraceEvent,
       context: resolved.context,
       deferredTerminalSuppressionEvidence:
         resolved.deferredTerminalSuppressionEvidence,
@@ -560,6 +563,8 @@ export async function processAssistantAutoReplyGroup(input: {
         ? error.message
         : 'Active turn input could not be accepted; will retry later.'
       return commitAssistantAutoReplyGroupOutcome({
+        executionContext: input.executionContext,
+        onTraceEvent: input.onTraceEvent,
         context: latestContext,
         onEvent: input.onEvent,
         onTerminalNonReplyCommitted: input.onTerminalNonReplyCommitted,
@@ -576,6 +581,8 @@ export async function processAssistantAutoReplyGroup(input: {
     }
 
     return commitAssistantAutoReplyGroupOutcome({
+      executionContext: input.executionContext,
+      onTraceEvent: input.onTraceEvent,
       context: latestContext,
       onEvent: input.onEvent,
       onTerminalNonReplyCommitted: input.onTerminalNonReplyCommitted,
@@ -909,6 +916,8 @@ async function resolveAssistantAutoReplyGroupOutcome(input: {
 }
 
 async function commitAssistantAutoReplyGroupOutcome(input: {
+  executionContext?: AssistantExecutionContext | null
+  onTraceEvent?: (event: AssistantProviderTraceEvent) => void
   context: AssistantAutoReplyGroupContext
   deferredTerminalSuppressionEvidence?: readonly AssistantAutoReplySuppressionEvidenceDraft[]
   onEvent?: (event: AssistantRunEvent) => void
@@ -917,6 +926,7 @@ async function commitAssistantAutoReplyGroupOutcome(input: {
   terminalSuppressedInputIds?: readonly string[]
   vault: string
 }): Promise<AssistantAutoReplyProcessResult> {
+  const outcomeStartedAt = performance.now()
   const artifactResult = await writeAssistantAutoReplyOutcomeArtifacts(input).catch((error) => {
     if (input.outcome.artifact.kind === 'error') {
       return {
@@ -927,8 +937,11 @@ async function commitAssistantAutoReplyGroupOutcome(input: {
     }
     throw error
   })
+  const artifactElapsedMs = performance.now() - outcomeStartedAt
+  const suppressionStartedAt = performance.now()
   const deferredSuppression =
     await writeDeferredAssistantAutoReplySuppressionEvidence(input)
+  const suppressionElapsedMs = performance.now() - suppressionStartedAt
   emitAssistantAutoReplyOutcomeEvent(input)
 
   const terminalLinqCleanup = mergeAssistantTerminalLinqCleanupMessageIds([
@@ -951,6 +964,20 @@ async function commitAssistantAutoReplyGroupOutcome(input: {
       hook: input.onTerminalNonReplyCommitted,
     })
   }
+  const deliveryIntentIds = collectAssistantAutoReplyOutcomeDeliveryIntentIds(input.outcome)
+  emitHostedAssistantTurnTimingTrace({
+    executionContext: input.executionContext,
+    onTraceEvent: input.onTraceEvent,
+    stage: 'auto-reply-outcome-committed',
+    // A multi-intent result has no unique correlation; never pick a sibling.
+    deliveryIntentId: deliveryIntentIds.length === 1 ? deliveryIntentIds[0] : null,
+    currentTurnDeliveryIntentCount: deliveryIntentIds.length,
+    persistenceTiming: {
+      turnTimingOutcomeArtifactsMs: artifactElapsedMs,
+      turnTimingSuppressionEvidenceMs: suppressionElapsedMs,
+    },
+    stepElapsedMs: performance.now() - outcomeStartedAt,
+  })
   return {
     advanceCursor: input.outcome.advanceCursor,
     ...(input.outcome.checkpointRequired ||
@@ -959,8 +986,7 @@ async function commitAssistantAutoReplyGroupOutcome(input: {
       ? { checkpointRequired: true }
       : {}),
     ...(terminalLinqCleanup ? { terminalLinqCleanup } : {}),
-    currentTurnDeliveryIntentIds:
-      collectAssistantAutoReplyOutcomeDeliveryIntentIds(input.outcome),
+    currentTurnDeliveryIntentIds: deliveryIntentIds,
     failed: input.outcome.summary.failed,
     lastInputCursor: input.context.lastInputCursor,
     nextWakeAt: input.outcome.nextWakeAt,

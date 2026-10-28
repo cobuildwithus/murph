@@ -14046,6 +14046,14 @@ describe("hosted runtime callbacks", () => {
           foregroundDeliveryPhaseStartedAtMonotonicMs: performance.now() - 40,
           latencyTracePort: null,
           memberChannelBarrierMs: 12.4,
+          memberChannelBarrierTiming: {
+            deliveryMemberChannelIntentLookupMs: 1.4,
+            deliveryMemberChannelWatcherMs: 7.6,
+            deliveryMemberChannelUpdateDrainMs: 2,
+            deliveryMemberChannelNextWakeMs: Number.NaN,
+            deliveryMemberChannelProcessedCount: 1,
+            deliveryMemberChannelRecordedCount: 0,
+          },
           runtimeAttemptId: "attempt_dispatch_timing",
         },
         effectsPort: createHostedRuntimeEffectsPortStub({
@@ -14076,6 +14084,11 @@ describe("hosted runtime callbacks", () => {
           eventCode: "assistant.automation_detail",
           redactedJson: {
             deliveryMemberChannelBarrierMs: 12,
+            deliveryMemberChannelIntentLookupMs: 1,
+            deliveryMemberChannelWatcherMs: 8,
+            deliveryMemberChannelUpdateDrainMs: 2,
+            deliveryMemberChannelProcessedCount: 1,
+            deliveryMemberChannelRecordedCount: 0,
             deliveryReplyBubblePacingMs: 0,
             deliveryProviderEntryFenceMs: expect.any(Number),
             deliveryRouteAuthorityCheckMs: expect.any(Number),

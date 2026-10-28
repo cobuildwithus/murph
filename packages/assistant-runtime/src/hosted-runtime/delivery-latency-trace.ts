@@ -23,7 +23,17 @@ import {
   resolveHostedRuntimeIdleCheckpointDelayMs,
 } from "./checkpoint-publication.ts";
 
+export interface HostedMemberChannelBarrierTiming {
+  deliveryMemberChannelIntentLookupMs?: number;
+  deliveryMemberChannelWatcherMs?: number;
+  deliveryMemberChannelUpdateDrainMs?: number;
+  deliveryMemberChannelNextWakeMs?: number;
+  deliveryMemberChannelProcessedCount?: number;
+  deliveryMemberChannelRecordedCount?: number;
+}
+
 export interface HostedDeliveryTraceContext {
+  memberChannelBarrierTiming?: HostedMemberChannelBarrierTiming;
   latencyTracePort: HostedRuntimePlatform["latencyTracePort"];
   runtimeAttemptId: string;
   runnerIdleTtlMs?: number | null;
@@ -60,6 +70,13 @@ export function writeHostedLinqDispatchEnteredTiming(input: {
   }
   const phaseStartedAt = context.foregroundDeliveryPhaseStartedAtMonotonicMs ?? null;
   const fields = {
+    deliveryMemberChannelIntentLookupMs: readDurationMs(context.memberChannelBarrierTiming?.deliveryMemberChannelIntentLookupMs ?? null),
+    deliveryMemberChannelWatcherMs: readDurationMs(context.memberChannelBarrierTiming?.deliveryMemberChannelWatcherMs ?? null),
+    deliveryMemberChannelUpdateDrainMs: readDurationMs(context.memberChannelBarrierTiming?.deliveryMemberChannelUpdateDrainMs ?? null),
+    deliveryMemberChannelNextWakeMs: readDurationMs(context.memberChannelBarrierTiming?.deliveryMemberChannelNextWakeMs ?? null),
+    deliveryMemberChannelProcessedCount: readDurationMs(context.memberChannelBarrierTiming?.deliveryMemberChannelProcessedCount ?? null),
+    deliveryMemberChannelRecordedCount: readDurationMs(context.memberChannelBarrierTiming?.deliveryMemberChannelRecordedCount ?? null),
+
     deliveryReplyBubblePacingMs: readDurationMs(context.replyBubblePacingMs ?? null),
     deliveryMemberChannelBarrierMs: readDurationMs(context.memberChannelBarrierMs ?? null),
     deliveryProviderEntryFenceMs: readDurationMs(

@@ -50,6 +50,8 @@ import {
   emitHostedAssistantContextSessionResolvedTrace,
 } from './hosted-context-diagnostics.js'
 import {
+  HOSTED_ASSISTANT_PERSISTENCE_TIMING_FIELDS,
+  type HostedAssistantPersistenceTiming,
   buildHostedAssistantFinalResponseCompletionTiming,
   emitHostedAssistantTurnTimingTrace,
 } from './hosted-turn-timing.js'
@@ -2316,8 +2318,10 @@ export async function sendAssistantMessageLocal(
             currentSession,
             sharedPlan,
           })
+        let artifactTiming: HostedAssistantPersistenceTiming = {}
         const turnArtifactsStartedAt = Date.now()
         const session = await finalizeAssistantTurnArtifacts({
+          onPersistenceTiming: (timing) => { artifactTiming = timing },
           assistantTranscriptText,
           input: currentInput,
           plan: sharedPlan,
@@ -2339,6 +2343,7 @@ export async function sendAssistantMessageLocal(
             ? null
             : elapsedSince(providerResultReturnedAt),
           stage: 'turn-artifacts-finalized',
+          persistenceTiming: artifactTiming,
           stepElapsedMs: elapsedSince(turnArtifactsStartedAt),
         })
         // Preceding-answer delivery is best-effort only when a final reply can
@@ -2439,12 +2444,14 @@ export async function sendAssistantMessageLocal(
         }
         let deliverySession =
           precedingDeliveryOutcomes.at(-1)?.session ?? session
+        const replyTiming: HostedAssistantPersistenceTiming = {}
         const replyDispatchStartedAt = Date.now()
         let finalDeliveryInput = finalReplyInput
         let finalTargetResolutionError: ReturnType<
           typeof normalizeAssistantDeliveryError
         > | null = null
         if (finalResponseText !== null && providerResult.targetInputId) {
+          const targetStartedAt = performance.now()
           try {
             finalDeliveryInput =
               await applyAssistantAcceptedMessageTargetToDeliveryInput({
@@ -2461,6 +2468,7 @@ export async function sendAssistantMessageLocal(
           } catch (error) {
             finalTargetResolutionError = normalizeAssistantDeliveryError(error)
           }
+          replyTiming.turnTimingAcceptedTargetMs = performance.now() - targetStartedAt
         }
         if (providerResult.responseContextReferences !== undefined) {
           finalDeliveryInput = {
@@ -2482,6 +2490,12 @@ export async function sendAssistantMessageLocal(
                   session: deliverySession,
                 }
               : await dispatchAssistantReply({
+                  onPersistenceTiming: (timing) => {
+                    for (const key of HOSTED_ASSISTANT_PERSISTENCE_TIMING_FIELDS) {
+                      const value = timing[key]
+                      if (value !== undefined) replyTiming[key] = (replyTiming[key] ?? 0) + value
+                    }
+                  },
                   input: finalDeliveryInput,
                   followUpRequest: providerResult.followUpRequest,
                   card: providerResult.responseCard ?? null,
@@ -2546,15 +2560,14 @@ export async function sendAssistantMessageLocal(
           reactionDeliveryOutcomes.length > 0
             ? reactionDeliveryOutcomes[reactionDeliveryOutcomes.length - 1]!
             : deliveryOutcome
+        const finalDeliveryIntentId = 'intentId' in finalDeliveryOutcome
+          ? finalDeliveryOutcome.intentId
+          : null
         emitTurnTiming({
           deliveryAttempted:
             finalResponseText !== null || reactionDeliveryOutcomes.length > 0,
-          deliveryIntentId: 'intentId' in finalDeliveryOutcome
-            ? finalDeliveryOutcome.intentId
-            : null,
-          deliveryIntentPresent: 'intentId' in finalDeliveryOutcome
-            ? finalDeliveryOutcome.intentId !== null
-            : false,
+          deliveryIntentId: finalDeliveryIntentId,
+          deliveryIntentPresent: finalDeliveryIntentId !== null,
           deliveryOutcomeKind: finalDeliveryOutcome.kind,
           elapsedMs: elapsedSince(turnTimingStartedAt),
           finalReplySelected: finalResponseText !== null,
@@ -2574,6 +2587,7 @@ export async function sendAssistantMessageLocal(
               ? null
               : Math.max(0, replyIntentReadyAt - providerResultReturnedAt),
           stage: 'reply-dispatched',
+          persistenceTiming: replyTiming,
           stepElapsedMs: elapsedSince(replyDispatchStartedAt),
         })
         const finalResponseDisposition =
@@ -2582,7 +2596,10 @@ export async function sendAssistantMessageLocal(
             : null
         const finalResponse = finalResponseText ?? ''
 
+        let finalizationTiming: HostedAssistantPersistenceTiming = {}
+        const finalizationStartedAt = performance.now()
         await finalizeDeliveredAssistantTurn({
+          onPersistenceTiming: (timing) => { finalizationTiming = timing },
           firstContactGuidanceInjected:
             providerResult.onboardingGuidanceInjected,
           firstContactStateDocIds: sharedPlan.firstContactStateDocIds,
@@ -2590,6 +2607,13 @@ export async function sendAssistantMessageLocal(
           response: finalResponse,
           turnId: currentUserTurn.turnId,
           vault: input.vault,
+        })
+
+        emitTurnTiming({
+          stage: 'turn-delivery-finalized',
+          deliveryIntentId: finalDeliveryIntentId,
+          persistenceTiming: finalizationTiming,
+          stepElapsedMs: performance.now() - finalizationStartedAt,
         })
 
         const result = buildCompletedAssistantAskResult({

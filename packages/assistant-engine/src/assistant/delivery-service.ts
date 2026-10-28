@@ -1,3 +1,8 @@
+import {
+  reportHostedAssistantPersistenceTiming,
+  type HostedAssistantPersistenceTiming,
+  type HostedAssistantPersistenceTimingSink,
+} from './hosted-turn-timing.js'
 import type {
   AssistantResponseMedia,
   AssistantSession,
@@ -162,6 +167,7 @@ export function dropUnsupportedAssistantResponseMediaForChannel(input: {
 }
 
 export async function deliverAssistantReply(input: {
+  onPersistenceTiming?: HostedAssistantPersistenceTimingSink
   followUpRequest?: import("@murphai/contracts").AutomationFollowUpRequest | null
   card?: AssistantResponseCard | null
   dedupeToken?: string | null
@@ -210,7 +216,8 @@ export async function deliverAssistantReply(input: {
 
   if (card !== null) {
     return await deliverAssistantCurrentAudienceMessage({
-    followUpRequest: input.followUpRequest,
+      onPersistenceTiming: input.onPersistenceTiming,
+      followUpRequest: input.followUpRequest,
       card,
       dedupeToken: baseDedupeToken,
       answeredMailboxItemIds: input.input.answeredMailboxItemIds ?? [],
@@ -227,7 +234,8 @@ export async function deliverAssistantReply(input: {
 
   if (!assistantChannelSupportsReplyBubbles(deliveryFields.channel)) {
     return await deliverAssistantCurrentAudienceMessage({
-    followUpRequest: input.followUpRequest,
+      onPersistenceTiming: input.onPersistenceTiming,
+      followUpRequest: input.followUpRequest,
       dedupeToken: baseDedupeToken,
       answeredMailboxItemIds: input.input.answeredMailboxItemIds ?? [],
       deliveryIdempotencyKey: hostedDelivery.deliveryIdempotencyKey,
@@ -251,7 +259,8 @@ export async function deliverAssistantReply(input: {
   })
   if (replyBubbles.length <= 1) {
     return await deliverAssistantCurrentAudienceMessage({
-    followUpRequest: input.followUpRequest,
+      onPersistenceTiming: input.onPersistenceTiming,
+      followUpRequest: input.followUpRequest,
       dedupeToken: baseDedupeToken,
       answeredMailboxItemIds: input.input.answeredMailboxItemIds ?? [],
       deliveryIdempotencyKey: hostedDelivery.deliveryIdempotencyKey,
@@ -279,6 +288,7 @@ export async function deliverAssistantReply(input: {
       turnId: input.turnId,
     })
     const outcome = await deliverAssistantCurrentAudienceMessage({
+      onPersistenceTiming: input.onPersistenceTiming,
       dedupeToken: bubbleIdempotencyKey,
       answeredMailboxItemIds: [],
       deliveryIdempotencyKey: bubbleIdempotencyKey,
@@ -303,6 +313,7 @@ export async function deliverAssistantReply(input: {
   }
 
   const finalOutcome = await deliverAssistantCurrentAudienceMessage({
+    onPersistenceTiming: input.onPersistenceTiming,
     followUpRequest: input.followUpRequest,
     dedupeToken: baseDedupeToken,
     answeredMailboxItemIds: input.input.answeredMailboxItemIds ?? [],
@@ -899,6 +910,7 @@ function resolveAssistantInputRouteBindingDelivery(input: {
 }
 
 async function deliverAssistantCurrentAudienceMessage(input: {
+  onPersistenceTiming?: HostedAssistantPersistenceTimingSink
   followUpRequest?: import("@murphai/contracts").AutomationFollowUpRequest | null
   card?: AssistantResponseCard | null
   answeredMailboxItemIds?: readonly string[] | null
@@ -923,6 +935,7 @@ async function deliverAssistantCurrentAudienceMessage(input: {
     input: input.input,
   })
   const outcome = await state.outbox.deliverMessage({
+    onPersistenceTiming: input.onPersistenceTiming,
     ...messageDeliveryFields,
     answeredMailboxItemIds: input.answeredMailboxItemIds ?? [],
     reviewedAssistantAskCompletionExpiresAt:
@@ -1067,6 +1080,7 @@ function stringifyHostedDeliveryIdempotencyKeyParts(
 }
 
 export async function finalizeAssistantTurnFromDeliveryOutcome(input: {
+  onPersistenceTiming?: HostedAssistantPersistenceTimingSink
   firstContactGuidanceInjected?: boolean
   firstContactStateDocIds?: readonly string[]
   outcome: AssistantDeliveryOutcome
@@ -1083,7 +1097,10 @@ export async function finalizeAssistantTurnFromDeliveryOutcome(input: {
     turnId: input.turnId,
   })
   const state = createAssistantRuntimeStateService(input.vault)
+  const timing: HostedAssistantPersistenceTiming = {}
+  const receiptStartedAt = performance.now()
   await state.turns.finalizeReceipt(plan.receipt)
+  timing.turnTimingReceiptFinalizationMs = performance.now() - receiptStartedAt
   // Any accepted reply on a first-contact-scoped route is first contact, not
   // just the canned welcome text: once the user has heard from the assistant
   // here, a queued signup welcome for this route is stale and must skip.
@@ -1092,21 +1109,26 @@ export async function finalizeAssistantTurnFromDeliveryOutcome(input: {
     response !== '' &&
     isAssistantFirstContactAcceptedForDelivery(input.outcome)
   if (firstContactAcceptedForDelivery) {
+    const startedAt = performance.now()
     await markAssistantFirstContactSeen({
       docIds: input.firstContactStateDocIds ?? [],
       seenAt: completedAt,
       vault: input.vault,
     })
+    timing.turnTimingFirstContactMs = performance.now() - startedAt
   }
   // The receipt finalization above is the commit; the terminal diagnostic is
   // observability only and must never fail an already-accepted delivery (a
   // thrown error here would abandon a queued outbox intent upstream).
+  const diagnosticStartedAt = performance.now()
   await state.diagnostics.recordEvent(plan.diagnostic).catch((error) => {
     warnAssistantBestEffortFailure({
       error,
       operation: 'turn delivery diagnostic',
     })
   })
+  timing.turnTimingTerminalDiagnosticMs = performance.now() - diagnosticStartedAt
+  reportHostedAssistantPersistenceTiming(input.onPersistenceTiming, timing)
 }
 
 // The first-contact marker's only reader is the hosted signup-welcome skip,
