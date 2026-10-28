@@ -3477,6 +3477,7 @@ export function createJunctionDeviceSyncProvider(
         completedWorkoutStreamIdentities,
         job.payload.workoutStreamEmptySeen === true,
         historicalResourceJobWorkBudget,
+        readFullJobTimeseriesWindowHours(job),
       );
       const result = withJunctionSkippedResourceMetadata(
         context,
@@ -5153,6 +5154,43 @@ export function createJunctionDeviceSyncProvider(
     };
   }
 
+  async function importJunctionHourlyResourceWindow(input: {
+    context: ProviderJobContext;
+    resource: string;
+    sourceProviders: readonly JunctionProviderConnection[];
+    skippedOptionalResources: JunctionSkippedOptionalResource[];
+    sourceProviderSlug?: string | null;
+    windowStart: string;
+    windowEnd: string;
+  }): Promise<JunctionDailyTimeseriesImportResult> {
+    const { context, resource, sourceProviders, skippedOptionalResources,
+      sourceProviderSlug, windowStart, windowEnd } = input;
+    if (context.shouldYield?.()) {
+      return { workoutStreamCursor: null, workoutStreamEmptySeen: false, yieldedAt: windowStart };
+    }
+    const startMs = Date.parse(windowStart);
+    const closedEndMs = Date.parse(floorUtcDayTimestamp(windowEnd));
+    if (!Number.isFinite(startMs) || startMs % TIMESERIES_HOUR_MS !== 0) {
+      throw invalidJunctionTimeseriesResourceProgress();
+    }
+    const hourEndMs = Math.min(startMs + TIMESERIES_HOUR_MS, closedEndMs);
+    if (startMs < hourEndMs) {
+      // Reuse the full-job complete-hour import owner and transport budget.
+      // One hour per durable suffix keeps raw collections bounded in memory.
+      await importJunctionTimeseriesResourceSnapshot({
+        collectionWorkLimit: JUNCTION_FULL_JOB_TIMESERIES_COLLECTION_WORK_LIMIT,
+        context, dateQueryFormat: "datetime", resource, skippedOptionalResources,
+        sourceProviderSlug, sourceProviders, windowStart,
+        windowEnd: new Date(hourEndMs).toISOString(),
+      });
+    }
+    return {
+      workoutStreamCursor: null,
+      workoutStreamEmptySeen: false,
+      yieldedAt: hourEndMs < closedEndMs ? new Date(hourEndMs).toISOString() : null,
+    };
+  }
+
   async function importTimeseriesDailySnapshots(
     context: ProviderJobContext,
     sourceProviders: readonly JunctionProviderConnection[],
@@ -5160,11 +5198,18 @@ export function createJunctionDeviceSyncProvider(
     windowEnd: string,
     skippedOptionalResources: JunctionSkippedOptionalResource[],
     resource: string,
-    sourceProviderSlug?: string | null,
-    completedWorkoutStreamIdentities: ReadonlySet<string> = new Set(),
-    workoutStreamEmptySeen = false,
-    historicalResourceJobWorkBudget?: JunctionHistoricalResourceJobWorkBudget,
+    sourceProviderSlug: string | null | undefined,
+    completedWorkoutStreamIdentities: ReadonlySet<string>,
+    workoutStreamEmptySeen: boolean,
+    historicalResourceJobWorkBudget: JunctionHistoricalResourceJobWorkBudget | undefined,
+    windowHours: 1 | 24,
   ): Promise<JunctionDailyTimeseriesImportResult> {
+    if (usesJunctionHourlyResourceWindow(resource, windowHours)) {
+      return importJunctionHourlyResourceWindow({
+        context, resource, sourceProviders, skippedOptionalResources,
+        sourceProviderSlug, windowStart, windowEnd,
+      });
+    }
     if (canBatchJunctionDailyTimeseriesImports(resource)) {
       return await importBatchedTimeseriesDailySnapshots({
         context,
@@ -10433,6 +10478,11 @@ function normalizeFullJobTimeseriesResourceCursor(
 function isFullJobTimeseriesContinuation(job: DeviceSyncJobRecord): boolean {
   return (job.kind === "backfill" || job.kind === "reconcile")
     && Object.prototype.hasOwnProperty.call(job.payload, "timeseriesResourceCursor");
+}
+
+function usesJunctionHourlyResourceWindow(resource: string, windowHours: 1 | 24): boolean {
+  return windowHours === 1
+    && resolveJunctionTimeseriesResourcePolicy(resource)?.normalizationMode === "hourly_or_session_feature";
 }
 
 function isJunctionTimeseriesWindowTooLarge(error: unknown): boolean {
