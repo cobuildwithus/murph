@@ -147,8 +147,8 @@ registered commands admit this detail:
 
 | Command | Existing source decisions retained |
 | --- | --- |
-| `meal edit` | `contract_invalid`, `invalid_timestamp`, or `vault_error` from the event mutation/usecase owners. |
-| `meal remove-photo` | `vault_error`; optionally its own `context.vaultCode` equal to `MEAL_PHOTO_RETENTION_PRECONDITION_FAILED` or `MEAL_PHOTO_RETENTION_MANIFEST_INVALID`, distinguishing retained-byte integrity from manifest failure. The already classified `invalid_operation` is unchanged. |
+| `meal edit` | `contract_invalid`, `invalid_timestamp`, or `vault_error` from the event mutation/usecase owners; the admitted nested codes below distinguish contract, ledger and lock failures. |
+| `meal remove-photo` | `contract_invalid` from stored-record reads or `vault_error`; nested codes distinguish ledger, lock, retained-byte integrity, manifest and lingering-reference failures. The already classified `invalid_operation` is unchanged. |
 | `food search-labels-batch` | The labels client's existing auth, rate limit, HTTP timeout, service availability, other HTTP rejection, body timeout, body-read failure and invalid-response codes. |
 | `research scout-batch` | The scout client's existing auth, rate limit, availability, invalid-response, request-rejection and timeout codes reached by response handling. |
 
@@ -159,24 +159,50 @@ recorded stage. A source code may still combine multiple failures, such as JSON
 and schema rejection; it is evidence of the typed cause, not a diagnosis of an
 earlier production failure.
 
+For both meal commands, `contract_invalid` admits `EVENT_CONTRACT_INVALID` and
+`VAULT_INVALID_JSONL`. Their `vault_error` admits `CANONICAL_WRITE_LOCKED` and
+`EVENT_LEDGER_SHARD_AMBIGUOUS`. Photo removal also admits
+`EVENT_CONTRACT_INVALID`, `VAULT_INVALID_JSONL`,
+`MEAL_PHOTO_RETENTION_PRECONDITION_FAILED`, `MEAL_PHOTO_RETENTION_MANIFEST_INVALID`
+and `MEAL_PHOTO_RETENTION_REFERENCE_INVALID` under `vault_error`, as reached
+inside removal after its initial read. Other nested names remain absent.
+
+Only the two meal commands' otherwise-unknown original failures can emit
+`sourceCause.code` equal to `missing_code` or `unrecognized_code`. These describe
+evidence availability: no safely observed own code (including rejected proxy,
+accessor or inherited metadata), or an observed value outside the admitted
+codes. They are not diagnoses or classifications of exception prose. An original
+code literally equal to either diagnostic label is itself unrecognized.
+Recognized legacy codes keep their existing classification. Missing old wire
+detail stays absent; readers never manufacture these states retrospectively.
+
 Wire detail requires an own outer `code` of exactly `unknown`; an unrecognized
 outer code that normalizes to `unknown` cannot authorize it. Capture and wire
 admission read only own data descriptors. They never coerce,
 enumerate, invoke accessors, follow causes/prototypes, or inspect messages,
 arguments, results, status values or arbitrary nested error codes. Unknown or
-malformed detail is omitted independently of the failure. A proxy's descriptor
-trap may execute, but only admitted literals are copied; a throwing trap cannot
-replace the original failure. The two source-cause
+malformed detail is omitted independently of the failure. The Node original-error
+observer uses native proxy detection before descriptor reads, including nested
+context and its EPIPE observation. It passes a detached own `vaultCode` value
+to the portable selector; proxy traps cannot manufacture original-error evidence.
+The portable wire reader handles parsed JSON, which cannot contain proxies;
+its defensive descriptor reads still catch throwing traps on direct in-process
+inputs. The two source-cause
 fields participate in variant equality under the existing eight-variant cap;
 `droppedFailures` records omitted observations without changing invocation
 call counts. Existing command, span, report, UDP and usage-body limits remain
 unchanged.
 
-The actual base reader drops only `sourceCause` and coalesces equal legacy
-variants, retaining failures, timing, profiles and token accounting. New readers
+Readers predating `sourceCause` drop that field and coalesce equal legacy
+variants. The preceding meal reader retains its known source codes and two photo
+retention codes, dropping new nested codes and observation labels while retaining
+failures, timing, profiles and token accounting. New readers
 accept absent detail without inventing a cause. Run the history-backed portable
 and hosted checks with `MURPH_CLI_SOURCE_CAUSE_COMPAT_BASE` set to the reviewed
-base. Reader-first deployment preserves measurement coverage; old readers remain
+base; `MURPH_CLI_MEAL_ORIGIN_COMPAT_BASE` selects the preceding meal reader.
+The real-handler collision test supports `MURPH_CLI_MEAL_ORIGIN_BASELINE` on
+unchanged base owners with only its test hunk applied. Reader-first deployment
+preserves measurement coverage; old readers remain
 safe during skew. Natural observations are useful only after authorized
 reader/writer convergence, with repeated profiles deduplicated by turn and
 native command completions kept separate from CLI counts.
