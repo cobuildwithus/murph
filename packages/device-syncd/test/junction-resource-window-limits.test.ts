@@ -1,11 +1,17 @@
 import assert from "node:assert/strict";
+import { rm } from "node:fs/promises";
+import path from "node:path";
 import { test } from "vitest";
 import {
   createAccount, createConnectionSource, createJob, createJobFromInput,
   createJunctionJobContext, createJunctionProvider, executeJunctionJob,
 } from "./junction-provider.harness.ts";
-import { createJsonResponse, readUrl, requireValue } from "./helpers.ts";
+import { createJsonResponse, makeTempDirectory, readUrl, requireValue } from "./helpers.ts";
 import type { DeviceSyncJobInput } from "../src/types.ts";
+import { createDeviceSyncService, SqliteDeviceSyncStore } from "../src/service.ts";
+import { normalizeConfiguredDeviceSyncJobInput } from "../src/provider-job-definitions.ts";
+import { shapeHostedDeviceSyncJobHintPayload } from "../src/hosted-hints.ts";
+import { parseHostedExecutionDeviceSyncWakeHint } from "../src/hosted-runtime.ts";
 
 const START = "2026-04-01T00:00:00.000Z";
 const END = "2026-04-02T00:00:00.000Z";
@@ -144,4 +150,78 @@ test("hourly resource continuation rejects a partial-hour coordinate before coll
   });
   assert.deepEqual(f.requests, []);
   assert.deepEqual(f.imported, []);
+});
+
+
+test("resource hourly recovery survives service enqueue, cold restore and hosted hints", async () => {
+  const f = fixture("heartrate");
+  const vaultRoot = await makeTempDirectory("murph-resource-hourly-recovery");
+  const stateDatabasePath = path.join(vaultRoot, "device-sync.sqlite");
+  let now = "2026-04-04T12:00:00.000Z";
+  const open = () => {
+    const store = new SqliteDeviceSyncStore(stateDatabasePath);
+    const service = createDeviceSyncService({
+      secret: "synthetic-device-sync-secret",
+      config: { vaultRoot, stateDatabasePath, publicBaseUrl: "https://sync.example.test",
+        log: { warn() {}, error() {} } },
+      store, providers: [f.provider], clock: { now: () => new Date(now) },
+      importer: { async importDeviceProviderSnapshot(input) {
+        await f.context.importSnapshot(input.snapshot);
+        return { applied: true, events: [] };
+      } },
+    });
+    return { store, service, close() { service.close(); store.close(); } };
+  };
+  let runtime = open();
+  try {
+    const account = runtime.store.upsertAccount({
+      provider: "junction", externalAccountId: "junction-user-1", scopes: [],
+      credential: { kind: "provider_config", providerConfigKey: "junction", credentialMetadata: {} },
+      connectedAt: now, nextReconcileAt: null,
+    });
+    runtime.store.upsertConnectionSource({
+      connectionId: account.id, sourceInstanceKey: "synthetic-garmin-source",
+      sourceProviderSlug: "garmin", status: "connected",
+      firstSeenAt: "2025-01-01T00:00:00.000Z", lastSeenAt: now,
+      resourceAvailabilitySummary: { heartrate: true },
+    });
+    const parent = runtime.store.enqueueJob({
+      accountId: account.id, provider: "junction", kind: "resource",
+      availableAt: now, priority: 30, dedupeKey: "synthetic-hourly-history",
+      payload: f.job.payload,
+    });
+    await runtime.service.runWorkerOnce(account.id);
+    const completed = requireValue(runtime.store.getJobById(parent.id), "completed parent");
+    assert.equal(completed.status, "succeeded", completed.lastErrorCode ?? "parent must complete");
+    assert.deepEqual(f.imported, []);
+    const [suffix] = runtime.store.listPendingJobsForAccount(account.id, 2);
+    assert.ok(suffix);
+    assert.equal(suffix.payload.timeseriesWindowHours, 1);
+    const hint = parseHostedExecutionDeviceSyncWakeHint(JSON.parse(JSON.stringify({ jobs: [{
+      kind: suffix.kind, payload: shapeHostedDeviceSyncJobHintPayload("junction", suffix),
+    }] })));
+    const hintJob = requireValue(hint?.jobs?.[0], "restored hourly hint");
+    const restored = normalizeConfiguredDeviceSyncJobInput("junction",
+      { kind: hintJob.kind, payload: hintJob.payload }, "synthetic hosted restore");
+    assert.deepEqual(restored.payload, suffix.payload);
+    assert.equal(restored.payload?.timeseriesWindowHours, 1);
+    assert.equal(restored.payload?.windowStart, START);
+    assert.equal(restored.payload?.windowEnd, END);
+    runtime.close();
+    now = suffix.availableAt;
+    runtime = open();
+    await runtime.service.runWorkerOnce(account.id);
+    const executed = requireValue(runtime.store.getJobById(suffix.id), "executed hourly suffix");
+    assert.equal(executed.status, "succeeded", JSON.stringify({
+      code: executed.lastErrorCode, attempts: executed.attempts, availableAt: executed.availableAt, now,
+    }));
+    assert.deepEqual(f.requests.map((value, index) => index === 0 ? value : new Date(value).toISOString()), ["2026-04-01", START]);
+    assert.deepEqual(f.imported.map((value) => new Date(value).toISOString()), [START]);
+    const [next] = runtime.store.listPendingJobsForAccount(account.id, 2);
+    assert.equal(next?.payload.windowStart, "2026-04-01T01:00:00.000Z");
+    assert.equal(next?.payload.timeseriesWindowHours, 1);
+  } finally {
+    runtime.close();
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
 });
