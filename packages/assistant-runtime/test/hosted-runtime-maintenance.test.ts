@@ -83,6 +83,9 @@ vi.mock("@murphai/assistant-engine", async () => ({
   HOSTED_ASSISTANT_CONTEXT_DIAGNOSTICS_SCHEMA:
     "murph.assistant-context-diagnostics.v1",
   HOSTED_ASSISTANT_CONTEXT_DIAGNOSTICS_TYPE: "assistant.context.diagnostics",
+  HOSTED_ASSISTANT_PERSISTENCE_TIMING_FIELDS: (await vi.importActual<
+    typeof import("@murphai/assistant-engine/assistant-runtime")
+  >("@murphai/assistant-engine/assistant-runtime")).HOSTED_ASSISTANT_PERSISTENCE_TIMING_FIELDS,
   HOSTED_ASSISTANT_TURN_TIMING_SCHEMA: "murph.assistant-turn-timing.v1",
   HOSTED_ASSISTANT_TURN_TIMING_TYPE: "assistant.turn.timing",
   runAssistantAutomationPass: mocks.runAssistantAutomationPass,
@@ -1846,6 +1849,7 @@ describe("runHostedAssistantAutomation", () => {
           turnTimingDeliveryIntentId: "intent_timing_123",
           turnTimingProviderRequestElapsedMs: 12,
           turnTimingSinceProviderResultMs: 5,
+          turnTimingOutboxLockWaitMs: 1.5,
           turnTimingStage: "reply-dispatched",
         },
         updates: [],
@@ -1887,6 +1891,7 @@ describe("runHostedAssistantAutomation", () => {
           turnTimingDeliveryIntentId: "intent_timing_123",
           turnTimingProviderRequestElapsedMs: 12,
           turnTimingSinceProviderResultMs: 5,
+          turnTimingOutboxLockWaitMs: 1.5,
           turnTimingStage: "reply-dispatched",
         }),
       }),
