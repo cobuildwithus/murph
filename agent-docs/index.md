@@ -1,3 +1,5 @@
+Release audit recovery, game correctness and dependency fixes are tracked in [the implementation plan](exec-plans/completed/2026-10-28-release-audit-fixes.md).
+
 Linq validation telemetry and release verification are tracked in [the completed implementation plan](exec-plans/completed/2026-10-27-linq-validation-telemetry.md).
 Intentional reply-bubble pacing attribution is tracked in [the delivery alert plan](exec-plans/completed/2026-10-27-reply-delivery-pacing.md); the current contract remains in `references/hosted-runtime-protocol.md`.
 

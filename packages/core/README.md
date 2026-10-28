@@ -37,6 +37,14 @@ a workspace containing it must stay on this reader version or newer, including
 restore and rollback. Old snapshots and old-producer receipts remain readable by
 the new bundle. Historical audits are not rewritten or reclaimed by this change.
 
+## Interrupted append recovery
+
+A prepared JSONL append may have written a prefix even when its filesystem call
+rejects before the action becomes applied. Rollback includes that prepared state,
+checks the durable base receipt and the staged payload prefix, then restores the
+original size (or removes a newly created shard). Unexpected content or a failed
+restore leaves the operation failed with its staged recovery evidence intact.
+
 ## Audit shard storage
 
 Closed audit months use verified Brotli `.jsonl.br` archives through the same

@@ -2478,3 +2478,85 @@ test("repairVault recreates missing required directories", async () => {
   assert.equal(await fs.stat(missingDirectory).then((stats) => stats.isDirectory()), true);
   assert.equal(typeof repaired.auditPath, "string");
 });
+
+
+test.each([false, true])("rolls back a partially written JSONL append (existing shard: %s)", async (existing) => {
+  const vaultRoot = await makeTempDirectory("murph-core-partial-append");
+  await initializeVault({ vaultRoot });
+  const targetRelativePath = "ledger/events/2026/2026-07.jsonl";
+  const target = path.join(vaultRoot, targetRelativePath);
+  const before = existing ? '{"id":"existing"}\n' : "";
+  if (existing) {
+    await fs.mkdir(path.dirname(target), { recursive: true });
+    await fs.writeFile(target, before);
+  }
+  const batch = await WriteBatch.create({ vaultRoot, operationType: "partial_append_proof", summary: "Recover an interrupted append" });
+  await batch.stageJsonlAppend(targetRelativePath, '{"id":"new"}\n');
+  const append = fs.appendFile.bind(fs);
+  vi.spyOn(fs, "appendFile").mockImplementation(async (file, data, options) => {
+    if (file === target) {
+      await append(file, String(data).slice(0, 6), options);
+      throw Object.assign(new Error("Synthetic disk-full failure"), { code: "ENOSPC" });
+    }
+    return append(file, data, options);
+  });
+  await assert.rejects(batch.commit(), { code: "ENOSPC" });
+  const operation = await readStoredWriteOperation(vaultRoot, batch.metadataRelativePath);
+  assert.equal(operation.status, "rolled_back");
+  assert.equal(operation.actions[0]?.state, "rolled_back");
+  if (existing) assert.equal(await fs.readFile(target, "utf8"), before);
+  else assert.equal(await pathExists(target), false);
+  vi.restoreAllMocks();
+  const following = await WriteBatch.create({ vaultRoot, operationType: "following_append", summary: "Append after successful recovery" });
+  await following.stageJsonlAppend(targetRelativePath, '{"id":"following"}\n');
+  await following.commit();
+  assert.equal(await fs.readFile(target, "utf8"), before + '{"id":"following"}\n');
+});
+
+test("preserves recovery evidence instead of truncating an unrelated append after a partial failure", async () => {
+  const vaultRoot = await makeTempDirectory("murph-core-partial-append-conflict");
+  await initializeVault({ vaultRoot });
+  const targetRelativePath = "ledger/events/2026/2026-07.jsonl";
+  const target = path.join(vaultRoot, targetRelativePath);
+  const batch = await WriteBatch.create({ vaultRoot, operationType: "partial_append_conflict", summary: "Preserve unexpected append content" });
+  await batch.stageJsonlAppend(targetRelativePath, '{"id":"new"}\n');
+  const append = fs.appendFile.bind(fs);
+  vi.spyOn(fs, "appendFile").mockImplementation(async (file, data, options) => {
+    if (file === target) {
+      await append(file, "unexpected content", options);
+      throw Object.assign(new Error("Synthetic interrupted write"), { code: "ENOSPC" });
+    }
+    return append(file, data, options);
+  });
+  await assert.rejects(batch.commit());
+  const operation = await readStoredWriteOperation(vaultRoot, batch.metadataRelativePath);
+  assert.notEqual(operation.status, "rolled_back");
+  assert.equal(await fs.readFile(target, "utf8"), "unexpected content");
+  assert.equal(await readStoredWriteOperationJsonlAppendPayload({ operation, targetRelativePath, vaultRoot }), '{"id":"new"}\n');
+});
+
+
+test("keeps the staged append when restoring its preimage also fails", async () => {
+  const vaultRoot = await makeTempDirectory("murph-core-append-rollback-failure");
+  await initializeVault({ vaultRoot });
+  const targetRelativePath = "ledger/events/2026/2026-07.jsonl";
+  const target = path.join(vaultRoot, targetRelativePath);
+  await fs.mkdir(path.dirname(target), { recursive: true });
+  await fs.writeFile(target, '{"id":"existing"}\n');
+  const batch = await WriteBatch.create({ vaultRoot, operationType: "rollback_failure", summary: "Preserve interrupted append recovery" });
+  await batch.stageJsonlAppend(targetRelativePath, '{"id":"new"}\n');
+  const append = fs.appendFile.bind(fs);
+  vi.spyOn(fs, "appendFile").mockImplementation(async (file, data, options) => {
+    if (file === target) {
+      await append(file, String(data).slice(0, 6), options);
+      throw Object.assign(new Error("Synthetic disk-full failure"), { code: "ENOSPC" });
+    }
+    return append(file, data, options);
+  });
+  vi.spyOn(fs, "truncate").mockRejectedValue(Object.assign(new Error("Synthetic restore failure"), { code: "EACCES" }));
+  await assert.rejects(batch.commit(), { code: "ENOSPC" });
+  const operation = await readStoredWriteOperation(vaultRoot, batch.metadataRelativePath);
+  assert.equal(operation.status, "failed");
+  assert.equal(operation.error?.message, "Synthetic restore failure");
+  assert.equal(await readStoredWriteOperationJsonlAppendPayload({ operation, targetRelativePath, vaultRoot }), '{"id":"new"}\n');
+});

@@ -11,7 +11,7 @@ import { isUniqueViolation } from "../device-sync/prisma-store/prisma-errors";
 import { generateHostedRandomPrefixedId, isRecord, sha256Hex } from "../primitives";
 import { getPrisma } from "../prisma";
 import { createHostedLinqDeliveryIdempotencyLookupKey } from "../hosted-onboarding/linq-observability-identifiers";
-import { areGameDevToolsAllowed, gameOnWhere, isGameEnabled, isGameEnabledFor, isGameOn, mediaKeyOwner, mediaKeyPrefixFor } from "./access";
+import { areGameDevToolsAllowed, gameOnSql, gameOnWhere, isGameEnabled, isGameEnabledFor, isGameOn, mediaKeyOwner, mediaKeyPrefixFor } from "./access";
 import { parseGameCommand } from "./command";
 import { moderateGameCommand } from "./moderation";
 import { parseStoredGameEntryData } from "./entry-data";
@@ -366,13 +366,15 @@ async function createGame(context: CommandContext, command: Extract<GameCommand,
     inviteeLabel?.relationship ? seal(labelTarget(actor, "relationship"), inviteeLabel.relationship) : null,
   ]);
   try {
-    await prisma.$transaction(async (tx) => {
+    const answer = await prisma.$transaction(async (tx) => {
       const now = context.now ?? await databaseNow(tx);
       // A block since the rematch was read, under the lock a block takes.
       const inviteeMemberId = rematch?.inviteeMemberId ?? null;
       if (inviteeMemberId) {
         await lockGamePair(tx, actor, inviteeMemberId);
         await rejectBlockedPair(tx, actor, inviteeMemberId, "You can't rematch this game.");
+        const pending = await assertLatestBetween(actor, inviteeMemberId, command.previousGameId!, now, tx);
+        if (pending) return pending;
       }
       await tx.game.create({
         data: {
@@ -396,7 +398,15 @@ async function createGame(context: CommandContext, command: Extract<GameCommand,
       });
       const previous = command.previousGameId ? { previousGameId: command.previousGameId } : {};
       await writeEvents(tx, gameId, actor, [{ payload: { round: rematch?.round ?? 1, ...previous }, type: "created" }]);
+      return null;
     });
+    // Joining rechecks the selected invitation under the same pair lock.
+    // Keep its loading/crypto preparation outside the creation transaction.
+    if (answer?.createdBy) {
+      return joinGame(context, { id: answer.id, createdBy: answer.createdBy }, {
+        termsVersion: currentTerms(parseStoredTerms(answer.terms)).n, timeZone: profile.timeZone,
+      });
+    }
   } catch (error) {
     if (!isUniqueViolation(error)) throw error;
     const raced = await prisma.game.findUnique({ select: { createdBy: true }, where: { id: gameId } });
@@ -439,8 +449,8 @@ type RematchAnswer = Pick<Game, "id" | "createdBy" | "terms">;
  * they have a game going or an open invite between them (it could never be
  * accepted), or when a later game between them has already settled.
  */
-async function assertLatestBetween(actor: string, otherId: string, previousGameId: string, now: Date): Promise<RematchAnswer | null> {
-  const prisma = getPrisma();
+async function assertLatestBetween(actor: string, otherId: string, previousGameId: string, now: Date, tx?: Tx): Promise<RematchAnswer | null> {
+  const prisma = tx ?? getPrisma();
   const bothPlayed = { AND: [{ players: { some: { memberId: actor } } }, { players: { some: { memberId: otherId } } }] };
   const pending = await prisma.game.findFirst({
     select: { createdBy: true, id: true, inviteeMemberId: true, previousGameId: true, terms: true },
@@ -457,14 +467,14 @@ async function assertLatestBetween(actor: string, otherId: string, previousGameI
   });
   // Both asked for a rematch of the same game: the second ask accepts the first (a retry finds it live).
   if (pending?.createdBy === otherId && pending.inviteeMemberId === actor && pending.previousGameId === previousGameId) return pending;
-  if (pending) reject("ALREADY_IN_A_GAME", await alreadyPlayingMessage(otherId));
+  if (pending) reject("ALREADY_IN_A_GAME", tx ? "These players already have a game going." : await alreadyPlayingMessage(otherId));
   const latest = await prisma.game.findFirst({
     orderBy: [{ settledAt: "desc" }, { id: "desc" }],
     select: { id: true },
     where: { ...bothPlayed, status: "settled" },
   });
   if (latest && latest.id !== previousGameId) {
-    const name = await firstNameOf(otherId);
+    const name = tx ? null : await firstNameOf(otherId);
     reject("REMATCH_OUTDATED", name ? `There's a newer game with ${name}.` : "There's a newer game between you two.");
   }
   return null;
@@ -1496,12 +1506,19 @@ export async function readHome(memberId: string): Promise<GameHomeView> {
   const prisma = getPrisma();
   const [profile, seats, addressed, tickets, usualEntry] = await Promise.all([
     prisma.gameProfile.findUnique({ where: { memberId } }),
-    prisma.gamePlayer.findMany({
-      orderBy: { joinedAt: "desc" },
-      select: { gameId: true },
-      take: HOME_CANDIDATE_LIMIT,
-      where: { game: { status: { in: ["invited", "negotiating", "live", "settled", "void"] }, events: { none: { type: "cancelled" } } }, memberId },
-    }),
+    // Apply active-game priority before the bounded history window, so new
+    // invitations and completed games cannot displace an older live game.
+    prisma.$queryRaw<Array<{ gameId: string }>>(Prisma.sql`
+      SELECT seat.game_id AS "gameId" FROM game_player seat
+      JOIN game ON game.id = seat.game_id
+      WHERE seat.member_id = ${memberId}
+        AND game.status IN ('invited', 'negotiating', 'live', 'settled', 'void')
+        AND ${gameOnSql("game")}
+        AND NOT EXISTS (SELECT 1 FROM game_event event WHERE event.game_id = game.id AND event.type = 'cancelled')
+      ORDER BY CASE game.status WHEN 'live' THEN 0 WHEN 'negotiating' THEN 1 WHEN 'invited' THEN 2 ELSE 3 END,
+        seat.joined_at DESC, seat.game_id DESC
+      LIMIT ${HOME_CANDIDATE_LIMIT}
+    `),
     prisma.game.findMany({ select: { id: true }, take: HOME_CANDIDATE_LIMIT, where: { inviteeMemberId: memberId,
       OR: [{ status: "invited" }, { status: "void", departedPlayer: { not: Prisma.DbNull } }] } }),
     prisma.gameTicket.findMany({
@@ -1642,21 +1659,25 @@ export async function authorizeMediaRead(memberId: string, mediaKey: string): Pr
     });
     if (sharedGame) return true;
   }
-  // Keys come from the bytes, so one file can belong to several entries; check the latest few.
-  const entries = await getPrisma().gameEntry.findMany({
-    orderBy: { receivedAt: "desc" },
-    select: { gameId: true, id: true },
-    take: 5,
-    where: { mediaKeys: { has: mediaKey }, memberId: ownerId },
-  });
-  const [games, reported] = await Promise.all([
-    loadGames(getPrisma(), [...new Set(entries.map((entry) => entry.gameId))]),
-    readReportedBy(memberId, { entryIds: entries.map((entry) => entry.id) }),
-  ]);
-  return entries.some((entry) => {
-    const game = games.find((candidate) => candidate.row.id === entry.gameId);
-    return game !== undefined && isGameOn(game.row) && visibleEntryIds(game.state, memberId, reported.entries).has(entry.id);
-  });
+  // The other-player branch of visibleEntryIds, applied before LIMIT. A key
+  // may appear in any number of games; authorization needs one visible use,
+  // no payload decryption or truncated candidate window.
+  const entries = await prisma.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+    SELECT entry.id FROM game_entry entry
+    JOIN game ON game.id = entry.game_id
+    JOIN game_player viewer ON viewer.game_id = game.id AND viewer.member_id = ${memberId}
+    WHERE entry.member_id = ${ownerId} AND entry.media_keys @> ARRAY[${mediaKey}]::text[]
+      AND entry.attempt > 0 AND entry.withdrawn_at IS NULL
+      AND ${gameOnSql("game")}
+      AND NOT EXISTS (SELECT 1 FROM game_report report
+        WHERE report.entry_id = entry.id AND report.reporter_member_id = ${memberId})
+      AND (game.status = 'settled' OR EXISTS (
+        SELECT 1 FROM game_entry own WHERE own.game_id = game.id
+          AND own.member_id = ${memberId} AND own.day_index = entry.day_index AND own.attempt > 0
+      ))
+    LIMIT 1
+  `);
+  return entries.length > 0;
 }
 
 // ------------------------------------------------------------ view assembly

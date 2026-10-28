@@ -3712,7 +3712,13 @@ export class WriteBatch {
         continue;
       }
 
-      if (action.state !== "applied") {
+      // A prepared append can have changed the target before appendFile rejects
+      // (or the process exits). Its preimage is durable even without "applied".
+      const preparedAppend = action.kind === "jsonl_append"
+        && action.state === "staged"
+        && action.originalSize !== undefined
+        && action.baseContentReceipt !== undefined;
+      if (action.state !== "applied" && !preparedAppend) {
         continue;
       }
 
@@ -3727,43 +3733,7 @@ export class WriteBatch {
           await copyFileAtomic(backupAbsolutePath, targetAbsolutePath);
         }
       } else if (action.kind === "jsonl_append") {
-        const targetAbsolutePath = resolveVaultPath(this.vaultRoot, action.targetRelativePath).absolutePath;
-        const storage = canonicalJsonlStorageForPath(action.targetRelativePath);
-        if (
-          storage &&
-          action.baseContentReceipt &&
-          action.originalSize !== undefined &&
-          await storage.createArchivedJsonlShardContentReceipt(
-            this.vaultRoot,
-            action.targetRelativePath,
-          )
-        ) {
-          await storage.truncateArchivedJsonlShard({
-            expectedBaseByteLength: action.originalSize,
-            expectedBaseSha256: action.baseContentReceipt.sha256,
-            targetRelativePath: action.targetRelativePath,
-            vaultRoot: this.vaultRoot,
-          });
-        } else if (
-          action.allowArchivedIntegrationIngestAmendment &&
-          action.baseContentReceipt &&
-          action.originalSize !== undefined &&
-          await createArchivedIntegrationIngestShardContentReceipt(
-            this.vaultRoot,
-            action.targetRelativePath,
-          )
-        ) {
-          await truncateArchivedIntegrationIngestShard({
-            expectedBaseByteLength: action.originalSize,
-            expectedBaseSha256: action.baseContentReceipt.sha256,
-            targetRelativePath: action.targetRelativePath,
-            vaultRoot: this.vaultRoot,
-          });
-        } else if (!action.existedBefore) {
-          await safeUnlink(targetAbsolutePath);
-        } else {
-          await fs.truncate(targetAbsolutePath, action.originalSize ?? 0);
-        }
+        await this.rollbackJsonlAppend(action);
       } else if (action.kind === "delete" && action.backupRelativePath) {
         const targetAbsolutePath = resolveVaultPath(this.vaultRoot, action.targetRelativePath).absolutePath;
         const backupAbsolutePath = resolveVaultPath(this.vaultRoot, action.backupRelativePath).absolutePath;
@@ -3772,6 +3742,69 @@ export class WriteBatch {
 
       action.state = "rolled_back";
       action.rolledBackAt = nowIso();
+    }
+  }
+
+  private async rollbackJsonlAppend(action: Extract<StoredWriteAction, { kind: "jsonl_append" }>): Promise<void> {
+    const targetAbsolutePath = resolveVaultPath(this.vaultRoot, action.targetRelativePath).absolutePath;
+    const storage = canonicalJsonlStorageForPath(action.targetRelativePath);
+    if (
+      storage &&
+      action.baseContentReceipt &&
+      action.originalSize !== undefined &&
+      await storage.createArchivedJsonlShardContentReceipt(
+        this.vaultRoot,
+        action.targetRelativePath,
+      )
+    ) {
+      await storage.truncateArchivedJsonlShard({
+        expectedBaseByteLength: action.originalSize,
+        expectedBaseSha256: action.baseContentReceipt.sha256,
+        targetRelativePath: action.targetRelativePath,
+        vaultRoot: this.vaultRoot,
+      });
+    } else if (
+      action.allowArchivedIntegrationIngestAmendment &&
+      action.baseContentReceipt &&
+      action.originalSize !== undefined &&
+      await createArchivedIntegrationIngestShardContentReceipt(
+        this.vaultRoot,
+        action.targetRelativePath,
+      )
+    ) {
+      await truncateArchivedIntegrationIngestShard({
+        expectedBaseByteLength: action.originalSize,
+        expectedBaseSha256: action.baseContentReceipt.sha256,
+        targetRelativePath: action.targetRelativePath,
+        vaultRoot: this.vaultRoot,
+      });
+    } else {
+      await this.assertJsonlAppendRollbackPreimage(action, targetAbsolutePath);
+      if (!action.existedBefore) await safeUnlink(targetAbsolutePath);
+      else await fs.truncate(targetAbsolutePath, action.originalSize ?? 0);
+    }
+  }
+
+  private async assertJsonlAppendRollbackPreimage(
+    action: Extract<StoredWriteAction, { kind: "jsonl_append" }>,
+    targetAbsolutePath: string,
+  ): Promise<void> {
+    if (action.baseContentReceipt && action.originalSize !== undefined) {
+      if (!(await pathExists(targetAbsolutePath))) {
+        if (action.existedBefore) {
+          throw this.buildResumeConflictError(action, "Append target disappeared before rollback.");
+        }
+      } else {
+        const content = await fs.readFile(targetAbsolutePath);
+        const base = createCommittedPayloadReceipt(content.subarray(0, action.originalSize));
+        const payload = await fs.readFile(resolveVaultPath(this.vaultRoot, action.stageRelativePath).absolutePath);
+        const tail = content.subarray(action.originalSize);
+        if (!receiptsMatch(base, action.baseContentReceipt)
+          || tail.byteLength > payload.byteLength
+          || !tail.equals(payload.subarray(0, tail.byteLength))) {
+          throw this.buildResumeConflictError(action, "Append target changed unexpectedly before rollback.");
+        }
+      }
     }
   }
 

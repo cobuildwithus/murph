@@ -2,6 +2,7 @@ import {
   DEFAULT_ASSISTANT_AUTOMATION_SCAN_LIMIT,
   assistantInputCandidateFromStoredEvent,
   compareAssistantInputCursors,
+  listAssistantInputEvents,
   isSameAssistantConversationRef,
   isAssistantHostedImageCompletionEvent,
   parseAssistantHostedImageCompletionOriginText,
@@ -437,17 +438,23 @@ export async function selectHostedAssistantInputIds(
     | {
         limit?: number;
         mode: "background";
+        signal?: AbortSignal | null;
         vaultRoot: string;
       },
 ): Promise<HostedAssistantInputSelection> {
   if (input.mode === "background") {
+    input.signal?.throwIfAborted();
+    const { events: storedEvents } = await listAssistantInputEvents({
+      limit: Number.MAX_SAFE_INTEGER, signal: input.signal, vault: input.vaultRoot,
+    });
     await runHostedPendingAssistantInputContentRetention({
-      vaultRoot: input.vaultRoot,
+      events: storedEvents, signal: input.signal, vaultRoot: input.vaultRoot,
     });
     const pendingInputIds = await compactHostedPendingAssistantInputIds({
-      vaultRoot: input.vaultRoot,
+      signal: input.signal, vaultRoot: input.vaultRoot,
     });
     const stale = await dropHostedStalePendingAssistantInputRetries({
+      storedEvents, signal: input.signal,
       events: await readHostedReplyablePendingAssistantInputEvents({
         inputIds: pendingInputIds,
         vaultRoot: input.vaultRoot,

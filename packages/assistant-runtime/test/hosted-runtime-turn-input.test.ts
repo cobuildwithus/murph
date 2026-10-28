@@ -2291,9 +2291,43 @@ describe("selectHostedAssistantInputIds", () => {
     });
     await writeAssistantAutoReplyReplyTerminalEvidence({ captureIds: [], inputIds: [newer.inputId], deliveryIntentId: null, outcome: "result", recordedAt: "2026-04-23T00:02:00.000Z", sessionId: "session_newer", vault: vaultRoot });
 
+    const unanswered = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({ dedupeKey: "dedupe_unanswered", eventId: "evt_unanswered", itemId: "item_unanswered",
+        laneSeq: "13", causalSeq: "13", messageId: "msg_unanswered",
+        occurredAt: "2026-04-23T00:03:00.000Z", receivedAt: "2026-04-23T00:03:01.000Z" }),
+    });
+    await enqueueHostedPendingAssistantInputId({ inputId: unanswered.inputId, vaultRoot });
+    const listSpy = vi.spyOn(assistantEngine, "listAssistantInputEvents");
     const selection = await selectHostedAssistantInputIds({ mode: "background", vaultRoot });
-    expect(selection.inputIds).toEqual([]);
+    expect(selection.inputIds).toEqual([unanswered.inputId]);
     expect(selection).toMatchObject({ staleRetryDropped: [{ inputId: failed.inputId, reason: "newer_message_answered" }] });
+    expect(listSpy).toHaveBeenCalledTimes(1); // Reuse the required retention read.
+  });
+
+  it("cancels background selection before history I/O", async () => {
+    const vaultRoot = await createTempVault();
+    const listSpy = vi.spyOn(assistantEngine, "listAssistantInputEvents");
+    const controller = new AbortController();
+    controller.abort(new Error("Synthetic cancellation"));
+    await expect(selectHostedAssistantInputIds({
+      mode: "background", vaultRoot, signal: controller.signal,
+    })).rejects.toThrow("Synthetic cancellation");
+    expect(listSpy).not.toHaveBeenCalled();
+  });
+
+  it("propagates cancellation from the history read without suppressing pending messages", async () => {
+    const vaultRoot = await createTempVault();
+    const controller = new AbortController();
+    const original = assistantEngine.listAssistantInputEvents;
+    vi.spyOn(assistantEngine, "listAssistantInputEvents").mockImplementationOnce(async (input) => {
+      expect(input.signal).toBe(controller.signal);
+      controller.abort(new Error("Synthetic scan cancellation"));
+      return original(input);
+    });
+    await expect(selectHostedAssistantInputIds({
+      mode: "background", vaultRoot, signal: controller.signal,
+    })).rejects.toThrow("Synthetic scan cancellation");
   });
 
   it("background mode selects bounded oldest non-terminal pending ids", async () => {

@@ -351,3 +351,15 @@ retrying; this avoids misleading projection-delivery timeouts.
 
 Device import yield reasons and receipt-capacity slicing are specified in
 [`agent-docs/RELIABILITY.md`](../../agent-docs/RELIABILITY.md).
+
+
+### Background stale retry discovery
+
+Background input selection reuses its content-retention event snapshot for stale
+retry discovery. Retention still owns the full-store scan; retry discovery does
+not perform a second scan. It groups recent pending member messages by exact
+source/account/thread, considers only later member inputs in those chats, and
+stops at the newest replied or committed-reply evidence per chat. System inputs
+and image completions cannot supersede member messages. The caller's abort
+signal reaches history listing, retention, compaction and retry evidence checks.
+No prompt, reply policy, persisted index, or foreground provider input changes.

@@ -415,6 +415,11 @@ describe("weekly game: posting", () => {
     // Thirty seconds of clock slack is allowed; more is not.
     expect(post(state, LEO, thirtyAfter, { captureAgeMs: (30 * 60 - 25) * 1000 }).entries[0].dayIndex).toBe(1);
     expect(post(state, LEO, thirtyAfter, { captureAgeMs: (30 * 60 - 35) * 1000 }).entries[0].dayIndex).toBe(2);
+    // Grace cannot make a photo from two days ago count for yesterday.
+    expect(codeOf(() => post(state, LEO, thirtyAfter, { captureAgeMs: 2 * 86_400_000 }))).toBe("DAY_CLOSED");
+    const yesterdayStart = at(state, LEO, 1, 3).getTime();
+    expect(post(state, LEO, thirtyAfter, { captureAgeMs: thirtyAfter.getTime() - yesterdayStart + 25_000 }).entries[0].dayIndex).toBe(1);
+    expect(codeOf(() => post(state, LEO, thirtyAfter, { captureAgeMs: thirtyAfter.getTime() - yesterdayStart + 35_000 }))).toBe("DAY_CLOSED");
     // No capture age: today.
     expect(post(state, LEO, thirtyAfter).entries[0].dayIndex).toBe(2);
     // Yesterday's shot past the hour, or once yesterday already has a live post, counts for no day.
