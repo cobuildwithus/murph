@@ -2714,6 +2714,43 @@ The onboarding lane is intentionally thin:
 - Verified email sync updates canonical hosted email-authorization facts in web
   storage; it does not write hosted execution env.
 
+Session reads in `src/lib/better-auth/session.ts` use a session-only Better Auth
+logger. Only the pinned `getSession` catch's exact error-level
+`INTERNAL_SERVER_ERROR` call with one argument makes a best-effort
+`console.error("Hosted auth session read failed.", { observedErrorCategory })`
+call through the existing Vercel structured console pipeline. The observation
+classifies the thrown value before Better Auth replaces it with
+`INTERNAL_SERVER_ERROR` / `FAILED_TO_GET_SESSION`; it does not establish the
+underlying root cause or which awaited operation failed.
+
+`observedErrorCategory` is a closed, source-owned vocabulary:
+
+| Observed value | Category |
+| --- | --- |
+| Exact Prisma known-request or initialization error, own data code `P1001` | `database_unreachable` |
+| Same, code `P1002` or `P1008` | `database_timeout` |
+| Same, code `P2024` | `database_pool_timeout` |
+| Same, code `P2034` | `database_transaction_conflict` |
+| Same classes, any other, absent, malformed or accessor code | `database_unknown` |
+| Exact `AuthRecordChangedError` | `auth_record_changed` |
+| Exact native `TypeError`, `RangeError`, `SyntaxError`, or `Error` | `native_type`, `native_range`, `native_syntax`, or `native_error`, respectively |
+| Anything else, including unrecognized subclasses, plain objects and proxies | `unknown` |
+
+Classification checks native error branding and immediate prototype identity;
+it reads only own data descriptors for Prisma `code` / `errorCode`. It never
+evaluates error getters or copies library messages, raw errors, names, codes,
+URLs, queries, tokens, identities, credentials, stacks, causes or nested payloads.
+The emitted object contains only `observedErrorCategory`. Classification or
+console failure cannot change the session result. The original library mask,
+status/body, APIError passthrough, browser/native transport and refresh behavior
+remain unchanged. Success and anonymous reads emit nothing; failures after
+`getSession` remain with their existing owners. Other Better Auth constructions,
+including logout, retain disabled library logging, and unrelated messages on
+the session instance are discarded. This adds no I/O beyond the existing console
+pipeline, state, retries, validation or authentication decisions. The regression
+tests use the actual pinned library with synthetic local database/crypto
+boundaries; their injected causes are not evidence of a production occurrence.
+
 Current hosted billing assumptions:
 
 - Starter enrollment requires no Checkout. Paid hosted onboarding uses Stripe
