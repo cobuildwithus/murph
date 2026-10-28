@@ -13,6 +13,8 @@ export type HostedAssistantTurnTimingStage =
   | 'usage-recorded'
   | 'turn-artifacts-finalized'
   | 'reply-dispatched'
+  | 'turn-delivery-finalized'
+  | 'auto-reply-outcome-committed'
   | 'scan-state-persisted'
   | 'automation-pass-finished'
   | 'foreground-delivery-phase-started'
@@ -39,7 +41,50 @@ export type HostedAssistantTurnTimingDeliveryOutcomeKind =
   | 'queued'
   | 'sent'
 
+// Fixed, content-free child timings. These are nested within existing stages,
+// not extra elapsed time or a new source of delivery authority.
+export const HOSTED_ASSISTANT_PERSISTENCE_TIMING_FIELDS = [
+  'turnTimingUserPersistenceMs',
+  'turnTimingAuditTranscriptMs',
+  'turnTimingAssistantTranscriptMs',
+  'turnTimingGeneratedImageMarkersMs',
+  'turnTimingNoReplyMarkersMs',
+  'turnTimingSessionPersistenceMs',
+  'turnTimingAcceptedTargetMs',
+  'turnTimingOutboxLockWaitMs',
+  'turnTimingOutboxDedupeMs',
+  'turnTimingOutboxIntentPersistenceMs',
+  'turnTimingOutboxReceiptPersistenceMs',
+  'turnTimingOutboxDiagnosticMs',
+  'turnTimingReceiptFinalizationMs',
+  'turnTimingFirstContactMs',
+  'turnTimingTerminalDiagnosticMs',
+  'turnTimingOutcomeArtifactsMs',
+  'turnTimingSuppressionEvidenceMs',
+  'turnTimingOutboxIntentCount',
+] as const
+
+export type HostedAssistantPersistenceTiming = Partial<Record<
+  typeof HOSTED_ASSISTANT_PERSISTENCE_TIMING_FIELDS[number], number
+>>
+export type HostedAssistantPersistenceTimingSink = (
+  timing: Readonly<HostedAssistantPersistenceTiming>,
+) => void
+
+export function reportHostedAssistantPersistenceTiming(
+  sink: HostedAssistantPersistenceTimingSink | undefined,
+  timing: HostedAssistantPersistenceTiming,
+): void {
+  if (!sink) return
+  try {
+    sink(timing)
+  } catch {
+    // Optional timing observers must not change persistence or delivery.
+  }
+}
+
 export interface HostedAssistantTurnTimingTraceInput {
+  persistenceTiming?: HostedAssistantPersistenceTiming
   currentTurnDeliveryIntentCount?: number | null
   deliveryAttempted?: boolean | null
   deliveryIntentId?: string | null
@@ -176,6 +221,12 @@ function buildHostedAssistantTurnTimingRawEvent(
     input.stepElapsedMs,
   )
 
+  for (const key of HOSTED_ASSISTANT_PERSISTENCE_TIMING_FIELDS) {
+    const value = input.persistenceTiming?.[key]
+    if (typeof value === 'number' && Number.isFinite(value) && value >= 0) {
+      rawEvent[key] = value
+    }
+  }
   return rawEvent
 }
 

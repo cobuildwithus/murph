@@ -51,3 +51,40 @@ describe("hosted turn timing diagnostics allowlist", () => {
     expect(details).not.toHaveProperty("usage");
   });
 });
+
+describe("persistence child timing compatibility", () => {
+  it.each(["turn-delivery-finalized", "auto-reply-outcome-committed"])(
+    "reads %s with bounded numbers while retaining the original anchor",
+    (stage) => {
+      expect(readRaw({
+        turnTimingStage: stage,
+        turnTimingProviderResultAtEpochMs: 1_768_046_400_000,
+        turnTimingOutboxLockWaitMs: 17.5,
+        turnTimingSessionPersistenceMs: 0,
+        turnTimingOutcomeArtifactsMs: 40,
+        turnTimingOutboxIntentCount: 2,
+        turnTimingUserPersistenceMs: -1,
+        turnTimingAssistantTranscriptMs: Number.NaN,
+        turnTimingReceiptFinalizationMs: "12",
+        turnTimingSecret: "synthetic payload must be dropped",
+      })).toEqual({
+        schema: "murph.assistant-turn-timing.v1",
+        type: "assistant.turn.timing",
+        turnTimingStage: stage,
+        turnTimingProviderResultAtEpochMs: 1_768_046_400_000,
+        turnTimingOutboxLockWaitMs: 17.5,
+        turnTimingSessionPersistenceMs: 0,
+        turnTimingOutcomeArtifactsMs: 40,
+        turnTimingOutboxIntentCount: 2,
+      });
+    },
+  );
+
+  it("keeps legacy records sparse instead of inventing child durations", () => {
+    expect(readRaw({})).toEqual({
+      schema: "murph.assistant-turn-timing.v1",
+      type: "assistant.turn.timing",
+      turnTimingStage: "reply-dispatched",
+    });
+  });
+});
