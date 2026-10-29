@@ -63,10 +63,12 @@
         },
         "pageRevisionId": {
           "type": "string",
+          "format": "starts_with",
           "pattern": "^sha256:.*"
         },
         "runSpecRevisionId": {
           "type": "string",
+          "format": "starts_with",
           "pattern": "^sha256:.*"
         },
         "testPlanId": {

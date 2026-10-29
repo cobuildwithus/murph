@@ -41,3 +41,5 @@ The user explicitly authorized backend, iOS and TestFlight deployment and native
 
 - Focused live schema journey passed with GPT-6.1 Sol using local subscription auth: one model/reasoning update, no duplicate effect, and a concise truthful next-message confirmation. UX verdict Ready. The canonical reminder journey could not start with either available binary because both lack the required native patch; no provider action occurred in those attempts. Existing Frog coverage records that launcher limitation.
 - CLI dependency isolation reproduces the exact old fingerprint under Zod 4.5.4 and the regenerated fingerprint under 4.6.6. Both skill-hash tests pass. No independent CLI command topology change was introduced.
+
+- The next platform shard reached Contracts and exposed two stale generated schema files after the Zod update. Regeneration adds only four starts_with format annotations to fields whose existing sha256 prefix patterns are unchanged. All 390 Contracts tests, emitted-artifact examples and both Contracts typechecks pass. No schema source or runtime validator changed.
