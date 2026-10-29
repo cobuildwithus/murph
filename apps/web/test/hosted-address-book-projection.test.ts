@@ -657,6 +657,59 @@ describe("hosted address-book projection lifecycle", () => {
       });
   });
 
+  it.each([
+    ["keeps the owner's labels with a July launch.legal grant", "2026-07-23", "matched"],
+    ["omits them when the owner's grant predates the minimum", "2026-04-29", "consent_unavailable"],
+  ] as const)("%s", async (_label, legalVersion, outcome) => {
+    const { assertHostedLaunchRequiredConsentGranted: realAssert } =
+      await vi.importActual<typeof import("@/src/lib/legal/consent")>("@/src/lib/legal/consent");
+    const grantedAt = new Date("2026-08-01T12:00:00.000Z");
+    const grant = (scope: string, documentVersionsJson: Record<string, string>) => ({
+      createdAt: grantedAt, documentVersionsJson, grantedAt, lastEventId: null, memberId: "owner-member",
+      revokedAt: null, scope, source: "test", status: "granted", updatedAt: grantedAt,
+    });
+    const consentRows = {
+      hostedConsentGrant: {
+        findMany: vi.fn(async () => [
+          grant("launch.legal", {
+            "health-ai-safety-disclosure": legalVersion,
+            "privacy-policy": legalVersion,
+            "terms-of-service": legalVersion,
+          }),
+          grant("launch.health-data", { "consumer-health-data-notice": "2026-07-23" }),
+        ]),
+      },
+    };
+    const store = new AddressBookPrismaStub("owner-member");
+    const crypto = makeAddressBookCrypto();
+    await replaceHostedAddressBookProjection({
+      crypto,
+      memberId: "owner-member",
+      prisma: store as never,
+      request: parseHostedAddressBookReplaceRequest({
+        baseRevision: 0,
+        contacts: [{ advisoryName: "Alex R.", phoneNumber: "+12125550100" }],
+        mutationId: "4f5150c8-a9bc-42d3-b975-a289481a3140",
+        schemaVersion: 1,
+      }),
+      source: SOURCE,
+    });
+    // The real registry decides, against the owner's recorded versions.
+    accessMocks.assertHostedLaunchRequiredConsentGranted.mockImplementation(
+      async ({ memberId }: { memberId: string }) => realAssert({ memberId, prisma: consentRows as never }),
+    );
+
+    const result = await readHostedOwnerAddressBookAdvisoryNames({
+      containerMemberId: "thread-container",
+      crypto,
+      phoneHandles: ["+12125550100"],
+      prisma: store as never,
+      source: SOURCE,
+    });
+    expect(result.outcome).toBe(outcome);
+    expect(result.names.get("+12125550100")).toBe(outcome === "matched" ? "Alex R." : undefined);
+  });
+
   it("omits ambiguous duplicate advisory names", async () => {
     const store = new AddressBookPrismaStub("owner-member");
     const crypto = makeAddressBookCrypto();

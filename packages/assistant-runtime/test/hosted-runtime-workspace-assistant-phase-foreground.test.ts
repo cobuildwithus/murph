@@ -4472,7 +4472,17 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
 
   it("stabilizes foreground imports before successful auto-reply delivery dispatch", async () => {
     const deliveryEffect = createDeliveryEffect();
-    const prepareAutoReplyDelivery = vi.fn(async () => undefined);
+    let clock = 100;
+    const clockSpy = vi.spyOn(performance, "now").mockImplementation(() => clock);
+    const prepareAutoReplyDelivery = vi.fn(async () => { clock += 700; });
+    mocks.prepareHostedSystemMailboxItemForCheckpoint.mockImplementation(async (request) => {
+      if (request.allowedRouteActions?.includes("apply-member-channels-update")) clock += 30;
+      return null;
+    });
+    mocks.resolveHostedSystemMailboxNextWakeAt.mockImplementation(async (request) => {
+      if (request?.allowedRouteActions?.includes("apply-member-channels-update")) clock += 5;
+      return null;
+    });
     mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
       deliveryEffect,
     ]);
@@ -4506,7 +4516,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
 
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
       prepareAutoReplyDelivery,
-    }));
+    })).finally(() => clockSpy.mockRestore());
 
     expect(result).toEqual(expect.objectContaining({
       checkpointReason: "outbox_receipt",
@@ -4516,6 +4526,19 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       }),
     }));
     expect(prepareAutoReplyDelivery).toHaveBeenCalledTimes(1);
+    expect(mocks.drainHostedPreparedAssistantDeliveries).toHaveBeenCalledWith(
+      expect.objectContaining({ deliveryTraceContext: expect.objectContaining({
+        memberChannelBarrierMs: 735,
+        memberChannelBarrierTiming: {
+          deliveryMemberChannelIntentLookupMs: 0,
+          deliveryMemberChannelWatcherMs: 700,
+          deliveryMemberChannelUpdateDrainMs: 30,
+          deliveryMemberChannelNextWakeMs: 5,
+          deliveryMemberChannelProcessedCount: 0,
+          deliveryMemberChannelRecordedCount: 0,
+        },
+      }) }),
+    );
     expect(
       prepareAutoReplyDelivery.mock.invocationCallOrder[0],
     ).toBeLessThan(

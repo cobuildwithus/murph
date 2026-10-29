@@ -2165,7 +2165,9 @@ describe("hosted runtime internal web routes", () => {
     expect(workspace.hostedAssistantAstraAllowed).toBe(astraAllowed);
     expect(workspace.hostedAssistantPriorityUntil).toBe(!group
       ? "2026-09-24T12:00:00.000Z" : undefined);
-    expect(workspace.hostedAssistantSubagentModelOverridesAllowed).toBe(!["individual Pulse", "Family Pulse"].includes(_name));
+    // Every listed paid plan (and every group) may select Sol; Astra stays
+    // independently restricted by the assertion above.
+    expect(workspace.hostedAssistantSubagentModelOverridesAllowed).toBe(true);
   });
 
   describe("checkpoint failure observations", () => {

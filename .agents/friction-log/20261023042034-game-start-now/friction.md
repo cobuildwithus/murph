@@ -22,3 +22,9 @@ Give that fixture an explicit future start date and assert proposal success. Thi
 ## Context
 
 Found while running the required game PostgreSQL suites for a negotiation recovery fix. No production behavior changes are needed for this fixture.
+
+The game API Terms-consent journey had the same fixture assumption: default
+acceptance started the game before its explicit start-now request. The failure
+reproduced locally during the UTC acceptance window. Give that journey the same
+explicit future start date as neighboring API fixtures, preserving all consent
+refusal, agreement, and posting assertions.

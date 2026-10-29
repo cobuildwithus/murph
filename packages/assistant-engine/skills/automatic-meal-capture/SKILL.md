@@ -173,7 +173,11 @@ When enriching a captured meal:
    `--nutrition-source estimated` only for visual ingredient or portion
    estimates. For mixed evidence, describe both and set confidence from the
    weakest material assumption. Preserve the meal's occurred-at time and
-   source. Keep the photo until saved structure has been read back.
+   source. For a device meal, include `--source device` in that same edit.
+   `--with-daily-totals` belongs to add/import, not edit; after editing, read
+   the meal back. Read daily totals only when the existing presentation and
+   numeric-suitability rules authorize them. Keep the photo until saved
+   structure has been read back.
 6. If the edit fails or the read-back does not prove the intended structure,
    run one fresh bounded meal list for the capture date, re-identify the exact
    photo-backed device meal from its returned id, source, occurred-at time, and

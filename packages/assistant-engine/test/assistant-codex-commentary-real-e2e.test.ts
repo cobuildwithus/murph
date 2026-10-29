@@ -1,5 +1,5 @@
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { homedir, tmpdir } from 'node:os'
 import path from 'node:path'
 
 import { afterEach, describe, expect, it } from 'vitest'
@@ -12,6 +12,9 @@ import { buildAssistantExecutionBehaviorText } from '../src/assistant/model-beha
 
 const RUN_REAL_CODEX_E2E = process.env.MURPH_RUN_REAL_CODEX_E2E === '1'
 const describeRealCodex = RUN_REAL_CODEX_E2E ? describe : describe.skip
+const model = process.env.MURPH_REAL_CODEX_MODEL?.trim() || 'gpt-6.1-sol'
+const subscription = process.env.MURPH_REAL_CODEX_AUTH === 'subscription'
+const modelProvider = subscription ? 'openai' : 'openai-env'
 
 const ENV_ALLOWLIST = [
   'PATH', 'TMPDIR', 'TMP', 'TEMP', 'LANG', 'LC_ALL', 'LC_CTYPE',
@@ -31,15 +34,17 @@ async function createRealCodexFixture(): Promise<{
   env: NodeJS.ProcessEnv
   workingDirectory: string
 }> {
-  const codexHome = await mkdtemp(path.join(tmpdir(), 'murph-commentary-e2e-'))
-  temporaryPaths.push(codexHome)
+  const codexHome = subscription
+    ? process.env.MURPH_REAL_CODEX_HOME || path.join(homedir(), '.codex')
+    : await mkdtemp(path.join(tmpdir(), 'murph-commentary-e2e-'))
+  if (!subscription) temporaryPaths.push(codexHome)
   const workingDirectory = await mkdtemp(
     path.join(tmpdir(), 'murph-commentary-e2e-wd-'),
   )
   temporaryPaths.push(workingDirectory)
-  await mkdir(codexHome, { recursive: true })
-  await writeFile(path.join(codexHome, 'config.toml'), [
-    'model = "gpt-6.1-sol"',
+  if (!subscription) await mkdir(codexHome, { recursive: true })
+  if (!subscription) await writeFile(path.join(codexHome, 'config.toml'), [
+    `model = ${JSON.stringify(model)}`,
     'model_provider = "openai-env"',
     'model_reasoning_effort = "low"',
     'approval_policy = "never"',
@@ -63,12 +68,12 @@ async function createRealCodexFixture(): Promise<{
   ].join('\n'), { encoding: 'utf8', mode: 0o600 })
 
   const env: NodeJS.ProcessEnv = {}
-  for (const key of ENV_ALLOWLIST) {
+  for (const key of [...ENV_ALLOWLIST, ...(subscription ? ['HOME', 'XDG_CONFIG_HOME', 'XDG_DATA_HOME'] : [])]) {
     if (process.env[key]?.trim()) {
       env[key] = process.env[key]
     }
   }
-  env.OPENAI_API_KEY = process.env.OPENAI_API_KEY
+  if (!subscription) env.OPENAI_API_KEY = process.env.OPENAI_API_KEY
 
   return { codexHome, env, workingDirectory }
 }
@@ -77,7 +82,7 @@ async function createRealCodexFixture(): Promise<{
 // These real-binary tests prove both sides of the boundary: commentary remains
 // internal, and a requested member-visible interim update uses the explicit
 // murph.send_progress_update tool when that tool is available.
-describeRealCodex('real Codex progress channel contract e2e', () => {
+describeRealCodex('real Codex progress channel contract e2e', { tags: ['real-codex-live'] }, () => {
   it('keeps commentary-phase agent messages internal', async () => {
     const { codexHome, env, workingDirectory } = await createRealCodexFixture()
 
@@ -96,8 +101,9 @@ describeRealCodex('real Codex progress channel contract e2e', () => {
       approvalPolicy: 'never',
       codexHome,
       env,
-      model: 'gpt-6.1-sol',
-      modelProvider: 'openai-env',
+      model,
+      modelProvider,
+      codexCommand: process.env.MURPH_REAL_CODEX_COMMAND,
       onProgress(event) {
         internalProgress.push({ kind: event.kind, text: event.text })
       },
@@ -153,8 +159,9 @@ describeRealCodex('real Codex progress channel contract e2e', () => {
         profile: 'gpt5-agentic',
       }),
       env,
-      model: 'gpt-6.1-sol',
-      modelProvider: 'openai-env',
+      model,
+      modelProvider,
+      codexCommand: process.env.MURPH_REAL_CODEX_COMMAND,
       progressDelivery,
       prompt: [
         'Before doing this substantial multi-step task, send one brief',

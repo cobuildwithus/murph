@@ -1,3 +1,8 @@
+Linq validation telemetry and release verification are tracked in [the completed implementation plan](exec-plans/completed/2026-10-27-linq-validation-telemetry.md).
+Intentional reply-bubble pacing attribution is tracked in [the delivery alert plan](exec-plans/completed/2026-10-27-reply-delivery-pacing.md); the current contract remains in `references/hosted-runtime-protocol.md`.
+
+Terra chat defaults, subscriber Sol eligibility, and the once-only preference reset are tracked in [the completed implementation plan](exec-plans/completed/2026-10-26-terra-chat-default.md). `ARCHITECTURE.md` owns selection; `apps/cloudflare/DEPLOY.md` owns rollout order.
+
 Connected-app response-limit attribution is tracked in [the diagnostic plan](exec-plans/completed/2026-10-25-connected-result-outcomes.md). The durable telemetry contract stays in `apps/web/README.md`.
 
 Hosted cron correlation under the restricted runner environment: [implementation plan](exec-plans/completed/2026-10-24-cron-delivery-correlation.md). The durable format contract stays in `packages/assistant-engine/README.md`.
@@ -19,6 +24,8 @@ Command-gated CLI source-cause telemetry is owned by
 [`runtime-state`](../packages/runtime-state/README.md#optional-cli-source-cause);
 implementation and local verification are tracked in
 [the active plan](exec-plans/active/2026-10-22-cli-source-cause.md).
+The remaining meal original-code and nested-cause correction is tracked in
+[meal failure origin telemetry](exec-plans/completed/2026-10-24-meal-failure-origin-telemetry.md).
 
 CLI canonical-write lock wait and importer load phases are owned by
 [`hosted-runtime-log-database.md`](../docs/hosted-runtime-log-database.md#canonical-write-wait-and-importer-load-reader-before-producer);
@@ -152,6 +159,11 @@ Garmin history import coalescing and synthetic fetch-work evidence are recorded
 in [the import-speed plan](exec-plans/completed/2026-09-24-garmin-import-speed.md).
 
 # Murph Agent Docs Index
+
+The weekly game's flag-gated Terms check on app writes
+(`MURPH_GAME_REQUIRE_CURRENT_TERMS`, `TERMS_REQUIRED`) is owned by
+[the weekly game spec](product-specs/weekly-game.md); its consent semantics sit
+with the other surfaces in `docs/legal-consent-implementation.md`.
 
 Weekly game report, block and the write-time content check are owned by
 `ARCHITECTURE.md` § Weekly game report, block, and content check; the player
@@ -1002,6 +1014,7 @@ Package verifier worker-exit result preservation is tracked in
 | `agent-docs/exec-plans/completed/2026-09-29-gpt61-sol-default.md` | GPT-6.1 Sol defaults, saved reminder upgrades, and Codex 0.159.1 compatibility. | Completed execution plan | Medium | 2026-09-29 |
 | `agent-docs/exec-plans/completed/2026-09-29-gpt61-sol-rollout.md` | Reviewed GPT-6.1 Sol implementation and staged release prerequisites. | Completed source-delivery plan | Medium | 2026-09-29 |
 | `agent-docs/exec-plans/completed/2026-09-23-vault-share-background.md` | Isolated checkpoint projection that continues across foreground replies; ownership and verification. | Hosted vault-share background execution | Medium | 2026-09-23 |
+| `agent-docs/exec-plans/completed/2026-10-28-junction-resource-hour-reader.md` | Reader-first admission and bounded hourly resource continuation proof before PR #4377. | Historical implementation evidence | Medium | 2026-10-28 |
 | `agent-docs/exec-plans/completed/2026-09-28-junction-record-window.md` | Bounded recovery for oversized Junction hourly-feature days. | Device-sync recovery plan | Medium | 2026-09-28 |
 | `agent-docs/exec-plans/completed/2026-09-28-checkpoint-failure-stage-telemetry.md` | Fixed-vocabulary checkpoint rejection-stage observation and response-preservation proof. | Completed telemetry implementation evidence | Low | 2026-09-28 |
 | `agent-docs/exec-plans/completed/2026-09-28-codex-0158-live-port.md` | Codex 0.158.0 public Live patch port, removal review, and native compatibility verification; deployment gates remain. | Historical implementation evidence | Medium | 2026-09-28 |

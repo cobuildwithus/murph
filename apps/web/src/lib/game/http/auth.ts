@@ -1,7 +1,9 @@
 import { isHostedOnboardingError } from "../../hosted-onboarding/errors";
 import { requireHostedMemberAuthFromBearerToken } from "../../hosted-onboarding/request-auth";
+import { hasHostedConsentAtPublishedVersions, readHostedConsentStatus } from "../../legal/consent";
 import { getPrisma } from "../../prisma";
 import { areGameDevToolsAllowed } from "../access";
+import type { GameCommand } from "../contract";
 import { canEnterGame } from "../service";
 import { gameHttpError } from "./errors";
 
@@ -30,6 +32,37 @@ export async function requireGameMemberAuth(request: Request, inviteToken?: stri
   }
   if (!(await canEnterGame(auth.member.id, inviteToken || request.headers.get(GAME_INVITE_HEADER) || null))) throw gameDisabled();
   return auth;
+}
+
+/**
+ * Starting, joining and playing a game: the writes that need Murph's current
+ * Terms. Reading, reporting, blocking, a profile, and taking back your own
+ * post, invite or change never wait on them.
+ */
+const NEEDS_CURRENT_TERMS: ReadonlySet<unknown> = new Set<GameCommand["type"]>([
+  "createGame", "join", "negotiate", "post", "proposeChange", "redeem",
+]);
+
+/**
+ * With `MURPH_GAME_REQUIRE_CURRENT_TERMS=true`, those writes need the
+ * `launch.legal` grant at the published document versions, not just the
+ * minimum the rest of Murph accepts, so players agree once to the Terms that
+ * cover games before they play on. Anything else, or unset, changes nothing.
+ * The refusal names the documents to agree to, with their versions.
+ */
+export async function requireCurrentTermsFor(
+  memberId: string,
+  command: { type?: unknown },
+  env: Readonly<Record<string, string | undefined>> = process.env,
+): Promise<void> {
+  if (env.MURPH_GAME_REQUIRE_CURRENT_TERMS !== "true" || !NEEDS_CURRENT_TERMS.has(command.type)) return;
+  const status = await readHostedConsentStatus({ memberId, prisma: getPrisma() });
+  const terms = status.scopes.find((scope) => scope.scope === "launch.legal");
+  if (terms && hasHostedConsentAtPublishedVersions(terms)) return;
+  throw gameHttpError("TERMS_REQUIRED", 403, "Agree to Murph's Terms to keep playing.", false, {
+    documents: terms?.documents ?? [],
+    scope: "launch.legal",
+  });
 }
 
 export function assertGameDevRoutesAllowed(): void {

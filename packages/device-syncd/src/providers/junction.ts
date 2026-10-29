@@ -5200,11 +5200,11 @@ export function createJunctionDeviceSyncProvider(
     windowEnd: string,
     skippedOptionalResources: JunctionSkippedOptionalResource[],
     resource: string,
-    sourceProviderSlug?: string | null,
-    completedWorkoutStreamIdentities: ReadonlySet<string> = new Set(),
-    workoutStreamEmptySeen = false,
-    historicalResourceJobWorkBudget?: JunctionHistoricalResourceJobWorkBudget,
-    windowHours: 1 | 24 = 24,
+    sourceProviderSlug: string | null | undefined,
+    completedWorkoutStreamIdentities: ReadonlySet<string>,
+    workoutStreamEmptySeen: boolean,
+    historicalResourceJobWorkBudget: JunctionHistoricalResourceJobWorkBudget | undefined,
+    windowHours: 1 | 24,
   ): Promise<JunctionDailyTimeseriesImportResult> {
     if (usesJunctionHourlyResourceWindow(resource, windowHours)) {
       return importJunctionHourlyResourceWindow({

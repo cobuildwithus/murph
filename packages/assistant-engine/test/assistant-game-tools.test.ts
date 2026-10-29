@@ -130,6 +130,7 @@ it.each(['mark_incomplete', 'restore_day'])('binds %s to the current speaker wit
   expect(MURPH_UPDATE_GAME_TOOL.description).toContain('ask once for the date')
   expect(MURPH_UPDATE_GAME_TOOL.description).toContain('one plain line naming the date or weekday')
   expect(MURPH_UPDATE_GAME_TOOL.description).toContain('never from progress.checkedAt or processing time')
+  expect(MURPH_UPDATE_GAME_TOOL.description).toContain('Before 3 AM, today is the previous calendar date; yesterday is one further day back')
 })
 
 it('cancels a not-yet-started game for the current speaker with no proposal or extra selector', async () => {

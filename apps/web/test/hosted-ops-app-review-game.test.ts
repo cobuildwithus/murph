@@ -3,6 +3,8 @@ import path from "node:path";
 
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
+import type { GameCommand } from "@/src/lib/game/contract";
+import { moderateGameCommand } from "@/src/lib/game/moderation";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 
 vi.mock("server-only", () => ({}));
@@ -43,6 +45,39 @@ describe("hosted ops App Review game route", () => {
     mocks.seedHostedOpsAppReviewGame.mockImplementation(async ({ mode }: { mode: string }) => ({
       action: mode === "apply" ? "applied" : "dry-run", blockers: [], sends: "none",
     }));
+  });
+
+  it("seeds only favors and plain words, nothing a reviewer could read as money", async () => {
+    const { APP_REVIEW_GAME_SEEDS } = await import("@/src/lib/hosted-ops/app-review-game");
+    expect(APP_REVIEW_GAME_SEEDS.map((seed) => seed.stake.item)).toEqual([
+      "Coffee of your choice",
+      "Loser cooks dinner",
+    ]);
+    for (const seed of APP_REVIEW_GAME_SEEDS) {
+      const create: GameCommand = {
+        gameId: "game_review_seed",
+        inviteeFirstName: "Sam",
+        terms: {
+          schedule: { count: 3 },
+          stakes: [seed.stake],
+          tasks: [seed.tasks.partner, seed.tasks.reviewer].map((text, seat) => ({ seat, text })),
+        },
+        type: "createGame",
+      };
+      expect(() => moderateGameCommand(create)).not.toThrow();
+      const texts = [seed.stake.item, seed.tasks.partner, seed.tasks.reviewer];
+      for (const entry of seed.entries) {
+        if (entry.kind !== "words") continue;
+        texts.push(entry.text);
+        const post: GameCommand = {
+          entryId: "entry_review_seed", gameId: "game_review_seed", kind: "words", mediaKeys: [], text: entry.text, type: "post",
+        };
+        expect(() => moderateGameCommand(post)).not.toThrow();
+      }
+      for (const text of texts) {
+        expect(text).not.toMatch(/[$€£¢]|\b(?:pay|pays|paid|paying|buy|buys|bought|cash|money|dollars?|bucks|bet|bets|wager|venmo|paypal|zelle)\b/iu);
+      }
+    }
   });
 
   it("dry-runs by default behind same-origin founder access", async () => {

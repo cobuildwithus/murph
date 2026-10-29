@@ -20,6 +20,20 @@ accepting. Everyone else sees every game route as missing. Removing a listed
 member turns their unlisted opponents' games off, mid-game included. The iOS
 client is the Murph app.
 
+With `MURPH_GAME_REQUIRE_CURRENT_TERMS=true` (unset or anything else is off, and
+off changes nothing), the HTTP door also refuses creating, accepting,
+negotiating, posting, proposing a change and marking a prize done until the
+member's `launch.legal` grant recorded the published document versions, not
+just the minimum the rest of Murph accepts (`requireCurrentTermsFor` in
+`http/auth.ts`, `hasHostedConsentAtPublishedVersions` in `legal/consent.ts`). The refusal is `403 TERMS_REQUIRED`
+with `details: { scope: "launch.legal", documents }`, each document carrying its
+id, title, link and current version, which is what the companion consent route
+(`POST /api/device-sync/companion/legal-consent`) takes. Reads, reports, blocks,
+the profile, and withdrawing your own post, invite or change stay open. The app
+shows Murph's Terms step, records the grant, and sends the write again. Clients
+that predate the code see an ordinary refusal, so turn it on only once a build
+that handles it is out. Game moves made in Murph's chat don't pass this door.
+
 ## Product
 
 A weekly game is a run of days between close people. Each player picks a habit
@@ -138,9 +152,11 @@ this default without deleting other people's private contact choices.
   excuse yet, never today. It neither scores nor unlocks.
 - **Post to unlock.** A posted partner day exposes only its posting time and
   optional device-rendered blur preview until you post that day. No media,
-  words or summary data is exposed while locked. Unlocking is permanent after
-  a non-excuse attempt, including withdrawal. Recap reveals every live artifact
-  to the game's players. Excuses remain private to their owner.
+  words or summary data is exposed while locked. The blur stays with the
+  unlocked post, for the app to show while its picture loads. Unlocking is
+  permanent after a non-excuse attempt, including withdrawal. Recap reveals
+  every live artifact to the game's players. Excuses remain private to their
+  owner.
 - **Offline grace.** In the hour after a player's 3am boundary, a photo the
   phone says it captured before the boundary (monotonic capture age, with 30
   seconds of slack) counts for the day that just ended, if that was a scheduled

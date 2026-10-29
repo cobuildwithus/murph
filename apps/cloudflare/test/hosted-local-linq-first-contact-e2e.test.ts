@@ -1139,7 +1139,7 @@ productionDescribe("hosted local Linq first-contact e2e", () => {
     expect(inboundPromptText).toContain(
       "$MURPH_ASSISTANT_SKILLS_ROOT/murph-onboarding/SKILL.md",
     );
-    expect(inboundPromptText).toContain("User message:\nSource: linq");
+    expect(inboundPromptText).toContain("Source: linq");
     },
     300_000,
   );

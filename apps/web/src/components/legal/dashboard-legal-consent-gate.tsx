@@ -16,6 +16,17 @@ import {
 } from "@/src/components/ui/dialog";
 import type { HostedConsentStatus } from "@/src/lib/legal/consent";
 
+/** What the current Terms and Privacy Policy versions added. Update it with the next bump. */
+const TERMS_UPDATE_SUMMARY = "We added rules for games.";
+
+/** The update dialog's line for a member who agreed before; it names the change only while the Terms step is pending. */
+export function dashboardLegalUpdateDescription(status: HostedConsentStatus): string {
+  const termsPending = status.launchScopes.some(
+    (scope) => scope.scope === "launch.legal" && !scope.granted,
+  );
+  return `We updated Murph's legal documents.${termsPending ? ` ${TERMS_UPDATE_SUMMARY}` : ""} Accept the current versions to get your full dashboard back.`;
+}
+
 export function DashboardLegalConsentGate({
   acceptScope,
   initialStatus,
@@ -44,7 +55,7 @@ export function DashboardLegalConsentGate({
 
   const title = isUpdate ? "Review what changed" : "Finish your consent";
   const description = isUpdate
-    ? "We updated Murph's legal documents. Accept the current versions to get your full dashboard back."
+    ? dashboardLegalUpdateDescription(initialStatus)
     : "Accept the remaining documents to connect health sources and use your full dashboard.";
 
   return (

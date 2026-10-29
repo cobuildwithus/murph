@@ -43,8 +43,20 @@ import {
 import { addDays } from "./time";
 import { pendingGameChangeView, gameChangeControls } from "./changes";
 
+const GAME_MEDIA_PATH = "/api/game/v1/media/";
+
 export function gameMediaUrl(key: string): string {
-  return `/api/game/v1/media/${encodeURIComponent(key)}`;
+  return `${GAME_MEDIA_PATH}${encodeURIComponent(key)}`;
+}
+
+/** The media key behind a view's link; null for anything else. */
+export function gameMediaKeyOf(url: string): string | null {
+  if (!url.startsWith(GAME_MEDIA_PATH)) return null;
+  try {
+    return decodeURIComponent(url.slice(GAME_MEDIA_PATH.length));
+  } catch {
+    return null;
+  }
 }
 
 export interface GameTicketRow {
@@ -296,9 +308,9 @@ function otherDayView(input: GameViewInput, visible: ReadonlySet<string>, other:
   // Reported: still their post for the day, with nothing of it to show.
   if (posted && input.hiddenEntryIds?.has(posted.id)) return { entry: null, hidden: true, seat: other.seat, status: "posted" };
   if (posted) {
-    const open = visible.has(posted.id);
-    return { entry: open ? entryView(posted, input) : null, seat: other.seat, status: open ? "posted" : "locked",
-      ...(!open ? { postedAt: posted.receivedAt.toISOString(), blurHash: posted.blurHash } : {}) };
+    if (!visible.has(posted.id)) return { entry: null, seat: other.seat, status: "locked", postedAt: posted.receivedAt.toISOString(), blurHash: posted.blurHash };
+    // Its blur stays once it's open, for the app to show while the picture loads.
+    return { entry: entryView(posted, input), seat: other.seat, status: "posted", ...(posted.blurHash ? { blurHash: posted.blurHash } : {}) };
   }
   return { entry: null, seat: other.seat, status: unpostedStatus(input, other, index) };
 }

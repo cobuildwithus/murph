@@ -64,7 +64,7 @@ A summary never derives, proposes, accepts, activates, or mutates targets.
 The food-journal skill owns the once-only optional introduction; prior declines
 and number-sensitive preferences suppress it, and silence never accepts goals.
 
-For explicit target-setting, read `references/daily-nutrition-card-goals.md`.
+Before creating or changing any saved numeric nutrition target, including a small revision to a provisional target, read `references/daily-nutrition-card-goals.md`. After the write, run `vault-cli goal show <goal-id>` and verify the complete target set, paused status, and unchanged effective window before confirming.
 It retains evidence-grounded derivation, the single canonical Goal proposal,
 explanation-before-card, explicit acceptance and decline semantics. The card tool
 prompt owns the numeric-suitability rule: use one compact safety question only

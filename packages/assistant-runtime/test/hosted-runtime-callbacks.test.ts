@@ -5561,14 +5561,36 @@ describe("hosted runtime callbacks", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-08T00:00:00.000Z"));
     try {
-      const effects = createReplyBubbleEffects({
+      const effects = [...createReplyBubbleEffects({
         baseKey: "delivery_bubbles",
         channel: "linq",
         count: 3,
         turnId: "turn_bubbles",
-      });
+      }), ...createReplyBubbleEffects({
+        baseKey: "unrelated_reply",
+        channel: "linq",
+        count: 1,
+        turnId: "turn_unrelated",
+      })];
       const effectById = new Map(effects.map((effect) => [effect.effectId, effect]));
       const dispatchedAt: number[] = [];
+      const pacing: number[] = [];
+      mocks.sendLinqMessage.mockResolvedValue({
+        providerMessageId: "message_bubble",
+        providerThreadId: "linq_chat_123",
+        target: "linq_chat_123",
+        targetKind: "thread",
+      });
+      const platform = { logPort: { write: vi.fn<HostedRuntimeLogPort["write"]>(async (request) => {
+        for (const entry of request.entries) {
+          if (entry.redactedJson?.turnTimingStage === "linq-dispatch-entered") {
+            const duration = entry.redactedJson.deliveryReplyBubblePacingMs;
+            assert(typeof duration === "number");
+            pacing.push(duration);
+          }
+        }
+        return { loggedCount: request.entries.length };
+      }) } };
       mocks.readAssistantOutboxIntentMirrorState.mockImplementation(
         async ({ intentId }) => createMirrorState({
           delivery: null,
@@ -5577,10 +5599,16 @@ describe("hosted runtime callbacks", () => {
           status: "pending",
         }),
       );
-      mocks.dispatchAssistantOutboxIntent.mockImplementation(async ({ intentId }) => {
+      mocks.dispatchAssistantOutboxIntent.mockImplementation(async ({ intentId, dependencies }) => {
         const effect = effectById.get(intentId);
         assert(effect);
         dispatchedAt.push(Date.now());
+        await dependencies.sendLinq({
+          idempotencyKey: effect.payload.idempotencyKey,
+          message: "Synthetic reply bubble.",
+          target: "linq_chat_123",
+          targetKind: "thread",
+        });
         return createDispatchResult({
           delivery: createDelivery({
             channel: "linq",
@@ -5596,7 +5624,18 @@ describe("hosted runtime callbacks", () => {
 
       const drain = drainHostedPreparedAssistantDeliveries({
         assistantDeliveryEffects: effects,
-        effectsPort: createHostedRuntimeEffectsPortStub(),
+        deliveryTraceContext: {
+          foregroundDeliveryPhaseStartedAtMonotonicMs: performance.now(),
+          latencyTracePort: null,
+          runtimeAttemptId: "attempt_bubble_pacing",
+        },
+        effectsPort: createHostedRuntimeEffectsPortStub({
+          assertLinqRecentInboundEngagement: vi.fn(async (request) =>
+            buildClaimedLinqEngagementResult(request)),
+        }),
+        forwardedEnv: { LINQ_API_TOKEN: "linq-token" },
+        platform,
+        providerFetch: vi.fn<typeof fetch>(async () => new Response(null, { status: 204 })),
         vaultRoot: HOSTED_WAKE.vaultRoot,
         wake: HOSTED_WAKE.wake,
       });
@@ -5608,11 +5647,16 @@ describe("hosted runtime callbacks", () => {
       await vi.advanceTimersByTimeAsync(1);
       expect(mocks.dispatchAssistantOutboxIntent).toHaveBeenCalledTimes(2);
       await vi.advanceTimersByTimeAsync(1_500);
-      await expect(drain).resolves.toHaveLength(3);
-      expect(mocks.dispatchAssistantOutboxIntent).toHaveBeenCalledTimes(3);
+      await expect(drain).resolves.toHaveLength(4);
+      expect(mocks.dispatchAssistantOutboxIntent).toHaveBeenCalledTimes(4);
+      await drainHostedRuntimeLogWritesBestEffort();
+      expect(pacing).toEqual([0, 1_500, 3_000, 0]);
+      const rows = platform.logPort.write.mock.calls.flatMap(([request]) => request.entries);
+      expect(parseHostedRuntimeLogRequest({ entries: rows })).toEqual({ entries: rows });
       expect(dispatchedAt).toEqual([
         Date.parse("2026-04-08T00:00:00.000Z"),
         Date.parse("2026-04-08T00:00:01.500Z"),
+        Date.parse("2026-04-08T00:00:03.000Z"),
         Date.parse("2026-04-08T00:00:03.000Z"),
       ]);
     } finally {
@@ -8171,6 +8215,59 @@ describe("hosted runtime callbacks", () => {
     });
     expect(mocks.dispatchAssistantOutboxIntent).toHaveBeenCalledTimes(1);
     expect(mocks.resetAssistantOutboxPreparedDispatchById).not.toHaveBeenCalled();
+  });
+
+  it("retains safe Linq validation context in Worker failure logs", async () => {
+    const effect = createEffect({ channel: "linq", transportIdempotent: true });
+    mocks.dispatchAssistantOutboxIntent.mockResolvedValueOnce(createDispatchResult(
+      { status: "failed", lastError: { code: "LINQ_API_REQUEST_FAILED", message: "HTTP 400" } },
+      {
+        code: "LINQ_API_REQUEST_FAILED",
+        message: "HTTP 400",
+        diagnosticContext: {
+          status: 400,
+          providerErrorCode: "1005",
+          providerRequestId: "synthetic-trace",
+          providerErrorFieldHints: "url,parts",
+          providerErrorReasonHints: "unsupported",
+          providerErrorMediaTypeHints: "webp",
+          requestPublicUrlMediaFormatSummary: "webp:1",
+          providerErrorMessageLength: 55,
+          requestBodyShape: "object:message|message:idempotency_key,parts",
+          requestMessagePartCount: 2,
+          requestPublicUrlMediaPartCount: 1,
+          requestAttachmentMediaPartCount: 0,
+          hasReplyToMessageId: false,
+          providerErrorMessage: "private provider prose",
+        },
+      },
+    ));
+    const outcomes = await drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub(),
+      providerFetch: vi.fn<typeof fetch>(),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    });
+    expect(outcomes[0]?.deliveryStatus).toBe("failed");
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(expect.objectContaining({
+      details: expect.objectContaining({
+        deliveryErrorDetailStatus: 400,
+        deliveryErrorDetailProviderCode: "1005",
+        deliveryErrorDetailProviderRequestId: "synthetic-trace",
+        deliveryErrorDetailProviderFieldHints: "url,parts",
+        deliveryErrorDetailProviderReasonHints: "unsupported",
+        deliveryErrorDetailProviderMediaTypeHints: "webp",
+        deliveryErrorDetailRequestPublicUrlMediaFormatSummary: "webp:1",
+        deliveryErrorDetailProviderMessageLength: 55,
+        deliveryErrorDetailRequestBodyShape: "object:message|message:idempotency_key,parts",
+        deliveryErrorDetailRequestMessagePartCount: 2,
+        deliveryErrorDetailRequestPublicUrlMediaPartCount: 1,
+        deliveryErrorDetailRequestAttachmentMediaPartCount: 0,
+        deliveryErrorDetailHasReplyToMessageId: false,
+      }),
+    }));
+    expect(JSON.stringify(mocks.emitHostedExecutionStructuredLog.mock.calls)).not.toContain("private provider prose");
   });
 
   it.each([
@@ -13949,6 +14046,14 @@ describe("hosted runtime callbacks", () => {
           foregroundDeliveryPhaseStartedAtMonotonicMs: performance.now() - 40,
           latencyTracePort: null,
           memberChannelBarrierMs: 12.4,
+          memberChannelBarrierTiming: {
+            deliveryMemberChannelIntentLookupMs: 1.4,
+            deliveryMemberChannelWatcherMs: 7.6,
+            deliveryMemberChannelUpdateDrainMs: 2,
+            deliveryMemberChannelNextWakeMs: Number.NaN,
+            deliveryMemberChannelProcessedCount: 1,
+            deliveryMemberChannelRecordedCount: 0,
+          },
           runtimeAttemptId: "attempt_dispatch_timing",
         },
         effectsPort: createHostedRuntimeEffectsPortStub({
@@ -13979,6 +14084,12 @@ describe("hosted runtime callbacks", () => {
           eventCode: "assistant.automation_detail",
           redactedJson: {
             deliveryMemberChannelBarrierMs: 12,
+            deliveryMemberChannelIntentLookupMs: 1,
+            deliveryMemberChannelWatcherMs: 8,
+            deliveryMemberChannelUpdateDrainMs: 2,
+            deliveryMemberChannelProcessedCount: 1,
+            deliveryMemberChannelRecordedCount: 0,
+            deliveryReplyBubblePacingMs: 0,
             deliveryProviderEntryFenceMs: expect.any(Number),
             deliveryRouteAuthorityCheckMs: expect.any(Number),
             deliverySendPreparationMs: expect.any(Number),

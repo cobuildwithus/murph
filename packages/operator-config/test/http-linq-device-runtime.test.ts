@@ -3386,6 +3386,90 @@ test('linq runtime records safe request and response diagnostics for provider ht
   )
 })
 
+test.each([
+  { message: 'Invalid url in parts: https://private.example.test/member-image.png', hints: 'url,parts' },
+  { message: 'Invalid reply_to.message_id for private-recipient@example.test', hints: 'reply_to,message_id' },
+  { message: 'Invalid parameter value', hints: 'none' },
+  { message: 'private_recipient private_url attachment_identity', hints: 'none' },
+  { message: '', hints: 'none' },
+  { message: null, hints: undefined },
+])('linq error field hints retain only closed schema vocabulary: $hints', async ({ message, hints }) => {
+  await assert.rejects(
+    () => sendLinqChatMessage(
+      { chatId: 'synthetic-chat', message: 'synthetic reply' },
+      {
+        env: { LINQ_API_TOKEN: '<REDACTED_TOKEN>' },
+        fetchImplementation: async () => createJsonResponse(
+          { error: { code: 1005, message }, trace_id: 'synthetic-trace' },
+          { status: 400 },
+        ),
+      },
+    ),
+    (error) => {
+      assert.ok(error instanceof VaultCliError)
+      assert.equal(error.context?.providerErrorCode, '1005')
+      assert.equal(error.context?.providerErrorFieldHints, hints)
+      assert.equal(error.context?.providerErrorMessageLength, message?.length)
+      assert.equal(error.context?.retryable, false)
+      const diagnostic = JSON.stringify(error.context)
+      assert.ok(!diagnostic.includes('private.example.test'))
+      assert.ok(!diagnostic.includes('private-recipient'))
+      assert.ok(!diagnostic.includes('member-image'))
+      assert.ok(!diagnostic.includes('private_recipient'))
+      return true
+    },
+  )
+})
+
+test.each([
+  { message: 'Unsupported content_type image/webp for private-file.webp', reasons: 'unsupported', formats: 'webp' },
+  { message: 'Invalid url: failed to download image from private-host', reasons: 'invalid,download', formats: 'none' },
+  { message: 'File too large; size_bytes exceeds maximum', reasons: 'too_large', formats: 'none' },
+  { message: 'Missing required reply_to.message_id; must be a UUID', reasons: 'missing_required,uuid', formats: 'none' },
+  { message: 'Attachment not found or expired', reasons: 'not_found,expired', formats: 'none' },
+  { message: 'Content type mismatch: image/AVIF is not supported', reasons: 'unsupported,type_mismatch', formats: 'avif' },
+  { message: 'Download timed out', reasons: 'download,timeout', formats: 'none' },
+  { message: 'Empty parts are not allowed; minimum size is one', reasons: 'not_allowed,too_small,empty', formats: 'none' },
+  { message: 'HTTPS is required', reasons: 'missing_required,https', formats: 'none' },
+  { message: 'private-recipient@example.test private-secret custom-format', reasons: 'unknown', formats: 'none' },
+])('linq validation hints retain reason vocabulary without provider values: $reasons', async ({ message, reasons, formats }) => {
+  await assert.rejects(
+    () => sendLinqChatMessage(
+      {
+        chatId: 'synthetic-chat', message: 'private reply body',
+        media: [
+          { url: 'https://example.test/private-image.webp' },
+          { url: 'https://example.test/private-other.webp' },
+          { url: 'https://example.test/private-photo.png' },
+          { url: 'https://example.test/private-photo.avif' },
+          { url: 'https://imagedelivery.net/synthetic-account/private-image/public' },
+          { attachmentId: 'synthetic-attachment' },
+        ],
+      },
+      {
+        env: { LINQ_API_TOKEN: '<REDACTED_TOKEN>' },
+        fetchImplementation: async () => createJsonResponse(
+          { error: { code: 1005, message }, trace_id: 'synthetic-trace' },
+          { status: 400 },
+        ),
+      },
+    ),
+    (error) => {
+      assert.ok(error instanceof VaultCliError)
+      assert.equal(error.context?.providerErrorReasonHints, reasons)
+      assert.equal(error.context?.providerErrorMediaTypeHints, formats)
+      assert.equal(error.context?.requestPublicUrlMediaFormatSummary, 'avif:1,png:1,unknown:1,webp:2')
+      assert.equal(error.context?.providerErrorCode, '1005')
+      assert.equal(error.context?.retryable, false)
+      const diagnostic = JSON.stringify(error.context)
+      for (const value of ['private-', 'example.test', 'imagedelivery.net', 'synthetic-account', 'synthetic-attachment', 'private reply body', 'custom-format']) {
+        assert.ok(!diagnostic.includes(value))
+      }
+      return true
+    },
+  )
+})
+
 test('linq runtime retains hashed text diagnostics from bounded response streams', async () => {
   const providerText = 'Plain Linq failure'
 

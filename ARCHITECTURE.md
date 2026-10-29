@@ -1661,12 +1661,13 @@ native `spawn_agent.model` field and never mutates that saved configuration.
 Web exposes the native field only when its existing assistant-configuration
 resolution confirms that the current managed runtime is authorized for the
 full product-model catalog; missing authority fails closed.
-The production image defaults to a catalog containing GPT-6.1 Sol and GPT-6 Luna plus
-GPT-5.6 Luna and Sol, retaining GPT-6 Sol for saved conversation preferences. CLI 0.163.0 supplies every entry from its native catalog;
-there is no separate launch-catalog supplement. All GPT-6 and GPT-6.1 entries retain
-the native 272K context limit. The image fails validation for missing entries. Web separately derives Astra authority from the canonical available models
+The production image defaults to a catalog containing GPT-6.1 Terra, GPT-6.1 Sol and GPT-6 Luna plus
+GPT-5.6 Luna and Sol, retaining GPT-6 Sol for saved conversation preferences. CLI 0.163.0 supplies the existing entries from its native catalog; the pinned
+`apps/cloudflare/codex-model-catalog.terra.json` adds the official refreshed
+Codex Terra launch entry. Terra retains its native 500K context window; existing
+GPT-6 and GPT-6.1 Sol entries retain their native 272K limit. The image fails validation for missing entries. Web separately derives Astra authority from the canonical available models
 and managed OpenAI provider; only an explicitly authorized workspace selects the
-expanded image-owned Astra catalog. Missing authority retains the five-model
+expanded image-owned Astra catalog. Missing authority retains the six-model
 catalog, preserving Edge and group delegation while Codex's native validation
 rejects Astra before a provider request. Catalog selection changes the native
 launch key, so a warm process cannot retain an earlier catalog after access changes.
@@ -1698,10 +1699,11 @@ Only the authoritative
 web response updates an ephemeral invocation-local projection; web remains the
 sole durable owner, and a later invocation rereads the preference there.
 For a synthetic thread-container member, the same input-bound path accepts
-model changes only. Null selects GPT-6.1 Sol,
-while explicit older-model or GPT-6 Luna choices use the member's existing nullable model
-field. Provider and reasoning stay fixed to OpenAI and `low`; no participant
-identity, plan state, or private preference enters the room path.
+model changes only. Null selects GPT-6.1 Sol; explicit Terra, Luna, or supported
+Sol choices use the member's existing nullable model field. Provider and reasoning stay fixed to OpenAI and `low`; no participant
+identity, raw plan state, or private preference enters the room prompt. Group
+Sol is available without a subscription; the personal Sol entitlement does not
+apply to rooms.
 Idle maintenance attributes compaction usage to the model actually bound to the
 warm thread, not a future preference, and skips provider work when that model
 cannot be priced. On fresh threads, pinned Codex raw completion notifications
@@ -1916,18 +1918,24 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   image origins.
 
   Nullable hosted-member model and reasoning preferences are web-owned,
-  billing-gated control facts. Managed OpenAI personal and group chats default
-  to GPT-6.1 Sol. Active members may select GPT-6.1 Sol or Luna and the existing
-  GPT-5.6 Luna; GPT-5.6 Sol and GPT-6 Astra retain their premium gates.
-  Saved Terra preferences now resolve to GPT-6.1 Sol; other explicit choices stay
-  saved, while a null preference follows the default. New managed recipes and
+  billing-gated control facts. Managed OpenAI personal chats default to GPT-6.1
+  Terra. Every group defaults to GPT-6.1 Sol without a subscription requirement.
+  Terra and Luna are available without a paid model entitlement.
+  All supported Sol versions require an active paid direct or family subscription
+  in personal chats; group rooms are exempt. Astra remains personal-only
+  and requires paid Edge or Max. Settings shows the same availability as chat
+  configuration. The Terra rollout clears all existing personal and synthetic
+  group model overrides once; subsequent explicit choices remain saved, while
+  a null preference follows the scope-specific default. An explicit Terra choice
+  in a group is stored so it remains distinct from the derived room default.
+  Ineligible personal Sol choices fall back to Terra without erasing later saved intent. New managed recipes and
   automation guidance use GPT-6 Luna for fixed cues and bounded low-risk workflows
   with a few targeted reads; ambiguous, research-heavy, sensitive, or demanding
   sourcing work retains GPT-6.1 Sol or the explicitly selected stronger model.
   Morning Journal uses its managed Luna pin. Web opening replies
   also use GPT-6 Luna. At scheduled execution,
   automation pins use a reviewed OpenAI replacement map: GPT-5.6 Luna becomes
-  GPT-6 Luna, and GPT-6 Sol, GPT-5.6 Sol, or Terra becomes GPT-6.1 Sol. Provider-neutral
+  GPT-6 Luna, and GPT-6 Sol, GPT-5.6 Sol, or GPT-5.6 Terra becomes GPT-6.1 Sol. Provider-neutral
   envelopes and canonical records retain the authored pin; resolution happens
   after the executing provider is known and before default reasoning is derived.
   Scheduled turns that inherit an explicitly saved GPT-6 Sol conversation target
@@ -5488,7 +5496,10 @@ until the viewer has posted that day; media reads use the same rule.
 `PUT /blocks/:memberId`, `DELETE /blocks/:memberId`, and `POST /media`. Reads: `GET /home`,
 `GET /games/:id`, `GET /invites/:token`, `GET /media/:key`. They use a plain
 Better Auth bearer session, not the paid-member check, because invitees play
-free; the flag and allowlist then hide every route. The invite preview and
+free; the global flag hides every route. During allowlisted rollout, members
+may also enter through their enabled game or a valid invite. Owners of outgoing
+blocks retain admission to reach their own unblock controls after their last
+game ends; creation and individual game authorization remain unchanged. The invite preview and
 `/g/<token>` page are unauthenticated and honor only the global flag. Dev
 time-travel routes return 404 in real production; they move a per-game clock
 (`game.dev_clock_offset_ms`, added to the database clock as that game's "now"
@@ -5511,7 +5522,12 @@ Only a versioned provider UUID/size pointer lives at the existing opaque R2
 namespace (`.image.json`), conditionally created for concurrent retry election.
 The additive member-bound `game-images/{stage,delivery,stat}` control routes
 need no hosted workspace. Native clients request `?delivery=signed&variant=avatar`
-or `photo`; old clients still receive a bounded image-byte proxy. Local stacks
+or `photo`; old clients still receive a bounded image-byte proxy. A post sent
+with `?delivery=signed` answers with the same signed `photo` capability on each
+other player's entry that post unlocked (`GameEntryView.delivery`), after the
+same `authorizeMediaRead` check, so the reveal needs no second request; one
+that can't be signed is left for the client to request. A missing hosted image
+is a 404 after one Worker lookup. Local stacks
 keep plain files on disk. Existing encrypted game images are deliberately not
 migrated; the earlier encrypted routes remain for old-Web rollout compatibility.
 
@@ -5593,7 +5609,8 @@ The posting transaction claims one `game_event` receipt of type
 recipient and recipient-local 3am day. First photo/heart-rate attempts qualify;
 retakes and excuses do not. The current 1v1 roster admits one recipient. A
 successful post adds at most one narrow route read and one claim insert under
-its existing game lock, with no external work. After commit, one route read
+its existing game lock, with no external work. After commit and once the
+post's response is on its way (Next.js `after`), one route read
 revalidates permission, token, suspension and the live unexpired registering
 session, then at most one 2.5-second APNs
 attempt and one receipt update record sent, failed, unregistered or superseded.

@@ -2256,8 +2256,8 @@ export async function drainHostedPreparedAssistantDeliveries(input: {
     userEnv: input.userEnv ?? {},
   }) as NodeJS.ProcessEnv;
   const linqDeliveryContexts = resolveHostedAssistantLinqDeliveryContexts({
-    context: input.linqDeliveryContext ?? null,
-    contexts: input.linqDeliveryContexts ?? null,
+    context: input.linqDeliveryContext,
+    contexts: input.linqDeliveryContexts,
     wake: input.wake,
   });
   const outcomes: HostedAssistantDeliveryOutcome[] = [];
@@ -2270,6 +2270,7 @@ export async function drainHostedPreparedAssistantDeliveries(input: {
     ]),
   );
   let pendingTypingStopEffectIndex = 0;
+  let replyBubblePacingMs = 0;
   try {
     for (let index = 0; index < input.assistantDeliveryEffects.length; index += 1) {
       pendingTypingStopEffectIndex = index;
@@ -2328,7 +2329,9 @@ export async function drainHostedPreparedAssistantDeliveries(input: {
       let currentEffectTypingStopRecorded = false;
       try {
         outcome = await deliverHostedPreparedAssistantDelivery({
-          deliveryTraceContext: input.deliveryTraceContext,
+          deliveryTraceContext: input.deliveryTraceContext
+            ? { ...input.deliveryTraceContext, replyBubblePacingMs }
+            : input.deliveryTraceContext,
           actionApprovalPort: input.actionApprovalPort ?? null,
           wake: input.wake,
           effectsPort: input.effectsPort,
@@ -2435,6 +2438,8 @@ export async function drainHostedPreparedAssistantDeliveries(input: {
       })) {
         try {
           await waitForHostedAssistantReplyBubblePause(input.signal ?? null);
+          // Credit only the configured wait, not timer overshoot or other work.
+          replyBubblePacingMs += HOSTED_LINQ_REPLY_BUBBLE_PAUSE_MS;
         } catch (error) {
           await resetHostedPreparedAssistantDeliveryEffects({
             effects: input.assistantDeliveryEffects.slice(index + 1),
@@ -2443,6 +2448,8 @@ export async function drainHostedPreparedAssistantDeliveries(input: {
           });
           throw error;
         }
+      } else {
+        replyBubblePacingMs = 0;
       }
     }
   } catch (error) {
@@ -7187,6 +7194,21 @@ function buildHostedAssistantDeliveryErrorDetailLogFields(
     details,
     ["errorCause", "cause"],
   ));
+  for (const [suffix, key] of [
+    ["ProviderRequestId", "providerRequestId"],
+    ["ProviderFieldHints", "providerErrorFieldHints"],
+    ["ProviderReasonHints", "providerErrorReasonHints"],
+    ["ProviderMediaTypeHints", "providerErrorMediaTypeHints"],
+    ["ProviderMessageLength", "providerErrorMessageLength"],
+    ["RequestBodyShape", "requestBodyShape"],
+    ["RequestMessagePartCount", "requestMessagePartCount"],
+    ["RequestPublicUrlMediaPartCount", "requestPublicUrlMediaPartCount"],
+    ["RequestPublicUrlMediaFormatSummary", "requestPublicUrlMediaFormatSummary"],
+    ["RequestAttachmentMediaPartCount", "requestAttachmentMediaPartCount"],
+    ["HasReplyToMessageId", "hasReplyToMessageId"],
+  ] as const) {
+    appendHostedAssistantDeliveryErrorLogValue(output, suffix, details[key]);
+  }
   output.deliveryErrorDetailFieldCount = Object.keys(details).length;
   return output;
 }

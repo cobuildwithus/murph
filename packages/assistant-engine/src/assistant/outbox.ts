@@ -1,3 +1,8 @@
+import {
+  reportHostedAssistantPersistenceTiming,
+  type HostedAssistantPersistenceTiming,
+  type HostedAssistantPersistenceTimingSink,
+} from './hosted-turn-timing.js'
 import { containsNutritionGoalInvitation, recordSentNutritionGoalInvitation } from './nutrition-card-introduction.js'
 import { registerDeliveredAssistantFollowUp } from './follow-ups.js'
 import { randomUUID } from 'node:crypto'
@@ -283,6 +288,7 @@ export type DeliverAssistantOutboxMessageResult =
     }
 
 export type AssistantOutboxCreateIntentInput = {
+  onPersistenceTiming?: HostedAssistantPersistenceTimingSink
   actorId?: string | null
   answeredMailboxItemIds?: readonly string[] | null
   reviewedAssistantAskCompletionExpiresAt?: string | null
@@ -326,7 +332,10 @@ export type AssistantOutboxCreateIntentInput = {
 export async function createAssistantOutboxIntent(
   input: AssistantOutboxCreateIntentInput,
 ): Promise<AssistantOutboxIntent> {
-  return withAssistantRuntimeWriteLock(input.vault, async (paths) => {
+  const timing: HostedAssistantPersistenceTiming = { turnTimingOutboxIntentCount: 1 }
+  const lockRequestedAt = performance.now()
+  const result = await withAssistantRuntimeWriteLock(input.vault, async (paths) => {
+    timing.turnTimingOutboxLockWaitMs = performance.now() - lockRequestedAt
     await ensureAssistantState(paths)
     const createdAt = input.createdAt ?? new Date().toISOString()
     const initialState = input.initialState ?? { status: 'pending' as const }
@@ -439,6 +448,7 @@ export async function createAssistantOutboxIntent(
       hasSharedHostedEmailGroupDeliveryIdentity(persistedTarget)
         ? null
         : deliveryIdempotencyKey
+    const dedupeStartedAt = performance.now()
     const existing = await findAssistantOutboxIntentByDedupeIdentity({
       dedupeKey,
       dedupeToken: input.dedupeToken,
@@ -450,6 +460,7 @@ export async function createAssistantOutboxIntent(
       skipLegacyMediaFallback: deliveryIdempotencyKey !== null,
       vault: input.vault,
     })
+    timing.turnTimingOutboxDedupeMs = performance.now() - dedupeStartedAt
     const isAutoReplyIntent = input.turnTrigger === 'automation-auto-reply'
     if (existing) {
       assertAssistantOutboxDedupeEffectMatches({
@@ -486,6 +497,7 @@ export async function createAssistantOutboxIntent(
             rawTargetIdentity,
             updatedAt: createdAt,
           })
+      const persistenceStartedAt = performance.now()
       if (isAutoReplyIntent) {
         await writeAssistantAutoReplyIntentProvenance({
           intentId: upgradedExisting.intentId,
@@ -505,11 +517,14 @@ export async function createAssistantOutboxIntent(
           paths,
         })
       }
+      timing.turnTimingOutboxIntentPersistenceMs = performance.now() - persistenceStartedAt
+      const receiptStartedAt = performance.now()
       await repairAssistantOutboxReceiptForIntent({
         at: upgradedExisting.updatedAt,
         intent: upgradedExisting,
         vault: input.vault,
       })
+      timing.turnTimingOutboxReceiptPersistenceMs = performance.now() - receiptStartedAt
       return upgradedExisting
     }
 
@@ -563,6 +578,7 @@ export async function createAssistantOutboxIntent(
     const persistedIntent = assistantOutboxIntentSchema.parse(
       sanitizeAssistantOutboxIntentForPersistence(intent),
     )
+    const persistenceStartedAt = performance.now()
     if (isAutoReplyIntent) {
       await writeAssistantAutoReplyIntentProvenance({
         intentId: intent.intentId,
@@ -580,11 +596,15 @@ export async function createAssistantOutboxIntent(
       ),
       paths,
     })
+    timing.turnTimingOutboxIntentPersistenceMs = performance.now() - persistenceStartedAt
+    const receiptStartedAt = performance.now()
     await repairAssistantOutboxReceiptForIntent({
       at: createdAt,
       intent: persistedIntent,
       vault: input.vault,
     })
+    timing.turnTimingOutboxReceiptPersistenceMs = performance.now() - receiptStartedAt
+    const diagnosticStartedAt = performance.now()
     await recordAssistantDiagnosticEvent({
       vault: input.vault,
       component: 'outbox',
@@ -598,8 +618,11 @@ export async function createAssistantOutboxIntent(
       },
     })
 
+    timing.turnTimingOutboxDiagnosticMs = performance.now() - diagnosticStartedAt
     return persistedIntent
   })
+  reportHostedAssistantPersistenceTiming(input.onPersistenceTiming, timing)
+  return result
 }
 
 export async function readAssistantOutboxIntent(
@@ -1655,6 +1678,7 @@ async function resolveDeviceActivityOutboxAuthorityError(input: {
 }
 
 export async function deliverAssistantOutboxMessage(input: {
+  onPersistenceTiming?: HostedAssistantPersistenceTimingSink
   actorId?: string | null
   answeredMailboxItemIds?: readonly string[] | null
   reviewedAssistantAskCompletionExpiresAt?: string | null
@@ -1697,6 +1721,7 @@ export async function deliverAssistantOutboxMessage(input: {
       input.answeredMailboxItemIds ?? [],
     )
   const intent = await createAssistantOutboxIntent({
+    onPersistenceTiming: input.onPersistenceTiming,
     followUpRequest: input.followUpRequest,
     followUpEvaluatedThrough: input.followUpEvaluatedThrough,
     actorId: input.actorId,

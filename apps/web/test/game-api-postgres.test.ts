@@ -15,11 +15,13 @@ import { POST as post } from "../app/api/game/v1/games/[id]/entries/route";
 import { GET as read } from "../app/api/game/v1/games/[id]/route";
 import { GET as home } from "../app/api/game/v1/home/route";
 import { DELETE as unblockRoute, PUT as blockRoute } from "../app/api/game/v1/blocks/[memberId]/route";
+import { PUT as blockInviteRoute } from "../app/api/game/v1/invites/[token]/block/route";
 import { POST as reportRoute } from "../app/api/game/v1/games/[id]/reports/route";
 import { GET as media } from "../app/api/game/v1/media/[...key]/route";
 import { POST as redeem } from "../app/api/game/v1/tickets/[id]/redeem/route";
 import { POST as proposeChange } from "../app/api/game/v1/games/[id]/changes/route";
 import { DELETE as cancelChange } from "../app/api/game/v1/games/[id]/changes/[proposalId]/route";
+import { POST as agree } from "../app/api/device-sync/companion/legal-consent/route";
 import { hostedAuthAdapter } from "../src/lib/better-auth/adapter";
 import { serializeHostedNativeSessionToken } from "../src/lib/better-auth/transport";
 import type { GameHomeView, GameView } from "../src/lib/game/contract";
@@ -190,6 +192,63 @@ describe.skipIf(!enabled)("game v1 local API smoke", () => {
     expect((await (await home(request(leo, undefined, "GET"))).json()).blocked).toEqual([]);
   }, 30_000);
 
+  it("asks for Murph's current Terms before create, accept and post only while the switch is on, then plays on", async () => {
+    const leo = await member("Leo");
+    const ava = await member("Ava");
+    // Both agreed to an older Terms; the flag alone decides whether that still plays.
+    for (const token of [leo, ava]) {
+      await getPrisma().hostedConsentGrant.create({ data: { memberId: tokenMember.get(token)!, scope: "launch.legal",
+        documentVersionsJson: { "terms-of-service": "2020-01-01", "privacy-policy": "2020-01-01", "health-ai-safety-disclosure": "2020-01-01" },
+        grantedAt: new Date(), source: "test" } });
+    }
+    const terms = { startsOn: new Date(Date.now() + 2 * 86_400_000).toISOString().slice(0, 10),
+      schedule: { count: 3 }, stakes: [{ kind: "prize", item: "Choose a book" }],
+      tasks: [{ seat: 0, text: "Move" }, { seat: 1, text: "Move" }] };
+    const off = await game(create(request(leo, { gameId: randomUUID(), inviteeFirstName: "Ava", terms })));
+    expect(off.status).toBe("invited");
+
+    vi.stubEnv("MURPH_GAME_REQUIRE_CURRENT_TERMS", "true");
+    try {
+      const id = randomUUID();
+      const context = { params: Promise.resolve({ id }) };
+      const refusal = async (response: Promise<Response>) => {
+        const result = await response;
+        const body = await result.json();
+        expect(result.status, JSON.stringify(body)).toBe(403);
+        expect(body.error).toMatchObject({ code: "TERMS_REQUIRED", details: { scope: "launch.legal" } });
+        return Object.fromEntries((body.error.details.documents as { id: string; version: string }[])
+          .map((document) => [document.id, document.version]));
+      };
+      const agreeTo = async (token: string, acceptedDocumentVersions: Record<string, string>) => {
+        const agreed = await agree(request(token, { scope: "launch.legal", acceptedDocumentVersions }));
+        expect(agreed.status).toBe(200);
+      };
+      // The versions the refusal names are the ones that unblock it.
+      await agreeTo(leo, await refusal(create(request(leo, { gameId: id, inviteeFirstName: "Ava", terms }))));
+      const created = await game(create(request(leo, { gameId: id, inviteeFirstName: "Ava", terms })));
+      const invite = { params: Promise.resolve({ token: created.inviteToken! }) };
+      const versions = await refusal(accept(request(ava, { termsVersion: 1, timeZone: "UTC" }), invite));
+      // Reading, reporting and taking things back stay open meanwhile.
+      expect((await home(request(ava, undefined, "GET"))).status).toBe(200);
+      expect((await game(read(request(leo, undefined, "GET"), context))).status).toBe("invited");
+      await agreeTo(ava, versions);
+      expect((await game(accept(request(ava, { termsVersion: 1, timeZone: "UTC" }), invite))).status).toBe("live");
+      await game(start(request(leo), context));
+      await photo(ava, id, 61);
+
+      // Leo's grant goes stale mid-game: his post waits, Ava's game reads on.
+      await getPrisma().hostedConsentGrant.update({ where: { memberId_scope: { memberId: tokenMember.get(leo)!, scope: "launch.legal" } },
+        data: { documentVersionsJson: { "terms-of-service": "2020-01-01" } } });
+      const mediaKey = await imageKey(leo, 62);
+      const entry = { entryId: randomUUID(), kind: "photo", mediaKeys: [mediaKey] };
+      await agreeTo(leo, await refusal(post(request(leo, entry), context)));
+      const posted = await game(post(request(leo, entry), context));
+      expect(posted.days[0].mine?.entryId).toBe(entry.entryId);
+    } finally {
+      vi.stubEnv("MURPH_GAME_REQUIRE_CURRENT_TERMS", "");
+    }
+  }, 30_000);
+
   it("posts every summary kind through dev days and reveals the untouched partner days only in recap", async () => {
     const poster = await member("Poster");
     const viewer = await member("Viewer");
@@ -233,20 +292,61 @@ describe.skipIf(!enabled)("game v1 local API smoke", () => {
     const recap = await game(settle(request(viewer), context));
     for (const [day, artifact] of artifacts.entries()) {
       expect(recap.days[day].others[0].entry).toMatchObject({ kind: artifact.kind, data: artifact.data ?? null });
-      expect(recap.days[day].others[0]).not.toHaveProperty("blurHash");
+      // Open now: no posted time, and the blur stays for while the picture loads.
+      expect(recap.days[day].others[0]).not.toHaveProperty("postedAt");
+      expect(recap.days[day].others[0].blurHash).toBe("synthetic-blur");
     }
   }, 30_000);
   describe("invite-only allowlist", () => {
     const terms = { schedule: { count: 7 }, stakes: [{ kind: "dare", item: "Sing at karaoke" }],
       tasks: [{ seat: 0, text: "Take a walk" }, { seat: 1, text: "Take a walk" }] };
     afterAll(() => vi.stubEnv("MURPH_GAME_MEMBER_ALLOWLIST", ""));
+    // Accepting from 8pm local starts day 1 tomorrow, so play where it is midday now.
+    const middayZone = () => {
+      const offset = ((12 - new Date().getUTCHours() + 36) % 24) - 12;
+      return offset === 0 ? "UTC" : `Etc/GMT${offset > 0 ? "-" : "+"}${Math.abs(offset)}`;
+    };
+
+    it.each([false, true])("keeps unblocking reachable after the only opponent is blocked (joined: %s)", async (joined) => {
+      const listed = await account();
+      const invitee = await account();
+      const stranger = await account();
+      vi.stubEnv("MURPH_GAME_MEMBER_ALLOWLIST", listed.id);
+      expect((await profile(request(listed.token, { firstName: "Ava", timeZone: "UTC" }, "PUT"))).status).toBe(200);
+      const created = await game(create(request(listed.token, { gameId: randomUUID(), inviteeFirstName: "Leo", terms })));
+      const token = created.inviteToken!;
+      expect((await profile(request(invitee.token, { firstName: "Leo", timeZone: "UTC" }, "PUT", token))).status).toBe(200);
+      if (joined) {
+        await game(accept(request(invitee.token, { termsVersion: 1, timeZone: "UTC" }), { params: Promise.resolve({ token }) }));
+        expect((await blockRoute(request(invitee.token, undefined, "PUT"), { params: Promise.resolve({ memberId: listed.id }) })).status).toBe(200);
+      } else {
+        expect((await blockInviteRoute(request(invitee.token, undefined, "PUT"), { params: Promise.resolve({ token }) })).status).toBe(200);
+      }
+      // No held link is needed to reach You > Blocked people after blocking.
+      const response = await home(request(invitee.token, undefined, "GET"));
+      expect(response.status).toBe(200);
+      expect((await response.json()).blocked).toEqual([{ firstName: "Ava", memberId: listed.id }]);
+      await refused(create(request(invitee.token, { gameId: randomUUID(), inviteeFirstName: "Sam", terms })));
+      await refused(home(request(stranger.token, undefined, "GET")));
+      vi.stubEnv("MURPH_GAME_ENABLED", "false");
+      try {
+        await refused(home(request(invitee.token, undefined, "GET")));
+        await refused(unblockRoute(request(invitee.token, undefined, "DELETE"), { params: Promise.resolve({ memberId: listed.id }) }));
+      } finally {
+        vi.stubEnv("MURPH_GAME_ENABLED", "true");
+      }
+      expect((await unblockRoute(request(invitee.token, undefined, "DELETE"), { params: Promise.resolve({ memberId: listed.id }) })).status).toBe(200);
+      expect(await getPrisma().gameBlock.count({ where: { blockerMemberId: invitee.id } })).toBe(0);
+      await refused(create(request(invitee.token, { gameId: randomUUID(), inviteeFirstName: "Sam", terms })));
+    });
 
     it("lets a new unlisted invitee in through a listed member's invite to play, settle, cash in and rematch, but never start fresh", async () => {
       const listed = await account();
       const invitee = await account();
       const stranger = await account();
       vi.stubEnv("MURPH_GAME_MEMBER_ALLOWLIST", listed.id);
-      expect((await profile(request(listed.token, { firstName: "Listed", timeZone: "UTC" }, "PUT"))).status).toBe(200);
+      const timeZone = middayZone();
+      expect((await profile(request(listed.token, { firstName: "Listed", timeZone }, "PUT"))).status).toBe(200);
       const id = randomUUID();
       const context = { params: Promise.resolve({ id }) };
       const created = await game(create(request(listed.token, { gameId: id, inviteeFirstName: "Invitee", terms })));
@@ -259,9 +359,9 @@ describe.skipIf(!enabled)("game v1 local API smoke", () => {
       const held = await home(request(invitee.token, undefined, "GET", token));
       expect(held.status).toBe(200);
       expect(await held.json()).toMatchObject({ canStartGames: false });
-      expect((await profile(request(invitee.token, { firstName: "Invitee", timeZone: "UTC" }, "PUT", token))).status).toBe(200);
+      expect((await profile(request(invitee.token, { firstName: "Invitee", timeZone }, "PUT", token))).status).toBe(200);
       // The accept route vouches with its own token; no header needed.
-      expect((await game(accept(request(invitee.token, { termsVersion: 1, timeZone: "UTC" }), { params: Promise.resolve({ token }) }))).status).toBe("live");
+      expect((await game(accept(request(invitee.token, { termsVersion: 1, timeZone }), { params: Promise.resolve({ token }) }))).status).toBe("live");
 
       const homeView: GameHomeView = await (await home(request(invitee.token, undefined, "GET"))).json();
       expect(homeView.games.map((shown) => shown.id)).toEqual([id]);

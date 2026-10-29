@@ -1709,7 +1709,8 @@ describe('applyMurphManagedAutomations', () => {
     expect(researchScoutRecord?.instructions).not.toContain('For each item include:')
     expect(researchScoutRecord?.instructions).not.toContain('one thing not to overinterpret')
     expect(researchScoutRecord?.instructions).not.toContain('plain-English `Basically:` sentence')
-    expect(researchScoutRecord?.instructions).toContain('Append one dated section to `weekly-health-research-scout`')
+    expect(researchScoutRecord?.instructions).toContain('Before returning a send decision, append one dated section to `weekly-health-research-scout`')
+    expect(researchScoutRecord?.instructions).toContain('if persistence fails, skip the send')
     expect(researchScoutRecord?.instructions).toContain('why close alternatives were suppressed')
     expect(researchScoutRecord?.instructions).toContain('clinician discussion prompt')
 

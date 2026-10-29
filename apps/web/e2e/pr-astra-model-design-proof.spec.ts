@@ -108,7 +108,7 @@ test("Premium model choice shows Astra on phone and desktop", async ({ browser }
       await expect.poll(async () => disabledResting.x - (await disabledStar.boundingBox())!.x).toBeGreaterThan(0.8);
       await page.mouse.click(disabledResting.x - 24, disabledResting.y);
       await expect(disabledRadio).not.toBeChecked();
-      await expect(disabledStudy.locator('[id="assistant-model-gpt-6.1-sol"]')).toBeChecked();
+      await expect(disabledStudy.locator('[id="assistant-model-gpt-6.1-terra"]')).toBeChecked();
       await page.mouse.move(0, 0);
       await expect.poll(async () => Math.abs((await disabledStar.boundingBox())!.x - disabledResting.x)).toBeLessThan(0.1);
       expect(hydrationErrors).toEqual([]);

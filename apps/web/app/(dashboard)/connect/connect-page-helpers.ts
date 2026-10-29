@@ -215,7 +215,7 @@ export function createConnectCallbackNotice(
     };
   }
 
-  if (input.errorCode === "CALLBACK_PROOF_INVALID") {
+  if (input.errorCode === "CALLBACK_PROOF_INVALID" || input.errorCode === "OAUTH_STATE_INVALID") {
     return {
       kind: "info",
       title: "Check your connections",

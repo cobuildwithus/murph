@@ -10,7 +10,6 @@ import { fileURLToPath } from "node:url";
 const scenarios = ["boot", "seed", "new"];
 const metrics = { cpuMs: { ratio: 1.25, floor: 100 }, wallMs: { ratio: 1.4, floor: 250 } };
 const benchPath = "packages/core/bench";
-const bundlePath = "apps/cloudflare/.deploy/runner-bundle";
 
 export function parseLatencyRun(output) {
   const rows = output.trim().split("\n").map((line) => JSON.parse(line));
@@ -149,7 +148,7 @@ async function main(baseArgument, candidateArgument) {
       const image = `murph-latency-${randomUUID()}`;
       command("docker", ["build", "--platform", "linux/amd64", "--tag", image,
         "--file", path.join(root, "Dockerfile.cloudflare-hosted-runner"),
-        "--build-arg", "HOSTED_RUNNER_BUNDLE_DIR=.", path.join(root, bundlePath)], { stdio: "inherit" });
+        path.join(root, "apps/cloudflare")], { stdio: "inherit" });
       images.push(image);
     }
     const samples = [[], []];

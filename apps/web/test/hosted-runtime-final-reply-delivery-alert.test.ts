@@ -351,6 +351,85 @@ describe("final reply delivery latency evaluation", () => {
     expect(evaluate([entry]).candidates[0]?.dispatchAttribution).toEqual({ status: "missing" });
   });
 
+  it.each([
+    [7_999, false],
+    [8_000, false],
+    [8_001, true],
+  ])("excludes only observed pacing from the strict budget at %i ms", (elapsedMs, slow) => {
+    const entry = buildCase({ providerResultToAcceptedMs: elapsedMs });
+    const dispatch = buildReplyRow({
+      attemptId: "attempt_synthetic_1",
+      intentId: "intent_synthetic_1",
+      redactedJson: {
+        deliveryReplyBubblePacingMs: 3_000,
+        deliverySinceForegroundPhaseStartedMs: 7_000,
+        turnTimingStage: "linq-dispatch-entered",
+      },
+    });
+    const result = evaluate([entry], [dispatch]);
+    expect(result.candidates).toHaveLength(slow ? 1 : 0);
+    expect(result.counts.providerResult.slow).toBe(slow ? 1 : 0);
+    if (slow) {
+      expect(result.candidates[0]).toMatchObject({
+        intentionalPacingMs: 3_000,
+        providerResultToAccepted: { elapsedMs, status: "observed" },
+      });
+    }
+  });
+
+  it("evaluates final completion independently after the same pacing exclusion", () => {
+    const entry = buildCase({
+      completedToResultMs: 100,
+      completion: "observed",
+      providerResultToAcceptedMs: 8_000,
+    });
+    const result = evaluate([entry], [buildReplyRow({
+      attemptId: "attempt_synthetic_1",
+      intentId: "intent_synthetic_1",
+      redactedJson: {
+        deliveryReplyBubblePacingMs: 3_000,
+        deliverySinceForegroundPhaseStartedMs: 7_000,
+        turnTimingStage: "linq-dispatch-entered",
+      },
+    })]);
+    expect(result.candidates[0]).toMatchObject({
+      intentionalPacingMs: 3_000,
+      finalResponseCompletedToAccepted: { elapsedMs: 8_100, status: "observed" },
+      triggerOrigins: ["final_response_completed"],
+    });
+  });
+
+  it.each([
+    { label: "older producer", pacing: undefined },
+    { label: "negative pacing", pacing: -1 },
+    { label: "fractional pacing", pacing: 1.5 },
+    { label: "pacing outside phase", pacing: 6_000 },
+    { label: "missing phase", phase: undefined },
+    { label: "phase outside result", phase: 9_000 },
+    { label: "different dispatch attempt", attemptId: "attempt_other" },
+    { label: "handoff", replyRuntimeAttemptIds: ["attempt_retry"] },
+    { label: "ambiguous dispatch", duplicate: true },
+  ])("retains the full budget for $label", (scenario) => {
+    const entry = buildCase({
+      providerResultToAcceptedMs: 7_000,
+      replyRuntimeAttemptIds: scenario.replyRuntimeAttemptIds,
+    });
+    const dispatch = buildReplyRow({
+      attemptId: scenario.attemptId ?? "attempt_synthetic_1",
+      intentId: "intent_synthetic_1",
+      redactedJson: {
+        deliveryReplyBubblePacingMs: "pacing" in scenario ? scenario.pacing : 3_000,
+        deliverySinceForegroundPhaseStartedMs: "phase" in scenario ? scenario.phase : 5_000,
+        turnTimingStage: "linq-dispatch-entered",
+      },
+    });
+    const result = evaluate([entry], scenario.duplicate ? [dispatch, dispatch] : [dispatch]);
+    expect(result.candidates[0]).toMatchObject({
+      intentionalPacingMs: null,
+      triggerOrigins: ["provider_result"],
+    });
+  });
+
   it("does not re-raise a delivery that already owns its alert", () => {
     const { candidates, counts } = evaluate([buildCase({
       alertRecorded: true,
@@ -473,6 +552,7 @@ describe("final reply delivery alert monitor", () => {
       "deliveryAttemptRelation",
       "dispatchAttribution",
       "finalResponseCompletedToAccepted",
+      "intentionalPacingMs",
       "providerResultToAccepted",
       "schemaVersion",
       "scope",

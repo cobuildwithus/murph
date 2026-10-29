@@ -2,6 +2,7 @@
 
 import {
   HOSTED_ASSISTANT_ASTRA_MODEL,
+  HOSTED_ASSISTANT_TERRA_MODEL,
   HOSTED_ASSISTANT_DEFAULT_MODEL,
   HOSTED_ASSISTANT_GPT_6_SOL_MODEL,
   HOSTED_ASSISTANT_GPT_61_SOL_MODEL,
@@ -38,7 +39,7 @@ import { SettingsStatusLine } from "./connected-account-card";
 import { UpgradeToEdgeButton } from "./hosted-plan-upgrade-button";
 
 const ASSISTANT_MODEL_SETTINGS_URL = "/api/settings/assistant-model";
-const SOL_REQUIRES_EDGE_ERROR_CODE = "ASSISTANT_MODEL_SOL_REQUIRES_EDGE";
+const SOL_REQUIRES_SUBSCRIPTION_ERROR_CODE = "ASSISTANT_MODEL_SOL_REQUIRES_SUBSCRIPTION";
 
 const MODEL_OPTIONS = [
   {
@@ -47,6 +48,13 @@ const MODEL_OPTIONS = [
     model: HOSTED_ASSISTANT_GPT_6_LUNA_MODEL,
     name: "Luna",
     usage: "Low usage",
+  },
+  {
+    artwork: "terra",
+    description: "Everyday health intelligence",
+    model: HOSTED_ASSISTANT_TERRA_MODEL,
+    name: "Terra",
+    usage: "Moderate usage",
   },
   {
     artwork: "sol",
@@ -143,19 +151,19 @@ function HostedAssistantModelSettingsForm(
       setAvailableModels(response.availableModels);
       setSaveAnnouncement(
         response.dormantSolPreference
-          ? `Saved. ${readProductModelName(response.model)} is active while Edge is paused; your previous model remains saved.`
+          ? `Saved. ${readProductModelName(response.model)} is active while your subscription is inactive; your previous model remains saved.`
           : `Saved. ${readProductModelName(response.model)} through OpenAI is your default.`,
       );
     } catch (error) {
       const solNoLongerAvailable = error instanceof HostedOnboardingApiError
-        && error.code === SOL_REQUIRES_EDGE_ERROR_CODE;
+        && error.code === SOL_REQUIRES_SUBSCRIPTION_ERROR_CODE;
       if (solNoLongerAvailable) {
         setDraftModel(currentModel);
         setSolAvailable(false);
       }
       setStatus({
         message: solNoLongerAvailable
-          ? `Your Edge access changed. Murph will keep using ${readProductModelName(currentModel)}.`
+          ? "Sol requires an active paid subscription. Refresh to see your current model."
           : "We couldn’t save this change. Try again.",
         tone: solNoLongerAvailable ? "neutral" : "destructive",
       });
@@ -186,7 +194,7 @@ function HostedAssistantModelSettingsForm(
 
         {dormantSolPreference ? (
           <p className="w-full rounded-xl border border-border bg-muted/30 p-4 text-sm text-pretty text-muted-foreground">
-            {`${readProductModelName(currentModel)} is active while Edge is paused. Your previous model is still saved and will return with Edge. Choose another model or save this default to replace it.`}
+            {`${readProductModelName(currentModel)} is active while your subscription is inactive. Your previous model is still saved and will return with a paid subscription. Choose another model or save this default to replace it.`}
           </p>
         ) : null}
 
@@ -201,7 +209,7 @@ function HostedAssistantModelSettingsForm(
             Choose one model for new Murph replies.
           </FieldDescription>
           <RadioGroup
-            className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3"
+            className="grid gap-3 sm:grid-cols-2"
             disabled={controlsDisabled}
             value={draftModel}
             onValueChange={(value) => {
@@ -216,7 +224,8 @@ function HostedAssistantModelSettingsForm(
             {MODEL_OPTIONS.map((option) => {
               const selected = draftModel === option.model;
               const unavailable = option.model === HOSTED_ASSISTANT_ASTRA_MODEL
-                && !availableModels?.includes(HOSTED_ASSISTANT_ASTRA_MODEL);
+                ? !availableModels?.includes(HOSTED_ASSISTANT_ASTRA_MODEL)
+                : option.model === HOSTED_ASSISTANT_GPT_61_SOL_MODEL && !solAvailable;
               const current = option.model === currentModel;
               const badge = readModelOptionBadge({
                 current,
@@ -240,7 +249,9 @@ function HostedAssistantModelSettingsForm(
                   id={`assistant-model-${option.model}`}
                   key={option.model}
                   meta={
-                    unavailable ? `${option.usage} · Edge required` : option.usage
+                    unavailable
+                      ? `${option.usage} · ${option.model === HOSTED_ASSISTANT_ASTRA_MODEL ? "Edge required" : "Subscription required"}`
+                      : option.usage
                   }
                   title={option.name}
                   value={option.model}
@@ -251,7 +262,7 @@ function HostedAssistantModelSettingsForm(
         </FieldSet>
 
         {props.configurationAvailable
-          && !solAvailable
+          && !availableModels?.includes(HOSTED_ASSISTANT_ASTRA_MODEL)
           && props.canUpgradeToEdge ? (
           <div className="flex w-full justify-end px-1">
             <UpgradeToEdgeButton
@@ -310,7 +321,7 @@ function readModelOptionBadge(input: {
   }
 
   if (input.unavailable) {
-    return <ModelOptionBadge>Edge</ModelOptionBadge>;
+    return <ModelOptionBadge>{input.model === HOSTED_ASSISTANT_ASTRA_MODEL ? "Edge" : "Subscriber"}</ModelOptionBadge>;
   }
 
   if (input.model === HOSTED_ASSISTANT_DEFAULT_MODEL) {
@@ -333,6 +344,7 @@ function ModelOptionBadge({ children }: { children: React.ReactNode }) {
 
 function readProductModelName(model: HostedAssistantProductModel): string {
   if (model === HOSTED_ASSISTANT_ASTRA_MODEL) return "Astra";
+  if (model === HOSTED_ASSISTANT_TERRA_MODEL) return "Terra";
   if (model === HOSTED_ASSISTANT_LUNA_MODEL || model === HOSTED_ASSISTANT_GPT_6_LUNA_MODEL) {
     return "Luna";
   }

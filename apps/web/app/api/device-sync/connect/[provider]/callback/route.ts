@@ -71,17 +71,33 @@ export async function GET(
       );
     }
 
-    const result = await publicIngress.handleConnectionCallback(providerName, {
-      expectedOwnerId: session.member.id,
-    });
-    const fallbackReturnTo = new URL("/connect", request.url).toString();
+    try {
+      const result = await publicIngress.handleConnectionCallback(providerName, {
+        expectedOwnerId: session.member.id,
+      });
+      const fallbackReturnTo = new URL("/connect", request.url).toString();
 
-    return providerCallbackRedirect({
-      returnTo: result.returnTo ?? fallbackReturnTo,
-      provider: result.account.provider,
-      connectSourceId: result.connectSourceId ?? null,
-      connectTarget: result.connectTarget ?? null,
-    }) ?? redirectTo(fallbackReturnTo);
+      return providerCallbackRedirect({
+        returnTo: result.returnTo ?? fallbackReturnTo,
+        provider: result.account.provider,
+        connectSourceId: result.connectSourceId ?? null,
+        connectTarget: result.connectTarget ?? null,
+      }) ?? redirectTo(fallbackReturnTo);
+    } catch (error) {
+      if (!isDeviceSyncError(error) || error.code !== "OAUTH_STATE_INVALID") {
+        throw error;
+      }
+      // Successful persistence retires its consumed admission. A later return
+      // and an expired/otherwise unavailable admission therefore share this
+      // code; neither proves the connection failed or succeeded. Keep the
+      // exact reason diagnostic-only and let Connect render stored truth.
+      reportHostedDeviceCallbackRejection({
+        errorCode: error.code,
+        memberId: session.member.id,
+        provider: providerName,
+      });
+      return hostedDeviceSyncCallbackFailureRedirect(request, providerName, error.code);
+    }
   } catch (error) {
     return await handleHostedDeviceSyncCallbackError(
       error,

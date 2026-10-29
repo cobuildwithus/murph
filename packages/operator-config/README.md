@@ -20,3 +20,17 @@ Assistant models run through OpenAI using Codex App Server. Hosted configuration
 accepts only the `openai` provider and `OPENAI_API_KEY`; local setup uses Codex
 authentication. Third-party inference providers and local model execution are
 unsupported.
+
+Linq HTTP error diagnostics retain provider codes and trace IDs without raw error
+prose. `providerErrorFieldHints` contains only fixed send-schema names found as
+words in the provider message (`none` when no names match); these are lexical
+hints, not proof of the rejected field. `providerErrorMessageLength` distinguishes
+missing prose from an empty or populated message without retaining its contents.
+`providerErrorReasonHints` and `providerErrorMediaTypeHints` similarly retain
+only fixed validation words and image-format names. Unrecognized reasons are
+`unknown`; absent format hints are `none`. These hints cannot determine retry
+safety or establish the root cause. `requestPublicUrlMediaFormatSummary` counts
+allowlisted URL suffixes (or `unknown`), never hosts, paths, or actual downloaded
+content types. Immediate failure logs retain these fields; durable delivery
+summaries include them in the existing request/response summaries. No raw provider
+message or URL is retained, including for unrecognized validation failures.

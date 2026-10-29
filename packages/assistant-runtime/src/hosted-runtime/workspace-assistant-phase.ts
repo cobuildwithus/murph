@@ -1,3 +1,4 @@
+import type { HostedMemberChannelBarrierTiming } from "./delivery-latency-trace.ts";
 import type { WearableHapticAction } from "@murphai/hosted-execution/wearable-haptics";
 import { HOSTED_WORKSPACE_SYSTEM_WORK_ACTIONS } from "./workspace-system-work.ts";
 import { createHash } from "node:crypto";
@@ -6537,13 +6538,14 @@ async function drainHostedPostCheckpointDelivery(input: {
 
   let memberChannelBarrier: HostedWorkspaceRunnerAssistantPhasePostCheckpoint | null = null;
   let memberChannelBarrierMs: number | null = null;
+  const memberChannelBarrierTiming: HostedMemberChannelBarrierTiming = {};
   try {
     if (hasDeliveryEffects && input.shouldYieldBackgroundDrain?.() === true) {
       return await yieldHostedBackgroundPostCheckpointDrain(input);
     }
     const memberChannelBarrierStartedAt = performance.now();
     memberChannelBarrier = hasDeliveryEffects
-      ? await flushHostedMemberChannelUpdatesBeforeAutoReplyDelivery(input)
+      ? await flushHostedMemberChannelUpdatesBeforeAutoReplyDelivery(input, memberChannelBarrierTiming)
       : null;
     // Read only when delivery effects drain below; no effects means no reader.
     memberChannelBarrierMs = performance.now() - memberChannelBarrierStartedAt;
@@ -6587,6 +6589,7 @@ async function drainHostedPostCheckpointDelivery(input: {
           foregroundDeliveryPhaseStartedAtMonotonicMs:
             input.foregroundDeliveryPhaseStartedAtMonotonicMs,
           memberChannelBarrierMs,
+          memberChannelBarrierTiming,
           latencyTracePort: input.input.runtime.platform.latencyTracePort,
           runtimeAttemptId: input.input.request.attemptId,
           runnerIdleTtlMs: input.input.request.runnerIdleTtlMs,
@@ -7206,17 +7209,27 @@ function isUnsafeHostedAssistantInputToken(value: string): boolean {
 
 async function flushHostedMemberChannelUpdatesBeforeAutoReplyDelivery(
   input: Parameters<typeof drainHostedPostCheckpointDelivery>[0],
+  timing: HostedMemberChannelBarrierTiming,
 ): Promise<HostedWorkspaceRunnerAssistantPhasePostCheckpoint | null> {
-  if (!await hostedDeliveryEffectsContainAutoReply({
+  const intentLookupStartedAt = performance.now();
+  const containsAutoReply = await hostedDeliveryEffectsContainAutoReply({
     effects: input.assistantDeliveryEffects,
     vaultRoot: input.input.restored.vaultRoot,
-  })) {
+  });
+  timing.deliveryMemberChannelIntentLookupMs = performance.now() - intentLookupStartedAt;
+  if (!containsAutoReply) {
     return null;
   }
 
-  await input.input.prepareAutoReplyDelivery?.();
+  if (input.input.prepareAutoReplyDelivery) {
+    const watcherStartedAt = performance.now();
+    await input.input.prepareAutoReplyDelivery();
+    timing.deliveryMemberChannelWatcherMs = performance.now() - watcherStartedAt;
+  }
 
+  const updateDrainStartedAt = performance.now();
   let processed = 0;
+  let recorded = 0;
   while (true) {
     assertHostedAssistantPhaseLiveness(input.input.signal);
     const preparation = await prepareHostedSystemMailboxItemForCheckpoint({
@@ -7247,6 +7260,7 @@ async function flushHostedMemberChannelUpdatesBeforeAutoReplyDelivery(
         runtime: input.input.runtime,
         vaultRoot: input.input.restored.vaultRoot,
       });
+      recorded += 1;
       if (record.failed > 0) {
         return await buildHostedMemberChannelDeliveryBarrierResult({
           input,
@@ -7261,10 +7275,15 @@ async function flushHostedMemberChannelUpdatesBeforeAutoReplyDelivery(
     processed += 1;
   }
 
+  timing.deliveryMemberChannelUpdateDrainMs = performance.now() - updateDrainStartedAt;
+  timing.deliveryMemberChannelProcessedCount = processed;
+  timing.deliveryMemberChannelRecordedCount = recorded;
+  const nextWakeStartedAt = performance.now();
   const pendingWakeAt = await resolveHostedSystemMailboxNextWakeAt({
     allowedRouteActions: HOSTED_MEMBER_CHANNEL_UPDATE_ROUTE_ACTIONS,
     vaultRoot: input.input.restored.vaultRoot,
   });
+  timing.deliveryMemberChannelNextWakeMs = performance.now() - nextWakeStartedAt;
   if (!pendingWakeAt) {
     return null;
   }
@@ -8478,14 +8497,20 @@ function buildHostedOutboxDeliveryErrorDetailSummary(
       ["textPartCount", "requestTextPartCount"],
       ["mediaPartCount", "requestMediaPartCount"],
       ["publicUrlMediaPartCount", "requestPublicUrlMediaPartCount"],
+      ["publicUrlMediaFormats", "requestPublicUrlMediaFormatSummary"],
       ["attachmentMediaPartCount", "requestAttachmentMediaPartCount"],
       ["bodyShape", "requestBodyShape"],
+      ["hasReplyToMessageId", "hasReplyToMessageId"],
     ]),
   );
   appendHostedOutboxDeliveryErrorDetail(
     output,
     "ResponseSummary",
     buildHostedOutboxDeliveryDiagnosticSummary(sanitizedDetails, [
+      ["fieldHints", "providerErrorFieldHints"],
+      ["reasonHints", "providerErrorReasonHints"],
+      ["mediaTypeHints", "providerErrorMediaTypeHints"],
+      ["messageLength", "providerErrorMessageLength"],
       ["kind", "responseBodyKind"],
       ["textLength", "responseBodyTextLength"],
       ["keyCount", "responseBodyKeyCount"],

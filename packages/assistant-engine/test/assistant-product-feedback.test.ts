@@ -149,6 +149,7 @@ describe("assistant product feedback", () => {
       "Accepted, already accepted, unavailable, and callback-failure results are terminal",
     );
     expect(description).not.toContain("retry once");
+    expect(description).toContain("do not delay submission to ask for those details");
     expect(schema).toContain('"minItems":0');
     expect(schema).toContain('"feature_interest"');
     expect(schema).toContain('"summary"');
@@ -212,6 +213,8 @@ describe("assistant product feedback", () => {
       "append a privacy-safe `Reproduction:` section in that same summary field",
     );
 
+    expect(systemPrompt).toContain("On explicit feedback submission, record facts and gaps now")
+    expect(systemPrompt).toContain("Otherwise, if one missing answer would materially change")
     const toolSchema = JSON.stringify(
       MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL.inputSchema,
     );

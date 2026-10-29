@@ -38,9 +38,10 @@ afterEach(() => {
 
 describe('Codex thread instructions', () => {
   it('keeps the Murph execution kernel compact without coding-agent baggage', () => {
-    // Includes native result-reading guidance; complete provider input grows by
-    // 41 tokens in both the individual and group capture fixtures.
-    expect(Buffer.byteLength(MURPH_CODEX_BASE_INSTRUCTIONS, 'utf8')).toBeLessThan(3_600)
+    // Includes result-reading and scheduled JSON delivery guidance. The complete
+    // native first request was measured at +0.460% individual / +0.605% group
+    // against the Terra release base; this cap still bounds kernel growth.
+    expect(Buffer.byteLength(MURPH_CODEX_BASE_INSTRUCTIONS, 'utf8')).toBeLessThan(3_800)
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
       "Complete the user's in-scope request end to end",
     )

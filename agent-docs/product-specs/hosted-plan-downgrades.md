@@ -1,6 +1,6 @@
 # Hosted Scheduled Plan Changes
 
-Last verified: 2026-08-08
+Last verified: 2026-10-26
 
 ## Goal
 
@@ -47,10 +47,12 @@ turn:
   [abuse-monitoring, prompt-cache, and endpoint retention
   controls](https://developers.openai.com/api/docs/guides/your-data#v1responses),
   and third-party tools remain subject to their own retention policies.
-- Personal and synthetic thread-container runtimes default to GPT-6 Sol.
-  The shared product catalog includes GPT-6 Sol and Luna, GPT-5.6 Luna and Sol,
-  and GPT-6 Astra. Web derives availability through the existing personal-plan
-  and room authority checks; GPT-5.6 Sol and Astra retain their premium gates.
+- Personal runtimes default to GPT-6.1 Terra. Synthetic thread-container
+  runtimes default to GPT-6.1 Sol without a subscription requirement.
+  The shared product catalog also includes GPT-6.1 Sol, GPT-6 Sol and Luna,
+  GPT-5.6 Luna and Sol, and GPT-6 Astra. In personal chats, all Sol versions
+  require an active paid personal or Family subscription. Groups are exempt.
+  Astra remains private-only and requires paid Edge or Max access.
 - Settings shows eligible choices and the existing upgrade action where the
   member can upgrade. An explicit accepted group request may choose a supported
   room model through `murph.assistant_configuration`; group reasoning remains
@@ -60,8 +62,9 @@ turn:
 - Postgres stores nullable model and reasoning intent on the existing
   `HostedMember` row. It remains the only durable owner; the vault, hosted
   workspace snapshot, and assistant runtime do not keep a second preference.
-  A null model follows the GPT-6 Sol default, and retired Terra preferences
-  resolve to that default. Existing explicit supported choices remain saved.
+  A null model follows the scope-specific default. The Terra rollout clears all
+  existing model overrides once after compatible runtime readers are deployed,
+  preserving reasoning preferences. Later explicit supported choices remain saved.
 - A scheduled plan change preserves current premium eligibility until billing
   reconciliation applies the new plan. If a saved premium model becomes
   unavailable, execution uses the default while retaining that preference for
