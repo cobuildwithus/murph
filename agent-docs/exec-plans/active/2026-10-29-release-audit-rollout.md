@@ -29,3 +29,15 @@ The user explicitly authorized backend, iOS and TestFlight deployment and native
 - Android main 916813760e1585ec84dc7ac1f1dcf75f874eae48: CI 40412071292 and instrumentation 40412071279 passed. Includes first-party auth and removal of the old Privy dependency.
 - New native tags point directly to these reviewed commits. Advancing source does not itself prove recovery; the real protected journeys must pass.
 - iOS release PR 284 records build 57 upload success and Apple processing acceptance; TestFlight availability was not verified there.
+
+## Candidate review and CI recovery
+
+- Round 1 ReviewGPT passed on fe6f3003c7515ecfa28726b5ab3d87aac8dbaafa using the Mountain managed lane. Eragon failed model selection before submission; it produced no review result.
+- CI exposed a retained inline type import from the homepage server-only helper in the dev compiler. An explicit whole-declaration type import erases that dependency. Nine focused real Chromium journeys and Web typecheck pass after the correction.
+- The broader Core suite expected duplicate archive recovery after an interrupted append. Prepared-append rollback now invokes that existing reconciliation first, preserving the original archive byte-for-byte and removing its identical plain duplicate. The expectation now checks that restored preimage and a successful subsequent append/replay. All 52 focused Core tests and its typecheck pass.
+- Regenerated the CLI skill hash after the Zod update; config schema and generated types did not change. Package-shape verification and CLI typecheck pass.
+- Complete first-provider input capture with the current production builders and installed Codex, using the locked prior Zod 4.5.4 versus candidate 4.6.6, reports identical byte lengths: individual 167088, group 145632, group tools available 154646. Registered tool bytes are 43065, 44811 and 69310 respectively. The scripted-loopback capture excludes only prompt_cache_key; no exact model tokenizer is available, so token counts are unclaimed. Runtime-generated request identities differ; equal byte length alone is not byte equality.
+- Earlier protected iOS diagnostics already prove fresh email receipt and code entry, then post_code_messaging_setup. This is a fixture-onboarding blocker: the ordinary production contract requires a conversational phone or Telegram channel. Asked the user to complete normal setup or arrange an already-onboarded protected test identity. No bypass or production identity mutation was performed.
+
+- Focused live schema journey passed with GPT-6.1 Sol using local subscription auth: one model/reasoning update, no duplicate effect, and a concise truthful next-message confirmation. UX verdict Ready. The canonical reminder journey could not start with either available binary because both lack the required native patch; no provider action occurred in those attempts. Existing Frog coverage records that launcher limitation.
+- CLI dependency isolation reproduces the exact old fingerprint under Zod 4.5.4 and the regenerated fingerprint under 4.6.6. Both skill-hash tests pass. No independent CLI command topology change was introduced.
