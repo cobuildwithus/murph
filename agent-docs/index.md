@@ -662,6 +662,8 @@ Connected-account reads and outdoor-reminder location share the runtime policy i
 `packages/assistant-engine/skills/connected-apps/references/reading.md`; the
 connected-apps entrypoint owns other services, writes, and account changes.
 
+- [Active release audit rollout](exec-plans/active/2026-10-29-release-audit-rollout.md) — backend delivery and native canary recovery.
+
 ## Purpose
 
 Deferred device hints honor their persisted retry time in wake projection and
