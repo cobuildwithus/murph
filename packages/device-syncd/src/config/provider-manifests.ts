@@ -239,6 +239,7 @@ const JUNCTION_DEVICE_SYNC_JOB_DEFINITIONS = {
       // day key is now derived from windowStart plus the authority timezone.
       temporalAuthorityDayKey: stringJobField(),
       temporalAuthorityTimeZone: stringJobField({ includeInHostedHint: true }),
+      timeseriesWindowHours: numberJobField({ includeInHostedHint: true }),
       webhookDataJson: stringJobField({ includeInHostedHint: true }),
       workoutStreamCursor: stringJobField({ includeInHostedHint: true }),
       workoutStreamEmptyReplay: booleanJobField({ includeInHostedHint: true }),

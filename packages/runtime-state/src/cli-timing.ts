@@ -206,7 +206,7 @@ export function cliTimingRejectionFailure(
 // errors. Keep these optional so older readers preserve failures and timing.
 const sourceCauseOwners = [
   ["meal edit", ["contract_invalid", "invalid_timestamp", "vault_error"]],
-  ["meal remove-photo", ["vault_error"]],
+  ["meal remove-photo", ["contract_invalid", "vault_error"]],
   ["food search-labels-batch", [
     "food_labels_api_auth_failed", "food_labels_api_rate_limited", "food_labels_api_request_timed_out",
     "food_labels_api_service_unavailable", "food_labels_api_response_failed",
@@ -217,12 +217,23 @@ const sourceCauseOwners = [
     "research_exa_invalid_response", "research_exa_request_rejected", "research_exa_timeout",
   ]],
 ] as const;
-const mealPhotoVaultCodes = [
-  "MEAL_PHOTO_RETENTION_PRECONDITION_FAILED", "MEAL_PHOTO_RETENTION_MANIFEST_INVALID",
+// Exact core codes preserved by the reached usecase mappings. Unknown names
+// stay absent; this is not a catalog of every vault error.
+const sourceCauseVaultCodes = [
+  ["meal edit", "contract_invalid", ["EVENT_CONTRACT_INVALID", "VAULT_INVALID_JSONL"]],
+  ["meal edit", "vault_error", ["CANONICAL_WRITE_LOCKED", "EVENT_LEDGER_SHARD_AMBIGUOUS"]],
+  ["meal remove-photo", "contract_invalid", ["EVENT_CONTRACT_INVALID", "VAULT_INVALID_JSONL"]],
+  ["meal remove-photo", "vault_error", [
+    "CANONICAL_WRITE_LOCKED", "EVENT_LEDGER_SHARD_AMBIGUOUS", "EVENT_CONTRACT_INVALID", "VAULT_INVALID_JSONL",
+    "MEAL_PHOTO_RETENTION_PRECONDITION_FAILED", "MEAL_PHOTO_RETENTION_MANIFEST_INVALID",
+    "MEAL_PHOTO_RETENTION_REFERENCE_INVALID",
+  ]],
 ] as const;
+// Observation states, never accepted as literal codes on an original error.
+const mealOriginalCodeStates = ["missing_code", "unrecognized_code"] as const;
 export interface CliTimingSourceCause {
-  code: typeof sourceCauseOwners[number][1][number];
-  vaultCode?: typeof mealPhotoVaultCodes[number];
+  code: typeof sourceCauseOwners[number][1][number] | typeof mealOriginalCodeStates[number];
+  vaultCode?: typeof sourceCauseVaultCodes[number][2][number];
 }
 
 /** Select fresh finite detail from an original error's context or a wire failure.
@@ -238,13 +249,16 @@ export function cliTimingSourceCauseFailure(
     const detail = property === "sourceCause" ? readCliTimingOwnData(source, property) : undefined;
     if (property === "sourceCause" && !record(detail)) return {};
     const rawCode = property === "context" ? code : readCliTimingOwnData(detail, "code");
-    const selected = allowed.find((candidate) => candidate === rawCode);
+    const selected = allowed.find((candidate) => candidate === rawCode) ??
+      (property === "sourceCause" && (command === "meal edit" || command === "meal remove-photo")
+        ? mealOriginalCodeStates.find((candidate) => candidate === rawCode) : undefined);
     if (!selected) return {};
     let vaultCode: CliTimingSourceCause["vaultCode"];
-    if (command === "meal remove-photo" && selected === "vault_error") {
+    const vaultCodes = sourceCauseVaultCodes.find(([name, owned]) => name === command && owned === selected)?.[2];
+    if (vaultCodes) {
       const context = property === "context" ? readCliTimingOwnData(source, "context") : detail;
       const rawVaultCode = record(context) ? readCliTimingOwnData(context, "vaultCode") : undefined;
-      vaultCode = mealPhotoVaultCodes.find((candidate) => candidate === rawVaultCode);
+      vaultCode = vaultCodes.find((candidate) => candidate === rawVaultCode);
     }
     return { sourceCause: { code: selected, ...(vaultCode ? { vaultCode } : {}) } };
   } catch { return {}; }

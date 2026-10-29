@@ -1,4 +1,9 @@
 import {
+  reportHostedAssistantPersistenceTiming,
+  type HostedAssistantPersistenceTiming,
+  type HostedAssistantPersistenceTimingSink,
+} from './hosted-turn-timing.js'
+import {
   assistantBackendTargetToProviderConfigInput,
   createAssistantModelTarget,
 } from '@murphai/operator-config/assistant-backend'
@@ -263,6 +268,7 @@ export async function applyAssistantSessionCodexResumeStateAction(input: {
 }
 
 export async function persistAssistantTurnAndSession(input: {
+  onPersistenceTiming?: HostedAssistantPersistenceTimingSink
   assistantTranscriptStandaloneContext?: true
   assistantTranscriptText?: string | null
   input: AssistantMessageInput
@@ -278,6 +284,7 @@ export async function persistAssistantTurnAndSession(input: {
   turnId: string
   userContentReceivedAt?: string | null
 }): Promise<AssistantSession> {
+  const timing: HostedAssistantPersistenceTiming = {}
   const state = createAssistantRuntimeStateService(input.input.vault)
   const persistUserPromptToTranscript = input.persistUserPromptToTranscript ?? true
   const assistantTranscriptText =
@@ -286,6 +293,7 @@ export async function persistAssistantTurnAndSession(input: {
       : input.assistantTranscriptText
 
   if (!input.plan.persistUserPromptOnFailure && persistUserPromptToTranscript) {
+    const startedAt = performance.now()
     await state.transcripts.append(
       input.session.sessionId,
       [
@@ -305,6 +313,7 @@ export async function persistAssistantTurnAndSession(input: {
       detail: 'user prompt persisted after provider completion',
       at: input.turnCreatedAt,
     })
+    timing.turnTimingUserPersistenceMs = performance.now() - startedAt
   }
 
   const auditEntries = buildAssistantProviderTranscriptAuditEntries({
@@ -312,7 +321,9 @@ export async function persistAssistantTurnAndSession(input: {
     routeLabel: input.providerResult.route.label,
   })
   if (auditEntries.length > 0) {
+    const startedAt = performance.now()
     await state.transcripts.append(input.session.sessionId, auditEntries)
+    timing.turnTimingAuditTranscriptMs = performance.now() - startedAt
   }
 
   const assistantTranscriptEntries = [
@@ -333,6 +344,7 @@ export async function persistAssistantTurnAndSession(input: {
         }]
       : []),
   ]
+  const generatedImageMarkersStartedAt = performance.now()
   const generatedImageDeliveryEntries =
     await resolveAssistantGeneratedImageDeliveryTranscriptEntries({
       input: input.input,
@@ -342,15 +354,18 @@ export async function persistAssistantTurnAndSession(input: {
       turnCreatedAt: input.turnCreatedAt,
       turnId: input.turnId,
     })
+  timing.turnTimingGeneratedImageMarkersMs = performance.now() - generatedImageMarkersStartedAt
   const turnTranscriptEntries = [
     ...assistantTranscriptEntries,
     ...generatedImageDeliveryEntries,
   ]
   if (turnTranscriptEntries.length > 0) {
+    const startedAt = performance.now()
     await state.transcripts.append(
       input.session.sessionId,
       turnTranscriptEntries,
     )
+    timing.turnTimingAssistantTranscriptMs = performance.now() - startedAt
   }
   const acceptedNoReplyDeliveryContextOrdinals =
     normalizeAssistantNoReplyDeliveryContextOrdinals(
@@ -365,6 +380,7 @@ export async function persistAssistantTurnAndSession(input: {
             ? [0]
             : []
         )
+  const noReplyMarkersStartedAt = performance.now()
   await persistAssistantNoReplyTranscriptMarkers({
     deliveryContextOrdinals: noReplyMarkerDeliveryContextOrdinals,
     sessionId: input.session.sessionId,
@@ -372,6 +388,7 @@ export async function persistAssistantTurnAndSession(input: {
     turnId: input.turnId,
     vault: input.input.vault,
   })
+  timing.turnTimingNoReplyMarkersMs = performance.now() - noReplyMarkersStartedAt
   const turnCommittedConversationHistory =
     persistUserPromptToTranscript ||
     turnTranscriptEntries.length > 0 ||
@@ -414,6 +431,7 @@ export async function persistAssistantTurnAndSession(input: {
       })
     : resolveAssistantNextResumeState(resumeStateInput)
 
+  const sessionPersistenceStartedAt = performance.now()
   const savedSession = await state.sessions.save({
     ...input.session,
     codexResume: nextResumeState,
@@ -427,6 +445,8 @@ export async function persistAssistantTurnAndSession(input: {
     turnCount: input.session.turnCount + 1,
   })
 
+  timing.turnTimingSessionPersistenceMs = performance.now() - sessionPersistenceStartedAt
+  reportHostedAssistantPersistenceTiming(input.onPersistenceTiming, timing)
   return savedSession
 }
 

@@ -4782,6 +4782,36 @@ returns successfully; it is a local acceptance observation, not a Linq server
 timestamp or member receipt. `deliveredAt` stays a separate boundary and is not
 used here.
 
+Post-result child attribution stays in the existing buffered turn-timing rows.
+Fixed `turnTiming*Ms` persistence fields separate transcript/marker/session
+writes, accepted-target resolution, outbox write-lock wait, dedupe lookup,
+intent/provenance writes, receipt repair and the existing diagnostic write.
+Outbox fields sum across the final reply's bubbles; `turnTimingOutboxIntentCount`
+counts those create/dedupe calls, not newly created intents. The fields are
+non-exhaustive nested durations, not additive latency outside their parent.
+They contain only finite nonnegative numbers. Missing means unmeasured or
+skipped, not zero; a zero may describe an executed no-op.
+
+`turn-delivery-finalized` follows the existing queue milestone and attributes
+receipt finalization, first-contact marking and the existing best-effort
+terminal diagnostic. `auto-reply-outcome-committed` measures outcome artifacts
+and deferred suppression evidence before scan-state persistence. It carries an
+existing delivery intent only for a unique single-intent outcome; multi-intent
+outcomes carry a count and no arbitrary sibling correlation. These stages are
+diagnostic only: neither moves nor substitutes the provider-result, queue,
+send or acceptance anchors, and neither supplies acknowledgement authority.
+
+The existing Linq dispatch row also includes optional member-channel barrier
+child timings: intent/provenance lookup, the foreground watcher stop/drain
+callback, the member-channel update prepare/record loop, and next-wake lookup.
+Processed and recorded counts describe that loop. These values are nested
+within `deliveryMemberChannelBarrierMs`; the barrier is not a pure lock wait.
+Blocked, failed or yielded barriers still prevent dispatch and do not fabricate
+a dispatch row. No new awaited I/O or synchronous telemetry flush is added.
+Old producers remain sparse and readable, and old readers may omit new child
+fields without affecting delivery. Coordinate compatible readers before runner
+producers to retain the diagnostics throughout rollout.
+
 Each accepted delivery joins exactly one queued final-reply `reply-dispatched`
 turn-timing row through the hashed delivery source reference. Two independently
 named measurements end at `acceptedAt`:

@@ -204,6 +204,13 @@ snapshot is already reconciled; it does not need an empty Web callback.
    Date-only rows remain daily aggregate inputs and publish a zero-coverage
    feature envelope without fabricated hourly, overnight, rate, peak, or
    episode facts, allowing a complete response to clear older temporal facts.
+   Hourly-feature resource jobs may reduce an oversized closed day into
+   complete UTC-hour suffixes through the existing scalar continuation. Each
+   suffix owns one bounded collection and canonical import; daily-aggregate
+   authority and collection caps do not expand. The first uncommitted hour
+   survives yielding and retry, and the canonical owner rechecks source
+   admission after collection. An oversized individual hour still fails
+   without a partial import.
    Sparse `caffeine`, `water`, and `mindfulness_minutes` direct-resource jobs
    retain precise windows because each admitted interval has its own exact-start
    identity, but those precise snapshots emit intervals only. The canonical

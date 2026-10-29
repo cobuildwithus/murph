@@ -2974,3 +2974,39 @@ test('sendAssistantMessageLocal emits a hosted context trace after session resol
   expect(JSON.stringify(rawEvent)).not.toContain('thread-message-trace')
   expect(JSON.stringify(rawEvent)).not.toContain('session-message-trace')
 })
+
+test('buffers persistence attribution on the original queue milestone and a later finalization milestone', async () => {
+  const { mocks, sendAssistantMessageLocal, session } = await loadLocalServiceModule()
+  mocks.finalizeAssistantTurnArtifacts.mockImplementationOnce(async (input) => {
+    input.onPersistenceTiming?.({ turnTimingSessionPersistenceMs: 31 })
+    return input.session
+  })
+  const dispatch = mocks.dispatchAssistantReply.getMockImplementation()!
+  mocks.dispatchAssistantReply.mockImplementationOnce(async (input) => {
+    input.onPersistenceTiming?.({ turnTimingOutboxLockWaitMs: 7, turnTimingOutboxIntentCount: 1 })
+    input.onPersistenceTiming?.({ turnTimingOutboxLockWaitMs: 11, turnTimingOutboxIntentCount: 1 })
+    return dispatch(input)
+  })
+  mocks.finalizeDeliveredAssistantTurn.mockImplementationOnce(async (input) => {
+    input.onPersistenceTiming?.({ turnTimingReceiptFinalizationMs: 29 })
+  })
+  const onTraceEvent = vi.fn()
+  const result = await sendAssistantMessageLocal({
+    deliverResponse: true,
+    executionContext: { hosted: { memberId: 'member-synthetic', userEnvKeys: [] } },
+    onTraceEvent,
+    prompt: 'Synthetic timing fixture',
+    vault: '/vaults/test',
+  })
+  expect(result).toMatchObject({ status: 'completed', session, deliveryIntentId: 'intent-1' })
+  const timings = onTraceEvent.mock.calls.map(([event]) => event.rawEvent)
+    .filter((raw) => raw?.type === 'assistant.turn.timing')
+  expect(timings).toEqual(expect.arrayContaining([
+    expect.objectContaining({ turnTimingStage: 'turn-artifacts-finalized', turnTimingSessionPersistenceMs: 31 }),
+    expect.objectContaining({ turnTimingStage: 'reply-dispatched', turnTimingOutboxLockWaitMs: 18, turnTimingOutboxIntentCount: 2 }),
+    expect.objectContaining({ turnTimingStage: 'turn-delivery-finalized', turnTimingReceiptFinalizationMs: 29, turnTimingDeliveryIntentId: 'intent-1' }),
+  ]))
+  expect(timings.findIndex((raw) => raw.turnTimingStage === 'reply-dispatched'))
+    .toBeLessThan(timings.findIndex((raw) => raw.turnTimingStage === 'turn-delivery-finalized'))
+  expect(mocks.finalizeDeliveredAssistantTurn).toHaveBeenCalledOnce()
+})

@@ -146,6 +146,38 @@ afterEach(async () => {
 })
 
 describe('assistant auto-reply event-first path', () => {
+  it('buffers outcome persistence timing without turning a trace failure into a delivery failure', async () => {
+    const vault = await createTempVault()
+    const onTraceEvent = vi.fn(() => { throw new Error('synthetic trace failure') })
+    const result = await processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context: createReplyContext(createLinqGroupCandidate({
+        inputId: 'ain_12121212121212121212121212121212',
+        messageId: 'synthetic-timing-message',
+        occurredAt: '2026-01-10T12:00:00.000Z',
+        text: 'Synthetic timing fixture',
+      })),
+      enabledChannels: ['linq'],
+      executionContext: { hosted: { memberId: 'member-synthetic', userEnvKeys: [] } },
+      inboxServices: createInboxServices(),
+      onTraceEvent,
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault,
+    })
+    expect(result).toMatchObject({ failed: 0, currentTurnDeliveryIntentIds: [] })
+    expect(replyEventPathMocks.sendAssistantMessage).toHaveBeenCalledOnce()
+    expect(onTraceEvent).toHaveBeenCalledWith(expect.objectContaining({
+      rawEvent: expect.objectContaining({
+        turnTimingStage: 'auto-reply-outcome-committed',
+        turnTimingDeliveryIntentId: null,
+        currentTurnDeliveryIntentCount: 0,
+        turnTimingOutcomeArtifactsMs: expect.any(Number),
+        turnTimingSuppressionEvidenceMs: expect.any(Number),
+      }),
+    }))
+  })
+
   it('preserves unresolved authenticated iMessage group reply context without exposing provider ids', async () => {
     const vault = await createTempVault()
     const candidate = createLinqGroupCandidate({

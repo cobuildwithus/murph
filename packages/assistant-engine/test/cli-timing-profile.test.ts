@@ -535,7 +535,8 @@ test('meal original failures cross real UDP, receiver, profile and hosted admiss
         { code: 'VALIDATION_ERROR', stage: 'validation', count: 1, validation: { field: 'nutritionConfidence', code: 'invalid_value', missing: false } },
       ])
       assert.deepEqual(report.commands[1]!.failures, [
-        { code: 'invalid_operation', stage: 'unknown', count: 1 }, { code: 'unknown', stage: 'unknown', count: 1 },
+        { code: 'invalid_operation', stage: 'unknown', count: 1 },
+        { code: 'unknown', stage: 'unknown', count: 1, sourceCause: { code: 'unrecognized_code' } },
       ])
       for (const command of report.commands.filter(command => command.outcome === 'ok')) {
         assert.equal(command.failures, undefined)
@@ -595,12 +596,20 @@ const sourceCauseCases: Array<{ command: string; stage: CliFailureTiming['stage'
   sourceCause: NonNullable<CliFailureTiming['sourceCause']> }> = [
   { command: 'meal edit', stage: 'unknown', sourceCause: { code: 'contract_invalid' } },
   { command: 'meal edit', stage: 'unknown', sourceCause: { code: 'vault_error' } },
+  { command: 'meal edit', stage: 'unknown', sourceCause: { code: 'vault_error', vaultCode: 'CANONICAL_WRITE_LOCKED' } },
+  { command: 'meal edit', stage: 'unknown', sourceCause: { code: 'vault_error', vaultCode: 'EVENT_LEDGER_SHARD_AMBIGUOUS' } },
+  { command: 'meal edit', stage: 'read', sourceCause: { code: 'contract_invalid', vaultCode: 'VAULT_INVALID_JSONL' } },
+  { command: 'meal edit', stage: 'read', sourceCause: { code: 'contract_invalid', vaultCode: 'EVENT_CONTRACT_INVALID' } },
   { command: 'meal remove-photo', stage: 'unknown', sourceCause: {
     code: 'vault_error', vaultCode: 'MEAL_PHOTO_RETENTION_PRECONDITION_FAILED',
   } },
   { command: 'meal remove-photo', stage: 'unknown', sourceCause: {
     code: 'vault_error', vaultCode: 'MEAL_PHOTO_RETENTION_MANIFEST_INVALID',
   } },
+  { command: 'meal remove-photo', stage: 'unknown', sourceCause: { code: 'vault_error', vaultCode: 'CANONICAL_WRITE_LOCKED' } },
+  { command: 'meal remove-photo', stage: 'unknown', sourceCause: { code: 'vault_error', vaultCode: 'MEAL_PHOTO_RETENTION_REFERENCE_INVALID' } },
+  { command: 'meal remove-photo', stage: 'read', sourceCause: { code: 'contract_invalid', vaultCode: 'VAULT_INVALID_JSONL' } },
+  { command: 'meal remove-photo', stage: 'read', sourceCause: { code: 'contract_invalid', vaultCode: 'EVENT_CONTRACT_INVALID' } },
   { command: 'food search-labels-batch', stage: 'response', sourceCause: { code: 'food_labels_api_response_failed' } },
   { command: 'food search-labels-batch', stage: 'response', sourceCause: { code: 'food_labels_api_invalid_response' } },
   { command: 'research scout-batch', stage: 'response', sourceCause: { code: 'research_exa_request_rejected' } },
@@ -625,10 +634,12 @@ async function exerciseSourceCauseFailures(batch: boolean, publish?: (report: Cl
       assert.equal(Object.hasOwn(original, 'sourceCause'), false)
       await delay(10)
     }
-    const unknown = new Error('PRIVATE_SENTINEL')
-    await assert.rejects(withCliTiming(() => timeCliDispatch('meal edit', async () => { throw unknown }), publish),
-      caught => caught === unknown)
-    await delay(10)
+    for (const code of [undefined, 'PRIVATE_SENTINEL']) {
+      const unknown = Object.assign(new Error('PRIVATE_SENTINEL'), { code })
+      await assert.rejects(withCliTiming(() => timeCliDispatch('meal edit', async () => { throw unknown }), publish),
+        caught => caught === unknown)
+      await delay(10)
+    }
     await withCliTiming(() => timeCliDispatch('meal edit', async () => {}), publish)
     await delay(10)
   }
@@ -653,21 +664,23 @@ test('source causes cross real UDP, receiver, profile and hosted admission for d
       assert.equal(event.method, 'murph/cliTiming')
       const report = normalizeCliTiming(event.params.timing)
       assert.ok(report)
-      assert.equal(report.reportCount, batch ? 1 : 11)
+      assert.equal(report.reportCount, batch ? 1 : sourceCauseCases.length + 4)
       assert.equal(report.batchContainers, batch ? 1 : 0)
       assert.deepEqual(report.commands.map(({ command, outcome, calls }) => ({ command, outcome, calls })), [
-        { command: 'meal edit', outcome: 'error', calls: 4 },
-        { command: 'meal remove-photo', outcome: 'error', calls: 2 },
+        { command: 'meal edit', outcome: 'error', calls: 9 },
+        { command: 'meal remove-photo', outcome: 'error', calls: 6 },
         { command: 'food search-labels-batch', outcome: 'error', calls: 2 },
         { command: 'research scout-batch', outcome: 'error', calls: 2 },
         { command: 'meal edit', outcome: 'ok', calls: 1 },
       ])
       for (const command of report.commands.filter(command => command.outcome === 'error')) {
         const failures: CliFailureTiming[] = sourceCauseCases.filter(row => row.command === command.command).map(row => ({
-          code: 'unknown', stage: row.stage, count: row.sourceCause.code === 'contract_invalid' ? 2 : 1,
+          code: 'unknown', stage: row.stage, count: row === sourceCauseCases[0] ? 2 : 1,
           sourceCause: row.sourceCause,
         }))
-        if (command.command === 'meal edit') failures.push({ code: 'unknown', stage: 'unknown', count: 1 })
+        if (command.command === 'meal edit') for (const code of ['missing_code', 'unrecognized_code'] as const) {
+          failures.push({ code: 'unknown', stage: 'unknown', count: 1, sourceCause: { code } })
+        }
         assert.deepEqual(command.failures, failures)
         assert.equal(command.droppedFailures, undefined)
       }
@@ -808,10 +821,7 @@ test('malformed source causes and legacy reports preserve failure, timing and us
   const baseline = buildAssistantCodexTurnProfileJson({ rawEvents, turnId })!
   const profile = { ...baseline, cliTiming: report }
   const expected = structuredClone(report)
-  expected.commands[0]!.failures = [
-    { code: 'unknown', stage: 'unknown', count: 3 },
-    { code: 'unknown', stage: 'unknown', count: 1, sourceCause: { code: 'vault_error' } },
-  ]
+  expected.commands[0]!.failures![0] = { code: 'unknown', stage: 'unknown', count: 2 }
   let reads = 0
   const malformed: unknown[] = [null, ['contract_invalid'], { code: 'PRIVATE_SENTINEL' },
     Object.create({ code: 'contract_invalid' }),
@@ -840,20 +850,17 @@ test('malformed source causes and legacy reports preserve failure, timing and us
     failures: [{ code: 'unknown', stage: 'unknown', count: 1 }],
   }] })
   assert.equal(mixed.reportCount, 2)
-  assert.equal(mixed.commands[0]!.calls, 6)
-  assert.deepEqual(mixed.commands[0]!.failures, [
-    { code: 'unknown', stage: 'unknown', count: 2, sourceCause: { code: 'contract_invalid' } },
-    { code: 'unknown', stage: 'unknown', count: 1, sourceCause: { code: 'vault_error' } },
-    { code: 'unknown', stage: 'unknown', count: 2 },
-  ])
+  assert.equal(mixed.commands[0]!.calls, 11)
+  // All eight newer variants already occupy the cap. An uncovered old call
+  // adds calls only; its separate observed unknown contributes one dropped failure.
+  assert.deepEqual(mixed.commands[0]!.failures, report.commands[0]!.failures)
+  assert.equal(mixed.commands[0]!.droppedFailures, 1)
   assert.deepEqual(usage({ ...profile, cliTiming: mixed }).turnProfileJson, { ...profile, cliTiming: mixed })
 })
 
 // Bind both actual base readers; a current-reader roundtrip is not compatibility proof.
-const sourceCauseCompatibilityBase = process.env.MURPH_CLI_SOURCE_CAUSE_COMPAT_BASE
-test.skipIf(!sourceCauseCompatibilityBase)('actual base hosted reader drops only source cause and retains legacy failures', async () => {
-  assert.equal(sourceCauseCompatibilityBase, '704630e3fda169456458db4c7a0f50121be120ee')
-  const source = (file: string) => execFileSync('git', ['show', `${sourceCauseCompatibilityBase}:${file}`],
+async function sourceCauseBaseReaders(base: string) {
+  const source = (file: string) => execFileSync('git', ['show', `${base}:${file}`],
     { encoding: 'utf8', maxBuffer: 1_000_000 })
   const moduleUrl = (text: string) => `data:text/javascript;base64,${Buffer.from(stripTypeScriptTypes(text)).toString('base64')}`
   const oldTimingUrl = moduleUrl(source('packages/runtime-state/src/cli-timing.ts'))
@@ -862,22 +869,34 @@ test.skipIf(!sourceCauseCompatibilityBase)('actual base hosted reader drops only
   assert.ok(oldUsageSource.includes('"@murphai/runtime-state/cli-timing"'))
   const old: { parseAssistantUsageRecord: typeof parseAssistantUsageRecord } = await import(moduleUrl(
     oldUsageSource.replace('"@murphai/runtime-state/cli-timing"', JSON.stringify(oldTimingUrl))))
+  return { oldTiming, old }
+}
+const sourceCauseCompatibilityBase = process.env.MURPH_CLI_SOURCE_CAUSE_COMPAT_BASE
+test.skipIf(!sourceCauseCompatibilityBase)('actual base hosted reader drops only source cause and retains legacy failures', async () => {
+  assert.equal(sourceCauseCompatibilityBase, '704630e3fda169456458db4c7a0f50121be120ee')
+  const { oldTiming, old } = await sourceCauseBaseReaders(sourceCauseCompatibilityBase)
   let report!: CliTiming
   await exerciseSourceCauseFailures(true, value => { report = value })
   const oldReport = structuredClone(report)
   for (const command of oldReport.commands.filter(command => command.outcome === 'error')) {
-    command.failures = [{ code: 'unknown', stage: command.failures![0]!.stage, count: command.calls }]
+    command.failures = command.failures!.map(({ code, stage, count }) => ({ code, stage, count }))
   }
-  assert.deepEqual(oldTiming.normalizeCliTiming(report), oldReport)
-  assert.deepEqual(normalizeCliTiming(oldReport), oldReport, 'New readers never backfill an old cause.')
+  const normalizedOld = normalizeCliTiming(oldReport)!
+  assert.deepEqual(oldTiming.normalizeCliTiming(report), normalizedOld)
+  assert.deepEqual(normalizeCliTiming(normalizedOld), normalizedOld, 'New readers never backfill an old cause.')
   const mixed = structuredClone(report)
-  mergeCliTiming(mixed, oldReport)
-  const oldMixed = structuredClone(oldReport)
-  oldTiming.mergeCliTiming(oldMixed, oldReport)
-  assert.deepEqual(oldTiming.normalizeCliTiming(mixed), oldMixed)
+  mergeCliTiming(mixed, normalizedOld)
+  // New-reader variant caps can drop incoming legacy observations; those drops
+  // stay explicit even when the old reader later coalesces the retained variants.
+  const oldMixed = structuredClone(mixed)
+  for (const command of oldMixed.commands) {
+    if (command.failures) command.failures = command.failures.map(({ code, stage, count }) => ({ code, stage, count }))
+  }
+  const normalizedMixed = normalizeCliTiming(oldMixed)!
+  assert.deepEqual(oldTiming.normalizeCliTiming(mixed), normalizedMixed)
   const baseline = buildAssistantCodexTurnProfileJson({ rawEvents: baseEvents, turnId })!
   for (const schema of ['murph.assistant-turn-profile.v1', 'murph.assistant-turn-profile.v2']) {
-    for (const [timing, expectedTiming] of [[report, oldReport], [mixed, oldMixed]]) {
+    for (const [timing, expectedTiming] of [[report, normalizedOld], [mixed, normalizedMixed]]) {
       const profile = { ...baseline, schema, tools: [], cliTiming: timing }
       const input = usage(profile)
       const expected = { ...input, turnProfileJson: { ...profile, cliTiming: expectedTiming } }
@@ -887,5 +906,43 @@ test.skipIf(!sourceCauseCompatibilityBase)('actual base hosted reader drops only
       assert.equal(expected.outputTokens, 11)
       assert.equal(JSON.stringify(expected).includes('PRIVATE_SENTINEL'), false)
     }
+  }
+})
+
+const mealOriginCompatibilityBase = process.env.MURPH_CLI_MEAL_ORIGIN_COMPAT_BASE
+test.skipIf(!mealOriginCompatibilityBase)('actual preceding meal reader drops only new nested and missing-code detail', async () => {
+  assert.equal(mealOriginCompatibilityBase, '5a7bebcdafafbf7e8d204d881eeca9a8b114b552')
+  const { oldTiming, old } = await sourceCauseBaseReaders(mealOriginCompatibilityBase)
+  let report!: CliTiming
+  await exerciseSourceCauseFailures(true, value => { report = value })
+  const projected = structuredClone(report)
+  for (const command of projected.commands) for (const failure of command.failures ?? []) {
+    const cause = failure.sourceCause
+    if (!cause || !command.command.startsWith('meal ')) continue
+    if (cause.code === 'missing_code' || cause.code === 'unrecognized_code' ||
+        (command.command === 'meal remove-photo' && cause.code === 'contract_invalid')) {
+      delete failure.sourceCause
+    } else if (command.command === 'meal edit' || ![
+      'MEAL_PHOTO_RETENTION_PRECONDITION_FAILED', 'MEAL_PHOTO_RETENTION_MANIFEST_INVALID',
+    ].some(code => code === cause.vaultCode)) delete cause.vaultCode
+  }
+  const expectedTiming = normalizeCliTiming(projected)!
+  assert.deepEqual(oldTiming.normalizeCliTiming(report), expectedTiming)
+  assert.deepEqual(normalizeCliTiming(expectedTiming), expectedTiming, 'Absent old evidence remains absent.')
+  const baseline = buildAssistantCodexTurnProfileJson({ rawEvents: baseEvents, turnId })!
+  for (const schema of ['murph.assistant-turn-profile.v1', 'murph.assistant-turn-profile.v2']) {
+    const input = usage({ ...baseline, schema, tools: [], cliTiming: report })
+    const expected = { ...input, turnProfileJson: { ...input.turnProfileJson, cliTiming: expectedTiming } }
+    assert.deepEqual(old.parseAssistantUsageRecord(JSON.parse(JSON.stringify(input))), expected)
+    assert.deepEqual(parseAssistantUsageRecord(expected), expected)
+    const absent = structuredClone(expected)
+    for (const command of absent.turnProfileJson.cliTiming.commands) {
+      delete command.failures; delete command.droppedFailures
+    }
+    assert.deepEqual(parseAssistantUsageRecord(absent), absent)
+    assert.deepEqual(old.parseAssistantUsageRecord(absent), absent)
+    assert.equal(expected.inputTokens, 17)
+    assert.equal(expected.outputTokens, 11)
+    assert.equal(JSON.stringify(expected).includes('PRIVATE_SENTINEL'), false)
   }
 })

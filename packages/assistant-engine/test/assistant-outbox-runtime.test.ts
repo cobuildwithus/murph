@@ -264,6 +264,52 @@ afterEach(async () => {
 })
 
 describe('assistant outbox runtime', () => {
+  it('attributes a real queued write lock without changing dedupe or surfacing observer failures', async () => {
+    const { vaultRoot } = await createAssistantVault('assistant-outbox-timing-')
+    let acquiredResolve!: () => void
+    let releaseResolve!: () => void
+    const acquired = new Promise<void>((resolve) => { acquiredResolve = resolve })
+    const release = new Promise<void>((resolve) => { releaseResolve = resolve })
+    const holding = withAssistantRuntimeWriteLock(vaultRoot, async () => {
+      acquiredResolve()
+      await release
+    })
+    await acquired
+    let clock = 100
+    vi.spyOn(performance, 'now').mockImplementation(() => clock)
+    const onPersistenceTiming = vi.fn((_timing: Readonly<Record<string, number>>) => { throw new Error('synthetic observer failure') })
+    const input = {
+      channel: 'linq' as const,
+      dedupeToken: 'synthetic-timing-token',
+      message: 'synthetic reply',
+      sessionId: 'session-timing',
+      threadId: 'thread-timing',
+      threadIsDirect: true,
+      turnId: 'turn-timing',
+      vault: vaultRoot,
+      onPersistenceTiming,
+    }
+    const pending = createAssistantOutboxIntent(input)
+    expect(onPersistenceTiming).not.toHaveBeenCalled()
+    clock = 175
+    releaseResolve()
+    const [intent] = await Promise.all([pending, holding])
+    expect(onPersistenceTiming).toHaveBeenCalledWith({
+      turnTimingOutboxLockWaitMs: 75,
+      turnTimingOutboxDedupeMs: 0,
+      turnTimingOutboxIntentPersistenceMs: 0,
+      turnTimingOutboxReceiptPersistenceMs: 0,
+      turnTimingOutboxDiagnosticMs: 0,
+      turnTimingOutboxIntentCount: 1,
+    })
+    const retry = await createAssistantOutboxIntent(input)
+    expect(retry.intentId).toBe(intent.intentId)
+    expect(onPersistenceTiming).toHaveBeenCalledTimes(2)
+    expect(onPersistenceTiming.mock.calls[1]?.[0]).not.toHaveProperty('turnTimingOutboxDiagnosticMs')
+    expect(await readAssistantOutboxIntent(vaultRoot, intent.intentId))
+      .toMatchObject({ intentId: intent.intentId, status: 'pending' })
+  })
+
   it('prepares only outbox and projection state for empty foreground reads and projection recovery', async () => {
     const { parentRoot, vaultRoot } = await createTempVaultContext('assistant-outbox-private-path-')
     tempRoots.push(parentRoot)

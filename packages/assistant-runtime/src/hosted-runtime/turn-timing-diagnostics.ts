@@ -1,4 +1,5 @@
 import {
+  HOSTED_ASSISTANT_PERSISTENCE_TIMING_FIELDS,
   HOSTED_ASSISTANT_TURN_TIMING_SCHEMA,
   HOSTED_ASSISTANT_TURN_TIMING_TYPE,
 } from "@murphai/assistant-engine";
@@ -14,6 +15,8 @@ const HOSTED_ASSISTANT_TURN_TIMING_STAGES = new Set([
   "usage-recorded",
   "turn-artifacts-finalized",
   "reply-dispatched",
+  "turn-delivery-finalized",
+  "auto-reply-outcome-committed",
   "scan-state-persisted",
   "automation-pass-finished",
   "foreground-delivery-phase-started",
@@ -123,6 +126,10 @@ export function readHostedAssistantTurnTimingTrace(
     }
   }
 
+  for (const key of HOSTED_ASSISTANT_PERSISTENCE_TIMING_FIELDS) {
+    const value = readHostedTurnTimingNonnegativeNumber(record, key);
+    if (value !== undefined) details[key] = value;
+  }
   return details;
 }
 
