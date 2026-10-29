@@ -15,7 +15,7 @@ The user explicitly authorized backend, iOS and TestFlight deployment and native
 ## Tasks and gates
 
 1. Merge current main into the owned backend fix branch, complete focused proof, publish PR 4397 and run final ReviewGPT concurrently with CI.
-2. Rotate native canary pins to reviewed native main revisions with green main CI, using new immutable tags. Run controller contract tests and protected canaries after the policy and deployed Web converge.
+2. Qualify reviewed native main revisions with green main CI through protected live runs on new immutable tags before promoting controller pins. Run controller contract tests and repeat protected canaries after the policy and deployed Web converge.
 3. Merge the backend only with resolved review, exact-head checks and mergeability; verify production Web and dispatch the normal protected gradual Cloudflare rollout with predeploy and live smoke gates enabled.
 4. Establish current iOS upload state. The release PR records successful upload of 1.1.24 (57); do not duplicate an already uploaded build. Confirm TestFlight processing and tester availability through supported authenticated access if available.
 5. Diagnose remaining native failures using closed stage summaries. Correct proven causes without weakening assertions or exporting private logs.
@@ -43,3 +43,9 @@ The user explicitly authorized backend, iOS and TestFlight deployment and native
 - CLI dependency isolation reproduces the exact old fingerprint under Zod 4.5.4 and the regenerated fingerprint under 4.6.6. Both skill-hash tests pass. No independent CLI command topology change was introduced.
 
 - The next platform shard reached Contracts and exposed two stale generated schema files after the Zod update. Regeneration adds only four starts_with format annotations to fields whose existing sha256 prefix patterns are unchanged. All 390 Contracts tests, emitted-artifact examples and both Contracts typechecks pass. No schema source or runtime validator changed.
+
+- CLI import-surface CI measured 321 modules against a 320 ceiling. Isolated built-CLI probes with the locked Zod versions reproduce base 320 / candidate 321; the entire difference is zod/v4/locales/tg.js (96 versus 97 Zod modules), with no new package. Admit only that measured module.
+- Pre-promotion protected canaries launched against verified production Web 207c9002802032ab689702395d4d1c4132c942f3: iOS run 40820646560 and Android run 40820648859. Both use non-destructive existing identities and reviewed immutable native tags; successful live qualification remains required before pin promotion.
+
+- Android qualification run 40820648859 failed before app-stage proof with gradle_failed. Native main already repaired its separate synthetic workflow for proven Ubuntu emulator runtime/disk prerequisites in Android PR 64; the protected workflow lacks that repair. Investigating and applying it in an isolated Android checkout. Remove both unqualified pin rotations from the backend release until live qualification passes.
+- CLI import-surface guard now passes all three tests at the measured 321 ceiling; CLI typecheck passes.
