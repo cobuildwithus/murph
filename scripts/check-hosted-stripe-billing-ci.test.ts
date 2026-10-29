@@ -44,9 +44,10 @@ describe("hosted Stripe billing workflow guard", () => {
   });
 
   it.each([
+    ["apps/web/test/hosted-billing-projection-waiter.test.ts", "missing-projection-diagnostic-proof"],
     ["apps/web/test/hosted-billing-browser-hydration.test.ts", "missing-hydration-proof"],
     ['MURPH_E2E_BILLING_BROWSER_SMOKE: "1"', "disabled-hydration-proof"],
-  ])("rejects removing the real browser proof requirement %s", async (marker, code) => {
+  ])("rejects removing the hermetic proof requirement %s", async (marker, code) => {
     expect(issueCodes((await readWorkflow()).replace(marker, ""))).toContain(code);
   });
 

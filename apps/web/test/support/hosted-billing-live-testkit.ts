@@ -612,7 +612,9 @@ export async function waitForHostedFamilyProjectionForTest(input: {
   });
 }
 
-async function pollHostedProjection<T>(input: {
+async function pollHostedProjection<
+  T extends HostedBillingProjectionForTest | HostedFamilyProjectionForTest,
+>(input: {
   label: string;
   read: () => Promise<T>;
   ready: (projection: T) => boolean;
@@ -625,9 +627,68 @@ async function pollHostedProjection<T>(input: {
     projection = await input.read();
   }
   if (!input.ready(projection)) {
-    throw new Error(`Timed out waiting for local billing projection: ${input.label}.`);
+    throw new Error(
+      `Timed out waiting for local billing projection: ${input.label}.`
+      + ` Last projection (${describeHostedProjection(projection)}).`,
+    );
   }
   return projection;
+}
+
+function describeHostedProjection(
+  projection: HostedBillingProjectionForTest | HostedFamilyProjectionForTest,
+): string {
+  const planCodes = [
+    "launch_edge_monthly", "launch_family_monthly", "launch_group_monthly", "launch_monthly",
+  ];
+  // Select closed scalar fields only; never serialize the projection or its members.
+  const fields = [
+    `status=${projectionEnum(projection.billingStatus, [
+      "active", "canceled", "incomplete", "not_started", "past_due", "paused", "unpaid",
+    ])}`,
+    `plan=${projectionEnum(projection.currentBillingPlanCode, planCodes)}`,
+    `phase=${projectionEnum(projection.currentBillingPhase, ["paid", "trial"])}`,
+    `customerPresent=${projection.stripeCustomerId !== null}`,
+    `subscriptionPresent=${projection.stripeSubscriptionId !== null}`,
+  ];
+  if ("members" in projection) {
+    fields.push(
+      `groupPresent=${projection.groupId !== null}`,
+      `ownerPresent=${projection.ownerMemberId !== null}`,
+      `billingActive=${projection.billingActive === true ? "active"
+        : projection.billingActive === false ? "inactive" : "unknown"}`,
+      `memberPlan=${projectionEnum(projection.memberPlanCode, ["pulse", "edge", "max"])}`,
+      `memberRole=${projectionEnum(projection.memberRole, ["owner", "member"])}`,
+      `memberStatus=${projectionEnum(projection.memberStatus, ["active", "removed"])}`,
+      `memberCount=${projectionCount(projection.members.length)}`,
+      `seatsPresent=${projection.seats !== null}`,
+      `activeSeats=${projectionCount(projection.seats?.active)}`,
+      `billedSeats=${projectionCount(projection.seats?.billed)}`,
+    );
+  } else {
+    fields.push(
+      `offer=${projectionEnum(projection.currentCheckoutOffer, ["pulse_trial_7d", "standard"])}`,
+      `periodStartPresent=${projection.currentPeriodStart !== null}`,
+      `periodEndPresent=${projection.currentPeriodEnd !== null}`,
+      `trialStartPresent=${projection.currentTrialStartedAt !== null}`,
+      `trialEndPresent=${projection.currentTrialEndsAt !== null}`,
+      `trialRedeemedPresent=${projection.pulseTrialRedeemedAt !== null}`,
+      `scheduledPlan=${projectionEnum(projection.scheduledBillingPlanCode, planCodes)}`,
+      `scheduledEffectivePresent=${projection.scheduledBillingEffectiveAt !== null}`,
+      `schedulePresent=${projection.stripeSubscriptionScheduleId !== null}`,
+    );
+  }
+  return fields.join(", ");
+}
+
+function projectionEnum(value: unknown, allowed: readonly string[]): string {
+  return value === null ? "absent" : allowed.find((entry) => entry === value) ?? "unknown";
+}
+
+function projectionCount(value: number | undefined): number | "absent" | "unknown" | "100+" {
+  if (value === undefined) return "absent";
+  if (!Number.isSafeInteger(value) || value < 0) return "unknown";
+  return value >= 100 ? "100+" : value;
 }
 
 async function withHostedBillingTestkit<T>(
