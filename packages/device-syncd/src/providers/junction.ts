@@ -271,6 +271,7 @@ interface JunctionWorkoutStreamImportResult extends JunctionTimeseriesImportResu
 }
 
 interface JunctionDailyTimeseriesImportResult extends JunctionTimeseriesImportResult {
+  timeseriesWindowHours?: 1;
   emptyWorkoutStreamReplayWindow?: {
     windowEnd: string;
     windowStart: string;
@@ -3487,6 +3488,7 @@ export function createJunctionDeviceSyncProvider(
               job,
               windowEnd: window.windowEnd,
               windowStart: dailyImport.yieldedAt,
+              timeseriesWindowHours: dailyImport.timeseriesWindowHours,
               workoutStreamCursor: effectiveResource === "workout_stream"
                 ? dailyImport.workoutStreamCursor
                 : undefined,
@@ -5408,6 +5410,9 @@ export function createJunctionDeviceSyncProvider(
         if (committedProgress) return finish(firstUncommittedDay());
         throw error;
       }
+      if (canReduceJunctionTimeseriesWindow(error, input.resource)) {
+        return { ...finish(firstUncommittedDay()), timeseriesWindowHours: 1 };
+      }
       if (isRetryableDeviceSyncFailure(error)) {
         throw new JunctionTimeseriesProgressError(error, firstUncommittedDay(), null);
       }
@@ -5738,9 +5743,8 @@ export function createJunctionDeviceSyncProvider(
         }
       } catch (error) {
         if (
-          isJunctionTimeseriesWindowTooLarge(error)
-          && timeseriesWindowHours === 24
-          && policy?.normalizationMode === "hourly_or_session_feature"
+          timeseriesWindowHours === 24
+          && canReduceJunctionTimeseriesWindow(error, resource)
         ) {
           return buildFullJobTimeseriesContinuationResult({
             context,
@@ -6362,6 +6366,7 @@ export function createJunctionDeviceSyncProvider(
     historicalUnresolvedProviderRecordIdentitiesJson?: string;
     historicalUnresolvedProviderRecordCount?: number;
     job: DeviceSyncJobRecord;
+    timeseriesWindowHours?: 1;
     workoutStreamCursor?: string | null;
     workoutStreamEmptySeen?: boolean;
     windowEnd: string;
@@ -6663,6 +6668,7 @@ export function createJunctionDeviceSyncProvider(
     historicalUnresolvedProviderRecordIdentitiesJson?: string;
     historicalUnresolvedProviderRecordCount?: number;
     job: DeviceSyncJobRecord;
+    timeseriesWindowHours?: 1;
     workoutStreamCursor?: string | null;
     workoutStreamEmptySeen?: boolean;
     windowEnd: string;
@@ -6703,6 +6709,7 @@ export function createJunctionDeviceSyncProvider(
             : undefined,
       windowEnd: input.windowEnd,
       windowStart: input.windowStart,
+      timeseriesWindowHours: input.timeseriesWindowHours ?? input.job.payload.timeseriesWindowHours,
       workoutStreamCursor: input.workoutStreamCursor || undefined,
       workoutStreamEmptySeen: input.workoutStreamEmptySeen === true
         ? true
@@ -10483,6 +10490,11 @@ function isFullJobTimeseriesContinuation(job: DeviceSyncJobRecord): boolean {
 function usesJunctionHourlyResourceWindow(resource: string, windowHours: 1 | 24): boolean {
   return windowHours === 1
     && resolveJunctionTimeseriesResourcePolicy(resource)?.normalizationMode === "hourly_or_session_feature";
+}
+
+function canReduceJunctionTimeseriesWindow(error: unknown, resource: string): boolean {
+  return usesJunctionHourlyResourceWindow(resource, 1)
+    && isJunctionTimeseriesWindowTooLarge(error);
 }
 
 function isJunctionTimeseriesWindowTooLarge(error: unknown): boolean {
