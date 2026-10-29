@@ -117,6 +117,7 @@ jobs:
           pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage
           apps/web/test/hosted-onboarding-billing-checkout-route.test.ts
           apps/web/test/hosted-billing-live-support.test.ts
+          apps/web/test/hosted-billing-projection-waiter.test.ts
 
       - name: Test workflow guard mutations
         run: >-
