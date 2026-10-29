@@ -1,3 +1,5 @@
+Release audit recovery, game correctness and dependency fixes are tracked in [the implementation plan](exec-plans/completed/2026-10-28-release-audit-fixes.md).
+
 Linq validation telemetry and release verification are tracked in [the completed implementation plan](exec-plans/completed/2026-10-27-linq-validation-telemetry.md).
 Intentional reply-bubble pacing attribution is tracked in [the delivery alert plan](exec-plans/completed/2026-10-27-reply-delivery-pacing.md); the current contract remains in `references/hosted-runtime-protocol.md`.
 
@@ -659,6 +661,8 @@ Malformed referral-path routing plan: [`2026-10-05-referral-path-routing.md`](ex
 Connected-account reads and outdoor-reminder location share the runtime policy in
 `packages/assistant-engine/skills/connected-apps/references/reading.md`; the
 connected-apps entrypoint owns other services, writes, and account changes.
+
+- [Active release audit rollout](exec-plans/active/2026-10-29-release-audit-rollout.md) — backend delivery and native canary recovery.
 
 ## Purpose
 

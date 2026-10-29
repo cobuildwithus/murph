@@ -25,6 +25,7 @@ export interface HostedAuthSessionProof {
 export async function readHostedAuthSession(input: {
   baseURL: string; secret: string; prisma: PrismaClient;
   credential: string; transport: HostedAuthTransport; refresh?: boolean;
+  purpose?: "account-deletion";
 }) {
   const headers = input.transport === "browser"
     ? new Headers({ cookie: `${hostedAuthCookieName(process.env.NODE_ENV === "production")}=${input.credential}` })
@@ -40,7 +41,9 @@ export async function readHostedAuthSession(input: {
     || !(current.expiresAt instanceof Date) || current.expiresAt <= new Date()) return { session: null, headers: result.headers };
   const member = await readHostedMemberCoreState({ memberId: user.id, prisma: input.prisma });
   if (!member) return { session: null, headers: result.headers };
-  assertHostedMemberNotSuspended(member);
+  // Suspension fences runtime access, but must not prevent an authenticated
+  // owner from finishing deletion after a provider failure.
+  if (input.purpose !== "account-deletion") assertHostedMemberNotSuspended(member);
   const proof: HostedAuthSessionProof = {
     credentialDigest: credentialDigest(input.credential), expiresAt: current.expiresAt, row,
   };

@@ -45,7 +45,10 @@ export async function getHostedAppSessionFromRequest(request: Request): Promise<
   return resolveHostedAppSessionFromHeaders(request.headers);
 }
 
-async function resolveHostedAppSessionFromHeaders(headers: Pick<Headers, "get">): Promise<HostedAppSession | null> {
+async function resolveHostedAppSessionFromHeaders(
+  headers: Pick<Headers, "get">,
+  purpose?: "account-deletion",
+): Promise<HostedAppSession | null> {
   let credential: ReturnType<typeof classifyHostedBrowserCredential>;
   try {
     credential = classifyHostedBrowserCredential({
@@ -57,6 +60,7 @@ async function resolveHostedAppSessionFromHeaders(headers: Pick<Headers, "get">)
   }
   if (credential.kind === "anonymous") return null;
   const result = await readHostedAuthSession({
+    purpose,
     ...requireHostedBetterAuthConfig(), credential: credential.token, transport: "browser", prisma: getPrisma(),
   });
   if (!result.session) return null;
@@ -66,6 +70,13 @@ async function resolveHostedAppSessionFromHeaders(headers: Pick<Headers, "get">)
 
 export async function requireHostedAppSessionFromRequest(request: Request): Promise<HostedAppSession> {
   const session = await getHostedAppSessionFromRequest(request);
+  if (!session) throw authRequired();
+  return session;
+}
+
+/** Only the account-deletion endpoint may admit a suspended owner's session. */
+export async function requireHostedAccountDeletionSessionFromRequest(request: Request): Promise<HostedAppSession> {
+  const session = await resolveHostedAppSessionFromHeaders(request.headers, "account-deletion");
   if (!session) throw authRequired();
   return session;
 }

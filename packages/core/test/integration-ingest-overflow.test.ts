@@ -113,10 +113,11 @@ test("compressed-size overflow and interrupted base publication recover before t
   faults.archiveRemoval = true;
   const input = deviceInput(base.vaultRoot, base.importedAt);
   await assert.rejects(importDeviceBatch(input), /synthetic interruption/);
-  assert.equal((await fs.stat(base.plainPath)).size, base.baseSize);
-  assert.equal(await prefixHash(base.plainPath, base.baseSize), base.baseHash);
+  // Prepared-append rollback resolves the identical plain/archive pair while
+  // checking its receipt, restoring the original archive before a later retry.
+  await assert.rejects(fs.access(base.plainPath));
   assert.deepEqual(await fs.readFile(base.archivePath), originalArchive);
-  assert.equal((await recoverInterruptedClosedIntegrationIngestArchives({ vaultRoot: base.vaultRoot, now: base.now })).repairedShardCount, 1);
+  assert.equal((await recoverInterruptedClosedIntegrationIngestArchives({ vaultRoot: base.vaultRoot, now: base.now })).repairedShardCount, 0);
   faults.compressedLimit = true;
   await assertImportedAndReplay(input, base);
 });

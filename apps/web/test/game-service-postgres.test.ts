@@ -710,6 +710,61 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     expect((await readGame(rematch!.id, leo))!.players[1]).toMatchObject({ memberId: ava, firstName: "Emma", relationship: "sister" });
   });
 
+  it.each([false, true])("serializes concurrent rematches (same player: %s)", async (samePlayer) => {
+    const leo = await member("Leo", "America/New_York");
+    const ava = await member("Ava", "America/New_York");
+    const first = await startGame(leo, ava);
+    await devSettleNow(first.gameId, leo);
+    const command = (): GameCommand => ({ type: "createGame", gameId: randomUUID(), inviteeFirstName: "Friend",
+      previousGameId: first.gameId, terms: TERMS });
+    const results = await Promise.all([run(leo, command()), run(samePlayer ? leo : ava, command())]);
+    const stored = await getPrisma().game.findMany({ where: { previousGameId: first.gameId } });
+    expect(stored).toHaveLength(1);
+    if (samePlayer) expect(results.filter((result) => result.ok)).toHaveLength(1);
+    else {
+      expect(results.every((result) => result.ok)).toBe(true);
+      expect(stored[0].status).toBe("live");
+    }
+  });
+
+  it("keeps an older live game on Home beyond fifty newer invitations", async () => {
+    const leo = await member("Leo", "America/New_York");
+    const ava = await member("Ava", "America/New_York");
+    const first = await startGame(leo, ava);
+    const template = await getPrisma().game.findUniqueOrThrow({ where: { id: first.gameId } });
+    const seat = await getPrisma().gamePlayer.findUniqueOrThrow({ where: { gameId_memberId: { gameId: first.gameId, memberId: leo } } });
+    for (let n = 0; n < 51; n += 1) {
+      const id = randomUUID();
+      await getPrisma().game.create({ data: { id, createdBy: leo, status: "invited",
+        terms: toPrismaJsonObject(template.terms), termsWordsEncrypted: template.termsWordsEncrypted,
+        inviteExpiresAt: new Date(Date.now() + 86_400_000) } });
+      await getPrisma().gamePlayer.create({ data: { gameId: id, memberId: leo, seat: 0, timeZone: seat.timeZone, joinedAt: new Date(Date.now() + n + 1) } });
+    }
+    expect((await readHome(leo)).games.some((game) => game.id === first.gameId)).toBe(true);
+  });
+
+  it("authorizes reused media through any visible entry beyond five newer references", async () => {
+    const poster = await member("Poster", "America/New_York");
+    const viewer = await member("Viewer", "America/New_York");
+    const stranger = await member("Stranger", "America/New_York");
+    const first = await startGame(poster, viewer);
+    await devStartNow(first.gameId, poster);
+    const shot = await photo(poster, first.gameId, "reused-image");
+    await ok(poster, shot);
+    await ok(viewer, await photo(viewer, first.gameId, "viewer-image"));
+    const entry = await getPrisma().gameEntry.findUniqueOrThrow({ where: { id: shot.entryId } });
+    // Later withdrawn references cannot hide the earlier, still-visible post.
+    for (let n = 0; n < 6; n += 1) {
+      await getPrisma().gameEntry.create({ data: { ...entry, id: randomUUID(), dayIndex: n + 1,
+        receivedAt: new Date(entry.receivedAt.getTime() + n + 1), withdrawnAt: new Date() } });
+    }
+    expect(await authorizeMediaRead(viewer, shot.mediaKeys[0])).toBe(true);
+    expect(await authorizeMediaRead(stranger, shot.mediaKeys[0])).toBe(false);
+    await getPrisma().gameReport.create({ data: { id: randomUUID(), reporterMemberId: viewer,
+      reportedMemberId: poster, gameId: first.gameId, entryId: entry.id, about: "post", reason: "other" } });
+    expect(await authorizeMediaRead(viewer, shot.mediaKeys[0])).toBe(false);
+  });
+
   it.each(["challenger", "opponent"] as const)("treats both players tapping rematch as the second accepting the first (first: %s)", async (firstAsker) => {
     const leo = await member("Leo", "America/New_York");
     const ava = await member("Ava", "Pacific/Auckland");

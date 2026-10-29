@@ -135,7 +135,9 @@ const scopedImportSurfaceProbes: readonly ScopedImportSurfaceProbe[] = [
     // contracts/dist/{experiment-outcome,schema-primitives,sleep-session}.js:
     // verbatim schema moves that let the Worker skip the broad schema module.
     // Admit the measured count only; no package or byte-budget change.
-    maxResolvedModules: 320,
+    // PR #4397 measured 320 with Zod 4.5.4 and 321 with patched Zod 4.6.6.
+    // The sole added module is zod/v4/locales/tg.js; no package is added.
+    maxResolvedModules: 321,
   },
 ]
 

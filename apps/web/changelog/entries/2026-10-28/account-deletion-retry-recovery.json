@@ -1,0 +1,17 @@
+{
+  "publishedOn": "2026-10-28",
+  "order": 200,
+  "item": {
+    "id": "account-deletion-retry-recovery",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Retry interrupted account deletion",
+    "summary": "If a connected service interrupts account deletion, you can retry from the same signed-in session.",
+    "details": "Your account remains paused while deletion is unfinished. A retry still requires a valid session and the deletion confirmation.",
+    "relevanceTags": [
+      "privacy",
+      "settings"
+    ],
+    "sourcePullRequests": [4397]
+  }
+}

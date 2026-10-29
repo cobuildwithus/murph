@@ -267,6 +267,7 @@ export async function collectHostedPendingAssistantInputMediaRetentionProtection
 }
 
 export async function runHostedPendingAssistantInputContentRetention(input: {
+  events?: readonly AssistantInputEventRecord[];
   now?: Date | string;
   signal?: AbortSignal | null;
   vaultRoot: string;
@@ -274,18 +275,18 @@ export async function runHostedPendingAssistantInputContentRetention(input: {
   input.signal?.throwIfAborted();
   const now = normalizeHostedPendingInputRetentionNow(input.now);
   const cutoffMs = now.getTime() - INBOX_TEXT_RETENTION_WINDOW_MS;
-  const listed = await listAssistantInputEvents({
+  const events = input.events ?? (await listAssistantInputEvents({
     limit: Number.MAX_SAFE_INTEGER,
     signal: input.signal,
     vault: input.vaultRoot,
-  });
+  })).events;
   const candidates: Array<{
     event: AssistantInputEventRecord;
     terminal: boolean;
   }> = [];
   let nextEligibleAt: string | null = null;
 
-  for (const event of listed.events) {
+  for (const event of events) {
     input.signal?.throwIfAborted();
     if (event.contentRetiredAt) {
       continue;
@@ -1562,64 +1563,38 @@ export type HostedStaleRetryDropReason = "too_old" | "newer_message_answered";
  */
 export async function dropHostedStalePendingAssistantInputRetries(input: {
   events: readonly AssistantInputEventRecord[];
+  /** The cursor-ordered snapshot already read by this pass's content retention. */
+  storedEvents: readonly AssistantInputEventRecord[];
   now?: Date;
+  signal?: AbortSignal | null;
   vaultRoot: string;
 }): Promise<{
   dropped: Array<{ inputId: string; reason: HostedStaleRetryDropReason }>;
   kept: AssistantInputEventRecord[];
 }> {
+  input.signal?.throwIfAborted();
   const nowMs = (input.now ?? new Date()).getTime();
-  const candidates = input.events.filter(isHostedMemberConversationInput);
-  if (candidates.length === 0) {
-    return { dropped: [], kept: [...input.events] };
-  }
   const reasons = new Map<string, HostedStaleRetryDropReason>();
-  const recent: AssistantInputEventRecord[] = [];
-  for (const event of candidates) {
+  const recentByChat = new Map<string, AssistantInputEventRecord[]>();
+  for (const event of input.events) {
+    if (!isHostedMemberConversationInput(event)) continue;
     const receivedAtMs = resolveHostedPendingInputReceivedAtMs(event);
     if (!Number.isFinite(receivedAtMs) || nowMs - receivedAtMs > HOSTED_STALE_RETRY_MAX_AGE_MS) {
       reasons.set(event.inputId, "too_old");
     } else {
-      recent.push(event);
-    }
-  }
-  if (recent.length > 0) {
-    const pendingInputIds = new Set(input.events.map((event) => event.inputId));
-    const oldest = recent.reduce((first, event) =>
-      compareAssistantInputCursors(event.cursor, first.cursor) < 0 ? event : first);
-    const later = (await listAssistantInputEvents({
-      afterCursor: oldest.cursor,
-      limit: Number.MAX_SAFE_INTEGER,
-      vault: input.vaultRoot,
-    })).events.filter((event) =>
-      !pendingInputIds.has(event.inputId) && isHostedMemberConversationInput(event));
-    const answered = new Map<string, boolean>();
-    const isAnswered = async (event: AssistantInputEventRecord) => {
-      const known = answered.get(event.inputId);
-      if (known !== undefined) return known;
-      const evidence = await readAssistantAutoReplyTerminalEvidenceByEvidenceId(input.vaultRoot, event.inputId)
-        ?? (event.projection.captureId
-          ? await readAssistantAutoReplyTerminalEvidenceByEvidenceId(input.vaultRoot, event.projection.captureId)
-          : null);
-      const terminal = evidence?.terminal.kind;
-      const result = terminal === "replied" || terminal === "reply_intent_committed";
-      answered.set(event.inputId, result);
-      return result;
-    };
-    for (const event of recent) {
-      for (const newer of later) {
-        if (
-          compareAssistantInputCursors(newer.cursor, event.cursor) > 0
-          && isSameHostedPendingInputChat(newer, event)
-          && await isAnswered(newer)
-        ) {
-          reasons.set(event.inputId, "newer_message_answered");
-          break;
-        }
+      const chat = hostedPendingInputChatKey(event);
+      if (chat) {
+        const recent = recentByChat.get(chat) ?? [];
+        recent.push(event);
+        recentByChat.set(chat, recent);
       }
     }
   }
+  for (const inputId of await findSupersededHostedPendingInputs({ ...input, recentByChat })) {
+    reasons.set(inputId, "newer_message_answered");
+  }
   const dropped = input.events.filter((event) => reasons.has(event.inputId));
+  input.signal?.throwIfAborted();
   if (dropped.length > 0) {
     await writeAssistantAutoReplySuppressionEvidence({
       captureIds: dropped.flatMap((event) => event.projection.captureId ? [event.projection.captureId] : []),
@@ -1634,6 +1609,52 @@ export async function dropHostedStalePendingAssistantInputRetries(input: {
   };
 }
 
+/** Reuse retention's snapshot; read terminal evidence only for relevant later messages. */
+async function findSupersededHostedPendingInputs(input: {
+  events: readonly AssistantInputEventRecord[];
+  storedEvents: readonly AssistantInputEventRecord[];
+  recentByChat: Map<string, AssistantInputEventRecord[]>;
+  signal?: AbortSignal | null;
+  vaultRoot: string;
+}): Promise<string[]> {
+  const { recentByChat } = input;
+  if (recentByChat.size === 0) return [];
+  const superseded: string[] = [];
+  const pendingInputIds = new Set(input.events.map((event) => event.inputId));
+  const oldestByChat = new Map([...recentByChat].map(([chat, events]) => [
+    chat, events.reduce((first, event) =>
+      compareAssistantInputCursors(event.cursor, first.cursor) < 0 ? event : first).cursor,
+  ]));
+  // Sort only relevant member inputs: cross-lane cursor ordering is not a
+  // total order. Within this one lane, newest-first lets us stop per chat.
+  const later = input.storedEvents.filter((event) => {
+    if (pendingInputIds.has(event.inputId) || !isHostedMemberConversationInput(event)) return false;
+    const chat = hostedPendingInputChatKey(event);
+    const oldest = chat ? oldestByChat.get(chat) : undefined;
+    return oldest !== undefined && compareAssistantInputCursors(event.cursor, oldest) > 0;
+  }).sort((left, right) => compareAssistantInputCursors(right.cursor, left.cursor));
+  for (const newer of later) {
+    input.signal?.throwIfAborted();
+    if (recentByChat.size === 0) break;
+    const chat = hostedPendingInputChatKey(newer);
+    const recent = chat ? recentByChat.get(chat) : undefined;
+    if (!chat || !recent) continue;
+    const evidence = await readAssistantAutoReplyTerminalEvidenceByEvidenceId(input.vaultRoot, newer.inputId)
+      ?? (newer.projection.captureId
+        ? await readAssistantAutoReplyTerminalEvidenceByEvidenceId(input.vaultRoot, newer.projection.captureId)
+        : null);
+    input.signal?.throwIfAborted();
+    if (evidence?.terminal.kind !== "replied" && evidence?.terminal.kind !== "reply_intent_committed") continue;
+    for (const event of recent) {
+      if (compareAssistantInputCursors(newer.cursor, event.cursor) > 0) {
+        superseded.push(event.inputId);
+      }
+    }
+    recentByChat.delete(chat);
+  }
+  return superseded;
+}
+
 /**
  * Only a member's own chat message is a retry that can go stale or be
  * superseded. System inputs (delivery failures, image completions) keep their
@@ -1646,16 +1667,11 @@ function isHostedMemberConversationInput(event: AssistantInputEventRecord): bool
     && !isAssistantHostedImageCompletionEvent(event);
 }
 
-function isSameHostedPendingInputChat(
-  left: AssistantInputEventRecord,
-  right: AssistantInputEventRecord,
-): boolean {
-  const a = left.conversation;
-  const b = right.conversation;
-  return Boolean(a?.source && a.threadId)
-    && a?.source === b?.source
-    && a?.accountId === b?.accountId
-    && a?.threadId === b?.threadId;
+function hostedPendingInputChatKey(event: AssistantInputEventRecord): string | null {
+  const chat = event.conversation;
+  return chat?.source && chat.threadId
+    ? JSON.stringify([chat.source, chat.accountId, chat.threadId])
+    : null;
 }
 
 export function isHostedPendingAssistantInputStillReplyable(input: {

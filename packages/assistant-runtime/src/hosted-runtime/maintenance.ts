@@ -372,6 +372,7 @@ export async function runHostedAssistantAutomation(
       : {
           limit: DEFAULT_ASSISTANT_AUTOMATION_SCAN_LIMIT,
           mode: "background",
+          signal,
           vaultRoot,
         },
   );

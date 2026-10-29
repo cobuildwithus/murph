@@ -12,7 +12,7 @@ const mocks = vi.hoisted(() => ({
   prismaClient: {
     label: "test-prisma",
   },
-  requireHostedAppSessionFromRequest: vi.fn(),
+  requireHostedAccountDeletionSessionFromRequest: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/csrf", () => ({
@@ -25,7 +25,7 @@ vi.mock("@/src/lib/prisma", () => ({
 
 vi.mock("@/src/lib/hosted-onboarding/app-session", () => ({
   buildHostedAppSessionClearCookies: mocks.buildHostedAppSessionClearCookies,
-  requireHostedAppSessionFromRequest: mocks.requireHostedAppSessionFromRequest,
+  requireHostedAccountDeletionSessionFromRequest: mocks.requireHostedAccountDeletionSessionFromRequest,
 }));
 
 vi.mock("@/src/lib/hosted-privacy/account-data-service", () => ({
@@ -60,7 +60,7 @@ describe("settings privacy delete route", () => {
       exitFeedback: null,
       providerAccessRemovalConfirmationToken: null,
     });
-    mocks.requireHostedAppSessionFromRequest.mockResolvedValue({
+    mocks.requireHostedAccountDeletionSessionFromRequest.mockResolvedValue({
       member: {
         id: "member_123",
       },
@@ -106,7 +106,7 @@ describe("settings privacy delete route", () => {
 
     expect(response.status).toBe(200);
     expect(mocks.assertHostedOnboardingMutationOrigin).toHaveBeenCalledWith(expect.any(Request));
-    expect(mocks.requireHostedAppSessionFromRequest).toHaveBeenCalledWith(expect.any(Request));
+    expect(mocks.requireHostedAccountDeletionSessionFromRequest).toHaveBeenCalledWith(expect.any(Request));
     expect(mocks.parseHostedAccountDeletionRequest).toHaveBeenCalledWith({
       confirmationPhrase: "DELETE MY ACCOUNT",
     });

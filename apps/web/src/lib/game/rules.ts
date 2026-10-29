@@ -537,7 +537,9 @@ function postingDay(state: RuleState, player: RulePlayer, captureAgeMs: number |
   if (captureAgeMs !== null && yesterday >= 0 && yesterday < lengthDays) {
     const boundary = dayStartInstant(addDays(player.dayOne!, today), player.timeZone).getTime();
     const capturedAt = now.getTime() - captureAgeMs;
-    if (graceOpen(state, player, yesterday) && now.getTime() - boundary < GAME_GRACE_MS && capturedAt <= boundary + GAME_CAPTURE_SLACK_MS) {
+    const yesterdayStart = dayStartInstant(addDays(player.dayOne!, yesterday), player.timeZone).getTime();
+    if (graceOpen(state, player, yesterday) && now.getTime() - boundary < GAME_GRACE_MS
+      && capturedAt >= yesterdayStart - GAME_CAPTURE_SLACK_MS && capturedAt <= boundary + GAME_CAPTURE_SLACK_MS) {
       return yesterday;
     }
   }

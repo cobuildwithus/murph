@@ -1542,6 +1542,12 @@ KMS-encrypted external-cleanup receipt in the same transaction. The receipt is
 the sole post-delete owner of the minimal Cloudflare runtime and Stripe customer
 identifiers; target completion is independent, retries use the
 existing retention sweep, and terminal convergence deletes the receipt.
+The account-deletion endpoint authenticates the same encrypted browser session
+but admits its suspended owner, so a provider failure can be retried with the
+existing session. This exception grants only deletion; ordinary session reads,
+runtime access, and transaction-time session guards still reject suspension.
+Revoked or expired sessions never qualify.
+
 Account deletion first locks and suspends the owner plus every owned thread
 container, and every relationship writer that can add a runtime, Stripe, or Family
 target shares that member lock and rejects suspended owners. The final
@@ -5484,7 +5490,14 @@ no timer or cron: whether a game is over is computed from its state, and reads
 1v1 records its addressed invitee (`game.invitee_member_id`), who alone besides
 the challenger can read it and its invite token. Reads are viewer-scoped:
 another player's entry is omitted from the response, not just its media URL,
-until the viewer has posted that day; media reads use the same rule.
+until the viewer has posted that day; media reads use the same rule. Media
+authorization applies participation, reveal, withdrawal, report and rollout
+predicates before its single-row existence limit; repeated content keys cannot
+hide an earlier visible use. Home prioritizes live games in SQL before its
+bounded candidate window. Rematch creation rechecks the latest pair state under
+the existing pair lock; an opposite simultaneous request joins the first invite
+after releasing that transaction. Grace accepts captures only from the day
+that just ended, with the existing clock slack at both boundaries.
 
 `/api/game/v1` routes are thin: they fold path ids into one command. Writes:
 `PUT /me/profile`, `POST /games`, `POST /invites/:token/accept`,
