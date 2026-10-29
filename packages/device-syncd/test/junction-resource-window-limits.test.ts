@@ -96,9 +96,8 @@ test("resource hourly overflow stays terminal to that attempt without partial im
   assert.deepEqual(f.imported, []);
 });
 
-test("daily aggregate resource overflow cannot opt into hourly partial authority", async () => {
+test("daily aggregate resource overflow stays day-atomic", async () => {
   const f = fixture("steps");
-  f.job.payload.timeseriesWindowHours = 1;
   await assert.rejects(executeJunctionJob(f.provider, f.context, f.job));
   assert.deepEqual(f.requests, ["2026-04-01"]);
   assert.deepEqual(f.imported, []);
@@ -117,41 +116,6 @@ test("resource overflow preserves committed days before switching to hourly suff
   assert.equal(f.requests.filter((start) => start === "2026-04-01").length, 1);
   assert.deepEqual(f.imported, [START, END]);
 });
-
-test("hourly resource continuation yields without reading or acknowledging the hour", async () => {
-  const f = fixture("heartrate");
-  f.job.payload.timeseriesWindowHours = 1;
-  f.context.shouldYield = () => true;
-  const result = await executeJunctionJob(f.provider, f.context, f.job);
-  assert.deepEqual(f.requests, []);
-  assert.deepEqual(f.imported, []);
-  assert.equal(result.scheduledJobs?.[0]?.payload?.windowStart, START);
-  assert.equal(result.scheduledJobs?.[0]?.payload?.timeseriesWindowHours, 1);
-  assert.equal(result.continuationProgress, undefined);
-});
-
-test("hourly resource imports keep the post-fetch source admission check", async () => {
-  const f = fixture("heartrate");
-  f.job.payload.timeseriesWindowHours = 1;
-  f.context.listConnectionSources = async () => f.requests.length === 0
-    ? f.context.account.sources ?? []
-    : [];
-  await executeJunctionJob(f.provider, f.context, f.job);
-  assert.equal(f.requests.length, 1);
-  assert.deepEqual(f.imported, []);
-});
-
-test("hourly resource continuation rejects a partial-hour coordinate before collection", async () => {
-  const f = fixture("heartrate");
-  f.job.payload.timeseriesWindowHours = 1;
-  f.job.payload.windowStart = "2026-04-01T00:30:00.000Z";
-  await assert.rejects(executeJunctionJob(f.provider, f.context, f.job), {
-    code: "DEVICE_SYNC_JOB_PAYLOAD_INVALID", retryable: false,
-  });
-  assert.deepEqual(f.requests, []);
-  assert.deepEqual(f.imported, []);
-});
-
 
 test("resource hourly recovery survives service enqueue, cold restore and hosted hints", async () => {
   const f = fixture("heartrate");

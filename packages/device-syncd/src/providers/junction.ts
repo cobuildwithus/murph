@@ -5410,9 +5410,7 @@ export function createJunctionDeviceSyncProvider(
         if (committedProgress) return finish(firstUncommittedDay());
         throw error;
       }
-      if (
-        canReduceJunctionTimeseriesWindow(error, input.resource)
-      ) {
+      if (canReduceJunctionTimeseriesWindow(error, input.resource)) {
         return { ...finish(firstUncommittedDay()), timeseriesWindowHours: 1 };
       }
       if (isRetryableDeviceSyncFailure(error)) {

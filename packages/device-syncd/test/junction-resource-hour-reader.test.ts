@@ -59,17 +59,6 @@ function fixture(resource: string, overflowHours = false, overflowDay = "2026-04
   return { provider, context, job, requests, requestEnds, imported };
 }
 
-test("reader keeps an unmarked oversized resource day terminal", async () => {
-  const f = fixture("heartrate");
-  await assert.rejects(executeJunctionJob(f.provider, f.context, f.job), (error: unknown) => {
-    assert.ok(error instanceof Error);
-    assert.equal((error as Error & { code?: string }).code ?? (error.cause as { code?: string })?.code, "JUNCTION_API_RECORD_LIMIT");
-    return true;
-  });
-  assert.deepEqual(f.requests, ["2026-04-01"]);
-  assert.deepEqual(f.imported, []);
-});
-
 test("reader preserves a supplied hourly suffix through every complete hour", async () => {
   const f = fixture("heartrate");
   let pending: DeviceSyncJobInput = { kind: "resource", payload: { ...f.job.payload, timeseriesWindowHours: 1 } };

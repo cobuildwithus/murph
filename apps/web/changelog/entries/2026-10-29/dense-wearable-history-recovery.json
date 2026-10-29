@@ -1,5 +1,5 @@
 {
-  "publishedOn": "2026-10-26",
+  "publishedOn": "2026-10-29",
   "order": 100,
   "item": {
     "id": "dense-wearable-history-recovery",
@@ -14,6 +14,7 @@
       "reliability"
     ],
     "sourcePullRequests": [
+      4396,
       4377
     ]
   }

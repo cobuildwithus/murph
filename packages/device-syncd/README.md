@@ -140,13 +140,12 @@ Current providers:
   suffix, preserving committed days, source admission and foreground yielding.
   An oversized individual hour still fails without partial import; this does
   not replay or reset earlier terminal jobs. Historical and webhook resource jobs
-  for uncapped dense daily-aggregate and hourly/session resources still fetch one
-  closed UTC day per request. Resource readers also accept an explicitly supplied
-  `timeseriesWindowHours: 1` for hourly/session features: import one complete UTC
-  hour with the existing transport caps, then retain the marker on the durable
-  suffix. They do not produce that marker after a daily overflow yet. Deploy
-  these readers and verify serving and warm-invocation convergence before a
-  separate producer enables hourly recovery; daily aggregates stay day-atomic.
+  for uncapped dense daily-aggregate and hourly/session resources begin with one
+  closed UTC day per request. The compatible resource reader accepts and retains
+  `timeseriesWindowHours: 1` on each hourly suffix. Deploy that reader and verify
+  serving and warm-invocation convergence before enabling the overflow producer;
+  retain that reader floor while hourly continuations can remain durable.
+  Daily aggregates stay day-atomic.
   A job's first nonempty day commits alone, as the
   one-day owner did; later consecutive closed days share one canonical import
   (up to eight days, 4,000 records, or whatever has accumulated after five
