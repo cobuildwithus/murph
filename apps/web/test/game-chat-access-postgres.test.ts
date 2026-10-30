@@ -80,6 +80,39 @@ describe.skipIf(!enabled)("game chat access PostgreSQL", () => {
       await prisma.$disconnect(); vi.unstubAllEnvs();
     }
   });
+  it("funds only the inherited room while a rematch notice awaits generation", async () => {
+    vi.stubEnv("MURPH_GAME_ENABLED", "true"); vi.stubEnv("MURPH_GAME_MEMBER_ALLOWLIST", "");
+    const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: databaseUrl }) });
+    const [room, first, second] = Array.from({ length: 3 }, () => randomUUID());
+    const gameId = randomUUID();
+    const now = new Date();
+    const key = createHostedLinqDeliveryIdempotencyLookupKey(`game-rematch:${gameId}`)!;
+    try {
+      await prisma.hostedMember.createMany({ data: [room, first, second].map(id => ({ id, billingStatus: "not_started" })) });
+      await prisma.hostedThreadContainer.create({ data: { memberId: room, ownerMemberId: first,
+        participants: { create: [first, second].map(participantMemberId => ({ participantMemberId,
+          handleLookupKey: `synthetic_${participantMemberId}`, firstSeenAt: now, lastSeenAt: now })) } } });
+      await prisma.hostedThreadRoute.create({ data: { channel: "linq", containerMemberId: room,
+        threadLookupKey: `synthetic_${room}`, threadIdentityLookupKey: `synthetic_${room}` } });
+      await prisma.gameProfile.createMany({ data: [first, second].map(memberId => ({ memberId, firstNameEncrypted: "synthetic", timeZone: "UTC" })) });
+      await prisma.game.create({ data: { id: gameId, createdBy: first, inviteeMemberId: second, status: "invited",
+        inviteExpiresAt: new Date(now.getTime() + 60_000),
+        chatContainerMemberId: room, terms: { v: 1, versions: [] }, termsWordsEncrypted: "synthetic",
+        players: { create: { memberId: first, seat: 0, timeZone: "UTC" } } } });
+      await reserveGameChatLifecycleTx({ gameId, kind: "rematch", now, tx: prisma });
+      expect(await readGameChatFundingRooms({ memberIds: [room], now, prisma })).toEqual(new Map([[room, room]]));
+      await prisma.game.update({ where: { id: gameId }, data: { inviteExpiresAt: now } });
+      expect(await readGameChatFundingRooms({ memberIds: [room], now, prisma })).toEqual(new Map());
+      await prisma.hostedLinqDelivery.update({ where: { idempotencyKey: key }, data: { status: "skipped", skippedAt: now } });
+      expect(await readGameChatFundingRooms({ memberIds: [room], now, prisma })).toEqual(new Map());
+    } finally {
+      await prisma.hostedLinqDelivery.deleteMany({ where: { idempotencyKey: key } });
+      await prisma.game.deleteMany({ where: { id: gameId } });
+      await prisma.hostedThreadContainer.deleteMany({ where: { memberId: room } });
+      await prisma.hostedMember.deleteMany({ where: { id: { in: [room, first, second] } } });
+      await prisma.$disconnect(); vi.unstubAllEnvs();
+    }
+  });
   it("funds the bound negotiating or live room without personal access or an extra allowance", async () => {
     vi.stubEnv("MURPH_GAME_ENABLED", "true");
     vi.stubEnv("MURPH_GAME_MEMBER_ALLOWLIST", "");
@@ -133,12 +166,16 @@ describe.skipIf(!enabled)("game chat access PostgreSQL", () => {
       })) });
       await prisma.game.create({ data: {
         id: gameId, createdBy: first, status: "negotiating", liveRosterKey: `${first}:${second}`, chatContainerMemberId: room,
+        inviteExpiresAt: new Date(now.getTime() + 60_000),
         terms: { v: 1, versions: [] }, termsWordsEncrypted: "synthetic-sealed-terms",
         players: { create: [first, second].map((memberId, seat) => ({
           memberId, seat, timeZone: "America/New_York", dayOne: new Date("2030-01-15T00:00:00Z"),
         })) },
       } });
       await assertRoom(true);
+      await prisma.game.update({ where: { id: gameId }, data: { inviteExpiresAt: now } });
+      await assertRoom(false);
+      await prisma.game.update({ where: { id: gameId }, data: { inviteExpiresAt: new Date(now.getTime() + 60_000) } });
       // Provider dispatch blinds sourceRef; frozen retries retain admission
       // through the exact bound payload owner, not the original raw reference.
       await prisma.hostedLinqDelivery.update({ where: { id: bootstrapReceiptId }, data: {

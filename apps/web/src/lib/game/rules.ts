@@ -242,8 +242,14 @@ export function hasUnlockedDay(entries: readonly RuleEntry[], memberId: string, 
  */
 export function isGameDue(state: RuleState, now: Date): boolean {
   const { game } = state;
-  if (game.status === "invited" || game.status === "negotiating") return game.inviteExpiresAt !== null && game.inviteExpiresAt <= now;
+  if (game.status === "invited" || game.status === "negotiating") return isGameInviteExpired(game, now);
   return game.status === "live" && settleDueAt(state) <= now;
+}
+
+/** The acceptance deadline shared by invited and negotiating games. */
+export function isGameInviteExpired(game: { status: string; inviteExpiresAt: Date | null }, now: Date): boolean {
+  return (game.status === "invited" || game.status === "negotiating")
+    && game.inviteExpiresAt !== null && game.inviteExpiresAt <= now;
 }
 
 /** This player's last day is over: the game is done for them, whatever the other player's clock says. */
@@ -420,8 +426,7 @@ export function decideJoin(
   const claimed = playerFor(state, input.memberId);
   const acceptingNegotiation = input.acceptNegotiation && game.status === "negotiating"
     && claimed && input.memberId !== game.createdBy && state.players.length === game.seats;
-  const expired = game.inviteExpiresAt !== null && input.now.getTime() >= game.inviteExpiresAt.getTime();
-  if (game.status === "void" || (["invited", "negotiating"].includes(game.status) && expired)) reject("INVITE_EXPIRED", "This invite isn't open anymore.");
+  if (game.status === "void" || isGameInviteExpired(game, input.now)) reject("INVITE_EXPIRED", "This invite isn't open anymore.");
   if (!acceptingNegotiation && (game.status !== "invited" || state.players.length >= game.seats)) reject("INVITE_USED", "This invite was already used.");
   if (!claimed) assertAddressee(game, input.memberId);
   if (input.termsVersion !== currentTerms(game.terms).n) {

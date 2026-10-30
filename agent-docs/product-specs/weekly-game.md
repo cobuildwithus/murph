@@ -192,7 +192,12 @@ this default without deleting other people's private contact choices.
 - **Rematch.** A new game can name the previous one. After a settled game with
   the same two people, its round is the previous round plus one; otherwise 1.
   A rematch of a settled 1v1 is addressed to the other player: it appears on
-  their Home ready to accept, so nobody texts a second link. Only that player
+  their Home ready to accept, so nobody texts a second link. When the finished
+  game has a linked group chat, the rematch keeps that room and Murph posts one
+  short notice there right after creation, naming the requester, whether the
+  rules are the same or what changed, and the app controls to Shake or suggest
+  changes. It never creates or discovers a chat for a rematch, and it drops the
+  notice if the rematch is no longer invited before delivery. Only that player
   can accept or negotiate it; anyone else holding the link is refused with
   `NOT_A_PLAYER`. When both players ask for a rematch of the same game, the
   second ask accepts the first on its terms. Otherwise it must follow the
@@ -292,8 +297,9 @@ participants make that room ineligible. Proposal copy
 names only the requested changes and asks the other player naturally. It mentions
 a date only for an explicit start-date change, omitting cutoff times and routine
 check-in preservation text. An
-ordinary contextual agreement is enough. App proposals get one model-written
-request. A proposal made in chat is explained by Murph in its normal reply,
+ordinary contextual agreement is enough. App proposals, including Suggest
+changes on an invite, post their one model-written request right after the app
+write commits; the minute sweep is recovery only. A proposal made in chat is explained by Murph in its normal reply,
 without a duplicate announcement. The app shows it waiting for agreement, not
 as a separately delivered notification. New group creation uses that same first
 message, rather than a generic opener followed by another message. Initial

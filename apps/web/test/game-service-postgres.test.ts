@@ -7,6 +7,10 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { Prisma } from "@prisma/client";
 
 const push = vi.hoisted(() => vi.fn().mockResolvedValue("sent"));
+const lifecycleDelivery = vi.hoisted(() => vi.fn().mockResolvedValue(true));
+const proposalDelivery = vi.hoisted(() => vi.fn().mockResolvedValue(true));
+vi.mock("@/src/lib/game/chat-lifecycle", () => ({ deliverGameChatLifecycle: lifecycleDelivery }));
+vi.mock("@/src/lib/game/chat-delivery", () => ({ deliverGameChangeProposal: proposalDelivery }));
 vi.mock("@/src/lib/apple-push/send", async (original) => ({
   ...await original<typeof import("@/src/lib/apple-push/send")>(), sendApplePush: push,
 }));
@@ -27,12 +31,14 @@ import {
   mediaKeyPrefixFor,
   authorizeMediaRead,
   readGame,
+  readGameRematchNotice,
   readHistory,
   readHome,
   readGameChatState,
   readInvitePreview,
   runGameCommand,
 } from "@/src/lib/game/service";
+import { buildGameRematchInstructions } from "@murphai/hosted-execution/runtime-control";
 import { decideNewTerms, parseStoredTerms } from "@/src/lib/game/rules";
 import { toPrismaJsonObject } from "@/src/lib/device-sync/prisma-store/prisma-json";
 import { addDays, dayStartInstant, gameLocalDate, weekdayOf } from "@/src/lib/game/time";
@@ -604,6 +610,65 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     expect(accepted).toMatchObject({ inviteToken: rematch!.inviteToken, round: 2, status: "live" });
   });
 
+  it("inherits and queues only an existing rematch room, then starts delivery after commit", async () => {
+    const leo = await member("Leo", "America/New_York");
+    const ava = await member("Ava", "America/New_York");
+    const db = getPrisma();
+    const linked = await startGame(leo, ava);
+    const room = `game_room_${randomUUID()}`;
+    memberIds.push(room);
+    await db.hostedMember.create({ data: { id: room, billingStatus: "not_started" } });
+    await db.game.update({ where: { id: linked.gameId }, data: { chatContainerMemberId: room } });
+    await devSettleNow(linked.gameId, leo);
+    lifecycleDelivery.mockClear();
+    const rematchId = randomUUID();
+    await ok(leo, { gameId: rematchId, inviteeFirstName: "Ava", previousGameId: linked.gameId, terms: TERMS, type: "createGame" });
+    expect(await db.game.findUniqueOrThrow({ where: { id: rematchId }, select: { chatContainerMemberId: true } }))
+      .toEqual({ chatContainerMemberId: room });
+    expect(await db.hostedLinqDelivery.findFirst({ where: { source: "game_lifecycle", sourceRef: rematchId, template: "game_rematch" } }))
+      .toMatchObject({ status: "awaiting_generation" });
+    expect(lifecycleDelivery).toHaveBeenCalledExactlyOnceWith(rematchId, "rematch");
+
+    const maya = await member("Maya", "UTC");
+    const sam = await member("Sam", "UTC");
+    const unlinked = await startGame(maya, sam);
+    await devSettleNow(unlinked.gameId, maya);
+    const silentId = randomUUID();
+    await ok(maya, { gameId: silentId, inviteeFirstName: "Sam", previousGameId: unlinked.gameId, terms: TERMS, type: "createGame" });
+    expect(await db.game.findUniqueOrThrow({ where: { id: silentId }, select: { chatContainerMemberId: true } }))
+      .toEqual({ chatContainerMemberId: null });
+    expect(await db.hostedLinqDelivery.count({ where: { source: "game_lifecycle", sourceRef: silentId, template: "game_rematch" } })).toBe(0);
+  });
+
+  it("keeps asymmetric tasks with their people when the previous invitee requests the rematch", async () => {
+    const challenger = await member("Challenger", "UTC");
+    const invitee = await member("Invitee", "UTC");
+    const first = await startGame(challenger, invitee);
+    await devSettleNow(first.gameId, challenger);
+    const rematch = await ok(invitee, { gameId: randomUUID(), inviteeFirstName: "Challenger", previousGameId: first.gameId,
+      terms: { ...TERMS, tasks: [{ seat: 0, text: "10 min abs" }, { seat: 1, text: "100 pushups" }] }, type: "createGame" });
+    const notice = await readGameRematchNotice(rematch!.id, [challenger, invitee]);
+    expect(notice).not.toBeNull();
+    expect(notice!.previous.tasksByMember).toEqual({ [challenger]: "100 pushups", [invitee]: "10 min abs" });
+    expect(notice!.rematch.tasksByMember).toEqual(notice!.previous.tasksByMember);
+    const prompt = JSON.parse(buildGameRematchInstructions(notice!).split("\n").at(-1)!);
+    expect(prompt.sameGame).toBe(true);
+    expect(prompt.rematch.tasksByMember).toEqual(prompt.previous.tasksByMember);
+  });
+
+  it("starts invite negotiation delivery immediately after its write", async () => {
+    const challenger = await member("Alex", "UTC");
+    const invitee = await member("Jordan", "UTC");
+    const gameId = randomUUID();
+    const created = await ok(challenger, { gameId, inviteeFirstName: "Jordan", terms: TERMS, type: "createGame" });
+    const proposalId = randomUUID();
+    proposalDelivery.mockClear();
+    expect(await run(invitee, { type: "negotiate", token: created!.inviteToken!, proposalId, termsVersion: 1,
+      timeZone: "UTC", change: { kind: "edit", lengthDays: 10 } })).toMatchObject({ ok: true });
+    expect(proposalDelivery).toHaveBeenCalledExactlyOnceWith(gameId, proposalId);
+    expect(await getPrisma().hostedLinqDelivery.count({ where: { source: "game_lifecycle", sourceRef: gameId, template: "game_proposal" } })).toBe(1);
+  });
+
   it("keeps a game's own invite token for its players after go-live, and never shows it to anyone else", async () => {
     const leo = await member("Leo", "America/New_York");
     const ava = await member("Ava", "America/New_York");
@@ -839,15 +904,22 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     const leo = await member("Leo", "America/New_York");
     const ava = await member("Ava", "Pacific/Auckland");
     const first = await startGame(leo, ava);
+    const room = `game_room_${randomUUID()}`;
+    memberIds.push(room);
+    await getPrisma().hostedMember.create({ data: { id: room, billingStatus: "not_started" } });
+    await getPrisma().game.update({ where: { id: first.gameId }, data: { chatContainerMemberId: room } });
     await devSettleNow(first.gameId, leo);
     const [asker, answerer] = firstAsker === "challenger" ? [leo, ava] : [ava, leo];
     const asked = await ok(asker, { gameId: randomUUID(), inviteeFirstName: "Them", previousGameId: first.gameId, terms: TERMS, type: "createGame" });
+    lifecycleDelivery.mockClear();
     const answerId = randomUUID();
     const answer: GameCommand = { gameId: answerId, inviteeFirstName: "Them", previousGameId: first.gameId, terms: { ...TERMS, lengthDays: 14 }, type: "createGame" };
     const answered = await ok(answerer, answer);
     // The second ask joins the first on its terms, with no second game.
     expect(answered).toMatchObject({ id: asked!.id, round: 2, status: "live", lengthDays: 7 });
     expect(await getPrisma().game.count({ where: { previousGameId: first.gameId } })).toBe(1);
+    expect(await getPrisma().hostedLinqDelivery.count({ where: { source: "game_lifecycle", template: "game_rematch", sourceRef: asked!.id } })).toBe(1);
+    expect(lifecycleDelivery).not.toHaveBeenCalled();
     // A retry of the same request returns the same game.
     expect(await ok(answerer, answer)).toMatchObject({ id: asked!.id, status: "live" });
     expect(await getPrisma().game.count({ where: { id: answerId } })).toBe(0);

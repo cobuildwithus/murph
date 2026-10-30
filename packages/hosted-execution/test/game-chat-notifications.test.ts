@@ -1,8 +1,32 @@
 import { describe, expect, it } from "vitest";
 import { hostedGameChatStateSchema } from "../src/game-tools.ts";
-import { GAME_PRIZE_WORDS, buildGameChangeExpiredInstructions, buildGameChangeCancelledInstructions, buildGameKickoffInstructions, buildGameProposalInstructions } from "../src/game-chat-notifications.ts";
+import { GAME_PRIZE_WORDS, buildGameChangeExpiredInstructions, buildGameChangeCancelledInstructions, buildGameKickoffInstructions, buildGameProposalInstructions, buildGameRematchInstructions } from "../src/game-chat-notifications.ts";
 
 describe("game v1 notification instructions", () => {
+  it("keeps a rematch short, app-controlled and free of link or lifecycle jargon", () => {
+    const rules = { checkInKind: "photo" as const, lengthDays: 7, schedule: { days: [0, 1, 2, 3, 4] },
+      stakes: [{ kind: "prize" as const, item: "breakfast" }], tasksByMember: { member_maya: "Walk", member_sam: "Walk" } };
+    const instructions = buildGameRematchInstructions({ requesterName: "Maya", previous: rules,
+      rematch: { ...rules, lengthDays: 10 }, startsOn: null });
+    expect(instructions).toContain("one short, natural message");
+    expect(instructions).toContain("Shake on it in the Murph app or suggest changes there");
+    expect(instructions).toContain("never call it the same game or the same challenge");
+    expect(instructions).toContain("Do not include a link");
+    expect(instructions).toContain("never use the words invite, round or token");
+    expect(JSON.parse(instructions.split("\n").at(-1)!)).toEqual({
+      requester: "Maya", sameGame: false, previous: rules, rematch: { ...rules, lengthDays: 10 }, startsOn: null,
+    });
+  });
+  it("compares asymmetric rematch tasks by person when the requester changes seats", () => {
+    const shared = { checkInKind: "photo" as const, lengthDays: 7, schedule: { days: [0, 1, 2, 3, 4] }, stakes: [] };
+    const instructions = buildGameRematchInstructions({ requesterName: "Sam", startsOn: null,
+      previous: { ...shared, tasksByMember: { member_alex: "Run", member_sam: "Lift" } },
+      rematch: { ...shared, tasksByMember: { member_sam: "Lift", member_alex: "Run" } } });
+    const data = JSON.parse(instructions.split("\n").at(-1)!);
+    expect(data.sameGame).toBe(true);
+    expect(data.previous.tasksByMember).toEqual({ member_alex: "Run", member_sam: "Lift" });
+    expect(data.rematch.tasksByMember).toEqual(data.previous.tasksByMember);
+  });
   it("explains a refused approval once without claiming the game ended", () => {
     const reason = "The proposed start date has passed. Propose a new date.";
     const instructions = buildGameChangeExpiredInstructions(reason);

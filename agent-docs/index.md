@@ -167,6 +167,13 @@ The weekly game's flag-gated Terms check on app writes
 [the weekly game spec](product-specs/weekly-game.md); its consent semantics sit
 with the other surfaces in `docs/legal-consent-implementation.md`.
 
+Weekly-game rematches inherit an existing pair chat for one invited-only group
+notice, and app-origin change proposals dispatch immediately with the minute
+sweep as recovery. The product contract is in
+[the weekly game spec](product-specs/weekly-game.md); receipt, status and exact-room
+authority live in `../apps/web/src/lib/game/chat-lifecycle.ts` and
+`../apps/web/src/lib/game/chat-delivery-authority.ts`.
+
 Weekly game report, block and the write-time content check are owned by
 `ARCHITECTURE.md` § Weekly game report, block, and content check; the player
 rules are in [the weekly game spec](product-specs/weekly-game.md), and the

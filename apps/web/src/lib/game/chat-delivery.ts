@@ -13,6 +13,7 @@ import type { GamePendingChange } from "./contract";
 import { buildGameProposalInstructions } from "@murphai/hosted-execution/runtime-control";
 export { buildGameProposalInstructions } from "@murphai/hosted-execution/runtime-control";
 import { openGameTexts } from "./crypto";
+import { isGameInviteExpired } from "./rules";
 
 import { findExistingGameChat, requireExactChat, requireExactGameChat } from "./chat-membership";
 export { isExactGameChat, requireExactGameChat } from "./chat-membership";
@@ -20,11 +21,12 @@ import { prepareGameChatBootstrap } from "./chat-bootstrap";
 import { markGameChatGenerationQueuedTx } from "./chat-lifecycle-receipt";
 
 /** Called after the game transaction. All provider and crypto work stays outside game locks. */
-export async function deliverGameChangeProposal(gameId: string, proposalId: string): Promise<boolean> {
+export async function deliverGameChangeProposal(gameId: string, proposalId: string, now = new Date()): Promise<boolean> {
   const prisma = getPrisma();
   const game = await prisma.game.findUnique({ where: { id: gameId }, include: { players: { orderBy: { seat: "asc" }, take: 3 } } });
   const proposal = game ? await readPendingGameChange(game) : null;
-  if (!game || !["live", "negotiating"].includes(game.status) || !proposal || proposal.id !== proposalId || game.players.length !== 2) return false;
+  if (!game || !["live", "negotiating"].includes(game.status) || isGameInviteExpired(game, now)
+    || !proposal || proposal.id !== proposalId || game.players.length !== 2) return false;
   if (!isGameOn(game)) return false;
   if (proposal.deliveryStatus === "sent") return true;
   if (proposal.origin === "chat") return false;
@@ -40,7 +42,7 @@ export async function deliverGameChangeProposal(gameId: string, proposalId: stri
   } else {
     containerMemberId = await findExistingGameChat(game.players.map((player) => player.memberId), phones);
     if (containerMemberId) {
-      const bound = await prisma.game.updateMany({ where: pendingWhere(gameId, proposalId, null), data: { chatContainerMemberId: containerMemberId } });
+      const bound = await prisma.game.updateMany({ where: pendingWhere(gameId, proposalId, null, now), data: { chatContainerMemberId: containerMemberId } });
       if (bound.count !== 1) return false;
     } else {
       return (await prepareGameChatBootstrap(gameId, `game-change:${gameId}:${proposal.id}`, message)) !== null;
@@ -65,14 +67,15 @@ async function prepareGameChatPlayers(game: Game & { players: GamePlayer[] }, pr
   return { phones, message };
 }
 
-function pendingWhere(gameId: string, proposalId: string, containerMemberId?: string | null): Prisma.GameWhereInput {
-  return { id: gameId, status: { in: ["live", "negotiating"] }, ...(containerMemberId === undefined ? {} : { chatContainerMemberId: containerMemberId }), pendingChange: { path: ["id"], equals: proposalId } };
+function pendingWhere(gameId: string, proposalId: string, containerMemberId?: string | null, now = new Date()): Prisma.GameWhereInput {
+  return { id: gameId, OR: [{ status: "live" }, { status: "negotiating", OR: [{ inviteExpiresAt: null }, { inviteExpiresAt: { gt: now } }] }],
+    ...(containerMemberId === undefined ? {} : { chatContainerMemberId: containerMemberId }), pendingChange: { path: ["id"], equals: proposalId } };
 }
 
 
 /** Revalidate the audience outside the existing provider dispatch transaction. */
 export async function readGameProposalDeliveryPlayers(key: string | null, containerMemberId: string): Promise<readonly string[] | undefined> {
-  return /^(game-change|game-started|game-change-cancelled|game-change-expired|game-cancelled):/.test(key ?? "") ? requireExactGameChat(containerMemberId) : undefined;
+  return /^(game-change|game-started|game-rematch|game-change-cancelled|game-change-expired|game-cancelled):/.test(key ?? "") ? requireExactGameChat(containerMemberId) : undefined;
 }
 
 
@@ -98,7 +101,8 @@ async function enqueueProposal(gameId: string, proposal: GamePendingChange, cont
     // stake words; rewriting it would replace their sealed canonical storage.
     const changed = await tx.$executeRaw`UPDATE game
       SET pending_change = jsonb_set(pending_change, '{deliveryStatus}', '"queued"'::jsonb)
-      WHERE id = ${gameId} AND status IN ('live', 'negotiating')
+      WHERE id = ${gameId} AND (status = 'live' OR (status = 'negotiating'
+          AND (invite_expires_at IS NULL OR invite_expires_at > CURRENT_TIMESTAMP)))
         AND chat_container_member_id = ${containerMemberId}
         AND pending_change->>'id' = ${proposal.id}`;
     if (changed !== 1) return null;
