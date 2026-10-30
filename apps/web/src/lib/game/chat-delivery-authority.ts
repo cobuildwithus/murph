@@ -2,7 +2,7 @@ import "server-only";
 import type { Prisma } from "@prisma/client";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import { isGameChangeExpired, parsePendingGameChange } from "./changes";
-import { parseStoredTerms } from "./rules";
+import { isGameInviteExpired, parseStoredTerms } from "./rules";
 import { sameGamePlayers } from "./chat-membership";
 
 /** Returns true only for the current proposal and proven audience; stale outbox work cannot announce a replaced edit. */
@@ -16,9 +16,17 @@ export async function assertGameProposalDeliveryCurrentTx(input: {
   const key = input.deliveryIdempotencyKey ?? "";
   if (key.startsWith("game-cancelled:")) return assertGameCancelledDeliveryCurrentTx(input);
   if (key.startsWith("game-change-cancelled:") || key.startsWith("game-change-expired:")) return assertGameChangeResolvedDeliveryCurrentTx(input);
+  const rematch = /^game-rematch:([^:]+)$/.exec(key);
+  if (rematch) return assertGameRematchDeliveryCurrentTx(input, rematch[1]);
   const lifecycle = /^game-started:([^:]+)$/.exec(key);
   if (lifecycle) return assertGameStartedDeliveryCurrentTx(input, lifecycle[1]);
   if (!key.startsWith("game-change:")) return false;
+  return assertGameChangeProposalDeliveryCurrentTx(input, key);
+}
+
+async function assertGameChangeProposalDeliveryCurrentTx(
+  input: Parameters<typeof assertGameProposalDeliveryCurrentTx>[0], key: string,
+): Promise<true> {
   const match = /^game-change:([^:]+):([^:]+)$/.exec(key);
   if (!match) return stale();
   const game = await input.tx.game.findFirst({
@@ -26,7 +34,8 @@ export async function assertGameProposalDeliveryCurrentTx(input: {
     include: { players: { take: 3 } },
   });
   const pending = parsePendingGameChange(game?.pendingChange);
-  if (!game || !pending || pending.id !== match[2] || game.players.length !== 2) return stale();
+  if (!game || isGameInviteExpired(game, input.now ?? new Date())
+    || !pending || pending.id !== match[2] || game.players.length !== 2) return stale();
   if (!sameGamePlayers(game.players.map((player) => player.memberId), input.playerMemberIds ?? [])) return stale();
   const expired = game.status === "live" && isGameChangeExpired({
     entries: [],
@@ -34,6 +43,20 @@ export async function assertGameProposalDeliveryCurrentTx(input: {
     players: game.players.map((player) => ({ memberId: player.memberId, seat: player.seat, timeZone: player.timeZone, dayOne: player.dayOne?.toISOString().slice(0, 10) ?? null })),
   }, pending, input.now ?? new Date());
   if (expired) stale();
+  return true;
+}
+
+async function assertGameRematchDeliveryCurrentTx(
+  input: Parameters<typeof assertGameProposalDeliveryCurrentTx>[0], gameId: string,
+): Promise<true> {
+  const game = await input.tx.game.findFirst({
+    where: { id: gameId, chatContainerMemberId: input.containerMemberId, status: "invited" },
+    include: { players: { take: 2 } },
+  });
+  if (!game?.createdBy || !game.inviteeMemberId || game.players.length !== 1
+    || isGameInviteExpired(game, input.now ?? new Date())
+    || game.players[0]?.memberId !== game.createdBy
+    || !sameGamePlayers([game.createdBy, game.inviteeMemberId], input.playerMemberIds ?? [])) return stale();
   return true;
 }
 async function assertGameCancelledDeliveryCurrentTx(input: Parameters<typeof assertGameProposalDeliveryCurrentTx>[0]): Promise<true> {

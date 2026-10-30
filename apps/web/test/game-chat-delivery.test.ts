@@ -28,7 +28,7 @@ vi.mock("../src/lib/hosted-groups/thread-container-participants", () => ({ recon
 vi.mock("../src/lib/hosted-mailbox/store", () => ({ appendPreparedHostedMailboxEnvelopeTx: m.enqueue, prepareHostedMailboxEnvelopeAppend: m.prepareMailbox, readHostedMailboxItemByDedupeKey: m.mailbox }));
 vi.mock("../src/lib/hosted-orchestration/signal-runtime", () => ({ signalHostedMailboxAppendRuntime: m.wake }));
 vi.mock("../src/lib/hosted-routing/assistant-notification-destination", () => ({ readHostedThreadContainerLinqRouteAuthorities: m.routes, assertHostedAssistantNotificationRouteAuthority: m.routeCheck, resolveHostedAssistantNotificationDestination: async () => ({ conversationShape: "thread-container", route: { channel: "linq" } }), bindHostedAssistantNotificationDestination: () => ({ route: { channel: "linq", delivery: { kind: "thread", target: "chat" }, accountId: "line" }, externalThreadRouteAuthority: { channel: "linq", containerMemberId: "room", threadId: "chat", accountLookupKey: "line-key" } }) }));
-import { deliverGameChangeProposal, isExactGameChat, buildGameProposalInstructions, requireExactGameChat } from "../src/lib/game/chat-delivery";
+import { deliverGameChangeProposal, isExactGameChat, buildGameProposalInstructions, readGameProposalDeliveryPlayers, requireExactGameChat } from "../src/lib/game/chat-delivery";
 const phones = ["+15555550101", "+15555550102"];
 const proposal: GamePendingChange = { id: "proposal", proposedByMemberId: "person-a", expectedTermsVersion: 1, change: { kind: "edit", schedule: { days: [5, 6] }, lengthDays: 14 }, effectiveFromDay: 2, deliveryStatus: "pending", startsOn: null };
 const chat = { isGroup: true, handlesComplete: true, handles: [...phones.map((handle) => ({ handle, isMe: false, status: "active" })), { handle: "+15555550100", isMe: true, status: "active" }] };
@@ -131,6 +131,12 @@ describe("game proposal chat delivery", () => {
     expect(m.candidates).not.toHaveBeenCalled();
     expect(m.enqueue).toHaveBeenCalledOnce();
   });
+  it("does not generate an expired negotiating proposal", async () => {
+    const now = new Date("2030-03-04T12:00:00Z");
+    m.game.mockResolvedValue({ ...game("room"), status: "negotiating", inviteExpiresAt: now });
+    await expect(deliverGameChangeProposal("game", "proposal", now)).resolves.toBe(false);
+    expect(m.prepareMailbox).not.toHaveBeenCalled(); expect(m.enqueue).not.toHaveBeenCalled();
+  });
   it("hands a new room to the generated first-message bootstrap without sending an opener", async () => {
     await deliverGameChangeProposal("game", "proposal");
     expect(m.bootstrap).toHaveBeenCalledExactlyOnceWith("game", "game-change:game:proposal", expect.stringContaining("one concise conversational message"));
@@ -154,6 +160,12 @@ describe("game proposal chat delivery", () => {
     expect(m.chat).toHaveBeenCalledWith({ chatId: "chat", timeoutMs: 3_000 });
     m.chat.mockResolvedValue({ ...chat, handlesComplete: false });
     await expect(requireExactGameChat("room")).rejects.toThrow("participants have changed");
+  });
+  it("revalidates the exact roster for rematch delivery", async () => {
+    await expect(readGameProposalDeliveryPlayers("game-rematch:game", "room"))
+      .resolves.toEqual(["person-a", "person-b"]);
+    await expect(readGameProposalDeliveryPlayers("assistant-outbox:scheduled", "room"))
+      .resolves.toBeUndefined();
   });
   it("queues model-authored instructions rather than exact announcement text", async () => {
     m.game.mockResolvedValue(game("room"));

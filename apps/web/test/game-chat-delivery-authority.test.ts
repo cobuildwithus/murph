@@ -65,10 +65,29 @@ describe("game proposal provider dispatch authority", () => {
     findFirst.mockResolvedValue(null);
     await expect(assertGameProposalDeliveryCurrentTx(kickoff)).rejects.toMatchObject({ code: "GAME_CHANGE_SUPERSEDED" });
   });
+  it("allows a rematch only while its addressed pair is still invited in the inherited room", async () => {
+    const { input, findFirst } = setup();
+    const invited = { ...row(), status: "invited", inviteeMemberId: "person-b", pendingChange: null,
+      players: [row().players[0]!] };
+    findFirst.mockResolvedValue(invited);
+    const rematch = { ...input, deliveryIdempotencyKey: "game-rematch:game" };
+    await expect(assertGameProposalDeliveryCurrentTx(rematch)).resolves.toBe(true);
+    expect(findFirst).toHaveBeenLastCalledWith(expect.objectContaining({ where: {
+      id: "game", chatContainerMemberId: "room", status: "invited",
+    } }));
+    await expect(assertGameProposalDeliveryCurrentTx({ ...rematch, playerMemberIds: ["person-a", "stranger"] }))
+      .rejects.toMatchObject({ code: "GAME_CHANGE_SUPERSEDED" });
+    findFirst.mockResolvedValue({ ...invited, inviteExpiresAt: now });
+    await expect(assertGameProposalDeliveryCurrentTx(rematch)).rejects.toMatchObject({ code: "GAME_CHANGE_SUPERSEDED" });
+    findFirst.mockResolvedValue({ ...row(), status: "live" });
+    await expect(assertGameProposalDeliveryCurrentTx(rematch)).rejects.toMatchObject({ code: "GAME_CHANGE_SUPERSEDED" });
+  });
   it("allows a negotiating proposal without inventing an already-started Day 1", async () => {
     const { input, findFirst } = setup();
-    findFirst.mockResolvedValue({ ...row(), status: "negotiating" });
+    findFirst.mockResolvedValue({ ...row(), status: "negotiating", inviteExpiresAt: new Date("2031-01-02T12:00:00Z") });
     await expect(assertGameProposalDeliveryCurrentTx({ ...input, now: new Date("2031-01-01T12:00:00Z") })).resolves.toBe(true);
+    await expect(assertGameProposalDeliveryCurrentTx({ ...input, now: new Date("2031-01-02T12:00:00Z") }))
+      .rejects.toMatchObject({ code: "GAME_CHANGE_SUPERSEDED" });
   });
 
   it("authorizes only the cancelled invite and original pair in its bound room", async () => {

@@ -45231,6 +45231,56 @@ describeRealCodex('real Codex game chat adjustment e2e', () => {
 })
 
 describeRealCodex('real Codex game lifecycle messaging e2e', () => {
+  it('game lifecycle rematch notice names the requester, changed game and app choices', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-game-rematch-notice-e2e-'))
+    const permissionHome = await materializeRealCodexHostedPermissionHome(config)
+    const { buildGameRematchInstructions } = await import('@murphai/hosted-execution/runtime-control')
+    const previous = { checkInKind: 'photo' as const, lengthDays: 7, schedule: { days: [0, 1, 2, 3, 4] },
+      stakes: [{ kind: 'prize' as const, item: 'breakfast in bed' }], tasksByMember: { member_alex: 'Walk 20 minutes', member_sam: 'Walk 20 minutes' } }
+    try {
+      await initializeVault({ timezone: 'America/New_York', vaultRoot: workingDirectory })
+      const modelTarget = createAssistantModelTarget({
+        approvalPolicy: 'never', codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND),
+        codexHome: permissionHome.codexHome, model: config.model, modelProvider: config.modelProvider,
+        provider: 'codex-cli', reasoningEffort: 'low', sandbox: 'workspace-write',
+      })
+      if (!modelTarget) throw new Error('Expected real Codex target.')
+      const events: unknown[] = []
+      const result = await sendAssistantNotificationLocal({
+        actorId: null, bindingDeliveryTarget: 'synthetic-game-thread', channel: 'linq',
+        deliveryDispatchMode: 'queue-only', deliveryTarget: 'synthetic-game-thread',
+        deliveryIdempotencyKey: 'game-rematch:game_synthetic', deliveryDedupeToken: 'game-rematch:game_synthetic',
+        responsePolicy: { kind: 'require_send' },
+        executionContext: { hosted: { defaultTarget: modelTarget, memberId: 'synthetic-group', userEnvKeys: [] } },
+        identityId: null, instructions: buildGameRematchInstructions({ requesterName: 'Alex', previous,
+          rematch: { ...previous, lengthDays: 10 }, startsOn: null }),
+        threadId: 'synthetic-game-thread', threadIsDirect: false,
+        onTraceEvent: (event) => events.push(event.rawEvent),
+        turnEnvironment: { currentWorkingDirectory: workingDirectory, env: config.env },
+        turnTrigger: 'manual-deliver', vault: workingDirectory, workingDirectory,
+      })
+      const intents = await listAssistantOutboxIntents(workingDirectory)
+      const reply = result.response ?? ''
+      process.stdout.write(`[game-lifecycle rematch-notice] ${JSON.stringify({ reply, intents: intents.length, decision: result.decision.kind })}\n`)
+      expect(readCapabilityRoutingActions(events)).toEqual([])
+      expect(result.decision.kind).toBe('send_message')
+      expect(result.deliveryOutcome?.kind).toBe('queued')
+      expect(intents).toHaveLength(1)
+      expect(intents[0]).toMatchObject({ channel: 'linq', threadIsDirect: false, status: 'pending' })
+      expect(reply).toMatch(/Alex/iu)
+      expect(reply).toMatch(/rematch/iu)
+      expect(reply).toMatch(/10|ten/iu)
+      expect(reply).toMatch(/7|seven|longer/iu)
+      expect(reply).toMatch(/Shake/iu)
+      expect(reply).toMatch(/suggest.*change|change.*suggest/iu)
+      expect(reply).not.toMatch(/same (?:game|challenge)|https?:\/\/|\binvite\b|\bround\b|\btoken\b|internal|notification|delivery/iu)
+      expect(reply.length).toBeLessThan(350)
+    } finally {
+      await removeRealCodexTemporaryPaths([workingDirectory, ...permissionHome.temporaryPaths, ...config.temporaryPaths])
+    }
+  }, 360_000)
+
   it('game lifecycle app proposal queues one generated request without a false restart', async () => {
     const config = await resolveRealCodexE2eConfig()
     const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-game-notice-e2e-'))

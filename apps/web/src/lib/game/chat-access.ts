@@ -33,10 +33,25 @@ export async function readGameChatFundingRooms(input: {
     ) pair ON TRUE
     JOIN LATERAL (
       SELECT COALESCE(
+        -- An addressed rematch temporarily funds only its inherited primary
+        -- room while the one bound-room notice is still waiting.
+        (SELECT rematch.id FROM game rematch
+          WHERE rematch.chat_container_member_id = room.id AND rematch.status = 'invited'
+            AND (rematch.invite_expires_at IS NULL OR rematch.invite_expires_at > ${input.now})
+            AND rematch.created_by = ANY(pair.player_ids)
+            AND rematch.invitee_member_id = ANY(pair.player_ids)
+            AND rematch.created_by <> rematch.invitee_member_id
+            AND EXISTS (SELECT 1 FROM hosted_linq_delivery receipt
+              WHERE receipt.source = 'game_lifecycle' AND receipt.source_ref = rematch.id
+                AND receipt.template = 'game_rematch'
+                AND receipt.status IN ('awaiting_generation', 'generation_queued')
+                AND receipt.skipped_at IS NULL)
+          ORDER BY rematch.created_at DESC, rematch.id LIMIT 1),
         -- A live/negotiating pair is uniquely reserved. Resolve it directly;
         -- repeated prior games do not add work to the active-game path.
         (SELECT id FROM game WHERE live_roster_key = array_to_string(pair.player_ids, ':')
-          AND status IN ('negotiating', 'live')),
+          AND (status = 'live' OR (status = 'negotiating'
+            AND (invite_expires_at IS NULL OR invite_expires_at > ${input.now})))),
         (SELECT recent.id FROM game_player first_player
           JOIN game recent ON recent.id = first_player.game_id
           WHERE first_player.member_id = pair.player_ids[1]
@@ -79,17 +94,25 @@ export async function readGameChatFundingRooms(input: {
             AND NOT EXISTS (SELECT 1 FROM hosted_linq_delivery receipt
               WHERE receipt.payload_owner_member_id = room.id AND receipt.source = 'game_lifecycle'
                 AND receipt.payload_schema = 'game_chat_bootstrap_v1' AND receipt.bootstrap_route_attached_at IS NOT NULL)))
-        AND (game.status IN ('negotiating', 'live') OR
+        AND (game.status = 'live'
+          OR (game.status IN ('invited', 'negotiating')
+            AND (game.invite_expires_at IS NULL OR game.invite_expires_at > ${input.now})) OR
           (game.status = 'settled' AND game.settled_at > ${settledCutoff} AND game.settled_at <= ${input.now}) OR
           (game.status = 'void' AND game.chat_container_member_id = room.id))
-        AND EXISTS (SELECT 1 FROM game_player p WHERE p.game_id = game.id AND p.seat = 0)
-        AND EXISTS (SELECT 1 FROM game_player p WHERE p.game_id = game.id AND p.seat = 1)
+        AND ((game.status = 'invited'
+              AND game.created_by = ANY(pair.player_ids)
+              AND game.invitee_member_id = ANY(pair.player_ids)
+              AND game.created_by <> game.invitee_member_id)
+          OR (game.status <> 'invited'
+              AND EXISTS (SELECT 1 FROM game_player p WHERE p.game_id = game.id AND p.seat = 0)
+              AND EXISTS (SELECT 1 FROM game_player p WHERE p.game_id = game.id AND p.seat = 1)
+              AND NOT EXISTS (SELECT 1 FROM game_player p
+                WHERE p.game_id = game.id AND (p.seat NOT IN (0, 1) OR NOT (p.member_id = ANY(pair.player_ids))))))
         AND ${gameOnSql("game")}
         AND NOT EXISTS (
-          SELECT 1 FROM game_player p
-          JOIN hosted_member person ON person.id = p.member_id
-          WHERE p.game_id = game.id AND (
-            p.seat NOT IN (0, 1) OR NOT (p.member_id = ANY(pair.player_ids)) OR person.suspended_at IS NOT NULL
+          SELECT 1 FROM hosted_member person
+          WHERE person.id = ANY(pair.player_ids) AND (
+            person.suspended_at IS NOT NULL
             OR EXISTS (SELECT 1 FROM hosted_consent_grant consent
               WHERE consent.member_id = person.id AND consent.scope = ${HOSTED_HEALTH_DATA_CONSENT_SCOPE}
                 AND consent.status = 'revoked')

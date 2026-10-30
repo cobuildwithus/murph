@@ -1,14 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 const m = vi.hoisted(() => ({
   event: vi.fn(), receipts: vi.fn(), frozen: vi.fn(), recover: vi.fn(), receiptUpdate: vi.fn(), game: vi.fn(), current: vi.fn(), bind: vi.fn(),
-  state: vi.fn(), identity: vi.fn(), discover: vi.fn(), exact: vi.fn(), bootstrap: vi.fn(), proposal: vi.fn(),
+  state: vi.fn(), rematchNotice: vi.fn(), identity: vi.fn(), discover: vi.fn(), exact: vi.fn(), bootstrap: vi.fn(), proposal: vi.fn(),
   destination: vi.fn(), mailbox: vi.fn(), prepare: vi.fn(), append: vi.fn(), signal: vi.fn(), route: vi.fn(),
 }));
 vi.mock("../src/lib/prisma", () => {
   const db = { gameEvent: { findUnique: m.event }, hostedLinqDelivery: { findMany: (input: { where: { payloadSchema?: string } }) => input.where.payloadSchema ? m.frozen(input) : m.receipts(input), updateMany: m.receiptUpdate }, game: { findUnique: m.game, findFirst: m.current, updateMany: m.bind } };
   return { getPrisma: () => ({ ...db, $transaction: async (fn: (tx: typeof db) => unknown) => fn(db) }) };
 });
-vi.mock("../src/lib/game/service", () => ({ readGameChatState: m.state }));
+vi.mock("../src/lib/game/service", () => ({ readGameChatState: m.state, readGameRematchNotice: m.rematchNotice }));
 vi.mock("../src/lib/game/chat-membership", () => ({ findExistingGameChat: m.discover, requireExactChat: m.exact }));
 vi.mock("../src/lib/game/chat-bootstrap", () => ({ prepareGameChatBootstrap: m.bootstrap, reconcileFrozenGameChatBootstrapReceipt: m.recover }));
 vi.mock("../src/lib/game/chat-delivery", () => ({ deliverGameChangeProposal: m.proposal }));
@@ -35,10 +35,56 @@ describe("durable game chat lifecycle", () => {
     m.receipts.mockResolvedValue([receipt]); m.frozen.mockResolvedValue([]); m.recover.mockResolvedValue(true); m.receiptUpdate.mockResolvedValue({ count: 1 });
     m.game.mockResolvedValue(game); m.current.mockResolvedValue({ id: "game" }); m.bind.mockResolvedValue({ count: 1 });
     m.state.mockResolvedValue({ games: [{ id: "game", status: "live", lengthDays: 7, startsOn: null, terms: { n: 1, fromDay: 0, tasks: [{ seat: 0, text: "Read a chapter" }, { seat: 1, text: "Read a chapter" }], schedule: { days: [0, 1, 2, 3, 4] }, stakes: [] }, players: players.map((memberId, seat) => ({ memberId, seat, firstName: seat ? "Sam" : "Alex", dayOne: "2030-03-04", timeZone: seat ? "Pacific/Auckland" : "America/Los_Angeles" })), pendingChange: null }] });
+    const rules = { checkInKind: "photo", lengthDays: 7, schedule: { days: [0, 1, 2, 3, 4] }, stakes: [], tasksByMember: { "person-a": "Read a chapter", "person-b": "Read a chapter" } };
+    m.rematchNotice.mockResolvedValue({ requesterName: "Alex", previous: rules, rematch: rules, startsOn: null });
     m.identity.mockImplementation(async ({ memberId }: { memberId: string }) => ({ phoneNumber: memberId === players[0] ? "+15555550101" : "+15555550102", phoneNumberVerifiedAt: now }));
     m.discover.mockResolvedValue(null); m.bootstrap.mockResolvedValue("room"); m.proposal.mockResolvedValue(true);
     m.destination.mockResolvedValue({ conversationShape: "thread-container", route: { channel: "linq" } });
     m.mailbox.mockResolvedValue(null); m.prepare.mockResolvedValue({}); m.append.mockResolvedValue({ mailboxItemId: "notice" });
+  });
+  it("queues a rematch only in its inherited room while it is still invited", async () => {
+    const rematchGame = { ...game, status: "invited", createdBy: players[0], inviteeMemberId: players[1], players: [{ memberId: players[0] }] };
+    m.game.mockResolvedValue(rematchGame);
+    m.receipts.mockResolvedValue([{ ...receipt, template: "game_rematch", idempotencyKey: "hash:game-rematch:game" }]);
+    await expect(drainGameChatLifecycle({ now })).resolves.toEqual({ attempted: 1, queued: 1, deferred: 0 });
+    const notification = m.prepare.mock.calls[0][0].envelope.notification;
+    expect(notification).toMatchObject({ deliveryIdempotencyKey: "game-rematch:game", responsePolicy: { kind: "require_send" } });
+    expect(notification.instructions).toContain("Shake on it in the Murph app or suggest changes there");
+    expect(m.rematchNotice).toHaveBeenCalledExactlyOnceWith("game", players);
+    expect(m.exact).toHaveBeenCalledExactlyOnceWith("room", ["+15555550101", "+15555550102"]);
+    expect(m.current).toHaveBeenCalledWith(expect.objectContaining({ where: { id: "game", status: { in: ["invited"] }, chatContainerMemberId: "room" } }));
+    expect(m.discover).not.toHaveBeenCalled(); expect(m.bootstrap).not.toHaveBeenCalled();
+  });
+  it("drops a rematch notice after acceptance and never discovers or creates a room", async () => {
+    m.receipts.mockResolvedValue([{ ...receipt, template: "game_rematch", idempotencyKey: "hash:game-rematch:game" }]);
+    m.game.mockResolvedValue({ ...game, status: "live" });
+    await expect(drainGameChatLifecycle({ now })).resolves.toEqual({ attempted: 1, queued: 0, deferred: 1 });
+    expect(m.receiptUpdate).toHaveBeenLastCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: "skipped", skipReason: "game_lifecycle_superseded" }) }));
+    expect(m.prepare).not.toHaveBeenCalled(); expect(m.discover).not.toHaveBeenCalled(); expect(m.bootstrap).not.toHaveBeenCalled();
+
+    m.game.mockResolvedValue({ ...game, status: "invited", createdBy: players[0], inviteeMemberId: players[1], chatContainerMemberId: null, players: [{ memberId: players[0] }] });
+    await expect(deliverGameChatLifecycle("game", "rematch")).resolves.toBe(false);
+    expect(m.discover).not.toHaveBeenCalled(); expect(m.bootstrap).not.toHaveBeenCalled();
+  });
+  it.each(["awaiting_generation", "generation_queued"])("terminally skips an expired invited rematch receipt from %s", async (status) => {
+    m.receipts.mockResolvedValue([{ ...receipt, template: "game_rematch", status, idempotencyKey: "hash:game-rematch:game" }]);
+    m.game.mockResolvedValue({ ...game, status: "invited", inviteExpiresAt: now, createdBy: players[0], inviteeMemberId: players[1], players: [{ memberId: players[0] }] });
+    await expect(drainGameChatLifecycle({ now })).resolves.toEqual({ attempted: 1, queued: 0, deferred: 1 });
+    expect(m.receiptUpdate).toHaveBeenLastCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ status: "skipped", skippedAt: now, retryAfterAt: null }),
+    }));
+    expect(m.prepare).not.toHaveBeenCalled(); expect(m.signal).not.toHaveBeenCalled();
+  });
+  it("lets the recovery sweep reuse the immediately queued rematch mailbox", async () => {
+    const rematchGame = { ...game, status: "invited", createdBy: players[0], inviteeMemberId: players[1], players: [{ memberId: players[0] }] };
+    m.game.mockResolvedValue(rematchGame);
+    await expect(deliverGameChatLifecycle("game", "rematch")).resolves.toBe(true);
+    expect(m.append).toHaveBeenCalledOnce();
+    m.mailbox.mockResolvedValue({ id: "rematch-notice", consumedAt: null });
+    m.receipts.mockResolvedValue([{ ...receipt, template: "game_rematch", status: "generation_queued", idempotencyKey: "hash:game-rematch:game" }]);
+    await expect(drainGameChatLifecycle({ now })).resolves.toEqual({ attempted: 1, queued: 1, deferred: 0 });
+    expect(m.append).toHaveBeenCalledOnce();
+    expect(m.signal).toHaveBeenLastCalledWith({ expectedUserId: "room", mailboxItemId: "rematch-notice" });
   });
   it.each(["The proposed start date has passed. Propose a new date.", "The proposed game length ends on a day already started. Propose a longer game."])("queues one existing-room refusal with the immutable reason: %s", async (reason) => {
     m.event.mockResolvedValue({ type:"change_expired", payload:{reason} });
@@ -181,8 +227,26 @@ describe("durable game chat lifecycle", () => {
     m.receipts.mockResolvedValue([{ ...receipt, template: "game_proposal", idempotencyKey: "hash:game-change:game:proposal" }]);
     m.game.mockResolvedValue({ pendingChange: pending, status: "negotiating" });
     await expect(drainGameChatLifecycle({ now })).resolves.toEqual({ attempted: 1, queued: 1, deferred: 0 });
-    expect(m.proposal).toHaveBeenCalledExactlyOnceWith("game", "proposal");
+    expect(m.proposal).toHaveBeenCalledExactlyOnceWith("game", "proposal", now);
     expect(m.state).not.toHaveBeenCalled(); expect(m.bootstrap).not.toHaveBeenCalled();
+  });
+  it("does not regenerate an immediately queued negotiation proposal when the sweep follows", async () => {
+    m.receipts.mockResolvedValue([{ ...receipt, template: "game_proposal", status: "generation_queued", idempotencyKey: "hash:game-change:game:proposal" }]);
+    m.game.mockResolvedValue({ ...game, pendingChange: pending, status: "negotiating" });
+    m.mailbox.mockResolvedValue({ id: "proposal-notice", consumedAt: null });
+    await expect(drainGameChatLifecycle({ now })).resolves.toEqual({ attempted: 1, queued: 1, deferred: 0 });
+    expect(m.proposal).not.toHaveBeenCalled();
+    expect(m.prepare).not.toHaveBeenCalled(); expect(m.append).not.toHaveBeenCalled();
+    expect(m.signal).toHaveBeenCalledExactlyOnceWith({ expectedUserId: "room", mailboxItemId: "proposal-notice" });
+  });
+  it.each(["awaiting_generation", "generation_queued"])("terminally skips an expired negotiating proposal receipt from %s", async (status) => {
+    m.receipts.mockResolvedValue([{ ...receipt, template: "game_proposal", status, idempotencyKey: "hash:game-change:game:proposal" }]);
+    m.game.mockResolvedValue({ ...game, inviteExpiresAt: now, pendingChange: pending, status: "negotiating" });
+    await expect(drainGameChatLifecycle({ now })).resolves.toEqual({ attempted: 1, queued: 0, deferred: 1 });
+    expect(m.receiptUpdate).toHaveBeenLastCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ status: "skipped", skippedAt: now, skipReason: "game_proposal_superseded" }),
+    }));
+    expect(m.proposal).not.toHaveBeenCalled(); expect(m.signal).not.toHaveBeenCalled();
   });
   it.each([null, { ...pending, id: "newer" }, { ...pending, origin: "chat", deliveryStatus: "conversation" }])("retires superseded app proposal intent without announcing it", async (pendingChange) => {
     m.receipts.mockResolvedValue([{ ...receipt, template: "game_proposal", idempotencyKey: "hash:game-change:game:proposal" }]); m.game.mockResolvedValue({ pendingChange, status: "live" });
