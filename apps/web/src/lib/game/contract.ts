@@ -399,6 +399,35 @@ export interface GameHomeView {
   wallet: { held: GameTicketView[]; owed: GameTicketView[]; redeemed: GameTicketView[] };
 }
 
+export interface GameHistoryView {
+  people: GameHistoryPersonView[];
+}
+
+export interface GameHistoryPersonView {
+  memberId: string;
+  firstName: string;
+  avatarUrl?: string;
+  record: { won: number; lost: number; tied: number };
+  games: GameHistoryGameView[];
+}
+
+export interface GameHistoryGameView {
+  id: string;
+  /** The viewer's local dates, matching the dates in `GameView.days`. */
+  startedOn: string;
+  endsOn: string;
+  lengthDays: number;
+  schedule: GameTermsVersion["schedule"];
+  score: { mine: number; theirs: number };
+  result: "won" | "lost" | "tied";
+  perfect: boolean;
+  previews: GameHistoryPreviewView[];
+}
+
+export interface GameHistoryPreviewView extends GameEntryView {
+  mine: boolean;
+}
+
 export interface GameBlockedPerson {
   memberId: string;
   firstName: string;

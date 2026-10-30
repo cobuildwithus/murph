@@ -82,6 +82,11 @@ A person can play several live games at once, one per opponent, but the same
 two people can't have two going together. Home lists the games waiting on you
 today first, then your other live games, invites, and results.
 
+`GET /api/game/v1/history` supplies the You tab's Games section: it groups only
+settled 1v1 games by unblocked opponent, orders people and their games by newest
+settlement, returns the viewer's record and score plus up to six authorized
+shot previews per game, and bounds both people and games per person.
+
 When inviting, the challenger can attach a private photo and relationship for
 the invitee alongside the first name they typed. Only the challenger ever sees
 them, in every game with that person; the photo is that player's picture in
