@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { Prisma } from "@prisma/client";
 
 const push = vi.hoisted(() => vi.fn().mockResolvedValue("sent"));
 const lifecycleDelivery = vi.hoisted(() => vi.fn().mockResolvedValue(true));
@@ -22,6 +23,7 @@ vi.mock("next/server", async (original) => ({
 
 import type { GameCommand, GameTermsInput } from "@/src/lib/game/contract";
 import { putGameMedia } from "@/src/lib/game/media";
+import { sealGameText } from "@/src/lib/game/crypto";
 import {
   devAdvanceDays,
   devSettleNow,
@@ -30,13 +32,14 @@ import {
   authorizeMediaRead,
   readGame,
   readGameRematchNotice,
+  readHistory,
   readHome,
   readGameChatState,
   readInvitePreview,
   runGameCommand,
 } from "@/src/lib/game/service";
 import { buildGameRematchInstructions } from "@murphai/hosted-execution/runtime-control";
-import { parseStoredTerms } from "@/src/lib/game/rules";
+import { decideNewTerms, parseStoredTerms } from "@/src/lib/game/rules";
 import { toPrismaJsonObject } from "@/src/lib/device-sync/prisma-store/prisma-json";
 import { addDays, dayStartInstant, gameLocalDate, weekdayOf } from "@/src/lib/game/time";
 import { getPrisma } from "@/src/lib/prisma";
@@ -131,6 +134,73 @@ async function startGame(challenger: string, invitee: string, extra: Partial<Ext
   const token = created!.inviteToken!;
   await ok(invitee, { termsVersion: 1, timeZone: inviteeTimeZone, token, type: "join" });
   return { gameId, token };
+}
+
+async function seedSettledGame(input: {
+  challenger: string;
+  opponent: string;
+  settledAt: Date;
+  scores?: [number, number];
+  misses?: [number, number];
+  mediaDays?: number;
+}): Promise<{ gameId: string; entryIds: string[]; mediaKeys: string[] }> {
+  const gameId = randomUUID();
+  const terms = decideNewTerms(TERMS, {
+    newKey: () => randomUUID(),
+    today: new Date().toISOString().slice(0, 10),
+  });
+  const termsWordsEncrypted = await sealGameText(
+    { field: "terms_words", memberId: input.challenger, rowId: gameId, table: "game" },
+    JSON.stringify(terms.words),
+  );
+  if (!termsWordsEncrypted) throw new Error("Synthetic game terms were not sealed.");
+  const dayOne = new Date("2030-01-01T00:00:00.000Z");
+  const scores = input.scores ?? [0, 0];
+  const misses = input.misses ?? [7, 7];
+  await getPrisma().game.create({ data: {
+    id: gameId,
+    createdBy: input.challenger,
+    status: "settled",
+    terms: toPrismaJsonObject(terms.terms),
+    termsWordsEncrypted,
+    lengthDays: terms.lengthDays,
+    startsOn: dayOne,
+    startedAt: dayOne,
+    settledAt: input.settledAt,
+    result: toPrismaJsonObject({
+      scores: [
+        { memberId: input.challenger, misses: misses[0], score: scores[0], seat: 0 },
+        { memberId: input.opponent, misses: misses[1], score: scores[1], seat: 1 },
+      ],
+      termsVersion: 1,
+      v: 1,
+    }),
+    players: { create: [
+      { memberId: input.challenger, seat: 0, timeZone: "UTC", dayOne },
+      { memberId: input.opponent, seat: 1, timeZone: "UTC", dayOne },
+    ] },
+  } });
+  const entryIds: string[] = [];
+  const mediaKeys: string[] = [];
+  for (let dayIndex = 0; dayIndex < (input.mediaDays ?? 0); dayIndex += 1) {
+    for (const [memberId, seat] of [[input.challenger, 0], [input.opponent, 1]] as const) {
+      const id = randomUUID();
+      const mediaKey = `game/${memberId}/${randomUUID()}.jpg`;
+      entryIds.push(id);
+      mediaKeys.push(mediaKey);
+      await getPrisma().gameEntry.create({ data: {
+        id,
+        gameId,
+        memberId,
+        dayIndex,
+        attempt: 1,
+        kind: "photo",
+        mediaKeys: [mediaKey],
+        receivedAt: new Date(dayOne.getTime() + dayIndex * 86_400_000 + seat),
+      } });
+    }
+  }
+  return { entryIds, gameId, mediaKeys };
 }
 
 describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () => {
@@ -1010,6 +1080,109 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
 
     const home = await readHome(leo);
     expect(home.games.map((game) => game.id).sort()).toEqual([open!.id, ...settledIds.slice(1)].sort());
+  });
+
+  it("orders settled history, counts each side's record, and keeps previews viewer-scoped to their game", async () => {
+    const viewer = await member("HistoryViewer", "UTC");
+    const ava = await member("HistoryAva", "UTC");
+    const ben = await member("HistoryBen", "UTC");
+    const now = Date.now();
+    const first = await seedSettledGame({ challenger: viewer, opponent: ava,
+      settledAt: new Date(now - 5 * 3_600_000), scores: [4, 2] });
+    const second = await seedSettledGame({ challenger: viewer, opponent: ava,
+      settledAt: new Date(now - 4 * 3_600_000), scores: [1, 3] });
+    const third = await seedSettledGame({ challenger: viewer, opponent: ava,
+      settledAt: new Date(now - 3 * 3_600_000), scores: [5, 2], mediaDays: 1 });
+    const latest = await seedSettledGame({ challenger: viewer, opponent: ava,
+      settledAt: new Date(now - 2 * 3_600_000), scores: [7, 7], misses: [0, 0], mediaDays: 4 });
+    const benGame = await seedSettledGame({ challenger: viewer, opponent: ben,
+      settledAt: new Date(now - 3_600_000), scores: [2, 4] });
+    const avatarKey = `game/${ava}/${randomUUID()}.jpg`;
+    await getPrisma().gameProfile.update({ where: { memberId: ava }, data: { photoKey: avatarKey } });
+    await getPrisma().gameReport.create({ data: {
+      id: randomUUID(), reporterMemberId: viewer, reportedMemberId: ava,
+      gameId: latest.gameId, entryId: latest.entryIds[1], about: "post", reason: "other",
+    } });
+
+    const history = await readHistory(viewer);
+    expect(history.people.map((person) => person.memberId)).toEqual([ben, ava]);
+    expect(history.people[0]).toMatchObject({ memberId: ben, record: { won: 0, lost: 1, tied: 0 },
+      games: [{ id: benGame.gameId, result: "lost", perfect: false, score: { mine: 2, theirs: 4 } }] });
+    const withAva = history.people[1];
+    expect(withAva).toMatchObject({
+      memberId: ava,
+      firstName: "HistoryAva",
+      avatarUrl: `/api/game/v1/media/${encodeURIComponent(avatarKey)}`,
+      record: { won: 2, lost: 1, tied: 1 },
+    });
+    expect(withAva.games.map((game) => game.id)).toEqual([latest.gameId, third.gameId, second.gameId, first.gameId]);
+    expect(withAva.games[0]).toMatchObject({
+      startedOn: "2030-01-01",
+      endsOn: "2030-01-07",
+      lengthDays: 7,
+      result: "tied",
+      perfect: true,
+      score: { mine: 7, theirs: 7 },
+      schedule: { days: [0, 1, 2, 3, 4, 5, 6] },
+    });
+    expect(withAva.games[0].previews).toHaveLength(6);
+    expect(withAva.games[0].previews.map((preview) => preview.mine)).toEqual([true, true, false, true, false, true]);
+    expect(JSON.stringify(withAva.games[0].previews)).not.toContain(latest.mediaKeys[1]);
+    expect(JSON.stringify(withAva.games[0].previews)).not.toContain(third.mediaKeys[0]);
+
+    const otherSide = await readHistory(ava);
+    expect(otherSide.people).toHaveLength(1);
+    expect(otherSide.people[0]).toMatchObject({ memberId: viewer, record: { won: 1, lost: 2, tied: 1 } });
+  });
+
+  it("leaves blocked people and every non-settled status out of history", async () => {
+    const viewer = await member("HistoryFilterViewer", "UTC");
+    const blocked = await member("HistoryBlocked", "UTC");
+    const blockedGame = await seedSettledGame({ challenger: viewer, opponent: blocked, settledAt: new Date() });
+    await ok(viewer, { memberId: blocked, type: "block" });
+    expect(await getPrisma().game.findUniqueOrThrow({ where: { id: blockedGame.gameId } })).toMatchObject({ status: "settled" });
+    // Someone who blocked the viewer is left out too, before the people cap counts them.
+    const blocker = await member("HistoryBlocker", "UTC");
+    await seedSettledGame({ challenger: viewer, opponent: blocker, settledAt: new Date() });
+    await ok(blocker, { memberId: viewer, type: "block" });
+
+    for (const status of ["void", "invited", "negotiating", "live"] as const) {
+      const opponent = await member(`History${status}`, "UTC");
+      const seeded = await seedSettledGame({ challenger: viewer, opponent, settledAt: new Date() });
+      await getPrisma().game.update({ where: { id: seeded.gameId }, data: {
+        status,
+        liveRosterKey: status === "live" || status === "negotiating" ? [viewer, opponent].sort().join(":") : null,
+        result: Prisma.DbNull,
+        settledAt: null,
+      } });
+    }
+
+    expect(await readHistory(viewer)).toEqual({ people: [] });
+  });
+
+  it("caps history at fifty people and fifty games per person", async () => {
+    const viewer = await member("HistoryCapViewer", "UTC");
+    const frequent = await member("HistoryFrequent", "UTC");
+    const now = Date.now();
+    const frequentIds: string[] = [];
+    for (let index = 0; index < 51; index += 1) {
+      frequentIds.push((await seedSettledGame({ challenger: viewer, opponent: frequent,
+        settledAt: new Date(now - (100 - index) * 1000) })).gameId);
+    }
+    const frequentHistory = await readHistory(viewer);
+    expect(frequentHistory.people).toHaveLength(1);
+    expect(frequentHistory.people[0].games).toHaveLength(50);
+    expect(frequentHistory.people[0].games.map((game) => game.id)).not.toContain(frequentIds[0]);
+
+    for (let index = 0; index < 51; index += 1) {
+      const opponent = await member(`HistoryCap${index}`, "UTC");
+      await seedSettledGame({ challenger: viewer, opponent,
+        settledAt: new Date(now + index * 1000) });
+    }
+    const peopleHistory = await readHistory(viewer);
+    expect(peopleHistory.people).toHaveLength(50);
+    expect(peopleHistory.people.every((person) => person.games.length <= 50)).toBe(true);
+    expect(new Set(peopleHistory.people.map((person) => person.memberId)).size).toBe(50);
   });
 
   it("voids an unclaimed invite past its expiry on the next read and keeps it on Home for a week", async () => {

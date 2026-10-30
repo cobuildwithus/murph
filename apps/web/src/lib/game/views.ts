@@ -11,6 +11,8 @@ import type {
   GameDayView,
   GameEntryView,
   GameEntryData,
+  GameHistoryGameView,
+  GameHistoryPersonView,
   GamePlayerView,
   GameTermsVersion,
   GameTicketView,
@@ -44,6 +46,7 @@ import { addDays } from "./time";
 import { pendingGameChangeView, gameChangeControls } from "./changes";
 
 const GAME_MEDIA_PATH = "/api/game/v1/media/";
+export const GAME_HISTORY_PREVIEW_LIMIT = 6;
 
 export function gameMediaUrl(key: string): string {
   return `${GAME_MEDIA_PATH}${encodeURIComponent(key)}`;
@@ -176,6 +179,52 @@ function entryView(entry: RuleEntry, input: GameViewInput): GameEntryView {
     mediaUrls: entry.mediaKeys.map(gameMediaUrl),
     text: words?.text ?? null,
     data: words?.data ?? null,
+  };
+}
+
+export interface BuiltGameHistoryView {
+  game: GameHistoryGameView;
+  person: Pick<GameHistoryPersonView, "memberId" | "firstName" | "avatarUrl">;
+}
+
+/** The bounded history projection, built from the same viewer-scoped inputs as a recap. */
+export function buildGameHistoryView(input: GameViewInput): BuiltGameHistoryView | null {
+  if (input.state.game.status !== "settled" || !input.result) return null;
+  const viewer = playerFor(input.state, input.viewerId);
+  const other = input.state.players.find((player) => player.memberId !== input.viewerId);
+  if (!viewer?.dayOne || !other || input.state.players.length !== 2) return null;
+
+  const mine = playerView(input, viewer);
+  const theirs = playerView(input, other);
+  const outcome = outcomeFor(input.result, input.viewerId);
+  const visible = visibleEntryIds(input.state, input.viewerId, input.hiddenEntryIds);
+  const seats = new Map(input.state.players.map((player) => [player.memberId, player.seat]));
+  const previews = input.state.entries
+    .filter((entry) => visible.has(entry.id) && entry.mediaKeys.length > 0)
+    .sort((a, b) => a.dayIndex - b.dayIndex
+      || (seats.get(a.memberId) ?? 0) - (seats.get(b.memberId) ?? 0)
+      || a.receivedAt.getTime() - b.receivedAt.getTime()
+      || a.id.localeCompare(b.id))
+    .slice(0, GAME_HISTORY_PREVIEW_LIMIT)
+    .map((entry) => ({ ...entryView(entry, input), mine: entry.memberId === input.viewerId }));
+
+  return {
+    game: {
+      endsOn: addDays(viewer.dayOne, input.state.game.lengthDays - 1),
+      id: input.state.game.id,
+      lengthDays: input.state.game.lengthDays,
+      perfect: outcome === "perfect",
+      previews,
+      result: outcome === "won" || outcome === "lost" ? outcome : "tied",
+      schedule: currentTerms(input.state.game.terms).schedule,
+      score: { mine: mine.score, theirs: theirs.score },
+      startedOn: viewer.dayOne,
+    },
+    person: {
+      ...(theirs.avatarUrl ? { avatarUrl: theirs.avatarUrl } : {}),
+      firstName: theirs.firstName,
+      memberId: other.memberId,
+    },
   };
 }
 

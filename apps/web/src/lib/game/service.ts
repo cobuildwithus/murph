@@ -24,6 +24,7 @@ import {
   type GameDayOutcome,
   type GameEntryKind,
   type GameError,
+  type GameHistoryView,
   type GameHomeView,
   type GameProfileView,
   type GameInvitePreview,
@@ -76,7 +77,18 @@ import { deliverGameChangeProposal } from "./chat-delivery";
 import { readGameChatCandidateIds, sameGamePlayers } from "./chat-membership";
 import { reserveGameChatLifecycleTx, reserveGameChatProposalTx, skipGameChatLifecycleTx } from "./chat-lifecycle-receipt";
 import { claimGamePostNotification, sendGamePostNotificationAfterResponse } from "./post-notification";
-import { buildGameView, gameMediaUrl, termsView, ticketView, visibleEntryIds, type GameTicketRow } from "./views";
+import {
+  buildGameHistoryView,
+  buildGameView,
+  GAME_HISTORY_PREVIEW_LIMIT,
+  gameMediaUrl,
+  termsView,
+  ticketView,
+  visibleEntryIds,
+  type BuiltGameHistoryView,
+  type GameTicketRow,
+  type GameViewInput,
+} from "./views";
 import { gameWordsMemberId, parseGameDepartedPlayer } from "./account-deletion";
 import { areGamePlayersBlocked, GAME_BLOCK_LIMIT, isHiddenBy, lockGamePair, readGameBlocks, type GameBlocks } from "./blocks";
 import { GAME_REPORT_ALERTS_PER_REPORTER_DAY, sendGameReportAlert } from "./report-alert";
@@ -99,6 +111,8 @@ const SYSTEM_ACTOR = "system";
 const DAY_MS = 24 * 60 * 60 * 1000;
 const HOME_CANDIDATE_LIMIT = 50;
 const HOME_SETTLED_SHOWN = 3;
+const HISTORY_PEOPLE_LIMIT = 50;
+const HISTORY_GAMES_PER_PERSON_LIMIT = 50;
 const HOME_EXPIRED_SHOWN = 3;
 const HOME_EXPIRED_FOR_MS = 7 * 24 * 60 * 60 * 1000;
 const WALLET_LIMIT = 200;
@@ -1403,6 +1417,65 @@ async function loadGames(db: Db, gameIds: readonly string[]): Promise<LoadedGame
   });
 }
 
+/** Loads only the media-bearing live entries that can appear in history previews. */
+async function loadHistoryGames(db: Db, gameIds: readonly string[], viewerId: string): Promise<LoadedGame[]> {
+  if (gameIds.length === 0) return [];
+  const [rows, entries] = await Promise.all([
+    db.game.findMany({ include: { players: true }, where: { id: { in: [...gameIds] } } }),
+    db.$queryRaw<GameEntry[]>(Prisma.sql`
+      WITH ranked_entry AS (
+        SELECT entry.*,
+          ROW_NUMBER() OVER (
+            PARTITION BY entry.game_id
+            ORDER BY entry.day_index, player.seat, entry.received_at, entry.id
+          ) AS preview_rank
+        FROM game_entry entry
+        JOIN game_player player
+          ON player.game_id = entry.game_id AND player.member_id = entry.member_id
+        WHERE entry.game_id IN (${Prisma.join(gameIds)})
+          AND entry.attempt > 0
+          AND entry.withdrawn_at IS NULL
+          AND cardinality(entry.media_keys) > 0
+          AND NOT EXISTS (
+            SELECT 1 FROM game_report report
+            WHERE report.reporter_member_id = ${viewerId} AND report.entry_id = entry.id
+          )
+      )
+      SELECT id,
+        game_id AS "gameId",
+        member_id AS "memberId",
+        day_index AS "dayIndex",
+        attempt,
+        kind,
+        text_encrypted AS "textEncrypted",
+        payload_encrypted AS "payloadEncrypted",
+        incomplete,
+        blur_hash AS "blurHash",
+        media_keys AS "mediaKeys",
+        capture_age_ms AS "captureAgeMs",
+        received_at AS "receivedAt",
+        withdrawn_at AS "withdrawnAt",
+        withdrawn_reason AS "withdrawnReason"
+      FROM ranked_entry
+      WHERE preview_rank <= ${GAME_HISTORY_PREVIEW_LIMIT}
+      ORDER BY game_id, preview_rank
+    `),
+  ]);
+  const byId = new Map(rows.map((row) => [row.id, row]));
+  const entriesByGame = new Map<string, GameEntry[]>();
+  for (const entry of entries) {
+    const gameEntries = entriesByGame.get(entry.gameId) ?? [];
+    gameEntries.push(entry);
+    entriesByGame.set(entry.gameId, gameEntries);
+  }
+  return gameIds.flatMap((id) => {
+    const row = byId.get(id);
+    if (!row) return [];
+    const gameEntries = entriesByGame.get(id) ?? [];
+    return [{ entries: gameEntries, row, state: toRuleState(row, gameEntries) }];
+  });
+}
+
 function toRuleState(row: GameRow, entries: readonly GameEntry[]): RuleState {
   return {
     entries: entries.map((entry) => ({
@@ -1630,6 +1703,73 @@ export async function readHome(memberId: string): Promise<GameHomeView> {
   };
 }
 
+/**
+ * Settled 1v1 history, bounded to a constant number of people, games and
+ * preview entries. Every database read is set-based; view hydration decrypts
+ * the selected rows in the same batch used by ordinary game views.
+ */
+export async function readHistory(memberId: string): Promise<GameHistoryView> {
+  const prisma = getPrisma();
+  const candidates = await prisma.$queryRaw<Array<{ gameId: string }>>(Prisma.sql`
+    WITH settled_pair AS (
+      SELECT game.id AS game_id,
+        opponent.member_id AS opponent_id,
+        game.settled_at AS settled_at,
+        ROW_NUMBER() OVER (
+          PARTITION BY opponent.member_id
+          ORDER BY game.settled_at DESC, game.id DESC
+        ) AS game_rank
+      FROM game
+      JOIN game_player viewer
+        ON viewer.game_id = game.id AND viewer.member_id = ${memberId}
+      JOIN game_player opponent
+        ON opponent.game_id = game.id AND opponent.member_id <> ${memberId}
+      WHERE game.status = 'settled'
+        AND game.settled_at IS NOT NULL
+        AND ${gameOnSql("game")}
+        AND (SELECT count(*) FROM game_player roster WHERE roster.game_id = game.id) = 2
+        AND NOT EXISTS (
+          SELECT 1 FROM game_block blocked
+          WHERE (blocked.blocker_member_id = ${memberId} AND blocked.blocked_member_id = opponent.member_id)
+            OR (blocked.blocker_member_id = opponent.member_id AND blocked.blocked_member_id = ${memberId})
+        )
+    ), recent_people AS (
+      SELECT opponent_id, max(settled_at) AS latest_at
+      FROM settled_pair
+      GROUP BY opponent_id
+      ORDER BY latest_at DESC, opponent_id
+      LIMIT ${HISTORY_PEOPLE_LIMIT}
+    )
+    SELECT settled_pair.game_id AS "gameId"
+    FROM settled_pair
+    JOIN recent_people USING (opponent_id)
+    WHERE settled_pair.game_rank <= ${HISTORY_GAMES_PER_PERSON_LIMIT}
+    ORDER BY recent_people.latest_at DESC,
+      settled_pair.opponent_id,
+      settled_pair.settled_at DESC,
+      settled_pair.game_id DESC
+  `);
+  if (candidates.length === 0) return { people: [] };
+
+  const gameIds = candidates.map((candidate) => candidate.gameId);
+  const [games, clock] = await Promise.all([
+    loadHistoryGames(prisma, gameIds, memberId),
+    databaseNow(prisma),
+  ]);
+  const built = await buildHistoryViews(games, memberId, clock);
+  const people = new Map<string, GameHistoryView["people"][number]>();
+  for (const item of built) {
+    let person = people.get(item.person.memberId);
+    if (!person) {
+      person = { ...item.person, games: [], record: { lost: 0, tied: 0, won: 0 } };
+      people.set(item.person.memberId, person);
+    }
+    person.games.push(item.game);
+    person.record[item.game.result] += 1;
+  }
+  return { people: [...people.values()] };
+}
+
 /** The members in a game: its players and an addressed rematch's invitee. */
 function participantsOf(game: LoadedGame): string[] {
   return [...game.row.players.map((player) => player.memberId), ...(game.row.inviteeMemberId ? [game.row.inviteeMemberId] : [])];
@@ -1804,7 +1944,13 @@ async function readTermWords(
  * way a player who left is: their seat and the viewer's name for them, no
  * photo, posts or days. Posts the viewer reported stay hidden.
  */
-async function buildViews(games: readonly LoadedGame[], viewerId: string, clock: Date, knownBlocks?: GameBlocks): Promise<GameView[]> {
+async function buildViewInputs(
+  games: readonly LoadedGame[],
+  viewerId: string,
+  clock: Date,
+  knownBlocks?: GameBlocks,
+  history = false,
+): Promise<GameViewInput[]> {
   if (games.length === 0) return [];
   const prisma = getPrisma();
   const memberIds = [...new Set([viewerId, ...games.flatMap((game) => game.row.players.map((player) => player.memberId))])];
@@ -1813,10 +1959,10 @@ async function buildViews(games: readonly LoadedGame[], viewerId: string, clock:
   const [profiles, labels, tickets, pendingViews, blocks, reported] = await Promise.all([
     prisma.gameProfile.findMany({ where: { memberId: { in: labelSubjects } } }),
     prisma.gameContactLabel.findMany({ where: { ownerMemberId: viewerId, subjectMemberId: { in: labelSubjects } } }),
-    prisma.gameTicket.findMany({
+    history ? [] : prisma.gameTicket.findMany({
       where: { gameId: { in: games.map((game) => game.row.id) }, OR: [{ owedTo: viewerId }, { owedBy: viewerId }] },
     }),
-    readPendingChangeViews(games.map((game) => game.row)),
+    history ? new Map() : readPendingChangeViews(games.map((game) => game.row)),
     knownBlocks ?? readGameBlocks(prisma, viewerId, labelSubjects),
     readReportedBy(viewerId, { gameIds: games.map((game) => game.row.id), players: labelSubjects }),
   ]);
@@ -1851,6 +1997,7 @@ async function buildViews(games: readonly LoadedGame[], viewerId: string, clock:
   // A game's own link belongs to its people: while invited, the challenger and
   // an addressed invitee; after go-live, both players (the token is spent).
   const tokenAt = games.map((game) => {
+    if (history) return null;
     const { row } = game;
     const holds = row.status === "invited"
       ? row.createdBy === viewerId || row.inviteeMemberId === viewerId
@@ -1858,6 +2005,7 @@ async function buildViews(games: readonly LoadedGame[], viewerId: string, clock:
     return holds ? ask(gameTarget(row, "invite_token"), row.inviteTokenEncrypted) : null;
   });
   const inviteAt = games.map((game) => {
+    if (history) return null;
     const { row } = game;
     // An addressed rematch whose challenger left still shows its invitee in their seat.
     if (row.status !== "invited" && !(row.departedPlayer !== null && row.inviteeMemberId === viewerId)) return null;
@@ -1911,7 +2059,7 @@ async function buildViews(games: readonly LoadedGame[], viewerId: string, clock:
     const invite = inviteAt[index];
     const tokenIndex = tokenAt[index];
     const result: StoredResult | null = game.row.result ? parseStoredResult(game.row.result) : null;
-    return buildGameView({
+    return {
       pendingChange: pendingViews.get(game.row.id) ?? null,
       avatarKeys,
       profileAvatarKeys,
@@ -1939,8 +2087,17 @@ async function buildViews(games: readonly LoadedGame[], viewerId: string, clock:
       tickets: tickets.filter((ticket) => ticket.gameId === game.row.id).map((ticket) => withoutHidden(toTicketRow(ticket), blocks)),
       viewerId,
       words: parseTermWords(plain[wordsAt[index]] ?? ""),
-    });
+    };
   });
+}
+
+async function buildViews(games: readonly LoadedGame[], viewerId: string, clock: Date, knownBlocks?: GameBlocks): Promise<GameView[]> {
+  return (await buildViewInputs(games, viewerId, clock, knownBlocks)).map(buildGameView);
+}
+
+async function buildHistoryViews(games: readonly LoadedGame[], viewerId: string, clock: Date): Promise<BuiltGameHistoryView[]> {
+  return (await buildViewInputs(games, viewerId, clock, undefined, true))
+    .flatMap((input) => buildGameHistoryView(input) ?? []);
 }
 
 /** One indexed receipt batch; delivery truth stays with the existing outbox owner. */
