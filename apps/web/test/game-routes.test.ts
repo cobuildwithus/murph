@@ -23,6 +23,7 @@ const mocks = vi.hoisted(() => ({
   control: null as null | { gameImageDelivery: ReturnType<typeof vi.fn> },
   mediaKeyPrefixFor: vi.fn(),
   readGame: vi.fn(),
+  readHistory: vi.fn(),
   readHome: vi.fn(),
   readInvitePreview: vi.fn(),
   requireHostedMemberAuthFromBearerToken: vi.fn(),
@@ -37,6 +38,7 @@ vi.mock("@/src/lib/game/service", () => ({
   canEnterGame: mocks.canEnterGame,
   mediaKeyPrefixFor: mocks.mediaKeyPrefixFor,
   readGame: mocks.readGame,
+  readHistory: mocks.readHistory,
   readHome: mocks.readHome,
   readInvitePreview: mocks.readInvitePreview,
   runGameCommand: mocks.runGameCommand,
@@ -66,6 +68,7 @@ type Routes = {
   entries: typeof import("../app/api/game/v1/games/[id]/entries/route");
   entry: typeof import("../app/api/game/v1/games/[id]/entries/[entryId]/route");
   game: typeof import("../app/api/game/v1/games/[id]/route");
+  history: typeof import("../app/api/game/v1/history/route");
   home: typeof import("../app/api/game/v1/home/route");
   invite: typeof import("../app/api/game/v1/invites/[token]/route");
   media: typeof import("../app/api/game/v1/media/[...key]/route");
@@ -122,6 +125,7 @@ describe("weekly game routes", () => {
       entries: await import("../app/api/game/v1/games/[id]/entries/route"),
       entry: await import("../app/api/game/v1/games/[id]/entries/[entryId]/route"),
       game: await import("../app/api/game/v1/games/[id]/route"),
+      history: await import("../app/api/game/v1/history/route"),
       home: await import("../app/api/game/v1/home/route"),
       invite: await import("../app/api/game/v1/invites/[token]/route"),
       media: await import("../app/api/game/v1/media/[...key]/route"),
@@ -145,6 +149,7 @@ describe("weekly game routes", () => {
     mocks.canEnterGame.mockResolvedValue(true);
     mocks.mediaKeyPrefixFor.mockImplementation((memberId: string) => `game/${memberId}/`);
     mocks.readGame.mockResolvedValue(VIEW);
+    mocks.readHistory.mockResolvedValue({ people: [] });
     mocks.runGameCommand.mockResolvedValue({ game: VIEW, ok: true });
   });
 
@@ -170,6 +175,7 @@ describe("weekly game routes", () => {
 
       const responses = await Promise.all([
         routes.home.GET(new Request(`${BASE}/home`)),
+        routes.history.GET(new Request(`${BASE}/history`)),
         routes.redeem.POST(writeRequest("POST", "/tickets/t_1/redeem"), params({ id: "t_1" })),
         routes.game.GET(new Request(`${BASE}/games/${GAME_ID}`), params({ id: GAME_ID })),
         routes.media.GET(new Request(`${BASE}/media/x`), params({ key: ["game", LEO, "x.jpg"] })),
@@ -183,6 +189,7 @@ describe("weekly game routes", () => {
         });
       }
       expect(mocks.readHome).not.toHaveBeenCalled();
+      expect(mocks.readHistory).not.toHaveBeenCalled();
       expect(mocks.runGameCommand).not.toHaveBeenCalled();
       expect(mocks.readGame).not.toHaveBeenCalled();
       expect(mocks.authorizeMediaRead).not.toHaveBeenCalled();
@@ -204,6 +211,7 @@ describe("weekly game routes", () => {
 
       const responses = await Promise.all([
         routes.home.GET(new Request(`${BASE}/home`)),
+        routes.history.GET(new Request(`${BASE}/history`)),
         routes.redeem.POST(writeRequest("POST", "/tickets/t_1/redeem"), params({ id: "t_1" })),
         routes.game.GET(new Request(`${BASE}/games/${GAME_ID}`), params({ id: GAME_ID })),
         routes.upload.POST(uploadRequest()),
@@ -217,6 +225,7 @@ describe("weekly game routes", () => {
       }
       expect(mocks.canEnterGame).toHaveBeenCalledWith(LEO, null);
       expect(mocks.readHome).not.toHaveBeenCalled();
+      expect(mocks.readHistory).not.toHaveBeenCalled();
       expect(mocks.runGameCommand).not.toHaveBeenCalled();
       expect(mocks.devStartNow).not.toHaveBeenCalled();
     });
@@ -368,6 +377,7 @@ describe("weekly game routes", () => {
     };
     const open = {
       "GET /home": () => routes.home.GET(new Request(`${BASE}/home`)),
+      "GET /history": () => routes.history.GET(new Request(`${BASE}/history`)),
       "GET /games/:id": () => routes.game.GET(new Request(`${BASE}/games/${GAME_ID}`), params({ id: GAME_ID })),
       "PUT /me/profile": () => routes.profile.PUT(writeRequest("PUT", "/me/profile", { firstName: "Leo", timeZone: "UTC" })),
       "DELETE /games/:id": () => routes.game.DELETE(writeRequest("DELETE", `/games/${GAME_ID}`), params({ id: GAME_ID })),
@@ -432,11 +442,14 @@ describe("weekly game routes", () => {
       mocks.readHome.mockResolvedValue({ games: [VIEW], me: { memberId: LEO }, wallet: { held: [], owed: [], redeemed: [] } });
 
       const home = await routes.home.GET(new Request(`${BASE}/home?memberId=${AVA}`, { headers: { "x-member-id": AVA } }));
+      const history = await routes.history.GET(new Request(`${BASE}/history?memberId=${AVA}`, { headers: { "x-member-id": AVA } }));
       const game = await routes.game.GET(new Request(`${BASE}/games/${GAME_ID}?memberId=${AVA}`), params({ id: GAME_ID }));
 
       expect(mocks.readHome).toHaveBeenCalledWith(LEO);
+      expect(mocks.readHistory).toHaveBeenCalledWith(LEO);
       expect(mocks.readGame).toHaveBeenCalledWith(GAME_ID, LEO);
       expect(await home.json()).toEqual({ games: [VIEW], me: { memberId: LEO }, ok: true, wallet: { held: [], owed: [], redeemed: [] } });
+      expect(await history.json()).toEqual({ ok: true, people: [] });
       expect(await game.json()).toEqual({ game: VIEW, ok: true });
     });
 
