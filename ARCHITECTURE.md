@@ -5539,10 +5539,29 @@ or `photo`; old clients still receive a bounded image-byte proxy. A post sent
 with `?delivery=signed` answers with the same signed `photo` capability on each
 other player's entry that post unlocked (`GameEntryView.delivery`), after the
 same `authorizeMediaRead` check, so the reveal needs no second request; one
-that can't be signed is left for the client to request. A missing hosted image
-is a 404 after one Worker lookup. Local stacks
-keep plain files on disk. Existing encrypted game images are deliberately not
-migrated; the earlier encrypted routes remain for old-Web rollout compatibility.
+that can't be signed is left for the client to request. A missing hosted pointer
+triggers a legacy encrypted-object lookup before returning 404. Web still owns the
+member control-domain key and original media-key AAD: on a missing image pointer,
+delivery or stat reads the old envelope, decrypts with `openGameMedia`, and sends
+the bytes through the existing `putGameImage` path. That path validates the content
+hash and preserves conditional pointer creation and account-deletion fencing.
+Web clears decrypted bytes after upload and retains the encrypted source for
+retries and rollback. No new Worker route or crypto authority is needed. Local
+stacks keep plain files on disk.
+
+History keeps `mediaUrls` as stable cache identities and adds optional
+`delivery: { url, expiresAt }` to the previews in each person's latest game.
+These use the five-minute `avatar`/`gameavatar` rendition. The HTTP layer applies
+the same media-read authorization after history's existing viewer filters,
+deduplicates content keys and processes four authorization/delivery chains at
+once, outside transactions. At 50 people and six previews this is at most 300
+normal Worker calls; a missing object uses two calls and a successful legacy
+repair uses four (delivery, legacy read, upload, delivery). Each distinct key
+adds zero database reads for the uploader, or at most five for the existing
+other-player authorization path. A legacy repair also uses the existing
+member-root lookup/unwrap once. Older games, local storage, denied reads and
+failed signing omit the optional field. History responses are private/no-store;
+capabilities are never persisted. No preview ordering or selection changes.
 
 Game Images writes register opaque R2 upload receipts before reading a permanent
 opaque deletion guard. Account deletion writes that guard, waits for all receipts

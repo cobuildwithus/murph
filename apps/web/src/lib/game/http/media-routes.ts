@@ -1,4 +1,4 @@
-import type { GameView } from "../contract";
+import type { GameHistoryView, GameView } from "../contract";
 import {
   GAME_MEDIA_MAX_BYTES,
   gameMediaDelivery,
@@ -78,6 +78,37 @@ export async function withUnlockedPhotoDeliveries(game: GameView, input: { entry
     return delivery ? { ...other, entry: { ...other.entry, delivery } } : other;
   }));
   return { ...game, days: game.days.map((candidate) => (candidate === day ? { ...candidate, others } : candidate)) };
+}
+
+/** Sign the card's latest game per person, after the normal history filters.
+ * At most 50 people × 6 previews; deduplicate keys and authorize/sign four at
+ * a time. Missing or unavailable delivery leaves the stable media URL intact.
+ */
+export async function withHistoryPhotoDeliveries(history: GameHistoryView, memberId: string): Promise<GameHistoryView> {
+  if (!servesSignedGameMedia()) return history;
+  const previews = history.people.flatMap((person) => person.games[0]?.previews ?? []);
+  const keys = [...new Set(previews.flatMap((preview) => {
+    const key = preview.mediaUrls[0] ? gameMediaKeyOf(preview.mediaUrls[0]) : null;
+    return key ? [key] : [];
+  }))];
+  const deliveries = new Map<string, { url: string; expiresAt: string }>();
+  for (let offset = 0; offset < keys.length; offset += 4) {
+    await Promise.all(keys.slice(offset, offset + 4).map(async (key) => {
+      const delivery = await isViewable(memberId, key)
+        .then((viewable) => viewable ? gameMediaDelivery(key, "avatar") : null)
+        .catch(() => null);
+      if (delivery) deliveries.set(key, delivery);
+    }));
+  }
+  return { ...history, people: history.people.map((person) => ({ ...person,
+    games: person.games.map((game, index) => index === 0 ? { ...game,
+      previews: game.previews.map((preview) => {
+        const key = preview.mediaUrls[0] ? gameMediaKeyOf(preview.mediaUrls[0]) : null;
+        const delivery = key ? deliveries.get(key) : null;
+        return delivery ? { ...preview, delivery } : preview;
+      }),
+    } : game),
+  })) };
 }
 
 async function isViewable(memberId: string, key: string): Promise<boolean> {

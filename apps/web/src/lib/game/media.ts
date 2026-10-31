@@ -9,6 +9,7 @@ import type { CloudflareHostedControlClient } from "@murphai/cloudflare-hosted-c
 
 import { readHostedExecutionControlClientIfConfigured } from "../hosted-execution/control";
 import { mediaKeyOwner } from "./access";
+import { openGameMedia } from "./crypto";
 import { readRawBodyBuffer } from "../http";
 
 /**
@@ -110,7 +111,8 @@ export async function statGameMedia(key: string): Promise<{ byteLength: number; 
   const contentType = contentTypeOf(key);
   if (store.kind === "hosted") {
     const { mediaId, owner } = hostedName(key);
-    const stored = await store.control.statGameImage({ mediaId, userId: owner });
+    const stored = await store.control.statGameImage({ mediaId, userId: owner })
+      ?? await recoverLegacyGameMedia(store.control, key);
     return stored ? { byteLength: stored.byteLength, contentType } : null;
   }
   try {
@@ -125,8 +127,7 @@ export async function readGameMedia(key: string): Promise<{ bytes: Uint8Array; c
   const store = requireStore();
   const contentType = contentTypeOf(key);
   if (store.kind === "hosted") {
-    const { mediaId, owner } = hostedName(key);
-    const delivery = await store.control.gameImageDelivery({ mediaId, userId: owner, variant: "photo" });
+    const delivery = await hostedDelivery(store.control, key, "photo");
     if (!delivery) return null;
     assertImageDeliveryURL(delivery.url);
     try {
@@ -153,10 +154,39 @@ export async function readGameMedia(key: string): Promise<{ bytes: Uint8Array; c
 export async function gameMediaDelivery(key: string, variant: "avatar" | "photo") {
   const store = requireStore();
   if (store.kind === "disk") return null;
+  return hostedDelivery(store.control, key, variant);
+}
+
+async function hostedDelivery(control: CloudflareHostedControlClient, key: string, variant: "avatar" | "photo") {
   const { mediaId, owner } = hostedName(key);
-  const delivery = await store.control.gameImageDelivery({ mediaId, userId: owner, variant });
+  const request = { mediaId, userId: owner, variant };
+  let delivery = await control.gameImageDelivery(request);
+  if (!delivery && await recoverLegacyGameMedia(control, key)) {
+    delivery = await control.gameImageDelivery(request);
+  }
   if (delivery) assertImageDeliveryURL(delivery.url);
   return delivery;
+}
+
+/** Only Web has the legacy member key. Reuse the original AAD and the Worker's
+ * content-hash validation, conditional pointer write and account-deletion fence.
+ * Keep the encrypted original; a failed repair can be retried on the next read.
+ */
+async function recoverLegacyGameMedia(control: CloudflareHostedControlClient, key: string) {
+  const { mediaId, owner } = hostedName(key);
+  try {
+    const envelope = await control.readGameMedia({ mediaId, userId: owner });
+    if (envelope === null) return null;
+    const bytes = await openGameMedia({ envelope, key, ownerMemberId: owner });
+    try {
+      await control.putGameImage({ bytes, contentType: contentTypeOf(key), mediaId, userId: owner });
+      return { byteLength: bytes.byteLength };
+    } finally {
+      bytes.fill(0);
+    }
+  } catch {
+    throw new Error("Game image recovery failed.");
+  }
 }
 
 function assertImageDeliveryURL(value: string): void {

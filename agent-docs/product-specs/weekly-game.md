@@ -86,6 +86,13 @@ today first, then your other live games, invites, and results.
 settled 1v1 games by unblocked opponent, orders people and their games by newest
 settlement, returns the viewer's record and score plus up to six authorized
 shot previews per game, and bounds both people and games per person.
+The latest game's previews for each person may also include `delivery` with a
+five-minute signed URL for the small rendition and its ISO `expiresAt`. Keep
+`mediaUrls` as cache identity; if delivery is absent or expired, request the
+stable media route as usual. Signing uses the same media authorization and
+never exposes hidden entries. Older games keep the stable media URLs only.
+Legacy encrypted images are repaired on authorized reads through Web's existing
+decryption and validated image-upload path when their source and key remain.
 
 When inviting, the challenger can attach a private photo and relationship for
 the invitee alongside the first name they typed. Only the challenger ever sees

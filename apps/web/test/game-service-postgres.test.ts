@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -23,6 +23,8 @@ vi.mock("next/server", async (original) => ({
 
 import type { GameCommand, GameTermsInput } from "@/src/lib/game/contract";
 import { putGameMedia } from "@/src/lib/game/media";
+import * as gameMedia from "@/src/lib/game/media";
+import { withHistoryPhotoDeliveries } from "@/src/lib/game/http/media-routes";
 import { sealGameText } from "@/src/lib/game/crypto";
 import {
   devAdvanceDays,
@@ -187,7 +189,7 @@ async function seedSettledGame(input: {
   for (let dayIndex = 0; dayIndex < (input.mediaDays ?? 0); dayIndex += 1) {
     for (const [memberId, seat] of [[input.challenger, 0], [input.opponent, 1]] as const) {
       const id = randomUUID();
-      const mediaKey = `game/${memberId}/${randomUUID()}.jpg`;
+      const mediaKey = `game/${memberId}/${randomBytes(32).toString("hex")}.jpg`;
       entryIds.push(id);
       mediaKeys.push(mediaKey);
       await getPrisma().gameEntry.create({ data: {
@@ -1221,6 +1223,42 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     const otherSide = await readHistory(ava);
     expect(otherSide.people).toHaveLength(1);
     expect(otherSide.people[0]).toMatchObject({ memberId: viewer, record: { won: 1, lost: 2, tied: 1 } });
+  });
+
+  it("signs only authorized history previews, excluding reported, withdrawn, blocked and non-player content", async () => {
+    const viewer = await member("DeliveryViewer", "UTC");
+    const opponent = await member("DeliveryOpponent", "UTC");
+    const outsider = await member("DeliveryOutsider", "UTC");
+    const game = await seedSettledGame({ challenger: viewer, opponent, settledAt: new Date(), mediaDays: 4 });
+    await getPrisma().gameReport.create({ data: {
+      id: randomUUID(), reporterMemberId: viewer, reportedMemberId: opponent,
+      gameId: game.gameId, entryId: game.entryIds[1], about: "post", reason: "other",
+    } });
+    await getPrisma().gameEntry.update({ where: { id: game.entryIds[3] }, data: { withdrawnAt: new Date() } });
+    vi.spyOn(gameMedia, "servesSignedGameMedia").mockReturnValue(true);
+    const delivery = { url: "https://imagedelivery.net/account/image/gameavatar?exp=9999999999&sig=synthetic", expiresAt: "2030-01-01T00:00:00.000Z" };
+    const sign = vi.spyOn(gameMedia, "gameMediaDelivery").mockResolvedValue(delivery);
+    const history = await readHistory(viewer);
+    const signed = await withHistoryPhotoDeliveries(history, viewer);
+    expect(signed.people[0].games[0].previews).toHaveLength(6);
+    expect(signed.people[0].games[0].previews.every((preview) => preview.delivery?.url === delivery.url)).toBe(true);
+    expect(sign).toHaveBeenCalledTimes(6);
+    expect(sign).not.toHaveBeenCalledWith(game.mediaKeys[1], "avatar");
+    expect(sign).not.toHaveBeenCalledWith(game.mediaKeys[3], "avatar");
+    sign.mockClear();
+    expect(await withHistoryPhotoDeliveries(await readHistory(outsider), outsider)).toEqual({ people: [] });
+    await withHistoryPhotoDeliveries(history, outsider);
+    expect(sign).not.toHaveBeenCalled();
+
+    await ok(opponent, { memberId: viewer, type: "block" });
+    expect(await withHistoryPhotoDeliveries(await readHistory(viewer), viewer)).toEqual({ people: [] });
+    expect(sign).not.toHaveBeenCalled();
+    // If a block lands after history assembly, media authorization still hides
+    // the opponent's pictures. The media route permits one's own uploads.
+    const changed = await withHistoryPhotoDeliveries(history, viewer);
+    expect(changed.people[0].games[0].previews.filter((preview) => !preview.mine)
+      .every((preview) => !preview.delivery)).toBe(true);
+    expect(sign.mock.calls.every(([key]) => key.startsWith(`game/${viewer}/`))).toBe(true);
   });
 
   it("leaves blocked people and every non-settled status out of history", async () => {
