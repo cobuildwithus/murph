@@ -67,7 +67,7 @@ export async function runDeployWorkerVersionCli(
     dependencies: {
       async deployDirect(input) {
         const retainServingRunner = input.containerRolloutMode === "worker-only";
-        const recovery = readRecoveryVersion(env, retainServingRunner, input.includeSecrets);
+        const recovery = readRecoveryVersion(env, input.includeSecrets);
         // Retaining an image does not attest an older protocol requirement.
         // Worker-only deployments must preserve the same Web consumer floor.
         const admitWeb = () => assertHostedWebProtocolAdmission(env);
@@ -94,13 +94,14 @@ export async function runDeployWorkerVersionCli(
         const assertUploadSource = async (expectedSourceVersionId: string): Promise<void> => {
           const before = await releaseProvider.readRecentWorkerVersionIds(input.workerName);
           if (before[0] !== expectedSourceVersionId
-            || (recovery && (before.length !== 2 || before[1] !== currentVersionId))) {
+            || (expectedSourceVersionId === recovery?.id && (before.length !== 2 || before[1] !== currentVersionId))) {
             throw new Error("Worker inheritance source changed before upload; resolve version drift before retrying.");
           }
         };
         if (recovery) {
           assertRecoveryWorkerVersion({
             currentVersion, currentVersionId,
+            currentDeploymentCreatedOn: current!.created_on,
             recoveryVersion: await releaseProvider.readWorkerVersion(input.workerName, recovery.id),
             recoveryVersionId: recovery.id, recoveryVersionTag: recovery.tag,
           });
@@ -266,7 +267,7 @@ export async function runDeployWorkerVersionCli(
   return result;
 }
 
-function readRecoveryVersion(source: EnvSource, workerOnly: boolean, includeSecrets: boolean): { id: string; tag: string } | null {
+function readRecoveryVersion(source: EnvSource, includeSecrets: boolean): { id: string; tag: string } | null {
   const id = source.HOSTED_EXECUTION_RECOVERY_VERSION_ID;
   const tag = source.HOSTED_EXECUTION_RECOVERY_VERSION_TAG;
   if (!id && !tag) return null;
@@ -274,8 +275,8 @@ function readRecoveryVersion(source: EnvSource, workerOnly: boolean, includeSecr
     || !tag.trim() || tag !== tag.trim()) {
     throw new Error("Worker recovery requires an exact full version UUID and nonempty version tag together.");
   }
-  if (!workerOnly || !includeSecrets) {
-    throw new Error("Worker recovery requires worker-only rollout with synchronized secrets.");
+  if (!includeSecrets) {
+    throw new Error("Worker recovery requires synchronized secrets.");
   }
   return { id, tag };
 }

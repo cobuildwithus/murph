@@ -39,6 +39,7 @@ export function hasRetiredInferenceSecrets(version: unknown, versionId: string):
 export function assertRecoveryWorkerVersion(input: {
   currentVersion: unknown;
   currentVersionId: string;
+  currentDeploymentCreatedOn: string;
   recoveryVersion: unknown;
   recoveryVersionId: string;
   recoveryVersionTag: string;
@@ -52,6 +53,14 @@ export function assertRecoveryWorkerVersion(input: {
   }
   if (current.size !== recovery.size || [...current].some(([name, type]) => recovery.get(name) !== type)) {
     throw new Error("Recovery Worker secret inventory differs from the current Worker secrets.");
+  }
+  // A version newer than the latest deployment cannot have served traffic.
+  // Merely being inactive also describes a previously activated rollback target.
+  const createdOn = isObjectRecord(input.recoveryVersion.metadata) ? input.recoveryVersion.metadata.created_on : undefined;
+  const uploadedAt = typeof createdOn === "string" ? Date.parse(createdOn) : NaN;
+  const deployedAt = Date.parse(input.currentDeploymentCreatedOn);
+  if (!Number.isFinite(uploadedAt) || !Number.isFinite(deployedAt) || uploadedAt <= deployedAt) {
+    throw new Error("Recovery Worker must have been uploaded after the current deployment; never-activated provenance is unproven.");
   }
 }
 

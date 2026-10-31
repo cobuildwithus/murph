@@ -1730,21 +1730,26 @@ Local serialization and mocked API tests do not replace protected external
 acceptance. Run cleanup through this deployment owner without separate local
 secret deletion or promotion.
 
-When an operator has identified a trusted failed upload that cannot be removed,
+When an operator has identified their trusted, never-activated failed upload,
 the protected deployment may explicitly use it as the secret source for a fresh
-worker-only upload. Set both `HOSTED_EXECUTION_RECOVERY_VERSION_ID` (the complete
-UUID) and `HOSTED_EXECUTION_RECOVERY_VERSION_TAG` (its exact tag), together with
-`HOSTED_EXECUTION_CONTAINER_ROLLOUT=worker-only` and synchronized secret inclusion.
+upload with a gradual, immediate, or worker-only rollout. Set both
+`HOSTED_EXECUTION_RECOVERY_VERSION_ID` (the complete UUID) and `HOSTED_EXECUTION_RECOVERY_VERSION_TAG` (its exact tag), together with
+synchronized secret inclusion. Select gradual or immediate to ship runner changes;
+worker-only still retains the serving images. No version deletion is needed.
 Both recovery inputs empty means ordinary deployment; partial, padded or malformed
 values fail closed. Forward these inputs only to the protected apply step.
 
 Recovery requires one live version serving 100%, a distinct named inactive version
 with the exact tag and complete live secret name/type inventory, and the raw
-latest pair inactive/live. The pair is checked before image/lifecycle preparation
+latest pair inactive/live. Its creation time must be strictly after the current
+deployment's creation time, proving it has never been activated; missing timestamps
+or a later rollback fail closed. The pair is checked before image/lifecycle preparation
 and again immediately before upload. The original live metadata still owns all
 runner preparation and final expected-secret calculations. Only the fresh upload's
-inheritance source changes; its history pair must be fresh/inactive, and all native
-PATCH, inventory, live identity, smoke and activation gates remain required.
+inheritance source changes; its history pair must be fresh/inactive. Full runner
+rollouts then use the ordinary fresh promotion/stage pair, not the recovery/live
+pair. All native PATCH, inventory, live identity, smoke and activation gates
+remain required.
 Only the newly verified version can appear in the deployment receipt or activation.
 
 The operator must establish that the named upload is their trusted failed attempt.
@@ -1752,6 +1757,11 @@ Matching names/types cannot prove opaque secret values are equal, and no secret
 values are fetched for this check. The current synchronized payload applies its
 rotations; optional inherited secrets remain subject to that explicit trust.
 This is not automatic discovery, retry or activation of the old candidate.
+After these changes reach both protected main branches, dispatch the private
+deployment again with the selected UUID/tag, `deploy_worker=true`,
+`sync_worker_secrets=true`, and the required rollout mode. A rerun without recovery
+inputs still rejects an inactive latest version. A dispatch resolves public main
+anew; rerunning an older workflow does not acquire updated workflow policy.
 Further drift or another failed upload requires a new deliberate selection;
 protected serialization remains necessary, with no atomic CAS guarantee.
 

@@ -27,11 +27,24 @@ const baseline = { id: "baseline-version", resources: { bindings: [...retained, 
 afterEach(async () => { await Promise.all(directories.splice(0).map(directory => rm(directory, { recursive: true, force: true }))); });
 
 describe("known inactive Worker recovery", () => {
-  const recovery = { ...baseline, id: "recovery-version", annotations: { "workers/tag": "known-inactive-tag" } };
+  const recovery = { ...baseline, id: "recovery-version", annotations: { "workers/tag": "known-inactive-tag" }, metadata: { created_on: "2026-01-02T00:00:00Z" } };
   const input = {
     currentVersion: baseline, currentVersionId: baseline.id,
+    currentDeploymentCreatedOn: "2026-01-01T00:00:00Z",
     recoveryVersion: recovery, recoveryVersionId: recovery.id, recoveryVersionTag: "known-inactive-tag",
   };
+
+  it.each([undefined, null, {}, { created_on: "invalid" }, { created_on: 123 },
+    { created_on: "2025-12-31T00:00:00Z" }, { created_on: "2026-01-01T00:00:00Z" },
+  ])("rejects unproven or previously activated recovery chronology %#", metadata => {
+    expect(() => assertRecoveryWorkerVersion({ ...input, recoveryVersion: { ...recovery, metadata } }))
+      .toThrow("never-activated provenance is unproven");
+  });
+
+  it.each(["", "invalid", "2026-01-03T00:00:00Z"])("rejects missing deployment chronology or a later rollback %#", currentDeploymentCreatedOn => {
+    expect(() => assertRecoveryWorkerVersion({ ...input, currentDeploymentCreatedOn }))
+      .toThrow("never-activated provenance is unproven");
+  });
 
   it("matches all optional, crypto, and retired secret names and types without reading values or unrelated config", () => {
     const bindings = [...retained, ...retired].reverse().map(binding => ({

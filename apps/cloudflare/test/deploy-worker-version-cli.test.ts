@@ -223,7 +223,7 @@ describe("runDeployWorkerVersionCli", () => {
     imageMocks.prepareHostedContainerDeployImage.mockReset();
     imageMocks.prepareHostedContainerDeployImage.mockImplementation(async ({ configPath }) => configPath);
     wranglerMocks.runWranglerJson.mockReset();
-    wranglerMocks.runWranglerJson.mockImplementation(async () => JSON.stringify({ versions: [{ percentage: 100, version_id: syntheticLiveVersion() }] }));
+    wranglerMocks.runWranglerJson.mockImplementation(async () => JSON.stringify({ created_on: "2026-01-01T00:00:00Z", versions: [{ percentage: 100, version_id: syntheticLiveVersion() }] }));
     wranglerMocks.runWranglerLogged.mockReset();
     wranglerMocks.runWranglerLoggedCaptured.mockReset();
     wranglerMocks.runWranglerLoggedCaptured.mockResolvedValue({ stderr: "", stdout: "deploy" });
@@ -313,9 +313,9 @@ describe("runDeployWorkerVersionCli", () => {
   });
 
   it.each([
-    ["immediate", true], ["gradual", true], ["worker-only", false],
+    ["immediate", false], ["gradual", false], ["worker-only", false],
   ] as const)("rejects recovery with mode=%s and synchronized secrets=%s", async (mode, includeSecrets) => {
-    await expect(syntheticDeployment(mode, recoveryEnv, includeSecrets)).rejects.toThrow("worker-only rollout with synchronized secrets");
+    await expect(syntheticDeployment(mode, recoveryEnv, includeSecrets)).rejects.toThrow("requires synchronized secrets");
     expect(releaseMocks.readWorkerVersion).not.toHaveBeenCalled();
     expect(wranglerMocks.runWranglerLogged).not.toHaveBeenCalled();
   });
@@ -359,7 +359,7 @@ describe("runDeployWorkerVersionCli", () => {
       }
       return ids;
     });
-    if (boundary === "live") wranglerMocks.runWranglerJson.mockResolvedValueOnce(JSON.stringify({ versions: [{ percentage: 100, version_id: "version-direct" }] }))
+    if (boundary === "live") wranglerMocks.runWranglerJson.mockResolvedValueOnce(JSON.stringify({ created_on: "2026-01-01T00:00:00Z", versions: [{ percentage: 100, version_id: "version-direct" }] }))
       .mockResolvedValue(JSON.stringify({ versions: [{ percentage: 100, version_id: "different-live-version" }] }));
     await expect(syntheticDeployment("worker-only", recoveryEnv, true)).rejects.toThrow(/changed|history/);
     expect(wranglerMocks.runWranglerLoggedCaptured).toHaveBeenCalledTimes(["initial", "pre-upload", "live"].includes(boundary) ? 0 : 1);
@@ -399,6 +399,52 @@ describe("runDeployWorkerVersionCli", () => {
       containerReleaseReceipt: { workerVersionId: "patched-version-1", versionTag: "fresh-release" },
       finalDeploymentVersions: [{ percentage: 100, versionId: "patched-version-1" }],
     });
+  });
+
+  it.each(["gradual", "immediate"] as const)("recovers a failed pre-activation upload with a fresh full %s rollout", async mode => {
+    const currentVersion = { id: "version-direct", resources: { bindings: [{ name: "OPENAI_API_KEY", type: "secret_text" }] } };
+    releaseMocks.readWorkerVersion.mockImplementation(async (_worker, id) => ({
+      ...currentVersion, id, annotations: { "workers/tag": "synthetic" }, metadata: { created_on: "2026-01-02T00:00:00Z" },
+    }));
+    fileMocks.readFile.mockImplementation(async filePath => String(filePath).endsWith("secrets.json")
+      ? JSON.stringify({ OPENAI_API_KEY: "synthetic-rotation" }) : "{}");
+    const serving = { name: renderedContainers[0]!.applicationName, className: "RunnerContainer",
+      applicationId: "serving-app", namespaceId: "serving-namespace", specification: { max_instances: 4 } };
+    releaseMocks.stageHostedRunnerRelease.mockImplementation(async ({ configPath }) => ({
+      configPath, promotionConfigPath: `${configPath}.promote`, activeApplicationName: serving.name,
+      workerOnly: false, applications: [serving], retirements: [],
+    }));
+    receiptMocks.parseWranglerWorkerVersionId.mockReturnValueOnce(recoveryVersionId);
+    receiptMocks.readCloudflareContainerApplicationIdentities.mockRejectedValueOnce(new Error("provider HTTP 500"));
+
+    await expect(syntheticDeployment(mode, {}, true)).rejects.toThrow("provider HTTP 500");
+    expect(wranglerMocks.runWranglerLoggedCaptured).toHaveBeenCalledOnce();
+    expect(syntheticLiveVersion()).toBe("version-direct");
+    // An ordinary rerun still refuses the leftover; explicit selection supplies provenance.
+    await expect(syntheticDeployment(mode, {}, true)).rejects.toThrow("inheritance source changed before upload");
+    expect(wranglerMocks.runWranglerLoggedCaptured).toHaveBeenCalledOnce();
+
+    await syntheticDeployment(mode, { ...recoveryEnv, HOSTED_EXECUTION_RECOVERY_VERSION_TAG: "synthetic" }, true);
+    expect(imageMocks.prepareHostedContainerDeployImage).toHaveBeenLastCalledWith(expect.objectContaining({
+      release: expect.objectContaining({ currentVersion: expect.objectContaining(currentVersion), releaseSha: "1".repeat(40) }),
+    }));
+    expect(releaseMocks.stageHostedRunnerRelease).toHaveBeenLastCalledWith(expect.objectContaining({
+      currentVersion: expect.objectContaining(currentVersion), currentVersionId: "version-direct", retainServingRunner: false,
+    }));
+    expect(releaseMocks.admitApplication).toHaveBeenCalledExactlyOnceWith({ ...serving,
+      rolloutStepPercentage: mode === "gradual" ? [10, 25, 50, 100] : 100,
+    });
+    expect(releaseMocks.runSmokeHostedDeploy).toHaveBeenCalledTimes(2);
+    expect(wranglerMocks.runWranglerLoggedCaptured.mock.calls.map(([args]) => args[3]))
+      .toEqual(["/tmp/config.jsonc", "/tmp/config.jsonc", "/tmp/config.jsonc.promote"]);
+    for (const [args] of wranglerMocks.runWranglerLoggedCaptured.mock.calls) expect(args).toContain("--secrets-file");
+    expect(wranglerMocks.runWranglerLogged.mock.calls.filter(([args]) => args[0] === "versions").map(([args]) => args[2]))
+      .toEqual(["uploaded-version-2@100%", "uploaded-version-3@100%"]);
+    expect(releaseMocks.readRecentWorkerVersionIds.mock.settledResults.slice(-5).map(result => result.value)).toEqual([
+      [recoveryVersionId, "version-direct"], [recoveryVersionId, "version-direct"],
+      ["uploaded-version-2", recoveryVersionId], ["uploaded-version-2", recoveryVersionId],
+      ["uploaded-version-3", "uploaded-version-2"],
+    ]);
   });
 
   it.each([
@@ -1051,7 +1097,7 @@ function configureRecoveryUpload() {
   const retired = [{ name: "VENICE_API_KEY", type: "secret_text" }, { name: "VERCEL_AI_API_KEY", type: "secret_text" }];
   const currentVersion = { id: "version-direct", resources: { bindings: [...retained, ...retired] } };
   releaseMocks.readWorkerVersion.mockImplementation(async (_worker, id) => id === "version-direct" ? currentVersion : {
-    id, annotations: { "workers/tag": "trusted-upload" }, resources: { bindings: [
+    id, annotations: { "workers/tag": "trusted-upload" }, metadata: { created_on: "2026-01-02T00:00:00Z" }, resources: { bindings: [
       ...retained, ...(id === "patched-version-1" ? [] : retired),
       ...(id === recoveryVersionId ? [] : [{ name: "NEW_SECRET", type: "secret_text" }]),
     ] },
