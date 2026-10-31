@@ -4301,7 +4301,8 @@ test('sendAssistantNotificationLocal rejects an empty context handoff response b
 })
 
 test('game recap notifications deliver and persist the accepted chat line exactly', async () => {
-  const savedChatLine = 'Ava won the mat jurisdiction case, 3–2.'
+  const savedChatLine = '  Ava won the mat jurisdiction case, 3–2.  \nWatch the recap: https://recaps.murph.test/recap/game_synthetic'
+  const beforeDelivery = vi.fn()
   const providerResult = createProviderResult({
     response: JSON.stringify({
       kind: 'send_message',
@@ -4326,6 +4327,7 @@ test('game recap notifications deliver and persist the accepted chat line exactl
     })
 
   const result = await sendAssistantNotificationLocal({
+    beforeDelivery,
     channel: 'linq',
     deliveryIdempotencyKey: 'game-recap:game_synthetic',
     deliveryTarget: 'synthetic-game-thread',
@@ -4352,6 +4354,7 @@ test('game recap notifications deliver and persist the accepted chat line exactl
     privateSummary: 'Saved game recap chat line.',
     text: savedChatLine,
   })
+  expect(beforeDelivery).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ response: savedChatLine, decision: expect.objectContaining({ text: savedChatLine }) }))
   expect(result.response).toBe(savedChatLine)
   expect(deliverMessage).toHaveBeenCalledWith(expect.objectContaining({
     message: savedChatLine,

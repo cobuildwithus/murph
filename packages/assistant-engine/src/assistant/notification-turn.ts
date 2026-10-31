@@ -1175,9 +1175,11 @@ function resolveAssistantGameRecapPresentation(
   savedChatLine: string | null,
 ): AssistantNotificationPresentation {
   if (savedChatLine === null) return generated
+  // Validate presence without trimming the server's accepted delivery text.
+  normalizeRequiredText(savedChatLine, 'saved game recap chat line')
   return {
-    responseText: normalizeRequiredText(savedChatLine, 'saved game recap chat line'),
-    transcriptText: normalizeRequiredText(savedChatLine, 'saved game recap transcript line'),
+    responseText: savedChatLine,
+    transcriptText: savedChatLine,
   }
 }
 
