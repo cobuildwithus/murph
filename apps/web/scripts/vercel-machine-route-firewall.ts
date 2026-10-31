@@ -110,7 +110,7 @@ export function evaluateMachineRouteFirewall(config: unknown, routes: readonly P
   const known = new Set(["rules", "ips", "crs", "managedRules", "rulesets", "firewallEnabled", "botIdEnabled",
     "attackModeEnabled", "id", "ownerId", "projectKey", "version", "updatedAt", "changes", "logHeaders", "conditions"]);
   for (const key of Object.keys(config)) {
-    if (!known.has(key) && config[key] != null && config[key] !== false) report("config:unknown-setting");
+    if (!known.has(key) && config[key] != null && config[key] !== false) report(`config:unknown-setting:${key}`);
   }
   return conflicts;
 }

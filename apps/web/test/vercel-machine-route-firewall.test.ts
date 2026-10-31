@@ -100,6 +100,8 @@ describe("conservative firewall overlap", () => {
       { rulesets: [rule([])] }, { attackModeEnabled: true }, { botIdEnabled: true },
       { newMitigation: { active: true } }, { rules: null }, { rules: [{}] },
     ]) expect(evaluateMachineRouteFirewall({ ...base, ...extra }, routes).length).toBeGreaterThan(0);
+    expect(evaluateMachineRouteFirewall({ ...base, newMitigation: { active: true } }, routes)[0]?.ruleId)
+      .toBe("config:unknown-setting:newMitigation");
     expect(evaluateMachineRouteFirewall({}, routes)).toHaveLength(3);
     expect(evaluateMachineRouteFirewall({ ...base, firewallEnabled: false }, routes)).toEqual([]);
     expect(evaluateMachineRouteFirewall({ ...base, firewallEnabled: false, attackModeEnabled: true }, routes)).toHaveLength(3);
