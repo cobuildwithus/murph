@@ -1517,7 +1517,9 @@ export async function sealGameRecap(input: {
     await lockGamePair(tx, input.playerMemberIds[0]!, input.playerMemberIds[1]!);
     const receipts = await tx.hostedLinqDelivery.count({ where: { idempotencyKey: key, source: "game_lifecycle", sourceRef: input.gameId, template: "game_recap", status: "generation_queued", payloadOwnerMemberId: input.containerMemberId } });
     if (receipts !== 1) return null;
-    const current = await tx.game.findFirst({ where: { id: input.gameId, chatContainerMemberId: input.containerMemberId, status: "settled" }, select: { id: true, recapEncrypted: true, players: { select: { memberId: true }, take: 3 } } });
+    // Account deletion clears the recap under this row lock, so the roster is re-read after it.
+    await tx.$queryRaw`SELECT id FROM game WHERE id = ${input.gameId} FOR UPDATE`;
+    const current = await tx.game.findFirst({ where: { id: input.gameId, chatContainerMemberId: input.containerMemberId, status: "settled", departedPlayer: { equals: Prisma.DbNull } }, select: { id: true, recapEncrypted: true, players: { select: { memberId: true }, take: 3 } } });
     if (!current || !sameGamePlayers(current.players.map((player) => player.memberId), input.playerMemberIds)) return null;
     const newest = await tx.game.findFirst({ where: { ...gamePairWhere(input.playerMemberIds), status: { in: ["negotiating", "live", "settled"] } }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], select: { id: true } });
     if (newest?.id !== input.gameId) return null;

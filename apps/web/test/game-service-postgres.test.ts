@@ -299,6 +299,47 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     expect((await readGame(gameId, ava))?.recap).toEqual(canonical);
   });
 
+  it("refuses a recap that waited on a player's account deletion", async () => {
+    const ava = await member("DepartAva", "UTC"), leo = await member("DepartLeo", "UTC");
+    const room = `hbm_gametest_room_${randomUUID().slice(0, 8)}`;
+    memberIds.push(room);
+    await getPrisma().hostedMember.create({ data: { id: room, billingStatus: "active" } });
+    const { gameId } = await startGame(ava, leo);
+    await getPrisma().game.update({ where: { id: gameId }, data: { chatContainerMemberId: room } });
+    await devStartNow(gameId, ava);
+    await devSettleNow(gameId, ava);
+    const eventId = gameChatLifecycleEventId(gameId, "recap");
+    await markGameChatGenerationQueuedTx(eventId, getPrisma(), room);
+    const recap = { pages: [{ background: "paper" as const, blocks: [{ kind: "headline" as const, text: "A departing week" }] }],
+      scoreLine: "DepartAva kept the streak.", chatLine: "The week is in." };
+    let holdDeletion!: () => void;
+    const held = new Promise<void>((resolve) => { holdDeletion = resolve; });
+    let deletionLocked!: () => void;
+    const locked = new Promise<void>((resolve) => { deletionLocked = resolve; });
+    // Mirrors applyGameAccountDeletionTx: the kept game is marked departed and its recap cleared under the row lock.
+    const deletion = getPrisma().$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM game WHERE id = ${gameId} FOR UPDATE`;
+      await tx.game.update({ where: { id: gameId }, data: { recapEncrypted: null,
+        departedPlayer: toPrismaJsonObject({ v: 1, at: new Date().toISOString(), nameEncrypted: "synthetic", seat: 1, viewerMemberId: ava }) } });
+      deletionLocked();
+      await held;
+    }, { timeout: 20_000 });
+    await locked;
+    const sealing = sealGameRecap({ beforeMutationTx: async () => {}, containerMemberId: room, eventId, gameId, playerMemberIds: [ava, leo], recap });
+    const deadline = Date.now() + 5_000;
+    while (Date.now() < deadline) {
+      const [waiting] = await getPrisma().$queryRaw<Array<{ count: bigint }>>`
+        SELECT count(*) AS count FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock'`;
+      if ((waiting?.count ?? 0n) > 0n) break;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    holdDeletion();
+    await deletion;
+    expect(await sealing).toBeNull();
+    const stored = await getPrisma().game.findUniqueOrThrow({ where: { id: gameId }, select: { recapEncrypted: true } });
+    expect(stored.recapEncrypted).toBeNull();
+  });
+
   it("caps concurrent retries and retakes per recipient and game, then allows the next recipient day", async () => {
     const poster = await member("Poster", "America/New_York");
     const recipient = await member("Recipient", "America/New_York");
