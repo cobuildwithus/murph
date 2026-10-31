@@ -444,6 +444,7 @@ export async function executeHostedAssistantNotificationWake(input: {
         (entry) => {
           redactedLogEntries.push(entry);
         },
+        input.groupToolPort ?? null,
       ),
       ...await resolveHostedConnectedChannelGreetingPolicy(input),
     });
@@ -775,6 +776,7 @@ function requireMemberActivationSignupWelcome(
 function scopeGameHostExecutionContext(
   wake: HostedExecutionAssistantNotificationRequestedWake,
   executionContext: AssistantExecutionContext,
+  groupToolPort: HostedRuntimeGroupToolPort | null,
 ): AssistantExecutionContext {
   const policy = wake.notification.responsePolicy;
   if (policy?.kind !== "require_game_recap" && policy?.kind !== "game_missed_check_in") return executionContext;
@@ -788,12 +790,15 @@ function scopeGameHostExecutionContext(
     && wake.eventId !== `game-missed:${policy.gameId}:${policy.memberId}:${policy.firstMissedDate}`) {
     throw new TypeError("Game check-in notification authority is invalid.");
   }
+  if (policy.kind === "require_game_recap" && !groupToolPort) {
+    throw new TypeError("Game recap requires its trusted control port.");
+  }
   return executionContext.hosted ? {
     ...executionContext,
     hosted: {
       ...executionContext.hosted,
       ...(policy.kind === "require_game_recap"
-        ? { gameRecapScope: { gameId: policy.gameId, eventId: policy.eventId, pairFingerprint: policy.pairFingerprint } }
+        ? { gameRecapScope: { gameId: policy.gameId, eventId: policy.eventId, pairFingerprint: policy.pairFingerprint }, groupTool: groupToolPort }
         : { gameMissedCheckInScope: policy }),
     },
   } : executionContext;
@@ -808,6 +813,7 @@ function buildAssistantNotificationInput(
   sourceMailboxItemId: string | null,
   turnEnvironment: AssistantTurnEnvironment | null,
   recordLogEntry: (entry: HostedExecutionRedactedLogEntry) => void,
+  groupToolPort: HostedRuntimeGroupToolPort | null,
 ): AssistantNotificationInput {
   const privateAssistantAskCompletion =
     wake.notification.privateAssistantAskCompletion ?? null;
@@ -843,7 +849,7 @@ function buildAssistantNotificationInput(
         }
       }
     : null;
-  const scopedExecutionContext = scopeGameHostExecutionContext(wake, executionContext);
+  const scopedExecutionContext = scopeGameHostExecutionContext(wake, executionContext, groupToolPort);
   const notificationInput = buildAssistantNotificationInputFromRoute({
     assistantTurnOrdinal: "assistant-notification:1",
     ...(authorizeOperatorTask
