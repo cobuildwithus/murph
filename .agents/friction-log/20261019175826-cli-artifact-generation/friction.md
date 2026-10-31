@@ -1,6 +1,7 @@
 ---
 title: 'CLI artifact generation hides shared-host build wait progress'
 severity: 'minor'
+issue: 'cobuildwithus/murph#4222'
 ---
 
 ## Expected Behavior

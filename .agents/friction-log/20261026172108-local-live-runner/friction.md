@@ -1,6 +1,7 @@
 ---
 title: 'Local live runner defaults to a binary rejected by canonical journeys'
 severity: 'minor'
+issue: 'cobuildwithus/murph#4385'
 ---
 
 ## Expected Behavior

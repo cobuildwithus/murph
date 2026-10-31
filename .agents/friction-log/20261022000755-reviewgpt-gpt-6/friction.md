@@ -1,6 +1,7 @@
 ---
 title: 'ReviewGPT GPT-6 Pro selection rejects the GPT-6 Power picker'
 severity: 'minor'
+issue: 'cobuildwithus/murph#4314'
 ---
 
 ## Expected Behavior
