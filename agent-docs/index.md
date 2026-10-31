@@ -1570,4 +1570,4 @@ Quiet Linq setup reminders and automated first-contact admission are owned by
 `../ARCHITECTURE.md`; local implementation and proof are recorded in
 [the bounded fix](exec-plans/completed/2026-10-25-linq-quiet-signup-reminder.md).
 
-Machine Web route firewall barrier detection and local proof: [implementation plan](exec-plans/active/2026-10-31-firewall-machine-route-guard.md). The durable contract is owned by `apps/web/README.md` under public route firewall verification.
+Machine Web route firewall barrier detection and local proof: [implementation plan](exec-plans/completed/2026-10-31-firewall-machine-route-guard.md). The durable contract is owned by `apps/web/README.md` under public route firewall verification.
