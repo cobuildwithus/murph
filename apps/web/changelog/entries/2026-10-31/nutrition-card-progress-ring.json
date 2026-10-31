@@ -1,0 +1,20 @@
+{
+  "publishedOn": "2026-10-31",
+  "order": 100,
+  "item": {
+    "id": "nutrition-card-progress-ring",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Nutrition cards show progress toward your targets again",
+    "summary": "If you have nutrition targets, the card you get after logging a meal shows the progress ring and target colors again.",
+    "details": "Some cards sent after a meal showed an empty ring and gray numbers even though every meal had complete totals. Murph now works out on-target, under, and over the same way every time.",
+    "relevanceTags": [
+      "nutrition",
+      "imessage",
+      "reliability"
+    ],
+    "sourcePullRequests": [
+      4404
+    ]
+  }
+}
