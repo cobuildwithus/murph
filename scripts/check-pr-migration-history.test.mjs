@@ -81,6 +81,18 @@ test("ignores unrelated base advances but rejects a new migration path already m
   assert.deepEqual(findChangedBaseMigrations({ ...f, baseSha, headSha: f.commit() }), [addition]);
 });
 
+test("ignores a migration inherited unchanged from a squash-merged parent branch", (t) => {
+  const f = fixture(t);
+  f.write(addition);
+  f.commit();
+  f.write("note.txt", "Stacked branch change\n");
+  const headSha = f.commit();
+  f.git("checkout", "--detach", f.baseSha);
+  f.write(addition);
+  const baseSha = f.commit();
+  assert.deepEqual(findChangedBaseMigrations({ ...f, baseSha, headSha }), []);
+});
+
 test("fails closed for missing or unavailable commit SHAs", (t) => {
   const f = fixture(t);
   assert.throws(() => findChangedBaseMigrations({ ...f }), /requires full/u);
