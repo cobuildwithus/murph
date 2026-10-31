@@ -116,7 +116,7 @@ describe('game recap dynamic contract', () => {
     expect(MURPH_WRITE_RECAP_TOOL.inputSchema.properties).not.toHaveProperty('gameId')
     const recapPort = vi.fn(async (request) => request.action === 'read_game'
       ? { action: 'read_game' as const, result: { status: 'ok' as const, recapGame: { id: 'game_bound' } } }
-      : { action: 'write_recap' as const, result: { status: 'ok' as const, recapOutcome: 'ok: saved. The players will see this recap.', recap, chatLine: recap.chatLine } })
+      : { action: 'write_recap' as const, result: { status: 'ok' as const, recapOutcome: 'ok: saved. The players will see this recap.', recap, chatLine: `${recap.chatLine}\nWatch the recap: https://recaps.murph.test/recap/game_bound` } })
     const savedChatLines: string[] = []
     const recapContext = { ...context(), groupTool: { request: recapPort }, currentUserActionScope: () => null,
       readGameLore: async () => 'Chat line used: An earlier line lived here.',
@@ -134,7 +134,7 @@ describe('game recap dynamic contract', () => {
       { action: 'write_recap', origin: { kind: 'game_recap', gameId: 'game_bound', eventId: 'game-recap:game_bound' }, recap, priorChatLines: ['An earlier line lived here.'] },
     ])
     for (const request of requests) expect(parseHostedRuntimeGroupToolRequest(request)).toEqual(request)
-    expect(savedChatLines).toEqual([recap.chatLine])
+    expect(savedChatLines).toEqual([`${recap.chatLine}\nWatch the recap: https://recaps.murph.test/recap/game_bound`])
   })
   it('prepares lore only in Linq group rooms and never fails the turn', async () => {
     const lore = { action: 'read_game' as const, result: { status: 'ok' as const, state: { games: [] }, loreFingerprint: 'a'.repeat(32), loreGuidance: 'Keep the lore.' } }

@@ -45732,9 +45732,9 @@ describeRealCodex('real Codex game recap e2e', () => {
                 rejectedWrites += 1
                 return { action: 'write_recap', result: { status: 'rejected', recapOutcome: `Not saved. Fix these and call write_recap again:\n- ${corrections.join('\n- ')}` } }
               }
-              if (saved[0]) return { action: 'write_recap', result: { status: 'ok', recapOutcome: 'ok: saved. The players will see this recap.', recap: saved[0], chatLine: saved[0].chatLine } }
+              if (saved[0]) return { action: 'write_recap', result: { status: 'ok', recapOutcome: 'ok: saved. The players will see this recap.', recap: saved[0], chatLine: `${saved[0].chatLine}\nWatch the recap: https://recaps.murph.test/recap/game_recap_synthetic` } }
               saved.push(request.recap)
-              return { action: 'write_recap', result: { status: 'ok', recapOutcome: 'ok: saved. The players will see this recap.', recap: request.recap, chatLine: request.recap.chatLine } }
+              return { action: 'write_recap', result: { status: 'ok', recapOutcome: 'ok: saved. The players will see this recap.', recap: request.recap, chatLine: `${request.recap.chatLine}\nWatch the recap: https://recaps.murph.test/recap/game_recap_synthetic` } }
             }
             throw new Error('The recap turn authorizes only read_game and write_recap.')
           } },
@@ -45761,10 +45761,14 @@ describeRealCodex('real Codex game recap e2e', () => {
       expect(result.decision.kind).toBe('send_message')
       expect(result.deliveryOutcome?.kind).toBe('queued')
       expect(intents).toHaveLength(1)
-      expect(result.response).toBe(saved[0]?.chatLine)
-      expect(result.response).not.toMatch(/https?:\/\//iu)
-      expect(result.response?.length).toBeLessThan(160)
-      expect(await readFile(path.join(workingDirectory, 'games', 'lore-0123456789abcdef0123456789abcdef.md'), 'utf8')).toContain(`Chat line used: ${saved[0]?.chatLine}`)
+      expect(result.response).toBe(`${saved[0]?.chatLine}\nWatch the recap: https://recaps.murph.test/recap/game_recap_synthetic`)
+      expect(intents[0]?.message).toBe(result.response)
+      expect(saved[0]?.chatLine).not.toMatch(/https?:\/\//iu)
+      expect(saved[0]?.chatLine.length).toBeLessThan(160)
+      const lore = await readFile(path.join(workingDirectory, 'games', 'lore-0123456789abcdef0123456789abcdef.md'), 'utf8')
+      expect(lore).toContain(`Chat line used: ${saved[0]?.chatLine}`)
+      expect(lore).not.toContain('Watch the recap:')
+      expect(lore).not.toContain('https://recaps.murph.test')
     } catch (error) {
       process.stdout.write(`[game-recap failure] ${JSON.stringify({ weekendsOff, actions: calls.map((call) => call.action), scoreLines: calls.flatMap((call) => call.action === 'write_recap' ? [call.recap.scoreLine] : []), seals: saved.length })}\n`)
       throw error
