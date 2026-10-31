@@ -1,3 +1,4 @@
+import { HOSTED_MACHINE_ROUTE_PREFIX } from "@murphai/hosted-execution/routes";
 import { readdir, readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 
@@ -39,6 +40,12 @@ const UNREGISTERED_ROUTE: HostedRunnerWebControlRoute = {
 void UNREGISTERED_ROUTE;
 
 describe("hosted runtime web-control route contract", () => {
+  it("keeps every runner Web-control route inside the firewall-protected prefix", () => {
+    for (const route of Object.values(HOSTED_RUNNER_WEB_CONTROL_ROUTES)) {
+      expect(new URL(route.path, "https://example.invalid").pathname.startsWith(HOSTED_MACHINE_ROUTE_PREFIX)).toBe(true);
+    }
+  });
+
   it("makes the registered route descriptor the only outbound call surface", () => {
     expectTypeOf<"route" extends keyof WebControlRequest ? true : false>()
       .toEqualTypeOf<true>();
