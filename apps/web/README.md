@@ -1002,6 +1002,18 @@ configuration and fails on disabled firewall, order, condition, algorithm,
 key, limit, window, action, or id drift. It never downloads environment values
 or prints the provider token or response body.
 
+The hourly `vercel-machine-route-firewall.yml` scheduled check (also manually
+dispatchable from trusted main) reads active WAF configuration and project
+security with the same three `HOSTED_WEB_VERCEL_*` values; its token needs
+read access to both endpoints. Internal routes, provider ingress and Vercel
+cron targets are derived from the route tree. Temporary firewall barriers on
+machine routes keep the scheduled check red until removed. Live firewall
+state is not a PR gate; GitHub's failed-run notification is the alert. Run
+`pnpm exec tsx --tsconfig apps/web/tsconfig.json apps/web/scripts/check-vercel-machine-routes.ts`
+from the repository root. IP blocks, managed mitigation and attack mode are
+conservative conflicts; earlier bypasses do not suppress them. Platform DDoS
+mitigation outside the project configuration is not observable by this check.
+
 Provider-owned webhook-admin settings:
 
 - `OURA_WEBHOOK_VERIFICATION_TOKEN` when the shared Oura provider config should answer webhook preflight challenges and maintain Oura webhook subscriptions. This secret should stay on the provider-owned config path rather than the generic hosted env surface.

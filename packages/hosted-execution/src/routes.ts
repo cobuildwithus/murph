@@ -1,3 +1,6 @@
+// Every Web route under this prefix is machine ingress protected by the scheduled firewall check.
+export const HOSTED_MACHINE_ROUTE_PREFIX = "/api/internal/";
+
 export const HOSTED_RUNTIME_POLL_TOOL_PATH = "/api/internal/hosted-execution/polls/tool";
 import type { HostedExecutionResolvedLinqDeliveryRoute } from "./contracts.ts";
 
