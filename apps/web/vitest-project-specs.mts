@@ -61,6 +61,7 @@ export const hostedWebVitestProjectSpecs = resolveVitestBucketFiles(
         "public-url.test.ts",
         "route-loading.test.tsx",
         "vercel-config.test.ts",
+        "vercel-machine-route-firewall.test.ts",
       ],
     },
   ],

@@ -34,6 +34,10 @@ describe('assistant nutrition source grounding', () => {
     expect(compact(nutritionStrategy)).toContain('Before creating or changing any saved numeric nutrition target')
     expect(compact(nutritionStrategy)).toContain('After the write, run `vault-cli goal show <goal-id>`')
 
+    // A saved recipe is one batch; a portion is scaled, never asked about or saved bare.
+    expect(food).toContain(
+      'A saved recipe lists one whole batch. For a portion, estimate the batch size from its ingredient amounts, scale to the amount the member describes, and save a marked estimate with all five metrics; never ask the member for the batch size or save the meal without nutrition.',
+    )
     expect(food).toContain(
       'Treat every calorie or macro estimate as two separate questions:',
     )

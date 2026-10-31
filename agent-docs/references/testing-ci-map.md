@@ -89,6 +89,12 @@ callback completion when optional logging fails.
 
 ## Current Repo Checks
 
+Machine Web route firewall coverage runs in Web's `hosted-web-store-config`
+bucket (`vercel-machine-route-firewall.test.ts`), with runner-prefix coverage in
+Cloudflare's existing `web-control-route-contract.test.ts`. These are static
+checks; `vercel-machine-route-firewall.yml` separately reads production hourly
+and on trusted-main manual dispatch, never as a required live-state PR gate.
+
 Background-only checkpoint timing is covered by
 `hosted-runtime-background-checkpoint-timing.test.ts`: settled background
 assistant work reaches a durable checkpoint without a conversation quiet window,

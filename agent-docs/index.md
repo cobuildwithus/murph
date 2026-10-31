@@ -1582,3 +1582,4 @@ Late settled-game recap recovery is tracked in
 [`the local implementation plan`](exec-plans/completed/2026-10-31-game-late-recap.md);
 `product-specs/weekly-game.md` owns the behavior and the Web contract-migration
 README owns the fixed-target postdeploy step.
+Machine Web route firewall barrier detection and local proof: [implementation plan](exec-plans/completed/2026-10-31-firewall-machine-route-guard.md). The durable contract is owned by `apps/web/README.md` under public route firewall verification.
