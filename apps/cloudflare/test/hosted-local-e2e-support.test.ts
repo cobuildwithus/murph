@@ -956,7 +956,6 @@ describe("expectAdvertisedMurphDynamicTools", () => {
       && name !== "murph.group_room_model"
       && name !== "murph.read_game"
       && name !== "murph.update_game"
-      && name !== "murph.write_recap"
       && name !== "murph.game_lore"
       && name !== "murph.game_photo"
       && name !== "murph.imessage_contact"
@@ -986,7 +985,6 @@ describe("expectAdvertisedMurphDynamicTools", () => {
       exerciseRoutineResponseCardAvailable: true,
       groupAvailable: true,
       gamesAvailable: true,
-      gameRecapAvailable: true,
       gamePhotosAvailable: true,
       groupRoomModelAvailable: true,
       imessageContactAvailable: true,
@@ -1016,7 +1014,6 @@ describe("expectAdvertisedMurphDynamicTools", () => {
     expect(allToolNames).toContain("murph.group_room_model");
     expect(allToolNames).toContain("murph.read_game");
     expect(allToolNames).toContain("murph.update_game");
-    expect(allToolNames).toContain("murph.write_recap");
     expect(allToolNames).toContain("murph.game_lore");
     expect(allToolNames).toContain("murph.game_photo");
     expect(allToolNames).toContain("murph.imessage_contact");
