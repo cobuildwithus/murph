@@ -120,3 +120,14 @@ it.skipIf(process.env.MURPH_VERIFY_GAME_INCOMPLETE_SKEW !== "1")("keeps old-runt
     expect(legacy.hostedGameToolResponseSchema.safeParse({ ...payload, result: { ...payload.result, dayOutcome: { date: "2030-04-01", status: "marked_incomplete" } } }).success).toBe(false);
   } finally { await rm(target, { force: true }); }
 });
+
+
+it("accepts legacy bare lines and composed recap messages", () => {
+  const bare = "x".repeat(160);
+  for (const chatLine of [bare, `${bare}\nWatch the recap: https://recaps.murph.test/r/game_synthetic`]) {
+    const payload = { action: "write_recap", result: { status: "ok", chatLine } };
+    expect(hostedGameToolResponseSchema.parse(payload)).toEqual(payload);
+  }
+  // The old response reader rejects a long delivery string; deploy this reader first.
+  expect(hostedGameToolResponseSchema.shape.result.shape.chatLine.unwrap().max(160).safeParse(`${bare}\nWatch the recap: https://recaps.murph.test/r/game_synthetic`).success).toBe(false);
+});

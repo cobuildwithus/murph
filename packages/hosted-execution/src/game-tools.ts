@@ -100,7 +100,8 @@ export const hostedGameToolResponseSchema = z.object({
     recapGame: z.unknown().optional(),
     recapOutcome: z.string().optional(),
     recap: hostedGameRecapSchema.optional(),
-    chatLine: z.string().max(160).optional(),
+    // Exact server-authored delivery text; recap.chatLine and lore stay bare.
+    chatLine: z.string().max(2048).optional(),
     loreGuidance: z.string().optional(),
     loreFingerprint: z.string().optional(),
   }).strict(),
