@@ -729,6 +729,7 @@ describe("handleHostedRuntimeGroupTool", () => {
     expect(HOSTED_RUNTIME_GROUP_TOOL_ACCESS_CLASSIFICATION).toEqual({
       read_game: "participant_aware",
       update_game: "participant_aware",
+      write_recap: "participant_aware",
       game_photo: "participant_aware",
       game_chat_bootstrap: "participant_aware",
       ask: "personal_active",

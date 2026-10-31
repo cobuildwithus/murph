@@ -19,6 +19,7 @@ import {
 import {
   createHostedExecutionPrivateAssistantAskCompletionDeliveryKey,
 } from '@murphai/hosted-execution/assistant-identifiers'
+import { GAME_LIVE_LORE_GUIDANCE } from '@murphai/hosted-execution/runtime-control'
 import { createDefaultLocalAssistantModelTarget } from '@murphai/operator-config/assistant-backend'
 import {
   normalizeAssistantProviderConfig,
@@ -5104,6 +5105,33 @@ describe('assistant Codex turn planning', () => {
     })
     expect(plan.dynamicTools.some(tool => tool.name === 'game_photo')).toBe(available)
     expect((plan.systemPrompt ?? '').includes('a clear current photo relevant to the sender')).toBe(available)
+  })
+
+  it.each([
+    ['direct', true, null, false],
+    ['group without a live game', false, null, false],
+    ['group with a live game', false, GAME_LIVE_LORE_GUIDANCE, true],
+  ] as const)('exposes game lore only for a %s turn', async (_label, threadIsDirect, loreGuidance, available) => {
+    const prepareGameLore = vi.fn(async () => loreGuidance)
+    const plan = await resolveAssistantRouteTurnPlan({
+      acceptedInputItems: [{ id: `ain_${'f'.repeat(32)}`, source: 'assistant-input' }],
+      executionContext: { hosted: { memberId: 'synthetic-lore-member', userEnvKeys: [] } },
+      hostedToolContext: {
+        ...createHostedToolContext(),
+        groupTool: { request: vi.fn() },
+        prepareGameLore,
+      },
+      input: { ...createMessageInput(), channel: 'linq', threadIsDirect, turnTrigger: 'automation-auto-reply' },
+      profile: { promptProfile: 'conversation', threadScope: 'session-thread', toolProfile: 'provider-turn' },
+      promptTimeContext: { currentLocalDate: '2030-04-01', currentTimeZone: 'UTC' },
+      route: createRoute(), session: createSession(),
+      sharedPlan: createSharedPlan({}, { channel: 'linq', threadIsDirect, threadId: 'synthetic-lore-thread' }),
+    })
+    const toolNames = plan.dynamicTools.map((tool) => tool.name)
+    expect(toolNames.includes('game_lore')).toBe(available)
+    expect(toolNames).not.toContain('write_recap')
+    expect((plan.systemPrompt ?? '').includes(GAME_LIVE_LORE_GUIDANCE)).toBe(available)
+    expect(prepareGameLore).toHaveBeenCalledTimes(threadIsDirect ? 0 : 1)
   })
 
   it.each([

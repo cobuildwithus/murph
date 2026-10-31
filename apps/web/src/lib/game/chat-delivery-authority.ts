@@ -3,7 +3,7 @@ import type { Prisma } from "@prisma/client";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import { isGameChangeExpired, parsePendingGameChange } from "./changes";
 import { isGameInviteExpired, parseStoredTerms } from "./rules";
-import { sameGamePlayers } from "./chat-membership";
+import { gamePairWhere, sameGamePlayers } from "./chat-membership";
 
 /** Returns true only for the current proposal and proven audience; stale outbox work cannot announce a replaced edit. */
 export async function assertGameProposalDeliveryCurrentTx(input: {
@@ -14,6 +14,10 @@ export async function assertGameProposalDeliveryCurrentTx(input: {
   now?: Date;
 }): Promise<boolean> {
   const key = input.deliveryIdempotencyKey ?? "";
+  const recap = /^game-recap:([^:]+)$/u.exec(key);
+  if (recap) return assertGameRecapDeliveryCurrentTx(input, recap[1]);
+  const missed = /^game-missed:([^:]+):([^:]+):(\d{4}-\d{2}-\d{2})$/u.exec(key);
+  if (missed) return assertGameMissedDeliveryCurrentTx(input, missed[1], missed[2]);
   if (key.startsWith("game-cancelled:")) return assertGameCancelledDeliveryCurrentTx(input);
   if (key.startsWith("game-change-cancelled:") || key.startsWith("game-change-expired:")) return assertGameChangeResolvedDeliveryCurrentTx(input);
   const rematch = /^game-rematch:([^:]+)$/.exec(key);
@@ -22,6 +26,43 @@ export async function assertGameProposalDeliveryCurrentTx(input: {
   if (lifecycle) return assertGameStartedDeliveryCurrentTx(input, lifecycle[1]);
   if (!key.startsWith("game-change:")) return false;
   return assertGameChangeProposalDeliveryCurrentTx(input, key);
+}
+
+async function assertGameRecapDeliveryCurrentTx(
+  input: Parameters<typeof assertGameProposalDeliveryCurrentTx>[0], gameId: string,
+): Promise<true> {
+  const players = input.playerMemberIds ?? [];
+  const game = await input.tx.game.findFirst({
+    where: { id: gameId, chatContainerMemberId: input.containerMemberId, status: "settled" },
+    include: { players: { take: 3 } },
+  });
+  if (!game || !sameGamePlayers(game.players.map((player) => player.memberId), players)) return stale();
+  const current = await input.tx.game.findFirst({
+    where: { ...gamePairWhere(players), status: { in: ["negotiating", "live", "settled"] } },
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    select: { id: true },
+  });
+  if (current?.id !== gameId) return stale();
+  return true;
+}
+
+async function assertGameMissedDeliveryCurrentTx(
+  input: Parameters<typeof assertGameProposalDeliveryCurrentTx>[0], gameId: string, addressedMemberId: string,
+): Promise<true> {
+  const players = input.playerMemberIds ?? [];
+  const game = await input.tx.game.findFirst({
+    where: { id: gameId, chatContainerMemberId: input.containerMemberId, status: "live" },
+    include: { players: { take: 3 } },
+  });
+  if (!game || !players.includes(addressedMemberId)
+    || !sameGamePlayers(game.players.map((player) => player.memberId), players)) return stale();
+  const current = await input.tx.game.findFirst({
+    where: { ...gamePairWhere(players), status: { in: ["negotiating", "live", "settled"] } },
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    select: { id: true },
+  });
+  if (current?.id !== gameId) return stale();
+  return true;
 }
 
 async function assertGameChangeProposalDeliveryCurrentTx(

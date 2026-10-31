@@ -258,7 +258,21 @@ export type HostedExecutionAssistantNotificationPromptProfile =
 export type HostedExecutionAssistantNotificationResponsePolicy =
   | { kind: "allow_send_or_skip" }
   | { kind: "require_send" }
-  | { kind: "require_send_exact_text"; text: string };
+  | { kind: "require_send_exact_text"; text: string }
+  | {
+      kind: "require_game_recap";
+      eventId: string;
+      gameId: string;
+      pairFingerprint: string;
+    }
+  | {
+      kind: "game_missed_check_in";
+      eventId: string;
+      firstMissedDate: string;
+      gameId: string;
+      memberId: string;
+      pairFingerprint: string;
+    };
 
 export interface HostedExecutionAssistantNotificationDeliverySource {
   fromPhoneNumber: string;

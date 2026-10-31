@@ -3,9 +3,10 @@ import type { Prisma } from "@prisma/client";
 import { buildHostedLinqDeliveryId } from "../hosted-onboarding/linq-delivery-store";
 import { createHostedLinqDeliveryIdempotencyLookupKey } from "../hosted-onboarding/linq-observability-identifiers";
 
-export type GameChatLifecycleKind = "started" | "rematch" | "change_cancelled" | "change_expired" | "cancelled";
+export type GameChatLifecycleKind = "started" | "rematch" | "change_cancelled" | "change_expired" | "cancelled" | "recap" | "missed";
 
 export function gameChatLifecycleEventId(gameId: string, kind: GameChatLifecycleKind, proposalId?: string): string {
+  if (kind === "missed") throw new Error("Missed-day lifecycle identity requires the player and first date.");
   if (kind === "change_cancelled" || kind === "change_expired") {
     if (!proposalId) throw new Error("Game change resolution requires its proposal identity.");
     return `game-${kind.replace("_", "-")}:${gameId}:${proposalId}`;
@@ -31,6 +32,19 @@ export async function reserveGameChatLifecycleTx(input: {
   });
 }
 
+export function gameMissedDayEventId(gameId: string, memberId: string, firstMissedDate: string): string {
+  return `game-missed:${gameId}:${memberId}:${firstMissedDate}`;
+}
+
+export async function reserveGameMissedDayTx(input: { gameId: string; memberId: string; firstMissedDate: string; dueAt: Date; tx: Pick<Prisma.TransactionClient, "hostedLinqDelivery"> }): Promise<void> {
+  const eventId = gameMissedDayEventId(input.gameId, input.memberId, input.firstMissedDate);
+  const key = createHostedLinqDeliveryIdempotencyLookupKey(eventId);
+  if (!key) throw new Error("Game missed-day delivery identity is unavailable.");
+  await input.tx.hostedLinqDelivery.createMany({ data: [{ id: buildHostedLinqDeliveryId(key), idempotencyKey: key,
+    source: "game_lifecycle", sourceRef: `${input.gameId}:${input.memberId}:${input.firstMissedDate}`, template: "game_missed",
+    status: "awaiting_generation", targetKind: "thread", attemptedAt: input.dueAt, retryAfterAt: input.dueAt }], skipDuplicates: true });
+}
+
 /** App proposals, including invite negotiation, own one ordinary proposal send. */
 export async function reserveGameChatProposalTx(input: {
   gameId: string; proposalId: string; now: Date;
@@ -54,7 +68,10 @@ export async function markGameChatGenerationQueuedTx(eventId: string, tx: Pick<P
     where: { idempotencyKey: key, source: "game_lifecycle", status: "awaiting_generation" },
     data: { status: "generation_queued", retryAfterAt: new Date(Date.now() + 60_000), ...(containerMemberId ? { payloadOwnerMemberId: containerMemberId } : {}) },
   });
-  if (containerMemberId && changed.count !== 1) throw new Error("Game chat bootstrap requires its pending lifecycle receipt.");
+  if (containerMemberId && changed.count !== 1) {
+    const existing = await tx.hostedLinqDelivery.count({ where: { idempotencyKey: key, source: "game_lifecycle", status: "generation_queued", payloadOwnerMemberId: containerMemberId } });
+    if (existing !== 1) throw new Error("Game chat lifecycle requires its pending lifecycle receipt.");
+  }
 }
 
 /**

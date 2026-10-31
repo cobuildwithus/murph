@@ -77,11 +77,13 @@ describe.skipIf(!runPostgresProof)("weekly game when a player deletes their acco
     const gameId = await live(leo, ava);
     await words(leo, gameId, "Leo day one");
     await words(ava, gameId, "Ava day one");
+    await getPrisma().game.update({ where: { id: gameId }, data: { recapEncrypted: "synthetic-must-clear" } });
     const [gone, stays] = leaver === "creator" ? [leo, ava] : [ava, leo];
     expect(await deleteAccount(gone)).toEqual({ calledOff: 1, deleted: 0, kept: 1 });
 
     const view = (await readGame(gameId, stays))!;
     expect(view).toMatchObject({ status: "void", result: null, tickets: [], settlesAt: null });
+    expect((await getPrisma().game.findUniqueOrThrow({ where: { id: gameId } })).recapEncrypted).toBeNull();
     const left = view.players.find((player) => player.left);
     // The name the remaining player knew them by: Leo's own label for Ava, or Leo's own name.
     expect(left).toMatchObject({ memberId: null, firstName: leaver === "creator" ? "Leo" : "Bestie", seat: leaver === "creator" ? 0 : 1, avatarUrl: null });

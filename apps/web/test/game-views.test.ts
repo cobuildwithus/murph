@@ -73,6 +73,7 @@ function view(state: RuleState, viewerId: string, now: Date, overrides: Partial<
     names: new Map([[LEO, "Leo"], [AVA, "Ava"]]),
     now,
     relationships: new Map(),
+    recap: null,
     result: null,
     round: 1,
     startedAt: JOIN_AT,

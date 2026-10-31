@@ -5,7 +5,7 @@ import { assertGameProposalDeliveryCurrentTx } from "../src/lib/game/chat-delive
 const now = new Date("2030-03-04T16:00:00Z");
 const row = () => ({
   id: "game", createdBy: "person-a", chatContainerMemberId: "room", pendingChange: { v: 1, id: "proposal", proposedByMemberId: "person-a", expectedTermsVersion: 1, change: { kind: "edit", schedule: { days: [5, 6] } }, effectiveFromDay: 0, startsOn: null, deliveryStatus: "queued" },
-  previousGameId: null, inviteeMemberId: null, round: 1, status: "live", terms: { v: 1, versions: [{ n: 1, fromDay: 0, schedule: { days: [0, 1, 2, 3, 4] }, stakes: [] }] }, termsWordsEncrypted: "synthetic", inviteTokenHash: null, inviteTokenEncrypted: null, inviteExpiresAt: null, pendingLabel: null, lengthDays: 7, startsOn: null, startedAt: now, liveRosterKey: "synthetic", devClockOffsetMs: null, result: null, departedPlayer: null, settledAt: null, createdAt: now, updatedAt: now,
+  previousGameId: null, inviteeMemberId: null, round: 1, status: "live", terms: { v: 1, versions: [{ n: 1, fromDay: 0, schedule: { days: [0, 1, 2, 3, 4] }, stakes: [] }] }, termsWordsEncrypted: "synthetic", inviteTokenHash: null, inviteTokenEncrypted: null, inviteExpiresAt: null, pendingLabel: null, lengthDays: 7, startsOn: null, startedAt: now, liveRosterKey: "synthetic", devClockOffsetMs: null, result: null, recapEncrypted: null, departedPlayer: null, settledAt: null, createdAt: now, updatedAt: now,
   players: ["person-a", "person-b"].map((memberId, seat) => ({ memberId, seat, timeZone: "UTC", dayOne: new Date("2030-03-05T00:00:00Z") })),
 } satisfies Game & { players: Array<{ memberId: string; seat: number; timeZone: string; dayOne: Date }> });
 function setup() {
@@ -64,6 +64,25 @@ describe("game proposal provider dispatch authority", () => {
     await expect(assertGameProposalDeliveryCurrentTx({ ...kickoff, playerMemberIds: ["person-a", "stranger"] })).rejects.toMatchObject({ code: "GAME_CHANGE_SUPERSEDED" });
     findFirst.mockResolvedValue(null);
     await expect(assertGameProposalDeliveryCurrentTx(kickoff)).rejects.toMatchObject({ code: "GAME_CHANGE_SUPERSEDED" });
+  });
+  it("authorizes recap and missed-day delivery only for the exact current bound game", async () => {
+    const { input, findFirst } = setup();
+    findFirst.mockResolvedValueOnce({ ...row(), status: "settled" }).mockResolvedValueOnce(row());
+    await expect(assertGameProposalDeliveryCurrentTx({ ...input, deliveryIdempotencyKey: "game-recap:game" })).resolves.toBe(true);
+    expect(findFirst.mock.calls[1]?.[0]?.where ?? {}).not.toHaveProperty("chatContainerMemberId");
+    findFirst.mockResolvedValueOnce(row()).mockResolvedValueOnce(row());
+    await expect(assertGameProposalDeliveryCurrentTx({ ...input, deliveryIdempotencyKey: "game-missed:game:person-a:2030-03-04" })).resolves.toBe(true);
+    findFirst.mockResolvedValueOnce(row()).mockResolvedValueOnce({ ...row(), id: "newer" });
+    await expect(assertGameProposalDeliveryCurrentTx({ ...input, deliveryIdempotencyKey: "game-missed:game:person-a:2030-03-04" }))
+      .rejects.toMatchObject({ code: "GAME_CHANGE_SUPERSEDED" });
+    findFirst.mockReset();
+    findFirst.mockResolvedValue(null);
+    await expect(assertGameProposalDeliveryCurrentTx({ ...input, deliveryIdempotencyKey: "game-missed:game:person-a:2030-03-04" }))
+      .rejects.toMatchObject({ code: "GAME_CHANGE_SUPERSEDED" });
+    findFirst.mockReset();
+    findFirst.mockResolvedValue(row());
+    await expect(assertGameProposalDeliveryCurrentTx({ ...input, deliveryIdempotencyKey: "game-missed:game:outsider:2030-03-04" }))
+      .rejects.toMatchObject({ code: "GAME_CHANGE_SUPERSEDED" });
   });
   it("allows a rematch only while its addressed pair is still invited in the inherited room", async () => {
     const { input, findFirst } = setup();

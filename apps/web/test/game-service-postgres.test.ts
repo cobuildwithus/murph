@@ -35,6 +35,7 @@ import {
   readHistory,
   readHome,
   readGameChatState,
+  sealGameRecap,
   readInvitePreview,
   runGameCommand,
 } from "@/src/lib/game/service";
@@ -43,6 +44,7 @@ import { decideNewTerms, parseStoredTerms } from "@/src/lib/game/rules";
 import { toPrismaJsonObject } from "@/src/lib/device-sync/prisma-store/prisma-json";
 import { addDays, dayStartInstant, gameLocalDate, weekdayOf } from "@/src/lib/game/time";
 import { getPrisma } from "@/src/lib/prisma";
+import { gameChatLifecycleEventId, markGameChatGenerationQueuedTx } from "@/src/lib/game/chat-lifecycle-receipt";
 
 const databaseUrl = process.env.DATABASE_URL?.trim() ?? "";
 const runPostgresProof = process.env.MURPH_TEST_POSTGRES_CONCURRENCY === "1";
@@ -250,6 +252,92 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     expect(recap.days[0].others[0]).toMatchObject({ status: "posted", blurHash: "synthetic-blur" });
     expect(recap.days[0].others[0]).not.toHaveProperty("postedAt");
     expect(await authorizeMediaRead(viewer, command.mediaKeys[0])).toBe(true);
+  });
+  it("seals an authorized recap on the settled game and exposes it to both players", async () => {
+    const ava = await member("RecapAva", "UTC"), leo = await member("RecapLeo", "UTC");
+    const room = `hbm_gametest_room_${randomUUID().slice(0, 8)}`;
+    memberIds.push(room);
+    await getPrisma().hostedMember.create({ data: { id: room, billingStatus: "active" } });
+    const { gameId } = await startGame(ava, leo);
+    await getPrisma().game.update({ where: { id: gameId }, data: { chatContainerMemberId: room } });
+    await devStartNow(gameId, ava);
+    const recapPost = await photo(ava, gameId, "recap-private-post");
+    await ok(ava, recapPost);
+    await devSettleNow(gameId, ava);
+    const eventId = gameChatLifecycleEventId(gameId, "recap");
+    await markGameChatGenerationQueuedTx(eventId, getPrisma(), room);
+    const recap = { pages: [
+      { background: "paper" as const, blocks: [{ kind: "headline" as const, text: "A synthetic week" }] },
+      { background: "slate" as const, blocks: [{ kind: "stat" as const, statValue: "7", text: "days considered" }] },
+      { background: "sage" as const, blocks: [{ kind: "headline" as const, text: "Breakfast changed hands" }] },
+    ], scoreLine: "RecapLeo owes RecapAva breakfast in bed.", chatLine: "Breakfast changed hands. Open the week for the handoff." };
+    const authorize = async () => {};
+    const alternate = { ...recap, chatLine: "A different concurrent candidate." };
+    const sealed = await Promise.all([recap, alternate].map((candidate) => sealGameRecap({ beforeMutationTx: authorize,
+      containerMemberId: room, eventId, gameId, playerMemberIds: [ava, leo], recap: candidate })));
+    expect(sealed[0]).toEqual(sealed[1]);
+    const canonical = sealed[0]!;
+    const stored = await getPrisma().game.findUniqueOrThrow({ where: { id: gameId }, select: { recapEncrypted: true } });
+    expect(stored.recapEncrypted).toBeTruthy();
+    expect(stored.recapEncrypted).not.toContain("Breakfast changed hands");
+    expect((await readGame(gameId, ava))?.recap).toEqual(canonical);
+    expect((await readGame(gameId, leo))?.recap).toEqual(canonical);
+    const reportId = randomUUID();
+    await getPrisma().gameReport.create({ data: { id: reportId, reporterMemberId: leo, reportedMemberId: ava,
+      gameId, entryId: recapPost.entryId, about: "post", reason: "other" } });
+    expect((await readGame(gameId, leo))?.recap).toBeNull();
+    expect((await readGame(gameId, ava))?.recap).toEqual(canonical);
+    await getPrisma().gameReport.delete({ where: { id: reportId } });
+    await getPrisma().gameBlock.create({ data: { blockerMemberId: leo, blockedMemberId: ava } });
+    expect((await readGame(gameId, leo))?.recap).toBeNull();
+    expect((await readGame(gameId, ava))?.recap).toBeNull();
+    await getPrisma().gameBlock.delete({ where: { blockerMemberId_blockedMemberId: { blockerMemberId: leo, blockedMemberId: ava } } });
+    const nextId = randomUUID();
+    const next = await ok(ava, { gameId: nextId, inviteeFirstName: "RecapLeo", previousGameId: gameId, terms: TERMS, type: "createGame" });
+    await ok(leo, { termsVersion: 1, timeZone: "UTC", token: next!.inviteToken!, type: "join" });
+    expect(await sealGameRecap({ beforeMutationTx: authorize, containerMemberId: room, eventId, gameId, playerMemberIds: [ava, leo], recap: { ...recap, scoreLine: "Stale recap" } })).toBeNull();
+    expect((await readGame(gameId, ava))?.recap).toEqual(canonical);
+  });
+
+  it("refuses a recap that waited on a player's account deletion", async () => {
+    const ava = await member("DepartAva", "UTC"), leo = await member("DepartLeo", "UTC");
+    const room = `hbm_gametest_room_${randomUUID().slice(0, 8)}`;
+    memberIds.push(room);
+    await getPrisma().hostedMember.create({ data: { id: room, billingStatus: "active" } });
+    const { gameId } = await startGame(ava, leo);
+    await getPrisma().game.update({ where: { id: gameId }, data: { chatContainerMemberId: room } });
+    await devStartNow(gameId, ava);
+    await devSettleNow(gameId, ava);
+    const eventId = gameChatLifecycleEventId(gameId, "recap");
+    await markGameChatGenerationQueuedTx(eventId, getPrisma(), room);
+    const recap = { pages: [{ background: "paper" as const, blocks: [{ kind: "headline" as const, text: "A departing week" }] }],
+      scoreLine: "DepartAva kept the streak.", chatLine: "The week is in." };
+    let holdDeletion!: () => void;
+    const held = new Promise<void>((resolve) => { holdDeletion = resolve; });
+    let deletionLocked!: () => void;
+    const locked = new Promise<void>((resolve) => { deletionLocked = resolve; });
+    // Mirrors applyGameAccountDeletionTx: the kept game is marked departed and its recap cleared under the row lock.
+    const deletion = getPrisma().$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM game WHERE id = ${gameId} FOR UPDATE`;
+      await tx.game.update({ where: { id: gameId }, data: { recapEncrypted: null,
+        departedPlayer: toPrismaJsonObject({ v: 1, at: new Date().toISOString(), nameEncrypted: "synthetic", seat: 1, viewerMemberId: ava }) } });
+      deletionLocked();
+      await held;
+    }, { timeout: 20_000 });
+    await locked;
+    const sealing = sealGameRecap({ beforeMutationTx: async () => {}, containerMemberId: room, eventId, gameId, playerMemberIds: [ava, leo], recap });
+    const deadline = Date.now() + 5_000;
+    while (Date.now() < deadline) {
+      const [waiting] = await getPrisma().$queryRaw<Array<{ count: bigint }>>`
+        SELECT count(*) AS count FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock'`;
+      if ((waiting?.count ?? 0n) > 0n) break;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    holdDeletion();
+    await deletion;
+    expect(await sealing).toBeNull();
+    const stored = await getPrisma().game.findUniqueOrThrow({ where: { id: gameId }, select: { recapEncrypted: true } });
+    expect(stored.recapEncrypted).toBeNull();
   });
 
   it("caps concurrent retries and retakes per recipient and game, then allows the next recipient day", async () => {

@@ -166,6 +166,7 @@ export type HostedExecutionStructuredLogDetails = {
 export const HOSTED_ASSISTANT_NOTIFICATION_VALIDATION_FAILURE_REASONS = [
   "decision_json_unparseable",
   "decision_schema_invalid",
+  "game_recap_not_saved",
   "runtime_presentation_non_send_decision",
   "creative_response_media_invalid",
 ] as const;

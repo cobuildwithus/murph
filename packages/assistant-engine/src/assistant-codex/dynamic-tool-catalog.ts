@@ -1,4 +1,4 @@
-import { MURPH_READ_GAME_TOOL, MURPH_UPDATE_GAME_TOOL, MURPH_GAME_PHOTO_TOOL } from './dynamic-tools/games.js'
+import { MURPH_READ_GAME_TOOL, MURPH_READ_GAME_RECAP_TOOL, MURPH_UPDATE_GAME_TOOL, MURPH_GAME_PHOTO_TOOL, MURPH_WRITE_RECAP_TOOL, MURPH_GAME_LORE_TOOL } from './dynamic-tools/games.js'
 import { MURPH_GET_SENDER_CONTACT_TOOL } from './dynamic-tools/sender-contact.js'
 import { MURPH_POLL_TOOL } from './dynamic-tools/conversation-polls.js'
 export { MURPH_POLL_TOOL } from './dynamic-tools/conversation-polls.js'
@@ -1782,6 +1782,7 @@ const MURPH_BASE_DYNAMIC_TOOLS = [
   MURPH_READ_GAME_TOOL,
   MURPH_UPDATE_GAME_TOOL,
   MURPH_GAME_PHOTO_TOOL,
+  MURPH_GAME_LORE_TOOL,
   MURPH_IMESSAGE_CONTACT_TOOL,
   MURPH_SUBSCRIPTION_TOOL,
   ...MURPH_GROUP_FAMILY_TOOLS,
@@ -1827,6 +1828,8 @@ export type MurphDynamicTool =
   | typeof MURPH_GROUP_DATA_EAGER_TOOL
   | typeof MURPH_ATTACH_FOLLOW_UP_TOOL
   | typeof MURPH_MEMBER_MEMORY_TOOL
+  | typeof MURPH_READ_GAME_RECAP_TOOL
+  | typeof MURPH_WRITE_RECAP_TOOL
   | typeof MURPH_GROUP_ASSISTANT_CONFIGURATION_TOOL
   | typeof MURPH_GROUP_CHALLENGE_RESPONSE_CARD_TOOL
   | typeof MURPH_GROUP_SEND_PROGRESS_UPDATE_TOOL
@@ -1852,6 +1855,7 @@ export interface MurphDynamicToolAvailability {
   pollsAvailable?: boolean | null
   gamesAvailable?: boolean | null
   gamePhotosAvailable?: boolean | null
+  gameLoreAvailable?: boolean | null
   imessageContactAvailable?: boolean | null
   imageGenerationAvailable?: boolean | null
   subscriptionAvailable?: boolean | null
@@ -1924,6 +1928,7 @@ const TOOL_AVAILABILITY: ReadonlyMap<MurphDynamicTool, AvailabilityPredicate> =
     [MURPH_READ_GAME_TOOL, defaultOff((a) => a.gamesAvailable)],
     [MURPH_UPDATE_GAME_TOOL, defaultOff((a) => a.gamesAvailable)],
     [MURPH_GAME_PHOTO_TOOL, defaultOff((a) => a.gamePhotosAvailable)],
+    [MURPH_GAME_LORE_TOOL, defaultOff((a) => a.gameLoreAvailable)],
     [MURPH_IMESSAGE_CONTACT_TOOL, defaultOff((a) => a.imessageContactAvailable)],
     [MURPH_SUBSCRIPTION_TOOL, defaultOff((a) => a.subscriptionAvailable)],
     ...MURPH_GROUP_FAMILY_TOOLS.map(

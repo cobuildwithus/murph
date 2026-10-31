@@ -622,10 +622,11 @@ describe("hosted execution observability", () => {
     expect(JSON.stringify(redacted)).not.toContain("do not keep me");
   });
 
-  it("keeps assistant-notification validation attribution on its four-value contract", () => {
+  it("keeps assistant-notification validation attribution on its five-value contract", () => {
     expect(HOSTED_ASSISTANT_NOTIFICATION_VALIDATION_FAILURE_REASONS).toEqual([
       "decision_json_unparseable",
       "decision_schema_invalid",
+      "game_recap_not_saved",
       "runtime_presentation_non_send_decision",
       "creative_response_media_invalid",
     ]);

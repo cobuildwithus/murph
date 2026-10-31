@@ -177,6 +177,31 @@ this default without deleting other people's private contact choices.
   N counts across the whole game, not per week). The result is frozen on the
   game. There is no timer: the first read of a finished game settles it, and so
   does either player accepting their next invite.
+- **Missed-day host check-ins.** Around 9am in a player's frozen game time zone,
+  after a scheduled day has closed without a post, Murph may address that player
+  with one short line in the pair's already-bound group. Consecutive missed days
+  share the first missed day's durable receipt, so they produce at most one turn
+  per miss run. Days off, still-open days, any-N open capacity and posts the
+  player marked incomplete do not trigger it. Murph reads bounded current-room
+  history and the exact pair's lore first and stays quiet when the player already
+  explained the miss. This path requires the exact two-player roster, never
+  discovers or creates a chat, and permits a no-reply result.
+- **Hosted recap.** Settlement reserves one durable recap turn for the bound
+  group. The turn reads the finished shared game, a bounded current-room
+  transcript and the exact pair's lore, then calls `write_recap` with
+  three to seven story pages from the fixed page kit, `scoreLine` and
+  `chatLine`. The model never selects a game id: trusted notification authority
+  binds the tool to the settled current game and exact room. The server checks
+  entry ownership and shared visibility, visual kinds and counts, text, quote,
+  score and chat-line limits, banned language, third-person shared copy, quote
+  density and verbatim player chat/post evidence. It also rejects stock chat
+  lines and three-word phrase reuse from earlier `Chat line used:` lore entries,
+  returning the fixed correction messages for a retry. The accepted recap is
+  sealed on the game row and both players receive
+  `recap: { pages, scoreLine, chatLine } | null` in `GameView`. After one
+  accepted `write_recap`, the runtime replaces any model-authored final copy
+  with the saved `chatLine`; the transcript and ordinary queued group delivery
+  therefore use that exact line.
 - **Tickets.** A prize or dare makes the loser owe the winner one ticket; a tie
   or all-perfect game owes nothing. Each ticket carries its stake kind. The
   winner marks a dare done with the same redeem action, without proof. Legacy
@@ -378,6 +403,18 @@ from omitting a date change. The original seven-day invite expiry also bounds
 unfinished negotiation. A pair cannot reserve another game while negotiating.
 
 ## Progress and photos in chat
+
+While a live game is bound to the room, ordinary group turns maintain one
+pair-owned workspace file selected by an opaque sorted-pair fingerprint. It
+persists across rematches for that pair and is treated as absent for other pairs,
+records dated word-for-word excuses, running bits, firsts, streaks, comebacks
+and which bits Murph already used. The dedicated game-lore tool owns access and
+never accepts a path or player identity; game storage does not duplicate the file. Keep it near 200 lines and trim
+the oldest lines first. Turns without a live game in that room do not receive
+permission to create or update game lore. Missed-day and recap turns read it
+before composing, and update it only from game or conversation evidence. After
+a recap save, Murph records the exact group copy as
+`Chat line used: <chatLine>` alongside the bits used and facts worth retaining.
 
 The verified two-player group may read daily check-in status, totals and recent
 settled results. These are shared metadata, not a bypass of post-to-unlock:

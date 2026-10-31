@@ -1,6 +1,13 @@
 // Exact production tool descriptors for the optional composed input measurement.
 // These snapshots preserve the reviewed rollout stages; current head uses real tools.
 
+// 64f117d039 before game-host lore was added to ordinary group turns.
+export const GAME_HOST_BASE_READ_GAME_TOOL = {
+  namespace: 'murph', name: 'read_game',
+  description: 'Read the games shared by the two players in this group chat, their agreed tasks, stakes, schedule, start dates and pending changes. Use before answering questions or changing a game. Each day closes at 3 AM the following local date in each player’s timeZone; dayOne is their first calendar date. Starting before 3 AM may give a short first day; explain the actual cutoff. The shared view includes daily check-in status and frozen settled results, but excludes private labels, photos, captions and excuses. Answer from returned progress and result; a missing post today is not a miss, and any-days targets are a total rather than daily obligations. Never infer why someone did not post. In what you write, call what the loser owes a prize, or a dare when it is one, and say who owes whom, as in "Ava owes you breakfast in bed." Never call it a ticket, bet, wager, stake or winnings, and never say cash in.',
+  inputSchema: { type: 'object', additionalProperties: false, properties: { messageRef: { type: 'string', description: 'For a photo offer or save, select the current accepted message from that player so photoCheckIn reflects their introduction status.' } }, required: [] },
+} as const
+
 // eff32234e77173681ae5358a9dd8083d5e6dcd85
 export const BASE_READ_GAME_TOOL = {
   namespace: 'murph', name: 'read_game',

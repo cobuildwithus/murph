@@ -2,6 +2,7 @@ import { resolveUsageOptimizerFeedbackScope } from './weekly-usage-optimizer.js'
 import {
   assistantReasoningEffortValues,
   type AssistantReasoningEffort,
+  type AssistantSandbox,
   type AssistantSession,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import {
@@ -16,6 +17,7 @@ import {
 } from '@murphai/operator-config/assistant/target-runtime'
 import {
   MURPH_GROUP_ROOM_MODEL_MAINTENANCE_PERMISSION_PROFILE,
+  MURPH_GAME_HOST_PERMISSION_PROFILE,
   MURPH_MEMBER_READ_PERMISSION_PROFILE,
   MURPH_MEMBER_WORKSPACE_PERMISSION_PROFILE,
 } from '@murphai/hosted-execution/assistant-permissions'
@@ -729,12 +731,16 @@ function resolveCodexAttemptCapabilities(
 ) {
   const outputOnlyTurn =
     executionPlan.profile.toolProfile === 'output-only-turn'
+  const gameHostTurn =
+    executionPlan.profile.toolProfile === 'game-host-turn'
   const readOnlyAutomationTurn = isReadOnlyScheduledTurn(
     executionPlan.input, attemptPlan.routePlan.followUpInvocation,
   )
-  const nativeCapabilitiesRestrictedTurn =
-    outputOnlyTurn ||
-    executionPlan.profile.promptProfile === 'creative-notification'
+  const nativeCapabilitiesRestrictedTurn = [
+    outputOnlyTurn,
+    gameHostTurn,
+    executionPlan.profile.promptProfile === 'creative-notification',
+  ].includes(true)
   const creativeNotificationSongTurn =
     executionPlan.profile.promptProfile === 'creative-notification' &&
     executionPlan.profile.toolProfile === 'provider-turn'
@@ -753,8 +759,11 @@ function resolveCodexAttemptCapabilities(
     automationId === MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID
   const toolOnlyMaintenanceTurn =
     groupRoomModelMaintenanceTurn || memberMemoryMaintenanceTurn
-  const restrictedOneShotTurn =
-    toolOnlyMaintenanceTurn || readOnlyAutomationTurn
+  const restrictedOneShotTurn = [
+    toolOnlyMaintenanceTurn,
+    readOnlyAutomationTurn,
+    gameHostTurn,
+  ].includes(true)
   const audience = executionPlan.sharedPlan.conversationPolicy.audience
   const groupConversation =
     resolveAssistantConversationScope(audience) === 'group'
@@ -774,6 +783,7 @@ function resolveCodexAttemptCapabilities(
       HOSTED_LOCAL_TEST_CODEX_MODEL_PROVIDER_ID
   return {
     outputOnlyTurn,
+    gameHostTurn,
     readOnlyAutomationTurn,
     nativeCapabilitiesRestrictedTurn,
     creativeNotificationSongTurn,
@@ -816,6 +826,9 @@ function resolveCodexAttemptPermissions(
   if (capabilities.groupRoomModelMaintenanceTurn) {
     return MURPH_GROUP_ROOM_MODEL_MAINTENANCE_PERMISSION_PROFILE
   }
+  if (capabilities.gameHostTurn) {
+    return MURPH_GAME_HOST_PERMISSION_PROFILE
+  }
   if (capabilities.readOnlyAutomationTurn && executionPlan.executionContext?.hosted) {
     return MURPH_MEMBER_READ_PERMISSION_PROFILE
   }
@@ -823,6 +836,16 @@ function resolveCodexAttemptPermissions(
     return MURPH_MEMBER_WORKSPACE_PERMISSION_PROFILE
   }
   return null
+}
+
+function resolveCodexAttemptSandbox(
+  capabilities: CodexAttemptCapabilities,
+  attemptPlan: AssistantCodexAttemptPlan,
+): AssistantSandbox | null {
+  if (capabilities.outputOnlyTurn) return null
+  if ([capabilities.gameHostTurn, capabilities.creativeNotificationSongTurn,
+    capabilities.readOnlyAutomationTurn, capabilities.groupEmailTurn].includes(true)) return 'read-only'
+  return attemptPlan.route.providerOptions.sandbox
 }
 
 function buildCodexAttemptProviderInput(
@@ -861,14 +884,7 @@ function buildCodexAttemptProviderInput(
       profile: attemptPlan.route.providerOptions.profile,
       provider: attemptPlan.route.provider,
       reasoningEffort,
-      sandbox:
-        capabilities.outputOnlyTurn
-          ? null
-          : capabilities.creativeNotificationSongTurn ||
-              capabilities.readOnlyAutomationTurn ||
-              capabilities.groupEmailTurn
-            ? 'read-only'
-            : attemptPlan.route.providerOptions.sandbox,
+      sandbox: resolveCodexAttemptSandbox(capabilities, attemptPlan),
     },
     turn: {
       abortSignal: serviceTier === 'flex'
@@ -907,7 +923,7 @@ function buildCodexAttemptProviderInput(
       groupRoomModelMaintenanceAuthorized:
         capabilities.groupRoomModelMaintenanceTurn,
       memberMemoryMaintenanceAuthorized: capabilities.memberMemoryMaintenanceTurn,
-      hostedToolContext: capabilities.hostedCapabilitiesRestricted
+      hostedToolContext: capabilities.hostedCapabilitiesRestricted && !capabilities.gameHostTurn
         ? null
         : executionPlan.hostedToolContext ?? null,
       materializeWorkspaceArtifacts: capabilities.hostedCapabilitiesRestricted

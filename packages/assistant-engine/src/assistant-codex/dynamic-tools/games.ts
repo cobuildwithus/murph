@@ -1,5 +1,5 @@
 import * as z from '@murphai/contracts/zod-runtime'
-import { GAME_PRIZE_WORDS, hostedGameUpdateSchema, hostedGamePhotoSchema, type HostedGameUpdate, type HostedGamePhoto } from '@murphai/hosted-execution/runtime-control'
+import { GAME_PRIZE_WORDS, hostedGameUpdateSchema, hostedGamePhotoSchema, hostedGameRecapSchema, type HostedGameUpdate, type HostedGamePhoto, type HostedGameRecap } from '@murphai/hosted-execution/runtime-control'
 import type { AssistantHostedToolContext } from '../../assistant/hosted-tool-context.js'
 import { parseDynamicToolArguments } from './dynamic-tool-wrapper.js'
 import { toolTextResult } from '../tool-failure-diagnostics.js'
@@ -8,6 +8,33 @@ export const MURPH_READ_GAME_TOOL = {
   namespace: 'murph', name: 'read_game',
   description: `Read the games shared by the two players in this group chat, their agreed tasks, stakes, schedule, start dates and pending changes. Use before answering questions or changing a game. Each day closes at 3 AM the following local date in each player’s timeZone; dayOne is their first calendar date. Starting before 3 AM may give a short first day; explain the actual cutoff. The shared view includes daily check-in status and frozen settled results, but excludes private labels, photos, captions and excuses. Answer from returned progress and result; a missing post today is not a miss, and any-days targets are a total rather than daily obligations. Never infer why someone did not post. ${GAME_PRIZE_WORDS}`,
   inputSchema: { type: 'object', additionalProperties: false, properties: { messageRef: { type: 'string', description: 'For a photo offer or save, select the current accepted message from that player so photoCheckIn reflects their introduction status.' } }, required: [] },
+} as const
+export const MURPH_READ_GAME_RECAP_TOOL = {
+  namespace: 'murph', name: 'read_game',
+  description: 'Read the finished game bound to this recap turn. Returns its players, terms, result, and each day’s posts or misses with entry IDs and post details; call it first.',
+  inputSchema: { type: 'object', additionalProperties: false, properties: {}, required: [] },
+} as const
+export const MURPH_WRITE_RECAP_TOOL = {
+  namespace: 'murph', name: 'write_recap',
+  description: 'Save the recap for this finished game. Returns ok, or a list of problems to fix (unknown entries, a quote that is not verbatim, text over its limit, banned words). Fix every problem and call it again; the last accepted call is what the players see.',
+  inputSchema: { type: 'object', additionalProperties: false, required: ['pages', 'scoreLine', 'chatLine'], properties: {
+    pages: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['background', 'blocks'], properties: {
+      background: { type: 'string', enum: ['night', 'paper', 'sage', 'sienna', 'slate'] },
+      blocks: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['kind'], properties: {
+        kind: { type: 'string', enum: ['contactSheet', 'headline', 'kicker', 'photo', 'photoPair', 'quote', 'stat'] },
+        entryIds: { type: 'array', items: { type: 'string' } }, style: { type: 'string', enum: ['print', 'fullBleed'] },
+        text: { type: 'string' }, statValue: { type: 'string' },
+        quote: { type: 'object', additionalProperties: false, required: ['who', 'text'], properties: { who: { type: 'string' }, text: { type: 'string' }, date: { type: 'string' } } },
+      } } },
+    } } }, scoreLine: { type: 'string' }, chatLine: { type: 'string' },
+  } },
+} as const
+export const MURPH_GAME_LORE_TOOL = {
+  namespace: 'murph', name: 'game_lore',
+  description: 'Read or replace the bound game pair’s lore when instructed. Returns current lore or save confirmation.',
+  inputSchema: { type: 'object', additionalProperties: false, required: ['operation'], properties: {
+    operation: { enum: ['read', 'replace'] }, content: { type: 'string' },
+  } },
 } as const
 export const MURPH_UPDATE_GAME_TOOL = {
   namespace: 'murph', name: 'update_game',
@@ -47,8 +74,20 @@ const rawUpdateArguments = z.object({ messageRef: z.string().min(1).max(128), op
   if (!parsed.success) { ctx.addIssue({ code: 'custom', message: 'Invalid game change operation' }); return z.NEVER }
   return { messageRef, update: parsed.data }
 })
-export type GameDynamicRequest = { action: 'read_game'; messageRef?: string } | { action: 'update_game'; messageRef: string; update: HostedGameUpdate } | { action: 'game_photo'; messageRef: string; photo: HostedGamePhoto }
+export type GameDynamicRequest = { action: 'read_game'; messageRef?: string } | { action: 'update_game'; messageRef: string; update: HostedGameUpdate } | { action: 'game_photo'; messageRef: string; photo: HostedGamePhoto } | { action: 'write_recap'; recap: HostedGameRecap } | { action: 'game_lore'; operation: 'read' | 'replace'; content?: string }
 export function readGameDynamicToolRequest(input: { arguments: unknown; tool: string | null }) {
+  if (input.tool === 'game_lore') {
+    const schema = z.discriminatedUnion('operation', [
+      z.object({ operation: z.literal('read') }).strict(),
+      z.object({ operation: z.literal('replace'), content: z.string().max(40000) }).strict(),
+    ])
+    const parsed = parseDynamicToolArguments({ schema, value: input.arguments, schemaRootKeys: ['operation', 'content'], toolName: 'murph.game_lore' })
+    return parsed.ok ? { kind: 'game' as const, request: { action: 'game_lore' as const, ...parsed.args } } : { kind: 'invalid-game-arguments' as const, validationDigest: parsed.validationDigest }
+  }
+  if (input.tool === 'write_recap') {
+    const parsed = parseDynamicToolArguments({ schema: hostedGameRecapSchema, value: input.arguments, schemaRootKeys: ['pages', 'scoreLine', 'chatLine'], toolName: 'murph.write_recap' })
+    return parsed.ok ? { kind: 'game' as const, request: { action: 'write_recap' as const, recap: parsed.args } } : { kind: 'invalid-game-arguments' as const, validationDigest: parsed.validationDigest }
+  }
   if (input.tool === 'read_game') {
     const parsed = parseDynamicToolArguments({ schema: z.object({ messageRef: z.string().min(1).max(128).optional() }).strict(), value: input.arguments, schemaRootKeys: ['messageRef'], toolName: 'murph.read_game' })
     return parsed.ok ? { kind: 'game' as const, request: { action: 'read_game' as const, ...parsed.args } } : { kind: 'invalid-game-arguments' as const, validationDigest: parsed.validationDigest }
@@ -63,7 +102,80 @@ export function readGameDynamicToolRequest(input: { arguments: unknown; tool: st
   const parsed = parseDynamicToolArguments({ schema: rawUpdateArguments, value: input.arguments, schemaRootKeys: ['messageRef', 'operation', 'gameId', 'proposalId', 'expectedTermsVersion', 'change', 'date'], toolName: 'murph.update_game' })
   return parsed.ok ? { kind: 'game' as const, request: { action: 'update_game' as const, ...parsed.args } } : { kind: 'invalid-game-arguments' as const, validationDigest: parsed.validationDigest }
 }
-export async function executeGameTool(input: { request: GameDynamicRequest; context: AssistantHostedToolContext | null }) {
+
+async function executeTrustedGameRecapTool(input: { request: GameDynamicRequest; context: AssistantHostedToolContext | null }): Promise<ReturnType<typeof toolTextResult> | null> {
+  if (input.request.action !== 'read_game' && input.request.action !== 'write_recap') return null
+  const tool = input.context?.groupTool
+  const recapScope = input.context?.currentGameRecapScope?.()
+  if (!tool || !recapScope) return unavailableGameRecapToolResult(input.request.action)
+  const origin = { kind: 'game_recap' as const, gameId: recapScope.gameId, eventId: recapScope.eventId }
+  try {
+    return input.request.action === 'read_game'
+      ? await executeTrustedGameRecapRead({ origin, tool })
+      : await executeTrustedGameRecapWrite({ context: input.context, origin, recap: input.request.recap, tool })
+  } catch (error) {
+    return toolTextResult(false, 'The recap action could not be confirmed. Read the game and fix every reported problem before trying again.', 'handler_exception', error)
+  }
+}
+
+function unavailableGameRecapToolResult(action: 'read_game' | 'write_recap'): ReturnType<typeof toolTextResult> | null {
+  return action === 'write_recap'
+    ? toolTextResult(false, 'write_recap is available only in the bound game recap turn.', 'authority_rejected')
+    : null
+}
+
+async function executeTrustedGameRecapRead(input: {
+  origin: { kind: 'game_recap'; gameId: string; eventId: string }
+  tool: NonNullable<AssistantHostedToolContext['groupTool']>
+}): Promise<ReturnType<typeof toolTextResult>> {
+  const result = await input.tool.request({ action: 'read_game', origin: input.origin })
+  return toolTextResult(true, JSON.stringify('recapGame' in result.result ? result.result.recapGame : result))
+}
+
+async function executeTrustedGameRecapWrite(input: {
+  context: AssistantHostedToolContext | null
+  origin: { kind: 'game_recap'; gameId: string; eventId: string }
+  recap: HostedGameRecap
+  tool: NonNullable<AssistantHostedToolContext['groupTool']>
+}): Promise<ReturnType<typeof toolTextResult>> {
+  const priorChatLines = (await input.context?.readGameLore?.() ?? '')
+    .split(/\r?\n/u)
+    .flatMap((line) => {
+      const marker = line.indexOf('Chat line used:')
+      if (marker < 0) return []
+      const chatLine = line.slice(marker + 'Chat line used:'.length).trim()
+      return chatLine && chatLine.length <= 160 ? [chatLine] : []
+    })
+    .slice(-100)
+  const result = await input.tool.request({ action: 'write_recap', origin: input.origin, recap: input.recap, priorChatLines })
+  const payload = result.result
+  if (payload.status === 'ok' && 'chatLine' in payload && typeof payload.chatLine === 'string') {
+    input.context?.recordSavedGameRecapChatLine?.(payload.chatLine)
+  }
+  const output = 'recapOutcome' in payload && typeof payload.recapOutcome === 'string'
+    ? payload.recapOutcome
+    : JSON.stringify(result)
+  return toolTextResult(true, output)
+}
+
+async function executeGameLoreTool(input: {
+  request: Extract<GameDynamicRequest, { action: 'game_lore' }>
+  context: AssistantHostedToolContext | null
+}) {
+  if (!input.context?.readGameLore || !input.context?.replaceGameLore) return toolTextResult(false, 'Pair lore is unavailable for this turn.', 'authority_rejected')
+  try {
+    if (input.request.operation === 'read') return toolTextResult(true, await input.context.readGameLore())
+    await input.context.replaceGameLore(input.request.content ?? '')
+    return toolTextResult(true, 'ok: pair lore replaced')
+  } catch (error) {
+    return toolTextResult(false, 'Pair lore could not be accessed.', 'handler_exception', error)
+  }
+}
+
+async function executeOrdinaryGameTool(input: {
+  request: Extract<GameDynamicRequest, { action: 'read_game' | 'update_game' | 'game_photo' }>
+  context: AssistantHostedToolContext | null
+}) {
   const tool = input.context?.groupTool
   const scope = input.context?.currentUserActionScope?.()
   if (!tool || scope?.conversationScope !== 'group' || !scope.acceptedInputIds.length) return toolTextResult(false, 'Game tools require current player input in the game group chat.', 'authority_rejected')
@@ -76,4 +188,12 @@ export async function executeGameTool(input: { request: GameDynamicRequest; cont
   } catch (error) {
     return toolTextResult(false, 'The game action could not be confirmed. Read the game to check its current state before claiming a change applied.', 'handler_exception', error)
   }
+}
+
+export async function executeGameTool(input: { request: GameDynamicRequest; context: AssistantHostedToolContext | null }) {
+  if (input.request.action === 'game_lore') return executeGameLoreTool({ ...input, request: input.request })
+  const recapResult = await executeTrustedGameRecapTool(input)
+  if (recapResult) return recapResult
+  if (input.request.action === 'write_recap') return toolTextResult(false, 'write_recap is available only in the bound game recap turn.', 'authority_rejected')
+  return executeOrdinaryGameTool({ ...input, request: input.request })
 }

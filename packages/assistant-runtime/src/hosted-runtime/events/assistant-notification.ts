@@ -444,6 +444,7 @@ export async function executeHostedAssistantNotificationWake(input: {
         (entry) => {
           redactedLogEntries.push(entry);
         },
+        input.groupToolPort,
       ),
       ...await resolveHostedConnectedChannelGreetingPolicy(input),
     });
@@ -772,6 +773,56 @@ function requireMemberActivationSignupWelcome(
   return wake.signupWelcome;
 }
 
+type GameHostResponsePolicy<Kind> = Extract<
+  NonNullable<HostedExecutionAssistantNotificationRequestedWake["notification"]["responsePolicy"]>,
+  { kind: Kind }
+>;
+
+function scopeGameHostExecutionContext(
+  wake: HostedExecutionAssistantNotificationRequestedWake,
+  executionContext: AssistantExecutionContext,
+  groupToolPort: HostedRuntimeGroupToolPort | null | undefined,
+): AssistantExecutionContext {
+  const policy = wake.notification.responsePolicy;
+  if (policy?.kind !== "require_game_recap" && policy?.kind !== "game_missed_check_in") return executionContext;
+  if (wake.eventId !== policy.eventId || wake.notification.route.threadIsDirect !== false) {
+    throw new TypeError("Game recap notification authority is invalid.");
+  }
+  const scope = policy.kind === "require_game_recap"
+    ? gameRecapHostedScope(wake.eventId, policy, groupToolPort)
+    : gameMissedCheckInHostedScope(wake.eventId, policy);
+  return executionContext.hosted
+    ? { ...executionContext, hosted: { ...executionContext.hosted, ...scope } }
+    : executionContext;
+}
+
+function gameRecapHostedScope(
+  eventId: string,
+  policy: GameHostResponsePolicy<"require_game_recap">,
+  groupToolPort: HostedRuntimeGroupToolPort | null | undefined,
+) {
+  if (eventId !== `game-recap:${policy.gameId}`) {
+    throw new TypeError("Game recap notification authority is invalid.");
+  }
+  if (!groupToolPort) {
+    throw new TypeError("Game recap requires its trusted control port.");
+  }
+  return {
+    gameRecapScope: { gameId: policy.gameId, eventId: policy.eventId, pairFingerprint: policy.pairFingerprint },
+    groupTool: groupToolPort,
+  };
+}
+
+function gameMissedCheckInHostedScope(
+  eventId: string,
+  policy: GameHostResponsePolicy<"game_missed_check_in">,
+) {
+  if (eventId !== `game-missed:${policy.gameId}:${policy.memberId}:${policy.firstMissedDate}`) {
+    throw new TypeError("Game check-in notification authority is invalid.");
+  }
+  return { gameMissedCheckInScope: policy };
+}
+
 function buildAssistantNotificationInput(
   wake: HostedExecutionAssistantNotificationRequestedWake,
   executionContext: AssistantExecutionContext,
@@ -781,6 +832,7 @@ function buildAssistantNotificationInput(
   sourceMailboxItemId: string | null,
   turnEnvironment: AssistantTurnEnvironment | null,
   recordLogEntry: (entry: HostedExecutionRedactedLogEntry) => void,
+  groupToolPort: HostedRuntimeGroupToolPort | null | undefined,
 ): AssistantNotificationInput {
   const privateAssistantAskCompletion =
     wake.notification.privateAssistantAskCompletion ?? null;
@@ -816,6 +868,7 @@ function buildAssistantNotificationInput(
         }
       }
     : null;
+  const scopedExecutionContext = scopeGameHostExecutionContext(wake, executionContext, groupToolPort);
   const notificationInput = buildAssistantNotificationInputFromRoute({
     assistantTurnOrdinal: "assistant-notification:1",
     ...(authorizeOperatorTask
@@ -838,7 +891,7 @@ function buildAssistantNotificationInput(
       ? "queue-only"
       : wake.notification.deliveryDispatchMode ?? undefined,
     deliveryIdempotencyKey: wake.notification.deliveryIdempotencyKey ?? null,
-    executionContext,
+    executionContext: scopedExecutionContext,
     ...(wake.notification.externalThreadRouteAuthority
       ? {
           externalThreadRouteAuthority:

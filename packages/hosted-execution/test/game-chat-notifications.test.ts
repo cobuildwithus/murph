@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { hostedGameChatStateSchema } from "../src/game-tools.ts";
-import { GAME_PRIZE_WORDS, buildGameChangeExpiredInstructions, buildGameChangeCancelledInstructions, buildGameKickoffInstructions, buildGameProposalInstructions, buildGameRematchInstructions } from "../src/game-chat-notifications.ts";
+import { GAME_LIVE_LORE_GUIDANCE, GAME_PRIZE_WORDS, buildGameChangeExpiredInstructions, buildGameChangeCancelledInstructions, buildGameKickoffInstructions, buildGameMissedDayInstructions, buildGameProposalInstructions, buildGameRecapInstructions, buildGameRematchInstructions, gameLiveLoreGuidanceForState } from "../src/game-chat-notifications.ts";
 
 describe("game v1 notification instructions", () => {
   it("keeps a rematch short, app-controlled and free of link or lifecycle jargon", () => {
@@ -61,5 +61,56 @@ describe("game v1 notification instructions", () => {
     for (const instructions of [proposal, kickoff]) expect(instructions).toContain(GAME_PRIZE_WORDS);
     expect(GAME_PRIZE_WORDS).toContain("owes you breakfast in bed.");
     for (const word of ["ticket", "bet", "wager", "stake", "winnings", "cash in"]) expect(GAME_PRIZE_WORDS).toContain(word);
+  });
+  it("snapshots the recap and missed-day prompt boundaries", () => {
+    const recap = buildGameRecapInstructions([{ playerName: "Ava", text: "My alarm won." }]);
+    expect(recap).not.toMatch(/\b(?:read_chat|read_lore|add_lore)\b/u);
+    const transcript = [{ playerName: "Ava", text: "My alarm won." }];
+    const missed = buildGameMissedDayInstructions({ playerName: "Ava", firstMissedDate: "2030-03-04", missedDates: ["2030-03-04", "2030-03-05"], transcript });
+    expect({
+      recapOpening: recap.split("\n")[0],
+      recapToolOrder: recap.includes("Use murph.read_game first") && recap.includes("then use murph.write_recap"),
+      recapReply: recap.includes("chatLine is the message you post") && recap.includes("Lead with the week's funniest specific moment"),
+      recapLore: recap.includes("murph.game_lore") && recap.includes("Chat line used:"),
+      recapTranscript: recap.includes('"playerName":"Ava","text":"My alarm won."'),
+      missedOpening: missed.split("\n")[0],
+      missedCanSkip: missed.includes("finish without a reply"),
+      missedData: JSON.parse(missed.split("\n").at(-1)!),
+      liveLoreGuidance: GAME_LIVE_LORE_GUIDANCE,
+    }).toMatchInlineSnapshot(`
+      {
+        "liveLoreGuidance": "This room has a live game. Use murph.game_lore to keep about 200 lines of brief dated pair lore from current chat and game evidence—verbatim excuses, trash talk, firsts, streaks, comebacks, running and used bits—trimming oldest first.",
+        "missedCanSkip": true,
+        "missedData": {
+          "firstMissedDate": "2030-03-04",
+          "missedDates": [
+            "2030-03-04",
+            "2030-03-05",
+          ],
+          "playerName": "Ava",
+          "transcript": [
+            {
+              "playerName": "Ava",
+              "text": "My alarm won.",
+            },
+          ],
+        },
+        "missedOpening": "A player missed one or more consecutive scheduled game days. Read the pair lore with murph.game_lore and use the bounded same-room transcript below before deciding whether to speak.",
+        "recapLore": true,
+        "recapOpening": "The game just ended. Write its recap: a short story of the week the two players swipe through in the app, like Instagram stories. Use murph.read_game first, read the pair lore with murph.game_lore, use the bounded current-room transcript below, then use murph.write_recap and update the pair lore with murph.game_lore.",
+        "recapReply": true,
+        "recapToolOrder": true,
+        "recapTranscript": true,
+      }
+    `);
+  });
+  it("adds lore guidance only when the bound shared state has a live game", () => {
+    const live = hostedGameChatStateSchema.parse({ games: [{
+      id: "game_synthetic", status: "live", startsOn: null, lengthDays: 7, terms: { n: 1, fromDay: 0, tasks: [], schedule: { count: 3 }, stakes: [] }, players: [], pendingChange: null,
+      changeControls: { canStartNow: false, canEdit: false, canEditSchedule: false, canEditStartDate: false, editableFromDay: null },
+    }] });
+    expect(gameLiveLoreGuidanceForState(live)).toBe(GAME_LIVE_LORE_GUIDANCE);
+    expect(gameLiveLoreGuidanceForState({ games: live.games.map((game) => ({ ...game, status: "settled" as const })) })).toBeUndefined();
+    expect(gameLiveLoreGuidanceForState({ games: [] })).toBeUndefined();
   });
 });

@@ -946,6 +946,7 @@ describe("startAssistantProviderStubServer", () => {
 describe("expectAdvertisedMurphDynamicTools", () => {
   it("expects gated tools only when the scenario enables them", () => {
     const allToolNames = listMurphDynamicToolNames();
+    const ordinaryToolNames = allToolNames.filter((name) => name !== "murph.game_lore");
     const baseToolNames = allToolNames.filter((name) =>
       name !== "murph.analyze_video"
       && name !== "murph.create_calendar_link"
@@ -955,6 +956,7 @@ describe("expectAdvertisedMurphDynamicTools", () => {
       && name !== "murph.group_room_model"
       && name !== "murph.read_game"
       && name !== "murph.update_game"
+      && name !== "murph.game_lore"
       && name !== "murph.game_photo"
       && name !== "murph.imessage_contact"
       && name !== "murph.usage_diagnostics"
@@ -1012,6 +1014,7 @@ describe("expectAdvertisedMurphDynamicTools", () => {
     expect(allToolNames).toContain("murph.group_room_model");
     expect(allToolNames).toContain("murph.read_game");
     expect(allToolNames).toContain("murph.update_game");
+    expect(allToolNames).toContain("murph.game_lore");
     expect(allToolNames).toContain("murph.game_photo");
     expect(allToolNames).toContain("murph.imessage_contact");
     expect(allToolNames).toContain("murph.usage_diagnostics");
@@ -1078,15 +1081,15 @@ describe("expectAdvertisedMurphDynamicTools", () => {
     );
 
     expectAdvertisedMurphDynamicTools(
-      [buildResponsesRequest(allToolNames)],
+      [buildResponsesRequest(ordinaryToolNames)],
       allToolsAvailable,
     );
     expectAdvertisedMurphDynamicTools(
-      [buildResponsesRequest(allToolNames, "code-mode")],
+      [buildResponsesRequest(ordinaryToolNames, "code-mode")],
       allToolsAvailable,
     );
     expectAdvertisedMurphDynamicTools(
-      [buildResponsesRequest(allToolNames, "code-mode-namespaced")],
+      [buildResponsesRequest(ordinaryToolNames, "code-mode-namespaced")],
       allToolsAvailable,
     );
   });

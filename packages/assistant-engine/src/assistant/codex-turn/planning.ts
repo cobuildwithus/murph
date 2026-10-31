@@ -1,4 +1,4 @@
-import { GAME_PHOTO_CHAT_GUIDANCE } from "../../assistant-codex/dynamic-tools/games.js"
+import { GAME_PHOTO_CHAT_GUIDANCE, MURPH_GAME_LORE_TOOL, MURPH_READ_GAME_RECAP_TOOL, MURPH_WRITE_RECAP_TOOL } from "../../assistant-codex/dynamic-tools/games.js"
 import { resolveUsageOptimizerFeedbackScope } from '../weekly-usage-optimizer.js'
 import { resolveAssistantFollowUpTurnContext } from '../follow-ups.js'
 import type { AssistantSession } from '@murphai/operator-config/assistant-cli-contracts'
@@ -132,6 +132,7 @@ import { resolveAssistantConversationScope } from '../conversation-policy.js'
 import {
   MURPH_GROUP_ROOM_MODEL_TOOL,
   MURPH_MEMBER_MEMORY_TOOL,
+  MURPH_FINISH_WITHOUT_REPLY_TOOL,
   resolveMurphDynamicTools,
   type MurphDynamicTool,
 } from '../../assistant-codex/dynamic-tool-catalog.js'
@@ -270,6 +271,7 @@ export type AssistantCodexTurnToolProfile =
   | 'provider-turn'
   | 'maintenance-turn'
   | 'output-only-turn'
+  | 'game-host-turn'
 
 export type AssistantCodexThreadScope =
   | 'session-thread'
@@ -464,6 +466,66 @@ interface AssistantRouteTurnPlanInput {
 
 function areConversationGamesAvailable(input: AssistantRouteTurnPlanInput, acceptedInputIds: readonly string[], scope: string): boolean {
   return input.hostedToolContext?.groupTool != null && scope === 'group' && acceptedInputIds.length > 0
+}
+
+export function resolveAssistantGameHostDynamicTools(
+  context: Pick<AssistantHostedToolContext, 'currentGameRecapScope' | 'currentGameMissedCheckInScope'> | null,
+): MurphDynamicTool[] {
+  if (context?.currentGameRecapScope?.() != null) {
+    return [MURPH_READ_GAME_RECAP_TOOL, MURPH_WRITE_RECAP_TOOL, MURPH_GAME_LORE_TOOL]
+  }
+  if (context?.currentGameMissedCheckInScope?.() != null) {
+    return [MURPH_GAME_LORE_TOOL, MURPH_FINISH_WITHOUT_REPLY_TOOL]
+  }
+  return []
+}
+
+async function prepareAssistantGameLoreGuidance(input: {
+  authenticatedGroupProviderTurn: boolean
+  gameHostTurn: boolean
+  hostedToolContext: AssistantHostedToolContext | null
+}): Promise<string | null> {
+  if (![input.authenticatedGroupProviderTurn, input.gameHostTurn].includes(true)) return null
+  return await input.hostedToolContext?.prepareGameLore?.() ?? null
+}
+
+function optionalPrompt(prompt: string | null): string[] {
+  return prompt ? [prompt] : []
+}
+
+function resolveAssistantAllowFinishWithoutReply(input: {
+  configured: boolean | null | undefined
+  hostedToolContext: AssistantHostedToolContext | null
+  toolProfile: AssistantCodexTurnToolProfile
+}): boolean {
+  if (input.configured != null) return input.configured
+  return [
+    input.toolProfile === 'provider-turn',
+    input.hostedToolContext?.currentGameMissedCheckInScope?.() != null,
+  ].includes(true)
+}
+
+function resolveAssistantSpecializedDynamicTools(input: {
+  gameHostTurn: boolean
+  hostedToolContext: AssistantHostedToolContext | null
+  maintenanceProfile: AssistantMessageInput['maintenanceProfile']
+  maintenanceTurn: boolean
+  onboardingGoalCheckinTurn: boolean
+  outputOnlyTurn: boolean
+  scheduledAutomationId: string | null | undefined
+}): MurphDynamicTool[] | null {
+  if (input.outputOnlyTurn || input.onboardingGoalCheckinTurn) return []
+  if (input.gameHostTurn) return resolveAssistantGameHostDynamicTools(input.hostedToolContext)
+  if (!input.maintenanceTurn) return null
+  if (input.maintenanceProfile === 'group-room-model'
+    && input.scheduledAutomationId === MURPH_GROUP_ROOM_MODEL_CONSOLIDATION_AUTOMATION_ID) {
+    return [MURPH_GROUP_ROOM_MODEL_TOOL]
+  }
+  if (input.maintenanceProfile === 'member-memory'
+    && input.scheduledAutomationId === MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID) {
+    return [MURPH_MEMBER_MEMORY_TOOL]
+  }
+  return []
 }
 
 function gamePhotoContextPrompts(input: AssistantRouteTurnPlanInput, acceptedInputIds: readonly string[], scope: string): string[] {
@@ -840,6 +902,7 @@ export async function resolveAssistantRouteTurnPlan(
     input.hostedToolContext?.personalizationTool != null &&
     input.input.assistantStyleSettingsAuthorized !== false
   const outputOnlyTurn = input.profile.toolProfile === 'output-only-turn'
+  const gameHostTurn = input.profile.toolProfile === 'game-host-turn'
   // Context handoff is the only conversation profile that is both isolated
   // and output-only. Keep the existing profile shape so ordinary conversation
   // planning remains its owner while this detached delivery contract stays
@@ -983,6 +1046,11 @@ export async function resolveAssistantRouteTurnPlan(
       '- do not call `murph.generate_image` while this status is present, even for a different image. if asked for another image, say that request was not started and ask the user to wait for this result first.',
     ].join('\n')
   })()
+  const gameLoreGuidance = await prepareAssistantGameLoreGuidance({
+    authenticatedGroupProviderTurn,
+    gameHostTurn,
+    hostedToolContext: input.hostedToolContext ?? null,
+  })
   const hostedDynamicContextPrompts =
     maintenanceTurn || systemNotificationTurn
       ? []
@@ -991,6 +1059,7 @@ export async function resolveAssistantRouteTurnPlan(
           ...(pendingHostedImageContextPrompt
             ? [pendingHostedImageContextPrompt]
             : []),
+          ...optionalPrompt(gameLoreGuidance),
         ]
   const groupRoomModelPrompt = authenticatedGroupProviderTurn
     ? await readAssistantGroupRoomModelPrompt({
@@ -1237,24 +1306,25 @@ export async function resolveAssistantRouteTurnPlan(
     privateInteractiveAudience ||
     (hostedGroupRuntime && messageTargetingAvailable)
   const productFeedbackAuthorized = hasProductFeedbackAuthority(input, conversationScope)
-  const allowFinishWithoutReply =
-    input.allowFinishWithoutReply ?? input.profile.toolProfile === 'provider-turn'
+  const allowFinishWithoutReply = resolveAssistantAllowFinishWithoutReply({
+    configured: input.allowFinishWithoutReply,
+    hostedToolContext: input.hostedToolContext ?? null,
+    toolProfile: input.profile.toolProfile,
+  })
   // Maintenance turns run without a delivery target. Each mutable profile
   // receives only its host-owned tool for the exact managed automation.
-  const availableDynamicTools = outputOnlyTurn || onboardingGoalCheckinTurn
-      ? []
-      : maintenanceTurn
-      ? input.input.maintenanceProfile === 'group-room-model' &&
-      input.input.scheduledInvocationAuthority?.automationId ===
-        MURPH_GROUP_ROOM_MODEL_CONSOLIDATION_AUTOMATION_ID
-        ? [MURPH_GROUP_ROOM_MODEL_TOOL]
-        : input.input.maintenanceProfile === 'member-memory' &&
-          input.input.scheduledInvocationAuthority?.automationId ===
-            MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID
-          ? [MURPH_MEMBER_MEMORY_TOOL]
-          : []
-      : resolveMurphDynamicTools({
+  const specializedDynamicTools = resolveAssistantSpecializedDynamicTools({
+    gameHostTurn,
+    hostedToolContext: input.hostedToolContext ?? null,
+    maintenanceProfile: input.input.maintenanceProfile,
+    maintenanceTurn,
+    onboardingGoalCheckinTurn,
+    outputOnlyTurn,
+    scheduledAutomationId: input.input.scheduledInvocationAuthority?.automationId,
+  })
+  const availableDynamicTools = specializedDynamicTools ?? resolveMurphDynamicTools({
         gamesAvailable: areConversationGamesAvailable(input, userActionAcceptedInputIds, conversationScope),
+        gameLoreAvailable: gameLoreGuidance !== null,
         gamePhotosAvailable: gamePhotoContextPrompts(input, userActionAcceptedInputIds, conversationScope).length > 0,
         pollsAvailable,
         assistantStyleSettingsAvailable,

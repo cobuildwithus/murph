@@ -1,5 +1,7 @@
 import type { ConversationPollTool } from "@murphai/hosted-execution/conversation-polls";
 import { createHash } from 'node:crypto'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import path from 'node:path'
 
 import type {
   HostedReturnContactKind,
@@ -193,6 +195,12 @@ export interface AssistantHostedToolContext {
   }): void
   currentScheduledPhoneCallScope?(): AssistantHostedScheduledPhoneCallScope | null
   currentUserActionScope?(): AssistantHostedUserActionScope | null
+  currentGameRecapScope?(): { gameId: string; eventId: string; pairFingerprint: string } | null
+  currentGameMissedCheckInScope?(): { gameId: string; eventId: string; memberId: string; firstMissedDate: string; pairFingerprint: string } | null
+  prepareGameLore?(): Promise<string | null>
+  readGameLore?(): Promise<string>
+  replaceGameLore?(content: string): Promise<void>
+  recordSavedGameRecapChatLine?(chatLine: string): void
   currentProductFeedbackAcceptedInputIds?(): readonly string[]
   readonly computerToolsAvailable: boolean
   readonly pendingVaultFilesAvailable?: boolean
@@ -233,6 +241,7 @@ export function createAssistantHostedToolContext(input: {
     >,
   ) => void
   recordGroupEmailPendingDeliveryIntentId?: (intentId: string) => void
+  recordSavedGameRecapChatLine?: (chatLine: string) => void
   verifyGeneratedImageDelivery?: (input: {
     contentType: AssistantVaultImageResponseMedia['contentType']
     imageRef: string
@@ -247,6 +256,7 @@ export function createAssistantHostedToolContext(input: {
   session: AssistantSession
 }): AssistantHostedToolContext {
   const executionContext = input.executionContext ?? null
+  let ordinaryGameLore: Promise<{ fingerprint: string; guidance: string } | null> | null = null
   const route = input.route ?? null
   const clinicalRecordsConnectLinkTool =
     executionContext?.clinicalRecordsConnectLinkTool ?? null
@@ -346,6 +356,35 @@ export function createAssistantHostedToolContext(input: {
         }),
       originSessionId: deliveryContext.session.sessionId,
     }
+  }
+  const prepareGameLore = async (): Promise<{ fingerprint: string; guidance: string } | null> => {
+    const explicit = executionContext?.gameRecapScope ?? executionContext?.gameMissedCheckInScope ?? null
+    if (explicit) return { fingerprint: explicit.pairFingerprint, guidance: '' }
+    if (ordinaryGameLore) return ordinaryGameLore
+    ordinaryGameLore = (async () => {
+      const scope = readCurrentUserActionScope()
+      const assistantInputId = scope?.conversationScope === 'group'
+        ? scope.acceptedInputIds[scope.acceptedInputIds.length - 1]
+        : null
+      // Lore is optional: only Linq rooms host games, and a failed probe never blocks the turn.
+      if (!assistantInputId || !executionContext?.groupTool || normalizeHostedDeliveryChannel(input.messageInput.channel) !== 'linq') return null
+      try {
+        const response = await executionContext.groupTool.request({ action: 'read_game', origin: { kind: 'accepted_input', assistantInputId } })
+        const result = response.result
+        return result.status === 'ok' && 'loreFingerprint' in result && typeof result.loreFingerprint === 'string'
+          && 'loreGuidance' in result && typeof result.loreGuidance === 'string'
+          ? { fingerprint: result.loreFingerprint, guidance: result.loreGuidance }
+          : null
+      } catch {
+        return null
+      }
+    })()
+    return ordinaryGameLore
+  }
+  const gameLorePath = async (): Promise<string> => {
+    const scope = await prepareGameLore()
+    if (!scope || !/^[a-f0-9]{32}$/u.test(scope.fingerprint)) throw new TypeError('Pair lore authority is unavailable.')
+    return path.join(input.messageInput.vault, 'games', `lore-${scope.fingerprint}.md`)
   }
   const readCurrentInvocationScope = (): AssistantHostedInvocationScope | null => {
     if (readCurrentHostedImageCompletionEffectScope() !== null) {
@@ -562,6 +601,24 @@ export function createAssistantHostedToolContext(input: {
     recordGroupEmailSendResult: input.recordGroupEmailSendResult,
     currentScheduledPhoneCallScope: readCurrentScheduledPhoneCallScope,
     currentUserActionScope: readCurrentUserActionScope,
+    currentGameRecapScope: () => executionContext?.gameRecapScope ?? null,
+    currentGameMissedCheckInScope: () => executionContext?.gameMissedCheckInScope ?? null,
+    prepareGameLore: async () => (await prepareGameLore())?.guidance || null,
+    readGameLore: async () => {
+      try {
+        return (await readFile(await gameLorePath(), 'utf8')).slice(-64 * 1024)
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return ''
+        throw error
+      }
+    },
+    replaceGameLore: async (content) => {
+      if (Buffer.byteLength(content, 'utf8') > 64 * 1024) throw new TypeError('Pair lore is too large.')
+      const target = await gameLorePath()
+      await mkdir(path.dirname(target), { recursive: true })
+      await writeFile(target, content, { encoding: 'utf8', mode: 0o600 })
+    },
+    recordSavedGameRecapChatLine: input.recordSavedGameRecapChatLine,
     currentProductFeedbackAcceptedInputIds: () =>
       readCurrentHostedImageCompletionEffectScope() === null
         ? input.getProductFeedbackAcceptedInputIds?.() ?? []

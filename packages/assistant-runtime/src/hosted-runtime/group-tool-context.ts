@@ -339,6 +339,7 @@ function buildHostedGroupSimpleActionUnavailable(
         | "read_game"
         | "update_game"
         | "game_photo"
+        | "write_recap"
         | "record_current_sender_journal_fact"
         | "set_current_sender_journal_capture"
         | "set_journal_capture";
@@ -347,7 +348,7 @@ function buildHostedGroupSimpleActionUnavailable(
   unavailableReason: "authenticated_sender_required",
 ): HostedRuntimeGroupToolResponse {
   if (request.action === "game_chat_bootstrap") return { action: request.action, result: { status: "unavailable" } };
-  if (request.action === "read_game" || request.action === "update_game" || request.action === "game_photo") {
+  if (request.action === "read_game" || request.action === "update_game" || request.action === "game_photo" || request.action === "write_recap") {
     return { action: request.action, result: { status: "unavailable", error: unavailableReason } };
   }
   return {
