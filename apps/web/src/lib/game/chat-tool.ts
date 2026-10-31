@@ -139,6 +139,8 @@ export async function readGameRecapChatMessages(input: {
     containerMemberId: input.containerMemberId,
     playerNamesByMemberId: input.material.validation.playerNamesByMemberId,
     since: input.material.validation.startedAt,
+    // The game's own chat: a recap written later never reads the next game's.
+    until: input.material.validation.settledAt ?? undefined,
   });
 }
 
@@ -146,13 +148,14 @@ export async function readGameChatTranscript(input: {
   containerMemberId: string;
   playerNamesByMemberId: readonly { memberId: string; name: string }[];
   since: Date;
+  until?: Date;
 }): Promise<GameRecapChatMessage[]> {
   const prisma = getPrisma();
   const availableAt = new Date();
   const rows = await prisma.hostedMailboxItem.findMany({
     orderBy: { laneSeq: "desc" }, take: 100,
     where: { ...buildHostedMailboxLiveItemWhere(availableAt), userId: input.containerMemberId,
-      kind: "conversation.message", lane: "conversation", occurredAt: { gte: input.since } },
+      kind: "conversation.message", lane: "conversation", occurredAt: { gte: input.since, ...(input.until ? { lte: input.until } : {}) } },
     select: { id: true, userId: true, dedupeKey: true, kind: true, lane: true, laneSeq: true, occurredAt: true,
       payloadInlineCiphertext: true, payloadSchema: true, payload: { select: { payloadCiphertext: true } } },
   });

@@ -1435,6 +1435,7 @@ export type GameRecapMaterial = {
   entries: Array<{ entryId: string; kind: string; playerName: string; text: string | null; visibleToBoth: boolean }>;
   validation: {
     startedAt: Date;
+    settledAt: Date | null;
     playerNamesByMemberId: Array<{ memberId: string; name: string }>;
     result: Array<{ memberId: string; name: string; score: number }>;
   };
@@ -1485,7 +1486,7 @@ export async function readGameRecapMaterial(gameId: string, containerMemberId: s
   }));
   return {
     players: row.players.map((player) => names.get(player.memberId) ?? ""), entries,
-    validation: { startedAt: row.startedAt ?? row.createdAt,
+    validation: { startedAt: row.startedAt ?? row.createdAt, settledAt: row.settledAt,
       playerNamesByMemberId: row.players.map((player) => ({ memberId: player.memberId, name: names.get(player.memberId) ?? "" })),
       result: result.scores.map((score) => ({ memberId: score.memberId, name: names.get(score.memberId) ?? "", score: score.score })) },
     game: { id: row.id, players: row.players.map((player) => ({ name: names.get(player.memberId) ?? "", task: terms.tasks.find((task) => task.seat === player.seat)?.text ?? "" })),
