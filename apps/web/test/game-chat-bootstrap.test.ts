@@ -2,10 +2,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { HostedGameChatBootstrapRequest } from "@murphai/hosted-execution/runtime-control";
 
 const m = vi.hoisted(() => ({
-  writeMetadata: vi.fn(), markReceipt: vi.fn(), attached: false, skipped: false, game: vi.fn(), updateGame: vi.fn(), receipt: vi.fn(), otherReceipt: vi.fn(), route: vi.fn(), saveReceipt: vi.fn(), wake: vi.fn(), runtime: vi.fn(), access: vi.fn(), identities: vi.fn(), create: vi.fn(), chat: vi.fn(), lines: vi.fn(), capacity: vi.fn(), claim: vi.fn(), accepted: vi.fn(), prepareMailbox: vi.fn(), enqueue: vi.fn(), mailbox: vi.fn(), pendingMailbox: vi.fn(), prepareContainer: vi.fn(), createContainer: vi.fn(), prepareRoute: vi.fn(), attachRoute: vi.fn(), append: vi.fn(), signal: vi.fn(), participants: vi.fn(), sequence: [] as string[], frozen: null as null | Record<string, unknown>,
+  writeMetadata: vi.fn(), markReceipt: vi.fn(), countReceipt: vi.fn(), attached: false, skipped: false, game: vi.fn(), updateGame: vi.fn(), receipt: vi.fn(), otherReceipt: vi.fn(), route: vi.fn(), saveReceipt: vi.fn(), wake: vi.fn(), runtime: vi.fn(), access: vi.fn(), identities: vi.fn(), create: vi.fn(), chat: vi.fn(), lines: vi.fn(), capacity: vi.fn(), claim: vi.fn(), accepted: vi.fn(), prepareMailbox: vi.fn(), enqueue: vi.fn(), mailbox: vi.fn(), pendingMailbox: vi.fn(), prepareContainer: vi.fn(), createContainer: vi.fn(), prepareRoute: vi.fn(), attachRoute: vi.fn(), append: vi.fn(), signal: vi.fn(), participants: vi.fn(), sequence: [] as string[], frozen: null as null | Record<string, unknown>,
 }));
 vi.mock("../src/lib/prisma", () => {
-  const tx = { $queryRaw: vi.fn(), $executeRaw: m.writeMetadata, game: { findFirst: m.game, findUnique: m.game, update: m.updateGame }, hostedMember: { count: async () => 2 }, hostedThreadRoute: { findFirst: m.route }, hostedMailboxItem: { findFirst: m.pendingMailbox }, hostedLinqDelivery: { findFirst: m.otherReceipt, findUnique: m.receipt, update: m.saveReceipt, updateMany: m.markReceipt }, hostedThreadContainerParticipant: { createMany: m.participants } };
+  const tx = { $queryRaw: vi.fn(), $executeRaw: m.writeMetadata, game: { findFirst: m.game, findUnique: m.game, update: m.updateGame }, hostedMember: { count: async () => 2 }, hostedThreadRoute: { findFirst: m.route }, hostedMailboxItem: { findFirst: m.pendingMailbox }, hostedLinqDelivery: { count: m.countReceipt, findFirst: m.otherReceipt, findUnique: m.receipt, update: m.saveReceipt, updateMany: m.markReceipt }, hostedThreadContainerParticipant: { createMany: m.participants } };
   return { getPrisma: () => ({ ...tx, $transaction: async (fn: (value: typeof tx) => unknown) => fn(tx) }) };
 });
 vi.mock("../src/lib/hosted-crypto/domain-root-unwrap-cache", () => ({ runWithHostedDomainRootUnwrapCache: (fn: () => unknown) => fn(), runWithHostedDomainRootProviderCallsDisabled: (fn: () => unknown) => fn() }));
@@ -45,6 +45,7 @@ describe("generated game chat bootstrap", () => {
       if (data.bootstrapRouteAttachedAt) { m.sequence.push("attached"); m.attached = true; }
     });
     m.markReceipt.mockImplementation(async ({ data }: { data: { skippedAt?: Date; payloadOwnerMemberId?: string } }) => { if (data.skippedAt) m.skipped = true; if (data.payloadOwnerMemberId) m.sequence.push("queue-owner"); return { count: 1 }; });
+    m.countReceipt.mockResolvedValue(1);
     m.identities.mockImplementation(async ({ memberId }: { memberId: string }) => ({ phoneNumber: phones[memberId === "person_a" ? 0 : 1], phoneNumberVerifiedAt: new Date() }));
     m.lines.mockResolvedValue([{ phoneNumber: "+15555550100", phoneNumberLookupKey: "line", maxNewConversationsPerDay: 10 }]);
     m.capacity.mockResolvedValue(true); m.claim.mockResolvedValue({ claimed: true, id: "delivery" });
@@ -66,6 +67,7 @@ describe("generated game chat bootstrap", () => {
   it("does not publish bootstrap work without its reserved lifecycle receipt", async () => {
     m.game.mockResolvedValue(game(null));
     m.markReceipt.mockResolvedValueOnce({ count: 0 });
+    m.countReceipt.mockResolvedValueOnce(0);
     await expect(prepareGameChatBootstrap(gameId, eventId, "Announce the agreed challenge.")).rejects.toThrow("requires its pending lifecycle receipt");
     expect(m.signal).not.toHaveBeenCalled(); expect(m.create).not.toHaveBeenCalled();
   });

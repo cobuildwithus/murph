@@ -585,6 +585,8 @@ export type AssistantWorkspaceArtifactMaterializer = (
 ) => Promise<AssistantWorkspaceArtifactMaterializationResult>
 
 export interface AssistantHostedExecutionContext {
+  gameRecapScope?: { gameId: string; eventId: string; pairFingerprint: string } | null
+  gameMissedCheckInScope?: { gameId: string; eventId: string; memberId: string; firstMissedDate: string; pairFingerprint: string } | null
   actionApprovalPort?: AssistantHostedActionApprovalPort | null
   assertTurnCommitAuthority?(input: {
     acceptedInputs: readonly AssistantAcceptedTurnInputItemInput[]
@@ -680,6 +682,24 @@ export function appendAssistantHostedDynamicContextPrompt(input: {
   }
 }
 
+function normalizeAssistantGameRecapScope(scope: AssistantHostedExecutionContext['gameRecapScope']): { gameId: string; eventId: string; pairFingerprint: string } | null {
+  const gameId = normalizeNullableString(scope?.gameId)
+  const eventId = normalizeNullableString(scope?.eventId)
+  const pairFingerprint = normalizeNullableString(scope?.pairFingerprint)
+  return gameId && eventId && pairFingerprint ? { gameId, eventId, pairFingerprint } : null
+}
+
+function normalizeAssistantGameMissedCheckInScope(scope: AssistantHostedExecutionContext['gameMissedCheckInScope']): NonNullable<AssistantHostedExecutionContext['gameMissedCheckInScope']> | null {
+  const gameId = normalizeNullableString(scope?.gameId)
+  const eventId = normalizeNullableString(scope?.eventId)
+  const memberId = normalizeNullableString(scope?.memberId)
+  const firstMissedDate = normalizeNullableString(scope?.firstMissedDate)
+  const pairFingerprint = normalizeNullableString(scope?.pairFingerprint)
+  return gameId && eventId && memberId && firstMissedDate && pairFingerprint
+    ? { gameId, eventId, memberId, firstMissedDate, pairFingerprint }
+    : null
+}
+
 export function normalizeAssistantExecutionContext(
   input: AssistantExecutionContext | null | undefined,
 ): AssistantExecutionContext {
@@ -713,6 +733,8 @@ export function normalizeAssistantExecutionContext(
   const dynamicContextPrompts = normalizeAssistantDynamicContextPrompts(
     hosted.dynamicContextPrompts,
   )
+  const gameRecapScope = normalizeAssistantGameRecapScope(hosted.gameRecapScope)
+  const gameMissedCheckInScope = normalizeAssistantGameMissedCheckInScope(hosted.gameMissedCheckInScope)
   const familyPlanTool = normalizeAssistantFamilyPlanTool(hosted.familyPlanTool)
   const imessageContactTool = normalizeAssistantIMessageContactTool(
     hosted.imessageContactTool,
@@ -788,6 +810,8 @@ export function normalizeAssistantExecutionContext(
       ...optionalHostedField('groupPermissionOfferTool', groupPermissionOfferTool),
       ...optionalHostedField('groupSharedReader', groupSharedReader),
       ...optionalHostedField('groupTool', groupTool),
+      ...optionalHostedField('gameRecapScope', gameRecapScope),
+      ...optionalHostedField('gameMissedCheckInScope', gameMissedCheckInScope),
       ...optionalHostedField('labsTool', labsTool),
       ...optionalHostedField('planUsageTool', planUsageTool),
       ...optionalHostedField('usageDiagnostics', usageDiagnostics),

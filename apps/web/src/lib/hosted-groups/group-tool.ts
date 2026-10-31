@@ -276,6 +276,7 @@ export const HOSTED_RUNTIME_GROUP_TOOL_ACCESS_CLASSIFICATION = {
   read_game: "participant_aware",
   update_game: "participant_aware",
   game_photo: "participant_aware",
+  write_recap: "participant_aware",
   game_chat_bootstrap: "participant_aware",
   ask: "personal_active",
   handoff: "personal_active",
@@ -454,14 +455,14 @@ export async function handleHostedRuntimeConversationTool(
   if (input.request.action === "game_chat_bootstrap") {
     return handleGameChatBootstrapControl({ memberId: input.memberId, runtimeIdentity: input.runtimeIdentity ?? null, request: input.request });
   }
-  if (input.request.action === "read_game" || input.request.action === "update_game" || input.request.action === "game_photo") {
+  if (input.request.action === "read_game" || input.request.action === "update_game" || input.request.action === "game_photo" || input.request.action === "write_recap") {
     return handleGameChatTool({ memberId: input.memberId, runtimeIdentity: input.runtimeIdentity ?? null, request: input.request });
   }
   return handleHostedRuntimeGroupTool({ ...input, request: input.request });
 }
 
 type HostedRuntimeNonGameToolHandlerInput = Omit<HostedRuntimeGroupToolHandlerInput, "request"> & {
-  request: Exclude<HostedRuntimeGroupToolRequest, { action: "read_game" | "update_game" | "game_photo" | "game_chat_bootstrap" }>;
+  request: Exclude<HostedRuntimeGroupToolRequest, { action: "read_game" | "update_game" | "game_photo" | "write_recap" | "game_chat_bootstrap" }>;
 };
 
 export async function handleHostedRuntimeGroupTool(

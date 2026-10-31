@@ -3,12 +3,15 @@ const m = vi.hoisted(() => ({
   event: vi.fn(), receipts: vi.fn(), frozen: vi.fn(), recover: vi.fn(), receiptUpdate: vi.fn(), game: vi.fn(), current: vi.fn(), bind: vi.fn(),
   state: vi.fn(), rematchNotice: vi.fn(), identity: vi.fn(), discover: vi.fn(), exact: vi.fn(), bootstrap: vi.fn(), proposal: vi.fn(),
   destination: vi.fn(), mailbox: vi.fn(), prepare: vi.fn(), append: vi.fn(), signal: vi.fn(), route: vi.fn(),
+  reserveMissed: vi.fn(), recapMaterial: vi.fn(), recapMessages: vi.fn(), transcript: vi.fn(),
 }));
 vi.mock("../src/lib/prisma", () => {
   const db = { gameEvent: { findUnique: m.event }, hostedLinqDelivery: { findMany: (input: { where: { payloadSchema?: string } }) => input.where.payloadSchema ? m.frozen(input) : m.receipts(input), updateMany: m.receiptUpdate }, game: { findUnique: m.game, findFirst: m.current, updateMany: m.bind } };
   return { getPrisma: () => ({ ...db, $transaction: async (fn: (tx: typeof db) => unknown) => fn(db) }) };
 });
-vi.mock("../src/lib/game/service", () => ({ readGameChatState: m.state, readGameRematchNotice: m.rematchNotice }));
+vi.mock("../src/lib/game/service", () => ({ readGameChatState: m.state, readGameRematchNotice: m.rematchNotice,
+  readGameRecapMaterial: m.recapMaterial, reserveDueGameMissedDayCheckIns: m.reserveMissed }));
+vi.mock("../src/lib/game/chat-tool", () => ({ readGameRecapChatMessages: m.recapMessages, readGameChatTranscript: m.transcript }));
 vi.mock("../src/lib/game/chat-membership", () => ({ findExistingGameChat: m.discover, requireExactChat: m.exact }));
 vi.mock("../src/lib/game/chat-bootstrap", () => ({ prepareGameChatBootstrap: m.bootstrap, reconcileFrozenGameChatBootstrapReceipt: m.recover }));
 vi.mock("../src/lib/game/chat-delivery", () => ({ deliverGameChangeProposal: m.proposal }));
@@ -32,9 +35,13 @@ const receipt = { id: "receipt", status: "awaiting_generation", sourceRef: "game
 describe("durable game chat lifecycle", () => {
   beforeEach(() => {
     vi.resetAllMocks();
+    m.reserveMissed.mockResolvedValue(0);
     m.receipts.mockResolvedValue([receipt]); m.frozen.mockResolvedValue([]); m.recover.mockResolvedValue(true); m.receiptUpdate.mockResolvedValue({ count: 1 });
     m.game.mockResolvedValue(game); m.current.mockResolvedValue({ id: "game" }); m.bind.mockResolvedValue({ count: 1 });
     m.state.mockResolvedValue({ games: [{ id: "game", status: "live", lengthDays: 7, startsOn: null, terms: { n: 1, fromDay: 0, tasks: [{ seat: 0, text: "Read a chapter" }, { seat: 1, text: "Read a chapter" }], schedule: { days: [0, 1, 2, 3, 4] }, stakes: [] }, players: players.map((memberId, seat) => ({ memberId, seat, firstName: seat ? "Sam" : "Alex", dayOne: "2030-03-04", timeZone: seat ? "Pacific/Auckland" : "America/Los_Angeles" })), pendingChange: null }] });
+    m.recapMaterial.mockResolvedValue({ game: {}, players: ["Alex", "Sam"], entries: [], validation: { startedAt: now, playerNamesByMemberId: [] } });
+    m.recapMessages.mockResolvedValue([{ playerName: "Alex", text: "The bounded room transcript." }]);
+    m.transcript.mockResolvedValue([{ playerName: "Alex", text: "The bounded room transcript." }]);
     const rules = { checkInKind: "photo", lengthDays: 7, schedule: { days: [0, 1, 2, 3, 4] }, stakes: [], tasksByMember: { "person-a": "Read a chapter", "person-b": "Read a chapter" } };
     m.rematchNotice.mockResolvedValue({ requesterName: "Alex", previous: rules, rematch: rules, startsOn: null });
     m.identity.mockImplementation(async ({ memberId }: { memberId: string }) => ({ phoneNumber: memberId === players[0] ? "+15555550101" : "+15555550102", phoneNumberVerifiedAt: now }));
@@ -53,6 +60,27 @@ describe("durable game chat lifecycle", () => {
     expect(m.rematchNotice).toHaveBeenCalledExactlyOnceWith("game", players);
     expect(m.exact).toHaveBeenCalledExactlyOnceWith("room", ["+15555550101", "+15555550102"]);
     expect(m.current).toHaveBeenCalledWith(expect.objectContaining({ where: { id: "game", status: { in: ["invited"] }, chatContainerMemberId: "room" } }));
+    expect(m.discover).not.toHaveBeenCalled(); expect(m.bootstrap).not.toHaveBeenCalled();
+  });
+  it("queues recap authority only for the settled game already bound to this room", async () => {
+    m.game.mockResolvedValue({ ...game, status: "settled" });
+    m.receipts.mockResolvedValue([{ ...receipt, template: "game_recap", idempotencyKey: "hash:game-recap:game" }]);
+    await expect(drainGameChatLifecycle({ now })).resolves.toEqual({ attempted: 1, queued: 1, deferred: 0 });
+    const notification = m.prepare.mock.calls[0][0].envelope.notification;
+    expect(notification).not.toHaveProperty("gameRecap");
+    expect(notification.responsePolicy).toMatchObject({ kind: "require_game_recap", gameId: "game", eventId: "game-recap:game", pairFingerprint: expect.stringMatching(/^[a-f0-9]{32}$/u) });
+    expect(notification.instructions).toContain("murph.write_recap");
+    expect(notification.instructions).toContain("The bounded room transcript.");
+    expect(m.discover).not.toHaveBeenCalled(); expect(m.bootstrap).not.toHaveBeenCalled();
+  });
+  it("queues one skippable missed-day turn in the bound room", async () => {
+    m.receipts.mockResolvedValue([{ ...receipt, template: "game_missed", sourceRef: "game:person-a:2030-03-03", idempotencyKey: "hash:game-missed:game:person-a:2030-03-03" }]);
+    await expect(drainGameChatLifecycle({ now })).resolves.toEqual({ attempted: 1, queued: 1, deferred: 0 });
+    const notification = m.prepare.mock.calls[0][0].envelope.notification;
+    expect(notification).toMatchObject({ deliveryIdempotencyKey: "game-missed:game:person-a:2030-03-03",
+      responsePolicy: { kind: "game_missed_check_in", gameId: "game", eventId: "game-missed:game:person-a:2030-03-03",
+        memberId: "person-a", firstMissedDate: "2030-03-03", pairFingerprint: expect.stringMatching(/^[a-f0-9]{32}$/u) } });
+    expect(notification.instructions).toContain("If the player already explained the miss in this chat, finish without a reply");
     expect(m.discover).not.toHaveBeenCalled(); expect(m.bootstrap).not.toHaveBeenCalled();
   });
   it("drops a rematch notice after acceptance and never discovers or creates a room", async () => {
@@ -167,7 +195,7 @@ describe("durable game chat lifecycle", () => {
     });
     expect(m.exact).toHaveBeenCalledExactlyOnceWith("room", ["+15555550101", "+15555550102"]);
     expect(m.append).toHaveBeenCalledOnce();
-    expect(m.receiptUpdate).toHaveBeenLastCalledWith(expect.objectContaining({ where: { idempotencyKey: "hash:game-started:game", source: "game_lifecycle", status: "awaiting_generation" }, data: { status: "generation_queued", retryAfterAt: expect.any(Date) } }));
+    expect(m.receiptUpdate).toHaveBeenLastCalledWith(expect.objectContaining({ where: { idempotencyKey: "hash:game-started:game", source: "game_lifecycle", status: "awaiting_generation" }, data: { status: "generation_queued", retryAfterAt: expect.any(Date), payloadOwnerMemberId: "room" } }));
     const notification = m.prepare.mock.calls[0][0].envelope.notification;
     expect(notification.responsePolicy).toEqual({ kind: "require_send" });
     expect(notification.instructions).toContain("do not create, schedule or claim any reminders");
@@ -196,7 +224,7 @@ describe("durable game chat lifecycle", () => {
     m.signal.mockRejectedValue(new Error("Signal unavailable"));
     await expect(drainGameChatLifecycle({ now })).resolves.toEqual({ attempted: 1, queued: 0, deferred: 1 });
     expect(m.append).toHaveBeenCalledOnce();
-    expect(m.receiptUpdate).toHaveBeenLastCalledWith(expect.objectContaining({ data: { status: "generation_queued", retryAfterAt: expect.any(Date) } }));
+    expect(m.receiptUpdate).toHaveBeenLastCalledWith(expect.objectContaining({ data: { status: "generation_queued", retryAfterAt: expect.any(Date), payloadOwnerMemberId: "room" } }));
     // The same bounded game receipt sweep owns notification signal recovery.
   });
   it("recovers a failed first signal without generation, route discovery or a second send", async () => {

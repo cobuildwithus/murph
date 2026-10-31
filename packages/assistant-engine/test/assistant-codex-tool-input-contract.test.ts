@@ -1,10 +1,11 @@
-import { INCOMPLETE_BASE_UPDATE_GAME_TOOL } from './support/game-input-baselines.ts'
-import { GAME_INPUT_BASELINES, V1_BASE_PHOTO_GUIDANCE } from './support/game-input-baselines.ts'
+import { GAME_HOST_BASE_READ_GAME_TOOL, INCOMPLETE_BASE_UPDATE_GAME_TOOL } from './support/game-input-baselines.ts'
+import { GAME_INPUT_BASELINES } from './support/game-input-baselines.ts'
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { rm } from 'node:fs/promises'
 
 import { HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV } from '@murphai/hosted-execution/env'
+import { GAME_LIVE_LORE_GUIDANCE } from '@murphai/hosted-execution/runtime-control'
 import { afterAll, afterEach, describe, expect, it } from 'vitest'
 
 import {
@@ -1351,17 +1352,24 @@ describe('game progress and photo initial input measurement', () => {
   )
 })
 
-describe('game v1 initial input measurement', () => {
-  it.skipIf(process.env.MURPH_MEASURE_GAME_V1_INPUT !== '1').each(['direct', 'group'] as const)(
-    'game v1: complete first provider input (%s)', { timeout: 180_000 }, async (scope) => {
+describe('game host initial input measurement', () => {
+  it.skipIf(process.env.MURPH_MEASURE_GAME_HOST_INPUT !== '1').each([
+    { label: 'direct', scope: 'direct', liveGame: false },
+    { label: 'group-no-live-game', scope: 'group', liveGame: false },
+    { label: 'group-live-game', scope: 'group', liveGame: true },
+  ] as const)(
+    'game host: complete first provider input ($label)', { timeout: 180_000 }, async ({ label, scope, liveGame }) => {
       stub ??= await startScriptedResponsesStub()
       const scenario = await prepareScriptedTurnScenario(stub, temporaryPaths, { model: 'gpt-6.1-sol', multiAgentV2: true })
       const catalog = await writeHostedOpenAiMixedModeModelCatalogJson({ codexCommand: scenario.turnInput.codexCommand, directory: scenario.turnInput.codexHome })
       const measurements: Array<{ phase: string; bytes: number; providerFields: string[]; instructionsBytes: number; dynamicContextBytes: number; toolCount: number; registeredToolBytes: number; exclusions: string[] }> = []
-      for (const phase of ['v1', 'head'] as const) {
+      for (const phase of ['base', 'head'] as const) {
+        const liveGameLoreAvailable = phase === 'head' && liveGame
         const layers = buildAssistantSystemPromptLayers({
           assistantCliContract: null, assistantHostedAutomationAvailable: true,
-          assistantDynamicContextPrompts: scope === 'group' ? [phase === 'head' ? GAME_PHOTO_CHAT_GUIDANCE : V1_BASE_PHOTO_GUIDANCE] : [],
+          assistantDynamicContextPrompts: scope === 'group'
+            ? [GAME_PHOTO_CHAT_GUIDANCE, ...(liveGameLoreAvailable ? [GAME_LIVE_LORE_GUIDANCE] : [])]
+            : [],
           assistantHostedGroupToolSurface: scope === 'group' ? 'families' : 'none',
           channel: 'linq', cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
           conversationScope: scope, currentLocalDate: '2030-04-01', currentInstant: '2030-04-01T16:00:00.000Z', currentTimeZone: 'America/New_York',
@@ -1373,11 +1381,10 @@ describe('game v1 initial input measurement', () => {
           groupAvailable: scope === 'group', groupSharedReadAvailable: scope === 'group', responseCardsAvailable: scope === 'direct',
           imageGenerationAvailable: false, progressUpdatesAvailable: false,
           gamesAvailable: scope === 'group', gamePhotosAvailable: scope === 'group',
+          gameLoreAvailable: liveGameLoreAvailable,
         })
-        const tools = availableTools.map((tool) => {
-          if (phase === 'head') return tool
-          return GAME_INPUT_BASELINES[phase].find((baseline) => baseline.name === tool.name) ?? tool
-        })
+        const tools = phase === 'head' ? availableTools : availableTools.map((tool) =>
+          tool.name === GAME_HOST_BASE_READ_GAME_TOOL.name ? GAME_HOST_BASE_READ_GAME_TOOL : tool)
         await stopWarmCodexAppServer()
         stub.markRequestBaseline()
         stub.captureProviderRequestDiagnostics({ completeInput: true })
@@ -1396,8 +1403,9 @@ describe('game v1 initial input measurement', () => {
         assert.equal(body.model, 'gpt-6.1-sol')
         delete body.prompt_cache_key
         const serialized = JSON.stringify(body)
-        if (scope === 'group') assert.equal(serialized.includes('game_photo'), true)
-        else assert.equal(serialized.includes('game_photo'), false)
+        assert.equal(serialized.includes('game_photo'), scope === 'group')
+        assert.equal(serialized.includes('game_lore'), liveGameLoreAvailable)
+        assert.equal(serialized.includes('write_recap'), false)
         measurements.push({ phase, bytes: Buffer.byteLength(serialized), providerFields: Object.keys(body).sort(),
           instructionsBytes: Buffer.byteLength(developerInstructions), dynamicContextBytes: Buffer.byteLength(layers.dynamicTurnContextPrompt),
           toolCount: tools.length, registeredToolBytes: Buffer.byteLength(JSON.stringify(tools)),
@@ -1405,8 +1413,8 @@ describe('game v1 initial input measurement', () => {
       }
       const base = measurements[0], head = measurements.at(-1)
       assert.ok(base && head)
-      process.stdout.write('[game-v1-input-proof] ' + JSON.stringify({ scope, model: 'gpt-6.1-sol', measurements,
-        baseline: 'Exact v1 base tool descriptors and photo guidance from 970bce2bca; head uses production v1 tools. All other production instructions, native catalog, messages and tools remain identical.',
+      process.stdout.write('[game-host-input-proof] ' + JSON.stringify({ case: label, model: 'gpt-6.1-sol', measurements,
+        baseline: 'Exact committed read_game descriptor from 64f117d039; base and head otherwise use the same production instructions, native catalog, messages and ordinary tools. Only a live-game head adds lore guidance and murph.game_lore.',
         incrementalBytes: measurements.slice(1).map((next, index) => ({ from: measurements[index]!.phase, to: next.phase, delta: next.bytes - measurements[index]!.bytes, percent: (next.bytes - measurements[index]!.bytes) / measurements[index]!.bytes * 100 })),
         deltaBytes: head.bytes - base.bytes, deltaPercent: (head.bytes - base.bytes) / base.bytes * 100,
         tokens: null, tokenDelta: null, tokenPercent: null, tokenLimitation: 'No exact GPT-6.1 Sol tokenizer is configured; scripted usage is not tokenization and no estimate is substituted.',

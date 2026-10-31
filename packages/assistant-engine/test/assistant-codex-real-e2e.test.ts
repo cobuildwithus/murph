@@ -45584,6 +45584,75 @@ describeRealCodex('real Codex game lifecycle messaging e2e', () => {
   }, 360_000)
 })
 
+describeRealCodex('real Codex game recap e2e', () => {
+  it('game recap notification writes one sealed story and queues its saved chat line exactly', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-game-recap-e2e-'))
+    const permissionHome = await materializeRealCodexHostedPermissionHome(config)
+    const { buildGameRecapInstructions } = await import('@murphai/hosted-execution/runtime-control')
+    const calls: Array<import('@murphai/hosted-execution/runtime-control').HostedRuntimeGroupToolRequest> = []
+    const saved: Array<import('@murphai/hosted-execution/runtime-control').HostedGameRecap> = []
+    try {
+      await initializeVault({ timezone: 'America/New_York', vaultRoot: workingDirectory })
+      await mkdir(path.join(workingDirectory, 'games'), { recursive: true })
+      await writeFile(path.join(workingDirectory, 'games', 'lore-0123456789abcdef0123456789abcdef.md'), '# Ava & Leo\n\n- Used bit: sauna citizenship.\n', 'utf8')
+      const modelTarget = createAssistantModelTarget({
+        approvalPolicy: 'never', codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND),
+        codexHome: permissionHome.codexHome, model: config.model, modelProvider: config.modelProvider,
+        provider: 'codex-cli', reasoningEffort: 'low', sandbox: 'workspace-write',
+      })
+      if (!modelTarget) throw new Error('Expected real Codex target.')
+      const result = await sendAssistantNotificationLocal({
+        actorId: null, bindingDeliveryTarget: 'synthetic-game-thread', channel: 'linq',
+        deliveryDispatchMode: 'queue-only', deliveryTarget: 'synthetic-game-thread',
+        deliveryIdempotencyKey: 'game-recap:game_recap_synthetic',
+        deliveryDedupeToken: 'game-recap:game_recap_synthetic',
+        executionContext: { hosted: {
+          defaultTarget: modelTarget,
+          gameRecapScope: { gameId: 'game_recap_synthetic', eventId: 'game-recap:game_recap_synthetic', pairFingerprint: '0123456789abcdef0123456789abcdef' },
+          groupTool: { request: async (request): Promise<import('@murphai/hosted-execution/runtime-control').HostedGameToolResponse> => {
+            calls.push(request)
+            if (request.action === 'read_game') return { action: 'read_game', result: { status: 'ok', recapGame: {
+              id: 'game_recap_synthetic', players: [{ name: 'Ava', task: '10 minutes of abs' }, { name: 'Leo', task: '100 pushups' }],
+              lengthDays: 3, schedule: { days: [0, 1, 2] }, stakes: [{ kind: 'prize', item: 'breakfast in bed' }],
+              score: [{ name: 'Ava', score: 3 }, { name: 'Leo', score: 2 }], days: [
+                { dayNumber: 1, posts: { Ava: { entryId: 'entry_ava_1', kind: 'photo', text: 'purple mat' }, Leo: { entryId: 'entry_leo_1', kind: 'photo', text: 'sauna again' } } },
+                { dayNumber: 2, posts: { Ava: { entryId: 'entry_ava_2', kind: 'photo', text: 'leg raises' }, Leo: 'missed' } },
+                { dayNumber: 3, posts: { Ava: { entryId: 'entry_ava_3', kind: 'photo', text: 'crunches' }, Leo: { entryId: 'entry_leo_3', kind: 'words', text: 'I was spiritually doing pushups' } } },
+              ],
+            } } }
+            if (request.action === 'write_recap') {
+              saved.push(request.recap)
+              return { action: 'write_recap', result: { status: 'ok', recapOutcome: 'ok: saved. The players will see this recap.', recap: request.recap, chatLine: request.recap.chatLine } }
+            }
+            throw new Error('The recap turn authorizes only read_game and write_recap.')
+          } },
+          memberId: 'synthetic-group', userEnvKeys: [],
+        } },
+        identityId: null, instructions: buildGameRecapInstructions([{ playerName: 'Leo', text: 'I was spiritually doing pushups.' }]), responsePolicy: { kind: 'require_game_recap', gameId: 'game_recap_synthetic', eventId: 'game-recap:game_recap_synthetic', pairFingerprint: '0123456789abcdef0123456789abcdef' },
+        threadId: 'synthetic-game-thread', threadIsDirect: false,
+        turnEnvironment: { currentWorkingDirectory: workingDirectory, env: config.env },
+        turnTrigger: 'manual-deliver', vault: workingDirectory, workingDirectory,
+      })
+      const intents = await listAssistantOutboxIntents(workingDirectory)
+      process.stdout.write(`[game-recap notification] ${JSON.stringify({ reply: result.response, actions: calls.map((call) => call.action), intents: intents.length })}\n`)
+      expect(calls[0]?.action).toBe('read_game')
+      expect(calls.filter((call) => call.action === 'write_recap')).toHaveLength(1)
+      expect(saved[0]?.pages.length).toBeGreaterThanOrEqual(3)
+      expect(saved[0]?.scoreLine).toMatch(/owes|breakfast/iu)
+      expect(result.decision.kind).toBe('send_message')
+      expect(result.deliveryOutcome?.kind).toBe('queued')
+      expect(intents).toHaveLength(1)
+      expect(result.response).toBe(saved[0]?.chatLine)
+      expect(result.response).not.toMatch(/https?:\/\//iu)
+      expect(result.response?.length).toBeLessThan(160)
+      expect(await readFile(path.join(workingDirectory, 'games', 'lore-0123456789abcdef0123456789abcdef.md'), 'utf8')).toContain(`Chat line used: ${saved[0]?.chatLine}`)
+    } finally {
+      await removeRealCodexTemporaryPaths([workingDirectory, ...permissionHome.temporaryPaths, ...config.temporaryPaths])
+    }
+  }, 360_000)
+})
+
 describeRealCodex('real Codex game bootstrap e2e', () => {
   it('writes one generated kickoff as the first group message and recovers the same receipt', async () => {
     const config = await resolveRealCodexE2eConfig()

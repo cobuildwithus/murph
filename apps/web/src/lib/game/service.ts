@@ -1,6 +1,6 @@
 import "server-only";
 
-import type { HostedGameChatState } from "@murphai/hosted-execution/runtime-control";
+import { hostedGameRecapSchema, type HostedGameChatState, type HostedGameRecap } from "@murphai/hosted-execution/runtime-control";
 import { gameChatProgress } from "./chat-progress";
 import { randomBytes } from "node:crypto";
 
@@ -70,12 +70,14 @@ import {
   type StoredResult,
   type TermWords,
 } from "./rules";
-import { gameLocalDate } from "./time";
+import { addDays, dayStartInstant, GAME_GRACE_MS, gameLocalDate } from "./time";
 import { agreedDayOne, gameChangeCancellationNeedsNotice, decideApprovedGameChange, pendingGameChangeView, decideGameChange, gameChangeControls, gameChangeRefusal, isGameChangeExpired, isGameChangeOutdated, isSameGameChange, parsePendingGameChange, type StoredGamePendingChange } from "./changes";
 import { prepareGameChangeWords, readPendingGameChanges, type PreparedGameChangeWords } from "./change-words";
 import { deliverGameChangeProposal } from "./chat-delivery";
-import { readGameChatCandidateIds, sameGamePlayers } from "./chat-membership";
+import { gamePairWhere, readGameChatCandidateIds, sameGamePlayers } from "./chat-membership";
 import { reserveGameChatLifecycleTx, reserveGameChatProposalTx, skipGameChatLifecycleTx } from "./chat-lifecycle-receipt";
+import { reserveGameMissedDayTx } from "./chat-lifecycle-receipt";
+import { canScheduleMissedDayCheckIn, firstDatesOfMissRuns, isMissedCheckInDueNow, missedCheckInDueAt, visitGameMissedCheckInPages, type MissedCheckInDay } from "./missed-check-in";
 import { claimGamePostNotification, sendGamePostNotificationAfterResponse } from "./post-notification";
 import {
   buildGameHistoryView,
@@ -1031,6 +1033,9 @@ async function settleGame(gameId: string, actor = SYSTEM_ACTOR): Promise<void> {
       ...(row.devClockOffsetMs === null ? {} : { createdAt: gameNow(clock, row) }) }));
     await tx.gameTicket.createMany({ data: tickets });
     await endGame(tx, gameId, { result: toPrismaJsonObject(decision.result), settledAt: clock, status: "settled" });
+    if (state.game.status === "live" && row.chatContainerMemberId) {
+      await reserveGameChatLifecycleTx({ gameId, kind: "recap", now: clock, tx });
+    }
     const scores = decision.result.scores.map(({ score, seat }) => ({ score, seat }));
     await writeEvents(tx, gameId, actor, [{ payload: { scores, ticketIds: tickets.map((ticket) => ticket.id) }, type: "settled" }]);
   });
@@ -1382,6 +1387,148 @@ export async function readGameChatState(containerMemberId: string, playerMemberI
       pendingChange, changeControls: gameChangeControls(state, gameNow(clock, row), pendingChange),
     };
   }) };
+}
+
+/** Bounded hourly-sharded sweep; lifecycle receipts own retries after discovery. */
+export async function reserveDueGameMissedDayCheckIns(now = new Date()): Promise<number> {
+  const prisma = getPrisma();
+  const shard = Math.floor(now.getTime() / 60_000) % 60;
+  let reserved = 0;
+  await visitGameMissedCheckInPages({
+    readPage: async (cursor, limit) => (await prisma.$queryRaw<Array<{ id: string }>>`
+      SELECT id FROM game
+      WHERE status = 'live' AND chat_container_member_id IS NOT NULL
+        AND mod(abs(hashtext(id)::bigint), 60) = ${shard}
+        AND id > ${cursor}
+      ORDER BY id LIMIT ${limit}`).map((row) => row.id),
+    visit: async (ids) => {
+      const loaded = await loadGames(prisma, [...ids]);
+      for (const game of loaded) {
+        const schedule = currentTerms(game.state.game.terms).schedule;
+        if (!canScheduleMissedDayCheckIn({ boundRoomId: game.row.chatContainerMemberId, gameStatus: game.row.status, schedule })) continue;
+        for (const player of game.state.players) {
+          if (!player.dayOne) continue;
+          const days: MissedCheckInDay[] = Array.from({ length: game.row.lengthDays }, (_, dayIndex) => {
+            const date = addDays(player.dayOne!, dayIndex);
+            if (!isScheduledDay(game.state, dayIndex)) return { date, status: "off" as const };
+            const entry = liveEntry(game.state.entries, player.memberId, dayIndex);
+            if (entry) return { date, status: entry.incomplete ? "incomplete" as const : "posted" as const };
+            const closed = now.getTime() >= dayStartInstant(addDays(date, 1), player.timeZone).getTime() + GAME_GRACE_MS;
+            return { date, status: closed ? "missed" as const : "open" as const };
+          });
+          for (const run of firstDatesOfMissRuns(days)) {
+            const dueAt = missedCheckInDueAt(run.firstMissedDate, player.timeZone);
+            if (!dueAt || !isMissedCheckInDueNow({ dueAt, now })) continue;
+            await prisma.$transaction((tx) => reserveGameMissedDayTx({ gameId: game.row.id, memberId: player.memberId, firstMissedDate: run.firstMissedDate, dueAt, tx }));
+            reserved += 1;
+          }
+        }
+      }
+    },
+  });
+  return reserved;
+}
+
+export type GameRecapMaterial = {
+  game: Record<string, unknown>;
+  players: string[];
+  entries: Array<{ entryId: string; kind: string; playerName: string; text: string | null; visibleToBoth: boolean }>;
+  validation: {
+    startedAt: Date;
+    playerNamesByMemberId: Array<{ memberId: string; name: string }>;
+    result: Array<{ memberId: string; name: string; score: number }>;
+  };
+};
+
+/** Finished shared projection for the bound recap turn; private contact labels stay out. */
+export async function readGameRecapMaterial(gameId: string, containerMemberId: string, expectedPlayers: readonly string[]): Promise<GameRecapMaterial | null> {
+  const prisma = getPrisma();
+  const row = await prisma.game.findFirst({ where: { id: gameId, chatContainerMemberId: containerMemberId, status: "settled" }, include: { players: { orderBy: { seat: "asc" } }, tickets: true } });
+  if (!row || row.players.length !== 2 || !row.result || !sameGamePlayers(row.players.map((player) => player.memberId), expectedPlayers)) return null;
+  const current = await prisma.game.findFirst({ where: { ...gamePairWhere(expectedPlayers), status: { in: ["negotiating", "live", "settled"] } }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], select: { id: true } });
+  if (current?.id !== gameId) return null;
+  const rowEntries = await prisma.gameEntry.findMany({ where: { gameId }, orderBy: { receivedAt: "asc" } });
+  const profiles = await prisma.gameProfile.findMany({ where: { memberId: { in: row.players.map((player) => player.memberId) } }, select: { memberId: true, firstNameEncrypted: true } });
+  const reports = await prisma.gameReport.findMany({ where: { gameId, entryId: { not: null } }, select: { entryId: true } });
+  const hidden = new Set(reports.flatMap((report) => report.entryId ? [report.entryId] : []));
+  const shownEntries = rowEntries.filter((entry) => entry.attempt > 0 && entry.withdrawnAt === null && !hidden.has(entry.id));
+  const plain = await openGameTexts([
+    { ...gameTarget(row, "terms_words"), value: row.termsWordsEncrypted },
+    ...profiles.map((profile) => ({ field: "first_name", memberId: profile.memberId, rowId: profile.memberId, table: "game_profile" as const, value: profile.firstNameEncrypted })),
+    ...shownEntries.flatMap((entry) => {
+      const target = { memberId: entry.memberId, rowId: entry.id, table: "game_entry" as const };
+      return [{ ...target, field: "text", value: entry.textEncrypted }, { ...target, field: "payload", value: entry.payloadEncrypted }];
+    }),
+  ]);
+  const words = parseTermWords(plain[0] ?? "");
+  const names = new Map(profiles.map((profile, index) => [profile.memberId, plain[index + 1] ?? ""]));
+  const entryOffset = 1 + profiles.length;
+  const entries = shownEntries.map((entry, index) => ({
+    entryId: entry.id,
+    kind: entry.kind === "heart_rate" ? "heartRate" : entry.kind,
+    playerName: names.get(entry.memberId) ?? "",
+    text: plain[entryOffset + index * 2] ?? null,
+    visibleToBoth: true,
+  }));
+  const terms = termsView(toRuleState(row, rowEntries), words);
+  const state = toRuleState(row, rowEntries);
+  const result = parseStoredResult(row.result);
+  const postsByDay = Array.from({ length: row.lengthDays }, (_, dayIndex) => ({
+    dayNumber: dayIndex + 1,
+    dates: Object.fromEntries(row.players.map((player) => [names.get(player.memberId) ?? "", player.dayOne ? addDays(fromDbDate(player.dayOne)!, dayIndex) : null])),
+    posts: Object.fromEntries(row.players.map((player) => {
+      const name = names.get(player.memberId) ?? "";
+      const entry = shownEntries.find((candidate) => candidate.memberId === player.memberId && candidate.dayIndex === dayIndex);
+      if (!isScheduledDay(state, dayIndex)) return [name, "off"];
+      if (!entry) return [name, "missed"];
+      const projected = entries.find((candidate) => candidate.entryId === entry.id)!;
+      return [name, { entryId: entry.id, kind: projected.kind, text: projected.text, data: parseStoredGameEntryData(toEntryKind(entry.kind), plain[entryOffset + shownEntries.indexOf(entry) * 2 + 1] ?? null), ...(entry.incomplete ? { incomplete: true } : {}) }];
+    })),
+  }));
+  return {
+    players: row.players.map((player) => names.get(player.memberId) ?? ""), entries,
+    validation: { startedAt: row.startedAt ?? row.createdAt,
+      playerNamesByMemberId: row.players.map((player) => ({ memberId: player.memberId, name: names.get(player.memberId) ?? "" })),
+      result: result.scores.map((score) => ({ memberId: score.memberId, name: names.get(score.memberId) ?? "", score: score.score })) },
+    game: { id: row.id, players: row.players.map((player) => ({ name: names.get(player.memberId) ?? "", task: terms.tasks.find((task) => task.seat === player.seat)?.text ?? "" })),
+      lengthDays: row.lengthDays, schedule: terms.schedule, stakes: terms.stakes, score: result.scores.map((score) => ({ name: names.get(score.memberId) ?? "", score: score.score })), days: postsByDay },
+  };
+}
+
+export async function sealGameRecap(input: {
+  beforeMutationTx: (tx: Prisma.TransactionClient) => Promise<void>;
+  containerMemberId: string;
+  eventId: string;
+  gameId: string;
+  playerMemberIds: readonly string[];
+  recap: HostedGameRecap | null;
+}): Promise<HostedGameRecap | null> {
+  if (!sameGamePlayers(input.playerMemberIds, input.playerMemberIds)) return null;
+  const prisma = getPrisma();
+  const row = await prisma.game.findFirst({ where: { id: input.gameId, chatContainerMemberId: input.containerMemberId, status: "settled" } });
+  if (!row) return null;
+  const recapEncrypted = input.recap === null
+    ? null
+    : await seal(gameTarget(row, "recap"), JSON.stringify(input.recap));
+  const key = createHostedLinqDeliveryIdempotencyLookupKey(input.eventId);
+  if (!key) return null;
+  const stored = await prisma.$transaction(async (tx) => {
+    await input.beforeMutationTx(tx);
+    await lockGamePair(tx, input.playerMemberIds[0]!, input.playerMemberIds[1]!);
+    const receipts = await tx.hostedLinqDelivery.count({ where: { idempotencyKey: key, source: "game_lifecycle", sourceRef: input.gameId, template: "game_recap", status: "generation_queued", payloadOwnerMemberId: input.containerMemberId } });
+    if (receipts !== 1) return null;
+    const current = await tx.game.findFirst({ where: { id: input.gameId, chatContainerMemberId: input.containerMemberId, status: "settled" }, select: { id: true, recapEncrypted: true, players: { select: { memberId: true }, take: 3 } } });
+    if (!current || !sameGamePlayers(current.players.map((player) => player.memberId), input.playerMemberIds)) return null;
+    const newest = await tx.game.findFirst({ where: { ...gamePairWhere(input.playerMemberIds), status: { in: ["negotiating", "live", "settled"] } }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], select: { id: true } });
+    if (newest?.id !== input.gameId) return null;
+    if (current.recapEncrypted) return current.recapEncrypted;
+    if (!recapEncrypted) return null;
+    const changed = await tx.game.updateMany({ where: { id: input.gameId, chatContainerMemberId: input.containerMemberId, status: "settled", recapEncrypted: null }, data: { recapEncrypted } });
+    return changed.count === 1 ? recapEncrypted : null;
+  });
+  if (!stored) return null;
+  const [plain] = await openGameTexts([{ ...gameTarget(row, "recap"), value: stored }]);
+  return hostedGameRecapSchema.parse(JSON.parse(plain ?? "null"));
 }
 
 /** The caller already holds member/runtime authority; locks follow member before game. */
@@ -1968,6 +2115,9 @@ async function buildViewInputs(
   ]);
   const hiddenEntryIds = reported.entries;
   const hiddenPlayers = games.map((game) => game.state.players.find((player) => player.memberId !== viewerId && isHiddenBy(blocks, player.memberId)) ?? null);
+  const recapSuppressed = games.map((game, index) => hiddenPlayers[index] !== null
+    || game.entries.some((entry) => hiddenEntryIds.has(entry.id))
+    || game.state.players.some((player) => player.memberId !== viewerId && reported.players.has(player.memberId)));
   const states = games.map((game, index) => {
     const hidden = hiddenPlayers[index];
     return hidden ? withoutPlayer(game.state, hidden.memberId) : game.state;
@@ -1980,6 +2130,9 @@ async function buildViewInputs(
     return requests.length - 1;
   };
   const wordsAt = games.map((game) => ask(gameTarget(game.row, "terms_words"), game.row.termsWordsEncrypted));
+  const recapAt = games.map((game, index) => game.row.recapEncrypted && !recapSuppressed[index]
+    ? ask(gameTarget(game.row, "recap"), game.row.recapEncrypted)
+    : null);
   // A player who left: the name the viewer, the only member left, knew them by.
   const departedAt = games.map((game) => {
     const departed = parseGameDepartedPlayer(game.row.departedPlayer);
@@ -2081,6 +2234,7 @@ async function buildViewInputs(
       hiddenEntryIds,
       now: gameNow(clock, game.row),
       result,
+      recap: recapAt[index] === null ? null : hostedGameRecapSchema.parse(JSON.parse(plain[recapAt[index]!] ?? "null")),
       round: game.row.round,
       startedAt: game.row.startedAt,
       state: states[index],

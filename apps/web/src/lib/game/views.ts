@@ -104,6 +104,7 @@ export interface GameViewInput {
   /** Posts the viewer reported. */
   hiddenEntryIds?: ReadonlySet<string>;
   result: StoredResult | null;
+  recap: GameView["recap"];
   tickets: readonly GameTicketRow[];
 }
 
@@ -252,6 +253,7 @@ export function buildGameView(input: GameViewInput): GameView {
           scores: input.result.scores.map(({ score, seat }) => ({ score, seat })),
         }
       : null,
+    recap: input.recap,
     retakeAvailable: retakeAvailable(state, viewerId, input.now),
     round: input.round,
     settlesAt: settlesAt(state, viewerId, input.now),

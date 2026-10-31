@@ -2827,6 +2827,7 @@ model Game {
   // shift) everywhere else; production never writes it.
   devClockOffsetMs     BigInt?      @map("dev_clock_offset_ms")
   result               Json?
+  recapEncrypted       String?      @map("recap_encrypted")
   // Set when a player deleted their account: their seat, when, and the name the
   // remaining member knew them by, sealed under that member's key.
   departedPlayer       Json?        @map("departed_player")

@@ -23,6 +23,7 @@ import {
   MURPH_ASSISTANT_SKILLS_ROOT_ENV,
 } from "@murphai/assistant-engine/assistant-skill-assets";
 import {
+  buildMurphGameHostPermissionProfileTomlLines,
   MURPH_GROUP_READ_PERMISSION_PROFILE,
   MURPH_GROUP_ROOM_MODEL_MAINTENANCE_PERMISSION_PROFILE,
   MURPH_MEMBER_READ_PERMISSION_PROFILE,
@@ -2273,6 +2274,7 @@ test("hosted Codex config TOML omits credential values and runtime authority hea
       "request_max_retries = 4",
       "stream_max_retries = 0",
       "",
+      ...buildMurphGameHostPermissionProfileTomlLines(),
       "# Read-only, ephemeral consultations initiated by a current group member.",
       `[permissions.${MURPH_GROUP_READ_PERMISSION_PROFILE}.filesystem]`,
       '":minimal" = "read"',

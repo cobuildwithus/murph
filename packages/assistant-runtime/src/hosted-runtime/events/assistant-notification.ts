@@ -772,6 +772,33 @@ function requireMemberActivationSignupWelcome(
   return wake.signupWelcome;
 }
 
+function scopeGameHostExecutionContext(
+  wake: HostedExecutionAssistantNotificationRequestedWake,
+  executionContext: AssistantExecutionContext,
+): AssistantExecutionContext {
+  const policy = wake.notification.responsePolicy;
+  if (policy?.kind !== "require_game_recap" && policy?.kind !== "game_missed_check_in") return executionContext;
+  if (wake.eventId !== policy.eventId || wake.notification.route.threadIsDirect !== false) {
+    throw new TypeError("Game recap notification authority is invalid.");
+  }
+  if (policy.kind === "require_game_recap" && wake.eventId !== `game-recap:${policy.gameId}`) {
+    throw new TypeError("Game recap notification authority is invalid.");
+  }
+  if (policy.kind === "game_missed_check_in"
+    && wake.eventId !== `game-missed:${policy.gameId}:${policy.memberId}:${policy.firstMissedDate}`) {
+    throw new TypeError("Game check-in notification authority is invalid.");
+  }
+  return executionContext.hosted ? {
+    ...executionContext,
+    hosted: {
+      ...executionContext.hosted,
+      ...(policy.kind === "require_game_recap"
+        ? { gameRecapScope: { gameId: policy.gameId, eventId: policy.eventId, pairFingerprint: policy.pairFingerprint } }
+        : { gameMissedCheckInScope: policy }),
+    },
+  } : executionContext;
+}
+
 function buildAssistantNotificationInput(
   wake: HostedExecutionAssistantNotificationRequestedWake,
   executionContext: AssistantExecutionContext,
@@ -816,6 +843,7 @@ function buildAssistantNotificationInput(
         }
       }
     : null;
+  const scopedExecutionContext = scopeGameHostExecutionContext(wake, executionContext);
   const notificationInput = buildAssistantNotificationInputFromRoute({
     assistantTurnOrdinal: "assistant-notification:1",
     ...(authorizeOperatorTask
@@ -838,7 +866,7 @@ function buildAssistantNotificationInput(
       ? "queue-only"
       : wake.notification.deliveryDispatchMode ?? undefined,
     deliveryIdempotencyKey: wake.notification.deliveryIdempotencyKey ?? null,
-    executionContext,
+    executionContext: scopedExecutionContext,
     ...(wake.notification.externalThreadRouteAuthority
       ? {
           externalThreadRouteAuthority:

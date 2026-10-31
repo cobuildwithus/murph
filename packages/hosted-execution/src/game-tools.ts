@@ -22,17 +22,37 @@ export const hostedGameUpdateSchema = z.discriminatedUnion("operation", [
   z.object({ operation: z.literal("cancel_game"), gameId }).strict(),
 ]);
 export type HostedGameUpdate = z.infer<typeof hostedGameUpdateSchema>;
-const origin = z.object({ kind: z.literal("accepted_input"), assistantInputId: ref }).strict();
+const acceptedInputOrigin = z.object({ kind: z.literal("accepted_input"), assistantInputId: ref }).strict();
+const gameRecapOrigin = z.object({ kind: z.literal("game_recap"), gameId, eventId: ref }).strict();
 export const hostedGamePhotoSchema = z.object({
   operation: z.enum(["offer", "save", "dismiss"]), gameId,
   sourceMessageRef: ref.optional(), attachmentOrdinal: z.number().int().min(1).max(32).optional(),
   replaceEntryId: gameId.optional(),
 }).strict();
 export type HostedGamePhoto = z.infer<typeof hostedGamePhotoSchema>;
+const recapBlock = z.object({
+  kind: z.enum(["photo", "photoPair", "contactSheet", "headline", "kicker", "quote", "stat"]),
+  entryIds: z.array(ref).optional(),
+  style: z.enum(["print", "fullBleed"]).optional(),
+  text: z.string().optional(),
+  statValue: z.string().optional(),
+  quote: z.object({ who: z.string(), text: z.string(), date: z.string().optional() }).strict().optional(),
+}).strict();
+export const hostedGameRecapSchema = z.object({
+  pages: z.array(z.object({
+    background: z.enum(["night", "paper", "sage", "sienna", "slate"]),
+    blocks: z.array(recapBlock),
+  }).strict()),
+  scoreLine: z.string(),
+  chatLine: z.string(),
+}).strict();
+export type HostedGameRecap = z.infer<typeof hostedGameRecapSchema>;
 export const hostedGameToolRequestSchema = z.discriminatedUnion("action", [
-  z.object({ action: z.literal("read_game"), origin }).strict(),
-  z.object({ action: z.literal("game_photo"), origin, photo: hostedGamePhotoSchema }).strict(),
-  z.object({ action: z.literal("update_game"), origin, update: hostedGameUpdateSchema }).strict(),
+  z.object({ action: z.literal("read_game"), origin: z.union([acceptedInputOrigin, gameRecapOrigin]) }).strict(),
+  z.object({ action: z.literal("game_photo"), origin: acceptedInputOrigin, photo: hostedGamePhotoSchema }).strict(),
+  z.object({ action: z.literal("update_game"), origin: acceptedInputOrigin, update: hostedGameUpdateSchema }).strict(),
+  z.object({ action: z.literal("write_recap"), origin: gameRecapOrigin, recap: hostedGameRecapSchema,
+    priorChatLines: z.array(z.string().max(160)).max(100) }).strict(),
 ]);
 export type HostedGameToolRequest = z.infer<typeof hostedGameToolRequestSchema>;
 const terms = z.object({
@@ -70,13 +90,19 @@ export const hostedGameChatStateSchema = z.object({ games: z.array(z.object({
 }).strict()).max(10), photoCheckIn: z.object({ introductionAvailable: z.boolean(), hasPendingOffer: z.boolean() }).strict().optional() }).strict();
 export type HostedGameChatState = z.infer<typeof hostedGameChatStateSchema>;
 export const hostedGameToolResponseSchema = z.object({
-  action: z.enum(["read_game", "update_game", "game_photo"]),
+  action: z.enum(["read_game", "update_game", "game_photo", "write_recap"]),
   result: z.object({
     status: z.enum(["ok", "unavailable", "rejected"]),
     state: hostedGameChatStateSchema.optional(),
     error: z.string().max(128).optional(),
     dayOutcome: z.object({ date, status: z.enum(["marked_incomplete", "restored", "already_incomplete", "already_complete", "no_artifact"]) }).strict().optional(),
     photoOutcome: z.enum(["offer", "suppressed", "saved", "dismissed"]).optional(),
+    recapGame: z.unknown().optional(),
+    recapOutcome: z.string().optional(),
+    recap: hostedGameRecapSchema.optional(),
+    chatLine: z.string().max(160).optional(),
+    loreGuidance: z.string().optional(),
+    loreFingerprint: z.string().optional(),
   }).strict(),
 }).strict();
 export type HostedGameToolResponse = z.infer<typeof hostedGameToolResponseSchema>;

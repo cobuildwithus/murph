@@ -1243,8 +1243,9 @@ describe("hosted Prisma baseline migration", () => {
       "20261023180000_game_day_incomplete",
       "20261024200000_game_departed_player",
       "20261025120000_linq_signup_link_reminder",
-    "20261026120000_game_block_report",
-    "20261026120000_reset_chat_models_to_terra",
+      "20261026120000_game_block_report",
+      "20261026120000_reset_chat_models_to_terra",
+      "20261030120000_game_recap",
       "migration_lock.toml",
     ]);
     expect(migrationEntries).toEqual(

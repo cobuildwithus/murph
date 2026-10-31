@@ -4300,6 +4300,79 @@ test('sendAssistantNotificationLocal rejects an empty context handoff response b
   expect(mocks.persistAssistantTurnAndSession).not.toHaveBeenCalled()
 })
 
+test('game recap notifications deliver and persist the accepted chat line exactly', async () => {
+  const savedChatLine = 'Ava won the mat jurisdiction case, 3–2.'
+  const providerResult = createProviderResult({
+    response: JSON.stringify({
+      kind: 'send_message',
+      privateSummary: 'Announce the saved recap.',
+      text: 'The recap is ready.',
+    }),
+    transcriptResponse: 'The recap is ready.',
+    responseCard: DAILY_NUTRITION_CARD,
+    responseMedia: [{
+      filename: 'should-not-send.mp3', kind: 'voice_memo', transcript: 'not recap media',
+      transport: { attachmentId: 'attachment-recap-forbidden', kind: 'linq_attachment' },
+    }],
+  })
+  const { deliverMessage, mocks, sendAssistantNotificationLocal } =
+    await loadNotificationTurnHarness({
+      onExecuteCodexTurnWithRecovery: async (providerInput) => {
+        providerInput.hostedToolContext?.recordSavedGameRecapChatLine?.(savedChatLine)
+        return { kind: 'succeeded', providerTurn: providerResult }
+      },
+      providerResult,
+      turnId: 'turn-game-recap-exact-chat-line',
+    })
+
+  const result = await sendAssistantNotificationLocal({
+    channel: 'linq',
+    deliveryIdempotencyKey: 'game-recap:game_synthetic',
+    deliveryTarget: 'synthetic-game-thread',
+    executionContext: {
+      hosted: {
+        gameRecapScope: {
+          eventId: 'game-recap:game_synthetic',
+          gameId: 'game_synthetic',
+          pairFingerprint: '0123456789abcdef0123456789abcdef',
+        },
+        memberId: 'synthetic-group',
+        userEnvKeys: [],
+      },
+    },
+    instructions: 'Write and announce the game recap.',
+    responsePolicy: { kind: 'require_game_recap', eventId: 'game-recap:game_synthetic', gameId: 'game_synthetic', pairFingerprint: '0123456789abcdef0123456789abcdef' },
+    threadId: 'synthetic-game-thread',
+    threadIsDirect: false,
+    vault: '/vaults/game-recap-exact-chat-line',
+  })
+
+  expect(result.decision).toEqual({
+    kind: 'send_message',
+    privateSummary: 'Saved game recap chat line.',
+    text: savedChatLine,
+  })
+  expect(result.response).toBe(savedChatLine)
+  expect(deliverMessage).toHaveBeenCalledWith(expect.objectContaining({
+    message: savedChatLine,
+    card: null,
+    media: [],
+  }))
+  expect(mocks.persistAssistantTurnAndSession).toHaveBeenCalledWith(
+    expect.objectContaining({ assistantTranscriptText: savedChatLine }),
+  )
+  expect(mocks.executeCodexTurnWithRecovery).toHaveBeenCalledWith(
+    expect.objectContaining({
+      profile: {
+        nativeResumePolicy: 'disabled',
+        promptProfile: 'conversation',
+        threadScope: 'isolated-thread',
+        toolProfile: 'game-host-turn',
+      },
+    }),
+  )
+})
+
 test.each([
   {
     expectedPromptProfile: 'creative-notification',

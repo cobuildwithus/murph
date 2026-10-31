@@ -383,6 +383,7 @@ export interface GameView {
   inviteToken: string | null;
   inviteExpiresAt: string | null;
   result: { scores: { seat: number; score: number }[]; outcome: "won" | "lost" | "tie" | "perfect" } | null;
+  recap: { pages: Array<{ background: "night" | "paper" | "sage" | "sienna" | "slate"; blocks: Array<Record<string, unknown>> }>; scoreLine: string; chatLine: string } | null;
   tickets: GameTicketView[];
 }
 

@@ -1,9 +1,12 @@
 import { describe, expect, it, vi } from 'vitest'
 import { readTestMurphDynamicToolRequest } from './support/codex-app-server.ts'
 import { executeMurphDynamicToolRequest, resolveMurphDynamicTools } from '../src/assistant-codex/dynamic-tools.js'
-import { MURPH_READ_GAME_TOOL, MURPH_UPDATE_GAME_TOOL, MURPH_GAME_PHOTO_TOOL } from '../src/assistant-codex/dynamic-tools/games.js'
+import { MURPH_READ_GAME_TOOL, MURPH_READ_GAME_RECAP_TOOL, MURPH_UPDATE_GAME_TOOL, MURPH_GAME_PHOTO_TOOL, MURPH_WRITE_RECAP_TOOL, MURPH_GAME_LORE_TOOL } from '../src/assistant-codex/dynamic-tools/games.js'
+import { resolveAssistantGameHostDynamicTools } from '../src/assistant/codex-turn/planning.js'
+import { MURPH_FINISH_WITHOUT_REPLY_TOOL } from '../src/assistant-codex/dynamic-tool-catalog.js'
 import type { AssistantHostedToolContext } from '../src/assistant/hosted-tool-context.js'
 import { parseHostedRuntimeGroupToolRequest, parseHostedRuntimeGroupToolResponse } from '@murphai/hosted-execution/parsers'
+import type { HostedGameRecap } from '@murphai/hosted-execution/runtime-control'
 const inputId = 'ain_' + 'a'.repeat(32)
 const secondInput = 'ain_' + 'b'.repeat(32)
 const origin = { kind: 'accepted_input' as const, assistantInputId: inputId }
@@ -30,6 +33,7 @@ describe('game dynamic tools', () => {
     expect(resolveMurphDynamicTools({})).not.toContain(MURPH_UPDATE_GAME_TOOL)
     expect(resolveMurphDynamicTools({ gamesAvailable: true })).not.toContain(MURPH_GAME_PHOTO_TOOL)
     expect(resolveMurphDynamicTools({ gamesAvailable: true, gamePhotosAvailable: true })).toContain(MURPH_GAME_PHOTO_TOOL)
+    expect(resolveMurphDynamicTools({ gamesAvailable: true })).not.toContain(MURPH_WRITE_RECAP_TOOL)
     expect(MURPH_UPDATE_GAME_TOOL.description).toContain('ordinary conversational agreement')
     expect(MURPH_UPDATE_GAME_TOOL.description).toContain('do not demand special words')
     expect(MURPH_READ_GAME_TOOL.description).toContain('call what the loser owes a prize')
@@ -85,6 +89,60 @@ describe('game dynamic tools', () => {
     expect(parse('update_game',{...approval,operation:'propose',expectedTermsVersion:1,change:{...change,stakesApplyToWholeGame:false}})?.kind).toBe('invalid-game-arguments')
   })
 
+})
+
+describe('game recap dynamic contract', () => {
+  const recap: HostedGameRecap = { pages: [
+    { background: 'paper', blocks: [{ kind: 'headline', text: 'A very specific week' }] },
+    { background: 'slate', blocks: [{ kind: 'stat', statValue: '5', text: 'days posted' }] },
+    { background: 'sage', blocks: [{ kind: 'quote', quote: { who: 'Ava', text: 'verbatim words' } }] },
+  ], scoreLine: 'Leo owes Ava breakfast.', chatLine: 'Sauna citizenship survived. Open the week for the paperwork.' }
+  it('gives isolated recap and check-in turns only their host-owned tools', () => {
+    expect(resolveAssistantGameHostDynamicTools({ currentGameRecapScope: () => ({ gameId: 'game', eventId: 'game-recap:game', pairFingerprint: 'a'.repeat(32) }) }))
+      .toEqual([MURPH_READ_GAME_RECAP_TOOL, MURPH_WRITE_RECAP_TOOL, MURPH_GAME_LORE_TOOL])
+    expect(resolveAssistantGameHostDynamicTools({ currentGameMissedCheckInScope: () => ({ gameId: 'game', eventId: 'game-missed:game:a:2030-01-01', memberId: 'a', firstMissedDate: '2030-01-01', pairFingerprint: 'a'.repeat(32) }) }))
+      .toEqual([MURPH_GAME_LORE_TOOL, MURPH_FINISH_WITHOUT_REPLY_TOOL])
+    expect(MURPH_READ_GAME_TOOL.description).not.toContain('recap turn')
+    expect(MURPH_READ_GAME_TOOL.description).not.toContain('loreGuidance')
+    expect(MURPH_READ_GAME_RECAP_TOOL.description).toContain('recap turn')
+    expect(MURPH_GAME_LORE_TOOL.description).toContain('when instructed')
+    expect(MURPH_GAME_LORE_TOOL.description).toContain('Returns')
+    expect(MURPH_GAME_LORE_TOOL.inputSchema).toEqual({
+      type: 'object', additionalProperties: false, required: ['operation'],
+      properties: { operation: { enum: ['read', 'replace'] }, content: { type: 'string' } },
+    })
+  })
+  it('shows no model game selector and binds reads and writes to the trusted recap scope', async () => {
+    expect(MURPH_WRITE_RECAP_TOOL.inputSchema.properties).not.toHaveProperty('gameId')
+    const recapPort = vi.fn(async (request) => request.action === 'read_game'
+      ? { action: 'read_game' as const, result: { status: 'ok' as const, recapGame: { id: 'game_bound' } } }
+      : { action: 'write_recap' as const, result: { status: 'ok' as const, recapOutcome: 'ok: saved. The players will see this recap.', recap, chatLine: recap.chatLine } })
+    const savedChatLines: string[] = []
+    const recapContext = { ...context(), groupTool: { request: recapPort }, currentUserActionScope: () => null,
+      readGameLore: async () => 'Chat line used: An earlier line lived here.',
+      replaceGameLore: async () => {},
+      recordSavedGameRecapChatLine: (chatLine: string) => savedChatLines.push(chatLine),
+      currentGameRecapScope: () => ({ gameId: 'game_bound', eventId: 'game-recap:game_bound', pairFingerprint: '0123456789abcdef0123456789abcdef' }) }
+    for (const [tool, args] of [['read_game', {}], ['write_recap', recap]] as const) {
+      const request = parse(tool, args)
+      if (!request) throw new Error('Expected recap request')
+      expect((await executeMurphDynamicToolRequest({ request, hostedToolContext: recapContext, env: {}, fetchImpl: fetch, nextUsageOrdinal: () => 0, progressDelivery: null })).rpcResult.success).toBe(true)
+    }
+    const pairFingerprint = '0123456789abcdef0123456789abcdef'
+    expect(recapPort.mock.calls.map(([request]) => request)).toEqual([
+      { action: 'read_game', origin: { kind: 'game_recap', gameId: 'game_bound', eventId: 'game-recap:game_bound', pairFingerprint } },
+      { action: 'write_recap', origin: { kind: 'game_recap', gameId: 'game_bound', eventId: 'game-recap:game_bound', pairFingerprint }, recap, priorChatLines: ['An earlier line lived here.'] },
+    ])
+    expect(savedChatLines).toEqual([recap.chatLine])
+  })
+  it('rejects write_recap outside a trusted recap notification', async () => {
+    port.mockClear()
+    const request = parse('write_recap', recap)
+    if (!request) throw new Error('Expected recap request')
+    const result = await executeMurphDynamicToolRequest({ request, hostedToolContext: context(), env: {}, fetchImpl: fetch, nextUsageOrdinal: () => 0, progressDelivery: null })
+    expect(result.rpcResult.success).toBe(false)
+    expect(port).not.toHaveBeenCalled()
+  })
 })
 
 describe('game photo dynamic contract', () => {

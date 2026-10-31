@@ -1784,6 +1784,48 @@ function parseHostedExecutionAssistantNotificationResponsePolicy(
         kind,
         text: requireString(record.text, `${label}.text`),
       };
+    case "require_game_recap":
+      assertExactHostedExecutionKeys(
+        record,
+        ["eventId", "gameId", "kind", "pairFingerprint"],
+        label,
+      );
+      return {
+        kind,
+        eventId: requireString(record.eventId, `${label}.eventId`),
+        gameId: requireString(record.gameId, `${label}.gameId`),
+        pairFingerprint: requireString(
+          record.pairFingerprint,
+          `${label}.pairFingerprint`,
+        ),
+      };
+    case "game_missed_check_in":
+      assertExactHostedExecutionKeys(
+        record,
+        [
+          "eventId",
+          "firstMissedDate",
+          "gameId",
+          "kind",
+          "memberId",
+          "pairFingerprint",
+        ],
+        label,
+      );
+      return {
+        kind,
+        eventId: requireString(record.eventId, `${label}.eventId`),
+        firstMissedDate: requireString(
+          record.firstMissedDate,
+          `${label}.firstMissedDate`,
+        ),
+        gameId: requireString(record.gameId, `${label}.gameId`),
+        memberId: requireString(record.memberId, `${label}.memberId`),
+        pairFingerprint: requireString(
+          record.pairFingerprint,
+          `${label}.pairFingerprint`,
+        ),
+      };
     default:
       throw new TypeError(`${label}.kind is invalid.`);
   }

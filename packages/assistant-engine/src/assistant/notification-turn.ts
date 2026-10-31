@@ -196,6 +196,14 @@ const ASSISTANT_INTERACTIVE_NOTIFICATION_TURN_PROFILE: Required<
   threadScope: 'isolated-thread',
   toolProfile: 'provider-turn',
 }
+const ASSISTANT_GAME_RECAP_NOTIFICATION_TURN_PROFILE: Required<
+  AssistantCodexTurnThreadScopeProfile
+> = {
+  nativeResumePolicy: 'disabled',
+  promptProfile: 'conversation',
+  threadScope: 'isolated-thread',
+  toolProfile: 'game-host-turn',
+}
 export type AssistantNotificationDecision = z.infer<
   typeof assistantNotificationDecisionSchema
 >
@@ -227,6 +235,8 @@ export type AssistantNotificationResponsePolicy =
   | { kind: 'allow_send_or_skip' }
   | { kind: 'require_send' }
   | { kind: 'require_send_exact_text'; text: string }
+  | { kind: 'require_game_recap'; eventId: string; gameId: string; pairFingerprint: string }
+  | { kind: 'game_missed_check_in'; eventId: string; firstMissedDate: string; gameId: string; memberId: string; pairFingerprint: string }
 
 type AssistantModelBackedNotificationResponsePolicy = Exclude<
   AssistantNotificationResponsePolicy,
@@ -458,12 +468,13 @@ export async function sendAssistantNotificationLocal(
       }
 
       const turnId = createAssistantTurnId()
-      const hostedExecutionContext =
-        isAssistantNotificationScheduledOccurrence(input) &&
-        !isAssistantNotificationMaintenanceExactSkip(input)
-          ? executionContext?.hosted ?? null
-          : null
+      const hostedExecutionContext = resolveAssistantNotificationHostedExecutionContext(
+        input,
+        executionContext,
+      )
       const route = resolveAssistantTurnRoute(messageInput, defaults, resolved)
+      let savedGameRecapChatLine: string | null = null
+      const gameRecapTurn = hostedExecutionContext?.gameRecapScope != null
       const hostedToolContext = hostedExecutionContext
         ? createAssistantHostedToolContext({
             beforeToolExecution: input.beforeToolExecution
@@ -490,6 +501,12 @@ export async function sendAssistantNotificationLocal(
               groupEmailPendingDeliveryIntentId = intentId
               input.onGroupEmailPendingDeliveryIntentId?.(intentId)
             },
+            ...buildAssistantGameRecapToolContextFields({
+              enabled: gameRecapTurn,
+              recordSavedChatLine: (chatLine) => {
+                savedGameRecapChatLine = chatLine
+              },
+            }),
             route,
             session: resolved.session,
           })
@@ -657,7 +674,9 @@ export async function sendAssistantNotificationLocal(
           providerResult.response.startsWith(providerAuthoredResponse)
         let decision: AssistantNotificationDecision
         try {
-          decision = providerResult.finalAction?.kind === 'none' && groupEmailSendResult
+          decision = resolveAssistantGameRecapDecision(
+            savedGameRecapChatLine,
+            () => providerResult.finalAction?.kind === 'none' && groupEmailSendResult
             ? {
                 kind: 'skip',
                 privateSummary: 'Group email effect completed.',
@@ -677,6 +696,7 @@ export async function sendAssistantNotificationLocal(
                     !hasAppendOnlyRuntimePresentation,
                   runtimeResponse: providerResult.response,
                 })
+          )
           if (runtimeOwnsFinalPresentation && decision.kind !== 'send_message') {
             throw createAssistantNotificationInvalidResponseError(
               'runtime_presentation_non_send_decision',
@@ -689,6 +709,7 @@ export async function sendAssistantNotificationLocal(
             providerValidationErrorDetails,
           )
         }
+        assertAssistantGameRecapSaved(gameRecapTurn, savedGameRecapChatLine)
         if (isAssistantNotificationMaintenanceExactSkip(input)) {
           try {
             assertAssistantMaintenanceNotificationDecision({
@@ -747,14 +768,17 @@ export async function sendAssistantNotificationLocal(
             providerValidationErrorDetails,
           )
         }
-        const { responseText, transcriptText } =
-          resolveAssistantNotificationPresentation({
+        const generatedPresentation = resolveAssistantNotificationPresentation({
             decision,
             hasAppendOnlyRuntimePresentation,
             providerAuthoredResponse,
             providerResult,
             runtimeOwnsFinalPresentation,
           })
+        const { responseText, transcriptText } = resolveAssistantGameRecapPresentation(
+          generatedPresentation,
+          savedGameRecapChatLine,
+        )
         throwIfAssistantNotificationAborted(messageInput.abortSignal)
         await runAssistantNotificationBeforeDelivery(input, {
           decision: {
@@ -799,9 +823,9 @@ export async function sendAssistantNotificationLocal(
             dedupeToken: input.deliveryDedupeToken ?? null,
             decisionSubject: decision.subject ?? null,
             input: messageInput,
-            followUpRequest: providerResult.followUpRequest,
-            card: providerResult.responseCard ?? null,
-            media: responseMedia,
+            followUpRequest: gameRecapTurn ? null : providerResult.followUpRequest,
+            card: gameRecapTurn ? null : providerResult.responseCard ?? null,
+            media: gameRecapTurn ? [] : responseMedia,
             message: responseText,
             session: savedSession,
             sharedPlan,
@@ -867,9 +891,9 @@ export async function sendAssistantNotificationLocal(
           dedupeToken: input.deliveryDedupeToken ?? null,
           decisionSubject: decision.subject ?? null,
           input: messageInput,
-          followUpRequest: providerResult.followUpRequest,
-          card: providerResult.responseCard ?? null,
-          media: responseMedia,
+          followUpRequest: gameRecapTurn ? null : providerResult.followUpRequest,
+          card: gameRecapTurn ? null : providerResult.responseCard ?? null,
+          media: gameRecapTurn ? [] : responseMedia,
           message: responseText,
           session: providerResult.session,
           sharedPlan,
@@ -1094,6 +1118,66 @@ function resolveAssistantNotificationPresentation(input: {
       input.providerResult.transcriptResponse ?? responseText,
       'runtime-owned notification transcript',
     ),
+  }
+}
+
+function resolveAssistantNotificationHostedExecutionContext(
+  input: AssistantNotificationInput,
+  executionContext: AssistantExecutionContext | null,
+): NonNullable<AssistantExecutionContext['hosted']> | null {
+  if (isAssistantNotificationMaintenanceExactSkip(input)) return null
+  if (
+    !isAssistantNotificationScheduledOccurrence(input) &&
+    executionContext?.hosted?.gameRecapScope == null
+    && executionContext?.hosted?.gameMissedCheckInScope == null
+  ) return null
+  return executionContext?.hosted ?? null
+}
+
+function buildAssistantGameRecapToolContextFields(input: {
+  enabled: boolean
+  recordSavedChatLine(chatLine: string): void
+}): {
+  recordSavedGameRecapChatLine?: (chatLine: string) => void
+} {
+  if (!input.enabled) return {}
+  return {
+    recordSavedGameRecapChatLine: input.recordSavedChatLine,
+  }
+}
+
+function resolveAssistantGameRecapDecision(
+  savedChatLine: string | null,
+  fallback: () => AssistantNotificationDecision,
+): AssistantNotificationDecision {
+  return savedChatLine === null
+    ? fallback()
+    : {
+        kind: 'send_message',
+        privateSummary: 'Saved game recap chat line.',
+        text: savedChatLine,
+      }
+}
+
+function assertAssistantGameRecapSaved(
+  gameRecapTurn: boolean,
+  savedChatLine: string | null,
+): void {
+  if (!gameRecapTurn || savedChatLine !== null) return
+  throw createAssistantNotificationInvalidResponseError(
+    'game_recap_not_saved',
+    'A game recap notification requires one accepted write_recap call before delivery.',
+  )
+}
+
+function resolveAssistantGameRecapPresentation(
+  generated: AssistantNotificationPresentation,
+  savedChatLine: string | null,
+): AssistantNotificationPresentation {
+  if (savedChatLine === null) return generated
+  return {
+    responseText: normalizeRequiredText(savedChatLine, 'saved game recap chat line'),
+    transcriptText: normalizeRequiredText(savedChatLine, 'saved game recap transcript line'),
   }
 }
 
@@ -1934,6 +2018,12 @@ function resolveAssistantNotificationTurnProfile(
     }
     return ASSISTANT_INTERACTIVE_NOTIFICATION_TURN_PROFILE
   }
+  if (input.executionContext?.hosted?.gameRecapScope != null) {
+    return ASSISTANT_GAME_RECAP_NOTIFICATION_TURN_PROFILE
+  }
+  if (input.executionContext?.hosted?.gameMissedCheckInScope != null) {
+    return ASSISTANT_GAME_RECAP_NOTIFICATION_TURN_PROFILE
+  }
   if (isAssistantOnboardingGoalCheckinNotification(input) || usageOptimizerScope !== null) {
     return ASSISTANT_INTERACTIVE_NOTIFICATION_TURN_PROFILE
   }
@@ -2061,7 +2151,7 @@ function resolveAssistantNotificationFirstContactDocIds(input: {
 function assertAssistantNotificationSkipAllowed(
   policy: AssistantModelBackedNotificationResponsePolicy,
 ): void {
-  if (policy.kind === 'allow_send_or_skip') {
+  if (policy.kind === 'allow_send_or_skip' || policy.kind === 'game_missed_check_in') {
     return
   }
 
