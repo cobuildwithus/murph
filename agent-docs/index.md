@@ -1,3 +1,7 @@
+Cloudflare failed-upload recovery for full runner rollouts is tracked in
+[the implementation plan](exec-plans/completed/2026-10-31-cf-upload-recovery.md);
+`../apps/cloudflare/DEPLOY.md` owns the recovery contract.
+
 Release audit recovery, game correctness and dependency fixes are tracked in [the implementation plan](exec-plans/completed/2026-10-28-release-audit-fixes.md).
 
 Linq validation telemetry and release verification are tracked in [the completed implementation plan](exec-plans/completed/2026-10-27-linq-validation-telemetry.md).
