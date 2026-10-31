@@ -70,7 +70,8 @@ describe("game v1 notification instructions", () => {
     expect({
       recapOpening: recap.split("\n")[0],
       recapToolOrder: recap.includes("Use murph.read_game first") && recap.includes("then use murph.write_recap"),
-      recapReply: recap.includes("chatLine is the message you post") && recap.includes("Lead with the week's funniest specific moment"),
+      recapReply: recap.includes("chatLine is your message to the two of them") && recap.includes("Lead with one specific thing one of them did or said during the game"),
+      recapMomentsNotBookkeeping: recap.includes("Changing the game (terms, prize wording, schedule, invites) is bookkeeping, never a moment"),
       recapLore: recap.includes("murph.game_lore") && recap.includes("Chat line used:"),
       recapTranscript: recap.includes('"playerName":"Ava","text":"My alarm won."'),
       missedOpening: missed.split("\n")[0],
@@ -97,6 +98,7 @@ describe("game v1 notification instructions", () => {
         },
         "missedOpening": "A player missed one or more consecutive scheduled game days. Read the pair lore with murph.game_lore and use the bounded same-room transcript below before deciding whether to speak.",
         "recapLore": true,
+        "recapMomentsNotBookkeeping": true,
         "recapOpening": "The game just ended. Write its recap: a short story of the week the two players swipe through in the app, like Instagram stories. Use murph.read_game first, read the pair lore with murph.game_lore, use the bounded current-room transcript below, then use murph.write_recap and update the pair lore with murph.game_lore.",
         "recapReply": true,
         "recapToolOrder": true,
