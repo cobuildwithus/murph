@@ -1577,3 +1577,8 @@ Protected read-only mailbox checkpoint inspection is owned by `agent-docs/SECURI
 Quiet Linq setup reminders and automated first-contact admission are owned by
 `../ARCHITECTURE.md`; local implementation and proof are recorded in
 [the bounded fix](exec-plans/completed/2026-10-25-linq-quiet-signup-reminder.md).
+
+Late settled-game recap recovery is tracked in
+[`the local implementation plan`](exec-plans/completed/2026-10-31-game-late-recap.md);
+`product-specs/weekly-game.md` owns the behavior and the Web contract-migration
+README owns the fixed-target postdeploy step.

@@ -46,7 +46,11 @@ describe("game recap validation", () => {
     expect(validateGameRecap({ recap: { ...valid, scoreLine: "Ava owes Leo breakfast in bed." }, players, entries, result }))
       .toContain("scoreLine: Leo, the settled loser, must be on the owing side to Ava.");
     expect(validateGameRecap({ recap: valid, players, entries, result: result.map((score) => ({ ...score, score: 3 })) }))
-      .toContain("scoreLine: the settled result is a tie; nobody owes.");
+      .toContain("scoreLine: the settled result is a tie; name the players and describe the tie without owe, owes, owed or owing.");
+    const tie = result.map((score) => ({ ...score, score: 3 }));
+    expect(validateGameRecap({ recap: { ...valid, scoreLine: "Ava and Leo tied. Nobody owes breakfast." }, players, entries, result: tie }))
+      .toContain("scoreLine: the settled result is a tie; name the players and describe the tie without owe, owes, owed or owing.");
+    expect(validateGameRecap({ recap: { ...valid, scoreLine: "Ava and Leo tied; breakfast stays unclaimed." }, players, entries, result: tie })).toEqual([]);
     expect(validateGameRecap({ recap: valid, players, entries, result })).toEqual([]);
   });
   it("ports quote density, chat-line originality and exact quote checks", () => {

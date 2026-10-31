@@ -198,7 +198,9 @@ this default without deleting other people's private contact choices.
   transcript and the exact pair's lore, then calls `write_recap` with
   three to seven story pages from the fixed page kit, `scoreLine` and
   `chatLine`. The model never selects a game id: trusted notification authority
-  binds the tool to the settled current game and exact room. The server checks
+  binds the tool to the exact settled game and room, even after a rematch starts.
+  A finished game can receive its first recap late; a saved recap is never
+  overwritten. Versioned schedules mark rest days as off, not missed. The server checks
   entry ownership and shared visibility, visual kinds and counts, text, quote,
   score and chat-line limits, banned language, third-person shared copy, quote
   density and verbatim player chat/post evidence. It also rejects stock chat

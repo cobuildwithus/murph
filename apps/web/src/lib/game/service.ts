@@ -74,7 +74,7 @@ import { addDays, dayStartInstant, GAME_GRACE_MS, gameLocalDate } from "./time";
 import { agreedDayOne, gameChangeCancellationNeedsNotice, decideApprovedGameChange, pendingGameChangeView, decideGameChange, gameChangeControls, gameChangeRefusal, isGameChangeExpired, isGameChangeOutdated, isSameGameChange, parsePendingGameChange, type StoredGamePendingChange } from "./changes";
 import { prepareGameChangeWords, readPendingGameChanges, type PreparedGameChangeWords } from "./change-words";
 import { deliverGameChangeProposal } from "./chat-delivery";
-import { gamePairWhere, readGameChatCandidateIds, sameGamePlayers } from "./chat-membership";
+import { readGameChatCandidateIds, sameGamePlayers } from "./chat-membership";
 import { reserveGameChatLifecycleTx, reserveGameChatProposalTx, skipGameChatLifecycleTx } from "./chat-lifecycle-receipt";
 import { reserveGameMissedDayTx } from "./chat-lifecycle-receipt";
 import { canScheduleMissedDayCheckIn, firstDatesOfMissRuns, isMissedCheckInDueNow, missedCheckInDueAt, visitGameMissedCheckInPages, type MissedCheckInDay } from "./missed-check-in";
@@ -1443,10 +1443,8 @@ export type GameRecapMaterial = {
 /** Finished shared projection for the bound recap turn; private contact labels stay out. */
 export async function readGameRecapMaterial(gameId: string, containerMemberId: string, expectedPlayers: readonly string[]): Promise<GameRecapMaterial | null> {
   const prisma = getPrisma();
-  const row = await prisma.game.findFirst({ where: { id: gameId, chatContainerMemberId: containerMemberId, status: "settled" }, include: { players: { orderBy: { seat: "asc" } }, tickets: true } });
+  const row = await prisma.game.findFirst({ where: { id: gameId, chatContainerMemberId: containerMemberId, status: "settled", departedPlayer: { equals: Prisma.DbNull } }, include: { players: { orderBy: { seat: "asc" } }, tickets: true } });
   if (!row || row.players.length !== 2 || !row.result || !sameGamePlayers(row.players.map((player) => player.memberId), expectedPlayers)) return null;
-  const current = await prisma.game.findFirst({ where: { ...gamePairWhere(expectedPlayers), status: { in: ["negotiating", "live", "settled"] } }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], select: { id: true } });
-  if (current?.id !== gameId) return null;
   const rowEntries = await prisma.gameEntry.findMany({ where: { gameId }, orderBy: { receivedAt: "asc" } });
   const profiles = await prisma.gameProfile.findMany({ where: { memberId: { in: row.players.map((player) => player.memberId) } }, select: { memberId: true, firstNameEncrypted: true } });
   const reports = await prisma.gameReport.findMany({ where: { gameId, entryId: { not: null } }, select: { entryId: true } });
@@ -1521,8 +1519,9 @@ export async function sealGameRecap(input: {
     await tx.$queryRaw`SELECT id FROM game WHERE id = ${input.gameId} FOR UPDATE`;
     const current = await tx.game.findFirst({ where: { id: input.gameId, chatContainerMemberId: input.containerMemberId, status: "settled", departedPlayer: { equals: Prisma.DbNull } }, select: { id: true, recapEncrypted: true, players: { select: { memberId: true }, take: 3 } } });
     if (!current || !sameGamePlayers(current.players.map((player) => player.memberId), input.playerMemberIds)) return null;
-    const newest = await tx.game.findFirst({ where: { ...gamePairWhere(input.playerMemberIds), status: { in: ["negotiating", "live", "settled"] } }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], select: { id: true } });
-    if (newest?.id !== input.gameId) return null;
+    // A rematch cannot invalidate a finished game's first recap. The pair lock
+    // still serializes joins/blocks; this row lock and null-only write preserve
+    // the settled game's first seal, even if a newer game committed first.
     if (current.recapEncrypted) return current.recapEncrypted;
     if (!recapEncrypted) return null;
     const changed = await tx.game.updateMany({ where: { id: input.gameId, chatContainerMemberId: input.containerMemberId, status: "settled", recapEncrypted: null }, data: { recapEncrypted } });

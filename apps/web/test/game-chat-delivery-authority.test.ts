@@ -65,11 +65,22 @@ describe("game proposal provider dispatch authority", () => {
     findFirst.mockResolvedValue(null);
     await expect(assertGameProposalDeliveryCurrentTx(kickoff)).rejects.toMatchObject({ code: "GAME_CHANGE_SUPERSEDED" });
   });
-  it("authorizes recap and missed-day delivery only for the exact current bound game", async () => {
+  it("authorizes an older settled recap for its bound pair without consulting the newest game", async () => {
     const { input, findFirst } = setup();
-    findFirst.mockResolvedValueOnce({ ...row(), status: "settled" }).mockResolvedValueOnce(row());
+    findFirst.mockResolvedValueOnce({ ...row(), status: "settled" }).mockResolvedValue({ ...row(), id: "newer" });
     await expect(assertGameProposalDeliveryCurrentTx({ ...input, deliveryIdempotencyKey: "game-recap:game" })).resolves.toBe(true);
-    expect(findFirst.mock.calls[1]?.[0]?.where ?? {}).not.toHaveProperty("chatContainerMemberId");
+    expect(findFirst).toHaveBeenCalledTimes(1);
+    expect(findFirst).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({
+      id: "game", chatContainerMemberId: "room", status: "settled", departedPlayer: expect.anything(),
+    }) }));
+    await expect(assertGameProposalDeliveryCurrentTx({ ...input, deliveryIdempotencyKey: "game-recap:game", playerMemberIds: ["person-a", "outsider"] }))
+      .rejects.toMatchObject({ code: "GAME_CHANGE_SUPERSEDED" });
+    findFirst.mockResolvedValue(null);
+    await expect(assertGameProposalDeliveryCurrentTx({ ...input, deliveryIdempotencyKey: "game-recap:game" }))
+      .rejects.toMatchObject({ code: "GAME_CHANGE_SUPERSEDED" });
+  });
+  it("still requires the newest game for missed-day delivery", async () => {
+    const { input, findFirst } = setup();
     findFirst.mockResolvedValueOnce(row()).mockResolvedValueOnce(row());
     await expect(assertGameProposalDeliveryCurrentTx({ ...input, deliveryIdempotencyKey: "game-missed:game:person-a:2030-03-04" })).resolves.toBe(true);
     findFirst.mockResolvedValueOnce(row()).mockResolvedValueOnce({ ...row(), id: "newer" });
