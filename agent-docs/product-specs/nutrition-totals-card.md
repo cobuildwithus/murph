@@ -35,13 +35,22 @@ records, use another date, reinterpret raw bounds, or invent targets.
 
 | Canonical goal context | Fresh authoring / behavior |
 | --- | --- |
-| `ready` | Five accepted compatible snapshots, unchanged target values and status semantics. |
+| `ready` | Five accepted compatible snapshots with unchanged target values and host-derived statuses. |
 | `missing` | Five explicit nulls, including a compatible subset of accepted targets. No derivation or mutations. |
 | `conflict`, `incompatible`, `capacity` | Truthful text, no card or target mutation. Never silently relabel as missing or acceptance. |
 
 `packages/contracts/src/assistant.ts` and the operator tool JSON schema accept
 exactly all-null or all-five fresh V2 goals. Mixed fresh authoring is invalid.
 The historical V1 and nullable/mixed V2 readers remain available for replay.
+
+For fresh V2 attachments, the host derives each goal status before validation
+using `getNutritionCardGoalStatus` from contracts. A null total or fewer
+supporting meals than the card yields `unavailable`. Otherwise, total divided
+by target yields `far_under_target` below 0.6, `under_target` from 0.6 to below
+0.9, `on_target` from 0.9 through 1.1, `over_target` above 1.1 through 1.4, and
+`far_over_target` above 1.4. An in-progress day does not make a complete metric
+unavailable. Null goals remain null, and sent snapshots are never recomputed.
+
 The existing calorie-target floor remains a target rule, not a minimum amount
 that must have been logged before a totals-only card is allowed.
 

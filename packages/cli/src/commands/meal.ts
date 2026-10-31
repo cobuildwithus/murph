@@ -644,9 +644,8 @@ const DAILY_NUTRITION_CARD_METRICS = [
 
 /**
  * Copies the fresh canonical day into the totals-only card so a routine meal
- * log can attach it without re-authoring numbers. Accepted goals need
- * model-authored statuses, and incomplete coverage needs recovery first, so
- * both yield null.
+ * log can attach it without re-authoring numbers. This shortcut is only for
+ * missing goals and complete coverage; other cases yield null.
  */
 function buildTotalsOnlyDailyNutritionCard(
   data: z.infer<typeof mealNutritionTotalsResultSchema>,
