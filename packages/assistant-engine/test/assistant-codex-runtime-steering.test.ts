@@ -857,7 +857,7 @@ describe('steered final segments', () => {
     expect(result.responseCard).toEqual(DAILY_NUTRITION_RESPONSE_CARD)
     expect(result.responseMedia).toEqual([])
     expect(result.finalMessage).toBe(
-      'Jul 28: about 1,490.25 calories · 94.5g protein · 193.125g carbs · 34.75g fat · 26.5g fiber from 3 logged meals. Targets: 2,100 calories (under target) · 100g protein (on target) · 220g carbs (on target) · 40g fat (on target) · 30g fiber (under target).',
+      'Jul 28: about 1,490.25 calories · 94.5g protein · 193.125g carbs · 34.75g fat · 26.5g fiber from 3 logged meals. Targets: 2,100 calories (under target) · 100g protein (on target) · 220g carbs (under target) · 40g fat (under target) · 30g fiber (under target).',
     )
     expect(result.providerAuthoredFinalMessage).toBe('Final follow-up answer.')
     expect(result.responseDeliveryContextOrdinal).toBe(1)
@@ -865,7 +865,7 @@ describe('steered final segments', () => {
       deliveryContextOrdinal: 0,
       media: [],
       response:
-        'Jul 28: about 1,490.25 calories · 94.5g protein · 193.125g carbs · 34.75g fat · 26.5g fiber from 3 logged meals. Targets: 2,100 calories (under target) · 100g protein (on target) · 220g carbs (on target) · 40g fat (on target) · 30g fiber (under target).',
+        'Jul 28: about 1,490.25 calories · 94.5g protein · 193.125g carbs · 34.75g fat · 26.5g fiber from 3 logged meals. Targets: 2,100 calories (under target) · 100g protein (on target) · 220g carbs (under target) · 40g fat (under target) · 30g fiber (under target).',
     }])
   })
 
@@ -922,7 +922,7 @@ describe('steered final segments', () => {
     expect(result.responseCard).toEqual(DAILY_NUTRITION_RESPONSE_CARD)
     expect(result.providerAuthoredFinalMessage).toBe('')
     expect(result.finalMessage).toBe(
-      'Jul 28: about 1,490.25 calories · 94.5g protein · 193.125g carbs · 34.75g fat · 26.5g fiber from 3 logged meals. Targets: 2,100 calories (under target) · 100g protein (on target) · 220g carbs (on target) · 40g fat (on target) · 30g fiber (under target).',
+      'Jul 28: about 1,490.25 calories · 94.5g protein · 193.125g carbs · 34.75g fat · 26.5g fiber from 3 logged meals. Targets: 2,100 calories (under target) · 100g protein (on target) · 220g carbs (under target) · 40g fat (under target) · 30g fiber (under target).',
     )
   })
 

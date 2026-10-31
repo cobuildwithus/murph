@@ -28,7 +28,9 @@ import {
   compactTableGenericResponseCardV1Schema,
   compactTableWorkoutResponseCardAuthoringV1Schema,
   dailyNutritionResponseCardV2AuthoringSchema,
+  getNutritionCardGoalStatus,
   isStrictIsoDate,
+  nutritionCardGoalStatusValues,
   type CalendarEventV1,
 } from '@murphai/contracts'
 import {
@@ -8250,7 +8252,9 @@ function parseAttachResponseCardArguments(
   const schemaName = 'murph.attach_response_card.input'
   const toolName = 'murph.attach_response_card'
   if (audience !== 'group') {
-    const runtimeValue = stampTrackedResponseCardSnapshot(value)
+    const runtimeValue = normalizeNutritionCardGoalStatuses(
+      stampTrackedResponseCardSnapshot(value),
+    )
     const parsed = attachResponseCardArgumentsSchema.safeParse(runtimeValue)
     if (parsed.success) {
       return {
@@ -8313,6 +8317,47 @@ function parseAttachResponseCardArguments(
     input: groupChallengeParsed.data,
     ok: true,
   }
+}
+
+function normalizeNutritionCardGoalStatuses(value: unknown): unknown {
+  const input = asRecord(value)
+  const card = asRecord(input?.card)
+  const totals = asRecord(card?.totals)
+  const goals = asRecord(card?.goals)
+  if (
+    card?.kind !== 'daily_nutrition'
+    || card.version !== 2
+    || typeof card.mealCount !== 'number'
+    || !Number.isFinite(card.mealCount)
+    || !totals
+    || !goals
+  ) return value
+
+  const cardMealCount = card.mealCount
+  const normalizedGoals = Object.fromEntries(Object.entries(goals).map(([key, value]) => {
+    const goal = asRecord(value)
+    const metric = asRecord(totals[key])
+    if (
+      !goal
+      || typeof goal.target !== 'number'
+      || !Number.isFinite(goal.target)
+      || !nutritionCardGoalStatusValues.some((status) => status === goal.status)
+      || !metric
+      || (metric.total !== null && (typeof metric.total !== 'number' || !Number.isFinite(metric.total)))
+      || typeof metric.mealCount !== 'number'
+      || !Number.isFinite(metric.mealCount)
+    ) return [key, value]
+
+    return [key, {
+      ...goal,
+      status: getNutritionCardGoalStatus(
+        { total: metric.total, mealCount: metric.mealCount },
+        cardMealCount,
+        goal.target,
+      ),
+    }]
+  }))
+  return { ...input, card: { ...card, goals: normalizedGoals } }
 }
 
 function stampTrackedResponseCardSnapshot(value: unknown): unknown {

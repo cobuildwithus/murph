@@ -50,6 +50,7 @@ import {
   eventRecordSchema,
   experimentFrontmatterSchema,
   experimentProgressSnapshotSchema,
+  getNutritionCardGoalStatus,
   goalMetricTargetSchema,
   parseCalendarEventPayload,
   regimenFrontmatterSchema,
@@ -35052,6 +35053,46 @@ describeRealCodex('real Codex daily nutrition-card authority e2e', () => {
     } finally { await removeRealCodexTemporaryPaths(config.temporaryPaths) }
   })
 
+  // An ordinary meal reply on a low-effort personal-chat model must still show
+  // progress: the host, not the model, owns each accepted goal's status.
+  it.each([
+    ['first meal under target', false,
+      'Lunch: chicken burrito bowl, label says 1,150 calories, 95g protein, 120g carbs, 38g fat, 12g fiber.'],
+    ['dinner over target', true,
+      'Dinner: grilled salmon plate, label says 520 calories, 38g protein, 55g carbs, 14g fat, 7g fiber.'],
+  ] as const)('meal log with accepted targets attaches host-derived goal statuses: %s', {
+    timeout: 1_800_000,
+  }, async (_name, seedMeals, prompt) => {
+    const config = await resolveRealCodexE2eConfig()
+    try {
+      const result = await runRealNutritionCardAuthorityScenario({
+        config, goalScenario: 'date-window', seedMeals, allowMealWrites: true,
+        reasoningEffort: 'low', initialPrompt: prompt,
+      })
+      process.stdout.write('[nutrition-goal-status-e2e] ' + JSON.stringify({
+        model: config.model,
+        commands: expandRecordedVaultCommands(result.commands),
+        reply: result.finalMessage,
+        modelAuthoredGoals: result.modelAuthoredCards.map((card) => readRecord(card)?.goals ?? null),
+        attachedGoals: result.card?.kind === 'daily_nutrition' && 'goals' in result.card ? result.card.goals : null,
+      }) + '\n')
+      expect(result.attachCallCount).toBe(1)
+      const card = result.card
+      if (card?.kind !== 'daily_nutrition' || !('version' in card)) {
+        throw new Error('Expected a V2 daily nutrition card.')
+      }
+      expect(card).toMatchObject({ localDate: '2026-07-30', mealCount: seedMeals ? 4 : 1 })
+      for (const metric of ['calories', 'proteinGrams', 'carbsGrams', 'fatGrams', 'fiberGrams'] as const) {
+        const goal = card.goals[metric]
+        if (!goal) throw new Error(`Expected an accepted ${metric} goal.`)
+        expect(card.totals[metric].mealCount).toBe(card.mealCount)
+        expect(goal.status).not.toBe('unavailable')
+        expect(goal.status).toBe(getNutritionCardGoalStatus(card.totals[metric], card.mealCount, goal.target))
+      }
+      expect(readNutritionGoalMutationCommands(expandRecordedVaultCommands(result.commands))).toEqual([])
+    } finally { await removeRealCodexTemporaryPaths(config.temporaryPaths) }
+  })
+
 })
 
 describeRealCodex('real Codex latest-context nutrition-card e2e', () => {
@@ -37916,6 +37957,7 @@ async function runRealNutritionCardAuthorityScenario(input: {
   verifyVault?: (vaultRoot: string) => Promise<void>
   initialPrompt?: string
   liveSteerPrompt?: string
+  reasoningEffort?: 'low' | 'medium'
 }): Promise<{
   attachCallCount: number
   card: CodexAppServerTurnResult['responseCard']
@@ -37923,6 +37965,7 @@ async function runRealNutritionCardAuthorityScenario(input: {
   deliveryContextOrdinal: number
   finalMessage: string
   foodJournalRead: boolean
+  modelAuthoredCards: unknown[]
   progressUpdates: string[]
 }> {
   const workingDirectory = await mkdtemp(
@@ -38038,7 +38081,7 @@ async function runRealNutritionCardAuthorityScenario(input: {
           'The meal totals and my accepted targets are already saved.',
           'Do not create, rename, or change a Goal.',
         ].join(' '),
-      reasoningEffort: 'medium',
+      reasoningEffort: input.reasoningEffort ?? 'medium',
       sandbox: 'workspace-write',
       workingDirectory,
     })
@@ -38050,11 +38093,12 @@ async function runRealNutritionCardAuthorityScenario(input: {
     if (!input.allowMealWrites) expect((await readVaultRawTolerant(vaultRoot)).events).toEqual(eventsBefore)
     await input.verifyVault?.(vaultRoot)
     const commandText = (await readFile(commandLog, 'utf8')).trim()
-    const attachCallCount = readCapabilityRoutingActions(result.jsonEvents)
+    const attachActions = readCapabilityRoutingActions(result.jsonEvents)
       .filter((action) =>
         action.kind === 'dynamic'
         && action.tool === MURPH_ATTACH_RESPONSE_CARD_TOOL.name
-      ).length
+      )
+    const attachCallCount = attachActions.length
 
     process.stdout.write('[nutrition-journey-reply] ' + JSON.stringify({
       scenario: input.initialPrompt,
@@ -38071,6 +38115,8 @@ async function runRealNutritionCardAuthorityScenario(input: {
         action.kind === 'command' && action.output.includes('# Food journal')
       ),
       finalMessage: result.finalMessage,
+      modelAuthoredCards: attachActions.map((action) =>
+        action.kind === 'dynamic' ? action.argumentsValue.card : null),
       progressUpdates,
     }
   } finally {

@@ -7789,10 +7789,10 @@ if (!tool) {
           fiberGrams: { total: 15, mealCount: 2 },
         },
         goals: {
-          calories: { target: 1_800, status: 'under_target' },
+          calories: { target: 1_800, status: 'far_under_target' },
           proteinGrams: { target: 100, status: 'under_target' },
-          carbsGrams: { target: 190, status: 'under_target' },
-          fatGrams: { target: 55, status: 'under_target' },
+          carbsGrams: { target: 190, status: 'far_under_target' },
+          fatGrams: { target: 55, status: 'far_under_target' },
           fiberGrams: { target: 25, status: 'under_target' },
         },
       },

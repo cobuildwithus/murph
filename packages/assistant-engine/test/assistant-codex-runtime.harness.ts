@@ -177,8 +177,8 @@ const DAILY_NUTRITION_RESPONSE_CARD: AssistantResponseCard = {
   goals: {
     calories: { target: 2_100, status: 'under_target' },
     proteinGrams: { target: 100, status: 'on_target' },
-    carbsGrams: { target: 220, status: 'on_target' },
-    fatGrams: { target: 40, status: 'on_target' },
+    carbsGrams: { target: 220, status: 'under_target' },
+    fatGrams: { target: 40, status: 'under_target' },
     fiberGrams: { target: 30, status: 'under_target' },
   },
 }

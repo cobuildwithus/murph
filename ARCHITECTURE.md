@@ -3084,8 +3084,10 @@ Assistant response cards are singular outbox-owned presentation siblings, not a
 new delivery primitive. The daily-nutrition V1 contract remains readable for
 retained effects and already-sent messages. V2 keeps the same card kind and
 adds canonical fiber totals plus nullable frozen goal snapshots. Targets come
-only from current active canonical goals; the one-message semantic status is
-not persisted goal progress. Ordinary private-direct interactive turns, exact
+only from current active canonical goals; the host derives each fresh V2
+status from metric coverage and the total/target ratio through the shared
+contracts helper before authoring validation. The one-message semantic status
+is not persisted goal progress. Ordinary private-direct interactive turns, exact
 private-direct scheduled turns, and the managed meal closeout share this one
 attachment tool. Scheduled use requires saved instructions that explicitly
 request a card; occurrence authority alone is not card intent. Because a card

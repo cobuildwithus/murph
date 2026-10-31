@@ -70,8 +70,8 @@ const CARD: AssistantResponseCard = {
   goals: {
     calories: { target: 2_100, status: 'under_target' },
     proteinGrams: { target: 100, status: 'on_target' },
-    carbsGrams: { target: 220, status: 'on_target' },
-    fatGrams: { target: 40, status: 'on_target' },
+    carbsGrams: { target: 220, status: 'under_target' },
+    fatGrams: { target: 40, status: 'under_target' },
     fiberGrams: { target: 30, status: 'under_target' },
   },
 }
@@ -1286,7 +1286,8 @@ describe('murph.attach_response_card', () => {
       },
     }
     expect(readCardToolRequest({ card: contradictoryCard })).toMatchObject({
-      kind: 'invalid-response-card-arguments',
+      kind: 'attach-response-card',
+      card: { goals: { calories: { target: 2_000, status: 'over_target' } } },
     })
     expect(readCardToolRequest({
       card: {
@@ -2399,4 +2400,75 @@ it('attaches fresh totals-only nutrition without targets, but not in a group or 
   expect(withMedia.rpcResult.success).toBe(false)
   const duplicate = await executeCardTool({ request: request!, currentResponseCard: card })
   expect(duplicate.rpcResult.success).toBe(false)
+})
+
+
+it.each([null, 'private'] as const)('computes all five nutrition statuses before attachment for audience %s', async (responseCardAudience) => {
+  const card = {
+    ...CARD,
+    totals: {
+      calories: { total: 500, mealCount: 3 },
+      proteinGrams: { total: 70, mealCount: 3 },
+      carbsGrams: { total: 100, mealCount: 3 },
+      fatGrams: { total: 120, mealCount: 3 },
+      fiberGrams: { total: 150, mealCount: 3 },
+    },
+    goals: {
+      calories: { target: 2_000, status: 'unavailable' },
+      proteinGrams: { target: 100, status: 'unavailable' },
+      carbsGrams: { target: 100, status: 'unavailable' },
+      fatGrams: { target: 100, status: 'unavailable' },
+      fiberGrams: { target: 100, status: 'unavailable' },
+    },
+  }
+  const original = structuredClone(card)
+  const request = readTestMurphDynamicToolRequest({
+    method: 'item/tool/call',
+    params: { arguments: { card }, namespace: 'murph', tool: 'attach_response_card' },
+  }, { responseCardAudience })
+  expect(request?.kind).toBe('attach-response-card')
+  const result = await executeCardTool({ request: request! })
+  expect(result.rpcResult.success).toBe(true)
+  expect(result.responseCardPatch?.card).toEqual({
+    ...card,
+    goals: {
+      calories: { target: 2_000, status: 'far_under_target' },
+      proteinGrams: { target: 100, status: 'under_target' },
+      carbsGrams: { target: 100, status: 'on_target' },
+      fatGrams: { target: 100, status: 'over_target' },
+      fiberGrams: { target: 100, status: 'far_over_target' },
+    },
+  })
+  expect(card).toEqual(original)
+})
+
+it.each([
+  { total: 20, mealCount: 3, status: 'far_under_target' },
+  { total: 20, mealCount: 2, status: 'unavailable' },
+  { total: null, mealCount: 0, status: 'unavailable' },
+])('corrects an on_target status with total $total and coverage $mealCount', async ({ total, mealCount, status }) => {
+  const card = {
+    ...CARD,
+    totals: { ...CARD.totals, proteinGrams: { total, mealCount } },
+    goals: { ...CARD.goals, proteinGrams: { target: 100, status: 'on_target' } },
+  }
+  const request = readCardToolRequest({ card })
+  expect(request?.kind).toBe('attach-response-card')
+  const result = await executeCardTool({ request: request! })
+  expect(result.rpcResult.success).toBe(true)
+  expect(result.responseCardPatch?.card).toEqual({
+    ...card, goals: { ...card.goals, proteinGrams: { target: 100, status } },
+  })
+})
+
+it.each([
+  { target: '100', status: 'unavailable' },
+  { target: Number.NaN, status: 'unavailable' },
+  { target: Number.POSITIVE_INFINITY, status: 'unavailable' },
+  { target: 0, status: 'unavailable' },
+  { target: 100, status: 'invalid' },
+  { target: 100 },
+])('preserves validation for malformed nutrition goals: %j', (goal) => {
+  expect(readCardToolRequest({ card: { ...CARD, goals: { ...CARD.goals, proteinGrams: goal } } }))
+    .toMatchObject({ kind: 'invalid-response-card-arguments' })
 })

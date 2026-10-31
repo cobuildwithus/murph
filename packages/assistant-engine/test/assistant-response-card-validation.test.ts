@@ -32,7 +32,7 @@ const INVALID_TABLE = {
   tracking: null,
 } as const
 
-const INVALID_NUTRITION_CARD = {
+const CONTRADICTORY_NUTRITION_CARD = {
   kind: 'daily_nutrition',
   version: 2,
   localDate: '2026-08-14',
@@ -54,9 +54,9 @@ const INVALID_NUTRITION_CARD = {
 } as const
 
 const VALID_NUTRITION_CARD = {
-  ...INVALID_NUTRITION_CARD,
+  ...CONTRADICTORY_NUTRITION_CARD,
   goals: {
-    ...INVALID_NUTRITION_CARD.goals,
+    ...CONTRADICTORY_NUTRITION_CARD.goals,
     carbsGrams: { target: 200, status: 'under_target' },
   },
 } as const
@@ -257,17 +257,9 @@ describe('response-card validation feedback', () => {
     expect(JSON.stringify(invalidCellRequest)).not.toContain('synthetic-cell-marker')
     expect(JSON.stringify(invalidCellRequest)).not.toContain('note')
 
-    expect(readCardToolRequest(INVALID_NUTRITION_CARD)).toMatchObject({
-      kind: 'invalid-response-card-arguments',
-      validationDigest: {
-        pathIssues: expect.arrayContaining([
-          expect.objectContaining({
-            path: 'card.goals.carbsGrams.status',
-            code: 'custom',
-            expected: 'consistent_with_total_and_target',
-          }),
-        ]),
-      },
+    expect(readCardToolRequest(CONTRADICTORY_NUTRITION_CARD)).toMatchObject({
+      kind: 'attach-response-card',
+      card: { goals: { carbsGrams: { target: 200, status: 'under_target' } } },
     })
 
     const result = await executeMurphDynamicToolRequest({

@@ -71,6 +71,23 @@ export type NutritionCardMetric = {
   mealCount: number;
 };
 
+/** Frozen presentation status for a metric and its accepted positive target. */
+export function getNutritionCardGoalStatus(
+  metric: NutritionCardMetric,
+  cardMealCount: number,
+  target: number,
+): NutritionCardGoalStatus {
+  if (metric.total === null || metric.mealCount < cardMealCount) {
+    return "unavailable";
+  }
+  const ratio = metric.total / target;
+  if (ratio < 0.6) return "far_under_target";
+  if (ratio < 0.9) return "under_target";
+  if (ratio <= 1.1) return "on_target";
+  if (ratio <= 1.4) return "over_target";
+  return "far_over_target";
+}
+
 export type NutritionCardGoalSnapshot = {
   target: number;
   status: NutritionCardGoalStatus;
