@@ -53,7 +53,7 @@ async function fixture(gameId = randomUUID()) {
   }))) });
   const newerId = randomUUID(); games.push(newerId);
   await db.game.create({ data: {
-    id: newerId, createdBy: players[0], status: "live", lengthDays: 7, chatContainerMemberId: room,
+    id: newerId, createdBy: players[0], ...withStatus("live"), lengthDays: 7, chatContainerMemberId: room,
     terms: { v: 1, versions: [{ n: 1, fromDay: 0, schedule: { count: 3 }, stakes: [] }] }, termsWordsEncrypted: "unused",
     players: { create: players.map((memberId, seat) => ({ memberId, seat, timeZone: "UTC" })) },
   } });
@@ -61,6 +61,11 @@ async function fixture(gameId = randomUUID()) {
   const key = createHostedLinqDeliveryIdempotencyLookupKey(eventId)!;
   const sealInput = { beforeMutationTx: async () => {}, containerMemberId: room, eventId, gameId, playerMemberIds: players, recap };
   return { db, gameId, newerId, players, room, eventId, key, sealInput };
+}
+
+/** The schema's roster check: only negotiating and live games hold a roster key, and keys are unique. */
+function withStatus(status: string) {
+  return { status, liveRosterKey: status === "live" || status === "negotiating" ? `test-late-recap-${randomUUID()}` : null };
 }
 
 describe.skipIf(!enabled)("late settled-game recap PostgreSQL proof", () => {
@@ -101,7 +106,7 @@ describe.skipIf(!enabled)("late settled-game recap PostgreSQL proof", () => {
 
   it.each(["live", "negotiating", "void"])("does not admit %s games for recap reads, seals or delivery", async (status) => {
     const { db, gameId, room, players, eventId, sealInput } = await fixture();
-    await db.game.update({ where: { id: gameId }, data: { status } });
+    await db.game.update({ where: { id: gameId }, data: withStatus(status) });
     await reserveGameChatLifecycleTx({ gameId, kind: "recap", now: new Date(), tx: db });
     await markGameChatGenerationQueuedTx(eventId, db, room);
     expect(await readGameRecapMaterial(gameId, room, players)).toBeNull();
@@ -144,7 +149,7 @@ describe.skipIf(!enabled)("late settled-game recap PostgreSQL proof", () => {
     await other.db.$executeRawUnsafe(migrationSql); // target absent
     expect(await other.db.hostedLinqDelivery.count({ where: { sourceRef: other.gameId } })).toBe(0);
     const { db, gameId, players, room } = await fixture(targetId);
-    for (const data of [{ status: "live" }, { status: "negotiating" }, { status: "settled", chatContainerMemberId: null },
+    for (const data of [withStatus("live"), withStatus("negotiating"), { ...withStatus("settled"), chatContainerMemberId: null },
       { chatContainerMemberId: room, departedPlayer: { seat: 1 } }, { departedPlayer: Prisma.DbNull, recapEncrypted: "already-sealed" }]) {
       await db.game.update({ where: { id: gameId }, data });
       await db.$executeRawUnsafe(migrationSql);
