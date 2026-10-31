@@ -1,6 +1,7 @@
 ---
 title: 'Stripe checkout fixture failures discard diagnostic output'
 severity: 'minor'
+issue: 'cobuildwithus/murph#4315'
 ---
 
 ## Expected Behavior

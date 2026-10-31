@@ -1,6 +1,7 @@
 ---
 title: 'Full live suite includes a benchmark with unreproducible local fixtures'
 severity: 'minor'
+issue: 'cobuildwithus/murph#4386'
 ---
 
 ## Expected Behavior

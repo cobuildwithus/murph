@@ -1927,6 +1927,10 @@
     {
       "issue": "cobuildwithus/murph#4205",
       "path": ".agents/friction-log/20261018223932-docs-drift-requires/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#4314",
+      "path": ".agents/friction-log/20261022000755-reviewgpt-gpt-6/friction.md"
     }
   ],
   "version": 1
