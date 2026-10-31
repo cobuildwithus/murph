@@ -5,7 +5,7 @@ import path from "node:path";
 
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { GameView } from "../src/lib/game/contract";
+import type { GameHistoryView, GameView } from "../src/lib/game/contract";
 import type { RuleEntry, RuleState } from "../src/lib/game/rules";
 import { buildGameView } from "../src/lib/game/views";
 import { hostedOnboardingError } from "../src/lib/hosted-onboarding/errors";
@@ -486,6 +486,63 @@ describe("weekly game routes", () => {
       });
     });
 
+    it("signs history card previews with the avatar variant after media authorization, preserving cache identities", async () => {
+      const history = historyFixture(1, 2);
+      const previews = history.people[0].games[0].previews;
+      // A repeated content key is authorized and signed only once.
+      previews[1].mediaUrls = previews[0].mediaUrls;
+      mocks.readHistory.mockResolvedValue(history);
+      const delivery = { url: "https://imagedelivery.net/account/image/gameavatar?exp=9999999999&sig=synthetic", expiresAt: "2030-01-01T00:00:00.000Z" };
+      vi.stubEnv("VERCEL_ENV", "production");
+      mocks.control = { gameImageDelivery: vi.fn(async () => delivery) };
+      mocks.authorizeMediaRead.mockResolvedValue(true);
+      const response = await routes.history.GET(new Request(`${BASE}/history`));
+      const result = await response.json();
+      expect(result.people[0].games[0].previews).toEqual(previews.map((preview) => ({ ...preview, delivery })));
+      expect(result.people[0].games[1]).toEqual(history.people[0].games[1]);
+      expect(response.headers.get("cache-control")).toBe("private, no-store");
+      expect(response.headers.get("referrer-policy")).toBe("no-referrer");
+      expect(mocks.authorizeMediaRead).toHaveBeenCalledTimes(5);
+      expect(mocks.authorizeMediaRead).toHaveBeenCalledWith(LEO, `game/${LEO}/${"0".repeat(64)}.jpg`);
+      expect(mocks.control.gameImageDelivery).toHaveBeenCalledTimes(5);
+      expect(mocks.control.gameImageDelivery).toHaveBeenCalledWith({ userId: LEO, mediaId: `${"0".repeat(64)}.jpg`, variant: "avatar" });
+
+      mocks.authorizeMediaRead.mockResolvedValue(false);
+      expect(await (await routes.history.GET(new Request(`${BASE}/history`))).json()).toEqual({ ok: true, ...history });
+      expect(mocks.control.gameImageDelivery).toHaveBeenCalledTimes(5);
+      mocks.authorizeMediaRead.mockResolvedValue(true);
+      mocks.control.gameImageDelivery.mockRejectedValue(new Error("synthetic signing outage"));
+      expect(await (await routes.history.GET(new Request(`${BASE}/history`))).json()).toEqual({ ok: true, ...history });
+      mocks.control = null;
+      expect(await (await routes.history.GET(new Request(`${BASE}/history`))).json()).toEqual({ ok: true, ...history });
+      vi.stubEnv("VERCEL_ENV", "");
+      expect(await (await routes.history.GET(new Request(`${BASE}/history`))).json()).toEqual({ ok: true, ...history });
+    });
+
+    it("caps history signing at 300 calls and four concurrent operations at maximum history size", async () => {
+      const history = historyFixture(50, 50);
+      mocks.readHistory.mockResolvedValue(history);
+      vi.stubEnv("VERCEL_ENV", "production");
+      mocks.authorizeMediaRead.mockResolvedValue(true);
+      let active = 0;
+      let peak = 0;
+      mocks.control = { gameImageDelivery: vi.fn(async () => {
+        active += 1;
+        peak = Math.max(peak, active);
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        active -= 1;
+        return { url: "https://imagedelivery.net/account/image/gameavatar?exp=9999999999&sig=synthetic", expiresAt: "2030-01-01T00:00:00.000Z" };
+      }) };
+      const result = await (await routes.history.GET(new Request(`${BASE}/history`))).json();
+      expect(mocks.control.gameImageDelivery).toHaveBeenCalledTimes(300);
+      expect(mocks.authorizeMediaRead).toHaveBeenCalledTimes(300);
+      expect(peak).toBe(4);
+      expect(active).toBe(0);
+      expect(result.people.every((person: GameHistoryView["people"][number]) =>
+        person.games[0].previews.every((preview) => preview.delivery)
+        && person.games.slice(1).every((game) => game.previews.every((preview) => !preview.delivery)))).toBe(true);
+    });
+
     it("signs the pictures a post unlocked into its answer, only when the app asks", async () => {
       const leoKey = `game/${LEO}/${"c".repeat(64)}.jpg`;
       const avaKey = `game/${AVA}/${"d".repeat(64)}.jpg`;
@@ -751,4 +808,18 @@ function devRequest(action: string, body?: Record<string, unknown>) {
     headers: { authorization: "Bearer token", "content-type": "application/json" },
     method: "POST",
   });
+}
+
+function historyFixture(people: number, games: number): GameHistoryView {
+  return { people: Array.from({ length: people }, (_, person) => ({
+    memberId: `member_${person}`, firstName: "Player", record: { won: 0, lost: 0, tied: games },
+    games: Array.from({ length: games }, (_, game) => ({
+      id: `game_${person}_${game}`, startedOn: "2030-01-01", endsOn: "2030-01-07", lengthDays: 7,
+      schedule: { count: 5 }, score: { mine: 0, theirs: 0 }, result: "tied", perfect: false,
+      previews: Array.from({ length: 6 }, (_, preview) => ({
+        entryId: `entry_${person}_${game}_${preview}`, kind: "photo", text: null, mine: preview % 2 === 0,
+        mediaUrls: [`/api/game/v1/media/${encodeURIComponent(`game/${LEO}/${(person * games * 6 + game * 6 + preview).toString(16).padStart(64, "0")}.jpg`)}`],
+      })),
+    })),
+  })) };
 }

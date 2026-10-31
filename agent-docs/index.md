@@ -1,3 +1,7 @@
+Legacy game photo recovery and history card delivery are tracked in
+[the implementation plan](exec-plans/completed/2026-10-31-game-history-photo-delivery.md).
+`../ARCHITECTURE.md` and `product-specs/weekly-game.md` own the contract.
+
 Cloudflare failed-upload recovery for full runner rollouts is tracked in
 [the implementation plan](exec-plans/completed/2026-10-31-cf-upload-recovery.md);
 `../apps/cloudflare/DEPLOY.md` owns the recovery contract.

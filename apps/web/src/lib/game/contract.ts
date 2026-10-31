@@ -303,9 +303,10 @@ export interface GameEntryView {
   text: string | null;
   data?: GameEntryData | null;
   /**
-   * Only in a post's answer asked for with `?delivery=signed`: the first
-   * media URL's short-lived signed photo URL, for another player's picture
-   * that post unlocked. Missing means ask for it as usual.
+   * The first media URL's five-minute signed delivery URL. A post's answer
+   * with `?delivery=signed` uses the photo rendition for unlocked pictures.
+   * History uses the avatar rendition for each person's latest game previews.
+   * Missing means request mediaUrls[0] as usual; mediaUrls remains cache identity.
    */
   delivery?: { url: string; expiresAt: string };
 }
