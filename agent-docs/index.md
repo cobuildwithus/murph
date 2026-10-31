@@ -1583,3 +1583,5 @@ Late settled-game recap recovery is tracked in
 `product-specs/weekly-game.md` owns the behavior and the Web contract-migration
 README owns the fixed-target postdeploy step.
 Machine Web route firewall barrier detection and local proof: [implementation plan](exec-plans/completed/2026-10-31-firewall-machine-route-guard.md). The durable contract is owned by `apps/web/README.md` under public route firewall verification.
+
+Phone-call enum forward repair and immutable migration history proof: [implementation plan](exec-plans/completed/2026-10-31-phone-call-linq-enum.md). The current Prisma contract remains in `../apps/web/README.md`.
