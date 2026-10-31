@@ -363,17 +363,10 @@ scheduled-question exception; its answer uses the existing-meal recovery above.
    complete `{ total, mealCount }` pair unchanged from the canonical read,
    including `fiberGrams`. For `missing`, every goal entry is null; never mix
    snapshots and nulls or derive targets. For `ready`, each goal entry is
-   `{ target: <exact canonical daily target>, status: <assessment> }`. Never
-   translate a threshold or range comparator into this point-target payload.
-   The assessment must be one of `far_under_target`, `under_target`, `on_target`,
-   `over_target`, `far_over_target`, or `unavailable`. A metric whose total is
-   missing or whose `mealCount` is below the top-level `mealCount` must use
-   `unavailable`; do not color an incomplete total as under, on, or over target.
-   Use the member's explicit tolerance or intensity when present. Otherwise
-   make a forgiving, context-aware assessment: broadly aligned is `on_target`,
-   a modest miss is `under_target` or `over_target`, and only a clearly material
-   miss is `far_under_target` or `far_over_target`. There is no universal
-   percentage threshold. After the tool succeeds, return a `send_message`
+   `{ target: <exact canonical daily target>, status: <any valid status> }`;
+   the host replaces each status with its deterministic assessment of the
+   copied total and target. Never translate a threshold or range comparator
+   into this point-target payload. After the tool succeeds, return a `send_message`
    decision without repeating nutrition values in its text; the runtime
    replaces that text with the deterministic closeout derived from the card.
    Do not author a second nutrition summary. The runtime labels partial totals
