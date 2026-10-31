@@ -4,7 +4,7 @@ import { executeMurphDynamicToolRequest, resolveMurphDynamicTools } from '../src
 import { MURPH_READ_GAME_TOOL, MURPH_READ_GAME_RECAP_TOOL, MURPH_UPDATE_GAME_TOOL, MURPH_GAME_PHOTO_TOOL, MURPH_WRITE_RECAP_TOOL, MURPH_GAME_LORE_TOOL } from '../src/assistant-codex/dynamic-tools/games.js'
 import { resolveAssistantGameHostDynamicTools } from '../src/assistant/codex-turn/planning.js'
 import { MURPH_FINISH_WITHOUT_REPLY_TOOL } from '../src/assistant-codex/dynamic-tool-catalog.js'
-import type { AssistantHostedToolContext } from '../src/assistant/hosted-tool-context.js'
+import { createAssistantHostedToolContext, type AssistantHostedToolContext } from '../src/assistant/hosted-tool-context.js'
 import { parseHostedRuntimeGroupToolRequest, parseHostedRuntimeGroupToolResponse } from '@murphai/hosted-execution/parsers'
 import type { HostedGameRecap } from '@murphai/hosted-execution/runtime-control'
 const inputId = 'ain_' + 'a'.repeat(32)
@@ -128,12 +128,25 @@ describe('game recap dynamic contract', () => {
       if (!request) throw new Error('Expected recap request')
       expect((await executeMurphDynamicToolRequest({ request, hostedToolContext: recapContext, env: {}, fetchImpl: fetch, nextUsageOrdinal: () => 0, progressDelivery: null })).rpcResult.success).toBe(true)
     }
-    const pairFingerprint = '0123456789abcdef0123456789abcdef'
-    expect(recapPort.mock.calls.map(([request]) => request)).toEqual([
-      { action: 'read_game', origin: { kind: 'game_recap', gameId: 'game_bound', eventId: 'game-recap:game_bound', pairFingerprint } },
-      { action: 'write_recap', origin: { kind: 'game_recap', gameId: 'game_bound', eventId: 'game-recap:game_bound', pairFingerprint }, recap, priorChatLines: ['An earlier line lived here.'] },
+    const requests = recapPort.mock.calls.map(([request]) => request)
+    expect(requests).toEqual([
+      { action: 'read_game', origin: { kind: 'game_recap', gameId: 'game_bound', eventId: 'game-recap:game_bound' } },
+      { action: 'write_recap', origin: { kind: 'game_recap', gameId: 'game_bound', eventId: 'game-recap:game_bound' }, recap, priorChatLines: ['An earlier line lived here.'] },
     ])
+    for (const request of requests) expect(parseHostedRuntimeGroupToolRequest(request)).toEqual(request)
     expect(savedChatLines).toEqual([recap.chatLine])
+  })
+  it('prepares lore only in Linq group rooms and never fails the turn', async () => {
+    const lore = { action: 'read_game' as const, result: { status: 'ok' as const, state: { games: [] }, loreFingerprint: 'a'.repeat(32), loreGuidance: 'Keep the lore.' } }
+    const prepare = (channel: string, request: unknown) => createAssistantHostedToolContext({
+      executionContext: { groupTool: { request } } as never, getConversationScope: () => 'group', getUserActionAcceptedInputIds: () => [inputId],
+      messageInput: { channel, vault: '/synthetic-vault' } as never, session: { binding: { channel }, sessionId: 'synthetic-lore-session' } as never,
+    }).prepareGameLore?.()
+    const telegram = vi.fn(async () => lore)
+    expect(await prepare('telegram', telegram)).toBeNull()
+    expect(telegram).not.toHaveBeenCalled()
+    expect(await prepare('linq', vi.fn(async () => { throw new Error('Exact game chat unavailable') }))).toBeNull()
+    expect(await prepare('linq', vi.fn(async () => lore))).toBe('Keep the lore.')
   })
   it('rejects write_recap outside a trusted recap notification', async () => {
     port.mockClear()

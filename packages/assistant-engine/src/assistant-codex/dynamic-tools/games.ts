@@ -108,7 +108,7 @@ async function executeTrustedGameRecapTool(input: { request: GameDynamicRequest;
   const tool = input.context?.groupTool
   const recapScope = input.context?.currentGameRecapScope?.()
   if (!tool || !recapScope) return unavailableGameRecapToolResult(input.request.action)
-  const origin = { kind: 'game_recap' as const, ...recapScope }
+  const origin = { kind: 'game_recap' as const, gameId: recapScope.gameId, eventId: recapScope.eventId }
   try {
     return input.request.action === 'read_game'
       ? await executeTrustedGameRecapRead({ origin, tool })

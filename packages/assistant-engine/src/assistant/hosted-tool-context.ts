@@ -366,13 +366,18 @@ export function createAssistantHostedToolContext(input: {
       const assistantInputId = scope?.conversationScope === 'group'
         ? scope.acceptedInputIds[scope.acceptedInputIds.length - 1]
         : null
-      if (!assistantInputId || !executionContext?.groupTool) return null
-      const response = await executionContext.groupTool.request({ action: 'read_game', origin: { kind: 'accepted_input', assistantInputId } })
-      const result = response.result
-      return result.status === 'ok' && 'loreFingerprint' in result && typeof result.loreFingerprint === 'string'
-        && 'loreGuidance' in result && typeof result.loreGuidance === 'string'
-        ? { fingerprint: result.loreFingerprint, guidance: result.loreGuidance }
-        : null
+      // Lore is optional: only Linq rooms host games, and a failed probe never blocks the turn.
+      if (!assistantInputId || !executionContext?.groupTool || normalizeHostedDeliveryChannel(input.messageInput.channel) !== 'linq') return null
+      try {
+        const response = await executionContext.groupTool.request({ action: 'read_game', origin: { kind: 'accepted_input', assistantInputId } })
+        const result = response.result
+        return result.status === 'ok' && 'loreFingerprint' in result && typeof result.loreFingerprint === 'string'
+          && 'loreGuidance' in result && typeof result.loreGuidance === 'string'
+          ? { fingerprint: result.loreFingerprint, guidance: result.loreGuidance }
+          : null
+      } catch {
+        return null
+      }
     })()
     return ordinaryGameLore
   }
