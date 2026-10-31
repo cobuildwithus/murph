@@ -1005,8 +1005,9 @@ or prints the provider token or response body.
 The hourly `vercel-machine-route-firewall.yml` scheduled check (also manually
 dispatchable from trusted main) reads active WAF configuration and project
 security with the same three `HOSTED_WEB_VERCEL_*` values; its token needs
-read access to both endpoints. Internal routes, provider ingress and Vercel
-cron targets are derived from the route tree. Temporary firewall barriers on
+read access to both endpoints. Internal routes, provider ingress, Vercel cron
+targets and the runner-proxied data API paths (`HOSTED_RUNTIME_DATA_API_PATHS`)
+are derived from the route tree and shared route constants. Temporary firewall barriers on
 machine routes keep the scheduled check red until removed. Live firewall
 state is not a PR gate; GitHub's failed-run notification is the alert. Run
 `pnpm exec tsx --tsconfig apps/web/tsconfig.json apps/web/scripts/check-vercel-machine-routes.ts`

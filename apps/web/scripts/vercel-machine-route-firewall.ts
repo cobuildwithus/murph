@@ -22,7 +22,11 @@ function routePattern(route: string): RegExp {
   return new RegExp(`^${pattern}/?$`, "u");
 }
 
-function pathMatch(route: string, op: unknown, value: string): Match {
+// Vercel operators are case-insensitive. Its `re` operator is PCRE, which
+// JavaScript cannot evaluate faithfully, so regex conditions stay may-match.
+function pathMatch(rawRoute: string, op: unknown, rawValue: string): Match {
+  const route = rawRoute.toLowerCase();
+  const value = rawValue.toLowerCase();
   const dynamic = route.includes("[");
   if (op === "eq") return dynamic ? (routePattern(route).test(value) ? undefined : false) : route === value;
   if (op === "pre" && dynamic) {
@@ -39,10 +43,6 @@ function pathMatch(route: string, op: unknown, value: string): Match {
   if (dynamic) return undefined;
   if (op === "pre") return route.startsWith(value);
   if (op === "suf") return route.endsWith(value);
-  // Unknown/invalid regex syntax must stay may-match, including under negation.
-  if (op === "re") {
-    try { return new RegExp(value).test(route); } catch { return undefined; }
-  }
   return undefined;
 }
 
@@ -52,7 +52,7 @@ function conditionMayMatch(condition: unknown, route: ProtectedRoute, method: st
   let match: Match = undefined;
   if (condition.type === "path") match = pathMatch(route.path, condition.op, condition.value);
   if (condition.type === "method") {
-    if (condition.op === "eq") match = method === condition.value;
+    if (condition.op === "eq") match = method === condition.value.toUpperCase();
     else match = undefined;
   }
   return match === undefined || (condition.neg === true ? !match : match);

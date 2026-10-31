@@ -1,5 +1,7 @@
 // Every Web route under this prefix is machine ingress protected by the scheduled firewall check.
 export const HOSTED_MACHINE_ROUTE_PREFIX = "/api/internal/";
+// Public Web data routes the Cloudflare runner also proxies hosted tool calls to.
+export const HOSTED_RUNTIME_DATA_API_PATHS: readonly string[] = ["/api/foods", "/api/supplements"];
 
 export const HOSTED_RUNTIME_POLL_TOOL_PATH = "/api/internal/hosted-execution/polls/tool";
 import type { HostedExecutionResolvedLinqDeliveryRoute } from "./contracts.ts";

@@ -1,6 +1,8 @@
-import { readFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { HOSTED_MACHINE_ROUTE_PREFIX } from "@murphai/hosted-execution/routes";
+import { HOSTED_MACHINE_ROUTE_PREFIX, HOSTED_RUNTIME_DATA_API_PATHS } from "@murphai/hosted-execution/routes";
 import { checkVercelMachineRoutes } from "../scripts/check-vercel-machine-routes.ts";
 import { evaluateMachineRouteFirewall } from "../scripts/vercel-machine-route-firewall.ts";
 import { BROWSER_CALLBACK_ROUTES, readProtectedMachineRoutes, readWebRoutes, routeMethods } from "../scripts/vercel-machine-routes.ts";
@@ -34,6 +36,7 @@ describe("machine route inventory", () => {
     }
     const vercel = JSON.parse(await readFile(new URL("../vercel.json", import.meta.url), "utf8"));
     for (const cron of vercel.crons) expect(paths).toContain(cron.path);
+    for (const dataApiPath of HOSTED_RUNTIME_DATA_API_PATHS) expect(paths).toContain(dataApiPath);
     expect(paths).toContain("/api/retell/functions/ask-murph");
     expect(paths).toContain("/api/device-sync/webhooks/[provider]");
     expect(paths).not.toContain("/api/device-sync/companion/auth-diagnostics");
@@ -44,6 +47,25 @@ describe("machine route inventory", () => {
     expect(routeMethods('export { handler as PUT, DELETE } from "./owner";')).toEqual(["PUT", "DELETE", "OPTIONS"]);
     expect(routeMethods('export * from "./owner";')).toContain("POST");
     expect(routeMethods('// export const GET = fake;\nexport const POST = handler;')).not.toContain("GET");
+    expect(routeMethods("export const GET = handler; export const { POST } = handlers;")).toContain("POST");
+  });
+
+  it("discovers every supported route-handler extension", async () => {
+    const webRoot = await mkdtemp(path.join(tmpdir(), "machine-routes-"));
+    try {
+      const files: [string, string, string][] = [
+        ["api/hooks/js", "route.js", "export async function POST() {}"],
+        ["api/hooks/tsx", "route.tsx", "export async function POST() { return <div />; }"],
+        ["api/hooks/page", "page.tsx", "export default function Page() { return <div />; }"],
+      ];
+      for (const [dir, file, source] of files) {
+        await mkdir(path.join(webRoot, "app", dir), { recursive: true });
+        await writeFile(path.join(webRoot, "app", dir, file), source);
+      }
+      expect((await readWebRoutes(webRoot)).map((route) => route.path)).toEqual(["/api/hooks/js", "/api/hooks/tsx"]);
+    } finally {
+      await rm(webRoot, { force: true, recursive: true });
+    }
   });
 });
 
@@ -79,6 +101,15 @@ describe("conservative firewall overlap", () => {
     [condition("path", "re", "[", true)], [null],
   ])("fails closed on unprovable conditions %j", (...conditions) => {
     expect(evaluateMachineRouteFirewall(config([rule(conditions)]), routes).length).toBeGreaterThan(0);
+  });
+
+  it("matches case-insensitively and never excludes a route by local regex evaluation", () => {
+    const phone = [routes[0]!];
+    expect(evaluateMachineRouteFirewall(config([rule([condition("path", "eq", "/API/INTERNAL/PHONE-CALLS")])]), phone)).toHaveLength(1);
+    expect(evaluateMachineRouteFirewall(config([rule([condition("path", "eq", routes[0]!.path), condition("method", "eq", "post")])]), phone)).toHaveLength(1);
+    const pcreOnly = condition("path", "re", "\\A/api/internal/phone-calls\\z");
+    expect(evaluateMachineRouteFirewall(config([rule([condition("path", "pre", "/api/internal/phone-calls"), pcreOnly])]), phone)).toHaveLength(1);
+    expect(evaluateMachineRouteFirewall(config([rule([{ ...pcreOnly, neg: true }])]), phone)).toHaveLength(1);
   });
 
   it("does not mistake one dynamic route sample for the full route space", () => {
@@ -134,6 +165,15 @@ describe("scheduled read-only checker", () => {
     expect(log).toHaveBeenCalledWith(expect.stringContaining(AUGUST_PHONE_BARRIERS[0]!.id));
     await expect(checkVercelMachineRoutes(environment, api(PUBLIC_FIREWALL_V8, { attackModeEnabled: true }), log)).rejects.toThrow("machine-route conflicts");
     expect(JSON.stringify(log.mock.calls)).not.toContain(environment.HOSTED_WEB_VERCEL_TOKEN);
+  });
+
+  it("prints API-derived ids without workflow-command markers or line breaks", async () => {
+    const log = vi.fn();
+    const hostile = { ...rule([condition("path", "eq", routes[0]!.path)]), id: "##[warning]x\n::error::y" };
+    await expect(checkVercelMachineRoutes(environment, api(config([hostile])), log)).rejects.toThrow("machine-route conflicts");
+    const lines = log.mock.calls.map(([line]) => String(line));
+    expect(lines.some((line) => line.startsWith("Firewall conflict: rule="))).toBe(true);
+    for (const line of lines) expect(line).not.toMatch(/##\[|\n/u);
   });
 
   it("fails closed without leaking fetch errors or response bodies", async () => {

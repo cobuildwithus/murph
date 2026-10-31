@@ -49,9 +49,10 @@ export async function checkVercelMachineRoutes(
     ...config,
     attackModeEnabled: project.security.attackModeEnabled ?? false,
   }, routes);
+  // API-derived ids keep a fixed alphabet so no newline or `##[` workflow command can form.
+  const safe = (value: string) => value.replace(/[^\w:./[\]-]/gu, "?");
   for (const conflict of conflicts) {
-    // JSON quoting prevents workflow-command/newline injection from rule ids.
-    log(`Firewall conflict: rule=${JSON.stringify(conflict.ruleId)} route=${JSON.stringify(conflict.route)}`);
+    log(`Firewall conflict: rule=${safe(conflict.ruleId)} route=${safe(conflict.route)}`);
   }
   if (conflicts.length > 0) throw new Error(`Vercel firewall check: ${conflicts.length} machine-route conflicts.`);
   log(`Vercel firewall check passed: ${routes.length} protected routes; zero conflicts.`);
